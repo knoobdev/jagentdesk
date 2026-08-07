@@ -1,0 +1,18 @@
+appId: app.jagentdesk.mobile
+
+---
+- launchApp:
+    clearState: true
+- assertVisible: "Connect to JAgentDesk"
+- assertVisible:
+    id: pair-start-scan
+- assertVisible:
+    id: pair-start-link
+- assertNotVisible:
+    id: tailscale-login-interactive
+- tapOn:
+    id: pair-start-link
+- assertVisible: "Pair with JAgentDesk desktop"
+- assertVisible:
+    id: pair-link-input
+- takeScreenshot: pair-start-link-form

@@ -1,0 +1,12 @@
+node_modules
+dist
+.env
+.DS_Store
+*.log
+.debug.conversations
+conversations
+.cache
+.debug/
+.env.test
+# Compiled tailnet bridge (built via `npm run build:tsnet-bridge`)
+go/tsnet-bridge/tailnet-bridge

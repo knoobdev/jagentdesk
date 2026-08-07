@@ -1,0 +1,52 @@
+appId: app.jagentdesk.mobile
+
+---
+- launchApp:
+    clearState: true
+- assertVisible: "Connect to JAgentDesk"
+- tapOn:
+    id: pair-start-link
+- assertVisible: "Pair with JAgentDesk desktop"
+- tapOn:
+    id: pair-link-input
+- inputText: ${PAIRING_OFFER_URL}
+- assertVisible:
+    id: pair-link-input
+    text: ${PAIRING_OFFER_URL}
+- takeScreenshot: tailscale-pair-link-entered
+- tapOn:
+    id: pair-link-submit
+
+# The offer is persisted first. Tailscale login must appear only after the
+# desktop offer has been accepted, never as the initial mobile screen.
+- extendedWaitUntil:
+    visible: "Join your tailnet"
+    timeout: 15000
+- assertNotVisible:
+    id: pair-start-link
+- tapOn:
+    id: tailscale-login-authkey-input
+- inputText: ${JAGENTDESK_E2E_TAILSCALE_AUTH_KEY}
+- tapOn: "Auth key"
+- tapOn:
+    id: tailscale-login-authkey-submit
+
+# The native iOS tsnet node must report connected before pair verification is
+# shown; this prevents the previous 0.5s form flash and redirect loop.
+- extendedWaitUntil:
+    visible: "Enter verification code"
+    timeout: 90000
+- assertVisible:
+    id: pairing-code-input
+- tapOn:
+    id: pairing-code-input
+- inputText: ${PAIRING_CODE}
+- assertVisible:
+    id: pairing-code-submit
+- tapOn:
+    id: pairing-code-submit
+- extendedWaitUntil:
+    visible:
+      id: open-project-submit
+    timeout: 90000
+- takeScreenshot: tailscale-pair-complete

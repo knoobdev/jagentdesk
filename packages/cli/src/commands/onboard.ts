@@ -1,0 +1,478 @@
+import { cancel, confirm, intro, isCancel, log, note, outro, spinner } from "@clack/prompts";
+import { Command, Option } from "commander";
+import { writeFileSync } from "node:fs";
+import path from "node:path";
+import { loadPersistedConfig, type PersistedConfig } from "@jagentdesk/server";
+import { DEFAULT_JAGENTDESK_DAEMON_PORT } from "@jagentdesk/protocol/defaults";
+import {
+  resolveLocalJAgentDeskHome,
+  resolveLocalDaemonState,
+  resolveTcpHostFromListen,
+  startLocalDaemonDetached,
+  tailDaemonLog,
+  type DaemonStartOptions,
+} from "./daemon/local-daemon.js";
+import { tryConnectToDaemon } from "../utils/client.js";
+import { formatPairingInstructions } from "../output/pairing.js";
+import { resolveLocalPairingOffer } from "./daemon/pair.js";
+
+interface OnboardOptions extends DaemonStartOptions {
+  timeout?: string;
+  voice?: "ask" | "enable" | "disable";
+}
+
+type RawOnboardOptions = OnboardOptions & {
+  allowedHosts?: string;
+};
+
+type OnboardPersistedConfig = PersistedConfig & {
+  features?: PersistedConfig["features"] & {
+    dictation?: PersistedConfig["features"] extends { dictation?: infer T }
+      ? T & { enabled?: boolean }
+      : { enabled?: boolean };
+    voiceMode?: PersistedConfig["features"] extends { voiceMode?: infer T }
+      ? T & { enabled?: boolean }
+      : { enabled?: boolean };
+  };
+};
+
+const DEFAULT_READY_TIMEOUT_MS = 10 * 60 * 1000;
+const READY_PROBE_TIMEOUT_MS = 1200;
+
+class OnboardCancelledError extends Error {}
+
+const plainNoteFormat = (line: string): string => line;
+
+function renderNote(message: string, title: string): void {
+  note(message, title, { format: plainNoteFormat });
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function parseTimeoutMs(raw: string | undefined): number {
+  if (!raw || raw.trim().length === 0) {
+    return DEFAULT_READY_TIMEOUT_MS;
+  }
+
+  const seconds = Number(raw);
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    throw new Error(`Invalid timeout value: ${raw}`);
+  }
+
+  return Math.ceil(seconds * 1000);
+}
+
+function savePersistedConfig(jagentdeskHome: string, config: OnboardPersistedConfig): void {
+  const configPath = path.join(jagentdeskHome, "config.json");
+  writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+}
+
+function applyVoiceSelection(
+  config: OnboardPersistedConfig,
+  enabled: boolean,
+): OnboardPersistedConfig {
+  return {
+    ...config,
+    features: {
+      ...config.features,
+      dictation: {
+        ...config.features?.dictation,
+        enabled,
+      },
+      voiceMode: {
+        ...config.features?.voiceMode,
+        enabled,
+      },
+    },
+  };
+}
+
+function resolvePersistedVoiceSelection(config: OnboardPersistedConfig): boolean | null {
+  const voiceModeEnabled = config.features?.voiceMode?.enabled;
+  if (typeof voiceModeEnabled === "boolean") {
+    return voiceModeEnabled;
+  }
+
+  const dictationEnabled = config.features?.dictation?.enabled;
+  if (typeof dictationEnabled === "boolean") {
+    return dictationEnabled;
+  }
+
+  return null;
+}
+
+async function resolveVoiceSelection(mode: OnboardOptions["voice"]): Promise<boolean> {
+  if (mode === "enable") {
+    return true;
+  }
+  if (mode === "disable") {
+    return false;
+  }
+
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    log.message("Non-interactive terminal detected; voice setup defaults to disabled.");
+    return false;
+  }
+
+  const answer = await confirm({
+    message: "Enable voice features? (downloads local STT/TTS models in background)",
+    active: "Yes",
+    inactive: "No",
+    initialValue: false,
+  });
+
+  if (isCancel(answer)) {
+    throw new OnboardCancelledError("Onboarding cancelled by user.");
+  }
+
+  return answer;
+}
+
+interface DownloadProgress {
+  modelId: string | null;
+  pct: number | null;
+}
+
+function parseDownloadProgress(logTail: string): DownloadProgress | null {
+  const lines = logTail.split("\n").filter(Boolean);
+
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index];
+    if (!line || !line.includes("Downloading model artifact")) {
+      continue;
+    }
+
+    const pctMatch = line.match(/"pct"\s*:\s*(\d{1,3})|\bpct[=:]\s*(\d{1,3})/);
+    const modelMatch = line.match(/"modelId"\s*:\s*"([^"]+)"|\bmodelId[=:]\s*"?([^\s",}]+)/);
+
+    return {
+      modelId: modelMatch?.[1] ?? modelMatch?.[2] ?? null,
+      pct: pctMatch ? Number(pctMatch[1] ?? pctMatch[2]) : null,
+    };
+  }
+
+  return null;
+}
+
+function renderProgressLine(progress: DownloadProgress): string {
+  const modelSuffix = progress.modelId ? ` (${progress.modelId})` : "";
+  if (progress.pct === null) {
+    return `Downloading speech model${modelSuffix}...`;
+  }
+  return `Downloading speech model${modelSuffix}: ${progress.pct}%`;
+}
+
+type ProbeResult = { kind: "ready"; listen: string; host: string | null } | { kind: "pending" };
+
+async function probeDaemonReady(home: string, timeoutMs: number): Promise<ProbeResult> {
+  const state = resolveLocalDaemonState({ home });
+  const host = resolveTcpHostFromListen(state.listen);
+  const deadline = Date.now() + timeoutMs;
+  const remainingTimeoutMs = () => Math.max(1, deadline - Date.now());
+
+  if (state.running && host) {
+    const client = await tryConnectToDaemon({
+      host,
+      timeout: Math.min(remainingTimeoutMs(), READY_PROBE_TIMEOUT_MS),
+    });
+    if (client) {
+      try {
+        await client.fetchAgents({
+          timeout: Math.min(remainingTimeoutMs(), READY_PROBE_TIMEOUT_MS),
+        });
+        return { kind: "ready", listen: state.listen, host };
+      } catch {
+        // Daemon process is alive but not API-ready yet.
+      } finally {
+        await client.close().catch(() => {});
+      }
+    }
+  } else if (state.running && !host) {
+    return { kind: "ready", listen: state.listen, host: null };
+  }
+
+  return { kind: "pending" };
+}
+
+interface ProgressState {
+  lastStatus: string;
+  lastPrintedAt: number;
+}
+
+function announceProgress(
+  home: string,
+  state: ProgressState,
+  onStatus: ((message: string) => void) | undefined,
+): ProgressState {
+  const progress = parseDownloadProgress(tailDaemonLog(home, 120) ?? "");
+  const progressLine = progress ? renderProgressLine(progress) : null;
+  const statusMessage = progressLine ?? "Waiting for daemon to become ready...";
+
+  if (statusMessage !== state.lastStatus) {
+    onStatus?.(statusMessage);
+    return { lastStatus: statusMessage, lastPrintedAt: Date.now() };
+  }
+  if (!onStatus && Date.now() - state.lastPrintedAt >= 3000) {
+    console.log(statusMessage);
+    return { lastStatus: state.lastStatus, lastPrintedAt: Date.now() };
+  }
+  return state;
+}
+
+async function waitForDaemonReady(args: {
+  home: string;
+  timeoutMs: number;
+  onStatus?: (message: string) => void;
+}): Promise<{ listen: string; host: string | null }> {
+  const deadline = Date.now() + args.timeoutMs;
+  const createTimeoutError = () => {
+    const recentLogs = tailDaemonLog(args.home, 60);
+    return new Error(
+      [
+        `Timed out after ${Math.ceil(args.timeoutMs / 1000)}s waiting for daemon readiness.`,
+        recentLogs ? `Recent daemon logs:\n${recentLogs}` : null,
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+    );
+  };
+
+  async function poll(state: ProgressState): Promise<{ listen: string; host: string | null }> {
+    if (Date.now() >= deadline) {
+      throw createTimeoutError();
+    }
+    const probe = await probeDaemonReady(args.home, Math.max(1, deadline - Date.now()));
+    if (probe.kind === "ready") {
+      return { listen: probe.listen, host: probe.host };
+    }
+    const nextState = announceProgress(args.home, state, args.onStatus);
+    if (Date.now() >= deadline) {
+      throw createTimeoutError();
+    }
+    await sleep(200);
+    return poll(nextState);
+  }
+
+  return poll({ lastStatus: "", lastPrintedAt: 0 });
+}
+
+function printNextSteps(pairingUrl: string | null, jagentdeskHome: string, richUi: boolean): void {
+  const daemonLogPath = path.join(jagentdeskHome, "daemon.log");
+  const nextStepsLines = [
+    pairingUrl
+      ? "1. Open JAgentDesk and scan the QR code above, or paste the pairing link."
+      : "1. Open JAgentDesk and connect to your daemon.",
+    "2. Web app: connect from the JAgentDesk mobile app",
+    "3. Desktop app: install the JAgentDesk desktop app",
+    "4. Docs: run jagentdesk --help for the full command reference",
+    '5. Example: jagentdesk run --output-schema schema.json "extract fields"',
+  ];
+  const quickReferenceLines = [
+    "1. jagentdesk --help",
+    "2. jagentdesk ls",
+    '3. jagentdesk run "your prompt"',
+    "4. jagentdesk status",
+    `5. Daemon logs: ${daemonLogPath}`,
+  ];
+
+  if (!richUi) {
+    console.log("");
+    console.log("Next steps:");
+    for (const line of nextStepsLines) {
+      console.log(line);
+    }
+    console.log("");
+    console.log("CLI quick reference:");
+    for (const line of quickReferenceLines) {
+      console.log(line);
+    }
+    return;
+  }
+
+  renderNote(nextStepsLines.join("\n"), "Next steps");
+  renderNote(quickReferenceLines.join("\n"), "CLI quick reference");
+}
+
+export function onboardCommand(): Command {
+  return new Command("onboard")
+    .description("Run first-time setup, start daemon, and print pairing instructions")
+    .option("--listen <listen>", "Listen target (host:port, port, or unix socket path)")
+    .option("--port <port>", `Port to listen on (default: ${DEFAULT_JAGENTDESK_DAEMON_PORT})`)
+    .option("--home <path>", "JAgentDesk home directory (default: ~/.jagentdesk)")
+    .option("--no-mcp", "Disable the Agent MCP HTTP endpoint")
+    .option(
+      "--hostnames <hosts>",
+      'Daemon hostnames (comma-separated, e.g. "myhost,.example.com" or "true" for any)',
+    )
+    .addOption(new Option("--allowed-hosts <hosts>").hideHelp())
+    .option("--timeout <seconds>", "Max time to wait for daemon readiness (default: 600)")
+    .option("--voice <mode>", "Voice setup mode: ask, enable, disable", "ask")
+    .action(async (options: RawOnboardOptions) => {
+      await runOnboard({
+        ...options,
+        hostnames: options.hostnames ?? options.allowedHosts,
+      });
+    });
+}
+
+async function resolveAndPersistVoice(
+  jagentdeskHome: string,
+  options: OnboardOptions,
+): Promise<boolean> {
+  let persisted = loadPersistedConfig(jagentdeskHome) as OnboardPersistedConfig;
+  const persistedVoiceSelection = resolvePersistedVoiceSelection(persisted);
+  const shouldPrompt = options.voice === "ask" || options.voice === undefined;
+  let voiceEnabled: boolean;
+  try {
+    voiceEnabled =
+      shouldPrompt && persistedVoiceSelection !== null
+        ? persistedVoiceSelection
+        : await resolveVoiceSelection(options.voice);
+  } catch (error) {
+    if (error instanceof OnboardCancelledError) {
+      cancel("Onboarding cancelled.");
+      process.exit(0);
+    }
+    throw error;
+  }
+
+  if (shouldPrompt && persistedVoiceSelection !== null) {
+    log.message(`Using saved voice setup from config (${voiceEnabled ? "enabled" : "disabled"}).`);
+  }
+
+  persisted = applyVoiceSelection(persisted, voiceEnabled);
+  savePersistedConfig(jagentdeskHome, persisted);
+  return voiceEnabled;
+}
+
+async function ensureDaemonStarted(options: OnboardOptions, richUi: boolean): Promise<void> {
+  const stateBeforeStart = resolveLocalDaemonState({ home: options.home });
+  if (stateBeforeStart.running) {
+    log.message(`Daemon already running (PID ${stateBeforeStart.pidInfo?.pid ?? "unknown"}).`);
+    return;
+  }
+
+  const startSpinner = richUi ? spinner() : null;
+  try {
+    if (startSpinner) {
+      startSpinner.start("Starting daemon...");
+    } else {
+      log.message("Starting daemon...");
+    }
+    const startup = await startLocalDaemonDetached(options);
+    if (startSpinner) {
+      startSpinner.stop(`Daemon started (PID ${startup.pid ?? "unknown"})`);
+    } else {
+      log.message(`Daemon started (PID ${startup.pid ?? "unknown"})`);
+    }
+    log.message(`Logs: ${startup.logPath}`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (startSpinner) {
+      startSpinner.error(message);
+    } else {
+      log.error(message);
+    }
+    process.exit(1);
+  }
+}
+
+async function waitForDaemonReadyWithUi(args: {
+  home: string;
+  timeoutMs: number;
+  richUi: boolean;
+}): Promise<{ listen: string; host: string | null }> {
+  const readySpinner = args.richUi ? spinner() : null;
+  try {
+    if (readySpinner) {
+      readySpinner.start("Waiting for daemon to become ready...");
+    } else {
+      log.message("Waiting for daemon to become ready...");
+    }
+    const readyState = await waitForDaemonReady({
+      home: args.home,
+      timeoutMs: args.timeoutMs,
+      onStatus: readySpinner ? (message) => readySpinner.message(message) : undefined,
+    });
+    if (readySpinner) {
+      readySpinner.stop(`Daemon ready on ${readyState.listen}`);
+    } else {
+      log.message(`Daemon ready on ${readyState.listen}`);
+    }
+    return readyState;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (readySpinner) {
+      readySpinner.error(message);
+    } else {
+      log.error(message);
+    }
+    return process.exit(1);
+  }
+}
+
+export async function runOnboard(options: OnboardOptions): Promise<void> {
+  const richUi = process.stdin.isTTY && process.stdout.isTTY;
+  if (richUi) {
+    intro("Welcome to JAgentDesk");
+  }
+
+  if (options.listen && options.port) {
+    cancel("Cannot use --listen and --port together");
+    process.exit(1);
+  }
+
+  let timeoutMs = DEFAULT_READY_TIMEOUT_MS;
+  try {
+    timeoutMs = parseTimeoutMs(options.timeout);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    cancel(message);
+    process.exit(1);
+  }
+
+  const jagentdeskHome = resolveLocalJAgentDeskHome(options.home);
+  if (richUi) {
+    renderNote(jagentdeskHome, "JAgentDesk home");
+  }
+
+  const voiceEnabled = await resolveAndPersistVoice(jagentdeskHome, options);
+  log.message(
+    voiceEnabled
+      ? "Voice features enabled. Local speech models will be downloaded automatically if missing."
+      : "Voice features disabled. Local speech models will not be downloaded.",
+  );
+
+  await ensureDaemonStarted(options, richUi);
+  await waitForDaemonReadyWithUi({
+    home: options.home ?? jagentdeskHome,
+    timeoutMs,
+    richUi,
+  });
+
+  const pairing = await resolveLocalPairingOffer({ jagentdeskHome });
+  if (!pairing.tailnetEnabled || !pairing.url) {
+    log.message(
+      "Tailnet pairing is not configured. Set JAGENTDESK_TAILNET_HOST to pair devices over your tailnet.",
+    );
+    printNextSteps(null, jagentdeskHome, richUi);
+    if (richUi) outro("JAgentDesk daemon is running.");
+    return;
+  }
+
+  process.stdout.write(
+    formatPairingInstructions({
+      url: pairing.url,
+      qr: pairing.qr,
+      columns: process.stdout.columns,
+    }),
+  );
+  printNextSteps(pairing.url, jagentdeskHome, richUi);
+  if (richUi) {
+    outro("JAgentDesk is ready!");
+  }
+}

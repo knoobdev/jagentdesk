@@ -1,0 +1,1677 @@
+import { execFile } from "child_process";
+import { promisify } from "util";
+import { existsSync, mkdirSync, realpathSync, rmSync, statSync } from "fs";
+import { copyFile, rm, stat } from "fs/promises";
+import { join, basename, dirname, isAbsolute, resolve, sep } from "path";
+import net from "node:net";
+import { createHash } from "node:crypto";
+import stripAnsi from "strip-ansi";
+import {
+  buildStringCommandShellInvocation,
+  createStringCommandShellEnv,
+} from "./string-command-shell.js";
+import { readJAgentDeskConfigJson, resolveJAgentDeskConfigPath } from "./jagentdesk-config-file.js";
+export {
+  JAgentDeskConfigRawSchema,
+  JAgentDeskLifecycleCommandRawSchema,
+  JAgentDeskScriptEntryRawSchema,
+  JAgentDeskWorktreeConfigRawSchema,
+  JAgentDeskConfigSchema,
+  type JAgentDeskConfig,
+  type JAgentDeskConfigRaw,
+} from "@jagentdesk/protocol/jagentdesk-config-schema";
+import { JAgentDeskConfigSchema, type JAgentDeskConfig } from "@jagentdesk/protocol/jagentdesk-config-schema";
+import {
+  createJAgentDeskWorktreeChangeRequestHint,
+  normalizeBaseRefName,
+  type JAgentDeskWorktreeChangeRequestHint,
+  readJAgentDeskWorktreeMetadata,
+  readJAgentDeskWorktreeRuntimePort,
+  writeJAgentDeskWorktreeMetadata,
+  writeJAgentDeskWorktreeRuntimeMetadata,
+} from "./worktree-metadata.js";
+import { runGitCommand } from "./run-git-command.js";
+import { spawnProcess } from "./spawn.js";
+import { resolveJAgentDeskHome } from "../server/jagentdesk-home.js";
+import { createExternalProcessEnv } from "../server/jagentdesk-env.js";
+import { parseGitRevParsePath, resolveGitRevParsePath } from "./git-rev-parse-path.js";
+import { validateBranchSlug } from "@jagentdesk/protocol/branch-slug";
+import { expandTilde, getRealpathAwareRelativePath, isPathInsideRoot } from "./path.js";
+
+export { slugify, validateBranchSlug } from "@jagentdesk/protocol/branch-slug";
+
+const execFileAsync = promisify(execFile);
+const READ_ONLY_GIT_ENV = {
+  GIT_OPTIONAL_LOCKS: "0",
+} as const;
+
+export interface WorktreeConfig {
+  branchName: string;
+  worktreePath: string;
+}
+
+export interface WorktreeRuntimeEnv {
+  [key: string]: string;
+  JAGENTDESK_SOURCE_CHECKOUT_PATH: string;
+  JAGENTDESK_ROOT_PATH: string;
+  JAGENTDESK_WORKTREE_PATH: string;
+  JAGENTDESK_BRANCH_NAME: string;
+  JAGENTDESK_WORKTREE_PORT: string;
+}
+
+export interface WorktreeSetupCommandResult {
+  command: string;
+  cwd: string;
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  durationMs: number;
+}
+
+export type WorktreeSetupCommandProgressEvent =
+  | {
+      type: "command_started";
+      index: number;
+      total: number;
+      command: string;
+      cwd: string;
+    }
+  | {
+      type: "output";
+      index: number;
+      total: number;
+      command: string;
+      cwd: string;
+      stream: "stdout" | "stderr";
+      chunk: string;
+    }
+  | {
+      type: "command_completed";
+      index: number;
+      total: number;
+      command: string;
+      cwd: string;
+      exitCode: number | null;
+      durationMs: number;
+      stdout: string;
+      stderr: string;
+    };
+
+export interface WorktreeTerminalConfig {
+  name?: string;
+  command: string;
+}
+
+export interface PlainScriptConfig {
+  type?: undefined;
+  command: string;
+  port?: undefined;
+}
+
+export interface ServiceScriptConfig {
+  type: "service";
+  command: string;
+  port?: number; // explicit port override, otherwise auto-assigned
+}
+
+export type ScriptConfig = PlainScriptConfig | ServiceScriptConfig;
+
+export function isServiceScript(config: ScriptConfig): config is ServiceScriptConfig {
+  return "type" in config && config.type === "service";
+}
+
+export class WorktreeSetupError extends Error {
+  readonly results: WorktreeSetupCommandResult[];
+
+  constructor(message: string, results: WorktreeSetupCommandResult[]) {
+    super(message);
+    this.name = "WorktreeSetupError";
+    this.results = results;
+  }
+}
+
+export type WorktreeTeardownCommandResult = WorktreeSetupCommandResult;
+
+export class WorktreeTeardownError extends Error {
+  readonly results: WorktreeTeardownCommandResult[];
+
+  constructor(message: string, results: WorktreeTeardownCommandResult[]) {
+    super(message);
+    this.name = "WorktreeTeardownError";
+    this.results = results;
+  }
+}
+
+export interface JAgentDeskWorktreeInfo {
+  path: string;
+  createdAt: string;
+  branchName?: string;
+  head?: string;
+}
+
+export interface JAgentDeskWorktreeOwnership {
+  allowed: boolean;
+  repoRoot?: string;
+  worktreeRoot?: string;
+  worktreePath?: string;
+}
+
+export interface JAgentDeskWorktreeOwnershipOptions extends WorktreeRootOptions {
+  knownGitCommonDir?: string | null;
+}
+
+export interface WorktreeRootOptions {
+  jagentdeskHome?: string;
+  worktreesRoot?: string;
+}
+
+export interface WorktreeCheckoutRef {
+  remoteName?: string;
+  remoteRef: string;
+}
+
+export type WorktreeSource =
+  | { kind: "branch-off"; baseBranch: string; branchName: string }
+  | { kind: "checkout-branch"; branchName: string }
+  | {
+      kind: "checkout-change-request";
+      forge: string;
+      changeRequestNumber: number;
+      headRef: string;
+      headRepositoryOwner?: string;
+      baseRefName: string;
+      checkoutRefs?: WorktreeCheckoutRef[];
+      localBranchName?: string;
+      pushRemoteUrl?: string;
+      trackOriginHead?: boolean;
+    }
+  | {
+      kind: "checkout-github-pr";
+      githubPrNumber: number;
+      headRef: string;
+      headRepositoryOwner?: string;
+      baseRefName: string;
+      checkoutRefs?: WorktreeCheckoutRef[];
+      localBranchName?: string;
+      pushRemoteUrl?: string;
+      trackOriginHead?: boolean;
+    };
+
+export interface CreateWorktreeOptions {
+  cwd: string;
+  worktreeSlug: string;
+  source: WorktreeSource;
+  runSetup: boolean;
+  jagentdeskHome?: string;
+  worktreesRoot?: string;
+}
+
+interface ResolveExistingWorktreeForSlugOptions {
+  slug: string;
+  repoRoot: string;
+  jagentdeskHome?: string;
+  worktreesRoot?: string;
+}
+
+export class BranchAlreadyCheckedOutError extends Error {
+  readonly branchName: string;
+
+  constructor(branchName: string) {
+    super(`Branch already checked out: ${branchName}`);
+    this.name = "BranchAlreadyCheckedOutError";
+    this.branchName = branchName;
+  }
+}
+
+export class UnknownBranchError extends Error {
+  readonly branchName: string;
+  readonly cwd: string;
+
+  constructor(params: { branchName: string; cwd: string }) {
+    super(`Unknown branch: ${params.branchName}`);
+    this.name = "UnknownBranchError";
+    this.branchName = params.branchName;
+    this.cwd = params.cwd;
+  }
+}
+
+export class InvalidGitBranchNameError extends Error {
+  readonly branchName: string;
+
+  constructor(branchName: string) {
+    super(`Invalid branch name: Git rejected ref name '${branchName}'`);
+    this.name = "InvalidGitBranchNameError";
+    this.branchName = branchName;
+  }
+}
+
+export type ReadJAgentDeskConfigResult =
+  | { ok: true; config: JAgentDeskConfig | null }
+  | { ok: false; configPath: string; error: unknown };
+
+export function readJAgentDeskConfig(repoRoot: string): ReadJAgentDeskConfigResult {
+  try {
+    const json = readJAgentDeskConfigJson(repoRoot);
+    if (json === null) {
+      return { ok: true, config: null };
+    }
+    return { ok: true, config: JAgentDeskConfigSchema.parse(json) };
+  } catch (error) {
+    return { ok: false, configPath: resolveJAgentDeskConfigPath(repoRoot), error };
+  }
+}
+
+export function jagentdeskConfigParseError(failure: { configPath: string; error: unknown }): Error {
+  const detail = failure.error instanceof Error ? failure.error.message : String(failure.error);
+  return new Error(`Failed to parse jagentdesk.json at ${failure.configPath}: ${detail}`, {
+    cause: failure.error,
+  });
+}
+
+function readJAgentDeskConfigOrThrow(repoRoot: string): JAgentDeskConfig | null {
+  const result = readJAgentDeskConfig(repoRoot);
+  if (!result.ok) {
+    throw jagentdeskConfigParseError(result);
+  }
+  return result.config;
+}
+
+export function getWorktreeSetupCommands(repoRoot: string): string[] {
+  return readJAgentDeskConfigOrThrow(repoRoot)?.worktree?.setup ?? [];
+}
+
+export function getWorktreeTeardownCommands(repoRoot: string): string[] {
+  return readJAgentDeskConfigOrThrow(repoRoot)?.worktree?.teardown ?? [];
+}
+
+export function getWorktreeTerminalSpecs(repoRoot: string): WorktreeTerminalConfig[] {
+  const terminals = readJAgentDeskConfigOrThrow(repoRoot)?.worktree?.terminals;
+  if (!Array.isArray(terminals) || terminals.length === 0) {
+    return [];
+  }
+
+  const specs: WorktreeTerminalConfig[] = [];
+  for (const terminal of terminals) {
+    if (!terminal || typeof terminal !== "object") {
+      continue;
+    }
+
+    const rawCommand = terminal.command;
+    if (typeof rawCommand !== "string") {
+      continue;
+    }
+    const command = rawCommand.trim();
+    if (!command) {
+      continue;
+    }
+
+    const rawName = terminal.name;
+    const name =
+      typeof rawName === "string" && rawName.trim().length > 0 ? rawName.trim() : undefined;
+
+    specs.push({
+      ...(name ? { name } : {}),
+      command,
+    });
+  }
+
+  return specs;
+}
+
+export function getScriptConfigs(config: JAgentDeskConfig | null): Map<string, ScriptConfig> {
+  const scripts = config?.scripts;
+  if (!scripts || typeof scripts !== "object") {
+    return new Map();
+  }
+
+  const result = new Map<string, ScriptConfig>();
+  for (const [name, entry] of Object.entries(scripts)) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+
+    const rawCommand = entry.command;
+    if (typeof rawCommand !== "string") {
+      continue;
+    }
+    const command = rawCommand.trim();
+    if (!command) {
+      continue;
+    }
+
+    const scriptConfig: ScriptConfig =
+      entry.type === "service"
+        ? {
+            type: "service",
+            command,
+          }
+        : { command };
+
+    if (
+      isServiceScript(scriptConfig) &&
+      typeof entry.port === "number" &&
+      Number.isFinite(entry.port)
+    ) {
+      scriptConfig.port = entry.port;
+    }
+
+    result.set(name, scriptConfig);
+  }
+
+  return result;
+}
+
+export function processCarriageReturns(text: string): string {
+  if (!text.includes("\r")) {
+    return text;
+  }
+
+  const output: string[] = [];
+  let line: string[] = [];
+  let cursor = 0;
+
+  const flushLine = () => {
+    output.push(line.join(""));
+    line = [];
+    cursor = 0;
+  };
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+
+    if (char === "\r") {
+      if (text[index + 1] === "\n") {
+        flushLine();
+        output.push("\n");
+        index += 1;
+        continue;
+      }
+      cursor = 0;
+      continue;
+    }
+
+    if (char === "\n") {
+      flushLine();
+      output.push("\n");
+      continue;
+    }
+
+    if (cursor < line.length) {
+      line[cursor] = char;
+    } else {
+      line.push(char);
+    }
+    cursor += 1;
+  }
+
+  if (line.length > 0) {
+    output.push(line.join(""));
+  }
+
+  return output.join("");
+}
+
+async function execSetupCommand(
+  command: string,
+  options: { cwd: string; env: NodeJS.ProcessEnv },
+): Promise<WorktreeSetupCommandResult> {
+  const startedAt = Date.now();
+  const shellInvocation = buildStringCommandShellInvocation({ command });
+  try {
+    const { stdout, stderr } = await execFileAsync(shellInvocation.shell, shellInvocation.args, {
+      cwd: options.cwd,
+      env: options.env,
+    });
+    return {
+      command,
+      cwd: options.cwd,
+      stdout: stdout ?? "",
+      stderr: stderr ?? "",
+      exitCode: 0,
+      durationMs: Date.now() - startedAt,
+    };
+  } catch (error) {
+    const execErr = error as { stdout?: string; stderr?: string; code?: unknown } | undefined;
+    return {
+      command,
+      cwd: options.cwd,
+      stdout: execErr?.stdout ?? "",
+      stderr: execErr?.stderr ?? (error instanceof Error ? error.message : String(error)),
+      exitCode: typeof execErr?.code === "number" ? execErr.code : null,
+      durationMs: Date.now() - startedAt,
+    };
+  }
+}
+
+async function execSetupCommandStreamed(options: {
+  command: string;
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  index: number;
+  total: number;
+  onEvent?: (event: WorktreeSetupCommandProgressEvent) => void;
+}): Promise<WorktreeSetupCommandResult> {
+  return new Promise((resolvePromise) => {
+    const startedAt = Date.now();
+    const stdoutChunks: string[] = [];
+    const stderrChunks: string[] = [];
+    let settled = false;
+
+    const emitOutput = (stream: "stdout" | "stderr", chunk: string) => {
+      const text = stripAnsi(chunk);
+      if (!text) {
+        return;
+      }
+      if (stream === "stdout") {
+        stdoutChunks.push(text);
+      } else {
+        stderrChunks.push(text);
+      }
+      options.onEvent?.({
+        type: "output",
+        index: options.index,
+        total: options.total,
+        command: options.command,
+        cwd: options.cwd,
+        stream,
+        chunk: text,
+      });
+    };
+
+    const finish = (exitCode: number | null) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      const result: WorktreeSetupCommandResult = {
+        command: options.command,
+        cwd: options.cwd,
+        stdout: stdoutChunks.join(""),
+        stderr: stderrChunks.join(""),
+        exitCode,
+        durationMs: Date.now() - startedAt,
+      };
+      options.onEvent?.({
+        type: "command_completed",
+        index: options.index,
+        total: options.total,
+        command: options.command,
+        cwd: options.cwd,
+        exitCode: result.exitCode,
+        durationMs: result.durationMs,
+        stdout: result.stdout,
+        stderr: result.stderr,
+      });
+      resolvePromise(result);
+    };
+
+    options.onEvent?.({
+      type: "command_started",
+      index: options.index,
+      total: options.total,
+      command: options.command,
+      cwd: options.cwd,
+    });
+
+    const shellInvocation = buildStringCommandShellInvocation({ command: options.command });
+    const child = spawnProcess(shellInvocation.shell, shellInvocation.args, {
+      cwd: options.cwd,
+      env: options.env,
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    child.stdout?.on("data", (chunk: Buffer | string) => {
+      emitOutput("stdout", chunk.toString());
+    });
+
+    child.stderr?.on("data", (chunk: Buffer | string) => {
+      emitOutput("stderr", chunk.toString());
+    });
+
+    child.on("error", (error) => {
+      emitOutput("stderr", error instanceof Error ? error.message : String(error));
+      finish(null);
+    });
+
+    child.on("close", (code) => {
+      finish(typeof code === "number" ? code : null);
+    });
+  });
+}
+
+async function getAvailablePort(): Promise<number> {
+  return new Promise((resolvePromise, reject) => {
+    const server = net.createServer();
+    server.once("error", reject);
+    server.listen(0, () => {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        server.close(() => reject(new Error("Failed to acquire available port")));
+        return;
+      }
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolvePromise(address.port);
+      });
+    });
+  });
+}
+
+async function assertPortAvailable(port: number): Promise<void> {
+  await new Promise<void>((resolvePromise, reject) => {
+    const server = net.createServer();
+    server.once("error", (error: NodeJS.ErrnoException) => {
+      let message: string;
+      if (error?.code === "EADDRINUSE") {
+        message = `Persisted worktree port ${port} is already in use`;
+      } else if (error instanceof Error) {
+        message = error.message;
+      } else {
+        message = String(error);
+      }
+      reject(new Error(message));
+    });
+    server.listen(port, () => {
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolvePromise();
+      });
+    });
+  });
+}
+
+async function inferRepoRootPathFromWorktreePath(worktreePath: string): Promise<string> {
+  try {
+    const commonDir = await getGitCommonDir(worktreePath);
+    const normalizedCommonDir = normalizePathForOwnership(commonDir);
+    // Normal repo/worktree: common dir is <repoRoot>/.git
+    if (basename(normalizedCommonDir) === ".git") {
+      return dirname(normalizedCommonDir);
+    }
+    // Bare repo: common dir is the repo dir itself
+    return normalizedCommonDir;
+  } catch {
+    // Fallback: best-effort resolve toplevel (will be the worktree root in typical cases)
+    try {
+      const { stdout } = await runGitCommand(["rev-parse", "--show-toplevel"], {
+        cwd: worktreePath,
+        envOverlay: READ_ONLY_GIT_ENV,
+      });
+      const topLevel = parseGitRevParsePath(stdout);
+      if (topLevel) {
+        return normalizePathForOwnership(topLevel);
+      }
+    } catch {
+      // ignore
+    }
+    return normalizePathForOwnership(worktreePath);
+  }
+}
+
+export async function runWorktreeSetupCommands(options: {
+  worktreePath: string;
+  branchName: string;
+  cleanupOnFailure: boolean;
+  repoRootPath?: string;
+  runtimeEnv?: WorktreeRuntimeEnv;
+  onEvent?: (event: WorktreeSetupCommandProgressEvent) => void;
+}): Promise<WorktreeSetupCommandResult[]> {
+  // Read jagentdesk.json from the worktree (it will have the same content as the source repo)
+  const setupCommands = getWorktreeSetupCommands(options.worktreePath);
+  if (setupCommands.length === 0) {
+    return [];
+  }
+
+  const runtimeEnv =
+    options.runtimeEnv ??
+    (await resolveWorktreeRuntimeEnv({
+      worktreePath: options.worktreePath,
+      branchName: options.branchName,
+      ...(options.repoRootPath ? { repoRootPath: options.repoRootPath } : {}),
+    }));
+  const setupEnv = createStringCommandShellEnv(createExternalProcessEnv(process.env, runtimeEnv));
+
+  const results: WorktreeSetupCommandResult[] = [];
+  for (const [index, cmd] of setupCommands.entries()) {
+    const result = options.onEvent
+      ? await execSetupCommandStreamed({
+          command: cmd,
+          cwd: options.worktreePath,
+          env: setupEnv,
+          index: index + 1,
+          total: setupCommands.length,
+          onEvent: options.onEvent,
+        })
+      : await execSetupCommand(cmd, {
+          cwd: options.worktreePath,
+          env: setupEnv,
+        });
+    results.push(result);
+
+    if (result.exitCode !== 0) {
+      if (options.cleanupOnFailure) {
+        try {
+          await runGitCommand(["worktree", "remove", options.worktreePath, "--force"], {
+            cwd: options.worktreePath,
+            timeout: 120_000,
+          });
+        } catch {
+          rmSync(options.worktreePath, { recursive: true, force: true });
+        }
+      }
+      throw new WorktreeSetupError(
+        `Worktree setup command failed: ${cmd}\n${result.stderr}`.trim(),
+        results,
+      );
+    }
+  }
+
+  return results;
+}
+
+async function resolveBranchNameForWorktreePath(worktreePath: string): Promise<string> {
+  try {
+    const { stdout } = await runGitCommand(["branch", "--show-current"], {
+      cwd: worktreePath,
+      envOverlay: READ_ONLY_GIT_ENV,
+    });
+    const branchName = stdout.trim();
+    if (branchName.length > 0) {
+      return branchName;
+    }
+  } catch {
+    // ignore
+  }
+
+  return basename(worktreePath);
+}
+
+export async function resolveWorktreeRuntimeEnv(options: {
+  worktreePath: string;
+  branchName?: string;
+  repoRootPath?: string;
+}): Promise<WorktreeRuntimeEnv> {
+  const repoRootPath =
+    options.repoRootPath ?? (await inferRepoRootPathFromWorktreePath(options.worktreePath));
+  const branchName =
+    options.branchName ?? (await resolveBranchNameForWorktreePath(options.worktreePath));
+
+  let worktreePort = readJAgentDeskWorktreeRuntimePort(options.worktreePath);
+  if (worktreePort === null) {
+    worktreePort = await getAvailablePort();
+    const metadata = readJAgentDeskWorktreeMetadata(options.worktreePath);
+    if (metadata) {
+      writeJAgentDeskWorktreeRuntimeMetadata(options.worktreePath, { worktreePort });
+    }
+  } else {
+    await assertPortAvailable(worktreePort);
+  }
+
+  return {
+    // Source checkout path is the original git repo root (shared across worktrees), not the
+    // worktree itself. This allows setup scripts to copy local files (e.g. .env) from the
+    // source checkout.
+    JAGENTDESK_SOURCE_CHECKOUT_PATH: repoRootPath,
+    // Backward-compatible alias.
+    JAGENTDESK_ROOT_PATH: repoRootPath,
+    JAGENTDESK_WORKTREE_PATH: options.worktreePath,
+    JAGENTDESK_BRANCH_NAME: branchName,
+    JAGENTDESK_WORKTREE_PORT: String(worktreePort),
+  };
+}
+
+export async function runWorktreeTeardownCommands(options: {
+  worktreePath: string;
+  teardownCwd?: string;
+  branchName?: string;
+  repoRootPath?: string;
+}): Promise<WorktreeTeardownCommandResult[]> {
+  const teardownCwd = options.teardownCwd ?? options.worktreePath;
+  if (getRealpathAwareRelativePath(options.worktreePath, teardownCwd) === null) {
+    throw new Error(`Worktree teardown cwd is outside the worktree: ${teardownCwd}`);
+  }
+  const teardownCommands = getWorktreeTeardownCommands(teardownCwd);
+  if (teardownCommands.length === 0) {
+    return [];
+  }
+
+  const repoRootPath =
+    options.repoRootPath ?? (await inferRepoRootPathFromWorktreePath(options.worktreePath));
+  const branchName =
+    options.branchName ?? (await resolveBranchNameForWorktreePath(options.worktreePath));
+  const worktreePort = readJAgentDeskWorktreeRuntimePort(options.worktreePath);
+
+  const teardownEnv: NodeJS.ProcessEnv = createStringCommandShellEnv(
+    createExternalProcessEnv(process.env, {
+      // Source checkout path is the original git repo root (shared across worktrees), not the
+      // worktree itself. This allows lifecycle scripts to copy or clean resources using paths
+      // from the source checkout.
+      JAGENTDESK_SOURCE_CHECKOUT_PATH: repoRootPath,
+      // Backward-compatible alias.
+      JAGENTDESK_ROOT_PATH: repoRootPath,
+      JAGENTDESK_WORKTREE_PATH: options.worktreePath,
+      JAGENTDESK_BRANCH_NAME: branchName,
+      ...(worktreePort !== null ? { JAGENTDESK_WORKTREE_PORT: String(worktreePort) } : {}),
+    }),
+  );
+
+  const results: WorktreeTeardownCommandResult[] = [];
+  for (const cmd of teardownCommands) {
+    const result = await execSetupCommand(cmd, {
+      cwd: teardownCwd,
+      env: teardownEnv,
+    });
+    results.push(result);
+
+    if (result.exitCode !== 0) {
+      throw new WorktreeTeardownError(
+        `Worktree teardown command failed: ${cmd}\n${result.stderr}`.trim(),
+        results,
+      );
+    }
+  }
+
+  return results;
+}
+
+export async function seedJAgentDeskConfigFile(options: {
+  sourceCwd: string;
+  targetCwd: string;
+}): Promise<void> {
+  const sourceConfigPath = join(options.sourceCwd, "jagentdesk.json");
+  const targetConfigPath = join(options.targetCwd, "jagentdesk.json");
+  try {
+    await stat(targetConfigPath);
+    return;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  await copyFile(sourceConfigPath, targetConfigPath).catch((error) => {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  });
+}
+
+/**
+ * Get the git common directory (shared across worktrees) for a given cwd.
+ * This is where refs, objects, etc. are stored.
+ */
+export async function getGitCommonDir(cwd: string): Promise<string> {
+  const { stdout } = await runGitCommand(["rev-parse", "--git-common-dir"], {
+    cwd,
+    envOverlay: READ_ONLY_GIT_ENV,
+  });
+  const commonDir = resolveGitRevParsePath(cwd, stdout);
+  if (!commonDir) {
+    throw new Error("Not in a git repository");
+  }
+  return commonDir;
+}
+
+const WORKTREE_PROJECT_HASH_LENGTH = 8;
+
+function deriveShortAlphanumericHash(value: string): string {
+  const digest = createHash("sha256").update(value).digest();
+  let hashValue = 0n;
+  for (let index = 0; index < 8; index += 1) {
+    hashValue = (hashValue << 8n) | BigInt(digest[index] ?? 0);
+  }
+  return hashValue.toString(36).padStart(13, "0").slice(0, WORKTREE_PROJECT_HASH_LENGTH);
+}
+
+export async function deriveWorktreeProjectHash(cwd: string): Promise<string> {
+  try {
+    const commonDir = await getGitCommonDir(cwd);
+    const normalizedCommonDir = normalizePathForOwnership(commonDir);
+    const repoRoot =
+      basename(normalizedCommonDir) === ".git" ? dirname(normalizedCommonDir) : normalizedCommonDir;
+    return deriveShortAlphanumericHash(repoRoot);
+  } catch {
+    return deriveShortAlphanumericHash(normalizePathForOwnership(cwd));
+  }
+}
+
+export function resolveJAgentDeskWorktreesBaseRoot(options?: WorktreeRootOptions): string {
+  if (options?.worktreesRoot) {
+    const expandedRoot = expandTilde(options.worktreesRoot);
+    if (isAbsolute(expandedRoot)) {
+      return resolve(expandedRoot);
+    }
+    const home = options.jagentdeskHome ? resolve(options.jagentdeskHome) : resolveJAgentDeskHome();
+    return resolve(home, expandedRoot);
+  }
+
+  const home = options?.jagentdeskHome ? resolve(options.jagentdeskHome) : resolveJAgentDeskHome();
+  return join(home, "worktrees");
+}
+
+export async function getJAgentDeskWorktreesRoot(
+  cwd: string,
+  jagentdeskHome?: string,
+  worktreesRoot?: string,
+): Promise<string> {
+  const baseRoot = resolveJAgentDeskWorktreesBaseRoot({ jagentdeskHome, worktreesRoot });
+  const projectHash = await deriveWorktreeProjectHash(cwd);
+  return join(baseRoot, projectHash);
+}
+
+export async function computeWorktreePath(
+  cwd: string,
+  slug: string,
+  jagentdeskHome?: string,
+  worktreesRoot?: string,
+): Promise<string> {
+  const projectWorktreesRoot = await getJAgentDeskWorktreesRoot(cwd, jagentdeskHome, worktreesRoot);
+  return join(projectWorktreesRoot, slug);
+}
+
+export function mapWorkspaceCwdToWorktree(input: {
+  sourceWorktreePath: string;
+  workspaceCwd: string;
+  targetWorktreePath: string;
+}): string {
+  const relativeWorkspaceCwd = getRealpathAwareRelativePath(
+    input.sourceWorktreePath,
+    input.workspaceCwd,
+  );
+  if (relativeWorkspaceCwd === null) {
+    throw new Error(`Workspace cwd is outside its source worktree: ${input.workspaceCwd}`);
+  }
+
+  return mapWorkspaceRelativeCwdToWorktree({
+    relativeWorkspaceCwd,
+    targetWorktreePath: input.targetWorktreePath,
+  });
+}
+
+export function mapWorkspaceRelativeCwdToWorktree(input: {
+  relativeWorkspaceCwd: string;
+  targetWorktreePath: string;
+}): string {
+  const mappedCwd = resolve(input.targetWorktreePath, input.relativeWorkspaceCwd);
+  if (!isPathInsideRoot(input.targetWorktreePath, mappedCwd)) {
+    throw new Error(`Workspace cwd escapes its target worktree: ${input.relativeWorkspaceCwd}`);
+  }
+  return mappedCwd;
+}
+
+function normalizePathForOwnership(input: string): string {
+  try {
+    return realpathSync(input);
+  } catch {
+    return resolve(input);
+  }
+}
+
+function resolveRepoRootFromGitCommonDir(commonDir: string): string {
+  const normalizedCommonDir = normalizePathForOwnership(commonDir);
+  return basename(normalizedCommonDir) === ".git"
+    ? dirname(normalizedCommonDir)
+    : normalizedCommonDir;
+}
+
+export async function isJAgentDeskOwnedWorktreeCwd(
+  cwd: string,
+  options?: JAgentDeskWorktreeOwnershipOptions,
+): Promise<JAgentDeskWorktreeOwnership> {
+  const resolvedCwd = normalizePathForOwnership(cwd);
+
+  // repoRoot is best-effort: git may be unreachable from the worktree (e.g. a
+  // previous archive attempt removed the admin dir before the working tree
+  // could be fully cleaned up). We still want to allow archiving in that case.
+  let repoRoot: string | undefined;
+  if (options?.knownGitCommonDir) {
+    repoRoot = resolveRepoRootFromGitCommonDir(options.knownGitCommonDir);
+  } else if (options?.knownGitCommonDir === undefined) {
+    try {
+      const gitCommonDir = await getGitCommonDir(cwd);
+      repoRoot = resolveRepoRootFromGitCommonDir(gitCommonDir);
+    } catch {
+      // ignore
+    }
+  }
+
+  const worktreesBaseRoot = resolveJAgentDeskWorktreesBaseRoot(options);
+  const relativePath = getRealpathAwareRelativePath(worktreesBaseRoot, resolvedCwd);
+
+  // Ownership is defined by the path living under <worktrees-root>/<hash>/<slug>[/...].
+  // The <hash>/<slug> prefix is JAgentDesk-private — nothing else writes there — so the
+  // path shape alone is sufficient proof of ownership, even when git has already
+  // forgotten about the worktree.
+  if (relativePath === null) {
+    return {
+      allowed: false,
+      ...(repoRoot !== undefined ? { repoRoot } : {}),
+      worktreePath: resolvedCwd,
+    };
+  }
+
+  const parts = relativePath.split(sep).filter((part) => part.length > 0);
+  if (parts.length < 2) {
+    return {
+      allowed: false,
+      ...(repoRoot !== undefined ? { repoRoot } : {}),
+      worktreePath: resolvedCwd,
+    };
+  }
+
+  const worktreesRoot = join(worktreesBaseRoot, parts[0]);
+  return {
+    allowed: true,
+    ...(repoRoot !== undefined ? { repoRoot } : {}),
+    worktreeRoot: worktreesRoot,
+    worktreePath: join(worktreesRoot, parts[1]),
+  };
+}
+
+type ParsedJAgentDeskWorktreeInfo = Omit<JAgentDeskWorktreeInfo, "createdAt">;
+
+function parseWorktreeList(output: string): ParsedJAgentDeskWorktreeInfo[] {
+  const entries: ParsedJAgentDeskWorktreeInfo[] = [];
+  let current: ParsedJAgentDeskWorktreeInfo | null = null;
+
+  for (const line of output.split("\n")) {
+    if (line.startsWith("worktree ")) {
+      if (current?.path) {
+        entries.push(current);
+      }
+      current = { path: line.slice("worktree ".length).trim() };
+      continue;
+    }
+
+    if (!current) {
+      continue;
+    }
+
+    if (line.startsWith("branch ")) {
+      const ref = line.slice("branch ".length).trim();
+      current.branchName = ref.startsWith("refs/heads/") ? ref.slice("refs/heads/".length) : ref;
+    } else if (line.startsWith("HEAD ")) {
+      current.head = line.slice("HEAD ".length).trim();
+    } else if (line.trim().length === 0) {
+      if (current.path) {
+        entries.push(current);
+      }
+      current = null;
+    }
+  }
+
+  if (current?.path) {
+    entries.push(current);
+  }
+
+  return entries;
+}
+
+function resolveWorktreeCreatedAtIso(worktreePath: string): string {
+  try {
+    const stats = statSync(worktreePath);
+    const birthtimeMs = stats.birthtimeMs;
+    const createdAtMs =
+      Number.isFinite(birthtimeMs) && birthtimeMs > 0 ? birthtimeMs : stats.ctimeMs;
+    return new Date(createdAtMs).toISOString();
+  } catch {
+    return new Date(0).toISOString();
+  }
+}
+
+export async function listJAgentDeskWorktrees({
+  cwd,
+  jagentdeskHome,
+  worktreesRoot,
+}: {
+  cwd: string;
+  jagentdeskHome?: string;
+  worktreesRoot?: string;
+}): Promise<JAgentDeskWorktreeInfo[]> {
+  const projectWorktreesRoot = await getJAgentDeskWorktreesRoot(cwd, jagentdeskHome, worktreesRoot);
+  const { stdout } = await runGitCommand(["worktree", "list", "--porcelain"], {
+    cwd,
+    envOverlay: READ_ONLY_GIT_ENV,
+  });
+
+  return parseWorktreeList(stdout)
+    .map((entry) => Object.assign({}, entry, { path: normalizePathForOwnership(entry.path) }))
+    .filter((entry) => getRealpathAwareRelativePath(projectWorktreesRoot, entry.path) !== null)
+    .map((entry) =>
+      Object.assign({}, entry, { createdAt: resolveWorktreeCreatedAtIso(entry.path) }),
+    );
+}
+
+export async function resolveExistingWorktreeForSlug({
+  slug,
+  repoRoot,
+  jagentdeskHome,
+  worktreesRoot,
+}: ResolveExistingWorktreeForSlugOptions): Promise<WorktreeConfig | null> {
+  const worktrees = await listJAgentDeskWorktrees({
+    cwd: repoRoot,
+    jagentdeskHome,
+    worktreesRoot,
+  });
+  const slugSuffix = `${sep}${slug}`;
+  const existingWorktree = worktrees.find((worktree) => worktree.path.endsWith(slugSuffix));
+  if (!existingWorktree) {
+    return null;
+  }
+
+  const { stdout } = await runGitCommand(["branch", "--show-current"], {
+    cwd: existingWorktree.path,
+    envOverlay: READ_ONLY_GIT_ENV,
+  });
+  const branchName = stdout.trim();
+  if (!branchName) {
+    throw new Error(`Unable to resolve branch for existing worktree: ${existingWorktree.path}`);
+  }
+
+  return {
+    branchName,
+    worktreePath: existingWorktree.path,
+  };
+}
+
+export interface DeleteJAgentDeskWorktreeOptions {
+  cwd: string | null;
+  worktreePath?: string;
+  teardownCwds?: string[];
+  worktreeSlug?: string;
+  worktreesRoot?: string;
+  jagentdeskHome?: string;
+  worktreesBaseRoot?: string;
+}
+
+export async function deleteJAgentDeskWorktree({
+  cwd,
+  worktreePath,
+  teardownCwds,
+  worktreeSlug,
+  worktreesRoot,
+  jagentdeskHome,
+  worktreesBaseRoot,
+}: DeleteJAgentDeskWorktreeOptions): Promise<void> {
+  if (!worktreePath && !worktreeSlug) {
+    throw new Error("worktreePath or worktreeSlug is required");
+  }
+
+  // Resolve the worktrees-root. With a repo cwd we hash it the normal way; if
+  // git has forgotten about the worktree we expect the caller to hand us the
+  // path-derived worktreesRoot from the ownership check.
+  let resolvedWorktreesRoot: string;
+  if (worktreesRoot) {
+    resolvedWorktreesRoot = worktreesRoot;
+  } else if (cwd) {
+    resolvedWorktreesRoot = await getJAgentDeskWorktreesRoot(cwd, jagentdeskHome, worktreesBaseRoot);
+  } else {
+    throw new Error("cwd or worktreesRoot is required to delete a JAgentDesk worktree");
+  }
+
+  const requestedPath = worktreePath ?? join(resolvedWorktreesRoot, worktreeSlug!);
+  const resolvedRequested = normalizePathForOwnership(requestedPath);
+  const ownership = await isJAgentDeskOwnedWorktreeCwd(requestedPath, {
+    jagentdeskHome,
+    worktreesRoot: worktreesBaseRoot,
+  });
+  const resolvedWorktree =
+    ownership.allowed && ownership.worktreePath ? ownership.worktreePath : resolvedRequested;
+
+  const relativeWorktreePath = getRealpathAwareRelativePath(
+    resolvedWorktreesRoot,
+    resolvedWorktree,
+  );
+  if (relativeWorktreePath === null || relativeWorktreePath === "") {
+    throw new Error("Refusing to delete non-JAgentDesk worktree");
+  }
+
+  if (await pathExists(resolvedWorktree)) {
+    for (const teardownCwd of teardownCwds ?? [resolvedWorktree]) {
+      await runWorktreeTeardownCommands({
+        worktreePath: resolvedWorktree,
+        teardownCwd,
+      });
+    }
+  }
+
+  if (cwd) {
+    try {
+      await runGitCommand(["worktree", "remove", resolvedWorktree, "--force"], {
+        cwd,
+        timeout: 120_000,
+      });
+    } catch {
+      // `git worktree remove` fails if the admin dir is already gone (e.g. a
+      // prior archive attempt removed it before the working tree could be
+      // fully cleaned up), or if the repo root has moved. Fall through to the
+      // rm retry loop below so the operation stays idempotent.
+    }
+  }
+
+  await removeDirectoryWithRetries(resolvedWorktree);
+
+  if (cwd) {
+    try {
+      await runGitCommand(["worktree", "prune"], { cwd, timeout: 30_000 });
+    } catch {
+      // not critical; git will prune lazily
+    }
+  }
+}
+
+export async function rollbackCreatedJAgentDeskWorktree(
+  options: DeleteJAgentDeskWorktreeOptions,
+  cause: unknown,
+): Promise<never> {
+  let cleanupError: unknown;
+  try {
+    await deleteJAgentDeskWorktree(options);
+  } catch (error) {
+    cleanupError = error;
+  }
+  if (cleanupError) {
+    const failure = new Error(
+      `${cause instanceof Error ? cause.message : "Worktree workflow failed"}; rollback also failed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
+      { cause },
+    );
+    Object.assign(failure, { cleanupError });
+    throw failure;
+  }
+  throw cause;
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function removeDirectoryWithRetries(path: string): Promise<void> {
+  if (!(await pathExists(path))) {
+    return;
+  }
+
+  const delaysMs = [0, 100, 300, 700, 1500];
+  let lastError: unknown = null;
+  for (const delay of delaysMs) {
+    if (delay > 0) {
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, delay));
+    }
+    try {
+      await rm(path, { recursive: true, force: true });
+      if (!(await pathExists(path))) {
+        return;
+      }
+      lastError = new Error(`Directory still present after rm: ${path}`);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (await pathExists(path)) {
+    throw lastError instanceof Error
+      ? lastError
+      : new Error(`Failed to remove worktree directory: ${path}`);
+  }
+}
+
+/**
+ * Create a git worktree with proper naming conventions
+ */
+export const createWorktree = async ({
+  cwd,
+  source,
+  worktreeSlug,
+  runSetup,
+  jagentdeskHome,
+  worktreesRoot,
+}: CreateWorktreeOptions): Promise<WorktreeConfig> => {
+  const sourcePlan = await resolveWorktreeSourcePlan({ cwd, source, desiredSlug: worktreeSlug });
+  let worktreePath = join(await getJAgentDeskWorktreesRoot(cwd, jagentdeskHome, worktreesRoot), worktreeSlug);
+  mkdirSync(dirname(worktreePath), { recursive: true });
+
+  // Also handle worktree path collision
+  let finalWorktreePath = worktreePath;
+  let pathSuffix = 1;
+  while (existsSync(finalWorktreePath)) {
+    finalWorktreePath = `${worktreePath}-${pathSuffix}`;
+    pathSuffix++;
+  }
+
+  // Primitive owner for `git worktree add`; callers route through createWorktreeCore.
+  await runGitCommand(["worktree", "add", finalWorktreePath, ...sourcePlan.addArguments], {
+    cwd,
+    timeout: 120_000,
+  });
+  worktreePath = normalizePathForOwnership(finalWorktreePath);
+
+  if (sourcePlan.pushRemote) {
+    await configureWorktreePushRemote({
+      cwd,
+      branchName: sourcePlan.branchName,
+      remote: sourcePlan.pushRemote,
+    });
+  }
+  if (sourcePlan.trackingRemote) {
+    await configureWorktreeTrackingRemote({
+      cwd,
+      branchName: sourcePlan.branchName,
+      remote: sourcePlan.trackingRemote,
+    });
+  }
+
+  writeJAgentDeskWorktreeMetadata(worktreePath, {
+    baseRefName: sourcePlan.metadataBaseRefName,
+    ...(sourcePlan.changeRequestLookupTarget
+      ? { changeRequestLookupTarget: sourcePlan.changeRequestLookupTarget }
+      : {}),
+  });
+
+  await seedJAgentDeskConfigFile({ sourceCwd: cwd, targetCwd: worktreePath });
+
+  if (runSetup) {
+    await runWorktreeSetupCommands({
+      worktreePath,
+      branchName: sourcePlan.branchName,
+      cleanupOnFailure: true,
+    });
+  }
+
+  return {
+    branchName: sourcePlan.branchName,
+    worktreePath,
+  };
+};
+
+interface ResolveWorktreeSourcePlanOptions {
+  cwd: string;
+  source: WorktreeSource;
+  desiredSlug: string;
+}
+
+interface WorktreeSourcePlan {
+  branchName: string;
+  metadataBaseRefName: string;
+  changeRequestLookupTarget?: JAgentDeskWorktreeChangeRequestHint;
+  addArguments: string[];
+  pushRemote?: {
+    name: string;
+    url: string;
+    headRef: string;
+    track: boolean;
+  };
+  trackingRemote?: {
+    name: string;
+    headRef: string;
+  };
+}
+
+async function resolveWorktreeSourcePlan({
+  cwd,
+  source,
+  desiredSlug,
+}: ResolveWorktreeSourcePlanOptions): Promise<WorktreeSourcePlan> {
+  switch (source.kind) {
+    case "branch-off": {
+      const branchName = source.branchName;
+      validateWorktreeBranchName(branchName);
+      const normalizedBaseBranch = normalizeRequiredBaseBranch(source.baseBranch);
+      const resolvedBaseBranch = await resolveBaseBranchForWorktree(cwd, source.baseBranch);
+      const branchExists = await localBranchExists(cwd, branchName);
+      const base = branchExists ? branchName : resolvedBaseBranch;
+      const candidateBranch = branchExists ? desiredSlug : branchName;
+      const newBranchName = await resolveUniqueLocalBranchName(cwd, candidateBranch);
+
+      return {
+        branchName: newBranchName,
+        metadataBaseRefName: normalizedBaseBranch,
+        addArguments: ["-b", newBranchName, "--no-track", base],
+      };
+    }
+    case "checkout-branch": {
+      await validateExistingWorktreeBranchName(cwd, source.branchName);
+      if (!(await localBranchExists(cwd, source.branchName))) {
+        try {
+          await runGitCommand(["fetch", "origin", `${source.branchName}:${source.branchName}`], {
+            cwd,
+            timeout: 120_000,
+          });
+        } catch {
+          throw new UnknownBranchError({ branchName: source.branchName, cwd });
+        }
+      }
+      if (await isBranchCheckedOut(cwd, source.branchName)) {
+        throw new BranchAlreadyCheckedOutError(source.branchName);
+      }
+
+      return {
+        branchName: source.branchName,
+        metadataBaseRefName: source.branchName,
+        addArguments: [source.branchName],
+      };
+    }
+    case "checkout-change-request":
+    case "checkout-github-pr": {
+      const localBranchCandidate = source.localBranchName ?? source.headRef;
+      await validateExistingWorktreeBranchName(cwd, localBranchCandidate);
+      const localBranchName = await resolveUniqueLocalBranchName(cwd, localBranchCandidate);
+      const normalizedBaseRefName = normalizeRequiredBaseBranch(source.baseRefName);
+      const changeRequestNumber =
+        source.kind === "checkout-github-pr" ? source.githubPrNumber : source.changeRequestNumber;
+      await fetchWorktreeCheckoutRefs({
+        cwd,
+        localBranchName,
+        checkoutRefs: source.checkoutRefs ?? [
+          { remoteName: "origin", remoteRef: `refs/pull/${changeRequestNumber}/head` },
+        ],
+      });
+      const shouldTrackOriginHead = source.trackOriginHead === true;
+      const trackingRemote = shouldTrackOriginHead
+        ? await tryFetchWorktreeTrackingRemote({
+            cwd,
+            remoteName: "origin",
+            headRef: source.headRef,
+          })
+        : undefined;
+      const remotePlan: Pick<WorktreeSourcePlan, "pushRemote" | "trackingRemote"> = {};
+      if (source.pushRemoteUrl) {
+        const remoteName = `jagentdesk-pr-${changeRequestNumber}`;
+        remotePlan.pushRemote = {
+          name: remoteName,
+          url: source.pushRemoteUrl,
+          headRef: source.headRef,
+          track: true,
+        };
+      } else if (shouldTrackOriginHead && localBranchName !== source.headRef) {
+        const originUrl = await getWorktreeRemotePushUrl(cwd, "origin");
+        if (originUrl) {
+          remotePlan.pushRemote = {
+            name: `jagentdesk-pr-${changeRequestNumber}`,
+            url: originUrl,
+            headRef: source.headRef,
+            track: false,
+          };
+        }
+      }
+      if (trackingRemote) {
+        remotePlan.trackingRemote = trackingRemote;
+      }
+
+      return {
+        branchName: localBranchName,
+        metadataBaseRefName: normalizedBaseRefName,
+        changeRequestLookupTarget: createJAgentDeskWorktreeChangeRequestHint({
+          headRef: source.headRef,
+          ...(source.headRepositoryOwner
+            ? { headRepositoryOwner: source.headRepositoryOwner }
+            : {}),
+          changeRequestNumber,
+          localBranchName,
+        }),
+        addArguments: [localBranchName],
+        ...remotePlan,
+      };
+    }
+  }
+}
+
+async function configureWorktreePushRemote(options: {
+  cwd: string;
+  branchName: string;
+  remote: {
+    name: string;
+    url: string;
+    headRef: string;
+    track: boolean;
+  };
+}): Promise<void> {
+  await runGitCommand(["config", `remote.${options.remote.name}.url`, options.remote.url], {
+    cwd: options.cwd,
+  });
+  await runGitCommand(
+    ["config", `remote.${options.remote.name}.push`, `HEAD:refs/heads/${options.remote.headRef}`],
+    { cwd: options.cwd },
+  );
+  await runGitCommand(["config", `branch.${options.branchName}.pushRemote`, options.remote.name], {
+    cwd: options.cwd,
+  });
+  if (!options.remote.track) {
+    return;
+  }
+  await runGitCommand(
+    [
+      "config",
+      `remote.${options.remote.name}.fetch`,
+      `+refs/heads/${options.remote.headRef}:refs/remotes/${options.remote.name}/${options.remote.headRef}`,
+    ],
+    { cwd: options.cwd },
+  );
+  const trackingRemote = await tryFetchWorktreeTrackingRemote({
+    cwd: options.cwd,
+    remoteName: options.remote.name,
+    headRef: options.remote.headRef,
+  });
+  if (trackingRemote) {
+    await configureWorktreeTrackingRemote({
+      cwd: options.cwd,
+      branchName: options.branchName,
+      remote: trackingRemote,
+    });
+  }
+}
+
+async function fetchWorktreeCheckoutRefs(options: {
+  cwd: string;
+  localBranchName: string;
+  checkoutRefs: WorktreeCheckoutRef[];
+}): Promise<void> {
+  let lastResult:
+    | Awaited<ReturnType<typeof runGitCommand>>
+    | { stderr: string; stdout: string; exitCode: number | null }
+    | null = null;
+  for (const checkoutRef of options.checkoutRefs) {
+    lastResult = await runGitCommand(
+      [
+        "fetch",
+        checkoutRef.remoteName ?? "origin",
+        `+${checkoutRef.remoteRef}:refs/heads/${options.localBranchName}`,
+        "--force",
+      ],
+      {
+        cwd: options.cwd,
+        timeout: 120_000,
+        acceptExitCodes: [0, 1, 128],
+      },
+    );
+    if (lastResult.exitCode === 0) {
+      return;
+    }
+  }
+  const attemptedRefs = options.checkoutRefs
+    .map((checkoutRef) => `${checkoutRef.remoteName ?? "origin"} ${checkoutRef.remoteRef}`)
+    .join(", ");
+  throw new Error(
+    `Unable to fetch change request refs for worktree branch ${options.localBranchName}: ${attemptedRefs}${lastResult?.stderr ? `\n${lastResult.stderr}` : ""}`,
+  );
+}
+
+async function tryFetchWorktreeTrackingRemote(options: {
+  cwd: string;
+  remoteName: string;
+  headRef: string;
+}): Promise<{ name: string; headRef: string } | undefined> {
+  const result = await runGitCommand(
+    [
+      "fetch",
+      options.remoteName,
+      `+refs/heads/${options.headRef}:refs/remotes/${options.remoteName}/${options.headRef}`,
+    ],
+    {
+      cwd: options.cwd,
+      timeout: 120_000,
+      acceptExitCodes: [0, 1, 128],
+    },
+  );
+  if (result.exitCode !== 0) {
+    return undefined;
+  }
+  await ensureRemoteFetchesBranch(options);
+  return { name: options.remoteName, headRef: options.headRef };
+}
+
+async function ensureRemoteFetchesBranch(options: {
+  cwd: string;
+  remoteName: string;
+  headRef: string;
+}): Promise<void> {
+  const configKey = `remote.${options.remoteName}.fetch`;
+  const exactRefspec = `refs/heads/${options.headRef}:refs/remotes/${options.remoteName}/${options.headRef}`;
+  const wildcardRefspec = `refs/heads/*:refs/remotes/${options.remoteName}/*`;
+  const { stdout } = await runGitCommand(["config", "--get-all", configKey], {
+    cwd: options.cwd,
+    acceptExitCodes: [0, 1],
+  });
+  const alreadyTracked = stdout
+    .split("\n")
+    .map((refspec) => refspec.trim().replace(/^\+/, ""))
+    .some((refspec) => refspec === exactRefspec || refspec === wildcardRefspec);
+  if (alreadyTracked) {
+    return;
+  }
+  await runGitCommand(["config", "--add", configKey, `+${exactRefspec}`], { cwd: options.cwd });
+}
+
+async function getWorktreeRemotePushUrl(
+  cwd: string,
+  remoteName: string,
+): Promise<string | undefined> {
+  try {
+    const { stdout } = await runGitCommand(["remote", "get-url", "--push", remoteName], {
+      cwd,
+    });
+    const url = stdout.trim();
+    return url.length > 0 ? url : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function configureWorktreeTrackingRemote(options: {
+  cwd: string;
+  branchName: string;
+  remote: {
+    name: string;
+    headRef: string;
+  };
+}): Promise<void> {
+  await runGitCommand(
+    [
+      "branch",
+      "--set-upstream-to",
+      `${options.remote.name}/${options.remote.headRef}`,
+      options.branchName,
+    ],
+    { cwd: options.cwd },
+  );
+}
+
+function validateWorktreeBranchName(branchName: string): void {
+  const validation = validateBranchSlug(branchName);
+  if (!validation.valid) {
+    throw new Error(`Invalid branch name: ${validation.error}`);
+  }
+}
+
+async function validateExistingWorktreeBranchName(cwd: string, branchName: string): Promise<void> {
+  const result = await runGitCommand(["check-ref-format", "--branch", branchName], {
+    cwd,
+    timeout: 30_000,
+    acceptExitCodes: [0, 1, 128],
+  });
+  if (result.exitCode !== 0) {
+    throw new InvalidGitBranchNameError(branchName);
+  }
+}
+
+function normalizeRequiredBaseBranch(baseBranch: string): string {
+  const normalizedBaseBranch = normalizeBaseRefName(baseBranch);
+  if (!normalizedBaseBranch) {
+    throw new Error("Base branch is required when creating a JAgentDesk worktree");
+  }
+  if (normalizedBaseBranch === "HEAD") {
+    throw new Error("Base branch cannot be HEAD when creating a JAgentDesk worktree");
+  }
+  return normalizedBaseBranch;
+}
+
+async function resolveBaseBranchForWorktree(
+  cwd: string,
+  requestedBaseBranch: string,
+): Promise<string> {
+  const requested = requestedBaseBranch.trim();
+  const normalized = normalizeRequiredBaseBranch(requested);
+  let exactRef: string | null = null;
+  if (requested.startsWith("refs/")) {
+    exactRef = requested;
+  } else if (requested.startsWith("origin/")) {
+    exactRef = `refs/remotes/${requested}`;
+  }
+
+  if (exactRef) {
+    try {
+      await runGitCommand(["rev-parse", "--verify", exactRef], { cwd });
+      return exactRef;
+    } catch {
+      throw new Error(`Base branch not found: ${normalized}`);
+    }
+  }
+
+  const candidates = [`refs/heads/${requested}`, `refs/remotes/origin/${requested}`, requested];
+  for (const candidate of candidates) {
+    try {
+      await runGitCommand(["rev-parse", "--verify", candidate], { cwd });
+      return candidate;
+    } catch {
+      // Try the next unambiguous local, remote, or legacy ref candidate.
+    }
+  }
+  throw new Error(`Base branch not found: ${normalized}`);
+}
+
+async function localBranchExists(cwd: string, branchName: string): Promise<boolean> {
+  try {
+    await runGitCommand(["show-ref", "--verify", "--quiet", `refs/heads/${branchName}`], {
+      cwd,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function resolveUniqueLocalBranchName(cwd: string, candidateBranch: string): Promise<string> {
+  let newBranchName = candidateBranch;
+  let suffix = 1;
+  while (await localBranchExists(cwd, newBranchName)) {
+    newBranchName = `${candidateBranch}-${suffix}`;
+    suffix++;
+  }
+  return newBranchName;
+}
+
+async function isBranchCheckedOut(cwd: string, branchName: string): Promise<boolean> {
+  const { stdout } = await runGitCommand(["worktree", "list", "--porcelain"], {
+    cwd,
+    envOverlay: READ_ONLY_GIT_ENV,
+  });
+  return parseWorktreeList(stdout).some((entry) => entry.branchName === branchName);
+}

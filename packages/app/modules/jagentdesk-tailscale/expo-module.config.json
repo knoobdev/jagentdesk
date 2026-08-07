@@ -1,0 +1,5 @@
+{
+  "platforms": ["ios", "android"],
+  "ios": { "modules": ["JAgentDeskTailscaleModule"] },
+  "android": { "modules": ["sh.jagentdesk.tailscale.JAgentDeskTailscaleModule"] }
+}

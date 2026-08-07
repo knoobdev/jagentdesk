@@ -1,0 +1,282 @@
+import { z } from "zod";
+import type { AgentMode } from "./agent-types.js";
+
+export type AgentModeColorTier = "safe" | "moderate" | "dangerous" | "planning" | `#${string}`;
+// Open string by design: the client looks icons up in a registry and falls back
+// to a default for unknown values. Daemon downgrades unknown icons for clients
+// that pre-date the open-string contract (see CLIENT_CAPS.customModeIcons).
+export type AgentModeIcon = string;
+
+export interface AgentModeVisuals {
+  icon: AgentModeIcon;
+  colorTier: AgentModeColorTier;
+}
+
+export type AgentProviderModeDefinition = Omit<AgentMode, "icon" | "colorTier"> &
+  AgentModeVisuals & {
+    // Marks the provider's most-permissioned no-prompt mode. Selecting it means tools run without approval; the runtime mechanism is provider-specific.
+    isUnattended?: boolean;
+  };
+
+// TODO: `modes` should not be static. Providers (especially ACP) report their
+// own modes at runtime via session/new. We should fetch modes from the provider
+// as source of truth and enrich with UI metadata (icons, colorTier) on top.
+export interface AgentProviderDefinition {
+  id: string;
+  label: string;
+  description: string;
+  enabledByDefault?: boolean;
+  defaultModeId: string | null;
+  modes: AgentProviderModeDefinition[];
+  voice?: {
+    enabled: boolean;
+    defaultModeId: string;
+    defaultModel?: string;
+  };
+}
+
+const CLAUDE_MODES: AgentProviderModeDefinition[] = [
+  {
+    id: "plan",
+    label: "Plan Mode",
+    description: "Analyze the codebase without executing tools or edits",
+    icon: "ShieldEllipsis",
+    colorTier: "planning",
+  },
+  {
+    id: "default",
+    label: "Always Ask",
+    description: "Prompts for permission the first time a tool is used",
+    icon: "Shield",
+    colorTier: "safe",
+  },
+  {
+    id: "acceptEdits",
+    label: "Accept File Edits",
+    description: "Automatically approves edit-focused tools without prompting",
+    icon: "ShieldPlus",
+    colorTier: "moderate",
+  },
+  {
+    id: "auto",
+    label: "Auto mode",
+    description: "Uses a model classifier to review permission prompts automatically",
+    icon: "ShieldCheck",
+    colorTier: "moderate",
+  },
+  {
+    id: "bypassPermissions",
+    label: "Bypass",
+    description: "Skip all permission prompts (use with caution)",
+    icon: "ShieldOff",
+    colorTier: "dangerous",
+    isUnattended: true,
+  },
+];
+
+const CODEX_MODES: AgentProviderModeDefinition[] = [
+  {
+    id: "auto",
+    label: "Default Permissions",
+    description: "Edit files and run commands with Codex's default approval flow.",
+    icon: "Shield",
+    colorTier: "moderate",
+  },
+  {
+    id: "auto-review",
+    label: "Auto-review",
+    description:
+      "Same workspace-write permissions as Default, but eligible `on-request` approvals are routed through the auto-reviewer subagent.",
+    icon: "ShieldCheck",
+    colorTier: "moderate",
+  },
+  {
+    id: "full-access",
+    label: "Full Access",
+    description: "Edit files, run commands, and access the network without additional prompts.",
+    icon: "ShieldOff",
+    colorTier: "dangerous",
+    isUnattended: true,
+  },
+];
+
+const COPILOT_MODES: AgentProviderModeDefinition[] = [
+  {
+    id: "https://agentclientprotocol.com/protocol/session-modes#agent",
+    label: "Agent",
+    description: "Default agent mode for conversational interactions",
+    icon: "Shield",
+    colorTier: "moderate",
+  },
+  {
+    id: "https://agentclientprotocol.com/protocol/session-modes#plan",
+    label: "Plan",
+    description: "Plan mode for creating and executing multi-step plans",
+    icon: "ShieldEllipsis",
+    colorTier: "planning",
+  },
+  {
+    id: "allow-all",
+    label: "Allow All",
+    description: "Automatically approves all Copilot tool, path, and URL requests.",
+    icon: "ShieldOff",
+    colorTier: "dangerous",
+    isUnattended: true,
+  },
+];
+
+const OPENCODE_MODES: AgentProviderModeDefinition[] = [
+  {
+    id: "build",
+    label: "Build",
+    description: "Allows edits and tool execution for implementation work",
+    icon: "Shield",
+    colorTier: "moderate",
+  },
+  {
+    id: "plan",
+    label: "Plan",
+    description: "Read-only planning mode that avoids file edits",
+    icon: "ShieldEllipsis",
+    colorTier: "planning",
+  },
+];
+
+export const OMP_MODES: AgentProviderModeDefinition[] = [
+  {
+    id: "full",
+    label: "Full Access",
+    description: "Launches OMP with yolo approval mode so tools run without prompts.",
+    icon: "ShieldOff",
+    colorTier: "dangerous",
+    isUnattended: true,
+  },
+  {
+    id: "write",
+    label: "Write Approval",
+    description: "Launches OMP with write approval mode — reads are free, writes require approval.",
+    icon: "ShieldAlert",
+    colorTier: "moderate",
+  },
+  {
+    id: "ask",
+    label: "Always Ask",
+    description: "Launches OMP with always-ask approval mode for write and exec tools.",
+    icon: "ShieldCheck",
+    colorTier: "safe",
+  },
+];
+
+
+export const AGENT_PROVIDER_DEFINITIONS: AgentProviderDefinition[] = [
+  {
+    id: "claude",
+    label: "Claude",
+    description: "Anthropic's multi-tool assistant with MCP support, streaming, and deep reasoning",
+    defaultModeId: "auto",
+    modes: CLAUDE_MODES,
+    voice: {
+      enabled: true,
+      defaultModeId: "default",
+      defaultModel: "haiku",
+    },
+  },
+  {
+    id: "codex",
+    label: "Codex",
+    description: "OpenAI's Codex workspace agent with sandbox controls and optional network access",
+    defaultModeId: "auto-review",
+    modes: CODEX_MODES,
+    voice: {
+      enabled: true,
+      defaultModeId: "auto",
+      defaultModel: "gpt-5.4-mini",
+    },
+  },
+  {
+    id: "copilot",
+    label: "Copilot",
+    description: "GitHub Copilot via Agent Client Protocol with dynamic modes and session support",
+    defaultModeId: "https://agentclientprotocol.com/protocol/session-modes#agent",
+    modes: COPILOT_MODES,
+  },
+  {
+    id: "opencode",
+    label: "OpenCode",
+    description: "Open-source coding assistant with multi-provider model support",
+    // No static default: OpenCode users can rename or delete any agent,
+    // including "build". Leaving this unset means the daemon and OpenCode
+    // itself decide (see normalizeOpenCodeModeId in opencode-agent.ts).
+    defaultModeId: null,
+    modes: OPENCODE_MODES,
+    voice: {
+      enabled: true,
+      defaultModeId: "build",
+    },
+  },
+  {
+    id: "pi",
+    label: "Pi",
+    description: "Minimal terminal-based coding agent with multi-provider LLM support",
+    defaultModeId: null,
+    modes: [],
+  },
+  {
+    id: "omp",
+    label: "Oh My Pi",
+    description: "Multi-provider coding agent with native approvals, host tools, and subagents",
+    enabledByDefault: false,
+    defaultModeId: "full",
+    modes: OMP_MODES,
+  },
+];
+
+export const DEV_AGENT_PROVIDER_DEFINITIONS: AgentProviderDefinition[] = [];
+
+export function getAgentProviderDefinition(
+  provider: string,
+  definitions: AgentProviderDefinition[] = [
+    ...AGENT_PROVIDER_DEFINITIONS,
+    ...DEV_AGENT_PROVIDER_DEFINITIONS,
+  ],
+): AgentProviderDefinition {
+  const definition = definitions.find((entry) => entry.id === provider);
+  if (!definition) {
+    throw new Error(`Unknown agent provider: ${provider}`);
+  }
+  return definition;
+}
+
+export const BUILTIN_PROVIDER_IDS = AGENT_PROVIDER_DEFINITIONS.map((d) => d.id);
+export const AGENT_PROVIDER_IDS = BUILTIN_PROVIDER_IDS;
+
+export const AgentProviderSchema = z.string();
+
+export function isValidAgentProvider(
+  value: string,
+  validIds: Iterable<string> = BUILTIN_PROVIDER_IDS,
+): boolean {
+  return Array.isArray(validIds) ? validIds.includes(value) : new Set(validIds).has(value);
+}
+
+export function getUnattendedModeId(
+  provider: string,
+  definitions: AgentProviderDefinition[] = [
+    ...AGENT_PROVIDER_DEFINITIONS,
+    ...DEV_AGENT_PROVIDER_DEFINITIONS,
+  ],
+): string | undefined {
+  const definition = definitions.find((entry) => entry.id === provider);
+  return definition?.modes.find((mode) => mode.isUnattended)?.id;
+}
+
+export function getModeVisuals(
+  provider: string,
+  modeId: string,
+  definitions: AgentProviderDefinition[],
+): AgentModeVisuals | undefined {
+  const definition = definitions.find((entry) => entry.id === provider);
+  const mode = definition?.modes.find((m) => m.id === modeId);
+  if (!mode) return undefined;
+  return { icon: mode.icon, colorTier: mode.colorTier };
+}

@@ -1,0 +1,26 @@
+appId: app.jagentdesk.mobile
+
+---
+- launchApp:
+    clearState: true
+- openLink: "jagentdesk:///tailscale-login"
+- assertVisible: "Join your tailnet"
+- tapOn:
+    id: tailscale-login-authkey-input
+- setClipboard: ${JAGENTDESK_E2E_TAILSCALE_AUTH_KEY}
+- pasteText
+- tapOn: "Auth key"
+- tapOn:
+    id: tailscale-login-authkey-submit
+- extendedWaitUntil:
+    visible:
+      id: pair-start-link
+    timeout: 90000
+- takeScreenshot: tailscale-authkey-after-login
+- pressKey: HOME
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: pair-start-link
+    timeout: 30000
+- takeScreenshot: tailscale-authkey-after-restart

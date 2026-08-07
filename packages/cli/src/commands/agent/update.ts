@@ -1,0 +1,274 @@
+import type { Command } from "commander";
+import type { AgentProviderNotice } from "@jagentdesk/protocol/agent-types";
+import type { AgentSnapshotPayload } from "@jagentdesk/protocol/messages";
+import { connectToDaemon, getDaemonHost } from "../../utils/client.js";
+import type {
+  CommandOptions,
+  SingleResult,
+  OutputSchema,
+  CommandError,
+} from "../../output/index.js";
+
+/** Result type for agent update command */
+export interface AgentUpdateResult {
+  agentId: string;
+  name: string | null;
+  labels: string;
+  thinkingOptionId: string | null;
+  noticeType: AgentProviderNotice["type"] | null;
+  notice: string | null;
+}
+
+/** Schema for update command output */
+export const updateSchema: OutputSchema<AgentUpdateResult> = {
+  idField: "agentId",
+  columns: [
+    { header: "AGENT ID", field: "agentId" },
+    { header: "NAME", field: "name" },
+    { header: "LABELS", field: "labels" },
+    { header: "THINKING", field: "thinkingOptionId" },
+    { header: "NOTICE", field: "notice" },
+  ],
+};
+
+export interface AgentUpdateOptions extends CommandOptions {
+  name?: string;
+  label?: string[];
+  thinking?: string;
+  host?: string;
+}
+
+export type AgentUpdateCommandResult = SingleResult<AgentUpdateResult>;
+
+export interface AgentMetadataChanges {
+  name?: string;
+  labels?: Record<string, string>;
+}
+
+interface AgentUpdateServerInfo {
+  features?: { agentThinkingUpdate?: boolean };
+}
+
+export interface AgentUpdateClient {
+  getLastServerInfoMessage(): AgentUpdateServerInfo | null;
+  updateAgent(agentId: string, updates: AgentMetadataChanges): Promise<void>;
+  setAgentThinkingOption(
+    agentId: string,
+    thinkingOptionId: string,
+  ): Promise<AgentProviderNotice | null>;
+}
+
+export type AgentChanges =
+  | { type: "metadata"; updates: AgentMetadataChanges }
+  | { type: "thinking"; thinkingOptionId: string };
+
+export interface AppliedAgentChanges {
+  notice: AgentProviderNotice | null;
+}
+
+export function toAgentUpdateResult(
+  agent: Pick<AgentSnapshotPayload, "id" | "title" | "labels" | "effectiveThinkingOptionId">,
+  appliedChanges: AppliedAgentChanges,
+): AgentUpdateResult {
+  return {
+    agentId: agent.id,
+    name: agent.title,
+    labels: formatLabels(agent.labels),
+    thinkingOptionId: agent.effectiveThinkingOptionId ?? null,
+    noticeType: appliedChanges.notice?.type ?? null,
+    notice: appliedChanges.notice?.message ?? null,
+  };
+}
+
+export async function applyAgentChanges(
+  client: AgentUpdateClient,
+  agentId: string,
+  changes: AgentChanges,
+): Promise<AppliedAgentChanges> {
+  if (changes.type === "thinking") {
+    // COMPAT(agentThinkingUpdate): added in v0.2.4, remove gate after 2027-01-28.
+    if (client.getLastServerInfoMessage()?.features?.agentThinkingUpdate !== true) {
+      throw {
+        code: "DAEMON_UPDATE_REQUIRED",
+        message: "Update the host to use agent thinking updates.",
+      } satisfies CommandError;
+    }
+    const notice = await client.setAgentThinkingOption(agentId, changes.thinkingOptionId);
+    return { notice };
+  }
+  await client.updateAgent(agentId, changes.updates);
+  return { notice: null };
+}
+
+function parseLabelOptions(labels: string[] | undefined): Record<string, string> {
+  const parsed: Record<string, string> = {};
+  if (!labels) {
+    return parsed;
+  }
+
+  for (const rawLabel of labels) {
+    for (const segment of rawLabel.split(",")) {
+      const label = segment.trim();
+      if (!label) {
+        continue;
+      }
+
+      const eqIndex = label.indexOf("=");
+      if (eqIndex === -1) {
+        const error: CommandError = {
+          code: "INVALID_LABEL",
+          message: `Invalid label format: ${label}`,
+          details: "Labels must be in key=value format",
+        };
+        throw error;
+      }
+
+      const key = label.slice(0, eqIndex).trim();
+      const value = label.slice(eqIndex + 1);
+      if (!key) {
+        const error: CommandError = {
+          code: "INVALID_LABEL",
+          message: `Invalid label format: ${label}`,
+          details: "Labels must include a non-empty key in key=value format",
+        };
+        throw error;
+      }
+
+      parsed[key] = value;
+    }
+  }
+
+  return parsed;
+}
+
+function formatLabels(labels: Record<string, string>): string {
+  const entries = Object.entries(labels);
+  if (entries.length === 0) {
+    return "-";
+  }
+  return entries.map(([key, value]) => `${key}=${value}`).join(",");
+}
+
+function parseAgentChanges(options: AgentUpdateOptions): AgentChanges {
+  const name = options.name?.trim();
+  if (options.name !== undefined && !name) {
+    throw {
+      code: "INVALID_NAME",
+      message: "Name cannot be empty",
+      details: "Use --name <name> with a non-empty value",
+    } satisfies CommandError;
+  }
+
+  const labels = parseLabelOptions(options.label);
+  const thinkingOptionId = options.thinking?.trim();
+  if (options.thinking !== undefined && !thinkingOptionId) {
+    throw {
+      code: "INVALID_THINKING_OPTION",
+      message: "--thinking cannot be empty",
+      details:
+        'Provide a thinking option ID. Use "jagentdesk provider models <provider> --thinking" to list valid IDs.',
+    } satisfies CommandError;
+  }
+
+  const hasMetadataUpdates = Boolean(name) || Object.keys(labels).length > 0;
+  if (hasMetadataUpdates && thinkingOptionId) {
+    throw {
+      code: "INVALID_OPTIONS",
+      message: "--thinking cannot be combined with --name or --label",
+      details: "Run separate agent update commands for runtime settings and metadata.",
+    } satisfies CommandError;
+  }
+  if (!hasMetadataUpdates && !thinkingOptionId) {
+    throw {
+      code: "NO_CHANGES_PROVIDED",
+      message: "Nothing to update",
+      details: "Provide at least one of: --name <name>, --label <key=value>, --thinking <id>",
+    } satisfies CommandError;
+  }
+
+  if (thinkingOptionId) {
+    return { type: "thinking", thinkingOptionId };
+  }
+  return {
+    type: "metadata",
+    updates: {
+      ...(name ? { name } : {}),
+      ...(Object.keys(labels).length > 0 ? { labels } : {}),
+    },
+  };
+}
+
+export async function runUpdateCommand(
+  agentIdArg: string,
+  options: AgentUpdateOptions,
+  _command: Command,
+): Promise<AgentUpdateCommandResult> {
+  const host = getDaemonHost({ host: options.host });
+
+  // Validate arguments
+  if (!agentIdArg || agentIdArg.trim().length === 0) {
+    const error: CommandError = {
+      code: "MISSING_AGENT_ID",
+      message: "Agent ID is required",
+      details: "Usage: jagentdesk agent update <id> [--name <name>] [--label <key=value>]",
+    };
+    throw error;
+  }
+
+  const changes = parseAgentChanges(options);
+
+  let client;
+  try {
+    client = await connectToDaemon({ host: options.host });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const error: CommandError = {
+      code: "DAEMON_NOT_RUNNING",
+      message: `Cannot connect to daemon at ${host}: ${message}`,
+      details: "Start the daemon with: jagentdesk daemon start",
+    };
+    throw error;
+  }
+
+  try {
+    const fetchResult = await client.fetchAgent({ agentId: agentIdArg });
+    if (!fetchResult) {
+      const error: CommandError = {
+        code: "AGENT_NOT_FOUND",
+        message: `Agent not found: ${agentIdArg}`,
+        details: 'Use "jagentdesk ls" to list available agents',
+      };
+      throw error;
+    }
+    const agentId = fetchResult.agent.id;
+
+    const appliedChanges = await applyAgentChanges(client, agentId, changes);
+
+    const updatedResult = await client.fetchAgent({ agentId });
+    if (!updatedResult) {
+      throw new Error(`Agent not found after update: ${agentId}`);
+    }
+
+    await client.close();
+
+    return {
+      type: "single",
+      data: toAgentUpdateResult(updatedResult.agent, appliedChanges),
+      schema: updateSchema,
+    };
+  } catch (err) {
+    await client.close().catch(() => {});
+
+    // Re-throw CommandError as-is
+    if (err && typeof err === "object" && "code" in err) {
+      throw err;
+    }
+
+    const message = err instanceof Error ? err.message : String(err);
+    const error: CommandError = {
+      code: "UPDATE_FAILED",
+      message: `Failed to update agent: ${message}`,
+    };
+    throw error;
+  }
+}

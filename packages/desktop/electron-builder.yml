@@ -1,0 +1,88 @@
+npmRebuild: false
+appId: sh.jagentdesk.desktop
+productName: JAgentDesk
+executableName: JAgentDesk
+protocols:
+  - name: JAgentDesk agent link
+    schemes:
+      - jagentdesk
+afterPack: ./scripts/after-pack.js
+afterSign: ./scripts/after-sign.js
+directories:
+  output: release
+files:
+  - dist/**/*
+  - "!**/*.map"
+  - "!node_modules/@jagentdesk/*/src/**"
+  - "!node_modules/@jagentdesk/**/*.test.*"
+  - "!node_modules/@jagentdesk/**/*.spec.*"
+  - "!node_modules/@jagentdesk/server/dist/server/web-ui/**"
+asarUnpack:
+  - dist/daemon/node-entrypoint-runner.js
+  - node_modules/@jagentdesk/server/dist/server/terminal/shell-integration/**/*
+extraResources:
+  - from: ../app/dist
+    to: app-dist
+  - from: ../server/dist/server/go/tsnet-bridge/tailnet-bridge
+    to: bin/tailnet-bridge
+  - from: ../../skills
+    to: skills
+  - from: assets/editor-targets
+    to: editor-target-icons
+publish:
+  provider: github
+  owner: jcode831
+  repo: jagentdesk
+mac:
+  artifactName: "JAgentDesk-${version}-${arch}.${ext}"
+  category: public.app-category.developer-tools
+  icon: assets/icon.icns
+  hardenedRuntime: true
+  notarize: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.inherit.plist
+  extraResources:
+    - from: bin/jagentdesk
+      to: bin/jagentdesk
+    - from: assets/icon.png
+      to: icon.png
+  target:
+    - dmg
+    - zip
+linux:
+  category: Development
+  icon: assets
+  artifactName: "JAgentDesk-${version}-${arch}.${ext}"
+  maintainer: "Mohamed Boudra <hello@moboudra.com>"
+  vendor: "JAgentDesk"
+  extraResources:
+    - from: bin/jagentdesk
+      to: bin/jagentdesk
+  target:
+    - AppImage
+    - deb
+    - rpm
+    - tar.gz
+appImage:
+  # Keep the AppImage filename stable across versions so desktop shortcuts and
+  # the local CLI symlink remain valid after a rebuild.
+  artifactName: "JAgentDesk-${arch}.${ext}"
+win:
+  artifactName: "JAgentDesk-Setup-${version}-${arch}.${ext}"
+  icon: assets/icon.ico
+  extraResources:
+    - from: bin/jagentdesk.cmd
+      to: bin/jagentdesk.cmd
+  target:
+    - target: nsis
+      arch:
+        - x64
+        - arm64
+    - target: zip
+      arch:
+        - x64
+        - arm64
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true

@@ -1,0 +1,126 @@
+import { describe, expect, test } from "vitest";
+import {
+  formatHostRuntimeSection,
+  formatServerInfoSection,
+  redactAppDiagnosticReport,
+} from "./app-diagnostic-report";
+import type { HostRuntimeSnapshot } from "@/runtime/host-runtime";
+import type { HostProfile } from "@/types/host-connection";
+import { defaultHostAppearance } from "@/hosts/appearance";
+
+function makeHost(): HostProfile {
+  return {
+    serverId: "srv-secret",
+    label: "Secret host",
+    appearance: defaultHostAppearance(),
+    lifecycle: {},
+    preferredConnectionId: "direct:secret.example.test:6767",
+    createdAt: "2026-06-25T00:00:00.000Z",
+    updatedAt: "2026-06-25T00:00:00.000Z",
+    connections: [
+      {
+        id: "direct:secret.example.test:6767",
+        type: "directTcp",
+        endpoint: "secret.example.test:6767",
+        useTls: true,
+        password: "tcp-password",
+      },
+      {
+        id: "tailnet:tailnet.secret.test:443",
+        type: "tailnet",
+        tailnetAddress: "tailnet.secret.test:443",
+        useTls: true,
+        daemonPublicKeyB64: "daemon-public-key-secret",
+      },
+      {
+        id: "socket:/tmp/jagentdesk-secret.sock",
+        type: "directSocket",
+        path: "/tmp/jagentdesk-secret.sock",
+      },
+      {
+        id: "pipe:\\\\.\\pipe\\jagentdesk-secret",
+        type: "directPipe",
+        path: "\\\\.\\pipe\\jagentdesk-secret",
+      },
+    ],
+  };
+}
+
+describe("app diagnostics report", () => {
+  test("reports whether the connected daemon is managed by JAgentDesk Desktop", () => {
+    const report = formatServerInfoSection({
+      status: "server_info",
+      serverId: "srv-desktop-managed",
+      hostname: "desktop-host.local",
+      version: "0.1.108",
+      desktopManaged: true,
+    });
+
+    expect(report).toContain("Desktop managed: yes");
+  });
+
+  test("formats connection rows without raw connection details", () => {
+    const host = makeHost();
+    const snapshot: HostRuntimeSnapshot = {
+      serverId: host.serverId,
+      activeConnectionId: "tailnet:tailnet.secret.test:443",
+      activeConnection: {
+        type: "tailnet",
+        endpoint: "tailnet.secret.test:443",
+        display: "tailnet.secret.test:443",
+      },
+      connectionStatus: "online",
+      client: null,
+      lastError: null,
+      lastOnlineAt: "2026-06-25T00:00:00.000Z",
+      agentDirectoryStatus: "ready",
+      agentDirectoryError: null,
+      hasEverLoadedAgentDirectory: true,
+      probeByConnectionId: new Map([
+        ["direct:secret.example.test:6767", { status: "available", latencyMs: 42 }],
+        ["tailnet:tailnet.secret.test:443", { status: "available", latencyMs: 8 }],
+      ]),
+      clientGeneration: 1,
+      connectionEpoch: 1,
+      pendingPairingRequests: [],
+      pendingPairingRequest: null,
+    };
+
+    const report = formatHostRuntimeSection({ host, snapshot });
+
+    expect(report).toContain("direct TCP");
+    expect(report).toContain("tailnet");
+    expect(report).toContain("local socket");
+    expect(report).toContain("local pipe");
+    expect(report).not.toContain("secret.example.test");
+    expect(report).not.toContain("tailnet.secret.test");
+    expect(report).not.toContain("daemon-public-key-secret");
+    expect(report).not.toContain("/tmp/jagentdesk-secret.sock");
+    expect(report).not.toContain("tcp-password");
+  });
+
+  test("redacts saved connection secrets from collected daemon and desktop text", () => {
+    const host = makeHost();
+    const redacted = redactAppDiagnosticReport(
+      [
+        "Desktop app log tail",
+        "secret.example.test:6767",
+        "tailnet.secret.test:443",
+        "daemon-public-key-secret",
+        "/tmp/jagentdesk-secret.sock",
+        "\\\\.\\pipe\\jagentdesk-secret",
+        "password=tcp-password",
+        "jagentdesk://pairing-secret",
+      ].join("\n"),
+      [host],
+    );
+
+    expect(redacted).not.toContain("secret.example.test");
+    expect(redacted).not.toContain("tailnet.secret.test");
+    expect(redacted).not.toContain("daemon-public-key-secret");
+    expect(redacted).not.toContain("/tmp/jagentdesk-secret.sock");
+    expect(redacted).not.toContain("\\\\.\\pipe\\jagentdesk-secret");
+    expect(redacted).not.toContain("tcp-password");
+    expect(redacted).not.toContain("pairing-secret");
+  });
+});

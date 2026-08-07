@@ -1,0 +1,8 @@
+framework module "JAgentDeskTailscale" {
+	header "ref.h"
+    header "Tailscalebridge.objc.h"
+    header "Universe.objc.h"
+    header "JAgentDeskTailscale.h"
+
+    export *
+}

@@ -1,0 +1,174 @@
+export interface HostPortParts {
+  host: string;
+  port: number;
+  isIpv6: boolean;
+}
+
+export interface ConnectionUriParts extends HostPortParts {
+  useTls: boolean;
+}
+
+export interface ParsedConnectionUri extends ConnectionUriParts {
+  password?: string;
+}
+
+function parsePort(portStr: string, context: string): number {
+  const port = Number(portStr);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`${context}: port must be between 1 and 65535`);
+  }
+  return port;
+}
+
+export function parseHostPort(input: string): HostPortParts {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    throw new Error("Host is required");
+  }
+
+  // IPv6: [::1]:6767
+  if (trimmed.startsWith("[")) {
+    const match = trimmed.match(/^\[([^\]]+)\]:(\d{1,5})$/);
+    if (!match) {
+      throw new Error("Invalid host:port (expected [::1]:6767)");
+    }
+    const host = match[1].trim();
+    if (!host) throw new Error("Host is required");
+    const port = parsePort(match[2], "Invalid host:port");
+    return { host, port, isIpv6: true };
+  }
+
+  const match = trimmed.match(/^(.+):(\d{1,5})$/);
+  if (!match) {
+    throw new Error("Invalid host:port (expected localhost:6767)");
+  }
+  const host = match[1].trim();
+  if (!host) throw new Error("Host is required");
+  const port = parsePort(match[2], "Invalid host:port");
+  return { host, port, isIpv6: false };
+}
+
+export function normalizeHostPort(input: string): string {
+  const { host, port, isIpv6 } = parseHostPort(input);
+  return isIpv6 ? `[${host}]:${port}` : `${host}:${port}`;
+}
+
+export function parseConnectionUri(input: string): ParsedConnectionUri {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    throw new Error("Connection URI is required");
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new Error("Invalid connection URI");
+  }
+
+  if (parsed.protocol !== "tcp:") {
+    throw new Error("Connection URI protocol must be tcp:");
+  }
+  if (!parsed.hostname) {
+    throw new Error("Connection URI host is required");
+  }
+  if (!parsed.port) {
+    throw new Error("Connection URI port is required");
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error("Connection URI userinfo is not supported");
+  }
+
+  const isIpv6 = parsed.hostname.startsWith("[") && parsed.hostname.endsWith("]");
+  const host = isIpv6 ? parsed.hostname.slice(1, -1) : parsed.hostname;
+  const password = parsed.searchParams.get("password") || undefined;
+
+  return {
+    host,
+    port: parsePort(parsed.port, "Invalid connection URI"),
+    isIpv6,
+    useTls: parsed.searchParams.get("ssl") === "true",
+    ...(password ? { password } : {}),
+  };
+}
+
+export function serializeConnectionUri(parts: ConnectionUriParts): string {
+  return createConnectionUri(parts).toString();
+}
+
+export function serializeConnectionUriForStorage(parts: ParsedConnectionUri): string {
+  const url = createConnectionUri(parts);
+  if (parts.password) {
+    url.searchParams.set("password", parts.password);
+  }
+  return url.toString();
+}
+
+function createConnectionUri(parts: ConnectionUriParts): URL {
+  const hostPart = parts.isIpv6 ? `[${parts.host}]` : parts.host;
+  const url = new URL(`tcp://${hostPart}:${parts.port}`);
+  if (parts.useTls) {
+    url.searchParams.set("ssl", "true");
+  }
+  return url;
+}
+
+export function normalizeLoopbackToLocalhost(endpoint: string): string {
+  const { host, port, isIpv6 } = parseHostPort(endpoint);
+  if (host === "127.0.0.1" || (!isIpv6 && host === "0.0.0.0")) {
+    return `localhost:${port}`;
+  }
+  if (isIpv6 && (host === "::1" || host === "::")) {
+    return `localhost:${port}`;
+  }
+  return endpoint;
+}
+
+export function deriveLabelFromEndpoint(endpoint: string): string {
+  try {
+    const { host } = parseHostPort(endpoint);
+    return host || "Unnamed Host";
+  } catch {
+    return "Unnamed Host";
+  }
+}
+
+export interface WebSocketUrlOptions {
+  useTls: boolean;
+}
+
+export function buildDaemonWebSocketUrl(endpoint: string, opts: WebSocketUrlOptions): string {
+  const { host, port, isIpv6 } = parseHostPort(endpoint);
+  const protocol = opts.useTls ? "wss" : "ws";
+  const hostPart = isIpv6 ? `[${host}]` : host;
+  return new URL(`${protocol}://${hostPart}:${port}/ws`).toString();
+}
+
+export function extractHostPortFromWebSocketUrl(wsUrl: string): string {
+  const parsed = new URL(wsUrl);
+  if (parsed.protocol !== "ws:" && parsed.protocol !== "wss:") {
+    throw new Error("Invalid WebSocket URL protocol");
+  }
+  if (parsed.pathname.replace(/\/+$/, "") !== "/ws") {
+    throw new Error("Invalid WebSocket URL (expected /ws path)");
+  }
+
+  const host = parsed.hostname;
+  let port: number;
+  if (parsed.port) {
+    port = Number(parsed.port);
+  } else if (parsed.protocol === "wss:") {
+    port = 443;
+  } else {
+    port = 80;
+  }
+  if (!host) {
+    throw new Error("Invalid WebSocket URL (missing hostname)");
+  }
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error("Invalid WebSocket URL (invalid port)");
+  }
+
+  const isIpv6 = host.includes(":") && !host.startsWith("[") && !host.endsWith("]");
+  return isIpv6 ? `[${host}]:${port}` : `${host}:${port}`;
+}

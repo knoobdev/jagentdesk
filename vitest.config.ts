@@ -1,0 +1,58 @@
+import fs from "node:fs";
+import path from "node:path";
+import { configDefaults, defineConfig } from "vitest/config";
+
+const appDir = path.resolve(__dirname, "packages/app");
+const appNodeModules = path.resolve(appDir, "node_modules");
+const rootNodeModules = path.resolve(__dirname, "node_modules");
+const resolvePackageEntry = (packageName: string) => {
+  const appPackagePath = path.resolve(appNodeModules, packageName);
+  return fs.existsSync(appPackagePath)
+    ? appPackagePath
+    : path.resolve(rootNodeModules, packageName);
+};
+
+export default defineConfig({
+  resolve: {
+    extensions: [
+      ".web.mjs",
+      ".web.js",
+      ".web.mts",
+      ".web.ts",
+      ".web.jsx",
+      ".web.tsx",
+      ".mjs",
+      ".js",
+      ".mts",
+      ".ts",
+      ".jsx",
+      ".tsx",
+      ".json",
+    ],
+    alias: [
+      { find: "@", replacement: path.resolve(appDir, "src") },
+      { find: "@server", replacement: path.resolve(__dirname, "packages/server/src") },
+      {
+        find: "react-native",
+        replacement: path.resolve(rootNodeModules, "react-native-web/dist/index.js"),
+      },
+      { find: "react", replacement: resolvePackageEntry("react") },
+      { find: "react-dom", replacement: resolvePackageEntry("react-dom") },
+      {
+        find: /^@xterm\/addon-ligatures\/lib\/addon-ligatures\.mjs$/,
+        replacement: path.resolve(appDir, "test-stubs/xterm-addon-ligatures.ts"),
+      },
+      {
+        find: /^@xterm\/addon-ligatures$/,
+        replacement: path.resolve(appDir, "test-stubs/xterm-addon-ligatures.ts"),
+      },
+    ],
+  },
+  test: {
+    // Fake-timer suites freeze p-throttle's clock, so a real per-second cap deadlocks them.
+    env: {
+      JAGENTDESK_GIT_MAX_PROCESSES_PER_SECOND: "10000",
+    },
+    exclude: [...configDefaults.exclude, "**/.claude/**", "**/.dev/**", "**/scratchpad/**"],
+  },
+});

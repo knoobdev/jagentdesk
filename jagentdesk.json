@@ -1,0 +1,32 @@
+{
+  "worktree": {
+    "setup": [
+      "npm ci",
+      "node ./scripts/seed-ios-native-cache.mjs",
+      "node ./scripts/seed-worktree-dev-state.mjs",
+      "npm run build:server",
+      "npm run build --workspace=@jagentdesk/expo-two-way-audio"
+    ]
+  },
+  "scripts": {
+    "daemon": {
+      "type": "service",
+      "command": "JAGENTDESK_DEV_MANAGED_HOME=1 JAGENTDESK_DEV_ROOT=\"${JAGENTDESK_WORKTREE_PATH:-$PWD}\" JAGENTDESK_HOME=\"${JAGENTDESK_WORKTREE_PATH:-$PWD}/.dev/jagentdesk-home\" JAGENTDESK_SKIP_DEV_SERVER_BUILD=1 JAGENTDESK_LISTEN=0.0.0.0:${JAGENTDESK_PORT:-6768} ./scripts/dev-daemon.sh"
+    },
+    "app": {
+      "type": "service",
+      "command": "JAGENTDESK_DEV_MANAGED_HOME=1 JAGENTDESK_DEV_ROOT=\"${JAGENTDESK_WORKTREE_PATH:-$PWD}\" JAGENTDESK_HOME=\"${JAGENTDESK_WORKTREE_PATH:-$PWD}/.dev/jagentdesk-home\" JAGENTDESK_LISTEN=0.0.0.0:${JAGENTDESK_SERVICE_DAEMON_PORT:-6768} JAGENTDESK_DEV_DAEMON_ENDPOINT=localhost:${JAGENTDESK_SERVICE_DAEMON_PORT:-6768} EXPO_PORT=${JAGENTDESK_PORT:-} ./scripts/dev-app.sh"
+    },
+    "desktop": {
+      "type": "service",
+      "command": "JAGENTDESK_DEV_MANAGED_HOME=1 JAGENTDESK_DEV_ROOT=\"${JAGENTDESK_WORKTREE_PATH:-$PWD}\" JAGENTDESK_HOME=\"${JAGENTDESK_WORKTREE_PATH:-$PWD}/.dev/jagentdesk-home\" JAGENTDESK_LISTEN=0.0.0.0:${JAGENTDESK_SERVICE_DAEMON_PORT:-6768} JAGENTDESK_DEV_DAEMON_ENDPOINT=localhost:${JAGENTDESK_SERVICE_DAEMON_PORT:-6768} EXPO_PORT=${JAGENTDESK_PORT:-} npm run dev --workspace=@jagentdesk/desktop"
+    },
+    "ios-simulator": {
+      "type": "service",
+      "command": "JAGENTDESK_DEV_MANAGED_HOME=1 JAGENTDESK_DEV_ROOT=\"$PWD\" JAGENTDESK_HOME=\"$PWD/.dev/jagentdesk-home\" JAGENTDESK_LISTEN=0.0.0.0:${JAGENTDESK_SERVICE_DAEMON_PORT} JAGENTDESK_DEV_DAEMON_ENDPOINT=localhost:${JAGENTDESK_SERVICE_DAEMON_PORT} ./scripts/jagentdesk-ios-simulator-service.sh"
+    },
+    "typecheck": {
+      "command": "npm run typecheck"
+    }
+  }
+}

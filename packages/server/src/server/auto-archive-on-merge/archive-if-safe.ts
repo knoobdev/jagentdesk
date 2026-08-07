@@ -1,0 +1,161 @@
+import type { Logger } from "pino";
+
+import type { AgentManager } from "../agent/agent-manager.js";
+import type { AgentStorage } from "../agent/agent-storage.js";
+import type { DaemonConfigStore } from "../daemon-config-store.js";
+import {
+  archiveByScope,
+  type ActiveWorkspaceRef,
+  killTerminalsForWorkspace,
+  resolveWorkspaceIdAtPath,
+} from "../workspace-archive-service.js";
+import type {
+  WorkspaceGitRuntimeSnapshot,
+  WorkspaceGitServiceImpl,
+} from "../workspace-git-service.js";
+import type { ForgeService } from "../../services/forge-service.js";
+import type { TerminalManager } from "../../terminal/terminal-manager.js";
+import { isJAgentDeskOwnedWorktreeCwd } from "../../utils/worktree.js";
+import type { WorkspaceArchiveContext } from "../workspace-registry.js";
+
+export interface AutoArchiveArchiveOptions {
+  jagentdeskHome: string;
+  jagentdeskWorktreesBaseRoot?: string;
+  daemonConfigStore: DaemonConfigStore;
+  workspaceGitService: WorkspaceGitServiceImpl;
+  github: ForgeService;
+  agentManager: AgentManager;
+  agentStorage: AgentStorage;
+  terminalManager: TerminalManager;
+  findWorkspaceIdForCwd: (cwd: string) => Promise<string | null>;
+  listActiveWorkspaces: () => Promise<ActiveWorkspaceRef[]>;
+  getAutoArchivedChangeRequestUrl: (workspaceId: string) => Promise<string | null>;
+  archiveWorkspaceRecord: (workspaceId: string, context?: WorkspaceArchiveContext) => Promise<void>;
+  markWorkspaceArchiving: (workspaceIds: Iterable<string>, archivingAt: string) => void;
+  clearWorkspaceArchiving: (workspaceIds: Iterable<string>) => void;
+  emitWorkspaceUpdatesForWorkspaceIds: (workspaceIds: Iterable<string>) => Promise<void>;
+}
+
+export interface ArchiveIfSafeDependencies {
+  archiveByScope: typeof archiveByScope;
+  resolveWorkspaceIdAtPath: typeof resolveWorkspaceIdAtPath;
+  isJAgentDeskOwnedWorktreeCwd: typeof isJAgentDeskOwnedWorktreeCwd;
+  killTerminalsForWorkspace: typeof killTerminalsForWorkspace;
+}
+
+const defaultDependencies: ArchiveIfSafeDependencies = {
+  archiveByScope,
+  resolveWorkspaceIdAtPath,
+  isJAgentDeskOwnedWorktreeCwd,
+  killTerminalsForWorkspace,
+};
+
+export async function archiveIfSafe(input: {
+  cwd: string;
+  pullRequest: WorkspaceGitRuntimeSnapshot["forge"]["pullRequest"];
+  inFlight: Set<string>;
+  options: AutoArchiveArchiveOptions;
+  log: Logger;
+  deps?: ArchiveIfSafeDependencies;
+}): Promise<void> {
+  const { cwd, pullRequest, inFlight, options, log } = input;
+  const deps = input.deps ?? defaultDependencies;
+
+  if (!pullRequest?.isMerged) {
+    return;
+  }
+  if (options.daemonConfigStore.get().autoArchiveAfterMerge !== true) {
+    return;
+  }
+  if (inFlight.has(cwd)) {
+    return;
+  }
+
+  inFlight.add(cwd);
+  try {
+    let snapshot: Awaited<ReturnType<typeof options.workspaceGitService.getSnapshot>> | null;
+    try {
+      snapshot = await options.workspaceGitService.getSnapshot(cwd, {
+        reason: "auto-archive-on-merge",
+      });
+    } catch (error) {
+      log.warn({ err: error, cwd }, "Failed to read snapshot for auto-archive; skipping");
+      return;
+    }
+    if (!snapshot) {
+      return;
+    }
+
+    if (snapshot.git.isDirty === true) {
+      return;
+    }
+    if (typeof snapshot.git.aheadOfOrigin === "number" && snapshot.git.aheadOfOrigin > 0) {
+      return;
+    }
+
+    const ownership = await deps.isJAgentDeskOwnedWorktreeCwd(cwd, {
+      jagentdeskHome: options.jagentdeskHome,
+      worktreesRoot: options.jagentdeskWorktreesBaseRoot,
+    });
+    if (!ownership.allowed) {
+      return;
+    }
+
+    try {
+      const workspaceId = await deps.resolveWorkspaceIdAtPath(
+        {
+          findWorkspaceIdForCwd: options.findWorkspaceIdForCwd,
+          listActiveWorkspaces: options.listActiveWorkspaces,
+        },
+        cwd,
+      );
+      if (!workspaceId) {
+        log.warn({ cwd }, "Auto-archive could not resolve a workspace for cwd; skipping");
+        return;
+      }
+      const autoArchivedChangeRequestUrl =
+        await options.getAutoArchivedChangeRequestUrl(workspaceId);
+      if (autoArchivedChangeRequestUrl === pullRequest.url) {
+        return;
+      }
+
+      await deps.archiveByScope(
+        {
+          jagentdeskHome: options.jagentdeskHome,
+          jagentdeskWorktreesBaseRoot: options.jagentdeskWorktreesBaseRoot,
+          github: options.github,
+          workspaceGitService: options.workspaceGitService,
+          agentManager: options.agentManager,
+          agentStorage: options.agentStorage,
+          findWorkspaceIdForCwd: options.findWorkspaceIdForCwd,
+          listActiveWorkspaces: options.listActiveWorkspaces,
+          archiveWorkspaceRecord: (workspaceIdToArchive) =>
+            options.archiveWorkspaceRecord(workspaceIdToArchive, {
+              autoArchivedChangeRequestUrl: pullRequest.url,
+            }),
+          emitWorkspaceUpdatesForWorkspaceIds: options.emitWorkspaceUpdatesForWorkspaceIds,
+          markWorkspaceArchiving: options.markWorkspaceArchiving,
+          clearWorkspaceArchiving: options.clearWorkspaceArchiving,
+          killTerminalsForWorkspace: (workspaceIdToKill) =>
+            deps.killTerminalsForWorkspace(
+              {
+                terminalManager: options.terminalManager,
+                sessionLogger: log,
+              },
+              workspaceIdToKill,
+            ),
+          sessionLogger: log,
+        },
+        {
+          scope: { kind: "workspace", workspaceId },
+          requestId: "auto-archive-on-merge",
+        },
+      );
+      log.info({ cwd }, "Auto-archived worktree after PR merge");
+    } catch (error) {
+      log.warn({ err: error, cwd }, "Auto-archive after merge failed");
+    }
+  } finally {
+    inFlight.delete(cwd);
+  }
+}

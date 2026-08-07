@@ -1,0 +1,12 @@
+appId: app.jagentdesk.mobile
+
+---
+- launchApp:
+    clearState: true
+- assertVisible: "Connect to JAgentDesk"
+- tapOn:
+    id: pair-start-scan
+- extendedWaitUntil:
+    visible: "Scan QR"
+    timeout: 15000
+- takeScreenshot: pair-scan-camera-surface

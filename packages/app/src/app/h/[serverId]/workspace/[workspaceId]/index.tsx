@@ -1,0 +1,306 @@
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useNavigation } from "@react-navigation/native";
+import { StyleSheet, View } from "react-native";
+import { useGlobalSearchParams, useLocalSearchParams, useRootNavigationState } from "expo-router";
+import { HostRouteBootstrapBoundary } from "@/components/host-route-bootstrap-boundary";
+import { RetainedPanel } from "@/components/retained-panel";
+import {
+  type ActiveWorkspaceSelection,
+  useActiveWorkspaceSelection,
+} from "@/stores/navigation-active-workspace-store";
+import { useHasHydratedWorkspaces, useWorkspaceExists } from "@/stores/session-store-hooks";
+import type { WorkspaceTabTarget } from "@/workspace-tabs/model";
+import { WorkspaceScreen } from "@/screens/workspace/workspace-screen";
+import { useWorkspaceLayoutStoreHydrated } from "@/stores/workspace-layout-store";
+import {
+  areWorkspaceSelectionListsEqual,
+  areWorkspaceSelectionsEqual,
+  getWorkspaceSelectionKey,
+  orderWorkspaceSelectionsForStableRender,
+  pruneMountedWorkspaceSelections,
+  resolveWorkspaceDeckEntries,
+  shouldKeepWorkspaceDeckEntryMounted,
+  WORKSPACE_DECK_MAX_MOUNTED_WORKSPACES,
+} from "@/screens/workspace/workspace-deck-retention";
+import {
+  decodeWorkspaceIdFromPathSegment,
+  parseWorkspaceOpenIntent,
+  type WorkspaceOpenIntent,
+} from "@/utils/host-routes";
+import {
+  replaceBrowserRouteWithCanonicalHostWorkspaceRoute,
+  stripHostWorkspaceRouteEchoSearchFromBrowserUrlAfterCommit,
+} from "@/utils/host-route-browser";
+import { prepareWorkspaceTab } from "@/utils/workspace-navigation";
+import { isWeb } from "@/constants/platform";
+
+function getParamValue(value: string | string[] | undefined): string {
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  if (Array.isArray(value)) {
+    const firstValue = value[0];
+    return typeof firstValue === "string" ? firstValue.trim() : "";
+  }
+  return "";
+}
+
+function getOpenIntentTarget(openIntent: WorkspaceOpenIntent): WorkspaceTabTarget {
+  if (openIntent.kind === "agent") {
+    return { kind: "agent", agentId: openIntent.agentId };
+  }
+  if (openIntent.kind === "terminal") {
+    return { kind: "terminal", terminalId: openIntent.terminalId };
+  }
+  if (openIntent.kind === "file") {
+    return { kind: "file", path: openIntent.path };
+  }
+  if (openIntent.kind === "setup") {
+    return { kind: "setup", workspaceId: openIntent.workspaceId };
+  }
+  return { kind: "draft", draftId: openIntent.draftId };
+}
+
+function stripOpenSearchParamFromBrowserUrl() {
+  if (!isWeb || typeof window === "undefined") {
+    return;
+  }
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has("open")) {
+    return;
+  }
+  url.searchParams.delete("open");
+  replaceBrowserRouteWithCanonicalHostWorkspaceRoute(`${url.pathname}${url.search}${url.hash}`);
+}
+
+function clearConsumedOpenIntent(input: {
+  navigation: { setParams: (params: { open?: string | undefined }) => void };
+}) {
+  input.navigation.setParams({ open: undefined });
+  if (isWeb) {
+    stripOpenSearchParamFromBrowserUrl();
+  }
+}
+
+export default function HostWorkspaceIndexRoute() {
+  return (
+    <HostRouteBootstrapBoundary>
+      <HostWorkspaceRouteContent />
+    </HostRouteBootstrapBoundary>
+  );
+}
+
+function HostWorkspaceRouteContent() {
+  const navigation = useNavigation();
+  const rootNavigationState = useRootNavigationState();
+  const hasHydratedWorkspaceLayoutStore = useWorkspaceLayoutStoreHydrated();
+  const consumedIntentRef = useRef<string | null>(null);
+  const [intentConsumed, setIntentConsumed] = useState(false);
+  const params = useLocalSearchParams<{
+    serverId?: string | string[];
+    workspaceId?: string | string[];
+  }>();
+  const globalParams = useGlobalSearchParams<{
+    open?: string | string[];
+  }>();
+  const serverId = getParamValue(params.serverId);
+  const workspaceValue = getParamValue(params.workspaceId);
+  const workspaceId = workspaceValue
+    ? (decodeWorkspaceIdFromPathSegment(workspaceValue) ?? "")
+    : "";
+  const openValue = getParamValue(globalParams.open);
+  const hasHydratedWorkspaces = useHasHydratedWorkspaces(serverId);
+  const workspaceExists = useWorkspaceExists(serverId, workspaceId);
+  const openIntent = useMemo(() => parseWorkspaceOpenIntent(openValue), [openValue]);
+  const recoveryAgentId = openIntent?.kind === "agent" ? openIntent.agentId : null;
+  const isAgentOpenIntent = recoveryAgentId !== null;
+  const isOpenIntentWaitingForWorkspace = Boolean(
+    isAgentOpenIntent && (!hasHydratedWorkspaces || !workspaceExists),
+  );
+  useEffect(() => {
+    if (!serverId || !workspaceId) {
+      return;
+    }
+    stripHostWorkspaceRouteEchoSearchFromBrowserUrlAfterCommit();
+  }, [serverId, workspaceId]);
+
+  useEffect(() => {
+    if (!openValue) {
+      return;
+    }
+    if (!rootNavigationState?.key) {
+      return;
+    }
+    if (!hasHydratedWorkspaceLayoutStore) {
+      return;
+    }
+    if (isOpenIntentWaitingForWorkspace) {
+      return;
+    }
+
+    const consumptionKey = `${serverId}:${workspaceId}:${openValue}`;
+    if (consumedIntentRef.current === consumptionKey) {
+      clearConsumedOpenIntent({
+        navigation: navigation as unknown as {
+          setParams: (params: { open?: string | undefined }) => void;
+        },
+      });
+      setIntentConsumed(true);
+      return;
+    }
+    consumedIntentRef.current = consumptionKey;
+
+    if (openIntent) {
+      prepareWorkspaceTab({
+        serverId,
+        workspaceId,
+        target: getOpenIntentTarget(openIntent),
+        pin: openIntent.kind === "agent",
+      });
+    }
+
+    // Expo Router's replace ignores query-param-only changes (findDivergentState
+    // skips search params). Strip ?open from the browser URL directly so the
+    // address bar reflects the clean workspace route.
+    clearConsumedOpenIntent({
+      navigation: navigation as unknown as {
+        setParams: (params: { open?: string | undefined }) => void;
+      },
+    });
+
+    setIntentConsumed(true);
+  }, [
+    hasHydratedWorkspaceLayoutStore,
+    isOpenIntentWaitingForWorkspace,
+    navigation,
+    openIntent,
+    openValue,
+    rootNavigationState?.key,
+    serverId,
+    workspaceId,
+  ]);
+
+  if (
+    openValue &&
+    !isOpenIntentWaitingForWorkspace &&
+    (!intentConsumed || !hasHydratedWorkspaceLayoutStore)
+  ) {
+    return null;
+  }
+
+  return <WorkspaceDeck recoveryRequested={isAgentOpenIntent} recoveryAgentId={recoveryAgentId} />;
+}
+
+function WorkspaceDeck({
+  recoveryRequested,
+  recoveryAgentId,
+}: {
+  recoveryRequested: boolean;
+  recoveryAgentId: string | null;
+}) {
+  const activeSelection = useActiveWorkspaceSelection();
+  const [mountedSelections, setMountedSelections] = useState<ActiveWorkspaceSelection[]>(() =>
+    activeSelection ? [activeSelection] : [],
+  );
+  const unmountWorkspaceSelection = useCallback((selection: ActiveWorkspaceSelection) => {
+    setMountedSelections((current) =>
+      current.filter(
+        (mountedSelection) => !areWorkspaceSelectionsEqual(mountedSelection, selection),
+      ),
+    );
+  }, []);
+
+  const nextMountedSelections = useMemo(
+    () =>
+      pruneMountedWorkspaceSelections({
+        currentSelections: mountedSelections,
+        activeSelection,
+        maxMountedWorkspaces: WORKSPACE_DECK_MAX_MOUNTED_WORKSPACES,
+      }),
+    [activeSelection, mountedSelections],
+  );
+  const renderedSelections = useMemo(
+    () => orderWorkspaceSelectionsForStableRender(nextMountedSelections),
+    [nextMountedSelections],
+  );
+  const renderedEntries = useMemo(
+    () => resolveWorkspaceDeckEntries({ selections: renderedSelections, activeSelection }),
+    [activeSelection, renderedSelections],
+  );
+
+  useLayoutEffect(() => {
+    if (!areWorkspaceSelectionListsEqual(mountedSelections, nextMountedSelections)) {
+      setMountedSelections(nextMountedSelections);
+    }
+  }, [mountedSelections, nextMountedSelections]);
+
+  return (
+    <View style={styles.deck}>
+      {renderedEntries.map(({ selection, active }) => {
+        return (
+          <WorkspaceDeckEntry
+            key={getWorkspaceSelectionKey(selection)}
+            selection={selection}
+            active={active}
+            recoveryRequested={recoveryRequested}
+            recoveryAgentId={recoveryAgentId}
+            onUnmountInactive={unmountWorkspaceSelection}
+          />
+        );
+      })}
+    </View>
+  );
+}
+
+function WorkspaceDeckEntry({
+  selection,
+  active,
+  recoveryRequested,
+  recoveryAgentId,
+  onUnmountInactive,
+}: {
+  selection: ActiveWorkspaceSelection;
+  active: boolean;
+  recoveryRequested: boolean;
+  recoveryAgentId: string | null;
+  onUnmountInactive: (selection: ActiveWorkspaceSelection) => void;
+}) {
+  const hasHydratedWorkspaces = useHasHydratedWorkspaces(selection.serverId);
+  const workspaceExists = useWorkspaceExists(selection.serverId, selection.workspaceId);
+  const shouldKeepMounted = shouldKeepWorkspaceDeckEntryMounted({
+    isActive: active,
+    hasHydratedWorkspaces,
+    workspaceExists,
+  });
+
+  useEffect(() => {
+    if (!shouldKeepMounted) {
+      onUnmountInactive(selection);
+    }
+  }, [onUnmountInactive, selection, shouldKeepMounted]);
+
+  if (!shouldKeepMounted) {
+    return null;
+  }
+
+  return (
+    <RetainedPanel
+      active={active}
+      testID={`workspace-deck-entry-${selection.serverId}:${selection.workspaceId}`}
+    >
+      <WorkspaceScreen
+        serverId={selection.serverId}
+        workspaceId={selection.workspaceId}
+        isRouteFocused={active}
+        recoveryRequested={active && recoveryRequested}
+        recoveryAgentId={active ? recoveryAgentId : null}
+      />
+    </RetainedPanel>
+  );
+}
+
+const styles = StyleSheet.create({
+  deck: {
+    flex: 1,
+  },
+});

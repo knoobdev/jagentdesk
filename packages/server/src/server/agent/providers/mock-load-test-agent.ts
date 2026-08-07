@@ -1,0 +1,1401 @@
+import { randomUUID } from "node:crypto";
+import type { Logger } from "pino";
+import type {
+  AgentCapabilityFlags,
+  AgentClient,
+  AgentFeature,
+  AgentLaunchContext,
+  AgentMode,
+  AgentModelDefinition,
+  AgentPersistenceHandle,
+  AgentPermissionRequest,
+  AgentPermissionResponse,
+  AgentPermissionResult,
+  AgentPromptInput,
+  AgentProvider,
+  AgentRunOptions,
+  AgentRunResult,
+  AgentRuntimeInfo,
+  AgentSession,
+  AgentSessionConfig,
+  AgentStreamEvent,
+  AgentTimelineItem,
+  FetchCatalogOptions,
+  ImportableProviderSession,
+  ImportProviderSessionContext,
+  ImportProviderSessionInput,
+  ProviderCatalog,
+  ToolCallDetail,
+  ToolCallTimelineItem,
+} from "../agent-sdk-types.js";
+import { importSessionFromPersistence } from "../provider-session-import.js";
+import { getAgentProviderDefinition } from "@jagentdesk/protocol/provider-manifest";
+
+export const MOCK_LOAD_TEST_PROVIDER_ID = "mock";
+export const MOCK_LOAD_TEST_DEFAULT_MODEL_ID = "five-minute-stream";
+export const MOCK_LOAD_TEST_HANDLED_COMMAND = "/mock handled-command";
+const MOCK_LOAD_TEST_MODE_ID = "load-test";
+const MOCK_LOAD_TEST_DURATION_MS = 5 * 60 * 1000;
+const MOCK_LOAD_TEST_INTERVAL_MS = 40;
+const ONE_PIXEL_PNG_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl4Kj8AAAAASUVORK5CYII=";
+
+const CAPABILITIES: AgentCapabilityFlags = {
+  supportsStreaming: true,
+  supportsSessionPersistence: true,
+  supportsSessionListing: true,
+  supportsDynamicModes: false,
+  supportsMcpServers: false,
+  supportsReasoningStream: true,
+  supportsToolInvocations: true,
+  supportsRewindConversation: true,
+  supportsRewindFiles: true,
+  supportsRewindBoth: true,
+};
+
+const MODELS: AgentModelDefinition[] = [
+  {
+    provider: MOCK_LOAD_TEST_PROVIDER_ID,
+    id: MOCK_LOAD_TEST_DEFAULT_MODEL_ID,
+    label: "Five minute stream",
+    description:
+      "Realistic agent flow streamed as sub-word tokens for five minutes (good for scroll/coalesce debugging).",
+    isDefault: true,
+    metadata: {
+      durationMs: MOCK_LOAD_TEST_DURATION_MS,
+      intervalMs: MOCK_LOAD_TEST_INTERVAL_MS,
+    },
+  },
+  {
+    provider: MOCK_LOAD_TEST_PROVIDER_ID,
+    id: "thirty-minute-stream",
+    label: "Thirty minute stream",
+    description: "Long-running realistic stream for extended scroll-anchor debugging.",
+    metadata: {
+      durationMs: 30 * 60 * 1000,
+      intervalMs: 50,
+    },
+  },
+  {
+    provider: MOCK_LOAD_TEST_PROVIDER_ID,
+    id: "one-minute-stream",
+    label: "One minute stream",
+    description: "Shorter realistic stream for quick manual checks.",
+    metadata: {
+      durationMs: 60_000,
+      intervalMs: 40,
+    },
+  },
+  {
+    provider: MOCK_LOAD_TEST_PROVIDER_ID,
+    id: "ten-second-stream",
+    label: "Ten second stream",
+    description: "Fast realistic stream for tests and smoke checks.",
+    metadata: {
+      durationMs: 10_000,
+      intervalMs: 5,
+    },
+  },
+];
+
+interface ActiveTurn {
+  turnId: string;
+  assistantMessageId: string;
+  prompt: AgentPromptInput;
+  startedAt: number;
+  cycle: number;
+  durationMs: number;
+  intervalMs: number;
+  timer: ReturnType<typeof setTimeout> | null;
+  resolve: (result: AgentRunResult) => void;
+  completed: Promise<AgentRunResult>;
+  queue: CycleEvent[];
+  emittedTokens: number;
+  turnStarted: boolean;
+}
+
+type CycleEvent =
+  | { kind: "assistant_token"; text: string }
+  | { kind: "reasoning_token"; text: string }
+  | { kind: "tool_running"; callId: string; name: string; detail: ToolCallDetail }
+  | { kind: "tool_completed"; callId: string; name: string; detail: ToolCallDetail }
+  | { kind: "usage" };
+
+interface LargeAgentStreamPayloadRequest {
+  bytes: number;
+  kind: "diff" | "file" | "image";
+}
+
+interface AgentStreamStressRequest {
+  count: number;
+  coalesced: boolean;
+}
+
+interface MockQuestionOption {
+  label: string;
+  description?: string;
+}
+
+interface MockQuestionPromptQuestion {
+  question: string;
+  header: string;
+  options: MockQuestionOption[];
+  multiSelect: boolean;
+  allowOther?: boolean;
+  allowEmpty?: boolean;
+  placeholder?: string;
+  dismissLabel?: string;
+}
+
+interface MockQuestionPromptRequest {
+  questions: MockQuestionPromptQuestion[];
+}
+
+function shouldEmitPlanApprovalPrompt(prompt: AgentPromptInput): boolean {
+  return /emit\s+(?:a\s+)?synthetic\s+plan\s+approval/i.test(promptToText(prompt));
+}
+
+function shouldEmitTurnFailure(prompt: AgentPromptInput): boolean {
+  return /emit\s+(?:a\s+)?synthetic\s+turn\s+failure/i.test(promptToText(prompt));
+}
+
+function parseSettledAssistantImageMarkdown(prompt: AgentPromptInput): string | null {
+  const match = /^emit settled assistant image markdown:\s*(!\[[^\]\r\n]*\]\(.+\))\s*$/i.exec(
+    promptToText(prompt),
+  );
+  return match?.[1] ?? null;
+}
+
+function parseMockQuestionPrompt(prompt: AgentPromptInput): MockQuestionPromptRequest | null {
+  const text = promptToText(prompt);
+  if (!/emit\s+(?:a\s+)?synthetic\s+questions?/i.test(text)) {
+    return null;
+  }
+
+  if (/free[-\s]?write|freeform|text[-\s]?only/i.test(text)) {
+    return {
+      questions: [
+        {
+          question: "What is the GitHub private repo URL to push to?",
+          header: "repoUrl",
+          options: [],
+          multiSelect: false,
+          placeholder: "git@github.com:user/repo.git",
+        },
+        {
+          question: "What should the first commit message be?",
+          header: "commitMessage",
+          options: [],
+          multiSelect: false,
+          placeholder: "Initial commit",
+        },
+      ],
+    };
+  }
+
+  return {
+    questions: [
+      {
+        question: "Which surface should this apply to?",
+        header: "surface",
+        options: [{ label: "App" }, { label: "Desktop" }],
+        multiSelect: false,
+      },
+      {
+        question: "Which rollout should we use?",
+        header: "rollout",
+        options: [{ label: "Immediately" }, { label: "Behind feature flag" }],
+        multiSelect: false,
+      },
+      {
+        question: "What success criteria should we use?",
+        header: "success",
+        options: [],
+        multiSelect: false,
+        placeholder: "Describe success...",
+      },
+    ],
+  };
+}
+
+function resolveModelProfile(modelId: string | null | undefined): {
+  modelId: string;
+  durationMs: number;
+  intervalMs: number;
+} {
+  const model = MODELS.find((entry) => entry.id === modelId) ?? MODELS[0];
+  const metadata = model.metadata ?? {};
+  return {
+    modelId: model.id,
+    durationMs:
+      typeof metadata.durationMs === "number" ? metadata.durationMs : MOCK_LOAD_TEST_DURATION_MS,
+    intervalMs:
+      typeof metadata.intervalMs === "number" ? metadata.intervalMs : MOCK_LOAD_TEST_INTERVAL_MS,
+  };
+}
+
+function promptToText(prompt: AgentPromptInput): string {
+  if (typeof prompt === "string") {
+    return prompt;
+  }
+  return prompt
+    .flatMap((block) => (block.type === "text" ? [block.text] : []))
+    .join("\n")
+    .trim();
+}
+
+function parseUserMessageDelayMs(prompt: AgentPromptInput): number {
+  const match = /delay synthetic user message by (\d+)ms/i.exec(promptToText(prompt));
+  const delayMs = Number(match?.[1] ?? 0);
+  return Number.isSafeInteger(delayMs) ? Math.min(delayMs, 2_000) : 0;
+}
+
+function shouldWithholdUserMessageUntilInterrupt(prompt: AgentPromptInput): boolean {
+  return /withhold synthetic user message until interrupted/i.test(promptToText(prompt));
+}
+
+function shouldEmitUserMessageBeforeTurnAcceptance(prompt: AgentPromptInput): boolean {
+  return /emit synthetic user message before accepting turn/i.test(promptToText(prompt));
+}
+
+function parseAssistantMessagesBeforeUserMessage(prompt: AgentPromptInput): number | null {
+  const match = /emit (\d+) assistant messages before synthetic user message/i.exec(
+    promptToText(prompt),
+  );
+  const count = Number(match?.[1]);
+  return Number.isSafeInteger(count) && count > 0 ? Math.min(count, 500) : null;
+}
+
+function parseLargeAgentStreamPayloadPrompt(
+  prompt: AgentPromptInput,
+): LargeAgentStreamPayloadRequest | null {
+  const text = promptToText(prompt);
+  const match =
+    /emit\s+(\d+)\s+(?:byte\s+)?(?:large\s+)?(diff|file|image)\s+agent stream (?:update|payload)/i.exec(
+      text,
+    );
+  if (!match) {
+    return null;
+  }
+  const bytes = Number(match[1]);
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return null;
+  }
+  const kindValue = match[2]?.toLowerCase();
+  if (kindValue !== "diff" && kindValue !== "file" && kindValue !== "image") {
+    return null;
+  }
+  return {
+    bytes: Math.min(bytes, 1_000_000),
+    kind: kindValue,
+  };
+}
+
+function parseAgentStreamStressPrompt(prompt: AgentPromptInput): AgentStreamStressRequest | null {
+  const text = promptToText(prompt);
+  const match = /emit\s+(\d+)\s+(coalesced\s+)?agent stream updates/i.exec(text);
+  if (!match) {
+    return null;
+  }
+  const count = Number(match[1]);
+  if (!Number.isFinite(count) || count <= 0) {
+    return null;
+  }
+  return {
+    count: Math.min(count, 5_000),
+    coalesced: Boolean(match[2]),
+  };
+}
+
+function parseStructuredBranchNamePrompt(
+  prompt: AgentPromptInput,
+): { title: string; branch: string } | null {
+  const text = promptToText(prompt);
+  const hasBranchNamePrompt =
+    text.includes("Generate a title and a git branch name for a coding agent") &&
+    (text.includes("Return JSON only with fields 'title' and 'branch'.") ||
+      text.includes('"title"') ||
+      text.includes('"branch"'));
+  if (
+    !hasBranchNamePrompt &&
+    !(
+      text.includes("You must respond with JSON only that matches this JSON Schema") &&
+      text.includes('"title"') &&
+      text.includes('"branch"')
+    )
+  ) {
+    return null;
+  }
+
+  const seed =
+    text.match(/<user-prompt>\n([\s\S]*?)\n<\/user-prompt>/)?.[1]?.trim() ??
+    text.match(/<attachments>\n([\s\S]*?)\n<\/attachments>/)?.[1]?.trim() ??
+    "";
+  const firstLine =
+    seed
+      .split("\n")
+      .find((line) => line.trim().length > 0)
+      ?.trim() ?? "Mock task";
+  const title = firstLine
+    .replace(/^["'`]+|["'`]+$/g, "")
+    .replace(/\s+/g, " ")
+    .slice(0, 80)
+    .trim();
+  const branch =
+    title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 100) || "mock-task";
+
+  return { title: title || "Mock task", branch };
+}
+
+function buildRepeatedPayload(bytes: number, prefix: string): string {
+  const line = `${prefix} ${"x".repeat(96)}\n`;
+  let output = "";
+  while (output.length < bytes) {
+    output += line;
+  }
+  return output.slice(0, bytes);
+}
+
+function tokenize(text: string): string[] {
+  const tokens: string[] = [];
+  const regex = /(\s*)(\S+)|(\s+)/g;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text)) !== null) {
+    const [, leadingWs, word, lonelyWs] = match;
+    if (lonelyWs !== undefined) {
+      tokens.push(lonelyWs);
+      continue;
+    }
+    const ws = leadingWs ?? "";
+    const w = word ?? "";
+    if (w.length <= 5) {
+      tokens.push(ws + w);
+      continue;
+    }
+    tokens.push(ws + w.slice(0, 4));
+    for (let i = 4; i < w.length; i += 4) {
+      tokens.push(w.slice(i, i + 4));
+    }
+  }
+  return tokens;
+}
+
+function buildIntroParagraph(cycle: number): string {
+  return [
+    `## Cycle ${cycle}`,
+    "",
+    "I'll take a look at the scroll anchor behavior you described. Let me start by walking through how the conversation list currently handles streaming updates and where the auto-scroll logic actually lives. My instinct is that the anchor is supposed to pin to the bottom only when the user is already there, but I want to confirm that against the code rather than guess. This kind of behavior is usually a thin layout effect over a ref, and the bugs tend to come from event ordering rather than the math itself, so the first useful step is to read the relevant files.",
+  ].join("\n");
+}
+
+function buildReasoningText(): string {
+  return "Need to find the scroll container, the layout effect that watches for new messages, and any gesture handler that might fight with programmatic scrolling. Probably a ref on the FlatList plus a near-bottom threshold.";
+}
+
+function buildMidParagraph(): string {
+  return [
+    "Now I have a clearer picture. The auto-scroll uses a ref on the FlatList and tracks whether the user has scrolled away from the bottom by comparing the offset against the content size. There are a few subtle issues worth flagging before we change anything:",
+    "",
+    "- The threshold for 'near the bottom' is hardcoded at 80px, which feels too tight on dense content where headers and tool calls take up a lot of vertical space.",
+    "- We rely on `onContentSizeChange` to detect new content, but that fires after layout, not as the streaming delta arrives, so we end up scrolling one frame late on fast streams.",
+    "- The gesture handler does not pause scroll-to-bottom while the user is actively dragging, which means a drag in progress can be visually overridden mid-frame.",
+    "- Coalescing happens upstream, so the FlatList sees fewer updates than the wire — but each batch can still cause a relayout.",
+    "",
+    "Let me make a small adjustment to the threshold and add a flag for active gestures, then run a quick command to confirm the order of events when streaming is fast.",
+  ].join("\n");
+}
+
+function buildClosingParagraph(): string {
+  return "The change should keep scroll-to-bottom working when the user is at the bottom while not yanking the viewport when they are reading earlier messages. The bash output confirms the `userIsAtBottom` flag flips correctly during a simulated streaming burst, and the gesture flag suppresses scroll while a drag is active. If you want, I can follow up with a regression test that drives the FlatList with synthetic deltas at high frequency to lock in the behavior. For now, I'll stop here so you can take a look.";
+}
+
+function buildEditDiff(filePath: string): string {
+  return [
+    `diff --git a/${filePath} b/${filePath}`,
+    `--- a/${filePath}`,
+    `+++ b/${filePath}`,
+    "@@ -42,7 +42,9 @@",
+    "   const ref = useRef<FlatList>(null);",
+    "   const [userIsAtBottom, setUserIsAtBottom] = useState(true);",
+    "-  const NEAR_BOTTOM_PX = 80;",
+    "+  const NEAR_BOTTOM_PX = 160;",
+    "+  const isDraggingRef = useRef(false);",
+    "",
+    "-  if (userIsAtBottom) ref.current?.scrollToEnd({ animated: true });",
+    "+  if (userIsAtBottom && !isDraggingRef.current) {",
+    "+    ref.current?.scrollToEnd({ animated: true });",
+    "+  }",
+  ].join("\n");
+}
+
+function buildCycleQueue(turnId: string, cycle: number): CycleEvent[] {
+  const queue: CycleEvent[] = [];
+
+  for (const tok of tokenize(buildIntroParagraph(cycle))) {
+    queue.push({ kind: "assistant_token", text: tok });
+  }
+
+  for (const tok of tokenize(buildReasoningText())) {
+    queue.push({ kind: "reasoning_token", text: tok });
+  }
+
+  const readDetail: ToolCallDetail = {
+    type: "read",
+    filePath: "packages/app/src/components/conversation-list.tsx",
+  };
+  const readId = `${turnId}:read:${cycle}`;
+  queue.push({ kind: "tool_running", callId: readId, name: "read", detail: readDetail });
+  queue.push({
+    kind: "tool_completed",
+    callId: readId,
+    name: "read",
+    detail: {
+      ...readDetail,
+      content:
+        "export function ConversationList() {\n  const ref = useRef<FlatList>(null);\n  // ...\n}",
+    },
+  });
+
+  const grepDetail: ToolCallDetail = {
+    type: "search",
+    query: "scrollToEnd",
+    toolName: "grep",
+    mode: "files_with_matches",
+  };
+  const grepId = `${turnId}:grep:${cycle}`;
+  queue.push({ kind: "tool_running", callId: grepId, name: "grep", detail: grepDetail });
+  queue.push({
+    kind: "tool_completed",
+    callId: grepId,
+    name: "grep",
+    detail: {
+      ...grepDetail,
+      filePaths: [
+        "packages/app/src/components/conversation-list.tsx",
+        "packages/app/src/hooks/use-scroll-anchor.ts",
+      ],
+      numFiles: 2,
+      numMatches: 5,
+    },
+  });
+
+  for (const tok of tokenize(buildMidParagraph())) {
+    queue.push({ kind: "assistant_token", text: tok });
+  }
+
+  const editFile = "packages/app/src/hooks/use-scroll-anchor.ts";
+  const editDetail: ToolCallDetail = {
+    type: "edit",
+    filePath: editFile,
+    oldString: "const NEAR_BOTTOM_PX = 80;",
+    newString: "const NEAR_BOTTOM_PX = 160;",
+    unifiedDiff: buildEditDiff(editFile),
+  };
+  const editId = `${turnId}:edit:${cycle}`;
+  queue.push({ kind: "tool_running", callId: editId, name: "edit", detail: editDetail });
+  queue.push({ kind: "tool_completed", callId: editId, name: "edit", detail: editDetail });
+
+  const shellDetail: ToolCallDetail = {
+    type: "shell",
+    command: "node scripts/simulate-stream-burst.mjs",
+    cwd: "/tmp/jagentdesk-mock-load",
+    output:
+      "[burst] tick 1 userIsAtBottom=true\n[burst] tick 2 userIsAtBottom=true\n[burst] drag-start isDragging=true\n[burst] tick 3 suppressed\n[burst] drag-end isDragging=false\n",
+    exitCode: 0,
+  };
+  const shellId = `${turnId}:bash:${cycle}`;
+  queue.push({ kind: "tool_running", callId: shellId, name: "bash", detail: shellDetail });
+  queue.push({ kind: "tool_completed", callId: shellId, name: "bash", detail: shellDetail });
+
+  for (const tok of tokenize(buildClosingParagraph())) {
+    queue.push({ kind: "assistant_token", text: tok });
+  }
+
+  queue.push({ kind: "usage" });
+
+  return queue;
+}
+
+function createToolCall(input: {
+  callId: string;
+  name: string;
+  status: ToolCallTimelineItem["status"];
+  detail: ToolCallDetail;
+}): ToolCallTimelineItem {
+  return {
+    type: "tool_call",
+    callId: input.callId,
+    name: input.name,
+    status: input.status,
+    error: null,
+    detail: input.detail,
+  };
+}
+
+export class MockLoadTestAgentClient implements AgentClient {
+  readonly provider: AgentProvider = MOCK_LOAD_TEST_PROVIDER_ID;
+  readonly capabilities = CAPABILITIES;
+
+  constructor(private readonly logger?: Logger) {}
+
+  async createSession(
+    config: AgentSessionConfig,
+    _launchContext?: AgentLaunchContext,
+  ): Promise<AgentSession> {
+    return new MockLoadTestAgentSession({
+      config,
+      sessionId: randomUUID(),
+      logger: this.logger,
+    });
+  }
+
+  async resumeSession(
+    handle: AgentPersistenceHandle,
+    overrides?: Partial<AgentSessionConfig>,
+    _launchContext?: AgentLaunchContext,
+  ): Promise<AgentSession> {
+    const metadata = (handle.metadata ?? {}) as Partial<AgentSessionConfig>;
+    return new MockLoadTestAgentSession({
+      config: {
+        cwd: metadata.cwd ?? overrides?.cwd ?? process.cwd(),
+        ...metadata,
+        ...overrides,
+        provider: MOCK_LOAD_TEST_PROVIDER_ID,
+      },
+      sessionId: handle.sessionId,
+      logger: this.logger,
+    });
+  }
+
+  async fetchCatalog(_options: FetchCatalogOptions): Promise<ProviderCatalog> {
+    return {
+      models: MODELS,
+      modes: getAgentProviderDefinition(MOCK_LOAD_TEST_PROVIDER_ID).modes,
+    };
+  }
+
+  async listImportableSessions(): Promise<ImportableProviderSession[]> {
+    return [];
+  }
+
+  async importSession(input: ImportProviderSessionInput, context: ImportProviderSessionContext) {
+    return importSessionFromPersistence({
+      provider: MOCK_LOAD_TEST_PROVIDER_ID,
+      request: input,
+      context,
+      resumeSession: this.resumeSession.bind(this),
+    });
+  }
+
+  async isAvailable(): Promise<boolean> {
+    return true;
+  }
+
+  async getDiagnostic(): Promise<{ diagnostic: string }> {
+    return {
+      diagnostic: "Mock load-test provider is available in development builds.",
+    };
+  }
+}
+
+export class MockLoadTestAgentSession implements AgentSession {
+  readonly provider: AgentProvider = MOCK_LOAD_TEST_PROVIDER_ID;
+  readonly capabilities = CAPABILITIES;
+  readonly features: AgentFeature[] = [];
+  readonly id: string;
+  private readonly listeners = new Set<(event: AgentStreamEvent) => void>();
+  private readonly history: AgentStreamEvent[] = [];
+  private readonly logger?: Logger;
+  private activeTurn: ActiveTurn | null = null;
+  private pendingPermissions = new Map<string, AgentPermissionRequest>();
+  private modeId: string | null;
+  private modelId: string | null;
+  private readonly assistantResponse: string | null;
+  private readonly rewindError: string | null;
+  private remainingPromptRejections: number;
+
+  constructor(options: { config: AgentSessionConfig; sessionId: string; logger?: Logger }) {
+    this.id = options.sessionId;
+    this.logger = options.logger;
+    this.modeId = options.config.modeId ?? MOCK_LOAD_TEST_MODE_ID;
+    this.modelId = options.config.model ?? MOCK_LOAD_TEST_DEFAULT_MODEL_ID;
+    this.assistantResponse =
+      typeof options.config.featureValues?.mockAssistantResponse === "string"
+        ? options.config.featureValues.mockAssistantResponse
+        : null;
+    this.rewindError =
+      typeof options.config.featureValues?.mockRewindError === "string"
+        ? options.config.featureValues.mockRewindError
+        : null;
+    const requestedPromptRejections = options.config.featureValues?.mockPromptRejections;
+    this.remainingPromptRejections =
+      typeof requestedPromptRejections === "number" &&
+      Number.isSafeInteger(requestedPromptRejections) &&
+      requestedPromptRejections > 0
+        ? requestedPromptRejections
+        : 0;
+  }
+
+  async run(prompt: AgentPromptInput, options?: AgentRunOptions): Promise<AgentRunResult> {
+    const { turnId } = await this.startTurn(prompt, options);
+    const turn = this.activeTurn;
+    if (!turn || turn.turnId !== turnId) {
+      throw new Error("Mock load-test turn did not start");
+    }
+    return turn.completed;
+  }
+
+  async startTurn(
+    prompt: AgentPromptInput,
+    options?: AgentRunOptions,
+  ): Promise<{ turnId: string }> {
+    if (this.activeTurn) {
+      throw new Error("Mock load-test provider already has an active turn");
+    }
+    if (this.remainingPromptRejections > 0) {
+      this.remainingPromptRejections -= 1;
+      throw new Error("Requested mock prompt rejection");
+    }
+
+    const profile = resolveModelProfile(this.modelId);
+    const turnId = randomUUID();
+    const assistantMessageId = randomUUID();
+    let resolve!: (result: AgentRunResult) => void;
+    const completed = new Promise<AgentRunResult>((promiseResolve) => {
+      resolve = promiseResolve;
+    });
+    const turn: ActiveTurn = {
+      turnId,
+      assistantMessageId,
+      prompt,
+      startedAt: Date.now(),
+      cycle: 0,
+      durationMs: profile.durationMs,
+      intervalMs: profile.intervalMs,
+      timer: null,
+      resolve,
+      completed,
+      queue: [],
+      emittedTokens: 0,
+      turnStarted: false,
+    };
+    this.activeTurn = turn;
+    const largePayload = parseLargeAgentStreamPayloadPrompt(prompt);
+    const stress = parseAgentStreamStressPrompt(prompt);
+    const questionPrompt = parseMockQuestionPrompt(prompt);
+    const structuredBranchName = parseStructuredBranchNamePrompt(prompt);
+    const settledAssistantImageMarkdown = parseSettledAssistantImageMarkdown(prompt);
+    const scheduleTurn = () => {
+      if (shouldEmitTurnFailure(prompt)) {
+        this.scheduleFailedTurn(turn);
+      } else if (this.assistantResponse !== null) {
+        this.scheduleSettledAssistantTurn(turn, this.assistantResponse);
+      } else if (structuredBranchName) {
+        this.scheduleSettledAssistantTurn(turn, JSON.stringify(structuredBranchName));
+      } else if (settledAssistantImageMarkdown) {
+        this.scheduleSettledAssistantTurn(turn, settledAssistantImageMarkdown);
+      } else if (shouldEmitPlanApprovalPrompt(prompt)) {
+        this.schedulePlanApprovalTurn(turn);
+      } else if (questionPrompt) {
+        this.scheduleQuestionPromptTurn(turn, questionPrompt);
+      } else if (largePayload) {
+        this.scheduleLargePayloadTurn(turn, largePayload);
+      } else if (stress) {
+        this.scheduleStressTurn(turn, stress);
+      } else {
+        this.schedule(turn, 0);
+      }
+    };
+    const emitUserMessage = () => {
+      if (this.activeTurn?.turnId !== turnId) {
+        return;
+      }
+      this.emitTurnStarted(turn);
+      this.emit({
+        type: "timeline",
+        provider: this.provider,
+        turnId,
+        item: {
+          type: "user_message",
+          text: promptToText(prompt),
+          messageId: randomUUID(),
+          ...(options?.clientMessageId ? { clientMessageId: options.clientMessageId } : {}),
+        },
+      });
+    };
+    if (shouldEmitUserMessageBeforeTurnAcceptance(prompt)) {
+      emitUserMessage();
+      scheduleTurn();
+      return { turnId };
+    }
+    if (shouldWithholdUserMessageUntilInterrupt(prompt)) {
+      return { turnId };
+    }
+    const assistantMessagesBeforeUserMessage = parseAssistantMessagesBeforeUserMessage(prompt);
+    if (assistantMessagesBeforeUserMessage !== null) {
+      turn.timer = setTimeout(async () => {
+        if (this.activeTurn !== turn) return;
+        this.emitTurnStarted(turn);
+        for (let index = 0; index < assistantMessagesBeforeUserMessage; index += 1) {
+          this.emitTimeline(turnId, {
+            type: "assistant_message",
+            text: `Synthetic pre-echo message ${index + 1}`,
+            messageId: `${turn.assistantMessageId}-${index + 1}`,
+          });
+          await new Promise<void>((resolvePromise) => setImmediate(resolvePromise));
+          if (this.activeTurn !== turn) return;
+        }
+        emitUserMessage();
+        await new Promise<void>((resolvePromise) => setImmediate(resolvePromise));
+        if (this.activeTurn !== turn) return;
+        this.finishTurnWithText(turn, "Synthetic pre-echo stream complete");
+      }, 0);
+      turn.timer.unref?.();
+      return { turnId };
+    }
+    const userMessageDelayMs = parseUserMessageDelayMs(prompt);
+    const userMessageTimer = setTimeout(() => {
+      emitUserMessage();
+      if (userMessageDelayMs > 0) scheduleTurn();
+    }, userMessageDelayMs);
+    userMessageTimer.unref?.();
+    if (userMessageDelayMs === 0) scheduleTurn();
+    return { turnId };
+  }
+
+  tryHandleOutOfBand(
+    prompt: AgentPromptInput,
+  ): { run(ctx: { emit: (event: AgentStreamEvent) => void }): Promise<void> } | null {
+    if (prompt !== MOCK_LOAD_TEST_HANDLED_COMMAND) return null;
+    return {
+      run: async ({ emit }) => {
+        emit({
+          type: "timeline",
+          provider: this.provider,
+          item: { type: "assistant_message", text: "Mock command handled" },
+        });
+      },
+    };
+  }
+
+  subscribe(callback: (event: AgentStreamEvent) => void): () => void {
+    this.listeners.add(callback);
+    return () => {
+      this.listeners.delete(callback);
+    };
+  }
+
+  async *streamHistory(): AsyncGenerator<AgentStreamEvent> {
+    for (const event of this.history) {
+      yield event;
+    }
+  }
+
+  async getRuntimeInfo(): Promise<AgentRuntimeInfo> {
+    return {
+      provider: this.provider,
+      sessionId: this.id,
+      model: this.modelId,
+      modeId: this.modeId,
+    };
+  }
+
+  async getAvailableModes(): Promise<AgentMode[]> {
+    return getAgentProviderDefinition(MOCK_LOAD_TEST_PROVIDER_ID).modes;
+  }
+
+  async getCurrentMode(): Promise<string | null> {
+    return this.modeId;
+  }
+
+  async setMode(modeId: string): Promise<void> {
+    this.modeId = modeId;
+  }
+
+  getPendingPermissions(): AgentPermissionRequest[] {
+    return Array.from(this.pendingPermissions.values());
+  }
+
+  async respondToPermission(
+    requestId: string,
+    response: AgentPermissionResponse,
+  ): Promise<AgentPermissionResult | void> {
+    const request = this.pendingPermissions.get(requestId);
+    if (!request) {
+      return undefined;
+    }
+    this.pendingPermissions.delete(requestId);
+
+    const turn = this.activeTurn;
+    this.emit({
+      type: "permission_resolved",
+      provider: this.provider,
+      requestId,
+      resolution: response,
+      ...(turn ? { turnId: turn.turnId } : {}),
+    });
+
+    if (turn) {
+      this.finishTurnWithText(
+        turn,
+        request.kind === "question"
+          ? "Synthetic questions resolved"
+          : "Synthetic plan approval resolved",
+      );
+    }
+    return undefined;
+  }
+
+  describePersistence(): AgentPersistenceHandle | null {
+    return {
+      provider: this.provider,
+      sessionId: this.id,
+      metadata: {
+        model: this.modelId,
+        modeId: this.modeId,
+      },
+    };
+  }
+
+  async interrupt(): Promise<void> {
+    const turn = this.activeTurn;
+    if (!turn) {
+      return;
+    }
+    this.clearTurnTimer(turn);
+    this.activeTurn = null;
+    const event: AgentStreamEvent = {
+      type: "turn_canceled",
+      provider: this.provider,
+      reason: "Interrupted",
+      turnId: turn.turnId,
+    };
+    this.emit(event);
+    turn.resolve({
+      sessionId: this.id,
+      finalText: "",
+      timeline: [],
+      canceled: true,
+    });
+  }
+
+  async close(): Promise<void> {
+    await this.interrupt();
+    this.listeners.clear();
+  }
+
+  async revertConversation(input: { messageId: string }): Promise<void> {
+    this.failConfiguredRewind();
+    this.validateRewindTarget(input.messageId);
+    this.keepFirstUserMessageHistory();
+  }
+
+  async revertFiles(input: { messageId: string }): Promise<void> {
+    this.failConfiguredRewind();
+    this.validateRewindTarget(input.messageId);
+  }
+
+  async revertBoth(input: { messageId: string }): Promise<void> {
+    this.failConfiguredRewind();
+    this.validateRewindTarget(input.messageId);
+    this.keepFirstUserMessageHistory();
+  }
+
+  async setModel(modelId: string | null): Promise<void> {
+    this.modelId = modelId ?? MOCK_LOAD_TEST_DEFAULT_MODEL_ID;
+  }
+
+  private schedule(turn: ActiveTurn, delayMs: number): void {
+    turn.timer = setTimeout(() => {
+      this.tick(turn);
+    }, delayMs);
+    turn.timer.unref?.();
+  }
+
+  private emitTurnStarted(turn: ActiveTurn): void {
+    if (turn.turnStarted) {
+      return;
+    }
+    turn.turnStarted = true;
+    this.emit({
+      type: "turn_started",
+      provider: this.provider,
+      turnId: turn.turnId,
+    });
+  }
+
+  private failConfiguredRewind(): void {
+    if (this.rewindError) {
+      throw new Error(this.rewindError);
+    }
+  }
+
+  private validateRewindTarget(messageId: string): void {
+    const isKnownUserMessage = this.history.some(
+      (event) =>
+        event.type === "timeline" &&
+        event.item.type === "user_message" &&
+        event.item.messageId === messageId,
+    );
+    if (!isKnownUserMessage) {
+      throw new Error(`Mock rewind target ${messageId} was not found in session history`);
+    }
+  }
+
+  private scheduleLargePayloadTurn(
+    turn: ActiveTurn,
+    largePayload: LargeAgentStreamPayloadRequest,
+  ): void {
+    turn.timer = setTimeout(() => {
+      this.emitLargePayloadTurn(turn, largePayload);
+    }, 0);
+    turn.timer.unref?.();
+  }
+
+  private scheduleFailedTurn(turn: ActiveTurn): void {
+    turn.timer = setTimeout(() => {
+      if (this.activeTurn !== turn) {
+        return;
+      }
+      this.clearTurnTimer(turn);
+      this.emitTurnStarted(turn);
+      this.activeTurn = null;
+      this.emit({
+        type: "turn_failed",
+        provider: this.provider,
+        turnId: turn.turnId,
+        error: "Requested mock provider failure",
+      });
+      turn.resolve({
+        sessionId: this.id,
+        finalText: "",
+        timeline: [],
+        canceled: false,
+      });
+    }, 0);
+    turn.timer.unref?.();
+  }
+
+  private scheduleStressTurn(turn: ActiveTurn, stress: AgentStreamStressRequest): void {
+    turn.timer = setTimeout(() => {
+      this.emitStressTurn(turn, stress);
+    }, 0);
+    turn.timer.unref?.();
+  }
+
+  private schedulePlanApprovalTurn(turn: ActiveTurn): void {
+    turn.timer = setTimeout(() => {
+      this.emitPlanApprovalTurn(turn);
+    }, 0);
+    turn.timer.unref?.();
+  }
+
+  private scheduleQuestionPromptTurn(
+    turn: ActiveTurn,
+    questionPrompt: MockQuestionPromptRequest,
+  ): void {
+    turn.timer = setTimeout(() => {
+      this.emitQuestionPromptTurn(turn, questionPrompt);
+    }, 0);
+    turn.timer.unref?.();
+  }
+
+  private scheduleSettledAssistantTurn(turn: ActiveTurn, finalText: string): void {
+    turn.timer = setTimeout(() => {
+      this.emitSettledAssistantTurn(turn, finalText);
+    }, 0);
+    turn.timer.unref?.();
+  }
+
+  private emitSettledAssistantTurn(turn: ActiveTurn, finalText: string): void {
+    if (this.activeTurn !== turn) {
+      return;
+    }
+
+    this.clearTurnTimer(turn);
+    this.emitTurnStarted(turn);
+
+    this.emitTimeline(turn.turnId, {
+      type: "assistant_message",
+      text: finalText,
+      messageId: turn.assistantMessageId,
+    });
+    this.activeTurn = null;
+    this.emit({
+      type: "turn_completed",
+      provider: this.provider,
+      turnId: turn.turnId,
+    });
+    turn.resolve({
+      sessionId: this.id,
+      finalText,
+      timeline: [
+        {
+          type: "assistant_message",
+          text: finalText,
+          messageId: turn.assistantMessageId,
+        },
+      ],
+      canceled: false,
+    });
+  }
+
+  private emitPlanApprovalTurn(turn: ActiveTurn): void {
+    if (this.activeTurn !== turn) {
+      return;
+    }
+
+    this.clearTurnTimer(turn);
+    this.emitTurnStarted(turn);
+
+    const request: AgentPermissionRequest = {
+      id: `mock-plan-${turn.turnId}`,
+      provider: this.provider,
+      name: "MockPlanApproval",
+      kind: "plan",
+      title: "Plan",
+      description: "Review the proposed plan before implementation starts.",
+      input: {
+        plan: "1. Add the README note.\n2. Keep the change scoped.\n3. Verify the diff.",
+      },
+      actions: [
+        {
+          id: "implement",
+          label: "Implement",
+          behavior: "allow",
+          variant: "primary",
+          intent: "implement",
+        },
+        {
+          id: "dismiss",
+          label: "Dismiss",
+          behavior: "deny",
+          variant: "secondary",
+          intent: "dismiss",
+        },
+      ],
+      metadata: {
+        source: "mock_plan_approval",
+      },
+    };
+
+    this.pendingPermissions.set(request.id, request);
+    this.emit({
+      type: "permission_requested",
+      provider: this.provider,
+      request,
+      turnId: turn.turnId,
+    });
+  }
+
+  private emitQuestionPromptTurn(
+    turn: ActiveTurn,
+    questionPrompt: MockQuestionPromptRequest,
+  ): void {
+    if (this.activeTurn !== turn) {
+      return;
+    }
+
+    this.clearTurnTimer(turn);
+    this.emitTurnStarted(turn);
+
+    const request: AgentPermissionRequest = {
+      id: `mock-questions-${turn.turnId}`,
+      provider: this.provider,
+      name: "MockQuestions",
+      kind: "question",
+      title: "Questions",
+      input: {
+        questions: questionPrompt.questions,
+      },
+      metadata: {
+        source: "mock_questions",
+      },
+    };
+
+    this.pendingPermissions.set(request.id, request);
+    this.emit({
+      type: "permission_requested",
+      provider: this.provider,
+      request,
+      turnId: turn.turnId,
+    });
+  }
+
+  private emitStressTurn(turn: ActiveTurn, stress: AgentStreamStressRequest): void {
+    if (this.activeTurn !== turn) {
+      return;
+    }
+
+    this.clearTurnTimer(turn);
+    this.emitTurnStarted(turn);
+
+    for (let index = 0; index < stress.count; index += 1) {
+      this.emitTimeline(
+        turn.turnId,
+        stress.coalesced
+          ? {
+              type: "assistant_message",
+              text: `stress-update-${index}`,
+              messageId: turn.assistantMessageId,
+            }
+          : {
+              type: "todo",
+              items: [{ text: `stress-update-${index}`, completed: index % 2 === 0 }],
+            },
+      );
+    }
+
+    this.activeTurn = null;
+    const usage = {
+      inputTokens: 1,
+      outputTokens: stress.count,
+      contextWindowUsedTokens: stress.count,
+      contextWindowMaxTokens: 128_000,
+    };
+    this.emit({
+      type: "turn_completed",
+      provider: this.provider,
+      turnId: turn.turnId,
+      usage,
+    });
+    turn.resolve({
+      sessionId: this.id,
+      finalText: "Synthetic agent stream stress complete",
+      usage,
+      timeline: [],
+      canceled: false,
+    });
+  }
+
+  private emitLargePayloadTurn(
+    turn: ActiveTurn,
+    largePayload: LargeAgentStreamPayloadRequest,
+  ): void {
+    if (this.activeTurn !== turn) {
+      return;
+    }
+
+    this.clearTurnTimer(turn);
+    this.emitTurnStarted(turn);
+
+    const payload = buildRepeatedPayload(largePayload.bytes, largePayload.kind);
+    if (largePayload.kind === "diff") {
+      this.emitTimeline(
+        turn.turnId,
+        createToolCall({
+          callId: `${turn.turnId}:edit:large`,
+          name: "edit",
+          status: "completed",
+          detail: {
+            type: "edit",
+            filePath: "src/large-diff.ts",
+            unifiedDiff: `diff --git a/src/large-diff.ts b/src/large-diff.ts\n${payload}`,
+          },
+        }),
+      );
+    } else if (largePayload.kind === "file") {
+      this.emitTimeline(
+        turn.turnId,
+        createToolCall({
+          callId: `${turn.turnId}:read:large`,
+          name: "read",
+          status: "completed",
+          detail: {
+            type: "read",
+            filePath: "src/large-file.txt",
+            content: payload,
+          },
+        }),
+      );
+    } else {
+      const imageBytes = Buffer.from(ONE_PIXEL_PNG_BASE64, "base64");
+      const imagePayload = Buffer.concat([
+        imageBytes,
+        Buffer.alloc(Math.max(0, largePayload.bytes - imageBytes.length)),
+      ]).toString("base64");
+      this.emitTimeline(turn.turnId, {
+        type: "assistant_message",
+        text: `![Synthetic image](data:image/png;base64,${imagePayload})`,
+        messageId: turn.assistantMessageId,
+      });
+    }
+
+    this.activeTurn = null;
+    const usage = {
+      inputTokens: 1,
+      outputTokens: largePayload.bytes,
+      contextWindowUsedTokens: largePayload.bytes,
+      contextWindowMaxTokens: 128_000,
+    };
+    this.emit({
+      type: "turn_completed",
+      provider: this.provider,
+      turnId: turn.turnId,
+      usage,
+    });
+    turn.resolve({
+      sessionId: this.id,
+      finalText: "Synthetic large payload complete",
+      usage,
+      timeline: [],
+      canceled: false,
+    });
+  }
+
+  private tick(turn: ActiveTurn): void {
+    if (this.activeTurn !== turn) {
+      return;
+    }
+
+    this.clearTurnTimer(turn);
+    this.emitTurnStarted(turn);
+
+    const elapsedMs = Date.now() - turn.startedAt;
+    if (elapsedMs >= turn.durationMs) {
+      this.finishTurn(turn);
+      return;
+    }
+
+    if (turn.queue.length === 0) {
+      turn.cycle += 1;
+      turn.queue = buildCycleQueue(turn.turnId, turn.cycle);
+    }
+
+    const event = turn.queue.shift();
+    if (event) {
+      this.dispatchCycleEvent(turn, event);
+    }
+
+    this.schedule(turn, turn.intervalMs);
+  }
+
+  private dispatchCycleEvent(turn: ActiveTurn, event: CycleEvent): void {
+    switch (event.kind) {
+      case "assistant_token": {
+        turn.emittedTokens += 1;
+        this.emitTimeline(turn.turnId, {
+          type: "assistant_message",
+          text: event.text,
+          messageId: turn.assistantMessageId,
+        });
+        return;
+      }
+      case "reasoning_token": {
+        turn.emittedTokens += 1;
+        this.emitTimeline(turn.turnId, {
+          type: "reasoning",
+          text: event.text,
+        });
+        return;
+      }
+      case "tool_running":
+      case "tool_completed": {
+        this.emitTimeline(
+          turn.turnId,
+          createToolCall({
+            callId: event.callId,
+            name: event.name,
+            status: event.kind === "tool_running" ? "running" : "completed",
+            detail: event.detail,
+          }),
+        );
+        return;
+      }
+      case "usage": {
+        this.emit({
+          type: "usage_updated",
+          provider: this.provider,
+          turnId: turn.turnId,
+          usage: {
+            inputTokens: turn.cycle * 32,
+            outputTokens: turn.emittedTokens,
+            contextWindowUsedTokens: turn.emittedTokens * 2,
+            contextWindowMaxTokens: 128_000,
+          },
+        });
+        return;
+      }
+    }
+  }
+
+  private finishTurn(turn: ActiveTurn): void {
+    this.emitTimeline(turn.turnId, {
+      type: "assistant_message",
+      text: "\n\n_(end of synthetic stream)_\n",
+      messageId: turn.assistantMessageId,
+    });
+    this.finishTurnWithText(turn, "Synthetic load test complete");
+  }
+
+  private finishTurnWithText(turn: ActiveTurn, finalText: string): void {
+    this.activeTurn = null;
+    const usage = {
+      inputTokens: turn.cycle * 32,
+      outputTokens: turn.emittedTokens,
+      contextWindowUsedTokens: turn.emittedTokens * 2,
+      contextWindowMaxTokens: 128_000,
+    };
+    this.emit({
+      type: "turn_completed",
+      provider: this.provider,
+      turnId: turn.turnId,
+      usage,
+    });
+    turn.resolve({
+      sessionId: this.id,
+      finalText,
+      usage,
+      timeline: [],
+      canceled: false,
+    });
+  }
+
+  private emitTimeline(turnId: string, item: AgentTimelineItem): void {
+    this.emit({
+      type: "timeline",
+      provider: this.provider,
+      turnId,
+      item,
+    });
+  }
+
+  private emit(event: AgentStreamEvent): void {
+    this.remember(event);
+    for (const listener of this.listeners) {
+      try {
+        listener(event);
+      } catch (error) {
+        this.logger?.warn({ err: error }, "Mock load-test listener failed");
+      }
+    }
+  }
+
+  private remember(event: AgentStreamEvent): void {
+    this.history.push(event);
+  }
+
+  private keepFirstUserMessageHistory(): void {
+    const nextHistory: AgentStreamEvent[] = [];
+    for (const event of this.history) {
+      if (event.type === "timeline" && event.item.type === "user_message") {
+        nextHistory.push(event);
+        break;
+      }
+    }
+    this.history.length = 0;
+    this.history.push(...nextHistory);
+  }
+
+  private clearTurnTimer(turn: ActiveTurn): void {
+    if (!turn.timer) {
+      return;
+    }
+    clearTimeout(turn.timer);
+    turn.timer = null;
+  }
+}

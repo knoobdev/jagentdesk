@@ -1,0 +1,22 @@
+appId: app.jagentdesk.mobile
+
+---
+- launchApp:
+    clearState: true
+- openLink: "jagentdesk:///tailscale-login"
+- assertVisible: "Join your tailnet"
+- tapOn:
+    id: tailscale-login-interactive
+- extendedWaitUntil:
+    visible: ".*login\\.tailscale\\.com.*"
+    timeout: 60000
+- launchApp
+- openLink: "jagentdesk:///tailscale-login"
+- assertVisible:
+    id: tailscale-login-interactive
+- tapOn:
+    id: tailscale-login-interactive
+- takeScreenshot: tailscale-login-repeat-after-second-tap
+- extendedWaitUntil:
+    visible: ".*login\\.tailscale\\.com.*"
+    timeout: 60000

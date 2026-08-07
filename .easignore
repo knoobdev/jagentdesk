@@ -1,0 +1,17 @@
+# Keep the cloud mobile build archive focused on source and native module files.
+scratchpad/
+**/scratchpad/
+node_modules/
+**/node_modules/
+packages/app/ios/
+packages/app/android/
+packages/app/dist/
+packages/app/web-build/
+packages/desktop/release/
+packages/app/.expo/
+.expo/
+.git/
+*.log
+.dev/
+.tmp/
+artifacts/

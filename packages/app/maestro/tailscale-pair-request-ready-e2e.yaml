@@ -1,0 +1,10 @@
+appId: app.jagentdesk.mobile
+---
+- launchApp
+- extendedWaitUntil:
+    visible: "Enter verification code"
+    timeout: 30000
+- assertVisible:
+    id: pairing-code-input
+- assertVisible: "Enter the 6-digit code shown in the JAgentDesk desktop connection popup."
+- takeScreenshot: tailscale-pair-request-ready

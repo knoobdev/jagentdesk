@@ -1,0 +1,29 @@
+appId: app.jagentdesk.mobile
+---
+- launchApp:
+    clearState: true
+- assertVisible: "Connect to JAgentDesk"
+- tapOn:
+    id: pair-start-link
+- assertVisible: "Pair with JAgentDesk desktop"
+- tapOn:
+    id: pair-link-input
+- inputText: ${PAIRING_OFFER_URL}
+- tapOn:
+    id: pair-link-submit
+- extendedWaitUntil:
+    visible: "Join your tailnet"
+    timeout: 15000
+- tapOn:
+    id: tailscale-login-authkey-input
+- inputText: ${JAGENTDESK_E2E_TAILSCALE_AUTH_KEY}
+- hideKeyboard
+- tapOn:
+    id: tailscale-login-authkey-submit
+- extendedWaitUntil:
+    visible: "Enter verification code"
+    timeout: 90000
+- assertVisible:
+    id: pairing-code-input
+- assertVisible: "Enter the 6-digit code shown in the JAgentDesk desktop connection popup."
+- takeScreenshot: tailscale-pair-request-auth-ready

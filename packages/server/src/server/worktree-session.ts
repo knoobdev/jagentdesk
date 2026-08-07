@@ -1,0 +1,784 @@
+import type { Logger } from "pino";
+import { basename } from "node:path";
+
+import type { AgentSessionConfig } from "./agent/agent-sdk-types.js";
+import {
+  type GitSetupOptions,
+  type FirstAgentContext,
+  type ChangeRequestCheckoutSource,
+  type SessionInboundMessage,
+  type SessionOutboundMessage,
+  type WorkspaceSetupSnapshot,
+  type WorkspaceDescriptorPayload,
+} from "./messages.js";
+import type { PersistedWorkspaceRecord } from "./workspace-registry.js";
+import type { WorkspaceGitService } from "./workspace-git-service.js";
+import {
+  runAsyncWorktreeBootstrap,
+  applyWorktreeSetupProgressEvent,
+  buildWorktreeSetupDetail,
+  createWorktreeSetupProgressAccumulator,
+  getWorktreeSetupProgressResults,
+} from "./worktree-bootstrap.js";
+import type { TerminalManager } from "../terminal/terminal-manager.js";
+import type { ServiceProxySubsystem } from "./service-proxy.js";
+import type { WorkspaceScriptRuntimeStore } from "./workspace-script-runtime-store.js";
+import type { CheckoutExistingBranchResult } from "../utils/checkout-git.js";
+import { expandTilde } from "../utils/path.js";
+import {
+  getWorktreeSetupCommands,
+  resolveWorktreeRuntimeEnv,
+  runWorktreeSetupCommands,
+  slugify,
+  validateBranchSlug,
+  type WorktreeConfig,
+  type WorktreeSetupCommandResult,
+  WorktreeSetupError,
+} from "../utils/worktree.js";
+import { toCheckoutError } from "./checkout-git-utils.js";
+import type {
+  CreateJAgentDeskWorktreeInput,
+  CreateJAgentDeskWorktreeResult,
+} from "./jagentdesk-worktree-service.js";
+import type { ArchiveDependencies } from "./workspace-archive-service.js";
+import { toWorktreeWireError } from "./worktree-errors.js";
+import {
+  archiveCommand,
+  createJAgentDeskWorktreeCommand,
+  listJAgentDeskWorktreesCommand,
+} from "./worktree/commands.js";
+
+const SAFE_GIT_REF_PATTERN = /^[A-Za-z0-9._/-]+$/;
+
+export interface NormalizedGitOptions {
+  baseBranch?: string;
+  createNewBranch: boolean;
+  newBranchName?: string;
+  createWorktree: boolean;
+  worktreeSlug?: string;
+  requestedWorktreeSlug?: string;
+  refName?: string;
+  action?: "branch-off" | "checkout";
+  checkoutSource?: ChangeRequestCheckoutSource;
+  githubPrNumber?: number;
+}
+
+type EmitSessionMessage = (message: SessionOutboundMessage) => void;
+type AgentWorktreeSetupTimelineItem = Parameters<
+  typeof runAsyncWorktreeBootstrap
+>[0]["appendTimelineItem"] extends (item: infer Item) => unknown
+  ? Item
+  : never;
+type AgentWorktreeSetupTimelineWriter = (input: {
+  agentId: string;
+  item: AgentWorktreeSetupTimelineItem;
+}) => Promise<boolean>;
+
+interface BuildAgentSessionConfigDependencies {
+  jagentdeskHome?: string;
+  worktreesRoot?: string;
+  sessionLogger: Logger;
+  workspaceGitService?: WorkspaceGitService;
+  createJAgentDeskWorktree: (
+    input: CreateJAgentDeskWorktreeInput,
+    options?: {
+      resolveDefaultBranch?: (repoRoot: string) => Promise<string>;
+      setupContinuation?: CreateJAgentDeskWorktreeSetupContinuationInput;
+    },
+  ) => Promise<CreateJAgentDeskWorktreeWorkflowResult>;
+  checkoutExistingBranch: (cwd: string, branch: string) => Promise<CheckoutExistingBranchResult>;
+  createBranchFromBase: (params: {
+    cwd: string;
+    baseBranch: string;
+    newBranchName: string;
+  }) => Promise<void>;
+}
+
+interface CreateJAgentDeskWorktreeInBackgroundDependencies {
+  jagentdeskHome?: string;
+  worktreesRoot?: string;
+  emitWorkspaceUpdateForWorkspaceId: (workspaceId: string) => Promise<void>;
+  cacheWorkspaceSetupSnapshot: (workspaceId: string, snapshot: WorkspaceSetupSnapshot) => void;
+  emit: EmitSessionMessage;
+  sessionLogger: Logger;
+  terminalManager: TerminalManager | null;
+  archiveWorkspaceRecord: (workspaceId: string) => Promise<void>;
+  serviceProxy: ServiceProxySubsystem | null;
+  scriptRuntimeStore: WorkspaceScriptRuntimeStore | null;
+  getDaemonTcpPort: (() => number | null) | null;
+  getDaemonTcpHost: (() => string | null) | null;
+  serviceProxyPublicBaseUrl?: string | null;
+  onScriptsChanged: ((workspaceId: string, workspaceDirectory: string) => void) | null;
+}
+
+interface CreateJAgentDeskWorktreeWorkflowDependencies extends CreateJAgentDeskWorktreeInBackgroundDependencies {
+  createJAgentDeskWorktree: (
+    input: CreateJAgentDeskWorktreeInput,
+    options?: {
+      resolveDefaultBranch?: (repoRoot: string) => Promise<string>;
+    },
+  ) => Promise<CreateJAgentDeskWorktreeResult>;
+  warmWorkspaceGitData: (workspace: PersistedWorkspaceRecord) => Promise<void>;
+  autoNameWorkspaceBranchForFirstAgent: (input: {
+    workspace: PersistedWorkspaceRecord;
+    firstAgentContext: FirstAgentContext;
+  }) => void;
+}
+
+interface AgentWorktreeSetupContinuationInput {
+  kind: "agent";
+  terminalManager: TerminalManager | null;
+  appendTimelineItem: AgentWorktreeSetupTimelineWriter;
+  emitLiveTimelineItem: AgentWorktreeSetupTimelineWriter;
+  logger: Logger;
+}
+
+export type CreateJAgentDeskWorktreeSetupContinuationInput =
+  | { kind: "workspace" }
+  | AgentWorktreeSetupContinuationInput;
+
+export interface AgentWorktreeSetupContinuation {
+  kind: "agent";
+  startAfterAgentCreate: (input: { agentId: string }) => void;
+}
+
+export type CreateJAgentDeskWorktreeWorkflowResult = CreateJAgentDeskWorktreeResult & {
+  setupContinuation?: AgentWorktreeSetupContinuation;
+};
+
+export type CreateJAgentDeskWorktreeWorkflowFn = (
+  input: CreateJAgentDeskWorktreeInput,
+  options?: {
+    resolveDefaultBranch?: (repoRoot: string) => Promise<string>;
+    setupContinuation?: CreateJAgentDeskWorktreeSetupContinuationInput;
+  },
+) => Promise<CreateJAgentDeskWorktreeWorkflowResult>;
+
+interface HandleWorkspaceSetupStatusRequestDependencies {
+  emit: EmitSessionMessage;
+  workspaceSetupSnapshots: ReadonlyMap<string, WorkspaceSetupSnapshot>;
+}
+
+interface HandleCreateJAgentDeskWorktreeRequestDependencies {
+  jagentdeskHome?: string;
+  worktreesRoot?: string;
+  describeWorkspaceRecord: (
+    result: CreateJAgentDeskWorktreeResult,
+  ) => Promise<WorkspaceDescriptorPayload>;
+  emit: EmitSessionMessage;
+  sessionLogger: Logger;
+  createJAgentDeskWorktreeWorkflow: (
+    input: CreateJAgentDeskWorktreeInput,
+  ) => Promise<CreateJAgentDeskWorktreeWorkflowResult>;
+}
+
+function normalizeFirstAgentContext(
+  request: Extract<SessionInboundMessage, { type: "create_jagentdesk_worktree_request" }>,
+): FirstAgentContext | undefined {
+  if (request.firstAgentContext) {
+    return request.firstAgentContext;
+  }
+
+  if (request.attachments || request.nameContext) {
+    return {
+      attachments: request.attachments ?? [],
+      ...(request.nameContext ? { prompt: request.nameContext } : {}),
+    };
+  }
+
+  return undefined;
+}
+
+export async function buildAgentSessionConfig(
+  dependencies: BuildAgentSessionConfigDependencies,
+  config: AgentSessionConfig,
+  gitOptions?: GitSetupOptions,
+  legacyWorktreeName?: string,
+  firstAgentContext?: FirstAgentContext,
+): Promise<{
+  sessionConfig: AgentSessionConfig;
+  setupContinuation?: AgentWorktreeSetupContinuation;
+  createdWorkspaceId?: string;
+}> {
+  let cwd = expandTilde(config.cwd);
+  const normalized = normalizeGitOptions(gitOptions, legacyWorktreeName);
+  let setupContinuation: AgentWorktreeSetupContinuation | undefined;
+  let createdWorkspaceId: string | undefined;
+
+  if (!normalized) {
+    return {
+      sessionConfig: {
+        ...config,
+        cwd,
+      },
+    };
+  }
+
+  if (normalized.createWorktree) {
+    dependencies.sessionLogger.info(
+      { worktreeSlug: normalized.requestedWorktreeSlug },
+      "Creating worktree through createWorktreeCore",
+    );
+
+    const createdWorktree = await dependencies.createJAgentDeskWorktree(
+      {
+        cwd,
+        worktreeSlug: normalized.worktreeSlug,
+        refName: normalized.refName,
+        action: normalized.action,
+        checkoutSource: normalized.checkoutSource,
+        githubPrNumber: normalized.githubPrNumber,
+        firstAgentContext,
+        runSetup: false,
+        jagentdeskHome: dependencies.jagentdeskHome,
+        worktreesRoot: dependencies.worktreesRoot,
+      },
+      {
+        resolveDefaultBranch: normalized.baseBranch
+          ? async () => normalized.baseBranch!
+          : (repoRoot) =>
+              resolveGitCreateBaseBranch(
+                repoRoot,
+                dependencies.workspaceGitService,
+                dependencies.jagentdeskHome,
+              ),
+      },
+    );
+    cwd = createdWorktree.workspace.cwd;
+    setupContinuation = createdWorktree.setupContinuation;
+    createdWorkspaceId = createdWorktree.workspace.workspaceId;
+  } else if (normalized.createNewBranch) {
+    const baseBranch =
+      normalized.baseBranch ??
+      (await resolveGitCreateBaseBranch(
+        cwd,
+        dependencies.workspaceGitService,
+        dependencies.jagentdeskHome,
+      ));
+    await dependencies.createBranchFromBase({
+      cwd,
+      baseBranch,
+      newBranchName: normalized.newBranchName!,
+    });
+    dependencies.workspaceGitService?.invalidateForge(cwd);
+  } else if (normalized.baseBranch) {
+    await dependencies.checkoutExistingBranch(cwd, normalized.baseBranch);
+    dependencies.workspaceGitService?.invalidateForge(cwd);
+  }
+
+  return {
+    sessionConfig: {
+      ...config,
+      cwd,
+    },
+    setupContinuation,
+    createdWorkspaceId,
+  };
+}
+
+interface ValidateNormalizedGitOptionsInput {
+  baseBranch: string | undefined;
+  createNewBranch: boolean;
+  normalizedBranchName: string | undefined;
+  normalizedWorktreeSlug: string | undefined;
+}
+
+function validateNormalizedGitOptions(input: ValidateNormalizedGitOptionsInput): void {
+  if (input.baseBranch) {
+    assertSafeGitRef(input.baseBranch, "base branch");
+  }
+
+  if (input.createNewBranch) {
+    if (!input.normalizedBranchName) {
+      throw new Error("New branch name is required");
+    }
+    const validation = validateBranchSlug(input.normalizedBranchName);
+    if (!validation.valid) {
+      throw new Error(`Invalid branch name: ${validation.error}`);
+    }
+  }
+
+  if (input.normalizedWorktreeSlug) {
+    const validation = validateBranchSlug(input.normalizedWorktreeSlug);
+    if (!validation.valid) {
+      throw new Error(`Invalid worktree name: ${validation.error}`);
+    }
+  }
+}
+
+export function normalizeGitOptions(
+  gitOptions?: GitSetupOptions,
+  legacyWorktreeName?: string,
+): NormalizedGitOptions | null {
+  const fallbackOptions: GitSetupOptions | undefined = legacyWorktreeName
+    ? {
+        createWorktree: true,
+        createNewBranch: true,
+        newBranchName: legacyWorktreeName,
+        worktreeSlug: legacyWorktreeName,
+      }
+    : undefined;
+
+  const merged = gitOptions ?? fallbackOptions;
+  if (!merged) {
+    return null;
+  }
+
+  const baseBranch = merged.baseBranch?.trim() || undefined;
+  const createWorktree = Boolean(merged.createWorktree);
+  const createNewBranch = Boolean(merged.createNewBranch);
+  const normalizedBranchName = merged.newBranchName ? slugify(merged.newBranchName) : undefined;
+  const requestedWorktreeSlug = merged.worktreeSlug ? slugify(merged.worktreeSlug) : undefined;
+  const normalizedWorktreeSlug = requestedWorktreeSlug ?? normalizedBranchName;
+  const refName = merged.refName?.trim() || undefined;
+  const action = merged.action;
+  // COMPAT(githubPrNumber): added in v0.1.106, remove after 2026-12-28 once
+  // clients send checkoutSource.
+  const checkoutSource =
+    merged.checkoutSource ??
+    (merged.githubPrNumber
+      ? ({ kind: "change_request", forge: "github", number: merged.githubPrNumber } as const)
+      : undefined);
+  const githubPrNumber = merged.githubPrNumber;
+
+  if (
+    !createWorktree &&
+    !createNewBranch &&
+    !baseBranch &&
+    !refName &&
+    !action &&
+    !checkoutSource &&
+    !githubPrNumber
+  ) {
+    return null;
+  }
+
+  validateNormalizedGitOptions({
+    baseBranch,
+    createNewBranch,
+    normalizedBranchName,
+    normalizedWorktreeSlug,
+  });
+
+  return {
+    baseBranch,
+    createNewBranch,
+    newBranchName: normalizedBranchName,
+    createWorktree,
+    worktreeSlug: normalizedWorktreeSlug,
+    requestedWorktreeSlug,
+    refName,
+    action,
+    checkoutSource,
+    githubPrNumber,
+  };
+}
+
+export function assertSafeGitRef(ref: string, label: string): void {
+  if (!SAFE_GIT_REF_PATTERN.test(ref) || ref.includes("..") || ref.includes("@{")) {
+    throw new Error(`Invalid ${label}: ${ref}`);
+  }
+}
+
+export async function resolveGitCreateBaseBranch(
+  cwd: string,
+  workspaceGitService?: WorkspaceGitService,
+  _jagentdeskHome?: string,
+): Promise<string> {
+  if (!workspaceGitService) {
+    throw new Error("WorkspaceGitService is required to resolve the repository root");
+  }
+
+  return workspaceGitService.resolveDefaultBranch(cwd);
+}
+
+export async function handleJAgentDeskWorktreeListRequest(
+  dependencies: {
+    emit: EmitSessionMessage;
+    jagentdeskHome?: string;
+    workspaceGitService: WorkspaceGitService;
+  },
+  msg: Extract<SessionInboundMessage, { type: "jagentdesk_worktree_list_request" }>,
+): Promise<void> {
+  const { requestId } = msg;
+  const cwd = msg.repoRoot ?? msg.cwd;
+  if (!cwd) {
+    dependencies.emit({
+      type: "jagentdesk_worktree_list_response",
+      payload: {
+        worktrees: [],
+        error: { code: "UNKNOWN", message: "cwd or repoRoot is required" },
+        requestId,
+      },
+    });
+    return;
+  }
+
+  try {
+    const worktrees = await listJAgentDeskWorktreesCommand(
+      { workspaceGitService: dependencies.workspaceGitService },
+      { cwd },
+    );
+    dependencies.emit({
+      type: "jagentdesk_worktree_list_response",
+      payload: {
+        worktrees: worktrees.map((entry) => ({
+          worktreePath: entry.path,
+          createdAt: entry.createdAt,
+          branchName: entry.branchName ?? null,
+          head: entry.head ?? null,
+        })),
+        error: null,
+        requestId,
+      },
+    });
+  } catch (error) {
+    dependencies.emit({
+      type: "jagentdesk_worktree_list_response",
+      payload: {
+        worktrees: [],
+        error: toCheckoutError(error),
+        requestId,
+      },
+    });
+  }
+}
+
+export async function handleJAgentDeskWorktreeArchiveRequest(
+  dependencies: Omit<
+    ArchiveDependencies,
+    "emitWorkspaceUpdatesForWorkspaceIds" | "workspaceGitService"
+  > & {
+    emit: EmitSessionMessage;
+    workspaceGitService: Pick<WorkspaceGitService, "getSnapshot" | "listWorktrees">;
+    emitWorkspaceUpdatesForWorkspaceIds: (workspaceIds: Iterable<string>) => Promise<void>;
+  },
+  msg: Extract<SessionInboundMessage, { type: "jagentdesk_worktree_archive_request" }>,
+): Promise<void> {
+  const { requestId } = msg;
+
+  try {
+    const result = await archiveCommand(dependencies, {
+      requestId,
+      worktreePath: msg.worktreePath,
+      repoRoot: msg.repoRoot,
+      branchName: msg.branchName,
+      workspaceId: msg.workspaceId,
+      scope: msg.scope,
+    });
+    if (!result.ok) {
+      dependencies.emit({
+        type: "jagentdesk_worktree_archive_response",
+        payload: {
+          success: false,
+          removedAgents: result.removedAgents,
+          error: {
+            code: result.code,
+            message: result.message,
+          },
+          requestId,
+        },
+      });
+      return;
+    }
+
+    dependencies.emit({
+      type: "jagentdesk_worktree_archive_response",
+      payload: {
+        success: true,
+        removedAgents: result.removedAgents,
+        error: null,
+        requestId,
+      },
+    });
+  } catch (error) {
+    dependencies.emit({
+      type: "jagentdesk_worktree_archive_response",
+      payload: {
+        success: false,
+        removedAgents: [],
+        error: toCheckoutError(error),
+        requestId,
+      },
+    });
+  }
+}
+
+export async function handleCreateJAgentDeskWorktreeRequest(
+  dependencies: HandleCreateJAgentDeskWorktreeRequestDependencies,
+  request: Extract<SessionInboundMessage, { type: "create_jagentdesk_worktree_request" }>,
+): Promise<void> {
+  try {
+    const commandResult = await createJAgentDeskWorktreeCommand(
+      {
+        jagentdeskHome: dependencies.jagentdeskHome,
+        worktreesRoot: dependencies.worktreesRoot,
+        createJAgentDeskWorktreeWorkflow: dependencies.createJAgentDeskWorktreeWorkflow,
+      },
+      {
+        cwd: request.cwd,
+        projectId: request.projectId,
+        worktreeSlug: request.worktreeSlug,
+        firstAgentContext: normalizeFirstAgentContext(request),
+        refName: request.refName,
+        action: request.action,
+        checkoutSource: request.checkoutSource,
+        githubPrNumber: request.githubPrNumber,
+      },
+    );
+
+    if (!commandResult.ok) {
+      dependencies.sessionLogger.error(
+        { err: commandResult.cause, cwd: request.cwd, worktreeSlug: request.worktreeSlug },
+        "Failed to create worktree",
+      );
+      dependencies.emit({
+        type: "create_jagentdesk_worktree_response",
+        payload: {
+          workspace: null,
+          error: commandResult.error.message,
+          errorCode: commandResult.error.code,
+          setupTerminalId: null,
+          requestId: request.requestId,
+        },
+      });
+      return;
+    }
+
+    const createdWorktree = commandResult.createdWorktree;
+    const descriptor = await dependencies.describeWorkspaceRecord(createdWorktree);
+    dependencies.emit({
+      type: "create_jagentdesk_worktree_response",
+      payload: {
+        workspace: descriptor,
+        error: null,
+        setupTerminalId: null,
+        requestId: request.requestId,
+      },
+    });
+    dependencies.emit({
+      type: "workspace_update",
+      payload: {
+        kind: "upsert",
+        workspace: descriptor,
+      },
+    });
+  } catch (error) {
+    const wireError = toWorktreeWireError(error);
+    dependencies.sessionLogger.error(
+      { err: error, cwd: request.cwd, worktreeSlug: request.worktreeSlug },
+      "Failed to create worktree",
+    );
+    dependencies.emit({
+      type: "create_jagentdesk_worktree_response",
+      payload: {
+        workspace: null,
+        error: wireError.message,
+        errorCode: wireError.code,
+        setupTerminalId: null,
+        requestId: request.requestId,
+      },
+    });
+  }
+}
+
+export async function createJAgentDeskWorktreeWorkflow(
+  dependencies: CreateJAgentDeskWorktreeWorkflowDependencies,
+  input: CreateJAgentDeskWorktreeInput,
+  options?: {
+    resolveDefaultBranch?: (repoRoot: string) => Promise<string>;
+    setupContinuation?: CreateJAgentDeskWorktreeSetupContinuationInput;
+  },
+): Promise<CreateJAgentDeskWorktreeWorkflowResult> {
+  const createdWorktree = await dependencies.createJAgentDeskWorktree(
+    {
+      ...input,
+      runSetup: false,
+      jagentdeskHome: input.jagentdeskHome ?? dependencies.jagentdeskHome,
+      worktreesRoot: input.worktreesRoot ?? dependencies.worktreesRoot,
+    },
+    options?.resolveDefaultBranch
+      ? { resolveDefaultBranch: options.resolveDefaultBranch }
+      : undefined,
+  );
+  const slug = basename(createdWorktree.worktree.worktreePath);
+  const workspace = createdWorktree.workspace;
+  const setupContinuation = options?.setupContinuation ?? { kind: "workspace" };
+
+  setTimeout(() => {
+    if (input.firstAgentContext) {
+      dependencies.autoNameWorkspaceBranchForFirstAgent({
+        workspace,
+        firstAgentContext: input.firstAgentContext,
+      });
+    }
+    void dependencies.warmWorkspaceGitData(workspace).catch((error) => {
+      dependencies.sessionLogger.warn(
+        { err: error, workspaceId: workspace.workspaceId },
+        "Failed to warm workspace git data after creating worktree",
+      );
+    });
+    if (setupContinuation.kind === "workspace") {
+      void runWorktreeSetupInBackground(dependencies, {
+        requestCwd: input.cwd,
+        repoRoot: createdWorktree.repoRoot,
+        workspaceId: workspace.workspaceId,
+        worktree: createdWorktree.worktree,
+        shouldBootstrap: createdWorktree.created,
+        slug,
+        worktreePath: createdWorktree.worktree.worktreePath,
+        workspaceCwd: workspace.cwd,
+      });
+    }
+  }, 0);
+
+  if (setupContinuation.kind === "agent") {
+    return {
+      ...createdWorktree,
+      setupContinuation: {
+        kind: "agent",
+        startAfterAgentCreate: ({ agentId }) => {
+          void runAsyncWorktreeBootstrap({
+            agentId,
+            workspaceId: workspace.workspaceId,
+            worktree: createdWorktree.worktree,
+            workspaceCwd: workspace.cwd,
+            shouldBootstrap: createdWorktree.created,
+            terminalManager: setupContinuation.terminalManager,
+            appendTimelineItem: (item) => setupContinuation.appendTimelineItem({ agentId, item }),
+            emitLiveTimelineItem: (item) =>
+              setupContinuation.emitLiveTimelineItem({ agentId, item }),
+            logger: setupContinuation.logger,
+          });
+        },
+      },
+    };
+  }
+
+  return createdWorktree;
+}
+
+export async function handleWorkspaceSetupStatusRequest(
+  dependencies: HandleWorkspaceSetupStatusRequestDependencies,
+  request: Extract<SessionInboundMessage, { type: "workspace_setup_status_request" }>,
+): Promise<void> {
+  const workspaceId = request.workspaceId;
+  const snapshot = dependencies.workspaceSetupSnapshots.get(workspaceId) ?? null;
+
+  dependencies.emit({
+    type: "workspace_setup_status_response",
+    payload: {
+      requestId: request.requestId,
+      workspaceId,
+      snapshot,
+    },
+  });
+}
+
+export async function runWorktreeSetupInBackground(
+  dependencies: CreateJAgentDeskWorktreeInBackgroundDependencies,
+  options: {
+    requestCwd: string;
+    repoRoot: string;
+    workspaceId: string;
+    worktree: WorktreeConfig;
+    shouldBootstrap: boolean;
+    slug: string;
+    worktreePath: string;
+    workspaceCwd?: string;
+  },
+): Promise<void> {
+  let worktree: WorktreeConfig = options.worktree;
+  let setupResults: WorktreeSetupCommandResult[] = [];
+  let setupStarted = false;
+  const progressAccumulator = createWorktreeSetupProgressAccumulator();
+  const workspaceId = options.workspaceId;
+
+  const emitSetupProgress = (status: "running" | "completed" | "failed", error: string | null) => {
+    const snapshot: WorkspaceSetupSnapshot = {
+      status,
+      detail: buildWorktreeSetupDetail({
+        worktree,
+        results:
+          status === "running"
+            ? getWorktreeSetupProgressResults(progressAccumulator)
+            : setupResults,
+        outputAccumulatorsByIndex: progressAccumulator.outputAccumulatorsByIndex,
+      }),
+      error,
+    };
+    dependencies.cacheWorkspaceSetupSnapshot(workspaceId, snapshot);
+    dependencies.emit({
+      type: "workspace_setup_progress",
+      payload: {
+        workspaceId,
+        ...snapshot,
+      },
+    });
+  };
+
+  try {
+    try {
+      emitSetupProgress("running", null);
+
+      if (!options.shouldBootstrap) {
+        emitSetupProgress("completed", null);
+      } else {
+        const workspaceCwd = options.workspaceCwd ?? worktree.worktreePath;
+        const setupCommands = getWorktreeSetupCommands(workspaceCwd);
+        if (setupCommands.length === 0) {
+          setupStarted = true;
+          emitSetupProgress("completed", null);
+        } else {
+          const runtimeEnv = await resolveWorktreeRuntimeEnv({
+            worktreePath: worktree.worktreePath,
+            branchName: worktree.branchName,
+            repoRootPath: options.repoRoot,
+          });
+          dependencies.terminalManager?.registerCwdEnv({
+            cwd: workspaceCwd,
+            env: runtimeEnv,
+          });
+          setupStarted = true;
+          setupResults = await runWorktreeSetupCommands({
+            worktreePath: workspaceCwd,
+            branchName: worktree.branchName,
+            cleanupOnFailure: false,
+            repoRootPath: options.repoRoot,
+            runtimeEnv,
+            onEvent: (event) => {
+              applyWorktreeSetupProgressEvent(progressAccumulator, event);
+              emitSetupProgress("running", null);
+            },
+          });
+          emitSetupProgress("completed", null);
+        }
+      }
+    } catch (error) {
+      if (error instanceof WorktreeSetupError) {
+        setupResults = error.results;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      emitSetupProgress("failed", message);
+
+      if (!setupStarted) {
+        await dependencies.archiveWorkspaceRecord(options.workspaceId);
+      }
+
+      dependencies.sessionLogger.error(
+        {
+          err: error,
+          cwd: options.requestCwd,
+          repoRoot: options.repoRoot,
+          worktreeSlug: worktree.branchName,
+          worktreePath: worktree.worktreePath,
+          setupStarted,
+        },
+        "Background worktree setup failed",
+      );
+      return;
+    }
+  } finally {
+    await dependencies.emitWorkspaceUpdateForWorkspaceId(options.workspaceId);
+  }
+}

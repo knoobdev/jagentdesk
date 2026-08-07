@@ -1,0 +1,75 @@
+import { createFileRoute } from "@tanstack/react-router";
+import { SiteShell } from "~/components/site-shell";
+import { pageMeta } from "~/meta";
+
+export const Route = createFileRoute("/privacy")({
+  head: () =>
+    pageMeta(
+      "Privacy Policy - JAgentDesk",
+      "Privacy policy for JAgentDesk, the self-hosted coding agent manager. No tracking, no analytics, no data collection. Your code stays on your machine.",
+      "/privacy",
+    ),
+  component: Privacy,
+});
+
+function Privacy() {
+  return (
+    <SiteShell width="default">
+      <h1 className="text-3xl font-medium mb-8">Privacy Policy</h1>
+
+      <div className="space-y-6 text-white/70 leading-relaxed">
+        <p>
+          JAgentDesk is a self-hosted tool for managing coding agents. Your code and data stay on your
+          machine.
+        </p>
+
+        <section className="space-y-3">
+          <h2 className="text-xl font-medium text-white">What we collect</h2>
+          <p>Nothing. JAgentDesk runs on your machine and doesn&apos;t send us any data.</p>
+        </section>
+
+        <section className="space-y-3">
+          <h2 className="text-xl font-medium text-white">Tailscale connection</h2>
+          <p>
+            JAgentDesk connects the clients and daemon over the user&apos;s Tailscale network. The
+            application pairing and six-digit signing flow adds a second authorization step for
+            every mobile device.
+          </p>
+        </section>
+
+        <section className="space-y-3">
+          <h2 className="text-xl font-medium text-white">Analytics and tracking</h2>
+          <p>
+            We don&apos;t use analytics, tracking pixels, cookies, or ads. The app doesn&apos;t
+            phone home.
+          </p>
+        </section>
+
+        <section className="space-y-3">
+          <h2 className="text-xl font-medium text-white">Third-party services</h2>
+          <p>
+            JAgentDesk wraps agent providers like Claude Code, Codex, and OpenCode. Those tools
+            communicate with their own APIs (Anthropic, OpenAI, etc.) using your credentials. JAgentDesk
+            doesn&apos;t manage or intercept those API calls.
+          </p>
+          <p>
+            If you use voice features with cloud providers (OpenAI speech), your voice data is sent
+            to those services according to their privacy policies.
+          </p>
+        </section>
+
+        <section className="space-y-3">
+          <h2 className="text-xl font-medium text-white">We don&apos;t sell your data</h2>
+          <p>We don&apos;t have your data to sell. JAgentDesk is self-hosted and local-first.</p>
+        </section>
+
+        <section className="space-y-3">
+          <h2 className="text-xl font-medium text-white">Questions</h2>
+          <p>If you have questions about privacy, review the local project documentation.</p>
+        </section>
+
+        <p className="text-sm text-white/50 pt-6">Last updated: February 2025</p>
+      </div>
+    </SiteShell>
+  );
+}

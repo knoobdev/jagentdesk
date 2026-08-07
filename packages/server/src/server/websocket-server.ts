@@ -1,0 +1,3349 @@
+import { WebSocket, WebSocketServer } from "ws";
+import type { IncomingMessage, Server as HTTPServer } from "http";
+import { join } from "path";
+import { hostname as getHostname } from "node:os";
+import { randomUUID } from "node:crypto";
+import { monitorEventLoopDelay } from "node:perf_hooks";
+import type { AgentManager, AgentMetricsSnapshot } from "./agent/agent-manager.js";
+import type { AgentStorage } from "./agent/agent-storage.js";
+import type { DownloadTokenStore } from "./file-download/token-store.js";
+import type { TerminalManager } from "../terminal/terminal-manager.js";
+import type pino from "pino";
+import type { ProjectRegistry, WorkspaceRegistry } from "./workspace-registry.js";
+import type { ProjectUpdate } from "./workspace-reconciliation-service.js";
+import type { FileBackedChatService } from "./chat/chat-service.js";
+import type { LoopService } from "./loop-service.js";
+import type { ScheduleService } from "./schedule/service.js";
+import type { CheckoutDiffManager, CheckoutDiffMetrics } from "./checkout-diff-manager.js";
+import type { DaemonConfigStore, MutableDaemonConfig } from "./daemon-config-store.js";
+import {
+  type ServerInfoStatusPayload,
+  type SessionInboundMessage,
+  type SessionOutboundMessage,
+  type WorkspaceSetupSnapshot,
+  type WSHelloMessage,
+  type WSInboundMessage,
+  WSInboundMessageSchema,
+  type ServerCapabilityState,
+  type ServerCapabilities,
+  type WSOutboundMessage,
+  wrapSessionMessage,
+} from "./messages.js";
+import { asUint8Array, decodeBinaryFrame } from "@jagentdesk/protocol/binary-frames/index";
+import type { TerminalActivity } from "@jagentdesk/protocol/terminal-activity";
+import type { HostnamesConfig } from "./hostnames.js";
+import { isHostnameAllowed } from "./hostnames.js";
+import { Session, type SessionLifecycleIntent, type SessionRuntimeMetrics } from "./session.js";
+import type { HubRelationshipManagement } from "./hub/relationship-controller.js";
+import type { PairingCodeDetails, PairingCodeManager } from "./pairing/pairing-code.js";
+import type { HubExecutionAgents } from "./hub/daemon-executions.js";
+import type { AgentProvider } from "./agent/agent-sdk-types.js";
+import { ProviderSnapshotManager } from "./agent/provider-snapshot-manager.js";
+import type {
+  WorkspaceGitRuntimeSnapshot,
+  WorkspaceGitService,
+  WorkspaceGitServiceMetrics,
+} from "./workspace-git-service.js";
+import type { GitCommandRuntimeMetricsSnapshot } from "../utils/git-command-runtime-metrics.js";
+import { snapshotGitCommandRuntimeMetrics } from "../utils/run-git-command.js";
+import type { WorkspaceAutoName } from "./workspace-auto-name.js";
+import { deriveProjectSlug } from "./workspace-git-metadata.js";
+import { PushTokenStore } from "./push/token-store.js";
+import { createPushNotificationSender, type PushNotificationSender } from "./push/notifications.js";
+import type { ScriptHealthState } from "./script-health-monitor.js";
+import type { ServiceProxySubsystem } from "./service-proxy.js";
+import type { WorkspaceScriptRuntimeStore } from "./workspace-script-runtime-store.js";
+import type { SpeechReadinessSnapshot, SpeechService } from "./speech/speech-runtime.js";
+import type { VoiceCallerContext, VoiceSpeakHandler } from "./voice-types.js";
+import {
+  computeNotificationPlan,
+  isPushEligibleAttentionReason,
+  type ClientPresenceState,
+} from "./agent-attention-policy.js";
+import {
+  buildAgentAttentionNotificationPayload,
+  findLatestPermissionRequest,
+} from "@jagentdesk/protocol/agent-attention-notification";
+import { createGitHubService } from "../services/github-service.js";
+import type { ForgeService } from "../services/forge-service.js";
+import {
+  extractWsBearerProtocol,
+  extractWsBearerToken,
+  isBearerTokenValid,
+  type DaemonAuthConfig,
+} from "./auth.js";
+import {
+  WebSocketRuntimeMetricsWindow,
+  type WebSocketRuntimeCounters,
+  type WebSocketRuntimeDiagnosticSnapshot,
+} from "./websocket/runtime-metrics.js";
+import { ProviderUsageService } from "../services/quota-fetcher/service.js";
+import { getProcessMemoryDiagnostics, getProcessUptimeSeconds } from "./process-diagnostics.js";
+import {
+  CLIENT_SHUTDOWN_RPC_REASON,
+  normalizeClientRestartRpcReason,
+} from "./lifecycle-reasons.js";
+import { CLIENT_CAPS } from "@jagentdesk/protocol/client-capabilities";
+import type { BrowserAutomationExecuteResponse } from "@jagentdesk/protocol/browser-automation/rpc-schemas";
+import {
+  BrowserAutomationHostCapabilitySchema,
+  type BrowserAutomationHostCapability,
+} from "@jagentdesk/protocol/browser-automation/capabilities";
+import type { BrowserToolsBroker } from "./browser-tools/broker.js";
+import type { DaemonRuntimeConfig } from "./session/daemon/daemon-session.js";
+import type { NonceChallengeManager } from "./pairing/nonce-challenge.js";
+import type { PairedDeviceStore } from "./pairing/paired-devices.js";
+import { verifySignedHello } from "./pairing/signed-hello.js";
+import {
+  APPLICATION_SOCKET_LEASE_CHECK_INTERVAL_MS,
+  ApplicationSocketLease,
+  MAX_PHYSICAL_SOCKET_BUFFERED_BYTES,
+  outboundFrameByteLength,
+  physicalSocketHasCapacity,
+  sendBoundedPhysicalFrame,
+  sendBoundedPhysicalFrameAndWait,
+} from "./websocket/physical-socket.js";
+
+const WS_CLOSE_DAEMON_AUTH_FAILED = 4401;
+
+export interface ExternalSocketMetadata {
+  transport: "tailnet";
+  externalSessionKey?: string;
+}
+
+/**
+ * Dependencies for the tailnet pairing gate: the paired-device store, the
+ * single-use nonce challenge manager, and the daemon's own public key (the
+ * value clients prove knowledge of when registering a new device).
+ */
+export interface PairingServerDependencies {
+  devices: PairedDeviceStore;
+  challenges: NonceChallengeManager;
+  daemonPublicKeyB64: string;
+  pairingCodeManager?: PairingCodeManager;
+}
+
+interface PendingConnection {
+  connectionLogger: pino.Logger;
+  helloTimeout: ReturnType<typeof setTimeout> | null;
+  identity: WebSocketConnectionIdentity;
+  /** Challenge nonce issued to this socket when it attached over the tailnet. */
+  challengeNonce?: string;
+  pairingRequestId?: string;
+  /** Created only after the mobile client has sent its pairing identity hint. */
+  pairingCode?: PairingCodeDetails;
+}
+
+type PendingPairingRequestPayload = Extract<
+  SessionOutboundMessage,
+  { type: "pairing.device.requested" }
+>["payload"];
+
+interface WebSocketConnectionIdentity {
+  connectionId: string;
+  transport: "direct" | "tailnet";
+  peer: "loopback" | "local_ipc" | "external";
+  browserOrigin: boolean;
+  host?: string;
+  origin?: string;
+  userAgent?: string;
+  remoteAddress?: string;
+  clientId?: string;
+  sessionId?: string;
+  appVersion?: string;
+  deviceId?: string;
+}
+
+interface WebSocketServerConfig {
+  allowedOrigins: Set<string>;
+  hostnames?: HostnamesConfig;
+  daemonStatusRpc?: boolean;
+}
+
+type WebSocketRuntimeMetrics = SessionRuntimeMetrics & CheckoutDiffMetrics;
+interface GitRuntimeMetrics {
+  commands: GitCommandRuntimeMetricsSnapshot;
+  workspaceService: WorkspaceGitServiceMetrics;
+}
+type WebSocketRuntimeDiagnosticPayload = WebSocketRuntimeDiagnosticSnapshot<
+  WebSocketRuntimeMetrics,
+  AgentMetricsSnapshot,
+  GitRuntimeMetrics
+>;
+type WebSocketRuntimeMetricsLogPayload = Omit<WebSocketRuntimeDiagnosticPayload, "collectedAt">;
+
+type TerminalAttentionReason = "finished" | "needs_input";
+
+function resolveTerminalAttentionReason(input: {
+  attentionReason?: TerminalActivity["attentionReason"];
+  previousState: "working" | "idle" | "attention" | null;
+  state: "working" | "idle" | "attention" | null;
+}): TerminalAttentionReason | null {
+  if (input.attentionReason === "finished") return "finished";
+  if (input.attentionReason === "needs_input") return "needs_input";
+  if (input.state === "attention") return "needs_input";
+  if (input.previousState === "working" && input.state === "idle") return "finished";
+  return null;
+}
+
+function terminalAttentionTitle(reason: TerminalAttentionReason): string {
+  return reason === "needs_input" ? "Terminal needs input" : "Terminal finished";
+}
+
+function createFallbackWorkspaceGitSnapshot(cwd: string): WorkspaceGitRuntimeSnapshot {
+  return {
+    cwd,
+    git: {
+      isGit: false,
+      repoRoot: null,
+      mainRepoRoot: null,
+      currentBranch: null,
+      remoteUrl: null,
+      isJAgentDeskOwnedWorktree: false,
+      isDirty: null,
+      baseRef: null,
+      aheadBehind: null,
+      aheadOfOrigin: null,
+      behindOfOrigin: null,
+      hasRemote: false,
+      diffStat: null,
+    },
+    forge: {
+      featuresEnabled: false,
+      authState: "no_remote",
+      pullRequest: null,
+      error: null,
+    },
+  };
+}
+
+function createFallbackWorkspaceGitService(): WorkspaceGitService {
+  return {
+    registerWorkspace: () => ({
+      unsubscribe: () => {},
+    }),
+    onSnapshotUpdated: () => ({
+      unsubscribe: () => {},
+    }),
+    peekSnapshot: () => null,
+    getCheckout: async (cwd: string) => ({
+      cwd,
+      isGit: false,
+      currentBranch: null,
+      remoteUrl: null,
+      worktreeRoot: null,
+      isJAgentDeskOwnedWorktree: false,
+      mainRepoRoot: null,
+    }),
+    getSnapshot: async (cwd: string) => createFallbackWorkspaceGitSnapshot(cwd),
+    resolveForge: async () => null,
+    getCheckoutDiff: async () => ({ diff: "" }),
+    validateBranchRef: async () => ({ kind: "not-found" }),
+    hasLocalBranch: async () => false,
+    suggestBranchesForCwd: async () => [],
+    listStashes: async () => [],
+    listWorktrees: async () => [],
+    getProjectSlug: async (cwd: string) => {
+      const snapshot = createFallbackWorkspaceGitSnapshot(cwd);
+      return deriveProjectSlug(cwd, snapshot.git.isGit ? snapshot.git.remoteUrl : null);
+    },
+    resolveRepoRoot: async (cwd: string) => cwd,
+    resolveDefaultBranch: async () => "main",
+    resolveRepoRemoteUrl: async () => null,
+    refresh: async () => {},
+    requestWorkingTreeWatch: async () => ({
+      repoRoot: null,
+      unsubscribe: () => {},
+    }),
+    scheduleRefreshForCwd: () => {},
+    onWorkspaceStateMayHaveChanged: () => {},
+    invalidateForge: () => {},
+    getMetrics: () => ({
+      workspaceTargetCount: 0,
+      workspaceListenerCount: 0,
+      repositoryTargetCount: 0,
+      repositoryWorkspaceLinkCount: 0,
+      workingTreeWatchTargetCount: 0,
+      workingTreeWatchListenerCount: 0,
+      workspaceObservationSetupInFlightCount: 0,
+      workingTreeWatchSetupInFlightCount: 0,
+      workspaceRefreshInFlightCount: 0,
+      workspaceRefreshQueuedCount: 0,
+      fetchInFlightCount: 0,
+      snapshotUpdatedListenerCount: 0,
+    }),
+    dispose: () => {},
+  };
+}
+
+function createNoopProjectRegistry(): ProjectRegistry {
+  return {
+    initialize: async () => {},
+    existsOnDisk: async () => true,
+    list: async () => [],
+    get: async () => null,
+    getOrCreateActiveByRoot: async (input) => ({
+      projectId: "prj_noop",
+      rootPath: input.rootPath,
+      kind: input.kind,
+      displayName: input.displayName,
+      projectKey: input.projectKey ?? null,
+      customName: null,
+      customIconRevision: null,
+      createdAt: input.timestamp,
+      updatedAt: input.timestamp,
+      archivedAt: null,
+    }),
+    upsert: async () => {},
+    update: async () => null,
+    archive: async () => {},
+    remove: async () => {},
+  };
+}
+
+function createNoopWorkspaceRegistry(): WorkspaceRegistry {
+  return {
+    initialize: async () => {},
+    existsOnDisk: async () => true,
+    list: async () => [],
+    get: async () => null,
+    update: async () => null,
+    upsert: async () => {},
+    archive: async () => {},
+    remove: async () => {},
+  };
+}
+
+function toServerCapabilityState(params: {
+  state: SpeechReadinessSnapshot["dictation"];
+  reason: string;
+}): ServerCapabilityState {
+  const { state, reason } = params;
+  return {
+    enabled: state.enabled,
+    reason,
+  };
+}
+
+function resolveCapabilityReason(params: {
+  state: SpeechReadinessSnapshot["dictation"];
+  readiness: SpeechReadinessSnapshot;
+}): string {
+  const { state, readiness } = params;
+  if (state.available) {
+    return "";
+  }
+
+  if (readiness.voiceFeature.reasonCode === "model_download_in_progress") {
+    const baseMessage = readiness.voiceFeature.message.trim();
+    if (baseMessage.includes("Try again in a few minutes")) {
+      return baseMessage;
+    }
+    return `${baseMessage} Try again in a few minutes.`;
+  }
+
+  return state.message;
+}
+
+function buildServerCapabilities(params: {
+  readiness: SpeechReadinessSnapshot | null;
+}): ServerCapabilities | undefined {
+  const readiness = params.readiness;
+  if (!readiness) {
+    return undefined;
+  }
+  return {
+    voice: {
+      dictation: toServerCapabilityState({
+        state: readiness.dictation,
+        reason: resolveCapabilityReason({
+          state: readiness.dictation,
+          readiness,
+        }),
+      }),
+      voice: toServerCapabilityState({
+        state: readiness.realtimeVoice,
+        reason: resolveCapabilityReason({
+          state: readiness.realtimeVoice,
+          readiness,
+        }),
+      }),
+    },
+  };
+}
+
+function areServerCapabilitiesEqual(
+  current: ServerCapabilities | undefined,
+  next: ServerCapabilities | undefined,
+): boolean {
+  return JSON.stringify(current ?? null) === JSON.stringify(next ?? null);
+}
+
+function bufferFromWsData(data: Buffer | ArrayBuffer | Buffer[] | string): Buffer {
+  if (typeof data === "string") return Buffer.from(data, "utf8");
+  if (Array.isArray(data)) {
+    return Buffer.concat(
+      data.map((item) => (Buffer.isBuffer(item) ? item : Buffer.from(item as ArrayBuffer))),
+    );
+  }
+  if (Buffer.isBuffer(data)) return data;
+  return Buffer.from(data);
+}
+
+function getBrowserHostCapability(
+  capabilities: Record<string, unknown> | null,
+): BrowserAutomationHostCapability | null {
+  const parsed = BrowserAutomationHostCapabilitySchema.safeParse(
+    capabilities?.[CLIENT_CAPS.browserHost],
+  );
+  return parsed.success ? parsed.data : null;
+}
+
+export interface WebSocketLike {
+  readyState: number;
+  bufferedAmount?: number;
+  send: (
+    data: string | Uint8Array | ArrayBuffer,
+    callback?: (error?: Error) => void,
+  ) => void | Promise<void>;
+  close: (code?: number, reason?: string) => void;
+  terminate?: () => void;
+  on: (event: "message" | "close" | "error", listener: (...args: unknown[]) => void) => void;
+  once: (event: "close" | "error", listener: (...args: unknown[]) => void) => void;
+}
+
+interface TrustedSessionConnection {
+  kind: "trusted";
+  session: Session;
+  clientId: string;
+  appVersion: string | null;
+  clientCapabilities: Record<string, unknown> | null;
+  connectionLogger: pino.Logger;
+  sockets: Set<WebSocketLike>;
+  externalDisconnectCleanupTimeout: ReturnType<typeof setTimeout> | null;
+}
+
+interface HubConnection {
+  kind: "hub";
+  session: Session;
+  daemonId: string;
+  connectionLogger: pino.Logger;
+  socket: WebSocketLike;
+}
+
+type SessionConnection = TrustedSessionConnection | HubConnection;
+
+type TrustedLifecycleKey =
+  | "clientId"
+  | "appVersion"
+  | "clientCapabilities"
+  | "sockets"
+  | "externalDisconnectCleanupTimeout";
+type HubLifecycleOverlap = Extract<keyof HubConnection, TrustedLifecycleKey>;
+const HUB_HAS_NO_TRUSTED_LIFECYCLE_STATE: HubLifecycleOverlap extends never ? true : never = true;
+void HUB_HAS_NO_TRUSTED_LIFECYCLE_STATE;
+
+interface BrowserToolsRegistration {
+  capabilitySignature: string;
+  unregister: () => void;
+}
+
+interface SocketSessionOptions {
+  clientId: string;
+  appVersion: string | null;
+  clientCapabilities: Record<string, unknown> | null;
+  scopes: readonly string[];
+  connectionLogger: pino.Logger;
+  onMessage: (message: SessionOutboundMessage) => void;
+  onMessageToSource?: (source: object, message: SessionOutboundMessage) => void;
+  onBinaryMessage?: (frame: Uint8Array) => void;
+  onBinaryMessageToSource?: (source: object, frame: Uint8Array) => Promise<void>;
+  getTransportBufferedAmount?: () => number | null;
+  onLifecycleIntent?: (intent: SessionLifecycleIntent) => void;
+  hubExecutionAgents?: HubExecutionAgents;
+  hubRelationships?: HubRelationshipManagement;
+}
+
+interface ClosePhysicalSocketParams {
+  ws: WebSocketLike;
+  logMessage: string;
+  logFields?: Record<string, unknown>;
+}
+
+const SLOW_REQUEST_THRESHOLD_MS = 500;
+const EXTERNAL_SESSION_DISCONNECT_GRACE_MS = 90_000;
+const HELLO_TIMEOUT_MS = 15_000;
+// A new tailnet device intentionally pauses before hello while its owner
+// reads the code from the desktop and enters it on mobile. Keep that socket
+// alive for the complete pairing-code lifetime instead of returning the
+// misleading "Hello timeout" error after 15 seconds.
+const TAILNET_PAIRING_HELLO_TIMEOUT_MS = 5 * 60 * 1000;
+const WS_CLOSE_HELLO_TIMEOUT = 4001;
+const WS_CLOSE_INVALID_HELLO = 4002;
+const WS_CLOSE_INCOMPATIBLE_PROTOCOL = 4003;
+const WS_CLOSE_PAIRING_CANCELLED = 4408;
+const PAIRING_ALREADY_IN_PROGRESS_REASON = "Another device pairing is already in progress";
+const WS_CLOSE_SERVER_SHUTDOWN = 1001;
+const WS_PROTOCOL_VERSION = 1;
+const WS_RUNTIME_METRICS_FLUSH_MS = 30_000;
+
+export class MissingDaemonVersionError extends Error {
+  constructor() {
+    super("VoiceAssistantWebSocketServer requires a non-empty daemonVersion.");
+    this.name = "MissingDaemonVersionError";
+  }
+}
+
+interface RequiredWebSocketServices {
+  chatService: FileBackedChatService;
+  loopService: LoopService;
+  scheduleService: ScheduleService;
+  checkoutDiffManager: CheckoutDiffManager;
+}
+
+function requireWebSocketServices(params: {
+  chatService?: FileBackedChatService;
+  loopService?: LoopService;
+  scheduleService?: ScheduleService;
+  checkoutDiffManager?: CheckoutDiffManager;
+}): RequiredWebSocketServices {
+  const { chatService, loopService, scheduleService, checkoutDiffManager } = params;
+  if (!chatService) {
+    throw new Error("VoiceAssistantWebSocketServer requires a chat service.");
+  }
+  if (!loopService) {
+    throw new Error("VoiceAssistantWebSocketServer requires a loop service.");
+  }
+  if (!scheduleService) {
+    throw new Error("VoiceAssistantWebSocketServer requires a schedule service.");
+  }
+  if (!checkoutDiffManager) {
+    throw new Error("VoiceAssistantWebSocketServer requires a checkout diff manager.");
+  }
+  return { chatService, loopService, scheduleService, checkoutDiffManager };
+}
+
+/**
+ * WebSocket server that only accepts sockets + parses/forwards messages to the session layer.
+ */
+export class VoiceAssistantWebSocketServer {
+  private readonly logger: pino.Logger;
+  private readonly wss: WebSocketServer;
+  private readonly pendingConnections: Map<WebSocketLike, PendingConnection> = new Map();
+  private readonly sessions: Map<WebSocketLike, SessionConnection> = new Map();
+  private readonly socketIdentities: Map<WebSocketLike, WebSocketConnectionIdentity> = new Map();
+  private readonly externalSessionsByKey: Map<string, TrustedSessionConnection> = new Map();
+  private readonly serverId: string;
+  private readonly daemonVersion: string;
+  private readonly daemonRuntimeConfig: DaemonRuntimeConfig | undefined;
+  private readonly agentManager: AgentManager;
+  private readonly agentStorage: AgentStorage;
+  private readonly projectRegistry: ProjectRegistry;
+  private readonly workspaceRegistry: WorkspaceRegistry;
+  private readonly chatService: FileBackedChatService;
+  private readonly loopService: LoopService;
+  private readonly scheduleService: ScheduleService;
+  private readonly checkoutDiffManager: CheckoutDiffManager;
+  private readonly github: ForgeService;
+  private readonly workspaceGitService: WorkspaceGitService;
+  private readonly workspaceAutoName: WorkspaceAutoName;
+  private readonly downloadTokenStore: DownloadTokenStore;
+  private readonly jagentdeskHome: string;
+  private readonly worktreesRoot: string | undefined;
+  private readonly daemonConfigStore: DaemonConfigStore;
+  private readonly pushTokenStore: PushTokenStore;
+  private readonly pushNotificationSender: PushNotificationSender;
+  private readonly mcpBaseUrl: string | null;
+  private speech!: SpeechService | null;
+  private terminalManager!: TerminalManager | null;
+  private serviceProxy!: ServiceProxySubsystem | null;
+  private scriptRuntimeStore!: WorkspaceScriptRuntimeStore | null;
+  private getDaemonTcpPort!: (() => number | null) | null;
+  private getDaemonTcpHost!: (() => string | null) | null;
+  private serviceProxyPublicBaseUrl!: string | null;
+  private resolveScriptHealth!: ((hostname: string) => ScriptHealthState | null) | null;
+  private dictation!: {
+    finalTimeoutMs?: number;
+  } | null;
+  private readonly voiceSpeakHandlers = new Map<string, VoiceSpeakHandler>();
+  private readonly voiceCallerContexts = new Map<string, VoiceCallerContext>();
+  private readonly workspaceSetupSnapshots = new Map<string, WorkspaceSetupSnapshot>();
+  private readonly providerSnapshotManager: ProviderSnapshotManager;
+  private onLifecycleIntent!: ((intent: SessionLifecycleIntent) => void) | null;
+  private onBranchChanged!:
+    | ((workspaceId: string, oldBranch: string | null, newBranch: string | null) => void)
+    | null;
+  private serverCapabilities: ServerCapabilities | undefined;
+  private readonly runtimeMetrics = new WebSocketRuntimeMetricsWindow();
+  private lastRuntimeMetricsSnapshot: WebSocketRuntimeDiagnosticPayload | null = null;
+  private runtimeMetricsInterval: ReturnType<typeof setInterval> | null = null;
+  private applicationSocketLeaseInterval: ReturnType<typeof setInterval> | null = null;
+  private readonly applicationSocketLease = new ApplicationSocketLease<WebSocketLike>();
+  private eventLoopDelayMonitor: ReturnType<typeof monitorEventLoopDelay> | null = null;
+  private unsubscribeSpeechReadiness: (() => void) | null = null;
+  private unsubscribeDaemonConfigChange: (() => void) | null = null;
+  private readonly providerUsageService: ProviderUsageService;
+  private unsubscribeTerminalActivity: (() => void) | null = null;
+  private readonly browserToolsBroker: BrowserToolsBroker | null;
+  private readonly hubRelationships: HubRelationshipManagement | null;
+  private readonly pairing: PairingServerDependencies | null;
+  /**
+   * Pairing requests are retained until their code expires or registration
+   * completes. The request can arrive while the desktop renderer is still
+   * reconnecting, so a one-shot broadcast is not sufficient to drive the
+   * desktop approval popup.
+   */
+  /**
+   * There is deliberately one active pairing request per daemon. A mobile
+   * retry can open a new tailnet socket while the owner is reading the code;
+   * that retry must reuse the existing request and code instead of creating a
+   * second desktop card with a different code.
+   */
+  private readonly pendingPairingRequests = new Map<string, PendingPairingRequestPayload>();
+  private readonly pendingPairingRequestTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly browserToolsRegistrations = new Map<string, BrowserToolsRegistration>();
+  private acceptingConnections = true;
+  private readonly advertiseDaemonStatusRpc: boolean;
+
+  constructor(
+    server: HTTPServer,
+    logger: pino.Logger,
+    serverId: string,
+    agentManager: AgentManager,
+    agentStorage: AgentStorage,
+    downloadTokenStore: DownloadTokenStore,
+    jagentdeskHome: string,
+    daemonConfigStore: DaemonConfigStore,
+    mcpBaseUrl: string | null,
+    wsConfig: WebSocketServerConfig,
+    workspaceAutoName: WorkspaceAutoName,
+    auth?: DaemonAuthConfig,
+    speech?: SpeechService | null,
+    terminalManager?: TerminalManager | null,
+    dictation?: {
+      finalTimeoutMs?: number;
+    },
+    daemonVersion?: string,
+    onLifecycleIntent?: (intent: SessionLifecycleIntent) => void,
+    projectRegistry?: ProjectRegistry,
+    workspaceRegistry?: WorkspaceRegistry,
+    chatService?: FileBackedChatService,
+    loopService?: LoopService,
+    scheduleService?: ScheduleService,
+    checkoutDiffManager?: CheckoutDiffManager,
+    serviceProxy?: ServiceProxySubsystem | null,
+    scriptRuntimeStore?: WorkspaceScriptRuntimeStore | null,
+    onBranchChanged?: (
+      workspaceId: string,
+      oldBranch: string | null,
+      newBranch: string | null,
+    ) => void,
+    getDaemonTcpPort?: () => number | null,
+    getDaemonTcpHost?: () => string | null,
+    resolveScriptHealth?: (hostname: string) => ScriptHealthState | null,
+    workspaceGitService?: WorkspaceGitService,
+    github?: ForgeService,
+    pushNotificationSender?: PushNotificationSender,
+    providerSnapshotManager?: ProviderSnapshotManager,
+    daemonRuntimeConfig?: DaemonRuntimeConfig,
+    serviceProxyPublicBaseUrl?: string | null,
+    browserToolsBroker?: BrowserToolsBroker | null,
+    hubRelationships?: HubRelationshipManagement | null,
+    pairing?: PairingServerDependencies | null,
+  ) {
+    this.logger = logger.child({ module: "websocket-server" });
+    this.advertiseDaemonStatusRpc = wsConfig.daemonStatusRpc !== false;
+    this.serverId = serverId;
+    if (typeof daemonVersion !== "string" || daemonVersion.trim().length === 0) {
+      throw new MissingDaemonVersionError();
+    }
+    this.daemonVersion = daemonVersion.trim();
+    this.daemonRuntimeConfig = daemonRuntimeConfig;
+    this.browserToolsBroker = browserToolsBroker ?? null;
+    this.hubRelationships = hubRelationships ?? null;
+    this.pairing = pairing ?? null;
+    this.agentManager = agentManager;
+    this.agentStorage = agentStorage;
+    this.projectRegistry = projectRegistry ?? createNoopProjectRegistry();
+    this.workspaceRegistry = workspaceRegistry ?? createNoopWorkspaceRegistry();
+    const requiredServices = requireWebSocketServices({
+      chatService,
+      loopService,
+      scheduleService,
+      checkoutDiffManager,
+    });
+    this.chatService = requiredServices.chatService;
+    this.loopService = requiredServices.loopService;
+    this.scheduleService = requiredServices.scheduleService;
+    this.checkoutDiffManager = requiredServices.checkoutDiffManager;
+    this.github = github ?? createGitHubService();
+    this.workspaceGitService = workspaceGitService ?? createFallbackWorkspaceGitService();
+    this.workspaceAutoName = workspaceAutoName;
+    this.downloadTokenStore = downloadTokenStore;
+    this.jagentdeskHome = jagentdeskHome;
+    this.worktreesRoot = daemonRuntimeConfig?.worktreesRoot;
+    this.daemonConfigStore = daemonConfigStore;
+    this.mcpBaseUrl = mcpBaseUrl;
+    this.assignOptionalServices({
+      speech,
+      terminalManager,
+      dictation,
+      onLifecycleIntent,
+      serviceProxy,
+      scriptRuntimeStore,
+      onBranchChanged,
+      getDaemonTcpPort,
+      getDaemonTcpHost,
+      serviceProxyPublicBaseUrl,
+      resolveScriptHealth,
+    });
+    if (!providerSnapshotManager) {
+      throw new Error("providerSnapshotManager is required");
+    }
+    this.providerSnapshotManager = providerSnapshotManager;
+    this.serverCapabilities = buildServerCapabilities({
+      readiness: this.speech?.getReadiness() ?? null,
+    });
+    this.unsubscribeSpeechReadiness =
+      this.speech?.onReadinessChange((snapshot) => {
+        this.publishSpeechReadiness(snapshot);
+      }) ?? null;
+    this.unsubscribeDaemonConfigChange = this.daemonConfigStore.onChange((config, details) => {
+      const nextAgentManagerState = this.providerSnapshotManager.applyMutableProviderConfig(
+        config.providers,
+        { removeProviders: details.removedProviders },
+      );
+      this.agentManager.updateProviderRegistry(nextAgentManagerState);
+      this.broadcastDaemonConfigChanged(config);
+    });
+
+    const pushLogger = this.logger.child({ module: "push" });
+    this.pushTokenStore = new PushTokenStore(pushLogger, join(jagentdeskHome, "push-tokens.json"));
+    this.pushNotificationSender =
+      pushNotificationSender ?? createPushNotificationSender(pushLogger, this.pushTokenStore);
+
+    this.agentManager.setAgentAttentionCallback((params) => {
+      void this.broadcastAgentAttention(params).catch((err) => {
+        this.logger.warn({ err, agentId: params.agentId }, "Failed to broadcast agent attention");
+      });
+    });
+
+    this.providerUsageService = new ProviderUsageService({
+      logger: this.logger,
+    });
+
+    this.wss = this.createWebSocketServer(server, wsConfig, auth);
+    this.startRuntimeMetricsInterval();
+    this.startApplicationSocketLeaseInterval();
+
+    this.logger.info("WebSocket server initialized on /ws");
+  }
+
+  private assignOptionalServices(params: {
+    speech: SpeechService | null | undefined;
+    terminalManager: TerminalManager | null | undefined;
+    dictation: { finalTimeoutMs?: number } | undefined;
+    onLifecycleIntent: ((intent: SessionLifecycleIntent) => void) | undefined;
+    serviceProxy: ServiceProxySubsystem | null | undefined;
+    scriptRuntimeStore: WorkspaceScriptRuntimeStore | null | undefined;
+    onBranchChanged:
+      | ((workspaceId: string, oldBranch: string | null, newBranch: string | null) => void)
+      | undefined;
+    getDaemonTcpPort: (() => number | null) | undefined;
+    getDaemonTcpHost: (() => string | null) | undefined;
+    serviceProxyPublicBaseUrl: string | null | undefined;
+    resolveScriptHealth: ((hostname: string) => ScriptHealthState | null) | undefined;
+  }): void {
+    this.speech = params.speech ?? null;
+    this.terminalManager = params.terminalManager ?? null;
+    if (this.terminalManager) {
+      this.unsubscribeTerminalActivity = this.terminalManager.subscribeTerminalActivity((event) => {
+        const reason = resolveTerminalAttentionReason({
+          attentionReason: event.activity?.attentionReason,
+          previousState: event.previous?.state ?? null,
+          state: event.activity?.state ?? null,
+        });
+        if (!reason) {
+          return;
+        }
+        void this.broadcastTerminalAttention({
+          terminalId: event.terminalId,
+          cwd: event.cwd,
+          ...(event.workspaceId ? { workspaceId: event.workspaceId } : {}),
+          terminalName: event.name,
+          reason,
+        }).catch((err) => {
+          this.logger.warn(
+            { err, terminalId: event.terminalId },
+            "Failed to broadcast terminal attention",
+          );
+        });
+      });
+    }
+    this.dictation = params.dictation ?? null;
+    this.onLifecycleIntent = params.onLifecycleIntent ?? null;
+    this.serviceProxy = params.serviceProxy ?? null;
+    this.scriptRuntimeStore = params.scriptRuntimeStore ?? null;
+    this.onBranchChanged = params.onBranchChanged ?? null;
+    this.getDaemonTcpPort = params.getDaemonTcpPort ?? null;
+    this.getDaemonTcpHost = params.getDaemonTcpHost ?? null;
+    this.serviceProxyPublicBaseUrl = params.serviceProxyPublicBaseUrl ?? null;
+    this.resolveScriptHealth = params.resolveScriptHealth ?? null;
+  }
+
+  private createWebSocketServer(
+    server: HTTPServer,
+    wsConfig: WebSocketServerConfig,
+    auth: DaemonAuthConfig | undefined,
+  ): WebSocketServer {
+    const { allowedOrigins, hostnames } = wsConfig;
+    const password = auth?.password;
+    const wss = new WebSocketServer({
+      server,
+      path: "/ws",
+      handleProtocols: (protocols) => selectWebSocketProtocol(protocols, password),
+      verifyClient: ({ req }, callback) => {
+        this.verifyWsUpgrade(req, allowedOrigins, hostnames, callback);
+      },
+    });
+    wss.on("connection", (ws, request) => {
+      void this.attachAuthenticatedSocket(ws, request, password);
+    });
+    return wss;
+  }
+
+  private startRuntimeMetricsInterval(): void {
+    this.eventLoopDelayMonitor = monitorEventLoopDelay({ resolution: 10 });
+    this.eventLoopDelayMonitor.enable();
+    const runtimeMetricsInterval = setInterval(() => {
+      this.flushRuntimeMetrics();
+    }, WS_RUNTIME_METRICS_FLUSH_MS);
+    this.runtimeMetricsInterval = runtimeMetricsInterval;
+    (runtimeMetricsInterval as unknown as { unref?: () => void }).unref?.();
+  }
+
+  private startApplicationSocketLeaseInterval(): void {
+    const interval = setInterval(() => {
+      for (const ws of this.applicationSocketLease.listExpired()) {
+        this.closePhysicalSocket({
+          ws,
+          logMessage: "Closing physical WebSocket with expired application lease",
+        });
+      }
+    }, APPLICATION_SOCKET_LEASE_CHECK_INTERVAL_MS);
+    this.applicationSocketLeaseInterval = interval;
+    (interval as unknown as { unref?: () => void }).unref?.();
+  }
+
+  // Main-loop stall visibility: terminal frames and agent traffic share one event
+  // loop, so delay percentiles here are the ground truth for "the daemon is busy".
+  private snapshotEventLoopDelay(): { p50Ms: number; p99Ms: number; maxMs: number } | null {
+    const monitor = this.eventLoopDelayMonitor;
+    if (!monitor) {
+      return null;
+    }
+    const toMs = (nanoseconds: number): number => Math.round(nanoseconds / 1e5) / 10;
+    const snapshot = {
+      p50Ms: toMs(monitor.percentile(50)),
+      p99Ms: toMs(monitor.percentile(99)),
+      maxMs: toMs(monitor.max),
+    };
+    monitor.reset();
+    return snapshot;
+  }
+
+  private verifyWsUpgrade(
+    req: IncomingMessage,
+    allowedOrigins: Set<string>,
+    hostnames: HostnamesConfig | undefined,
+    callback: (res: boolean, code?: number, message?: string) => void,
+  ): void {
+    if (!this.acceptingConnections) {
+      callback(false, 503, "Server shutting down");
+      return;
+    }
+
+    const requestMetadata = extractSocketRequestMetadata(req);
+    const origin = requestMetadata.origin;
+    const requestHost = requestMetadata.host ?? null;
+    if (requestHost && !isHostnameAllowed(requestHost, hostnames)) {
+      this.incrementRuntimeCounter("hostRejected");
+      this.logger.warn(
+        { ...requestMetadata, host: requestHost },
+        "Rejected connection from disallowed host",
+      );
+      callback(false, 403, "Host not allowed");
+      return;
+    }
+    const sameOrigin = isWebSocketSameOrigin(origin, requestHost);
+
+    if (!origin || allowedOrigins.has("*") || allowedOrigins.has(origin) || sameOrigin) {
+      callback(true);
+    } else {
+      this.incrementRuntimeCounter("originRejected");
+      this.logger.warn({ ...requestMetadata, origin }, "Rejected connection from origin");
+      callback(false, 403, "Origin not allowed");
+    }
+  }
+
+  private async attachAuthenticatedSocket(
+    ws: WebSocket,
+    request: IncomingMessage,
+    password: string | undefined,
+  ): Promise<void> {
+    if (password) {
+      const requestMetadata = extractSocketRequestMetadata(request);
+      const protocol = extractWsBearerProtocol(request.headers["sec-websocket-protocol"]);
+      const token = extractWsBearerToken(protocol);
+      const isAuthorized = isBearerTokenValid({ password, token });
+      if (!isAuthorized) {
+        const reason = token === null ? "Password required" : "Incorrect password";
+        this.logger.warn(
+          { ...requestMetadata, hasToken: token !== null },
+          "Rejected WebSocket connection with invalid daemon password",
+        );
+        ws.close(WS_CLOSE_DAEMON_AUTH_FAILED, reason);
+        return;
+      }
+    }
+
+    await this.attachSocket(ws, request);
+  }
+
+  public broadcast(message: WSOutboundMessage): void {
+    const trustedSockets = [...this.sessions]
+      .filter(([, connection]) => connection.kind === "trusted")
+      .map(([ws]) => ws);
+    this.sendMessageToSockets(trustedSockets, message);
+  }
+
+  private rememberPendingPairingRequest(payload: PendingPairingRequestPayload): void {
+    for (const requestId of this.pendingPairingRequests.keys()) {
+      if (requestId !== payload.requestId) {
+        this.forgetPendingPairingRequest(requestId);
+      }
+    }
+    this.forgetPendingPairingRequest(payload.requestId);
+    this.pendingPairingRequests.set(payload.requestId, payload);
+    const timeout = setTimeout(
+      () => {
+        this.forgetPendingPairingRequest(payload.requestId);
+      },
+      Math.max(0, payload.expiresAtMs - Date.now()),
+    );
+    (timeout as unknown as { unref?: () => void }).unref?.();
+    this.pendingPairingRequestTimers.set(payload.requestId, timeout);
+  }
+
+  private updatePendingPairingRequest(
+    requestId: string,
+    patch: Partial<
+      Pick<
+        PendingPairingRequestPayload,
+        "deviceName" | "devicePublicKeyB64" | "connectionId" | "remoteAddress"
+      >
+    >,
+  ): void {
+    const current = this.pendingPairingRequests.get(requestId);
+    if (!current) {
+      return;
+    }
+    const updated = { ...current, ...patch };
+    this.rememberPendingPairingRequest(updated);
+    this.broadcast(
+      wrapSessionMessage({
+        type: "pairing.device.requested",
+        payload: updated,
+      }),
+    );
+  }
+
+  private getActivePendingPairingRequest(): PendingPairingRequestPayload | null {
+    const now = Date.now();
+    const request = this.pendingPairingRequests.values().next().value as
+      | PendingPairingRequestPayload
+      | undefined;
+    if (!request) {
+      return null;
+    }
+    if (request.expiresAtMs <= now) {
+      this.forgetPendingPairingRequest(request.requestId);
+      return null;
+    }
+    return request;
+  }
+
+  private replacePendingPairingSocket(requestId: string, currentWs: WebSocketLike): void {
+    for (const [ws, pending] of this.pendingConnections) {
+      if (ws === currentWs || pending.pairingRequestId !== requestId) {
+        continue;
+      }
+      this.clearPendingConnection(ws);
+      try {
+        ws.close(WS_CLOSE_PAIRING_CANCELLED, "Pairing connection replaced by a retry");
+      } catch {
+        // The previous retry may already have closed its socket.
+      }
+    }
+  }
+
+  private rejectDuplicatePairingConnection(
+    ws: WebSocketLike,
+    pendingConnection: PendingConnection,
+  ): void {
+    const requestId = pendingConnection.pairingRequestId;
+    if (!requestId) {
+      this.clearPendingConnection(ws);
+      return;
+    }
+    const cancellationMessage = wrapSessionMessage({
+      type: "pairing.device.cancelled",
+      payload: {
+        requestId,
+        reason: PAIRING_ALREADY_IN_PROGRESS_REASON,
+      },
+    });
+    this.sendToClient(ws, cancellationMessage);
+    this.clearPendingConnection(ws);
+    const closeTimer = setTimeout(() => {
+      try {
+        ws.close(WS_CLOSE_PAIRING_CANCELLED, PAIRING_ALREADY_IN_PROGRESS_REASON);
+      } catch {
+        // The socket may have closed after receiving the cancellation.
+      }
+    }, 10);
+    (closeTimer as unknown as { unref?: () => void }).unref?.();
+  }
+
+  private forgetPendingPairingRequest(requestId: string): void {
+    this.pendingPairingRequests.delete(requestId);
+    const timeout = this.pendingPairingRequestTimers.get(requestId);
+    if (timeout) {
+      clearTimeout(timeout);
+      this.pendingPairingRequestTimers.delete(requestId);
+    }
+  }
+
+  /**
+   * Declines a pending tailnet device from a trusted desktop session. The
+   * request is removed before the waiting socket is closed, so a late code
+   * submission cannot register the device after the desktop declined it.
+   */
+  private async cancelPendingPairingRequest(input: { requestId: string; reason: string }): Promise<{
+    ok: boolean;
+    error?: string;
+  }> {
+    const pendingRequest = this.pendingPairingRequests.get(input.requestId);
+    const pendingEntry = [...this.pendingConnections.entries()].find(
+      ([, pending]) => pending.pairingRequestId === input.requestId,
+    );
+    if (!pendingRequest || !pendingEntry) {
+      return { ok: false, error: "Pairing request is no longer pending" };
+    }
+
+    const [ws] = pendingEntry;
+    const reason = input.reason || "Pairing request declined by desktop";
+    this.forgetPendingPairingRequest(input.requestId);
+    const cancellationMessage = wrapSessionMessage({
+      type: "pairing.device.cancelled",
+      payload: { requestId: input.requestId, reason },
+    });
+    try {
+      const payload = JSON.stringify(cancellationMessage);
+      const sent = await sendBoundedPhysicalFrameAndWait({
+        socket: ws,
+        frame: payload,
+        onHighWater: () => this.closeAtOutboundHighWater(ws),
+      });
+      if (sent) {
+        this.runtimeMetrics.recordOutboundMessage(cancellationMessage, ws.bufferedAmount);
+        // Let the WebSocket implementation flush the control event to the
+        // mobile peer before the close frame follows it.
+        await new Promise<void>((resolve) => setTimeout(resolve, 10));
+      }
+    } catch (error) {
+      this.logger.debug(
+        { err: error, requestId: input.requestId },
+        "Could not notify mobile about declined pairing request",
+      );
+    }
+    this.broadcast(cancellationMessage);
+    this.clearPendingConnection(ws);
+    try {
+      ws.close(WS_CLOSE_PAIRING_CANCELLED, "Pairing request declined");
+    } catch {
+      // The socket may have closed between the lookup and the decline.
+    }
+    return { ok: true };
+  }
+
+  private replayPendingPairingRequests(
+    ws: WebSocketLike,
+    transport: WebSocketConnectionIdentity["transport"],
+  ): void {
+    // The desktop approval UI is a local trusted client. Do not replay the
+    // desktop-only notification to the tailnet client that triggered it.
+    if (transport === "tailnet") {
+      return;
+    }
+
+    const now = Date.now();
+    for (const request of this.pendingPairingRequests.values()) {
+      if (request.expiresAtMs <= now) {
+        this.forgetPendingPairingRequest(request.requestId);
+        continue;
+      }
+      this.sendToClient(
+        ws,
+        wrapSessionMessage({ type: "pairing.device.requested", payload: request }),
+      );
+    }
+  }
+
+  public listTrustedSessions(): Session[] {
+    return Array.from(
+      new Set(
+        [...this.sessions.values(), ...this.externalSessionsByKey.values()]
+          .filter(
+            (connection): connection is TrustedSessionConnection => connection.kind === "trusted",
+          )
+          .map((connection) => connection.session),
+      ),
+    );
+  }
+
+  public publishProjectUpdate(update: ProjectUpdate): void {
+    for (const session of this.listTrustedSessions()) session.emitProjectUpdate(update);
+  }
+
+  public publishSpeechReadiness(readiness: SpeechReadinessSnapshot | null): void {
+    this.updateServerCapabilities(buildServerCapabilities({ readiness }));
+  }
+
+  public updateServerCapabilities(capabilities: ServerCapabilities | null | undefined): void {
+    const next = capabilities ?? undefined;
+    if (areServerCapabilitiesEqual(this.serverCapabilities, next)) {
+      return;
+    }
+    this.serverCapabilities = next;
+    this.broadcastCapabilitiesUpdate();
+  }
+
+  public async attachExternalSocket(
+    ws: WebSocketLike,
+    metadata?: ExternalSocketMetadata,
+  ): Promise<void> {
+    if (metadata?.transport === "tailnet") {
+      this.incrementRuntimeCounter("tailnetExternalSocketAttached");
+    }
+    await this.attachSocket(ws, undefined, metadata);
+  }
+
+  public async attachHubSocket(
+    ws: WebSocketLike,
+    options: {
+      daemonId: string;
+      scopes: readonly string[];
+      agents: HubExecutionAgents;
+    },
+  ): Promise<void> {
+    if (!this.acceptingConnections) {
+      ws.close(WS_CLOSE_SERVER_SHUTDOWN, "Server shutting down");
+      return;
+    }
+
+    const connectionLogger = this.logger.child({
+      connectionKind: "hub",
+      daemonId: options.daemonId,
+    });
+    const session = this.createSocketSession({
+      clientId: `hub:${options.daemonId}`,
+      appVersion: null,
+      clientCapabilities: null,
+      scopes: options.scopes,
+      connectionLogger,
+      onMessage: (message) => this.sendToClient(ws, wrapSessionMessage(message)),
+      hubExecutionAgents: options.agents,
+    });
+    const connection: HubConnection = {
+      kind: "hub",
+      session,
+      daemonId: options.daemonId,
+      connectionLogger,
+      socket: ws,
+    };
+    this.sessions.set(ws, connection);
+    this.bindSocketHandlers(ws);
+    connectionLogger.info("Hub session attached");
+  }
+
+  public prepareForShutdown(): void {
+    this.acceptingConnections = false;
+  }
+
+  public async close(): Promise<void> {
+    this.prepareForShutdown();
+    this.unsubscribeSpeechReadiness?.();
+    this.unsubscribeSpeechReadiness = null;
+    this.unsubscribeDaemonConfigChange?.();
+    this.unsubscribeDaemonConfigChange = null;
+    this.unsubscribeTerminalActivity?.();
+    this.unsubscribeTerminalActivity = null;
+    if (this.runtimeMetricsInterval) {
+      clearInterval(this.runtimeMetricsInterval);
+      this.runtimeMetricsInterval = null;
+    }
+    if (this.applicationSocketLeaseInterval) {
+      clearInterval(this.applicationSocketLeaseInterval);
+      this.applicationSocketLeaseInterval = null;
+    }
+    this.applicationSocketLease.clear();
+    this.flushRuntimeMetrics({ final: true });
+    this.eventLoopDelayMonitor?.disable();
+    this.eventLoopDelayMonitor = null;
+
+    const uniqueConnections = new Set<SessionConnection>([
+      ...this.sessions.values(),
+      ...this.externalSessionsByKey.values(),
+    ]);
+
+    const pendingSockets = new Set<WebSocketLike>(this.pendingConnections.keys());
+    for (const pending of this.pendingConnections.values()) {
+      if (pending.helloTimeout) {
+        clearTimeout(pending.helloTimeout);
+        pending.helloTimeout = null;
+      }
+    }
+
+    const cleanupPromises: Promise<void>[] = [];
+    for (const connection of uniqueConnections) {
+      if (connection.kind === "trusted" && connection.externalDisconnectCleanupTimeout) {
+        clearTimeout(connection.externalDisconnectCleanupTimeout);
+        connection.externalDisconnectCleanupTimeout = null;
+      }
+
+      cleanupPromises.push(Promise.resolve(connection.session.cleanup()));
+      const sockets = connection.kind === "trusted" ? connection.sockets : [connection.socket];
+      for (const ws of sockets) {
+        cleanupPromises.push(
+          new Promise<void>((resolve) => {
+            // WebSocket.CLOSED = 3
+            if (ws.readyState === 3) {
+              resolve();
+              return;
+            }
+            ws.once("close", () => resolve());
+            ws.close();
+          }),
+        );
+      }
+    }
+
+    for (const ws of pendingSockets) {
+      cleanupPromises.push(
+        new Promise<void>((resolve) => {
+          if (ws.readyState === 3) {
+            resolve();
+            return;
+          }
+          ws.once("close", () => resolve());
+          ws.close();
+        }),
+      );
+    }
+
+    await Promise.all(cleanupPromises);
+    this.providerSnapshotManager.destroy();
+    this.checkoutDiffManager.dispose();
+    this.workspaceGitService.dispose();
+    this.pendingConnections.clear();
+    for (const requestId of this.pendingPairingRequests.keys()) {
+      this.forgetPendingPairingRequest(requestId);
+    }
+    this.sessions.clear();
+    this.socketIdentities.clear();
+    this.externalSessionsByKey.clear();
+    for (const clientId of this.browserToolsRegistrations.keys()) {
+      this.unregisterBrowserToolsClient(clientId);
+    }
+    this.wss.close();
+  }
+
+  private sendToClient(ws: WebSocketLike, message: WSOutboundMessage): void {
+    this.sendMessageToSockets([ws], message);
+  }
+
+  private sendMessageToSockets(sockets: Iterable<WebSocketLike>, message: WSOutboundMessage): void {
+    const writableSockets = [...sockets].filter((ws) => this.ensureOutboundCapacity(ws, 0));
+    if (writableSockets.length === 0) {
+      return;
+    }
+
+    let payload: string;
+    try {
+      payload = JSON.stringify(message);
+    } catch (err) {
+      this.logger.warn({ err }, "ws_serialize_failed");
+      return;
+    }
+
+    const payloadBytes = outboundFrameByteLength(payload);
+    for (const ws of writableSockets) {
+      this.sendFrameToClient(ws, payload, payloadBytes, () => {
+        this.runtimeMetrics.recordOutboundMessage(message, ws.bufferedAmount);
+      });
+    }
+  }
+
+  private sendBinaryToClient(ws: WebSocketLike, frame: Uint8Array): void {
+    this.sendFrameToClient(ws, frame, outboundFrameByteLength(frame), () => {
+      this.runtimeMetrics.recordOutboundBinaryFrame(ws.bufferedAmount);
+    });
+  }
+
+  private async sendBinaryToClientAndWait(ws: WebSocketLike, frame: Uint8Array): Promise<void> {
+    try {
+      const sent = await sendBoundedPhysicalFrameAndWait({
+        socket: ws,
+        frame,
+        onHighWater: () => this.closeAtOutboundHighWater(ws),
+      });
+      if (!sent) {
+        throw new Error("Physical WebSocket is not open");
+      }
+      this.runtimeMetrics.recordOutboundBinaryFrame(ws.bufferedAmount);
+    } catch (err) {
+      this.logger.warn({ err }, "ws_send_failed");
+      throw err;
+    }
+  }
+
+  private sendFrameToClient(
+    ws: WebSocketLike,
+    frame: string | Uint8Array,
+    frameBytes: number,
+    recordSent: () => void,
+  ): void {
+    try {
+      const sent = sendBoundedPhysicalFrame({
+        socket: ws,
+        frame,
+        frameBytes,
+        onHighWater: () => this.closeAtOutboundHighWater(ws),
+      });
+      if (sent) recordSent();
+    } catch (err) {
+      this.logger.warn({ err }, "ws_send_failed");
+    }
+  }
+
+  private ensureOutboundCapacity(ws: WebSocketLike, frameBytes: number): boolean {
+    if (ws.readyState !== 1) return false;
+    if (physicalSocketHasCapacity(ws, frameBytes)) return true;
+
+    this.closeAtOutboundHighWater(ws);
+    return false;
+  }
+
+  private closeAtOutboundHighWater(ws: WebSocketLike): void {
+    this.closePhysicalSocket({
+      ws,
+      logMessage: "Closing physical WebSocket at outbound high-water mark",
+      logFields: {
+        bufferedAmount: ws.bufferedAmount,
+        maxBufferedBytes: MAX_PHYSICAL_SOCKET_BUFFERED_BYTES,
+      },
+    });
+  }
+
+  private closePhysicalSocket(params: ClosePhysicalSocketParams): void {
+    const { ws, logMessage, logFields } = params;
+    this.applicationSocketLease.release(ws);
+    if (ws.readyState !== 1) {
+      return;
+    }
+    const identity = this.socketIdentities.get(ws);
+    this.logger.warn(
+      {
+        ...(identity ? toConnectionLogFields(identity) : {}),
+        ...logFields,
+      },
+      logMessage,
+    );
+    try {
+      // A close frame queues behind application data, so it cannot enforce a
+      // hard memory cutoff. Production transports expose terminate().
+      if (ws.terminate) {
+        ws.terminate();
+      } else {
+        ws.close();
+      }
+    } catch (err) {
+      this.logger.warn(
+        { err, ...(identity ? toConnectionLogFields(identity) : {}) },
+        "ws_close_failed",
+      );
+    }
+  }
+
+  private sendToConnection(connection: SessionConnection, message: WSOutboundMessage): void {
+    const sockets = connection.kind === "trusted" ? connection.sockets : [connection.socket];
+    this.sendMessageToSockets(sockets, message);
+  }
+
+  private sendBinaryToConnection(connection: SessionConnection, frame: Uint8Array): void {
+    if (connection.kind !== "trusted") {
+      return;
+    }
+    for (const ws of connection.sockets) {
+      this.sendBinaryToClient(ws, frame);
+    }
+  }
+
+  private async attachSocket(
+    ws: WebSocketLike,
+    request?: unknown,
+    metadata?: ExternalSocketMetadata,
+  ): Promise<void> {
+    if (!this.acceptingConnections) {
+      try {
+        ws.close(WS_CLOSE_SERVER_SHUTDOWN, "Server shutting down");
+      } catch {
+        // ignore close errors
+      }
+      return;
+    }
+
+    const requestMetadata = extractSocketRequestMetadata(request);
+    const identity = createWebSocketConnectionIdentity(requestMetadata, metadata);
+    this.socketIdentities.set(ws, identity);
+    const connectionLogger = this.logger.child(toConnectionLogFields(identity));
+
+    const pending: PendingConnection = {
+      connectionLogger,
+      helloTimeout: null,
+      identity,
+    };
+    const helloTimeoutMs =
+      identity.transport === "tailnet" && this.pairing
+        ? TAILNET_PAIRING_HELLO_TIMEOUT_MS
+        : HELLO_TIMEOUT_MS;
+    const timeout = setTimeout(() => {
+      if (this.pendingConnections.get(ws) !== pending) {
+        return;
+      }
+      pending.helloTimeout = null;
+      this.pendingConnections.delete(ws);
+      pending.connectionLogger.warn(
+        { ...toConnectionLogFields(identity), timeoutMs: helloTimeoutMs },
+        "Closing connection due to missing hello",
+      );
+      try {
+        ws.close(WS_CLOSE_HELLO_TIMEOUT, "Hello timeout");
+      } catch {
+        // ignore close errors
+      }
+    }, helloTimeoutMs);
+    pending.helloTimeout = timeout;
+    (timeout as unknown as { unref?: () => void }).unref?.();
+
+    this.pendingConnections.set(ws, pending);
+    this.incrementRuntimeCounter("connectedAwaitingHello");
+    this.bindSocketHandlers(ws);
+
+    if (identity.transport === "tailnet") {
+      if (!this.pairing) {
+        this.clearPendingConnection(ws);
+        pending.connectionLogger.warn(
+          { ...toConnectionLogFields(identity) },
+          "Rejected tailnet connection: pairing is not configured on the daemon",
+        );
+        try {
+          ws.close(WS_CLOSE_DAEMON_AUTH_FAILED, "Tailnet connections require pairing");
+        } catch {
+          // ignore close errors
+        }
+        return;
+      }
+      const challengeNonce = this.pairing.challenges.issue();
+      pending.challengeNonce = challengeNonce;
+      pending.pairingRequestId = randomUUID();
+      this.sendToClient(ws, { type: "challenge", nonce: challengeNonce });
+      pending.connectionLogger.info(
+        { ...toConnectionLogFields(identity) },
+        "Issued tailnet pairing challenge; awaiting device identity and signed hello",
+      );
+    }
+
+    pending.connectionLogger.info(
+      {
+        ...toConnectionLogFields(identity),
+        totalPendingConnections: this.pendingConnections.size,
+      },
+      "Client connected; awaiting hello",
+    );
+  }
+
+  private createSessionConnection(params: {
+    ws: WebSocketLike;
+    clientId: string;
+    appVersion: string | null;
+    clientCapabilities: Record<string, unknown> | null;
+    connectionLogger: pino.Logger;
+  }): TrustedSessionConnection {
+    const { ws, clientId, appVersion, clientCapabilities, connectionLogger } = params;
+    let connection: TrustedSessionConnection | null = null;
+
+    const session = this.createSocketSession({
+      clientId,
+      appVersion,
+      clientCapabilities,
+      scopes: ["*"],
+      connectionLogger,
+      onMessage: (msg) => {
+        if (!connection) {
+          return;
+        }
+        this.sendToConnection(connection, wrapSessionMessage(msg));
+      },
+      onMessageToSource: (source, msg) => {
+        if (!connection || !connection.sockets.has(source as WebSocketLike)) {
+          return;
+        }
+        this.sendToClient(source as WebSocketLike, wrapSessionMessage(msg));
+      },
+      onBinaryMessage: (frame) => {
+        if (!connection) {
+          return;
+        }
+        this.sendBinaryToConnection(connection, frame);
+      },
+      onBinaryMessageToSource: async (source, frame) => {
+        if (!connection || !connection.sockets.has(source as WebSocketLike)) {
+          throw new Error("File transfer source socket is no longer attached");
+        }
+        await this.sendBinaryToClientAndWait(source as WebSocketLike, frame);
+      },
+      getTransportBufferedAmount: () => {
+        if (!connection) {
+          return null;
+        }
+        // Tailnet-attached sockets are a WebSocketLike that doesn't expose
+        // bufferedAmount. Return null when no socket gives a signal so the
+        // terminal fallback can't mistake "no signal" for "client keeping up";
+        // a direct ws reports its real buffered bytes (0 when drained).
+        let maxBuffered: number | null = null;
+        for (const socket of connection.sockets) {
+          if (typeof socket.bufferedAmount === "number") {
+            maxBuffered = Math.max(maxBuffered ?? 0, socket.bufferedAmount);
+          }
+        }
+        return maxBuffered;
+      },
+      onLifecycleIntent: (intent) => {
+        this.onLifecycleIntent?.(intent);
+      },
+      hubRelationships: this.hubRelationships ?? undefined,
+    });
+
+    connection = {
+      kind: "trusted",
+      session,
+      clientId,
+      appVersion,
+      clientCapabilities,
+      connectionLogger,
+      sockets: new Set([ws]),
+      externalDisconnectCleanupTimeout: null,
+    };
+    session.updateClientCapabilities(clientCapabilities, ws);
+    return connection;
+  }
+
+  private createSocketSession(options: SocketSessionOptions): Session {
+    return new Session({
+      clientId: options.clientId,
+      appVersion: options.appVersion,
+      clientCapabilities: options.clientCapabilities,
+      scopes: options.scopes,
+      onMessage: options.onMessage,
+      onMessageToSource: options.onMessageToSource,
+      onBinaryMessage: options.onBinaryMessage,
+      onBinaryMessageToSource: options.onBinaryMessageToSource,
+      getTransportBufferedAmount: options.getTransportBufferedAmount,
+      onLifecycleIntent: options.onLifecycleIntent,
+      logger: options.connectionLogger.child({ module: "session" }),
+      onWorkspaceRecovered: async (workspace) => {
+        await Promise.all(
+          this.listTrustedSessions().map((activeSession) =>
+            activeSession.refreshRecoveredWorkspaceForExternalMutation(workspace),
+          ),
+        );
+      },
+      downloadTokenStore: this.downloadTokenStore,
+      pushTokenStore: this.pushTokenStore,
+      jagentdeskHome: this.jagentdeskHome,
+      worktreesRoot: this.worktreesRoot,
+      agentManager: this.agentManager,
+      agentStorage: this.agentStorage,
+      projectRegistry: this.projectRegistry,
+      workspaceRegistry: this.workspaceRegistry,
+      chatService: this.chatService,
+      loopService: this.loopService,
+      scheduleService: this.scheduleService,
+      checkoutDiffManager: this.checkoutDiffManager,
+      github: this.github,
+      workspaceGitService: this.workspaceGitService,
+      workspaceAutoName: this.workspaceAutoName,
+      daemonConfigStore: this.daemonConfigStore,
+      mcpBaseUrl: this.mcpBaseUrl,
+      stt: () => this.speech?.resolveStt() ?? null,
+      sttLanguage: this.speech?.resolveSttLanguage() ?? "en",
+      tts: () => this.speech?.resolveTts() ?? null,
+      terminalManager: this.terminalManager,
+      providerSnapshotManager: this.providerSnapshotManager,
+      providerUsageService: this.providerUsageService,
+      hubExecutionAgents: options.hubExecutionAgents,
+      hubRelationships: options.hubRelationships,
+      pairedDevices: this.pairing?.devices,
+      daemonPublicKeyB64: this.pairing?.daemonPublicKeyB64,
+      pairingCodeManager: this.pairing?.pairingCodeManager,
+      cancelPendingPairingRequest: ({ requestId, reason }) =>
+        this.cancelPendingPairingRequest({ requestId, reason }),
+      serviceProxy: this.serviceProxy ?? undefined,
+      scriptRuntimeStore: this.scriptRuntimeStore ?? undefined,
+      workspaceSetupSnapshots: this.workspaceSetupSnapshots,
+      onBranchChanged: this.onBranchChanged ?? undefined,
+      getDaemonTcpPort: this.getDaemonTcpPort ?? undefined,
+      getDaemonTcpHost: this.getDaemonTcpHost ?? undefined,
+      serviceProxyPublicBaseUrl: this.serviceProxyPublicBaseUrl,
+      resolveScriptHealth: this.resolveScriptHealth ?? undefined,
+      voice: {
+        turnDetection: () => this.speech?.resolveTurnDetection() ?? null,
+      },
+      voiceBridge: {
+        registerVoiceSpeakHandler: (agentId, handler) => {
+          this.voiceSpeakHandlers.set(agentId, handler);
+        },
+        unregisterVoiceSpeakHandler: (agentId) => {
+          this.voiceSpeakHandlers.delete(agentId);
+        },
+        registerVoiceCallerContext: (agentId, context) => {
+          this.voiceCallerContexts.set(agentId, context);
+        },
+        unregisterVoiceCallerContext: (agentId) => {
+          this.voiceCallerContexts.delete(agentId);
+        },
+      },
+      dictation:
+        this.dictation || this.speech
+          ? {
+              finalTimeoutMs: this.dictation?.finalTimeoutMs,
+              stt: () => this.speech?.resolveDictationStt() ?? null,
+              sttLanguage: this.speech?.resolveDictationSttLanguage() ?? "en",
+              getSpeechReadiness: () => this.speech!.getReadiness(),
+            }
+          : undefined,
+      serverId: this.serverId,
+      daemonVersion: this.daemonVersion,
+      daemonRuntimeConfig: this.daemonRuntimeConfig,
+      getWebSocketRuntimeMetrics: () => this.lastRuntimeMetricsSnapshot,
+    });
+  }
+
+  private clearPendingConnection(ws: WebSocketLike): PendingConnection | null {
+    const pending = this.pendingConnections.get(ws);
+    if (!pending) {
+      return null;
+    }
+    if (pending.helloTimeout) {
+      clearTimeout(pending.helloTimeout);
+      pending.helloTimeout = null;
+    }
+    this.pendingConnections.delete(ws);
+    return pending;
+  }
+
+  /**
+   * Fail-closed tailnet gate: a tailnet hello must carry a valid signed
+   * challenge response from a paired device. Returns true when the hello may
+   * proceed, false when the socket was closed for authorization failure.
+   */
+  private verifyTailnetSignedHello(params: {
+    ws: WebSocketLike;
+    message: WSHelloMessage;
+    pending: PendingConnection;
+  }): boolean {
+    const { ws, message, pending } = params;
+    // Bind the response to the nonce issued on this exact socket. The global
+    // nonce store is intentionally shared for single-use/replay protection,
+    // but it must not let a valid signature for another socket's challenge
+    // authorize this connection.
+    if (!pending.challengeNonce || message.nonce !== pending.challengeNonce) {
+      this.pairing?.challenges.consume(pending.challengeNonce ?? "");
+      this.incrementRuntimeCounter("tailnetSignedHelloRejected");
+      this.clearPendingConnection(ws);
+      pending.connectionLogger.warn(
+        {
+          ...toConnectionLogFields(pending.identity),
+          reason: "challenge nonce mismatch",
+        },
+        "Rejected tailnet hello: challenge nonce is not bound to this socket",
+      );
+      try {
+        ws.close(WS_CLOSE_DAEMON_AUTH_FAILED, "Authorization failed");
+      } catch {
+        // ignore close errors
+      }
+      return false;
+    }
+    const verification = this.pairing
+      ? verifySignedHello({
+          nonce: message.nonce,
+          signature: message.signature,
+          devicePublicKeyB64: message.devicePublicKeyB64,
+          challenges: this.pairing.challenges,
+          devices: this.pairing.devices,
+        })
+      : { ok: false as const, reason: "pairing is not configured" };
+    if (!verification.ok) {
+      this.incrementRuntimeCounter("tailnetSignedHelloRejected");
+      this.clearPendingConnection(ws);
+      pending.connectionLogger.warn(
+        {
+          ...toConnectionLogFields(pending.identity),
+          reason: verification.reason,
+        },
+        "Rejected tailnet hello: signed challenge verification failed",
+      );
+      try {
+        ws.close(WS_CLOSE_DAEMON_AUTH_FAILED, "Authorization failed");
+      } catch {
+        // ignore close errors
+      }
+      return false;
+    }
+    this.incrementRuntimeCounter("tailnetSignedHelloAccepted");
+    pending.identity.clientId = message.clientId;
+    if (message.devicePublicKeyB64) {
+      const device = this.pairing?.devices.getByPublicKey(message.devicePublicKeyB64);
+      if (device) {
+        pending.identity.deviceId = device.deviceId;
+      }
+    }
+    pending.connectionLogger.info(
+      { ...toConnectionLogFields(pending.identity) },
+      "Tailnet signed hello verified",
+    );
+    return true;
+  }
+
+  private handleHello(params: {
+    ws: WebSocketLike;
+    message: WSHelloMessage;
+    pending: PendingConnection;
+  }): void {
+    const { ws, message, pending } = params;
+
+    if (pending.identity.transport === "tailnet" && !this.verifyTailnetSignedHello(params)) {
+      return;
+    }
+
+    if (message.protocolVersion !== WS_PROTOCOL_VERSION) {
+      this.clearPendingConnection(ws);
+      pending.connectionLogger.warn(
+        {
+          receivedProtocolVersion: message.protocolVersion,
+          expectedProtocolVersion: WS_PROTOCOL_VERSION,
+        },
+        "Rejected hello due to protocol version mismatch",
+      );
+      try {
+        ws.close(WS_CLOSE_INCOMPATIBLE_PROTOCOL, "Incompatible protocol version");
+      } catch {
+        // ignore close errors
+      }
+      return;
+    }
+
+    const clientId = message.clientId.trim();
+    if (clientId.length === 0) {
+      this.clearPendingConnection(ws);
+      pending.connectionLogger.warn("Rejected hello with empty clientId");
+      try {
+        ws.close(WS_CLOSE_INVALID_HELLO, "Invalid hello");
+      } catch {
+        // ignore close errors
+      }
+      return;
+    }
+
+    this.clearPendingConnection(ws);
+    pending.identity.clientId = clientId;
+    if (message.appVersion) {
+      pending.identity.appVersion = message.appVersion;
+    }
+    const existing = this.externalSessionsByKey.get(clientId);
+    if (existing) {
+      this.incrementRuntimeCounter("helloResumed");
+      if (existing.externalDisconnectCleanupTimeout) {
+        clearTimeout(existing.externalDisconnectCleanupTimeout);
+        existing.externalDisconnectCleanupTimeout = null;
+      }
+      const newAppVersion = message.appVersion ?? null;
+      if (newAppVersion && newAppVersion !== existing.appVersion) {
+        existing.appVersion = newAppVersion;
+        existing.session.updateAppVersion(newAppVersion);
+      }
+      const newClientCapabilities = message.capabilities ?? null;
+      // COMPAT(selectiveAgentTimeline): added in v0.1.106. Every capable resumed
+      // hello resets membership before server_info so stale retained-session
+      // state cannot leak. Remove after 2027-01-12.
+      existing.session.updateClientCapabilities(newClientCapabilities, ws);
+      if (
+        JSON.stringify(existing.clientCapabilities ?? null) !==
+        JSON.stringify(newClientCapabilities ?? null)
+      ) {
+        existing.clientCapabilities = newClientCapabilities;
+        this.syncBrowserToolsClientRegistration(existing);
+      }
+      existing.sockets.add(ws);
+      this.sessions.set(ws, existing);
+      pending.identity.sessionId = existing.session.getSessionId();
+      this.syncBrowserToolsClientRegistration(existing);
+      this.sendToClient(ws, this.createServerInfoMessage());
+      this.replayPendingPairingRequests(ws, pending.identity.transport);
+      pending.connectionLogger.info(
+        {
+          ...toConnectionLogFields(pending.identity),
+          resumed: true,
+          totalSessions: this.sessions.size,
+        },
+        "Client connected via hello",
+      );
+      return;
+    }
+
+    const connectionLogger = pending.connectionLogger.child({ clientId });
+    this.incrementRuntimeCounter("helloNew");
+    const connection = this.createSessionConnection({
+      ws,
+      clientId,
+      appVersion: message.appVersion ?? null,
+      clientCapabilities: message.capabilities ?? null,
+      connectionLogger,
+    });
+    this.sessions.set(ws, connection);
+    this.externalSessionsByKey.set(clientId, connection);
+    pending.identity.sessionId = connection.session.getSessionId();
+    this.syncBrowserToolsClientRegistration(connection);
+    this.sendToClient(ws, this.createServerInfoMessage());
+    this.replayPendingPairingRequests(ws, pending.identity.transport);
+    connection.connectionLogger.info(
+      {
+        ...toConnectionLogFields(pending.identity),
+        resumed: false,
+        totalSessions: this.sessions.size,
+      },
+      "Client connected via hello",
+    );
+  }
+
+  private buildServerInfoStatusPayload(): ServerInfoStatusPayload {
+    return {
+      status: "server_info",
+      serverId: this.serverId,
+      hostname: getHostname(),
+      version: this.daemonVersion,
+      // COMPAT(desktopManaged): added in v0.1.X, remove optional parsing after 2027-01-16.
+      desktopManaged: this.daemonRuntimeConfig?.desktopManaged === true,
+      ...(this.serverCapabilities ? { capabilities: this.serverCapabilities } : {}),
+      features: {
+        // COMPAT(providersSnapshot): keep optional until all clients rely on snapshot flow.
+        providersSnapshot: true,
+        // COMPAT(checkoutForgeSetAutoMerge): added in v0.1.106, remove old
+        // checkoutGithubSetAutoMerge fallback after 2026-12-28.
+        checkoutForgeSetAutoMerge: true,
+        // COMPAT(checkoutGithubSetAutoMerge): added in v0.1.75, remove gate after 2026-11-13.
+        checkoutGithubSetAutoMerge: true,
+        githubCheckDetails: true,
+        // COMPAT(forgeCheckDetails): added in v0.1.106, remove githubCheckDetails fallback after 2026-12-28.
+        forgeCheckDetails: true,
+        // COMPAT(forgeSearch): added in v0.1.106, remove github_search fallback after 2026-12-28.
+        forgeSearch: true,
+        // COMPAT(daemonStatusRpc): added in v0.1.76, remove gate after 2026-11-18.
+        ...(this.advertiseDaemonStatusRpc ? { daemonStatusRpc: true } : {}),
+        // COMPAT(terminalRestoreModes): added in v0.1.81, remove gate after 2026-11-23.
+        "terminal-restore-modes": true,
+        // COMPAT(terminalInputModeReplay): added in v0.2.6, remove gate after 2027-02-02.
+        "terminal-input-mode-replay": true,
+        // COMPAT(terminalSizeOwnership): added in v0.2.6, remove gate after 2027-02-02.
+        "terminal-size-ownership": true,
+        // COMPAT(rewind): added in v0.1.X, drop the gate when floor >= v0.1.X.
+        rewind: true,
+        // COMPAT(agentTimelinePromptIndex): added in v0.2.X, drop the gate when floor >= v0.2.X.
+        agentTimelinePromptIndex: true,
+        // COMPAT(checkoutRefresh): added in v0.1.86, remove gate after 2026-11-29.
+        checkoutRefresh: true,
+        // COMPAT(workspaceMultiplicity): added in v0.1.97, drop the gate when floor >= v0.1.97
+        workspaceMultiplicity: true,
+        // COMPAT(projectRemove): added in v0.1.97, drop the gate when floor >= v0.1.97.
+        projectRemove: true,
+        // COMPAT(projectAdd): added in v0.1.97, drop the gate when floor >= v0.1.97.
+        projectAdd: true,
+        // COMPAT(projectList): added in v0.2.4, drop the gate when floor >= v0.2.4.
+        projectList: true,
+        // COMPAT(worktreeRestore): keep through 2027-01-11 for clients older than v0.1.105.
+        worktreeRestore: true,
+        // COMPAT(workspaceRecovery): added in v0.1.105, remove after 2027-01-11 once daemon floor >= v0.1.105.
+        workspaceRecovery: true,
+        // COMPAT(workspaceFileEditing): added in v0.2.0, remove after 2027-01-18 once daemon floor >= v0.2.0.
+        workspaceFileEditing: true,
+        // COMPAT(providerUsageList): added in v0.1.98, drop the gate when daemon floor >= v0.1.98.
+        providerUsageList: true,
+        // COMPAT(agentDetach): added in v0.1.98, remove gate after 2026-12-19 once daemon floor >= v0.1.98.
+        agentDetach: true,
+        // COMPAT(agentThinkingUpdate): added in v0.2.4, remove gate after 2027-01-28.
+        agentThinkingUpdate: true,
+        // COMPAT(daemonDiagnostics): added in v0.1.100, remove gate after 2026-12-25 once daemon floor >= v0.1.100.
+        daemonDiagnostics: true,
+        // COMPAT(daemonSelfUpdate): added in v0.1.93, remove gate after 2026-12-13.
+        daemonSelfUpdate: this.daemonRuntimeConfig?.desktopManaged !== true,
+        // COMPAT(agentForkContext): added in v0.1.102, remove gate after 2026-12-28.
+        agentForkContext: true,
+        // COMPAT(agentForkContextCursor): added in v0.1.108, remove gate after 2027-01-14.
+        agentForkContextCursor: true,
+        // COMPAT(providerSubagents): added in v0.1.107, remove gate after 2027-01-12.
+        providerSubagents: true,
+        // COMPAT(workspacePinning): added in v0.1.107, remove gate after 2027-01-12.
+        workspacePinning: true,
+        // COMPAT(hubRelationship): added in v0.1.X, drop the gate when floor >= v0.1.X.
+        hubRelationship: true,
+        // COMPAT(projectGithubClone): added in v0.1.108, remove gate after 2027-01-15.
+        projectGithubClone: true,
+        // COMPAT(workspaceGithubRepositorySearch): added in v0.1.108, remove gate after 2027-01-15.
+        workspaceGithubRepositorySearch: true,
+        // COMPAT(projectCreateDirectory): added in v0.1.108, remove gate after 2027-01-15.
+        projectCreateDirectory: true,
+        // COMPAT(commitsList): added in v0.1.110, remove gate after 2027-01-16.
+        commitsList: true,
+        // COMPAT(commitBaseClassification): added in v0.2.0, remove gate after 2027-01-23.
+        commitBaseClassification: true,
+        // COMPAT(providerRemoval): added in v0.1.105, drop the gate when floor >= v0.1.105.
+        providerRemoval: true,
+        // COMPAT(importSessionWorkspaceTarget): added in v0.1.110, remove gate after 2027-01-16.
+        importSessionWorkspaceTarget: true,
+        // COMPAT(forgeProviders): added in v0.1.106, drop the gate when daemon floor >= v0.1.106.
+        forgeProviders: true,
+        // COMPAT(selectiveAgentTimeline): added in v0.1.106, remove after 2027-01-12.
+        selectiveAgentTimeline: true,
+        // COMPAT(canonicalSubmittedPrompts): added in v0.2.6, remove gate after 2027-01-30.
+        canonicalSubmittedPrompts: true,
+        // COMPAT(stableProjectIdentity): added in v0.1.109, remove gate after 2027-01-15.
+        stableProjectIdentity: true,
+        // COMPAT(workspaceScriptManagement): added in v0.1.105, remove gate after 2027-01-10.
+        workspaceScriptManagement: true,
+        // COMPAT(projectCustomIcon): added in v0.2.0, remove after 2027-01-20.
+        projectCustomIcon: true,
+      },
+    };
+  }
+
+  private createServerInfoMessage(): WSOutboundMessage {
+    return {
+      type: "session",
+      message: {
+        type: "status",
+        payload: this.buildServerInfoStatusPayload(),
+      },
+    };
+  }
+
+  private createDaemonConfigChangedMessage(config: MutableDaemonConfig): WSOutboundMessage {
+    return wrapSessionMessage({
+      type: "status",
+      payload: {
+        status: "daemon_config_changed",
+        config,
+      },
+    });
+  }
+
+  private broadcastCapabilitiesUpdate(): void {
+    this.broadcast(this.createServerInfoMessage());
+  }
+
+  private broadcastDaemonConfigChanged(config: MutableDaemonConfig): void {
+    this.broadcast(this.createDaemonConfigChangedMessage(config));
+  }
+
+  private bindSocketHandlers(ws: WebSocketLike): void {
+    ws.on("message", (...args: unknown[]) => {
+      const data = args[0] as Buffer | ArrayBuffer | Buffer[] | string;
+      this.handleRawMessage(ws, data);
+    });
+
+    ws.on("close", async (...args: unknown[]) => {
+      const code = args[0];
+      const reason = args[1];
+      await this.detachSocket(ws, {
+        code: typeof code === "number" ? code : undefined,
+        reason,
+      });
+    });
+
+    ws.on("error", async (...args: unknown[]) => {
+      const error = args[0];
+      const err = error instanceof Error ? error : new Error(String(error));
+      const active = this.sessions.get(ws);
+      const pending = this.pendingConnections.get(ws);
+      const log = active?.connectionLogger ?? pending?.connectionLogger ?? this.logger;
+      log.error({ err }, "Client error");
+      await this.detachSocket(ws, { error: err });
+    });
+  }
+
+  public resolveVoiceSpeakHandler(callerAgentId: string): VoiceSpeakHandler | null {
+    return this.voiceSpeakHandlers.get(callerAgentId) ?? null;
+  }
+
+  public resolveVoiceCallerContext(callerAgentId: string): VoiceCallerContext | null {
+    return this.voiceCallerContexts.get(callerAgentId) ?? null;
+  }
+
+  private async detachSocket(
+    ws: WebSocketLike,
+    details: {
+      code?: number;
+      reason?: unknown;
+      error?: Error;
+    },
+  ): Promise<void> {
+    this.applicationSocketLease.release(ws);
+    const identity = this.socketIdentities.get(ws);
+    const identityFields = identity ? toConnectionLogFields(identity) : {};
+    const pending = this.clearPendingConnection(ws);
+    if (pending) {
+      this.incrementRuntimeCounter("pendingDisconnected");
+      pending.connectionLogger.info(
+        {
+          ...identityFields,
+          code: details.code,
+          reason: stringifyCloseReason(details.reason),
+        },
+        "Pending client disconnected",
+      );
+      this.socketIdentities.delete(ws);
+      return;
+    }
+
+    const connection = this.sessions.get(ws);
+    if (!connection) {
+      if (identity) {
+        this.logger.info(
+          {
+            ...identityFields,
+            code: details.code,
+            reason: stringifyCloseReason(details.reason),
+          },
+          "Client socket closed without active session",
+        );
+        this.socketIdentities.delete(ws);
+      }
+      return;
+    }
+
+    this.sessions.delete(ws);
+    if (connection.kind === "hub") {
+      this.socketIdentities.delete(ws);
+      connection.connectionLogger.info(
+        { code: details.code, reason: stringifyCloseReason(details.reason) },
+        "Hub session disconnected",
+      );
+      connection.session.cleanup();
+      return;
+    }
+    connection.sockets.delete(ws);
+    connection.session.clearAgentTimelineSubscription(ws);
+    this.socketIdentities.delete(ws);
+
+    if (connection.sockets.size === 0) {
+      this.unregisterBrowserToolsClient(connection.clientId);
+      this.incrementRuntimeCounter("sessionDisconnectedWaitingReconnect");
+      if (connection.externalDisconnectCleanupTimeout) {
+        clearTimeout(connection.externalDisconnectCleanupTimeout);
+      }
+      const timeout = setTimeout(() => {
+        if (connection.externalDisconnectCleanupTimeout !== timeout) {
+          return;
+        }
+        connection.externalDisconnectCleanupTimeout = null;
+        void this.cleanupConnection(connection, "Client disconnected (grace timeout)");
+      }, EXTERNAL_SESSION_DISCONNECT_GRACE_MS);
+      connection.externalDisconnectCleanupTimeout = timeout;
+
+      connection.connectionLogger.info(
+        {
+          ...identityFields,
+          code: details.code,
+          reason: stringifyCloseReason(details.reason),
+          reconnectGraceMs: EXTERNAL_SESSION_DISCONNECT_GRACE_MS,
+        },
+        "Client disconnected; waiting for reconnect",
+      );
+      return;
+    }
+
+    if (connection.sockets.size > 0) {
+      this.incrementRuntimeCounter("sessionSocketDisconnectedAttached");
+      connection.connectionLogger.info(
+        {
+          ...identityFields,
+          remainingSockets: connection.sockets.size,
+          code: details.code,
+          reason: stringifyCloseReason(details.reason),
+        },
+        "Client socket disconnected; session remains attached",
+      );
+      return;
+    }
+
+    await this.cleanupConnection(connection, "Client disconnected");
+  }
+
+  private async cleanupConnection(
+    connection: TrustedSessionConnection,
+    logMessage: string,
+  ): Promise<void> {
+    this.incrementRuntimeCounter("sessionCleanup");
+    if (connection.externalDisconnectCleanupTimeout) {
+      clearTimeout(connection.externalDisconnectCleanupTimeout);
+      connection.externalDisconnectCleanupTimeout = null;
+    }
+
+    for (const socket of connection.sockets) {
+      this.sessions.delete(socket);
+      this.socketIdentities.delete(socket);
+    }
+    connection.sockets.clear();
+    const existing = this.externalSessionsByKey.get(connection.clientId);
+    if (existing === connection) {
+      this.externalSessionsByKey.delete(connection.clientId);
+    }
+    this.unregisterBrowserToolsClient(connection.clientId);
+
+    connection.connectionLogger.trace(
+      { clientId: connection.clientId, totalSessions: this.sessions.size },
+      logMessage,
+    );
+    await connection.session.cleanup();
+  }
+
+  private syncBrowserToolsClientRegistration(connection: TrustedSessionConnection): void {
+    if (!this.browserToolsBroker) {
+      return;
+    }
+    const browserHostCapability = getBrowserHostCapability(connection.clientCapabilities);
+    if (!browserHostCapability) {
+      this.unregisterBrowserToolsClient(connection.clientId);
+      return;
+    }
+    const capabilitySignature = JSON.stringify(browserHostCapability);
+    const existing = this.browserToolsRegistrations.get(connection.clientId);
+    if (existing?.capabilitySignature === capabilitySignature) {
+      return;
+    }
+    if (existing) {
+      this.browserToolsRegistrations.delete(connection.clientId);
+      existing.unregister();
+    }
+
+    const unregister = this.browserToolsBroker.registerClient({
+      id: connection.clientId,
+      hostKind: browserHostCapability.hostKind,
+      supportedCommands: browserHostCapability.supportedCommands,
+      sendBrowserAutomationRequest: (request) => {
+        this.sendToConnection(connection, wrapSessionMessage(request));
+      },
+    });
+    this.browserToolsRegistrations.set(connection.clientId, {
+      capabilitySignature,
+      unregister,
+    });
+  }
+
+  private unregisterBrowserToolsClient(clientId: string): void {
+    const registration = this.browserToolsRegistrations.get(clientId);
+    if (!registration) {
+      return;
+    }
+    this.browserToolsRegistrations.delete(clientId);
+    registration.unregister();
+  }
+
+  private handleInvalidInboundMessage(args: {
+    ws: WebSocketLike;
+    parsed: unknown;
+    parsedMessage: { success: false; error: { message: string } } & Record<string, unknown>;
+    pendingConnection: PendingConnection | undefined;
+    activeConnection: SessionConnection | undefined;
+    log: pino.Logger;
+  }): void {
+    const { ws, parsed, parsedMessage, pendingConnection, activeConnection, log } = args;
+    this.incrementRuntimeCounter("validationFailed");
+    if (pendingConnection) {
+      pendingConnection.connectionLogger.warn(
+        { error: parsedMessage.error.message },
+        "Rejected pending message before hello",
+      );
+      this.clearPendingConnection(ws);
+      try {
+        ws.close(WS_CLOSE_INVALID_HELLO, "Invalid hello");
+      } catch {
+        // ignore close errors
+      }
+      return;
+    }
+
+    const requestInfo = extractRequestInfoFromUnknownWsInbound(parsed);
+    const isUnknownSchema =
+      requestInfo?.requestId != null &&
+      typeof parsed === "object" &&
+      parsed != null &&
+      "type" in parsed &&
+      (parsed as { type?: unknown }).type === "session";
+
+    log.warn(
+      {
+        clientId: activeConnection?.kind === "trusted" ? activeConnection.clientId : undefined,
+        requestId: requestInfo?.requestId,
+        requestType: requestInfo?.requestType,
+        error: parsedMessage.error.message,
+      },
+      "WS inbound message validation failed",
+    );
+
+    if (requestInfo) {
+      this.sendToClient(
+        ws,
+        wrapSessionMessage({
+          type: "rpc_error",
+          payload: {
+            requestId: requestInfo.requestId,
+            requestType: requestInfo.requestType,
+            error: isUnknownSchema
+              ? `Unknown request, try upgrading the daemon (currently v${this.daemonVersion})`
+              : "Invalid message",
+            code: isUnknownSchema ? "unknown_schema" : "invalid_message",
+          },
+        }),
+      );
+      return;
+    }
+
+    const errorMessage = `Invalid message: ${parsedMessage.error.message}`;
+    this.sendToClient(
+      ws,
+      wrapSessionMessage({
+        type: "status",
+        payload: {
+          status: "error",
+          message: errorMessage,
+        },
+      }),
+    );
+  }
+
+  private maybeHandleBinaryFrame(params: {
+    ws: WebSocketLike;
+    buffer: Buffer;
+    activeConnection: SessionConnection | undefined;
+    log: pino.Logger;
+  }): boolean {
+    const { ws, buffer, activeConnection, log } = params;
+    const asBytes = asUint8Array(buffer);
+    if (!asBytes) {
+      return false;
+    }
+    const decodedFrame = decodeBinaryFrame(asBytes);
+    if (!decodedFrame) {
+      return false;
+    }
+    if (!activeConnection) {
+      this.incrementRuntimeCounter("binaryBeforeHelloRejected");
+      log.warn("Rejected binary frame before hello");
+      this.clearPendingConnection(ws);
+      try {
+        ws.close(WS_CLOSE_INVALID_HELLO, "Session message before hello");
+      } catch {
+        // ignore close errors
+      }
+      return true;
+    }
+    if (activeConnection.kind === "hub") {
+      log.warn("Rejected binary frame on Hub session");
+      ws.close(WS_CLOSE_INVALID_HELLO, "Binary frames are not supported on Hub sessions");
+      return true;
+    }
+    void Promise.resolve(activeConnection.session.handleBinaryFrame(decodedFrame)).catch(
+      (error: unknown) => {
+        this.handleRawMessageError({
+          ws,
+          data: buffer,
+          error,
+          log: activeConnection.connectionLogger,
+        });
+      },
+    );
+    return true;
+  }
+
+  private handlePendingConnectionMessage(params: {
+    ws: WebSocketLike;
+    message: WSInboundMessage;
+    pendingConnection: PendingConnection;
+  }): void {
+    const { ws, message, pendingConnection } = params;
+    if (message.type === "hello") {
+      this.handleHello({
+        ws,
+        message,
+        pending: pendingConnection,
+      });
+      return;
+    }
+
+    if (message.type === "session" && message.message.type === "pairing.device.register.request") {
+      this.handlePairingRegisterPreHello({
+        ws,
+        request: message.message,
+        pendingConnection,
+      });
+      return;
+    }
+
+    if (message.type === "session" && message.message.type === "pairing.device.identify.request") {
+      this.handlePairingIdentifyPreHello({
+        ws,
+        request: message.message,
+        pendingConnection,
+      });
+      return;
+    }
+
+    pendingConnection.connectionLogger.warn(
+      {
+        messageType: message.type,
+      },
+      "Rejected pending message before hello",
+    );
+    this.incrementRuntimeCounter("pendingMessageRejectedBeforeHello");
+    this.clearPendingConnection(ws);
+    try {
+      ws.close(WS_CLOSE_INVALID_HELLO, "Session message before hello");
+    } catch {
+      // ignore close errors
+    }
+  }
+
+  /**
+   * Stores a human-readable device hint on the desktop-only request event.
+   * The hint is not trusted for authorization; the code and signed hello are
+   * still mandatory and remain the only access-control decisions.
+   */
+  private handlePairingIdentifyPreHello(params: {
+    ws: WebSocketLike;
+    request: Extract<SessionInboundMessage, { type: "pairing.device.identify.request" }>;
+    pendingConnection: PendingConnection;
+  }): void {
+    const { ws, request, pendingConnection } = params;
+    if (!pendingConnection.pairingRequestId) {
+      return;
+    }
+    if (!this.pairing?.pairingCodeManager) {
+      return;
+    }
+
+    if (pendingConnection.pairingCode) {
+      this.updatePendingPairingRequest(pendingConnection.pairingRequestId, {
+        deviceName: request.deviceName,
+        ...(request.devicePublicKeyB64 ? { devicePublicKeyB64: request.devicePublicKeyB64 } : {}),
+      });
+      return;
+    }
+
+    const activeRequest = this.getActivePendingPairingRequest();
+    if (activeRequest) {
+      const sameDevice =
+        !activeRequest.devicePublicKeyB64 ||
+        !request.devicePublicKeyB64 ||
+        activeRequest.devicePublicKeyB64 === request.devicePublicKeyB64;
+      if (!sameDevice) {
+        this.rejectDuplicatePairingConnection(ws, pendingConnection);
+        return;
+      }
+
+      this.replacePendingPairingSocket(activeRequest.requestId, ws);
+      pendingConnection.pairingRequestId = activeRequest.requestId;
+      pendingConnection.pairingCode = {
+        code: activeRequest.pairingCode,
+        expiresAtMs: activeRequest.expiresAtMs,
+      };
+      this.updatePendingPairingRequest(activeRequest.requestId, {
+        deviceName: request.deviceName,
+        ...(request.devicePublicKeyB64 ? { devicePublicKeyB64: request.devicePublicKeyB64 } : {}),
+        connectionId: pendingConnection.identity.connectionId,
+        ...(pendingConnection.identity.remoteAddress
+          ? { remoteAddress: pendingConnection.identity.remoteAddress }
+          : {}),
+      });
+      return;
+    }
+
+    pendingConnection.pairingCode = this.pairing.pairingCodeManager.issueWithExpiry();
+    const pairingRequestPayload: PendingPairingRequestPayload = {
+      requestId: pendingConnection.pairingRequestId,
+      pairingCode: pendingConnection.pairingCode.code,
+      expiresAtMs: pendingConnection.pairingCode.expiresAtMs,
+      connectionId: pendingConnection.identity.connectionId,
+      ...(request.deviceName ? { deviceName: request.deviceName } : {}),
+      ...(request.devicePublicKeyB64 ? { devicePublicKeyB64: request.devicePublicKeyB64 } : {}),
+      ...(pendingConnection.identity.remoteAddress
+        ? { remoteAddress: pendingConnection.identity.remoteAddress }
+        : {}),
+      transport: "tailnet",
+    };
+    this.rememberPendingPairingRequest(pairingRequestPayload);
+    this.broadcast(
+      wrapSessionMessage({
+        type: "pairing.device.requested",
+        payload: pairingRequestPayload,
+      }),
+    );
+  }
+
+  /**
+   * Accepts `pairing.device.register.request` before hello so a new device can
+   * register its public key, then completes the signed-hello handshake. The
+   * request must prove knowledge of the daemon's public key (the value the
+   * client read from the pairing offer); a mismatch is rejected fail-closed.
+   */
+  private handlePairingRegisterPreHello(params: {
+    ws: WebSocketLike;
+    request: Extract<SessionInboundMessage, { type: "pairing.device.register.request" }>;
+    pendingConnection: PendingConnection;
+  }): void {
+    const { ws, request, pendingConnection } = params;
+    const respond = (payload: {
+      requestId: string;
+      ok: boolean;
+      deviceId?: string;
+      error?: string;
+    }): void => {
+      this.sendToClient(
+        ws,
+        wrapSessionMessage({
+          type: "pairing.device.register.response",
+          payload,
+        }),
+      );
+    };
+
+    if (!this.pairing) {
+      respond({
+        requestId: request.requestId,
+        ok: false,
+        error: "Pairing is not configured on the daemon",
+      });
+      return;
+    }
+
+    if (request.daemonPublicKeyB64 !== this.pairing.daemonPublicKeyB64) {
+      pendingConnection.connectionLogger.warn(
+        {
+          ...toConnectionLogFields(pendingConnection.identity),
+          requestId: request.requestId,
+        },
+        "Rejected pairing register: daemon public key mismatch",
+      );
+      respond({
+        requestId: request.requestId,
+        ok: false,
+        error: "daemon public key mismatch",
+      });
+      return;
+    }
+
+    if (this.pairing.pairingCodeManager) {
+      const expectedCode = pendingConnection.pairingCode;
+      const hasValidPairingCode = Boolean(
+        expectedCode &&
+        request.pairingCode &&
+        this.pairing.pairingCodeManager.verifyForRequest(request.pairingCode, expectedCode),
+      );
+      if (!hasValidPairingCode) {
+        pendingConnection.connectionLogger.warn(
+          {
+            ...toConnectionLogFields(pendingConnection.identity),
+            requestId: request.requestId,
+            hasPairingCode: Boolean(request.pairingCode),
+            pairingCodeLength: request.pairingCode?.length ?? 0,
+            expectedPairingCodeLength: expectedCode?.code.length ?? 0,
+          },
+          "Rejected pairing register: invalid or expired six-digit code",
+        );
+        respond({
+          requestId: request.requestId,
+          ok: false,
+          error: "Invalid or expired 6-digit pairing code",
+        });
+        return;
+      }
+    }
+
+    try {
+      // A native tsnet node can reconnect while the first registration is
+      // still settling. Treat the same public key as an idempotent register:
+      // otherwise the second socket creates a fresh desktop request and
+      // leaves the approval popup stuck after the first socket has completed.
+      const existingDevice = this.pairing.devices.getByPublicKey(request.devicePublicKeyB64);
+      const device =
+        existingDevice ??
+        this.pairing.devices.register({
+          devicePublicKeyB64: request.devicePublicKeyB64,
+          deviceName: request.deviceName,
+        });
+      if (!existingDevice) {
+        this.incrementRuntimeCounter("pairingDeviceRegistered");
+      }
+      pendingConnection.connectionLogger.info(
+        {
+          ...toConnectionLogFields(pendingConnection.identity),
+          deviceId: device.deviceId,
+          requestId: request.requestId,
+        },
+        existingDevice ? "Reused paired device registration" : "Registered paired device",
+      );
+      respond({ requestId: request.requestId, ok: true, deviceId: device.deviceId });
+      if (pendingConnection.pairingRequestId) {
+        this.forgetPendingPairingRequest(pendingConnection.pairingRequestId);
+        this.broadcast(
+          wrapSessionMessage({
+            type: "pairing.device.completed",
+            payload: {
+              requestId: pendingConnection.pairingRequestId,
+              deviceId: device.deviceId,
+              ...(request.deviceName ? { deviceName: request.deviceName } : {}),
+              connectionId: pendingConnection.identity.connectionId,
+              ...(pendingConnection.identity.remoteAddress
+                ? { remoteAddress: pendingConnection.identity.remoteAddress }
+                : {}),
+            },
+          }),
+        );
+      }
+    } catch (error) {
+      pendingConnection.connectionLogger.warn(
+        {
+          err: error,
+          requestId: request.requestId,
+        },
+        "Failed to register paired device",
+      );
+      respond({
+        requestId: request.requestId,
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private handleRawMessage(
+    ws: WebSocketLike,
+    data: Buffer | ArrayBuffer | Buffer[] | string,
+  ): void {
+    if (!this.acceptingConnections) {
+      return;
+    }
+
+    this.applicationSocketLease.renew(ws);
+
+    const activeConnection = this.sessions.get(ws);
+    const pendingConnection = this.pendingConnections.get(ws);
+    const log =
+      activeConnection?.connectionLogger ?? pendingConnection?.connectionLogger ?? this.logger;
+
+    try {
+      const buffer = bufferFromWsData(data);
+      const binaryHandled = this.maybeHandleBinaryFrame({
+        ws,
+        buffer,
+        activeConnection,
+        log,
+      });
+      if (binaryHandled) {
+        return;
+      }
+
+      const parsed = JSON.parse(buffer.toString());
+      const parsedMessage = WSInboundMessageSchema.safeParse(parsed);
+      if (!parsedMessage.success) {
+        this.handleInvalidInboundMessage({
+          ws,
+          parsed,
+          parsedMessage,
+          pendingConnection,
+          activeConnection,
+          log,
+        });
+        return;
+      }
+
+      const message = parsedMessage.data;
+      this.recordInboundMessageType(message.type);
+
+      if (message.type === "ping") {
+        this.applicationSocketLease.claim(ws);
+        this.sendToClient(ws, { type: "pong" });
+        return;
+      }
+
+      if (message.type === "recording_state") {
+        return;
+      }
+
+      if (pendingConnection) {
+        this.handlePendingConnectionMessage({
+          ws,
+          message,
+          pendingConnection,
+        });
+        return;
+      }
+
+      if (!activeConnection) {
+        this.incrementRuntimeCounter("missingConnectionForMessage");
+        this.logger.error("No connection found for websocket");
+        return;
+      }
+
+      if (message.type === "hello") {
+        this.incrementRuntimeCounter("unexpectedHelloOnActiveConnection");
+        activeConnection.connectionLogger.warn("Received hello on active connection");
+        try {
+          ws.close(WS_CLOSE_INVALID_HELLO, "Unexpected hello");
+        } catch {
+          // ignore close errors
+        }
+        return;
+      }
+
+      if (message.type === "session") {
+        void this.dispatchSessionMessage(ws, activeConnection, message).catch((error: unknown) => {
+          this.handleRawMessageError({ ws, data, error, log: activeConnection.connectionLogger });
+        });
+      }
+    } catch (error) {
+      this.handleRawMessageError({ ws, data, error, log });
+    }
+  }
+
+  private async dispatchSessionMessage(
+    ws: WebSocketLike,
+    activeConnection: SessionConnection,
+    message: Extract<WSInboundMessage, { type: "session" }>,
+  ): Promise<void> {
+    this.recordInboundSessionRequestType(message.message.type);
+    const controlRpc = getControlRpcLogInfo(message.message);
+    if (controlRpc) {
+      const identity = this.socketIdentities.get(ws);
+      let connectionFields: Record<string, unknown>;
+      if (identity) {
+        connectionFields = toConnectionLogFields(identity);
+      } else if (activeConnection.kind === "trusted") {
+        connectionFields = { clientId: activeConnection.clientId };
+      } else {
+        connectionFields = { daemonId: activeConnection.daemonId };
+      }
+      activeConnection.connectionLogger.warn(
+        {
+          ...connectionFields,
+          ...controlRpc,
+        },
+        "ws_control_rpc_received",
+      );
+    }
+    if (
+      activeConnection.kind === "trusted" &&
+      message.message.type === "browser.automation.execute.response"
+    ) {
+      this.browserToolsBroker?.receiveResponse(message.message as BrowserAutomationExecuteResponse);
+      return;
+    }
+
+    const startMs = performance.now();
+    await activeConnection.session.handleMessage(message.message, ws);
+    const durationMs = performance.now() - startMs;
+    this.recordRequestLatency(message.message.type, durationMs);
+
+    if (durationMs >= SLOW_REQUEST_THRESHOLD_MS && activeConnection.kind === "trusted") {
+      activeConnection.connectionLogger.warn(
+        {
+          requestType: message.message.type,
+          durationMs: Math.round(durationMs),
+          inflightRequests: activeConnection.session.getRuntimeMetrics().inflightRequests,
+        },
+        "ws_slow_request",
+      );
+    }
+  }
+
+  private handleRawMessageError(params: {
+    ws: WebSocketLike;
+    data: Buffer | ArrayBuffer | Buffer[] | string;
+    error: unknown;
+    log: pino.Logger;
+  }): void {
+    const { ws, data, error, log } = params;
+    const err = error instanceof Error ? error : new Error(String(error));
+    const { rawPayload, parsedPayload } = this.decodeRawMessagePayloadForError(data);
+
+    const trimmedRawPayload =
+      typeof rawPayload === "string" && rawPayload.length > 2000
+        ? `${rawPayload.slice(0, 2000)}... (truncated)`
+        : rawPayload;
+
+    log.error(
+      {
+        err,
+        rawPayload: trimmedRawPayload,
+        parsedPayload,
+      },
+      "Failed to parse/handle message",
+    );
+
+    if (this.pendingConnections.has(ws)) {
+      this.clearPendingConnection(ws);
+      try {
+        ws.close(WS_CLOSE_INVALID_HELLO, "Invalid hello");
+      } catch {
+        // ignore close errors
+      }
+      return;
+    }
+
+    const requestInfo = extractRequestInfoFromUnknownWsInbound(parsedPayload);
+    if (requestInfo) {
+      this.sendToClient(
+        ws,
+        wrapSessionMessage({
+          type: "rpc_error",
+          payload: {
+            requestId: requestInfo.requestId,
+            requestType: requestInfo.requestType,
+            error: "Invalid message",
+            code: "invalid_message",
+          },
+        }),
+      );
+      return;
+    }
+
+    this.sendToClient(
+      ws,
+      wrapSessionMessage({
+        type: "status",
+        payload: {
+          status: "error",
+          message: `Invalid message: ${err.message}`,
+        },
+      }),
+    );
+  }
+
+  private decodeRawMessagePayloadForError(data: Buffer | ArrayBuffer | Buffer[] | string): {
+    rawPayload: string | null;
+    parsedPayload: unknown;
+  } {
+    let rawPayload: string | null = null;
+    let parsedPayload: unknown = null;
+    try {
+      const buffer = bufferFromWsData(data);
+      rawPayload = buffer.toString();
+      parsedPayload = JSON.parse(rawPayload);
+    } catch (payloadError) {
+      rawPayload = rawPayload ?? "<unreadable>";
+      parsedPayload = parsedPayload ?? rawPayload;
+      const payloadErr =
+        payloadError instanceof Error ? payloadError : new Error(String(payloadError));
+      this.logger.error({ err: payloadErr }, "Failed to decode raw payload");
+    }
+    return { rawPayload, parsedPayload };
+  }
+
+  private incrementRuntimeCounter(counter: keyof WebSocketRuntimeCounters): void {
+    this.runtimeMetrics.incrementCounter(counter);
+  }
+
+  private recordInboundMessageType(type: string): void {
+    this.runtimeMetrics.recordInboundMessage(type);
+  }
+
+  private recordInboundSessionRequestType(type: string): void {
+    this.runtimeMetrics.recordInboundSessionRequest(type);
+  }
+
+  private recordRequestLatency(type: string, durationMs: number): void {
+    this.runtimeMetrics.recordRequestLatency(type, durationMs);
+  }
+
+  private collectSessionRuntimeMetrics(): WebSocketRuntimeMetrics {
+    const uniqueConnections = new Set<TrustedSessionConnection>(
+      this.externalSessionsByKey.values(),
+    );
+    let terminalDirectorySubscriptionCount = 0;
+    let terminalSubscriptionCount = 0;
+    let workspaceGitWatchedDirectoryCount = 0;
+    let workspaceGitWorkspaceRecordCount = 0;
+    let workspaceGitSubscriptionCount = 0;
+    let inflightRequests = 0;
+    let peakInflightRequests = 0;
+
+    for (const connection of uniqueConnections) {
+      const sessionMetrics = connection.session.getRuntimeMetrics();
+      terminalDirectorySubscriptionCount += sessionMetrics.terminalDirectorySubscriptionCount;
+      terminalSubscriptionCount += sessionMetrics.terminalSubscriptionCount;
+      workspaceGitWatchedDirectoryCount += sessionMetrics.workspaceGitWatchedDirectoryCount;
+      workspaceGitWorkspaceRecordCount += sessionMetrics.workspaceGitWorkspaceRecordCount;
+      workspaceGitSubscriptionCount += sessionMetrics.workspaceGitSubscriptionCount;
+      inflightRequests += sessionMetrics.inflightRequests;
+      peakInflightRequests = Math.max(peakInflightRequests, sessionMetrics.peakInflightRequests);
+      connection.session.resetPeakInflight();
+    }
+
+    return {
+      ...this.checkoutDiffManager.getMetrics(),
+      terminalDirectorySubscriptionCount,
+      terminalSubscriptionCount,
+      workspaceGitWatchedDirectoryCount,
+      workspaceGitWorkspaceRecordCount,
+      workspaceGitSubscriptionCount,
+      inflightRequests,
+      peakInflightRequests,
+    };
+  }
+
+  private flushRuntimeMetrics(options?: { final?: boolean }): void {
+    const runtimeMetrics = this.runtimeMetrics.snapshotAndReset();
+    const activeConnections = new Set<SessionConnection>(this.sessions.values()).size;
+    const activeSockets = this.sessions.size;
+    const pendingConnections = this.pendingConnections.size;
+    const reconnectGraceSessions = [...this.externalSessionsByKey.values()].filter(
+      (connection) =>
+        connection.sockets.size === 0 && connection.externalDisconnectCleanupTimeout !== null,
+    ).length;
+    const sessionMetrics = this.collectSessionRuntimeMetrics();
+    const agentSnapshot = this.agentManager.getMetricsSnapshot();
+    const gitCommandMetrics = snapshotGitCommandRuntimeMetrics();
+    const loggedMetrics = {
+      windowMs: runtimeMetrics.windowMs,
+      final: Boolean(options?.final),
+      sessions: {
+        activeConnections,
+        externalSessionKeys: this.externalSessionsByKey.size,
+        reconnectGraceSessions,
+      },
+      sockets: {
+        activeSockets,
+        pendingConnections,
+      },
+      counters: runtimeMetrics.counters,
+      inboundMessageTypesTop: runtimeMetrics.inboundMessageTypesTop,
+      inboundSessionRequestTypesTop: runtimeMetrics.inboundSessionRequestTypesTop,
+      outboundMessageTypesTop: runtimeMetrics.outboundMessageTypesTop,
+      outboundSessionMessageTypesTop: runtimeMetrics.outboundSessionMessageTypesTop,
+      outboundAgentStreamTypesTop: runtimeMetrics.outboundAgentStreamTypesTop,
+      outboundAgentStreamAgentsTop: runtimeMetrics.outboundAgentStreamAgentsTop,
+      outboundBinaryFrameTypesTop: runtimeMetrics.outboundBinaryFrameTypesTop,
+      bufferedAmount: runtimeMetrics.bufferedAmount,
+      eventLoopDelay: this.snapshotEventLoopDelay(),
+      uptimeSeconds: getProcessUptimeSeconds(),
+      memory: getProcessMemoryDiagnostics(),
+      runtime: sessionMetrics,
+      latency: runtimeMetrics.latency,
+      agents: agentSnapshot,
+      git: {
+        commands: gitCommandMetrics,
+        workspaceService: this.workspaceGitService.getMetrics(),
+      },
+    } satisfies WebSocketRuntimeMetricsLogPayload;
+
+    this.lastRuntimeMetricsSnapshot = {
+      collectedAt: new Date().toISOString(),
+      ...loggedMetrics,
+    };
+    this.logger.info(loggedMetrics, "ws_runtime_metrics");
+  }
+
+  private getClientActivityState(session: Session): ClientPresenceState {
+    const activity = session.getClientActivity();
+    if (!activity) {
+      return {
+        appVisible: false,
+        focusedAgentId: null,
+        focusedTerminalId: null,
+        lastActivityAtMs: null,
+      };
+    }
+
+    return {
+      appVisible: activity.appVisible,
+      focusedAgentId: activity.focusedAgentId,
+      focusedTerminalId: activity.focusedTerminalId,
+      lastActivityAtMs: activity.lastActivityAt.getTime(),
+    };
+  }
+
+  private async broadcastAgentAttention(params: {
+    agentId: string;
+    provider: AgentProvider;
+    reason: "finished" | "error" | "permission";
+  }): Promise<void> {
+    const clientEntries: Array<{
+      ws: WebSocketLike;
+      state: ClientPresenceState;
+    }> = [];
+
+    for (const [ws, connection] of this.sessions) {
+      if (connection.kind !== "trusted") {
+        continue;
+      }
+      clientEntries.push({
+        ws,
+        state: this.getClientActivityState(connection.session),
+      });
+    }
+
+    const allStates = clientEntries.map((e) => e.state);
+    const nowMs = Date.now();
+    const agent = this.agentManager.getAgent(params.agentId);
+    if (!agent?.workspaceId) {
+      return;
+    }
+    const notification = buildAgentAttentionNotificationPayload({
+      reason: params.reason,
+      serverId: this.serverId,
+      workspaceId: agent.workspaceId,
+      agentId: params.agentId,
+      permissionRequest: findLatestPermissionRequest(agent.pendingPermissions),
+    });
+
+    const plan = computeNotificationPlan({
+      allStates,
+      focusTarget: { kind: "agent", id: params.agentId },
+      pushEligible: isPushEligibleAttentionReason(params.reason),
+      nowMs,
+    });
+
+    if (plan.shouldPush) {
+      void this.pushNotificationSender.send(notification).catch((err) => {
+        this.logger.warn({ err, agentId: params.agentId }, "Failed to send push notification");
+      });
+    }
+
+    for (const [clientIndex, { ws }] of clientEntries.entries()) {
+      const shouldNotify = clientIndex === plan.inAppRecipientIndex;
+      const timestamp = new Date().toISOString();
+      const connection = this.sessions.get(ws);
+      const attentionPayload = {
+        agentId: params.agentId,
+        reason: params.reason,
+        timestamp,
+        shouldNotify,
+        notification,
+      };
+      const message = wrapSessionMessage(
+        connection?.session.supportsForSource(CLIENT_CAPS.selectiveAgentTimeline, ws)
+          ? {
+              type: "agent_attention_required",
+              payload: attentionPayload,
+            }
+          : {
+              type: "agent_stream",
+              payload: {
+                agentId: params.agentId,
+                event: {
+                  type: "attention_required",
+                  provider: params.provider,
+                  reason: params.reason,
+                  timestamp,
+                  shouldNotify,
+                  notification,
+                },
+                timestamp,
+              },
+            },
+      );
+
+      this.sendToClient(ws, message);
+    }
+  }
+
+  private async broadcastTerminalAttention(params: {
+    terminalId: string;
+    cwd: string;
+    workspaceId?: string;
+    terminalName: string;
+    reason: TerminalAttentionReason;
+  }): Promise<void> {
+    const clientEntries: Array<{
+      ws: WebSocketLike;
+      state: ClientPresenceState;
+    }> = [];
+
+    for (const [ws, connection] of this.sessions) {
+      if (connection.kind !== "trusted") {
+        continue;
+      }
+      clientEntries.push({
+        ws,
+        state: this.getClientActivityState(connection.session),
+      });
+    }
+
+    const allStates = clientEntries.map((e) => e.state);
+    const nowMs = Date.now();
+    const workspaceId = params.workspaceId;
+
+    const plan = computeNotificationPlan({
+      allStates,
+      focusTarget: { kind: "terminal", id: params.terminalId },
+      pushEligible: true,
+      nowMs,
+    });
+
+    const title = terminalAttentionTitle(params.reason);
+    const body = params.terminalName;
+
+    if (plan.shouldPush) {
+      void this.pushNotificationSender
+        .send({
+          title,
+          body,
+          data: {
+            serverId: this.serverId,
+            terminalId: params.terminalId,
+            cwd: params.cwd,
+            ...(workspaceId ? { workspaceId } : {}),
+          },
+        })
+        .catch((err) => {
+          this.logger.warn(
+            { err, terminalId: params.terminalId },
+            "Failed to send push notification",
+          );
+        });
+    }
+
+    for (const [clientIndex, { ws }] of clientEntries.entries()) {
+      const shouldNotify = clientIndex === plan.inAppRecipientIndex;
+      const message = wrapSessionMessage({
+        type: "terminal_attention_required",
+        payload: {
+          serverId: this.serverId,
+          terminalId: params.terminalId,
+          cwd: params.cwd,
+          ...(workspaceId ? { workspaceId } : {}),
+          reason: params.reason,
+          title,
+          body,
+          shouldNotify,
+        },
+      });
+      this.sendToClient(ws, message);
+    }
+  }
+}
+
+interface SocketRequestMetadata {
+  host?: string;
+  origin?: string;
+  userAgent?: string;
+  remoteAddress?: string;
+}
+
+function createWebSocketConnectionIdentity(
+  requestMetadata: SocketRequestMetadata,
+  metadata: ExternalSocketMetadata | undefined,
+): WebSocketConnectionIdentity {
+  return {
+    connectionId: `conn_${randomUUID().replaceAll("-", "")}`,
+    transport: metadata?.transport === "tailnet" ? "tailnet" : "direct",
+    peer: resolveConnectionPeer(requestMetadata, metadata),
+    browserOrigin: requestMetadata.origin !== undefined,
+    ...(requestMetadata.host ? { host: requestMetadata.host } : {}),
+    ...(requestMetadata.origin ? { origin: requestMetadata.origin } : {}),
+    ...(requestMetadata.userAgent ? { userAgent: requestMetadata.userAgent } : {}),
+    ...(requestMetadata.remoteAddress ? { remoteAddress: requestMetadata.remoteAddress } : {}),
+  };
+}
+
+function toConnectionLogFields(identity: WebSocketConnectionIdentity): Record<string, string> {
+  return {
+    connectionId: identity.connectionId,
+    transport: identity.transport,
+    peer: identity.peer,
+    ...(identity.host ? { host: identity.host } : {}),
+    ...(identity.origin ? { origin: identity.origin } : {}),
+    ...(identity.userAgent ? { userAgent: identity.userAgent } : {}),
+    ...(identity.remoteAddress ? { remoteAddress: identity.remoteAddress } : {}),
+    ...(identity.clientId ? { clientId: identity.clientId } : {}),
+    ...(identity.sessionId ? { sessionId: identity.sessionId } : {}),
+    ...(identity.appVersion ? { appVersion: identity.appVersion } : {}),
+    ...(identity.deviceId ? { deviceId: identity.deviceId } : {}),
+  };
+}
+
+function resolveConnectionPeer(
+  requestMetadata: SocketRequestMetadata,
+  metadata: ExternalSocketMetadata | undefined,
+): WebSocketConnectionIdentity["peer"] {
+  if (metadata?.transport === "tailnet") return "external";
+  if (!requestMetadata.remoteAddress) return "local_ipc";
+  return isLoopbackAddress(requestMetadata.remoteAddress) ? "loopback" : "external";
+}
+
+function isLoopbackAddress(address: string): boolean {
+  const normalized = address.toLowerCase();
+  if (normalized === "::1" || normalized === "0:0:0:0:0:0:0:1") return true;
+  const ipv4 = normalized.startsWith("::ffff:") ? normalized.slice("::ffff:".length) : normalized;
+  return ipv4.startsWith("127.");
+}
+
+function extractSocketRequestMetadata(request: unknown): SocketRequestMetadata {
+  if (!request || typeof request !== "object") {
+    return {};
+  }
+
+  const record = request as {
+    headers?: {
+      host?: unknown;
+      origin?: unknown;
+      "user-agent"?: unknown;
+    };
+    url?: unknown;
+    socket?: {
+      remoteAddress?: unknown;
+    };
+  };
+
+  const host = typeof record.headers?.host === "string" ? record.headers.host : undefined;
+  const origin = typeof record.headers?.origin === "string" ? record.headers.origin : undefined;
+  const userAgent =
+    typeof record.headers?.["user-agent"] === "string" ? record.headers["user-agent"] : undefined;
+  const remoteAddress =
+    typeof record.socket?.remoteAddress === "string" ? record.socket.remoteAddress : undefined;
+
+  return {
+    ...(host ? { host } : {}),
+    ...(origin ? { origin } : {}),
+    ...(userAgent ? { userAgent } : {}),
+    ...(remoteAddress ? { remoteAddress } : {}),
+  };
+}
+
+interface HostAuthority {
+  hostname: string;
+  port: string | null;
+}
+
+function stripIpv6Brackets(hostname: string): string {
+  return hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
+}
+
+function parseHostAuthority(host: string): HostAuthority | null {
+  const trimmed = host.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (trimmed.startsWith("[")) {
+    const end = trimmed.indexOf("]");
+    if (end === -1) {
+      return null;
+    }
+    const hostname = stripIpv6Brackets(trimmed.slice(0, end + 1)).toLowerCase();
+    const rest = trimmed.slice(end + 1);
+    if (!rest) {
+      return { hostname, port: null };
+    }
+    if (!rest.startsWith(":")) {
+      return null;
+    }
+    const port = rest.slice(1);
+    return port ? { hostname, port } : null;
+  }
+
+  const firstColon = trimmed.indexOf(":");
+  if (firstColon === -1) {
+    return { hostname: trimmed.toLowerCase(), port: null };
+  }
+  if (trimmed.indexOf(":", firstColon + 1) !== -1) {
+    return { hostname: trimmed.toLowerCase(), port: null };
+  }
+  const hostname = trimmed.slice(0, firstColon).toLowerCase();
+  const port = trimmed.slice(firstColon + 1);
+  return hostname && port ? { hostname, port } : null;
+}
+
+function defaultPortForOriginProtocol(protocol: string): string | null {
+  if (protocol === "http:") {
+    return "80";
+  }
+  if (protocol === "https:") {
+    return "443";
+  }
+  return null;
+}
+
+function isLoopbackAlias(hostname: string): boolean {
+  const normalized = stripIpv6Brackets(hostname).toLowerCase();
+  if (normalized === "localhost" || normalized.endsWith(".localhost")) {
+    return true;
+  }
+  if (normalized === "::1" || normalized === "0:0:0:0:0:0:0:1") {
+    return true;
+  }
+  return /^127(?:\.\d{1,3}){3}$/.test(normalized);
+}
+
+export function isWebSocketSameOrigin(
+  origin: string | undefined,
+  requestHost: string | null,
+): boolean {
+  if (!origin || !requestHost) {
+    return false;
+  }
+
+  if (origin === `http://${requestHost}` || origin === `https://${requestHost}`) {
+    return true;
+  }
+
+  let originUrl: URL;
+  try {
+    originUrl = new URL(origin);
+  } catch {
+    return false;
+  }
+  const originPort = originUrl.port || defaultPortForOriginProtocol(originUrl.protocol);
+  if (!originPort) {
+    return false;
+  }
+
+  const requestAuthority = parseHostAuthority(requestHost);
+  if (!requestAuthority) {
+    return false;
+  }
+  const requestPort = requestAuthority.port || defaultPortForOriginProtocol(originUrl.protocol);
+  if (originPort !== requestPort) {
+    return false;
+  }
+
+  return isLoopbackAlias(originUrl.hostname) && isLoopbackAlias(requestAuthority.hostname);
+}
+
+function selectWebSocketProtocol(
+  protocols: Set<string>,
+  password: string | undefined,
+): string | false {
+  if (!password) {
+    return protocols.values().next().value ?? false;
+  }
+
+  for (const protocol of protocols) {
+    const token = extractWsBearerToken(protocol);
+    if (token !== null) {
+      return protocol;
+    }
+  }
+
+  return false;
+}
+
+function stringifyCloseReason(reason: unknown): string | null {
+  if (typeof reason === "string") {
+    return reason.length > 0 ? reason : null;
+  }
+  if (Buffer.isBuffer(reason)) {
+    const text = reason.toString();
+    return text.length > 0 ? text : null;
+  }
+  if (reason == null) {
+    return null;
+  }
+  const text = String(reason);
+  return text.length > 0 ? text : null;
+}
+
+function getControlRpcLogInfo(
+  message: Extract<WSInboundMessage, { type: "session" }>["message"],
+): { requestType: string; requestId: string; reason?: string } | null {
+  if (message.type === "shutdown_server_request") {
+    return {
+      requestType: message.type,
+      requestId: message.requestId,
+      reason: CLIENT_SHUTDOWN_RPC_REASON,
+    };
+  }
+  if (message.type === "restart_server_request") {
+    const reason = normalizeClientRestartRpcReason(message.reason);
+    return {
+      requestType: message.type,
+      requestId: message.requestId,
+      reason,
+    };
+  }
+  if (message.type === "daemon.update.request") {
+    return {
+      requestType: message.type,
+      requestId: message.requestId,
+      reason: "daemon_update",
+    };
+  }
+  return null;
+}
+
+function extractRequestInfoFromUnknownWsInbound(
+  payload: unknown,
+): { requestId: string; requestType?: string } | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const record = payload as {
+    type?: unknown;
+    requestId?: unknown;
+    message?: unknown;
+  };
+
+  // Session-wrapped messages
+  if (record.type === "session" && record.message && typeof record.message === "object") {
+    const msg = record.message as { requestId?: unknown; type?: unknown };
+    if (typeof msg.requestId === "string") {
+      return {
+        requestId: msg.requestId,
+        ...(typeof msg.type === "string" ? { requestType: msg.type } : {}),
+      };
+    }
+  }
+
+  // Non-session messages (future-proof)
+  if (typeof record.requestId === "string") {
+    return {
+      requestId: record.requestId,
+      ...(typeof record.type === "string" ? { requestType: record.type } : {}),
+    };
+  }
+
+  return null;
+}

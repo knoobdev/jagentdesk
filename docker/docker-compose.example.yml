@@ -1,0 +1,21 @@
+# Minimal JAgentDesk daemon + web UI deployment.
+#
+# Open http://localhost:6767 after `docker compose up -d`.
+# For any network-reachable deployment, change JAGENTDESK_PASSWORD first.
+services:
+  jagentdesk:
+    image: jagentdesk:local:latest
+    container_name: jagentdesk
+    restart: unless-stopped
+    ports:
+      - "6767:6767"
+    environment:
+      JAGENTDESK_PASSWORD: "change-me"
+      # Add DNS names you use to reach this container. IPs and localhost are
+      # already allowed by default.
+      # JAGENTDESK_HOSTNAMES: "jagentdesk.example.com,.lan"
+    volumes:
+      # Persistent daemon state and agent credentials/config.
+      - ./jagentdesk-home:/home/jagentdesk
+      # Code visible to JAgentDesk and the agents it launches.
+      - ./workspace:/workspace

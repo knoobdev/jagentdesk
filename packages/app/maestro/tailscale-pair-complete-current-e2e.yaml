@@ -1,0 +1,15 @@
+appId: app.jagentdesk.mobile
+---
+- launchApp
+- extendedWaitUntil:
+    visible: "Enter verification code"
+    timeout: 30000
+- assertNotVisible: "Verify and pair"
+- tapOn:
+    id: pairing-code-input
+- inputText: ${PAIRING_CODE}
+- extendedWaitUntil:
+    visible:
+      id: open-project-submit
+    timeout: 90000
+- takeScreenshot: tailscale-pair-complete-current

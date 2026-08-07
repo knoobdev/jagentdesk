@@ -1,0 +1,1 @@
+export const MAX_EXPLICIT_AGENT_TITLE_CHARS = 200;

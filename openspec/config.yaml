@@ -1,0 +1,53 @@
+schema: spec-driven
+
+context: |
+  Product: JAgentDesk — nền tảng self-hosted điều khiển coding agent chạy trên máy cá nhân.
+  A daemon runs on the work machine and manages agent processes; a desktop app and a
+  mobile app connect to the daemon. Behavior parity is grounded in the local reference
+  snapshot at scratchpad/reference, with THREE deliberate product deltas:
+
+    1. NO in-app editor. Viewing files and diffs is supported; editing files in the app is NOT.
+    2. Transport is TAILSCALE (tsnet), not a hosted relay server. The daemon serves /ws
+       on the tailnet; clients dial it directly over WireGuard. JAgentDesk's relay + E2EE box layer
+       is dropped (WireGuard already provides transport encryption + node identity).
+    3. Application-layer PAIRING + connection SIGNING so an arbitrary tailnet node cannot
+       control the daemon just by being on the tailnet. Mobile app's FIRST screen captures
+       a pairing offer; Tailscale login (interactive login OR auth key) follows the offer,
+       then the signed connection requires the desktop's six-digit verification code.
+
+  Push notifications: use Expo Push Service as broker (free, unlimited) with content-light
+  payloads (event type + opaque id only; detail fetched over Tailscale on open). Unavoidable
+  cost floor is the $99/yr Apple Developer account. No self-hosted APNs/FCM in phase 1.
+
+  Source of truth for parity behavior is the local reference snapshot at scratchpad/reference —
+  reference it by file:line, never invent behavior. Its docs live under scratchpad/reference/docs
+  and scratchpad/reference/public-docs.
+
+  Tech stack: TypeScript monorepo. Daemon/server = Node. Shared UI =
+  Expo / React Native + react-native-web (one codebase for mobile + desktop web view).
+  Desktop = Electron hosting the Expo web export. Protocol = shared Zod schemas over a
+  single WebSocket /ws (JSON envelopes + binary frames for terminal/file transfer).
+  Design tokens are copied from the reference snapshot's packages/app/src/styles/theme.ts
+  (real hex, real scales).
+
+  Conventions: all timestamps are Unix UTC milliseconds with _ms suffix. Cross-references
+  use file.section form. Any security- or protocol-affecting change needs an ADR under
+  openspec/ (or docs/decisions). Every design value (color/size/spacing) must be quoted from
+  the JAgentDesk design system with the real value — no "light gray", no "about 12px".
+  UI strings default to English; spec prose is written in Vietnamese where authored by hand.
+
+  Forbidden: mock data, placeholder/fake names (no "iPhone 15 Pro (Nam)", no example.com),
+  claiming done without evidence, or guessing parity behavior instead of reading the reference snapshot.
+
+rules:
+  proposal:
+    - Always include a "Non-goals" section; explicitly list "in-app file editing" as a non-goal.
+    - State the three product deltas (no editor, Tailscale transport, pairing+signing).
+  design:
+    - Ground every parity claim in a scratchpad/reference file:line reference.
+    - For transport decisions, name the exact replacement seam in the reference source.
+  specs:
+    - Requirements must be testable and measurable; every requirement has at least one scenario.
+    - Quote design values (hex, px, ms) literally from the reference source; never approximate.
+  tasks:
+    - Group tasks by capability; each task references the spec requirement it satisfies.
