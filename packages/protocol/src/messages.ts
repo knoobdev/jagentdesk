@@ -6,6 +6,17 @@ import { MAX_EXPLICIT_AGENT_TITLE_CHARS } from "./agent-title-limits.js";
 import { AgentProviderSchema } from "./provider-manifest.js";
 import { TOOL_CALL_ICON_NAMES } from "./agent-types.js";
 import {
+  OrchestrationConfigGetRequestSchema,
+  OrchestrationConfigGetResponseSchema,
+  OrchestrationConfigPatchSchema,
+  OrchestrationConfigSchema,
+  OrchestrationConfigUpdateRequestSchema,
+  OrchestrationConfigUpdateResponseSchema,
+  OrchestrationTaskPrepareRequestSchema,
+  OrchestrationTaskPrepareResponseSchema,
+  createDefaultOrchestrationConfig,
+} from "./orchestration.js";
+import {
   ChatCreateRequestSchema,
   ChatListRequestSchema,
   ChatInspectRequestSchema,
@@ -56,6 +67,10 @@ import {
 import {
   BrowserAutomationExecuteRequestSchema,
   BrowserAutomationExecuteResponseSchema,
+  BrowserScreenshotRequestSchema,
+  BrowserScreenshotResponseSchema,
+  BrowserListRequestSchema,
+  BrowserListResponseSchema,
 } from "./browser-automation/rpc-schemas.js";
 import { BrowserAutomationHostCapabilitySchema } from "./browser-automation/capabilities.js";
 import {
@@ -153,6 +168,7 @@ export const MutableDaemonConfigSchema = z
     enableTerminalAgentHooks: z.boolean().default(false),
     appendSystemPrompt: z.string().default(""),
     terminalProfiles: z.array(TerminalProfileSchema).optional(),
+    orchestration: OrchestrationConfigSchema.default(createDefaultOrchestrationConfig()),
   })
   .strip();
 
@@ -169,6 +185,7 @@ export const MutableDaemonConfigPatchSchema = z
     enableTerminalAgentHooks: z.boolean().optional(),
     appendSystemPrompt: z.string().optional(),
     terminalProfiles: z.array(TerminalProfileSchema).optional(),
+    orchestration: OrchestrationConfigPatchSchema.optional(),
   })
   .partial()
   .strip();
@@ -1276,6 +1293,8 @@ export const SetDaemonConfigRequestMessageSchema = z.object({
   requestId: z.string(),
   config: MutableDaemonConfigPatchSchema,
 });
+
+export { OrchestrationConfigSchema, OrchestrationConfigPatchSchema } from "./orchestration.js";
 
 export const ReadProjectConfigRequestMessageSchema = z.object({
   type: z.literal("read_project_config_request"),
@@ -2576,6 +2595,8 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   HubExecutionAgentCreateRequestSchema,
   HubExecutionControlRequestSchema,
   BrowserAutomationExecuteResponseSchema,
+  BrowserScreenshotRequestSchema,
+  BrowserListRequestSchema,
   VoiceAudioChunkMessageSchema,
   AbortRequestMessageSchema,
   AudioPlayedMessageSchema,
@@ -2614,6 +2635,9 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   SetDaemonConfigRequestMessageSchema,
   ReadProjectConfigRequestMessageSchema,
   WriteProjectConfigRequestMessageSchema,
+  OrchestrationConfigGetRequestSchema,
+  OrchestrationConfigUpdateRequestSchema,
+  OrchestrationTaskPrepareRequestSchema,
   DictationStreamStartMessageSchema,
   DictationStreamChunkMessageSchema,
   DictationStreamFinishMessageSchema,
@@ -5426,7 +5450,12 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   HubExecutionControlResponseSchema,
   HubExecutionAgentUpdateSchema,
   HubExecutionAgentStreamSchema,
+  OrchestrationConfigGetResponseSchema,
+  OrchestrationConfigUpdateResponseSchema,
+  OrchestrationTaskPrepareResponseSchema,
   BrowserAutomationExecuteRequestSchema,
+  BrowserScreenshotResponseSchema,
+  BrowserListResponseSchema,
   ActivityLogMessageSchema,
   AssistantChunkMessageSchema,
   AudioOutputMessageSchema,

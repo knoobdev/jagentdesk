@@ -147,6 +147,7 @@ export const fr: TranslationResources = {
     clientCommands: {
       archiveAgent: "Archiver l'agent actuel",
       freshDraft: "Archivez cet agent et démarrez un nouveau brouillon",
+      orchestrate: "Démarrer l'orchestration (Superviseur → Lead → Pair)",
     },
     github: {
       searching: "Recherche...",
@@ -1633,6 +1634,7 @@ export const fr: TranslationResources = {
       projects: "Projets",
       connections: "Relations",
       agents: "Agents",
+      orchestration: "Orchestration",
       workspaces: "Workspaces",
       providers: "Fournisseurs",
       usage: "Utilisation",
@@ -2219,7 +2221,8 @@ export const fr: TranslationResources = {
       },
       writeFailures: {
         staleTitle: "Configuration modifiée sur le disque",
-        staleDescription: "Rechargez pour récupérer le dernier jagentdesk.json avant de sauvegarder.",
+        staleDescription:
+          "Rechargez pour récupérer le dernier jagentdesk.json avant de sauvegarder.",
         failedTitle: "Impossible d'enregistrer jagentdesk.json",
         failedDescription: "Réessayez ou rechargez la dernière version à partir du disque.",
       },

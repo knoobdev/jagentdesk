@@ -203,10 +203,13 @@ export default {
     extra: {
       fdroidBuild: isFdroidBuild,
       router: {},
-      eas: {
-        projectId: "afd7bb1c-1f83-4471-a0df-c894c49d6bba",
-      },
+      eas:
+        process.env.EAS_PROJECT_ID === ""
+          ? {}
+          : {
+              projectId: process.env.EAS_PROJECT_ID ?? "2bcf1178-84eb-49e5-aa1e-2c66679371b5",
+            },
     },
-    owner: "jagent20261",
+    owner: process.env.EAS_OWNER ?? "jagentdesk20262",
   },
 };

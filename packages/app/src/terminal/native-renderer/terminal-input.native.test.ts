@@ -199,4 +199,25 @@ describe("native terminal typed input", () => {
       shouldClear: false,
     });
   });
+
+  it("does not replay a stale IME suggestion when the native clear leaves composing text behind", () => {
+    const input = createTerminalTextInputState();
+    let typed = "";
+
+    for (const key of "resta") {
+      typed += key;
+      input.receiveKeyPress(key);
+      input.receiveTextChange(typed);
+    }
+
+    expect(input.receiveTextChange("restaurant ")).toEqual({
+      data: "urant ",
+      shouldClear: false,
+    });
+
+    expect(input.receiveTextChange("restaurant x")).toEqual({
+      data: "x",
+      shouldClear: false,
+    });
+  });
 });

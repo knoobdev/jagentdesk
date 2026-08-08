@@ -28,6 +28,9 @@ import { useAgentControlCommandCenterActions } from "@/command-center/agent-cont
 import { encodeImages } from "@/utils/encode-images";
 import type { WorkspaceFileOpenRequest } from "@/workspace/file-open";
 import { shouldAutoFocusWorkspaceDraftComposer } from "@/screens/workspace/workspace-draft-pane-focus";
+import { runOrchestrateClientCommand } from "@/orchestration/start-objective";
+import { useOrchestration } from "@/hooks/use-orchestration";
+import type { ClientSlashCommand } from "@/client-slash-commands";
 import {
   shouldAllowEmptyDraftText,
   validateDraftSubmission,
@@ -378,6 +381,27 @@ export function WorkspaceDraftAgentTab({
     throw new Error("Workspace draft composer state is required");
   }
 
+  // /orc from a fresh draft: start orchestration instead of creating a normal agent
+  // whose first message would be the literal "/orc …" (which a provider rejects as an
+  // unknown command). No model pick is needed — orchestration uses its configured profiles.
+  const { config: orchestrationConfig } = useOrchestration(serverId);
+  const handleDraftClientSlashCommand = useCallback(
+    async (command: ClientSlashCommand) => {
+      if (command.kind !== "orchestrate") {
+        return;
+      }
+      await runOrchestrateClientCommand({
+        client,
+        config: orchestrationConfig,
+        cwd: composerState.workingDir,
+        serverId,
+        workspaceId,
+        rawRequest: command.argument ?? "",
+      });
+    },
+    [client, orchestrationConfig, composerState.workingDir, serverId, workspaceId],
+  );
+
   const draftProvider = composerState.selectedProvider;
   const draftProviderDefinitions = composerState.providerDefinitions;
   const draftThinkingOptions = composerState.availableThinkingOptions;
@@ -696,6 +720,7 @@ export function WorkspaceDraftAgentTab({
           externalKeyboardShift
           isPaneFocused={isPaneFocused}
           onSubmitMessage={handleCreateFromInput}
+          onClientSlashCommand={handleDraftClientSlashCommand}
           isSubmitLoading={isSubmitting}
           blurOnSubmit={true}
           value={draftInput.text}

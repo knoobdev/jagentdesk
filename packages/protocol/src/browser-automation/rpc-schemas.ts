@@ -539,3 +539,65 @@ export type BrowserAutomationExecuteRequest = z.infer<typeof BrowserAutomationEx
 export type BrowserAutomationExecuteResponse = z.infer<
   typeof BrowserAutomationExecuteResponseSchema
 >;
+
+// Client-facing browser screencast (view-only v1): a viewer client (e.g. mobile) polls the
+// current frame of a browser tab. The daemon fulfils each request through the browser-tools
+// broker's screenshot command against the desktop browserHost and relays the PNG back.
+export const BrowserScreenshotRequestSchema = z.object({
+  type: z.literal("browser.screenshot.request"),
+  requestId: z.string().min(1),
+  browserId: BrowserAutomationBrowserIdSchema,
+  workspaceId: z.string().min(1),
+});
+export type BrowserScreenshotRequest = z.infer<typeof BrowserScreenshotRequestSchema>;
+
+// NB: use z.union (not z.discriminatedUnion("ok", …)) — the AOT validator codegen emits a string
+// `switch(payload.ok){case "true":…}` for a boolean discriminator, which never matches the real
+// boolean and rejects every valid message.
+export const BrowserScreenshotResponseSchema = z.object({
+  type: z.literal("browser.screenshot.response"),
+  payload: z.union([
+    z.object({
+      requestId: z.string().min(1),
+      ok: z.literal(true),
+      mimeType: z.literal("image/png"),
+      dataBase64: z.string().min(1),
+      width: z.number().int().nonnegative(),
+      height: z.number().int().nonnegative(),
+    }),
+    z.object({
+      requestId: z.string().min(1),
+      ok: z.literal(false),
+      error: z.object({ code: z.string(), message: z.string() }),
+    }),
+  ]),
+});
+export type BrowserScreenshotResponse = z.infer<typeof BrowserScreenshotResponseSchema>;
+
+// Client-facing list of the host's live browser tabs, so a viewer client (e.g. mobile) can
+// discover a desktop-hosted browser to screencast (workspace tab layout + browser store are
+// desktop-local, so the mobile cannot otherwise learn the browserIds).
+export const BrowserListRequestSchema = z.object({
+  type: z.literal("browser.list.request"),
+  requestId: z.string().min(1),
+  workspaceId: z.string().min(1),
+});
+export type BrowserListRequest = z.infer<typeof BrowserListRequestSchema>;
+
+export const BrowserListResponseSchema = z.object({
+  type: z.literal("browser.list.response"),
+  // z.union (not discriminatedUnion) — see BrowserScreenshotResponseSchema note re the AOT codegen.
+  payload: z.union([
+    z.object({
+      requestId: z.string().min(1),
+      ok: z.literal(true),
+      tabs: z.array(BrowserAutomationTabInfoSchema),
+    }),
+    z.object({
+      requestId: z.string().min(1),
+      ok: z.literal(false),
+      error: z.object({ code: z.string(), message: z.string() }),
+    }),
+  ]),
+});
+export type BrowserListResponse = z.infer<typeof BrowserListResponseSchema>;

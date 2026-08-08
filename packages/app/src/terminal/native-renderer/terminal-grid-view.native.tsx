@@ -9,18 +9,27 @@ import {
   type ViewStyle,
 } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
+import Svg, { G, Path } from "react-native-svg";
 import type { ITheme } from "@xterm/xterm";
 
 import { createTerminalCellStyleResolver, DEFAULT_TERMINAL_THEME } from "./colors";
+import type { TerminalGlyphRect } from "./terminal-custom-glyph";
 import { resolveNativeTerminalFontFamily } from "./font.native";
 import type { TerminalViewportState } from "./headless-terminal-state";
 import {
   resolveMeasuredTerminalCellMetrics,
+  resolveTerminalCustomGlyphCellTransform,
   resolveTerminalGridMetricsMeasurement,
   resolveTerminalCursorOffset,
   type TerminalGridCellMetrics,
 } from "./terminal-grid-metrics";
-import { buildRows, type TerminalRowModel, type TerminalRun } from "./terminal-row-model";
+import {
+  buildRows,
+  type TerminalCustomGlyphCell,
+  type TerminalCustomGlyphRun,
+  type TerminalRowModel,
+  type TerminalRun,
+} from "./terminal-row-model";
 import {
   resolveTerminalSelectionRects,
   type TerminalSelectionRange,
@@ -114,9 +123,104 @@ function TerminalGridRun({ run, cellWidth, cellHeight, textStyle }: TerminalGrid
 
   return (
     <View style={runStyle}>
-      <Text numberOfLines={1} style={runTextStyle}>
-        {run.text}
-      </Text>
+      {run.renderKind === "custom-glyph" ? (
+        <TerminalGridCustomGlyphRun run={run} cellWidth={cellWidth} cellHeight={cellHeight} />
+      ) : (
+        <Text numberOfLines={1} style={runTextStyle}>
+          {run.text}
+        </Text>
+      )}
+    </View>
+  );
+}
+
+interface TerminalGridCustomGlyphRunProps {
+  run: TerminalCustomGlyphRun;
+  cellWidth: number;
+  cellHeight: number;
+}
+
+interface TerminalGridCustomGlyphRectProps {
+  cell: TerminalCustomGlyphCell;
+  rect: TerminalGlyphRect;
+  cellWidth: number;
+  cellHeight: number;
+  foregroundColor: string;
+}
+
+function TerminalGridCustomGlyphRect({
+  cell,
+  rect,
+  cellWidth,
+  cellHeight,
+  foregroundColor,
+}: TerminalGridCustomGlyphRectProps) {
+  const style = useMemo<ViewStyle>(
+    () => ({
+      position: "absolute",
+      backgroundColor: foregroundColor,
+      left: (cell.offset + rect.x) * cellWidth,
+      top: rect.y * cellHeight,
+      width: rect.width * cellWidth,
+      height: rect.height * cellHeight,
+    }),
+    [cell.offset, cellHeight, cellWidth, foregroundColor, rect],
+  );
+
+  return <View style={style} />;
+}
+
+function TerminalGridCustomGlyphRun({
+  run,
+  cellWidth,
+  cellHeight,
+}: TerminalGridCustomGlyphRunProps) {
+  const opacity = typeof run.style.opacity === "number" ? run.style.opacity : 1;
+
+  return (
+    <View style={[styles.customGlyphRun, { opacity }]}>
+      {run.glyphs.map((cell) =>
+        cell.glyph.kind === "rects"
+          ? cell.glyph.rects.map((rect) => (
+              <TerminalGridCustomGlyphRect
+                key={`${cell.key}:${rect.x}:${rect.y}:${rect.width}:${rect.height}`}
+                cell={cell}
+                rect={rect}
+                cellWidth={cellWidth}
+                cellHeight={cellHeight}
+                foregroundColor={run.foregroundColor}
+              />
+            ))
+          : null,
+      )}
+      <Svg
+        height={cellHeight}
+        pointerEvents="none"
+        preserveAspectRatio="none"
+        style={styles.customGlyphSvg}
+        viewBox={`0 0 ${run.cellCount * cellWidth} ${cellHeight}`}
+        width={run.cellCount * cellWidth}
+      >
+        <G fill="none" stroke={run.foregroundColor}>
+          {run.glyphs.map((cell) =>
+            cell.glyph.kind === "path" ? (
+              <Path
+                d={cell.glyph.path}
+                key={cell.key}
+                strokeLinecap="butt"
+                strokeLinejoin="miter"
+                strokeWidth={cell.glyph.strokeWidth}
+                transform={resolveTerminalCustomGlyphCellTransform({
+                  cellOffset: cell.offset,
+                  cellWidth,
+                  cellHeight,
+                })}
+                vectorEffect="non-scaling-stroke"
+              />
+            ) : null,
+          )}
+        </G>
+      </Svg>
     </View>
   );
 }
@@ -367,6 +471,15 @@ const styles = StyleSheet.create({
   },
   run: {
     overflow: "hidden",
+  },
+  customGlyphRun: {
+    flex: 1,
+    position: "relative",
+  },
+  customGlyphSvg: {
+    left: 0,
+    position: "absolute",
+    top: 0,
   },
   rowText: {
     includeFontPadding: false,

@@ -832,6 +832,13 @@ export function BrowserPane({
     };
     const handleWebviewFocus = () => {
       onFocusPane?.();
+      webview.focus?.();
+      const focusBrowser = getDesktopHost()?.browser?.focus;
+      if (typeof focusBrowser === "function") {
+        void focusBrowser(browserIdRef.current).catch((error) => {
+          console.error("[browser-webview] focus failed", error);
+        });
+      }
     };
 
     webview.addEventListener("did-start-loading", handleStartLoading);

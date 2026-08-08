@@ -203,6 +203,11 @@ import {
 } from "@/workspace/file-open";
 import { RenderProfile } from "@/utils/render-profiler";
 import { useWorkspaceCheckoutStatus } from "@/screens/workspace/use-workspace-checkout-status";
+import { WorkspaceOrchestrationPanel } from "@/screens/workspace/orchestration-workspace-panel";
+import {
+  OrchestrationAgentsColumn,
+  useWorkspaceOrchestrationRosterCount,
+} from "@/screens/workspace/orchestration-agents-column";
 
 const WORKSPACE_SETUP_AUTO_OPEN_WINDOW_MS = 30_000;
 const WORKSPACE_FLOATING_PANEL_PORTAL_HOST_PREFIX = "workspace-floating-panels";
@@ -1621,6 +1626,7 @@ interface WorkspaceChromeRowProps extends Omit<
   "workspaceRoot"
 > {
   children: ReactNode;
+  leftDock?: ReactNode;
   explorerOpen: boolean;
   portalHostName: string;
   showExplorerSidebar: boolean;
@@ -1629,6 +1635,7 @@ interface WorkspaceChromeRowProps extends Omit<
 
 function WorkspaceChromeRow({
   children,
+  leftDock,
   explorerOpen,
   portalHostName,
   showExplorerSidebar,
@@ -1636,10 +1643,20 @@ function WorkspaceChromeRow({
   ...explorerProps
 }: WorkspaceChromeRowProps) {
   const explorerRendered = showExplorerSidebar && explorerOpen && workspaceRoot !== null;
+  const leftRendered = leftDock != null;
+  const centerCorners = leftRendered
+    ? explorerRendered
+      ? "none"
+      : "top-right"
+    : explorerRendered
+      ? "top-left"
+      : "both";
 
   return (
     <View style={styles.threePaneRow}>
-      <WindowChromeRegion corners={explorerRendered ? "top-left" : "both"}>
+      {leftRendered ? <WindowChromeRegion corners="top-left">{leftDock}</WindowChromeRegion> : null}
+
+      <WindowChromeRegion corners={centerCorners}>
         <FloatingPanelPortalHostNameProvider hostName={portalHostName}>
           {children}
         </FloatingPanelPortalHostNameProvider>
@@ -2588,7 +2605,8 @@ function WorkspaceScreenContent({
 
   const handleCreateBrowserTab = useCallback(
     (input?: { paneId?: string }) => {
-      if (!persistenceKey || !getIsElectron()) {
+      // Allowed on Electron (real webview) and native mobile (screencast viewer of the desktop tab).
+      if (!persistenceKey || (!getIsElectron() && !isNative)) {
         return;
       }
       if (input?.paneId) {
@@ -3498,9 +3516,18 @@ function WorkspaceScreenContent({
     workspaceKey: persistenceKey,
   });
 
+  const orchestrationRosterCount = useWorkspaceOrchestrationRosterCount(
+    normalizedServerId,
+    normalizedWorkspaceId,
+  );
   const headerRight = useMemo(
     () => (
       <View style={styles.headerRight}>
+        <WorkspaceOrchestrationPanel
+          serverId={normalizedServerId}
+          workspaceId={normalizedWorkspaceId}
+          cwd={workspaceDirectory}
+        />
         {!isMobile && workspaceDescriptor && workspaceDescriptor.scripts.length > 0 ? (
           <WorkspaceScriptsButton
             serverId={normalizedServerId}
@@ -3657,7 +3684,9 @@ function WorkspaceScreenContent({
     () => createTerminalMutation.isPending || pendingTerminalCreateInput !== null,
     [createTerminalMutation.isPending, pendingTerminalCreateInput],
   );
-  const showCreateBrowserTab = getIsElectron();
+  // Desktop (Electron) hosts the browser in a real webview; native mobile can't, but it can now
+  // open a browser tab that *screencasts* the desktop-hosted browser, so surface the entry there too.
+  const showCreateBrowserTab = getIsElectron() || isNative;
   const focusedPaneIdOrUndefined = useMemo(() => focusedPaneId ?? undefined, [focusedPaneId]);
   const desktopFocusModeEnabled = useMemo(
     () => isFocusModeEnabled && !isMobile,
@@ -3883,6 +3912,14 @@ function WorkspaceScreenContent({
               workspaceRoot={workspaceDirectory}
               isGit={isGitCheckout}
               onOpenFile={handleOpenFileFromExplorer}
+              leftDock={
+                !isMobile && orchestrationRosterCount > 0 ? (
+                  <OrchestrationAgentsColumn
+                    serverId={normalizedServerId}
+                    workspaceId={normalizedWorkspaceId}
+                  />
+                ) : null
+              }
             >
               {workspaceCenterColumn}
             </WorkspaceChromeRow>

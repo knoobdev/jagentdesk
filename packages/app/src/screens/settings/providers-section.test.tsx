@@ -5,6 +5,7 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderSnapshotEntry } from "@jagentdesk/protocol/agent-types";
+import { createDefaultOrchestrationConfig } from "@jagentdesk/protocol/orchestration";
 import type { MutableDaemonConfig } from "@jagentdesk/protocol/messages";
 
 const { theme, snapshotState, configState, patchConfigMock, openProviderSettingsMock } = vi.hoisted(
@@ -311,6 +312,7 @@ function makeConfig(providers: MutableDaemonConfig["providers"] = {}): MutableDa
     autoArchiveAfterMerge: false,
     enableTerminalAgentHooks: false,
     appendSystemPrompt: "",
+    orchestration: createDefaultOrchestrationConfig(),
   };
 }
 

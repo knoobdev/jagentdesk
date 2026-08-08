@@ -64,6 +64,10 @@ import {
   useHostRuntimeLastError,
   useHosts,
 } from "@/runtime/host-runtime";
+import { useOrchestration } from "@/hooks/use-orchestration";
+import { runOrchestrateClientCommand } from "@/orchestration/start-objective";
+import { OrchestrationLeadPlanCard } from "@/screens/workspace/orchestration-agents-column";
+import { ORCHESTRATION_ROLE_LABEL } from "@jagentdesk/protocol/orchestration";
 import {
   deriveRouteBottomAnchorIntent,
   deriveRouteBottomAnchorRequest,
@@ -1440,8 +1444,33 @@ function ActiveAgentComposer({
     COMPACT_FORM_FACTOR_WIDTH,
     { initialIsBelow: isCompactFormFactor },
   );
+  const client = useHostRuntimeClient(serverId);
+  const { config: orchestrationConfig } = useOrchestration(serverId);
   const paneContext = usePaneContext();
   const { workspaceId, tabId, retargetCurrentTab, openTab } = paneContext;
+  // Orchestration interaction model: the composer talks to the Supervisor; while a
+  // run is active, Lead/Peer threads are observe-only so the human watches the bounded
+  // work without racing the running turn. The Lead plan renders in the Supervisor thread.
+  const activeAgentRole = useSessionStore(
+    (state) => state.sessions[serverId]?.agents.get(agentId)?.labels[ORCHESTRATION_ROLE_LABEL],
+  );
+  const isOrchestrationRunActive = useSessionStore((state) => {
+    const agents = state.sessions[serverId]?.agents;
+    if (!agents) return false;
+    for (const candidate of agents.values()) {
+      if (
+        candidate.workspaceId === workspaceId &&
+        candidate.labels[ORCHESTRATION_ROLE_LABEL] &&
+        candidate.status === "running"
+      ) {
+        return true;
+      }
+    }
+    return false;
+  });
+  const isSupervisorThread = activeAgentRole === "supervisor";
+  const composerViewOnly =
+    (activeAgentRole === "lead" || activeAgentRole === "peer") && isOrchestrationRunActive;
   const { archiveAgent } = useArchiveAgent();
   const closeWorkspaceTab = useWorkspaceLayoutStore((state) => state.closeTab);
   const hideWorkspaceAgent = useWorkspaceLayoutStore((state) => state.hideAgent);
@@ -1511,6 +1540,18 @@ function ActiveAgentComposer({
         throw new Error("Agent not found");
       }
 
+      if (command.kind === "orchestrate") {
+        await runOrchestrateClientCommand({
+          client,
+          config: orchestrationConfig,
+          cwd,
+          serverId,
+          workspaceId,
+          rawRequest: command.argument ?? "",
+        });
+        return; // do NOT archive the current agent
+      }
+
       const workspaceKey = buildWorkspaceTabPersistenceKey({ serverId, workspaceId });
       if (workspaceKey) {
         unpinWorkspaceAgent(workspaceKey, agentId);
@@ -1533,7 +1574,10 @@ function ActiveAgentComposer({
       agentId,
       archiveAgent,
       closeWorkspaceTab,
+      client,
+      cwd,
       hideWorkspaceAgent,
+      orchestrationConfig,
       retargetCurrentTab,
       serverId,
       tabId,
@@ -1557,6 +1601,9 @@ function ActiveAgentComposer({
 
   return (
     <ReanimatedAnimated.View style={inputAreaStyle} onLayout={onInputAreaLayout}>
+      {isSupervisorThread ? (
+        <OrchestrationLeadPlanCard serverId={serverId} workspaceId={workspaceId} />
+      ) : null}
       <SubagentsTrack
         rows={subagentRows}
         onOpenSubagent={handleOpenSubagent}
@@ -1565,30 +1612,39 @@ function ActiveAgentComposer({
         onArchiveFinished={handleHideFinishedProviderSubagents}
         onDetachSubagent={canDetachSubagents ? handleDetachSubagent : undefined}
       />
-      <Composer
-        agentId={agentId}
-        serverId={serverId}
-        workspaceId={workspaceId}
-        externalKeyboardShift
-        isPaneFocused={isPaneFocused}
-        value={agentInputDraft.text}
-        onChangeText={agentInputDraft.setText}
-        attachments={agentInputDraft.attachments}
-        attachmentScopeKeys={attachmentScopeKeys}
-        onOpenWorkspaceAttachment={handleOpenWorkspaceAttachment}
-        onChangeAttachments={agentInputDraft.setAttachments}
-        cwd={cwd}
-        clearDraft={agentInputDraft.clear}
-        autoFocus={isPaneFocused}
-        autoFocusKey={String(agentInputDraft.attachmentFocusRequestId)}
-        isSubmitLoading={isSubmitLoading}
-        onAttentionInputFocus={onAttentionInputFocus}
-        onAttentionPromptSend={onAttentionPromptSend}
-        onComposerHeightChange={onComposerHeightChange}
-        onMessageSent={onMessageSent}
-        onClientSlashCommand={handleClientSlashCommand}
-        isCompactLayout={isCompactComposerLayout}
-      />
+      {composerViewOnly ? (
+        <View style={styles.composerViewOnly} testID="orchestration-composer-view-only">
+          <Text style={styles.composerViewOnlyText}>
+            View-only while the run is active. Steer it by chatting with the Supervisor; this thread
+            unlocks when the run is idle.
+          </Text>
+        </View>
+      ) : (
+        <Composer
+          agentId={agentId}
+          serverId={serverId}
+          workspaceId={workspaceId}
+          externalKeyboardShift
+          isPaneFocused={isPaneFocused}
+          value={agentInputDraft.text}
+          onChangeText={agentInputDraft.setText}
+          attachments={agentInputDraft.attachments}
+          attachmentScopeKeys={attachmentScopeKeys}
+          onOpenWorkspaceAttachment={handleOpenWorkspaceAttachment}
+          onChangeAttachments={agentInputDraft.setAttachments}
+          cwd={cwd}
+          clearDraft={agentInputDraft.clear}
+          autoFocus={isPaneFocused}
+          autoFocusKey={String(agentInputDraft.attachmentFocusRequestId)}
+          isSubmitLoading={isSubmitLoading}
+          onAttentionInputFocus={onAttentionInputFocus}
+          onAttentionPromptSend={onAttentionPromptSend}
+          onComposerHeightChange={onComposerHeightChange}
+          onMessageSent={onMessageSent}
+          onClientSlashCommand={handleClientSlashCommand}
+          isCompactLayout={isCompactComposerLayout}
+        />
+      )}
     </ReanimatedAnimated.View>
   );
 }
@@ -1677,6 +1733,19 @@ const styles = StyleSheet.create((theme) => ({
   root: {
     flex: 1,
     backgroundColor: theme.colors.surface0,
+  },
+  composerViewOnly: {
+    marginHorizontal: theme.spacing[4],
+    marginBottom: theme.spacing[4],
+    padding: theme.spacing[4],
+    borderRadius: theme.borderRadius.lg,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+  },
+  composerViewOnlyText: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.sm,
   },
   container: {
     flex: 1,

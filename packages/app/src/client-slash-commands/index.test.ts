@@ -68,6 +68,7 @@ describe("resolveClientSlashCommand", () => {
     ).toEqual([
       ["exit", ["quit", "q"], "immediate"],
       ["clear", ["new"], "immediate"],
+      ["orc", ["orchestrate"], "immediate"],
     ]);
   });
 
@@ -92,6 +93,24 @@ describe("resolveClientSlashCommand", () => {
     expect(resolveClientSlashCommand({ text: "/new", hasAttachments: false })).toMatchObject({
       name: "clear",
       kind: "replace-agent-with-draft",
+    });
+    expect(resolveClientSlashCommand({ text: "/orc", hasAttachments: false })).toMatchObject({
+      name: "orc",
+      kind: "orchestrate",
+      execution: "immediate",
+    });
+    expect(
+      resolveClientSlashCommand({ text: "/orchestrate", hasAttachments: false }),
+    ).toMatchObject({
+      name: "orc",
+      kind: "orchestrate",
+    });
+    expect(
+      resolveClientSlashCommand({ text: "/orc build the feature", hasAttachments: false }),
+    ).toMatchObject({
+      name: "orc",
+      kind: "orchestrate",
+      argument: "build the feature",
     });
   });
 

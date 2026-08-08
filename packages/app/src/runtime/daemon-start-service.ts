@@ -10,7 +10,7 @@ export interface StartDaemonIfEnabledInput {
   shouldStart: DaemonStartCondition;
 }
 
-type DaemonConnectionStore = Pick<HostRuntimeStore, "upsertConnectionFromListen"> &
+type DaemonConnectionStore = Pick<HostRuntimeStore, "getHosts" | "upsertConnectionFromListen"> &
   Partial<Pick<HostRuntimeStore, "upsertTailnetConnection">>;
 
 export interface DaemonStartServiceDeps {
@@ -27,6 +27,11 @@ export async function upsertDesktopDaemonConnection(
   const serverId = daemon.serverId.trim();
   if (!serverId) {
     return { ok: false, error: "Desktop daemon did not return a server id." };
+  }
+  if (store.getHosts().some((host) => host.serverId === serverId)) {
+    // The saved registry already knows this server. Desktop bootstrap must not
+    // re-register a connection that could clobber the user's active choice.
+    return { ok: true };
   }
 
   if (connectionMode === null) {

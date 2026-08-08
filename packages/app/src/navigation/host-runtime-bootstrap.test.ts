@@ -7,24 +7,25 @@ import {
   shouldRunStartupGiveUpTimer,
   startHostRuntimeBootstrap,
 } from "./host-runtime-bootstrap";
-import type {
-  DaemonStartCondition,
-  StartDaemonIfEnabledInput,
-} from "@/runtime/daemon-start-service";
+import type { StartDaemonIfEnabledInput } from "@/runtime/daemon-start-service";
 
 describe("startHostRuntimeBootstrap", () => {
-  it("boots the host registry and starts the managed-daemon decision as one operation", () => {
+  it("boots the host registry and starts the managed-daemon decision as one operation", async () => {
     const events: string[] = [];
     const shouldStartDaemon = async () => true;
     const store = {
-      boot: () => {
+      boot: async () => {
         events.push("boot");
       },
     };
-    let receivedCondition: DaemonStartCondition | null = null;
+    const receivedDecisions: Array<Promise<boolean>> = [];
     const daemonStartService = {
       startIfEnabled: async (input: StartDaemonIfEnabledInput) => {
-        receivedCondition = input.shouldStart;
+        receivedDecisions.push(
+          Promise.resolve(
+            typeof input.shouldStart === "boolean" ? input.shouldStart : input.shouldStart(),
+          ),
+        );
         events.push("daemon-start-decision");
         return { ok: true as const };
       },
@@ -37,7 +38,7 @@ describe("startHostRuntimeBootstrap", () => {
     });
 
     expect(events).toEqual(["boot", "daemon-start-decision"]);
-    expect(receivedCondition).toBe(shouldStartDaemon);
+    expect(await receivedDecisions[0]).toBe(true);
   });
 });
 

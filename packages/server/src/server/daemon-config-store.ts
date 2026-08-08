@@ -168,11 +168,7 @@ export class DaemonConfigStore {
   private readonly changeListeners = new Set<ConfigListener>();
   private readonly fieldChangeHandlers = new Map<string, Set<FieldChangeHandler>>();
 
-  constructor(
-    jagentdeskHome: string,
-    initial: MutableDaemonConfig,
-    logger?: LoggerLike,
-  ) {
+  constructor(jagentdeskHome: string, initial: MutableDaemonConfig, logger?: LoggerLike) {
     this.jagentdeskHome = jagentdeskHome;
     this.logger = getLogger(logger);
     this.current = MutableDaemonConfigSchema.parse(initial);
@@ -332,6 +328,7 @@ function mergeMutableConfigIntoPersistedConfig(params: {
       autoArchiveAfterMerge: mutable.autoArchiveAfterMerge,
       enableTerminalAgentHooks: mutable.enableTerminalAgentHooks,
       appendSystemPrompt: mutable.appendSystemPrompt,
+      orchestration: mutable.orchestration,
       ...(mutable.terminalProfiles !== undefined
         ? { terminalProfiles: mutable.terminalProfiles }
         : {}),

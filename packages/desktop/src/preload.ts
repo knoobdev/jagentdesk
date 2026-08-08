@@ -64,7 +64,8 @@ contextBridge.exposeInMainWorld("jagentdeskDesktop", {
           ipcRenderer.removeListener("jagentdesk:window:resized", listener);
         };
       },
-      setBadgeCount: (count?: number) => ipcRenderer.invoke("jagentdesk:window:setBadgeCount", count),
+      setBadgeCount: (count?: number) =>
+        ipcRenderer.invoke("jagentdesk:window:setBadgeCount", count),
     }),
   },
   dialog: {
@@ -72,7 +73,8 @@ contextBridge.exposeInMainWorld("jagentdeskDesktop", {
       ipcRenderer.invoke("jagentdesk:dialog:ask", message, options),
     askWithCheckbox: (message: string, options: Record<string, unknown>) =>
       ipcRenderer.invoke("jagentdesk:dialog:askWithCheckbox", message, options),
-    open: (options?: Record<string, unknown>) => ipcRenderer.invoke("jagentdesk:dialog:open", options),
+    open: (options?: Record<string, unknown>) =>
+      ipcRenderer.invoke("jagentdesk:dialog:open", options),
   },
   notification: {
     isSupported: () => ipcRenderer.invoke("jagentdesk:notification:isSupported"),
@@ -111,6 +113,7 @@ contextBridge.exposeInMainWorld("jagentdeskDesktop", {
       ipcRenderer.invoke("jagentdesk:browser:unregister-workspace-browser", browserId),
     setWorkspaceActiveBrowser: (input: { workspaceId: string; browserId: string | null }) =>
       ipcRenderer.invoke("jagentdesk:browser:set-workspace-active-browser", input),
+    focus: (browserId: string) => ipcRenderer.invoke("jagentdesk:browser:focus", browserId),
     openDevTools: (browserId: string) =>
       ipcRenderer.invoke("jagentdesk:browser:open-devtools", browserId),
     clearProfile: (legacyBrowserIds: string[]) =>

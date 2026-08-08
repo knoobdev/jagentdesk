@@ -145,6 +145,7 @@ export const ptBR: TranslationResources = {
     clientCommands: {
       archiveAgent: "Arquivar o agente atual",
       freshDraft: "Arquivar este agente e iniciar um novo rascunho",
+      orchestrate: "Iniciar orquestração (Supervisor → Líder → Par)",
     },
     github: {
       searching: "Buscando...",
@@ -1100,7 +1101,8 @@ export const ptBR: TranslationResources = {
     },
     rosetta: {
       title: "Baixar a build para Apple Silicon",
-      runningIntel: "Você está executando a build Intel do JAgentDesk pelo Rosetta no Apple Silicon.",
+      runningIntel:
+        "Você está executando a build Intel do JAgentDesk pelo Rosetta no Apple Silicon.",
       highCpu: "Isso causa alto uso de CPU. Baixe a build para Apple Silicon para corrigir.",
     },
     permissions: {
@@ -1615,6 +1617,7 @@ export const ptBR: TranslationResources = {
       projects: "Projetos",
       connections: "Conexões",
       agents: "Agentes",
+      orchestration: "Orchestration",
       workspaces: "Workspaces",
       providers: "Provedores",
       usage: "Uso",
@@ -2180,7 +2183,8 @@ export const ptBR: TranslationResources = {
         newScript: "Novo script",
         editScript: "Editar {{name}}",
         runAsService: "Executar como serviço",
-        serviceHint: "O JAgentDesk supervisiona o processo e atribui uma porta via $JAGENTDESK_PORT",
+        serviceHint:
+          "O JAgentDesk supervisiona o processo e atribui uma porta via $JAGENTDESK_PORT",
         actions: {
           add: "Adicionar script",
           edit: "Editar",

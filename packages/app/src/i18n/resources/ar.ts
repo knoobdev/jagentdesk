@@ -145,6 +145,7 @@ export const ar: TranslationResources = {
     clientCommands: {
       archiveAgent: "أرشفة الوكيل الحالي",
       freshDraft: "أرشفة هذا الوكيل وابدأ مسودة جديدة",
+      orchestrate: "بدء التنسيق (المشرف ← القائد ← النظير)",
     },
     github: {
       searching: "جارٍ البحث...",
@@ -1590,6 +1591,7 @@ export const ar: TranslationResources = {
       projects: "المشاريع",
       connections: "اتصالات",
       agents: "Agents",
+      orchestration: "Orchestration",
       workspaces: "Workspaces",
       providers: "مقدمي الخدمات",
       usage: "الاستخدام",

@@ -145,6 +145,7 @@ export const zhCN: TranslationResources = {
     clientCommands: {
       archiveAgent: "归档当前 Agent",
       freshDraft: "归档此 Agent 并开始新的草稿",
+      orchestrate: "开始编排（主管 → 负责人 → 同级）",
     },
     github: {
       searching: "正在搜索...",
@@ -1571,6 +1572,7 @@ export const zhCN: TranslationResources = {
       projects: "项目",
       connections: "连接",
       agents: "Agents",
+      orchestration: "Orchestration",
       workspaces: "Workspaces",
       providers: "Providers",
       usage: "使用情况",
@@ -1962,11 +1964,13 @@ export const zhCN: TranslationResources = {
           offlineTitle: "Host 离线",
           offlineMessage: "这个 Host 已离线。JAgentDesk 会自动重连，请等它恢复在线后再重启。",
           requestFailedTitle: "错误",
-          requestFailedMessage: "发送重启请求失败。JAgentDesk 会自动重连，请在 Host 显示在线后重试。",
+          requestFailedMessage:
+            "发送重启请求失败。JAgentDesk 会自动重连，请在 Host 显示在线后重试。",
           dialogFailedMessage: "无法打开重启确认对话框。",
         },
         update: {
-          desktopManagedHint: "此 Daemon 由 JAgentDesk Desktop 管理。请在 Host 上更新 JAgentDesk Desktop。",
+          desktopManagedHint:
+            "此 Daemon 由 JAgentDesk Desktop 管理。请在 Host 上更新 JAgentDesk Desktop。",
           title: "Update daemon",
           hint: "Update the daemon to the latest version and restart it",
           confirm: "Update",

@@ -2,6 +2,7 @@ import type { TextStyle } from "react-native";
 import type { TerminalCell } from "@jagentdesk/protocol/messages";
 
 import type { TerminalCellStyleResolver } from "./colors";
+import { resolveTerminalCustomGlyph, type TerminalCustomGlyph } from "./terminal-custom-glyph";
 
 const WIDE_CHAR_RANGES: ReadonlyArray<readonly [number, number]> = [
   [0x1100, 0x115f],
@@ -16,12 +17,30 @@ const WIDE_CHAR_RANGES: ReadonlyArray<readonly [number, number]> = [
   [0x1f300, 0x1faff],
 ];
 
-export interface TerminalRun {
+interface TerminalRunBase {
   key: string;
   text: string;
   cellCount: number;
   styleKey: string;
   style: TextStyle;
+  foregroundColor: string;
+}
+
+export interface TerminalTextRun extends TerminalRunBase {
+  renderKind: "text";
+}
+
+export interface TerminalCustomGlyphRun extends TerminalRunBase {
+  renderKind: "custom-glyph";
+  glyphs: TerminalCustomGlyphCell[];
+}
+
+export type TerminalRun = TerminalCustomGlyphRun | TerminalTextRun;
+
+export interface TerminalCustomGlyphCell {
+  key: string;
+  offset: number;
+  glyph: TerminalCustomGlyph;
 }
 
 export interface TerminalRowModel {
@@ -75,22 +94,47 @@ function appendRun(input: {
   cellCount: number;
   styleKey: string;
   style: TextStyle;
+  foregroundColor: string;
+  customGlyph: TerminalCustomGlyph | null;
   col: number;
 }): void {
+  const renderKind = input.customGlyph ? "custom-glyph" : "text";
   const previousRun = input.runs[input.runs.length - 1];
-  if (previousRun && previousRun.styleKey === input.styleKey) {
+  if (
+    previousRun &&
+    previousRun.styleKey === input.styleKey &&
+    previousRun.renderKind === renderKind
+  ) {
+    const offset = previousRun.cellCount;
     previousRun.text += input.text;
     previousRun.cellCount += input.cellCount;
+    if (previousRun.renderKind === "custom-glyph" && input.customGlyph) {
+      previousRun.glyphs.push({
+        key: `${input.col}:${input.text}`,
+        offset,
+        glyph: input.customGlyph,
+      });
+    }
     return;
   }
 
-  input.runs.push({
+  const baseRun: TerminalRunBase = {
     key: `${input.col}:${input.styleKey}`,
     text: input.text,
     cellCount: input.cellCount,
     styleKey: input.styleKey,
     style: input.style,
-  });
+    foregroundColor: input.foregroundColor,
+  };
+  if (input.customGlyph) {
+    input.runs.push({
+      ...baseRun,
+      renderKind: "custom-glyph",
+      glyphs: [{ key: `${input.col}:${input.text}`, offset: 0, glyph: input.customGlyph }],
+    });
+    return;
+  }
+  input.runs.push({ ...baseRun, renderKind: "text" });
 }
 
 function buildRowModel(input: {
@@ -106,17 +150,21 @@ function buildRowModel(input: {
     const text = cell.char || " ";
     const resolvedStyle = input.resolver.resolve(cell);
     const cellCount = terminalCellCount(input.cells, col, text);
+    const customGlyph = resolveTerminalCustomGlyph(text);
     appendRun({
       runs,
       text,
       cellCount,
       styleKey: resolvedStyle.key,
       style: resolvedStyle.style,
+      foregroundColor: resolvedStyle.foregroundColor,
+      customGlyph,
       col,
     });
     hash = hashStringPart(hash, text);
     hash = hashStringPart(hash, String(cellCount));
     hash = hashStringPart(hash, resolvedStyle.key);
+    hash = hashStringPart(hash, customGlyph ? "custom-glyph" : "text");
 
     if (cellCount > 1) {
       col += 1;

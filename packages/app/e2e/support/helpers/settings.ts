@@ -35,6 +35,7 @@ type HostSection =
   | "connections"
   | "pair-device"
   | "agents"
+  | "orchestration"
   | "workspaces"
   | "providers"
   | "usage"
@@ -127,7 +128,10 @@ export async function seedSavedSettingsHosts(
       }
 
       localStorage.setItem(keys.registry, JSON.stringify(storedRegistry));
-      localStorage.setItem("@jagentdesk:create-agent-preferences", JSON.stringify(storedPreferences));
+      localStorage.setItem(
+        "@jagentdesk:create-agent-preferences",
+        JSON.stringify(storedPreferences),
+      );
       localStorage.setItem(keys.disableDefaultSeedOnce, nonce);
     },
     {

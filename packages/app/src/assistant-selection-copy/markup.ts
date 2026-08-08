@@ -5,6 +5,15 @@ export const MARKDOWN_COPY_LIST_START_ATTRIBUTE = "data-jagentdesk-markdown-list
 export const MARKDOWN_COPY_LANGUAGE_ATTRIBUTE = "data-jagentdesk-markdown-language";
 export const MARKDOWN_COPY_ALIGN_ATTRIBUTE = "data-jagentdesk-markdown-align";
 
+/**
+ * Trailing line breaks, with any indentation that followed the last one.
+ *
+ * Copying code strips these: pasting a trailing newline into a terminal runs the
+ * last line. A fence body always ends in one, and ends in several when the author
+ * left blank lines before the closing fence.
+ */
+export const TRAILING_CODE_LINE_BREAKS = /(\r?\n[ \t]*)+$/;
+
 export const markdownCopyDataSet = {
   blockquote: { jagentdeskMarkdownTag: "blockquote" },
   br: { jagentdeskMarkdownTag: "br" },

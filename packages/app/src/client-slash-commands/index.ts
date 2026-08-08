@@ -1,17 +1,22 @@
 import type { Agent } from "@/stores/session-store";
 import type { WorkspaceDraftTabSetup } from "@/workspace-tabs/model";
 
-export type ClientSlashCommandKind = "archive-agent" | "replace-agent-with-draft";
+export type ClientSlashCommandKind = "archive-agent" | "replace-agent-with-draft" | "orchestrate";
 export type ClientSlashCommandExecution = "immediate" | "insert";
 
 export interface ClientSlashCommand {
   name: string;
   aliases: readonly string[];
   description: string;
-  descriptionKey: "composer.clientCommands.archiveAgent" | "composer.clientCommands.freshDraft";
+  descriptionKey:
+    | "composer.clientCommands.archiveAgent"
+    | "composer.clientCommands.freshDraft"
+    | "composer.clientCommands.orchestrate";
   argumentHint: string;
   kind: ClientSlashCommandKind;
   execution: ClientSlashCommandExecution;
+  acceptsArgument?: boolean;
+  argument?: string;
 }
 
 export const CLIENT_SLASH_COMMANDS: readonly ClientSlashCommand[] = [
@@ -32,6 +37,16 @@ export const CLIENT_SLASH_COMMANDS: readonly ClientSlashCommand[] = [
     argumentHint: "",
     kind: "replace-agent-with-draft",
     execution: "immediate",
+  },
+  {
+    name: "orc",
+    aliases: ["orchestrate"],
+    description: "Start orchestration (Supervisor → Lead → Peer)",
+    descriptionKey: "composer.clientCommands.orchestrate",
+    argumentHint: "<what should the team do>",
+    kind: "orchestrate",
+    execution: "immediate",
+    acceptsArgument: true,
   },
 ];
 
@@ -56,12 +71,18 @@ export function resolveClientSlashCommand(input: {
     return null;
   }
 
-  const commandName = trimmed.slice(1);
-  if (!commandName || /\s/.test(commandName)) {
-    return null;
-  }
+  const withoutSlash = trimmed.slice(1);
+  const wsIndex = withoutSlash.search(/\s/);
+  const name = wsIndex === -1 ? withoutSlash : withoutSlash.slice(0, wsIndex);
+  const argument = wsIndex === -1 ? "" : withoutSlash.slice(wsIndex + 1).trim();
+  if (!name) return null;
 
-  return COMMAND_BY_NAME.get(commandName) ?? null;
+  const command = COMMAND_BY_NAME.get(name);
+  if (!command) return null;
+  if (!command.acceptsArgument) {
+    return argument ? null : command; // preserve old behavior for exit/clear
+  }
+  return { ...command, argument };
 }
 
 export function buildDraftAgentSetup(agent: Agent): WorkspaceDraftTabSetup {

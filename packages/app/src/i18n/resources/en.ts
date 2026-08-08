@@ -143,6 +143,7 @@ export const en = {
     clientCommands: {
       archiveAgent: "Archive the current agent",
       freshDraft: "Archive this agent and start a fresh draft",
+      orchestrate: "Start orchestration (Supervisor → Lead → Peer)",
     },
     github: {
       searching: "Searching...",
@@ -1618,6 +1619,7 @@ export const en = {
       projects: "Projects",
       connections: "Connections",
       agents: "Agents",
+      orchestration: "Orchestration",
       workspaces: "Workspaces",
       providers: "Providers",
       usage: "Usage",

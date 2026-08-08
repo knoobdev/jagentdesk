@@ -40,6 +40,7 @@ export const CLAUDE_MODEL_MANIFEST = [
     contextWindowMaxTokens: 1_000_000,
     effortLevels: CLAUDE_EFFORT_LEVELS.xhigh,
     supportsThinkingDisabled: true,
+    supportsFastMode: true,
   },
   {
     id: "claude-fable-5[1m]",

@@ -18,11 +18,12 @@ interface RecordedTailnetUpsert {
 }
 
 function createFakeStore(): {
-  store: Pick<HostRuntimeStore, "upsertConnectionFromListen">;
+  store: Pick<HostRuntimeStore, "getHosts" | "upsertConnectionFromListen">;
   upserts: RecordedUpsert[];
 } {
   const upserts: RecordedUpsert[] = [];
   const store = {
+    getHosts: () => [],
     upsertConnectionFromListen: async (input: RecordedUpsert) => {
       upserts.push(input);
       return {} as Awaited<ReturnType<HostRuntimeStore["upsertConnectionFromListen"]>>;
@@ -32,7 +33,7 @@ function createFakeStore(): {
 }
 
 function createTailnetStore(): {
-  store: Pick<HostRuntimeStore, "upsertConnectionFromListen"> &
+  store: Pick<HostRuntimeStore, "getHosts" | "upsertConnectionFromListen"> &
     Pick<HostRuntimeStore, "upsertTailnetConnection">;
   localUpserts: RecordedUpsert[];
   tailnetUpserts: RecordedTailnetUpsert[];
@@ -40,6 +41,7 @@ function createTailnetStore(): {
   const localUpserts: RecordedUpsert[] = [];
   const tailnetUpserts: RecordedTailnetUpsert[] = [];
   const store = {
+    getHosts: () => [],
     upsertConnectionFromListen: async (input: RecordedUpsert) => {
       localUpserts.push(input);
       return {} as Awaited<ReturnType<HostRuntimeStore["upsertConnectionFromListen"]>>;

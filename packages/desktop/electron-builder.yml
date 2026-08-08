@@ -17,6 +17,12 @@ files:
   - "!node_modules/@jagentdesk/**/*.test.*"
   - "!node_modules/@jagentdesk/**/*.spec.*"
   - "!node_modules/@jagentdesk/server/dist/server/web-ui/**"
+  # Workspace packages are symlinked, so anything a dev generates inside them
+  # lands in the asar. CI never has these; a local .debug run adds gigabytes.
+  - "!node_modules/@jagentdesk/*/.debug/**"
+  - "!node_modules/@jagentdesk/*/.tasks/**"
+  - "!node_modules/@jagentdesk/*/conversations/**"
+  - "!node_modules/@jagentdesk/*/test-results/**"
 asarUnpack:
   - dist/daemon/node-entrypoint-runner.js
   - node_modules/@jagentdesk/server/dist/server/terminal/shell-integration/**/*

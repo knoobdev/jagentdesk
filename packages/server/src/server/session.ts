@@ -178,6 +178,7 @@ import {
   requireActiveWorkspaceForArchive,
 } from "./workspace-archive-service.js";
 import type { ServiceProxySubsystem } from "./service-proxy.js";
+import { prepareTaskBrief } from "./orchestration/task-brief.js";
 import { renameCurrentBranch as renameCurrentBranchDefault } from "../utils/checkout-git.js";
 import {
   createGitMutationService,
@@ -1846,6 +1847,7 @@ export class Session {
       this.dispatchAgentTimelineMessage(msg, source) ??
       this.dispatchHubExecutionMessage(msg) ??
       this.dispatchAgentLifecycleMessage(msg) ??
+      this.dispatchOrchestrationMessage(msg) ??
       this.dispatchAgentConfigMessage(msg) ??
       this.dispatchCheckoutMessage(msg) ??
       this.dispatchWorkspaceRecoveryMessage(msg) ??
@@ -2067,6 +2069,43 @@ export class Session {
         return this.projectConfigSession.handleReadProjectConfigRequest(msg);
       case "write_project_config_request":
         return this.projectConfigSession.handleWriteProjectConfigRequest(msg);
+      default:
+        return undefined;
+    }
+  }
+
+  private dispatchOrchestrationMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    switch (msg.type) {
+      case "orchestration.config.get.request":
+        this.emit({
+          type: "orchestration.config.get.response",
+          payload: {
+            requestId: msg.requestId,
+            config: this.daemonConfigStore.get().orchestration,
+          },
+        });
+        return undefined;
+      case "orchestration.config.update.request":
+        this.emit({
+          type: "orchestration.config.update.response",
+          payload: {
+            requestId: msg.requestId,
+            config: this.daemonConfigStore.patch({ orchestration: msg.config }).orchestration,
+          },
+        });
+        return undefined;
+      case "orchestration.task.prepare.request": {
+        const brief = prepareTaskBrief({
+          rawRequest: msg.rawRequest,
+          config: this.daemonConfigStore.get().orchestration,
+          routeCategory: msg.routeCategory,
+        });
+        this.emit({
+          type: "orchestration.task.prepare.response",
+          payload: { requestId: msg.requestId, brief },
+        });
+        return undefined;
+      }
       default:
         return undefined;
     }

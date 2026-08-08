@@ -63,9 +63,13 @@ import {
 import { limitAgentTimelineItemContent } from "./agent-timeline-content.js";
 import { AgentRunState, type ForegroundTurnWaiter } from "./agent-run-state.js";
 import { getAgentProviderDefinition } from "@jagentdesk/protocol/provider-manifest";
+import { ORCHESTRATION_ROLE_LABEL } from "@jagentdesk/protocol/orchestration";
 import { invokeRewindCapability, type RewindMode } from "./rewind/rewind.js";
 import { isSystemInjectedEnvelope } from "./agent-prompt.js";
-import { stripInternalJAgentDeskMcpServer, withRuntimeJAgentDeskMcpServer } from "./runtime-mcp-config.js";
+import {
+  stripInternalJAgentDeskMcpServer,
+  withRuntimeJAgentDeskMcpServer,
+} from "./runtime-mcp-config.js";
 import { resolveCreateAgentTitles } from "./create-agent-title.js";
 import type { JAgentDeskToolCatalogFactory } from "./tools/types.js";
 import {
@@ -4425,7 +4429,9 @@ export class AgentManager {
     agentId: string,
     env?: Record<string, string>,
   ): Promise<PreparedSessionConfig> {
-    const storedConfig = await this.normalizeConfig(stripInternalJAgentDeskMcpServer(config), { env });
+    const storedConfig = await this.normalizeConfig(stripInternalJAgentDeskMcpServer(config), {
+      env,
+    });
     const launchConfig = this.applyDaemonAppendSystemPrompt(
       withRuntimeJAgentDeskMcpServer({
         config: storedConfig,
@@ -4464,8 +4470,15 @@ export class AgentManager {
         JAGENTDESK_AGENT_CWD: cwd,
       },
     };
+    // Orchestration-role agents (Supervisor/Lead/Peer) always need the JAgentDesk MCP
+    // tools so the control plane works even when the global mcp.injectIntoAgents flag is
+    // off — otherwise a fresh daemon would ship the orchestration contract without the
+    // orchestration tools, leaving the chain inert.
+    const isOrchestrationAgent = Boolean(
+      this.agents.get(agentId)?.labels?.[ORCHESTRATION_ROLE_LABEL],
+    );
     if (
-      this.jagentdeskToolsEnabled &&
+      (this.jagentdeskToolsEnabled || isOrchestrationAgent) &&
       client.capabilities.supportsNativeJAgentDeskTools &&
       this.jagentdeskToolCatalogFactory
     ) {
@@ -4478,7 +4491,9 @@ export class AgentManager {
     launchConfig: AgentSessionConfig,
     launchContext: AgentLaunchContext,
   ): AgentSessionConfig {
-    return launchContext.jagentdeskTools ? stripInternalJAgentDeskMcpServer(launchConfig) : launchConfig;
+    return launchContext.jagentdeskTools
+      ? stripInternalJAgentDeskMcpServer(launchConfig)
+      : launchConfig;
   }
 
   private async requireAvailableClient(options: { provider: AgentProvider }): Promise<AgentClient> {

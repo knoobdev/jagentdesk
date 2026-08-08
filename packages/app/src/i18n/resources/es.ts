@@ -145,6 +145,7 @@ export const es: TranslationResources = {
     clientCommands: {
       archiveAgent: "Archivar el agente actual",
       freshDraft: "Archive este agente y comience un nuevo borrador",
+      orchestrate: "Iniciar orquestación (Supervisor → Líder → Par)",
     },
     github: {
       searching: "Búsqueda...",
@@ -1629,6 +1630,7 @@ export const es: TranslationResources = {
       projects: "Proyectos",
       connections: "Conexiones",
       agents: "Agents",
+      orchestration: "Orchestration",
       workspaces: "Workspaces",
       providers: "Proveedores",
       usage: "Uso",
@@ -2215,7 +2217,8 @@ export const es: TranslationResources = {
       },
       writeFailures: {
         staleTitle: "Configuración cambiada en el disco",
-        staleDescription: "Vuelva a cargar para obtener el último jagentdesk.json antes de guardar.",
+        staleDescription:
+          "Vuelva a cargar para obtener el último jagentdesk.json antes de guardar.",
         failedTitle: "No se pudo guardar jagentdesk.json",
         failedDescription: "Inténtelo de nuevo o vuelva a cargar la última versión desde el disco.",
       },

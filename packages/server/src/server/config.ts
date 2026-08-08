@@ -252,7 +252,10 @@ function resolveWebUiConfig(
   const rawDistDir = env.JAGENTDESK_WEB_UI_DIST_DIR ?? persisted.features?.webUi?.distDir;
   const trimmedDistDir = rawDistDir?.trim();
   const distDir = trimmedDistDir
-    ? path.resolve(path.isAbsolute(trimmedDistDir) ? trimmedDistDir : jagentdeskHome, trimmedDistDir)
+    ? path.resolve(
+        path.isAbsolute(trimmedDistDir) ? trimmedDistDir : jagentdeskHome,
+        trimmedDistDir,
+      )
     : BUNDLED_WEB_UI_DIST_DIR;
   return {
     enabled,
@@ -386,6 +389,7 @@ function resolveStaticLoadConfigSettings(
     autoArchiveAfterMerge: persisted.daemon?.autoArchiveAfterMerge ?? false,
     appendSystemPrompt: resolveAppendSystemPrompt(persisted),
     terminalProfiles: persisted.daemon?.terminalProfiles,
+    orchestration: persisted.daemon?.orchestration,
     hostnames: mergeHostnames([
       persisted.daemon?.hostnames,
       parseHostnamesEnv(env.JAGENTDESK_HOSTNAMES ?? env.JAGENTDESK_ALLOWED_HOSTS),
@@ -414,6 +418,7 @@ export function loadConfig(
     autoArchiveAfterMerge,
     appendSystemPrompt,
     terminalProfiles,
+    orchestration,
     hostnames,
     trustedProxies,
     appBaseUrl,
@@ -449,6 +454,7 @@ export function loadConfig(
     enableTerminalAgentHooks: persisted.daemon?.enableTerminalAgentHooks ?? false,
     appendSystemPrompt,
     terminalProfiles,
+    orchestration,
     mcpDebug: env.MCP_DEBUG === "1",
     isDev: resolveJAgentDeskNodeEnv(env) === "development",
     agentStoragePath: path.join(jagentdeskHome, "agents"),

@@ -145,6 +145,7 @@ export const ru: TranslationResources = {
     clientCommands: {
       archiveAgent: "Архивировать текущего агента",
       freshDraft: "Архивируйте этот агент и начните новый черновик",
+      orchestrate: "Запустить оркестрацию (Супервизор → Лид → Пиер)",
     },
     github: {
       searching: "Идет поиск...",
@@ -1620,6 +1621,7 @@ export const ru: TranslationResources = {
       projects: "Проекты",
       connections: "Соединения",
       agents: "Agents",
+      orchestration: "Orchestration",
       workspaces: "Workspaces",
       providers: "Провайдеры",
       usage: "Использование",
@@ -1848,7 +1850,8 @@ export const ru: TranslationResources = {
         updateTitle: "Обновить навыки JAgentDesk?",
         updateFallback: "Синхронизируйте связанные навыки с вашим компьютером.",
         uninstallTitle: "Удалить навыки JAgentDesk?",
-        uninstallMessage: "Удаляет все навыки оркестровки JAgentDesk из ~/.agents, ~/.claude, ~/.codex.",
+        uninstallMessage:
+          "Удаляет все навыки оркестровки JAgentDesk из ~/.agents, ~/.claude, ~/.codex.",
         choose: "Выбрать навыки",
         chooseAll: "Все навыки",
         chooseAllHint: "Держите установленными все входящие навыки, включая добавленные позже.",

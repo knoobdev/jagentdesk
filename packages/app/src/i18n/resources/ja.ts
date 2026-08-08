@@ -145,6 +145,7 @@ export const ja: TranslationResources = {
     clientCommands: {
       archiveAgent: "現在のエージェントをアーカイブ",
       freshDraft: "このエージェントをアーカイブして新しい下書きを開始",
+      orchestrate: "オーケストレーションを開始（スーパーバイザー → リード → ピア）",
     },
     github: {
       searching: "検索中...",
@@ -1603,6 +1604,7 @@ export const ja: TranslationResources = {
       projects: "プロジェクト",
       connections: "接続",
       agents: "エージェント",
+      orchestration: "Orchestration",
       workspaces: "ワークスペース",
       providers: "プロバイダー",
       usage: "使用状況",
@@ -2185,7 +2187,8 @@ export const ja: TranslationResources = {
       },
       writeFailures: {
         staleTitle: "設定がディスク上で変更されました",
-        staleDescription: "保存する前に最新のjagentdesk.jsonを取得するために再読み込みしてください。",
+        staleDescription:
+          "保存する前に最新のjagentdesk.jsonを取得するために再読み込みしてください。",
         failedTitle: "jagentdesk.jsonを保存できませんでした",
         failedDescription: "再試行するか、ディスクから最新バージョンを再読み込みしてください。",
       },

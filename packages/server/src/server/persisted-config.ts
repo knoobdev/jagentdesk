@@ -12,6 +12,7 @@ import type { AgentProviderRuntimeSettingsMap } from "./agent/provider-launch-co
 import { ensurePrivateFile, writePrivateFileAtomicSync } from "./private-files.js";
 import { TerminalProfileSchema } from "@jagentdesk/protocol/messages";
 import { JAgentDeskServicePortAllocationSchema } from "@jagentdesk/protocol/jagentdesk-config-schema";
+import { OrchestrationConfigSchema } from "@jagentdesk/protocol/orchestration";
 
 export const LogLevelSchema = z.enum(["trace", "debug", "info", "warn", "error", "fatal"]);
 export const LogFormatSchema = z.enum(["pretty", "json"]);
@@ -260,6 +261,7 @@ export const PersistedConfigSchema = z
         enableTerminalAgentHooks: z.boolean().optional(),
         appendSystemPrompt: z.string().optional(),
         terminalProfiles: z.array(TerminalProfileSchema).optional(),
+        orchestration: OrchestrationConfigSchema.optional(),
         cors: z
           .object({
             allowedOrigins: z.array(z.string()).optional(),

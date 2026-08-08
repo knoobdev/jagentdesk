@@ -176,6 +176,11 @@ import { getOrCreateServerId } from "./server-id.js";
 import { resolveDaemonVersion } from "./daemon-version.js";
 import type { AgentClient, AgentProvider } from "./agent/agent-sdk-types.js";
 import type { FirstAgentContext, TerminalProfile } from "@jagentdesk/protocol/messages";
+import {
+  createDefaultOrchestrationConfig,
+  type OrchestrationConfig,
+} from "@jagentdesk/protocol/orchestration";
+import { OrchestrationRuntime } from "./orchestration/runtime.js";
 import type {
   AgentProviderRuntimeSettingsMap,
   ProviderOverride,
@@ -404,6 +409,7 @@ export interface JAgentDeskDaemonConfig {
   enableTerminalAgentHooks?: boolean;
   appendSystemPrompt?: string;
   terminalProfiles?: TerminalProfile[];
+  orchestration?: OrchestrationConfig;
   staticDir: string;
   mcpDebug: boolean;
   isDev?: boolean;
@@ -536,6 +542,7 @@ function createInitialMutableDaemonConfig(config: JAgentDeskDaemonConfig): Mutab
     autoArchiveAfterMerge: config.autoArchiveAfterMerge ?? false,
     enableTerminalAgentHooks: config.enableTerminalAgentHooks ?? false,
     appendSystemPrompt: config.appendSystemPrompt ?? "",
+    orchestration: config.orchestration ?? createDefaultOrchestrationConfig(),
   };
 
   if (config.terminalProfiles !== undefined) {
@@ -1270,6 +1277,15 @@ export async function createJAgentDeskDaemon(
   );
   logger.info({ elapsed: elapsed() }, "Preparing voice and MCP runtime");
 
+  const orchestrationRuntime = new OrchestrationRuntime({
+    jagentdeskHome: config.jagentdeskHome,
+    agentManager,
+    agentStorage,
+    providerSnapshotManager,
+    getConfig: () => daemonConfigStore.get().orchestration,
+    logger,
+  });
+
   const createAgentToolHostDependencies = (
     runtime: JAgentDeskToolRuntimeContext,
   ): JAgentDeskToolHostDependencies => ({
@@ -1327,6 +1343,7 @@ export async function createJAgentDeskDaemon(
     voiceOnly: runtime.voiceOnly,
     resolveSpeakHandler: (agentId) => wsServer?.resolveVoiceSpeakHandler(agentId) ?? null,
     resolveCallerContext: (agentId) => wsServer?.resolveVoiceCallerContext(agentId) ?? null,
+    orchestrationRuntime,
     logger,
   });
   const createAgentToolCatalog = (runtime: JAgentDeskToolRuntimeContext) =>

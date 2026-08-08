@@ -39,6 +39,7 @@ const FLAG_STRIKETHROUGH = 1 << 5;
 interface ResolvedCellStyle {
   key: string;
   style: TextStyle;
+  foregroundColor: string;
 }
 
 interface ResolvedCellColors {
@@ -222,7 +223,7 @@ export function createTerminalCellStyleResolver(theme: ITheme): TerminalCellStyl
       });
       const cachedStyle = styleCache.get(key);
       if (cachedStyle) {
-        return { key, style: cachedStyle };
+        return { key, style: cachedStyle, foregroundColor: colors.foreground };
       }
 
       const style = createTextStyle({
@@ -232,7 +233,7 @@ export function createTerminalCellStyleResolver(theme: ITheme): TerminalCellStyl
         flags,
       });
       styleCache.set(key, style);
-      return { key, style };
+      return { key, style, foregroundColor: colors.foreground };
     },
   };
 }

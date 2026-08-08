@@ -446,40 +446,55 @@ ipcMain.handle("jagentdesk:browser:register-attached", (event, rawInput: unknown
   }
 });
 
-ipcMain.handle("jagentdesk:browser:unregister-workspace-browser", async (event, browserId: unknown) => {
-  if (typeof browserId === "string" && browserId.trim().length > 0) {
-    const normalizedBrowserId = browserId.trim();
-    const hasOtherHost = getJAgentDeskBrowserWebviewRegistry().hasBrowserInOtherHostWindow(
-      event.sender.id,
-      normalizedBrowserId,
-    );
-    unregisterJAgentDeskBrowserFromHost(event.sender.id, normalizedBrowserId);
-    // COMPAT(browserProfile): added in v0.1.108; remove after 2027-01-15.
-    const legacyProfile = hasOtherHost
-      ? null
-      : getLegacyJAgentDeskBrowserProfileSession(session, normalizedBrowserId);
-    if (legacyProfile) {
-      try {
-        await clearJAgentDeskBrowserProfile({
-          profileSessions: [legacyProfile],
-          listGuests: () => [],
-          logReloadError: () => {},
-        });
-      } catch (error) {
-        log.warn("[browser-profile] failed to clear legacy tab profile", {
-          browserId: normalizedBrowserId,
-          error,
-        });
+ipcMain.handle(
+  "jagentdesk:browser:unregister-workspace-browser",
+  async (event, browserId: unknown) => {
+    if (typeof browserId === "string" && browserId.trim().length > 0) {
+      const normalizedBrowserId = browserId.trim();
+      const hasOtherHost = getJAgentDeskBrowserWebviewRegistry().hasBrowserInOtherHostWindow(
+        event.sender.id,
+        normalizedBrowserId,
+      );
+      unregisterJAgentDeskBrowserFromHost(event.sender.id, normalizedBrowserId);
+      // COMPAT(browserProfile): added in v0.1.108; remove after 2027-01-15.
+      const legacyProfile = hasOtherHost
+        ? null
+        : getLegacyJAgentDeskBrowserProfileSession(session, normalizedBrowserId);
+      if (legacyProfile) {
+        try {
+          await clearJAgentDeskBrowserProfile({
+            profileSessions: [legacyProfile],
+            listGuests: () => [],
+            logReloadError: () => {},
+          });
+        } catch (error) {
+          log.warn("[browser-profile] failed to clear legacy tab profile", {
+            browserId: normalizedBrowserId,
+            error,
+          });
+        }
       }
     }
-  }
-});
+  },
+);
 
 ipcMain.handle("jagentdesk:browser:set-workspace-active-browser", (event, rawInput: unknown) => {
   const input = readActiveBrowserInput(rawInput);
   if (input) {
     setWorkspaceActiveJAgentDeskBrowserId({ ...input, hostWebContentsId: event.sender.id });
   }
+});
+
+ipcMain.handle("jagentdesk:browser:focus", (event, browserId: unknown): boolean => {
+  if (typeof browserId !== "string" || browserId.trim().length === 0) {
+    return false;
+  }
+  const contents = getJAgentDeskBrowserWebContentsForHostWindow(browserId, event.sender.id);
+  if (!contents) {
+    return false;
+  }
+  contents.focus();
+  return true;
 });
 
 ipcMain.handle("jagentdesk:browser:open-devtools", (event, browserId: unknown) => {

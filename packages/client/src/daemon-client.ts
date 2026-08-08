@@ -114,6 +114,12 @@ import type {
   AgentProvider,
   AgentSessionConfig,
 } from "@jagentdesk/protocol/agent-types";
+import type {
+  OrchestrationConfig,
+  OrchestrationConfigPatch,
+  OrchestrationTaskBrief,
+  OrchestrationRouteCategory,
+} from "@jagentdesk/protocol/orchestration";
 import type { MutableDaemonConfig, MutableDaemonConfigPatch } from "@jagentdesk/protocol/messages";
 import { terminalSubscriptionKey } from "@jagentdesk/protocol/terminal-subscription-key";
 import {
@@ -145,6 +151,8 @@ import { TerminalStreamRouter, type TerminalStreamEvent } from "./terminal-strea
 import type {
   BrowserAutomationExecuteRequest,
   BrowserAutomationExecuteResponse,
+  BrowserScreenshotResponse,
+  BrowserListResponse,
 } from "@jagentdesk/protocol/browser-automation/rpc-schemas";
 
 export interface Logger {
@@ -4595,6 +4603,76 @@ export class DaemonClient {
         config,
       },
       responseType: "set_daemon_config_response",
+    });
+  }
+
+  async getOrchestrationConfig(requestId?: string): Promise<{
+    requestId: string;
+    config: OrchestrationConfig;
+  }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "orchestration.config.get.request" },
+    });
+  }
+
+  // Browser screencast (view-only): fetch the current frame of a browser tab. Polled by the
+  // mobile BrowserPane to render a live view of the desktop-hosted browser.
+  async requestBrowserScreenshot(input: {
+    browserId: string;
+    workspaceId: string;
+    requestId?: string;
+  }): Promise<BrowserScreenshotResponse["payload"]> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId: input.requestId,
+      message: {
+        type: "browser.screenshot.request",
+        browserId: input.browserId,
+        workspaceId: input.workspaceId,
+      },
+    });
+  }
+
+  // List the host's live browser tabs so a viewer client can pick one to screencast.
+  async requestBrowserList(input: {
+    workspaceId: string;
+    requestId?: string;
+  }): Promise<BrowserListResponse["payload"]> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId: input.requestId,
+      message: {
+        type: "browser.list.request",
+        workspaceId: input.workspaceId,
+      },
+    });
+  }
+
+  async patchOrchestrationConfig(
+    config: OrchestrationConfigPatch,
+    requestId?: string,
+  ): Promise<{ requestId: string; config: OrchestrationConfig }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "orchestration.config.update.request", config },
+    });
+  }
+
+  async prepareOrchestrationTask(input: {
+    rawRequest: string;
+    workspaceId?: string;
+    cwd?: string;
+    routeCategory?: OrchestrationRouteCategory;
+    requestId?: string;
+  }): Promise<{ requestId: string; brief: OrchestrationTaskBrief }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId: input.requestId,
+      message: {
+        type: "orchestration.task.prepare.request",
+        rawRequest: input.rawRequest,
+        ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
+        ...(input.cwd ? { cwd: input.cwd } : {}),
+        ...(input.routeCategory ? { routeCategory: input.routeCategory } : {}),
+      },
     });
   }
 

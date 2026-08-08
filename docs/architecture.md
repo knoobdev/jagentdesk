@@ -69,9 +69,10 @@ not retain non-Git directories.
 | `server/websocket-server.ts`    | WebSocket connection management, hello handshake, binary frame routing        |
 | `server/session.ts`             | Per-client session state, timeline subscriptions, terminal operations         |
 | `server/agent/agent-manager.ts` | Agent lifecycle state machine, timeline tracking, subscriber management       |
-| `server/agent/agent-storage.ts` | File-backed JSON persistence at `$JAGENTDESK_HOME/agents/`                         |
+| `server/agent/agent-storage.ts` | File-backed JSON persistence at `$JAGENTDESK_HOME/agents/`                    |
 | `server/agent/tools/`           | Transport-neutral catalog for workspaces, agents, permissions, and automation |
-| `server/agent/mcp-server.ts`    | Thin MCP adapter that registers the JAgentDesk tool catalog with the MCP SDK       |
+| `server/orchestration/`         | Task Brief compiler, role-scoped topology enforcement, handback/dissent state |
+| `server/agent/mcp-server.ts`    | Thin MCP adapter that registers the JAgentDesk tool catalog with the MCP SDK  |
 | `server/agent/providers/`       | Provider adapters (see "Agent providers" below)                               |
 | `server/tsnet-listener.ts`      | Tailnet (tsnet) listener for remote access                                    |
 | `server/schedule/`              | Cron-based scheduled agents                                                   |
@@ -208,6 +209,8 @@ Every physical send path enforces an 8 MiB outbound high-water mark, including J
 Client session RPC waits default to 60s so slow or mobile networks do not turn a live but delayed daemon response into a false operation failure. Keep connect timeouts, app-level grace windows, explicit diagnostic latency probes, liveness ping timers, and genuinely long-running RPCs separate from this default.
 
 New session RPCs use dotted names with `.request` and `.response` suffixes, such as `checkout.forge.set_auto_merge.request` and `checkout.forge.set_auto_merge.response`. See [rpc-namespacing.md](rpc-namespacing.md) for the convention and migration rules for older flat RPC names.
+
+The Supervisor–Lead–Peer control plane is documented in [orchestration.md](orchestration.md).
 
 **Notable session message types:**
 

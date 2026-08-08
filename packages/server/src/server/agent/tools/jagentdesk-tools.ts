@@ -90,6 +90,12 @@ import type {
   JAgentDeskToolExecutionContext,
   JAgentDeskToolResult,
 } from "./types.js";
+import {
+  OrchestrationDissentOutcomeSchema,
+  OrchestrationHandbackSchema,
+  OrchestrationRouteCategorySchema,
+} from "@jagentdesk/protocol/orchestration";
+import type { OrchestrationRuntime } from "../../orchestration/runtime.js";
 
 export interface JAgentDeskToolHostDependencies {
   agentManager: AgentManager;
@@ -138,6 +144,7 @@ export interface JAgentDeskToolHostDependencies {
    */
   resolveSpeakHandler?: (callerAgentId: string) => VoiceSpeakHandler | null;
   resolveCallerContext?: (callerAgentId: string) => VoiceCallerContext | null;
+  orchestrationRuntime?: OrchestrationRuntime;
   enableVoiceTools?: boolean;
   voiceOnly?: boolean;
   logger: Logger;
@@ -535,7 +542,9 @@ function resolveTerminalKeyToken(key: string, literal: boolean): string {
   }
 }
 
-export function createJAgentDeskToolCatalog(options: JAgentDeskToolHostDependencies): JAgentDeskToolCatalog {
+export function createJAgentDeskToolCatalog(
+  options: JAgentDeskToolHostDependencies,
+): JAgentDeskToolCatalog {
   const {
     agentManager,
     agentStorage,
@@ -546,12 +555,19 @@ export function createJAgentDeskToolCatalog(options: JAgentDeskToolHostDependenc
     callerAgentId,
     resolveSpeakHandler,
     resolveCallerContext,
+    orchestrationRuntime,
     logger,
   } = options;
   const childLogger = logger.child({ module: "agent", component: "jagentdesk-tool-catalog" });
   const callerContext = callerAgentId ? (resolveCallerContext?.(callerAgentId) ?? null) : null;
+  const callerOrchestrationContext = callerAgentId
+    ? (orchestrationRuntime?.getAgentContext(callerAgentId) ?? null)
+    : null;
 
-  const parseToolInput = async (tool: JAgentDeskToolDefinition, input: unknown): Promise<unknown> => {
+  const parseToolInput = async (
+    tool: JAgentDeskToolDefinition,
+    input: unknown,
+  ): Promise<unknown> => {
     const inputSchema = tool.inputSchema;
     if (!inputSchema) {
       return input;
@@ -1149,6 +1165,149 @@ export function createJAgentDeskToolCatalog(options: JAgentDeskToolHostDependenc
   type TopLevelCreateAgentArgs = z.infer<typeof canonicalTopLevelCreateAgentArgsSchema>;
   type LegacyTopLevelCreateAgentArgs = z.infer<typeof legacyTopLevelCreateAgentArgsSchema>;
 
+  if (orchestrationRuntime && callerAgentId && callerOrchestrationContext) {
+    if (callerOrchestrationContext.role === "supervisor") {
+      registerTool(
+        "orchestration.bootstrap_lead",
+        {
+          title: "Bootstrap orchestration Lead",
+          description:
+            "Supervisor-only operation: create or reuse the single engineering Lead for this workspace and orchestration run.",
+          inputSchema: {
+            assignment: z.string().trim().min(1).max(12000),
+            title: z.string().trim().min(1).max(60).optional(),
+          },
+          outputSchema: {
+            agentId: z.string(),
+            provider: z.string(),
+            model: z.string(),
+            thinkingOptionId: z.string(),
+            reused: z.boolean(),
+          },
+        },
+        async ({ assignment, title }) => {
+          const result = await orchestrationRuntime.bootstrapLead({
+            callerAgentId,
+            assignment,
+            title,
+            callerContext,
+          });
+          return { content: [], structuredContent: ensureValidJson(result) };
+        },
+      );
+    }
+
+    if (callerOrchestrationContext.role === "lead") {
+      registerTool(
+        "orchestration.create_peer",
+        {
+          title: "Create bounded orchestration Peer",
+          description:
+            "Lead-only operation: create one bounded Peer using the configured semantic route, provider/model, thinking level, and fan-out limit.",
+          inputSchema: {
+            routeCategory: OrchestrationRouteCategorySchema,
+            assignment: z.string().trim().min(1).max(12000),
+            ownershipBoundary: z.string().trim().min(1).max(12000),
+            expectedHandback: z.string().trim().min(1).max(12000),
+            title: z.string().trim().min(1).max(60).optional(),
+          },
+          outputSchema: {
+            agentId: z.string(),
+            assignmentId: z.string(),
+            routeCategory: OrchestrationRouteCategorySchema,
+            profileId: z.string(),
+            provider: z.string(),
+            model: z.string(),
+            thinkingOptionId: z.string(),
+          },
+        },
+        async ({ routeCategory, assignment, ownershipBoundary, expectedHandback, title }) => {
+          const result = await orchestrationRuntime.createPeer({
+            callerAgentId,
+            routeCategory,
+            assignment,
+            ownershipBoundary,
+            expectedHandback,
+            title,
+            callerContext,
+          });
+          return { content: [], structuredContent: ensureValidJson(result) };
+        },
+      );
+    }
+
+    if (callerOrchestrationContext.role === "peer") {
+      registerTool(
+        "orchestration.handback",
+        {
+          title: "Return orchestration handback",
+          description:
+            "Peer-only operation: persist evidence-bearing handback and deliver it to the owning Lead.",
+          inputSchema: OrchestrationHandbackSchema,
+          outputSchema: { handbackId: z.string(), leadAgentId: z.string() },
+        },
+        async (handback) => {
+          const result = await orchestrationRuntime.recordHandback({ callerAgentId, handback });
+          return { content: [], structuredContent: ensureValidJson(result) };
+        },
+      );
+    }
+
+    if (callerOrchestrationContext.role === "lead") {
+      registerTool(
+        "orchestration.resolve_dissent",
+        {
+          title: "Resolve orchestration dissent",
+          description:
+            "Lead-only operation: close a Peer dissent with exactly one allowed outcome and an explicit next action.",
+          inputSchema: {
+            peerAgentId: z.string().min(1),
+            outcome: OrchestrationDissentOutcomeSchema,
+            rationale: z.string().trim().min(1).max(12000),
+            nextAction: z.string().trim().min(1).max(12000),
+          },
+          outputSchema: { dissentId: z.string(), verificationRound: z.number() },
+        },
+        async ({ peerAgentId, outcome, rationale, nextAction }) => {
+          const result = await orchestrationRuntime.resolveDissent({
+            callerAgentId,
+            peerAgentId,
+            outcome,
+            rationale,
+            nextAction,
+          });
+          return { content: [], structuredContent: ensureValidJson(result) };
+        },
+      );
+    }
+
+    if (callerOrchestrationContext.role === "lead") {
+      registerTool(
+        "orchestration.accept_result",
+        {
+          title: "Accept orchestration engineering result",
+          description:
+            "Lead-only operation: record technical acceptance after validation and notify the Supervisor.",
+          inputSchema: {
+            summary: z.string().trim().min(1).max(12000),
+            evidence: z.string().trim().min(1).max(12000),
+            remainingUncertainty: z.string().trim().min(1).max(12000),
+          },
+          outputSchema: { supervisorAgentId: z.string() },
+        },
+        async ({ summary, evidence, remainingUncertainty }) => {
+          const result = await orchestrationRuntime.acceptResult({
+            callerAgentId,
+            summary,
+            evidence,
+            remainingUncertainty,
+          });
+          return { content: [], structuredContent: ensureValidJson(result) };
+        },
+      );
+    }
+  }
+
   if (options.voiceOnly || options.enableVoiceTools || callerContext?.enableVoiceTools) {
     registerTool(
       "speak",
@@ -1411,6 +1570,11 @@ export function createJAgentDeskToolCatalog(options: JAgentDeskToolHostDependenc
       },
     },
     async (args: unknown) => {
+      if (callerOrchestrationContext) {
+        throw new Error(
+          `Orchestration ${callerOrchestrationContext.role} cannot use generic create_agent; use the role-scoped orchestration tool`,
+        );
+      }
       const resolvedArgs = await resolveCreateAgentToolArgs(args);
       const { parsedArgs, worktree } = resolvedArgs;
       let requestedBackground: boolean;
@@ -1871,6 +2035,26 @@ export function createJAgentDeskToolCatalog(options: JAgentDeskToolHostDependenc
       background = Boolean(callerAgentId),
       notifyOnFinish = Boolean(callerAgentId),
     }) => {
+      if (callerOrchestrationContext?.role === "peer") {
+        throw new Error("Peer cannot dispatch prompts; return a structured orchestration.handback");
+      }
+      const targetContext = orchestrationRuntime?.getAgentContext(agentId);
+      if (
+        callerOrchestrationContext?.role === "lead" &&
+        targetContext?.role === "peer" &&
+        targetContext.briefId === callerOrchestrationContext.briefId
+      ) {
+        throw new Error(
+          "Lead must use orchestration.create_peer and its bounded assignment contract",
+        );
+      }
+      if (
+        callerOrchestrationContext?.role === "supervisor" &&
+        targetContext?.role === "peer" &&
+        targetContext.briefId === callerOrchestrationContext.briefId
+      ) {
+        throw new Error("Supervisor cannot dispatch directly to a Peer");
+      }
       const shouldNotifyOnFinish = Boolean(callerAgentId && notifyOnFinish && background);
 
       await sendPromptToAgent({

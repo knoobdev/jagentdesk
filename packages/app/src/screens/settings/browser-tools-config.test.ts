@@ -1,4 +1,5 @@
 import type { MutableDaemonConfig } from "@jagentdesk/protocol/messages";
+import { createDefaultOrchestrationConfig } from "@jagentdesk/protocol/orchestration";
 import { describe, expect, it } from "vitest";
 import {
   BROWSER_TOOLS_WARNING,
@@ -16,6 +17,7 @@ function makeConfig(browserToolsEnabled = false): MutableDaemonConfig {
     autoArchiveAfterMerge: false,
     enableTerminalAgentHooks: false,
     appendSystemPrompt: "",
+    orchestration: createDefaultOrchestrationConfig(),
   };
 }
 

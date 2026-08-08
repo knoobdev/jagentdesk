@@ -376,7 +376,9 @@ function getTransformOrigin(placement: Placement, alignment: Alignment): string 
   if (alignment === "start") horizontal = "left";
   else if (alignment === "end") horizontal = "right";
   else horizontal = "center";
-  return `${vertical} ${horizontal}`;
+  // React Native parses transform-origin positionally (x then y), unlike CSS
+  // which accepts keyword pairs in either order.
+  return `${horizontal} ${vertical}`;
 }
 
 const CONTENT_ENTERING_DURATION_MS = 150;

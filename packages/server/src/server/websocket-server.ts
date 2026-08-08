@@ -84,7 +84,13 @@ import {
   normalizeClientRestartRpcReason,
 } from "./lifecycle-reasons.js";
 import { CLIENT_CAPS } from "@jagentdesk/protocol/client-capabilities";
-import type { BrowserAutomationExecuteResponse } from "@jagentdesk/protocol/browser-automation/rpc-schemas";
+import type {
+  BrowserAutomationExecuteResponse,
+  BrowserScreenshotRequest,
+  BrowserScreenshotResponse,
+  BrowserListRequest,
+  BrowserListResponse,
+} from "@jagentdesk/protocol/browser-automation/rpc-schemas";
 import {
   BrowserAutomationHostCapabilitySchema,
   type BrowserAutomationHostCapability,
@@ -2680,6 +2686,17 @@ export class VoiceAssistantWebSocketServer {
       this.browserToolsBroker?.receiveResponse(message.message as BrowserAutomationExecuteResponse);
       return;
     }
+    if (
+      activeConnection.kind === "trusted" &&
+      message.message.type === "browser.screenshot.request"
+    ) {
+      await this.handleBrowserScreenshotRequest(ws, message.message as BrowserScreenshotRequest);
+      return;
+    }
+    if (activeConnection.kind === "trusted" && message.message.type === "browser.list.request") {
+      await this.handleBrowserListRequest(ws, message.message as BrowserListRequest);
+      return;
+    }
 
     const startMs = performance.now();
     await activeConnection.session.handleMessage(message.message, ws);
@@ -2695,6 +2712,102 @@ export class VoiceAssistantWebSocketServer {
         },
         "ws_slow_request",
       );
+    }
+  }
+
+  // Browser screencast (view-only): a viewer client polls the current frame of a browser tab.
+  // Fulfilled through the browser-tools broker's screenshot command against the desktop
+  // browserHost; the PNG is relayed straight back to the requesting client.
+  private async handleBrowserScreenshotRequest(
+    ws: WebSocketLike,
+    request: BrowserScreenshotRequest,
+  ): Promise<void> {
+    const { requestId, browserId, workspaceId } = request;
+    const respond = (payload: BrowserScreenshotResponse["payload"]): void =>
+      this.sendToClient(ws, wrapSessionMessage({ type: "browser.screenshot.response", payload }));
+    const broker = this.browserToolsBroker;
+    if (!broker) {
+      respond({
+        requestId,
+        ok: false,
+        error: { code: "browser_unsupported", message: "No browser host is connected." },
+      });
+      return;
+    }
+    try {
+      const result = await broker.execute({
+        command: { command: "screenshot", args: { browserId, fullPage: false } },
+        workspaceId,
+        requestId: `screencast:${requestId}`,
+      });
+      if (result.ok && result.result.command === "screenshot") {
+        respond({
+          requestId,
+          ok: true,
+          mimeType: "image/png",
+          dataBase64: result.result.dataBase64,
+          width: result.result.width,
+          height: result.result.height,
+        });
+        return;
+      }
+      const error = result.ok
+        ? { code: "browser_unknown_error", message: "Unexpected screenshot result." }
+        : { code: result.error.code, message: result.error.message };
+      respond({ requestId, ok: false, error });
+    } catch (error) {
+      respond({
+        requestId,
+        ok: false,
+        error: {
+          code: "browser_unknown_error",
+          message: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+  }
+
+  // Browser screencast discovery: list the host's live browser tabs so a viewer client can pick
+  // a desktop-hosted browser to screencast.
+  private async handleBrowserListRequest(
+    ws: WebSocketLike,
+    request: BrowserListRequest,
+  ): Promise<void> {
+    const { requestId, workspaceId } = request;
+    const respond = (payload: BrowserListResponse["payload"]): void =>
+      this.sendToClient(ws, wrapSessionMessage({ type: "browser.list.response", payload }));
+    const broker = this.browserToolsBroker;
+    if (!broker) {
+      respond({
+        requestId,
+        ok: false,
+        error: { code: "browser_unsupported", message: "No browser host is connected." },
+      });
+      return;
+    }
+    try {
+      const result = await broker.execute({
+        command: { command: "list_tabs", args: {} },
+        workspaceId,
+        requestId: `browserlist:${requestId}`,
+      });
+      if (result.ok && result.result.command === "list_tabs") {
+        respond({ requestId, ok: true, tabs: result.result.tabs });
+        return;
+      }
+      const error = result.ok
+        ? { code: "browser_unknown_error", message: "Unexpected list result." }
+        : { code: result.error.code, message: result.error.message };
+      respond({ requestId, ok: false, error });
+    } catch (error) {
+      respond({
+        requestId,
+        ok: false,
+        error: {
+          code: "browser_unknown_error",
+          message: error instanceof Error ? error.message : String(error),
+        },
+      });
     }
   }
 

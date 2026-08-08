@@ -70,9 +70,18 @@ export interface SidebarWorkspaceMenuProps {
   isPinned?: boolean;
   onTogglePin?: () => void;
   openInFileManagerPath?: string | null;
+  /**
+   * Lifted so the row that reveals the kebab can keep it mounted while its menu is up. See
+   * `useOpenKebabMenuVisibility`.
+   */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
-interface SidebarWorkspaceMenuItemsProps extends Omit<SidebarWorkspaceMenuProps, "onArchive"> {
+interface SidebarWorkspaceMenuItemsProps extends Omit<
+  SidebarWorkspaceMenuProps,
+  "onArchive" | "open" | "onOpenChange"
+> {
   onArchive?: () => void;
 }
 
@@ -201,10 +210,12 @@ export function SidebarWorkspaceMenu({
   isPinned,
   onTogglePin,
   openInFileManagerPath,
+  open,
+  onOpenChange,
 }: SidebarWorkspaceMenuProps) {
   const { t } = useTranslation();
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={onOpenChange}>
       <DropdownMenuTrigger
         hitSlop={8}
         style={triggerStyle}
