@@ -1,3 +1,4 @@
+import { StatusRing } from "@/components/status-ring";
 import type { SidebarSurfaceBackdrop } from "@/styles/surface-backdrop";
 import { PluginWorkspaceRowBadgeItems } from "@/plugins/workspace-row-badge-items";
 import { memo, useCallback, useId, useMemo, useState, type ReactNode } from "react";
@@ -308,7 +309,7 @@ function WorkspaceStatusIndicator({
   if (loading) {
     return (
       <View style={styles.workspaceStatusDot} testID="workspace-status-indicator-loading">
-        <PulsingStatusDot style={styles.standaloneRunningDot} />
+        <StatusRing />
       </View>
     );
   }
@@ -316,7 +317,7 @@ function WorkspaceStatusIndicator({
   if (shouldRenderSyncedStatusLoader({ bucket })) {
     return (
       <View style={styles.workspaceStatusDot} testID="workspace-status-indicator-running">
-        <PulsingStatusDot style={styles.standaloneRunningDot} />
+        <StatusRing />
       </View>
     );
   }

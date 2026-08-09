@@ -1,3 +1,4 @@
+import { StatusRing } from "@/components/status-ring";
 import { useMutation } from "@tanstack/react-query";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { useWorkspaceDirectory } from "@/stores/session-store-hooks";
@@ -45,7 +46,7 @@ function AgentDot({ status }: { status: AggregatedAgent["status"] }) {
   if (status === "error") dotStyle = styles.dotFailed;
   return (
     <View style={styles.dotSlot}>
-      <View style={[styles.dot, dotStyle]} />
+      {status === "running" ? <StatusRing /> : <View style={[styles.dot, dotStyle]} />}
     </View>
   );
 }
