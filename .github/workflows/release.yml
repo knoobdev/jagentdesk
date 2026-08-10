@@ -141,16 +141,19 @@ jobs:
 
       - name: Build desktop package
         shell: bash
+        working-directory: packages/desktop
         env:
           EP_GH_IGNORE_TIME: "true"
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: |
           set -euo pipefail
+          npm --prefix ../.. run build:app-deps:clean
+          (cd ../app && JAGENTDESK_WEB_PLATFORM=electron npx expo export --platform web)
           extra_args=()
           if [[ "${{ matrix.name }}" == macos-* ]]; then
             extra_args+=("-c.mac.notarize=false" "-c.mac.hardenedRuntime=false")
           fi
-          npm run build:desktop -- --publish never ${{ matrix.build_args }} "${extra_args[@]}"
+          npm run build -- --publish never ${{ matrix.build_args }} "${extra_args[@]}"
 
       - name: Upload desktop files to GitHub Release
         shell: bash
