@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "description": "JAgentDesk desktop app (Electron wrapper)",
+  "homepage": "https://github.com/knoobdev/jagentdesk",
   "license": "AGPL-3.0-or-later",
   "main": "dist/main.js",
   "scripts": {
