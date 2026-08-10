@@ -182,37 +182,49 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Set up EAS
-        uses: expo/expo-github-action@v8
+      - name: Set up Java
+        uses: actions/setup-java@v4
         with:
-          eas-version: 16.32.0
-          token: ${{ secrets.EXPO_TOKEN }}
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
 
-      - name: Build Android APK on EAS
-        id: eas-build
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK components
         shell: bash
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
           set -euo pipefail
-          cd packages/app
-          npx eas build --platform android --profile production-apk --non-interactive --wait --json \
-            > "$RUNNER_TEMP/eas-android.json"
-          build_id="$(jq -r 'if type == "array" then .[0].id // empty else .id // empty end' "$RUNNER_TEMP/eas-android.json")"
-          test -n "$build_id"
-          echo "build_id=$build_id" >> "$GITHUB_OUTPUT"
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
-      - name: Download Android APK
+      - name: Build Android app dependencies
+        run: |
+          npm run build:app-deps
+          npm --prefix packages/app run build:terminal-webview
+
+      - name: Build Android APK locally
         id: artifact
         shell: bash
         run: |
           set -euo pipefail
+          export APP_VARIANT=production
           cd packages/app
-          npx eas build:view "${{ steps.eas-build.outputs.build_id }}" --json > "$RUNNER_TEMP/eas-android-view.json"
-          artifact_url="$(jq -r '.artifacts.buildUrl // .artifacts.applicationArchiveUrl // empty' "$RUNNER_TEMP/eas-android-view.json")"
-          test -n "$artifact_url"
+          npx expo prebuild --platform android --clean --non-interactive
+          cd android
+          ./gradlew :app:assembleRelease \
+            --no-daemon \
+            --max-workers=1 \
+            -Dorg.gradle.parallel=false \
+            -Dorg.gradle.jvmargs=-Xmx2048m \
+            -x lint \
+            -x lintVitalAnalyzeRelease \
+            -x lintVitalRelease \
+            -x generateReleaseLintModel \
+            -x generateReleaseLintVitalModel
           asset_path="$RUNNER_TEMP/JAgentDesk-${RELEASE_TAG}-android.apk"
-          curl --fail --location --retry 3 --output "$asset_path" "$artifact_url"
+          cp app/build/outputs/apk/release/app-release.apk "$asset_path"
           echo "asset_path=$asset_path" >> "$GITHUB_OUTPUT"
 
       - name: Upload Android APK to GitHub Release
@@ -249,37 +261,35 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Set up EAS
-        uses: expo/expo-github-action@v8
-        with:
-          eas-version: 16.32.0
-          token: ${{ secrets.EXPO_TOKEN }}
-
-      - name: Build iOS Simulator artifact on EAS
-        id: eas-build
-        shell: bash
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      - name: Build iOS app dependencies
         run: |
-          set -euo pipefail
-          cd packages/app
-          npx eas build --platform ios --profile production-simulator --non-interactive --wait --json \
-            > "$RUNNER_TEMP/eas-ios.json"
-          build_id="$(jq -r 'if type == "array" then .[0].id // empty else .id // empty end' "$RUNNER_TEMP/eas-ios.json")"
-          test -n "$build_id"
-          echo "build_id=$build_id" >> "$GITHUB_OUTPUT"
+          npm run build:app-deps
+          npm --prefix packages/app run build:terminal-webview
 
-      - name: Download iOS Simulator artifact
+      - name: Build iOS Simulator artifact locally
         id: artifact
         shell: bash
         run: |
           set -euo pipefail
+          export APP_VARIANT=production
           cd packages/app
-          npx eas build:view "${{ steps.eas-build.outputs.build_id }}" --json > "$RUNNER_TEMP/eas-ios-view.json"
-          artifact_url="$(jq -r '.artifacts.buildUrl // .artifacts.applicationArchiveUrl // empty' "$RUNNER_TEMP/eas-ios-view.json")"
-          test -n "$artifact_url"
+          npx expo prebuild --platform ios --clean --non-interactive
+          cd ios
+          pod install --repo-update
+          derived_data="$RUNNER_TEMP/jagentdesk-ios-derived"
+          xcodebuild \
+            -workspace JAgentDesk.xcworkspace \
+            -scheme JAgentDesk \
+            -configuration Release \
+            -sdk iphonesimulator \
+            -destination "generic/platform=iOS Simulator" \
+            -derivedDataPath "$derived_data" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
           asset_path="$RUNNER_TEMP/JAgentDesk-${RELEASE_TAG}-ios-simulator.tar.gz"
-          curl --fail --location --retry 3 --output "$asset_path" "$artifact_url"
+          tar -czf "$asset_path" -C "$derived_data/Build/Products/Release-iphonesimulator" JAgentDesk.app
           echo "asset_path=$asset_path" >> "$GITHUB_OUTPUT"
 
       - name: Upload iOS Simulator artifact to GitHub Release

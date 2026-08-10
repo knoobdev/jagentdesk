@@ -104,13 +104,14 @@ Workflow `.github/workflows/release.yml` chạy khi push tag semver dạng `v*.*
 repo này là `v1.0.0` và phải khớp version `1.0.0` trong các package.
 
 - Desktop build theo matrix macOS, Windows và Linux, sau đó upload installer vào GitHub Release.
-- Mobile Android build profile EAS `production-apk` và upload APK.
-- Mobile iOS build profile EAS `production-simulator` và upload artifact simulator.
+- Mobile Android được prebuild và compile trực tiếp trên runner, sau đó upload APK cài thử.
+- Mobile iOS được compile trực tiếp cho Simulator với `CODE_SIGNING_ALLOWED=NO`, sau đó upload
+  artifact simulator.
 
-GitHub Actions tự có `GITHUB_TOKEN`. Mobile job cần thêm repository secret `EXPO_TOKEN` có quyền
-EAS build; nếu chưa có secret này, desktop job vẫn có thể chạy nhưng mobile cloud build sẽ dừng
-với lỗi cấu hình rõ ràng. Build iOS cho device/Sideloadly cần Apple signing credentials riêng và
-không được giả định là đã ký trong workflow simulator.
+GitHub Actions tự có `GITHUB_TOKEN`; workflow `v1.0.0` không cần `EXPO_TOKEN`. APK Android của
+workflow là bản cài thử, không phải artifact đã ký để phát hành Play Store. Build iOS cho
+device/Sideloadly cần Apple signing credentials riêng và không được giả định là đã ký trong
+workflow simulator.
 
 Tạo release đầu tiên:
 
