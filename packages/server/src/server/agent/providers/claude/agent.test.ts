@@ -12,6 +12,7 @@ import {
   normalizeClaudeAskUserQuestionRequestInput,
   normalizeClaudeAskUserQuestionUpdatedInput,
   resolveClaudeCodeVersion,
+  summarizeClaudeQuestionPermission,
   toClaudeSdkMcpConfig,
 } from "./agent.js";
 import { claudeProjectDirSync } from "./project-dir.js";
@@ -401,7 +402,9 @@ describe("ClaudeAgentClient.fetchCatalog", () => {
   const logger = createTestLogger();
 
   test("returns hardcoded claude models", async () => {
-    const emptyConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), "jagentdesk-claude-models-empty-"));
+    const emptyConfigDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), "jagentdesk-claude-models-empty-"),
+    );
     try {
       const client = new ClaudeAgentClient({
         logger,
@@ -445,7 +448,9 @@ describe("ClaudeAgentClient.fetchCatalog", () => {
   });
 
   test("preserves the catalog when Claude Code version detection fails", async () => {
-    const emptyConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), "jagentdesk-claude-models-empty-"));
+    const emptyConfigDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), "jagentdesk-claude-models-empty-"),
+    );
     try {
       const client = new ClaudeAgentClient({
         logger,
@@ -468,7 +473,9 @@ describe("ClaudeAgentClient.fetchCatalog", () => {
   });
 
   test("exposes Ultra Code on xhigh-capable Claude models", async () => {
-    const emptyConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), "jagentdesk-claude-models-empty-"));
+    const emptyConfigDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), "jagentdesk-claude-models-empty-"),
+    );
     try {
       const client = new ClaudeAgentClient({
         logger,
@@ -870,6 +877,22 @@ describe("ClaudeAgentSession features", () => {
 });
 
 describe("normalizeClaudeAskUserQuestionUpdatedInput", () => {
+  test("summarizes AskUserQuestion for the permission card", () => {
+    expect(
+      summarizeClaudeQuestionPermission("AskUserQuestion", {
+        questions: [
+          {
+            question: "Which provider should I use?",
+            options: [{ label: "Claude" }, { label: "Codex" }],
+          },
+        ],
+      }),
+    ).toEqual({
+      title: "Which provider should I use?",
+      description: "Claude / Codex",
+    });
+  });
+
   test("marks Claude AskUserQuestion options as allowing other answers", () => {
     expect(
       normalizeClaudeAskUserQuestionRequestInput("AskUserQuestion", {

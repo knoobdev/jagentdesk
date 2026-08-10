@@ -1489,7 +1489,9 @@ describe("Codex app-server provider", () => {
     session.activeForegroundTurnId = null;
     session.client = createStub<CodexClientLike>({ request });
 
-    await session.startTurn("/jagentdesk-implement in a worktree, remember to use Claude for the UI");
+    await session.startTurn(
+      "/jagentdesk-implement in a worktree, remember to use Claude for the UI",
+    );
 
     const turnStartCall = request.mock.calls.find(([method]) => method === "turn/start");
     expect(turnStartCall?.[1]).toEqual(
@@ -1525,6 +1527,32 @@ describe("Codex app-server provider", () => {
       argumentHint: "",
       kind: "skill",
     });
+  });
+
+  test("omits disabled Codex skills from slash commands", async () => {
+    const commands = await listCommandsFromFakeCodex([
+      {
+        name: "enabled-skill",
+        description: "An enabled skill.",
+        path: "/tmp/skills/enabled-skill/SKILL.md",
+        enabled: true,
+      },
+      {
+        name: "disabled-skill",
+        description: "A disabled skill.",
+        path: "/tmp/skills/disabled-skill/SKILL.md",
+        enabled: false,
+      },
+      {
+        name: "legacy-skill",
+        description: "Skill without enabled field.",
+        path: "/tmp/skills/legacy-skill/SKILL.md",
+      },
+    ]);
+
+    expect(
+      commands.filter((command) => command.kind === "skill").map((command) => command.name),
+    ).toEqual(["enabled-skill", "legacy-skill"]);
   });
 
   test("deduplicates Codex skill slash commands returned from multiple skill roots", async () => {

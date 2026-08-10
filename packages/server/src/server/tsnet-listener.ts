@@ -168,6 +168,135 @@ export function createTsnetListener(options: TsnetListenerOptions): TsnetListene
     }
   }
 
+  function extractTailscaleLoginUrl(line: string): string | null {
+    const marker = "https://login.tailscale.com/";
+    const start = line.indexOf(marker);
+    if (start < 0) return null;
+    const candidate = line.slice(start).split(/\s+/)[0] ?? "";
+    return candidate.replace(/[),.;]+$/, "") || null;
+  }
+
+  function recordLoginUrl(url: string): void {
+    loginUrl = url;
+    writeStatus(false);
+    // The URL contains a one-time login token. Persist it for the renderer but
+    // never put the token in daemon logs.
+    logger.info(
+      { port: options.port, loginUrlAvailable: true },
+      "tsnet bridge awaiting interactive login",
+    );
+  }
+
+  function attachBridgeOutputHandlers(bridgeProcess: ChildProcess): void {
+    bridgeProcess.stdout?.on("data", (chunk: Buffer) => {
+      for (const line of chunk.toString().split("\n")) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        if (trimmed.startsWith("TSNET_READY ")) {
+          const host = trimmed.slice("TSNET_READY ".length).trim();
+          readyHost = host || null;
+          // A login URL is one-time state. Once the bridge is ready, remove it
+          // so a later restart can never reopen an obsolete browser URL.
+          loginUrl = null;
+          writeStatus(Boolean(readyHost), readyHost);
+          continue;
+        }
+        if (trimmed.startsWith("TSNET_ERROR ")) {
+          const message = trimmed.slice("TSNET_ERROR ".length).trim();
+          logger.error({ message }, "tsnet bridge startup failed");
+          readyHost = null;
+          loginUrl = null;
+          localProxyPort = null;
+          writeStatus(false);
+          continue;
+        }
+        const stdoutLoginUrl = extractTailscaleLoginUrl(trimmed);
+        if (stdoutLoginUrl) {
+          recordLoginUrl(stdoutLoginUrl);
+          continue;
+        }
+        logger.info({ line: trimmed }, "tsnet bridge output");
+      }
+    });
+    bridgeProcess.stderr?.on("data", (chunk: Buffer) => {
+      for (const line of chunk.toString().split("\n")) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        const stderrLoginUrl = extractTailscaleLoginUrl(trimmed);
+        if (stderrLoginUrl) {
+          recordLoginUrl(stderrLoginUrl);
+        } else {
+          logger.debug({ stderr: trimmed }, "tsnet bridge stderr");
+        }
+      }
+    });
+    bridgeProcess.on("exit", (code, signal) => {
+      logger.warn({ code, signal }, "tsnet bridge exited");
+      readyHost = null;
+      loginUrl = null;
+      localProxyPort = null;
+      writeStatus(false);
+      child = null;
+    });
+    bridgeProcess.on("error", (error) => {
+      logger.error({ err: error }, "tsnet bridge spawn failed");
+      readyHost = null;
+      loginUrl = null;
+      localProxyPort = null;
+      child = null;
+      writeStatus(false);
+    });
+  }
+
+  function shouldStartBridge(): boolean {
+    if (options.port <= 0) {
+      logger.info("tsnet listener unavailable: daemon has no TCP listen port");
+      return false;
+    }
+    if (options.bridgeBinary && !options.spawnBridge && !existsSync(options.bridgeBinary)) {
+      throw new Error("Configured Tailscale bridge does not exist: " + options.bridgeBinary);
+    }
+    if (!binary) {
+      if (!allowExternalServe) {
+        throw new Error(
+          "Embedded Tailscale bridge is unavailable; build tailnet-bridge or explicitly enable external serve mode",
+        );
+      }
+      // Explicit compatibility mode: an external tailscale process forwards
+      // the daemon port. This is never enabled by the packaged app.
+      logger.info(
+        {
+          host: staticHost || null,
+          hint: "set JAGENTDESK_TSNET_BRIDGE_BIN or build go/tsnet-bridge to enable the embedded tailnet listener",
+        },
+        "tsnet listener: no bridge binary; relying on external tailscale serve",
+      );
+      return false;
+    }
+
+    // Only spawn the bridge when the daemon actually wants to join a tailnet:
+    // an explicit bridge binary override, a TS auth key, or an existing tsnet
+    // state directory. Otherwise the embedded listener would try to join with
+    // no credentials and block startup.
+    const stateDirExists = stateDir.length > 0 && existsSync(stateDir);
+    const tailnetEnabled =
+      options.authKey !== undefined ||
+      stateDirExists ||
+      options.bridgeBinary !== undefined ||
+      process.env.JAGENTDESK_TAILSCALE_INTERACTIVE === "1";
+    if (!tailnetEnabled) {
+      logger.info(
+        {
+          host: staticHost || null,
+          hint: "set JAGENTDESK_TAILSCALE_AUTH_KEY or a tailnet state directory to enable the embedded tailnet listener",
+        },
+        "tsnet listener: tailnet not enabled; skipping bridge",
+      );
+      return false;
+    }
+    return true;
+  }
+
   function currentAddress(): DirectTailnetAddress | null {
     const host = readyHost ?? (allowExternalServe ? staticHost : "");
     if (!host || options.port <= 0) {
@@ -185,54 +314,8 @@ export function createTsnetListener(options: TsnetListenerOptions): TsnetListene
       }
       started = true;
       writeStatus(false);
-
-      if (options.port <= 0) {
-        logger.info("tsnet listener unavailable: daemon has no TCP listen port");
-        return;
-      }
-
-      if (options.bridgeBinary && !options.spawnBridge && !existsSync(options.bridgeBinary)) {
-        throw new Error("Configured Tailscale bridge does not exist: " + options.bridgeBinary);
-      }
-
-      if (!binary) {
-        if (!allowExternalServe) {
-          throw new Error(
-            "Embedded Tailscale bridge is unavailable; build tailnet-bridge or explicitly enable external serve mode",
-          );
-        }
-        // Explicit compatibility mode: an external tailscale process forwards
-        // the daemon port. This is never enabled by the packaged app.
-        logger.info(
-          {
-            host: staticHost || null,
-            hint: "set JAGENTDESK_TSNET_BRIDGE_BIN or build go/tsnet-bridge to enable the embedded tailnet listener",
-          },
-          "tsnet listener: no bridge binary; relying on external tailscale serve",
-        );
-        return;
-      }
-
-      // Only spawn the bridge when the daemon actually wants to join a tailnet:
-      // an explicit bridge binary override, a TS auth key, or an existing tsnet
-      // state directory. Otherwise the embedded listener would try to join with
-      // no credentials and block startup.
-      const stateDirExists = stateDir.length > 0 && existsSync(stateDir);
-      const tailnetEnabled =
-        options.authKey !== undefined ||
-        stateDirExists ||
-        options.bridgeBinary !== undefined ||
-        process.env.JAGENTDESK_TAILSCALE_INTERACTIVE === "1";
-      if (!tailnetEnabled) {
-        logger.info(
-          {
-            host: staticHost || null,
-            hint: "set JAGENTDESK_TAILSCALE_AUTH_KEY or a tailnet state directory to enable the embedded tailnet listener",
-          },
-          "tsnet listener: tailnet not enabled; skipping bridge",
-        );
-        return;
-      }
+      if (!shouldStartBridge()) return;
+      if (!binary) return;
 
       // Local ingress the bridge forwards tailnet TCP to. It performs the HTTP
       // upgrade and WebSocket framing, then hands the socket to the daemon.
@@ -272,55 +355,7 @@ export function createTsnetListener(options: TsnetListenerOptions): TsnetListene
         TS_AUTHKEY: options.authKey ?? process.env.JAGENTDESK_TAILSCALE_AUTH_KEY ?? "",
         TS_STATE_DIR: stateDir,
       });
-
-      child.stdout?.on("data", (chunk: Buffer) => {
-        for (const line of chunk.toString().split("\n")) {
-          const trimmed = line.trim();
-          if (!trimmed) {
-            continue;
-          }
-          if (trimmed.startsWith("TSNET_READY ")) {
-            const host = trimmed.slice("TSNET_READY ".length).trim();
-            readyHost = host || null;
-            writeStatus(Boolean(readyHost), readyHost);
-          } else if (trimmed.startsWith("TSNET_LOGIN_URL ")) {
-            loginUrl = trimmed.slice("TSNET_LOGIN_URL ".length).trim() || null;
-            writeStatus(false);
-            logger.info(
-              { port: options.port, loginUrl },
-              "tsnet bridge awaiting interactive login",
-            );
-          } else if (trimmed.startsWith("TSNET_ERROR ")) {
-            const message = trimmed.slice("TSNET_ERROR ".length).trim();
-            logger.error({ message }, "tsnet bridge startup failed");
-            readyHost = null;
-            loginUrl = null;
-            localProxyPort = null;
-            writeStatus(false);
-          } else {
-            logger.info({ line: trimmed }, "tsnet bridge output");
-          }
-        }
-      });
-      child.stderr?.on("data", (chunk: Buffer) => {
-        logger.debug({ stderr: chunk.toString() }, "tsnet bridge stderr");
-      });
-      child.on("exit", (code, signal) => {
-        logger.warn({ code, signal }, "tsnet bridge exited");
-        readyHost = null;
-        loginUrl = null;
-        localProxyPort = null;
-        writeStatus(false);
-        child = null;
-      });
-      child.on("error", (error) => {
-        logger.error({ err: error }, "tsnet bridge spawn failed");
-        readyHost = null;
-        loginUrl = null;
-        localProxyPort = null;
-        child = null;
-        writeStatus(false);
-      });
+      attachBridgeOutputHandlers(child);
     },
     stop: async () => {
       if (stopped) {

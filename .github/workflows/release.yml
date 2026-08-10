@@ -1,0 +1,291 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing version tag to build (for example v1.0.0)"
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+jobs:
+  validate:
+    name: Validate release tag
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.20.0"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify tag and package versions
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+          const tag = process.env.RELEASE_TAG;
+          if (!/^v\d+\.\d+\.\d+$/.test(tag)) {
+            throw new Error(`Expected a semver tag such as v1.0.0, got ${tag}`);
+          }
+          const expectedVersion = tag.slice(1);
+          const packageFiles = ["package.json"];
+          for (const workspace of JSON.parse(fs.readFileSync("package.json", "utf8")).workspaces) {
+            packageFiles.push(`${workspace}/package.json`);
+          }
+          for (const file of packageFiles) {
+            const pkg = JSON.parse(fs.readFileSync(file, "utf8"));
+            if (pkg.version !== expectedVersion) {
+              throw new Error(`${file} is ${pkg.version}; expected ${expectedVersion}`);
+            }
+          }
+          console.log(`Validated ${tag} against ${packageFiles.length} package manifests.`);
+          NODE
+
+      - name: Typecheck
+        run: npm run typecheck
+
+  create-release:
+    name: Create GitHub release
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create release if missing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists."
+          else
+            gh release create "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "JAgentDesk $RELEASE_TAG" \
+              --generate-notes
+          fi
+
+  desktop:
+    name: Desktop (${{ matrix.name }})
+    needs: [validate, create-release]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x64
+            runner: ubuntu-22.04
+            build_args: "--linux --x64"
+          - name: windows-x64
+            runner: windows-latest
+            build_args: "--win --x64"
+          - name: macos-arm64
+            runner: macos-14
+            build_args: "--mac --arm64"
+          - name: macos-x64
+            runner: macos-15-intel
+            build_args: "--mac --x64"
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.20.0"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build desktop package
+        shell: bash
+        env:
+          EP_GH_IGNORE_TIME: "true"
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: |
+          set -euo pipefail
+          extra_args=()
+          if [[ "${{ matrix.name }}" == macos-* ]]; then
+            extra_args+=("-c.mac.notarize=false" "-c.mac.hardenedRuntime=false")
+          fi
+          npm run build:desktop -- --publish never ${{ matrix.build_args }} "${extra_args[@]}"
+
+      - name: Upload desktop files to GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mapfile -d '' files < <(find packages/desktop/release -maxdepth 1 -type f ! -name '*.yml' -print0 | sort -z)
+          if (( ${#files[@]} == 0 )); then
+            echo "No desktop release files were produced."
+            exit 1
+          fi
+          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+
+      - name: Upload desktop workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.name }}
+          path: packages/desktop/release/*
+          if-no-files-found: error
+          retention-days: 14
+
+  mobile-android:
+    name: Mobile Android APK
+    needs: [validate, create-release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.20.0"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set up EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: 16.32.0
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Build Android APK on EAS
+        id: eas-build
+        shell: bash
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          cd packages/app
+          npx eas build --platform android --profile production-apk --non-interactive --wait --json \
+            > "$RUNNER_TEMP/eas-android.json"
+          build_id="$(jq -r 'if type == "array" then .[0].id // empty else .id // empty end' "$RUNNER_TEMP/eas-android.json")"
+          test -n "$build_id"
+          echo "build_id=$build_id" >> "$GITHUB_OUTPUT"
+
+      - name: Download Android APK
+        id: artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd packages/app
+          npx eas build:view "${{ steps.eas-build.outputs.build_id }}" --json > "$RUNNER_TEMP/eas-android-view.json"
+          artifact_url="$(jq -r '.artifacts.buildUrl // .artifacts.applicationArchiveUrl // empty' "$RUNNER_TEMP/eas-android-view.json")"
+          test -n "$artifact_url"
+          asset_path="$RUNNER_TEMP/JAgentDesk-${RELEASE_TAG}-android.apk"
+          curl --fail --location --retry 3 --output "$asset_path" "$artifact_url"
+          echo "asset_path=$asset_path" >> "$GITHUB_OUTPUT"
+
+      - name: Upload Android APK to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$RELEASE_TAG" "${{ steps.artifact.outputs.asset_path }}" --clobber --repo "$GITHUB_REPOSITORY"
+
+      - name: Upload Android APK workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-android-apk
+          path: ${{ steps.artifact.outputs.asset_path }}
+          if-no-files-found: error
+          retention-days: 14
+
+  mobile-ios-simulator:
+    name: Mobile iOS Simulator
+    needs: [validate, create-release]
+    runs-on: macos-14
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.20.0"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set up EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: 16.32.0
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Build iOS Simulator artifact on EAS
+        id: eas-build
+        shell: bash
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          cd packages/app
+          npx eas build --platform ios --profile production-simulator --non-interactive --wait --json \
+            > "$RUNNER_TEMP/eas-ios.json"
+          build_id="$(jq -r 'if type == "array" then .[0].id // empty else .id // empty end' "$RUNNER_TEMP/eas-ios.json")"
+          test -n "$build_id"
+          echo "build_id=$build_id" >> "$GITHUB_OUTPUT"
+
+      - name: Download iOS Simulator artifact
+        id: artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd packages/app
+          npx eas build:view "${{ steps.eas-build.outputs.build_id }}" --json > "$RUNNER_TEMP/eas-ios-view.json"
+          artifact_url="$(jq -r '.artifacts.buildUrl // .artifacts.applicationArchiveUrl // empty' "$RUNNER_TEMP/eas-ios-view.json")"
+          test -n "$artifact_url"
+          asset_path="$RUNNER_TEMP/JAgentDesk-${RELEASE_TAG}-ios-simulator.tar.gz"
+          curl --fail --location --retry 3 --output "$asset_path" "$artifact_url"
+          echo "asset_path=$asset_path" >> "$GITHUB_OUTPUT"
+
+      - name: Upload iOS Simulator artifact to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$RELEASE_TAG" "${{ steps.artifact.outputs.asset_path }}" --clobber --repo "$GITHUB_REPOSITORY"
+
+      - name: Upload iOS Simulator workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-ios-simulator
+          path: ${{ steps.artifact.outputs.asset_path }}
+          if-no-files-found: error
+          retention-days: 14

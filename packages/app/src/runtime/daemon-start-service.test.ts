@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { DaemonStartService, upsertDesktopDaemonConnection } from "./daemon-start-service";
 import type { HostRuntimeStore } from "./host-runtime";
 import type { DesktopDaemonStatus } from "@/desktop/daemon/desktop-daemon";
+import type { HostProfile } from "@/types/host-connection";
 
 interface RecordedUpsert {
   listenAddress: string;
@@ -40,8 +41,9 @@ function createTailnetStore(): {
 } {
   const localUpserts: RecordedUpsert[] = [];
   const tailnetUpserts: RecordedTailnetUpsert[] = [];
+  const hosts: HostProfile[] = [];
   const store = {
-    getHosts: () => [],
+    getHosts: () => hosts,
     upsertConnectionFromListen: async (input: RecordedUpsert) => {
       localUpserts.push(input);
       return {} as Awaited<ReturnType<HostRuntimeStore["upsertConnectionFromListen"]>>;
@@ -377,6 +379,40 @@ describe("upsertDesktopDaemonConnection", () => {
         label: "desktop",
       },
     ]);
+  });
+
+  it("adds the verified tailnet connection to an existing local desktop host", async () => {
+    const fake = createTailnetStore();
+    fake.store.getHosts = () => [
+      {
+        serverId: "srv_desktop",
+        label: "desktop",
+        appearance: {} as HostProfile["appearance"],
+        lifecycle: {},
+        connections: [
+          { id: "direct:localhost:6768", type: "directTcp", endpoint: "localhost:6768" },
+        ],
+        preferredConnectionId: "direct:localhost:6768",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+    ];
+    const daemon = makeStatus({
+      tailnetAddress: "jcode-3.tailf900c1.ts.net:6768",
+      daemonPublicKeyB64: "daemon-public-key",
+      tailscaleConnected: true,
+    });
+
+    const result = await upsertDesktopDaemonConnection(fake.store, daemon, "tailscale");
+
+    expect(result).toEqual({ ok: true });
+    expect(fake.tailnetUpserts).toHaveLength(1);
+    expect(fake.tailnetUpserts[0]).toMatchObject({
+      serverId: "srv_desktop",
+      tailnetAddress: "jcode-3.tailf900c1.ts.net:6768",
+      daemonPublicKeyB64: "daemon-public-key",
+    });
+    expect(fake.store.getHosts()[0]?.preferredConnectionId).toBe("direct:localhost:6768");
   });
 
   it("does not create a localhost fallback while Tailscale is not ready", async () => {

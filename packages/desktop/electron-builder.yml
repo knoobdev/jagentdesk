@@ -37,7 +37,7 @@ extraResources:
     to: editor-target-icons
 publish:
   provider: github
-  owner: jcode831
+  owner: knoobdev
   repo: jagentdesk
 mac:
   artifactName: "JAgentDesk-${version}-${arch}.${ext}"

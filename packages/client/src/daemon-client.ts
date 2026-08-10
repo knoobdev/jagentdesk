@@ -331,6 +331,19 @@ export interface DaemonClientConfig {
    * daemons), a plain unsigned hello is sent after a short fallback delay.
    */
   expectChallenge?: boolean;
+  /**
+   * Override the wait before the challenge fallback fires (ms). Direct/loopback
+   * clients use a short value because a pairing-enforcing daemon issues the
+   * challenge synchronously on connect.
+   */
+  challengeWaitFallbackMs?: number;
+  /**
+   * Direct/loopback only: when the challenge wait times out, send a plain hello
+   * instead of closing the connection. Lets a local client work against both a
+   * pairing-enforcing daemon (challenge answered) and a legacy/gate-off daemon
+   * (no challenge). Never set this for tailnet — it would be an auth bypass.
+   */
+  unsignedHelloFallbackOnChallengeTimeout?: boolean;
   /** Tailnet transport only: keys used to answer the daemon's nonce challenge. */
   deviceSigning?: DeviceSigningConfig;
   /** Tailnet transport only: register the device pre-hello on first challenge. */
@@ -5521,8 +5534,19 @@ export class DaemonClient {
     if (this.challengeWaitTimeout) {
       clearTimeout(this.challengeWaitTimeout);
     }
+    const fallbackMs = this.config.challengeWaitFallbackMs ?? CHALLENGE_WAIT_FALLBACK_MS;
     this.challengeWaitTimeout = setTimeout(() => {
       this.challengeWaitTimeout = null;
+      // A direct/loopback client cannot know up front whether the daemon
+      // enforces local device pairing. When it does, the challenge arrives
+      // synchronously on connect and is handled before this fires. When it does
+      // not (gate off / old daemon), fall back to a plain hello so the ordinary
+      // local connection keeps working. This fallback is opt-in and must never
+      // be enabled for tailnet, where an unsigned hello would be an auth bypass.
+      if (this.config.unsignedHelloFallbackOnChallengeTimeout) {
+        this.sendHelloMessage();
+        return;
+      }
       // Tailnet transport is always paired and signed. An unsigned fallback
       // would turn a challenge timeout into an authorization bypass, so close
       // this attempt and let the normal reconnect/health loop report failure.
@@ -5534,7 +5558,7 @@ export class DaemonClient {
         event: "CHALLENGE_TIMEOUT",
         reasonCode: "tailnet_challenge_timeout",
       });
-    }, CHALLENGE_WAIT_FALLBACK_MS);
+    }, fallbackMs);
   }
 
   private handleChallenge(nonce: string): void {

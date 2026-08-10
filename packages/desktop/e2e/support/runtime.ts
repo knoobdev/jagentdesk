@@ -33,7 +33,8 @@ export interface RealDaemonState {
 export async function loadRealDaemonState(): Promise<RealDaemonState> {
   const port = getE2EDaemonPort();
   const jagentdeskHome = process.env.E2E_JAGENTDESK_HOME;
-  if (!jagentdeskHome) throw new Error("E2E_JAGENTDESK_HOME not set — the worker fixture must run first");
+  if (!jagentdeskHome)
+    throw new Error("E2E_JAGENTDESK_HOME not set — the worker fixture must run first");
 
   const resp = await fetch(`http://127.0.0.1:${port}/api/status`);
   const data: DaemonApiStatus = await resp.json();
@@ -65,6 +66,10 @@ export interface DesktopRuntimeConfig {
   hangDaemonStart?: boolean;
   /** Delay the desktop settings IPC response to exercise startup ordering. */
   desktopSettingsDelayMs?: number;
+  /** Simulated Tailscale state returned by desktop_tailscale_status. */
+  tailscaleConnected?: boolean;
+  tailnetAddress?: string | null;
+  daemonPublicKeyB64?: string | null;
   /**
    * Controls what dialog.ask returns when the daemon management confirm dialog
    * fires. True = confirm (proceed with the action), false = cancel. Defaults to
@@ -145,6 +150,9 @@ export async function installDesktopRuntime(
         version: cfg.daemonVersion ?? null,
         desktopManaged: manageDaemon,
         error: null,
+        tailscaleConnected: cfg.tailscaleConnected === true,
+        tailnetAddress: cfg.tailnetAddress ?? null,
+        daemonPublicKeyB64: cfg.daemonPublicKeyB64 ?? null,
       };
     }
 
@@ -196,6 +204,7 @@ export async function installDesktopRuntime(
           await waitForDesktopSettingsResponse();
           return {
             daemon: { manageBuiltInDaemon: manageDaemon, keepRunningAfterQuit: true },
+            tailscale: { authKeyConfigured: false },
           };
         }
 
@@ -211,7 +220,25 @@ export async function installDesktopRuntime(
           }
           return {
             daemon: { manageBuiltInDaemon: manageDaemon, keepRunningAfterQuit: true },
+            tailscale: { authKeyConfigured: false },
           };
+        }
+
+        if (command === "desktop_tailscale_status") {
+          return {
+            connected: cfg.tailscaleConnected === true,
+            tailnet: cfg.tailscaleConnected === true ? "e2e.tailnet.ts.net" : null,
+            daemonStatus: "running",
+            healthy: cfg.tailscaleConnected === true,
+            tailnetAddress: cfg.tailnetAddress ?? null,
+            tailnetProxyAddress: cfg.tailscaleConnected === true ? "127.0.0.1:55750" : null,
+            daemonPublicKeyB64: cfg.daemonPublicKeyB64 ?? null,
+            devicePublicKeyB64: null,
+          };
+        }
+
+        if (command === "start_tailscale_login") {
+          return { started: true, connected: false };
         }
 
         if (command === "stop_desktop_daemon") {

@@ -4,10 +4,10 @@
 
 Controlled by `APP_VARIANT` in `packages/app/app.config.js` (vanilla Expo, no custom Gradle plugin):
 
-| Variant       | App name    | Package ID       |
-| ------------- | ----------- | ---------------- |
-| `production`  | JAgentDesk       | `sh.jagentdesk`       |
-| `development` | JAgentDesk Debug | `sh.jagentdesk.debug` |
+| Variant       | App name         | Package ID                    |
+| ------------- | ---------------- | ----------------------------- |
+| `production`  | JAgentDesk       | `app.jagentdesk.mobile`       |
+| `development` | JAgentDesk Debug | `app.jagentdesk.mobile.debug` |
 
 EAS profiles: `development`, `production`, and `production-apk` in `packages/app/eas.json`.
 

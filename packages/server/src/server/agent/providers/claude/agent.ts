@@ -1033,6 +1033,30 @@ function resolvePermissionKind(
   return "tool";
 }
 
+export function summarizeClaudeQuestionPermission(
+  toolName: string,
+  input: AgentMetadata,
+): { title?: string; description?: string } {
+  if (toolName !== "AskUserQuestion" || !Array.isArray(input.questions)) {
+    return {};
+  }
+
+  const question = input.questions.find(isMetadata);
+  const title = typeof question?.question === "string" ? question.question.trim() : "";
+  if (!title) return {};
+
+  const labels = Array.isArray(question?.options)
+    ? question.options
+        .map((option) => {
+          if (typeof option === "string") return option.trim();
+          return isMetadata(option) && typeof option.label === "string" ? option.label.trim() : "";
+        })
+        .filter((label) => label.length > 0)
+    : [];
+
+  return labels.length > 0 ? { title, description: labels.join(" / ") } : { title };
+}
+
 function getClaudeModeLabel(modeId: PermissionMode): string {
   return DEFAULT_MODES.find((mode) => mode.id === modeId)?.label ?? modeId;
 }
@@ -4333,6 +4357,7 @@ class ClaudeAgentSession implements AgentSession {
       provider: "claude",
       name: toolName,
       kind,
+      ...summarizeClaudeQuestionPermission(toolName, input),
       input: requestInput,
       detail: toolDetail,
       suggestions: options.suggestions?.map((suggestion) => ({

@@ -1073,17 +1073,15 @@ function TailscaleHealthMonitor() {
 // context and need one shared provider for sibling sheets to stack.
 function RootProviders({ children }: { children: ReactNode }) {
   return (
-    <SafeAreaProvider>
-      <WindowChromeProvider>
-        <KeyboardProvider>
-          <KeyboardShiftProvider>
-            <PortalProvider>
-              <BottomSheetModalProvider>{children}</BottomSheetModalProvider>
-            </PortalProvider>
-          </KeyboardShiftProvider>
-        </KeyboardProvider>
-      </WindowChromeProvider>
-    </SafeAreaProvider>
+    <WindowChromeProvider>
+      <KeyboardProvider>
+        <KeyboardShiftProvider>
+          <PortalProvider>
+            <BottomSheetModalProvider>{children}</BottomSheetModalProvider>
+          </PortalProvider>
+        </KeyboardShiftProvider>
+      </KeyboardProvider>
+    </WindowChromeProvider>
   );
 }
 
@@ -1115,9 +1113,11 @@ export default function RootLayout() {
   return (
     <QueryProvider>
       <I18nProvider>
-        <RootErrorBoundary>
-          <RootAppTree />
-        </RootErrorBoundary>
+        <SafeAreaProvider>
+          <RootErrorBoundary>
+            <RootAppTree />
+          </RootErrorBoundary>
+        </SafeAreaProvider>
       </I18nProvider>
     </QueryProvider>
   );

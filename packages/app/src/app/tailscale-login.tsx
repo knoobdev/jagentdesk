@@ -11,14 +11,19 @@ import * as WebBrowser from "expo-web-browser";
 import { Button } from "@/components/ui/button";
 import { JAgentDeskLogo } from "@/components/icons/jagentdesk-logo";
 import { isNative } from "@/constants/platform";
+import { getDesktopDaemonStatus, getDesktopTailscaleStatus } from "@/desktop/daemon/desktop-daemon";
 import { SPACING } from "@/styles/theme";
 import {
   getSnapshot,
   getTailscaleLoginAdapter,
   refreshTailscaleStatus,
   setConnectionMode,
+  useTailscaleLoginStatus,
 } from "@/tailscale";
 import type { TailscaleLoginAdapter } from "@/tailscale";
+import { upsertDesktopDaemonConnection } from "@/runtime/daemon-start-service";
+import { getHostRuntimeStore } from "@/runtime/host-runtime";
+import { buildSettingsHostSectionRoute } from "@/utils/host-routes";
 
 const styles = StyleSheet.create((theme) => ({
   root: {
@@ -119,6 +124,7 @@ const AUTH_KEY_STATUS_POLL_MS = 250;
 const AUTH_KEY_STATUS_PROBE_TIMEOUT_MS = 2_000;
 const INTERACTIVE_LOGIN_TIMEOUT_MS = 120_000;
 const INTERACTIVE_LOGIN_URL_POLL_MS = 250;
+const LOGIN_SCREEN_STATUS_POLL_MS = 500;
 
 async function refreshTailscaleStatusBounded(): Promise<void> {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -194,13 +200,30 @@ export default function TailscaleLoginRoute() {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const params = useLocalSearchParams<{ returnTo?: string }>();
-  const returnTo = params.returnTo === "pair-verify" ? "/pair-verify" : "/";
+  const params = useLocalSearchParams<{
+    returnTo?: string;
+    serverId?: string;
+    manage?: string;
+  }>();
+  const returnTo = useMemo<Href>(() => {
+    if (params.returnTo === "pair-verify") {
+      return "/pair-verify";
+    }
+    if (params.returnTo === "host-overview" && typeof params.serverId === "string") {
+      return buildSettingsHostSectionRoute(params.serverId, "host");
+    }
+    return "/";
+  }, [params.returnTo, params.serverId]);
+  const canReturnToOverview =
+    params.returnTo === "host-overview" && typeof params.serverId === "string";
+  const isManagementRoute = params.manage === "true";
   const adapter = useMemo<TailscaleLoginAdapter>(() => getTailscaleLoginAdapter(), []);
   const isDesktopLogin = adapter.platform === "desktop";
+  const tailscaleStatus = useTailscaleLoginStatus();
   const authKeyInputRef = useRef<TextInputType | null>(null);
   const authKeySubmitInFlightRef = useRef(false);
   const authKeyErrorVisibleRef = useRef(false);
+  const interactiveErrorVisibleRef = useRef(false);
   const statusCheckInFlightRef = useRef(false);
   const mountedRef = useRef(true);
 
@@ -209,6 +232,55 @@ export default function TailscaleLoginRoute() {
   const [authKey, setAuthKey] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [connectionType, setConnectionType] = useState<"tailscale" | "local">("tailscale");
+
+  const handleBackToOverview = useCallback(() => {
+    router.replace(returnTo);
+  }, [returnTo, router]);
+
+  const syncDesktopTailnetHost = useCallback(async () => {
+    if (!isDesktopLogin) {
+      return;
+    }
+    const store = getHostRuntimeStore();
+    const fastStatus = await getDesktopTailscaleStatus();
+    const routeServerId = typeof params.serverId === "string" ? params.serverId : null;
+    const daemonStatus =
+      routeServerId &&
+      fastStatus.connected &&
+      fastStatus.tailnetAddress &&
+      fastStatus.daemonPublicKeyB64
+        ? {
+            serverId: routeServerId,
+            status: "running" as const,
+            listen: null,
+            hostname: fastStatus.tailnet,
+            pid: null,
+            home: "",
+            version: null,
+            desktopManaged: true,
+            error: null,
+            healthy: fastStatus.healthy,
+            tailnetAddress: fastStatus.tailnetAddress,
+            daemonPublicKeyB64: fastStatus.daemonPublicKeyB64,
+            tailscaleConnected: true,
+          }
+        : await getDesktopDaemonStatus();
+    const result = await upsertDesktopDaemonConnection(store, daemonStatus, "tailscale");
+    if (!result.ok) {
+      throw new Error(result.error);
+    }
+  }, [isDesktopLogin, params.serverId]);
+
+  const finishConnectedLogin = useCallback(async () => {
+    await syncDesktopTailnetHost();
+    if (!mountedRef.current) {
+      return;
+    }
+    await setConnectionMode("tailscale");
+    if (!isManagementRoute) {
+      router.replace(returnTo as Href);
+    }
+  }, [isManagementRoute, returnTo, router, syncDesktopTailnetHost]);
 
   useEffect(() => {
     return () => {
@@ -223,6 +295,7 @@ export default function TailscaleLoginRoute() {
 
   const handleInteractiveLogin = useCallback(async () => {
     authKeyErrorVisibleRef.current = false;
+    interactiveErrorVisibleRef.current = false;
     setError(null);
     setInteractiveInProgress(true);
     try {
@@ -232,11 +305,13 @@ export default function TailscaleLoginRoute() {
       if (!isDesktopLogin && adapter.getInteractiveLoginUrl) {
         const preparation = adapter.prepareInteractiveLogin?.() ?? { ok: true };
         if (!preparation.ok) {
+          interactiveErrorVisibleRef.current = true;
           setError(preparation.error ?? t("tailscaleLogin.errorFailed"));
           return;
         }
         const authUrl = await waitForInteractiveLoginUrl(adapter, () => mountedRef.current);
         if (!authUrl || !mountedRef.current) {
+          interactiveErrorVisibleRef.current = true;
           setError("Tailscale did not provide a login URL. Try again.");
           return;
         }
@@ -261,10 +336,10 @@ export default function TailscaleLoginRoute() {
         }
 
         if (connected) {
+          interactiveErrorVisibleRef.current = false;
           await WebBrowser.dismissBrowser().catch(() => undefined);
           await browserPromise;
-          await setConnectionMode("tailscale");
-          router.replace(returnTo as Href);
+          await finishConnectedLogin();
           return;
         }
 
@@ -273,10 +348,11 @@ export default function TailscaleLoginRoute() {
         await browserPromise;
         await refreshTailscaleStatusBounded();
         if (getSnapshot().kind === "connected") {
-          await setConnectionMode("tailscale");
-          router.replace(returnTo as Href);
+          interactiveErrorVisibleRef.current = false;
+          await finishConnectedLogin();
           return;
         }
+        interactiveErrorVisibleRef.current = true;
         setError("Tailscale login was not completed. Open Sign in with Tailscale to try again.");
         return;
       }
@@ -292,20 +368,22 @@ export default function TailscaleLoginRoute() {
           return;
         }
         if (getSnapshot().kind === "connected") {
-          await setConnectionMode("tailscale");
-          router.replace(returnTo as Href);
+          interactiveErrorVisibleRef.current = false;
+          await finishConnectedLogin();
           return;
         }
         setError("Tailscale login opened. Finish it; this screen will reconnect automatically.");
       } else {
+        interactiveErrorVisibleRef.current = true;
         setError(result.error ?? t("tailscaleLogin.errorFailed"));
       }
     } catch {
+      interactiveErrorVisibleRef.current = true;
       setError(t("tailscaleLogin.errorFailed"));
     } finally {
       setInteractiveInProgress(false);
     }
-  }, [adapter, isDesktopLogin, returnTo, router, t]);
+  }, [adapter, finishConnectedLogin, isDesktopLogin, t]);
 
   const handleCheckStatus = useCallback(async () => {
     if (
@@ -317,29 +395,36 @@ export default function TailscaleLoginRoute() {
       return;
     }
     statusCheckInFlightRef.current = true;
-    setError(null);
+    if (!interactiveErrorVisibleRef.current) {
+      setError(null);
+    }
     try {
       await refreshTailscaleStatus();
       const status = getSnapshot();
       if (status.kind === "connected") {
-        await setConnectionMode("tailscale");
-        router.replace(returnTo as Href);
+        await finishConnectedLogin();
       } else if (status.kind === "unavailable") {
         // Not being authenticated is the expected initial state. Do not show
         // it as a connectivity failure before the user has joined a tailnet.
-        setError("Tailscale is unavailable on this device. Install Tailscale or use an auth key.");
-      } else {
+        if (!interactiveErrorVisibleRef.current) {
+          setError(
+            "Tailscale is unavailable on this device. Install Tailscale or use an auth key.",
+          );
+        }
+      } else if (!interactiveErrorVisibleRef.current) {
         setError(null);
       }
     } catch {
       // A status probe can fail while the native node is still starting. The
       // login screen is itself the recovery path, so keep it actionable and
       // avoid claiming that the computer is unreachable before authentication.
-      setError(null);
+      if (!interactiveErrorVisibleRef.current) {
+        setError(null);
+      }
     } finally {
       statusCheckInFlightRef.current = false;
     }
-  }, [authKeyInProgress, interactiveInProgress, returnTo, router]);
+  }, [authKeyInProgress, finishConnectedLogin, interactiveInProgress]);
 
   useEffect(() => {
     // Do not race the interactive login with the background status probe. The
@@ -350,7 +435,7 @@ export default function TailscaleLoginRoute() {
       return;
     }
     void handleCheckStatus();
-    const timer = setInterval(() => void handleCheckStatus(), 10000);
+    const timer = setInterval(() => void handleCheckStatus(), LOGIN_SCREEN_STATUS_POLL_MS);
     return () => clearInterval(timer);
   }, [authKeyInProgress, handleCheckStatus, interactiveInProgress]);
 
@@ -367,6 +452,7 @@ export default function TailscaleLoginRoute() {
     // lingers, then pass it straight to the adapter, which never logs it.
     authKeySubmitInFlightRef.current = true;
     authKeyErrorVisibleRef.current = false;
+    interactiveErrorVisibleRef.current = false;
     setError(null);
     setAuthKeyInProgress(true);
     clearAuthKey();
@@ -386,8 +472,7 @@ export default function TailscaleLoginRoute() {
           setError("Tailscale joined, but the connection is not ready yet. Try again.");
           return;
         }
-        await setConnectionMode("tailscale");
-        router.replace(returnTo as Href);
+        await finishConnectedLogin();
       } else {
         authKeyErrorVisibleRef.current = true;
         setError(result.error ?? t("tailscaleLogin.errorFailed"));
@@ -399,10 +484,145 @@ export default function TailscaleLoginRoute() {
       setAuthKeyInProgress(false);
       authKeySubmitInFlightRef.current = false;
     }
-  }, [adapter, authKey, clearAuthKey, returnTo, router, t]);
+  }, [adapter, authKey, clearAuthKey, finishConnectedLogin, t]);
 
   const busy = interactiveInProgress || authKeyInProgress;
   const showLocalFallback = !adapter.isSupported && !isDesktopLogin;
+  const handleSelectTailscaleConnectionType = useCallback(() => setConnectionType("tailscale"), []);
+  const handleSelectLocalConnectionType = useCallback(() => setConnectionType("local"), []);
+  const handleContinueLocal = useCallback(async () => {
+    await setConnectionMode("local");
+    router.replace("/");
+  }, [router]);
+  const localConnectionDescription = showLocalFallback
+    ? "This mobile build cannot embed Tailscale yet. Use Local pairing, or install the supported iOS build."
+    : "Use the local JAgentDesk daemon on this computer.";
+
+  const connectionContent = (() => {
+    if (isManagementRoute && tailscaleStatus.kind === "connected") {
+      return (
+        <View style={styles.card} testID="tailscale-login-manage-card">
+          <Text style={styles.fieldLabel}>{t("tailscaleLogin.manageConnectedTitle")}</Text>
+          <Text style={styles.subtitle}>{t("tailscaleLogin.manageConnectedHint")}</Text>
+          <Button
+            variant="secondary"
+            size="lg"
+            onPress={handleCheckStatus}
+            disabled={busy}
+            testID="tailscale-login-manage-refresh"
+          >
+            {t("tailscaleLogin.manageRefreshAction")}
+          </Button>
+        </View>
+      );
+    }
+
+    if (
+      isManagementRoute &&
+      (tailscaleStatus.kind === "unknown" || tailscaleStatus.kind === "connecting")
+    ) {
+      return (
+        <View style={styles.card} testID="tailscale-login-manage-card">
+          <Text style={styles.connectingText}>{t("tailscaleLogin.manageChecking")}</Text>
+        </View>
+      );
+    }
+
+    if (connectionType === "local" || showLocalFallback) {
+      return (
+        <View style={styles.card}>
+          <Text style={styles.subtitle}>{localConnectionDescription}</Text>
+          <Button
+            variant="default"
+            size="lg"
+            onPress={handleContinueLocal}
+            testID="connection-local-continue"
+          >
+            Continue with Local
+          </Button>
+        </View>
+      );
+    }
+
+    if (!adapter.isSupported) {
+      return null;
+    }
+
+    return (
+      <>
+        <View style={styles.card}>
+          <Button
+            variant="default"
+            size="lg"
+            leftIcon={TailscaleMark}
+            onPress={handleInteractiveLogin}
+            loading={interactiveInProgress}
+            disabled={authKeyInProgress}
+            testID="tailscale-login-interactive"
+          >
+            {interactiveInProgress
+              ? t("tailscaleLogin.interactiveInProgress")
+              : t("tailscaleLogin.interactiveAction")}
+          </Button>
+
+          {interactiveInProgress ? (
+            <Text style={styles.connectingText} testID="tailscale-login-connecting">
+              {t("tailscaleLogin.connecting")}
+            </Text>
+          ) : null}
+
+          <View style={styles.divider} />
+
+          <Text style={styles.fieldLabel}>{t("tailscaleLogin.authKeyLabel")}</Text>
+          <TextInput
+            ref={authKeyInputRef}
+            value={authKey}
+            onChangeText={setAuthKey}
+            placeholder={t("tailscaleLogin.authKeyPlaceholder")}
+            placeholderTextColor={styles.placeholderColor.color}
+            style={styles.input}
+            secureTextEntry
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoComplete="off"
+            textContentType={isNative ? "oneTimeCode" : undefined}
+            editable={!busy}
+            testID="tailscale-login-authkey-input"
+          />
+          <Button
+            variant="secondary"
+            size="lg"
+            leftIcon={KeyRound}
+            onPress={handleAuthKeySubmit}
+            loading={authKeyInProgress}
+            disabled={interactiveInProgress}
+            testID="tailscale-login-authkey-submit"
+          >
+            {authKeyInProgress
+              ? t("tailscaleLogin.authKeyInProgress")
+              : t("tailscaleLogin.authKeyAction")}
+          </Button>
+        </View>
+
+        {error ? (
+          <Text style={styles.error} testID="tailscale-login-error">
+            {error}
+          </Text>
+        ) : null}
+      </>
+    );
+  })();
+
+  let pageTitle = t("tailscaleLogin.unavailableTitle");
+  let pageSubtitle = t("tailscaleLogin.unavailableBody");
+  if (adapter.isSupported) {
+    pageTitle = t("tailscaleLogin.title");
+    pageSubtitle = t("tailscaleLogin.subtitle");
+  }
+  if (isManagementRoute) {
+    pageTitle = t("tailscaleLogin.manageTitle");
+    pageSubtitle = t("tailscaleLogin.manageSubtitle");
+  }
 
   return (
     <View style={styles.root}>
@@ -416,16 +636,8 @@ export default function TailscaleLoginRoute() {
         <View style={styles.content}>
           <JAgentDeskLogo size={96} />
           <View style={styles.copyBlock}>
-            <Text style={styles.title}>
-              {adapter.isSupported
-                ? t("tailscaleLogin.title")
-                : t("tailscaleLogin.unavailableTitle")}
-            </Text>
-            <Text style={styles.subtitle}>
-              {adapter.isSupported
-                ? t("tailscaleLogin.subtitle")
-                : t("tailscaleLogin.unavailableBody")}
-            </Text>
+            <Text style={styles.title}>{pageTitle}</Text>
+            <Text style={styles.subtitle}>{pageSubtitle}</Text>
           </View>
 
           {isDesktopLogin ? (
@@ -434,14 +646,14 @@ export default function TailscaleLoginRoute() {
               <View style={styles.connectionTypeRow}>
                 <Button
                   variant={connectionType === "tailscale" ? "default" : "secondary"}
-                  onPress={() => setConnectionType("tailscale")}
+                  onPress={handleSelectTailscaleConnectionType}
                   testID="connection-type-tailscale"
                 >
                   Tailscale (default)
                 </Button>
                 <Button
                   variant={connectionType === "local" ? "default" : "secondary"}
-                  onPress={() => setConnectionType("local")}
+                  onPress={handleSelectLocalConnectionType}
                   testID="connection-type-local"
                 >
                   Local
@@ -450,87 +662,18 @@ export default function TailscaleLoginRoute() {
             </View>
           ) : null}
 
-          {connectionType === "local" || showLocalFallback ? (
-            <View style={styles.card}>
-              <Text style={styles.subtitle}>
-                {showLocalFallback
-                  ? "This mobile build cannot embed Tailscale yet. Use Local pairing, or install the supported iOS build."
-                  : "Use the local JAgentDesk daemon on this computer."}
-              </Text>
-              <Button
-                variant="default"
-                size="lg"
-                onPress={async () => {
-                  await setConnectionMode("local");
-                  router.replace("/");
-                }}
-                testID="connection-local-continue"
-              >
-                Continue with Local
-              </Button>
-            </View>
-          ) : adapter.isSupported ? (
-            <>
-              <View style={styles.card}>
-                <Button
-                  variant="default"
-                  size="lg"
-                  leftIcon={<TailscaleMark />}
-                  onPress={handleInteractiveLogin}
-                  loading={interactiveInProgress}
-                  disabled={authKeyInProgress}
-                  testID="tailscale-login-interactive"
-                >
-                  {interactiveInProgress
-                    ? t("tailscaleLogin.interactiveInProgress")
-                    : t("tailscaleLogin.interactiveAction")}
-                </Button>
+          {connectionContent}
 
-                {interactiveInProgress ? (
-                  <Text style={styles.connectingText} testID="tailscale-login-connecting">
-                    {t("tailscaleLogin.connecting")}
-                  </Text>
-                ) : null}
-
-                <View style={styles.divider} />
-
-                <Text style={styles.fieldLabel}>{t("tailscaleLogin.authKeyLabel")}</Text>
-                <TextInput
-                  ref={authKeyInputRef}
-                  value={authKey}
-                  onChangeText={setAuthKey}
-                  placeholder={t("tailscaleLogin.authKeyPlaceholder")}
-                  placeholderTextColor={styles.placeholderColor.color}
-                  style={styles.input}
-                  secureTextEntry
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  autoComplete="off"
-                  textContentType={isNative ? "oneTimeCode" : undefined}
-                  editable={!busy}
-                  testID="tailscale-login-authkey-input"
-                />
-                <Button
-                  variant="secondary"
-                  size="lg"
-                  leftIcon={KeyRound}
-                  onPress={handleAuthKeySubmit}
-                  loading={authKeyInProgress}
-                  disabled={interactiveInProgress}
-                  testID="tailscale-login-authkey-submit"
-                >
-                  {authKeyInProgress
-                    ? t("tailscaleLogin.authKeyInProgress")
-                    : t("tailscaleLogin.authKeyAction")}
-                </Button>
-              </View>
-
-              {error ? (
-                <Text style={styles.error} testID="tailscale-login-error">
-                  {error}
-                </Text>
-              ) : null}
-            </>
+          {canReturnToOverview ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              onPress={handleBackToOverview}
+              disabled={busy}
+              testID="tailscale-login-back-to-overview"
+            >
+              {t("tailscaleLogin.backToOverview")}
+            </Button>
           ) : null}
 
           <Text style={styles.note}>{t("tailscaleLogin.sameTailnetNote")}</Text>

@@ -1,6 +1,7 @@
 import { Platform } from "react-native";
 import { requireOptionalNativeModule } from "expo-modules-core";
 import { isWeb } from "@/constants/platform";
+import { getDesktopTailscaleStatus } from "@/desktop/daemon/desktop-daemon";
 import { getDesktopHost } from "@/desktop/host";
 import { invokeDesktopCommand } from "@/desktop/electron/invoke";
 import type { TailscaleLoginResult, TailscaleLoginStatus } from "./types";
@@ -67,11 +68,7 @@ export class WebTailscaleLoginAdapter implements TailscaleLoginAdapter {
   async getStatus(): Promise<TailscaleLoginStatus> {
     if (this.platform === "desktop") {
       try {
-        const result = await invokeDesktopCommand<{
-          connected?: boolean;
-          tailnetProxyAddress?: string | null;
-          devicePublicKeyB64?: string | null;
-        }>("desktop_tailscale_status");
+        const result = await getDesktopTailscaleStatus();
         desktopDevicePublicKeyB64 = result.devicePublicKeyB64 ?? null;
         desktopTailnetProxyAddress = result.tailnetProxyAddress ?? null;
         return result.connected === true ? { kind: "connected" } : { kind: "needs-login" };
@@ -151,10 +148,10 @@ export interface JAgentDeskTailscaleNativeModule {
   getProxyAddress?: (target: string) => string | null;
 }
 
-export type DeviceSigningMaterial = {
+export interface DeviceSigningMaterial {
   devicePublicKeyB64: string;
   signNonce(nonce: string): string | Promise<string>;
-};
+}
 
 export class NativeTailscaleLoginAdapter implements TailscaleLoginAdapter {
   readonly platform: "ios" | "android";

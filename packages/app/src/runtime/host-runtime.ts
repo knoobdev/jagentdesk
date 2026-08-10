@@ -448,7 +448,10 @@ function toSnapshotConnectionPatch(
 
 function buildConnectionCandidates(
   host: HostProfile,
-  connectionMode: ConnectionMode | null = "local",
+  // ADR-0010: never auto-select "local" on a native device — it is not
+  // co-located with the daemon and must not become an unauthenticated control
+  // path. Web/desktop run alongside the daemon, so "local" stays their default.
+  connectionMode: ConnectionMode | null = isWeb ? "local" : null,
 ): ConnectionCandidate[] {
   if (connectionMode === null) {
     return [];
@@ -622,7 +625,8 @@ export class HostRuntimeController {
     this.host = input.host;
     this.deps = input.deps ?? createDefaultDeps();
     this.onReconcileServerId = input.onReconcileServerId ?? null;
-    this.connectionMode = input.connectionMode ?? "local";
+    // ADR-0010: no auto "local" default on native (see buildConnectionCandidates).
+    this.connectionMode = input.connectionMode ?? (isWeb ? "local" : null);
     this.connectionMachineState = {
       tag: "booting",
     };

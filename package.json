@@ -10,10 +10,17 @@
     "voice",
     "voice-assistant"
   ],
-  "homepage": "https://jagentdesk.local",
+  "homepage": "https://github.com/knoobdev/jagentdesk",
+  "bugs": {
+    "url": "https://github.com/knoobdev/jagentdesk/issues"
+  },
   "license": "AGPL-3.0-or-later",
   "author": {
     "name": "JAgentDesk"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/knoobdev/jagentdesk.git"
   },
   "workspaces": [
     "packages/expo-two-way-audio",

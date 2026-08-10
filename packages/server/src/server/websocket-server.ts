@@ -127,6 +127,15 @@ export interface PairingServerDependencies {
   challenges: NonceChallengeManager;
   daemonPublicKeyB64: string;
   pairingCodeManager?: PairingCodeManager;
+  /**
+   * When true, direct/loopback connections must also present a challenge-bound
+   * signed hello from a paired device — the same gate applied to tailnet
+   * (ADR-0010). Left off by default so a daemon that has not yet bootstrapped a
+   * local trusted device (desktop owner key) is not locked out of local
+   * control. Flipping this on requires every local client (CLI included) to be
+   * a paired device.
+   */
+  requireSignedHelloForDirect?: boolean;
 }
 
 interface PendingConnection {
@@ -1430,10 +1439,9 @@ export class VoiceAssistantWebSocketServer {
       helloTimeout: null,
       identity,
     };
-    const helloTimeoutMs =
-      identity.transport === "tailnet" && this.pairing
-        ? TAILNET_PAIRING_HELLO_TIMEOUT_MS
-        : HELLO_TIMEOUT_MS;
+    const helloTimeoutMs = this.requiresSignedHello(identity)
+      ? TAILNET_PAIRING_HELLO_TIMEOUT_MS
+      : HELLO_TIMEOUT_MS;
     const timeout = setTimeout(() => {
       if (this.pendingConnections.get(ws) !== pending) {
         return;
@@ -1457,27 +1465,32 @@ export class VoiceAssistantWebSocketServer {
     this.incrementRuntimeCounter("connectedAwaitingHello");
     this.bindSocketHandlers(ws);
 
-    if (identity.transport === "tailnet") {
-      if (!this.pairing) {
-        this.clearPendingConnection(ws);
-        pending.connectionLogger.warn(
-          { ...toConnectionLogFields(identity) },
-          "Rejected tailnet connection: pairing is not configured on the daemon",
-        );
-        try {
-          ws.close(WS_CLOSE_DAEMON_AUTH_FAILED, "Tailnet connections require pairing");
-        } catch {
-          // ignore close errors
-        }
-        return;
+    // A tailnet connection can never be served unauthenticated: reject it up
+    // front when pairing is not configured, regardless of the direct-gate flag.
+    if (identity.transport === "tailnet" && !this.pairing) {
+      this.clearPendingConnection(ws);
+      pending.connectionLogger.warn(
+        { ...toConnectionLogFields(identity) },
+        "Rejected tailnet connection: pairing is not configured on the daemon",
+      );
+      try {
+        ws.close(WS_CLOSE_DAEMON_AUTH_FAILED, "Tailnet connections require pairing");
+      } catch {
+        // ignore close errors
       }
-      const challengeNonce = this.pairing.challenges.issue();
+      return;
+    }
+
+    if (this.requiresSignedHello(identity)) {
+      // `requiresSignedHello` only returns true when `this.pairing` is wired.
+      const pairing = this.pairing as PairingServerDependencies;
+      const challengeNonce = pairing.challenges.issue();
       pending.challengeNonce = challengeNonce;
       pending.pairingRequestId = randomUUID();
       this.sendToClient(ws, { type: "challenge", nonce: challengeNonce });
       pending.connectionLogger.info(
-        { ...toConnectionLogFields(identity) },
-        "Issued tailnet pairing challenge; awaiting device identity and signed hello",
+        { ...toConnectionLogFields(identity), transport: identity.transport },
+        "Issued pairing challenge; awaiting device identity and signed hello",
       );
     }
 
@@ -1675,6 +1688,22 @@ export class VoiceAssistantWebSocketServer {
    * challenge response from a paired device. Returns true when the hello may
    * proceed, false when the socket was closed for authorization failure.
    */
+  /**
+   * Whether this connection must complete a challenge-bound signed hello from a
+   * paired device before any RPC is processed. Always required for tailnet;
+   * also required for direct/loopback when the daemon is configured to enforce
+   * device pairing locally (ADR-0010). Requires `this.pairing` to be wired.
+   */
+  private requiresSignedHello(identity: WebSocketConnectionIdentity): boolean {
+    if (!this.pairing) {
+      return false;
+    }
+    if (identity.transport === "tailnet") {
+      return true;
+    }
+    return this.pairing.requireSignedHelloForDirect === true;
+  }
+
   private verifyTailnetSignedHello(params: {
     ws: WebSocketLike;
     message: WSHelloMessage;
@@ -1751,7 +1780,7 @@ export class VoiceAssistantWebSocketServer {
   }): void {
     const { ws, message, pending } = params;
 
-    if (pending.identity.transport === "tailnet" && !this.verifyTailnetSignedHello(params)) {
+    if (this.requiresSignedHello(pending.identity) && !this.verifyTailnetSignedHello(params)) {
       return;
     }
 

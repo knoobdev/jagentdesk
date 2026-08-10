@@ -178,8 +178,8 @@ export default {
       [
         "expo-gradle-jvmargs",
         {
-          xmx: "4096m",
-          maxMetaspace: "1024m",
+          xmx: "2048m",
+          maxMetaspace: "512m",
         },
       ],
       [

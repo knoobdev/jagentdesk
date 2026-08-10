@@ -37,7 +37,10 @@ const DEFAULT_HOST = `localhost:${DEFAULT_JAGENTDESK_DAEMON_PORT}`;
 const DEFAULT_TIMEOUT = 15000;
 const PID_FILENAME = "jagentdesk.pid";
 
-type CliDeviceKeypair = { publicKeyB64: string; privateKeyPem: string };
+interface CliDeviceKeypair {
+  publicKeyB64: string;
+  privateKeyPem: string;
+}
 
 function loadOrCreateCliDeviceKeypair(home: string): CliDeviceKeypair {
   const pathToKey = path.join(home, "cli-device-keypair.json");
@@ -172,7 +175,10 @@ function readPidSocketTarget(jagentdeskHome: string): string | null {
   }
 }
 
-function resolveConfiguredIpcDaemonHost(env: NodeJS.ProcessEnv, jagentdeskHome: string): string | null {
+function resolveConfiguredIpcDaemonHost(
+  env: NodeJS.ProcessEnv,
+  jagentdeskHome: string,
+): string | null {
   const directEnvHost = normalizeDaemonHost(env.JAGENTDESK_LISTEN ?? "");
   if (isIpcDaemonHost(directEnvHost)) {
     return directEnvHost;
@@ -188,7 +194,10 @@ function resolveConfiguredIpcDaemonHost(env: NodeJS.ProcessEnv, jagentdeskHome: 
   return isIpcDaemonHost(configuredHost) ? configuredHost : null;
 }
 
-function resolveConfiguredTcpDaemonHost(env: NodeJS.ProcessEnv, jagentdeskHome: string): string | null {
+function resolveConfiguredTcpDaemonHost(
+  env: NodeJS.ProcessEnv,
+  jagentdeskHome: string,
+): string | null {
   const configuredHost = normalizeDaemonHost(loadConfig(jagentdeskHome, { env }).listen);
   if (!isTcpDaemonHost(configuredHost)) {
     return null;
@@ -302,6 +311,11 @@ async function tryConnectHost(
   nodeWebSocketFactory: ReturnType<typeof createNodeWebSocketFactory>,
 ): Promise<{ client: DaemonClient } | { error: unknown }> {
   const target = resolveDaemonTarget(host);
+  // ADR-0010: a daemon that enforces local device pairing issues a challenge on
+  // direct/loopback too. Carry the CLI device signer so we can answer it. This
+  // is backward-compatible: when the daemon issues no challenge (gate off or
+  // old daemon), the client falls back to sending a plain hello on open.
+  const keypair = loadOrCreateCliDeviceKeypair(resolveJAgentDeskHome());
   const client = new DaemonClient({
     url: target.url,
     clientId,
@@ -319,6 +333,19 @@ async function tryConnectHost(
         ...(target.type === "ipc" ? { socketPath: target.socketPath } : {}),
       }),
     reconnect: { enabled: false },
+    expectChallenge: true,
+    // The daemon issues the local challenge synchronously on connect, so a short
+    // wait is enough; if none arrives (gate off / old daemon) fall back to a
+    // plain hello so the ordinary local connection keeps working.
+    challengeWaitFallbackMs: 750,
+    unsignedHelloFallbackOnChallengeTimeout: true,
+    deviceSigning: {
+      devicePublicKeyB64: keypair.publicKeyB64,
+      signNonce: (nonce: string) =>
+        sign(null, Buffer.from(nonce, "utf8"), createPrivateKey(keypair.privateKeyPem)).toString(
+          "base64",
+        ),
+    },
   });
 
   try {

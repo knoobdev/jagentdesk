@@ -552,6 +552,7 @@ function createInitialMutableDaemonConfig(config: JAgentDeskDaemonConfig): Mutab
   return initialConfig;
 }
 
+// oxlint-disable-next-line complexity
 export async function createJAgentDeskDaemon(
   config: JAgentDeskDaemonConfig,
   rootLogger: Logger,
@@ -598,6 +599,13 @@ export async function createJAgentDeskDaemon(
   }
   const nonceChallenges: NonceChallengeManager = createNonceChallengeManager({ logger });
   const pairingCodeManager: PairingCodeManager = createPairingCodeManager();
+  // ADR-0010: when enabled, direct/loopback connections must also present a
+  // signed hello from a paired device. Off by default so a daemon whose only
+  // trusted device has not bootstrapped yet keeps local control; flipping it on
+  // requires every local client (CLI included) to be a paired device.
+  const requireSignedHelloForDirect =
+    process.env.JAGENTDESK_REQUIRE_LOCAL_PAIRING === "1" ||
+    process.env.JAGENTDESK_REQUIRE_LOCAL_PAIRING === "true";
   const managedProcesses = createBootstrapManagedProcessRegistry(config, logger);
   // Reconcile the helper-process ledger in the background so it never blocks the
   // daemon from coming up; terminating a live leftover can take a few seconds.
@@ -1606,6 +1614,7 @@ export async function createJAgentDeskDaemon(
                 challenges: nonceChallenges,
                 daemonPublicKeyB64: daemonKeyPair.publicKeyB64,
                 pairingCodeManager,
+                requireSignedHelloForDirect,
               },
             );
             tsnetListener = createTsnetListener({

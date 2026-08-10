@@ -58,7 +58,9 @@ function createWorkspaceAutoNameStub(): WorkspaceAutoName {
   });
 }
 
-function createPairingServerHarness(options: { enablePairingCode?: boolean } = {}): {
+function createPairingServerHarness(
+  options: { enablePairingCode?: boolean; requireSignedHelloForDirect?: boolean } = {},
+): {
   harness: PairingDaemonHarness;
   devices: ReturnType<typeof createPairedDeviceStore>;
   home: string;
@@ -72,6 +74,7 @@ function createPairingServerHarness(options: { enablePairingCode?: boolean } = {
     challenges,
     daemonPublicKeyB64: DAEMON_PUBLIC_KEY_B64,
     ...(options.enablePairingCode ? { pairingCodeManager: createPairingCodeManager() } : {}),
+    ...(options.requireSignedHelloForDirect ? { requireSignedHelloForDirect: true } : {}),
   };
 
   // The tsnet listener owns a loopback ingress that performs the HTTP upgrade
@@ -976,6 +979,98 @@ describe("tailnet pairing handshake over a real WebSocket", () => {
     );
     const close = await client.waitForClose();
     expect(close.code).toBe(4401);
+  });
+
+  test("direct gate off by default: a plain direct hello is accepted without a challenge", async () => {
+    const { harness } = createPairingServerHarness();
+    harnesses.push(harness);
+    const directPort = await waitForDirectPort(harness);
+
+    const client = createBufferedTailnetClient(`ws://127.0.0.1:${directPort}/ws`);
+    await new Promise<void>((resolve, reject) => {
+      client.socket.once("open", () => resolve());
+      client.socket.once("error", (error) => reject(error));
+    });
+
+    client.socket.send(
+      JSON.stringify({
+        type: "hello",
+        clientId: "client-local",
+        clientType: "mobile",
+        protocolVersion: 1,
+      }),
+    );
+    const serverInfo = (await client.waitFor((m) => {
+      const message = m as { type?: string; message?: { payload?: { status?: string } } };
+      return message.type === "session" && message.message?.payload?.status === "server_info";
+    })) as { message: { payload: { serverId: string } } };
+    expect(serverInfo.message.payload.serverId).toBe("srv-test");
+
+    client.socket.close();
+  });
+
+  test("direct gate on: issues a challenge and rejects an unsigned direct hello with 4401", async () => {
+    const { harness } = createPairingServerHarness({ requireSignedHelloForDirect: true });
+    harnesses.push(harness);
+    const directPort = await waitForDirectPort(harness);
+
+    const client = createBufferedTailnetClient(`ws://127.0.0.1:${directPort}/ws`);
+    await new Promise<void>((resolve, reject) => {
+      client.socket.once("open", () => resolve());
+      client.socket.once("error", (error) => reject(error));
+    });
+
+    const challenge = (await client.waitFor(
+      (m) => (m as { type?: string }).type === "challenge",
+    )) as { type: string; nonce: string };
+    expect(challenge.nonce).toBeTruthy();
+
+    client.socket.send(
+      JSON.stringify({
+        type: "hello",
+        clientId: "client-local",
+        clientType: "mobile",
+        protocolVersion: 1,
+      }),
+    );
+    const close = await client.waitForClose();
+    expect(close.code).toBe(4401);
+  });
+
+  test("direct gate on: a paired device's signed hello upgrades over direct", async () => {
+    const { harness, devices } = createPairingServerHarness({ requireSignedHelloForDirect: true });
+    harnesses.push(harness);
+    const directPort = await waitForDirectPort(harness);
+    const key = generateDeviceKeyPair();
+    const publicKeyB64 = exportDevicePublicKey(key.publicKey);
+    // Mirror the desktop owner self-bootstrap: the local device is already trusted.
+    devices.register({ devicePublicKeyB64: publicKeyB64, deviceName: "Local owner" });
+
+    const client = createBufferedTailnetClient(`ws://127.0.0.1:${directPort}/ws`);
+    await new Promise<void>((resolve, reject) => {
+      client.socket.once("open", () => resolve());
+      client.socket.once("error", (error) => reject(error));
+    });
+
+    const challenge = (await client.waitFor(
+      (m) => (m as { type?: string }).type === "challenge",
+    )) as { type: string; nonce: string };
+
+    client.socket.send(
+      signedHello({
+        clientId: "client-local",
+        nonce: challenge.nonce,
+        key,
+        devicePublicKeyB64: publicKeyB64,
+      }),
+    );
+    const serverInfo = (await client.waitFor((m) => {
+      const message = m as { type?: string; message?: { payload?: { status?: string } } };
+      return message.type === "session" && message.message?.payload?.status === "server_info";
+    })) as { message: { payload: { serverId: string } } };
+    expect(serverInfo.message.payload.serverId).toBe("srv-test");
+
+    client.socket.close();
   });
 
   test("rejects a valid signature when its nonce belongs to another socket", async () => {

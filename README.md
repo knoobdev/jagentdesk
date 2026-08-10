@@ -1,44 +1,137 @@
 # JAgentDesk
 
-JAgentDesk is a self-hosted desktop and mobile application for controlling coding agents that
-run on your own computer. The daemon manages the agent processes; desktop and mobile clients
-connect to it through Tailscale and require application-level pairing before control is granted.
+JAgentDesk là ứng dụng self-hosted để theo dõi và điều khiển coding agent chạy trên máy của
+bạn. Daemon chạy cục bộ, còn desktop và mobile kết nối trực tiếp qua Tailscale. Mỗi thiết bị
+mobile phải hoàn tất pairing ở tầng ứng dụng và nhập mã xác minh 6 số trước khi được cấp quyền.
 
-## Project boundaries
+Dự án này được fork từ [Paseo](https://github.com/getpaseo/paseo), sau đó được rebrand và phát
+triển riêng cho các ranh giới của JAgentDesk:
 
-- Tailscale is the only remote transport. There is no hosted relay or public web-app endpoint.
-- Pairing uses a QR code or pairing link followed by a six-digit device-signing step.
-- The app can view files and diffs, but it does not edit files in place.
-- Provider credentials remain with the local agent CLIs and are not collected by JAgentDesk.
+- Không có editor trong app; app chỉ xem file, diff và điều khiển agent.
+- Tailscale là transport từ xa duy nhất; không có relay server của JAgentDesk.
+- Có application-level pairing bằng offer link/QR và mã xác minh 6 số.
+- Có luồng orchestration Supervisor → Lead → Peer và entry point `/orc`.
 
-## Workspace map
+## Thành phần
 
-- `packages/server` — daemon, agent lifecycle, WebSocket API, MCP server, and Tailscale bridge
-- `packages/app` — Expo client for iOS, Android, and web
-- `packages/desktop` — Electron desktop application
-- `packages/cli` — command-line client and daemon commands
-- `packages/protocol` — shared protocol schemas and connection contracts
-- `packages/website` — local documentation and build instructions
+- `packages/server` — daemon, vòng đời agent, WebSocket API và Tailscale bridge.
+- `packages/app` — client Expo cho iOS, Android và web.
+- `packages/desktop` — app Electron cho macOS, Windows và Linux.
+- `packages/client` và `packages/protocol` — client dùng chung và contract giao thức.
+- `packages/cli` — CLI điều khiển daemon.
 
-## Development
+## Cài đặt và chạy nhanh
+
+Yêu cầu Node.js `22.20.0` và npm. Repo có thể dùng mise để cài đúng toolchain trong
+`.tool-versions`; Android local build cần thêm Android SDK, còn iOS local build cần Xcode.
 
 ```bash
+git clone https://github.com/knoobdev/jagentdesk.git
+cd jagentdesk
 npm install
+```
+
+Chạy daemon, mobile/web và desktop ở các terminal riêng:
+
+```bash
 npm run dev:server
 npm run dev:app
 npm run dev:desktop
 ```
 
-Build and validate the two application surfaces:
+Daemon dev lắng nghe tại `127.0.0.1:6768`. Xem thêm [docs/development.md](docs/development.md),
+[docs/android.md](docs/android.md) và [docs/mobile-testing.md](docs/mobile-testing.md).
+
+## Sử dụng desktop và mobile
+
+### 1. Đăng nhập Tailscale
+
+1. Mở JAgentDesk Desktop và vào phần host/overview.
+2. Trong **Tailscale connection**, chọn **Sign in with Tailscale** và hoàn tất đăng nhập trong
+   cửa sổ trình duyệt.
+3. Chờ trạng thái host chuyển sang **Online**. Mobile cũng phải đăng nhập vào cùng tailnet.
+
+Nếu không muốn dùng trình duyệt trong lúc test, Tailscale auth key có thể được nhập ở màn hình
+đăng nhập của mobile. Không commit auth key vào repo hoặc đưa auth key vào issue/log.
+
+### 2. Pair mobile với desktop
+
+1. Trên desktop mở **Pair a device**.
+2. Dùng **Copy** để copy nguyên pairing offer link, hoặc quét QR.
+3. Trên mobile mở luồng pair, dán offer link vào ô pairing link rồi kết nối.
+4. Khi desktop nhận được tín hiệu offer từ mobile, card **Device connection request** mới xuất
+   hiện cùng mã xác minh và countdown.
+5. Xác nhận đúng thiết bị trên desktop, nhập mã 6 số vào mobile và chờ trạng thái **Device
+   connected successfully**.
+
+Pairing offer link không phải là quyền truy cập hoàn chỉnh. Thiết bị vẫn cần tailnet access,
+identity key và mã xác minh do desktop hiển thị.
+
+### 3. Mở project và agent
+
+Sau khi pairing, chọn **Add a project** hoặc **Import session** trên mobile. Trên desktop, chọn
+project/workspace rồi mở agent tương ứng. Provider CLI (Claude Code, Codex, Copilot, OpenCode,
+Pi...) vẫn dùng credential của chính provider trên máy chạy daemon; JAgentDesk không thu thập
+credential đó.
+
+## Cài mobile không ký bằng Sideloadly
+
+### Android
+
+Tải file APK từ GitHub Release `v1.0.0` hoặc release tương ứng. Bật cho phép cài ứng dụng từ
+nguồn này trong Android Settings, mở APK và cài đặt. File `.aab` dành cho Play Store/EAS không
+phải file cài trực tiếp; hãy dùng artifact `.apk`.
+
+### iPhone/iPad
+
+Build iOS simulator (`.tar.gz`) không cài được lên iPhone thật. Để sideload trên thiết bị thật,
+cần một IPA cho device, được ký bằng Apple ID/certificate của người cài:
+
+1. Cài [Sideloadly](https://sideloadly.io/) trên macOS hoặc Windows.
+2. Kết nối iPhone bằng USB, mở khóa và bấm **Trust** nếu iOS hỏi.
+3. Mở Sideloadly, chọn thiết bị, kéo file IPA vào vùng IPA và nhập Apple ID.
+4. Bấm **Start**, hoàn tất xác thực Apple ID nếu được yêu cầu.
+5. Trên iPhone vào **Settings → General → VPN & Device Management**, tin cậy developer
+   profile rồi mở JAgentDesk.
+
+IPA phải được build cho device (`eas build --platform ios --profile production` hoặc build riêng
+với Apple signing). Profile `production-simulator` chỉ dùng cho iOS Simulator. Apple ID miễn phí
+có thể có thời hạn ký ngắn; khi app hết hạn, sideload lại IPA.
+
+## Build và release bằng GitHub Actions
+
+Workflow `.github/workflows/release.yml` chạy khi push tag semver dạng `v*.*.*`. Tag đầu tiên của
+repo này là `v1.0.0` và phải khớp version `1.0.0` trong các package.
+
+- Desktop build theo matrix macOS, Windows và Linux, sau đó upload installer vào GitHub Release.
+- Mobile Android build profile EAS `production-apk` và upload APK.
+- Mobile iOS build profile EAS `production-simulator` và upload artifact simulator.
+
+GitHub Actions tự có `GITHUB_TOKEN`. Mobile job cần thêm repository secret `EXPO_TOKEN` có quyền
+EAS build; nếu chưa có secret này, desktop job vẫn có thể chạy nhưng mobile cloud build sẽ dừng
+với lỗi cấu hình rõ ràng. Build iOS cho device/Sideloadly cần Apple signing credentials riêng và
+không được giả định là đã ký trong workflow simulator.
+
+Tạo release đầu tiên:
 
 ```bash
-npm run build:desktop
-npm run typecheck
-cd packages/app && eas build --platform ios
+git tag v1.0.0
+git push origin main --tags
 ```
 
-The detailed local runbooks are in [`docs/`](docs/) and [`public-docs/`](public-docs/).
+Chạy kiểm tra/build tương ứng ở local:
+
+```bash
+npm run typecheck
+npm run lint
+npm run build:desktop -- --publish never
+cd packages/app
+npx eas build --platform android --profile production-apk
+```
 
 ## License
 
-AGPL-3.0
+JAgentDesk được phát hành theo AGPL-3.0-or-later.
+
+Cảm ơn Paseo và các contributor của Paseo vì nền tảng ban đầu đã giúp JAgentDesk bắt đầu nhanh
+hơn.

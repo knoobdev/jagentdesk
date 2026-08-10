@@ -15,6 +15,7 @@ import { daemonPairingOfferQueryKey } from "@/data/daemon-pairing";
 import { useHostRuntimeClient, useHostRuntimeSnapshot } from "@/runtime/host-runtime";
 import type { PendingPairingRequest } from "@/runtime/host-runtime";
 import type { Theme } from "@/styles/theme";
+import { formatPairingCountdown } from "./pairing-countdown";
 
 const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
 const foregroundMutedColorMapping = (theme: Theme) => ({
@@ -28,20 +29,28 @@ export interface PairDeviceSectionProps {
 
 type PairingOfferPayload = DaemonGetPairingOfferResponse["payload"];
 
-function useActivePairingRequests(requests: PendingPairingRequest[]): PendingPairingRequest[] {
+function useActivePairingRequests(requests: PendingPairingRequest[]): {
+  requests: PendingPairingRequest[];
+  nowMs: number;
+} {
   const [pairingClock, setPairingClock] = useState(() => Date.now());
+  const hasPendingRequest = requests.some((request) => request.status === "pending");
 
   useEffect(() => {
-    if (!requests.some((request) => request.status === "pending")) {
+    setPairingClock(Date.now());
+    if (!hasPendingRequest) {
       return;
     }
     const timer = setInterval(() => setPairingClock(Date.now()), 1_000);
     return () => clearInterval(timer);
-  }, [requests]);
+  }, [hasPendingRequest]);
 
-  return requests.filter(
-    (request) => request.status === "completed" || request.expiresAtMs > pairingClock,
-  );
+  return {
+    requests: requests.filter(
+      (request) => request.status === "completed" || request.expiresAtMs > pairingClock,
+    ),
+    nowMs: pairingClock,
+  };
 }
 
 export function PairDeviceSection({ serverId, onClose }: PairDeviceSectionProps) {
@@ -129,7 +138,7 @@ export function PairDeviceSection({ serverId, onClose }: PairDeviceSectionProps)
     void pairingQuery.refetch();
   }, [pairingQuery]);
   const qrSvg = useMemo(() => qrQuery.data ?? null, [qrQuery.data]);
-  const activePairingRequests = useActivePairingRequests(
+  const { requests: activePairingRequests, nowMs: pairingNowMs } = useActivePairingRequests(
     runtimeSnapshot?.pendingPairingRequests ??
       (runtimeSnapshot?.pendingPairingRequest ? [runtimeSnapshot.pendingPairingRequest] : []),
   );
@@ -144,6 +153,7 @@ export function PairDeviceSection({ serverId, onClose }: PairDeviceSectionProps)
         qrSvg={qrSvg}
         qrError={qrQuery.isError}
         pairingRequests={activePairingRequests}
+        pairingNowMs={pairingNowMs}
         cancellingRequestIds={cancellingRequestIds}
         cancelError={cancelError}
         isWideLayout={viewportWidth >= 720}
@@ -165,6 +175,7 @@ interface PairDeviceBodyProps {
   qrSvg: string | null;
   qrError: boolean;
   pairingRequests: PendingPairingRequest[];
+  pairingNowMs: number;
   cancellingRequestIds: Set<string>;
   cancelError: string | null;
   isWideLayout: boolean;
@@ -197,6 +208,7 @@ function PairDeviceBody(props: PairDeviceBodyProps) {
       <View style={props.isWideLayout ? styles.requestColumn : undefined}>
         <PairingRequestPanel
           requests={props.pairingRequests}
+          nowMs={props.pairingNowMs}
           cancellingRequestIds={props.cancellingRequestIds}
           cancelError={props.cancelError}
           onCancel={props.onCancel}
@@ -254,11 +266,13 @@ function PairingOffer(props: PairDeviceBodyProps & { offer: PairingOfferPayload 
 
 function PairingRequestPanel({
   requests,
+  nowMs,
   cancellingRequestIds,
   cancelError,
   onCancel,
 }: {
   requests: PendingPairingRequest[];
+  nowMs: number;
   cancellingRequestIds: Set<string>;
   cancelError: string | null;
   onCancel: (requestId: string) => void;
@@ -292,6 +306,7 @@ function PairingRequestPanel({
       <View style={styles.requestList}>
         <PairingRequestCard
           request={request}
+          nowMs={nowMs}
           cancelling={cancellingRequestIds.has(request.requestId)}
           onCancel={onCancel}
         />
@@ -302,10 +317,12 @@ function PairingRequestPanel({
 
 function PairingRequestCard({
   request,
+  nowMs,
   cancelling,
   onCancel,
 }: {
   request: PendingPairingRequest;
+  nowMs: number;
   cancelling: boolean;
   onCancel: (requestId: string) => void;
 }) {
@@ -314,11 +331,7 @@ function PairingRequestCard({
   const deviceKey = request.devicePublicKeyB64
     ? request.devicePublicKeyB64.slice(0, 8) + "…" + request.devicePublicKeyB64.slice(-8)
     : "Waiting for device key";
-  const remainingMs = Math.max(0, request.expiresAtMs - Date.now());
-  const remainingSeconds = Math.ceil(remainingMs / 1_000);
-  const minutes = Math.floor(remainingSeconds / 60);
-  const seconds = remainingSeconds % 60;
-  const countdown = [minutes, seconds.toString().padStart(2, "0")].join(":");
+  const countdown = formatPairingCountdown(request.expiresAtMs, nowMs);
   const handleCancel = useCallback(
     () => onCancel(request.requestId),
     [onCancel, request.requestId],
@@ -346,7 +359,6 @@ function PairingRequestCard({
         <View style={styles.codeCard} testID="pairing-request-code">
           <Text style={styles.codeLabel}>6-digit verification code</Text>
           <Text style={styles.code}>{request.pairingCode}</Text>
-          <Text style={styles.expiryLabel}>Expires in {countdown}</Text>
         </View>
       ) : null}
       {!isCompleted ? (
@@ -549,9 +561,5 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.xs,
     fontFamily: theme.fontFamily.mono,
-  },
-  expiryLabel: {
-    color: theme.colors.foregroundMuted,
-    fontSize: theme.fontSize.xs,
   },
 }));

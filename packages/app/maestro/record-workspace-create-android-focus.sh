@@ -17,7 +17,7 @@ DEVICE_VIDEO="/sdcard/jagentdesk-maestro-workspace-create-focused.mp4"
 LOCAL_VIDEO="$VIDEO_DIR/jagentdesk-maestro-workspace-create-focused.mp4"
 CLIENT_EXPORTS="$REPO_ROOT/packages/client/dist/daemon-client.js"
 
-export JAGENTDESK_MAESTRO_APP_ID="${JAGENTDESK_MAESTRO_APP_ID:-sh.jagentdesk.debug}"
+export JAGENTDESK_MAESTRO_APP_ID="${JAGENTDESK_MAESTRO_APP_ID:-app.jagentdesk.mobile.debug}"
 export JAGENTDESK_MAESTRO_DIRECT_ENDPOINT="${JAGENTDESK_MAESTRO_DIRECT_ENDPOINT:-127.0.0.1:6767}"
 export JAGENTDESK_MAESTRO_DAEMON_WS_URL="${JAGENTDESK_MAESTRO_DAEMON_WS_URL:-ws://127.0.0.1:6767/ws}"
 

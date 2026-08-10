@@ -343,7 +343,7 @@ export function HostSettingsPage({
 
       <HostAppearanceSection host={host} />
 
-      {isLocalDaemon ? <LocalDaemonSection /> : null}
+      {isLocalDaemon ? <LocalDaemonSection serverId={serverId} /> : null}
 
       {!isLocalDaemon ? <UpdateDaemonCard key={host.serverId} host={host} /> : null}
 

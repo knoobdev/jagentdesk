@@ -25,16 +25,15 @@
         "APP_VARIANT": "production"
       },
       "android": {
-        "resourceClass": "large"
+        "gradleCommand": ":app:bundleRelease --no-daemon --max-workers=1 -Dorg.gradle.parallel=false -Dorg.gradle.jvmargs=-Xmx2048m"
       }
     },
     "production-apk": {
       "extends": "production",
       "distribution": "internal",
       "android": {
-        "resourceClass": "large",
         "buildType": "apk",
-        "gradleCommand": ":app:assembleRelease -x lint -x lintVitalAnalyzeRelease -x lintVitalRelease -x generateReleaseLintModel -x generateReleaseLintVitalModel"
+        "gradleCommand": ":app:assembleRelease -x lint -x lintVitalAnalyzeRelease -x lintVitalRelease -x generateReleaseLintModel -x generateReleaseLintVitalModel --no-daemon --max-workers=1 -Dorg.gradle.parallel=false -Dorg.gradle.jvmargs=-Xmx2048m"
       }
     },
     "production-simulator": {

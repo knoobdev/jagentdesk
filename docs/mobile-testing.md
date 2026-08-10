@@ -7,7 +7,7 @@ Agent Device `.ad` scripts are the primary mobile E2E format. An agent discovers
 Record a flow while driving the app normally:
 
 ```bash
-agent-device open sh.jagentdesk.debug \
+agent-device open app.jagentdesk.mobile.debug \
   --platform ios \
   --session terminal-author \
   --save-script ./packages/app/e2e/mobile/agent-device/terminal.ios.ad
@@ -141,7 +141,7 @@ Two reusable flows handle Expo dev client screens after launch:
 `flows/land-in-chat.yaml` is the canonical "get into a chat" primitive. It `clearState`s, runs `launch.yaml`, taps the welcome screen's direct-connection option, types `127.0.0.1:6767`, submits, and waits for `message-input-root`. Compose any composer-level fixture on top of it:
 
 ```yaml
-appId: sh.jagentdesk
+appId: app.jagentdesk.mobile
 ---
 - runFlow: flows/land-in-chat.yaml
 # ...your scenario here, starting from a ready composer
@@ -244,7 +244,7 @@ done
 Voice mode uses the custom `expo-two-way-audio` Android module, so incoming calls and other system audio owners must be tested with emulator/system commands, not a JS-only test. To verify that voice resume handles denied audio focus without crashing:
 
 ```bash
-adb shell am start -n sh.jagentdesk/.MainActivity
+adb shell am start -n app.jagentdesk.mobile/.MainActivity
 # Start voice mode in an existing composer, then background JAgentDesk with Home.
 adb emu gsm call 5551234
 # Foreground JAgentDesk while the call is still ringing.

@@ -3388,6 +3388,9 @@ export class CodexAppServerAgentSession implements AgentSession {
           const skillRecord = toObjectRecord(skill);
           if (typeof skillRecord?.name !== "string" || typeof skillRecord?.path !== "string")
             continue;
+          // Newer Codex versions include disabled skills in skills/list. They must not appear as
+          // slash commands; older versions omit the field and remain enabled by default.
+          if (skillRecord.enabled === false) continue;
           if (!skillsByName.has(skillRecord.name)) {
             skillsByName.set(skillRecord.name, {
               name: skillRecord.name,

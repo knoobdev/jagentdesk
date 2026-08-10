@@ -19,6 +19,7 @@ import { useDesktopIpcErrorReporter } from "@/desktop/hooks/desktop-ipc-error";
 import type { DesktopSettings } from "@/desktop/settings/desktop-settings";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import { upsertDesktopDaemonConnection } from "@/runtime/daemon-start-service";
+import { getConnectionMode } from "@/tailscale";
 import { confirmDialog } from "@/utils/confirm-dialog";
 
 type DesktopDaemonSettings = DesktopSettings["daemon"];
@@ -71,6 +72,7 @@ export function useBuiltInDaemonManagement(
           const upsertResult = await upsertDesktopDaemonConnection(
             getHostRuntimeStore(),
             result.newStatus,
+            await getConnectionMode(),
           );
           if (!upsertResult.ok) {
             throw new DaemonConnectionRegistrationError(upsertResult.error);

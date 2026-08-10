@@ -1,5 +1,8 @@
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { WebSocket } from "ws";
 import { describe, expect, test } from "vitest";
 import pino from "pino";
@@ -160,6 +163,40 @@ describe("createTsnetListener", () => {
     child.stdout.emit("data", Buffer.from("TSNET_READY live.tailnet.ts.net\n"));
     expect(listener.getDirectAddress()).toEqual({ host: "live.tailnet.ts.net", port: 6767 });
     await listener.stop();
+  });
+
+  test("publishes a login URL emitted on the bridge stderr", async () => {
+    const child = createFakeChild();
+    const home = mkdtempSync(join(tmpdir(), "jagentdesk-tsnet-status-"));
+    const statusFile = join(home, "tailscale-status.json");
+    const options = listenableOptions("/usr/bin/fake-tailnet-bridge", async () => {});
+    options.statusFile = statusFile;
+    options.spawnBridge = () => child as unknown as ChildProcess;
+
+    try {
+      const listener = createTsnetListener(options);
+      await listener.start();
+      child.stderr.emit(
+        "data",
+        Buffer.from(
+          "To start this tsnet server, go to: https://login.tailscale.com/a/one-time-token\n",
+        ),
+      );
+
+      expect(JSON.parse(readFileSync(statusFile, "utf8"))).toMatchObject({
+        connected: false,
+        loginUrl: "https://login.tailscale.com/a/one-time-token",
+      });
+      child.stdout.emit("data", Buffer.from("TSNET_READY jcode.tailnet.ts.net\n"));
+      expect(JSON.parse(readFileSync(statusFile, "utf8"))).toMatchObject({
+        connected: true,
+        loginUrl: null,
+        host: "jcode.tailnet.ts.net",
+      });
+      await listener.stop();
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   test("clears the direct address when the bridge reports an error or exits", async () => {

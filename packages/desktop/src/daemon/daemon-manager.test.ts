@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   },
   runExternalCliJsonCommand: vi.fn(),
   runExternalCliTextCommand: vi.fn(),
+  shellOpenExternal: vi.fn(),
   createNodeEntrypointInvocation: vi.fn(() => ({
     command: "node",
     args: [],
@@ -36,6 +37,7 @@ vi.mock("electron", () => ({
   },
   ipcMain: { handle: vi.fn() },
   powerMonitor: { getSystemIdleTime: vi.fn(() => 0) },
+  shell: { openExternal: mocks.shellOpenExternal },
 }));
 
 vi.mock("electron-log/main", () => ({
@@ -123,6 +125,8 @@ describe("daemon-manager commands", () => {
     mocks.settings = DEFAULT_DESKTOP_SETTINGS;
     mocks.runExternalCliJsonCommand.mockReset();
     mocks.runExternalCliTextCommand.mockReset();
+    mocks.shellOpenExternal.mockReset();
+    mocks.shellOpenExternal.mockResolvedValue(undefined);
     mocks.createNodeEntrypointInvocation.mockReset();
     mocks.createNodeEntrypointInvocation.mockReturnValue({ command: "node", args: [], env: {} });
     mocks.spawnProcess.mockReset();
@@ -532,6 +536,37 @@ describe("daemon-manager commands", () => {
 
     expect(mocks.createNodeEntrypointInvocation).toHaveBeenCalledWith(
       expect.objectContaining({ args: [] }),
+    );
+  });
+
+  it("opens the Tailscale login URL through the system browser", async () => {
+    mkdirSync(mocks.jagentdeskHome, { recursive: true });
+    writeFileSync(
+      `${mocks.jagentdeskHome}/tailscale-status.json`,
+      JSON.stringify({
+        connected: false,
+        loginUrl: "https://login.tailscale.com/a/test-login",
+        updatedAt: Date.now(),
+      }),
+    );
+    mocks.runExternalCliJsonCommand.mockResolvedValue({
+      localDaemon: "running",
+      connectedDaemon: "reachable",
+      serverId: "server-1",
+      pid: 4242,
+      listen: "127.0.0.1:6768",
+      daemonVersion: "1.2.3",
+      desktopManaged: true,
+    });
+
+    const handlers = createDaemonCommandHandlers();
+
+    await expect(handlers.start_tailscale_login()).resolves.toEqual({
+      started: false,
+      connected: false,
+    });
+    expect(mocks.shellOpenExternal).toHaveBeenCalledWith(
+      "https://login.tailscale.com/a/test-login",
     );
   });
 

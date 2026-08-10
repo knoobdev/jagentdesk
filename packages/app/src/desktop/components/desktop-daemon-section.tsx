@@ -1,7 +1,8 @@
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import React, { type ReactElement, useCallback, useMemo, useState } from "react";
-import { Alert, Text, TextInput, View } from "react-native";
+import { Alert, Text, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
+import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { settingsStyles } from "@/styles/settings";
@@ -11,17 +12,14 @@ import { AdaptiveModalSheet, type SheetHeader } from "@/components/adaptive-moda
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { isVersionMismatch } from "@/desktop/runtime";
-import {
-  getCliDaemonStatus,
-  restartDesktopDaemon,
-  shouldUseDesktopDaemon,
-} from "@/desktop/daemon/desktop-daemon";
+import { getCliDaemonStatus, shouldUseDesktopDaemon } from "@/desktop/daemon/desktop-daemon";
 import { useBuiltInDaemonManagement } from "@/desktop/hooks/use-built-in-daemon-management";
 import { useDaemonStatus } from "@/desktop/hooks/use-daemon-status";
 import { useDesktopSettings, type DesktopSettings } from "@/desktop/settings/desktop-settings";
 import { resolveAppVersion } from "@/utils/app-version";
 import { CODE_SURFACE_DATASET } from "@/styles/code-surface";
 import { ICON_SIZE, type Theme } from "@/styles/theme";
+import { useTailscaleLoginStatus } from "@/tailscale";
 
 const ThemedActivity = withUnistyles(Activity);
 const ThemedCopy = withUnistyles(Copy);
@@ -327,13 +325,11 @@ function DaemonInfoCard(props: DaemonInfoCardProps) {
   );
 }
 
-export function LocalDaemonSection() {
+export function LocalDaemonSection({ serverId }: { serverId: string }) {
   const { t } = useTranslation();
   const showSection = shouldUseDesktopDaemon();
   const appVersion = resolveAppVersion();
   const { settings, updateSettings, isLoading: isLoadingSettings } = useDesktopSettings();
-  const [tailscaleAuthKey, setTailscaleAuthKey] = useState("");
-  const [isSavingTailscaleKey, setIsSavingTailscaleKey] = useState(false);
   const daemonSettings = settings.daemon;
   const updateDaemonSettings = useCallback(
     (updates: Partial<DesktopDaemonSettings>) => updateSettings({ daemon: updates }),
@@ -385,23 +381,6 @@ export function LocalDaemonSection() {
     void handleOpenCliStatus();
   }, [handleOpenCliStatus]);
 
-  const handleSaveTailscaleKey = useCallback(() => {
-    const authKey = tailscaleAuthKey.trim();
-    if (!authKey) return;
-    setIsSavingTailscaleKey(true);
-    void updateSettings({ tailscale: { authKey } })
-      .then(() => restartDesktopDaemon())
-      .then(() => setTailscaleAuthKey(""))
-      .finally(() => setIsSavingTailscaleKey(false));
-  }, [tailscaleAuthKey, updateSettings]);
-
-  const handleClearTailscaleKey = useCallback(() => {
-    setIsSavingTailscaleKey(true);
-    void updateSettings({ tailscale: { authKey: null } }).finally(() =>
-      setIsSavingTailscaleKey(false),
-    );
-  }, [updateSettings]);
-
   const copyIcon = useMemo(
     () => <ThemedCopy size={ICON_SIZE.sm} uniProps={foregroundColorMapping} />,
     [],
@@ -420,83 +399,43 @@ export function LocalDaemonSection() {
   }
 
   return (
-    <SettingsSection
-      title={t("desktop.daemon.title")}
-      testID="host-page-daemon-lifecycle-card"
-    >
-      {isLoading || isLoadingSettings ? (
-        <View style={[settingsStyles.card, styles.loadingCard]}>
-          <ThemedLoadingSpinner size="small" uniProps={foregroundMutedColorMapping} />
-        </View>
-      ) : (
-        <>
-          <DaemonInfoCard
-            daemonStatusStateText={daemonStatusStateText}
-            daemonStatusDetailText={daemonStatusDetailText}
-            isDaemonManagementPaused={isDaemonManagementPaused}
-            copyIcon={copyIcon}
-            fileTextIcon={fileTextIcon}
-            activityIcon={activityIcon}
-            handleToggleDaemonManagement={handleToggleDaemonManagement}
-            isUpdatingDaemonManagement={isUpdatingDaemonManagement}
-            keepRunningAfterQuit={daemonSettings.keepRunningAfterQuit}
-            handleToggleKeepRunningAfterQuit={handleToggleKeepRunningAfterQuit}
-            isUpdatingKeepRunningAfterQuit={isUpdatingKeepRunningAfterQuit}
-            daemonLogs={daemonLogs}
-            handleCopyLogPath={handleCopyLogPath}
-            handleOpenLogs={handleOpenLogs}
-            handleRunCliStatus={handleRunCliStatus}
-            isLoadingCliStatus={isLoadingCliStatus}
-          />
-
-          {daemonVersionMismatch ? (
-            <View style={styles.warningCard}>
-              <Text style={styles.warningText}>{t("desktop.daemon.versionMismatch")}</Text>
-            </View>
-          ) : null}
-
-          <View style={[settingsStyles.card, styles.tailscaleCard]} testID="tailscale-settings-card">
-            <Text style={settingsStyles.rowTitle}>Tailscale connection</Text>
-            <Text style={settingsStyles.rowHint}>
-              JAgentDesk uses Tailscale only for desktop/mobile daemon connections. The key is
-              stored in the operating system secure storage and is never shown again.
-            </Text>
-            <Text style={styles.tailscaleStatus}>
-              {settings.tailscale.authKeyConfigured ? "Auth key configured" : "Not configured"}
-            </Text>
-            <TextInput
-              value={tailscaleAuthKey}
-              onChangeText={setTailscaleAuthKey}
-              placeholder="tskey-auth-…"
-              secureTextEntry
-              autoCapitalize="none"
-              autoCorrect={false}
-              style={styles.tailscaleInput}
-              accessibilityLabel="Tailscale auth key"
-            />
-            <View style={styles.actionGroup}>
-              <Button
-                variant="default"
-                size="sm"
-                onPress={handleSaveTailscaleKey}
-                disabled={isSavingTailscaleKey || tailscaleAuthKey.trim().length === 0}
-              >
-                Save auth key and restart daemon
-              </Button>
-              {settings.tailscale.authKeyConfigured ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onPress={handleClearTailscaleKey}
-                  disabled={isSavingTailscaleKey}
-                >
-                  Remove auth key
-                </Button>
-              ) : null}
-            </View>
+    <>
+      <SettingsSection title={t("desktop.daemon.title")} testID="host-page-daemon-lifecycle-card">
+        {isLoading || isLoadingSettings ? (
+          <View style={[settingsStyles.card, styles.loadingCard]}>
+            <ThemedLoadingSpinner size="small" uniProps={foregroundMutedColorMapping} />
           </View>
-        </>
-      )}
+        ) : (
+          <>
+            <DaemonInfoCard
+              daemonStatusStateText={daemonStatusStateText}
+              daemonStatusDetailText={daemonStatusDetailText}
+              isDaemonManagementPaused={isDaemonManagementPaused}
+              copyIcon={copyIcon}
+              fileTextIcon={fileTextIcon}
+              activityIcon={activityIcon}
+              handleToggleDaemonManagement={handleToggleDaemonManagement}
+              isUpdatingDaemonManagement={isUpdatingDaemonManagement}
+              keepRunningAfterQuit={daemonSettings.keepRunningAfterQuit}
+              handleToggleKeepRunningAfterQuit={handleToggleKeepRunningAfterQuit}
+              isUpdatingKeepRunningAfterQuit={isUpdatingKeepRunningAfterQuit}
+              daemonLogs={daemonLogs}
+              handleCopyLogPath={handleCopyLogPath}
+              handleOpenLogs={handleOpenLogs}
+              handleRunCliStatus={handleRunCliStatus}
+              isLoadingCliStatus={isLoadingCliStatus}
+            />
+
+            {daemonVersionMismatch ? (
+              <View style={styles.warningCard}>
+                <Text style={styles.warningText}>{t("desktop.daemon.versionMismatch")}</Text>
+              </View>
+            ) : null}
+          </>
+        )}
+      </SettingsSection>
+
+      <TailscaleConnectionSection serverId={serverId} />
 
       <DaemonLogsModal
         visible={isLogsModalOpen}
@@ -510,28 +449,91 @@ export function LocalDaemonSection() {
         cliStatusOutput={cliStatusOutput}
         onCopy={handleCopyCliStatus}
       />
+    </>
+  );
+}
+
+function TailscaleConnectionSection({ serverId }: { serverId: string }) {
+  const { t } = useTranslation();
+  const router = useRouter();
+  const status = useTailscaleLoginStatus();
+
+  const statusText = (() => {
+    switch (status.kind) {
+      case "connected":
+        return t("tailscaleLogin.overviewStatusConnected");
+      case "connecting":
+        return t("tailscaleLogin.overviewStatusConnecting");
+      case "needs-login":
+        return t("tailscaleLogin.overviewStatusNeedsLogin");
+      case "unavailable":
+        return t("tailscaleLogin.overviewStatusUnavailable");
+      case "unknown":
+      default:
+        return t("tailscaleLogin.overviewStatusChecking");
+    }
+  })();
+
+  const handleOpenConnection = useCallback(() => {
+    router.push({
+      pathname: "/tailscale-login",
+      params: {
+        returnTo: "host-overview",
+        serverId,
+        ...(status.kind === "connected" ? { manage: "true" } : {}),
+      },
+    });
+  }, [router, serverId, status.kind]);
+
+  return (
+    <SettingsSection title="Tailscale connection" testID="tailscale-connection-section">
+      <View style={[settingsStyles.card, styles.tailscaleCard]} testID="tailscale-settings-card">
+        <View style={settingsStyles.row}>
+          <View style={settingsStyles.rowContent}>
+            <Text style={settingsStyles.rowTitle}>Status</Text>
+            <Text style={settingsStyles.rowHint}>{t("tailscaleLogin.overviewHint")}</Text>
+          </View>
+          <Text style={styles.tailscaleStatus} testID="tailscale-connection-status">
+            {statusText}
+          </Text>
+        </View>
+        <View style={[settingsStyles.row, settingsStyles.rowBorder]}>
+          <View style={settingsStyles.rowContent}>
+            <Text style={settingsStyles.rowTitle}>
+              {status.kind === "connected"
+                ? t("tailscaleLogin.overviewManageTitle")
+                : t("tailscaleLogin.overviewConnectTitle")}
+            </Text>
+            <Text style={settingsStyles.rowHint}>
+              {status.kind === "connected"
+                ? t("tailscaleLogin.overviewManageHint")
+                : t("tailscaleLogin.overviewConnectHint")}
+            </Text>
+          </View>
+          <Button
+            variant="outline"
+            size="sm"
+            onPress={handleOpenConnection}
+            testID="tailscale-connection-open"
+          >
+            {status.kind === "connected"
+              ? t("tailscaleLogin.overviewManageAction")
+              : t("tailscaleLogin.overviewConnectAction")}
+          </Button>
+        </View>
+      </View>
     </SettingsSection>
   );
 }
 
 const styles = StyleSheet.create((theme) => ({
   tailscaleCard: {
-    marginTop: theme.spacing[3],
     gap: theme.spacing[2],
   },
   tailscaleStatus: {
     color: theme.colors.foreground,
     fontSize: theme.fontSize.sm,
     fontWeight: "600",
-  },
-  tailscaleInput: {
-    minHeight: 40,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: theme.borderRadius.md,
-    color: theme.colors.foreground,
-    paddingHorizontal: theme.spacing[3],
-    backgroundColor: theme.colors.background,
   },
   actionGroup: {
     flexDirection: "row",

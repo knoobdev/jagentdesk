@@ -6,7 +6,7 @@ Implement the Orchestration feature in the real JAgentDesk runtime. The feature 
 daemon-backed and persisted; it is not a presentation-only settings surface.
 
 The product contract is the local setup documentation in
-`/Users/ngocchanh/Project/private/organisations/hdc/paseo-setup-docs`, especially:
+the local orchestration setup documentation outside this repository, especially:
 
 - `02-topology-and-authority.md` — Human → Supervisor → Lead → bounded Peer
 - `03-provider-routing.md` — semantic routes and multi-provider/model catalog

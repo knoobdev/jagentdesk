@@ -45,6 +45,18 @@ export interface DesktopAppLogs {
   contents: string;
 }
 
+export interface DesktopTailscaleStatus {
+  connected: boolean;
+  tailnet: string | null;
+  loginUrl: string | null;
+  daemonStatus: DesktopDaemonState;
+  healthy: boolean;
+  tailnetAddress: string | null;
+  tailnetProxyAddress: string | null;
+  daemonPublicKeyB64: string | null;
+  devicePublicKeyB64: string | null;
+}
+
 export interface LocalTransportTarget {
   [key: string]: unknown;
   transportType: "socket" | "pipe";
@@ -123,6 +135,23 @@ function parseDesktopDaemonLogs(raw: unknown): DesktopDaemonLogs {
   };
 }
 
+function parseDesktopTailscaleStatus(raw: unknown): DesktopTailscaleStatus {
+  if (!isRecord(raw)) {
+    throw new Error("Unexpected desktop Tailscale status response.");
+  }
+  return {
+    connected: raw.connected === true,
+    tailnet: toStringOrNull(raw.tailnet),
+    loginUrl: toStringOrNull(raw.loginUrl),
+    daemonStatus: parseDesktopDaemonState(raw.daemonStatus),
+    healthy: raw.healthy === true,
+    tailnetAddress: toStringOrNull(raw.tailnetAddress),
+    tailnetProxyAddress: toStringOrNull(raw.tailnetProxyAddress),
+    daemonPublicKeyB64: toStringOrNull(raw.daemonPublicKeyB64),
+    devicePublicKeyB64: toStringOrNull(raw.devicePublicKeyB64),
+  };
+}
+
 export function shouldUseDesktopDaemon(): boolean {
   return isElectronRuntime();
 }
@@ -147,6 +176,10 @@ export async function restartDesktopDaemon(): Promise<DesktopDaemonStatus> {
 
 export async function getDesktopDaemonLogs(): Promise<DesktopDaemonLogs> {
   return parseDesktopDaemonLogs(await invokeDesktopCommand("desktop_daemon_logs"));
+}
+
+export async function getDesktopTailscaleStatus(): Promise<DesktopTailscaleStatus> {
+  return parseDesktopTailscaleStatus(await invokeDesktopCommand("desktop_tailscale_status"));
 }
 
 export async function getDesktopAppLogs(): Promise<DesktopAppLogs> {

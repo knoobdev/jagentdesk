@@ -28,17 +28,14 @@ export async function upsertDesktopDaemonConnection(
   if (!serverId) {
     return { ok: false, error: "Desktop daemon did not return a server id." };
   }
-  if (store.getHosts().some((host) => host.serverId === serverId)) {
-    // The saved registry already knows this server. Desktop bootstrap must not
-    // re-register a connection that could clobber the user's active choice.
-    return { ok: true };
-  }
 
   if (connectionMode === null) {
     // First-run desktop startup must not create a localhost host before the
     // user chooses Local or authenticates Tailscale.
     return { ok: true };
   }
+
+  const existingHost = store.getHosts().find((host) => host.serverId === serverId);
 
   if (connectionMode === "tailscale") {
     const tailnetAddress = daemon.tailnetAddress?.trim() ?? "";
@@ -59,6 +56,14 @@ export async function upsertDesktopDaemonConnection(
       daemonPublicKeyB64,
       label: daemon.hostname ?? undefined,
     });
+    return { ok: true };
+  }
+
+  if (existingHost) {
+    // The saved registry already knows this server. Desktop bootstrap must not
+    // re-register a local connection that could clobber the user's active
+    // choice. Tailscale mode is handled above because an existing local host
+    // still needs its verified tailnet connection added.
     return { ok: true };
   }
 
