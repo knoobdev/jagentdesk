@@ -42,6 +42,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Build workspace dependencies for typecheck
+        run: |
+          npm run build:server
+          npm run build:app-deps
+
       - name: Verify tag and package versions
         run: |
           node <<'NODE'
