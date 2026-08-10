@@ -149,9 +149,15 @@ jobs:
           set -euo pipefail
           npm --prefix ../.. run build:app-deps:clean
           (cd ../app && JAGENTDESK_WEB_PLATFORM=electron npx expo export --platform web)
+          desktop_dir="$PWD"
           extra_args=()
           if [[ "${{ matrix.name }}" == macos-* ]]; then
-            extra_args+=("-c.mac.notarize=false" "-c.mac.hardenedRuntime=false")
+            extra_args+=(
+              "-c.mac.notarize=false"
+              "-c.mac.hardenedRuntime=false"
+              "-c.mac.entitlements=${desktop_dir}/build/entitlements.mac.plist"
+              "-c.mac.entitlementsInherit=${desktop_dir}/build/entitlements.mac.inherit.plist"
+            )
           fi
           npm run build -- --publish never ${{ matrix.build_args }} "${extra_args[@]}"
 
