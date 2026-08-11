@@ -36,6 +36,13 @@
         "gradleCommand": ":app:assembleRelease -x lint -x lintVitalAnalyzeRelease -x lintVitalRelease -x generateReleaseLintModel -x generateReleaseLintVitalModel --no-daemon --max-workers=1 -Dorg.gradle.parallel=false -Dorg.gradle.jvmargs=-Xmx2048m"
       }
     },
+    "production-ipa": {
+      "extends": "production",
+      "distribution": "store",
+      "ios": {
+        "simulator": false
+      }
+    },
     "production-simulator": {
       "extends": "production",
       "ios": {

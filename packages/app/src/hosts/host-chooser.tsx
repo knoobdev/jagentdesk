@@ -21,6 +21,7 @@ import {
   useWebOverlayRegistration,
 } from "@/lib/overlay-root";
 import { useHosts } from "@/runtime/host-runtime";
+import { useConnectionMode } from "@/tailscale";
 import { orderHostsLocalFirst, type HostProfile } from "@/types/host-connection";
 import { buildSettingsAddHostRoute } from "@/utils/host-routes";
 
@@ -69,11 +70,13 @@ function matchesHostQuery(host: HostProfile, query: string): boolean {
 export function useHostChooser() {
   const hosts = useHosts();
   const localServerId = useLocalDaemonServerId();
+  const { mode: connectionMode } = useConnectionMode();
+  const localServerIdForOrdering = connectionMode === "local" ? localServerId : null;
   const open = useHostChooserStore((state) => state.open);
 
   return useCallback(
     (input: ChooseHostInput) => {
-      const availableHosts = orderHostsLocalFirst(hosts, localServerId).filter(
+      const availableHosts = orderHostsLocalFirst(hosts, localServerIdForOrdering).filter(
         input.filter ?? (() => true),
       );
 
@@ -94,7 +97,7 @@ export function useHostChooser() {
       });
       return true;
     },
-    [hosts, localServerId, open],
+    [hosts, localServerIdForOrdering, open],
   );
 }
 

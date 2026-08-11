@@ -84,8 +84,9 @@ phải file cài trực tiếp; hãy dùng artifact `.apk`.
 
 ### iPhone/iPad
 
-Build iOS simulator (`.tar.gz`) không cài được lên iPhone thật. Để sideload trên thiết bị thật,
-cần một IPA cho device, được ký bằng Apple ID/certificate của người cài:
+GitHub Actions tạo IPA cho device bằng profile EAS `production-ipa`; artifact có tên dạng
+`JAgentDesk-v1.0.0-ios.ipa`. Đây là IPA device, không phải app Simulator. Để sideload trên thiết
+bị thật, Sideloadly sẽ ký lại IPA bằng Apple ID/certificate của người cài:
 
 1. Cài [Sideloadly](https://sideloadly.io/) trên macOS hoặc Windows.
 2. Kết nối iPhone bằng USB, mở khóa và bấm **Trust** nếu iOS hỏi.
@@ -94,9 +95,9 @@ cần một IPA cho device, được ký bằng Apple ID/certificate của ngư�
 5. Trên iPhone vào **Settings → General → VPN & Device Management**, tin cậy developer
    profile rồi mở JAgentDesk.
 
-IPA phải được build cho device (`eas build --platform ios --profile production` hoặc build riêng
-với Apple signing). Profile `production-simulator` chỉ dùng cho iOS Simulator. Apple ID miễn phí
-có thể có thời hạn ký ngắn; khi app hết hạn, sideload lại IPA.
+IPA phải được build cho device. Có thể build thủ công từ thư mục `packages/app` bằng
+`eas build --platform ios --profile production-ipa`; profile `production-simulator` chỉ dùng cho
+iOS Simulator. Apple ID miễn phí có thể có thời hạn ký ngắn; khi app hết hạn, sideload lại IPA.
 
 ## Build và release bằng GitHub Actions
 
@@ -105,13 +106,13 @@ repo này là `v1.0.0` và phải khớp version `1.0.0` trong các package.
 
 - Desktop build theo matrix macOS, Windows và Linux, sau đó upload installer vào GitHub Release.
 - Mobile Android được prebuild và compile trực tiếp trên runner, sau đó upload APK cài thử.
-- Mobile iOS được compile trực tiếp cho Simulator với `CODE_SIGNING_ALLOWED=NO`, sau đó upload
-  artifact simulator.
+- Mobile iOS dùng EAS profile `production-ipa`, chờ build device hoàn tất, tải `.ipa` đã ký và
+  upload vào GitHub Release.
 
-GitHub Actions tự có `GITHUB_TOKEN`; workflow `v1.0.0` không cần `EXPO_TOKEN`. APK Android của
-workflow là bản cài thử, không phải artifact đã ký để phát hành Play Store. Build iOS cho
-device/Sideloadly cần Apple signing credentials riêng và không được giả định là đã ký trong
-workflow simulator.
+GitHub Actions tự có `GITHUB_TOKEN`, nhưng job IPA cần secret `EXPO_TOKEN` và Apple signing
+credentials đã được cấu hình trong EAS project. Tạo secret tại repository Settings → Secrets and
+variables → Actions → New repository secret với tên `EXPO_TOKEN`. APK Android của workflow là bản
+cài thử, không phải artifact đã ký để phát hành Play Store.
 
 Tạo release đầu tiên:
 

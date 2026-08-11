@@ -3,9 +3,10 @@ import { useEffect, useSyncExternalStore } from "react";
 
 export type ConnectionMode = "tailscale" | "local";
 
-// Bump the marker after the first broken desktop build so stale success from
-// the old fake status implementation can never bypass the real login gate.
-const CONNECTION_MODE_KEY = "@jagentdesk:connection-mode:v3";
+// Bump the marker after the broken desktop transport rollout. Existing
+// installs that selected Local before the real Tailscale gate existed must see
+// the login screen once instead of silently reusing that stale choice.
+const CONNECTION_MODE_KEY = "@jagentdesk:connection-mode:v4";
 
 type Listener = () => void;
 interface ConnectionModeSnapshot {

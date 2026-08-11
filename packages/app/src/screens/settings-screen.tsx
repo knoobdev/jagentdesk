@@ -48,7 +48,6 @@ import { SettingsSection } from "@/screens/settings/settings-section";
 import { AppearanceSection } from "@/screens/settings/appearance/appearance-section";
 import {
   useAppSettings,
-  useSettings,
   parseTerminalScrollbackLines,
   type AppSettings,
   type SendBehavior,
@@ -62,7 +61,6 @@ import {
 } from "@/types/host-connection";
 import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 import { WindowChromeRegion, WindowChromeSafeArea } from "@/utils/desktop-window";
-import { confirmDialog } from "@/utils/confirm-dialog";
 import { BackHeader } from "@/components/headers/back-header";
 import { ScreenHeader } from "@/components/headers/screen-header";
 import { AddHostMethodModal } from "@/components/add-host-method-modal";
@@ -78,6 +76,7 @@ import { DesktopPermissionsSection } from "@/desktop/components/desktop-permissi
 import { BrowserDataSection } from "@/desktop/browser/settings/browser-data-section";
 import { IntegrationsSection } from "@/desktop/components/integrations-section";
 import { isElectronRuntime } from "@/desktop/host";
+import { setConnectionMode, useConnectionMode } from "@/tailscale";
 import { useAppDiagnosticStore } from "@/diagnostics/store";
 import { settingsStyles } from "@/styles/settings";
 import { THINKING_TONE_NATIVE_PCM_BASE64 } from "@/utils/thinking-tone.native-pcm";
@@ -120,8 +119,6 @@ import {
   navigateToLastWorkspace,
   useLastWorkspaceSelection,
 } from "@/stores/navigation-active-workspace-store";
-import { setConnectionMode } from "@/tailscale";
-
 // ---------------------------------------------------------------------------
 // View model
 // ---------------------------------------------------------------------------
@@ -537,7 +534,8 @@ function DiagnosticsSection({
 // ---------------------------------------------------------------------------
 
 /**
- * Local daemon first, then remaining hosts in their existing order.
+ * Keep the local daemon first only when the active transport is Local; a
+ * Tailscale session keeps the user's saved host order.
  */
 function useSortedHosts(hosts: HostProfile[], localServerId: string | null): HostProfile[] {
   return useMemo(() => orderHostsLocalFirst(hosts, localServerId), [hosts, localServerId]);
@@ -735,7 +733,9 @@ function SettingsSidebar({
   const { t } = useTranslation();
   const hosts = useHosts();
   const localServerId = useLocalDaemonServerId();
-  const sortedHosts = useSortedHosts(hosts, localServerId);
+  const { mode: connectionMode } = useConnectionMode();
+  const localServerIdForOrdering = connectionMode === "local" ? localServerId : null;
+  const sortedHosts = useSortedHosts(hosts, localServerIdForOrdering);
   const hasHosts = sortedHosts.length > 0;
   const enableBuiltInDaemonOption = useEnableBuiltInDaemonOption();
   const isDesktopApp = isElectronRuntime();
@@ -883,7 +883,9 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
   const insetBottomStyle = useMemo(() => ({ paddingBottom: insets.bottom }), [insets.bottom]);
   const hosts = useHosts();
   const localServerId = useLocalDaemonServerId();
-  const sortedHosts = useSortedHosts(hosts, localServerId);
+  const { mode: connectionMode } = useConnectionMode();
+  const localServerIdForOrdering = connectionMode === "local" ? localServerId : null;
+  const sortedHosts = useSortedHosts(hosts, localServerIdForOrdering);
   const lastWorkspaceSelection = useLastWorkspaceSelection();
   const routedSettingsHostServerId =
     view.kind === "host" || view.kind === "project" ? view.serverId : null;
@@ -904,11 +906,11 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
     if (view.kind === "host" || view.kind === "project") return view.serverId;
     return resolveActiveHostServerId({
       selectedServerId: selectedSettingsHostServerId,
-      localServerId,
+      localServerId: localServerIdForOrdering,
       hosts,
       orderedHosts: sortedHosts,
     });
-  }, [view, selectedSettingsHostServerId, localServerId, hosts, sortedHosts]);
+  }, [view, selectedSettingsHostServerId, localServerIdForOrdering, hosts, sortedHosts]);
 
   const handleSendBehaviorChange = useCallback(
     (behavior: SendBehavior) => {
@@ -981,13 +983,6 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
     setPairLinkTitle(undefined);
   }, []);
 
-  const goBackToAddConnectionMethods = useCallback(() => {
-    setIsDirectHostVisible(false);
-    setIsPasteLinkVisible(false);
-    setPairLinkTitle(undefined);
-    setIsAddHostMethodVisible(true);
-  }, []);
-
   const handleAddHost = useCallback(() => {
     setIsAddHostMethodVisible(true);
   }, []);
@@ -1008,6 +1003,7 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
       .then(() => {
         setIsAddHostMethodVisible(false);
         setIsDirectHostVisible(true);
+        return undefined;
       })
       .catch(() => {
         Alert.alert("Connection setup failed", "JAgentDesk could not save Local connection mode.");

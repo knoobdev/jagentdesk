@@ -1,4 +1,8 @@
-import { startDesktopDaemon, type DesktopDaemonStatus } from "@/desktop/daemon/desktop-daemon";
+import {
+  startDesktopDaemon,
+  type DesktopDaemonStartOptions,
+  type DesktopDaemonStatus,
+} from "@/desktop/daemon/desktop-daemon";
 import { connectionFromListen } from "@/types/host-connection";
 import type { ConnectionMode } from "@/tailscale";
 import type { HostRuntimeStore } from "@/runtime/host-runtime";
@@ -15,7 +19,7 @@ type DaemonConnectionStore = Pick<HostRuntimeStore, "getHosts" | "upsertConnecti
 
 export interface DaemonStartServiceDeps {
   store: DaemonConnectionStore;
-  startDesktopDaemon?: () => Promise<DesktopDaemonStatus>;
+  startDesktopDaemon?: (options?: DesktopDaemonStartOptions) => Promise<DesktopDaemonStatus>;
   getConnectionMode?: () => Promise<ConnectionMode | null>;
 }
 
@@ -87,7 +91,9 @@ export async function upsertDesktopDaemonConnection(
 
 export class DaemonStartService {
   private readonly store: DaemonConnectionStore;
-  private readonly invokeStartDesktopDaemon: () => Promise<DesktopDaemonStatus>;
+  private readonly invokeStartDesktopDaemon: (
+    options?: DesktopDaemonStartOptions,
+  ) => Promise<DesktopDaemonStatus>;
   private readonly resolveConnectionMode: () => Promise<ConnectionMode | null>;
   private readonly listeners = new Set<() => void>();
   private lastError: string | null = null;
@@ -123,12 +129,11 @@ export class DaemonStartService {
         return { ok: true };
       }
 
-      const daemon = await this.invokeStartDesktopDaemon();
-      const result = await upsertDesktopDaemonConnection(
-        this.store,
-        daemon,
-        await this.resolveConnectionMode(),
-      );
+      const connectionMode = await this.resolveConnectionMode();
+      const daemon = await this.invokeStartDesktopDaemon({
+        enableTailscale: connectionMode === "tailscale",
+      });
+      const result = await upsertDesktopDaemonConnection(this.store, daemon, connectionMode);
       return result.ok ? result : this.fail(result.error);
     } catch (error) {
       return this.fail(error instanceof Error ? error.message : String(error));

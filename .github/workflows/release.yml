@@ -264,10 +264,10 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  mobile-ios-simulator:
-    name: Mobile iOS Simulator
+  mobile-ios-ipa:
+    name: Mobile iOS IPA (EAS signed)
     needs: [validate, create-release]
-    runs-on: macos-15
+    runs-on: ubuntu-latest
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -282,49 +282,92 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
-      - name: Install dependencies
+      - name: Install dependencies and EAS CLI
         run: npm ci
 
-      - name: Build iOS app dependencies
+      - name: Check EAS credentials
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
-          npm run build:app-deps
-          npm --prefix packages/app run build:terminal-webview
+          if [[ -z "${EXPO_TOKEN:-}" ]]; then
+            echo "::error::The iOS IPA job requires the EXPO_TOKEN GitHub Actions secret."
+            echo "::error::Configure EAS Apple credentials for the jagentdesk project, then add EXPO_TOKEN in Settings > Secrets and variables > Actions."
+            exit 1
+          fi
 
-      - name: Build iOS Simulator artifact locally
+      - name: Build signed iOS device IPA with EAS
         id: artifact
         shell: bash
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
           set -euo pipefail
-          export APP_VARIANT=production
           cd packages/app
-          npx expo prebuild --platform ios --clean --non-interactive
-          cd ios
-          pod install --repo-update
-          derived_data="$RUNNER_TEMP/jagentdesk-ios-derived"
-          xcodebuild \
-            -workspace JAgentDesk.xcworkspace \
-            -scheme JAgentDesk \
-            -configuration Release \
-            -sdk iphonesimulator \
-            -destination "generic/platform=iOS Simulator" \
-            -derivedDataPath "$derived_data" \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            build
-          asset_path="$RUNNER_TEMP/JAgentDesk-${RELEASE_TAG}-ios-simulator.tar.gz"
-          tar -czf "$asset_path" -C "$derived_data/Build/Products/Release-iphonesimulator" JAgentDesk.app
+          eas_json="$RUNNER_TEMP/eas-ios-build.json"
+          build_view_json="$RUNNER_TEMP/eas-ios-build-view.json"
+          npx --no-install eas build \
+            --platform ios \
+            --profile production-ipa \
+            --non-interactive \
+            --wait \
+            --json > "$eas_json"
+
+          build_id="$(node - "$eas_json" <<'NODE'
+          const fs = require("node:fs");
+          const input = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+          const values = Array.isArray(input) ? input : [input];
+          const findBuild = (value) => {
+            if (!value || typeof value !== "object") return null;
+            if (typeof value.id === "string" && value.id.length > 0) return value.id;
+            for (const child of Object.values(value)) {
+              const found = findBuild(child);
+              if (found) return found;
+            }
+            return null;
+          };
+          const id = values.map(findBuild).find(Boolean);
+          if (!id) throw new Error("EAS did not return an iOS build id.");
+          process.stdout.write(id);
+          NODE
+          )"
+
+          npx --no-install eas build:view "$build_id" --json > "$build_view_json"
+          artifact_url="$(node - "$build_view_json" <<'NODE'
+          const fs = require("node:fs");
+          const input = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+          const urlKeys = new Set(["applicationArchiveUrl", "buildUrl", "artifactUrl"]);
+          const findUrl = (value) => {
+            if (!value || typeof value !== "object") return null;
+            for (const [key, child] of Object.entries(value)) {
+              if (urlKeys.has(key) && typeof child === "string" && child.startsWith("https://")) {
+                return child;
+              }
+              const found = findUrl(child);
+              if (found) return found;
+            }
+            return null;
+          };
+          const url = findUrl(input);
+          if (!url) throw new Error("EAS finished without an IPA download URL.");
+          process.stdout.write(url);
+          NODE
+          )"
+
+          asset_path="$RUNNER_TEMP/JAgentDesk-${RELEASE_TAG}-ios.ipa"
+          curl --fail --location --retry 5 --retry-delay 2 "$artifact_url" --output "$asset_path"
+          test -s "$asset_path"
+          unzip -tq "$asset_path" >/dev/null
           echo "asset_path=$asset_path" >> "$GITHUB_OUTPUT"
 
-      - name: Upload iOS Simulator artifact to GitHub Release
+      - name: Upload iOS IPA to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$RELEASE_TAG" "${{ steps.artifact.outputs.asset_path }}" --clobber --repo "$GITHUB_REPOSITORY"
 
-      - name: Upload iOS Simulator workflow artifact
+      - name: Upload iOS IPA workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mobile-ios-simulator
+          name: mobile-ios-ipa
           path: ${{ steps.artifact.outputs.asset_path }}
           if-no-files-found: error
           retention-days: 14

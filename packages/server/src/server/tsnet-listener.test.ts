@@ -55,6 +55,34 @@ function listenableOptions(
 }
 
 describe("createTsnetListener", () => {
+  test("does not spawn the bridge when the desktop explicitly selects Local", async () => {
+    const previous = process.env.JAGENTDESK_TAILSCALE_ENABLED;
+    const child = createFakeChild();
+    const spawned: string[] = [];
+    process.env.JAGENTDESK_TAILSCALE_ENABLED = "0";
+    try {
+      const listener = createTsnetListener({
+        ...listenableOptions("/usr/bin/fake-tailnet-bridge", async () => {}),
+        spawnBridge: (binary) => {
+          spawned.push(binary);
+          return child as unknown as ChildProcess;
+        },
+      });
+
+      await listener.start();
+
+      expect(spawned).toEqual([]);
+      expect(listener.getDirectAddress()).toBeNull();
+      await listener.stop();
+    } finally {
+      if (previous === undefined) {
+        delete process.env.JAGENTDESK_TAILSCALE_ENABLED;
+      } else {
+        process.env.JAGENTDESK_TAILSCALE_ENABLED = previous;
+      }
+    }
+  });
+
   test("fails when an explicitly configured bridge does not exist", async () => {
     const listener = createTsnetListener({
       logger: pino({ level: "silent" }),

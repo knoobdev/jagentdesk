@@ -102,7 +102,10 @@ export class WebTailscaleLoginAdapter implements TailscaleLoginAdapter {
     }
     try {
       await invokeDesktopCommand("patch_desktop_settings", { tailscale: { authKey: key } });
-      await invokeDesktopCommand("restart_desktop_daemon", { reason: "tailscale_login" });
+      await invokeDesktopCommand("restart_desktop_daemon", {
+        reason: "tailscale_login",
+        enableTailscale: true,
+      });
       return { ok: true };
     } catch (error) {
       return { ok: false, error: errorMessage(error, TAILSCALE_LOGIN_FAILED_ERROR) };

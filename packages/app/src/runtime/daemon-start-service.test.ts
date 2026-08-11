@@ -89,6 +89,22 @@ describe("DaemonStartService", () => {
     expect(service.isRunning()).toBe(false);
   });
 
+  it("passes the selected transport mode to managed daemon startup", async () => {
+    const fake = createFakeStore();
+    const startDesktopDaemon = vi.fn(async (_options?: { enableTailscale?: boolean }) =>
+      makeStatus(),
+    );
+    const service = new DaemonStartService({
+      store: fake.store,
+      startDesktopDaemon,
+      getConnectionMode: async () => "local",
+    });
+
+    await service.start();
+
+    expect(startDesktopDaemon).toHaveBeenCalledWith({ enableTailscale: false });
+  });
+
   it("reports lastError after a missing listen address and clears running state when done", async () => {
     const fake = createFakeStore();
     const service = new DaemonStartService({
@@ -190,6 +206,7 @@ describe("DaemonStartService", () => {
     expect(service.isRunning()).toBe(true);
     expect(runningSnapshots).toEqual([true]);
 
+    await vi.waitFor(() => expect(resolveStart).toBeTypeOf("function"));
     resolveStart?.(makeStatus());
     await startPromise;
 

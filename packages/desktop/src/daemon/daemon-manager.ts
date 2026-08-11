@@ -80,6 +80,8 @@ export interface DesktopDaemonStatus {
   tailnetProxyAddress?: string | null;
   daemonPublicKeyB64?: string | null;
   tailscaleConnected?: boolean;
+  /** Present for daemons started by a current desktop build. */
+  tailscaleEnabled?: boolean;
 }
 
 interface DesktopDaemonLogs {
@@ -165,6 +167,7 @@ interface TailscaleStatusFile {
   port?: number | null;
   tailnetProxyAddress?: string | null;
   daemonPublicKeyB64?: string | null;
+  enabled?: boolean;
   updatedAt?: number;
 }
 
@@ -460,6 +463,9 @@ function buildDesktopDaemonStatus(
       : null,
     daemonPublicKeyB64: facts.tailscaleStatus?.daemonPublicKeyB64 ?? null,
     tailscaleConnected: facts.tailscaleConnected,
+    ...(facts.tailscaleStatus?.enabled !== undefined
+      ? { tailscaleEnabled: facts.tailscaleStatus.enabled }
+      : {}),
   };
 }
 
@@ -571,9 +577,12 @@ async function waitForDetachedStartup(child: ChildProcess): Promise<void> {
   }
 }
 
-function buildDaemonBaseEnv(useSavedTailscaleAuthKey: boolean): NodeJS.ProcessEnv {
+function buildDaemonBaseEnv(
+  useSavedTailscaleAuthKey: boolean,
+  enableTailscale: boolean,
+): NodeJS.ProcessEnv {
   const baseEnv = { ...process.env };
-  if (!useSavedTailscaleAuthKey) {
+  if (!useSavedTailscaleAuthKey || !enableTailscale) {
     // Do not let a launcher-provided key bypass the explicit interactive-login
     // action either. The auth-key action is the only path allowed to use it.
     delete baseEnv.JAGENTDESK_TAILSCALE_AUTH_KEY;
@@ -629,8 +638,20 @@ function waitForDaemonStartup(waitForReady: boolean): Promise<DesktopDaemonStatu
 
 async function reuseOrRestartRunningDaemon(
   current: DesktopDaemonStatus,
+  enableTailscale: boolean,
 ): Promise<DesktopDaemonStatus | null> {
   if (current.status !== "running") return null;
+  const transportModeMismatch = enableTailscale
+    ? current.tailscaleEnabled === false
+    : current.tailscaleEnabled !== false;
+  if (transportModeMismatch) {
+    logDesktopDaemonLifecycle("daemon transport mode changed, restarting", {
+      previousTailscaleEnabled: current.tailscaleEnabled ?? null,
+      nextTailscaleEnabled: enableTailscale,
+    });
+    await stopDesktopDaemon("restart");
+    return null;
+  }
   if (!shouldRestartForVersion(current)) return current;
 
   logDesktopDaemonLifecycle("daemon version mismatch, restarting", {
@@ -646,11 +667,14 @@ interface StartDaemonOptions {
   useSavedTailscaleAuthKey?: boolean;
   /** Interactive login only needs the bridge status file, not full daemon readiness. */
   waitForReady?: boolean;
+  /** The bridge is opt-in for the managed daemon; Local and first-run disable it. */
+  enableTailscale?: boolean;
 }
 
 async function startDaemon({
   useSavedTailscaleAuthKey = true,
   waitForReady = true,
+  enableTailscale = true,
 }: StartDaemonOptions = {}): Promise<DesktopDaemonStatus> {
   assertBuiltInDaemonManagementEnabled(await getDesktopSettingsStore().get());
   synchronizeManagedDaemonConfig();
@@ -664,7 +688,7 @@ async function startDaemon({
     error: current.error,
     desktopManaged: current.desktopManaged,
   });
-  const reusableDaemon = await reuseOrRestartRunningDaemon(current);
+  const reusableDaemon = await reuseOrRestartRunningDaemon(current, enableTailscale);
   if (reusableDaemon) return reusableDaemon;
 
   const daemonRunner = resolveDaemonRunnerEntrypoint();
@@ -674,9 +698,11 @@ async function startDaemon({
     entrypoint: daemonRunner,
     argvMode: "node-script",
     args: reclaimStalePidLock ? ["--reclaim-stale-pid-lock"] : [],
-    baseEnv: buildDaemonBaseEnv(useSavedTailscaleAuthKey),
+    baseEnv: buildDaemonBaseEnv(useSavedTailscaleAuthKey, enableTailscale),
   });
-  const tailscaleAuthKey = await resolveDaemonTailscaleAuthKey(useSavedTailscaleAuthKey);
+  const tailscaleAuthKey = enableTailscale
+    ? await resolveDaemonTailscaleAuthKey(useSavedTailscaleAuthKey)
+    : null;
   const desktopDevice = getDesktopDeviceKeyPair();
 
   logDesktopDaemonLifecycle("starting detached daemon", {
@@ -708,7 +734,8 @@ async function startDaemon({
       // legacy 6767 daemon instead of starting JAgentDesk on 6768.
       JAGENTDESK_HOME: getJAgentDeskHome(),
       JAGENTDESK_LISTEN: process.env.JAGENTDESK_LISTEN ?? "127.0.0.1:6768",
-      JAGENTDESK_TAILSCALE_INTERACTIVE: "1",
+      JAGENTDESK_TAILSCALE_ENABLED: enableTailscale ? "1" : "0",
+      JAGENTDESK_TAILSCALE_INTERACTIVE: enableTailscale ? "1" : "0",
       // The renderer's desktop client uses this loopback ingress to traverse
       // the same tailnet-tagged and signed daemon path as a mobile client.
       // The daemon still exposes the real tailnet listener on 6768.
@@ -780,10 +807,10 @@ export async function stopDesktopDaemon(
   return statusAfter ?? (await resolveDesktopDaemonStatus());
 }
 
-async function restartDaemon(): Promise<DesktopDaemonStatus> {
+async function restartDaemon(enableTailscale = true): Promise<DesktopDaemonStatus> {
   assertBuiltInDaemonManagementEnabled(await getDesktopSettingsStore().get());
   await stopDesktopDaemon("restart");
-  return startDaemon();
+  return startDaemon({ enableTailscale });
 }
 
 function getDaemonLogs(): DesktopDaemonLogs {
@@ -884,7 +911,11 @@ export function createDaemonCommandHandlers(): Record<string, DesktopCommandHand
       const existingStatus = readTailscaleStatusFile();
 
       if (daemonStatus.status === "running") {
-        if (existingStatus?.connected === true && daemonStatus.healthy === true) {
+        if (
+          existingStatus?.enabled !== false &&
+          existingStatus?.connected === true &&
+          daemonStatus.healthy === true
+        ) {
           return { started: false, connected: true };
         }
         if (
@@ -907,7 +938,11 @@ export function createDaemonCommandHandlers(): Record<string, DesktopCommandHand
       }
 
       const startupStartedAt = Date.now();
-      await startDaemon({ useSavedTailscaleAuthKey: false, waitForReady: false });
+      await startDaemon({
+        useSavedTailscaleAuthKey: false,
+        waitForReady: false,
+        enableTailscale: true,
+      });
 
       for (let attempt = 0; attempt < 60; attempt += 1) {
         const status = readFreshTailscaleStatusFile(statusFile, startupStartedAt);
@@ -930,9 +965,10 @@ export function createDaemonCommandHandlers(): Record<string, DesktopCommandHand
         "JAgentDesk could not obtain a Tailscale authentication URL. Check the daemon status or use an auth key.",
       );
     },
-    start_desktop_daemon: () => startDaemon(),
+    start_desktop_daemon: (args) =>
+      startDaemon({ enableTailscale: args?.enableTailscale !== false }),
     stop_desktop_daemon: (args) => stopDesktopDaemon(parseDesktopDaemonStopReason(args)),
-    restart_desktop_daemon: () => restartDaemon(),
+    restart_desktop_daemon: (args) => restartDaemon(args?.enableTailscale !== false),
     desktop_daemon_logs: () => getDaemonLogs(),
     desktop_app_logs: () => getDesktopAppLogs(),
     desktop_get_system_idle_time: () => powerMonitor.getSystemIdleTime() * 1000,

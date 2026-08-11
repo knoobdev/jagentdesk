@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   },
   runExternalCliJsonCommand: vi.fn(),
   runExternalCliTextCommand: vi.fn(),
+  httpRequest: vi.fn(),
   shellOpenExternal: vi.fn(),
   createNodeEntrypointInvocation: vi.fn(() => ({
     command: "node",
@@ -50,6 +51,10 @@ vi.mock("electron-log/main", () => ({
       },
     },
   },
+}));
+
+vi.mock("node:http", () => ({
+  request: mocks.httpRequest,
 }));
 
 vi.mock("@jagentdesk/server", () => ({
@@ -120,11 +125,34 @@ function scheduleFailedStartup(child: MockChildProcess): void {
   });
 }
 
+function respondWithHealthyStatus(
+  callback: (response: { statusCode: number; resume: () => void }) => void,
+): void {
+  queueMicrotask(() => callback({ statusCode: 200, resume: () => undefined }));
+}
+
 describe("daemon-manager commands", () => {
   beforeEach(() => {
     mocks.settings = DEFAULT_DESKTOP_SETTINGS;
     mocks.runExternalCliJsonCommand.mockReset();
     mocks.runExternalCliTextCommand.mockReset();
+    mocks.httpRequest.mockReset();
+    mocks.httpRequest.mockImplementation(
+      (
+        _url: unknown,
+        _options: unknown,
+        callback: (response: { statusCode: number; resume: () => void }) => void,
+      ) => {
+        const request = new EventEmitter() as EventEmitter & {
+          destroy: () => void;
+          end: () => void;
+        };
+        request.destroy = vi.fn();
+        request.end = vi.fn();
+        respondWithHealthyStatus(callback);
+        return request;
+      },
+    );
     mocks.shellOpenExternal.mockReset();
     mocks.shellOpenExternal.mockResolvedValue(undefined);
     mocks.createNodeEntrypointInvocation.mockReset();

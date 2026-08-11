@@ -14,6 +14,8 @@ import type { HubRelationshipManagement } from "../../hub/relationship-controlle
 import type { PairedDeviceStore } from "../../pairing/paired-devices.js";
 import type { PairingCodeManager } from "../../pairing/pairing-code.js";
 
+const PROVIDER_AVAILABILITY_CACHE_TTL_MS = 5_000;
+
 export interface DaemonRuntimeConfig {
   listen: string | null;
   worktreesRoot?: string;
@@ -76,6 +78,11 @@ export class DaemonSession {
   private readonly listProjects: () => Promise<PersistedProjectRecord[]>;
   private readonly listWorkspaces: () => Promise<PersistedWorkspaceRecord[]>;
   private readonly listProviderAvailability: () => Promise<ProviderAvailability[]>;
+  private providerAvailabilityCache: {
+    providers: ProviderAvailability[];
+    expiresAt: number;
+  } | null = null;
+  private providerAvailabilityRefresh: Promise<ProviderAvailability[]> | null = null;
   private readonly getWebSocketRuntimeMetrics: () => DaemonWebSocketRuntimeDiagnosticSnapshot | null;
   private readonly logger: pino.Logger;
   private readonly selfUpdate: DaemonSelfUpdateSessionController;
@@ -116,6 +123,30 @@ export class DaemonSession {
       emitLifecycleIntent: (intent) => this.host.emitLifecycleIntent(intent),
       sessionLogger: this.logger,
     });
+  }
+
+  private async getCachedProviderAvailability(): Promise<ProviderAvailability[]> {
+    const now = Date.now();
+    if (this.providerAvailabilityCache && this.providerAvailabilityCache.expiresAt > now) {
+      return this.providerAvailabilityCache.providers;
+    }
+    if (this.providerAvailabilityRefresh) {
+      return this.providerAvailabilityRefresh;
+    }
+
+    const refresh = this.listProviderAvailability()
+      .then((providers) => {
+        this.providerAvailabilityCache = {
+          providers,
+          expiresAt: Date.now() + PROVIDER_AVAILABILITY_CACHE_TTL_MS,
+        };
+        return providers;
+      })
+      .finally(() => {
+        this.providerAvailabilityRefresh = null;
+      });
+    this.providerAvailabilityRefresh = refresh;
+    return refresh;
   }
 
   async handleHubRelationshipRequest(
@@ -173,7 +204,7 @@ export class DaemonSession {
   ): Promise<void> {
     try {
       const pidInfo = await getPidLockInfo(this.jagentdeskHome);
-      const providers = (await this.listProviderAvailability()).map((p) => ({
+      const providers = (await this.getCachedProviderAvailability()).map((p) => ({
         provider: p.provider,
         available: p.available,
         error: p.error ?? null,

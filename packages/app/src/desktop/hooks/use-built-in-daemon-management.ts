@@ -65,7 +65,8 @@ export function useBuiltInDaemonManagement(
               destructive: true,
             }),
           persistSettings: (next) => updateSettings(next) as Promise<void>,
-          startDaemon: startDesktopDaemon,
+          startDaemon: async () =>
+            startDesktopDaemon({ enableTailscale: (await getConnectionMode()) === "tailscale" }),
           stopDaemon: () => stopDesktopDaemon("settings"),
         });
         if (result.kind === "enabled") {

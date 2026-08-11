@@ -150,19 +150,21 @@ export function createTsnetListener(options: TsnetListenerOptions): TsnetListene
     if (!options.statusFile) return;
     try {
       mkdirSync(path.dirname(options.statusFile), { recursive: true });
-      writeFileSync(
-        options.statusFile,
-        JSON.stringify({
-          connected,
-          host,
-          loginUrl,
-          port: connected ? options.port : null,
-          tailnetProxyAddress: localProxyPort !== null ? `127.0.0.1:${localProxyPort}` : null,
-          daemonPublicKeyB64: options.daemonPublicKeyB64 ?? null,
-          updatedAt: Date.now(),
-        }),
-        "utf8",
-      );
+      const status: Record<string, unknown> = {
+        connected,
+        host,
+        loginUrl,
+        port: connected ? options.port : null,
+        tailnetProxyAddress: localProxyPort !== null ? `127.0.0.1:${localProxyPort}` : null,
+        daemonPublicKeyB64: options.daemonPublicKeyB64 ?? null,
+        updatedAt: Date.now(),
+      };
+      if (process.env.JAGENTDESK_TAILSCALE_ENABLED === "0") {
+        status.enabled = false;
+      } else if (process.env.JAGENTDESK_TAILSCALE_ENABLED === "1") {
+        status.enabled = true;
+      }
+      writeFileSync(options.statusFile, JSON.stringify(status), "utf8");
     } catch {
       // Health reporting is best effort and must never prevent the daemon from serving.
     }
@@ -251,6 +253,10 @@ export function createTsnetListener(options: TsnetListenerOptions): TsnetListene
   function shouldStartBridge(): boolean {
     if (options.port <= 0) {
       logger.info("tsnet listener unavailable: daemon has no TCP listen port");
+      return false;
+    }
+    if (process.env.JAGENTDESK_TAILSCALE_ENABLED === "0") {
+      logger.info("tsnet listener disabled by the desktop transport mode");
       return false;
     }
     if (options.bridgeBinary && !options.spawnBridge && !existsSync(options.bridgeBinary)) {

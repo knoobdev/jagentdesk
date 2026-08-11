@@ -35,6 +35,11 @@ export interface DesktopDaemonStatus {
   tailscaleConnected?: boolean;
 }
 
+export interface DesktopDaemonStartOptions {
+  /** Whether the managed daemon should start its embedded Tailscale bridge. */
+  enableTailscale?: boolean;
+}
+
 export interface DesktopDaemonLogs {
   logPath: string;
   contents: string;
@@ -160,8 +165,14 @@ export async function getDesktopDaemonStatus(): Promise<DesktopDaemonStatus> {
   return parseDesktopDaemonStatus(await invokeDesktopCommand("desktop_daemon_status"));
 }
 
-export async function startDesktopDaemon(): Promise<DesktopDaemonStatus> {
-  return parseDesktopDaemonStatus(await invokeDesktopCommand("start_desktop_daemon"));
+export async function startDesktopDaemon(
+  options: DesktopDaemonStartOptions = {},
+): Promise<DesktopDaemonStatus> {
+  return parseDesktopDaemonStatus(
+    await invokeDesktopCommand("start_desktop_daemon", {
+      enableTailscale: options.enableTailscale,
+    }),
+  );
 }
 
 export async function stopDesktopDaemon(
@@ -170,8 +181,14 @@ export async function stopDesktopDaemon(
   return parseDesktopDaemonStatus(await invokeDesktopCommand("stop_desktop_daemon", { reason }));
 }
 
-export async function restartDesktopDaemon(): Promise<DesktopDaemonStatus> {
-  return parseDesktopDaemonStatus(await invokeDesktopCommand("restart_desktop_daemon"));
+export async function restartDesktopDaemon(
+  options: DesktopDaemonStartOptions = {},
+): Promise<DesktopDaemonStatus> {
+  return parseDesktopDaemonStatus(
+    await invokeDesktopCommand("restart_desktop_daemon", {
+      enableTailscale: options.enableTailscale,
+    }),
+  );
 }
 
 export async function getDesktopDaemonLogs(): Promise<DesktopDaemonLogs> {
