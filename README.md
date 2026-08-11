@@ -79,14 +79,14 @@ credential đó.
 ### Android
 
 Tải file APK từ GitHub Release `v1.0.0` hoặc release tương ứng. Bật cho phép cài ứng dụng từ
-nguồn này trong Android Settings, mở APK và cài đặt. File `.aab` dành cho Play Store/EAS không
-phải file cài trực tiếp; hãy dùng artifact `.apk`.
+nguồn này trong Android Settings, mở APK và cài đặt. File `.aab` dành cho Play Store không phải
+file cài trực tiếp; hãy dùng artifact `.apk`.
 
 ### iPhone/iPad
 
-GitHub Actions tạo IPA cho device bằng profile EAS `production-ipa`; artifact có tên dạng
-`JAgentDesk-v1.0.0-ios.ipa`. Đây là IPA device, không phải app Simulator. Để sideload trên thiết
-bị thật, Sideloadly sẽ ký lại IPA bằng Apple ID/certificate của người cài:
+GitHub Actions build IPA cho device trực tiếp bằng Xcode trên macOS runner; artifact có tên dạng
+`JAgentDesk-v1.0.0-ios.ipa`. Đây là IPA device chưa ký, không phải app Simulator. Để sideload trên
+thiết bị thật, Sideloadly sẽ ký lại IPA bằng Apple ID/certificate của người cài:
 
 1. Cài [Sideloadly](https://sideloadly.io/) trên macOS hoặc Windows.
 2. Kết nối iPhone bằng USB, mở khóa và bấm **Trust** nếu iOS hỏi.
@@ -95,9 +95,8 @@ bị thật, Sideloadly sẽ ký lại IPA bằng Apple ID/certificate của ng�
 5. Trên iPhone vào **Settings → General → VPN & Device Management**, tin cậy developer
    profile rồi mở JAgentDesk.
 
-IPA phải được build cho device. Có thể build thủ công từ thư mục `packages/app` bằng
-`eas build --platform ios --profile production-ipa`; profile `production-simulator` chỉ dùng cho
-iOS Simulator. Apple ID miễn phí có thể có thời hạn ký ngắn; khi app hết hạn, sideload lại IPA.
+IPA phải được build cho device. Apple ID miễn phí có thể có thời hạn ký ngắn; khi app hết hạn,
+sideload lại IPA.
 
 ## Build và release bằng GitHub Actions
 
@@ -106,13 +105,12 @@ repo này là `v1.0.0` và phải khớp version `1.0.0` trong các package.
 
 - Desktop build theo matrix macOS, Windows và Linux, sau đó upload installer vào GitHub Release.
 - Mobile Android được prebuild và compile trực tiếp trên runner, sau đó upload APK cài thử.
-- Mobile iOS dùng EAS profile `production-ipa`, chờ build device hoàn tất, tải `.ipa` đã ký và
-  upload vào GitHub Release.
+- Mobile iOS chạy `expo prebuild`, CocoaPods và `xcodebuild` trực tiếp trên macOS runner, đóng gói
+  `.app` device thành `.ipa` chưa ký rồi upload vào GitHub Release. Workflow không dùng EAS.
 
-GitHub Actions tự có `GITHUB_TOKEN`, nhưng job IPA cần secret `EXPO_TOKEN` và Apple signing
-credentials đã được cấu hình trong EAS project. Tạo secret tại repository Settings → Secrets and
-variables → Actions → New repository secret với tên `EXPO_TOKEN`. APK Android của workflow là bản
-cài thử, không phải artifact đã ký để phát hành Play Store.
+GitHub Actions tự có `GITHUB_TOKEN`; job IPA không cần secret signing vì Sideloadly sẽ ký lại IPA
+trên máy người cài. APK Android của workflow là bản cài thử, không phải artifact đã ký để phát hành
+Play Store.
 
 Tạo release đầu tiên:
 
@@ -128,7 +126,10 @@ npm run typecheck
 npm run lint
 npm run build:desktop -- --publish never
 cd packages/app
-npx eas build --platform android --profile production-apk
+npm --prefix ../.. run build:app-deps
+npm run build:terminal-webview
+APP_VARIANT=production npx expo prebuild --platform android --clean --non-interactive
+(cd android && ./gradlew :app:assembleRelease)
 ```
 
 ## License

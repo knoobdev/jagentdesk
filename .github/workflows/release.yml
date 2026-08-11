@@ -265,9 +265,13 @@ jobs:
           retention-days: 14
 
   mobile-ios-ipa:
-    name: Mobile iOS IPA (EAS signed)
+    name: Mobile iOS device IPA (Xcode, unsigned)
     needs: [validate, create-release]
-    runs-on: ubuntu-latest
+    runs-on: macos-15
+    env:
+      CI: "1"
+      LANG: en_US.UTF-8
+      LC_ALL: en_US.UTF-8
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -282,79 +286,71 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
-      - name: Install dependencies and EAS CLI
-        run: npm ci
-
-      - name: Check EAS credentials
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      - name: Select and verify compatible Xcode
+        shell: bash
         run: |
-          if [[ -z "${EXPO_TOKEN:-}" ]]; then
-            echo "::error::The iOS IPA job requires the EXPO_TOKEN GitHub Actions secret."
-            echo "::error::Configure EAS Apple credentials for the jagentdesk project, then add EXPO_TOKEN in Settings > Secrets and variables > Actions."
+          set -euo pipefail
+          for xcode_app in \
+            /Applications/Xcode_16.4.app \
+            /Applications/Xcode_16.3.app \
+            /Applications/Xcode_16.2.app \
+            /Applications/Xcode_16.1.app \
+            /Applications/Xcode.app; do
+            if [[ -d "$xcode_app/Contents/Developer" ]]; then
+              sudo xcode-select --switch "$xcode_app/Contents/Developer"
+              break
+            fi
+          done
+          xcodebuild -version
+          xcode_version="$(xcodebuild -version | awk '$1 == "Xcode" {print $2}')"
+          xcode_major="${xcode_version%%.*}"
+          xcode_minor="${xcode_version#*.}"
+          xcode_minor="${xcode_minor%%.*}"
+          if (( xcode_major < 16 || (xcode_major == 16 && xcode_minor < 1) )); then
+            echo "Xcode $xcode_version is too old; React Native 0.81 requires Xcode 16.1 or newer."
             exit 1
           fi
 
-      - name: Build signed iOS device IPA with EAS
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build iOS app dependencies
+        run: |
+          npm run build:app-deps
+          npm --prefix packages/app run build:terminal-webview
+
+      - name: Build unsigned iOS device IPA with Xcode
         id: artifact
         shell: bash
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
           set -euo pipefail
+          export APP_VARIANT=production
           cd packages/app
-          eas_json="$RUNNER_TEMP/eas-ios-build.json"
-          build_view_json="$RUNNER_TEMP/eas-ios-build-view.json"
-          npx --no-install eas build \
-            --platform ios \
-            --profile production-ipa \
-            --non-interactive \
-            --wait \
-            --json > "$eas_json"
+          npx expo prebuild --platform ios --clean --no-install
+          cd ios
+          pod install --repo-update
+          derived_data="$RUNNER_TEMP/jagentdesk-ios-derived"
+          xcodebuild \
+            -workspace JAgentDesk.xcworkspace \
+            -scheme JAgentDesk \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            -derivedDataPath "$derived_data" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
 
-          build_id="$(node - "$eas_json" <<'NODE'
-          const fs = require("node:fs");
-          const input = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-          const values = Array.isArray(input) ? input : [input];
-          const findBuild = (value) => {
-            if (!value || typeof value !== "object") return null;
-            if (typeof value.id === "string" && value.id.length > 0) return value.id;
-            for (const child of Object.values(value)) {
-              const found = findBuild(child);
-              if (found) return found;
-            }
-            return null;
-          };
-          const id = values.map(findBuild).find(Boolean);
-          if (!id) throw new Error("EAS did not return an iOS build id.");
-          process.stdout.write(id);
-          NODE
-          )"
-
-          npx --no-install eas build:view "$build_id" --json > "$build_view_json"
-          artifact_url="$(node - "$build_view_json" <<'NODE'
-          const fs = require("node:fs");
-          const input = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-          const urlKeys = new Set(["applicationArchiveUrl", "buildUrl", "artifactUrl"]);
-          const findUrl = (value) => {
-            if (!value || typeof value !== "object") return null;
-            for (const [key, child] of Object.entries(value)) {
-              if (urlKeys.has(key) && typeof child === "string" && child.startsWith("https://")) {
-                return child;
-              }
-              const found = findUrl(child);
-              if (found) return found;
-            }
-            return null;
-          };
-          const url = findUrl(input);
-          if (!url) throw new Error("EAS finished without an IPA download URL.");
-          process.stdout.write(url);
-          NODE
-          )"
-
+          app_path="$derived_data/Build/Products/Release-iphoneos/JAgentDesk.app"
+          test -d "$app_path"
+          test -f "$app_path/JAgentDesk"
+          lipo -info "$app_path/JAgentDesk"
+          ipa_root="$RUNNER_TEMP/jagentdesk-ios-ipa"
+          mkdir -p "$ipa_root/Payload"
+          ditto "$app_path" "$ipa_root/Payload/JAgentDesk.app"
           asset_path="$RUNNER_TEMP/JAgentDesk-${RELEASE_TAG}-ios.ipa"
-          curl --fail --location --retry 5 --retry-delay 2 "$artifact_url" --output "$asset_path"
+          (cd "$ipa_root" && /usr/bin/zip -qry "$asset_path" Payload)
           test -s "$asset_path"
           unzip -tq "$asset_path" >/dev/null
           echo "asset_path=$asset_path" >> "$GITHUB_OUTPUT"
@@ -364,10 +360,26 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$RELEASE_TAG" "${{ steps.artifact.outputs.asset_path }}" --clobber --repo "$GITHUB_REPOSITORY"
 
-      - name: Upload iOS IPA workflow artifact
+      - name: Remove obsolete simulator release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          old_asset_name="JAgentDesk-${RELEASE_TAG}-ios-simulator.tar.gz"
+          old_asset_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
+            --jq ".assets[] | select(.name == \"$old_asset_name\") | .id" | head -n 1)"
+          if [[ -n "$old_asset_id" ]]; then
+            gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$old_asset_id"
+            echo "Removed obsolete simulator asset $old_asset_name."
+          else
+            echo "No obsolete simulator asset found."
+          fi
+
+      - name: Upload iOS device IPA workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mobile-ios-ipa
+          name: mobile-ios-device-ipa
           path: ${{ steps.artifact.outputs.asset_path }}
           if-no-files-found: error
           retention-days: 14
