@@ -346,6 +346,14 @@ async function shouldStartBuiltInDaemon(): Promise<boolean> {
   if (hasConfiguredLocalDaemonOverride()) {
     return false;
   }
+  // A fresh desktop install must land on the Tailscale gate without first
+  // starting a Local daemon. Starting Local here forced the login action to
+  // perform a slow stop/restart and made the app appear to choose Local by
+  // itself.
+  const connectionMode = await getConnectionMode();
+  if (connectionMode === null) {
+    return false;
+  }
   const settings = await loadDesktopSettings();
   return settings.daemon.manageBuiltInDaemon;
 }
@@ -354,6 +362,9 @@ function HostRuntimeBootstrapProvider({ children }: { children: ReactNode }) {
   const { mode: connectionMode, loaded: connectionModeLoaded } = useConnectionMode();
 
   useEffect(() => {
+    if (!connectionModeLoaded) {
+      return;
+    }
     const store = getHostRuntimeStore();
     const daemonStartService = getDaemonStartService({ store, getConnectionMode });
     startHostRuntimeBootstrap({

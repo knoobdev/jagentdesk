@@ -4,6 +4,8 @@ import type { NodeEntrypointInvocation } from "../node-entrypoint-launcher.js";
 import { createNodeEntrypointInvocation } from "../runtime-paths.js";
 import { resolveExternalCliEntrypoint } from "./entrypoints.js";
 
+const EXTERNAL_CLI_TIMEOUT_MS = 8_000;
+
 function createExternalCliInvocation(args: string[]): NodeEntrypointInvocation {
   return createNodeEntrypointInvocation({
     entrypoint: resolveExternalCliEntrypoint(),
@@ -25,6 +27,22 @@ function spawnExternalCli(
 
     let stdout = "";
     let stderr = "";
+    let timedOut = false;
+    let settled = false;
+    let forceKillTimeout: ReturnType<typeof setTimeout> | undefined;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGTERM");
+      forceKillTimeout = setTimeout(() => child.kill("SIGKILL"), 250);
+    }, EXTERNAL_CLI_TIMEOUT_MS);
+
+    const finish = (result: { stdout: string; stderr: string; exitCode: number | null }) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      if (forceKillTimeout !== undefined) clearTimeout(forceKillTimeout);
+      resolve(result);
+    };
 
     child.stdout!.on("data", (data: Buffer) => {
       stdout += data.toString();
@@ -33,9 +51,21 @@ function spawnExternalCli(
       stderr += data.toString();
     });
 
-    child.on("error", reject);
+    child.on("error", (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      if (forceKillTimeout !== undefined) clearTimeout(forceKillTimeout);
+      reject(error);
+    });
     child.on("close", (exitCode) => {
-      resolve({ stdout, stderr, exitCode });
+      finish({
+        stdout,
+        stderr: timedOut
+          ? `${stderr}\nCLI command timed out after ${EXTERNAL_CLI_TIMEOUT_MS}ms.`
+          : stderr,
+        exitCode,
+      });
     });
   });
 }

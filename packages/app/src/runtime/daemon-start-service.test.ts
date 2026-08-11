@@ -243,6 +243,32 @@ describe("DaemonStartService", () => {
     expect(daemonStartCount).toBe(1);
   });
 
+  it("shares concurrent startup calls instead of starting two daemon supervisors", async () => {
+    const fake = createFakeStore();
+    let resolveStart: ((value: DesktopDaemonStatus) => void) | undefined;
+    const startDesktopDaemon = vi.fn(
+      () =>
+        new Promise<DesktopDaemonStatus>((resolve) => {
+          resolveStart = resolve;
+        }),
+    );
+    const service = new DaemonStartService({
+      store: fake.store,
+      startDesktopDaemon,
+    });
+
+    const first = service.startIfEnabled({ shouldStart: true });
+    const second = service.startIfEnabled({ shouldStart: true });
+
+    expect(service.isRunning()).toBe(true);
+    await vi.waitFor(() => expect(startDesktopDaemon).toHaveBeenCalledTimes(1));
+    resolveStart?.(makeStatus());
+
+    await expect(Promise.all([first, second])).resolves.toEqual([{ ok: true }, { ok: true }]);
+    expect(startDesktopDaemon).toHaveBeenCalledTimes(1);
+    expect(service.isRunning()).toBe(false);
+  });
+
   it("finishes without starting the daemon when management is disabled", async () => {
     const fake = createFakeStore();
     let daemonStartCount = 0;

@@ -1,10 +1,17 @@
 {
   "name": "@jagentdesk/desktop",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "JAgentDesk desktop app (Electron wrapper)",
   "homepage": "https://github.com/knoobdev/jagentdesk",
   "license": "AGPL-3.0-or-later",
+  "author": {
+    "name": "JAgentDesk"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/knoobdev/jagentdesk.git"
+  },
   "main": "dist/main.js",
   "scripts": {
     "build": "npm --prefix ../.. run build:server:clean && npm run build:main && electron-builder --config electron-builder.yml",

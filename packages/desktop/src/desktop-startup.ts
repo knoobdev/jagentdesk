@@ -1,7 +1,7 @@
 export interface DesktopStartupDependencies {
   hasPendingGuiLaunchRequest: boolean;
   runCliPassthroughIfRequested: () => Promise<boolean>;
-  inheritLoginShellEnv: () => void;
+  inheritLoginShellEnv: () => void | Promise<void>;
   bootstrapGui: () => Promise<void>;
   /** Schedule shell discovery after the first window is available. */
   defer?: (task: () => void) => void;

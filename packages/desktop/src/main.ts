@@ -4,7 +4,7 @@ import log from "electron-log/main";
 log.transports.console.level = "info";
 log.initialize({ spyRendererConsole: true });
 
-import { inheritLoginShellEnv } from "./login-shell-env.js";
+import { inheritLoginShellEnvAsync } from "./login-shell-env.js";
 
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -1054,7 +1054,7 @@ async function bootstrap(): Promise<void> {
 void runDesktopStartup({
   hasPendingGuiLaunchRequest: Boolean(pendingOpenProjectPath || pendingAgentNavigation),
   runCliPassthroughIfRequested,
-  inheritLoginShellEnv,
+  inheritLoginShellEnv: inheritLoginShellEnvAsync,
   bootstrapGui: bootstrap,
   autoUpdateInstalledSkills: () => {
     void autoUpdateInstalledSkills().catch((error) => {

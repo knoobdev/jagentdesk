@@ -29,10 +29,17 @@ export function startHostRuntimeBootstrap(input: StartHostRuntimeBootstrapInput)
   const registryReady = input.store.boot();
   void input.daemonStartService.startIfEnabled({
     shouldStart: async () => {
+      const shouldStart =
+        typeof input.shouldStartDaemon === "boolean"
+          ? input.shouldStartDaemon
+          : input.shouldStartDaemon();
+      if (!(await shouldStart)) {
+        // First-run desktop login must not wait for the host registry or start a
+        // local daemon before the user has selected a transport.
+        return false;
+      }
       await registryReady;
-      return typeof input.shouldStartDaemon === "boolean"
-        ? input.shouldStartDaemon
-        : input.shouldStartDaemon();
+      return true;
     },
   });
 }
@@ -71,7 +78,7 @@ export function resolveStartupBlocker(input: ResolveStartupBlockerInput): Startu
   return { kind: "none" };
 }
 
-export function resolveStartupNavigationReady(input: { startupBlocker: StartupBlocker }): boolean {
+export function resolveStartupNavigationReady(_input: { startupBlocker: StartupBlocker }): boolean {
   // Starting the managed daemon is deliberately background work. The login
   // and pairing gates must be reachable while the daemon is still acquiring a
   // Tailscale identity. The route resolver still owns the terminal error

@@ -48,8 +48,11 @@ import { tailFile } from "../diagnostics/tail-file.js";
 
 const DAEMON_LOG_FILENAME = "daemon.log";
 const STARTUP_POLL_INTERVAL_MS = 200;
-const STARTUP_POLL_MAX_ATTEMPTS = 150;
+const STARTUP_READY_TIMEOUT_MS = 30_000;
 const DETACHED_STARTUP_GRACE_MS = 1200;
+const DAEMON_HEALTH_TIMEOUT_MS = 250;
+const TAILSCALE_LOGIN_URL_TIMEOUT_MS = 20_000;
+const TAILSCALE_STATUS_FRESHNESS_MS = 15_000;
 
 type DesktopDaemonState = "starting" | "running" | "stopped" | "errored";
 const DESKTOP_DAEMON_STOP_REASON_VALUES = [
@@ -262,10 +265,14 @@ function probeAppOwnedDaemonHealth(listen: string | null): Promise<boolean> {
       settled = true;
       resolve(healthy);
     };
-    const request = httpRequest(url, { method: "GET", timeout: 1_000 }, (response) => {
-      response.resume();
-      finish(response.statusCode === 200);
-    });
+    const request = httpRequest(
+      url,
+      { method: "GET", timeout: DAEMON_HEALTH_TIMEOUT_MS },
+      (response) => {
+        response.resume();
+        finish(response.statusCode === 200);
+      },
+    );
     request.once("timeout", () => {
       request.destroy();
       finish(false);
@@ -469,9 +476,41 @@ function buildDesktopDaemonStatus(
   };
 }
 
-export async function resolveDesktopDaemonStatus(): Promise<DesktopDaemonStatus> {
+function stoppedDesktopDaemonStatus(
+  home: string,
+  error: string | null = null,
+): DesktopDaemonStatus {
+  return {
+    serverId: "",
+    status: "stopped",
+    listen: null,
+    hostname: null,
+    pid: null,
+    home,
+    version: null,
+    desktopManaged: false,
+    error,
+    healthy: false,
+    tailnetAddress: null,
+    tailnetProxyAddress: null,
+    daemonPublicKeyB64: null,
+    tailscaleConnected: false,
+  };
+}
+
+async function resolveDesktopDaemonStatusUnshared(): Promise<DesktopDaemonStatus> {
   const home = getJAgentDeskHome();
   const expectedListen = getManagedDaemonListen();
+
+  // A cold start should not spawn the external CLI just to discover that the
+  // app-owned port is closed. The CLI is still used whenever the endpoint or
+  // managed process exists, which preserves stale-daemon/version detection.
+  if (!isDesktopManagedDaemonRunningSync()) {
+    const appOwnedHealth = await probeAppOwnedDaemonHealth(expectedListen);
+    if (!appOwnedHealth) {
+      return stoppedDesktopDaemonStatus(home);
+    }
+  }
 
   try {
     const payload = (await runExternalCliJsonCommand(["daemon", "status", "--json"])) as Record<
@@ -483,23 +522,25 @@ export async function resolveDesktopDaemonStatus(): Promise<DesktopDaemonStatus>
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     logDesktopDaemonLifecycle("resolveStatus CLI command failed", { error: errorMessage });
-    return {
-      serverId: "",
-      status: "stopped",
-      listen: null,
-      hostname: null,
-      pid: null,
-      home,
-      version: null,
-      desktopManaged: false,
-      error: errorMessage,
-      healthy: false,
-      tailnetAddress: null,
-      tailnetProxyAddress: null,
-      daemonPublicKeyB64: null,
-      tailscaleConnected: false,
-    };
+    return stoppedDesktopDaemonStatus(home, errorMessage);
   }
+}
+
+let desktopDaemonStatusInFlight: Promise<DesktopDaemonStatus> | null = null;
+
+export function resolveDesktopDaemonStatus(): Promise<DesktopDaemonStatus> {
+  if (desktopDaemonStatusInFlight) {
+    return desktopDaemonStatusInFlight;
+  }
+
+  const operation = resolveDesktopDaemonStatusUnshared();
+  const trackedOperation = operation.finally(() => {
+    if (desktopDaemonStatusInFlight === trackedOperation) {
+      desktopDaemonStatusInFlight = null;
+    }
+  });
+  desktopDaemonStatusInFlight = trackedOperation;
+  return trackedOperation;
 }
 
 function normalizeVersion(version: string | null): string | null {
@@ -612,28 +653,80 @@ function readFreshTailscaleStatusFile(
   }
 }
 
+function isFreshTailscaleStatus(status: TailscaleStatusFile | null): boolean {
+  return (
+    typeof status?.updatedAt === "number" &&
+    Date.now() - status.updatedAt <= TAILSCALE_STATUS_FRESHNESS_MS
+  );
+}
+
+function isTailscaleLoginUrl(value: string | null | undefined): value is string {
+  return typeof value === "string" && value.startsWith("https://login.tailscale.com/");
+}
+
+function openTailscaleLoginUrl(url: string): void {
+  logDesktopDaemonLifecycle("opening Tailscale login URL", { url });
+  // LaunchServices can take an unpredictable amount of time while the system
+  // browser is starting. The IPC action must resolve after dispatching the URL,
+  // not after the browser process finishes its own startup.
+  void shell.openExternal(url).catch((error) => {
+    logDesktopDaemonLifecycle("failed to open Tailscale login URL", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
+}
+
 async function pollForRunningDaemon(): Promise<DesktopDaemonStatus> {
-  async function poll(attempt: number): Promise<DesktopDaemonStatus> {
-    if (attempt >= STARTUP_POLL_MAX_ATTEMPTS) return resolveDesktopDaemonStatus();
-    const status = await resolveDesktopDaemonStatus();
-    if (attempt === 0 || attempt === STARTUP_POLL_MAX_ATTEMPTS - 1 || attempt % 10 === 9) {
-      logDesktopDaemonLifecycle("polling daemon status after detached start", {
-        attempt: attempt + 1,
-        status: status.status,
-        pid: status.pid,
-        listen: status.listen,
-        serverId: status.serverId || null,
+  const startedAt = Date.now();
+  let attempt = 0;
+  while (Date.now() - startedAt < STARTUP_READY_TIMEOUT_MS) {
+    attempt += 1;
+    const healthy = await probeAppOwnedDaemonHealth(getManagedDaemonListen());
+    if (attempt === 1 || attempt % 10 === 0) {
+      logDesktopDaemonLifecycle("polling daemon health after detached start", {
+        attempt,
+        healthy,
+        elapsedMs: Date.now() - startedAt,
       });
     }
-    if (status.status === "running" && status.serverId && status.listen) return status;
+    if (healthy) {
+      // Resolve the full identity exactly once after the local server is ready.
+      // The previous implementation spawned the external CLI on every 200 ms
+      // attempt, multiplying startup latency and creating status races.
+      return await resolveDesktopDaemonStatus();
+    }
     await sleep(STARTUP_POLL_INTERVAL_MS);
-    return poll(attempt + 1);
   }
-  return poll(0);
+
+  logDesktopDaemonLifecycle("daemon health did not become ready before timeout", {
+    timeoutMs: STARTUP_READY_TIMEOUT_MS,
+  });
+  return await resolveDesktopDaemonStatus();
+}
+
+function buildStartingDesktopDaemonStatus(): DesktopDaemonStatus {
+  return {
+    serverId: "",
+    status: "starting",
+    listen: getManagedDaemonListen(),
+    hostname: null,
+    pid: null,
+    home: getJAgentDeskHome(),
+    version: resolveDesktopAppVersion(),
+    desktopManaged: true,
+    error: null,
+    healthy: false,
+    tailnetAddress: null,
+    tailnetProxyAddress: null,
+    daemonPublicKeyB64: null,
+    tailscaleConnected: false,
+  };
 }
 
 function waitForDaemonStartup(waitForReady: boolean): Promise<DesktopDaemonStatus> {
-  return waitForReady ? pollForRunningDaemon() : resolveDesktopDaemonStatus();
+  return waitForReady
+    ? pollForRunningDaemon()
+    : Promise.resolve(buildStartingDesktopDaemonStatus());
 }
 
 async function reuseOrRestartRunningDaemon(
@@ -669,28 +762,23 @@ interface StartDaemonOptions {
   waitForReady?: boolean;
   /** The bridge is opt-in for the managed daemon; Local and first-run disable it. */
   enableTailscale?: boolean;
+  /** A caller that has just stopped the daemon can skip a second CLI status probe. */
+  initialStatus?: DesktopDaemonStatus;
 }
 
-async function startDaemon({
-  useSavedTailscaleAuthKey = true,
-  waitForReady = true,
-  enableTailscale = true,
-}: StartDaemonOptions = {}): Promise<DesktopDaemonStatus> {
-  assertBuiltInDaemonManagementEnabled(await getDesktopSettingsStore().get());
-  synchronizeManagedDaemonConfig();
+interface SpawnDaemonOptions {
+  current: DesktopDaemonStatus;
+  useSavedTailscaleAuthKey: boolean;
+  waitForReady: boolean;
+  enableTailscale: boolean;
+}
 
-  const current = await resolveDesktopDaemonStatus();
-  logDesktopDaemonLifecycle("initial status check before start", {
-    status: current.status,
-    pid: current.pid,
-    listen: current.listen,
-    serverId: current.serverId || null,
-    error: current.error,
-    desktopManaged: current.desktopManaged,
-  });
-  const reusableDaemon = await reuseOrRestartRunningDaemon(current, enableTailscale);
-  if (reusableDaemon) return reusableDaemon;
-
+async function spawnDetachedDaemon({
+  current,
+  useSavedTailscaleAuthKey,
+  waitForReady,
+  enableTailscale,
+}: SpawnDaemonOptions): Promise<DesktopDaemonStatus> {
   const daemonRunner = resolveDaemonRunnerEntrypoint();
   const reclaimStalePidLock =
     current.status === "errored" && current.desktopManaged && current.error === null;
@@ -753,10 +841,37 @@ async function startDaemon({
   });
 
   child.unref();
-
   await waitForDetachedStartup(child);
-
   return waitForDaemonStartup(waitForReady);
+}
+
+async function startDaemon({
+  useSavedTailscaleAuthKey = true,
+  waitForReady = true,
+  enableTailscale = true,
+  initialStatus,
+}: StartDaemonOptions = {}): Promise<DesktopDaemonStatus> {
+  assertBuiltInDaemonManagementEnabled(await getDesktopSettingsStore().get());
+  synchronizeManagedDaemonConfig();
+
+  const current = initialStatus ?? (await resolveDesktopDaemonStatus());
+  logDesktopDaemonLifecycle("initial status check before start", {
+    status: current.status,
+    pid: current.pid,
+    listen: current.listen,
+    serverId: current.serverId || null,
+    error: current.error,
+    desktopManaged: current.desktopManaged,
+  });
+  const reusableDaemon = await reuseOrRestartRunningDaemon(current, enableTailscale);
+  if (reusableDaemon) return reusableDaemon;
+
+  return await spawnDetachedDaemon({
+    current,
+    useSavedTailscaleAuthKey,
+    waitForReady,
+    enableTailscale,
+  });
 }
 
 async function stopConflictingDaemonForInteractiveLogin(): Promise<void> {
@@ -823,6 +938,95 @@ function getDaemonLogs(): DesktopDaemonLogs {
 
 async function getCliDaemonStatus(): Promise<string> {
   return await runExternalCliTextCommand(["daemon", "status"]);
+}
+
+interface InteractiveTailscaleLoginResult {
+  started: boolean;
+  connected: boolean;
+}
+
+async function resolveRunningInteractiveTailscaleLogin(
+  existingStatus: TailscaleStatusFile | null,
+  appOwnedHealth: boolean,
+): Promise<InteractiveTailscaleLoginResult | null> {
+  if (existingStatus?.enabled !== false && existingStatus?.connected === true && appOwnedHealth) {
+    return { started: false, connected: true };
+  }
+
+  if (isTailscaleLoginUrl(existingStatus?.loginUrl) && isFreshTailscaleStatus(existingStatus)) {
+    openTailscaleLoginUrl(existingStatus.loginUrl);
+    return { started: false, connected: false };
+  }
+
+  // An existing daemon may have been started with the saved auth-key path.
+  // Restart this explicit interactive action without that key so the embedded
+  // bridge produces the browser login URL.
+  await runDesktopDaemonStopViaCli({ reason: "restart" });
+  return null;
+}
+
+async function waitForInteractiveTailscaleLogin(
+  statusFile: string,
+  startupStartedAt: number,
+): Promise<InteractiveTailscaleLoginResult> {
+  const deadline = startupStartedAt + TAILSCALE_LOGIN_URL_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const status = readFreshTailscaleStatusFile(statusFile, startupStartedAt);
+    if (status?.connected === true && (await probeAppOwnedDaemonHealth(getManagedDaemonListen()))) {
+      return { started: false, connected: true };
+    }
+    if (isTailscaleLoginUrl(status?.loginUrl)) {
+      openTailscaleLoginUrl(status.loginUrl);
+      return { started: true, connected: false };
+    }
+    await sleep(Math.min(250, Math.max(1, deadline - Date.now())));
+  }
+  throw new Error(
+    `JAgentDesk could not obtain a Tailscale authentication URL within ${TAILSCALE_LOGIN_URL_TIMEOUT_MS / 1000} seconds. Check the daemon status or use an auth key.`,
+  );
+}
+
+async function startInteractiveTailscaleLogin(): Promise<InteractiveTailscaleLoginResult> {
+  const statusFile = path.join(getJAgentDeskHome(), "tailscale-status.json");
+  const existingStatus = readTailscaleStatusFile();
+  const managedProcessRunning = isDesktopManagedDaemonRunningSync();
+  const appOwnedHealth = await probeAppOwnedDaemonHealth(getManagedDaemonListen());
+  const daemonIsRunning = managedProcessRunning || appOwnedHealth;
+
+  logDesktopDaemonLifecycle("interactive Tailscale login requested", {
+    managedProcessRunning,
+    appOwnedHealth,
+    existingStatus: existingStatus
+      ? {
+          connected: existingStatus.connected ?? false,
+          enabled: existingStatus.enabled ?? null,
+          hasLoginUrl: isTailscaleLoginUrl(existingStatus.loginUrl),
+        }
+      : null,
+  });
+
+  if (daemonIsRunning) {
+    const existingResult = await resolveRunningInteractiveTailscaleLogin(
+      existingStatus,
+      appOwnedHealth,
+    );
+    if (existingResult) return existingResult;
+  } else if (!app.isPackaged) {
+    // In development, the CLI daemon can still occupy this app-owned home/port.
+    // Replace only that exact same-home process; never touch a daemon belonging
+    // to another installation.
+    await stopConflictingDaemonForInteractiveLogin();
+  }
+
+  const startupStartedAt = Date.now();
+  await startDaemon({
+    useSavedTailscaleAuthKey: false,
+    waitForReady: false,
+    enableTailscale: true,
+    initialStatus: stoppedDesktopDaemonStatus(getJAgentDeskHome()),
+  });
+
+  return await waitForInteractiveTailscaleLogin(statusFile, startupStartedAt);
 }
 
 // ---------------------------------------------------------------------------
@@ -905,66 +1109,7 @@ export function createDaemonCommandHandlers(): Record<string, DesktopCommandHand
       if (!nonce) throw new Error("A Tailscale challenge nonce is required.");
       return signDeviceNonce(getDesktopDeviceKeyPair(), nonce);
     },
-    start_tailscale_login: async () => {
-      const statusFile = path.join(getJAgentDeskHome(), "tailscale-status.json");
-      const daemonStatus = await resolveDesktopDaemonStatus();
-      const existingStatus = readTailscaleStatusFile();
-
-      if (daemonStatus.status === "running") {
-        if (
-          existingStatus?.enabled !== false &&
-          existingStatus?.connected === true &&
-          daemonStatus.healthy === true
-        ) {
-          return { started: false, connected: true };
-        }
-        if (
-          typeof existingStatus?.loginUrl === "string" &&
-          existingStatus.loginUrl.startsWith("https://login.tailscale.com/")
-        ) {
-          await shell.openExternal(existingStatus.loginUrl);
-          return { started: false, connected: false };
-        }
-
-        // An existing daemon may have been started with the saved auth-key
-        // path. Restart this explicit interactive action without that key so
-        // the embedded bridge produces the browser login URL.
-        await stopDesktopDaemon("restart");
-      } else {
-        // In development, the CLI daemon can still occupy this app-owned
-        // home/port. Replace only that exact same-home process; never touch a
-        // daemon belonging to another installation.
-        await stopConflictingDaemonForInteractiveLogin();
-      }
-
-      const startupStartedAt = Date.now();
-      await startDaemon({
-        useSavedTailscaleAuthKey: false,
-        waitForReady: false,
-        enableTailscale: true,
-      });
-
-      for (let attempt = 0; attempt < 60; attempt += 1) {
-        const status = readFreshTailscaleStatusFile(statusFile, startupStartedAt);
-        if (status?.connected === true) {
-          const daemonHealth = await resolveDesktopDaemonStatus();
-          if (daemonHealth.status === "running" && daemonHealth.healthy === true) {
-            return { started: false, connected: true };
-          }
-        }
-        if (
-          typeof status?.loginUrl === "string" &&
-          status.loginUrl.startsWith("https://login.tailscale.com/")
-        ) {
-          await shell.openExternal(status.loginUrl);
-          return { started: true, connected: false };
-        }
-        await sleep(500);
-      }
-      throw new Error(
-        "JAgentDesk could not obtain a Tailscale authentication URL. Check the daemon status or use an auth key.",
-      );
-    },
+    start_tailscale_login: startInteractiveTailscaleLogin,
     start_desktop_daemon: (args) =>
       startDaemon({ enableTailscale: args?.enableTailscale !== false }),
     stop_desktop_daemon: (args) => stopDesktopDaemon(parseDesktopDaemonStopReason(args)),

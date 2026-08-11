@@ -98,6 +98,7 @@ export class DaemonStartService {
   private readonly listeners = new Set<() => void>();
   private lastError: string | null = null;
   private inFlightCount = 0;
+  private inFlightStart: Promise<DaemonStartResult> | null = null;
 
   constructor(deps: DaemonStartServiceDeps) {
     this.store = deps.store;
@@ -112,6 +113,24 @@ export class DaemonStartService {
   }
 
   async startIfEnabled(input: StartDaemonIfEnabledInput): Promise<DaemonStartResult> {
+    // React can re-run the bootstrap effect while the persisted connection mode
+    // is hydrating. Share the operation so two renderer calls can never spawn
+    // two managed daemon supervisors for the same desktop runtime.
+    if (this.inFlightStart) {
+      return this.inFlightStart;
+    }
+
+    const operation = this.runStartIfEnabled(input);
+    const trackedOperation = operation.finally(() => {
+      if (this.inFlightStart === trackedOperation) {
+        this.inFlightStart = null;
+      }
+    });
+    this.inFlightStart = trackedOperation;
+    return trackedOperation;
+  }
+
+  private async runStartIfEnabled(input: StartDaemonIfEnabledInput): Promise<DaemonStartResult> {
     // Settings evaluation is part of startup. Publish the running state before
     // its first await so restored app chrome cannot appear between these phases.
     this.beginRequest();
