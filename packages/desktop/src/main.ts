@@ -14,6 +14,7 @@ import {
   app,
   BrowserWindow,
   clipboard,
+  dialog,
   Menu,
   ipcMain,
   nativeImage,
@@ -21,6 +22,7 @@ import {
   protocol,
   screen,
   session,
+  shell,
   webContents,
 } from "electron";
 import { registerDaemonManager } from "./daemon/daemon-manager.js";
@@ -94,14 +96,38 @@ import {
   type AgentDeepLinkTarget,
 } from "@jagentdesk/protocol/agent-deep-link";
 import { AgentNavigationInbox, parseAgentDeepLinkFromArgv } from "./agent-navigation.js";
+import { isRunningUnderARM64Translation } from "./system/arm64-translation.js";
 
 const DEV_SERVER_URL = process.env.EXPO_DEV_URL ?? "http://localhost:8081";
 const APP_SCHEME = "jagentdesk";
+const RELEASES_URL = "https://github.com/knoobdev/jagentdesk/releases/latest";
 const JAGENTDESK_DEBUG = process.env.JAGENTDESK_DEBUG === "1";
 const DISABLE_SINGLE_INSTANCE_LOCK = process.env.JAGENTDESK_DISABLE_SINGLE_INSTANCE_LOCK === "1";
 const APP_NAME = process.env.JAGENTDESK_TEST_APP_NAME?.trim() || "JAgentDesk";
 const pendingBrowserWindowOpenRequests = new PendingBrowserWindowOpenRequests();
 const agentNavigationInbox = new AgentNavigationInbox();
+
+async function refuseRosettaBuild(): Promise<boolean> {
+  if (process.platform !== "darwin" || !isRunningUnderARM64Translation()) {
+    return false;
+  }
+
+  const result = await dialog.showMessageBox({
+    type: "error",
+    title: "Wrong JAgentDesk build",
+    message: "This Intel build cannot run efficiently on Apple Silicon.",
+    detail:
+      "Download the macOS Apple Silicon build of JAgentDesk. Running the Intel build under Rosetta can make startup and every interaction extremely slow.",
+    buttons: ["Open Apple Silicon release", "Quit"],
+    defaultId: 0,
+    cancelId: 1,
+  });
+  if (result.response === 0) {
+    void shell.openExternal(RELEASES_URL);
+  }
+  app.exit(1);
+  return true;
+}
 
 // A second-instance launch can arrive before the packaged protocol handler,
 // IPC handlers, and first window exist. Wait for full bootstrap, not just
@@ -748,6 +774,14 @@ async function createWindow(
     },
   });
 
+  let windowShown = false;
+  const showWindow = () => {
+    if (windowShown || mainWindow.isDestroyed()) return;
+    windowShown = true;
+    mainWindow.show();
+  };
+  const windowShowFallback = setTimeout(showWindow, 5_000);
+
   const webContentsId = mainWindow.webContents.id;
   pendingOpenProjectStore.set(webContentsId, options.pendingOpenProjectPath);
   mainWindow.webContents.on("did-start-navigation", (_event, _url, isSameDocument, isMainFrame) => {
@@ -756,6 +790,7 @@ async function createWindow(
     }
   });
   mainWindow.on("closed", () => {
+    clearTimeout(windowShowFallback);
     pendingOpenProjectStore.delete(webContentsId);
     agentNavigationInbox.removeWindow(webContentsId);
     unregisterJAgentDeskBrowserHost(webContentsId);
@@ -814,9 +849,8 @@ async function createWindow(
     registerBrowserWebviewNavigationGuards(contents);
   });
 
-  mainWindow.once("ready-to-show", () => {
-    mainWindow.show();
-  });
+  mainWindow.once("ready-to-show", showWindow);
+  mainWindow.webContents.once("did-finish-load", showWindow);
 
   if (!app.isPackaged) {
     const { loadReactDevTools } = await import("./features/react-devtools.js");
@@ -966,6 +1000,10 @@ async function bootstrap(): Promise<void> {
   }
 
   await app.whenReady();
+
+  if (await refuseRosettaBuild()) {
+    return;
+  }
 
   const appDistDir = getAppDistDir();
   protocol.handle(APP_SCHEME, (request) => {

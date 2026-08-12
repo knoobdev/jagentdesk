@@ -105,6 +105,9 @@ export class WebTailscaleLoginAdapter implements TailscaleLoginAdapter {
       await invokeDesktopCommand("restart_desktop_daemon", {
         reason: "tailscale_login",
         enableTailscale: true,
+        // The renderer owns the bounded readiness poll. Do not make the IPC
+        // request wait for daemon bootstrap or a Tailscale browser flow.
+        waitForReady: false,
       });
       return { ok: true };
     } catch (error) {

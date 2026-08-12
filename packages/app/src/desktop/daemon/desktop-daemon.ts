@@ -190,6 +190,7 @@ export async function restartDesktopDaemon(
   return parseDesktopDaemonStatus(
     await invokeDesktopCommand("restart_desktop_daemon", {
       enableTailscale: options.enableTailscale,
+      waitForReady: options.waitForReady,
     }),
   );
 }

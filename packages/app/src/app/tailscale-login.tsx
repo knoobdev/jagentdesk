@@ -184,6 +184,152 @@ async function waitForInteractiveLoginUrl(
   return null;
 }
 
+type DesktopInteractiveLoginState = "connected" | "timeout";
+
+async function waitForDesktopInteractiveLogin(
+  isActive: () => boolean,
+): Promise<DesktopInteractiveLoginState | null> {
+  const deadline = Date.now() + INTERACTIVE_LOGIN_TIMEOUT_MS;
+
+  while (isActive() && Date.now() < deadline) {
+    try {
+      const status = await getDesktopTailscaleStatus();
+      if (!isActive()) {
+        return null;
+      }
+      if (status.connected && status.healthy) {
+        return "connected";
+      }
+      // Electron opens the URL from the main process as soon as the embedded
+      // bridge emits it. Keep polling while the user completes the browser
+      // flow instead of reporting a false failure or allowing a second
+      // start/restart race.
+    } catch {
+      // The daemon can be between supervisor and worker startup. Continue
+      // polling until the bounded interactive-login deadline.
+    }
+
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      break;
+    }
+    await new Promise<void>((resolve) =>
+      setTimeout(resolve, Math.min(INTERACTIVE_LOGIN_URL_POLL_MS, remainingMs)),
+    );
+  }
+
+  return "timeout";
+}
+
+interface InteractiveLoginRunnerOptions {
+  adapter: TailscaleLoginAdapter;
+  isDesktopLogin: boolean;
+  isActive: () => boolean;
+  finishConnectedLogin: () => Promise<void>;
+  setError: (error: string | null) => void;
+  setInteractiveErrorVisible: (visible: boolean) => void;
+  failedError: string;
+}
+
+async function runInteractiveLogin({
+  adapter,
+  isDesktopLogin,
+  isActive,
+  finishConnectedLogin,
+  setError,
+  setInteractiveErrorVisible,
+  failedError,
+}: InteractiveLoginRunnerOptions): Promise<void> {
+  if (!isDesktopLogin && adapter.getInteractiveLoginUrl) {
+    const preparation = adapter.prepareInteractiveLogin?.() ?? { ok: true };
+    if (!preparation.ok) {
+      setInteractiveErrorVisible(true);
+      setError(preparation.error ?? failedError);
+      return;
+    }
+    const authUrl = await waitForInteractiveLoginUrl(adapter, isActive);
+    if (!authUrl || !isActive()) {
+      setInteractiveErrorVisible(true);
+      setError("Tailscale did not provide a login URL. Try again.");
+      return;
+    }
+
+    let browserClosed = false;
+    const browserPromise = WebBrowser.openBrowserAsync(authUrl)
+      .catch(() => null)
+      .then((result) => {
+        browserClosed = true;
+        return result;
+      });
+    const connected = await Promise.race([
+      waitForTailscaleConnection(() => isActive() && !browserClosed, INTERACTIVE_LOGIN_TIMEOUT_MS),
+      browserPromise.then(() => false),
+    ]);
+
+    if (!isActive()) {
+      return;
+    }
+
+    if (connected) {
+      setInteractiveErrorVisible(false);
+      await WebBrowser.dismissBrowser().catch(() => undefined);
+      await browserPromise;
+      await finishConnectedLogin();
+      return;
+    }
+
+    // The user may have closed the browser immediately after completing
+    // login. Perform one final real status refresh before showing an error.
+    await browserPromise;
+    await refreshTailscaleStatusBounded();
+    if (getSnapshot().kind === "connected") {
+      setInteractiveErrorVisible(false);
+      await finishConnectedLogin();
+      return;
+    }
+    setInteractiveErrorVisible(true);
+    setError("Tailscale login was not completed. Open Sign in with Tailscale to try again.");
+    return;
+  }
+
+  const result = await adapter.startInteractiveLogin();
+  if (!result.ok) {
+    setInteractiveErrorVisible(true);
+    setError(result.error ?? failedError);
+    return;
+  }
+
+  if (isDesktopLogin) {
+    const desktopLoginState = await waitForDesktopInteractiveLogin(isActive);
+    if (!isActive() || desktopLoginState === null) {
+      return;
+    }
+    if (desktopLoginState === "connected") {
+      setInteractiveErrorVisible(false);
+      await finishConnectedLogin();
+      return;
+    }
+    setInteractiveErrorVisible(true);
+    setError("Tailscale login did not finish in time. Try Sign in with Tailscale again.");
+    return;
+  }
+
+  // The adapter opens the real control-plane URL/app. Re-check once
+  // immediately so an already-completed login transitions now; the
+  // background monitor continues polling while the user finishes the
+  // browser login.
+  await refreshTailscaleStatusBounded();
+  if (!isActive()) {
+    return;
+  }
+  if (getSnapshot().kind === "connected") {
+    setInteractiveErrorVisible(false);
+    await finishConnectedLogin();
+    return;
+  }
+  setError("Tailscale login opened. Finish it; this screen will reconnect automatically.");
+}
+
 function TailscaleMark() {
   return (
     <Svg width={20} height={20} viewBox="0 0 24 24" accessibilityLabel="Tailscale">
@@ -299,84 +445,17 @@ export default function TailscaleLoginRoute() {
     setError(null);
     setInteractiveInProgress(true);
     try {
-      // Native tsnet produces the control-plane URL asynchronously. Open it
-      // in Expo's in-app browser so the app owns the browser session and can
-      // dismiss it as soon as the node reports a completed login.
-      if (!isDesktopLogin && adapter.getInteractiveLoginUrl) {
-        const preparation = adapter.prepareInteractiveLogin?.() ?? { ok: true };
-        if (!preparation.ok) {
-          interactiveErrorVisibleRef.current = true;
-          setError(preparation.error ?? t("tailscaleLogin.errorFailed"));
-          return;
-        }
-        const authUrl = await waitForInteractiveLoginUrl(adapter, () => mountedRef.current);
-        if (!authUrl || !mountedRef.current) {
-          interactiveErrorVisibleRef.current = true;
-          setError("Tailscale did not provide a login URL. Try again.");
-          return;
-        }
-
-        let browserClosed = false;
-        const browserPromise = WebBrowser.openBrowserAsync(authUrl)
-          .catch(() => null)
-          .then((result) => {
-            browserClosed = true;
-            return result;
-          });
-        const connected = await Promise.race([
-          waitForTailscaleConnection(
-            () => mountedRef.current && !browserClosed,
-            INTERACTIVE_LOGIN_TIMEOUT_MS,
-          ),
-          browserPromise.then(() => false),
-        ]);
-
-        if (!mountedRef.current) {
-          return;
-        }
-
-        if (connected) {
-          interactiveErrorVisibleRef.current = false;
-          await WebBrowser.dismissBrowser().catch(() => undefined);
-          await browserPromise;
-          await finishConnectedLogin();
-          return;
-        }
-
-        // The user may have closed the browser immediately after completing
-        // login. Perform one final real status refresh before showing an error.
-        await browserPromise;
-        await refreshTailscaleStatusBounded();
-        if (getSnapshot().kind === "connected") {
-          interactiveErrorVisibleRef.current = false;
-          await finishConnectedLogin();
-          return;
-        }
-        interactiveErrorVisibleRef.current = true;
-        setError("Tailscale login was not completed. Open Sign in with Tailscale to try again.");
-        return;
-      }
-
-      const result = await adapter.startInteractiveLogin();
-      if (result.ok) {
-        // The adapter opens the real control-plane URL/app. Re-check once
-        // immediately so an already-completed login transitions now; the
-        // background monitor continues polling while the user finishes the
-        // browser login.
-        await refreshTailscaleStatusBounded();
-        if (!mountedRef.current) {
-          return;
-        }
-        if (getSnapshot().kind === "connected") {
-          interactiveErrorVisibleRef.current = false;
-          await finishConnectedLogin();
-          return;
-        }
-        setError("Tailscale login opened. Finish it; this screen will reconnect automatically.");
-      } else {
-        interactiveErrorVisibleRef.current = true;
-        setError(result.error ?? t("tailscaleLogin.errorFailed"));
-      }
+      await runInteractiveLogin({
+        adapter,
+        isDesktopLogin,
+        isActive: () => mountedRef.current,
+        finishConnectedLogin,
+        setError,
+        setInteractiveErrorVisible: (visible) => {
+          interactiveErrorVisibleRef.current = visible;
+        },
+        failedError: t("tailscaleLogin.errorFailed"),
+      });
     } catch {
       interactiveErrorVisibleRef.current = true;
       setError(t("tailscaleLogin.errorFailed"));
@@ -557,7 +636,7 @@ export default function TailscaleLoginRoute() {
             leftIcon={TailscaleMark}
             onPress={handleInteractiveLogin}
             loading={interactiveInProgress}
-            disabled={authKeyInProgress}
+            disabled={authKeyInProgress || interactiveInProgress}
             testID="tailscale-login-interactive"
           >
             {interactiveInProgress

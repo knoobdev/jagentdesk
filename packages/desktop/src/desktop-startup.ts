@@ -20,7 +20,7 @@ export async function runDesktopStartup(deps: DesktopStartupDependencies): Promi
   // Finder/Dock launches inherit a tiny environment. Shell discovery is useful
   // for later agent processes, but it must not compete with the first renderer
   // paint. Keep it off the cold path even when the user's shell takes seconds.
-  const defer = deps.defer ?? ((task: () => void) => setTimeout(task, 4000));
+  const defer = deps.defer ?? ((task: () => void) => setTimeout(task, 15_000));
   defer(() => {
     void deps.inheritLoginShellEnv();
   });

@@ -54,6 +54,12 @@ const DAEMON_HEALTH_TIMEOUT_MS = 250;
 const TAILSCALE_LOGIN_URL_TIMEOUT_MS = 90_000;
 const TAILSCALE_STATUS_FRESHNESS_MS = 15_000;
 
+// Interactive login is intentionally a background operation. Keep one
+// monitor per desktop process so repeated taps cannot stop/start the daemon
+// repeatedly while the browser login is still being prepared.
+let interactiveTailscaleLoginMonitor: Promise<void> | null = null;
+let interactiveTailscaleLoginStarting = false;
+
 type DesktopDaemonState = "starting" | "running" | "stopped" | "errored";
 const DESKTOP_DAEMON_STOP_REASON_VALUES = [
   "manual_ipc",
@@ -1083,10 +1089,13 @@ export async function stopDesktopDaemon(
   return statusAfter ?? (await resolveDesktopDaemonStatus());
 }
 
-async function restartDaemon(enableTailscale = true): Promise<DesktopDaemonStatus> {
+async function restartDaemon(
+  enableTailscale = true,
+  waitForReady = true,
+): Promise<DesktopDaemonStatus> {
   assertBuiltInDaemonManagementEnabled(await getDesktopSettingsStore().get());
   await stopDesktopDaemon("restart");
-  return startDaemon({ enableTailscale });
+  return startDaemon({ enableTailscale, waitForReady });
 }
 
 function getDaemonLogs(): DesktopDaemonLogs {
@@ -1148,23 +1157,74 @@ async function waitForInteractiveTailscaleLogin(
 }
 
 async function startInteractiveTailscaleLogin(): Promise<InteractiveTailscaleLoginResult> {
-  const statusFile = path.join(getJAgentDeskHome(), "tailscale-status.json");
-  const existingStatus = readTailscaleStatusFile();
-  const managedProcessRunning = isDesktopManagedDaemonRunningSync();
-  const appOwnedHealth = await probeAppOwnedDaemonHealth(getManagedDaemonListen());
-  const daemonIsRunning = managedProcessRunning || appOwnedHealth;
+  if (interactiveTailscaleLoginMonitor || interactiveTailscaleLoginStarting) {
+    return { started: true, connected: false };
+  }
 
-  logDesktopDaemonLifecycle("interactive Tailscale login requested", {
-    managedProcessRunning,
-    appOwnedHealth,
-    existingStatus: existingStatus
-      ? {
-          connected: existingStatus.connected ?? false,
-          enabled: existingStatus.enabled ?? null,
-          hasLoginUrl: isTailscaleLoginUrl(existingStatus.loginUrl),
+  interactiveTailscaleLoginStarting = true;
+
+  try {
+    const statusFile = path.join(getJAgentDeskHome(), "tailscale-status.json");
+    const existingStatus = readTailscaleStatusFile();
+    const managedProcessRunning = isDesktopManagedDaemonRunningSync();
+    const appOwnedHealth = await probeAppOwnedDaemonHealth(getManagedDaemonListen());
+    const daemonIsRunning = managedProcessRunning || appOwnedHealth;
+
+    logDesktopDaemonLifecycle("interactive Tailscale login requested", {
+      managedProcessRunning,
+      appOwnedHealth,
+      existingStatus: existingStatus
+        ? {
+            connected: existingStatus.connected ?? false,
+            enabled: existingStatus.enabled ?? null,
+            hasLoginUrl: isTailscaleLoginUrl(existingStatus.loginUrl),
+          }
+        : null,
+    });
+
+    if (existingStatus?.enabled !== false && existingStatus?.connected === true && appOwnedHealth) {
+      return { started: false, connected: true };
+    }
+
+    if (isTailscaleLoginUrl(existingStatus?.loginUrl) && isFreshTailscaleStatus(existingStatus)) {
+      openTailscaleLoginUrl(existingStatus.loginUrl);
+      return { started: false, connected: false };
+    }
+
+    const operation = startInteractiveTailscaleLoginOperation({
+      daemonIsRunning,
+      appOwnedHealth,
+      existingStatus,
+      statusFile,
+    })
+      .then(() => undefined)
+      .catch((error) => {
+        logDesktopDaemonLifecycle("interactive Tailscale login monitor failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      })
+      .finally(() => {
+        if (interactiveTailscaleLoginMonitor === operation) {
+          interactiveTailscaleLoginMonitor = null;
         }
-      : null,
-  });
+      });
+    interactiveTailscaleLoginMonitor = operation;
+
+    // Stop/restart and URL discovery run in the monitor. Returning now keeps
+    // the renderer responsive even if an old supervisor takes time to exit.
+    return { started: true, connected: false };
+  } finally {
+    interactiveTailscaleLoginStarting = false;
+  }
+}
+
+async function startInteractiveTailscaleLoginOperation(input: {
+  daemonIsRunning: boolean;
+  appOwnedHealth: boolean;
+  existingStatus: TailscaleStatusFile | null;
+  statusFile: string;
+}): Promise<InteractiveTailscaleLoginResult> {
+  const { daemonIsRunning, appOwnedHealth, existingStatus, statusFile } = input;
 
   if (daemonIsRunning) {
     const existingResult = await resolveRunningInteractiveTailscaleLogin(
@@ -1277,7 +1337,8 @@ export function createDaemonCommandHandlers(): Record<string, DesktopCommandHand
         waitForReady: args?.waitForReady !== false,
       }),
     stop_desktop_daemon: (args) => stopDesktopDaemon(parseDesktopDaemonStopReason(args)),
-    restart_desktop_daemon: (args) => restartDaemon(args?.enableTailscale !== false),
+    restart_desktop_daemon: (args) =>
+      restartDaemon(args?.enableTailscale !== false, args?.waitForReady !== false),
     desktop_daemon_logs: () => getDaemonLogs(),
     desktop_app_logs: () => getDesktopAppLogs(),
     desktop_get_system_idle_time: () => powerMonitor.getSystemIdleTime() * 1000,

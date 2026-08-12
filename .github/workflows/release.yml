@@ -93,6 +93,7 @@ jobs:
             gh release create "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --title "JAgentDesk $RELEASE_TAG" \
+              --notes "macOS: on Apple Silicon, download the asset named macOS-Apple-Silicon. Do not install the Intel x64 asset on Apple Silicon; it runs under Rosetta and is intentionally rejected by the app." \
               --generate-notes
           fi
 
@@ -160,6 +161,21 @@ jobs:
             )
           fi
           npm run build -- --publish never ${{ matrix.build_args }} "${extra_args[@]}"
+
+      - name: Label Apple Silicon macOS assets
+        if: matrix.name == 'macos-arm64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for file in \
+            packages/desktop/release/*-arm64.dmg \
+            packages/desktop/release/*-arm64.zip \
+            packages/desktop/release/*-arm64.dmg.blockmap \
+            packages/desktop/release/*-arm64.zip.blockmap; do
+            target="${file/-arm64/-macOS-Apple-Silicon}"
+            mv "$file" "$target"
+          done
 
       - name: Upload desktop files to GitHub Release
         shell: bash

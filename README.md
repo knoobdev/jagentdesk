@@ -54,6 +54,12 @@ Daemon dev lắng nghe tại `127.0.0.1:6768`. Xem thêm [docs/development.md](d
 Nếu không muốn dùng trình duyệt trong lúc test, Tailscale auth key có thể được nhập ở màn hình
 đăng nhập của mobile. Không commit auth key vào repo hoặc đưa auth key vào issue/log.
 
+### Tải đúng bản desktop trên macOS
+
+Trên máy Mac Apple Silicon (M1/M2/M3/M4), hãy tải asset có tên `macOS-Apple-Silicon` trong
+GitHub Release. Asset `x64` chỉ dành cho Mac Intel. JAgentDesk sẽ chặn bản Intel chạy dưới
+Rosetta để tránh tình trạng CPU cao và UI phản hồi chậm.
+
 ### 2. Pair mobile với desktop
 
 1. Trên desktop mở **Pair a device**.
@@ -78,14 +84,14 @@ credential đó.
 
 ### Android
 
-Tải file APK từ GitHub Release `v1.0.0` hoặc release tương ứng. Bật cho phép cài ứng dụng từ
+Tải file APK từ GitHub Release `v1.0.3` hoặc release tương ứng. Bật cho phép cài ứng dụng từ
 nguồn này trong Android Settings, mở APK và cài đặt. File `.aab` dành cho Play Store không phải
 file cài trực tiếp; hãy dùng artifact `.apk`.
 
 ### iPhone/iPad
 
 GitHub Actions build IPA cho device trực tiếp bằng Xcode trên macOS runner; artifact có tên dạng
-`JAgentDesk-v1.0.0-ios.ipa`. Đây là IPA device chưa ký, không phải app Simulator. Để sideload trên
+`JAgentDesk-v1.0.3-ios.ipa`. Đây là IPA device chưa ký, không phải app Simulator. Để sideload trên
 thiết bị thật, Sideloadly sẽ ký lại IPA bằng Apple ID/certificate của người cài:
 
 1. Cài [Sideloadly](https://sideloadly.io/) trên macOS hoặc Windows.
