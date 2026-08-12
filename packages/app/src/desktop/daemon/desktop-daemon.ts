@@ -38,6 +38,8 @@ export interface DesktopDaemonStatus {
 export interface DesktopDaemonStartOptions {
   /** Whether the managed daemon should start its embedded Tailscale bridge. */
   enableTailscale?: boolean;
+  /** Return as soon as the supervisor is alive; readiness is observed in the background. */
+  waitForReady?: boolean;
 }
 
 export interface DesktopDaemonLogs {
@@ -171,6 +173,7 @@ export async function startDesktopDaemon(
   return parseDesktopDaemonStatus(
     await invokeDesktopCommand("start_desktop_daemon", {
       enableTailscale: options.enableTailscale,
+      waitForReady: options.waitForReady,
     }),
   );
 }

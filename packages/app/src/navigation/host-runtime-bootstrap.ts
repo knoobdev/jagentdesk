@@ -26,8 +26,12 @@ export interface StartHostRuntimeBootstrapInput {
 }
 
 export function startHostRuntimeBootstrap(input: StartHostRuntimeBootstrapInput): void {
-  const registryReady = input.store.boot();
+  // Registry hydration and managed daemon startup are independent. Waiting for
+  // the registry here made the Tailscale gate inherit slow disk/storage work
+  // and, on a cold desktop, made the first window look frozen.
+  const registryReady = input.store.boot().catch(() => undefined);
   void input.daemonStartService.startIfEnabled({
+    storeReady: registryReady,
     shouldStart: async () => {
       const shouldStart =
         typeof input.shouldStartDaemon === "boolean"
@@ -38,7 +42,6 @@ export function startHostRuntimeBootstrap(input: StartHostRuntimeBootstrapInput)
         // local daemon before the user has selected a transport.
         return false;
       }
-      await registryReady;
       return true;
     },
   });

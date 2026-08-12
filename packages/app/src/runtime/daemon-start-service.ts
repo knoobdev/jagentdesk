@@ -1,4 +1,5 @@
 import {
+  getDesktopDaemonStatus,
   startDesktopDaemon,
   type DesktopDaemonStartOptions,
   type DesktopDaemonStatus,
@@ -12,6 +13,8 @@ export type DaemonStartCondition = boolean | (() => boolean | Promise<boolean>);
 
 export interface StartDaemonIfEnabledInput {
   shouldStart: DaemonStartCondition;
+  /** Registry hydration may run in parallel with daemon startup, but identity reconciliation waits for it. */
+  storeReady?: Promise<void>;
 }
 
 type DaemonConnectionStore = Pick<HostRuntimeStore, "getHosts" | "upsertConnectionFromListen"> &
@@ -20,6 +23,7 @@ type DaemonConnectionStore = Pick<HostRuntimeStore, "getHosts" | "upsertConnecti
 export interface DaemonStartServiceDeps {
   store: DaemonConnectionStore;
   startDesktopDaemon?: (options?: DesktopDaemonStartOptions) => Promise<DesktopDaemonStatus>;
+  getDesktopDaemonStatus?: () => Promise<DesktopDaemonStatus>;
   getConnectionMode?: () => Promise<ConnectionMode | null>;
 }
 
@@ -94,6 +98,7 @@ export class DaemonStartService {
   private readonly invokeStartDesktopDaemon: (
     options?: DesktopDaemonStartOptions,
   ) => Promise<DesktopDaemonStatus>;
+  private readonly invokeGetDesktopDaemonStatus: () => Promise<DesktopDaemonStatus>;
   private readonly resolveConnectionMode: () => Promise<ConnectionMode | null>;
   private readonly listeners = new Set<() => void>();
   private lastError: string | null = null;
@@ -103,6 +108,7 @@ export class DaemonStartService {
   constructor(deps: DaemonStartServiceDeps) {
     this.store = deps.store;
     this.invokeStartDesktopDaemon = deps.startDesktopDaemon ?? startDesktopDaemon;
+    this.invokeGetDesktopDaemonStatus = deps.getDesktopDaemonStatus ?? getDesktopDaemonStatus;
     // Unit-test callers historically modelled the pre-Tailscale local daemon;
     // production wiring passes the persisted mode explicitly.
     this.resolveConnectionMode = deps.getConnectionMode ?? (async () => "local");
@@ -149,9 +155,20 @@ export class DaemonStartService {
       }
 
       const connectionMode = await this.resolveConnectionMode();
+      const storeReady = input.storeReady ?? Promise.resolve();
       const daemon = await this.invokeStartDesktopDaemon({
         enableTailscale: connectionMode === "tailscale",
+        waitForReady: false,
       });
+      if (daemon.status === "starting") {
+        // The desktop renderer must not wait for a cold daemon bootstrap. The
+        // daemon can take tens of seconds to initialize its registries and
+        // Tailscale bridge; reconcile its identity after the first window is
+        // already usable.
+        void this.reconcileWhenReady(connectionMode, storeReady);
+        return { ok: true };
+      }
+      await storeReady;
       const result = await upsertDesktopDaemonConnection(this.store, daemon, connectionMode);
       return result.ok ? result : this.fail(result.error);
     } catch (error) {
@@ -159,6 +176,36 @@ export class DaemonStartService {
     } finally {
       this.endRequest();
     }
+  }
+
+  private async reconcileWhenReady(
+    connectionMode: ConnectionMode | null,
+    storeReady: Promise<void>,
+  ): Promise<void> {
+    const deadline = Date.now() + 120_000;
+    while (Date.now() < deadline) {
+      try {
+        const daemon = await this.invokeGetDesktopDaemonStatus();
+        if (daemon.status === "running") {
+          await storeReady;
+          const result = await upsertDesktopDaemonConnection(this.store, daemon, connectionMode);
+          if (!result.ok) {
+            this.fail(result.error);
+          }
+          return;
+        }
+        if (daemon.status === "errored" || daemon.status === "stopped") {
+          this.fail(daemon.error ?? "The managed desktop daemon stopped during startup.");
+          return;
+        }
+      } catch {
+        // Keep polling. The status endpoint is expected to be unavailable
+        // while the worker is still constructing its HTTP server.
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, 500));
+    }
+
+    this.fail("The managed desktop daemon did not become ready within 120 seconds.");
   }
 
   getLastError(): string | null {

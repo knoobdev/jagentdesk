@@ -51,7 +51,7 @@ const STARTUP_POLL_INTERVAL_MS = 200;
 const STARTUP_READY_TIMEOUT_MS = 30_000;
 const DETACHED_STARTUP_GRACE_MS = 1200;
 const DAEMON_HEALTH_TIMEOUT_MS = 250;
-const TAILSCALE_LOGIN_URL_TIMEOUT_MS = 20_000;
+const TAILSCALE_LOGIN_URL_TIMEOUT_MS = 90_000;
 const TAILSCALE_STATUS_FRESHNESS_MS = 15_000;
 
 type DesktopDaemonState = "starting" | "running" | "stopped" | "errored";
@@ -282,20 +282,101 @@ function probeAppOwnedDaemonHealth(listen: string | null): Promise<boolean> {
   });
 }
 
+function readAppOwnedDaemonStatus(listen: string | null): Promise<Record<string, unknown> | null> {
+  const value = listen?.trim() ?? "";
+  if (!value) return Promise.resolve(null);
+
+  let url: URL;
+  try {
+    url = new URL(`http://${value}/api/status`);
+  } catch {
+    return Promise.resolve(null);
+  }
+
+  const hostname = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  if (hostname !== "127.0.0.1" && hostname !== "localhost" && hostname !== "::1") {
+    return Promise.resolve(null);
+  }
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (status: Record<string, unknown> | null) => {
+      if (settled) return;
+      settled = true;
+      resolve(status);
+    };
+    const request = httpRequest(
+      url,
+      { method: "GET", timeout: DAEMON_HEALTH_TIMEOUT_MS },
+      (response) => {
+        if (typeof response.on !== "function" || typeof response.setEncoding !== "function") {
+          response.resume();
+          finish(null);
+          return;
+        }
+        let body = "";
+        response.setEncoding("utf8");
+        response.on("data", (chunk: string) => {
+          body += chunk;
+        });
+        response.on("end", () => {
+          if (response.statusCode !== 200) {
+            finish(null);
+            return;
+          }
+          try {
+            const parsed = JSON.parse(body) as unknown;
+            finish(
+              parsed && typeof parsed === "object" && !Array.isArray(parsed)
+                ? (parsed as Record<string, unknown>)
+                : null,
+            );
+          } catch {
+            finish(null);
+          }
+        });
+      },
+    );
+    request.once("timeout", () => {
+      request.destroy();
+      finish(null);
+    });
+    request.once("error", () => finish(null));
+    request.end();
+  });
+}
+
 function logFilePath(): string {
   return path.join(getJAgentDeskHome(), DAEMON_LOG_FILENAME);
 }
 
-export function isDesktopManagedDaemonRunningSync(): boolean {
+interface ManagedDaemonPidLock {
+  pid?: unknown;
+  desktopManaged?: unknown;
+}
+
+function readManagedDaemonPidSync(): number | null {
   try {
-    const raw = readFileSync(path.join(getJAgentDeskHome(), "jagentdesk.pid"), "utf-8");
-    const lock = JSON.parse(raw) as { pid?: unknown; desktopManaged?: unknown };
-    if (lock.desktopManaged !== true) return false;
-    if (typeof lock.pid !== "number" || !Number.isInteger(lock.pid)) return false;
-    return isProcessRunning(lock.pid);
+    const lock = JSON.parse(
+      readFileSync(path.join(getJAgentDeskHome(), "jagentdesk.pid"), "utf8"),
+    ) as ManagedDaemonPidLock;
+    if (
+      lock.desktopManaged !== true ||
+      typeof lock.pid !== "number" ||
+      !Number.isInteger(lock.pid) ||
+      lock.pid <= 1
+    ) {
+      return null;
+    }
+    return lock.pid;
   } catch {
-    return false;
+    return null;
   }
+}
+
+export function isDesktopManagedDaemonRunningSync(): boolean {
+  const pid = readManagedDaemonPidSync();
+  return pid !== null && isProcessRunning(pid);
 }
 
 function summarizeDesktopDaemonStatus(status: DesktopDaemonStatus): Record<string, unknown> {
@@ -321,6 +402,53 @@ const DESKTOP_DAEMON_STOP_CLI_ARGS = [
   "5",
 ];
 
+const DIRECT_STOP_TIMEOUT_MS = 10_000;
+
+async function stopManagedDaemonByOwnerPid(
+  reason: DesktopDaemonStopReason,
+): Promise<unknown | null> {
+  const pid = readManagedDaemonPidSync();
+  if (pid === null || !isProcessRunning(pid)) {
+    return null;
+  }
+
+  logDesktopDaemonLifecycle("stopping managed daemon through owner PID", { reason, ownerPid: pid });
+  try {
+    process.kill(pid, "SIGTERM");
+  } catch (error) {
+    if (!isProcessRunning(pid)) {
+      return { action: "stopped", reason: "owner_pid_signal", pid };
+    }
+    throw error;
+  }
+
+  const deadline = Date.now() + DIRECT_STOP_TIMEOUT_MS;
+  while (isProcessRunning(pid) && Date.now() < deadline) {
+    await sleep(100);
+  }
+
+  if (isProcessRunning(pid)) {
+    logDesktopDaemonLifecycle("managed daemon did not stop after SIGTERM; sending SIGKILL", {
+      reason,
+      ownerPid: pid,
+    });
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      // The process may have exited between the liveness check and SIGKILL.
+    }
+    while (isProcessRunning(pid) && Date.now() < deadline + 3_000) {
+      await sleep(100);
+    }
+  }
+
+  if (isProcessRunning(pid)) {
+    throw new Error(`Managed daemon owner PID ${pid} did not stop.`);
+  }
+
+  return { action: "stopped", reason: "owner_pid_signal", pid };
+}
+
 async function runDesktopDaemonStopViaCli({
   reason,
   statusBefore,
@@ -338,7 +466,12 @@ async function runDesktopDaemonStopViaCli({
     statusBefore: statusBefore ? summarizeDesktopDaemonStatus(statusBefore) : null,
   });
 
-  const cliResult = await runExternalCliJsonCommand(DESKTOP_DAEMON_STOP_CLI_ARGS);
+  // The bundled CLI is a fallback for legacy/untracked daemons. For the
+  // app-owned daemon, signal the supervisor directly: spawning another
+  // Electron/Node helper while the worker is booting can block for seconds and
+  // was the source of the quit/startup stalls seen on macOS.
+  const directResult = await stopManagedDaemonByOwnerPid(reason);
+  const cliResult = directResult ?? (await runExternalCliJsonCommand(DESKTOP_DAEMON_STOP_CLI_ARGS));
   const statusAfter = resolveStatusAfter ? await resolveDesktopDaemonStatus() : null;
 
   logDesktopDaemonLifecycle("desktop daemon stop completed", {
@@ -501,15 +634,37 @@ function stoppedDesktopDaemonStatus(
 async function resolveDesktopDaemonStatusUnshared(): Promise<DesktopDaemonStatus> {
   const home = getJAgentDeskHome();
   const expectedListen = getManagedDaemonListen();
+  const managedProcessRunning = isDesktopManagedDaemonRunningSync();
+  const appOwnedHealth = await probeAppOwnedDaemonHealth(expectedListen);
+
+  if (managedProcessRunning && !appOwnedHealth) {
+    // A live supervisor may still be constructing the worker HTTP server. Do
+    // not invoke the external CLI here; that command talks to the same cold
+    // runtime and can block the renderer for its full timeout.
+    return buildStartingDesktopDaemonStatus();
+  }
+
+  if (managedProcessRunning && appOwnedHealth) {
+    const directStatus = await readAppOwnedDaemonStatus(expectedListen);
+    if (directStatus) {
+      const directPayload = {
+        ...directStatus,
+        daemonVersion: directStatus.version,
+        localDaemon: "running",
+        connectedDaemon: "reachable",
+        desktopManaged: true,
+        pid: readManagedDaemonPidSync(),
+      };
+      const facts = await resolveDesktopDaemonStatusFacts(directPayload, expectedListen);
+      return buildDesktopDaemonStatus(directPayload, home, facts);
+    }
+  }
 
   // A cold start should not spawn the external CLI just to discover that the
   // app-owned port is closed. The CLI is still used whenever the endpoint or
   // managed process exists, which preserves stale-daemon/version detection.
-  if (!isDesktopManagedDaemonRunningSync()) {
-    const appOwnedHealth = await probeAppOwnedDaemonHealth(expectedListen);
-    if (!appOwnedHealth) {
-      return stoppedDesktopDaemonStatus(home);
-    }
+  if (!managedProcessRunning && !appOwnedHealth) {
+    return stoppedDesktopDaemonStatus(home);
   }
 
   try {
@@ -866,6 +1021,12 @@ async function startDaemon({
   const reusableDaemon = await reuseOrRestartRunningDaemon(current, enableTailscale);
   if (reusableDaemon) return reusableDaemon;
 
+  if (current.status === "starting" && current.desktopManaged) {
+    // A supervisor can be alive while its worker is still bootstrapping. Do
+    // not create a second supervisor for the same PID lock.
+    return waitForDaemonStartup(waitForReady);
+  }
+
   return await spawnDetachedDaemon({
     current,
     useSavedTailscaleAuthKey,
@@ -906,7 +1067,7 @@ export async function stopDesktopDaemon(
   reason: DesktopDaemonStopReason = DEFAULT_DESKTOP_DAEMON_STOP_REASON,
 ): Promise<DesktopDaemonStatus> {
   const status = await resolveDesktopDaemonStatus();
-  if (status.status !== "running") {
+  if (status.status !== "running" && !(status.status === "starting" && status.desktopManaged)) {
     logDesktopDaemonLifecycle("desktop daemon stop skipped", {
       reason,
       statusBefore: summarizeDesktopDaemonStatus(status),
@@ -1111,7 +1272,10 @@ export function createDaemonCommandHandlers(): Record<string, DesktopCommandHand
     },
     start_tailscale_login: startInteractiveTailscaleLogin,
     start_desktop_daemon: (args) =>
-      startDaemon({ enableTailscale: args?.enableTailscale !== false }),
+      startDaemon({
+        enableTailscale: args?.enableTailscale !== false,
+        waitForReady: args?.waitForReady !== false,
+      }),
     stop_desktop_daemon: (args) => stopDesktopDaemon(parseDesktopDaemonStopReason(args)),
     restart_desktop_daemon: (args) => restartDaemon(args?.enableTailscale !== false),
     desktop_daemon_logs: () => getDaemonLogs(),

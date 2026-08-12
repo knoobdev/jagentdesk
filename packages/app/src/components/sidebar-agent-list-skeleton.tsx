@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { Animated, View, type StyleProp, type ViewStyle } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
+import { isNative } from "@/constants/platform";
 
 const SECTION_OPACITIES: readonly number[] = [1, 0.7, 0.4];
 const SECTION_KEYS = SECTION_OPACITIES.map((_, i) => `skeleton-section-${i}`);
@@ -62,12 +63,12 @@ export function SidebarAgentListSkeleton() {
         Animated.timing(pulse, {
           toValue: 1,
           duration: 1000,
-          useNativeDriver: true,
+          useNativeDriver: isNative,
         }),
         Animated.timing(pulse, {
           toValue: 0,
           duration: 1000,
-          useNativeDriver: true,
+          useNativeDriver: isNative,
         }),
       ]),
     );

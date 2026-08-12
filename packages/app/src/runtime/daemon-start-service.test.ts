@@ -102,7 +102,37 @@ describe("DaemonStartService", () => {
 
     await service.start();
 
-    expect(startDesktopDaemon).toHaveBeenCalledWith({ enableTailscale: false });
+    expect(startDesktopDaemon).toHaveBeenCalledWith({
+      enableTailscale: false,
+      waitForReady: false,
+    });
+  });
+
+  it("returns before a cold daemon is ready and reconciles it in the background", async () => {
+    const fake = createFakeStore();
+    let resolveStatus: ((status: DesktopDaemonStatus) => void) | undefined;
+    const startDesktopDaemon = vi.fn(async () => makeStatus({ status: "starting", serverId: "" }));
+    const getDesktopDaemonStatus = vi.fn(
+      () =>
+        new Promise<DesktopDaemonStatus>((resolve) => {
+          resolveStatus = resolve;
+        }),
+    );
+    const service = new DaemonStartService({
+      store: fake.store,
+      startDesktopDaemon,
+      getDesktopDaemonStatus,
+      getConnectionMode: async () => "local",
+    });
+
+    await expect(service.start()).resolves.toEqual({ ok: true });
+    expect(service.isRunning()).toBe(false);
+    expect(fake.upserts).toEqual([]);
+    await vi.waitFor(() => expect(getDesktopDaemonStatus).toHaveBeenCalled());
+
+    resolveStatus?.(makeStatus());
+    await vi.waitFor(() => expect(fake.upserts).toHaveLength(1));
+    expect(service.getLastError()).toBeNull();
   });
 
   it("reports lastError after a missing listen address and clears running state when done", async () => {

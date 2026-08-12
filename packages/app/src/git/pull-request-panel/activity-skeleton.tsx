@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { Animated, View, type StyleProp, type ViewStyle } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
+import { isNative } from "@/constants/platform";
 
 const ROW_KEYS = [0, 1, 2].map((i) => `pr-activity-skeleton-row-${i}`);
 
@@ -9,8 +10,8 @@ export function useSkeletonPulse(): Animated.Value {
   useEffect(() => {
     const animation = Animated.loop(
       Animated.sequence([
-        Animated.timing(pulse, { toValue: 1, duration: 1000, useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 0, duration: 1000, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 1, duration: 1000, useNativeDriver: isNative }),
+        Animated.timing(pulse, { toValue: 0, duration: 1000, useNativeDriver: isNative }),
       ]),
     );
     animation.start();

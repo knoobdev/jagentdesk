@@ -17,7 +17,14 @@ export async function runDesktopStartup(deps: DesktopStartupDependencies): Promi
   // Login-shell discovery can invoke a user's interactive shell and block for
   // up to its timeout. Never put that synchronous work on the cold-start path:
   // the packaged app must render its first window before environment probing.
-  const defer = deps.defer ?? ((task: () => void) => setTimeout(task, 0));
-  defer(deps.inheritLoginShellEnv);
-  deps.autoUpdateInstalledSkills?.();
+  // Finder/Dock launches inherit a tiny environment. Shell discovery is useful
+  // for later agent processes, but it must not compete with the first renderer
+  // paint. Keep it off the cold path even when the user's shell takes seconds.
+  const defer = deps.defer ?? ((task: () => void) => setTimeout(task, 4000));
+  defer(() => {
+    void deps.inheritLoginShellEnv();
+  });
+  if (deps.autoUpdateInstalledSkills) {
+    defer(() => deps.autoUpdateInstalledSkills?.());
+  }
 }

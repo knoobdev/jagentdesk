@@ -173,6 +173,9 @@ function createIsolatedDesktopEnv({ home, listen, userData, cdpPort }) {
     JAGENTDESK_HOME: home,
     JAGENTDESK_LISTEN: listen,
     JAGENTDESK_ELECTRON_USER_DATA_DIR: userData,
+    JAGENTDESK_LOCAL_SPEECH_AUTO_DOWNLOAD: "0",
+    JAGENTDESK_DICTATION_ENABLED: "0",
+    JAGENTDESK_VOICE_MODE_ENABLED: "0",
     JAGENTDESK_ELECTRON_FLAGS: `--remote-debugging-address=127.0.0.1 --remote-debugging-port=${cdpPort}`,
   };
 }
@@ -501,6 +504,40 @@ async function assertPackagedRendererLoaded(page, deadline) {
   }
 }
 
+async function assertPackagedFirstRunTailscaleGate(page, deadline) {
+  await page.waitForFunction(
+    () =>
+      window.location.href.includes("/tailscale-login") &&
+      document.querySelector('[data-testid="tailscale-login-screen"]') instanceof HTMLElement,
+    undefined,
+    { timeout: remainingTime(deadline) },
+  );
+
+  const gate = await page.evaluate(() => ({
+    url: window.location.href,
+    hasInteractiveLogin:
+      document.querySelector('[data-testid="tailscale-login-interactive"]') instanceof HTMLElement,
+    hasAuthKeyLogin:
+      document.querySelector('[data-testid="tailscale-login-authkey-input"]') instanceof
+      HTMLElement,
+  }));
+  if (!gate.hasInteractiveLogin || !gate.hasAuthKeyLogin) {
+    throw new Error(`Packaged first-run Tailscale gate is incomplete: ${JSON.stringify(gate)}`);
+  }
+  console.log(`Packaged desktop smoke: first-run Tailscale gate reached at ${gate.url}`);
+}
+
+async function selectLocalTransportForDaemonSmoke(page, deadline) {
+  // The first-run gate is intentionally shown before any Local daemon starts.
+  // Persist Local only after asserting that contract, so the remainder of this
+  // smoke test can still exercise the managed-daemon and CLI paths.
+  await page.getByTestId("connection-type-local").click();
+  await page.getByTestId("connection-local-continue").click();
+  await page.waitForFunction(() => !window.location.href.includes("/tailscale-login"), undefined, {
+    timeout: remainingTime(deadline),
+  });
+}
+
 async function waitForRendererStartedDaemon({
   page,
   daemonHome,
@@ -515,7 +552,9 @@ async function waitForRendererStartedDaemon({
 
   while (Date.now() < deadline) {
     try {
-      lastStatus = await page.evaluate(() => window.jagentdeskDesktop.invoke("desktop_daemon_status"));
+      lastStatus = await page.evaluate(() =>
+        window.jagentdeskDesktop.invoke("desktop_daemon_status"),
+      );
       if (
         lastStatus?.status === "running" &&
         lastStatus.desktopManaged === true &&
@@ -858,6 +897,8 @@ async function smokePackagedDesktopApp({ appPath }) {
     page = await waitForPackagedAppPage(browser, deadline);
     await assertPackagedRendererLoaded(page, deadline);
     console.log("Packaged desktop smoke: real app renderer and preload bridge loaded");
+    await assertPackagedFirstRunTailscaleGate(page, deadline);
+    await selectLocalTransportForDaemonSmoke(page, deadline);
     const status = await waitForRendererStartedDaemon({
       page,
       daemonHome,

@@ -1019,8 +1019,10 @@ function DesktopConnectionGate() {
   useEffect(() => {
     const shouldOpenLogin =
       mode === null ||
-      (mode === "tailscale" &&
-        (loginStatus.kind === "needs-login" || loginStatus.kind === "unavailable"));
+      // The login route owns the status polling and recovery actions. Do not
+      // keep the root route behind host/daemon hydration while the first
+      // Tailscale status probe is still unknown.
+      (mode === "tailscale" && loginStatus.kind !== "connected");
     if (
       !desktopRuntime ||
       !loaded ||
