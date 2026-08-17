@@ -2,6 +2,7 @@ import { Platform } from "react-native";
 import { requireOptionalNativeModule } from "expo-modules-core";
 import { isWeb } from "@/constants/platform";
 import { getDesktopTailscaleStatus } from "@/desktop/daemon/desktop-daemon";
+import type { DesktopTailscaleStatus } from "@/desktop/daemon/desktop-daemon";
 import { getDesktopHost } from "@/desktop/host";
 import { invokeDesktopCommand } from "@/desktop/electron/invoke";
 import type { TailscaleLoginResult, TailscaleLoginStatus } from "./types";
@@ -59,6 +60,19 @@ function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
+export function mapDesktopTailscaleStatusToLoginStatus(
+  result: Pick<DesktopTailscaleStatus, "connected" | "daemonStatus">,
+): TailscaleLoginStatus {
+  // A persisted Tailscale mode is restored before the managed daemon has
+  // finished its cold start. Treat that short interval as connecting so the
+  // desktop does not redirect to the login screen and make the user wait for
+  // a second health probe.
+  if (result.daemonStatus === "starting" || result.daemonStatus === "stopped") {
+    return { kind: "connecting" };
+  }
+  return result.connected === true ? { kind: "connected" } : { kind: "needs-login" };
+}
+
 export class WebTailscaleLoginAdapter implements TailscaleLoginAdapter {
   platform = (getDesktopHost() ? "desktop" : "web") as "desktop" | "web";
   isSupported = true;
@@ -71,7 +85,7 @@ export class WebTailscaleLoginAdapter implements TailscaleLoginAdapter {
         const result = await getDesktopTailscaleStatus();
         desktopDevicePublicKeyB64 = result.devicePublicKeyB64 ?? null;
         desktopTailnetProxyAddress = result.tailnetProxyAddress ?? null;
-        return result.connected === true ? { kind: "connected" } : { kind: "needs-login" };
+        return mapDesktopTailscaleStatusToLoginStatus(result);
       } catch {
         return { kind: "unavailable" };
       }

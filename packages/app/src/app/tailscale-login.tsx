@@ -7,7 +7,6 @@ import { StyleSheet } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KeyRound } from "lucide-react-native";
 import Svg, { Circle, Path } from "react-native-svg";
-import * as WebBrowser from "expo-web-browser";
 import { Button } from "@/components/ui/button";
 import { JAgentDeskLogo } from "@/components/icons/jagentdesk-logo";
 import { isNative } from "@/constants/platform";
@@ -123,7 +122,7 @@ const AUTH_KEY_STATUS_TIMEOUT_MS = 10_000;
 const AUTH_KEY_STATUS_POLL_MS = 250;
 const AUTH_KEY_STATUS_PROBE_TIMEOUT_MS = 2_000;
 const INTERACTIVE_LOGIN_TIMEOUT_MS = 120_000;
-const INTERACTIVE_LOGIN_URL_POLL_MS = 250;
+const INTERACTIVE_LOGIN_STATUS_POLL_MS = 500;
 const LOGIN_SCREEN_STATUS_POLL_MS = 500;
 
 async function refreshTailscaleStatusBounded(): Promise<void> {
@@ -166,24 +165,6 @@ async function waitForTailscaleConnection(
   return false;
 }
 
-async function waitForInteractiveLoginUrl(
-  adapter: TailscaleLoginAdapter,
-  isActive: () => boolean,
-): Promise<string | null> {
-  const deadline = Date.now() + INTERACTIVE_LOGIN_TIMEOUT_MS;
-  while (isActive() && Date.now() < deadline) {
-    const authUrl = adapter.getInteractiveLoginUrl?.() ?? null;
-    if (authUrl?.startsWith("https://")) {
-      return authUrl;
-    }
-    const remainingMs = deadline - Date.now();
-    await new Promise<void>((resolve) =>
-      setTimeout(resolve, Math.min(INTERACTIVE_LOGIN_URL_POLL_MS, Math.max(0, remainingMs))),
-    );
-  }
-  return null;
-}
-
 type DesktopInteractiveLoginState = "connected" | "timeout";
 
 async function waitForDesktopInteractiveLogin(
@@ -214,7 +195,7 @@ async function waitForDesktopInteractiveLogin(
       break;
     }
     await new Promise<void>((resolve) =>
-      setTimeout(resolve, Math.min(INTERACTIVE_LOGIN_URL_POLL_MS, remainingMs)),
+      setTimeout(resolve, Math.min(INTERACTIVE_LOGIN_STATUS_POLL_MS, remainingMs)),
     );
   }
 
@@ -240,58 +221,10 @@ async function runInteractiveLogin({
   setInteractiveErrorVisible,
   failedError,
 }: InteractiveLoginRunnerOptions): Promise<void> {
-  if (!isDesktopLogin && adapter.getInteractiveLoginUrl) {
-    const preparation = adapter.prepareInteractiveLogin?.() ?? { ok: true };
-    if (!preparation.ok) {
-      setInteractiveErrorVisible(true);
-      setError(preparation.error ?? failedError);
-      return;
-    }
-    const authUrl = await waitForInteractiveLoginUrl(adapter, isActive);
-    if (!authUrl || !isActive()) {
-      setInteractiveErrorVisible(true);
-      setError("Tailscale did not provide a login URL. Try again.");
-      return;
-    }
-
-    let browserClosed = false;
-    const browserPromise = WebBrowser.openBrowserAsync(authUrl)
-      .catch(() => null)
-      .then((result) => {
-        browserClosed = true;
-        return result;
-      });
-    const connected = await Promise.race([
-      waitForTailscaleConnection(() => isActive() && !browserClosed, INTERACTIVE_LOGIN_TIMEOUT_MS),
-      browserPromise.then(() => false),
-    ]);
-
-    if (!isActive()) {
-      return;
-    }
-
-    if (connected) {
-      setInteractiveErrorVisible(false);
-      await WebBrowser.dismissBrowser().catch(() => undefined);
-      await browserPromise;
-      await finishConnectedLogin();
-      return;
-    }
-
-    // The user may have closed the browser immediately after completing
-    // login. Perform one final real status refresh before showing an error.
-    await browserPromise;
-    await refreshTailscaleStatusBounded();
-    if (getSnapshot().kind === "connected") {
-      setInteractiveErrorVisible(false);
-      await finishConnectedLogin();
-      return;
-    }
-    setInteractiveErrorVisible(true);
-    setError("Tailscale login was not completed. Open Sign in with Tailscale to try again.");
-    return;
-  }
-
+  // Native adapters launch the URL with UIApplication/Android ACTION_VIEW,
+  // which uses the system browser and its normal Tailscale cookie/session.
+  // Do not fetch the URL into Expo's embedded browser: that flow can render
+  // Tailscale's "unable to load user on response" Error 500 page.
   const result = await adapter.startInteractiveLogin();
   if (!result.ok) {
     setInteractiveErrorVisible(true);

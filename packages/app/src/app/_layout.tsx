@@ -91,6 +91,7 @@ import { useOpenAgentListGesture } from "@/mobile-panels/gestures";
 import { MobilePanelsProvider } from "@/mobile-panels/provider";
 import { PairDeviceModal } from "@/desktop/components/pair-device-modal";
 import { I18nProvider } from "@/i18n/provider";
+import { shouldRedirectToDesktopTailscaleLogin } from "@/navigation/desktop-connection-gate";
 import {
   getConnectionMode,
   refreshTailscaleStatus,
@@ -1017,19 +1018,14 @@ function DesktopConnectionGate() {
   const loginStatus = useTailscaleLoginStatus();
 
   useEffect(() => {
-    const shouldOpenLogin =
-      mode === null ||
-      // The login route owns the status polling and recovery actions. Do not
-      // keep the root route behind host/daemon hydration while the first
-      // Tailscale status probe is still unknown.
-      (mode === "tailscale" && loginStatus.kind !== "connected");
     if (
-      !desktopRuntime ||
-      !loaded ||
-      pathname === "/tailscale-login" ||
-      isPairingRoute(pathname) ||
-      mode === "local" ||
-      !shouldOpenLogin
+      !shouldRedirectToDesktopTailscaleLogin({
+        desktopRuntime,
+        connectionModeLoaded: loaded,
+        pathname,
+        mode,
+        loginStatusKind: loginStatus.kind,
+      })
     ) {
       return;
     }
@@ -1058,13 +1054,7 @@ function TailscaleHealthMonitor() {
   const pathname = usePathname();
 
   useEffect(() => {
-    if (
-      mode !== "tailscale" ||
-      pathname === "/" ||
-      pathname === "" ||
-      pathname === "/tailscale-login" ||
-      isPairingRoute(pathname)
-    ) {
+    if (mode !== "tailscale" || pathname === "/tailscale-login" || isPairingRoute(pathname)) {
       return;
     }
 

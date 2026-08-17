@@ -2,6 +2,8 @@ package sh.jagentdesk.tailscale
 
 import android.content.Intent
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import tailscalebridge.Bridge
@@ -10,7 +12,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 class JAgentDeskTailscaleModule : Module() {
-  private val bridge = Bridge()
+  private var bridge = Bridge()
   private val worker = Executors.newSingleThreadExecutor()
   private val nodeLock = Any()
   private val loginInFlight = AtomicBoolean(false)
@@ -46,6 +48,7 @@ class JAgentDeskTailscaleModule : Module() {
     }
 
     Function("prepareInteractiveLogin") {
+      resetUnauthenticatedInteractiveNodeIfNeeded()
       startInteractiveNodeIfNeeded()
       mapOf("ok" to true)
     }
@@ -64,6 +67,7 @@ class JAgentDeskTailscaleModule : Module() {
         return@AsyncFunction mapOf("ok" to false, "error" to "An auth key is required.")
       }
       try {
+        resetUnauthenticatedInteractiveNodeIfNeeded()
         bridge.start(key, stateDirectory().absolutePath, "jagentdesk-mobile", "")
         synchronized(nodeLock) {
           nodeStarting = false
@@ -100,6 +104,7 @@ class JAgentDeskTailscaleModule : Module() {
     if (!loginInFlight.compareAndSet(false, true)) {
       return mapOf("ok" to false, "error" to "A Tailscale login is already in progress")
     }
+    resetUnauthenticatedInteractiveNodeIfNeeded()
     startInteractiveNodeIfNeeded()
     worker.execute {
       val deadline = System.currentTimeMillis() + 120_000L
@@ -115,6 +120,23 @@ class JAgentDeskTailscaleModule : Module() {
       loginInFlight.set(false)
     }
     return mapOf("ok" to true)
+  }
+
+  private fun resetUnauthenticatedInteractiveNodeIfNeeded() {
+    // A failed browser attempt leaves tsnet's old auth URL cached in the
+    // bridge. Keep an authenticated node, but replace an unauthenticated one
+    // before the next attempt so Tailscale issues a fresh URL.
+    if (File(stateDirectory(), AUTHENTICATED_MARKER).exists()) return
+
+    val canReset = synchronized(nodeLock) { nodeReady && !nodeStarting }
+    if (!canReset || bridge.tailnetName().isNotEmpty()) return
+
+    synchronized(nodeLock) {
+      if (nodeReady && !nodeStarting) {
+        bridge = Bridge()
+        nodeReady = false
+      }
+    }
   }
 
   private fun startInteractiveNodeIfNeeded() {
@@ -144,7 +166,12 @@ class JAgentDeskTailscaleModule : Module() {
     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(authUrl)).apply {
       addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
-    context.startActivity(intent)
+    // The login worker is deliberately off the Expo call thread. Dispatch the
+    // actual Activity launch to Android's main looper so the system browser
+    // opens reliably on cold starts as well as after a failed attempt.
+    Handler(Looper.getMainLooper()).post {
+      runCatching { context.startActivity(intent) }
+    }
   }
 
   private fun stateDirectory(): File {

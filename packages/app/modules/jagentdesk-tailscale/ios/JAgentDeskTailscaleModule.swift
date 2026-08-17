@@ -4,11 +4,11 @@ import UIKit
 import TailscaleBridgeNative
 
 public final class JAgentDeskTailscaleModule: Module {
-  private let bridge = TailscalebridgeBridge()
+  private var bridge = TailscalebridgeBridge()
   private let interactiveLoginLock = NSLock()
   private let interactiveLoginQueue = DispatchQueue(
     label: "sh.jagentdesk.tailscale.interactive-login",
-    qos: .userInitiated,
+    qos: .userInitiated
   )
   private let interactiveNodeLock = NSLock()
   private var interactiveLoginInFlight = false
@@ -98,6 +98,7 @@ public final class JAgentDeskTailscaleModule: Module {
       let stateDir = try self.stateDirectory()
       let normalizedAuthKey = authKey.trimmingCharacters(in: .whitespacesAndNewlines)
       NSLog("[JAgentDeskTailscale] auth key received bytes=%ld", normalizedAuthKey.lengthOfBytes(using: .utf8))
+      self.resetUnauthenticatedInteractiveNodeIfNeeded(stateDir: stateDir)
       do {
         try self.bridge.start(normalizedAuthKey, stateDir: stateDir, hostname: "jagentdesk-mobile", target: "")
       } catch {
@@ -146,6 +147,7 @@ public final class JAgentDeskTailscaleModule: Module {
 
       do {
         let stateDir = try self.stateDirectory()
+        self.resetUnauthenticatedInteractiveNodeIfNeeded(stateDir: stateDir)
         self.startInteractiveNodeIfNeeded(stateDir: stateDir)
 
         DispatchQueue.global(qos: .userInitiated).async {
@@ -187,11 +189,35 @@ public final class JAgentDeskTailscaleModule: Module {
   private func prepareInteractiveLogin() -> [String: Any] {
     do {
       let stateDir = try self.stateDirectory()
+      self.resetUnauthenticatedInteractiveNodeIfNeeded(stateDir: stateDir)
       self.startInteractiveNodeIfNeeded(stateDir: stateDir)
       return ["ok": true]
     } catch {
       return ["ok": false, "error": error.localizedDescription]
     }
+  }
+
+  private func resetUnauthenticatedInteractiveNodeIfNeeded(stateDir: String) {
+    // A failed browser attempt leaves tsnet's old auth URL cached in the
+    // bridge. Keep an authenticated node, but replace an unauthenticated one
+    // before the next attempt so Tailscale issues a fresh URL.
+    if self.hasPersistedAuthenticatedState(stateDir: stateDir) {
+      return
+    }
+
+    self.interactiveNodeLock.lock()
+    let canReset = self.interactiveNodeReady && !self.interactiveNodeStartInFlight
+    self.interactiveNodeLock.unlock()
+    if !canReset || !self.bridge.tailnetName().isEmpty {
+      return
+    }
+
+    self.interactiveNodeLock.lock()
+    if self.interactiveNodeReady && !self.interactiveNodeStartInFlight {
+      self.bridge = TailscalebridgeBridge()
+      self.interactiveNodeReady = false
+    }
+    self.interactiveNodeLock.unlock()
   }
 
   private func startInteractiveNodeIfNeeded(stateDir: String) {

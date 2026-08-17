@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { NativeTailscaleLoginAdapter, WebTailscaleLoginAdapter } from "./adapter";
+import {
+  mapDesktopTailscaleStatusToLoginStatus,
+  NativeTailscaleLoginAdapter,
+  WebTailscaleLoginAdapter,
+} from "./adapter";
 import type { JAgentDeskTailscaleNativeModule } from "./adapter";
 import type { TailscaleLoginAdapter } from "./adapter";
 import type { TailscaleLoginResult, TailscaleLoginStatus } from "./types";
@@ -47,6 +51,18 @@ afterEach(() => {
 });
 
 describe("WebTailscaleLoginAdapter", () => {
+  it("keeps a persisted desktop connection in the connecting state during daemon startup", () => {
+    expect(
+      mapDesktopTailscaleStatusToLoginStatus({ connected: false, daemonStatus: "starting" }),
+    ).toEqual({ kind: "connecting" });
+    expect(
+      mapDesktopTailscaleStatusToLoginStatus({ connected: false, daemonStatus: "stopped" }),
+    ).toEqual({ kind: "connecting" });
+    expect(
+      mapDesktopTailscaleStatusToLoginStatus({ connected: false, daemonStatus: "running" }),
+    ).toEqual({ kind: "needs-login" });
+  });
+
   it("does not fake interactive login in a browser", async () => {
     const adapter = new WebTailscaleLoginAdapter();
 
@@ -204,5 +220,16 @@ describe("NativeTailscaleLoginAdapter with a fake native module", () => {
       ok: false,
       error: "user cancelled",
     });
+  });
+
+  it("prefers the native non-blocking browser launcher when available", async () => {
+    const module = fakeModule();
+    const beginInteractiveLogin = vi.fn(() => ({ ok: true }));
+    module.beginInteractiveLogin = beginInteractiveLogin;
+    const adapter = new NativeTailscaleLoginAdapter("ios", module);
+
+    expect(await adapter.startInteractiveLogin()).toEqual({ ok: true });
+    expect(beginInteractiveLogin).toHaveBeenCalledTimes(1);
+    expect(module.startInteractiveLogin).not.toHaveBeenCalled();
   });
 });
