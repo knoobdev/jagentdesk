@@ -61,6 +61,24 @@ function deepMerge<T extends Record<string, unknown>>(
   return next as T;
 }
 
+function omitOrchestrationRoles(
+  config: Record<string, unknown>,
+  roleIds: string[],
+): Record<string, unknown> {
+  if (roleIds.length === 0) return config;
+  const orchestration = config.orchestration;
+  if (!isRecord(orchestration)) return config;
+  const roles = orchestration.roles;
+  if (!isRecord(roles)) return config;
+  const nextRoles: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(roles)) {
+    if (!roleIds.includes(key)) {
+      nextRoles[key] = value;
+    }
+  }
+  return { ...config, orchestration: { ...orchestration, roles: nextRoles } };
+}
+
 function omitProvidersFromConfig<T extends { providers?: Record<string, unknown> }>(
   config: T,
   providers: readonly string[],
@@ -182,7 +200,15 @@ export class DaemonConfigStore {
     const parsedPatch = MutableDaemonConfigPatchSchema.parse(partial);
     const { removeProviders = [], ...configPatch } = parsedPatch;
     const removedProviders = Array.from(new Set(removeProviders));
-    const merged = deepMerge(this.current, configPatch);
+    let removedRoleIds: string[] = [];
+    if (configPatch.orchestration && "removeRoleIds" in configPatch.orchestration) {
+      const { removeRoleIds, ...orchestrationRest } = configPatch.orchestration;
+      removedRoleIds = Array.from(new Set(removeRoleIds ?? [])).filter(
+        (id) => id !== "supervisor" && id !== "lead" && id !== "peer",
+      );
+      configPatch.orchestration = orchestrationRest;
+    }
+    const merged = omitOrchestrationRoles(deepMerge(this.current, configPatch), removedRoleIds);
     const next = MutableDaemonConfigSchema.parse(
       omitMetadataGenerationProvidersFromConfig(
         omitProvidersFromConfig(merged, removedProviders),

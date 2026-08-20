@@ -1,8 +1,14 @@
 import { z } from "zod";
 
-/** The three bounded roles in the JAgentDesk orchestration topology. */
-export const OrchestrationRoleSchema = z.enum(["supervisor", "lead", "peer"]);
+/** Built-in roles that define the delegation topology. Custom roles are allowed and behave
+ * as bounded peer-like workers. */
+export const BUILTIN_ORCHESTRATION_ROLES = ["supervisor", "lead", "peer"] as const;
+export type BuiltinOrchestrationRole = (typeof BUILTIN_ORCHESTRATION_ROLES)[number];
+export const OrchestrationRoleSchema = z.string().min(1);
 export type OrchestrationRole = z.infer<typeof OrchestrationRoleSchema>;
+export function isBuiltinOrchestrationRole(role: string): role is BuiltinOrchestrationRole {
+  return (BUILTIN_ORCHESTRATION_ROLES as readonly string[]).includes(role);
+}
 
 /** Semantic work categories used to choose a role profile and fallback chain. */
 export const OrchestrationRouteCategorySchema = z.enum([
@@ -29,6 +35,8 @@ export type OrchestrationProfile = z.infer<typeof OrchestrationProfileSchema>;
 
 export const OrchestrationRoleConfigSchema = z.object({
   enabled: z.boolean().default(true),
+  label: z.string().min(1).optional(),
+  instructions: z.string().optional(),
   profiles: z.array(OrchestrationProfileSchema).min(1),
   defaultProfileId: z.string().min(1),
 });
@@ -46,6 +54,7 @@ export const OrchestrationRouteSchema = z.object({
   primary: OrchestrationRouteTargetSchema,
   fallbacks: z.array(OrchestrationRouteTargetSchema).default([]),
   guardProviderPrefix: z.string().min(1).optional(),
+  instructions: z.string().optional(),
 });
 export type OrchestrationRoute = z.infer<typeof OrchestrationRouteSchema>;
 
@@ -59,11 +68,13 @@ export const OrchestrationConfigSchema = z.object({
       maxPeersPerLead: z.number().int().min(1).max(12).default(3),
     })
     .default({ maxPeersPerLead: 3 }),
-  roles: z.object({
-    supervisor: OrchestrationRoleConfigSchema,
-    lead: OrchestrationRoleConfigSchema,
-    peer: OrchestrationRoleConfigSchema,
-  }),
+  roles: z
+    .object({
+      supervisor: OrchestrationRoleConfigSchema,
+      lead: OrchestrationRoleConfigSchema,
+      peer: OrchestrationRoleConfigSchema,
+    })
+    .catchall(OrchestrationRoleConfigSchema),
   routes: z.object({
     planning: OrchestrationRouteSchema,
     impl: OrchestrationRouteSchema,
@@ -78,6 +89,8 @@ export type OrchestrationConfig = z.infer<typeof OrchestrationConfigSchema>;
 
 const OrchestrationRoleConfigPatchSchema = z.object({
   enabled: z.boolean().optional(),
+  label: z.string().min(1).optional(),
+  instructions: z.string().optional(),
   profiles: z.array(OrchestrationProfileSchema).min(1).optional(),
   defaultProfileId: z.string().min(1).optional(),
 });
@@ -93,7 +106,9 @@ export const OrchestrationConfigPatchSchema = z.object({
       lead: OrchestrationRoleConfigPatchSchema.optional(),
       peer: OrchestrationRoleConfigPatchSchema.optional(),
     })
+    .catchall(OrchestrationRoleConfigPatchSchema)
     .optional(),
+  removeRoleIds: z.array(z.string().min(1)).optional(),
   routes: z
     .object({
       planning: OrchestrationRouteSchema.optional(),
@@ -269,7 +284,7 @@ export const OrchestrationHandbackSchema = z.object({
 });
 export type OrchestrationHandback = z.infer<typeof OrchestrationHandbackSchema>;
 
-export const OrchestrationRoleLabelSchema = z.enum(["supervisor", "lead", "peer"]);
+export const OrchestrationRoleLabelSchema = z.string().min(1);
 export const ORCHESTRATION_ROLE_LABEL = "jagentdesk.orchestration.role";
 export const ORCHESTRATION_WORKSPACE_LABEL = "jagentdesk.orchestration.workspace-id";
 export const ORCHESTRATION_BRIEF_LABEL = "jagentdesk.orchestration.brief-id";

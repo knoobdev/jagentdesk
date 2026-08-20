@@ -140,10 +140,15 @@ function compactTitle(value: string, fallback: string): string {
   return normalized.slice(0, 60);
 }
 
+function isPeerLikeRole(role: string): boolean {
+  return role !== "supervisor" && role !== "lead";
+}
+
 function formatLeadRelay(input: {
   assignment: string;
   briefId: string;
   workspaceId: string;
+  roleInstructions?: string;
 }): string {
   return [
     "<jagentdesk-orchestration>",
@@ -155,6 +160,9 @@ function formatLeadRelay(input: {
     "",
     "Human relay:",
     input.assignment,
+    ...(input.roleInstructions?.trim()
+      ? ["", "Custom role instructions:", input.roleInstructions.trim()]
+      : []),
     "",
     "Authority contract:",
     "- Decompose the work and choose the engineering approach.",
@@ -174,13 +182,22 @@ function formatPeerAssignment(input: {
   routeCategory: OrchestrationRouteCategory;
   profile: OrchestrationProfile;
   profileThinkingOptionId: string;
+  roleId: string;
+  roleInstructions?: string;
+  routeInstructions?: string;
 }): string {
   return [
     "<jagentdesk-orchestration>",
-    "Role: Peer.",
+    `Role: ${input.roleId}.`,
     "This is a bounded assignment from the Lead. Do not create agents, choose product architecture, or accept the whole engineering result.",
     `Route: ${input.routeCategory}`,
     `Execution profile: ${input.profile.provider}/${input.profile.model} (thinking ${input.profileThinkingOptionId})`,
+    ...(input.roleInstructions?.trim()
+      ? ["", "Custom role instructions:", input.roleInstructions.trim()]
+      : []),
+    ...(input.routeInstructions?.trim()
+      ? ["", "Route instructions:", input.routeInstructions.trim()]
+      : []),
     "",
     "Assignment:",
     input.assignment,
@@ -287,6 +304,17 @@ export class OrchestrationRuntime {
     }
     if (context.role !== role) {
       throw new Error(`Orchestration role ${context.role} cannot perform the ${role} operation`);
+    }
+    return context;
+  }
+
+  private requirePeerLikeContext(agentId: string): OrchestrationAgentContext {
+    const context = this.getAgentContext(agentId);
+    if (!context) {
+      throw new Error(`Agent ${agentId} is not part of an Orchestration run`);
+    }
+    if (!isPeerLikeRole(context.role)) {
+      throw new Error(`Orchestration role ${context.role} cannot perform the peer operation`);
     }
     return context;
   }
@@ -451,6 +479,7 @@ export class OrchestrationRuntime {
             assignment: input.assignment,
             briefId: context.briefId,
             workspaceId: context.workspaceId,
+            roleInstructions: this.dependencies.getConfig().roles.lead.instructions,
           }),
           unarchive: false,
           logger: this.dependencies.logger.child({ module: "orchestration-runtime" }),
@@ -490,6 +519,7 @@ export class OrchestrationRuntime {
               assignment: input.assignment,
               briefId: context.briefId,
               workspaceId: context.workspaceId,
+              roleInstructions: this.dependencies.getConfig().roles.lead.instructions,
             }),
             labels: {
               [ORCHESTRATION_ROLE_LABEL]: "lead",
@@ -532,7 +562,6 @@ export class OrchestrationRuntime {
         throw new Error("Only the registered Lead may staff Peer assignments for this run");
       }
       const config = this.dependencies.getConfig();
-      if (!config.roles.peer.enabled) throw new Error("The Peer role is disabled");
       const maxPeers = config.limits.maxPeersPerLead;
       const peerAssignments = run.assignments.filter(
         (assignment) =>
@@ -543,7 +572,7 @@ export class OrchestrationRuntime {
       }
 
       const candidates = resolveConfiguredRouteCandidates(config, input.routeCategory).filter(
-        (candidate) => candidate.target.role === "peer",
+        (candidate) => isPeerLikeRole(candidate.target.role),
       );
       if (candidates.length === 0) {
         throw new Error(
@@ -555,6 +584,10 @@ export class OrchestrationRuntime {
       for (const candidate of candidates) {
         try {
           const assignmentId = randomUUID();
+          const roleConfig = config.roles[candidate.target.role];
+          if (!roleConfig || roleConfig.enabled === false) {
+            throw new Error(`role ${candidate.target.role} is disabled or not configured`);
+          }
           const thinkingOptionId = profileThinking(candidate.target, candidate.profile);
           const agent = await this.createChild({
             caller: context,
@@ -568,9 +601,12 @@ export class OrchestrationRuntime {
               routeCategory: input.routeCategory,
               profile: candidate.profile,
               profileThinkingOptionId: thinkingOptionId,
+              roleId: candidate.target.role,
+              roleInstructions: roleConfig.instructions,
+              routeInstructions: config.routes[input.routeCategory].instructions,
             }),
             labels: {
-              [ORCHESTRATION_ROLE_LABEL]: "peer",
+              [ORCHESTRATION_ROLE_LABEL]: candidate.target.role,
               [ORCHESTRATION_WORKSPACE_LABEL]: context.workspaceId,
               [ORCHESTRATION_BRIEF_LABEL]: context.briefId,
               [ORCHESTRATION_ROUTE_LABEL]: input.routeCategory,
@@ -612,7 +648,7 @@ export class OrchestrationRuntime {
     callerAgentId: string;
     handback: OrchestrationHandback;
   }): Promise<{ handbackId: string; leadAgentId: string }> {
-    const context = this.requireContext(input.callerAgentId, "peer");
+    const context = this.requirePeerLikeContext(input.callerAgentId);
     return this.mutate(async (state) => {
       const run = this.ensureRun(state, context);
       const parentAgentId = getParentAgentIdFromLabels(context.agent.labels);
@@ -664,7 +700,7 @@ export class OrchestrationRuntime {
         !peer ||
         peer.labels[ORCHESTRATION_BRIEF_LABEL] !== context.briefId ||
         peer.labels[ORCHESTRATION_WORKSPACE_LABEL] !== context.workspaceId ||
-        peer.labels[ORCHESTRATION_ROLE_LABEL] !== "peer" ||
+        !isPeerLikeRole(peer.labels[ORCHESTRATION_ROLE_LABEL] ?? "") ||
         getParentAgentIdFromLabels(peer.labels) !== context.agent.id
       ) {
         throw new Error("Dissent target is not a Peer owned by this Lead");
