@@ -1236,7 +1236,10 @@ export function createJAgentDeskToolCatalog(
       );
     }
 
-    if (callerOrchestrationContext.role === "peer") {
+    if (
+      callerOrchestrationContext.role !== "supervisor" &&
+      callerOrchestrationContext.role !== "lead"
+    ) {
       registerTool(
         "orchestration.handback",
         {
