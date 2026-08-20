@@ -353,7 +353,14 @@ export function createTsnetListener(options: TsnetListenerOptions): TsnetListene
         ...(options.hostname ? ["--hostname", options.hostname] : []),
         ...(options.useTls ? ["--tls"] : []),
       ];
-      const spawnBridge = options.spawnBridge ?? spawn;
+      // The default spawner must translate the (binary, args, env) contract into
+      // node's spawn(command, args, { env }) shape. Passing the env object as the
+      // options argument directly would drop TS_AUTHKEY (it is not a SpawnOptions
+      // field), leaving the bridge stuck on interactive login.
+      const spawnBridge =
+        options.spawnBridge ??
+        ((bridgeBinary, bridgeArgs, bridgeEnv) =>
+          spawn(bridgeBinary, bridgeArgs, { env: bridgeEnv }));
       child = spawnBridge(binary, args, {
         ...process.env,
         // The Go bridge consumes the standard Tailscale variable only inside

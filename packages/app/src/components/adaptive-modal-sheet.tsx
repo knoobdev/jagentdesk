@@ -303,6 +303,11 @@ const ThemedBottomSheetTextInput = withUnistyles(BottomSheetTextInput, (theme) =
 export const AdaptiveTextInput = forwardRef<TextInput, AdaptiveTextInputProps>(
   function AdaptiveTextInputInner(props, ref) {
     const isMobile = useIsCompactFormFactor();
+    // BottomSheetTextInput calls useBottomSheetInternal(), which throws when it
+    // renders outside a BottomSheet (e.g. a plain settings page). Detect the
+    // context safely (returns null outside a sheet) and only use the sheet-aware
+    // input when actually inside one; otherwise fall back to the standard input.
+    const insideBottomSheet = useBottomSheetInternal(true) !== null;
     const { value: _value, initialValue, resetKey, defaultValue, style, ...inputProps } = props;
     // Leaf-owned color goes LAST so callers cannot override it with a stale
     // theme read. Outline color is theme-aware on web :focus-visible.
@@ -312,7 +317,7 @@ export const AdaptiveTextInput = forwardRef<TextInput, AdaptiveTextInputProps>(
       style: [styles.adaptiveInputOutline, style, styles.adaptiveInputText],
     };
 
-    if (isMobile && isNative) {
+    if (isMobile && isNative && insideBottomSheet) {
       return (
         <ThemedBottomSheetTextInput
           key={resetKey}
