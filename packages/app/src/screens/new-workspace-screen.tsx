@@ -86,7 +86,11 @@ import type { AgentAttachment, ForgeSearchItem } from "@jagentdesk/protocol/mess
 import type { CreateJAgentDeskWorktreeInput } from "@jagentdesk/client/internal/daemon-client";
 import type { AgentProvider } from "@jagentdesk/protocol/agent-types";
 import type { WorkspaceDraftTabSetup, WorkspaceTabTarget } from "@/workspace-tabs/model";
-import { isEmptyWorkspaceSubmission, runCreateEmptyWorkspace } from "./new-workspace-empty";
+import {
+  isEmptyWorkspaceSubmission,
+  runCreateEmptyWorkspace,
+  type CreateEmptyWorkspaceInput,
+} from "./new-workspace-empty";
 import {
   getWorkspaceNamingAttachments,
   remapDraftCwdToWorkspace,
@@ -1106,6 +1110,45 @@ function submitWorkspaceDraft(input: SubmitDraftInput): void {
   useDraftStore.getState().clearDraftInput({ draftKey, lifecycle: "sent" });
 }
 
+async function openOrchestrationWorkspace(deps: {
+  ensureWorkspace: CreateEmptyWorkspaceInput["ensureWorkspace"];
+  serverId: string;
+  sourceDirectory: string | null;
+  setPendingAction: (action: "chat" | "empty" | null) => void;
+  setErrorMessage: (message: string | null) => void;
+}): Promise<void> {
+  try {
+    deps.setErrorMessage(null);
+    deps.setPendingAction("empty");
+    await runCreateEmptyWorkspace({
+      payload: { text: "", attachments: [], cwd: deps.sourceDirectory ?? "" },
+      ensureWorkspace: deps.ensureWorkspace,
+      serverId: deps.serverId,
+      navigate: (targetServerId, workspaceId) =>
+        navigateToWorkspace({
+          serverId: targetServerId,
+          workspaceId,
+          openIntent: "orchestration",
+        }),
+    });
+  } catch (error) {
+    deps.setErrorMessage(error instanceof Error ? error.message : String(error));
+  } finally {
+    deps.setPendingAction(null);
+  }
+}
+
+function resolveWorktreeSupportForScreen(
+  selectedProject: HostProjectListItem | null,
+  selectedServerId: string,
+): "supported" | "unsupported" | "unknown" {
+  if (!selectedProject) return "unsupported";
+  return getWorktreeSupportForHostProject({
+    project: selectedProject,
+    serverId: selectedServerId,
+  });
+}
+
 function useNewWorkspaceHostSelector(input: {
   initialServerId: string;
   allServerIds: string[];
@@ -1528,30 +1571,6 @@ function useNewWorkspaceFormStack(input: NewWorkspaceFormStackInput): ReactEleme
   );
 }
 
-function OrchestrationToggleButton({
-  requested,
-  disabled,
-  onToggle,
-}: {
-  requested: boolean;
-  disabled: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <Button
-      variant={requested ? "default" : "outline"}
-      size="sm"
-      leftIcon={GitBranch}
-      onPress={onToggle}
-      disabled={disabled}
-      testID="new-workspace-orchestration-toggle"
-      style={styles.orchestrationButton}
-    >
-      {requested ? "ORC enabled" : "Start with ORC"}
-    </Button>
-  );
-}
-
 export function NewWorkspaceScreen({
   serverId,
   sourceDirectory: sourceDirectoryProp,
@@ -1592,11 +1611,7 @@ export function NewWorkspaceScreen({
     typeof normalizeWorkspaceDescriptor
   > | null>(null);
   const [pendingAction, setPendingAction] = useState<"chat" | "empty" | null>(null);
-  const [orchestrationRequested, setOrchestrationRequested] = useState(startWithOrchestration);
-  const handleToggleOrchestration = useCallback(
-    () => setOrchestrationRequested((current) => !current),
-    [],
-  );
+  const [orchestrationRequested] = useState(startWithOrchestration);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const openAddProjectPicker = useOpenAddProject();
@@ -1711,9 +1726,7 @@ export function NewWorkspaceScreen({
   });
 
   const currentBranch = checkoutStatus?.currentBranch ?? null;
-  const worktreeSupport = selectedProject
-    ? getWorktreeSupportForHostProject({ project: selectedProject, serverId: selectedServerId })
-    : "unsupported";
+  const worktreeSupport = resolveWorktreeSupportForScreen(selectedProject, selectedServerId);
   const isPending = isNewWorkspacePending({ pendingAction, isDraftHandoffActive });
   const { effectiveIsolation, setIsolation, canCreateWorktree, showRefPicker } =
     useWorkspaceIsolation({
@@ -2092,6 +2105,17 @@ export function NewWorkspaceScreen({
       toast,
     ],
   );
+  const handleOpenOrchestration = useCallback(
+    () =>
+      openOrchestrationWorkspace({
+        ensureWorkspace,
+        serverId: selectedServerId,
+        sourceDirectory: selectedSourceDirectory,
+        setPendingAction,
+        setErrorMessage,
+      }),
+    [ensureWorkspace, selectedServerId, selectedSourceDirectory],
+  );
 
   const renderPickerOption = useCallback(
     (props: {
@@ -2223,11 +2247,17 @@ export function NewWorkspaceScreen({
         <ReanimatedAnimated.View style={centeredStyle}>
           <View style={styles.composerTitleContainer}>
             <Text style={styles.composerTitle}>{t("newWorkspace.title")}</Text>
-            <OrchestrationToggleButton
-              requested={orchestrationRequested}
-              disabled={isPending}
-              onToggle={handleToggleOrchestration}
-            />
+            <Button
+              variant="outline"
+              size="sm"
+              leftIcon={GitBranch}
+              onPress={handleOpenOrchestration}
+              disabled={isPending || !selectedSourceDirectory}
+              testID="new-workspace-open-orchestration"
+              style={styles.orchestrationButton}
+            >
+              Open Orchestration
+            </Button>
           </View>
           {formStack}
           <Composer

@@ -22,6 +22,10 @@ import type {
   OrchestrationRouteCategory,
   OrchestrationRouteTarget,
 } from "@jagentdesk/protocol/orchestration";
+import {
+  defaultRoleInstructions,
+  defaultRouteInstructions,
+} from "@jagentdesk/protocol/orchestration";
 
 const BUILTIN_ROLE_IDS = ["supervisor", "lead", "peer"];
 function isBuiltinRoleId(role: string): boolean {
@@ -591,7 +595,8 @@ function InstructionsField({
   return (
     <Field label={label} hint={hint}>
       <FormTextInput
-        value={draft}
+        initialValue={value ?? ""}
+        resetKey={value ?? ""}
         onChangeText={setDraft}
         onBlur={handleBlur}
         placeholder={placeholder}
@@ -731,8 +736,8 @@ function RoleCard({
         <InstructionsField
           label="Instructions"
           hint="System instructions injected into this role's agents at creation."
-          value={config.roles[role].instructions}
-          placeholder="Optional role instructions"
+          value={config.roles[role].instructions || defaultRoleInstructions(role)}
+          placeholder="Role instructions"
           testID={`orchestration-role-instructions-${role}`}
           onSave={handleSaveInstructions}
         />
@@ -813,7 +818,7 @@ function RouteRow({
       <InstructionsField
         label="Route instructions"
         hint="Extra guidance for how the Lead interprets this route."
-        value={route.instructions}
+        value={route.instructions || defaultRouteInstructions(category)}
         placeholder="Optional route instructions"
         testID={`orchestration-route-instructions-${category}`}
         onSave={handleSaveRouteInstructions}

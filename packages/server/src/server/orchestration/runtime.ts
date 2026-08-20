@@ -8,6 +8,8 @@ import {
   ORCHESTRATION_ROLE_LABEL,
   ORCHESTRATION_ROUTE_LABEL,
   ORCHESTRATION_WORKSPACE_LABEL,
+  defaultRoleInstructions,
+  defaultRouteInstructions,
   OrchestrationDissentOutcomeSchema,
   OrchestrationHandbackSchema,
   OrchestrationRoleLabelSchema,
@@ -150,6 +152,7 @@ function formatLeadRelay(input: {
   workspaceId: string;
   roleInstructions?: string;
 }): string {
+  const instructions = (input.roleInstructions ?? "").trim() || defaultRoleInstructions("lead");
   return [
     "<jagentdesk-orchestration>",
     "Role: Lead.",
@@ -160,17 +163,7 @@ function formatLeadRelay(input: {
     "",
     "Human relay:",
     input.assignment,
-    ...(input.roleInstructions?.trim()
-      ? ["", "Custom role instructions:", input.roleInstructions.trim()]
-      : []),
-    "",
-    "Authority contract:",
-    "- Decompose the work and choose the engineering approach.",
-    "- Use orchestration.create_peer for bounded implementation/search/research/review assignments.",
-    "- Every Peer assignment must state ownership, expected evidence, and handback fields.",
-    "- Review Peer evidence and counterevidence; close dissent with exactly one allowed outcome.",
-    "- Use orchestration.accept_result only after validation and technical acceptance.",
-    "- Do not create a second Lead, bypass the Supervisor, or make product decisions outside the relay.",
+    ...(instructions ? ["", "Instructions:", instructions] : []),
     "</jagentdesk-orchestration>",
   ].join("\n");
 }
@@ -186,18 +179,16 @@ function formatPeerAssignment(input: {
   roleInstructions?: string;
   routeInstructions?: string;
 }): string {
+  const roleInstr = (input.roleInstructions ?? "").trim() || defaultRoleInstructions(input.roleId);
+  const routeInstr =
+    (input.routeInstructions ?? "").trim() || defaultRouteInstructions(input.routeCategory);
   return [
     "<jagentdesk-orchestration>",
     `Role: ${input.roleId}.`,
-    "This is a bounded assignment from the Lead. Do not create agents, choose product architecture, or accept the whole engineering result.",
     `Route: ${input.routeCategory}`,
     `Execution profile: ${input.profile.provider}/${input.profile.model} (thinking ${input.profileThinkingOptionId})`,
-    ...(input.roleInstructions?.trim()
-      ? ["", "Custom role instructions:", input.roleInstructions.trim()]
-      : []),
-    ...(input.routeInstructions?.trim()
-      ? ["", "Route instructions:", input.routeInstructions.trim()]
-      : []),
+    ...(roleInstr ? ["", "Role instructions:", roleInstr] : []),
+    ...(routeInstr ? ["", "Route instructions:", routeInstr] : []),
     "",
     "Assignment:",
     input.assignment,
@@ -208,7 +199,6 @@ function formatPeerAssignment(input: {
     "Expected handback:",
     input.expectedHandback,
     "Return a structured handback with: What changed/inspected; Evidence; Remaining uncertainty; Counterevidence; Requested resolution.",
-    "If direction is unsafe or authority is unclear, stop before an irreversible choice and use orchestration.handback with the dissent fields.",
     "</jagentdesk-orchestration>",
   ].join("\n");
 }

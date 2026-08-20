@@ -176,36 +176,105 @@ export function createDefaultOrchestrationConfig(): OrchestrationConfig {
     roles: {
       supervisor: {
         enabled: true,
+        instructions: DEFAULT_ROLE_INSTRUCTIONS.supervisor,
         profiles: supervisorProfiles,
         defaultProfileId: "supervisor-codex-luna",
       },
       lead: {
         enabled: true,
+        instructions: DEFAULT_ROLE_INSTRUCTIONS.lead,
         profiles: leadProfiles,
         defaultProfileId: "lead-codex-luna",
       },
       peer: {
         enabled: true,
+        instructions: DEFAULT_ROLE_INSTRUCTIONS.peer,
         profiles: peerProfiles,
         defaultProfileId: "peer-deepseek-flash",
       },
     },
     routes: {
-      planning: { primary: { role: "lead", profileId: "lead-codex-sol" }, fallbacks: [] },
+      planning: {
+        primary: { role: "lead", profileId: "lead-codex-sol" },
+        fallbacks: [],
+        instructions: DEFAULT_ROUTE_INSTRUCTIONS.planning,
+      },
       impl: {
         primary: { role: "peer", profileId: "peer-deepseek-flash" },
         fallbacks: [{ role: "peer", profileId: "peer-codex-luna" }],
+        instructions: DEFAULT_ROUTE_INSTRUCTIONS.impl,
       },
-      impl_deep: { primary: { role: "peer", profileId: "peer-codex-luna" }, fallbacks: [] },
+      impl_deep: {
+        primary: { role: "peer", profileId: "peer-codex-luna" },
+        fallbacks: [],
+        instructions: DEFAULT_ROUTE_INSTRUCTIONS.impl_deep,
+      },
       search: {
         primary: { role: "peer", profileId: "peer-codex-luna", thinkingOptionId: "low" },
         fallbacks: [{ role: "peer", profileId: "peer-deepseek-flash" }],
+        instructions: DEFAULT_ROUTE_INSTRUCTIONS.search,
       },
-      research: { primary: { role: "peer", profileId: "peer-deepseek-flash" }, fallbacks: [] },
-      audit: { primary: { role: "peer", profileId: "peer-codex-luna" }, fallbacks: [] },
-      ui: { primary: { role: "peer", profileId: "peer-gemini-ui" }, fallbacks: [] },
+      research: {
+        primary: { role: "peer", profileId: "peer-deepseek-flash" },
+        fallbacks: [],
+        instructions: DEFAULT_ROUTE_INSTRUCTIONS.research,
+      },
+      audit: {
+        primary: { role: "peer", profileId: "peer-codex-luna" },
+        fallbacks: [],
+        instructions: DEFAULT_ROUTE_INSTRUCTIONS.audit,
+      },
+      ui: {
+        primary: { role: "peer", profileId: "peer-gemini-ui" },
+        fallbacks: [],
+        instructions: DEFAULT_ROUTE_INSTRUCTIONS.ui,
+      },
     },
   };
+}
+
+export const DEFAULT_ROLE_INSTRUCTIONS: Record<BuiltinOrchestrationRole, string> = {
+  supervisor: [
+    "You are the Supervisor: the human-facing front door and relay for this workspace.",
+    "- Preserve the human objective faithfully; do not invent product decisions.",
+    "- Bootstrap exactly one Lead per workspace and observe governance/lifecycle only.",
+    "- Do not split tasks, pick Peers, choose architecture, or accept engineering results.",
+  ].join("\n"),
+  lead: [
+    "You are the Lead: the single engineering owner for this workspace and orchestration run.",
+    "- Decompose the work and choose the engineering approach.",
+    "- Use orchestration.create_peer for bounded implementation/search/research/review assignments.",
+    "- Every Peer assignment must state ownership, expected evidence, and handback fields.",
+    "- Review Peer evidence and counterevidence; close dissent with exactly one allowed outcome.",
+    "- Use orchestration.accept_result only after validation and technical acceptance.",
+    "- Do not create a second Lead, bypass the Supervisor, or make product decisions outside the relay.",
+  ].join("\n"),
+  peer: [
+    "You are a bounded Peer worker acting on a single assignment from the Lead.",
+    "- Do not create agents, choose product architecture, or accept the whole engineering result.",
+    "- Return a structured handback: What changed/inspected; Evidence; Remaining uncertainty; Counterevidence; Requested resolution.",
+    "- If direction is unsafe or authority is unclear, stop before an irreversible choice and use orchestration.handback.",
+  ].join("\n"),
+};
+
+export const DEFAULT_ROUTE_INSTRUCTIONS: Record<OrchestrationRouteCategory, string> = {
+  planning:
+    "Plan the approach and decomposition before implementation; surface risks and open questions.",
+  impl: "Implement the assignment with tests/validation and return concrete evidence.",
+  impl_deep: "Deep, careful implementation for high-risk or intricate work; validate thoroughly.",
+  search:
+    "Locate the relevant code/information quickly and return precise findings with references.",
+  research: "Research the question and return evidence plus counterevidence, not just conclusions.",
+  audit: "Audit/review for correctness, security, and completeness; report defects with repro.",
+  ui: "Build the interface per the design system; verify it renders correctly.",
+};
+
+export function defaultRoleInstructions(role: string): string {
+  return isBuiltinOrchestrationRole(role) ? DEFAULT_ROLE_INSTRUCTIONS[role] : "";
+}
+
+export function defaultRouteInstructions(category: OrchestrationRouteCategory): string {
+  return DEFAULT_ROUTE_INSTRUCTIONS[category] ?? "";
 }
 
 export const OrchestrationTaskStatusSchema = z.enum(["ready", "needs_clarification"]);
