@@ -1058,10 +1058,23 @@ function TailscaleHealthMonitor() {
       return;
     }
 
-    void refreshTailscaleStatus();
+    const reconnectNow = () => {
+      void refreshTailscaleStatus();
+      const store = getHostRuntimeStore();
+      void store.runProbeCycleNow();
+      store.ensureConnectedAll();
+    };
+
+    reconnectNow();
     const timer = setInterval(() => void refreshTailscaleStatus(), 5000);
+    const appStateSubscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active") {
+        reconnectNow();
+      }
+    });
     return () => {
       clearInterval(timer);
+      appStateSubscription.remove();
     };
   }, [mode, pathname]);
 

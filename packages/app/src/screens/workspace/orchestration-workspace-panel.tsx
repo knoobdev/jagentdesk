@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { GitBranch, X } from "lucide-react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
@@ -24,6 +24,7 @@ interface WorkspaceOrchestrationPanelProps {
   cwd: string | null;
   variant?: "modal" | "dock";
   onClose?: () => void;
+  openOnMount?: boolean;
 }
 
 const ROLE_ORDER: Record<string, number> = { supervisor: 0, lead: 1, peer: 2 };
@@ -71,6 +72,7 @@ export function WorkspaceOrchestrationPanel({
   cwd,
   variant = "modal",
   onClose,
+  openOnMount = false,
 }: WorkspaceOrchestrationPanelProps) {
   const { theme } = useUnistyles();
   const router = useRouter();
@@ -92,6 +94,12 @@ export function WorkspaceOrchestrationPanel({
   const [brief, setBrief] = useState<OrchestrationTaskBrief | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+
+  useEffect(() => {
+    if (openOnMount) {
+      setVisible(true);
+    }
+  }, [openOnMount]);
 
   const supervisor = useMemo(
     () => agents.find((agent) => agent.labels[ORCHESTRATION_ROLE_LABEL] === "supervisor"),

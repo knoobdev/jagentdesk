@@ -301,12 +301,14 @@ interface WorkspaceScreenProps {
   isRouteFocused?: boolean;
   recoveryRequested?: boolean;
   recoveryAgentId?: string | null;
+  orchestrationRequested?: boolean;
 }
 
 type WorkspaceScreenContentProps = WorkspaceScreenProps & {
   isRouteFocused: boolean;
   recoveryRequested: boolean;
   recoveryAgentId: string | null;
+  orchestrationRequested: boolean;
 };
 
 function trimNonEmpty(value: string | null | undefined): string | null {
@@ -941,6 +943,7 @@ export const WorkspaceScreen = memo(function WorkspaceScreen({
   isRouteFocused,
   recoveryRequested,
   recoveryAgentId,
+  orchestrationRequested,
 }: WorkspaceScreenProps) {
   const navigationFocused = useIsFocused();
   return (
@@ -950,6 +953,7 @@ export const WorkspaceScreen = memo(function WorkspaceScreen({
       isRouteFocused={isRouteFocused ?? navigationFocused}
       recoveryRequested={recoveryRequested ?? false}
       recoveryAgentId={recoveryAgentId ?? null}
+      orchestrationRequested={orchestrationRequested ?? false}
     />
   );
 });
@@ -1758,6 +1762,7 @@ function WorkspaceScreenContent({
   isRouteFocused,
   recoveryRequested,
   recoveryAgentId,
+  orchestrationRequested,
 }: WorkspaceScreenContentProps) {
   const { t } = useTranslation();
   const _insets = useSafeAreaInsets();
@@ -3527,6 +3532,7 @@ function WorkspaceScreenContent({
           serverId={normalizedServerId}
           workspaceId={normalizedWorkspaceId}
           cwd={workspaceDirectory}
+          openOnMount={isRouteFocused && orchestrationRequested}
         />
         {!isMobile && workspaceDescriptor && workspaceDescriptor.scripts.length > 0 ? (
           <WorkspaceScriptsButton
@@ -3668,6 +3674,8 @@ function WorkspaceScreenContent({
       explorerToggleLabel,
       explorerToggleAccessibilityState,
       explorerToggleStyle,
+      isRouteFocused,
+      orchestrationRequested,
       t,
     ],
   );

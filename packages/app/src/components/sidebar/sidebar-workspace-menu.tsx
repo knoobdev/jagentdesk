@@ -2,7 +2,16 @@ import { useMemo, type ComponentProps, type PropsWithChildren, type ReactNode } 
 import { useTranslation } from "react-i18next";
 import { type PressableStateCallbackType } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import { Archive, CircleCheck, Copy, MoreVertical, Pencil, Pin, PinOff } from "lucide-react-native";
+import {
+  Archive,
+  CircleCheck,
+  Copy,
+  GitBranch,
+  MoreVertical,
+  Pencil,
+  Pin,
+  PinOff,
+} from "lucide-react-native";
 import { isNative, isWeb } from "@/constants/platform";
 import { getForgePresentation, normalizeForge } from "@/git/forge";
 import type { SidebarWorkspaceEntry } from "@/hooks/use-sidebar-workspaces-list";
@@ -37,6 +46,7 @@ const ThemedPencil = withUnistyles(Pencil);
 const ThemedCircleCheck = withUnistyles(CircleCheck);
 const ThemedPin = withUnistyles(Pin);
 const ThemedPinOff = withUnistyles(PinOff);
+const ThemedGitBranch = withUnistyles(GitBranch);
 
 const copyLeadingIcon = <ThemedCopy size={14} uniProps={foregroundMutedColorMapping} />;
 const renameLeadingIcon = <ThemedPencil size={14} uniProps={foregroundMutedColorMapping} />;
@@ -46,6 +56,9 @@ const markAsReadLeadingIcon = (
 const archiveLeadingIcon = <ThemedArchive size={14} uniProps={foregroundMutedColorMapping} />;
 const pinLeadingIcon = <ThemedPin size={14} uniProps={foregroundMutedColorMapping} />;
 const unpinLeadingIcon = <ThemedPinOff size={14} uniProps={foregroundMutedColorMapping} />;
+const orchestrationLeadingIcon = (
+  <ThemedGitBranch size={14} uniProps={foregroundMutedColorMapping} />
+);
 
 function renderTriggerIcon({ hovered }: { hovered?: boolean }) {
   return (
@@ -69,6 +82,7 @@ export interface SidebarWorkspaceMenuProps {
   archiveShortcutKeys?: ShortcutKey[][] | null;
   isPinned?: boolean;
   onTogglePin?: () => void;
+  onOpenOrchestration?: () => void;
   openInFileManagerPath?: string | null;
   /**
    * Lifted so the row that reveals the kebab can keep it mounted while its menu is up. See
@@ -114,6 +128,7 @@ function SidebarWorkspaceMenuItems({
   archiveShortcutKeys,
   isPinned,
   onTogglePin,
+  onOpenOrchestration,
   openInFileManagerPath,
 }: SidebarWorkspaceMenuItemsProps & { surface: MenuSurface }): ReactNode {
   const { t } = useTranslation();
@@ -174,6 +189,16 @@ function SidebarWorkspaceMenuItems({
           {isPinned ? t("sidebar.workspace.actions.unpin") : t("sidebar.workspace.actions.pin")}
         </WorkspaceMenuItem>
       ) : null}
+      {onOpenOrchestration ? (
+        <WorkspaceMenuItem
+          surface={surface}
+          testID={`sidebar-workspace-menu-open-orchestration-${workspaceKey}`}
+          leading={orchestrationLeadingIcon}
+          onSelect={onOpenOrchestration}
+        >
+          Open Orchestration
+        </WorkspaceMenuItem>
+      ) : null}
       <OpenInFileManagerMenuItem
         surface={surface}
         path={openInFileManagerPath}
@@ -209,6 +234,7 @@ export function SidebarWorkspaceMenu({
   archiveShortcutKeys,
   isPinned,
   onTogglePin,
+  onOpenOrchestration,
   openInFileManagerPath,
   open,
   onOpenChange,
@@ -240,6 +266,7 @@ export function SidebarWorkspaceMenu({
           archiveShortcutKeys={archiveShortcutKeys}
           isPinned={isPinned}
           onTogglePin={onTogglePin}
+          onOpenOrchestration={onOpenOrchestration}
           openInFileManagerPath={openInFileManagerPath}
         />
       </DropdownMenuContent>
@@ -272,6 +299,7 @@ export function SidebarWorkspaceContextMenu({
   archiveShortcutKeys,
   isPinned,
   onTogglePin,
+  onOpenOrchestration,
   openInFileManagerPath,
   accessibilityLabel,
   ...triggerProps
@@ -333,6 +361,7 @@ export function SidebarWorkspaceContextMenu({
           archiveShortcutKeys={archiveShortcutKeys}
           isPinned={isPinned}
           onTogglePin={onTogglePin}
+          onOpenOrchestration={onOpenOrchestration}
           openInFileManagerPath={openInFileManagerPath}
         />
       </ContextMenuContent>
