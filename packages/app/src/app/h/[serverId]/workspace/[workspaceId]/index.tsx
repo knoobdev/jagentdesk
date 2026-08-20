@@ -116,8 +116,10 @@ function HostWorkspaceRouteContent() {
   const openIntent = useMemo(() => parseWorkspaceOpenIntent(openValue), [openValue]);
   const recoveryAgentId = openIntent?.kind === "agent" ? openIntent.agentId : null;
   const isAgentOpenIntent = recoveryAgentId !== null;
+  const isOrchestrationOpenIntent = openIntent?.kind === "orchestration";
   const isOpenIntentWaitingForWorkspace = Boolean(
-    isAgentOpenIntent && (!hasHydratedWorkspaces || !workspaceExists),
+    (isAgentOpenIntent || isOrchestrationOpenIntent) &&
+    (!hasHydratedWorkspaces || !workspaceExists),
   );
   useEffect(() => {
     if (!serverId || !workspaceId) {
