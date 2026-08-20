@@ -45,7 +45,9 @@ function getParamValue(value: string | string[] | undefined): string {
   return "";
 }
 
-function getOpenIntentTarget(openIntent: WorkspaceOpenIntent): WorkspaceTabTarget {
+function getOpenIntentTarget(
+  openIntent: Exclude<WorkspaceOpenIntent, { kind: "orchestration" }>,
+): WorkspaceTabTarget {
   if (openIntent.kind === "agent") {
     return { kind: "agent", agentId: openIntent.agentId };
   }
@@ -114,8 +116,10 @@ function HostWorkspaceRouteContent() {
   const openIntent = useMemo(() => parseWorkspaceOpenIntent(openValue), [openValue]);
   const recoveryAgentId = openIntent?.kind === "agent" ? openIntent.agentId : null;
   const isAgentOpenIntent = recoveryAgentId !== null;
+  const isOrchestrationOpenIntent = openIntent?.kind === "orchestration";
   const isOpenIntentWaitingForWorkspace = Boolean(
-    isAgentOpenIntent && (!hasHydratedWorkspaces || !workspaceExists),
+    (isAgentOpenIntent || isOrchestrationOpenIntent) &&
+    (!hasHydratedWorkspaces || !workspaceExists),
   );
   useEffect(() => {
     if (!serverId || !workspaceId) {
@@ -150,7 +154,7 @@ function HostWorkspaceRouteContent() {
     }
     consumedIntentRef.current = consumptionKey;
 
-    if (openIntent) {
+    if (openIntent && openIntent.kind !== "orchestration") {
       prepareWorkspaceTab({
         serverId,
         workspaceId,
@@ -188,15 +192,23 @@ function HostWorkspaceRouteContent() {
     return null;
   }
 
-  return <WorkspaceDeck recoveryRequested={isAgentOpenIntent} recoveryAgentId={recoveryAgentId} />;
+  return (
+    <WorkspaceDeck
+      recoveryRequested={isAgentOpenIntent}
+      recoveryAgentId={recoveryAgentId}
+      orchestrationRequested={openIntent?.kind === "orchestration"}
+    />
+  );
 }
 
 function WorkspaceDeck({
   recoveryRequested,
   recoveryAgentId,
+  orchestrationRequested,
 }: {
   recoveryRequested: boolean;
   recoveryAgentId: string | null;
+  orchestrationRequested: boolean;
 }) {
   const activeSelection = useActiveWorkspaceSelection();
   const [mountedSelections, setMountedSelections] = useState<ActiveWorkspaceSelection[]>(() =>
@@ -244,6 +256,7 @@ function WorkspaceDeck({
             active={active}
             recoveryRequested={recoveryRequested}
             recoveryAgentId={recoveryAgentId}
+            orchestrationRequested={orchestrationRequested}
             onUnmountInactive={unmountWorkspaceSelection}
           />
         );
@@ -257,12 +270,14 @@ function WorkspaceDeckEntry({
   active,
   recoveryRequested,
   recoveryAgentId,
+  orchestrationRequested,
   onUnmountInactive,
 }: {
   selection: ActiveWorkspaceSelection;
   active: boolean;
   recoveryRequested: boolean;
   recoveryAgentId: string | null;
+  orchestrationRequested: boolean;
   onUnmountInactive: (selection: ActiveWorkspaceSelection) => void;
 }) {
   const hasHydratedWorkspaces = useHasHydratedWorkspaces(selection.serverId);
@@ -294,6 +309,7 @@ function WorkspaceDeckEntry({
         isRouteFocused={active}
         recoveryRequested={active && recoveryRequested}
         recoveryAgentId={active ? recoveryAgentId : null}
+        orchestrationRequested={active && orchestrationRequested}
       />
     </RetainedPanel>
   );

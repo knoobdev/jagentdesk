@@ -38,6 +38,7 @@ import * as Clipboard from "expo-clipboard";
 import { DiffStat } from "@/components/diff-stat";
 import {
   ExternalLink,
+  GitBranch,
   GitPullRequest,
   Settings,
   MoreVertical,
@@ -150,6 +151,7 @@ const projectViewKeyExtractor = (project: SidebarProjectEntry) => project.viewKe
 
 const WORKSPACE_STATUS_DOT_WIDTH = 14;
 const ThemedExternalLink = withUnistyles(ExternalLink);
+const ThemedGitBranch = withUnistyles(GitBranch);
 const ThemedGitPullRequest = withUnistyles(GitPullRequest);
 const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
 const ThemedPlus = withUnistyles(Plus);
@@ -417,6 +419,7 @@ function ProjectRowTrailingActions({
   isProjectActive,
   onBeginWorkspaceSetup,
   onRemoveProject,
+  onOpenOrchestration,
   removeProjectStatus,
 }: {
   projectViewKey: string;
@@ -429,6 +432,7 @@ function ProjectRowTrailingActions({
   isProjectActive: boolean;
   onBeginWorkspaceSetup: () => void;
   onRemoveProject?: () => void;
+  onOpenOrchestration?: () => void;
   removeProjectStatus: "idle" | "pending" | "success";
 }) {
   const actionsVisible = isHovered || platformIsNative || isMobileBreakpoint;
@@ -453,6 +457,7 @@ function ProjectRowTrailingActions({
             settingsTarget={settingsTarget}
             projectPath={projectPath}
             onRemoveProject={onRemoveProject}
+            onOpenOrchestration={worktreeTarget ? onOpenOrchestration : undefined}
             removeProjectStatus={removeProjectStatus}
           />
         </View>
@@ -465,6 +470,9 @@ const trash2LeadingIcon = <ThemedTrash2 size={14} uniProps={foregroundMutedColor
 const settingsLeadingIcon = <ThemedSettings size={14} uniProps={foregroundMutedColorMapping} />;
 const openInNewWindowLeadingIcon = (
   <ThemedExternalLink size={14} uniProps={foregroundMutedColorMapping} />
+);
+const orchestrationLeadingIcon = (
+  <ThemedGitBranch size={14} uniProps={foregroundMutedColorMapping} />
 );
 
 function renderKebabTriggerIcon({ hovered }: { hovered?: boolean }) {
@@ -481,12 +489,14 @@ function ProjectKebabMenu({
   settingsTarget,
   projectPath,
   onRemoveProject,
+  onOpenOrchestration,
   removeProjectStatus,
 }: {
   projectViewKey: string;
   settingsTarget: { serverId: string; projectId: string } | null;
   projectPath: string;
   onRemoveProject: () => void;
+  onOpenOrchestration?: () => void;
   removeProjectStatus: "idle" | "pending" | "success";
 }) {
   const { t } = useTranslation();
@@ -508,6 +518,7 @@ function ProjectKebabMenu({
           settingsTarget={settingsTarget}
           projectPath={projectPath}
           onRemoveProject={onRemoveProject}
+          onOpenOrchestration={onOpenOrchestration}
           removeProjectStatus={removeProjectStatus}
         />
       </DropdownMenuContent>
@@ -536,13 +547,15 @@ function ProjectMenuItems({
   settingsTarget,
   projectPath,
   onRemoveProject,
+  onOpenOrchestration,
   removeProjectStatus,
 }: {
   surface: ProjectMenuSurface;
   projectViewKey: string;
   settingsTarget: { serverId: string; projectId: string } | null;
   projectPath: string;
-  onRemoveProject: () => void;
+  onRemoveProject?: () => void;
+  onOpenOrchestration?: () => void;
   removeProjectStatus: "idle" | "pending" | "success";
 }) {
   const { t } = useTranslation();
@@ -585,21 +598,33 @@ function ProjectMenuItems({
           {t("sidebar.project.actions.openNewWindow")}
         </ProjectMenuItem>
       ) : null}
+      {onOpenOrchestration ? (
+        <ProjectMenuItem
+          surface={surface}
+          testID={`sidebar-project-menu-open-orchestration-${projectViewKey}`}
+          leading={orchestrationLeadingIcon}
+          onSelect={onOpenOrchestration}
+        >
+          Start ORC in new workspace
+        </ProjectMenuItem>
+      ) : null}
       <OpenInFileManagerMenuItem
         surface={surface}
         path={projectPath}
         testID={`sidebar-project-menu-open-folder-${projectViewKey}`}
       />
-      <ProjectMenuItem
-        surface={surface}
-        testID={`sidebar-project-menu-remove-${projectViewKey}`}
-        leading={trash2LeadingIcon}
-        status={removeProjectStatus}
-        pendingLabel={t("sidebar.project.actions.removing")}
-        onSelect={onRemoveProject}
-      >
-        {t("sidebar.project.actions.remove")}
-      </ProjectMenuItem>
+      {onRemoveProject ? (
+        <ProjectMenuItem
+          surface={surface}
+          testID={`sidebar-project-menu-remove-${projectViewKey}`}
+          leading={trash2LeadingIcon}
+          status={removeProjectStatus}
+          pendingLabel={t("sidebar.project.actions.removing")}
+          onSelect={onRemoveProject}
+        >
+          {t("sidebar.project.actions.remove")}
+        </ProjectMenuItem>
+      ) : null}
     </>
   );
 }
@@ -616,6 +641,7 @@ function WorkspaceRowRightGroup({
   archivePendingLabel,
   archiveShortcutKeys,
   onArchive,
+  onOpenOrchestration,
   onMarkAsRead,
   onCopyBranchName,
   onCopyPath,
@@ -634,6 +660,7 @@ function WorkspaceRowRightGroup({
   archivePendingLabel?: string;
   archiveShortcutKeys?: ShortcutKey[][] | null;
   onArchive?: () => void;
+  onOpenOrchestration?: () => void;
   onMarkAsRead?: () => void;
   onCopyBranchName?: () => void;
   onCopyPath?: () => void;
@@ -683,6 +710,7 @@ function WorkspaceRowRightGroup({
                 onRename={onRename}
                 onMarkAsRead={onMarkAsRead}
                 onArchive={onArchive}
+                onOpenOrchestration={onOpenOrchestration}
                 archiveLabel={archiveLabel}
                 archiveStatus={archiveStatus}
                 archivePendingLabel={archivePendingLabel}
@@ -884,6 +912,22 @@ function ProjectHeaderRow({
       }) as Href,
     );
   }, [displayName, onWorkspacePress, worktreeTarget]);
+  const handleOpenOrchestration = useCallback(() => {
+    if (!worktreeTarget) {
+      return;
+    }
+    onWorkspacePress?.();
+    router.navigate(
+      buildNewWorkspaceRoute({
+        serverId: worktreeTarget.serverId,
+        sourceDirectory: worktreeTarget.iconWorkingDir,
+        displayName,
+        projectId: worktreeTarget.projectId,
+        startWithOrchestration: true,
+      }) as Href,
+    );
+  }, [displayName, onWorkspacePress, worktreeTarget]);
+  const orchestrationHandler = worktreeTarget ? handleOpenOrchestration : undefined;
   const interaction = useLongPressDragInteraction({
     drag,
     menuController,
@@ -952,6 +996,7 @@ function ProjectHeaderRow({
         isMobileBreakpoint={isMobileBreakpoint}
         isProjectActive={isProjectActive}
         onBeginWorkspaceSetup={handleBeginWorkspaceSetup}
+        onOpenOrchestration={orchestrationHandler}
         onRemoveProject={onRemoveProject}
         removeProjectStatus={removeProjectStatus}
       />
@@ -963,7 +1008,7 @@ function ProjectHeaderRow({
     </>
   );
 
-  if (!onRemoveProject) {
+  if (!onRemoveProject && !worktreeTarget) {
     return (
       <View
         {...dragAttributes}
@@ -1020,6 +1065,7 @@ function ProjectHeaderRow({
           settingsTarget={settingsTarget}
           projectPath={projectPath}
           onRemoveProject={onRemoveProject}
+          onOpenOrchestration={orchestrationHandler}
           removeProjectStatus={removeProjectStatus}
         />
       </ContextMenuContent>
@@ -1075,6 +1121,14 @@ function WorkspaceRowInner({
     onPress();
   }, [interaction.didLongPressRef, onPress]);
 
+  const handleOpenOrchestration = useCallback(() => {
+    navigateToWorkspace({
+      serverId: workspace.serverId,
+      workspaceId: workspace.workspaceId,
+      openIntent: "orchestration",
+    });
+  }, [workspace.serverId, workspace.workspaceId]);
+
   const accessibilityState = useMemo(() => ({ selected }), [selected]);
 
   return (
@@ -1119,6 +1173,7 @@ function WorkspaceRowInner({
               archiveShortcutKeys={archiveShortcutKeys}
               isPinned={isPinned}
               onTogglePin={onTogglePin}
+              onOpenOrchestration={handleOpenOrchestration}
               openInFileManagerPath={workspace.workspaceDirectory}
               disabled={isArchiving}
               aria-selected={selected}
@@ -1156,6 +1211,7 @@ function WorkspaceRowInner({
                   archivePendingLabel={archivePendingLabel}
                   archiveShortcutKeys={archiveShortcutKeys}
                   onArchive={onArchive}
+                  onOpenOrchestration={handleOpenOrchestration}
                   onCopyBranchName={onCopyBranchName}
                   onCopyPath={onCopyPath}
                   onRename={onRename}

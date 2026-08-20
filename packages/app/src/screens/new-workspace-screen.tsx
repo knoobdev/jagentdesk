@@ -23,6 +23,7 @@ import { Combobox, ComboboxItem } from "@/components/ui/combobox";
 import type { ComboboxOption as ComboboxOptionType, ComboboxProps } from "@/components/ui/combobox";
 import { ComboboxTrigger } from "@/components/ui/combobox-trigger";
 import { Shortcut } from "@/components/ui/shortcut";
+import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 import { SidebarMenuToggle } from "@/components/headers/menu-header";
@@ -168,6 +169,7 @@ interface NewWorkspaceScreenProps {
   projectId?: string;
   displayName?: string;
   draftId?: string;
+  startWithOrchestration?: boolean;
 }
 
 interface PickerOptionData {
@@ -768,6 +770,7 @@ interface SubmitDraftInput {
   provider: AgentProvider;
   composerState: NewWorkspaceComposerState;
   supportsForgeSearch: boolean;
+  openOrchestration?: boolean;
 }
 
 type NewWorkspaceComposerState = NonNullable<
@@ -872,6 +875,7 @@ interface CreateChatAgentInput {
   draftKey: string;
   draftId?: string;
   supportsForgeSearch: boolean;
+  openOrchestration?: boolean;
   labels: {
     composerStateRequired: string;
     selectModel: string;
@@ -973,6 +977,7 @@ async function runCreateChatAgent(input: CreateChatAgentInput): Promise<void> {
     provider,
     composerState,
     supportsForgeSearch: input.supportsForgeSearch,
+    openOrchestration: input.openOrchestration,
   });
 }
 
@@ -1096,6 +1101,7 @@ function submitWorkspaceDraft(input: SubmitDraftInput): void {
     serverId,
     workspaceId,
     target: submission.target,
+    openIntent: input.openOrchestration ? "orchestration" : undefined,
   });
   useDraftStore.getState().clearDraftInput({ draftKey, lifecycle: "sent" });
 }
@@ -1522,12 +1528,37 @@ function useNewWorkspaceFormStack(input: NewWorkspaceFormStackInput): ReactEleme
   );
 }
 
+function OrchestrationToggleButton({
+  requested,
+  disabled,
+  onToggle,
+}: {
+  requested: boolean;
+  disabled: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <Button
+      variant={requested ? "default" : "outline"}
+      size="sm"
+      leftIcon={GitBranch}
+      onPress={onToggle}
+      disabled={disabled}
+      testID="new-workspace-orchestration-toggle"
+      style={styles.orchestrationButton}
+    >
+      {requested ? "ORC enabled" : "Start with ORC"}
+    </Button>
+  );
+}
+
 export function NewWorkspaceScreen({
   serverId,
   sourceDirectory: sourceDirectoryProp,
   projectId,
   displayName: displayNameProp,
   draftId,
+  startWithOrchestration = false,
 }: NewWorkspaceScreenProps) {
   const queryClient = useQueryClient();
   const { theme } = useUnistyles();
@@ -1561,6 +1592,11 @@ export function NewWorkspaceScreen({
     typeof normalizeWorkspaceDescriptor
   > | null>(null);
   const [pendingAction, setPendingAction] = useState<"chat" | "empty" | null>(null);
+  const [orchestrationRequested, setOrchestrationRequested] = useState(startWithOrchestration);
+  const handleToggleOrchestration = useCallback(
+    () => setOrchestrationRequested((current) => !current),
+    [],
+  );
   const [pickerOpen, setPickerOpen] = useState(false);
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const openAddProjectPicker = useOpenAddProject();
@@ -2011,7 +2047,11 @@ export function NewWorkspaceScreen({
             ensureWorkspace,
             serverId: selectedServerId,
             navigate: (targetServerId, workspaceId) =>
-              navigateToWorkspace({ serverId: targetServerId, workspaceId }),
+              navigateToWorkspace({
+                serverId: targetServerId,
+                workspaceId,
+                openIntent: orchestrationRequested ? "orchestration" : undefined,
+              }),
           });
           return;
         }
@@ -2026,6 +2066,7 @@ export function NewWorkspaceScreen({
           draftKey,
           draftId,
           supportsForgeSearch,
+          openOrchestration: orchestrationRequested,
           labels: {
             composerStateRequired: t("newWorkspace.errors.composerStateRequired"),
             selectModel: t("newWorkspace.errors.selectModel"),
@@ -2044,6 +2085,7 @@ export function NewWorkspaceScreen({
       draftKey,
       ensureWorkspace,
       forkDraftSetup,
+      orchestrationRequested,
       selectedServerId,
       supportsForgeSearch,
       t,
@@ -2181,6 +2223,11 @@ export function NewWorkspaceScreen({
         <ReanimatedAnimated.View style={centeredStyle}>
           <View style={styles.composerTitleContainer}>
             <Text style={styles.composerTitle}>{t("newWorkspace.title")}</Text>
+            <OrchestrationToggleButton
+              requested={orchestrationRequested}
+              disabled={isPending}
+              onToggle={handleToggleOrchestration}
+            />
           </View>
           {formStack}
           <Composer
@@ -2251,6 +2298,10 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.xl,
     fontWeight: theme.fontWeight.normal,
     color: theme.colors.foreground,
+  },
+  orchestrationButton: {
+    alignSelf: "center",
+    marginTop: 8,
   },
   errorText: {
     fontSize: theme.fontSize.sm,

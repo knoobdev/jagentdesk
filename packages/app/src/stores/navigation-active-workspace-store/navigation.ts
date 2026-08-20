@@ -27,6 +27,7 @@ export interface NavigateToWorkspaceInput {
   workspaceId: string;
   target?: WorkspaceTabTarget;
   pin?: boolean;
+  openIntent?: string;
 }
 
 export interface NavigateToWorkspaceDeps extends PrepareWorkspaceTabDeps {
@@ -107,14 +108,13 @@ export function navigateToWorkspace(
     }
   }
 
-  const route =
+  const openIntentArg =
     input.target?.kind === "agent" && !resolvedWorkspaceId
-      ? buildHostWorkspaceOpenRoute(
-          input.serverId,
-          input.workspaceId,
-          `agent:${input.target.agentId}`,
-        )
-      : buildHostWorkspaceRoute(input.serverId, input.workspaceId);
+      ? `agent:${input.target.agentId}`
+      : (input.openIntent ?? null);
+  const route = openIntentArg
+    ? buildHostWorkspaceOpenRoute(input.serverId, input.workspaceId, openIntentArg)
+    : buildHostWorkspaceRoute(input.serverId, input.workspaceId);
   deps.rememberLastWorkspace({ serverId: input.serverId, workspaceId: input.workspaceId });
   deps.navigateToRoute(route);
   return route;

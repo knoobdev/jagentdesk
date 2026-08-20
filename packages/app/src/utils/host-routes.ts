@@ -124,7 +124,8 @@ export type WorkspaceOpenIntent =
   | { kind: "terminal"; terminalId: string }
   | { kind: "file"; path: string }
   | { kind: "draft"; draftId: string }
-  | { kind: "setup"; workspaceId: string };
+  | { kind: "setup"; workspaceId: string }
+  | { kind: "orchestration" };
 
 export function parseWorkspaceOpenIntent(
   value: string | null | undefined,
@@ -132,6 +133,10 @@ export function parseWorkspaceOpenIntent(
   const normalized = trimNonEmpty(value);
   if (!normalized) {
     return null;
+  }
+
+  if (normalized === "orchestration") {
+    return { kind: "orchestration" };
   }
 
   const separator = normalized.indexOf(":");
@@ -438,6 +443,7 @@ interface NewWorkspaceRouteOptions {
   displayName?: string;
   projectId?: string;
   draftId?: string;
+  startWithOrchestration?: boolean;
 }
 
 function buildNewWorkspaceSearch(options: NewWorkspaceRouteOptions): string {
@@ -457,6 +463,9 @@ function buildNewWorkspaceSearch(options: NewWorkspaceRouteOptions): string {
   }
   if (options.draftId) {
     params.set("draftId", options.draftId);
+  }
+  if (options.startWithOrchestration) {
+    params.set("orc", "1");
   }
   return params.toString();
 }
