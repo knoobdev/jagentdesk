@@ -117,6 +117,7 @@ export async function fanOutReconciledWorkspaceUpdates(input: {
 }
 
 import { VoiceAssistantWebSocketServer } from "./websocket-server.js";
+import { enrichProcessPath } from "./enrich-path.js";
 import { createGitHubService } from "../services/github-service.js";
 import { createJAgentDeskWorktree as createRegisteredJAgentDeskWorktree } from "./jagentdesk-worktree-service.js";
 import { createWorkspaceProvisioningService } from "./session/workspace-provisioning/workspace-provisioning-service.js";
@@ -560,6 +561,10 @@ export async function createJAgentDeskDaemon(
 ): Promise<JAgentDeskDaemon> {
   configureGitProcessPolicy(config.git ?? resolveGitProcessPolicy({ env: process.env }));
   const logger = rootLogger.child({ module: "bootstrap" });
+  // Recover the user's real PATH before any provider CLI discovery runs. A
+  // GUI-launched daemon otherwise inherits a minimal PATH and reports every
+  // provider as "unavailable" even when the CLIs are installed.
+  await enrichProcessPath(logger);
   const bootstrapStart = performance.now();
   const elapsed = () => `${(performance.now() - bootstrapStart).toFixed(0)}ms`;
   const daemonVersion = config.daemonVersion ?? resolveDaemonVersion(import.meta.url);
