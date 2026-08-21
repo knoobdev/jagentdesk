@@ -282,6 +282,11 @@ function BottomSheetVisibleContent({ children }: { children: ReactNode }) {
 export type AdaptiveTextInputProps = TextInputProps & {
   initialValue?: string;
   resetKey?: string | number;
+  // Web-only opt-in: render a controlled input (forward `value`) instead of the
+  // default native-owned/uncontrolled behavior. The uncontrolled path drops
+  // composed characters from IMEs (Vietnamese Telex/VNI, CJK); a controlled
+  // input on web composes correctly. Native keeps the uncontrolled behavior.
+  webControlled?: boolean;
 };
 
 // React Native controlled TextInput can replay stale JS values during fast input
@@ -311,12 +316,18 @@ export const AdaptiveTextInput = forwardRef<TextInput, AdaptiveTextInputProps>(
     // context safely (returns null outside a sheet) and only use the sheet-aware
     // input when actually inside one; otherwise fall back to the standard input.
     const insideBottomSheet = useBottomSheetInternal(true) !== null;
-    const { value: _value, initialValue, resetKey, defaultValue, style, ...inputProps } = props;
+    const { value, initialValue, resetKey, defaultValue, style, webControlled, ...inputProps } =
+      props;
+    // IME-heavy inputs opt into a controlled input on web so composed diacritics
+    // are preserved; everything else stays native-owned/uncontrolled.
+    const controlledOnWeb = webControlled === true && !isNative;
     // Leaf-owned color goes LAST so callers cannot override it with a stale
     // theme read. Outline color is theme-aware on web :focus-visible.
     const textInputProps = {
       ...inputProps,
-      defaultValue: initialValue ?? defaultValue,
+      ...(controlledOnWeb
+        ? { value: value ?? "" }
+        : { defaultValue: initialValue ?? defaultValue }),
       style: [styles.adaptiveInputOutline, style, styles.adaptiveInputText],
     };
 

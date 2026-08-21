@@ -265,6 +265,7 @@ export function WorkspaceOrchestrationPanel({
           value={request}
           onChangeText={setRequest}
           onKeyPress={handleKeyPress}
+          webControlled
           multiline
           numberOfLines={5}
           textAlignVertical="top"
