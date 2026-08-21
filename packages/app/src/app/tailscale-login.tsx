@@ -122,6 +122,7 @@ const AUTH_KEY_STATUS_TIMEOUT_MS = 10_000;
 const AUTH_KEY_STATUS_POLL_MS = 250;
 const AUTH_KEY_STATUS_PROBE_TIMEOUT_MS = 2_000;
 const INTERACTIVE_LOGIN_TIMEOUT_MS = 120_000;
+const INTERACTIVE_LOGIN_URL_TIMEOUT_MS = 30_000;
 const INTERACTIVE_LOGIN_STATUS_POLL_MS = 500;
 const LOGIN_SCREEN_STATUS_POLL_MS = 500;
 
@@ -244,6 +245,19 @@ async function runInteractiveLogin({
     }
     setInteractiveErrorVisible(true);
     setError("Tailscale login did not finish in time. Try Sign in with Tailscale again.");
+    return;
+  }
+
+  // Keep the caller's in-progress (spinner + disabled button) state active while
+  // the embedded node produces its login URL — the native side opens the browser
+  // around then. Without this the spinner disappears the instant
+  // startInteractiveLogin resolves, so the cold-start wait before the browser
+  // opens looks completely unresponsive.
+  const urlDeadline = Date.now() + INTERACTIVE_LOGIN_URL_TIMEOUT_MS;
+  while (isActive() && !adapter.getInteractiveLoginUrl?.() && Date.now() < urlDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, INTERACTIVE_LOGIN_STATUS_POLL_MS));
+  }
+  if (!isActive()) {
     return;
   }
 
@@ -393,6 +407,9 @@ export default function TailscaleLoginRoute() {
     interactiveErrorVisibleRef.current = false;
     setError(null);
     setInteractiveInProgress(true);
+    // Let the spinner/disabled state paint before any potentially long native
+    // call so the tap has immediate visible feedback.
+    await new Promise((resolve) => setTimeout(resolve, 0));
     try {
       await runInteractiveLogin({
         adapter,
