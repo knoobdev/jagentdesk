@@ -112,12 +112,31 @@ function ProfileModal({ visible, role, serverId, onClose, onSave }: ProfileModal
   const selectedProviderStatus = selectedEntry?.status;
   const providerHasModels = Boolean(selectedEntry?.models?.length);
   const isCustomProvider = providerSelection === CUSTOM_OPTION.value;
-  // A concrete provider is chosen but exposes no model list -> let the user type the model id.
-  const useFreeformModel = !isCustomProvider && providerSelection !== "" && !providerHasModels;
+  // Model detection on the daemon is lazy; while it runs the provider reports
+  // `loading`. Show a detecting state during that window instead of forcing
+  // manual entry.
+  const isDetectingModels =
+    !isCustomProvider &&
+    providerSelection !== "" &&
+    !providerHasModels &&
+    (selectedProviderStatus === "loading" || providersSnapshot.isRefreshing);
+  // Only fall back to a free-text model id once detection has finished and the
+  // provider genuinely exposes no models (or it is a custom provider).
+  const useFreeformModel =
+    !isCustomProvider && providerSelection !== "" && !isDetectingModels && !providerHasModels;
   const modelStatusHint =
     selectedProviderStatus && selectedProviderStatus !== "ready"
       ? `Provider status: ${selectedProviderStatus}. It may not be installed on this host — enter a model id manually.`
       : "No models were detected for this provider — enter a model id manually.";
+
+  // Trigger provider detection when a concrete provider is selected so the model
+  // dropdown populates instead of defaulting to manual entry.
+  const refreshProviders = providersSnapshot.refresh;
+  useEffect(() => {
+    if (visible && resolvedProvider && !isCustomProvider) {
+      void refreshProviders();
+    }
+  }, [visible, resolvedProvider, isCustomProvider, refreshProviders]);
 
   const resolvedModel = (
     useFreeformModel || modelSelection === CUSTOM_OPTION.value ? customModel : modelSelection
@@ -218,7 +237,13 @@ function ProfileModal({ visible, role, serverId, onClose, onSave }: ProfileModal
             testID="orchestration-profile-provider"
           />
         ) : null}
-        {useFreeformModel ? (
+        {isDetectingModels ? (
+          <Field label="Model" hint="Detecting available models on this host…">
+            <Text style={settingsStyles.rowHint} testID="orchestration-profile-model-detecting">
+              Detecting available models…
+            </Text>
+          </Field>
+        ) : useFreeformModel ? (
           <Field label="Model" hint={modelStatusHint}>
             <FormTextInput
               value={customModel}
@@ -331,12 +356,31 @@ function AddRoleModal({ visible, serverId, existingRoleIds, onClose, onSave }: A
   const selectedProviderStatus = selectedEntry?.status;
   const providerHasModels = Boolean(selectedEntry?.models?.length);
   const isCustomProvider = providerSelection === CUSTOM_OPTION.value;
-  // A concrete provider is chosen but exposes no model list -> let the user type the model id.
-  const useFreeformModel = !isCustomProvider && providerSelection !== "" && !providerHasModels;
+  // Model detection on the daemon is lazy; while it runs the provider reports
+  // `loading`. Show a detecting state during that window instead of forcing
+  // manual entry.
+  const isDetectingModels =
+    !isCustomProvider &&
+    providerSelection !== "" &&
+    !providerHasModels &&
+    (selectedProviderStatus === "loading" || providersSnapshot.isRefreshing);
+  // Only fall back to a free-text model id once detection has finished and the
+  // provider genuinely exposes no models (or it is a custom provider).
+  const useFreeformModel =
+    !isCustomProvider && providerSelection !== "" && !isDetectingModels && !providerHasModels;
   const modelStatusHint =
     selectedProviderStatus && selectedProviderStatus !== "ready"
       ? `Provider status: ${selectedProviderStatus}. It may not be installed on this host — enter a model id manually.`
       : "No models were detected for this provider — enter a model id manually.";
+
+  // Trigger provider detection when a concrete provider is selected so the model
+  // dropdown populates instead of defaulting to manual entry.
+  const refreshProviders = providersSnapshot.refresh;
+  useEffect(() => {
+    if (visible && resolvedProvider && !isCustomProvider) {
+      void refreshProviders();
+    }
+  }, [visible, resolvedProvider, isCustomProvider, refreshProviders]);
 
   const resolvedModel = (
     useFreeformModel || modelSelection === CUSTOM_OPTION.value ? customModel : modelSelection
@@ -485,7 +529,13 @@ function AddRoleModal({ visible, serverId, existingRoleIds, onClose, onSave }: A
             testID="orchestration-role-provider"
           />
         ) : null}
-        {useFreeformModel ? (
+        {isDetectingModels ? (
+          <Field label="Model" hint="Detecting available models on this host…">
+            <Text style={settingsStyles.rowHint} testID="orchestration-role-model-detecting">
+              Detecting available models…
+            </Text>
+          </Field>
+        ) : useFreeformModel ? (
           <Field label="Model" hint={modelStatusHint}>
             <FormTextInput
               value={customModel}

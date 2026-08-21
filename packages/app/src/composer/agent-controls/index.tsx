@@ -1624,7 +1624,17 @@ export const AgentControls = memo(function AgentControls({
 
   const handleModelSelectorOpen = useCallback(() => {
     refetchSnapshotIfStale(agentProvider);
-  }, [agentProvider, refetchSnapshotIfStale]);
+    // Provider/model detection on the daemon is lazy: until it has run, the
+    // selected provider reports `loading`/no models and the picker looks
+    // "unavailable". Force a detection pass when the provider is not ready yet
+    // so the model list actually populates.
+    if (agentProvider) {
+      const entry = resolveSnapshotSelectedEntry(snapshotEntries, agentProvider);
+      if (!entry || entry.status !== "ready") {
+        void refreshSnapshot([agentProvider]);
+      }
+    }
+  }, [agentProvider, refetchSnapshotIfStale, refreshSnapshot, snapshotEntries]);
 
   const handleRetryModelProvider = useCallback(
     (provider: AgentProvider) => {

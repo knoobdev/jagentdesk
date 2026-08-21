@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ScrollView, Text, TextInput, View } from "react-native";
+import { AppState, ScrollView, Text, TextInput, View } from "react-native";
 import type { TextInput as TextInputType } from "react-native";
 import { useLocalSearchParams, useRouter, type Href } from "expo-router";
 import { StyleSheet } from "react-native-unistyles";
@@ -367,6 +367,22 @@ export default function TailscaleLoginRoute() {
     };
   }, []);
 
+  // Warm the embedded tsnet node as soon as the login screen appears so its auth
+  // URL is (mostly) ready by the time the user taps "Sign in". Without this the
+  // node cold-starts only on tap, which is why the browser can take a long time
+  // to open. Best-effort: a build whose native module lacks prepare is a no-op,
+  // and the interactive login still starts the node itself.
+  useEffect(() => {
+    if (isDesktopLogin || !adapter.isSupported || !adapter.prepareInteractiveLogin) {
+      return;
+    }
+    try {
+      adapter.prepareInteractiveLogin();
+    } catch {
+      // Ignore warmup failures; startInteractiveLogin remains the source of truth.
+    }
+  }, [adapter, isDesktopLogin]);
+
   const clearAuthKey = useCallback(() => {
     setAuthKey("");
     authKeyInputRef.current?.clear();
@@ -449,6 +465,18 @@ export default function TailscaleLoginRoute() {
     void handleCheckStatus();
     const timer = setInterval(() => void handleCheckStatus(), LOGIN_SCREEN_STATUS_POLL_MS);
     return () => clearInterval(timer);
+  }, [authKeyInProgress, handleCheckStatus, interactiveInProgress]);
+
+  // When the user returns from the Tailscale browser login, the JS timers were
+  // suspended in the background. Re-check status immediately on foreground so the
+  // screen reconnects as soon as the tailnet is up instead of after the next tick.
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active" && !interactiveInProgress && !authKeyInProgress) {
+        void handleCheckStatus();
+      }
+    });
+    return () => subscription.remove();
   }, [authKeyInProgress, handleCheckStatus, interactiveInProgress]);
 
   const handleAuthKeySubmit = useCallback(async () => {
