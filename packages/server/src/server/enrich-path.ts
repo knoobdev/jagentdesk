@@ -32,6 +32,7 @@ function commonBinDirs(): string[] {
     path.join(home, ".local", "bin"),
     path.join(home, "bin"),
     path.join(home, ".npm-global", "bin"),
+    path.join(home, ".opencode", "bin"),
     path.join(home, ".bun", "bin"),
     path.join(home, ".deno", "bin"),
     path.join(home, "go", "bin"),
@@ -40,12 +41,35 @@ function commonBinDirs(): string[] {
   ];
 }
 
+// The login-shell probe is what captures version-managed tools (nvm/asdf/fnm)
+// whose bin directories are exported from the user's shell rc. GUI/launchd
+// processes frequently start without SHELL set, so fall back to the account's
+// real login shell and finally the platform default.
+function resolveUserShell(): string | null {
+  if (process.platform === "win32") {
+    return null;
+  }
+  const fromEnv = process.env.SHELL?.trim();
+  if (fromEnv) {
+    return fromEnv;
+  }
+  try {
+    const fromUser = os.userInfo().shell?.trim();
+    if (fromUser) {
+      return fromUser;
+    }
+  } catch {
+    // os.userInfo() can throw on some platforms; fall through to the default.
+  }
+  return process.platform === "darwin" ? "/bin/zsh" : "/bin/bash";
+}
+
 // Ask the user's login+interactive shell for its PATH. Interactive (`-i`) is
 // required because Homebrew/nvm/asdf usually export PATH from `.zshrc`/`.bashrc`.
 // Bounded and best-effort: any failure falls back to the common directories.
 async function resolveLoginShellPath(timeoutMs: number): Promise<string | null> {
-  const shell = process.env.SHELL;
-  if (!shell || process.platform === "win32") {
+  const shell = resolveUserShell();
+  if (!shell) {
     return null;
   }
   try {
