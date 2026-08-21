@@ -153,7 +153,13 @@ export function WorkspaceOrchestrationPanel({
   }, [client, config, cwd, request, setVisible, supervisor, variant, onClose, workspaceId]);
 
   const handleKeyPress = useCallback(
-    (event: { nativeEvent: { key: string; shiftKey?: boolean }; preventDefault?: () => void }) => {
+    (event: {
+      nativeEvent: { key: string; shiftKey?: boolean; isComposing?: boolean };
+      preventDefault?: () => void;
+    }) => {
+      // Do not treat Enter as "send" while an IME is composing (e.g. Vietnamese
+      // Telex/VNI, CJK). Intercepting it mid-composition drops the diacritic.
+      if (event.nativeEvent.isComposing) return;
       if (event.nativeEvent.key !== "Enter") return;
       if (event.nativeEvent.shiftKey) return;
       if (pending) return;

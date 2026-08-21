@@ -108,6 +108,9 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.lg,
     fontWeight: theme.fontWeight.medium,
   },
+  subtitle: {
+    fontSize: theme.fontSize.sm,
+  },
   headerActions: {
     flexDirection: "row",
     alignItems: "center",
@@ -347,6 +350,13 @@ export function SheetHeaderView({
     () => [styles.title, { color: theme.colors.foreground }],
     [theme.colors.foreground],
   );
+  // A plain string subtitle would otherwise render without a Text wrapper and
+  // inherit a non-theme (often dark) color — invisible in dark mode. Wrap it in
+  // a Text with a live theme color; element subtitles pass through unchanged.
+  const subtitleStyle = useMemo(
+    () => [styles.subtitle, { color: theme.colors.foregroundMuted }],
+    [theme.colors.foregroundMuted],
+  );
   const back = header.back;
   const handleBackPress = back?.onPress;
   const search = header.search;
@@ -382,7 +392,13 @@ export function SheetHeaderView({
           <Text style={titleStyle} numberOfLines={1}>
             {header.title}
           </Text>
-          {header.subtitle}
+          {typeof header.subtitle === "string" ? (
+            <Text style={subtitleStyle} numberOfLines={1}>
+              {header.subtitle}
+            </Text>
+          ) : (
+            header.subtitle
+          )}
         </View>
         {header.actions ? <View style={styles.headerActions}>{header.actions}</View> : null}
         {showCloseButton ? (

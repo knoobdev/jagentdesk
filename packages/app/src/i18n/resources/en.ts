@@ -1256,8 +1256,9 @@ export const en = {
     title: "Join your tailnet",
     subtitle: "JAgentDesk reaches your computer over Tailscale. Sign in to continue.",
     interactiveAction: "Sign in with Tailscale",
-    interactiveInProgress: "Connecting...",
-    connecting: "Connecting to your tailnet...",
+    interactiveInProgress: "Opening browser…",
+    connecting:
+      "Opening the Tailscale login in your browser. Finish signing in there, then return to this app — it reconnects automatically.",
     authKeyLabel: "Auth key",
     authKeyPlaceholder: "Paste your auth key",
     authKeyAction: "Join with auth key",

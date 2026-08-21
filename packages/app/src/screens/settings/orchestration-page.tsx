@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ScrollView, Text, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { AdaptiveModalSheet, type SheetHeader } from "@/components/adaptive-modal-sheet";
+import { useToast } from "@/contexts/toast-context";
 import { Button } from "@/components/ui/button";
 import { Field, FormTextInput } from "@/components/ui/form-field";
 import {
@@ -879,6 +880,7 @@ function RouteRow({
 
 export function HostOrchestrationPage({ serverId }: OrchestrationPageProps) {
   const { theme } = useUnistyles();
+  const toast = useToast();
   const { config, isLoading, error: loadError, patchConfig } = useOrchestration(serverId);
   const [profileRole, setProfileRole] = useState<OrchestrationRole | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -905,13 +907,22 @@ export function HostOrchestrationPage({ serverId }: OrchestrationPageProps) {
         return [route.primary, ...route.fallbacks].some((target) => target.role === role);
       });
       if (usedByRoute) {
-        setError("This role is used by a route. Change that route before removing it.");
+        const message = "This role is used by a route. Change that route before removing it.";
+        setError(message);
+        toast.error(message);
         return;
       }
       setError(null);
-      await patchConfig({ removeRoleIds: [role] });
+      try {
+        await patchConfig({ removeRoleIds: [role] });
+      } catch (removeError) {
+        const message =
+          removeError instanceof Error ? removeError.message : "Unable to remove role.";
+        setError(message);
+        toast.error(message);
+      }
     },
-    [config, patchConfig],
+    [config, patchConfig, toast],
   );
 
   const addCustomRole = useCallback(
@@ -947,9 +958,16 @@ export function HostOrchestrationPage({ serverId }: OrchestrationPageProps) {
     ) => {
       if (!config) return;
       setError(null);
-      await patchConfig({ roles: { [role]: patch } });
+      try {
+        await patchConfig({ roles: { [role]: patch } });
+      } catch (updateError) {
+        const message =
+          updateError instanceof Error ? updateError.message : "Unable to update orchestration.";
+        setError(message);
+        toast.error(message);
+      }
     },
-    [config, patchConfig],
+    [config, patchConfig, toast],
   );
 
   const addProfile = useCallback(
@@ -964,7 +982,9 @@ export function HostOrchestrationPage({ serverId }: OrchestrationPageProps) {
     async (role: OrchestrationRole, profileId: string) => {
       if (!config) return;
       if (config.roles[role].profiles.length <= 1) {
-        setError("Each role must keep at least one profile.");
+        const message = "Each role must keep at least one profile.";
+        setError(message);
+        toast.error(message);
         return;
       }
       const routeUsesProfile = ROUTE_ORDER.some((category) => {
@@ -974,7 +994,9 @@ export function HostOrchestrationPage({ serverId }: OrchestrationPageProps) {
         );
       });
       if (routeUsesProfile) {
-        setError("This profile is used by a route. Change that route before removing it.");
+        const message = "This profile is used by a route. Change that route before removing it.";
+        setError(message);
+        toast.error(message);
         return;
       }
       await updateRole(role, {
@@ -985,7 +1007,7 @@ export function HostOrchestrationPage({ serverId }: OrchestrationPageProps) {
             : config.roles[role].defaultProfileId,
       });
     },
-    [config, updateRole],
+    [config, updateRole, toast],
   );
 
   const routeOptions = useMemo<SelectFieldOption<OrchestrationRouteTarget>[]>(() => {
