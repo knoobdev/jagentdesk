@@ -323,8 +323,6 @@ function computeStatusReason(status: Record<string, unknown> | undefined): strin
   return status.phase as string;
 }
 
-
-
 function mapPod(raw: Record<string, unknown>): PodDTO {
   const metadata = raw.metadata as Record<string, unknown> | undefined;
   const status = raw.status as Record<string, unknown> | undefined;
