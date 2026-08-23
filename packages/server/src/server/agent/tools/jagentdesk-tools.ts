@@ -95,7 +95,12 @@ import {
   OrchestrationHandbackSchema,
   OrchestrationRouteCategorySchema,
 } from "@jagentdesk/protocol/orchestration";
-import type { OrchestrationRuntime } from "../../orchestration/runtime.js";
+import type {
+  OrchestrationAgentContext,
+  OrchestrationRuntime,
+} from "../../orchestration/runtime.js";
+import type { ClusterRegistry } from "../../cluster/cluster-registry.js";
+import type { AgentPermissionResponse } from "../agent-sdk-types.js";
 
 export interface JAgentDeskToolHostDependencies {
   agentManager: AgentManager;
@@ -145,6 +150,17 @@ export interface JAgentDeskToolHostDependencies {
   resolveSpeakHandler?: (callerAgentId: string) => VoiceSpeakHandler | null;
   resolveCallerContext?: (callerAgentId: string) => VoiceCallerContext | null;
   orchestrationRuntime?: OrchestrationRuntime;
+  clusterRegistry?: ClusterRegistry;
+  requestHostToolPermission?: (
+    agentId: string,
+    request: {
+      name: string;
+      kind: string;
+      title?: string;
+      description?: string;
+      input?: Record<string, unknown>;
+    },
+  ) => Promise<AgentPermissionResponse>;
   enableVoiceTools?: boolean;
   voiceOnly?: boolean;
   logger: Logger;
@@ -539,6 +555,354 @@ function resolveTerminalKeyToken(key: string, literal: boolean): string {
       return "\u0005";
     default:
       return key;
+  }
+}
+
+function registerKubectlTools(params: {
+  registerTool: (
+    name: string,
+    config: JAgentDeskToolConfig,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Tool handlers are schema-validated at registration boundaries.
+    handler: (input: any, context: JAgentDeskToolExecutionContext) => Promise<JAgentDeskToolResult>,
+  ) => void;
+  options: JAgentDeskToolHostDependencies;
+  callerAgentId: string | undefined;
+}): void {
+  const { registerTool, options, callerAgentId } = params;
+
+  registerTool(
+    "kubectl_get",
+    {
+      title: "Kubectl get",
+      description: "Read Kubernetes resources from a connected cluster. Auto-approved (read-only).",
+      inputSchema: {
+        clusterId: z.string().min(1),
+        action: z.enum(["get", "list", "describe", "logs"]),
+        kind: z.string().optional(),
+        namespace: z.string().optional(),
+        name: z.string().optional(),
+      },
+    },
+    async (input: {
+      clusterId: string;
+      action: "get" | "list" | "describe" | "logs";
+      kind?: string;
+      namespace?: string;
+      name?: string;
+    }) => {
+      const client = options.clusterRegistry?.getClient(input.clusterId);
+      if (!client) {
+        return {
+          content: [
+            { type: "text", text: `Cluster not found or not connected: ${input.clusterId}` },
+          ],
+          isError: true,
+        };
+      }
+      let text: string;
+      try {
+        switch (input.action) {
+          case "list": {
+            if (!input.kind) throw new Error("kind is required for list action");
+            const items = await client.listGeneric(input.kind, input.namespace);
+            text = JSON.stringify(items, null, 2);
+            break;
+          }
+          case "logs": {
+            if (!input.namespace || !input.name)
+              throw new Error("namespace and name are required for logs action");
+            text = await client.getPodLogs(input.namespace, input.name);
+            break;
+          }
+          case "get":
+          case "describe": {
+            if (!input.kind || !input.name)
+              throw new Error("kind and name are required for get/describe action");
+            text = await client.getGeneric(input.kind, input.namespace, input.name);
+            break;
+          }
+          default:
+            throw new Error(`Unknown action: ${input.action}`);
+        }
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
+          isError: true,
+        };
+      }
+      return { content: [{ type: "text", text }] };
+    },
+  );
+
+  registerTool(
+    "kubectl_apply",
+    {
+      title: "Kubectl apply",
+      description:
+        "Write (apply/delete/scale/restart) Kubernetes resources. Requires user approval via permission card.",
+      inputSchema: {
+        clusterId: z.string().min(1),
+        action: z.enum(["apply", "delete", "scale", "restart"]),
+        manifestYaml: z.string().optional(),
+        kind: z.string().optional(),
+        namespace: z.string().optional(),
+        name: z.string().optional(),
+        replicas: z.number().optional(),
+      },
+    },
+    async (
+      input: {
+        clusterId: string;
+        action: "apply" | "delete" | "scale" | "restart";
+        manifestYaml?: string;
+        kind?: string;
+        namespace?: string;
+        name?: string;
+        replicas?: number;
+      },
+      _context: JAgentDeskToolExecutionContext,
+    ) => {
+      if (!callerAgentId) {
+        return {
+          content: [
+            { type: "text", text: "kubectl_apply is only available to agent-scoped tool sessions" },
+          ],
+          isError: true,
+        };
+      }
+      const client = options.clusterRegistry?.getClient(input.clusterId);
+      if (!client) {
+        return {
+          content: [
+            { type: "text", text: `Cluster not found or not connected: ${input.clusterId}` },
+          ],
+          isError: true,
+        };
+      }
+      const description =
+        input.manifestYaml ?? `${input.action} ${input.kind ?? "?"}/${input.name ?? "?"}`;
+      const decision = await options.requestHostToolPermission!(callerAgentId, {
+        name: "kubectl_apply",
+        kind: "tool",
+        title: `${input.action} on ${input.clusterId}`,
+        description,
+        input: input as unknown as Record<string, unknown>,
+      });
+      if (decision.behavior !== "allow") {
+        return { content: [{ type: "text", text: "Denied by user." }], isError: true };
+      }
+      try {
+        const result = await client.applyWrite({
+          kind: input.kind ?? "",
+          namespace: input.namespace,
+          name: input.name ?? "",
+          action: input.action,
+          replicas: input.replicas,
+          manifestYaml: input.manifestYaml,
+          dryRun: false,
+        });
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
+          isError: true,
+        };
+      }
+    },
+  );
+}
+
+function validateSendPromptCaller(
+  callerOrchestrationContext: OrchestrationAgentContext | null,
+  orchestrationRuntime: OrchestrationRuntime | null | undefined,
+  agentId: string,
+): void {
+  if (callerOrchestrationContext?.role === "peer") {
+    throw new Error("Peer cannot dispatch prompts; return a structured orchestration.handback");
+  }
+  const targetContext = orchestrationRuntime?.getAgentContext(agentId);
+  if (
+    callerOrchestrationContext?.role === "lead" &&
+    targetContext?.role === "peer" &&
+    targetContext.briefId === callerOrchestrationContext.briefId
+  ) {
+    throw new Error("Lead must use orchestration.create_peer and its bounded assignment contract");
+  }
+  if (
+    callerOrchestrationContext?.role === "supervisor" &&
+    targetContext?.role === "peer" &&
+    targetContext.briefId === callerOrchestrationContext.briefId
+  ) {
+    throw new Error("Supervisor cannot dispatch directly to a Peer");
+  }
+}
+
+function registerOrchestrationTools(params: {
+  registerTool: (
+    name: string,
+    config: JAgentDeskToolConfig,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Tool handlers are schema-validated at registration boundaries.
+    handler: (input: any, context: JAgentDeskToolExecutionContext) => Promise<JAgentDeskToolResult>,
+  ) => void;
+  orchestrationRuntime: OrchestrationRuntime;
+  callerAgentId: string;
+  callerOrchestrationContext: OrchestrationAgentContext;
+  callerContext: {
+    lockedCwd?: string;
+    allowCustomCwd?: boolean;
+    childAgentDefaultLabels?: Record<string, string>;
+  } | null;
+}): void {
+  const {
+    registerTool,
+    orchestrationRuntime,
+    callerAgentId,
+    callerOrchestrationContext,
+    callerContext,
+  } = params;
+
+  if (callerOrchestrationContext.role === "supervisor") {
+    registerTool(
+      "orchestration.bootstrap_lead",
+      {
+        title: "Bootstrap orchestration Lead",
+        description:
+          "Supervisor-only operation: create or reuse the single engineering Lead for this workspace and orchestration run.",
+        inputSchema: {
+          assignment: z.string().trim().min(1).max(12000),
+          title: z.string().trim().min(1).max(60).optional(),
+        },
+        outputSchema: {
+          agentId: z.string(),
+          provider: z.string(),
+          model: z.string(),
+          thinkingOptionId: z.string(),
+          reused: z.boolean(),
+        },
+      },
+      async ({ assignment, title }) => {
+        const result = await orchestrationRuntime.bootstrapLead({
+          callerAgentId,
+          assignment,
+          title,
+          callerContext,
+        });
+        return { content: [], structuredContent: ensureValidJson(result) };
+      },
+    );
+  }
+
+  if (callerOrchestrationContext.role === "lead") {
+    registerTool(
+      "orchestration.create_peer",
+      {
+        title: "Create bounded orchestration Peer",
+        description:
+          "Lead-only operation: create one bounded Peer using the configured semantic route, provider/model, thinking level, and fan-out limit.",
+        inputSchema: {
+          routeCategory: OrchestrationRouteCategorySchema,
+          assignment: z.string().trim().min(1).max(12000),
+          ownershipBoundary: z.string().trim().min(1).max(12000),
+          expectedHandback: z.string().trim().min(1).max(12000),
+          title: z.string().trim().min(1).max(60).optional(),
+        },
+        outputSchema: {
+          agentId: z.string(),
+          assignmentId: z.string(),
+          routeCategory: OrchestrationRouteCategorySchema,
+          profileId: z.string(),
+          provider: z.string(),
+          model: z.string(),
+          thinkingOptionId: z.string(),
+        },
+      },
+      async ({ routeCategory, assignment, ownershipBoundary, expectedHandback, title }) => {
+        const result = await orchestrationRuntime.createPeer({
+          callerAgentId,
+          routeCategory,
+          assignment,
+          ownershipBoundary,
+          expectedHandback,
+          title,
+          callerContext,
+        });
+        return { content: [], structuredContent: ensureValidJson(result) };
+      },
+    );
+  }
+
+  if (
+    callerOrchestrationContext.role !== "supervisor" &&
+    callerOrchestrationContext.role !== "lead"
+  ) {
+    registerTool(
+      "orchestration.handback",
+      {
+        title: "Return orchestration handback",
+        description:
+          "Peer-only operation: persist evidence-bearing handback and deliver it to the owning Lead.",
+        inputSchema: OrchestrationHandbackSchema,
+        outputSchema: { handbackId: z.string(), leadAgentId: z.string() },
+      },
+      async (handback) => {
+        const result = await orchestrationRuntime.recordHandback({ callerAgentId, handback });
+        return { content: [], structuredContent: ensureValidJson(result) };
+      },
+    );
+  }
+
+  if (callerOrchestrationContext.role === "lead") {
+    registerTool(
+      "orchestration.resolve_dissent",
+      {
+        title: "Resolve orchestration dissent",
+        description:
+          "Lead-only operation: close a Peer dissent with exactly one allowed outcome and an explicit next action.",
+        inputSchema: {
+          peerAgentId: z.string().min(1),
+          outcome: OrchestrationDissentOutcomeSchema,
+          rationale: z.string().trim().min(1).max(12000),
+          nextAction: z.string().trim().min(1).max(12000),
+        },
+        outputSchema: { dissentId: z.string(), verificationRound: z.number() },
+      },
+      async ({ peerAgentId, outcome, rationale, nextAction }) => {
+        const result = await orchestrationRuntime.resolveDissent({
+          callerAgentId,
+          peerAgentId,
+          outcome,
+          rationale,
+          nextAction,
+        });
+        return { content: [], structuredContent: ensureValidJson(result) };
+      },
+    );
+  }
+
+  if (callerOrchestrationContext.role === "lead") {
+    registerTool(
+      "orchestration.accept_result",
+      {
+        title: "Accept orchestration engineering result",
+        description:
+          "Lead-only operation: record technical acceptance after validation and notify the Supervisor.",
+        inputSchema: {
+          summary: z.string().trim().min(1).max(12000),
+          evidence: z.string().trim().min(1).max(12000),
+          remainingUncertainty: z.string().trim().min(1).max(12000),
+        },
+        outputSchema: { supervisorAgentId: z.string() },
+      },
+      async ({ summary, evidence, remainingUncertainty }) => {
+        const result = await orchestrationRuntime.acceptResult({
+          callerAgentId,
+          summary,
+          evidence,
+          remainingUncertainty,
+        });
+        return { content: [], structuredContent: ensureValidJson(result) };
+      },
+    );
   }
 }
 
@@ -1166,149 +1530,13 @@ export function createJAgentDeskToolCatalog(
   type LegacyTopLevelCreateAgentArgs = z.infer<typeof legacyTopLevelCreateAgentArgsSchema>;
 
   if (orchestrationRuntime && callerAgentId && callerOrchestrationContext) {
-    if (callerOrchestrationContext.role === "supervisor") {
-      registerTool(
-        "orchestration.bootstrap_lead",
-        {
-          title: "Bootstrap orchestration Lead",
-          description:
-            "Supervisor-only operation: create or reuse the single engineering Lead for this workspace and orchestration run.",
-          inputSchema: {
-            assignment: z.string().trim().min(1).max(12000),
-            title: z.string().trim().min(1).max(60).optional(),
-          },
-          outputSchema: {
-            agentId: z.string(),
-            provider: z.string(),
-            model: z.string(),
-            thinkingOptionId: z.string(),
-            reused: z.boolean(),
-          },
-        },
-        async ({ assignment, title }) => {
-          const result = await orchestrationRuntime.bootstrapLead({
-            callerAgentId,
-            assignment,
-            title,
-            callerContext,
-          });
-          return { content: [], structuredContent: ensureValidJson(result) };
-        },
-      );
-    }
-
-    if (callerOrchestrationContext.role === "lead") {
-      registerTool(
-        "orchestration.create_peer",
-        {
-          title: "Create bounded orchestration Peer",
-          description:
-            "Lead-only operation: create one bounded Peer using the configured semantic route, provider/model, thinking level, and fan-out limit.",
-          inputSchema: {
-            routeCategory: OrchestrationRouteCategorySchema,
-            assignment: z.string().trim().min(1).max(12000),
-            ownershipBoundary: z.string().trim().min(1).max(12000),
-            expectedHandback: z.string().trim().min(1).max(12000),
-            title: z.string().trim().min(1).max(60).optional(),
-          },
-          outputSchema: {
-            agentId: z.string(),
-            assignmentId: z.string(),
-            routeCategory: OrchestrationRouteCategorySchema,
-            profileId: z.string(),
-            provider: z.string(),
-            model: z.string(),
-            thinkingOptionId: z.string(),
-          },
-        },
-        async ({ routeCategory, assignment, ownershipBoundary, expectedHandback, title }) => {
-          const result = await orchestrationRuntime.createPeer({
-            callerAgentId,
-            routeCategory,
-            assignment,
-            ownershipBoundary,
-            expectedHandback,
-            title,
-            callerContext,
-          });
-          return { content: [], structuredContent: ensureValidJson(result) };
-        },
-      );
-    }
-
-    if (
-      callerOrchestrationContext.role !== "supervisor" &&
-      callerOrchestrationContext.role !== "lead"
-    ) {
-      registerTool(
-        "orchestration.handback",
-        {
-          title: "Return orchestration handback",
-          description:
-            "Peer-only operation: persist evidence-bearing handback and deliver it to the owning Lead.",
-          inputSchema: OrchestrationHandbackSchema,
-          outputSchema: { handbackId: z.string(), leadAgentId: z.string() },
-        },
-        async (handback) => {
-          const result = await orchestrationRuntime.recordHandback({ callerAgentId, handback });
-          return { content: [], structuredContent: ensureValidJson(result) };
-        },
-      );
-    }
-
-    if (callerOrchestrationContext.role === "lead") {
-      registerTool(
-        "orchestration.resolve_dissent",
-        {
-          title: "Resolve orchestration dissent",
-          description:
-            "Lead-only operation: close a Peer dissent with exactly one allowed outcome and an explicit next action.",
-          inputSchema: {
-            peerAgentId: z.string().min(1),
-            outcome: OrchestrationDissentOutcomeSchema,
-            rationale: z.string().trim().min(1).max(12000),
-            nextAction: z.string().trim().min(1).max(12000),
-          },
-          outputSchema: { dissentId: z.string(), verificationRound: z.number() },
-        },
-        async ({ peerAgentId, outcome, rationale, nextAction }) => {
-          const result = await orchestrationRuntime.resolveDissent({
-            callerAgentId,
-            peerAgentId,
-            outcome,
-            rationale,
-            nextAction,
-          });
-          return { content: [], structuredContent: ensureValidJson(result) };
-        },
-      );
-    }
-
-    if (callerOrchestrationContext.role === "lead") {
-      registerTool(
-        "orchestration.accept_result",
-        {
-          title: "Accept orchestration engineering result",
-          description:
-            "Lead-only operation: record technical acceptance after validation and notify the Supervisor.",
-          inputSchema: {
-            summary: z.string().trim().min(1).max(12000),
-            evidence: z.string().trim().min(1).max(12000),
-            remainingUncertainty: z.string().trim().min(1).max(12000),
-          },
-          outputSchema: { supervisorAgentId: z.string() },
-        },
-        async ({ summary, evidence, remainingUncertainty }) => {
-          const result = await orchestrationRuntime.acceptResult({
-            callerAgentId,
-            summary,
-            evidence,
-            remainingUncertainty,
-          });
-          return { content: [], structuredContent: ensureValidJson(result) };
-        },
-      );
-    }
+    registerOrchestrationTools({
+      registerTool,
+      orchestrationRuntime,
+      callerAgentId,
+      callerOrchestrationContext,
+      callerContext,
+    });
   }
 
   if (options.voiceOnly || options.enableVoiceTools || callerContext?.enableVoiceTools) {
@@ -2038,26 +2266,7 @@ export function createJAgentDeskToolCatalog(
       background = Boolean(callerAgentId),
       notifyOnFinish = Boolean(callerAgentId),
     }) => {
-      if (callerOrchestrationContext?.role === "peer") {
-        throw new Error("Peer cannot dispatch prompts; return a structured orchestration.handback");
-      }
-      const targetContext = orchestrationRuntime?.getAgentContext(agentId);
-      if (
-        callerOrchestrationContext?.role === "lead" &&
-        targetContext?.role === "peer" &&
-        targetContext.briefId === callerOrchestrationContext.briefId
-      ) {
-        throw new Error(
-          "Lead must use orchestration.create_peer and its bounded assignment contract",
-        );
-      }
-      if (
-        callerOrchestrationContext?.role === "supervisor" &&
-        targetContext?.role === "peer" &&
-        targetContext.briefId === callerOrchestrationContext.briefId
-      ) {
-        throw new Error("Supervisor cannot dispatch directly to a Peer");
-      }
+      validateSendPromptCaller(callerOrchestrationContext, orchestrationRuntime, agentId);
       const shouldNotifyOnFinish = Boolean(callerAgentId && notifyOnFinish && background);
 
       await sendPromptToAgent({
@@ -3305,6 +3514,10 @@ export function createJAgentDeskToolCatalog(
       };
     },
   );
+
+  // ── kubectl tools ──────────────────────────────────────────────────────
+
+  registerKubectlTools({ registerTool, options, callerAgentId });
 
   return toCatalog();
 }

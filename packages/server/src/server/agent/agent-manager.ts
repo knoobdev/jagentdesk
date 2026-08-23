@@ -627,6 +627,10 @@ export class AgentManager {
   private readonly backgroundTasks = new Set<Promise<void>>();
   private readonly agentRegistrationTasks = new Set<Promise<void>>();
   private readonly inFlightAgentCloses = new Map<string, Promise<void>>();
+  private readonly hostToolPermissions = new Map<
+    string,
+    (response: AgentPermissionResponse) => void
+  >();
   private readonly agentStreamCoalescer: AgentStreamCoalescer;
   private mcpBaseUrl: string | null;
   private readonly mcpAuthToken: string | null;
@@ -2364,6 +2368,23 @@ export class AgentManager {
     response: AgentPermissionResponse,
   ): Promise<AgentPermissionResult | void> {
     const agent = this.requireAgent(agentId);
+
+    // Intercept host tool permissions before forwarding to agent session.
+    const hostResolve = this.hostToolPermissions.get(requestId);
+    if (hostResolve) {
+      this.hostToolPermissions.delete(requestId);
+      agent.pendingPermissions.delete(requestId);
+      this.dispatchStream(agentId, {
+        type: "permission_resolved",
+        provider: agent.session.provider,
+        requestId,
+        resolution: response,
+      });
+      this.emitState(agent);
+      hostResolve(response);
+      return;
+    }
+
     agent.inFlightPermissionResponses.add(requestId);
 
     try {
@@ -2391,6 +2412,46 @@ export class AgentManager {
       agent.inFlightPermissionResponses.delete(requestId);
       agent.bufferedPermissionResolutions.delete(requestId);
     }
+  }
+
+  async requestHostToolPermission(
+    agentId: string,
+    request: {
+      name: string;
+      kind: string;
+      title?: string;
+      description?: string;
+      input?: Record<string, unknown>;
+    },
+  ): Promise<AgentPermissionResponse> {
+    const agent = this.requireAgent(agentId);
+    const id = randomUUID();
+    const permissionRequest: AgentPermissionRequest = {
+      id,
+      provider: agent.session.provider,
+      name: request.name,
+      kind: "tool",
+      title: request.title,
+      description: request.description,
+      input: request.input as Record<string, unknown>,
+    };
+
+    const promise = new Promise<AgentPermissionResponse>((resolvePermission) => {
+      this.hostToolPermissions.set(id, resolvePermission);
+    });
+
+    agent.pendingPermissions.set(id, permissionRequest);
+    if (!agent.internal) {
+      this.broadcastAgentAttention(agent, "permission");
+    }
+    this.dispatchStream(agentId, {
+      type: "permission_requested",
+      provider: agent.session.provider,
+      request: permissionRequest,
+    });
+    this.emitState(agent);
+
+    return promise;
   }
 
   async cancelAgentRun(agentId: string): Promise<AgentRunCancellationResult> {
