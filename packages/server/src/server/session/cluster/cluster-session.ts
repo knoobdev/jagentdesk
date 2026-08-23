@@ -2,6 +2,7 @@ import type pino from "pino";
 import type { SessionInboundMessage, SessionOutboundMessage } from "../../messages.js";
 import type { ClusterRegistry } from "../../cluster/cluster-registry.js";
 import { detectKubeContexts } from "../../cluster/kube-config-source.js";
+import { GENERIC_KINDS } from "../../cluster/kube-client.js";
 
 export interface ClusterSessionHost {
   emit(msg: SessionOutboundMessage): void;
@@ -241,6 +242,48 @@ export class ClusterSession {
         payload: {
           requestId: request.requestId,
           result,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitClusterRpcError(request, error);
+    }
+  }
+
+  async handleClusterKinds(
+    request: Extract<SessionInboundMessage, { type: "cluster/kinds" }>,
+  ): Promise<void> {
+    try {
+      const client = this.clusterRegistry.getClient(request.id);
+      const crds = client ? await client.discoverCRDs() : [];
+      this.host.emit({
+        type: "cluster/kinds/response",
+        payload: {
+          requestId: request.requestId,
+          kinds: [...GENERIC_KINDS, ...crds],
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitClusterRpcError(request, error);
+    }
+  }
+
+  async handleClusterResourceList(
+    request: Extract<SessionInboundMessage, { type: "cluster/resource/list" }>,
+  ): Promise<void> {
+    try {
+      const client = this.clusterRegistry.getClient(request.id);
+      if (!client) {
+        throw new Error(`cluster not connected: ${request.id}`);
+      }
+      const items = await client.listGeneric(request.kind, request.namespace);
+      this.host.emit({
+        type: "cluster/resource/list/response",
+        payload: {
+          requestId: request.requestId,
+          kind: request.kind,
+          items,
           error: null,
         },
       });

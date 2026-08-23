@@ -593,6 +593,14 @@ type ClusterWritePayload = Extract<
   SessionOutboundMessage,
   { type: "cluster/write/response" }
 >["payload"];
+type ClusterKindsPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/kinds/response" }
+>["payload"];
+type ClusterResourceListPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/resource/list/response" }
+>["payload"];
 type ScheduleCreatePayload = Extract<
   SessionOutboundMessage,
   { type: "schedule/create/response" }
@@ -5641,6 +5649,32 @@ export class DaemonClient {
         dryRun: options.dryRun,
       },
       responseType: "cluster/write/response",
+    });
+  }
+
+  async clusterKinds(options: { requestId?: string; id: string }): Promise<ClusterKindsPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "cluster/kinds", id: options.id },
+      responseType: "cluster/kinds/response",
+    });
+  }
+
+  async clusterResourceList(options: {
+    requestId?: string;
+    id: string;
+    kind: string;
+    namespace?: string;
+  }): Promise<ClusterResourceListPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "cluster/resource/list",
+        id: options.id,
+        kind: options.kind,
+        ...(options.namespace ? { namespace: options.namespace } : {}),
+      },
+      responseType: "cluster/resource/list/response",
     });
   }
 

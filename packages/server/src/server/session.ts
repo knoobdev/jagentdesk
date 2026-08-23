@@ -2386,6 +2386,10 @@ export class Session {
         return this.clusterSession.handleLogsRequest(msg);
       case "cluster/write":
         return this.clusterSession.handleWriteRequest(msg);
+      case "cluster/kinds":
+        return this.clusterSession.handleClusterKinds(msg);
+      case "cluster/resource/list":
+        return this.clusterSession.handleClusterResourceList(msg);
       default:
         return undefined;
     }

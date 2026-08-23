@@ -184,6 +184,50 @@ export const ClusterWriteResponseSchema = z.object({
   }),
 });
 
+// ── cluster/kinds ─────────────────────────────────────────────────────────
+
+export const ClusterKindsRequestSchema = z.object({
+  type: z.literal("cluster/kinds"),
+  requestId: z.string(),
+  id: z.string(),
+});
+
+export const ClusterKindsResponseSchema = z.object({
+  type: z.literal("cluster/kinds/response"),
+  payload: z.object({
+    requestId: z.string(),
+    kinds: z.array(
+      z.object({
+        kind: z.string(),
+        apiVersion: z.string(),
+        namespaced: z.boolean(),
+        category: z.string(),
+      }),
+    ),
+    error: z.string().nullable(),
+  }),
+});
+
+// ── cluster/resource/list ──────────────────────────────────────────────────
+
+export const ClusterResourceListRequestSchema = z.object({
+  type: z.literal("cluster/resource/list"),
+  requestId: z.string(),
+  id: z.string(),
+  kind: z.string(),
+  namespace: z.string().optional(),
+});
+
+export const ClusterResourceListResponseSchema = z.object({
+  type: z.literal("cluster/resource/list/response"),
+  payload: z.object({
+    requestId: z.string(),
+    kind: z.string(),
+    items: z.array(z.unknown()),
+    error: z.string().nullable(),
+  }),
+});
+
 // ── Type exports ────────────────────────────────────────────────────────
 
 export type KubeContextInfo = z.infer<typeof KubeContextInfoSchema>;
@@ -209,3 +253,8 @@ export type ClusterResourcesResponse = z.infer<typeof ClusterResourcesResponseSc
 export type ClusterGetResponse = z.infer<typeof ClusterGetResponseSchema>;
 export type ClusterLogsResponse = z.infer<typeof ClusterLogsResponseSchema>;
 export type ClusterWriteResponse = z.infer<typeof ClusterWriteResponseSchema>;
+
+export type ClusterKindsRequest = z.infer<typeof ClusterKindsRequestSchema>;
+export type ClusterKindsResponse = z.infer<typeof ClusterKindsResponseSchema>;
+export type ClusterResourceListRequest = z.infer<typeof ClusterResourceListRequestSchema>;
+export type ClusterResourceListResponse = z.infer<typeof ClusterResourceListResponseSchema>;
