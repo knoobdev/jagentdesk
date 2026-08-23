@@ -1063,6 +1063,9 @@ function TailscaleHealthMonitor() {
       const store = getHostRuntimeStore();
       void store.runProbeCycleNow();
       store.ensureConnectedAll();
+      // ensureConnectedAll no-ops on a "connected" zombie socket left behind by
+      // OS suspension; force a liveness check that reconnects if the link is dead.
+      store.revalidateConnectedAll();
     };
 
     reconnectNow();

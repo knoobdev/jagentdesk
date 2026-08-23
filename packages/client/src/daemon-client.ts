@@ -1473,6 +1473,34 @@ export class DaemonClient {
     void this.connect();
   }
 
+  /**
+   * Force a liveness check, typically when the app returns to the foreground.
+   * iOS/Android suspension freezes the heartbeat timers and can kill the tailnet
+   * path while the local loopback WebSocket stays OPEN — leaving a "connected"
+   * zombie that {@link ensureConnected} would early-return for. Ping with a short
+   * timeout and, if it fails, tear the transport down and reconnect immediately
+   * instead of waiting up to ~50s for the heartbeat to notice.
+   */
+  async revalidateConnection(): Promise<void> {
+    if (this.connectionState.status === "disposed") {
+      return;
+    }
+    this.shouldReconnect = true;
+    if (this.connectionState.status !== "connected") {
+      this.ensureConnected();
+      return;
+    }
+    try {
+      await this.livenessPing({ timeoutMs: DEFAULT_LIVENESS_TIMEOUT_MS });
+    } catch {
+      this.disposeTransport(1001, "Resume revalidation ping failed");
+      this.scheduleReconnect({
+        reason: "resume-revalidation",
+        reasonCode: "RESUME_REVALIDATE",
+      });
+    }
+  }
+
   getConnectionState(): ConnectionState {
     return this.connectionState;
   }

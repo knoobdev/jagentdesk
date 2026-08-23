@@ -24,6 +24,8 @@ function roleLabel(role: string | undefined, route: string | undefined): string 
 interface OrchestrationAgentsColumnProps {
   serverId: string;
   workspaceId: string;
+  /** Full-width, height-capped layout for the mobile workspace (vs the desktop dock column). */
+  compact?: boolean;
 }
 
 /**
@@ -58,6 +60,7 @@ export function useWorkspaceOrchestrationRosterCount(
 export function OrchestrationAgentsColumn({
   serverId,
   workspaceId,
+  compact = false,
 }: OrchestrationAgentsColumnProps) {
   const { theme } = useUnistyles();
   const router = useRouter();
@@ -88,7 +91,10 @@ export function OrchestrationAgentsColumn({
   }
 
   return (
-    <View style={styles.column} testID="workspace-orchestration-agents-column">
+    <View
+      style={[styles.column, compact && styles.columnCompact]}
+      testID="workspace-orchestration-agents-column"
+    >
       <View style={styles.header}>
         <Text style={styles.headerTitle}>WORKSPACE AGENTS</Text>
         <Text style={styles.headerSubtitle}>Human → Supervisor → Lead → Peer</Text>
@@ -212,6 +218,14 @@ const styles = StyleSheet.create((theme) => ({
     borderRightWidth: 1,
     borderRightColor: theme.colors.border,
     backgroundColor: theme.colors.surface1,
+  },
+  columnCompact: {
+    width: "100%",
+    height: undefined,
+    maxHeight: 240,
+    borderRightWidth: 0,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border,
   },
   header: {
     paddingHorizontal: theme.spacing[4],

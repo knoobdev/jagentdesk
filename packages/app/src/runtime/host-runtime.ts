@@ -789,6 +789,10 @@ export class HostRuntimeController {
     this.activeClient?.ensureConnected();
   }
 
+  revalidateConnection(): void {
+    void this.activeClient?.revalidateConnection();
+  }
+
   markAgentDirectorySyncLoading(): void {
     const status = this.snapshot.hasEverLoadedAgentDirectory ? "revalidating" : "initial_loading";
     this.updateSnapshot({
@@ -2398,6 +2402,12 @@ export class HostRuntimeStore {
   ensureConnectedAll(): void {
     for (const controller of this.controllers.values()) {
       controller.ensureConnected();
+    }
+  }
+
+  revalidateConnectedAll(): void {
+    for (const controller of this.controllers.values()) {
+      controller.revalidateConnection();
     }
   }
 

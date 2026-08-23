@@ -16,6 +16,10 @@ import { useTranslation } from "react-i18next";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { formatTimeAgo } from "@/utils/time";
 import { type AggregatedAgent } from "@/hooks/use-aggregated-agents";
+import {
+  ORCHESTRATION_ROLE_LABEL,
+  ORCHESTRATION_ROUTE_LABEL,
+} from "@jagentdesk/protocol/orchestration";
 import { useSessionStore } from "@/stores/session-store";
 import { Archive, ChevronRight } from "lucide-react-native";
 import { getProviderIcon } from "@/components/provider-icons";
@@ -89,6 +93,20 @@ function formatDateSectionLabel(t: TFunction, section: DateSectionKey): string {
     case "older":
       return t("agentList.dateSections.older");
   }
+}
+
+function orchestrationRoleBadgeLabel(
+  labels: Record<string, string | undefined> | undefined,
+): string | null {
+  const role = labels?.[ORCHESTRATION_ROLE_LABEL];
+  if (!role) return null;
+  if (role === "supervisor") return "Supervisor";
+  if (role === "lead") return "Lead";
+  if (role === "peer") {
+    const route = labels?.[ORCHESTRATION_ROUTE_LABEL];
+    return route ? `Peer · ${route}` : "Peer";
+  }
+  return role;
 }
 
 function SessionBadge({
@@ -228,6 +246,7 @@ function SessionRow({
   const workspaceName = agent.projectPlacement?.workspaceName ?? "";
   const ProviderIcon = getProviderIcon(agent.provider);
   const pendingPermissionCount = agent.pendingPermissionCount ?? 0;
+  const orchestrationRoleBadge = orchestrationRoleBadgeLabel(agent.labels);
 
   const pressableStyle = useCallback(
     ({ pressed, hovered = false }: PressableStateCallbackType & { hovered?: boolean }) => [
@@ -276,6 +295,7 @@ function SessionRow({
           <Text style={sessionTitleStyle} numberOfLines={1}>
             {agent.title || t("agentList.fallbackTitle")}
           </Text>
+          {orchestrationRoleBadge ? <SessionBadge label={orchestrationRoleBadge} /> : null}
           <SessionRowBadges
             agent={agent}
             archivedIcon={archivedIcon}

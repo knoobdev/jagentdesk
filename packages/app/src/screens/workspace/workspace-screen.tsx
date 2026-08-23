@@ -3834,26 +3834,35 @@ function WorkspaceScreenContent({
       )}
 
       {isMobile ? (
-        <MobileWorkspaceTabSwitcher
-          tabs={tabs}
-          activeTabKey={activeTabKey}
-          activeTab={activeTabDescriptor}
-          tabSwitcherOptions={tabSwitcherOptions}
-          tabByKey={tabByKey}
-          normalizedServerId={normalizedServerId}
-          normalizedWorkspaceId={normalizedWorkspaceId}
-          onSelectSwitcherTab={handleSelectSwitcherTab}
-          onCopyResumeCommand={handleCopyResumeCommand}
-          onCopyAgentId={handleCopyAgentId}
-          onCopyTerminalId={handleCopyTerminalId}
-          onCopyFilePath={handleCopyFilePath}
-          onReloadAgent={handleReloadAgent}
-          onRenameTab={handleRenameTab}
-          onCloseTab={handleCloseTabById}
-          onCloseTabsAbove={handleCloseTabsToLeft}
-          onCloseTabsBelow={handleCloseTabsToRight}
-          onCloseOtherTabs={handleCloseOtherTabs}
-        />
+        <>
+          {orchestrationRosterCount > 0 ? (
+            <OrchestrationAgentsColumn
+              serverId={normalizedServerId}
+              workspaceId={normalizedWorkspaceId}
+              compact
+            />
+          ) : null}
+          <MobileWorkspaceTabSwitcher
+            tabs={tabs}
+            activeTabKey={activeTabKey}
+            activeTab={activeTabDescriptor}
+            tabSwitcherOptions={tabSwitcherOptions}
+            tabByKey={tabByKey}
+            normalizedServerId={normalizedServerId}
+            normalizedWorkspaceId={normalizedWorkspaceId}
+            onSelectSwitcherTab={handleSelectSwitcherTab}
+            onCopyResumeCommand={handleCopyResumeCommand}
+            onCopyAgentId={handleCopyAgentId}
+            onCopyTerminalId={handleCopyTerminalId}
+            onCopyFilePath={handleCopyFilePath}
+            onReloadAgent={handleReloadAgent}
+            onRenameTab={handleRenameTab}
+            onCloseTab={handleCloseTabById}
+            onCloseTabsAbove={handleCloseTabsToLeft}
+            onCloseTabsBelow={handleCloseTabsToRight}
+            onCloseOtherTabs={handleCloseOtherTabs}
+          />
+        </>
       ) : null}
 
       {shouldRenderDesktopPaneFallback ? (
