@@ -1,5 +1,14 @@
-import { KubeConfig, CoreV1Api, AppsV1Api } from "@kubernetes/client-node";
-import { dumpYaml } from "@kubernetes/client-node";
+import {
+  KubeConfig,
+  CoreV1Api,
+  AppsV1Api,
+  KubernetesObjectApi,
+  ApiextensionsV1Api,
+  loadYaml,
+  dumpYaml,
+  PatchStrategy,
+} from "@kubernetes/client-node";
+import type { KubernetesObject } from "@kubernetes/client-node";
 import type {
   PodDTO,
   ContainerDTO,
@@ -13,6 +22,8 @@ export class KubeClient {
   private kc: KubeConfig | undefined;
   private coreApi: CoreV1Api | undefined;
   private appsApi: AppsV1Api | undefined;
+  private objectApi: KubernetesObjectApi | undefined;
+  private crdApi: ApiextensionsV1Api | undefined;
   private readonly contextName: string;
 
   constructor(contextName: string) {
@@ -25,6 +36,8 @@ export class KubeClient {
     this.kc.setCurrentContext(this.contextName);
     this.coreApi = this.kc.makeApiClient(CoreV1Api);
     this.appsApi = this.kc.makeApiClient(AppsV1Api);
+    this.objectApi = KubernetesObjectApi.makeApiClient(this.kc);
+    this.crdApi = this.kc.makeApiClient(ApiextensionsV1Api);
 
     // Verify connection with a lightweight call
     try {
@@ -232,7 +245,7 @@ export class KubeClient {
           if (!op.manifestYaml) {
             return { ok: false, dryRun: op.dryRun, message: "manifestYaml required for apply" };
           }
-          return { ok: false, dryRun: op.dryRun, message: "apply not yet implemented" };
+          return this.applyGeneric(op.manifestYaml, op.dryRun);
         }
         default:
           return { ok: false, dryRun: op.dryRun, message: `unknown action: ${op.action}` };
@@ -252,6 +265,142 @@ export class KubeClient {
     }
   }
 
+  async listGeneric(kind: string, namespace?: string): Promise<Array<Record<string, unknown>>> {
+    this.ensureConnected();
+    const entry = findKindEntry(kind);
+    const ns = entry.namespaced && namespace ? namespace : undefined;
+    const res = await this.objectApi!.list(entry.apiVersion, entry.kind, ns);
+    return (res as unknown as { items: Array<Record<string, unknown>> }).items;
+  }
+
+  async getGeneric(kind: string, namespace: string | undefined, name: string): Promise<string> {
+    this.ensureConnected();
+    const entry = findKindEntry(kind);
+    const spec = {
+      apiVersion: entry.apiVersion,
+      kind: entry.kind,
+      metadata: { name, namespace: entry.namespaced ? (namespace ?? "default") : undefined },
+    } as unknown as Parameters<KubernetesObjectApi["read"]>[0];
+    const obj = await this.objectApi!.read(spec);
+    return dumpYaml(obj);
+  }
+
+  async applyGeneric(manifestYaml: string, dryRun: boolean): Promise<WriteResult> {
+    this.ensureConnected();
+    const dryRunOption = dryRun ? "All" : undefined;
+    const obj = loadYaml<KubernetesObject>(manifestYaml);
+    if (!obj.apiVersion || !obj.kind) {
+      return { ok: false, dryRun, message: "manifest missing apiVersion or kind" };
+    }
+    try {
+      await this.objectApi!.patch(
+        obj,
+        undefined,
+        dryRunOption,
+        "jagentdesk",
+        true,
+        PatchStrategy.ServerSideApply,
+      );
+      return { ok: true, dryRun, message: `applied ${obj.kind}/${obj.metadata?.name as string}` };
+    } catch (patchErr) {
+      const patchMsg = patchErr instanceof Error ? patchErr.message : String(patchErr);
+      // If resource not found (404), fallback to create
+      if (
+        patchMsg.includes("404") ||
+        patchMsg.includes("Not Found") ||
+        patchMsg.includes("not found")
+      ) {
+        try {
+          await this.objectApi!.create(obj, undefined, dryRunOption, "jagentdesk");
+          return {
+            ok: true,
+            dryRun,
+            message: `created ${obj.kind}/${obj.metadata?.name as string}`,
+          };
+        } catch (createErr) {
+          return {
+            ok: false,
+            dryRun,
+            message: createErr instanceof Error ? createErr.message : String(createErr),
+          };
+        }
+      }
+      return { ok: false, dryRun, message: patchMsg };
+    }
+  }
+
+  async deleteGeneric(
+    kind: string,
+    namespace: string | undefined,
+    name: string,
+    dryRun: boolean,
+  ): Promise<WriteResult> {
+    this.ensureConnected();
+    const entry = findKindEntry(kind);
+    const dryRunOption = dryRun ? "All" : undefined;
+    const spec: KubernetesObject = {
+      apiVersion: entry.apiVersion,
+      kind: entry.kind,
+      metadata: { name, namespace: entry.namespaced ? (namespace ?? "default") : undefined },
+    };
+    try {
+      await this.objectApi!.delete(spec, undefined, dryRunOption);
+      return {
+        ok: true,
+        dryRun,
+        message: `deleted ${kind}/${name}`,
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        dryRun,
+        message: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+
+  async discoverCRDs(): Promise<
+    Array<{ kind: string; apiVersion: string; namespaced: boolean; category: "Custom" }>
+  > {
+    this.ensureConnected();
+    const res = await this.crdApi!.listCustomResourceDefinition();
+    const list = res as unknown as { items: Array<Record<string, unknown>> };
+    return list.items.map((crd) => {
+      const spec = crd.spec as Record<string, unknown> | undefined;
+      const names = spec?.names as Record<string, unknown> | undefined;
+      const versions = spec?.versions as Array<Record<string, unknown>> | undefined;
+      const servedVersion = versions?.find((v) => v.served === true) ?? versions?.[0];
+      const group = spec?.group as string | undefined;
+      const version = servedVersion?.name as string | undefined;
+      return {
+        kind: (names?.kind as string) ?? "Unknown",
+        apiVersion: group && version ? `${group}/${version}` : "Unknown",
+        namespaced: (spec?.scope as string) === "Namespaced",
+        category: "Custom" as const,
+      };
+    });
+  }
+
+  async revealSecret(namespace: string, name: string): Promise<Record<string, string>> {
+    this.ensureConnected();
+    const spec = {
+      apiVersion: "v1",
+      kind: "Secret",
+      metadata: { name, namespace },
+    } as unknown as Parameters<KubernetesObjectApi["read"]>[0];
+    const secret = await this.objectApi!.read(spec);
+    const data = (secret as unknown as { data?: Record<string, string> }).data ?? {};
+    const result: Record<string, string> = {};
+    for (const [key, val] of Object.entries(data)) {
+      try {
+        result[key] = Buffer.from(val, "base64").toString("utf-8");
+      } catch {
+        result[key] = val;
+      }
+    }
+    return result;
+  }
+
   async disconnect(): Promise<void> {
     this.kc = undefined;
     this.coreApi = undefined;
@@ -259,7 +408,7 @@ export class KubeClient {
   }
 
   private ensureConnected(): void {
-    if (!this.coreApi || !this.appsApi) {
+    if (!this.coreApi || !this.appsApi || !this.objectApi) {
       throw new Error("KubeClient not connected. Call connect() first.");
     }
   }
@@ -460,3 +609,100 @@ function mapEvent(raw: Record<string, unknown>): EventDTO {
     lastSeen_ms,
   };
 }
+
+interface GenericKindEntry {
+  kind: string;
+  apiVersion: string;
+  namespaced: boolean;
+  category: string;
+}
+
+function findKindEntry(kind: string): GenericKindEntry {
+  const lower = kind.toLowerCase();
+  const entry = GENERIC_KINDS.find((e) => e.kind.toLowerCase() === lower);
+  if (!entry) {
+    throw new Error(`unsupported kind: ${kind}`);
+  }
+  return entry;
+}
+
+export const GENERIC_KINDS: ReadonlyArray<GenericKindEntry> = [
+  // Workloads
+  { kind: "Pod", apiVersion: "v1", namespaced: true, category: "Workloads" },
+  { kind: "Deployment", apiVersion: "apps/v1", namespaced: true, category: "Workloads" },
+  { kind: "DaemonSet", apiVersion: "apps/v1", namespaced: true, category: "Workloads" },
+  { kind: "StatefulSet", apiVersion: "apps/v1", namespaced: true, category: "Workloads" },
+  { kind: "ReplicaSet", apiVersion: "apps/v1", namespaced: true, category: "Workloads" },
+  { kind: "ReplicationController", apiVersion: "v1", namespaced: true, category: "Workloads" },
+  { kind: "Job", apiVersion: "batch/v1", namespaced: true, category: "Workloads" },
+  { kind: "CronJob", apiVersion: "batch/v1", namespaced: true, category: "Workloads" },
+  // Config
+  { kind: "ConfigMap", apiVersion: "v1", namespaced: true, category: "Config" },
+  { kind: "Secret", apiVersion: "v1", namespaced: true, category: "Config" },
+  { kind: "ResourceQuota", apiVersion: "v1", namespaced: true, category: "Config" },
+  { kind: "LimitRange", apiVersion: "v1", namespaced: true, category: "Config" },
+  {
+    kind: "HorizontalPodAutoscaler",
+    apiVersion: "autoscaling/v2",
+    namespaced: true,
+    category: "Config",
+  },
+  { kind: "PodDisruptionBudget", apiVersion: "policy/v1", namespaced: true, category: "Config" },
+  {
+    kind: "PriorityClass",
+    apiVersion: "scheduling.k8s.io/v1",
+    namespaced: false,
+    category: "Config",
+  },
+  { kind: "RuntimeClass", apiVersion: "node.k8s.io/v1", namespaced: false, category: "Config" },
+  // Network
+  { kind: "Service", apiVersion: "v1", namespaced: true, category: "Network" },
+  { kind: "Endpoints", apiVersion: "v1", namespaced: true, category: "Network" },
+  { kind: "Ingress", apiVersion: "networking.k8s.io/v1", namespaced: true, category: "Network" },
+  {
+    kind: "IngressClass",
+    apiVersion: "networking.k8s.io/v1",
+    namespaced: false,
+    category: "Network",
+  },
+  {
+    kind: "NetworkPolicy",
+    apiVersion: "networking.k8s.io/v1",
+    namespaced: true,
+    category: "Network",
+  },
+  // Storage
+  { kind: "PersistentVolumeClaim", apiVersion: "v1", namespaced: true, category: "Storage" },
+  { kind: "PersistentVolume", apiVersion: "v1", namespaced: false, category: "Storage" },
+  { kind: "StorageClass", apiVersion: "storage.k8s.io/v1", namespaced: false, category: "Storage" },
+  // Cluster
+  { kind: "Namespace", apiVersion: "v1", namespaced: false, category: "Cluster" },
+  { kind: "Node", apiVersion: "v1", namespaced: false, category: "Cluster" },
+  { kind: "Event", apiVersion: "v1", namespaced: true, category: "Cluster" },
+  // Access
+  { kind: "ServiceAccount", apiVersion: "v1", namespaced: true, category: "Access" },
+  {
+    kind: "ClusterRole",
+    apiVersion: "rbac.authorization.k8s.io/v1",
+    namespaced: false,
+    category: "Access",
+  },
+  {
+    kind: "Role",
+    apiVersion: "rbac.authorization.k8s.io/v1",
+    namespaced: true,
+    category: "Access",
+  },
+  {
+    kind: "ClusterRoleBinding",
+    apiVersion: "rbac.authorization.k8s.io/v1",
+    namespaced: false,
+    category: "Access",
+  },
+  {
+    kind: "RoleBinding",
+    apiVersion: "rbac.authorization.k8s.io/v1",
+    namespaced: true,
+    category: "Access",
+  },
+];
