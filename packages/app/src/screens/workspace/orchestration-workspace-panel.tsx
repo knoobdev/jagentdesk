@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { GitBranch, X } from "lucide-react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
@@ -90,7 +90,12 @@ export function WorkspaceOrchestrationPanel({
     [sessionAgents, workspaceId],
   );
   const [visible, setVisible] = useState(false);
-  const [request, setRequest] = useState("");
+  // The request text is held in a ref and the input is uncontrolled: setting
+  // state on every keystroke re-renders the surrounding bottom-sheet, which drops
+  // IME-composed characters (Vietnamese/CJK). We read the value on send and clear
+  // it by bumping requestResetKey.
+  const requestRef = useRef("");
+  const [requestResetKey, setRequestResetKey] = useState(0);
   const [brief, setBrief] = useState<OrchestrationTaskBrief | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -121,8 +126,12 @@ export function WorkspaceOrchestrationPanel({
     [agents],
   );
 
+  const handleChangeText = useCallback((text: string) => {
+    requestRef.current = text;
+  }, []);
+
   const handleSend = useCallback(async () => {
-    const rawRequest = request.trim();
+    const rawRequest = requestRef.current.trim();
     if (!rawRequest || !client || !cwd || !config) {
       setError("Connect to the host and choose a workspace before sending a request.");
       return;
@@ -140,7 +149,8 @@ export function WorkspaceOrchestrationPanel({
       });
       setBrief(brief);
       if (!started) return; // needs clarification — keep modal open, show the brief
-      setRequest("");
+      requestRef.current = "";
+      setRequestResetKey((key) => key + 1);
       if (variant === "modal") {
         setVisible(false);
       }
@@ -150,24 +160,25 @@ export function WorkspaceOrchestrationPanel({
     } finally {
       setPending(false);
     }
-  }, [client, config, cwd, request, setVisible, supervisor, variant, onClose, workspaceId]);
+  }, [client, config, cwd, setVisible, supervisor, variant, onClose, workspaceId]);
 
+  const pendingRef = useRef(pending);
+  pendingRef.current = pending;
   const handleKeyPress = useCallback(
     (event: {
-      nativeEvent: { key: string; shiftKey?: boolean; isComposing?: boolean };
+      nativeEvent: { key: string; shiftKey?: boolean; isComposing?: boolean; keyCode?: number };
       preventDefault?: () => void;
     }) => {
-      // Do not treat Enter as "send" while an IME is composing (e.g. Vietnamese
-      // Telex/VNI, CJK). Intercepting it mid-composition drops the diacritic.
-      if (event.nativeEvent.isComposing) return;
+      // Never treat Enter as "send" while an IME is composing.
+      if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
       if (event.nativeEvent.key !== "Enter") return;
       if (event.nativeEvent.shiftKey) return;
-      if (pending) return;
-      if (!request.trim()) return;
+      if (pendingRef.current) return;
+      if (!requestRef.current.trim()) return;
       event.preventDefault?.();
       void handleSend();
     },
-    [handleSend, pending, request],
+    [handleSend],
   );
 
   const header = useMemo<SheetHeader>(
@@ -262,10 +273,10 @@ export function WorkspaceOrchestrationPanel({
         hint="Write naturally. The system prepares the complete Supervisor brief automatically."
       >
         <FormTextInput
-          value={request}
-          onChangeText={setRequest}
+          initialValue=""
+          resetKey={requestResetKey}
+          onChangeText={handleChangeText}
           onKeyPress={handleKeyPress}
-          webControlled
           multiline
           numberOfLines={5}
           textAlignVertical="top"
@@ -281,7 +292,7 @@ export function WorkspaceOrchestrationPanel({
         testID="orchestration-send-request"
         onPress={() => void handleSend()}
         loading={pending}
-        disabled={!request.trim() || pending}
+        disabled={pending}
       >
         Send to Supervisor
       </Button>
