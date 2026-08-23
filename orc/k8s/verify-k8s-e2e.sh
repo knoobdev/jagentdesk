@@ -24,9 +24,14 @@ CDIR="packages/server/src/server/cluster"
 node -e "process.exit(require('./packages/server/package.json').dependencies?.['@kubernetes/client-node']?0:1)" 2>/dev/null \
   && ok "dep @kubernetes/client-node khai bao" || no "chua khai bao @kubernetes/client-node"
 
-# [1.3] cluster RPC domain dang ky trong protocol
-grep -rqE "cluster\.(contexts|import|list|connect|resources|logs|write)" packages/protocol/src 2>/dev/null \
+# [1.3] cluster RPC domain dang ky trong protocol (slash-namespace)
+grep -rqE "cluster/(contexts|import|list|connect|resources|kinds)" packages/protocol/src 2>/dev/null \
   && ok "cluster RPC domain co trong protocol" || no "chua co cluster RPC trong protocol"
+
+# [1.3b] generic engine + generic RPC (S1c/S1b-ext)
+grep -rq "GENERIC_KINDS" packages/server/src/server/cluster/kube-client.ts 2>/dev/null \
+  && grep -rqE "cluster/resource/list|cluster/kinds" packages/protocol/src 2>/dev/null \
+  && ok "generic engine + generic RPC (any kind)" || no "chua co generic engine/RPC"
 
 # [1.4] typecheck server (tsgo, khong build Go bridge)
 ( cd packages/server && npx tsgo -p tsconfig.server.typecheck.json --noEmit ) >/tmp/k8s-tc.log 2>&1 \
@@ -53,15 +58,17 @@ if have "$CDIR/cluster-dto.ts"; then
     && ok "DTO khong lo credential" || no "DTO co the lo credential (grep token/cert)"
 else no "chua co cluster-dto.ts"; fi
 
-echo "═══════════ S2 · cluster = workspace + add/connect ═══════════"
-grep -rqE "\"cluster\"|'cluster'" packages/app/src/**/*workspace* 2>/dev/null \
-  && ok "workspace kind cluster co dau vet trong app" || no "chua co workspace kind cluster"
-grep -rqiE "Connect a Kubernetes cluster|Add cluster" packages/app/src 2>/dev/null \
-  && ok "UI Add/Connect cluster co chuoi" || no "chua co UI Add/Connect cluster"
+echo "═══════════ S2a · Clusters screen (add/connect UI) ═══════════"
+{ [ -f packages/app/src/screens/clusters-screen.tsx ] && grep -rqE "clusterConnect|clusterImport" packages/app/src/screens/clusters-screen.tsx; } \
+  && ok "Clusters screen goi connect/import RPC" || no "chua co Clusters screen"
 
-echo "═══════════ S3 · workloads panel + resource detail + edit YAML ═══════════"
-grep -rqE "register.*cluster|panelKind.*cluster|\"cluster\"" packages/app/src/**/register-panels* 2>/dev/null \
-  && ok "panel kind cluster dang ky" || no "chua dang ky panel kind cluster"
+echo "═══════════ S3 · generic resource browser (moi kind) ═══════════"
+{ [ -f packages/app/src/components/cluster-resource-browser.tsx ] && grep -rqE "clusterKinds|clusterResourceList" packages/app/src/components/cluster-resource-browser.tsx; } \
+  && ok "resource browser goi clusterKinds/resourceList" || no "chua co resource browser"
+
+echo "═══════════ S2b · cluster = workspace kind + panel (TODO) ═══════════"
+grep -rqE "kind: \"cluster\"" packages/app/src/workspace-tabs 2>/dev/null \
+  && ok "panel kind cluster dang ky" || no "chua dang ky panel kind cluster (S2b TODO)"
 
 echo "═══════════ S4 · agent kubectl tool + permission ═══════════"
 grep -rqiE "kubectl|kube-tool|cluster.*tool" packages/server/src/server/agent 2>/dev/null \
