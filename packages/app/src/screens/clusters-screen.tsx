@@ -1,23 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { FlatList, Pressable, ScrollView, Text, View, type ListRenderItem } from "react-native";
-import { Boxes, CircleAlert, Import, RefreshCw } from "lucide-react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
+import { Boxes, CircleAlert, Import } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import { useIsCompactFormFactor } from "@/constants/layout";
 import { useHostRuntimeClient, useHosts } from "@/runtime/host-runtime";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
-import { ClusterStatusDot, ContextStatusDot, PodStatusDot } from "@/components/cluster-dot";
+import { ClusterResourceBrowser } from "@/components/cluster-resource-browser";
+import { ClusterStatusDot, ContextStatusDot } from "@/components/cluster-dot";
 import type { Theme } from "@/styles/theme";
 import type { ClusterInfo, KubeContextInfo } from "@jagentdesk/protocol/cluster/rpc-schemas";
-
-interface PodItem {
-  name: string;
-  namespace: string;
-  phase: string;
-  ready: string;
-  restarts: number;
-  node?: string;
-  statusReason?: string;
-}
 
 function ImportButton({
   contextName,
@@ -74,7 +64,6 @@ function WorkloadsButton({
 }
 
 export function ClustersScreen() {
-  const isCompact = useIsCompactFormFactor();
   const hosts = useHosts();
   const serverId = hosts[0]?.serverId ?? "";
   const client = useHostRuntimeClient(serverId);
@@ -82,12 +71,10 @@ export function ClustersScreen() {
   const [contexts, setContexts] = useState<KubeContextInfo[]>([]);
   const [clusters, setClusters] = useState<ClusterInfo[]>([]);
   const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null);
-  const [pods, setPods] = useState<PodItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [importingName, setImportingName] = useState<string | null>(null);
   const [connectingId, setConnectingId] = useState<string | null>(null);
-  const [loadingPods, setLoadingPods] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!client) return;
@@ -151,80 +138,14 @@ export function ClustersScreen() {
     [client, refresh],
   );
 
-  const handleWorkloads = useCallback(
-    async (id: string) => {
-      if (!client) return;
-      setSelectedClusterId(id);
-      setLoadingPods(true);
-      setError(null);
-      try {
-        const res = await client.clusterResources({ id, kind: "pods" });
-        if (res.error) setError(res.error);
-        else setPods(res.items as PodItem[]);
-      } catch (e: unknown) {
-        setError(e instanceof Error ? e.message : "Failed to load pods");
-      } finally {
-        setLoadingPods(false);
-      }
-    },
-    [client],
-  );
-
-  const handleRefreshPods = useCallback(() => {
-    if (selectedClusterId) {
-      handleWorkloads(selectedClusterId);
-    }
-  }, [selectedClusterId, handleWorkloads]);
+  const handleSelectCluster = useCallback((id: string) => {
+    setSelectedClusterId(id);
+    setError(null);
+  }, []);
 
   const clusteredContextNames = useMemo(
     () => new Set(clusters.map((c) => c.contextName)),
     [clusters],
-  );
-
-  const renderPodItem: ListRenderItem<PodItem> = useCallback(
-    ({ item }) => {
-      if (isCompact) {
-        return (
-          <View style={styles.podCard}>
-            <View style={styles.podCardHeader}>
-              <PodStatusDot phase={item.phase} statusReason={item.statusReason} />
-              <Text style={styles.podName} numberOfLines={1}>
-                {item.name}
-              </Text>
-            </View>
-            <View style={styles.podCardMeta}>
-              <Text style={styles.podMetaText}>{item.namespace}</Text>
-              <Text style={styles.podMetaSeparator}>·</Text>
-              <Text style={styles.podMetaText}>{item.phase}</Text>
-              <Text style={styles.podMetaSeparator}>·</Text>
-              <Text style={styles.podMetaText}>{item.ready}</Text>
-              <Text style={styles.podMetaSeparator}>·</Text>
-              <Text style={styles.podMetaText}>{item.restarts} restarts</Text>
-            </View>
-          </View>
-        );
-      }
-      return (
-        <View style={styles.podRow}>
-          <PodStatusDot phase={item.phase} statusReason={item.statusReason} />
-          <Text style={styles.podName} numberOfLines={1}>
-            {item.name}
-          </Text>
-          <Text style={styles.podMetaText} numberOfLines={1}>
-            {item.namespace}
-          </Text>
-          <Text style={styles.podMetaText}>{item.phase}</Text>
-          <Text style={styles.podMetaText}>{item.ready}</Text>
-          <Text style={styles.podMetaText}>{item.restarts}</Text>
-        </View>
-      );
-    },
-    [isCompact],
-  );
-
-  const keyExtractor = useCallback(
-    (item: PodItem, idx: number) => `${item.namespace}/${item.name}/${idx}`,
-    [],
   );
 
   if (loading) {
@@ -234,27 +155,6 @@ export function ClustersScreen() {
       </View>
     );
   }
-
-  const podsSection = (() => {
-    if (!selectedClusterId) return null;
-    if (loadingPods) {
-      return (
-        <View style={styles.centerContainer}>
-          <ThemedLoadingSpinner size="small" uniProps={foregroundMutedColorMapping} />
-        </View>
-      );
-    }
-    return (
-      <FlatList
-        data={pods}
-        keyExtractor={keyExtractor}
-        renderItem={renderPodItem}
-        scrollEnabled={false}
-      />
-    );
-  })();
-
-  const noPods = selectedClusterId && !loadingPods && pods.length === 0;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
@@ -328,7 +228,7 @@ export function ClustersScreen() {
                       <Text style={styles.clusterCounts}>
                         {cluster.nodeCount ?? "?"} nodes · {cluster.podCount ?? "?"} pods
                       </Text>
-                      <WorkloadsButton clusterId={cluster.id} onWorkloads={handleWorkloads} />
+                      <WorkloadsButton clusterId={cluster.id} onWorkloads={handleSelectCluster} />
                     </>
                   ) : (
                     <ConnectButton
@@ -347,18 +247,14 @@ export function ClustersScreen() {
         </View>
       )}
 
-      {/* Pods */}
+      {/* Resource browser */}
       {selectedClusterId ? (
-        <>
+        <View style={styles.browserSection}>
           <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionTitle}>Pods</Text>
-            <Pressable style={styles.refreshButton} onPress={handleRefreshPods}>
-              <ThemedRefreshCw size={14} uniProps={foregroundMutedColorMapping} />
-            </Pressable>
+            <Text style={styles.sectionTitle}>Resources</Text>
           </View>
-          {noPods ? <Text style={styles.emptyText}>No pods found.</Text> : null}
-          {podsSection}
-        </>
+          <ClusterResourceBrowser serverId={serverId} clusterId={selectedClusterId} />
+        </View>
       ) : null}
     </ScrollView>
   );
@@ -367,7 +263,6 @@ export function ClustersScreen() {
 const ThemedBoxes = withUnistyles(Boxes);
 const ThemedCircleAlert = withUnistyles(CircleAlert);
 const ThemedImport = withUnistyles(Import);
-const ThemedRefreshCw = withUnistyles(RefreshCw);
 const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
 
 const foregroundColorMapping = (theme: Theme) => ({ color: theme.colors.foreground });
@@ -429,6 +324,9 @@ const styles = StyleSheet.create((theme) => ({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+  },
+  browserSection: {
+    minHeight: 200,
   },
   sectionCard: {
     borderRadius: theme.borderRadius.lg,
@@ -542,52 +440,5 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.xs,
     fontWeight: theme.fontWeight.medium,
     color: theme.colors.foreground,
-  },
-  refreshButton: {
-    padding: theme.spacing[1],
-  },
-  podRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing[2],
-    paddingHorizontal: theme.spacing[3],
-    paddingVertical: theme.spacing[2],
-    borderBottomWidth: theme.borderWidth[1],
-    borderBottomColor: theme.colors.border,
-  },
-  podCard: {
-    padding: theme.spacing[3],
-    borderRadius: theme.borderRadius.lg,
-    borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.border,
-    marginBottom: theme.spacing[2],
-  },
-  podCardHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing[2],
-    marginBottom: theme.spacing[1],
-  },
-  podCardMeta: {
-    flexDirection: "row",
-    alignItems: "center",
-    flexWrap: "wrap",
-    gap: theme.spacing[1],
-    marginLeft: theme.spacing[4],
-  },
-  podName: {
-    fontSize: theme.fontSize.sm,
-    color: theme.colors.foreground,
-    flex: 1,
-    minWidth: 0,
-  },
-  podMetaText: {
-    fontSize: theme.fontSize.xs,
-    color: theme.colors.foregroundMuted,
-  },
-  podMetaSeparator: {
-    fontSize: theme.fontSize.xs,
-    color: theme.colors.foregroundMuted,
-    opacity: 0.7,
   },
 }));
