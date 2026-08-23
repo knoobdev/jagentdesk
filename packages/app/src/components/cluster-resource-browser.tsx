@@ -3,6 +3,7 @@ import { FlatList, Pressable, ScrollView, Text, View, type ListRenderItem } from
 import { StyleSheet } from "react-native-unistyles";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
+import { ClusterResourceDetail } from "@/components/cluster-resource-detail";
 import { ClusterStatusDot, PodStatusDot } from "@/components/cluster-dot";
 import type { Theme } from "@/styles/theme";
 
@@ -91,6 +92,11 @@ export function ClusterResourceBrowser({
   const [loadingItems, setLoadingItems] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [kindError, setKindError] = useState<string | null>(null);
+  const [selectedResource, setSelectedResource] = useState<{
+    kind: string;
+    namespace: string;
+    name: string;
+  } | null>(null);
   const kindListRef = useRef<ScrollView>(null);
 
   useEffect(() => {
@@ -144,6 +150,45 @@ export function ClusterResourceBrowser({
     [client, clusterId],
   );
 
+  const handleResourcePress = useCallback(
+    (item: ResourceItem) => () => {
+      setSelectedResource({
+        kind: selectedKind ?? "",
+        namespace: item.namespace ?? "",
+        name: item.name,
+      });
+    },
+    [selectedKind],
+  );
+
+  const handleDetailClose = useCallback(() => {
+    setSelectedResource(null);
+  }, []);
+
+  const handleDetailChanged = useCallback(() => {
+    // Reload the current resource list
+    if (client && selectedKind) {
+      setLoadingItems(true);
+      setError(null);
+      void client
+        .clusterResourceList({ id: clusterId, kind: selectedKind })
+        .then((res) => {
+          if (res.error) {
+            setError(res.error);
+            setItems([]);
+          } else {
+            setItems(res.items as ResourceItem[]);
+          }
+          return undefined;
+        })
+        .catch((e: unknown) => {
+          setError(e instanceof Error ? e.message : "Failed to load resources");
+          setItems([]);
+        })
+        .finally(() => setLoadingItems(false));
+    }
+  }, [client, clusterId, selectedKind]);
+
   const grouped = useMemo(() => groupByCategory(kinds), [kinds]);
 
   const renderResourceItem: ListRenderItem<ResourceItem> = useCallback(
@@ -157,7 +202,7 @@ export function ClusterResourceBrowser({
           )?.phase as string | undefined)
         : undefined;
       return (
-        <View style={styles.resourceRow}>
+        <Pressable style={styles.resourceRow} onPress={handleResourcePress(item)}>
           <View style={styles.resourceNameCell}>
             {isPod && podPhase ? (
               <PodStatusDot phase={podPhase} />
@@ -172,10 +217,10 @@ export function ClusterResourceBrowser({
             {item.namespace ?? "-"}
           </Text>
           <Text style={styles.resourceAge}>{formatAge(item.creationTimestamp)}</Text>
-        </View>
+        </Pressable>
       );
     },
-    [selectedKind],
+    [selectedKind, handleResourcePress],
   );
 
   const keyExtractor = useCallback(
@@ -330,6 +375,18 @@ export function ClusterResourceBrowser({
 
         {/* Resource table */}
         <View style={styles.contentArea}>{renderResourceContent()}</View>
+
+        {selectedResource ? (
+          <ClusterResourceDetail
+            serverId={serverId}
+            clusterId={clusterId}
+            kind={selectedResource.kind}
+            namespace={selectedResource.namespace || undefined}
+            name={selectedResource.name}
+            onClose={handleDetailClose}
+            onChanged={handleDetailChanged}
+          />
+        ) : null}
       </View>
     );
   }
@@ -344,6 +401,18 @@ export function ClusterResourceBrowser({
 
         <View style={styles.contentArea}>{renderResourceContent()}</View>
       </View>
+
+      {selectedResource ? (
+        <ClusterResourceDetail
+          serverId={serverId}
+          clusterId={clusterId}
+          kind={selectedResource.kind}
+          namespace={selectedResource.namespace || undefined}
+          name={selectedResource.name}
+          onClose={handleDetailClose}
+          onChanged={handleDetailChanged}
+        />
+      ) : null}
     </View>
   );
 }
