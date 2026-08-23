@@ -10,7 +10,13 @@ export type AgentUnarchiveController = Pick<AgentManager, "notifyAgentState" | "
 
 export type AgentRunController = Pick<
   AgentManager,
-  "getAgent" | "tryRunOutOfBand" | "hasInFlightRun" | "replaceAgentRun" | "streamAgent"
+  | "getAgent"
+  | "tryRunOutOfBand"
+  | "hasInFlightRun"
+  | "replaceAgentRun"
+  | "streamAgent"
+  | "hasPendingPermissions"
+  | "deferPromptUntilPermissionResolved"
 >;
 
 export interface StartAgentRunOptions {
@@ -43,6 +49,18 @@ export async function startAgentRun(
   // intercept lives at this layer so it covers every prompt entrypoint.
   if (agentManager.tryRunOutOfBand(agentId, prompt, options?.runOptions)) {
     return { outOfBand: true };
+  }
+  // Do not interrupt an agent that is paused waiting for a user permission
+  // (e.g. an orchestration Lead that called ask_user_question): a replace would
+  // auto-deny the pending question. Queue the prompt and deliver it once the
+  // agent is idle again.
+  if (
+    options?.replaceRunning &&
+    agentManager.hasInFlightRun(agentId) &&
+    agentManager.hasPendingPermissions(agentId)
+  ) {
+    agentManager.deferPromptUntilPermissionResolved(agentId, prompt, options?.runOptions);
+    return { outOfBand: false };
   }
   const shouldReplace = Boolean(options?.replaceRunning && agentManager.hasInFlightRun(agentId));
   const runOptions = options?.runOptions;

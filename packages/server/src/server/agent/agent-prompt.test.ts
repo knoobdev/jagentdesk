@@ -89,6 +89,8 @@ function createFinishNotificationScenario(
   });
   Reflect.set(agentManager, "tryRunOutOfBand", () => false);
   Reflect.set(agentManager, "hasInFlightRun", () => Boolean(options?.parentPromptError));
+  Reflect.set(agentManager, "hasPendingPermissions", () => false);
+  Reflect.set(agentManager, "deferPromptUntilPermissionResolved", () => {});
   Reflect.set(agentManager, "streamAgent", (_agentId: string, prompt: string) => {
     parentPrompted = true;
     resolveParentPrompt?.(prompt);
@@ -169,6 +171,8 @@ test("sendPromptToAgent forwards the client message id as run options", async ()
   );
   Reflect.set(agentManager, "tryRunOutOfBand", vi.fn().mockReturnValue(false));
   Reflect.set(agentManager, "hasInFlightRun", vi.fn().mockReturnValue(false));
+  Reflect.set(agentManager, "hasPendingPermissions", vi.fn().mockReturnValue(false));
+  Reflect.set(agentManager, "deferPromptUntilPermissionResolved", vi.fn());
   Reflect.set(agentManager, "streamAgent", streamAgentSpy);
 
   const agentStorage: AgentStorage = Object.create(AgentStorage.prototype);
@@ -192,6 +196,47 @@ test("sendPromptToAgent forwards the client message id as run options", async ()
     outputSchema: { type: "object" },
     clientMessageId: "msg-client-1",
   });
+});
+
+test("sendPromptToAgent defers instead of interrupting an agent awaiting a user permission", async () => {
+  const agent: ManagedAgent = Object.create(null);
+  Reflect.set(agent, "id", "agent-1");
+  Reflect.set(agent, "provider", "codex");
+
+  const streamAgentSpy = vi.fn(() => (async function* noop() {})());
+  const replaceAgentRunSpy = vi.fn(async () => (async function* noop() {})());
+  const deferSpy = vi.fn();
+  const agentManager: AgentManager = Object.create(AgentManager.prototype);
+  Reflect.set(
+    agentManager,
+    "getAgent",
+    vi.fn(() => agent),
+  );
+  Reflect.set(agentManager, "tryRunOutOfBand", vi.fn().mockReturnValue(false));
+  Reflect.set(agentManager, "hasInFlightRun", vi.fn().mockReturnValue(true));
+  Reflect.set(agentManager, "hasPendingPermissions", vi.fn().mockReturnValue(true));
+  Reflect.set(agentManager, "deferPromptUntilPermissionResolved", deferSpy);
+  Reflect.set(agentManager, "streamAgent", streamAgentSpy);
+  Reflect.set(agentManager, "replaceAgentRun", replaceAgentRunSpy);
+
+  const agentStorage: AgentStorage = Object.create(AgentStorage.prototype);
+  Reflect.set(
+    agentStorage,
+    "get",
+    vi.fn(async () => null),
+  );
+
+  await sendPromptToAgent({
+    agentManager,
+    agentStorage,
+    agentId: "agent-1",
+    prompt: "relay",
+    logger: createTestLogger(),
+  });
+
+  expect(deferSpy).toHaveBeenCalledWith("agent-1", "relay", undefined);
+  expect(replaceAgentRunSpy).not.toHaveBeenCalled();
+  expect(streamAgentSpy).not.toHaveBeenCalled();
 });
 
 test("finish notifications tell the parent the child's last assistant message", async () => {
@@ -292,6 +337,8 @@ it("does not notify archived callers", async () => {
     }),
   );
   Reflect.set(agentManager, "hasInFlightRun", vi.fn().mockReturnValue(false));
+  Reflect.set(agentManager, "hasPendingPermissions", vi.fn().mockReturnValue(false));
+  Reflect.set(agentManager, "deferPromptUntilPermissionResolved", vi.fn());
   Reflect.set(agentManager, "streamAgent", streamAgentSpy);
   Reflect.set(agentManager, "replaceAgentRun", replaceAgentRunSpy);
 

@@ -342,6 +342,11 @@ interface ManagedAgentBase {
   >;
   inFlightPermissionResponses: Set<string>;
   pendingReplacement: boolean;
+  // Prompts (e.g. an orchestration relay or a Peer handback) that arrived while
+  // this agent was paused on a pending user permission. Interrupting the paused
+  // turn would auto-deny the question, so they are queued and delivered once the
+  // agent goes idle again.
+  deferredPrompts?: { prompt: AgentPromptInput; options?: AgentRunOptions }[];
   persistence: AgentPersistenceHandle | null;
   historyPrimed: boolean;
   lastUserMessageAt: Date | null;
@@ -2483,6 +2488,58 @@ export class AgentManager {
     return Array.from(agent.pendingPermissions.values());
   }
 
+  hasPendingPermissions(agentId: string): boolean {
+    return (this.agents.get(agentId)?.pendingPermissions.size ?? 0) > 0;
+  }
+
+  /**
+   * Queue a prompt to deliver once the agent is no longer paused on a user
+   * permission, instead of interrupting the paused turn (which would auto-deny
+   * the pending question). Delivered by {@link flushDeferredPrompts}.
+   */
+  deferPromptUntilPermissionResolved(
+    agentId: string,
+    prompt: AgentPromptInput,
+    options?: AgentRunOptions,
+  ): void {
+    const agent = this.agents.get(agentId);
+    if (!agent) {
+      return;
+    }
+    (agent.deferredPrompts ??= []).push({ prompt, ...(options ? { options } : {}) });
+    this.logger.debug(
+      { agentId, queued: agent.deferredPrompts.length },
+      "Deferred prompt while agent awaits a user permission",
+    );
+  }
+
+  private flushDeferredPrompts(agent: ActiveManagedAgent): void {
+    if (
+      !agent.deferredPrompts?.length ||
+      agent.pendingPermissions.size > 0 ||
+      this.hasInFlightRun(agent.id)
+    ) {
+      return;
+    }
+    const next = agent.deferredPrompts.shift();
+    if (agent.deferredPrompts.length === 0) {
+      agent.deferredPrompts = undefined;
+    }
+    if (!next) {
+      return;
+    }
+    const iterator = this.streamAgent(agent.id, next.prompt, next.options);
+    void (async () => {
+      try {
+        for await (const _event of iterator) {
+          // Events broadcast via subscribers.
+        }
+      } catch (error) {
+        this.logger.error({ err: error, agentId: agent.id }, "Deferred prompt delivery failed");
+      }
+    })();
+  }
+
   private peekPendingPermission(agent: ManagedAgent): AgentPermissionRequest | null {
     const iterator = agent.pendingPermissions.values().next();
     return iterator.done ? null : iterator.value;
@@ -3776,6 +3833,9 @@ export class AgentManager {
       this.emitState(agent);
     }
     void this.refreshRuntimeInfo(agent);
+    // Deliver any relay/handback that was queued while this agent was paused on
+    // a user permission, now that its turn has completed.
+    this.flushDeferredPrompts(agent);
   }
 
   private async onStreamTurnFailed(params: {
