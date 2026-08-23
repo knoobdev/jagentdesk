@@ -1,6 +1,6 @@
 {
   "name": "@jagentdesk/cli",
-  "version": "1.0.14",
+  "version": "1.0.15",
   "description": "JAgentDesk CLI - control your AI coding agents from the command line",
   "bin": {
     "jagentdesk": "bin/jagentdesk"
@@ -28,9 +28,9 @@
   },
   "dependencies": {
     "@clack/prompts": "^1.0.0",
-    "@jagentdesk/client": "1.0.14",
-    "@jagentdesk/protocol": "1.0.14",
-    "@jagentdesk/server": "1.0.14",
+    "@jagentdesk/client": "1.0.15",
+    "@jagentdesk/protocol": "1.0.15",
+    "@jagentdesk/server": "1.0.15",
     "chalk": "^5.3.0",
     "commander": "^12.0.0",
     "mime-types": "^2.1.35",
