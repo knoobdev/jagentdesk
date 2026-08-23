@@ -425,6 +425,14 @@ export function buildHostSessionsRoute(serverId: string) {
   return `${base}/sessions` as const;
 }
 
+export function buildClustersRoute(serverId: string) {
+  const normalized = trimNonEmpty(serverId);
+  if (!normalized) {
+    return "/" as const;
+  }
+  return `/h/${encodeSegment(normalized)}/clusters` as const;
+}
+
 export function buildSessionsRoute() {
   return "/sessions" as const;
 }
