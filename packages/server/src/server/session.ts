@@ -160,6 +160,8 @@ import {
   createGitMetadataGenerator,
 } from "./session/checkout/git-metadata-generator.js";
 import { ChatScheduleLoopSession } from "./session/chat/chat-schedule-loop-session.js";
+import { ClusterSession } from "./session/cluster/cluster-session.js";
+import { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { ProviderCatalogSession } from "./session/provider/provider-catalog-session.js";
 import { WorkspaceFilesSession } from "./session/files/workspace-files-session.js";
 import { AgentConfigSession } from "./session/agent-config/agent-config-session.js";
@@ -440,6 +442,7 @@ export interface SessionOptions {
   chatService: FileBackedChatService;
   scheduleService: ScheduleService;
   loopService: LoopService;
+  clusterRegistry?: ClusterRegistry;
   checkoutDiffManager: CheckoutDiffManager;
   github?: ForgeService;
   createAgentMcpTransport?: AgentMcpTransportFactory;
@@ -667,6 +670,7 @@ export class Session {
   private readonly voiceSession: VoiceSession;
   private readonly checkoutSession: CheckoutSession;
   private readonly chatScheduleLoopSession: ChatScheduleLoopSession;
+  private clusterSession!: ClusterSession;
   private readonly providerCatalogSession: ProviderCatalogSession;
   private readonly workspaceFilesSession: WorkspaceFilesSession;
   private readonly agentConfigSession: AgentConfigSession;
@@ -853,6 +857,7 @@ export class Session {
       clientId: this.clientId,
       logger: this.sessionLogger,
     });
+    this.initClusterSession(options);
     this.providerCatalogSession = new ProviderCatalogSession({
       host: {
         emit: (msg) => this.emit(msg),
@@ -1046,6 +1051,16 @@ export class Session {
     this.subscribeToRegistryMutations();
 
     this.sessionLogger.trace({}, "agent.session.lifecycle.created");
+  }
+
+  private initClusterSession(options: SessionOptions): void {
+    this.clusterSession = new ClusterSession({
+      host: {
+        emit: (msg) => this.emit(msg),
+      },
+      clusterRegistry: options.clusterRegistry ?? new ClusterRegistry(),
+      logger: this.sessionLogger,
+    });
   }
 
   updateAppVersion(appVersion: string | null): void {
@@ -1856,6 +1871,7 @@ export class Session {
       this.dispatchProviderMessage(msg) ??
       this.dispatchTerminalMessage(msg) ??
       this.dispatchChatScheduleLoopMessage(msg) ??
+      this.dispatchClusterMessage(msg) ??
       this.dispatchMiscMessage(msg);
     if (promise) await promise;
   }
@@ -2345,6 +2361,31 @@ export class Session {
         return this.chatScheduleLoopSession.handleScheduleRunOnceRequest(msg);
       case "schedule/update":
         return this.chatScheduleLoopSession.handleScheduleUpdateRequest(msg);
+      default:
+        return undefined;
+    }
+  }
+
+  private dispatchClusterMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    switch (msg.type) {
+      case "cluster/contexts":
+        return this.clusterSession.handleContextsRequest(msg);
+      case "cluster/import":
+        return this.clusterSession.handleImportRequest(msg);
+      case "cluster/list":
+        return this.clusterSession.handleListRequest(msg);
+      case "cluster/connect":
+        return this.clusterSession.handleConnectRequest(msg);
+      case "cluster/disconnect":
+        return this.clusterSession.handleDisconnectRequest(msg);
+      case "cluster/resources":
+        return this.clusterSession.handleResourcesRequest(msg);
+      case "cluster/get":
+        return this.clusterSession.handleGetRequest(msg);
+      case "cluster/logs":
+        return this.clusterSession.handleLogsRequest(msg);
+      case "cluster/write":
+        return this.clusterSession.handleWriteRequest(msg);
       default:
         return undefined;
     }

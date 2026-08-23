@@ -557,6 +557,42 @@ type LoopInspectPayload = Extract<
 >["payload"];
 type LoopLogsPayload = Extract<SessionOutboundMessage, { type: "loop/logs/response" }>["payload"];
 type LoopStopPayload = Extract<SessionOutboundMessage, { type: "loop/stop/response" }>["payload"];
+type ClusterContextsPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/contexts/response" }
+>["payload"];
+type ClusterImportPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/import/response" }
+>["payload"];
+type ClusterListPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/list/response" }
+>["payload"];
+type ClusterConnectPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/connect/response" }
+>["payload"];
+type ClusterDisconnectPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/disconnect/response" }
+>["payload"];
+type ClusterResourcesPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/resources/response" }
+>["payload"];
+type ClusterGetPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/get/response" }
+>["payload"];
+type ClusterLogsPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/logs/response" }
+>["payload"];
+type ClusterWritePayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/write/response" }
+>["payload"];
 type ScheduleCreatePayload = Extract<
   SessionOutboundMessage,
   { type: "schedule/create/response" }
@@ -5461,6 +5497,150 @@ export class DaemonClient {
         id: normalized.id,
       },
       responseType: "loop/stop/response",
+    });
+  }
+
+  // ── Cluster RPC methods ───────────────────────────────────────────────
+
+  async clusterContexts(requestId?: string): Promise<ClusterContextsPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "cluster/contexts" },
+      responseType: "cluster/contexts/response",
+    });
+  }
+
+  async clusterImport(options: {
+    requestId?: string;
+    contextName?: string;
+    kubeconfigYaml?: string;
+    displayName?: string;
+  }): Promise<ClusterImportPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "cluster/import",
+        ...(options.contextName ? { contextName: options.contextName } : {}),
+        ...(options.kubeconfigYaml ? { kubeconfigYaml: options.kubeconfigYaml } : {}),
+        ...(options.displayName ? { displayName: options.displayName } : {}),
+      },
+      responseType: "cluster/import/response",
+    });
+  }
+
+  async clusterList(requestId?: string): Promise<ClusterListPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "cluster/list" },
+      responseType: "cluster/list/response",
+    });
+  }
+
+  async clusterConnect(options: {
+    requestId?: string;
+    id: string;
+  }): Promise<ClusterConnectPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "cluster/connect", id: options.id },
+      responseType: "cluster/connect/response",
+    });
+  }
+
+  async clusterDisconnect(options: {
+    requestId?: string;
+    id: string;
+  }): Promise<ClusterDisconnectPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "cluster/disconnect", id: options.id },
+      responseType: "cluster/disconnect/response",
+    });
+  }
+
+  async clusterResources(options: {
+    requestId?: string;
+    id: string;
+    kind: "pods" | "deployments" | "nodes" | "events";
+    namespace?: string;
+  }): Promise<ClusterResourcesPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "cluster/resources",
+        id: options.id,
+        kind: options.kind,
+        ...(options.namespace ? { namespace: options.namespace } : {}),
+      },
+      responseType: "cluster/resources/response",
+    });
+  }
+
+  async clusterGet(options: {
+    requestId?: string;
+    id: string;
+    kind: string;
+    namespace?: string;
+    name: string;
+  }): Promise<ClusterGetPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "cluster/get",
+        id: options.id,
+        kind: options.kind,
+        ...(options.namespace ? { namespace: options.namespace } : {}),
+        name: options.name,
+      },
+      responseType: "cluster/get/response",
+    });
+  }
+
+  async clusterLogs(options: {
+    requestId?: string;
+    id: string;
+    namespace: string;
+    pod: string;
+    container?: string;
+  }): Promise<ClusterLogsPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "cluster/logs",
+        id: options.id,
+        namespace: options.namespace,
+        pod: options.pod,
+        ...(options.container ? { container: options.container } : {}),
+      },
+      responseType: "cluster/logs/response",
+    });
+  }
+
+  async clusterWrite(options: {
+    requestId?: string;
+    id: string;
+    kind: string;
+    namespace?: string;
+    name: string;
+    action: "scale" | "delete" | "restart" | "apply";
+    replicas?: number;
+    manifestYaml?: string;
+    dryRun: boolean;
+  }): Promise<ClusterWritePayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "cluster/write",
+        id: options.id,
+        kind: options.kind,
+        ...(options.namespace ? { namespace: options.namespace } : {}),
+        name: options.name,
+        action: options.action,
+        ...(typeof options.replicas === "number" ? { replicas: options.replicas } : {}),
+        ...(options.manifestYaml ? { manifestYaml: options.manifestYaml } : {}),
+        dryRun: options.dryRun,
+      },
+      responseType: "cluster/write/response",
     });
   }
 

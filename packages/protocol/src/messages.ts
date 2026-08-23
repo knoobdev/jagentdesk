@@ -65,6 +65,26 @@ import {
   LoopStopResponseSchema,
 } from "./loop/rpc-schemas.js";
 import {
+  ClusterContextsRequestSchema,
+  ClusterContextsResponseSchema,
+  ClusterImportRequestSchema,
+  ClusterImportResponseSchema,
+  ClusterListRequestSchema,
+  ClusterListResponseSchema,
+  ClusterConnectRequestSchema,
+  ClusterConnectResponseSchema,
+  ClusterDisconnectRequestSchema,
+  ClusterDisconnectResponseSchema,
+  ClusterResourcesRequestSchema,
+  ClusterResourcesResponseSchema,
+  ClusterGetRequestSchema,
+  ClusterGetResponseSchema,
+  ClusterLogsRequestSchema,
+  ClusterLogsResponseSchema,
+  ClusterWriteRequestSchema,
+  ClusterWriteResponseSchema,
+} from "./cluster/rpc-schemas.js";
+import {
   BrowserAutomationExecuteRequestSchema,
   BrowserAutomationExecuteResponseSchema,
   BrowserScreenshotRequestSchema,
@@ -2762,6 +2782,15 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   LoopInspectRequestSchema,
   LoopLogsRequestSchema,
   LoopStopRequestSchema,
+  ClusterContextsRequestSchema,
+  ClusterImportRequestSchema,
+  ClusterListRequestSchema,
+  ClusterConnectRequestSchema,
+  ClusterDisconnectRequestSchema,
+  ClusterResourcesRequestSchema,
+  ClusterGetRequestSchema,
+  ClusterLogsRequestSchema,
+  ClusterWriteRequestSchema,
 ]);
 
 export type SessionInboundMessage = z.infer<typeof SessionInboundMessageSchema>;
@@ -5629,6 +5658,15 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   LoopInspectResponseSchema,
   LoopLogsResponseSchema,
   LoopStopResponseSchema,
+  ClusterContextsResponseSchema,
+  ClusterImportResponseSchema,
+  ClusterListResponseSchema,
+  ClusterConnectResponseSchema,
+  ClusterDisconnectResponseSchema,
+  ClusterResourcesResponseSchema,
+  ClusterGetResponseSchema,
+  ClusterLogsResponseSchema,
+  ClusterWriteResponseSchema,
   DaemonUpdateProgressMessageSchema,
   DaemonUpdateResponseSchema,
 ]);

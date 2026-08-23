@@ -62,6 +62,10 @@ export function asLoopService(): SessionOptions["loopService"] {
   return createStub<SessionOptions["loopService"]>({});
 }
 
+export function asClusterRegistry(): Exclude<SessionOptions["clusterRegistry"], undefined> {
+  return createStub<Exclude<SessionOptions["clusterRegistry"], undefined>>({});
+}
+
 export function asCheckoutDiffManager(stub: {
   [K in keyof SessionOptions["checkoutDiffManager"]]?: unknown;
 }): SessionOptions["checkoutDiffManager"] {
