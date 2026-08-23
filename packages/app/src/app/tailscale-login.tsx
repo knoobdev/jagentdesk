@@ -321,6 +321,10 @@ export default function TailscaleLoginRoute() {
   const mountedRef = useRef(true);
 
   const [interactiveInProgress, setInteractiveInProgress] = useState(false);
+  // After the browser login is opened, the tailnet still needs a few seconds to
+  // come up once the user returns. Keep the sign-in button locked with a
+  // connecting hint during that window so it cannot be tapped again by mistake.
+  const [awaitingConnection, setAwaitingConnection] = useState(false);
   const [authKeyInProgress, setAuthKeyInProgress] = useState(false);
   const [authKey, setAuthKey] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -365,6 +369,7 @@ export default function TailscaleLoginRoute() {
   }, [isDesktopLogin, params.serverId]);
 
   const finishConnectedLogin = useCallback(async () => {
+    setAwaitingConnection(false);
     await syncDesktopTailnetHost();
     if (!mountedRef.current) {
       return;
@@ -422,6 +427,12 @@ export default function TailscaleLoginRoute() {
         },
         failedError: t("tailscaleLogin.errorFailed"),
       });
+      // The browser login was opened; hold the button locked with a connecting
+      // hint until the poll detects the tailnet is up (or the safety timeout
+      // clears it), so a green, tappable button does not invite a mis-tap.
+      if (mountedRef.current && getSnapshot().kind !== "connected") {
+        setAwaitingConnection(true);
+      }
     } catch {
       interactiveErrorVisibleRef.current = true;
       setError(t("tailscaleLogin.errorFailed"));
@@ -429,6 +440,16 @@ export default function TailscaleLoginRoute() {
       setInteractiveInProgress(false);
     }
   }, [adapter, finishConnectedLogin, isDesktopLogin, t]);
+
+  // Safety valve: never leave the button locked forever if the user abandons the
+  // browser login.
+  useEffect(() => {
+    if (!awaitingConnection) {
+      return;
+    }
+    const timer = setTimeout(() => setAwaitingConnection(false), INTERACTIVE_LOGIN_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [awaitingConnection]);
 
   const handleCheckStatus = useCallback(async () => {
     if (
@@ -543,7 +564,7 @@ export default function TailscaleLoginRoute() {
     }
   }, [adapter, authKey, clearAuthKey, finishConnectedLogin, t]);
 
-  const busy = interactiveInProgress || authKeyInProgress;
+  const busy = interactiveInProgress || authKeyInProgress || awaitingConnection;
   const showLocalFallback = !adapter.isSupported && !isDesktopLogin;
   const handleSelectTailscaleConnectionType = useCallback(() => setConnectionType("tailscale"), []);
   const handleSelectLocalConnectionType = useCallback(() => setConnectionType("local"), []);
@@ -613,18 +634,22 @@ export default function TailscaleLoginRoute() {
             size="lg"
             leftIcon={TailscaleMark}
             onPress={handleInteractiveLogin}
-            loading={interactiveInProgress}
-            disabled={authKeyInProgress || interactiveInProgress}
+            loading={interactiveInProgress || awaitingConnection}
+            disabled={authKeyInProgress || interactiveInProgress || awaitingConnection}
             testID="tailscale-login-interactive"
           >
             {interactiveInProgress
               ? t("tailscaleLogin.interactiveInProgress")
-              : t("tailscaleLogin.interactiveAction")}
+              : awaitingConnection
+                ? t("tailscaleLogin.awaitingConnection")
+                : t("tailscaleLogin.interactiveAction")}
           </Button>
 
-          {interactiveInProgress ? (
+          {interactiveInProgress || awaitingConnection ? (
             <Text style={styles.connectingText} testID="tailscale-login-connecting">
-              {t("tailscaleLogin.connecting")}
+              {awaitingConnection
+                ? t("tailscaleLogin.awaitingConnectionHint")
+                : t("tailscaleLogin.connecting")}
             </Text>
           ) : null}
 
