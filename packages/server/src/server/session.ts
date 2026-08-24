@@ -160,6 +160,8 @@ import {
   createGitMetadataGenerator,
 } from "./session/checkout/git-metadata-generator.js";
 import { ChatScheduleLoopSession } from "./session/chat/chat-schedule-loop-session.js";
+import { ClusterSession } from "./session/cluster/cluster-session.js";
+import { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { ProviderCatalogSession } from "./session/provider/provider-catalog-session.js";
 import { WorkspaceFilesSession } from "./session/files/workspace-files-session.js";
 import { AgentConfigSession } from "./session/agent-config/agent-config-session.js";
@@ -440,6 +442,7 @@ export interface SessionOptions {
   chatService: FileBackedChatService;
   scheduleService: ScheduleService;
   loopService: LoopService;
+  clusterRegistry?: ClusterRegistry;
   checkoutDiffManager: CheckoutDiffManager;
   github?: ForgeService;
   createAgentMcpTransport?: AgentMcpTransportFactory;
@@ -667,6 +670,7 @@ export class Session {
   private readonly voiceSession: VoiceSession;
   private readonly checkoutSession: CheckoutSession;
   private readonly chatScheduleLoopSession: ChatScheduleLoopSession;
+  private clusterSession!: ClusterSession;
   private readonly providerCatalogSession: ProviderCatalogSession;
   private readonly workspaceFilesSession: WorkspaceFilesSession;
   private readonly agentConfigSession: AgentConfigSession;
@@ -853,6 +857,7 @@ export class Session {
       clientId: this.clientId,
       logger: this.sessionLogger,
     });
+    this.initClusterSession(options);
     this.providerCatalogSession = new ProviderCatalogSession({
       host: {
         emit: (msg) => this.emit(msg),
@@ -1046,6 +1051,16 @@ export class Session {
     this.subscribeToRegistryMutations();
 
     this.sessionLogger.trace({}, "agent.session.lifecycle.created");
+  }
+
+  private initClusterSession(options: SessionOptions): void {
+    this.clusterSession = new ClusterSession({
+      host: {
+        emit: (msg) => this.emit(msg),
+      },
+      clusterRegistry: options.clusterRegistry ?? new ClusterRegistry(),
+      logger: this.sessionLogger,
+    });
   }
 
   updateAppVersion(appVersion: string | null): void {
@@ -1856,6 +1871,7 @@ export class Session {
       this.dispatchProviderMessage(msg) ??
       this.dispatchTerminalMessage(msg) ??
       this.dispatchChatScheduleLoopMessage(msg) ??
+      this.dispatchClusterMessage(msg) ??
       this.dispatchMiscMessage(msg);
     if (promise) await promise;
   }
@@ -2345,6 +2361,82 @@ export class Session {
         return this.chatScheduleLoopSession.handleScheduleRunOnceRequest(msg);
       case "schedule/update":
         return this.chatScheduleLoopSession.handleScheduleUpdateRequest(msg);
+      default:
+        return undefined;
+    }
+  }
+
+  // oxlint-disable-next-line complexity
+  private dispatchClusterMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    switch (msg.type) {
+      case "cluster/contexts":
+        return this.clusterSession.handleContextsRequest(msg);
+      case "cluster/import":
+        return this.clusterSession.handleImportRequest(msg);
+      case "cluster/list":
+        return this.clusterSession.handleListRequest(msg);
+      case "cluster/connect":
+        return this.clusterSession.handleConnectRequest(msg);
+      case "cluster/disconnect":
+        return this.clusterSession.handleDisconnectRequest(msg);
+      case "cluster/resources":
+        return this.clusterSession.handleResourcesRequest(msg);
+      case "cluster/get":
+        return this.clusterSession.handleGetRequest(msg);
+      case "cluster/logs":
+        return this.clusterSession.handleLogsRequest(msg);
+      case "cluster/logs/subscribe":
+        return this.clusterSession.handleLogsSubscribeRequest(msg);
+      case "cluster/logs/unsubscribe":
+        return this.clusterSession.handleLogsUnsubscribeRequest(msg);
+      case "cluster/write":
+        return this.clusterSession.handleWriteRequest(msg);
+      case "cluster/kinds":
+        return this.clusterSession.handleClusterKinds(msg);
+      case "cluster/resource/list":
+        return this.clusterSession.handleClusterResourceList(msg);
+      case "cluster/reveal-secret":
+        return this.clusterSession.handleRevealSecretRequest(msg);
+      case "cluster/node-op":
+        return this.clusterSession.handleNodeOpRequest(msg);
+      case "cluster/cronjob-op":
+        return this.clusterSession.handleCronjobOpRequest(msg);
+      case "cluster/metrics":
+        return this.clusterSession.handleClusterMetrics(msg);
+      case "cluster/helm/list":
+        return this.clusterSession.handleHelmListRequest(msg);
+      case "cluster/helm/history":
+        return this.clusterSession.handleHelmHistoryRequest(msg);
+      case "cluster/helm/values":
+        return this.clusterSession.handleHelmValuesRequest(msg);
+      case "cluster/helm/rollback":
+        return this.clusterSession.handleHelmRollbackRequest(msg);
+      case "cluster/helm/uninstall":
+        return this.clusterSession.handleHelmUninstallRequest(msg);
+      case "cluster/exec/start":
+        return this.clusterSession.handleExecStart(
+          msg as unknown as Parameters<typeof this.clusterSession.handleExecStart>[0],
+        );
+      case "cluster/exec/stdin":
+        return this.clusterSession.handleExecStdin(
+          msg as unknown as Parameters<typeof this.clusterSession.handleExecStdin>[0],
+        );
+      case "cluster/exec/close":
+        return this.clusterSession.handleExecClose(
+          msg as unknown as Parameters<typeof this.clusterSession.handleExecClose>[0],
+        );
+      case "cluster/pf/start" as string:
+        return this.clusterSession.handlePfStart(
+          msg as unknown as Parameters<typeof this.clusterSession.handlePfStart>[0],
+        );
+      case "cluster/pf/stdin" as string:
+        return this.clusterSession.handlePfStdin(
+          msg as unknown as Parameters<typeof this.clusterSession.handlePfStdin>[0],
+        );
+      case "cluster/pf/close" as string:
+        return this.clusterSession.handlePfClose(
+          msg as unknown as Parameters<typeof this.clusterSession.handlePfClose>[0],
+        );
       default:
         return undefined;
     }
@@ -6944,6 +7036,7 @@ export class Session {
 
     this.workspaceGitObserver.dispose();
     this.workspaceFilesSession.dispose();
+    this.clusterSession.dispose();
   }
 }
 

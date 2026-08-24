@@ -147,6 +147,7 @@ import {
 import { FileBackedChatService } from "./chat/chat-service.js";
 import { CheckoutDiffManager } from "./checkout-diff-manager.js";
 import { LoopService } from "./loop-service.js";
+import { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { ScheduleService } from "./schedule/service.js";
 import { DaemonConfigStore, type MutableDaemonConfig } from "./daemon-config-store.js";
 import { BrowserToolsBroker } from "./browser-tools/broker.js";
@@ -1202,6 +1203,8 @@ export async function createJAgentDeskDaemon(
   });
   await loopService.initialize();
   logger.info({ elapsed: elapsed() }, "Loop service initialized");
+  const clusterRegistry = new ClusterRegistry();
+  logger.info("Cluster registry created");
   const createScheduleLocalWorkspaceExternal = async (input: {
     cwd: string;
     firstAgentContext: FirstAgentContext;
@@ -1357,6 +1360,9 @@ export async function createJAgentDeskDaemon(
     resolveSpeakHandler: (agentId) => wsServer?.resolveVoiceSpeakHandler(agentId) ?? null,
     resolveCallerContext: (agentId) => wsServer?.resolveVoiceCallerContext(agentId) ?? null,
     orchestrationRuntime,
+    clusterRegistry,
+    requestHostToolPermission: (agentId, req) =>
+      agentManager.requestHostToolPermission(agentId, req),
     logger,
   });
   const createAgentToolCatalog = (runtime: JAgentDeskToolRuntimeContext) =>
@@ -1592,6 +1598,7 @@ export async function createJAgentDeskDaemon(
               workspaceRegistry,
               chatService,
               loopService,
+              clusterRegistry,
               scheduleService,
               checkoutDiffManager,
               serviceProxy,

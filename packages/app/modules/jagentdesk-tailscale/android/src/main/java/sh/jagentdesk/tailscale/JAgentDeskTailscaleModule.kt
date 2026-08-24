@@ -37,8 +37,15 @@ class JAgentDeskTailscaleModule : Module() {
       if (bridge.tailnetName().isNotEmpty()) {
         markAuthenticated()
         "connected"
+      } else if (File(stateDirectory(), AUTHENTICATED_MARKER).exists()) {
+        // Cold-start restore warm-up: node restored from a previously
+        // authenticated state but the tailnet has not reached Running yet, so
+        // tailnetName() is transiently empty. A passive status probe must NOT
+        // delete the restore marker — that permanently forces every future
+        // cold start back to login even though the saved session is valid.
+        // Report "connecting"; only an explicit sign-out clears the marker.
+        "connecting"
       } else {
-        removeAuthenticatedMarker()
         "needs-login"
       }
     }

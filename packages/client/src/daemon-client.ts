@@ -557,6 +557,86 @@ type LoopInspectPayload = Extract<
 >["payload"];
 type LoopLogsPayload = Extract<SessionOutboundMessage, { type: "loop/logs/response" }>["payload"];
 type LoopStopPayload = Extract<SessionOutboundMessage, { type: "loop/stop/response" }>["payload"];
+type ClusterContextsPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/contexts/response" }
+>["payload"];
+type ClusterImportPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/import/response" }
+>["payload"];
+type ClusterListPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/list/response" }
+>["payload"];
+type ClusterConnectPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/connect/response" }
+>["payload"];
+type ClusterDisconnectPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/disconnect/response" }
+>["payload"];
+type ClusterResourcesPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/resources/response" }
+>["payload"];
+type ClusterGetPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/get/response" }
+>["payload"];
+type ClusterLogsPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/logs/response" }
+>["payload"];
+type ClusterWritePayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/write/response" }
+>["payload"];
+type ClusterKindsPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/kinds/response" }
+>["payload"];
+type ClusterResourceListPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/resource/list/response" }
+>["payload"];
+type ClusterRevealSecretPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/reveal-secret/response" }
+>["payload"];
+type ClusterNodeOpPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/node-op/response" }
+>["payload"];
+type ClusterCronjobOpPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/cronjob-op/response" }
+>["payload"];
+type ClusterMetricsPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/metrics/response" }
+>["payload"];
+type ClusterHelmListPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/helm/list/response" }
+>["payload"];
+type ClusterHelmHistoryPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/helm/history/response" }
+>["payload"];
+type ClusterHelmValuesPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/helm/values/response" }
+>["payload"];
+type ClusterHelmRollbackPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/helm/rollback/response" }
+>["payload"];
+type ClusterHelmUninstallPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/helm/uninstall/response" }
+>["payload"];
 type ScheduleCreatePayload = Extract<
   SessionOutboundMessage,
   { type: "schedule/create/response" }
@@ -1171,6 +1251,18 @@ export class DaemonClient {
     string,
     { cwd: string; path: string; onUpdate: (version: FileVersion) => void }
   >();
+  private logSubscriptions = new Map<
+    string,
+    {
+      id: string;
+      namespace: string;
+      pod: string;
+      container?: string;
+      onChunk: (chunk: string) => void;
+    }
+  >();
+  private execCallbacks = new Map<string, (data: string) => void>();
+  private pfCallbacks = new Map<string, (data: string) => void>();
   private readonly terminalStreams = new TerminalStreamRouter();
   private pendingBinaryFileReads = new Map<string, PendingBinaryFileRead>();
   private activeBinaryFileTransfers = new Map<string, BinaryFileTransferState>();
@@ -1444,6 +1536,7 @@ export class DaemonClient {
     this.rejectPingProbe(new Error("Daemon client closed"));
     this.terminalStreams.clearSlots();
     this.fileSubscriptions.clear();
+    this.logSubscriptions.clear();
     this.lastServerInfoMessage = null;
     if (this.runtimeMetricsInterval) {
       clearInterval(this.runtimeMetricsInterval);
@@ -2435,6 +2528,22 @@ export class DaemonClient {
       })
         .then((payload) => subscription.onUpdate(payload.initial))
         .catch(() => undefined);
+    }
+  }
+
+  private resubscribeLogSubscriptions(): void {
+    for (const [subscriptionId, subscription] of this.logSubscriptions) {
+      void this.sendCorrelatedSessionRequest({
+        message: {
+          type: "cluster/logs/subscribe",
+          id: subscription.id,
+          subscriptionId,
+          namespace: subscription.namespace,
+          pod: subscription.pod,
+          ...(subscription.container ? { container: subscription.container } : {}),
+        },
+        responseType: "cluster/logs/subscribe/response",
+      }).catch(() => undefined);
     }
   }
 
@@ -5464,6 +5573,481 @@ export class DaemonClient {
     });
   }
 
+  // ── Cluster RPC methods ───────────────────────────────────────────────
+
+  async clusterContexts(requestId?: string): Promise<ClusterContextsPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "cluster/contexts" },
+      responseType: "cluster/contexts/response",
+    });
+  }
+
+  async clusterImport(options: {
+    requestId?: string;
+    contextName?: string;
+    kubeconfigYaml?: string;
+    displayName?: string;
+  }): Promise<ClusterImportPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "cluster/import",
+        ...(options.contextName ? { contextName: options.contextName } : {}),
+        ...(options.kubeconfigYaml ? { kubeconfigYaml: options.kubeconfigYaml } : {}),
+        ...(options.displayName ? { displayName: options.displayName } : {}),
+      },
+      responseType: "cluster/import/response",
+    });
+  }
+
+  async clusterList(requestId?: string): Promise<ClusterListPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "cluster/list" },
+      responseType: "cluster/list/response",
+    });
+  }
+
+  async clusterConnect(options: {
+    requestId?: string;
+    id: string;
+  }): Promise<ClusterConnectPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "cluster/connect", id: options.id },
+      responseType: "cluster/connect/response",
+    });
+  }
+
+  async clusterDisconnect(options: {
+    requestId?: string;
+    id: string;
+  }): Promise<ClusterDisconnectPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "cluster/disconnect", id: options.id },
+      responseType: "cluster/disconnect/response",
+    });
+  }
+
+  async clusterResources(options: {
+    requestId?: string;
+    id: string;
+    kind: "pods" | "deployments" | "nodes" | "events";
+    namespace?: string;
+  }): Promise<ClusterResourcesPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "cluster/resources",
+        id: options.id,
+        kind: options.kind,
+        ...(options.namespace ? { namespace: options.namespace } : {}),
+      },
+      responseType: "cluster/resources/response",
+    });
+  }
+
+  async clusterGet(options: {
+    requestId?: string;
+    id: string;
+    kind: string;
+    namespace?: string;
+    name: string;
+  }): Promise<ClusterGetPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "cluster/get",
+        id: options.id,
+        kind: options.kind,
+        ...(options.namespace ? { namespace: options.namespace } : {}),
+        name: options.name,
+      },
+      responseType: "cluster/get/response",
+    });
+  }
+
+  async clusterLogs(options: {
+    requestId?: string;
+    id: string;
+    namespace: string;
+    pod: string;
+    container?: string;
+  }): Promise<ClusterLogsPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "cluster/logs",
+        id: options.id,
+        namespace: options.namespace,
+        pod: options.pod,
+        ...(options.container ? { container: options.container } : {}),
+      },
+      responseType: "cluster/logs/response",
+    });
+  }
+
+  async clusterLogsSubscribe(
+    options: {
+      id: string;
+      namespace: string;
+      pod: string;
+      container?: string;
+    },
+    onChunk: (chunk: string) => void,
+  ): Promise<{ subscriptionId: string; unsubscribe: () => Promise<void> }> {
+    const subscriptionId = crypto.randomUUID();
+    this.logSubscriptions.set(subscriptionId, { ...options, onChunk });
+    try {
+      const payload = await this.sendCorrelatedSessionRequest({
+        message: {
+          type: "cluster/logs/subscribe",
+          id: options.id,
+          subscriptionId,
+          namespace: options.namespace,
+          pod: options.pod,
+          ...(options.container ? { container: options.container } : {}),
+        },
+        responseType: "cluster/logs/subscribe/response",
+      });
+      return {
+        subscriptionId: payload.subscriptionId,
+        unsubscribe: async () => {
+          if (!this.logSubscriptions.delete(subscriptionId)) return;
+          await this.sendCorrelatedSessionRequest({
+            message: { type: "cluster/logs/unsubscribe", subscriptionId },
+            responseType: "cluster/logs/unsubscribe/response",
+          }).catch(() => undefined);
+        },
+      };
+    } catch (error) {
+      this.logSubscriptions.delete(subscriptionId);
+      throw error;
+    }
+  }
+
+  async clusterExecStart(
+    options: {
+      id: string;
+      namespace: string;
+      pod: string;
+      container?: string;
+      command?: string[];
+    },
+    onData: (data: string) => void,
+  ): Promise<{
+    execId: string;
+    write: (data: string) => void;
+    close: () => Promise<void>;
+  }> {
+    const execId = crypto.randomUUID();
+    this.execCallbacks.set(execId, onData);
+    try {
+      await this.sendCorrelatedSessionRequest({
+        message: {
+          type: "cluster/exec/start",
+          id: options.id,
+          execId,
+          namespace: options.namespace,
+          pod: options.pod,
+          ...(options.container ? { container: options.container } : {}),
+          ...(options.command ? { command: options.command } : {}),
+        } as unknown as SessionInboundMessage,
+        responseType: "cluster/exec/start/response" as unknown as "cluster/exec/start/response",
+      });
+      return {
+        execId,
+        write: (data: string) => {
+          this.sendSessionMessage({
+            type: "cluster/exec/stdin",
+            execId,
+            data,
+          } as unknown as SessionInboundMessage);
+        },
+        close: async () => {
+          this.execCallbacks.delete(execId);
+          await this.sendCorrelatedSessionRequest({
+            message: { type: "cluster/exec/close", execId } as unknown as SessionInboundMessage,
+            responseType: "cluster/exec/close/response" as unknown as "cluster/exec/close/response",
+          }).catch(() => undefined);
+        },
+      };
+    } catch (error) {
+      this.execCallbacks.delete(execId);
+      throw error;
+    }
+  }
+
+  async clusterPortForwardStart(
+    options: {
+      id: string;
+      namespace: string;
+      pod: string;
+      podPort: number;
+    },
+    onData: (data: string) => void,
+  ): Promise<{
+    pfId: string;
+    write: (data: string) => void;
+    close: () => Promise<void>;
+  }> {
+    const pfId = crypto.randomUUID();
+    this.pfCallbacks.set(pfId, onData);
+    try {
+      await this.sendCorrelatedSessionRequest({
+        message: {
+          type: "cluster/pf/start",
+          id: options.id,
+          pfId,
+          namespace: options.namespace,
+          pod: options.pod,
+          podPort: options.podPort,
+        } as unknown as SessionInboundMessage,
+        // oxlint-disable-next-line @typescript-eslint/no-explicit-any
+        responseType: "cluster/pf/start/response" as any,
+      });
+      return {
+        pfId,
+        write: (data: string) => {
+          this.sendSessionMessage({
+            type: "cluster/pf/stdin",
+            pfId,
+            data,
+          } as unknown as SessionInboundMessage);
+        },
+        close: async () => {
+          this.pfCallbacks.delete(pfId);
+          await this.sendCorrelatedSessionRequest({
+            message: { type: "cluster/pf/close", pfId } as unknown as SessionInboundMessage,
+            // oxlint-disable-next-line @typescript-eslint/no-explicit-any
+            responseType: "cluster/pf/close/response" as any,
+          }).catch(() => undefined);
+        },
+      };
+    } catch (error) {
+      this.pfCallbacks.delete(pfId);
+      throw error;
+    }
+  }
+
+  async clusterWrite(options: {
+    requestId?: string;
+    id: string;
+    kind: string;
+    namespace?: string;
+    name: string;
+    action: "scale" | "delete" | "restart" | "apply";
+    replicas?: number;
+    manifestYaml?: string;
+    dryRun: boolean;
+  }): Promise<ClusterWritePayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "cluster/write",
+        id: options.id,
+        kind: options.kind,
+        ...(options.namespace ? { namespace: options.namespace } : {}),
+        name: options.name,
+        action: options.action,
+        ...(typeof options.replicas === "number" ? { replicas: options.replicas } : {}),
+        ...(options.manifestYaml ? { manifestYaml: options.manifestYaml } : {}),
+        dryRun: options.dryRun,
+      },
+      responseType: "cluster/write/response",
+    });
+  }
+
+  async clusterKinds(options: { requestId?: string; id: string }): Promise<ClusterKindsPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "cluster/kinds", id: options.id },
+      responseType: "cluster/kinds/response",
+    });
+  }
+
+  async clusterResourceList(options: {
+    requestId?: string;
+    id: string;
+    kind: string;
+    namespace?: string;
+  }): Promise<ClusterResourceListPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "cluster/resource/list",
+        id: options.id,
+        kind: options.kind,
+        ...(options.namespace ? { namespace: options.namespace } : {}),
+      },
+      responseType: "cluster/resource/list/response",
+    });
+  }
+
+  async clusterRevealSecret(options: {
+    requestId?: string;
+    id: string;
+    namespace: string;
+    name: string;
+  }): Promise<ClusterRevealSecretPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "cluster/reveal-secret",
+        id: options.id,
+        namespace: options.namespace,
+        name: options.name,
+      },
+      responseType: "cluster/reveal-secret/response",
+    });
+  }
+
+  async clusterNodeOp(options: {
+    requestId?: string;
+    id: string;
+    name: string;
+    op: "cordon" | "uncordon";
+  }): Promise<ClusterNodeOpPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "cluster/node-op",
+        id: options.id,
+        name: options.name,
+        op: options.op,
+      },
+      responseType: "cluster/node-op/response",
+    });
+  }
+
+  async clusterCronjobOp(options: {
+    requestId?: string;
+    id: string;
+    namespace: string;
+    name: string;
+    op: "trigger" | "suspend" | "resume";
+  }): Promise<ClusterCronjobOpPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "cluster/cronjob-op",
+        id: options.id,
+        namespace: options.namespace,
+        name: options.name,
+        op: options.op,
+      },
+      responseType: "cluster/cronjob-op/response",
+    });
+  }
+
+  async clusterMetrics(options: {
+    requestId?: string;
+    id: string;
+    scope: "nodes" | "pods";
+    namespace?: string;
+  }): Promise<ClusterMetricsPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "cluster/metrics",
+        id: options.id,
+        scope: options.scope,
+        ...(options.namespace ? { namespace: options.namespace } : {}),
+      },
+      responseType: "cluster/metrics/response",
+    });
+  }
+
+  async clusterHelmList(options: {
+    requestId?: string;
+    id: string;
+  }): Promise<ClusterHelmListPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "cluster/helm/list",
+        id: options.id,
+      },
+      responseType: "cluster/helm/list/response",
+    });
+  }
+
+  async clusterHelmHistory(options: {
+    requestId?: string;
+    id: string;
+    namespace: string;
+    name: string;
+  }): Promise<ClusterHelmHistoryPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "cluster/helm/history",
+        id: options.id,
+        namespace: options.namespace,
+        name: options.name,
+      },
+      responseType: "cluster/helm/history/response",
+    });
+  }
+
+  async clusterHelmValues(options: {
+    requestId?: string;
+    id: string;
+    namespace: string;
+    name: string;
+  }): Promise<ClusterHelmValuesPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "cluster/helm/values",
+        id: options.id,
+        namespace: options.namespace,
+        name: options.name,
+      },
+      responseType: "cluster/helm/values/response",
+    });
+  }
+
+  async clusterHelmRollback(options: {
+    requestId?: string;
+    id: string;
+    namespace: string;
+    name: string;
+    revision: number;
+  }): Promise<ClusterHelmRollbackPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "cluster/helm/rollback",
+        id: options.id,
+        namespace: options.namespace,
+        name: options.name,
+        revision: options.revision,
+      },
+      responseType: "cluster/helm/rollback/response",
+    });
+  }
+
+  async clusterHelmUninstall(options: {
+    requestId?: string;
+    id: string;
+    namespace: string;
+    name: string;
+  }): Promise<ClusterHelmUninstallPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "cluster/helm/uninstall",
+        id: options.id,
+        namespace: options.namespace,
+        name: options.name,
+      },
+      responseType: "cluster/helm/uninstall/response",
+    });
+  }
+
   onTerminalStreamEvent(handler: (event: TerminalStreamEvent) => void): () => void {
     return this.terminalStreams.onEvent(handler);
   }
@@ -6130,6 +6714,35 @@ export class DaemonClient {
     });
   }
 
+  private handleClusterPushMessage(msg: SessionOutboundMessage): boolean {
+    const consumerMessage = normalizeProviderSnapshotUpdateMessage(msg);
+
+    if (consumerMessage.type === "cluster/logs/chunk") {
+      this.logSubscriptions.get(consumerMessage.subscriptionId)?.onChunk(consumerMessage.chunk);
+      return true;
+    }
+
+    if ((consumerMessage as unknown as Record<string, unknown>).type === "cluster/exec/data") {
+      const execMsg = consumerMessage as unknown as { execId: string; data: string };
+      const cb = this.execCallbacks.get(execMsg.execId);
+      if (cb) {
+        cb(execMsg.data);
+      }
+      return true;
+    }
+
+    if ((consumerMessage as unknown as Record<string, unknown>).type === "cluster/pf/data") {
+      const pfMsg = consumerMessage as unknown as { pfId: string; data: string };
+      const cb = this.pfCallbacks.get(pfMsg.pfId);
+      if (cb) {
+        cb(pfMsg.data);
+      }
+      return true;
+    }
+
+    return false;
+  }
+
   private handleSessionMessage(msg: SessionOutboundMessage): void {
     const consumerMessage = normalizeProviderSnapshotUpdateMessage(msg);
 
@@ -6145,6 +6758,7 @@ export class DaemonClient {
           this.resubscribeCheckoutDiffSubscriptions();
           this.resubscribeTerminalDirectorySubscriptions();
           this.resubscribeFileSubscriptions();
+          this.resubscribeLogSubscriptions();
           this.flushPendingSendQueue();
           this.resolveConnect();
         }
@@ -6160,6 +6774,8 @@ export class DaemonClient {
         .get(consumerMessage.payload.subscriptionId)
         ?.onUpdate(consumerMessage.payload.version);
     }
+
+    this.handleClusterPushMessage(msg);
 
     if (this.rawMessageListeners.size > 0) {
       for (const handler of this.rawMessageListeners) {

@@ -1,5 +1,6 @@
 import { router, usePathname } from "expo-router";
 import {
+  Boxes,
   CalendarClock,
   FolderPlus,
   History,
@@ -58,6 +59,7 @@ import { useCloseAgentListGesture } from "@/mobile-panels/gestures";
 import { MobilePanelOverlay } from "@/mobile-panels/presentation";
 import { useIsMobilePanelPresented } from "@/mobile-panels/provider";
 import {
+  buildClustersRoute,
   buildOpenProjectRoute,
   buildNewWorkspaceRoute,
   buildSchedulesRoute,
@@ -92,6 +94,7 @@ interface SidebarSharedProps {
   handleOpenProject: () => void;
   handleHome: () => void;
   handleSettings: () => void;
+  handleClusters: () => void;
   labels: SidebarLabels;
   newWorkspaceKeys: ShortcutKey[][] | null;
   handleAddHost: () => void;
@@ -108,6 +111,7 @@ interface SidebarLabels {
   searchHosts: string;
   sessions: string;
   schedules: string;
+  clusters: string;
   closeSidebar: string;
 }
 
@@ -211,6 +215,22 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     router.push(buildOpenProjectRoute());
   }, []);
 
+  const hosts = useHosts();
+  const firstServerId = hosts[0]?.serverId ?? "";
+
+  const handleClustersDesktop = useCallback(() => {
+    if (firstServerId) {
+      router.push(buildClustersRoute(firstServerId));
+    }
+  }, [firstServerId]);
+
+  const handleClustersMobile = useCallback(() => {
+    if (firstServerId) {
+      showMobileAgent();
+      router.push(buildClustersRoute(firstServerId));
+    }
+  }, [firstServerId, showMobileAgent]);
+
   const handleViewMoreNavigate = useCallback(() => {
     router.push(buildSessionsRoute());
   }, []);
@@ -231,6 +251,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       searchHosts: t("sidebar.host.searchPlaceholder"),
       sessions: t("sidebar.sections.sessions"),
       schedules: t("sidebar.sections.schedules"),
+      clusters: "Clusters",
       closeSidebar: t("sidebar.actions.closeSidebar"),
     }),
     [t],
@@ -250,6 +271,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     shortcutIndexByWorkspaceKey,
     toggleProjectCollapsed,
     handleRefresh,
+    handleClusters: handleClustersDesktop,
     labels,
     newWorkspaceKeys,
   };
@@ -259,6 +281,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       <RetainedPanelActivity active={active}>
         <MobileSidebar
           {...sharedProps}
+          handleClusters={handleClustersMobile}
           insetsTop={insets.top}
           insetsBottom={insets.bottom}
           closeSidebar={showMobileAgent}
@@ -278,6 +301,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     <RetainedPanelActivity active={active}>
       <DesktopSidebar
         {...sharedProps}
+        handleClusters={handleClustersDesktop}
         insetsTop={insets.top}
         active={active}
         handleOpenProject={handleOpenProjectDesktop}
@@ -532,6 +556,7 @@ function SidebarFooter({
   handleOpenProject,
   handleHome,
   handleSettings,
+  handleClusters,
   labels,
   handleAddHost,
   handleOpenHostSettings,
@@ -540,12 +565,14 @@ function SidebarFooter({
   handleOpenProject: () => void;
   handleHome: () => void;
   handleSettings: () => void;
+  handleClusters: () => void;
   labels: {
     addProject: string;
     hosts: string;
     home: string;
     pairDevice: string;
     settings: string;
+    clusters: string;
     searchHosts: string;
   };
   handleAddHost: () => void;
@@ -581,6 +608,13 @@ function SidebarFooter({
           testID="sidebar-home"
           label={labels.home}
           icon={Home}
+          theme={theme}
+        />
+        <FooterIconButton
+          onPress={handleClusters}
+          testID="sidebar-clusters"
+          label={labels.clusters}
+          icon={Boxes}
           theme={theme}
         />
         {localServerId ? (
@@ -624,6 +658,7 @@ function MobileSidebar({
   handleOpenProject,
   handleHome,
   handleSettings,
+  handleClusters,
   labels,
   handleAddHost,
   handleOpenHostSettings,
@@ -743,6 +778,7 @@ function MobileSidebar({
           handleOpenProject={handleOpenProject}
           handleHome={handleHome}
           handleSettings={handleSettings}
+          handleClusters={handleClusters}
           labels={labels}
           handleAddHost={handleAddHost}
           handleOpenHostSettings={handleOpenHostSettings}
@@ -770,6 +806,7 @@ function DesktopSidebar({
   handleOpenProject,
   handleHome,
   handleSettings,
+  handleClusters,
   labels,
   handleAddHost,
   handleOpenHostSettings,
@@ -908,6 +945,7 @@ function DesktopSidebar({
           handleOpenProject={handleOpenProject}
           handleHome={handleHome}
           handleSettings={handleSettings}
+          handleClusters={handleClusters}
           labels={labels}
           handleAddHost={handleAddHost}
           handleOpenHostSettings={handleOpenHostSettings}

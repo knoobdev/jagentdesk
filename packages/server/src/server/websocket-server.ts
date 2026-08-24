@@ -13,6 +13,7 @@ import type { ProjectRegistry, WorkspaceRegistry } from "./workspace-registry.js
 import type { ProjectUpdate } from "./workspace-reconciliation-service.js";
 import type { FileBackedChatService } from "./chat/chat-service.js";
 import type { LoopService } from "./loop-service.js";
+import type { ClusterRegistry } from "./cluster/cluster-registry.js";
 import type { ScheduleService } from "./schedule/service.js";
 import type { CheckoutDiffManager, CheckoutDiffMetrics } from "./checkout-diff-manager.js";
 import type { DaemonConfigStore, MutableDaemonConfig } from "./daemon-config-store.js";
@@ -557,6 +558,7 @@ export class VoiceAssistantWebSocketServer {
   private readonly workspaceRegistry: WorkspaceRegistry;
   private readonly chatService: FileBackedChatService;
   private readonly loopService: LoopService;
+  private readonly clusterRegistry: ClusterRegistry;
   private readonly scheduleService: ScheduleService;
   private readonly checkoutDiffManager: CheckoutDiffManager;
   private readonly github: ForgeService;
@@ -644,6 +646,7 @@ export class VoiceAssistantWebSocketServer {
     workspaceRegistry?: WorkspaceRegistry,
     chatService?: FileBackedChatService,
     loopService?: LoopService,
+    clusterRegistry?: ClusterRegistry,
     scheduleService?: ScheduleService,
     checkoutDiffManager?: CheckoutDiffManager,
     serviceProxy?: ServiceProxySubsystem | null,
@@ -689,6 +692,8 @@ export class VoiceAssistantWebSocketServer {
     });
     this.chatService = requiredServices.chatService;
     this.loopService = requiredServices.loopService;
+    this.clusterRegistry =
+      clusterRegistry ?? new (require("./cluster/cluster-registry.js").ClusterRegistry)();
     this.scheduleService = requiredServices.scheduleService;
     this.checkoutDiffManager = requiredServices.checkoutDiffManager;
     this.github = github ?? createGitHubService();
@@ -1609,6 +1614,7 @@ export class VoiceAssistantWebSocketServer {
       workspaceRegistry: this.workspaceRegistry,
       chatService: this.chatService,
       loopService: this.loopService,
+      clusterRegistry: this.clusterRegistry,
       scheduleService: this.scheduleService,
       checkoutDiffManager: this.checkoutDiffManager,
       github: this.github,
