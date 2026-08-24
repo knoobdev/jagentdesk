@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, Pressable, ScrollView, Text, View, type ListRenderItem } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { useIsCompactFormFactor } from "@/constants/layout";
@@ -42,6 +42,19 @@ function formatAge(creationTimestamp: string): string {
   if (diffDays >= 1) return `${diffDays}d`;
   if (diffHours >= 1) return `${diffHours}h`;
   return `${diffMin}m`;
+}
+
+function formatCpu(cpuNano: number): string {
+  return `${Math.round(cpuNano / 1e6)}m`;
+}
+
+function formatMem(memoryBytes: number): string {
+  return `${Math.round(memoryBytes / 1048576)}Mi`;
+}
+
+interface MetricsEntry {
+  cpuNano: number;
+  memoryBytes: number;
 }
 
 function bucketCategory(category: string): string {
@@ -92,6 +105,8 @@ export function ClusterResourceBrowser({
   const [loadingItems, setLoadingItems] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [kindError, setKindError] = useState<string | null>(null);
+  const [metricsMap, setMetricsMap] = useState<Record<string, MetricsEntry>>({});
+  const [metricsError, setMetricsError] = useState<string | null>(null);
   const [selectedResource, setSelectedResource] = useState<{
     kind: string;
     namespace: string;
@@ -130,6 +145,8 @@ export function ClusterResourceBrowser({
       setSelectedKind(kind);
       setLoadingItems(true);
       setError(null);
+      setMetricsMap({});
+      setMetricsError(null);
       void client
         .clusterResourceList({ id: clusterId, kind })
         .then((res) => {
@@ -146,6 +163,33 @@ export function ClusterResourceBrowser({
           setItems([]);
         })
         .finally(() => setLoadingItems(false));
+
+      if (kind === "Node" || kind === "Pod") {
+        const scope = kind === "Node" ? "nodes" : "pods";
+        void client
+          .clusterMetrics({ id: clusterId, scope })
+          .then((res) => {
+            if (res.error) {
+              setMetricsError(res.error);
+              return;
+            }
+            const map: Record<string, MetricsEntry> = {};
+            for (const item of res.items as Array<{
+              name: string;
+              namespace?: string;
+              cpuNano: number;
+              memoryBytes: number;
+            }>) {
+              const key = scope === "pods" ? `${item.namespace ?? ""}/${item.name}` : item.name;
+              map[key] = { cpuNano: item.cpuNano, memoryBytes: item.memoryBytes };
+            }
+            setMetricsMap(map);
+            return undefined;
+          })
+          .catch((e: unknown) => {
+            setMetricsError(e instanceof Error ? e.message : "Metrics unavailable");
+          });
+      }
     },
     [client, clusterId],
   );
@@ -170,6 +214,8 @@ export function ClusterResourceBrowser({
     if (client && selectedKind) {
       setLoadingItems(true);
       setError(null);
+      setMetricsMap({});
+      setMetricsError(null);
       void client
         .clusterResourceList({ id: clusterId, kind: selectedKind })
         .then((res) => {
@@ -186,6 +232,33 @@ export function ClusterResourceBrowser({
           setItems([]);
         })
         .finally(() => setLoadingItems(false));
+
+      if (selectedKind === "Node" || selectedKind === "Pod") {
+        const scope = selectedKind === "Node" ? "nodes" : "pods";
+        void client
+          .clusterMetrics({ id: clusterId, scope })
+          .then((res) => {
+            if (res.error) {
+              setMetricsError(res.error);
+              return;
+            }
+            const map: Record<string, MetricsEntry> = {};
+            for (const item of res.items as Array<{
+              name: string;
+              namespace?: string;
+              cpuNano: number;
+              memoryBytes: number;
+            }>) {
+              const key = scope === "pods" ? `${item.namespace ?? ""}/${item.name}` : item.name;
+              map[key] = { cpuNano: item.cpuNano, memoryBytes: item.memoryBytes };
+            }
+            setMetricsMap(map);
+            return undefined;
+          })
+          .catch((e: unknown) => {
+            setMetricsError(e instanceof Error ? e.message : "Metrics unavailable");
+          });
+      }
     }
   }, [client, clusterId, selectedKind]);
 
@@ -194,6 +267,7 @@ export function ClusterResourceBrowser({
   const renderResourceItem: ListRenderItem<ResourceItem> = useCallback(
     ({ item }) => {
       const isPod = selectedKind === "Pod";
+      const isNodeOrPod = selectedKind === "Node" || isPod;
       const podPhase = isPod
         ? ((
             (item as unknown as Record<string, unknown>).status as
@@ -201,6 +275,32 @@ export function ClusterResourceBrowser({
               | undefined
           )?.phase as string | undefined)
         : undefined;
+      const metricsKey = isPod ? `${item.namespace ?? ""}/${item.name}` : item.name;
+      const metrics = isNodeOrPod ? metricsMap[metricsKey] : undefined;
+      let metricsContent: React.ReactNode = null;
+      if (isNodeOrPod) {
+        if (metrics) {
+          metricsContent = (
+            <>
+              <Text style={styles.resourceCpu}>{formatCpu(metrics.cpuNano)}</Text>
+              <Text style={styles.resourceMem}>{formatMem(metrics.memoryBytes)}</Text>
+            </>
+          );
+        } else if (metricsError) {
+          metricsContent = (
+            <Text style={styles.metricsUnavailable} numberOfLines={1}>
+              metrics unavailable
+            </Text>
+          );
+        } else {
+          metricsContent = (
+            <>
+              <Text style={styles.resourceCpu}>-</Text>
+              <Text style={styles.resourceMem}>-</Text>
+            </>
+          );
+        }
+      }
       return (
         <Pressable style={styles.resourceRow} onPress={handleResourcePress(item)}>
           <View style={styles.resourceNameCell}>
@@ -216,11 +316,12 @@ export function ClusterResourceBrowser({
           <Text style={styles.resourceNamespace} numberOfLines={1}>
             {item.namespace ?? "-"}
           </Text>
+          {metricsContent}
           <Text style={styles.resourceAge}>{formatAge(item.creationTimestamp)}</Text>
         </Pressable>
       );
     },
-    [selectedKind, handleResourcePress],
+    [selectedKind, handleResourcePress, metricsMap, metricsError],
   );
 
   const keyExtractor = useCallback(
@@ -298,6 +399,12 @@ export function ClusterResourceBrowser({
         <View style={styles.tableHeader}>
           <Text style={styles.tableHeaderName}>NAME</Text>
           <Text style={styles.tableHeaderNamespace}>NAMESPACE</Text>
+          {selectedKind === "Node" || selectedKind === "Pod" ? (
+            <>
+              <Text style={styles.tableHeaderCpu}>CPU</Text>
+              <Text style={styles.tableHeaderMem}>MEM</Text>
+            </>
+          ) : null}
           <Text style={styles.tableHeaderAge}>AGE</Text>
         </View>
         <FlatList
@@ -570,6 +677,24 @@ const styles = StyleSheet.create((theme: Theme) => ({
     letterSpacing: 0.5,
     textAlign: "right" as const,
   },
+  tableHeaderCpu: {
+    width: 60,
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foregroundMuted,
+    textTransform: "uppercase" as const,
+    letterSpacing: 0.5,
+    textAlign: "right" as const,
+  },
+  tableHeaderMem: {
+    width: 60,
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foregroundMuted,
+    textTransform: "uppercase" as const,
+    letterSpacing: 0.5,
+    textAlign: "right" as const,
+  },
   resourceRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -595,6 +720,25 @@ const styles = StyleSheet.create((theme: Theme) => ({
     width: 140,
     fontSize: theme.fontSize.xs,
     color: theme.colors.foregroundMuted,
+  },
+  resourceCpu: {
+    width: 60,
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+    textAlign: "right" as const,
+  },
+  resourceMem: {
+    width: 60,
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+    textAlign: "right" as const,
+  },
+  metricsUnavailable: {
+    width: 120,
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+    fontStyle: "italic" as const,
+    textAlign: "right" as const,
   },
   resourceAge: {
     width: 60,
