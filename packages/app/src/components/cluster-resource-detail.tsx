@@ -3,6 +3,9 @@ import { Pressable, ScrollView, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { AdaptiveModalSheet, AdaptiveTextInput } from "@/components/adaptive-modal-sheet";
+import { ClusterSecretReveal } from "./cluster-secret-reveal";
+import { ClusterNodeOps } from "./cluster-node-ops";
+import { ClusterCronjobOps } from "./cluster-cronjob-ops";
 import type { Theme } from "@/styles/theme";
 
 interface ClusterResourceDetailProps {
@@ -82,6 +85,9 @@ export function ClusterResourceDetail({
   const isWorkload = WORKLOAD_KINDS.has(kind);
   const canRestart = RESTARTABLE_KINDS.has(kind);
   const isPod = kind.toLowerCase() === "pod";
+  const isSecret = kind.toLowerCase() === "secret";
+  const isNode = kind.toLowerCase() === "node";
+  const isCronJob = kind.toLowerCase() === "cronjob";
 
   useEffect(() => {
     if (!client) {
@@ -445,42 +451,248 @@ export function ClusterResourceDetail({
 
   return (
     <AdaptiveModalSheet header={header} visible onClose={onClose} scrollable={false}>
-      {/* Action bar */}
-      <View style={styles.actionBar}>
-        <View style={styles.actionBarLeft}>
-          {isPod ? (
-            <Pressable style={styles.actionButton} onPress={handleToggleLogs} disabled={logLoading}>
-              <Text style={styles.actionButtonText}>{showLogs ? "YAML" : "Logs"}</Text>
-            </Pressable>
-          ) : null}
-          {canRestart ? (
-            <Pressable style={styles.actionButton} onPress={handleRestart} disabled={restarting}>
-              <Text style={styles.actionButtonText}>
-                {restarting ? "Restarting..." : "Restart"}
-              </Text>
-            </Pressable>
-          ) : null}
-          <Pressable
-            style={[styles.actionButton, editing && styles.actionButtonActive]}
-            onPress={handleToggleEdit}
-          >
-            <Text style={[styles.actionButtonText, editing && styles.actionButtonTextActive]}>
-              {editing ? "View YAML" : "Edit YAML"}
-            </Text>
+      <ResourceDetailBody
+        isPod={isPod}
+        isSecret={isSecret}
+        isNode={isNode}
+        isCronJob={isCronJob}
+        isWorkload={isWorkload}
+        canRestart={canRestart}
+        showLogs={showLogs}
+        editing={editing}
+        logLoading={logLoading}
+        deleting={deleting}
+        deletingConfirm={deletingConfirm}
+        scaling={scaling}
+        restarting={restarting}
+        client={client}
+        clusterId={clusterId}
+        namespace={namespace}
+        name={name}
+        scaleReplicas={scaleReplicas}
+        selectedContainer={selectedContainer}
+        containers={containers}
+        message={message}
+        deleteButtonLabel={deleteButtonLabel}
+        logsBody={logsBody}
+        yamlBody={yamlBody}
+        onChanged={onChanged}
+        setScaleReplicas={setScaleReplicas}
+        handleToggleLogs={handleToggleLogs}
+        handleRestart={handleRestart}
+        handleDelete={handleDelete}
+        handleScale={handleScale}
+        handleToggleEdit={handleToggleEdit}
+        handleRefreshLogs={handleRefreshLogs}
+        handleSelectContainer={handleSelectContainer}
+      />
+    </AdaptiveModalSheet>
+  );
+}
+
+interface ResourceDetailBodyProps {
+  isPod: boolean;
+  isSecret: boolean;
+  isNode: boolean;
+  isCronJob: boolean;
+  isWorkload: boolean;
+  canRestart: boolean;
+  showLogs: boolean;
+  editing: boolean;
+  logLoading: boolean;
+  deleting: boolean;
+  deletingConfirm: boolean;
+  scaling: boolean;
+  restarting: boolean;
+  client: ReturnType<typeof useHostRuntimeClient>;
+  clusterId: string;
+  namespace?: string;
+  name: string;
+  scaleReplicas: string;
+  selectedContainer: string | null;
+  containers: string[];
+  message: string | null;
+  deleteButtonLabel: string;
+  logsBody: React.ReactNode;
+  yamlBody: React.ReactNode;
+  onChanged?: () => void;
+  setScaleReplicas: (v: string) => void;
+  handleToggleLogs: () => void;
+  handleRestart: () => void;
+  handleDelete: () => void;
+  handleScale: () => void;
+  handleToggleEdit: () => void;
+  handleRefreshLogs: () => void;
+  handleSelectContainer: (container: string) => void;
+}
+
+interface ResourceDetailActionBarProps {
+  isPod: boolean;
+  isNode: boolean;
+  isCronJob: boolean;
+  canRestart: boolean;
+  showLogs: boolean;
+  editing: boolean;
+  logLoading: boolean;
+  deleting: boolean;
+  deletingConfirm: boolean;
+  restarting: boolean;
+  client: ReturnType<typeof useHostRuntimeClient>;
+  clusterId: string;
+  namespace?: string;
+  name: string;
+  deleteButtonLabel: string;
+  onChanged?: () => void;
+  handleToggleLogs: () => void;
+  handleRestart: () => void;
+  handleDelete: () => void;
+  handleToggleEdit: () => void;
+}
+
+function ResourceDetailActionBar({
+  isPod,
+  isNode,
+  isCronJob,
+  canRestart,
+  showLogs,
+  editing,
+  logLoading,
+  deleting,
+  deletingConfirm,
+  restarting,
+  client,
+  clusterId,
+  namespace,
+  name,
+  deleteButtonLabel,
+  onChanged,
+  handleToggleLogs,
+  handleRestart,
+  handleDelete,
+  handleToggleEdit,
+}: ResourceDetailActionBarProps) {
+  return (
+    <View style={styles.actionBar}>
+      <View style={styles.actionBarLeft}>
+        {isPod ? (
+          <Pressable style={styles.actionButton} onPress={handleToggleLogs} disabled={logLoading}>
+            <Text style={styles.actionButtonText}>{showLogs ? "YAML" : "Logs"}</Text>
           </Pressable>
-        </View>
+        ) : null}
+        {canRestart ? (
+          <Pressable style={styles.actionButton} onPress={handleRestart} disabled={restarting}>
+            <Text style={styles.actionButtonText}>{restarting ? "Restarting..." : "Restart"}</Text>
+          </Pressable>
+        ) : null}
+        {isNode ? (
+          <ClusterNodeOps
+            client={client!}
+            clusterId={clusterId}
+            name={name}
+            onChanged={onChanged}
+          />
+        ) : null}
+        {isCronJob ? (
+          <ClusterCronjobOps
+            client={client!}
+            clusterId={clusterId}
+            namespace={namespace ?? ""}
+            name={name}
+            onChanged={onChanged}
+          />
+        ) : null}
         <Pressable
-          style={[styles.deleteButton, deletingConfirm && styles.deleteButtonConfirm]}
-          onPress={handleDelete}
-          disabled={deleting}
+          style={[styles.actionButton, editing && styles.actionButtonActive]}
+          onPress={handleToggleEdit}
         >
-          <Text
-            style={[styles.deleteButtonText, deletingConfirm && styles.deleteButtonTextConfirm]}
-          >
-            {deleteButtonLabel}
+          <Text style={[styles.actionButtonText, editing && styles.actionButtonTextActive]}>
+            {editing ? "View YAML" : "Edit YAML"}
           </Text>
         </Pressable>
       </View>
+      <Pressable
+        style={[styles.deleteButton, deletingConfirm && styles.deleteButtonConfirm]}
+        onPress={handleDelete}
+        disabled={deleting}
+      >
+        <Text style={[styles.deleteButtonText, deletingConfirm && styles.deleteButtonTextConfirm]}>
+          {deleteButtonLabel}
+        </Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function ResourceDetailBody({
+  isPod,
+  isSecret,
+  isNode,
+  isCronJob,
+  isWorkload,
+  canRestart,
+  showLogs,
+  editing,
+  logLoading,
+  deleting,
+  deletingConfirm,
+  scaling,
+  restarting,
+  client,
+  clusterId,
+  namespace,
+  name,
+  scaleReplicas,
+  selectedContainer,
+  containers,
+  message,
+  deleteButtonLabel,
+  logsBody,
+  yamlBody,
+  onChanged,
+  setScaleReplicas,
+  handleToggleLogs,
+  handleRestart,
+  handleDelete,
+  handleScale,
+  handleToggleEdit,
+  handleRefreshLogs,
+  handleSelectContainer,
+}: ResourceDetailBodyProps) {
+  return (
+    <>
+      <ResourceDetailActionBar
+        isPod={isPod}
+        isNode={isNode}
+        isCronJob={isCronJob}
+        canRestart={canRestart}
+        showLogs={showLogs}
+        editing={editing}
+        logLoading={logLoading}
+        deleting={deleting}
+        deletingConfirm={deletingConfirm}
+        restarting={restarting}
+        client={client}
+        clusterId={clusterId}
+        namespace={namespace}
+        name={name}
+        deleteButtonLabel={deleteButtonLabel}
+        onChanged={onChanged}
+        handleToggleLogs={handleToggleLogs}
+        handleRestart={handleRestart}
+        handleDelete={handleDelete}
+        handleToggleEdit={handleToggleEdit}
+      />
+
+      {isSecret && client ? (
+        <View style={styles.secretSection}>
+          <ClusterSecretReveal
+            client={client}
+            clusterId={clusterId}
+            namespace={namespace ?? ""}
+            name={name}
+          />
+        </View>
+      ) : null}
 
       {/* Scale row */}
       {isWorkload ? (
@@ -557,7 +769,7 @@ export function ClusterResourceDetail({
           <Text style={styles.messageText}>{message}</Text>
         </View>
       ) : null}
-    </AdaptiveModalSheet>
+    </>
   );
 }
 
@@ -805,5 +1017,11 @@ const styles = StyleSheet.create((theme: Theme) => ({
   messageText: {
     fontSize: theme.fontSize.sm,
     color: theme.colors.foreground,
+  },
+  secretSection: {
+    paddingTop: theme.spacing[3],
+    paddingBottom: theme.spacing[2],
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
   },
 }));

@@ -2390,6 +2390,12 @@ export class Session {
         return this.clusterSession.handleClusterKinds(msg);
       case "cluster/resource/list":
         return this.clusterSession.handleClusterResourceList(msg);
+      case "cluster/reveal-secret":
+        return this.clusterSession.handleRevealSecretRequest(msg);
+      case "cluster/node-op":
+        return this.clusterSession.handleNodeOpRequest(msg);
+      case "cluster/cronjob-op":
+        return this.clusterSession.handleCronjobOpRequest(msg);
       default:
         return undefined;
     }
