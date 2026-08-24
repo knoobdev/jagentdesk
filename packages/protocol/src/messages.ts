@@ -116,6 +116,12 @@ import {
   ClusterExecDataSchema,
   ClusterExecCloseRequestSchema,
   ClusterExecCloseResponseSchema,
+  ClusterPfStartRequestSchema,
+  ClusterPfStartResponseSchema,
+  ClusterPfStdinRequestSchema,
+  ClusterPfDataSchema,
+  ClusterPfCloseRequestSchema,
+  ClusterPfCloseResponseSchema,
 } from "./cluster/rpc-schemas.js";
 import {
   BrowserAutomationExecuteRequestSchema,
@@ -2840,6 +2846,9 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ClusterExecStartRequestSchema,
   ClusterExecStdinRequestSchema,
   ClusterExecCloseRequestSchema,
+  ClusterPfStartRequestSchema,
+  ClusterPfStdinRequestSchema,
+  ClusterPfCloseRequestSchema,
 ]);
 
 export type SessionInboundMessage = z.infer<typeof SessionInboundMessageSchema>;
@@ -5733,6 +5742,9 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ClusterExecStartResponseSchema,
   ClusterExecDataSchema,
   ClusterExecCloseResponseSchema,
+  ClusterPfStartResponseSchema,
+  ClusterPfDataSchema,
+  ClusterPfCloseResponseSchema,
   DaemonUpdateProgressMessageSchema,
   DaemonUpdateResponseSchema,
 ]);

@@ -1262,6 +1262,7 @@ export class DaemonClient {
     }
   >();
   private execCallbacks = new Map<string, (data: string) => void>();
+  private pfCallbacks = new Map<string, (data: string) => void>();
   private readonly terminalStreams = new TerminalStreamRouter();
   private pendingBinaryFileReads = new Map<string, PendingBinaryFileRead>();
   private activeBinaryFileTransfers = new Map<string, BinaryFileTransferState>();
@@ -5779,6 +5780,58 @@ export class DaemonClient {
     }
   }
 
+  async clusterPortForwardStart(
+    options: {
+      id: string;
+      namespace: string;
+      pod: string;
+      podPort: number;
+    },
+    onData: (data: string) => void,
+  ): Promise<{
+    pfId: string;
+    write: (data: string) => void;
+    close: () => Promise<void>;
+  }> {
+    const pfId = crypto.randomUUID();
+    this.pfCallbacks.set(pfId, onData);
+    try {
+      await this.sendCorrelatedSessionRequest({
+        message: {
+          type: "cluster/pf/start",
+          id: options.id,
+          pfId,
+          namespace: options.namespace,
+          pod: options.pod,
+          podPort: options.podPort,
+        } as unknown as SessionInboundMessage,
+        // oxlint-disable-next-line @typescript-eslint/no-explicit-any
+        responseType: "cluster/pf/start/response" as any,
+      });
+      return {
+        pfId,
+        write: (data: string) => {
+          this.sendSessionMessage({
+            type: "cluster/pf/stdin",
+            pfId,
+            data,
+          } as unknown as SessionInboundMessage);
+        },
+        close: async () => {
+          this.pfCallbacks.delete(pfId);
+          await this.sendCorrelatedSessionRequest({
+            message: { type: "cluster/pf/close", pfId } as unknown as SessionInboundMessage,
+            // oxlint-disable-next-line @typescript-eslint/no-explicit-any
+            responseType: "cluster/pf/close/response" as any,
+          }).catch(() => undefined);
+        },
+      };
+    } catch (error) {
+      this.pfCallbacks.delete(pfId);
+      throw error;
+    }
+  }
+
   async clusterWrite(options: {
     requestId?: string;
     id: string;
@@ -6661,6 +6714,35 @@ export class DaemonClient {
     });
   }
 
+  private handleClusterPushMessage(msg: SessionOutboundMessage): boolean {
+    const consumerMessage = normalizeProviderSnapshotUpdateMessage(msg);
+
+    if (consumerMessage.type === "cluster/logs/chunk") {
+      this.logSubscriptions.get(consumerMessage.subscriptionId)?.onChunk(consumerMessage.chunk);
+      return true;
+    }
+
+    if ((consumerMessage as unknown as Record<string, unknown>).type === "cluster/exec/data") {
+      const execMsg = consumerMessage as unknown as { execId: string; data: string };
+      const cb = this.execCallbacks.get(execMsg.execId);
+      if (cb) {
+        cb(execMsg.data);
+      }
+      return true;
+    }
+
+    if ((consumerMessage as unknown as Record<string, unknown>).type === "cluster/pf/data") {
+      const pfMsg = consumerMessage as unknown as { pfId: string; data: string };
+      const cb = this.pfCallbacks.get(pfMsg.pfId);
+      if (cb) {
+        cb(pfMsg.data);
+      }
+      return true;
+    }
+
+    return false;
+  }
+
   private handleSessionMessage(msg: SessionOutboundMessage): void {
     const consumerMessage = normalizeProviderSnapshotUpdateMessage(msg);
 
@@ -6693,17 +6775,7 @@ export class DaemonClient {
         ?.onUpdate(consumerMessage.payload.version);
     }
 
-    if (consumerMessage.type === "cluster/logs/chunk") {
-      this.logSubscriptions.get(consumerMessage.subscriptionId)?.onChunk(consumerMessage.chunk);
-    }
-
-    if ((consumerMessage as unknown as Record<string, unknown>).type === "cluster/exec/data") {
-      const execMsg = consumerMessage as unknown as { execId: string; data: string };
-      const cb = this.execCallbacks.get(execMsg.execId);
-      if (cb) {
-        cb(execMsg.data);
-      }
-    }
+    this.handleClusterPushMessage(msg);
 
     if (this.rawMessageListeners.size > 0) {
       for (const handler of this.rawMessageListeners) {
