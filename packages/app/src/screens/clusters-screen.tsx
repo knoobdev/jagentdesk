@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { Boxes, CircleAlert } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import { useIsCompactFormFactor } from "@/constants/layout";
 import { useHostRuntimeClient, useHosts } from "@/runtime/host-runtime";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { ContextStatusDot, ClusterStatusDot } from "@/components/cluster-dot";
@@ -89,6 +91,15 @@ export function ClustersScreen() {
   const serverId = hosts[0]?.serverId ?? "";
   const client = useHostRuntimeClient(serverId);
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const isCompact = useIsCompactFormFactor();
+
+  // Phones render this screen with no native header, so pad past the status
+  // bar / notch. 0 on desktop, real inset on iOS + Android.
+  const contentContainerStyle = useMemo(
+    () => [styles.contentContainer, isCompact ? { paddingTop: insets.top } : null],
+    [isCompact, insets.top],
+  );
 
   const [contexts, setContexts] = useState<KubeContextInfo[]>([]);
   const [clusters, setClusters] = useState<ClusterInfo[]>([]);
@@ -200,7 +211,7 @@ export function ClustersScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
+    <ScrollView style={styles.container} contentContainerStyle={contentContainerStyle}>
       <View style={styles.headerRow}>
         <ThemedBoxes size={20} uniProps={foregroundColorMapping} />
         <Text style={styles.header}>Clusters</Text>

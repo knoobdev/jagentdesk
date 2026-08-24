@@ -1,11 +1,13 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Pressable, TextInput, View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ArrowUp } from "lucide-react-native";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
 import { useSessionStore } from "@/stores/session-store";
 import { askAgentAboutResource } from "@/components/cluster-ask-agent";
+import { useIsCompactFormFactor } from "@/constants/layout";
 import type { Theme } from "@/styles/theme";
 
 const ThemedArrowUp = withUnistyles(ArrowUp);
@@ -37,6 +39,13 @@ export function ClusterComposer({
   const ready = Boolean(client && provider && cwd);
 
   const [text, setText] = useState("");
+  const insets = useSafeAreaInsets();
+  const isCompact = useIsCompactFormFactor();
+  // Clear the home indicator / gesture bar on phones without padding desktop.
+  const wrapStyle = useMemo(
+    () => [styles.wrap, isCompact && insets.bottom > 0 ? { paddingBottom: insets.bottom } : null],
+    [isCompact, insets.bottom],
+  );
 
   const handleSend = useCallback(() => {
     const trimmed = text.trim();
@@ -56,7 +65,7 @@ export function ClusterComposer({
   const canSend = ready && text.trim().length > 0;
 
   return (
-    <View style={styles.wrap}>
+    <View style={wrapStyle}>
       <View style={styles.composer}>
         <TextInput
           style={styles.input}

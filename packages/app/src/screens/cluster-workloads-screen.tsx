@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { ClusterInfo } from "@jagentdesk/protocol/cluster/rpc-schemas";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { ClusterResourceBrowser } from "@/components/cluster-resource-browser";
 import { ClusterComposer } from "@/components/cluster-composer";
+import { useIsCompactFormFactor } from "@/constants/layout";
 import type { Theme } from "@/styles/theme";
 
 /**
@@ -21,6 +23,16 @@ export function ClusterWorkloadsScreen({
 }) {
   const client = useHostRuntimeClient(serverId);
   const [cluster, setCluster] = useState<ClusterInfo | null>(null);
+  const insets = useSafeAreaInsets();
+  const isCompact = useIsCompactFormFactor();
+
+  // On phones the host stack has no native header (headerShown: false), so the
+  // screen paints under the status bar / notch / camera cutout. Reserve the
+  // real top inset (0 on desktop) so it fits every device. iOS + Android alike.
+  const containerStyle = useMemo(
+    () => [styles.container, isCompact ? { paddingTop: insets.top } : null],
+    [isCompact, insets.top],
+  );
 
   useEffect(() => {
     if (!client) return;
@@ -34,7 +46,7 @@ export function ClusterWorkloadsScreen({
   }, [client, clusterId]);
 
   return (
-    <View style={styles.container}>
+    <View style={containerStyle}>
       <View style={styles.body}>
         <ClusterResourceBrowser serverId={serverId} clusterId={clusterId} />
       </View>
