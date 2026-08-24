@@ -847,6 +847,7 @@ function ResourceDetailActionBar({
         <YamlViewButtons
           editing={editing}
           showYaml={showYaml}
+          showViewToggle={!showLogs && !showShell}
           onToggleYaml={handleToggleYaml}
           onToggleEdit={handleToggleEdit}
         />
@@ -954,17 +955,19 @@ function PortForwardActiveStatus({
 function YamlViewButtons({
   editing,
   showYaml,
+  showViewToggle,
   onToggleYaml,
   onToggleEdit,
 }: {
   editing: boolean;
   showYaml: boolean;
+  showViewToggle: boolean;
   onToggleYaml: () => void;
   onToggleEdit: () => void;
 }) {
   return (
     <>
-      {editing ? null : (
+      {editing || !showViewToggle ? null : (
         <Pressable
           style={[styles.actionButton, showYaml && styles.actionButtonActive]}
           onPress={onToggleYaml}
@@ -987,16 +990,19 @@ function YamlViewButtons({
 }
 
 function DetailMainView({
+  visible,
   showYaml,
   editing,
   yamlBody,
   overviewBody,
 }: {
+  visible: boolean;
   showYaml: boolean;
   editing: boolean;
   yamlBody: ReactNode;
   overviewBody: ReactNode;
 }) {
+  if (!visible) return null;
   if (showYaml) {
     return (
       <View style={styles.yamlContainer}>
@@ -1190,14 +1196,15 @@ function ResourceDetailBody({
           </View>
           {logsBody}
         </View>
-      ) : (
-        <DetailMainView
-          showYaml={editing || showYaml || overviewBody === null}
-          editing={editing}
-          yamlBody={yamlBody}
-          overviewBody={overviewBody}
-        />
-      )}
+      ) : null}
+
+      <DetailMainView
+        visible={!showLogs && !showShell}
+        showYaml={editing || showYaml || overviewBody === null}
+        editing={editing}
+        yamlBody={yamlBody}
+        overviewBody={overviewBody}
+      />
 
       {showShell ? (
         <View style={styles.shellContainer}>
