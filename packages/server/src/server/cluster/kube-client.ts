@@ -6,11 +6,13 @@ import {
   KubernetesObjectApi,
   ApiextensionsV1Api,
   Metrics,
+  Log,
   loadYaml,
   dumpYaml,
   PatchStrategy,
 } from "@kubernetes/client-node";
 import type { KubernetesObject } from "@kubernetes/client-node";
+import { PassThrough } from "node:stream";
 import type {
   PodDTO,
   ContainerDTO,
@@ -159,6 +161,27 @@ export class KubeClient {
       tailLines: 100,
     });
     return logStr;
+  }
+
+  async streamPodLogs(
+    namespace: string,
+    pod: string,
+    container: string | undefined,
+    onChunk: (text: string) => void,
+  ): Promise<() => void> {
+    this.ensureConnected();
+    const stream = new PassThrough();
+    const log = new Log(this.kc!);
+    const controller = await log.log(namespace, pod, container ?? "", stream, {
+      follow: true,
+      tailLines: 100,
+      pretty: false,
+    });
+    stream.on("data", (d: Buffer) => onChunk(d.toString()));
+    return () => {
+      controller.abort();
+      stream.destroy();
+    };
   }
 
   async applyWrite(op: {

@@ -347,6 +347,57 @@ export type ClusterCronjobOpResponse = z.infer<typeof ClusterCronjobOpResponseSc
 export type ClusterMetricsRequest = z.infer<typeof ClusterMetricsRequestSchema>;
 export type ClusterMetricsResponse = z.infer<typeof ClusterMetricsResponseSchema>;
 
+// ── cluster/logs/subscribe ─────────────────────────────────────────────────────
+
+export const ClusterLogsSubscribeRequestSchema = z.object({
+  type: z.literal("cluster/logs/subscribe"),
+  requestId: z.string(),
+  id: z.string(),
+  subscriptionId: z.string(),
+  namespace: z.string(),
+  pod: z.string(),
+  container: z.string().optional(),
+});
+
+export const ClusterLogsSubscribeResponseSchema = z.object({
+  type: z.literal("cluster/logs/subscribe/response"),
+  payload: z.object({
+    requestId: z.string(),
+    subscriptionId: z.string(),
+    error: z.string().nullable(),
+  }),
+});
+
+// ── cluster/logs/chunk (PUSH, no requestId) ────────────────────────────────────
+
+export const ClusterLogsChunkSchema = z.object({
+  type: z.literal("cluster/logs/chunk"),
+  subscriptionId: z.string(),
+  chunk: z.string(),
+});
+
+// ── cluster/logs/unsubscribe ───────────────────────────────────────────────────
+
+export const ClusterLogsUnsubscribeRequestSchema = z.object({
+  type: z.literal("cluster/logs/unsubscribe"),
+  requestId: z.string(),
+  subscriptionId: z.string(),
+});
+
+export const ClusterLogsUnsubscribeResponseSchema = z.object({
+  type: z.literal("cluster/logs/unsubscribe/response"),
+  payload: z.object({
+    requestId: z.string(),
+    ok: z.boolean(),
+  }),
+});
+
+export type ClusterLogsSubscribeRequest = z.infer<typeof ClusterLogsSubscribeRequestSchema>;
+export type ClusterLogsSubscribeResponse = z.infer<typeof ClusterLogsSubscribeResponseSchema>;
+export type ClusterLogsChunk = z.infer<typeof ClusterLogsChunkSchema>;
+export type ClusterLogsUnsubscribeRequest = z.infer<typeof ClusterLogsUnsubscribeRequestSchema>;
+export type ClusterLogsUnsubscribeResponse = z.infer<typeof ClusterLogsUnsubscribeResponseSchema>;
+
 // ── cluster/helm/* ────────────────────────────────────────────────────────────
 
 export const HelmReleaseDTOSchema = z.object({

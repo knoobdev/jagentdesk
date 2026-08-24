@@ -2385,6 +2385,10 @@ export class Session {
         return this.clusterSession.handleGetRequest(msg);
       case "cluster/logs":
         return this.clusterSession.handleLogsRequest(msg);
+      case "cluster/logs/subscribe":
+        return this.clusterSession.handleLogsSubscribeRequest(msg);
+      case "cluster/logs/unsubscribe":
+        return this.clusterSession.handleLogsUnsubscribeRequest(msg);
       case "cluster/write":
         return this.clusterSession.handleWriteRequest(msg);
       case "cluster/kinds":
@@ -7008,6 +7012,7 @@ export class Session {
 
     this.workspaceGitObserver.dispose();
     this.workspaceFilesSession.dispose();
+    this.clusterSession.dispose();
   }
 }
 

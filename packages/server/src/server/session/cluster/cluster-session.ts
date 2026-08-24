@@ -25,11 +25,23 @@ export class ClusterSession {
   private readonly host: ClusterSessionHost;
   private readonly clusterRegistry: ClusterRegistry;
   private readonly logger: pino.Logger;
+  private readonly logSubscriptions = new Map<string, () => void>();
 
   constructor(options: ClusterSessionOptions) {
     this.host = options.host;
     this.clusterRegistry = options.clusterRegistry;
     this.logger = options.logger;
+  }
+
+  dispose(): void {
+    for (const stop of this.logSubscriptions.values()) {
+      try {
+        stop();
+      } catch {
+        // best-effort teardown
+      }
+    }
+    this.logSubscriptions.clear();
   }
 
   private emitClusterRpcError(request: { requestId: string; type: string }, error: unknown): void {
@@ -220,6 +232,61 @@ export class ClusterSession {
           requestId: request.requestId,
           logs,
           error: null,
+        },
+      });
+    } catch (error) {
+      this.emitClusterRpcError(request, error);
+    }
+  }
+
+  async handleLogsSubscribeRequest(
+    request: Extract<SessionInboundMessage, { type: "cluster/logs/subscribe" }>,
+  ): Promise<void> {
+    try {
+      const client = this.clusterRegistry.getClient(request.id);
+      if (!client) {
+        throw new Error(`cluster not connected: ${request.id}`);
+      }
+      const stop = await client.streamPodLogs(
+        request.namespace,
+        request.pod,
+        request.container,
+        (chunk) => {
+          this.host.emit({
+            type: "cluster/logs/chunk",
+            subscriptionId: request.subscriptionId,
+            chunk,
+          } as SessionOutboundMessage);
+        },
+      );
+      this.logSubscriptions.set(request.subscriptionId, stop);
+      this.host.emit({
+        type: "cluster/logs/subscribe/response",
+        payload: {
+          requestId: request.requestId,
+          subscriptionId: request.subscriptionId,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitClusterRpcError(request, error);
+    }
+  }
+
+  async handleLogsUnsubscribeRequest(
+    request: Extract<SessionInboundMessage, { type: "cluster/logs/unsubscribe" }>,
+  ): Promise<void> {
+    try {
+      const stop = this.logSubscriptions.get(request.subscriptionId);
+      if (stop) {
+        stop();
+        this.logSubscriptions.delete(request.subscriptionId);
+      }
+      this.host.emit({
+        type: "cluster/logs/unsubscribe/response",
+        payload: {
+          requestId: request.requestId,
+          ok: true,
         },
       });
     } catch (error) {

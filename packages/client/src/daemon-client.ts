@@ -1251,6 +1251,16 @@ export class DaemonClient {
     string,
     { cwd: string; path: string; onUpdate: (version: FileVersion) => void }
   >();
+  private logSubscriptions = new Map<
+    string,
+    {
+      id: string;
+      namespace: string;
+      pod: string;
+      container?: string;
+      onChunk: (chunk: string) => void;
+    }
+  >();
   private readonly terminalStreams = new TerminalStreamRouter();
   private pendingBinaryFileReads = new Map<string, PendingBinaryFileRead>();
   private activeBinaryFileTransfers = new Map<string, BinaryFileTransferState>();
@@ -1524,6 +1534,7 @@ export class DaemonClient {
     this.rejectPingProbe(new Error("Daemon client closed"));
     this.terminalStreams.clearSlots();
     this.fileSubscriptions.clear();
+    this.logSubscriptions.clear();
     this.lastServerInfoMessage = null;
     if (this.runtimeMetricsInterval) {
       clearInterval(this.runtimeMetricsInterval);
@@ -2515,6 +2526,22 @@ export class DaemonClient {
       })
         .then((payload) => subscription.onUpdate(payload.initial))
         .catch(() => undefined);
+    }
+  }
+
+  private resubscribeLogSubscriptions(): void {
+    for (const [subscriptionId, subscription] of this.logSubscriptions) {
+      void this.sendCorrelatedSessionRequest({
+        message: {
+          type: "cluster/logs/subscribe",
+          id: subscription.id,
+          subscriptionId,
+          namespace: subscription.namespace,
+          pod: subscription.pod,
+          ...(subscription.container ? { container: subscription.container } : {}),
+        },
+        responseType: "cluster/logs/subscribe/response",
+      }).catch(() => undefined);
     }
   }
 
@@ -5660,6 +5687,45 @@ export class DaemonClient {
     });
   }
 
+  async clusterLogsSubscribe(
+    options: {
+      id: string;
+      namespace: string;
+      pod: string;
+      container?: string;
+    },
+    onChunk: (chunk: string) => void,
+  ): Promise<{ subscriptionId: string; unsubscribe: () => Promise<void> }> {
+    const subscriptionId = crypto.randomUUID();
+    this.logSubscriptions.set(subscriptionId, { ...options, onChunk });
+    try {
+      const payload = await this.sendCorrelatedSessionRequest({
+        message: {
+          type: "cluster/logs/subscribe",
+          id: options.id,
+          subscriptionId,
+          namespace: options.namespace,
+          pod: options.pod,
+          ...(options.container ? { container: options.container } : {}),
+        },
+        responseType: "cluster/logs/subscribe/response",
+      });
+      return {
+        subscriptionId: payload.subscriptionId,
+        unsubscribe: async () => {
+          if (!this.logSubscriptions.delete(subscriptionId)) return;
+          await this.sendCorrelatedSessionRequest({
+            message: { type: "cluster/logs/unsubscribe", subscriptionId },
+            responseType: "cluster/logs/unsubscribe/response",
+          }).catch(() => undefined);
+        },
+      };
+    } catch (error) {
+      this.logSubscriptions.delete(subscriptionId);
+      throw error;
+    }
+  }
+
   async clusterWrite(options: {
     requestId?: string;
     id: string;
@@ -6557,6 +6623,7 @@ export class DaemonClient {
           this.resubscribeCheckoutDiffSubscriptions();
           this.resubscribeTerminalDirectorySubscriptions();
           this.resubscribeFileSubscriptions();
+          this.resubscribeLogSubscriptions();
           this.flushPendingSendQueue();
           this.resolveConnect();
         }
@@ -6571,6 +6638,10 @@ export class DaemonClient {
       this.fileSubscriptions
         .get(consumerMessage.payload.subscriptionId)
         ?.onUpdate(consumerMessage.payload.version);
+    }
+
+    if (consumerMessage.type === "cluster/logs/chunk") {
+      this.logSubscriptions.get(consumerMessage.subscriptionId)?.onChunk(consumerMessage.chunk);
     }
 
     if (this.rawMessageListeners.size > 0) {
