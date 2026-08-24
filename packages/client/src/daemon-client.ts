@@ -1261,6 +1261,7 @@ export class DaemonClient {
       onChunk: (chunk: string) => void;
     }
   >();
+  private execCallbacks = new Map<string, (data: string) => void>();
   private readonly terminalStreams = new TerminalStreamRouter();
   private pendingBinaryFileReads = new Map<string, PendingBinaryFileRead>();
   private activeBinaryFileTransfers = new Map<string, BinaryFileTransferState>();
@@ -5726,6 +5727,58 @@ export class DaemonClient {
     }
   }
 
+  async clusterExecStart(
+    options: {
+      id: string;
+      namespace: string;
+      pod: string;
+      container?: string;
+      command?: string[];
+    },
+    onData: (data: string) => void,
+  ): Promise<{
+    execId: string;
+    write: (data: string) => void;
+    close: () => Promise<void>;
+  }> {
+    const execId = crypto.randomUUID();
+    this.execCallbacks.set(execId, onData);
+    try {
+      await this.sendCorrelatedSessionRequest({
+        message: {
+          type: "cluster/exec/start",
+          id: options.id,
+          execId,
+          namespace: options.namespace,
+          pod: options.pod,
+          ...(options.container ? { container: options.container } : {}),
+          ...(options.command ? { command: options.command } : {}),
+        } as unknown as SessionInboundMessage,
+        responseType: "cluster/exec/start/response" as unknown as "cluster/exec/start/response",
+      });
+      return {
+        execId,
+        write: (data: string) => {
+          this.sendSessionMessage({
+            type: "cluster/exec/stdin",
+            execId,
+            data,
+          } as unknown as SessionInboundMessage);
+        },
+        close: async () => {
+          this.execCallbacks.delete(execId);
+          await this.sendCorrelatedSessionRequest({
+            message: { type: "cluster/exec/close", execId } as unknown as SessionInboundMessage,
+            responseType: "cluster/exec/close/response" as unknown as "cluster/exec/close/response",
+          }).catch(() => undefined);
+        },
+      };
+    } catch (error) {
+      this.execCallbacks.delete(execId);
+      throw error;
+    }
+  }
+
   async clusterWrite(options: {
     requestId?: string;
     id: string;
@@ -6642,6 +6695,14 @@ export class DaemonClient {
 
     if (consumerMessage.type === "cluster/logs/chunk") {
       this.logSubscriptions.get(consumerMessage.subscriptionId)?.onChunk(consumerMessage.chunk);
+    }
+
+    if ((consumerMessage as unknown as Record<string, unknown>).type === "cluster/exec/data") {
+      const execMsg = consumerMessage as unknown as { execId: string; data: string };
+      const cb = this.execCallbacks.get(execMsg.execId);
+      if (cb) {
+        cb(execMsg.data);
+      }
     }
 
     if (this.rawMessageListeners.size > 0) {

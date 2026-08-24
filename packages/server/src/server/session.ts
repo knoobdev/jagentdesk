@@ -2413,6 +2413,18 @@ export class Session {
         return this.clusterSession.handleHelmRollbackRequest(msg);
       case "cluster/helm/uninstall":
         return this.clusterSession.handleHelmUninstallRequest(msg);
+      case "cluster/exec/start":
+        return this.clusterSession.handleExecStart(
+          msg as unknown as Parameters<typeof this.clusterSession.handleExecStart>[0],
+        );
+      case "cluster/exec/stdin":
+        return this.clusterSession.handleExecStdin(
+          msg as unknown as Parameters<typeof this.clusterSession.handleExecStdin>[0],
+        );
+      case "cluster/exec/close":
+        return this.clusterSession.handleExecClose(
+          msg as unknown as Parameters<typeof this.clusterSession.handleExecClose>[0],
+        );
       default:
         return undefined;
     }

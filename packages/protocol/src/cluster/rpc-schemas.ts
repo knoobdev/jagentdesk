@@ -508,6 +508,62 @@ export const ClusterHelmUninstallResponseSchema = z.object({
   }),
 });
 
+// ── cluster/exec/* ────────────────────────────────────────────────────────────
+
+export const ClusterExecStartRequestSchema = z.object({
+  type: z.literal("cluster/exec/start"),
+  requestId: z.string(),
+  id: z.string(),
+  execId: z.string(),
+  namespace: z.string(),
+  pod: z.string(),
+  container: z.string().optional(),
+  command: z.array(z.string()).optional(),
+});
+
+export const ClusterExecStartResponseSchema = z.object({
+  type: z.literal("cluster/exec/start/response"),
+  payload: z.object({
+    requestId: z.string(),
+    execId: z.string(),
+    error: z.string().nullable(),
+  }),
+});
+
+export const ClusterExecStdinRequestSchema = z.object({
+  type: z.literal("cluster/exec/stdin"),
+  requestId: z.string().optional(),
+  execId: z.string(),
+  data: z.string(),
+});
+
+export const ClusterExecDataSchema = z.object({
+  type: z.literal("cluster/exec/data"),
+  execId: z.string(),
+  data: z.string(),
+});
+
+export const ClusterExecCloseRequestSchema = z.object({
+  type: z.literal("cluster/exec/close"),
+  requestId: z.string(),
+  execId: z.string(),
+});
+
+export const ClusterExecCloseResponseSchema = z.object({
+  type: z.literal("cluster/exec/close/response"),
+  payload: z.object({
+    requestId: z.string(),
+    ok: z.boolean(),
+  }),
+});
+
+export type ClusterExecStartRequest = z.infer<typeof ClusterExecStartRequestSchema>;
+export type ClusterExecStartResponse = z.infer<typeof ClusterExecStartResponseSchema>;
+export type ClusterExecStdinRequest = z.infer<typeof ClusterExecStdinRequestSchema>;
+export type ClusterExecData = z.infer<typeof ClusterExecDataSchema>;
+export type ClusterExecCloseRequest = z.infer<typeof ClusterExecCloseRequestSchema>;
+export type ClusterExecCloseResponse = z.infer<typeof ClusterExecCloseResponseSchema>;
+
 export type ClusterHelmListRequest = z.infer<typeof ClusterHelmListRequestSchema>;
 export type ClusterHelmListResponse = z.infer<typeof ClusterHelmListResponseSchema>;
 export type ClusterHelmHistoryRequest = z.infer<typeof ClusterHelmHistoryRequestSchema>;

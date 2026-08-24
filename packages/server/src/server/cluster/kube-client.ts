@@ -7,6 +7,7 @@ import {
   ApiextensionsV1Api,
   Metrics,
   Log,
+  Exec,
   loadYaml,
   dumpYaml,
   PatchStrategy,
@@ -181,6 +182,51 @@ export class KubeClient {
     return () => {
       controller.abort();
       stream.destroy();
+    };
+  }
+
+  async execInPod(
+    namespace: string,
+    pod: string,
+    container: string | undefined,
+    command: string[],
+    onData: (text: string) => void,
+  ): Promise<{ write: (data: string) => void; close: () => void }> {
+    this.ensureConnected();
+    const cmd = command.length > 0 ? command : ["/bin/sh"];
+
+    const stdoutStream = new PassThrough();
+    const stderrStream = new PassThrough();
+    const stdinStream = new PassThrough();
+
+    const exec = new Exec(this.kc!);
+    let ws: import("ws").WebSocket | null = null;
+
+    const dataHandler = (d: Buffer) => onData(d.toString());
+    stdoutStream.on("data", dataHandler);
+    stderrStream.on("data", dataHandler);
+
+    ws = await exec.exec(
+      namespace,
+      pod,
+      container ?? "",
+      cmd,
+      stdoutStream,
+      stderrStream,
+      stdinStream,
+      true, // tty
+    );
+
+    return {
+      write(data: string): void {
+        stdinStream.write(data);
+      },
+      close(): void {
+        ws?.close();
+        stdinStream.destroy();
+        stdoutStream.destroy();
+        stderrStream.destroy();
+      },
     };
   }
 

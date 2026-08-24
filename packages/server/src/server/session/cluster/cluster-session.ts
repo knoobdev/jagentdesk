@@ -26,6 +26,10 @@ export class ClusterSession {
   private readonly clusterRegistry: ClusterRegistry;
   private readonly logger: pino.Logger;
   private readonly logSubscriptions = new Map<string, () => void>();
+  private readonly execSessions = new Map<
+    string,
+    { write: (d: string) => void; close: () => void }
+  >();
 
   constructor(options: ClusterSessionOptions) {
     this.host = options.host;
@@ -42,6 +46,14 @@ export class ClusterSession {
       }
     }
     this.logSubscriptions.clear();
+    for (const exec of this.execSessions.values()) {
+      try {
+        exec.close();
+      } catch {
+        // best-effort teardown
+      }
+    }
+    this.execSessions.clear();
   }
 
   private emitClusterRpcError(request: { requestId: string; type: string }, error: unknown): void {
@@ -584,5 +596,69 @@ export class ClusterSession {
     } catch (error) {
       this.emitClusterRpcError(request, error);
     }
+  }
+
+  async handleExecStart(
+    request: Record<string, unknown> & { type: "cluster/exec/start" },
+  ): Promise<void> {
+    try {
+      const client = this.clusterRegistry.getClient(request.id as string);
+      if (!client) {
+        throw new Error(`cluster not connected: ${request.id}`);
+      }
+      const { write, close } = await client.execInPod(
+        request.namespace as string,
+        request.pod as string,
+        request.container as string | undefined,
+        (request.command as string[]) ?? [],
+        (data: string) => {
+          this.host.emit({
+            type: "cluster/exec/data",
+            execId: request.execId,
+            data,
+          } as unknown as SessionOutboundMessage);
+        },
+      );
+      this.execSessions.set(request.execId as string, { write, close });
+      this.host.emit({
+        type: "cluster/exec/start/response",
+        payload: {
+          requestId: request.requestId,
+          execId: request.execId,
+          error: null,
+        },
+      } as unknown as SessionOutboundMessage);
+    } catch (error) {
+      this.emitClusterRpcError(
+        request as unknown as Parameters<typeof this.emitClusterRpcError>[0],
+        error,
+      );
+    }
+  }
+
+  async handleExecStdin(
+    request: Record<string, unknown> & { type: "cluster/exec/stdin" },
+  ): Promise<void> {
+    const session = this.execSessions.get(request.execId as string);
+    if (session) {
+      session.write(request.data as string);
+    }
+  }
+
+  async handleExecClose(
+    request: Record<string, unknown> & { type: "cluster/exec/close" },
+  ): Promise<void> {
+    const session = this.execSessions.get(request.execId as string);
+    if (session) {
+      session.close();
+      this.execSessions.delete(request.execId as string);
+    }
+    this.host.emit({
+      type: "cluster/exec/close/response",
+      payload: {
+        requestId: request.requestId,
+        ok: true,
+      },
+    } as unknown as SessionOutboundMessage);
   }
 }

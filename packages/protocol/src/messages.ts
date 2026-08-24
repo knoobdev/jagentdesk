@@ -110,6 +110,12 @@ import {
   ClusterHelmRollbackResponseSchema,
   ClusterHelmUninstallRequestSchema,
   ClusterHelmUninstallResponseSchema,
+  ClusterExecStartRequestSchema,
+  ClusterExecStartResponseSchema,
+  ClusterExecStdinRequestSchema,
+  ClusterExecDataSchema,
+  ClusterExecCloseRequestSchema,
+  ClusterExecCloseResponseSchema,
 } from "./cluster/rpc-schemas.js";
 import {
   BrowserAutomationExecuteRequestSchema,
@@ -2831,6 +2837,9 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ClusterHelmValuesRequestSchema,
   ClusterHelmRollbackRequestSchema,
   ClusterHelmUninstallRequestSchema,
+  ClusterExecStartRequestSchema,
+  ClusterExecStdinRequestSchema,
+  ClusterExecCloseRequestSchema,
 ]);
 
 export type SessionInboundMessage = z.infer<typeof SessionInboundMessageSchema>;
@@ -5721,6 +5730,9 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ClusterHelmValuesResponseSchema,
   ClusterHelmRollbackResponseSchema,
   ClusterHelmUninstallResponseSchema,
+  ClusterExecStartResponseSchema,
+  ClusterExecDataSchema,
+  ClusterExecCloseResponseSchema,
   DaemonUpdateProgressMessageSchema,
   DaemonUpdateResponseSchema,
 ]);
