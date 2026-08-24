@@ -18,6 +18,34 @@ interface ClusterResourceDetailProps {
 const WORKLOAD_KINDS = new Set(["Deployment", "DaemonSet", "StatefulSet", "ReplicaSet"]);
 const RESTARTABLE_KINDS = new Set(["Deployment", "DaemonSet", "StatefulSet"]);
 
+function parseContainersFromYaml(yaml: string): string[] {
+  const containers: string[] = [];
+  const lines = yaml.split("\n");
+  let inContainers = false;
+  let containersIndent = 0;
+
+  for (const line of lines) {
+    const trimmed = line.trimStart();
+    if (!inContainers) {
+      if (trimmed === "containers:") {
+        inContainers = true;
+        containersIndent = line.length - trimmed.length;
+      }
+    } else {
+      const indent = line.length - trimmed.length;
+      if (indent <= containersIndent && trimmed.length > 0 && !trimmed.startsWith("#")) {
+        break;
+      }
+      const nameMatch = trimmed.match(/^-\s+name:\s+(\S+)/);
+      if (nameMatch) {
+        containers.push(nameMatch[1]);
+      }
+    }
+  }
+
+  return containers;
+}
+
 export function ClusterResourceDetail({
   serverId,
   clusterId,
@@ -43,8 +71,17 @@ export function ClusterResourceDetail({
   const [applying, setApplying] = useState(false);
   const [editedYamlResetKey, setEditedYamlResetKey] = useState(0);
 
+  // Logs state
+  const [showLogs, setShowLogs] = useState(false);
+  const [logs, setLogs] = useState<string | null>(null);
+  const [logLoading, setLogLoading] = useState(false);
+  const [logError, setLogError] = useState<string | null>(null);
+  const [containers, setContainers] = useState<string[]>([]);
+  const [selectedContainer, setSelectedContainer] = useState<string | null>(null);
+
   const isWorkload = WORKLOAD_KINDS.has(kind);
   const canRestart = RESTARTABLE_KINDS.has(kind);
+  const isPod = kind.toLowerCase() === "pod";
 
   useEffect(() => {
     if (!client) {
@@ -75,6 +112,68 @@ export function ClusterResourceDetail({
       })
       .finally(() => setLoading(false));
   }, [client, clusterId, kind, namespace, name]);
+
+  // Parse containers from YAML when it loads for Pods
+  useEffect(() => {
+    if (yaml && isPod) {
+      setContainers(parseContainersFromYaml(yaml));
+    }
+  }, [yaml, isPod]);
+
+  const fetchLogs = useCallback(
+    async (container: string | null) => {
+      if (!client || !namespace) {
+        setLogError("No namespace available");
+        setLogLoading(false);
+        return;
+      }
+      setLogLoading(true);
+      setLogError(null);
+      setLogs(null);
+      try {
+        const res = await client.clusterLogs({
+          id: clusterId,
+          namespace,
+          pod: name,
+          ...(container ? { container } : {}),
+        });
+        if (res.error) {
+          setLogError(res.error);
+        } else {
+          setLogs(res.logs);
+        }
+      } catch (e: unknown) {
+        setLogError(e instanceof Error ? e.message : "Failed to fetch logs");
+      } finally {
+        setLogLoading(false);
+      }
+    },
+    [client, clusterId, namespace, name],
+  );
+
+  const handleToggleLogs = useCallback(() => {
+    const next = !showLogs;
+    setShowLogs(next);
+    if (next) {
+      setEditing(false);
+      fetchLogs(selectedContainer);
+    }
+  }, [showLogs, fetchLogs, selectedContainer]);
+
+  const handleRefreshLogs = useCallback(() => {
+    fetchLogs(selectedContainer);
+  }, [fetchLogs, selectedContainer]);
+
+  const handleSelectContainer = useCallback(
+    (container: string) => {
+      const next = selectedContainer === container ? null : container;
+      setSelectedContainer(next);
+      if (showLogs) {
+        fetchLogs(next);
+      }
+    },
+    [selectedContainer, showLogs, fetchLogs],
+  );
 
   const handleDelete = useCallback(() => {
     if (!deletingConfirm) {
@@ -234,6 +333,7 @@ export function ClusterResourceDetail({
   const handleToggleEdit = useCallback(() => {
     setEditing((e) => !e);
     setDeletingConfirm(false);
+    setShowLogs(false);
   }, []);
 
   const yamlBody = useMemo(() => {
@@ -291,6 +391,44 @@ export function ClusterResourceDetail({
     );
   }, [loading, error, yaml, editing, editedYaml, editedYamlResetKey, handleApply, applying]);
 
+  const logsBody = useMemo(() => {
+    if (logLoading) {
+      return (
+        <View style={styles.centerContainer}>
+          <Text style={styles.loadingText}>Loading logs...</Text>
+        </View>
+      );
+    }
+    if (logError) {
+      return (
+        <View style={styles.centerContainer}>
+          <Text style={styles.errorText}>{logError}</Text>
+        </View>
+      );
+    }
+    if (logs === null) {
+      return (
+        <View style={styles.centerContainer}>
+          <Text style={styles.emptyText}>No logs available</Text>
+        </View>
+      );
+    }
+    if (logs === "") {
+      return (
+        <View style={styles.centerContainer}>
+          <Text style={styles.emptyText}>No logs</Text>
+        </View>
+      );
+    }
+    return (
+      <ScrollView style={styles.logsScroll} nestedScrollEnabled>
+        <Text style={styles.logsText} selectable>
+          {logs}
+        </Text>
+      </ScrollView>
+    );
+  }, [logLoading, logError, logs]);
+
   const deleteButtonLabel = useMemo(() => {
     if (deleting) return "Deleting...";
     if (deletingConfirm) return "Confirm delete?";
@@ -310,6 +448,11 @@ export function ClusterResourceDetail({
       {/* Action bar */}
       <View style={styles.actionBar}>
         <View style={styles.actionBarLeft}>
+          {isPod ? (
+            <Pressable style={styles.actionButton} onPress={handleToggleLogs} disabled={logLoading}>
+              <Text style={styles.actionButtonText}>{showLogs ? "YAML" : "Logs"}</Text>
+            </Pressable>
+          ) : null}
           {canRestart ? (
             <Pressable style={styles.actionButton} onPress={handleRestart} disabled={restarting}>
               <Text style={styles.actionButtonText}>
@@ -359,11 +502,54 @@ export function ClusterResourceDetail({
         </View>
       ) : null}
 
-      {/* YAML body */}
-      <View style={styles.yamlContainer}>
-        <Text style={styles.yamlSectionLabel}>{editing ? "Edit YAML" : "YAML"}</Text>
-        {yamlBody}
-      </View>
+      {showLogs ? (
+        <View style={styles.logsContainer}>
+          <View style={styles.logsHeader}>
+            <Text style={styles.yamlSectionLabel}>Logs</Text>
+            <View style={styles.logsHeaderRight}>
+              {containers.length > 1 ? (
+                <View style={styles.containerSelector}>
+                  {containers.map((c) => (
+                    <Pressable
+                      key={c}
+                      style={[
+                        styles.containerChip,
+                        selectedContainer === c && styles.containerChipActive,
+                      ]}
+                      // eslint-disable-next-line react-perf/jsx-no-new-function-as-prop
+                      onPress={() => handleSelectContainer(c)}
+                    >
+                      <Text
+                        style={[
+                          styles.containerChipText,
+                          selectedContainer === c && styles.containerChipTextActive,
+                        ]}
+                      >
+                        {c}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              ) : null}
+              <Pressable
+                style={styles.refreshButton}
+                onPress={handleRefreshLogs}
+                disabled={logLoading}
+              >
+                <Text style={styles.refreshButtonText}>
+                  {logLoading ? "Loading..." : "Refresh"}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+          {logsBody}
+        </View>
+      ) : (
+        <View style={styles.yamlContainer}>
+          <Text style={styles.yamlSectionLabel}>{editing ? "Edit YAML" : "YAML"}</Text>
+          {yamlBody}
+        </View>
+      )}
 
       {/* Message */}
       {message ? (
@@ -522,6 +708,73 @@ const styles = StyleSheet.create((theme: Theme) => ({
     fontSize: theme.fontSize.sm,
     fontWeight: theme.fontWeight.medium,
     color: theme.colors.accentForeground,
+  },
+  logsContainer: {
+    flex: 1,
+    minHeight: 200,
+    paddingTop: theme.spacing[3],
+  },
+  logsHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: theme.spacing[2],
+  },
+  logsHeaderRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+  },
+  logsScroll: {
+    flex: 1,
+    minHeight: 160,
+    backgroundColor: theme.colors.surface0,
+    borderRadius: theme.borderRadius.md,
+    padding: theme.spacing[3],
+  },
+  logsText: {
+    fontFamily: theme.fontFamily.mono,
+    fontSize: theme.fontSize.code,
+    color: theme.colors.foregroundMuted,
+    lineHeight: 20,
+    flexWrap: "wrap",
+  },
+  containerSelector: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[1],
+  },
+  containerChip: {
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
+    borderRadius: theme.borderRadius.sm,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+  },
+  containerChipActive: {
+    backgroundColor: theme.colors.accent,
+    borderColor: theme.colors.accent,
+  },
+  containerChipText: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+  },
+  containerChipTextActive: {
+    color: theme.colors.accentForeground,
+  },
+  refreshButton: {
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
+    borderRadius: theme.borderRadius.md,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+  },
+  refreshButtonText: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foreground,
   },
   centerContainer: {
     flex: 1,
