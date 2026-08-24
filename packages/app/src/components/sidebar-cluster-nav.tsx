@@ -9,6 +9,7 @@ import { KindIcon } from "@/components/cluster-kind-icon";
 import { ClusterNamespaceSelector } from "@/components/cluster-namespace-selector";
 import { ClusterStatusDot } from "@/components/cluster-dot";
 import { useClusterNavStore } from "@/stores/cluster-nav-store";
+import { useClusterViewStore } from "@/stores/cluster-view-store";
 import { buildClustersRoute } from "@/utils/host-routes";
 import type { Theme } from "@/styles/theme";
 
@@ -97,6 +98,7 @@ export function SidebarClusterNav({
   const selectHelm = useClusterNavStore((s) => s.selectHelm);
   const setNamespace = useClusterNavStore((s) => s.setNamespace);
   const ensureCluster = useClusterNavStore((s) => s.ensureCluster);
+  const showList = useClusterViewStore((s) => s.setActive);
 
   useEffect(() => {
     ensureCluster(clusterId);
@@ -123,10 +125,16 @@ export function SidebarClusterNav({
   const grouped = useMemo(() => groupByCategory(kinds), [kinds]);
 
   const handleSelectKind = useCallback(
-    (kind: string) => selectKind(clusterId, kind),
-    [clusterId, selectKind],
+    (kind: string) => {
+      selectKind(clusterId, kind);
+      showList(null); // switching kind returns to the list view
+    },
+    [clusterId, selectKind, showList],
   );
-  const handleSelectHelm = useCallback(() => selectHelm(clusterId), [clusterId, selectHelm]);
+  const handleSelectHelm = useCallback(() => {
+    selectHelm(clusterId);
+    showList(null);
+  }, [clusterId, selectHelm, showList]);
   const handleBack = useCallback(() => {
     router.replace(buildClustersRoute(serverId));
   }, [serverId]);
