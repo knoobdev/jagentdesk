@@ -17,8 +17,10 @@ interface ClusterChatState {
   openChat: (input: { clusterId: string; agentId: string; workspaceId: string | null }) => void;
   /** Hide the dock but keep the agentId so it can be reopened. */
   hideChat: () => void;
-  /** Reveal a previously created agent's dock. */
+  /** Reveal the dock (works before any agent exists — shows the entry composer). */
   showChat: () => void;
+  /** Open/collapse the dock. */
+  setOpen: (open: boolean) => void;
   /** Fully reset when leaving the cluster or switching clusters. */
   resetForCluster: (clusterId: string) => void;
   setWidth: (width: number) => void;
@@ -32,17 +34,18 @@ export const useClusterChatStore = create<ClusterChatState>((set, get) => ({
   clusterId: null,
   agentId: null,
   workspaceId: null,
-  open: false,
+  // The chat sidebar is visible by default so the composer is always right
+  // there; collapsing it (X) is opt-in and reopens from the slim handle.
+  open: true,
   width: DEFAULT_WIDTH,
   openChat: ({ clusterId, agentId, workspaceId }) =>
     set({ clusterId, agentId, workspaceId, open: true }),
   hideChat: () => set({ open: false }),
-  showChat: () => {
-    if (get().agentId) set({ open: true });
-  },
+  showChat: () => set({ open: true }),
+  setOpen: (open) => set({ open }),
   resetForCluster: (clusterId) => {
     if (get().clusterId !== clusterId) {
-      set({ clusterId, agentId: null, workspaceId: null, open: false });
+      set({ clusterId, agentId: null, workspaceId: null, open: true });
     }
   },
   setWidth: (width) =>

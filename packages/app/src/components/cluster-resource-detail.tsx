@@ -7,8 +7,9 @@ import { AdaptiveTextInput } from "@/components/adaptive-modal-sheet";
 import { ClusterSecretReveal } from "./cluster-secret-reveal";
 import { ClusterNodeOps } from "./cluster-node-ops";
 import { ClusterCronjobOps } from "./cluster-cronjob-ops";
-import { ClusterComposer } from "./cluster-composer";
 import { ClusterPodShell } from "./cluster-pod-shell";
+import { HighlightedLines } from "@/components/highlighted-content";
+import { highlightToKeyedLines } from "@/utils/highlight-cache";
 import type { Theme } from "@/styles/theme";
 
 const ThemedX = withUnistyles(X);
@@ -530,11 +531,22 @@ export function ClusterResourceDetail({
         </View>
       );
     }
+    const keyedLines = highlightToKeyedLines(yaml, "yaml");
     return (
       <ScrollView style={styles.yamlScroll} nestedScrollEnabled>
-        <Text style={styles.yamlText} selectable>
-          {yaml}
-        </Text>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator
+          contentContainerStyle={styles.yamlInner}
+        >
+          {keyedLines ? (
+            <HighlightedLines lines={keyedLines} startLine={1} />
+          ) : (
+            <Text style={styles.yamlText} selectable>
+              {yaml}
+            </Text>
+          )}
+        </ScrollView>
       </ScrollView>
     );
   }, [loading, error, yaml, editing, editedYaml, editedYamlResetKey, handleApply, applying]);
@@ -582,13 +594,6 @@ export function ClusterResourceDetail({
     if (deletingConfirm) return "Confirm delete?";
     return "Delete";
   }, [deleting, deletingConfirm]);
-
-  // The user types their own question; whatever they're viewing (this resource,
-  // and the logs if shown) rides along as context.
-  const chatResource = useMemo(
-    () => ({ kind, namespace, name, yaml, logs: showLogs ? logs : null }),
-    [kind, namespace, name, yaml, showLogs, logs],
-  );
 
   return (
     <View style={styles.inlineRoot}>
@@ -657,12 +662,6 @@ export function ClusterResourceDetail({
         setPfPodPort={setPfPodPort}
         handlePortForward={handlePortForward}
         handleStopPortForward={handleStopPortForward}
-      />
-      <ClusterComposer
-        serverId={serverId}
-        clusterId={clusterId}
-        clusterName={kind}
-        resource={chatResource}
       />
     </View>
   );
@@ -1284,7 +1283,10 @@ const styles = StyleSheet.create((theme: Theme) => ({
     minHeight: 160,
     backgroundColor: theme.colors.surface1,
     borderRadius: theme.borderRadius.md,
+  },
+  yamlInner: {
     padding: theme.spacing[3],
+    minWidth: "100%",
   },
   yamlText: {
     fontFamily: theme.fontFamily.mono,

@@ -8,7 +8,7 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import { Gesture } from "react-native-gesture-handler";
-import { X } from "lucide-react-native";
+import { MessageSquare, X } from "lucide-react-native";
 import { AgentConversationPanel } from "@/panels/agent-panel";
 import {
   PaneProvider,
@@ -16,6 +16,7 @@ import {
   createPaneFocusContextValue,
   type PaneContextValue,
 } from "@/panels/pane-context";
+import { ClusterComposer, type ClusterComposerResource } from "@/components/cluster-composer";
 import { SidebarResizeHandle } from "@/components/sidebar-resize-handle";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import {
@@ -26,29 +27,35 @@ import {
 import type { Theme } from "@/styles/theme";
 
 const ThemedX = withUnistyles(X);
+const ThemedMessageSquare = withUnistyles(MessageSquare);
 const mutedColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 const noop = () => {};
 
 /**
- * A slide-in chat dock pinned to the right of the cluster/workloads view. It
- * embeds the real agent conversation + composer (AgentPanelContent) so the
- * experience matches the agent tab, while the k8s resources stay mounted on the
- * left. Toggling the dock never leaves the cluster route. On phones it expands
- * to the full width (chat takes over); on desktop it splits beside the table
- * and can be resized.
+ * The chat surface for the cluster view — the ONLY place chat lives. It is a
+ * right sidebar: collapsed to a slim handle by default, expanding into a panel
+ * that holds either the entry composer (type your first question) or the real
+ * agent conversation + composer once a chat exists. The k8s content stays on the
+ * left the whole time; opening/closing never leaves the cluster route. Whatever
+ * the user is viewing (`resource`) rides along as context on the first message.
  */
 export function ClusterChatDock({
   serverId,
+  clusterId,
   clusterName,
+  resource,
 }: {
   serverId: string;
+  clusterId: string;
   clusterName: string;
+  resource?: ClusterComposerResource;
 }) {
   const open = useClusterChatStore((s) => s.open);
   const agentId = useClusterChatStore((s) => s.agentId);
   const workspaceId = useClusterChatStore((s) => s.workspaceId);
   const width = useClusterChatStore((s) => s.width);
   const hideChat = useClusterChatStore((s) => s.hideChat);
+  const showChat = useClusterChatStore((s) => s.showChat);
   const setWidth = useClusterChatStore((s) => s.setWidth);
 
   const isCompact = useIsCompactFormFactor();
@@ -86,6 +93,7 @@ export function ClusterChatDock({
   );
 
   const handleClose = useCallback(() => hideChat(), [hideChat]);
+  const handleOpen = useCallback(() => showChat(), [showChat]);
   const innerStyle = useMemo(() => [styles.inner, { width: target }], [target]);
 
   // AgentConversationPanel + Composer read their target/serverId/workspace from
@@ -109,7 +117,13 @@ export function ClusterChatDock({
     [],
   );
 
-  if (!agentId) return null;
+  if (!open) {
+    return (
+      <Pressable style={styles.handle} onPress={handleOpen} accessibilityLabel="Open chat">
+        <ThemedMessageSquare size={18} uniProps={mutedColor} />
+      </Pressable>
+    );
+  }
 
   return (
     <Animated.View style={[styles.dock, animStyle]}>
@@ -118,24 +132,37 @@ export function ClusterChatDock({
       )}
       <View style={innerStyle}>
         <View style={styles.header}>
+          <ThemedMessageSquare size={15} uniProps={mutedColor} />
           <Text style={styles.headerTitle} numberOfLines={1}>
-            {clusterName}
+            {agentId ? clusterName : `Ask about ${clusterName}`}
           </Text>
           <Pressable
             style={styles.closeBtn}
             onPress={handleClose}
-            accessibilityLabel="Hide chat"
+            accessibilityLabel="Collapse chat"
             hitSlop={8}
           >
             <ThemedX size={16} uniProps={mutedColor} />
           </Pressable>
         </View>
         <View style={styles.body}>
-          <PaneProvider value={paneValue}>
-            <PaneFocusProvider value={focusValue}>
-              <AgentConversationPanel />
-            </PaneFocusProvider>
-          </PaneProvider>
+          {agentId ? (
+            <PaneProvider value={paneValue}>
+              <PaneFocusProvider value={focusValue}>
+                <AgentConversationPanel />
+              </PaneFocusProvider>
+            </PaneProvider>
+          ) : (
+            <View style={styles.entry}>
+              <View style={styles.entrySpacer} />
+              <ClusterComposer
+                serverId={serverId}
+                clusterId={clusterId}
+                clusterName={clusterName}
+                resource={resource}
+              />
+            </View>
+          )}
         </View>
       </View>
     </Animated.View>
@@ -143,6 +170,15 @@ export function ClusterChatDock({
 }
 
 const styles = StyleSheet.create((theme: Theme) => ({
+  handle: {
+    width: 48,
+    height: "100%",
+    alignItems: "center",
+    paddingTop: theme.spacing[3],
+    borderLeftWidth: theme.borderWidth[1],
+    borderLeftColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+  },
   dock: {
     height: "100%",
     overflow: "hidden",
@@ -181,5 +217,12 @@ const styles = StyleSheet.create((theme: Theme) => ({
   body: {
     flex: 1,
     minHeight: 0,
+  },
+  entry: {
+    flex: 1,
+    minHeight: 0,
+  },
+  entrySpacer: {
+    flex: 1,
   },
 }));

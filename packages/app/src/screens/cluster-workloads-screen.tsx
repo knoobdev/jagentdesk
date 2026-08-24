@@ -1,29 +1,25 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Pressable, Text, View } from "react-native";
-import { StyleSheet, withUnistyles } from "react-native-unistyles";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { View } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { MessageSquare } from "lucide-react-native";
 import type { ClusterInfo } from "@jagentdesk/protocol/cluster/rpc-schemas";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { ClusterResourceBrowser } from "@/components/cluster-resource-browser";
 import { ClusterResourceDetail } from "@/components/cluster-resource-detail";
 import { ClusterTabBar } from "@/components/cluster-tab-bar";
-import { ClusterComposer } from "@/components/cluster-composer";
 import { ClusterChatDock } from "@/components/cluster-chat-dock";
+import type { ClusterComposerResource } from "@/components/cluster-composer";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useClusterChatStore } from "@/stores/cluster-chat-store";
 import { useClusterNavStore } from "@/stores/cluster-nav-store";
 import { useClusterViewStore } from "@/stores/cluster-view-store";
 import type { Theme } from "@/styles/theme";
 
-const ThemedMessageSquare = withUnistyles(MessageSquare);
-const accentColor = (theme: Theme) => ({ color: theme.colors.accent });
-
 /**
  * The content pane for a connected cluster. The category navigation lives in the
- * app left sidebar (SidebarClusterNav). This screen shows the resource table on
- * the left and — when the user chats — a slide-in agent dock on the right, so
- * the k8s resources stay on screen instead of navigating away to an agent tab.
+ * app left sidebar (SidebarClusterNav). The resource list + detail tabs stay on
+ * the left; chat lives entirely in the right dock (ClusterChatDock), which
+ * carries whatever the user is currently viewing as context.
  */
 export function ClusterWorkloadsScreen({
   serverId,
@@ -37,9 +33,6 @@ export function ClusterWorkloadsScreen({
   const insets = useSafeAreaInsets();
   const isCompact = useIsCompactFormFactor();
 
-  const chatOpen = useClusterChatStore((s) => s.open);
-  const chatAgentId = useClusterChatStore((s) => s.agentId);
-  const showChat = useClusterChatStore((s) => s.showChat);
   const resetForCluster = useClusterChatStore((s) => s.resetForCluster);
 
   // Content tabs: the resource list plus any open detail views.
@@ -50,12 +43,16 @@ export function ClusterWorkloadsScreen({
   const resetViewForCluster = useClusterViewStore((s) => s.resetForCluster);
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null;
 
-  // What the user is currently browsing, attached as context to their question.
+  // Whatever the user is currently viewing rides along to the chat as context:
+  // the open detail resource, otherwise the selected kind + namespace.
   const selectedKind = useClusterNavStore((s) => s.selectedKind);
   const selectedNamespace = useClusterNavStore((s) => s.selectedNamespace);
-  const composerResource = useMemo(
-    () => ({ kind: selectedKind, namespace: selectedNamespace }),
-    [selectedKind, selectedNamespace],
+  const composerResource = useMemo<ClusterComposerResource>(
+    () =>
+      activeTab
+        ? { kind: activeTab.kind, namespace: activeTab.namespace, name: activeTab.name }
+        : { kind: selectedKind, namespace: selectedNamespace },
+    [activeTab, selectedKind, selectedNamespace],
   );
 
   useEffect(() => {
@@ -83,32 +80,9 @@ export function ClusterWorkloadsScreen({
   }, [client, clusterId]);
 
   const clusterName = cluster?.displayName ?? cluster?.contextName ?? "this cluster";
-  const handleShowChat = useCallback(() => showChat(), [showChat]);
   const handleDetailClose = useCallback(() => {
     if (activeTab) closeTab(activeTab.id);
   }, [activeTab, closeTab]);
-
-  // Bottom slot under the table: hidden while the dock is open (the dock owns
-  // the composer), a "Show chat" toggle when a hidden chat exists, otherwise the
-  // entry composer that starts a chat.
-  let bottomSlot: ReactNode = (
-    <ClusterComposer
-      serverId={serverId}
-      clusterId={clusterId}
-      clusterName={clusterName}
-      resource={composerResource}
-    />
-  );
-  if (chatOpen) {
-    bottomSlot = null;
-  } else if (chatAgentId) {
-    bottomSlot = (
-      <Pressable style={styles.showChatBar} onPress={handleShowChat}>
-        <ThemedMessageSquare size={16} uniProps={accentColor} />
-        <Text style={styles.showChatText}>Show chat</Text>
-      </Pressable>
-    );
-  }
 
   return (
     <View style={containerStyle}>
@@ -126,15 +100,17 @@ export function ClusterWorkloadsScreen({
               onChanged={bumpRefresh}
             />
           ) : (
-            <>
-              <View style={styles.body}>
-                <ClusterResourceBrowser serverId={serverId} clusterId={clusterId} />
-              </View>
-              {bottomSlot}
-            </>
+            <View style={styles.body}>
+              <ClusterResourceBrowser serverId={serverId} clusterId={clusterId} />
+            </View>
           )}
         </View>
-        <ClusterChatDock serverId={serverId} clusterName={clusterName} />
+        <ClusterChatDock
+          serverId={serverId}
+          clusterId={clusterId}
+          clusterName={clusterName}
+          resource={composerResource}
+        />
       </View>
     </View>
   );
@@ -158,19 +134,5 @@ const styles = StyleSheet.create((theme: Theme) => ({
   body: {
     flex: 1,
     minHeight: 0,
-  },
-  showChatBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: theme.spacing[2],
-    paddingVertical: theme.spacing[3],
-    borderTopWidth: theme.borderWidth[1],
-    borderTopColor: theme.colors.border,
-  },
-  showChatText: {
-    fontSize: theme.fontSize.sm,
-    fontWeight: theme.fontWeight.medium,
-    color: theme.colors.accent,
   },
 }));
