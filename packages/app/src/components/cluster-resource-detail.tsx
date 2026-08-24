@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
-import { StyleSheet } from "react-native-unistyles";
+import { StyleSheet, withUnistyles } from "react-native-unistyles";
+import { X } from "lucide-react-native";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
-import { AdaptiveModalSheet, AdaptiveTextInput } from "@/components/adaptive-modal-sheet";
+import { AdaptiveTextInput } from "@/components/adaptive-modal-sheet";
 import { ClusterSecretReveal } from "./cluster-secret-reveal";
 import { ClusterNodeOps } from "./cluster-node-ops";
 import { ClusterCronjobOps } from "./cluster-cronjob-ops";
 import { ClusterComposer } from "./cluster-composer";
 import { ClusterPodShell } from "./cluster-pod-shell";
 import type { Theme } from "@/styles/theme";
+
+const ThemedX = withUnistyles(X);
+const closeIconColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 
 interface ClusterResourceDetailProps {
   serverId: string;
@@ -579,14 +583,6 @@ export function ClusterResourceDetail({
     return "Delete";
   }, [deleting, deletingConfirm]);
 
-  const header = useMemo(
-    () => ({
-      title: name,
-      subtitle: `${kind}${namespace ? ` · ${namespace}` : " · cluster-scoped"}`,
-    }),
-    [kind, name, namespace],
-  );
-
   // The user types their own question; whatever they're viewing (this resource,
   // and the logs if shown) rides along as context.
   const chatResource = useMemo(
@@ -595,7 +591,26 @@ export function ClusterResourceDetail({
   );
 
   return (
-    <AdaptiveModalSheet header={header} visible onClose={onClose} scrollable={false}>
+    <View style={styles.inlineRoot}>
+      <View style={styles.inlineHeader}>
+        <View style={styles.inlineHeaderText}>
+          <Text style={styles.inlineTitle} numberOfLines={1}>
+            {name}
+          </Text>
+          <Text style={styles.inlineSubtitle} numberOfLines={1}>
+            {kind}
+            {namespace ? ` · ${namespace}` : " · cluster-scoped"}
+          </Text>
+        </View>
+        <Pressable
+          style={styles.inlineClose}
+          onPress={onClose}
+          accessibilityLabel="Close"
+          hitSlop={8}
+        >
+          <ThemedX size={16} uniProps={closeIconColor} />
+        </Pressable>
+      </View>
       <ResourceDetailBody
         isPod={isPod}
         isSecret={isSecret}
@@ -648,9 +663,8 @@ export function ClusterResourceDetail({
         clusterId={clusterId}
         clusterName={kind}
         resource={chatResource}
-        onSent={onClose}
       />
-    </AdaptiveModalSheet>
+    </View>
   );
 }
 
@@ -1121,6 +1135,40 @@ function ResourceDetailBody({
 }
 
 const styles = StyleSheet.create((theme: Theme) => ({
+  inlineRoot: {
+    flex: 1,
+    minHeight: 0,
+    backgroundColor: theme.colors.surface0,
+  },
+  inlineHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+  },
+  inlineHeaderText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  inlineTitle: {
+    fontSize: theme.fontSize.base,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.foreground,
+  },
+  inlineSubtitle: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+  },
+  inlineClose: {
+    width: 28,
+    height: 28,
+    borderRadius: theme.borderRadius.md,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   actionBar: {
     flexDirection: "row",
     alignItems: "center",

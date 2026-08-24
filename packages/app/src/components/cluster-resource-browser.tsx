@@ -2,10 +2,10 @@ import { useCallback, useEffect, useMemo, useState, type ReactElement } from "re
 import { FlatList, Pressable, Text, View, type ListRenderItem } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
-import { ClusterResourceDetail } from "@/components/cluster-resource-detail";
 import { ClusterHelmView } from "@/components/cluster-helm-view";
 import { ClusterStatusDot, PodStatusDot } from "@/components/cluster-dot";
 import { useClusterNavStore } from "@/stores/cluster-nav-store";
+import { useClusterViewStore } from "@/stores/cluster-view-store";
 import type { Theme } from "@/styles/theme";
 
 interface KindInfo {
@@ -93,11 +93,8 @@ export function ClusterResourceBrowser({
   const [loadingItems, setLoadingItems] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [metricsMap, setMetricsMap] = useState<Record<string, MetricsEntry>>({});
-  const [selectedResource, setSelectedResource] = useState<{
-    kind: string;
-    namespace: string;
-    name: string;
-  } | null>(null);
+  const openDetail = useClusterViewStore((s) => s.openDetail);
+  const listRefreshKey = useClusterViewStore((s) => s.listRefreshKey);
 
   useEffect(() => {
     if (!client) return;
@@ -176,19 +173,28 @@ export function ClusterResourceBrowser({
 
   const handleResourcePress = useCallback(
     (item: ResourceItem) => () => {
-      setSelectedResource({
+      openDetail(clusterId, {
         kind: selectedKind ?? "",
-        namespace: item.namespace ?? "",
+        namespace: item.namespace || undefined,
         name: item.name,
       });
     },
-    [selectedKind],
+    [openDetail, clusterId, selectedKind],
   );
 
-  const handleDetailClose = useCallback(() => setSelectedResource(null), []);
-  const handleDetailChanged = useCallback(() => {
-    if (client && selectedKind) loadResources(selectedKind, selectedNamespace, isNamespaced);
-  }, [client, selectedKind, selectedNamespace, isNamespaced, loadResources]);
+  // Reload the list when a detail tab mutates a resource (delete/apply/scale).
+  useEffect(() => {
+    if (listRefreshKey === 0 || !client || showingHelm || !selectedKind) return;
+    loadResources(selectedKind, selectedNamespace, isNamespaced);
+  }, [
+    listRefreshKey,
+    client,
+    showingHelm,
+    selectedKind,
+    selectedNamespace,
+    isNamespaced,
+    loadResources,
+  ]);
 
   const renderResourceItem: ListRenderItem<ResourceItem> = useCallback(
     ({ item }) => {
@@ -309,22 +315,7 @@ export function ClusterResourceBrowser({
     );
   }
 
-  return (
-    <View style={styles.container}>
-      {content}
-      {selectedResource ? (
-        <ClusterResourceDetail
-          serverId={serverId}
-          clusterId={clusterId}
-          kind={selectedResource.kind}
-          namespace={selectedResource.namespace || undefined}
-          name={selectedResource.name}
-          onClose={handleDetailClose}
-          onChanged={handleDetailChanged}
-        />
-      ) : null}
-    </View>
-  );
+  return <View style={styles.container}>{content}</View>;
 }
 
 const styles = StyleSheet.create((theme: Theme) => ({

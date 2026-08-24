@@ -6,11 +6,14 @@ import { MessageSquare } from "lucide-react-native";
 import type { ClusterInfo } from "@jagentdesk/protocol/cluster/rpc-schemas";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { ClusterResourceBrowser } from "@/components/cluster-resource-browser";
+import { ClusterResourceDetail } from "@/components/cluster-resource-detail";
+import { ClusterTabBar } from "@/components/cluster-tab-bar";
 import { ClusterComposer } from "@/components/cluster-composer";
 import { ClusterChatDock } from "@/components/cluster-chat-dock";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useClusterChatStore } from "@/stores/cluster-chat-store";
 import { useClusterNavStore } from "@/stores/cluster-nav-store";
+import { useClusterViewStore } from "@/stores/cluster-view-store";
 import type { Theme } from "@/styles/theme";
 
 const ThemedMessageSquare = withUnistyles(MessageSquare);
@@ -39,6 +42,14 @@ export function ClusterWorkloadsScreen({
   const showChat = useClusterChatStore((s) => s.showChat);
   const resetForCluster = useClusterChatStore((s) => s.resetForCluster);
 
+  // Content tabs: the resource list plus any open detail views.
+  const tabs = useClusterViewStore((s) => s.tabs);
+  const activeTabId = useClusterViewStore((s) => s.activeTabId);
+  const closeTab = useClusterViewStore((s) => s.closeTab);
+  const bumpRefresh = useClusterViewStore((s) => s.bumpRefresh);
+  const resetViewForCluster = useClusterViewStore((s) => s.resetForCluster);
+  const activeTab = tabs.find((t) => t.id === activeTabId) ?? null;
+
   // What the user is currently browsing, attached as context to their question.
   const selectedKind = useClusterNavStore((s) => s.selectedKind);
   const selectedNamespace = useClusterNavStore((s) => s.selectedNamespace);
@@ -49,7 +60,8 @@ export function ClusterWorkloadsScreen({
 
   useEffect(() => {
     resetForCluster(clusterId);
-  }, [clusterId, resetForCluster]);
+    resetViewForCluster(clusterId);
+  }, [clusterId, resetForCluster, resetViewForCluster]);
 
   // On phones the host stack has no native header (headerShown: false), so the
   // screen paints under the status bar / notch / camera cutout. Reserve the
@@ -72,6 +84,9 @@ export function ClusterWorkloadsScreen({
 
   const clusterName = cluster?.displayName ?? cluster?.contextName ?? "this cluster";
   const handleShowChat = useCallback(() => showChat(), [showChat]);
+  const handleDetailClose = useCallback(() => {
+    if (activeTab) closeTab(activeTab.id);
+  }, [activeTab, closeTab]);
 
   // Bottom slot under the table: hidden while the dock is open (the dock owns
   // the composer), a "Show chat" toggle when a hidden chat exists, otherwise the
@@ -99,10 +114,25 @@ export function ClusterWorkloadsScreen({
     <View style={containerStyle}>
       <View style={styles.row}>
         <View style={styles.leftColumn}>
-          <View style={styles.body}>
-            <ClusterResourceBrowser serverId={serverId} clusterId={clusterId} />
-          </View>
-          {bottomSlot}
+          <ClusterTabBar />
+          {activeTab ? (
+            <ClusterResourceDetail
+              serverId={serverId}
+              clusterId={clusterId}
+              kind={activeTab.kind}
+              namespace={activeTab.namespace}
+              name={activeTab.name}
+              onClose={handleDetailClose}
+              onChanged={bumpRefresh}
+            />
+          ) : (
+            <>
+              <View style={styles.body}>
+                <ClusterResourceBrowser serverId={serverId} clusterId={clusterId} />
+              </View>
+              {bottomSlot}
+            </>
+          )}
         </View>
         <ClusterChatDock serverId={serverId} clusterName={clusterName} />
       </View>
