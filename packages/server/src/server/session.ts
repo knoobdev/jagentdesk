@@ -2396,6 +2396,8 @@ export class Session {
         return this.clusterSession.handleNodeOpRequest(msg);
       case "cluster/cronjob-op":
         return this.clusterSession.handleCronjobOpRequest(msg);
+      case "cluster/metrics":
+        return this.clusterSession.handleClusterMetrics(msg);
       default:
         return undefined;
     }

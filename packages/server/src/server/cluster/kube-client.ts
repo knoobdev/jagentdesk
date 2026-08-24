@@ -5,6 +5,7 @@ import {
   AppsV1Api,
   KubernetesObjectApi,
   ApiextensionsV1Api,
+  Metrics,
   loadYaml,
   dumpYaml,
   PatchStrategy,
@@ -514,6 +515,54 @@ export class KubeClient {
     }
   }
 
+  async getNodeMetrics(): Promise<Array<{ name: string; cpuNano: number; memoryBytes: number }>> {
+    this.ensureConnected();
+    const metrics = new Metrics(this.kc!);
+    try {
+      const list = await metrics.getNodeMetrics();
+      return list.items.map((item) => ({
+        name: item.metadata.name,
+        cpuNano: parseCpuToNano(item.usage.cpu),
+        memoryBytes: parseMemToBytes(item.usage.memory),
+      }));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("404") || msg.includes("503") || msg.includes("ServiceUnavailable")) {
+        throw new Error("metrics-server not available", { cause: err });
+      }
+      throw err;
+    }
+  }
+
+  async getPodMetrics(
+    namespace?: string,
+  ): Promise<Array<{ name: string; namespace: string; cpuNano: number; memoryBytes: number }>> {
+    this.ensureConnected();
+    const metrics = new Metrics(this.kc!);
+    try {
+      const list = await metrics.getPodMetrics(namespace);
+      return list.items.map((item) => {
+        const totalCpu = item.containers.reduce((sum, c) => sum + parseCpuToNano(c.usage.cpu), 0);
+        const totalMem = item.containers.reduce(
+          (sum, c) => sum + parseMemToBytes(c.usage.memory),
+          0,
+        );
+        return {
+          name: item.metadata.name,
+          namespace: item.metadata.namespace,
+          cpuNano: totalCpu,
+          memoryBytes: totalMem,
+        };
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("404") || msg.includes("503") || msg.includes("ServiceUnavailable")) {
+        throw new Error("metrics-server not available", { cause: err });
+      }
+      throw err;
+    }
+  }
+
   async disconnect(): Promise<void> {
     this.kc = undefined;
     this.coreApi = undefined;
@@ -737,6 +786,48 @@ function findKindEntry(kind: string): GenericKindEntry {
     throw new Error(`unsupported kind: ${kind}`);
   }
   return entry;
+}
+
+export function parseCpuToNano(s: string): number {
+  const trimmed = s.trim();
+  if (trimmed.endsWith("n")) {
+    return parseInt(trimmed.slice(0, -1), 10) || 0;
+  }
+  if (trimmed.endsWith("m")) {
+    return (parseFloat(trimmed.slice(0, -1)) || 0) * 1_000_000;
+  }
+  if (trimmed.endsWith("u")) {
+    return (parseFloat(trimmed.slice(0, -1)) || 0) * 1000;
+  }
+  return (parseFloat(trimmed) || 0) * 1_000_000_000;
+}
+
+export function parseMemToBytes(s: string): number {
+  const trimmed = s.trim();
+  const match = trimmed.match(/^([\d.]+)\s*(K|M|G|T|Ki|Mi|Gi|Ti)?i?$/);
+  if (!match) return parseInt(trimmed, 10) || 0;
+  const val = parseFloat(match[1]) || 0;
+  const suffix = match[2] ?? "";
+  switch (suffix) {
+    case "K":
+      return val * 1000;
+    case "M":
+      return val * 1_000_000;
+    case "G":
+      return val * 1_000_000_000;
+    case "T":
+      return val * 1_000_000_000_000;
+    case "Ki":
+      return val * 1024;
+    case "Mi":
+      return val * 1024 * 1024;
+    case "Gi":
+      return val * 1024 * 1024 * 1024;
+    case "Ti":
+      return val * 1024 * 1024 * 1024 * 1024;
+    default:
+      return val;
+  }
 }
 
 export const GENERIC_KINDS: ReadonlyArray<GenericKindEntry> = [

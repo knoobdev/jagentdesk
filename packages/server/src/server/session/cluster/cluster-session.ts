@@ -368,4 +368,32 @@ export class ClusterSession {
       this.emitClusterRpcError(request, error);
     }
   }
+
+  async handleClusterMetrics(
+    request: Extract<SessionInboundMessage, { type: "cluster/metrics" }>,
+  ): Promise<void> {
+    try {
+      const client = this.clusterRegistry.getClient(request.id);
+      if (!client) {
+        throw new Error(`cluster not connected: ${request.id}`);
+      }
+      let items: unknown[];
+      if (request.scope === "nodes") {
+        items = await client.getNodeMetrics();
+      } else {
+        items = await client.getPodMetrics(request.namespace);
+      }
+      this.host.emit({
+        type: "cluster/metrics/response",
+        payload: {
+          requestId: request.requestId,
+          scope: request.scope,
+          items,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitClusterRpcError(request, error);
+    }
+  }
 }

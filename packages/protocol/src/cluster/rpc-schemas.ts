@@ -286,6 +286,26 @@ export const ClusterCronjobOpResponseSchema = z.object({
   }),
 });
 
+// ── cluster/metrics ───────────────────────────────────────────────────────
+
+export const ClusterMetricsRequestSchema = z.object({
+  type: z.literal("cluster/metrics"),
+  requestId: z.string(),
+  id: z.string(),
+  scope: z.enum(["nodes", "pods"]),
+  namespace: z.string().optional(),
+});
+
+export const ClusterMetricsResponseSchema = z.object({
+  type: z.literal("cluster/metrics/response"),
+  payload: z.object({
+    requestId: z.string(),
+    scope: z.enum(["nodes", "pods"]),
+    items: z.array(z.unknown()),
+    error: z.string().nullable(),
+  }),
+});
+
 // ── Type exports ────────────────────────────────────────────────────────
 
 export type KubeContextInfo = z.infer<typeof KubeContextInfoSchema>;
@@ -323,3 +343,6 @@ export type ClusterNodeOpRequest = z.infer<typeof ClusterNodeOpRequestSchema>;
 export type ClusterNodeOpResponse = z.infer<typeof ClusterNodeOpResponseSchema>;
 export type ClusterCronjobOpRequest = z.infer<typeof ClusterCronjobOpRequestSchema>;
 export type ClusterCronjobOpResponse = z.infer<typeof ClusterCronjobOpResponseSchema>;
+
+export type ClusterMetricsRequest = z.infer<typeof ClusterMetricsRequestSchema>;
+export type ClusterMetricsResponse = z.infer<typeof ClusterMetricsResponseSchema>;

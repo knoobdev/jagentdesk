@@ -613,6 +613,10 @@ type ClusterCronjobOpPayload = Extract<
   SessionOutboundMessage,
   { type: "cluster/cronjob-op/response" }
 >["payload"];
+type ClusterMetricsPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/metrics/response" }
+>["payload"];
 type ScheduleCreatePayload = Extract<
   SessionOutboundMessage,
   { type: "schedule/create/response" }
@@ -5743,6 +5747,24 @@ export class DaemonClient {
         op: options.op,
       },
       responseType: "cluster/cronjob-op/response",
+    });
+  }
+
+  async clusterMetrics(options: {
+    requestId?: string;
+    id: string;
+    scope: "nodes" | "pods";
+    namespace?: string;
+  }): Promise<ClusterMetricsPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "cluster/metrics",
+        id: options.id,
+        scope: options.scope,
+        ...(options.namespace ? { namespace: options.namespace } : {}),
+      },
+      responseType: "cluster/metrics/response",
     });
   }
 
