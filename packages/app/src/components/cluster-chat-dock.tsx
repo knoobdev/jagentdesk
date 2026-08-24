@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { Pressable, Text, View, useWindowDimensions } from "react-native";
+import { ActivityIndicator, Pressable, Text, View, useWindowDimensions } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import Animated, {
   runOnJS,
@@ -16,8 +16,12 @@ import {
   createPaneFocusContextValue,
   type PaneContextValue,
 } from "@/panels/pane-context";
-import { ClusterComposer, type ClusterComposerResource } from "@/components/cluster-composer";
+import { askAgentAboutResource } from "@/components/cluster-ask-agent";
+import type { ClusterComposerResource } from "@/components/cluster-composer";
 import { SidebarResizeHandle } from "@/components/sidebar-resize-handle";
+import { useHostRuntimeClient } from "@/runtime/host-runtime";
+import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
+import { useSessionStore } from "@/stores/session-store";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import {
   useClusterChatStore,
@@ -28,16 +32,17 @@ import type { Theme } from "@/styles/theme";
 
 const ThemedX = withUnistyles(X);
 const ThemedMessageSquare = withUnistyles(MessageSquare);
+const ThemedActivityIndicator = withUnistyles(ActivityIndicator);
 const mutedColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 const noop = () => {};
 
 /**
- * The chat surface for the cluster view — the ONLY place chat lives. It is a
- * right sidebar: collapsed to a slim handle by default, expanding into a panel
- * that holds either the entry composer (type your first question) or the real
- * agent conversation + composer once a chat exists. The k8s content stays on the
- * left the whole time; opening/closing never leaves the cluster route. Whatever
- * the user is viewing (`resource`) rides along as context on the first message.
+ * The chat surface for the cluster view — the ONLY place chat lives, a right
+ * sidebar that is open by default. So the composer is the REAL agent composer
+ * (model / thinking / permission / @files / commands / subagents), it eagerly
+ * spins up one idle agent per cluster with the cluster context baked in
+ * (clusterId, kubectl tools, "wait for the user's question") and renders the
+ * agent conversation. The k8s content stays on the left the whole time.
  */
 export function ClusterChatDock({
   serverId,
@@ -57,6 +62,34 @@ export function ClusterChatDock({
   const hideChat = useClusterChatStore((s) => s.hideChat);
   const showChat = useClusterChatStore((s) => s.showChat);
   const setWidth = useClusterChatStore((s) => s.setWidth);
+  const openChat = useClusterChatStore((s) => s.openChat);
+
+  const client = useHostRuntimeClient(serverId);
+  const { entries: providerEntries } = useProvidersSnapshot(serverId);
+  const firstWorkspace = useSessionStore(
+    (state) => state.sessions[serverId]?.workspaces.values().next().value,
+  );
+  const provider = providerEntries?.find((e) => e.enabled)?.provider ?? null;
+  const cwd = firstWorkspace?.workspaceDirectory ?? null;
+  const ready = Boolean(client && provider && cwd);
+
+  // Eagerly create one idle agent per cluster so the real composer is ready.
+  const createdForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!open || agentId || !ready || !client || !provider || !cwd) return;
+    if (createdForRef.current === clusterId) return;
+    createdForRef.current = clusterId;
+    void askAgentAboutResource({
+      client,
+      serverId,
+      clusterId,
+      kind: resource?.kind ?? "cluster",
+      namespace: resource?.namespace,
+      provider,
+      cwd,
+      onCreated: ({ id, workspaceId: ws }) => openChat({ clusterId, agentId: id, workspaceId: ws }),
+    });
+  }, [open, agentId, ready, client, provider, cwd, clusterId, resource, serverId, openChat]);
 
   const isCompact = useIsCompactFormFactor();
   const { width: screenWidth } = useWindowDimensions();
@@ -65,7 +98,6 @@ export function ClusterChatDock({
   const w = useSharedValue(open ? target : 0);
   const prevOpen = useRef(open);
   useEffect(() => {
-    // Animate only when the open state toggles; snap on width/rotation changes.
     const toggled = prevOpen.current !== open;
     prevOpen.current = open;
     const to = open ? target : 0;
@@ -81,7 +113,6 @@ export function ClusterChatDock({
           startWidthRef.current = width;
         })
         .onUpdate((event) => {
-          // Dragging the left edge left (negative translationX) widens the dock.
           const next = Math.max(
             CLUSTER_CHAT_MIN_WIDTH,
             Math.min(CLUSTER_CHAT_MAX_WIDTH, startWidthRef.current - event.translationX),
@@ -96,8 +127,6 @@ export function ClusterChatDock({
   const handleOpen = useCallback(() => showChat(), [showChat]);
   const innerStyle = useMemo(() => [styles.inner, { width: target }], [target]);
 
-  // AgentConversationPanel + Composer read their target/serverId/workspace from
-  // the pane context, so provide a synthetic one scoped to the dock's agent.
   const paneValue = useMemo<PaneContextValue>(
     () => ({
       serverId,
@@ -117,6 +146,30 @@ export function ClusterChatDock({
     [],
   );
 
+  let body;
+  if (agentId) {
+    body = (
+      <PaneProvider value={paneValue}>
+        <PaneFocusProvider value={focusValue}>
+          <AgentConversationPanel />
+        </PaneFocusProvider>
+      </PaneProvider>
+    );
+  } else if (ready) {
+    body = (
+      <View style={styles.center}>
+        <ThemedActivityIndicator uniProps={mutedColor} />
+        <Text style={styles.centerText}>Starting chat…</Text>
+      </View>
+    );
+  } else {
+    body = (
+      <View style={styles.center}>
+        <Text style={styles.centerText}>Connect a host & add a project to chat with an agent</Text>
+      </View>
+    );
+  }
+
   if (!open) {
     return (
       <Pressable style={styles.handle} onPress={handleOpen} accessibilityLabel="Open chat">
@@ -134,7 +187,7 @@ export function ClusterChatDock({
         <View style={styles.header}>
           <ThemedMessageSquare size={15} uniProps={mutedColor} />
           <Text style={styles.headerTitle} numberOfLines={1}>
-            {agentId ? clusterName : `Ask about ${clusterName}`}
+            {clusterName}
           </Text>
           <Pressable
             style={styles.closeBtn}
@@ -145,25 +198,7 @@ export function ClusterChatDock({
             <ThemedX size={16} uniProps={mutedColor} />
           </Pressable>
         </View>
-        <View style={styles.body}>
-          {agentId ? (
-            <PaneProvider value={paneValue}>
-              <PaneFocusProvider value={focusValue}>
-                <AgentConversationPanel />
-              </PaneFocusProvider>
-            </PaneProvider>
-          ) : (
-            <View style={styles.entry}>
-              <View style={styles.entrySpacer} />
-              <ClusterComposer
-                serverId={serverId}
-                clusterId={clusterId}
-                clusterName={clusterName}
-                resource={resource}
-              />
-            </View>
-          )}
-        </View>
+        <View style={styles.body}>{body}</View>
       </View>
     </Animated.View>
   );
@@ -218,11 +253,16 @@ const styles = StyleSheet.create((theme: Theme) => ({
     flex: 1,
     minHeight: 0,
   },
-  entry: {
+  center: {
     flex: 1,
-    minHeight: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: theme.spacing[2],
+    padding: theme.spacing[4],
   },
-  entrySpacer: {
-    flex: 1,
+  centerText: {
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foregroundMuted,
+    textAlign: "center",
   },
 }));
