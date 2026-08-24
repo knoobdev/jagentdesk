@@ -80,6 +80,7 @@ export function ClusterResourceDetail({
   const [scaleReplicas, setScaleReplicas] = useState("");
   const [scaling, setScaling] = useState(false);
   const [restarting, setRestarting] = useState(false);
+  const [rollingBack, setRollingBack] = useState(false);
   const [applying, setApplying] = useState(false);
   const [editedYamlResetKey, setEditedYamlResetKey] = useState(0);
   const [showYaml, setShowYaml] = useState(false);
@@ -113,6 +114,7 @@ export function ClusterResourceDetail({
 
   const isWorkload = WORKLOAD_KINDS.has(kind);
   const canRestart = RESTARTABLE_KINDS.has(kind);
+  const canRollback = kind === "Deployment";
   const isPod = kind.toLowerCase() === "pod";
   const isSecret = kind.toLowerCase() === "secret";
   const isNode = kind.toLowerCase() === "node";
@@ -392,6 +394,31 @@ export function ClusterResourceDetail({
       .finally(() => setRestarting(false));
   }, [client, clusterId, kind, namespace, name]);
 
+  const handleRollback = useCallback(() => {
+    if (!client) return;
+    setRollingBack(true);
+    setMessage(null);
+    setDeletingConfirm(false);
+    void client
+      .clusterWrite({
+        id: clusterId,
+        kind,
+        namespace,
+        name,
+        action: "rollback",
+        dryRun: false,
+      })
+      .then((res) => {
+        setMessage(res.error ?? res.result?.message ?? "Rollback initiated");
+        if (!res.error && res.result?.ok !== false) onChanged?.();
+        return undefined;
+      })
+      .catch((e: unknown) => {
+        setMessage(e instanceof Error ? e.message : "Rollback failed");
+      })
+      .finally(() => setRollingBack(false));
+  }, [client, clusterId, kind, namespace, name, onChanged]);
+
   const handleScale = useCallback(() => {
     if (!client) return;
     const replicas = parseInt(scaleReplicas, 10);
@@ -649,6 +676,7 @@ export function ClusterResourceDetail({
         isCronJob={isCronJob}
         isWorkload={isWorkload}
         canRestart={canRestart}
+        canRollback={canRollback}
         showLogs={showLogs}
         showShell={showShell}
         editing={editing}
@@ -657,6 +685,7 @@ export function ClusterResourceDetail({
         deletingConfirm={deletingConfirm}
         scaling={scaling}
         restarting={restarting}
+        rollingBack={rollingBack}
         client={client}
         serverId={serverId}
         clusterId={clusterId}
@@ -676,6 +705,7 @@ export function ClusterResourceDetail({
         setScaleReplicas={setScaleReplicas}
         handleToggleLogs={handleToggleLogs}
         handleRestart={handleRestart}
+        handleRollback={handleRollback}
         handleDelete={handleDelete}
         handleScale={handleScale}
         handleToggleEdit={handleToggleEdit}
@@ -703,6 +733,7 @@ interface ResourceDetailBodyProps {
   isCronJob: boolean;
   isWorkload: boolean;
   canRestart: boolean;
+  canRollback: boolean;
   showLogs: boolean;
   showShell: boolean;
   editing: boolean;
@@ -711,6 +742,7 @@ interface ResourceDetailBodyProps {
   deletingConfirm: boolean;
   scaling: boolean;
   restarting: boolean;
+  rollingBack: boolean;
   client: ReturnType<typeof useHostRuntimeClient>;
   serverId: string;
   clusterId: string;
@@ -730,6 +762,7 @@ interface ResourceDetailBodyProps {
   setScaleReplicas: (v: string) => void;
   handleToggleLogs: () => void;
   handleRestart: () => void;
+  handleRollback: () => void;
   handleDelete: () => void;
   handleScale: () => void;
   handleToggleEdit: () => void;
@@ -752,6 +785,7 @@ interface ResourceDetailActionBarProps {
   isNode: boolean;
   isCronJob: boolean;
   canRestart: boolean;
+  canRollback: boolean;
   showLogs: boolean;
   showShell: boolean;
   editing: boolean;
@@ -759,6 +793,7 @@ interface ResourceDetailActionBarProps {
   deleting: boolean;
   deletingConfirm: boolean;
   restarting: boolean;
+  rollingBack: boolean;
   client: ReturnType<typeof useHostRuntimeClient>;
   clusterId: string;
   namespace?: string;
@@ -768,6 +803,7 @@ interface ResourceDetailActionBarProps {
   handleToggleLogs: () => void;
   handleToggleShell: () => void;
   handleRestart: () => void;
+  handleRollback: () => void;
   handleDelete: () => void;
   handleToggleEdit: () => void;
   showYaml: boolean;
@@ -782,6 +818,7 @@ function ResourceDetailActionBar({
   isNode,
   isCronJob,
   canRestart,
+  canRollback,
   showLogs,
   showShell,
   editing,
@@ -789,6 +826,7 @@ function ResourceDetailActionBar({
   deleting,
   deletingConfirm,
   restarting,
+  rollingBack,
   client,
   clusterId,
   namespace,
@@ -798,6 +836,7 @@ function ResourceDetailActionBar({
   handleToggleLogs,
   handleToggleShell,
   handleRestart,
+  handleRollback,
   handleDelete,
   handleToggleEdit,
   showYaml,
@@ -834,6 +873,13 @@ function ResourceDetailActionBar({
         {canRestart ? (
           <Pressable style={styles.actionButton} onPress={handleRestart} disabled={restarting}>
             <Text style={styles.actionButtonText}>{restarting ? "Restarting..." : "Restart"}</Text>
+          </Pressable>
+        ) : null}
+        {canRollback ? (
+          <Pressable style={styles.actionButton} onPress={handleRollback} disabled={rollingBack}>
+            <Text style={styles.actionButtonText}>
+              {rollingBack ? "Rolling back..." : "Rollback"}
+            </Text>
           </Pressable>
         ) : null}
         {isNode ? (
@@ -1030,6 +1076,7 @@ function ResourceDetailBody({
   isCronJob,
   isWorkload,
   canRestart,
+  canRollback,
   showLogs,
   showShell,
   editing,
@@ -1038,6 +1085,7 @@ function ResourceDetailBody({
   deletingConfirm,
   scaling,
   restarting,
+  rollingBack,
   client,
   serverId,
   clusterId,
@@ -1057,6 +1105,7 @@ function ResourceDetailBody({
   setScaleReplicas,
   handleToggleLogs,
   handleRestart,
+  handleRollback,
   handleDelete,
   handleScale,
   handleToggleEdit,
@@ -1082,6 +1131,7 @@ function ResourceDetailBody({
         isNode={isNode}
         isCronJob={isCronJob}
         canRestart={canRestart}
+        canRollback={canRollback}
         showLogs={showLogs}
         showShell={showShell}
         editing={editing}
@@ -1089,6 +1139,7 @@ function ResourceDetailBody({
         deleting={deleting}
         deletingConfirm={deletingConfirm}
         restarting={restarting}
+        rollingBack={rollingBack}
         client={client}
         clusterId={clusterId}
         namespace={namespace}
@@ -1098,6 +1149,7 @@ function ResourceDetailBody({
         handleToggleLogs={handleToggleLogs}
         handleToggleShell={handleToggleShell}
         handleRestart={handleRestart}
+        handleRollback={handleRollback}
         handleDelete={handleDelete}
         handleToggleEdit={handleToggleEdit}
         showYaml={showYaml}

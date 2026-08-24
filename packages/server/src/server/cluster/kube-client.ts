@@ -276,7 +276,7 @@ export class KubeClient {
     kind: string;
     namespace?: string;
     name: string;
-    action: "scale" | "delete" | "restart" | "apply";
+    action: "scale" | "delete" | "restart" | "apply" | "rollback";
     replicas?: number;
     manifestYaml?: string;
     dryRun: boolean;
@@ -321,6 +321,16 @@ export class KubeClient {
         }
         case "delete": {
           return this.deleteGeneric(op.kind, op.namespace, op.name, op.dryRun);
+        }
+        case "rollback": {
+          if (op.kind.toLowerCase() !== "deployment") {
+            return {
+              ok: false,
+              dryRun: op.dryRun,
+              message: `rollback not supported for kind: ${op.kind}`,
+            };
+          }
+          return this.rollbackDeployment(op.namespace ?? "default", op.name);
         }
         case "restart": {
           const kindLower = op.kind.toLowerCase();
@@ -535,6 +545,76 @@ export class KubeClient {
       );
       const action = unschedulable ? "cordoned" : "uncordoned";
       return { ok: true, dryRun: false, message: `node ${name} ${action}` };
+    } catch (err) {
+      return {
+        ok: false,
+        dryRun: false,
+        message: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+
+  /**
+   * Roll a Deployment back to its previous revision (kubectl rollout undo). The
+   * previous pod template lives on the ReplicaSet with the highest
+   * deployment.kubernetes.io/revision below the current one; we copy its template
+   * back onto the Deployment. Returns a clear message when there is nothing to
+   * roll back to (single-revision Deployment).
+   */
+  async rollbackDeployment(namespace: string, name: string): Promise<WriteResult> {
+    this.ensureConnected();
+    try {
+      const dep = await this.appsApi!.readNamespacedDeployment({
+        name,
+        namespace: namespace ?? "default",
+      });
+      const depUid = dep.metadata?.uid;
+      const curRevision = Number(
+        dep.metadata?.annotations?.["deployment.kubernetes.io/revision"] ?? "0",
+      );
+      const rsList = await this.appsApi!.listNamespacedReplicaSet({
+        namespace: namespace ?? "default",
+      });
+      const candidates = (rsList.items ?? [])
+        .filter((rs) => (rs.metadata?.ownerReferences ?? []).some((o) => o.uid === depUid))
+        .map((rs) => ({
+          rs,
+          rev: Number(rs.metadata?.annotations?.["deployment.kubernetes.io/revision"] ?? "0"),
+        }))
+        .filter((x) => x.rev > 0 && x.rev < curRevision)
+        .sort((a, b) => b.rev - a.rev);
+      if (!candidates.length) {
+        return {
+          ok: false,
+          dryRun: false,
+          message: `No previous revision to roll back to for ${name}.`,
+        };
+      }
+      const target = candidates[0];
+      const template = target.rs.spec?.template;
+      if (!template) {
+        return { ok: false, dryRun: false, message: "Target revision has no pod template." };
+      }
+      // The pod-template-hash label is managed by the controller; drop it so the
+      // Deployment controller recomputes a fresh ReplicaSet.
+      const cleaned = JSON.parse(JSON.stringify(template)) as {
+        metadata?: { labels?: Record<string, string> };
+      };
+      if (cleaned.metadata?.labels) delete cleaned.metadata.labels["pod-template-hash"];
+      await this.objectApi!.patch(
+        {
+          apiVersion: "apps/v1",
+          kind: "Deployment",
+          metadata: { name, namespace: namespace ?? "default" },
+          spec: { template: cleaned },
+        } as unknown as KubernetesObject,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        PatchStrategy.StrategicMergePatch,
+      );
+      return { ok: true, dryRun: false, message: `Rolled back ${name} to revision ${target.rev}.` };
     } catch (err) {
       return {
         ok: false,

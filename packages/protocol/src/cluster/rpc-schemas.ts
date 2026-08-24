@@ -94,7 +94,7 @@ export const ClusterWriteRequestSchema = z.object({
   kind: z.string(),
   namespace: z.string().optional(),
   name: z.string(),
-  action: z.enum(["scale", "delete", "restart", "apply"]),
+  action: z.enum(["scale", "delete", "restart", "apply", "rollback"]),
   replicas: z.number().int().optional(),
   manifestYaml: z.string().optional(),
   dryRun: z.boolean(),

@@ -5838,7 +5838,7 @@ export class DaemonClient {
     kind: string;
     namespace?: string;
     name: string;
-    action: "scale" | "delete" | "restart" | "apply";
+    action: "scale" | "delete" | "restart" | "apply" | "rollback";
     replicas?: number;
     manifestYaml?: string;
     dryRun: boolean;
