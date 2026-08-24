@@ -45,9 +45,9 @@ export async function askAgentAboutResource(input: AskAgentAboutResourceInput): 
     ? `The user is currently looking at ${kind} "${name}"${nsPart}.`
     : `The user is currently browsing ${kind} resources.`;
 
-  // IMPORTANT: do NOT auto-send a prompt. Attach the cluster context so the
-  // agent knows which cluster/tools to use, then open the chat with an empty
-  // composer so the user asks their own question.
+  // The cluster context is a HIDDEN system prompt (appendSystemPrompt), never a
+  // visible message/attachment — so the chat opens empty and "ready", not like a
+  // conversation already happened. The agent waits for the user's question.
   const context = [
     `You are operating the Kubernetes cluster with clusterId "${clusterId}".`,
     focus,
@@ -62,18 +62,11 @@ export async function askAgentAboutResource(input: AskAgentAboutResourceInput): 
     const agent = await client.createAgent({
       provider,
       cwd,
+      systemPrompt: context,
       labels: { "jagentdesk.cluster.id": clusterId },
       // When the user typed a question in the composer, send it as the first
       // message; otherwise open an empty chat for them to type.
       ...(trimmed ? { initialPrompt: trimmed } : {}),
-      attachments: [
-        {
-          type: "text" as const,
-          mimeType: "text/plain" as const,
-          title: `cluster-${clusterId}-context.txt`,
-          text: context,
-        },
-      ],
     });
 
     if (onCreated) {
