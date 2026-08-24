@@ -147,7 +147,11 @@ export class KubeClient {
         namespace: namespace ?? "default",
       });
     } else {
-      throw new Error(`unsupported kind: ${kind}`);
+      // Every other kind (StatefulSet, DaemonSet, Secret, Ingress, PVC, Job,
+      // CronJob, HPA, ServiceAccount, CRDs, …) is read through the dynamic
+      // object API so the detail view works for the full discovered kind set,
+      // not just the six hand-wired kinds above.
+      return this.getGeneric(kind, namespace, name);
     }
 
     return dumpYaml(obj);
@@ -216,6 +220,15 @@ export class KubeClient {
       stderrStream,
       stdinStream,
       true, // tty
+      // Surface the exec error channel (channel 3). Without this, a pod whose
+      // image has no shell (distroless) — or a wrong container — leaves the
+      // terminal blank forever; now it prints why the shell could not start.
+      (status) => {
+        if (status.status === "Failure") {
+          const reason = status.message ?? status.reason ?? "exec failed";
+          onData(`\r\n\x1b[31m[shell unavailable] ${reason}\x1b[0m\r\n`);
+        }
+      },
     );
 
     return {
@@ -278,71 +291,69 @@ export class KubeClient {
             return { ok: false, dryRun: op.dryRun, message: "replicas required for scale" };
           }
           const kindLower = op.kind.toLowerCase();
-          if (kindLower === "deployment") {
-            await this.appsApi!.patchNamespacedDeploymentScale({
-              name: op.name,
-              namespace: op.namespace ?? "default",
-              body: { spec: { replicas: op.replicas } },
-              dryRun: dryRunOption,
-            });
-          } else {
+          const scalable = ["deployment", "statefulset", "replicaset", "replicationcontroller"];
+          if (!scalable.includes(kindLower)) {
             return {
               ok: false,
               dryRun: op.dryRun,
               message: `scale not supported for kind: ${op.kind}`,
             };
           }
+          const entry = findKindEntry(op.kind);
+          // Merge-patch spec.replicas. The typed patchNamespaced* helpers default
+          // to a JSON-patch content type (which expects an array of ops) and
+          // reject our object body with a 400; the generic object API lets us
+          // pick the correct merge-patch strategy.
+          await this.objectApi!.patch(
+            {
+              apiVersion: entry.apiVersion,
+              kind: entry.kind,
+              metadata: { name: op.name, namespace: op.namespace ?? "default" },
+              spec: { replicas: op.replicas },
+            } as KubernetesObject,
+            undefined,
+            dryRunOption,
+            undefined,
+            undefined,
+            PatchStrategy.MergePatch,
+          );
           break;
         }
         case "delete": {
-          const kindLower = op.kind.toLowerCase();
-          if (kindLower === "pod") {
-            await this.coreApi!.deleteNamespacedPod({
-              name: op.name,
-              namespace: op.namespace ?? "default",
-              dryRun: dryRunOption,
-            });
-          } else if (kindLower === "deployment") {
-            await this.appsApi!.deleteNamespacedDeployment({
-              name: op.name,
-              namespace: op.namespace ?? "default",
-              dryRun: dryRunOption,
-            });
-          } else {
-            return {
-              ok: false,
-              dryRun: op.dryRun,
-              message: `delete not supported for kind: ${op.kind}`,
-            };
-          }
-          break;
+          return this.deleteGeneric(op.kind, op.namespace, op.name, op.dryRun);
         }
         case "restart": {
           const kindLower = op.kind.toLowerCase();
-          if (kindLower === "deployment") {
-            await this.appsApi!.patchNamespacedDeployment({
-              name: op.name,
-              namespace: op.namespace ?? "default",
-              body: {
-                spec: {
-                  template: {
-                    metadata: {
-                      annotations: {
-                        "kubectl.kubernetes.io/restartedAt": new Date().toISOString(),
-                      },
-                    },
-                  },
-                },
-              },
-              dryRun: dryRunOption,
-            });
-          } else {
+          const restartable = ["deployment", "statefulset", "daemonset"];
+          if (!restartable.includes(kindLower)) {
             return {
               ok: false,
               dryRun: op.dryRun,
               message: `restart not supported for kind: ${op.kind}`,
             };
           }
+          const entry = findKindEntry(op.kind);
+          await this.objectApi!.patch(
+            {
+              apiVersion: entry.apiVersion,
+              kind: entry.kind,
+              metadata: { name: op.name, namespace: op.namespace ?? "default" },
+              spec: {
+                template: {
+                  metadata: {
+                    annotations: {
+                      "kubectl.kubernetes.io/restartedAt": new Date().toISOString(),
+                    },
+                  },
+                },
+              },
+            } as KubernetesObject,
+            undefined,
+            dryRunOption,
+            undefined,
+            undefined,
+            PatchStrategy.StrategicMergePatch,
+          );
           break;
         }
         case "apply": {
@@ -627,12 +638,12 @@ export class KubeClient {
         cpuNano: parseCpuToNano(item.usage.cpu),
         memoryBytes: parseMemToBytes(item.usage.memory),
       }));
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("404") || msg.includes("503") || msg.includes("ServiceUnavailable")) {
-        throw new Error("metrics-server not available", { cause: err });
-      }
-      throw err;
+    } catch {
+      // Metrics are best-effort: many clusters have no metrics-server (or a
+      // broken metrics.k8s.io APIService that 500s with a non-JSON body). Treat
+      // any failure as "no metrics" so the CPU/MEM columns simply stay empty
+      // instead of surfacing an error over an otherwise-working resource list.
+      return [];
     }
   }
 
@@ -656,12 +667,10 @@ export class KubeClient {
           memoryBytes: totalMem,
         };
       });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("404") || msg.includes("503") || msg.includes("ServiceUnavailable")) {
-        throw new Error("metrics-server not available", { cause: err });
-      }
-      throw err;
+    } catch {
+      // Best-effort: see getNodeMetrics — no metrics-server means empty columns,
+      // not an error.
+      return [];
     }
   }
 
