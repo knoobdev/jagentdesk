@@ -32,6 +32,10 @@ export class KubeClient {
     this.contextName = contextName;
   }
 
+  get context(): string {
+    return this.contextName;
+  }
+
   async connect(): Promise<void> {
     this.kc = new KubeConfig();
     this.kc.loadFromDefault();

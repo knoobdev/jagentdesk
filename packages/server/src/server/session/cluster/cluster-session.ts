@@ -3,6 +3,13 @@ import type { SessionInboundMessage, SessionOutboundMessage } from "../../messag
 import type { ClusterRegistry } from "../../cluster/cluster-registry.js";
 import { detectKubeContexts } from "../../cluster/kube-config-source.js";
 import { GENERIC_KINDS } from "../../cluster/kube-client.js";
+import {
+  helmList,
+  helmHistory,
+  helmValues,
+  helmRollback,
+  helmUninstall,
+} from "../../cluster/helm-client.js";
 
 export interface ClusterSessionHost {
   emit(msg: SessionOutboundMessage): void;
@@ -389,6 +396,121 @@ export class ClusterSession {
           requestId: request.requestId,
           scope: request.scope,
           items,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitClusterRpcError(request, error);
+    }
+  }
+
+  async handleHelmListRequest(
+    request: Extract<SessionInboundMessage, { type: "cluster/helm/list" }>,
+  ): Promise<void> {
+    try {
+      const client = this.clusterRegistry.getClient(request.id);
+      if (!client) {
+        throw new Error(`cluster not connected: ${request.id}`);
+      }
+      const releases = await helmList(client.context);
+      this.host.emit({
+        type: "cluster/helm/list/response",
+        payload: {
+          requestId: request.requestId,
+          releases,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitClusterRpcError(request, error);
+    }
+  }
+
+  async handleHelmHistoryRequest(
+    request: Extract<SessionInboundMessage, { type: "cluster/helm/history" }>,
+  ): Promise<void> {
+    try {
+      const client = this.clusterRegistry.getClient(request.id);
+      if (!client) {
+        throw new Error(`cluster not connected: ${request.id}`);
+      }
+      const revisions = await helmHistory(client.context, request.namespace, request.name);
+      this.host.emit({
+        type: "cluster/helm/history/response",
+        payload: {
+          requestId: request.requestId,
+          revisions,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitClusterRpcError(request, error);
+    }
+  }
+
+  async handleHelmValuesRequest(
+    request: Extract<SessionInboundMessage, { type: "cluster/helm/values" }>,
+  ): Promise<void> {
+    try {
+      const client = this.clusterRegistry.getClient(request.id);
+      if (!client) {
+        throw new Error(`cluster not connected: ${request.id}`);
+      }
+      const values = await helmValues(client.context, request.namespace, request.name);
+      this.host.emit({
+        type: "cluster/helm/values/response",
+        payload: {
+          requestId: request.requestId,
+          values,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitClusterRpcError(request, error);
+    }
+  }
+
+  async handleHelmRollbackRequest(
+    request: Extract<SessionInboundMessage, { type: "cluster/helm/rollback" }>,
+  ): Promise<void> {
+    try {
+      const client = this.clusterRegistry.getClient(request.id);
+      if (!client) {
+        throw new Error(`cluster not connected: ${request.id}`);
+      }
+      const result = await helmRollback(
+        client.context,
+        request.namespace,
+        request.name,
+        request.revision,
+      );
+      this.host.emit({
+        type: "cluster/helm/rollback/response",
+        payload: {
+          requestId: request.requestId,
+          result,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitClusterRpcError(request, error);
+    }
+  }
+
+  async handleHelmUninstallRequest(
+    request: Extract<SessionInboundMessage, { type: "cluster/helm/uninstall" }>,
+  ): Promise<void> {
+    try {
+      const client = this.clusterRegistry.getClient(request.id);
+      if (!client) {
+        throw new Error(`cluster not connected: ${request.id}`);
+      }
+      const result = await helmUninstall(client.context, request.namespace, request.name);
+      this.host.emit({
+        type: "cluster/helm/uninstall/response",
+        payload: {
+          requestId: request.requestId,
+          result,
           error: null,
         },
       });

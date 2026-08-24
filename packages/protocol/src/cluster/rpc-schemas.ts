@@ -346,3 +346,124 @@ export type ClusterCronjobOpResponse = z.infer<typeof ClusterCronjobOpResponseSc
 
 export type ClusterMetricsRequest = z.infer<typeof ClusterMetricsRequestSchema>;
 export type ClusterMetricsResponse = z.infer<typeof ClusterMetricsResponseSchema>;
+
+// ── cluster/helm/* ────────────────────────────────────────────────────────────
+
+export const HelmReleaseDTOSchema = z.object({
+  name: z.string(),
+  namespace: z.string(),
+  revision: z.string(),
+  updated: z.string(),
+  status: z.string(),
+  chart: z.string(),
+  appVersion: z.string(),
+});
+
+export const HelmRevisionDTOSchema = z.object({
+  revision: z.number(),
+  updated: z.string(),
+  status: z.string(),
+  chart: z.string(),
+  appVersion: z.string(),
+  description: z.string(),
+});
+
+export const HelmResultSchema = z.object({
+  ok: z.boolean(),
+  message: z.string(),
+});
+
+export const ClusterHelmListRequestSchema = z.object({
+  type: z.literal("cluster/helm/list"),
+  requestId: z.string(),
+  id: z.string(),
+});
+
+export const ClusterHelmListResponseSchema = z.object({
+  type: z.literal("cluster/helm/list/response"),
+  payload: z.object({
+    requestId: z.string(),
+    releases: z.array(HelmReleaseDTOSchema),
+    error: z.string().nullable(),
+  }),
+});
+
+export const ClusterHelmHistoryRequestSchema = z.object({
+  type: z.literal("cluster/helm/history"),
+  requestId: z.string(),
+  id: z.string(),
+  namespace: z.string(),
+  name: z.string(),
+});
+
+export const ClusterHelmHistoryResponseSchema = z.object({
+  type: z.literal("cluster/helm/history/response"),
+  payload: z.object({
+    requestId: z.string(),
+    revisions: z.array(HelmRevisionDTOSchema),
+    error: z.string().nullable(),
+  }),
+});
+
+export const ClusterHelmValuesRequestSchema = z.object({
+  type: z.literal("cluster/helm/values"),
+  requestId: z.string(),
+  id: z.string(),
+  namespace: z.string(),
+  name: z.string(),
+});
+
+export const ClusterHelmValuesResponseSchema = z.object({
+  type: z.literal("cluster/helm/values/response"),
+  payload: z.object({
+    requestId: z.string(),
+    values: z.string().nullable(),
+    error: z.string().nullable(),
+  }),
+});
+
+export const ClusterHelmRollbackRequestSchema = z.object({
+  type: z.literal("cluster/helm/rollback"),
+  requestId: z.string(),
+  id: z.string(),
+  namespace: z.string(),
+  name: z.string(),
+  revision: z.number(),
+});
+
+export const ClusterHelmRollbackResponseSchema = z.object({
+  type: z.literal("cluster/helm/rollback/response"),
+  payload: z.object({
+    requestId: z.string(),
+    result: HelmResultSchema.nullable(),
+    error: z.string().nullable(),
+  }),
+});
+
+export const ClusterHelmUninstallRequestSchema = z.object({
+  type: z.literal("cluster/helm/uninstall"),
+  requestId: z.string(),
+  id: z.string(),
+  namespace: z.string(),
+  name: z.string(),
+});
+
+export const ClusterHelmUninstallResponseSchema = z.object({
+  type: z.literal("cluster/helm/uninstall/response"),
+  payload: z.object({
+    requestId: z.string(),
+    result: HelmResultSchema.nullable(),
+    error: z.string().nullable(),
+  }),
+});
+
+export type ClusterHelmListRequest = z.infer<typeof ClusterHelmListRequestSchema>;
+export type ClusterHelmListResponse = z.infer<typeof ClusterHelmListResponseSchema>;
+export type ClusterHelmHistoryRequest = z.infer<typeof ClusterHelmHistoryRequestSchema>;
+export type ClusterHelmHistoryResponse = z.infer<typeof ClusterHelmHistoryResponseSchema>;
+export type ClusterHelmValuesRequest = z.infer<typeof ClusterHelmValuesRequestSchema>;
+export type ClusterHelmValuesResponse = z.infer<typeof ClusterHelmValuesResponseSchema>;
+export type ClusterHelmRollbackRequest = z.infer<typeof ClusterHelmRollbackRequestSchema>;
+export type ClusterHelmRollbackResponse = z.infer<typeof ClusterHelmRollbackResponseSchema>;
+export type ClusterHelmUninstallRequest = z.infer<typeof ClusterHelmUninstallRequestSchema>;
+export type ClusterHelmUninstallResponse = z.infer<typeof ClusterHelmUninstallResponseSchema>;

@@ -617,6 +617,26 @@ type ClusterMetricsPayload = Extract<
   SessionOutboundMessage,
   { type: "cluster/metrics/response" }
 >["payload"];
+type ClusterHelmListPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/helm/list/response" }
+>["payload"];
+type ClusterHelmHistoryPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/helm/history/response" }
+>["payload"];
+type ClusterHelmValuesPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/helm/values/response" }
+>["payload"];
+type ClusterHelmRollbackPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/helm/rollback/response" }
+>["payload"];
+type ClusterHelmUninstallPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/helm/uninstall/response" }
+>["payload"];
 type ScheduleCreatePayload = Extract<
   SessionOutboundMessage,
   { type: "schedule/create/response" }
@@ -5765,6 +5785,94 @@ export class DaemonClient {
         ...(options.namespace ? { namespace: options.namespace } : {}),
       },
       responseType: "cluster/metrics/response",
+    });
+  }
+
+  async clusterHelmList(options: {
+    requestId?: string;
+    id: string;
+  }): Promise<ClusterHelmListPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "cluster/helm/list",
+        id: options.id,
+      },
+      responseType: "cluster/helm/list/response",
+    });
+  }
+
+  async clusterHelmHistory(options: {
+    requestId?: string;
+    id: string;
+    namespace: string;
+    name: string;
+  }): Promise<ClusterHelmHistoryPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "cluster/helm/history",
+        id: options.id,
+        namespace: options.namespace,
+        name: options.name,
+      },
+      responseType: "cluster/helm/history/response",
+    });
+  }
+
+  async clusterHelmValues(options: {
+    requestId?: string;
+    id: string;
+    namespace: string;
+    name: string;
+  }): Promise<ClusterHelmValuesPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "cluster/helm/values",
+        id: options.id,
+        namespace: options.namespace,
+        name: options.name,
+      },
+      responseType: "cluster/helm/values/response",
+    });
+  }
+
+  async clusterHelmRollback(options: {
+    requestId?: string;
+    id: string;
+    namespace: string;
+    name: string;
+    revision: number;
+  }): Promise<ClusterHelmRollbackPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "cluster/helm/rollback",
+        id: options.id,
+        namespace: options.namespace,
+        name: options.name,
+        revision: options.revision,
+      },
+      responseType: "cluster/helm/rollback/response",
+    });
+  }
+
+  async clusterHelmUninstall(options: {
+    requestId?: string;
+    id: string;
+    namespace: string;
+    name: string;
+  }): Promise<ClusterHelmUninstallPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "cluster/helm/uninstall",
+        id: options.id,
+        namespace: options.namespace,
+        name: options.name,
+      },
+      responseType: "cluster/helm/uninstall/response",
     });
   }
 

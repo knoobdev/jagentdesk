@@ -2366,6 +2366,7 @@ export class Session {
     }
   }
 
+  // oxlint-disable-next-line complexity
   private dispatchClusterMessage(msg: SessionInboundMessage): Promise<void> | undefined {
     switch (msg.type) {
       case "cluster/contexts":
@@ -2398,6 +2399,16 @@ export class Session {
         return this.clusterSession.handleCronjobOpRequest(msg);
       case "cluster/metrics":
         return this.clusterSession.handleClusterMetrics(msg);
+      case "cluster/helm/list":
+        return this.clusterSession.handleHelmListRequest(msg);
+      case "cluster/helm/history":
+        return this.clusterSession.handleHelmHistoryRequest(msg);
+      case "cluster/helm/values":
+        return this.clusterSession.handleHelmValuesRequest(msg);
+      case "cluster/helm/rollback":
+        return this.clusterSession.handleHelmRollbackRequest(msg);
+      case "cluster/helm/uninstall":
+        return this.clusterSession.handleHelmUninstallRequest(msg);
       default:
         return undefined;
     }
