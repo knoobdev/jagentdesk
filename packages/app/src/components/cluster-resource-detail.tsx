@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
+import { parse as parseYaml } from "yaml";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { X } from "lucide-react-native";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
@@ -10,6 +11,7 @@ import { ClusterCronjobOps } from "./cluster-cronjob-ops";
 import { ClusterPodShell } from "./cluster-pod-shell";
 import { HighlightedLines } from "@/components/highlighted-content";
 import { highlightToKeyedLines } from "@/utils/highlight-cache";
+import { ClusterResourceOverview } from "@/components/cluster-resource-overview";
 import type { Theme } from "@/styles/theme";
 
 const ThemedX = withUnistyles(X);
@@ -80,6 +82,8 @@ export function ClusterResourceDetail({
   const [restarting, setRestarting] = useState(false);
   const [applying, setApplying] = useState(false);
   const [editedYamlResetKey, setEditedYamlResetKey] = useState(0);
+  const [showYaml, setShowYaml] = useState(false);
+  const handleToggleYaml = useCallback(() => setShowYaml((v) => !v), []);
 
   // Logs state
   const [showLogs, setShowLogs] = useState(false);
@@ -551,6 +555,19 @@ export function ClusterResourceDetail({
     );
   }, [loading, error, yaml, editing, editedYaml, editedYamlResetKey, handleApply, applying]);
 
+  // Parse the manifest into a structured overview (k8slens-style) shown by
+  // default; YAML is a toggle.
+  const overviewBody = useMemo(() => {
+    if (!yaml) return null;
+    try {
+      const parsed = parseYaml(yaml);
+      if (!parsed || typeof parsed !== "object") return null;
+      return <ClusterResourceOverview obj={parsed as Record<string, unknown>} kind={kind} />;
+    } catch {
+      return null;
+    }
+  }, [yaml, kind]);
+
   const logsBody = useMemo(() => {
     if (logLoading) {
       return (
@@ -643,6 +660,9 @@ export function ClusterResourceDetail({
         deleteButtonLabel={deleteButtonLabel}
         logsBody={logsBody}
         yamlBody={yamlBody}
+        overviewBody={overviewBody}
+        showYaml={showYaml}
+        handleToggleYaml={handleToggleYaml}
         onChanged={onChanged}
         setScaleReplicas={setScaleReplicas}
         handleToggleLogs={handleToggleLogs}
@@ -694,6 +714,9 @@ interface ResourceDetailBodyProps {
   deleteButtonLabel: string;
   logsBody: React.ReactNode;
   yamlBody: React.ReactNode;
+  overviewBody: ReactNode;
+  showYaml: boolean;
+  handleToggleYaml: () => void;
   onChanged?: () => void;
   setScaleReplicas: (v: string) => void;
   handleToggleLogs: () => void;
@@ -738,6 +761,8 @@ interface ResourceDetailActionBarProps {
   handleRestart: () => void;
   handleDelete: () => void;
   handleToggleEdit: () => void;
+  showYaml: boolean;
+  handleToggleYaml: () => void;
   pfState: { pfId: string; podPort: number; bytes: number; close: () => Promise<void> } | null;
   setPfShowInput: (v: boolean) => void;
   handleStopPortForward: () => void;
@@ -766,6 +791,8 @@ function ResourceDetailActionBar({
   handleRestart,
   handleDelete,
   handleToggleEdit,
+  showYaml,
+  handleToggleYaml,
   pfState,
   setPfShowInput,
   handleStopPortForward,
@@ -817,14 +844,12 @@ function ResourceDetailActionBar({
             onChanged={onChanged}
           />
         ) : null}
-        <Pressable
-          style={[styles.actionButton, editing && styles.actionButtonActive]}
-          onPress={handleToggleEdit}
-        >
-          <Text style={[styles.actionButtonText, editing && styles.actionButtonTextActive]}>
-            {editing ? "View YAML" : "Edit YAML"}
-          </Text>
-        </Pressable>
+        <YamlViewButtons
+          editing={editing}
+          showYaml={showYaml}
+          onToggleYaml={handleToggleYaml}
+          onToggleEdit={handleToggleEdit}
+        />
       </View>
       <Pressable
         style={[styles.deleteButton, deletingConfirm && styles.deleteButtonConfirm]}
@@ -926,6 +951,63 @@ function PortForwardActiveStatus({
   );
 }
 
+function YamlViewButtons({
+  editing,
+  showYaml,
+  onToggleYaml,
+  onToggleEdit,
+}: {
+  editing: boolean;
+  showYaml: boolean;
+  onToggleYaml: () => void;
+  onToggleEdit: () => void;
+}) {
+  return (
+    <>
+      {editing ? null : (
+        <Pressable
+          style={[styles.actionButton, showYaml && styles.actionButtonActive]}
+          onPress={onToggleYaml}
+        >
+          <Text style={[styles.actionButtonText, showYaml && styles.actionButtonTextActive]}>
+            {showYaml ? "Overview" : "YAML"}
+          </Text>
+        </Pressable>
+      )}
+      <Pressable
+        style={[styles.actionButton, editing && styles.actionButtonActive]}
+        onPress={onToggleEdit}
+      >
+        <Text style={[styles.actionButtonText, editing && styles.actionButtonTextActive]}>
+          {editing ? "View YAML" : "Edit YAML"}
+        </Text>
+      </Pressable>
+    </>
+  );
+}
+
+function DetailMainView({
+  showYaml,
+  editing,
+  yamlBody,
+  overviewBody,
+}: {
+  showYaml: boolean;
+  editing: boolean;
+  yamlBody: ReactNode;
+  overviewBody: ReactNode;
+}) {
+  if (showYaml) {
+    return (
+      <View style={styles.yamlContainer}>
+        <Text style={styles.yamlSectionLabel}>{editing ? "Edit YAML" : "YAML"}</Text>
+        {yamlBody}
+      </View>
+    );
+  }
+  return <View style={styles.overviewContainer}>{overviewBody}</View>;
+}
+
 function ResourceDetailBody({
   isPod,
   isSecret,
@@ -953,6 +1035,9 @@ function ResourceDetailBody({
   deleteButtonLabel,
   logsBody,
   yamlBody,
+  overviewBody,
+  showYaml,
+  handleToggleYaml,
   onChanged,
   setScaleReplicas,
   handleToggleLogs,
@@ -1000,6 +1085,8 @@ function ResourceDetailBody({
         handleRestart={handleRestart}
         handleDelete={handleDelete}
         handleToggleEdit={handleToggleEdit}
+        showYaml={showYaml}
+        handleToggleYaml={handleToggleYaml}
         pfState={pfState}
         setPfShowInput={setPfShowInput}
         handleStopPortForward={handleStopPortForward}
@@ -1104,10 +1191,12 @@ function ResourceDetailBody({
           {logsBody}
         </View>
       ) : (
-        <View style={styles.yamlContainer}>
-          <Text style={styles.yamlSectionLabel}>{editing ? "Edit YAML" : "YAML"}</Text>
-          {yamlBody}
-        </View>
+        <DetailMainView
+          showYaml={editing || showYaml || overviewBody === null}
+          editing={editing}
+          yamlBody={yamlBody}
+          overviewBody={overviewBody}
+        />
       )}
 
       {showShell ? (
@@ -1269,6 +1358,10 @@ const styles = StyleSheet.create((theme: Theme) => ({
     flex: 1,
     minHeight: 200,
     paddingTop: theme.spacing[3],
+  },
+  overviewContainer: {
+    flex: 1,
+    minHeight: 200,
   },
   yamlSectionLabel: {
     fontSize: theme.fontSize.xs,
