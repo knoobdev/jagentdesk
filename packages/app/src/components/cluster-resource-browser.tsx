@@ -4,6 +4,7 @@ import { StyleSheet } from "react-native-unistyles";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { ClusterResourceDetail } from "@/components/cluster-resource-detail";
+import { ClusterHelmView } from "@/components/cluster-helm-view";
 import { ClusterStatusDot, PodStatusDot } from "@/components/cluster-dot";
 import type { Theme } from "@/styles/theme";
 
@@ -112,6 +113,7 @@ export function ClusterResourceBrowser({
     namespace: string;
     name: string;
   } | null>(null);
+  const [showingHelm, setShowingHelm] = useState(false);
   const kindListRef = useRef<ScrollView>(null);
 
   useEffect(() => {
@@ -142,6 +144,7 @@ export function ClusterResourceBrowser({
   const handleSelectKind = useCallback(
     (kind: string) => {
       if (!client) return;
+      setShowingHelm(false);
       setSelectedKind(kind);
       setLoadingItems(true);
       setError(null);
@@ -193,6 +196,12 @@ export function ClusterResourceBrowser({
     },
     [client, clusterId],
   );
+
+  const handleSelectHelm = useCallback(() => {
+    setShowingHelm(true);
+    setSelectedKind(null);
+    setItems([]);
+  }, []);
 
   const handleResourcePress = useCallback(
     (item: ResourceItem) => () => {
@@ -366,6 +375,9 @@ export function ClusterResourceBrowser({
   );
 
   const renderResourceContent = useCallback(() => {
+    if (showingHelm) {
+      return <ClusterHelmView serverId={serverId} clusterId={clusterId} />;
+    }
     if (!selectedKind) {
       return (
         <View style={styles.centerContainer}>
@@ -415,7 +427,17 @@ export function ClusterResourceBrowser({
         />
       </>
     );
-  }, [selectedKind, loadingItems, error, items, keyExtractor, renderResourceItem]);
+  }, [
+    selectedKind,
+    loadingItems,
+    error,
+    items,
+    keyExtractor,
+    renderResourceItem,
+    showingHelm,
+    serverId,
+    clusterId,
+  ]);
 
   // ── Loading state ──
   if (loadingKinds) {
@@ -478,6 +500,18 @@ export function ClusterResourceBrowser({
               })}
             </View>
           ))}
+          {/* Helm nav */}
+          <View style={styles.mobileCategoryGroup}>
+            <Text style={styles.mobileCategoryLabel}>Helm</Text>
+            <Pressable
+              style={[styles.mobileChip, showingHelm && styles.mobileChipSelected]}
+              onPress={handleSelectHelm}
+            >
+              <Text style={[styles.mobileChipText, showingHelm && styles.mobileChipTextSelected]}>
+                Releases
+              </Text>
+            </Pressable>
+          </View>
         </ScrollView>
 
         {/* Resource table */}
@@ -504,6 +538,20 @@ export function ClusterResourceBrowser({
       <View style={styles.desktopLayout}>
         <ScrollView style={styles.navRail} contentContainerStyle={styles.navRailContent}>
           {grouped.map(renderCategory)}
+          <View style={styles.categoryGroup}>
+            <Text style={styles.categoryHeader}>Helm</Text>
+            <Pressable
+              style={[styles.kindRow, showingHelm && styles.kindRowSelected]}
+              onPress={handleSelectHelm}
+            >
+              <Text
+                style={[styles.kindName, showingHelm && styles.kindNameSelected]}
+                numberOfLines={1}
+              >
+                Releases
+              </Text>
+            </Pressable>
+          </View>
         </ScrollView>
 
         <View style={styles.contentArea}>{renderResourceContent()}</View>
