@@ -9,6 +9,7 @@ import { ClusterCronjobOps } from "./cluster-cronjob-ops";
 import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
 import { useSessionStore } from "@/stores/session-store";
 import { askAgentAboutResource } from "./cluster-ask-agent";
+import { ClusterPodShell } from "./cluster-pod-shell";
 import type { Theme } from "@/styles/theme";
 
 interface ClusterResourceDetailProps {
@@ -112,6 +113,9 @@ export function ClusterResourceDetail({
   const [followEnabled, setFollowEnabled] = useState(false);
   const followUnsubscribeRef = useRef<(() => Promise<void>) | null>(null);
   const logsScrollRef = useRef<ScrollView>(null);
+
+  // Shell state
+  const [showShell, setShowShell] = useState(false);
 
   const isWorkload = WORKLOAD_KINDS.has(kind);
   const canRestart = RESTARTABLE_KINDS.has(kind);
@@ -253,6 +257,7 @@ export function ClusterResourceDetail({
     const next = !showLogs;
     setShowLogs(next);
     if (next) {
+      setShowShell(false);
       setEditing(false);
       fetchLogs(selectedContainer);
     }
@@ -276,6 +281,16 @@ export function ClusterResourceDetail({
   const handleToggleFollow = useCallback(() => {
     setFollowEnabled((prev) => !prev);
     setLogError(null);
+  }, []);
+
+  const handleToggleShell = useCallback(() => {
+    setShowShell((prev) => {
+      if (!prev) {
+        setShowLogs(false);
+        setEditing(false);
+      }
+      return !prev;
+    });
   }, []);
 
   const handleDelete = useCallback(() => {
@@ -437,6 +452,7 @@ export function ClusterResourceDetail({
     setEditing((e) => !e);
     setDeletingConfirm(false);
     setShowLogs(false);
+    setShowShell(false);
   }, []);
 
   const yamlBody = useMemo(() => {
@@ -556,6 +572,7 @@ export function ClusterResourceDetail({
         isWorkload={isWorkload}
         canRestart={canRestart}
         showLogs={showLogs}
+        showShell={showShell}
         editing={editing}
         logLoading={logLoading}
         deleting={deleting}
@@ -563,6 +580,7 @@ export function ClusterResourceDetail({
         scaling={scaling}
         restarting={restarting}
         client={client}
+        serverId={serverId}
         clusterId={clusterId}
         namespace={namespace}
         name={name}
@@ -585,6 +603,7 @@ export function ClusterResourceDetail({
         handleSelectContainer={handleSelectContainer}
         followEnabled={followEnabled}
         handleToggleFollow={handleToggleFollow}
+        handleToggleShell={handleToggleShell}
         agentProvider={agentProvider}
         agentCwd={agentCwd}
         handleDiagnose={handleDiagnose}
@@ -601,6 +620,7 @@ interface ResourceDetailBodyProps {
   isWorkload: boolean;
   canRestart: boolean;
   showLogs: boolean;
+  showShell: boolean;
   editing: boolean;
   logLoading: boolean;
   deleting: boolean;
@@ -608,6 +628,7 @@ interface ResourceDetailBodyProps {
   scaling: boolean;
   restarting: boolean;
   client: ReturnType<typeof useHostRuntimeClient>;
+  serverId: string;
   clusterId: string;
   namespace?: string;
   name: string;
@@ -630,6 +651,7 @@ interface ResourceDetailBodyProps {
   handleSelectContainer: (container: string) => void;
   followEnabled: boolean;
   handleToggleFollow: () => void;
+  handleToggleShell: () => void;
   agentProvider: string | null;
   agentCwd: string | null;
   handleDiagnose: () => void;
@@ -641,6 +663,7 @@ interface ResourceDetailActionBarProps {
   isCronJob: boolean;
   canRestart: boolean;
   showLogs: boolean;
+  showShell: boolean;
   editing: boolean;
   logLoading: boolean;
   deleting: boolean;
@@ -654,6 +677,7 @@ interface ResourceDetailActionBarProps {
   deleteButtonLabel: string;
   onChanged?: () => void;
   handleToggleLogs: () => void;
+  handleToggleShell: () => void;
   handleRestart: () => void;
   handleDelete: () => void;
   handleToggleEdit: () => void;
@@ -668,6 +692,7 @@ function ResourceDetailActionBar({
   isCronJob,
   canRestart,
   showLogs,
+  showShell,
   editing,
   logLoading,
   deleting,
@@ -681,6 +706,7 @@ function ResourceDetailActionBar({
   deleteButtonLabel,
   onChanged,
   handleToggleLogs,
+  handleToggleShell,
   handleRestart,
   handleDelete,
   handleToggleEdit,
@@ -694,6 +720,16 @@ function ResourceDetailActionBar({
         {isPod ? (
           <Pressable style={styles.actionButton} onPress={handleToggleLogs} disabled={logLoading}>
             <Text style={styles.actionButtonText}>{showLogs ? "YAML" : "Logs"}</Text>
+          </Pressable>
+        ) : null}
+        {isPod ? (
+          <Pressable
+            style={[styles.actionButton, showShell && styles.actionButtonActive]}
+            onPress={handleToggleShell}
+          >
+            <Text style={[styles.actionButtonText, showShell && styles.actionButtonTextActive]}>
+              {showShell ? "YAML" : "Shell"}
+            </Text>
           </Pressable>
         ) : null}
         {canRestart ? (
@@ -778,6 +814,7 @@ function ResourceDetailBody({
   isWorkload,
   canRestart,
   showLogs,
+  showShell,
   editing,
   logLoading,
   deleting,
@@ -785,6 +822,7 @@ function ResourceDetailBody({
   scaling,
   restarting,
   client,
+  serverId,
   clusterId,
   namespace,
   name,
@@ -807,6 +845,7 @@ function ResourceDetailBody({
   handleSelectContainer,
   followEnabled,
   handleToggleFollow,
+  handleToggleShell,
   agentProvider,
   agentCwd,
   handleDiagnose,
@@ -819,6 +858,7 @@ function ResourceDetailBody({
         isCronJob={isCronJob}
         canRestart={canRestart}
         showLogs={showLogs}
+        showShell={showShell}
         editing={editing}
         logLoading={logLoading}
         deleting={deleting}
@@ -832,6 +872,7 @@ function ResourceDetailBody({
         deleteButtonLabel={deleteButtonLabel}
         onChanged={onChanged}
         handleToggleLogs={handleToggleLogs}
+        handleToggleShell={handleToggleShell}
         handleRestart={handleRestart}
         handleDelete={handleDelete}
         handleToggleEdit={handleToggleEdit}
@@ -931,6 +972,19 @@ function ResourceDetailBody({
           {yamlBody}
         </View>
       )}
+
+      {showShell ? (
+        <View style={styles.shellContainer}>
+          <ClusterPodShell
+            serverId={serverId}
+            clusterId={clusterId}
+            namespace={namespace ?? ""}
+            pod={name}
+            container={selectedContainer ?? undefined}
+            onClose={handleToggleShell}
+          />
+        </View>
+      ) : null}
 
       {/* Message */}
       {message ? (
@@ -1225,5 +1279,10 @@ const styles = StyleSheet.create((theme: Theme) => ({
     paddingBottom: theme.spacing[2],
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,
+  },
+  shellContainer: {
+    flex: 1,
+    minHeight: 300,
+    paddingTop: theme.spacing[3],
   },
 }));
