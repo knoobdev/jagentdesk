@@ -8,6 +8,7 @@ import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
 import { useSessionStore } from "@/stores/session-store";
 import { askAgentAboutResource } from "@/components/cluster-ask-agent";
 import { useIsCompactFormFactor } from "@/constants/layout";
+import { useClusterChatStore } from "@/stores/cluster-chat-store";
 import type { Theme } from "@/styles/theme";
 
 const ThemedArrowUp = withUnistyles(ArrowUp);
@@ -39,6 +40,7 @@ export function ClusterComposer({
   const ready = Boolean(client && provider && cwd);
 
   const [text, setText] = useState("");
+  const openChat = useClusterChatStore((s) => s.openChat);
   const insets = useSafeAreaInsets();
   const isCompact = useIsCompactFormFactor();
   // Clear the home indicator / gesture bar on phones without padding desktop.
@@ -58,9 +60,12 @@ export function ClusterComposer({
       provider,
       cwd,
       message: trimmed,
+      // Open the conversation in the slide-in dock instead of a full agent tab
+      // so the k8s resources stay on screen.
+      onCreated: ({ id, workspaceId }) => openChat({ clusterId, agentId: id, workspaceId }),
     });
     setText("");
-  }, [text, client, provider, cwd, serverId, clusterId, currentKind]);
+  }, [text, client, provider, cwd, serverId, clusterId, currentKind, openChat]);
 
   const canSend = ready && text.trim().length > 0;
 

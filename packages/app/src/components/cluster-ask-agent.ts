@@ -14,11 +14,28 @@ export interface AskAgentAboutResourceInput {
   cwd: string;
   /** The question the user typed in the cluster composer. Sent as the first message. */
   message?: string;
+  /**
+   * When provided, the created agent is handed back instead of navigating to a
+   * full agent tab. The cluster/workloads view uses this to open the chat in a
+   * slide-in dock so the k8s resources stay on screen.
+   */
+  onCreated?: (agent: { id: string; workspaceId: string | null }) => void;
 }
 
 export async function askAgentAboutResource(input: AskAgentAboutResourceInput): Promise<void> {
-  const { client, serverId, clusterId, kind, namespace, name, yaml, provider, cwd, message } =
-    input;
+  const {
+    client,
+    serverId,
+    clusterId,
+    kind,
+    namespace,
+    name,
+    yaml,
+    provider,
+    cwd,
+    message,
+    onCreated,
+  } = input;
 
   const nsPart = namespace ? ` in namespace "${namespace}"` : "";
   const focus = name
@@ -54,6 +71,16 @@ export async function askAgentAboutResource(input: AskAgentAboutResourceInput): 
         },
       ],
     });
+
+    if (onCreated) {
+      // Keep the k8s view: open the conversation in the cluster chat dock.
+      const workspaceId =
+        typeof (agent as { workspaceId?: unknown }).workspaceId === "string"
+          ? (agent as { workspaceId: string }).workspaceId
+          : null;
+      onCreated({ id: agent.id, workspaceId });
+      return;
+    }
 
     // Land on the chat with the composer focused — the user types the question.
     navigateToAgent({ serverId, agentId: agent.id });
