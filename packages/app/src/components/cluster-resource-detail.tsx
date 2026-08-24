@@ -117,6 +117,16 @@ export function ClusterResourceDetail({
   // Shell state
   const [showShell, setShowShell] = useState(false);
 
+  // Port-forward state
+  const [pfShowInput, setPfShowInput] = useState(false);
+  const [pfPodPort, setPfPodPort] = useState("80");
+  const [pfState, setPfState] = useState<{
+    pfId: string;
+    podPort: number;
+    bytes: number;
+    close: () => Promise<void>;
+  } | null>(null);
+
   const isWorkload = WORKLOAD_KINDS.has(kind);
   const canRestart = RESTARTABLE_KINDS.has(kind);
   const isPod = kind.toLowerCase() === "pod";
@@ -281,6 +291,46 @@ export function ClusterResourceDetail({
   const handleToggleFollow = useCallback(() => {
     setFollowEnabled((prev) => !prev);
     setLogError(null);
+  }, []);
+
+  const handlePortForward = useCallback(() => {
+    if (!client || !namespace || !pfPodPort) return;
+    const podPort = parseInt(pfPodPort, 10);
+    if (isNaN(podPort) || podPort < 1 || podPort > 65535) {
+      setMessage("Invalid port number (1-65535)");
+      return;
+    }
+    setMessage(null);
+    void client
+      .clusterPortForwardStart({ id: clusterId, namespace, pod: name, podPort }, () => {
+        setPfState((prev) => (prev ? { ...prev, bytes: prev.bytes + 1 } : null));
+      })
+      .then(({ pfId, close }: { pfId: string; close: () => Promise<void> }) => {
+        setPfState({ pfId, podPort, bytes: 0, close });
+        setPfShowInput(false);
+        return undefined;
+      })
+      .catch((e: unknown) => {
+        setMessage(e instanceof Error ? e.message : "Port-forward failed");
+      });
+  }, [client, clusterId, namespace, name, pfPodPort]);
+
+  const handleStopPortForward = useCallback(() => {
+    const current = pfState;
+    if (!current) return;
+    current.close().catch(() => {});
+    setPfState(null);
+  }, [pfState]);
+
+  // Cleanup port-forward on unmount
+  useEffect(() => {
+    return () => {
+      if (pfState) {
+        pfState.close().catch(() => {});
+      }
+    };
+    // We intentionally capture pfState at mount time for cleanup only
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleToggleShell = useCallback(() => {
@@ -607,6 +657,13 @@ export function ClusterResourceDetail({
         agentProvider={agentProvider}
         agentCwd={agentCwd}
         handleDiagnose={handleDiagnose}
+        pfShowInput={pfShowInput}
+        pfPodPort={pfPodPort}
+        pfState={pfState}
+        setPfShowInput={setPfShowInput}
+        setPfPodPort={setPfPodPort}
+        handlePortForward={handlePortForward}
+        handleStopPortForward={handleStopPortForward}
       />
     </AdaptiveModalSheet>
   );
@@ -655,6 +712,13 @@ interface ResourceDetailBodyProps {
   agentProvider: string | null;
   agentCwd: string | null;
   handleDiagnose: () => void;
+  pfShowInput: boolean;
+  pfPodPort: string;
+  pfState: { pfId: string; podPort: number; bytes: number; close: () => Promise<void> } | null;
+  setPfShowInput: (v: boolean) => void;
+  setPfPodPort: (v: string) => void;
+  handlePortForward: () => void;
+  handleStopPortForward: () => void;
 }
 
 interface ResourceDetailActionBarProps {
@@ -684,6 +748,9 @@ interface ResourceDetailActionBarProps {
   agentProvider: string | null;
   agentCwd: string | null;
   handleDiagnose: () => void;
+  pfState: { pfId: string; podPort: number; bytes: number; close: () => Promise<void> } | null;
+  setPfShowInput: (v: boolean) => void;
+  handleStopPortForward: () => void;
 }
 
 function ResourceDetailActionBar({
@@ -713,7 +780,11 @@ function ResourceDetailActionBar({
   agentProvider,
   agentCwd,
   handleDiagnose,
+  pfState,
+  setPfShowInput,
+  handleStopPortForward,
 }: ResourceDetailActionBarProps) {
+  const handleStartPf = useCallback(() => setPfShowInput(true), [setPfShowInput]);
   return (
     <View style={styles.actionBar}>
       <View style={styles.actionBarLeft}>
@@ -732,6 +803,12 @@ function ResourceDetailActionBar({
             </Text>
           </Pressable>
         ) : null}
+        <PortForwardActionButton
+          isPod={isPod}
+          pfState={pfState}
+          onStop={handleStopPortForward}
+          onStart={handleStartPf}
+        />
         {canRestart ? (
           <Pressable style={styles.actionButton} onPress={handleRestart} disabled={restarting}>
             <Text style={styles.actionButtonText}>{restarting ? "Restarting..." : "Restart"}</Text>
@@ -806,6 +883,93 @@ function DiagnoseButton({
   );
 }
 
+function PortForwardActionButton({
+  isPod,
+  pfState,
+  onStop,
+  onStart,
+}: {
+  isPod: boolean;
+  pfState: { pfId: string; podPort: number; bytes: number; close: () => Promise<void> } | null;
+  onStop: () => void;
+  onStart: () => void;
+}) {
+  if (!isPod) return null;
+  if (pfState) {
+    return (
+      <Pressable style={[styles.actionButton, styles.actionButtonPfActive]} onPress={onStop}>
+        <Text style={[styles.actionButtonText, styles.actionButtonTextPfActive]}>Stop PF</Text>
+      </Pressable>
+    );
+  }
+  return (
+    <Pressable style={styles.actionButton} onPress={onStart}>
+      <Text style={styles.actionButtonText}>Port-forward</Text>
+    </Pressable>
+  );
+}
+
+function PortForwardInputRow({
+  isPod,
+  pfShowInput,
+  pfState,
+  pfPodPort,
+  name,
+  onPortChange,
+  onStart,
+  onCancel,
+}: {
+  isPod: boolean;
+  pfShowInput: boolean;
+  pfState: { pfId: string; podPort: number; bytes: number; close: () => Promise<void> } | null;
+  pfPodPort: string;
+  name: string;
+  onPortChange: (v: string) => void;
+  onStart: () => void;
+  onCancel: () => void;
+}) {
+  if (!isPod || !pfShowInput || pfState) return null;
+  return (
+    <View style={styles.pfRow}>
+      <Text style={styles.pfLabel}>Port:</Text>
+      <View style={styles.pfInputWrapper}>
+        <AdaptiveTextInput
+          style={styles.pfInput}
+          value={pfPodPort}
+          onChangeText={onPortChange}
+          keyboardType="number-pad"
+          placeholder="e.g. 80"
+          resetKey={`pf-port-${name}`}
+        />
+      </View>
+      <Pressable style={styles.pfStartButton} onPress={onStart}>
+        <Text style={styles.pfStartButtonText}>Start</Text>
+      </Pressable>
+      <Pressable style={styles.pfCancelButton} onPress={onCancel}>
+        <Text style={styles.pfCancelButtonText}>Cancel</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function PortForwardActiveStatus({
+  isPod,
+  pfState,
+}: {
+  isPod: boolean;
+  pfState: { pfId: string; podPort: number; bytes: number; close: () => Promise<void> } | null;
+}) {
+  if (!isPod || !pfState) return null;
+  return (
+    <View style={styles.pfActiveRow}>
+      <Text style={styles.pfActiveText}>
+        Forwarding pod:{pfState.podPort} on daemon host (active)
+      </Text>
+      <Text style={styles.pfBytesText}>{pfState.bytes} bytes received</Text>
+    </View>
+  );
+}
+
 function ResourceDetailBody({
   isPod,
   isSecret,
@@ -849,7 +1013,16 @@ function ResourceDetailBody({
   agentProvider,
   agentCwd,
   handleDiagnose,
+  pfShowInput,
+  pfPodPort,
+  pfState,
+  setPfShowInput,
+  setPfPodPort,
+  handlePortForward,
+  handleStopPortForward,
 }: ResourceDetailBodyProps) {
+  const handleCancelPfInput = useCallback(() => setPfShowInput(false), [setPfShowInput]);
+
   return (
     <>
       <ResourceDetailActionBar
@@ -879,6 +1052,9 @@ function ResourceDetailBody({
         agentProvider={agentProvider}
         agentCwd={agentCwd}
         handleDiagnose={handleDiagnose}
+        pfState={pfState}
+        setPfShowInput={setPfShowInput}
+        handleStopPortForward={handleStopPortForward}
       />
 
       {isSecret && client ? (
@@ -911,6 +1087,19 @@ function ResourceDetailBody({
           </Pressable>
         </View>
       ) : null}
+
+      <PortForwardInputRow
+        isPod={isPod}
+        pfShowInput={pfShowInput}
+        pfState={pfState}
+        pfPodPort={pfPodPort}
+        name={name}
+        onPortChange={setPfPodPort}
+        onStart={handlePortForward}
+        onCancel={handleCancelPfInput}
+      />
+
+      <PortForwardActiveStatus isPod={isPod} pfState={pfState} />
 
       {showLogs ? (
         <View style={styles.logsContainer}>
@@ -1284,5 +1473,81 @@ const styles = StyleSheet.create((theme: Theme) => ({
     flex: 1,
     minHeight: 300,
     paddingTop: theme.spacing[3],
+  },
+  pfRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    paddingVertical: theme.spacing[2],
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+  },
+  pfLabel: {
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foreground,
+    fontWeight: theme.fontWeight.medium,
+  },
+  pfInputWrapper: {
+    flex: 1,
+    maxWidth: 100,
+  },
+  pfInput: {
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.md,
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foreground,
+  },
+  pfStartButton: {
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[1.5],
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.accent,
+  },
+  pfStartButtonText: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.accentForeground,
+  },
+  pfCancelButton: {
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[1.5],
+    borderRadius: theme.borderRadius.md,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+  },
+  pfCancelButtonText: {
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foregroundMuted,
+  },
+  pfActiveRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: theme.spacing[2],
+    paddingVertical: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
+    backgroundColor: theme.colors.palette.green[100],
+    borderRadius: theme.borderRadius.md,
+    marginTop: theme.spacing[2],
+  },
+  pfActiveText: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.palette.green[800],
+    flex: 1,
+  },
+  pfBytesText: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.palette.green[600],
+  },
+  actionButtonPfActive: {
+    backgroundColor: theme.colors.palette.red[500],
+    borderColor: theme.colors.palette.red[500],
+  },
+  actionButtonTextPfActive: {
+    color: "#ffffff",
   },
 }));
