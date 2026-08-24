@@ -1,93 +1,86 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
-import { Boxes, CircleAlert, Import } from "lucide-react-native";
+import { Boxes, CircleAlert } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
+import { useRouter } from "expo-router";
 import { useHostRuntimeClient, useHosts } from "@/runtime/host-runtime";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
-import { ClusterResourceBrowser } from "@/components/cluster-resource-browser";
-import { ClusterStatusDot, ContextStatusDot } from "@/components/cluster-dot";
+import { ContextStatusDot, ClusterStatusDot } from "@/components/cluster-dot";
+import { buildClusterWorkloadsRoute } from "@/utils/host-routes";
 import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
 import { useSessionStore } from "@/stores/session-store";
 import { askAgentAboutResource } from "@/components/cluster-ask-agent";
 import type { Theme } from "@/styles/theme";
 import type { ClusterInfo, KubeContextInfo } from "@jagentdesk/protocol/cluster/rpc-schemas";
 
-function ImportButton({
-  contextName,
-  importing,
-  onImport,
-}: {
-  contextName: string;
-  importing: boolean;
-  onImport: (name: string) => void;
-}) {
-  const handlePress = useCallback(() => onImport(contextName), [contextName, onImport]);
-  return (
-    <Pressable style={styles.importButton} onPress={handlePress} disabled={importing}>
-      <ThemedImport size={14} uniProps={foregroundColorMapping} />
-      <Text style={styles.importButtonText}>{importing ? "Importing..." : "Import"}</Text>
-    </Pressable>
-  );
-}
-
-function ConnectButton({
-  clusterId,
+function ContextRow({
+  ctx,
+  cluster,
   connecting,
+  agentReady,
   onConnect,
-}: {
-  clusterId: string;
-  connecting: boolean;
-  onConnect: (id: string) => void;
-}) {
-  const handlePress = useCallback(() => onConnect(clusterId), [clusterId, onConnect]);
-  return (
-    <Pressable
-      style={[styles.connectButton, connecting && styles.connectButtonDisabled]}
-      onPress={handlePress}
-      disabled={connecting}
-    >
-      <Text style={styles.connectButtonText}>{connecting ? "Connecting..." : "Connect"}</Text>
-    </Pressable>
-  );
-}
-
-function WorkloadsButton({
-  clusterId,
-  onWorkloads,
-}: {
-  clusterId: string;
-  onWorkloads: (id: string) => void;
-}) {
-  const handlePress = useCallback(() => onWorkloads(clusterId), [clusterId, onWorkloads]);
-  return (
-    <Pressable style={styles.workloadsButton} onPress={handlePress}>
-      <Text style={styles.workloadsButtonText}>Workloads</Text>
-    </Pressable>
-  );
-}
-
-function AskClusterButton({
-  clusterId,
-  disabled,
-  label,
+  onOpen,
   onAsk,
 }: {
-  clusterId: string;
-  disabled: boolean;
-  label: string;
-  onAsk: (id: string) => void;
+  ctx: KubeContextInfo;
+  cluster: ClusterInfo | null;
+  connecting: boolean;
+  agentReady: boolean;
+  onConnect: (ctx: KubeContextInfo) => void;
+  onOpen: (clusterId: string) => void;
+  onAsk: (clusterId: string) => void;
 }) {
-  const handlePress = useCallback(() => onAsk(clusterId), [clusterId, onAsk]);
+  const connected = cluster?.state === "connected";
+  const busy = connecting || cluster?.state === "connecting";
+  const handleConnect = useCallback(() => onConnect(ctx), [onConnect, ctx]);
+  const handleOpen = useCallback(() => {
+    if (cluster) onOpen(cluster.id);
+  }, [onOpen, cluster]);
+  const handleAsk = useCallback(() => {
+    if (cluster) onAsk(cluster.id);
+  }, [onAsk, cluster]);
+
   return (
-    <Pressable
-      style={[styles.askClusterButton, disabled && styles.askClusterButtonDisabled]}
-      onPress={handlePress}
-      disabled={disabled}
-    >
-      <Text style={[styles.askClusterButtonText, disabled && styles.askClusterButtonTextDisabled]}>
-        {label}
-      </Text>
-    </Pressable>
+    <View style={styles.contextRow}>
+      {cluster ? (
+        <ClusterStatusDot state={cluster.state} />
+      ) : (
+        <ContextStatusDot current={ctx.current} />
+      )}
+      <View style={styles.contextInfo}>
+        <Text style={styles.contextName} numberOfLines={1}>
+          {ctx.name}
+        </Text>
+        <Text style={styles.contextServer} numberOfLines={1}>
+          {connected && cluster
+            ? `${cluster.nodeCount ?? "?"} nodes · ${cluster.podCount ?? "?"} pods · ${ctx.server}`
+            : ctx.server}
+        </Text>
+      </View>
+
+      {connected && cluster ? (
+        <>
+          <Pressable style={[styles.btn, styles.btnPrimary]} onPress={handleOpen}>
+            <Text style={styles.btnPrimaryText}>Open workloads</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.btn, styles.btnGhost, !agentReady && styles.btnDisabled]}
+            onPress={handleAsk}
+            disabled={!agentReady}
+          >
+            <Text style={styles.btnGhostText}>Ask an agent</Text>
+          </Pressable>
+        </>
+      ) : (
+        <Pressable
+          style={[styles.btn, styles.btnPrimary, busy && styles.btnDisabled]}
+          onPress={handleConnect}
+          disabled={busy}
+        >
+          <Text style={styles.btnPrimaryText}>{busy ? "Connecting…" : "Connect"}</Text>
+        </Pressable>
+      )}
+    </View>
   );
 }
 
@@ -95,14 +88,13 @@ export function ClustersScreen() {
   const hosts = useHosts();
   const serverId = hosts[0]?.serverId ?? "";
   const client = useHostRuntimeClient(serverId);
+  const router = useRouter();
 
   const [contexts, setContexts] = useState<KubeContextInfo[]>([]);
   const [clusters, setClusters] = useState<ClusterInfo[]>([]);
-  const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [importingName, setImportingName] = useState<string | null>(null);
-  const [connectingId, setConnectingId] = useState<string | null>(null);
+  const [busyContext, setBusyContext] = useState<string | null>(null);
 
   // Ask-agent wiring
   const { entries: providerEntries } = useProvidersSnapshot(serverId);
@@ -111,21 +103,7 @@ export function ClustersScreen() {
   );
   const agentProvider = providerEntries?.find((e) => e.enabled)?.provider ?? null;
   const agentCwd = firstWorkspace?.workspaceDirectory ?? null;
-
-  const handleAskAgentAboutCluster = useCallback(
-    (clusterId: string) => {
-      if (!client || !agentProvider || !agentCwd) return;
-      void askAgentAboutResource({
-        client,
-        serverId,
-        clusterId,
-        kind: "cluster",
-        provider: agentProvider,
-        cwd: agentCwd,
-      });
-    },
-    [client, serverId, agentProvider, agentCwd],
-  );
+  const agentReady = Boolean(agentProvider && agentCwd);
 
   const refresh = useCallback(async () => {
     if (!client) return;
@@ -153,50 +131,64 @@ export function ClustersScreen() {
     refresh().finally(() => setLoading(false));
   }, [client, refresh]);
 
-  const handleImport = useCallback(
-    async (contextName: string) => {
-      if (!client) return;
-      setImportingName(contextName);
-      setError(null);
-      try {
-        const res = await client.clusterImport({ contextName });
-        if (res.error) setError(res.error);
-        else await refresh();
-      } catch (e: unknown) {
-        setError(e instanceof Error ? e.message : "Import failed");
-      } finally {
-        setImportingName(null);
-      }
-    },
-    [client, refresh],
-  );
+  const clusterByContext = useMemo(() => {
+    const map = new Map<string, ClusterInfo>();
+    for (const c of clusters) map.set(c.contextName, c);
+    return map;
+  }, [clusters]);
 
+  // One-click: import (if needed) then connect.
   const handleConnect = useCallback(
-    async (id: string) => {
+    async (ctx: KubeContextInfo) => {
       if (!client) return;
-      setConnectingId(id);
+      setBusyContext(ctx.name);
       setError(null);
       try {
-        const res = await client.clusterConnect({ id });
-        if (res.error) setError(res.error);
-        else await refresh();
+        let cluster = clusterByContext.get(ctx.name) ?? null;
+        if (!cluster) {
+          const imp = await client.clusterImport({ contextName: ctx.name });
+          if (imp.error) {
+            setError(imp.error);
+            return;
+          }
+          cluster = imp.clusters.find((c) => c.contextName === ctx.name) ?? null;
+        }
+        if (!cluster) {
+          setError("Could not resolve cluster for context");
+          return;
+        }
+        const con = await client.clusterConnect({ id: cluster.id });
+        if (con.error) setError(con.error);
+        await refresh();
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : "Connect failed");
       } finally {
-        setConnectingId(null);
+        setBusyContext(null);
       }
     },
-    [client, refresh],
+    [client, clusterByContext, refresh],
   );
 
-  const handleSelectCluster = useCallback((id: string) => {
-    setSelectedClusterId(id);
-    setError(null);
-  }, []);
+  const handleOpenWorkloads = useCallback(
+    (clusterId: string) => {
+      router.push(buildClusterWorkloadsRoute(serverId, clusterId));
+    },
+    [router, serverId],
+  );
 
-  const clusteredContextNames = useMemo(
-    () => new Set(clusters.map((c) => c.contextName)),
-    [clusters],
+  const handleAskAgent = useCallback(
+    (clusterId: string) => {
+      if (!client || !agentProvider || !agentCwd) return;
+      void askAgentAboutResource({
+        client,
+        serverId,
+        clusterId,
+        kind: "cluster",
+        provider: agentProvider,
+        cwd: agentCwd,
+      });
+    },
+    [client, serverId, agentProvider, agentCwd],
   );
 
   if (loading) {
@@ -213,6 +205,7 @@ export function ClustersScreen() {
         <ThemedBoxes size={20} uniProps={foregroundColorMapping} />
         <Text style={styles.header}>Clusters</Text>
       </View>
+      <Text style={styles.headerHint}>Connect a Kubernetes context, then open its workloads.</Text>
 
       {error ? (
         <View style={styles.errorBanner}>
@@ -221,118 +214,35 @@ export function ClustersScreen() {
         </View>
       ) : null}
 
-      {/* Detected contexts */}
-      <Text style={styles.sectionTitle}>Detected contexts</Text>
       {contexts.length === 0 ? (
-        <Text style={styles.emptyText}>No Kubernetes contexts detected.</Text>
+        <Text style={styles.emptyText}>No Kubernetes contexts detected in ~/.kube/config.</Text>
       ) : (
         <View style={styles.sectionCard}>
-          {contexts.map((ctx) => {
-            const imported = clusteredContextNames.has(ctx.name);
-            return (
-              <View key={ctx.name} style={styles.contextRow}>
-                <ContextStatusDot current={ctx.current} />
-                <View style={styles.contextInfo}>
-                  <Text style={styles.contextName} numberOfLines={1}>
-                    {ctx.name}
-                  </Text>
-                  <Text style={styles.contextServer} numberOfLines={1}>
-                    {ctx.server}
-                  </Text>
-                </View>
-                {imported ? (
-                  <Text style={styles.importedLabel}>Imported</Text>
-                ) : (
-                  <ImportButton
-                    contextName={ctx.name}
-                    importing={importingName === ctx.name}
-                    onImport={handleImport}
-                  />
-                )}
-              </View>
-            );
-          })}
+          {contexts.map((ctx) => (
+            <ContextRow
+              key={ctx.name}
+              ctx={ctx}
+              cluster={clusterByContext.get(ctx.name) ?? null}
+              connecting={busyContext === ctx.name}
+              agentReady={agentReady}
+              onConnect={handleConnect}
+              onOpen={handleOpenWorkloads}
+              onAsk={handleAskAgent}
+            />
+          ))}
         </View>
       )}
-
-      {/* Clusters */}
-      <Text style={styles.sectionTitle}>Clusters</Text>
-      {clusters.length === 0 ? (
-        <Text style={styles.emptyText}>No clusters imported.</Text>
-      ) : (
-        <View style={styles.sectionCard}>
-          {clusters.map((cluster) => {
-            const isConnected = cluster.state === "connected";
-            const isConnecting = cluster.state === "connecting";
-            return (
-              <View key={cluster.id} style={styles.clusterCard}>
-                <View style={styles.clusterCardHeader}>
-                  <ClusterStatusDot state={cluster.state} />
-                  <View style={styles.clusterInfo}>
-                    <Text style={styles.clusterName} numberOfLines={1}>
-                      {cluster.displayName || cluster.contextName}
-                    </Text>
-                    <Text style={styles.clusterState}>{cluster.state}</Text>
-                  </View>
-                  {isConnected ? (
-                    <>
-                      <Text style={styles.clusterCounts}>
-                        {cluster.nodeCount ?? "?"} nodes · {cluster.podCount ?? "?"} pods
-                      </Text>
-                      <WorkloadsButton clusterId={cluster.id} onWorkloads={handleSelectCluster} />
-                      <AskClusterButton
-                        clusterId={cluster.id}
-                        disabled={!agentProvider || !agentCwd}
-                        label={
-                          !agentProvider || !agentCwd
-                            ? "Connect a host & add a project first"
-                            : "Ask an agent"
-                        }
-                        onAsk={handleAskAgentAboutCluster}
-                      />
-                    </>
-                  ) : (
-                    <ConnectButton
-                      clusterId={cluster.id}
-                      connecting={isConnecting || connectingId === cluster.id}
-                      onConnect={handleConnect}
-                    />
-                  )}
-                </View>
-                {cluster.lastError ? (
-                  <Text style={styles.clusterError}>{cluster.lastError}</Text>
-                ) : null}
-              </View>
-            );
-          })}
-        </View>
-      )}
-
-      {/* Resource browser */}
-      {selectedClusterId ? (
-        <View style={styles.browserSection}>
-          <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionTitle}>Resources</Text>
-          </View>
-          <ClusterResourceBrowser serverId={serverId} clusterId={selectedClusterId} />
-        </View>
-      ) : null}
     </ScrollView>
   );
 }
 
 const ThemedBoxes = withUnistyles(Boxes);
 const ThemedCircleAlert = withUnistyles(CircleAlert);
-const ThemedImport = withUnistyles(Import);
 const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
 
 const foregroundColorMapping = (theme: Theme) => ({ color: theme.colors.foreground });
-const foregroundMutedColorMapping = (theme: Theme) => ({
-  color: theme.colors.foregroundMuted,
-});
-const redColorMapping = (theme: Theme) => ({
-  color: theme.colors.palette.red[500],
-});
+const foregroundMutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
+const redColorMapping = (theme: Theme) => ({ color: theme.colors.palette.red[500] });
 
 const styles = StyleSheet.create((theme) => ({
   container: {
@@ -361,6 +271,11 @@ const styles = StyleSheet.create((theme) => ({
     fontWeight: theme.fontWeight.bold,
     color: theme.colors.foreground,
   },
+  headerHint: {
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foregroundMuted,
+    marginTop: -theme.spacing[2],
+  },
   errorBanner: {
     flexDirection: "row",
     alignItems: "center",
@@ -373,21 +288,6 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
     fontSize: theme.fontSize.sm,
     color: theme.colors.palette.red[800],
-  },
-  sectionTitle: {
-    fontSize: theme.fontSize.sm,
-    fontWeight: theme.fontWeight.medium,
-    color: theme.colors.foregroundMuted,
-    textTransform: "uppercase" as const,
-    letterSpacing: 0.5,
-  },
-  sectionHeaderRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  browserSection: {
-    minHeight: 200,
   },
   sectionCard: {
     borderRadius: theme.borderRadius.lg,
@@ -422,104 +322,30 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.xs,
     color: theme.colors.foregroundMuted,
   },
-  importedLabel: {
-    fontSize: theme.fontSize.xs,
-    color: theme.colors.palette.green[400],
-    fontWeight: theme.fontWeight.medium,
-  },
-  importButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing[1],
-    paddingHorizontal: theme.spacing[2],
-    paddingVertical: theme.spacing[1],
-    borderRadius: theme.borderRadius.md,
-    borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.border,
-  },
-  importButtonText: {
-    fontSize: theme.fontSize.xs,
-    color: theme.colors.foreground,
-  },
-  clusterCard: {
-    borderBottomWidth: theme.borderWidth[1],
-    borderBottomColor: theme.colors.border,
-  },
-  clusterCardHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing[2],
-    paddingHorizontal: theme.spacing[3],
-    paddingVertical: theme.spacing[3],
-  },
-  clusterInfo: {
-    flex: 1,
-    minWidth: 0,
-  },
-  clusterName: {
-    fontSize: theme.fontSize.sm,
-    fontWeight: theme.fontWeight.medium,
-    color: theme.colors.foreground,
-  },
-  clusterState: {
-    fontSize: theme.fontSize.xs,
-    color: theme.colors.foregroundMuted,
-  },
-  clusterCounts: {
-    fontSize: theme.fontSize.xs,
-    color: theme.colors.foregroundMuted,
-    marginRight: theme.spacing[2],
-  },
-  clusterError: {
-    fontSize: theme.fontSize.xs,
-    color: theme.colors.palette.red[500],
-    paddingHorizontal: theme.spacing[3],
-    paddingBottom: theme.spacing[2],
-  },
-  connectButton: {
+  btn: {
     paddingHorizontal: theme.spacing[3],
     paddingVertical: theme.spacing[1.5],
     borderRadius: theme.borderRadius.md,
+  },
+  btnPrimary: {
     backgroundColor: theme.colors.palette.green[400],
   },
-  connectButtonDisabled: {
-    opacity: 0.6,
-  },
-  connectButtonText: {
+  btnPrimaryText: {
     fontSize: theme.fontSize.xs,
     fontWeight: theme.fontWeight.medium,
     color: theme.colors.foreground,
   },
-  workloadsButton: {
-    paddingHorizontal: theme.spacing[3],
-    paddingVertical: theme.spacing[1.5],
-    borderRadius: theme.borderRadius.md,
-    borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.border,
-  },
-  workloadsButtonText: {
-    fontSize: theme.fontSize.xs,
-    fontWeight: theme.fontWeight.medium,
-    color: theme.colors.foreground,
-  },
-  askClusterButton: {
-    paddingHorizontal: theme.spacing[3],
-    paddingVertical: theme.spacing[1.5],
-    borderRadius: theme.borderRadius.md,
+  btnGhost: {
     borderWidth: theme.borderWidth[1],
     borderColor: theme.colors.border,
     backgroundColor: theme.colors.surface1,
   },
-  askClusterButtonDisabled: {
-    opacity: 0.5,
-  },
-  askClusterButtonText: {
+  btnGhostText: {
     fontSize: theme.fontSize.xs,
     fontWeight: theme.fontWeight.medium,
     color: theme.colors.foreground,
   },
-  askClusterButtonTextDisabled: {
-    color: theme.colors.foregroundMuted,
-    fontSize: theme.fontSize.xs,
+  btnDisabled: {
+    opacity: 0.5,
   },
 }));

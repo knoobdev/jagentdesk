@@ -23,6 +23,38 @@ interface ResourceItem {
   name: string;
   namespace: string;
   creationTimestamp: string;
+  phase?: string;
+  ready?: string;
+  restarts?: number;
+}
+
+/**
+ * clusterResourceList returns raw Kubernetes objects (fields live under
+ * item.metadata / item.status), while clusterResources returned flat DTOs.
+ * Normalize both shapes into a flat ResourceItem so NAME / NAMESPACE / AGE /
+ * STATUS columns are always populated.
+ */
+function normalizeResourceItem(raw: Record<string, unknown>): ResourceItem {
+  const md = (raw.metadata as Record<string, unknown> | undefined) ?? {};
+  const status = (raw.status as Record<string, unknown> | undefined) ?? {};
+  const name = (md.name as string) ?? (raw.name as string) ?? "";
+  const namespace = (md.namespace as string) ?? (raw.namespace as string) ?? "";
+  const creationTimestamp =
+    (md.creationTimestamp as string) ?? (raw.creationTimestamp as string) ?? "";
+  const containerStatuses = (status.containerStatuses as Array<Record<string, unknown>>) ?? [];
+  const readyCount = containerStatuses.filter((c) => c.ready === true).length;
+  const restarts = containerStatuses.reduce((sum, c) => sum + ((c.restartCount as number) ?? 0), 0);
+  return {
+    name,
+    namespace,
+    creationTimestamp,
+    phase: (status.phase as string) ?? (raw.phase as string) ?? undefined,
+    ready:
+      containerStatuses.length > 0
+        ? `${readyCount}/${containerStatuses.length}`
+        : ((raw.ready as string) ?? undefined),
+    restarts: containerStatuses.length > 0 ? restarts : ((raw.restarts as number) ?? undefined),
+  };
 }
 
 const CATEGORY_ORDER = [
@@ -36,7 +68,9 @@ const CATEGORY_ORDER = [
 ] as const;
 
 function formatAge(creationTimestamp: string): string {
+  if (!creationTimestamp) return "-";
   const created = new Date(creationTimestamp).getTime();
+  if (Number.isNaN(created)) return "-";
   const now = Date.now();
   const diffMs = now - created;
   if (diffMs < 0) return "0m";
@@ -111,7 +145,6 @@ export function ClusterResourceBrowser({
   const [error, setError] = useState<string | null>(null);
   const [kindError, setKindError] = useState<string | null>(null);
   const [metricsMap, setMetricsMap] = useState<Record<string, MetricsEntry>>({});
-  const [metricsError, setMetricsError] = useState<string | null>(null);
   const [selectedResource, setSelectedResource] = useState<{
     kind: string;
     namespace: string;
@@ -178,7 +211,6 @@ export function ClusterResourceBrowser({
       setLoadingItems(true);
       setError(null);
       setMetricsMap({});
-      setMetricsError(null);
       void client
         .clusterResourceList({
           id: clusterId,
@@ -190,7 +222,7 @@ export function ClusterResourceBrowser({
             setError(res.error);
             setItems([]);
           } else {
-            setItems(res.items as ResourceItem[]);
+            setItems((res.items as Array<Record<string, unknown>>).map(normalizeResourceItem));
           }
           return undefined;
         })
@@ -205,10 +237,7 @@ export function ClusterResourceBrowser({
         void client
           .clusterMetrics({ id: clusterId, scope })
           .then((res) => {
-            if (res.error) {
-              setMetricsError(res.error);
-              return;
-            }
+            if (res.error) return;
             const map: Record<string, MetricsEntry> = {};
             for (const item of res.items as Array<{
               name: string;
@@ -222,9 +251,7 @@ export function ClusterResourceBrowser({
             setMetricsMap(map);
             return undefined;
           })
-          .catch((e: unknown) => {
-            setMetricsError(e instanceof Error ? e.message : "Metrics unavailable");
-          });
+          .catch(() => {});
       }
     },
     [client, clusterId, isNamespaced],
@@ -277,65 +304,60 @@ export function ClusterResourceBrowser({
   }, [client, selectedKind, selectedNamespace, loadResources]);
 
   const grouped = useMemo(() => groupByCategory(kinds), [kinds]);
+  const hasMetrics = useMemo(() => Object.keys(metricsMap).length > 0, [metricsMap]);
 
   const renderResourceItem: ListRenderItem<ResourceItem> = useCallback(
     ({ item }) => {
       const isPod = selectedKind === "Pod";
-      const isNodeOrPod = selectedKind === "Node" || isPod;
-      const podPhase = isPod
-        ? ((
-            (item as unknown as Record<string, unknown>).status as
-              | Record<string, unknown>
-              | undefined
-          )?.phase as string | undefined)
-        : undefined;
+      const isNode = selectedKind === "Node";
+      const isNodeOrPod = isNode || isPod;
       const metricsKey = isPod ? `${item.namespace ?? ""}/${item.name}` : item.name;
       const metrics = isNodeOrPod ? metricsMap[metricsKey] : undefined;
-      let metricsContent: React.ReactNode = null;
-      if (isNodeOrPod) {
-        if (metrics) {
-          metricsContent = (
-            <>
-              <Text style={styles.resourceCpu}>{formatCpu(metrics.cpuNano)}</Text>
-              <Text style={styles.resourceMem}>{formatMem(metrics.memoryBytes)}</Text>
-            </>
-          );
-        } else if (metricsError) {
-          metricsContent = (
-            <Text style={styles.metricsUnavailable} numberOfLines={1}>
-              metrics unavailable
-            </Text>
-          );
-        } else {
-          metricsContent = (
-            <>
-              <Text style={styles.resourceCpu}>-</Text>
-              <Text style={styles.resourceMem}>-</Text>
-            </>
-          );
-        }
-      }
       return (
-        <Pressable style={styles.resourceRow} onPress={handleResourcePress(item)}>
-          <View style={styles.resourceNameCell}>
-            {isPod && podPhase ? (
-              <PodStatusDot phase={podPhase} />
+        <Pressable style={styles.row} onPress={handleResourcePress(item)}>
+          <View style={styles.cellName}>
+            {isPod && item.phase ? (
+              <PodStatusDot phase={item.phase} statusReason={item.phase} />
             ) : (
               <ClusterStatusDot state="connected" />
             )}
-            <Text style={styles.resourceName} numberOfLines={1}>
-              {item.name}
+            <Text style={styles.cellNameText} numberOfLines={1}>
+              {item.name || "-"}
             </Text>
           </View>
-          <Text style={styles.resourceNamespace} numberOfLines={1}>
-            {item.namespace ?? "-"}
+          <Text style={styles.cellNs} numberOfLines={1}>
+            {item.namespace || "-"}
           </Text>
-          {metricsContent}
-          <Text style={styles.resourceAge}>{formatAge(item.creationTimestamp)}</Text>
+          {isPod ? (
+            <>
+              <Text style={styles.cellNarrow} numberOfLines={1}>
+                {item.ready ?? "-"}
+              </Text>
+              <Text style={styles.cellNarrow} numberOfLines={1}>
+                {item.restarts ?? 0}
+              </Text>
+              <Text style={styles.cellStatus} numberOfLines={1}>
+                {item.phase || "-"}
+              </Text>
+            </>
+          ) : null}
+          {isNodeOrPod && hasMetrics ? (
+            <>
+              <Text style={styles.cellMetric} numberOfLines={1}>
+                {metrics ? formatCpu(metrics.cpuNano) : "-"}
+              </Text>
+              <Text style={styles.cellMetric} numberOfLines={1}>
+                {metrics ? formatMem(metrics.memoryBytes) : "-"}
+              </Text>
+            </>
+          ) : null}
+          <Text style={styles.cellAge} numberOfLines={1}>
+            {formatAge(item.creationTimestamp)}
+          </Text>
         </Pressable>
       );
     },
-    [selectedKind, handleResourcePress, metricsMap, metricsError],
+    [selectedKind, handleResourcePress, metricsMap, hasMetrics],
   );
 
   const keyExtractor = useCallback(
@@ -411,56 +433,54 @@ export function ClusterResourceBrowser({
         </View>
       );
     }
+    const isPodKind = selectedKind === "Pod";
+    const isNodeOrPodKind = isPodKind || selectedKind === "Node";
     return (
       <>
-        <View style={styles.askAgentRow}>
-          <Text style={styles.askAgentLabel}>Diagnose or manage {selectedKind} resources</Text>
-          <Pressable
-            style={[
-              styles.askAgentButton,
-              !agentProvider || !agentCwd ? styles.askAgentButtonDisabled : null,
-            ]}
-            onPress={handleAskAgent}
-            disabled={!agentProvider || !agentCwd}
-          >
-            <Text
-              style={[
-                styles.askAgentButtonText,
-                !agentProvider || !agentCwd ? styles.askAgentButtonTextDisabled : null,
-              ]}
-            >
-              {!agentProvider || !agentCwd
-                ? "Connect a host & add a project first"
-                : "Ask an agent"}
-            </Text>
-          </Pressable>
-        </View>
-        {isNamespaced ? (
-          <View style={styles.namespaceRow}>
+        <View style={styles.toolbar}>
+          <Text style={styles.toolbarTitle}>{selectedKind}</Text>
+          <Text style={styles.toolbarCount}>{items.length}</Text>
+          <View style={styles.toolbarSpacer} />
+          {isNamespaced ? (
             <ClusterNamespaceSelector
               serverId={serverId}
               clusterId={clusterId}
               value={selectedNamespace}
               onChange={handleNamespaceChange}
             />
-          </View>
-        ) : null}
-        <View style={styles.tableHeader}>
-          <Text style={styles.tableHeaderName}>NAME</Text>
-          <Text style={styles.tableHeaderNamespace}>NAMESPACE</Text>
-          {selectedKind === "Node" || selectedKind === "Pod" ? (
+          ) : null}
+          <Pressable
+            style={[styles.askBtn, (!agentProvider || !agentCwd) && styles.askBtnDisabled]}
+            onPress={handleAskAgent}
+            disabled={!agentProvider || !agentCwd}
+          >
+            <Text style={styles.askBtnText}>Ask an agent</Text>
+          </Pressable>
+        </View>
+        <View style={styles.header}>
+          <Text style={styles.headerName}>NAME</Text>
+          <Text style={styles.headerNs}>NAMESPACE</Text>
+          {isPodKind ? (
             <>
-              <Text style={styles.tableHeaderCpu}>CPU</Text>
-              <Text style={styles.tableHeaderMem}>MEM</Text>
+              <Text style={styles.headerNarrow}>READY</Text>
+              <Text style={styles.headerNarrow}>RESTARTS</Text>
+              <Text style={styles.headerStatus}>STATUS</Text>
             </>
           ) : null}
-          <Text style={styles.tableHeaderAge}>AGE</Text>
+          {isNodeOrPodKind && hasMetrics ? (
+            <>
+              <Text style={styles.headerMetric}>CPU</Text>
+              <Text style={styles.headerMetric}>MEM</Text>
+            </>
+          ) : null}
+          <Text style={styles.headerAge}>AGE</Text>
         </View>
         <FlatList
           data={items}
           keyExtractor={keyExtractor}
           renderItem={renderResourceItem}
           scrollEnabled={false}
+          style={styles.list}
         />
       </>
     );
@@ -480,6 +500,7 @@ export function ClusterResourceBrowser({
     isNamespaced,
     selectedNamespace,
     handleNamespaceChange,
+    hasMetrics,
   ]);
 
   // ── Loading state ──
@@ -734,124 +755,29 @@ const styles = StyleSheet.create((theme: Theme) => ({
     minWidth: 0,
     minHeight: 0,
   },
-  // ── Table ──
-  tableHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: theme.spacing[2],
-    paddingVertical: theme.spacing[1],
-    borderBottomWidth: theme.borderWidth[1],
-    borderBottomColor: theme.colors.border,
-  },
-  tableHeaderName: {
-    flex: 1,
-    fontSize: theme.fontSize.xs,
-    fontWeight: theme.fontWeight.medium,
-    color: theme.colors.foregroundMuted,
-    textTransform: "uppercase" as const,
-    letterSpacing: 0.5,
-  },
-  tableHeaderNamespace: {
-    width: 140,
-    fontSize: theme.fontSize.xs,
-    fontWeight: theme.fontWeight.medium,
-    color: theme.colors.foregroundMuted,
-    textTransform: "uppercase" as const,
-    letterSpacing: 0.5,
-  },
-  tableHeaderAge: {
-    width: 60,
-    fontSize: theme.fontSize.xs,
-    fontWeight: theme.fontWeight.medium,
-    color: theme.colors.foregroundMuted,
-    textTransform: "uppercase" as const,
-    letterSpacing: 0.5,
-    textAlign: "right" as const,
-  },
-  tableHeaderCpu: {
-    width: 60,
-    fontSize: theme.fontSize.xs,
-    fontWeight: theme.fontWeight.medium,
-    color: theme.colors.foregroundMuted,
-    textTransform: "uppercase" as const,
-    letterSpacing: 0.5,
-    textAlign: "right" as const,
-  },
-  tableHeaderMem: {
-    width: 60,
-    fontSize: theme.fontSize.xs,
-    fontWeight: theme.fontWeight.medium,
-    color: theme.colors.foregroundMuted,
-    textTransform: "uppercase" as const,
-    letterSpacing: 0.5,
-    textAlign: "right" as const,
-  },
-  resourceRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: theme.spacing[2],
-    paddingVertical: theme.spacing[2],
-    borderBottomWidth: theme.borderWidth[1],
-    borderBottomColor: theme.colors.border,
-  },
-  resourceNameCell: {
-    flex: 1,
+  // ── Toolbar ──
+  toolbar: {
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[2],
-    minWidth: 0,
-  },
-  resourceName: {
-    fontSize: theme.fontSize.sm,
-    color: theme.colors.foreground,
-    flex: 1,
-    minWidth: 0,
-  },
-  resourceNamespace: {
-    width: 140,
-    fontSize: theme.fontSize.xs,
-    color: theme.colors.foregroundMuted,
-  },
-  resourceCpu: {
-    width: 60,
-    fontSize: theme.fontSize.xs,
-    color: theme.colors.foregroundMuted,
-    textAlign: "right" as const,
-  },
-  resourceMem: {
-    width: 60,
-    fontSize: theme.fontSize.xs,
-    color: theme.colors.foregroundMuted,
-    textAlign: "right" as const,
-  },
-  metricsUnavailable: {
-    width: 120,
-    fontSize: theme.fontSize.xs,
-    color: theme.colors.foregroundMuted,
-    fontStyle: "italic" as const,
-    textAlign: "right" as const,
-  },
-  resourceAge: {
-    width: 60,
-    fontSize: theme.fontSize.xs,
-    color: theme.colors.foregroundMuted,
-    textAlign: "right" as const,
-  },
-  askAgentRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
     paddingVertical: theme.spacing[2],
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,
   },
-  askAgentLabel: {
+  toolbarTitle: {
+    fontSize: theme.fontSize.base,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foreground,
+  },
+  toolbarCount: {
     fontSize: theme.fontSize.sm,
     color: theme.colors.foregroundMuted,
+  },
+  toolbarSpacer: {
     flex: 1,
   },
-  askAgentButton: {
+  askBtn: {
     paddingHorizontal: theme.spacing[3],
     paddingVertical: theme.spacing[1.5],
     borderRadius: theme.borderRadius.md,
@@ -859,24 +785,126 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderColor: theme.colors.border,
     backgroundColor: theme.colors.surface1,
   },
-  askAgentButtonDisabled: {
+  askBtnDisabled: {
     opacity: 0.5,
   },
-  askAgentButtonText: {
-    fontSize: theme.fontSize.sm,
+  askBtnText: {
+    fontSize: theme.fontSize.xs,
     fontWeight: theme.fontWeight.medium,
     color: theme.colors.foreground,
   },
-  askAgentButtonTextDisabled: {
-    color: theme.colors.foregroundMuted,
-    fontSize: theme.fontSize.xs,
-  },
-  namespaceRow: {
+  // ── Table header ──
+  header: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: theme.spacing[2],
+    gap: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
     paddingVertical: theme.spacing[1.5],
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,
+  },
+  headerName: {
+    flex: 1,
+    minWidth: 150,
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foregroundMuted,
+    textTransform: "uppercase" as const,
+    letterSpacing: 0.5,
+  },
+  headerNs: {
+    width: 130,
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foregroundMuted,
+    textTransform: "uppercase" as const,
+    letterSpacing: 0.5,
+  },
+  headerNarrow: {
+    width: 60,
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foregroundMuted,
+    textTransform: "uppercase" as const,
+    letterSpacing: 0.5,
+  },
+  headerStatus: {
+    width: 96,
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foregroundMuted,
+    textTransform: "uppercase" as const,
+    letterSpacing: 0.5,
+  },
+  headerMetric: {
+    width: 48,
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foregroundMuted,
+    textTransform: "uppercase" as const,
+    letterSpacing: 0.5,
+    textAlign: "right" as const,
+  },
+  headerAge: {
+    width: 48,
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foregroundMuted,
+    textTransform: "uppercase" as const,
+    letterSpacing: 0.5,
+    textAlign: "right" as const,
+  },
+  // ── Rows ──
+  list: {
+    flexGrow: 0,
+  },
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+  },
+  cellName: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    minWidth: 150,
+  },
+  cellNameText: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foreground,
+  },
+  cellNs: {
+    width: 130,
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foregroundMuted,
+  },
+  cellNarrow: {
+    width: 60,
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foregroundMuted,
+  },
+  cellStatus: {
+    width: 96,
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foregroundMuted,
+  },
+  cellMetric: {
+    width: 48,
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+    textAlign: "right" as const,
+  },
+  cellAge: {
+    width: 48,
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foregroundMuted,
+    textAlign: "right" as const,
   },
 }));

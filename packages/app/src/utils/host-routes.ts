@@ -433,6 +433,15 @@ export function buildClustersRoute(serverId: string) {
   return `/h/${encodeSegment(normalized)}/clusters` as const;
 }
 
+export function buildClusterWorkloadsRoute(serverId: string, clusterId: string) {
+  const normalizedServer = trimNonEmpty(serverId);
+  const normalizedCluster = trimNonEmpty(clusterId);
+  if (!normalizedServer || !normalizedCluster) {
+    return buildClustersRoute(serverId);
+  }
+  return `/h/${encodeSegment(normalizedServer)}/cluster/${encodeSegment(normalizedCluster)}` as const;
+}
+
 export function buildSessionsRoute() {
   return "/sessions" as const;
 }
