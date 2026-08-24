@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { ScrollView, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { PodStatusDot } from "@/components/cluster-dot";
+import { ClusterResourceEvents } from "@/components/cluster-resource-events";
 import type { Theme } from "@/styles/theme";
 
 type Obj = Record<string, unknown>;
@@ -29,48 +30,131 @@ interface Row {
   value: string;
 }
 
-function buildRows(kind: string, spec: Obj, status: Obj, md: Obj): Row[] {
+// Kind-specific rows. Each helper receives a `push(label, value)` that skips
+// empty values, plus the parsed spec/status/metadata objects. Kept small per
+// kind so the whole thing stays well under the complexity limit.
+type Push = (label: string, value: unknown) => void;
+
+const KIND_ROWS: Record<string, (p: Push, spec: Obj, status: Obj, md: Obj, data?: Obj) => void> = {
+  Pod: (p, spec, status) => {
+    p("Status", status.phase);
+    p("Node", spec.nodeName);
+    p("Pod IP", status.podIP);
+    p("Host IP", status.hostIP);
+    p("QoS Class", status.qosClass);
+    p("Service Account", spec.serviceAccountName);
+  },
+  Deployment: (p, spec, status) => {
+    const desired = str(spec.replicas) ?? "0";
+    const ready = str(status.readyReplicas) ?? "0";
+    p("Replicas", `${ready}/${desired} ready`);
+    p("Available", status.availableReplicas);
+    p("Updated", status.updatedReplicas);
+    p("Strategy", asObj(spec.strategy).type);
+  },
+  DaemonSet: (p, _spec, status) => {
+    p("Desired", status.desiredNumberScheduled);
+    p("Current", status.currentNumberScheduled);
+    p("Ready", status.numberReady);
+    p("Available", status.numberAvailable);
+    p("Up-to-date", status.updatedNumberScheduled);
+  },
+  Service: (p, spec, status) => {
+    p("Type", spec.type);
+    p("Cluster IP", spec.clusterIP);
+    p("External IP", str(asObj(asObj(status.loadBalancer)).ingress) ?? spec.externalName);
+    p("Selector", entriesToStr(asObj(spec.selector)));
+    const ports = asArr(spec.ports)
+      .map((port) => {
+        const node = str(port.nodePort);
+        return `${str(port.port) ?? "?"}/${str(port.protocol) ?? "TCP"}${node ? ` →${node}` : ""}`;
+      })
+      .join(", ");
+    if (ports) p("Ports", ports);
+  },
+  Ingress: (p, spec) => {
+    p("Class", spec.ingressClassName);
+    const hosts = asArr(spec.rules)
+      .map((r) => str(r.host))
+      .filter(Boolean)
+      .join(", ");
+    if (hosts) p("Hosts", hosts);
+  },
+  Node: (p, _spec, status) => {
+    const info = asObj(status.nodeInfo);
+    p("OS", info.operatingSystem);
+    p("Architecture", info.architecture);
+    p("Kernel", info.kernelVersion);
+    p("Kubelet", info.kubeletVersion);
+    p("Container Runtime", info.containerRuntimeVersion);
+    const cap = asObj(status.capacity);
+    p("CPU", cap.cpu);
+    p("Memory", cap.memory);
+    p("Pods", cap.pods);
+  },
+  Job: (p, spec, status) => {
+    p("Completions", spec.completions);
+    p("Parallelism", spec.parallelism);
+    p("Active", asArr(status.active).length || status.active);
+    p("Succeeded", status.succeeded);
+    p("Failed", status.failed);
+  },
+  CronJob: (p, spec, status) => {
+    p("Schedule", spec.schedule);
+    p("Suspend", spec.suspend);
+    p("Active", asArr(status.active).length || undefined);
+    p("Last Schedule", str(status.lastScheduleTime));
+  },
+  ConfigMap: (p, _spec, _status, _md, data) => p("Keys", Object.keys(asObj(data)).join(", ")),
+  Secret: (p, spec, _status, _md, data) => {
+    p("Type", spec.type);
+    p("Keys", Object.keys(asObj(data)).join(", "));
+  },
+  PersistentVolumeClaim: (p, spec, status) => {
+    p("Status", status.phase);
+    p("Volume", spec.volumeName);
+    p("Capacity", asObj(status.capacity).storage ?? asObj(asObj(spec.resources).requests).storage);
+    p("Access Modes", asArr(spec.accessModes).join(", ") || spec.accessModes);
+    p("Storage Class", spec.storageClassName);
+  },
+  PersistentVolume: (p, spec, status) => {
+    p("Status", status.phase);
+    p("Capacity", asObj(spec.capacity).storage);
+    p("Access Modes", asArr(spec.accessModes).join(", ") || spec.accessModes);
+    p("Reclaim Policy", spec.persistentVolumeReclaimPolicy);
+    p("Storage Class", spec.storageClassName);
+  },
+  Namespace: (p, _spec, status) => p("Status", asObj(status).phase),
+  ServiceAccount: (p, _spec, _status, md) =>
+    p("Secrets", asArr(md.secrets ?? []).length || undefined),
+  HorizontalPodAutoscaler: (p, spec, status) => {
+    p("Target", `${str(asObj(spec.scaleTargetRef).kind)}/${str(asObj(spec.scaleTargetRef).name)}`);
+    p("Min Replicas", spec.minReplicas);
+    p("Max Replicas", spec.maxReplicas);
+    p("Current Replicas", status.currentReplicas);
+    p("Desired Replicas", status.desiredReplicas);
+  },
+};
+KIND_ROWS.StatefulSet = KIND_ROWS.Deployment;
+KIND_ROWS.ReplicaSet = KIND_ROWS.Deployment;
+KIND_ROWS.ReplicationController = KIND_ROWS.Deployment;
+
+function entriesToStr(obj: Obj): string {
+  return Object.entries(obj)
+    .map(([k, v]) => `${k}=${str(v) ?? ""}`)
+    .join(", ");
+}
+
+function buildRows(kind: string, spec: Obj, status: Obj, md: Obj, data?: Obj): Row[] {
   const rows: Row[] = [];
-  const push = (label: string, value: unknown) => {
+  const push: Push = (label, value) => {
     const v = str(value);
     if (v) rows.push({ label, value: v });
   };
   push("Namespace", md.namespace);
   const createdAge = age(md.creationTimestamp);
   if (createdAge) rows.push({ label: "Created", value: `${createdAge} ago` });
-
-  if (kind === "Pod") {
-    push("Status", status.phase);
-    push("Node", spec.nodeName);
-    push("Pod IP", status.podIP);
-    push("Host IP", status.hostIP);
-    push("QoS Class", status.qosClass);
-    push("Service Account", spec.serviceAccountName);
-  } else if (kind === "Deployment" || kind === "StatefulSet" || kind === "ReplicaSet") {
-    const desired = str(spec.replicas) ?? "0";
-    const ready = str(status.readyReplicas) ?? "0";
-    rows.push({ label: "Replicas", value: `${ready}/${desired} ready` });
-    push("Available", status.availableReplicas);
-    push("Updated", status.updatedReplicas);
-    push("Strategy", asObj(spec.strategy).type);
-  } else if (kind === "Service") {
-    push("Type", spec.type);
-    push("Cluster IP", spec.clusterIP);
-    const ports = asArr(spec.ports)
-      .map((p) => `${str(p.port) ?? "?"}/${str(p.protocol) ?? "TCP"}`)
-      .join(", ");
-    if (ports) rows.push({ label: "Ports", value: ports });
-  } else if (kind === "Node") {
-    const info = asObj(status.nodeInfo);
-    push("OS", info.operatingSystem);
-    push("Kernel", info.kernelVersion);
-    push("Kubelet", info.kubeletVersion);
-    push("Container Runtime", info.containerRuntimeVersion);
-  } else if (kind === "Job" || kind === "CronJob") {
-    push("Schedule", spec.schedule);
-    push("Active", asArr(status.active).length || undefined);
-    push("Succeeded", status.succeeded);
-  }
+  KIND_ROWS[kind]?.(push, spec, status, md, data);
   return rows;
 }
 
@@ -104,7 +188,21 @@ function ChipList({ entries }: { entries: [string, string][] }) {
   );
 }
 
-export function ClusterResourceOverview({ obj, kind }: { obj: Obj; kind: string }) {
+export function ClusterResourceOverview({
+  obj,
+  kind,
+  eventsServerId,
+  eventsClusterId,
+  eventsNamespace,
+  eventsName,
+}: {
+  obj: Obj;
+  kind: string;
+  eventsServerId?: string;
+  eventsClusterId?: string;
+  eventsNamespace?: string;
+  eventsName?: string;
+}) {
   const { rows, labels, annotations, containers, conditions } = useMemo(() => {
     const md = asObj(obj.metadata);
     const spec = asObj(obj.spec);
@@ -112,7 +210,7 @@ export function ClusterResourceOverview({ obj, kind }: { obj: Obj; kind: string 
     const cs = asArr(status.containerStatuses);
     const statusByName = new Map(cs.map((c) => [str(c.name) ?? "", c]));
     return {
-      rows: buildRows(kind, spec, status, md),
+      rows: buildRows(kind, spec, status, md, asObj(obj.data)),
       labels: Object.entries(asObj(md.labels)).map(
         ([k, v]) => [k, str(v) ?? ""] as [string, string],
       ),
@@ -201,6 +299,16 @@ export function ClusterResourceOverview({ obj, kind }: { obj: Obj; kind: string 
           <Text style={styles.sectionTitle}>Annotations</Text>
           <ChipList entries={annotations} />
         </View>
+      ) : null}
+
+      {eventsServerId && eventsClusterId && eventsName ? (
+        <ClusterResourceEvents
+          serverId={eventsServerId}
+          clusterId={eventsClusterId}
+          namespace={eventsNamespace}
+          name={eventsName}
+          kind={kind}
+        />
       ) : null}
     </ScrollView>
   );

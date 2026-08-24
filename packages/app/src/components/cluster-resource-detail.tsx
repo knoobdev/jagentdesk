@@ -562,11 +562,20 @@ export function ClusterResourceDetail({
     try {
       const parsed = parseYaml(yaml);
       if (!parsed || typeof parsed !== "object") return null;
-      return <ClusterResourceOverview obj={parsed as Record<string, unknown>} kind={kind} />;
+      return (
+        <ClusterResourceOverview
+          obj={parsed as Record<string, unknown>}
+          kind={kind}
+          eventsServerId={serverId}
+          eventsClusterId={clusterId}
+          eventsNamespace={namespace}
+          eventsName={name}
+        />
+      );
     } catch {
       return null;
     }
-  }, [yaml, kind]);
+  }, [yaml, kind, serverId, clusterId, namespace, name]);
 
   const logsBody = useMemo(() => {
     if (logLoading) {
