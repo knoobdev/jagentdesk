@@ -1214,6 +1214,8 @@ function ResourceDetailBody({
             namespace={namespace ?? ""}
             pod={name}
             container={selectedContainer ?? undefined}
+            containers={containers}
+            onSelectContainer={handleSelectContainer}
             onClose={handleToggleShell}
           />
         </View>

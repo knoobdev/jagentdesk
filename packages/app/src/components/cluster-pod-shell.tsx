@@ -11,10 +11,37 @@ interface ClusterPodShellProps {
   namespace: string;
   pod: string;
   container?: string;
+  containers?: string[];
+  onSelectContainer?: (container: string) => void;
   onClose: () => void;
 }
 
 const encoder = new TextEncoder();
+
+function ContainerChip({
+  name,
+  selected,
+  onSelect,
+}: {
+  name: string;
+  selected: boolean;
+  onSelect: (name: string) => void;
+}) {
+  const handlePress = useCallback(() => onSelect(name), [name, onSelect]);
+  return (
+    <Pressable
+      style={[styles.containerChip, selected && styles.containerChipActive]}
+      onPress={handlePress}
+    >
+      <Text
+        style={[styles.containerChipText, selected && styles.containerChipTextActive]}
+        numberOfLines={1}
+      >
+        {name}
+      </Text>
+    </Pressable>
+  );
+}
 
 /**
  * An interactive pod shell rendered with the app's real terminal emulator (same
@@ -28,6 +55,8 @@ export function ClusterPodShell({
   namespace,
   pod,
   container,
+  containers = [],
+  onSelectContainer,
   onClose,
 }: ClusterPodShellProps) {
   const client = useHostRuntimeClient(serverId);
@@ -36,19 +65,25 @@ export function ClusterPodShell({
   const execRef = useRef<{ write: (d: string) => void; close: () => Promise<void> } | null>(null);
   const cancelledRef = useRef(false);
 
+  // A multi-container pod needs an explicit container or exec fails with HTTP 400
+  // ("a container name must be specified"). Default to the first one so the shell
+  // works out of the box; the selector below lets the user switch.
+  const activeContainer = container ?? containers[0];
+
   useEffect(() => {
     if (!client) {
       setError("No client connection");
       return;
     }
     cancelledRef.current = false;
+    setError(null);
     void client
       .clusterExecStart(
         {
           id: clusterId,
           namespace,
           pod,
-          ...(container ? { container } : {}),
+          ...(activeContainer ? { container: activeContainer } : {}),
           command: ["/bin/sh"],
         },
         (data: string) => {
@@ -71,7 +106,7 @@ export function ClusterPodShell({
       void execRef.current?.close();
       execRef.current = null;
     };
-  }, [client, clusterId, namespace, pod, container]);
+  }, [client, clusterId, namespace, pod, activeContainer]);
 
   const handleInput = useCallback((data: string) => {
     execRef.current?.write(data);
@@ -92,6 +127,18 @@ export function ClusterPodShell({
           <Text style={styles.closeButtonText}>Close</Text>
         </Pressable>
       </View>
+      {containers.length > 1 && onSelectContainer ? (
+        <View style={styles.containerBar}>
+          {containers.map((c) => (
+            <ContainerChip
+              key={c}
+              name={c}
+              selected={c === activeContainer}
+              onSelect={onSelectContainer}
+            />
+          ))}
+        </View>
+      ) : null}
       {error ? (
         <View style={styles.errorContainer}>
           <Text style={styles.errorText}>{error}</Text>
@@ -100,7 +147,7 @@ export function ClusterPodShell({
         <View style={styles.terminal}>
           <TerminalEmulator
             ref={emulatorRef}
-            streamKey={`pod-exec:${clusterId}:${namespace}/${pod}/${container ?? ""}`}
+            streamKey={`pod-exec:${clusterId}:${namespace}/${pod}/${activeContainer ?? ""}`}
             supportsTerminalInputModeReplay={false}
             scrollbackLines={5000}
             fontSize={13}
@@ -145,6 +192,32 @@ const styles = StyleSheet.create((theme: Theme) => ({
     fontSize: theme.fontSize.xs,
     fontWeight: theme.fontWeight.medium,
     color: theme.colors.foreground,
+  },
+  containerBar: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: theme.spacing[1.5],
+    marginBottom: theme.spacing[2],
+  },
+  containerChip: {
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
+    borderRadius: theme.borderRadius.md,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+  },
+  containerChipActive: {
+    borderColor: theme.colors.accent,
+    backgroundColor: theme.colors.surfaceSidebarHover,
+  },
+  containerChipText: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+  },
+  containerChipTextActive: {
+    color: theme.colors.foreground,
+    fontWeight: theme.fontWeight.medium,
   },
   errorContainer: {
     flex: 1,
