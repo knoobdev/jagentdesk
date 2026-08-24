@@ -112,7 +112,20 @@ export function ClusterNamespaceSelector({
           setError(res.error);
           setNamespaces([]);
         } else {
-          setNamespaces(res.items as NamespaceItem[]);
+          // clusterResourceList returns raw Kubernetes objects, so the name lives
+          // under metadata.name — reading `.name` directly leaves every row blank.
+          const parsed = (res.items as Array<Record<string, unknown>>)
+            .map((raw) => {
+              const md = (raw.metadata as Record<string, unknown> | undefined) ?? {};
+              return {
+                name: (md.name as string) ?? (raw.name as string) ?? "",
+                namespace: "",
+                creationTimestamp: (md.creationTimestamp as string) ?? "",
+              };
+            })
+            .filter((ns) => ns.name)
+            .sort((a, b) => a.name.localeCompare(b.name));
+          setNamespaces(parsed);
         }
         return undefined;
       })
