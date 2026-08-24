@@ -1,15 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FlatList, Pressable, ScrollView, Text, View, type ListRenderItem } from "react-native";
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
+import { FlatList, Pressable, Text, View, type ListRenderItem } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
-import { useIsCompactFormFactor } from "@/constants/layout";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
-import { ClusterNamespaceSelector } from "@/components/cluster-namespace-selector";
 import { ClusterResourceDetail } from "@/components/cluster-resource-detail";
 import { ClusterHelmView } from "@/components/cluster-helm-view";
 import { ClusterStatusDot, PodStatusDot } from "@/components/cluster-dot";
-import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
-import { useSessionStore } from "@/stores/session-store";
-import { askAgentAboutResource } from "./cluster-ask-agent";
+import { useClusterNavStore } from "@/stores/cluster-nav-store";
 import type { Theme } from "@/styles/theme";
 
 interface KindInfo {
@@ -28,26 +24,22 @@ interface ResourceItem {
   restarts?: number;
 }
 
-/**
- * clusterResourceList returns raw Kubernetes objects (fields live under
- * item.metadata / item.status), while clusterResources returned flat DTOs.
- * Normalize both shapes into a flat ResourceItem so NAME / NAMESPACE / AGE /
- * STATUS columns are always populated.
- */
+interface MetricsEntry {
+  cpuNano: number;
+  memoryBytes: number;
+}
+
+/** clusterResourceList returns raw Kubernetes objects; flatten so every column is populated. */
 function normalizeResourceItem(raw: Record<string, unknown>): ResourceItem {
   const md = (raw.metadata as Record<string, unknown> | undefined) ?? {};
   const status = (raw.status as Record<string, unknown> | undefined) ?? {};
-  const name = (md.name as string) ?? (raw.name as string) ?? "";
-  const namespace = (md.namespace as string) ?? (raw.namespace as string) ?? "";
-  const creationTimestamp =
-    (md.creationTimestamp as string) ?? (raw.creationTimestamp as string) ?? "";
   const containerStatuses = (status.containerStatuses as Array<Record<string, unknown>>) ?? [];
   const readyCount = containerStatuses.filter((c) => c.ready === true).length;
   const restarts = containerStatuses.reduce((sum, c) => sum + ((c.restartCount as number) ?? 0), 0);
   return {
-    name,
-    namespace,
-    creationTimestamp,
+    name: (md.name as string) ?? (raw.name as string) ?? "",
+    namespace: (md.namespace as string) ?? (raw.namespace as string) ?? "",
+    creationTimestamp: (md.creationTimestamp as string) ?? (raw.creationTimestamp as string) ?? "",
     phase: (status.phase as string) ?? (raw.phase as string) ?? undefined,
     ready:
       containerStatuses.length > 0
@@ -57,22 +49,11 @@ function normalizeResourceItem(raw: Record<string, unknown>): ResourceItem {
   };
 }
 
-const CATEGORY_ORDER = [
-  "Cluster",
-  "Workloads",
-  "Config",
-  "Network",
-  "Storage",
-  "Access",
-  "Custom",
-] as const;
-
 function formatAge(creationTimestamp: string): string {
   if (!creationTimestamp) return "-";
   const created = new Date(creationTimestamp).getTime();
   if (Number.isNaN(created)) return "-";
-  const now = Date.now();
-  const diffMs = now - created;
+  const diffMs = Date.now() - created;
   if (diffMs < 0) return "0m";
   const diffMin = Math.floor(diffMs / 60000);
   if (diffMin < 1) return "0m";
@@ -86,47 +67,15 @@ function formatAge(creationTimestamp: string): string {
 function formatCpu(cpuNano: number): string {
   return `${Math.round(cpuNano / 1e6)}m`;
 }
-
 function formatMem(memoryBytes: number): string {
   return `${Math.round(memoryBytes / 1048576)}Mi`;
 }
 
-interface MetricsEntry {
-  cpuNano: number;
-  memoryBytes: number;
-}
-
-function bucketCategory(category: string): string {
-  const norm = category.charAt(0).toUpperCase() + category.slice(1).toLowerCase();
-  if ((CATEGORY_ORDER as readonly string[]).includes(norm)) return norm;
-  return "Custom";
-}
-
-function groupByCategory(kinds: KindInfo[]): Array<{ category: string; kinds: KindInfo[] }> {
-  const map = new Map<string, KindInfo[]>();
-  for (const kind of kinds) {
-    const cat = bucketCategory(kind.category);
-    const list = map.get(cat) ?? [];
-    list.push(kind);
-    map.set(cat, list);
-  }
-  const result: Array<{ category: string; kinds: KindInfo[] }> = [];
-  const seen = new Set<string>();
-  for (const cat of CATEGORY_ORDER) {
-    const list = map.get(cat);
-    if (list) {
-      result.push({ category: cat, kinds: list });
-      seen.add(cat);
-    }
-  }
-  for (const [cat, list] of map) {
-    if (!seen.has(cat)) {
-      result.push({ category: cat, kinds: list });
-    }
-  }
-  return result;
-}
-
+/**
+ * The resource TABLE for a cluster. The category navigation now lives in the app
+ * left sidebar (SidebarClusterNav); this component only reads the selected kind
+ * from the shared store and renders the Lens-style table + detail drawer.
+ */
 export function ClusterResourceBrowser({
   serverId,
   clusterId,
@@ -134,79 +83,41 @@ export function ClusterResourceBrowser({
   serverId: string;
   clusterId: string;
 }) {
-  const isCompact = useIsCompactFormFactor();
   const client = useHostRuntimeClient(serverId);
+  const selectedKind = useClusterNavStore((s) => s.selectedKind);
+  const showingHelm = useClusterNavStore((s) => s.showingHelm);
+  const selectedNamespace = useClusterNavStore((s) => s.selectedNamespace);
 
   const [kinds, setKinds] = useState<KindInfo[]>([]);
-  const [selectedKind, setSelectedKind] = useState<string | null>(null);
   const [items, setItems] = useState<ResourceItem[]>([]);
-  const [loadingKinds, setLoadingKinds] = useState(true);
   const [loadingItems, setLoadingItems] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [kindError, setKindError] = useState<string | null>(null);
   const [metricsMap, setMetricsMap] = useState<Record<string, MetricsEntry>>({});
   const [selectedResource, setSelectedResource] = useState<{
     kind: string;
     namespace: string;
     name: string;
   } | null>(null);
-  const [selectedNamespace, setSelectedNamespace] = useState<string | undefined>(undefined);
-  const [showingHelm, setShowingHelm] = useState(false);
-  const kindListRef = useRef<ScrollView>(null);
-
-  // Ask-agent wiring
-  const { entries: providerEntries } = useProvidersSnapshot(serverId);
-  const firstWorkspace = useSessionStore(
-    (state) => state.sessions[serverId]?.workspaces.values().next().value,
-  );
-  const agentProvider = providerEntries?.find((e) => e.enabled)?.provider ?? null;
-  const agentCwd = firstWorkspace?.workspaceDirectory ?? null;
-
-  const handleAskAgent = useCallback(() => {
-    if (!client || !agentProvider || !agentCwd || !selectedKind) return;
-    void askAgentAboutResource({
-      client,
-      serverId,
-      clusterId,
-      kind: selectedKind,
-      provider: agentProvider,
-      cwd: agentCwd,
-    });
-  }, [client, serverId, clusterId, selectedKind, agentProvider, agentCwd]);
 
   useEffect(() => {
-    if (!client) {
-      setLoadingKinds(false);
-      return;
-    }
-    setLoadingKinds(true);
-    setKindError(null);
+    if (!client) return;
     void client
       .clusterKinds({ id: clusterId })
       .then((res) => {
-        if (res.error) {
-          setKindError(res.error);
-          setKinds([]);
-        } else {
-          setKinds(res.kinds as KindInfo[]);
-        }
+        if (!res.error) setKinds(res.kinds as KindInfo[]);
         return undefined;
       })
-      .catch((e: unknown) => {
-        setKindError(e instanceof Error ? e.message : "Failed to load kinds");
-        setKinds([]);
-      })
-      .finally(() => setLoadingKinds(false));
+      .catch(() => {});
   }, [client, clusterId]);
 
-  const selectedKindInfo = useMemo(
-    () => kinds.find((k) => k.kind === selectedKind) ?? null,
+  const isNamespaced = useMemo(
+    () => kinds.find((k) => k.kind === selectedKind)?.namespaced ?? false,
     [kinds, selectedKind],
   );
-  const isNamespaced = selectedKindInfo?.namespaced ?? false;
+  const hasMetrics = useMemo(() => Object.keys(metricsMap).length > 0, [metricsMap]);
 
   const loadResources = useCallback(
-    (kind: string, namespace: string | undefined) => {
+    (kind: string, namespace: string | undefined, namespaced: boolean) => {
       if (!client) return;
       setLoadingItems(true);
       setError(null);
@@ -215,7 +126,7 @@ export function ClusterResourceBrowser({
         .clusterResourceList({
           id: clusterId,
           kind,
-          ...(isNamespaced && namespace ? { namespace } : {}),
+          ...(namespaced && namespace ? { namespace } : {}),
         })
         .then((res) => {
           if (res.error) {
@@ -254,33 +165,14 @@ export function ClusterResourceBrowser({
           .catch(() => {});
       }
     },
-    [client, clusterId, isNamespaced],
+    [client, clusterId],
   );
 
-  const handleSelectKind = useCallback(
-    (kind: string) => {
-      setShowingHelm(false);
-      setSelectedKind(kind);
-      loadResources(kind, selectedNamespace);
-    },
-    [loadResources, selectedNamespace],
-  );
-
-  const handleNamespaceChange = useCallback(
-    (namespace: string | undefined) => {
-      setSelectedNamespace(namespace);
-      if (selectedKind) {
-        loadResources(selectedKind, namespace);
-      }
-    },
-    [selectedKind, loadResources],
-  );
-
-  const handleSelectHelm = useCallback(() => {
-    setShowingHelm(true);
-    setSelectedKind(null);
-    setItems([]);
-  }, []);
+  // Reload whenever the sidebar selection or namespace changes.
+  useEffect(() => {
+    if (!client || showingHelm || !selectedKind) return;
+    loadResources(selectedKind, selectedNamespace, isNamespaced);
+  }, [client, showingHelm, selectedKind, selectedNamespace, isNamespaced, loadResources]);
 
   const handleResourcePress = useCallback(
     (item: ResourceItem) => () => {
@@ -293,24 +185,15 @@ export function ClusterResourceBrowser({
     [selectedKind],
   );
 
-  const handleDetailClose = useCallback(() => {
-    setSelectedResource(null);
-  }, []);
-
+  const handleDetailClose = useCallback(() => setSelectedResource(null), []);
   const handleDetailChanged = useCallback(() => {
-    if (client && selectedKind) {
-      loadResources(selectedKind, selectedNamespace);
-    }
-  }, [client, selectedKind, selectedNamespace, loadResources]);
-
-  const grouped = useMemo(() => groupByCategory(kinds), [kinds]);
-  const hasMetrics = useMemo(() => Object.keys(metricsMap).length > 0, [metricsMap]);
+    if (client && selectedKind) loadResources(selectedKind, selectedNamespace, isNamespaced);
+  }, [client, selectedKind, selectedNamespace, isNamespaced, loadResources]);
 
   const renderResourceItem: ListRenderItem<ResourceItem> = useCallback(
     ({ item }) => {
       const isPod = selectedKind === "Pod";
-      const isNode = selectedKind === "Node";
-      const isNodeOrPod = isNode || isPod;
+      const isNodeOrPod = isPod || selectedKind === "Node";
       const metricsKey = isPod ? `${item.namespace ?? ""}/${item.name}` : item.name;
       const metrics = isNodeOrPod ? metricsMap[metricsKey] : undefined;
       return (
@@ -365,97 +248,37 @@ export function ClusterResourceBrowser({
     [],
   );
 
-  const handleMobileChipPress = useCallback(
-    (kind: string) => () => handleSelectKind(kind),
-    [handleSelectKind],
-  );
-
-  const renderKindItem = useCallback(
-    (kind: KindInfo) => {
-      const isSelected = selectedKind === kind.kind;
-      const isPod = kind.kind === "Pod";
-      const onPress = handleMobileChipPress(kind.kind);
-      return (
-        <Pressable
-          key={kind.kind}
-          style={[styles.kindRow, isSelected && styles.kindRowSelected]}
-          onPress={onPress}
-        >
-          {isPod ? <PodStatusDot phase="unknown" /> : <ClusterStatusDot state="connected" />}
-          <Text style={[styles.kindName, isSelected && styles.kindNameSelected]} numberOfLines={1}>
-            {kind.kind}
-          </Text>
-        </Pressable>
-      );
-    },
-    [selectedKind, handleMobileChipPress],
-  );
-
-  const renderCategory = useCallback(
-    (group: { category: string; kinds: KindInfo[] }) => (
-      <View key={group.category} style={styles.categoryGroup}>
-        <Text style={styles.categoryHeader}>{group.category}</Text>
-        {group.kinds.map(renderKindItem)}
+  let content: ReactElement;
+  if (showingHelm) {
+    content = <ClusterHelmView serverId={serverId} clusterId={clusterId} />;
+  } else if (!selectedKind) {
+    content = (
+      <View style={styles.center}>
+        <Text style={styles.muted}>Pick a resource on the left to browse.</Text>
       </View>
-    ),
-    [renderKindItem],
-  );
-
-  const renderResourceContent = useCallback(() => {
-    if (showingHelm) {
-      return <ClusterHelmView serverId={serverId} clusterId={clusterId} />;
-    }
-    if (!selectedKind) {
-      return (
-        <View style={styles.centerContainer}>
-          <Text style={styles.emptyText}>Select a resource kind to browse.</Text>
-        </View>
-      );
-    }
-    if (loadingItems) {
-      return (
-        <View style={styles.centerContainer}>
-          <Text style={styles.loadingText}>Loading...</Text>
-        </View>
-      );
-    }
-    if (error) {
-      return (
-        <View style={styles.centerContainer}>
-          <Text style={styles.errorText}>{error}</Text>
-        </View>
-      );
-    }
-    if (items.length === 0) {
-      return (
-        <View style={styles.centerContainer}>
-          <Text style={styles.emptyText}>No resources found.</Text>
-        </View>
-      );
-    }
+    );
+  } else if (loadingItems) {
+    content = (
+      <View style={styles.center}>
+        <Text style={styles.muted}>Loading…</Text>
+      </View>
+    );
+  } else if (error) {
+    content = (
+      <View style={styles.center}>
+        <Text style={styles.errorText}>{error}</Text>
+      </View>
+    );
+  } else {
     const isPodKind = selectedKind === "Pod";
     const isNodeOrPodKind = isPodKind || selectedKind === "Node";
-    return (
+    content = (
       <>
         <View style={styles.toolbar}>
           <Text style={styles.toolbarTitle}>{selectedKind}</Text>
           <Text style={styles.toolbarCount}>{items.length}</Text>
           <View style={styles.toolbarSpacer} />
-          {isNamespaced ? (
-            <ClusterNamespaceSelector
-              serverId={serverId}
-              clusterId={clusterId}
-              value={selectedNamespace}
-              onChange={handleNamespaceChange}
-            />
-          ) : null}
-          <Pressable
-            style={[styles.askBtn, (!agentProvider || !agentCwd) && styles.askBtnDisabled]}
-            onPress={handleAskAgent}
-            disabled={!agentProvider || !agentCwd}
-          >
-            <Text style={styles.askBtnText}>Ask an agent</Text>
-          </Pressable>
+          <Text style={styles.toolbarNs}>{selectedNamespace ?? "All namespaces"}</Text>
         </View>
         <View style={styles.header}>
           <Text style={styles.headerName}>NAME</Text>
@@ -475,152 +298,20 @@ export function ClusterResourceBrowser({
           ) : null}
           <Text style={styles.headerAge}>AGE</Text>
         </View>
-        <FlatList
-          data={items}
-          keyExtractor={keyExtractor}
-          renderItem={renderResourceItem}
-          scrollEnabled={false}
-          style={styles.list}
-        />
+        {items.length === 0 ? (
+          <View style={styles.center}>
+            <Text style={styles.muted}>No {selectedKind} resources found.</Text>
+          </View>
+        ) : (
+          <FlatList data={items} keyExtractor={keyExtractor} renderItem={renderResourceItem} />
+        )}
       </>
     );
-  }, [
-    selectedKind,
-    loadingItems,
-    error,
-    items,
-    keyExtractor,
-    renderResourceItem,
-    showingHelm,
-    serverId,
-    clusterId,
-    agentProvider,
-    agentCwd,
-    handleAskAgent,
-    isNamespaced,
-    selectedNamespace,
-    handleNamespaceChange,
-    hasMetrics,
-  ]);
-
-  // ── Loading state ──
-  if (loadingKinds) {
-    return (
-      <View style={styles.centerContainer}>
-        <Text style={styles.loadingText}>Loading kinds...</Text>
-      </View>
-    );
   }
 
-  // ── Error state ──
-  if (kindError) {
-    return (
-      <View style={styles.centerContainer}>
-        <Text style={styles.errorText}>{kindError}</Text>
-      </View>
-    );
-  }
-
-  // ── Empty state ──
-  if (kinds.length === 0) {
-    return (
-      <View style={styles.centerContainer}>
-        <Text style={styles.emptyText}>No resource kinds found.</Text>
-      </View>
-    );
-  }
-
-  // ── Content ──
-  if (isCompact) {
-    return (
-      <View style={styles.container}>
-        {/* Mobile: horizontal chip nav */}
-        <ScrollView
-          ref={kindListRef}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.mobileNavScroll}
-          contentContainerStyle={styles.mobileNavContent}
-        >
-          {grouped.map((group) => (
-            <View key={group.category} style={styles.mobileCategoryGroup}>
-              <Text style={styles.mobileCategoryLabel}>{group.category}</Text>
-              {group.kinds.map((kind) => {
-                const isSelected = selectedKind === kind.kind;
-                const onPress = handleMobileChipPress(kind.kind);
-                return (
-                  <Pressable
-                    key={kind.kind}
-                    style={[styles.mobileChip, isSelected && styles.mobileChipSelected]}
-                    onPress={onPress}
-                  >
-                    <Text
-                      style={[styles.mobileChipText, isSelected && styles.mobileChipTextSelected]}
-                    >
-                      {kind.kind}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          ))}
-          {/* Helm nav */}
-          <View style={styles.mobileCategoryGroup}>
-            <Text style={styles.mobileCategoryLabel}>Helm</Text>
-            <Pressable
-              style={[styles.mobileChip, showingHelm && styles.mobileChipSelected]}
-              onPress={handleSelectHelm}
-            >
-              <Text style={[styles.mobileChipText, showingHelm && styles.mobileChipTextSelected]}>
-                Releases
-              </Text>
-            </Pressable>
-          </View>
-        </ScrollView>
-
-        {/* Resource table */}
-        <View style={styles.contentArea}>{renderResourceContent()}</View>
-
-        {selectedResource ? (
-          <ClusterResourceDetail
-            serverId={serverId}
-            clusterId={clusterId}
-            kind={selectedResource.kind}
-            namespace={selectedResource.namespace || undefined}
-            name={selectedResource.name}
-            onClose={handleDetailClose}
-            onChanged={handleDetailChanged}
-          />
-        ) : null}
-      </View>
-    );
-  }
-
-  // Desktop: two-column layout
   return (
     <View style={styles.container}>
-      <View style={styles.desktopLayout}>
-        <ScrollView style={styles.navRail} contentContainerStyle={styles.navRailContent}>
-          {grouped.map(renderCategory)}
-          <View style={styles.categoryGroup}>
-            <Text style={styles.categoryHeader}>Helm</Text>
-            <Pressable
-              style={[styles.kindRow, showingHelm && styles.kindRowSelected]}
-              onPress={handleSelectHelm}
-            >
-              <Text
-                style={[styles.kindName, showingHelm && styles.kindNameSelected]}
-                numberOfLines={1}
-              >
-                Releases
-              </Text>
-            </Pressable>
-          </View>
-        </ScrollView>
-
-        <View style={styles.contentArea}>{renderResourceContent()}</View>
-      </View>
-
+      {content}
       {selectedResource ? (
         <ClusterResourceDetail
           serverId={serverId}
@@ -637,125 +328,10 @@ export function ClusterResourceBrowser({
 }
 
 const styles = StyleSheet.create((theme: Theme) => ({
-  container: {
-    flex: 1,
-    minHeight: 0,
-  },
-  desktopLayout: {
-    flex: 1,
-    flexDirection: "row",
-    minHeight: 0,
-  },
-  centerContainer: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: 120,
-  },
-  // ── Loading / Error / Empty ──
-  loadingText: {
-    fontSize: theme.fontSize.sm,
-    color: theme.colors.foregroundMuted,
-  },
-  errorText: {
-    fontSize: theme.fontSize.sm,
-    color: theme.colors.palette.red[500],
-  },
-  emptyText: {
-    fontSize: theme.fontSize.sm,
-    color: theme.colors.foregroundMuted,
-    fontStyle: "italic",
-  },
-  // ── Nav rail (desktop) ──
-  navRail: {
-    width: 200,
-    borderRightWidth: theme.borderWidth[1],
-    borderRightColor: theme.colors.border,
-    marginRight: theme.spacing[3],
-  },
-  navRailContent: {
-    paddingVertical: theme.spacing[1],
-    gap: theme.spacing[1],
-  },
-  categoryGroup: {
-    gap: 1,
-  },
-  categoryHeader: {
-    fontSize: theme.fontSize.xs,
-    fontWeight: theme.fontWeight.medium,
-    color: theme.colors.foregroundMuted,
-    textTransform: "uppercase" as const,
-    letterSpacing: 0.5,
-    paddingHorizontal: theme.spacing[2],
-    paddingVertical: theme.spacing[1],
-  },
-  kindRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing[2],
-    paddingHorizontal: theme.spacing[2],
-    paddingVertical: theme.spacing[1.5],
-    borderRadius: theme.borderRadius.md,
-  },
-  kindRowSelected: {
-    backgroundColor: theme.colors.surface2,
-  },
-  kindName: {
-    fontSize: theme.fontSize.sm,
-    color: theme.colors.foreground,
-    flex: 1,
-    minWidth: 0,
-  },
-  kindNameSelected: {
-    fontWeight: theme.fontWeight.medium,
-  },
-  // ── Mobile nav ──
-  mobileNavScroll: {
-    marginBottom: theme.spacing[2],
-  },
-  mobileNavContent: {
-    gap: theme.spacing[2],
-    paddingHorizontal: theme.spacing[1],
-  },
-  mobileCategoryGroup: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing[1],
-  },
-  mobileCategoryLabel: {
-    fontSize: theme.fontSize.xs,
-    fontWeight: theme.fontWeight.medium,
-    color: theme.colors.foregroundMuted,
-    textTransform: "uppercase" as const,
-    letterSpacing: 0.5,
-    marginRight: theme.spacing[1],
-  },
-  mobileChip: {
-    paddingHorizontal: theme.spacing[2],
-    paddingVertical: theme.spacing[1],
-    borderRadius: theme.borderRadius.full,
-    backgroundColor: theme.colors.surface1,
-    borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.border,
-  },
-  mobileChipSelected: {
-    backgroundColor: theme.colors.surface2,
-    borderColor: theme.colors.foregroundMuted,
-  },
-  mobileChipText: {
-    fontSize: theme.fontSize.xs,
-    color: theme.colors.foreground,
-  },
-  mobileChipTextSelected: {
-    fontWeight: theme.fontWeight.medium,
-  },
-  // ── Content area ──
-  contentArea: {
-    flex: 1,
-    minWidth: 0,
-    minHeight: 0,
-  },
-  // ── Toolbar ──
+  container: { flex: 1, minHeight: 0 },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", minHeight: 120 },
+  muted: { fontSize: theme.fontSize.sm, color: theme.colors.foregroundMuted, fontStyle: "italic" },
+  errorText: { fontSize: theme.fontSize.sm, color: theme.colors.palette.red[500] },
   toolbar: {
     flexDirection: "row",
     alignItems: "center",
@@ -770,30 +346,9 @@ const styles = StyleSheet.create((theme: Theme) => ({
     fontWeight: theme.fontWeight.medium,
     color: theme.colors.foreground,
   },
-  toolbarCount: {
-    fontSize: theme.fontSize.sm,
-    color: theme.colors.foregroundMuted,
-  },
-  toolbarSpacer: {
-    flex: 1,
-  },
-  askBtn: {
-    paddingHorizontal: theme.spacing[3],
-    paddingVertical: theme.spacing[1.5],
-    borderRadius: theme.borderRadius.md,
-    borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface1,
-  },
-  askBtnDisabled: {
-    opacity: 0.5,
-  },
-  askBtnText: {
-    fontSize: theme.fontSize.xs,
-    fontWeight: theme.fontWeight.medium,
-    color: theme.colors.foreground,
-  },
-  // ── Table header ──
+  toolbarCount: { fontSize: theme.fontSize.sm, color: theme.colors.foregroundMuted },
+  toolbarSpacer: { flex: 1 },
+  toolbarNs: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -854,10 +409,6 @@ const styles = StyleSheet.create((theme: Theme) => ({
     letterSpacing: 0.5,
     textAlign: "right" as const,
   },
-  // ── Rows ──
-  list: {
-    flexGrow: 0,
-  },
   row: {
     flexDirection: "row",
     alignItems: "center",
@@ -880,21 +431,9 @@ const styles = StyleSheet.create((theme: Theme) => ({
     fontSize: theme.fontSize.sm,
     color: theme.colors.foreground,
   },
-  cellNs: {
-    width: 130,
-    fontSize: theme.fontSize.sm,
-    color: theme.colors.foregroundMuted,
-  },
-  cellNarrow: {
-    width: 60,
-    fontSize: theme.fontSize.sm,
-    color: theme.colors.foregroundMuted,
-  },
-  cellStatus: {
-    width: 96,
-    fontSize: theme.fontSize.sm,
-    color: theme.colors.foregroundMuted,
-  },
+  cellNs: { width: 130, fontSize: theme.fontSize.sm, color: theme.colors.foregroundMuted },
+  cellNarrow: { width: 60, fontSize: theme.fontSize.sm, color: theme.colors.foregroundMuted },
+  cellStatus: { width: 96, fontSize: theme.fontSize.sm, color: theme.colors.foregroundMuted },
   cellMetric: {
     width: 48,
     fontSize: theme.fontSize.xs,

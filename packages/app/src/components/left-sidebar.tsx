@@ -72,6 +72,7 @@ import type { ShortcutKey } from "@/utils/format-shortcut";
 import { SidebarAgentListSkeleton } from "./sidebar-agent-list-skeleton";
 import { SidebarCalloutSlot } from "./sidebar-callout-slot";
 import { SidebarWorkspaceList } from "./sidebar-workspace-list";
+import { SidebarClusterNav } from "./sidebar-cluster-nav";
 import { useLocalDaemonServerId } from "@/hooks/use-is-local-daemon";
 import { usePairDeviceModalStore } from "@/stores/pair-device-modal-store";
 
@@ -820,6 +821,13 @@ function DesktopSidebar({
   const hasActiveHostFilter = useSidebarViewStore((state) => state.hostFilters.length > 0);
   const isSessionsActive = pathname.includes("/sessions");
   const isSchedulesActive = pathname.includes("/schedules");
+  const clusterRouteMatch = pathname.match(/\/h\/([^/]+)\/cluster\/([^/]+)/);
+  const clusterRoute = clusterRouteMatch
+    ? {
+        serverId: decodeURIComponent(clusterRouteMatch[1]),
+        clusterId: decodeURIComponent(clusterRouteMatch[2]),
+      }
+    : null;
   const sidebarWidth = usePanelStore((state) => state.sidebarWidth);
   const setSidebarWidth = usePanelStore((state) => state.setSidebarWidth);
   const { width: viewportWidth } = useWindowDimensions();
@@ -877,6 +885,25 @@ function DesktopSidebar({
     () => [styles.sidebarHeaderGroup, ownsTopLeft && styles.sidebarHeaderGroupBelowChrome],
     [ownsTopLeft],
   );
+  const workspaceListElement =
+    isInitialLoad && !hasActiveHostFilter ? (
+      <SidebarAgentListSkeleton />
+    ) : (
+      <SidebarWorkspaceList
+        collapsedProjectKeys={collapsedProjectKeys}
+        onToggleProjectCollapsed={toggleProjectCollapsed}
+        shortcutIndexByWorkspaceKey={shortcutIndexByWorkspaceKey}
+        groupMode={groupMode}
+        statusGroups={statusGroups}
+        pinnedGroups={pinnedGroups}
+        projects={projects}
+        workspaceEntriesByKey={workspaceEntriesByKey}
+        isRefreshing={isManualRefresh && isRevalidating}
+        onRefresh={handleRefresh}
+        onAddProject={handleOpenProject}
+        listHeaderComponent={workspacesSectionHeaderElement}
+      />
+    );
   return (
     <Animated.View
       accessibilityElementsHidden={!active}
@@ -893,49 +920,38 @@ function DesktopSidebar({
           ) : (
             <TitlebarDragRegion />
           )}
-          <View style={sidebarHeaderGroupStyle}>
-            <SidebarNewWorkspaceHeaderRow
-              label={labels.newWorkspace}
-              testID="sidebar-global-new-workspace"
-              variant="compact"
-              shortcutKeys={newWorkspaceKeys}
-            />
-            <SidebarHeaderRow
-              icon={History}
-              label={labels.sessions}
-              onPress={handleViewMore}
-              isActive={isSessionsActive}
-              testID="sidebar-sessions"
-              variant="compact"
-            />
-            <SidebarHeaderRow
-              icon={CalendarClock}
-              label={labels.schedules}
-              onPress={handleViewSchedules}
-              isActive={isSchedulesActive}
-              testID="sidebar-schedules"
-              variant="compact"
-            />
-          </View>
+          {clusterRoute ? null : (
+            <View style={sidebarHeaderGroupStyle}>
+              <SidebarNewWorkspaceHeaderRow
+                label={labels.newWorkspace}
+                testID="sidebar-global-new-workspace"
+                variant="compact"
+                shortcutKeys={newWorkspaceKeys}
+              />
+              <SidebarHeaderRow
+                icon={History}
+                label={labels.sessions}
+                onPress={handleViewMore}
+                isActive={isSessionsActive}
+                testID="sidebar-sessions"
+                variant="compact"
+              />
+              <SidebarHeaderRow
+                icon={CalendarClock}
+                label={labels.schedules}
+                onPress={handleViewSchedules}
+                isActive={isSchedulesActive}
+                testID="sidebar-schedules"
+                variant="compact"
+              />
+            </View>
+          )}
         </View>
 
-        {isInitialLoad && !hasActiveHostFilter ? (
-          <SidebarAgentListSkeleton />
+        {clusterRoute ? (
+          <SidebarClusterNav serverId={clusterRoute.serverId} clusterId={clusterRoute.clusterId} />
         ) : (
-          <SidebarWorkspaceList
-            collapsedProjectKeys={collapsedProjectKeys}
-            onToggleProjectCollapsed={toggleProjectCollapsed}
-            shortcutIndexByWorkspaceKey={shortcutIndexByWorkspaceKey}
-            groupMode={groupMode}
-            statusGroups={statusGroups}
-            pinnedGroups={pinnedGroups}
-            projects={projects}
-            workspaceEntriesByKey={workspaceEntriesByKey}
-            isRefreshing={isManualRefresh && isRevalidating}
-            onRefresh={handleRefresh}
-            onAddProject={handleOpenProject}
-            listHeaderComponent={workspacesSectionHeaderElement}
-          />
+          workspaceListElement
         )}
 
         <SidebarCalloutSlot />

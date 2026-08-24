@@ -12,10 +12,13 @@ export interface AskAgentAboutResourceInput {
   yaml?: string;
   provider: string;
   cwd: string;
+  /** The question the user typed in the cluster composer. Sent as the first message. */
+  message?: string;
 }
 
 export async function askAgentAboutResource(input: AskAgentAboutResourceInput): Promise<void> {
-  const { client, serverId, clusterId, kind, namespace, name, yaml, provider, cwd } = input;
+  const { client, serverId, clusterId, kind, namespace, name, yaml, provider, cwd, message } =
+    input;
 
   const nsPart = namespace ? ` in namespace "${namespace}"` : "";
   const focus = name
@@ -34,10 +37,14 @@ export async function askAgentAboutResource(input: AskAgentAboutResourceInput): 
   ].join("\n");
 
   try {
+    const trimmed = message?.trim();
     const agent = await client.createAgent({
       provider,
       cwd,
       labels: { "jagentdesk.cluster.id": clusterId },
+      // When the user typed a question in the composer, send it as the first
+      // message; otherwise open an empty chat for them to type.
+      ...(trimmed ? { initialPrompt: trimmed } : {}),
       attachments: [
         {
           type: "text" as const,
@@ -51,7 +58,7 @@ export async function askAgentAboutResource(input: AskAgentAboutResourceInput): 
     // Land on the chat with the composer focused — the user types the question.
     navigateToAgent({ serverId, agentId: agent.id });
   } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : "Failed to create agent";
-    Alert.alert("Agent Error", message);
+    const errMessage = e instanceof Error ? e.message : "Failed to create agent";
+    Alert.alert("Agent Error", errMessage);
   }
 }
