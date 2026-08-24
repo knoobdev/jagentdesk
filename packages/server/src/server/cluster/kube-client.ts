@@ -8,6 +8,7 @@ import {
   Metrics,
   Log,
   Exec,
+  PortForward,
   loadYaml,
   dumpYaml,
   PatchStrategy,
@@ -226,6 +227,34 @@ export class KubeClient {
         stdinStream.destroy();
         stdoutStream.destroy();
         stderrStream.destroy();
+      },
+    };
+  }
+
+  async startPortForward(
+    namespace: string,
+    pod: string,
+    podPort: number,
+    onData: (chunk: Buffer) => void,
+  ): Promise<{ write: (d: Buffer) => void; close: () => void }> {
+    this.ensureConnected();
+    const outStream = new PassThrough();
+    const inStream = new PassThrough();
+    const pf = new PortForward(this.kc!);
+    outStream.on("data", (d: Buffer) => onData(d));
+    const conn = await pf.portForward(namespace, pod, [podPort], outStream, null, inStream);
+    return {
+      write(d: Buffer): void {
+        inStream.write(d);
+      },
+      close(): void {
+        inStream.destroy();
+        outStream.destroy();
+        if (typeof conn === "function") {
+          conn();
+        } else {
+          conn.close();
+        }
       },
     };
   }

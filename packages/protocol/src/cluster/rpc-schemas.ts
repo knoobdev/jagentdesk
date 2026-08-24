@@ -564,6 +564,61 @@ export type ClusterExecData = z.infer<typeof ClusterExecDataSchema>;
 export type ClusterExecCloseRequest = z.infer<typeof ClusterExecCloseRequestSchema>;
 export type ClusterExecCloseResponse = z.infer<typeof ClusterExecCloseResponseSchema>;
 
+// ── cluster/pf/* ─────────────────────────────────────────────────────────────
+
+export const ClusterPfStartRequestSchema = z.object({
+  type: z.literal("cluster/pf/start"),
+  requestId: z.string(),
+  id: z.string(),
+  pfId: z.string(),
+  namespace: z.string(),
+  pod: z.string(),
+  podPort: z.number().int(),
+});
+
+export const ClusterPfStartResponseSchema = z.object({
+  type: z.literal("cluster/pf/start/response"),
+  payload: z.object({
+    requestId: z.string(),
+    pfId: z.string(),
+    error: z.string().nullable(),
+  }),
+});
+
+export const ClusterPfStdinRequestSchema = z.object({
+  type: z.literal("cluster/pf/stdin"),
+  requestId: z.string().optional(),
+  pfId: z.string(),
+  data: z.string(),
+});
+
+export const ClusterPfDataSchema = z.object({
+  type: z.literal("cluster/pf/data"),
+  pfId: z.string(),
+  data: z.string(),
+});
+
+export const ClusterPfCloseRequestSchema = z.object({
+  type: z.literal("cluster/pf/close"),
+  requestId: z.string(),
+  pfId: z.string(),
+});
+
+export const ClusterPfCloseResponseSchema = z.object({
+  type: z.literal("cluster/pf/close/response"),
+  payload: z.object({
+    requestId: z.string(),
+    ok: z.boolean(),
+  }),
+});
+
+export type ClusterPfStartRequest = z.infer<typeof ClusterPfStartRequestSchema>;
+export type ClusterPfStartResponse = z.infer<typeof ClusterPfStartResponseSchema>;
+export type ClusterPfStdinRequest = z.infer<typeof ClusterPfStdinRequestSchema>;
+export type ClusterPfData = z.infer<typeof ClusterPfDataSchema>;
+export type ClusterPfCloseRequest = z.infer<typeof ClusterPfCloseRequestSchema>;
+export type ClusterPfCloseResponse = z.infer<typeof ClusterPfCloseResponseSchema>;
+
 export type ClusterHelmListRequest = z.infer<typeof ClusterHelmListRequestSchema>;
 export type ClusterHelmListResponse = z.infer<typeof ClusterHelmListResponseSchema>;
 export type ClusterHelmHistoryRequest = z.infer<typeof ClusterHelmHistoryRequestSchema>;

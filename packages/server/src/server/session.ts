@@ -2425,6 +2425,18 @@ export class Session {
         return this.clusterSession.handleExecClose(
           msg as unknown as Parameters<typeof this.clusterSession.handleExecClose>[0],
         );
+      case "cluster/pf/start" as string:
+        return this.clusterSession.handlePfStart(
+          msg as unknown as Parameters<typeof this.clusterSession.handlePfStart>[0],
+        );
+      case "cluster/pf/stdin" as string:
+        return this.clusterSession.handlePfStdin(
+          msg as unknown as Parameters<typeof this.clusterSession.handlePfStdin>[0],
+        );
+      case "cluster/pf/close" as string:
+        return this.clusterSession.handlePfClose(
+          msg as unknown as Parameters<typeof this.clusterSession.handlePfClose>[0],
+        );
       default:
         return undefined;
     }

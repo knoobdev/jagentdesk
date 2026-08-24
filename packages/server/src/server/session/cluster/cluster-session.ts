@@ -30,6 +30,10 @@ export class ClusterSession {
     string,
     { write: (d: string) => void; close: () => void }
   >();
+  private readonly pfSessions = new Map<
+    string,
+    { write: (d: Buffer) => void; close: () => void }
+  >();
 
   constructor(options: ClusterSessionOptions) {
     this.host = options.host;
@@ -54,6 +58,14 @@ export class ClusterSession {
       }
     }
     this.execSessions.clear();
+    for (const pf of this.pfSessions.values()) {
+      try {
+        pf.close();
+      } catch {
+        // best-effort teardown
+      }
+    }
+    this.pfSessions.clear();
   }
 
   private emitClusterRpcError(request: { requestId: string; type: string }, error: unknown): void {
@@ -655,6 +667,69 @@ export class ClusterSession {
     }
     this.host.emit({
       type: "cluster/exec/close/response",
+      payload: {
+        requestId: request.requestId,
+        ok: true,
+      },
+    } as unknown as SessionOutboundMessage);
+  }
+
+  async handlePfStart(
+    request: Record<string, unknown> & { type: "cluster/pf/start" },
+  ): Promise<void> {
+    try {
+      const client = this.clusterRegistry.getClient(request.id as string);
+      if (!client) {
+        throw new Error(`cluster not connected: ${request.id}`);
+      }
+      const { write, close } = await client.startPortForward(
+        request.namespace as string,
+        request.pod as string,
+        request.podPort as number,
+        (chunk: Buffer) => {
+          this.host.emit({
+            type: "cluster/pf/data",
+            pfId: request.pfId,
+            data: chunk.toString("base64"),
+          } as unknown as SessionOutboundMessage);
+        },
+      );
+      this.pfSessions.set(request.pfId as string, { write, close });
+      this.host.emit({
+        type: "cluster/pf/start/response",
+        payload: {
+          requestId: request.requestId,
+          pfId: request.pfId,
+          error: null,
+        },
+      } as unknown as SessionOutboundMessage);
+    } catch (error) {
+      this.emitClusterRpcError(
+        request as unknown as Parameters<typeof this.emitClusterRpcError>[0],
+        error,
+      );
+    }
+  }
+
+  async handlePfStdin(
+    request: Record<string, unknown> & { type: "cluster/pf/stdin" },
+  ): Promise<void> {
+    const session = this.pfSessions.get(request.pfId as string);
+    if (session) {
+      session.write(Buffer.from(request.data as string, "base64"));
+    }
+  }
+
+  async handlePfClose(
+    request: Record<string, unknown> & { type: "cluster/pf/close" },
+  ): Promise<void> {
+    const session = this.pfSessions.get(request.pfId as string);
+    if (session) {
+      session.close();
+      this.pfSessions.delete(request.pfId as string);
+    }
+    this.host.emit({
+      type: "cluster/pf/close/response",
       payload: {
         requestId: request.requestId,
         ok: true,
