@@ -73,7 +73,18 @@ public final class JAgentDeskTailscaleModule: Module {
         self.markAuthenticated(stateDir: try? self.stateDirectory())
         return "connected"
       }
-      self.removeAuthenticatedMarker(stateDir: try? self.stateDirectory())
+      // Cold-start restore warm-up: the node was started from a previously
+      // authenticated state but the tailnet has not reached Running yet, so
+      // tailnetName() is transiently empty. A passive status probe must NOT
+      // delete the restore marker here — doing so permanently forces every
+      // future cold start back to the login screen even though the saved
+      // session is still valid. Keep the marker and report "connecting"; only
+      // an explicit sign-out clears it.
+      if let stateDir = try? self.stateDirectory(),
+        self.hasPersistedAuthenticatedState(stateDir: stateDir)
+      {
+        return "connecting"
+      }
       return "needs-login"
     }
 
