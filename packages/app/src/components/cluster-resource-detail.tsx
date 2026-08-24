@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
@@ -82,6 +82,11 @@ export function ClusterResourceDetail({
   const [containers, setContainers] = useState<string[]>([]);
   const [selectedContainer, setSelectedContainer] = useState<string | null>(null);
 
+  // Follow (live stream) state
+  const [followEnabled, setFollowEnabled] = useState(false);
+  const followUnsubscribeRef = useRef<(() => Promise<void>) | null>(null);
+  const logsScrollRef = useRef<ScrollView>(null);
+
   const isWorkload = WORKLOAD_KINDS.has(kind);
   const canRestart = RESTARTABLE_KINDS.has(kind);
   const isPod = kind.toLowerCase() === "pod";
@@ -125,6 +130,67 @@ export function ClusterResourceDetail({
       setContainers(parseContainersFromYaml(yaml));
     }
   }, [yaml, isPod]);
+
+  // Follow (live stream) subscription effect
+  useEffect(() => {
+    if (!followEnabled || !showLogs || !client || !namespace) return;
+
+    let cancelled = false;
+    setLogError(null);
+
+    client
+      .clusterLogsSubscribe(
+        {
+          id: clusterId,
+          namespace,
+          pod: name,
+          ...(selectedContainer ? { container: selectedContainer } : {}),
+        },
+        (chunk: string) => {
+          if (cancelled) return;
+          setLogs((prev) => {
+            if (prev === null) return chunk;
+            const combined = prev + chunk;
+            const lines = combined.split("\n");
+            if (lines.length > 2000) {
+              return lines.slice(lines.length - 2000).join("\n");
+            }
+            return combined;
+          });
+        },
+      )
+      .then(({ unsubscribe }) => {
+        if (cancelled) {
+          unsubscribe().catch(() => {});
+          return;
+        }
+        followUnsubscribeRef.current = unsubscribe;
+        return undefined;
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setLogError(e instanceof Error ? e.message : "Follow failed");
+        setFollowEnabled(false);
+      });
+
+    return () => {
+      cancelled = true;
+      if (followUnsubscribeRef.current) {
+        followUnsubscribeRef.current().catch(() => {});
+        followUnsubscribeRef.current = null;
+      }
+    };
+  }, [followEnabled, showLogs, client, clusterId, namespace, name, selectedContainer]);
+
+  // Auto-scroll when follow is on and new logs arrive
+  useEffect(() => {
+    if (followEnabled && logsScrollRef.current) {
+      const timer = setTimeout(() => {
+        logsScrollRef.current?.scrollToEnd({ animated: false });
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [logs, followEnabled]);
 
   const fetchLogs = useCallback(
     async (container: string | null) => {
@@ -180,6 +246,11 @@ export function ClusterResourceDetail({
     },
     [selectedContainer, showLogs, fetchLogs],
   );
+
+  const handleToggleFollow = useCallback(() => {
+    setFollowEnabled((prev) => !prev);
+    setLogError(null);
+  }, []);
 
   const handleDelete = useCallback(() => {
     if (!deletingConfirm) {
@@ -427,7 +498,7 @@ export function ClusterResourceDetail({
       );
     }
     return (
-      <ScrollView style={styles.logsScroll} nestedScrollEnabled>
+      <ScrollView ref={logsScrollRef} style={styles.logsScroll} nestedScrollEnabled>
         <Text style={styles.logsText} selectable>
           {logs}
         </Text>
@@ -485,6 +556,8 @@ export function ClusterResourceDetail({
         handleToggleEdit={handleToggleEdit}
         handleRefreshLogs={handleRefreshLogs}
         handleSelectContainer={handleSelectContainer}
+        followEnabled={followEnabled}
+        handleToggleFollow={handleToggleFollow}
       />
     </AdaptiveModalSheet>
   );
@@ -524,6 +597,8 @@ interface ResourceDetailBodyProps {
   handleToggleEdit: () => void;
   handleRefreshLogs: () => void;
   handleSelectContainer: (container: string) => void;
+  followEnabled: boolean;
+  handleToggleFollow: () => void;
 }
 
 interface ResourceDetailActionBarProps {
@@ -657,6 +732,8 @@ function ResourceDetailBody({
   handleToggleEdit,
   handleRefreshLogs,
   handleSelectContainer,
+  followEnabled,
+  handleToggleFollow,
 }: ResourceDetailBodyProps) {
   return (
     <>
@@ -744,14 +821,26 @@ function ResourceDetailBody({
                 </View>
               ) : null}
               <Pressable
-                style={styles.refreshButton}
-                onPress={handleRefreshLogs}
-                disabled={logLoading}
+                style={[followEnabled ? styles.followButtonActive : styles.followButton]}
+                onPress={handleToggleFollow}
               >
-                <Text style={styles.refreshButtonText}>
-                  {logLoading ? "Loading..." : "Refresh"}
+                <Text
+                  style={[followEnabled ? styles.followButtonTextActive : styles.followButtonText]}
+                >
+                  {followEnabled ? "Follow" : "Follow"}
                 </Text>
               </Pressable>
+              {!followEnabled ? (
+                <Pressable
+                  style={styles.refreshButton}
+                  onPress={handleRefreshLogs}
+                  disabled={logLoading}
+                >
+                  <Text style={styles.refreshButtonText}>
+                    {logLoading ? "Loading..." : "Refresh"}
+                  </Text>
+                </Pressable>
+              ) : null}
             </View>
           </View>
           {logsBody}
@@ -987,6 +1076,32 @@ const styles = StyleSheet.create((theme: Theme) => ({
     fontSize: theme.fontSize.xs,
     fontWeight: theme.fontWeight.medium,
     color: theme.colors.foreground,
+  },
+  followButton: {
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
+    borderRadius: theme.borderRadius.md,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+  },
+  followButtonActive: {
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.accent,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.accent,
+  },
+  followButtonText: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foreground,
+  },
+  followButtonTextActive: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.accentForeground,
   },
   centerContainer: {
     flex: 1,
