@@ -19,16 +19,28 @@ const sendIconColor = (theme: Theme) => ({ color: theme.colors.accentForeground 
  * The user types a question and sends it — this creates an agent with the
  * cluster context + the typed message and opens the chat (matches the mockup).
  */
+export interface ClusterComposerResource {
+  kind?: string | null;
+  namespace?: string;
+  name?: string;
+  yaml?: string | null;
+  logs?: string | null;
+}
+
 export function ClusterComposer({
   serverId,
   clusterId,
   clusterName,
-  currentKind,
+  resource,
+  onSent,
 }: {
   serverId: string;
   clusterId: string;
   clusterName: string;
-  currentKind?: string | null;
+  /** What the user is currently viewing — attached as context to their question. */
+  resource?: ClusterComposerResource;
+  /** Called after a message is sent (e.g. to close a detail sheet). */
+  onSent?: () => void;
 }) {
   const client = useHostRuntimeClient(serverId);
   const { entries: providerEntries } = useProvidersSnapshot(serverId);
@@ -56,7 +68,11 @@ export function ClusterComposer({
       client,
       serverId,
       clusterId,
-      kind: currentKind ?? "cluster",
+      kind: resource?.kind ?? "cluster",
+      namespace: resource?.namespace,
+      name: resource?.name,
+      yaml: resource?.yaml ?? undefined,
+      logs: resource?.logs ?? undefined,
       provider,
       cwd,
       message: trimmed,
@@ -65,9 +81,22 @@ export function ClusterComposer({
       onCreated: ({ id, workspaceId }) => openChat({ clusterId, agentId: id, workspaceId }),
     });
     setText("");
-  }, [text, client, provider, cwd, serverId, clusterId, currentKind, openChat]);
+    onSent?.();
+  }, [text, client, provider, cwd, serverId, clusterId, resource, openChat, onSent]);
 
   const canSend = ready && text.trim().length > 0;
+
+  const placeholder = useMemo(() => {
+    if (!ready) return "Connect a host & add a project to chat with an agent";
+    if (resource?.name) {
+      return `Ask about ${resource.kind ?? "this"} "${resource.name}"…`;
+    }
+    if (resource?.kind) {
+      const ns = resource.namespace ? ` in ${resource.namespace}` : "";
+      return `Ask about ${resource.kind}${ns}…`;
+    }
+    return `Ask an agent about ${clusterName}…  e.g. "why is a pod crash-looping?"`;
+  }, [ready, resource, clusterName]);
 
   return (
     <View style={wrapStyle}>
@@ -76,11 +105,7 @@ export function ClusterComposer({
           style={styles.input}
           value={text}
           onChangeText={setText}
-          placeholder={
-            ready
-              ? `Ask an agent about ${clusterName}…  e.g. "why is a pod crash-looping?"`
-              : "Connect a host & add a project to chat with an agent"
-          }
+          placeholder={placeholder}
           placeholderTextColor={placeholderColor}
           editable={ready}
           multiline

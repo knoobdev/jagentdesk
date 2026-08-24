@@ -6,9 +6,7 @@ import { AdaptiveModalSheet, AdaptiveTextInput } from "@/components/adaptive-mod
 import { ClusterSecretReveal } from "./cluster-secret-reveal";
 import { ClusterNodeOps } from "./cluster-node-ops";
 import { ClusterCronjobOps } from "./cluster-cronjob-ops";
-import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
-import { useSessionStore } from "@/stores/session-store";
-import { askAgentAboutResource } from "./cluster-ask-agent";
+import { ClusterComposer } from "./cluster-composer";
 import { ClusterPodShell } from "./cluster-pod-shell";
 import type { Theme } from "@/styles/theme";
 
@@ -77,29 +75,6 @@ export function ClusterResourceDetail({
   const [restarting, setRestarting] = useState(false);
   const [applying, setApplying] = useState(false);
   const [editedYamlResetKey, setEditedYamlResetKey] = useState(0);
-
-  // Ask-agent wiring
-  const { entries: providerEntries } = useProvidersSnapshot(serverId);
-  const firstWorkspace = useSessionStore(
-    (state) => state.sessions[serverId]?.workspaces.values().next().value,
-  );
-  const agentProvider = providerEntries?.find((e) => e.enabled)?.provider ?? null;
-  const agentCwd = firstWorkspace?.workspaceDirectory ?? null;
-
-  const handleDiagnose = useCallback(() => {
-    if (!client || !agentProvider || !agentCwd || !yaml) return;
-    void askAgentAboutResource({
-      client,
-      serverId,
-      clusterId,
-      kind,
-      namespace,
-      name,
-      yaml,
-      provider: agentProvider,
-      cwd: agentCwd,
-    });
-  }, [client, serverId, clusterId, kind, namespace, name, yaml, agentProvider, agentCwd]);
 
   // Logs state
   const [showLogs, setShowLogs] = useState(false);
@@ -612,6 +587,13 @@ export function ClusterResourceDetail({
     [kind, name, namespace],
   );
 
+  // The user types their own question; whatever they're viewing (this resource,
+  // and the logs if shown) rides along as context.
+  const chatResource = useMemo(
+    () => ({ kind, namespace, name, yaml, logs: showLogs ? logs : null }),
+    [kind, namespace, name, yaml, showLogs, logs],
+  );
+
   return (
     <AdaptiveModalSheet header={header} visible onClose={onClose} scrollable={false}>
       <ResourceDetailBody
@@ -634,7 +616,6 @@ export function ClusterResourceDetail({
         clusterId={clusterId}
         namespace={namespace}
         name={name}
-        yaml={yaml}
         scaleReplicas={scaleReplicas}
         selectedContainer={selectedContainer}
         containers={containers}
@@ -654,9 +635,6 @@ export function ClusterResourceDetail({
         followEnabled={followEnabled}
         handleToggleFollow={handleToggleFollow}
         handleToggleShell={handleToggleShell}
-        agentProvider={agentProvider}
-        agentCwd={agentCwd}
-        handleDiagnose={handleDiagnose}
         pfShowInput={pfShowInput}
         pfPodPort={pfPodPort}
         pfState={pfState}
@@ -664,6 +642,13 @@ export function ClusterResourceDetail({
         setPfPodPort={setPfPodPort}
         handlePortForward={handlePortForward}
         handleStopPortForward={handleStopPortForward}
+      />
+      <ClusterComposer
+        serverId={serverId}
+        clusterId={clusterId}
+        clusterName={kind}
+        resource={chatResource}
+        onSent={onClose}
       />
     </AdaptiveModalSheet>
   );
@@ -689,7 +674,6 @@ interface ResourceDetailBodyProps {
   clusterId: string;
   namespace?: string;
   name: string;
-  yaml: string | null;
   scaleReplicas: string;
   selectedContainer: string | null;
   containers: string[];
@@ -709,9 +693,6 @@ interface ResourceDetailBodyProps {
   followEnabled: boolean;
   handleToggleFollow: () => void;
   handleToggleShell: () => void;
-  agentProvider: string | null;
-  agentCwd: string | null;
-  handleDiagnose: () => void;
   pfShowInput: boolean;
   pfPodPort: string;
   pfState: { pfId: string; podPort: number; bytes: number; close: () => Promise<void> } | null;
@@ -737,7 +718,6 @@ interface ResourceDetailActionBarProps {
   clusterId: string;
   namespace?: string;
   name: string;
-  yaml: string | null;
   deleteButtonLabel: string;
   onChanged?: () => void;
   handleToggleLogs: () => void;
@@ -745,9 +725,6 @@ interface ResourceDetailActionBarProps {
   handleRestart: () => void;
   handleDelete: () => void;
   handleToggleEdit: () => void;
-  agentProvider: string | null;
-  agentCwd: string | null;
-  handleDiagnose: () => void;
   pfState: { pfId: string; podPort: number; bytes: number; close: () => Promise<void> } | null;
   setPfShowInput: (v: boolean) => void;
   handleStopPortForward: () => void;
@@ -769,7 +746,6 @@ function ResourceDetailActionBar({
   clusterId,
   namespace,
   name,
-  yaml,
   deleteButtonLabel,
   onChanged,
   handleToggleLogs,
@@ -777,9 +753,6 @@ function ResourceDetailActionBar({
   handleRestart,
   handleDelete,
   handleToggleEdit,
-  agentProvider,
-  agentCwd,
-  handleDiagnose,
   pfState,
   setPfShowInput,
   handleStopPortForward,
@@ -831,13 +804,6 @@ function ResourceDetailActionBar({
             onChanged={onChanged}
           />
         ) : null}
-        {yaml ? (
-          <DiagnoseButton
-            agentProvider={agentProvider}
-            agentCwd={agentCwd}
-            onPress={handleDiagnose}
-          />
-        ) : null}
         <Pressable
           style={[styles.actionButton, editing && styles.actionButtonActive]}
           onPress={handleToggleEdit}
@@ -857,29 +823,6 @@ function ResourceDetailActionBar({
         </Text>
       </Pressable>
     </View>
-  );
-}
-
-function DiagnoseButton({
-  agentProvider,
-  agentCwd,
-  onPress,
-}: {
-  agentProvider: string | null;
-  agentCwd: string | null;
-  onPress: () => void;
-}) {
-  const disabled = !agentProvider || !agentCwd;
-  return (
-    <Pressable
-      style={[styles.actionButton, disabled ? styles.actionButtonDisabled : null]}
-      onPress={onPress}
-      disabled={disabled}
-    >
-      <Text style={[styles.actionButtonText, disabled ? styles.actionButtonTextDisabled : null]}>
-        {disabled ? "Connect a host & add a project first" : "Diagnose"}
-      </Text>
-    </Pressable>
   );
 }
 
@@ -990,7 +933,6 @@ function ResourceDetailBody({
   clusterId,
   namespace,
   name,
-  yaml,
   scaleReplicas,
   selectedContainer,
   containers,
@@ -1010,9 +952,6 @@ function ResourceDetailBody({
   followEnabled,
   handleToggleFollow,
   handleToggleShell,
-  agentProvider,
-  agentCwd,
-  handleDiagnose,
   pfShowInput,
   pfPodPort,
   pfState,
@@ -1041,7 +980,6 @@ function ResourceDetailBody({
         clusterId={clusterId}
         namespace={namespace}
         name={name}
-        yaml={yaml}
         deleteButtonLabel={deleteButtonLabel}
         onChanged={onChanged}
         handleToggleLogs={handleToggleLogs}
@@ -1049,9 +987,6 @@ function ResourceDetailBody({
         handleRestart={handleRestart}
         handleDelete={handleDelete}
         handleToggleEdit={handleToggleEdit}
-        agentProvider={agentProvider}
-        agentCwd={agentCwd}
-        handleDiagnose={handleDiagnose}
         pfState={pfState}
         setPfShowInput={setPfShowInput}
         handleStopPortForward={handleStopPortForward}

@@ -10,6 +10,8 @@ export interface AskAgentAboutResourceInput {
   namespace?: string;
   name?: string;
   yaml?: string;
+  /** Currently-visible logs for the focused resource, attached as context. */
+  logs?: string;
   provider: string;
   cwd: string;
   /** The question the user typed in the cluster composer. Sent as the first message. */
@@ -34,6 +36,7 @@ export async function askAgentAboutResource(input: AskAgentAboutResourceInput): 
     provider,
     cwd,
     message,
+    logs,
     onCreated,
   } = input;
 
@@ -51,6 +54,7 @@ export async function askAgentAboutResource(input: AskAgentAboutResourceInput): 
     `Use the kubectl_get tool (action get/describe/logs/list) and the kubectl_apply tool, always passing clusterId="${clusterId}".`,
     "Wait for the user's question before taking any action.",
     ...(yaml && name ? ["", `Current manifest of ${kind}/${name}:`, yaml] : []),
+    ...(logs ? ["", `Current logs the user is viewing for ${name ?? kind}:`, logs] : []),
   ].join("\n");
 
   try {

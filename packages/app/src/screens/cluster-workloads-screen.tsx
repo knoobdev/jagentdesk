@@ -10,6 +10,7 @@ import { ClusterComposer } from "@/components/cluster-composer";
 import { ClusterChatDock } from "@/components/cluster-chat-dock";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useClusterChatStore } from "@/stores/cluster-chat-store";
+import { useClusterNavStore } from "@/stores/cluster-nav-store";
 import type { Theme } from "@/styles/theme";
 
 const ThemedMessageSquare = withUnistyles(MessageSquare);
@@ -37,6 +38,14 @@ export function ClusterWorkloadsScreen({
   const chatAgentId = useClusterChatStore((s) => s.agentId);
   const showChat = useClusterChatStore((s) => s.showChat);
   const resetForCluster = useClusterChatStore((s) => s.resetForCluster);
+
+  // What the user is currently browsing, attached as context to their question.
+  const selectedKind = useClusterNavStore((s) => s.selectedKind);
+  const selectedNamespace = useClusterNavStore((s) => s.selectedNamespace);
+  const composerResource = useMemo(
+    () => ({ kind: selectedKind, namespace: selectedNamespace }),
+    [selectedKind, selectedNamespace],
+  );
 
   useEffect(() => {
     resetForCluster(clusterId);
@@ -68,7 +77,12 @@ export function ClusterWorkloadsScreen({
   // the composer), a "Show chat" toggle when a hidden chat exists, otherwise the
   // entry composer that starts a chat.
   let bottomSlot: ReactNode = (
-    <ClusterComposer serverId={serverId} clusterId={clusterId} clusterName={clusterName} />
+    <ClusterComposer
+      serverId={serverId}
+      clusterId={clusterId}
+      clusterName={clusterName}
+      resource={composerResource}
+    />
   );
   if (chatOpen) {
     bottomSlot = null;
