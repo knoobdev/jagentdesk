@@ -3,6 +3,7 @@ import { FlatList, Pressable, ScrollView, Text, View, type ListRenderItem } from
 import { StyleSheet } from "react-native-unistyles";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
+import { ClusterNamespaceSelector } from "@/components/cluster-namespace-selector";
 import { ClusterResourceDetail } from "@/components/cluster-resource-detail";
 import { ClusterHelmView } from "@/components/cluster-helm-view";
 import { ClusterStatusDot, PodStatusDot } from "@/components/cluster-dot";
@@ -116,6 +117,7 @@ export function ClusterResourceBrowser({
     namespace: string;
     name: string;
   } | null>(null);
+  const [selectedNamespace, setSelectedNamespace] = useState<string | undefined>(undefined);
   const [showingHelm, setShowingHelm] = useState(false);
   const kindListRef = useRef<ScrollView>(null);
 
@@ -164,17 +166,25 @@ export function ClusterResourceBrowser({
       .finally(() => setLoadingKinds(false));
   }, [client, clusterId]);
 
-  const handleSelectKind = useCallback(
-    (kind: string) => {
+  const selectedKindInfo = useMemo(
+    () => kinds.find((k) => k.kind === selectedKind) ?? null,
+    [kinds, selectedKind],
+  );
+  const isNamespaced = selectedKindInfo?.namespaced ?? false;
+
+  const loadResources = useCallback(
+    (kind: string, namespace: string | undefined) => {
       if (!client) return;
-      setShowingHelm(false);
-      setSelectedKind(kind);
       setLoadingItems(true);
       setError(null);
       setMetricsMap({});
       setMetricsError(null);
       void client
-        .clusterResourceList({ id: clusterId, kind })
+        .clusterResourceList({
+          id: clusterId,
+          kind,
+          ...(isNamespaced && namespace ? { namespace } : {}),
+        })
         .then((res) => {
           if (res.error) {
             setError(res.error);
@@ -217,7 +227,26 @@ export function ClusterResourceBrowser({
           });
       }
     },
-    [client, clusterId],
+    [client, clusterId, isNamespaced],
+  );
+
+  const handleSelectKind = useCallback(
+    (kind: string) => {
+      setShowingHelm(false);
+      setSelectedKind(kind);
+      loadResources(kind, selectedNamespace);
+    },
+    [loadResources, selectedNamespace],
+  );
+
+  const handleNamespaceChange = useCallback(
+    (namespace: string | undefined) => {
+      setSelectedNamespace(namespace);
+      if (selectedKind) {
+        loadResources(selectedKind, namespace);
+      }
+    },
+    [selectedKind, loadResources],
   );
 
   const handleSelectHelm = useCallback(() => {
@@ -242,57 +271,10 @@ export function ClusterResourceBrowser({
   }, []);
 
   const handleDetailChanged = useCallback(() => {
-    // Reload the current resource list
     if (client && selectedKind) {
-      setLoadingItems(true);
-      setError(null);
-      setMetricsMap({});
-      setMetricsError(null);
-      void client
-        .clusterResourceList({ id: clusterId, kind: selectedKind })
-        .then((res) => {
-          if (res.error) {
-            setError(res.error);
-            setItems([]);
-          } else {
-            setItems(res.items as ResourceItem[]);
-          }
-          return undefined;
-        })
-        .catch((e: unknown) => {
-          setError(e instanceof Error ? e.message : "Failed to load resources");
-          setItems([]);
-        })
-        .finally(() => setLoadingItems(false));
-
-      if (selectedKind === "Node" || selectedKind === "Pod") {
-        const scope = selectedKind === "Node" ? "nodes" : "pods";
-        void client
-          .clusterMetrics({ id: clusterId, scope })
-          .then((res) => {
-            if (res.error) {
-              setMetricsError(res.error);
-              return;
-            }
-            const map: Record<string, MetricsEntry> = {};
-            for (const item of res.items as Array<{
-              name: string;
-              namespace?: string;
-              cpuNano: number;
-              memoryBytes: number;
-            }>) {
-              const key = scope === "pods" ? `${item.namespace ?? ""}/${item.name}` : item.name;
-              map[key] = { cpuNano: item.cpuNano, memoryBytes: item.memoryBytes };
-            }
-            setMetricsMap(map);
-            return undefined;
-          })
-          .catch((e: unknown) => {
-            setMetricsError(e instanceof Error ? e.message : "Metrics unavailable");
-          });
-      }
+      loadResources(selectedKind, selectedNamespace);
     }
-  }, [client, clusterId, selectedKind]);
+  }, [client, selectedKind, selectedNamespace, loadResources]);
 
   const grouped = useMemo(() => groupByCategory(kinds), [kinds]);
 
@@ -453,6 +435,16 @@ export function ClusterResourceBrowser({
             </Text>
           </Pressable>
         </View>
+        {isNamespaced ? (
+          <View style={styles.namespaceRow}>
+            <ClusterNamespaceSelector
+              serverId={serverId}
+              clusterId={clusterId}
+              value={selectedNamespace}
+              onChange={handleNamespaceChange}
+            />
+          </View>
+        ) : null}
         <View style={styles.tableHeader}>
           <Text style={styles.tableHeaderName}>NAME</Text>
           <Text style={styles.tableHeaderNamespace}>NAMESPACE</Text>
@@ -485,6 +477,9 @@ export function ClusterResourceBrowser({
     agentProvider,
     agentCwd,
     handleAskAgent,
+    isNamespaced,
+    selectedNamespace,
+    handleNamespaceChange,
   ]);
 
   // ── Loading state ──
@@ -875,5 +870,13 @@ const styles = StyleSheet.create((theme: Theme) => ({
   askAgentButtonTextDisabled: {
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.xs,
+  },
+  namespaceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1.5],
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
   },
 }));
