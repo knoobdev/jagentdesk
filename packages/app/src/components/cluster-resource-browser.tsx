@@ -6,6 +6,9 @@ import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { ClusterResourceDetail } from "@/components/cluster-resource-detail";
 import { ClusterHelmView } from "@/components/cluster-helm-view";
 import { ClusterStatusDot, PodStatusDot } from "@/components/cluster-dot";
+import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
+import { useSessionStore } from "@/stores/session-store";
+import { askAgentAboutResource } from "./cluster-ask-agent";
 import type { Theme } from "@/styles/theme";
 
 interface KindInfo {
@@ -115,6 +118,26 @@ export function ClusterResourceBrowser({
   } | null>(null);
   const [showingHelm, setShowingHelm] = useState(false);
   const kindListRef = useRef<ScrollView>(null);
+
+  // Ask-agent wiring
+  const { entries: providerEntries } = useProvidersSnapshot(serverId);
+  const firstWorkspace = useSessionStore(
+    (state) => state.sessions[serverId]?.workspaces.values().next().value,
+  );
+  const agentProvider = providerEntries?.find((e) => e.enabled)?.provider ?? null;
+  const agentCwd = firstWorkspace?.workspaceDirectory ?? null;
+
+  const handleAskAgent = useCallback(() => {
+    if (!client || !agentProvider || !agentCwd || !selectedKind) return;
+    void askAgentAboutResource({
+      client,
+      serverId,
+      clusterId,
+      kind: selectedKind,
+      provider: agentProvider,
+      cwd: agentCwd,
+    });
+  }, [client, serverId, clusterId, selectedKind, agentProvider, agentCwd]);
 
   useEffect(() => {
     if (!client) {
@@ -408,6 +431,28 @@ export function ClusterResourceBrowser({
     }
     return (
       <>
+        <View style={styles.askAgentRow}>
+          <Text style={styles.askAgentLabel}>Diagnose or manage {selectedKind} resources</Text>
+          <Pressable
+            style={[
+              styles.askAgentButton,
+              !agentProvider || !agentCwd ? styles.askAgentButtonDisabled : null,
+            ]}
+            onPress={handleAskAgent}
+            disabled={!agentProvider || !agentCwd}
+          >
+            <Text
+              style={[
+                styles.askAgentButtonText,
+                !agentProvider || !agentCwd ? styles.askAgentButtonTextDisabled : null,
+              ]}
+            >
+              {!agentProvider || !agentCwd
+                ? "Connect a host & add a project first"
+                : "Ask an agent"}
+            </Text>
+          </Pressable>
+        </View>
         <View style={styles.tableHeader}>
           <Text style={styles.tableHeaderName}>NAME</Text>
           <Text style={styles.tableHeaderNamespace}>NAMESPACE</Text>
@@ -437,6 +482,9 @@ export function ClusterResourceBrowser({
     showingHelm,
     serverId,
     clusterId,
+    agentProvider,
+    agentCwd,
+    handleAskAgent,
   ]);
 
   // ── Loading state ──
@@ -793,5 +841,39 @@ const styles = StyleSheet.create((theme: Theme) => ({
     fontSize: theme.fontSize.xs,
     color: theme.colors.foregroundMuted,
     textAlign: "right" as const,
+  },
+  askAgentRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[2],
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+  },
+  askAgentLabel: {
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foregroundMuted,
+    flex: 1,
+  },
+  askAgentButton: {
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[1.5],
+    borderRadius: theme.borderRadius.md,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+  },
+  askAgentButtonDisabled: {
+    opacity: 0.5,
+  },
+  askAgentButtonText: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foreground,
+  },
+  askAgentButtonTextDisabled: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.xs,
   },
 }));

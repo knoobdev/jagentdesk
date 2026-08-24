@@ -6,6 +6,9 @@ import { useHostRuntimeClient, useHosts } from "@/runtime/host-runtime";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { ClusterResourceBrowser } from "@/components/cluster-resource-browser";
 import { ClusterStatusDot, ContextStatusDot } from "@/components/cluster-dot";
+import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
+import { useSessionStore } from "@/stores/session-store";
+import { askAgentAboutResource } from "@/components/cluster-ask-agent";
 import type { Theme } from "@/styles/theme";
 import type { ClusterInfo, KubeContextInfo } from "@jagentdesk/protocol/cluster/rpc-schemas";
 
@@ -63,6 +66,31 @@ function WorkloadsButton({
   );
 }
 
+function AskClusterButton({
+  clusterId,
+  disabled,
+  label,
+  onAsk,
+}: {
+  clusterId: string;
+  disabled: boolean;
+  label: string;
+  onAsk: (id: string) => void;
+}) {
+  const handlePress = useCallback(() => onAsk(clusterId), [clusterId, onAsk]);
+  return (
+    <Pressable
+      style={[styles.askClusterButton, disabled && styles.askClusterButtonDisabled]}
+      onPress={handlePress}
+      disabled={disabled}
+    >
+      <Text style={[styles.askClusterButtonText, disabled && styles.askClusterButtonTextDisabled]}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
 export function ClustersScreen() {
   const hosts = useHosts();
   const serverId = hosts[0]?.serverId ?? "";
@@ -75,6 +103,29 @@ export function ClustersScreen() {
   const [error, setError] = useState<string | null>(null);
   const [importingName, setImportingName] = useState<string | null>(null);
   const [connectingId, setConnectingId] = useState<string | null>(null);
+
+  // Ask-agent wiring
+  const { entries: providerEntries } = useProvidersSnapshot(serverId);
+  const firstWorkspace = useSessionStore(
+    (state) => state.sessions[serverId]?.workspaces.values().next().value,
+  );
+  const agentProvider = providerEntries?.find((e) => e.enabled)?.provider ?? null;
+  const agentCwd = firstWorkspace?.workspaceDirectory ?? null;
+
+  const handleAskAgentAboutCluster = useCallback(
+    (clusterId: string) => {
+      if (!client || !agentProvider || !agentCwd) return;
+      void askAgentAboutResource({
+        client,
+        serverId,
+        clusterId,
+        kind: "cluster",
+        provider: agentProvider,
+        cwd: agentCwd,
+      });
+    },
+    [client, serverId, agentProvider, agentCwd],
+  );
 
   const refresh = useCallback(async () => {
     if (!client) return;
@@ -229,6 +280,16 @@ export function ClustersScreen() {
                         {cluster.nodeCount ?? "?"} nodes · {cluster.podCount ?? "?"} pods
                       </Text>
                       <WorkloadsButton clusterId={cluster.id} onWorkloads={handleSelectCluster} />
+                      <AskClusterButton
+                        clusterId={cluster.id}
+                        disabled={!agentProvider || !agentCwd}
+                        label={
+                          !agentProvider || !agentCwd
+                            ? "Connect a host & add a project first"
+                            : "Ask an agent"
+                        }
+                        onAsk={handleAskAgentAboutCluster}
+                      />
                     </>
                   ) : (
                     <ConnectButton
@@ -440,5 +501,25 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.xs,
     fontWeight: theme.fontWeight.medium,
     color: theme.colors.foreground,
+  },
+  askClusterButton: {
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[1.5],
+    borderRadius: theme.borderRadius.md,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+  },
+  askClusterButtonDisabled: {
+    opacity: 0.5,
+  },
+  askClusterButtonText: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foreground,
+  },
+  askClusterButtonTextDisabled: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.xs,
   },
 }));

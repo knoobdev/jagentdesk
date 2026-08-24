@@ -6,6 +6,9 @@ import { AdaptiveModalSheet, AdaptiveTextInput } from "@/components/adaptive-mod
 import { ClusterSecretReveal } from "./cluster-secret-reveal";
 import { ClusterNodeOps } from "./cluster-node-ops";
 import { ClusterCronjobOps } from "./cluster-cronjob-ops";
+import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
+import { useSessionStore } from "@/stores/session-store";
+import { askAgentAboutResource } from "./cluster-ask-agent";
 import type { Theme } from "@/styles/theme";
 
 interface ClusterResourceDetailProps {
@@ -73,6 +76,29 @@ export function ClusterResourceDetail({
   const [restarting, setRestarting] = useState(false);
   const [applying, setApplying] = useState(false);
   const [editedYamlResetKey, setEditedYamlResetKey] = useState(0);
+
+  // Ask-agent wiring
+  const { entries: providerEntries } = useProvidersSnapshot(serverId);
+  const firstWorkspace = useSessionStore(
+    (state) => state.sessions[serverId]?.workspaces.values().next().value,
+  );
+  const agentProvider = providerEntries?.find((e) => e.enabled)?.provider ?? null;
+  const agentCwd = firstWorkspace?.workspaceDirectory ?? null;
+
+  const handleDiagnose = useCallback(() => {
+    if (!client || !agentProvider || !agentCwd || !yaml) return;
+    void askAgentAboutResource({
+      client,
+      serverId,
+      clusterId,
+      kind,
+      namespace,
+      name,
+      yaml,
+      provider: agentProvider,
+      cwd: agentCwd,
+    });
+  }, [client, serverId, clusterId, kind, namespace, name, yaml, agentProvider, agentCwd]);
 
   // Logs state
   const [showLogs, setShowLogs] = useState(false);
@@ -540,6 +566,7 @@ export function ClusterResourceDetail({
         clusterId={clusterId}
         namespace={namespace}
         name={name}
+        yaml={yaml}
         scaleReplicas={scaleReplicas}
         selectedContainer={selectedContainer}
         containers={containers}
@@ -558,6 +585,9 @@ export function ClusterResourceDetail({
         handleSelectContainer={handleSelectContainer}
         followEnabled={followEnabled}
         handleToggleFollow={handleToggleFollow}
+        agentProvider={agentProvider}
+        agentCwd={agentCwd}
+        handleDiagnose={handleDiagnose}
       />
     </AdaptiveModalSheet>
   );
@@ -581,6 +611,7 @@ interface ResourceDetailBodyProps {
   clusterId: string;
   namespace?: string;
   name: string;
+  yaml: string | null;
   scaleReplicas: string;
   selectedContainer: string | null;
   containers: string[];
@@ -599,6 +630,9 @@ interface ResourceDetailBodyProps {
   handleSelectContainer: (container: string) => void;
   followEnabled: boolean;
   handleToggleFollow: () => void;
+  agentProvider: string | null;
+  agentCwd: string | null;
+  handleDiagnose: () => void;
 }
 
 interface ResourceDetailActionBarProps {
@@ -616,12 +650,16 @@ interface ResourceDetailActionBarProps {
   clusterId: string;
   namespace?: string;
   name: string;
+  yaml: string | null;
   deleteButtonLabel: string;
   onChanged?: () => void;
   handleToggleLogs: () => void;
   handleRestart: () => void;
   handleDelete: () => void;
   handleToggleEdit: () => void;
+  agentProvider: string | null;
+  agentCwd: string | null;
+  handleDiagnose: () => void;
 }
 
 function ResourceDetailActionBar({
@@ -639,12 +677,16 @@ function ResourceDetailActionBar({
   clusterId,
   namespace,
   name,
+  yaml,
   deleteButtonLabel,
   onChanged,
   handleToggleLogs,
   handleRestart,
   handleDelete,
   handleToggleEdit,
+  agentProvider,
+  agentCwd,
+  handleDiagnose,
 }: ResourceDetailActionBarProps) {
   return (
     <View style={styles.actionBar}>
@@ -676,6 +718,13 @@ function ResourceDetailActionBar({
             onChanged={onChanged}
           />
         ) : null}
+        {yaml ? (
+          <DiagnoseButton
+            agentProvider={agentProvider}
+            agentCwd={agentCwd}
+            onPress={handleDiagnose}
+          />
+        ) : null}
         <Pressable
           style={[styles.actionButton, editing && styles.actionButtonActive]}
           onPress={handleToggleEdit}
@@ -698,6 +747,29 @@ function ResourceDetailActionBar({
   );
 }
 
+function DiagnoseButton({
+  agentProvider,
+  agentCwd,
+  onPress,
+}: {
+  agentProvider: string | null;
+  agentCwd: string | null;
+  onPress: () => void;
+}) {
+  const disabled = !agentProvider || !agentCwd;
+  return (
+    <Pressable
+      style={[styles.actionButton, disabled ? styles.actionButtonDisabled : null]}
+      onPress={onPress}
+      disabled={disabled}
+    >
+      <Text style={[styles.actionButtonText, disabled ? styles.actionButtonTextDisabled : null]}>
+        {disabled ? "Connect a host & add a project first" : "Diagnose"}
+      </Text>
+    </Pressable>
+  );
+}
+
 function ResourceDetailBody({
   isPod,
   isSecret,
@@ -716,6 +788,7 @@ function ResourceDetailBody({
   clusterId,
   namespace,
   name,
+  yaml,
   scaleReplicas,
   selectedContainer,
   containers,
@@ -734,6 +807,9 @@ function ResourceDetailBody({
   handleSelectContainer,
   followEnabled,
   handleToggleFollow,
+  agentProvider,
+  agentCwd,
+  handleDiagnose,
 }: ResourceDetailBodyProps) {
   return (
     <>
@@ -752,12 +828,16 @@ function ResourceDetailBody({
         clusterId={clusterId}
         namespace={namespace}
         name={name}
+        yaml={yaml}
         deleteButtonLabel={deleteButtonLabel}
         onChanged={onChanged}
         handleToggleLogs={handleToggleLogs}
         handleRestart={handleRestart}
         handleDelete={handleDelete}
         handleToggleEdit={handleToggleEdit}
+        agentProvider={agentProvider}
+        agentCwd={agentCwd}
+        handleDiagnose={handleDiagnose}
       />
 
       {isSecret && client ? (
@@ -896,6 +976,13 @@ const styles = StyleSheet.create((theme: Theme) => ({
   },
   actionButtonTextActive: {
     color: theme.colors.foreground,
+  },
+  actionButtonDisabled: {
+    opacity: 0.5,
+  },
+  actionButtonTextDisabled: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
   },
   deleteButton: {
     paddingHorizontal: theme.spacing[3],
