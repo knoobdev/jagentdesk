@@ -601,6 +601,18 @@ type ClusterResourceListPayload = Extract<
   SessionOutboundMessage,
   { type: "cluster/resource/list/response" }
 >["payload"];
+type ClusterRevealSecretPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/reveal-secret/response" }
+>["payload"];
+type ClusterNodeOpPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/node-op/response" }
+>["payload"];
+type ClusterCronjobOpPayload = Extract<
+  SessionOutboundMessage,
+  { type: "cluster/cronjob-op/response" }
+>["payload"];
 type ScheduleCreatePayload = Extract<
   SessionOutboundMessage,
   { type: "schedule/create/response" }
@@ -5675,6 +5687,62 @@ export class DaemonClient {
         ...(options.namespace ? { namespace: options.namespace } : {}),
       },
       responseType: "cluster/resource/list/response",
+    });
+  }
+
+  async clusterRevealSecret(options: {
+    requestId?: string;
+    id: string;
+    namespace: string;
+    name: string;
+  }): Promise<ClusterRevealSecretPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "cluster/reveal-secret",
+        id: options.id,
+        namespace: options.namespace,
+        name: options.name,
+      },
+      responseType: "cluster/reveal-secret/response",
+    });
+  }
+
+  async clusterNodeOp(options: {
+    requestId?: string;
+    id: string;
+    name: string;
+    op: "cordon" | "uncordon";
+  }): Promise<ClusterNodeOpPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "cluster/node-op",
+        id: options.id,
+        name: options.name,
+        op: options.op,
+      },
+      responseType: "cluster/node-op/response",
+    });
+  }
+
+  async clusterCronjobOp(options: {
+    requestId?: string;
+    id: string;
+    namespace: string;
+    name: string;
+    op: "trigger" | "suspend" | "resume";
+  }): Promise<ClusterCronjobOpPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "cluster/cronjob-op",
+        id: options.id,
+        namespace: options.namespace,
+        name: options.name,
+        op: options.op,
+      },
+      responseType: "cluster/cronjob-op/response",
     });
   }
 

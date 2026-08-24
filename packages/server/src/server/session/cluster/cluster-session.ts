@@ -291,4 +291,81 @@ export class ClusterSession {
       this.emitClusterRpcError(request, error);
     }
   }
+
+  async handleRevealSecretRequest(
+    request: Extract<SessionInboundMessage, { type: "cluster/reveal-secret" }>,
+  ): Promise<void> {
+    try {
+      const client = this.clusterRegistry.getClient(request.id);
+      if (!client) {
+        throw new Error(`cluster not connected: ${request.id}`);
+      }
+      const data = await client.revealSecret(request.namespace, request.name);
+      this.host.emit({
+        type: "cluster/reveal-secret/response",
+        payload: {
+          requestId: request.requestId,
+          data,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitClusterRpcError(request, error);
+    }
+  }
+
+  async handleNodeOpRequest(
+    request: Extract<SessionInboundMessage, { type: "cluster/node-op" }>,
+  ): Promise<void> {
+    try {
+      const client = this.clusterRegistry.getClient(request.id);
+      if (!client) {
+        throw new Error(`cluster not connected: ${request.id}`);
+      }
+      const result = await client.cordonNode(request.name, request.op === "cordon");
+      this.host.emit({
+        type: "cluster/node-op/response",
+        payload: {
+          requestId: request.requestId,
+          result,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitClusterRpcError(request, error);
+    }
+  }
+
+  async handleCronjobOpRequest(
+    request: Extract<SessionInboundMessage, { type: "cluster/cronjob-op" }>,
+  ): Promise<void> {
+    try {
+      const client = this.clusterRegistry.getClient(request.id);
+      if (!client) {
+        throw new Error(`cluster not connected: ${request.id}`);
+      }
+      let result;
+      switch (request.op) {
+        case "trigger":
+          result = await client.triggerCronJob(request.namespace, request.name);
+          break;
+        case "suspend":
+          result = await client.setCronJobSuspend(request.namespace, request.name, true);
+          break;
+        case "resume":
+          result = await client.setCronJobSuspend(request.namespace, request.name, false);
+          break;
+      }
+      this.host.emit({
+        type: "cluster/cronjob-op/response",
+        payload: {
+          requestId: request.requestId,
+          result,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitClusterRpcError(request, error);
+    }
+  }
 }

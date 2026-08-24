@@ -228,6 +228,64 @@ export const ClusterResourceListResponseSchema = z.object({
   }),
 });
 
+// ── cluster/reveal-secret ────────────────────────────────────────────────────
+
+export const ClusterRevealSecretRequestSchema = z.object({
+  type: z.literal("cluster/reveal-secret"),
+  requestId: z.string(),
+  id: z.string(),
+  namespace: z.string(),
+  name: z.string(),
+});
+
+export const ClusterRevealSecretResponseSchema = z.object({
+  type: z.literal("cluster/reveal-secret/response"),
+  payload: z.object({
+    requestId: z.string(),
+    data: z.record(z.string(), z.string()).nullable(),
+    error: z.string().nullable(),
+  }),
+});
+
+// ── cluster/node-op ──────────────────────────────────────────────────────────
+
+export const ClusterNodeOpRequestSchema = z.object({
+  type: z.literal("cluster/node-op"),
+  requestId: z.string(),
+  id: z.string(),
+  name: z.string(),
+  op: z.enum(["cordon", "uncordon"]),
+});
+
+export const ClusterNodeOpResponseSchema = z.object({
+  type: z.literal("cluster/node-op/response"),
+  payload: z.object({
+    requestId: z.string(),
+    result: WriteResultSchema.nullable(),
+    error: z.string().nullable(),
+  }),
+});
+
+// ── cluster/cronjob-op ───────────────────────────────────────────────────────
+
+export const ClusterCronjobOpRequestSchema = z.object({
+  type: z.literal("cluster/cronjob-op"),
+  requestId: z.string(),
+  id: z.string(),
+  namespace: z.string(),
+  name: z.string(),
+  op: z.enum(["trigger", "suspend", "resume"]),
+});
+
+export const ClusterCronjobOpResponseSchema = z.object({
+  type: z.literal("cluster/cronjob-op/response"),
+  payload: z.object({
+    requestId: z.string(),
+    result: WriteResultSchema.nullable(),
+    error: z.string().nullable(),
+  }),
+});
+
 // ── Type exports ────────────────────────────────────────────────────────
 
 export type KubeContextInfo = z.infer<typeof KubeContextInfoSchema>;
@@ -258,3 +316,10 @@ export type ClusterKindsRequest = z.infer<typeof ClusterKindsRequestSchema>;
 export type ClusterKindsResponse = z.infer<typeof ClusterKindsResponseSchema>;
 export type ClusterResourceListRequest = z.infer<typeof ClusterResourceListRequestSchema>;
 export type ClusterResourceListResponse = z.infer<typeof ClusterResourceListResponseSchema>;
+
+export type ClusterRevealSecretRequest = z.infer<typeof ClusterRevealSecretRequestSchema>;
+export type ClusterRevealSecretResponse = z.infer<typeof ClusterRevealSecretResponseSchema>;
+export type ClusterNodeOpRequest = z.infer<typeof ClusterNodeOpRequestSchema>;
+export type ClusterNodeOpResponse = z.infer<typeof ClusterNodeOpResponseSchema>;
+export type ClusterCronjobOpRequest = z.infer<typeof ClusterCronjobOpRequestSchema>;
+export type ClusterCronjobOpResponse = z.infer<typeof ClusterCronjobOpResponseSchema>;

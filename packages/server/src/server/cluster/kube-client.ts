@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import {
   KubeConfig,
   CoreV1Api,
@@ -399,6 +400,118 @@ export class KubeClient {
       }
     }
     return result;
+  }
+
+  async cordonNode(name: string, unschedulable: boolean): Promise<WriteResult> {
+    this.ensureConnected();
+    try {
+      const body = {
+        apiVersion: "v1",
+        kind: "Node",
+        metadata: { name },
+        spec: { unschedulable },
+      } as unknown as KubernetesObject;
+      await this.objectApi!.patch(
+        body,
+        undefined,
+        undefined,
+        "jagentdesk",
+        true,
+        PatchStrategy.ServerSideApply,
+      );
+      const action = unschedulable ? "cordoned" : "uncordoned";
+      return { ok: true, dryRun: false, message: `node ${name} ${action}` };
+    } catch (err) {
+      return {
+        ok: false,
+        dryRun: false,
+        message: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+
+  async triggerCronJob(namespace: string, name: string): Promise<WriteResult> {
+    this.ensureConnected();
+    try {
+      const yaml = await this.getGeneric("CronJob", namespace, name);
+      const cronJob = loadYaml<Record<string, unknown>>(yaml);
+      const jobTemplate = (cronJob.spec as Record<string, unknown> | undefined)?.jobTemplate as
+        | Record<string, unknown>
+        | undefined;
+      if (!jobTemplate) {
+        return {
+          ok: false,
+          dryRun: false,
+          message: `CronJob ${name} has no spec.jobTemplate`,
+        };
+      }
+      const suffix = crypto.randomBytes(5).toString("hex");
+      const jobName = `${name}-manual-${suffix}`;
+      const job: Record<string, unknown> = {
+        apiVersion: "batch/v1",
+        kind: "Job",
+        metadata: {
+          name: jobName,
+          namespace,
+          ownerReferences: [
+            {
+              apiVersion: "batch/v1",
+              kind: "CronJob",
+              name,
+              uid: (cronJob.metadata as Record<string, unknown> | undefined)?.uid as
+                | string
+                | undefined,
+            },
+          ],
+        },
+        spec: jobTemplate.spec,
+      };
+      await this.objectApi!.create(
+        job as unknown as KubernetesObject,
+        undefined,
+        undefined,
+        "jagentdesk",
+      );
+      return {
+        ok: true,
+        dryRun: false,
+        message: `created Job ${jobName} from CronJob ${name}`,
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        dryRun: false,
+        message: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+
+  async setCronJobSuspend(namespace: string, name: string, suspend: boolean): Promise<WriteResult> {
+    this.ensureConnected();
+    try {
+      const body = {
+        apiVersion: "batch/v1",
+        kind: "CronJob",
+        metadata: { name, namespace },
+        spec: { suspend },
+      } as unknown as KubernetesObject;
+      await this.objectApi!.patch(
+        body,
+        undefined,
+        undefined,
+        "jagentdesk",
+        true,
+        PatchStrategy.ServerSideApply,
+      );
+      const action = suspend ? "suspended" : "resumed";
+      return { ok: true, dryRun: false, message: `CronJob ${name} ${action}` };
+    } catch (err) {
+      return {
+        ok: false,
+        dryRun: false,
+        message: err instanceof Error ? err.message : String(err),
+      };
+    }
   }
 
   async disconnect(): Promise<void> {
