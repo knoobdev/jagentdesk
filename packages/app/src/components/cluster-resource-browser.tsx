@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
-import { FlatList, Pressable, Text, View, type ListRenderItem } from "react-native";
+import { FlatList, Pressable, Text, TextInput, View, type ListRenderItem } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { ClusterHelmView } from "@/components/cluster-helm-view";
@@ -93,8 +93,56 @@ export function ClusterResourceBrowser({
   const [loadingItems, setLoadingItems] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [metricsMap, setMetricsMap] = useState<Record<string, MetricsEntry>>({});
+  const [query, setQuery] = useState("");
+  const [sortKey, setSortKey] = useState<"name" | "age">("name");
+  const [sortAsc, setSortAsc] = useState(true);
   const openDetail = useClusterViewStore((s) => s.openDetail);
   const listRefreshKey = useClusterViewStore((s) => s.listRefreshKey);
+
+  // Clear the search box when switching kinds so a stale filter never hides a
+  // fresh list.
+  useEffect(() => {
+    setQuery("");
+  }, [selectedKind]);
+
+  const toggleSort = useCallback(
+    (key: "name" | "age") => {
+      if (sortKey === key) setSortAsc((v) => !v);
+      else {
+        setSortKey(key);
+        setSortAsc(true);
+      }
+    },
+    [sortKey],
+  );
+  const sortByName = useCallback(() => toggleSort("name"), [toggleSort]);
+  const sortByAge = useCallback(() => toggleSort("age"), [toggleSort]);
+  const sortArrow = useCallback(
+    (key: "name" | "age") => {
+      if (sortKey !== key) return "";
+      return sortAsc ? " ↑" : " ↓";
+    },
+    [sortKey, sortAsc],
+  );
+
+  const visibleItems = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const filtered = q
+      ? items.filter(
+          (it) =>
+            it.name.toLowerCase().includes(q) || (it.namespace ?? "").toLowerCase().includes(q),
+        )
+      : items;
+    const sorted = [...filtered].sort((a, b) => {
+      if (sortKey === "age") {
+        // creationTimestamp is ISO, so a string compare orders by time (older =
+        // smaller). Ascending shows oldest first.
+        return (a.creationTimestamp ?? "").localeCompare(b.creationTimestamp ?? "");
+      }
+      return a.name.localeCompare(b.name);
+    });
+    return sortAsc ? sorted : sorted.toReversed();
+  }, [items, query, sortKey, sortAsc]);
 
   useEffect(() => {
     if (!client) return;
@@ -282,12 +330,25 @@ export function ClusterResourceBrowser({
       <>
         <View style={styles.toolbar}>
           <Text style={styles.toolbarTitle}>{selectedKind}</Text>
-          <Text style={styles.toolbarCount}>{items.length}</Text>
+          <Text style={styles.toolbarCount}>
+            {query ? `${visibleItems.length}/${items.length}` : items.length}
+          </Text>
+          <TextInput
+            style={styles.search}
+            value={query}
+            onChangeText={setQuery}
+            placeholder={`Search ${selectedKind}…`}
+            placeholderTextColor={styles.toolbarNs.color}
+            autoCorrect={false}
+            autoCapitalize="none"
+          />
           <View style={styles.toolbarSpacer} />
           <Text style={styles.toolbarNs}>{selectedNamespace ?? "All namespaces"}</Text>
         </View>
         <View style={styles.header}>
-          <Text style={styles.headerName}>NAME</Text>
+          <Pressable style={styles.headerNameBtn} onPress={sortByName}>
+            <Text style={styles.headerName}>NAME{sortArrow("name")}</Text>
+          </Pressable>
           <Text style={styles.headerNs}>NAMESPACE</Text>
           {isPodKind ? (
             <>
@@ -302,14 +363,24 @@ export function ClusterResourceBrowser({
               <Text style={styles.headerMetric}>MEM</Text>
             </>
           ) : null}
-          <Text style={styles.headerAge}>AGE</Text>
+          <Pressable onPress={sortByAge}>
+            <Text style={styles.headerAge}>AGE{sortArrow("age")}</Text>
+          </Pressable>
         </View>
-        {items.length === 0 ? (
+        {visibleItems.length === 0 ? (
           <View style={styles.center}>
-            <Text style={styles.muted}>No {selectedKind} resources found.</Text>
+            <Text style={styles.muted}>
+              {items.length === 0
+                ? `No ${selectedKind} resources found.`
+                : `No matches for “${query}”.`}
+            </Text>
           </View>
         ) : (
-          <FlatList data={items} keyExtractor={keyExtractor} renderItem={renderResourceItem} />
+          <FlatList
+            data={visibleItems}
+            keyExtractor={keyExtractor}
+            renderItem={renderResourceItem}
+          />
         )}
       </>
     );
@@ -340,6 +411,18 @@ const styles = StyleSheet.create((theme: Theme) => ({
   toolbarCount: { fontSize: theme.fontSize.sm, color: theme.colors.foregroundMuted },
   toolbarSpacer: { flex: 1 },
   toolbarNs: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
+  search: {
+    width: 240,
+    marginLeft: theme.spacing[2],
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
+    borderRadius: theme.borderRadius.md,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foreground,
+  },
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -349,9 +432,11 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,
   },
-  headerName: {
+  headerNameBtn: {
     flex: 1,
     minWidth: 150,
+  },
+  headerName: {
     fontSize: theme.fontSize.xs,
     fontWeight: theme.fontWeight.medium,
     color: theme.colors.foregroundMuted,
