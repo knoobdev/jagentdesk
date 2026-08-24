@@ -673,6 +673,13 @@ function MobileSidebar({
   const hasActiveHostFilter = useSidebarViewStore((state) => state.hostFilters.length > 0);
   const isSessionsActive = pathname.includes("/sessions");
   const isSchedulesActive = pathname.includes("/schedules");
+  const clusterRouteMatch = pathname.match(/\/h\/([^/]+)\/cluster\/([^/]+)/);
+  const clusterRoute = clusterRouteMatch
+    ? {
+        serverId: decodeURIComponent(clusterRouteMatch[1]),
+        clusterId: decodeURIComponent(clusterRouteMatch[2]),
+      }
+    : null;
   const { gesture: closeGesture, gestureRef: closeGestureRef } = useCloseAgentListGesture();
   const dragGestureHostPresented = useIsMobilePanelPresented("agent-list");
 
@@ -699,6 +706,29 @@ function MobileSidebar({
     [insetsTop, insetsBottom, theme.colors.surfaceSidebar],
   );
 
+  const mobileWorkspaceBody =
+    isInitialLoad && !hasActiveHostFilter ? (
+      <SidebarAgentListSkeleton />
+    ) : (
+      <SidebarWorkspaceList
+        collapsedProjectKeys={collapsedProjectKeys}
+        onToggleProjectCollapsed={toggleProjectCollapsed}
+        shortcutIndexByWorkspaceKey={shortcutIndexByWorkspaceKey}
+        groupMode={groupMode}
+        statusGroups={statusGroups}
+        pinnedGroups={pinnedGroups}
+        projects={projects}
+        workspaceEntriesByKey={workspaceEntriesByKey}
+        isRefreshing={isManualRefresh && isRevalidating}
+        onRefresh={handleRefresh}
+        onWorkspacePress={handleWorkspacePress}
+        onAddProject={handleOpenProject}
+        parentGestureRef={closeGestureRef}
+        dragGestureHostPresented={dragGestureHostPresented}
+        listHeaderComponent={workspacesSectionHeaderElement}
+      />
+    );
+
   return (
     <MobilePanelOverlay
       panel="agent-list"
@@ -707,31 +737,33 @@ function MobileSidebar({
     >
       <View style={styles.sidebarContent} pointerEvents="auto">
         <WindowChromeSafeArea placement="below" />
-        <View style={styles.sidebarHeaderGroup}>
-          <SidebarNewWorkspaceHeaderRow
-            label={labels.newWorkspace}
-            testID="sidebar-global-new-workspace"
-            variant="compact"
-            shortcutKeys={newWorkspaceKeys}
-            onBeforeNavigate={closeSidebar}
-          />
-          <SidebarHeaderRow
-            icon={History}
-            label={labels.sessions}
-            onPress={handleViewMore}
-            isActive={isSessionsActive}
-            testID="sidebar-sessions"
-            variant="compact"
-          />
-          <SidebarHeaderRow
-            icon={CalendarClock}
-            label={labels.schedules}
-            onPress={handleViewSchedules}
-            isActive={isSchedulesActive}
-            testID="sidebar-schedules"
-            variant="compact"
-          />
-        </View>
+        {clusterRoute ? null : (
+          <View style={styles.sidebarHeaderGroup}>
+            <SidebarNewWorkspaceHeaderRow
+              label={labels.newWorkspace}
+              testID="sidebar-global-new-workspace"
+              variant="compact"
+              shortcutKeys={newWorkspaceKeys}
+              onBeforeNavigate={closeSidebar}
+            />
+            <SidebarHeaderRow
+              icon={History}
+              label={labels.sessions}
+              onPress={handleViewMore}
+              isActive={isSessionsActive}
+              testID="sidebar-sessions"
+              variant="compact"
+            />
+            <SidebarHeaderRow
+              icon={CalendarClock}
+              label={labels.schedules}
+              onPress={handleViewSchedules}
+              isActive={isSchedulesActive}
+              testID="sidebar-schedules"
+              variant="compact"
+            />
+          </View>
+        )}
         <WindowChromeSafeArea placement="inline" style={styles.mobileCloseButtonRow}>
           <Pressable
             style={styles.mobileCloseButton}
@@ -752,26 +784,10 @@ function MobileSidebar({
           </Pressable>
         </WindowChromeSafeArea>
 
-        {isInitialLoad && !hasActiveHostFilter ? (
-          <SidebarAgentListSkeleton />
+        {clusterRoute ? (
+          <SidebarClusterNav serverId={clusterRoute.serverId} clusterId={clusterRoute.clusterId} />
         ) : (
-          <SidebarWorkspaceList
-            collapsedProjectKeys={collapsedProjectKeys}
-            onToggleProjectCollapsed={toggleProjectCollapsed}
-            shortcutIndexByWorkspaceKey={shortcutIndexByWorkspaceKey}
-            groupMode={groupMode}
-            statusGroups={statusGroups}
-            pinnedGroups={pinnedGroups}
-            projects={projects}
-            workspaceEntriesByKey={workspaceEntriesByKey}
-            isRefreshing={isManualRefresh && isRevalidating}
-            onRefresh={handleRefresh}
-            onWorkspacePress={handleWorkspacePress}
-            onAddProject={handleOpenProject}
-            parentGestureRef={closeGestureRef}
-            dragGestureHostPresented={dragGestureHostPresented}
-            listHeaderComponent={workspacesSectionHeaderElement}
-          />
+          mobileWorkspaceBody
         )}
 
         <SidebarFooter
