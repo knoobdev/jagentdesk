@@ -30,32 +30,32 @@ interface ClusterResourceDetailProps {
 const WORKLOAD_KINDS = new Set(["Deployment", "DaemonSet", "StatefulSet", "ReplicaSet"]);
 const RESTARTABLE_KINDS = new Set(["Deployment", "DaemonSet", "StatefulSet"]);
 
-function parseContainersFromYaml(yaml: string): string[] {
-  const containers: string[] = [];
-  const lines = yaml.split("\n");
-  let inContainers = false;
-  let containersIndent = 0;
-
-  for (const line of lines) {
-    const trimmed = line.trimStart();
-    if (!inContainers) {
-      if (trimmed === "containers:") {
-        inContainers = true;
-        containersIndent = line.length - trimmed.length;
-      }
-    } else {
-      const indent = line.length - trimmed.length;
-      if (indent <= containersIndent && trimmed.length > 0 && !trimmed.startsWith("#")) {
-        break;
-      }
-      const nameMatch = trimmed.match(/^-\s+name:\s+(\S+)/);
-      if (nameMatch) {
-        containers.push(nameMatch[1]);
-      }
-    }
+function collectNames(arr: unknown, out: string[]): void {
+  if (!Array.isArray(arr)) return;
+  for (const c of arr) {
+    const n = (c as { name?: unknown })?.name;
+    if (typeof n === "string" && n) out.push(n);
   }
+}
 
-  return containers;
+/**
+ * Real container names for a Pod, parsed from the manifest OBJECT — a naive text
+ * scan for "- name:" also matches env-var entries (e.g. QDRANT_APIKEY), which
+ * then get offered as bogus shell/log targets and make exec fail. Regular
+ * containers come first so the default shell/log container is an exec'able one.
+ */
+function parseContainersFromYaml(yaml: string): string[] {
+  try {
+    const obj = parseYaml(yaml) as { spec?: Record<string, unknown> } | null;
+    const spec = obj?.spec ?? {};
+    const names: string[] = [];
+    collectNames(spec.containers, names);
+    collectNames(spec.initContainers, names);
+    collectNames(spec.ephemeralContainers, names);
+    return names;
+  } catch {
+    return [];
+  }
 }
 
 export function ClusterResourceDetail({
