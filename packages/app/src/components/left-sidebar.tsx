@@ -557,7 +557,6 @@ function SidebarFooter({
   handleOpenProject,
   handleHome,
   handleSettings,
-  handleClusters,
   labels,
   handleAddHost,
   handleOpenHostSettings,
@@ -566,14 +565,12 @@ function SidebarFooter({
   handleOpenProject: () => void;
   handleHome: () => void;
   handleSettings: () => void;
-  handleClusters: () => void;
   labels: {
     addProject: string;
     hosts: string;
     home: string;
     pairDevice: string;
     settings: string;
-    clusters: string;
     searchHosts: string;
   };
   handleAddHost: () => void;
@@ -609,13 +606,6 @@ function SidebarFooter({
           testID="sidebar-home"
           label={labels.home}
           icon={Home}
-          theme={theme}
-        />
-        <FooterIconButton
-          onPress={handleClusters}
-          testID="sidebar-clusters"
-          label={labels.clusters}
-          icon={Boxes}
           theme={theme}
         />
         {localServerId ? (
@@ -673,6 +663,7 @@ function MobileSidebar({
   const hasActiveHostFilter = useSidebarViewStore((state) => state.hostFilters.length > 0);
   const isSessionsActive = pathname.includes("/sessions");
   const isSchedulesActive = pathname.includes("/schedules");
+  const isClustersActive = pathname.includes("/clusters");
   const clusterRouteMatch = pathname.match(/\/h\/([^/]+)\/cluster\/([^/]+)/);
   const clusterRoute = clusterRouteMatch
     ? {
@@ -762,6 +753,14 @@ function MobileSidebar({
               testID="sidebar-schedules"
               variant="compact"
             />
+            <SidebarHeaderRow
+              icon={Boxes}
+              label={labels.clusters}
+              onPress={handleClusters}
+              isActive={isClustersActive}
+              testID="sidebar-clusters-nav"
+              variant="compact"
+            />
           </View>
         )}
         <WindowChromeSafeArea placement="inline" style={styles.mobileCloseButtonRow}>
@@ -795,7 +794,6 @@ function MobileSidebar({
           handleOpenProject={handleOpenProject}
           handleHome={handleHome}
           handleSettings={handleSettings}
-          handleClusters={handleClusters}
           labels={labels}
           handleAddHost={handleAddHost}
           handleOpenHostSettings={handleOpenHostSettings}
@@ -837,6 +835,7 @@ function DesktopSidebar({
   const hasActiveHostFilter = useSidebarViewStore((state) => state.hostFilters.length > 0);
   const isSessionsActive = pathname.includes("/sessions");
   const isSchedulesActive = pathname.includes("/schedules");
+  const isClustersActive = pathname.includes("/clusters");
   const clusterRouteMatch = pathname.match(/\/h\/([^/]+)\/cluster\/([^/]+)/);
   const clusterRoute = clusterRouteMatch
     ? {
@@ -960,6 +959,14 @@ function DesktopSidebar({
                 testID="sidebar-schedules"
                 variant="compact"
               />
+              <SidebarHeaderRow
+                icon={Boxes}
+                label={labels.clusters}
+                onPress={handleClusters}
+                isActive={isClustersActive}
+                testID="sidebar-clusters-nav"
+                variant="compact"
+              />
             </View>
           )}
         </View>
@@ -977,7 +984,6 @@ function DesktopSidebar({
           handleOpenProject={handleOpenProject}
           handleHome={handleHome}
           handleSettings={handleSettings}
-          handleClusters={handleClusters}
           labels={labels}
           handleAddHost={handleAddHost}
           handleOpenHostSettings={handleOpenHostSettings}
