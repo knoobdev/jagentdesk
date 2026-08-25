@@ -1,29 +1,87 @@
 # JAgentDesk
 
-JAgentDesk là ứng dụng self-hosted để theo dõi và điều khiển coding agent chạy trên máy của
-bạn. Daemon chạy cục bộ, còn desktop và mobile kết nối trực tiếp qua Tailscale. Mỗi thiết bị
-mobile phải hoàn tất pairing ở tầng ứng dụng và nhập mã xác minh 6 số trước khi được cấp quyền.
+**Self-hosted remote control for your coding agents — now with a built-in Kubernetes cockpit.**
 
-Dự án này được fork từ [Paseo](https://github.com/getpaseo/paseo), sau đó được rebrand và phát
-triển riêng cho các ranh giới của JAgentDesk:
+JAgentDesk lets you run AI coding agents (Claude Code, Codex, and more) on your own
+machine and drive them from anywhere. A lightweight **daemon** runs on your workstation and
+manages agent processes; **desktop** (macOS / Windows / Linux) and **mobile** (iOS / Android)
+apps connect straight to it over **Tailscale** — no relay server, no data leaving your
+tailnet. Every device completes an application‑level **pairing** (offer link / QR + a 6‑digit
+code) before it can control the daemon.
 
-- Không có editor trong app; app chỉ xem file, diff và điều khiển agent.
-- Tailscale là transport từ xa duy nhất; không có relay server của JAgentDesk.
-- Có application-level pairing bằng offer link/QR và mã xác minh 6 số.
-- Có luồng orchestration Supervisor → Lead → Peer và entry point `/orc`.
+> **📦 [Download the latest release →](https://github.com/knoobdev/jagentdesk/releases/latest)**
 
-## Thành phần
+JAgentDesk is a rebranded, independently‑developed fork of [Paseo](https://github.com/getpaseo/paseo)
+with a few deliberate boundaries:
 
-- `packages/server` — daemon, vòng đời agent, WebSocket API và Tailscale bridge.
-- `packages/app` — client Expo cho iOS, Android và web.
-- `packages/desktop` — app Electron cho macOS, Windows và Linux.
-- `packages/client` và `packages/protocol` — client dùng chung và contract giao thức.
-- `packages/cli` — CLI điều khiển daemon.
+- **No in‑app editor.** You can view files, diffs, and logs — but you edit through the agent, not a text editor.
+- **Tailscale is the only remote transport.** No JAgentDesk relay.
+- **Application‑level pairing** with an offer link / QR and a 6‑digit verification code.
+- **Multi‑agent orchestration** (Supervisor → Lead → Peer) and agent‑to‑agent messaging.
 
-## Cài đặt và chạy nhanh
+---
 
-Yêu cầu Node.js `22.20.0` và npm. Repo có thể dùng mise để cài đúng toolchain trong
-`.tool-versions`; Android local build cần thêm Android SDK, còn iOS local build cần Xcode.
+## What can it do?
+
+- **Run & steer agents remotely** — start agents, send prompts, watch streamed output and tool
+  calls, interrupt runs, review file diffs, all from desktop or phone.
+- **Multiple providers** — Claude Code and other CLI agents, each with model / thinking /
+  permission controls in the composer.
+- **Agent orchestration** — a Supervisor/Lead/Peer runtime; agents can `list_agents`,
+  `send_agent_prompt`, and `create_agent` to coordinate work across the daemon.
+- **Kubernetes cluster management** *(new)* — a k8s‑Lens‑style cockpit built into the app.
+- **Per‑cluster AI chat** *(new)* — ask an agent about any resource or its logs; the agent uses
+  real `kubectl` tools scoped to the exact cluster you connected.
+
+---
+
+## ✨ New in this release
+
+### Kubernetes cluster management (desktop **and** mobile)
+
+Open **Clusters** from the sidebar to manage Kubernetes from inside JAgentDesk:
+
+- **Connect any context** from `~/.kube/config` (docker‑desktop, GKE, EKS, …) — browsing needs
+  no project; just connect and explore.
+- **Browse every resource type** — Namespaces, Nodes, Events, Pods, Deployments, DaemonSets,
+  StatefulSets, ReplicaSets, Jobs, CronJobs, ConfigMaps, Secrets, Services, Ingress, and more,
+  with a searchable, sortable, responsive table (compact columns on phones).
+- **Rich resource detail** — a k8s‑Lens‑style overview plus raw **YAML**, live **logs** (follow +
+  container selector), an interactive **shell** (exec), **port‑forward**, and **Events** filtered
+  to the resource.
+- **Actions** — Scale, Restart, Rollback (Deployments), Edit YAML / Apply, and Delete — with the
+  correct Kubernetes patch strategies under the hood.
+- Works identically on the **Electron desktop app** and the **iOS/Android app**.
+
+### Ask AI about your cluster
+
+- An **Ask AI** button on every resource hands the agent the exact resource — and, when the logs
+  pane is open, the on‑screen log buffer — so *“what’s wrong in this log?”* just works.
+- The agent is wired to **cluster‑scoped `kubectl` tools** (`kubectl_get` for get/describe/logs/list,
+  `kubectl_apply` for changes) that target the exact cluster you connected, even if it isn’t in a
+  local kubeconfig.
+- Replies stream live (assistant text **and** tool calls) in a chat dock that sits beside the
+  resource view — a right‑hand side panel on desktop, a floating chat button on phones.
+
+### Cluster chat history, new chats & project picker
+
+- **History** — every conversation for a cluster, with titles and timestamps; tap to switch back
+  to any past chat and its full transcript.
+- **New chat** — start a fresh conversation; empty chats get distinct titles (no more duplicate
+  “Untitled chat”).
+- **Project picker** — choose which project/workspace a cluster chat runs in (the agent’s working
+  directory), instead of it silently picking one for you. The picker appears when you have more
+  than one project.
+
+For a full walkthrough see **[docs/kubernetes.md](docs/kubernetes.md)**.
+
+---
+
+## Quick start
+
+Requires **Node.js 22.20.0** and npm. The repo ships a `.tool-versions` file (use
+[mise](https://mise.jdx.dev/) to install the exact toolchain). Local Android builds need the
+Android SDK; local iOS builds need Xcode.
 
 ```bash
 git clone https://github.com/knoobdev/jagentdesk.git
@@ -31,116 +89,84 @@ cd jagentdesk
 npm install
 ```
 
-Chạy daemon, mobile/web và desktop ở các terminal riêng:
+Run the daemon, the mobile/web client, and the desktop app in separate terminals:
 
 ```bash
-npm run dev:server
-npm run dev:app
-npm run dev:desktop
+npm run dev:server    # the daemon
+npm run dev:app       # Expo client (iOS / Android / web)
+npm run dev:desktop   # Electron desktop app
 ```
 
-Daemon dev lắng nghe tại `127.0.0.1:6768`. Xem thêm [docs/development.md](docs/development.md),
-[docs/android.md](docs/android.md) và [docs/mobile-testing.md](docs/mobile-testing.md).
+Or just grab a prebuilt app from the **[latest release](https://github.com/knoobdev/jagentdesk/releases/latest)**
+(macOS Apple Silicon / Intel, Windows x64, Linux x64, Android APK, iOS IPA).
 
-## Sử dụng desktop và mobile
+> **macOS:** on Apple Silicon, download the **macOS‑Apple‑Silicon** asset. Do not install the
+> Intel x64 asset on Apple Silicon — it runs under Rosetta and is intentionally rejected by the app.
 
-### 1. Đăng nhập Tailscale
+---
 
-1. Mở JAgentDesk Desktop và vào phần host/overview.
-2. Trong **Tailscale connection**, chọn **Sign in with Tailscale** và hoàn tất đăng nhập trong
-   cửa sổ trình duyệt.
-3. Chờ trạng thái host chuyển sang **Online**. Mobile cũng phải đăng nhập vào cùng tailnet.
+## Using the Kubernetes features
 
-Nếu không muốn dùng trình duyệt trong lúc test, Tailscale auth key có thể được nhập ở màn hình
-đăng nhập của mobile. Không commit auth key vào repo hoặc đưa auth key vào issue/log.
+1. **Connect a cluster.** Sidebar → **Clusters** → pick a context → **Connect** (green dot = connected).
+2. **Browse.** Press **Open workloads**. On desktop you get a three‑column layout (kind nav ·
+   resource list · chat dock); on phones the kind menu slides in — tap a kind (e.g. **Pod**).
+3. **Inspect a resource.** Tap a row for the detail view: overview, YAML, Logs, Shell,
+   Port‑forward, Events, and actions.
+4. **Ask AI.** Tap **Ask AI** (or the chat button / side panel) — the agent receives the resource
+   (and open logs) as context and answers with live `kubectl` output. First set up a provider
+   (**Setup providers**) and add at least one project so the chat has a working directory.
+5. **Switch / start chats.** Open the **history** (clock icon) in the chat header to see past
+   conversations, start a **New chat**, or pick the **project** new chats run in.
 
-### Tải đúng bản desktop trên macOS
+---
 
-Trên máy Mac Apple Silicon (M1/M2/M3/M4), hãy tải asset có tên `macOS-Apple-Silicon` trong
-GitHub Release. Asset `x64` chỉ dành cho Mac Intel. JAgentDesk sẽ chặn bản Intel chạy dưới
-Rosetta để tránh tình trạng CPU cao và UI phản hồi chậm.
+## Repository layout
 
-### 2. Pair mobile với desktop
+- `packages/server` — the daemon: agent lifecycle, WebSocket API, Kubernetes client, and the
+  Tailscale bridge.
+- `packages/app` — the Expo client for iOS, Android, and web.
+- `packages/desktop` — the Electron app for macOS, Windows, and Linux.
+- `packages/client` & `packages/protocol` — the shared client and the wire‑protocol contract.
+- `packages/cli` — a CLI to control the daemon (`jagentdesk daemon start|stop|restart|status`).
+- `docs/` — architecture, data model, development, and feature guides (including
+  [Kubernetes](docs/kubernetes.md)).
 
-1. Trên desktop mở **Pair a device**.
-2. Dùng **Copy** để copy nguyên pairing offer link, hoặc quét QR.
-3. Trên mobile mở luồng pair, dán offer link vào ô pairing link rồi kết nối.
-4. Khi desktop nhận được tín hiệu offer từ mobile, card **Device connection request** mới xuất
-   hiện cùng mã xác minh và countdown.
-5. Xác nhận đúng thiết bị trên desktop, nhập mã 6 số vào mobile và chờ trạng thái **Device
-   connected successfully**.
+See [docs/architecture.md](docs/architecture.md) and [docs/development.md](docs/development.md) to
+go deeper.
 
-Pairing offer link không phải là quyền truy cập hoàn chỉnh. Thiết bị vẫn cần tailnet access,
-identity key và mã xác minh do desktop hiển thị.
+---
 
-### 3. Mở project và agent
+## Building releases
 
-Sau khi pairing, chọn **Add a project** hoặc **Import session** trên mobile. Trên desktop, chọn
-project/workspace rồi mở agent tương ứng. Provider CLI (Claude Code, Codex, Copilot, OpenCode,
-Pi...) vẫn dùng credential của chính provider trên máy chạy daemon; JAgentDesk không thu thập
-credential đó.
-
-## Cài mobile không ký bằng Sideloadly
-
-### Android
-
-Tải file APK từ GitHub Release `v1.0.3` hoặc release tương ứng. Bật cho phép cài ứng dụng từ
-nguồn này trong Android Settings, mở APK và cài đặt. File `.aab` dành cho Play Store không phải
-file cài trực tiếp; hãy dùng artifact `.apk`.
-
-### iPhone/iPad
-
-GitHub Actions build IPA cho device trực tiếp bằng Xcode trên macOS runner; artifact có tên dạng
-`JAgentDesk-v1.0.3-ios.ipa`. Đây là IPA device chưa ký, không phải app Simulator. Để sideload trên
-thiết bị thật, Sideloadly sẽ ký lại IPA bằng Apple ID/certificate của người cài:
-
-1. Cài [Sideloadly](https://sideloadly.io/) trên macOS hoặc Windows.
-2. Kết nối iPhone bằng USB, mở khóa và bấm **Trust** nếu iOS hỏi.
-3. Mở Sideloadly, chọn thiết bị, kéo file IPA vào vùng IPA và nhập Apple ID.
-4. Bấm **Start**, hoàn tất xác thực Apple ID nếu được yêu cầu.
-5. Trên iPhone vào **Settings → General → VPN & Device Management**, tin cậy developer
-   profile rồi mở JAgentDesk.
-
-IPA phải được build cho device. Apple ID miễn phí có thể có thời hạn ký ngắn; khi app hết hạn,
-sideload lại IPA.
-
-## Build và release bằng GitHub Actions
-
-Workflow `.github/workflows/release.yml` chạy khi push tag semver dạng `v*.*.*`. Tag đầu tiên của
-repo này là `v1.0.0` và phải khớp version `1.0.0` trong các package.
-
-- Desktop build theo matrix macOS, Windows và Linux, sau đó upload installer vào GitHub Release.
-- Mobile Android được prebuild và compile trực tiếp trên runner, sau đó upload APK cài thử.
-- Mobile iOS chạy `expo prebuild`, CocoaPods và `xcodebuild` trực tiếp trên macOS runner, đóng gói
-  `.app` device thành `.ipa` chưa ký rồi upload vào GitHub Release. Workflow không dùng EAS.
-
-GitHub Actions tự có `GITHUB_TOKEN`; job IPA không cần secret signing vì Sideloadly sẽ ký lại IPA
-trên máy người cài. APK Android của workflow là bản cài thử, không phải artifact đã ký để phát hành
-Play Store.
-
-Tạo release đầu tiên:
+`.github/workflows/release.yml` runs on every semver tag push (`v*.*.*`) and on manual dispatch.
+It builds the desktop apps (macOS / Windows / Linux), an Android APK, and an unsigned iOS IPA,
+then attaches them to the matching GitHub Release. To cut a release:
 
 ```bash
-git tag v1.0.0
+# bump every package.json to the target version first, then:
+git tag v0.0.1
 git push origin main --tags
 ```
 
-Chạy kiểm tra/build tương ứng ở local:
+---
 
-```bash
-npm run typecheck
-npm run lint
-npm run build:desktop -- --publish never
-cd packages/app
-npm --prefix ../.. run build:app-deps
-npm run build:terminal-webview
-APP_VARIANT=production npx expo prebuild --platform android --clean --non-interactive
-(cd android && ./gradlew :app:assembleRelease)
-```
+## Contributing
+
+Contributions are welcome — please read [CONTRIBUTING.md](CONTRIBUTING.md) first.
+
+**Contributors**
+
+- **[knoobdev](https://github.com/knoobdev)** — maintainer.
+- **Claude** (Anthropic) — feature development & engineering.
+- **DeepSeek** — engineering support.
+
+---
+
+## Acknowledgements
+
+Huge thanks to **[Paseo](https://github.com/getpaseo/paseo)** and its contributors — JAgentDesk is
+forked from Paseo, and that foundation is what let this project get off the ground so quickly.
 
 ## License
 
-JAgentDesk được phát hành theo AGPL-3.0-or-later.
-
-Cảm ơn Paseo và các contributor của Paseo vì nền tảng ban đầu đã giúp JAgentDesk bắt đầu nhanh
-hơn.
+JAgentDesk is released under **AGPL‑3.0‑or‑later**. See [LICENSE](LICENSE).

@@ -1,6 +1,6 @@
 {
   "name": "@jagentdesk/highlight",
-  "version": "1.0.19",
+  "version": "0.0.1",
   "files": [
     "dist",
     "!dist/**/*.map"
