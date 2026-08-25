@@ -15,7 +15,7 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import { Gesture } from "react-native-gesture-handler";
-import { History, MessageSquare, Plus, X } from "lucide-react-native";
+import { Check, History, MessageSquare, Plus, X } from "lucide-react-native";
 import { formatTimeAgo } from "@/utils/time";
 import { AgentConversationPanel } from "@/panels/agent-panel";
 import {
@@ -31,7 +31,7 @@ import type { ClusterComposerResource } from "@/components/cluster-composer";
 import { SidebarResizeHandle } from "@/components/sidebar-resize-handle";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
-import { useSessionStore, type Agent } from "@/stores/session-store";
+import { useSessionStore, type Agent, type WorkspaceDescriptor } from "@/stores/session-store";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import {
   useClusterChatStore,
@@ -45,6 +45,8 @@ const ThemedX = withUnistyles(X);
 const ThemedMessageSquare = withUnistyles(MessageSquare);
 const ThemedHistory = withUnistyles(History);
 const ThemedPlus = withUnistyles(Plus);
+const ThemedCheck = withUnistyles(Check);
+const accentColor = (theme: Theme) => ({ color: theme.colors.accent });
 const ThemedActivityIndicator = withUnistyles(ActivityIndicator);
 const mutedColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 const fabIconColor = (theme: Theme) => ({ color: theme.colors.accentForeground });
@@ -134,6 +136,56 @@ function createClusterAgent(params: {
   });
 }
 
+/** Display name for a project in the picker. */
+function workspaceLabel(ws: WorkspaceDescriptor): string {
+  return ws.projectCustomName || ws.projectDisplayName || ws.name || "Project";
+}
+
+/** One representative workspace per distinct project — the user picks a project,
+ *  not each per-agent worktree (which all share the project directory). */
+function distinctProjects(list: WorkspaceDescriptor[]): WorkspaceDescriptor[] {
+  const seen = new Set<string>();
+  const out: WorkspaceDescriptor[] = [];
+  for (const ws of list) {
+    const key = ws.projectId || ws.projectRootPath || ws.workspaceDirectory || ws.id;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(ws);
+  }
+  return out;
+}
+
+/** One selectable project row in the cluster chat history overlay. */
+function WorkspaceItem({
+  workspace,
+  active,
+  onSelect,
+}: {
+  workspace: WorkspaceDescriptor;
+  active: boolean;
+  onSelect: (id: string) => void;
+}) {
+  const handlePress = useCallback(() => onSelect(workspace.id), [onSelect, workspace.id]);
+  return (
+    <Pressable
+      style={active ? [styles.historyItem, styles.historyItemActive] : styles.historyItem}
+      onPress={handlePress}
+    >
+      <View style={styles.wsText}>
+        <Text style={styles.historyTitle} numberOfLines={1}>
+          {workspaceLabel(workspace)}
+        </Text>
+        {workspace.projectRootPath || workspace.workspaceDirectory ? (
+          <Text style={styles.wsDir} numberOfLines={1}>
+            {workspace.projectRootPath || workspace.workspaceDirectory}
+          </Text>
+        ) : null}
+      </View>
+      {active ? <ThemedCheck size={16} uniProps={accentColor} /> : null}
+    </Pressable>
+  );
+}
+
 /** One row in the cluster chat history overlay. */
 function HistoryItem({
   agent,
@@ -188,12 +240,28 @@ export function ClusterChatDock({
 
   const client = useHostRuntimeClient(serverId);
   const { entries: providerEntries } = useProvidersSnapshot(serverId);
-  const firstWorkspace = useSessionStore(
-    (state) => state.sessions[serverId]?.workspaces.values().next().value,
-  );
+  const workspaces = useSessionStore((state) => state.sessions[serverId]?.workspaces);
   const agents = useSessionStore((state) => state.sessions[serverId]?.agents);
   const provider = providerEntries?.find((e) => e.enabled)?.provider ?? null;
-  const cwd = firstWorkspace?.workspaceDirectory ?? null;
+  // The project the cluster chat runs in (agent cwd): the user's pick, else the
+  // first available. Previously this was silently "whatever workspace is first",
+  // which is why the chat felt like it landed in a random project.
+  const pickedWorkspaceId = useClusterChatStore((s) => s.pickedWorkspaceId);
+  const setPickedWorkspaceId = useClusterChatStore((s) => s.setPickedWorkspaceId);
+  const workspaceList = useMemo(
+    () => (workspaces ? Array.from(workspaces.values()) : []),
+    [workspaces],
+  );
+  const chosenWorkspace = useMemo(() => {
+    const picked = pickedWorkspaceId ? workspaces?.get(pickedWorkspaceId) : undefined;
+    return picked ?? workspaceList[0] ?? null;
+  }, [pickedWorkspaceId, workspaces, workspaceList]);
+  const cwd = chosenWorkspace?.workspaceDirectory || null;
+  // One row per project (not per per-agent worktree) so the picker is a short,
+  // meaningful list of the user's projects.
+  const projectOptions = useMemo(() => distinctProjects(workspaceList), [workspaceList]);
+  const chosenProjectKey =
+    chosenWorkspace?.projectId || chosenWorkspace?.projectRootPath || chosenWorkspace?.id;
   const ready = Boolean(client && provider && cwd);
 
   // Register the dock's agent as "visible" so the session subscribes to its
@@ -317,6 +385,10 @@ export function ClusterChatDock({
     },
     [clusterId, openChat],
   );
+  const handleSelectWorkspace = useCallback(
+    (id: string) => setPickedWorkspaceId(id),
+    [setPickedWorkspaceId],
+  );
   const handleNewChat = useCallback(() => {
     setHistoryOpen(false);
     if (!client || !provider || !cwd) return;
@@ -428,11 +500,25 @@ export function ClusterChatDock({
           {body}
           {historyOpen ? (
             <View style={styles.historyOverlay}>
-              <Pressable style={styles.historyNew} onPress={handleNewChat}>
-                <ThemedPlus size={16} uniProps={mutedColor} />
-                <Text style={styles.historyNewText}>New chat</Text>
-              </Pressable>
               <ScrollView>
+                {projectOptions.length >= 2 ? (
+                  <>
+                    <Text style={styles.historySectionLabel}>PROJECT FOR NEW CHATS</Text>
+                    {projectOptions.map((ws) => (
+                      <WorkspaceItem
+                        key={ws.id}
+                        workspace={ws}
+                        active={(ws.projectId || ws.projectRootPath || ws.id) === chosenProjectKey}
+                        onSelect={handleSelectWorkspace}
+                      />
+                    ))}
+                    <Text style={styles.historySectionLabel}>CHATS</Text>
+                  </>
+                ) : null}
+                <Pressable style={styles.historyNew} onPress={handleNewChat}>
+                  <ThemedPlus size={16} uniProps={mutedColor} />
+                  <Text style={styles.historyNewText}>New chat</Text>
+                </Pressable>
                 {clusterAgents.length === 0 ? (
                   <Text style={styles.historyEmpty}>No previous chats for this cluster.</Text>
                 ) : (
@@ -543,6 +629,14 @@ const styles = StyleSheet.create((theme: Theme) => ({
     bottom: 0,
     backgroundColor: theme.colors.surface0,
   },
+  historySectionLabel: {
+    paddingHorizontal: theme.spacing[3],
+    paddingTop: theme.spacing[3],
+    paddingBottom: theme.spacing[1],
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foregroundMuted,
+  },
   historyNew: {
     flexDirection: "row",
     alignItems: "center",
@@ -577,6 +671,14 @@ const styles = StyleSheet.create((theme: Theme) => ({
     color: theme.colors.foreground,
   },
   historyTime: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+  },
+  wsText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  wsDir: {
     fontSize: theme.fontSize.xs,
     color: theme.colors.foregroundMuted,
   },

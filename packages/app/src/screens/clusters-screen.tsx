@@ -11,6 +11,7 @@ import { ContextStatusDot, ClusterStatusDot } from "@/components/cluster-dot";
 import { buildClusterWorkloadsRoute } from "@/utils/host-routes";
 import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
 import { useSessionStore } from "@/stores/session-store";
+import { useClusterChatStore } from "@/stores/cluster-chat-store";
 import { askAgentAboutResource } from "@/components/cluster-ask-agent";
 import type { Theme } from "@/styles/theme";
 import type { ClusterInfo, KubeContextInfo } from "@jagentdesk/protocol/cluster/rpc-schemas";
@@ -126,13 +127,16 @@ export function ClustersScreen() {
   const [error, setError] = useState<string | null>(null);
   const [busyContext, setBusyContext] = useState<string | null>(null);
 
-  // Ask-agent wiring
+  // Ask-agent wiring. cwd = the project the user picked for cluster chat (shared
+  // with the chat dock), falling back to the first available workspace.
   const { entries: providerEntries } = useProvidersSnapshot(serverId);
-  const firstWorkspace = useSessionStore(
-    (state) => state.sessions[serverId]?.workspaces.values().next().value,
-  );
+  const workspaces = useSessionStore((state) => state.sessions[serverId]?.workspaces);
+  const pickedWorkspaceId = useClusterChatStore((s) => s.pickedWorkspaceId);
   const agentProvider = providerEntries?.find((e) => e.enabled)?.provider ?? null;
-  const agentCwd = firstWorkspace?.workspaceDirectory ?? null;
+  const chosenWorkspace =
+    (pickedWorkspaceId ? workspaces?.get(pickedWorkspaceId) : undefined) ??
+    workspaces?.values().next().value;
+  const agentCwd = chosenWorkspace?.workspaceDirectory ?? null;
   const agentReady = Boolean(agentProvider && agentCwd);
 
   const refresh = useCallback(async () => {

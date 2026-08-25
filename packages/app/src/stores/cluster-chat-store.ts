@@ -40,6 +40,13 @@ interface ClusterChatState {
   setPendingAsk: (ask: ClusterChatPendingAsk) => void;
   /** Clear the queued question once the dock has delivered it. */
   clearPendingAsk: () => void;
+  /**
+   * The project/workspace the user picked for cluster chats to run in (the agent's
+   * cwd). null = fall back to the first available workspace. Persists across
+   * clusters — a k8s project is usually the same regardless of which cluster.
+   */
+  pickedWorkspaceId: string | null;
+  setPickedWorkspaceId: (workspaceId: string | null) => void;
   /** Open/collapse the dock. */
   setOpen: (open: boolean) => void;
   /**
@@ -68,12 +75,14 @@ export const useClusterChatStore = create<ClusterChatState>((set, get) => ({
   open: false,
   width: DEFAULT_WIDTH,
   pendingAsk: null,
+  pickedWorkspaceId: null,
   openChat: ({ clusterId, agentId, workspaceId }) =>
     set({ clusterId, agentId, workspaceId, open: true }),
   hideChat: () => set({ open: false }),
   showChat: () => set({ open: true }),
   setPendingAsk: (ask) => set({ pendingAsk: ask }),
   clearPendingAsk: () => set({ pendingAsk: null }),
+  setPickedWorkspaceId: (pickedWorkspaceId) => set({ pickedWorkspaceId }),
   setOpen: (open) => set({ open }),
   resetForCluster: (clusterId, open = true) => {
     if (get().clusterId !== clusterId) {
