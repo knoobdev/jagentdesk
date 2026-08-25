@@ -1416,6 +1416,9 @@ const styles = StyleSheet.create((theme: Theme) => ({
     alignItems: "center",
     justifyContent: "space-between",
     gap: theme.spacing[2],
+    // Breathing room above so the row sits centered between the header title and
+    // the details table instead of hugging the title.
+    paddingTop: theme.spacing[3],
     paddingBottom: theme.spacing[3],
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,

@@ -362,7 +362,7 @@ const styles = StyleSheet.create((theme) => ({
   contextActions: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: theme.spacing[2],
+    gap: theme.spacing[1.5],
     paddingLeft: theme.spacing[4],
   },
   contextInfo: {
@@ -379,8 +379,8 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.foregroundMuted,
   },
   btn: {
-    paddingHorizontal: theme.spacing[3],
-    paddingVertical: theme.spacing[1.5],
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
     borderRadius: theme.borderRadius.md,
   },
   btnPrimary: {
