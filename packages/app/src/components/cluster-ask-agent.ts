@@ -17,6 +17,13 @@ export interface AskAgentAboutResourceInput {
   /** The question the user typed in the cluster composer. Sent as the first message. */
   message?: string;
   /**
+   * Explicit title for the agent. The daemon does NOT auto-title from the first
+   * message, so an untitled agent stays "Untitled chat" forever — pass a distinct
+   * title when creating an empty chat so the history list doesn't fill with
+   * duplicate names.
+   */
+  title?: string;
+  /**
    * When provided, the created agent is handed back instead of navigating to a
    * full agent tab. The cluster/workloads view uses this to open the chat in a
    * slide-in dock so the k8s resources stay on screen.
@@ -37,6 +44,7 @@ export async function askAgentAboutResource(input: AskAgentAboutResourceInput): 
     cwd,
     message,
     logs,
+    title,
     onCreated,
   } = input;
 
@@ -73,6 +81,9 @@ export async function askAgentAboutResource(input: AskAgentAboutResourceInput): 
       cwd,
       systemPrompt: context,
       labels: { "jagentdesk.cluster.id": clusterId },
+      // A distinct title up front (the daemon never auto-titles), so empty chats
+      // don't all collapse to "Untitled chat" in the history list.
+      ...(title ? { title } : {}),
       // When the user typed a question in the composer, send it as the first
       // message; otherwise open an empty chat for them to type.
       ...(trimmed ? { initialPrompt: trimmed } : {}),

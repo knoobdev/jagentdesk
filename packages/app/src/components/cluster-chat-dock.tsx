@@ -97,6 +97,11 @@ function deliverPendingAsk(
   }).catch(() => {});
 }
 
+/** A distinct default title for an empty cluster chat (the daemon never auto-titles). */
+function nextChatTitle(existingCount: number): string {
+  return existingCount <= 0 ? "Cluster chat" : `Cluster chat ${existingCount + 1}`;
+}
+
 /** Spin up the single cluster agent, baking in any queued Ask AI context. */
 function createClusterAgent(params: {
   client: NonNullable<ReturnType<typeof useHostRuntimeClient>>;
@@ -106,9 +111,11 @@ function createClusterAgent(params: {
   resource?: ClusterComposerResource;
   provider: string;
   cwd: string;
+  /** Explicit title for an empty chat; omit when a message will seed the title. */
+  title?: string;
   onOpen: (input: { clusterId: string; agentId: string; workspaceId: string | null }) => void;
 }): void {
-  const { client, serverId, clusterId, ask, resource, provider, cwd, onOpen } = params;
+  const { client, serverId, clusterId, ask, resource, provider, cwd, title, onOpen } = params;
   void askAgentAboutResource({
     client,
     serverId,
@@ -121,6 +128,8 @@ function createClusterAgent(params: {
     provider,
     cwd,
     message: ask?.message,
+    // A message seeds the title from its first line; only title the empty ones.
+    ...(ask?.message ? {} : { title }),
     onCreated: ({ id, workspaceId: ws }) => onOpen({ clusterId, agentId: id, workspaceId: ws }),
   });
 }
@@ -230,6 +239,7 @@ export function ClusterChatDock({
     }
 
     // One agent per cluster, no race: bake the pending resource context into it.
+    // This branch only runs when none exists yet, so it is the cluster's first chat.
     createClusterAgent({
       client,
       serverId,
@@ -238,6 +248,7 @@ export function ClusterChatDock({
       resource,
       provider,
       cwd,
+      title: nextChatTitle(0),
       onOpen: openChat,
     });
   }, [
@@ -318,9 +329,10 @@ export function ClusterChatDock({
       resource,
       provider,
       cwd,
+      title: nextChatTitle(clusterAgents.length),
       onOpen: openChat,
     });
-  }, [client, provider, cwd, clusterId, serverId, resource, openChat]);
+  }, [client, provider, cwd, clusterId, serverId, resource, openChat, clusterAgents.length]);
 
   const paneValue = useMemo<PaneContextValue>(
     () => ({
