@@ -25,6 +25,12 @@ import { resolveCliVersion } from "../version.js";
 export interface ConnectOptions {
   host?: string;
   timeout?: number;
+  /**
+   * Optional client capabilities to advertise during the connect handshake, e.g.
+   * `{ browser_host: { hostKind, supportedCommands } }` to register a CLI-based
+   * browser automation host with the daemon's browser-tools broker.
+   */
+  capabilities?: Record<string, unknown>;
 }
 
 export interface DaemonConnectionCommandError {
@@ -309,6 +315,7 @@ async function tryConnectHost(
   clientId: string,
   timeout: number,
   nodeWebSocketFactory: ReturnType<typeof createNodeWebSocketFactory>,
+  capabilities?: Record<string, unknown>,
 ): Promise<{ client: DaemonClient } | { error: unknown }> {
   const target = resolveDaemonTarget(host);
   // ADR-0010: a daemon that enforces local device pairing issues a challenge on
@@ -323,6 +330,7 @@ async function tryConnectHost(
     appVersion: resolveCliVersion(),
     password,
     connectTimeoutMs: timeout,
+    ...(capabilities ? { capabilities: capabilities as DaemonClientConfig["capabilities"] } : {}),
     webSocketFactory: (
       url: string,
       config?: { headers?: Record<string, string>; protocols?: string[] },
@@ -434,7 +442,14 @@ export async function connectToDaemon(options?: ConnectOptions): Promise<DaemonC
     }
     const host = hosts[index];
     const password = resolveDaemonPassword(host);
-    const result = await tryConnectHost(host, password, clientId, timeout, nodeWebSocketFactory);
+    const result = await tryConnectHost(
+      host,
+      password,
+      clientId,
+      timeout,
+      nodeWebSocketFactory,
+      options?.capabilities,
+    );
     if ("client" in result) {
       return result.client;
     }

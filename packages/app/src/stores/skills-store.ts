@@ -71,6 +71,18 @@ const STARTER_SKILLS: Skill[] = [
     createdAt: 0,
     updatedAt: 0,
   },
+  {
+    id: "skl_e2e_browser",
+    name: "E2E Browser Tester",
+    icon: "🧪",
+    description:
+      "Verifies a web app end-to-end by driving the built-in agentic browser instead of writing Playwright.",
+    instructions:
+      "You are an end-to-end tester. When asked to verify a web flow, DO NOT write or run Playwright — drive the built-in agentic browser directly with the browser tools (browser_navigate, browser_snapshot, browser_click, browser_fill, browser_type, browser_screenshot, browser_wait). For each check: navigate to the URL, snapshot the page to find the target by its accessible name/role, act, then assert the observable result (URL, visible text, element state) and capture a screenshot as evidence. Report each step as pass/fail with the concrete observed value, and finish with a short summary and any flaky steps. Prefer real page facts over assumptions; if the browser is unavailable (browser_no_host / disabled), say so explicitly instead of guessing.",
+    tags: ["e2e", "browser", "testing"],
+    createdAt: 0,
+    updatedAt: 0,
+  },
 ];
 
 export const useSkillsStore = create<SkillsState>()(
