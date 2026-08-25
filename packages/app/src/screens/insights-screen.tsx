@@ -170,62 +170,69 @@ export function InsightsScreen() {
         </Text>
 
         {!hasData ? (
-          <Text style={styles.empty}>
-            No usage yet. Start an agent and its token and cost totals will appear here.
+          <Text style={styles.banner}>
+            No agent has reported usage on this host yet — the figures below stay at zero until one
+            does.
           </Text>
-        ) : (
-          <>
-            <View style={styles.kpiRow}>
-              <KpiTile
-                Icon={ThemedCpu}
-                label="TOKENS"
-                value={formatTokenCount(insights.totalTokens)}
-                sub={`${formatTokenCount(insights.totalInputTokens + insights.totalCachedInputTokens)} in · ${formatTokenCount(insights.totalOutputTokens)} out`}
-              />
-              <KpiTile
-                Icon={ThemedCoins}
-                label="COST"
-                value={insights.hasCost ? formatUsd(insights.totalCostUsd) : "—"}
-                sub={insights.hasCost ? "reported by provider" : "not reported (subscription)"}
-              />
-              <KpiTile
-                Icon={ThemedUsers}
-                label="AGENTS"
-                value={String(insights.agentsWithUsage)}
-                sub={`of ${insights.agentCount} on host`}
-              />
-              <KpiTile
-                Icon={ThemedCpu}
-                label="AVG / AGENT"
-                value={formatTokenCount(insights.avgTokensPerAgent)}
-                sub="tokens per agent"
-              />
-            </View>
+        ) : null}
 
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>Tokens by model</Text>
-              {insights.byModel.map((row, i) => (
-                <ModelBar key={row.model} row={row} index={i} maxTokens={maxModelTokens} />
-              ))}
-            </View>
+        <View style={styles.kpiRow}>
+          <KpiTile
+            Icon={ThemedCpu}
+            label="TOKENS"
+            value={formatTokenCount(insights.totalTokens)}
+            sub={`${formatTokenCount(insights.totalInputTokens + insights.totalCachedInputTokens)} in · ${formatTokenCount(insights.totalOutputTokens)} out`}
+          />
+          <KpiTile
+            Icon={ThemedCoins}
+            label="COST"
+            value={insights.hasCost ? formatUsd(insights.totalCostUsd) : "—"}
+            sub={insights.hasCost ? "reported by provider" : "not reported"}
+          />
+          <KpiTile
+            Icon={ThemedUsers}
+            label="AGENTS"
+            value={String(insights.agentsWithUsage)}
+            sub={`of ${insights.agentCount} on host`}
+          />
+          <KpiTile
+            Icon={ThemedCpu}
+            label="AVG / AGENT"
+            value={formatTokenCount(insights.avgTokensPerAgent)}
+            sub="tokens per agent"
+          />
+        </View>
 
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>Top agents by tokens</Text>
-              {insights.topAgents.map((row) => (
-                <AgentBar key={row.id} row={row} maxTokens={maxAgentTokens} />
-              ))}
-            </View>
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Tokens by model</Text>
+          {insights.byModel.length > 0 ? (
+            insights.byModel.map((row, i) => (
+              <ModelBar key={row.model} row={row} index={i} maxTokens={maxModelTokens} />
+            ))
+          ) : (
+            <Text style={styles.cardEmpty}>No model usage yet.</Text>
+          )}
+        </View>
 
-            {insights.activeContext.length > 0 ? (
-              <View style={styles.card}>
-                <Text style={styles.cardTitle}>Context window · running agents</Text>
-                {insights.activeContext.map((row) => (
-                  <ContextRow key={row.id} row={row} />
-                ))}
-              </View>
-            ) : null}
-          </>
-        )}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Top agents by tokens</Text>
+          {insights.topAgents.length > 0 ? (
+            insights.topAgents.map((row) => (
+              <AgentBar key={row.id} row={row} maxTokens={maxAgentTokens} />
+            ))
+          ) : (
+            <Text style={styles.cardEmpty}>No agent usage yet.</Text>
+          )}
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Context window · running agents</Text>
+          {insights.activeContext.length > 0 ? (
+            insights.activeContext.map((row) => <ContextRow key={row.id} row={row} />)
+          ) : (
+            <Text style={styles.cardEmpty}>No agent is running right now.</Text>
+          )}
+        </View>
       </ScrollView>
     </View>
   );
@@ -247,11 +254,21 @@ const styles = StyleSheet.create((theme: Theme) => ({
     marginTop: theme.spacing[2],
     lineHeight: 20,
   },
-  empty: {
+  banner: {
+    marginTop: theme.spacing[3],
+    padding: theme.spacing[3],
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foregroundMuted,
+    backgroundColor: theme.colors.surface1,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.md,
+    lineHeight: 20,
+  },
+  cardEmpty: {
     fontSize: theme.fontSize.sm,
     color: theme.colors.foregroundMuted,
     fontStyle: "italic",
-    padding: theme.spacing[4],
   },
   kpiRow: {
     flexDirection: "row",
