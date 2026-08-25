@@ -39,9 +39,12 @@ export const useClusterChatStore = create<ClusterChatState>((set, get) => ({
   clusterId: null,
   agentId: null,
   workspaceId: null,
-  // The chat sidebar is visible by default so the composer is always right
-  // there; collapsing it (X) is opt-in and reopens from the slim handle.
-  open: true,
+  // Start CLOSED. resetForCluster (called when the workloads screen mounts) sets
+  // the real initial state per form factor: open on desktop, closed on phones.
+  // Keeping the default closed also stops the dock's eager agent-creation effect
+  // (gated on `open`) from firing during the first render — before resetForCluster
+  // runs — which used to set clusterId and defeat resetForCluster's own guard.
+  open: false,
   width: DEFAULT_WIDTH,
   openChat: ({ clusterId, agentId, workspaceId }) =>
     set({ clusterId, agentId, workspaceId, open: true }),
