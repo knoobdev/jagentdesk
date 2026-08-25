@@ -17,6 +17,8 @@ import {
   type PaneContextValue,
 } from "@/panels/pane-context";
 import { askAgentAboutResource } from "@/components/cluster-ask-agent";
+import { dispatchComposerAgentMessage } from "@/composer/actions";
+import { createMessageSubmissionWriter } from "@/composer/submission/writer";
 import type { ClusterComposerResource } from "@/components/cluster-composer";
 import { SidebarResizeHandle } from "@/components/sidebar-resize-handle";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
@@ -27,6 +29,7 @@ import {
   useClusterChatStore,
   CLUSTER_CHAT_MIN_WIDTH,
   CLUSTER_CHAT_MAX_WIDTH,
+  type ClusterChatPendingAsk,
 } from "@/stores/cluster-chat-store";
 import type { Theme } from "@/styles/theme";
 
@@ -52,6 +55,52 @@ function findLatestClusterAgent(
     if (!latest || agent.lastActivityAt > latest.lastActivityAt) latest = agent;
   }
   return latest;
+}
+
+/** Send a queued Ask AI question to an already-existing cluster agent. */
+function deliverPendingAsk(
+  client: ReturnType<typeof useHostRuntimeClient>,
+  serverId: string,
+  agentId: string,
+  message: string,
+): void {
+  if (!client) return;
+  void dispatchComposerAgentMessage({
+    client,
+    agentId,
+    text: message,
+    attachments: [],
+    encodeImages: async () => undefined,
+    submission: createMessageSubmissionWriter(serverId),
+  }).catch(() => {});
+}
+
+/** Spin up the single cluster agent, baking in any queued Ask AI context. */
+function createClusterAgent(params: {
+  client: NonNullable<ReturnType<typeof useHostRuntimeClient>>;
+  serverId: string;
+  clusterId: string;
+  ask: ClusterChatPendingAsk | null;
+  resource?: ClusterComposerResource;
+  provider: string;
+  cwd: string;
+  onOpen: (input: { clusterId: string; agentId: string; workspaceId: string | null }) => void;
+}): void {
+  const { client, serverId, clusterId, ask, resource, provider, cwd, onOpen } = params;
+  void askAgentAboutResource({
+    client,
+    serverId,
+    clusterId,
+    kind: ask?.kind ?? resource?.kind ?? "cluster",
+    namespace: ask?.namespace ?? resource?.namespace,
+    name: ask?.name,
+    yaml: ask?.yaml,
+    logs: ask?.logs,
+    provider,
+    cwd,
+    message: ask?.message,
+    onCreated: ({ id, workspaceId: ws }) => onOpen({ clusterId, agentId: id, workspaceId: ws }),
+  });
 }
 
 /**
@@ -92,34 +141,58 @@ export function ClusterChatDock({
   const cwd = firstWorkspace?.workspaceDirectory ?? null;
   const ready = Boolean(client && provider && cwd);
 
+  // Register the dock's agent as "visible" so the session subscribes to its
+  // timeline and applies the authoritative history. Without this the panel only
+  // shows the optimistic user bubble — the agent's replies (which the daemon DOES
+  // produce) never sync, because only the workspace screen registered visibility.
+  const viewedTimelineSync = useSessionStore(
+    (state) => state.sessions[serverId]?.viewedTimelineSync ?? null,
+  );
+  const timelineSourceId = `cluster-chat:${serverId}`;
+  useEffect(() => {
+    if (!viewedTimelineSync) return;
+    const visible = open && agentId ? [agentId] : [];
+    viewedTimelineSync.replaceVisibleAgentIds(timelineSourceId, visible);
+    return () => viewedTimelineSync.replaceVisibleAgentIds(timelineSourceId, []);
+  }, [viewedTimelineSync, timelineSourceId, open, agentId]);
+
   // Open ONE agent per cluster: reuse the existing one if the user already chatted
   // with this cluster (so their conversation + the model's response are still
   // there), and only create a fresh agent when none exists. Previously the dock
   // created a brand-new agent every time the workloads view mounted, which spawned
   // duplicate "main" agents and could show an empty agent instead of the one that
   // actually replied.
+  const pendingAsk = useClusterChatStore((s) => s.pendingAsk);
+  const clearPendingAsk = useClusterChatStore((s) => s.clearPendingAsk);
   const createdForRef = useRef<string | null>(null);
   useEffect(() => {
     if (!open || agentId || !ready || !client || !provider || !cwd) return;
-    if (createdForRef.current === clusterId) return;
+    // The createdForRef guard stops re-creation on re-renders, but a queued Ask AI
+    // question must still be delivered even if we already created this cluster's
+    // agent, so only short-circuit when there is nothing pending.
+    if (createdForRef.current === clusterId && !pendingAsk) return;
+
+    createdForRef.current = clusterId;
+    const ask = pendingAsk;
+    if (ask) clearPendingAsk();
 
     const existing = findLatestClusterAgent(agents, clusterId);
     if (existing) {
-      createdForRef.current = clusterId;
       openChat({ clusterId, agentId: existing.id, workspaceId: existing.workspaceId ?? null });
+      if (ask) deliverPendingAsk(client, serverId, existing.id, ask.message);
       return;
     }
 
-    createdForRef.current = clusterId;
-    void askAgentAboutResource({
+    // One agent per cluster, no race: bake the pending resource context into it.
+    createClusterAgent({
       client,
       serverId,
       clusterId,
-      kind: resource?.kind ?? "cluster",
-      namespace: resource?.namespace,
+      ask,
+      resource,
       provider,
       cwd,
-      onCreated: ({ id, workspaceId: ws }) => openChat({ clusterId, agentId: id, workspaceId: ws }),
+      onOpen: openChat,
     });
   }, [
     open,
@@ -133,6 +206,8 @@ export function ClusterChatDock({
     serverId,
     openChat,
     agents,
+    pendingAsk,
+    clearPendingAsk,
   ]);
 
   const isCompact = useIsCompactFormFactor();

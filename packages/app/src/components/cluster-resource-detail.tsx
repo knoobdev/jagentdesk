@@ -12,12 +12,9 @@ import { ClusterPodShell } from "./cluster-pod-shell";
 import { HighlightedLines } from "@/components/highlighted-content";
 import { highlightToKeyedLines } from "@/utils/highlight-cache";
 import { ClusterResourceOverview } from "@/components/cluster-resource-overview";
-import { askAgentAboutResource } from "@/components/cluster-ask-agent";
 import { dispatchComposerAgentMessage } from "@/composer/actions";
 import { createMessageSubmissionWriter } from "@/composer/submission/writer";
 import { useClusterChatStore } from "@/stores/cluster-chat-store";
-import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
-import { useSessionStore } from "@/stores/session-store";
 import type { Theme } from "@/styles/theme";
 
 const ThemedX = withUnistyles(X);
@@ -434,13 +431,7 @@ export function ClusterResourceDetail({
   // live resource + logs per request is what makes "what's in this log?" work.
   const chatAgentId = useClusterChatStore((s) => s.agentId);
   const showChat = useClusterChatStore((s) => s.showChat);
-  const openChat = useClusterChatStore((s) => s.openChat);
-  const { entries: providerEntries } = useProvidersSnapshot(serverId);
-  const provider = providerEntries?.find((e) => e.enabled)?.provider ?? null;
-  const firstWorkspace = useSessionStore(
-    (st) => st.sessions[serverId]?.workspaces.values().next().value,
-  );
-  const cwd = firstWorkspace?.workspaceDirectory ?? null;
+  const setPendingAsk = useClusterChatStore((s) => s.setPendingAsk);
   const [asking, setAsking] = useState(false);
 
   const handleAskAI = useCallback(() => {
@@ -449,16 +440,17 @@ export function ClusterResourceDetail({
     // agent can pull the full logs itself via kubectl_get if it needs more.
     const logsTail =
       showLogs && logs ? logs.split("\n").slice(-200).join("\n").slice(-8000) : undefined;
-    const question = "Summarize what you see here, then wait for my follow-up questions about it.";
+    const nsPart = namespace ? ` in namespace "${namespace}"` : "";
+    // A SELF-CONTAINED message: the resource identity + the on-screen logs + the
+    // question. Works whether the dock reuses an existing agent or creates one.
+    const askMessage = [
+      `I'm now looking at ${kind} "${name}"${nsPart}.`,
+      ...(logsTail ? ["", "Current logs on my screen:", "```", logsTail, "```"] : []),
+      "",
+      "Summarize what you see here, then wait for my follow-up questions about it.",
+    ].join("\n");
     showChat();
     if (chatAgentId) {
-      const nsPart = namespace ? ` in namespace "${namespace}"` : "";
-      const parts = [
-        `I'm now looking at ${kind} "${name}"${nsPart}.`,
-        ...(logsTail ? ["", "Current logs on my screen:", "```", logsTail, "```"] : []),
-        "",
-        question,
-      ];
       setAsking(true);
       // Route through the SAME submission path the composer uses: it writes the
       // user bubble optimistically and starts the turn. A raw client.sendAgentMessage
@@ -468,7 +460,7 @@ export function ClusterResourceDetail({
       dispatchComposerAgentMessage({
         client,
         agentId: chatAgentId,
-        text: parts.join("\n"),
+        text: askMessage,
         attachments: [],
         encodeImages: async () => undefined,
         submission: createMessageSubmissionWriter(serverId),
@@ -479,25 +471,10 @@ export function ClusterResourceDetail({
         .finally(() => setAsking(false));
       return;
     }
-    if (!provider || !cwd) {
-      setMessage("Connect a host & add a project to chat with an agent");
-      return;
-    }
-    setAsking(true);
-    void askAgentAboutResource({
-      client,
-      serverId,
-      clusterId,
-      kind,
-      namespace,
-      name,
-      yaml: yaml ?? undefined,
-      logs: logsTail,
-      provider,
-      cwd,
-      message: question,
-      onCreated: ({ id, workspaceId }) => openChat({ clusterId, agentId: id, workspaceId }),
-    }).finally(() => setAsking(false));
+    // No dock agent yet: queue the question and let the dock create exactly ONE
+    // agent and deliver it. Creating here as well used to race the dock's own
+    // agent-creation effect — two agents, and the panel showed the empty one.
+    setPendingAsk({ message: askMessage, kind, namespace, name });
   }, [
     client,
     asking,
@@ -508,12 +485,8 @@ export function ClusterResourceDetail({
     namespace,
     kind,
     name,
-    provider,
-    cwd,
     serverId,
-    clusterId,
-    yaml,
-    openChat,
+    setPendingAsk,
   ]);
 
   const handleScale = useCallback(() => {
