@@ -376,6 +376,19 @@ function resolveBrowserToolsEnabled(persisted: ReturnType<typeof loadPersistedCo
   return persisted.daemon?.browserTools?.enabled ?? false;
 }
 
+// Default ON so agents actually receive the jagentdesk MCP tools (kubectl_get,
+// orchestration, schedules, …). The config snapshot bootstrap reports already
+// assumes this default, and the whole point of the /mcp/agents endpoint is for
+// agents to use it. Left off, the k8s chat agent could not use kubectl_get and
+// silently fell back to a shell kubectl. The restricted daemon-worker forces it
+// off separately.
+function resolveMcpInjectIntoAgents(
+  cli: CliConfigOverrides | undefined,
+  persisted: ReturnType<typeof loadPersistedConfig>,
+): boolean {
+  return cli?.mcpInjectIntoAgents ?? persisted.daemon?.mcp?.injectIntoAgents ?? true;
+}
+
 function resolveStaticLoadConfigSettings(
   env: NodeJS.ProcessEnv,
   cli: CliConfigOverrides | undefined,
@@ -383,8 +396,7 @@ function resolveStaticLoadConfigSettings(
 ) {
   return {
     mcpEnabled: cli?.mcpEnabled ?? persisted.daemon?.mcp?.enabled ?? true,
-    mcpInjectIntoAgents:
-      cli?.mcpInjectIntoAgents ?? persisted.daemon?.mcp?.injectIntoAgents ?? false,
+    mcpInjectIntoAgents: resolveMcpInjectIntoAgents(cli, persisted),
     browserToolsEnabled: resolveBrowserToolsEnabled(persisted),
     autoArchiveAfterMerge: persisted.daemon?.autoArchiveAfterMerge ?? false,
     appendSystemPrompt: resolveAppendSystemPrompt(persisted),
