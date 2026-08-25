@@ -48,6 +48,10 @@ function ContextRow({
     if (cluster) onDisconnect(cluster.id);
   }, [onDisconnect, cluster]);
 
+  let connectLabel = "Connect";
+  if (busy) connectLabel = "Connecting…";
+  else if (errored) connectLabel = "Retry";
+
   return (
     <View style={styles.contextRow}>
       {cluster ? (
@@ -88,9 +92,7 @@ function ContextRow({
           onPress={handleConnect}
           disabled={busy}
         >
-          <Text style={styles.btnPrimaryText}>
-            {busy ? "Connecting…" : errored ? "Retry" : "Connect"}
-          </Text>
+          <Text style={styles.btnPrimaryText}>{connectLabel}</Text>
         </Pressable>
       )}
     </View>
