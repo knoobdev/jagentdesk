@@ -1539,6 +1539,12 @@ export function createJAgentDeskToolCatalog(
     });
   }
 
+  // Kubectl tools are core cluster functionality and must be available to every
+  // agent (the k8s chat agent relies on them). Register them BEFORE the
+  // voice-only early return below — otherwise a voice-only session silently
+  // drops kubectl_get/kubectl_apply and the agent falls back to shelling out.
+  registerKubectlTools({ registerTool, options, callerAgentId });
+
   if (options.voiceOnly || options.enableVoiceTools || callerContext?.enableVoiceTools) {
     registerTool(
       "speak",
@@ -3514,10 +3520,6 @@ export function createJAgentDeskToolCatalog(
       };
     },
   );
-
-  // ── kubectl tools ──────────────────────────────────────────────────────
-
-  registerKubectlTools({ registerTool, options, callerAgentId });
 
   return toCatalog();
 }
