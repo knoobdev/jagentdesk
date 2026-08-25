@@ -1,6 +1,7 @@
 import { router, usePathname } from "expo-router";
 import {
   Boxes,
+  Sparkles,
   CalendarClock,
   FolderPlus,
   History,
@@ -61,6 +62,7 @@ import { useIsMobilePanelPresented } from "@/mobile-panels/provider";
 import { useClusterNavStore } from "@/stores/cluster-nav-store";
 import {
   buildClustersRoute,
+  buildSkillsRoute,
   buildClusterWorkloadsRoute,
   buildOpenProjectRoute,
   buildNewWorkspaceRoute,
@@ -98,6 +100,7 @@ interface SidebarSharedProps {
   handleHome: () => void;
   handleSettings: () => void;
   handleClusters: () => void;
+  handleSkills: () => void;
   labels: SidebarLabels;
   newWorkspaceKeys: ShortcutKey[][] | null;
   handleAddHost: () => void;
@@ -115,6 +118,7 @@ interface SidebarLabels {
   sessions: string;
   schedules: string;
   clusters: string;
+  skills: string;
   closeSidebar: string;
 }
 
@@ -243,6 +247,20 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     }
   }, [clustersRoute, showMobileAgent]);
 
+  const skillsRoute = useMemo(
+    () => (firstServerId ? buildSkillsRoute(firstServerId) : null),
+    [firstServerId],
+  );
+  const handleSkillsDesktop = useCallback(() => {
+    if (skillsRoute) router.push(skillsRoute);
+  }, [skillsRoute]);
+  const handleSkillsMobile = useCallback(() => {
+    if (skillsRoute) {
+      showMobileAgent();
+      router.push(skillsRoute);
+    }
+  }, [skillsRoute, showMobileAgent]);
+
   const handleViewMoreNavigate = useCallback(() => {
     router.push(buildSessionsRoute());
   }, []);
@@ -264,6 +282,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       sessions: t("sidebar.sections.sessions"),
       schedules: t("sidebar.sections.schedules"),
       clusters: "Clusters",
+      skills: "Skills",
       closeSidebar: t("sidebar.actions.closeSidebar"),
     }),
     [t],
@@ -284,6 +303,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     toggleProjectCollapsed,
     handleRefresh,
     handleClusters: handleClustersDesktop,
+    handleSkills: handleSkillsDesktop,
     labels,
     newWorkspaceKeys,
   };
@@ -294,6 +314,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
         <MobileSidebar
           {...sharedProps}
           handleClusters={handleClustersMobile}
+          handleSkills={handleSkillsMobile}
           insetsTop={insets.top}
           insetsBottom={insets.bottom}
           closeSidebar={showMobileAgent}
@@ -314,6 +335,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       <DesktopSidebar
         {...sharedProps}
         handleClusters={handleClustersDesktop}
+        handleSkills={handleSkillsDesktop}
         insetsTop={insets.top}
         active={active}
         handleOpenProject={handleOpenProjectDesktop}
@@ -661,6 +683,7 @@ function MobileSidebar({
   handleHome,
   handleSettings,
   handleClusters,
+  handleSkills,
   labels,
   handleAddHost,
   handleOpenHostSettings,
@@ -675,6 +698,7 @@ function MobileSidebar({
   const isSessionsActive = pathname.includes("/sessions");
   const isSchedulesActive = pathname.includes("/schedules");
   const isClustersActive = pathname.includes("/clusters");
+  const isSkillsActive = pathname.includes("/skills");
   const clusterRouteMatch = pathname.match(/\/h\/([^/]+)\/cluster\/([^/]+)/);
   const clusterRoute = clusterRouteMatch
     ? {
@@ -772,6 +796,14 @@ function MobileSidebar({
               testID="sidebar-clusters-nav"
               variant="compact"
             />
+            <SidebarHeaderRow
+              icon={Sparkles}
+              label={labels.skills}
+              onPress={handleSkills}
+              isActive={isSkillsActive}
+              testID="sidebar-skills-nav"
+              variant="compact"
+            />
           </View>
         )}
         <WindowChromeSafeArea placement="inline" style={styles.mobileCloseButtonRow}>
@@ -833,6 +865,7 @@ function DesktopSidebar({
   handleHome,
   handleSettings,
   handleClusters,
+  handleSkills,
   labels,
   handleAddHost,
   handleOpenHostSettings,
@@ -847,6 +880,7 @@ function DesktopSidebar({
   const isSessionsActive = pathname.includes("/sessions");
   const isSchedulesActive = pathname.includes("/schedules");
   const isClustersActive = pathname.includes("/clusters");
+  const isSkillsActive = pathname.includes("/skills");
   const clusterRouteMatch = pathname.match(/\/h\/([^/]+)\/cluster\/([^/]+)/);
   const clusterRoute = clusterRouteMatch
     ? {
@@ -976,6 +1010,14 @@ function DesktopSidebar({
                 onPress={handleClusters}
                 isActive={isClustersActive}
                 testID="sidebar-clusters-nav"
+                variant="compact"
+              />
+              <SidebarHeaderRow
+                icon={Sparkles}
+                label={labels.skills}
+                onPress={handleSkills}
+                isActive={isSkillsActive}
+                testID="sidebar-skills-nav"
                 variant="compact"
               />
             </View>
