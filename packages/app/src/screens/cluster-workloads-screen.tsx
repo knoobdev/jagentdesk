@@ -13,6 +13,7 @@ import { useIsCompactFormFactor } from "@/constants/layout";
 import { useClusterChatStore } from "@/stores/cluster-chat-store";
 import { useClusterNavStore } from "@/stores/cluster-nav-store";
 import { useClusterViewStore } from "@/stores/cluster-view-store";
+import { usePanelStore } from "@/stores/panel-store";
 import type { Theme } from "@/styles/theme";
 
 /**
@@ -65,6 +66,14 @@ export function ClusterWorkloadsScreen({
     // to it instead of forcing the user to reconnect + reopen from scratch.
     setLastCluster(serverId, clusterId);
   }, [clusterId, serverId, isCompact, resetForCluster, resetViewForCluster, setLastCluster]);
+
+  const showMobileAgentList = usePanelStore((s) => s.showMobileAgentList);
+  useEffect(() => {
+    // On phones the kind nav is a slide-in overlay. Opening a cluster's workloads
+    // reveals it right away so the user sees the resource menu instead of a bare
+    // "pick a resource" pane with no visible way to choose.
+    if (isCompact) showMobileAgentList();
+  }, [clusterId, isCompact, showMobileAgentList]);
 
   // On phones the host stack has no native header (headerShown: false), so the
   // screen paints under the status bar / notch / camera cutout. Reserve the

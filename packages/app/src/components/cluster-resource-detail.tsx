@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { parse as parseYaml } from "yaml";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import { X } from "lucide-react-native";
+import { Sparkles, X } from "lucide-react-native";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { AdaptiveTextInput } from "@/components/adaptive-modal-sheet";
 import { ClusterSecretReveal } from "./cluster-secret-reveal";
@@ -12,10 +12,18 @@ import { ClusterPodShell } from "./cluster-pod-shell";
 import { HighlightedLines } from "@/components/highlighted-content";
 import { highlightToKeyedLines } from "@/utils/highlight-cache";
 import { ClusterResourceOverview } from "@/components/cluster-resource-overview";
+import { askAgentAboutResource } from "@/components/cluster-ask-agent";
+import { dispatchComposerAgentMessage } from "@/composer/actions";
+import { createMessageSubmissionWriter } from "@/composer/submission/writer";
+import { useClusterChatStore } from "@/stores/cluster-chat-store";
+import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
+import { useSessionStore } from "@/stores/session-store";
 import type { Theme } from "@/styles/theme";
 
 const ThemedX = withUnistyles(X);
+const ThemedSparkles = withUnistyles(Sparkles);
 const closeIconColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
+const askAiIconColor = (theme: Theme) => ({ color: theme.colors.accentForeground });
 
 interface ClusterResourceDetailProps {
   serverId: string;
@@ -419,6 +427,95 @@ export function ClusterResourceDetail({
       .finally(() => setRollingBack(false));
   }, [client, clusterId, kind, namespace, name, onChanged]);
 
+  // "Ask AI" hands the resource the user is currently looking at — and, when the
+  // logs pane is open, the exact log buffer on screen — to the cluster's chat
+  // agent. The dock reuses ONE agent per cluster, so its baked context can be
+  // stale (it was created while the user browsed something else); attaching the
+  // live resource + logs per request is what makes "what's in this log?" work.
+  const chatAgentId = useClusterChatStore((s) => s.agentId);
+  const showChat = useClusterChatStore((s) => s.showChat);
+  const openChat = useClusterChatStore((s) => s.openChat);
+  const { entries: providerEntries } = useProvidersSnapshot(serverId);
+  const provider = providerEntries?.find((e) => e.enabled)?.provider ?? null;
+  const firstWorkspace = useSessionStore(
+    (st) => st.sessions[serverId]?.workspaces.values().next().value,
+  );
+  const cwd = firstWorkspace?.workspaceDirectory ?? null;
+  const [asking, setAsking] = useState(false);
+
+  const handleAskAI = useCallback(() => {
+    if (!client || asking) return;
+    // Only ship a bounded tail so a chatty pod can't blow up the request; the
+    // agent can pull the full logs itself via kubectl_get if it needs more.
+    const logsTail =
+      showLogs && logs ? logs.split("\n").slice(-200).join("\n").slice(-8000) : undefined;
+    const question = "Summarize what you see here, then wait for my follow-up questions about it.";
+    showChat();
+    if (chatAgentId) {
+      const nsPart = namespace ? ` in namespace "${namespace}"` : "";
+      const parts = [
+        `I'm now looking at ${kind} "${name}"${nsPart}.`,
+        ...(logsTail ? ["", "Current logs on my screen:", "```", logsTail, "```"] : []),
+        "",
+        question,
+      ];
+      setAsking(true);
+      // Route through the SAME submission path the composer uses: it writes the
+      // user bubble optimistically and starts the turn. A raw client.sendAgentMessage
+      // is accepted by the daemon but never renders in the panel (which draws the
+      // user message from this submission store, not a daemon echo), so the chat
+      // looked silent even though the message went through.
+      dispatchComposerAgentMessage({
+        client,
+        agentId: chatAgentId,
+        text: parts.join("\n"),
+        attachments: [],
+        encodeImages: async () => undefined,
+        submission: createMessageSubmissionWriter(serverId),
+      })
+        .catch((e: unknown) =>
+          setMessage(e instanceof Error ? e.message : "Failed to reach the agent"),
+        )
+        .finally(() => setAsking(false));
+      return;
+    }
+    if (!provider || !cwd) {
+      setMessage("Connect a host & add a project to chat with an agent");
+      return;
+    }
+    setAsking(true);
+    void askAgentAboutResource({
+      client,
+      serverId,
+      clusterId,
+      kind,
+      namespace,
+      name,
+      yaml: yaml ?? undefined,
+      logs: logsTail,
+      provider,
+      cwd,
+      message: question,
+      onCreated: ({ id, workspaceId }) => openChat({ clusterId, agentId: id, workspaceId }),
+    }).finally(() => setAsking(false));
+  }, [
+    client,
+    asking,
+    showLogs,
+    logs,
+    showChat,
+    chatAgentId,
+    namespace,
+    kind,
+    name,
+    provider,
+    cwd,
+    serverId,
+    clusterId,
+    yaml,
+    openChat,
+  ]);
+
   const handleScale = useCallback(() => {
     if (!client) return;
     const replicas = parseInt(scaleReplicas, 10);
@@ -660,6 +757,15 @@ export function ClusterResourceDetail({
             {namespace ? ` · ${namespace}` : " · cluster-scoped"}
           </Text>
         </View>
+        <Pressable
+          style={styles.askAiButton}
+          onPress={handleAskAI}
+          disabled={asking}
+          accessibilityLabel="Ask AI about this resource"
+        >
+          <ThemedSparkles size={13} uniProps={askAiIconColor} />
+          <Text style={styles.askAiButtonText}>{asking ? "Asking…" : "Ask AI"}</Text>
+        </Pressable>
         <Pressable
           style={styles.inlineClose}
           onPress={onClose}
@@ -1362,6 +1468,20 @@ const styles = StyleSheet.create((theme: Theme) => ({
   actionButtonActive: {
     backgroundColor: theme.colors.surface2,
     borderColor: theme.colors.foregroundMuted,
+  },
+  askAiButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[1],
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1.5],
+    borderRadius: theme.borderRadius.full,
+    backgroundColor: theme.colors.accent,
+  },
+  askAiButtonText: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.accentForeground,
   },
   actionButtonText: {
     fontSize: theme.fontSize.sm,

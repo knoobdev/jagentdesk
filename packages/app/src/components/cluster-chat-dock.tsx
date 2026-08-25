@@ -34,6 +34,7 @@ const ThemedX = withUnistyles(X);
 const ThemedMessageSquare = withUnistyles(MessageSquare);
 const ThemedActivityIndicator = withUnistyles(ActivityIndicator);
 const mutedColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
+const fabIconColor = (theme: Theme) => ({ color: theme.colors.accentForeground });
 const noop = () => {};
 
 const CLUSTER_AGENT_LABEL = "jagentdesk.cluster.id";
@@ -214,6 +215,17 @@ export function ClusterChatDock({
   }
 
   if (!open) {
+    // On phones the closed dock is a floating action button that does NOT take
+    // layout width, so the resource table (search box, namespace, AGE) gets the
+    // full screen instead of being clipped by a 48px handle strip. On desktop it
+    // stays a slim edge handle.
+    if (isCompact) {
+      return (
+        <Pressable style={styles.fab} onPress={handleOpen} accessibilityLabel="Open chat">
+          <ThemedMessageSquare size={22} uniProps={fabIconColor} />
+        </Pressable>
+      );
+    }
     return (
       <Pressable style={styles.handle} onPress={handleOpen} accessibilityLabel="Open chat">
         <ThemedMessageSquare size={18} uniProps={mutedColor} />
@@ -256,6 +268,23 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderLeftWidth: theme.borderWidth[1],
     borderLeftColor: theme.colors.border,
     backgroundColor: theme.colors.surface1,
+  },
+  fab: {
+    position: "absolute",
+    right: theme.spacing[4],
+    bottom: theme.spacing[6],
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: theme.colors.accent,
+    shadowColor: "#000",
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 6,
+    zIndex: 20,
   },
   dock: {
     height: "100%",

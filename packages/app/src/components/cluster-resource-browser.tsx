@@ -396,8 +396,12 @@ export function ClusterResourceBrowser({
             autoCorrect={false}
             autoCapitalize="none"
           />
-          <View style={styles.toolbarSpacer} />
-          <Text style={styles.toolbarNs}>{selectedNamespace ?? "All namespaces"}</Text>
+          {isCompact ? null : (
+            <>
+              <View style={styles.toolbarSpacer} />
+              <Text style={styles.toolbarNs}>{selectedNamespace ?? "All namespaces"}</Text>
+            </>
+          )}
         </View>
         <View style={styles.header}>
           <Pressable style={styles.headerNameBtn} onPress={sortByName}>
