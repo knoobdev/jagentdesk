@@ -1,4 +1,4 @@
-export type SupportedLocale = "ar" | "en" | "es" | "fr" | "ja" | "pt-BR" | "ru" | "zh-CN";
+export type SupportedLocale = "ar" | "en" | "es" | "fr" | "ja" | "pt-BR" | "ru" | "vi" | "zh-CN";
 export type AppLanguage = "system" | SupportedLocale;
 
 export interface LanguageOption {
@@ -17,6 +17,7 @@ export const LANGUAGE_OPTIONS: LanguageOption[] = [
   { value: "ja", labelKey: "settings.general.language.options.ja" },
   { value: "pt-BR", labelKey: "settings.general.language.options.ptBR" },
   { value: "ru", labelKey: "settings.general.language.options.ru" },
+  { value: "vi", labelKey: "settings.general.language.options.vi" },
   { value: "zh-CN", labelKey: "settings.general.language.options.zhCN" },
 ];
 
@@ -29,6 +30,7 @@ const SUPPORTED_LANGUAGES = new Set<AppLanguage>([
   "ja",
   "pt-BR",
   "ru",
+  "vi",
   "zh-CN",
 ]);
 const LANGUAGE_NATIVE_NAMES: Record<SupportedLocale, string> = {
@@ -39,6 +41,7 @@ const LANGUAGE_NATIVE_NAMES: Record<SupportedLocale, string> = {
   ja: "日本語",
   "pt-BR": "Português brasileiro",
   ru: "Русский",
+  vi: "Tiếng Việt",
   "zh-CN": "简体中文",
 };
 const LANGUAGE_NAMES_BY_LOCALE: Record<SupportedLocale, Record<SupportedLocale, string>> = {
@@ -49,6 +52,7 @@ const LANGUAGE_NAMES_BY_LOCALE: Record<SupportedLocale, Record<SupportedLocale, 
     fr: "الفرنسية",
     ja: "اليابانية",
     "pt-BR": "البرتغالية البرازيلية",
+    vi: "الفيتنامية",
     ru: "الروسية",
     "zh-CN": "الصينية المبسطة",
   },
@@ -59,6 +63,7 @@ const LANGUAGE_NAMES_BY_LOCALE: Record<SupportedLocale, Record<SupportedLocale, 
     fr: "French",
     ja: "Japanese",
     "pt-BR": "Brazilian Portuguese",
+    vi: "Vietnamese",
     ru: "Russian",
     "zh-CN": "Simplified Chinese",
   },
@@ -69,6 +74,7 @@ const LANGUAGE_NAMES_BY_LOCALE: Record<SupportedLocale, Record<SupportedLocale, 
     fr: "francés",
     ja: "japonés",
     "pt-BR": "portugués brasileño",
+    vi: "vietnamita",
     ru: "ruso",
     "zh-CN": "chino simplificado",
   },
@@ -79,6 +85,7 @@ const LANGUAGE_NAMES_BY_LOCALE: Record<SupportedLocale, Record<SupportedLocale, 
     fr: "français",
     ja: "japonais",
     "pt-BR": "portugais brésilien",
+    vi: "vietnamien",
     ru: "russe",
     "zh-CN": "chinois simplifié",
   },
@@ -89,6 +96,7 @@ const LANGUAGE_NAMES_BY_LOCALE: Record<SupportedLocale, Record<SupportedLocale, 
     fr: "フランス語",
     ja: "日本語",
     "pt-BR": "ブラジルポルトガル語",
+    vi: "ベトナム語",
     ru: "ロシア語",
     "zh-CN": "簡体字中国語",
   },
@@ -99,6 +107,7 @@ const LANGUAGE_NAMES_BY_LOCALE: Record<SupportedLocale, Record<SupportedLocale, 
     fr: "francês",
     ja: "japonês",
     "pt-BR": "Português brasileiro",
+    vi: "vietnamita",
     ru: "russo",
     "zh-CN": "chinês simplificado",
   },
@@ -109,8 +118,20 @@ const LANGUAGE_NAMES_BY_LOCALE: Record<SupportedLocale, Record<SupportedLocale, 
     fr: "французский",
     ja: "японский",
     "pt-BR": "бразильский португальский",
+    vi: "вьетнамский",
     ru: "русский",
     "zh-CN": "упрощенный китайский",
+  },
+  vi: {
+    ar: "Tiếng Ả Rập",
+    en: "Tiếng Anh",
+    es: "Tiếng Tây Ban Nha",
+    fr: "Tiếng Pháp",
+    ja: "Tiếng Nhật",
+    "pt-BR": "Tiếng Bồ Đào Nha (Brazil)",
+    ru: "Tiếng Nga",
+    vi: "Tiếng Việt",
+    "zh-CN": "Tiếng Trung giản thể",
   },
   "zh-CN": {
     ar: "阿拉伯语",
@@ -119,6 +140,7 @@ const LANGUAGE_NAMES_BY_LOCALE: Record<SupportedLocale, Record<SupportedLocale, 
     fr: "法语",
     ja: "日语",
     "pt-BR": "巴西葡萄牙语",
+    vi: "越南语",
     ru: "俄语",
     "zh-CN": "简体中文",
   },
@@ -148,6 +170,35 @@ export function formatLanguageOptionLabel(
   return `${nativeName} - ${activeLanguageName}`;
 }
 
+// Languages that accept any region variant (e.g. en-US, ar-EG, vi-VN) — matched
+// on the base subtag. Portuguese and Chinese are intentionally NOT here: only
+// specific variants map (pt/pt-br → pt-BR; zh/zh-cn/zh-hans* → zh-CN), so
+// pt-PT and zh-TW correctly fall through to the default.
+const SYSTEM_LOCALE_BY_BASE: Record<string, SupportedLocale> = {
+  ar: "ar",
+  en: "en",
+  es: "es",
+  fr: "fr",
+  ja: "ja",
+  ru: "ru",
+  vi: "vi",
+};
+
+function matchSystemLocale(normalized: string): SupportedLocale | null {
+  const base = normalized.split("-")[0] ?? "";
+  const anyRegion = SYSTEM_LOCALE_BY_BASE[base];
+  if (anyRegion) {
+    return anyRegion;
+  }
+  if (normalized === "pt" || normalized === "pt-br") {
+    return "pt-BR";
+  }
+  if (normalized === "zh" || normalized === "zh-cn" || normalized.startsWith("zh-hans")) {
+    return "zh-CN";
+  }
+  return null;
+}
+
 export function resolveSupportedLocale(
   language: AppLanguage,
   systemLocales: readonly string[],
@@ -157,30 +208,9 @@ export function resolveSupportedLocale(
   }
 
   for (const locale of systemLocales) {
-    const normalized = locale.toLowerCase();
-    if (normalized === "ar" || normalized.startsWith("ar-")) {
-      return "ar";
-    }
-    if (normalized === "en" || normalized.startsWith("en-")) {
-      return "en";
-    }
-    if (normalized === "es" || normalized.startsWith("es-")) {
-      return "es";
-    }
-    if (normalized === "fr" || normalized.startsWith("fr-")) {
-      return "fr";
-    }
-    if (normalized === "ja" || normalized.startsWith("ja-")) {
-      return "ja";
-    }
-    if (normalized === "pt" || normalized === "pt-br") {
-      return "pt-BR";
-    }
-    if (normalized === "ru" || normalized.startsWith("ru-")) {
-      return "ru";
-    }
-    if (normalized === "zh" || normalized === "zh-cn" || normalized.startsWith("zh-hans")) {
-      return "zh-CN";
+    const match = matchSystemLocale(locale.toLowerCase());
+    if (match) {
+      return match;
     }
   }
 

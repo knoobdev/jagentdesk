@@ -1690,6 +1690,7 @@ export const ptBR: TranslationResources = {
           ja: "Japonês",
           ptBR: "Português brasileiro",
           ru: "Russo",
+          vi: "vietnamita",
           zhCN: "Chinês simplificado",
         },
       },

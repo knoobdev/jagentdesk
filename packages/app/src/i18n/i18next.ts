@@ -8,6 +8,7 @@ import { fr } from "./resources/fr";
 import { ja } from "./resources/ja";
 import { ptBR } from "./resources/pt-BR";
 import { ru } from "./resources/ru";
+import { vi } from "./resources/vi";
 import { zhCN } from "./resources/zh-CN";
 
 const i18n = createInstance();
@@ -25,6 +26,7 @@ observeI18nInit(
       ja: { translation: ja },
       "pt-BR": { translation: ptBR },
       ru: { translation: ru },
+      vi: { translation: vi },
       "zh-CN": { translation: zhCN },
     },
     interpolation: {

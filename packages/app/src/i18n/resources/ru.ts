@@ -1693,6 +1693,7 @@ export const ru: TranslationResources = {
           ja: "日本語",
           ptBR: "Português brasileiro",
           ru: "Русский",
+          vi: "вьетнамский",
           zhCN: "中文",
         },
       },

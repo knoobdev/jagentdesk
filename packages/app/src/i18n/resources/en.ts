@@ -1713,6 +1713,7 @@ export const en = {
           ja: "Japanese",
           ptBR: "Brazilian Portuguese",
           ru: "Russian",
+          vi: "Vietnamese",
           zhCN: "Simplified Chinese",
         },
       },

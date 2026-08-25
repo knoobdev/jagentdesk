@@ -1707,6 +1707,7 @@ export const fr: TranslationResources = {
           ja: "日本語",
           ptBR: "Português brasileiro",
           ru: "Русский",
+          vi: "vietnamien",
           zhCN: "中文",
         },
       },

@@ -1674,6 +1674,7 @@ export const ja: TranslationResources = {
           ja: "日本語",
           ptBR: "ブラジルポルトガル語",
           ru: "ロシア語",
+          vi: "ベトナム語",
           zhCN: "簡体字中国語",
         },
       },

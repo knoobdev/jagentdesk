@@ -28,6 +28,7 @@ describe("parseAppLanguage", () => {
       "ja",
       "pt-BR",
       "ru",
+      "vi",
       "zh-CN",
     ]);
   });

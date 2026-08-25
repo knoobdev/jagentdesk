@@ -1662,6 +1662,7 @@ export const ar: TranslationResources = {
           ja: "日本語",
           ptBR: "Português brasileiro",
           ru: "Русский",
+          vi: "الفيتنامية",
           zhCN: "中文",
         },
       },

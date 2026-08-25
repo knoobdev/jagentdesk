@@ -1642,6 +1642,7 @@ export const zhCN: TranslationResources = {
           ja: "日本語",
           ptBR: "Português brasileiro",
           ru: "Русский",
+          vi: "越南语",
           zhCN: "简体中文",
         },
       },
