@@ -127,7 +127,16 @@ export const useSkillsStore = create<SkillsState>()(
     {
       name: "@jagentdesk:skills",
       storage: createJSONStorage(() => AsyncStorage),
-      version: 1,
+      version: 2,
+      // Existing installs persisted the v1 starter set; append any starter skill
+      // (matched by id) they don't have yet so new built-ins show up on upgrade
+      // without clobbering the user's own skills or edits.
+      migrate: (persisted) => {
+        const state = (persisted as SkillsState | undefined) ?? { skills: [] as Skill[] };
+        const have = new Set(state.skills.map((s) => s.id));
+        const missing = STARTER_SKILLS.filter((s) => !have.has(s.id));
+        return { ...state, skills: [...state.skills, ...missing] };
+      },
     },
   ),
 );
