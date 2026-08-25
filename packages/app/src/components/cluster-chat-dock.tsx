@@ -1,5 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
-import { ActivityIndicator, Pressable, Text, View, useWindowDimensions } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+  useWindowDimensions,
+} from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import Animated, {
   runOnJS,
@@ -8,7 +15,8 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import { Gesture } from "react-native-gesture-handler";
-import { MessageSquare, X } from "lucide-react-native";
+import { History, MessageSquare, Plus, X } from "lucide-react-native";
+import { formatTimeAgo } from "@/utils/time";
 import { AgentConversationPanel } from "@/panels/agent-panel";
 import {
   PaneProvider,
@@ -35,6 +43,8 @@ import type { Theme } from "@/styles/theme";
 
 const ThemedX = withUnistyles(X);
 const ThemedMessageSquare = withUnistyles(MessageSquare);
+const ThemedHistory = withUnistyles(History);
+const ThemedPlus = withUnistyles(Plus);
 const ThemedActivityIndicator = withUnistyles(ActivityIndicator);
 const mutedColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 const fabIconColor = (theme: Theme) => ({ color: theme.colors.accentForeground });
@@ -55,6 +65,18 @@ function findLatestClusterAgent(
     if (!latest || agent.lastActivityAt > latest.lastActivityAt) latest = agent;
   }
   return latest;
+}
+
+/** All non-archived agents for this cluster, most-recently-active first. */
+function listClusterAgents(agents: Map<string, Agent> | undefined, clusterId: string): Agent[] {
+  if (!agents) return [];
+  const out: Agent[] = [];
+  for (const agent of agents.values()) {
+    if (agent.archivedAt) continue;
+    if (agent.labels?.[CLUSTER_AGENT_LABEL] !== clusterId) continue;
+    out.push(agent);
+  }
+  return out.sort((a, b) => b.lastActivityAt.getTime() - a.lastActivityAt.getTime());
 }
 
 /** Send a queued Ask AI question to an already-existing cluster agent. */
@@ -101,6 +123,30 @@ function createClusterAgent(params: {
     message: ask?.message,
     onCreated: ({ id, workspaceId: ws }) => onOpen({ clusterId, agentId: id, workspaceId: ws }),
   });
+}
+
+/** One row in the cluster chat history overlay. */
+function HistoryItem({
+  agent,
+  active,
+  onSelect,
+}: {
+  agent: Agent;
+  active: boolean;
+  onSelect: (a: Agent) => void;
+}) {
+  const handlePress = useCallback(() => onSelect(agent), [onSelect, agent]);
+  return (
+    <Pressable
+      style={active ? [styles.historyItem, styles.historyItemActive] : styles.historyItem}
+      onPress={handlePress}
+    >
+      <Text style={styles.historyTitle} numberOfLines={1}>
+        {agent.title || "Untitled chat"}
+      </Text>
+      <Text style={styles.historyTime}>{formatTimeAgo(agent.lastActivityAt)}</Text>
+    </Pressable>
+  );
 }
 
 /**
@@ -246,6 +292,36 @@ export function ClusterChatDock({
   const handleOpen = useCallback(() => showChat(), [showChat]);
   const innerStyle = useMemo(() => [styles.inner, { width: target }], [target]);
 
+  // History: every non-archived agent for this cluster, so the user can switch
+  // back to a past conversation or start a fresh one instead of being stuck with
+  // the single reused agent.
+  const clusterAgents = useMemo(() => listClusterAgents(agents, clusterId), [agents, clusterId]);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const handleToggleHistory = useCallback(() => setHistoryOpen((v) => !v), []);
+  const handleSelectAgent = useCallback(
+    (a: Agent) => {
+      createdForRef.current = clusterId;
+      openChat({ clusterId, agentId: a.id, workspaceId: a.workspaceId ?? null });
+      setHistoryOpen(false);
+    },
+    [clusterId, openChat],
+  );
+  const handleNewChat = useCallback(() => {
+    setHistoryOpen(false);
+    if (!client || !provider || !cwd) return;
+    createdForRef.current = clusterId;
+    createClusterAgent({
+      client,
+      serverId,
+      clusterId,
+      ask: null,
+      resource,
+      provider,
+      cwd,
+      onOpen: openChat,
+    });
+  }, [client, provider, cwd, clusterId, serverId, resource, openChat]);
+
   const paneValue = useMemo<PaneContextValue>(
     () => ({
       serverId,
@@ -320,6 +396,14 @@ export function ClusterChatDock({
             {clusterName}
           </Text>
           <Pressable
+            style={historyOpen ? [styles.closeBtn, styles.headerBtnActive] : styles.closeBtn}
+            onPress={handleToggleHistory}
+            accessibilityLabel="Chat history"
+            hitSlop={8}
+          >
+            <ThemedHistory size={16} uniProps={mutedColor} />
+          </Pressable>
+          <Pressable
             style={styles.closeBtn}
             onPress={handleClose}
             accessibilityLabel="Collapse chat"
@@ -328,7 +412,31 @@ export function ClusterChatDock({
             <ThemedX size={16} uniProps={mutedColor} />
           </Pressable>
         </View>
-        <View style={styles.body}>{body}</View>
+        <View style={styles.body}>
+          {body}
+          {historyOpen ? (
+            <View style={styles.historyOverlay}>
+              <Pressable style={styles.historyNew} onPress={handleNewChat}>
+                <ThemedPlus size={16} uniProps={mutedColor} />
+                <Text style={styles.historyNewText}>New chat</Text>
+              </Pressable>
+              <ScrollView>
+                {clusterAgents.length === 0 ? (
+                  <Text style={styles.historyEmpty}>No previous chats for this cluster.</Text>
+                ) : (
+                  clusterAgents.map((a) => (
+                    <HistoryItem
+                      key={a.id}
+                      agent={a}
+                      active={a.id === agentId}
+                      onSelect={handleSelectAgent}
+                    />
+                  ))
+                )}
+              </ScrollView>
+            </View>
+          ) : null}
+        </View>
       </View>
     </Animated.View>
   );
@@ -396,6 +504,9 @@ const styles = StyleSheet.create((theme: Theme) => ({
     alignItems: "center",
     justifyContent: "center",
   },
+  headerBtnActive: {
+    backgroundColor: theme.colors.surface2,
+  },
   body: {
     flex: 1,
     minHeight: 0,
@@ -411,5 +522,56 @@ const styles = StyleSheet.create((theme: Theme) => ({
     fontSize: theme.fontSize.sm,
     color: theme.colors.foregroundMuted,
     textAlign: "center",
+  },
+  historyOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: theme.colors.surface0,
+  },
+  historyNew: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[3],
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+  },
+  historyNewText: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foreground,
+  },
+  historyItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[3],
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+  },
+  historyItemActive: {
+    backgroundColor: theme.colors.surface1,
+  },
+  historyTitle: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foreground,
+  },
+  historyTime: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+  },
+  historyEmpty: {
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foregroundMuted,
+    textAlign: "center",
+    padding: theme.spacing[4],
   },
 }));
