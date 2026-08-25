@@ -6,6 +6,7 @@ import { ClusterHelmView } from "@/components/cluster-helm-view";
 import { ClusterStatusDot, PodStatusDot } from "@/components/cluster-dot";
 import { useClusterNavStore } from "@/stores/cluster-nav-store";
 import { useClusterViewStore } from "@/stores/cluster-view-store";
+import { useIsCompactFormFactor } from "@/constants/layout";
 import type { Theme } from "@/styles/theme";
 
 interface KindInfo {
@@ -71,6 +72,90 @@ function formatMem(memoryBytes: number): string {
   return `${Math.round(memoryBytes / 1048576)}Mi`;
 }
 
+function PodCells({ item, isCompact }: { item: ResourceItem; isCompact: boolean }) {
+  return (
+    <>
+      <Text style={styles.cellNarrow} numberOfLines={1}>
+        {item.ready ?? "-"}
+      </Text>
+      {isCompact ? null : (
+        <>
+          <Text style={styles.cellNarrow} numberOfLines={1}>
+            {item.restarts ?? 0}
+          </Text>
+          <Text style={styles.cellStatus} numberOfLines={1}>
+            {item.phase || "-"}
+          </Text>
+        </>
+      )}
+    </>
+  );
+}
+
+function MetricCells({ metrics }: { metrics: MetricsEntry | undefined }) {
+  return (
+    <>
+      <Text style={styles.cellMetric} numberOfLines={1}>
+        {metrics ? formatCpu(metrics.cpuNano) : "-"}
+      </Text>
+      <Text style={styles.cellMetric} numberOfLines={1}>
+        {metrics ? formatMem(metrics.memoryBytes) : "-"}
+      </Text>
+    </>
+  );
+}
+
+function ResourceRow({
+  item,
+  isPod,
+  isNodeOrPod,
+  isCompact,
+  hasMetrics,
+  metrics,
+  onPress,
+}: {
+  item: ResourceItem;
+  isPod: boolean;
+  isNodeOrPod: boolean;
+  isCompact: boolean;
+  hasMetrics: boolean;
+  metrics: MetricsEntry | undefined;
+  onPress: () => void;
+}) {
+  const sub = isPod && item.phase ? `${item.namespace} · ${item.phase}` : item.namespace;
+  return (
+    <Pressable style={styles.row} onPress={onPress}>
+      <View style={styles.cellName}>
+        {isPod && item.phase ? (
+          <PodStatusDot phase={item.phase} statusReason={item.phase} />
+        ) : (
+          <ClusterStatusDot state="connected" />
+        )}
+        <View style={styles.cellNameInner}>
+          <Text style={styles.cellNameText} numberOfLines={1}>
+            {item.name || "-"}
+          </Text>
+          {isCompact && item.namespace ? (
+            <Text style={styles.cellNameSub} numberOfLines={1}>
+              {sub}
+            </Text>
+          ) : null}
+        </View>
+      </View>
+      {isCompact ? null : (
+        <Text style={styles.cellNs} numberOfLines={1}>
+          {item.namespace || "-"}
+        </Text>
+      )}
+      {isPod ? <PodCells item={item} isCompact={isCompact} /> : null}
+      {!isCompact && isNodeOrPod && hasMetrics ? <MetricCells metrics={metrics} /> : null}
+      <Text style={styles.cellAge} numberOfLines={1}>
+        {formatAge(item.creationTimestamp)}
+      </Text>
+    </Pressable>
+  );
+}
+
 /**
  * The resource TABLE for a cluster. The category navigation now lives in the app
  * left sidebar (SidebarClusterNav); this component only reads the selected kind
@@ -87,6 +172,7 @@ export function ClusterResourceBrowser({
   const selectedKind = useClusterNavStore((s) => s.selectedKind);
   const showingHelm = useClusterNavStore((s) => s.showingHelm);
   const selectedNamespace = useClusterNavStore((s) => s.selectedNamespace);
+  const isCompact = useIsCompactFormFactor();
 
   const [kinds, setKinds] = useState<KindInfo[]>([]);
   const [items, setItems] = useState<ResourceItem[]>([]);
@@ -249,52 +335,20 @@ export function ClusterResourceBrowser({
       const isPod = selectedKind === "Pod";
       const isNodeOrPod = isPod || selectedKind === "Node";
       const metricsKey = isPod ? `${item.namespace ?? ""}/${item.name}` : item.name;
-      const metrics = isNodeOrPod ? metricsMap[metricsKey] : undefined;
+      const metrics = isNodeOrPod && hasMetrics ? metricsMap[metricsKey] : undefined;
       return (
-        <Pressable style={styles.row} onPress={handleResourcePress(item)}>
-          <View style={styles.cellName}>
-            {isPod && item.phase ? (
-              <PodStatusDot phase={item.phase} statusReason={item.phase} />
-            ) : (
-              <ClusterStatusDot state="connected" />
-            )}
-            <Text style={styles.cellNameText} numberOfLines={1}>
-              {item.name || "-"}
-            </Text>
-          </View>
-          <Text style={styles.cellNs} numberOfLines={1}>
-            {item.namespace || "-"}
-          </Text>
-          {isPod ? (
-            <>
-              <Text style={styles.cellNarrow} numberOfLines={1}>
-                {item.ready ?? "-"}
-              </Text>
-              <Text style={styles.cellNarrow} numberOfLines={1}>
-                {item.restarts ?? 0}
-              </Text>
-              <Text style={styles.cellStatus} numberOfLines={1}>
-                {item.phase || "-"}
-              </Text>
-            </>
-          ) : null}
-          {isNodeOrPod && hasMetrics ? (
-            <>
-              <Text style={styles.cellMetric} numberOfLines={1}>
-                {metrics ? formatCpu(metrics.cpuNano) : "-"}
-              </Text>
-              <Text style={styles.cellMetric} numberOfLines={1}>
-                {metrics ? formatMem(metrics.memoryBytes) : "-"}
-              </Text>
-            </>
-          ) : null}
-          <Text style={styles.cellAge} numberOfLines={1}>
-            {formatAge(item.creationTimestamp)}
-          </Text>
-        </Pressable>
+        <ResourceRow
+          item={item}
+          isPod={isPod}
+          isNodeOrPod={isNodeOrPod}
+          isCompact={isCompact}
+          hasMetrics={hasMetrics}
+          metrics={metrics}
+          onPress={handleResourcePress(item)}
+        />
       );
     },
-    [selectedKind, handleResourcePress, metricsMap, hasMetrics],
+    [selectedKind, handleResourcePress, metricsMap, hasMetrics, isCompact],
   );
 
   const keyExtractor = useCallback(
@@ -349,15 +403,19 @@ export function ClusterResourceBrowser({
           <Pressable style={styles.headerNameBtn} onPress={sortByName}>
             <Text style={styles.headerName}>NAME{sortArrow("name")}</Text>
           </Pressable>
-          <Text style={styles.headerNs}>NAMESPACE</Text>
+          {isCompact ? null : <Text style={styles.headerNs}>NAMESPACE</Text>}
           {isPodKind ? (
             <>
               <Text style={styles.headerNarrow}>READY</Text>
-              <Text style={styles.headerNarrow}>RESTARTS</Text>
-              <Text style={styles.headerStatus}>STATUS</Text>
+              {isCompact ? null : (
+                <>
+                  <Text style={styles.headerNarrow}>RESTARTS</Text>
+                  <Text style={styles.headerStatus}>STATUS</Text>
+                </>
+              )}
             </>
           ) : null}
-          {isNodeOrPodKind && hasMetrics ? (
+          {!isCompact && isNodeOrPodKind && hasMetrics ? (
             <>
               <Text style={styles.headerMetric}>CPU</Text>
               <Text style={styles.headerMetric}>MEM</Text>
@@ -501,11 +559,17 @@ const styles = StyleSheet.create((theme: Theme) => ({
     gap: theme.spacing[2],
     minWidth: 150,
   },
-  cellNameText: {
+  cellNameInner: {
     flex: 1,
     minWidth: 0,
+  },
+  cellNameText: {
     fontSize: theme.fontSize.sm,
     color: theme.colors.foreground,
+  },
+  cellNameSub: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
   },
   cellNs: { width: 130, fontSize: theme.fontSize.sm, color: theme.colors.foregroundMuted },
   cellNarrow: { width: 60, fontSize: theme.fontSize.sm, color: theme.colors.foregroundMuted },
