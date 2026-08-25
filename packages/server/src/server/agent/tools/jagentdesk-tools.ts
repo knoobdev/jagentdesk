@@ -739,6 +739,39 @@ function registerKubectlTools(params: {
       }
     },
   );
+
+  // Lets ANY agent (a workspace/project agent, not just the k8s chat) discover
+  // the clusters connected in the app and their clusterId, so it can then drive
+  // them with kubectl_get/kubectl_apply — the bridge between workspace agents and
+  // the Kubernetes feature.
+  registerTool(
+    "cluster_list",
+    {
+      title: "List Kubernetes clusters",
+      description:
+        "List the Kubernetes clusters connected in the app (clusterId, name, state, node/pod counts). Pass a returned clusterId to kubectl_get/kubectl_apply. Auto-approved (read-only).",
+      inputSchema: {},
+    },
+    async () => {
+      const clusters = options.clusterRegistry?.list() ?? [];
+      const summary = clusters.map((c) => ({
+        clusterId: c.id,
+        name: c.displayName ?? c.contextName,
+        context: c.contextName,
+        state: c.state,
+        nodes: c.nodeCount,
+        pods: c.podCount,
+      }));
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ count: summary.length, clusters: summary }, null, 2),
+          },
+        ],
+      };
+    },
+  );
 }
 
 function validateSendPromptCaller(
