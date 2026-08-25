@@ -226,7 +226,9 @@ export class KubeClient {
       (status) => {
         if (status.status === "Failure") {
           const reason = status.message ?? status.reason ?? "exec failed";
-          onData(`\r\n\x1b[31m[shell unavailable] ${reason}\x1b[0m\r\n`);
+          // Plain marker (no ANSI) — the app intercepts this to show a clean error
+          // card instead of dumping raw text into the terminal grid.
+          onData(`\n[shell-error] ${reason}\n`);
         }
       },
     );
