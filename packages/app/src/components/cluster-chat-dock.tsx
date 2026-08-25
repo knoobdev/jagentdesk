@@ -21,7 +21,7 @@ import type { ClusterComposerResource } from "@/components/cluster-composer";
 import { SidebarResizeHandle } from "@/components/sidebar-resize-handle";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
-import { useSessionStore } from "@/stores/session-store";
+import { useSessionStore, type Agent } from "@/stores/session-store";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import {
   useClusterChatStore,
@@ -35,6 +35,23 @@ const ThemedMessageSquare = withUnistyles(MessageSquare);
 const ThemedActivityIndicator = withUnistyles(ActivityIndicator);
 const mutedColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 const noop = () => {};
+
+const CLUSTER_AGENT_LABEL = "jagentdesk.cluster.id";
+
+/** Most recently active, non-archived agent that was created for this cluster. */
+function findLatestClusterAgent(
+  agents: Map<string, Agent> | undefined,
+  clusterId: string,
+): Agent | null {
+  if (!agents) return null;
+  let latest: Agent | null = null;
+  for (const agent of agents.values()) {
+    if (agent.archivedAt) continue;
+    if (agent.labels?.[CLUSTER_AGENT_LABEL] !== clusterId) continue;
+    if (!latest || agent.lastActivityAt > latest.lastActivityAt) latest = agent;
+  }
+  return latest;
+}
 
 /**
  * The chat surface for the cluster view — the ONLY place chat lives, a right
@@ -69,15 +86,29 @@ export function ClusterChatDock({
   const firstWorkspace = useSessionStore(
     (state) => state.sessions[serverId]?.workspaces.values().next().value,
   );
+  const agents = useSessionStore((state) => state.sessions[serverId]?.agents);
   const provider = providerEntries?.find((e) => e.enabled)?.provider ?? null;
   const cwd = firstWorkspace?.workspaceDirectory ?? null;
   const ready = Boolean(client && provider && cwd);
 
-  // Eagerly create one idle agent per cluster so the real composer is ready.
+  // Open ONE agent per cluster: reuse the existing one if the user already chatted
+  // with this cluster (so their conversation + the model's response are still
+  // there), and only create a fresh agent when none exists. Previously the dock
+  // created a brand-new agent every time the workloads view mounted, which spawned
+  // duplicate "main" agents and could show an empty agent instead of the one that
+  // actually replied.
   const createdForRef = useRef<string | null>(null);
   useEffect(() => {
     if (!open || agentId || !ready || !client || !provider || !cwd) return;
     if (createdForRef.current === clusterId) return;
+
+    const existing = findLatestClusterAgent(agents, clusterId);
+    if (existing) {
+      createdForRef.current = clusterId;
+      openChat({ clusterId, agentId: existing.id, workspaceId: existing.workspaceId ?? null });
+      return;
+    }
+
     createdForRef.current = clusterId;
     void askAgentAboutResource({
       client,
@@ -89,7 +120,19 @@ export function ClusterChatDock({
       cwd,
       onCreated: ({ id, workspaceId: ws }) => openChat({ clusterId, agentId: id, workspaceId: ws }),
     });
-  }, [open, agentId, ready, client, provider, cwd, clusterId, resource, serverId, openChat]);
+  }, [
+    open,
+    agentId,
+    ready,
+    client,
+    provider,
+    cwd,
+    clusterId,
+    resource,
+    serverId,
+    openChat,
+    agents,
+  ]);
 
   const isCompact = useIsCompactFormFactor();
   const { width: screenWidth } = useWindowDimensions();
