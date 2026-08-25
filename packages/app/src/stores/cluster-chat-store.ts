@@ -21,8 +21,13 @@ interface ClusterChatState {
   showChat: () => void;
   /** Open/collapse the dock. */
   setOpen: (open: boolean) => void;
-  /** Fully reset when leaving the cluster or switching clusters. */
-  resetForCluster: (clusterId: string) => void;
+  /**
+   * Fully reset when leaving the cluster or switching clusters. `open` controls
+   * whether the dock starts revealed — true on desktop (side panel), false on
+   * phones where the dock is a full-screen overlay that would otherwise bury the
+   * k8s resource view.
+   */
+  resetForCluster: (clusterId: string, open?: boolean) => void;
   setWidth: (width: number) => void;
 }
 
@@ -43,9 +48,9 @@ export const useClusterChatStore = create<ClusterChatState>((set, get) => ({
   hideChat: () => set({ open: false }),
   showChat: () => set({ open: true }),
   setOpen: (open) => set({ open }),
-  resetForCluster: (clusterId) => {
+  resetForCluster: (clusterId, open = true) => {
     if (get().clusterId !== clusterId) {
-      set({ clusterId, agentId: null, workspaceId: null, open: true });
+      set({ clusterId, agentId: null, workspaceId: null, open });
     }
   },
   setWidth: (width) =>

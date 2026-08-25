@@ -56,9 +56,11 @@ export function ClusterWorkloadsScreen({
   );
 
   useEffect(() => {
-    resetForCluster(clusterId);
+    // On phones the chat dock is a full-screen overlay, so start it CLOSED and
+    // let the k8s resource view be the landing; desktop keeps the side dock open.
+    resetForCluster(clusterId, !isCompact);
     resetViewForCluster(clusterId);
-  }, [clusterId, resetForCluster, resetViewForCluster]);
+  }, [clusterId, isCompact, resetForCluster, resetViewForCluster]);
 
   // On phones the host stack has no native header (headerShown: false), so the
   // screen paints under the status bar / notch / camera cutout. Reserve the
