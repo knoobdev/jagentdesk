@@ -23,6 +23,7 @@ function ContextRow({
   onConnect,
   onOpen,
   onAsk,
+  onDisconnect,
 }: {
   ctx: KubeContextInfo;
   cluster: ClusterInfo | null;
@@ -31,8 +32,10 @@ function ContextRow({
   onConnect: (ctx: KubeContextInfo) => void;
   onOpen: (clusterId: string) => void;
   onAsk: (clusterId: string) => void;
+  onDisconnect: (clusterId: string) => void;
 }) {
   const connected = cluster?.state === "connected";
+  const errored = cluster?.state === "error";
   const busy = connecting || cluster?.state === "connecting";
   const handleConnect = useCallback(() => onConnect(ctx), [onConnect, ctx]);
   const handleOpen = useCallback(() => {
@@ -41,6 +44,9 @@ function ContextRow({
   const handleAsk = useCallback(() => {
     if (cluster) onAsk(cluster.id);
   }, [onAsk, cluster]);
+  const handleDisconnect = useCallback(() => {
+    if (cluster) onDisconnect(cluster.id);
+  }, [onDisconnect, cluster]);
 
   return (
     <View style={styles.contextRow}>
@@ -72,6 +78,9 @@ function ContextRow({
           >
             <Text style={styles.btnGhostText}>Ask an agent</Text>
           </Pressable>
+          <Pressable style={[styles.btn, styles.btnGhost]} onPress={handleDisconnect}>
+            <Text style={styles.btnGhostText}>Disconnect</Text>
+          </Pressable>
         </>
       ) : (
         <Pressable
@@ -79,7 +88,9 @@ function ContextRow({
           onPress={handleConnect}
           disabled={busy}
         >
-          <Text style={styles.btnPrimaryText}>{busy ? "Connecting…" : "Connect"}</Text>
+          <Text style={styles.btnPrimaryText}>
+            {busy ? "Connecting…" : errored ? "Retry" : "Connect"}
+          </Text>
         </Pressable>
       )}
     </View>
@@ -202,6 +213,21 @@ export function ClustersScreen() {
     [client, serverId, agentProvider, agentCwd],
   );
 
+  const handleDisconnect = useCallback(
+    (clusterId: string) => {
+      if (!client) return;
+      setError(null);
+      void client
+        .clusterDisconnect({ id: clusterId })
+        .then((res) => {
+          if (res.error) setError(res.error);
+          return refresh();
+        })
+        .catch((e: unknown) => setError(e instanceof Error ? e.message : "Disconnect failed"));
+    },
+    [client, refresh],
+  );
+
   if (loading) {
     return (
       <View style={styles.centerContainer}>
@@ -239,6 +265,7 @@ export function ClustersScreen() {
               onConnect={handleConnect}
               onOpen={handleOpenWorkloads}
               onAsk={handleAskAgent}
+              onDisconnect={handleDisconnect}
             />
           ))}
         </View>
@@ -339,12 +366,12 @@ const styles = StyleSheet.create((theme) => ({
     borderRadius: theme.borderRadius.md,
   },
   btnPrimary: {
-    backgroundColor: theme.colors.palette.green[400],
+    backgroundColor: theme.colors.accent,
   },
   btnPrimaryText: {
     fontSize: theme.fontSize.xs,
     fontWeight: theme.fontWeight.medium,
-    color: theme.colors.foreground,
+    color: theme.colors.accentForeground,
   },
   btnGhost: {
     borderWidth: theme.borderWidth[1],
