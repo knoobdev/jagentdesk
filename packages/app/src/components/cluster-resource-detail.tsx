@@ -848,7 +848,12 @@ function ResourceDetailActionBar({
   const handleStartPf = useCallback(() => setPfShowInput(true), [setPfShowInput]);
   return (
     <View style={styles.actionBar}>
-      <View style={styles.actionBarLeft}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.actionBarScroll}
+        contentContainerStyle={styles.actionBarLeft}
+      >
         {isPod ? (
           <Pressable style={styles.actionButton} onPress={handleToggleLogs} disabled={logLoading}>
             <Text style={styles.actionButtonText}>{showLogs ? "YAML" : "Logs"}</Text>
@@ -906,7 +911,7 @@ function ResourceDetailActionBar({
           onToggleYaml={handleToggleYaml}
           onToggleEdit={handleToggleEdit}
         />
-      </View>
+      </ScrollView>
       <Pressable
         style={[styles.deleteButton, deletingConfirm && styles.deleteButtonConfirm]}
         onPress={handleDelete}
@@ -1336,10 +1341,15 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,
   },
+  actionBarScroll: {
+    flex: 1,
+    marginRight: theme.spacing[2],
+  },
   actionBarLeft: {
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[2],
+    paddingRight: theme.spacing[2],
   },
   actionButton: {
     paddingHorizontal: theme.spacing[3],

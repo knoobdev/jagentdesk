@@ -27,10 +27,12 @@ export const useClusterNavStore = create<ClusterNavState>((set, get) => ({
   setNamespace: (namespace) => set({ selectedNamespace: namespace }),
   ensureCluster: (clusterId) => {
     if (get().clusterId !== clusterId) {
-      // New cluster opened: default to Pods, reset namespace/helm.
+      // New cluster opened: land on the nav with NOTHING selected instead of
+      // jumping straight into the Pod list. The user picks a kind from the
+      // sidebar; the content pane shows a "pick a resource" prompt until then.
       set({
         clusterId,
-        selectedKind: "Pod",
+        selectedKind: null,
         selectedNamespace: undefined,
         showingHelm: false,
       });

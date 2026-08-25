@@ -10,6 +10,8 @@ import { ClusterNamespaceSelector } from "@/components/cluster-namespace-selecto
 import { ClusterStatusDot } from "@/components/cluster-dot";
 import { useClusterNavStore } from "@/stores/cluster-nav-store";
 import { useClusterViewStore } from "@/stores/cluster-view-store";
+import { usePanelStore } from "@/stores/panel-store";
+import { useIsCompactFormFactor } from "@/constants/layout";
 import { buildClustersRoute } from "@/utils/host-routes";
 import type { Theme } from "@/styles/theme";
 
@@ -99,6 +101,8 @@ export function SidebarClusterNav({
   const setNamespace = useClusterNavStore((s) => s.setNamespace);
   const ensureCluster = useClusterNavStore((s) => s.ensureCluster);
   const showList = useClusterViewStore((s) => s.setActive);
+  const showMobileAgent = usePanelStore((s) => s.showMobileAgent);
+  const isCompact = useIsCompactFormFactor();
 
   useEffect(() => {
     ensureCluster(clusterId);
@@ -128,13 +132,17 @@ export function SidebarClusterNav({
     (kind: string) => {
       selectKind(clusterId, kind);
       showList(null); // switching kind returns to the list view
+      // On phones the nav is a slide-in overlay; dismiss it so the resource list
+      // is revealed instead of leaving the user to drag the sidebar away.
+      if (isCompact) showMobileAgent();
     },
-    [clusterId, selectKind, showList],
+    [clusterId, selectKind, showList, isCompact, showMobileAgent],
   );
   const handleSelectHelm = useCallback(() => {
     selectHelm(clusterId);
     showList(null);
-  }, [clusterId, selectHelm, showList]);
+    if (isCompact) showMobileAgent();
+  }, [clusterId, selectHelm, showList, isCompact, showMobileAgent]);
   const handleBack = useCallback(() => {
     router.replace(buildClustersRoute(serverId));
   }, [serverId]);
