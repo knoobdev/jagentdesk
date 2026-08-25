@@ -605,7 +605,36 @@ function registerKubectlTools(params: {
           case "list": {
             if (!input.kind) throw new Error("kind is required for list action");
             const items = await client.listGeneric(input.kind, input.namespace);
-            text = JSON.stringify(items, null, 2);
+            // Return a COMPACT summary, not the full objects — a namespace of pods
+            // serializes to hundreds of KB (managedFields, full spec/status) and
+            // blows past the MCP result size limit. Use action=get/describe for the
+            // full manifest of a single resource.
+            const summary = items.map((raw) => {
+              const md = (raw.metadata as Record<string, unknown> | undefined) ?? {};
+              const status = (raw.status as Record<string, unknown> | undefined) ?? {};
+              const cs = (status.containerStatuses as Array<{ ready?: boolean }> | undefined) ?? [];
+              const ready = cs.length
+                ? `${cs.filter((c) => c.ready).length}/${cs.length}`
+                : undefined;
+              return {
+                name: md.name,
+                namespace: md.namespace,
+                status: status.phase ?? undefined,
+                ready,
+                replicas: status.readyReplicas ?? status.availableReplicas ?? undefined,
+                created: md.creationTimestamp,
+              };
+            });
+            text = JSON.stringify(
+              {
+                kind: input.kind,
+                namespace: input.namespace ?? "all",
+                count: items.length,
+                items: summary,
+              },
+              null,
+              2,
+            );
             break;
           }
           case "logs": {
