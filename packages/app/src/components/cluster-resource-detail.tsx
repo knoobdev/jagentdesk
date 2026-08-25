@@ -1492,6 +1492,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     flex: 1,
     minHeight: 200,
     paddingTop: theme.spacing[3],
+    paddingHorizontal: theme.spacing[3],
   },
   logsHeader: {
     flexDirection: "row",
@@ -1621,6 +1622,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     flex: 1,
     minHeight: 300,
     paddingTop: theme.spacing[3],
+    paddingHorizontal: theme.spacing[3],
   },
   pfRow: {
     flexDirection: "row",

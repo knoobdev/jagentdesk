@@ -290,7 +290,10 @@ const styles = StyleSheet.create((theme: Theme) => ({
   terminal: {
     flex: 1,
     minHeight: 240,
+    maxHeight: 520,
     borderRadius: theme.borderRadius.md,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
     overflow: "hidden",
     backgroundColor: theme.colors.surface1,
   },
