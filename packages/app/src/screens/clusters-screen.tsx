@@ -54,24 +54,38 @@ function ContextRow({
 
   return (
     <View style={styles.contextRow}>
-      {cluster ? (
-        <ClusterStatusDot state={cluster.state} />
-      ) : (
-        <ContextStatusDot current={ctx.current} />
-      )}
-      <View style={styles.contextInfo}>
-        <Text style={styles.contextName} numberOfLines={1}>
-          {ctx.name}
-        </Text>
-        <Text style={styles.contextServer} numberOfLines={1}>
-          {connected && cluster
-            ? `${cluster.nodeCount ?? "?"} nodes · ${cluster.podCount ?? "?"} pods · ${ctx.server}`
-            : ctx.server}
-        </Text>
+      <View style={styles.contextHeader}>
+        {cluster ? (
+          <ClusterStatusDot state={cluster.state} />
+        ) : (
+          <ContextStatusDot current={ctx.current} />
+        )}
+        <View style={styles.contextInfo}>
+          <Text style={styles.contextName} numberOfLines={1}>
+            {ctx.name}
+          </Text>
+          <Text style={styles.contextServer} numberOfLines={1}>
+            {connected && cluster
+              ? `${cluster.nodeCount ?? "?"} nodes · ${cluster.podCount ?? "?"} pods · ${ctx.server}`
+              : ctx.server}
+          </Text>
+        </View>
+        {connected && cluster ? null : (
+          <Pressable
+            style={[styles.btn, styles.btnPrimary, busy && styles.btnDisabled]}
+            onPress={handleConnect}
+            disabled={busy}
+          >
+            <Text style={styles.btnPrimaryText}>{connectLabel}</Text>
+          </Pressable>
+        )}
       </View>
 
+      {/* Connected: the name/link stays on the header row above; the actions wrap
+          onto their own row so a phone width can't clip "Disconnect" or squeeze
+          the cluster name to nothing. */}
       {connected && cluster ? (
-        <>
+        <View style={styles.contextActions}>
           <Pressable style={[styles.btn, styles.btnPrimary]} onPress={handleOpen}>
             <Text style={styles.btnPrimaryText}>Open workloads</Text>
           </Pressable>
@@ -85,16 +99,8 @@ function ContextRow({
           <Pressable style={[styles.btn, styles.btnGhost]} onPress={handleDisconnect}>
             <Text style={styles.btnGhostText}>Disconnect</Text>
           </Pressable>
-        </>
-      ) : (
-        <Pressable
-          style={[styles.btn, styles.btnPrimary, busy && styles.btnDisabled]}
-          onPress={handleConnect}
-          disabled={busy}
-        >
-          <Text style={styles.btnPrimaryText}>{connectLabel}</Text>
-        </Pressable>
-      )}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -341,13 +347,23 @@ const styles = StyleSheet.create((theme) => ({
     fontStyle: "italic",
   },
   contextRow: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: "column",
     gap: theme.spacing[2],
     paddingHorizontal: theme.spacing[3],
     paddingVertical: theme.spacing[3],
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,
+  },
+  contextHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+  },
+  contextActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: theme.spacing[2],
+    paddingLeft: theme.spacing[4],
   },
   contextInfo: {
     flex: 1,

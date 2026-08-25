@@ -1427,11 +1427,13 @@ const styles = StyleSheet.create((theme: Theme) => ({
   actionBarLeft: {
     flexDirection: "row",
     alignItems: "center",
-    gap: theme.spacing[2],
-    paddingRight: theme.spacing[2],
+    gap: theme.spacing[1.5],
+    // Trailing space so the last button clears the fixed Delete instead of being
+    // clipped mid-label at the scroll edge (which read as "covered by Delete").
+    paddingRight: theme.spacing[3],
   },
   actionButton: {
-    paddingHorizontal: theme.spacing[3],
+    paddingHorizontal: theme.spacing[2],
     paddingVertical: theme.spacing[1.5],
     borderRadius: theme.borderRadius.md,
     borderWidth: theme.borderWidth[1],
@@ -1457,7 +1459,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     color: theme.colors.accentForeground,
   },
   actionButtonText: {
-    fontSize: theme.fontSize.sm,
+    fontSize: theme.fontSize.xs,
     fontWeight: theme.fontWeight.medium,
     color: theme.colors.foreground,
   },
@@ -1472,7 +1474,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     color: theme.colors.foregroundMuted,
   },
   deleteButton: {
-    paddingHorizontal: theme.spacing[3],
+    paddingHorizontal: theme.spacing[2],
     paddingVertical: theme.spacing[1.5],
     borderRadius: theme.borderRadius.md,
     backgroundColor: theme.colors.destructive,
@@ -1481,7 +1483,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     backgroundColor: theme.colors.palette.red[500],
   },
   deleteButtonText: {
-    fontSize: theme.fontSize.sm,
+    fontSize: theme.fontSize.xs,
     fontWeight: theme.fontWeight.medium,
     color: theme.colors.destructiveForeground,
   },
