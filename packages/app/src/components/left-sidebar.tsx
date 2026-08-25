@@ -58,8 +58,10 @@ import { useOwnsWindowChromeCorner, WindowChromeSafeArea } from "@/utils/desktop
 import { useCloseAgentListGesture } from "@/mobile-panels/gestures";
 import { MobilePanelOverlay } from "@/mobile-panels/presentation";
 import { useIsMobilePanelPresented } from "@/mobile-panels/provider";
+import { useClusterNavStore } from "@/stores/cluster-nav-store";
 import {
   buildClustersRoute,
+  buildClusterWorkloadsRoute,
   buildOpenProjectRoute,
   buildNewWorkspaceRoute,
   buildSchedulesRoute,
@@ -218,19 +220,28 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
 
   const hosts = useHosts();
   const firstServerId = hosts[0]?.serverId ?? "";
+  const lastCluster = useClusterNavStore((s) => s.lastCluster);
+
+  // Jump straight back to the cluster the user last had open (its workloads),
+  // falling back to the cluster list when there is none.
+  const clustersRoute = useMemo(() => {
+    if (lastCluster) {
+      return buildClusterWorkloadsRoute(lastCluster.serverId, lastCluster.clusterId);
+    }
+    if (firstServerId) return buildClustersRoute(firstServerId);
+    return null;
+  }, [lastCluster, firstServerId]);
 
   const handleClustersDesktop = useCallback(() => {
-    if (firstServerId) {
-      router.push(buildClustersRoute(firstServerId));
-    }
-  }, [firstServerId]);
+    if (clustersRoute) router.push(clustersRoute);
+  }, [clustersRoute]);
 
   const handleClustersMobile = useCallback(() => {
-    if (firstServerId) {
+    if (clustersRoute) {
       showMobileAgent();
-      router.push(buildClustersRoute(firstServerId));
+      router.push(clustersRoute);
     }
-  }, [firstServerId, showMobileAgent]);
+  }, [clustersRoute, showMobileAgent]);
 
   const handleViewMoreNavigate = useCallback(() => {
     router.push(buildSessionsRoute());

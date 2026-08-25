@@ -11,10 +11,13 @@ interface ClusterNavState {
   selectedKind: string | null;
   selectedNamespace: string | undefined;
   showingHelm: boolean;
+  /** The last cluster the user had open, so the sidebar can jump straight back. */
+  lastCluster: { serverId: string; clusterId: string } | null;
   selectKind: (clusterId: string, kind: string) => void;
   selectHelm: (clusterId: string) => void;
   setNamespace: (namespace: string | undefined) => void;
   ensureCluster: (clusterId: string) => void;
+  setLastCluster: (serverId: string, clusterId: string) => void;
 }
 
 export const useClusterNavStore = create<ClusterNavState>((set, get) => ({
@@ -22,6 +25,8 @@ export const useClusterNavStore = create<ClusterNavState>((set, get) => ({
   selectedKind: null,
   selectedNamespace: undefined,
   showingHelm: false,
+  lastCluster: null,
+  setLastCluster: (serverId, clusterId) => set({ lastCluster: { serverId, clusterId } }),
   selectKind: (clusterId, kind) => set({ clusterId, selectedKind: kind, showingHelm: false }),
   selectHelm: (clusterId) => set({ clusterId, selectedKind: null, showingHelm: true }),
   setNamespace: (namespace) => set({ selectedNamespace: namespace }),

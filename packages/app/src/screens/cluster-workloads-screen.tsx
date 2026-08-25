@@ -47,6 +47,7 @@ export function ClusterWorkloadsScreen({
   // the open detail resource, otherwise the selected kind + namespace.
   const selectedKind = useClusterNavStore((s) => s.selectedKind);
   const selectedNamespace = useClusterNavStore((s) => s.selectedNamespace);
+  const setLastCluster = useClusterNavStore((s) => s.setLastCluster);
   const composerResource = useMemo<ClusterComposerResource>(
     () =>
       activeTab
@@ -60,7 +61,10 @@ export function ClusterWorkloadsScreen({
     // let the k8s resource view be the landing; desktop keeps the side dock open.
     resetForCluster(clusterId, !isCompact);
     resetViewForCluster(clusterId);
-  }, [clusterId, isCompact, resetForCluster, resetViewForCluster]);
+    // Remember this cluster so the sidebar's Clusters entry can jump straight back
+    // to it instead of forcing the user to reconnect + reopen from scratch.
+    setLastCluster(serverId, clusterId);
+  }, [clusterId, serverId, isCompact, resetForCluster, resetViewForCluster, setLastCluster]);
 
   // On phones the host stack has no native header (headerShown: false), so the
   // screen paints under the status bar / notch / camera cutout. Reserve the
