@@ -262,6 +262,7 @@ export const vi = {
           midnight: "Nửa đêm",
           claude: "Claude",
           ghostty: "Ghostty",
+          pureBlack: "Đen tuyền",
           auto: "Theo hệ thống",
         },
       },
