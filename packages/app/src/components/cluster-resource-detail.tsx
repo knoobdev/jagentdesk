@@ -5,7 +5,6 @@ import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { Sparkles, X } from "lucide-react-native";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { AdaptiveTextInput } from "@/components/adaptive-modal-sheet";
-import { ClusterSecretReveal } from "./cluster-secret-reveal";
 import { ClusterNodeOps } from "./cluster-node-ops";
 import { ClusterCronjobOps } from "./cluster-cronjob-ops";
 import { ClusterPodShell } from "./cluster-pod-shell";
@@ -667,12 +666,17 @@ export function ClusterResourceDetail({
           eventsClusterId={clusterId}
           eventsNamespace={namespace}
           eventsName={name}
+          revealSecret={
+            isSecret && client && namespace && name
+              ? () => client.clusterRevealSecret({ id: clusterId, namespace, name })
+              : undefined
+          }
         />
       );
     } catch {
       return null;
     }
-  }, [yaml, kind, serverId, clusterId, namespace, name]);
+  }, [yaml, kind, serverId, clusterId, namespace, name, isSecret, client]);
 
   const logsBody = useMemo(() => {
     if (logLoading) {
@@ -1243,16 +1247,6 @@ function ResourceDetailBody({
         handleStopPortForward={handleStopPortForward}
       />
 
-      {isSecret && client ? (
-        <View style={styles.secretSection}>
-          <ClusterSecretReveal
-            client={client}
-            clusterId={clusterId}
-            namespace={namespace ?? ""}
-            name={name}
-          />
-        </View>
-      ) : null}
 
       {/* Scale row */}
       {isWorkload ? (

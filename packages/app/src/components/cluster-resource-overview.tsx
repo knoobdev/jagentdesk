@@ -1,5 +1,5 @@
-import { useMemo } from "react";
-import { ScrollView, Text, View } from "react-native";
+import { useCallback, useMemo, useState } from "react";
+import { Pressable, ScrollView, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { PodStatusDot } from "@/components/cluster-dot";
 import { ClusterResourceEvents } from "@/components/cluster-resource-events";
@@ -203,6 +203,7 @@ export function ClusterResourceOverview({
   eventsClusterId,
   eventsNamespace,
   eventsName,
+  revealSecret,
 }: {
   obj: Obj;
   kind: string;
@@ -210,7 +211,51 @@ export function ClusterResourceOverview({
   eventsClusterId?: string;
   eventsNamespace?: string;
   eventsName?: string;
+  // For Secrets: decode all keys on demand (one daemon call), enabling the
+  // inline per-key Show/Hide toggle on the Data rows.
+  revealSecret?: () => Promise<{ data: Record<string, string> | null; error: string | null }>;
 }) {
+  const [revealedData, setRevealedData] = useState<Record<string, string> | null>(null);
+  const [shownKeys, setShownKeys] = useState<Set<string>>(() => new Set());
+  const [revealing, setRevealing] = useState(false);
+  const [revealError, setRevealError] = useState<string | null>(null);
+
+  const toggleSecretKey = useCallback(
+    async (key: string) => {
+      setShownKeys((prev) => {
+        if (prev.has(key)) {
+          const next = new Set(prev);
+          next.delete(key);
+          return next;
+        }
+        return prev;
+      });
+      if (shownKeys.has(key)) return;
+      let map = revealedData;
+      if (!map && revealSecret) {
+        setRevealing(true);
+        setRevealError(null);
+        try {
+          const res = await revealSecret();
+          if (res.error) {
+            setRevealError(res.error);
+            setRevealing(false);
+            return;
+          }
+          map = res.data ?? {};
+          setRevealedData(map);
+        } catch (e) {
+          setRevealError(e instanceof Error ? e.message : "Failed to reveal secret");
+          setRevealing(false);
+          return;
+        }
+        setRevealing(false);
+      }
+      setShownKeys((prev) => new Set(prev).add(key));
+    },
+    [shownKeys, revealedData, revealSecret],
+  );
+
   const { rows, labels, annotations, containers, conditions, dataEntries } = useMemo(() => {
     const md = asObj(obj.metadata);
     const spec = asObj(obj.spec);
@@ -259,36 +304,50 @@ export function ClusterResourceOverview({
       {dataEntries.length > 0 ? (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Data</Text>
-          {dataEntries.map(([k, v]) => (
-            <View key={k} style={styles.dataEntry}>
-              <View style={styles.dataEntryHead}>
-                <Text style={styles.dataEntryKey} selectable numberOfLines={1}>
-                  {k}
-                </Text>
-                {kind === "ConfigMap" ? (
-                  <Text style={styles.dataEntryMeta}>{dataMeta(v)}</Text>
-                ) : null}
-              </View>
-              {kind === "Secret" ? (
-                <View style={styles.secretMasked}>
-                  <Text style={styles.secretMaskedText}>•••••••••••• · use Reveal to view</Text>
+          {dataEntries.map(([k, v]) => {
+            const isSecret = kind === "Secret";
+            const shown = shownKeys.has(k);
+            const decoded = revealedData?.[k];
+            const showValue = isSecret ? shown && decoded !== undefined : true;
+            return (
+              <View key={k} style={styles.dataEntry}>
+                <View style={styles.dataEntryHead}>
+                  <Text style={styles.dataEntryKey} selectable numberOfLines={1}>
+                    {k}
+                  </Text>
+                  {isSecret ? (
+                    <Pressable style={styles.revealBtn} onPress={() => toggleSecretKey(k)}>
+                      <Text style={styles.revealBtnText}>
+                        {revealing && !shown ? "Revealing…" : shown ? "Hide" : "Show"}
+                      </Text>
+                    </Pressable>
+                  ) : (
+                    <Text style={styles.dataEntryMeta}>{dataMeta(v)}</Text>
+                  )}
                 </View>
-              ) : (
-                <ScrollView style={styles.codeBlock} nestedScrollEnabled>
-                  <ScrollView
-                    horizontal
-                    nestedScrollEnabled
-                    contentContainerStyle={styles.codeBlockContent}
-                    showsHorizontalScrollIndicator
-                  >
-                    <Text style={styles.codeText} selectable>
-                      {v}
-                    </Text>
+                {showValue ? (
+                  <ScrollView style={styles.codeBlock} nestedScrollEnabled>
+                    <ScrollView
+                      horizontal
+                      nestedScrollEnabled
+                      contentContainerStyle={styles.codeBlockContent}
+                      showsHorizontalScrollIndicator
+                    >
+                      <Text style={styles.codeText} selectable>
+                        {isSecret ? decoded : v}
+                      </Text>
+                    </ScrollView>
                   </ScrollView>
-                </ScrollView>
-              )}
-            </View>
-          ))}
+                ) : (
+                  <View style={styles.secretMasked}>
+                    <Text style={styles.secretMaskedText}>
+                      {revealError ?? "••••••••••••"}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            );
+          })}
         </View>
       ) : null}
 
@@ -420,8 +479,22 @@ const styles = StyleSheet.create((theme: Theme) => ({
     fontSize: theme.fontSize.xs,
     color: theme.colors.foregroundExtraMuted,
   },
+  revealBtn: {
+    flexShrink: 0,
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
+    borderRadius: theme.borderRadius.md,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface2,
+  },
+  revealBtnText: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foreground,
+  },
   codeBlock: {
-    maxHeight: 360,
+    maxHeight: 200,
     borderWidth: theme.borderWidth[1],
     borderColor: theme.colors.border,
     borderRadius: theme.borderRadius.lg,

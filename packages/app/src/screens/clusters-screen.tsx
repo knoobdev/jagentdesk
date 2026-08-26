@@ -82,6 +82,15 @@ function ContextRow({
         )}
       </View>
 
+      {errored && cluster?.lastError ? (
+        <View style={styles.contextError}>
+          <ThemedCircleAlert size={13} uniProps={redColorMapping} />
+          <Text style={styles.contextErrorText} numberOfLines={4}>
+            {cluster.lastError}
+          </Text>
+        </View>
+      ) : null}
+
       {/* Connected: the name/link stays on the header row above; the actions wrap
           onto their own row so a phone width can't clip "Disconnect" or squeeze
           the cluster name to nothing. */}
@@ -338,6 +347,18 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
     fontSize: theme.fontSize.sm,
     color: theme.colors.palette.red[800],
+  },
+  contextError: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: theme.spacing[2],
+    paddingLeft: theme.spacing[4],
+    paddingTop: theme.spacing[1],
+  },
+  contextErrorText: {
+    flex: 1,
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.palette.red[500],
   },
   sectionCard: {
     borderRadius: theme.borderRadius.lg,

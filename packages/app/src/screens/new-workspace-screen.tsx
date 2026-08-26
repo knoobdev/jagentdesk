@@ -824,6 +824,7 @@ async function createMultiplicityWorkspace(input: {
   withInitialAgent: boolean;
   prompt: string;
   attachments: AgentAttachment[];
+  title?: string;
   mergeWorkspaces: (
     serverId: string,
     workspaces: ReturnType<typeof normalizeWorkspaceDescriptor>[],
@@ -853,6 +854,7 @@ async function createMultiplicityWorkspace(input: {
           projectId,
         },
     ...(firstAgentContext ? { firstAgentContext } : {}),
+    ...(input.title ? { title: input.title } : {}),
   });
   if (payload.error || !payload.workspace) {
     throw new Error(payload.error ?? input.createFailedMessage);
@@ -1124,6 +1126,7 @@ async function openOrchestrationWorkspace(deps: {
       payload: { text: "", attachments: [], cwd: deps.sourceDirectory ?? "" },
       ensureWorkspace: deps.ensureWorkspace,
       serverId: deps.serverId,
+      title: "Orchestration",
       navigate: (targetServerId, workspaceId) =>
         navigateToWorkspace({
           serverId: targetServerId,
@@ -1985,6 +1988,7 @@ export function NewWorkspaceScreen({
       prompt: string;
       attachments: AgentAttachment[];
       withInitialAgent: boolean;
+      title?: string;
     }) => {
       if (createdWorkspace) {
         return createdWorkspace;
@@ -2018,6 +2022,7 @@ export function NewWorkspaceScreen({
             withInitialAgent: input.withInitialAgent,
             prompt: input.prompt,
             attachments: input.attachments,
+            title: input.title,
             mergeWorkspaces,
             serverId: selectedServerId,
             createFailedMessage: t("newWorkspace.errors.createWorktreeFailed"),
