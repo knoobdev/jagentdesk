@@ -24,6 +24,7 @@ import Markdown, {
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { AppearanceStyleBoundary } from "@/components/appearance-style-boundary";
 import { HighlightedCodeBlock } from "@/components/highlighted-code-block";
+import { MarkdownFenceBlock } from "@/components/markdown/fence";
 import { MarkdownParagraphView, MarkdownTextSpan } from "@/components/markdown-text";
 import { MarkdownTableCellText } from "@/components/markdown-text-selection";
 import { getMarkdownListMarker, getMarkdownListSpacing } from "@/utils/markdown-list";
@@ -611,10 +612,11 @@ export function createSharedMarkdownRules(): RenderRules {
       styles: MarkdownStyles,
       inheritedStyles: TextStyle = {},
     ) => (
-      <HighlightedCodeBlock
+      <MarkdownFenceBlock
         key={node.key}
         code={node.content}
-        language={node.sourceInfo}
+        info={node.sourceInfo}
+        phase="complete"
         inheritedStyles={inheritedStyles}
         textStyle={styles.fence}
       />

@@ -263,6 +263,14 @@ export const zhCN: TranslationResources = {
     },
   },
   message: {
+    diagram: {
+      diagram: "Diagram",
+      zoomIn: "Zoom in",
+      zoomOut: "Zoom out",
+      resetZoom: "Reset view",
+      viewSource: "View source",
+      viewDiagram: "View diagram",
+    },
     actions: {
       copyCode: "复制代码",
       copyTurn: "复制回合",

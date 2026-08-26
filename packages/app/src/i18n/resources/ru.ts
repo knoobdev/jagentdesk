@@ -265,6 +265,14 @@ export const ru: TranslationResources = {
     },
   },
   message: {
+    diagram: {
+      diagram: "Diagram",
+      zoomIn: "Zoom in",
+      zoomOut: "Zoom out",
+      resetZoom: "Reset view",
+      viewSource: "View source",
+      viewDiagram: "View diagram",
+    },
     actions: {
       copyCode: "Скопировать код",
       copyTurn: "Копировать ход",
