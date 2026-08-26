@@ -383,10 +383,13 @@ jobs:
         run: |
           set -euo pipefail
           old_asset_name="JAgentDesk-${RELEASE_TAG}-ios-simulator.tar.gz"
-          old_asset_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
-            --jq ".assets[] | select(.name == \"$old_asset_name\") | .id" | head -n 1)"
-          if [[ -n "$old_asset_id" ]]; then
-            gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$old_asset_id"
+          old_asset_id=""
+          if release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" 2>/dev/null)"; then
+            old_asset_id="$(printf '%s' "$release_json" \
+              | jq -r ".assets[] | select(.name == \"$old_asset_name\") | .id" | head -n 1)"
+          fi
+          if [[ -n "$old_asset_id" && "$old_asset_id" != "null" ]]; then
+            gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$old_asset_id" || true
             echo "Removed obsolete simulator asset $old_asset_name."
           else
             echo "No obsolete simulator asset found."
