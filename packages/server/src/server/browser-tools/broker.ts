@@ -43,7 +43,10 @@ export interface BrowserToolsBrokerOptions {
   createRequestId?: () => string;
 }
 
-const DEFAULT_BROWSER_TOOLS_TIMEOUT_MS = 15_000;
+// A busy host can take tens of seconds to attach a new guest webContents and
+// register it; keep the per-command ceiling generous so browser_new_tab does not
+// fail spuriously under load (it still resolves as soon as the host responds).
+const DEFAULT_BROWSER_TOOLS_TIMEOUT_MS = 90_000;
 
 export class BrowserToolsBroker {
   private readonly defaultTimeoutMs: number;

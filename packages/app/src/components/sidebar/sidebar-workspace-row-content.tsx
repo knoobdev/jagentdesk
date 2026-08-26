@@ -34,6 +34,7 @@ import { getStatusDotColor, isEmphasizedStatusDotBucket } from "@/utils/status-d
 import { shouldRenderSyncedStatusLoader } from "@/utils/status-loader";
 import { openExternalUrl } from "@/utils/open-external-url";
 import { resolveSidebarWorkspacePrimaryLabel } from "@/components/sidebar/sidebar-workspace-title";
+import { useWorkspacePrimaryAgentTitle } from "@/hooks/use-workspace-primary-agent-title";
 
 // The scrim spans more than the kebab so the fade starts left of the diff stat. Solid from
 // SCRIM_SOLID_OFFSET rightward, which keeps the kebab itself off the gradient entirely.
@@ -177,7 +178,12 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
   const {
     settings: { workspaceTitleSource },
   } = useAppSettings();
-  const workspaceLabel = resolveSidebarWorkspacePrimaryLabel({ workspace, workspaceTitleSource });
+  const primaryAgentTitle = useWorkspacePrimaryAgentTitle(workspace.serverId, workspace.workspaceId);
+  const workspaceLabel = resolveSidebarWorkspacePrimaryLabel({
+    workspace,
+    workspaceTitleSource,
+    fallbackTitle: primaryAgentTitle,
+  });
   const hasTitleAccessory = Boolean(scriptIconKind || workspace.prHint || hostBadge);
   const workspaceBranchTextStyle = useMemo(
     () => [

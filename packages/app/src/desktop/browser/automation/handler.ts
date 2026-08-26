@@ -411,7 +411,7 @@ async function waitForBrowserRegistration(params: {
   // dom-ready + register (cold browser-host init), so give registration a
   // generous ceiling — it resolves as soon as the tab appears, this is only the
   // worst-case wait before we tell the agent to retry.
-  const deadline = Date.now() + (params.timeoutMs ?? 12_000);
+  const deadline = Date.now() + (params.timeoutMs ?? 80_000);
   while (Date.now() < deadline) {
     const payload = await params.executeAutomationCommand({
       type: "browser.automation.execute.request",

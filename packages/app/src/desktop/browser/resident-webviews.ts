@@ -56,8 +56,18 @@ function registerBrowserWhenAttached(
 ): void {
   // Reparenting a webview can replace its guest WebContents without replacing
   // this DOM element, so every attachment needs a fresh main-process registration.
-  webview.addEventListener("did-attach", () => {
-    const webContentsId = webview.getWebContentsId();
+  const register = (): boolean => {
+    let webContentsId: number;
+    try {
+      // Under heavy host load the guest can fire "did-attach" before it is
+      // dom-ready; getWebContentsId() then throws "The WebView must be attached
+      // to the DOM…". Treat that as "not ready yet" and retry on dom-ready,
+      // instead of letting it throw uncaught and abort registration (which makes
+      // browser_new_tab time out).
+      webContentsId = webview.getWebContentsId();
+    } catch {
+      return false;
+    }
     void browser
       .registerAttachedBrowser({
         browserId: identity.browserId,
@@ -67,6 +77,17 @@ function registerBrowserWhenAttached(
       .catch((error) => {
         console.error("[browser-webview] attached registration failed", error);
       });
+    return true;
+  };
+  webview.addEventListener("did-attach", () => {
+    if (register()) {
+      return;
+    }
+    const onDomReady = () => {
+      webview.removeEventListener("dom-ready", onDomReady);
+      register();
+    };
+    webview.addEventListener("dom-ready", onDomReady);
   });
 }
 
