@@ -32,8 +32,11 @@ with a few deliberate boundaries:
 - **Kubernetes cluster management** — a full Kubernetes cockpit built into the app.
 - **Per‑cluster AI chat** — ask an agent about any resource or its logs; the agent uses
   real `kubectl` tools scoped to the exact cluster you connected.
-- **Skills** _(new)_ — save reusable “trained” assistants (icon, instructions, tags) and spin up
-  an agent pre‑loaded with a skill in one tap.
+- **Skills** _(new)_ — reusable expertise agents **use** (attach many from the composer) and
+  **learn** from real conversations; auto‑loaded by message, no hand‑typed corrections.
+- **Plugins** _(new)_ — extend the app with local, trusted code: surfaces, sidebar items,
+  workspace panels, command‑center items, attachment sources, and themes (off by default).
+- **Active‑turn steering** _(new)_ — send a message into a running turn without cancelling it.
 - **Agentic browser** _(new)_ — the agent drives a real built‑in browser (open tabs, click,
   evaluate) with optional **stealth** (fingerprint/webdriver normalisation) and a **session vault**
   for your own logins.
@@ -87,20 +90,40 @@ Open **Clusters** from the sidebar to manage Kubernetes from inside JAgentDesk:
 
 For a full walkthrough see **[docs/kubernetes.md](docs/kubernetes.md)**.
 
-### Skills — train reusable assistants
+### Skills — reusable expertise your agents use and learn
 
-Open **Skills** from the sidebar to turn a good setup into a one‑tap expert:
+Open **Skills** from the sidebar to build reusable expertise that **agents use** (many at once)
+and **learn** from real conversations — not throwaway one‑off agents:
 
 - **Create / edit / delete** a skill with an icon, name, description, an instruction prompt, and
-  comma‑separated tags. Editing pre‑fills every field so you tweak instead of retyping.
-- **Use** a skill to start an agent pre‑loaded with its instructions — your expert on tap.
-- **Train & level up** — a skill starts _In training_ and earns XP as you rate its work
-  (👍 / 👎 + an optional correction, which is folded back into its instructions). Levels run
-  Novice → Expert with an XP bar, and a **graduation checklist** (enough examples, a passing
-  approval rate, a streak of approvals, detailed instructions) gates promotion to a graduated
-  **Skill**. Train from the dedicated training view **or** straight from a running agent via the
-  floating **Train** pill.
-- Skills live on the daemon, so they’re shared across desktop **and** mobile.
+  comma‑separated tags.
+- **Attach from the composer** — a **Skills** picker in the composer lets you attach **one or more**
+  skills to the current agent; their instructions are injected so the agent actually uses them.
+  **Auto‑load** (on by default) matches relevant skills to your message automatically.
+- **Learn from the conversation** — no hand‑typed corrections. 👍 a real assistant reply and the
+  skill captures that answer as knowledge (+XP); the agent can also **propose a lesson** after a
+  turn for you to approve or reject.
+- **Level up** — skills earn XP as they learn, running Novice → Expert with an XP bar and a
+  **graduation checklist**.
+- Available on **desktop and mobile**.
+
+### Plugins — extend the app with local, trusted code
+
+Install local plugins that contribute surfaces, sidebar items, workspace panels, command‑center
+items, attachment sources, and themes:
+
+- **Local‑disk only** — `jagentdesk plugin install <dir>`; no marketplace, no network install.
+- **Compiled + run on the daemon** — an esbuild pipeline splits client/server code; each plugin
+  runs in its own subprocess and reaches the daemon over an internal session.
+- **Trusted, off by default** — plugins run unsandboxed with a full daemon session, so
+  `pluginsEnabled` defaults to **false**; a reserved `plugin:<id>` identity keeps a tailnet node
+  from ever impersonating a plugin. Manage them under **Settings → Plugins** (list / install /
+  enable / disable / remove / logs).
+
+### Active‑turn steering
+
+Send a message **into a running turn** without cancelling it. **Settings → Default send** offers
+**Steer** (inject into the live turn, falling back to interrupt), **Interrupt**, or **Queue**.
 
 ### Agentic browser (desktop)
 
