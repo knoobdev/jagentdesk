@@ -89,6 +89,15 @@ import {
 import { runDesktopStartup } from "./desktop-startup.js";
 import { autoUpdateInstalledSkills } from "./integrations/skills/index.js";
 import { registerBrowserAutomationIpc } from "./features/browser-automation/ipc.js";
+import {
+  applyStealthToWebContents,
+  setStealthEnabled,
+} from "./features/browser-stealth.js";
+import {
+  deleteConnectedLogin,
+  listConnectedLogins,
+  saveConnectedLoginForContents,
+} from "./features/browser-vault.js";
 import { BrowserKeyboard } from "./features/browser-keyboard/index.js";
 import {
   buildAgentDeepLinkRoute,
@@ -655,6 +664,47 @@ ipcMain.handle("jagentdesk:browser:copy-element", (_event, payload: unknown): bo
   return false;
 });
 
+ipcMain.handle("jagentdesk:browser:set-stealth", (_event, enabled: unknown): boolean => {
+  const on = enabled === true;
+  setStealthEnabled(on);
+  log.info("[browser-stealth] toggled", { enabled: on });
+  return on;
+});
+
+ipcMain.handle("jagentdesk:browser:list-connected-logins", async () => {
+  return listConnectedLogins();
+});
+
+ipcMain.handle(
+  "jagentdesk:browser:save-connected-login",
+  async (event, browserId: unknown) => {
+    if (typeof browserId !== "string" || browserId.trim().length === 0) {
+      return null;
+    }
+    const contents = getJAgentDeskBrowserWebContentsForHostWindow(browserId, event.sender.id);
+    if (!contents || contents.isDestroyed()) {
+      return null;
+    }
+    try {
+      return await saveConnectedLoginForContents(contents);
+    } catch (error) {
+      log.warn("[browser-vault] save-connected-login.failed", { browserId, error: String(error) });
+      return null;
+    }
+  },
+);
+
+ipcMain.handle("jagentdesk:browser:delete-connected-login", async (_event, domain: unknown) => {
+  if (typeof domain !== "string" || domain.trim().length === 0) {
+    return;
+  }
+  try {
+    await deleteConnectedLogin(domain);
+  } catch (error) {
+    log.warn("[browser-vault] delete-connected-login.failed", { domain, error: String(error) });
+  }
+});
+
 protocol.registerSchemesAsPrivileged([
   {
     scheme: APP_SCHEME,
@@ -835,6 +885,9 @@ async function createWindow(
   });
   mainWindow.webContents.on("did-attach-webview", (_event, contents) => {
     prepareJAgentDeskBrowserWebContents(contents);
+    // Anti-detection: inject fingerprint/webdriver patches before page scripts
+    // (no-op unless stealth is enabled). Runs on the next navigation.
+    void applyStealthToWebContents(contents);
     contents.once("destroyed", () => {
       pendingBrowserWindowOpenRequests.delete(contents.id);
     });

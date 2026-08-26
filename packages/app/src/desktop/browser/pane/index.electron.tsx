@@ -617,9 +617,8 @@ export function BrowserPane({
   const browser = useBrowserStore((state) => state.browsersById[browserId] ?? null);
   const updateBrowser = useBrowserStore((state) => state.updateBrowser);
   const isAgentDriving = useAgentDriving(browserId);
-  // Stealth + connected-logins are not wired to a real backend yet (Phases 4–5);
-  // surface their true state (off / none) rather than faking the mock's values.
-  const stealthOn = false;
+  // Stealth state lives in the stealth store (read inside the cockpit controls).
+  // Connected-logins count comes from the vault (Phase 5); 0 until saved.
   const connectedLogins = 0;
   const webviewRef = useRef<ElectronWebview | null>(null);
   const webviewHostRef = useRef<HTMLDivElement | null>(null);
@@ -1690,7 +1689,7 @@ export function BrowserPane({
               }
             />
           </ToolbarButton>
-          <CockpitControls stealthOn={stealthOn} connectedLogins={connectedLogins} />
+          <CockpitControls connectedLogins={connectedLogins} />
         </View>
       </View>
       {browser?.lastError ? (
@@ -1721,7 +1720,7 @@ export function BrowserPane({
       </View>
         </View>
       </View>
-      <AntiDetectionStrip browserId={browserId} stealthOn={stealthOn} />
+      <AntiDetectionStrip browserId={browserId} />
     </View>
   );
 }

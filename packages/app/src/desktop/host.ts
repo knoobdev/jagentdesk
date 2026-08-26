@@ -164,6 +164,23 @@ export interface DesktopBrowserBridge {
   ) => Promise<string | null>;
   /** Copy element text and/or an image to the system clipboard from main. */
   copyElement?: (payload: { text?: string; imageDataUrl?: string }) => Promise<boolean>;
+  /**
+   * Enable/disable anti-detection ("stealth") for new browser guests. When on,
+   * main injects webdriver/fingerprint patches and drives human-like input.
+   */
+  setStealthEnabled?: (enabled: boolean) => Promise<void>;
+  /** List saved per-domain login sessions (Connected logins vault). */
+  listConnectedLogins?: () => Promise<DesktopConnectedLogin[]>;
+  /** Capture + encrypt the current cookies for the active tab's domain. */
+  saveConnectedLogin?: (browserId: string) => Promise<DesktopConnectedLogin | null>;
+  /** Forget a saved login: delete its encrypted entry and clear its cookies. */
+  deleteConnectedLogin?: (domain: string) => Promise<void>;
+}
+
+export interface DesktopConnectedLogin {
+  domain: string;
+  cookieCount: number;
+  savedAt: number;
 }
 
 export interface DesktopInvokeBridge {

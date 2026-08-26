@@ -29,6 +29,13 @@ const escapedAppSrcRoot = appSrcRoot
   .join("[\\\\/]");
 const pathSeparatorPattern = "[\\\\/]";
 
+const workspaceRoot = path.resolve(projectRoot, "..", "..");
+// Watch the whole monorepo so workspace packages' files (including the `source`
+// export condition → src/*.ts that the experimental resolver selects) are inside
+// a watched root; otherwise Metro fails to resolve/hash them.
+config.watchFolders = Array.from(
+  new Set([...(config.watchFolders ?? []), workspaceRoot]),
+);
 config.resolver.extraNodeModules = {
   ...config.resolver.extraNodeModules,
   react: path.join(appNodeModulesRoot, "react"),

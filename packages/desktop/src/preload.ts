@@ -126,5 +126,12 @@ contextBridge.exposeInMainWorld("jagentdeskDesktop", {
     ) => ipcRenderer.invoke("jagentdesk:browser:capture-element", browserId, rect),
     copyElement: (payload: { text?: string; imageDataUrl?: string }) =>
       ipcRenderer.invoke("jagentdesk:browser:copy-element", payload),
+    setStealthEnabled: (enabled: boolean) =>
+      ipcRenderer.invoke("jagentdesk:browser:set-stealth", enabled),
+    listConnectedLogins: () => ipcRenderer.invoke("jagentdesk:browser:list-connected-logins"),
+    saveConnectedLogin: (browserId: string) =>
+      ipcRenderer.invoke("jagentdesk:browser:save-connected-login", browserId),
+    deleteConnectedLogin: (domain: string) =>
+      ipcRenderer.invoke("jagentdesk:browser:delete-connected-login", domain),
   },
 });

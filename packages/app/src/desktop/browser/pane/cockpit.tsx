@@ -1,9 +1,10 @@
-import { useMemo } from "react";
-import { ScrollView, Text, View } from "react-native";
+import { useCallback, useMemo } from "react";
+import { Pressable, ScrollView, Text, View } from "react-native";
 import { Check, ChevronRight, KeyRound, Loader, Shield, X } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useShallow } from "zustand/shallow";
 import { useBrowserActivityStore, type BrowserStep } from "@/desktop/browser/automation/activity-store";
+import { useBrowserStealthStore } from "@/desktop/browser/stealth-store";
 import type { Theme } from "@/styles/theme";
 
 const ThemedShield = withUnistyles(Shield);
@@ -97,23 +98,27 @@ export function BrowserTaskPanel({ browserId, title }: { browserId: string; titl
   );
 }
 
-/** Top-bar controls: Stealth state pill + Connected-logins button. Both reflect the
- *  REAL state — stealth is off and no logins are saved until those subsystems ship. */
-export function CockpitControls({
-  stealthOn,
-  connectedLogins,
-}: {
-  stealthOn: boolean;
-  connectedLogins: number;
-}) {
+/** Top-bar controls: a working Stealth toggle + Connected-logins count. The pill
+ *  reflects and drives the REAL stealth state (see stealth-store → main injection). */
+export function CockpitControls({ connectedLogins }: { connectedLogins: number }) {
+  const stealthOn = useBrowserStealthStore((s) => s.enabled);
+  const setEnabled = useBrowserStealthStore((s) => s.setEnabled);
+  const toggle = useCallback(() => setEnabled(!stealthOn), [setEnabled, stealthOn]);
+  const a11yState = useMemo(() => ({ checked: stealthOn }), [stealthOn]);
   return (
     <View style={styles.controls}>
-      <View style={stealthOn ? styles.pillOn : styles.pill}>
+      <Pressable
+        style={stealthOn ? styles.pillOn : styles.pill}
+        onPress={toggle}
+        accessibilityRole="switch"
+        accessibilityState={a11yState}
+        accessibilityLabel="Toggle stealth mode"
+      >
         <ThemedShield size={13} uniProps={stealthOn ? okColor : mutedColor} />
         <Text style={stealthOn ? styles.pillTextOn : styles.pillText}>
           {stealthOn ? "Stealth on" : "Stealth off"}
         </Text>
-      </View>
+      </Pressable>
       <View style={styles.pill}>
         <ThemedKey size={13} uniProps={mutedColor} />
         <Text style={styles.pillText}>
@@ -124,14 +129,9 @@ export function CockpitControls({
   );
 }
 
-/** Bottom strip: real action count + current step + honest anti-detection state. */
-export function AntiDetectionStrip({
-  browserId,
-  stealthOn,
-}: {
-  browserId: string;
-  stealthOn: boolean;
-}) {
+/** Bottom strip: real action count + current step + real anti-detection state. */
+export function AntiDetectionStrip({ browserId }: { browserId: string }) {
+  const stealthOn = useBrowserStealthStore((s) => s.enabled);
   const steps = useSteps(browserId);
   const actions = useMemo(() => steps.filter((s) => s.command !== "list_tabs").length, [steps]);
   const current = steps.length > 0 ? steps[steps.length - 1] : null;
