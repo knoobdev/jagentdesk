@@ -25,6 +25,7 @@ import { FileDropZone } from "@/components/file-drop/file-drop-zone";
 import { useRetainedPanelActive } from "@/components/retained-panel";
 import { SidebarCallout } from "@/components/sidebar-callout";
 import { Composer } from "@/composer";
+import { AgentSkillTrainBar } from "@/components/agent-skill-train-bar";
 import { getActiveMessageSubmissions } from "@/composer/submission/model";
 import { RewindComposerRestoreProvider } from "@/components/rewind/composer-restore";
 import { getProviderIcon } from "@/components/provider-icons";
@@ -357,13 +358,16 @@ function AgentPanel() {
   invariant(target.kind === "agent", "AgentPanel requires agent target");
 
   return (
-    <AgentPanelContent
-      serverId={serverId}
-      workspaceId={workspaceId}
-      agentId={target.agentId}
-      isPaneFocused={isInteractive}
-      onOpenWorkspaceFile={openFileInWorkspace}
-    />
+    <View style={{ flex: 1, minHeight: 0 }}>
+      <AgentPanelContent
+        serverId={serverId}
+        workspaceId={workspaceId}
+        agentId={target.agentId}
+        isPaneFocused={isInteractive}
+        onOpenWorkspaceFile={openFileInWorkspace}
+      />
+      <AgentSkillTrainBar serverId={serverId} agentId={target.agentId} />
+    </View>
   );
 }
 

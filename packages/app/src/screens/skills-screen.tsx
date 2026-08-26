@@ -8,6 +8,7 @@ import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
 import { useSessionStore } from "@/stores/session-store";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { navigateToAgent } from "@/utils/navigate-to-agent";
+import { uniqueTitle } from "@/utils/unique-title";
 import { AdaptiveTextInput } from "@/components/adaptive-modal-sheet";
 import { SkillTrainingView } from "@/components/skill-training-view";
 import { useSkillsStore, levelProgress, approvalRate, type Skill } from "@/stores/skills-store";
@@ -146,6 +147,7 @@ export function SkillsScreen() {
     (state) => state.sessions[serverId]?.workspaces.values().next().value,
   );
   const cwd = firstWorkspace?.workspaceDirectory ?? null;
+  const agents = useSessionStore((state) => state.sessions[serverId]?.agents);
 
   const [edit, setEdit] = useState<EditState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -173,12 +175,18 @@ export function SkillsScreen() {
         return;
       }
       setError(null);
+      // Don't spawn duplicate "K8s Doctor" agents when a skill is used twice —
+      // suffix a counter against the existing agent titles.
+      const title = uniqueTitle(
+        skill.name,
+        agents ? Array.from(agents.values(), (a) => a.title) : [],
+      );
       void client
         .createAgent({
           provider,
           cwd,
           systemPrompt: skill.instructions,
-          title: skill.name,
+          title,
           labels: { "jagentdesk.skill.id": skill.id, "jagentdesk.skill.name": skill.name },
         })
         .then((agent) => {
@@ -187,7 +195,7 @@ export function SkillsScreen() {
         })
         .catch((e: unknown) => setError(e instanceof Error ? e.message : "Failed to start skill"));
     },
-    [client, provider, cwd, serverId],
+    [client, provider, cwd, serverId, agents],
   );
 
   const handleNew = useCallback(() => setEdit({ ...EMPTY_EDIT }), []);

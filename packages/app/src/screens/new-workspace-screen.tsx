@@ -48,6 +48,7 @@ import {
   useLastWorkspaceSelection,
 } from "@/stores/navigation-active-workspace-store";
 import { normalizeWorkspaceDescriptor, useSessionStore } from "@/stores/session-store";
+import { uniqueTitle } from "@/utils/unique-title";
 import { useWorkspace } from "@/stores/session-store-hooks";
 import { buildNewWorkspaceDraftKey, generateDraftId } from "@/stores/draft-keys";
 import { useDraftStore } from "@/stores/draft-store";
@@ -1116,6 +1117,7 @@ async function openOrchestrationWorkspace(deps: {
   ensureWorkspace: CreateEmptyWorkspaceInput["ensureWorkspace"];
   serverId: string;
   sourceDirectory: string | null;
+  title: string;
   setPendingAction: (action: "chat" | "empty" | null) => void;
   setErrorMessage: (message: string | null) => void;
 }): Promise<void> {
@@ -1126,7 +1128,7 @@ async function openOrchestrationWorkspace(deps: {
       payload: { text: "", attachments: [], cwd: deps.sourceDirectory ?? "" },
       ensureWorkspace: deps.ensureWorkspace,
       serverId: deps.serverId,
-      title: "Orchestration",
+      title: deps.title,
       navigate: (targetServerId, workspaceId) =>
         navigateToWorkspace({
           serverId: targetServerId,
@@ -2110,17 +2112,20 @@ export function NewWorkspaceScreen({
       toast,
     ],
   );
-  const handleOpenOrchestration = useCallback(
-    () =>
-      openOrchestrationWorkspace({
-        ensureWorkspace,
-        serverId: selectedServerId,
-        sourceDirectory: selectedSourceDirectory,
-        setPendingAction,
-        setErrorMessage,
-      }),
-    [ensureWorkspace, selectedServerId, selectedSourceDirectory],
-  );
+  const handleOpenOrchestration = useCallback(() => {
+    const existing = useSessionStore.getState().sessions[selectedServerId]?.workspaces;
+    const titles = existing
+      ? Array.from(existing.values(), (w) => w.title || w.name)
+      : [];
+    return openOrchestrationWorkspace({
+      ensureWorkspace,
+      serverId: selectedServerId,
+      sourceDirectory: selectedSourceDirectory,
+      title: uniqueTitle("Orchestration", titles),
+      setPendingAction,
+      setErrorMessage,
+    });
+  }, [ensureWorkspace, selectedServerId, selectedSourceDirectory]);
 
   const renderPickerOption = useCallback(
     (props: {

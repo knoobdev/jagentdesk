@@ -17,6 +17,7 @@ import Animated, {
 import { Gesture } from "react-native-gesture-handler";
 import { Check, History, MessageSquare, Plus, X } from "lucide-react-native";
 import { formatTimeAgo } from "@/utils/time";
+import { uniqueTitle } from "@/utils/unique-title";
 import { AgentConversationPanel } from "@/panels/agent-panel";
 import {
   PaneProvider,
@@ -100,8 +101,10 @@ function deliverPendingAsk(
 }
 
 /** A distinct default title for an empty cluster chat (the daemon never auto-titles). */
-function nextChatTitle(existingCount: number): string {
-  return existingCount <= 0 ? "Cluster chat" : `Cluster chat ${existingCount + 1}`;
+function nextChatTitle(existingTitles: Iterable<string | null | undefined>): string {
+  // Dedup against the actual existing titles (not a count) so deleting a chat
+  // in the middle can't produce a colliding "Cluster chat 2".
+  return uniqueTitle("Cluster chat", existingTitles);
 }
 
 /** Spin up the single cluster agent, baking in any queued Ask AI context. */
@@ -340,7 +343,7 @@ export function ClusterChatDock({
       resource,
       provider,
       cwd,
-      title: nextChatTitle(0),
+      title: nextChatTitle(listClusterAgents(agents, clusterId).map((a) => a.title)),
       onOpen: openChat,
     });
   }, [
@@ -430,10 +433,10 @@ export function ClusterChatDock({
       resource,
       provider,
       cwd,
-      title: nextChatTitle(clusterAgents.length),
+      title: nextChatTitle(clusterAgents.map((a) => a.title)),
       onOpen: openChat,
     });
-  }, [client, provider, cwd, clusterId, serverId, resource, openChat, clusterAgents.length]);
+  }, [client, provider, cwd, clusterId, serverId, resource, openChat, clusterAgents]);
 
   const paneValue = useMemo<PaneContextValue>(
     () => ({
