@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
-import { Sparkles, Plus, Play, Pencil, Trash2, X } from "lucide-react-native";
+import { Sparkles, Plus, Play, Pencil, Trash2, X, Dumbbell, GraduationCap } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useHosts, useHostRuntimeClient } from "@/runtime/host-runtime";
@@ -9,7 +9,8 @@ import { useSessionStore } from "@/stores/session-store";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { navigateToAgent } from "@/utils/navigate-to-agent";
 import { AdaptiveTextInput } from "@/components/adaptive-modal-sheet";
-import { useSkillsStore, type Skill } from "@/stores/skills-store";
+import { SkillTrainingView } from "@/components/skill-training-view";
+import { useSkillsStore, levelProgress, approvalRate, type Skill } from "@/stores/skills-store";
 import type { Theme } from "@/styles/theme";
 
 const ThemedSparkles = withUnistyles(Sparkles);
@@ -18,9 +19,13 @@ const ThemedPlay = withUnistyles(Play);
 const ThemedPencil = withUnistyles(Pencil);
 const ThemedTrash = withUnistyles(Trash2);
 const ThemedX = withUnistyles(X);
+const ThemedDumbbell = withUnistyles(Dumbbell);
+const ThemedGraduationCap = withUnistyles(GraduationCap);
 const accentColor = (theme: Theme) => ({ color: theme.colors.accent });
 const accentFgColor = (theme: Theme) => ({ color: theme.colors.accentForeground });
 const mutedColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
+
+type SkillFilter = "all" | "training" | "graduated";
 
 interface EditState {
   id: string | null;
@@ -43,17 +48,23 @@ const EMPTY_EDIT: EditState = {
 function SkillCard({
   skill,
   onUse,
+  onTrain,
   onEdit,
   onDelete,
 }: {
   skill: Skill;
   onUse: (s: Skill) => void;
+  onTrain: (s: Skill) => void;
   onEdit: (s: Skill) => void;
   onDelete: (s: Skill) => void;
 }) {
   const handleUse = useCallback(() => onUse(skill), [onUse, skill]);
+  const handleTrain = useCallback(() => onTrain(skill), [onTrain, skill]);
   const handleEdit = useCallback(() => onEdit(skill), [onEdit, skill]);
   const handleDelete = useCallback(() => onDelete(skill), [onDelete, skill]);
+  const prog = levelProgress(skill.xp);
+  const graduated = skill.status === "graduated";
+  const pct = Math.round(approvalRate(skill) * 100);
   return (
     <View style={styles.card}>
       <View style={styles.cardHead}>
@@ -63,10 +74,31 @@ function SkillCard({
         <Text style={styles.cardName} numberOfLines={1}>
           {skill.name}
         </Text>
+        <View style={graduated ? styles.badgeGrad : styles.badgeTrain}>
+          <Text style={graduated ? styles.badgeGradText : styles.badgeTrainText}>
+            {graduated ? "GRADUATED" : "TRAINING"}
+          </Text>
+        </View>
       </View>
-      <Text style={styles.cardDesc} numberOfLines={3}>
+      <Text style={styles.cardDesc} numberOfLines={2}>
         {skill.description || "No description"}
       </Text>
+
+      <View style={styles.levelRow}>
+        <Text style={styles.levelLabel}>
+          Lv {prog.level} · {prog.tier}
+        </Text>
+        <Text style={styles.xpText}>
+          {prog.atMax ? "MAX" : `${prog.inLevel}/${prog.forLevel} XP`}
+        </Text>
+      </View>
+      <View style={styles.xpTrack}>
+        <View style={[styles.xpFill, { width: `${(prog.inLevel / prog.forLevel) * 100}%` }]} />
+      </View>
+      <Text style={styles.statsLine}>
+        {skill.runs} runs · {pct}% approved · {skill.examples.length} examples
+      </Text>
+
       {skill.tags.length > 0 ? (
         <View style={styles.tags}>
           {skill.tags.slice(0, 4).map((tag) => (
@@ -80,6 +112,10 @@ function SkillCard({
         <Pressable style={styles.usebtn} onPress={handleUse}>
           <ThemedPlay size={14} uniProps={accentFgColor} />
           <Text style={styles.usebtnText}>Use</Text>
+        </Pressable>
+        <Pressable style={styles.trainBtn} onPress={handleTrain}>
+          <ThemedDumbbell size={14} uniProps={accentColor} />
+          <Text style={styles.trainBtnText}>Train</Text>
         </Pressable>
         <Pressable style={styles.iconBtn} onPress={handleEdit} accessibilityLabel="Edit skill">
           <ThemedPencil size={15} uniProps={mutedColor} />
@@ -113,6 +149,17 @@ export function SkillsScreen() {
 
   const [edit, setEdit] = useState<EditState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<SkillFilter>("all");
+  const [trainingId, setTrainingId] = useState<string | null>(null);
+  const trainingSkill = useMemo(
+    () => (trainingId ? (skills.find((s) => s.id === trainingId) ?? null) : null),
+    [trainingId, skills],
+  );
+  const filteredSkills = useMemo(
+    () => (filter === "all" ? skills : skills.filter((s) => s.status === filter)),
+    [filter, skills],
+  );
+  const handleTrain = useCallback((skill: Skill) => setTrainingId(skill.id), []);
 
   const contentContainerStyle = useMemo(
     () => [styles.content, isCompact ? { paddingTop: insets.top } : null],
@@ -201,27 +248,54 @@ export function SkillsScreen() {
           </Pressable>
         </View>
         <Text style={styles.hint}>
-          Train agents into reusable assistants. Use a skill to spin up an agent pre-loaded with its
-          instructions — your expert on tap.
+          Train your agents into reusable assistants. Teach a skill by example, watch it level up,
+          then invoke it anytime — your personal expert on tap.
         </Text>
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
+        <View style={styles.filterRow}>
+          {(["all", "training", "graduated"] as const).map((f) => (
+            <Pressable
+              key={f}
+              style={filter === f ? [styles.filterTab, styles.filterTabActive] : styles.filterTab}
+              onPress={() => setFilter(f)}
+            >
+              <Text style={filter === f ? styles.filterTabTextActive : styles.filterTabText}>
+                {f === "all" ? "All" : f === "training" ? "In training" : "Graduated"}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+
         <View style={styles.grid}>
-          {skills.map((skill) => (
+          {filteredSkills.map((skill) => (
             <View key={skill.id} style={isCompact ? styles.cellFull : styles.cellHalf}>
               <SkillCard
                 skill={skill}
                 onUse={handleUse}
+                onTrain={handleTrain}
                 onEdit={handleEdit}
                 onDelete={handleDelete}
               />
             </View>
           ))}
-          {skills.length === 0 ? (
-            <Text style={styles.empty}>No skills yet. Create your first assistant.</Text>
+          {filteredSkills.length === 0 ? (
+            <Text style={styles.empty}>
+              {filter === "all"
+                ? "No skills yet. Create your first assistant."
+                : `No ${filter === "training" ? "in-training" : "graduated"} skills yet.`}
+            </Text>
           ) : null}
         </View>
       </ScrollView>
+
+      {trainingSkill ? (
+        <SkillTrainingView
+          skill={trainingSkill}
+          onClose={() => setTrainingId(null)}
+          onUse={handleUse}
+        />
+      ) : null}
 
       {edit ? (
         <View style={styles.overlay}>
@@ -381,6 +455,76 @@ const styles = StyleSheet.create((theme: Theme) => ({
     color: theme.colors.foregroundMuted,
     lineHeight: 18,
     minHeight: 36,
+  },
+  badgeTrain: {
+    borderRadius: theme.borderRadius.sm,
+    paddingHorizontal: theme.spacing[1.5],
+    paddingVertical: 1,
+    backgroundColor: theme.colors.surface2,
+  },
+  badgeTrainText: {
+    fontSize: 9,
+    fontWeight: theme.fontWeight.bold,
+    letterSpacing: 0.5,
+    color: theme.colors.foregroundMuted,
+  },
+  badgeGrad: {
+    borderRadius: theme.borderRadius.sm,
+    paddingHorizontal: theme.spacing[1.5],
+    paddingVertical: 1,
+    backgroundColor: theme.colors.accent,
+  },
+  badgeGradText: {
+    fontSize: 9,
+    fontWeight: theme.fontWeight.bold,
+    letterSpacing: 0.5,
+    color: theme.colors.accentForeground,
+  },
+  levelRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  levelLabel: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.foreground,
+  },
+  xpText: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundExtraMuted },
+  xpTrack: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: theme.colors.surface2,
+    overflow: "hidden",
+  },
+  xpFill: { height: 6, borderRadius: 3, backgroundColor: theme.colors.accent },
+  statsLine: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
+  trainBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: theme.spacing[1.5],
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.accent,
+    borderRadius: theme.borderRadius.md,
+    paddingVertical: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
+  },
+  trainBtnText: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.accent,
+  },
+  filterRow: { flexDirection: "row", gap: theme.spacing[2] },
+  filterTab: {
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[1.5],
+    borderRadius: theme.borderRadius.md,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+  },
+  filterTabActive: { backgroundColor: theme.colors.accent, borderColor: theme.colors.accent },
+  filterTabText: { fontSize: theme.fontSize.sm, color: theme.colors.foregroundMuted },
+  filterTabTextActive: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.accentForeground,
   },
   tags: { flexDirection: "row", flexWrap: "wrap", gap: theme.spacing[1.5] },
   tag: {
