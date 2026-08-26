@@ -238,7 +238,7 @@ export function SkillsScreen() {
                   <Text style={styles.label}>Icon</Text>
                   <AdaptiveTextInput
                     style={styles.iconInput}
-                    value={edit.icon}
+                    initialValue={edit.icon}
                     onChangeText={setIcon}
                     resetKey={`icon-${edit.id ?? "new"}`}
                   />
@@ -247,7 +247,7 @@ export function SkillsScreen() {
                   <Text style={styles.label}>Name</Text>
                   <AdaptiveTextInput
                     style={styles.input}
-                    value={edit.name}
+                    initialValue={edit.name}
                     onChangeText={setName}
                     placeholder="e.g. Release Captain"
                     resetKey={`name-${edit.id ?? "new"}`}
@@ -257,7 +257,7 @@ export function SkillsScreen() {
               <Text style={styles.label}>Description</Text>
               <AdaptiveTextInput
                 style={styles.input}
-                value={edit.description}
+                initialValue={edit.description}
                 onChangeText={setDescription}
                 placeholder="What this assistant does"
                 resetKey={`desc-${edit.id ?? "new"}`}
@@ -265,7 +265,7 @@ export function SkillsScreen() {
               <Text style={styles.label}>Instructions (the skill’s system prompt)</Text>
               <AdaptiveTextInput
                 style={styles.textarea}
-                value={edit.instructions}
+                initialValue={edit.instructions}
                 onChangeText={setInstructions}
                 placeholder="How the agent should behave when this skill is used…"
                 multiline
@@ -274,7 +274,7 @@ export function SkillsScreen() {
               <Text style={styles.label}>Tags (comma-separated)</Text>
               <AdaptiveTextInput
                 style={styles.input}
-                value={edit.tags}
+                initialValue={edit.tags}
                 onChangeText={setTags}
                 placeholder="release, git, ci"
                 resetKey={`tags-${edit.id ?? "new"}`}

@@ -29,9 +29,17 @@ with a few deliberate boundaries:
   permission controls in the composer.
 - **Agent orchestration** — a Supervisor/Lead/Peer runtime; agents can `list_agents`,
   `send_agent_prompt`, and `create_agent` to coordinate work across the daemon.
-- **Kubernetes cluster management** *(new)* — a k8s‑Lens‑style cockpit built into the app.
-- **Per‑cluster AI chat** *(new)* — ask an agent about any resource or its logs; the agent uses
+- **Kubernetes cluster management** — a k8s‑Lens‑style cockpit built into the app.
+- **Per‑cluster AI chat** — ask an agent about any resource or its logs; the agent uses
   real `kubectl` tools scoped to the exact cluster you connected.
+- **Skills** *(new)* — save reusable “trained” assistants (icon, instructions, tags) and spin up
+  an agent pre‑loaded with a skill in one tap.
+- **Agentic browser** *(new)* — the agent drives a real built‑in browser (open tabs, click,
+  evaluate) with optional **stealth** (fingerprint/webdriver normalisation) and a **session vault**
+  for your own logins.
+- **Usage & cost insights** *(new)* — a dashboard of tokens, spend, and per‑model / per‑agent
+  breakdowns.
+- **Multi‑language UI** *(new)* — switch the app language from Settings.
 
 ---
 
@@ -74,6 +82,38 @@ Open **Clusters** from the sidebar to manage Kubernetes from inside JAgentDesk:
   than one project.
 
 For a full walkthrough see **[docs/kubernetes.md](docs/kubernetes.md)**.
+
+### Skills — train reusable assistants
+
+Open **Skills** from the sidebar to turn a good setup into a one‑tap expert:
+
+- **Create / edit / delete** a skill with an icon, name, description, an instruction prompt, and
+  comma‑separated tags. Editing pre‑fills every field so you tweak instead of retyping.
+- **Use** a skill to start an agent pre‑loaded with its instructions — your expert on tap.
+- Skills live on the daemon, so they’re shared across desktop **and** mobile.
+
+### Agentic browser (desktop)
+
+The agent drives a real Chromium `<webview>` over CDP — no external Playwright to wire up:
+
+- **Cockpit UI** matching the design mock: a live step timeline of `browser_*` actions, an
+  “agent driving” badge, and element highlights when the agent clicks.
+- **Stealth** *(opt‑in)* normalises the classic automation tells (`navigator.webdriver`,
+  languages/plugins, WebGL vendor, hardware) before any page script runs — for legitimate
+  automation of **your own** accounts.
+- **Session vault** *(opt‑in)* captures/restores a domain’s logged‑in cookies, encrypted at rest
+  with the OS keychain (`safeStorage`).
+
+### Usage & cost insights
+
+Open **Usage & Cost** for a dashboard of token usage and spend — totals plus per‑model and
+per‑agent breakdowns. Empty accounts show the full layout with zeroed metrics rather than a blank
+“no data” page.
+
+### Multi‑language UI
+
+The app UI can be switched between languages from **Settings**; strings are fully externalised so
+new locales drop in without code changes.
 
 ---
 
