@@ -33,10 +33,12 @@ const STEALTH_SOURCE = `(() => {
     if (!window.chrome) { window.chrome = { runtime: {} }; }
   } catch (e) {}
   try {
-    // 3. Non-empty languages / plugins.
-    Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'], configurable: true });
+    // 3. Non-empty languages / plugins. Define on the prototype (the instance
+    // property can be non-configurable, which silently defeats an instance-level
+    // defineProperty).
+    Object.defineProperty(Navigator.prototype, 'languages', { get: () => ['en-US', 'en'], configurable: true });
     const fakePlugins = [{ name: 'Chromium PDF Plugin' }, { name: 'Chrome PDF Viewer' }, { name: 'Native Client' }];
-    Object.defineProperty(navigator, 'plugins', { get: () => fakePlugins, configurable: true });
+    Object.defineProperty(Navigator.prototype, 'plugins', { get: () => fakePlugins, configurable: true });
   } catch (e) {}
   try {
     // 4. permissions.query for notifications (headless returns 'denied' oddly).
