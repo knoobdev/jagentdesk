@@ -95,6 +95,7 @@ export function ClusterResourceDetail({
   const [logs, setLogs] = useState<string | null>(null);
   const [logLoading, setLogLoading] = useState(false);
   const [logError, setLogError] = useState<string | null>(null);
+  const [logTimestamps, setLogTimestamps] = useState(false);
   const [containers, setContainers] = useState<string[]>([]);
   const [selectedContainer, setSelectedContainer] = useState<string | null>(null);
 
@@ -120,6 +121,10 @@ export function ClusterResourceDetail({
   const canRestart = RESTARTABLE_KINDS.has(kind);
   const canRollback = kind === "Deployment";
   const isPod = kind.toLowerCase() === "pod";
+  const isService = kind.toLowerCase() === "service";
+  // Port-forward works for pods directly and for services (resolved to a
+  // backing pod on the daemon, like `kubectl port-forward service/x`).
+  const canPortForward = isPod || isService;
   const isSecret = kind.toLowerCase() === "secret";
   const isNode = kind.toLowerCase() === "node";
   const isCronJob = kind.toLowerCase() === "cronjob";
@@ -175,6 +180,7 @@ export function ClusterResourceDetail({
           namespace,
           pod: name,
           ...(selectedContainer ? { container: selectedContainer } : {}),
+          timestamps: logTimestamps,
         },
         (chunk: string) => {
           if (cancelled) return;
@@ -210,7 +216,7 @@ export function ClusterResourceDetail({
         followUnsubscribeRef.current = null;
       }
     };
-  }, [followEnabled, showLogs, client, clusterId, namespace, name, selectedContainer]);
+  }, [followEnabled, showLogs, client, clusterId, namespace, name, selectedContainer, logTimestamps]);
 
   // Auto-scroll when follow is on and new logs arrive
   useEffect(() => {
@@ -238,6 +244,8 @@ export function ClusterResourceDetail({
           namespace,
           pod: name,
           ...(container ? { container } : {}),
+          timestamps: logTimestamps,
+          tailLines: 1000,
         });
         if (res.error) {
           setLogError(res.error);
@@ -250,7 +258,7 @@ export function ClusterResourceDetail({
         setLogLoading(false);
       }
     },
-    [client, clusterId, namespace, name],
+    [client, clusterId, namespace, name, logTimestamps],
   );
 
   const handleToggleLogs = useCallback(() => {
@@ -283,6 +291,38 @@ export function ClusterResourceDetail({
     setLogError(null);
   }, []);
 
+  const handleToggleTimestamps = useCallback(() => {
+    setLogTimestamps((prev) => !prev);
+  }, []);
+
+  // Re-fetch a one-shot log view when the timestamps toggle flips so existing
+  // lines gain/lose the prefix. A live follow re-subscribes via its own effect.
+  const firstTsRender = useRef(true);
+  useEffect(() => {
+    if (firstTsRender.current) {
+      firstTsRender.current = false;
+      return;
+    }
+    if (showLogs && !followEnabled) {
+      void fetchLogs(selectedContainer);
+    }
+    // Only re-run when the timestamp preference changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [logTimestamps]);
+
+  const handleDownloadLogs = useCallback(() => {
+    if (!logs || typeof document === "undefined") return;
+    const blob = new Blob([logs], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${name}${selectedContainer ? `-${selectedContainer}` : ""}.log`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }, [logs, name, selectedContainer]);
+
   const handlePortForward = useCallback(() => {
     if (!client || !namespace || !pfPodPort) return;
     const podPort = parseInt(pfPodPort, 10);
@@ -292,9 +332,17 @@ export function ClusterResourceDetail({
     }
     setMessage(null);
     void client
-      .clusterPortForwardStart({ id: clusterId, namespace, pod: name, podPort }, () => {
-        setPfState((prev) => (prev ? { ...prev, bytes: prev.bytes + 1 } : null));
-      })
+      .clusterPortForwardStart(
+        {
+          id: clusterId,
+          namespace,
+          ...(isService ? { service: name } : { pod: name }),
+          podPort,
+        },
+        () => {
+          setPfState((prev) => (prev ? { ...prev, bytes: prev.bytes + 1 } : null));
+        },
+      )
       .then(({ pfId, close }: { pfId: string; close: () => Promise<void> }) => {
         setPfState({ pfId, podPort, bytes: 0, close });
         setPfShowInput(false);
@@ -303,7 +351,7 @@ export function ClusterResourceDetail({
       .catch((e: unknown) => {
         setMessage(e instanceof Error ? e.message : "Port-forward failed");
       });
-  }, [client, clusterId, namespace, name, pfPodPort]);
+  }, [client, clusterId, namespace, name, pfPodPort, isService]);
 
   const handleStopPortForward = useCallback(() => {
     const current = pfState;
@@ -707,14 +755,40 @@ export function ClusterResourceDetail({
         </View>
       );
     }
+    const lines = logs.split("\n");
     return (
       <ScrollView ref={logsScrollRef} style={styles.logsScroll} nestedScrollEnabled>
-        <Text style={styles.logsText} selectable>
-          {logs}
-        </Text>
+        <View style={styles.logsInner}>
+          {lines.map((line, i) => {
+            const lower = line.toLowerCase();
+            const sev = /\b(error|fatal|panic|exception|failed|fail)\b/.test(lower)
+              ? styles.logError
+              : /\b(warn|warning)\b/.test(lower)
+                ? styles.logWarn
+                : /\b(debug|trace)\b/.test(lower)
+                  ? styles.logDebug
+                  : styles.logInfo;
+            let ts: string | null = null;
+            let rest = line;
+            if (logTimestamps && /^\d{4}-\d{2}-\d{2}T/.test(line)) {
+              const sp = line.indexOf(" ");
+              if (sp > 0) {
+                ts = line.slice(0, sp);
+                rest = line.slice(sp + 1);
+              }
+            }
+            return (
+              <Text key={i} style={styles.logLineBase} selectable>
+                <Text style={styles.logLineNum}>{String(i + 1).padStart(4, " ")}  </Text>
+                {ts ? <Text style={styles.logTs}>{ts} </Text> : null}
+                <Text style={sev}>{rest}</Text>
+              </Text>
+            );
+          })}
+        </View>
       </ScrollView>
     );
-  }, [logLoading, logError, logs]);
+  }, [logLoading, logError, logs, logTimestamps]);
 
   const deleteButtonLabel = useMemo(() => {
     if (deleting) return "Deleting...";
@@ -758,6 +832,7 @@ export function ClusterResourceDetail({
         isNode={isNode}
         isCronJob={isCronJob}
         isWorkload={isWorkload}
+        canPortForward={canPortForward}
         canRestart={canRestart}
         canRollback={canRollback}
         showLogs={showLogs}
@@ -796,6 +871,10 @@ export function ClusterResourceDetail({
         handleSelectContainer={handleSelectContainer}
         followEnabled={followEnabled}
         handleToggleFollow={handleToggleFollow}
+        logTimestamps={logTimestamps}
+        handleToggleTimestamps={handleToggleTimestamps}
+        handleDownloadLogs={handleDownloadLogs}
+        canDownloadLogs={Boolean(logs)}
         handleToggleShell={handleToggleShell}
         pfShowInput={pfShowInput}
         pfPodPort={pfPodPort}
@@ -815,6 +894,7 @@ interface ResourceDetailBodyProps {
   isNode: boolean;
   isCronJob: boolean;
   isWorkload: boolean;
+  canPortForward: boolean;
   canRestart: boolean;
   canRollback: boolean;
   showLogs: boolean;
@@ -853,6 +933,10 @@ interface ResourceDetailBodyProps {
   handleSelectContainer: (container: string) => void;
   followEnabled: boolean;
   handleToggleFollow: () => void;
+  logTimestamps: boolean;
+  handleToggleTimestamps: () => void;
+  handleDownloadLogs: () => void;
+  canDownloadLogs: boolean;
   handleToggleShell: () => void;
   pfShowInput: boolean;
   pfPodPort: string;
@@ -865,6 +949,7 @@ interface ResourceDetailBodyProps {
 
 interface ResourceDetailActionBarProps {
   isPod: boolean;
+  canPortForward: boolean;
   isNode: boolean;
   isCronJob: boolean;
   canRestart: boolean;
@@ -898,6 +983,7 @@ interface ResourceDetailActionBarProps {
 
 function ResourceDetailActionBar({
   isPod,
+  canPortForward,
   isNode,
   isCronJob,
   canRestart,
@@ -953,7 +1039,7 @@ function ResourceDetailActionBar({
           </Pressable>
         ) : null}
         <PortForwardActionButton
-          isPod={isPod}
+          isPod={canPortForward}
           pfState={pfState}
           onStop={handleStopPortForward}
           onStart={handleStartPf}
@@ -1163,6 +1249,7 @@ function ResourceDetailBody({
   isNode,
   isCronJob,
   isWorkload,
+  canPortForward,
   canRestart,
   canRollback,
   showLogs,
@@ -1201,6 +1288,10 @@ function ResourceDetailBody({
   handleSelectContainer,
   followEnabled,
   handleToggleFollow,
+  logTimestamps,
+  handleToggleTimestamps,
+  handleDownloadLogs,
+  canDownloadLogs,
   handleToggleShell,
   pfShowInput,
   pfPodPort,
@@ -1216,6 +1307,7 @@ function ResourceDetailBody({
     <>
       <ResourceDetailActionBar
         isPod={isPod}
+        canPortForward={canPortForward}
         isNode={isNode}
         isCronJob={isCronJob}
         canRestart={canRestart}
@@ -1269,7 +1361,7 @@ function ResourceDetailBody({
       ) : null}
 
       <PortForwardInputRow
-        isPod={isPod}
+        isPod={canPortForward}
         pfShowInput={pfShowInput}
         pfState={pfState}
         pfPodPort={pfPodPort}
@@ -1279,7 +1371,7 @@ function ResourceDetailBody({
         onCancel={handleCancelPfInput}
       />
 
-      <PortForwardActiveStatus isPod={isPod} pfState={pfState} />
+      <PortForwardActiveStatus isPod={canPortForward} pfState={pfState} />
 
       {showLogs ? (
         <View style={styles.logsContainer}>
@@ -1329,6 +1421,23 @@ function ResourceDetailBody({
                   <Text style={styles.refreshButtonText}>
                     {logLoading ? "Loading..." : "Refresh"}
                   </Text>
+                </Pressable>
+              ) : null}
+              <Pressable
+                style={[logTimestamps ? styles.followButtonActive : styles.followButton]}
+                onPress={handleToggleTimestamps}
+              >
+                <Text
+                  style={[
+                    logTimestamps ? styles.followButtonTextActive : styles.followButtonText,
+                  ]}
+                >
+                  Timestamps
+                </Text>
+              </Pressable>
+              {canDownloadLogs ? (
+                <Pressable style={styles.refreshButton} onPress={handleDownloadLogs}>
+                  <Text style={styles.refreshButtonText}>Download</Text>
                 </Pressable>
               ) : null}
             </View>
@@ -1621,6 +1730,18 @@ const styles = StyleSheet.create((theme: Theme) => ({
     lineHeight: 20,
     flexWrap: "wrap",
   },
+  logsInner: { gap: 0 },
+  logLineBase: {
+    fontFamily: theme.fontFamily.mono,
+    fontSize: theme.fontSize.code,
+    lineHeight: 18,
+  },
+  logLineNum: { color: theme.colors.foregroundExtraMuted },
+  logTs: { color: theme.colors.palette.blue[400] },
+  logInfo: { color: theme.colors.foreground },
+  logError: { color: theme.colors.palette.red[500] },
+  logWarn: { color: theme.colors.palette.amber[500] },
+  logDebug: { color: theme.colors.foregroundMuted },
   containerSelector: {
     flexDirection: "row",
     alignItems: "center",

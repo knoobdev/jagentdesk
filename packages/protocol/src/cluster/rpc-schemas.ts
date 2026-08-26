@@ -85,6 +85,10 @@ export const ClusterLogsRequestSchema = z.object({
   namespace: z.string(),
   pod: z.string(),
   container: z.string().optional(),
+  // Prefix each line with an RFC3339 timestamp (kubectl --timestamps).
+  timestamps: z.boolean().optional(),
+  // How many trailing lines to fetch (default 100); higher for a full download.
+  tailLines: z.number().int().positive().optional(),
 });
 
 export const ClusterWriteRequestSchema = z.object({
@@ -357,6 +361,7 @@ export const ClusterLogsSubscribeRequestSchema = z.object({
   namespace: z.string(),
   pod: z.string(),
   container: z.string().optional(),
+  timestamps: z.boolean().optional(),
 });
 
 export const ClusterLogsSubscribeResponseSchema = z.object({
@@ -572,7 +577,10 @@ export const ClusterPfStartRequestSchema = z.object({
   id: z.string(),
   pfId: z.string(),
   namespace: z.string(),
-  pod: z.string(),
+  // Target is either a pod (direct) or a service (resolved to a backing pod
+  // on the daemon). Exactly one is set.
+  pod: z.string().optional(),
+  service: z.string().optional(),
   podPort: z.number().int(),
 });
 

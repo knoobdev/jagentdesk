@@ -2252,17 +2252,6 @@ export function NewWorkspaceScreen({
         <ReanimatedAnimated.View style={centeredStyle}>
           <View style={styles.composerTitleContainer}>
             <Text style={styles.composerTitle}>{t("newWorkspace.title")}</Text>
-            <Button
-              variant="outline"
-              size="sm"
-              leftIcon={GitBranch}
-              onPress={handleOpenOrchestration}
-              disabled={isPending || !selectedSourceDirectory}
-              testID="new-workspace-open-orchestration"
-              style={styles.orchestrationButton}
-            >
-              Open Orchestration
-            </Button>
           </View>
           {formStack}
           <Composer

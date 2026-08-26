@@ -157,14 +157,20 @@ export class KubeClient {
     return dumpYaml(obj);
   }
 
-  async getPodLogs(namespace: string, pod: string, container?: string): Promise<string> {
+  async getPodLogs(
+    namespace: string,
+    pod: string,
+    container?: string,
+    options?: { timestamps?: boolean; tailLines?: number },
+  ): Promise<string> {
     this.ensureConnected();
     // Use CoreV1Api.readNamespacedPodLog which returns the log string directly
     const logStr = await this.coreApi!.readNamespacedPodLog({
       name: pod,
       namespace,
       container,
-      tailLines: 100,
+      tailLines: options?.tailLines ?? 100,
+      timestamps: options?.timestamps ?? false,
     });
     return logStr;
   }
@@ -174,6 +180,7 @@ export class KubeClient {
     pod: string,
     container: string | undefined,
     onChunk: (text: string) => void,
+    options?: { timestamps?: boolean },
   ): Promise<() => void> {
     this.ensureConnected();
     const stream = new PassThrough();
@@ -182,6 +189,7 @@ export class KubeClient {
       follow: true,
       tailLines: 100,
       pretty: false,
+      timestamps: options?.timestamps ?? false,
     });
     stream.on("data", (d: Buffer) => onChunk(d.toString()));
     return () => {
@@ -244,6 +252,36 @@ export class KubeClient {
         stderrStream.destroy();
       },
     };
+  }
+
+  // Resolve a Service to a concrete backing pod + target port so port-forward
+  // (which the k8s client only supports for pods) can target a Service like
+  // kubectl port-forward service/x does.
+  async resolveServiceToPod(
+    namespace: string,
+    service: string,
+    servicePort: number,
+  ): Promise<{ pod: string; targetPort: number }> {
+    this.ensureConnected();
+    const svc = await this.coreApi!.readNamespacedService({ name: service, namespace });
+    const selector = svc.spec?.selector;
+    if (!selector || Object.keys(selector).length === 0) {
+      throw new Error(`Service ${service} has no pod selector to port-forward to`);
+    }
+    const portSpec =
+      svc.spec?.ports?.find((p) => p.port === servicePort) ?? svc.spec?.ports?.[0];
+    const targetPort =
+      typeof portSpec?.targetPort === "number" ? portSpec.targetPort : servicePort;
+    const labelSelector = Object.entries(selector)
+      .map(([k, v]) => `${k}=${v}`)
+      .join(",");
+    const pods = await this.coreApi!.listNamespacedPod({ namespace, labelSelector });
+    const running = pods.items.find((p) => p.status?.phase === "Running") ?? pods.items[0];
+    const podName = running?.metadata?.name;
+    if (!podName) {
+      throw new Error(`No pods found backing service ${service}`);
+    }
+    return { pod: podName, targetPort };
   }
 
   async startPortForward(

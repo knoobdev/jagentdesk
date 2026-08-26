@@ -5675,6 +5675,8 @@ export class DaemonClient {
     namespace: string;
     pod: string;
     container?: string;
+    timestamps?: boolean;
+    tailLines?: number;
   }): Promise<ClusterLogsPayload> {
     return this.sendCorrelatedSessionRequest({
       requestId: options.requestId,
@@ -5684,6 +5686,8 @@ export class DaemonClient {
         namespace: options.namespace,
         pod: options.pod,
         ...(options.container ? { container: options.container } : {}),
+        ...(options.timestamps ? { timestamps: true } : {}),
+        ...(options.tailLines ? { tailLines: options.tailLines } : {}),
       },
       responseType: "cluster/logs/response",
     });
@@ -5695,6 +5699,7 @@ export class DaemonClient {
       namespace: string;
       pod: string;
       container?: string;
+      timestamps?: boolean;
     },
     onChunk: (chunk: string) => void,
   ): Promise<{ subscriptionId: string; unsubscribe: () => Promise<void> }> {
@@ -5709,6 +5714,7 @@ export class DaemonClient {
           namespace: options.namespace,
           pod: options.pod,
           ...(options.container ? { container: options.container } : {}),
+          ...(options.timestamps ? { timestamps: true } : {}),
         },
         responseType: "cluster/logs/subscribe/response",
       });
@@ -5784,7 +5790,8 @@ export class DaemonClient {
     options: {
       id: string;
       namespace: string;
-      pod: string;
+      pod?: string;
+      service?: string;
       podPort: number;
     },
     onData: (data: string) => void,
@@ -5802,7 +5809,8 @@ export class DaemonClient {
           id: options.id,
           pfId,
           namespace: options.namespace,
-          pod: options.pod,
+          ...(options.pod ? { pod: options.pod } : {}),
+          ...(options.service ? { service: options.service } : {}),
           podPort: options.podPort,
         } as unknown as SessionInboundMessage,
         // oxlint-disable-next-line @typescript-eslint/no-explicit-any

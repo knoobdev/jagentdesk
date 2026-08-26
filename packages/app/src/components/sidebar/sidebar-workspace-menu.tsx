@@ -189,16 +189,6 @@ function SidebarWorkspaceMenuItems({
           {isPinned ? t("sidebar.workspace.actions.unpin") : t("sidebar.workspace.actions.pin")}
         </WorkspaceMenuItem>
       ) : null}
-      {onOpenOrchestration ? (
-        <WorkspaceMenuItem
-          surface={surface}
-          testID={`sidebar-workspace-menu-open-orchestration-${workspaceKey}`}
-          leading={orchestrationLeadingIcon}
-          onSelect={onOpenOrchestration}
-        >
-          Open Orchestration
-        </WorkspaceMenuItem>
-      ) : null}
       <OpenInFileManagerMenuItem
         surface={surface}
         path={openInFileManagerPath}

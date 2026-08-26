@@ -249,7 +249,10 @@ export class ClusterSession {
       if (!client) {
         throw new Error(`cluster not connected: ${request.id}`);
       }
-      const logs = await client.getPodLogs(request.namespace, request.pod, request.container);
+      const logs = await client.getPodLogs(request.namespace, request.pod, request.container, {
+        timestamps: request.timestamps,
+        tailLines: request.tailLines,
+      });
       this.host.emit({
         type: "cluster/logs/response",
         payload: {
@@ -282,6 +285,7 @@ export class ClusterSession {
             chunk,
           } as SessionOutboundMessage);
         },
+        { timestamps: request.timestamps },
       );
       this.logSubscriptions.set(request.subscriptionId, stop);
       this.host.emit({
@@ -682,10 +686,24 @@ export class ClusterSession {
       if (!client) {
         throw new Error(`cluster not connected: ${request.id}`);
       }
+      let targetPod = request.pod as string | undefined;
+      let targetPort = request.podPort as number;
+      if (request.service) {
+        const resolved = await client.resolveServiceToPod(
+          request.namespace as string,
+          request.service as string,
+          request.podPort as number,
+        );
+        targetPod = resolved.pod;
+        targetPort = resolved.targetPort;
+      }
+      if (!targetPod) {
+        throw new Error("port-forward requires a pod or service target");
+      }
       const { write, close } = await client.startPortForward(
         request.namespace as string,
-        request.pod as string,
-        request.podPort as number,
+        targetPod,
+        targetPort,
         (chunk: Buffer) => {
           this.host.emit({
             type: "cluster/pf/data",
