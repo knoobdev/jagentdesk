@@ -418,6 +418,9 @@ function getFallbackTabOptionDescription(
   if (tab.target.kind === "working_diff") {
     return labels.changes;
   }
+  if (tab.target.kind === "plugin") {
+    return tab.target.pluginId;
+  }
   return tab.target.path;
 }
 
