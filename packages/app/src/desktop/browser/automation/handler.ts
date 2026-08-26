@@ -407,7 +407,11 @@ async function waitForBrowserRegistration(params: {
   timeoutMs?: number;
   pollIntervalMs?: number;
 }): Promise<boolean> {
-  const deadline = Date.now() + (params.timeoutMs ?? 5_000);
+  // The first tab after app start can take several seconds to attach + become
+  // dom-ready + register (cold browser-host init), so give registration a
+  // generous ceiling — it resolves as soon as the tab appears, this is only the
+  // worst-case wait before we tell the agent to retry.
+  const deadline = Date.now() + (params.timeoutMs ?? 12_000);
   while (Date.now() < deadline) {
     const payload = await params.executeAutomationCommand({
       type: "browser.automation.execute.request",

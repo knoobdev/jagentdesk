@@ -178,7 +178,14 @@ export function prepareBrowserWebview(
   webview.setAttribute("spellcheck", "false");
   webview.setAttribute("autosize", "on");
   if (input.initialUrl) {
-    (webview as BrowserWebviewElement).src = input.initialUrl;
+    // Use the `src` ATTRIBUTE, not the `.src` property. The property setter
+    // navigates the guest and requires the <webview> to already be attached +
+    // dom-ready; on a freshly-created, still-detached element it intermittently
+    // throws "The WebView must be attached to the DOM…", which aborts this
+    // function before registerBrowserWhenAttached wires up — so the tab never
+    // registers and browser_new_tab times out. The attribute is safe pre-attach
+    // and navigates once the guest attaches.
+    webview.setAttribute("src", input.initialUrl);
   }
   registerBrowserWhenAttached(webview as BrowserWebviewElement, input, browser);
 }
