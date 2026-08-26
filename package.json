@@ -27,6 +27,7 @@
     "packages/highlight",
     "packages/protocol",
     "packages/client",
+    "packages/plugin",
     "packages/server",
     "packages/app",
     "packages/website",
