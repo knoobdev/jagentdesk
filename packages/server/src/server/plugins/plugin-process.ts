@@ -156,7 +156,8 @@ process.on("message", (message: PluginProcessRequest) => {
     })
     .then((output) => registered.contract.output.parseAsync(output))
     .then(
-      (output) => send({ type: "result", requestId: message.requestId, output }),
-      (error) => send({ type: "error", requestId: message.requestId, error: describeError(error) }),
+      (output: unknown) => send({ type: "result", requestId: message.requestId, output }),
+      (error: unknown) =>
+        send({ type: "error", requestId: message.requestId, error: describeError(error) }),
     );
 });
