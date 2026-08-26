@@ -3,6 +3,7 @@ import { FlatList, Pressable, Text, TextInput, View, type ListRenderItem } from 
 import { StyleSheet } from "react-native-unistyles";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { ClusterHelmView } from "@/components/cluster-helm-view";
+import { ClusterOverviewDashboard } from "@/components/cluster-overview-dashboard";
 import { ClusterStatusDot, PodStatusDot } from "@/components/cluster-dot";
 import { useClusterNavStore } from "@/stores/cluster-nav-store";
 import { useClusterViewStore } from "@/stores/cluster-view-store";
@@ -171,6 +172,7 @@ export function ClusterResourceBrowser({
   const client = useHostRuntimeClient(serverId);
   const selectedKind = useClusterNavStore((s) => s.selectedKind);
   const showingHelm = useClusterNavStore((s) => s.showingHelm);
+  const showingOverview = useClusterNavStore((s) => s.showingOverview);
   const selectedNamespace = useClusterNavStore((s) => s.selectedNamespace);
   const isCompact = useIsCompactFormFactor();
 
@@ -357,7 +359,9 @@ export function ClusterResourceBrowser({
   );
 
   let content: ReactElement;
-  if (showingHelm) {
+  if (showingOverview) {
+    content = <ClusterOverviewDashboard serverId={serverId} clusterId={clusterId} />;
+  } else if (showingHelm) {
     content = <ClusterHelmView serverId={serverId} clusterId={clusterId} />;
   } else if (!selectedKind) {
     content = (

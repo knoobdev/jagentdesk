@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import { ChevronLeft, Boxes } from "lucide-react-native";
+import { ChevronLeft, Boxes, Gauge } from "lucide-react-native";
 import { router } from "expo-router";
 import type { ClusterInfo } from "@jagentdesk/protocol/cluster/rpc-schemas";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
@@ -17,6 +17,7 @@ import type { Theme } from "@/styles/theme";
 
 const ThemedChevronLeft = withUnistyles(ChevronLeft);
 const ThemedBoxes = withUnistyles(Boxes);
+const ThemedGauge = withUnistyles(Gauge);
 const mutedColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 
 interface KindInfo {
@@ -98,6 +99,8 @@ export function SidebarClusterNav({
   const selectedNamespace = useClusterNavStore((s) => s.selectedNamespace);
   const selectKind = useClusterNavStore((s) => s.selectKind);
   const selectHelm = useClusterNavStore((s) => s.selectHelm);
+  const showingOverview = useClusterNavStore((s) => s.showingOverview);
+  const selectOverview = useClusterNavStore((s) => s.selectOverview);
   const setNamespace = useClusterNavStore((s) => s.setNamespace);
   const ensureCluster = useClusterNavStore((s) => s.ensureCluster);
   const showList = useClusterViewStore((s) => s.setActive);
@@ -138,6 +141,11 @@ export function SidebarClusterNav({
     },
     [clusterId, selectKind, showList, isCompact, showMobileAgent],
   );
+  const handleSelectOverview = useCallback(() => {
+    selectOverview(clusterId);
+    showList(null);
+    if (isCompact) showMobileAgent();
+  }, [clusterId, selectOverview, showList, isCompact, showMobileAgent]);
   const handleSelectHelm = useCallback(() => {
     selectHelm(clusterId);
     showList(null);
@@ -171,6 +179,13 @@ export function SidebarClusterNav({
       </View>
 
       <ScrollView style={styles.nav} contentContainerStyle={styles.navContent}>
+        <Pressable
+          style={[styles.row, showingOverview && styles.rowActive]}
+          onPress={handleSelectOverview}
+        >
+          <ThemedGauge size={15} uniProps={mutedColor} />
+          <Text style={[styles.rowLabel, showingOverview && styles.rowLabelActive]}>Overview</Text>
+        </Pressable>
         {grouped.map((group) => (
           <NavGroup
             key={group.category}
