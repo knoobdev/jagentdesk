@@ -159,7 +159,9 @@ export interface JAgentDeskWorkspaceActions {
 
 type JAgentDeskAgentSessionConfig = CreateAgentRequestMessage["config"];
 type JAgentDeskAgentProvider = JAgentDeskAgentSessionConfig["provider"];
-type JAgentDeskAgentConfigOverrides = Partial<Omit<JAgentDeskAgentSessionConfig, "provider" | "cwd">>;
+type JAgentDeskAgentConfigOverrides = Partial<
+  Omit<JAgentDeskAgentSessionConfig, "provider" | "cwd">
+>;
 
 export interface JAgentDeskAgentCreateOptions extends JAgentDeskAgentConfigOverrides {
   config?: JAgentDeskAgentSessionConfig;
@@ -196,9 +198,15 @@ export interface JAgentDeskAgentSendOptions {
   attachments?: SendAgentMessageRequest["attachments"];
 }
 
-export type JAgentDeskAgentUpdate = Extract<SessionOutboundMessage, { type: "agent_update" }>["payload"];
+export type JAgentDeskAgentUpdate = Extract<
+  SessionOutboundMessage,
+  { type: "agent_update" }
+>["payload"];
 
-export type JAgentDeskAgentStream = Extract<SessionOutboundMessage, { type: "agent_stream" }>["payload"];
+export type JAgentDeskAgentStream = Extract<
+  SessionOutboundMessage,
+  { type: "agent_stream" }
+>["payload"];
 
 export type JAgentDeskAgentUpdateHandler = (update: JAgentDeskAgentUpdate) => void;
 
@@ -284,7 +292,10 @@ export interface JAgentDeskProviderActions {
   claude(input?: JAgentDeskProviderConfigInput): JAgentDeskProviderConfig;
   opencode(input?: JAgentDeskProviderConfigInput): JAgentDeskProviderConfig;
   copilot(input?: JAgentDeskProviderConfigInput): JAgentDeskProviderConfig;
-  config(provider: JAgentDeskAgentProvider, input?: JAgentDeskProviderConfigInput): JAgentDeskProviderConfig;
+  config(
+    provider: JAgentDeskAgentProvider,
+    input?: JAgentDeskProviderConfigInput,
+  ): JAgentDeskProviderConfig;
   listModels(
     provider: JAgentDeskAgentProvider,
     options?: JAgentDeskProviderListOptions,
@@ -327,23 +338,33 @@ export interface JAgentDeskConfigActions {
   ): Promise<{ requestId: string; config: MutableDaemonConfig }>;
 }
 
-export interface JAgentDeskClient {
+/**
+ * The daemon-facing action surface (workspaces / agents / providers / config)
+ * without any connection lifecycle. Built over an existing {@link DaemonClient}
+ * so multiple consumers — the CLI client, plugin subprocesses — can share one
+ * daemon session. See {@link createJAgentDeskApi}.
+ */
+export interface JAgentDeskApi {
   readonly workspaces: JAgentDeskWorkspaceActions;
   readonly agents: JAgentDeskAgentActions;
   readonly providers: JAgentDeskProviderActions;
   readonly config: JAgentDeskConfigActions;
+}
+
+export interface JAgentDeskClient extends JAgentDeskApi {
   connect(): Promise<void>;
   close(): Promise<void>;
   ensureConnected(): void;
   getConnectionState(): ConnectionState;
 }
 
-export function createJAgentDeskClient(config: JAgentDeskClientConfig): JAgentDeskClient {
-  const daemonClient = new DaemonClient({
-    ...config,
-    clientId: config.clientId ?? createGeneratedClientId(),
-    clientType: "cli",
-  });
+/**
+ * Build the daemon action facade over an existing DaemonClient, without owning
+ * the connection lifecycle. This is the surface handed to plugin backends (which
+ * reach the daemon over an IPC transport) and the core of
+ * {@link createJAgentDeskClient}.
+ */
+export function createJAgentDeskApi(daemonClient: DaemonClient): JAgentDeskApi {
   const createWorkspaceHandle = createWorkspaceHandleFactory(daemonClient);
   const createAgentHandle = createAgentHandleFactory(daemonClient);
 
@@ -396,6 +417,18 @@ export function createJAgentDeskClient(config: JAgentDeskClientConfig): JAgentDe
       get: (requestId) => daemonClient.getDaemonConfig(requestId),
       patch: (patch, requestId) => daemonClient.patchDaemonConfig(patch, requestId),
     },
+  };
+}
+
+export function createJAgentDeskClient(config: JAgentDeskClientConfig): JAgentDeskClient {
+  const daemonClient = new DaemonClient({
+    ...config,
+    clientId: config.clientId ?? createGeneratedClientId(),
+    clientType: "cli",
+  });
+
+  return {
+    ...createJAgentDeskApi(daemonClient),
     connect: () => daemonClient.connect(),
     close: () => daemonClient.close(),
     ensureConnected: () => daemonClient.ensureConnected(),
@@ -403,7 +436,9 @@ export function createJAgentDeskClient(config: JAgentDeskClientConfig): JAgentDe
   };
 }
 
-type WorkspaceHandleFactory = (workspace: string | JAgentDeskWorkspace) => JAgentDeskWorkspaceHandle;
+type WorkspaceHandleFactory = (
+  workspace: string | JAgentDeskWorkspace,
+) => JAgentDeskWorkspaceHandle;
 type AgentHandleFactory = (agent: string | JAgentDeskAgent) => JAgentDeskAgentHandle;
 
 function createWorkspaceHandleFactory(daemonClient: DaemonClient): WorkspaceHandleFactory {
