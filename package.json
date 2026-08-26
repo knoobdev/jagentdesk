@@ -54,7 +54,7 @@
     "build:client:clean": "npm run build:protocol:clean && npm run build:clean --workspace=@jagentdesk/client",
     "build:server-deps": "concurrently --kill-others-on-fail --names highlight,client --prefix-colors yellow,blue \"npm run build:highlight\" \"npm run build:client\"",
     "build:server-deps:clean": "npm run build:highlight:clean && npm run build:client:clean",
-    "build:server": "npm run build:server-deps && npm run build --workspace=@jagentdesk/server && npm run build --workspace=@jagentdesk/cli",
+    "build:server": "npm run build:server-deps && npm run build --workspace=@jagentdesk/plugin && npm run build --workspace=@jagentdesk/server && npm run build --workspace=@jagentdesk/cli",
     "build:server:clean": "npm run build:server-deps:clean && npm run build:clean --workspace=@jagentdesk/server && npm run build:clean --workspace=@jagentdesk/cli",
     "build:daemon-web-ui": "node scripts/build-daemon-web-ui.mjs",
     "build:app-deps": "npm run build:highlight && npm run build:client && npm run build --workspace=@jagentdesk/expo-two-way-audio",
