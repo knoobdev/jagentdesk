@@ -150,6 +150,7 @@ import { LoopService } from "./loop-service.js";
 import { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { ScheduleService } from "./schedule/service.js";
 import { DaemonConfigStore, type MutableDaemonConfig } from "./daemon-config-store.js";
+import { PluginService } from "./plugins/index.js";
 import { BrowserToolsBroker } from "./browser-tools/broker.js";
 import { DaemonConfigBrowserToolsPolicy } from "./browser-tools/policy.js";
 import { WorkspaceGitServiceImpl } from "./workspace-git-service.js";
@@ -576,6 +577,9 @@ export async function createJAgentDeskDaemon(
   );
   const browserToolsPolicy = new DaemonConfigBrowserToolsPolicy(daemonConfigStore);
   const browserToolsBroker = new BrowserToolsBroker({});
+  // Local-disk-only plugin service (ADR-0014). `pluginsEnabled` defaults FALSE,
+  // so start() spawns nothing unless the operator has explicitly enabled plugins.
+  const pluginRuntime = new PluginService(logger, daemonConfigStore);
 
   const serverId = getOrCreateServerId(config.jagentdeskHome, { logger });
   const daemonKeyPair = await loadOrCreateDaemonKeyPair(config.jagentdeskHome, logger);
@@ -1628,7 +1632,12 @@ export async function createJAgentDeskDaemon(
                 pairingCodeManager,
                 requireSignedHelloForDirect,
               },
+              pluginRuntime,
             );
+            // Bind the plugin session host and start configured plugins before any
+            // external ingress attaches, mirroring upstream's pre-accept ordering.
+            pluginRuntime.bindJAgentDeskSessionHost(wsServer);
+            await pluginRuntime.start();
             tsnetListener = createTsnetListener({
               logger,
               port: boundListenTarget.type === "tcp" ? boundListenTarget.port : 0,
@@ -1671,6 +1680,7 @@ export async function createJAgentDeskDaemon(
       speechService.start();
       scriptHealthMonitor.start();
     } catch (error) {
+      await pluginRuntime.stopAllPlugins().catch(() => undefined);
       await serviceProxy.stopStandalone().catch(() => undefined);
       if (mainStarted) {
         httpServer.closeAllConnections();
@@ -1681,6 +1691,7 @@ export async function createJAgentDeskDaemon(
   };
 
   const stop = async () => {
+    await pluginRuntime.stopAllPlugins().catch(() => undefined);
     await hubRelationships.stop();
     workspaceReconciliation.dispose();
     scriptHealthMonitor.stop();

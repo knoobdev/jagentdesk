@@ -34,7 +34,14 @@ import { asUint8Array, decodeBinaryFrame } from "@jagentdesk/protocol/binary-fra
 import type { TerminalActivity } from "@jagentdesk/protocol/terminal-activity";
 import type { HostnamesConfig } from "./hostnames.js";
 import { isHostnameAllowed } from "./hostnames.js";
-import { Session, type SessionLifecycleIntent, type SessionRuntimeMetrics } from "./session.js";
+import {
+  Session,
+  type SessionLifecycleIntent,
+  type SessionOptions,
+  type SessionRuntimeMetrics,
+} from "./session.js";
+
+type PluginRuntimePort = NonNullable<SessionOptions["pluginRuntime"]>;
 import type { HubRelationshipManagement } from "./hub/relationship-controller.js";
 import type { PairingCodeDetails, PairingCodeManager } from "./pairing/pairing-code.js";
 import type { HubExecutionAgents } from "./hub/daemon-executions.js";
@@ -604,6 +611,14 @@ export class VoiceAssistantWebSocketServer {
   private readonly browserToolsBroker: BrowserToolsBroker | null;
   private readonly hubRelationships: HubRelationshipManagement | null;
   private readonly pairing: PairingServerDependencies | null;
+  // Sockets attached in-process via attachPluginSocket. The `plugin:<id>` clientId
+  // is reserved: only a socket present in this map may claim it during hello, and
+  // such a socket may claim ONLY its own `plugin:<id>`. A network socket can never
+  // claim any `plugin:`/`hub:` clientId. Plugin sockets also skip the signed-hello
+  // requirement (they are trusted in-process) and the external reconnect grace.
+  private readonly pluginSocketIds = new Map<WebSocketLike, string>();
+  private readonly pluginSocketCleanup = new Map<WebSocketLike, () => void>();
+  private readonly pluginRuntime: PluginRuntimePort | null;
   /**
    * Pairing requests are retained until their code expires or registration
    * completes. The request can arrive while the desktop renderer is still
@@ -668,6 +683,7 @@ export class VoiceAssistantWebSocketServer {
     browserToolsBroker?: BrowserToolsBroker | null,
     hubRelationships?: HubRelationshipManagement | null,
     pairing?: PairingServerDependencies | null,
+    pluginRuntime?: PluginRuntimePort | null,
   ) {
     this.logger = logger.child({ module: "websocket-server" });
     this.advertiseDaemonStatusRpc = wsConfig.daemonStatusRpc !== false;
@@ -680,6 +696,7 @@ export class VoiceAssistantWebSocketServer {
     this.browserToolsBroker = browserToolsBroker ?? null;
     this.hubRelationships = hubRelationships ?? null;
     this.pairing = pairing ?? null;
+    this.pluginRuntime = pluginRuntime ?? null;
     this.agentManager = agentManager;
     this.agentStorage = agentStorage;
     this.projectRegistry = projectRegistry ?? createNoopProjectRegistry();
@@ -1197,6 +1214,42 @@ export class VoiceAssistantWebSocketServer {
     connectionLogger.info("Hub session attached");
   }
 
+  /**
+   * Attach an in-process plugin session socket. The socket completes the normal
+   * hello handshake (so the plugin's DaemonClient receives server_info), but its
+   * `plugin:<pluginId>` clientId is reserved to this method — see the hello guard.
+   * Resolves `closed` once the socket is fully detached and its session cleaned up.
+   */
+  public async attachPluginSocket(
+    pluginId: string,
+    ws: WebSocketLike,
+  ): Promise<{ closed: Promise<void> }> {
+    if (!this.acceptingConnections) {
+      throw new Error(`Cannot attach plugin session while shutting down: ${pluginId}`);
+    }
+    let resolve: () => void = () => undefined;
+    const closed = new Promise<void>((finish) => {
+      resolve = finish;
+    });
+    this.pluginSocketIds.set(ws, pluginId);
+    this.pluginSocketCleanup.set(ws, resolve);
+    try {
+      await this.attachSocket(ws, undefined, undefined, true);
+    } catch (error) {
+      this.pluginSocketIds.delete(ws);
+      this.finishPluginSocketCleanup(ws);
+      throw error;
+    }
+    return { closed };
+  }
+
+  private finishPluginSocketCleanup(ws: WebSocketLike): void {
+    const resolve = this.pluginSocketCleanup.get(ws);
+    if (!resolve) return;
+    this.pluginSocketCleanup.delete(ws);
+    resolve();
+  }
+
   public prepareForShutdown(): void {
     this.acceptingConnections = false;
   }
@@ -1424,6 +1477,7 @@ export class VoiceAssistantWebSocketServer {
     ws: WebSocketLike,
     request?: unknown,
     metadata?: ExternalSocketMetadata,
+    isPluginSocket = false,
   ): Promise<void> {
     if (!this.acceptingConnections) {
       try {
@@ -1439,12 +1493,16 @@ export class VoiceAssistantWebSocketServer {
     this.socketIdentities.set(ws, identity);
     const connectionLogger = this.logger.child(toConnectionLogFields(identity));
 
+    // In-process plugin sockets are trusted: they never require a signed hello
+    // even when local device pairing is enforced for direct connections.
+    const signedHelloRequired = !isPluginSocket && this.requiresSignedHello(identity);
+
     const pending: PendingConnection = {
       connectionLogger,
       helloTimeout: null,
       identity,
     };
-    const helloTimeoutMs = this.requiresSignedHello(identity)
+    const helloTimeoutMs = signedHelloRequired
       ? TAILNET_PAIRING_HELLO_TIMEOUT_MS
       : HELLO_TIMEOUT_MS;
     const timeout = setTimeout(() => {
@@ -1486,7 +1544,7 @@ export class VoiceAssistantWebSocketServer {
       return;
     }
 
-    if (this.requiresSignedHello(identity)) {
+    if (signedHelloRequired) {
       // `requiresSignedHello` only returns true when `this.pairing` is wired.
       const pairing = this.pairing as PairingServerDependencies;
       const challengeNonce = pairing.challenges.issue();
@@ -1673,6 +1731,7 @@ export class VoiceAssistantWebSocketServer {
       daemonVersion: this.daemonVersion,
       daemonRuntimeConfig: this.daemonRuntimeConfig,
       getWebSocketRuntimeMetrics: () => this.lastRuntimeMetricsSnapshot,
+      pluginRuntime: this.pluginRuntime ?? undefined,
     });
   }
 
@@ -1786,7 +1845,12 @@ export class VoiceAssistantWebSocketServer {
   }): void {
     const { ws, message, pending } = params;
 
-    if (this.requiresSignedHello(pending.identity) && !this.verifyTailnetSignedHello(params)) {
+    // In-process plugin sockets are trusted and never carry a signed hello.
+    if (
+      !this.pluginSocketIds.has(ws) &&
+      this.requiresSignedHello(pending.identity) &&
+      !this.verifyTailnetSignedHello(params)
+    ) {
       return;
     }
 
@@ -1819,6 +1883,15 @@ export class VoiceAssistantWebSocketServer {
       return;
     }
 
+    // Reserved-clientId guard. `plugin:<id>` and `hub:<id>` name in-process,
+    // trusted sessions. Only a socket registered via attachPluginSocket may claim
+    // a `plugin:` clientId, and only its own `plugin:<pluginId>`. Any network
+    // socket claiming a reserved prefix is rejected — this is the auth invariant
+    // that keeps a tailnet node from impersonating a daemon-internal session.
+    if (this.rejectsReservedClientId(ws, pending, clientId)) {
+      return;
+    }
+
     this.clearPendingConnection(ws);
     pending.identity.clientId = clientId;
     if (message.appVersion) {
@@ -1826,42 +1899,7 @@ export class VoiceAssistantWebSocketServer {
     }
     const existing = this.externalSessionsByKey.get(clientId);
     if (existing) {
-      this.incrementRuntimeCounter("helloResumed");
-      if (existing.externalDisconnectCleanupTimeout) {
-        clearTimeout(existing.externalDisconnectCleanupTimeout);
-        existing.externalDisconnectCleanupTimeout = null;
-      }
-      const newAppVersion = message.appVersion ?? null;
-      if (newAppVersion && newAppVersion !== existing.appVersion) {
-        existing.appVersion = newAppVersion;
-        existing.session.updateAppVersion(newAppVersion);
-      }
-      const newClientCapabilities = message.capabilities ?? null;
-      // COMPAT(selectiveAgentTimeline): added in v0.1.106. Every capable resumed
-      // hello resets membership before server_info so stale retained-session
-      // state cannot leak. Remove after 2027-01-12.
-      existing.session.updateClientCapabilities(newClientCapabilities, ws);
-      if (
-        JSON.stringify(existing.clientCapabilities ?? null) !==
-        JSON.stringify(newClientCapabilities ?? null)
-      ) {
-        existing.clientCapabilities = newClientCapabilities;
-        this.syncBrowserToolsClientRegistration(existing);
-      }
-      existing.sockets.add(ws);
-      this.sessions.set(ws, existing);
-      pending.identity.sessionId = existing.session.getSessionId();
-      this.syncBrowserToolsClientRegistration(existing);
-      this.sendToClient(ws, this.createServerInfoMessage());
-      this.replayPendingPairingRequests(ws, pending.identity.transport);
-      pending.connectionLogger.info(
-        {
-          ...toConnectionLogFields(pending.identity),
-          resumed: true,
-          totalSessions: this.sessions.size,
-        },
-        "Client connected via hello",
-      );
+      this.resumeExistingExternalSession({ ws, message, pending, existing });
       return;
     }
 
@@ -1884,6 +1922,82 @@ export class VoiceAssistantWebSocketServer {
       {
         ...toConnectionLogFields(pending.identity),
         resumed: false,
+        totalSessions: this.sessions.size,
+      },
+      "Client connected via hello",
+    );
+  }
+
+  /**
+   * Reserved-clientId guard. `plugin:<id>` and `hub:<id>` name in-process, trusted
+   * sessions. Only a socket registered via attachPluginSocket may claim a `plugin:`
+   * clientId, and only its own `plugin:<pluginId>`. Any network socket claiming a
+   * reserved prefix is rejected — the auth invariant that keeps a tailnet node from
+   * impersonating a daemon-internal session. Returns true when the socket was closed.
+   */
+  private rejectsReservedClientId(
+    ws: WebSocketLike,
+    pending: PendingConnection,
+    clientId: string,
+  ): boolean {
+    const reservedPluginId = this.pluginSocketIds.get(ws);
+    const expectedPluginClientId = reservedPluginId ? `plugin:${reservedPluginId}` : null;
+    const claimsReservedPrefix = clientId.startsWith("plugin:") || clientId.startsWith("hub:");
+    const violates =
+      (expectedPluginClientId !== null && clientId !== expectedPluginClientId) ||
+      (expectedPluginClientId === null && claimsReservedPrefix);
+    if (!violates) {
+      return false;
+    }
+    this.clearPendingConnection(ws);
+    pending.connectionLogger.warn({ clientId }, "Rejected reserved clientId");
+    try {
+      ws.close(WS_CLOSE_INVALID_HELLO, "Invalid plugin clientId");
+    } catch {
+      // ignore close errors
+    }
+    return true;
+  }
+
+  private resumeExistingExternalSession(params: {
+    ws: WebSocketLike;
+    message: WSHelloMessage;
+    pending: PendingConnection;
+    existing: TrustedSessionConnection;
+  }): void {
+    const { ws, message, pending, existing } = params;
+    this.incrementRuntimeCounter("helloResumed");
+    if (existing.externalDisconnectCleanupTimeout) {
+      clearTimeout(existing.externalDisconnectCleanupTimeout);
+      existing.externalDisconnectCleanupTimeout = null;
+    }
+    const newAppVersion = message.appVersion ?? null;
+    if (newAppVersion && newAppVersion !== existing.appVersion) {
+      existing.appVersion = newAppVersion;
+      existing.session.updateAppVersion(newAppVersion);
+    }
+    const newClientCapabilities = message.capabilities ?? null;
+    // COMPAT(selectiveAgentTimeline): added in v0.1.106. Every capable resumed
+    // hello resets membership before server_info so stale retained-session
+    // state cannot leak. Remove after 2027-01-12.
+    existing.session.updateClientCapabilities(newClientCapabilities, ws);
+    if (
+      JSON.stringify(existing.clientCapabilities ?? null) !==
+      JSON.stringify(newClientCapabilities ?? null)
+    ) {
+      existing.clientCapabilities = newClientCapabilities;
+      this.syncBrowserToolsClientRegistration(existing);
+    }
+    existing.sockets.add(ws);
+    this.sessions.set(ws, existing);
+    pending.identity.sessionId = existing.session.getSessionId();
+    this.syncBrowserToolsClientRegistration(existing);
+    this.sendToClient(ws, this.createServerInfoMessage());
+    this.replayPendingPairingRequests(ws, pending.identity.transport);
+    pending.connectionLogger.info(
+      {
+        ...toConnectionLogFields(pending.identity),
+        resumed: true,
         totalSessions: this.sessions.size,
       },
       "Client connected via hello",
@@ -1986,6 +2100,16 @@ export class VoiceAssistantWebSocketServer {
         workspaceScriptManagement: true,
         // COMPAT(projectCustomIcon): added in v0.2.0, remove after 2027-01-20.
         projectCustomIcon: true,
+        // Advertise the plugin management surface only when a PluginService is
+        // wired; without it the plugin.* RPCs return empty/disabled results.
+        ...(this.pluginRuntime
+          ? {
+              plugins: true,
+              pluginManagement: true,
+              pluginLogs: true,
+              pluginThemes: true,
+            }
+          : {}),
       },
     };
   }
@@ -2075,6 +2199,8 @@ export class VoiceAssistantWebSocketServer {
         "Pending client disconnected",
       );
       this.socketIdentities.delete(ws);
+      this.pluginSocketIds.delete(ws);
+      this.finishPluginSocketCleanup(ws);
       return;
     }
 
@@ -2091,6 +2217,8 @@ export class VoiceAssistantWebSocketServer {
         );
         this.socketIdentities.delete(ws);
       }
+      this.pluginSocketIds.delete(ws);
+      this.finishPluginSocketCleanup(ws);
       return;
     }
 
@@ -2110,6 +2238,15 @@ export class VoiceAssistantWebSocketServer {
 
     if (connection.sockets.size === 0) {
       this.unregisterBrowserToolsClient(connection.clientId);
+      // Plugin sessions are ephemeral in-process sockets: never hold them in the
+      // external reconnect-grace window. Clean up immediately and resolve `closed`
+      // so the PluginRuntime can complete its stop/reload sequence deterministically.
+      if (this.pluginSocketIds.has(ws)) {
+        this.pluginSocketIds.delete(ws);
+        await this.cleanupConnection(connection, "Plugin session disconnected");
+        this.finishPluginSocketCleanup(ws);
+        return;
+      }
       this.incrementRuntimeCounter("sessionDisconnectedWaitingReconnect");
       if (connection.externalDisconnectCleanupTimeout) {
         clearTimeout(connection.externalDisconnectCleanupTimeout);
