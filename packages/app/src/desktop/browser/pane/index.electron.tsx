@@ -51,6 +51,12 @@ import {
 } from "@/desktop/host";
 import { useBrowserStore, normalizeWorkspaceBrowserUrl } from "@/desktop/browser/store";
 import {
+  BrowserTaskPanel,
+  CockpitControls,
+  AntiDetectionStrip,
+  useAgentDriving,
+} from "@/desktop/browser/pane/cockpit";
+import {
   prepareBrowserWebview,
   releaseResidentBrowserWebview,
   takeResidentBrowserWebview,
@@ -610,6 +616,11 @@ export function BrowserPane({
   const { t } = useTranslation();
   const browser = useBrowserStore((state) => state.browsersById[browserId] ?? null);
   const updateBrowser = useBrowserStore((state) => state.updateBrowser);
+  const isAgentDriving = useAgentDriving(browserId);
+  // Stealth + connected-logins are not wired to a real backend yet (Phases 4–5);
+  // surface their true state (off / none) rather than faking the mock's values.
+  const stealthOn = false;
+  const connectedLogins = 0;
   const webviewRef = useRef<ElectronWebview | null>(null);
   const webviewHostRef = useRef<HTMLDivElement | null>(null);
   const urlInputRef = useRef<WebTextInput | null>(null);
@@ -1584,6 +1595,9 @@ export function BrowserPane({
 
   return (
     <View style={styles.container}>
+      <View style={styles.bodyRow}>
+        <BrowserTaskPanel browserId={browserId} title={browser?.title ?? draftUrl} />
+        <View style={styles.rightCol}>
       <View style={styles.chromeRow}>
         <View style={styles.chromeLeft}>
           <ToolbarButton
@@ -1676,6 +1690,7 @@ export function BrowserPane({
               }
             />
           </ToolbarButton>
+          <CockpitControls stealthOn={stealthOn} connectedLogins={connectedLogins} />
         </View>
       </View>
       {browser?.lastError ? (
@@ -1690,6 +1705,12 @@ export function BrowserPane({
           ref: setWebviewHostNode,
           style: webviewHostStyle,
         })}
+        {isAgentDriving ? (
+          <View style={styles.drivingBadge} pointerEvents="none">
+            <View style={styles.drivingBadgeDot} />
+            <Text style={styles.drivingBadgeText}>agent driving</Text>
+          </View>
+        ) : null}
         {pendingSelection ? (
           <BrowserElementAnnotationCard
             selection={pendingSelection}
@@ -1698,6 +1719,9 @@ export function BrowserPane({
           />
         ) : null}
       </View>
+        </View>
+      </View>
+      <AntiDetectionStrip browserId={browserId} stealthOn={stealthOn} />
     </View>
   );
 }
@@ -1799,6 +1823,41 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
     minHeight: 0,
     backgroundColor: theme.colors.surface0,
+  },
+  bodyRow: {
+    flex: 1,
+    minHeight: 0,
+    flexDirection: "row",
+  },
+  rightCol: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 0,
+  },
+  drivingBadge: {
+    position: "absolute",
+    top: theme.spacing[2],
+    right: theme.spacing[2],
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[1.5],
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
+    borderRadius: theme.borderRadius.full,
+    backgroundColor: "rgba(16,24,20,0.82)",
+    borderWidth: 1,
+    borderColor: theme.colors.palette.green[500],
+  },
+  drivingBadgeDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: theme.colors.palette.green[500],
+  },
+  drivingBadgeText: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.palette.green[500],
+    fontWeight: theme.fontWeight.medium,
   },
   chromeRow: {
     height: WORKSPACE_SECONDARY_HEADER_HEIGHT,

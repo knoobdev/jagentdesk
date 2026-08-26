@@ -8,6 +8,12 @@ import {
 import { createWorkspaceBrowser, getBrowserRecord, useBrowserStore } from "@/desktop/browser/store";
 import { collectAllTabs, useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
 import { buildWorkspaceTabPersistenceKey } from "@/workspace-tabs/model";
+import { useBrowserActivityStore } from "@/desktop/browser/automation/activity-store";
+
+function readArgBrowserId(request: BrowserAutomationExecuteRequest): string | null {
+  const args = request.command.args as Record<string, unknown> | undefined;
+  return typeof args?.browserId === "string" ? args.browserId : null;
+}
 
 type BrowserAutomationExecuteRequest = Extract<
   SessionOutboundMessage,
@@ -42,9 +48,38 @@ export function mountBrowserAutomationHandler(
   options: BrowserAutomationHandlerOptions,
 ): () => void {
   const getHost = options.getHost ?? getDesktopHost;
+  const activity = useBrowserActivityStore.getState();
   const unsubscribe = options.client.on("browser.automation.execute.request", (request) => {
+    // Record every agent browser command as a live step for the cockpit timeline.
+    const argBrowserId = readArgBrowserId(request);
+    activity.begin({
+      requestId: request.requestId,
+      command: request.command.command,
+      browserId: argBrowserId,
+      agentId: request.agentId,
+      args: request.command.args as Record<string, unknown> | undefined,
+    });
+    // Wrap the response send so we mark the step done/failed and resolve the
+    // new_tab browserId from the result — without touching the branchy handler.
+    const instrumentedClient: BrowserAutomationClient = {
+      on: options.client.on.bind(options.client),
+      sendBrowserAutomationExecuteResponse: (response) => {
+        const payload = response.payload;
+        const resultBrowserId =
+          payload.ok && "browserId" in payload.result
+            ? (payload.result.browserId as string)
+            : argBrowserId;
+        activity.finish({
+          requestId: payload.requestId,
+          ok: payload.ok,
+          browserId: resultBrowserId,
+          errorCode: payload.ok ? undefined : payload.error.code,
+        });
+        options.client.sendBrowserAutomationExecuteResponse(response);
+      },
+    };
     void handleBrowserAutomationRequest({
-      client: options.client,
+      client: instrumentedClient,
       getHost,
       request,
       serverId: options.serverId,
