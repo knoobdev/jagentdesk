@@ -25,6 +25,12 @@ function age(creationTimestamp: unknown): string | undefined {
   return `${min}m`;
 }
 
+/** "N lines" summary shown beside a ConfigMap data key. */
+function dataMeta(v: string): string {
+  const lines = v ? v.split("\n").length : 0;
+  return `${lines} line${lines === 1 ? "" : "s"}`;
+}
+
 interface Row {
   label: string;
   value: string;
@@ -253,22 +259,36 @@ export function ClusterResourceOverview({
       {dataEntries.length > 0 ? (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Data</Text>
-          <View style={styles.grid}>
-            {dataEntries.map(([k, v]) => (
-              <View key={k} style={styles.dataRow}>
-                <Text style={styles.dataKey} selectable numberOfLines={1}>
+          {dataEntries.map(([k, v]) => (
+            <View key={k} style={styles.dataEntry}>
+              <View style={styles.dataEntryHead}>
+                <Text style={styles.dataEntryKey} selectable numberOfLines={1}>
                   {k}
                 </Text>
-                <Text
-                  style={styles.dataValue}
-                  selectable={kind !== "Secret"}
-                  numberOfLines={kind === "Secret" ? 1 : 8}
-                >
-                  {kind === "Secret" ? "•••••••• (reveal to view)" : v}
-                </Text>
+                {kind === "ConfigMap" ? (
+                  <Text style={styles.dataEntryMeta}>{dataMeta(v)}</Text>
+                ) : null}
               </View>
-            ))}
-          </View>
+              {kind === "Secret" ? (
+                <View style={styles.secretMasked}>
+                  <Text style={styles.secretMaskedText}>•••••••••••• · use Reveal to view</Text>
+                </View>
+              ) : (
+                <ScrollView style={styles.codeBlock} nestedScrollEnabled>
+                  <ScrollView
+                    horizontal
+                    nestedScrollEnabled
+                    contentContainerStyle={styles.codeBlockContent}
+                    showsHorizontalScrollIndicator
+                  >
+                    <Text style={styles.codeText} selectable>
+                      {v}
+                    </Text>
+                  </ScrollView>
+                </ScrollView>
+              )}
+            </View>
+          ))}
         </View>
       ) : null}
 
@@ -380,28 +400,51 @@ const styles = StyleSheet.create((theme: Theme) => ({
     fontSize: theme.fontSize.sm,
     color: theme.colors.foreground,
   },
-  dataRow: {
+  dataEntry: { gap: theme.spacing[1] },
+  dataEntryHead: {
     flexDirection: "row",
-    alignItems: "flex-start",
-    gap: theme.spacing[3],
-    paddingHorizontal: theme.spacing[3],
-    paddingVertical: theme.spacing[2],
-    borderBottomWidth: theme.borderWidth[1],
-    borderBottomColor: theme.colors.border,
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: theme.spacing[2],
   },
-  dataKey: {
-    width: 160,
-    flexShrink: 0,
-    fontSize: theme.fontSize.sm,
-    fontWeight: theme.fontWeight.medium,
-    color: theme.colors.foregroundMuted,
-    fontFamily: theme.fontFamily.mono,
-  },
-  dataValue: {
+  dataEntryKey: {
     flex: 1,
     minWidth: 0,
-    fontSize: theme.fontSize.code,
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.semibold,
     color: theme.colors.foreground,
+    fontFamily: theme.fontFamily.mono,
+  },
+  dataEntryMeta: {
+    flexShrink: 0,
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundExtraMuted,
+  },
+  codeBlock: {
+    maxHeight: 360,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.surface1,
+  },
+  codeBlockContent: { padding: theme.spacing[3] },
+  codeText: {
+    fontSize: theme.fontSize.code,
+    lineHeight: 18,
+    color: theme.colors.foreground,
+    fontFamily: theme.fontFamily.mono,
+  },
+  secretMasked: {
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.surface1,
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+  },
+  secretMaskedText: {
+    fontSize: theme.fontSize.code,
+    color: theme.colors.foregroundMuted,
     fontFamily: theme.fontFamily.mono,
   },
   containerRow: {

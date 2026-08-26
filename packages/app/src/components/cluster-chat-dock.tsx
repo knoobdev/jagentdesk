@@ -155,17 +155,24 @@ function distinctProjects(list: WorkspaceDescriptor[]): WorkspaceDescriptor[] {
   return out;
 }
 
+/** A project the cluster chat can run in (agent cwd). */
+interface ClusterChatProject {
+  key: string;
+  label: string;
+  rootPath: string;
+}
+
 /** One selectable project row in the cluster chat history overlay. */
-function WorkspaceItem({
-  workspace,
+function ProjectItem({
+  project,
   active,
   onSelect,
 }: {
-  workspace: WorkspaceDescriptor;
+  project: ClusterChatProject;
   active: boolean;
-  onSelect: (id: string) => void;
+  onSelect: (key: string) => void;
 }) {
-  const handlePress = useCallback(() => onSelect(workspace.id), [onSelect, workspace.id]);
+  const handlePress = useCallback(() => onSelect(project.key), [onSelect, project.key]);
   return (
     <Pressable
       style={active ? [styles.historyItem, styles.historyItemActive] : styles.historyItem}
@@ -173,11 +180,11 @@ function WorkspaceItem({
     >
       <View style={styles.wsText}>
         <Text style={styles.historyTitle} numberOfLines={1}>
-          {workspaceLabel(workspace)}
+          {project.label}
         </Text>
-        {workspace.projectRootPath || workspace.workspaceDirectory ? (
+        {project.rootPath ? (
           <Text style={styles.wsDir} numberOfLines={1}>
-            {workspace.projectRootPath || workspace.workspaceDirectory}
+            {project.rootPath}
           </Text>
         ) : null}
       </View>
@@ -241,27 +248,44 @@ export function ClusterChatDock({
   const client = useHostRuntimeClient(serverId);
   const { entries: providerEntries } = useProvidersSnapshot(serverId);
   const workspaces = useSessionStore((state) => state.sessions[serverId]?.workspaces);
+  const projects = useSessionStore((state) => state.sessions[serverId]?.projects);
   const agents = useSessionStore((state) => state.sessions[serverId]?.agents);
   const provider = providerEntries?.find((e) => e.enabled)?.provider ?? null;
-  // The project the cluster chat runs in (agent cwd): the user's pick, else the
-  // first available. Previously this was silently "whatever workspace is first",
-  // which is why the chat felt like it landed in a random project.
   const pickedWorkspaceId = useClusterChatStore((s) => s.pickedWorkspaceId);
   const setPickedWorkspaceId = useClusterChatStore((s) => s.setPickedWorkspaceId);
-  const workspaceList = useMemo(
-    () => (workspaces ? Array.from(workspaces.values()) : []),
-    [workspaces],
-  );
-  const chosenWorkspace = useMemo(() => {
-    const picked = pickedWorkspaceId ? workspaces?.get(pickedWorkspaceId) : undefined;
-    return picked ?? workspaceList[0] ?? null;
-  }, [pickedWorkspaceId, workspaces, workspaceList]);
-  const cwd = chosenWorkspace?.workspaceDirectory || null;
-  // One row per project (not per per-agent worktree) so the picker is a short,
-  // meaningful list of the user's projects.
-  const projectOptions = useMemo(() => distinctProjects(workspaceList), [workspaceList]);
-  const chosenProjectKey =
-    chosenWorkspace?.projectId || chosenWorkspace?.projectRootPath || chosenWorkspace?.id;
+
+  // A cluster chat runs an agent inside a project directory (its cwd). Build the
+  // pickable project list from the flat workspaces map when present, but fall
+  // back to session.projects — on the cluster route the workspaces map can be
+  // empty while projects (what the sidebar shows) is populated, which previously
+  // left New chat with no project, a null cwd, and a dead button.
+  const projectOptions = useMemo<ClusterChatProject[]>(() => {
+    const wsList = workspaces ? Array.from(workspaces.values()) : [];
+    const fromWs = distinctProjects(wsList)
+      .map((w) => ({
+        key: w.projectId || w.projectRootPath || w.workspaceDirectory || w.id,
+        label: workspaceLabel(w),
+        rootPath: w.workspaceDirectory || w.projectRootPath || "",
+      }))
+      .filter((p) => p.rootPath);
+    if (fromWs.length > 0) return fromWs;
+    const projList = projects ? Array.from(projects.values()) : [];
+    return projList
+      .map((p) => ({
+        key: p.projectId,
+        label: p.projectCustomName || p.projectDisplayName || p.projectRootPath,
+        rootPath: p.projectRootPath,
+      }))
+      .filter((p) => p.rootPath);
+  }, [workspaces, projects]);
+  const chosenProject = useMemo(() => {
+    const picked = pickedWorkspaceId
+      ? projectOptions.find((p) => p.key === pickedWorkspaceId)
+      : undefined;
+    return picked ?? projectOptions[0] ?? null;
+  }, [pickedWorkspaceId, projectOptions]);
+  const cwd = chosenProject?.rootPath || null;
+  const chosenProjectKey = chosenProject?.key;
   const ready = Boolean(client && provider && cwd);
 
   // Register the dock's agent as "visible" so the session subscribes to its
@@ -390,8 +414,13 @@ export function ClusterChatDock({
     [setPickedWorkspaceId],
   );
   const handleNewChat = useCallback(() => {
+    if (!client || !provider || !cwd) {
+      // Never a silent no-op: open the panel so the user can pick a project (or
+      // see why a chat can't start) instead of clicking into nothing.
+      setHistoryOpen(true);
+      return;
+    }
     setHistoryOpen(false);
-    if (!client || !provider || !cwd) return;
     createdForRef.current = clusterId;
     createClusterAgent({
       client,
@@ -509,19 +538,28 @@ export function ClusterChatDock({
           {historyOpen ? (
             <View style={styles.historyOverlay}>
               <ScrollView>
-                {projectOptions.length >= 2 ? (
+                {projectOptions.length >= 1 ? (
                   <>
                     <Text style={styles.historySectionLabel}>PROJECT FOR NEW CHATS</Text>
-                    {projectOptions.map((ws) => (
-                      <WorkspaceItem
-                        key={ws.id}
-                        workspace={ws}
-                        active={(ws.projectId || ws.projectRootPath || ws.id) === chosenProjectKey}
+                    {projectOptions.map((p) => (
+                      <ProjectItem
+                        key={p.key}
+                        project={p}
+                        active={p.key === chosenProjectKey}
                         onSelect={handleSelectWorkspace}
                       />
                     ))}
                     <Text style={styles.historySectionLabel}>CHATS</Text>
                   </>
+                ) : (
+                  <Text style={styles.historyEmpty}>
+                    Add a project (sidebar → Add project) to chat about this cluster.
+                  </Text>
+                )}
+                {!provider ? (
+                  <Text style={styles.historyEmpty}>
+                    Enable an AI provider in Host settings to start a chat.
+                  </Text>
                 ) : null}
                 <Pressable style={styles.historyNew} onPress={handleNewChat}>
                   <ThemedPlus size={16} uniProps={mutedColor} />
