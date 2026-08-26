@@ -22,6 +22,24 @@ export interface SkillExample {
   at: number;
 }
 
+/**
+ * Knowledge a skill learned from a REAL conversation (redesign per
+ * docs/plans/active/skills-redesign.md). Sources:
+ * - "approved-answer": the user 👍'd an assistant message; its content is captured.
+ * - "proposed": the agent proposed a lesson after a turn; pending user approval.
+ * - "correction": (legacy) a hand-typed correction — kept for migration only.
+ */
+export interface LearnedEntry {
+  id: string;
+  source: "approved-answer" | "proposed" | "correction";
+  content: string;
+  /** For "proposed" entries: whether the user has approved it into the skill. */
+  approved: boolean;
+  /** Provider message id the lesson came from, when applicable. */
+  messageId?: string;
+  at: number;
+}
+
 export interface Skill {
   id: string;
   name: string;
@@ -35,8 +53,21 @@ export interface Skill {
   approvals: number;
   consecutiveApprovals: number;
   examples: SkillExample[];
+  /** Knowledge learned from real conversations (approve / agent-proposed). */
+  learned: LearnedEntry[];
   createdAt: number;
   updatedAt: number;
+}
+
+/**
+ * The effective system prompt a skill contributes to an agent: the base
+ * instructions plus everything it has learned (approved lessons only).
+ */
+export function skillEffectivePrompt(skill: Skill): string {
+  const lessons = (skill.learned ?? [])
+    .filter((l) => l.approved)
+    .map((l) => `- (learned) ${l.content}`);
+  return lessons.length > 0 ? `${skill.instructions}\n\n${lessons.join("\n")}` : skill.instructions;
 }
 
 export interface SkillDraft {
@@ -133,8 +164,23 @@ interface SkillsState {
   addSkill: (draft: SkillDraft) => Skill;
   updateSkill: (id: string, patch: Partial<SkillDraft>) => void;
   removeSkill: (id: string) => void;
-  /** Log one rated training run; awards XP, grows instructions, saves the example. */
-  recordTraining: (id: string, input: { task: string; rating: "up" | "down"; correction?: string }) => void;
+  /** @deprecated legacy hand-typed training; replaced by learnFromMessage/proposeLearning. */
+  recordTraining: (
+    id: string,
+    input: { task: string; rating: "up" | "down"; correction?: string },
+  ) => void;
+  /**
+   * The user rated a real assistant message. 👍 captures its content as approved
+   * knowledge and awards XP; 👎 records a negative run. No hand-typed text.
+   */
+  learnFromMessage: (
+    id: string,
+    input: { content: string; rating: "up" | "down"; messageId?: string },
+  ) => void;
+  /** The agent proposed a lesson after a turn; stored pending user approval. */
+  proposeLearning: (id: string, content: string, messageId?: string) => string;
+  /** Approve (keep) or reject (drop) an agent-proposed lesson. */
+  resolveProposedLearning: (id: string, entryId: string, approve: boolean) => void;
   graduateSkill: (id: string) => void;
 }
 
@@ -151,11 +197,53 @@ function hashString(value: string): number {
   return hash;
 }
 
+// Migrate one persisted skill to v4: backfill `learned`, converting legacy
+// hand-typed corrections into approved learned entries (extracted to keep the
+// migrate() callback shallow).
+function migrateSkillToV4(s: Partial<Skill>): Skill {
+  const examples = s.examples ?? [];
+  const alreadyLearned = (s.learned ?? []).length > 0;
+  const fromCorrections: LearnedEntry[] = alreadyLearned
+    ? []
+    : examples.flatMap((e) =>
+        e.correction?.trim()
+          ? [
+              {
+                id: makeId("lrn"),
+                source: "correction" as const,
+                content: e.correction.trim(),
+                approved: true,
+                at: e.at ?? Date.now(),
+              },
+            ]
+          : [],
+      );
+  return { ...baseFields(), ...s, examples, learned: s.learned ?? fromCorrections } as Skill;
+}
+
+// Approve (keep) or reject (drop) a proposed learned entry by id.
+function resolveLearned(
+  learned: LearnedEntry[],
+  entryId: string,
+  approve: boolean,
+): LearnedEntry[] {
+  if (!approve) return learned.filter((l) => l.id !== entryId);
+  return learned.map((l) => (l.id === entryId ? { ...l, approved: true } : l));
+}
+
 function baseFields(): Pick<
   Skill,
-  "status" | "xp" | "runs" | "approvals" | "consecutiveApprovals" | "examples"
+  "status" | "xp" | "runs" | "approvals" | "consecutiveApprovals" | "examples" | "learned"
 > {
-  return { status: "training", xp: 0, runs: 0, approvals: 0, consecutiveApprovals: 0, examples: [] };
+  return {
+    status: "training",
+    xp: 0,
+    runs: 0,
+    approvals: 0,
+    consecutiveApprovals: 0,
+    examples: [],
+    learned: [],
+  };
 }
 
 const STARTER_SKILLS: Skill[] = [
@@ -266,6 +354,74 @@ export const useSkillsStore = create<SkillsState>()(
             };
           }),
         })),
+      learnFromMessage: (id, input) =>
+        set((state) => ({
+          skills: state.skills.map((s) => {
+            if (s.id !== id) return s;
+            const up = input.rating === "up";
+            const content = input.content.trim();
+            const learned: LearnedEntry[] =
+              up && content
+                ? [
+                    {
+                      id: makeId("lrn"),
+                      source: "approved-answer" as const,
+                      content,
+                      approved: true,
+                      messageId: input.messageId,
+                      at: Date.now(),
+                    },
+                    ...s.learned,
+                  ].slice(0, 200)
+                : s.learned;
+            return {
+              ...s,
+              runs: s.runs + 1,
+              approvals: s.approvals + (up ? 1 : 0),
+              consecutiveApprovals: up ? s.consecutiveApprovals + 1 : 0,
+              xp: s.xp + (up ? XP_APPROVE : XP_REJECT),
+              learned,
+              updatedAt: Date.now(),
+            };
+          }),
+        })),
+      proposeLearning: (id, content, messageId) => {
+        const entryId = makeId("lrn");
+        set((state) => ({
+          skills: state.skills.map((s) =>
+            s.id === id
+              ? {
+                  ...s,
+                  learned: [
+                    {
+                      id: entryId,
+                      source: "proposed" as const,
+                      content: content.trim(),
+                      approved: false,
+                      messageId,
+                      at: Date.now(),
+                    },
+                    ...s.learned,
+                  ].slice(0, 200),
+                  updatedAt: Date.now(),
+                }
+              : s,
+          ),
+        }));
+        return entryId;
+      },
+      resolveProposedLearning: (id, entryId, approve) =>
+        set((state) => ({
+          skills: state.skills.map((s) =>
+            s.id === id
+              ? {
+                  ...s,
+                  learned: resolveLearned(s.learned, entryId, approve),
+                  updatedAt: Date.now(),
+                }
+              : s,
+          ),
+        })),
       graduateSkill: (id) =>
         set((state) => ({
           skills: state.skills.map((s) =>
@@ -276,17 +432,13 @@ export const useSkillsStore = create<SkillsState>()(
     {
       name: "@jagentdesk:skills",
       storage: createJSONStorage(() => AsyncStorage),
-      version: 3,
-      // v2→v3 adds the training/leveling fields. Backfill any skill (starter or
-      // user-made) that predates them so the library renders levels without
-      // clobbering names/instructions/edits. Also append new starter skills.
+      version: 4,
+      // v2→v3 added training/leveling fields. v3→v4 adds `learned` (knowledge from
+      // real conversations) — backfill it, and migrate any legacy hand-typed
+      // corrections in `examples` into approved learned entries so nothing is lost.
       migrate: (persisted) => {
         const state = (persisted as { skills?: Partial<Skill>[] } | undefined) ?? { skills: [] };
-        const existing = (state.skills ?? []).map((s) => ({
-          ...baseFields(),
-          ...s,
-          examples: s.examples ?? [],
-        })) as Skill[];
+        const existing = (state.skills ?? []).map(migrateSkillToV4);
         const have = new Set(existing.map((s) => s.id));
         const missing = STARTER_SKILLS.filter((s) => !have.has(s.id));
         return { ...state, skills: [...existing, ...missing] };
