@@ -99,6 +99,8 @@ import {
   HostTerminalsPage,
 } from "@/screens/settings/host-page";
 import { HostOrchestrationPage } from "@/screens/settings/orchestration-page";
+import { HostPluginsPage } from "@/screens/settings/plugins-page";
+import { useHostFeature } from "@/runtime/host-features";
 import ProjectsScreen from "@/screens/projects-screen";
 import ProjectSettingsScreen from "@/screens/project-settings-screen";
 import { SETTINGS_DESKTOP_SIDEBAR_WIDTH, useIsCompactFormFactor } from "@/constants/layout";
@@ -173,6 +175,7 @@ const HOST_SECTION_ITEMS: HostSectionItem[] = [
   { id: "providers", labelKey: "settings.hostSections.providers", icon: Boxes },
   { id: "usage", labelKey: "settings.hostSections.usage", icon: Gauge },
   { id: "terminals", labelKey: "settings.hostSections.terminals", icon: SquareTerminal },
+  { id: "plugins", labelKey: "settings.hostSections.plugins", icon: Puzzle },
 ];
 
 function renderHostSettingsContent(
@@ -199,6 +202,8 @@ function renderHostSettingsContent(
       return <HostUsagePage serverId={view.serverId} />;
     case "terminals":
       return <HostTerminalsPage serverId={view.serverId} />;
+    case "plugins":
+      return <HostPluginsPage serverId={view.serverId} />;
     case "host":
       return <HostSettingsPage serverId={view.serverId} onHostRemoved={onHostRemoved} />;
   }
@@ -738,6 +743,10 @@ function SettingsSidebar({
   const enableBuiltInDaemonOption = useEnableBuiltInDaemonOption();
   const isDesktopApp = isElectronRuntime();
   const items = SIDEBAR_SECTION_ITEMS.filter((item) => !item.desktopOnly || isDesktopApp);
+  const pluginManagementSupported = useHostFeature(activeHostServerId, "pluginManagement");
+  const hostSectionItems = HOST_SECTION_ITEMS.filter(
+    (item) => item.id !== "plugins" || pluginManagementSupported,
+  );
   const insets = useSafeAreaInsets();
   const isDesktop = layout === "desktop";
   const outerContainerStyle = useMemo(
@@ -779,7 +788,7 @@ function SettingsSidebar({
             onAddHost={onAddHost}
             enableBuiltInDaemonOption={enableBuiltInDaemonOption}
           />
-          {HOST_SECTION_ITEMS.map((item) => (
+          {hostSectionItems.map((item) => (
             <SidebarHostSectionButton
               key={item.id}
               itemId={item.id}

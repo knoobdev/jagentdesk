@@ -1,3 +1,5 @@
+import { pluginSettings } from "./plugin-settings";
+
 export const en = {
   common: {
     back: "Back",
@@ -1647,7 +1649,9 @@ export const en = {
       vimKeybindings: "Vim keybindings",
       vimHint: "Applies to source files on web and desktop.",
     },
+    plugins: pluginSettings.en,
     hostSections: {
+      plugins: "Plugins",
       projects: "Projects",
       connections: "Connections",
       agents: "Agents",

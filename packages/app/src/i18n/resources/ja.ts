@@ -1,4 +1,5 @@
 import type { TranslationResources } from "./en";
+import { pluginSettings } from "./plugin-settings";
 
 export const ja: TranslationResources = {
   common: {
@@ -1608,7 +1609,9 @@ export const ja: TranslationResources = {
       vimKeybindings: "Vim キーバインド",
       vimHint: "Web とデスクトップのソースファイルに適用されます。",
     },
+    plugins: pluginSettings.ja,
     hostSections: {
+      plugins: "プラグイン",
       projects: "プロジェクト",
       connections: "接続",
       agents: "エージェント",

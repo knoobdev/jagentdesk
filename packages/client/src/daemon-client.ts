@@ -4632,6 +4632,16 @@ export class DaemonClient {
     });
   }
 
+  async getPluginCatalog(): Promise<Array<{ id: string; clientBundle: string }>> {
+    const requestId = this.createRequestId();
+    const payload = await this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "plugin.catalog.get.request", requestId },
+      responseType: "plugin.catalog.get.response",
+    });
+    return payload.plugins;
+  }
+
   async listPlugins(): Promise<PluginListItem[]> {
     const requestId = this.createRequestId();
     const payload = await this.sendCorrelatedSessionRequest({
@@ -4640,6 +4650,22 @@ export class DaemonClient {
       responseType: "plugin.list.response",
     });
     return payload.plugins;
+  }
+
+  async invokePluginRpc(pluginId: string, method: string, input: unknown): Promise<unknown> {
+    const requestId = this.createRequestId();
+    const payload = await this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "plugin.rpc.invoke.request",
+        requestId,
+        pluginId,
+        method,
+        input,
+      },
+      responseType: "plugin.rpc.invoke.response",
+    });
+    return payload.output;
   }
 
   async getPluginLogs(pluginId: string): Promise<PluginLogEntry[]> {
@@ -4660,6 +4686,16 @@ export class DaemonClient {
       responseType: "plugin.directory.install.response",
     });
     return payload.plugin;
+  }
+
+  async inspectDirectoryPlugin(path: string): Promise<{ id: string }> {
+    const requestId = this.createRequestId();
+    const payload = await this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "plugin.directory.inspect.request", requestId, path },
+      responseType: "plugin.directory.inspect.response",
+    });
+    return { id: payload.id };
   }
 
   async reloadPlugin(pluginId: string): Promise<PluginListItem> {

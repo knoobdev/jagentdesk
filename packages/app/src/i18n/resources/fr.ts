@@ -1,4 +1,5 @@
 import type { TranslationResources } from "./en";
+import { pluginSettings } from "./plugin-settings";
 
 export const fr: TranslationResources = {
   common: {
@@ -1638,7 +1639,9 @@ export const fr: TranslationResources = {
       vimKeybindings: "Raccourcis Vim",
       vimHint: "S’applique aux fichiers source sur le web et le bureau.",
     },
+    plugins: pluginSettings.fr,
     hostSections: {
+      plugins: "Plugins",
       projects: "Projets",
       connections: "Relations",
       agents: "Agents",

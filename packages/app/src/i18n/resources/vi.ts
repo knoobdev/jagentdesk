@@ -1,5 +1,7 @@
 // Vietnamese (Tiếng Việt). Partial translation of the app shell; any missing key
 // falls back to English (i18next fallbackLng: "en"). Extend incrementally.
+import { pluginSettings } from "./plugin-settings";
+
 export const vi = {
   common: {
     back: "Quay lại",
@@ -234,6 +236,7 @@ export const vi = {
     },
   },
   settings: {
+    plugins: pluginSettings.vi,
     general: {
       language: {
         label: "Ngôn ngữ",

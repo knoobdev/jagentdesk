@@ -1,4 +1,5 @@
 import type { TranslationResources } from "./en";
+import { pluginSettings } from "./plugin-settings";
 
 export const ptBR: TranslationResources = {
   common: {
@@ -1621,7 +1622,9 @@ export const ptBR: TranslationResources = {
       vimKeybindings: "Atalhos do Vim",
       vimHint: "Aplica-se a arquivos-fonte na web e no desktop.",
     },
+    plugins: pluginSettings["pt-BR"],
     hostSections: {
+      plugins: "Plugins",
       projects: "Projetos",
       connections: "Conexões",
       agents: "Agentes",

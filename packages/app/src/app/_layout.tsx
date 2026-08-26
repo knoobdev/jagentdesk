@@ -21,6 +21,7 @@ import { GestureDetector, GestureHandlerRootView } from "react-native-gesture-ha
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { StyleSheet, UnistylesRuntime, useUnistyles } from "react-native-unistyles";
+import { PluginCatalogSync } from "@/plugins";
 import { CommandCenter } from "@/command-center/command-center";
 import { CommandCenterRootActions } from "@/command-center/root-registration";
 import { CommandCenterProvider } from "@/command-center/provider";
@@ -273,7 +274,7 @@ function ManagedDaemonSession({ daemon }: { daemon: HostProfile }) {
 
   return (
     <SessionProvider key={daemon.serverId} serverId={daemon.serverId} client={client}>
-      {null}
+      <PluginCatalogSync serverId={daemon.serverId} client={client} />
     </SessionProvider>
   );
 }

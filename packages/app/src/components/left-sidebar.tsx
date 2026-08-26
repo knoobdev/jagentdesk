@@ -32,6 +32,7 @@ import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 import { resolveDesktopSidebarWidth } from "@/components/desktop-sidebar-layout";
 import { HostPicker } from "@/components/hosts/host-picker";
 import { SidebarHeaderRow } from "@/components/sidebar/sidebar-header-row";
+import { PluginSidebarItems } from "@/plugins";
 import { SidebarDisplayPreferencesMenu } from "@/components/sidebar/sidebar-display-preferences-menu";
 import { SidebarHelpMenu } from "@/components/sidebar/sidebar-help-menu";
 import { SidebarResizeHandle } from "@/components/sidebar-resize-handle";
@@ -836,6 +837,7 @@ function MobileSidebar({
               testID="sidebar-insights-nav"
               variant="compact"
             />
+            <PluginSidebarItems onBeforeNavigate={closeSidebar} />
           </View>
         )}
         <WindowChromeSafeArea placement="inline" style={styles.mobileCloseButtonRow}>
@@ -1062,6 +1064,7 @@ function DesktopSidebar({
                 testID="sidebar-insights-nav"
                 variant="compact"
               />
+              <PluginSidebarItems />
             </View>
           )}
         </View>

@@ -1,4 +1,5 @@
 import type { TranslationResources } from "./en";
+import { pluginSettings } from "./plugin-settings";
 
 export const zhCN: TranslationResources = {
   common: {
@@ -1576,7 +1577,9 @@ export const zhCN: TranslationResources = {
       vimKeybindings: "Vim 键位",
       vimHint: "适用于网页和桌面端的源文件。",
     },
+    plugins: pluginSettings["zh-CN"],
     hostSections: {
+      plugins: "插件",
       projects: "项目",
       connections: "连接",
       agents: "Agents",
