@@ -172,17 +172,13 @@ export function SidebarClusterNav({
 
       <ScrollView style={styles.nav} contentContainerStyle={styles.navContent}>
         {grouped.map((group) => (
-          <View key={group.category}>
-            <Text style={styles.categoryHeader}>{group.category}</Text>
-            {group.kinds.map((k) => (
-              <KindRow
-                key={k.kind}
-                kind={k.kind}
-                active={!showingHelm && selectedKind === k.kind}
-                onSelect={handleSelectKind}
-              />
-            ))}
-          </View>
+          <NavGroup
+            key={group.category}
+            group={group}
+            showingHelm={showingHelm}
+            selectedKind={selectedKind}
+            onSelect={handleSelectKind}
+          />
         ))}
         <Text style={styles.categoryHeader}>Helm</Text>
         <Pressable style={[styles.row, showingHelm && styles.rowActive]} onPress={handleSelectHelm}>
@@ -190,6 +186,46 @@ export function SidebarClusterNav({
           <Text style={[styles.rowLabel, showingHelm && styles.rowLabelActive]}>Releases</Text>
         </Pressable>
       </ScrollView>
+    </View>
+  );
+}
+
+// A category group in the resource tree. Long groups (notably "Custom"/CRDs on
+// clusters with many CRDs) are capped with a Show more / Show less toggle so the
+// tree stays navigable.
+const GROUP_CAP = 8;
+function NavGroup({
+  group,
+  showingHelm,
+  selectedKind,
+  onSelect,
+}: {
+  group: { category: string; kinds: KindInfo[] };
+  showingHelm: boolean;
+  selectedKind: string | null;
+  onSelect: (kind: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const overflow = group.kinds.length > GROUP_CAP;
+  const visible = expanded || !overflow ? group.kinds : group.kinds.slice(0, GROUP_CAP);
+  return (
+    <View>
+      <Text style={styles.categoryHeader}>{group.category}</Text>
+      {visible.map((k) => (
+        <KindRow
+          key={k.kind}
+          kind={k.kind}
+          active={!showingHelm && selectedKind === k.kind}
+          onSelect={onSelect}
+        />
+      ))}
+      {overflow ? (
+        <Pressable style={styles.showMore} onPress={() => setExpanded((v) => !v)}>
+          <Text style={styles.showMoreText}>
+            {expanded ? "Show less" : `Show ${group.kinds.length - GROUP_CAP} more`}
+          </Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -248,6 +284,15 @@ const styles = StyleSheet.create((theme: Theme) => ({
     paddingHorizontal: theme.spacing[2],
     paddingTop: theme.spacing[3],
     paddingBottom: theme.spacing[1],
+  },
+  showMore: {
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
+  },
+  showMoreText: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.accent,
   },
   row: {
     flexDirection: "row",

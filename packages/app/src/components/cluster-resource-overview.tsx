@@ -105,10 +105,12 @@ const KIND_ROWS: Record<string, (p: Push, spec: Obj, status: Obj, md: Obj, data?
     p("Active", asArr(status.active).length || undefined);
     p("Last Schedule", str(status.lastScheduleTime));
   },
-  ConfigMap: (p, _spec, _status, _md, data) => p("Keys", Object.keys(asObj(data)).join(", ")),
+  // ConfigMap keys/values are rendered as a dedicated Data table below, not as
+  // a single joined summary row.
+  ConfigMap: () => {},
   Secret: (p, spec, _status, _md, data) => {
     p("Type", spec.type);
-    p("Keys", Object.keys(asObj(data)).join(", "));
+    p("Keys", str(Object.keys(asObj(data)).length));
   },
   PersistentVolumeClaim: (p, spec, status) => {
     p("Status", status.phase);
@@ -203,7 +205,7 @@ export function ClusterResourceOverview({
   eventsNamespace?: string;
   eventsName?: string;
 }) {
-  const { rows, labels, annotations, containers, conditions } = useMemo(() => {
+  const { rows, labels, annotations, containers, conditions, dataEntries } = useMemo(() => {
     const md = asObj(obj.metadata);
     const spec = asObj(obj.spec);
     const status = asObj(obj.status);
@@ -211,6 +213,10 @@ export function ClusterResourceOverview({
     const statusByName = new Map(cs.map((c) => [str(c.name) ?? "", c]));
     return {
       rows: buildRows(kind, spec, status, md, asObj(obj.data)),
+      dataEntries:
+        kind === "ConfigMap" || kind === "Secret"
+          ? Object.entries(asObj(obj.data)).map(([k, v]) => [k, str(v) ?? ""] as [string, string])
+          : [],
       labels: Object.entries(asObj(md.labels)).map(
         ([k, v]) => [k, str(v) ?? ""] as [string, string],
       ),
@@ -241,6 +247,28 @@ export function ClusterResourceOverview({
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Details</Text>
           <SummarySection rows={rows} />
+        </View>
+      ) : null}
+
+      {dataEntries.length > 0 ? (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Data</Text>
+          <View style={styles.grid}>
+            {dataEntries.map(([k, v]) => (
+              <View key={k} style={styles.dataRow}>
+                <Text style={styles.dataKey} selectable numberOfLines={1}>
+                  {k}
+                </Text>
+                <Text
+                  style={styles.dataValue}
+                  selectable={kind !== "Secret"}
+                  numberOfLines={kind === "Secret" ? 1 : 8}
+                >
+                  {kind === "Secret" ? "•••••••• (reveal to view)" : v}
+                </Text>
+              </View>
+            ))}
+          </View>
         </View>
       ) : null}
 
@@ -351,6 +379,30 @@ const styles = StyleSheet.create((theme: Theme) => ({
     minWidth: 0,
     fontSize: theme.fontSize.sm,
     color: theme.colors.foreground,
+  },
+  dataRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: theme.spacing[3],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+  },
+  dataKey: {
+    width: 160,
+    flexShrink: 0,
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foregroundMuted,
+    fontFamily: theme.fontFamily.mono,
+  },
+  dataValue: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: theme.fontSize.code,
+    color: theme.colors.foreground,
+    fontFamily: theme.fontFamily.mono,
   },
   containerRow: {
     flexDirection: "row",

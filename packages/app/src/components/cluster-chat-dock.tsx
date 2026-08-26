@@ -480,6 +480,14 @@ export function ClusterChatDock({
             {clusterName}
           </Text>
           <Pressable
+            style={styles.closeBtn}
+            onPress={handleNewChat}
+            accessibilityLabel="New chat"
+            hitSlop={8}
+          >
+            <ThemedPlus size={16} uniProps={mutedColor} />
+          </Pressable>
+          <Pressable
             style={historyOpen ? [styles.closeBtn, styles.headerBtnActive] : styles.closeBtn}
             onPress={handleToggleHistory}
             accessibilityLabel="Chat history"

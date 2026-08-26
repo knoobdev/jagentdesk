@@ -49,6 +49,13 @@ export async function runOrchestrateClientCommand(deps: {
   }
 }
 
+/** A concise, human-facing title for the Supervisor agent, from the objective. */
+function orchestrationAgentTitle(rawRequest: string): string {
+  const first = rawRequest.split("\n")[0]?.trim() ?? "";
+  if (!first) return "Orchestration";
+  return first.length > 60 ? `${first.slice(0, 57).trimEnd()}…` : first;
+}
+
 export async function startOrchestrationObjective(deps: {
   client: OrchestrationClient;
   config: OrchestrationConfig;
@@ -102,6 +109,10 @@ export async function startOrchestrationObjective(deps: {
       model: profile.model,
       thinkingOptionId: profile.thinkingOptionId,
       initialPrompt: prompt,
+      // Give the Supervisor an explicit, meaningful title. Without one the agent
+      // (and the whole ORC workspace's sidebar row) falls back to the git branch
+      // name — which reads as a bogus "main" agent.
+      title: orchestrationAgentTitle(rawRequest),
       labels: {
         [ORCHESTRATION_ROLE_LABEL]: "supervisor",
         "jagentdesk.orchestration.workspace-id": workspaceId,

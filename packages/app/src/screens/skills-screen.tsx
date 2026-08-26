@@ -232,7 +232,7 @@ export function SkillsScreen() {
                 <ThemedX size={17} uniProps={mutedColor} />
               </Pressable>
             </View>
-            <ScrollView style={styles.sheetBody}>
+            <ScrollView style={styles.sheetBody} contentContainerStyle={styles.sheetBodyContent}>
               <View style={styles.fieldRow}>
                 <View style={styles.iconField}>
                   <Text style={styles.label}>Icon</Text>
@@ -452,6 +452,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     color: theme.colors.foreground,
   },
   sheetBody: { paddingHorizontal: theme.spacing[4], paddingTop: theme.spacing[3] },
+  sheetBodyContent: { paddingBottom: theme.spacing[6] },
   fieldRow: { flexDirection: "row", gap: theme.spacing[3] },
   iconField: { width: 72 },
   nameField: { flex: 1 },
