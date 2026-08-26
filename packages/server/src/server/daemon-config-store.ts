@@ -99,6 +99,26 @@ function omitProvidersFromConfig<T extends { providers?: Record<string, unknown>
   return changed ? ({ ...config, providers: nextProviders } as T) : config;
 }
 
+function omitPluginsFromConfig<T extends { plugins?: Record<string, unknown> }>(
+  config: T,
+  plugins: readonly string[],
+): T {
+  if (plugins.length === 0 || !config.plugins) {
+    return config;
+  }
+
+  let changed = false;
+  const nextPlugins = { ...config.plugins };
+  for (const plugin of plugins) {
+    if (plugin in nextPlugins) {
+      delete nextPlugins[plugin];
+      changed = true;
+    }
+  }
+
+  return changed ? ({ ...config, plugins: nextPlugins } as T) : config;
+}
+
 function omitMetadataGenerationProvidersFromConfig<
   T extends { metadataGeneration?: { providers?: Array<{ provider?: unknown }> } },
 >(config: T, providers: readonly string[]): T {
@@ -198,8 +218,9 @@ export class DaemonConfigStore {
 
   public patch(partial: MutableDaemonConfigPatch): MutableDaemonConfig {
     const parsedPatch = MutableDaemonConfigPatchSchema.parse(partial);
-    const { removeProviders = [], ...configPatch } = parsedPatch;
+    const { removeProviders = [], removePlugins = [], ...configPatch } = parsedPatch;
     const removedProviders = Array.from(new Set(removeProviders));
+    const removedPlugins = Array.from(new Set(removePlugins));
     let removedRoleIds: string[] = [];
     if (configPatch.orchestration && "removeRoleIds" in configPatch.orchestration) {
       const { removeRoleIds, ...orchestrationRest } = configPatch.orchestration;
@@ -210,9 +231,12 @@ export class DaemonConfigStore {
     }
     const merged = omitOrchestrationRoles(deepMerge(this.current, configPatch), removedRoleIds);
     const next = MutableDaemonConfigSchema.parse(
-      omitMetadataGenerationProvidersFromConfig(
-        omitProvidersFromConfig(merged, removedProviders),
-        removedProviders,
+      omitPluginsFromConfig(
+        omitMetadataGenerationProvidersFromConfig(
+          omitProvidersFromConfig(merged, removedProviders),
+          removedProviders,
+        ),
+        removedPlugins,
       ),
     );
 
@@ -221,7 +245,7 @@ export class DaemonConfigStore {
     });
     const configChanged = !isEqualValue(this.current, next);
 
-    if (!configChanged && removedProviders.length === 0) {
+    if (!configChanged && removedProviders.length === 0 && removedPlugins.length === 0) {
       return this.current;
     }
 

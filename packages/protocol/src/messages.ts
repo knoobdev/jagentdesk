@@ -266,6 +266,9 @@ export const MutableDaemonConfigPatchSchema = z
     orchestration: OrchestrationConfigPatchSchema.optional(),
     pluginsEnabled: z.boolean().optional(),
     plugins: z.record(PluginIdSchema, PluginSourceSchema).optional(),
+    // Delete plugin entries by id (the `plugins` record is deep-merged, so a
+    // key can't be removed by omission — mirror removeProviders). See ADR-0014.
+    removePlugins: z.array(PluginIdSchema).optional(),
   })
   .partial()
   .strip();

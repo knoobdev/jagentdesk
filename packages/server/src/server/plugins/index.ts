@@ -177,9 +177,9 @@ export class PluginService {
   async removePlugin(pluginId: string): Promise<void> {
     this.requireSource(pluginId);
     const stopping = this.runtime.stopPluginById(pluginId);
-    const sources = { ...this.configStore.get().plugins };
-    delete sources[pluginId];
-    this.configStore.patch({ plugins: sources });
+    // The `plugins` record is deep-merged on patch, so omitting a key does not
+    // delete it — use the explicit removePlugins escape hatch. See ADR-0014.
+    this.configStore.patch({ removePlugins: [pluginId] });
     await this.enqueue(async () => {
       await stopping;
       this.runtime.clearLogs(pluginId);
