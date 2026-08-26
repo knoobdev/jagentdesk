@@ -616,6 +616,24 @@ export interface AgentPermissionResult {
   followUpPrompt?: AgentPromptInput;
 }
 
+/**
+ * Options for {@link AgentSession.steerActiveTurn}. `expectedTurnId` guards the
+ * injection: the provider only steers if the currently-active turn still equals
+ * the turn the caller observed, otherwise it returns `unavailable`. See ADR-0013.
+ */
+export interface SteerActiveTurnOptions extends AgentRunOptions {
+  expectedTurnId: string;
+}
+
+/**
+ * Result of a steer attempt.
+ * - `accepted`: the message was injected into the active turn.
+ * - `unavailable`: the turn could not be steered (provider unsupported, turn
+ *   already ended, or `expectedTurnId` no longer matches). The caller then
+ *   safely falls back to interrupt-and-replace.
+ */
+export type SteerResult = { status: "accepted" } | { status: "unavailable" };
+
 export interface AgentSession {
   readonly provider: AgentProvider;
   readonly id: string | null;
@@ -656,6 +674,14 @@ export interface AgentSession {
   tryHandleOutOfBand?(prompt: AgentPromptInput): {
     run(ctx: { emit: (event: AgentStreamEvent) => void }): Promise<void>;
   } | null;
+  /**
+   * Inject a user message into the currently-active turn without cancelling it
+   * ("steering"). Only defined by providers that support mid-turn injection.
+   * Must re-check that `options.expectedTurnId` still owns the active turn both
+   * before and after building the message, returning `{ status: "unavailable" }`
+   * if not (the manager then falls back to interrupt). See ADR-0013.
+   */
+  steerActiveTurn?(prompt: AgentPromptInput, options: SteerActiveTurnOptions): Promise<SteerResult>;
 }
 
 export type FetchCatalogOptions =

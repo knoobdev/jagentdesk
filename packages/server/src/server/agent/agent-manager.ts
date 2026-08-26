@@ -42,6 +42,7 @@ import {
   type ImportedTimelineEntry,
   type ImportableProviderSession,
   type ListImportableSessionsOptions,
+  type SteerResult,
 } from "./agent-sdk-types.js";
 import { buildArchivedAgentRecord, type ArchivedStoredAgentRecord } from "./agent-archive.js";
 import type { StoredAgentRecord, AgentStorage } from "./agent-storage.js";
@@ -2254,6 +2255,35 @@ export class AgentManager {
       }
       throw error;
     }
+  }
+
+  /**
+   * Inject a message into the agent's live foreground turn without cancelling it
+   * ("steering"). Returns `{ status: "unavailable" }` when the provider doesn't
+   * support steering or the active turn can't be steered right now, so the caller
+   * can fall back to interrupt-and-replace. The injected user message is emitted
+   * by the provider (stamped with the active turnId and any clientMessageId) and
+   * persisted through the normal event pipeline. See ADR-0013.
+   */
+  async steerActiveTurn(
+    agentId: string,
+    prompt: AgentPromptInput,
+    options?: AgentRunOptions,
+  ): Promise<SteerResult> {
+    const agent = this.requireSessionAgent(agentId);
+    const expectedTurnId = agent.activeForegroundTurnId;
+    if (!expectedTurnId || !agent.session.steerActiveTurn) {
+      return { status: "unavailable" };
+    }
+    const result = await agent.session.steerActiveTurn(prompt, {
+      ...options,
+      expectedTurnId,
+    });
+    if (result.status === "accepted") {
+      this.touchUpdatedAt(agent);
+      this.emitState(agent);
+    }
+    return result;
   }
 
   async waitForAgentRunStart(agentId: string, options?: WaitForAgentStartOptions): Promise<void> {

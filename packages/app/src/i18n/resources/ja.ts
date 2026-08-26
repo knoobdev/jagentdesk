@@ -1635,10 +1635,13 @@ export const ja: TranslationResources = {
       defaultSend: {
         label: "デフォルトの送信",
         descriptions: {
+          steer:
+            "エージェント実行中、Enterは進行中のターンを中断せずに誘導します（誘導できない場合は中断にフォールバック）。",
           interrupt: "エージェント実行中、Enterで中断します。Command/Ctrl+Enterでキューに追加。",
           queue: "エージェント実行中、Enterでキューに追加します。Command/Ctrl+Enterで送信。",
         },
         options: {
+          steer: "ステアリング",
           interrupt: "中断",
           queue: "キュー",
         },

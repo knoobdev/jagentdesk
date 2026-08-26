@@ -239,6 +239,91 @@ test("sendPromptToAgent defers instead of interrupting an agent awaiting a user 
   expect(streamAgentSpy).not.toHaveBeenCalled();
 });
 
+function createSteerAgentManager(steerStatus: "accepted" | "unavailable") {
+  const agent: ManagedAgent = Object.create(null);
+  Reflect.set(agent, "id", "agent-1");
+  Reflect.set(agent, "provider", "claude");
+
+  const streamAgentSpy = vi.fn(() => (async function* noop() {})());
+  const replaceAgentRunSpy = vi.fn(async () => (async function* noop() {})());
+  const steerSpy = vi.fn(async () => ({ status: steerStatus }));
+  const agentManager: AgentManager = Object.create(AgentManager.prototype);
+  Reflect.set(
+    agentManager,
+    "getAgent",
+    vi.fn(() => agent),
+  );
+  Reflect.set(agentManager, "tryRunOutOfBand", vi.fn().mockReturnValue(false));
+  Reflect.set(agentManager, "hasInFlightRun", vi.fn().mockReturnValue(true));
+  Reflect.set(agentManager, "hasPendingPermissions", vi.fn().mockReturnValue(false));
+  Reflect.set(agentManager, "deferPromptUntilPermissionResolved", vi.fn());
+  Reflect.set(agentManager, "streamAgent", streamAgentSpy);
+  Reflect.set(agentManager, "replaceAgentRun", replaceAgentRunSpy);
+  Reflect.set(agentManager, "steerActiveTurn", steerSpy);
+
+  const agentStorage: AgentStorage = Object.create(AgentStorage.prototype);
+  Reflect.set(
+    agentStorage,
+    "get",
+    vi.fn(async () => null),
+  );
+
+  return { agentManager, agentStorage, streamAgentSpy, replaceAgentRunSpy, steerSpy };
+}
+
+test("sendPromptToAgent steers the live turn without interrupting when steer is accepted", async () => {
+  const { agentManager, agentStorage, streamAgentSpy, replaceAgentRunSpy, steerSpy } =
+    createSteerAgentManager("accepted");
+
+  const result = await sendPromptToAgent({
+    agentManager,
+    agentStorage,
+    agentId: "agent-1",
+    prompt: "steer me",
+    activeTurnBehavior: "steer",
+    logger: createTestLogger(),
+  });
+
+  expect(steerSpy).toHaveBeenCalledWith("agent-1", "steer me", undefined);
+  expect(result).toEqual({ outOfBand: false, steered: true });
+  expect(replaceAgentRunSpy).not.toHaveBeenCalled();
+  expect(streamAgentSpy).not.toHaveBeenCalled();
+});
+
+test("sendPromptToAgent falls back to interrupt when steering is unavailable", async () => {
+  const { agentManager, agentStorage, replaceAgentRunSpy, steerSpy } =
+    createSteerAgentManager("unavailable");
+
+  const result = await sendPromptToAgent({
+    agentManager,
+    agentStorage,
+    agentId: "agent-1",
+    prompt: "steer me",
+    activeTurnBehavior: "steer",
+    logger: createTestLogger(),
+  });
+
+  expect(steerSpy).toHaveBeenCalledTimes(1);
+  expect(replaceAgentRunSpy).toHaveBeenCalledWith("agent-1", "steer me", undefined);
+  expect(result).toEqual({ outOfBand: false });
+});
+
+test("sendPromptToAgent interrupts (never steers) when behavior is left default", async () => {
+  const { agentManager, agentStorage, replaceAgentRunSpy, steerSpy } =
+    createSteerAgentManager("accepted");
+
+  await sendPromptToAgent({
+    agentManager,
+    agentStorage,
+    agentId: "agent-1",
+    prompt: "no steer",
+    logger: createTestLogger(),
+  });
+
+  expect(steerSpy).not.toHaveBeenCalled();
+  expect(replaceAgentRunSpy).toHaveBeenCalledWith("agent-1", "no steer", undefined);
+});
+
 test("finish notifications tell the parent the child's last assistant message", async () => {
   const scenario = createFinishNotificationScenario({
     childLastAssistantMessage: "Implemented the cleanup and all checks pass.",

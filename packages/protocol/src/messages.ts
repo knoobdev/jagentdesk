@@ -1093,6 +1093,16 @@ const ImageAttachmentSchema = z.object({
   mimeType: z.string(), // e.g., "image/jpeg", "image/png"
 });
 
+/**
+ * How to treat a message sent while the agent is mid-turn.
+ * - "interrupt": cancel the running turn and start a new one with this message.
+ * - "steer": inject this message into the *running* turn without cancelling it,
+ *   falling back to "interrupt" when the provider/turn can't be steered.
+ * Absent ⇒ server treats as "interrupt" (backward compatible). See ADR-0013.
+ */
+export const ActiveTurnBehaviorSchema = z.enum(["interrupt", "steer"]);
+export type ActiveTurnBehavior = z.infer<typeof ActiveTurnBehaviorSchema>;
+
 export const SendAgentMessageSchema = z.object({
   type: z.literal("send_agent_message"),
   agentId: z.string(),
@@ -1100,6 +1110,7 @@ export const SendAgentMessageSchema = z.object({
   messageId: z.string().optional(), // Client-provided ID for deduplication
   images: z.array(ImageAttachmentSchema).optional(),
   attachments: AgentAttachmentsSchema,
+  activeTurnBehavior: ActiveTurnBehaviorSchema.optional(),
 });
 
 // ============================================================================
@@ -1222,6 +1233,7 @@ export const SendAgentMessageRequestSchema = z.object({
   messageId: z.string().optional(), // Client-provided ID for deduplication
   images: z.array(ImageAttachmentSchema).optional(),
   attachments: AgentAttachmentsSchema,
+  activeTurnBehavior: ActiveTurnBehaviorSchema.optional(),
 });
 
 export const WaitForFinishRequestSchema = z.object({

@@ -98,7 +98,7 @@ import { createMessageSubmissionWriter } from "@/composer/submission/writer";
 import { ComposerKeyboardScopeProvider } from "@/composer/keyboard-scope";
 import { useAppSettings } from "@/hooks/use-settings";
 import { isWeb, isNative } from "@/constants/platform";
-import type { ForgeSearchItem } from "@jagentdesk/protocol/messages";
+import type { ActiveTurnBehavior, ForgeSearchItem } from "@jagentdesk/protocol/messages";
 import type {
   AttachmentMetadata,
   ComposerAttachment,
@@ -1193,7 +1193,13 @@ export function Composer({
   const { pickFiles } = useFilePicker();
   const agentIdRef = useRef(agentId);
   const sendAgentMessageRef = useRef<
-    ((agentId: string, text: string, attachments: ComposerAttachment[]) => Promise<void>) | null
+    | ((
+        agentId: string,
+        text: string,
+        attachments: ComposerAttachment[],
+        activeTurnBehavior?: ActiveTurnBehavior,
+      ) => Promise<void>)
+    | null
   >(null);
   const onSubmitMessageRef = useRef(onSubmitMessage);
 
@@ -1245,7 +1251,11 @@ export function Composer({
   }, [focusInput, onFocusInput]);
 
   const submitMessage = useCallback(
-    async (text: string, submitAttachments: ComposerAttachment[]) => {
+    async (
+      text: string,
+      submitAttachments: ComposerAttachment[],
+      activeTurnBehavior?: ActiveTurnBehavior,
+    ) => {
       onMessageSent?.();
       if (onSubmitMessageRef.current) {
         await onSubmitMessageRef.current({ text, attachments: submitAttachments, cwd });
@@ -1254,7 +1264,12 @@ export function Composer({
       if (!sendAgentMessageRef.current) {
         throw new Error(t("workspace.terminal.hostDisconnected"));
       }
-      await sendAgentMessageRef.current(agentIdRef.current, text, submitAttachments);
+      await sendAgentMessageRef.current(
+        agentIdRef.current,
+        text,
+        submitAttachments,
+        activeTurnBehavior,
+      );
     },
     [cwd, onMessageSent, t],
   );
@@ -1268,6 +1283,7 @@ export function Composer({
       targetAgentId: string,
       text: string,
       sendAttachments: ComposerAttachment[],
+      activeTurnBehavior?: ActiveTurnBehavior,
     ) => {
       if (!client) {
         throw new Error(t("workspace.terminal.hostDisconnected"));
@@ -1282,6 +1298,7 @@ export function Composer({
         }),
         encodeImages,
         submission: createMessageSubmissionWriter(serverId),
+        activeTurnBehavior,
       });
       onAttentionPromptSend?.();
     };
@@ -1359,7 +1376,14 @@ export function Composer({
           if (submitBehavior !== "preserve-and-lock") {
             beginSubmit(submitAttachments);
           }
-          await submitMessage(submitText, submitAttachments);
+          // Reaching submitMessage while the agent is running means this is a
+          // deliberate mid-turn send: steer the live turn or interrupt it, per
+          // the user's send-behavior setting. See ADR-0013.
+          let activeTurnBehavior: ActiveTurnBehavior | undefined;
+          if (isAgentRunning) {
+            activeTurnBehavior = appSettings.sendBehavior === "steer" ? "steer" : "interrupt";
+          }
+          await submitMessage(submitText, submitAttachments, activeTurnBehavior);
         },
         clearDraft,
         setUserInput,
@@ -1380,6 +1404,7 @@ export function Composer({
     },
     [
       allowEmptySubmit,
+      appSettings.sendBehavior,
       beginSubmit,
       clearDraft,
       completeSubmit,

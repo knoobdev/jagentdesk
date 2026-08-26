@@ -1674,10 +1674,13 @@ export const en = {
       defaultSend: {
         label: "Default send",
         descriptions: {
+          steer:
+            "When the agent is running, Enter steers the live turn without interrupting it — falling back to interrupt if it can't be steered.",
           interrupt: "When the agent is running, Enter interrupts. Command/Ctrl+Enter queues.",
           queue: "When the agent is running, Enter queues. Command/Ctrl+Enter submits.",
         },
         options: {
+          steer: "Steer",
           interrupt: "Interrupt",
           queue: "Queue",
         },

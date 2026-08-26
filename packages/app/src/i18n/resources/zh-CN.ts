@@ -1603,10 +1603,12 @@ export const zhCN: TranslationResources = {
       defaultSend: {
         label: "默认发送",
         descriptions: {
+          steer: "Agent 运行时，Enter 会在不中断当前回合的情况下进行引导——若无法引导则回退为中断。",
           interrupt: "Agent 运行时，Enter 会中断。Command/Ctrl+Enter 会排队。",
           queue: "Agent 运行时，Enter 会排队。Command/Ctrl+Enter 会提交。",
         },
         options: {
+          steer: "引导",
           interrupt: "中断",
           queue: "排队",
         },

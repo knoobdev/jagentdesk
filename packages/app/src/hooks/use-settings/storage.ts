@@ -10,7 +10,7 @@ export const APP_SETTINGS_QUERY_KEY = ["app-settings"];
 // namespace. New settings are written only under the JAgentDesk namespace.
 const LEGACY_SETTINGS_KEY = "@jagentdesk:settings";
 
-export type SendBehavior = "interrupt" | "queue";
+export type SendBehavior = "interrupt" | "steer" | "queue";
 export type ServiceUrlBehavior = "ask" | "in-app" | "external";
 export type WorkspaceTitleSource = "title" | "branch";
 export type ToolCallDetailLevel = "overview" | "detailed";
@@ -58,7 +58,7 @@ type StoredAppSettings = Partial<AppSettings> & { compactToolCalls?: unknown };
 export const DEFAULT_CLIENT_SETTINGS: AppSettings = {
   theme: "auto",
   language: "system",
-  sendBehavior: "interrupt",
+  sendBehavior: "steer",
   serviceUrlBehavior: "ask",
   terminalScrollbackLines: DEFAULT_TERMINAL_SCROLLBACK_LINES,
   useLegacyTerminalRenderer: false,
@@ -87,9 +87,7 @@ export interface KeyValueStorage {
 export interface DesktopSettingsBridge {
   isElectron(): boolean;
   loadDesktopSettings(): Promise<DesktopSettings>;
-  migrateLegacyDesktopSettings(input: {
-    manageBuiltInDaemon?: boolean;
-  }): Promise<void>;
+  migrateLegacyDesktopSettings(input: { manageBuiltInDaemon?: boolean }): Promise<void>;
 }
 
 export interface SettingsDeps {

@@ -6759,7 +6759,7 @@ export class Session {
         },
         "agent.session.send_agent_message",
       );
-      let dispatchResult: { outOfBand: boolean };
+      let dispatchResult: { outOfBand: boolean; steered?: boolean };
       try {
         dispatchResult = await sendPromptToAgent({
           agentManager: this.agentManager,
@@ -6767,6 +6767,7 @@ export class Session {
           agentId,
           prompt,
           messageId: msg.messageId,
+          activeTurnBehavior: msg.activeTurnBehavior,
           logger: this.sessionLogger,
         });
       } catch (error) {
@@ -6784,7 +6785,9 @@ export class Session {
         return;
       }
 
-      if (dispatchResult.outOfBand) {
+      // A steered message was injected into the already-running turn — there is
+      // no new run to wait for, so ack immediately (like an out-of-band prompt).
+      if (dispatchResult.outOfBand || dispatchResult.steered) {
         this.emit({
           type: "send_agent_message_response",
           payload: {

@@ -109,6 +109,8 @@ import {
   type McpServerConfig,
   type ProviderCatalog,
   type ResolveAgentDefaultModeInput,
+  type SteerActiveTurnOptions,
+  type SteerResult,
 } from "../../agent-sdk-types.js";
 import { importSessionFromPersistence } from "../../provider-session-import.js";
 import {
@@ -2231,6 +2233,43 @@ class ClaudeAgentSession implements AgentSession {
     }
 
     return { turnId };
+  }
+
+  /**
+   * Inject a user message into the live foreground turn without cancelling it.
+   * The Claude Agent SDK streaming input accepts a `priority: "next"` user
+   * message mid-turn; we push it onto the same input queue that owns the active
+   * turn. Guards that `expectedTurnId` still owns the foreground turn both before
+   * and after building the message. See ADR-0013.
+   */
+  async steerActiveTurn(
+    prompt: AgentPromptInput,
+    options: SteerActiveTurnOptions,
+  ): Promise<SteerResult> {
+    if (this.closed) {
+      return { status: "unavailable" };
+    }
+    // Admission: the turn we'd inject into must be exactly the one the caller
+    // observed, and the live query + input stream for it must still exist.
+    if (this.activeForegroundTurnId !== options.expectedTurnId || !this.query || !this.input) {
+      return { status: "unavailable" };
+    }
+    const input = this.input;
+    const sdkMessage = this.toSdkUserMessage(prompt);
+    sdkMessage.priority = "next";
+    // Re-check after building the message: guard against the turn ending (or the
+    // query restarting onto a fresh input) via a re-entrant callback in between.
+    if (this.activeForegroundTurnId !== options.expectedTurnId || this.input !== input) {
+      return { status: "unavailable" };
+    }
+    input.push(sdkMessage);
+    const turnId = options.expectedTurnId;
+    setTimeout(() => {
+      if (this.activeForegroundTurnId === turnId) {
+        this.emitSubmittedUserMessage(sdkMessage, turnId, options.clientMessageId);
+      }
+    }, 0);
+    return { status: "accepted" };
   }
 
   subscribe(callback: (event: AgentStreamEvent) => void): () => void {

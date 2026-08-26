@@ -1,4 +1,4 @@
-import type { ForgeSearchItem } from "@jagentdesk/protocol/messages";
+import type { ActiveTurnBehavior, ForgeSearchItem } from "@jagentdesk/protocol/messages";
 import type {
   AttachmentMetadata,
   ComposerAttachment,
@@ -50,6 +50,7 @@ export interface ComposerSendClient {
       messageId: string;
       images: Array<{ data: string; mimeType: string }>;
       attachments: ReturnType<typeof splitComposerAttachmentsForSubmit>["attachments"];
+      activeTurnBehavior?: ActiveTurnBehavior;
     },
   ) => Promise<void>;
   uploadFile: (input: { fileName: string; mimeType: string; bytes: Uint8Array }) => Promise<{
@@ -176,6 +177,8 @@ export interface DispatchComposerAgentMessageInput {
     images: AttachmentMetadata[],
   ) => Promise<Array<{ data: string; mimeType: string }> | undefined>;
   submission: MessageSubmissionWriter;
+  /** How to treat the message when the agent is mid-turn (see ADR-0013). */
+  activeTurnBehavior?: ActiveTurnBehavior;
 }
 
 export async function dispatchComposerAgentMessage(
@@ -199,6 +202,7 @@ export async function dispatchComposerAgentMessage(
       messageId: clientMessageId,
       images: imagesData ?? [],
       attachments: wirePayload.attachments,
+      ...(input.activeTurnBehavior ? { activeTurnBehavior: input.activeTurnBehavior } : {}),
     });
     input.submission.accept(input.agentId, clientMessageId);
   } catch (error) {

@@ -1666,12 +1666,15 @@ export const fr: TranslationResources = {
       defaultSend: {
         label: "Envoi par défaut",
         descriptions: {
+          steer:
+            "Lorsque l'agent est en cours d'exécution, Entrée oriente le tour en cours sans l'interrompre — repli sur l'interruption si impossible.",
           interrupt:
             "Lorsque l'agent est en cours d'exécution, Entrée interrompt. Commande/Ctrl+Entrée met en file d'attente.",
           queue:
             "Lorsque l'agent est en cours d'exécution, Entrée met en file d'attente. Commande/Ctrl+Entrée envoie.",
         },
         options: {
+          steer: "Orienter",
           interrupt: "Interrompre",
           queue: "File d'attente",
         },

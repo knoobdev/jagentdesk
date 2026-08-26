@@ -1,5 +1,7 @@
 import type { Logger } from "pino";
 
+import type { ActiveTurnBehavior } from "@jagentdesk/protocol/messages";
+
 import type { AgentPromptInput, AgentRunOptions } from "./agent-sdk-types.js";
 import type { AgentManager, ManagedAgent } from "./agent-manager.js";
 import type { AgentStorage } from "./agent-storage.js";
@@ -15,23 +17,30 @@ export type AgentRunController = Pick<
   | "hasInFlightRun"
   | "replaceAgentRun"
   | "streamAgent"
+  | "steerActiveTurn"
   | "hasPendingPermissions"
   | "deferPromptUntilPermissionResolved"
 >;
 
 export interface StartAgentRunOptions {
   replaceRunning?: boolean;
+  /**
+   * How to treat the prompt when a turn is already in flight. "steer" injects it
+   * into the running turn (falling back to interrupt when the provider/turn can't
+   * be steered); "interrupt" (default) cancels and replaces. Only consulted when
+   * `replaceRunning` is set and a run is in flight. See ADR-0013.
+   */
+  activeTurnBehavior?: ActiveTurnBehavior;
   runOptions?: AgentRunOptions;
 }
 
-export async function startAgentRun(
-  agentManager: AgentRunController,
+function logStartRequest(
+  logger: Logger,
   agentId: string,
   prompt: AgentPromptInput,
-  logger: Logger,
+  snapshot: ManagedAgent | null,
   options?: StartAgentRunOptions,
-): Promise<{ outOfBand: boolean }> {
-  const snapshot = agentManager.getAgent(agentId);
+): void {
   logger.trace(
     {
       agentId,
@@ -44,6 +53,46 @@ export async function startAgentRun(
     },
     "agent.session.start_stream.request",
   );
+}
+
+/**
+ * Attempt to steer the live turn (ADR-0013). Returns true only when the message
+ * was injected into the running turn; false means the caller should fall back to
+ * the normal interrupt-and-replace path.
+ */
+async function trySteerActiveTurn(
+  agentManager: AgentRunController,
+  agentId: string,
+  prompt: AgentPromptInput,
+  logger: Logger,
+  options?: StartAgentRunOptions,
+): Promise<boolean> {
+  if (
+    !options?.replaceRunning ||
+    options.activeTurnBehavior !== "steer" ||
+    !agentManager.hasInFlightRun(agentId)
+  ) {
+    return false;
+  }
+  const steerResult = await agentManager.steerActiveTurn(agentId, prompt, options.runOptions);
+  if (steerResult.status !== "accepted") {
+    return false;
+  }
+  logger.trace({ agentId }, "agent.session.start_stream.steered");
+  return true;
+}
+
+export async function startAgentRun(
+  agentManager: AgentRunController,
+  agentId: string,
+  prompt: AgentPromptInput,
+  logger: Logger,
+  options?: StartAgentRunOptions,
+): Promise<{ outOfBand: boolean; steered?: boolean }> {
+  const snapshot = agentManager.getAgent(agentId);
+  const provider = snapshot?.provider;
+  const providerSessionId = snapshot?.persistence?.sessionId ?? undefined;
+  logStartRequest(logger, agentId, prompt, snapshot, options);
   // Out-of-band commands (e.g. /goal pause) must run WITHOUT canceling an
   // in-flight turn — replaceAgentRun would interrupt the running turn. The
   // intercept lives at this layer so it covers every prompt entrypoint.
@@ -62,47 +111,51 @@ export async function startAgentRun(
     agentManager.deferPromptUntilPermissionResolved(agentId, prompt, options?.runOptions);
     return { outOfBand: false };
   }
+  // Steer into the live turn instead of interrupting, when requested and the
+  // provider/turn can accept it. On "unavailable" we fall through to the normal
+  // interrupt-and-replace path below. (Pending-permission runs already deferred
+  // above, so steering never races a paused permission.) See ADR-0013.
+  if (await trySteerActiveTurn(agentManager, agentId, prompt, logger, options)) {
+    return { outOfBand: false, steered: true };
+  }
   const shouldReplace = Boolean(options?.replaceRunning && agentManager.hasInFlightRun(agentId));
   const runOptions = options?.runOptions;
   const iterator = shouldReplace
     ? await agentManager.replaceAgentRun(agentId, prompt, runOptions)
     : agentManager.streamAgent(agentId, prompt, runOptions);
   logger.trace(
-    {
-      agentId,
-      provider: snapshot?.provider,
-      providerSessionId: snapshot?.persistence?.sessionId ?? undefined,
-      shouldReplace,
-    },
+    { agentId, provider, providerSessionId, shouldReplace },
     "agent.session.start_stream.iterator_returned",
   );
-  void (async () => {
-    try {
-      for await (const _ of iterator) {
-        // Events are broadcast via AgentManager subscribers.
-      }
-      logger.trace(
-        {
-          agentId,
-          provider: snapshot?.provider,
-          providerSessionId: snapshot?.persistence?.sessionId ?? undefined,
-        },
-        "agent.session.iterator.drained",
-      );
-    } catch (error) {
-      logger.trace(
-        {
-          agentId,
-          provider: snapshot?.provider,
-          providerSessionId: snapshot?.persistence?.sessionId ?? undefined,
-          err: error,
-        },
-        "agent.session.iterator.error",
-      );
-      logger.error({ err: error, agentId }, "Agent stream failed");
-    }
-  })();
+  void drainAgentRunIterator(iterator, agentId, snapshot, logger);
   return { outOfBand: false };
+}
+
+/**
+ * Drain a started agent-run iterator in the background. Events are broadcast via
+ * AgentManager subscribers, so this only needs to pump the iterator to
+ * completion and log the outcome.
+ */
+async function drainAgentRunIterator(
+  iterator: AsyncGenerator<unknown>,
+  agentId: string,
+  snapshot: ManagedAgent | null,
+  logger: Logger,
+): Promise<void> {
+  const traceBase = {
+    agentId,
+    provider: snapshot?.provider,
+    providerSessionId: snapshot?.persistence?.sessionId ?? undefined,
+  };
+  try {
+    for await (const _ of iterator) {
+      // Events are broadcast via AgentManager subscribers.
+    }
+    logger.trace(traceBase, "agent.session.iterator.drained");
+  } catch (error) {
+    logger.trace({ ...traceBase, err: error }, "agent.session.iterator.error");
+    logger.error({ err: error, agentId }, "Agent stream failed");
+  }
 }
 
 /**
@@ -145,6 +198,8 @@ export interface SendPromptToAgentParams {
   prompt: AgentPromptInput;
   messageId?: string;
   runOptions?: AgentRunOptions;
+  /** How to treat the prompt when a turn is already in flight (see ADR-0013). */
+  activeTurnBehavior?: ActiveTurnBehavior;
   /** Optional mode to set on the agent before the run starts. */
   sessionMode?: string;
   /**
@@ -221,6 +276,7 @@ export async function sendPromptToAgent(
 
   return await startAgentRun(params.agentManager, params.agentId, params.prompt, params.logger, {
     replaceRunning: true,
+    activeTurnBehavior: params.activeTurnBehavior,
     runOptions,
   });
 }

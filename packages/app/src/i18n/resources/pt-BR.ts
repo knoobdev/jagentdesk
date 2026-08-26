@@ -1649,11 +1649,14 @@ export const ptBR: TranslationResources = {
       defaultSend: {
         label: "Envio padrão",
         descriptions: {
+          steer:
+            "Quando o agente está em execução, Enter direciona o turno ativo sem interrompê-lo — recorrendo à interrupção se não for possível direcionar.",
           interrupt:
             "Quando o agente está em execução, Enter interrompe. Command/Ctrl+Enter enfileira.",
           queue: "Quando o agente está em execução, Enter enfileira. Command/Ctrl+Enter envia.",
         },
         options: {
+          steer: "Direcionar",
           interrupt: "Interromper",
           queue: "Fila",
         },

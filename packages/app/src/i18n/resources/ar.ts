@@ -1622,11 +1622,14 @@ export const ar: TranslationResources = {
       defaultSend: {
         label: "إرسال افتراضي",
         descriptions: {
+          steer:
+            "أثناء تشغيل الوكيل، يوجّه Enter الدور الجاري دون مقاطعته — مع الرجوع إلى المقاطعة إذا تعذّر التوجيه.",
           interrupt:
             "عند تشغيل الوكيل، يوقف Enter التشغيل. Command/Ctrl+Enter يضيف إلى قائمة الانتظار.",
           queue: "عند تشغيل الوكيل، يضيف Enter إلى قائمة الانتظار. Command/Ctrl+Enter يرسل.",
         },
         options: {
+          steer: "توجيه",
           interrupt: "مقاطعة",
           queue: "طابور",
         },

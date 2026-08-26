@@ -372,6 +372,8 @@ export interface SendMessageOptions {
   messageId?: string;
   images?: Array<{ data: string; mimeType: string }>;
   attachments?: SendAgentMessageRequest["attachments"];
+  /** How to treat this message when the agent is mid-turn (see ADR-0013). */
+  activeTurnBehavior?: SendAgentMessageRequest["activeTurnBehavior"];
 }
 
 export interface AgentAttentionRequiredNotification {
@@ -3121,6 +3123,7 @@ export class DaemonClient {
       ...(messageId ? { messageId } : {}),
       ...(options?.images ? { images: options.images } : {}),
       ...(options?.attachments ? { attachments: options.attachments } : {}),
+      ...(options?.activeTurnBehavior ? { activeTurnBehavior: options.activeTurnBehavior } : {}),
     });
     const payload = await this.sendRequest({
       requestId,

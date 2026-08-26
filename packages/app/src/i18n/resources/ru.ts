@@ -1653,10 +1653,13 @@ export const ru: TranslationResources = {
       defaultSend: {
         label: "Отправка по умолчанию",
         descriptions: {
+          steer:
+            "Когда агент работает, Enter направляет текущий ход, не прерывая его — с переходом к прерыванию, если направить нельзя.",
           interrupt: "Когда агент работает, Enter прерывает. Command/Ctrl+Enter ставит в очередь.",
           queue: "Когда агент работает, Enter ставит в очередь. Command/Ctrl+Enter отправляет.",
         },
         options: {
+          steer: "Направлять",
           interrupt: "Прерывать",
           queue: "Очередь",
         },

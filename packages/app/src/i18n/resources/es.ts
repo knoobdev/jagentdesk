@@ -1663,12 +1663,15 @@ export const es: TranslationResources = {
       defaultSend: {
         label: "Envío predeterminado",
         descriptions: {
+          steer:
+            "Cuando el agente se está ejecutando, Enter dirige el turno activo sin interrumpirlo; recurre a interrumpir si no se puede dirigir.",
           interrupt:
             "Cuando el agente se está ejecutando, Enter interrumpe. Command/Ctrl+Enter pone en cola.",
           queue:
             "Cuando el agente se está ejecutando, Enter pone en cola. Command/Ctrl+Enter envía.",
         },
         options: {
+          steer: "Dirigir",
           interrupt: "Interrumpir",
           queue: "Cola",
         },

@@ -2,7 +2,7 @@ import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import type { MessagePayload } from "@/composer/types";
 import type { MessageInputKeyboardActionKind } from "@/keyboard/actions";
 
-export type SendBehavior = "interrupt" | "queue";
+export type SendBehavior = "interrupt" | "steer" | "queue";
 
 interface ComposerSurfaceState {
   opacity: 0 | 1;
