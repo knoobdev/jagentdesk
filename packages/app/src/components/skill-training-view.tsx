@@ -1,8 +1,18 @@
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import { ThumbsUp, ThumbsDown, GraduationCap, Play, X, Check } from "lucide-react-native";
-import { AdaptiveTextInput } from "@/components/adaptive-modal-sheet";
+import {
+  ThumbsUp,
+  ThumbsDown,
+  GraduationCap,
+  Play,
+  X,
+  Check,
+  Sparkles,
+  Lightbulb,
+  Pencil,
+  Trash2,
+} from "lucide-react-native";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import {
   useSkillsStore,
@@ -10,6 +20,7 @@ import {
   approvalRate,
   graduationStatus,
   type Skill,
+  type LearnedEntry,
 } from "@/stores/skills-store";
 import type { Theme } from "@/styles/theme";
 
@@ -19,16 +30,23 @@ const ThemedGraduationCap = withUnistyles(GraduationCap);
 const ThemedPlay = withUnistyles(Play);
 const ThemedX = withUnistyles(X);
 const ThemedCheck = withUnistyles(Check);
+const ThemedSparkles = withUnistyles(Sparkles);
+const ThemedLightbulb = withUnistyles(Lightbulb);
+const ThemedPencil = withUnistyles(Pencil);
+const ThemedTrash = withUnistyles(Trash2);
 const mutedColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 const accentFgColor = (theme: Theme) => ({ color: theme.colors.accentForeground });
+const accentColor = (theme: Theme) => ({ color: theme.colors.accent });
 const okColor = (theme: Theme) => ({ color: theme.colors.palette.green[500] });
 const dimColor = (theme: Theme) => ({ color: theme.colors.foregroundExtraMuted });
 
 /**
- * Training surface for a Skill: give it a task, rate the run 👍/👎, and optionally
- * add a correction that is appended to the skill's instructions ("learned"). Each
- * rating awards XP toward the next level; once the graduation checklist is met the
- * skill can Graduate. Matches docs/design/skills/mock2-train.png.
+ * Read-only "Growth" view for a Skill: shows level/XP/tier, the graduation
+ * checklist, this skill's stats, and everything the skill has *learned from real
+ * conversations* — approved answers and agent-proposed lessons. There is no
+ * hand-typed instruction input; knowledge only enters a skill by rating a real
+ * assistant message 👍 (see AgentSkillTrainBar) or approving an agent-proposed
+ * lesson. Learned entries can be reviewed and removed here.
  */
 export function SkillTrainingView({
   skill,
@@ -40,31 +58,25 @@ export function SkillTrainingView({
   onUse: (s: Skill) => void;
 }) {
   const isCompact = useIsCompactFormFactor();
-  const recordTraining = useSkillsStore((s) => s.recordTraining);
   const graduateSkill = useSkillsStore((s) => s.graduateSkill);
-
-  const [task, setTask] = useState("");
-  const [correction, setCorrection] = useState("");
-  const [resetKey, setResetKey] = useState(0);
+  const resolveProposedLearning = useSkillsStore((s) => s.resolveProposedLearning);
 
   const prog = levelProgress(skill.xp);
   const grad = graduationStatus(skill);
   const pct = Math.round(approvalRate(skill) * 100);
   const graduated = skill.status === "graduated";
-
-  const rate = useCallback(
-    (rating: "up" | "down") => {
-      if (!task.trim()) return;
-      recordTraining(skill.id, { task, rating, correction });
-      setTask("");
-      setCorrection("");
-      setResetKey((k) => k + 1);
-    },
-    [task, correction, recordTraining, skill.id],
-  );
+  const learned = skill.learned ?? [];
 
   const handleGraduate = useCallback(() => graduateSkill(skill.id), [graduateSkill, skill.id]);
   const handleRunInAgent = useCallback(() => onUse(skill), [onUse, skill]);
+  const handleApproveLesson = useCallback(
+    (entryId: string) => resolveProposedLearning(skill.id, entryId, true),
+    [resolveProposedLearning, skill.id],
+  );
+  const handleRemoveLesson = useCallback(
+    (entryId: string) => resolveProposedLearning(skill.id, entryId, false),
+    [resolveProposedLearning, skill.id],
+  );
 
   const growth = (
     <View style={styles.side}>
@@ -73,7 +85,9 @@ export function SkillTrainingView({
         <Text style={styles.levelBig}>
           Lv {prog.level} · {prog.tier}
         </Text>
-        <Text style={styles.xpText}>{prog.atMax ? "Max level" : `${prog.inLevel}/${prog.forLevel} XP`}</Text>
+        <Text style={styles.xpText}>
+          {prog.atMax ? "Max level" : `${prog.inLevel}/${prog.forLevel} XP`}
+        </Text>
         <View style={styles.xpTrack}>
           <View style={[styles.xpFill, { width: `${(prog.inLevel / prog.forLevel) * 100}%` }]} />
         </View>
@@ -100,7 +114,7 @@ export function SkillTrainingView({
         <Text style={styles.panelTitle}>This skill</Text>
         <Stat label="Runs" value={String(skill.runs)} />
         <Stat label="Approval rate" value={`${pct}%`} />
-        <Stat label="Examples saved" value={String(skill.examples.length)} />
+        <Stat label="Lessons learned" value={String(learned.length)} />
         <Stat label="Consecutive 👍" value={String(skill.consecutiveApprovals)} />
       </View>
     </View>
@@ -111,70 +125,45 @@ export function SkillTrainingView({
       <View style={styles.panel}>
         <Text style={styles.panelTitle}>Instructions</Text>
         <ScrollView style={styles.instrScroll} nestedScrollEnabled>
-          {skill.instructions.split("\n").map((line, i) => {
-            const learned = line.includes("(learned)");
-            return (
-              <Text key={i} style={learned ? styles.instrLearned : styles.instrLine} selectable>
-                {line || " "}
-                {learned ? "  ← learned" : ""}
-              </Text>
-            );
-          })}
+          {instructionLines(skill.instructions).map((line) => (
+            <Text
+              key={line.key}
+              style={line.learned ? styles.instrLearned : styles.instrLine}
+              selectable
+            >
+              {line.text || " "}
+              {line.learned ? "  ← learned" : ""}
+            </Text>
+          ))}
         </ScrollView>
       </View>
 
       <View style={styles.panel}>
-        <Text style={styles.panelTitle}>Train by example</Text>
-        <Text style={styles.fieldLabel}>Task you gave the skill</Text>
-        <AdaptiveTextInput
-          style={styles.input}
-          resetKey={`task-${resetKey}`}
-          initialValue=""
-          placeholder="e.g. Diagnose why api-7c9d keeps restarting"
-          onChangeText={setTask}
-        />
-        <Text style={styles.fieldLabel}>Correction (optional — taught to the skill)</Text>
-        <AdaptiveTextInput
-          style={styles.inputMulti}
-          resetKey={`corr-${resetKey}`}
-          initialValue=""
-          multiline
-          placeholder="e.g. Always check the previous container's exit code first"
-          onChangeText={setCorrection}
-        />
-        <View style={styles.rateRow}>
-          <Pressable style={styles.rejectBtn} onPress={() => rate("down")}>
-            <ThemedThumbsDown size={15} uniProps={mutedColor} />
-            <Text style={styles.rejectText}>Needs work</Text>
-          </Pressable>
-          <Pressable style={styles.approveBtn} onPress={() => rate("up")}>
-            <ThemedThumbsUp size={15} uniProps={accentFgColor} />
-            <Text style={styles.approveText}>Approve</Text>
-          </Pressable>
+        <View style={styles.learnedHead}>
+          <ThemedSparkles size={13} uniProps={accentColor} />
+          <Text style={styles.panelTitle}>Learned from conversations</Text>
         </View>
-        <Pressable style={styles.runBtn} onPress={handleRunInAgent}>
-          <ThemedPlay size={14} uniProps={mutedColor} />
-          <Text style={styles.runText}>Run this skill in an agent to test</Text>
-        </Pressable>
+        {learned.length === 0 ? (
+          <Text style={styles.emptyText}>
+            Nothing learned yet. In an agent using this skill, approve a reply 👍 or accept an
+            agent-proposed lesson to teach it — no hand-typed instructions.
+          </Text>
+        ) : (
+          learned.map((entry) => (
+            <LearnedRow
+              key={entry.id}
+              entry={entry}
+              onApprove={handleApproveLesson}
+              onRemove={handleRemoveLesson}
+            />
+          ))
+        )}
       </View>
 
-      {skill.examples.length > 0 ? (
-        <View style={styles.panel}>
-          <Text style={styles.panelTitle}>Recent examples</Text>
-          {skill.examples.slice(0, 6).map((ex) => (
-            <View key={ex.id} style={styles.exRow}>
-              {ex.rating === "up" ? (
-                <ThemedThumbsUp size={12} uniProps={okColor} />
-              ) : (
-                <ThemedThumbsDown size={12} uniProps={dimColor} />
-              )}
-              <Text style={styles.exTask} numberOfLines={1}>
-                {ex.task}
-              </Text>
-            </View>
-          ))}
-        </View>
-      ) : null}
+      <Pressable style={styles.runBtn} onPress={handleRunInAgent}>
+        <ThemedPlay size={14} uniProps={mutedColor} />
+        <Text style={styles.runText}>Run this skill in an agent to test</Text>
+      </Pressable>
     </View>
   );
 
@@ -206,7 +195,7 @@ export function SkillTrainingView({
               </Text>
             </Pressable>
           ) : null}
-          <Pressable style={styles.closeBtn} onPress={onClose} accessibilityLabel="Close training">
+          <Pressable style={styles.closeBtn} onPress={onClose} accessibilityLabel="Close growth">
             <ThemedX size={18} uniProps={mutedColor} />
           </Pressable>
         </View>
@@ -215,6 +204,71 @@ export function SkillTrainingView({
           {growth}
         </ScrollView>
       </View>
+    </View>
+  );
+}
+
+const LEARNED_LABEL: Record<LearnedEntry["source"], string> = {
+  "approved-answer": "Approved answer",
+  proposed: "Proposed lesson",
+  correction: "Correction",
+};
+
+function instructionLines(instructions: string): { key: string; text: string; learned: boolean }[] {
+  return instructions.split("\n").map((text, idx) => ({
+    key: `instr-${idx}`,
+    text,
+    learned: text.includes("(learned)"),
+  }));
+}
+
+function iconForLearned(source: LearnedEntry["source"]) {
+  if (source === "approved-answer") return ThemedThumbsUp;
+  if (source === "correction") return ThemedPencil;
+  return ThemedLightbulb;
+}
+
+function LearnedRow({
+  entry,
+  onApprove,
+  onRemove,
+}: {
+  entry: LearnedEntry;
+  onApprove: (entryId: string) => void;
+  onRemove: (entryId: string) => void;
+}) {
+  const pending = entry.source === "proposed" && !entry.approved;
+  const label = LEARNED_LABEL[entry.source];
+  const approve = useCallback(() => onApprove(entry.id), [onApprove, entry.id]);
+  const remove = useCallback(() => onRemove(entry.id), [onRemove, entry.id]);
+  const Icon = iconForLearned(entry.source);
+
+  return (
+    <View style={pending ? [styles.learnedRow, styles.learnedRowPending] : styles.learnedRow}>
+      <View style={styles.learnedTopRow}>
+        <Icon size={12} uniProps={pending ? accentColor : okColor} />
+        <Text style={styles.learnedSource}>{pending ? "Proposed lesson · pending" : label}</Text>
+        {!pending ? (
+          <Pressable style={styles.iconBtn} onPress={remove} accessibilityLabel="Remove lesson">
+            <ThemedTrash size={13} uniProps={dimColor} />
+          </Pressable>
+        ) : null}
+      </View>
+      <Text style={styles.learnedText} selectable>
+        {entry.content}
+      </Text>
+      {pending ? (
+        <View style={styles.learnedActions}>
+          <Pressable style={styles.rejectBtn} onPress={remove}>
+            <ThemedThumbsDown size={13} uniProps={mutedColor} />
+            <Text style={styles.rejectText}>Reject</Text>
+          </Pressable>
+          <Pressable style={styles.approveBtn} onPress={approve}>
+            <ThemedCheck size={13} uniProps={accentFgColor} />
+            <Text style={styles.approveText}>Approve</Text>
+          </Pressable>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -268,8 +322,16 @@ const styles = StyleSheet.create((theme: Theme) => ({
   },
   headIconText: { fontSize: 20 },
   headText: { flex: 1, minWidth: 0 },
-  headName: { fontSize: theme.fontSize.lg, fontWeight: theme.fontWeight.bold, color: theme.colors.foreground },
-  headSub: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundExtraMuted, letterSpacing: 0.5 },
+  headName: {
+    fontSize: theme.fontSize.lg,
+    fontWeight: theme.fontWeight.bold,
+    color: theme.colors.foreground,
+  },
+  headSub: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundExtraMuted,
+    letterSpacing: 0.5,
+  },
   gradBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -280,7 +342,11 @@ const styles = StyleSheet.create((theme: Theme) => ({
     paddingVertical: theme.spacing[2],
   },
   gradBtnDisabled: { opacity: 0.5 },
-  gradBtnText: { fontSize: theme.fontSize.sm, fontWeight: theme.fontWeight.semibold, color: theme.colors.accentForeground },
+  gradBtnText: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.accentForeground,
+  },
   closeBtn: { width: 34, height: 34, alignItems: "center", justifyContent: "center" },
   body: { flexDirection: "row", gap: theme.spacing[4], padding: theme.spacing[4] },
   bodyCompact: { flexDirection: "column", gap: theme.spacing[4], padding: theme.spacing[4] },
@@ -301,36 +367,47 @@ const styles = StyleSheet.create((theme: Theme) => ({
     textTransform: "uppercase" as const,
     letterSpacing: 0.5,
   },
-  levelBig: { fontSize: theme.fontSize.xl, fontWeight: theme.fontWeight.bold, color: theme.colors.foreground },
+  levelBig: {
+    fontSize: theme.fontSize.xl,
+    fontWeight: theme.fontWeight.bold,
+    color: theme.colors.foreground,
+  },
   xpText: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
-  xpTrack: { height: 8, borderRadius: 4, backgroundColor: theme.colors.surface2, overflow: "hidden" },
+  xpTrack: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: theme.colors.surface2,
+    overflow: "hidden",
+  },
   xpFill: { height: 8, borderRadius: 4, backgroundColor: theme.colors.accent },
   instrScroll: { maxHeight: 200 },
   instrLine: { fontSize: theme.fontSize.sm, color: theme.colors.foregroundMuted, lineHeight: 20 },
-  instrLearned: { fontSize: theme.fontSize.sm, color: theme.colors.palette.green[500], lineHeight: 20 },
-  fieldLabel: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted, marginTop: theme.spacing[1] },
-  input: {
+  instrLearned: {
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.palette.green[500],
+    lineHeight: 20,
+  },
+  learnedHead: { flexDirection: "row", alignItems: "center", gap: theme.spacing[1.5] },
+  emptyText: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted, lineHeight: 18 },
+  learnedRow: {
+    gap: theme.spacing[1.5],
+    padding: theme.spacing[2],
+    borderRadius: theme.borderRadius.md,
     borderWidth: theme.borderWidth[1],
     borderColor: theme.colors.border,
-    borderRadius: theme.borderRadius.md,
     backgroundColor: theme.colors.surface0,
-    color: theme.colors.foreground,
-    paddingHorizontal: theme.spacing[3],
-    paddingVertical: theme.spacing[2],
-    fontSize: theme.fontSize.sm,
   },
-  inputMulti: {
-    borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.border,
-    borderRadius: theme.borderRadius.md,
-    backgroundColor: theme.colors.surface0,
-    color: theme.colors.foreground,
-    paddingHorizontal: theme.spacing[3],
-    paddingVertical: theme.spacing[2],
-    fontSize: theme.fontSize.sm,
-    minHeight: 60,
+  learnedRowPending: { borderColor: theme.colors.accent },
+  learnedTopRow: { flexDirection: "row", alignItems: "center", gap: theme.spacing[1.5] },
+  learnedSource: {
+    flex: 1,
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.foregroundMuted,
   },
-  rateRow: { flexDirection: "row", gap: theme.spacing[2], marginTop: theme.spacing[1] },
+  learnedText: { fontSize: theme.fontSize.sm, color: theme.colors.foreground, lineHeight: 19 },
+  learnedActions: { flexDirection: "row", gap: theme.spacing[2], marginTop: theme.spacing[1] },
+  iconBtn: { width: 24, height: 24, alignItems: "center", justifyContent: "center" },
   approveBtn: {
     flex: 1,
     flexDirection: "row",
@@ -339,9 +416,13 @@ const styles = StyleSheet.create((theme: Theme) => ({
     gap: theme.spacing[1.5],
     backgroundColor: theme.colors.accent,
     borderRadius: theme.borderRadius.md,
-    paddingVertical: theme.spacing[2],
+    paddingVertical: theme.spacing[1.5],
   },
-  approveText: { fontSize: theme.fontSize.sm, fontWeight: theme.fontWeight.semibold, color: theme.colors.accentForeground },
+  approveText: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.accentForeground,
+  },
   rejectBtn: {
     flex: 1,
     flexDirection: "row",
@@ -351,15 +432,18 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderWidth: theme.borderWidth[1],
     borderColor: theme.colors.border,
     borderRadius: theme.borderRadius.md,
-    paddingVertical: theme.spacing[2],
+    paddingVertical: theme.spacing[1.5],
   },
-  rejectText: { fontSize: theme.fontSize.sm, fontWeight: theme.fontWeight.medium, color: theme.colors.foregroundMuted },
+  rejectText: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foregroundMuted,
+  },
   runBtn: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: theme.spacing[1.5],
-    marginTop: theme.spacing[1],
     paddingVertical: theme.spacing[2],
   },
   runText: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
@@ -376,7 +460,9 @@ const styles = StyleSheet.create((theme: Theme) => ({
   checkCount: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundExtraMuted },
   statRow: { flexDirection: "row", justifyContent: "space-between" },
   statLabel: { fontSize: theme.fontSize.sm, color: theme.colors.foregroundMuted },
-  statValue: { fontSize: theme.fontSize.sm, fontWeight: theme.fontWeight.semibold, color: theme.colors.foreground },
-  exRow: { flexDirection: "row", alignItems: "center", gap: theme.spacing[2] },
-  exTask: { flex: 1, fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
+  statValue: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.foreground,
+  },
 }));

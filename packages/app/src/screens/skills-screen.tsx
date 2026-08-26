@@ -1,22 +1,20 @@
 import { useCallback, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
-import { Sparkles, Plus, Play, Pencil, Trash2, X, Dumbbell, GraduationCap } from "lucide-react-native";
+import { Sparkles, Plus, Pencil, Trash2, X, Dumbbell, GraduationCap } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useHosts, useHostRuntimeClient } from "@/runtime/host-runtime";
-import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
+import { useHosts } from "@/runtime/host-runtime";
 import { useSessionStore } from "@/stores/session-store";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { navigateToAgent } from "@/utils/navigate-to-agent";
-import { uniqueTitle } from "@/utils/unique-title";
 import { AdaptiveTextInput } from "@/components/adaptive-modal-sheet";
 import { SkillTrainingView } from "@/components/skill-training-view";
 import { useSkillsStore, levelProgress, approvalRate, type Skill } from "@/stores/skills-store";
+import { useAgentSkillsStore } from "@/stores/agent-skills-store";
 import type { Theme } from "@/styles/theme";
 
 const ThemedSparkles = withUnistyles(Sparkles);
 const ThemedPlus = withUnistyles(Plus);
-const ThemedPlay = withUnistyles(Play);
 const ThemedPencil = withUnistyles(Pencil);
 const ThemedTrash = withUnistyles(Trash2);
 const ThemedX = withUnistyles(X);
@@ -111,8 +109,8 @@ function SkillCard({
       ) : null}
       <View style={styles.cardFoot}>
         <Pressable style={styles.usebtn} onPress={handleUse}>
-          <ThemedPlay size={14} uniProps={accentFgColor} />
-          <Text style={styles.usebtnText}>Use</Text>
+          <ThemedPlus size={14} uniProps={accentFgColor} />
+          <Text style={styles.usebtnText}>Attach</Text>
         </Pressable>
         <Pressable style={styles.trainBtn} onPress={handleTrain}>
           <ThemedDumbbell size={14} uniProps={accentColor} />
@@ -132,7 +130,6 @@ function SkillCard({
 export function SkillsScreen() {
   const hosts = useHosts();
   const serverId = hosts[0]?.serverId ?? "";
-  const client = useHostRuntimeClient(serverId);
   const insets = useSafeAreaInsets();
   const isCompact = useIsCompactFormFactor();
 
@@ -141,13 +138,11 @@ export function SkillsScreen() {
   const updateSkill = useSkillsStore((s) => s.updateSkill);
   const removeSkill = useSkillsStore((s) => s.removeSkill);
 
-  const { entries: providerEntries } = useProvidersSnapshot(serverId);
-  const provider = providerEntries?.find((e) => e.enabled)?.provider ?? null;
-  const firstWorkspace = useSessionStore(
-    (state) => state.sessions[serverId]?.workspaces.values().next().value,
-  );
-  const cwd = firstWorkspace?.workspaceDirectory ?? null;
   const agents = useSessionStore((state) => state.sessions[serverId]?.agents);
+  const focusedAgentId = useSessionStore(
+    (state) => state.sessions[serverId]?.focusedAgentId ?? null,
+  );
+  const attachSkillToAgent = useAgentSkillsStore((s) => s.toggleAttached);
 
   const [edit, setEdit] = useState<EditState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -168,34 +163,35 @@ export function SkillsScreen() {
     [isCompact, insets.top],
   );
 
+  // The current agent to attach a skill to: the focused agent, else the most
+  // recently active one. Skills attach to an existing agent now (redesign B3) —
+  // "Attach" no longer spawns a new agent.
+  const resolveTargetAgentId = useCallback((): string | null => {
+    if (!agents || agents.size === 0) return null;
+    if (focusedAgentId && agents.has(focusedAgentId)) return focusedAgentId;
+    let best: { id: string; at: number } | null = null;
+    for (const agent of agents.values()) {
+      const at = agent.lastActivityAt?.getTime?.() ?? 0;
+      if (!best || at > best.at) best = { id: agent.id, at };
+    }
+    return best?.id ?? null;
+  }, [agents, focusedAgentId]);
+
   const handleUse = useCallback(
     (skill: Skill) => {
-      if (!client || !provider || !cwd) {
-        setError("Connect a host and add a project to use a skill.");
+      const targetId = resolveTargetAgentId();
+      if (!targetId) {
+        setError("Open an agent first, then attach this skill from the composer’s Skills picker.");
         return;
       }
       setError(null);
-      // Don't spawn duplicate "K8s Doctor" agents when a skill is used twice —
-      // suffix a counter against the existing agent titles.
-      const title = uniqueTitle(
-        skill.name,
-        agents ? Array.from(agents.values(), (a) => a.title) : [],
-      );
-      void client
-        .createAgent({
-          provider,
-          cwd,
-          systemPrompt: skill.instructions,
-          title,
-          labels: { "jagentdesk.skill.id": skill.id, "jagentdesk.skill.name": skill.name },
-        })
-        .then((agent) => {
-          navigateToAgent({ serverId, agentId: agent.id });
-          return undefined;
-        })
-        .catch((e: unknown) => setError(e instanceof Error ? e.message : "Failed to start skill"));
+      const attached = useAgentSkillsStore.getState().attached[targetId] ?? [];
+      if (!attached.includes(skill.id)) {
+        attachSkillToAgent(targetId, skill.id);
+      }
+      navigateToAgent({ serverId, agentId: targetId });
     },
-    [client, provider, cwd, serverId, agents],
+    [attachSkillToAgent, resolveTargetAgentId, serverId],
   );
 
   const handleNew = useCallback(() => setEdit({ ...EMPTY_EDIT }), []);
@@ -256,8 +252,9 @@ export function SkillsScreen() {
           </Pressable>
         </View>
         <Text style={styles.hint}>
-          Train your agents into reusable assistants. Teach a skill by example, watch it level up,
-          then invoke it anytime — your personal expert on tap.
+          Build reusable expertise your agents share. Attach one or more skills to an agent from the
+          composer, watch them level up as they learn, and let auto-load pull in the right skill for
+          each question.
         </Text>
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
