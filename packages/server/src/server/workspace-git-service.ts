@@ -1219,13 +1219,12 @@ export class WorkspaceGitServiceImpl implements WorkspaceGitService {
   }
 
   private degradeWorkingTreeWatch(target: WorkingTreeWatchTarget, reason: "watcher_error"): void {
-    if (target.subscription) {
-      const subscription = target.subscription;
-      target.subscription = null;
-      void subscription.unsubscribe().catch((error) => {
-        this.logger.warn({ err: error, cwd: target.cwd }, "Failed to stop working tree watcher");
-      });
-    }
+    // COMPAT(parcel-watcher-eintr): this runs only after the watcher already
+    // errored; calling unsubscribe() on an errored subscription can block Node's
+    // main thread inside parcel-watcher's ~InotifyBackend() (parceljs/watcher#253),
+    // freezing the whole daemon. Abandon the subscription instead of stopping it,
+    // then fall back to degraded polling.
+    target.subscription = null;
     this.startWorkingTreeWatchFallback(target, reason);
   }
 
