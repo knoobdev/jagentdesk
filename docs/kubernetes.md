@@ -1,6 +1,6 @@
 # Kubernetes cluster management
 
-JAgentDesk ships a Kubernetes cockpit — a k8s‑Lens‑style resource browser plus a per‑cluster AI
+JAgentDesk ships a Kubernetes cockpit — a full resource browser plus a per‑cluster AI
 chat — that runs identically on the **Electron desktop app** and the **iOS/Android app**. It talks
 to your clusters through the daemon's Kubernetes client, so the app never needs a local `kubectl`
 and the agent can operate a cluster that isn't in any local kubeconfig.
@@ -40,18 +40,27 @@ The resource table is **searchable and sortable** (by name / age) and **responsi
 drops secondary columns and folds namespace + status into a subtitle so the search box and AGE
 stay visible.
 
+The kind navigation opens on an **Overview** dashboard: KPI cards (Nodes, Pods, Deployments,
+Services, Namespaces, container restarts), a pod‑health bar (Running / Pending / Failed /
+Succeeded), and a node list with readiness — a cluster‑at‑a‑glance landing page before you drill
+into a kind.
+
 ---
 
 ## 3. Inspect a resource
 
 Tap a row to open the detail view:
 
-- **Overview** — a structured, k8s‑Lens‑style summary (namespace, node, IPs, QoS, containers,
-  conditions, labels, …).
+- **Overview** — a structured summary (namespace, node, IPs, QoS, containers,
+  conditions, labels, …). For **ConfigMaps** and **Secrets** the data keys render as
+  scrollable code blocks; secret values stay masked behind a per‑key **Show / Hide**.
 - **YAML** — the live manifest, with **Edit YAML → Apply** for changes.
-- **Logs** — streamed logs with **Follow** and a **container selector**.
+- **Logs** — streamed logs with **Follow** and a **container selector**, a **Timestamps**
+  toggle, per‑line severity colouring, and a **Download** button that saves the on‑screen
+  buffer to a file.
 - **Shell** — an interactive `exec` terminal into a chosen container.
-- **Port‑forward** — forward a pod port to localhost.
+- **Port‑forward** — forward a **Pod _or_ Service** port to localhost (Services resolve to a
+  backing pod automatically).
 - **Events** — Kubernetes Events filtered to the resource.
 
 Workload actions appear where they apply: **Scale** and **Restart** (Deployments, DaemonSets,
@@ -66,14 +75,14 @@ like `kubectl`.
 Every resource detail has an **Ask AI** button (a sparkle pill in the header).
 
 - It opens the cluster's chat and hands the agent the exact resource you're viewing. If the **logs**
-  pane is open, the on‑screen log buffer is attached too, so *“what's in this log?”* has context.
+  pane is open, the on‑screen log buffer is attached too, so _“what's in this log?”_ has context.
 - The agent is instructed to prefer the daemon's **cluster‑scoped tools**, which are exposed over
   the `jagentdesk` MCP server:
   - `mcp__jagentdesk__kubectl_get` — `get` / `describe` / `logs` / `list`, bound to the connected
     `clusterId`.
   - `mcp__jagentdesk__kubectl_apply` — changes, bound to the same `clusterId`.
   - `mcp__jagentdesk__cluster_list` — enumerate connected clusters.
-- Replies stream live — assistant text **and** tool calls (e.g. *Kubectl Get*) — in the chat dock.
+- Replies stream live — assistant text **and** tool calls (e.g. _Kubectl Get_) — in the chat dock.
 
 The chat composer is the full agent composer (model / thinking / permission / `@files` /
 `/commands`), so you can keep the conversation going after the first answer.
@@ -84,11 +93,11 @@ The chat composer is the full agent composer (model / thinking / permission / `@
 
 Open the **history** (clock icon) in the chat header:
 
-- **PROJECT FOR NEW CHATS** *(shown when you have 2+ projects)* — pick which project/workspace new
+- **PROJECT FOR NEW CHATS** _(shown when you have 2+ projects)_ — pick which project/workspace new
   cluster chats run in. This is the agent's working directory; the choice is remembered across
   clusters. With a single project the picker is hidden and that project is used.
-- **New chat** — start a fresh conversation. Empty chats get distinct titles (*Cluster chat*,
-  *Cluster chat 2*, …); chats started from **Ask AI** are titled from their first message.
+- **New chat** — start a fresh conversation. Empty chats get distinct titles (_Cluster chat_,
+  _Cluster chat 2_, …); chats started from **Ask AI** are titled from their first message.
 - **Chat list** — every non‑archived conversation for the cluster with its title and relative time.
   Tap one to switch back to it and its full transcript.
 
@@ -100,8 +109,8 @@ One agent is reused per cluster by default (so opening workloads never spawns du
 ## Notes & limitations
 
 - The AI chat needs a **provider** (set up under **Setup providers**) and at least one **project**
-  so the agent has a working directory; until then the dock shows *“Connect a host & add a project
-  to chat with an agent.”*
+  so the agent has a working directory; until then the dock shows _“Connect a host & add a project
+  to chat with an agent.”_
 - The daemon reads `~/.kube/config` on start; if you connect a cluster right after (re)starting the
   daemon and the list looks empty, give it a moment or reopen **Clusters**.
 - Agent‑to‑agent tools (`list_agents`, `send_agent_prompt`, `create_agent`) operate on the whole
