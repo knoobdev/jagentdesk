@@ -3,6 +3,7 @@ import type {
   ForgeSearchItem,
   UploadedFileAttachment,
 } from "@jagentdesk/protocol/messages";
+import type { PluginAttachmentItem } from "@jagentdesk/plugin";
 
 export type AttachmentStorageType = "web-indexeddb" | "desktop-file" | "native-file";
 
@@ -114,6 +115,14 @@ export type UserComposerAttachment =
       kind: "github_pr";
       item: ForgeSearchItem;
       owner?: typeof NEW_WORKSPACE_PICKER_ATTACHMENT_OWNER;
+    }
+  | {
+      kind: "plugin_resource";
+      pluginId: string;
+      sourceId: string;
+      sourceTitle: string;
+      sourceIcon: string;
+      item: PluginAttachmentItem;
     };
 
 export type WorkspaceComposerAttachment =

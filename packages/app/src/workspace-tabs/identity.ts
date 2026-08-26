@@ -32,7 +32,28 @@ export function normalizeWorkspaceTabTarget(
   if (value.kind === "working_diff") {
     return normalizeWorkingDiffTabTarget(value);
   }
+  if (value.kind === "plugin") {
+    return normalizePluginTabTarget(value);
+  }
   return normalizeSimpleWorkspaceTabTarget(value);
+}
+
+function normalizePluginTabTarget(
+  value: Extract<WorkspaceTabTarget, { kind: "plugin" }>,
+): WorkspaceTabTarget | null {
+  const pluginId = trimNonEmpty(value.pluginId);
+  const panelId = trimNonEmpty(value.panelId);
+  if (!pluginId || !panelId) {
+    return null;
+  }
+  if (value.context === "agent") {
+    const agentId = trimNonEmpty(value.agentId);
+    return agentId ? { kind: "plugin", pluginId, panelId, context: "agent", agentId } : null;
+  }
+  if (value.context === "workspace") {
+    return { kind: "plugin", pluginId, panelId, context: "workspace" };
+  }
+  return null;
 }
 
 function normalizeSimpleWorkspaceTabTarget(value: WorkspaceTabTarget): WorkspaceTabTarget | null {
@@ -127,6 +148,14 @@ function secondaryWorkspaceTabTargetsEqual(
   if (left.kind === "commit_diff" && right.kind === "commit_diff") {
     return left.sha === right.sha;
   }
+  if (left.kind === "plugin" && right.kind === "plugin") {
+    return (
+      left.pluginId === right.pluginId &&
+      left.panelId === right.panelId &&
+      left.context === right.context &&
+      (left.context !== "agent" || right.context !== "agent" || left.agentId === right.agentId)
+    );
+  }
   return false;
 }
 
@@ -187,6 +216,12 @@ export function buildDeterministicWorkspaceTabId(target: WorkspaceTabTarget): st
   }
   if (target.kind === "working_diff") {
     return "working_diff";
+  }
+  if (target.kind === "plugin") {
+    if (target.context === "agent") {
+      return `plugin_agent_${target.pluginId.length}_${target.pluginId}_${target.panelId.length}_${target.panelId}_${target.agentId.length}_${target.agentId}`;
+    }
+    return `plugin_workspace_${target.pluginId.length}_${target.pluginId}_${target.panelId.length}_${target.panelId}`;
   }
   return `file_${target.path}`;
 }

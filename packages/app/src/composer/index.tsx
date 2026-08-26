@@ -109,6 +109,8 @@ import type {
 import type { PickedFile } from "@/attachments/picked-file";
 import { resolveComposerAttachmentSubmitFormat } from "@/composer/attachments/submit";
 import { composerWorkspaceAttachment } from "@/composer/attachments/workspace";
+import { usePluginAttachmentPicker } from "@/plugins/attachments/picker";
+import { PluginResourceAttachmentPill } from "@/plugins/attachments/pill";
 import { useWorkspaceAttachmentsForScopes } from "@/attachments/workspace-attachments-store";
 import { droppedItemsToPickedFiles } from "@/composer/attachments/drop";
 import { getFileTypeLabel } from "@/attachments/file-types";
@@ -374,6 +376,11 @@ interface RenderComposerAttachmentPillArgs {
   labels: RenderAttachmentTrayArgs["labels"];
 }
 
+const pluginResourceOpenLabel = (source: string, identifier: string): string =>
+  `Open ${source} ${identifier}`;
+const pluginResourceRemoveLabel = (source: string, identifier: string): string =>
+  `Remove ${source} ${identifier}`;
+
 function renderComposerAttachmentPill(args: RenderComposerAttachmentPillArgs): ReactElement {
   const { attachment, index, disabled, onOpen, onRemove, labels } = args;
   if (attachment.kind === "image") {
@@ -422,6 +429,20 @@ function renderComposerAttachmentPill(args: RenderComposerAttachmentPillArgs): R
       onOpen,
       onRemove,
     });
+  }
+  if (attachment.kind === "plugin_resource") {
+    return (
+      <PluginResourceAttachmentPill
+        key={`plugin:${attachment.pluginId}/${attachment.sourceId}/${attachment.item.id}`}
+        attachment={attachment}
+        index={index}
+        disabled={disabled}
+        onOpen={onOpen}
+        onRemove={onRemove}
+        openLabel={pluginResourceOpenLabel}
+        removeLabel={pluginResourceRemoveLabel}
+      />
+    );
   }
   return (
     <GithubAttachmentPill
@@ -1121,6 +1142,14 @@ export function Composer({
   const [githubSearchQuery, setGithubSearchQuery] = useState("");
   const [lightboxMetadata, setLightboxMetadata] = useState<AttachmentMetadata | null>(null);
   const attachButtonRef = useRef<View | null>(null);
+  const pluginAttachmentPicker = usePluginAttachmentPicker({
+    serverId,
+    client,
+    connected: isConnected,
+    attachments,
+    onChangeAttachments: setSelectedAttachments,
+    anchorRef: attachButtonRef,
+  });
   const messageInputRef = useRef<MessageInputRef>(null);
   const isComposerLocked = resolveIsComposerLocked(submitBehavior, isSubmitLoading);
   const keyboardHandlerIdRef = useRef(
@@ -1918,8 +1947,16 @@ export function Composer({
         },
       },
     );
+    items.push(...pluginAttachmentPicker.menuItems);
     return items;
-  }, [forgePresentation, handlePasteImage, handlePickFile, handlePickImage, t]);
+  }, [
+    forgePresentation,
+    handlePasteImage,
+    handlePickFile,
+    handlePickImage,
+    pluginAttachmentPicker.menuItems,
+    t,
+  ]);
 
   const handleToggleGithubItem = useCallback(
     (item: ForgeSearchItem) => {
@@ -2164,6 +2201,7 @@ export function Composer({
                 emptyText={githubEmptyText}
                 renderOption={renderGithubPickerOption}
               />
+              {pluginAttachmentPicker.picker}
             </View>
           </View>
         </View>
