@@ -158,7 +158,11 @@ public final class JAgentDeskTailscaleModule: Module {
 
       do {
         let stateDir = try self.stateDirectory()
-        self.resetUnauthenticatedInteractiveNodeIfNeeded(stateDir: stateDir)
+        // Explicit "Sign in with Tailscale": always start from an unauthenticated
+        // node so tsnet issues a fresh browser URL. A stale authenticated node
+        // (its key may no longer be reachable) would otherwise be reused and
+        // never emit a URL, leaving the button doing nothing.
+        self.forceFreshInteractiveNode(stateDir: stateDir)
         self.startInteractiveNodeIfNeeded(stateDir: stateDir)
 
         DispatchQueue.global(qos: .userInitiated).async {
@@ -205,6 +209,27 @@ public final class JAgentDeskTailscaleModule: Module {
       return ["ok": true]
     } catch {
       return ["ok": false, "error": error.localizedDescription]
+    }
+  }
+
+  private func forceFreshInteractiveNode(stateDir: String) {
+    // Drop the in-memory node and wipe persisted tsnet state so the next start
+    // is a fresh, unauthenticated login that always produces a browser URL.
+    self.interactiveNodeLock.lock()
+    self.bridge = TailscalebridgeBridge()
+    self.interactiveNodeReady = false
+    self.interactiveNodeStartInFlight = false
+    self.interactiveNodeLock.unlock()
+    self.removePersistedTailscaleState(stateDir: stateDir)
+  }
+
+  private func removePersistedTailscaleState(stateDir: String) {
+    let fm = FileManager.default
+    try? fm.removeItem(at: authenticatedMarkerURL(stateDir: stateDir))
+    if let entries = try? fm.contentsOfDirectory(atPath: stateDir) {
+      for entry in entries {
+        try? fm.removeItem(atPath: (stateDir as NSString).appendingPathComponent(entry))
+      }
     }
   }
 

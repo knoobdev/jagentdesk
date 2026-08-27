@@ -111,7 +111,11 @@ class JAgentDeskTailscaleModule : Module() {
     if (!loginInFlight.compareAndSet(false, true)) {
       return mapOf("ok" to false, "error" to "A Tailscale login is already in progress")
     }
-    resetUnauthenticatedInteractiveNodeIfNeeded()
+    // Explicit "Sign in with Tailscale": always start from an unauthenticated
+    // node so tsnet issues a fresh browser URL. A stale authenticated node (its
+    // key may no longer be reachable) would otherwise be reused and never emit a
+    // URL, leaving the button doing nothing.
+    forceFreshInteractiveNode()
     startInteractiveNodeIfNeeded()
     worker.execute {
       val deadline = System.currentTimeMillis() + 120_000L
@@ -127,6 +131,21 @@ class JAgentDeskTailscaleModule : Module() {
       loginInFlight.set(false)
     }
     return mapOf("ok" to true)
+  }
+
+  private fun forceFreshInteractiveNode() {
+    // Drop the in-memory node and wipe persisted tsnet state so the next start
+    // is a fresh, unauthenticated login that always produces a browser URL.
+    synchronized(nodeLock) {
+      bridge = Bridge()
+      nodeReady = false
+      nodeStarting = false
+    }
+    removePersistedTailscaleState()
+  }
+
+  private fun removePersistedTailscaleState() {
+    stateDirectory().listFiles()?.forEach { runCatching { it.deleteRecursively() } }
   }
 
   private fun resetUnauthenticatedInteractiveNodeIfNeeded() {

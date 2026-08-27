@@ -1,5 +1,5 @@
 import { type ChildProcess } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import path from "node:path";
 import { app, ipcMain, powerMonitor, shell } from "electron";
@@ -1239,6 +1239,14 @@ async function startInteractiveTailscaleLoginOperation(input: {
     await stopConflictingDaemonForInteractiveLogin();
   }
 
+  // This path is only reached when the daemon is not already connected and no
+  // fresh login URL exists. A persisted tsnet node identity in the state dir is
+  // reused by srv.Up() and, if it is no longer reachable on the control plane,
+  // tsnet never emits a login URL — so the browser never opens and the flow
+  // times out ("did not finish in time"). Remove the persisted state so the
+  // restart starts an unauthenticated node that issues a fresh browser URL.
+  wipeTailscaleStateForFreshLogin();
+
   const startupStartedAt = Date.now();
   await startDaemon({
     useSavedTailscaleAuthKey: false,
@@ -1248,6 +1256,17 @@ async function startInteractiveTailscaleLoginOperation(input: {
   });
 
   return await waitForInteractiveTailscaleLogin(statusFile, startupStartedAt);
+}
+
+function wipeTailscaleStateForFreshLogin(): void {
+  const stateDir = path.join(getJAgentDeskHome(), "tailscale");
+  try {
+    rmSync(stateDir, { recursive: true, force: true });
+  } catch (error) {
+    logDesktopDaemonLifecycle("failed to wipe Tailscale state for fresh login", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
