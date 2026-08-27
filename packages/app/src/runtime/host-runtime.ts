@@ -9,12 +9,24 @@ import {
 } from "@jagentdesk/client/internal/daemon-client";
 import {
   connectionFromListen,
+  disambiguateHostLabels,
+  hostHasLocalConnection,
+  hostHasTailnetConnection,
   normalizeStoredHostProfile,
   upsertHostConnectionInProfiles,
   registryHasConnection,
   type HostConnection,
   type HostProfile,
 } from "@/types/host-connection";
+import {
+  parseTimingOutHosts,
+  removeTimingOutHost,
+  serializeTimingOutHosts,
+  upsertTimingOutHost,
+  TIMING_OUT_HOSTS_STORAGE_KEY,
+  type TimingOutHostEntry,
+  type TimingOutHostKind,
+} from "@/runtime/timing-out-hosts";
 import { defaultHostAppearance, type HostBadgeDisplay, type HostColor } from "@/hosts/appearance";
 import {
   buildDaemonWebSocketUrl,
@@ -97,6 +109,13 @@ export interface HostRuntimeSnapshot {
   pendingPairingRequests: PendingPairingRequest[];
   /** The one active pairing request for this host, if any. */
   pendingPairingRequest: PendingPairingRequest | null;
+  /**
+   * True once a LOCAL (non-tailnet) connection has failed `MAX_LOCAL_RETRIES`
+   * times in a row without reaching online. Auto-retry stops and the UI offers
+   * to remove and recreate the host. Always false for tailnet connections,
+   * which keep their login-based reconnect behavior (no retry cap).
+   */
+  localRetriesExhausted: boolean;
 }
 
 type HostRuntimeSnapshotPatch = Partial<Omit<HostRuntimeSnapshot, "serverId" | "clientGeneration">>;
@@ -200,6 +219,9 @@ const ADAPTIVE_SWITCH_THRESHOLD_MS = 40;
 const ADAPTIVE_SWITCH_CONSECUTIVE_PROBES = 3;
 const DEFAULT_AGENT_DIRECTORY_PAGE_LIMIT = 200;
 const CONFIGURED_OVERRIDE_BOOTSTRAP_RETRY_MS = 1_000;
+// A local host that fails to connect this many times in a row stops auto-retrying
+// and asks the user to remove and recreate it (REQ 4). Tailnet hosts are exempt.
+const MAX_LOCAL_RETRIES = 3;
 
 function toActiveConnection(connection: HostConnection): ActiveConnection {
   if (connection.type === "directSocket") {
@@ -466,6 +488,38 @@ function buildConnectionCandidates(
   }));
 }
 
+/**
+ * Pure state transition for the local-retry budget (REQ 4). Given the previous
+ * and next connection-machine tags plus the running count, decide the new count
+ * and whether retries are now exhausted. Tailnet connections never accrue a
+ * count. Reaching "online" resets. A failure (error/offline reached from
+ * connecting/online) increments; hitting `maxRetries` flags exhaustion.
+ */
+export function nextLocalRetryState(input: {
+  connectionType: HostConnection["type"];
+  previousTag: HostRuntimeConnectionMachineState["tag"];
+  nextTag: HostRuntimeConnectionMachineState["tag"];
+  currentCount: number;
+  exhausted: boolean;
+  maxRetries: number;
+}): { count: number; exhausted: boolean } {
+  const { connectionType, previousTag, nextTag, currentCount, exhausted, maxRetries } = input;
+  if (connectionType === "tailnet") {
+    return { count: currentCount, exhausted };
+  }
+  if (nextTag === "online") {
+    return { count: 0, exhausted: false };
+  }
+  const enteredFailure =
+    (nextTag === "error" || nextTag === "offline") &&
+    (previousTag === "connecting" || previousTag === "online");
+  if (!enteredFailure || exhausted) {
+    return { count: currentCount, exhausted };
+  }
+  const count = currentCount + 1;
+  return { count, exhausted: count >= maxRetries };
+}
+
 function findConnectionById(host: HostProfile, connectionId: string | null): HostConnection | null {
   if (!connectionId) {
     return null;
@@ -615,6 +669,10 @@ export class HostRuntimeController {
   private probeRequestVersion = 0;
   private probeCycleInFlight: Promise<void> | null = null;
   private connectionMode: ConnectionMode | null;
+  // REQ 4: count consecutive failed connect attempts on a LOCAL connection.
+  // Reset to 0 whenever the host reaches online, its active connection changes,
+  // or the connection mode changes.
+  private localRetryCount = 0;
 
   constructor(input: {
     host: HostProfile;
@@ -641,6 +699,7 @@ export class HostRuntimeController {
       clientGeneration: 0,
       pendingPairingRequest: null,
       pendingPairingRequests: [],
+      localRetriesExhausted: false,
     };
   }
 
@@ -778,11 +837,68 @@ export class HostRuntimeController {
       return;
     }
     this.connectionMode = value;
+    // A mode change is a fresh start for the local-retry budget.
+    this.resetLocalRetries();
     // Invalidate an in-flight local probe and immediately re-evaluate the
     // candidate set. A mode change must never leave an already-created
     // controller pinned to localhost until the next periodic probe.
     this.probeRequestVersion += 1;
     void this.runProbeCycleNow();
+  }
+
+  /**
+   * Clear the local-retry budget and resume auto-retrying. Called when the user
+   * explicitly retries a local host that had exhausted its attempts, and on
+   * connection-mode changes.
+   */
+  resetLocalRetries(): void {
+    this.localRetryCount = 0;
+    if (this.snapshot.localRetriesExhausted) {
+      this.activeClient?.setReconnectEnabled(true);
+      this.updateSnapshot({ localRetriesExhausted: false });
+      if (this.started && !this.probeIntervalHandle) {
+        this.probeIntervalHandle = setInterval(() => {
+          void this.runProbeCycleNow();
+        }, PROBE_TICK_MS);
+      }
+    }
+  }
+
+  /**
+   * REQ 4: track consecutive local connection failures. A connect attempt that
+   * ends in error/offline (from connecting or online) counts as one failed
+   * retry; reaching online resets the budget. After `MAX_LOCAL_RETRIES` failures
+   * auto-retry stops (probe interval cleared, client reconnect disabled) and the
+   * snapshot flags `localRetriesExhausted` so the UI can offer remove+recreate.
+   * Tailnet connections are exempt.
+   */
+  private evaluateLocalRetry(
+    connection: HostConnection,
+    previousTag: HostRuntimeConnectionMachineState["tag"],
+    nextTag: HostRuntimeConnectionMachineState["tag"],
+  ): void {
+    const result = nextLocalRetryState({
+      connectionType: connection.type,
+      previousTag,
+      nextTag,
+      currentCount: this.localRetryCount,
+      exhausted: this.snapshot.localRetriesExhausted,
+      maxRetries: MAX_LOCAL_RETRIES,
+    });
+    this.localRetryCount = result.count;
+    if (result.exhausted === this.snapshot.localRetriesExhausted) {
+      return;
+    }
+    if (result.exhausted) {
+      // Budget exhausted: stop auto-retrying so the host stops thrashing and the
+      // user is asked to remove and recreate it.
+      if (this.probeIntervalHandle) {
+        clearInterval(this.probeIntervalHandle);
+        this.probeIntervalHandle = null;
+      }
+      this.activeClient?.setReconnectEnabled(false);
+    }
+    this.updateSnapshot({ localRetriesExhausted: result.exhausted });
   }
 
   ensureConnected(): void {
@@ -1359,11 +1475,13 @@ export class HostRuntimeController {
       if (!this.isCurrentSwitchRequest(requestVersion) || this.activeClient !== client) {
         return;
       }
+      const previousTag = this.connectionMachineState.tag;
       this.applyConnectionEvent({
         type: "client_state",
         state,
         lastError: client.lastError,
       });
+      this.evaluateLocalRetry(connection, previousTag, this.connectionMachineState.tag);
       const patch: HostRuntimeSnapshotPatch = {
         ...toSnapshotConnectionPatch(this.connectionMachineState, this.connectionEpoch),
         ...this.buildAgentDirectoryStatusPatch(),
@@ -1380,10 +1498,12 @@ export class HostRuntimeController {
         return;
       }
       const message = toErrorMessage(error);
+      const previousTag = this.connectionMachineState.tag;
       this.applyConnectionEvent({
         type: "connect_failed",
         message,
       });
+      this.evaluateLocalRetry(connection, previousTag, this.connectionMachineState.tag);
       this.updateSnapshot({
         ...toSnapshotConnectionPatch(this.connectionMachineState, this.connectionEpoch),
       });
@@ -1489,6 +1609,15 @@ export class HostRuntimeStore {
   private hostListVersion = 0;
   private hostRegistryLoaded = false;
   private hosts: HostProfile[] = [];
+  // Memoized display view of `hosts` with duplicate labels disambiguated. Keyed
+  // on the raw `hosts` reference so `getHosts()` returns a stable array (required
+  // by useSyncExternalStore) and only recomputes when the host list changes.
+  private hostsDisplaySource: HostProfile[] | null = null;
+  private hostsDisplay: HostProfile[] = [];
+  // The connection mode the memoized display list was computed for. REQ 2 hides
+  // tailnet-only hosts in local mode, so the memo must recompute when the mode
+  // changes even if the raw `hosts` reference did not.
+  private hostsDisplayMode: ConnectionMode | null = null;
   private hostAppearanceMutationTail: Promise<void> = Promise.resolve();
   private hostRegistryStatus: HostRegistryStatus = "loading";
   private deps: HostRuntimeControllerDeps;
@@ -1502,6 +1631,18 @@ export class HostRuntimeStore {
   private connectionModeUnsubscribe: (() => void) | null = null;
   private storage: HostRuntimeStorage;
   private replicaCache: ReplicaCache;
+  // REQ 6: raised (once) when the user switches to Local while at least one
+  // tailnet host exists — mobile devices cannot connect over Tailscale in Local
+  // mode. Consumed by the UI, which shows a warning toast.
+  private pendingLocalModeWarning = false;
+  private localModeWarningListeners = new Set<() => void>();
+  // REQ 3: the persisted set of hosts that were failing to connect, so the app
+  // can re-notify on the next launch. Kept in memory and mirrored to storage.
+  private timingOutHosts: TimingOutHostEntry[] = [];
+  private lastTimingOutKindByServer = new Map<string, TimingOutHostKind | null>();
+  // Listeners notified when a host transitions online, so the app layer can run
+  // reverse migration if that host previously had data migrated away from it.
+  private sourceHostReconnectListeners = new Set<(serverId: string) => void>();
 
   constructor(input?: { deps?: HostRuntimeControllerDeps; storage?: HostRuntimeStorage }) {
     this.deps = input?.deps ?? createDefaultDeps();
@@ -1512,7 +1653,110 @@ export class HostRuntimeStore {
   // --- Host registry ---
 
   getHosts(): HostProfile[] {
-    return this.hosts;
+    if (this.hostsDisplaySource !== this.hosts || this.hostsDisplayMode !== this.connectionMode) {
+      // REQ 2: in Local mode a host reachable ONLY over the tailnet cannot be
+      // connected to, so hide it. Tailscale mode and the pre-login `null` gate
+      // keep every host visible.
+      const visible =
+        this.connectionMode === "local"
+          ? this.hosts.filter((host) => hostHasLocalConnection(host))
+          : this.hosts;
+      this.hostsDisplay = disambiguateHostLabels(visible);
+      this.hostsDisplaySource = this.hosts;
+      this.hostsDisplayMode = this.connectionMode;
+    }
+    return this.hostsDisplay;
+  }
+
+  /** True when any registered host has a tailnet connection (REQ 6). */
+  hasTailnetHost(): boolean {
+    return this.hosts.some((host) => hostHasTailnetConnection(host));
+  }
+
+  // --- Local-mode mobile-connectivity warning (REQ 6) ---
+
+  subscribeLocalModeWarning(listener: () => void): () => void {
+    this.localModeWarningListeners.add(listener);
+    return () => {
+      this.localModeWarningListeners.delete(listener);
+    };
+  }
+
+  /** Read and clear the one-shot "mobile can't connect in Local mode" warning. */
+  consumeLocalModeWarning(): boolean {
+    const pending = this.pendingLocalModeWarning;
+    this.pendingLocalModeWarning = false;
+    return pending;
+  }
+
+  private raiseLocalModeWarning(): void {
+    this.pendingLocalModeWarning = true;
+    for (const listener of this.localModeWarningListeners) {
+      listener();
+    }
+  }
+
+  // --- Timing-out hosts persistence (REQ 3) ---
+
+  /** The hosts that were failing to connect as of the last persisted update. */
+  getPersistedTimingOutHosts(): TimingOutHostEntry[] {
+    return this.timingOutHosts;
+  }
+
+  private async loadTimingOutHosts(): Promise<void> {
+    try {
+      const raw = await this.storage.getItem(TIMING_OUT_HOSTS_STORAGE_KEY);
+      this.timingOutHosts = parseTimingOutHosts(raw);
+      for (const entry of this.timingOutHosts) {
+        this.lastTimingOutKindByServer.set(entry.serverId, entry.kind);
+      }
+    } catch {
+      this.timingOutHosts = [];
+    }
+  }
+
+  private persistTimingOutHosts(): void {
+    void this.storage
+      .setItem(TIMING_OUT_HOSTS_STORAGE_KEY, serializeTimingOutHosts(this.timingOutHosts))
+      .catch((error) => console.error("[HostRuntime] Failed to persist timing-out hosts", error));
+  }
+
+  /**
+   * REQ 3: update the persisted timing-out set as a host enters or leaves the
+   * failing state. A tailnet host counts as timing out when its connection is in
+   * "error"; a local host counts when it has exhausted its retries.
+   */
+  private trackTimingOutHost(serverId: string, snapshot: HostRuntimeSnapshot): void {
+    const host = this.hosts.find((entry) => entry.serverId === serverId);
+    if (!host) {
+      return;
+    }
+    const isTailnet = !hostHasLocalConnection(host);
+    let kind: TimingOutHostKind | null = null;
+    if (isTailnet) {
+      kind = snapshot.connectionStatus === "error" ? "tailnet" : null;
+    } else {
+      kind = snapshot.localRetriesExhausted ? "local" : null;
+    }
+
+    if (this.lastTimingOutKindByServer.get(serverId) === kind) {
+      return;
+    }
+    this.lastTimingOutKindByServer.set(serverId, kind);
+
+    const next = kind
+      ? upsertTimingOutHost(this.timingOutHosts, {
+          serverId,
+          label: host.label,
+          kind,
+          updatedAt: Date.now(),
+        })
+      : removeTimingOutHost(this.timingOutHosts, serverId);
+    if (next === this.timingOutHosts) {
+      return;
+    }
+    this.timingOutHosts = next;
+    this.persistTimingOutHosts();
   }
 
   getHostRegistryStatus(): HostRegistryStatus {
@@ -1547,6 +1791,11 @@ export class HostRuntimeStore {
     this.connectionModeUnsubscribe = subscribeConnectionMode(() => {
       void getConnectionMode().then((nextMode) => {
         if (nextMode !== this.connectionMode) {
+          // REQ 6: warn once when switching to Local while tailnet hosts exist,
+          // since mobile devices can no longer reach the daemon over Tailscale.
+          if (nextMode === "local" && this.hasTailnetHost()) {
+            this.raiseLocalModeWarning();
+          }
           this.connectionMode = nextMode;
           for (const controller of this.controllers.values()) {
             controller.setConnectionMode(nextMode);
@@ -1557,6 +1806,7 @@ export class HostRuntimeStore {
       });
     });
     const override = readConfiguredLocalDaemonOverride();
+    await this.loadTimingOutHosts();
     await this.loadFromStorage();
     this.markHostRegistryLoaded();
 
@@ -2119,6 +2369,12 @@ export class HostRuntimeStore {
       this.controllers.delete(serverId);
       this.lastConnectionStatusByServer.delete(serverId);
       this.directoryBootstrapInFlight.delete(serverId);
+      this.lastTimingOutKindByServer.delete(serverId);
+      const prunedTimingOut = removeTimingOutHost(this.timingOutHosts, serverId);
+      if (prunedTimingOut !== this.timingOutHosts) {
+        this.timingOutHosts = prunedTimingOut;
+        this.persistTimingOutHosts();
+      }
       this.directorySyncByServer.get(serverId)?.dispose();
       this.directorySyncByServer.delete(serverId);
       this.clearHostReplica(serverId);
@@ -2162,6 +2418,7 @@ export class HostRuntimeStore {
         const snapshot = controller.getSnapshot();
         this.syncSessionReplica(snapshot.serverId, snapshot);
         this.maybeAutoBootstrapDirectories(snapshot.serverId);
+        this.trackTimingOutHost(snapshot.serverId, snapshot);
         this.emit(snapshot.serverId);
       });
       void controller
@@ -2223,6 +2480,9 @@ export class HostRuntimeStore {
       void invalidateCheckoutGitQueriesForServer(queryClient, serverId);
       invalidateServerDataQueriesAfterReconnect({ queryClient, serverId });
       void queryClient.invalidateQueries({ queryKey: schedulesQueryBaseKey });
+      // A reconnecting host may be the source of a previous migration; let the app
+      // layer offer to reverse it now that the source is reachable again.
+      this.notifySourceHostReconnected(serverId);
     }
 
     // Runtime owns directory bootstrap policy, including reconnect and delayed
@@ -2331,6 +2591,42 @@ export class HostRuntimeStore {
     return this.controllers.get(serverId)?.getClient() ?? null;
   }
 
+  /** Human label for a host, or null when the host is not registered. */
+  getHostLabel(serverId: string): string | null {
+    return this.hosts.find((host) => host.serverId === serverId)?.label ?? null;
+  }
+
+  /**
+   * Subscribe to be notified when a host comes (back) online. The app layer wires
+   * this to reverse migration: if the reconnecting host previously had data
+   * migrated away from it, export those agents from the current host and import
+   * them back (with a user confirm). See host-migration-service.
+   */
+  subscribeSourceHostReconnect(listener: (serverId: string) => void): () => void {
+    this.sourceHostReconnectListeners.add(listener);
+    return () => {
+      this.sourceHostReconnectListeners.delete(listener);
+    };
+  }
+
+  /** Re-key the offline replica cache after a migration (see host-migration-service). */
+  remapReplicaCacheAgentIds(serverId: string, idMap: Record<string, string>): void {
+    this.replicaCache.remapAgentIds(serverId, idMap);
+  }
+
+  private notifySourceHostReconnected(serverId: string): void {
+    for (const listener of this.sourceHostReconnectListeners) {
+      try {
+        listener(serverId);
+      } catch (error) {
+        console.error("[HostRuntime] source-host reconnect listener failed", {
+          serverId,
+          error: toErrorMessage(error),
+        });
+      }
+    }
+  }
+
   setPendingPairingRequest(serverId: string, request: PendingPairingRequest): void {
     this.controllers.get(serverId)?.setPendingPairingRequest(request);
   }
@@ -2409,6 +2705,14 @@ export class HostRuntimeStore {
     for (const controller of this.controllers.values()) {
       controller.revalidateConnection();
     }
+  }
+
+  /**
+   * Clear a local host's exhausted-retry state and resume auto-retrying (REQ 4).
+   * Used when the user explicitly retries a local host that gave up.
+   */
+  resetLocalRetries(serverId: string): void {
+    this.controllers.get(serverId)?.resetLocalRetries();
   }
 
   runProbeCycleNow(serverId?: string): Promise<void> {

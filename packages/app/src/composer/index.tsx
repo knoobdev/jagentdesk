@@ -42,10 +42,7 @@ import {
   type DraftAgentControlsProps,
 } from "@/composer/agent-controls";
 import { SkillsControl } from "@/composer/agent-controls/skills-control";
-import { useSkillsStore } from "@/stores/skills-store";
-import { useAgentSkillsStore } from "@/stores/agent-skills-store";
-import { matchSkillsForQuery } from "@/skills/match-skills";
-import { applySkillPreamble, computeSkillInjection } from "@/skills/skill-injection";
+import { resolveSkillInjectedText } from "@/skills/skill-injection";
 import { ContextWindowMeter } from "@/components/context-window-meter";
 import { useImageAttachmentPicker } from "@/hooks/use-image-attachment-picker";
 import { selectAgentTurnPresentation, useSessionStore } from "@/stores/session-store";
@@ -171,30 +168,6 @@ function resolveIsComposerLocked(
   isSubmitLoading: boolean,
 ): boolean {
   return submitBehavior === "preserve-and-lock" && isSubmitLoading;
-}
-
-/**
- * Prepend the effective prompts of the skills active on this agent (redesign
- * B3 + B5). Attached skills always count; auto-load also matches the message
- * text. Each skill is delivered once per agent (see skill-injection). Reads
- * store snapshots at send time — no React deps needed.
- */
-function resolveSkillInjectedText(agentId: string, text: string): string {
-  const skills = useSkillsStore.getState().skills;
-  const agentSkills = useAgentSkillsStore.getState();
-  const attachedIds = agentSkills.attached[agentId] ?? [];
-  const matchedIds = agentSkills.autoLoad
-    ? matchSkillsForQuery(skills, text).map((skill) => skill.id)
-    : [];
-  const injection = computeSkillInjection({
-    skills,
-    attachedIds,
-    matchedIds,
-    alreadyInjectedIds: agentSkills.injected[agentId] ?? [],
-  });
-  if (!injection.preamble) return text;
-  agentSkills.markInjected(agentId, injection.injectedIds);
-  return applySkillPreamble(text, injection.preamble);
 }
 
 function resolveIsVoiceModeForAgent(

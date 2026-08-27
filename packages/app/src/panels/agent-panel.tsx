@@ -358,7 +358,7 @@ function AgentPanel() {
   invariant(target.kind === "agent", "AgentPanel requires agent target");
 
   return (
-    <View style={{ flex: 1, minHeight: 0 }}>
+    <View style={animatedStaticStyles.panelContainer}>
       <AgentPanelContent
         serverId={serverId}
         workspaceId={workspaceId}
@@ -882,6 +882,7 @@ function ChatAgentContent({
       toastApi.show(t("agentPanel.states.reconnecting"), {
         durationMs: null,
         testID: "agent-reconnecting-toast",
+        icon: <View style={styles.reconnectingDot} testID="agent-reconnecting-dot" />,
       });
     }
   }, [connectionStatus, dismissToast, toastApi, t]);
@@ -1701,9 +1702,12 @@ function AgentSessionUnavailableState({
           </>
         ) : (
           <>
-            <Text style={styles.offlineTitle}>
-              {t("agentPanel.unavailable.reconnectingTo", { serverLabel })}
-            </Text>
+            <View style={styles.reconnectingRow}>
+              <View style={styles.reconnectingDot} testID="agent-reconnecting-dot" />
+              <Text style={styles.offlineTitle}>
+                {t("agentPanel.unavailable.reconnectingTo", { serverLabel })}
+              </Text>
+            </View>
             <Text style={styles.offlineDescription}>
               {t("agentPanel.unavailable.showAgainWhenReachable")}
             </Text>
@@ -1730,6 +1734,10 @@ const animatedStaticStyles = RNStyleSheet.create({
   },
   inputAreaWrapper: {
     width: "100%",
+  },
+  panelContainer: {
+    flex: 1,
+    minHeight: 0,
   },
 });
 
@@ -1821,6 +1829,18 @@ const styles = StyleSheet.create((theme) => ({
     textAlign: "center",
     fontSize: theme.fontSize.sm,
     color: theme.colors.foregroundMuted,
+  },
+  reconnectingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: theme.spacing[2],
+  },
+  reconnectingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: theme.colors.palette.amber[500],
   },
   offlineTitle: {
     fontSize: theme.fontSize.base,

@@ -181,6 +181,20 @@ export interface AgentUsage {
   contextWindowUsedTokens?: number;
 }
 
+/**
+ * Cumulative usage totals accumulated across every completed turn of an agent.
+ * Unlike {@link AgentUsage} (a per-turn snapshot used for the context-window
+ * meter), these values are persisted and only ever grow, so the Usage & Cost
+ * insights survive reconnects and directory refreshes.
+ */
+export interface AgentUsageTotals {
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  totalCostUsd: number;
+  turns: number;
+}
+
 export const TOOL_CALL_ICON_NAMES = [
   "wrench",
   "square_terminal",

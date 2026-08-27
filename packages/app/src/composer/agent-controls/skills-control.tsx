@@ -112,6 +112,7 @@ export function SkillsControl({ agentId }: SkillsControlProps): ReactElement {
         label="Skills"
         value={value}
         showToolbarLabel={!isCompact}
+        badgeCount={count}
         showCaret={false}
         open={open}
         onPress={handlePress}

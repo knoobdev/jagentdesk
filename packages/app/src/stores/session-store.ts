@@ -30,6 +30,7 @@ import type {
   AgentMode,
   AgentCapabilityFlags,
   AgentUsage,
+  AgentUsageTotals,
   AgentPersistenceHandle,
 } from "@jagentdesk/protocol/agent-types";
 import type {
@@ -128,6 +129,7 @@ export interface Agent {
   persistence: AgentPersistenceHandle | null;
   runtimeInfo?: AgentRuntimeInfo;
   lastUsage?: AgentUsage;
+  usageTotals?: AgentUsageTotals;
   lastError?: string | null;
   title: string | null;
   cwd: string;
@@ -480,6 +482,11 @@ interface SessionStoreActions {
     clientGeneration?: number,
   ) => void;
   restoreSessionReplica: (serverId: string, replica: SessionReplica) => void;
+  // Rewrite agent-id-keyed state for one host after a migration assigned new ids
+  // (idMap: oldAgentId -> newAgentId). Authoritative agent state still arrives
+  // from the target daemon's directory sync; this keeps local state (focus,
+  // cached snapshots) consistent in the meantime.
+  remapAgentIds: (serverId: string, idMap: Record<string, string>) => void;
   clearSession: (serverId: string) => void;
   getSession: (serverId: string) => SessionState | undefined;
   updateSessionClient: (serverId: string, client: DaemonClient, clientGeneration?: number) => void;
@@ -833,6 +840,77 @@ export const useSessionStore = create<SessionStore>()(
               },
             },
             agentLastActivity,
+          };
+        });
+      },
+
+      remapAgentIds: (serverId, idMap) => {
+        if (Object.keys(idMap).length === 0) {
+          return;
+        }
+        set((prev) => {
+          const session = prev.sessions[serverId];
+          if (!session) {
+            return prev;
+          }
+          const remapKey = (id: string): string => idMap[id] ?? id;
+          const rekeyMap = <T>(map: Map<string, T>): Map<string, T> => {
+            let changed = false;
+            const next = new Map<string, T>();
+            for (const [key, value] of map) {
+              const nextKey = remapKey(key);
+              if (nextKey !== key) {
+                changed = true;
+              }
+              if (!next.has(nextKey)) {
+                next.set(nextKey, value);
+              }
+            }
+            return changed ? next : map;
+          };
+          const rekeyAgentMap = (map: Map<string, Agent>): Map<string, Agent> => {
+            let changed = false;
+            const next = new Map<string, Agent>();
+            for (const [key, agent] of map) {
+              const nextKey = remapKey(key);
+              if (nextKey !== key) {
+                changed = true;
+              }
+              if (!next.has(nextKey)) {
+                next.set(nextKey, nextKey === key ? agent : { ...agent, id: nextKey });
+              }
+            }
+            return changed ? next : map;
+          };
+          return {
+            ...prev,
+            sessions: {
+              ...prev.sessions,
+              [serverId]: {
+                ...session,
+                focusedAgentId: session.focusedAgentId
+                  ? remapKey(session.focusedAgentId)
+                  : session.focusedAgentId,
+                agents: rekeyAgentMap(session.agents),
+                agentDetails: rekeyAgentMap(session.agentDetails),
+                agentStreamTail: rekeyMap(session.agentStreamTail),
+                agentStreamHead: rekeyMap(session.agentStreamHead),
+                agentTurnLiveness: rekeyMap(session.agentTurnLiveness),
+                messageSubmissions: rekeyMap(session.messageSubmissions),
+                agentTimelineCursor: rekeyMap(session.agentTimelineCursor),
+                agentTimelineHasOlder: rekeyMap(session.agentTimelineHasOlder),
+                agentTimelineHasNewer: rekeyMap(session.agentTimelineHasNewer),
+                agentTimelineOlderFetchInFlight: rekeyMap(session.agentTimelineOlderFetchInFlight),
+                agentHistorySyncGeneration: rekeyMap(session.agentHistorySyncGeneration),
+                agentAuthoritativeHistoryApplied: rekeyMap(
+                  session.agentAuthoritativeHistoryApplied,
+                ),
+                initializingAgents: rekeyMap(session.initializingAgents),
+                pendingPermissions: rekeyMap(session.pendingPermissions),
+                fileExplorer: rekeyMap(session.fileExplorer),
+                queuedMessages: rekeyMap(session.queuedMessages),
+              },
+            },
           };
         });
       },

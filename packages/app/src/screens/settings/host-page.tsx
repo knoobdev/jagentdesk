@@ -20,6 +20,7 @@ import {
   resolveTerminalProfiles,
 } from "@jagentdesk/protocol/terminal-profiles";
 import { AdaptiveModalSheet, type SheetHeader } from "@/components/adaptive-modal-sheet";
+import { HostPickerOption } from "@/components/hosts/host-picker";
 import { SettingsTextAreaCard } from "@/components/settings-textarea";
 import { Alert as InlineAlert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -55,8 +56,11 @@ import { ProviderUsageSettingsSection } from "@/provider-usage/settings-section"
 import { useProviderUsage } from "@/provider-usage/use-provider-usage";
 import { HostAppearanceSection } from "@/screens/settings/host-appearance-section";
 import { SettingsSection } from "@/screens/settings/settings-section";
+import { migrateHostData } from "@/runtime/migration/host-migration-service";
+import { useToast } from "@/contexts/toast-context";
 import { useSessionStore } from "@/stores/session-store";
 import { settingsStyles } from "@/styles/settings";
+import { disambiguateHostLabels } from "@/types/host-connection";
 import type { HostConnection, HostProfile } from "@/types/host-connection";
 import { confirmDialog } from "@/utils/confirm-dialog";
 import { isVersionMismatch } from "@/desktop/runtime";
@@ -347,6 +351,8 @@ export function HostSettingsPage({
       {isLocalDaemon ? <LocalDaemonSection serverId={serverId} /> : null}
 
       {!isLocalDaemon ? <UpdateDaemonCard key={host.serverId} host={host} /> : null}
+
+      <MigrateHostDataSection host={host} />
 
       <RemoveHostSection host={host} isLocalDaemon={isLocalDaemon} onRemoved={onHostRemoved} />
     </View>
@@ -1220,6 +1226,160 @@ function PairDeviceRow({ serverId }: { serverId: string }) {
   );
 }
 
+// REQ 5/8: user-initiated forward migration. Moves this host's agents and their
+// data onto another connected host; migrated items surface the source host label
+// as a display prefix (provenance is applied by the migration service). Reverse
+// migration on source reconnect is wired separately (see host-migration-service).
+function MigrateTargetOption({
+  serverId,
+  label,
+  onSelect,
+}: {
+  serverId: string;
+  label: string;
+  onSelect: (targetServerId: string, targetLabel: string) => void;
+}) {
+  const handlePress = useCallback(() => onSelect(serverId, label), [onSelect, serverId, label]);
+  return (
+    <HostPickerOption
+      serverId={serverId}
+      label={label}
+      showActiveConnection
+      active={false}
+      onPress={handlePress}
+      testID={`migrate-data-target-${serverId}`}
+    />
+  );
+}
+
+function MigrateHostDataSection({ host }: { host: HostProfile }) {
+  const { t } = useTranslation();
+  const { theme } = useUnistyles();
+  const toast = useToast();
+  const hosts = useHosts();
+  const sourceConnected = useHostRuntimeIsConnected(host.serverId);
+  const targets = useMemo(
+    () => disambiguateHostLabels(hosts).filter((entry) => entry.serverId !== host.serverId),
+    [hosts, host.serverId],
+  );
+  const [isPicking, setIsPicking] = useState(false);
+  const [isMigrating, setIsMigrating] = useState(false);
+
+  const pickerHeader = useMemo<SheetHeader>(() => ({ title: t("migration.pickTarget") }), [t]);
+
+  const handleOpenPicker = useCallback(() => setIsPicking(true), []);
+  const handleClosePicker = useCallback(() => {
+    if (isMigrating) return;
+    setIsPicking(false);
+  }, [isMigrating]);
+
+  const runMigration = useCallback(
+    async (targetServerId: string, targetLabel: string) => {
+      const store = getHostRuntimeStore();
+      const sourceClient = store.getClient(host.serverId);
+      const targetClient = store.getClient(targetServerId);
+      if (!sourceClient || !targetClient) {
+        toast.show(t("migration.notConnected"), { variant: "error" });
+        return;
+      }
+      setIsMigrating(true);
+      try {
+        const result = await migrateHostData({
+          sourceServerId: host.serverId,
+          targetServerId,
+          sourceClient,
+          targetClient,
+          sourceHostLabel: host.label,
+          replicaCache: {
+            remapAgentIds: (serverId, idMap) => store.remapReplicaCacheAgentIds(serverId, idMap),
+          },
+        });
+        setIsPicking(false);
+        toast.show(
+          t("migration.success", {
+            count: Object.keys(result.idMap).length,
+            target: targetLabel,
+          }),
+          { variant: "success" },
+        );
+      } catch (error) {
+        console.error("[HostPage] Failed to migrate host data", error);
+        toast.show(t("migration.failed"), { variant: "error" });
+      } finally {
+        setIsMigrating(false);
+      }
+    },
+    [host.label, host.serverId, t, toast],
+  );
+
+  const handleSelectTarget = useCallback(
+    (targetServerId: string, targetLabel: string) => {
+      void (async () => {
+        const confirmed = await confirmDialog({
+          title: t("migration.confirmTitle"),
+          message: t("migration.confirmMessage", { source: host.label, target: targetLabel }),
+          confirmLabel: t("migration.confirmAction"),
+          cancelLabel: t("common.actions.cancel"),
+        });
+        if (!confirmed) return;
+        await runMigration(targetServerId, targetLabel);
+      })();
+    },
+    [host.label, runMigration, t],
+  );
+
+  const moveIcon = useMemo(
+    () => <ArrowUpToLine size={theme.iconSize.sm} color={theme.colors.foreground} />,
+    [theme.iconSize.sm, theme.colors.foreground],
+  );
+
+  return (
+    <SettingsSection title={t("migration.moveDataTitle")} testID="host-page-migrate-data-card">
+      <View style={settingsStyles.card}>
+        <View style={settingsStyles.row}>
+          <View style={settingsStyles.rowContent}>
+            <Text style={settingsStyles.rowTitle}>{t("migration.moveDataTitle")}</Text>
+            <Text style={settingsStyles.rowHint}>
+              {targets.length === 0 ? t("migration.noTargets") : t("migration.moveDataHint")}
+            </Text>
+          </View>
+          <Button
+            variant="outline"
+            size="sm"
+            leftIcon={moveIcon}
+            onPress={handleOpenPicker}
+            disabled={targets.length === 0 || !sourceConnected || isMigrating}
+            testID="host-page-migrate-data-button"
+          >
+            {t("migration.moveDataAction")}
+          </Button>
+        </View>
+      </View>
+
+      {isPicking ? (
+        <AdaptiveModalSheet
+          header={pickerHeader}
+          visible
+          onClose={handleClosePicker}
+          testID="migrate-data-target-modal"
+        >
+          <Text style={styles.confirmText}>{t("migration.pickTargetHint")}</Text>
+          <View style={styles.migrateTargetList}>
+            {targets.map((target) => (
+              <MigrateTargetOption
+                key={target.serverId}
+                serverId={target.serverId}
+                label={target.label}
+                onSelect={handleSelectTarget}
+              />
+            ))}
+          </View>
+        </AdaptiveModalSheet>
+      ) : null}
+    </SettingsSection>
+  );
+}
+
 function RemoveHostSection({
   host,
   isLocalDaemon,
@@ -1881,6 +2041,10 @@ const styles = StyleSheet.create((theme) => ({
   emptyText: {
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.sm,
+  },
+  migrateTargetList: {
+    marginTop: theme.spacing[3],
+    gap: theme.spacing[1],
   },
 }));
 

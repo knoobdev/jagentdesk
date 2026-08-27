@@ -28,6 +28,7 @@ import {
 import { askAgentAboutResource } from "@/components/cluster-ask-agent";
 import { dispatchComposerAgentMessage } from "@/composer/actions";
 import { createMessageSubmissionWriter } from "@/composer/submission/writer";
+import { resolveSkillInjectedText } from "@/skills/skill-injection";
 import type { ClusterComposerResource } from "@/components/cluster-composer";
 import { SidebarResizeHandle } from "@/components/sidebar-resize-handle";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
@@ -93,7 +94,7 @@ function deliverPendingAsk(
   void dispatchComposerAgentMessage({
     client,
     agentId,
-    text: message,
+    text: resolveSkillInjectedText(agentId, message),
     attachments: [],
     encodeImages: async () => undefined,
     submission: createMessageSubmissionWriter(serverId),
@@ -228,6 +229,41 @@ function HistoryItem({
  * (clusterId, kubectl tools, "wait for the user's question") and renders the
  * agent conversation. The k8s content stays on the left the whole time.
  */
+function ClusterChatBody({
+  agentId,
+  ready,
+  paneValue,
+  focusValue,
+}: {
+  agentId: string | null;
+  ready: boolean;
+  paneValue: PaneContextValue;
+  focusValue: ReturnType<typeof createPaneFocusContextValue>;
+}) {
+  if (agentId) {
+    return (
+      <PaneProvider value={paneValue}>
+        <PaneFocusProvider value={focusValue}>
+          <AgentConversationPanel />
+        </PaneFocusProvider>
+      </PaneProvider>
+    );
+  }
+  if (ready) {
+    return (
+      <View style={styles.center}>
+        <ThemedActivityIndicator uniProps={mutedColor} />
+        <Text style={styles.centerText}>Starting chat…</Text>
+      </View>
+    );
+  }
+  return (
+    <View style={styles.center}>
+      <Text style={styles.centerText}>Connect a host & add a project to chat with an agent</Text>
+    </View>
+  );
+}
+
 export function ClusterChatDock({
   serverId,
   clusterId,
@@ -457,30 +493,6 @@ export function ClusterChatDock({
     [],
   );
 
-  let body;
-  if (agentId) {
-    body = (
-      <PaneProvider value={paneValue}>
-        <PaneFocusProvider value={focusValue}>
-          <AgentConversationPanel />
-        </PaneFocusProvider>
-      </PaneProvider>
-    );
-  } else if (ready) {
-    body = (
-      <View style={styles.center}>
-        <ThemedActivityIndicator uniProps={mutedColor} />
-        <Text style={styles.centerText}>Starting chat…</Text>
-      </View>
-    );
-  } else {
-    body = (
-      <View style={styles.center}>
-        <Text style={styles.centerText}>Connect a host & add a project to chat with an agent</Text>
-      </View>
-    );
-  }
-
   if (!open) {
     // On phones the closed dock is a floating action button that does NOT take
     // layout width, so the resource table (search box, namespace, AGE) gets the
@@ -537,7 +549,12 @@ export function ClusterChatDock({
           </Pressable>
         </View>
         <View style={styles.body}>
-          {body}
+          <ClusterChatBody
+            agentId={agentId}
+            ready={ready}
+            paneValue={paneValue}
+            focusValue={focusValue}
+          />
           {historyOpen ? (
             <View style={styles.historyOverlay}>
               <ScrollView>

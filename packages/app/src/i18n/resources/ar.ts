@@ -371,6 +371,15 @@ export const ar: TranslationResources = {
       hostStatus: "حالة Host:{{status}}",
       needsHostUpgrade: "قم بتحديث مضيفك لاستعادة مساحة العمل هذه",
       manageHost: "إدارة المضيف",
+      loginAgain: "تسجيل الدخول مرة أخرى",
+      removeHost: "إزالة المضيف",
+      tailnetNeedsLogin: "قد يتطلب هذا المضيف تسجيل الدخول إلى Tailscale مرة أخرى.",
+      localRetriesExhaustedTitle: "تعذّر الوصول إلى {{hostName}}",
+      localRetriesExhaustedDescription:
+        "فشل هذا المضيف المحلي في الاتصال بعد 3 محاولات. أزِله وأعِد إنشاءه للمحاولة مرة أخرى.",
+      localRetriesExhaustedAction: "إزالة وإعادة الإنشاء",
+      localRetriesExhaustedConfirm:
+        "تعذّر الوصول إلى هذا المضيف المحلي بعد 3 محاولات. هل تريد إزالته وإعادة إنشائه؟",
       recovery: {
         archivedTitle: "مساحة العمل مؤرشفة",
         restoreDescription:
@@ -889,6 +898,45 @@ export const ar: TranslationResources = {
         generic: "قم بإعداد {{brand}} على هذا المضيف لاستخدام ميزاته.",
       },
     },
+  },
+  connection: {
+    localMode: {
+      mobileWarning:
+        "الوضع المحلي مُفعَّل. لا يمكن للأجهزة المحمولة الاتصال بهذا الكمبيوتر عبر Tailscale حتى تعود إلى وضع Tailscale.",
+    },
+    timingOut: {
+      tailnet: {
+        title: "تعذّر اتصال {{hostName}}",
+        message:
+          "انتهت مهلة هذا المضيف عبر Tailscale. سجّل الدخول إلى Tailscale مرة أخرى لاستعادة الاتصال.",
+        action: "تسجيل الدخول مرة أخرى",
+      },
+      local: {
+        title: "تعذّر اتصال {{hostName}}",
+        message:
+          "لم يتم العثور على معلومات إعادة المحاولة لهذا المضيف المحلي. أزِله وأعِد إنشاءه لإعادة الاتصال.",
+        action: "إزالة وإعادة الإنشاء",
+      },
+    },
+  },
+  migration: {
+    moveDataTitle: "نقل البيانات إلى مضيف آخر",
+    moveDataAction: "نقل البيانات…",
+    moveDataHint:
+      "انقل وكلاء هذا المضيف وبياناتهم إلى مضيف آخر متصل. تعرض العناصر المنقولة اسم هذا المضيف كبادئة.",
+    pickTarget: "اختر مضيفًا هدفًا",
+    pickTargetHint: "تُنقل البيانات إلى المضيف الذي تختاره هنا.",
+    noTargets: "قم بتوصيل مضيف آخر لنقل البيانات إليه.",
+    notConnected: "هذا المضيف غير متصل حاليًا. أعد توصيله ثم حاول مرة أخرى.",
+    confirmTitle: "نقل البيانات؟",
+    confirmMessage:
+      "نقل الوكلاء والبيانات من {{source}} إلى {{target}}؟ ستعرض العناصر المنقولة وسم {{source}} على {{target}}.",
+    confirmAction: "نقل البيانات",
+    success: "تم نقل {{count}} وكيلًا من هذا المضيف إلى {{target}}.",
+    failed: "تعذّر نقل البيانات. لم يتغير شيء.",
+    recreateHealed: "تمت إعادة الاتصال بـ {{hostName}}.",
+    recreateSuccess: "تمت إعادة إنشاء {{hostName}} ونقل بياناته.",
+    recreateFailed: "تعذّر الوصول إلى {{hostName}} لإعادة إنشائه. تُرك كما هو.",
   },
   sidebar: {
     pinned: {

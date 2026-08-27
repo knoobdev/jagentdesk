@@ -124,6 +124,12 @@ import {
   ClusterPfCloseResponseSchema,
 } from "./cluster/rpc-schemas.js";
 import {
+  ExportHostDataRequestMessageSchema,
+  ExportHostDataResponseMessageSchema,
+  ImportHostDataRequestMessageSchema,
+  ImportHostDataResponseMessageSchema,
+} from "./migration/host-data-bundle.js";
+import {
   BrowserAutomationExecuteRequestSchema,
   BrowserAutomationExecuteResponseSchema,
   BrowserScreenshotRequestSchema,
@@ -289,6 +295,7 @@ import type {
   ToolCallDetail,
   ToolCallTimelineItem,
   AgentUsage,
+  AgentUsageTotals,
 } from "./agent-types.js";
 
 export const AgentStatusSchema = z.enum(AGENT_LIFECYCLE_STATUSES);
@@ -399,6 +406,14 @@ const AgentUsageSchema: z.ZodType<AgentUsage> = z.object({
   totalCostUsd: z.number().optional(),
   contextWindowMaxTokens: z.number().optional(),
   contextWindowUsedTokens: z.number().optional(),
+});
+
+const AgentUsageTotalsSchema: z.ZodType<AgentUsageTotals> = z.object({
+  inputTokens: z.number(),
+  cachedInputTokens: z.number(),
+  outputTokens: z.number(),
+  totalCostUsd: z.number(),
+  turns: z.number(),
 });
 
 const McpStdioServerConfigSchema = z.object({
@@ -815,6 +830,7 @@ export const AgentSnapshotPayloadSchema = z.object({
   persistence: AgentPersistenceHandleSchema.nullable(),
   runtimeInfo: AgentRuntimeInfoSchema.optional(),
   lastUsage: AgentUsageSchema.optional(),
+  usageTotals: AgentUsageTotalsSchema.optional(),
   lastError: z.string().optional(),
   title: z.string().nullable(),
   labels: z.record(z.string(), z.string()).default({}),
@@ -2941,6 +2957,8 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ClusterPfStartRequestSchema,
   ClusterPfStdinRequestSchema,
   ClusterPfCloseRequestSchema,
+  ExportHostDataRequestMessageSchema,
+  ImportHostDataRequestMessageSchema,
 ]);
 
 export type SessionInboundMessage = z.infer<typeof SessionInboundMessageSchema>;
@@ -5942,6 +5960,8 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ClusterPfCloseResponseSchema,
   DaemonUpdateProgressMessageSchema,
   DaemonUpdateResponseSchema,
+  ExportHostDataResponseMessageSchema,
+  ImportHostDataResponseMessageSchema,
 ]);
 
 export type SessionOutboundMessage = z.infer<typeof SessionOutboundMessageSchema>;

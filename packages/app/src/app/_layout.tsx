@@ -16,7 +16,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { AppState, useWindowDimensions, View } from "react-native";
+import { Alert, AppState, useWindowDimensions, View } from "react-native";
 import { GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -103,6 +103,7 @@ import { keyboardActionDispatcher } from "@/keyboard/keyboard-action-dispatcher"
 import { polyfillCrypto } from "@/polyfills/crypto";
 import { polyfillNavigator } from "@/polyfills/navigator";
 import { queryClient } from "@/data/query-client";
+import { createSourceHostReconnectHandler } from "@/runtime/migration/reverse-migration-handler";
 import {
   getHostRuntimeStore,
   hasConfiguredLocalDaemonOverride,
@@ -112,6 +113,7 @@ import {
   useHosts,
 } from "@/runtime/host-runtime";
 import { getDaemonStartService } from "@/runtime/daemon-start-service";
+import { ConnectionNotifications } from "@/runtime/connection-notifications";
 import { applyAppearance } from "@/screens/settings/appearance/apply-appearance";
 import { selectIsAgentListOpen, usePanelStore } from "@/stores/panel-store";
 import { flushDraftPersistStorage } from "@/stores/draft-store";
@@ -731,6 +733,7 @@ function ProvidersWrapper({ children }: { children: ReactNode }) {
       <DesktopWindowControlsSync enabled={!settingsLoading} />
       <OfferLinkListener />
       <HostSessionManager />
+      <ConnectionNotifications />
       <FaviconStatusSync />
       {children}
     </VoiceProvider>
@@ -907,6 +910,41 @@ function OpenProjectListener() {
   return null;
 }
 
+// Detects when a host that was a prior migration source comes back online and
+// offers to migrate its data back (reverse migration). See host-migration-service.
+function ReverseMigrationListener() {
+  useEffect(() => {
+    const store = getHostRuntimeStore();
+    const handler = createSourceHostReconnectHandler({
+      hostRuntime: store,
+      confirm: ({ agentCount, sourceHostLabel }) =>
+        new Promise<boolean>((resolve) => {
+          const label = sourceHostLabel ?? "the original host";
+          Alert.alert(
+            "Move data back?",
+            `${label} is back online. Move ${agentCount} migrated ${
+              agentCount === 1 ? "agent" : "agents"
+            } back to it?`,
+            [
+              { text: "Not now", style: "cancel", onPress: () => resolve(false) },
+              { text: "Move back", onPress: () => resolve(true) },
+            ],
+            { cancelable: true, onDismiss: () => resolve(false) },
+          );
+        }),
+      onError: (error, context) => {
+        console.error("[ReverseMigration] failed", {
+          sourceServerId: context.sourceServerId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      },
+    });
+    return store.subscribeSourceHostReconnect(handler);
+  }, []);
+
+  return null;
+}
+
 function AppWithSidebar({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const hosts = useHosts();
@@ -1002,6 +1040,7 @@ function AppShell() {
       <HorizontalScrollProvider>
         <DesktopConnectionGate />
         <OpenProjectListener />
+        <ReverseMigrationListener />
         <AgentNavigationListener />
         <AppWithSidebar>
           <WorkspaceRouteNavigationBridge />

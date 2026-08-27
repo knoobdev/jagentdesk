@@ -1,4 +1,5 @@
 import { useCallback, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import type {
   OrchestrationConfig,
@@ -14,6 +15,7 @@ export const orchestrationConfigQueryKey = (serverId: string | null) => [
 ];
 
 export function useOrchestration(serverId: string | null) {
+  const { t } = useTranslation();
   const client = useHostRuntimeClient(serverId ?? "");
   const isConnected = useHostRuntimeIsConnected(serverId ?? "");
   const queryClient = useQueryClient();
@@ -24,7 +26,7 @@ export function useOrchestration(serverId: string | null) {
     pushEvent: "status:daemon_config_changed",
     queryFn: async () => {
       if (!client) {
-        throw new Error("Host is not connected");
+        throw new Error(t("workspace.terminal.hostDisconnected"));
       }
       return (await client.getOrchestrationConfig()).config;
     },
@@ -33,13 +35,13 @@ export function useOrchestration(serverId: string | null) {
   const patchConfig = useCallback(
     async (patch: OrchestrationConfigPatch): Promise<OrchestrationConfig | undefined> => {
       if (!client) {
-        throw new Error("Host is not connected");
+        throw new Error(t("workspace.terminal.hostDisconnected"));
       }
       const config = (await client.patchOrchestrationConfig(patch)).config;
       queryClient.setQueryData(queryKey, config);
       return config;
     },
-    [client, queryClient, queryKey],
+    [client, queryClient, queryKey, t],
   );
 
   const prepareTask = useCallback(
@@ -50,11 +52,11 @@ export function useOrchestration(serverId: string | null) {
       routeCategory?: OrchestrationRouteCategory;
     }) => {
       if (!client) {
-        throw new Error("Host is not connected");
+        throw new Error(t("workspace.terminal.hostDisconnected"));
       }
       return client.prepareOrchestrationTask(input);
     },
-    [client],
+    [client, t],
   );
 
   return {

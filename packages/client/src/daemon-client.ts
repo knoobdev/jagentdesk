@@ -156,6 +156,10 @@ import type {
   BrowserScreenshotResponse,
   BrowserListResponse,
 } from "@jagentdesk/protocol/browser-automation/rpc-schemas";
+import type {
+  HostDataBundle,
+  HostDataImportResult,
+} from "@jagentdesk/protocol/migration/host-data-bundle";
 
 export interface Logger {
   debug(obj: object, msg?: string): void;
@@ -1094,6 +1098,9 @@ function toTimeoutError(error: unknown, label: string, timeoutMs: number): Error
 const DEFAULT_RECONNECT_BASE_DELAY_MS = 1500;
 const DEFAULT_RECONNECT_MAX_DELAY_MS = 30000;
 const DEFAULT_SESSION_RPC_TIMEOUT_MS = 60_000;
+// Migration bundles carry serialized records + provider history blobs and can be
+// large; allow more headroom than a normal RPC.
+const HOST_DATA_MIGRATION_TIMEOUT_MS = 300_000;
 const DEFAULT_CONNECT_TIMEOUT_MS = 15_000;
 const DEFAULT_LIVENESS_TIMEOUT_MS = 5000;
 export const CHALLENGE_WAIT_FALLBACK_MS = 10_000;
@@ -5679,6 +5686,64 @@ export class DaemonClient {
   }
 
   // ── Cluster RPC methods ───────────────────────────────────────────────
+
+  /**
+   * Export this daemon's agents (whole daemon, or a subset) into a portable
+   * bundle for host-to-host migration. Throws on daemon-side failure.
+   */
+  async exportHostData(options?: { agentIds?: string[] }): Promise<HostDataBundle> {
+    const requestId = this.createRequestId();
+    const message = SessionInboundMessageSchema.parse({
+      type: "export_host_data_request",
+      requestId,
+      ...(options?.agentIds ? { agentIds: options.agentIds } : {}),
+    });
+    const payload = await this.sendRequest({
+      requestId,
+      message,
+      options: { skipQueue: true },
+      timeout: HOST_DATA_MIGRATION_TIMEOUT_MS,
+      select: (msg) => {
+        if (msg.type !== "export_host_data_response" || msg.payload.requestId !== requestId) {
+          return null;
+        }
+        return msg.payload;
+      },
+    });
+    if (payload.error || !payload.bundle) {
+      throw new Error(payload.error ?? "Host data export returned no bundle");
+    }
+    return payload.bundle;
+  }
+
+  /**
+   * Import a previously-exported bundle into this (target) daemon. Returns the
+   * id map + provenance the client needs to re-key its per-host state.
+   */
+  async importHostData(bundle: HostDataBundle): Promise<HostDataImportResult> {
+    const requestId = this.createRequestId();
+    const message = SessionInboundMessageSchema.parse({
+      type: "import_host_data_request",
+      requestId,
+      bundle,
+    });
+    const payload = await this.sendRequest({
+      requestId,
+      message,
+      options: { skipQueue: true },
+      timeout: HOST_DATA_MIGRATION_TIMEOUT_MS,
+      select: (msg) => {
+        if (msg.type !== "import_host_data_response" || msg.payload.requestId !== requestId) {
+          return null;
+        }
+        return msg.payload;
+      },
+    });
+    if (payload.error || !payload.result) {
+      throw new Error(payload.error ?? "Host data import returned no result");
+    }
+    return payload.result;
+  }
 
   async clusterContexts(requestId?: string): Promise<ClusterContextsPayload> {
     return this.sendCorrelatedSessionRequest({

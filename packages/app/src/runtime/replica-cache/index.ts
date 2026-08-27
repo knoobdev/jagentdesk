@@ -159,6 +159,7 @@ function serializeAgent(agent: Agent): StoredAgent {
     persistence: agent.persistence,
     ...(agent.runtimeInfo ? { runtimeInfo: agent.runtimeInfo } : {}),
     ...(agent.lastUsage ? { lastUsage: agent.lastUsage } : {}),
+    ...(agent.usageTotals ? { usageTotals: agent.usageTotals } : {}),
     ...(agent.lastError ? { lastError: agent.lastError } : {}),
     title: agent.title,
     labels: agent.labels,
@@ -362,6 +363,36 @@ export class ReplicaCache {
       this.capturedSessions.set(newServerId, capturedSession);
     }
     if (this.activeServerIds.delete(oldServerId)) this.activeServerIds.add(newServerId);
+    this.needsPersist = true;
+    this.schedulePersist();
+  }
+
+  /**
+   * Rewrite the agent ids inside a host's cached snapshot after a migration
+   * assigned new ids on the target daemon (idMap: oldAgentId -> newAgentId). Keeps
+   * the offline replica coherent until the target daemon re-pushes authoritative
+   * agent state on reconnect.
+   */
+  remapAgentIds(serverId: string, idMap: Record<string, string>): void {
+    if (Object.keys(idMap).length === 0) return;
+    const remap = (id: string): string => idMap[id] ?? id;
+    const stored = this.storedHosts.get(serverId);
+    if (stored) {
+      this.storedHosts.set(serverId, {
+        ...stored,
+        agents: stored.agents.map((agent) => ({
+          ...agent,
+          snapshot: { ...agent.snapshot, id: remap(agent.snapshot.id) },
+        })),
+        timeline: stored.timeline
+          ? { ...stored.timeline, agentId: remap(stored.timeline.agentId) }
+          : stored.timeline,
+      });
+    }
+    const focusedAgentId = this.lastFocusedAgentIds.get(serverId);
+    if (focusedAgentId) {
+      this.lastFocusedAgentIds.set(serverId, remap(focusedAgentId));
+    }
     this.needsPersist = true;
     this.schedulePersist();
   }

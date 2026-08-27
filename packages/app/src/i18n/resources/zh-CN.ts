@@ -371,6 +371,13 @@ export const zhCN: TranslationResources = {
       hostStatus: "Host 状态：{{status}}",
       needsHostUpgrade: "更新你的 Host 以恢复此 workspace",
       manageHost: "管理 Host",
+      loginAgain: "重新登录",
+      removeHost: "移除 Host",
+      tailnetNeedsLogin: "此 Host 可能需要您重新登录 Tailscale。",
+      localRetriesExhaustedTitle: "无法连接到 {{hostName}}",
+      localRetriesExhaustedDescription: "此本地 Host 连接 3 次均失败。请移除并重新创建后再试。",
+      localRetriesExhaustedAction: "移除并重新创建",
+      localRetriesExhaustedConfirm: "尝试 3 次后仍无法连接此本地 Host。要移除并重新创建吗？",
       recovery: {
         archivedTitle: "Workspace 已归档",
         restoreDescription:
@@ -881,6 +888,43 @@ export const zhCN: TranslationResources = {
         generic: "在此主机上设置 {{brand}} 以使用其功能。",
       },
     },
+  },
+  connection: {
+    localMode: {
+      mobileWarning:
+        "已开启本地模式。在切换回 Tailscale 模式之前，移动设备无法通过 Tailscale 连接到这台电脑。",
+    },
+    timingOut: {
+      tailnet: {
+        title: "{{hostName}} 无法连接",
+        message: "此 Host 通过 Tailscale 连接超时。请重新登录 Tailscale 以恢复连接。",
+        action: "重新登录",
+      },
+      local: {
+        title: "{{hostName}} 无法连接",
+        message: "未找到此本地 Host 的重试信息。请移除并重新创建以重新连接。",
+        action: "移除并重新创建",
+      },
+    },
+  },
+  migration: {
+    moveDataTitle: "将数据移动到其他主机",
+    moveDataAction: "移动数据…",
+    moveDataHint:
+      "将此主机的代理及其数据移动到另一台已连接的主机。迁移的项目会以此主机名称作为前缀显示。",
+    pickTarget: "选择目标主机",
+    pickTargetHint: "数据将移动到你在此处选择的主机。",
+    noTargets: "请连接另一台主机以便移动数据。",
+    notConnected: "该主机当前未连接。请重新连接后再试。",
+    confirmTitle: "移动数据？",
+    confirmMessage:
+      "将代理和数据从 {{source}} 移动到 {{target}}？迁移的项目将在 {{target}} 上显示 {{source}} 标签。",
+    confirmAction: "移动数据",
+    success: "已将 {{count}} 个代理从此主机移动到 {{target}}。",
+    failed: "无法移动数据。未做任何更改。",
+    recreateHealed: "已重新连接 {{hostName}}。",
+    recreateSuccess: "已重新创建 {{hostName}} 并移动其数据。",
+    recreateFailed: "无法连接 {{hostName}} 进行重新创建，已保持原样。",
   },
   sidebar: {
     pinned: {

@@ -29,6 +29,7 @@ import {
 } from "./state";
 import { migrateDraftInput, migratePersistedState, type MigrateLegacyImages } from "./migration";
 import { createDraftPersistStorage } from "./persistence";
+import { remapDraftKeys } from "@/stores/draft-keys";
 
 export type { DraftInput, DraftLifecycleState } from "./state";
 
@@ -48,6 +49,11 @@ interface DraftStoreActions {
   getCreateModalDraft: () => DraftInput | null;
   saveCreateModalDraft: (draft: DraftInput | null) => void;
   collectActiveAttachmentIds: () => string[];
+  remapServerDrafts: (input: {
+    oldServerId: string;
+    newServerId: string;
+    idMap: Record<string, string>;
+  }) => void;
 }
 
 interface DraftStoreRuntimeState {
@@ -407,6 +413,21 @@ export const useDraftStore = create<DraftStore>()(
 
       collectActiveAttachmentIds: () => {
         return Array.from(collectReferencedAttachmentIdsFromState(get()).values());
+      },
+
+      remapServerDrafts: ({ oldServerId, newServerId, idMap }) => {
+        set((state) => {
+          const remapped = remapDraftKeys({
+            drafts: state.drafts,
+            oldServerId,
+            newServerId,
+            idMap,
+          });
+          if (remapped === state.drafts) {
+            return state;
+          }
+          return { drafts: remapped };
+        });
       },
     }),
     {

@@ -375,6 +375,15 @@ export const fr: TranslationResources = {
       hostStatus: "StatutHost:{{status}}",
       needsHostUpgrade: "Mettez à jour votre hôte pour restaurer cet espace de travail",
       manageHost: "Gérer l'hôte",
+      loginAgain: "Se reconnecter",
+      removeHost: "Supprimer l'hôte",
+      tailnetNeedsLogin: "Cet hôte peut nécessiter une nouvelle connexion à Tailscale.",
+      localRetriesExhaustedTitle: "Impossible de joindre {{hostName}}",
+      localRetriesExhaustedDescription:
+        "Cet hôte local n'a pas pu se connecter après 3 tentatives. Supprimez-le et recréez-le pour réessayer.",
+      localRetriesExhaustedAction: "Supprimer et recréer",
+      localRetriesExhaustedConfirm:
+        "Impossible de joindre cet hôte local après 3 tentatives. Le supprimer et le recréer ?",
       recovery: {
         archivedTitle: "Espace de travail archivé",
         restoreDescription:
@@ -919,6 +928,45 @@ export const fr: TranslationResources = {
         generic: "Configurez {{brand}} sur cet hôte pour utiliser ses fonctionnalités.",
       },
     },
+  },
+  connection: {
+    localMode: {
+      mobileWarning:
+        "Le mode Local est activé. Les appareils mobiles ne peuvent pas se connecter à cet ordinateur via Tailscale tant que vous ne repassez pas en mode Tailscale.",
+    },
+    timingOut: {
+      tailnet: {
+        title: "{{hostName}} n'a pas pu se connecter",
+        message:
+          "Cet hôte expirait via Tailscale. Reconnectez-vous à Tailscale pour rétablir la connexion.",
+        action: "Se reconnecter",
+      },
+      local: {
+        title: "{{hostName}} n'a pas pu se connecter",
+        message:
+          "Les informations de nouvelle tentative de cet hôte local sont introuvables. Supprimez-le et recréez-le pour vous reconnecter.",
+        action: "Supprimer et recréer",
+      },
+    },
+  },
+  migration: {
+    moveDataTitle: "Déplacer les données vers un autre hôte",
+    moveDataAction: "Déplacer les données…",
+    moveDataHint:
+      "Déplacez les agents de cet hôte et leurs données vers un autre hôte connecté. Les éléments migrés affichent le nom de cet hôte en préfixe.",
+    pickTarget: "Choisir un hôte de destination",
+    pickTargetHint: "Les données sont déplacées vers l'hôte que vous choisissez ici.",
+    noTargets: "Connectez un autre hôte pour y déplacer les données.",
+    notConnected: "Cet hôte n'est pas connecté pour le moment. Reconnectez-le et réessayez.",
+    confirmTitle: "Déplacer les données ?",
+    confirmMessage:
+      "Déplacer les agents et les données de {{source}} vers {{target}} ? Les éléments migrés afficheront une étiquette {{source}} sur {{target}}.",
+    confirmAction: "Déplacer les données",
+    success: "{{count}} agents déplacés de cet hôte vers {{target}}.",
+    failed: "Impossible de déplacer les données. Rien n'a été modifié.",
+    recreateHealed: "{{hostName}} reconnecté.",
+    recreateSuccess: "{{hostName}} recréé et ses données déplacées.",
+    recreateFailed: "Impossible de joindre {{hostName}} pour le recréer. Il a été laissé en place.",
   },
   sidebar: {
     pinned: {

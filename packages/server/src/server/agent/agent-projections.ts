@@ -87,6 +87,7 @@ export function toStoredAgentRecord(
     features: normalizeFeatures(agent.features),
     persistence,
     lastError: agent.lastError ?? undefined,
+    usageTotals: agent.usageTotals,
     requiresAttention: agent.attention.requiresAttention,
     attentionReason: agent.attention.requiresAttention ? agent.attention.attentionReason : null,
     attentionTimestamp: agent.attention.requiresAttention
@@ -140,6 +141,10 @@ export function toAgentPayload(
   const usage = sanitizeUsage(agent.lastUsage);
   if (usage !== undefined) {
     payload.lastUsage = usage;
+  }
+
+  if (agent.usageTotals !== undefined) {
+    payload.usageTotals = agent.usageTotals;
   }
 
   if (agent.lastError !== undefined) {
@@ -244,6 +249,7 @@ export function buildStoredAgentPayload(
     attentionTimestamp: record.attentionTimestamp ?? null,
     archivedAt: record.archivedAt ?? null,
     labels: normalizeLabels(record.labels),
+    ...(record.usageTotals ? { usageTotals: record.usageTotals } : {}),
     ...(providerAvailable ? {} : { providerUnavailable: true }),
   };
 }

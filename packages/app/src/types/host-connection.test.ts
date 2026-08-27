@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { defaultHostAppearance } from "@/hosts/appearance";
 import {
+  disambiguateHostLabels,
+  hostHasLocalConnection,
+  hostHasTailnetConnection,
   normalizeStoredHostProfile,
   orderHostsLocalFirst,
   resolveActiveHostServerId,
@@ -8,6 +11,118 @@ import {
   type HostConnection,
   type HostProfile,
 } from "./host-connection";
+
+function makeVisibilityHost(serverId: string, connections: HostConnection[]): HostProfile {
+  return {
+    serverId,
+    label: serverId,
+    appearance: defaultHostAppearance(),
+    lifecycle: {},
+    connections,
+    preferredConnectionId: connections[0]?.id ?? null,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  };
+}
+
+const visibilityDirect: HostConnection = {
+  id: "direct:localhost:6797",
+  type: "directTcp",
+  endpoint: "localhost:6797",
+};
+const visibilitySocket: HostConnection = {
+  id: "socket:/tmp/jagentdesk.sock",
+  type: "directSocket",
+  path: "/tmp/jagentdesk.sock",
+};
+const visibilityTailnet: HostConnection = {
+  id: "tailnet:jcode-1:6768",
+  type: "tailnet",
+  tailnetAddress: "jcode-1.tailf900c1.ts.net:6768",
+  daemonPublicKeyB64: "k",
+};
+
+describe("hostHasLocalConnection / hostHasTailnetConnection", () => {
+  it("treats a tailnet-only host as having no local connection", () => {
+    const host = makeVisibilityHost("srv_tail", [visibilityTailnet]);
+    expect(hostHasLocalConnection(host)).toBe(false);
+    expect(hostHasTailnetConnection(host)).toBe(true);
+  });
+
+  it("treats a direct/socket/pipe host as having a local connection", () => {
+    expect(hostHasLocalConnection(makeVisibilityHost("srv_tcp", [visibilityDirect]))).toBe(true);
+    expect(hostHasLocalConnection(makeVisibilityHost("srv_sock", [visibilitySocket]))).toBe(true);
+    expect(hostHasTailnetConnection(makeVisibilityHost("srv_tcp", [visibilityDirect]))).toBe(false);
+  });
+
+  it("keeps a dual-connection host local-visible while still tailnet-capable", () => {
+    const dual = makeVisibilityHost("srv_dual", [visibilityTailnet, visibilityDirect]);
+    expect(hostHasLocalConnection(dual)).toBe(true);
+    expect(hostHasTailnetConnection(dual)).toBe(true);
+  });
+});
+
+describe("disambiguateHostLabels", () => {
+  function hostWith(serverId: string, label: string, connection: HostConnection): HostProfile {
+    return {
+      serverId,
+      label,
+      appearance: defaultHostAppearance(),
+      lifecycle: {},
+      connections: [connection],
+      preferredConnectionId: connection.id,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+  }
+
+  it("appends the connection hint only to hosts whose label collides", () => {
+    const hosts = [
+      hostWith("srv_a", "JCode.local", {
+        id: "direct:localhost:6796",
+        type: "directTcp",
+        endpoint: "localhost:6796",
+      }),
+      hostWith("srv_b", "JCode.local", {
+        id: "tailnet:jcode-1:6768",
+        type: "tailnet",
+        tailnetAddress: "jcode-1.tailf900c1.ts.net:6768",
+        daemonPublicKeyB64: "k",
+      }),
+      hostWith("srv_c", "OtherBox", {
+        id: "direct:localhost:6767",
+        type: "directTcp",
+        endpoint: "localhost:6767",
+      }),
+    ];
+
+    const result = disambiguateHostLabels(hosts);
+
+    expect(result[0]?.label).toBe("JCode.local (localhost:6796)");
+    expect(result[1]?.label).toBe("JCode.local (jcode-1.tailf900c1.ts.net:6768)");
+    // A unique label is left untouched.
+    expect(result[2]?.label).toBe("OtherBox");
+    // serverIds are never mutated.
+    expect(result.map((h) => h.serverId)).toEqual(["srv_a", "srv_b", "srv_c"]);
+  });
+
+  it("leaves a list with no collisions unchanged", () => {
+    const hosts = [
+      hostWith("srv_a", "Alpha", {
+        id: "direct:localhost:6796",
+        type: "directTcp",
+        endpoint: "localhost:6796",
+      }),
+      hostWith("srv_b", "Beta", {
+        id: "direct:localhost:6797",
+        type: "directTcp",
+        endpoint: "localhost:6797",
+      }),
+    ];
+
+    expect(disambiguateHostLabels(hosts).map((h) => h.label)).toEqual(["Alpha", "Beta"]);
+  });
+});
 
 function makeHost(serverId: string): HostProfile {
   return {

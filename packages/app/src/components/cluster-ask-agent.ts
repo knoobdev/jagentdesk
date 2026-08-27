@@ -1,6 +1,10 @@
 import { Alert } from "react-native";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import { navigateToAgent } from "@/utils/navigate-to-agent";
+import { useSkillsStore } from "@/stores/skills-store";
+import { useAgentSkillsStore } from "@/stores/agent-skills-store";
+import { matchSkillsForQuery } from "@/skills/match-skills";
+import { applySkillPreamble, buildSkillsPreamble } from "@/skills/skill-injection";
 
 export interface AskAgentAboutResourceInput {
   client: DaemonClient;
@@ -29,6 +33,19 @@ export interface AskAgentAboutResourceInput {
    * slide-in dock so the k8s resources stay on screen.
    */
   onCreated?: (agent: { id: string; workspaceId: string | null }) => void;
+}
+
+/**
+ * Best-effort skill injection for a message sent as the first prompt of a
+ * NOT-YET-CREATED agent. Only auto-load matching (keyed off the message text)
+ * can apply pre-creation; attached-skill injection is tracked per agentId, which
+ * doesn't exist yet. Reads store snapshots statically so it works outside React.
+ */
+function resolveAutoLoadInjectedPrompt(text: string): string {
+  if (!useAgentSkillsStore.getState().autoLoad) return text;
+  const skills = useSkillsStore.getState().skills;
+  const matched = matchSkillsForQuery(skills, text);
+  return applySkillPreamble(text, buildSkillsPreamble(matched));
 }
 
 export async function askAgentAboutResource(input: AskAgentAboutResourceInput): Promise<void> {
@@ -76,6 +93,11 @@ export async function askAgentAboutResource(input: AskAgentAboutResourceInput): 
 
   try {
     const trimmed = message?.trim();
+    // Inject auto-load-matched skills into the first message so cluster "Ask AI"
+    // reaches parity with the composer send path. The agent id does not exist yet,
+    // so attached-skill injection (which is tracked per agentId) can't apply here —
+    // only the auto-load matching that keys off the message text.
+    const initialPrompt = trimmed ? resolveAutoLoadInjectedPrompt(trimmed) : trimmed;
     const agent = await client.createAgent({
       provider,
       cwd,
@@ -86,7 +108,7 @@ export async function askAgentAboutResource(input: AskAgentAboutResourceInput): 
       ...(title ? { title } : {}),
       // When the user typed a question in the composer, send it as the first
       // message; otherwise open an empty chat for them to type.
-      ...(trimmed ? { initialPrompt: trimmed } : {}),
+      ...(initialPrompt ? { initialPrompt } : {}),
     });
 
     if (onCreated) {

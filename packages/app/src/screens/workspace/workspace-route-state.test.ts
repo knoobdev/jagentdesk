@@ -26,11 +26,17 @@ function resolve(input: {
   connectionStatus?: "online" | "offline";
   hasHydratedWorkspaces?: boolean;
   recovery?: WorkspaceRecoveryModel;
+  serverId?: string;
+  isTailnet?: boolean;
+  localRetriesExhausted?: boolean;
 }) {
   return resolveWorkspaceRouteState({
     hostName: "Laptop",
+    serverId: input.serverId ?? "srv_laptop",
+    isTailnet: input.isTailnet ?? false,
     connectionStatus: input.connectionStatus ?? "online",
     lastError: input.connectionStatus === "offline" ? "transport closed" : null,
+    localRetriesExhausted: input.localRetriesExhausted ?? false,
     workspace: input.workspace ?? null,
     hasHydratedWorkspaces: input.hasHydratedWorkspaces ?? true,
     recovery: input.recovery ?? { kind: "checking" },
@@ -55,6 +61,21 @@ describe("resolveWorkspaceRouteState", () => {
     expect(resolve({ connectionStatus: "offline" })).toEqual({
       kind: "unreachable",
       hostName: "Laptop",
+      serverId: "srv_laptop",
+      isTailnet: false,
+      connectionStatus: "offline",
+      lastError: "transport closed",
+    });
+  });
+
+  it("populates serverId and isTailnet on the unreachable state", () => {
+    expect(
+      resolve({ connectionStatus: "offline", serverId: "srv_remote", isTailnet: true }),
+    ).toEqual({
+      kind: "unreachable",
+      hostName: "Laptop",
+      serverId: "srv_remote",
+      isTailnet: true,
       connectionStatus: "offline",
       lastError: "transport closed",
     });
@@ -66,6 +87,8 @@ describe("resolveWorkspaceRouteState", () => {
     ).toEqual({
       kind: "reconnecting",
       hostName: "Laptop",
+      serverId: "srv_laptop",
+      isTailnet: false,
       connectionStatus: "offline",
       lastError: "transport closed",
     });

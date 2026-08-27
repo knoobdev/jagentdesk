@@ -7,13 +7,25 @@ export type WorkspaceRouteState =
   | {
       kind: "reconnecting";
       hostName: string;
+      serverId: string;
+      isTailnet: boolean;
       connectionStatus: Exclude<HostRuntimeConnectionStatus, "online">;
       lastError: string | null;
     }
   | {
       kind: "unreachable";
       hostName: string;
+      serverId: string;
+      isTailnet: boolean;
       connectionStatus: Exclude<HostRuntimeConnectionStatus, "online">;
+      lastError: string | null;
+    }
+  | {
+      // REQ 4: a local host failed to connect MAX_LOCAL_RETRIES times; auto-retry
+      // stopped and the user is offered a remove-and-recreate action.
+      kind: "localRetriesExhausted";
+      hostName: string;
+      serverId: string;
       lastError: string | null;
     }
   | { kind: "loading"; hostName: string }
@@ -29,8 +41,11 @@ export type WorkspaceRouteState =
 
 export function resolveWorkspaceRouteState(input: {
   hostName: string;
+  serverId: string;
+  isTailnet: boolean;
   connectionStatus: HostRuntimeConnectionStatus;
   lastError: string | null;
+  localRetriesExhausted: boolean;
   workspace: WorkspaceDescriptor | null;
   hasHydratedWorkspaces: boolean;
   recovery: WorkspaceRecoveryModel;
@@ -46,15 +61,27 @@ export function resolveWorkspaceRouteState(input: {
     return {
       kind: "reconnecting",
       hostName: input.hostName,
+      serverId: input.serverId,
+      isTailnet: input.isTailnet,
       connectionStatus: input.connectionStatus,
       lastError: input.lastError,
     };
   }
 
   if (input.connectionStatus !== "online") {
+    if (input.localRetriesExhausted && !input.isTailnet) {
+      return {
+        kind: "localRetriesExhausted",
+        hostName: input.hostName,
+        serverId: input.serverId,
+        lastError: input.lastError,
+      };
+    }
     return {
       kind: "unreachable",
       hostName: input.hostName,
+      serverId: input.serverId,
+      isTailnet: input.isTailnet,
       connectionStatus: input.connectionStatus,
       lastError: input.lastError,
     };

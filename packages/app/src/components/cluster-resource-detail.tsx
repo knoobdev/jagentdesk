@@ -13,6 +13,7 @@ import { highlightToKeyedLines } from "@/utils/highlight-cache";
 import { ClusterResourceOverview } from "@/components/cluster-resource-overview";
 import { dispatchComposerAgentMessage } from "@/composer/actions";
 import { createMessageSubmissionWriter } from "@/composer/submission/writer";
+import { resolveSkillInjectedText } from "@/skills/skill-injection";
 import { useClusterChatStore } from "@/stores/cluster-chat-store";
 import type { Theme } from "@/styles/theme";
 
@@ -216,7 +217,16 @@ export function ClusterResourceDetail({
         followUnsubscribeRef.current = null;
       }
     };
-  }, [followEnabled, showLogs, client, clusterId, namespace, name, selectedContainer, logTimestamps]);
+  }, [
+    followEnabled,
+    showLogs,
+    client,
+    clusterId,
+    namespace,
+    name,
+    selectedContainer,
+    logTimestamps,
+  ]);
 
   // Auto-scroll when follow is on and new logs arrive
   useEffect(() => {
@@ -507,7 +517,7 @@ export function ClusterResourceDetail({
       dispatchComposerAgentMessage({
         client,
         agentId: chatAgentId,
-        text: askMessage,
+        text: resolveSkillInjectedText(chatAgentId, askMessage),
         attachments: [],
         encodeImages: async () => undefined,
         submission: createMessageSubmissionWriter(serverId),
@@ -699,6 +709,14 @@ export function ClusterResourceDetail({
     );
   }, [loading, error, yaml, editing, editedYaml, editedYamlResetKey, handleApply, applying]);
 
+  const revealSecret = useMemo(
+    () =>
+      isSecret && client && namespace && name
+        ? () => client.clusterRevealSecret({ id: clusterId, namespace, name })
+        : undefined,
+    [isSecret, client, clusterId, namespace, name],
+  );
+
   // Parse the manifest into a structured overview (k8slens-style) shown by
   // default; YAML is a toggle.
   const overviewBody = useMemo(() => {
@@ -714,17 +732,13 @@ export function ClusterResourceDetail({
           eventsClusterId={clusterId}
           eventsNamespace={namespace}
           eventsName={name}
-          revealSecret={
-            isSecret && client && namespace && name
-              ? () => client.clusterRevealSecret({ id: clusterId, namespace, name })
-              : undefined
-          }
+          revealSecret={revealSecret}
         />
       );
     } catch {
       return null;
     }
-  }, [yaml, kind, serverId, clusterId, namespace, name, isSecret, client]);
+  }, [yaml, kind, serverId, clusterId, namespace, name, revealSecret]);
 
   const logsBody = useMemo(() => {
     if (logLoading) {
@@ -756,18 +770,20 @@ export function ClusterResourceDetail({
       );
     }
     const lines = logs.split("\n");
+    const lineKeyCounts = new Map<string, number>();
     return (
       <ScrollView ref={logsScrollRef} style={styles.logsScroll} nestedScrollEnabled>
         <View style={styles.logsInner}>
           {lines.map((line, i) => {
             const lower = line.toLowerCase();
-            const sev = /\b(error|fatal|panic|exception|failed|fail)\b/.test(lower)
-              ? styles.logError
-              : /\b(warn|warning)\b/.test(lower)
-                ? styles.logWarn
-                : /\b(debug|trace)\b/.test(lower)
-                  ? styles.logDebug
-                  : styles.logInfo;
+            let sev = styles.logInfo;
+            if (/\b(error|fatal|panic|exception|failed|fail)\b/.test(lower)) {
+              sev = styles.logError;
+            } else if (/\b(warn|warning)\b/.test(lower)) {
+              sev = styles.logWarn;
+            } else if (/\b(debug|trace)\b/.test(lower)) {
+              sev = styles.logDebug;
+            }
             let ts: string | null = null;
             let rest = line;
             if (logTimestamps && /^\d{4}-\d{2}-\d{2}T/.test(line)) {
@@ -777,9 +793,12 @@ export function ClusterResourceDetail({
                 rest = line.slice(sp + 1);
               }
             }
+            const occurrence = lineKeyCounts.get(line) ?? 0;
+            lineKeyCounts.set(line, occurrence + 1);
+            const lineKey = `${occurrence}:${line}`;
             return (
-              <Text key={i} style={styles.logLineBase} selectable>
-                <Text style={styles.logLineNum}>{String(i + 1).padStart(4, " ")}  </Text>
+              <Text key={lineKey} style={styles.logLineBase} selectable>
+                <Text style={styles.logLineNum}>{String(i + 1).padStart(4, " ")} </Text>
                 {ts ? <Text style={styles.logTs}>{ts} </Text> : null}
                 <Text style={sev}>{rest}</Text>
               </Text>
@@ -828,7 +847,6 @@ export function ClusterResourceDetail({
       </View>
       <ResourceDetailBody
         isPod={isPod}
-        isSecret={isSecret}
         isNode={isNode}
         isCronJob={isCronJob}
         isWorkload={isWorkload}
@@ -890,7 +908,6 @@ export function ClusterResourceDetail({
 
 interface ResourceDetailBodyProps {
   isPod: boolean;
-  isSecret: boolean;
   isNode: boolean;
   isCronJob: boolean;
   isWorkload: boolean;
@@ -1245,7 +1262,6 @@ function DetailMainView({
 
 function ResourceDetailBody({
   isPod,
-  isSecret,
   isNode,
   isCronJob,
   isWorkload,
@@ -1339,7 +1355,6 @@ function ResourceDetailBody({
         handleStopPortForward={handleStopPortForward}
       />
 
-
       {/* Scale row */}
       {isWorkload ? (
         <View style={styles.scaleRow}>
@@ -1428,9 +1443,7 @@ function ResourceDetailBody({
                 onPress={handleToggleTimestamps}
               >
                 <Text
-                  style={[
-                    logTimestamps ? styles.followButtonTextActive : styles.followButtonText,
-                  ]}
+                  style={[logTimestamps ? styles.followButtonTextActive : styles.followButtonText]}
                 >
                   Timestamps
                 </Text>

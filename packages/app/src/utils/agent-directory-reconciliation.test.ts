@@ -211,6 +211,45 @@ describe("agent directory reconciliation", () => {
     });
   });
 
+  it("preserves a good title when an equal-timestamp upsert carries a null title", () => {
+    // k8s idle agents keep a fixed updatedAt, so a fresh delta with title: null
+    // hits the equal-timestamp fresh branch and must not wipe the known title.
+    const result = reconcileAgentDirectory({
+      previous: new Map([["agent", { ...replica("agent", "idle"), title: "prod-api" }]]),
+      snapshot: [
+        { ...entry("agent", "idle"), agent: { ...snapshot("agent", "idle"), title: "prod-api" } },
+      ],
+      deltas: [
+        {
+          kind: "upsert",
+          // Equal updatedAt (10:00) and an absent/null title from the daemon.
+          agent: { ...snapshot("agent", "idle"), title: null },
+          project: entry("agent", "idle").project,
+        },
+      ],
+    });
+
+    expect(result.entries[0]?.agent.title).toBe("prod-api");
+  });
+
+  it("lets a non-null incoming title win on an equal-timestamp upsert", () => {
+    const result = reconcileAgentDirectory({
+      previous: new Map([["agent", { ...replica("agent", "idle"), title: "old" }]]),
+      snapshot: [
+        { ...entry("agent", "idle"), agent: { ...snapshot("agent", "idle"), title: "old" } },
+      ],
+      deltas: [
+        {
+          kind: "upsert",
+          agent: { ...snapshot("agent", "idle"), title: "new" },
+          project: entry("agent", "idle").project,
+        },
+      ],
+    });
+
+    expect(result.entries[0]?.agent.title).toBe("new");
+  });
+
   it("preserves usage when a stale buffered upsert omits it", () => {
     const result = reconcileAgentDirectory({
       previous: new Map(),

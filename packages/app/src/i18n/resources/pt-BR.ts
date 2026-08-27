@@ -374,6 +374,15 @@ export const ptBR: TranslationResources = {
       hostStatus: "Status do host: {{status}}",
       needsHostUpgrade: "Atualize o host para restaurar este workspace",
       manageHost: "Gerenciar host",
+      loginAgain: "Entrar novamente",
+      removeHost: "Remover host",
+      tailnetNeedsLogin: "Este host pode exigir que você faça login no Tailscale novamente.",
+      localRetriesExhaustedTitle: "Não foi possível acessar {{hostName}}",
+      localRetriesExhaustedDescription:
+        "Este host local falhou ao conectar após 3 tentativas. Remova e recrie para tentar de novo.",
+      localRetriesExhaustedAction: "Remover e recriar",
+      localRetriesExhaustedConfirm:
+        "Não foi possível acessar este host local após 3 tentativas. Remover e recriar?",
       recovery: {
         archivedTitle: "Workspace arquivado",
         restoreDescription:
@@ -911,6 +920,45 @@ export const ptBR: TranslationResources = {
         generic: "Configure o {{brand}} neste host para usar seus recursos.",
       },
     },
+  },
+  connection: {
+    localMode: {
+      mobileWarning:
+        "O modo Local está ativado. Dispositivos móveis não conseguem se conectar a este computador via Tailscale até você voltar ao modo Tailscale.",
+    },
+    timingOut: {
+      tailnet: {
+        title: "{{hostName}} não conectou",
+        message:
+          "Este host estava expirando pelo Tailscale. Faça login no Tailscale novamente para restaurar a conexão.",
+        action: "Entrar novamente",
+      },
+      local: {
+        title: "{{hostName}} não conectou",
+        message:
+          "As informações de repetição deste host local não foram encontradas. Remova e recrie para reconectar.",
+        action: "Remover e recriar",
+      },
+    },
+  },
+  migration: {
+    moveDataTitle: "Mover dados para outro host",
+    moveDataAction: "Mover dados…",
+    moveDataHint:
+      "Move os agentes deste host e seus dados para outro host conectado. Os itens migrados mostram o nome deste host como prefixo.",
+    pickTarget: "Escolha um host de destino",
+    pickTargetHint: "Os dados são movidos para o host que você escolher aqui.",
+    noTargets: "Conecte outro host para mover dados para ele.",
+    notConnected: "Esse host não está conectado no momento. Reconecte-o e tente novamente.",
+    confirmTitle: "Mover dados?",
+    confirmMessage:
+      "Mover agentes e dados de {{source}} para {{target}}? Os itens migrados mostrarão um rótulo {{source}} em {{target}}.",
+    confirmAction: "Mover dados",
+    success: "{{count}} agentes movidos deste host para {{target}}.",
+    failed: "Não foi possível mover os dados. Nada foi alterado.",
+    recreateHealed: "{{hostName}} reconectado.",
+    recreateSuccess: "{{hostName}} recriado e seus dados movidos.",
+    recreateFailed: "Não foi possível acessar {{hostName}} para recriá-lo. Ele foi mantido.",
   },
   sidebar: {
     pinned: {

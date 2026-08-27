@@ -4,9 +4,12 @@ import { useSessionStore } from "@/stores/session-store";
 import type { Agent } from "@/stores/session-store";
 
 /**
- * Usage & Cost Insights are aggregated entirely from the per-agent snapshots the
- * daemon already streams to the client (`agent.lastUsage`) — the same numbers the
- * composer's context-window meter renders. No extra RPC, no persisted history.
+ * Usage & Cost Insights aggregate the per-agent cumulative usage totals the
+ * daemon accumulates across every completed turn (`agent.usageTotals`). These are
+ * persisted server-side, so they survive reconnects and directory refreshes —
+ * unlike the per-turn `agent.lastUsage` snapshot (which the composer's
+ * context-window meter still renders and which we only read here for the live
+ * context-window display). No extra RPC, no client-side history.
  *
  * Deliberately NOT included: tokens-over-time and per-tool cost. The daemon keeps
  * no usage history and does not attribute cost to individual tools, so those would
@@ -70,11 +73,18 @@ function agentModel(agent: Agent): string {
   return agent.model ?? agent.runtimeInfo?.model ?? agent.provider ?? "unknown";
 }
 
-function agentTokens(agent: Agent): { input: number; cached: number; output: number; total: number } {
-  const usage = agent.lastUsage;
-  const input = usage?.inputTokens ?? 0;
-  const cached = usage?.cachedInputTokens ?? 0;
-  const output = usage?.outputTokens ?? 0;
+function agentTokens(agent: Agent): {
+  input: number;
+  cached: number;
+  output: number;
+  total: number;
+} {
+  // Cumulative, persisted totals — survive reconnect/directory refresh, unlike
+  // the per-turn `lastUsage` snapshot which is overwritten each turn.
+  const totals = agent.usageTotals;
+  const input = totals?.inputTokens ?? 0;
+  const cached = totals?.cachedInputTokens ?? 0;
+  const output = totals?.outputTokens ?? 0;
   return { input, cached, output, total: input + cached + output };
 }
 
@@ -105,6 +115,12 @@ function upsertModel(
   byModel.set(model, bucket);
 }
 
+function agentHasUsage(agent: Agent): boolean {
+  return Boolean(
+    agent.usageTotals && (agent.usageTotals.turns > 0 || agent.usageTotals.totalCostUsd > 0),
+  );
+}
+
 function buildInsights(agents: Map<string, Agent> | undefined): UsageInsights {
   if (!agents || agents.size === 0) {
     return EMPTY_INSIGHTS;
@@ -125,11 +141,12 @@ function buildInsights(agents: Map<string, Agent> | undefined): UsageInsights {
     }
     const model = agentModel(agent);
     const { input, cached, output, total } = agentTokens(agent);
-    const cost = agent.lastUsage?.totalCostUsd ?? 0;
+    const cost = agent.usageTotals?.totalCostUsd ?? 0;
+    // Context-window meter stays on the live per-turn snapshot.
     const ctxUsed = agent.lastUsage?.contextWindowUsedTokens ?? null;
     const ctxMax = agent.lastUsage?.contextWindowMaxTokens ?? null;
 
-    if (total > 0 || cost > 0) {
+    if (agentHasUsage(agent)) {
       agentsWithUsage += 1;
     }
 
@@ -167,7 +184,8 @@ function buildInsights(agents: Map<string, Agent> | undefined): UsageInsights {
     .sort((a, b) => b.totalTokens - a.totalTokens)
     .slice(0, 8);
   activeContext.sort(
-    (a, b) => (b.contextUsedTokens ?? 0) / (b.contextMaxTokens ?? 1) -
+    (a, b) =>
+      (b.contextUsedTokens ?? 0) / (b.contextMaxTokens ?? 1) -
       (a.contextUsedTokens ?? 0) / (a.contextMaxTokens ?? 1),
   );
 

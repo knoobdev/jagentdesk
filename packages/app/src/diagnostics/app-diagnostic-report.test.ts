@@ -84,6 +84,7 @@ describe("app diagnostics report", () => {
       connectionEpoch: 1,
       pendingPairingRequests: [],
       pendingPairingRequest: null,
+      localRetriesExhausted: false,
     };
 
     const report = formatHostRuntimeSection({ host, snapshot });

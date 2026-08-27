@@ -97,11 +97,14 @@ import {
 import { selectVisibleAgentIds } from "./visible-agent-ids";
 import {
   getHostRuntimeStore,
+  useHostMutations,
   useHostRuntimeClient,
   useHostRuntimeIsConnected,
   useHostRuntimeSnapshot,
   useHosts,
 } from "@/runtime/host-runtime";
+import { recreateLocalHost } from "@/runtime/migration/recreate-local-host";
+import type { HostProfile } from "@/types/host-connection";
 import { prefetchProvidersSnapshot } from "@/hooks/use-providers-snapshot";
 import { shouldShowWorkspaceSetup, useWorkspaceSetupStore } from "@/stores/workspace-setup-store";
 import { useWorkspace } from "@/stores/session-store-hooks";
@@ -1477,12 +1480,37 @@ function getHostDisplayName(host: { label?: string | null } | null, fallback: st
   return trimmed ? trimmed : fallback;
 }
 
+function isTailnetHost(host: HostProfile | null): boolean {
+  if (!host) {
+    return false;
+  }
+  const preferred =
+    host.connections.find((connection) => connection.id === host.preferredConnectionId) ??
+    host.connections[0];
+  return preferred?.type === "tailnet";
+}
+
 function useWorkspaceRouteActions(normalizedServerId: string): {
   handleRetryHost: () => void;
   handleManageHost: () => void;
+  handleRelogin: () => void;
+  handleRemoveHost: () => void;
+  handleRecreateLocalHost: () => void;
   handleDismissMissingWorkspace: () => void;
 } {
   const router = useRouter();
+  const { t } = useTranslation();
+  const toast = useToast();
+  const { removeHost } = useHostMutations();
+  const hosts = useHosts();
+  const host = useMemo(
+    () => hosts.find((entry) => entry.serverId === normalizedServerId) ?? null,
+    [hosts, normalizedServerId],
+  );
+  const hostName = useMemo(
+    () => getHostDisplayName(host, normalizedServerId),
+    [host, normalizedServerId],
+  );
   const handleRetryHost = useCallback(() => {
     if (!normalizedServerId) {
       return;
@@ -1495,6 +1523,76 @@ function useWorkspaceRouteActions(normalizedServerId: string): {
     }
     router.push(buildSettingsHostRoute(normalizedServerId) as Href);
   }, [normalizedServerId, router]);
+  const handleRelogin = useCallback(() => {
+    router.push("/tailscale-login" as Href);
+  }, [router]);
+  const handleRemoveHost = useCallback(() => {
+    if (!normalizedServerId) {
+      return;
+    }
+    void (async () => {
+      const confirmed = await confirmDialog({
+        title: t("settings.host.daemon.remove.title"),
+        message: t("settings.host.daemon.remove.confirmMessage", { name: hostName }),
+        confirmLabel: t("workspace.route.removeHost"),
+        cancelLabel: t("common.actions.cancel"),
+        destructive: true,
+      });
+      if (!confirmed) {
+        return;
+      }
+      try {
+        await removeHost(normalizedServerId);
+      } catch (error) {
+        console.error("[WorkspaceScreen] Failed to remove host", error);
+        return;
+      }
+      if (router.canGoBack()) {
+        router.back();
+        return;
+      }
+      router.replace("/" as Href);
+    })();
+  }, [hostName, normalizedServerId, removeHost, router, t]);
+  const handleRecreateLocalHost = useCallback(() => {
+    if (!normalizedServerId) {
+      return;
+    }
+    void (async () => {
+      const confirmed = await confirmDialog({
+        title: t("workspace.route.localRetriesExhaustedTitle", { hostName }),
+        message: t("workspace.route.localRetriesExhaustedConfirm"),
+        confirmLabel: t("workspace.route.localRetriesExhaustedAction"),
+        cancelLabel: t("common.actions.cancel"),
+        destructive: true,
+      });
+      if (!confirmed) {
+        return;
+      }
+      // Re-probe the same local endpoint the broken host used and carry its data
+      // across (REQ 4 + REQ 5). A probe failure keeps the old host in place and
+      // surfaces an error rather than dropping it.
+      let outcome: Awaited<ReturnType<typeof recreateLocalHost>>;
+      try {
+        outcome = await recreateLocalHost(normalizedServerId, {
+          hostRuntime: getHostRuntimeStore(),
+        });
+      } catch (error) {
+        console.error("[WorkspaceScreen] Failed to recreate unreachable local host", error);
+        toast.show(t("migration.recreateFailed", { hostName }), {
+          variant: "error",
+        });
+        return;
+      }
+      toast.show(
+        outcome.status === "recreated"
+          ? t("migration.recreateSuccess", { hostName })
+          : t("migration.recreateHealed", { hostName }),
+        { variant: "success" },
+      );
+      router.replace(buildHostRootRoute(outcome.serverId) as Href);
+    })();
+  }, [hostName, normalizedServerId, router, t, toast]);
   const handleDismissMissingWorkspace = useCallback(() => {
     if (router.canGoBack()) {
       router.back();
@@ -1510,6 +1608,9 @@ function useWorkspaceRouteActions(normalizedServerId: string): {
   return {
     handleRetryHost,
     handleManageHost,
+    handleRelogin,
+    handleRemoveHost,
+    handleRecreateLocalHost,
     handleDismissMissingWorkspace,
   };
 }
@@ -1527,20 +1628,27 @@ function useResolvedWorkspaceRouteState(input: {
   );
   const hostSnapshot = useHostRuntimeSnapshot(input.serverId);
   const hostName = useMemo(() => getHostDisplayName(host, input.serverId), [host, input.serverId]);
+  const isTailnet = useMemo(() => isTailnetHost(host), [host]);
   return useMemo(
     () =>
       resolveWorkspaceRouteState({
         hostName,
+        serverId: input.serverId,
+        isTailnet,
         connectionStatus: hostSnapshot?.connectionStatus ?? "connecting",
         lastError: hostSnapshot?.lastError ?? null,
+        localRetriesExhausted: hostSnapshot?.localRetriesExhausted ?? false,
         workspace: input.workspace,
         hasHydratedWorkspaces: input.hasHydratedWorkspaces,
         recovery: input.recovery,
       }),
     [
       hostName,
+      input.serverId,
+      isTailnet,
       hostSnapshot?.connectionStatus,
       hostSnapshot?.lastError,
+      hostSnapshot?.localRetriesExhausted,
       input.workspace,
       input.hasHydratedWorkspaces,
       input.recovery,
@@ -1651,13 +1759,12 @@ function WorkspaceChromeRow({
 }: WorkspaceChromeRowProps) {
   const explorerRendered = showExplorerSidebar && explorerOpen && workspaceRoot !== null;
   const leftRendered = leftDock != null;
-  const centerCorners = leftRendered
-    ? explorerRendered
-      ? "none"
-      : "top-right"
-    : explorerRendered
-      ? "top-left"
-      : "both";
+  let centerCorners: "none" | "top-right" | "top-left" | "both";
+  if (leftRendered) {
+    centerCorners = explorerRendered ? "none" : "top-right";
+  } else {
+    centerCorners = explorerRendered ? "top-left" : "both";
+  }
 
   return (
     <View style={styles.threePaneRow}>
@@ -1782,8 +1889,14 @@ function WorkspaceScreenContent({
   );
   const workspaceDescriptor = useWorkspace(normalizedServerId, normalizedWorkspaceId);
   const workspaceScripts = getWorkspaceScripts(workspaceDescriptor);
-  const { handleRetryHost, handleManageHost, handleDismissMissingWorkspace } =
-    useWorkspaceRouteActions(normalizedServerId);
+  const {
+    handleRetryHost,
+    handleManageHost,
+    handleRelogin,
+    handleRemoveHost,
+    handleRecreateLocalHost,
+    handleDismissMissingWorkspace,
+  } = useWorkspaceRouteActions(normalizedServerId);
 
   const workspaceTerminalScopeKey = useMemo(
     () => buildWorkspaceTerminalScopeKey(normalizedServerId, normalizedWorkspaceId),
@@ -3514,6 +3627,9 @@ function WorkspaceScreenContent({
     actions: {
       onRetryHost: handleRetryHost,
       onManageHost: handleManageHost,
+      onRelogin: handleRelogin,
+      onRemoveHost: handleRemoveHost,
+      onRecreateLocalHost: handleRecreateLocalHost,
       onDismissMissingWorkspace: handleDismissMissingWorkspace,
       onRecoverWorkspace: workspaceRecovery.restore,
       onRetryRecoveryInspection: workspaceRecovery.retryInspection,
@@ -3707,6 +3823,24 @@ function WorkspaceScreenContent({
     () =>
       `${WORKSPACE_FLOATING_PANEL_PORTAL_HOST_PREFIX}:${normalizedServerId}:${normalizedWorkspaceId}`,
     [normalizedServerId, normalizedWorkspaceId],
+  );
+  const orchestrationLeftDock = useMemo(
+    () =>
+      !isMobile && orchestrationRosterCount > 0 ? (
+        <OrchestrationAgentsColumn
+          serverId={normalizedServerId}
+          workspaceId={normalizedWorkspaceId}
+        />
+      ) : null,
+    [isMobile, orchestrationRosterCount, normalizedServerId, normalizedWorkspaceId],
+  );
+  const importSheetVisible = useMemo(
+    () => isRouteFocused && isImportSheetVisible,
+    [isRouteFocused, isImportSheetVisible],
+  );
+  const renameModalTab = useMemo(
+    () => (isRouteFocused ? renamingTab : null),
+    [isRouteFocused, renamingTab],
   );
   const desktopSplitContent = useMemo(() => {
     if (!canRenderDesktopPaneSplits || !workspaceLayout || !persistenceKey) {
@@ -3932,19 +4066,12 @@ function WorkspaceScreenContent({
               workspaceRoot={workspaceDirectory}
               isGit={isGitCheckout}
               onOpenFile={handleOpenFileFromExplorer}
-              leftDock={
-                !isMobile && orchestrationRosterCount > 0 ? (
-                  <OrchestrationAgentsColumn
-                    serverId={normalizedServerId}
-                    workspaceId={normalizedWorkspaceId}
-                  />
-                ) : null
-              }
+              leftDock={orchestrationLeftDock}
             >
               {workspaceCenterColumn}
             </WorkspaceChromeRow>
             <ImportSessionSheet
-              visible={isRouteFocused && isImportSheetVisible}
+              visible={importSheetVisible}
               client={client}
               serverId={normalizedServerId}
               cwd={workspaceDirectory}
@@ -3953,7 +4080,7 @@ function WorkspaceScreenContent({
               onImportedAgent={handleImportedAgent}
             />
             <WorkspaceTabRenameModal
-              renamingTab={isRouteFocused ? renamingTab : null}
+              renamingTab={renameModalTab}
               onSubmit={handleRenameModalSubmit}
               onClose={handleRenameModalClose}
             />

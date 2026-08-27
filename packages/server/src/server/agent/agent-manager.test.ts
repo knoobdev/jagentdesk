@@ -5150,6 +5150,76 @@ test("applies live autonomous events and preserves usage omitted from completion
   expect(lifecycleUpdates).toContain("idle");
 });
 
+test("bills a stopped (canceled) turn's usage into usageTotals", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-canceled-usage-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  let capturedSession: TestAgentSession | null = null;
+
+  class LiveEventClient extends TestAgentClient {
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      capturedSession = new TestAgentSession(config);
+      return capturedSession;
+    }
+  }
+
+  const manager = new AgentManager({
+    clients: { codex: new LiveEventClient() },
+    registry: storage,
+    logger,
+    idFactory: () => "00000000-0000-4000-8000-000000000126",
+  });
+
+  const snapshot = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+    workspaceId: undefined,
+  });
+
+  let sawRunning = false;
+  let resolveIdle!: () => void;
+  const backToIdle = new Promise<void>((resolve) => {
+    resolveIdle = resolve;
+  });
+  const unsubscribe = manager.subscribe(
+    (event) => {
+      if (event.type === "agent_state" && event.agent.id === snapshot.id) {
+        if (event.agent.lifecycle === "running") sawRunning = true;
+        if (sawRunning && event.agent.lifecycle === "idle") resolveIdle();
+      }
+    },
+    { agentId: snapshot.id, replayState: false },
+  );
+
+  const turnId = "canceled-turn-1";
+  capturedSession!.pushEvent({ type: "turn_started", provider: "codex", turnId });
+  await vi.waitFor(() => {
+    expect(manager.getAgent(snapshot.id)?.lifecycle).toBe("running");
+  });
+  // Partial usage streamed before the user stops the turn.
+  capturedSession!.pushEvent({
+    type: "usage_updated",
+    provider: "codex",
+    usage: { inputTokens: 42, outputTokens: 7, totalCostUsd: 0.001 },
+    turnId,
+  });
+  // User stops mid-flight: turn_canceled, NOT turn_completed.
+  capturedSession!.pushEvent({
+    type: "turn_canceled",
+    provider: "codex",
+    reason: "interrupted",
+    turnId,
+  });
+  await backToIdle;
+
+  const updated = manager.getAgent(snapshot.id);
+  expect(updated?.usageTotals).toEqual({
+    inputTokens: 42,
+    cachedInputTokens: 0,
+    outputTokens: 7,
+    totalCostUsd: 0.001,
+    turns: 1,
+  });
+  unsubscribe();
+});
+
 test("ignores stale autonomous terminals without lowering the active turn lifecycle", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-stale-autonomous-terminal-"));
   const storage = new AgentStorage(join(workdir, "agents"), logger);

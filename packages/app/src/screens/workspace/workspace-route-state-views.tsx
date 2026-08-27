@@ -1,5 +1,5 @@
 import { Text, View } from "react-native";
-import { ArrowLeftToLine, RotateCw, Settings } from "lucide-react-native";
+import { ArrowLeftToLine, LogIn, RotateCw, Settings, Trash2 } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,9 @@ const foregroundMutedColorMapping = (theme: Theme) => ({
 interface WorkspaceRouteStateActions {
   onRetryHost: () => void;
   onManageHost: () => void;
+  onRelogin: () => void;
+  onRemoveHost: () => void;
+  onRecreateLocalHost: () => void;
   onDismissMissingWorkspace: () => void;
   onRecoverWorkspace: () => void;
   onRetryRecoveryInspection: () => void;
@@ -57,6 +60,16 @@ export function renderWorkspaceRouteGate(input: {
         <WorkspaceUnreachable
           state={input.state}
           onRetry={input.actions.onRetryHost}
+          onManageHost={input.actions.onManageHost}
+          onRelogin={input.actions.onRelogin}
+          onRemoveHost={input.actions.onRemoveHost}
+        />
+      );
+    case "localRetriesExhausted":
+      return (
+        <WorkspaceLocalRetriesExhausted
+          state={input.state}
+          onRecreate={input.actions.onRecreateLocalHost}
           onManageHost={input.actions.onManageHost}
         />
       );
@@ -202,28 +215,36 @@ function WorkspaceUnreachable({
   state,
   onRetry,
   onManageHost,
+  onRelogin,
+  onRemoveHost,
 }: {
   state: Extract<WorkspaceRouteState, { kind: "unreachable" }>;
   onRetry: () => void;
   onManageHost: () => void;
+  onRelogin: () => void;
+  onRemoveHost: () => void;
 }) {
   const { t } = useTranslation();
   const canRetry = state.connectionStatus === "offline" || state.connectionStatus === "error";
+  const isConnecting = state.connectionStatus === "connecting" || state.connectionStatus === "idle";
 
   return (
     <View style={styles.emptyState}>
-      {state.connectionStatus === "connecting" || state.connectionStatus === "idle" ? (
+      {isConnecting ? (
         <ThemedLoadingSpinner size="small" uniProps={foregroundMutedColorMapping} />
       ) : null}
       <View style={styles.textStack}>
         <Text style={styles.title}>{getWorkspaceHostStateTitle(state, t)}</Text>
         <Text style={styles.description}>
-          {state.connectionStatus === "connecting" || state.connectionStatus === "idle"
+          {isConnecting
             ? state.hostName
             : t("workspace.route.hostStatus", {
                 status: formatConnectionStatus(state.connectionStatus),
               })}
         </Text>
+        {canRetry && state.isTailnet ? (
+          <Text style={styles.description}>{t("workspace.route.tailnetNeedsLogin")}</Text>
+        ) : null}
         {state.lastError ? (
           <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
             <TooltipTrigger asChild>
@@ -242,11 +263,56 @@ function WorkspaceUnreachable({
           <Button size="sm" variant="default" leftIcon={RotateCw} onPress={onRetry}>
             {t("common.actions.retry")}
           </Button>
+          {state.isTailnet ? (
+            <Button size="sm" variant="outline" leftIcon={LogIn} onPress={onRelogin}>
+              {t("workspace.route.loginAgain")}
+            </Button>
+          ) : null}
           <Button size="sm" variant="outline" leftIcon={Settings} onPress={onManageHost}>
             {t("workspace.route.manageHost")}
           </Button>
+          <Button size="sm" variant="outline" leftIcon={Trash2} onPress={onRemoveHost}>
+            {t("workspace.route.removeHost")}
+          </Button>
         </View>
       ) : null}
+    </View>
+  );
+}
+
+function WorkspaceLocalRetriesExhausted({
+  state,
+  onRecreate,
+  onManageHost,
+}: {
+  state: Extract<WorkspaceRouteState, { kind: "localRetriesExhausted" }>;
+  onRecreate: () => void;
+  onManageHost: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <View style={styles.emptyState}>
+      <View style={styles.textStack}>
+        <Text style={styles.title}>
+          {t("workspace.route.localRetriesExhaustedTitle", { hostName: state.hostName })}
+        </Text>
+        <Text style={styles.description}>
+          {t("workspace.route.localRetriesExhaustedDescription")}
+        </Text>
+        {state.lastError ? (
+          <Text style={styles.error} numberOfLines={3}>
+            {state.lastError}
+          </Text>
+        ) : null}
+      </View>
+      <View style={styles.actions}>
+        <Button size="sm" variant="default" leftIcon={Trash2} onPress={onRecreate}>
+          {t("workspace.route.localRetriesExhaustedAction")}
+        </Button>
+        <Button size="sm" variant="outline" leftIcon={Settings} onPress={onManageHost}>
+          {t("workspace.route.manageHost")}
+        </Button>
+      </View>
     </View>
   );
 }

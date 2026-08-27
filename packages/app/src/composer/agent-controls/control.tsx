@@ -13,6 +13,13 @@ interface AgentControlTriggerProps {
   label: string;
   value?: string;
   showToolbarLabel?: boolean;
+  /**
+   * When the toolbar trigger collapses to an icon-only pill (compact / phone),
+   * a positive count renders a small numeric badge so the user still sees how
+   * many items are attached. Ignored on desktop, where the full value label
+   * already shows the count.
+   */
+  badgeCount?: number;
   showCaret?: boolean;
   open?: boolean;
   disabled?: boolean;
@@ -30,6 +37,7 @@ export const AgentControlTrigger = forwardRef<View, AgentControlTriggerProps>(
       label,
       value,
       showToolbarLabel = true,
+      badgeCount,
       showCaret = false,
       open = false,
       disabled = false,
@@ -44,6 +52,8 @@ export const AgentControlTrigger = forwardRef<View, AgentControlTriggerProps>(
     const resolvedGlyphSize = isSheet ? 16 : glyphSize;
     const resolvedIconColor = iconColor ?? styles.iconColor.color;
     const showValue = isSheet || showToolbarLabel;
+    const showBadge =
+      !isSheet && !showToolbarLabel && typeof badgeCount === "number" && badgeCount > 0;
     const triggerStyle = useCallback(
       ({ pressed, hovered }: PressableStateCallbackType) => [
         isSheet ? styles.sheetRow : styles.toolbarControl,
@@ -74,6 +84,13 @@ export const AgentControlTrigger = forwardRef<View, AgentControlTriggerProps>(
         ) : (
           <ComposerToolbarGlyph size={resolvedGlyphSize}>
             <Icon size={resolvedGlyphSize} color={resolvedIconColor} />
+            {showBadge ? (
+              <View style={styles.badge} pointerEvents="none">
+                <Text style={styles.badgeText} numberOfLines={1}>
+                  {badgeCount}
+                </Text>
+              </View>
+            ) : null}
           </ComposerToolbarGlyph>
         )}
         {isSheet ? (
@@ -163,5 +180,23 @@ const styles = StyleSheet.create((theme) => ({
   },
   iconColor: {
     color: theme.colors.foregroundMuted,
+  },
+  badge: {
+    position: "absolute",
+    top: -6,
+    right: -8,
+    minWidth: 14,
+    height: 14,
+    paddingHorizontal: 3,
+    borderRadius: theme.borderRadius.full,
+    backgroundColor: theme.colors.accent,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  badgeText: {
+    color: theme.colors.accentForeground,
+    fontSize: 9,
+    fontWeight: theme.fontWeight.semibold,
+    lineHeight: 12,
   },
 }));

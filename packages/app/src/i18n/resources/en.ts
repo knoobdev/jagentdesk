@@ -371,6 +371,15 @@ export const en = {
       hostStatus: "Host status: {{status}}",
       needsHostUpgrade: "Update your host to restore this workspace",
       manageHost: "Manage host",
+      loginAgain: "Log in again",
+      removeHost: "Remove host",
+      tailnetNeedsLogin: "This host may need you to log in to Tailscale again.",
+      localRetriesExhaustedTitle: "Can't reach {{hostName}}",
+      localRetriesExhaustedDescription:
+        "This local host failed to connect after 3 tries. Remove and recreate it to try again.",
+      localRetriesExhaustedAction: "Remove and recreate",
+      localRetriesExhaustedConfirm:
+        "Can't reach this local host after 3 tries. Remove and recreate it?",
       recovery: {
         archivedTitle: "Workspace archived",
         restoreDescription:
@@ -900,6 +909,45 @@ export const en = {
         generic: "Set up {{brand}} on this host to use its features.",
       },
     },
+  },
+  connection: {
+    localMode: {
+      mobileWarning:
+        "Local mode is on. Mobile devices can't connect to this computer over Tailscale until you switch back to Tailscale mode.",
+    },
+    timingOut: {
+      tailnet: {
+        title: "{{hostName}} couldn't connect",
+        message:
+          "This host was timing out over Tailscale. Log in to Tailscale again to restore the connection.",
+        action: "Log in again",
+      },
+      local: {
+        title: "{{hostName}} couldn't connect",
+        message:
+          "Retry info for this local host wasn't found. Remove and recreate it to reconnect.",
+        action: "Remove and recreate",
+      },
+    },
+  },
+  migration: {
+    moveDataTitle: "Move data to another host",
+    moveDataAction: "Move data…",
+    moveDataHint:
+      "Move this host's agents and their data to another connected host. Migrated items show this host's name as a prefix.",
+    pickTarget: "Choose a target host",
+    pickTargetHint: "Data moves to the host you pick here.",
+    noTargets: "Connect another host to move data to it.",
+    notConnected: "That host isn't connected right now. Reconnect it and try again.",
+    confirmTitle: "Move data?",
+    confirmMessage:
+      "Move agents and data from {{source}} to {{target}}? Migrated items will show a {{source}} label on {{target}}.",
+    confirmAction: "Move data",
+    success: "Moved {{count}} agents from this host to {{target}}.",
+    failed: "Couldn't move data. Nothing was changed.",
+    recreateHealed: "Reconnected {{hostName}}.",
+    recreateSuccess: "Recreated {{hostName}} and moved its data over.",
+    recreateFailed: "Couldn't reach {{hostName}} to recreate it. It was left in place.",
   },
   sidebar: {
     pinned: {

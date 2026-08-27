@@ -63,6 +63,7 @@ import {
 } from "./agent-stream-coalescer.js";
 import { limitAgentTimelineItemContent } from "./agent-timeline-content.js";
 import { AgentRunState, type ForegroundTurnWaiter } from "./agent-run-state.js";
+import type { AgentUsageTotals } from "@jagentdesk/protocol/agent-types";
 import { getAgentProviderDefinition } from "@jagentdesk/protocol/provider-manifest";
 import { ORCHESTRATION_ROLE_LABEL } from "@jagentdesk/protocol/orchestration";
 import { invokeRewindCapability, type RewindMode } from "./rewind/rewind.js";
@@ -354,6 +355,19 @@ interface ManagedAgentBase {
   activeTurnId: string | null;
   activeTurnStartedAt: Date | null;
   lastUsage?: AgentUsage;
+  /**
+   * Cumulative usage accumulated across every completed turn. Persisted, unlike
+   * {@link lastUsage} (a per-turn snapshot). Feeds the Usage & Cost insights.
+   */
+  usageTotals?: AgentUsageTotals;
+  /**
+   * Usage reported by `usage_updated` events during the CURRENT turn. Reset when
+   * a turn starts. Used to bill into {@link usageTotals} when a turn ends without
+   * a `turn_completed` event (i.e. it was interrupted/stopped -> `turn_canceled`,
+   * or errored -> `turn_failed`), so a stopped turn's tokens are not lost. Never
+   * persisted; purely per-turn bookkeeping.
+   */
+  currentTurnUsage?: AgentUsage;
   lastError?: string;
   attention: AttentionState;
   foregroundTurnWaiters: Set<ForegroundTurnWaiter>;
@@ -1296,6 +1310,7 @@ export class AgentManager {
     const rehydrateFromDisk = options?.rehydrateFromDisk ?? false;
     const preservedHistoryPrimed = existing.historyPrimed;
     const preservedLastUsage = existing.lastUsage;
+    const preservedUsageTotals = existing.usageTotals;
     const preservedLastError = existing.lastError;
     const preservedAttention = existing.attention;
     const handle = existing.persistence;
@@ -1348,6 +1363,7 @@ export class AgentManager {
         lastUserMessageAt: existing.lastUserMessageAt,
         historyPrimed: rehydrateFromDisk ? false : preservedHistoryPrimed,
         lastUsage: preservedLastUsage,
+        usageTotals: preservedUsageTotals,
         lastError: preservedLastError,
         attention: preservedAttention,
       });
@@ -1606,6 +1622,7 @@ export class AgentManager {
         historyPrimed: true,
         lastUserMessageAt: record.lastUserMessageAt ? new Date(record.lastUserMessageAt) : null,
         lastUsage: undefined,
+        usageTotals: record.usageTotals,
         lastError: record.lastError ?? undefined,
         attention: { requiresAttention: false },
         internal: record.internal,
@@ -2961,6 +2978,7 @@ export class AgentManager {
       persistence?: AgentPersistenceHandle;
       historyPrimed?: boolean;
       lastUsage?: AgentUsage;
+      usageTotals?: AgentUsageTotals;
       lastError?: string;
       attention?: AttentionState;
       initialTitle?: string | null;
@@ -3115,6 +3133,7 @@ export class AgentManager {
           labels?: Record<string, string>;
           historyPrimed?: boolean;
           lastUsage?: AgentUsage;
+          usageTotals?: AgentUsageTotals;
           lastError?: string;
           attention?: AttentionState;
           persistence?: AgentPersistenceHandle;
@@ -3156,6 +3175,7 @@ export class AgentManager {
       historyPrimed: options?.historyPrimed ?? durableTimelineHasRows,
       lastUserMessageAt: options?.lastUserMessageAt ?? null,
       lastUsage: options?.lastUsage,
+      usageTotals: options?.usageTotals,
       lastError: options?.lastError,
       attention: resolveInitialAttention(options?.attention),
       internal: config.internal ?? false,
@@ -3753,6 +3773,9 @@ export class AgentManager {
         return undefined;
       case "usage_updated":
         agent.lastUsage = event.usage;
+        // Remember this turn's running usage so it can be billed even if the
+        // turn ends via cancel/fail (no turn_completed). Reset on turn start.
+        agent.currentTurnUsage = event.usage;
         this.emitState(agent);
         return undefined;
       case "mode_changed":
@@ -3887,6 +3910,29 @@ export class AgentManager {
     flags.shouldNotifyWaiters = true;
   }
 
+  /**
+   * Add one turn's usage into the agent's cumulative {@link usageTotals} ledger.
+   * Called on turn_completed (authoritative final usage) and on
+   * turn_canceled/turn_failed (the partial usage streamed before the stop), so a
+   * turn that the user interrupts still counts its consumed tokens.
+   */
+  private accumulateUsageTotals(agent: ManagedAgent, usage: AgentUsage): void {
+    const prev = agent.usageTotals ?? {
+      inputTokens: 0,
+      cachedInputTokens: 0,
+      outputTokens: 0,
+      totalCostUsd: 0,
+      turns: 0,
+    };
+    agent.usageTotals = {
+      inputTokens: prev.inputTokens + (usage.inputTokens ?? 0),
+      cachedInputTokens: prev.cachedInputTokens + (usage.cachedInputTokens ?? 0),
+      outputTokens: prev.outputTokens + (usage.outputTokens ?? 0),
+      totalCostUsd: prev.totalCostUsd + (usage.totalCostUsd ?? 0),
+      turns: prev.turns + 1,
+    };
+  }
+
   private onStreamTurnCompleted(params: {
     agent: ActiveManagedAgent;
     event: Extract<AgentStreamEvent, { type: "turn_completed" }>;
@@ -3909,7 +3955,12 @@ export class AgentManager {
     if (terminalDisposition === "stale") return;
     if (event.usage) {
       agent.lastUsage = { ...agent.lastUsage, ...event.usage };
+      this.accumulateUsageTotals(agent, event.usage);
     }
+    // The turn reached a clean end: its usage (if any) is now billed via
+    // `event.usage`, so drop the per-turn tracker to avoid re-billing it if a
+    // stray canceled/failed event arrives for the same turn.
+    agent.currentTurnUsage = undefined;
     // If no usage on turn_completed, keep lastUsage as-is so context window
     // data accumulated during streaming isn't lost when the provider omits
     // it from the completion event.
@@ -3954,6 +4005,13 @@ export class AgentManager {
       "handleStreamEvent: turn_failed",
     );
     if (terminalDisposition === "stale") return;
+    // A failed turn may still have consumed tokens before erroring; bill the
+    // usage streamed so far so it isn't lost from the cumulative ledger.
+    if (agent.currentTurnUsage) {
+      this.accumulateUsageTotals(agent, agent.currentTurnUsage);
+      agent.currentTurnUsage = undefined;
+      this.emitState(agent);
+    }
     if (!isForegroundEvent && !agent.activeForegroundTurnId) {
       agent.lifecycle = "error";
     }
@@ -3996,6 +4054,13 @@ export class AgentManager {
       "agent.manager.turn.canceled",
     );
     if (terminalDisposition === "stale") return;
+    // The user stopped this turn mid-flight. It still consumed tokens, so bill
+    // the usage streamed so far into the cumulative ledger + persist it.
+    if (agent.currentTurnUsage) {
+      this.accumulateUsageTotals(agent, agent.currentTurnUsage);
+      agent.currentTurnUsage = undefined;
+      this.emitState(agent);
+    }
     if (!isForegroundEvent && !agent.activeForegroundTurnId && !agent.pendingReplacement) {
       agent.lifecycle = "idle";
     }
@@ -4013,6 +4078,9 @@ export class AgentManager {
     flags: StreamEventFlags;
   }): void {
     const { agent, eventTurnId, isForegroundEvent, flags } = params;
+    // A fresh turn begins: clear last turn's per-turn usage tracker so a later
+    // cancel/fail bills only THIS turn's usage, never a prior turn's.
+    agent.currentTurnUsage = undefined;
     this.logger.trace(
       {
         agentId: agent.id,

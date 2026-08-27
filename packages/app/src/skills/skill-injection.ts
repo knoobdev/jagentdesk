@@ -1,4 +1,6 @@
-import { skillEffectivePrompt, type Skill } from "@/stores/skills-store";
+import { skillEffectivePrompt, useSkillsStore, type Skill } from "@/stores/skills-store";
+import { useAgentSkillsStore } from "@/stores/agent-skills-store";
+import { matchSkillsForQuery } from "@/skills/match-skills";
 
 /**
  * Turning attached / auto-matched skills into agent context (redesign B3 + B5,
@@ -72,4 +74,29 @@ export function computeSkillInjection(input: SkillInjectionInput): SkillInjectio
  */
 export function applySkillPreamble(text: string, preamble: string): string {
   return preamble ? `${preamble}${SKILL_PREAMBLE_SEPARATOR}${text}` : text;
+}
+
+/**
+ * Prepend the effective prompts of the skills active on this agent (redesign
+ * B3 + B5). Attached skills always count; auto-load also matches the message
+ * text. Each skill is delivered once per agent (see computeSkillInjection).
+ * Reads store snapshots at send time — no React deps needed, so it works from
+ * both the composer and the cluster send paths.
+ */
+export function resolveSkillInjectedText(agentId: string, text: string): string {
+  const skills = useSkillsStore.getState().skills;
+  const agentSkills = useAgentSkillsStore.getState();
+  const attachedIds = agentSkills.attached[agentId] ?? [];
+  const matchedIds = agentSkills.autoLoad
+    ? matchSkillsForQuery(skills, text).map((skill) => skill.id)
+    : [];
+  const injection = computeSkillInjection({
+    skills,
+    attachedIds,
+    matchedIds,
+    alreadyInjectedIds: agentSkills.injected[agentId] ?? [],
+  });
+  if (!injection.preamble) return text;
+  agentSkills.markInjected(agentId, injection.injectedIds);
+  return applySkillPreamble(text, injection.preamble);
 }

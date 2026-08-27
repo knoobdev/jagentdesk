@@ -373,6 +373,15 @@ export const ru: TranslationResources = {
       hostStatus: "Статус Host:{{status}}",
       needsHostUpgrade: "Обновите хост, чтобы восстановить эту рабочую область",
       manageHost: "Управление хостом",
+      loginAgain: "Войти снова",
+      removeHost: "Удалить хост",
+      tailnetNeedsLogin: "Для этого хоста может потребоваться повторный вход в Tailscale.",
+      localRetriesExhaustedTitle: "Не удаётся подключиться к {{hostName}}",
+      localRetriesExhaustedDescription:
+        "Этот локальный хост не подключился после 3 попыток. Удалите и создайте его заново, чтобы повторить.",
+      localRetriesExhaustedAction: "Удалить и создать заново",
+      localRetriesExhaustedConfirm:
+        "Не удаётся подключиться к этому локальному хосту после 3 попыток. Удалить и создать заново?",
       recovery: {
         archivedTitle: "Рабочая область в архиве",
         restoreDescription:
@@ -911,6 +920,46 @@ export const ru: TranslationResources = {
         generic: "Настройте {{brand}} на этом хосте, чтобы использовать его функции.",
       },
     },
+  },
+  connection: {
+    localMode: {
+      mobileWarning:
+        "Включён локальный режим. Мобильные устройства не смогут подключиться к этому компьютеру через Tailscale, пока вы не вернётесь в режим Tailscale.",
+    },
+    timingOut: {
+      tailnet: {
+        title: "Не удалось подключить {{hostName}}",
+        message:
+          "Этот хост не отвечал по Tailscale. Войдите в Tailscale снова, чтобы восстановить соединение.",
+        action: "Войти снова",
+      },
+      local: {
+        title: "Не удалось подключить {{hostName}}",
+        message:
+          "Информация о повторных попытках для этого локального хоста не найдена. Удалите и создайте его заново, чтобы переподключиться.",
+        action: "Удалить и создать заново",
+      },
+    },
+  },
+  migration: {
+    moveDataTitle: "Перенести данные на другой хост",
+    moveDataAction: "Перенести данные…",
+    moveDataHint:
+      "Перенесите агентов этого хоста и их данные на другой подключённый хост. Перенесённые элементы показывают имя этого хоста в виде префикса.",
+    pickTarget: "Выберите целевой хост",
+    pickTargetHint: "Данные переносятся на выбранный здесь хост.",
+    noTargets: "Подключите другой хост, чтобы перенести данные на него.",
+    notConnected: "Этот хост сейчас не подключён. Переподключите его и повторите попытку.",
+    confirmTitle: "Перенести данные?",
+    confirmMessage:
+      "Перенести агентов и данные с {{source}} на {{target}}? Перенесённые элементы будут показывать метку {{source}} на {{target}}.",
+    confirmAction: "Перенести данные",
+    success: "Перенесено {{count}} агентов с этого хоста на {{target}}.",
+    failed: "Не удалось перенести данные. Ничего не изменено.",
+    recreateHealed: "{{hostName}} снова подключён.",
+    recreateSuccess: "{{hostName}} создан заново, его данные перенесены.",
+    recreateFailed:
+      "Не удалось связаться с {{hostName}} для пересоздания. Он оставлен без изменений.",
   },
   sidebar: {
     pinned: {

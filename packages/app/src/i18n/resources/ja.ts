@@ -374,6 +374,15 @@ export const ja: TranslationResources = {
       hostStatus: "ホストの状態: {{status}}",
       needsHostUpgrade: "このワークスペースを復元するにはホストを更新してください",
       manageHost: "ホストを管理",
+      loginAgain: "再ログイン",
+      removeHost: "ホストを削除",
+      tailnetNeedsLogin: "このホストは Tailscale への再ログインが必要な場合があります。",
+      localRetriesExhaustedTitle: "{{hostName}} に接続できません",
+      localRetriesExhaustedDescription:
+        "このローカルホストは3回試しても接続できませんでした。削除して作り直すと再試行できます。",
+      localRetriesExhaustedAction: "削除して作り直す",
+      localRetriesExhaustedConfirm:
+        "3回試してもこのローカルホストに接続できません。削除して作り直しますか？",
       recovery: {
         archivedTitle: "ワークスペースはアーカイブ済みです",
         restoreDescription:
@@ -900,6 +909,45 @@ export const ja: TranslationResources = {
         generic: "このホストで {{brand}} をセットアップすると、その機能を使えます。",
       },
     },
+  },
+  connection: {
+    localMode: {
+      mobileWarning:
+        "ローカルモードが有効です。Tailscale モードに戻すまで、モバイル端末は Tailscale 経由でこのコンピューターに接続できません。",
+    },
+    timingOut: {
+      tailnet: {
+        title: "{{hostName}} に接続できませんでした",
+        message:
+          "このホストは Tailscale 経由でタイムアウトしていました。Tailscale に再ログインして接続を復元してください。",
+        action: "再ログイン",
+      },
+      local: {
+        title: "{{hostName}} に接続できませんでした",
+        message:
+          "このローカルホストの再試行情報が見つかりませんでした。削除して作り直すと再接続できます。",
+        action: "削除して作り直す",
+      },
+    },
+  },
+  migration: {
+    moveDataTitle: "データを別のホストに移動",
+    moveDataAction: "データを移動…",
+    moveDataHint:
+      "このホストのエージェントとそのデータを、接続済みの別のホストに移動します。移動した項目には、このホスト名がプレフィックスとして表示されます。",
+    pickTarget: "移動先のホストを選択",
+    pickTargetHint: "ここで選んだホストにデータが移動します。",
+    noTargets: "データの移動先となる別のホストを接続してください。",
+    notConnected: "そのホストは現在接続されていません。再接続してからもう一度お試しください。",
+    confirmTitle: "データを移動しますか？",
+    confirmMessage:
+      "{{source}} から {{target}} にエージェントとデータを移動しますか？移動した項目は {{target}} 上で {{source}} のラベルが表示されます。",
+    confirmAction: "データを移動",
+    success: "このホストから {{target}} に {{count}} 件のエージェントを移動しました。",
+    failed: "データを移動できませんでした。変更はありません。",
+    recreateHealed: "{{hostName}} を再接続しました。",
+    recreateSuccess: "{{hostName}} を再作成し、データを移動しました。",
+    recreateFailed: "{{hostName}} に接続できず再作成できませんでした。そのまま残しました。",
   },
   sidebar: {
     pinned: {

@@ -125,6 +125,8 @@ import {
   listImportableProviderSessions,
   normalizeImportAgentRequest,
 } from "./agent/import-sessions.js";
+import { exportHostData } from "./migration/export-host-data.js";
+import { importHostData } from "./migration/import-host-data.js";
 import {
   checkoutLiteFromGitSnapshot,
   checkoutFromPersistedWorkspacePlacement,
@@ -635,6 +637,7 @@ export class Session {
   private readonly sessionLogger: pino.Logger;
   private readonly jagentdeskHome: string;
   private readonly worktreesRoot: string | undefined;
+  private readonly serverId: string;
 
   private agentManager: AgentManager;
   private readonly agentStorage: AgentStorage;
@@ -738,14 +741,7 @@ export class Session {
       terminalManager,
       providerSnapshotManager,
       providerUsageService,
-      serviceProxy,
-      scriptRuntimeStore,
-      workspaceSetupSnapshots,
       onBranchChanged,
-      getDaemonTcpPort,
-      getDaemonTcpHost,
-      serviceProxyPublicBaseUrl,
-      resolveScriptHealth,
       voice,
       voiceBridge,
       dictation,
@@ -774,6 +770,7 @@ export class Session {
     this.pushTokenStore = pushTokenStore;
     this.jagentdeskHome = jagentdeskHome;
     this.worktreesRoot = worktreesRoot;
+    this.serverId = serverId ?? "";
     this.sessionLogger = logger.child({
       module: "session",
       clientId: this.clientId,
@@ -998,13 +995,14 @@ export class Session {
       logger: this.sessionLogger,
     });
     this.providerSnapshotManager = providerSnapshotManager;
-    this.serviceProxy = serviceProxy ?? null;
-    this.scriptRuntimeStore = scriptRuntimeStore ?? null;
-    this.workspaceSetupSnapshots = workspaceSetupSnapshots ?? new Map();
-    this.getDaemonTcpPort = getDaemonTcpPort ?? null;
-    this.getDaemonTcpHost = getDaemonTcpHost ?? null;
-    this.serviceProxyPublicBaseUrl = serviceProxyPublicBaseUrl ?? null;
-    this.resolveScriptHealth = resolveScriptHealth ?? null;
+    const optionalServiceRefs = Session.resolveOptionalServiceRefs(options);
+    this.serviceProxy = optionalServiceRefs.serviceProxy;
+    this.scriptRuntimeStore = optionalServiceRefs.scriptRuntimeStore;
+    this.workspaceSetupSnapshots = optionalServiceRefs.workspaceSetupSnapshots;
+    this.getDaemonTcpPort = optionalServiceRefs.getDaemonTcpPort;
+    this.getDaemonTcpHost = optionalServiceRefs.getDaemonTcpHost;
+    this.serviceProxyPublicBaseUrl = optionalServiceRefs.serviceProxyPublicBaseUrl;
+    this.resolveScriptHealth = optionalServiceRefs.resolveScriptHealth;
     this.workspaceScripts = createWorkspaceScriptsService({
       serviceProxy: this.serviceProxy,
       scriptRuntimeStore: this.scriptRuntimeStore,
@@ -1075,6 +1073,26 @@ export class Session {
     this.unsubscribePluginChanges = this.subscribeToPluginChanges(pluginRuntime);
 
     this.sessionLogger.trace({}, "agent.session.lifecycle.created");
+  }
+
+  private static resolveOptionalServiceRefs(options: SessionOptions): {
+    serviceProxy: ServiceProxySubsystem | null;
+    scriptRuntimeStore: WorkspaceScriptRuntimeStore | null;
+    workspaceSetupSnapshots: Map<string, WorkspaceSetupSnapshot>;
+    getDaemonTcpPort: (() => number | null) | null;
+    getDaemonTcpHost: (() => string | null) | null;
+    serviceProxyPublicBaseUrl: string | null;
+    resolveScriptHealth: ((hostname: string) => ScriptHealthState | null) | null;
+  } {
+    return {
+      serviceProxy: options.serviceProxy ?? null,
+      scriptRuntimeStore: options.scriptRuntimeStore ?? null,
+      workspaceSetupSnapshots: options.workspaceSetupSnapshots ?? new Map(),
+      getDaemonTcpPort: options.getDaemonTcpPort ?? null,
+      getDaemonTcpHost: options.getDaemonTcpHost ?? null,
+      serviceProxyPublicBaseUrl: options.serviceProxyPublicBaseUrl ?? null,
+      resolveScriptHealth: options.resolveScriptHealth ?? null,
+    };
   }
 
   private initClusterSession(options: SessionOptions): void {
@@ -1879,26 +1897,36 @@ export class Session {
   }
 
   private async dispatchInboundMessage(msg: SessionInboundMessage, source?: object): Promise<void> {
-    const promise =
-      this.dispatchVoiceAndControlMessage(msg) ??
-      this.dispatchAgentRewindMessage(msg) ??
-      this.dispatchAgentRelationshipMessage(msg) ??
-      this.dispatchAgentTimelineMessage(msg, source) ??
-      this.dispatchHubExecutionMessage(msg) ??
-      this.dispatchAgentLifecycleMessage(msg) ??
-      this.dispatchOrchestrationMessage(msg) ??
-      this.dispatchAgentConfigMessage(msg) ??
-      this.dispatchCheckoutMessage(msg) ??
-      this.dispatchWorkspaceRecoveryMessage(msg) ??
-      this.dispatchWorkspaceAndProjectMessage(msg) ??
-      this.dispatchWorkspaceFileMessage(msg, source) ??
-      this.dispatchProviderMessage(msg) ??
-      this.dispatchTerminalMessage(msg) ??
-      this.dispatchChatScheduleLoopMessage(msg) ??
-      this.dispatchClusterMessage(msg) ??
-      this.dispatchPluginMessage(msg) ??
-      this.dispatchPluginDirectoryMessage(msg) ??
-      this.dispatchMiscMessage(msg);
+    // Ordered dispatchers: the first one that recognizes the message returns a
+    // (possibly async) result and the rest are skipped — matching the previous
+    // left-to-right `??` short-circuit chain exactly.
+    const dispatchers: Array<() => Promise<void> | undefined> = [
+      () => this.dispatchVoiceAndControlMessage(msg),
+      () => this.dispatchAgentRewindMessage(msg),
+      () => this.dispatchAgentRelationshipMessage(msg),
+      () => this.dispatchAgentTimelineMessage(msg, source),
+      () => this.dispatchHubExecutionMessage(msg),
+      () => this.dispatchAgentLifecycleMessage(msg),
+      () => this.dispatchOrchestrationMessage(msg),
+      () => this.dispatchAgentConfigMessage(msg),
+      () => this.dispatchCheckoutMessage(msg),
+      () => this.dispatchWorkspaceRecoveryMessage(msg),
+      () => this.dispatchWorkspaceAndProjectMessage(msg),
+      () => this.dispatchWorkspaceFileMessage(msg, source),
+      () => this.dispatchProviderMessage(msg),
+      () => this.dispatchTerminalMessage(msg),
+      () => this.dispatchChatScheduleLoopMessage(msg),
+      () => this.dispatchClusterMessage(msg),
+      () => this.dispatchMigrationMessage(msg),
+      () => this.dispatchPluginMessage(msg),
+      () => this.dispatchPluginDirectoryMessage(msg),
+      () => this.dispatchMiscMessage(msg),
+    ];
+    let promise: Promise<void> | undefined;
+    for (const dispatch of dispatchers) {
+      promise = dispatch();
+      if (promise) break;
+    }
     if (promise) await promise;
   }
 
@@ -2580,6 +2608,80 @@ export class Session {
         );
       default:
         return undefined;
+    }
+  }
+
+  private dispatchMigrationMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    switch (msg.type) {
+      case "export_host_data_request":
+        return this.handleExportHostDataRequest(msg);
+      case "import_host_data_request":
+        return this.handleImportHostDataRequest(msg);
+      default:
+        return undefined;
+    }
+  }
+
+  private async handleExportHostDataRequest(
+    msg: Extract<SessionInboundMessage, { type: "export_host_data_request" }>,
+  ): Promise<void> {
+    try {
+      const bundle = await exportHostData({
+        serverId: this.serverId,
+        agentStorage: this.agentStorage,
+        workspaceRegistry: this.workspaceRegistry,
+        projectRegistry: this.projectRegistry,
+        logger: this.sessionLogger,
+        ...(msg.agentIds ? { agentIds: msg.agentIds } : {}),
+      });
+      this.emit({
+        type: "export_host_data_response",
+        payload: { requestId: msg.requestId, bundle, error: null },
+      });
+    } catch (error) {
+      const message = getErrorMessage(error);
+      this.sessionLogger.error({ err: error }, "Failed to export host data");
+      this.emit({
+        type: "export_host_data_response",
+        payload: { requestId: msg.requestId, bundle: null, error: message },
+      });
+    }
+  }
+
+  private async handleImportHostDataRequest(
+    msg: Extract<SessionInboundMessage, { type: "import_host_data_request" }>,
+  ): Promise<void> {
+    try {
+      const result = await importHostData({
+        targetServerId: this.serverId,
+        bundle: msg.bundle,
+        agentStorage: this.agentStorage,
+        workspaceRegistry: this.workspaceRegistry,
+        projectRegistry: this.projectRegistry,
+        logger: this.sessionLogger,
+      });
+      // Surface the newly-imported workspaces so the client's directory refreshes.
+      for (const raw of msg.bundle.workspaces) {
+        const workspaceId = (raw as { workspaceId?: unknown }).workspaceId;
+        if (typeof workspaceId !== "string") {
+          continue;
+        }
+        const workspace = await this.workspaceRegistry.get(workspaceId);
+        if (workspace) {
+          await this.registerWorkspaceForImportedAgent(workspace);
+        }
+      }
+      this.emit({
+        type: "import_host_data_response",
+        payload: { requestId: msg.requestId, result, error: null },
+      });
+    } catch (error) {
+      const message = getErrorMessage(error);
+      this.sessionLogger.error({ err: error }, "Failed to import host data");
+      this.emit({
+        type: "import_host_data_response",
+        payload: { requestId: msg.requestId, result: null, error: message },
+      });
     }
   }
 

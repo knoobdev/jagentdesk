@@ -63,6 +63,49 @@ export function normalizeHostLabel(value: string | null | undefined, serverId: s
   return trimmed.length > 0 ? trimmed : serverId;
 }
 
+/**
+ * A short, human-readable hint for which connection a host uses, so two hosts
+ * that happen to share a hostname (e.g. the same machine reachable both over
+ * the tailnet and over localhost, both labelled "JCode.local") can be told
+ * apart. Prefers the host's preferred connection, falling back to the first.
+ */
+export function hostConnectionHint(host: HostProfile): string {
+  const conn =
+    host.connections.find((c) => c.id === host.preferredConnectionId) ?? host.connections[0];
+  if (!conn) return host.serverId.slice(0, 8);
+  switch (conn.type) {
+    case "directTcp":
+      return conn.endpoint;
+    case "tailnet":
+      return conn.tailnetAddress;
+    case "directSocket":
+    case "directPipe":
+      return conn.path;
+    default:
+      return host.serverId.slice(0, 8);
+  }
+}
+
+/**
+ * Return the hosts with display labels made unique: any label shared by more
+ * than one host gets its connection hint appended (e.g. "JCode.local
+ * (localhost:6796)" vs "JCode.local (jcode-1.tailf900c1.ts.net:6768)"). Hosts
+ * whose label is already unique are returned unchanged. Pure and idempotent
+ * when fed the raw (un-disambiguated) labels; callers should memoize on the
+ * source array so the result reference stays stable.
+ */
+export function disambiguateHostLabels(hosts: readonly HostProfile[]): HostProfile[] {
+  const labelCounts = new Map<string, number>();
+  for (const host of hosts) {
+    labelCounts.set(host.label, (labelCounts.get(host.label) ?? 0) + 1);
+  }
+  return hosts.map((host) =>
+    (labelCounts.get(host.label) ?? 0) > 1
+      ? { ...host, label: `${host.label} (${hostConnectionHint(host)})` }
+      : host,
+  );
+}
+
 export function orderHostsLocalFirst<T extends { serverId: string }>(
   hosts: T[],
   localServerId: string | null,
@@ -293,6 +336,48 @@ function toObjectRecord(value: unknown): Record<string, unknown> | undefined {
   return isPlainRecord(value) ? value : undefined;
 }
 
+function normalizeStoredDirectTcp(record: Record<string, unknown>): HostConnection | null {
+  try {
+    const endpoint = normalizeLoopbackToLocalhost(
+      normalizeHostPort(typeof record.endpoint === "string" ? record.endpoint : ""),
+    );
+    return DirectTcpHostConnectionSchema.parse({
+      id: `direct:${endpoint}`,
+      type: "directTcp",
+      endpoint,
+      useTls: record.useTls,
+      ...(typeof record.password === "string" ? { password: record.password } : {}),
+    });
+  } catch {
+    return null;
+  }
+}
+
+function normalizeStoredTailnet(record: Record<string, unknown>): HostConnection | null {
+  try {
+    const tailnetAddress = normalizeHostPort(
+      typeof record.tailnetAddress === "string" ? record.tailnetAddress : "",
+    );
+    const daemonPublicKeyB64 = (
+      typeof record.daemonPublicKeyB64 === "string" ? record.daemonPublicKeyB64 : ""
+    ).trim();
+    if (!daemonPublicKeyB64) return null;
+    const useTls = typeof record.useTls === "boolean" ? record.useTls : undefined;
+    return {
+      id: useTls === true ? `tailnet:wss:${tailnetAddress}` : `tailnet:${tailnetAddress}`,
+      type: "tailnet",
+      tailnetAddress,
+      ...(useTls !== undefined ? { useTls } : {}),
+      daemonPublicKeyB64,
+      ...(typeof record.pairingCode === "string" && /^\d{6}$/.test(record.pairingCode)
+        ? { pairingCode: record.pairingCode }
+        : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
 function normalizeStoredConnection(connection: unknown): HostConnection | null {
   const record = toObjectRecord(connection);
   if (!record) {
@@ -300,20 +385,7 @@ function normalizeStoredConnection(connection: unknown): HostConnection | null {
   }
   const type = record.type;
   if (type === "directTcp") {
-    try {
-      const endpoint = normalizeLoopbackToLocalhost(
-        normalizeHostPort(typeof record.endpoint === "string" ? record.endpoint : ""),
-      );
-      return DirectTcpHostConnectionSchema.parse({
-        id: `direct:${endpoint}`,
-        type: "directTcp",
-        endpoint,
-        useTls: record.useTls,
-        ...(typeof record.password === "string" ? { password: record.password } : {}),
-      });
-    } catch {
-      return null;
-    }
+    return normalizeStoredDirectTcp(record);
   }
   if (type === "directSocket") {
     const path = (typeof record.path === "string" ? record.path : "").trim();
@@ -324,28 +396,7 @@ function normalizeStoredConnection(connection: unknown): HostConnection | null {
     return path ? { id: `pipe:${path}`, type: "directPipe", path } : null;
   }
   if (type === "tailnet") {
-    try {
-      const tailnetAddress = normalizeHostPort(
-        typeof record.tailnetAddress === "string" ? record.tailnetAddress : "",
-      );
-      const daemonPublicKeyB64 = (
-        typeof record.daemonPublicKeyB64 === "string" ? record.daemonPublicKeyB64 : ""
-      ).trim();
-      if (!daemonPublicKeyB64) return null;
-      const useTls = typeof record.useTls === "boolean" ? record.useTls : undefined;
-      return {
-        id: useTls === true ? `tailnet:wss:${tailnetAddress}` : `tailnet:${tailnetAddress}`,
-        type: "tailnet",
-        tailnetAddress,
-        ...(useTls !== undefined ? { useTls } : {}),
-        daemonPublicKeyB64,
-        ...(typeof record.pairingCode === "string" && /^\d{6}$/.test(record.pairingCode)
-          ? { pairingCode: record.pairingCode }
-          : {}),
-      };
-    } catch {
-      return null;
-    }
+    return normalizeStoredTailnet(record);
   }
 
   return null;
@@ -390,6 +441,21 @@ export function normalizeStoredHostProfile(entry: unknown): HostProfile | null {
     createdAt: typeof record.createdAt === "string" ? record.createdAt : now,
     updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : now,
   };
+}
+
+/**
+ * True when the host has at least one connection that is reachable without
+ * Tailscale (a direct TCP/socket/pipe endpoint). A host whose connections are
+ * ALL `tailnet` cannot be reached in local connection mode, so the host list
+ * hides it there (see `HostRuntimeStore.getHosts`).
+ */
+export function hostHasLocalConnection(host: HostProfile): boolean {
+  return host.connections.some((connection) => connection.type !== "tailnet");
+}
+
+/** True when the host has at least one `tailnet` connection. */
+export function hostHasTailnetConnection(host: HostProfile): boolean {
+  return host.connections.some((connection) => connection.type === "tailnet");
 }
 
 export function hostHasConnection(host: HostProfile, connection: HostConnection): boolean {
