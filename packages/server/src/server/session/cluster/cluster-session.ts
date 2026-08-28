@@ -355,20 +355,36 @@ export class ClusterSession {
   async handleClusterKinds(
     request: Extract<SessionInboundMessage, { type: "cluster/kinds" }>,
   ): Promise<void> {
-    try {
-      const client = this.clusterRegistry.getClient(request.id);
-      const crds = client ? await client.discoverCRDs() : [];
-      this.host.emit({
-        type: "cluster/kinds/response",
-        payload: {
-          requestId: request.requestId,
-          kinds: [...GENERIC_KINDS, ...crds],
-          error: null,
-        },
-      });
-    } catch (error) {
-      this.emitClusterRpcError(request, error);
+    // Always return the built-in kinds; discovering CRDs is best-effort. On
+    // RBAC-restricted clusters the user often can't list CustomResourceDefinitions
+    // — that used to throw and leave the whole kind menu empty. The standard kinds
+    // are hard-coded so the menu always renders; custom kinds are added only when
+    // discovery is permitted.
+    const client = this.clusterRegistry.getClient(request.id);
+    let crds: Array<{
+      kind: string;
+      apiVersion: string;
+      namespaced: boolean;
+      category: "Custom";
+    }> = [];
+    if (client) {
+      try {
+        crds = await client.discoverCRDs();
+      } catch (error) {
+        this.logger.warn(
+          { err: error, clusterId: request.id },
+          "CRD discovery failed (likely RBAC); returning built-in kinds only",
+        );
+      }
     }
+    this.host.emit({
+      type: "cluster/kinds/response",
+      payload: {
+        requestId: request.requestId,
+        kinds: [...GENERIC_KINDS, ...crds],
+        error: null,
+      },
+    });
   }
 
   async handleClusterResourceList(

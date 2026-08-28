@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
-import { FlatList, Pressable, Text, TextInput, View, type ListRenderItem } from "react-native";
+import {
+  FlatList,
+  Modal,
+  Pressable,
+  Text,
+  TextInput,
+  View,
+  type ListRenderItem,
+} from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { ClusterHelmView } from "@/components/cluster-helm-view";
@@ -157,6 +165,14 @@ function ResourceRow({
   );
 }
 
+/** Friendly message for a failed list — flags RBAC/permission errors clearly. */
+function describeClusterListError(kind: string, raw: string): string {
+  if (/forbidden|cannot list|not allowed|unauthorized|permission|rbac/i.test(raw)) {
+    return `You don't have permission to view ${kind} in this cluster.\n\n${raw}`;
+  }
+  return raw;
+}
+
 /**
  * The resource TABLE for a cluster. The category navigation now lives in the app
  * left sidebar (SidebarClusterNav); this component only reads the selected kind
@@ -180,6 +196,10 @@ export function ClusterResourceBrowser({
   const [items, setItems] = useState<ResourceItem[]>([]);
   const [loadingItems, setLoadingItems] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // A centered popup shown when listing the selected kind fails — most often a
+  // permission (RBAC) error on a restricted cluster where the kind is in the menu
+  // but the user isn't allowed to list it.
+  const [errorPopup, setErrorPopup] = useState<string | null>(null);
   const [metricsMap, setMetricsMap] = useState<Record<string, MetricsEntry>>({});
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState<"name" | "age">("name");
@@ -187,9 +207,10 @@ export function ClusterResourceBrowser({
   const openDetail = useClusterViewStore((s) => s.openDetail);
   const listRefreshKey = useClusterViewStore((s) => s.listRefreshKey);
 
-  // Clear the search box when switching kinds so a stale filter never hides a
-  // fresh list.
+  // Clear the search box + any error popup when switching kinds so a stale
+  // filter/error never carries over to a fresh list.
   useEffect(() => {
+    setErrorPopup(null);
     setQuery("");
   }, [selectedKind]);
 
@@ -205,6 +226,7 @@ export function ClusterResourceBrowser({
   );
   const sortByName = useCallback(() => toggleSort("name"), [toggleSort]);
   const sortByAge = useCallback(() => toggleSort("age"), [toggleSort]);
+  const dismissErrorPopup = useCallback(() => setErrorPopup(null), []);
   const sortArrow = useCallback(
     (key: "name" | "age") => {
       if (sortKey !== key) return "";
@@ -274,12 +296,15 @@ export function ClusterResourceBrowser({
           }
           if (res.error) {
             setError(res.error);
+            setErrorPopup(describeClusterListError(kind, res.error));
             setItems([]);
           } else {
             setItems((res.items as Array<Record<string, unknown>>).map(normalizeResourceItem));
           }
         } catch (e: unknown) {
-          setError(e instanceof Error ? e.message : "Failed to load resources");
+          const message = e instanceof Error ? e.message : "Failed to load resources";
+          setError(message);
+          setErrorPopup(describeClusterListError(kind, message));
           setItems([]);
         } finally {
           setLoadingItems(false);
@@ -462,7 +487,35 @@ export function ClusterResourceBrowser({
     );
   }
 
-  return <View style={styles.container}>{content}</View>;
+  return (
+    <View style={styles.container}>
+      {content}
+      <ClusterErrorPopup message={errorPopup} onDismiss={dismissErrorPopup} />
+    </View>
+  );
+}
+
+/** Centered popup for a failed resource list (typically an RBAC permission error). */
+function ClusterErrorPopup({
+  message,
+  onDismiss,
+}: {
+  message: string | null;
+  onDismiss: () => void;
+}) {
+  return (
+    <Modal visible={message !== null} transparent animationType="fade" onRequestClose={onDismiss}>
+      <Pressable style={styles.modalBackdrop} onPress={onDismiss}>
+        <View style={styles.modalCard}>
+          <Text style={styles.modalTitle}>Cannot load this resource</Text>
+          <Text style={styles.modalMessage}>{message}</Text>
+          <Pressable style={styles.modalButton} onPress={onDismiss} testID="cluster-error-dismiss">
+            <Text style={styles.modalButtonText}>OK</Text>
+          </Pressable>
+        </View>
+      </Pressable>
+    </Modal>
+  );
 }
 
 const styles = StyleSheet.create((theme: Theme) => ({
@@ -470,6 +523,41 @@ const styles = StyleSheet.create((theme: Theme) => ({
   center: { flex: 1, alignItems: "center", justifyContent: "center", minHeight: 120 },
   muted: { fontSize: theme.fontSize.sm, color: theme.colors.foregroundMuted, fontStyle: "italic" },
   errorText: { fontSize: theme.fontSize.sm, color: theme.colors.palette.red[500] },
+  modalBackdrop: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.5)",
+    padding: theme.spacing[4],
+  },
+  modalCard: {
+    width: "100%",
+    maxWidth: 420,
+    gap: theme.spacing[3],
+    padding: theme.spacing[4],
+    borderRadius: 14,
+    backgroundColor: theme.colors.surface1,
+    borderColor: theme.colors.border,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  modalTitle: { fontSize: theme.fontSize.base, fontWeight: "600", color: theme.colors.foreground },
+  modalMessage: {
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foregroundMuted,
+    lineHeight: 20,
+  },
+  modalButton: {
+    alignSelf: "flex-end",
+    paddingHorizontal: theme.spacing[4],
+    paddingVertical: theme.spacing[2],
+    borderRadius: 8,
+    backgroundColor: theme.colors.surface3,
+  },
+  modalButtonText: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: "600",
+    color: theme.colors.foreground,
+  },
   toolbar: {
     flexDirection: "row",
     alignItems: "center",
