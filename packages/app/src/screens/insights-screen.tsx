@@ -3,7 +3,7 @@ import { ScrollView, Text, View } from "react-native";
 import { BarChart3, Coins, Cpu, Users } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useHosts } from "@/runtime/host-runtime";
+import { useHostRouteServerId } from "@/navigation/host-route-context";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { formatTokenCount } from "@/components/context-window-meter.utils";
 import {
@@ -205,8 +205,11 @@ function modelIndexByName(insights: UsageInsights): Map<string, number> {
 }
 
 export function InsightsScreen() {
-  const hosts = useHosts();
-  const serverId = hosts[0]?.serverId ?? "";
+  // Read the host the user actually navigated into (like every sibling screen),
+  // not raw hosts[0]: on mobile (tailscale mode) getHosts() returns every host in
+  // registry order, so hosts[0] can be a different daemon than the viewed one and
+  // sessions[hosts[0].serverId] is empty → the whole dashboard reads zeros.
+  const serverId = useHostRouteServerId() ?? "";
   const insets = useSafeAreaInsets();
   const isCompact = useIsCompactFormFactor();
   const insights = useUsageInsights(serverId);
