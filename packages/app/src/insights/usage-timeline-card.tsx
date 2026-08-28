@@ -77,7 +77,7 @@ function formatUsd(value: number): string {
 }
 
 export function UsageTimelineCard({ serverId }: { serverId: string }) {
-  const days = useUsageHistory(serverId);
+  const { days } = useUsageHistory(serverId);
   const [period, setPeriod] = useState<Period>("day");
   const [width, setWidth] = useState(0);
 

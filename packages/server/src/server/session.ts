@@ -2296,7 +2296,18 @@ export class Session {
     }
     this.emit({
       type: "usage.history.get.response",
-      payload: { requestId: msg.requestId, days: this.usageHistory?.get() ?? [] },
+      payload: {
+        requestId: msg.requestId,
+        days: this.usageHistory?.get() ?? [],
+        lifetime: this.usageHistory?.lifetime() ?? {
+          inputTokens: 0,
+          cachedInputTokens: 0,
+          outputTokens: 0,
+          totalCostUsd: 0,
+          turns: 0,
+          byModel: {},
+        },
+      },
     });
     return undefined;
   }

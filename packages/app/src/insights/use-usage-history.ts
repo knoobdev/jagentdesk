@@ -1,18 +1,34 @@
 import { useTranslation } from "react-i18next";
-import type { UsageDayRollup } from "@jagentdesk/protocol/usage-history";
+import type { LifetimeUsage, UsageDayRollup } from "@jagentdesk/protocol/usage-history";
 import { useReplicaQuery } from "@/data/query";
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 
 export const usageHistoryQueryKey = (serverId: string | null) => ["usage-history", serverId];
 
+export interface UsageHistory {
+  days: UsageDayRollup[];
+  /** Persistent lifetime total (baseline + all days); survives agent deletion. */
+  lifetime: LifetimeUsage;
+}
+
+const EMPTY_LIFETIME: LifetimeUsage = {
+  inputTokens: 0,
+  cachedInputTokens: 0,
+  outputTokens: 0,
+  totalCostUsd: 0,
+  turns: 0,
+  byModel: {},
+};
+
 /**
- * The daemon-recorded usage time-series (one rollup per UTC day). Hydrates from
- * `usage.history.get` and stays live via the `status:usage_changed` broadcast
- * (routed into this query's cache by push-router). This is real recorded history
- * — the per-agent running totals have no time axis — so it can drive a
- * day/month/year chart.
+ * The daemon-recorded usage time-series (one rollup per UTC day) plus the
+ * persistent lifetime total. Hydrates from `usage.history.get` and stays live via
+ * the `status:usage_changed` broadcast (routed into this query's cache by
+ * push-router). The lifetime total is computed daemon-side from a one-time
+ * baseline + every day rollup — never summed over live agents — so the headline
+ * Usage & Cost figures don't drop when an agent is deleted.
  */
-export function useUsageHistory(serverId: string): UsageDayRollup[] {
+export function useUsageHistory(serverId: string): UsageHistory {
   const { t } = useTranslation();
   const client = useHostRuntimeClient(serverId);
   const isConnected = useHostRuntimeIsConnected(serverId);
@@ -24,8 +40,9 @@ export function useUsageHistory(serverId: string): UsageDayRollup[] {
       if (!client) {
         throw new Error(t("workspace.terminal.hostDisconnected"));
       }
-      return (await client.getUsageHistory()).days;
+      const { days, lifetime } = await client.getUsageHistory();
+      return { days, lifetime } satisfies UsageHistory;
     },
   });
-  return query.data ?? [];
+  return query.data ?? { days: [], lifetime: EMPTY_LIFETIME };
 }

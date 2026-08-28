@@ -123,7 +123,7 @@ import type {
   OrchestrationRouteCategory,
 } from "@jagentdesk/protocol/orchestration";
 import type { Skill, SkillMutation } from "@jagentdesk/protocol/skills";
-import type { UsageDayRollup } from "@jagentdesk/protocol/usage-history";
+import type { LifetimeUsage, UsageDayRollup } from "@jagentdesk/protocol/usage-history";
 import type { MutableDaemonConfig, MutableDaemonConfigPatch } from "@jagentdesk/protocol/messages";
 import { terminalSubscriptionKey } from "@jagentdesk/protocol/terminal-subscription-key";
 import {
@@ -4898,10 +4898,11 @@ export class DaemonClient {
     });
   }
 
-  // Daemon-recorded usage time-series for the day/month/year dashboard.
+  // Daemon-recorded usage time-series for the day/month/year dashboard, plus the
+  // persistent lifetime total (survives agent deletion).
   async getUsageHistory(
     requestId?: string,
-  ): Promise<{ requestId: string; days: UsageDayRollup[] }> {
+  ): Promise<{ requestId: string; days: UsageDayRollup[]; lifetime: LifetimeUsage }> {
     return this.sendNamespacedCorrelatedSessionRequest({
       requestId,
       message: { type: "usage.history.get.request" },

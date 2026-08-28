@@ -148,7 +148,7 @@ import { FileBackedChatService } from "./chat/chat-service.js";
 import { CheckoutDiffManager } from "./checkout-diff-manager.js";
 import { LoopService } from "./loop-service.js";
 import { SkillsStorage } from "./skills/skills-storage.js";
-import { UsageHistoryStorage } from "./usage/usage-history-storage.js";
+import { buildLifetimeBaseline, UsageHistoryStorage } from "./usage/usage-history-storage.js";
 import { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { ScheduleService } from "./schedule/service.js";
 import { DaemonConfigStore, type MutableDaemonConfig } from "./daemon-config-store.js";
@@ -909,6 +909,22 @@ export async function createJAgentDeskDaemon(
   );
   await agentStorage.initialize();
   logger.info({ elapsed: elapsed() }, "Agent storage initialized");
+  // Seed the lifetime usage baseline once from existing agents so headline Usage
+  // & Cost figures include usage that predates the time-series and never drop
+  // when an agent is deleted. No-op if a baseline was already persisted.
+  try {
+    const records = await agentStorage.list();
+    usageHistory.seedBaselineIfEmpty(
+      buildLifetimeBaseline(
+        records.map((record) => ({
+          usageTotals: record.usageTotals,
+          model: record.config?.model ?? record.runtimeInfo?.model ?? record.provider,
+        })),
+      ),
+    );
+  } catch (error) {
+    logger.warn({ err: error }, "Failed to seed usage baseline from existing agents");
+  }
   await bootstrapWorkspaceRegistries({
     serverId,
     jagentdeskHome: config.jagentdeskHome,

@@ -10,9 +10,10 @@ import {
   useUsageInsights,
   type AgentUsageRow,
   type ModelUsageRow,
-  type UsageInsights,
 } from "@/insights/use-usage-insights";
+import { useUsageHistory } from "@/insights/use-usage-history";
 import { UsageTimelineCard } from "@/insights/usage-timeline-card";
+import type { LifetimeUsage } from "@jagentdesk/protocol/usage-history";
 import type { Theme } from "@/styles/theme";
 
 const ThemedBarChart = withUnistyles(BarChart3);
@@ -198,10 +199,21 @@ function Card({
   );
 }
 
-function modelIndexByName(insights: UsageInsights): Map<string, number> {
-  const map = new Map<string, number>();
-  insights.byModel.forEach((row, i) => map.set(row.model, i));
-  return map;
+// Per-model rows from the persisted lifetime total (survives agent deletion),
+// ranked by tokens. `agentCount` isn't tracked in history and isn't rendered here.
+function lifetimeModelRows(lifetime: LifetimeUsage): ModelUsageRow[] {
+  return Object.entries(lifetime.byModel)
+    .map(([model, b]) => ({
+      model,
+      agentCount: 0,
+      inputTokens: b.inputTokens,
+      cachedInputTokens: b.cachedInputTokens,
+      outputTokens: b.outputTokens,
+      totalTokens: b.inputTokens + b.cachedInputTokens + b.outputTokens,
+      costUsd: b.totalCostUsd,
+    }))
+    .filter((row) => row.totalTokens > 0)
+    .sort((a, b) => b.totalTokens - a.totalTokens);
 }
 
 export function InsightsScreen() {
@@ -213,6 +225,13 @@ export function InsightsScreen() {
   const insets = useSafeAreaInsets();
   const isCompact = useIsCompactFormFactor();
   const insights = useUsageInsights(serverId);
+  // Headline TOKENS/COST/by-model come from the daemon-persisted LIFETIME total
+  // (baseline + every recorded day), NOT the live per-agent sum — so they include
+  // usage that predates the time-series and never drop when an agent is deleted.
+  // Per-agent views (AGENTS, Top agents, Context) stay live from `insights`.
+  const { lifetime } = useUsageHistory(serverId);
+  const lifetimeTokens = lifetime.inputTokens + lifetime.cachedInputTokens + lifetime.outputTokens;
+  const lifetimeModels = useMemo(() => lifetimeModelRows(lifetime), [lifetime]);
 
   const contentContainerStyle = useMemo(
     () => [styles.content, isCompact ? { paddingTop: insets.top } : null],
@@ -220,13 +239,18 @@ export function InsightsScreen() {
   );
   const halfCard = useMemo(() => (isCompact ? styles.cardFull : styles.cardHalf), [isCompact]);
 
-  const maxModelTokens = insights.byModel.reduce((m, r) => Math.max(m, r.totalTokens), 0);
+  const maxModelTokens = lifetimeModels.reduce((m, r) => Math.max(m, r.totalTokens), 0);
   const maxAgentTokens = insights.topAgents.reduce((m, r) => Math.max(m, r.totalTokens), 0);
-  const colorByModel = useMemo(() => modelIndexByName(insights), [insights]);
-  const hasData = insights.agentsWithUsage > 0;
-  const modelSubtitle = insights.hasCost
-    ? `${insights.byModel.length} model${insights.byModel.length === 1 ? "" : "s"} · ${formatUsd(insights.totalCostUsd)}`
-    : `${insights.byModel.length} model${insights.byModel.length === 1 ? "" : "s"}`;
+  const colorByModel = useMemo(() => {
+    const map = new Map<string, number>();
+    lifetimeModels.forEach((row, i) => map.set(row.model, i));
+    return map;
+  }, [lifetimeModels]);
+  const hasData = lifetimeTokens > 0 || insights.agentsWithUsage > 0;
+  const lifetimeHasCost = lifetime.totalCostUsd > 0;
+  const modelSubtitle = lifetimeHasCost
+    ? `${lifetimeModels.length} model${lifetimeModels.length === 1 ? "" : "s"} · ${formatUsd(lifetime.totalCostUsd)}`
+    : `${lifetimeModels.length} model${lifetimeModels.length === 1 ? "" : "s"}`;
 
   return (
     <View style={styles.root}>
@@ -251,14 +275,14 @@ export function InsightsScreen() {
           <KpiTile
             Icon={ThemedCpu}
             label="TOKENS"
-            value={formatTokenCount(insights.totalTokens)}
-            sub={`${formatTokenCount(insights.totalInputTokens + insights.totalCachedInputTokens)} in · ${formatTokenCount(insights.totalOutputTokens)} out`}
+            value={formatTokenCount(lifetimeTokens)}
+            sub={`${formatTokenCount(lifetime.inputTokens + lifetime.cachedInputTokens)} in · ${formatTokenCount(lifetime.outputTokens)} out`}
           />
           <KpiTile
             Icon={ThemedCoins}
             label="COST"
-            value={insights.hasCost ? formatUsd(insights.totalCostUsd) : "—"}
-            sub={insights.hasCost ? "reported by provider" : "not reported"}
+            value={lifetimeHasCost ? formatUsd(lifetime.totalCostUsd) : "—"}
+            sub={lifetimeHasCost ? "reported by provider" : "not reported"}
           />
           <KpiTile
             Icon={ThemedUsers}
@@ -278,8 +302,8 @@ export function InsightsScreen() {
 
         <View style={styles.cardsRow}>
           <Card title="Tokens by model" subtitle={modelSubtitle} style={halfCard}>
-            {insights.byModel.length > 0 ? (
-              insights.byModel.map((row, i) => (
+            {lifetimeModels.length > 0 ? (
+              lifetimeModels.map((row, i) => (
                 <ModelRow key={row.model} row={row} index={i} maxTokens={maxModelTokens} />
               ))
             ) : (

@@ -24,6 +24,18 @@ export const UsageDayRollupSchema = UsageBucketSchema.extend({
 });
 export type UsageDayRollup = z.infer<typeof UsageDayRollupSchema>;
 
+/**
+ * The persistent LIFETIME total (with per-model breakdown), computed daemon-side
+ * as the one-time baseline (a snapshot of every agent's usage the first time this
+ * shipped) plus every day rollup since. It is NOT summed over live agents, so
+ * deleting an agent never lowers it — the headline Usage & Cost figures survive
+ * agent deletion.
+ */
+export const LifetimeUsageSchema = UsageBucketSchema.extend({
+  byModel: z.record(z.string(), UsageBucketSchema),
+});
+export type LifetimeUsage = z.infer<typeof LifetimeUsageSchema>;
+
 export function emptyUsageBucket(): UsageBucket {
   return { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, totalCostUsd: 0, turns: 0 };
 }
@@ -58,7 +70,11 @@ export const UsageHistoryGetRequestSchema = z.object({
 });
 export const UsageHistoryGetResponseSchema = z.object({
   type: z.literal("usage.history.get.response"),
-  payload: z.object({ requestId: z.string(), days: z.array(UsageDayRollupSchema) }),
+  payload: z.object({
+    requestId: z.string(),
+    days: z.array(UsageDayRollupSchema),
+    lifetime: LifetimeUsageSchema,
+  }),
 });
 export type UsageHistoryGetRequest = z.infer<typeof UsageHistoryGetRequestSchema>;
 
@@ -66,4 +82,5 @@ export type UsageHistoryGetRequest = z.infer<typeof UsageHistoryGetRequestSchema
 export const UsageChangedStatusPayloadSchema = z.object({
   status: z.literal("usage_changed"),
   days: z.array(UsageDayRollupSchema),
+  lifetime: LifetimeUsageSchema,
 });

@@ -16,7 +16,7 @@ import type { LoopService } from "./loop-service.js";
 import type { SkillsStorage } from "./skills/skills-storage.js";
 import type { Skill } from "@jagentdesk/protocol/skills";
 import type { UsageHistoryStorage } from "./usage/usage-history-storage.js";
-import type { UsageDayRollup } from "@jagentdesk/protocol/usage-history";
+import type { LifetimeUsage, UsageDayRollup } from "@jagentdesk/protocol/usage-history";
 import type { ClusterRegistry } from "./cluster/cluster-registry.js";
 import type { ScheduleService } from "./schedule/service.js";
 import type { CheckoutDiffManager, CheckoutDiffMetrics } from "./checkout-diff-manager.js";
@@ -2171,8 +2171,8 @@ export class VoiceAssistantWebSocketServer {
   private setupUsageBroadcast(usageHistory: UsageHistoryStorage | null | undefined): void {
     this.usageHistory = usageHistory ?? null;
     this.unsubscribeUsageChange =
-      this.usageHistory?.onChange((days) => {
-        this.broadcastUsageChanged(days);
+      this.usageHistory?.onChange((days, lifetime) => {
+        this.broadcastUsageChanged(days, lifetime);
       }) ?? null;
   }
 
@@ -2185,11 +2185,11 @@ export class VoiceAssistantWebSocketServer {
     );
   }
 
-  private broadcastUsageChanged(days: UsageDayRollup[]): void {
+  private broadcastUsageChanged(days: UsageDayRollup[], lifetime: LifetimeUsage): void {
     this.broadcast(
       wrapSessionMessage({
         type: "status",
-        payload: { status: "usage_changed", days },
+        payload: { status: "usage_changed", days, lifetime },
       }),
     );
   }

@@ -7,8 +7,8 @@ import type {
 import { agentCommandsQueryRoot } from "@/hooks/agent-commands-query";
 import { orderCheckoutDiffFiles } from "@/git/diff-order";
 import { daemonConfigQueryKey } from "@/data/daemon-config";
-import { usageHistoryQueryKey } from "@/insights/use-usage-history";
-import type { UsageDayRollup } from "@jagentdesk/protocol/usage-history";
+import { usageHistoryQueryKey, type UsageHistory } from "@/insights/use-usage-history";
+import type { LifetimeUsage, UsageDayRollup } from "@jagentdesk/protocol/usage-history";
 import { daemonPairingOfferQueryKey } from "@/data/daemon-pairing";
 import { providersSnapshotQueryKey, providersSnapshotQueryRoot } from "@/data/providers-snapshot";
 
@@ -423,14 +423,18 @@ function applyUsageHistoryStatus(input: {
   serverId: string;
   message: StatusMessage;
 }): void {
-  const payload = input.message.payload as { status?: string; days?: UsageDayRollup[] };
-  if (payload.status !== "usage_changed" || !Array.isArray(payload.days)) {
+  const payload = input.message.payload as {
+    status?: string;
+    days?: UsageDayRollup[];
+    lifetime?: LifetimeUsage;
+  };
+  if (payload.status !== "usage_changed" || !Array.isArray(payload.days) || !payload.lifetime) {
     return;
   }
-  input.queryClient.setQueryData<UsageDayRollup[]>(
-    usageHistoryQueryKey(input.serverId),
-    payload.days,
-  );
+  input.queryClient.setQueryData<UsageHistory>(usageHistoryQueryKey(input.serverId), {
+    days: payload.days,
+    lifetime: payload.lifetime,
+  });
 }
 
 function applyCheckoutDiffUpdate(input: {
