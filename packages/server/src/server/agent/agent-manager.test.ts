@@ -5220,6 +5220,55 @@ test("bills a stopped (canceled) turn's usage into usageTotals", async () => {
   unsubscribe();
 });
 
+test("fires onUsageBilled for each billed turn (feeds the usage time-series)", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-usage-billed-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  let capturedSession: TestAgentSession | null = null;
+
+  class LiveEventClient extends TestAgentClient {
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      capturedSession = new TestAgentSession(config);
+      return capturedSession;
+    }
+  }
+
+  const onUsageBilled = vi.fn();
+  const manager = new AgentManager({
+    clients: { codex: new LiveEventClient() },
+    registry: storage,
+    logger,
+    onUsageBilled,
+    idFactory: () => "00000000-0000-4000-8000-000000000127",
+  });
+
+  const snapshot = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+    workspaceId: undefined,
+  });
+
+  const turnId = "billed-turn-1";
+  capturedSession!.pushEvent({ type: "turn_started", provider: "codex", turnId });
+  await vi.waitFor(() => {
+    expect(manager.getAgent(snapshot.id)?.lifecycle).toBe("running");
+  });
+  capturedSession!.pushEvent({
+    type: "turn_completed",
+    provider: "codex",
+    turnId,
+    usage: { inputTokens: 100, outputTokens: 20, totalCostUsd: 0.02 },
+  });
+
+  await vi.waitFor(() => {
+    expect(onUsageBilled).toHaveBeenCalledTimes(1);
+  });
+  const billed = onUsageBilled.mock.calls[0][0];
+  expect(billed.provider).toBe("codex");
+  expect(billed.usage).toEqual({ inputTokens: 100, outputTokens: 20, totalCostUsd: 0.02 });
+  expect(typeof billed.timestampMs).toBe("number");
+  expect(typeof billed.model).toBe("string");
+
+  rmSync(workdir, { recursive: true, force: true });
+});
+
 test("ignores stale autonomous terminals without lowering the active turn lifecycle", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-stale-autonomous-terminal-"));
   const storage = new AgentStorage(join(workdir, "agents"), logger);

@@ -24,6 +24,11 @@ import {
   SkillsChangedStatusPayloadSchema,
 } from "./skills.js";
 import {
+  UsageHistoryGetRequestSchema,
+  UsageHistoryGetResponseSchema,
+  UsageChangedStatusPayloadSchema,
+} from "./usage-history.js";
+import {
   ChatCreateRequestSchema,
   ChatListRequestSchema,
   ChatInspectRequestSchema,
@@ -2814,6 +2819,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   OrchestrationTaskPrepareRequestSchema,
   SkillsGetRequestSchema,
   SkillsMutateRequestSchema,
+  UsageHistoryGetRequestSchema,
   DictationStreamStartMessageSchema,
   DictationStreamChunkMessageSchema,
   DictationStreamFinishMessageSchema,
@@ -3340,6 +3346,7 @@ export const KnownStatusPayloadSchema = z.discriminatedUnion("status", [
   DaemonConfigChangedStatusPayloadSchema,
   PluginCatalogChangedStatusPayloadSchema,
   SkillsChangedStatusPayloadSchema,
+  UsageChangedStatusPayloadSchema,
 ]);
 
 export type KnownStatusPayload = z.infer<typeof KnownStatusPayloadSchema>;
@@ -5755,6 +5762,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   OrchestrationTaskPrepareResponseSchema,
   SkillsGetResponseSchema,
   SkillsMutateResponseSchema,
+  UsageHistoryGetResponseSchema,
   BrowserAutomationExecuteRequestSchema,
   BrowserScreenshotResponseSchema,
   BrowserListResponseSchema,

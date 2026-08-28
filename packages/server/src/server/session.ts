@@ -214,6 +214,7 @@ import type pino from "pino";
 import { FileBackedChatService } from "./chat/chat-service.js";
 import { LoopService } from "./loop-service.js";
 import type { SkillsStorage } from "./skills/skills-storage.js";
+import type { UsageHistoryStorage } from "./usage/usage-history-storage.js";
 import { ScheduleService } from "./schedule/service.js";
 import {
   createGitHubService,
@@ -446,6 +447,7 @@ export interface SessionOptions {
   scheduleService: ScheduleService;
   loopService: LoopService;
   skillsStorage?: SkillsStorage | null;
+  usageHistory?: UsageHistoryStorage | null;
   clusterRegistry?: ClusterRegistry;
   checkoutDiffManager: CheckoutDiffManager;
   github?: ForgeService;
@@ -655,6 +657,7 @@ export class Session {
   private readonly workspaceRecovery: WorkspaceRecoveryService;
   private readonly daemonConfigStore: DaemonConfigStore;
   private readonly skillsStorage: SkillsStorage | null;
+  private readonly usageHistory: UsageHistoryStorage | null;
   private readonly pushTokenStore: PushTokenStore;
   private unsubscribeAgentEvents: (() => void) | null = null;
   private unsubscribeProjectMutations: (() => void) | null = null;
@@ -950,6 +953,7 @@ export class Session {
       : null;
     this.daemonConfigStore = daemonConfigStore;
     this.skillsStorage = options.skillsStorage ?? null;
+    this.usageHistory = options.usageHistory ?? null;
     this.terminalManager = terminalManager;
     this.terminalController = new TerminalSessionController({
       terminalManager,
@@ -1913,6 +1917,7 @@ export class Session {
       () => this.dispatchAgentLifecycleMessage(msg),
       () => this.dispatchOrchestrationMessage(msg),
       () => this.dispatchSkillsMessage(msg),
+      () => this.dispatchUsageMessage(msg),
       () => this.dispatchAgentConfigMessage(msg),
       () => this.dispatchCheckoutMessage(msg),
       () => this.dispatchWorkspaceRecoveryMessage(msg),
@@ -2283,6 +2288,17 @@ export class Session {
       default:
         return undefined;
     }
+  }
+
+  private dispatchUsageMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    if (msg.type !== "usage.history.get.request") {
+      return undefined;
+    }
+    this.emit({
+      type: "usage.history.get.response",
+      payload: { requestId: msg.requestId, days: this.usageHistory?.get() ?? [] },
+    });
+    return undefined;
   }
 
   private dispatchOrchestrationMessage(msg: SessionInboundMessage): Promise<void> | undefined {

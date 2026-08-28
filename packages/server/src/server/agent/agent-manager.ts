@@ -260,6 +260,13 @@ export interface AgentManagerOptions {
   idFactory?: () => string;
   registry?: AgentStorage;
   onAgentAttention?: AgentAttentionCallback;
+  /** Fired once per billed turn (completed or stopped) so a usage time-series can be recorded. */
+  onUsageBilled?: (input: {
+    timestampMs: number;
+    provider: string;
+    model: string;
+    usage: AgentUsage;
+  }) => void;
   onWorkspaceStateMayHaveChanged?: (params: { cwd: string }) => void;
   durableTimelineStore?: AgentTimelineStore;
   terminalManager?: TerminalManager | null;
@@ -653,6 +660,7 @@ export class AgentManager {
   private jagentdeskToolCatalogFactory: JAgentDeskToolCatalogFactory | null = null;
   private appendSystemPrompt: string;
   private onAgentAttention?: AgentAttentionCallback;
+  private readonly onUsageBilled?: AgentManagerOptions["onUsageBilled"];
   private onAgentArchived?: AgentArchivedCallback;
   private onWorkspaceStateMayHaveChanged?: (params: { cwd: string }) => void;
   private logger: Logger;
@@ -664,6 +672,7 @@ export class AgentManager {
     this.registry = options?.registry;
     this.durableTimelineStore = options?.durableTimelineStore;
     this.onAgentAttention = options?.onAgentAttention;
+    this.onUsageBilled = options?.onUsageBilled;
     this.onWorkspaceStateMayHaveChanged = options?.onWorkspaceStateMayHaveChanged;
     this.mcpBaseUrl = options?.mcpBaseUrl ?? null;
     this.mcpAuthToken = options?.mcpAuthToken ?? null;
@@ -3931,6 +3940,14 @@ export class AgentManager {
       totalCostUsd: prev.totalCostUsd + (usage.totalCostUsd ?? 0),
       turns: prev.turns + 1,
     };
+    // Record the same billed turn into the daemon's usage time-series so a
+    // day/month/year dashboard can be charted (usageTotals carry no time axis).
+    this.onUsageBilled?.({
+      timestampMs: Date.now(),
+      provider: agent.provider,
+      model: agent.config?.model ?? agent.runtimeInfo?.model ?? agent.provider,
+      usage,
+    });
   }
 
   private onStreamTurnCompleted(params: {

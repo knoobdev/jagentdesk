@@ -12,6 +12,7 @@ import {
   type ModelUsageRow,
   type UsageInsights,
 } from "@/insights/use-usage-insights";
+import { UsageTimelineCard } from "@/insights/usage-timeline-card";
 import type { Theme } from "@/styles/theme";
 
 const ThemedBarChart = withUnistyles(BarChart3);
@@ -102,7 +103,15 @@ function Bar({ color, pct }: { color: string; pct: number }) {
   );
 }
 
-function ModelRow({ row, index, maxTokens }: { row: ModelUsageRow; index: number; maxTokens: number }) {
+function ModelRow({
+  row,
+  index,
+  maxTokens,
+}: {
+  row: ModelUsageRow;
+  index: number;
+  maxTokens: number;
+}) {
   const color = modelColor(index);
   return (
     <View style={styles.item}>
@@ -261,6 +270,8 @@ export function InsightsScreen() {
             sub="tokens per agent"
           />
         </View>
+
+        <UsageTimelineCard serverId={serverId} />
 
         <View style={styles.cardsRow}>
           <Card title="Tokens by model" subtitle={modelSubtitle} style={halfCard}>

@@ -7,6 +7,8 @@ import type {
 import { agentCommandsQueryRoot } from "@/hooks/agent-commands-query";
 import { orderCheckoutDiffFiles } from "@/git/diff-order";
 import { daemonConfigQueryKey } from "@/data/daemon-config";
+import { usageHistoryQueryKey } from "@/insights/use-usage-history";
+import type { UsageDayRollup } from "@jagentdesk/protocol/usage-history";
 import { daemonPairingOfferQueryKey } from "@/data/daemon-pairing";
 import { providersSnapshotQueryKey, providersSnapshotQueryRoot } from "@/data/providers-snapshot";
 
@@ -275,6 +277,7 @@ export function mountServerDataPushRouter(input: PushRouterInput): () => void {
   });
   const unsubscribeDaemonConfig = input.client.on("status", (message) => {
     applyDaemonConfigStatus({ queryClient: input.queryClient, serverId: input.serverId, message });
+    applyUsageHistoryStatus({ queryClient: input.queryClient, serverId: input.serverId, message });
   });
   const unsubscribeCheckoutDiffUpdate = input.client.on("checkout_diff_update", (message) => {
     applyCheckoutDiffUpdate({
@@ -413,6 +416,21 @@ function applyDaemonConfigStatus(input: {
   void input.queryClient.invalidateQueries({
     queryKey: daemonPairingOfferQueryKey(input.serverId),
   });
+}
+
+function applyUsageHistoryStatus(input: {
+  queryClient: QueryClient;
+  serverId: string;
+  message: StatusMessage;
+}): void {
+  const payload = input.message.payload as { status?: string; days?: UsageDayRollup[] };
+  if (payload.status !== "usage_changed" || !Array.isArray(payload.days)) {
+    return;
+  }
+  input.queryClient.setQueryData<UsageDayRollup[]>(
+    usageHistoryQueryKey(input.serverId),
+    payload.days,
+  );
 }
 
 function applyCheckoutDiffUpdate(input: {

@@ -148,6 +148,7 @@ import { FileBackedChatService } from "./chat/chat-service.js";
 import { CheckoutDiffManager } from "./checkout-diff-manager.js";
 import { LoopService } from "./loop-service.js";
 import { SkillsStorage } from "./skills/skills-storage.js";
+import { UsageHistoryStorage } from "./usage/usage-history-storage.js";
 import { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { ScheduleService } from "./schedule/service.js";
 import { DaemonConfigStore, type MutableDaemonConfig } from "./daemon-config-store.js";
@@ -885,6 +886,8 @@ export async function createJAgentDeskDaemon(
     isDev: config.isDev === true,
     extraClients: config.agentClients,
   });
+  const usageHistory = new UsageHistoryStorage(config.jagentdeskHome, logger);
+  await usageHistory.initialize();
   const initialAgentManagerState = providerSnapshotManager.getAgentManagerProviderState();
   const agentManager = new AgentManager({
     clients: initialAgentManagerState.clients,
@@ -894,6 +897,7 @@ export async function createJAgentDeskDaemon(
     onWorkspaceStateMayHaveChanged: ({ cwd }) => {
       workspaceGitService.onWorkspaceStateMayHaveChanged(cwd);
     },
+    onUsageBilled: (billed) => usageHistory.record(billed),
     mcpAuthToken: agentMcpAuthToken,
     logger,
   });
@@ -1637,6 +1641,7 @@ export async function createJAgentDeskDaemon(
               },
               pluginRuntime,
               skillsStorage,
+              usageHistory,
             );
             // Bind the plugin session host and start configured plugins before any
             // external ingress attaches, mirroring upstream's pre-accept ordering.
