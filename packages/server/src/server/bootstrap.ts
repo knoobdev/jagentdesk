@@ -1230,7 +1230,11 @@ export async function createJAgentDeskDaemon(
   logger.info({ elapsed: elapsed() }, "Loop service initialized");
   const skillsStorage = new SkillsStorage(config.jagentdeskHome, logger);
   await skillsStorage.initialize();
-  const clusterRegistry = new ClusterRegistry();
+  const clusterRegistry = new ClusterRegistry({
+    jagentdeskHome: config.jagentdeskHome,
+    logger,
+  });
+  await clusterRegistry.initialize();
   logger.info("Cluster registry created");
   const createScheduleLocalWorkspaceExternal = async (input: {
     cwd: string;
