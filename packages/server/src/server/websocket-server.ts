@@ -13,6 +13,8 @@ import type { ProjectRegistry, WorkspaceRegistry } from "./workspace-registry.js
 import type { ProjectUpdate } from "./workspace-reconciliation-service.js";
 import type { FileBackedChatService } from "./chat/chat-service.js";
 import type { LoopService } from "./loop-service.js";
+import type { SkillsStorage } from "./skills/skills-storage.js";
+import type { Skill } from "@jagentdesk/protocol/skills";
 import type { ClusterRegistry } from "./cluster/cluster-registry.js";
 import type { ScheduleService } from "./schedule/service.js";
 import type { CheckoutDiffManager, CheckoutDiffMetrics } from "./checkout-diff-manager.js";
@@ -565,6 +567,7 @@ export class VoiceAssistantWebSocketServer {
   private readonly workspaceRegistry: WorkspaceRegistry;
   private readonly chatService: FileBackedChatService;
   private readonly loopService: LoopService;
+  private skillsStorage: SkillsStorage | null = null;
   private readonly clusterRegistry: ClusterRegistry;
   private readonly scheduleService: ScheduleService;
   private readonly checkoutDiffManager: CheckoutDiffManager;
@@ -606,6 +609,7 @@ export class VoiceAssistantWebSocketServer {
   private eventLoopDelayMonitor: ReturnType<typeof monitorEventLoopDelay> | null = null;
   private unsubscribeSpeechReadiness: (() => void) | null = null;
   private unsubscribeDaemonConfigChange: (() => void) | null = null;
+  private unsubscribeSkillsChange: (() => void) | null = null;
   private readonly providerUsageService: ProviderUsageService;
   private unsubscribeTerminalActivity: (() => void) | null = null;
   private readonly browserToolsBroker: BrowserToolsBroker | null;
@@ -684,6 +688,7 @@ export class VoiceAssistantWebSocketServer {
     hubRelationships?: HubRelationshipManagement | null,
     pairing?: PairingServerDependencies | null,
     pluginRuntime?: PluginRuntimePort | null,
+    skillsStorage?: SkillsStorage | null,
   ) {
     this.logger = logger.child({ module: "websocket-server" });
     this.advertiseDaemonStatusRpc = wsConfig.daemonStatusRpc !== false;
@@ -753,6 +758,7 @@ export class VoiceAssistantWebSocketServer {
       this.agentManager.updateProviderRegistry(nextAgentManagerState);
       this.broadcastDaemonConfigChanged(config);
     });
+    this.setupSkillsBroadcast(skillsStorage);
 
     const pushLogger = this.logger.child({ module: "push" });
     this.pushTokenStore = new PushTokenStore(pushLogger, join(jagentdeskHome, "push-tokens.json"));
@@ -1260,6 +1266,8 @@ export class VoiceAssistantWebSocketServer {
     this.unsubscribeSpeechReadiness = null;
     this.unsubscribeDaemonConfigChange?.();
     this.unsubscribeDaemonConfigChange = null;
+    this.unsubscribeSkillsChange?.();
+    this.unsubscribeSkillsChange = null;
     this.unsubscribeTerminalActivity?.();
     this.unsubscribeTerminalActivity = null;
     if (this.runtimeMetricsInterval) {
@@ -1672,6 +1680,7 @@ export class VoiceAssistantWebSocketServer {
       workspaceRegistry: this.workspaceRegistry,
       chatService: this.chatService,
       loopService: this.loopService,
+      skillsStorage: this.skillsStorage,
       clusterRegistry: this.clusterRegistry,
       scheduleService: this.scheduleService,
       checkoutDiffManager: this.checkoutDiffManager,
@@ -2140,6 +2149,23 @@ export class VoiceAssistantWebSocketServer {
 
   private broadcastDaemonConfigChanged(config: MutableDaemonConfig): void {
     this.broadcast(this.createDaemonConfigChangedMessage(config));
+  }
+
+  private setupSkillsBroadcast(skillsStorage: SkillsStorage | null | undefined): void {
+    this.skillsStorage = skillsStorage ?? null;
+    this.unsubscribeSkillsChange =
+      this.skillsStorage?.onChange((skills) => {
+        this.broadcastSkillsChanged(skills);
+      }) ?? null;
+  }
+
+  private broadcastSkillsChanged(skills: Skill[]): void {
+    this.broadcast(
+      wrapSessionMessage({
+        type: "status",
+        payload: { status: "skills_changed", skills },
+      }),
+    );
   }
 
   private bindSocketHandlers(ws: WebSocketLike): void {

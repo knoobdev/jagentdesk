@@ -147,6 +147,7 @@ import {
 import { FileBackedChatService } from "./chat/chat-service.js";
 import { CheckoutDiffManager } from "./checkout-diff-manager.js";
 import { LoopService } from "./loop-service.js";
+import { SkillsStorage } from "./skills/skills-storage.js";
 import { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { ScheduleService } from "./schedule/service.js";
 import { DaemonConfigStore, type MutableDaemonConfig } from "./daemon-config-store.js";
@@ -1207,6 +1208,8 @@ export async function createJAgentDeskDaemon(
   });
   await loopService.initialize();
   logger.info({ elapsed: elapsed() }, "Loop service initialized");
+  const skillsStorage = new SkillsStorage(config.jagentdeskHome, logger);
+  await skillsStorage.initialize();
   const clusterRegistry = new ClusterRegistry();
   logger.info("Cluster registry created");
   const createScheduleLocalWorkspaceExternal = async (input: {
@@ -1633,6 +1636,7 @@ export async function createJAgentDeskDaemon(
                 requireSignedHelloForDirect,
               },
               pluginRuntime,
+              skillsStorage,
             );
             // Bind the plugin session host and start configured plugins before any
             // external ingress attaches, mirroring upstream's pre-accept ordering.

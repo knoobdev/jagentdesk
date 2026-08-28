@@ -122,6 +122,7 @@ import type {
   OrchestrationTaskBrief,
   OrchestrationRouteCategory,
 } from "@jagentdesk/protocol/orchestration";
+import type { Skill, SkillMutation } from "@jagentdesk/protocol/skills";
 import type { MutableDaemonConfig, MutableDaemonConfigPatch } from "@jagentdesk/protocol/messages";
 import { terminalSubscriptionKey } from "@jagentdesk/protocol/terminal-subscription-key";
 import {
@@ -4875,6 +4876,24 @@ export class DaemonClient {
     return this.sendNamespacedCorrelatedSessionRequest({
       requestId,
       message: { type: "orchestration.config.get.request" },
+    });
+  }
+
+  // Skills are daemon-owned + synced: every device reads the same list/XP.
+  async getSkills(requestId?: string): Promise<{ requestId: string; skills: Skill[] }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "skills.get.request" },
+    });
+  }
+
+  async mutateSkills(
+    mutation: SkillMutation,
+    requestId?: string,
+  ): Promise<{ requestId: string; skills: Skill[] }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "skills.mutate.request", mutation },
     });
   }
 

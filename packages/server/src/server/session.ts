@@ -213,6 +213,7 @@ import type { SpeechReadinessSnapshot } from "./speech/speech-runtime.js";
 import type pino from "pino";
 import { FileBackedChatService } from "./chat/chat-service.js";
 import { LoopService } from "./loop-service.js";
+import type { SkillsStorage } from "./skills/skills-storage.js";
 import { ScheduleService } from "./schedule/service.js";
 import {
   createGitHubService,
@@ -444,6 +445,7 @@ export interface SessionOptions {
   chatService: FileBackedChatService;
   scheduleService: ScheduleService;
   loopService: LoopService;
+  skillsStorage?: SkillsStorage | null;
   clusterRegistry?: ClusterRegistry;
   checkoutDiffManager: CheckoutDiffManager;
   github?: ForgeService;
@@ -652,6 +654,7 @@ export class Session {
   private readonly workspaceProvisioning: WorkspaceProvisioningService;
   private readonly workspaceRecovery: WorkspaceRecoveryService;
   private readonly daemonConfigStore: DaemonConfigStore;
+  private readonly skillsStorage: SkillsStorage | null;
   private readonly pushTokenStore: PushTokenStore;
   private unsubscribeAgentEvents: (() => void) | null = null;
   private unsubscribeProjectMutations: (() => void) | null = null;
@@ -946,6 +949,7 @@ export class Session {
         })
       : null;
     this.daemonConfigStore = daemonConfigStore;
+    this.skillsStorage = options.skillsStorage ?? null;
     this.terminalManager = terminalManager;
     this.terminalController = new TerminalSessionController({
       terminalManager,
@@ -1908,6 +1912,7 @@ export class Session {
       () => this.dispatchHubExecutionMessage(msg),
       () => this.dispatchAgentLifecycleMessage(msg),
       () => this.dispatchOrchestrationMessage(msg),
+      () => this.dispatchSkillsMessage(msg),
       () => this.dispatchAgentConfigMessage(msg),
       () => this.dispatchCheckoutMessage(msg),
       () => this.dispatchWorkspaceRecoveryMessage(msg),
@@ -2254,6 +2259,27 @@ export class Session {
         return this.projectConfigSession.handleReadProjectConfigRequest(msg);
       case "write_project_config_request":
         return this.projectConfigSession.handleWriteProjectConfigRequest(msg);
+      default:
+        return undefined;
+    }
+  }
+
+  private dispatchSkillsMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    switch (msg.type) {
+      case "skills.get.request":
+        this.emit({
+          type: "skills.get.response",
+          payload: { requestId: msg.requestId, skills: this.skillsStorage?.get() ?? [] },
+        });
+        return undefined;
+      case "skills.mutate.request":
+        return (async () => {
+          const skills = this.skillsStorage ? await this.skillsStorage.mutate(msg.mutation) : [];
+          this.emit({
+            type: "skills.mutate.response",
+            payload: { requestId: msg.requestId, skills },
+          });
+        })();
       default:
         return undefined;
     }

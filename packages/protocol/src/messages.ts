@@ -17,6 +17,13 @@ import {
   createDefaultOrchestrationConfig,
 } from "./orchestration.js";
 import {
+  SkillsGetRequestSchema,
+  SkillsGetResponseSchema,
+  SkillsMutateRequestSchema,
+  SkillsMutateResponseSchema,
+  SkillsChangedStatusPayloadSchema,
+} from "./skills.js";
+import {
   ChatCreateRequestSchema,
   ChatListRequestSchema,
   ChatInspectRequestSchema,
@@ -2805,6 +2812,8 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   OrchestrationConfigGetRequestSchema,
   OrchestrationConfigUpdateRequestSchema,
   OrchestrationTaskPrepareRequestSchema,
+  SkillsGetRequestSchema,
+  SkillsMutateRequestSchema,
   DictationStreamStartMessageSchema,
   DictationStreamChunkMessageSchema,
   DictationStreamFinishMessageSchema,
@@ -3330,6 +3339,7 @@ export const KnownStatusPayloadSchema = z.discriminatedUnion("status", [
   RestartRequestedStatusPayloadSchema,
   DaemonConfigChangedStatusPayloadSchema,
   PluginCatalogChangedStatusPayloadSchema,
+  SkillsChangedStatusPayloadSchema,
 ]);
 
 export type KnownStatusPayload = z.infer<typeof KnownStatusPayloadSchema>;
@@ -5743,6 +5753,8 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   OrchestrationConfigGetResponseSchema,
   OrchestrationConfigUpdateResponseSchema,
   OrchestrationTaskPrepareResponseSchema,
+  SkillsGetResponseSchema,
+  SkillsMutateResponseSchema,
   BrowserAutomationExecuteRequestSchema,
   BrowserScreenshotResponseSchema,
   BrowserListResponseSchema,

@@ -2,6 +2,7 @@ import { Redirect, Stack, useLocalSearchParams } from "expo-router";
 import { useHostRuntimeBootstrapState } from "@/app/_layout";
 import { HostRouteProvider } from "@/navigation/host-route-context";
 import { resolveStartupRoute } from "@/navigation/host-runtime-bootstrap";
+import { SkillsSyncBinder } from "@/skills/skills-sync-binder";
 import { ThemedStack } from "@/navigation/themed-stack";
 import { useHostRegistryStatus, useHosts } from "@/runtime/host-runtime";
 
@@ -50,5 +51,10 @@ function KnownHostRoute() {
     return stack;
   }
 
-  return <HostRouteProvider serverId={routeServerId}>{stack}</HostRouteProvider>;
+  return (
+    <HostRouteProvider serverId={routeServerId}>
+      <SkillsSyncBinder serverId={routeServerId} />
+      {stack}
+    </HostRouteProvider>
+  );
 }
