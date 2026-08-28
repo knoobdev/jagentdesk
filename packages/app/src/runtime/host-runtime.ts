@@ -40,6 +40,7 @@ import { isWeb } from "@/constants/platform";
 import { connectToDaemon } from "@/utils/test-daemon-connection";
 import { getOrCreateClientId } from "@/utils/client-id";
 import {
+  clearConnectionMode,
   getConnectionMode,
   getTailscaleLoginAdapter,
   subscribeConnectionMode,
@@ -2266,6 +2267,23 @@ export class HostRuntimeStore {
     const remaining = this.hosts.filter((daemon) => daemon.serverId !== serverId);
     this.setHostsAndSync(remaining);
     await this.persistHosts();
+    await this.resetConnectionModeWhenHostsEmpty();
+  }
+
+  /**
+   * Deleting the last host returns the app to the first-run connection gate.
+   * Without this, a persisted `"local"` mode locks the user into Local forever:
+   * `shouldRedirectToDesktopTailscaleLogin` never offers the login/choice screen
+   * once a mode is chosen, and the built-in daemon silently re-seeds a Local host
+   * on the next launch — so the user can never reach Tailscale login again. Only
+   * user-initiated removals that empty the registry reset the mode; `null` is the
+   * choose-Tailscale-or-Local gate.
+   */
+  private async resetConnectionModeWhenHostsEmpty(): Promise<void> {
+    if (this.hosts.length > 0 || this.connectionMode === null) {
+      return;
+    }
+    await clearConnectionMode();
   }
 
   async removeConnection(serverId: string, connectionId: string): Promise<void> {
@@ -2291,6 +2309,7 @@ export class HostRuntimeStore {
       .filter((entry): entry is HostProfile => entry !== null);
     this.setHostsAndSync(next);
     await this.persistHosts();
+    await this.resetConnectionModeWhenHostsEmpty();
   }
 
   private async upsertHostConnection(input: {
