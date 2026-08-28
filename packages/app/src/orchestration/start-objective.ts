@@ -86,12 +86,11 @@ export async function startOrchestrationObjective(deps: {
     prepared.brief.normalizedPrompt,
     "",
     "Runtime contract:",
-    "- You are the Supervisor. Own the human objective and do not perform bounded implementation yourself.",
-    "- Call orchestration.bootstrap_lead exactly once when this run has no healthy Lead; pass the human relay without adding an engineering plan.",
-    "- Never use generic create_agent or send_agent_prompt to bypass the topology, and never dispatch directly to a Peer.",
-    "- The Lead must use orchestration.create_peer for bounded assignments, orchestration.handback for evidence, orchestration.resolve_dissent for the three allowed outcomes, and orchestration.accept_result after validation.",
-    "- Report the Lead's accepted result, dissent, counterevidence, validation, and unresolved decisions back to this conversation.",
-    `- The requested engineering route is ${prepared.brief.routeCategory}; preferred target is ${prepared.brief.selectedRoute.role}/${prepared.brief.selectedRoute.profileId}.`,
+    "- You are the Supervisor and the single point of contact for this objective.",
+    "- Delegate ONLY when the objective genuinely needs multiple parallel workstreams. If it is a single, self-contained task, COMPLETE IT YOURSELF in this conversation and do NOT create any other agent — spawning a Lead/Peers for a simple task just doubles the token cost for no benefit.",
+    "- When (and only when) delegation is warranted: call orchestration.bootstrap_lead exactly once to hand the objective to a Lead; pass the human relay without adding an engineering plan. Then the Lead uses orchestration.create_peer for bounded assignments, orchestration.handback for evidence, orchestration.resolve_dissent for the three allowed outcomes, and orchestration.accept_result after validation.",
+    "- If you delegate, never use generic create_agent or send_agent_prompt to bypass the topology, and never dispatch directly to a Peer; report the Lead's accepted result, dissent, counterevidence, validation, and unresolved decisions back to this conversation.",
+    `- If delegation is warranted, the requested engineering route is ${prepared.brief.routeCategory}; preferred target is ${prepared.brief.selectedRoute.role}/${prepared.brief.selectedRoute.profileId}.`,
     `- The daemon enforces a maximum of ${config.limits.maxPeersPerLead} bounded Peer assignments for this run.`,
   ].join("\n");
   if (supervisor) {
