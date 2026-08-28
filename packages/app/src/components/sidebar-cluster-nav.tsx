@@ -151,16 +151,40 @@ export function SidebarClusterNav({
     showList(null);
     if (isCompact) showMobileAgent();
   }, [clusterId, selectHelm, showList, isCompact, showMobileAgent]);
-  const handleBack = useCallback(() => {
+  // Two distinct back affordances: "Back" returns to wherever the user came from
+  // (the previous screen — e.g. an agent, or the clusters list), while "Clusters"
+  // always jumps to the clusters list so they can pick a different cluster.
+  const handleBackToPrevious = useCallback(() => {
+    if (router.canGoBack()) router.back();
+    else router.replace(buildClustersRoute(serverId));
+  }, [serverId]);
+  const handleBackToClusters = useCallback(() => {
     router.replace(buildClustersRoute(serverId));
   }, [serverId]);
 
   return (
     <View style={styles.container}>
-      <Pressable style={styles.backRow} onPress={handleBack}>
-        <ThemedChevronLeft size={16} uniProps={mutedColor} />
-        <Text style={styles.backText}>Clusters</Text>
-      </Pressable>
+      <View style={styles.backRow}>
+        <Pressable
+          style={styles.backBtn}
+          onPress={handleBackToPrevious}
+          accessibilityLabel="Back to previous page"
+          testID="cluster-back-previous"
+        >
+          <ThemedChevronLeft size={16} uniProps={mutedColor} />
+          <Text style={styles.backText}>Back</Text>
+        </Pressable>
+        <View style={styles.backDivider} />
+        <Pressable
+          style={styles.backBtn}
+          onPress={handleBackToClusters}
+          accessibilityLabel="Back to clusters list"
+          testID="cluster-back-list"
+        >
+          <ThemedBoxes size={15} uniProps={mutedColor} />
+          <Text style={styles.backText}>Clusters</Text>
+        </Pressable>
+      </View>
 
       <View style={styles.clusterCard}>
         <ClusterStatusDot state={cluster?.state ?? "connected"} />
@@ -221,6 +245,7 @@ function NavGroup({
   onSelect: (kind: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const toggleExpanded = useCallback(() => setExpanded((v) => !v), []);
   const overflow = group.kinds.length > GROUP_CAP;
   const visible = expanded || !overflow ? group.kinds : group.kinds.slice(0, GROUP_CAP);
   return (
@@ -235,7 +260,7 @@ function NavGroup({
         />
       ))}
       {overflow ? (
-        <Pressable style={styles.showMore} onPress={() => setExpanded((v) => !v)}>
+        <Pressable style={styles.showMore} onPress={toggleExpanded}>
           <Text style={styles.showMoreText}>
             {expanded ? "Show less" : `Show ${group.kinds.length - GROUP_CAP} more`}
           </Text>
@@ -253,9 +278,21 @@ const styles = StyleSheet.create((theme: Theme) => ({
   backRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: theme.spacing[2],
-    paddingHorizontal: theme.spacing[3],
+    paddingHorizontal: theme.spacing[2],
     paddingVertical: theme.spacing[2],
+  },
+  backBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[1],
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
+  },
+  backDivider: {
+    width: StyleSheet.hairlineWidth,
+    alignSelf: "stretch",
+    marginVertical: theme.spacing[1],
+    backgroundColor: theme.colors.border,
   },
   backText: {
     fontSize: theme.fontSize.sm,

@@ -85,14 +85,37 @@ export function ClusterWorkloadsScreen({
 
   useEffect(() => {
     if (!client) return;
-    void client
-      .clusterList()
-      .then((res) => {
-        if (!res.error) setCluster(res.clusters.find((c) => c.id === clusterId) ?? null);
-        return undefined;
-      })
-      .catch(() => {});
-  }, [client, clusterId]);
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await client.clusterList();
+        if (cancelled || res.error) return;
+        const found = res.clusters.find((c) => c.id === clusterId) ?? null;
+        setCluster(found);
+        // Ensure the cluster is actually connected before any resource view lists.
+        // The connection lives in-memory on the daemon and is dropped on daemon
+        // restart (e.g. after an app update); and opening a cluster directly (deep
+        // link, or the sidebar "return to last cluster" jump) never runs the
+        // connect flow the clusters list does. Without this, cluster/resource/list
+        // fails with "cluster not connected" and workloads silently don't load.
+        if (found && found.state !== "connected" && found.state !== "connecting") {
+          const con = await client.clusterConnect({ id: clusterId });
+          if (cancelled || con.error) return;
+          const refreshed = await client.clusterList().catch(() => null);
+          if (cancelled) return;
+          if (refreshed && !refreshed.error) {
+            setCluster(refreshed.clusters.find((c) => c.id === clusterId) ?? found);
+          }
+          bumpRefresh(); // reload resource views now that the client is connected
+        }
+      } catch {
+        // best-effort; the resource views surface their own errors + retry
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [client, clusterId, bumpRefresh]);
 
   const clusterName = cluster?.displayName ?? cluster?.contextName ?? "this cluster";
   const handleDetailClose = useCallback(() => {

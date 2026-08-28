@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ScrollView, type StyleProp, Text, View, type ViewStyle } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
+import { useClusterViewStore } from "@/stores/cluster-view-store";
 import type { Theme } from "@/styles/theme";
 
 /**
@@ -31,6 +32,32 @@ interface OverviewData {
   events: number;
 }
 
+interface PodStats {
+  running: number;
+  pending: number;
+  failed: number;
+  other: number;
+  restarts: number;
+  total: number;
+}
+
+function computePodStats(pods: Item[]): PodStats {
+  let running = 0;
+  let pending = 0;
+  let failed = 0;
+  let other = 0;
+  let restarts = 0;
+  for (const p of pods) {
+    const ph = (p.status?.phase ?? "").toLowerCase();
+    restarts += (p.status?.containerStatuses ?? []).reduce((s, c) => s + (c.restartCount ?? 0), 0);
+    if (ph === "running" || ph === "succeeded") running += 1;
+    else if (ph === "pending") pending += 1;
+    else if (ph === "failed" || ph.includes("crash") || ph.includes("error")) failed += 1;
+    else other += 1;
+  }
+  return { running, pending, failed, other, restarts, total: pods.length };
+}
+
 export function ClusterOverviewDashboard({
   serverId,
   clusterId,
@@ -45,6 +72,9 @@ export function ClusterOverviewDashboard({
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<OverviewData | null>(null);
   const [resolvedName, setResolvedName] = useState<string | undefined>(clusterName);
+  // Reload when the screen (re)connects the cluster, so the Overview isn't left
+  // empty after an auto-connect following a daemon restart / direct open.
+  const listRefreshKey = useClusterViewStore((s) => s.listRefreshKey);
 
   useEffect(() => {
     if (clusterName || !client) return;
@@ -104,28 +134,9 @@ export function ClusterOverviewDashboard({
     return () => {
       cancelled = true;
     };
-  }, [client, clusterId]);
+  }, [client, clusterId, listRefreshKey]);
 
-  const pods = data?.pods ?? [];
-  const podStats = useMemo(() => {
-    let running = 0;
-    let pending = 0;
-    let failed = 0;
-    let other = 0;
-    let restarts = 0;
-    for (const p of pods) {
-      const ph = (p.status?.phase ?? "").toLowerCase();
-      restarts += (p.status?.containerStatuses ?? []).reduce(
-        (s, c) => s + (c.restartCount ?? 0),
-        0,
-      );
-      if (ph === "running" || ph === "succeeded") running += 1;
-      else if (ph === "pending") pending += 1;
-      else if (ph === "failed" || ph.includes("crash") || ph.includes("error")) failed += 1;
-      else other += 1;
-    }
-    return { running, pending, failed, other, restarts, total: pods.length };
-  }, [pods]);
+  const podStats = useMemo(() => computePodStats(data?.pods ?? []), [data]);
 
   if (loading) {
     return (
@@ -141,9 +152,6 @@ export function ClusterOverviewDashboard({
       </View>
     );
   }
-
-  const total = podStats.total || 1;
-  const seg = (n: number) => `${(n / total) * 100}%` as const;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -165,31 +173,7 @@ export function ClusterOverviewDashboard({
         />
       </View>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Pod health</Text>
-        <View style={styles.bar}>
-          {podStats.running > 0 ? (
-            <View style={[styles.barRun, { width: seg(podStats.running) }]} />
-          ) : null}
-          {podStats.pending > 0 ? (
-            <View style={[styles.barPend, { width: seg(podStats.pending) }]} />
-          ) : null}
-          {podStats.failed > 0 ? (
-            <View style={[styles.barFail, { width: seg(podStats.failed) }]} />
-          ) : null}
-          {podStats.other > 0 ? (
-            <View style={[styles.barOther, { width: seg(podStats.other) }]} />
-          ) : null}
-        </View>
-        <View style={styles.legend}>
-          <Legend color={styles.dotRun} label="Running" n={podStats.running} />
-          <Legend color={styles.dotPend} label="Pending" n={podStats.pending} />
-          <Legend color={styles.dotFail} label="Failed" n={podStats.failed} />
-          {podStats.other > 0 ? (
-            <Legend color={styles.dotOther} label="Other" n={podStats.other} />
-          ) : null}
-        </View>
-      </View>
+      <PodHealthBar podStats={podStats} />
 
       {data && data.nodes.length > 0 ? (
         <View style={styles.section}>
@@ -207,6 +191,38 @@ export function ClusterOverviewDashboard({
         </View>
       ) : null}
     </ScrollView>
+  );
+}
+
+function PodHealthBar({ podStats }: { podStats: PodStats }) {
+  const total = podStats.total || 1;
+  const seg = (n: number) => `${(n / total) * 100}%` as const;
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>Pod health</Text>
+      <View style={styles.bar}>
+        {podStats.running > 0 ? (
+          <View style={[styles.barRun, { width: seg(podStats.running) }]} />
+        ) : null}
+        {podStats.pending > 0 ? (
+          <View style={[styles.barPend, { width: seg(podStats.pending) }]} />
+        ) : null}
+        {podStats.failed > 0 ? (
+          <View style={[styles.barFail, { width: seg(podStats.failed) }]} />
+        ) : null}
+        {podStats.other > 0 ? (
+          <View style={[styles.barOther, { width: seg(podStats.other) }]} />
+        ) : null}
+      </View>
+      <View style={styles.legend}>
+        <Legend color={styles.dotRun} label="Running" n={podStats.running} />
+        <Legend color={styles.dotPend} label="Pending" n={podStats.pending} />
+        <Legend color={styles.dotFail} label="Failed" n={podStats.failed} />
+        {podStats.other > 0 ? (
+          <Legend color={styles.dotOther} label="Other" n={podStats.other} />
+        ) : null}
+      </View>
+    </View>
   );
 }
 
@@ -230,15 +246,7 @@ function Kpi({
   );
 }
 
-function Legend({
-  color,
-  label,
-  n,
-}: {
-  color: StyleProp<ViewStyle>;
-  label: string;
-  n: number;
-}) {
+function Legend({ color, label, n }: { color: StyleProp<ViewStyle>; label: string; n: number }) {
   return (
     <View style={styles.legendItem}>
       <View style={color} />
@@ -255,7 +263,11 @@ const styles = StyleSheet.create((theme: Theme) => ({
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: theme.spacing[6] },
   muted: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm },
   error: { color: theme.colors.palette.red[500], fontSize: theme.fontSize.sm },
-  title: { fontSize: theme.fontSize.xl, fontWeight: theme.fontWeight.bold, color: theme.colors.foreground },
+  title: {
+    fontSize: theme.fontSize.xl,
+    fontWeight: theme.fontWeight.bold,
+    color: theme.colors.foreground,
+  },
   subtitle: { fontSize: theme.fontSize.sm, color: theme.colors.foregroundMuted },
   kpiGrid: { flexDirection: "row", flexWrap: "wrap", gap: theme.spacing[3] },
   kpi: {
@@ -269,9 +281,22 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderRadius: theme.borderRadius.lg,
     backgroundColor: theme.colors.surface1,
   },
-  kpiValue: { fontSize: theme.fontSize["2xl"], fontWeight: theme.fontWeight.bold, color: theme.colors.foreground },
-  kpiValueWarn: { fontSize: theme.fontSize["2xl"], fontWeight: theme.fontWeight.bold, color: theme.colors.palette.amber[500] },
-  kpiLabel: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted, textTransform: "uppercase" as const, letterSpacing: 0.5 },
+  kpiValue: {
+    fontSize: theme.fontSize["2xl"],
+    fontWeight: theme.fontWeight.bold,
+    color: theme.colors.foreground,
+  },
+  kpiValueWarn: {
+    fontSize: theme.fontSize["2xl"],
+    fontWeight: theme.fontWeight.bold,
+    color: theme.colors.palette.amber[500],
+  },
+  kpiLabel: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+    textTransform: "uppercase" as const,
+    letterSpacing: 0.5,
+  },
   kpiSub: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundExtraMuted },
   section: { gap: theme.spacing[2] },
   sectionTitle: {
@@ -281,7 +306,13 @@ const styles = StyleSheet.create((theme: Theme) => ({
     textTransform: "uppercase" as const,
     letterSpacing: 0.5,
   },
-  bar: { flexDirection: "row", height: 10, borderRadius: 5, overflow: "hidden", backgroundColor: theme.colors.surface2 },
+  bar: {
+    flexDirection: "row",
+    height: 10,
+    borderRadius: 5,
+    overflow: "hidden",
+    backgroundColor: theme.colors.surface2,
+  },
   barRun: { backgroundColor: theme.colors.palette.green[500] },
   barPend: { backgroundColor: theme.colors.palette.amber[500] },
   barFail: { backgroundColor: theme.colors.palette.red[500] },
@@ -289,10 +320,25 @@ const styles = StyleSheet.create((theme: Theme) => ({
   legend: { flexDirection: "row", flexWrap: "wrap", gap: theme.spacing[3] },
   legendItem: { flexDirection: "row", alignItems: "center", gap: theme.spacing[1] },
   legendText: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
-  dotRun: { width: 8, height: 8, borderRadius: 4, backgroundColor: theme.colors.palette.green[500] },
-  dotPend: { width: 8, height: 8, borderRadius: 4, backgroundColor: theme.colors.palette.amber[500] },
+  dotRun: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: theme.colors.palette.green[500],
+  },
+  dotPend: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: theme.colors.palette.amber[500],
+  },
   dotFail: { width: 8, height: 8, borderRadius: 4, backgroundColor: theme.colors.palette.red[500] },
-  dotOther: { width: 8, height: 8, borderRadius: 4, backgroundColor: theme.colors.foregroundExtraMuted },
+  dotOther: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: theme.colors.foregroundExtraMuted,
+  },
   list: {
     borderWidth: theme.borderWidth[1],
     borderColor: theme.colors.border,
@@ -308,5 +354,10 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,
   },
-  listName: { flex: 1, fontSize: theme.fontSize.sm, color: theme.colors.foreground, fontFamily: theme.fontFamily.mono },
+  listName: {
+    flex: 1,
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foreground,
+    fontFamily: theme.fontFamily.mono,
+  },
 }));

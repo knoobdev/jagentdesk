@@ -252,29 +252,39 @@ export function ClusterResourceBrowser({
   const loadResources = useCallback(
     (kind: string, namespace: string | undefined, namespaced: boolean) => {
       if (!client) return;
+      const activeClient = client;
       setLoadingItems(true);
       setError(null);
       setMetricsMap({});
-      void client
-        .clusterResourceList({
+      const listOnce = () =>
+        activeClient.clusterResourceList({
           id: clusterId,
           kind,
           ...(namespaced && namespace ? { namespace } : {}),
-        })
-        .then((res) => {
+        });
+      void (async () => {
+        try {
+          let res = await listOnce();
+          // The daemon holds the kube connection in memory; it's dropped on a
+          // daemon restart (e.g. after an app update). Re-establish it once and
+          // retry before surfacing "cluster not connected" as a dead-end error.
+          if (res.error && /not connected/i.test(res.error)) {
+            const con = await activeClient.clusterConnect({ id: clusterId });
+            if (!con.error) res = await listOnce();
+          }
           if (res.error) {
             setError(res.error);
             setItems([]);
           } else {
             setItems((res.items as Array<Record<string, unknown>>).map(normalizeResourceItem));
           }
-          return undefined;
-        })
-        .catch((e: unknown) => {
+        } catch (e: unknown) {
           setError(e instanceof Error ? e.message : "Failed to load resources");
           setItems([]);
-        })
-        .finally(() => setLoadingItems(false));
+        } finally {
+          setLoadingItems(false);
+        }
+      })();
 
       if (kind === "Node" || kind === "Pod") {
         const scope = kind === "Node" ? "nodes" : "pods";
