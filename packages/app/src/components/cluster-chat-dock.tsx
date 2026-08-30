@@ -1,12 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  Text,
-  View,
-  useWindowDimensions,
-} from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Pressable, ScrollView, Text, View, useWindowDimensions } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import Animated, {
   runOnJS,
@@ -17,7 +10,6 @@ import Animated, {
 import { Gesture } from "react-native-gesture-handler";
 import { Check, History, MessageSquare, Plus, X } from "lucide-react-native";
 import { formatTimeAgo } from "@/utils/time";
-import { uniqueTitle } from "@/utils/unique-title";
 import { AgentConversationPanel } from "@/panels/agent-panel";
 import {
   PaneProvider,
@@ -26,6 +18,7 @@ import {
   type PaneContextValue,
 } from "@/panels/pane-context";
 import { askAgentAboutResource } from "@/components/cluster-ask-agent";
+import { ClusterDraftChat } from "@/components/cluster-draft-chat";
 import { dispatchComposerAgentMessage } from "@/composer/actions";
 import { createMessageSubmissionWriter } from "@/composer/submission/writer";
 import { resolveSkillInjectedText } from "@/skills/skill-injection";
@@ -49,7 +42,6 @@ const ThemedHistory = withUnistyles(History);
 const ThemedPlus = withUnistyles(Plus);
 const ThemedCheck = withUnistyles(Check);
 const accentColor = (theme: Theme) => ({ color: theme.colors.accent });
-const ThemedActivityIndicator = withUnistyles(ActivityIndicator);
 const mutedColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 const fabIconColor = (theme: Theme) => ({ color: theme.colors.accentForeground });
 const noop = () => {};
@@ -101,41 +93,32 @@ function deliverPendingAsk(
   }).catch(() => {});
 }
 
-/** A distinct default title for an empty cluster chat (the daemon never auto-titles). */
-function nextChatTitle(existingTitles: Iterable<string | null | undefined>): string {
-  // Dedup against the actual existing titles (not a count) so deleting a chat
-  // in the middle can't produce a colliding "Cluster chat 2".
-  return uniqueTitle("Cluster chat", existingTitles);
-}
-
-/** Spin up the single cluster agent, baking in any queued Ask AI context. */
+/** Create the cluster agent seeded with a queued "Ask AI" question (titles it). */
 function createClusterAgent(params: {
   client: NonNullable<ReturnType<typeof useHostRuntimeClient>>;
   serverId: string;
   clusterId: string;
-  ask: ClusterChatPendingAsk | null;
+  clusterName: string;
+  ask: ClusterChatPendingAsk;
   resource?: ClusterComposerResource;
   provider: string;
   cwd: string;
-  /** Explicit title for an empty chat; omit when a message will seed the title. */
-  title?: string;
   onOpen: (input: { clusterId: string; agentId: string; workspaceId: string | null }) => void;
 }): void {
-  const { client, serverId, clusterId, ask, resource, provider, cwd, title, onOpen } = params;
+  const { client, serverId, clusterId, clusterName, ask, resource, provider, cwd, onOpen } = params;
   void askAgentAboutResource({
     client,
     serverId,
     clusterId,
-    kind: ask?.kind ?? resource?.kind ?? "cluster",
-    namespace: ask?.namespace ?? resource?.namespace,
-    name: ask?.name,
-    yaml: ask?.yaml,
-    logs: ask?.logs,
+    clusterName,
+    kind: ask.kind ?? resource?.kind ?? "cluster",
+    namespace: ask.namespace ?? resource?.namespace,
+    name: ask.name,
+    yaml: ask.yaml,
+    logs: ask.logs,
     provider,
     cwd,
-    message: ask?.message,
-    // A message seeds the title from its first line; only title the empty ones.
-    ...(ask?.message ? {} : { title }),
+    message: ask.message,
     onCreated: ({ id, workspaceId: ws }) => onOpen({ clusterId, agentId: id, workspaceId: ws }),
   });
 }
@@ -234,11 +217,14 @@ function ClusterChatBody({
   ready,
   paneValue,
   focusValue,
+  entryComposer,
 }: {
   agentId: string | null;
   ready: boolean;
   paneValue: PaneContextValue;
   focusValue: ReturnType<typeof createPaneFocusContextValue>;
+  /** Shown before any agent exists: the user creates the agent by sending here. */
+  entryComposer: ReactNode;
 }) {
   if (agentId) {
     return (
@@ -250,12 +236,9 @@ function ClusterChatBody({
     );
   }
   if (ready) {
-    return (
-      <View style={styles.center}>
-        <ThemedActivityIndicator uniProps={mutedColor} />
-        <Text style={styles.centerText}>Starting chat…</Text>
-      </View>
-    );
+    // No agent yet — do NOT auto-create one. The user types a real question here
+    // and only then is the agent created (titled from that message + cluster).
+    return <View style={styles.entryBody}>{entryComposer}</View>;
   }
   return (
     <View style={styles.center}>
@@ -283,6 +266,8 @@ export function ClusterChatDock({
   const showChat = useClusterChatStore((s) => s.showChat);
   const setWidth = useClusterChatStore((s) => s.setWidth);
   const openChat = useClusterChatStore((s) => s.openChat);
+  const startNewChat = useClusterChatStore((s) => s.startNewChat);
+  const draft = useClusterChatStore((s) => s.draft);
 
   const client = useHostRuntimeClient(serverId);
   const { entries: providerEntries } = useProvidersSnapshot(serverId);
@@ -342,46 +327,56 @@ export function ClusterChatDock({
     return () => viewedTimelineSync.replaceVisibleAgentIds(timelineSourceId, []);
   }, [viewedTimelineSync, timelineSourceId, open, agentId]);
 
-  // Open ONE agent per cluster: reuse the existing one if the user already chatted
-  // with this cluster (so their conversation + the model's response are still
-  // there), and only create a fresh agent when none exists. Previously the dock
-  // created a brand-new agent every time the workloads view mounted, which spawned
-  // duplicate "main" agents and could show an empty agent instead of the one that
-  // actually replied.
+  // NEVER auto-create a blank agent just because the dock is visible — that was
+  // the bug that spawned anonymous "Cluster chat" duplicates, one per opened
+  // workloads view. Instead:
+  //   • a queued "Ask AI" question is a real chat action → reuse or create+seed;
+  //   • opening the dock reopens the cluster's most recent conversation (no
+  //     creation), so continuity is kept;
+  //   • otherwise leave agentId null → the entry composer is shown and the agent
+  //     is created only when the user actually sends a message.
   const pendingAsk = useClusterChatStore((s) => s.pendingAsk);
   const clearPendingAsk = useClusterChatStore((s) => s.clearPendingAsk);
   const createdForRef = useRef<string | null>(null);
   useEffect(() => {
     if (!open || agentId || !ready || !client || !provider || !cwd) return;
-    // The createdForRef guard stops re-creation on re-renders, but a queued Ask AI
-    // question must still be delivered even if we already created this cluster's
-    // agent, so only short-circuit when there is nothing pending.
-    if (createdForRef.current === clusterId && !pendingAsk) return;
 
-    createdForRef.current = clusterId;
     const ask = pendingAsk;
-    if (ask) clearPendingAsk();
-
-    const existing = findLatestClusterAgent(agents, clusterId);
-    if (existing) {
-      openChat({ clusterId, agentId: existing.id, workspaceId: existing.workspaceId ?? null });
-      if (ask) deliverPendingAsk(client, serverId, existing.id, ask.message);
+    if (ask) {
+      clearPendingAsk();
+      createdForRef.current = clusterId;
+      const existing = findLatestClusterAgent(agents, clusterId);
+      if (existing) {
+        openChat({ clusterId, agentId: existing.id, workspaceId: existing.workspaceId ?? null });
+        deliverPendingAsk(client, serverId, existing.id, ask.message);
+      } else {
+        createClusterAgent({
+          client,
+          serverId,
+          clusterId,
+          clusterName,
+          ask,
+          resource,
+          provider,
+          cwd,
+          onOpen: openChat,
+        });
+      }
       return;
     }
 
-    // One agent per cluster, no race: bake the pending resource context into it.
-    // This branch only runs when none exists yet, so it is the cluster's first chat.
-    createClusterAgent({
-      client,
-      serverId,
-      clusterId,
-      ask,
-      resource,
-      provider,
-      cwd,
-      title: nextChatTitle(listClusterAgents(agents, clusterId).map((a) => a.title)),
-      onOpen: openChat,
-    });
+    // The user explicitly asked for a fresh chat: show the entry composer and
+    // create nothing until they send.
+    if (draft) return;
+
+    // First reveal of this cluster's dock: reopen the last conversation if any.
+    if (createdForRef.current === clusterId) return;
+    createdForRef.current = clusterId;
+    const existing = findLatestClusterAgent(agents, clusterId);
+    if (existing) {
+      openChat({ clusterId, agentId: existing.id, workspaceId: existing.workspaceId ?? null });
+    }
+    // else: no prior chat → leave agentId null; the entry composer handles creation.
   }, [
     open,
     agentId,
@@ -390,12 +385,14 @@ export function ClusterChatDock({
     provider,
     cwd,
     clusterId,
+    clusterName,
     resource,
     serverId,
     openChat,
     agents,
     pendingAsk,
     clearPendingAsk,
+    draft,
   ]);
 
   const isCompact = useIsCompactFormFactor();
@@ -460,19 +457,32 @@ export function ClusterChatDock({
       return;
     }
     setHistoryOpen(false);
+    // Show the entry composer for a blank chat; the agent is created only when the
+    // user sends a message (titled from it). createdForRef stops the open-effect
+    // from immediately reopening the last conversation instead.
     createdForRef.current = clusterId;
-    createClusterAgent({
-      client,
-      serverId,
-      clusterId,
-      ask: null,
-      resource,
-      provider,
-      cwd,
-      title: nextChatTitle(clusterAgents.map((a) => a.title)),
-      onOpen: openChat,
-    });
-  }, [client, provider, cwd, clusterId, serverId, resource, openChat, clusterAgents]);
+    startNewChat();
+  }, [client, provider, cwd, clusterId, startNewChat]);
+
+  // The pre-agent composer: the FULL agent composer with no agent created yet.
+  // Sending here creates the cluster agent (seeded with the cluster system prompt
+  // + labels, titled from the message + cluster) and opens it. Shared desktop +
+  // mobile. `cwd` is only truthy when `ready`, which is when this is rendered.
+  const entryComposer = useMemo(
+    () =>
+      cwd ? (
+        <ClusterDraftChat
+          serverId={serverId}
+          clusterId={clusterId}
+          clusterName={clusterName}
+          resource={resource}
+          cwd={cwd}
+          isPaneFocused={open}
+          onCreated={openChat}
+        />
+      ) : null,
+    [serverId, clusterId, clusterName, resource, cwd, open, openChat],
+  );
 
   const paneValue = useMemo<PaneContextValue>(
     () => ({
@@ -554,6 +564,7 @@ export function ClusterChatDock({
             ready={ready}
             paneValue={paneValue}
             focusValue={focusValue}
+            entryComposer={entryComposer}
           />
           {historyOpen ? (
             <View style={styles.historyOverlay}>
@@ -681,6 +692,10 @@ const styles = StyleSheet.create((theme: Theme) => ({
     justifyContent: "center",
     gap: theme.spacing[2],
     padding: theme.spacing[4],
+  },
+  entryBody: {
+    flex: 1,
+    justifyContent: "flex-end",
   },
   centerText: {
     fontSize: theme.fontSize.sm,

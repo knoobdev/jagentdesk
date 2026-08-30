@@ -21,6 +21,13 @@ interface ClusterNavState {
   setNamespace: (namespace: string | undefined) => void;
   ensureCluster: (clusterId: string) => void;
   setLastCluster: (serverId: string, clusterId: string) => void;
+  /**
+   * Forget the remembered cluster when the user explicitly disconnects it, so
+   * the sidebar's Clusters entry falls back to the cluster list instead of
+   * jumping back into (and silently reconnecting) a cluster the user just left.
+   * No-op when the disconnected cluster isn't the remembered one.
+   */
+  clearLastCluster: (clusterId: string) => void;
 }
 
 export const useClusterNavStore = create<ClusterNavState>((set, get) => ({
@@ -31,6 +38,8 @@ export const useClusterNavStore = create<ClusterNavState>((set, get) => ({
   showingOverview: false,
   lastCluster: null,
   setLastCluster: (serverId, clusterId) => set({ lastCluster: { serverId, clusterId } }),
+  clearLastCluster: (clusterId) =>
+    set((s) => (s.lastCluster?.clusterId === clusterId ? { lastCluster: null } : {})),
   selectKind: (clusterId, kind) =>
     set({ clusterId, selectedKind: kind, showingHelm: false, showingOverview: false }),
   selectHelm: (clusterId) =>

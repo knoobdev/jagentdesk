@@ -33,6 +33,9 @@ export function ClusterComposer({
   clusterName,
   resource,
   onSent,
+  onCreated,
+  cwd: cwdProp,
+  provider: providerProp,
 }: {
   serverId: string;
   clusterId: string;
@@ -41,18 +44,28 @@ export function ClusterComposer({
   resource?: ClusterComposerResource;
   /** Called after a message is sent (e.g. to close a detail sheet). */
   onSent?: () => void;
+  /**
+   * Where to open the created conversation. Defaults to the slide-in chat dock;
+   * callers embedding this as the dock's own entry composer pass their handler so
+   * the project (cwd) and dock state stay consistent.
+   */
+  onCreated?: (input: { clusterId: string; agentId: string; workspaceId: string | null }) => void;
+  /** cwd/provider overrides so an embedding dock's picked project is honoured. */
+  cwd?: string | null;
+  provider?: string | null;
 }) {
   const client = useHostRuntimeClient(serverId);
   const { entries: providerEntries } = useProvidersSnapshot(serverId);
   const firstWorkspace = useSessionStore(
     (state) => state.sessions[serverId]?.workspaces.values().next().value,
   );
-  const provider = providerEntries?.find((e) => e.enabled)?.provider ?? null;
-  const cwd = firstWorkspace?.workspaceDirectory ?? null;
+  const provider = providerProp ?? providerEntries?.find((e) => e.enabled)?.provider ?? null;
+  const cwd = cwdProp ?? firstWorkspace?.workspaceDirectory ?? null;
   const ready = Boolean(client && provider && cwd);
 
   const [text, setText] = useState("");
-  const openChat = useClusterChatStore((s) => s.openChat);
+  const openChatStore = useClusterChatStore((s) => s.openChat);
+  const openChat = onCreated ?? openChatStore;
   const insets = useSafeAreaInsets();
   const isCompact = useIsCompactFormFactor();
   // Clear the home indicator / gesture bar on phones without padding desktop.
@@ -68,6 +81,7 @@ export function ClusterComposer({
       client,
       serverId,
       clusterId,
+      clusterName,
       kind: resource?.kind ?? "cluster",
       namespace: resource?.namespace,
       name: resource?.name,
@@ -82,7 +96,7 @@ export function ClusterComposer({
     });
     setText("");
     onSent?.();
-  }, [text, client, provider, cwd, serverId, clusterId, resource, openChat, onSent]);
+  }, [text, client, provider, cwd, serverId, clusterId, clusterName, resource, openChat, onSent]);
 
   const canSend = ready && text.trim().length > 0;
 

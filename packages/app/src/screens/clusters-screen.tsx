@@ -9,10 +9,7 @@ import { useHostRuntimeClient, useHosts } from "@/runtime/host-runtime";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { ContextStatusDot, ClusterStatusDot } from "@/components/cluster-dot";
 import { buildClusterWorkloadsRoute } from "@/utils/host-routes";
-import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
-import { useSessionStore } from "@/stores/session-store";
-import { useClusterChatStore } from "@/stores/cluster-chat-store";
-import { askAgentAboutResource } from "@/components/cluster-ask-agent";
+import { useClusterNavStore } from "@/stores/cluster-nav-store";
 import type { Theme } from "@/styles/theme";
 import type { ClusterInfo, KubeContextInfo } from "@jagentdesk/protocol/cluster/rpc-schemas";
 
@@ -20,19 +17,15 @@ function ContextRow({
   ctx,
   cluster,
   connecting,
-  agentReady,
   onConnect,
   onOpen,
-  onAsk,
   onDisconnect,
 }: {
   ctx: KubeContextInfo;
   cluster: ClusterInfo | null;
   connecting: boolean;
-  agentReady: boolean;
   onConnect: (ctx: KubeContextInfo) => void;
   onOpen: (clusterId: string) => void;
-  onAsk: (clusterId: string) => void;
   onDisconnect: (clusterId: string) => void;
 }) {
   const connected = cluster?.state === "connected";
@@ -42,9 +35,6 @@ function ContextRow({
   const handleOpen = useCallback(() => {
     if (cluster) onOpen(cluster.id);
   }, [onOpen, cluster]);
-  const handleAsk = useCallback(() => {
-    if (cluster) onAsk(cluster.id);
-  }, [onAsk, cluster]);
   const handleDisconnect = useCallback(() => {
     if (cluster) onDisconnect(cluster.id);
   }, [onDisconnect, cluster]);
@@ -99,13 +89,6 @@ function ContextRow({
           <Pressable style={[styles.btn, styles.btnPrimary]} onPress={handleOpen}>
             <Text style={styles.btnPrimaryText}>Open workloads</Text>
           </Pressable>
-          <Pressable
-            style={[styles.btn, styles.btnGhost, !agentReady && styles.btnDisabled]}
-            onPress={handleAsk}
-            disabled={!agentReady}
-          >
-            <Text style={styles.btnGhostText}>Ask an agent</Text>
-          </Pressable>
           <Pressable style={[styles.btn, styles.btnGhost]} onPress={handleDisconnect}>
             <Text style={styles.btnGhostText}>Disconnect</Text>
           </Pressable>
@@ -119,6 +102,7 @@ export function ClustersScreen() {
   const hosts = useHosts();
   const serverId = hosts[0]?.serverId ?? "";
   const client = useHostRuntimeClient(serverId);
+  const clearLastCluster = useClusterNavStore((s) => s.clearLastCluster);
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const isCompact = useIsCompactFormFactor();
@@ -135,18 +119,6 @@ export function ClustersScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyContext, setBusyContext] = useState<string | null>(null);
-
-  // Ask-agent wiring. cwd = the project the user picked for cluster chat (shared
-  // with the chat dock), falling back to the first available workspace.
-  const { entries: providerEntries } = useProvidersSnapshot(serverId);
-  const workspaces = useSessionStore((state) => state.sessions[serverId]?.workspaces);
-  const pickedWorkspaceId = useClusterChatStore((s) => s.pickedWorkspaceId);
-  const agentProvider = providerEntries?.find((e) => e.enabled)?.provider ?? null;
-  const chosenWorkspace =
-    (pickedWorkspaceId ? workspaces?.get(pickedWorkspaceId) : undefined) ??
-    workspaces?.values().next().value;
-  const agentCwd = chosenWorkspace?.workspaceDirectory ?? null;
-  const agentReady = Boolean(agentProvider && agentCwd);
 
   const refresh = useCallback(async () => {
     if (!client) return;
@@ -219,25 +191,14 @@ export function ClustersScreen() {
     [router, serverId],
   );
 
-  const handleAskAgent = useCallback(
-    (clusterId: string) => {
-      if (!client || !agentProvider || !agentCwd) return;
-      void askAgentAboutResource({
-        client,
-        serverId,
-        clusterId,
-        kind: "cluster",
-        provider: agentProvider,
-        cwd: agentCwd,
-      });
-    },
-    [client, serverId, agentProvider, agentCwd],
-  );
-
   const handleDisconnect = useCallback(
     (clusterId: string) => {
       if (!client) return;
       setError(null);
+      // Drop the "return to last cluster" jump target so the sidebar's Clusters
+      // entry goes to the list after an explicit disconnect, instead of reopening
+      // this cluster and silently reconnecting it (which left namespace on "Error").
+      clearLastCluster(clusterId);
       void client
         .clusterDisconnect({ id: clusterId })
         .then((res) => {
@@ -246,7 +207,7 @@ export function ClustersScreen() {
         })
         .catch((e: unknown) => setError(e instanceof Error ? e.message : "Disconnect failed"));
     },
-    [client, refresh],
+    [client, refresh, clearLastCluster],
   );
 
   if (loading) {
@@ -282,10 +243,8 @@ export function ClustersScreen() {
               ctx={ctx}
               cluster={clusterByContext.get(ctx.name) ?? null}
               connecting={busyContext === ctx.name}
-              agentReady={agentReady}
               onConnect={handleConnect}
               onOpen={handleOpenWorkloads}
-              onAsk={handleAskAgent}
               onDisconnect={handleDisconnect}
             />
           ))}

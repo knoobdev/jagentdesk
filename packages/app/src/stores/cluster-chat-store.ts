@@ -30,12 +30,21 @@ interface ClusterChatState {
   open: boolean;
   width: number;
   pendingAsk: ClusterChatPendingAsk | null;
+  /**
+   * True when the user explicitly asked for a fresh chat (the entry composer),
+   * so the dock must NOT auto-reuse the cluster's most recent agent. Cleared once
+   * an agent is opened. Distinguishes "give me a blank chat" from "just opened
+   * the workloads view" (where reusing the last conversation is the nice default).
+   */
+  draft: boolean;
   /** Open (or reveal) the dock for a freshly created cluster agent. */
   openChat: (input: { clusterId: string; agentId: string; workspaceId: string | null }) => void;
   /** Hide the dock but keep the agentId so it can be reopened. */
   hideChat: () => void;
   /** Reveal the dock (works before any agent exists — shows the entry composer). */
   showChat: () => void;
+  /** Clear the current agent and show the entry composer for a brand-new chat. */
+  startNewChat: () => void;
   /** Queue a resource question for the dock's agent, then the caller reveals the dock. */
   setPendingAsk: (ask: ClusterChatPendingAsk) => void;
   /** Clear the queued question once the dock has delivered it. */
@@ -75,18 +84,20 @@ export const useClusterChatStore = create<ClusterChatState>((set, get) => ({
   open: false,
   width: DEFAULT_WIDTH,
   pendingAsk: null,
+  draft: false,
   pickedWorkspaceId: null,
   openChat: ({ clusterId, agentId, workspaceId }) =>
-    set({ clusterId, agentId, workspaceId, open: true }),
+    set({ clusterId, agentId, workspaceId, open: true, draft: false }),
   hideChat: () => set({ open: false }),
   showChat: () => set({ open: true }),
+  startNewChat: () => set({ agentId: null, workspaceId: null, open: true, draft: true }),
   setPendingAsk: (ask) => set({ pendingAsk: ask }),
   clearPendingAsk: () => set({ pendingAsk: null }),
   setPickedWorkspaceId: (pickedWorkspaceId) => set({ pickedWorkspaceId }),
   setOpen: (open) => set({ open }),
   resetForCluster: (clusterId, open = true) => {
     if (get().clusterId !== clusterId) {
-      set({ clusterId, agentId: null, workspaceId: null, open, pendingAsk: null });
+      set({ clusterId, agentId: null, workspaceId: null, open, pendingAsk: null, draft: false });
     }
   },
   setWidth: (width) =>

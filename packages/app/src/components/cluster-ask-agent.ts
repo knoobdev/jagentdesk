@@ -1,6 +1,7 @@
 import { Alert } from "react-native";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import { navigateToAgent } from "@/utils/navigate-to-agent";
+import { clusterChatTitle } from "@/utils/cluster-chat-title";
 import { useSkillsStore } from "@/stores/skills-store";
 import { useAgentSkillsStore } from "@/stores/agent-skills-store";
 import { matchSkillsForQuery } from "@/skills/match-skills";
@@ -21,10 +22,15 @@ export interface AskAgentAboutResourceInput {
   /** The question the user typed in the cluster composer. Sent as the first message. */
   message?: string;
   /**
-   * Explicit title for the agent. The daemon does NOT auto-title from the first
-   * message, so an untitled agent stays "Untitled chat" forever — pass a distinct
-   * title when creating an empty chat so the history list doesn't fill with
-   * duplicate names.
+   * The cluster's display name. When a first message is present and no explicit
+   * title is given, the agent is titled "<cluster>: <message>" so cluster chats
+   * read like normal chat agents (title from content) yet stay distinguishable
+   * per cluster in the agents list.
+   */
+  clusterName?: string;
+  /**
+   * Explicit title override. Normally omitted — the title is derived from the
+   * first message + clusterName. Only pass this to force a specific title.
    */
   title?: string;
   /**
@@ -48,32 +54,26 @@ function resolveAutoLoadInjectedPrompt(text: string): string {
   return applySkillPreamble(text, buildSkillsPreamble(matched));
 }
 
-export async function askAgentAboutResource(input: AskAgentAboutResourceInput): Promise<void> {
-  const {
-    client,
-    serverId,
-    clusterId,
-    kind,
-    namespace,
-    name,
-    yaml,
-    provider,
-    cwd,
-    message,
-    logs,
-    title,
-    onCreated,
-  } = input;
-
+/**
+ * The hidden system prompt that binds an agent to one cluster: which clusterId to
+ * operate, to prefer the dedicated MCP kubectl tools, and (optionally) the
+ * resource/manifest/logs the user is currently viewing. Shared by "Ask AI" and
+ * the cluster chat composer so both create identically-grounded agents.
+ */
+export function buildClusterSystemPrompt(input: {
+  clusterId: string;
+  kind: string;
+  namespace?: string;
+  name?: string;
+  yaml?: string;
+  logs?: string;
+}): string {
+  const { clusterId, kind, namespace, name, yaml, logs } = input;
   const nsPart = namespace ? ` in namespace "${namespace}"` : "";
   const focus = name
     ? `The user is currently looking at ${kind} "${name}"${nsPart}.`
     : `The user is currently browsing ${kind} resources.`;
-
-  // The cluster context is a HIDDEN system prompt (appendSystemPrompt), never a
-  // visible message/attachment — so the chat opens empty and "ready", not like a
-  // conversation already happened. The agent waits for the user's question.
-  const context = [
+  return [
     `You are operating the Kubernetes cluster with clusterId "${clusterId}".`,
     focus,
     "PREFER the dedicated cluster tools for every read or change — they talk to the",
@@ -90,6 +90,30 @@ export async function askAgentAboutResource(input: AskAgentAboutResourceInput): 
     ...(yaml && name ? ["", `Current manifest of ${kind}/${name}:`, yaml] : []),
     ...(logs ? ["", `Current logs the user is viewing for ${name ?? kind}:`, logs] : []),
   ].join("\n");
+}
+
+export async function askAgentAboutResource(input: AskAgentAboutResourceInput): Promise<void> {
+  const {
+    client,
+    serverId,
+    clusterId,
+    kind,
+    namespace,
+    name,
+    yaml,
+    provider,
+    cwd,
+    message,
+    logs,
+    clusterName,
+    title,
+    onCreated,
+  } = input;
+
+  // The cluster context is a HIDDEN system prompt (appendSystemPrompt), never a
+  // visible message/attachment — so the chat opens empty and "ready", not like a
+  // conversation already happened. The agent waits for the user's question.
+  const context = buildClusterSystemPrompt({ clusterId, kind, namespace, name, yaml, logs });
 
   try {
     const trimmed = message?.trim();
@@ -98,14 +122,16 @@ export async function askAgentAboutResource(input: AskAgentAboutResourceInput): 
     // so attached-skill injection (which is tracked per agentId) can't apply here —
     // only the auto-load matching that keys off the message text.
     const initialPrompt = trimmed ? resolveAutoLoadInjectedPrompt(trimmed) : trimmed;
+    // Title from the first message + cluster (like a normal chat agent's auto-title,
+    // but distinguishable per cluster). An explicit `title` still wins.
+    const resolvedTitle =
+      title ?? (trimmed && clusterName ? clusterChatTitle(clusterName, trimmed) : undefined);
     const agent = await client.createAgent({
       provider,
       cwd,
       systemPrompt: context,
       labels: { "jagentdesk.cluster.id": clusterId },
-      // A distinct title up front (the daemon never auto-titles), so empty chats
-      // don't all collapse to "Untitled chat" in the history list.
-      ...(title ? { title } : {}),
+      ...(resolvedTitle ? { title: resolvedTitle } : {}),
       // When the user typed a question in the composer, send it as the first
       // message; otherwise open an empty chat for them to type.
       ...(initialPrompt ? { initialPrompt } : {}),
