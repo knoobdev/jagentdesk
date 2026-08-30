@@ -1,6 +1,7 @@
 import type pino from "pino";
 import { v4 as uuidv4 } from "uuid";
 import { getErrorMessage, getErrorMessageOr } from "@jagentdesk/protocol/error-utils";
+import type { AgentProvider } from "@jagentdesk/protocol/agent-types";
 import type { AgentProviderNotice } from "../../agent/agent-sdk-types.js";
 import type { SessionInboundMessage, SessionOutboundMessage } from "../../messages.js";
 
@@ -27,6 +28,7 @@ export interface AgentConfigOperations {
   ensureLoaded(agentId: string): Promise<void>;
   setMode(agentId: string, modeId: string): Promise<AgentProviderNotice | null>;
   setModel(agentId: string, modelId: string | null): Promise<void>;
+  switchProvider(agentId: string, provider: AgentProvider, modelId: string | null): Promise<void>;
   setFeature(agentId: string, featureId: string, value: unknown): Promise<void>;
   setThinking(
     agentId: string,
@@ -98,6 +100,25 @@ export class AgentConfigSession {
         return undefined;
       },
       emitResponse: (payload) => this.host.emit({ type: "set_agent_model_response", payload }),
+    });
+  }
+
+  handleSwitchAgentProviderRequest(
+    msg: Extract<SessionInboundMessage, { type: "switch_agent_provider_request" }>,
+  ): Promise<void> {
+    const { agentId, provider, modelId, requestId } = msg;
+    return this.applyConfigChange({
+      agentId,
+      requestId,
+      logLabel: "switch_agent_provider_request",
+      logFields: { agentId, provider, modelId, requestId },
+      failureText: "Failed to switch agent provider",
+      run: async () => {
+        await this.operations.switchProvider(agentId, provider, modelId ?? null);
+        return undefined;
+      },
+      emitResponse: (payload) =>
+        this.host.emit({ type: "switch_agent_provider_response", payload }),
     });
   }
 

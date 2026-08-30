@@ -1740,6 +1740,24 @@ export const SetAgentModelResponseMessageSchema = z.object({
   payload: AgentActionResponsePayloadSchema,
 });
 
+// Switch a live agent to a DIFFERENT provider (not just a model within the same
+// provider) mid-conversation. The daemon spins up a fresh session on the new
+// provider and seeds the prior conversation as context on the next turn, so the
+// agent keeps its history. modelId is the model to select on the new provider
+// (null/omitted = the provider's default).
+export const SwitchAgentProviderRequestMessageSchema = z.object({
+  type: z.literal("switch_agent_provider_request"),
+  agentId: z.string(),
+  provider: AgentProviderSchema,
+  modelId: z.string().nullable().optional(),
+  requestId: z.string(),
+});
+
+export const SwitchAgentProviderResponseMessageSchema = z.object({
+  type: z.literal("switch_agent_provider_response"),
+  payload: AgentActionResponsePayloadSchema,
+});
+
 export const SetAgentThinkingRequestMessageSchema = z.object({
   type: z.literal("set_agent_thinking_request"),
   agentId: z.string(),
@@ -2848,6 +2866,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   AgentForkContextRequestMessageSchema,
   SetAgentModeRequestMessageSchema,
   SetAgentModelRequestMessageSchema,
+  SwitchAgentProviderRequestMessageSchema,
   SetAgentThinkingRequestMessageSchema,
   SetAgentFeatureRequestMessageSchema,
   AgentDetachRequestMessageSchema,
@@ -5849,6 +5868,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   WriteProjectConfigResponseMessageSchema,
   SetAgentModeResponseMessageSchema,
   SetAgentModelResponseMessageSchema,
+  SwitchAgentProviderResponseMessageSchema,
   SetAgentThinkingResponseMessageSchema,
   SetAgentFeatureResponseMessageSchema,
   AgentDetachResponseMessageSchema,
@@ -6069,6 +6089,9 @@ export type SendAgentMessageResponseMessage = z.infer<typeof SendAgentMessageRes
 export type SetVoiceModeResponseMessage = z.infer<typeof SetVoiceModeResponseMessageSchema>;
 export type SetAgentModeResponseMessage = z.infer<typeof SetAgentModeResponseMessageSchema>;
 export type SetAgentModelResponseMessage = z.infer<typeof SetAgentModelResponseMessageSchema>;
+export type SwitchAgentProviderResponseMessage = z.infer<
+  typeof SwitchAgentProviderResponseMessageSchema
+>;
 export type SetAgentThinkingResponseMessage = z.infer<typeof SetAgentThinkingResponseMessageSchema>;
 export type SetAgentFeatureResponseMessage = z.infer<typeof SetAgentFeatureResponseMessageSchema>;
 export type AgentDetachResponseMessage = z.infer<typeof AgentDetachResponseMessageSchema>;
@@ -6241,6 +6264,9 @@ export type WorkspaceRecoveryInspectRequest = z.infer<typeof WorkspaceRecoveryIn
 export type WorkspaceRecoveryRestoreRequest = z.infer<typeof WorkspaceRecoveryRestoreRequestSchema>;
 export type SetAgentModeRequestMessage = z.infer<typeof SetAgentModeRequestMessageSchema>;
 export type SetAgentModelRequestMessage = z.infer<typeof SetAgentModelRequestMessageSchema>;
+export type SwitchAgentProviderRequestMessage = z.infer<
+  typeof SwitchAgentProviderRequestMessageSchema
+>;
 export type SetAgentThinkingRequestMessage = z.infer<typeof SetAgentThinkingRequestMessageSchema>;
 export type SetAgentFeatureRequestMessage = z.infer<typeof SetAgentFeatureRequestMessageSchema>;
 export type AgentDetachRequestMessage = z.infer<typeof AgentDetachRequestMessageSchema>;

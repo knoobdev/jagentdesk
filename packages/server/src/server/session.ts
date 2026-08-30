@@ -909,6 +909,8 @@ export class Session {
         setMode: async (agentId, modeId) =>
           (await setAgentModeCommand({ agentManager }, { agentId, modeId })).notice,
         setModel: (agentId, modelId) => agentManager.setAgentModel(agentId, modelId),
+        switchProvider: (agentId, provider, modelId) =>
+          agentManager.switchAgentProvider(agentId, provider, modelId),
         setFeature: (agentId, featureId, value) =>
           agentManager.setAgentFeature(agentId, featureId, value),
         setThinking: (agentId, thinkingOptionId) =>
@@ -2215,16 +2217,26 @@ export class Session {
     }
   }
 
-  private dispatchAgentConfigMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+  /** The per-agent config mutations (mode/model/provider/feature/thinking). */
+  private dispatchAgentConfigSessionMessage(msg: SessionInboundMessage): Promise<void> | undefined {
     switch (msg.type) {
       case "set_agent_mode_request":
         return this.agentConfigSession.handleSetAgentModeRequest(msg);
       case "set_agent_model_request":
         return this.agentConfigSession.handleSetAgentModelRequest(msg);
+      case "switch_agent_provider_request":
+        return this.agentConfigSession.handleSwitchAgentProviderRequest(msg);
       case "set_agent_feature_request":
         return this.agentConfigSession.handleSetAgentFeatureRequest(msg);
       case "set_agent_thinking_request":
         return this.agentConfigSession.handleSetAgentThinkingRequest(msg);
+      default:
+        return undefined;
+    }
+  }
+
+  private dispatchAgentConfigMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    switch (msg.type) {
       case "get_daemon_config_request":
         this.emit({
           type: "get_daemon_config_response",
@@ -2265,7 +2277,7 @@ export class Session {
       case "write_project_config_request":
         return this.projectConfigSession.handleWriteProjectConfigRequest(msg);
       default:
-        return undefined;
+        return this.dispatchAgentConfigSessionMessage(msg);
     }
   }
 
@@ -3535,7 +3547,13 @@ export class Session {
     );
 
     const promptText = options?.spokenInput ? wrapSpokenInput(text) : text;
-    const prompt = buildAgentPrompt(promptText, images, attachments);
+    // If the agent just switched provider, prepend the prior conversation (staged
+    // as a chat-history attachment) so the new provider opens with full context.
+    const providerSwitchSeed = this.agentManager.consumeProviderSwitchSeed(agentId);
+    const effectiveAttachments = providerSwitchSeed
+      ? [providerSwitchSeed, ...(attachments ?? [])]
+      : attachments;
+    const prompt = buildAgentPrompt(promptText, images, effectiveAttachments);
 
     try {
       await sendPromptToAgent({

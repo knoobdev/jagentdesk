@@ -73,6 +73,8 @@ import {
   withRuntimeJAgentDeskMcpServer,
 } from "./runtime-mcp-config.js";
 import { resolveCreateAgentTitles } from "./create-agent-title.js";
+import { buildAgentForkContextAttachment } from "./activity-curator.js";
+import type { AgentAttachment } from "@jagentdesk/protocol/messages";
 import type { JAgentDeskToolCatalogFactory } from "./tools/types.js";
 import {
   ProviderSubagentStore,
@@ -649,6 +651,10 @@ export class AgentManager {
   private readonly backgroundTasks = new Set<Promise<void>>();
   private readonly agentRegistrationTasks = new Set<Promise<void>>();
   private readonly inFlightAgentCloses = new Map<string, Promise<void>>();
+  // Chat-history seed staged when an agent switches provider mid-conversation.
+  // The next user turn consumes it so the new provider (which has no native
+  // session) opens with the prior conversation as context. Keyed by agentId.
+  private readonly pendingProviderSwitchSeed = new Map<string, AgentAttachment>();
   private readonly hostToolPermissions = new Map<
     string,
     (response: AgentPermissionResponse) => void
@@ -1672,6 +1678,119 @@ export class AgentManager {
     }
     this.touchUpdatedAt(agent);
     this.emitState(agent);
+  }
+
+  /**
+   * Switch a live agent to a DIFFERENT provider mid-conversation while keeping
+   * its history. A native provider session is not portable, so we snapshot the
+   * timeline as a provider-agnostic chat-history attachment, stand up a fresh
+   * session on the new provider (create, not resume — it has no handle), keep
+   * the existing timeline, and stage the snapshot so the NEXT user turn seeds
+   * the new provider with the prior conversation. A same-provider call is just a
+   * model change.
+   */
+  async switchAgentProvider(
+    agentId: string,
+    provider: AgentProvider,
+    modelId: string | null,
+  ): Promise<void> {
+    if (this.requireSessionAgent(agentId).provider === provider) {
+      await this.setAgentModel(agentId, modelId);
+      return;
+    }
+    await this.trackAgentRegistrationOperation(
+      this.switchAgentProviderInternal(agentId, provider, modelId),
+    );
+  }
+
+  private async switchAgentProviderInternal(
+    agentId: string,
+    provider: AgentProvider,
+    modelId: string | null,
+  ): Promise<void> {
+    this.assertAcceptingAgentRegistrations();
+    let existing = this.requireSessionAgent(agentId);
+    if (this.hasInFlightRun(agentId)) {
+      await this.cancelAgentRunBefore(agentId, "reload");
+      existing = this.requireSessionAgent(agentId);
+    }
+
+    // Snapshot the conversation so the new provider opens with full context.
+    const timeline = this.fetchTimeline(agentId, { direction: "tail", limit: 0 });
+    const seed = buildAgentForkContextAttachment({
+      rows: timeline.rows,
+      agentTitle: existing.config.title ?? null,
+      cwd: existing.config.cwd,
+    });
+
+    // Provider-specific selections (mode/thinking/features/extra) do not map
+    // across providers — reset them and let the new provider pick its defaults.
+    const normalizedModelId =
+      typeof modelId === "string" && modelId.trim().length > 0 ? modelId : undefined;
+    const newConfig = {
+      ...existing.config,
+      provider,
+      model: normalizedModelId,
+      modeId: undefined,
+      thinkingOptionId: undefined,
+      featureValues: undefined,
+      extra: undefined,
+    } as AgentSessionConfig;
+
+    const client = this.requireClient(provider);
+    const { storedConfig, launchConfig } = await this.prepareSessionConfig(newConfig, agentId);
+    const launchContext = await this.buildLaunchContext(agentId, client, storedConfig.cwd);
+    const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
+
+    // The new provider has no native session handle → create a fresh session.
+    const session = await client.createSession(providerLaunchConfig, launchContext);
+    await this.requireExternalMcpSupport(session, storedConfig);
+
+    let handedToRegistration = false;
+    try {
+      this.assertAcceptingAgentRegistrations();
+      const closedExisting = this.prepareAgentForClosure(existing, "provider switched");
+      try {
+        await this.persistSnapshot(closedExisting);
+      } finally {
+        await this.closeReloadedSession(existing.session, agentId);
+      }
+
+      handedToRegistration = true;
+      const registered = await this.registerSession(session, storedConfig, agentId, {
+        labels: existing.labels,
+        workspaceId: existing.workspaceId,
+        owner: existing.owner,
+        createdAt: existing.createdAt,
+        updatedAt: existing.updatedAt,
+        lastUserMessageAt: existing.lastUserMessageAt,
+        // Keep the existing timeline; the new provider has no history to stream.
+        historyPrimed: true,
+        lastUsage: existing.lastUsage,
+        usageTotals: existing.usageTotals,
+        lastError: existing.lastError,
+        attention: existing.attention,
+      });
+      // The next user turn carries the prior conversation to the new provider.
+      this.pendingProviderSwitchSeed.set(agentId, seed.attachment);
+      this.touchUpdatedAt(registered);
+      this.emitState(registered);
+    } finally {
+      if (!handedToRegistration) {
+        await this.closeUnregisteredSession(session);
+      }
+    }
+  }
+
+  /**
+   * Take (and clear) any chat-history seed staged by a mid-conversation provider
+   * switch. Returned as an attachment to prepend to the next user turn's prompt.
+   */
+  consumeProviderSwitchSeed(agentId: string): AgentAttachment | null {
+    const seed = this.pendingProviderSwitchSeed.get(agentId);
+    if (!seed) return null;
+    this.pendingProviderSwitchSeed.delete(agentId);
+    return seed;
   }
 
   async setAgentThinkingOption(

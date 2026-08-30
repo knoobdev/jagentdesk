@@ -3273,6 +3273,44 @@ export class DaemonClient {
     }
   }
 
+  /**
+   * Switch a live agent to a different provider mid-conversation. The daemon
+   * starts a fresh session on `provider` (selecting `modelId`, or the provider
+   * default when null) and carries the prior conversation forward as context on
+   * the next turn, so the agent keeps its history.
+   */
+  async switchAgentProvider(
+    agentId: string,
+    provider: AgentProvider,
+    modelId: string | null,
+  ): Promise<void> {
+    const requestId = this.createRequestId();
+    const message = SessionInboundMessageSchema.parse({
+      type: "switch_agent_provider_request",
+      agentId,
+      provider,
+      modelId,
+      requestId,
+    });
+    const payload = await this.sendRequest({
+      requestId,
+      message,
+      options: { skipQueue: true },
+      select: (msg) => {
+        if (msg.type !== "switch_agent_provider_response") {
+          return null;
+        }
+        if (msg.payload.requestId !== requestId) {
+          return null;
+        }
+        return msg.payload;
+      },
+    });
+    if (!payload.accepted) {
+      throw new Error(payload.error ?? "switchAgentProvider rejected");
+    }
+  }
+
   async setAgentFeature(agentId: string, featureId: string, value: unknown): Promise<void> {
     const requestId = this.createRequestId();
     const message = SessionInboundMessageSchema.parse({

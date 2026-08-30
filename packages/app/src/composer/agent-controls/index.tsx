@@ -1463,14 +1463,18 @@ export const AgentControls = memo(function AgentControls({
     [agent?.provider, models],
   );
   const agentModelSelectorProviders = useMemo(() => {
-    if (snapshotSelectedEntry) {
-      return buildSelectableProviderSelectorProviders([snapshotSelectedEntry]);
+    // List EVERY enabled provider (not just the current one) so the user can
+    // switch a live agent to another provider mid-conversation. A same-provider
+    // pick just changes the model; a cross-provider pick routes through
+    // switchAgentProvider (context carries over).
+    if (snapshotEntries && snapshotEntries.length > 0) {
+      return buildSelectableProviderSelectorProviders(snapshotEntries);
     }
     return buildProviderSelectorProviders({
       providerDefinitions: agentProviderDefinitions,
       modelsByProvider: agentProviderModels,
     });
-  }, [agentProviderDefinitions, agentProviderModels, snapshotSelectedEntry]);
+  }, [agentProviderDefinitions, agentProviderModels, snapshotEntries]);
 
   const modelSelection = resolveAgentModelSelection({
     models,
@@ -1524,6 +1528,37 @@ export const AgentControls = memo(function AgentControls({
   const handleSelectCommandCenterModel = useCallback(
     (_provider: AgentProvider, modelId: string) => handleSelectModel(modelId),
     [handleSelectModel],
+  );
+
+  // Switch a live agent to a DIFFERENT provider mid-conversation. Same provider →
+  // ordinary model change; different provider → switchAgentProvider, which stands
+  // up a fresh session on the new provider and carries the prior conversation
+  // forward as context on the next message.
+  const handleSelectProviderAndModel = useCallback(
+    async (provider: AgentProvider, modelId: string) => {
+      if (!client) {
+        return;
+      }
+      if (provider === agentProvider) {
+        await handleSelectModel(modelId);
+        return;
+      }
+      try {
+        await client.switchAgentProvider(agentId, provider, modelId);
+        await updatePreferences((current) =>
+          mergeProviderPreferences({
+            preferences: current,
+            provider,
+            updates: { model: modelId },
+          }),
+        );
+        toast.show("Provider switched — your chat context carries over to the next message.");
+      } catch (error) {
+        console.warn("[AgentControls] switchAgentProvider failed", error);
+        toast.error(toErrorMessage(error));
+      }
+    },
+    [agentId, agentProvider, client, handleSelectModel, toast, updatePreferences],
   );
 
   const handleToggleFavoriteModel = useCallback(
@@ -1654,6 +1689,7 @@ export const AgentControls = memo(function AgentControls({
       modelOptions={modelOptions}
       selectedModelId={modelSelection.activeModelId ?? undefined}
       onSelectModel={handleSelectModel}
+      onSelectProviderAndModel={handleSelectProviderAndModel}
       favoriteKeys={favoriteKeys}
       onToggleFavoriteModel={handleToggleFavoriteModel}
       thinkingOptions={thinkingOptions.length > 1 ? thinkingOptions : undefined}
