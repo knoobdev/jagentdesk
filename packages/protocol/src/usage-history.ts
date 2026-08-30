@@ -17,7 +17,7 @@ export const UsageBucketSchema = z.object({
 export type UsageBucket = z.infer<typeof UsageBucketSchema>;
 
 export const UsageDayRollupSchema = UsageBucketSchema.extend({
-  /** UTC calendar day, `YYYY-MM-DD`. */
+  /** Local calendar day (daemon host time), `YYYY-MM-DD`. See localDayKey. */
   date: z.string(),
   /** Per-model breakdown for the day, keyed by model id (or provider fallback). */
   byModel: z.record(z.string(), UsageBucketSchema),
@@ -58,9 +58,19 @@ export function addUsageToBucket(
   return bucket;
 }
 
-/** The UTC `YYYY-MM-DD` for a Unix-ms timestamp. */
-export function utcDayKey(timestampMs: number): string {
-  return new Date(timestampMs).toISOString().slice(0, 10);
+/**
+ * The LOCAL `YYYY-MM-DD` for a Unix-ms timestamp — the calendar day as seen on
+ * the machine running the daemon (which is the user's own machine in the
+ * self-hosted model), so "today" in the Usage & Cost chart matches the user's
+ * wall clock. A UTC-based key put early-local-day turns on the previous day for
+ * any positive-offset timezone (e.g. UTC+7), which read as an off-by-one.
+ */
+export function localDayKey(timestampMs: number): string {
+  const d = new Date(timestampMs);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 // ── RPC: usage.history.get ───────────────────────────────────────────────────

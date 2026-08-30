@@ -7,7 +7,7 @@ import {
   emptyUsageBucket,
   LifetimeUsageSchema,
   UsageDayRollupSchema,
-  utcDayKey,
+  localDayKey,
   type LifetimeUsage,
   type UsageBucket,
   type UsageDayRollup,
@@ -164,7 +164,7 @@ export class UsageHistoryStorage {
 
   /** Fold one billed turn into today's rollup (and its per-model breakdown). */
   record(input: BilledUsage): void {
-    const date = utcDayKey(input.timestampMs);
+    const date = localDayKey(input.timestampMs);
     let rollup = this.byDate.get(date);
     if (!rollup) {
       rollup = { date, ...emptyUsageBucket(), byModel: {} };
