@@ -1,6 +1,6 @@
 import path from "node:path";
 import { existsSync } from "node:fs";
-import { app, BrowserWindow, Notification, ipcMain, nativeImage } from "electron";
+import { BrowserWindow, Notification, ipcMain, nativeImage } from "electron";
 
 interface NotificationInput {
   title?: unknown;
@@ -61,21 +61,11 @@ function focusSenderWindow(sender: Electron.WebContents): BrowserWindow | null {
   return win;
 }
 
-/**
- * macOS requires a notification to have been shown at least once before
- * the app appears in System Preferences > Notifications. We fire a
- * silent no-op notification during startup to ensure registration.
- */
-export function ensureNotificationCenterRegistration(): void {
-  if (process.platform !== "darwin" || !Notification.isSupported()) {
-    return;
-  }
-
-  const probe = new Notification({ title: app.name, silent: true });
-  probe.on("show", () => probe.close());
-  setTimeout(() => probe.close(), 2_000);
-  probe.show();
-}
+// NOTE: no startup "registration probe" notification. macOS registers the app in
+// System Preferences the first time a REAL notification is shown, so a dedicated
+// startup probe is unnecessary — and the previous silent probe still surfaced a
+// visible, empty banner on every launch (title = app name, no body), which read
+// as a phantom notification the user never triggered.
 
 export function registerNotificationHandlers(): void {
   ipcMain.handle("jagentdesk:notification:isSupported", () => {

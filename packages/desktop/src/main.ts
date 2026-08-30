@@ -42,10 +42,7 @@ import {
 } from "./window/window-manager.js";
 import { setupDarwinCompositorWatchdog } from "./window/compositor-watchdog/index.js";
 import { registerDialogHandlers } from "./features/dialogs.js";
-import {
-  registerNotificationHandlers,
-  ensureNotificationCenterRegistration,
-} from "./features/notifications.js";
+import { registerNotificationHandlers } from "./features/notifications.js";
 import { registerOpenerHandlers } from "./features/opener.js";
 import { registerEditorTargetHandlers } from "./features/editor-targets/ipc.js";
 import { setupApplicationMenu } from "./features/menu.js";
@@ -89,10 +86,7 @@ import {
 import { runDesktopStartup } from "./desktop-startup.js";
 import { autoUpdateInstalledSkills } from "./integrations/skills/index.js";
 import { registerBrowserAutomationIpc } from "./features/browser-automation/ipc.js";
-import {
-  applyStealthToWebContents,
-  setStealthEnabled,
-} from "./features/browser-stealth.js";
+import { applyStealthToWebContents, setStealthEnabled } from "./features/browser-stealth.js";
 import {
   deleteConnectedLogin,
   listConnectedLogins,
@@ -675,24 +669,21 @@ ipcMain.handle("jagentdesk:browser:list-connected-logins", async () => {
   return listConnectedLogins();
 });
 
-ipcMain.handle(
-  "jagentdesk:browser:save-connected-login",
-  async (event, browserId: unknown) => {
-    if (typeof browserId !== "string" || browserId.trim().length === 0) {
-      return null;
-    }
-    const contents = getJAgentDeskBrowserWebContentsForHostWindow(browserId, event.sender.id);
-    if (!contents || contents.isDestroyed()) {
-      return null;
-    }
-    try {
-      return await saveConnectedLoginForContents(contents);
-    } catch (error) {
-      log.warn("[browser-vault] save-connected-login.failed", { browserId, error: String(error) });
-      return null;
-    }
-  },
-);
+ipcMain.handle("jagentdesk:browser:save-connected-login", async (event, browserId: unknown) => {
+  if (typeof browserId !== "string" || browserId.trim().length === 0) {
+    return null;
+  }
+  const contents = getJAgentDeskBrowserWebContentsForHostWindow(browserId, event.sender.id);
+  if (!contents || contents.isDestroyed()) {
+    return null;
+  }
+  try {
+    return await saveConnectedLoginForContents(contents);
+  } catch (error) {
+    log.warn("[browser-vault] save-connected-login.failed", { browserId, error: String(error) });
+    return null;
+  }
+});
 
 ipcMain.handle("jagentdesk:browser:delete-connected-login", async (_event, domain: unknown) => {
   if (typeof domain !== "string" || domain.trim().length === 0) {
@@ -1093,7 +1084,6 @@ async function bootstrap(): Promise<void> {
       });
     },
   });
-  ensureNotificationCenterRegistration();
   registerDaemonManager();
   registerWindowManager();
   registerDialogHandlers();
