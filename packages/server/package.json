@@ -1,6 +1,6 @@
 {
   "name": "@jagentdesk/server",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "JAgentDesk backend server",
   "files": [
     "dist/server",
@@ -71,10 +71,10 @@
     "@anthropic-ai/sdk": "^0.104.2",
     "@babel/parser": "^7.29.0",
     "@isaacs/ttlcache": "^2.1.4",
-    "@jagentdesk/client": "0.0.2",
-    "@jagentdesk/highlight": "0.0.2",
-    "@jagentdesk/plugin": "0.0.2",
-    "@jagentdesk/protocol": "0.0.2",
+    "@jagentdesk/client": "0.0.3",
+    "@jagentdesk/highlight": "0.0.3",
+    "@jagentdesk/plugin": "0.0.3",
+    "@jagentdesk/protocol": "0.0.3",
     "@kubernetes/client-node": "^1.4.0",
     "@modelcontextprotocol/sdk": "^1.20.1",
     "@opencode-ai/sdk": "1.14.46",

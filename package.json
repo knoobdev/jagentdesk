@@ -1,6 +1,6 @@
 {
   "name": "jagentdesk",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "private": true,
   "description": "JAgentDesk: voice-controlled development environment for local AI coding agents",
   "keywords": [
