@@ -1,0 +1,116 @@
+# Apply plan: multi-database management (DataGrip-class)
+
+Spec: `docs/databases.md`. Mirrors the Kubernetes cockpit (`docs/kubernetes.md`) 1:1 — swap
+`KubeClient` for a per-engine `DbClient`; reuse registry/protocol/session/client/UI/chat shape.
+
+## Outcome
+
+A database workspace beside Clusters: connect PostgreSQL/MySQL/SQLite (then MSSQL/Oracle/Mongo),
+browse schema, view+edit data with transactions, run SQL with a result grid + Explain, and chat with
+a schema-grounded agent (read-only by default, writes gated). Desktop + mobile, real app components.
+Every shipped task runs against a real database — no stubs.
+
+## Process
+
+- Supervisor/Lead/Peer: keep scope, stop when authority or proof is insufficient.
+- Each task group is a **vertical slice that runs end-to-end** before the next; mark `[x]` only with
+  a test or observable proof recorded inline.
+- Write-scope per slice is isolated; typecheck + lint + focused test gate every commit (lefthook).
+
+## Security decisions (must land before the code that needs them)
+
+- **Credentials at rest** → reuse `safeStorage`/keychain like `packages/desktop/src/features/browser-vault.ts`.
+  Only connection identity is persisted to `<jagentdeskHome>/databases/databases.json`; the secret
+  is stored encrypted and read only in-daemon. No secret on the wire, no relay. (Decision, not MVP.)
+- **Write safety** → read-only default; every value parameter-bound; `sql_exec` (writes/DDL) is
+  agent-scoped and always routes through `requestHostToolPermission`
+  (`packages/server/src/server/agent/agent-manager.ts`) before running; data-editor writes preview
+  their DML first.
+
+## Component mapping (verified file:line — clone these shapes)
+
+| Layer               | Kubernetes source of truth                                                                                                                                                                   | New database file                                                                                                                                                              |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------- | -------- | ------ | ----- | ------------- | ---- | ----- | --- | --------------------------------------------------------------- | ------- | ---------- | --- | ------- | ------- | ----- | ---- | ------- | ------------------------------------- |
+| Registry            | `packages/server/src/server/cluster/cluster-registry.ts` (`ClusterRegistry`: import/connect/disconnect/list/getClient, `clusters.json`, `initialize`)                                        | `packages/server/src/server/database/database-registry.ts`                                                                                                                     |
+| Client              | `cluster/kube-client.ts` (`connect`, typed lists, `GENERIC_KINDS`, `discoverCRDs`, generic list/get)                                                                                         | `database/db-client.ts` (interface) + `database/adapters/{postgres,mysql,sqlite}.ts`                                                                                           |
+| DTOs                | `cluster/cluster-dto.ts` (`ClusterInfo`, `ClusterConnectionState`)                                                                                                                           | `database/database-dto.ts` (`DatabaseInfo`, state, `SchemaObject`, `ColumnDef`, `ResultSet`)                                                                                   |
+| Connection source   | `cluster/kube-config-source.ts`                                                                                                                                                              | `database/db-connection-source.ts` (DSN/params parse)                                                                                                                          |
+| Protocol            | `packages/protocol/src/cluster/rpc-schemas.ts` + unions in `messages.ts` (`cluster/list                                                                                                      | connect                                                                                                                                                                        | disconnect | contexts | import | kinds | resource/list | logs | write | …`) | `packages/protocol/src/database/rpc-schemas.ts` (`database/list | connect | disconnect | add | objects | columns | query | exec | explain | history`) + register in `messages.ts` |
+| Session handler     | `packages/server/src/server/session/cluster/cluster-session.ts`                                                                                                                              | `session/database/database-session.ts`                                                                                                                                         |
+| Session wiring      | `server/session.ts` `initClusterSession` + `dispatchClusterMessage`                                                                                                                          | `initDatabaseSession` + `dispatchDatabaseMessage`                                                                                                                              |
+| Bootstrap           | `bootstrap.ts` (`new ClusterRegistry({jagentdeskHome,logger})` + `initialize()`, pass to session + MCP host deps)                                                                            | construct `DatabaseRegistry` the same way                                                                                                                                      |
+| Client              | `packages/client/src/daemon-client.ts` `clusterList/Connect/Kinds/ResourceList/…` (+ response-type regs)                                                                                     | `databaseList/Connect/Objects/Query/Exec/…`                                                                                                                                    |
+| Routes              | `packages/app/src/utils/host-routes.ts` `buildClustersRoute` / `buildClusterWorkloadsRoute`; `app/h/[serverId]/clusters.tsx`, `cluster/[clusterId].tsx`                                      | `buildDatabasesRoute` / `buildDatabaseBrowseRoute`; `app/h/[serverId]/databases.tsx`, `database/[databaseId].tsx`                                                              |
+| Screens             | `screens/clusters-screen.tsx`, `screens/cluster-workloads-screen.tsx`                                                                                                                        | `screens/databases-screen.tsx`, `screens/database-browse-screen.tsx`                                                                                                           |
+| Components          | `sidebar-cluster-nav.tsx`, `cluster-resource-browser.tsx`, `cluster-chat-dock.tsx`, `cluster-draft-chat.tsx`                                                                                 | `sidebar-database-nav.tsx`, `database-object-browser.tsx` (+ data grid + Monaco SQL console), `database-chat-dock.tsx`, `database-draft-chat.tsx`                              |
+| Stores              | `stores/cluster-nav-store.ts`, `cluster-view-store.ts`, `cluster-chat-store.ts`                                                                                                              | `stores/database-nav-store.ts`, `database-view-store.ts`, `database-chat-store.ts`                                                                                             |
+| Sidebar entry       | `components/left-sidebar.tsx` (`sidebar-clusters-nav`, cluster route regex)                                                                                                                  | add `sidebar-databases-nav` + `.../database/…` branch                                                                                                                          |
+| Chat prompt + tools | `components/cluster-ask-agent.ts` `buildClusterSystemPrompt` + label `jagentdesk.cluster.id`; `agent/tools/jagentdesk-tools.ts` `registerKubectlTools` (`kubectl_get/apply`, `cluster_list`) | `components/database-ask-agent.ts` `buildDatabaseSystemPrompt` + label `jagentdesk.database.id`; `registerSqlTools` (`sql_query` read-only, `sql_exec` gated, `database_list`) |
+| MCP-inject flag     | `config.ts` `resolveMcpInjectIntoAgents` (already ON)                                                                                                                                        | reuse as-is                                                                                                                                                                    |
+
+## Task groups (each = a runnable slice; apply in order)
+
+### P0 — daemon foundation (SQLite, zero-infra, provable now) — DONE 2026-09-01
+
+- [x] `database-dto.ts` + `db-client.ts` interface (`connect/close/serverVersion/listSchemas/listObjects/listColumns/runQuery(paged)/execWrite`) + `isWriteStatement` guard.
+- [x] SQLite adapter (`better-sqlite3`) — `PRAGMA` introspection (columns incl. PK/FK), paged read-only query, write path.
+- [x] `database-registry.ts` mirroring `ClusterRegistry` (identity persist to `databases.json`, `getClient`, connect/disconnect/remove).
+- [x] Credential vault: `secret-store.ts` — `FileSecretStore` (AES-256-GCM, key 0600 in `<home>/databases/`) + `MemorySecretStore`; secret never in databases.json nor on the wire.
+- [x] Proof: `database-registry.test.ts` — **4/4 pass**: temp SQLite → add → connect (SQLite version) → introspect (PK on id, FK on customer_id, NOT NULL on status) → paged query (limit/offset + `truncated`) → read-only guard rejects DELETE → identity persists across restart → secret encrypted at rest (not plaintext on disk). typecheck + lint clean.
+
+### P1 — protocol + session + client + PG/MySQL adapters
+
+- [ ] `protocol/src/database/rpc-schemas.ts` (list/connect/disconnect/add/objects/columns/query/exec/explain/history) + register in `messages.ts` unions.
+- [ ] `session/database/database-session.ts` handlers + wire `dispatchDatabaseMessage`/`initDatabaseSession` in `session.ts`; construct `DatabaseRegistry` in `bootstrap.ts`.
+- [ ] `daemon-client.ts` `databaseList/Connect/Objects/Columns/Query/Exec/Explain` + response-type regs.
+- [ ] PostgreSQL adapter (`pg`+`pg-cursor`) and MySQL adapter (`mysql2`), same interface + `information_schema`/`pg_catalog` introspection.
+- [ ] Proof: real `.e2e` test connecting a throwaway Postgres (docker) — connect → objects → columns → paged query → explain.
+
+### P2 — app shell: sidebar entry, list + add connection, routes, stores
+
+- [ ] `sidebar-databases-nav` entry in `left-sidebar.tsx` + `databases`/`database/[id]` routes + route builders.
+- [ ] `databases-screen.tsx` (list connections, Add-connection sheet: engine + form/DSN + Test + vault note) using real theme components.
+- [ ] `database-nav-store` / `database-view-store` / `database-chat-store`.
+- [ ] Proof: live CDP — add a SQLite/PG connection, connect, land on the browse screen.
+
+### P3 — object explorer + data grid + SQL console
+
+- [ ] `database-object-browser.tsx`: schema tree (lazy per level) with column type + PK/FK icons; Overview.
+- [ ] Data grid: paginated (first/prev/next/last), sortable, filterable, read-only view.
+- [ ] SQL console (reuse Monaco) with schema-grounded completion; Services panel Output/Result/Query Plan; Explain.
+- [ ] Proof: live — browse a table, run a SELECT, page/sort/filter, view Explain.
+
+### P4 — data editor (writes, transactions)
+
+- [ ] Inline cell edit + add/clone/delete rows; Tx Auto/Manual; Submit/Commit/Rollback; Preview DML; Export CSV/JSON/SQL.
+- [ ] `sql_exec` / editor writes route through `requestHostToolPermission`.
+- [ ] Proof: live — edit a row under Manual tx, preview DML, commit; rollback path.
+
+### P5 — AI chat + SQL MCP tools
+
+- [ ] `database-ask-agent.ts` `buildDatabaseSystemPrompt` + label; `database-chat-dock.tsx` / `database-draft-chat.tsx` cloned from cluster chat (agent created only on first real message).
+- [ ] `registerSqlTools`: `sql_query` (read-only, auto-inject), `sql_exec` (gated), `database_list`.
+- [ ] Proof: live — NL→SQL read-only answer with a result; a write proposal that pauses for approval.
+
+### P6 — breadth + advanced (additive)
+
+- [ ] MSSQL / Oracle / MongoDB / ClickHouse adapters (same interface).
+- [ ] Query history per connection; DDL view; schema diff; ER diagram; explain-plan flame graph.
+- [ ] Mobile parity pass across all screens.
+
+## Authority gaps / decisions to confirm
+
+- First-class engines beyond PG/MySQL/SQLite order (default: those three first). — proceed with default.
+- Default connection privilege (recommend read-only role) — surfaced in UI; user chooses.
+- Vault scope (per-connection secret only) — decided above.
+
+## Progress
+
+- [x] 2026-09-01: Spec `docs/databases.md` written (mirrors kubernetes.md; real component refs).
+- [ ] P0 …
+
+## Validation
+
+- Focused: adapter + registry unit tests (SQLite in CI; PG/MySQL via docker `.e2e`).
+- Integration: `database/*` RPC round-trip; MCP `sql_query`/`sql_exec` gating.
+- End-to-end: live CDP on desktop app — add connection → browse → query → edit → chat; mobile parity.
