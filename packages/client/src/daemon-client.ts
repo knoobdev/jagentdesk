@@ -1,5 +1,6 @@
 import type { z } from "zod";
 import { CLIENT_CAPS, type ClientCapability } from "@jagentdesk/protocol/client-capabilities";
+import type { DatabaseEngine, DbConnectionConfig } from "@jagentdesk/protocol/database/rpc-schemas";
 import type { AgentAttentionNotificationPayload } from "@jagentdesk/protocol/agent-attention-notification";
 import {
   AgentCreateFailedStatusPayloadSchema,
@@ -626,6 +627,46 @@ type ClusterCronjobOpPayload = Extract<
 type ClusterMetricsPayload = Extract<
   SessionOutboundMessage,
   { type: "cluster/metrics/response" }
+>["payload"];
+type DatabaseListPayload = Extract<
+  SessionOutboundMessage,
+  { type: "database/list/response" }
+>["payload"];
+type DatabaseAddPayload = Extract<
+  SessionOutboundMessage,
+  { type: "database/add/response" }
+>["payload"];
+type DatabaseConnectPayload = Extract<
+  SessionOutboundMessage,
+  { type: "database/connect/response" }
+>["payload"];
+type DatabaseDisconnectPayload = Extract<
+  SessionOutboundMessage,
+  { type: "database/disconnect/response" }
+>["payload"];
+type DatabaseRemovePayload = Extract<
+  SessionOutboundMessage,
+  { type: "database/remove/response" }
+>["payload"];
+type DatabaseSchemasPayload = Extract<
+  SessionOutboundMessage,
+  { type: "database/schemas/response" }
+>["payload"];
+type DatabaseObjectsPayload = Extract<
+  SessionOutboundMessage,
+  { type: "database/objects/response" }
+>["payload"];
+type DatabaseColumnsPayload = Extract<
+  SessionOutboundMessage,
+  { type: "database/columns/response" }
+>["payload"];
+type DatabaseQueryPayload = Extract<
+  SessionOutboundMessage,
+  { type: "database/query/response" }
+>["payload"];
+type DatabaseExecPayload = Extract<
+  SessionOutboundMessage,
+  { type: "database/exec/response" }
 >["payload"];
 type ClusterHelmListPayload = Extract<
   SessionOutboundMessage,
@@ -5867,6 +5908,146 @@ export class DaemonClient {
       requestId: options.requestId,
       message: { type: "cluster/disconnect", id: options.id },
       responseType: "cluster/disconnect/response",
+    });
+  }
+
+  async databaseList(requestId?: string): Promise<DatabaseListPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "database/list" },
+      responseType: "database/list/response",
+    });
+  }
+
+  async databaseAdd(options: {
+    requestId?: string;
+    engine: DatabaseEngine;
+    displayName?: string;
+    config: DbConnectionConfig;
+  }): Promise<DatabaseAddPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "database/add",
+        engine: options.engine,
+        ...(options.displayName ? { displayName: options.displayName } : {}),
+        config: options.config,
+      },
+      responseType: "database/add/response",
+    });
+  }
+
+  async databaseConnect(options: {
+    requestId?: string;
+    id: string;
+  }): Promise<DatabaseConnectPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "database/connect", id: options.id },
+      responseType: "database/connect/response",
+    });
+  }
+
+  async databaseDisconnect(options: {
+    requestId?: string;
+    id: string;
+  }): Promise<DatabaseDisconnectPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "database/disconnect", id: options.id },
+      responseType: "database/disconnect/response",
+    });
+  }
+
+  async databaseRemove(options: {
+    requestId?: string;
+    id: string;
+  }): Promise<DatabaseRemovePayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "database/remove", id: options.id },
+      responseType: "database/remove/response",
+    });
+  }
+
+  async databaseSchemas(options: {
+    requestId?: string;
+    id: string;
+  }): Promise<DatabaseSchemasPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "database/schemas", id: options.id },
+      responseType: "database/schemas/response",
+    });
+  }
+
+  async databaseObjects(options: {
+    requestId?: string;
+    id: string;
+    schema: string;
+  }): Promise<DatabaseObjectsPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "database/objects", id: options.id, schema: options.schema },
+      responseType: "database/objects/response",
+    });
+  }
+
+  async databaseColumns(options: {
+    requestId?: string;
+    id: string;
+    schema: string;
+    table: string;
+  }): Promise<DatabaseColumnsPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "database/columns",
+        id: options.id,
+        schema: options.schema,
+        table: options.table,
+      },
+      responseType: "database/columns/response",
+    });
+  }
+
+  async databaseQuery(options: {
+    requestId?: string;
+    id: string;
+    sql: string;
+    limit?: number;
+    offset?: number;
+    params?: Array<string | number | boolean | null>;
+  }): Promise<DatabaseQueryPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "database/query",
+        id: options.id,
+        sql: options.sql,
+        ...(options.limit === undefined ? {} : { limit: options.limit }),
+        ...(options.offset === undefined ? {} : { offset: options.offset }),
+        ...(options.params ? { params: options.params } : {}),
+      },
+      responseType: "database/query/response",
+    });
+  }
+
+  async databaseExec(options: {
+    requestId?: string;
+    id: string;
+    sql: string;
+    params?: Array<string | number | boolean | null>;
+  }): Promise<DatabaseExecPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "database/exec",
+        id: options.id,
+        sql: options.sql,
+        ...(options.params ? { params: options.params } : {}),
+      },
+      responseType: "database/exec/response",
     });
   }
 

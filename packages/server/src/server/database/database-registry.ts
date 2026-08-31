@@ -7,6 +7,8 @@ import { writeJsonFileAtomic } from "../atomic-file.js";
 import type { DatabaseEngine, DatabaseInfo, DatabaseConnectionState } from "./database-dto.js";
 import type { DbClient, DbConnectionConfig } from "./db-client.js";
 import { SqliteDbClient } from "./adapters/sqlite.js";
+import { PostgresDbClient } from "./adapters/postgres.js";
+import { MysqlDbClient } from "./adapters/mysql.js";
 import { FileSecretStore, MemorySecretStore, type SecretStore } from "./secret-store.js";
 
 interface StoredConnection {
@@ -181,8 +183,12 @@ function createClient(engine: DatabaseEngine, config: DbConnectionConfig): DbCli
   switch (engine) {
     case "sqlite":
       return new SqliteDbClient(config);
+    case "postgres":
+      return new PostgresDbClient(config);
+    case "mysql":
+      return new MysqlDbClient(config);
     default:
-      // postgres/mysql/… adapters land in P1; keep the switch exhaustive-friendly.
+      // mssql/oracle/mongodb/clickhouse adapters land in P6.
       throw new Error(`database engine not yet supported: ${engine}`);
   }
 }

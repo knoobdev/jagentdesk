@@ -18,6 +18,7 @@ import type { Skill } from "@jagentdesk/protocol/skills";
 import type { UsageHistoryStorage } from "./usage/usage-history-storage.js";
 import type { LifetimeUsage, UsageDayRollup } from "@jagentdesk/protocol/usage-history";
 import type { ClusterRegistry } from "./cluster/cluster-registry.js";
+import type { DatabaseRegistry } from "./database/database-registry.js";
 import type { ScheduleService } from "./schedule/service.js";
 import type { CheckoutDiffManager, CheckoutDiffMetrics } from "./checkout-diff-manager.js";
 import type { DaemonConfigStore, MutableDaemonConfig } from "./daemon-config-store.js";
@@ -572,6 +573,7 @@ export class VoiceAssistantWebSocketServer {
   private skillsStorage: SkillsStorage | null = null;
   private usageHistory: UsageHistoryStorage | null = null;
   private readonly clusterRegistry: ClusterRegistry;
+  private readonly databaseRegistry: DatabaseRegistry;
   private readonly scheduleService: ScheduleService;
   private readonly checkoutDiffManager: CheckoutDiffManager;
   private readonly github: ForgeService;
@@ -694,6 +696,7 @@ export class VoiceAssistantWebSocketServer {
     pluginRuntime?: PluginRuntimePort | null,
     skillsStorage?: SkillsStorage | null,
     usageHistory?: UsageHistoryStorage | null,
+    databaseRegistry?: DatabaseRegistry,
   ) {
     this.logger = logger.child({ module: "websocket-server" });
     this.advertiseDaemonStatusRpc = wsConfig.daemonStatusRpc !== false;
@@ -721,6 +724,8 @@ export class VoiceAssistantWebSocketServer {
     this.loopService = requiredServices.loopService;
     this.clusterRegistry =
       clusterRegistry ?? new (require("./cluster/cluster-registry.js").ClusterRegistry)();
+    this.databaseRegistry =
+      databaseRegistry ?? new (require("./database/database-registry.js").DatabaseRegistry)();
     this.scheduleService = requiredServices.scheduleService;
     this.checkoutDiffManager = requiredServices.checkoutDiffManager;
     this.github = github ?? createGitHubService();
@@ -1691,6 +1696,7 @@ export class VoiceAssistantWebSocketServer {
       skillsStorage: this.skillsStorage,
       usageHistory: this.usageHistory,
       clusterRegistry: this.clusterRegistry,
+      databaseRegistry: this.databaseRegistry,
       scheduleService: this.scheduleService,
       checkoutDiffManager: this.checkoutDiffManager,
       github: this.github,

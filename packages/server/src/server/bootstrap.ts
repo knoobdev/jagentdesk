@@ -150,6 +150,7 @@ import { LoopService } from "./loop-service.js";
 import { SkillsStorage } from "./skills/skills-storage.js";
 import { buildLifetimeBaseline, UsageHistoryStorage } from "./usage/usage-history-storage.js";
 import { ClusterRegistry } from "./cluster/cluster-registry.js";
+import { DatabaseRegistry } from "./database/database-registry.js";
 import { ScheduleService } from "./schedule/service.js";
 import { DaemonConfigStore, type MutableDaemonConfig } from "./daemon-config-store.js";
 import { PluginService } from "./plugins/index.js";
@@ -1236,6 +1237,12 @@ export async function createJAgentDeskDaemon(
   });
   await clusterRegistry.initialize();
   logger.info("Cluster registry created");
+  const databaseRegistry = new DatabaseRegistry({
+    jagentdeskHome: config.jagentdeskHome,
+    logger,
+  });
+  await databaseRegistry.initialize();
+  logger.info("Database registry created");
   const createScheduleLocalWorkspaceExternal = async (input: {
     cwd: string;
     firstAgentContext: FirstAgentContext;
@@ -1662,6 +1669,7 @@ export async function createJAgentDeskDaemon(
               pluginRuntime,
               skillsStorage,
               usageHistory,
+              databaseRegistry,
             );
             // Bind the plugin session host and start configured plugins before any
             // external ingress attaches, mirroring upstream's pre-accept ordering.

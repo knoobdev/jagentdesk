@@ -135,6 +135,7 @@ import {
   ClusterPfCloseRequestSchema,
   ClusterPfCloseResponseSchema,
 } from "./cluster/rpc-schemas.js";
+import { DatabaseRequestSchemas, DatabaseResponseSchemas } from "./database/rpc-schemas.js";
 import {
   ExportHostDataRequestMessageSchema,
   ExportHostDataResponseMessageSchema,
@@ -2779,6 +2780,7 @@ export const HubExecutionControlRequestSchema = z.object({
 export type HubExecutionControlRequest = z.infer<typeof HubExecutionControlRequestSchema>;
 
 export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
+  ...DatabaseRequestSchemas,
   HubExecutionAgentCreateRequestSchema,
   HubExecutionControlRequestSchema,
   BrowserAutomationExecuteResponseSchema,
@@ -5772,6 +5774,7 @@ export function parseHubExecutionOutboundMessage(value: unknown): HubExecutionOu
 export type DaemonUpdateProgressMessage = z.infer<typeof DaemonUpdateProgressMessageSchema>;
 
 export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
+  ...DatabaseResponseSchemas,
   HubExecutionAgentCreateResponseSchema,
   HubExecutionControlResponseSchema,
   HubExecutionAgentUpdateSchema,

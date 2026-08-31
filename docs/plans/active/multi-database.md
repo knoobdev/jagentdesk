@@ -58,13 +58,13 @@ Every shipped task runs against a real database — no stubs.
 - [x] Credential vault: `secret-store.ts` — `FileSecretStore` (AES-256-GCM, key 0600 in `<home>/databases/`) + `MemorySecretStore`; secret never in databases.json nor on the wire.
 - [x] Proof: `database-registry.test.ts` — **4/4 pass**: temp SQLite → add → connect (SQLite version) → introspect (PK on id, FK on customer_id, NOT NULL on status) → paged query (limit/offset + `truncated`) → read-only guard rejects DELETE → identity persists across restart → secret encrypted at rest (not plaintext on disk). typecheck + lint clean.
 
-### P1 — protocol + session + client + PG/MySQL adapters
+### P1 — protocol + session + client + PG/MySQL adapters — DONE 2026-09-01
 
-- [ ] `protocol/src/database/rpc-schemas.ts` (list/connect/disconnect/add/objects/columns/query/exec/explain/history) + register in `messages.ts` unions.
-- [ ] `session/database/database-session.ts` handlers + wire `dispatchDatabaseMessage`/`initDatabaseSession` in `session.ts`; construct `DatabaseRegistry` in `bootstrap.ts`.
-- [ ] `daemon-client.ts` `databaseList/Connect/Objects/Columns/Query/Exec/Explain` + response-type regs.
-- [ ] PostgreSQL adapter (`pg`+`pg-cursor`) and MySQL adapter (`mysql2`), same interface + `information_schema`/`pg_catalog` introspection.
-- [ ] Proof: real `.e2e` test connecting a throwaway Postgres (docker) — connect → objects → columns → paged query → explain.
+- [x] `protocol/src/database/rpc-schemas.ts` (list/add/connect/disconnect/remove/schemas/objects/columns/query/exec) + registered in `messages.ts` unions (`...DatabaseRequestSchemas` / `...DatabaseResponseSchemas`). Generic `req`/`resp` helpers preserve per-field types in the inferred union.
+- [x] `session/database/database-session.ts` handlers (never throw to the socket loop; error path emits a typed empty body) + wired `dispatchDatabaseMessage`/`initDatabaseSession` in `session.ts`; `DatabaseRegistry` constructed in `bootstrap.ts` and threaded through `VoiceAssistantWebSocketServer` (new trailing positional param → no slot shift) into `SessionOptions`.
+- [x] `daemon-client.ts` `databaseList/Add/Connect/Disconnect/Remove/Schemas/Objects/Columns/Query/Exec` (auto-correlated: responses carry `payload.requestId`, so no extra registration needed).
+- [x] PostgreSQL adapter (`pg`, `pg_catalog`/`information_schema` PK+FK introspection, `rowMode:'array'`) and MySQL adapter (`mysql2/promise`, `information_schema`, `rowsAsArray`), same `DbClient` interface + read-only guard.
+- [x] Proof: `database-p1-e2e.test.ts` — **4/4 pass**. (1) Full protocol→session→registry→adapter round-trip over SQLite, every request parsed through `SessionInboundMessageSchema` and every response through `SessionOutboundMessageSchema` (add→connect→schemas→objects→columns→paged query→exec update). (2) Error path emits typed empty body, never throws. (3) **Real Postgres** (docker `postgres:16`) — connect→version→create→introspect (PK on id, FK on customer_id, NOT NULL on status)→paginate→read-only guard rejects DELETE. (4) **Real MySQL** (docker `mysql:8`) — same. PG/MySQL gated by `JAD_DB_E2E=1` (containers on ports 55433/55434). typecheck server+client clean.
 
 ### P2 — app shell: sidebar entry, list + add connection, routes, stores
 
@@ -107,7 +107,9 @@ Every shipped task runs against a real database — no stubs.
 ## Progress
 
 - [x] 2026-09-01: Spec `docs/databases.md` written (mirrors kubernetes.md; real component refs).
-- [ ] P0 …
+- [x] 2026-09-01: P0 daemon foundation — DTO/DbClient/isWriteStatement, SQLite adapter, DatabaseRegistry, AES-256-GCM secret vault; 4/4 tests.
+- [x] 2026-09-01: P1 protocol+session+client+PG/MySQL adapters — 4/4 tests incl. real Postgres + MySQL over docker.
+- [ ] P2 …
 
 ## Validation
 

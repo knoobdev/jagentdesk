@@ -164,6 +164,8 @@ import {
 import { ChatScheduleLoopSession } from "./session/chat/chat-schedule-loop-session.js";
 import { ClusterSession } from "./session/cluster/cluster-session.js";
 import { ClusterRegistry } from "./cluster/cluster-registry.js";
+import { DatabaseSession } from "./session/database/database-session.js";
+import { DatabaseRegistry } from "./database/database-registry.js";
 import { ProviderCatalogSession } from "./session/provider/provider-catalog-session.js";
 import { WorkspaceFilesSession } from "./session/files/workspace-files-session.js";
 import { AgentConfigSession } from "./session/agent-config/agent-config-session.js";
@@ -449,6 +451,7 @@ export interface SessionOptions {
   skillsStorage?: SkillsStorage | null;
   usageHistory?: UsageHistoryStorage | null;
   clusterRegistry?: ClusterRegistry;
+  databaseRegistry?: DatabaseRegistry;
   checkoutDiffManager: CheckoutDiffManager;
   github?: ForgeService;
   createAgentMcpTransport?: AgentMcpTransportFactory;
@@ -700,6 +703,7 @@ export class Session {
   private readonly checkoutSession: CheckoutSession;
   private readonly chatScheduleLoopSession: ChatScheduleLoopSession;
   private clusterSession!: ClusterSession;
+  private databaseSession!: DatabaseSession;
   private readonly providerCatalogSession: ProviderCatalogSession;
   private readonly workspaceFilesSession: WorkspaceFilesSession;
   private readonly agentConfigSession: AgentConfigSession;
@@ -882,6 +886,7 @@ export class Session {
       logger: this.sessionLogger,
     });
     this.initClusterSession(options);
+    this.initDatabaseSession(options);
     this.providerCatalogSession = new ProviderCatalogSession({
       host: {
         emit: (msg) => this.emit(msg),
@@ -1111,6 +1116,16 @@ export class Session {
         emit: (msg) => this.emit(msg),
       },
       clusterRegistry: options.clusterRegistry ?? new ClusterRegistry(),
+      logger: this.sessionLogger,
+    });
+  }
+
+  private initDatabaseSession(options: SessionOptions): void {
+    this.databaseSession = new DatabaseSession({
+      host: {
+        emit: (msg) => this.emit(msg),
+      },
+      databaseRegistry: options.databaseRegistry ?? new DatabaseRegistry(),
       logger: this.sessionLogger,
     });
   }
@@ -1929,6 +1944,7 @@ export class Session {
       () => this.dispatchTerminalMessage(msg),
       () => this.dispatchChatScheduleLoopMessage(msg),
       () => this.dispatchClusterMessage(msg),
+      () => this.dispatchDatabaseMessage(msg),
       () => this.dispatchMigrationMessage(msg),
       () => this.dispatchPluginMessage(msg),
       () => this.dispatchPluginDirectoryMessage(msg),
@@ -2671,6 +2687,33 @@ export class Session {
         return this.clusterSession.handlePfClose(
           msg as unknown as Parameters<typeof this.clusterSession.handlePfClose>[0],
         );
+      default:
+        return undefined;
+    }
+  }
+
+  private dispatchDatabaseMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    switch (msg.type) {
+      case "database/list":
+        return this.databaseSession.handleList(msg);
+      case "database/add":
+        return this.databaseSession.handleAdd(msg);
+      case "database/connect":
+        return this.databaseSession.handleConnect(msg);
+      case "database/disconnect":
+        return this.databaseSession.handleDisconnect(msg);
+      case "database/remove":
+        return this.databaseSession.handleRemove(msg);
+      case "database/schemas":
+        return this.databaseSession.handleSchemas(msg);
+      case "database/objects":
+        return this.databaseSession.handleObjects(msg);
+      case "database/columns":
+        return this.databaseSession.handleColumns(msg);
+      case "database/query":
+        return this.databaseSession.handleQuery(msg);
+      case "database/exec":
+        return this.databaseSession.handleExec(msg);
       default:
         return undefined;
     }
