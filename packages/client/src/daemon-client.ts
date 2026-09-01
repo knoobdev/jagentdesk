@@ -648,6 +648,14 @@ type DatabaseRemovePayload = Extract<
   SessionOutboundMessage,
   { type: "database/remove/response" }
 >["payload"];
+type DatabaseDatabasesPayload = Extract<
+  SessionOutboundMessage,
+  { type: "database/databases/response" }
+>["payload"];
+type DatabaseUseDatabasePayload = Extract<
+  SessionOutboundMessage,
+  { type: "database/use-database/response" }
+>["payload"];
 type DatabaseSchemasPayload = Extract<
   SessionOutboundMessage,
   { type: "database/schemas/response" }
@@ -5987,6 +5995,29 @@ export class DaemonClient {
       requestId: options.requestId,
       message: { type: "database/remove", id: options.id },
       responseType: "database/remove/response",
+    });
+  }
+
+  async databaseDatabases(options: {
+    requestId?: string;
+    id: string;
+  }): Promise<DatabaseDatabasesPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "database/databases", id: options.id },
+      responseType: "database/databases/response",
+    });
+  }
+
+  async databaseUseDatabase(options: {
+    requestId?: string;
+    id: string;
+    database: string;
+  }): Promise<DatabaseUseDatabasePayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "database/use-database", id: options.id, database: options.database },
+      responseType: "database/use-database/response",
     });
   }
 

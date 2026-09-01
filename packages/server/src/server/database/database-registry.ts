@@ -4,7 +4,12 @@ import path from "node:path";
 import { z } from "zod";
 import type { Logger } from "pino";
 import { writeJsonFileAtomic } from "../atomic-file.js";
-import type { DatabaseEngine, DatabaseInfo, DatabaseConnectionState } from "./database-dto.js";
+import type {
+  DatabaseEngine,
+  DatabaseInfo,
+  DatabaseConnectionState,
+  DbDatabaseName,
+} from "./database-dto.js";
 import type { DbClient, DbConnectionConfig } from "./db-client.js";
 import { SqliteDbClient } from "./adapters/sqlite.js";
 import { PostgresDbClient } from "./adapters/postgres.js";
@@ -30,6 +35,9 @@ interface StoredConnection {
   serverVersion?: string;
   lastError?: string;
   lastSeen_ms?: number;
+  /** Runtime-only override of `database` after switching databases on the same
+   *  server (postgres/mssql). Never persisted — a fresh connect uses `database`. */
+  activeDatabase?: string;
 }
 
 // Persisted shape: identity + non-secret connection fields only. The secret is
@@ -128,17 +136,51 @@ export class DatabaseRegistry {
   async connect(id: string): Promise<DatabaseInfo> {
     const entry = this.connections.get(id);
     if (!entry) throw new Error(`database not found: ${id}`);
+    entry.activeDatabase = undefined; // a fresh connect starts on the default db
+    return this.openClient(entry);
+  }
+
+  /** The databases on the server this connection points at (empty when the engine
+   *  has a single logical database or is not connected). */
+  async listDatabases(id: string): Promise<DbDatabaseName[]> {
+    const client = this.clients.get(id);
+    if (!client?.listDatabases) return [];
+    return client.listDatabases();
+  }
+
+  /** Switch which database on the same server this connection operates. Reconnects
+   *  the client to `database` (postgres can't switch db on a live session), so the
+   *  browse view and the chat agent both follow. */
+  async useDatabase(id: string, database: string): Promise<DatabaseInfo> {
+    const entry = this.connections.get(id);
+    if (!entry) throw new Error(`database not found: ${id}`);
+    const previous = entry.activeDatabase;
+    entry.activeDatabase = database;
+    const old = this.clients.get(id);
+    if (old) {
+      await old.close().catch(() => undefined);
+      this.clients.delete(id);
+    }
+    const info = await this.openClient(entry);
+    if (entry.state !== "connected") entry.activeDatabase = previous; // roll back on failure
+    return info;
+  }
+
+  /** Build the live config from an entry (honoring an active-database override) and
+   *  connect a fresh client. Shared by connect() and useDatabase(). */
+  private async openClient(entry: StoredConnection): Promise<DatabaseInfo> {
     entry.state = "connecting";
     try {
-      const secret = await this.secrets.get(id);
+      const secret = await this.secrets.get(entry.id);
+      const database = entry.activeDatabase ?? entry.database;
       const config: DbConnectionConfig = {
         host: entry.host,
         port: entry.port,
-        database: entry.database,
+        database,
         user: entry.user,
         file: entry.file,
         options: entry.options,
-        ...secretFields(secret),
+        ...secretFields(secret, database),
       };
       const client = createClient(entry.engine, config);
       await client.connect();
@@ -146,7 +188,7 @@ export class DatabaseRegistry {
       entry.state = "connected";
       entry.lastSeen_ms = Date.now();
       entry.lastError = undefined;
-      this.clients.set(id, client);
+      this.clients.set(entry.id, client);
     } catch (err) {
       entry.state = "error";
       entry.lastError = err instanceof Error ? err.message : String(err);
@@ -161,7 +203,10 @@ export class DatabaseRegistry {
       this.clients.delete(id);
     }
     const entry = this.connections.get(id);
-    if (entry) entry.state = "saved";
+    if (entry) {
+      entry.state = "saved";
+      entry.activeDatabase = undefined;
+    }
   }
 
   async remove(id: string): Promise<void> {
@@ -225,9 +270,22 @@ function toPersisted(c: StoredConnection): Record<string, unknown> {
   return out;
 }
 
-function secretFields(secret: string | null): Partial<DbConnectionConfig> {
+function secretFields(secret: string | null, database?: string): Partial<DbConnectionConfig> {
   if (!secret) return {};
-  return isDsn(secret) ? { dsn: secret } : { password: secret };
+  return isDsn(secret) ? { dsn: overrideDsnDatabase(secret, database) } : { password: secret };
+}
+
+/** Point a DSN at a different database (used when switching databases on a
+ *  DSN-configured connection). Discrete-field connections don't need this. */
+function overrideDsnDatabase(dsn: string, database?: string): string {
+  if (!database) return dsn;
+  try {
+    const url = new URL(dsn);
+    url.pathname = `/${encodeURIComponent(database)}`;
+    return url.toString();
+  } catch {
+    return dsn;
+  }
 }
 
 /** host:port/database (or file path for SQLite) for display — never the secret. */
@@ -248,5 +306,6 @@ function toInfo(entry: StoredConnection): DatabaseInfo {
     serverVersion: entry.serverVersion,
     lastError: entry.lastError,
     lastSeen_ms: entry.lastSeen_ms,
+    currentDatabase: entry.activeDatabase ?? entry.database,
   };
 }

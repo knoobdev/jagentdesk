@@ -2704,6 +2704,10 @@ export class Session {
         return this.databaseSession.handleDisconnect(msg);
       case "database/remove":
         return this.databaseSession.handleRemove(msg);
+      case "database/databases":
+        return this.databaseSession.handleDatabases(msg);
+      case "database/use-database":
+        return this.databaseSession.handleUseDatabase(msg);
       case "database/schemas":
         return this.databaseSession.handleSchemas(msg);
       case "database/objects":

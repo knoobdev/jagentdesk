@@ -26,8 +26,12 @@ export const DatabaseInfoSchema = z.object({
   serverVersion: z.string().optional(),
   lastError: z.string().optional(),
   lastSeen_ms: z.number().optional(),
+  currentDatabase: z.string().optional(),
 });
 export type DatabaseInfo = z.infer<typeof DatabaseInfoSchema>;
+
+export const DbDatabaseNameSchema = z.object({ name: z.string(), current: z.boolean() });
+export type DbDatabaseName = z.infer<typeof DbDatabaseNameSchema>;
 
 export const DbSchemaSchema = z.object({ name: z.string() });
 export const DbObjectSchema = z.object({
@@ -125,6 +129,18 @@ export const DatabaseDisconnectRequestSchema = req("database/disconnect", { id: 
 export const DatabaseDisconnectResponseSchema = resp("database/disconnect/response", {});
 export const DatabaseRemoveRequestSchema = req("database/remove", { id: z.string() });
 export const DatabaseRemoveResponseSchema = resp("database/remove/response", {});
+// ── databases on the server (DATABASE switcher) + switch active database ──
+export const DatabaseDatabasesRequestSchema = req("database/databases", { id: z.string() });
+export const DatabaseDatabasesResponseSchema = resp("database/databases/response", {
+  databases: z.array(DbDatabaseNameSchema),
+});
+export const DatabaseUseDatabaseRequestSchema = req("database/use-database", {
+  id: z.string(),
+  database: z.string(),
+});
+export const DatabaseUseDatabaseResponseSchema = resp("database/use-database/response", {
+  database: DatabaseInfoSchema.nullable(),
+});
 // ── introspection ──
 export const DatabaseSchemasRequestSchema = req("database/schemas", { id: z.string() });
 export const DatabaseSchemasResponseSchema = resp("database/schemas/response", {
@@ -194,6 +210,8 @@ export const DatabaseRequestSchemas = [
   DatabaseConnectRequestSchema,
   DatabaseDisconnectRequestSchema,
   DatabaseRemoveRequestSchema,
+  DatabaseDatabasesRequestSchema,
+  DatabaseUseDatabaseRequestSchema,
   DatabaseSchemasRequestSchema,
   DatabaseObjectsRequestSchema,
   DatabaseColumnsRequestSchema,
@@ -212,6 +230,8 @@ export const DatabaseResponseSchemas = [
   DatabaseConnectResponseSchema,
   DatabaseDisconnectResponseSchema,
   DatabaseRemoveResponseSchema,
+  DatabaseDatabasesResponseSchema,
+  DatabaseUseDatabaseResponseSchema,
   DatabaseSchemasResponseSchema,
   DatabaseObjectsResponseSchema,
   DatabaseColumnsResponseSchema,

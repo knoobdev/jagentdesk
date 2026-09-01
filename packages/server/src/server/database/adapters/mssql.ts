@@ -3,6 +3,7 @@ import type { DbClient, DbConnectionConfig, RunQueryOptions } from "../db-client
 import { isWriteStatement } from "../db-client.js";
 import type {
   DbColumn,
+  DbDatabaseName,
   DbForeignKey,
   DbObject,
   DbSchema,
@@ -78,6 +79,15 @@ export class MssqlDbClient implements DbClient {
     return res.recordset
       .map((r) => ({ name: String(r.name) }))
       .filter((s) => !SYSTEM_SCHEMAS.has(s.name));
+  }
+
+  async listDatabases(): Promise<DbDatabaseName[]> {
+    const res = await this.require()
+      .request()
+      .query<{ name: string; current: number }>(
+        "select name, case when name = db_name() then 1 else 0 end as current from sys.databases where state = 0 order by name",
+      );
+    return res.recordset.map((r) => ({ name: String(r.name), current: r.current === 1 }));
   }
 
   async listObjects(schema: string): Promise<DbObject[]> {

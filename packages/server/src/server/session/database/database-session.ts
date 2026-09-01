@@ -74,6 +74,18 @@ export class DatabaseSession {
     });
   }
 
+  async handleDatabases(msg: Req<"database/databases">): Promise<void> {
+    await this.run(msg.requestId, "database/databases/response", async () => ({
+      databases: await this.registry.listDatabases(msg.id),
+    }));
+  }
+
+  async handleUseDatabase(msg: Req<"database/use-database">): Promise<void> {
+    await this.run(msg.requestId, "database/use-database/response", async () => ({
+      database: await this.registry.useDatabase(msg.id, msg.database),
+    }));
+  }
+
   async handleSchemas(msg: Req<"database/schemas">): Promise<void> {
     await this.run(msg.requestId, "database/schemas/response", async () => ({
       schemas: await this.requireClient(msg.id).listSchemas(),
@@ -170,7 +182,10 @@ function emptyBody(type: string): Record<string, unknown> {
       return { databases: [] };
     case "database/add/response":
     case "database/connect/response":
+    case "database/use-database/response":
       return { database: null };
+    case "database/databases/response":
+      return { databases: [] };
     case "database/schemas/response":
       return { schemas: [] };
     case "database/objects/response":

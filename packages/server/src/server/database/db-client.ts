@@ -1,5 +1,6 @@
 import type {
   DbColumn,
+  DbDatabaseName,
   DbForeignKey,
   DbObject,
   DbSchema,
@@ -44,6 +45,12 @@ export interface DbClient {
   serverVersion(): Promise<string>;
 
   listSchemas(): Promise<DbSchema[]>;
+  /**
+   * The databases on this server (postgres/mysql/mssql). Optional — engines with a
+   * single logical database (sqlite, oracle service) omit it, so the UI hides the
+   * DATABASE switcher. Used to switch which database the connection operates.
+   */
+  listDatabases?(): Promise<DbDatabaseName[]>;
   listObjects(schema: string): Promise<DbObject[]>;
   listColumns(schema: string, table: string): Promise<DbColumn[]>;
   /** Foreign-key edges within a schema (empty for engines without FKs). */

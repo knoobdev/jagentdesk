@@ -3,6 +3,7 @@ import type { DbClient, DbConnectionConfig, RunQueryOptions } from "../db-client
 import { isWriteStatement } from "../db-client.js";
 import type {
   DbColumn,
+  DbDatabaseName,
   DbForeignKey,
   DbObject,
   DbSchema,
@@ -70,6 +71,15 @@ export class PostgresDbClient implements DbClient {
       "select schema_name from information_schema.schemata where schema_name not like 'pg_%' and schema_name <> 'information_schema' order by schema_name",
     );
     return res.rows.map((r) => ({ name: r.schema_name }));
+  }
+
+  async listDatabases(): Promise<DbDatabaseName[]> {
+    const cur = (await this.require().query<{ db: string }>("select current_database() as db"))
+      .rows[0]?.db;
+    const res = await this.require().query<{ name: string }>(
+      "select datname as name from pg_database where datallowconn and not datistemplate order by datname",
+    );
+    return res.rows.map((r) => ({ name: r.name, current: r.name === cur }));
   }
 
   async listObjects(schema: string): Promise<DbObject[]> {

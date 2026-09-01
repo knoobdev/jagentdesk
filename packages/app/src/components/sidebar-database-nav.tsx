@@ -15,7 +15,12 @@ import {
   Terminal,
 } from "lucide-react-native";
 import { router } from "expo-router";
-import type { DatabaseInfo, DbObject, DbSchema } from "@jagentdesk/protocol/database/rpc-schemas";
+import type {
+  DatabaseInfo,
+  DbDatabaseName,
+  DbObject,
+  DbSchema,
+} from "@jagentdesk/protocol/database/rpc-schemas";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { DatabaseStatusDot } from "@/components/database-dot";
 import { useDatabaseNavStore } from "@/stores/database-nav-store";
@@ -63,6 +68,48 @@ function SchemaRow({
       </Text>
       {active ? <ThemedCheck size={13} uniProps={accentColor} /> : null}
     </Pressable>
+  );
+}
+
+/** A labeled database picker (DataGrip's server → databases level). Shown only for
+ *  engines that expose multiple databases on one connection (postgres/mssql). */
+function DatabaseSelect({
+  databases,
+  value,
+  onSelect,
+}: {
+  databases: DbDatabaseName[];
+  value: string | null;
+  onSelect: (name: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const toggle = useCallback(() => setOpen((v) => !v), []);
+  const pick = useCallback(
+    (name: string) => {
+      onSelect(name);
+      setOpen(false);
+    },
+    [onSelect],
+  );
+  if (databases.length < 2) return null;
+  return (
+    <View style={styles.schemaSelect}>
+      <Text style={styles.schemaSelectLabel}>DATABASE</Text>
+      <Pressable style={styles.schemaTrigger} onPress={toggle} testID="database-db-select">
+        <ThemedDatabase size={14} uniProps={mutedColor} />
+        <Text style={styles.schemaTriggerText} numberOfLines={1}>
+          {value ?? "Select database"}
+        </Text>
+        <ThemedChevronDown size={14} uniProps={mutedColor} />
+      </Pressable>
+      {open ? (
+        <View style={styles.schemaMenu}>
+          {databases.map((d) => (
+            <SchemaRow key={d.name} name={d.name} active={value === d.name} onSelect={pick} />
+          ))}
+        </View>
+      ) : null}
+    </View>
   );
 }
 
@@ -142,6 +189,7 @@ export function SidebarDatabaseNav({
   const client = useHostRuntimeClient(serverId);
   const [database, setDatabase] = useState<DatabaseInfo | null>(null);
   const [schemas, setSchemas] = useState<DbSchema[]>([]);
+  const [databases, setDatabases] = useState<DbDatabaseName[]>([]);
   const [objects, setObjects] = useState<DbObject[]>([]);
 
   const selectedSchema = useDatabaseNavStore((s) => s.selectedSchema);
@@ -162,6 +210,7 @@ export function SidebarDatabaseNav({
   // or a sidebar jump renders this nav before connect runs, so the first schema
   // fetch fails with "database is not connected"; re-run when the connect lands.
   const listRefreshKey = useDatabaseViewStore((s) => s.listRefreshKey);
+  const bumpRefresh = useDatabaseViewStore((s) => s.bumpRefresh);
   const showMobileAgent = usePanelStore((s) => s.showMobileAgent);
   const isCompact = useIsCompactFormFactor();
 
@@ -175,6 +224,13 @@ export function SidebarDatabaseNav({
       .databaseList()
       .then((res) => {
         if (!res.error) setDatabase(res.databases.find((d) => d.id === databaseId) ?? null);
+        return undefined;
+      })
+      .catch(() => {});
+    void client
+      .databaseDatabases({ id: databaseId })
+      .then((res) => {
+        if (!res.error) setDatabases(res.databases);
         return undefined;
       })
       .catch(() => {});
@@ -244,6 +300,23 @@ export function SidebarDatabaseNav({
     if (isCompact) showMobileAgent();
   }, [databaseId, selectEr, isCompact, showMobileAgent]);
   const handleSelectSchema = useCallback((name: string) => setSchema(name), [setSchema]);
+  const currentDatabase = database?.currentDatabase ?? null;
+  const handleSelectDatabase = useCallback(
+    (name: string) => {
+      if (!client || name === currentDatabase) return;
+      // Reconnect the connection to the chosen database, then reload the tree.
+      setSchema(null);
+      setObjects([]);
+      void client
+        .databaseUseDatabase({ id: databaseId, database: name })
+        .then(() => {
+          bumpRefresh();
+          return undefined;
+        })
+        .catch(() => {});
+    },
+    [client, databaseId, currentDatabase, setSchema, bumpRefresh],
+  );
 
   const handleBackToPrevious = useCallback(() => {
     if (router.canGoBack()) router.back();
@@ -284,6 +357,11 @@ export function SidebarDatabaseNav({
         </Text>
       </View>
 
+      <DatabaseSelect
+        databases={databases}
+        value={currentDatabase}
+        onSelect={handleSelectDatabase}
+      />
       <SchemaSelect schemas={schemas} value={selectedSchema} onSelect={handleSelectSchema} />
 
       <ScrollView style={styles.nav} contentContainerStyle={styles.navContent}>

@@ -24,6 +24,16 @@ export interface DatabaseInfo {
   serverVersion?: string;
   lastError?: string;
   lastSeen_ms?: number;
+  /** The database currently active on the connection (which db the live client is
+   *  in). Lets one connection switch between databases on the same server. */
+  currentDatabase?: string;
+}
+
+/** One database on the server a connection points at (for the DATABASE switcher). */
+export interface DbDatabaseName {
+  name: string;
+  /** True for the database the connection's live client is currently in. */
+  current: boolean;
 }
 
 export type SchemaObjectKind =
