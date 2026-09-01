@@ -51,17 +51,11 @@ export function DatabaseBrowseScreen({
   useEffect(() => {
     resetViewForDatabase(databaseId);
     setLastDatabase(serverId, databaseId);
-    // On phones the chat dock is a full-screen overlay, so start it CLOSED and
-    // let the data view be the landing; desktop keeps the side dock open.
-    resetChatForDatabase(databaseId, !isCompact);
-  }, [
-    databaseId,
-    serverId,
-    isCompact,
-    resetViewForDatabase,
-    setLastDatabase,
-    resetChatForDatabase,
-  ]);
+    // Start the chat dock COLLAPSED — data grids / structure / ER are wide, so the
+    // browse view gets the full pane by default (on desktop the closed dock is a
+    // slim handle; on phones a FAB). The user opens chat when they want it.
+    resetChatForDatabase(databaseId, false);
+  }, [databaseId, serverId, resetViewForDatabase, setLastDatabase, resetChatForDatabase]);
 
   const showMobileAgentList = usePanelStore((s) => s.showMobileAgentList);
   useEffect(() => {

@@ -482,19 +482,21 @@ function EditableTable({
   onDeleteRow: (row: Cell[]) => void;
 }) {
   return (
-    <ScrollView horizontal style={styles.hScroll}>
-      <View>
-        <View style={styles.headerRow}>
-          <View style={styles.gutter} />
-          {result.columns.map((col) => (
-            <View key={col.name} style={styles.cell}>
-              <Text style={styles.headerText} numberOfLines={1}>
-                {col.name}
-              </Text>
-            </View>
-          ))}
-        </View>
-        <ScrollView style={styles.vScroll}>
+    // Vertical (rows) scroll outside, horizontal (columns) inside — both axes
+    // scroll, no clipping regardless of pane size.
+    <ScrollView style={styles.vScroll}>
+      <ScrollView horizontal>
+        <View>
+          <View style={styles.headerRow}>
+            <View style={styles.gutter} />
+            {result.columns.map((col) => (
+              <View key={col.name} style={styles.cell}>
+                <Text style={styles.headerText} numberOfLines={1}>
+                  {col.name}
+                </Text>
+              </View>
+            ))}
+          </View>
           {result.rows.map((row, r) => (
             // Positional rows: index is the correct key for an arbitrary result.
             <EditableRow
@@ -507,8 +509,8 @@ function EditableTable({
               onDelete={onDeleteRow}
             />
           ))}
-        </ScrollView>
-      </View>
+        </View>
+      </ScrollView>
     </ScrollView>
   );
 }
@@ -732,7 +734,6 @@ const styles = StyleSheet.create((theme: Theme) => ({
   errorBox: { padding: theme.spacing[3], backgroundColor: theme.colors.palette.red[100] },
   errorText: { fontSize: theme.fontSize.sm, color: theme.colors.palette.red[800] },
   center: { flex: 1, alignItems: "center", justifyContent: "center", minHeight: 120 },
-  hScroll: { flex: 1, minHeight: 0 },
   headerRow: {
     flexDirection: "row",
     borderBottomWidth: theme.borderWidth[1],
@@ -760,7 +761,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     fontWeight: theme.fontWeight.semibold,
     color: theme.colors.foreground,
   },
-  vScroll: { minHeight: 0 },
+  vScroll: { flex: 1, minHeight: 0 },
   bodyRow: {
     flexDirection: "row",
     borderBottomWidth: StyleSheet.hairlineWidth,

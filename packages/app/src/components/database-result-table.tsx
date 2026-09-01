@@ -32,23 +32,25 @@ export function DatabaseResultTable({ result }: { result: QueryResult }) {
   }, [result]);
 
   return (
-    <ScrollView horizontal style={styles.hScroll} contentContainerStyle={styles.hContent}>
-      <View>
-        <View style={styles.headerRow}>
-          {result.columns.map((col, i) => (
-            <View key={col.name} style={[styles.headerCell, { width: widths[i] }]}>
-              <Text style={styles.headerText} numberOfLines={1}>
-                {col.name}
-              </Text>
-              {col.dataType ? (
-                <Text style={styles.headerType} numberOfLines={1}>
-                  {col.dataType}
+    // Vertical (page) scroll on the outside, horizontal (columns) on the inside —
+    // both axes scroll and nothing is clipped, regardless of pane width/height.
+    <ScrollView style={styles.vScroll}>
+      <ScrollView horizontal contentContainerStyle={styles.hContent}>
+        <View>
+          <View style={styles.headerRow}>
+            {result.columns.map((col, i) => (
+              <View key={col.name} style={[styles.headerCell, { width: widths[i] }]}>
+                <Text style={styles.headerText} numberOfLines={1}>
+                  {col.name}
                 </Text>
-              ) : null}
-            </View>
-          ))}
-        </View>
-        <ScrollView style={styles.vScroll}>
+                {col.dataType ? (
+                  <Text style={styles.headerType} numberOfLines={1}>
+                    {col.dataType}
+                  </Text>
+                ) : null}
+              </View>
+            ))}
+          </View>
           {result.rows.map((row, r) => (
             // Rows are positional (no stable PK is guaranteed in an arbitrary
             // result set), so the row index is the correct key here.
@@ -70,17 +72,13 @@ export function DatabaseResultTable({ result }: { result: QueryResult }) {
             </View>
           ))}
           {result.rows.length === 0 ? <Text style={styles.emptyText}>No rows.</Text> : null}
-        </ScrollView>
-      </View>
+        </View>
+      </ScrollView>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create((theme: Theme) => ({
-  hScroll: {
-    flex: 1,
-    minHeight: 0,
-  },
   hContent: {
     flexGrow: 1,
   },
@@ -106,6 +104,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     color: theme.colors.foregroundExtraMuted,
   },
   vScroll: {
+    flex: 1,
     minHeight: 0,
   },
   bodyRow: {

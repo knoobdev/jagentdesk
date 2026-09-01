@@ -72,32 +72,34 @@ export function DatabaseStructureView({
   let body;
   if (tab === "columns") {
     body = (
-      <ScrollView style={styles.scroll} horizontal>
-        <ScrollView style={styles.gridV} contentContainerStyle={styles.gridVContent}>
-          <View style={styles.gridHeader}>
-            <Text style={[styles.gridHeadText, styles.cIdx]}>#</Text>
-            <Text style={[styles.gridHeadText, styles.cName]}>Name</Text>
-            <Text style={[styles.gridHeadText, styles.cType]}>Type</Text>
-            <Text style={[styles.gridHeadText, styles.cNull]}>Nullable</Text>
-            <Text style={[styles.gridHeadText, styles.cKey]}>Key</Text>
-            <Text style={[styles.gridHeadText, styles.cDefault]}>Default</Text>
-          </View>
-          {columns.map((c, i) => (
-            <View key={c.name} style={[styles.gridRow, i % 2 === 1 && styles.gridRowAlt]}>
-              <Text style={[styles.cIdx, styles.gridMuted]}>{i + 1}</Text>
-              <Text style={[styles.cName, styles.gridName]} numberOfLines={1}>
-                {c.name}
-              </Text>
-              <Text style={[styles.cType, styles.gridMono]} numberOfLines={1}>
-                {c.dataType}
-              </Text>
-              <Text style={[styles.cNull, styles.gridCell]}>{c.nullable ? "YES" : "NO"}</Text>
-              <Text style={[styles.cKey, styles.gridKey]}>{keyLabel(c)}</Text>
-              <Text style={[styles.cDefault, styles.gridMuted]} numberOfLines={1}>
-                {c.defaultValue ?? ""}
-              </Text>
+      <ScrollView style={styles.gridV}>
+        <ScrollView horizontal contentContainerStyle={styles.gridVContent}>
+          <View>
+            <View style={styles.gridHeader}>
+              <Text style={[styles.gridHeadText, styles.cIdx]}>#</Text>
+              <Text style={[styles.gridHeadText, styles.cName]}>Name</Text>
+              <Text style={[styles.gridHeadText, styles.cType]}>Type</Text>
+              <Text style={[styles.gridHeadText, styles.cNull]}>Nullable</Text>
+              <Text style={[styles.gridHeadText, styles.cKey]}>Key</Text>
+              <Text style={[styles.gridHeadText, styles.cDefault]}>Default</Text>
             </View>
-          ))}
+            {columns.map((c, i) => (
+              <View key={c.name} style={[styles.gridRow, i % 2 === 1 && styles.gridRowAlt]}>
+                <Text style={[styles.cIdx, styles.gridMuted]}>{i + 1}</Text>
+                <Text style={[styles.cName, styles.gridName]} numberOfLines={1}>
+                  {c.name}
+                </Text>
+                <Text style={[styles.cType, styles.gridMono]} numberOfLines={1}>
+                  {c.dataType}
+                </Text>
+                <Text style={[styles.cNull, styles.gridCell]}>{c.nullable ? "YES" : "NO"}</Text>
+                <Text style={[styles.cKey, styles.gridKey]}>{keyLabel(c)}</Text>
+                <Text style={[styles.cDefault, styles.gridMuted]} numberOfLines={1}>
+                  {c.defaultValue ?? ""}
+                </Text>
+              </View>
+            ))}
+          </View>
         </ScrollView>
       </ScrollView>
     );
