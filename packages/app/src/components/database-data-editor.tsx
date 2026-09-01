@@ -539,6 +539,15 @@ export function DatabaseDataEditor({
 
       {gridBody}
 
+      <ValueEditorDock
+        cell={valueCell}
+        table={table}
+        schema={schema}
+        editable={canEdit}
+        onSave={saveValueCell}
+        onClose={closeValueCell}
+      />
+
       <View style={styles.statusBar}>
         <Text style={styles.statusText} numberOfLines={1}>
           {status ?? `${shown} row${shown === 1 ? "" : "s"}${result?.truncated ? "+" : ""}`}
@@ -548,12 +557,6 @@ export function DatabaseDataEditor({
       </View>
 
       <PreviewModal open={previewOpen} statements={previewStatements} onClose={closePreview} />
-      <ValueEditorModal
-        cell={valueCell}
-        editable={canEdit}
-        onSave={saveValueCell}
-        onClose={closeValueCell}
-      />
     </View>
   );
 }
@@ -821,13 +824,23 @@ function PreviewModal({
   );
 }
 
-function ValueEditorModal({
+/**
+ * The value editor — a bottom-docked panel (DataGrip's "Value" view), not a
+ * floating dialog. Shows the full cell content for a long text / JSON / BLOB
+ * value that a single grid row can't display; editable cells write back through
+ * the same commit path, read-only cells just view. Monospace, dense, IDE-styled.
+ */
+function ValueEditorDock({
   cell,
+  table,
+  schema,
   editable,
   onSave,
   onClose,
 }: {
   cell: ExpandedCell | null;
+  table: string;
+  schema: string;
   editable: boolean;
   onSave: (text: string) => void;
   onClose: () => void;
@@ -837,37 +850,51 @@ function ValueEditorModal({
     setDraft(cell?.text ?? "");
   }, [cell]);
   const handleSave = useCallback(() => onSave(draft), [onSave, draft]);
+  const handleNull = useCallback(() => onSave("NULL"), [onSave]);
   if (!cell) return null;
+  const dirty = draft !== (cell.text ?? "");
+  const chars = draft.length;
+  const lines = draft ? draft.split("\n").length : 0;
   return (
-    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.modalBackdrop}>
-        <View style={styles.modalCard}>
-          <Text style={styles.modalTitle} numberOfLines={1}>
-            {cell.col}
-          </Text>
-          <ThemedCellInput
-            style={styles.valueEditorInput}
-            value={draft}
-            onChangeText={setDraft}
-            editable={editable}
-            multiline
-            autoCapitalize="none"
-            autoCorrect={false}
-            uniProps={placeholderColor}
-          />
-          <View style={styles.modalActions}>
-            <Pressable style={styles.tbtn} onPress={onClose}>
-              <Text style={styles.tbtnText}>Close</Text>
-            </Pressable>
-            {editable ? (
-              <Pressable style={styles.tbtn} onPress={handleSave}>
-                <Text style={styles.tbtnText}>Save</Text>
-              </Pressable>
-            ) : null}
-          </View>
-        </View>
+    <View style={styles.valueDock}>
+      <View style={styles.valueDockHeader}>
+        <Text style={styles.valueDockRef} numberOfLines={1}>
+          {schema}.{table}.<Text style={styles.valueDockCol}>{cell.col}</Text>
+        </Text>
+        <Text style={styles.valueDockMeta}>
+          {lines} ln · {chars} ch
+        </Text>
+        <View style={styles.valueDockSpacer} />
+        {editable ? (
+          <Pressable style={styles.valueDockBtn} onPress={handleNull}>
+            <Text style={styles.valueDockBtnText}>Set NULL</Text>
+          </Pressable>
+        ) : null}
+        {editable ? (
+          <Pressable
+            style={[styles.valueDockBtn, dirty && styles.valueDockBtnPrimary]}
+            onPress={handleSave}
+          >
+            <Text style={[styles.valueDockBtnText, dirty && styles.valueDockBtnTextPrimary]}>
+              Apply
+            </Text>
+          </Pressable>
+        ) : null}
+        <Pressable style={styles.valueDockBtn} onPress={onClose}>
+          <Text style={styles.valueDockBtnText}>Close</Text>
+        </Pressable>
       </View>
-    </Modal>
+      <ThemedCellInput
+        style={styles.valueDockInput}
+        value={draft}
+        onChangeText={setDraft}
+        editable={editable}
+        multiline
+        autoCapitalize="none"
+        autoCorrect={false}
+        uniProps={placeholderColor}
+      />
+    </View>
   );
 }
 
@@ -1033,14 +1060,52 @@ const styles = StyleSheet.create((theme: Theme) => ({
     color: theme.colors.foreground,
   },
   modalScroll: { minHeight: 0 },
-  valueEditorInput: {
-    minHeight: 220,
-    maxHeight: 420,
-    padding: theme.spacing[2],
-    borderRadius: theme.borderRadius.md,
-    borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.border,
+  valueDock: {
+    height: 200,
+    borderTopWidth: theme.borderWidth[1],
+    borderTopColor: theme.colors.border,
     backgroundColor: theme.colors.surface0,
+  },
+  valueDockHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
+    height: 30,
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+  },
+  valueDockRef: {
+    fontSize: theme.fontSize.xs,
+    fontFamily: theme.fontFamily.mono,
+    color: theme.colors.foregroundMuted,
+    flexShrink: 1,
+  },
+  valueDockCol: {
+    color: theme.colors.foreground,
+    fontWeight: theme.fontWeight.semibold,
+  },
+  valueDockMeta: {
+    fontSize: 10,
+    color: theme.colors.foregroundExtraMuted,
+    fontFamily: theme.fontFamily.mono,
+  },
+  valueDockSpacer: { flex: 1 },
+  valueDockBtn: {
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: 3,
+    borderRadius: theme.borderRadius.sm,
+  },
+  valueDockBtnPrimary: { backgroundColor: theme.colors.accent },
+  valueDockBtnText: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+  },
+  valueDockBtnTextPrimary: { color: theme.colors.accentForeground },
+  valueDockInput: {
+    flex: 1,
+    padding: theme.spacing[3],
     fontSize: theme.fontSize.sm,
     fontFamily: theme.fontFamily.mono,
     color: theme.colors.foreground,
