@@ -12,6 +12,12 @@ import type { Theme } from "@/styles/theme";
 
 type Tab = "columns" | "ddl" | "relationships";
 
+function keyLabel(c: DbColumn): string {
+  if (c.isPrimaryKey) return "PK";
+  if (c.isForeignKey) return "FK";
+  return "";
+}
+
 /**
  * The structure view for a table — Columns (type / PK / FK / nullable / default),
  * DDL (reconstructed CREATE TABLE), and Relationships (outgoing + incoming
@@ -66,21 +72,33 @@ export function DatabaseStructureView({
   let body;
   if (tab === "columns") {
     body = (
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
-        {columns.map((c) => (
-          <View key={c.name} style={styles.colRow}>
-            <Text style={styles.colName} numberOfLines={1}>
-              {c.name}
-            </Text>
-            <Text style={styles.colType} numberOfLines={1}>
-              {c.dataType}
-              {c.nullable ? "" : " · NOT NULL"}
-              {c.isPrimaryKey ? " · PK" : ""}
-              {c.isForeignKey ? " · FK" : ""}
-              {c.defaultValue ? ` · default ${c.defaultValue}` : ""}
-            </Text>
+      <ScrollView style={styles.scroll} horizontal>
+        <ScrollView style={styles.gridV} contentContainerStyle={styles.gridVContent}>
+          <View style={styles.gridHeader}>
+            <Text style={[styles.gridHeadText, styles.cIdx]}>#</Text>
+            <Text style={[styles.gridHeadText, styles.cName]}>Name</Text>
+            <Text style={[styles.gridHeadText, styles.cType]}>Type</Text>
+            <Text style={[styles.gridHeadText, styles.cNull]}>Nullable</Text>
+            <Text style={[styles.gridHeadText, styles.cKey]}>Key</Text>
+            <Text style={[styles.gridHeadText, styles.cDefault]}>Default</Text>
           </View>
-        ))}
+          {columns.map((c, i) => (
+            <View key={c.name} style={[styles.gridRow, i % 2 === 1 && styles.gridRowAlt]}>
+              <Text style={[styles.cIdx, styles.gridMuted]}>{i + 1}</Text>
+              <Text style={[styles.cName, styles.gridName]} numberOfLines={1}>
+                {c.name}
+              </Text>
+              <Text style={[styles.cType, styles.gridMono]} numberOfLines={1}>
+                {c.dataType}
+              </Text>
+              <Text style={[styles.cNull, styles.gridCell]}>{c.nullable ? "YES" : "NO"}</Text>
+              <Text style={[styles.cKey, styles.gridKey]}>{keyLabel(c)}</Text>
+              <Text style={[styles.cDefault, styles.gridMuted]} numberOfLines={1}>
+                {c.defaultValue ?? ""}
+              </Text>
+            </View>
+          ))}
+        </ScrollView>
       </ScrollView>
     );
   } else if (tab === "ddl") {
@@ -164,17 +182,63 @@ const styles = StyleSheet.create((theme: Theme) => ({
   tabTextActive: { color: theme.colors.foreground },
   scroll: { flex: 1, minHeight: 0 },
   scrollContent: { padding: theme.spacing[3], gap: theme.spacing[1] },
-  colRow: {
+  gridV: { flex: 1, minHeight: 0 },
+  gridVContent: {},
+  gridHeader: {
+    flexDirection: "row",
+    paddingVertical: theme.spacing[1.5],
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+  },
+  gridHeadText: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.foregroundMuted,
+    paddingHorizontal: theme.spacing[2],
+  },
+  gridRow: {
+    flexDirection: "row",
+    alignItems: "center",
     paddingVertical: theme.spacing[1.5],
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: theme.colors.border,
   },
-  colName: {
+  gridRowAlt: { backgroundColor: theme.colors.surface1 },
+  gridCell: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foreground,
+    paddingHorizontal: theme.spacing[2],
+  },
+  gridName: {
     fontSize: theme.fontSize.sm,
     fontWeight: theme.fontWeight.medium,
     color: theme.colors.foreground,
+    paddingHorizontal: theme.spacing[2],
   },
-  colType: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
+  gridMono: {
+    fontSize: theme.fontSize.xs,
+    fontFamily: theme.fontFamily.mono,
+    color: theme.colors.foregroundMuted,
+    paddingHorizontal: theme.spacing[2],
+  },
+  gridMuted: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundExtraMuted,
+    paddingHorizontal: theme.spacing[2],
+  },
+  gridKey: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.accent,
+    paddingHorizontal: theme.spacing[2],
+  },
+  cIdx: { width: 44 },
+  cName: { width: 200 },
+  cType: { width: 180 },
+  cNull: { width: 90 },
+  cKey: { width: 56 },
+  cDefault: { width: 200 },
   ddl: {
     fontSize: theme.fontSize.xs,
     fontFamily: theme.fontFamily.mono,

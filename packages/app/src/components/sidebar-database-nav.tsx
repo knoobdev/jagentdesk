@@ -3,9 +3,12 @@ import { Pressable, ScrollView, Text, View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import {
   ChevronLeft,
+  ChevronDown,
+  Check,
   Database as DatabaseIcon,
   Gauge,
   GitCompare,
+  Layers,
   Share2,
   Table,
   Eye,
@@ -23,16 +26,20 @@ import { buildDatabasesRoute } from "@/utils/host-routes";
 import type { Theme } from "@/styles/theme";
 
 const ThemedChevronLeft = withUnistyles(ChevronLeft);
+const ThemedChevronDown = withUnistyles(ChevronDown);
+const ThemedCheck = withUnistyles(Check);
 const ThemedDatabase = withUnistyles(DatabaseIcon);
 const ThemedGauge = withUnistyles(Gauge);
 const ThemedGitCompare = withUnistyles(GitCompare);
+const ThemedLayers = withUnistyles(Layers);
 const ThemedShare2 = withUnistyles(Share2);
 const ThemedTable = withUnistyles(Table);
 const ThemedEye = withUnistyles(Eye);
 const ThemedTerminal = withUnistyles(Terminal);
 const mutedColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
+const accentColor = (theme: Theme) => ({ color: theme.colors.accent });
 
-function SchemaChip({
+function SchemaRow({
   name,
   active,
   onSelect,
@@ -43,14 +50,60 @@ function SchemaChip({
 }) {
   const handlePress = useCallback(() => onSelect(name), [name, onSelect]);
   return (
-    <Pressable style={[styles.schemaChip, active && styles.schemaChipActive]} onPress={handlePress}>
+    <Pressable
+      style={[styles.schemaOption, active && styles.schemaOptionActive]}
+      onPress={handlePress}
+    >
+      <ThemedLayers size={13} uniProps={mutedColor} />
       <Text
-        style={[styles.schemaChipText, active && styles.schemaChipTextActive]}
+        style={[styles.schemaOptionText, active && styles.schemaOptionTextActive]}
         numberOfLines={1}
       >
         {name}
       </Text>
+      {active ? <ThemedCheck size={13} uniProps={accentColor} /> : null}
     </Pressable>
+  );
+}
+
+/** A labeled schema picker (DataGrip's "schema" dropdown), not floating pills. */
+function SchemaSelect({
+  schemas,
+  value,
+  onSelect,
+}: {
+  schemas: DbSchema[];
+  value: string | null;
+  onSelect: (name: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const toggle = useCallback(() => setOpen((v) => !v), []);
+  const pick = useCallback(
+    (name: string) => {
+      onSelect(name);
+      setOpen(false);
+    },
+    [onSelect],
+  );
+  if (schemas.length === 0) return null;
+  return (
+    <View style={styles.schemaSelect}>
+      <Text style={styles.schemaSelectLabel}>SCHEMA</Text>
+      <Pressable style={styles.schemaTrigger} onPress={toggle}>
+        <ThemedLayers size={14} uniProps={mutedColor} />
+        <Text style={styles.schemaTriggerText} numberOfLines={1}>
+          {value ?? "Select schema"}
+        </Text>
+        <ThemedChevronDown size={14} uniProps={mutedColor} />
+      </Pressable>
+      {open ? (
+        <View style={styles.schemaMenu}>
+          {schemas.map((s) => (
+            <SchemaRow key={s.name} name={s.name} active={value === s.name} onSelect={pick} />
+          ))}
+        </View>
+      ) : null}
+    </View>
   );
 }
 
@@ -227,23 +280,7 @@ export function SidebarDatabaseNav({
         </Text>
       </View>
 
-      {schemas.length > 1 ? (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.schemaBar}
-          contentContainerStyle={styles.schemaBarContent}
-        >
-          {schemas.map((s) => (
-            <SchemaChip
-              key={s.name}
-              name={s.name}
-              active={selectedSchema === s.name}
-              onSelect={handleSelectSchema}
-            />
-          ))}
-        </ScrollView>
-      ) : null}
+      <SchemaSelect schemas={schemas} value={selectedSchema} onSelect={handleSelectSchema} />
 
       <ScrollView style={styles.nav} contentContainerStyle={styles.navContent}>
         <Pressable
@@ -338,30 +375,60 @@ const styles = StyleSheet.create((theme: Theme) => ({
     fontWeight: theme.fontWeight.medium,
     color: theme.colors.foreground,
   },
-  schemaBar: {
-    flexGrow: 0,
+  schemaSelect: {
+    marginHorizontal: theme.spacing[2],
     marginTop: theme.spacing[2],
+    gap: theme.spacing[1],
   },
-  schemaBarContent: {
-    paddingHorizontal: theme.spacing[2],
-    gap: theme.spacing[1.5],
+  schemaSelectLabel: {
+    fontSize: 10,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.foregroundExtraMuted,
+    letterSpacing: 0.6,
+    paddingHorizontal: theme.spacing[1],
   },
-  schemaChip: {
+  schemaTrigger: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
     paddingHorizontal: theme.spacing[2],
-    paddingVertical: theme.spacing[1],
+    paddingVertical: theme.spacing[1.5],
     borderRadius: theme.borderRadius.md,
     borderWidth: theme.borderWidth[1],
     borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
   },
-  schemaChipActive: {
-    borderColor: theme.colors.accent,
+  schemaTriggerText: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foreground,
+  },
+  schemaMenu: {
+    borderRadius: theme.borderRadius.md,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+    overflow: "hidden",
+  },
+  schemaOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1.5],
+  },
+  schemaOptionActive: {
     backgroundColor: theme.colors.surfaceSidebarHover,
   },
-  schemaChipText: {
-    fontSize: theme.fontSize.xs,
+  schemaOptionText: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: theme.fontSize.sm,
     color: theme.colors.foregroundMuted,
   },
-  schemaChipTextActive: {
+  schemaOptionTextActive: {
     color: theme.colors.foreground,
   },
   nav: {

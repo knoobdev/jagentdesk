@@ -339,6 +339,20 @@ async function main() {
     report.checks.listShowsEngine = await seen(page, "sqlite");
     report.screenshots.push(await shot(page, artifactDir, "1-databases-list"));
 
+    // 1b. The connect-DB form (Add connection → PostgreSQL shows the full field set).
+    try {
+      await page.getByTestId("db-add-connection").first().click({ timeout: 10_000 });
+      await delay(500);
+      await page.getByTestId("db-engine-postgres").first().click({ timeout: 8_000 });
+      await delay(400);
+      report.checks.connectFormFields = await seen(page, "Password");
+      report.screenshots.push(await shot(page, artifactDir, "1b-connect-db-form"));
+      await page.getByText("Cancel", { exact: true }).first().click({ timeout: 8_000 });
+      await delay(600);
+    } catch (e) {
+      report.steps.push(`connect-form error: ${String(e).slice(0, 100)}`);
+    }
+
     // 2. Connect + Open the seeded connection (the real button flow).
     try {
       await page.getByText("Connect", { exact: true }).first().click({ timeout: 15_000 });
@@ -364,6 +378,16 @@ async function main() {
     report.checks.gridShowsStatusColumn = await seen(page, "status");
     report.checks.gridShowsShipped = await seen(page, "shipped");
     report.screenshots.push(await shot(page, artifactDir, "3-data-grid"));
+
+    // 3b. Structure view (DataGrip-like columns grid: Name/Type/Nullable/Key/Default).
+    try {
+      await page.getByText("Structure", { exact: true }).first().click({ timeout: 10_000 });
+      await delay(1500);
+      report.checks.structureShowsGrid = await seen(page, "Nullable");
+      report.screenshots.push(await shot(page, artifactDir, "3b-structure"));
+    } catch (e) {
+      report.steps.push(`structure error: ${String(e).slice(0, 100)}`);
+    }
 
     // 4. SQL console → run a query.
     try {
