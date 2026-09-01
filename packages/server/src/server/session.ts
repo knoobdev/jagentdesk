@@ -2714,6 +2714,8 @@ export class Session {
         return this.databaseSession.handleQuery(msg);
       case "database/exec":
         return this.databaseSession.handleExec(msg);
+      case "database/explain":
+        return this.databaseSession.handleExplain(msg);
       case "database/begin":
         return this.databaseSession.handleBegin(msg);
       case "database/commit":

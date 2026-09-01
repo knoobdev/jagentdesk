@@ -159,6 +159,17 @@ export class PostgresDbClient implements DbClient {
     return { columns, rows, rowCount: rows.length, truncated, elapsedMs: nowMs() - started };
   }
 
+  async explain(sql: string): Promise<QueryResult> {
+    const started = nowMs();
+    const res = await this.require().query({
+      text: `EXPLAIN ${sql.trim().replace(/;\s*$/, "")}`,
+      rowMode: "array",
+    });
+    const columns: ResultColumn[] = res.fields.map((f) => ({ name: f.name }));
+    const rows = (res.rows as unknown[][]).map(toCells);
+    return { columns, rows, rowCount: rows.length, truncated: false, elapsedMs: nowMs() - started };
+  }
+
   async execWrite(
     sql: string,
     params?: ReadonlyArray<string | number | boolean | null>,

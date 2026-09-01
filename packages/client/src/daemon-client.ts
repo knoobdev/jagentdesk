@@ -668,6 +668,10 @@ type DatabaseExecPayload = Extract<
   SessionOutboundMessage,
   { type: "database/exec/response" }
 >["payload"];
+type DatabaseExplainPayload = Extract<
+  SessionOutboundMessage,
+  { type: "database/explain/response" }
+>["payload"];
 type DatabaseBeginPayload = Extract<
   SessionOutboundMessage,
   { type: "database/begin/response" }
@@ -6060,6 +6064,18 @@ export class DaemonClient {
         ...(options.params ? { params: options.params } : {}),
       },
       responseType: "database/exec/response",
+    });
+  }
+
+  async databaseExplain(options: {
+    requestId?: string;
+    id: string;
+    sql: string;
+  }): Promise<DatabaseExplainPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "database/explain", id: options.id, sql: options.sql },
+      responseType: "database/explain/response",
     });
   }
 

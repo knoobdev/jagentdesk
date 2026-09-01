@@ -42,6 +42,8 @@ export interface DbClient {
 
   /** Read-only query. Adapters must reject writes on this path. */
   runQuery(sql: string, options?: RunQueryOptions): Promise<QueryResult>;
+  /** The engine's query plan for a statement (EXPLAIN). Read-only. */
+  explain(sql: string): Promise<QueryResult>;
   /** Write path (INSERT/UPDATE/DELETE/DDL). Gated by callers, not here. */
   execWrite(
     sql: string,

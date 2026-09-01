@@ -108,6 +108,12 @@ export class DatabaseSession {
     }));
   }
 
+  async handleExplain(msg: Req<"database/explain">): Promise<void> {
+    await this.run(msg.requestId, "database/explain/response", async () => ({
+      result: await this.requireClient(msg.id).explain(msg.sql),
+    }));
+  }
+
   async handleBegin(msg: Req<"database/begin">): Promise<void> {
     await this.run(msg.requestId, "database/begin/response", async () => {
       await this.requireClient(msg.id).begin();
@@ -167,6 +173,7 @@ function emptyBody(type: string): Record<string, unknown> {
       return { columns: [] };
     case "database/query/response":
     case "database/exec/response":
+    case "database/explain/response":
       return { result: null };
     default:
       return {};

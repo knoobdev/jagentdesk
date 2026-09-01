@@ -156,6 +156,14 @@ export const DatabaseExecRequestSchema = req("database/exec", {
 export const DatabaseExecResponseSchema = resp("database/exec/response", {
   result: WriteResultSchema.nullable(),
 });
+// ── explain (query plan) ──
+export const DatabaseExplainRequestSchema = req("database/explain", {
+  id: z.string(),
+  sql: z.string(),
+});
+export const DatabaseExplainResponseSchema = resp("database/explain/response", {
+  result: QueryResultSchema.nullable(),
+});
 // ── transactions (data editor Manual mode) ──
 export const DatabaseBeginRequestSchema = req("database/begin", { id: z.string() });
 export const DatabaseBeginResponseSchema = resp("database/begin/response", {});
@@ -175,6 +183,7 @@ export const DatabaseRequestSchemas = [
   DatabaseColumnsRequestSchema,
   DatabaseQueryRequestSchema,
   DatabaseExecRequestSchema,
+  DatabaseExplainRequestSchema,
   DatabaseBeginRequestSchema,
   DatabaseCommitRequestSchema,
   DatabaseRollbackRequestSchema,
@@ -191,6 +200,7 @@ export const DatabaseResponseSchemas = [
   DatabaseColumnsResponseSchema,
   DatabaseQueryResponseSchema,
   DatabaseExecResponseSchema,
+  DatabaseExplainResponseSchema,
   DatabaseBeginResponseSchema,
   DatabaseCommitResponseSchema,
   DatabaseRollbackResponseSchema,

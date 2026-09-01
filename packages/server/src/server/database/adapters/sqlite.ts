@@ -106,6 +106,19 @@ export class SqliteDbClient implements DbClient {
     return { columns, rows, rowCount: rows.length, truncated, elapsedMs: nowMs() - started };
   }
 
+  async explain(sql: string): Promise<QueryResult> {
+    const started = nowMs();
+    const stmt = this.require().prepare(`EXPLAIN QUERY PLAN ${sql.trim().replace(/;\s*$/, "")}`);
+    stmt.raw(true);
+    const rawRows = stmt.all() as unknown[][];
+    const columns: ResultColumn[] = stmt.columns().map((c) => ({
+      name: c.name,
+      dataType: c.type ?? undefined,
+    }));
+    const rows = rawRows.map(toCells);
+    return { columns, rows, rowCount: rows.length, truncated: false, elapsedMs: nowMs() - started };
+  }
+
   async execWrite(
     sql: string,
     params?: ReadonlyArray<string | number | boolean | null>,

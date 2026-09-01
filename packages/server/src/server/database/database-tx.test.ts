@@ -45,6 +45,16 @@ describe("DbClient transactions (SQLite)", () => {
     expect(after.rows[0][0]).toBe("pending");
   });
 
+  it("returns a query plan via explain (read-only)", async () => {
+    const client = await connect();
+    const plan = await client.explain("select * from orders where id = 1");
+    expect(plan.columns.length).toBeGreaterThan(0);
+    // SQLite's EXPLAIN QUERY PLAN describes how the row is located.
+    const text = JSON.stringify(plan.rows).toLowerCase();
+    expect(text).toContain("orders");
+    await client.close();
+  });
+
   it("commits an edit so it persists", async () => {
     const client = await connect();
     await client.begin();

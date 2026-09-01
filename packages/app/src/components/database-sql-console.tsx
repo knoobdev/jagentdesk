@@ -1,10 +1,11 @@
 import { useCallback, useState } from "react";
-import { Pressable, Switch, Text, TextInput, View } from "react-native";
+import { Pressable, ScrollView, Switch, Text, TextInput, View } from "react-native";
 import { Play } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type { DatabaseEngine, QueryResult } from "@jagentdesk/protocol/database/rpc-schemas";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { useDatabaseViewStore } from "@/stores/database-view-store";
+import { useDatabaseHistoryStore } from "@/stores/database-history-store";
 import { DatabaseResultTable } from "@/components/database-result-table";
 import type { Theme } from "@/styles/theme";
 
@@ -28,7 +29,11 @@ function looksLikeWrite(sql: string): boolean {
   );
 }
 
-type Tab = "result" | "output";
+type Tab = "result" | "output" | "plan";
+
+function nowMs(): number {
+  return Date.now();
+}
 
 /**
  * A schema-grounded SQL console — the DbClient analogue of the cluster shell. A
@@ -48,13 +53,17 @@ export function DatabaseSqlConsole({
 }) {
   const client = useHostRuntimeClient(serverId);
   const bumpRefresh = useDatabaseViewStore((s) => s.bumpRefresh);
+  const recordHistory = useDatabaseHistoryStore((s) => s.record);
+  const history = useDatabaseHistoryStore((s) => s.byDatabase[databaseId] ?? []);
   const [sql, setSql] = useState("");
   const [allowWrites, setAllowWrites] = useState(false);
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<QueryResult | null>(null);
+  const [plan, setPlan] = useState<QueryResult | null>(null);
   const [output, setOutput] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("result");
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const run = useCallback(async () => {
     if (!client) return;
@@ -63,6 +72,7 @@ export function DatabaseSqlConsole({
     setRunning(true);
     setError(null);
     setOutput(null);
+    recordHistory(databaseId, trimmed, nowMs());
     try {
       if (looksLikeWrite(trimmed)) {
         if (!allowWrites) {
@@ -95,11 +105,39 @@ export function DatabaseSqlConsole({
     } finally {
       setRunning(false);
     }
-  }, [client, sql, allowWrites, databaseId, bumpRefresh]);
+  }, [client, sql, allowWrites, databaseId, bumpRefresh, recordHistory]);
+
+  const explain = useCallback(async () => {
+    if (!client) return;
+    const trimmed = sql.trim().replace(/;\s*$/, "");
+    if (!trimmed) return;
+    setRunning(true);
+    setError(null);
+    try {
+      const res = await client.databaseExplain({ id: databaseId, sql: trimmed });
+      if (res.error || !res.result) {
+        setError(res.error ?? "Explain failed");
+      } else {
+        setPlan(res.result);
+        setTab("plan");
+      }
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Explain failed");
+    } finally {
+      setRunning(false);
+    }
+  }, [client, sql, databaseId]);
 
   const handleRun = useCallback(() => void run(), [run]);
+  const handleExplain = useCallback(() => void explain(), [explain]);
   const showResult = useCallback(() => setTab("result"), []);
   const showOutput = useCallback(() => setTab("output"), []);
+  const showPlan = useCallback(() => setTab("plan"), []);
+  const toggleHistory = useCallback(() => setHistoryOpen((v) => !v), []);
+  const recallSql = useCallback((value: string) => {
+    setSql(value);
+    setHistoryOpen(false);
+  }, []);
 
   let resultBody;
   if (tab === "result") {
@@ -107,6 +145,12 @@ export function DatabaseSqlConsole({
       <DatabaseResultTable result={result} />
     ) : (
       <Text style={styles.hint}>Run a SELECT to see rows here.</Text>
+    );
+  } else if (tab === "plan") {
+    resultBody = plan ? (
+      <DatabaseResultTable result={plan} />
+    ) : (
+      <Text style={styles.hint}>Run Explain to see the query plan.</Text>
     );
   } else {
     resultBody = <Text style={styles.outputText}>{output ?? "No output yet."}</Text>;
@@ -137,6 +181,15 @@ export function DatabaseSqlConsole({
           <ThemedPlay size={13} uniProps={accentForeground} />
           <Text style={styles.runText}>{running ? "Running…" : "Run"}</Text>
         </Pressable>
+        <Pressable style={styles.tabBtn} onPress={handleExplain} disabled={running}>
+          <Text style={styles.tabText}>Explain</Text>
+        </Pressable>
+        <Pressable
+          style={historyOpen ? [styles.tabBtn, styles.tabBtnActive] : styles.tabBtn}
+          onPress={toggleHistory}
+        >
+          <Text style={[styles.tabText, historyOpen && styles.tabTextActive]}>History</Text>
+        </Pressable>
         <View style={styles.writesToggle}>
           <Switch value={allowWrites} onValueChange={setAllowWrites} />
           <Text style={styles.writesLabel}>Allow writes</Text>
@@ -147,6 +200,12 @@ export function DatabaseSqlConsole({
           onPress={showResult}
         >
           <Text style={[styles.tabText, tab === "result" && styles.tabTextActive]}>Result</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.tabBtn, tab === "plan" && styles.tabBtnActive]}
+          onPress={showPlan}
+        >
+          <Text style={[styles.tabText, tab === "plan" && styles.tabTextActive]}>Query Plan</Text>
         </Pressable>
         <Pressable
           style={[styles.tabBtn, tab === "output" && styles.tabBtnActive]}
@@ -162,8 +221,33 @@ export function DatabaseSqlConsole({
         </View>
       ) : null}
 
-      <View style={styles.resultArea}>{resultBody}</View>
+      <View style={styles.resultArea}>
+        {historyOpen ? (
+          <ScrollView style={styles.historyList}>
+            {history.length === 0 ? (
+              <Text style={styles.hint}>No history yet for this connection.</Text>
+            ) : (
+              history.map((h) => (
+                <HistoryRow key={`${h.at_ms}-${h.sql}`} sql={h.sql} onSelect={recallSql} />
+              ))
+            )}
+          </ScrollView>
+        ) : (
+          resultBody
+        )}
+      </View>
     </View>
+  );
+}
+
+function HistoryRow({ sql, onSelect }: { sql: string; onSelect: (sql: string) => void }) {
+  const handlePress = useCallback(() => onSelect(sql), [sql, onSelect]);
+  return (
+    <Pressable style={styles.historyRow} onPress={handlePress}>
+      <Text style={styles.historyText} numberOfLines={2}>
+        {sql}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -262,5 +346,20 @@ const styles = StyleSheet.create((theme: Theme) => ({
     fontFamily: theme.fontFamily.mono,
     color: theme.colors.foreground,
     padding: theme.spacing[3],
+  },
+  historyList: {
+    flex: 1,
+    minHeight: 0,
+  },
+  historyRow: {
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: theme.colors.border,
+  },
+  historyText: {
+    fontSize: theme.fontSize.xs,
+    fontFamily: theme.fontFamily.mono,
+    color: theme.colors.foreground,
   },
 }));

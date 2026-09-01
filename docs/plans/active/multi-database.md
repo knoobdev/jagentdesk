@@ -94,11 +94,16 @@ Every shipped task runs against a real database — no stubs.
 - [x] `registerSqlTools` in `jagentdesk-tools.ts`: `sql_query` (read-only — rejects writes), `sql_exec` (routes through `requestHostToolPermission`), `database_list`. `databaseRegistry` threaded into the tool-host deps in `bootstrap.ts`.
 - [x] Proof: `sql-tools.test.ts` (6/6) via the real tool catalog — registers all three tools; sql_query returns rows + rejects DELETE; **sql_exec denied → no write; allowed → writes** (permission gate verified); database_list reports the connected db. Server + app typecheck + lint clean. Live NL→SQL is the manual acceptance step.
 
-### P6 — breadth + advanced (additive)
+### P6 — breadth + advanced (additive) — PARTIAL 2026-09-01
 
-- [ ] MSSQL / Oracle / MongoDB / ClickHouse adapters (same interface).
-- [ ] Query history per connection; DDL view; schema diff; ER diagram; explain-plan flame graph.
-- [ ] Mobile parity pass across all screens.
+- [x] Explain / Query Plan: `DbClient.explain` on all three adapters (sqlite `EXPLAIN QUERY PLAN`, pg/mysql `EXPLAIN`) + `database/explain` RPC + `databaseExplain` client method + an "Explain" button and "Query Plan" tab in the SQL console.
+- [x] Query history per connection: `database-history-store` (in-memory, capped, most-recent-first, consecutive-dedup) + a History dropdown in the console that recalls a past statement.
+- [x] Mobile parity: every database screen/component is built on the same universal primitives as the cluster feature (Unistyles, `useIsCompactFormFactor`, slide-in nav via `showMobileAgent`, the chat dock's mobile FAB, `Modal`/`TextInput`/`ScrollView`). No desktop-only API is used; the same components render on iOS/Android. (Live device pass remains a manual acceptance step.)
+- [x] Proof: `database-tx.test.ts` explain case (query plan mentions the table) + `database-history-store.test.ts` (3/3: order/dedup, empty-skip + per-db isolation, clear).
+- [ ] Deferred (need their servers / non-SQL shape / large scope — scaffolding ready, not stubbed):
+  - MSSQL / Oracle / ClickHouse adapters (SQL-shaped, drop into `createClient` behind the same `DbClient`; each needs its driver + a live server to prove).
+  - MongoDB (non-SQL; needs a separate query surface, not `runQuery(sql)`).
+  - Schema diff, ER diagram, DDL view, explain-plan flame graph (additive UI, no protocol changes).
 
 ## Authority gaps / decisions to confirm
 
@@ -114,7 +119,7 @@ Every shipped task runs against a real database — no stubs.
 - [x] 2026-09-01: P2 app shell (sidebar entry + list/add + routes + stores) + P3 core (object tree, data grid, SQL console) — 10/10 app tests; typecheck + lint clean.
 - [x] 2026-09-01: P4 data editor + transactions — begin/commit/rollback across adapters + record editor + Preview DML; database-tx (2) + sql-dml (5) tests.
 - [x] 2026-09-01: P5 AI chat + SQL MCP tools — chat dock/draft/system-prompt + sql_query/sql_exec/database_list; sql-tools (6) tests incl. permission gate.
-- [ ] P6 …
+- [x] 2026-09-01: P6 (partial) — Explain/Query-Plan + query history + mobile-parity primitives; explain + history (4) tests. Extra engines + ER/diff/DDL deferred (documented).
 
 ## Validation
 

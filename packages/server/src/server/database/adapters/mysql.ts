@@ -128,6 +128,23 @@ export class MysqlDbClient implements DbClient {
     };
   }
 
+  async explain(sql: string): Promise<QueryResult> {
+    const started = nowMs();
+    const [rows, fields] = await this.require().query<mysql.RowDataPacket[][]>({
+      sql: `EXPLAIN ${sql.trim().replace(/;\s*$/, "")}`,
+      rowsAsArray: true,
+    });
+    const columns: ResultColumn[] = (fields ?? []).map((f) => ({ name: f.name }));
+    const rowsOut = (rows as unknown as unknown[][]).map(toCells);
+    return {
+      columns,
+      rows: rowsOut,
+      rowCount: rowsOut.length,
+      truncated: false,
+      elapsedMs: nowMs() - started,
+    };
+  }
+
   async execWrite(
     sql: string,
     params?: ReadonlyArray<string | number | boolean | null>,
