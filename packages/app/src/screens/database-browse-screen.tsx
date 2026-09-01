@@ -56,11 +56,19 @@ export function DatabaseBrowseScreen({
   useEffect(() => {
     resetViewForDatabase(databaseId);
     setLastDatabase(serverId, databaseId);
-    // Start the chat dock COLLAPSED — data grids / structure / ER are wide, so the
-    // browse view gets the full pane by default (on desktop the closed dock is a
-    // slim handle; on phones a FAB). The user opens chat when they want it.
-    resetChatForDatabase(databaseId, false);
-  }, [databaseId, serverId, resetViewForDatabase, setLastDatabase, resetChatForDatabase]);
+    // Show the chat panel by default on desktop — it's JAgentDesk's edge (a
+    // schema-grounded agent) and belongs visible beside the data, DataGrip-AI
+    // style. On phones it stays collapsed (the grid needs the full width) and is
+    // opened from the explorer's "Ask AI" button.
+    resetChatForDatabase(databaseId, !isCompact);
+  }, [
+    databaseId,
+    serverId,
+    isCompact,
+    resetViewForDatabase,
+    setLastDatabase,
+    resetChatForDatabase,
+  ]);
 
   const showMobileAgentList = usePanelStore((s) => s.showMobileAgentList);
   useEffect(() => {

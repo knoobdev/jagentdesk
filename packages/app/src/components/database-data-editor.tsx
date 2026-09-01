@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { ChevronLeft, ChevronRight, Plus, RefreshCw, Trash2, Undo2 } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
@@ -10,7 +10,7 @@ import type {
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { useDatabaseViewStore } from "@/stores/database-view-store";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
-import { isSqlEngine, qualifyTable } from "@/utils/sql-ident";
+import { isSqlEngine, qualifyTable, quoteIdent } from "@/utils/sql-ident";
 import { buildDelete, buildInsert, buildUpdate, type Cell, type Dml } from "@/utils/sql-dml";
 import type { Theme } from "@/styles/theme";
 
@@ -85,6 +85,8 @@ export function DatabaseDataEditor({
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [sort, setSort] = useState<{ col: string; dir: "asc" | "desc" } | null>(null);
+  const sortRef = useRef<{ col: string; dir: "asc" | "desc" } | null>(null);
 
   const pkCols = useMemo(() => columns.filter((c) => c.isPrimaryKey).map((c) => c.name), [columns]);
   const colNames = useMemo(() => columns.map((c) => c.name), [columns]);
@@ -110,9 +112,13 @@ export function DatabaseDataEditor({
         if (!("error" in cols) || !cols.error) {
           if ("columns" in cols && cols.columns) setColumns(cols.columns);
         }
+        const s = sortRef.current;
+        const orderBy = s
+          ? ` order by ${quoteIdent(engine, s.col)} ${s.dir === "desc" ? "desc" : "asc"}`
+          : "";
         const res = await client.databaseQuery({
           id: databaseId,
-          sql: `select * from ${qualifyTable(engine, schema, table)}`,
+          sql: `select * from ${qualifyTable(engine, schema, table)}${orderBy}`,
           limit: PAGE_SIZE,
           offset: nextPage * PAGE_SIZE,
         });
@@ -138,6 +144,21 @@ export function DatabaseDataEditor({
     void load(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [databaseId, schema, table, listRefreshKey]);
+
+  // Click a column header to sort (asc → desc → none), re-querying with ORDER BY.
+  const handleSort = useCallback(
+    (col: string) => {
+      const cur = sortRef.current;
+      let next: { col: string; dir: "asc" | "desc" } | null;
+      if (!cur || cur.col !== col) next = { col, dir: "asc" };
+      else if (cur.dir === "asc") next = { col, dir: "desc" };
+      else next = null;
+      sortRef.current = next;
+      setSort(next);
+      void load(0);
+    },
+    [load],
+  );
 
   const colIndex = useCallback((name: string) => colNames.indexOf(name), [colNames]);
   const keysForRow = useCallback(
@@ -340,15 +361,12 @@ export function DatabaseDataEditor({
             <View style={styles.headerRow}>
               <View style={styles.gutter} />
               {columns.map((c) => (
-                <View key={c.name} style={styles.cell}>
-                  <Text style={styles.headerText} numberOfLines={1}>
-                    {c.name}
-                  </Text>
-                  <Text style={styles.headerType} numberOfLines={1}>
-                    {c.dataType}
-                    {c.isPrimaryKey ? " · PK" : ""}
-                  </Text>
-                </View>
+                <HeaderCell
+                  key={c.name}
+                  column={c}
+                  sortDir={sort?.col === c.name ? sort.dir : null}
+                  onSort={handleSort}
+                />
               ))}
             </View>
             {result.rows.map((row, r) => (
@@ -488,6 +506,33 @@ export function DatabaseDataEditor({
 
       <PreviewModal open={previewOpen} statements={previewStatements} onClose={closePreview} />
     </View>
+  );
+}
+
+function HeaderCell({
+  column,
+  sortDir,
+  onSort,
+}: {
+  column: DbColumn;
+  sortDir: "asc" | "desc" | null;
+  onSort: (col: string) => void;
+}) {
+  const press = useCallback(() => onSort(column.name), [onSort, column.name]);
+  let arrow = "";
+  if (sortDir === "asc") arrow = " ↑";
+  else if (sortDir === "desc") arrow = " ↓";
+  return (
+    <Pressable style={styles.cell} onPress={press}>
+      <Text style={styles.headerText} numberOfLines={1}>
+        {column.name}
+        {arrow}
+      </Text>
+      <Text style={styles.headerType} numberOfLines={1}>
+        {column.dataType}
+        {column.isPrimaryKey ? " · PK" : ""}
+      </Text>
+    </Pressable>
   );
 }
 

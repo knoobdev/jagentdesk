@@ -15,6 +15,7 @@ import {
   RefreshCw,
   Search,
   Share2,
+  Sparkles,
   Table as TableIcon,
   Terminal,
   Trash2,
@@ -32,6 +33,7 @@ import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-
 import { DatabaseStatusDot } from "@/components/database-dot";
 import { useDatabaseNavStore, type SelectedDbObject } from "@/stores/database-nav-store";
 import { useDatabaseViewStore } from "@/stores/database-view-store";
+import { useDatabaseChatStore } from "@/stores/database-chat-store";
 import { usePanelStore } from "@/stores/panel-store";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { buildDatabasesRoute } from "@/utils/host-routes";
@@ -53,6 +55,8 @@ const ThemedTerminal = withUnistyles(Terminal);
 const ThemedShare2 = withUnistyles(Share2);
 const ThemedRefresh = withUnistyles(RefreshCw);
 const ThemedSearch = withUnistyles(Search);
+const ThemedSparkles = withUnistyles(Sparkles);
+const accentIcon = (theme: Theme) => ({ color: theme.colors.accent });
 const ThemedCopy = withUnistyles(Copy);
 const ThemedPencil = withUnistyles(Pencil);
 const ThemedTrash = withUnistyles(Trash2);
@@ -502,6 +506,9 @@ export function SidebarDatabaseNav({
   const listRefreshKey = useDatabaseViewStore((s) => s.listRefreshKey);
   const bumpRefresh = useDatabaseViewStore((s) => s.bumpRefresh);
   const showMobileAgent = usePanelStore((s) => s.showMobileAgent);
+  const chatOpen = useDatabaseChatStore((s) => s.open);
+  const showChat = useDatabaseChatStore((s) => s.showChat);
+  const hideChat = useDatabaseChatStore((s) => s.hideChat);
   const isCompact = useIsCompactFormFactor();
 
   const [menuObject, setMenuObject] = useState<SelectedDbObject | null>(null);
@@ -551,6 +558,13 @@ export function SidebarDatabaseNav({
     selectEr(databaseId);
     if (isCompact) showMobileAgent();
   }, [databaseId, selectEr, isCompact, showMobileAgent]);
+  const handleToggleChat = useCallback(() => {
+    if (chatOpen) hideChat();
+    else {
+      showChat();
+      if (isCompact) showMobileAgent();
+    }
+  }, [chatOpen, hideChat, showChat, isCompact, showMobileAgent]);
 
   const runDdl = useCallback(
     async (target: SelectedDbObject, sql: string) => {
@@ -660,14 +674,26 @@ export function SidebarDatabaseNav({
           {database?.displayName ?? "Database"}
         </Text>
         <Pressable
-          style={styles.iconBtn}
+          style={[styles.iconBtn, chatOpen && styles.iconBtnActive]}
+          onPress={handleToggleChat}
+          accessibilityLabel="Ask AI"
+          testID="database-ask-ai"
+        >
+          <ThemedSparkles size={15} uniProps={chatOpen ? accentIcon : mutedColor} />
+        </Pressable>
+        <Pressable
+          style={[styles.iconBtn, showingConsole && styles.iconBtnActive]}
           onPress={handleSelectConsole}
           accessibilityLabel="SQL console"
         >
-          <ThemedTerminal size={15} uniProps={showingConsole ? mutedColor : mutedColor} />
+          <ThemedTerminal size={15} uniProps={mutedColor} />
         </Pressable>
-        <Pressable style={styles.iconBtn} onPress={handleSelectEr} accessibilityLabel="ER diagram">
-          <ThemedShare2 size={15} uniProps={showingEr ? mutedColor : mutedColor} />
+        <Pressable
+          style={[styles.iconBtn, showingEr && styles.iconBtnActive]}
+          onPress={handleSelectEr}
+          accessibilityLabel="ER diagram"
+        >
+          <ThemedShare2 size={15} uniProps={mutedColor} />
         </Pressable>
         <Pressable
           style={styles.iconBtn}
@@ -789,6 +815,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     color: theme.colors.foreground,
   },
   iconBtn: { padding: 4, borderRadius: theme.borderRadius.sm },
+  iconBtnActive: { backgroundColor: theme.colors.surface2 },
   searchRow: {
     flexDirection: "row",
     alignItems: "center",

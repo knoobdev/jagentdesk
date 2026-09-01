@@ -37,7 +37,6 @@ const ThemedPlus = withUnistyles(Plus);
 const ThemedCheck = withUnistyles(Check);
 const accentColor = (theme: Theme) => ({ color: theme.colors.accent });
 const mutedColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
-const fabIconColor = (theme: Theme) => ({ color: theme.colors.accentForeground });
 const noop = () => {};
 
 const DATABASE_AGENT_LABEL = "jagentdesk.database.id";
@@ -222,7 +221,6 @@ export function DatabaseChatDock({
   const workspaceId = useDatabaseChatStore((s) => s.workspaceId);
   const width = useDatabaseChatStore((s) => s.width);
   const hideChat = useDatabaseChatStore((s) => s.hideChat);
-  const showChat = useDatabaseChatStore((s) => s.showChat);
   const setWidth = useDatabaseChatStore((s) => s.setWidth);
   const openChat = useDatabaseChatStore((s) => s.openChat);
   const startNewChat = useDatabaseChatStore((s) => s.startNewChat);
@@ -325,7 +323,6 @@ export function DatabaseChatDock({
   );
 
   const handleClose = useCallback(() => hideChat(), [hideChat]);
-  const handleOpen = useCallback(() => showChat(), [showChat]);
   const innerStyle = useMemo(() => [styles.inner, { width: target }], [target]);
 
   const databaseAgents = useMemo(
@@ -391,20 +388,9 @@ export function DatabaseChatDock({
     [],
   );
 
-  if (!open) {
-    if (isCompact) {
-      return (
-        <Pressable style={styles.fab} onPress={handleOpen} accessibilityLabel="Open chat">
-          <ThemedMessageSquare size={22} uniProps={fabIconColor} />
-        </Pressable>
-      );
-    }
-    return (
-      <Pressable style={styles.handle} onPress={handleOpen} accessibilityLabel="Open chat">
-        <ThemedMessageSquare size={18} uniProps={mutedColor} />
-      </Pressable>
-    );
-  }
+  // Closed: render nothing. The chat is a tool panel toggled from the explorer
+  // toolbar (the "Ask AI" button) — no floating handle/FAB on the right edge.
+  if (!open) return null;
 
   return (
     <Animated.View style={[styles.dock, animStyle]}>
