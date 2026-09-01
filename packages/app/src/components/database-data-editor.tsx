@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
-import { ChevronLeft, ChevronRight, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react-native";
+import { ChevronLeft, ChevronRight, Plus, RefreshCw, Trash2, Undo2 } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type {
   DatabaseEngine,
@@ -15,44 +15,40 @@ import { buildDelete, buildInsert, buildUpdate, type Cell, type Dml } from "@/ut
 import type { Theme } from "@/styles/theme";
 
 const PAGE_SIZE = 100;
+const GUTTER_W = 52;
+const CELL_W = 168;
 
 const ThemedChevronLeft = withUnistyles(ChevronLeft);
 const ThemedChevronRight = withUnistyles(ChevronRight);
 const ThemedRefresh = withUnistyles(RefreshCw);
-const ThemedPencil = withUnistyles(Pencil);
 const ThemedPlus = withUnistyles(Plus);
 const ThemedTrash = withUnistyles(Trash2);
+const ThemedUndo = withUnistyles(Undo2);
 const ThemedSpinner = withUnistyles(LoadingSpinner);
 const mutedColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 const placeholderColor = (theme: Theme) => ({
   placeholderTextColor: theme.colors.foregroundExtraMuted,
 });
+const ThemedCellInput = withUnistyles(TextInput);
 
 type TxMode = "auto" | "manual";
 
-interface PendingDelete {
-  keys: Record<string, Cell>;
-  label: string;
-}
-
-/** Coerce an edited string back to a JSON-safe cell (numbers stay numbers). */
 function coerce(text: string): Cell {
   if (text === "") return "";
   if (/^-?\d+$/.test(text)) return Number(text);
   if (/^-?\d+\.\d+$/.test(text)) return Number(text);
   return text;
 }
-
 function cellText(v: Cell): string {
   return v === null ? "" : String(v);
 }
 
 /**
- * The editable data view for a table — the DataGrip data editor. Rows load
- * read-only via `database/query`; a record editor collects add/update, a delete
- * marks rows, and the pending set is previewed as parameterized DML before it
- * runs. Auto mode autocommits each statement; Manual wraps them in an explicit
- * begin → commit/rollback on the connection. Editing needs a primary key.
+ * The DataGrip-style data editor: cells are edited INLINE (tap a cell → type),
+ * changed cells are highlighted, and add/delete act on the toolbar + selected
+ * rows — no per-row icons, no modal. Pending changes become parameterized DML
+ * (previewable), applied in Auto (autocommit) or Manual (begin → commit/rollback)
+ * transactions. Editing needs a primary key on a relational engine.
  */
 // eslint-disable-next-line complexity
 export function DatabaseDataEditor({
@@ -78,26 +74,29 @@ export function DatabaseDataEditor({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-
   const [txMode, setTxMode] = useState<TxMode>("auto");
   const [txOpen, setTxOpen] = useState(false);
 
-  // Pending change set (built into DML on submit).
-  const [pendingDeletes, setPendingDeletes] = useState<PendingDelete[]>([]);
-  const [pendingInserts, setPendingInserts] = useState<Array<Record<string, Cell>>>([]);
-  const [pendingUpdates, setPendingUpdates] = useState<
-    Array<{ keys: Record<string, Cell>; changes: Record<string, Cell>; label: string }>
-  >([]);
-
-  const [editorOpen, setEditorOpen] = useState(false);
-  const [editorMode, setEditorMode] = useState<"add" | "edit">("add");
-  const [editorDraft, setEditorDraft] = useState<Record<string, string>>({});
-  const [editorOriginal, setEditorOriginal] = useState<Cell[] | null>(null);
+  // Pending edits to existing rows keyed "rowIdx:col"; appended new rows; deleted
+  // existing-row indices; current inline-editing cell.
+  const [edits, setEdits] = useState<Record<string, Cell>>({});
+  const [newRows, setNewRows] = useState<Array<Record<string, Cell>>>([]);
+  const [deleted, setDeleted] = useState<Set<number>>(new Set());
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [editingKey, setEditingKey] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
 
   const pkCols = useMemo(() => columns.filter((c) => c.isPrimaryKey).map((c) => c.name), [columns]);
   const colNames = useMemo(() => columns.map((c) => c.name), [columns]);
-  const pendingCount = pendingDeletes.length + pendingInserts.length + pendingUpdates.length;
+  const canEdit = isSqlEngine(engine) && pkCols.length > 0;
+
+  const resetPending = useCallback(() => {
+    setEdits({});
+    setNewRows([]);
+    setDeleted(new Set());
+    setSelected(new Set());
+    setEditingKey(null);
+  }, []);
 
   const load = useCallback(
     async (nextPage: number) => {
@@ -105,23 +104,20 @@ export function DatabaseDataEditor({
       setLoading(true);
       setError(null);
       try {
-        const [cols, res] = await Promise.all([
-          columns.length
-            ? Promise.resolve({ error: null, columns })
-            : client.databaseColumns({ id: databaseId, schema, table }),
-          client.databaseQuery({
-            id: databaseId,
-            sql: `select * from ${qualifyTable(engine, schema, table)}`,
-            limit: PAGE_SIZE,
-            offset: nextPage * PAGE_SIZE,
-          }),
-        ]);
+        const cols = columns.length
+          ? { error: null, columns }
+          : await client.databaseColumns({ id: databaseId, schema, table });
         if (!("error" in cols) || !cols.error) {
           if ("columns" in cols && cols.columns) setColumns(cols.columns);
         }
-        if (res.error || !res.result) {
-          setError(res.error ?? "Query failed");
-        } else {
+        const res = await client.databaseQuery({
+          id: databaseId,
+          sql: `select * from ${qualifyTable(engine, schema, table)}`,
+          limit: PAGE_SIZE,
+          offset: nextPage * PAGE_SIZE,
+        });
+        if (res.error || !res.result) setError(res.error ?? "Query failed");
+        else {
           setResult(res.result);
           setPage(nextPage);
         }
@@ -135,11 +131,8 @@ export function DatabaseDataEditor({
   );
 
   useEffect(() => {
-    // Fresh table selection: reset the pending set and reload from page 0.
     setColumns([]);
-    setPendingDeletes([]);
-    setPendingInserts([]);
-    setPendingUpdates([]);
+    resetPending();
     setTxOpen(false);
     setStatus(null);
     void load(0);
@@ -147,7 +140,6 @@ export function DatabaseDataEditor({
   }, [databaseId, schema, table, listRefreshKey]);
 
   const colIndex = useCallback((name: string) => colNames.indexOf(name), [colNames]);
-
   const keysForRow = useCallback(
     (row: Cell[]): Record<string, Cell> => {
       const keys: Record<string, Cell> = {};
@@ -157,85 +149,90 @@ export function DatabaseDataEditor({
     [pkCols, colIndex],
   );
 
-  const openAdd = useCallback(() => {
-    const draft: Record<string, string> = {};
-    for (const name of colNames) draft[name] = "";
-    setEditorDraft(draft);
-    setEditorOriginal(null);
-    setEditorMode("add");
-    setEditorOpen(true);
-  }, [colNames]);
-
-  const openEditRow = useCallback(
-    (row: Cell[]) => {
-      const draft: Record<string, string> = {};
-      colNames.forEach((name, i) => {
-        draft[name] = cellText(row[i]);
-      });
-      setEditorDraft(draft);
-      setEditorOriginal(row);
-      setEditorMode("edit");
-      setEditorOpen(true);
+  // Inline editing.
+  const startEdit = useCallback(
+    (key: string) => {
+      if (canEdit) setEditingKey(key);
     },
-    [colNames],
+    [canEdit],
   );
-
-  const closeEditor = useCallback(() => setEditorOpen(false), []);
-
-  const saveEditor = useCallback(() => {
-    if (editorMode === "add") {
-      const values: Record<string, Cell> = {};
-      for (const name of colNames) {
-        const raw = editorDraft[name] ?? "";
-        if (raw !== "") values[name] = coerce(raw);
-      }
-      setPendingInserts((prev) => [...prev, values]);
-    } else if (editorOriginal) {
-      const changes: Record<string, Cell> = {};
-      colNames.forEach((name, i) => {
-        const original = cellText(editorOriginal[i]);
-        const next = editorDraft[name] ?? "";
-        if (next !== original) changes[name] = coerce(next);
+  const commitExistingEdit = useCallback(
+    (rowIdx: number, col: string, text: string, original: string) => {
+      setEditingKey(null);
+      setEdits((prev) => {
+        const key = `${rowIdx}:${col}`;
+        const next = { ...prev };
+        if (text === original) delete next[key];
+        else next[key] = coerce(text);
+        return next;
       });
-      if (Object.keys(changes).length > 0) {
-        const keys = keysForRow(editorOriginal);
-        const label = pkCols.map((k) => `${k}=${cellText(keys[k])}`).join(", ");
-        setPendingUpdates((prev) => [...prev, { keys, changes, label }]);
-      }
-    }
-    setEditorOpen(false);
-  }, [editorMode, editorOriginal, editorDraft, colNames, keysForRow, pkCols]);
-
-  const markDeleteRow = useCallback(
-    (row: Cell[]) => {
-      const keys = keysForRow(row);
-      const label = pkCols.map((k) => `${k}=${cellText(keys[k])}`).join(", ");
-      setPendingDeletes((prev) => [...prev, { keys, label }]);
     },
-    [keysForRow, pkCols],
+    [],
   );
-
-  const buildStatements = useCallback((): Dml[] => {
-    const stmts: Dml[] = [];
-    for (const u of pendingUpdates)
-      stmts.push(buildUpdate(engine, schema, table, u.changes, u.keys));
-    for (const ins of pendingInserts) {
-      if (Object.keys(ins).length > 0) stmts.push(buildInsert(engine, schema, table, ins));
-    }
-    for (const d of pendingDeletes) stmts.push(buildDelete(engine, schema, table, d.keys));
-    return stmts;
-  }, [pendingUpdates, pendingInserts, pendingDeletes, engine, schema, table]);
-
-  const clearPending = useCallback(() => {
-    setPendingDeletes([]);
-    setPendingInserts([]);
-    setPendingUpdates([]);
+  const commitNewEdit = useCallback((i: number, col: string, text: string) => {
+    setEditingKey(null);
+    setNewRows((prev) => {
+      const next = prev.map((r) => ({ ...r }));
+      if (text === "") delete next[i][col];
+      else next[i][col] = coerce(text);
+      return next;
+    });
   }, []);
 
-  const revert = useCallback(() => {
-    clearPending();
-    setStatus("Pending changes reverted.");
-  }, [clearPending]);
+  const toggleSelect = useCallback((rowIdx: number) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(rowIdx)) next.delete(rowIdx);
+      else next.add(rowIdx);
+      return next;
+    });
+  }, []);
+
+  const addRow = useCallback(() => setNewRows((prev) => [...prev, {}]), []);
+  const deleteSelected = useCallback(() => {
+    setDeleted((prev) => {
+      const next = new Set(prev);
+      for (const r of selected) next.add(r);
+      return next;
+    });
+    setSelected(new Set());
+  }, [selected]);
+
+  const buildStatements = useCallback((): Dml[] => {
+    if (!result) return [];
+    const stmts: Dml[] = [];
+    // Group edits by row.
+    const editedRows = new Map<number, Record<string, Cell>>();
+    for (const [key, value] of Object.entries(edits)) {
+      const [rStr, col] = key.split(/:(.+)/);
+      const r = Number(rStr);
+      if (deleted.has(r)) continue;
+      const m = editedRows.get(r) ?? {};
+      m[col] = value;
+      editedRows.set(r, m);
+    }
+    for (const [r, changes] of editedRows) {
+      stmts.push(buildUpdate(engine, schema, table, changes, keysForRow(result.rows[r])));
+    }
+    for (const nr of newRows) {
+      if (Object.keys(nr).length > 0) stmts.push(buildInsert(engine, schema, table, nr));
+    }
+    for (const r of deleted) {
+      stmts.push(buildDelete(engine, schema, table, keysForRow(result.rows[r])));
+    }
+    return stmts;
+  }, [result, edits, deleted, newRows, engine, schema, table, keysForRow]);
+
+  const editedRowCount = useMemo(() => {
+    const rows = new Set<number>();
+    for (const key of Object.keys(edits)) {
+      const r = Number(key.split(":")[0]);
+      if (!deleted.has(r)) rows.add(r);
+    }
+    return rows.size;
+  }, [edits, deleted]);
+  const pendingCount =
+    editedRowCount + deleted.size + newRows.filter((r) => Object.keys(r).length > 0).length;
 
   const submit = useCallback(async () => {
     if (!client || pendingCount === 0) return;
@@ -245,26 +242,18 @@ export function DatabaseDataEditor({
     try {
       if (txMode === "manual" && !txOpen) {
         const b = await client.databaseBegin({ id: databaseId });
-        if (b.error) {
-          setError(b.error);
-          return;
-        }
+        if (b.error) return setError(b.error);
         setTxOpen(true);
       }
       let affected = 0;
       for (const s of stmts) {
         const res = await client.databaseExec({ id: databaseId, sql: s.sql, params: s.params });
-        if (res.error) {
-          setError(res.error);
-          return;
-        }
+        if (res.error) return setError(res.error);
         affected += res.result?.affected ?? 0;
       }
-      clearPending();
+      resetPending();
       if (txMode === "manual") {
-        setStatus(
-          `${stmts.length} statement(s), ${affected} row(s) — uncommitted. Commit or Rollback.`,
-        );
+        setStatus(`${stmts.length} statement(s), ${affected} row(s) — uncommitted.`);
       } else {
         setStatus(`${stmts.length} statement(s) applied, ${affected} row(s).`);
         bumpRefresh();
@@ -280,7 +269,7 @@ export function DatabaseDataEditor({
     txMode,
     txOpen,
     databaseId,
-    clearPending,
+    resetPending,
     bumpRefresh,
     load,
     page,
@@ -289,23 +278,16 @@ export function DatabaseDataEditor({
   const commit = useCallback(async () => {
     if (!client || !txOpen) return;
     const res = await client.databaseCommit({ id: databaseId });
-    if (res.error) {
-      setError(res.error);
-      return;
-    }
+    if (res.error) return setError(res.error);
     setTxOpen(false);
     setStatus("Committed.");
     bumpRefresh();
     await load(page);
   }, [client, txOpen, databaseId, bumpRefresh, load, page]);
-
   const rollback = useCallback(async () => {
     if (!client || !txOpen) return;
     const res = await client.databaseRollback({ id: databaseId });
-    if (res.error) {
-      setError(res.error);
-      return;
-    }
+    if (res.error) return setError(res.error);
     setTxOpen(false);
     setStatus("Rolled back.");
     await load(page);
@@ -320,13 +302,14 @@ export function DatabaseDataEditor({
       });
       return obj;
     });
-    setStatus(
-      `Exported ${rows.length} rows as JSON (${JSON.stringify(rows).length} bytes) to log.`,
-    );
+    setStatus(`Exported ${rows.length} rows as JSON to log.`);
     // eslint-disable-next-line no-console
     console.log(JSON.stringify(rows, null, 2));
   }, [result]);
 
+  const onSubmit = useCallback(() => void submit(), [submit]);
+  const onCommit = useCallback(() => void commit(), [commit]);
+  const onRollback = useCallback(() => void rollback(), [rollback]);
   const handlePrev = useCallback(() => {
     if (page > 0) void load(page - 1);
   }, [page, load]);
@@ -337,37 +320,72 @@ export function DatabaseDataEditor({
   const toggleTxMode = useCallback(() => setTxMode((m) => (m === "auto" ? "manual" : "auto")), []);
   const openPreview = useCallback(() => setPreviewOpen(true), []);
   const closePreview = useCallback(() => setPreviewOpen(false), []);
-  const onSubmit = useCallback(() => void submit(), [submit]);
-  const onCommit = useCallback(() => void commit(), [commit]);
-  const onRollback = useCallback(() => void rollback(), [rollback]);
-  const setDraftField = useCallback(
-    (name: string, value: string) => setEditorDraft((d) => ({ ...d, [name]: value })),
-    [],
-  );
 
   const from = page * PAGE_SIZE;
   const shown = result?.rows.length ?? 0;
-  const canEdit = isSqlEngine(engine) && pkCols.length > 0;
   const previewStatements = previewOpen ? buildStatements() : [];
 
-  let tableBody;
+  let gridBody;
   if (loading && !result) {
-    tableBody = (
+    gridBody = (
       <View style={styles.center}>
         <ThemedSpinner size="small" uniProps={mutedColor} />
       </View>
     );
   } else if (result) {
-    tableBody = (
-      <EditableTable
-        result={result}
-        canEdit={canEdit}
-        onEditRow={openEditRow}
-        onDeleteRow={markDeleteRow}
-      />
+    gridBody = (
+      <ScrollView style={styles.vscroll}>
+        <ScrollView horizontal>
+          <View>
+            <View style={styles.headerRow}>
+              <View style={styles.gutter} />
+              {columns.map((c) => (
+                <View key={c.name} style={styles.cell}>
+                  <Text style={styles.headerText} numberOfLines={1}>
+                    {c.name}
+                  </Text>
+                  <Text style={styles.headerType} numberOfLines={1}>
+                    {c.dataType}
+                    {c.isPrimaryKey ? " · PK" : ""}
+                  </Text>
+                </View>
+              ))}
+            </View>
+            {result.rows.map((row, r) => (
+              <ExistingRow
+                // eslint-disable-next-line react/no-array-index-key
+                key={r}
+                rowIndex={r}
+                row={row}
+                columns={colNames}
+                edits={edits}
+                deleted={deleted.has(r)}
+                selected={selected.has(r)}
+                canEdit={canEdit}
+                editingKey={editingKey}
+                onSelect={toggleSelect}
+                onStartEdit={startEdit}
+                onCommitEdit={commitExistingEdit}
+              />
+            ))}
+            {newRows.map((nr, i) => (
+              <NewRow
+                // eslint-disable-next-line react/no-array-index-key
+                key={`new-${i}`}
+                index={i}
+                values={nr}
+                columns={colNames}
+                editingKey={editingKey}
+                onStartEdit={startEdit}
+                onCommitEdit={commitNewEdit}
+              />
+            ))}
+          </View>
+        </ScrollView>
+      </ScrollView>
     );
   } else {
-    tableBody = null;
+    gridBody = null;
   }
 
   return (
@@ -378,11 +396,27 @@ export function DatabaseDataEditor({
         </Text>
         <Pressable
           style={[styles.tbtn, !canEdit && styles.tbtnDisabled]}
-          onPress={openAdd}
+          onPress={addRow}
           disabled={!canEdit}
         >
           <ThemedPlus size={14} uniProps={mutedColor} />
-          <Text style={styles.tbtnText}>Add</Text>
+          <Text style={styles.tbtnText}>Row</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.tbtn, selected.size === 0 && styles.tbtnDisabled]}
+          onPress={deleteSelected}
+          disabled={selected.size === 0}
+        >
+          <ThemedTrash size={14} uniProps={mutedColor} />
+          <Text style={styles.tbtnText}>Delete{selected.size ? ` (${selected.size})` : ""}</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.tbtn, pendingCount === 0 && styles.tbtnDisabled]}
+          onPress={resetPending}
+          disabled={pendingCount === 0}
+        >
+          <ThemedUndo size={14} uniProps={mutedColor} />
+          <Text style={styles.tbtnText}>Revert</Text>
         </Pressable>
         <Pressable style={styles.tbtn} onPress={toggleTxMode}>
           <Text style={styles.tbtnText}>Tx: {txMode === "auto" ? "Auto" : "Manual"}</Text>
@@ -411,11 +445,6 @@ export function DatabaseDataEditor({
             </Pressable>
           </>
         ) : null}
-        {pendingCount > 0 ? (
-          <Pressable style={styles.tbtn} onPress={revert}>
-            <Text style={styles.tbtnText}>Revert</Text>
-          </Pressable>
-        ) : null}
         <View style={styles.toolbarSpacer} />
         <Pressable style={styles.tbtn} onPress={exportJson}>
           <Text style={styles.tbtnText}>Export</Text>
@@ -436,8 +465,8 @@ export function DatabaseDataEditor({
         <View style={styles.noteBar}>
           <Text style={styles.noteText}>
             {isSqlEngine(engine)
-              ? "This table has no primary key — rows are read-only (editing needs a key to target a row)."
-              : `Row editing isn't available for ${engine}; use the SQL console for changes.`}
+              ? "Read-only — this table has no primary key to target a row for editing."
+              : `Read-only — row editing isn't available for ${engine}; use the SQL console.`}
           </Text>
         </View>
       ) : null}
@@ -447,197 +476,199 @@ export function DatabaseDataEditor({
         </View>
       ) : null}
 
-      {tableBody}
+      {gridBody}
 
       <View style={styles.statusBar}>
         <Text style={styles.statusText} numberOfLines={1}>
           {status ?? `${shown} row${shown === 1 ? "" : "s"}${result?.truncated ? "+" : ""}`}
           {txOpen ? " · transaction open" : ""}
+          {canEdit ? " · double-tap a cell to edit" : ""}
         </Text>
       </View>
 
-      <RecordEditorModal
-        open={editorOpen}
-        mode={editorMode}
-        columns={columns}
-        draft={editorDraft}
-        onChangeField={setDraftField}
-        onSave={saveEditor}
-        onClose={closeEditor}
-      />
       <PreviewModal open={previewOpen} statements={previewStatements} onClose={closePreview} />
     </View>
   );
 }
 
-function EditableTable({
-  result,
-  canEdit,
-  onEditRow,
-  onDeleteRow,
-}: {
-  result: QueryResult;
-  canEdit: boolean;
-  onEditRow: (row: Cell[]) => void;
-  onDeleteRow: (row: Cell[]) => void;
-}) {
-  return (
-    // Vertical (rows) scroll outside, horizontal (columns) inside — both axes
-    // scroll, no clipping regardless of pane size.
-    <ScrollView style={styles.vScroll}>
-      <ScrollView horizontal>
-        <View>
-          <View style={styles.headerRow}>
-            <View style={styles.gutter} />
-            {result.columns.map((col) => (
-              <View key={col.name} style={styles.cell}>
-                <Text style={styles.headerText} numberOfLines={1}>
-                  {col.name}
-                </Text>
-              </View>
-            ))}
-          </View>
-          {result.rows.map((row, r) => (
-            // Positional rows: index is the correct key for an arbitrary result.
-            <EditableRow
-              // eslint-disable-next-line react/no-array-index-key
-              key={r}
-              row={row}
-              alt={r % 2 === 1}
-              canEdit={canEdit}
-              onEdit={onEditRow}
-              onDelete={onDeleteRow}
-            />
-          ))}
-        </View>
-      </ScrollView>
-    </ScrollView>
-  );
-}
-
-function EditableRow({
+function ExistingRow({
+  rowIndex,
   row,
-  alt,
-  canEdit,
-  onEdit,
-  onDelete,
-}: {
-  row: Cell[];
-  alt: boolean;
-  canEdit: boolean;
-  onEdit: (row: Cell[]) => void;
-  onDelete: (row: Cell[]) => void;
-}) {
-  const handleEdit = useCallback(() => onEdit(row), [onEdit, row]);
-  const handleDelete = useCallback(() => onDelete(row), [onDelete, row]);
-  return (
-    <View style={[styles.bodyRow, alt && styles.bodyRowAlt]}>
-      <View style={styles.gutter}>
-        {canEdit ? (
-          <>
-            <Pressable onPress={handleEdit} hitSlop={6} accessibilityLabel="Edit row">
-              <ThemedPencil size={13} uniProps={mutedColor} />
-            </Pressable>
-            <Pressable onPress={handleDelete} hitSlop={6} accessibilityLabel="Delete row">
-              <ThemedTrash size={13} uniProps={mutedColor} />
-            </Pressable>
-          </>
-        ) : null}
-      </View>
-      {row.map((cell, c) => (
-        // Cells are positional within a row (no column name is threaded here).
-        // eslint-disable-next-line react/no-array-index-key
-        <View key={c} style={styles.cell}>
-          <Text style={[styles.bodyText, cell === null && styles.nullText]} numberOfLines={1}>
-            {cell === null ? "NULL" : String(cell)}
-          </Text>
-        </View>
-      ))}
-    </View>
-  );
-}
-
-function RecordEditorModal({
-  open,
-  mode,
   columns,
-  draft,
-  onChangeField,
-  onSave,
-  onClose,
+  edits,
+  deleted,
+  selected,
+  canEdit,
+  editingKey,
+  onSelect,
+  onStartEdit,
+  onCommitEdit,
 }: {
-  open: boolean;
-  mode: "add" | "edit";
-  columns: DbColumn[];
-  draft: Record<string, string>;
-  onChangeField: (name: string, value: string) => void;
-  onSave: () => void;
-  onClose: () => void;
+  rowIndex: number;
+  row: Cell[];
+  columns: string[];
+  edits: Record<string, Cell>;
+  deleted: boolean;
+  selected: boolean;
+  canEdit: boolean;
+  editingKey: string | null;
+  onSelect: (rowIdx: number) => void;
+  onStartEdit: (key: string) => void;
+  onCommitEdit: (rowIdx: number, col: string, text: string, original: string) => void;
 }) {
+  const handleSelect = useCallback(() => onSelect(rowIndex), [onSelect, rowIndex]);
   return (
-    <Modal visible={open} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.modalBackdrop}>
-        <View style={styles.modalCard}>
-          <Text style={styles.modalTitle}>{mode === "add" ? "Add row" : "Edit row"}</Text>
-          <ScrollView style={styles.modalScroll}>
-            {columns.map((col) => (
-              <RecordField
-                key={col.name}
-                column={col}
-                value={draft[col.name] ?? ""}
-                onChange={onChangeField}
-              />
-            ))}
-          </ScrollView>
-          <View style={styles.modalActions}>
-            <Pressable style={[styles.tbtn, styles.tbtnPrimary]} onPress={onSave}>
-              <Text style={styles.tbtnPrimaryText}>
-                {mode === "add" ? "Add to pending" : "Stage change"}
-              </Text>
-            </Pressable>
-            <Pressable style={styles.tbtn} onPress={onClose}>
-              <Text style={styles.tbtnText}>Cancel</Text>
-            </Pressable>
-          </View>
-        </View>
-      </View>
-    </Modal>
+    <View
+      style={[
+        styles.bodyRow,
+        rowIndex % 2 === 1 && styles.bodyRowAlt,
+        deleted && styles.deletedRow,
+      ]}
+    >
+      <Pressable
+        style={[styles.gutter, selected && styles.gutterSelected]}
+        onPress={handleSelect}
+        disabled={!canEdit}
+      >
+        <Text style={styles.gutterText}>{rowIndex + 1}</Text>
+      </Pressable>
+      {row.map((cell, c) => {
+        const col = columns[c];
+        const key = `${rowIndex}:${col}`;
+        const edited = Object.prototype.hasOwnProperty.call(edits, key);
+        const value = edited ? edits[key] : cell;
+        return (
+          <GridCell
+            // eslint-disable-next-line react/no-array-index-key
+            key={c}
+            cellKey={key}
+            rowIndex={rowIndex}
+            col={col}
+            original={cellText(cell)}
+            text={cellText(value)}
+            isNull={value === null}
+            dirty={edited}
+            editable={canEdit && !deleted}
+            editing={editingKey === key}
+            onStart={onStartEdit}
+            onCommitExisting={onCommitEdit}
+          />
+        );
+      })}
+    </View>
   );
 }
 
-function RecordField({
-  column,
-  value,
-  onChange,
+function NewRow({
+  index,
+  values,
+  columns,
+  editingKey,
+  onStartEdit,
+  onCommitEdit,
 }: {
-  column: DbColumn;
-  value: string;
-  onChange: (name: string, value: string) => void;
+  index: number;
+  values: Record<string, Cell>;
+  columns: string[];
+  editingKey: string | null;
+  onStartEdit: (key: string) => void;
+  onCommitEdit: (i: number, col: string, text: string) => void;
 }) {
-  const handleChange = useCallback(
-    (v: string) => onChange(column.name, v),
-    [column.name, onChange],
-  );
   return (
-    <View style={styles.recordField}>
-      <Text style={styles.recordLabel}>
-        {column.name}
-        <Text style={styles.recordType}>
-          {"  "}
-          {column.dataType}
-          {column.isPrimaryKey ? " · PK" : ""}
-        </Text>
-      </Text>
-      <ThemedRecordInput
-        style={styles.recordInput}
-        value={value}
-        onChangeText={handleChange}
-        placeholder={column.nullable ? "NULL" : ""}
-        autoCapitalize="none"
-        autoCorrect={false}
-        uniProps={placeholderColor}
-      />
+    <View style={[styles.bodyRow, styles.newRow]}>
+      <View style={styles.gutter}>
+        <ThemedPlus size={12} uniProps={mutedColor} />
+      </View>
+      {columns.map((col) => {
+        const key = `new:${index}:${col}`;
+        const has = Object.prototype.hasOwnProperty.call(values, col);
+        return (
+          <GridCell
+            key={col}
+            cellKey={key}
+            newIndex={index}
+            col={col}
+            original=""
+            text={has ? cellText(values[col]) : ""}
+            isNull={false}
+            dirty
+            editable
+            editing={editingKey === key}
+            onStart={onStartEdit}
+            onCommitNew={onCommitEdit}
+          />
+        );
+      })}
     </View>
+  );
+}
+
+function GridCell({
+  cellKey,
+  rowIndex,
+  newIndex,
+  col,
+  original,
+  text,
+  isNull,
+  dirty,
+  editable,
+  editing,
+  onStart,
+  onCommitExisting,
+  onCommitNew,
+}: {
+  cellKey: string;
+  rowIndex?: number;
+  newIndex?: number;
+  col: string;
+  original: string;
+  text: string;
+  isNull: boolean;
+  dirty: boolean;
+  editable: boolean;
+  editing: boolean;
+  onStart: (key: string) => void;
+  onCommitExisting?: (rowIdx: number, col: string, text: string, original: string) => void;
+  onCommitNew?: (i: number, col: string, text: string) => void;
+}) {
+  const [draft, setDraft] = useState(text);
+  const handlePress = useCallback(() => {
+    setDraft(text);
+    onStart(cellKey);
+  }, [text, onStart, cellKey]);
+  const commit = useCallback(() => {
+    if (rowIndex !== undefined) onCommitExisting?.(rowIndex, col, draft, original);
+    else if (newIndex !== undefined) onCommitNew?.(newIndex, col, draft);
+  }, [rowIndex, newIndex, col, draft, original, onCommitExisting, onCommitNew]);
+
+  if (editing) {
+    return (
+      <View style={[styles.cell, styles.cellEditing]}>
+        <ThemedCellInput
+          style={styles.cellInput}
+          value={draft}
+          onChangeText={setDraft}
+          onBlur={commit}
+          onSubmitEditing={commit}
+          autoFocus
+          autoCapitalize="none"
+          autoCorrect={false}
+          uniProps={placeholderColor}
+        />
+      </View>
+    );
+  }
+  return (
+    <Pressable
+      style={[styles.cell, dirty && styles.cellDirty]}
+      onPress={editable ? handlePress : undefined}
+      disabled={!editable}
+    >
+      <Text style={[styles.bodyText, isNull && styles.nullText]} numberOfLines={1}>
+        {isNull ? "NULL" : text}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -657,16 +688,13 @@ function PreviewModal({
           <Text style={styles.modalTitle}>Preview DML ({statements.length})</Text>
           <ScrollView style={styles.modalScroll}>
             {statements.map((s, i) => (
-              // Statement list is a positional preview snapshot.
               // eslint-disable-next-line react/no-array-index-key
               <View key={i} style={styles.previewItem}>
                 <Text style={styles.previewSql}>{s.sql}</Text>
                 <Text style={styles.previewParams}>params: {JSON.stringify(s.params)}</Text>
               </View>
             ))}
-            {statements.length === 0 ? (
-              <Text style={styles.recordType}>No pending changes.</Text>
-            ) : null}
+            {statements.length === 0 ? <Text style={styles.previewParams}>No changes.</Text> : null}
           </ScrollView>
           <View style={styles.modalActions}>
             <Pressable style={styles.tbtn} onPress={onClose}>
@@ -678,8 +706,6 @@ function PreviewModal({
     </Modal>
   );
 }
-
-const ThemedRecordInput = withUnistyles(TextInput);
 
 const styles = StyleSheet.create((theme: Theme) => ({
   container: { flex: 1, minHeight: 0 },
@@ -734,6 +760,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
   errorBox: { padding: theme.spacing[3], backgroundColor: theme.colors.palette.red[100] },
   errorText: { fontSize: theme.fontSize.sm, color: theme.colors.palette.red[800] },
   center: { flex: 1, alignItems: "center", justifyContent: "center", minHeight: 120 },
+  vscroll: { flex: 1, minHeight: 0 },
   headerRow: {
     flexDirection: "row",
     borderBottomWidth: theme.borderWidth[1],
@@ -741,33 +768,45 @@ const styles = StyleSheet.create((theme: Theme) => ({
     backgroundColor: theme.colors.surface1,
   },
   gutter: {
-    width: 52,
-    flexDirection: "row",
+    width: GUTTER_W,
     alignItems: "center",
     justifyContent: "center",
-    gap: theme.spacing[1.5],
+    paddingVertical: theme.spacing[1.5],
     borderRightWidth: StyleSheet.hairlineWidth,
     borderRightColor: theme.colors.border,
   },
+  gutterSelected: { backgroundColor: theme.colors.accent },
+  gutterText: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundExtraMuted },
   cell: {
-    width: 160,
+    width: CELL_W,
     paddingHorizontal: theme.spacing[2],
     paddingVertical: theme.spacing[1.5],
     borderRightWidth: StyleSheet.hairlineWidth,
     borderRightColor: theme.colors.border,
+    justifyContent: "center",
+  },
+  cellDirty: { backgroundColor: "rgba(245, 158, 11, 0.16)" },
+  cellEditing: { backgroundColor: theme.colors.surface2, paddingVertical: 0 },
+  cellInput: {
+    fontSize: theme.fontSize.xs,
+    fontFamily: theme.fontFamily.mono,
+    color: theme.colors.foreground,
+    paddingVertical: theme.spacing[1.5],
   },
   headerText: {
     fontSize: theme.fontSize.xs,
     fontWeight: theme.fontWeight.semibold,
     color: theme.colors.foreground,
   },
-  vScroll: { flex: 1, minHeight: 0 },
+  headerType: { fontSize: 10, color: theme.colors.foregroundExtraMuted },
   bodyRow: {
     flexDirection: "row",
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: theme.colors.border,
   },
   bodyRowAlt: { backgroundColor: theme.colors.surface1 },
+  deletedRow: { opacity: 0.45 },
+  newRow: { backgroundColor: theme.colors.palette.green[100] },
   bodyText: {
     fontSize: theme.fontSize.xs,
     color: theme.colors.foreground,
@@ -791,7 +830,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
   },
   modalCard: {
     width: "100%",
-    maxWidth: 520,
+    maxWidth: 560,
     maxHeight: "80%",
     borderRadius: theme.borderRadius.lg,
     backgroundColor: theme.colors.surface1,
@@ -807,28 +846,6 @@ const styles = StyleSheet.create((theme: Theme) => ({
   },
   modalScroll: { minHeight: 0 },
   modalActions: { flexDirection: "row", gap: theme.spacing[2] },
-  recordField: { gap: theme.spacing[1], marginBottom: theme.spacing[2] },
-  recordLabel: {
-    fontSize: theme.fontSize.xs,
-    fontWeight: theme.fontWeight.medium,
-    color: theme.colors.foreground,
-  },
-  recordType: {
-    fontSize: theme.fontSize.xs,
-    color: theme.colors.foregroundMuted,
-    fontWeight: theme.fontWeight.normal,
-  },
-  recordInput: {
-    borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.border,
-    borderRadius: theme.borderRadius.md,
-    backgroundColor: theme.colors.surface0,
-    paddingHorizontal: theme.spacing[2],
-    paddingVertical: theme.spacing[2],
-    fontSize: theme.fontSize.sm,
-    fontFamily: theme.fontFamily.mono,
-    color: theme.colors.foreground,
-  },
   previewItem: {
     gap: theme.spacing[1],
     marginBottom: theme.spacing[2],

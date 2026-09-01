@@ -172,8 +172,10 @@ function DatabaseChatBody({
   }
   return (
     <View style={styles.center}>
+      <Text style={styles.centerTitle}>Ask about this database</Text>
       <Text style={styles.centerText}>
-        Add a project and enable an AI provider to chat about this database.
+        The chat runs a schema-grounded agent. To enable it, open a project (sidebar → Add project)
+        and turn on an AI provider in Host settings.
       </Text>
     </View>
   );
@@ -560,6 +562,12 @@ const styles = StyleSheet.create((theme: Theme) => ({
   entryBody: {
     flex: 1,
     justifyContent: "flex-end",
+  },
+  centerTitle: {
+    fontSize: theme.fontSize.base,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.foreground,
+    textAlign: "center",
   },
   centerText: {
     fontSize: theme.fontSize.sm,

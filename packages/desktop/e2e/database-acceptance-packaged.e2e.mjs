@@ -265,6 +265,26 @@ async function main() {
     report.checks.gridShowsData = await seen(page, "shipped");
     report.screenshots.push(await shot(page, artifactDir, "3-data-grid"));
 
+    // Inline cell edit (DataGrip-style): double-tap a status cell → type → blur →
+    // Submit → the new value must appear. Only meaningful for the editable SQLite run.
+    if (!usePg) {
+      try {
+        await page.getByText("shipped", { exact: true }).first().dblclick({ timeout: 10_000 });
+        await delay(400);
+        const input = page.locator("input:focus, textarea:focus").first();
+        await input.fill("delivered");
+        await page.getByText("Data", { exact: true }).first().click(); // blur → commit edit
+        await delay(400);
+        report.checks.cellMarkedDirty = await seen(page, "Preview (1)", 5000);
+        await page.getByText("Submit", { exact: true }).first().click({ timeout: 8000 });
+        await delay(2500);
+        report.checks.inlineEditPersisted = await seen(page, "delivered", 8000);
+      } catch (e) {
+        report.checks.inlineEditError = String(e).slice(0, 120);
+      }
+      report.screenshots.push(await shot(page, artifactDir, "3b-inline-edit"));
+    }
+
     // Structure grid.
     try {
       await page.getByText("Structure", { exact: true }).first().click({ timeout: 10_000 });
