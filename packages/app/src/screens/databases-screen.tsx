@@ -180,6 +180,7 @@ function Field({
         keyboardType={keyboardType}
         autoCapitalize="none"
         autoCorrect={false}
+        testID={`db-field-${fieldKey}`}
         uniProps={placeholderColorMapping}
       />
     </View>
@@ -199,7 +200,11 @@ function EngineChip({
 }) {
   const handlePress = useCallback(() => onSelect(engine), [engine, onSelect]);
   return (
-    <Pressable style={[styles.engineChip, active && styles.engineChipActive]} onPress={handlePress}>
+    <Pressable
+      style={[styles.engineChip, active && styles.engineChipActive]}
+      onPress={handlePress}
+      testID={`db-engine-${engine}`}
+    >
       <Text style={[styles.engineChipText, active && styles.engineChipTextActive]}>{label}</Text>
     </Pressable>
   );
@@ -370,7 +375,11 @@ export function DatabasesScreen() {
         <ThemedDatabase size={20} uniProps={foregroundColorMapping} />
         <Text style={styles.header}>Databases</Text>
         <View style={styles.headerSpacer} />
-        <Pressable style={[styles.btn, styles.btnPrimary]} onPress={toggleAdding}>
+        <Pressable
+          style={[styles.btn, styles.btnPrimary]}
+          onPress={toggleAdding}
+          testID="db-add-connection"
+        >
           <ThemedPlus size={14} uniProps={accentForegroundColorMapping} />
           <Text style={styles.btnPrimaryText}>Add connection</Text>
         </Pressable>
@@ -503,6 +512,7 @@ export function DatabasesScreen() {
               style={[styles.btn, styles.btnPrimary, saving && styles.btnDisabled]}
               onPress={handleSaveConnect}
               disabled={saving}
+              testID="db-save-connect"
             >
               <Text style={styles.btnPrimaryText}>{saving ? "Saving…" : "Save & connect"}</Text>
             </Pressable>
