@@ -7,6 +7,7 @@ import type {
   DbForeignKey,
 } from "@jagentdesk/protocol/database/rpc-schemas";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
+import { useDatabaseViewStore } from "@/stores/database-view-store";
 import { buildCreateTableDdl } from "@/utils/sql-ddl";
 import type { Theme } from "@/styles/theme";
 
@@ -37,6 +38,7 @@ export function DatabaseStructureView({
   table: string;
 }) {
   const client = useHostRuntimeClient(serverId);
+  const listRefreshKey = useDatabaseViewStore((s) => s.listRefreshKey);
   const [columns, setColumns] = useState<DbColumn[]>([]);
   const [fks, setFks] = useState<DbForeignKey[]>([]);
   const [tab, setTab] = useState<Tab>("columns");
@@ -56,7 +58,7 @@ export function DatabaseStructureView({
     return () => {
       cancelled = true;
     };
-  }, [client, databaseId, schema, table]);
+  }, [client, databaseId, schema, table, listRefreshKey]);
 
   const outgoing = useMemo(() => fks.filter((f) => f.table === table), [fks, table]);
   const incoming = useMemo(() => fks.filter((f) => f.refTable === table), [fks, table]);
