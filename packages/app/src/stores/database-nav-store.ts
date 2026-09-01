@@ -22,6 +22,8 @@ interface DatabaseNavState {
   showingConsole: boolean;
   /** Schema-compare view active. */
   showingDiff: boolean;
+  /** ER diagram view active. */
+  showingEr: boolean;
   /** Connection overview, shown by default when a database opens. */
   showingOverview: boolean;
   /** The last database the user had open, so the sidebar can jump straight back. */
@@ -29,6 +31,7 @@ interface DatabaseNavState {
   selectObject: (databaseId: string, object: SelectedDbObject) => void;
   selectConsole: (databaseId: string) => void;
   selectDiff: (databaseId: string) => void;
+  selectEr: (databaseId: string) => void;
   selectOverview: (databaseId: string) => void;
   setSchema: (schema: string | null) => void;
   ensureDatabase: (databaseId: string) => void;
@@ -48,6 +51,7 @@ export const useDatabaseNavStore = create<DatabaseNavState>((set, get) => ({
   selectedObject: null,
   showingConsole: false,
   showingDiff: false,
+  showingEr: false,
   showingOverview: false,
   lastDatabase: null,
   setLastDatabase: (serverId, databaseId) => set({ lastDatabase: { serverId, databaseId } }),
@@ -60,6 +64,7 @@ export const useDatabaseNavStore = create<DatabaseNavState>((set, get) => ({
       selectedSchema: object.schema,
       showingConsole: false,
       showingDiff: false,
+      showingEr: false,
       showingOverview: false,
     }),
   selectConsole: (databaseId) =>
@@ -68,6 +73,7 @@ export const useDatabaseNavStore = create<DatabaseNavState>((set, get) => ({
       selectedObject: null,
       showingConsole: true,
       showingDiff: false,
+      showingEr: false,
       showingOverview: false,
     }),
   selectDiff: (databaseId) =>
@@ -76,6 +82,16 @@ export const useDatabaseNavStore = create<DatabaseNavState>((set, get) => ({
       selectedObject: null,
       showingConsole: false,
       showingDiff: true,
+      showingEr: false,
+      showingOverview: false,
+    }),
+  selectEr: (databaseId) =>
+    set({
+      databaseId,
+      selectedObject: null,
+      showingConsole: false,
+      showingDiff: false,
+      showingEr: true,
       showingOverview: false,
     }),
   selectOverview: (databaseId) =>
@@ -84,6 +100,7 @@ export const useDatabaseNavStore = create<DatabaseNavState>((set, get) => ({
       selectedObject: null,
       showingConsole: false,
       showingDiff: false,
+      showingEr: false,
       showingOverview: true,
     }),
   setSchema: (selectedSchema) => set({ selectedSchema }),
@@ -96,6 +113,7 @@ export const useDatabaseNavStore = create<DatabaseNavState>((set, get) => ({
         selectedSchema: null,
         showingConsole: false,
         showingDiff: false,
+        showingEr: false,
         showingOverview: true,
       });
     }

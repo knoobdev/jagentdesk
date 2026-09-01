@@ -6,6 +6,7 @@ import {
   Database as DatabaseIcon,
   Gauge,
   GitCompare,
+  Share2,
   Table,
   Eye,
   Terminal,
@@ -25,6 +26,7 @@ const ThemedChevronLeft = withUnistyles(ChevronLeft);
 const ThemedDatabase = withUnistyles(DatabaseIcon);
 const ThemedGauge = withUnistyles(Gauge);
 const ThemedGitCompare = withUnistyles(GitCompare);
+const ThemedShare2 = withUnistyles(Share2);
 const ThemedTable = withUnistyles(Table);
 const ThemedEye = withUnistyles(Eye);
 const ThemedTerminal = withUnistyles(Terminal);
@@ -93,10 +95,12 @@ export function SidebarDatabaseNav({
   const selectedObject = useDatabaseNavStore((s) => s.selectedObject);
   const showingConsole = useDatabaseNavStore((s) => s.showingConsole);
   const showingDiff = useDatabaseNavStore((s) => s.showingDiff);
+  const showingEr = useDatabaseNavStore((s) => s.showingEr);
   const showingOverview = useDatabaseNavStore((s) => s.showingOverview);
   const selectObject = useDatabaseNavStore((s) => s.selectObject);
   const selectConsole = useDatabaseNavStore((s) => s.selectConsole);
   const selectDiff = useDatabaseNavStore((s) => s.selectDiff);
+  const selectEr = useDatabaseNavStore((s) => s.selectEr);
   const selectOverview = useDatabaseNavStore((s) => s.selectOverview);
   const setSchema = useDatabaseNavStore((s) => s.setSchema);
   const ensureDatabase = useDatabaseNavStore((s) => s.ensureDatabase);
@@ -178,6 +182,10 @@ export function SidebarDatabaseNav({
     selectDiff(databaseId);
     if (isCompact) showMobileAgent();
   }, [databaseId, selectDiff, isCompact, showMobileAgent]);
+  const handleSelectEr = useCallback(() => {
+    selectEr(databaseId);
+    if (isCompact) showMobileAgent();
+  }, [databaseId, selectEr, isCompact, showMobileAgent]);
   const handleSelectSchema = useCallback((name: string) => setSchema(name), [setSchema]);
 
   const handleBackToPrevious = useCallback(() => {
@@ -259,6 +267,10 @@ export function SidebarDatabaseNav({
           <Text style={[styles.rowLabel, showingDiff && styles.rowLabelActive]}>
             Compare schemas
           </Text>
+        </Pressable>
+        <Pressable style={[styles.row, showingEr && styles.rowActive]} onPress={handleSelectEr}>
+          <ThemedShare2 size={15} uniProps={mutedColor} />
+          <Text style={[styles.rowLabel, showingEr && styles.rowLabelActive]}>ER diagram</Text>
         </Pressable>
         {grouped.map((group) => (
           <View key={group.category}>

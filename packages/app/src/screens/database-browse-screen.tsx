@@ -8,6 +8,7 @@ import { DatabaseDataEditor } from "@/components/database-data-editor";
 import { DatabaseStructureView } from "@/components/database-structure-view";
 import { DatabaseSqlConsole } from "@/components/database-sql-console";
 import { DatabaseSchemaDiff } from "@/components/database-schema-diff";
+import { DatabaseErDiagram } from "@/components/database-er-diagram";
 import { DatabaseChatDock } from "@/components/database-chat-dock";
 import type { DatabaseComposerContext } from "@/components/database-draft-chat";
 import { useIsCompactFormFactor } from "@/constants/layout";
@@ -23,6 +24,7 @@ import type { Theme } from "@/styles/theme";
  * connection overview, a table data grid, or the SQL console — plus the chat
  * dock on the right (mirrors ClusterWorkloadsScreen).
  */
+// eslint-disable-next-line complexity
 export function DatabaseBrowseScreen({
   serverId,
   databaseId,
@@ -40,6 +42,7 @@ export function DatabaseBrowseScreen({
   const selectedObject = useDatabaseNavStore((s) => s.selectedObject);
   const showingConsole = useDatabaseNavStore((s) => s.showingConsole);
   const showingDiff = useDatabaseNavStore((s) => s.showingDiff);
+  const showingEr = useDatabaseNavStore((s) => s.showingEr);
   const setLastDatabase = useDatabaseNavStore((s) => s.setLastDatabase);
   const bumpRefresh = useDatabaseViewStore((s) => s.bumpRefresh);
   const resetViewForDatabase = useDatabaseViewStore((s) => s.resetForDatabase);
@@ -118,6 +121,8 @@ export function DatabaseBrowseScreen({
     content = <DatabaseSqlConsole serverId={serverId} databaseId={databaseId} engine={engine} />;
   } else if (showingDiff) {
     content = <DatabaseSchemaDiff serverId={serverId} databaseId={databaseId} />;
+  } else if (showingEr) {
+    content = <DatabaseErDiagram serverId={serverId} databaseId={databaseId} />;
   } else if (selectedObject) {
     const inner =
       objectView === "data" ? (
