@@ -11,6 +11,11 @@ import type { Theme } from "@/styles/theme";
 
 const ThemedPlay = withUnistyles(Play);
 const ThemedTextInput = withUnistyles(TextInput);
+
+// Stable empty reference: returning a fresh [] from the zustand selector on every
+// render makes the default (Object.is) equality see a change each time → infinite
+// re-render loop ("Maximum update depth exceeded"). Share one frozen array.
+const EMPTY_HISTORY: readonly { sql: string; at_ms: number }[] = Object.freeze([]);
 const accentForeground = (theme: Theme) => ({ color: theme.colors.accentForeground });
 const placeholderColor = (theme: Theme) => ({
   placeholderTextColor: theme.colors.foregroundExtraMuted,
@@ -54,7 +59,7 @@ export function DatabaseSqlConsole({
   const client = useHostRuntimeClient(serverId);
   const bumpRefresh = useDatabaseViewStore((s) => s.bumpRefresh);
   const recordHistory = useDatabaseHistoryStore((s) => s.record);
-  const history = useDatabaseHistoryStore((s) => s.byDatabase[databaseId] ?? []);
+  const history = useDatabaseHistoryStore((s) => s.byDatabase[databaseId] ?? EMPTY_HISTORY);
   const [sql, setSql] = useState("");
   const [allowWrites, setAllowWrites] = useState(false);
   const [running, setRunning] = useState(false);

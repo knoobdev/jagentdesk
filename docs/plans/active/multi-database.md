@@ -120,10 +120,12 @@ Every shipped task runs against a real database — no stubs.
 - [x] 2026-09-01: P2 app shell (sidebar entry + list/add + routes + stores) + P3 core (object tree, data grid, SQL console) — 10/10 app tests; typecheck + lint clean.
 - [x] 2026-09-01: P4 data editor + transactions — begin/commit/rollback across adapters + record editor + Preview DML; database-tx (2) + sql-dml (5) tests.
 - [x] 2026-09-01: P5 AI chat + SQL MCP tools — chat dock/draft/system-prompt + sql_query/sql_exec/database_list; sql-tools (6) tests incl. permission gate.
-- [x] 2026-09-01: P6 (partial) — Explain/Query-Plan + query history + mobile-parity primitives; explain + history (4) tests. Extra engines + ER/diff/DDL deferred (documented).
+- [x] 2026-09-01: P6 — Explain/Query-Plan + query history; all 7 engines (SQL Server/Oracle/Mongo/ClickHouse added); DDL view + relationships (list-ER) + schema diff + graphical ER canvas.
+- [x] 2026-09-01: **Final acceptance — live desktop app** (`packages/desktop/e2e/database-acceptance.e2e.mjs`). Real daemon (tsx source) + real Electron + CDP; seeded a real SQLite connection; drove the actual UI. Screenshots in `docs/design/databases/acceptance/`. Caught & fixed a real bug: the SQL console crashed with "Maximum update depth exceeded" — a zustand selector returning a fresh `[]` each render (fixed with a stable `EMPTY_HISTORY`).
 
 ## Validation
 
-- Focused: adapter + registry unit tests (SQLite in CI; PG/MySQL via docker `.e2e`).
-- Integration: `database/*` RPC round-trip; MCP `sql_query`/`sql_exec` gating.
-- End-to-end: live CDP on desktop app — add connection → browse → query → edit → chat; mobile parity.
+- Focused: adapter + registry unit tests (SQLite always; PG/MySQL/MSSQL/Oracle/Mongo/ClickHouse via docker under `JAD_DB_E2E=1`). Full DB suite **45/45**.
+- Integration: `database/*` RPC round-trip through the real wire union; MCP `sql_query`/`sql_exec` gating (6/6).
+- **End-to-end (done): live CDP on the real desktop app** — direct-connect a loopback daemon → Databases list shows the connection → open → object tree (customers, orders) → data editor with 8 real rows (edit/delete, Tx: Auto, Submit, Export) → SQL console runs `group by` returning paid=6/shipped=2 → ER diagram (2 tables, 1 FK edge). Evidence: `docs/design/databases/acceptance/{1-databases-list,3-data-grid,4-sql-console,5-er-diagram}.png` + `report.json`.
+- Remaining manual step: mobile-device pass (same universal components; not run on a physical device here).

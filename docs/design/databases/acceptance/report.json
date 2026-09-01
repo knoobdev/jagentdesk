@@ -1,0 +1,28 @@
+{
+  "steps": [
+    "daemon up",
+    "electron+CDP up",
+    "connected serverId=srv_QM8H7L3oUjG6",
+    "selected Local connect",
+    "direct-connect 127.0.0.1:49348",
+    "sidebar Databases entry visible"
+  ],
+  "screenshots": [
+    "/tmp/jad-db-acceptance/1-databases-list.png",
+    "/tmp/jad-db-acceptance/2-browse-overview.png",
+    "/tmp/jad-db-acceptance/3-data-grid.png",
+    "/tmp/jad-db-acceptance/4-sql-console.png",
+    "/tmp/jad-db-acceptance/5-er-diagram.png"
+  ],
+  "checks": {
+    "connectedSidebar": true,
+    "listShowsConnection": true,
+    "listShowsEngine": true,
+    "browseShowsTables": true,
+    "browseShowsOverviewOrEngine": false,
+    "gridShowsStatusColumn": true,
+    "gridShowsShipped": true,
+    "consoleRan": false,
+    "erShowsRelationships": true
+  }
+}
