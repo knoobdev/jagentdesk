@@ -2,7 +2,9 @@ import type {
   DbColumn,
   DbDatabaseName,
   DbForeignKey,
+  DbIndex,
   DbObject,
+  DbRoutine,
   DbSchema,
   QueryResult,
   WriteResult,
@@ -55,6 +57,16 @@ export interface DbClient {
   listColumns(schema: string, table: string): Promise<DbColumn[]>;
   /** Foreign-key edges within a schema (empty for engines without FKs). */
   listForeignKeys(schema: string): Promise<DbForeignKey[]>;
+  /**
+   * Indexes on a table (the Indexes node in the explorer). Optional — engines
+   * without a native index catalog omit it and the UI hides the node.
+   */
+  listIndexes?(schema: string, table: string): Promise<DbIndex[]>;
+  /**
+   * Stored functions/procedures in a schema (the Routines node). Optional — engines
+   * without routines (sqlite) omit it and the UI hides the node.
+   */
+  listRoutines?(schema: string): Promise<DbRoutine[]>;
 
   /** Read-only query. Adapters must reject writes on this path. */
   runQuery(sql: string, options?: RunQueryOptions): Promise<QueryResult>;

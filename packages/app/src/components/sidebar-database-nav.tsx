@@ -3,14 +3,18 @@ import { Modal, Pressable, ScrollView, Text, TextInput, View } from "react-nativ
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import * as Clipboard from "expo-clipboard";
 import {
+  Braces,
   ChevronLeft,
   ChevronDown,
   ChevronRight,
   Copy,
   Database as DatabaseIcon,
   Eye,
+  Folder,
+  Hash,
   KeyRound,
   Layers,
+  Link2,
   Pencil,
   RefreshCw,
   Search,
@@ -25,7 +29,10 @@ import type {
   DatabaseInfo,
   DbColumn,
   DbDatabaseName,
+  DbForeignKey,
+  DbIndex,
   DbObject,
+  DbRoutine,
   DbSchema,
 } from "@jagentdesk/protocol/database/rpc-schemas";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
@@ -60,6 +67,10 @@ const accentIcon = (theme: Theme) => ({ color: theme.colors.accent });
 const ThemedCopy = withUnistyles(Copy);
 const ThemedPencil = withUnistyles(Pencil);
 const ThemedTrash = withUnistyles(Trash2);
+const ThemedHash = withUnistyles(Hash);
+const ThemedLink = withUnistyles(Link2);
+const ThemedFunc = withUnistyles(Braces);
+const ThemedFolder = withUnistyles(Folder);
 const mutedColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 const faintColor = (theme: Theme) => ({ color: theme.colors.foregroundExtraMuted });
 
@@ -128,6 +139,246 @@ function ColumnRow({ column }: { column: DbColumn }) {
       <Text style={styles.colType} numberOfLines={1}>
         {column.dataType}
       </Text>
+    </View>
+  );
+}
+
+/** A leaf row for an index / foreign key / routine under a table or schema. */
+function LeafIcon({ icon }: { icon: "index" | "fk" | "routine" }) {
+  if (icon === "index") return <ThemedHash size={12} uniProps={faintColor} />;
+  if (icon === "fk") return <ThemedLink size={12} uniProps={faintColor} />;
+  return <ThemedFunc size={12} uniProps={faintColor} />;
+}
+
+function LeafRow({
+  icon,
+  label,
+  meta,
+}: {
+  icon: "index" | "fk" | "routine";
+  label: string;
+  meta?: string;
+}) {
+  return (
+    <View style={[styles.row, styles.columnRow]}>
+      <View style={styles.chevronSpace} />
+      <LeafIcon icon={icon} />
+      <Text style={styles.colName} numberOfLines={1}>
+        {label}
+      </Text>
+      {meta ? (
+        <Text style={styles.colType} numberOfLines={1}>
+          {meta}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+/** The generic collapsible folder header (Indexes / Foreign keys / Views / …). */
+function FolderRow({
+  label,
+  count,
+  expanded,
+  onPress,
+}: {
+  label: string;
+  count?: number;
+  expanded: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable style={styles.row} onPress={onPress}>
+      <Chevron expanded={expanded} />
+      <ThemedFolder size={13} uniProps={faintColor} />
+      <Text style={styles.folderLabel} numberOfLines={1}>
+        {label}
+      </Text>
+      {count != null ? <Text style={styles.folderCount}>{count}</Text> : null}
+    </Pressable>
+  );
+}
+
+/** Indexes folder under a table — lazy-loads on expand. */
+function IndexesFolder({
+  client,
+  id,
+  schema,
+  table,
+  refreshKey,
+}: {
+  client: DaemonClient | null;
+  id: string;
+  schema: string;
+  table: string;
+  refreshKey: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [items, setItems] = useState<DbIndex[] | null>(null);
+  const indexMeta = (ix: DbIndex): string => {
+    let prefix = "";
+    if (ix.primary) prefix = "PK · ";
+    else if (ix.unique) prefix = "UNIQUE · ";
+    return `${prefix}${ix.columns.join(", ")}`;
+  };
+  useEffect(() => {
+    if (!expanded || !client) return;
+    let cancelled = false;
+    void client
+      .databaseIndexes({ id, schema, table })
+      .then((r) => {
+        if (!cancelled) setItems(r.error ? [] : r.indexes);
+        return undefined;
+      })
+      .catch(() => {
+        if (!cancelled) setItems([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [expanded, client, id, schema, table, refreshKey]);
+  const toggle = useCallback(() => setExpanded((v) => !v), []);
+  return (
+    <View>
+      <FolderRow label="Indexes" count={items?.length} expanded={expanded} onPress={toggle} />
+      {expanded && items ? (
+        <View style={styles.childIndent}>
+          {items.map((ix) => (
+            <LeafRow key={ix.name} icon="index" label={ix.name} meta={indexMeta(ix)} />
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+/** Foreign-keys folder under a table — lazy-loads the schema's FKs and filters. */
+function ForeignKeysFolder({
+  client,
+  id,
+  schema,
+  table,
+  refreshKey,
+}: {
+  client: DaemonClient | null;
+  id: string;
+  schema: string;
+  table: string;
+  refreshKey: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [items, setItems] = useState<DbForeignKey[] | null>(null);
+  useEffect(() => {
+    if (!expanded || !client) return;
+    let cancelled = false;
+    void client
+      .databaseForeignKeys({ id, schema })
+      .then((r) => {
+        if (!cancelled) setItems(r.error ? [] : r.foreignKeys.filter((f) => f.table === table));
+        return undefined;
+      })
+      .catch(() => {
+        if (!cancelled) setItems([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [expanded, client, id, schema, table, refreshKey]);
+  const toggle = useCallback(() => setExpanded((v) => !v), []);
+  return (
+    <View>
+      <FolderRow label="Foreign keys" count={items?.length} expanded={expanded} onPress={toggle} />
+      {expanded && items ? (
+        <View style={styles.childIndent}>
+          {items.map((f) => (
+            <LeafRow
+              key={`${f.column}-${f.refTable}`}
+              icon="fk"
+              label={f.column}
+              meta={`→ ${f.refTable}.${f.refColumn}`}
+            />
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+/** Routines folder under a schema — lazy-loads functions/procedures. */
+function RoutinesFolder({
+  client,
+  id,
+  schema,
+  refreshKey,
+}: {
+  client: DaemonClient | null;
+  id: string;
+  schema: string;
+  refreshKey: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [items, setItems] = useState<DbRoutine[] | null>(null);
+  useEffect(() => {
+    if (!expanded || !client) return;
+    let cancelled = false;
+    void client
+      .databaseRoutines({ id, schema })
+      .then((r) => {
+        if (!cancelled) setItems(r.error ? [] : r.routines);
+        return undefined;
+      })
+      .catch(() => {
+        if (!cancelled) setItems([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [expanded, client, id, schema, refreshKey]);
+  const toggle = useCallback(() => setExpanded((v) => !v), []);
+  return (
+    <View>
+      <FolderRow label="Routines" count={items?.length} expanded={expanded} onPress={toggle} />
+      {expanded && items ? (
+        <View style={styles.childIndent}>
+          {items.map((r) => (
+            <LeafRow
+              key={`${r.kind}-${r.name}`}
+              icon="routine"
+              label={r.name}
+              meta={r.kind === "procedure" ? "proc" : (r.returnType ?? "fn")}
+            />
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+/** A simple folder listing objects already fetched (Views / Sequences). */
+function ObjectFolder({ label, objects }: { label: string; objects: DbObject[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const toggle = useCallback(() => setExpanded((v) => !v), []);
+  if (objects.length === 0) return null;
+  return (
+    <View>
+      <FolderRow label={label} count={objects.length} expanded={expanded} onPress={toggle} />
+      {expanded ? (
+        <View style={styles.childIndent}>
+          {objects.map((o) => (
+            <View key={o.name} style={[styles.row, styles.columnRow]}>
+              <View style={styles.chevronSpace} />
+              {label === "Views" ? (
+                <ThemedEye size={13} uniProps={mutedColor} />
+              ) : (
+                <ThemedHash size={12} uniProps={faintColor} />
+              )}
+              <Text style={styles.colName} numberOfLines={1}>
+                {o.name}
+              </Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -205,6 +456,24 @@ function TableNode({
           {columns.map((c) => (
             <ColumnRow key={c.name} column={c} />
           ))}
+          {object.kind === "table" ? (
+            <IndexesFolder
+              client={client}
+              id={id}
+              schema={object.schema}
+              table={object.name}
+              refreshKey={refreshKey}
+            />
+          ) : null}
+          {object.kind === "table" ? (
+            <ForeignKeysFolder
+              client={client}
+              id={id}
+              schema={object.schema}
+              table={object.name}
+              refreshKey={refreshKey}
+            />
+          ) : null}
         </View>
       ) : null}
     </View>
@@ -249,15 +518,16 @@ function SchemaNode({
       cancelled = true;
     };
   }, [expanded, client, id, schema, refreshKey]);
+  const [viewsExpanded, setViewsExpanded] = useState(false);
+  const toggleViews = useCallback(() => setViewsExpanded((v) => !v), []);
   const toggle = useCallback(() => setExpanded((v) => !v), []);
-  const tables = useMemo(
-    () =>
-      objects.filter(
-        (o) => o.kind === "table" || o.kind === "view" || o.kind === "materialized_view",
-      ),
+  const tables = useMemo(() => objects.filter((o) => o.kind === "table"), [objects]);
+  const views = useMemo(
+    () => objects.filter((o) => o.kind === "view" || o.kind === "materialized_view"),
     [objects],
   );
-  const tableList = tables.map((o) => (
+  const sequences = useMemo(() => objects.filter((o) => o.kind === "sequence"), [objects]);
+  const renderObject = (o: DbObject) => (
     <TableNode
       key={o.name}
       client={client}
@@ -273,12 +543,30 @@ function SchemaNode({
       onSelect={onSelect}
       onMenu={onMenu}
     />
-  ));
-  if (autoExpand) return <View>{tableList}</View>;
+  );
+  const body = (
+    <>
+      {tables.map(renderObject)}
+      {views.length > 0 ? (
+        <View>
+          <FolderRow
+            label="Views"
+            count={views.length}
+            expanded={viewsExpanded}
+            onPress={toggleViews}
+          />
+          {viewsExpanded ? <View style={styles.childIndent}>{views.map(renderObject)}</View> : null}
+        </View>
+      ) : null}
+      <ObjectFolder label="Sequences" objects={sequences} />
+      <RoutinesFolder client={client} id={id} schema={schema} refreshKey={refreshKey} />
+    </>
+  );
+  if (autoExpand) return <View>{body}</View>;
   return (
     <View>
       <TreeRow kind="schema" expanded={expanded} label={schema} onPress={toggle} />
-      {expanded ? <View style={styles.childIndent}>{tableList}</View> : null}
+      {expanded ? <View style={styles.childIndent}>{body}</View> : null}
     </View>
   );
 }
@@ -859,6 +1147,20 @@ const styles = StyleSheet.create((theme: Theme) => ({
     minWidth: 0,
     textAlign: "right",
     fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundExtraMuted,
+    fontFamily: theme.fontFamily.mono,
+  },
+  folderLabel: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foregroundMuted,
+    textTransform: "uppercase" as const,
+    letterSpacing: 0.4,
+  },
+  folderCount: {
+    fontSize: 10,
     color: theme.colors.foregroundExtraMuted,
     fontFamily: theme.fontFamily.mono,
   },

@@ -680,6 +680,14 @@ type DatabaseForeignKeysPayload = Extract<
   SessionOutboundMessage,
   { type: "database/foreign-keys/response" }
 >["payload"];
+type DatabaseIndexesPayload = Extract<
+  SessionOutboundMessage,
+  { type: "database/indexes/response" }
+>["payload"];
+type DatabaseRoutinesPayload = Extract<
+  SessionOutboundMessage,
+  { type: "database/routines/response" }
+>["payload"];
 type DatabaseExplainPayload = Extract<
   SessionOutboundMessage,
   { type: "database/explain/response" }
@@ -6111,6 +6119,36 @@ export class DaemonClient {
       requestId: options.requestId,
       message: { type: "database/foreign-keys", id: options.id, schema: options.schema },
       responseType: "database/foreign-keys/response",
+    });
+  }
+
+  async databaseIndexes(options: {
+    requestId?: string;
+    id: string;
+    schema: string;
+    table: string;
+  }): Promise<DatabaseIndexesPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "database/indexes",
+        id: options.id,
+        schema: options.schema,
+        table: options.table,
+      },
+      responseType: "database/indexes/response",
+    });
+  }
+
+  async databaseRoutines(options: {
+    requestId?: string;
+    id: string;
+    schema: string;
+  }): Promise<DatabaseRoutinesPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "database/routines", id: options.id, schema: options.schema },
+      responseType: "database/routines/response",
     });
   }
 

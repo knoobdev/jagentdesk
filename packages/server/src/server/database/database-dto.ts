@@ -81,6 +81,28 @@ export interface DbForeignKey {
   refColumn: string;
 }
 
+/** An index on a table (the Indexes node under a table in the explorer). */
+export interface DbIndex {
+  name: string;
+  /** Columns the index covers, in order. */
+  columns: string[];
+  unique: boolean;
+  /** True for the index backing the primary key. */
+  primary: boolean;
+  /** Access method / type when the engine exposes it (btree/hash/gin/…). */
+  method?: string;
+}
+
+/** A stored routine — function or procedure (the Routines node under a schema). */
+export interface DbRoutine {
+  name: string;
+  kind: "function" | "procedure";
+  /** Return type for functions; omitted for procedures. */
+  returnType?: string;
+  /** Rendered argument signature, e.g. "(a integer, b text)". */
+  arguments?: string;
+}
+
 /** A page of query results. Cells are JSON-safe scalars (or null). */
 export interface QueryResult {
   columns: ResultColumn[];

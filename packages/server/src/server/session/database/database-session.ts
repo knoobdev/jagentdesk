@@ -126,6 +126,20 @@ export class DatabaseSession {
     }));
   }
 
+  async handleIndexes(msg: Req<"database/indexes">): Promise<void> {
+    await this.run(msg.requestId, "database/indexes/response", async () => {
+      const client = this.requireClient(msg.id);
+      return { indexes: client.listIndexes ? await client.listIndexes(msg.schema, msg.table) : [] };
+    });
+  }
+
+  async handleRoutines(msg: Req<"database/routines">): Promise<void> {
+    await this.run(msg.requestId, "database/routines/response", async () => {
+      const client = this.requireClient(msg.id);
+      return { routines: client.listRoutines ? await client.listRoutines(msg.schema) : [] };
+    });
+  }
+
   async handleExplain(msg: Req<"database/explain">): Promise<void> {
     await this.run(msg.requestId, "database/explain/response", async () => ({
       result: await this.requireClient(msg.id).explain(msg.sql),
@@ -194,6 +208,10 @@ function emptyBody(type: string): Record<string, unknown> {
       return { columns: [] };
     case "database/foreign-keys/response":
       return { foreignKeys: [] };
+    case "database/indexes/response":
+      return { indexes: [] };
+    case "database/routines/response":
+      return { routines: [] };
     case "database/query/response":
     case "database/exec/response":
     case "database/explain/response":

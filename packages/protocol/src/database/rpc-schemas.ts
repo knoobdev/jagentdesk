@@ -64,6 +64,21 @@ export const DbForeignKeySchema = z.object({
   refColumn: z.string(),
 });
 export type DbForeignKey = z.infer<typeof DbForeignKeySchema>;
+export const DbIndexSchema = z.object({
+  name: z.string(),
+  columns: z.array(z.string()),
+  unique: z.boolean(),
+  primary: z.boolean(),
+  method: z.string().optional(),
+});
+export type DbIndex = z.infer<typeof DbIndexSchema>;
+export const DbRoutineSchema = z.object({
+  name: z.string(),
+  kind: z.enum(["function", "procedure"]),
+  returnType: z.string().optional(),
+  arguments: z.string().optional(),
+});
+export type DbRoutine = z.infer<typeof DbRoutineSchema>;
 export const ResultColumnSchema = z.object({ name: z.string(), dataType: z.string().optional() });
 const CellSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
 export const QueryResultSchema = z.object({
@@ -188,6 +203,23 @@ export const DatabaseForeignKeysRequestSchema = req("database/foreign-keys", {
 export const DatabaseForeignKeysResponseSchema = resp("database/foreign-keys/response", {
   foreignKeys: z.array(DbForeignKeySchema),
 });
+// ── indexes (explorer Indexes node) ──
+export const DatabaseIndexesRequestSchema = req("database/indexes", {
+  id: z.string(),
+  schema: z.string(),
+  table: z.string(),
+});
+export const DatabaseIndexesResponseSchema = resp("database/indexes/response", {
+  indexes: z.array(DbIndexSchema),
+});
+// ── routines (explorer Routines node) ──
+export const DatabaseRoutinesRequestSchema = req("database/routines", {
+  id: z.string(),
+  schema: z.string(),
+});
+export const DatabaseRoutinesResponseSchema = resp("database/routines/response", {
+  routines: z.array(DbRoutineSchema),
+});
 // ── explain (query plan) ──
 export const DatabaseExplainRequestSchema = req("database/explain", {
   id: z.string(),
@@ -216,6 +248,8 @@ export const DatabaseRequestSchemas = [
   DatabaseObjectsRequestSchema,
   DatabaseColumnsRequestSchema,
   DatabaseForeignKeysRequestSchema,
+  DatabaseIndexesRequestSchema,
+  DatabaseRoutinesRequestSchema,
   DatabaseQueryRequestSchema,
   DatabaseExecRequestSchema,
   DatabaseExplainRequestSchema,
@@ -236,6 +270,8 @@ export const DatabaseResponseSchemas = [
   DatabaseObjectsResponseSchema,
   DatabaseColumnsResponseSchema,
   DatabaseForeignKeysResponseSchema,
+  DatabaseIndexesResponseSchema,
+  DatabaseRoutinesResponseSchema,
   DatabaseQueryResponseSchema,
   DatabaseExecResponseSchema,
   DatabaseExplainResponseSchema,

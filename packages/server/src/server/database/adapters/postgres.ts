@@ -5,7 +5,9 @@ import type {
   DbColumn,
   DbDatabaseName,
   DbForeignKey,
+  DbIndex,
   DbObject,
+  DbRoutine,
   DbSchema,
   QueryResult,
   ResultColumn,
@@ -175,6 +177,65 @@ export class PostgresDbClient implements DbClient {
       refSchema: r.ref_schema,
       refTable: r.ref_table,
       refColumn: r.ref_column,
+    }));
+  }
+
+  async listIndexes(schema: string, table: string): Promise<DbIndex[]> {
+    const res = await this.require().query<{
+      name: string;
+      columns: string[];
+      unique: boolean;
+      primary: boolean;
+      method: string;
+    }>(
+      `select i.relname as name,
+              array_agg(a.attname::text order by k.ord) as columns,
+              ix.indisunique as unique,
+              ix.indisprimary as primary,
+              am.amname as method
+       from pg_index ix
+       join pg_class i on i.oid = ix.indexrelid
+       join pg_class t on t.oid = ix.indrelid
+       join pg_namespace n on n.oid = t.relnamespace
+       join pg_am am on am.oid = i.relam
+       join lateral unnest(ix.indkey) with ordinality as k(attnum, ord) on true
+       join pg_attribute a on a.attrelid = t.oid and a.attnum = k.attnum
+       where n.nspname = $1 and t.relname = $2
+       group by i.relname, ix.indisunique, ix.indisprimary, am.amname
+       order by ix.indisprimary desc, i.relname`,
+      [schema, table],
+    );
+    return res.rows.map((r) => ({
+      name: r.name,
+      columns: r.columns,
+      unique: r.unique,
+      primary: r.primary,
+      method: r.method,
+    }));
+  }
+
+  async listRoutines(schema: string): Promise<DbRoutine[]> {
+    const res = await this.require().query<{
+      name: string;
+      kind: string;
+      return_type: string;
+      arguments: string;
+    }>(
+      `select p.proname as name,
+              case p.prokind when 'p' then 'procedure' else 'function' end as kind,
+              pg_get_function_result(p.oid) as return_type,
+              pg_get_function_arguments(p.oid) as arguments
+       from pg_proc p
+       join pg_namespace n on n.oid = p.pronamespace
+       where n.nspname = $1 and p.prokind in ('f', 'p')
+       order by p.proname`,
+      [schema],
+    );
+    return res.rows.map((r) => ({
+      name: r.name,
+      kind: r.kind === "procedure" ? ("procedure" as const) : ("function" as const),
+      returnType: r.return_type || undefined,
+      arguments: r.arguments || undefined,
     }));
   }
 

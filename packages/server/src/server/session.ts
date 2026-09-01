@@ -2720,6 +2720,10 @@ export class Session {
         return this.databaseSession.handleExec(msg);
       case "database/foreign-keys":
         return this.databaseSession.handleForeignKeys(msg);
+      case "database/indexes":
+        return this.databaseSession.handleIndexes(msg);
+      case "database/routines":
+        return this.databaseSession.handleRoutines(msg);
       case "database/explain":
         return this.databaseSession.handleExplain(msg);
       case "database/begin":
