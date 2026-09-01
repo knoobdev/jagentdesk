@@ -6,9 +6,12 @@ import type { DatabaseInfo } from "@jagentdesk/protocol/database/rpc-schemas";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { DatabaseDataEditor } from "@/components/database-data-editor";
 import { DatabaseSqlConsole } from "@/components/database-sql-console";
+import { DatabaseChatDock } from "@/components/database-chat-dock";
+import type { DatabaseComposerContext } from "@/components/database-draft-chat";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useDatabaseNavStore } from "@/stores/database-nav-store";
 import { useDatabaseViewStore } from "@/stores/database-view-store";
+import { useDatabaseChatStore } from "@/stores/database-chat-store";
 import { usePanelStore } from "@/stores/panel-store";
 import type { Theme } from "@/styles/theme";
 
@@ -36,11 +39,22 @@ export function DatabaseBrowseScreen({
   const setLastDatabase = useDatabaseNavStore((s) => s.setLastDatabase);
   const bumpRefresh = useDatabaseViewStore((s) => s.bumpRefresh);
   const resetViewForDatabase = useDatabaseViewStore((s) => s.resetForDatabase);
+  const resetChatForDatabase = useDatabaseChatStore((s) => s.resetForDatabase);
 
   useEffect(() => {
     resetViewForDatabase(databaseId);
     setLastDatabase(serverId, databaseId);
-  }, [databaseId, serverId, resetViewForDatabase, setLastDatabase]);
+    // On phones the chat dock is a full-screen overlay, so start it CLOSED and
+    // let the data view be the landing; desktop keeps the side dock open.
+    resetChatForDatabase(databaseId, !isCompact);
+  }, [
+    databaseId,
+    serverId,
+    isCompact,
+    resetViewForDatabase,
+    setLastDatabase,
+    resetChatForDatabase,
+  ]);
 
   const showMobileAgentList = usePanelStore((s) => s.showMobileAgentList);
   useEffect(() => {
@@ -88,6 +102,10 @@ export function DatabaseBrowseScreen({
 
   const engine = database?.engine ?? "postgres";
   const dbName = database?.displayName ?? "this database";
+  const chatContext = useMemo<DatabaseComposerContext>(
+    () => ({ engine, schema: selectedObject?.schema, table: selectedObject?.name }),
+    [engine, selectedObject],
+  );
 
   let content;
   if (showingConsole) {
@@ -125,6 +143,12 @@ export function DatabaseBrowseScreen({
     <View style={containerStyle}>
       <View style={styles.row}>
         <View style={styles.leftColumn}>{content}</View>
+        <DatabaseChatDock
+          serverId={serverId}
+          databaseId={databaseId}
+          databaseName={dbName}
+          context={chatContext}
+        />
       </View>
     </View>
   );

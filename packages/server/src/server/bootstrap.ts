@@ -1399,6 +1399,7 @@ export async function createJAgentDeskDaemon(
     resolveCallerContext: (agentId) => wsServer?.resolveVoiceCallerContext(agentId) ?? null,
     orchestrationRuntime,
     clusterRegistry,
+    databaseRegistry,
     requestHostToolPermission: (agentId, req) =>
       agentManager.requestHostToolPermission(agentId, req),
     logger,

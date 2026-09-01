@@ -88,11 +88,11 @@ Every shipped task runs against a real database — no stubs.
 - [x] `sql-dml.ts`: `buildUpdate/buildInsert/buildDelete` — always parameter-bound, PK-keyed WHERE, engine-correct placeholders (`$n` pg, `?` mysql/sqlite) + ident quoting. (Editor writes are the user's own explicit action, previewed first; the agent `sql_exec` tool is the gated path — P5.)
 - [x] Proof: `database-tx.test.ts` (2/2) — begin→update→**rollback** leaves the row unchanged; begin→update→**commit** persists (verified across a fresh connection). `sql-dml.test.ts` (5/5) — UPDATE/INSERT/DELETE shape + params per engine, refuses keyless UPDATE. typecheck + lint clean.
 
-### P5 — AI chat + SQL MCP tools
+### P5 — AI chat + SQL MCP tools — DONE 2026-09-01
 
-- [ ] `database-ask-agent.ts` `buildDatabaseSystemPrompt` + label; `database-chat-dock.tsx` / `database-draft-chat.tsx` cloned from cluster chat (agent created only on first real message).
-- [ ] `registerSqlTools`: `sql_query` (read-only, auto-inject), `sql_exec` (gated), `database_list`.
-- [ ] Proof: live — NL→SQL read-only answer with a result; a write proposal that pauses for approval.
+- [x] `database-ask-agent.ts` `buildDatabaseSystemPrompt` (grounds the agent in databaseId/engine/schema + names the MCP tools) + label `jagentdesk.database.id`; `database-draft-chat.tsx` (full agent Composer; agent created only on first real message, titled `<db>: <question>`) + `database-chat-dock.tsx` (right dock: reopen latest / history / new chat / project picker / live AgentConversationPanel; desktop panel + mobile FAB) cloned from the cluster chat. `database-chat-store.ts`. Wired into the browse screen.
+- [x] `registerSqlTools` in `jagentdesk-tools.ts`: `sql_query` (read-only — rejects writes), `sql_exec` (routes through `requestHostToolPermission`), `database_list`. `databaseRegistry` threaded into the tool-host deps in `bootstrap.ts`.
+- [x] Proof: `sql-tools.test.ts` (6/6) via the real tool catalog — registers all three tools; sql_query returns rows + rejects DELETE; **sql_exec denied → no write; allowed → writes** (permission gate verified); database_list reports the connected db. Server + app typecheck + lint clean. Live NL→SQL is the manual acceptance step.
 
 ### P6 — breadth + advanced (additive)
 
@@ -113,7 +113,8 @@ Every shipped task runs against a real database — no stubs.
 - [x] 2026-09-01: P1 protocol+session+client+PG/MySQL adapters — 4/4 tests incl. real Postgres + MySQL over docker.
 - [x] 2026-09-01: P2 app shell (sidebar entry + list/add + routes + stores) + P3 core (object tree, data grid, SQL console) — 10/10 app tests; typecheck + lint clean.
 - [x] 2026-09-01: P4 data editor + transactions — begin/commit/rollback across adapters + record editor + Preview DML; database-tx (2) + sql-dml (5) tests.
-- [ ] P5 …
+- [x] 2026-09-01: P5 AI chat + SQL MCP tools — chat dock/draft/system-prompt + sql_query/sql_exec/database_list; sql-tools (6) tests incl. permission gate.
+- [ ] P6 …
 
 ## Validation
 

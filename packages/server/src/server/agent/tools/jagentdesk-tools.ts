@@ -100,6 +100,7 @@ import type {
   OrchestrationRuntime,
 } from "../../orchestration/runtime.js";
 import type { ClusterRegistry } from "../../cluster/cluster-registry.js";
+import type { DatabaseRegistry } from "../../database/database-registry.js";
 import type { AgentPermissionResponse } from "../agent-sdk-types.js";
 
 export interface JAgentDeskToolHostDependencies {
@@ -151,6 +152,7 @@ export interface JAgentDeskToolHostDependencies {
   resolveCallerContext?: (callerAgentId: string) => VoiceCallerContext | null;
   orchestrationRuntime?: OrchestrationRuntime;
   clusterRegistry?: ClusterRegistry;
+  databaseRegistry?: DatabaseRegistry;
   requestHostToolPermission?: (
     agentId: string,
     request: {
@@ -767,6 +769,142 @@ function registerKubectlTools(params: {
           {
             type: "text",
             text: JSON.stringify({ count: summary.length, clusters: summary }, null, 2),
+          },
+        ],
+      };
+    },
+  );
+}
+
+function registerSqlTools(params: {
+  registerTool: (
+    name: string,
+    config: JAgentDeskToolConfig,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Tool handlers are schema-validated at registration boundaries.
+    handler: (input: any, context: JAgentDeskToolExecutionContext) => Promise<JAgentDeskToolResult>,
+  ) => void;
+  options: JAgentDeskToolHostDependencies;
+  callerAgentId: string | undefined;
+}): void {
+  const { registerTool, options, callerAgentId } = params;
+
+  registerTool(
+    "sql_query",
+    {
+      title: "SQL query",
+      description:
+        "Run a read-only SQL SELECT against a connected database and return the rows. Auto-approved (read-only; writes are rejected on this path — use sql_exec).",
+      inputSchema: {
+        databaseId: z.string().min(1),
+        sql: z.string().min(1),
+        limit: z.number().optional(),
+        offset: z.number().optional(),
+      },
+    },
+    async (input: { databaseId: string; sql: string; limit?: number; offset?: number }) => {
+      const client = options.databaseRegistry?.getClient(input.databaseId);
+      if (!client) {
+        return {
+          content: [
+            { type: "text", text: `Database not found or not connected: ${input.databaseId}` },
+          ],
+          isError: true,
+        };
+      }
+      try {
+        const result = await client.runQuery(input.sql, {
+          limit: input.limit,
+          offset: input.offset,
+        });
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  registerTool(
+    "sql_exec",
+    {
+      title: "SQL exec",
+      description:
+        "Run a writing SQL statement (INSERT/UPDATE/DELETE/DDL) against a connected database. Requires user approval via permission card.",
+      inputSchema: {
+        databaseId: z.string().min(1),
+        sql: z.string().min(1),
+      },
+    },
+    async (
+      input: { databaseId: string; sql: string },
+      _context: JAgentDeskToolExecutionContext,
+    ) => {
+      if (!callerAgentId) {
+        return {
+          content: [
+            { type: "text", text: "sql_exec is only available to agent-scoped tool sessions" },
+          ],
+          isError: true,
+        };
+      }
+      const client = options.databaseRegistry?.getClient(input.databaseId);
+      if (!client) {
+        return {
+          content: [
+            { type: "text", text: `Database not found or not connected: ${input.databaseId}` },
+          ],
+          isError: true,
+        };
+      }
+      const decision = await options.requestHostToolPermission!(callerAgentId, {
+        name: "sql_exec",
+        kind: "tool",
+        title: `SQL write on ${input.databaseId}`,
+        description: input.sql,
+        input: input as unknown as Record<string, unknown>,
+      });
+      if (decision.behavior !== "allow") {
+        return { content: [{ type: "text", text: "Denied by user." }], isError: true };
+      }
+      try {
+        const result = await client.execWrite(input.sql);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  // Lets ANY agent discover the databases connected in the app and their
+  // databaseId, so it can then drive them with sql_query/sql_exec — the bridge
+  // between workspace agents and the database feature.
+  registerTool(
+    "database_list",
+    {
+      title: "List databases",
+      description:
+        "List the databases connected in the app (databaseId, name, engine, state). Pass a returned databaseId to sql_query/sql_exec. Auto-approved (read-only).",
+      inputSchema: {},
+    },
+    async () => {
+      const databases = options.databaseRegistry?.list() ?? [];
+      const summary = databases.map((d) => ({
+        databaseId: d.id,
+        name: d.displayName,
+        engine: d.engine,
+        target: d.target,
+        state: d.state,
+      }));
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ count: summary.length, databases: summary }, null, 2),
           },
         ],
       };
@@ -1606,6 +1744,7 @@ export function createJAgentDeskToolCatalog(
   // voice-only early return below — otherwise a voice-only session silently
   // drops kubectl_get/kubectl_apply and the agent falls back to shelling out.
   registerKubectlTools({ registerTool, options, callerAgentId });
+  registerSqlTools({ registerTool, options, callerAgentId });
 
   if (options.voiceOnly || options.enableVoiceTools || callerContext?.enableVoiceTools) {
     registerTool(
