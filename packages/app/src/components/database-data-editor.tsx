@@ -89,6 +89,7 @@ export function DatabaseDataEditor({
   const sortRef = useRef<{ col: string; dir: "asc" | "desc" } | null>(null);
   const [filterText, setFilterText] = useState("");
   const filterRef = useRef("");
+  const [valueCell, setValueCell] = useState<ExpandedCell | null>(null);
 
   const pkCols = useMemo(() => columns.filter((c) => c.isPrimaryKey).map((c) => c.name), [columns]);
   const colNames = useMemo(() => columns.map((c) => c.name), [columns]);
@@ -210,6 +211,22 @@ export function DatabaseDataEditor({
       return next;
     });
   }, []);
+
+  // Large-cell value editor — DataGrip's expandable cell viewer for long text /
+  // JSON / BLOB previews that don't fit an inline row. Read-only cells still open
+  // it (to read the full value); editable cells save back through the same path.
+  const handleExpandCell = useCallback((cell: ExpandedCell) => setValueCell(cell), []);
+  const closeValueCell = useCallback(() => setValueCell(null), []);
+  const saveValueCell = useCallback(
+    (text: string) => {
+      const v = valueCell;
+      setValueCell(null);
+      if (!v) return;
+      if (v.rowIndex !== undefined) commitExistingEdit(v.rowIndex, v.col, text, v.original);
+      else if (v.newIndex !== undefined) commitNewEdit(v.newIndex, v.col, text);
+    },
+    [valueCell, commitExistingEdit, commitNewEdit],
+  );
 
   const toggleSelect = useCallback((rowIdx: number) => {
     setSelected((prev) => {
@@ -395,6 +412,7 @@ export function DatabaseDataEditor({
                 onSelect={toggleSelect}
                 onStartEdit={startEdit}
                 onCommitEdit={commitExistingEdit}
+                onExpand={handleExpandCell}
               />
             ))}
             {newRows.map((nr, i) => (
@@ -407,6 +425,7 @@ export function DatabaseDataEditor({
                 editingKey={editingKey}
                 onStartEdit={startEdit}
                 onCommitEdit={commitNewEdit}
+                onExpand={handleExpandCell}
               />
             ))}
           </View>
@@ -529,6 +548,12 @@ export function DatabaseDataEditor({
       </View>
 
       <PreviewModal open={previewOpen} statements={previewStatements} onClose={closePreview} />
+      <ValueEditorModal
+        cell={valueCell}
+        editable={canEdit}
+        onSave={saveValueCell}
+        onClose={closeValueCell}
+      />
     </View>
   );
 }
@@ -572,6 +597,7 @@ function ExistingRow({
   onSelect,
   onStartEdit,
   onCommitEdit,
+  onExpand,
 }: {
   rowIndex: number;
   row: Cell[];
@@ -584,6 +610,7 @@ function ExistingRow({
   onSelect: (rowIdx: number) => void;
   onStartEdit: (key: string) => void;
   onCommitEdit: (rowIdx: number, col: string, text: string, original: string) => void;
+  onExpand: (cell: ExpandedCell) => void;
 }) {
   const handleSelect = useCallback(() => onSelect(rowIndex), [onSelect, rowIndex]);
   return (
@@ -621,11 +648,20 @@ function ExistingRow({
             editing={editingKey === key}
             onStart={onStartEdit}
             onCommitExisting={onCommitEdit}
+            onExpand={onExpand}
           />
         );
       })}
     </View>
   );
+}
+
+interface ExpandedCell {
+  rowIndex?: number;
+  newIndex?: number;
+  col: string;
+  text: string;
+  original: string;
 }
 
 function NewRow({
@@ -635,6 +671,7 @@ function NewRow({
   editingKey,
   onStartEdit,
   onCommitEdit,
+  onExpand,
 }: {
   index: number;
   values: Record<string, Cell>;
@@ -642,6 +679,7 @@ function NewRow({
   editingKey: string | null;
   onStartEdit: (key: string) => void;
   onCommitEdit: (i: number, col: string, text: string) => void;
+  onExpand: (cell: ExpandedCell) => void;
 }) {
   return (
     <View style={[styles.bodyRow, styles.newRow]}>
@@ -665,6 +703,7 @@ function NewRow({
             editing={editingKey === key}
             onStart={onStartEdit}
             onCommitNew={onCommitEdit}
+            onExpand={onExpand}
           />
         );
       })}
@@ -686,6 +725,7 @@ function GridCell({
   onStart,
   onCommitExisting,
   onCommitNew,
+  onExpand,
 }: {
   cellKey: string;
   rowIndex?: number;
@@ -700,12 +740,17 @@ function GridCell({
   onStart: (key: string) => void;
   onCommitExisting?: (rowIdx: number, col: string, text: string, original: string) => void;
   onCommitNew?: (i: number, col: string, text: string) => void;
+  onExpand: (cell: ExpandedCell) => void;
 }) {
   const [draft, setDraft] = useState(text);
   const handlePress = useCallback(() => {
     setDraft(text);
     onStart(cellKey);
   }, [text, onStart, cellKey]);
+  const handleExpand = useCallback(
+    () => onExpand({ rowIndex, newIndex, col, text, original }),
+    [onExpand, rowIndex, newIndex, col, text, original],
+  );
   const commit = useCallback(() => {
     if (rowIndex !== undefined) onCommitExisting?.(rowIndex, col, draft, original);
     else if (newIndex !== undefined) onCommitNew?.(newIndex, col, draft);
@@ -731,8 +776,8 @@ function GridCell({
   return (
     <Pressable
       style={[styles.cell, dirty && styles.cellDirty]}
-      onPress={editable ? handlePress : undefined}
-      disabled={!editable}
+      onPress={editable ? handlePress : handleExpand}
+      onLongPress={handleExpand}
     >
       <Text style={[styles.bodyText, isNull && styles.nullText]} numberOfLines={1}>
         {isNull ? "NULL" : text}
@@ -769,6 +814,56 @@ function PreviewModal({
             <Pressable style={styles.tbtn} onPress={onClose}>
               <Text style={styles.tbtnText}>Close</Text>
             </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function ValueEditorModal({
+  cell,
+  editable,
+  onSave,
+  onClose,
+}: {
+  cell: ExpandedCell | null;
+  editable: boolean;
+  onSave: (text: string) => void;
+  onClose: () => void;
+}) {
+  const [draft, setDraft] = useState("");
+  useEffect(() => {
+    setDraft(cell?.text ?? "");
+  }, [cell]);
+  const handleSave = useCallback(() => onSave(draft), [onSave, draft]);
+  if (!cell) return null;
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.modalBackdrop}>
+        <View style={styles.modalCard}>
+          <Text style={styles.modalTitle} numberOfLines={1}>
+            {cell.col}
+          </Text>
+          <ThemedCellInput
+            style={styles.valueEditorInput}
+            value={draft}
+            onChangeText={setDraft}
+            editable={editable}
+            multiline
+            autoCapitalize="none"
+            autoCorrect={false}
+            uniProps={placeholderColor}
+          />
+          <View style={styles.modalActions}>
+            <Pressable style={styles.tbtn} onPress={onClose}>
+              <Text style={styles.tbtnText}>Close</Text>
+            </Pressable>
+            {editable ? (
+              <Pressable style={styles.tbtn} onPress={handleSave}>
+                <Text style={styles.tbtnText}>Save</Text>
+              </Pressable>
+            ) : null}
           </View>
         </View>
       </View>
@@ -938,6 +1033,19 @@ const styles = StyleSheet.create((theme: Theme) => ({
     color: theme.colors.foreground,
   },
   modalScroll: { minHeight: 0 },
+  valueEditorInput: {
+    minHeight: 220,
+    maxHeight: 420,
+    padding: theme.spacing[2],
+    borderRadius: theme.borderRadius.md,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface0,
+    fontSize: theme.fontSize.sm,
+    fontFamily: theme.fontFamily.mono,
+    color: theme.colors.foreground,
+    textAlignVertical: "top" as const,
+  },
   modalActions: { flexDirection: "row", gap: theme.spacing[2] },
   previewItem: {
     gap: theme.spacing[1],
