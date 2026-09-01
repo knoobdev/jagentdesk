@@ -16,9 +16,9 @@ describe("useDatabaseNavStore", () => {
 
   it("selecting an object sets it active and clears console/overview", () => {
     const { selectObject } = useDatabaseNavStore.getState();
-    selectObject("db_1", { schema: "public", name: "orders" });
+    selectObject("db_1", { databaseId: "db_1", schema: "public", name: "orders" });
     const s = useDatabaseNavStore.getState();
-    expect(s.selectedObject).toEqual({ schema: "public", name: "orders" });
+    expect(s.selectedObject).toEqual({ databaseId: "db_1", schema: "public", name: "orders" });
     expect(s.selectedSchema).toBe("public");
     expect(s.showingConsole).toBe(false);
     expect(s.showingOverview).toBe(false);
@@ -26,7 +26,7 @@ describe("useDatabaseNavStore", () => {
 
   it("selecting the console clears the active object", () => {
     const { selectObject, selectConsole } = useDatabaseNavStore.getState();
-    selectObject("db_1", { schema: "public", name: "orders" });
+    selectObject("db_1", { databaseId: "db_1", schema: "public", name: "orders" });
     selectConsole("db_1");
     const s = useDatabaseNavStore.getState();
     expect(s.selectedObject).toBeNull();

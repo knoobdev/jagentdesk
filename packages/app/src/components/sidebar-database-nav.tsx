@@ -4,6 +4,7 @@ import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import {
   ChevronLeft,
   ChevronDown,
+  ChevronRight,
   Check,
   Database as DatabaseIcon,
   Gauge,
@@ -23,7 +24,7 @@ import type {
 } from "@jagentdesk/protocol/database/rpc-schemas";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { DatabaseStatusDot } from "@/components/database-dot";
-import { useDatabaseNavStore } from "@/stores/database-nav-store";
+import { useDatabaseNavStore, type SelectedDbObject } from "@/stores/database-nav-store";
 import { useDatabaseViewStore } from "@/stores/database-view-store";
 import { usePanelStore } from "@/stores/panel-store";
 import { useIsCompactFormFactor } from "@/constants/layout";
@@ -32,6 +33,7 @@ import type { Theme } from "@/styles/theme";
 
 const ThemedChevronLeft = withUnistyles(ChevronLeft);
 const ThemedChevronDown = withUnistyles(ChevronDown);
+const ThemedChevronRight = withUnistyles(ChevronRight);
 const ThemedCheck = withUnistyles(Check);
 const ThemedDatabase = withUnistyles(DatabaseIcon);
 const ThemedGauge = withUnistyles(Gauge);
@@ -71,42 +73,168 @@ function SchemaRow({
   );
 }
 
-/** A labeled database picker (DataGrip's server → databases level). Shown only for
- *  engines that expose multiple databases on one connection (postgres/mssql). */
-function DatabaseSelect({
-  databases,
-  value,
+/** A schema chip under a database node (when a database has multiple schemas). */
+function SchemaChip({
+  name,
+  active,
   onSelect,
 }: {
-  databases: DbDatabaseName[];
-  value: string | null;
+  name: string;
+  active: boolean;
   onSelect: (name: string) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const toggle = useCallback(() => setOpen((v) => !v), []);
-  const pick = useCallback(
-    (name: string) => {
-      onSelect(name);
-      setOpen(false);
-    },
-    [onSelect],
-  );
-  if (databases.length < 2) return null;
+  const handlePress = useCallback(() => onSelect(name), [name, onSelect]);
   return (
-    <View style={styles.schemaSelect}>
-      <Text style={styles.schemaSelectLabel}>DATABASE</Text>
-      <Pressable style={styles.schemaTrigger} onPress={toggle} testID="database-db-select">
+    <Pressable style={[styles.schemaChip, active && styles.schemaChipActive]} onPress={handlePress}>
+      <Text
+        style={[styles.schemaChipText, active && styles.schemaChipTextActive]}
+        numberOfLines={1}
+      >
+        {name}
+      </Text>
+    </Pressable>
+  );
+}
+
+/**
+ * One database in the connection's tree (DataGrip's server → databases). Expanding
+ * it opens a CHILD client on the daemon (composite id `${parentId}::${dbName}`) and
+ * lists that database's tables — many databases can be expanded at once. Selecting a
+ * table hands its child databaseId up so the data grid / chat operate that database.
+ */
+// eslint-disable-next-line complexity
+function DatabaseNode({
+  serverId,
+  parentId,
+  dbName,
+  expanded,
+  onToggle,
+  onSelectObject,
+  selectedObject,
+  refreshKey,
+}: {
+  serverId: string;
+  parentId: string;
+  dbName: string;
+  expanded: boolean;
+  onToggle: (name: string) => void;
+  onSelectObject: (object: SelectedDbObject) => void;
+  selectedObject: SelectedDbObject | null;
+  refreshKey: number;
+}) {
+  const client = useHostRuntimeClient(serverId);
+  const childId = `${parentId}::${dbName}`;
+  const [schemas, setSchemas] = useState<DbSchema[]>([]);
+  const [schema, setSchema] = useState<string | null>(null);
+  const [objects, setObjects] = useState<DbObject[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!expanded || !client) return;
+    let cancelled = false;
+    setLoading(true);
+    void (async () => {
+      const opened = await client
+        .databaseOpenDatabase({ id: parentId, database: dbName })
+        .catch(() => null);
+      if (cancelled || !opened || opened.error) {
+        if (!cancelled) setLoading(false);
+        return;
+      }
+      const res = await client.databaseSchemas({ id: childId }).catch(() => null);
+      if (cancelled || !res || res.error) {
+        if (!cancelled) setLoading(false);
+        return;
+      }
+      setSchemas(res.schemas);
+      const preferred =
+        res.schemas.find((s) => s.name === "public" || s.name === "main") ?? res.schemas[0];
+      const pick = schema ?? preferred?.name ?? null;
+      if (pick) {
+        setSchema(pick);
+        const o = await client.databaseObjects({ id: childId, schema: pick }).catch(() => null);
+        if (!cancelled && o && !o.error) setObjects(o.objects);
+      }
+      if (!cancelled) setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expanded, client, parentId, dbName, childId, refreshKey]);
+
+  const handleToggle = useCallback(() => onToggle(dbName), [onToggle, dbName]);
+  const handlePickSchema = useCallback(
+    (name: string) => {
+      setSchema(name);
+      if (!client) return;
+      void client
+        .databaseObjects({ id: childId, schema: name })
+        .then((o) => {
+          if (!o.error) setObjects(o.objects);
+          return undefined;
+        })
+        .catch(() => {});
+    },
+    [client, childId],
+  );
+  const handleSelect = useCallback(
+    (object: DbObject) =>
+      onSelectObject({ databaseId: childId, schema: object.schema, name: object.name }),
+    [onSelectObject, childId],
+  );
+
+  const tables = useMemo(
+    () =>
+      objects.filter(
+        (o) => o.kind === "table" || o.kind === "view" || o.kind === "materialized_view",
+      ),
+    [objects],
+  );
+
+  return (
+    <View>
+      <Pressable style={styles.dbNode} onPress={handleToggle} testID={`database-node-${dbName}`}>
+        {expanded ? (
+          <ThemedChevronDown size={13} uniProps={mutedColor} />
+        ) : (
+          <ThemedChevronRight size={13} uniProps={mutedColor} />
+        )}
         <ThemedDatabase size={14} uniProps={mutedColor} />
-        <Text style={styles.schemaTriggerText} numberOfLines={1}>
-          {value ?? "Select database"}
+        <Text style={styles.dbNodeText} numberOfLines={1}>
+          {dbName}
         </Text>
-        <ThemedChevronDown size={14} uniProps={mutedColor} />
       </Pressable>
-      {open ? (
-        <View style={styles.schemaMenu}>
-          {databases.map((d) => (
-            <SchemaRow key={d.name} name={d.name} active={value === d.name} onSelect={pick} />
+      {expanded ? (
+        <View style={styles.dbNodeChildren}>
+          {schemas.length > 1 ? (
+            <View style={styles.schemaChips}>
+              {schemas.map((s) => (
+                <SchemaChip
+                  key={s.name}
+                  name={s.name}
+                  active={schema === s.name}
+                  onSelect={handlePickSchema}
+                />
+              ))}
+            </View>
+          ) : null}
+          {tables.map((o) => (
+            <ObjectRow
+              key={`${o.schema}.${o.name}`}
+              object={o}
+              active={
+                selectedObject?.databaseId === childId &&
+                selectedObject?.schema === o.schema &&
+                selectedObject?.name === o.name
+              }
+              onSelect={handleSelect}
+            />
           ))}
+          {loading && tables.length === 0 ? <Text style={styles.emptyHint}>Loading…</Text> : null}
+          {!loading && tables.length === 0 ? (
+            <Text style={styles.emptyHint}>No tables.</Text>
+          ) : null}
         </View>
       ) : null}
     </View>
@@ -210,7 +338,6 @@ export function SidebarDatabaseNav({
   // or a sidebar jump renders this nav before connect runs, so the first schema
   // fetch fails with "database is not connected"; re-run when the connect lands.
   const listRefreshKey = useDatabaseViewStore((s) => s.listRefreshKey);
-  const bumpRefresh = useDatabaseViewStore((s) => s.bumpRefresh);
   const showMobileAgent = usePanelStore((s) => s.showMobileAgent);
   const isCompact = useIsCompactFormFactor();
 
@@ -275,13 +402,19 @@ export function SidebarDatabaseNav({
     return out;
   }, [objects]);
 
-  const handleSelectObject = useCallback(
-    (object: DbObject) => {
-      selectObject(databaseId, { schema: object.schema, name: object.name });
-      openTable(databaseId, { schema: object.schema, name: object.name });
+  // The object's own databaseId (a child database's composite id from the tree, or
+  // the connection id from the flat single-db view) is what the grid/chat operate.
+  const commitSelection = useCallback(
+    (object: SelectedDbObject) => {
+      selectObject(databaseId, object);
+      openTable(object.databaseId, { schema: object.schema, name: object.name });
       if (isCompact) showMobileAgent();
     },
     [databaseId, selectObject, openTable, isCompact, showMobileAgent],
+  );
+  const handleSelectObject = useCallback(
+    (object: DbObject) => commitSelection({ databaseId, schema: object.schema, name: object.name }),
+    [commitSelection, databaseId],
   );
   const handleSelectOverview = useCallback(() => {
     selectOverview(databaseId);
@@ -300,23 +433,19 @@ export function SidebarDatabaseNav({
     if (isCompact) showMobileAgent();
   }, [databaseId, selectEr, isCompact, showMobileAgent]);
   const handleSelectSchema = useCallback((name: string) => setSchema(name), [setSchema]);
-  const currentDatabase = database?.currentDatabase ?? null;
-  const handleSelectDatabase = useCallback(
-    (name: string) => {
-      if (!client || name === currentDatabase) return;
-      // Reconnect the connection to the chosen database, then reload the tree.
-      setSchema(null);
-      setObjects([]);
-      void client
-        .databaseUseDatabase({ id: databaseId, database: name })
-        .then(() => {
-          bumpRefresh();
-          return undefined;
-        })
-        .catch(() => {});
-    },
-    [client, databaseId, currentDatabase, setSchema, bumpRefresh],
-  );
+
+  // Which database nodes are expanded in the tree (multi-db engines). Local state:
+  // re-expanding on remount is cheap and avoids leaking tree state across databases.
+  const [expandedDbs, setExpandedDbs] = useState<Set<string>>(() => new Set());
+  const toggleDbNode = useCallback((name: string) => {
+    setExpandedDbs((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  }, []);
+  const multiDb = databases.length > 1;
 
   const handleBackToPrevious = useCallback(() => {
     if (router.canGoBack()) router.back();
@@ -357,13 +486,6 @@ export function SidebarDatabaseNav({
         </Text>
       </View>
 
-      <DatabaseSelect
-        databases={databases}
-        value={currentDatabase}
-        onSelect={handleSelectDatabase}
-      />
-      <SchemaSelect schemas={schemas} value={selectedSchema} onSelect={handleSelectSchema} />
-
       <ScrollView style={styles.nav} contentContainerStyle={styles.navContent}>
         <Pressable
           style={[styles.row, showingOverview && styles.rowActive]}
@@ -383,30 +505,57 @@ export function SidebarDatabaseNav({
         </Pressable>
         <Pressable style={[styles.row, showingDiff && styles.rowActive]} onPress={handleSelectDiff}>
           <ThemedGitCompare size={15} uniProps={mutedColor} />
-          <Text style={[styles.rowLabel, showingDiff && styles.rowLabelActive]}>
-            Compare schemas
-          </Text>
+          <Text style={[styles.rowLabel, showingDiff && styles.rowLabelActive]}>Compare</Text>
         </Pressable>
         <Pressable style={[styles.row, showingEr && styles.rowActive]} onPress={handleSelectEr}>
           <ThemedShare2 size={15} uniProps={mutedColor} />
           <Text style={[styles.rowLabel, showingEr && styles.rowLabelActive]}>ER diagram</Text>
         </Pressable>
-        {grouped.map((group) => (
-          <View key={group.category}>
-            <Text style={styles.categoryHeader}>{group.category}</Text>
-            {group.objects.map((o) => (
-              <ObjectRow
-                key={`${o.schema}.${o.name}`}
-                object={o}
-                active={selectedObject?.schema === o.schema && selectedObject?.name === o.name}
-                onSelect={handleSelectObject}
+
+        {multiDb ? (
+          <>
+            <Text style={styles.categoryHeader}>DATABASES</Text>
+            {databases.map((d) => (
+              <DatabaseNode
+                key={d.name}
+                serverId={serverId}
+                parentId={databaseId}
+                dbName={d.name}
+                expanded={expandedDbs.has(d.name)}
+                onToggle={toggleDbNode}
+                onSelectObject={commitSelection}
+                selectedObject={selectedObject}
+                refreshKey={listRefreshKey}
               />
             ))}
-          </View>
-        ))}
-        {objects.length === 0 ? (
-          <Text style={styles.emptyHint}>No tables in this schema.</Text>
-        ) : null}
+          </>
+        ) : (
+          <>
+            <View style={styles.schemaSelectInline}>
+              <SchemaSelect
+                schemas={schemas}
+                value={selectedSchema}
+                onSelect={handleSelectSchema}
+              />
+            </View>
+            {grouped.map((group) => (
+              <View key={group.category}>
+                <Text style={styles.categoryHeader}>{group.category}</Text>
+                {group.objects.map((o) => (
+                  <ObjectRow
+                    key={`${o.schema}.${o.name}`}
+                    object={o}
+                    active={selectedObject?.schema === o.schema && selectedObject?.name === o.name}
+                    onSelect={handleSelectObject}
+                  />
+                ))}
+              </View>
+            ))}
+            {objects.length === 0 ? (
+              <Text style={styles.emptyHint}>No tables in this schema.</Text>
+            ) : null}
+          </>
+        )}
       </ScrollView>
     </View>
   );
@@ -545,6 +694,50 @@ const styles = StyleSheet.create((theme: Theme) => ({
     minHeight: 32,
     paddingHorizontal: theme.spacing[2],
     borderRadius: theme.borderRadius.lg,
+  },
+  schemaSelectInline: {
+    paddingBottom: theme.spacing[1],
+  },
+  dbNode: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    minHeight: 30,
+    paddingHorizontal: theme.spacing[2],
+    borderRadius: theme.borderRadius.lg,
+  },
+  dbNodeText: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foreground,
+  },
+  dbNodeChildren: {
+    paddingLeft: theme.spacing[4],
+  },
+  schemaChips: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: theme.spacing[1],
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
+  },
+  schemaChip: {
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: 2,
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.surface2,
+  },
+  schemaChipActive: {
+    backgroundColor: theme.colors.accent,
+  },
+  schemaChipText: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+  },
+  schemaChipTextActive: {
+    color: theme.colors.accentForeground,
   },
   rowActive: {
     backgroundColor: theme.colors.surfaceSidebarHover,

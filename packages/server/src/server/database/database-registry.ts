@@ -35,9 +35,6 @@ interface StoredConnection {
   serverVersion?: string;
   lastError?: string;
   lastSeen_ms?: number;
-  /** Runtime-only override of `database` after switching databases on the same
-   *  server (postgres/mssql). Never persisted — a fresh connect uses `database`. */
-  activeDatabase?: string;
 }
 
 // Persisted shape: identity + non-secret connection fields only. The secret is
@@ -70,7 +67,10 @@ export interface AddConnectionInput {
  */
 export class DatabaseRegistry {
   private connections: Map<string, StoredConnection> = new Map();
+  // Live clients keyed by databaseId: a real connection's id, or a child database's
+  // composite id `${parentId}::${dbName}` opened from the tree.
   private clients: Map<string, DbClient> = new Map();
+  private childVersions: Map<string, string | undefined> = new Map();
   private readonly storePath: string | null;
   private readonly logger: Logger | null;
   private readonly secrets: SecretStore;
@@ -136,43 +136,68 @@ export class DatabaseRegistry {
   async connect(id: string): Promise<DatabaseInfo> {
     const entry = this.connections.get(id);
     if (!entry) throw new Error(`database not found: ${id}`);
-    entry.activeDatabase = undefined; // a fresh connect starts on the default db
-    return this.openClient(entry);
+    return this.openClient(entry, entry.database);
   }
 
   /** The databases on the server this connection points at (empty when the engine
-   *  has a single logical database or is not connected). */
+   *  has a single logical database or is not connected). Drives the DATABASE tree. */
   async listDatabases(id: string): Promise<DbDatabaseName[]> {
     const client = this.clients.get(id);
     if (!client?.listDatabases) return [];
     return client.listDatabases();
   }
 
-  /** Switch which database on the same server this connection operates. Reconnects
-   *  the client to `database` (postgres can't switch db on a live session), so the
-   *  browse view and the chat agent both follow. */
-  async useDatabase(id: string, database: string): Promise<DatabaseInfo> {
-    const entry = this.connections.get(id);
-    if (!entry) throw new Error(`database not found: ${id}`);
-    const previous = entry.activeDatabase;
-    entry.activeDatabase = database;
-    const old = this.clients.get(id);
-    if (old) {
-      await old.close().catch(() => undefined);
-      this.clients.delete(id);
+  /**
+   * Open another database on the same server as a CHILD connection, so the tree can
+   * show many databases of one connection at once (DataGrip's server → databases).
+   * The child is a full DbClient registered under the composite id
+   * `${parentId}::${database}`, reusing the parent's host/credentials with the
+   * database overridden — every existing RPC/component works on it unchanged because
+   * they key on databaseId. Runtime-only (never persisted). Idempotent.
+   */
+  async openDatabase(parentId: string, database: string): Promise<DatabaseInfo> {
+    const parent = this.connections.get(parentId);
+    if (!parent) throw new Error(`database not found: ${parentId}`);
+    const childId = childDatabaseId(parentId, database);
+    if (this.clients.has(childId)) {
+      return childInfo(parent, database, "connected", this.childVersions.get(childId));
     }
-    const info = await this.openClient(entry);
-    if (entry.state !== "connected") entry.activeDatabase = previous; // roll back on failure
-    return info;
+    try {
+      const secret = await this.secrets.get(parentId);
+      const config: DbConnectionConfig = {
+        host: parent.host,
+        port: parent.port,
+        database,
+        user: parent.user,
+        file: parent.file,
+        options: parent.options,
+        ...secretFields(secret, database),
+      };
+      const client = createClient(parent.engine, config);
+      await client.connect();
+      const version = await client.serverVersion().catch(() => undefined);
+      this.clients.set(childId, client);
+      this.childVersions.set(childId, version);
+      return childInfo(parent, database, "connected", version);
+    } catch (err) {
+      return childInfo(
+        parent,
+        database,
+        "error",
+        undefined,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
   }
 
-  /** Build the live config from an entry (honoring an active-database override) and
-   *  connect a fresh client. Shared by connect() and useDatabase(). */
-  private async openClient(entry: StoredConnection): Promise<DatabaseInfo> {
+  /** Build the live config from an entry and connect its client. */
+  private async openClient(
+    entry: StoredConnection,
+    database: string | undefined,
+  ): Promise<DatabaseInfo> {
     entry.state = "connecting";
     try {
       const secret = await this.secrets.get(entry.id);
-      const database = entry.activeDatabase ?? entry.database;
       const config: DbConnectionConfig = {
         host: entry.host,
         port: entry.port,
@@ -197,16 +222,19 @@ export class DatabaseRegistry {
   }
 
   async disconnect(id: string): Promise<void> {
-    const client = this.clients.get(id);
-    if (client) {
-      await client.close().catch(() => undefined);
-      this.clients.delete(id);
+    // Close the connection's own client + every child-database client opened from it.
+    for (const key of Array.from(this.clients.keys())) {
+      if (key === id || key.startsWith(`${id}::`)) {
+        await this.clients
+          .get(key)
+          ?.close()
+          .catch(() => undefined);
+        this.clients.delete(key);
+        this.childVersions.delete(key);
+      }
     }
     const entry = this.connections.get(id);
-    if (entry) {
-      entry.state = "saved";
-      entry.activeDatabase = undefined;
-    }
+    if (entry) entry.state = "saved";
   }
 
   async remove(id: string): Promise<void> {
@@ -306,6 +334,32 @@ function toInfo(entry: StoredConnection): DatabaseInfo {
     serverVersion: entry.serverVersion,
     lastError: entry.lastError,
     lastSeen_ms: entry.lastSeen_ms,
-    currentDatabase: entry.activeDatabase ?? entry.database,
+    currentDatabase: entry.database,
+  };
+}
+
+/** The composite databaseId of a child database opened on a connection. */
+function childDatabaseId(parentId: string, database: string): string {
+  return `${parentId}::${database}`;
+}
+
+/** DatabaseInfo for a child database (a database opened on a parent connection). */
+function childInfo(
+  parent: StoredConnection,
+  database: string,
+  state: DatabaseConnectionState,
+  serverVersion?: string,
+  lastError?: string,
+): DatabaseInfo {
+  const port = parent.port ? `:${parent.port}` : "";
+  return {
+    id: childDatabaseId(parent.id, database),
+    engine: parent.engine,
+    displayName: database,
+    target: `${parent.host ?? ""}${port}/${database}`,
+    state,
+    serverVersion,
+    lastError,
+    currentDatabase: database,
   };
 }

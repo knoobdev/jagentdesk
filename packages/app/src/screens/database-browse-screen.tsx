@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
-import { StyleSheet } from "react-native-unistyles";
+import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { PanelLeft } from "lucide-react-native";
 import type { DatabaseInfo } from "@jagentdesk/protocol/database/rpc-schemas";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { DatabaseDataEditor } from "@/components/database-data-editor";
@@ -17,6 +18,9 @@ import { useDatabaseViewStore } from "@/stores/database-view-store";
 import { useDatabaseChatStore } from "@/stores/database-chat-store";
 import { usePanelStore } from "@/stores/panel-store";
 import type { Theme } from "@/styles/theme";
+
+const ThemedPanelLeft = withUnistyles(PanelLeft);
+const mutedIconColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 
 /**
  * The content pane for a connected database. The object navigation lives in the
@@ -109,6 +113,9 @@ export function DatabaseBrowseScreen({
   );
   const showDataView = useCallback(() => setObjectView("data"), []);
   const showStructureView = useCallback(() => setObjectView("structure"), []);
+  // On phones the object nav is a slide-in that closes when you pick a table; this
+  // bar reopens it so the table tree is always one tap away (not just the chat FAB).
+  const handleOpenTables = useCallback(() => showMobileAgentList(), [showMobileAgentList]);
 
   let content;
   if (showingConsole) {
@@ -118,11 +125,14 @@ export function DatabaseBrowseScreen({
   } else if (showingEr) {
     content = <DatabaseErDiagram serverId={serverId} databaseId={databaseId} />;
   } else if (selectedObject) {
+    // A table picked from the tree carries its own databaseId (a child database's
+    // composite id), so the grid/structure operate that database, not the parent.
+    const objectDbId = selectedObject.databaseId;
     const inner =
       objectView === "data" ? (
         <DatabaseDataEditor
           serverId={serverId}
-          databaseId={databaseId}
+          databaseId={objectDbId}
           engine={engine}
           schema={selectedObject.schema}
           table={selectedObject.name}
@@ -130,7 +140,7 @@ export function DatabaseBrowseScreen({
       ) : (
         <DatabaseStructureView
           serverId={serverId}
-          databaseId={databaseId}
+          databaseId={objectDbId}
           engine={engine}
           schema={selectedObject.schema}
           table={selectedObject.name}
@@ -183,7 +193,22 @@ export function DatabaseBrowseScreen({
   return (
     <View style={containerStyle}>
       <View style={styles.row}>
-        <View style={styles.leftColumn}>{content}</View>
+        <View style={styles.leftColumn}>
+          {isCompact ? (
+            <Pressable
+              style={styles.mobileNavBar}
+              onPress={handleOpenTables}
+              accessibilityLabel="Show tables"
+              testID="database-mobile-tables"
+            >
+              <ThemedPanelLeft size={16} uniProps={mutedIconColor} />
+              <Text style={styles.mobileNavBarText} numberOfLines={1}>
+                {selectedObject ? `${selectedObject.schema}.${selectedObject.name}` : dbName}
+              </Text>
+            </Pressable>
+          ) : null}
+          {content}
+        </View>
         <DatabaseChatDock
           serverId={serverId}
           databaseId={databaseId}
@@ -220,6 +245,23 @@ const styles = StyleSheet.create((theme: Theme) => ({
     flex: 1,
     minWidth: 0,
     minHeight: 0,
+  },
+  mobileNavBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+  },
+  mobileNavBarText: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foreground,
   },
   viewSwitch: {
     flexDirection: "row",

@@ -80,9 +80,9 @@ export class DatabaseSession {
     }));
   }
 
-  async handleUseDatabase(msg: Req<"database/use-database">): Promise<void> {
-    await this.run(msg.requestId, "database/use-database/response", async () => ({
-      database: await this.registry.useDatabase(msg.id, msg.database),
+  async handleOpenDatabase(msg: Req<"database/open-database">): Promise<void> {
+    await this.run(msg.requestId, "database/open-database/response", async () => ({
+      database: await this.registry.openDatabase(msg.id, msg.database),
     }));
   }
 
@@ -182,7 +182,7 @@ function emptyBody(type: string): Record<string, unknown> {
       return { databases: [] };
     case "database/add/response":
     case "database/connect/response":
-    case "database/use-database/response":
+    case "database/open-database/response":
       return { database: null };
     case "database/databases/response":
       return { databases: [] };

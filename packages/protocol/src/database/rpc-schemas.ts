@@ -129,16 +129,16 @@ export const DatabaseDisconnectRequestSchema = req("database/disconnect", { id: 
 export const DatabaseDisconnectResponseSchema = resp("database/disconnect/response", {});
 export const DatabaseRemoveRequestSchema = req("database/remove", { id: z.string() });
 export const DatabaseRemoveResponseSchema = resp("database/remove/response", {});
-// ── databases on the server (DATABASE switcher) + switch active database ──
+// ── databases on the server (tree) + open a child database on a connection ──
 export const DatabaseDatabasesRequestSchema = req("database/databases", { id: z.string() });
 export const DatabaseDatabasesResponseSchema = resp("database/databases/response", {
   databases: z.array(DbDatabaseNameSchema),
 });
-export const DatabaseUseDatabaseRequestSchema = req("database/use-database", {
+export const DatabaseOpenDatabaseRequestSchema = req("database/open-database", {
   id: z.string(),
   database: z.string(),
 });
-export const DatabaseUseDatabaseResponseSchema = resp("database/use-database/response", {
+export const DatabaseOpenDatabaseResponseSchema = resp("database/open-database/response", {
   database: DatabaseInfoSchema.nullable(),
 });
 // ── introspection ──
@@ -211,7 +211,7 @@ export const DatabaseRequestSchemas = [
   DatabaseDisconnectRequestSchema,
   DatabaseRemoveRequestSchema,
   DatabaseDatabasesRequestSchema,
-  DatabaseUseDatabaseRequestSchema,
+  DatabaseOpenDatabaseRequestSchema,
   DatabaseSchemasRequestSchema,
   DatabaseObjectsRequestSchema,
   DatabaseColumnsRequestSchema,
@@ -231,7 +231,7 @@ export const DatabaseResponseSchemas = [
   DatabaseDisconnectResponseSchema,
   DatabaseRemoveResponseSchema,
   DatabaseDatabasesResponseSchema,
-  DatabaseUseDatabaseResponseSchema,
+  DatabaseOpenDatabaseResponseSchema,
   DatabaseSchemasResponseSchema,
   DatabaseObjectsResponseSchema,
   DatabaseColumnsResponseSchema,

@@ -1,30 +1,44 @@
-# Multi-database per connection (DataGrip-style server → databases → schemas)
+# Multi-database per connection — DataGrip tree + cross-db compare
 
-## Vấn đề
+## Chốt hướng (user xác nhận)
 
-Hiện tại 1 connection = 1 database (form add-connection có field `database` đơn; adapter connect vào đúng db đó). Không có tầng "databases của 1 server" như DataGrip (server → databases → schemas → tables). Người dùng muốn: trong 1 connection, xem/switch tất cả db names trên cùng server. Cho cả desktop lẫn mobile (app universal → 1 implementation).
+- Cây expand **nhiều database cùng lúc** trong 1 connection (KHÔNG phải dropdown-select-switch).
+- So sánh chéo **cả cấu trúc + dữ liệu** giữa 2 db name.
+- Làm trọn gói rồi test 1 lần (desktop + mobile).
 
-## Thiết kế
+## Kiến trúc: composite-id (ít xâm lấn nhất)
 
-Giữ nguyên model connection (không đổi persistence). Thêm khả năng liệt kê các database trên server và switch database đang active trong cùng connection bằng cách reconnect client tới db khác (cùng host/creds, khác dbname).
+Mỗi database mở ra trong cây = **một DbClient con** đăng ký dưới id ghép `parentId::dbName`. Nhờ đó TOÀN BỘ component sẵn có (data editor, structure, sql console, ER, chat, schema-diff) tái dùng nguyên vẹn vì chúng chỉ nhận `databaseId` — không cần luồn tham số `database` đi khắp nơi.
 
-- Chỉ engine hai tầng (schema nằm trong database) bật tính năng: `postgres`, `mssql`. `mysql` (schema == database) và `sqlite`/`oracle`/`mongo`/`clickhouse` → không có → UI ẩn selector (giữ UX cũ).
-- Switch = registry đóng client hiện tại, tạo client mới với `database` mới. Postgres không `USE` được trên cùng connection → phải reconnect. `activeDatabase` là runtime, KHÔNG persist (mở lại về db mặc định của connection).
-- Chat agent dùng `getClient(id)` → sau switch tự trỏ db mới (đúng ngữ nghĩa "operating this connection").
+- Bỏ model reconnect-1-active (activeDatabase/useDatabase) tao vừa làm sai.
+- Daemon giữ nhiều client/1 connection; con là runtime-only, không persist.
 
-## Trạng thái
+## Các bước
 
-Đã làm xong (commit `feat(db): multi-database per connection`):
+### Daemon
 
-- Daemon: `DbClient.listDatabases?()` + adapter postgres/mssql; registry `listDatabases(id)` + `useDatabase(id,name)` reconnect; `DatabaseInfo.currentDatabase`; DSN rewrite.
-- Protocol: RPC `database/databases` + `database/use-database`.
-- Session/client: handler + dispatch + `databaseDatabases`/`databaseUseDatabase`.
-- App: selector `DATABASE` trên `SCHEMA` trong `sidebar-database-nav` (shared desktop + mobile), chỉ hiện khi `databases.length > 1`.
+- Registry: `openDatabase(parentId, dbName)` tạo client con (config cha + secret + database=dbName), đăng ký dưới `parentId::dbName`, trả DatabaseInfo{id: composite}. Bỏ activeDatabase/useDatabase. disconnect(parent) đóng luôn con. getClient(compositeId) hoạt động sẵn.
+- Giữ `database/databases` (list tên db cho cây).
+
+### Protocol / session / client
+
+- Thay `database/use-database` → `database/open-database` {id, database} → child DatabaseInfo.
+- daemon-client: `databaseOpenDatabase({id, database})`.
+
+### App
+
+- `sidebar-database-nav`: viết lại thành CÂY. Engine nhiều-db (postgres/mssql): node database (từ listDatabases) → expand gọi openDatabase → dùng child id load schema/table. Nhiều db expand song song. Engine 1-db: giữ phẳng.
+- nav store: `selectedObject` thêm `databaseId` (child/parent) + trạng thái expand cây.
+- browse screen: content pane dùng `selectedObject.databaseId ?? routeId`.
+- Compare: tổng quát `database-schema-diff` thành chọn (dbId, schema) trái/phải khác db + thêm **data diff** (so hàng theo PK).
+
+### Mobile
+
+- Sửa lỗi object-nav overlay biến mất chỉ còn chat FAB; có đường quay lại nav rõ ràng.
 
 ## Validation
 
-- [x] Registry vs Postgres thật (shop_a → shop_b): listDatabases trả 3 db + current; useDatabase reconnect, introspection theo (orders → products).
-- [ ] Desktop: DATABASE selector hiện + switch đổi tree. Screenshot.
-- [ ] Mobile (bundle-swap): selector hiện trong compact nav + switch. Screenshot.
-- [ ] sqlite: selector KHÔNG hiện (regression).
-- [ ] Committed integration test (JAD_DB_E2E) cho listDatabases + useDatabase.
+- Registry: openDatabase con + nhiều client song song (Postgres shop_a + shop_b cùng mở).
+- Desktop: cây 2 db expand cùng lúc + compare cấu trúc + data giữa 2 db. Screenshot.
+- Mobile: cây + quay lại nav OK. Screenshot.
+- sqlite: giữ phẳng (regression).

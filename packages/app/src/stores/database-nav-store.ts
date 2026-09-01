@@ -8,6 +8,9 @@ import { create } from "zustand";
  * switching connections resets the selection cleanly.
  */
 export interface SelectedDbObject {
+  /** The databaseId that owns this object: the connection's id, or a child
+   *  database's composite id (`${parentId}::${dbName}`) when picked from the tree. */
+  databaseId: string;
   schema: string;
   name: string;
 }

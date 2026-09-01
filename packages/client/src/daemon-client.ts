@@ -652,9 +652,9 @@ type DatabaseDatabasesPayload = Extract<
   SessionOutboundMessage,
   { type: "database/databases/response" }
 >["payload"];
-type DatabaseUseDatabasePayload = Extract<
+type DatabaseOpenDatabasePayload = Extract<
   SessionOutboundMessage,
-  { type: "database/use-database/response" }
+  { type: "database/open-database/response" }
 >["payload"];
 type DatabaseSchemasPayload = Extract<
   SessionOutboundMessage,
@@ -6009,15 +6009,15 @@ export class DaemonClient {
     });
   }
 
-  async databaseUseDatabase(options: {
+  async databaseOpenDatabase(options: {
     requestId?: string;
     id: string;
     database: string;
-  }): Promise<DatabaseUseDatabasePayload> {
+  }): Promise<DatabaseOpenDatabasePayload> {
     return this.sendCorrelatedSessionRequest({
       requestId: options.requestId,
-      message: { type: "database/use-database", id: options.id, database: options.database },
-      responseType: "database/use-database/response",
+      message: { type: "database/open-database", id: options.id, database: options.database },
+      responseType: "database/open-database/response",
     });
   }
 
