@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
-import { StyleSheet } from "react-native-unistyles";
+import { StyleSheet, withUnistyles } from "react-native-unistyles";
+import { Check, ChevronDown, Layers } from "lucide-react-native";
 import type { DbDatabaseName, DbObject, DbSchema } from "@jagentdesk/protocol/database/rpc-schemas";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
@@ -8,9 +9,15 @@ import { diffObjects, type ObjectDiff } from "@/utils/sql-schema-diff";
 import { diffRows, type RowDiff } from "@/utils/sql-data-diff";
 import type { Theme } from "@/styles/theme";
 
+const ThemedChevronDown = withUnistyles(ChevronDown);
+const ThemedLayers = withUnistyles(Layers);
+const ThemedCheck = withUnistyles(Check);
+const mutedColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
+const accentColor = (theme: Theme) => ({ color: theme.colors.accent });
+
 const DATA_DIFF_CAP = 1000;
 
-function Chip({
+function SelectRow({
   name,
   active,
   onSelect,
@@ -24,12 +31,66 @@ function Chip({
   const handlePress = useCallback(() => onSelect(name), [name, onSelect]);
   return (
     <Pressable
-      style={[styles.chip, active && styles.chipActive]}
+      style={[styles.option, active && styles.optionActive]}
       onPress={handlePress}
       testID={testID}
     >
-      <Text style={[styles.chipText, active && styles.chipTextActive]}>{name}</Text>
+      <ThemedLayers size={13} uniProps={mutedColor} />
+      <Text style={styles.optionText} numberOfLines={1}>
+        {name}
+      </Text>
+      {active ? <ThemedCheck size={13} uniProps={accentColor} /> : null}
     </Pressable>
+  );
+}
+
+/** A labeled dropdown (DataGrip's data-source pickers), not a row of pills. */
+function Select({
+  label,
+  value,
+  options,
+  onSelect,
+  testPrefix,
+}: {
+  label: string;
+  value: string | null;
+  options: string[];
+  onSelect: (name: string) => void;
+  testPrefix: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const toggle = useCallback(() => setOpen((v) => !v), []);
+  const pick = useCallback(
+    (name: string) => {
+      onSelect(name);
+      setOpen(false);
+    },
+    [onSelect],
+  );
+  if (options.length === 0) return null;
+  return (
+    <View style={styles.select}>
+      <Text style={styles.selectLabel}>{label}</Text>
+      <Pressable style={styles.trigger} onPress={toggle} testID={`${testPrefix}-trigger`}>
+        <Text style={styles.triggerText} numberOfLines={1}>
+          {value ?? "Select"}
+        </Text>
+        <ThemedChevronDown size={14} uniProps={mutedColor} />
+      </Pressable>
+      {open ? (
+        <View style={styles.menu}>
+          {options.map((o) => (
+            <SelectRow
+              key={o}
+              name={o}
+              active={value === o}
+              onSelect={pick}
+              testID={`${testPrefix}-${o}`}
+            />
+          ))}
+        </View>
+      ) : null}
+    </View>
   );
 }
 
@@ -236,29 +297,21 @@ export function DatabaseSchemaDiff({
     <View style={styles.container}>
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
         <Text style={styles.title}>{multiDb ? "Compare databases" : "Compare schemas"}</Text>
-        <Text style={styles.label}>From</Text>
-        <View style={styles.chipRow}>
-          {leftChoices.map((n) => (
-            <Chip
-              key={`l-${n}`}
-              name={n}
-              active={leftValue === n}
-              onSelect={onLeft}
-              testID={`compare-from-${n}`}
-            />
-          ))}
-        </View>
-        <Text style={styles.label}>To</Text>
-        <View style={styles.chipRow}>
-          {rightChoices.map((n) => (
-            <Chip
-              key={`r-${n}`}
-              name={n}
-              active={rightValue === n}
-              onSelect={onRight}
-              testID={`compare-to-${n}`}
-            />
-          ))}
+        <View style={styles.selectRow}>
+          <Select
+            label="From"
+            value={leftValue}
+            options={leftChoices}
+            onSelect={onLeft}
+            testPrefix="compare-from"
+          />
+          <Select
+            label="To"
+            value={rightValue}
+            options={rightChoices}
+            onSelect={onRight}
+            testPrefix="compare-to"
+          />
         </View>
 
         <Text style={styles.summary}>
@@ -277,17 +330,14 @@ export function DatabaseSchemaDiff({
 
         {commonTables.length > 0 ? (
           <>
-            <Text style={styles.label}>Compare data (pick a table)</Text>
-            <View style={styles.chipRow}>
-              {commonTables.map((t) => (
-                <Chip
-                  key={`t-${t}`}
-                  name={t}
-                  active={table === t}
-                  onSelect={runDataDiff}
-                  testID={`compare-table-${t}`}
-                />
-              ))}
+            <View style={styles.selectRow}>
+              <Select
+                label="Compare data in table"
+                value={table}
+                options={commonTables}
+                onSelect={runDataDiff}
+                testPrefix="compare-table"
+              />
             </View>
             {dataError ? <Text style={styles.dataError}>{dataError}</Text> : null}
             {rowDiff ? (
@@ -319,23 +369,53 @@ const styles = StyleSheet.create((theme: Theme) => ({
     fontWeight: theme.fontWeight.bold,
     color: theme.colors.foreground,
   },
-  label: {
+  selectRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: theme.spacing[3],
+    marginTop: theme.spacing[2],
+  },
+  select: { minWidth: 160, gap: theme.spacing[1] },
+  selectLabel: {
     fontSize: theme.fontSize.xs,
     fontWeight: theme.fontWeight.medium,
     color: theme.colors.foregroundMuted,
-    marginTop: theme.spacing[2],
+    textTransform: "uppercase" as const,
+    letterSpacing: 0.5,
   },
-  chipRow: { flexDirection: "row", flexWrap: "wrap", gap: theme.spacing[1.5] },
-  chip: {
+  trigger: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
     paddingHorizontal: theme.spacing[2],
-    paddingVertical: theme.spacing[1],
+    paddingVertical: theme.spacing[1.5],
     borderRadius: theme.borderRadius.md,
     borderWidth: theme.borderWidth[1],
     borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
   },
-  chipActive: { borderColor: theme.colors.accent, backgroundColor: theme.colors.surface2 },
-  chipText: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
-  chipTextActive: { color: theme.colors.foreground },
+  triggerText: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foreground,
+  },
+  menu: {
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.surface0,
+    overflow: "hidden",
+  },
+  option: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1.5],
+  },
+  optionActive: { backgroundColor: theme.colors.surface1 },
+  optionText: { flex: 1, minWidth: 0, fontSize: theme.fontSize.sm, color: theme.colors.foreground },
   summary: {
     fontSize: theme.fontSize.sm,
     color: theme.colors.foregroundMuted,
