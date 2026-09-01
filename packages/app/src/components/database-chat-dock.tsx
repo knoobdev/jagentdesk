@@ -144,16 +144,34 @@ function HistoryItem({
   );
 }
 
+/**
+ * What the chat still needs before it can run, worded to name only what is
+ * actually missing — never nag about enabling a provider when one already is.
+ */
+function disabledChatHint(hasProvider: boolean, hasProject: boolean): string {
+  if (!hasProject && !hasProvider) {
+    return "open a project (sidebar → Add project) and turn on an AI provider in Host settings.";
+  }
+  if (!hasProject) {
+    return "open a project (sidebar → Add project) — the agent runs inside a project's workspace.";
+  }
+  return "turn on an AI provider in Host settings.";
+}
+
 /** Renders the created agent's conversation, or the entry composer before one exists. */
 function DatabaseChatBody({
   agentId,
   ready,
+  hasProvider,
+  hasProject,
   paneValue,
   focusValue,
   entryComposer,
 }: {
   agentId: string | null;
   ready: boolean;
+  hasProvider: boolean;
+  hasProject: boolean;
   paneValue: PaneContextValue;
   focusValue: ReturnType<typeof createPaneFocusContextValue>;
   entryComposer: ReactNode;
@@ -174,8 +192,8 @@ function DatabaseChatBody({
     <View style={styles.center}>
       <Text style={styles.centerTitle}>Ask about this database</Text>
       <Text style={styles.centerText}>
-        The chat runs a schema-grounded agent. To enable it, open a project (sidebar → Add project)
-        and turn on an AI provider in Host settings.
+        The chat runs a schema-grounded agent. To enable it,{" "}
+        {disabledChatHint(hasProvider, hasProject)}
       </Text>
     </View>
   );
@@ -428,6 +446,8 @@ export function DatabaseChatDock({
           <DatabaseChatBody
             agentId={agentId}
             ready={ready}
+            hasProvider={Boolean(provider)}
+            hasProject={Boolean(cwd)}
             paneValue={paneValue}
             focusValue={focusValue}
             entryComposer={entryComposer}
