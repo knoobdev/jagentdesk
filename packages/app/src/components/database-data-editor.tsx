@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { ChevronLeft, ChevronRight, Plus, RefreshCw, Trash2, Undo2 } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
+import * as Clipboard from "expo-clipboard";
 import type {
   DatabaseEngine,
   DbColumn,
@@ -41,6 +42,71 @@ function coerce(text: string): Cell {
 }
 function cellText(v: Cell): string {
   return v === null ? "" : String(v);
+}
+
+interface AggregateResult {
+  col: string;
+  count: number;
+  numeric: boolean;
+  sum?: number;
+  avg?: number;
+  min?: number;
+  max?: number;
+  distinct?: number;
+}
+
+/** DataGrip's status-bar aggregate for one column over the loaded page. */
+function computeAggregate(result: QueryResult, col: string): AggregateResult | null {
+  const idx = result.columns.findIndex((c) => c.name === col);
+  if (idx < 0) return null;
+  const present = result.rows.map((r) => r[idx]).filter((v) => v !== null);
+  const count = present.length;
+  const nums = present
+    .map((v) => (typeof v === "number" ? v : Number(v)))
+    .filter((n) => Number.isFinite(n));
+  if (count > 0 && nums.length === count) {
+    const sum = nums.reduce((a, b) => a + b, 0);
+    return {
+      col,
+      count,
+      numeric: true,
+      sum,
+      avg: sum / count,
+      min: Math.min(...nums),
+      max: Math.max(...nums),
+    };
+  }
+  return { col, count, numeric: false, distinct: new Set(present.map(String)).size };
+}
+
+const round2 = (n: number): string => (Number.isInteger(n) ? String(n) : n.toFixed(2));
+
+/** Serialise the loaded rows into an extractor format for the clipboard. */
+function extract(result: QueryResult, format: "csv" | "json" | "sql", table: string): string {
+  const names = result.columns.map((c) => c.name);
+  if (format === "json") {
+    return JSON.stringify(
+      result.rows.map((r) => Object.fromEntries(names.map((n, i) => [n, r[i]]))),
+      null,
+      2,
+    );
+  }
+  if (format === "csv") {
+    const esc = (v: Cell) => {
+      const s = v === null ? "" : String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    return [names.join(","), ...result.rows.map((r) => r.map(esc).join(","))].join("\n");
+  }
+  const lit = (v: Cell) => {
+    if (v === null) return "NULL";
+    if (typeof v === "number") return String(v);
+    if (typeof v === "boolean") return v ? "TRUE" : "FALSE";
+    return `'${String(v).replace(/'/g, "''")}'`;
+  };
+  return result.rows
+    .map((r) => `INSERT INTO ${table} (${names.join(", ")}) VALUES (${r.map(lit).join(", ")});`)
+    .join("\n");
 }
 
 /**
@@ -90,6 +156,8 @@ export function DatabaseDataEditor({
   const [filterText, setFilterText] = useState("");
   const filterRef = useRef("");
   const [valueCell, setValueCell] = useState<ExpandedCell | null>(null);
+  const [aggCol, setAggCol] = useState<string | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
 
   const pkCols = useMemo(() => columns.filter((c) => c.isPrimaryKey).map((c) => c.name), [columns]);
   const colNames = useMemo(() => columns.map((c) => c.name), [columns]);
@@ -342,19 +410,28 @@ export function DatabaseDataEditor({
     await load(page);
   }, [client, txOpen, databaseId, load, page]);
 
-  const exportJson = useCallback(() => {
-    if (!result) return;
-    const rows = result.rows.map((r) => {
-      const obj: Record<string, Cell> = {};
-      result.columns.forEach((c, i) => {
-        obj[c.name] = r[i];
-      });
-      return obj;
-    });
-    setStatus(`Exported ${rows.length} rows as JSON to log.`);
-    // eslint-disable-next-line no-console
-    console.log(JSON.stringify(rows, null, 2));
-  }, [result]);
+  const handleAggregate = useCallback(
+    (col: string) => setAggCol((cur) => (cur === col ? null : col)),
+    [],
+  );
+  const toggleExport = useCallback(() => setExportOpen((v) => !v), []);
+  const qualified = qualifyTable(engine, schema, table);
+  const copyExtract = useCallback(
+    (format: "csv" | "json" | "sql") => {
+      setExportOpen(false);
+      if (!result) return;
+      void Clipboard.setStringAsync(extract(result, format, qualified));
+      setStatus(`Copied ${result.rows.length} rows as ${format.toUpperCase()} to clipboard.`);
+    },
+    [result, qualified],
+  );
+  const copyCsv = useCallback(() => copyExtract("csv"), [copyExtract]);
+  const copyJson = useCallback(() => copyExtract("json"), [copyExtract]);
+  const copySql = useCallback(() => copyExtract("sql"), [copyExtract]);
+  const aggregate = useMemo(
+    () => (result && aggCol ? computeAggregate(result, aggCol) : null),
+    [result, aggCol],
+  );
 
   const onSubmit = useCallback(() => void submit(), [submit]);
   const onCommit = useCallback(() => void commit(), [commit]);
@@ -393,7 +470,9 @@ export function DatabaseDataEditor({
                   key={c.name}
                   column={c}
                   sortDir={sort?.col === c.name ? sort.dir : null}
+                  aggActive={aggCol === c.name}
                   onSort={handleSort}
+                  onAggregate={handleAggregate}
                 />
               ))}
             </View>
@@ -494,9 +573,24 @@ export function DatabaseDataEditor({
           </>
         ) : null}
         <View style={styles.toolbarSpacer} />
-        <Pressable style={styles.tbtn} onPress={exportJson}>
-          <Text style={styles.tbtnText}>Export</Text>
-        </Pressable>
+        <View>
+          <Pressable style={styles.tbtn} onPress={toggleExport}>
+            <Text style={styles.tbtnText}>Export ▾</Text>
+          </Pressable>
+          {exportOpen ? (
+            <View style={styles.exportMenu}>
+              <Pressable style={styles.exportItem} onPress={copyCsv}>
+                <Text style={styles.exportItemText}>Copy as CSV</Text>
+              </Pressable>
+              <Pressable style={styles.exportItem} onPress={copyJson}>
+                <Text style={styles.exportItemText}>Copy as JSON</Text>
+              </Pressable>
+              <Pressable style={styles.exportItem} onPress={copySql}>
+                <Text style={styles.exportItemText}>Copy as SQL INSERT</Text>
+              </Pressable>
+            </View>
+          ) : null}
+        </View>
         <Pressable style={styles.pageBtn} onPress={handlePrev} disabled={page === 0}>
           <ThemedChevronLeft size={16} uniProps={mutedColor} />
         </Pressable>
@@ -548,6 +642,23 @@ export function DatabaseDataEditor({
         onClose={closeValueCell}
       />
 
+      {aggregate ? (
+        <View style={styles.aggBar}>
+          <Text style={styles.aggBarCol}>{aggregate.col}</Text>
+          {aggregate.numeric ? (
+            <Text style={styles.aggBarText}>
+              count {aggregate.count} · sum {round2(aggregate.sum ?? 0)} · avg{" "}
+              {round2(aggregate.avg ?? 0)} · min {round2(aggregate.min ?? 0)} · max{" "}
+              {round2(aggregate.max ?? 0)}
+            </Text>
+          ) : (
+            <Text style={styles.aggBarText}>
+              count {aggregate.count} · distinct {aggregate.distinct}
+            </Text>
+          )}
+        </View>
+      ) : null}
+
       <View style={styles.statusBar}>
         <Text style={styles.statusText} numberOfLines={1}>
           {status ?? `${shown} row${shown === 1 ? "" : "s"}${result?.truncated ? "+" : ""}`}
@@ -564,27 +675,37 @@ export function DatabaseDataEditor({
 function HeaderCell({
   column,
   sortDir,
+  aggActive,
   onSort,
+  onAggregate,
 }: {
   column: DbColumn;
   sortDir: "asc" | "desc" | null;
+  aggActive: boolean;
   onSort: (col: string) => void;
+  onAggregate: (col: string) => void;
 }) {
   const press = useCallback(() => onSort(column.name), [onSort, column.name]);
+  const agg = useCallback(() => onAggregate(column.name), [onAggregate, column.name]);
   let arrow = "";
   if (sortDir === "asc") arrow = " ↑";
   else if (sortDir === "desc") arrow = " ↓";
   return (
-    <Pressable style={styles.cell} onPress={press}>
-      <Text style={styles.headerText} numberOfLines={1}>
-        {column.name}
-        {arrow}
-      </Text>
-      <Text style={styles.headerType} numberOfLines={1}>
-        {column.dataType}
-        {column.isPrimaryKey ? " · PK" : ""}
-      </Text>
-    </Pressable>
+    <View style={styles.headerCell}>
+      <Pressable style={styles.headerMain} onPress={press}>
+        <Text style={styles.headerText} numberOfLines={1}>
+          {column.name}
+          {arrow}
+        </Text>
+        <Text style={styles.headerType} numberOfLines={1}>
+          {column.dataType}
+          {column.isPrimaryKey ? " · PK" : ""}
+        </Text>
+      </Pressable>
+      <Pressable style={styles.aggBtn} onPress={agg} accessibilityLabel="Aggregate column">
+        <Text style={[styles.aggSigma, aggActive && styles.aggSigmaActive]}>Σ</Text>
+      </Pressable>
+    </View>
   );
 }
 
@@ -1008,12 +1129,64 @@ const styles = StyleSheet.create((theme: Theme) => ({
     color: theme.colors.foreground,
     paddingVertical: theme.spacing[1.5],
   },
+  headerCell: {
+    width: CELL_W,
+    flexDirection: "row",
+    alignItems: "center",
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderRightColor: theme.colors.border,
+  },
+  headerMain: {
+    flex: 1,
+    minWidth: 0,
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1.5],
+    justifyContent: "center",
+  },
+  aggBtn: { paddingHorizontal: theme.spacing[1.5], alignSelf: "stretch", justifyContent: "center" },
+  aggSigma: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundExtraMuted },
+  aggSigmaActive: { color: theme.colors.accent, fontWeight: theme.fontWeight.bold },
   headerText: {
     fontSize: theme.fontSize.xs,
     fontWeight: theme.fontWeight.semibold,
     color: theme.colors.foreground,
   },
   headerType: { fontSize: 10, color: theme.colors.foregroundExtraMuted },
+  exportMenu: {
+    position: "absolute",
+    top: 30,
+    right: 0,
+    minWidth: 180,
+    zIndex: 20,
+    backgroundColor: theme.colors.surface1,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.md,
+    paddingVertical: theme.spacing[1],
+  },
+  exportItem: { paddingHorizontal: theme.spacing[3], paddingVertical: theme.spacing[1.5] },
+  exportItemText: { fontSize: theme.fontSize.xs, color: theme.colors.foreground },
+  aggBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[1],
+    borderTopWidth: theme.borderWidth[1],
+    borderTopColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+  },
+  aggBarCol: {
+    fontSize: theme.fontSize.xs,
+    fontFamily: theme.fontFamily.mono,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.foreground,
+  },
+  aggBarText: {
+    fontSize: theme.fontSize.xs,
+    fontFamily: theme.fontFamily.mono,
+    color: theme.colors.foregroundMuted,
+  },
   bodyRow: {
     flexDirection: "row",
     borderBottomWidth: StyleSheet.hairlineWidth,
