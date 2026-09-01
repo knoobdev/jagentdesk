@@ -22,7 +22,7 @@ import type {
   DbObject,
   DbSchema,
 } from "@jagentdesk/protocol/database/rpc-schemas";
-import { useHostRuntimeClient } from "@/runtime/host-runtime";
+import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import { DatabaseStatusDot } from "@/components/database-dot";
 import { useDatabaseNavStore, type SelectedDbObject } from "@/stores/database-nav-store";
 import { useDatabaseViewStore } from "@/stores/database-view-store";
@@ -315,6 +315,10 @@ export function SidebarDatabaseNav({
   databaseId: string;
 }) {
   const client = useHostRuntimeClient(serverId);
+  // Gate DB fetches on a live session: a deep link renders this before the host
+  // WebSocket has synced, so an early databaseList returns empty and the tree
+  // never populates. Re-run once the connection lands.
+  const isConnected = useHostRuntimeIsConnected(serverId);
   const [database, setDatabase] = useState<DatabaseInfo | null>(null);
   const [schemas, setSchemas] = useState<DbSchema[]>([]);
   const [databases, setDatabases] = useState<DbDatabaseName[]>([]);
@@ -346,7 +350,7 @@ export function SidebarDatabaseNav({
   }, [databaseId, ensureDatabase]);
 
   useEffect(() => {
-    if (!client) return;
+    if (!client || !isConnected) return;
     void client
       .databaseList()
       .then((res) => {
@@ -376,7 +380,7 @@ export function SidebarDatabaseNav({
         return undefined;
       })
       .catch(() => {});
-  }, [client, databaseId, setSchema, listRefreshKey]);
+  }, [client, isConnected, databaseId, setSchema, listRefreshKey]);
 
   useEffect(() => {
     if (!client || !selectedSchema) return;

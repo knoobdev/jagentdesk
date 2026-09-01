@@ -4,7 +4,7 @@ import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { PanelLeft } from "lucide-react-native";
 import type { DatabaseInfo } from "@jagentdesk/protocol/database/rpc-schemas";
-import { useHostRuntimeClient } from "@/runtime/host-runtime";
+import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import { DatabaseDataEditor } from "@/components/database-data-editor";
 import { DatabaseStructureView } from "@/components/database-structure-view";
 import { DatabaseSqlConsole } from "@/components/database-sql-console";
@@ -37,6 +37,9 @@ export function DatabaseBrowseScreen({
   databaseId: string;
 }) {
   const client = useHostRuntimeClient(serverId);
+  // A deep link mounts this before the host WebSocket has synced; gate the
+  // connect/introspect on a live session so it doesn't no-op on an empty list.
+  const isConnected = useHostRuntimeIsConnected(serverId);
   const [database, setDatabase] = useState<DatabaseInfo | null>(null);
   const [schemaCount, setSchemaCount] = useState<number | null>(null);
   const [objectView, setObjectView] = useState<"data" | "structure">("data");
@@ -69,7 +72,7 @@ export function DatabaseBrowseScreen({
   }, [databaseId, isCompact, showMobileAgentList]);
 
   useEffect(() => {
-    if (!client) return;
+    if (!client || !isConnected) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -98,7 +101,7 @@ export function DatabaseBrowseScreen({
     return () => {
       cancelled = true;
     };
-  }, [client, databaseId, bumpRefresh]);
+  }, [client, isConnected, databaseId, bumpRefresh]);
 
   const containerStyle = useMemo(
     () => [styles.container, isCompact ? { paddingTop: insets.top } : null],
