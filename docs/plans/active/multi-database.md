@@ -100,10 +100,9 @@ Every shipped task runs against a real database — no stubs.
 - [x] Query history per connection: `database-history-store` (in-memory, capped, most-recent-first, consecutive-dedup) + a History dropdown in the console that recalls a past statement.
 - [x] Mobile parity: every database screen/component is built on the same universal primitives as the cluster feature (Unistyles, `useIsCompactFormFactor`, slide-in nav via `showMobileAgent`, the chat dock's mobile FAB, `Modal`/`TextInput`/`ScrollView`). No desktop-only API is used; the same components render on iOS/Android. (Live device pass remains a manual acceptance step.)
 - [x] Proof: `database-tx.test.ts` explain case (query plan mentions the table) + `database-history-store.test.ts` (3/3: order/dedup, empty-skip + per-db isolation, clear).
-- [ ] Deferred (need their servers / non-SQL shape / large scope — scaffolding ready, not stubbed):
-  - MSSQL / Oracle / ClickHouse adapters (SQL-shaped, drop into `createClient` behind the same `DbClient`; each needs its driver + a live server to prove).
-  - MongoDB (non-SQL; needs a separate query surface, not `runQuery(sql)`).
-  - Schema diff, ER diagram, DDL view, explain-plan flame graph (additive UI, no protocol changes).
+- [x] **All 7 engines live** (2026-09-01): added `mssql.ts` (mssql/tedious pure JS, information*schema, `@pN` binds, arrayRowMode), `oracle.ts` (oracledb **thin mode** — no Instant Client — ALL*_ dictionary, named binds, `:N`, `EXPLAIN PLAN`+dbms_xplan), `mongodb.ts` (document store mapped onto the contract: schemas→dbs, objects→collections, columns→sampled fields; a query is the grid's `select _ from "db"."coll"`translated to a find OR a JSON find spec; writes via JSON ops; row editor disabled),`clickhouse.ts`(HTTP client,`system.\*`, MergeTree, editor disabled). Registered in `createClient`; app engine picker lists all 7; DML placeholders per engine (`$n`/`?`/`@pN`/`:N`); `isSqlEngine` gates the row editor to the 5 relational engines.
+  - Proof: `database-engines-e2e.test.ts` (4/4, gated `JAD_DB_E2E=1`) — **real SQL Server (azure-sql-edge), Oracle (gvenzl/oracle-free 23), MongoDB 7, ClickHouse 24** each: connect → version → introspect (PK where the engine has one) → paginate (`truncated`) → read-only guard (SQL engines) / find+filter (Mongo). Full DB suite **40/40** with all seven servers up.
+- [ ] Deferred (additive UI, no protocol change): schema diff, ER diagram canvas, explain-plan flame graph. DDL view + a relationships (FK) view: see follow-up.
 
 ## Authority gaps / decisions to confirm
 

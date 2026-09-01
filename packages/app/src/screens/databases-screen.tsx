@@ -17,12 +17,17 @@ import type {
   DbConnectionConfig,
 } from "@jagentdesk/protocol/database/rpc-schemas";
 
-// Engines wired end-to-end today (P1). MSSQL/Oracle/Mongo/ClickHouse land in P6.
+// All engines have a live adapter (SQLite/PG/MySQL/SQL Server/Oracle/Mongo/
+// ClickHouse). For Oracle the "Database" field is the service name (e.g. FREEPDB1).
 const ENGINES: Array<{ key: DatabaseEngine; label: string; defaultPort?: number; file?: boolean }> =
   [
     { key: "postgres", label: "PostgreSQL", defaultPort: 5432 },
     { key: "mysql", label: "MySQL", defaultPort: 3306 },
     { key: "sqlite", label: "SQLite", file: true },
+    { key: "mssql", label: "SQL Server", defaultPort: 1433 },
+    { key: "oracle", label: "Oracle", defaultPort: 1521 },
+    { key: "mongodb", label: "MongoDB", defaultPort: 27017 },
+    { key: "clickhouse", label: "ClickHouse", defaultPort: 8123 },
   ];
 
 interface DraftForm {

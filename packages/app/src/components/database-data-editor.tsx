@@ -10,7 +10,7 @@ import type {
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { useDatabaseViewStore } from "@/stores/database-view-store";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
-import { qualifyTable } from "@/utils/sql-ident";
+import { isSqlEngine, qualifyTable } from "@/utils/sql-ident";
 import { buildDelete, buildInsert, buildUpdate, type Cell, type Dml } from "@/utils/sql-dml";
 import type { Theme } from "@/styles/theme";
 
@@ -347,7 +347,7 @@ export function DatabaseDataEditor({
 
   const from = page * PAGE_SIZE;
   const shown = result?.rows.length ?? 0;
-  const canEdit = pkCols.length > 0;
+  const canEdit = isSqlEngine(engine) && pkCols.length > 0;
   const previewStatements = previewOpen ? buildStatements() : [];
 
   let tableBody;
@@ -435,8 +435,9 @@ export function DatabaseDataEditor({
       {!canEdit && columns.length > 0 ? (
         <View style={styles.noteBar}>
           <Text style={styles.noteText}>
-            This table has no primary key — rows are read-only (editing needs a key to target a
-            row).
+            {isSqlEngine(engine)
+              ? "This table has no primary key — rows are read-only (editing needs a key to target a row)."
+              : `Row editing isn't available for ${engine}; use the SQL console for changes.`}
           </Text>
         </View>
       ) : null}

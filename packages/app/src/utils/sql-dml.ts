@@ -8,9 +8,12 @@ export interface Dml {
   params: Cell[];
 }
 
-/** Placeholder for the nth (1-based) bind parameter — Postgres numbers them. */
+/** Placeholder for the nth (1-based) bind parameter, per engine's binding style. */
 function placeholder(engine: DatabaseEngine, n: number): string {
-  return engine === "postgres" ? `$${n}` : "?";
+  if (engine === "postgres") return `$${n}`;
+  if (engine === "mssql") return `@p${n}`;
+  if (engine === "oracle") return `:${n}`;
+  return "?"; // mysql, sqlite
 }
 
 /**

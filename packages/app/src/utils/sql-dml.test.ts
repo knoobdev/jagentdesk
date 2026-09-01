@@ -22,6 +22,18 @@ describe("sql-dml", () => {
     expect(dml.params).toEqual(["shipped", 1]);
   });
 
+  it("builds a parameterized UPDATE for mssql (@pN placeholders)", () => {
+    const dml = buildUpdate("mssql", "dbo", "orders", { status: "shipped" }, { id: 1 });
+    expect(dml.sql).toBe('update "dbo"."orders" set "status" = @p1 where "id" = @p2');
+    expect(dml.params).toEqual(["shipped", 1]);
+  });
+
+  it("builds a parameterized UPDATE for oracle (:N placeholders)", () => {
+    const dml = buildUpdate("oracle", "SYSTEM", "ORDERS", { STATUS: "shipped" }, { ID: 1 });
+    expect(dml.sql).toBe('update "SYSTEM"."ORDERS" set "STATUS" = :1 where "ID" = :2');
+    expect(dml.params).toEqual(["shipped", 1]);
+  });
+
   it("builds an INSERT", () => {
     const dml = buildInsert("sqlite", "main", "orders", { status: "new", total: null });
     expect(dml.sql).toBe('insert into "main"."orders" ("status", "total") values (?, ?)');

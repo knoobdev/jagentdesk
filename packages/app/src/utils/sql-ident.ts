@@ -10,3 +10,14 @@ export function quoteIdent(engine: DatabaseEngine, name: string): string {
 export function qualifyTable(engine: DatabaseEngine, schema: string, table: string): string {
   return `${quoteIdent(engine, schema)}.${quoteIdent(engine, table)}`;
 }
+
+/** Relational engines that support the PK-keyed DML row editor. */
+export function isSqlEngine(engine: DatabaseEngine): boolean {
+  return (
+    engine === "postgres" ||
+    engine === "mysql" ||
+    engine === "sqlite" ||
+    engine === "mssql" ||
+    engine === "oracle"
+  );
+}

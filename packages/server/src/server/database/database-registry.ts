@@ -9,6 +9,10 @@ import type { DbClient, DbConnectionConfig } from "./db-client.js";
 import { SqliteDbClient } from "./adapters/sqlite.js";
 import { PostgresDbClient } from "./adapters/postgres.js";
 import { MysqlDbClient } from "./adapters/mysql.js";
+import { MssqlDbClient } from "./adapters/mssql.js";
+import { OracleDbClient } from "./adapters/oracle.js";
+import { MongoDbClient } from "./adapters/mongodb.js";
+import { ClickhouseDbClient } from "./adapters/clickhouse.js";
 import { FileSecretStore, MemorySecretStore, type SecretStore } from "./secret-store.js";
 
 interface StoredConnection {
@@ -187,8 +191,15 @@ function createClient(engine: DatabaseEngine, config: DbConnectionConfig): DbCli
       return new PostgresDbClient(config);
     case "mysql":
       return new MysqlDbClient(config);
+    case "mssql":
+      return new MssqlDbClient(config);
+    case "oracle":
+      return new OracleDbClient(config);
+    case "mongodb":
+      return new MongoDbClient(config);
+    case "clickhouse":
+      return new ClickhouseDbClient(config);
     default:
-      // mssql/oracle/mongodb/clickhouse adapters land in P6.
       throw new Error(`database engine not yet supported: ${engine}`);
   }
 }
