@@ -14,14 +14,20 @@ function Chip({
   name,
   active,
   onSelect,
+  testID,
 }: {
   name: string;
   active: boolean;
   onSelect: (name: string) => void;
+  testID?: string;
 }) {
   const handlePress = useCallback(() => onSelect(name), [name, onSelect]);
   return (
-    <Pressable style={[styles.chip, active && styles.chipActive]} onPress={handlePress}>
+    <Pressable
+      style={[styles.chip, active && styles.chipActive]}
+      onPress={handlePress}
+      testID={testID}
+    >
       <Text style={[styles.chipText, active && styles.chipTextActive]}>{name}</Text>
     </Pressable>
   );
@@ -233,13 +239,25 @@ export function DatabaseSchemaDiff({
         <Text style={styles.label}>From</Text>
         <View style={styles.chipRow}>
           {leftChoices.map((n) => (
-            <Chip key={`l-${n}`} name={n} active={leftValue === n} onSelect={onLeft} />
+            <Chip
+              key={`l-${n}`}
+              name={n}
+              active={leftValue === n}
+              onSelect={onLeft}
+              testID={`compare-from-${n}`}
+            />
           ))}
         </View>
         <Text style={styles.label}>To</Text>
         <View style={styles.chipRow}>
           {rightChoices.map((n) => (
-            <Chip key={`r-${n}`} name={n} active={rightValue === n} onSelect={onRight} />
+            <Chip
+              key={`r-${n}`}
+              name={n}
+              active={rightValue === n}
+              onSelect={onRight}
+              testID={`compare-to-${n}`}
+            />
           ))}
         </View>
 
@@ -262,7 +280,13 @@ export function DatabaseSchemaDiff({
             <Text style={styles.label}>Compare data (pick a table)</Text>
             <View style={styles.chipRow}>
               {commonTables.map((t) => (
-                <Chip key={`t-${t}`} name={t} active={table === t} onSelect={runDataDiff} />
+                <Chip
+                  key={`t-${t}`}
+                  name={t}
+                  active={table === t}
+                  onSelect={runDataDiff}
+                  testID={`compare-table-${t}`}
+                />
               ))}
             </View>
             {dataError ? <Text style={styles.dataError}>{dataError}</Text> : null}
