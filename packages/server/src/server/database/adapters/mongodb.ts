@@ -2,6 +2,7 @@ import { MongoClient, type Db } from "mongodb";
 import type { DbClient, DbConnectionConfig, RunQueryOptions } from "../db-client.js";
 import type {
   DbColumn,
+  DbForeignKey,
   DbObject,
   DbSchema,
   QueryResult,
@@ -101,6 +102,10 @@ export class MongoDbClient implements DbClient {
       isForeignKey: false,
       defaultValue: null,
     }));
+  }
+
+  async listForeignKeys(): Promise<DbForeignKey[]> {
+    return []; // MongoDB has no foreign keys.
   }
 
   async runQuery(sql: string, options?: RunQueryOptions): Promise<QueryResult> {

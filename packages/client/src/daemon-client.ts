@@ -668,6 +668,10 @@ type DatabaseExecPayload = Extract<
   SessionOutboundMessage,
   { type: "database/exec/response" }
 >["payload"];
+type DatabaseForeignKeysPayload = Extract<
+  SessionOutboundMessage,
+  { type: "database/foreign-keys/response" }
+>["payload"];
 type DatabaseExplainPayload = Extract<
   SessionOutboundMessage,
   { type: "database/explain/response" }
@@ -6064,6 +6068,18 @@ export class DaemonClient {
         ...(options.params ? { params: options.params } : {}),
       },
       responseType: "database/exec/response",
+    });
+  }
+
+  async databaseForeignKeys(options: {
+    requestId?: string;
+    id: string;
+    schema: string;
+  }): Promise<DatabaseForeignKeysPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "database/foreign-keys", id: options.id, schema: options.schema },
+      responseType: "database/foreign-keys/response",
     });
   }
 

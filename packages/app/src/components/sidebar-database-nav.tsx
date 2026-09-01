@@ -5,6 +5,7 @@ import {
   ChevronLeft,
   Database as DatabaseIcon,
   Gauge,
+  GitCompare,
   Table,
   Eye,
   Terminal,
@@ -23,6 +24,7 @@ import type { Theme } from "@/styles/theme";
 const ThemedChevronLeft = withUnistyles(ChevronLeft);
 const ThemedDatabase = withUnistyles(DatabaseIcon);
 const ThemedGauge = withUnistyles(Gauge);
+const ThemedGitCompare = withUnistyles(GitCompare);
 const ThemedTable = withUnistyles(Table);
 const ThemedEye = withUnistyles(Eye);
 const ThemedTerminal = withUnistyles(Terminal);
@@ -90,9 +92,11 @@ export function SidebarDatabaseNav({
   const selectedSchema = useDatabaseNavStore((s) => s.selectedSchema);
   const selectedObject = useDatabaseNavStore((s) => s.selectedObject);
   const showingConsole = useDatabaseNavStore((s) => s.showingConsole);
+  const showingDiff = useDatabaseNavStore((s) => s.showingDiff);
   const showingOverview = useDatabaseNavStore((s) => s.showingOverview);
   const selectObject = useDatabaseNavStore((s) => s.selectObject);
   const selectConsole = useDatabaseNavStore((s) => s.selectConsole);
+  const selectDiff = useDatabaseNavStore((s) => s.selectDiff);
   const selectOverview = useDatabaseNavStore((s) => s.selectOverview);
   const setSchema = useDatabaseNavStore((s) => s.setSchema);
   const ensureDatabase = useDatabaseNavStore((s) => s.ensureDatabase);
@@ -170,6 +174,10 @@ export function SidebarDatabaseNav({
     selectConsole(databaseId);
     if (isCompact) showMobileAgent();
   }, [databaseId, selectConsole, isCompact, showMobileAgent]);
+  const handleSelectDiff = useCallback(() => {
+    selectDiff(databaseId);
+    if (isCompact) showMobileAgent();
+  }, [databaseId, selectDiff, isCompact, showMobileAgent]);
   const handleSelectSchema = useCallback((name: string) => setSchema(name), [setSchema]);
 
   const handleBackToPrevious = useCallback(() => {
@@ -244,6 +252,12 @@ export function SidebarDatabaseNav({
           <ThemedTerminal size={15} uniProps={mutedColor} />
           <Text style={[styles.rowLabel, showingConsole && styles.rowLabelActive]}>
             SQL console
+          </Text>
+        </Pressable>
+        <Pressable style={[styles.row, showingDiff && styles.rowActive]} onPress={handleSelectDiff}>
+          <ThemedGitCompare size={15} uniProps={mutedColor} />
+          <Text style={[styles.rowLabel, showingDiff && styles.rowLabelActive]}>
+            Compare schemas
           </Text>
         </Pressable>
         {grouped.map((group) => (

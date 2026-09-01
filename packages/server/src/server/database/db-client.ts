@@ -1,4 +1,11 @@
-import type { DbColumn, DbObject, DbSchema, QueryResult, WriteResult } from "./database-dto.js";
+import type {
+  DbColumn,
+  DbForeignKey,
+  DbObject,
+  DbSchema,
+  QueryResult,
+  WriteResult,
+} from "./database-dto.js";
 
 /** Opening a connection. The secret lives here only in-memory, in-daemon. */
 export interface DbConnectionConfig {
@@ -39,6 +46,8 @@ export interface DbClient {
   listSchemas(): Promise<DbSchema[]>;
   listObjects(schema: string): Promise<DbObject[]>;
   listColumns(schema: string, table: string): Promise<DbColumn[]>;
+  /** Foreign-key edges within a schema (empty for engines without FKs). */
+  listForeignKeys(schema: string): Promise<DbForeignKey[]>;
 
   /** Read-only query. Adapters must reject writes on this path. */
   runQuery(sql: string, options?: RunQueryOptions): Promise<QueryResult>;

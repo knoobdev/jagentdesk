@@ -3,6 +3,7 @@ import type { DbClient, DbConnectionConfig, RunQueryOptions } from "../db-client
 import { isWriteStatement } from "../db-client.js";
 import type {
   DbColumn,
+  DbForeignKey,
   DbObject,
   DbSchema,
   QueryResult,
@@ -98,6 +99,10 @@ export class ClickhouseDbClient implements DbClient {
       isForeignKey: false,
       defaultValue: r[3] ? String(r[3]) : null,
     }));
+  }
+
+  async listForeignKeys(): Promise<DbForeignKey[]> {
+    return []; // ClickHouse has no foreign keys.
   }
 
   async runQuery(sql: string, options?: RunQueryOptions): Promise<QueryResult> {

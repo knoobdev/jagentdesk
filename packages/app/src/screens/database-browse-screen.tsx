@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
-import { ScrollView, Text, View } from "react-native";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Pressable, ScrollView, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { DatabaseInfo } from "@jagentdesk/protocol/database/rpc-schemas";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { DatabaseDataEditor } from "@/components/database-data-editor";
+import { DatabaseStructureView } from "@/components/database-structure-view";
 import { DatabaseSqlConsole } from "@/components/database-sql-console";
+import { DatabaseSchemaDiff } from "@/components/database-schema-diff";
 import { DatabaseChatDock } from "@/components/database-chat-dock";
 import type { DatabaseComposerContext } from "@/components/database-draft-chat";
 import { useIsCompactFormFactor } from "@/constants/layout";
@@ -31,11 +33,13 @@ export function DatabaseBrowseScreen({
   const client = useHostRuntimeClient(serverId);
   const [database, setDatabase] = useState<DatabaseInfo | null>(null);
   const [schemaCount, setSchemaCount] = useState<number | null>(null);
+  const [objectView, setObjectView] = useState<"data" | "structure">("data");
   const insets = useSafeAreaInsets();
   const isCompact = useIsCompactFormFactor();
 
   const selectedObject = useDatabaseNavStore((s) => s.selectedObject);
   const showingConsole = useDatabaseNavStore((s) => s.showingConsole);
+  const showingDiff = useDatabaseNavStore((s) => s.showingDiff);
   const setLastDatabase = useDatabaseNavStore((s) => s.setLastDatabase);
   const bumpRefresh = useDatabaseViewStore((s) => s.bumpRefresh);
   const resetViewForDatabase = useDatabaseViewStore((s) => s.resetForDatabase);
@@ -106,19 +110,57 @@ export function DatabaseBrowseScreen({
     () => ({ engine, schema: selectedObject?.schema, table: selectedObject?.name }),
     [engine, selectedObject],
   );
+  const showDataView = useCallback(() => setObjectView("data"), []);
+  const showStructureView = useCallback(() => setObjectView("structure"), []);
 
   let content;
   if (showingConsole) {
     content = <DatabaseSqlConsole serverId={serverId} databaseId={databaseId} engine={engine} />;
+  } else if (showingDiff) {
+    content = <DatabaseSchemaDiff serverId={serverId} databaseId={databaseId} />;
   } else if (selectedObject) {
+    const inner =
+      objectView === "data" ? (
+        <DatabaseDataEditor
+          serverId={serverId}
+          databaseId={databaseId}
+          engine={engine}
+          schema={selectedObject.schema}
+          table={selectedObject.name}
+        />
+      ) : (
+        <DatabaseStructureView
+          serverId={serverId}
+          databaseId={databaseId}
+          engine={engine}
+          schema={selectedObject.schema}
+          table={selectedObject.name}
+        />
+      );
     content = (
-      <DatabaseDataEditor
-        serverId={serverId}
-        databaseId={databaseId}
-        engine={engine}
-        schema={selectedObject.schema}
-        table={selectedObject.name}
-      />
+      <View style={styles.leftColumn}>
+        <View style={styles.viewSwitch}>
+          <Pressable
+            style={[styles.switchBtn, objectView === "data" && styles.switchBtnActive]}
+            onPress={showDataView}
+          >
+            <Text style={[styles.switchText, objectView === "data" && styles.switchTextActive]}>
+              Data
+            </Text>
+          </Pressable>
+          <Pressable
+            style={[styles.switchBtn, objectView === "structure" && styles.switchBtnActive]}
+            onPress={showStructureView}
+          >
+            <Text
+              style={[styles.switchText, objectView === "structure" && styles.switchTextActive]}
+            >
+              Structure
+            </Text>
+          </Pressable>
+        </View>
+        {inner}
+      </View>
     );
   } else {
     content = (
@@ -179,6 +221,29 @@ const styles = StyleSheet.create((theme: Theme) => ({
     flex: 1,
     minWidth: 0,
     minHeight: 0,
+  },
+  viewSwitch: {
+    flexDirection: "row",
+    gap: theme.spacing[1],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[1.5],
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+  },
+  switchBtn: {
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[1],
+    borderRadius: theme.borderRadius.md,
+  },
+  switchBtnActive: {
+    backgroundColor: theme.colors.surface2,
+  },
+  switchText: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+  },
+  switchTextActive: {
+    color: theme.colors.foreground,
   },
   overview: {
     flex: 1,

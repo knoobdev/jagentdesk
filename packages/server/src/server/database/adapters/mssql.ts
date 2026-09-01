@@ -3,6 +3,7 @@ import type { DbClient, DbConnectionConfig, RunQueryOptions } from "../db-client
 import { isWriteStatement } from "../db-client.js";
 import type {
   DbColumn,
+  DbForeignKey,
   DbObject,
   DbSchema,
   QueryResult,
@@ -135,6 +136,29 @@ export class MssqlDbClient implements DbClient {
       isPrimaryKey: Number(c.is_primary_key) === 1,
       isForeignKey: Number(c.is_foreign_key) === 1,
       defaultValue: c.default_value == null ? null : String(c.default_value),
+    }));
+  }
+
+  async listForeignKeys(schema: string): Promise<DbForeignKey[]> {
+    const res = await this.require()
+      .request()
+      .input("schema", schema)
+      .query<{ t: string; c: string; rs: string; rt: string; rc: string }>(
+        `select tp.name as t, cp.name as c,
+                schema_name(tr.schema_id) as rs, tr.name as rt, cr.name as rc
+         from sys.foreign_key_columns fkc
+         join sys.tables tp on tp.object_id = fkc.parent_object_id
+         join sys.columns cp on cp.object_id = fkc.parent_object_id and cp.column_id = fkc.parent_column_id
+         join sys.tables tr on tr.object_id = fkc.referenced_object_id
+         join sys.columns cr on cr.object_id = fkc.referenced_object_id and cr.column_id = fkc.referenced_column_id
+         where schema_name(tp.schema_id) = @schema`,
+      );
+    return res.recordset.map((r) => ({
+      table: String(r.t),
+      column: String(r.c),
+      refSchema: String(r.rs),
+      refTable: String(r.rt),
+      refColumn: String(r.rc),
     }));
   }
 

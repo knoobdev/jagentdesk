@@ -108,6 +108,12 @@ export class DatabaseSession {
     }));
   }
 
+  async handleForeignKeys(msg: Req<"database/foreign-keys">): Promise<void> {
+    await this.run(msg.requestId, "database/foreign-keys/response", async () => ({
+      foreignKeys: await this.requireClient(msg.id).listForeignKeys(msg.schema),
+    }));
+  }
+
   async handleExplain(msg: Req<"database/explain">): Promise<void> {
     await this.run(msg.requestId, "database/explain/response", async () => ({
       result: await this.requireClient(msg.id).explain(msg.sql),
@@ -171,6 +177,8 @@ function emptyBody(type: string): Record<string, unknown> {
       return { objects: [] };
     case "database/columns/response":
       return { columns: [] };
+    case "database/foreign-keys/response":
+      return { foreignKeys: [] };
     case "database/query/response":
     case "database/exec/response":
     case "database/explain/response":

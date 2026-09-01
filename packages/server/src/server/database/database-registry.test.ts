@@ -70,6 +70,20 @@ describe("DatabaseRegistry (SQLite)", () => {
     expect(page3.truncated).toBe(false);
   });
 
+  it("introspects foreign keys (the relationships / ER edges)", async () => {
+    const reg = new DatabaseRegistry({ jagentdeskHome: home });
+    const info = await reg.addConnection({ engine: "sqlite", config: { file: dbFile } });
+    await reg.connect(info.id);
+    const fks = await reg.getClient(info.id)!.listForeignKeys("main");
+    expect(fks).toContainEqual({
+      table: "orders",
+      column: "customer_id",
+      refSchema: "main",
+      refTable: "customers",
+      refColumn: "id",
+    });
+  });
+
   it("rejects a write on the read-only query path", async () => {
     const reg = new DatabaseRegistry({ jagentdeskHome: home });
     const info = await reg.addConnection({ engine: "sqlite", config: { file: dbFile } });

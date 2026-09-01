@@ -52,6 +52,14 @@ export const DbColumnSchema = z.object({
   isForeignKey: z.boolean(),
   defaultValue: z.string().nullable().optional(),
 });
+export const DbForeignKeySchema = z.object({
+  table: z.string(),
+  column: z.string(),
+  refSchema: z.string(),
+  refTable: z.string(),
+  refColumn: z.string(),
+});
+export type DbForeignKey = z.infer<typeof DbForeignKeySchema>;
 export const ResultColumnSchema = z.object({ name: z.string(), dataType: z.string().optional() });
 const CellSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
 export const QueryResultSchema = z.object({
@@ -156,6 +164,14 @@ export const DatabaseExecRequestSchema = req("database/exec", {
 export const DatabaseExecResponseSchema = resp("database/exec/response", {
   result: WriteResultSchema.nullable(),
 });
+// ── foreign keys (relationships / ER) ──
+export const DatabaseForeignKeysRequestSchema = req("database/foreign-keys", {
+  id: z.string(),
+  schema: z.string(),
+});
+export const DatabaseForeignKeysResponseSchema = resp("database/foreign-keys/response", {
+  foreignKeys: z.array(DbForeignKeySchema),
+});
 // ── explain (query plan) ──
 export const DatabaseExplainRequestSchema = req("database/explain", {
   id: z.string(),
@@ -181,6 +197,7 @@ export const DatabaseRequestSchemas = [
   DatabaseSchemasRequestSchema,
   DatabaseObjectsRequestSchema,
   DatabaseColumnsRequestSchema,
+  DatabaseForeignKeysRequestSchema,
   DatabaseQueryRequestSchema,
   DatabaseExecRequestSchema,
   DatabaseExplainRequestSchema,
@@ -198,6 +215,7 @@ export const DatabaseResponseSchemas = [
   DatabaseSchemasResponseSchema,
   DatabaseObjectsResponseSchema,
   DatabaseColumnsResponseSchema,
+  DatabaseForeignKeysResponseSchema,
   DatabaseQueryResponseSchema,
   DatabaseExecResponseSchema,
   DatabaseExplainResponseSchema,

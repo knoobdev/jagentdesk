@@ -3,6 +3,7 @@ import type { DbClient, DbConnectionConfig, RunQueryOptions } from "../db-client
 import { isWriteStatement } from "../db-client.js";
 import type {
   DbColumn,
+  DbForeignKey,
   DbObject,
   DbSchema,
   QueryResult,
@@ -84,6 +85,30 @@ export class SqliteDbClient implements DbClient {
       isForeignKey: fkCols.has(c.name),
       defaultValue: c.dflt_value == null ? null : String(c.dflt_value),
     }));
+  }
+
+  async listForeignKeys(_schema: string): Promise<DbForeignKey[]> {
+    const tables = this.require()
+      .prepare("select name from sqlite_master where type = 'table' and name not like 'sqlite_%'")
+      .all() as Array<{ name: string }>;
+    const out: DbForeignKey[] = [];
+    for (const t of tables) {
+      const fks = this.require().pragma(`foreign_key_list(${quoteIdent(t.name)})`) as Array<{
+        table: string;
+        from: string;
+        to: string;
+      }>;
+      for (const fk of fks) {
+        out.push({
+          table: t.name,
+          column: fk.from,
+          refSchema: "main",
+          refTable: fk.table,
+          refColumn: fk.to,
+        });
+      }
+    }
+    return out;
   }
 
   async runQuery(sql: string, options?: RunQueryOptions): Promise<QueryResult> {

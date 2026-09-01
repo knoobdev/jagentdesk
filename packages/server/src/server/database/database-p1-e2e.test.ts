@@ -193,6 +193,16 @@ describe.runIf(E2E)("PostgreSQL adapter e2e (throwaway docker)", () => {
       expect(page.rows).toHaveLength(2);
       expect(page.truncated).toBe(true);
 
+      const fks = await client.listForeignKeys("public");
+      expect(fks).toContainEqual(
+        expect.objectContaining({
+          table: "orders",
+          column: "customer_id",
+          refTable: "customers",
+          refColumn: "id",
+        }),
+      );
+
       await expect(client.runQuery("delete from orders")).rejects.toThrow(/read-only/i);
     } finally {
       await client.close();

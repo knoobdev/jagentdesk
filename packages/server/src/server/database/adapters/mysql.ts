@@ -3,6 +3,7 @@ import type { DbClient, DbConnectionConfig, RunQueryOptions } from "../db-client
 import { isWriteStatement } from "../db-client.js";
 import type {
   DbColumn,
+  DbForeignKey,
   DbObject,
   DbSchema,
   QueryResult,
@@ -99,6 +100,23 @@ export class MysqlDbClient implements DbClient {
       isPrimaryKey: Boolean(Number(c.is_primary_key)),
       isForeignKey: Boolean(Number(c.is_foreign_key)),
       defaultValue: c.default_value == null ? null : String(c.default_value),
+    }));
+  }
+
+  async listForeignKeys(schema: string): Promise<DbForeignKey[]> {
+    const [rows] = await this.require().query<mysql.RowDataPacket[]>(
+      `select table_name as t, column_name as c,
+              referenced_table_schema as rs, referenced_table_name as rt, referenced_column_name as rc
+       from information_schema.key_column_usage
+       where table_schema = ? and referenced_table_name is not null`,
+      [schema],
+    );
+    return rows.map((r) => ({
+      table: String(r.t),
+      column: String(r.c),
+      refSchema: String(r.rs),
+      refTable: String(r.rt),
+      refColumn: String(r.rc),
     }));
   }
 

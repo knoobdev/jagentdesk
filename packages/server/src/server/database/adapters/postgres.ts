@@ -3,6 +3,7 @@ import type { DbClient, DbConnectionConfig, RunQueryOptions } from "../db-client
 import { isWriteStatement } from "../db-client.js";
 import type {
   DbColumn,
+  DbForeignKey,
   DbObject,
   DbSchema,
   QueryResult,
@@ -136,6 +137,34 @@ export class PostgresDbClient implements DbClient {
       isPrimaryKey: c.is_primary_key,
       isForeignKey: c.is_foreign_key,
       defaultValue: c.default_value ?? null,
+    }));
+  }
+
+  async listForeignKeys(schema: string): Promise<DbForeignKey[]> {
+    const res = await this.require().query<{
+      table: string;
+      column: string;
+      ref_schema: string;
+      ref_table: string;
+      ref_column: string;
+    }>(
+      `select tc.table_name as table, kcu.column_name as column,
+              ccu.table_schema as ref_schema, ccu.table_name as ref_table,
+              ccu.column_name as ref_column
+       from information_schema.table_constraints tc
+       join information_schema.key_column_usage kcu
+         on kcu.constraint_name = tc.constraint_name and kcu.table_schema = tc.table_schema
+       join information_schema.constraint_column_usage ccu
+         on ccu.constraint_name = tc.constraint_name
+       where tc.constraint_type = 'FOREIGN KEY' and tc.table_schema = $1`,
+      [schema],
+    );
+    return res.rows.map((r) => ({
+      table: r.table,
+      column: r.column,
+      refSchema: r.ref_schema,
+      refTable: r.ref_table,
+      refColumn: r.ref_column,
     }));
   }
 

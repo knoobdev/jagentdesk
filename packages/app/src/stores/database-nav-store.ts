@@ -20,12 +20,15 @@ interface DatabaseNavState {
   selectedObject: SelectedDbObject | null;
   /** SQL console view active (mutually exclusive with object/overview). */
   showingConsole: boolean;
+  /** Schema-compare view active. */
+  showingDiff: boolean;
   /** Connection overview, shown by default when a database opens. */
   showingOverview: boolean;
   /** The last database the user had open, so the sidebar can jump straight back. */
   lastDatabase: { serverId: string; databaseId: string } | null;
   selectObject: (databaseId: string, object: SelectedDbObject) => void;
   selectConsole: (databaseId: string) => void;
+  selectDiff: (databaseId: string) => void;
   selectOverview: (databaseId: string) => void;
   setSchema: (schema: string | null) => void;
   ensureDatabase: (databaseId: string) => void;
@@ -44,6 +47,7 @@ export const useDatabaseNavStore = create<DatabaseNavState>((set, get) => ({
   selectedSchema: null,
   selectedObject: null,
   showingConsole: false,
+  showingDiff: false,
   showingOverview: false,
   lastDatabase: null,
   setLastDatabase: (serverId, databaseId) => set({ lastDatabase: { serverId, databaseId } }),
@@ -55,12 +59,33 @@ export const useDatabaseNavStore = create<DatabaseNavState>((set, get) => ({
       selectedObject: object,
       selectedSchema: object.schema,
       showingConsole: false,
+      showingDiff: false,
       showingOverview: false,
     }),
   selectConsole: (databaseId) =>
-    set({ databaseId, selectedObject: null, showingConsole: true, showingOverview: false }),
+    set({
+      databaseId,
+      selectedObject: null,
+      showingConsole: true,
+      showingDiff: false,
+      showingOverview: false,
+    }),
+  selectDiff: (databaseId) =>
+    set({
+      databaseId,
+      selectedObject: null,
+      showingConsole: false,
+      showingDiff: true,
+      showingOverview: false,
+    }),
   selectOverview: (databaseId) =>
-    set({ databaseId, selectedObject: null, showingConsole: false, showingOverview: true }),
+    set({
+      databaseId,
+      selectedObject: null,
+      showingConsole: false,
+      showingDiff: false,
+      showingOverview: true,
+    }),
   setSchema: (selectedSchema) => set({ selectedSchema }),
   ensureDatabase: (databaseId) => {
     if (get().databaseId !== databaseId) {
@@ -70,6 +95,7 @@ export const useDatabaseNavStore = create<DatabaseNavState>((set, get) => ({
         selectedObject: null,
         selectedSchema: null,
         showingConsole: false,
+        showingDiff: false,
         showingOverview: true,
       });
     }

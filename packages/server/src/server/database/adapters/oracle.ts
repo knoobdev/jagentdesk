@@ -3,6 +3,7 @@ import type { DbClient, DbConnectionConfig, RunQueryOptions } from "../db-client
 import { isWriteStatement } from "../db-client.js";
 import type {
   DbColumn,
+  DbForeignKey,
   DbObject,
   DbSchema,
   QueryResult,
@@ -141,6 +142,26 @@ export class OracleDbClient implements DbClient {
       isPrimaryKey: Number(r[4]) > 0,
       isForeignKey: Number(r[5]) > 0,
       defaultValue: r[3] == null ? null : String(r[3]).trim(),
+    }));
+  }
+
+  async listForeignKeys(schema: string): Promise<DbForeignKey[]> {
+    const res = await this.select(
+      `select ac.table_name as t, acc.column_name as c,
+              r.owner as rs, r.table_name as rt, rcc.column_name as rc
+       from all_constraints ac
+       join all_cons_columns acc on acc.constraint_name = ac.constraint_name and acc.owner = ac.owner
+       join all_constraints r on r.constraint_name = ac.r_constraint_name and r.owner = ac.r_owner
+       join all_cons_columns rcc on rcc.constraint_name = r.constraint_name and rcc.owner = r.owner and rcc.position = acc.position
+       where ac.constraint_type = 'R' and ac.owner = :owner`,
+      { owner: schema },
+    );
+    return res.rows.map((r) => ({
+      table: String(r[0]),
+      column: String(r[1]),
+      refSchema: String(r[2]),
+      refTable: String(r[3]),
+      refColumn: String(r[4]),
     }));
   }
 

@@ -62,6 +62,15 @@ export interface ResultColumn {
   dataType?: string;
 }
 
+/** A foreign-key edge — the adjacency the relationships/ER view is built from. */
+export interface DbForeignKey {
+  table: string;
+  column: string;
+  refSchema: string;
+  refTable: string;
+  refColumn: string;
+}
+
 /** A page of query results. Cells are JSON-safe scalars (or null). */
 export interface QueryResult {
   columns: ResultColumn[];
