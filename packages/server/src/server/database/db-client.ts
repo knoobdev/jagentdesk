@@ -47,6 +47,16 @@ export interface DbClient {
     sql: string,
     params?: ReadonlyArray<string | number | boolean | null>,
   ): Promise<WriteResult>;
+
+  /**
+   * Explicit transaction control for the data editor's Manual mode. All three
+   * run on this connection's single session, so a begin/exec/commit sequence of
+   * separate RPCs stays in the same transaction. In Auto mode the editor never
+   * calls these — each execWrite autocommits.
+   */
+  begin(): Promise<void>;
+  commit(): Promise<void>;
+  rollback(): Promise<void>;
 }
 
 /** A statement that mutates data/schema — rejected on the read-only path. */

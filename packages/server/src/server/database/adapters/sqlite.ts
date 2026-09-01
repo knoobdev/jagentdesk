@@ -116,6 +116,18 @@ export class SqliteDbClient implements DbClient {
       .run(...(params ?? []));
     return { affected: result.changes, elapsedMs: nowMs() - started };
   }
+
+  async begin(): Promise<void> {
+    if (!this.require().inTransaction) this.require().prepare("BEGIN").run();
+  }
+
+  async commit(): Promise<void> {
+    if (this.require().inTransaction) this.require().prepare("COMMIT").run();
+  }
+
+  async rollback(): Promise<void> {
+    if (this.require().inTransaction) this.require().prepare("ROLLBACK").run();
+  }
 }
 
 function quoteIdent(name: string): string {

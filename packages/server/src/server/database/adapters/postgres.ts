@@ -167,6 +167,18 @@ export class PostgresDbClient implements DbClient {
     const res = await this.require().query(sql, params ? [...params] : []);
     return { affected: res.rowCount ?? 0, elapsedMs: nowMs() - started };
   }
+
+  async begin(): Promise<void> {
+    await this.require().query("BEGIN");
+  }
+
+  async commit(): Promise<void> {
+    await this.require().query("COMMIT");
+  }
+
+  async rollback(): Promise<void> {
+    await this.require().query("ROLLBACK");
+  }
 }
 
 /** Wrap an arbitrary SELECT so paging works without parsing the statement. */

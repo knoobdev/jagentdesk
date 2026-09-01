@@ -668,6 +668,18 @@ type DatabaseExecPayload = Extract<
   SessionOutboundMessage,
   { type: "database/exec/response" }
 >["payload"];
+type DatabaseBeginPayload = Extract<
+  SessionOutboundMessage,
+  { type: "database/begin/response" }
+>["payload"];
+type DatabaseCommitPayload = Extract<
+  SessionOutboundMessage,
+  { type: "database/commit/response" }
+>["payload"];
+type DatabaseRollbackPayload = Extract<
+  SessionOutboundMessage,
+  { type: "database/rollback/response" }
+>["payload"];
 type ClusterHelmListPayload = Extract<
   SessionOutboundMessage,
   { type: "cluster/helm/list/response" }
@@ -6048,6 +6060,36 @@ export class DaemonClient {
         ...(options.params ? { params: options.params } : {}),
       },
       responseType: "database/exec/response",
+    });
+  }
+
+  async databaseBegin(options: { requestId?: string; id: string }): Promise<DatabaseBeginPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "database/begin", id: options.id },
+      responseType: "database/begin/response",
+    });
+  }
+
+  async databaseCommit(options: {
+    requestId?: string;
+    id: string;
+  }): Promise<DatabaseCommitPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "database/commit", id: options.id },
+      responseType: "database/commit/response",
+    });
+  }
+
+  async databaseRollback(options: {
+    requestId?: string;
+    id: string;
+  }): Promise<DatabaseRollbackPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "database/rollback", id: options.id },
+      responseType: "database/rollback/response",
     });
   }
 

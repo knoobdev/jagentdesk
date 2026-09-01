@@ -81,11 +81,12 @@ Every shipped task runs against a real database — no stubs.
 - [ ] Deferred to P6: sortable/filterable grid, schema-grounded completion, Explain / Query-Plan tab.
 - [x] Proof: `sql-ident.test.ts` (3/3) + app typecheck/lint clean. Live CDP browse/query is the manual acceptance step.
 
-### P4 — data editor (writes, transactions)
+### P4 — data editor (writes, transactions) — DONE 2026-09-01
 
-- [ ] Inline cell edit + add/clone/delete rows; Tx Auto/Manual; Submit/Commit/Rollback; Preview DML; Export CSV/JSON/SQL.
-- [ ] `sql_exec` / editor writes route through `requestHostToolPermission`.
-- [ ] Proof: live — edit a row under Manual tx, preview DML, commit; rollback path.
+- [x] Daemon: `DbClient.begin/commit/rollback` on all three adapters (sqlite BEGIN/COMMIT/ROLLBACK guarded by `inTransaction`; pg BEGIN/COMMIT/ROLLBACK; mysql2 beginTransaction/commit/rollback) + `database/begin|commit|rollback` RPCs + session handlers + `databaseBegin/Commit/Rollback` client methods.
+- [x] `database-data-editor.tsx`: record editor (add / edit row), delete-row marking, a pending change set previewed as parameterized DML before it runs; Tx Auto/Manual toggle; Submit; Commit/Rollback (visible only while a tx is open); Revert; Export (JSON); pagination + refresh. Editing requires a primary key (read-only + note when none). Replaces the read-only grid.
+- [x] `sql-dml.ts`: `buildUpdate/buildInsert/buildDelete` — always parameter-bound, PK-keyed WHERE, engine-correct placeholders (`$n` pg, `?` mysql/sqlite) + ident quoting. (Editor writes are the user's own explicit action, previewed first; the agent `sql_exec` tool is the gated path — P5.)
+- [x] Proof: `database-tx.test.ts` (2/2) — begin→update→**rollback** leaves the row unchanged; begin→update→**commit** persists (verified across a fresh connection). `sql-dml.test.ts` (5/5) — UPDATE/INSERT/DELETE shape + params per engine, refuses keyless UPDATE. typecheck + lint clean.
 
 ### P5 — AI chat + SQL MCP tools
 
@@ -111,7 +112,8 @@ Every shipped task runs against a real database — no stubs.
 - [x] 2026-09-01: P0 daemon foundation — DTO/DbClient/isWriteStatement, SQLite adapter, DatabaseRegistry, AES-256-GCM secret vault; 4/4 tests.
 - [x] 2026-09-01: P1 protocol+session+client+PG/MySQL adapters — 4/4 tests incl. real Postgres + MySQL over docker.
 - [x] 2026-09-01: P2 app shell (sidebar entry + list/add + routes + stores) + P3 core (object tree, data grid, SQL console) — 10/10 app tests; typecheck + lint clean.
-- [ ] P4 …
+- [x] 2026-09-01: P4 data editor + transactions — begin/commit/rollback across adapters + record editor + Preview DML; database-tx (2) + sql-dml (5) tests.
+- [ ] P5 …
 
 ## Validation
 

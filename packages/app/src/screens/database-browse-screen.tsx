@@ -4,7 +4,7 @@ import { StyleSheet } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { DatabaseInfo } from "@jagentdesk/protocol/database/rpc-schemas";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
-import { DatabaseDataGrid } from "@/components/database-data-grid";
+import { DatabaseDataEditor } from "@/components/database-data-editor";
 import { DatabaseSqlConsole } from "@/components/database-sql-console";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useDatabaseNavStore } from "@/stores/database-nav-store";
@@ -94,7 +94,7 @@ export function DatabaseBrowseScreen({
     content = <DatabaseSqlConsole serverId={serverId} databaseId={databaseId} engine={engine} />;
   } else if (selectedObject) {
     content = (
-      <DatabaseDataGrid
+      <DatabaseDataEditor
         serverId={serverId}
         databaseId={databaseId}
         engine={engine}

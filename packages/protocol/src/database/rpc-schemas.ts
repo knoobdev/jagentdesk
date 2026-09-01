@@ -156,6 +156,13 @@ export const DatabaseExecRequestSchema = req("database/exec", {
 export const DatabaseExecResponseSchema = resp("database/exec/response", {
   result: WriteResultSchema.nullable(),
 });
+// ── transactions (data editor Manual mode) ──
+export const DatabaseBeginRequestSchema = req("database/begin", { id: z.string() });
+export const DatabaseBeginResponseSchema = resp("database/begin/response", {});
+export const DatabaseCommitRequestSchema = req("database/commit", { id: z.string() });
+export const DatabaseCommitResponseSchema = resp("database/commit/response", {});
+export const DatabaseRollbackRequestSchema = req("database/rollback", { id: z.string() });
+export const DatabaseRollbackResponseSchema = resp("database/rollback/response", {});
 
 export const DatabaseRequestSchemas = [
   DatabaseListRequestSchema,
@@ -168,6 +175,9 @@ export const DatabaseRequestSchemas = [
   DatabaseColumnsRequestSchema,
   DatabaseQueryRequestSchema,
   DatabaseExecRequestSchema,
+  DatabaseBeginRequestSchema,
+  DatabaseCommitRequestSchema,
+  DatabaseRollbackRequestSchema,
 ] as const;
 
 export const DatabaseResponseSchemas = [
@@ -181,4 +191,7 @@ export const DatabaseResponseSchemas = [
   DatabaseColumnsResponseSchema,
   DatabaseQueryResponseSchema,
   DatabaseExecResponseSchema,
+  DatabaseBeginResponseSchema,
+  DatabaseCommitResponseSchema,
+  DatabaseRollbackResponseSchema,
 ] as const;

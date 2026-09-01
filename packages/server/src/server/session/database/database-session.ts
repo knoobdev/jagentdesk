@@ -108,6 +108,27 @@ export class DatabaseSession {
     }));
   }
 
+  async handleBegin(msg: Req<"database/begin">): Promise<void> {
+    await this.run(msg.requestId, "database/begin/response", async () => {
+      await this.requireClient(msg.id).begin();
+      return {};
+    });
+  }
+
+  async handleCommit(msg: Req<"database/commit">): Promise<void> {
+    await this.run(msg.requestId, "database/commit/response", async () => {
+      await this.requireClient(msg.id).commit();
+      return {};
+    });
+  }
+
+  async handleRollback(msg: Req<"database/rollback">): Promise<void> {
+    await this.run(msg.requestId, "database/rollback/response", async () => {
+      await this.requireClient(msg.id).rollback();
+      return {};
+    });
+  }
+
   private async run(
     requestId: string,
     type: SessionOutboundMessage["type"],

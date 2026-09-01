@@ -139,6 +139,18 @@ export class MysqlDbClient implements DbClient {
     );
     return { affected: result.affectedRows ?? 0, elapsedMs: nowMs() - started };
   }
+
+  async begin(): Promise<void> {
+    await this.require().beginTransaction();
+  }
+
+  async commit(): Promise<void> {
+    await this.require().commit();
+  }
+
+  async rollback(): Promise<void> {
+    await this.require().rollback();
+  }
 }
 
 /** Wrap an arbitrary SELECT so paging works without parsing the statement. */
