@@ -87,6 +87,8 @@ export function DatabaseDataEditor({
   const [previewOpen, setPreviewOpen] = useState(false);
   const [sort, setSort] = useState<{ col: string; dir: "asc" | "desc" } | null>(null);
   const sortRef = useRef<{ col: string; dir: "asc" | "desc" } | null>(null);
+  const [filterText, setFilterText] = useState("");
+  const filterRef = useRef("");
 
   const pkCols = useMemo(() => columns.filter((c) => c.isPrimaryKey).map((c) => c.name), [columns]);
   const colNames = useMemo(() => columns.map((c) => c.name), [columns]);
@@ -116,9 +118,10 @@ export function DatabaseDataEditor({
         const orderBy = s
           ? ` order by ${quoteIdent(engine, s.col)} ${s.dir === "desc" ? "desc" : "asc"}`
           : "";
+        const w = filterRef.current.trim() ? ` where ${filterRef.current.trim()}` : "";
         const res = await client.databaseQuery({
           id: databaseId,
-          sql: `select * from ${qualifyTable(engine, schema, table)}${orderBy}`,
+          sql: `select * from ${qualifyTable(engine, schema, table)}${w}${orderBy}`,
           limit: PAGE_SIZE,
           offset: nextPage * PAGE_SIZE,
         });
@@ -141,6 +144,10 @@ export function DatabaseDataEditor({
     resetPending();
     setTxOpen(false);
     setStatus(null);
+    sortRef.current = null;
+    setSort(null);
+    filterRef.current = "";
+    setFilterText("");
     void load(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [databaseId, schema, table, listRefreshKey]);
@@ -159,6 +166,10 @@ export function DatabaseDataEditor({
     },
     [load],
   );
+  const applyFilter = useCallback(() => {
+    filterRef.current = filterText;
+    void load(0);
+  }, [filterText, load]);
 
   const colIndex = useCallback((name: string) => colNames.indexOf(name), [colNames]);
   const keysForRow = useCallback(
@@ -479,6 +490,19 @@ export function DatabaseDataEditor({
         </Pressable>
       </View>
 
+      <View style={styles.filterBar}>
+        <Text style={styles.filterLabel}>WHERE</Text>
+        <TextInput
+          style={styles.filterInput}
+          value={filterText}
+          onChangeText={setFilterText}
+          placeholder="filter condition, e.g. status = 'paid'"
+          onSubmitEditing={applyFilter}
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+      </View>
+
       {!canEdit && columns.length > 0 ? (
         <View style={styles.noteBar}>
           <Text style={styles.noteText}>
@@ -763,6 +787,30 @@ const styles = StyleSheet.create((theme: Theme) => ({
     paddingVertical: theme.spacing[2],
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,
+  },
+  filterBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[1.5],
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+  },
+  filterLabel: {
+    fontSize: 10,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foregroundExtraMuted,
+    letterSpacing: 0.5,
+  },
+  filterInput: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: theme.fontSize.xs,
+    fontFamily: theme.fontFamily.mono,
+    color: theme.colors.foreground,
+    padding: 0,
   },
   title: {
     fontSize: theme.fontSize.sm,
