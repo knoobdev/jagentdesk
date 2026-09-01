@@ -2,6 +2,7 @@ import { router, usePathname } from "expo-router";
 import {
   Boxes,
   BarChart3,
+  Database,
   Sparkles,
   CalendarClock,
   FolderPlus,
@@ -15,7 +16,16 @@ import {
   X,
 } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import {
   Pressable,
   StyleSheet as RNStyleSheet,
@@ -62,8 +72,11 @@ import { useCloseAgentListGesture } from "@/mobile-panels/gestures";
 import { MobilePanelOverlay } from "@/mobile-panels/presentation";
 import { useIsMobilePanelPresented } from "@/mobile-panels/provider";
 import { useClusterNavStore } from "@/stores/cluster-nav-store";
+import { useDatabaseNavStore } from "@/stores/database-nav-store";
 import {
   buildClustersRoute,
+  buildDatabasesRoute,
+  buildDatabaseBrowseRoute,
   buildSkillsRoute,
   buildInsightsRoute,
   buildClusterWorkloadsRoute,
@@ -80,6 +93,31 @@ import { SidebarAgentListSkeleton } from "./sidebar-agent-list-skeleton";
 import { SidebarCalloutSlot } from "./sidebar-callout-slot";
 import { SidebarWorkspaceList } from "./sidebar-workspace-list";
 import { SidebarClusterNav } from "./sidebar-cluster-nav";
+import { SidebarDatabaseNav } from "./sidebar-database-nav";
+
+/**
+ * Pick the sidebar body for a route: a resource nav when the route points at a
+ * cluster or database, otherwise the workspace list. Returned as an element and
+ * rendered directly (not passed as a prop) so the two sidebar variants avoid a
+ * nested ternary without tripping the prop-identity perf rules.
+ */
+function resolveSidebarNavBody(
+  clusterRoute: { serverId: string; clusterId: string } | null,
+  databaseRoute: { serverId: string; databaseId: string } | null,
+  fallback: ReactNode,
+): ReactNode {
+  if (clusterRoute) {
+    return (
+      <SidebarClusterNav serverId={clusterRoute.serverId} clusterId={clusterRoute.clusterId} />
+    );
+  }
+  if (databaseRoute) {
+    return (
+      <SidebarDatabaseNav serverId={databaseRoute.serverId} databaseId={databaseRoute.databaseId} />
+    );
+  }
+  return fallback;
+}
 import { useLocalDaemonServerId } from "@/hooks/use-is-local-daemon";
 import { usePairDeviceModalStore } from "@/stores/pair-device-modal-store";
 
@@ -103,6 +141,7 @@ interface SidebarSharedProps {
   handleHome: () => void;
   handleSettings: () => void;
   handleClusters: () => void;
+  handleDatabases: () => void;
   handleSkills: () => void;
   handleInsights: () => void;
   labels: SidebarLabels;
@@ -122,6 +161,7 @@ interface SidebarLabels {
   sessions: string;
   schedules: string;
   clusters: string;
+  databases: string;
   skills: string;
   insights: string;
   closeSidebar: string;
@@ -252,6 +292,28 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     }
   }, [clustersRoute, showMobileAgent]);
 
+  const lastDatabase = useDatabaseNavStore((s) => s.lastDatabase);
+  // Jump straight back to the database the user last had open (its browse view),
+  // falling back to the connection list when there is none.
+  const databasesRoute = useMemo(() => {
+    if (lastDatabase) {
+      return buildDatabaseBrowseRoute(lastDatabase.serverId, lastDatabase.databaseId);
+    }
+    if (firstServerId) return buildDatabasesRoute(firstServerId);
+    return null;
+  }, [lastDatabase, firstServerId]);
+
+  const handleDatabasesDesktop = useCallback(() => {
+    if (databasesRoute) router.push(databasesRoute);
+  }, [databasesRoute]);
+
+  const handleDatabasesMobile = useCallback(() => {
+    if (databasesRoute) {
+      showMobileAgent();
+      router.push(databasesRoute);
+    }
+  }, [databasesRoute, showMobileAgent]);
+
   const skillsRoute = useMemo(
     () => (firstServerId ? buildSkillsRoute(firstServerId) : null),
     [firstServerId],
@@ -301,6 +363,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       sessions: t("sidebar.sections.sessions"),
       schedules: t("sidebar.sections.schedules"),
       clusters: "Clusters",
+      databases: "Databases",
       skills: "Skills",
       insights: "Usage & Cost",
       closeSidebar: t("sidebar.actions.closeSidebar"),
@@ -323,6 +386,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     toggleProjectCollapsed,
     handleRefresh,
     handleClusters: handleClustersDesktop,
+    handleDatabases: handleDatabasesDesktop,
     handleSkills: handleSkillsDesktop,
     handleInsights: handleInsightsDesktop,
     labels,
@@ -335,6 +399,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
         <MobileSidebar
           {...sharedProps}
           handleClusters={handleClustersMobile}
+          handleDatabases={handleDatabasesMobile}
           handleSkills={handleSkillsMobile}
           handleInsights={handleInsightsMobile}
           insetsTop={insets.top}
@@ -357,6 +422,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       <DesktopSidebar
         {...sharedProps}
         handleClusters={handleClustersDesktop}
+        handleDatabases={handleDatabasesDesktop}
         handleSkills={handleSkillsDesktop}
         handleInsights={handleInsightsDesktop}
         insetsTop={insets.top}
@@ -706,6 +772,7 @@ function MobileSidebar({
   handleHome,
   handleSettings,
   handleClusters,
+  handleDatabases,
   handleSkills,
   handleInsights,
   labels,
@@ -722,6 +789,7 @@ function MobileSidebar({
   const isSessionsActive = pathname.includes("/sessions");
   const isSchedulesActive = pathname.includes("/schedules");
   const isClustersActive = pathname.includes("/clusters");
+  const isDatabasesActive = pathname.includes("/database");
   const isSkillsActive = pathname.includes("/skills");
   const isInsightsActive = pathname.includes("/insights");
   const clusterRouteMatch = pathname.match(/\/h\/([^/]+)\/cluster\/([^/]+)/);
@@ -729,6 +797,13 @@ function MobileSidebar({
     ? {
         serverId: decodeURIComponent(clusterRouteMatch[1]),
         clusterId: decodeURIComponent(clusterRouteMatch[2]),
+      }
+    : null;
+  const databaseRouteMatch = pathname.match(/\/h\/([^/]+)\/database\/([^/]+)/);
+  const databaseRoute = databaseRouteMatch
+    ? {
+        serverId: decodeURIComponent(databaseRouteMatch[1]),
+        databaseId: decodeURIComponent(databaseRouteMatch[2]),
       }
     : null;
   const { gesture: closeGesture, gestureRef: closeGestureRef } = useCloseAgentListGesture();
@@ -788,7 +863,7 @@ function MobileSidebar({
     >
       <View style={styles.sidebarContent} pointerEvents="auto">
         <WindowChromeSafeArea placement="below" />
-        {clusterRoute ? null : (
+        {clusterRoute || databaseRoute ? null : (
           <View style={styles.sidebarHeaderGroup}>
             <SidebarNewWorkspaceHeaderRow
               label={labels.newWorkspace}
@@ -819,6 +894,14 @@ function MobileSidebar({
               onPress={handleClusters}
               isActive={isClustersActive}
               testID="sidebar-clusters-nav"
+              variant="compact"
+            />
+            <SidebarHeaderRow
+              icon={Database}
+              label={labels.databases}
+              onPress={handleDatabases}
+              isActive={isDatabasesActive}
+              testID="sidebar-databases-nav"
               variant="compact"
             />
             <SidebarHeaderRow
@@ -860,11 +943,7 @@ function MobileSidebar({
           </Pressable>
         </WindowChromeSafeArea>
 
-        {clusterRoute ? (
-          <SidebarClusterNav serverId={clusterRoute.serverId} clusterId={clusterRoute.clusterId} />
-        ) : (
-          mobileWorkspaceBody
-        )}
+        {resolveSidebarNavBody(clusterRoute, databaseRoute, mobileWorkspaceBody)}
 
         <SidebarFooter
           theme={theme}
@@ -899,6 +978,7 @@ function DesktopSidebar({
   handleHome,
   handleSettings,
   handleClusters,
+  handleDatabases,
   handleSkills,
   handleInsights,
   labels,
@@ -915,6 +995,7 @@ function DesktopSidebar({
   const isSessionsActive = pathname.includes("/sessions");
   const isSchedulesActive = pathname.includes("/schedules");
   const isClustersActive = pathname.includes("/clusters");
+  const isDatabasesActive = pathname.includes("/database");
   const isSkillsActive = pathname.includes("/skills");
   const isInsightsActive = pathname.includes("/insights");
   const clusterRouteMatch = pathname.match(/\/h\/([^/]+)\/cluster\/([^/]+)/);
@@ -922,6 +1003,13 @@ function DesktopSidebar({
     ? {
         serverId: decodeURIComponent(clusterRouteMatch[1]),
         clusterId: decodeURIComponent(clusterRouteMatch[2]),
+      }
+    : null;
+  const databaseRouteMatch = pathname.match(/\/h\/([^/]+)\/database\/([^/]+)/);
+  const databaseRoute = databaseRouteMatch
+    ? {
+        serverId: decodeURIComponent(databaseRouteMatch[1]),
+        databaseId: decodeURIComponent(databaseRouteMatch[2]),
       }
     : null;
   const sidebarWidth = usePanelStore((state) => state.sidebarWidth);
@@ -1016,7 +1104,7 @@ function DesktopSidebar({
           ) : (
             <TitlebarDragRegion />
           )}
-          {clusterRoute ? null : (
+          {clusterRoute || databaseRoute ? null : (
             <View style={sidebarHeaderGroupStyle}>
               <SidebarNewWorkspaceHeaderRow
                 label={labels.newWorkspace}
@@ -1049,6 +1137,14 @@ function DesktopSidebar({
                 variant="compact"
               />
               <SidebarHeaderRow
+                icon={Database}
+                label={labels.databases}
+                onPress={handleDatabases}
+                isActive={isDatabasesActive}
+                testID="sidebar-databases-nav"
+                variant="compact"
+              />
+              <SidebarHeaderRow
                 icon={Sparkles}
                 label={labels.skills}
                 onPress={handleSkills}
@@ -1069,11 +1165,7 @@ function DesktopSidebar({
           )}
         </View>
 
-        {clusterRoute ? (
-          <SidebarClusterNav serverId={clusterRoute.serverId} clusterId={clusterRoute.clusterId} />
-        ) : (
-          workspaceListElement
-        )}
+        {resolveSidebarNavBody(clusterRoute, databaseRoute, workspaceListElement)}
 
         <SidebarCalloutSlot />
 

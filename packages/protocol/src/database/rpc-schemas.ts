@@ -63,6 +63,13 @@ export const QueryResultSchema = z.object({
 });
 export const WriteResultSchema = z.object({ affected: z.number(), elapsedMs: z.number() });
 
+export type DbSchema = z.infer<typeof DbSchemaSchema>;
+export type DbObject = z.infer<typeof DbObjectSchema>;
+export type DbColumn = z.infer<typeof DbColumnSchema>;
+export type ResultColumn = z.infer<typeof ResultColumnSchema>;
+export type QueryResult = z.infer<typeof QueryResultSchema>;
+export type WriteResult = z.infer<typeof WriteResultSchema>;
+
 /** The secret (password/dsn) travels once at add-time over the encrypted
  *  transport, then lives only encrypted inside the daemon. */
 export const DbConnectionConfigSchema = z.object({

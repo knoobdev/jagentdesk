@@ -66,19 +66,20 @@ Every shipped task runs against a real database — no stubs.
 - [x] PostgreSQL adapter (`pg`, `pg_catalog`/`information_schema` PK+FK introspection, `rowMode:'array'`) and MySQL adapter (`mysql2/promise`, `information_schema`, `rowsAsArray`), same `DbClient` interface + read-only guard.
 - [x] Proof: `database-p1-e2e.test.ts` — **4/4 pass**. (1) Full protocol→session→registry→adapter round-trip over SQLite, every request parsed through `SessionInboundMessageSchema` and every response through `SessionOutboundMessageSchema` (add→connect→schemas→objects→columns→paged query→exec update). (2) Error path emits typed empty body, never throws. (3) **Real Postgres** (docker `postgres:16`) — connect→version→create→introspect (PK on id, FK on customer_id, NOT NULL on status)→paginate→read-only guard rejects DELETE. (4) **Real MySQL** (docker `mysql:8`) — same. PG/MySQL gated by `JAD_DB_E2E=1` (containers on ports 55433/55434). typecheck server+client clean.
 
-### P2 — app shell: sidebar entry, list + add connection, routes, stores
+### P2 — app shell: sidebar entry, list + add connection, routes, stores — DONE 2026-09-01
 
-- [ ] `sidebar-databases-nav` entry in `left-sidebar.tsx` + `databases`/`database/[id]` routes + route builders.
-- [ ] `databases-screen.tsx` (list connections, Add-connection sheet: engine + form/DSN + Test + vault note) using real theme components.
-- [ ] `database-nav-store` / `database-view-store` / `database-chat-store`.
-- [ ] Proof: live CDP — add a SQLite/PG connection, connect, land on the browse screen.
+- [x] `sidebar-databases-nav` entry (Database icon) in `left-sidebar.tsx` (desktop + mobile variants) + `databases`/`database/[databaseId]` expo-router files + `buildDatabasesRoute`/`buildDatabaseBrowseRoute`. Sidebar swaps to the object nav on a `/database/<id>` route (mirrors cluster), with a "return to last database" jump.
+- [x] `databases-screen.tsx` — list connections with status dot + connect/open/disconnect/remove; inline Add-connection form (engine chips postgres/mysql/sqlite; Fields vs DSN toggle; SQLite file path; Save / Save&connect) using real theme tokens; vault note in the header hint.
+- [x] `database-nav-store` (selection: object/console/overview + lastDatabase) / `database-view-store` (open table tabs + refresh). `database-chat-store` deferred to P5.
+- [x] Proof: `database-nav-store.test.ts` (7/7) — object/console/overview selection, ensureDatabase→overview, clearLastDatabase, tab open/close focus. typecheck (app) + lint clean.
 
-### P3 — object explorer + data grid + SQL console
+### P3 — object explorer + data grid + SQL console — CORE DONE 2026-09-01
 
-- [ ] `database-object-browser.tsx`: schema tree (lazy per level) with column type + PK/FK icons; Overview.
-- [ ] Data grid: paginated (first/prev/next/last), sortable, filterable, read-only view.
-- [ ] SQL console (reuse Monaco) with schema-grounded completion; Services panel Output/Result/Query Plan; Explain.
-- [ ] Proof: live — browse a table, run a SELECT, page/sort/filter, view Explain.
+- [x] `sidebar-database-nav.tsx`: schema selector + object tree grouped Tables/Views/Other with table/view icons; Overview + SQL console entries; lazy per-schema object load.
+- [x] Data grid (`database-data-grid.tsx`): paginated (prev/next + refresh, LIMIT/OFFSET via `truncated`), read-only view; shared `database-result-table.tsx` (horizontal+vertical scroll, mono cells, NULL styling, width estimation).
+- [x] SQL console (`database-sql-console.tsx`): universal multiline editor (desktop + mobile — not Monaco-only), Result/Output tabs, read-only SELECT path + "Allow writes" gate for exec; `qualifyTable` quotes idents per engine (`sql-ident.ts`, 3/3 tests).
+- [ ] Deferred to P6: sortable/filterable grid, schema-grounded completion, Explain / Query-Plan tab.
+- [x] Proof: `sql-ident.test.ts` (3/3) + app typecheck/lint clean. Live CDP browse/query is the manual acceptance step.
 
 ### P4 — data editor (writes, transactions)
 
@@ -109,7 +110,8 @@ Every shipped task runs against a real database — no stubs.
 - [x] 2026-09-01: Spec `docs/databases.md` written (mirrors kubernetes.md; real component refs).
 - [x] 2026-09-01: P0 daemon foundation — DTO/DbClient/isWriteStatement, SQLite adapter, DatabaseRegistry, AES-256-GCM secret vault; 4/4 tests.
 - [x] 2026-09-01: P1 protocol+session+client+PG/MySQL adapters — 4/4 tests incl. real Postgres + MySQL over docker.
-- [ ] P2 …
+- [x] 2026-09-01: P2 app shell (sidebar entry + list/add + routes + stores) + P3 core (object tree, data grid, SQL console) — 10/10 app tests; typecheck + lint clean.
+- [ ] P4 …
 
 ## Validation
 

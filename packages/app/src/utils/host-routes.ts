@@ -433,6 +433,23 @@ export function buildClustersRoute(serverId: string) {
   return `/h/${encodeSegment(normalized)}/clusters` as const;
 }
 
+export function buildDatabasesRoute(serverId: string) {
+  const normalized = trimNonEmpty(serverId);
+  if (!normalized) {
+    return "/" as const;
+  }
+  return `/h/${encodeSegment(normalized)}/databases` as const;
+}
+
+export function buildDatabaseBrowseRoute(serverId: string, databaseId: string) {
+  const normalizedServer = trimNonEmpty(serverId);
+  const normalizedDatabase = trimNonEmpty(databaseId);
+  if (!normalizedServer || !normalizedDatabase) {
+    return buildDatabasesRoute(serverId);
+  }
+  return `/h/${encodeSegment(normalizedServer)}/database/${encodeSegment(normalizedDatabase)}` as const;
+}
+
 export function buildSkillsRoute(serverId: string) {
   const normalized = trimNonEmpty(serverId);
   if (!normalized) {

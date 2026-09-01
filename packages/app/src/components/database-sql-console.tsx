@@ -1,0 +1,266 @@
+import { useCallback, useState } from "react";
+import { Pressable, Switch, Text, TextInput, View } from "react-native";
+import { Play } from "lucide-react-native";
+import { StyleSheet, withUnistyles } from "react-native-unistyles";
+import type { DatabaseEngine, QueryResult } from "@jagentdesk/protocol/database/rpc-schemas";
+import { useHostRuntimeClient } from "@/runtime/host-runtime";
+import { useDatabaseViewStore } from "@/stores/database-view-store";
+import { DatabaseResultTable } from "@/components/database-result-table";
+import type { Theme } from "@/styles/theme";
+
+const ThemedPlay = withUnistyles(Play);
+const ThemedTextInput = withUnistyles(TextInput);
+const accentForeground = (theme: Theme) => ({ color: theme.colors.accentForeground });
+const placeholderColor = (theme: Theme) => ({
+  placeholderTextColor: theme.colors.foregroundExtraMuted,
+});
+
+/** A statement that mutates data/schema — mirrors the daemon's read-only guard. */
+function looksLikeWrite(sql: string): boolean {
+  const head = sql
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/--[^\n]*/g, " ")
+    .trimStart()
+    .slice(0, 24)
+    .toLowerCase();
+  return /^(insert|update|delete|drop|alter|create|truncate|replace|merge|grant|revoke|call|comment)\b/.test(
+    head,
+  );
+}
+
+type Tab = "result" | "output";
+
+/**
+ * A schema-grounded SQL console — the DbClient analogue of the cluster shell. A
+ * SELECT runs through the read-only `database/query` path and renders a result
+ * grid; a write is refused unless the user flips "Allow writes", which routes it
+ * through `database/exec`. Universal (desktop + mobile) — a multiline input, not
+ * a desktop-only editor.
+ */
+export function DatabaseSqlConsole({
+  serverId,
+  databaseId,
+  engine,
+}: {
+  serverId: string;
+  databaseId: string;
+  engine: DatabaseEngine;
+}) {
+  const client = useHostRuntimeClient(serverId);
+  const bumpRefresh = useDatabaseViewStore((s) => s.bumpRefresh);
+  const [sql, setSql] = useState("");
+  const [allowWrites, setAllowWrites] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<QueryResult | null>(null);
+  const [output, setOutput] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [tab, setTab] = useState<Tab>("result");
+
+  const run = useCallback(async () => {
+    if (!client) return;
+    const trimmed = sql.trim().replace(/;\s*$/, "");
+    if (!trimmed) return;
+    setRunning(true);
+    setError(null);
+    setOutput(null);
+    try {
+      if (looksLikeWrite(trimmed)) {
+        if (!allowWrites) {
+          setError('This is a write statement. Enable "Allow writes" to run it.');
+          return;
+        }
+        const res = await client.databaseExec({ id: databaseId, sql: trimmed });
+        if (res.error || !res.result) {
+          setError(res.error ?? "Exec failed");
+        } else {
+          setResult(null);
+          setOutput(`${res.result.affected} row(s) affected · ${res.result.elapsedMs} ms`);
+          setTab("output");
+          bumpRefresh();
+        }
+      } else {
+        const res = await client.databaseQuery({ id: databaseId, sql: trimmed });
+        if (res.error || !res.result) {
+          setError(res.error ?? "Query failed");
+        } else {
+          setResult(res.result);
+          setOutput(
+            `${res.result.rowCount} row(s)${res.result.truncated ? "+ (truncated)" : ""} · ${res.result.elapsedMs} ms`,
+          );
+          setTab("result");
+        }
+      }
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Run failed");
+    } finally {
+      setRunning(false);
+    }
+  }, [client, sql, allowWrites, databaseId, bumpRefresh]);
+
+  const handleRun = useCallback(() => void run(), [run]);
+  const showResult = useCallback(() => setTab("result"), []);
+  const showOutput = useCallback(() => setTab("output"), []);
+
+  let resultBody;
+  if (tab === "result") {
+    resultBody = result ? (
+      <DatabaseResultTable result={result} />
+    ) : (
+      <Text style={styles.hint}>Run a SELECT to see rows here.</Text>
+    );
+  } else {
+    resultBody = <Text style={styles.outputText}>{output ?? "No output yet."}</Text>;
+  }
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.editorWrap}>
+        <ThemedTextInput
+          style={styles.editor}
+          value={sql}
+          onChangeText={setSql}
+          placeholder={`-- SQL for ${engine}\nselect * from ...`}
+          multiline
+          autoCapitalize="none"
+          autoCorrect={false}
+          spellCheck={false}
+          uniProps={placeholderColor}
+        />
+      </View>
+
+      <View style={styles.toolbar}>
+        <Pressable
+          style={[styles.runBtn, running && styles.runBtnDisabled]}
+          onPress={handleRun}
+          disabled={running}
+        >
+          <ThemedPlay size={13} uniProps={accentForeground} />
+          <Text style={styles.runText}>{running ? "Running…" : "Run"}</Text>
+        </Pressable>
+        <View style={styles.writesToggle}>
+          <Switch value={allowWrites} onValueChange={setAllowWrites} />
+          <Text style={styles.writesLabel}>Allow writes</Text>
+        </View>
+        <View style={styles.toolbarSpacer} />
+        <Pressable
+          style={[styles.tabBtn, tab === "result" && styles.tabBtnActive]}
+          onPress={showResult}
+        >
+          <Text style={[styles.tabText, tab === "result" && styles.tabTextActive]}>Result</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.tabBtn, tab === "output" && styles.tabBtnActive]}
+          onPress={showOutput}
+        >
+          <Text style={[styles.tabText, tab === "output" && styles.tabTextActive]}>Output</Text>
+        </Pressable>
+      </View>
+
+      {error ? (
+        <View style={styles.errorBox}>
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      ) : null}
+
+      <View style={styles.resultArea}>{resultBody}</View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create((theme: Theme) => ({
+  container: {
+    flex: 1,
+    minHeight: 0,
+  },
+  editorWrap: {
+    minHeight: 120,
+    maxHeight: 240,
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+  },
+  editor: {
+    flex: 1,
+    padding: theme.spacing[3],
+    fontSize: theme.fontSize.sm,
+    fontFamily: theme.fontFamily.mono,
+    color: theme.colors.foreground,
+    textAlignVertical: "top",
+  },
+  toolbar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+  },
+  runBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[1],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[1.5],
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.accent,
+  },
+  runBtnDisabled: {
+    opacity: 0.5,
+  },
+  runText: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.accentForeground,
+  },
+  writesToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[1.5],
+  },
+  writesLabel: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+  },
+  toolbarSpacer: {
+    flex: 1,
+  },
+  tabBtn: {
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
+    borderRadius: theme.borderRadius.md,
+  },
+  tabBtnActive: {
+    backgroundColor: theme.colors.surface2,
+  },
+  tabText: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+  },
+  tabTextActive: {
+    color: theme.colors.foreground,
+  },
+  errorBox: {
+    padding: theme.spacing[3],
+    backgroundColor: theme.colors.palette.red[100],
+  },
+  errorText: {
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.palette.red[800],
+  },
+  resultArea: {
+    flex: 1,
+    minHeight: 0,
+  },
+  hint: {
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foregroundMuted,
+    fontStyle: "italic",
+    padding: theme.spacing[3],
+  },
+  outputText: {
+    fontSize: theme.fontSize.sm,
+    fontFamily: theme.fontFamily.mono,
+    color: theme.colors.foreground,
+    padding: theme.spacing[3],
+  },
+}));
