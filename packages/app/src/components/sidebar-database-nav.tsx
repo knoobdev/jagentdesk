@@ -158,6 +158,10 @@ export function SidebarDatabaseNav({
   const setSchema = useDatabaseNavStore((s) => s.setSchema);
   const ensureDatabase = useDatabaseNavStore((s) => s.ensureDatabase);
   const openTable = useDatabaseViewStore((s) => s.openTable);
+  // Bumped by the browse screen once it finishes connecting. Opening via deep link
+  // or a sidebar jump renders this nav before connect runs, so the first schema
+  // fetch fails with "database is not connected"; re-run when the connect lands.
+  const listRefreshKey = useDatabaseViewStore((s) => s.listRefreshKey);
   const showMobileAgent = usePanelStore((s) => s.showMobileAgent);
   const isCompact = useIsCompactFormFactor();
 
@@ -189,7 +193,7 @@ export function SidebarDatabaseNav({
         return undefined;
       })
       .catch(() => {});
-  }, [client, databaseId, setSchema]);
+  }, [client, databaseId, setSchema, listRefreshKey]);
 
   useEffect(() => {
     if (!client || !selectedSchema) return;
