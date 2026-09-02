@@ -528,6 +528,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
   toolbar: {
     flexDirection: "row",
     alignItems: "center",
+    flexWrap: "wrap",
     gap: theme.spacing[2],
     paddingHorizontal: theme.spacing[3],
     paddingVertical: theme.spacing[2],
@@ -561,7 +562,8 @@ const styles = StyleSheet.create((theme: Theme) => ({
     color: theme.colors.foregroundMuted,
   },
   toolbarSpacer: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: theme.spacing[2],
   },
   tabBtn: {
     paddingHorizontal: theme.spacing[2],
