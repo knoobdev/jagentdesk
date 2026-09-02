@@ -48,6 +48,24 @@ with a few deliberate boundaries:
 
 ## ✨ New in this release
 
+### Databases — a DataGrip‑class workspace (desktop **and** mobile)
+
+Open **Databases** from the sidebar to work with your data from inside JAgentDesk:
+
+- **Seven engines** — PostgreSQL, MySQL, SQLite, SQL Server, Oracle, MongoDB, ClickHouse — behind
+  one provider‑agnostic contract; credentials never leave the daemon.
+- **Multiple databases per connection** — list and switch databases on a server, with a
+  DataGrip‑style tree (schemas, tables, columns, indexes, foreign keys, views, sequences, routines)
+  showing per‑node counts, plus **cross‑database compare** (structure + data).
+- **Data grid** — inline editing, `WHERE` filter, column sort, two‑axis scroll, clone row, CSV
+  import, export to CSV/JSON/SQL, aggregate view, record view, and transaction isolation levels.
+- **SQL console** — schema‑aware autocomplete, inspections, multiple result tabs, `EXPLAIN` / query
+  plan, and query history — with **foreign‑key navigation** and **full‑text search**.
+- **ER diagram**, **DDL view**, **schema diff**, and an **AI chat** with SQL tools grounded on the
+  live schema.
+
+See [CHANGELOG.md](CHANGELOG.md) for the full v0.0.4 notes.
+
 ### Kubernetes cluster management (desktop **and** mobile)
 
 Open **Clusters** from the sidebar to manage Kubernetes from inside JAgentDesk:

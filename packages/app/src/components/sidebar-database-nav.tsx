@@ -50,6 +50,31 @@ import { qualifyTable, quoteIdent } from "@/utils/sql-ident";
 import type { DatabaseEngine } from "@jagentdesk/protocol/database/rpc-schemas";
 import type { Theme } from "@/styles/theme";
 
+/** The daemon returns this while introspection races ahead of the parent
+ *  connect — common on a cold tailnet open, where a deep link mounts the tree
+ *  before the live client is ready in daemon memory. */
+const DB_NOT_CONNECTED = "database is not connected";
+
+/** Re-issue an introspection RPC while the connection is still coming up. Only
+ *  the "database is not connected" race (or a transient rejection) is retried; a
+ *  real error is returned as-is. Without this a cold tailnet open renders an
+ *  empty schema (only static folders) until the user manually refreshes. */
+async function retryWhileConnecting<T extends { error: string | null }>(
+  call: () => Promise<T>,
+  isCancelled: () => boolean,
+  attempts = 6,
+  delayMs = 400,
+): Promise<T | null> {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (isCancelled()) return null;
+    const res = await call().catch(() => null);
+    if (isCancelled()) return null;
+    if (res && res.error !== DB_NOT_CONNECTED) return res;
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+  return null;
+}
+
 const ThemedChevronLeft = withUnistyles(ChevronLeft);
 const ThemedChevronDown = withUnistyles(ChevronDown);
 const ThemedChevronRight = withUnistyles(ChevronRight);
@@ -515,16 +540,16 @@ function SchemaNode({
   useEffect(() => {
     if (!expanded || !client) return;
     let cancelled = false;
-    void client
-      .databaseObjects({ id, schema })
-      .then((res) => {
-        if (!cancelled && !res.error) {
-          setObjects(res.objects);
-          onTableCount?.(schema, res.objects.filter((o) => o.kind === "table").length);
-        }
-        return undefined;
-      })
-      .catch(() => {});
+    void retryWhileConnecting(
+      () => client.databaseObjects({ id, schema }),
+      () => cancelled,
+    ).then((res) => {
+      if (!cancelled && res && !res.error) {
+        setObjects(res.objects);
+        onTableCount?.(schema, res.objects.filter((o) => o.kind === "table").length);
+      }
+      return undefined;
+    });
     return () => {
       cancelled = true;
     };
@@ -622,12 +647,16 @@ function DatabaseNode({
     let cancelled = false;
     void (async () => {
       if (multiDb) {
-        const opened = await client
-          .databaseOpenDatabase({ id: parentId, database: dbName })
-          .catch(() => null);
+        const opened = await retryWhileConnecting(
+          () => client.databaseOpenDatabase({ id: parentId, database: dbName }),
+          () => cancelled,
+        );
         if (cancelled || !opened || opened.error) return;
       }
-      const res = await client.databaseSchemas({ id }).catch(() => null);
+      const res = await retryWhileConnecting(
+        () => client.databaseSchemas({ id }),
+        () => cancelled,
+      );
       if (!cancelled && res && !res.error) setSchemas(res.schemas);
     })();
     return () => {
@@ -834,20 +863,28 @@ export function SidebarDatabaseNav({
 
   useEffect(() => {
     if (!client || !isConnected) return;
+    let cancelled = false;
     void client
       .databaseList()
       .then((res) => {
-        if (!res.error) setDatabase(res.databases.find((d) => d.id === databaseId) ?? null);
+        if (!cancelled && !res.error) {
+          setDatabase(res.databases.find((d) => d.id === databaseId) ?? null);
+        }
         return undefined;
       })
       .catch(() => {});
-    void client
-      .databaseDatabases({ id: databaseId })
-      .then((res) => {
-        if (!res.error) setDatabases(res.databases);
-        return undefined;
-      })
-      .catch(() => {});
+    // databaseDatabases queries the live server, so it races the parent connect
+    // on a cold tailnet open — retry until connect settles.
+    void retryWhileConnecting(
+      () => client.databaseDatabases({ id: databaseId }),
+      () => cancelled,
+    ).then((res) => {
+      if (!cancelled && res && !res.error) setDatabases(res.databases);
+      return undefined;
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [client, isConnected, databaseId, listRefreshKey]);
   const multiDb = databases.length > 1;
   const engine = (database?.engine ?? "postgres") as DatabaseEngine;

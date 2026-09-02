@@ -9,6 +9,7 @@ import { KeyRound } from "lucide-react-native";
 import Svg, { Circle, Path } from "react-native-svg";
 import { Button } from "@/components/ui/button";
 import { JAgentDeskLogo } from "@/components/icons/jagentdesk-logo";
+import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 import { isNative } from "@/constants/platform";
 import { getDesktopDaemonStatus, getDesktopTailscaleStatus } from "@/desktop/daemon/desktop-daemon";
 import { SPACING } from "@/styles/theme";
@@ -565,6 +566,12 @@ export default function TailscaleLoginRoute() {
   }, [adapter, authKey, clearAuthKey, finishConnectedLogin, t]);
 
   const busy = interactiveInProgress || authKeyInProgress || awaitingConnection;
+  let interactiveButtonLabel = t("tailscaleLogin.interactiveAction");
+  if (interactiveInProgress) {
+    interactiveButtonLabel = t("tailscaleLogin.interactiveInProgress");
+  } else if (awaitingConnection) {
+    interactiveButtonLabel = t("tailscaleLogin.awaitingConnection");
+  }
   const showLocalFallback = !adapter.isSupported && !isDesktopLogin;
   const handleSelectTailscaleConnectionType = useCallback(() => setConnectionType("tailscale"), []);
   const handleSelectLocalConnectionType = useCallback(() => setConnectionType("local"), []);
@@ -638,11 +645,7 @@ export default function TailscaleLoginRoute() {
             disabled={authKeyInProgress || interactiveInProgress || awaitingConnection}
             testID="tailscale-login-interactive"
           >
-            {interactiveInProgress
-              ? t("tailscaleLogin.interactiveInProgress")
-              : awaitingConnection
-                ? t("tailscaleLogin.awaitingConnection")
-                : t("tailscaleLogin.interactiveAction")}
+            {interactiveButtonLabel}
           </Button>
 
           {interactiveInProgress || awaitingConnection ? (
@@ -708,6 +711,7 @@ export default function TailscaleLoginRoute() {
 
   return (
     <View style={styles.root}>
+      <TitlebarDragRegion />
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={[styles.container, { paddingBottom: SPACING[6] + insets.bottom }]}
