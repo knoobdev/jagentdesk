@@ -36,6 +36,19 @@ const placeholderColor = (theme: Theme) => ({
 const ThemedCellInput = withUnistyles(TextInput);
 
 type TxMode = "auto" | "manual";
+type IsolationLevel = "default" | "read committed" | "repeatable read" | "serializable";
+const ISOLATION_ORDER: IsolationLevel[] = [
+  "default",
+  "read committed",
+  "repeatable read",
+  "serializable",
+];
+const ISOLATION_LABEL: Record<IsolationLevel, string> = {
+  default: "Default",
+  "read committed": "Read Committed",
+  "repeatable read": "Repeatable Read",
+  serializable: "Serializable",
+};
 
 function coerce(text: string): Cell {
   if (text === "") return "";
@@ -188,6 +201,7 @@ export function DatabaseDataEditor({
   const [status, setStatus] = useState<string | null>(null);
   const [txMode, setTxMode] = useState<TxMode>("auto");
   const [txOpen, setTxOpen] = useState(false);
+  const [isolation, setIsolation] = useState<IsolationLevel>("default");
 
   // Pending edits to existing rows keyed "rowIdx:col"; appended new rows; deleted
   // existing-row indices; current inline-editing cell.
@@ -206,6 +220,7 @@ export function DatabaseDataEditor({
   const [exportOpen, setExportOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState("");
+  const [recordRow, setRecordRow] = useState<number | null>(null);
 
   const pkCols = useMemo(() => columns.filter((c) => c.isPrimaryKey).map((c) => c.name), [columns]);
   const colNames = useMemo(() => columns.map((c) => c.name), [columns]);
@@ -445,6 +460,15 @@ export function DatabaseDataEditor({
       if (txMode === "manual" && !txOpen) {
         const b = await client.databaseBegin({ id: databaseId });
         if (b.error) return setError(b.error);
+        // Apply the chosen isolation level as the transaction's first statement
+        // (SQL engines; sqlite has no SET TRANSACTION ISOLATION LEVEL).
+        if (isolation !== "default" && isSqlEngine(engine) && engine !== "sqlite") {
+          const iso = await client.databaseExec({
+            id: databaseId,
+            sql: `set transaction isolation level ${isolation}`,
+          });
+          if (iso.error) return setError(iso.error);
+        }
         setTxOpen(true);
       }
       let affected = 0;
@@ -470,6 +494,8 @@ export function DatabaseDataEditor({
     buildStatements,
     txMode,
     txOpen,
+    isolation,
+    engine,
     databaseId,
     resetPending,
     bumpRefresh,
@@ -517,6 +543,18 @@ export function DatabaseDataEditor({
     () => (result && aggCol ? computeAggregate(result, aggCol) : null),
     [result, aggCol],
   );
+  const openRecord = useCallback((rowIdx: number) => setRecordRow(rowIdx), []);
+  const closeRecord = useCallback(() => setRecordRow(null), []);
+  const recordStep = useCallback(
+    (delta: number) => {
+      setRecordRow((cur) => {
+        if (cur === null || !result) return cur;
+        const next = cur + delta;
+        return next >= 0 && next < result.rows.length ? next : cur;
+      });
+    },
+    [result],
+  );
   const openImport = useCallback(() => {
     setImportText("");
     setImportOpen(true);
@@ -545,6 +583,12 @@ export function DatabaseDataEditor({
   }, [page, result, load]);
   const handleRefresh = useCallback(() => void load(page), [page, load]);
   const toggleTxMode = useCallback(() => setTxMode((m) => (m === "auto" ? "manual" : "auto")), []);
+  const cycleIsolation = useCallback(() => {
+    setIsolation((cur) => {
+      const idx = ISOLATION_ORDER.indexOf(cur);
+      return ISOLATION_ORDER[(idx + 1) % ISOLATION_ORDER.length];
+    });
+  }, []);
   const openPreview = useCallback(() => setPreviewOpen(true), []);
   const closePreview = useCallback(() => setPreviewOpen(false), []);
 
@@ -595,6 +639,7 @@ export function DatabaseDataEditor({
                 onExpand={handleExpandCell}
                 fkByCol={fkByCol}
                 onNavigate={navigateFk}
+                onOpenRecord={openRecord}
               />
             ))}
             {newRows.map((nr, i) => (
@@ -651,6 +696,11 @@ export function DatabaseDataEditor({
         <Pressable style={styles.tbtn} onPress={toggleTxMode}>
           <Text style={styles.tbtnText}>Tx: {txMode === "auto" ? "Auto" : "Manual"}</Text>
         </Pressable>
+        {txMode === "manual" ? (
+          <Pressable style={styles.tbtn} onPress={cycleIsolation}>
+            <Text style={styles.tbtnText}>Iso: {ISOLATION_LABEL[isolation]}</Text>
+          </Pressable>
+        ) : null}
         <Pressable
           style={[styles.tbtn, pendingCount === 0 && styles.tbtnDisabled]}
           onPress={openPreview}
@@ -749,6 +799,20 @@ export function DatabaseDataEditor({
         onSave={saveValueCell}
         onClose={closeValueCell}
       />
+
+      {recordRow !== null && result && result.rows[recordRow] ? (
+        <RecordDock
+          rowIndex={recordRow}
+          total={result.rows.length}
+          row={result.rows[recordRow]}
+          columns={colNames}
+          edits={edits}
+          editable={canEdit}
+          onCommit={commitExistingEdit}
+          onStep={recordStep}
+          onClose={closeRecord}
+        />
+      ) : null}
 
       {aggregate ? (
         <View style={styles.aggBar}>
@@ -885,6 +949,7 @@ function ExistingRow({
   onExpand,
   fkByCol,
   onNavigate,
+  onOpenRecord,
 }: {
   rowIndex: number;
   row: Cell[];
@@ -900,8 +965,18 @@ function ExistingRow({
   onExpand: (cell: ExpandedCell) => void;
   fkByCol: Map<string, DbForeignKey>;
   onNavigate: (fk: DbForeignKey, value: Cell) => void;
+  onOpenRecord: (rowIdx: number) => void;
 }) {
   const handleSelect = useCallback(() => onSelect(rowIndex), [onSelect, rowIndex]);
+  const handleRecord = useCallback(() => onOpenRecord(rowIndex), [onOpenRecord, rowIndex]);
+  const gutterCtx = isWeb
+    ? {
+        onContextMenu: (e: { preventDefault?: () => void }) => {
+          e?.preventDefault?.();
+          handleRecord();
+        },
+      }
+    : {};
   return (
     <View
       style={[
@@ -913,7 +988,8 @@ function ExistingRow({
       <Pressable
         style={[styles.gutter, selected && styles.gutterSelected]}
         onPress={handleSelect}
-        disabled={!canEdit}
+        onLongPress={handleRecord}
+        {...(gutterCtx as object)}
       >
         <Text style={styles.gutterText}>{rowIndex + 1}</Text>
       </Pressable>
@@ -1214,6 +1290,113 @@ function ValueEditorDock({
   );
 }
 
+/** One labelled field in the record view. */
+function RecordField({
+  rowIndex,
+  col,
+  original,
+  current,
+  editable,
+  onCommit,
+}: {
+  rowIndex: number;
+  col: string;
+  original: string;
+  current: string;
+  editable: boolean;
+  onCommit: (rowIdx: number, col: string, text: string, original: string) => void;
+}) {
+  const [draft, setDraft] = useState(current);
+  useEffect(() => {
+    setDraft(current);
+  }, [current, rowIndex]);
+  const commit = useCallback(
+    () => onCommit(rowIndex, col, draft, original),
+    [onCommit, rowIndex, col, draft, original],
+  );
+  return (
+    <View style={styles.recordField}>
+      <Text style={styles.recordLabel} numberOfLines={1}>
+        {col}
+      </Text>
+      <ThemedCellInput
+        style={styles.recordInput}
+        value={draft}
+        onChangeText={setDraft}
+        onBlur={commit}
+        editable={editable}
+        autoCapitalize="none"
+        autoCorrect={false}
+        uniProps={placeholderColor}
+      />
+    </View>
+  );
+}
+
+/** The record view — the current row as a vertical form (DataGrip's single-record
+ *  editor), docked at the bottom with prev/next paging. */
+function RecordDock({
+  rowIndex,
+  total,
+  row,
+  columns,
+  edits,
+  editable,
+  onCommit,
+  onStep,
+  onClose,
+}: {
+  rowIndex: number;
+  total: number;
+  row: Cell[];
+  columns: string[];
+  edits: Record<string, Cell>;
+  editable: boolean;
+  onCommit: (rowIdx: number, col: string, text: string, original: string) => void;
+  onStep: (delta: number) => void;
+  onClose: () => void;
+}) {
+  const prev = useCallback(() => onStep(-1), [onStep]);
+  const next = useCallback(() => onStep(1), [onStep]);
+  return (
+    <View style={styles.recordDock}>
+      <View style={styles.valueDockHeader}>
+        <Text style={styles.valueDockRef}>
+          Record <Text style={styles.valueDockCol}>{rowIndex + 1}</Text> / {total}
+        </Text>
+        <View style={styles.valueDockSpacer} />
+        <Pressable style={styles.valueDockBtn} onPress={prev}>
+          <Text style={styles.valueDockBtnText}>‹ Prev</Text>
+        </Pressable>
+        <Pressable style={styles.valueDockBtn} onPress={next}>
+          <Text style={styles.valueDockBtnText}>Next ›</Text>
+        </Pressable>
+        <Pressable style={styles.valueDockBtn} onPress={onClose}>
+          <Text style={styles.valueDockBtnText}>Close</Text>
+        </Pressable>
+      </View>
+      <ScrollView style={styles.recordBody} contentContainerStyle={styles.recordBodyContent}>
+        {columns.map((col, i) => {
+          const key = `${rowIndex}:${col}`;
+          const edited = Object.prototype.hasOwnProperty.call(edits, key);
+          const value = edited ? edits[key] : row[i];
+          return (
+            <RecordField
+              key={col}
+              rowIndex={rowIndex}
+              col={col}
+              original={cellText(row[i])}
+              current={cellText(value)}
+              editable={editable}
+              onCommit={onCommit}
+            />
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create((theme: Theme) => ({
   container: { flex: 1, minHeight: 0 },
   toolbar: {
@@ -1495,6 +1678,34 @@ const styles = StyleSheet.create((theme: Theme) => ({
     fontFamily: theme.fontFamily.mono,
     color: theme.colors.foreground,
     textAlignVertical: "top" as const,
+  },
+  recordDock: {
+    height: 260,
+    borderTopWidth: theme.borderWidth[1],
+    borderTopColor: theme.colors.border,
+    backgroundColor: theme.colors.surface0,
+  },
+  recordBody: { flex: 1 },
+  recordBodyContent: { padding: theme.spacing[3], gap: theme.spacing[2] },
+  recordField: { flexDirection: "row", alignItems: "center", gap: theme.spacing[3] },
+  recordLabel: {
+    width: 160,
+    fontSize: theme.fontSize.xs,
+    fontFamily: theme.fontFamily.mono,
+    color: theme.colors.foregroundMuted,
+  },
+  recordInput: {
+    flex: 1,
+    minWidth: 0,
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.sm,
+    backgroundColor: theme.colors.surface0,
+    fontSize: theme.fontSize.sm,
+    fontFamily: theme.fontFamily.mono,
+    color: theme.colors.foreground,
   },
   modalActions: { flexDirection: "row", gap: theme.spacing[2] },
   previewItem: {
