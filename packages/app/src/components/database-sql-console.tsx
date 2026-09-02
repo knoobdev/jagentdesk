@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Switch, Text, TextInput, View } from "react-native";
 import { Play } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
@@ -36,6 +36,33 @@ function looksLikeWrite(sql: string): boolean {
 
 type Tab = "result" | "output" | "plan";
 
+// prettier-ignore
+const SQL_KEYWORDS = [
+  "select", "from", "where", "order by", "group by", "having", "limit", "offset",
+  "insert into", "update", "delete from", "values", "set", "join", "left join",
+  "right join", "inner join", "on", "as", "and", "or", "not", "null", "is null",
+  "is not null", "in", "like", "between", "distinct", "count", "sum", "avg", "min",
+  "max", "case", "when", "then", "else", "end", "asc", "desc", "returning",
+];
+
+const WORD_RE = /([A-Za-z_][A-Za-z0-9_]*)$/;
+
+interface SchemaPool {
+  tables: string[];
+  columns: string[];
+}
+
+/** One completion suggestion chip — its own component so the press handler is
+ *  stable (avoids react-perf's inline-function-as-prop). */
+function SuggestionChip({ value, onPick }: { value: string; onPick: (v: string) => void }) {
+  const press = useCallback(() => onPick(value), [onPick, value]);
+  return (
+    <Pressable style={styles.suggestChip} onPress={press}>
+      <Text style={styles.suggestText}>{value}</Text>
+    </Pressable>
+  );
+}
+
 function nowMs(): number {
   return Date.now();
 }
@@ -69,6 +96,69 @@ export function DatabaseSqlConsole({
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("result");
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [pool, setPool] = useState<SchemaPool>({ tables: [], columns: [] });
+
+  // Build a schema-aware completion pool once: table names across schemas + column
+  // names (bounded so a huge database doesn't fan out to thousands of introspects).
+  useEffect(() => {
+    if (!client) return;
+    let cancelled = false;
+    void (async () => {
+      const sc = await client.databaseSchemas({ id: databaseId }).catch(() => null);
+      if (!sc || sc.error || cancelled) return;
+      const tables = new Set<string>();
+      const columns = new Set<string>();
+      const addColumns = async (schemaName: string, tableName: string) => {
+        const cols = await client
+          .databaseColumns({ id: databaseId, schema: schemaName, table: tableName })
+          .catch(() => null);
+        if (cols && !cols.error) for (const c of cols.columns) columns.add(c.name);
+      };
+      let budget = 40;
+      for (const s of sc.schemas) {
+        const objs = await client
+          .databaseObjects({ id: databaseId, schema: s.name })
+          .catch(() => null);
+        if (cancelled) return;
+        if (!objs || objs.error) continue;
+        for (const o of objs.objects) {
+          tables.add(o.name);
+          if (budget > 0) {
+            budget--;
+            await addColumns(s.name, o.name);
+            if (cancelled) return;
+          }
+        }
+      }
+      if (!cancelled) setPool({ tables: [...tables], columns: [...columns] });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [client, databaseId]);
+
+  const suggestions = useMemo(() => {
+    const m = WORD_RE.exec(sql);
+    if (!m) return [];
+    const word = m[1].toLowerCase();
+    if (word.length < 1) return [];
+    const all = [...pool.columns, ...pool.tables, ...SQL_KEYWORDS];
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const s of all) {
+      const low = s.toLowerCase();
+      if (low.startsWith(word) && low !== word && !seen.has(s)) {
+        seen.add(s);
+        out.push(s);
+        if (out.length >= 8) break;
+      }
+    }
+    return out;
+  }, [sql, pool]);
+
+  const applySuggestion = useCallback((value: string) => {
+    setSql((cur) => `${cur.replace(WORD_RE, value)} `);
+  }, []);
 
   const run = useCallback(async () => {
     if (!client) return;
@@ -177,6 +267,19 @@ export function DatabaseSqlConsole({
         />
       </View>
 
+      {suggestions.length > 0 ? (
+        <ScrollView
+          horizontal
+          style={styles.suggestBar}
+          contentContainerStyle={styles.suggestContent}
+          keyboardShouldPersistTaps="always"
+        >
+          {suggestions.map((s) => (
+            <SuggestionChip key={s} value={s} onPick={applySuggestion} />
+          ))}
+        </ScrollView>
+      ) : null}
+
       <View style={styles.toolbar}>
         <Pressable
           style={[styles.runBtn, running && styles.runBtnDisabled]}
@@ -274,6 +377,29 @@ const styles = StyleSheet.create((theme: Theme) => ({
     fontFamily: theme.fontFamily.mono,
     color: theme.colors.foreground,
     textAlignVertical: "top",
+  },
+  suggestBar: {
+    flexGrow: 0,
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+  },
+  suggestContent: {
+    alignItems: "center",
+    gap: theme.spacing[1.5],
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
+  },
+  suggestChip: {
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: 3,
+    borderRadius: theme.borderRadius.sm,
+    backgroundColor: theme.colors.surface2,
+  },
+  suggestText: {
+    fontSize: theme.fontSize.xs,
+    fontFamily: theme.fontFamily.mono,
+    color: theme.colors.foreground,
   },
   toolbar: {
     flexDirection: "row",

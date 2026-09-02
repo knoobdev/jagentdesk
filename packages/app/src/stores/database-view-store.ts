@@ -18,11 +18,18 @@ interface DatabaseViewState {
   activeTabId: string | null;
   /** Bumped when an editor commit mutates data so the grid reloads. */
   listRefreshKey: number;
+  /** A pending WHERE for a table the user is navigating to via a foreign key
+   *  ("Related Rows"). The target data editor consumes it once on open. */
+  initialFilter: { schema: string; name: string; where: string } | null;
   openTable: (databaseId: string, input: { schema: string; name: string }) => void;
   closeTab: (id: string) => void;
   setActive: (id: string | null) => void;
   bumpRefresh: () => void;
   resetForDatabase: (databaseId: string) => void;
+  /** Queue a WHERE for the next open of (schema, name) — used by FK navigation. */
+  requestFilter: (schema: string, name: string, where: string) => void;
+  /** Read and clear a queued WHERE for (schema, name); null when none. */
+  consumeFilter: (schema: string, name: string) => string | null;
 }
 
 const tabId = (schema: string, name: string) => `${schema}.${name}`;
@@ -32,6 +39,16 @@ export const useDatabaseViewStore = create<DatabaseViewState>((set, get) => ({
   tabs: [],
   activeTabId: null,
   listRefreshKey: 0,
+  initialFilter: null,
+  requestFilter: (schema, name, where) => set({ initialFilter: { schema, name, where } }),
+  consumeFilter: (schema, name) => {
+    const f = get().initialFilter;
+    if (f && f.schema === schema && f.name === name) {
+      set({ initialFilter: null });
+      return f.where;
+    }
+    return null;
+  },
   openTable: (databaseId, input) => {
     const id = tabId(input.schema, input.name);
     const state = get();

@@ -6,12 +6,15 @@ import * as Clipboard from "expo-clipboard";
 import type {
   DatabaseEngine,
   DbColumn,
+  DbForeignKey,
   QueryResult,
 } from "@jagentdesk/protocol/database/rpc-schemas";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { useDatabaseViewStore } from "@/stores/database-view-store";
+import { useDatabaseNavStore } from "@/stores/database-nav-store";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { isSqlEngine, qualifyTable, quoteIdent } from "@/utils/sql-ident";
+import { isWeb } from "@/constants/platform";
 import { buildDelete, buildInsert, buildUpdate, type Cell, type Dml } from "@/utils/sql-dml";
 import type { Theme } from "@/styles/theme";
 
@@ -81,6 +84,44 @@ function computeAggregate(result: QueryResult, col: string): AggregateResult | n
 
 const round2 = (n: number): string => (Number.isInteger(n) ? String(n) : n.toFixed(2));
 
+/** Parse one CSV line honouring "quoted, fields" and doubled "" escapes. */
+function parseCsvLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let quoted = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (quoted) {
+      if (ch === '"' && line[i + 1] === '"') {
+        cur += '"';
+        i++;
+      } else if (ch === '"') quoted = false;
+      else cur += ch;
+    } else if (ch === '"') quoted = true;
+    else if (ch === ",") {
+      out.push(cur);
+      cur = "";
+    } else cur += ch;
+  }
+  out.push(cur);
+  return out;
+}
+
+/** Parse pasted CSV (header row + data) into new-row records for the editor. */
+function parseCsv(text: string, columns: string[]): Array<Record<string, Cell>> {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  if (lines.length < 2) return [];
+  const headers = parseCsvLine(lines[0]).map((h) => h.trim());
+  return lines.slice(1).map((line) => {
+    const cells = parseCsvLine(line);
+    const row: Record<string, Cell> = {};
+    headers.forEach((h, i) => {
+      if (columns.includes(h) && cells[i] !== undefined) row[h] = coerce(cells[i]);
+    });
+    return row;
+  });
+}
+
 /** Serialise the loaded rows into an extractor format for the clipboard. */
 function extract(result: QueryResult, format: "csv" | "json" | "sql", table: string): string {
   const names = result.columns.map((c) => c.name);
@@ -133,8 +174,13 @@ export function DatabaseDataEditor({
   const client = useHostRuntimeClient(serverId);
   const listRefreshKey = useDatabaseViewStore((s) => s.listRefreshKey);
   const bumpRefresh = useDatabaseViewStore((s) => s.bumpRefresh);
+  const consumeFilter = useDatabaseViewStore((s) => s.consumeFilter);
+  const requestFilter = useDatabaseViewStore((s) => s.requestFilter);
+  const openTable = useDatabaseViewStore((s) => s.openTable);
+  const selectObject = useDatabaseNavStore((s) => s.selectObject);
 
   const [columns, setColumns] = useState<DbColumn[]>([]);
+  const [fks, setFks] = useState<DbForeignKey[]>([]);
   const [result, setResult] = useState<QueryResult | null>(null);
   const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -158,6 +204,8 @@ export function DatabaseDataEditor({
   const [valueCell, setValueCell] = useState<ExpandedCell | null>(null);
   const [aggCol, setAggCol] = useState<string | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importText, setImportText] = useState("");
 
   const pkCols = useMemo(() => columns.filter((c) => c.isPrimaryKey).map((c) => c.name), [columns]);
   const colNames = useMemo(() => columns.map((c) => c.name), [columns]);
@@ -215,11 +263,48 @@ export function DatabaseDataEditor({
     setStatus(null);
     sortRef.current = null;
     setSort(null);
-    filterRef.current = "";
-    setFilterText("");
+    // A foreign-key navigation queued a WHERE for this table — apply it on open.
+    const queued = consumeFilter(schema, table);
+    filterRef.current = queued ?? "";
+    setFilterText(queued ?? "");
     void load(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [databaseId, schema, table, listRefreshKey]);
+
+  // Outgoing foreign keys for this table, so a cell in an FK column can jump to
+  // the referenced row (DataGrip's "Related Rows").
+  useEffect(() => {
+    if (!client) return;
+    let cancelled = false;
+    void client
+      .databaseForeignKeys({ id: databaseId, schema })
+      .then((r) => {
+        if (!cancelled) setFks(r.error ? [] : r.foreignKeys.filter((f) => f.table === table));
+        return undefined;
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [client, databaseId, schema, table, listRefreshKey]);
+  const fkByCol = useMemo(() => {
+    const m = new Map<string, DbForeignKey>();
+    for (const f of fks) m.set(f.column, f);
+    return m;
+  }, [fks]);
+  const navigateFk = useCallback(
+    (fk: DbForeignKey, value: Cell) => {
+      const ref = quoteIdent(engine, fk.refColumn);
+      let where: string;
+      if (value === null) where = `${ref} is null`;
+      else if (typeof value === "number") where = `${ref} = ${value}`;
+      else where = `${ref} = '${String(value).replace(/'/g, "''")}'`;
+      requestFilter(fk.refSchema, fk.refTable, where);
+      openTable(databaseId, { schema: fk.refSchema, name: fk.refTable });
+      selectObject(databaseId, { databaseId, schema: fk.refSchema, name: fk.refTable });
+    },
+    [engine, requestFilter, openTable, selectObject, databaseId],
+  );
 
   // Click a column header to sort (asc → desc → none), re-querying with ORDER BY.
   const handleSort = useCallback(
@@ -432,6 +517,22 @@ export function DatabaseDataEditor({
     () => (result && aggCol ? computeAggregate(result, aggCol) : null),
     [result, aggCol],
   );
+  const openImport = useCallback(() => {
+    setImportText("");
+    setImportOpen(true);
+  }, []);
+  const closeImport = useCallback(() => setImportOpen(false), []);
+  const runImport = useCallback(() => {
+    const parsed = parseCsv(importText, colNames);
+    if (parsed.length === 0) {
+      setStatus("No rows parsed — expect a header row matching column names, then data.");
+      setImportOpen(false);
+      return;
+    }
+    setNewRows((prev) => [...prev, ...parsed]);
+    setImportOpen(false);
+    setStatus(`Imported ${parsed.length} rows from CSV — review and Submit.`);
+  }, [importText, colNames]);
 
   const onSubmit = useCallback(() => void submit(), [submit]);
   const onCommit = useCallback(() => void commit(), [commit]);
@@ -492,6 +593,8 @@ export function DatabaseDataEditor({
                 onStartEdit={startEdit}
                 onCommitEdit={commitExistingEdit}
                 onExpand={handleExpandCell}
+                fkByCol={fkByCol}
+                onNavigate={navigateFk}
               />
             ))}
             {newRows.map((nr, i) => (
@@ -573,6 +676,11 @@ export function DatabaseDataEditor({
           </>
         ) : null}
         <View style={styles.toolbarSpacer} />
+        {canEdit ? (
+          <Pressable style={styles.tbtn} onPress={openImport}>
+            <Text style={styles.tbtnText}>Import CSV</Text>
+          </Pressable>
+        ) : null}
         <View>
           <Pressable style={styles.tbtn} onPress={toggleExport}>
             <Text style={styles.tbtnText}>Export ▾</Text>
@@ -668,7 +776,60 @@ export function DatabaseDataEditor({
       </View>
 
       <PreviewModal open={previewOpen} statements={previewStatements} onClose={closePreview} />
+      <ImportModal
+        open={importOpen}
+        value={importText}
+        onChange={setImportText}
+        onImport={runImport}
+        onClose={closeImport}
+      />
     </View>
+  );
+}
+
+function ImportModal({
+  open,
+  value,
+  onChange,
+  onImport,
+  onClose,
+}: {
+  open: boolean;
+  value: string;
+  onChange: (t: string) => void;
+  onImport: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <Modal visible={open} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.modalBackdrop}>
+        <View style={styles.modalCard}>
+          <Text style={styles.modalTitle}>Import CSV</Text>
+          <Text style={styles.importHint}>
+            Paste CSV with a header row matching column names. Rows are staged as new rows — review,
+            then Submit.
+          </Text>
+          <ThemedCellInput
+            style={styles.importInput}
+            value={value}
+            onChangeText={onChange}
+            multiline
+            placeholder={"id,name,email\n1,Ada,ada@example.test"}
+            autoCapitalize="none"
+            autoCorrect={false}
+            uniProps={placeholderColor}
+          />
+          <View style={styles.modalActions}>
+            <Pressable style={styles.tbtn} onPress={onClose}>
+              <Text style={styles.tbtnText}>Cancel</Text>
+            </Pressable>
+            <Pressable style={[styles.tbtn, styles.tbtnPrimary]} onPress={onImport}>
+              <Text style={styles.tbtnPrimaryText}>Add rows</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -722,6 +883,8 @@ function ExistingRow({
   onStartEdit,
   onCommitEdit,
   onExpand,
+  fkByCol,
+  onNavigate,
 }: {
   rowIndex: number;
   row: Cell[];
@@ -735,6 +898,8 @@ function ExistingRow({
   onStartEdit: (key: string) => void;
   onCommitEdit: (rowIdx: number, col: string, text: string, original: string) => void;
   onExpand: (cell: ExpandedCell) => void;
+  fkByCol: Map<string, DbForeignKey>;
+  onNavigate: (fk: DbForeignKey, value: Cell) => void;
 }) {
   const handleSelect = useCallback(() => onSelect(rowIndex), [onSelect, rowIndex]);
   return (
@@ -773,6 +938,9 @@ function ExistingRow({
             onStart={onStartEdit}
             onCommitExisting={onCommitEdit}
             onExpand={onExpand}
+            fk={fkByCol.get(col)}
+            rawValue={value}
+            onNavigate={onNavigate}
           />
         );
       })}
@@ -850,6 +1018,9 @@ function GridCell({
   onCommitExisting,
   onCommitNew,
   onExpand,
+  fk,
+  rawValue,
+  onNavigate,
 }: {
   cellKey: string;
   rowIndex?: number;
@@ -865,6 +1036,9 @@ function GridCell({
   onCommitExisting?: (rowIdx: number, col: string, text: string, original: string) => void;
   onCommitNew?: (i: number, col: string, text: string) => void;
   onExpand: (cell: ExpandedCell) => void;
+  fk?: DbForeignKey;
+  rawValue?: Cell;
+  onNavigate?: (fk: DbForeignKey, value: Cell) => void;
 }) {
   const [draft, setDraft] = useState(text);
   const handlePress = useCallback(() => {
@@ -875,10 +1049,23 @@ function GridCell({
     () => onExpand({ rowIndex, newIndex, col, text, original }),
     [onExpand, rowIndex, newIndex, col, text, original],
   );
+  const navigate = useCallback(() => {
+    if (fk && onNavigate) onNavigate(fk, rawValue ?? null);
+  }, [fk, onNavigate, rawValue]);
   const commit = useCallback(() => {
     if (rowIndex !== undefined) onCommitExisting?.(rowIndex, col, draft, original);
     else if (newIndex !== undefined) onCommitNew?.(newIndex, col, draft);
   }, [rowIndex, newIndex, col, draft, original, onCommitExisting, onCommitNew]);
+  // Right-click a foreign-key cell to jump to the referenced row (web/desktop).
+  const ctx =
+    isWeb && fk
+      ? {
+          onContextMenu: (e: { preventDefault?: () => void }) => {
+            e?.preventDefault?.();
+            navigate();
+          },
+        }
+      : {};
 
   if (editing) {
     return (
@@ -902,10 +1089,18 @@ function GridCell({
       style={[styles.cell, dirty && styles.cellDirty]}
       onPress={editable ? handlePress : handleExpand}
       onLongPress={handleExpand}
+      {...(ctx as object)}
     >
-      <Text style={[styles.bodyText, isNull && styles.nullText]} numberOfLines={1}>
-        {isNull ? "NULL" : text}
-      </Text>
+      <View style={styles.cellInner}>
+        <Text style={[styles.bodyText, isNull && styles.nullText]} numberOfLines={1}>
+          {isNull ? "NULL" : text}
+        </Text>
+        {fk ? (
+          <Pressable onPress={navigate} hitSlop={6} style={styles.fkJump}>
+            <Text style={styles.fkArrow}>↗</Text>
+          </Pressable>
+        ) : null}
+      </View>
     </Pressable>
   );
 }
@@ -1121,6 +1316,9 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderRightColor: theme.colors.border,
     justifyContent: "center",
   },
+  cellInner: { flexDirection: "row", alignItems: "center", gap: theme.spacing[1] },
+  fkJump: { paddingHorizontal: 2 },
+  fkArrow: { fontSize: theme.fontSize.xs, color: theme.colors.accent },
   cellDirty: { backgroundColor: "rgba(245, 158, 11, 0.16)" },
   cellEditing: { backgroundColor: theme.colors.surface2, paddingVertical: 0 },
   cellInput: {
@@ -1166,6 +1364,20 @@ const styles = StyleSheet.create((theme: Theme) => ({
   },
   exportItem: { paddingHorizontal: theme.spacing[3], paddingVertical: theme.spacing[1.5] },
   exportItemText: { fontSize: theme.fontSize.xs, color: theme.colors.foreground },
+  importHint: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
+  importInput: {
+    minHeight: 180,
+    maxHeight: 320,
+    padding: theme.spacing[2],
+    borderRadius: theme.borderRadius.md,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface0,
+    fontSize: theme.fontSize.sm,
+    fontFamily: theme.fontFamily.mono,
+    color: theme.colors.foreground,
+    textAlignVertical: "top" as const,
+  },
   aggBar: {
     flexDirection: "row",
     alignItems: "center",
