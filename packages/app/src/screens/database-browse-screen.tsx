@@ -9,6 +9,7 @@ import { DatabaseDataEditor } from "@/components/database-data-editor";
 import { DatabaseStructureView } from "@/components/database-structure-view";
 import { DatabaseSqlConsole } from "@/components/database-sql-console";
 import { DatabaseErDiagram } from "@/components/database-er-diagram";
+import { DatabaseFullTextSearch } from "@/components/database-full-text-search";
 import { DatabaseChatDock } from "@/components/database-chat-dock";
 import type { DatabaseComposerContext } from "@/components/database-draft-chat";
 import { useIsCompactFormFactor } from "@/constants/layout";
@@ -48,6 +49,7 @@ export function DatabaseBrowseScreen({
   const selectedObject = useDatabaseNavStore((s) => s.selectedObject);
   const showingConsole = useDatabaseNavStore((s) => s.showingConsole);
   const showingEr = useDatabaseNavStore((s) => s.showingEr);
+  const showingSearch = useDatabaseNavStore((s) => s.showingSearch);
   const setLastDatabase = useDatabaseNavStore((s) => s.setLastDatabase);
   const bumpRefresh = useDatabaseViewStore((s) => s.bumpRefresh);
   const resetViewForDatabase = useDatabaseViewStore((s) => s.resetForDatabase);
@@ -129,6 +131,10 @@ export function DatabaseBrowseScreen({
   let content;
   if (showingConsole) {
     content = <DatabaseSqlConsole serverId={serverId} databaseId={databaseId} engine={engine} />;
+  } else if (showingSearch) {
+    content = (
+      <DatabaseFullTextSearch serverId={serverId} databaseId={databaseId} engine={engine} />
+    );
   } else if (showingEr) {
     content = <DatabaseErDiagram serverId={serverId} databaseId={databaseId} />;
   } else if (selectedObject) {

@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
-import { ChevronLeft, ChevronRight, Plus, RefreshCw, Trash2, Undo2 } from "lucide-react-native";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Copy,
+  Plus,
+  RefreshCw,
+  Trash2,
+  Undo2,
+} from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import * as Clipboard from "expo-clipboard";
 import type {
@@ -28,6 +36,7 @@ const ThemedRefresh = withUnistyles(RefreshCw);
 const ThemedPlus = withUnistyles(Plus);
 const ThemedTrash = withUnistyles(Trash2);
 const ThemedUndo = withUnistyles(Undo2);
+const ThemedCopy = withUnistyles(Copy);
 const ThemedSpinner = withUnistyles(LoadingSpinner);
 const mutedColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 const placeholderColor = (theme: Theme) => ({
@@ -414,6 +423,26 @@ export function DatabaseDataEditor({
     });
     setSelected(new Set());
   }, [selected]);
+  // Clone selected rows as new rows (DataGrip's Duplicate Row) — copy every column
+  // except the primary key so the engine assigns a fresh identity.
+  const cloneSelected = useCallback(() => {
+    if (!result) return;
+    const clones: Array<Record<string, Cell>> = [];
+    for (const r of selected) {
+      const src = result.rows[r];
+      if (!src) continue;
+      const rec: Record<string, Cell> = {};
+      result.columns.forEach((c, i) => {
+        if (!pkCols.includes(c.name)) rec[c.name] = src[i];
+      });
+      clones.push(rec);
+    }
+    if (clones.length > 0) {
+      setNewRows((prev) => [...prev, ...clones]);
+      setSelected(new Set());
+      setStatus(`Cloned ${clones.length} row(s) — review and Submit.`);
+    }
+  }, [result, selected, pkCols]);
 
   const buildStatements = useCallback((): Dml[] => {
     if (!result) return [];
@@ -684,6 +713,14 @@ export function DatabaseDataEditor({
         >
           <ThemedTrash size={14} uniProps={mutedColor} />
           <Text style={styles.tbtnText}>Delete{selected.size ? ` (${selected.size})` : ""}</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.tbtn, (selected.size === 0 || !canEdit) && styles.tbtnDisabled]}
+          onPress={cloneSelected}
+          disabled={selected.size === 0 || !canEdit}
+        >
+          <ThemedCopy size={14} uniProps={mutedColor} />
+          <Text style={styles.tbtnText}>Clone{selected.size ? ` (${selected.size})` : ""}</Text>
         </Pressable>
         <Pressable
           style={[styles.tbtn, pendingCount === 0 && styles.tbtnDisabled]}

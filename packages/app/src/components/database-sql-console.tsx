@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, Switch, Text, TextInput, View } from "react-native";
 import { Play } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
@@ -63,6 +63,28 @@ function SuggestionChip({ value, onPick }: { value: string; onPick: (v: string) 
   );
 }
 
+/** One result-set tab (its own component for a stable press handler). */
+function ResultSetTab({
+  id,
+  label,
+  active,
+  onPick,
+}: {
+  id: number;
+  label: string;
+  active: boolean;
+  onPick: (id: number) => void;
+}) {
+  const press = useCallback(() => onPick(id), [onPick, id]);
+  return (
+    <Pressable style={[styles.rsTab, active && styles.rsTabActive]} onPress={press}>
+      <Text style={[styles.rsTabText, active && styles.rsTabTextActive]} numberOfLines={1}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
 function nowMs(): number {
   return Date.now();
 }
@@ -74,6 +96,7 @@ function nowMs(): number {
  * through `database/exec`. Universal (desktop + mobile) — a multiline input, not
  * a desktop-only editor.
  */
+// eslint-disable-next-line complexity
 export function DatabaseSqlConsole({
   serverId,
   databaseId,
@@ -97,6 +120,12 @@ export function DatabaseSqlConsole({
   const [tab, setTab] = useState<Tab>("result");
   const [historyOpen, setHistoryOpen] = useState(false);
   const [pool, setPool] = useState<SchemaPool>({ tables: [], columns: [] });
+  // Multiple result sets — each successful SELECT opens a new tab (Services-style).
+  const [resultSets, setResultSets] = useState<
+    Array<{ id: number; label: string; result: QueryResult }>
+  >([]);
+  const [activeRs, setActiveRs] = useState<number | null>(null);
+  const rsCounter = useRef(0);
 
   // Build a schema-aware completion pool once: table names across schemas + column
   // names (bounded so a huge database doesn't fan out to thousands of introspects).
@@ -160,6 +189,37 @@ export function DatabaseSqlConsole({
     setSql((cur) => `${cur.replace(WORD_RE, value)} `);
   }, []);
 
+  // Lightweight inspection: flag table names after FROM/JOIN that the schema pool
+  // doesn't know, with a nearest-match quick-fix hint (DataGrip's error highlight).
+  const inspections = useMemo(() => {
+    if (pool.tables.length === 0) return [];
+    const known = new Set(pool.tables.map((t) => t.toLowerCase()));
+    const re = /\b(?:from|join)\s+([A-Za-z_][A-Za-z0-9_]*)/gi;
+    const flagged = new Set<string>();
+    const out: string[] = [];
+    let m: RegExpExecArray | null = re.exec(sql);
+    while (m) {
+      const t = m[1].toLowerCase();
+      if (!known.has(t) && !flagged.has(t)) {
+        flagged.add(t);
+        const near = pool.tables.find((x) => x.toLowerCase().startsWith(t.slice(0, 3)));
+        out.push(`Unknown table "${m[1]}"${near ? ` — did you mean ${near}?` : ""}`);
+      }
+      m = re.exec(sql);
+    }
+    return out;
+  }, [sql, pool]);
+
+  const pickResultSet = useCallback((id: number) => {
+    setActiveRs(id);
+    setResultSets((prev) => {
+      const found = prev.find((r) => r.id === id);
+      if (found) setResult(found.result);
+      return prev;
+    });
+    setTab("result");
+  }, []);
+
   const run = useCallback(async () => {
     if (!client) return;
     const trimmed = sql.trim().replace(/;\s*$/, "");
@@ -189,6 +249,11 @@ export function DatabaseSqlConsole({
           setError(res.error ?? "Query failed");
         } else {
           setResult(res.result);
+          const id = ++rsCounter.current;
+          const label = trimmed.replace(/\s+/g, " ").slice(0, 22) || `Result ${id}`;
+          const captured = res.result;
+          setResultSets((prev) => [...prev, { id, label, result: captured }].slice(-6));
+          setActiveRs(id);
           setOutput(
             `${res.result.rowCount} row(s)${res.result.truncated ? "+ (truncated)" : ""} · ${res.result.elapsedMs} ms`,
           );
@@ -237,7 +302,27 @@ export function DatabaseSqlConsole({
   let resultBody;
   if (tab === "result") {
     resultBody = result ? (
-      <DatabaseResultTable result={result} />
+      <View style={styles.resultWrap}>
+        {resultSets.length > 1 ? (
+          <ScrollView
+            horizontal
+            style={styles.rsBar}
+            contentContainerStyle={styles.rsBarContent}
+            keyboardShouldPersistTaps="always"
+          >
+            {resultSets.map((rs) => (
+              <ResultSetTab
+                key={rs.id}
+                id={rs.id}
+                label={rs.label}
+                active={rs.id === activeRs}
+                onPick={pickResultSet}
+              />
+            ))}
+          </ScrollView>
+        ) : null}
+        <DatabaseResultTable result={result} />
+      </View>
     ) : (
       <Text style={styles.hint}>Run a SELECT to see rows here.</Text>
     );
@@ -278,6 +363,16 @@ export function DatabaseSqlConsole({
             <SuggestionChip key={s} value={s} onPick={applySuggestion} />
           ))}
         </ScrollView>
+      ) : null}
+
+      {inspections.length > 0 ? (
+        <View style={styles.inspectBar}>
+          {inspections.map((msg) => (
+            <Text key={msg} style={styles.inspectText} numberOfLines={1}>
+              ⚠ {msg}
+            </Text>
+          ))}
+        </View>
       ) : null}
 
       <View style={styles.toolbar}>
@@ -401,6 +496,35 @@ const styles = StyleSheet.create((theme: Theme) => ({
     fontFamily: theme.fontFamily.mono,
     color: theme.colors.foreground,
   },
+  inspectBar: {
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[1],
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+    gap: 2,
+  },
+  inspectText: { fontSize: theme.fontSize.xs, color: theme.colors.statusWarning },
+  resultWrap: { flex: 1, minHeight: 0 },
+  rsBar: {
+    flexGrow: 0,
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+  },
+  rsBarContent: { gap: theme.spacing[1], paddingHorizontal: theme.spacing[2], paddingVertical: 4 },
+  rsTab: {
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: 3,
+    borderRadius: theme.borderRadius.sm,
+  },
+  rsTabActive: { backgroundColor: theme.colors.surface2 },
+  rsTabText: {
+    fontSize: theme.fontSize.xs,
+    fontFamily: theme.fontFamily.mono,
+    color: theme.colors.foregroundMuted,
+  },
+  rsTabTextActive: { color: theme.colors.foreground },
   toolbar: {
     flexDirection: "row",
     alignItems: "center",

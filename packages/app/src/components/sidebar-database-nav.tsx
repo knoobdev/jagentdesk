@@ -789,6 +789,8 @@ export function SidebarDatabaseNav({
   const selectObject = useDatabaseNavStore((s) => s.selectObject);
   const selectConsole = useDatabaseNavStore((s) => s.selectConsole);
   const selectEr = useDatabaseNavStore((s) => s.selectEr);
+  const selectSearch = useDatabaseNavStore((s) => s.selectSearch);
+  const showingSearch = useDatabaseNavStore((s) => s.showingSearch);
   const ensureDatabase = useDatabaseNavStore((s) => s.ensureDatabase);
   const openTable = useDatabaseViewStore((s) => s.openTable);
   const listRefreshKey = useDatabaseViewStore((s) => s.listRefreshKey);
@@ -846,6 +848,10 @@ export function SidebarDatabaseNav({
     selectEr(databaseId);
     if (isCompact) showMobileAgent();
   }, [databaseId, selectEr, isCompact, showMobileAgent]);
+  const handleSelectSearch = useCallback(() => {
+    selectSearch(databaseId);
+    if (isCompact) showMobileAgent();
+  }, [databaseId, selectSearch, isCompact, showMobileAgent]);
   const handleToggleChat = useCallback(() => {
     if (chatOpen) hideChat();
     else {
@@ -982,6 +988,13 @@ export function SidebarDatabaseNav({
           accessibilityLabel="ER diagram"
         >
           <ThemedShare2 size={15} uniProps={mutedColor} />
+        </Pressable>
+        <Pressable
+          style={[styles.iconBtn, showingSearch && styles.iconBtnActive]}
+          onPress={handleSelectSearch}
+          accessibilityLabel="Search data"
+        >
+          <ThemedSearch size={15} uniProps={mutedColor} />
         </Pressable>
         <Pressable
           style={styles.iconBtn}
