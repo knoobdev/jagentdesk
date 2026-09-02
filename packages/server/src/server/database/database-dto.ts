@@ -56,6 +56,8 @@ export interface DbObject {
   kind: SchemaObjectKind;
   /** Best-effort row estimate; omitted when unknown or expensive to compute. */
   rowCount?: number;
+  /** Number of columns (shown next to the table in the explorer). */
+  columnCount?: number;
 }
 
 export interface DbColumn {

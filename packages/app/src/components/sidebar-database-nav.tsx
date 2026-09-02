@@ -100,12 +100,14 @@ function TreeRow({
   kind,
   expanded,
   label,
+  count,
   onPress,
   testID,
 }: {
   kind: "database" | "schema";
   expanded: boolean;
   label: string;
+  count?: number;
   onPress: () => void;
   testID?: string;
 }) {
@@ -120,6 +122,7 @@ function TreeRow({
       <Text style={styles.rowLabel} numberOfLines={1}>
         {label}
       </Text>
+      {count != null ? <Text style={styles.rowCount}>{count}</Text> : null}
     </Pressable>
   );
 }
@@ -450,6 +453,9 @@ function TableNode({
         <Text style={[styles.rowLabel, active && styles.rowLabelActive]} numberOfLines={1}>
           {object.name}
         </Text>
+        {object.columnCount != null ? (
+          <Text style={styles.rowCount}>{object.columnCount}</Text>
+        ) : null}
       </Pressable>
       {expanded ? (
         <View style={styles.childIndent}>
@@ -491,6 +497,7 @@ function SchemaNode({
   selectedObject,
   onSelect,
   onMenu,
+  onTableCount,
 }: {
   client: DaemonClient | null;
   id: string;
@@ -501,6 +508,7 @@ function SchemaNode({
   selectedObject: SelectedDbObject | null;
   onSelect: (object: SelectedDbObject) => void;
   onMenu: (object: SelectedDbObject) => void;
+  onTableCount?: (schema: string, count: number) => void;
 }) {
   const [expanded, setExpanded] = useState(autoExpand);
   const [objects, setObjects] = useState<DbObject[]>([]);
@@ -510,14 +518,17 @@ function SchemaNode({
     void client
       .databaseObjects({ id, schema })
       .then((res) => {
-        if (!cancelled && !res.error) setObjects(res.objects);
+        if (!cancelled && !res.error) {
+          setObjects(res.objects);
+          onTableCount?.(schema, res.objects.filter((o) => o.kind === "table").length);
+        }
         return undefined;
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [expanded, client, id, schema, refreshKey]);
+  }, [expanded, client, id, schema, refreshKey, onTableCount]);
   const [viewsExpanded, setViewsExpanded] = useState(false);
   const toggleViews = useCallback(() => setViewsExpanded((v) => !v), []);
   const toggle = useCallback(() => setExpanded((v) => !v), []);
@@ -596,6 +607,15 @@ function DatabaseNode({
 }) {
   const [expanded, setExpanded] = useState(!multiDb);
   const [schemas, setSchemas] = useState<DbSchema[]>([]);
+  const [tableCounts, setTableCounts] = useState<Record<string, number>>({});
+  const handleTableCount = useCallback(
+    (schema: string, count: number) => setTableCounts((prev) => ({ ...prev, [schema]: count })),
+    [],
+  );
+  const totalTables = useMemo(
+    () => Object.values(tableCounts).reduce((a, b) => a + b, 0),
+    [tableCounts],
+  );
   const id = multiDb ? `${parentId}::${dbName}` : parentId;
   useEffect(() => {
     if (!expanded || !client) return;
@@ -628,6 +648,7 @@ function DatabaseNode({
       selectedObject={selectedObject}
       onSelect={onSelect}
       onMenu={onMenu}
+      onTableCount={handleTableCount}
     />
   ));
   if (!multiDb) return <View>{schemaList}</View>;
@@ -637,6 +658,7 @@ function DatabaseNode({
         kind="database"
         expanded={expanded}
         label={dbName}
+        count={expanded && totalTables > 0 ? totalTables : undefined}
         onPress={toggle}
         testID={`database-node-${dbName}`}
       />
@@ -962,7 +984,7 @@ export function SidebarDatabaseNav({
         </Pressable>
       </View>
 
-      <View style={styles.header}>
+      <View style={[styles.header, isCompact && styles.headerCompact]}>
         <DatabaseStatusDot state={database?.state ?? "connected"} />
         <Text style={styles.headerName} numberOfLines={1}>
           {database?.displayName ?? "Database"}
@@ -1108,6 +1130,9 @@ const styles = StyleSheet.create((theme: Theme) => ({
     paddingHorizontal: theme.spacing[3],
     paddingBottom: theme.spacing[1],
   },
+  // On mobile the sidebar overlay's absolute close (×) button sits top-right; keep
+  // the header's icon toolbar (…Refresh) clear of it so they don't overlap.
+  headerCompact: { paddingRight: theme.spacing[12] },
   headerName: {
     flex: 1,
     minWidth: 0,
@@ -1176,6 +1201,12 @@ const styles = StyleSheet.create((theme: Theme) => ({
     fontSize: 10,
     color: theme.colors.foregroundExtraMuted,
     fontFamily: theme.fontFamily.mono,
+  },
+  rowCount: {
+    fontSize: 10,
+    color: theme.colors.foregroundExtraMuted,
+    fontFamily: theme.fontFamily.mono,
+    marginLeft: theme.spacing[1],
   },
   backdrop: {
     flex: 1,

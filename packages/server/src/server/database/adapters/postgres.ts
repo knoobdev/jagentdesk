@@ -85,7 +85,7 @@ export class PostgresDbClient implements DbClient {
   }
 
   async listObjects(schema: string): Promise<DbObject[]> {
-    const res = await this.require().query<{ name: string; kind: string }>(
+    const res = await this.require().query<{ name: string; kind: string; column_count: string }>(
       `select c.relname as name,
               case c.relkind
                 when 'r' then 'table'
@@ -94,7 +94,9 @@ export class PostgresDbClient implements DbClient {
                 when 'm' then 'materialized_view'
                 when 'S' then 'sequence'
                 else 'table'
-              end as kind
+              end as kind,
+              (select count(*) from pg_attribute a
+                 where a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped) as column_count
        from pg_class c
        join pg_namespace n on n.oid = c.relnamespace
        where n.nspname = $1 and c.relkind in ('r','p','v','m','S')
@@ -105,6 +107,7 @@ export class PostgresDbClient implements DbClient {
       schema,
       name: r.name,
       kind: r.kind as SchemaObjectKind,
+      columnCount: Number(r.column_count),
     }));
   }
 

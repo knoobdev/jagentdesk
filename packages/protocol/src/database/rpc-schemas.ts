@@ -47,6 +47,7 @@ export const DbObjectSchema = z.object({
     "collection",
   ]),
   rowCount: z.number().optional(),
+  columnCount: z.number().optional(),
 });
 export const DbColumnSchema = z.object({
   name: z.string(),
