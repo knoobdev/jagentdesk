@@ -108,7 +108,10 @@ jobs:
             runner: ubuntu-22.04
             build_args: "--linux --x64"
           - name: windows-x64
-            runner: windows-latest
+            # Pin to windows-2022 (VS2022): windows-latest ships VS18, which
+            # node-gyp 11 can't detect ("could not find a version of Visual
+            # Studio 2017 or newer"), breaking the better-sqlite3 native build.
+            runner: windows-2022
             build_args: "--win --x64"
           - name: macos-arm64
             runner: macos-14
