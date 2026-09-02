@@ -1,11 +1,11 @@
-# DataGrip parity — bản đồ ĐẦY ĐỦ (từ tài liệu chính thức JetBrains) + gap
+# DB IDE parity — bản đồ ĐẦY ĐỦ (từ tài liệu chính thức JetBrains) + gap
 
-Nguồn: jetbrains.com/help/datagrip (Database Explorer, Data Editor) + features overview.
+Nguồn: tài liệu Database Explorer / Data Editor chính thức (Database Explorer, Data Editor) + features overview.
 ✅ JAgentDesk đã có · ⚠️ một phần · ❌ chưa có. Mục tiêu: parity đúng thứ dùng thật.
 
 ## A. Data Sources / Connections / Drivers
 
-- ⚠️ Nhiều engine (DataGrip 50+, JAD 7). ✅ add/connect/disconnect(deactivate)/delete.
+- ⚠️ Nhiều engine (reference IDE 50+, JAD 7). ✅ add/connect/disconnect(deactivate)/delete.
 - ❌ Data Sources & Drivers dialog (properties), Test Connection.
 - ❌ SSH / SSL tunnel. ❌ Read-only mode per-connection.
 - ❌ Introspection level; Force Refresh (xoá cache load lại); Forget schema cache.
@@ -13,7 +13,7 @@ Nguồn: jetbrains.com/help/datagrip (Database Explorer, Data Editor) + features
 
 ## B. Database Explorer (cây) + toolbar
 
-- ⚠️ Cây: connection → database → schema → **tables** (JAD). DataGrip còn: **Views, Routines
+- ⚠️ Cây: connection → database → schema → **tables** (JAD). reference IDE còn: **Views, Routines
   (functions/procedures), Sequences, Columns, Keys(PK/FK), Indexes, Triggers, Constraints** làm node con.
 - ❌ **Refresh (Ctrl+F5)** / Force Refresh / Forget cache trong UI.
 - ❌ Expand all / Collapse all. ❌ **Go to DDL (Ctrl+B)**. ❌ Jump to Query Console.
@@ -38,8 +38,8 @@ Trên table/view:
 
 ## D. Data Editor / Grid — JAD mạnh phần lõi, thiếu nhiều tính năng dùng thật
 
-- ⚠️ View modes: DataGrip có **Table / Tree / Text / Transpose**; JAD chỉ Table.
-- ❌ **Record view** (panel sửa 1 hàng). ⚠️ Pagination (JAD prev/next; DataGrip first/prev/next/last + page size).
+- ⚠️ View modes: reference IDE có **Table / Tree / Text / Transpose**; JAD chỉ Table.
+- ❌ **Record view** (panel sửa 1 hàng). ⚠️ Pagination (JAD prev/next; reference IDE first/prev/next/last + page size).
 - ❌ **Go to Row**. ❌ **Foreign key navigation (Related Rows)** — nhảy tới hàng tham chiếu.
 - ❌ **Sort click-header** (server/client). ❌ **Filter (WHERE bar + per-column local filter)**. ❌ Full-text search trong grid.
 - ✅ Inline edit. ❌ auto-complete khi sửa ô. ❌ **Value editor ô lớn (text/JSON/XML/image/BLOB)**.
@@ -68,7 +68,7 @@ Trên table/view:
 
 - ✅ ER/UML diagram (canvas).
 
-## I. AI (DataGrip mới có)
+## I. AI (reference IDE mới có)
 
 - ✅ **JAD hơn ở đây**: chat schema-grounded, NL→SQL, sql_query/sql_exec, multi-step agent.
 
@@ -85,7 +85,7 @@ Trên table/view:
 2. **Refresh** thật (nút + F5 + tự sau DDL) — structure view hiện KHÔNG cập nhật khi thêm cột.
 3. **Cây thiếu node**: Views/Routines/Sequences/Columns/Keys/Indexes/Triggers.
 4. **Grid**: sort, filter (WHERE), value editor ô lớn, FK-navigation, aggregate, view modes, clone row.
-5. **SQL console**: auto-complete + inspections (đây là "linh hồn" DataGrip).
+5. **SQL console**: auto-complete + inspections (đây là "linh hồn" reference IDE).
 6. **Import CSV vào bảng** + data extractors.
 7. **Full-text search** dữ liệu.
 8. **Kiến trúc cây**: bỏ list "Overview/SQL/Compare/ER", cây là trung tâm, action qua menu/toolbar/tab.
@@ -98,13 +98,13 @@ Trên table/view:
 - ❌ Resolve mode Playground/Script. ❌ Tabbed results (Services). ❌ Execute-to-File. ❌ Cancel query.
 - ✅ Query history (JAD có).
 
-## L. Full object model (DataGrip quản lý các loại object)
+## L. Full object model (reference IDE quản lý các loại object)
 
 tables, columns, indexes, PK, FK, unique/check constraints, views, **materialized views**,
 functions, **stored procedures**, triggers, sequences, schemas, databases, **users/roles + grants**,
 collations, custom types/domains, extensions, synonyms, packages (Oracle), foreign tables,
 collections (Mongo). → JAD hiện chỉ introspect tables/views/columns/PK/FK.
-DataGrip có **dialog Modify Table / New … trực quan** cho tạo/sửa; JAD ❌.
+reference IDE có **dialog Modify Table / New … trực quan** cho tạo/sửa; JAD ❌.
 
 ## UI SPEC — chuẩn hiện đại (JetBrains New UI), KHÔNG cổ đại/trẻ con
 

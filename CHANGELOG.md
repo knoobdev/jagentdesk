@@ -6,7 +6,7 @@ upstream [Paseo](https://github.com/getpaseo/paseo) fork.
 
 ## v0.0.4 — 2026-09-02
 
-The multi-database (DataGrip-class) release, plus first-run and mobile
+The multi-database (IDE-class) release, plus first-run and mobile
 connection fixes.
 
 ### Added — Multi-database workspace
@@ -15,7 +15,7 @@ connection fixes.
   compare (structure + data) on a single server.
 - **Seven engines live** — PostgreSQL, MySQL, SQLite, SQL Server, Oracle,
   MongoDB, ClickHouse, behind one provider-agnostic `DbClient` contract.
-- **DataGrip-style explorer** — schemas, tables, columns, indexes, foreign
+- **IDE-style explorer** — schemas, tables, columns, indexes, foreign
   keys, views, sequences, routines, with per-node counts (tables per database,
   columns per table).
 - **Data grid** — inline cell editing, `WHERE` filter bar, column sort, two-axis

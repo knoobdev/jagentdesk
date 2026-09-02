@@ -1,4 +1,4 @@
-# Multi-database management (DataGrip-class)
+# Multi-database management
 
 JAgentDesk ships a database cockpit — a full schema/object browser, a data editor grid, a SQL
 console, and a per-connection AI chat — that runs identically on the **Electron desktop app** and

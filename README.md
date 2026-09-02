@@ -32,6 +32,10 @@ with a few deliberate boundaries:
 - **Kubernetes cluster management** — a full Kubernetes cockpit built into the app.
 - **Per‑cluster AI chat** — ask an agent about any resource or its logs; the agent uses
   real `kubectl` tools scoped to the exact cluster you connected.
+- **Databases** _(new)_ — a full database IDE built into the app: seven engines (PostgreSQL,
+  MySQL, SQLite, SQL Server, Oracle, MongoDB, ClickHouse), multiple databases per connection, an
+  object explorer with counts, a data grid with inline editing, a SQL console with autocomplete and
+  query plans, ER diagram, and an AI chat with SQL tools — credentials never leave the daemon.
 - **Skills** _(new)_ — reusable expertise agents **use** (attach many from the composer) and
   **learn** from real conversations; auto‑loaded by message, no hand‑typed corrections.
 - **Plugins** _(new)_ — extend the app with local, trusted code: surfaces, sidebar items,
@@ -48,14 +52,14 @@ with a few deliberate boundaries:
 
 ## ✨ New in this release
 
-### Databases — a DataGrip‑class workspace (desktop **and** mobile)
+### Databases — a full database IDE (desktop **and** mobile)
 
 Open **Databases** from the sidebar to work with your data from inside JAgentDesk:
 
 - **Seven engines** — PostgreSQL, MySQL, SQLite, SQL Server, Oracle, MongoDB, ClickHouse — behind
   one provider‑agnostic contract; credentials never leave the daemon.
 - **Multiple databases per connection** — list and switch databases on a server, with a
-  DataGrip‑style tree (schemas, tables, columns, indexes, foreign keys, views, sequences, routines)
+  an IDE‑style tree (schemas, tables, columns, indexes, foreign keys, views, sequences, routines)
   showing per‑node counts, plus **cross‑database compare** (structure + data).
 - **Data grid** — inline editing, `WHERE` filter, column sort, two‑axis scroll, clone row, CSV
   import, export to CSV/JSON/SQL, aggregate view, record view, and transaction isolation levels.

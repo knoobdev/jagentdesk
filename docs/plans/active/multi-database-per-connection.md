@@ -1,4 +1,4 @@
-# Multi-database per connection — DataGrip tree + cross-db compare
+# Multi-database per connection — object tree + cross-db compare
 
 ## Chốt hướng (user xác nhận)
 

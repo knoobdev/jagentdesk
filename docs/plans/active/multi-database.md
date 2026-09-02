@@ -1,4 +1,4 @@
-# Apply plan: multi-database management (DataGrip-class)
+# Apply plan: multi-database management
 
 Spec: `docs/databases.md`. Mirrors the Kubernetes cockpit (`docs/kubernetes.md`) 1:1 — swap
 `KubeClient` for a per-engine `DbClient`; reuse registry/protocol/session/client/UI/chat shape.
