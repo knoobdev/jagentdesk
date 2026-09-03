@@ -109,9 +109,11 @@ import {
   hasConfiguredLocalDaemonOverride,
   useHostRegistryLoaded,
   useHostRuntimeClient,
+  useHostRuntimeConnectionStatuses,
   useHostRuntimeSnapshot,
   useHosts,
 } from "@/runtime/host-runtime";
+import { hostHasTailnetConnection } from "@/types/host-connection";
 import { getDaemonStartService } from "@/runtime/daemon-start-service";
 import { ConnectionNotifications } from "@/runtime/connection-notifications";
 import { applyAppearance } from "@/screens/settings/appearance/apply-appearance";
@@ -1057,6 +1059,16 @@ function DesktopConnectionGate() {
   const desktopRuntime = shouldUseDesktopDaemon();
   const { mode, loaded } = useConnectionMode();
   const loginStatus = useTailscaleLoginStatus();
+  const hosts = useHosts();
+  const serverIds = useMemo(() => hosts.map((host) => host.serverId), [hosts]);
+  const connectionStatuses = useHostRuntimeConnectionStatuses(serverIds);
+  // A Tailscale host whose live connection has settled into "error" (retries
+  // exhausted, not merely "connecting") has timed out and will not self-recover.
+  const tailscaleTimedOut =
+    mode === "tailscale" &&
+    hosts.some(
+      (host) => hostHasTailnetConnection(host) && connectionStatuses.get(host.serverId) === "error",
+    );
 
   useEffect(() => {
     if (
@@ -1066,12 +1078,13 @@ function DesktopConnectionGate() {
         pathname,
         mode,
         loginStatusKind: loginStatus.kind,
+        tailscaleTimedOut,
       })
     ) {
       return;
     }
     router.replace("/tailscale-login");
-  }, [desktopRuntime, loaded, loginStatus.kind, mode, pathname, router]);
+  }, [desktopRuntime, loaded, loginStatus.kind, mode, pathname, router, tailscaleTimedOut]);
 
   return null;
 }
