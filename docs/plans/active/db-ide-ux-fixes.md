@@ -20,12 +20,12 @@ và desktop. Track theo cụm; nhiều bug chạm file dùng chung nên fix có 
 
 ### Cụm A — Data grid / cell edit (data-editor + result-table) — nặng nhất
 
-- [ ] A1 (both) **1 click vào cell = edit luôn** như DataGrip. Hiện `startEdit` chỉ set
+- [x] A1 (both) **1 click vào cell = edit luôn** như DataGrip. Hiện `startEdit` chỉ set
       `editingKey` — kiểm tra trigger (đang cần double-tap / long-press?).
-- [ ] A2 (mobile) Sửa cột: TextInput inline bị **gôm lại, khó nhìn** → mở **dialog/sheet**
+- [x] A2 (mobile) Sửa cột: TextInput inline bị **gôm lại, khó nhìn** → mở **dialog/sheet**
       để edit (đã có `valueCell` expand viewer :392 — route mobile edit qua đó / bottom sheet).
-- [ ] A3 (both) **Responsive bảng dữ liệu** không ổn — layout cột/scroll.
-- [ ] A4 (desktop) Scroll: **phải kéo xuống hết mới scroll ngang**. CHẨN ĐOÁN: data-editor
+- [x] A3 (both) **Responsive bảng dữ liệu** không ổn — layout cột/scroll.
+- [x] A4 (desktop) Scroll: **phải kéo xuống hết mới scroll ngang**. CHẨN ĐOÁN: data-editor
       `:637-689` lồng `<ScrollView vertical><ScrollView horizontal>` → thanh cuộn ngang nằm ở
       đáy nội dung cao (dưới viewport) nên phải kéo dọc hết mới cuộn ngang. Fix: đảo thành
       outer horizontal (height bounded = viewport) + inner vertical, header/cột-1 sticky.
@@ -37,25 +37,25 @@ và desktop. Track theo cụm; nhiều bug chạm file dùng chung nên fix có 
       chỉ theo breakpoint width → desktop window hẹp bị nhận là mobile → ra bottom-sheet
       giữa màn thay vì popup tại con trỏ. Fix: `isMobile = useIsCompactFormFactor() && !getIsElectron()`.
       App typecheck 0. **Cần verify runtime desktop** (chuột phải → popup tại con trỏ).
-- [ ] B3 (desktop) Chuột phải item table trong list **bắt force-select trước** — cho phép
+- [x] B3 (desktop) Chuột phải item table trong list **bắt force-select trước** — cho phép
       right-click trực tiếp mở menu cho đúng item.
 
 ### Cụm C — Filter (database-full-text-search.tsx)
 
-- [ ] C1 (both) Filter table **vỡ giao diện** — mất chữ / bị che (overflow, width).
+- [x] C1 (both) Filter table **vỡ giao diện** — mất chữ / bị che (overflow, width).
 
 ### Cụm D — ER diagram (database-er-diagram.tsx)
 
-- [ ] D1 (both) Canvas **không zoom in/out** — thêm pinch (mobile) + wheel/nút zoom (desktop).
+- [x] D1 (both) Canvas **không zoom in/out** — thêm pinch (mobile) + wheel/nút zoom (desktop).
 
 ### Cụm E — Navigation / footer (database-browse-screen + screens)
 
-- [ ] E1 (mobile) **Footer tràn viền**, mất chữ trái/phải — padding/safe-area/overflow.
-- [ ] E2 (mobile) Nhiều màn DB **thiếu nút Back** (phải vuốt phải) — thêm header back.
+- [x] E1 (mobile) **Footer tràn viền**, mất chữ trái/phải — padding/safe-area/overflow.
+- [x] E2 (mobile) Nhiều màn DB **thiếu nút Back** (phải vuốt phải) — thêm header back.
 
 ### Cụm F — Chat dock (database-chat-dock.tsx)
 
-- [ ] F1 (mobile) Vào Databases **mất widget chat agent** — điều kiện render ẩn trên mobile?
+- [x] F1 (mobile) Vào Databases **mất widget chat agent** — điều kiện render ẩn trên mobile?
 
 ## Cách làm
 
@@ -67,3 +67,6 @@ tới khi verify được từng cụm.
 
 - `valueCell` expand-cell viewer đã tồn tại (đã là hướng "dialog để edit") → tận dụng cho A2.
 - context-menu.tsx dùng chung toàn app — sửa vị trí phải test không vỡ chỗ khác.
+
+## Trạng thái (v0.0.7)
+Tất cả 12 bug đã fix (4 subagent song song + B1/B2) — app typecheck 0, Databases screen render không crash. Released v0.0.7. **Chưa verify grid/filter/ER với DB thật** (cần Add connection tới DB server) — khuyến nghị device pass. Android APK CI vẫn OOM (track riêng).
