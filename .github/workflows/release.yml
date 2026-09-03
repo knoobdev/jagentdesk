@@ -250,8 +250,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo rm -rf /usr/local/lib/android/sdk/ndk || true
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk/emulator /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          # NEVER delete $AGENT_TOOLSDIRECTORY (/opt/hostedtoolcache) — it holds the
+          # Java + Node toolchains this job needs; removing it broke JAVA_HOME.
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost \
+            /usr/local/lib/android/sdk/ndk /usr/local/lib/android/sdk/emulator || true
           sudo swapoff -a || true
           sudo rm -f /swapfile || true
           sudo fallocate -l 14G /swapfile
