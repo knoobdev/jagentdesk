@@ -2,7 +2,7 @@ import { fork, spawn, type ChildProcess } from "child_process";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { createStream as createRotatingFileStream } from "rotating-file-stream";
-import { signalProcessTree } from "../src/utils/tree-kill.js";
+import { terminateWithTreeKill } from "../src/utils/tree-kill.js";
 
 const WORKER_HEARTBEAT_INTERVAL_MS = 1_000;
 const WORKER_TERMINATION_GRACE_MS = 10_000;
@@ -205,7 +205,10 @@ export function runSupervisor(options: SupervisorOptions): SupervisorController 
           workerPid: currentChild.pid ?? null,
         },
       );
-      void signalProcessTree(currentChild, "SIGKILL").catch((error) => {
+      void terminateWithTreeKill(currentChild, {
+        gracefulSignal: "SIGKILL",
+        gracefulTimeoutMs: 0,
+      }).catch((error: unknown) => {
         writeLifecycleLog("Failed to force-kill worker process tree", {
           error: error instanceof Error ? error.message : String(error),
           supervisorPid: process.pid,
