@@ -124,29 +124,33 @@ quietly relying on:
   renders inside its host, not necessarily at window origin. Position anchored
   content relative to the host: `anchorRect - hostRect`. This is what
   `measureFloatingPanelPortalHost()` is for.
-- **React context.** `@gorhom/portal` is not a React portal — a real one keeps
-  context, this one does not. It stores the element and the host renders it, so
-  context resolves at the _host's_ position. Everything provided between
-  `PortalProvider` in `app/_layout.tsx` and your sheet is invisible inside it.
-  This is why app-wide providers wrap `PortalProvider` rather than the reverse.
 
-The fix for transforms is Gotcha 3. The fix for context is Gotcha 7.
+The fix for transforms is Gotcha 3.
 
-## Gotcha 3 — Keyboard layout and portal anchors
+## Gotcha 3 — Reanimated transforms vs `measureInWindow`
 
-Move the chat surface with worklet-driven bottom padding from
-`KeyboardShiftProvider`. Padding keeps the stream, composer, visual position,
-and native hit testing in the same layout. Do not translate the stream and
-composer independently.
+`measureInWindow` returns the view's _current_ screen position. In theory that
+includes Reanimated-applied transforms (Reanimated updates native view
+properties, and Android's `getLocationInWindow` reads transformed coords). In
+practice it's racy — the measurement may snapshot mid-animation, and on Android
+with Reanimated worklets the result is not always stable.
 
-Do not use the controller's raw keyboard progress for the padding. It can retain
-a nonzero value after the keyboard closes. The shared provider normalizes that
-state and reconciles native animation-end events.
+If the panel cannot stay inside the transformed ancestor, do not try to track
+the keyboard by re-measuring on every frame. Instead,
+**slave the popover's transform to the same `KeyboardShiftProvider` SharedValue
+the composer uses**:
 
-`measureInWindow` already includes the dock's current padding layout. When a
-portal opens, snapshot the current shift and apply only the subsequent shift
-delta to its animated `bottom`. Adding the full shift moves the portal twice and
-can place it over the composer controls.
+1. Snapshot `openShift = shift.value` at the moment you measure the anchor.
+2. Apply `useAnimatedStyle(() => ({ transform: [{ translateY: openShift.value - shift.value }] }))`
+   to the popover wrapper.
+
+When `shift` equals `openShift`, the translate is 0 and the popover sits at
+the measured position. When the keyboard moves afterward, the delta translates
+the popover by exactly the amount the composer translates. They move in
+lockstep, no re-measurement needed. Do not call
+`useReanimatedKeyboardAnimation()` directly for app UI offset policy; Android
+can briefly report a stale nonzero height with closed progress, and the shared
+provider is where that is normalized.
 
 The provider also reconciles iOS from the controller's native `onEnd` event.
 The controller's stock iOS shared values update at move start and during an
@@ -232,28 +236,6 @@ Do not treat `onChange(-1)` as a close by itself. In a stacked
 another pushed sheet. Close React state from `onDismiss`; use `onChange` only to
 track phase.
 
-## Gotcha 7 — A sheet cannot read context from its call site
-
-React cannot copy contexts reflectively, so the only way across the teleport in
-Gotcha 2 is to render the providers a second time, with values captured on the
-near side where they are still readable. `IsolatedBottomSheetModal` takes a
-`contextBridge` for exactly that:
-
-```tsx
-const contextBridge = useCallback<ContextBridge>(
-  (content) => <ThingContext.Provider value={thing}>{content}</ThingContext.Provider>,
-  [thing],
-);
-```
-
-The prop is **required**, and `null` is a real answer. A sheet whose content
-needs nothing local should have to say so, because the failure mode is silent
-until someone adds a `useContext` deep inside and it throws on device only —
-never on web, where the desktop path uses a real portal. `menu-surface.tsx`
-bridges the menu's two contexts; the rest pass `null`.
-
-Wrapping providers _around_ the modal does nothing. They land on the wrong side.
-
 ## Recipe for a new anchored panel
 
 Before you write a new one, ask:
@@ -276,6 +258,3 @@ Before you write a new one, ask:
    bounded**. Verify before you commit.
 
 Then copy the closest canonical file and trim.
-
-Building a **menu** rather than a bare panel? Don't. Use the menu engine — it already solves
-everything above, plus submenus, sheets, and hover intent. See [menus.md](menus.md).

@@ -14,7 +14,7 @@ Your code never leaves your machine. JAgentDesk is local-first.
        │                   │                  │
        │    WebSocket      │    WebSocket     │    Managed subprocess
        │    (direct or     │    (direct)      │    + WebSocket
-       │     via relay)    │                  │
+       │     via Tailscale) │                  │
        └───────────┬───────┴──────────────────┘
                    │
             ┌──────▼──────┐
@@ -37,7 +37,6 @@ Your code never leaves your machine. JAgentDesk is local-first.
 - **App:** Cross-platform Expo client for iOS, Android, web, and the shared UI used by desktop.
 - **CLI:** Terminal interface for agent workflows that can also start and manage the daemon.
 - **Desktop app:** Electron wrapper around the web app that bundles and auto-manages its own daemon.
-- **Relay:** Optional encrypted bridge for remote access without opening ports directly.
 
 ## Packages
 
@@ -49,7 +48,7 @@ The heart of JAgentDesk. A Node.js process that:
 - Manages agent lifecycle (create, run, stop, resume, archive)
 - Streams agent output in real time via a timeline model
 - Provides agent-to-agent tools through a transport-neutral tool catalog, with MCP as one adapter
-- Optionally connects outbound to a relay for remote access
+- Optionally connects to a Tailscale (tsnet) tailnet for remote access
 - Optionally serves the browser web client from the same HTTP server (self-hosting guide: [public-docs/web-ui.md](../public-docs/web-ui.md))
 
 All paths are under `packages/server/src/`.
@@ -64,21 +63,21 @@ not retain non-Git directories.
 
 **Key modules:**
 
-| Module                          | Responsibility                                                                 |
-| ------------------------------- | ------------------------------------------------------------------------------ |
-| `server/bootstrap.ts`           | Daemon initialization: HTTP server, WS server, agent manager, storage, relay   |
-| `server/websocket-server.ts`    | WebSocket connection management, hello handshake, binary frame routing         |
-| `server/session.ts`             | Per-client session state, timeline subscriptions, terminal operations          |
-| `server/directory-sync/`        | Daemon-global latest-state sequences for projects, workspaces, and agents      |
-| `server/workspace-labels/`      | Host-local label catalog, assignment mutations, and explicit subscriptions     |
-| `server/agent/agent-manager.ts` | Agent lifecycle state machine, timeline tracking, subscriber management        |
-| `server/agent/agent-storage.ts` | File-backed JSON persistence at `$JAGENTDESK_HOME/agents/`                          |
-| `server/agent/tools/`           | Transport-neutral catalog for workspaces, agents, permissions, and automation  |
-| `server/agent/mcp-server.ts`    | Thin MCP adapter that registers the JAgentDesk tool catalog with the MCP SDK        |
-| `server/agent/providers/`       | Provider adapters (see "Agent providers" below)                                |
-| `server/orchestration-skills/`  | Bundled catalog, host selection, convergence, and skill-directory transactions |
-| `server/relay-transport.ts`     | Outbound relay connection with E2E encryption                                  |
-| `server/schedule/`              | Cron-based scheduled agents                                                    |
+| Module                          | Responsibility                                                                |
+| ------------------------------- | ----------------------------------------------------------------------------- |
+| `server/bootstrap.ts`           | Daemon initialization: HTTP server, WS server, agent manager, storage, tsnet  |
+| `server/websocket-server.ts`    | WebSocket connection management, hello handshake, binary frame routing        |
+| `server/session.ts`             | Per-client session state, timeline subscriptions, terminal operations         |
+| `server/agent/agent-manager.ts` | Agent lifecycle state machine, timeline tracking, subscriber management       |
+| `server/agent/agent-storage.ts` | File-backed JSON persistence at `$JAGENTDESK_HOME/agents/`                    |
+| `server/agent/tools/`           | Transport-neutral catalog for workspaces, agents, permissions, and automation |
+| `server/orchestration/`         | Task Brief compiler, role-scoped topology enforcement, handback/dissent state |
+| `server/agent/mcp-server.ts`    | Thin MCP adapter that registers the JAgentDesk tool catalog with the MCP SDK  |
+| `server/agent/providers/`       | Provider adapters (see "Agent providers" below)                               |
+| `server/tsnet-listener.ts`      | Tailnet (tsnet) listener for remote access                                    |
+| `server/schedule/`              | Cron-based scheduled agents                                                   |
+| `server/loop-service.ts`        | Looping agent runs that retry until an exit condition                         |
+| `server/chat/`                  | Chat rooms for agent-to-agent and human-to-agent messaging                    |
 
 ### `packages/protocol` — Wire schemas and shared protocol types
 
@@ -94,50 +93,25 @@ facade. App and CLI may import the low-level driver from
 `@jagentdesk/client/internal/daemon-client` during migration, while new SDK-shaped
 code imports from `@jagentdesk/client`.
 
-`JAgentDeskApi` is the capability-only boundary over workspaces, agents, providers, and config.
-`JAgentDeskClient` adds connection lifecycle. App plugin surfaces borrow an API over their selected
-host's client; plugin subprocesses use the same facade over a host-owned IPC transport.
-
 ### `packages/app` — Mobile + web client (Expo)
 
 Cross-platform React Native app that connects to one or more daemons.
 
 - Expo Router navigation (`/h/[serverId]/workspace/[workspaceId]`, `/h/[serverId]/agent/[agentId]`, etc.). The `workspaceId` URL segment is an opaque workspace id, not a directly meaningful filesystem path.
-- `HostRuntimeController` manages saved host connections, reconnection, and per-host runtime state. Direct TCP and relay connections use the ordinary client transport; desktop socket, pipe, and SSH connections cross one Electron-owned transport boundary. SSH only tunnels to an already-running daemon.
-- `runtime/replica-cache` is typed storage behind the directory and timeline owners. It never observes or mutates `SessionStore`.
-- `runtime/directory-sync` owns directory cache selection and network reconciliation. On demand it paints accepted rows for one host, then passes the persisted per-entity cursor through `project.list`, `fetch_workspaces`, and `fetch_agents`; the daemon returns each entity's latest projection when its sequence is newer, plus tombstones.
-- `workspace-labels` owns one sequenced catalog replica per connected host, the deterministic cross-host projection that surfaces spanning hosts use (the filter page, the manager), and the per-host resolution a workspace row's chips use. Two hosts may give one name different colors, so a row resolves against its own host's catalog and a merged answer would be wrong there. Catalogs never synchronize between hosts; assignment creates a missing definition only on the target host. On the daemon, catalog and assignment rewrites share a journaled commit boundary. Startup recovery completes that commit before workspace or catalog publication.
+- `HostRuntimeController` manages saved host connections, reconnection, and per-host runtime state
+- `runtime/replica-cache` keeps a non-authoritative per-host display replica in AsyncStorage: only the last focused agent, its workspace, and a short timeline tail. It restores before navigation becomes ready, leaves remote hydration flags false, and is atomically replaced by the normal snapshot-plus-delta synchronization path.
 - `SessionContext` wraps the daemon client for the active session
 - Composer UI and submit/draft behavior live in `packages/app/src/composer/`; screens and panels should integrate it from there instead of dropping composer internals into `components/`, `hooks/`, or `screens/workspace/`
 - Timeline reducers in `timeline/session-stream-reducers.ts` handle compaction, gap detection, sequence-based deduplication
 - Timeline sync correctness is documented in [docs/timeline-sync.md](timeline-sync.md): live streams are for immediacy, `fetch_agent_timeline_request` is authoritative, and catch-up is paged but complete.
 - Voice features: dictation (STT) and voice agent (realtime)
 
-Consumers request directory or timeline data without choosing memory, cache, or network. The owner
-publishes an accepted cache hit and then reconciles it over the existing network path. A miss or an
-invalid row uses that same path. Offline demand still publishes an accepted cache hit and defers
-network reconciliation. Cache loading is demand-driven: opening a chat reads its agent row and
-focused timeline row, plus the workspace and project rows needed by the route; opening a directory
-reads directory rows for that host and establishes its live subscription when connected. Accepted
-cached rows satisfy the same consumer-readiness projection as network rows. Host registry startup and
-host connection do not create directory demand or install replicas. The directory owner retains
-declared surface demand and re-establishes network reconciliation after reconnect; React does not
-track connection generations. Late cache reads cannot replace state already advanced by live or
-authoritative network data. Owners explicitly persist accepted commits; directory rows and their
-checkpoint share one storage transaction. See
-[data-model.md](data-model.md#replica-row-store)
-for the storage shape and [timeline-sync.md](timeline-sync.md#client-replica-lifetime) for timeline
-resume behavior.
-
-The three directory entity types have independent monotonic sequences and share one daemon
-generation. The daemon retains only the latest projection per entity and bounded tombstones, not an
-event log. A missing, expired, or previous-generation cursor receives a full snapshot. Projects are
-independent records; a project with no workspaces does not need a workspace placeholder.
-
-Workspace label definitions use a separate, explicitly subscribed sequence. The list request both
-fetches and grants live updates for that session. A current cursor receives an empty correlated
-catch-up response when nothing changed; idle sessions and unsubscribed sessions receive no label
-traffic. Workspace assignments stay on the workspace directory sequence.
+The replica cache exists only to paint stale data immediately while the host connects. It does not
+own mutations, infer deletions, or replace daemon reconciliation. Pending permission requests are
+not restored from it. AsyncStorage is not encrypted, so the cached timeline tail may contain source
+code, prompts, and tool output; encrypted-at-rest storage is a separate product/security decision.
+Its serialized payload has a 1 MiB byte budget and evicts whole host snapshots in least-recently-
+written order; a single oversized host is omitted rather than partially restored.
 
 ### `packages/cli` — Command-line client
 
@@ -145,12 +119,13 @@ Commander.js CLI with Docker-style commands. Common agent operations are also ex
 
 - `jagentdesk agent ls/run/import/attach/logs/stop/delete/send/inspect/wait/archive/reload/update/mode`
 - `jagentdesk daemon start/stop/restart/status/pair/set-password`
+- `jagentdesk chat ls/create/inspect/post/read/wait/delete`
 - `jagentdesk terminal ls/create/capture/send-keys/kill`
 - `jagentdesk script ls/start/stop`
+- `jagentdesk loop run/ls/inspect/logs/stop`
 - `jagentdesk schedule create/ls/inspect/update/pause/resume/run-once/logs/delete`
 - `jagentdesk heartbeat create/update/delete`
-- `jagentdesk project create/ls/rename/delete`
-- `jagentdesk workspace create/ls/rename/archive`
+- `jagentdesk workspace create/ls/archive`
 - `jagentdesk permit allow/deny/ls`
 - `jagentdesk provider ls/models`
 - hidden legacy `jagentdesk worktree create/ls/archive` compatibility alias
@@ -158,26 +133,15 @@ Commander.js CLI with Docker-style commands. Common agent operations are also ex
 
 Communicates with the daemon via the same WebSocket protocol as the app.
 
-### `packages/relay` — Relay transport and E2E encryption
+### Remote access — Tailscale (tsnet)
 
-Enables remote access when the daemon is behind a firewall.
+Remote access no longer uses a relay. The daemon joins a Tailscale tailnet via
+`packages/server/src/server/tsnet-listener.ts` and accepts WebSocket connections
+there; WireGuard provides transport encryption and node identity, so the relay's
+E2EE box layer was removed. Pairing transfers the daemon's public key through a
+tailnet connection offer.
 
-- Curve25519 establishes the relay-session secret; NaCl `box` protects each payload with XSalsa20-Poly1305
-- The relay is zero-knowledge — it routes encrypted bytes and cannot read content
-- Client and daemon channels with identical API (`createClientChannel`, `createDaemonChannel`)
-- Pairing via QR code transfers the daemon's public key to the client
-- New homes keep relay disabled until pairing consent. `DaemonConfigStore` persists the desired state, while the relay runtime starts or stops the outbound transport live; pairing reads that current state instead of a startup snapshot.
-- Optional E2EE capability negotiation preserves application frame kind: text plaintext uses base64 ciphertext text frames, while binary plaintext uses raw ciphertext binary frames; mixed-version peers remain base64-only
-- Self-hosted relays opt into TLS with `daemon.relay.useTls` or `JAGENTDESK_RELAY_USE_TLS=true`; the public (client-facing) TLS setting can be overridden independently via `daemon.relay.publicUseTls` or `JAGENTDESK_RELAY_PUBLIC_USE_TLS`
-
-The production relay server lives in [jagentdesk/jagentdesk-relay](https://github.com/jagentdesk/jagentdesk-relay). It is a distributed Elixir service. The Cloudflare relay implementation in this monorepo is retained as legacy code and is not deployed.
-
-See [SECURITY.md](../SECURITY.md) for the full threat model.
-
-### JAgentDesk Hub
-
-The optional Hub relationship is daemon-outbound and does not use the relay. Its connection,
-authorization, ownership, persistence, and lifecycle contract is documented in [hub.md](hub.md).
+See [SECURITY.md](../SECURITY.md) for the threat model.
 
 ### `packages/desktop` — Desktop app (Electron)
 
@@ -186,10 +150,6 @@ Electron wrapper for macOS, Linux, and Windows.
 - Can spawn the daemon as a managed subprocess
 - Native file access for workspace integration
 - Same WebSocket client as mobile app
-
-The desktop does not manage agent skills. It retains one compatibility reader for the old
-`skill-selection.json`, imports that preference into its managed local daemon, then deletes the old
-file after the daemon confirms persistence.
 
 **Multi-window (hybrid land-on model).** `createWindow()` in `main.ts` is reusable: `⌘⇧N`/File→New Window, relaunching the app (`second-instance`), and the sidebar "Open in new window" action each open a fresh `BrowserWindow`. Every window shows the full sidebar — there is no per-window project ownership or filtering. "Land on a project" is delivered by a per-`webContents` `PendingOpenProjectStore`: each window pulls its own pending project path on mount (`jagentdesk:get-pending-open-project`) and runs the normal open-project flow, identical to a CLI `jagentdesk <path>` launch.
 
@@ -217,7 +177,7 @@ Agent browser_keypress -> guest sendInputEvent(skipIfUnhandled)
 
 ### `packages/website` — Marketing site
 
-TanStack Router + Cloudflare Workers. Serves jagentdesk.local.
+TanStack Router + Cloudflare Workers. Serves localhost:8082.
 
 ## WebSocket protocol
 
@@ -244,11 +204,13 @@ There is no dedicated welcome message; the server emits a `status` session messa
 
 Client liveness checks use the top-level JSON `ping`/`pong` envelope, not a session RPC or RFC6455 control ping. Current clients ping every 10 seconds, beginning one interval after connecting. The first ping claims an application-ownership lease for that physical socket, all later inbound activity renews it, and the daemon forcibly terminates the socket if the lease expires. A legacy or raw socket that never sends an application ping never enters this lease and is not closed for omitting one. Session RPC timeouts are operation failures and must not be treated as proof that the socket is dead.
 
-Every physical send path enforces an 8 MiB outbound high-water mark, including JSON broadcasts, binary terminal frames, and the encrypted relay adapter's asynchronous queue. This sits above the terminal stream's 4 MiB soft backpressure threshold, leaving room for snapshot catch-up before the hard cutoff. JSON is serialized once per broadcast after sockets already at the limit are removed, then its exact byte length is checked for every remaining socket. A frame that would cross the limit is not sent; that physical socket is forcibly terminated without disturbing other sockets attached to the same logical session. Multiple tabs and simultaneous direct and relay paths may legitimately share a client id.
+Every physical send path enforces an 8 MiB outbound high-water mark, including JSON broadcasts and binary terminal frames. This sits above the terminal stream's 4 MiB soft backpressure threshold, leaving room for snapshot catch-up before the hard cutoff. JSON is serialized once per broadcast after sockets already at the limit are removed, then its exact byte length is checked for every remaining socket. A frame that would cross the limit is not sent; that physical socket is forcibly terminated without disturbing other sockets attached to the same logical session. Multiple tabs and simultaneous direct and remote paths may legitimately share a client id.
 
-Client session RPC waits default to 60s so slow relay or mobile networks do not turn a live but delayed daemon response into a false operation failure. Keep connect timeouts, app-level grace windows, explicit diagnostic latency probes, liveness ping timers, and genuinely long-running RPCs separate from this default.
+Client session RPC waits default to 60s so slow or mobile networks do not turn a live but delayed daemon response into a false operation failure. Keep connect timeouts, app-level grace windows, explicit diagnostic latency probes, liveness ping timers, and genuinely long-running RPCs separate from this default.
 
 New session RPCs use dotted names with `.request` and `.response` suffixes, such as `checkout.forge.set_auto_merge.request` and `checkout.forge.set_auto_merge.response`. See [rpc-namespacing.md](rpc-namespacing.md) for the convention and migration rules for older flat RPC names.
+
+The Supervisor–Lead–Peer control plane is documented in [orchestration.md](orchestration.md).
 
 **Notable session message types:**
 
@@ -334,7 +296,7 @@ initializing → idle ⇄ running
   client-side dedup; the default fetch page is 200 items.
 - Timeline row `timestamp` values are canonical daemon-owned timestamps. Providers may supply original replay timestamps, but clients must not guess timestamp trust or hide time UI based on local clock heuristics.
 - Events stream to connected clients in real time; correctness is backed by authoritative timeline fetches and paged-to-completion catch-up.
-- Agent state persists to `$JAGENTDESK_HOME/agents/{cwd-with-dashes}/{agent-id}.json`. Timeline rows are runtime memory; provider history is the durable transcript authority and resumed agents rebuild from it. That storage path is derived from `cwd`, not from workspace id.
+- Agent state persists to `$JAGENTDESK_HOME/agents/{cwd-with-dashes}/{agent-id}.json` (timeline rows live alongside the record). That storage path is derived from `cwd`, not from workspace id.
 
 ## Right-sidebar boundary: directory-backed vs workspace-owned
 
@@ -409,13 +371,15 @@ Providers that can accept native tool definitions should set `supportsNativeJAge
 
 ```
 $JAGENTDESK_HOME/
-├── agents/{cwd-with-dashes}/{agent-id}.json   # Agent record
+├── agents/{cwd-with-dashes}/{agent-id}.json   # Agent record + persisted timeline rows
 ├── projects/projects.json                      # Project registry
 ├── projects/workspaces.json                    # Workspace registry
 ├── projects/icons/                             # Custom project icon images
+├── chat/                                       # Chat rooms
 ├── schedules/                                  # Scheduled-agent definitions and runs
+├── loops/                                      # Loop runs and logs
 ├── config.json                                 # Daemon config (mutable)
-├── daemon-keypair.json                         # Daemon identity for relay/E2EE
+├── daemon-keypair.json                         # Daemon identity for pairing/signing
 ├── push-tokens.json                            # Mobile push tokens
 ├── jagentdesk.sock / jagentdesk.pid                      # Local IPC socket and pidfile
 └── daemon.log                                  # Daemon trace logs (rotated)
@@ -425,4 +389,4 @@ $JAGENTDESK_HOME/
 
 1. **Local daemon** (default): `jagentdesk daemon start` on `127.0.0.1:6767`
 2. **Managed desktop**: Electron app spawns daemon as subprocess, and stops it again on quit so that "restart the app" is a complete reset. Settings > Host > "Keep daemon running after quit" opts out. Only a daemon the desktop started is stopped — a daemon you started yourself with `jagentdesk daemon start` is left alone (`jagentdesk.pid` records `desktopManaged`).
-3. **Remote + relay**: Daemon behind firewall, relay bridges with E2E encryption
+3. **Remote (Tailscale)**: Daemon behind a firewall, reachable over a tailnet via tsnet

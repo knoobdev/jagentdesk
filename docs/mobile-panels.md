@@ -30,10 +30,8 @@ The UI worklet owns transient motion:
 - the active gesture's starting revision
 - the last settled target
 
-React publishes the active panel only when the canonical target and the UI-thread position agree at
-the final anchor. Retained content never observes gesture previews, progress, or an unsettled target.
-The gesture hosts stay mounted; worklets reveal their retained overlays through native styles while
-React owns pointer events and accessibility.
+React also owns presentation lifecycle: whether an overlay is mounted/displayed and whether it may
+receive pointer events. Worklets never own `display` or `pointerEvents`.
 
 ## Why one position
 
@@ -57,10 +55,8 @@ while that revision still owns the gesture.
 
 When a React command arrives during a drag, its newer revision clears gesture ownership and starts
 motion toward the new target. The older gesture's remaining updates and finish callback are ignored.
-Canceled gestures return to the latest canonical target. A successful gesture starts its finishing
-motion immediately; the matching React command adopts that motion instead of restarting it. Position
-settlement and command acceptance may arrive in either order. Activity changes after both agree on
-the same target.
+Canceled gestures return to the latest canonical target. Animation completion is accepted only when
+its target and revision still match the canonical command.
 
 Manual gesture arbitration has two phases:
 
@@ -89,14 +85,8 @@ definition, no longer eligible to begin.
 - Animated panel nodes use React Native static styles plus inline theme values. Do not attach
   Unistyles-generated styles to those nodes; Unistyles and Reanimated patching the same Fabric node
   has caused native crashes.
-- `FORCE_REACT_RENDER_FOR_SETTLED_ANIMATIONS` stays off in `packages/app/package.json`. It is a
-  compile-time flag; changing it needs a native rebuild. With it on, Reanimated 4.3 hands settled
-  animated props back to React through a collector that forgets entries older than two seconds. A JS
-  stall across a panel settle loses the final position, and the next React commit reverts the overlay
-  to its last synced props: a backdrop over the workspace while the store says closed. Upstream fixed
-  the collector in 4.4.3, which needs React Native 0.83.
-- Gesture start and progress must not update React state. The retained overlay is already mounted and
-  offscreen; only the shared position and its derived native styles move during a drag.
+- The plain React wrapper owns `display: none` after settlement. This prevents a stale Fabric animated
+  prop commit from resurrecting a closed overlay.
 - Hidden tabs and workspaces use `RetainedPanel`. It owns a non-collapsible native root, visibility,
   pointer events, and the active signal consumed by `useRetainedPanelActive`.
 - Panels whose gesture wrapper already owns visibility use `RetainedPanelActivity` to provide the
@@ -108,9 +98,8 @@ definition, no longer eligible to begin.
 - Retention order and render order are separate concerns. LRU metadata may change on every switch;
   keyed retained roots must keep a stable sibling order. Moving large retained roots triggered Fabric
   Differ failures (`addViewAt` / `removeViewAt` view reuse) on Android.
-- `useIsMobilePanelActive` follows the settled target, not the requested target. Position at the
-  canonical target's anchor is the settlement signal; animation duration and completion callbacks
-  do not own activity. Cancellation publishes nothing.
+- The newly active panel must be included in the same render that changes selection. Adding it from an
+  effect creates a committed frame where every retained panel is hidden, which is a real blank screen.
 - Do not suspend retained native subtrees with `Suspense`/`react-freeze`. Suspension changes native
   ownership and can detach descendants. Keep the tree mounted, stabilize its subscriptions/selectors,
   and use the retained-panel active signal to stop timers, polling, and other genuine background work.
@@ -118,5 +107,5 @@ definition, no longer eligible to begin.
 ## Tests
 
 `packages/app/src/mobile-panels/model.test.ts` exercises command, drag, cancellation, interruption,
-rapid-command, position-settlement, and width-projection sequences through the transition model. Add
-a sequence there whenever ownership or ordering changes.
+rapid-command, stale-completion, and width-projection sequences through the transition model. Add a
+sequence there whenever ownership or ordering changes.
