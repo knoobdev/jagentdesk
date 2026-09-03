@@ -66,8 +66,25 @@ Outcome (typecheck 0 across every package):
 - [x] typecheck 0: protocol, client, server, app, desktop, plugin, highlight
 - [x] cli typecheck 0 (reverted hub/plugin/client to fork HEAD Tailscale-only; deleted 3 hub-cloud files)
 - [x] remove `paseo` keywords introduced by the port (only guard-test `@paseo/plugin` kept)
+- [x] merge port → `fix/usage-plan-skills` (ff); working tree now on the port source
 - [ ] build all packages + build desktop app + build mobile; runtime smoke test
-- [ ] merge `port/paseo-0.7.2` → main
+- [ ] reset `port/paseo-0.7.2` to the fixed HEAD + final push / land on mainline
+
+### Incident: node_modules clobbered on ff-merge (fixed)
+
+The pre-existing WIP port commit (`852ee1c52`, from a prior session) accidentally
+**git-tracked node_modules as self-referential symlinks** (top-level + 8 per-package,
+each `node_modules -> <its own abs path>`, the `//` double-slash betraying a
+`$dir/node_modules` script). node_modules was NOT tracked at `96a86c7ff`. When the
+ff-merge checked out those symlinks, git replaced the real (gitignored) node_modules
+dirs with ELOOP self-symlinks → every build/typecheck broke.
+
+Fix: `git rm --cached` all 9 node_modules symlinks + removed them from the working
+tree (commit `faf67a523`); node_modules stays gitignored and untracked. Real deps
+restored with `npm install` (the committed `package-lock.json` was stale — missing
+the DB-IDE/K8s/new deps: better-sqlite3, mongodb, mssql, mysql2, oracledb, pg,
+@kubernetes/client-node, @replit/codemirror-lang-csharp, … — so `npm ci` refused;
+`npm install` regenerated the lock).
 
 ## Invariants to preserve
 
