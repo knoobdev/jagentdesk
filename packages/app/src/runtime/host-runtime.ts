@@ -27,6 +27,14 @@ import {
   type TimingOutHostEntry,
   type TimingOutHostKind,
 } from "@/runtime/timing-out-hosts";
+import {
+  addHostBackup,
+  HOST_BACKUP_STORAGE_KEY,
+  parseHostBackups,
+  restoreHostProfile,
+  serializeHostBackups,
+  takeHostBackup,
+} from "@/runtime/host-backups";
 import { defaultHostAppearance, type HostBadgeDisplay, type HostColor } from "@/hosts/appearance";
 import {
   buildDaemonWebSocketUrl,
@@ -1641,6 +1649,9 @@ export class HostRuntimeStore {
   // can re-notify on the next launch. Kept in memory and mirrored to storage.
   private timingOutHosts: TimingOutHostEntry[] = [];
   private lastTimingOutKindByServer = new Map<string, TimingOutHostKind | null>();
+  // Removed host profiles, kept so a later re-login to the same daemon restores
+  // the host's saved label/appearance/connections (see host-backups.ts).
+  private hostBackups: HostProfile[] = [];
   // Listeners notified when a host transitions online, so the app layer can run
   // reverse migration if that host previously had data migrated away from it.
   private sourceHostReconnectListeners = new Set<(serverId: string) => void>();
@@ -1720,6 +1731,39 @@ export class HostRuntimeStore {
     void this.storage
       .setItem(TIMING_OUT_HOSTS_STORAGE_KEY, serializeTimingOutHosts(this.timingOutHosts))
       .catch((error) => console.error("[HostRuntime] Failed to persist timing-out hosts", error));
+  }
+
+  // --- Host profile backup / restore across re-login ---
+
+  private async loadHostBackups(): Promise<void> {
+    try {
+      this.hostBackups = parseHostBackups(await this.storage.getItem(HOST_BACKUP_STORAGE_KEY));
+    } catch {
+      this.hostBackups = [];
+    }
+  }
+
+  private persistHostBackups(): void {
+    void this.storage
+      .setItem(HOST_BACKUP_STORAGE_KEY, serializeHostBackups(this.hostBackups))
+      .catch((error) => console.error("[HostRuntime] Failed to persist host backups", error));
+  }
+
+  /** Remember a removed host so re-login to the same daemon restores its profile. */
+  private backupRemovedHost(removed: HostProfile): void {
+    this.hostBackups = addHostBackup(this.hostBackups, removed);
+    this.persistHostBackups();
+  }
+
+  /** If a fresh host matches a backup, restore its saved label/appearance/connections. */
+  private applyHostBackup(profiles: HostProfile[], serverId: string): HostProfile[] {
+    const { backup, remaining } = takeHostBackup(this.hostBackups, serverId);
+    if (!backup) return profiles;
+    this.hostBackups = remaining;
+    this.persistHostBackups();
+    return profiles.map((profile) =>
+      profile.serverId === serverId ? restoreHostProfile(profile, backup) : profile,
+    );
   }
 
   /**
@@ -1808,6 +1852,7 @@ export class HostRuntimeStore {
     });
     const override = readConfiguredLocalDaemonOverride();
     await this.loadTimingOutHosts();
+    await this.loadHostBackups();
     await this.loadFromStorage();
     this.markHostRegistryLoaded();
 
@@ -2264,6 +2309,10 @@ export class HostRuntimeStore {
   }
 
   async removeHost(serverId: string): Promise<void> {
+    const removed = this.hosts.find((daemon) => daemon.serverId === serverId);
+    if (removed) {
+      this.backupRemovedHost(removed);
+    }
     const remaining = this.hosts.filter((daemon) => daemon.serverId !== serverId);
     this.setHostsAndSync(remaining);
     await this.persistHosts();
@@ -2293,6 +2342,9 @@ export class HostRuntimeStore {
         if (daemon.serverId !== serverId) return daemon;
         const remaining = daemon.connections.filter((conn) => conn.id !== connectionId);
         if (remaining.length === 0) {
+          // Removing the host's last connection drops the host — back it up so a
+          // re-login to the same daemon restores its profile.
+          this.backupRemovedHost(daemon);
           return null;
         }
         const preferred =
@@ -2319,13 +2371,16 @@ export class HostRuntimeStore {
     existingClient?: DaemonClient;
   }): Promise<HostProfile> {
     const now = new Date().toISOString();
-    const next = upsertHostConnectionInProfiles({
+    const upserted = upsertHostConnectionInProfiles({
       profiles: this.hosts,
       serverId: input.serverId,
       label: input.label,
       connection: input.connection,
       now,
     });
+    // Restore a backed-up profile for this daemon (label/appearance/connections)
+    // when the user re-logs in after removing it.
+    const next = this.applyHostBackup(upserted, input.serverId);
     this.setHostsAndSync(next, {
       initialConnectionByServerId: input.existingClient
         ? new Map([

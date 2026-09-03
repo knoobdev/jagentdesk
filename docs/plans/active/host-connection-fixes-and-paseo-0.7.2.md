@@ -25,10 +25,10 @@ Findings (source ALREADY implements this):
 
 Expected: returning to host-picker + re-login deletes the old connection but BACKS IT UP, then RESTORES after a successful connect (Tailscale or Local). Workspaces/projects preserved (keyed by host prefix/serverId).
 
-- [ ] design backup store (persist removed HostProfile(s) keyed by serverId)
-- [ ] on Tailscale login success / Local continue success → restore matching backup
-- [ ] preserve workspace/project association by serverId prefix
-- [ ] tests
+- [x] backup store: host-backups.ts (persist removed HostProfile by serverId) +tests
+- [x] restore on re-login: both upsertTailnetConnection + upsertConnectionFromListen route through upsertHostConnection → applyHostBackup
+- [x] workspaces/projects already keyed by serverId (not purged on remove) → auto-reunite on same-daemon re-login
+- [x] tests (host-backups.test.ts 7/7)
 
 ## Part 4 — Port Paseo 0.6.x → 0.7.2 (SELECTIVE, not bulk-merge)
 
