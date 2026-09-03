@@ -39,7 +39,7 @@ import {
   useIsolatedBottomSheetVisibility,
 } from "@/components/ui/isolated-bottom-sheet-modal";
 import { FloatingScrollView, FloatingSurface } from "@/components/ui/floating";
-import { isWeb, isNative } from "@/constants/platform";
+import { isWeb, isNative, getIsElectron } from "@/constants/platform";
 
 // Keep parity with dropdown-menu action statuses.
 export type ActionStatus = "idle" | "pending" | "success";
@@ -388,7 +388,10 @@ export function ContextMenuContent({
   const { t } = useTranslation();
   const context = useContextMenuContext("ContextMenuContent");
   const { theme } = useUnistyles();
-  const isMobile = useIsCompactFormFactor();
+  // A narrow *desktop* (Electron) window is still a mouse/cursor context — it must
+  // get the cursor-anchored popup, never the touch bottom-sheet. Only treat true
+  // compact touch/web form factors as mobile.
+  const isMobile = useIsCompactFormFactor() && !getIsElectron();
   const useMobileSheet = isMobile && mobileMode === "sheet";
   const { open, setOpen, triggerRef, anchorRect } = context;
   const sheetSnapPoints = useMemo(() => ["30%", "55%"], []);
