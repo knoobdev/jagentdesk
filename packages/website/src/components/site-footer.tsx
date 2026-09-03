@@ -1,5 +1,4 @@
 import { getAlternativePages } from "~/data/alternative-pages";
-import { appStoreUrl, playStoreUrl, webAppUrl } from "~/downloads";
 
 interface SiteFooterProps {
   width?: "default" | "prose";
@@ -11,7 +10,7 @@ export function SiteFooter({ width = "default" }: SiteFooterProps) {
   const alternatives = getAlternativePages();
   return (
     <footer className={`${widthClasses} mx-auto`}>
-      <div className="border-t border-white/10 pt-8 pb-4 grid grid-cols-2 sm:grid-cols-5 gap-8 text-sm">
+      <div className="border-t border-white/10 pt-8 pb-4 grid grid-cols-1 sm:grid-cols-3 gap-8 text-sm">
         <div className="space-y-3">
           <p className="text-white/60 font-medium">Product</p>
           <div className="space-y-2">
@@ -28,18 +27,6 @@ export function SiteFooter({ width = "default" }: SiteFooterProps) {
               Docs
             </a>
             <a
-              href="/changelog"
-              className="block text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Changelog
-            </a>
-            <a
-              href="/hub"
-              className="block text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Hub
-            </a>
-            <a
               href="/docs/cli"
               className="block text-muted-foreground hover:text-foreground transition-colors"
             >
@@ -50,18 +37,6 @@ export function SiteFooter({ width = "default" }: SiteFooterProps) {
               className="block text-muted-foreground hover:text-foreground transition-colors"
             >
               Privacy
-            </a>
-            <a
-              href="/terms"
-              className="block text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Terms
-            </a>
-            <a
-              href="/sponsor"
-              className="block text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Sponsor
             </a>
           </div>
         </div>
@@ -106,72 +81,6 @@ export function SiteFooter({ width = "default" }: SiteFooterProps) {
                 {page.name}
               </a>
             ))}
-          </div>
-        </div>
-        <div className="space-y-3">
-          <p className="text-white/60 font-medium">Community</p>
-          <div className="space-y-2">
-            <a
-              href="https://discord.gg/jz8T2uahpH"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Discord
-            </a>
-            <a
-              href="https://www.reddit.com/r/JAgentDeskAI/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Reddit
-            </a>
-            <a
-              href="https://github.com/jagentdesk/jagentdesk"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block text-muted-foreground hover:text-foreground transition-colors"
-            >
-              GitHub
-            </a>
-          </div>
-        </div>
-        <div className="space-y-3">
-          <p className="text-white/60 font-medium">Download</p>
-          <div className="space-y-2">
-            <a
-              href={appStoreUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block text-muted-foreground hover:text-foreground transition-colors"
-            >
-              App Store
-            </a>
-            <a
-              href={playStoreUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Google Play
-            </a>
-            <a
-              href="https://github.com/jagentdesk/jagentdesk/releases"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Desktop
-            </a>
-            <a
-              href={webAppUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Web App
-            </a>
           </div>
         </div>
       </div>

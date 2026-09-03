@@ -1,87 +1,116 @@
 ---
-title: Open Source Superset Alternative With Native Mobile
-description: JAgentDesk is an Apache-2.0 Superset alternative that runs locally without an account and supports application plugins across its server and clients.
+title: Superset Alternative With Linux, Windows, and Mobile
+description: JAgentDesk is open source under an OSI license, has no login wall, ships native mobile, and runs on macOS, Linux, and Windows. Superset is source-available, macOS only, and gates the desktop app on a Superset login.
 nav: Superset
 order: 51
 ---
 
 # JAgentDesk vs Superset
 
-Superset is a source-available desktop workspace for running CLI coding agents in parallel Git worktrees. It includes a CLI, SDK, MCP server, and remote hosts.
+Superset is a macOS desktop app for running CLI coding agents in parallel git worktrees. Source-available under the Elastic License 2.0.
 
-JAgentDesk orchestrates coding agents from desktop, mobile, web, and the CLI. Open source under Apache-2.0.
+JAgentDesk is an app for orchestrating coding agents, with native clients on desktop, mobile, web, and the CLI. Open source (AGPL-3.0).
 
 ![JAgentDesk desktop and mobile app](/hero-mockup.png)
 
-## The main difference
+## When to pick what
 
-Superset provides a terminal-centered workspace for running many CLI agents in parallel Git worktrees. It requires a Superset account and GitHub sign-in, and its source is published under the Elastic License 2.0.
+Pick Superset if you prefer a terminal-first interface where agents live inside terminal panes.
 
-JAgentDesk runs locally without an account, is licensed under Apache 2.0, provides structured interfaces for supported agent harnesses, and supports application plugins with server-side behavior and native client components.
+Pick JAgentDesk if you want:
+
+- An OSI-approved open source license (AGPL-3.0)
+- Linux or Windows
+- A native mobile app
+- No login wall
+- A per-agent UI with modes, slash commands, and file pickers
+- Free without seat limits
 
 ## License
 
-JAgentDesk is open source under Apache-2.0. You can audit, fork, modify, and redistribute it.
+JAgentDesk is open source under AGPL-3.0. Audit it, fork it, redistribute it.
 
-Superset publishes its source under the Elastic License 2.0. You can use and modify it, but the license restricts offering Superset as a managed service and bypassing license-protected functionality.
+Superset is source-available under the Elastic License 2.0. The source is on GitHub, but the license restricts hosting it as a service and limits redistribution.
 
-## Architecture and access
+## Login
 
-Both tools run agents on machines you control and can connect to remote hosts.
+Superset's desktop app shows a Superset login wall on first launch. A Superset account is required to use it.
 
-JAgentDesk's daemon runs independently of its clients. Desktop, web, mobile, CLI, SDK, and MCP clients can connect directly, and local use does not require an account.
+JAgentDesk does not require any login.
 
-Superset requires a Superset account and GitHub sign-in when opening the app. Its synchronization, remote access, and team workflows use Superset's cloud services.
+## Architecture
+
+The JAgentDesk daemon runs as its own process. Desktop, web, mobile, and CLI clients connect to it. Run the daemon on your laptop, on a server, or in Docker, and connect from anywhere.
+
+Superset's desktop is the host. Agents run inside it.
 
 ## Providers
 
-Superset supports many CLI-based coding agents and lets you add custom terminal agents.
+Both tools support many agents. Superset is a terminal multiplexer where each agent runs inside a terminal pane. JAgentDesk runs Claude Code, Codex, OpenCode, and Pi natively with a per-agent UI (modes, slash commands, file picker, diff viewer), plus 30+ more agents through the in-app catalog via ACP, plus any custom CLI agent. See [Supported providers](/docs/supported-providers).
 
-JAgentDesk runs Claude Code, Codex, OpenCode, and Pi through native structured harnesses, plus 30+ agents through its ACP catalog and any custom CLI agent. See [all supported providers](/agents).
+## Panes
 
-## Application plugins
+JAgentDesk's app has split panes and tabs. Panes include a diff viewer and a browser for testing running services. Agents render as native UI with modes, slash commands, and file pickers.
 
-[JAgentDesk plugins](/docs/plugins) extend JAgentDesk itself. They can add server behavior and native client components such as workspace panels, sidebar items, composer attachments, themes, and Command Center items across desktop, browser, iOS, and Android.
+In Superset, each agent runs inside a terminal pane.
 
-Superset does not document an application extension API for adding both server behavior and native client components.
+## GitHub
 
-## Workspaces and review
+JAgentDesk's app handles commit, push, opening PRs, watching checks and reviews, and merging.
 
-Both tools provide Git worktrees, split panes, terminals, diff review, an in-app browser, GitHub workflows, schedules, and remote hosts.
+## CLI
 
-JAgentDesk gives supported providers a structured chat interface with modes, slash commands, tool calls, and file attachments. Superset can run any CLI agent in terminal panes and adds lifecycle status for supported agents.
+JAgentDesk has a CLI that mirrors the app:
 
-JAgentDesk also gives each worktree its own service URL, such as `web.fix-auth.my-app.localhost`, so parallel development servers do not compete for ports.
+```bash
+jagentdesk run --provider codex "implement OAuth"
+jagentdesk run --host devbox:6767 "run the test suite"
+jagentdesk ls
+jagentdesk send <agent-id> "add tests"
+jagentdesk schedule create --cron "0 9 * * 1" "audit the codebase"
+```
 
-## Automation
+`jagentdesk run --host` connects to a remote daemon. `jagentdesk schedule` runs an agent on a cron. `jagentdesk loop` retries an agent until a verification command passes.
 
-Both tools expose workspace and agent operations through a CLI, TypeScript SDK, and MCP server. They can create workspaces, launch agents, follow progress, and manage scheduled work.
+Superset is a desktop app and does not have a CLI.
+
+## Worktrees and services
+
+Both tools isolate parallel agents in git worktrees.
+
+JAgentDesk also gives each worktree its own dev server URL like `web.fix-auth.my-app.localhost`, so parallel agents don't fight for ports.
+
+## Mobile
+
+JAgentDesk ships native iOS and Android apps with the same feature set as the desktop. Superset does not have a mobile app.
+
+## Voice
+
+JAgentDesk's speech-to-text and text-to-speech run locally on your device. Superset does not have voice.
 
 ## Pricing
 
 JAgentDesk is free with no seat limits.
 
-Superset has a free individual tier. Team features, remote access, and integrations are part of its paid plans.
+Superset is free for one seat with local workspaces only. Team features and sync start at $20 per seat per month.
 
 ## Comparison
 
-|                              | JAgentDesk                                    | Superset                               |
-| ---------------------------- | ---------------------------------------- | -------------------------------------- |
-| License                      | Open source (Apache-2.0)                 | Source-available (Elastic License 2.0) |
-| Desktop platforms            | macOS, Linux, Windows                    | macOS, experimental Linux              |
-| Native mobile                | iOS, Android                             | Coming soon                            |
-| Account required             | No                                       | Yes, with GitHub sign-in               |
-| Agent harnesses              | Native, ACP, and custom CLI              | CLI agents                             |
-| Application plugins          | Server code and native client components | No                                     |
-| Split panes and tabs         | Yes                                      | Yes                                    |
-| In-app terminal              | Yes                                      | Yes                                    |
-| In-app browser               | Yes                                      | Yes                                    |
-| GitHub workflow in app       | Commit, push, PR, checks, reviews, merge | Yes                                    |
-| Git worktrees                | Yes                                      | Yes                                    |
-| Per-worktree dev server URLs | Yes                                      | Port detection                         |
-| Automation                   | CLI, SDK, MCP                            | CLI, SDK, MCP                          |
-| Schedules                    | Yes                                      | Yes                                    |
-| Local voice                  | Dictation and realtime voice             | No documented voice support            |
-| Self-hosted daemon           | Yes                                      | Host server                            |
+|                              | JAgentDesk                                                 | Superset                               |
+| ---------------------------- | ----------------------------------------------------- | -------------------------------------- |
+| License                      | Open source (AGPL-3.0)                                | Source-available (Elastic License 2.0) |
+| Platforms                    | macOS, Linux, Windows                                 | macOS only                             |
+| Native mobile                | iOS, Android                                          | —                                      |
+| Login required               | No                                                    | Yes (Superset account)                 |
+| Pricing                      | Free                                                  | Free 1 seat, $20/seat/mo Pro           |
+| Per-agent native UI          | Yes (modes, slash commands, file picker, diff viewer) | Terminal output                        |
+| Split panes and tabs         | Yes                                                   | Yes (terminals)                        |
+| In-app browser               | Yes                                                   | —                                      |
+| GitHub workflow in app       | Commit, push, PR, checks, reviews, merge              | Yes                                    |
+| Git worktrees                | Yes                                                   | Yes                                    |
+| Per-worktree dev server URLs | Yes                                                   | —                                      |
+| CLI                          | Run, `--host`, ls, send, schedule, loop               | —                                      |
+| Local voice (on-device)      | Yes                                                   | —                                      |
+| Self-hosted daemon           | Yes                                                   | —                                      |
 
 See also: [JAgentDesk vs Conductor](/alternatives/conductor), [JAgentDesk vs OpenChamber](/alternatives/openchamber), [JAgentDesk vs Happy Coder](/alternatives/happy-coder).

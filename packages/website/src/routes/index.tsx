@@ -17,18 +17,12 @@ function Home() {
     <LandingPage
       title={
         <>
-          The control plane
+          Orchestrate coding agents
           <br />
-          for coding agents
+          from your desk and your phone
         </>
       }
-      subtitle={
-        <>
-          Run any coding agent from anywhere.
-          <br />
-          Self-hosted, multi-provider, open source
-        </>
-      }
+      subtitle="Run any coding agent from your phone, desktop, or terminal. Self-hosted, multi-provider, open source."
     />
   );
 }
