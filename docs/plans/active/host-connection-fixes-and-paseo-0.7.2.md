@@ -80,9 +80,22 @@ Outcome (typecheck 0 across every package):
   startup-splash-screen, host-route-bootstrap-boundary, desktop-connection-gate,
   startup-dsl, daemon-port) is **byte-identical to the pre-merge baseline 96a86c7ff**
   → NOT a merge regression (pre-existing/env behavior).
-- [ ] build mobile (EAS) + runtime smoke over Tailscale — needs EAS account/simulator
-- [ ] final push / land on mainline branch (note: local `main` branch is stale; the
-  work sits on `fix/usage-plan-skills`)
+- [x] **mobile EAS iOS build GREEN** (profile production-simulator, account
+  jagentdesk20262); installed to iPhone 15 simulator, **app boots + renders the
+  JAgentDesk home correctly** (brand, layout, fonts — no crash/error modal). Full
+  connected DB/chat smoke needs a live daemon + Tailscale pairing (idb tap tooling
+  broken on this host); the pairing/routing files are byte-identical to baseline.
+- [x] fixed one latent typecheck error surfaced by the fresh plugin dist
+  (`plugins/theme.ts` now maps all 11 v0.7.2 PluginTheme color tokens)
+- [x] `main` fast-forwarded to the merged HEAD (`5f50e95e5`); all three branches
+  (main, fix/usage-plan-skills, port/paseo-0.7.2) aligned. **Not pushed** (user chose
+  FF-only). Port worktree removed.
+
+## Final state
+
+All 8 packages typecheck 0 (fresh dist). `build:server` + `build:desktop` GREEN.
+Desktop boots (host-picker). Mobile EAS build GREEN + boots on iOS simulator.
+`main` = `5f50e95e5`, local-only.
 
 ### Incident: node_modules clobbered on ff-merge (fixed)
 
