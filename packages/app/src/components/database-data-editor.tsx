@@ -9,7 +9,8 @@ import {
   Trash2,
   Undo2,
 } from "lucide-react-native";
-import { StyleSheet, withUnistyles } from "react-native-unistyles";
+import { StyleSheet, useUnistyles, withUnistyles } from "react-native-unistyles";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Clipboard from "expo-clipboard";
 import type {
   DatabaseEngine,
@@ -17,18 +18,26 @@ import type {
   DbForeignKey,
   QueryResult,
 } from "@jagentdesk/protocol/database/rpc-schemas";
+import type { LayoutChangeEvent } from "react-native";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { useDatabaseViewStore } from "@/stores/database-view-store";
 import { useDatabaseNavStore } from "@/stores/database-nav-store";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { isSqlEngine, qualifyTable, quoteIdent } from "@/utils/sql-ident";
-import { isWeb } from "@/constants/platform";
+import { isNative, isWeb } from "@/constants/platform";
+import { useIsCompactFormFactor } from "@/constants/layout";
 import { buildDelete, buildInsert, buildUpdate, type Cell, type Dml } from "@/utils/sql-dml";
 import type { Theme } from "@/styles/theme";
 
 const PAGE_SIZE = 100;
 const GUTTER_W = 52;
-const CELL_W = 168;
+// Column widths are estimated from the header + a sample of cell values and
+// clamped to this range so narrow columns stay readable and wide values (JSON,
+// text) truncate with an ellipsis instead of blowing out the row.
+const MIN_CELL_W = 120;
+const MAX_CELL_W = 360;
+const CHAR_W = 7.5;
+const EXPAND_THRESHOLD = 24;
 
 const ThemedChevronLeft = withUnistyles(ChevronLeft);
 const ThemedChevronRight = withUnistyles(ChevronRight);
@@ -234,6 +243,63 @@ export function DatabaseDataEditor({
   const pkCols = useMemo(() => columns.filter((c) => c.isPrimaryKey).map((c) => c.name), [columns]);
   const colNames = useMemo(() => columns.map((c) => c.name), [columns]);
   const canEdit = isSqlEngine(engine) && pkCols.length > 0;
+
+  // Compact/native devices route cell editing through the docked value editor
+  // (a proper multi-line surface) instead of the cramped inline TextInput.
+  const compact = useIsCompactFormFactor();
+  const dialogEdit = isNative || compact;
+
+  // On compact/mobile the bottom bars must clear the home indicator and any
+  // horizontal safe-area (landscape notch) so text isn't cut off at the screen
+  // edges. Desktop keeps the plain padded bars.
+  const insets = useSafeAreaInsets();
+  const { theme } = useUnistyles();
+  const barHInset = compact
+    ? {
+        paddingLeft: theme.spacing[3] + insets.left,
+        paddingRight: theme.spacing[3] + insets.right,
+      }
+    : null;
+  const statusBarInset = compact
+    ? {
+        paddingLeft: theme.spacing[3] + insets.left,
+        paddingRight: theme.spacing[3] + insets.right,
+        paddingBottom: theme.spacing[1] + insets.bottom,
+      }
+    : null;
+
+  // Estimate a width per column from the header label + a sample of loaded cell
+  // values, clamped to [MIN_CELL_W, MAX_CELL_W]. Keeps the grid legible from a
+  // narrow phone to a wide desktop without a measure/layout pass per cell.
+  const colWidths = useMemo(
+    () =>
+      columns.map((c) => {
+        let longest = c.name.length + (c.isPrimaryKey ? 3 : 0);
+        const idx = colNames.indexOf(c.name);
+        const sample = result ? Math.min(result.rows.length, 50) : 0;
+        for (let r = 0; r < sample; r++) {
+          const v = result?.rows[r]?.[idx];
+          const len = v === null || v === undefined ? 4 : String(v).length;
+          if (len > longest) longest = len;
+        }
+        return Math.max(MIN_CELL_W, Math.min(MAX_CELL_W, Math.round(longest * CHAR_W) + 24));
+      }),
+    [columns, colNames, result],
+  );
+
+  // Measured viewport height so the vertical body scroll can be bounded while the
+  // header row stays pinned above it (see gridBody). Without a bound, nesting a
+  // vertical scroll inside the horizontal scroll would grow unbounded on web.
+  const [gridH, setGridH] = useState(0);
+  const [headerH, setHeaderH] = useState(0);
+  const onGridLayout = useCallback(
+    (e: LayoutChangeEvent) => setGridH(e.nativeEvent.layout.height),
+    [],
+  );
+  const onHeaderLayout = useCallback(
+    (e: LayoutChangeEvent) => setHeaderH(e.nativeEvent.layout.height),
+    [],
+  );
 
   const resetPending = useCallback(() => {
     setEdits({});
@@ -633,16 +699,23 @@ export function DatabaseDataEditor({
       </View>
     );
   } else if (result) {
+    // Both axes scroll independently: the OUTER scroll is horizontal (so its
+    // scrollbar sits at the viewport edge, not below tall content), and the
+    // header + rows share it so columns stay aligned. The INNER vertical scroll
+    // is bounded to the measured viewport height (gridH − headerH) so the header
+    // row stays pinned while rows scroll under it.
+    const bodyH = gridH > 0 ? Math.max(0, gridH - headerH) : undefined;
     gridBody = (
-      <ScrollView style={styles.vscroll}>
-        <ScrollView horizontal>
-          <View>
-            <View style={styles.headerRow}>
+      <View style={styles.gridWrap} onLayout={onGridLayout}>
+        <ScrollView horizontal style={styles.hscroll} contentContainerStyle={styles.hContent}>
+          <View style={styles.grid}>
+            <View style={styles.headerRow} onLayout={onHeaderLayout}>
               <View style={styles.gutter} />
-              {columns.map((c) => (
+              {columns.map((c, i) => (
                 <HeaderCell
                   key={c.name}
                   column={c}
+                  width={colWidths[i]}
                   sortDir={sort?.col === c.name ? sort.dir : null}
                   aggActive={aggCol === c.name}
                   onSort={handleSort}
@@ -650,43 +723,49 @@ export function DatabaseDataEditor({
                 />
               ))}
             </View>
-            {result.rows.map((row, r) => (
-              <ExistingRow
-                // eslint-disable-next-line react/no-array-index-key
-                key={r}
-                rowIndex={r}
-                row={row}
-                columns={colNames}
-                edits={edits}
-                deleted={deleted.has(r)}
-                selected={selected.has(r)}
-                canEdit={canEdit}
-                editingKey={editingKey}
-                onSelect={toggleSelect}
-                onStartEdit={startEdit}
-                onCommitEdit={commitExistingEdit}
-                onExpand={handleExpandCell}
-                fkByCol={fkByCol}
-                onNavigate={navigateFk}
-                onOpenRecord={openRecord}
-              />
-            ))}
-            {newRows.map((nr, i) => (
-              <NewRow
-                // eslint-disable-next-line react/no-array-index-key
-                key={`new-${i}`}
-                index={i}
-                values={nr}
-                columns={colNames}
-                editingKey={editingKey}
-                onStartEdit={startEdit}
-                onCommitEdit={commitNewEdit}
-                onExpand={handleExpandCell}
-              />
-            ))}
+            <ScrollView style={[styles.bodyScroll, bodyH !== undefined ? { height: bodyH } : null]}>
+              {result.rows.map((row, r) => (
+                <ExistingRow
+                  // eslint-disable-next-line react/no-array-index-key
+                  key={r}
+                  rowIndex={r}
+                  row={row}
+                  columns={colNames}
+                  widths={colWidths}
+                  edits={edits}
+                  deleted={deleted.has(r)}
+                  selected={selected.has(r)}
+                  canEdit={canEdit}
+                  dialogEdit={dialogEdit}
+                  editingKey={editingKey}
+                  onSelect={toggleSelect}
+                  onStartEdit={startEdit}
+                  onCommitEdit={commitExistingEdit}
+                  onExpand={handleExpandCell}
+                  fkByCol={fkByCol}
+                  onNavigate={navigateFk}
+                  onOpenRecord={openRecord}
+                />
+              ))}
+              {newRows.map((nr, i) => (
+                <NewRow
+                  // eslint-disable-next-line react/no-array-index-key
+                  key={`new-${i}`}
+                  index={i}
+                  values={nr}
+                  columns={colNames}
+                  widths={colWidths}
+                  dialogEdit={dialogEdit}
+                  editingKey={editingKey}
+                  onStartEdit={startEdit}
+                  onCommitEdit={commitNewEdit}
+                  onExpand={handleExpandCell}
+                />
+              ))}
+            </ScrollView>
           </View>
         </ScrollView>
-      </ScrollView>
+      </View>
     );
   } else {
     gridBody = null;
@@ -694,7 +773,7 @@ export function DatabaseDataEditor({
 
   return (
     <View style={styles.container}>
-      <View style={styles.toolbar}>
+      <View style={[styles.toolbar, barHInset]}>
         <Text style={styles.title} numberOfLines={1}>
           {schema}.{table}
         </Text>
@@ -852,7 +931,7 @@ export function DatabaseDataEditor({
       ) : null}
 
       {aggregate ? (
-        <View style={styles.aggBar}>
+        <View style={[styles.aggBar, barHInset]}>
           <Text style={styles.aggBarCol}>{aggregate.col}</Text>
           {aggregate.numeric ? (
             <Text style={styles.aggBarText}>
@@ -868,11 +947,11 @@ export function DatabaseDataEditor({
         </View>
       ) : null}
 
-      <View style={styles.statusBar}>
+      <View style={[styles.statusBar, statusBarInset]}>
         <Text style={styles.statusText} numberOfLines={1}>
           {status ?? `${shown} row${shown === 1 ? "" : "s"}${result?.truncated ? "+" : ""}`}
           {txOpen ? " · transaction open" : ""}
-          {canEdit ? " · double-tap a cell to edit" : ""}
+          {canEdit ? (dialogEdit ? " · tap a cell to edit" : " · click a cell to edit") : ""}
         </Text>
       </View>
 
@@ -936,12 +1015,14 @@ function ImportModal({
 
 function HeaderCell({
   column,
+  width,
   sortDir,
   aggActive,
   onSort,
   onAggregate,
 }: {
   column: DbColumn;
+  width: number;
   sortDir: "asc" | "desc" | null;
   aggActive: boolean;
   onSort: (col: string) => void;
@@ -953,7 +1034,7 @@ function HeaderCell({
   if (sortDir === "asc") arrow = " ↑";
   else if (sortDir === "desc") arrow = " ↓";
   return (
-    <View style={styles.headerCell}>
+    <View style={[styles.headerCell, { width }]}>
       <Pressable style={styles.headerMain} onPress={press}>
         <Text style={styles.headerText} numberOfLines={1}>
           {column.name}
@@ -975,10 +1056,12 @@ function ExistingRow({
   rowIndex,
   row,
   columns,
+  widths,
   edits,
   deleted,
   selected,
   canEdit,
+  dialogEdit,
   editingKey,
   onSelect,
   onStartEdit,
@@ -991,10 +1074,12 @@ function ExistingRow({
   rowIndex: number;
   row: Cell[];
   columns: string[];
+  widths: number[];
   edits: Record<string, Cell>;
   deleted: boolean;
   selected: boolean;
   canEdit: boolean;
+  dialogEdit: boolean;
   editingKey: string | null;
   onSelect: (rowIdx: number) => void;
   onStartEdit: (key: string) => void;
@@ -1042,11 +1127,13 @@ function ExistingRow({
             cellKey={key}
             rowIndex={rowIndex}
             col={col}
+            width={widths[c]}
             original={cellText(cell)}
             text={cellText(value)}
             isNull={value === null}
             dirty={edited}
             editable={canEdit && !deleted}
+            dialogEdit={dialogEdit}
             editing={editingKey === key}
             onStart={onStartEdit}
             onCommitExisting={onCommitEdit}
@@ -1073,6 +1160,8 @@ function NewRow({
   index,
   values,
   columns,
+  widths,
+  dialogEdit,
   editingKey,
   onStartEdit,
   onCommitEdit,
@@ -1081,6 +1170,8 @@ function NewRow({
   index: number;
   values: Record<string, Cell>;
   columns: string[];
+  widths: number[];
+  dialogEdit: boolean;
   editingKey: string | null;
   onStartEdit: (key: string) => void;
   onCommitEdit: (i: number, col: string, text: string) => void;
@@ -1091,7 +1182,7 @@ function NewRow({
       <View style={styles.gutter}>
         <ThemedPlus size={12} uniProps={mutedColor} />
       </View>
-      {columns.map((col) => {
+      {columns.map((col, c) => {
         const key = `new:${index}:${col}`;
         const has = Object.prototype.hasOwnProperty.call(values, col);
         return (
@@ -1100,11 +1191,13 @@ function NewRow({
             cellKey={key}
             newIndex={index}
             col={col}
+            width={widths[c]}
             original=""
             text={has ? cellText(values[col]) : ""}
             isNull={false}
             dirty
             editable
+            dialogEdit={dialogEdit}
             editing={editingKey === key}
             onStart={onStartEdit}
             onCommitNew={onCommitEdit}
@@ -1121,11 +1214,13 @@ function GridCell({
   rowIndex,
   newIndex,
   col,
+  width,
   original,
   text,
   isNull,
   dirty,
   editable,
+  dialogEdit,
   editing,
   onStart,
   onCommitExisting,
@@ -1139,11 +1234,13 @@ function GridCell({
   rowIndex?: number;
   newIndex?: number;
   col: string;
+  width: number;
   original: string;
   text: string;
   isNull: boolean;
   dirty: boolean;
   editable: boolean;
+  dialogEdit: boolean;
   editing: boolean;
   onStart: (key: string) => void;
   onCommitExisting?: (rowIdx: number, col: string, text: string, original: string) => void;
@@ -1154,14 +1251,21 @@ function GridCell({
   onNavigate?: (fk: DbForeignKey, value: Cell) => void;
 }) {
   const [draft, setDraft] = useState(text);
-  const handlePress = useCallback(() => {
-    setDraft(text);
-    onStart(cellKey);
-  }, [text, onStart, cellKey]);
   const handleExpand = useCallback(
     () => onExpand({ rowIndex, newIndex, col, text, original }),
     [onExpand, rowIndex, newIndex, col, text, original],
   );
+  // A single tap enters edit mode (DataGrip-style). On desktop that's the inline
+  // input; on compact/native it routes to the docked value editor which is a
+  // proper multi-line surface. Read-only cells always open the (read-only) dock.
+  const handlePress = useCallback(() => {
+    if (editable && !dialogEdit) {
+      setDraft(text);
+      onStart(cellKey);
+    } else {
+      handleExpand();
+    }
+  }, [editable, dialogEdit, text, onStart, cellKey, handleExpand]);
   const navigate = useCallback(() => {
     if (fk && onNavigate) onNavigate(fk, rawValue ?? null);
   }, [fk, onNavigate, rawValue]);
@@ -1182,7 +1286,7 @@ function GridCell({
 
   if (editing) {
     return (
-      <View style={[styles.cell, styles.cellEditing]}>
+      <View style={[styles.cell, styles.cellEditing, { width }]}>
         <ThemedCellInput
           style={styles.cellInput}
           value={draft}
@@ -1197,10 +1301,13 @@ function GridCell({
       </View>
     );
   }
+  // Keep an explicit expand affordance for long values even on desktop, where a
+  // single click enters inline edit — this opens the full multi-line viewer.
+  const showExpand = !isNull && text.length > EXPAND_THRESHOLD;
   return (
     <Pressable
-      style={[styles.cell, dirty && styles.cellDirty]}
-      onPress={editable ? handlePress : handleExpand}
+      style={[styles.cell, { width }, dirty && styles.cellDirty]}
+      onPress={handlePress}
       onLongPress={handleExpand}
       {...(ctx as object)}
     >
@@ -1208,6 +1315,11 @@ function GridCell({
         <Text style={[styles.bodyText, isNull && styles.nullText]} numberOfLines={1}>
           {isNull ? "NULL" : text}
         </Text>
+        {showExpand ? (
+          <Pressable onPress={handleExpand} hitSlop={6} style={styles.expandBtn}>
+            <Text style={styles.expandIcon}>⤢</Text>
+          </Pressable>
+        ) : null}
         {fk ? (
           <Pressable onPress={navigate} hitSlop={6} style={styles.fkJump}>
             <Text style={styles.fkArrow}>↗</Text>
@@ -1511,7 +1623,13 @@ const styles = StyleSheet.create((theme: Theme) => ({
   errorBox: { padding: theme.spacing[3], backgroundColor: theme.colors.palette.red[100] },
   errorText: { fontSize: theme.fontSize.sm, color: theme.colors.palette.red[800] },
   center: { flex: 1, alignItems: "center", justifyContent: "center", minHeight: 120 },
-  vscroll: { flex: 1, minHeight: 0 },
+  // Outer horizontal scroll (columns) fills the pane; the inner vertical scroll
+  // (rows) is bounded to the measured height so the header row stays pinned.
+  gridWrap: { flex: 1, minHeight: 0 },
+  hscroll: { flex: 1 },
+  hContent: { flexGrow: 1, flexDirection: "column" },
+  grid: { flexGrow: 1, minHeight: 0 },
+  bodyScroll: { flexGrow: 1, minHeight: 0 },
   headerRow: {
     flexDirection: "row",
     borderBottomWidth: theme.borderWidth[1],
@@ -1529,7 +1647,6 @@ const styles = StyleSheet.create((theme: Theme) => ({
   gutterSelected: { backgroundColor: theme.colors.accent },
   gutterText: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundExtraMuted },
   cell: {
-    width: CELL_W,
     paddingHorizontal: theme.spacing[2],
     paddingVertical: theme.spacing[1.5],
     borderRightWidth: StyleSheet.hairlineWidth,
@@ -1539,6 +1656,8 @@ const styles = StyleSheet.create((theme: Theme) => ({
   cellInner: { flexDirection: "row", alignItems: "center", gap: theme.spacing[1] },
   fkJump: { paddingHorizontal: 2 },
   fkArrow: { fontSize: theme.fontSize.xs, color: theme.colors.accent },
+  expandBtn: { paddingHorizontal: 2 },
+  expandIcon: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundExtraMuted },
   cellDirty: { backgroundColor: "rgba(245, 158, 11, 0.16)" },
   cellEditing: { backgroundColor: theme.colors.surface2, paddingVertical: 0 },
   cellInput: {
@@ -1548,7 +1667,6 @@ const styles = StyleSheet.create((theme: Theme) => ({
     paddingVertical: theme.spacing[1.5],
   },
   headerCell: {
-    width: CELL_W,
     flexDirection: "row",
     alignItems: "center",
     borderRightWidth: StyleSheet.hairlineWidth,
@@ -1615,6 +1733,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     color: theme.colors.foreground,
   },
   aggBarText: {
+    flexShrink: 1,
     fontSize: theme.fontSize.xs,
     fontFamily: theme.fontFamily.mono,
     color: theme.colors.foregroundMuted,
@@ -1628,6 +1747,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
   deletedRow: { opacity: 0.45 },
   newRow: { backgroundColor: theme.colors.palette.green[100] },
   bodyText: {
+    flexShrink: 1,
     fontSize: theme.fontSize.xs,
     color: theme.colors.foreground,
     fontFamily: theme.fontFamily.mono,

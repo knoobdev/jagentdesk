@@ -38,13 +38,20 @@ import type {
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import { DatabaseStatusDot } from "@/components/database-dot";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuLabel,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { useDatabaseNavStore, type SelectedDbObject } from "@/stores/database-nav-store";
 import { useDatabaseViewStore } from "@/stores/database-view-store";
 import { useDatabaseChatStore } from "@/stores/database-chat-store";
 import { usePanelStore } from "@/stores/panel-store";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { buildDatabasesRoute } from "@/utils/host-routes";
-import { isWeb } from "@/constants/platform";
 import { buildCreateTableDdl } from "@/utils/sql-ddl";
 import { qualifyTable, quoteIdent } from "@/utils/sql-ident";
 import type { DatabaseEngine } from "@jagentdesk/protocol/database/rpc-schemas";
@@ -98,18 +105,6 @@ const ThemedFunc = withUnistyles(Braces);
 const ThemedFolder = withUnistyles(Folder);
 const mutedColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 const faintColor = (theme: Theme) => ({ color: theme.colors.foregroundExtraMuted });
-
-/** Right-click on desktop (web/Electron), long-press on touch — DataGrip's menu. */
-function contextProps(onMenu: () => void): object {
-  return isWeb
-    ? {
-        onContextMenu: (e: { preventDefault?: () => void }) => {
-          e?.preventDefault?.();
-          onMenu();
-        },
-      }
-    : {};
-}
 
 /** Expand/collapse chevron (or blank spacer when not expandable). */
 function Chevron({ expanded }: { expanded: boolean }) {
@@ -411,6 +406,19 @@ function ObjectFolder({ label, objects }: { label: string; objects: DbObject[] }
   );
 }
 
+/** The right-click / long-press actions for a table/object row. Each row wires
+ *  its own trigger, so right-click hits the row under the cursor directly —
+ *  no prior selection required. */
+type TableActions = {
+  onOpen: (target: SelectedDbObject) => void;
+  onRefresh: () => void;
+  onCopyName: (target: SelectedDbObject) => void;
+  onCopyDdl: (target: SelectedDbObject) => void;
+  onRename: (target: SelectedDbObject) => void;
+  onTruncate: (target: SelectedDbObject) => void;
+  onDrop: (target: SelectedDbObject) => void;
+};
+
 /** A table/view node: expand → columns; select → open data; right-click → menu. */
 // eslint-disable-next-line complexity
 function TableNode({
@@ -421,7 +429,7 @@ function TableNode({
   filter,
   refreshKey,
   onSelect,
-  onMenu,
+  actions,
 }: {
   client: DaemonClient | null;
   id: string;
@@ -430,7 +438,7 @@ function TableNode({
   filter: string;
   refreshKey: number;
   onSelect: (object: SelectedDbObject) => void;
-  onMenu: (object: SelectedDbObject) => void;
+  actions: TableActions;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [columns, setColumns] = useState<DbColumn[]>([]);
@@ -454,7 +462,12 @@ function TableNode({
   }, [expanded, client, id, object.schema, object.name, refreshKey]);
   const toggle = useCallback(() => setExpanded((v) => !v), []);
   const select = useCallback(() => onSelect(target), [onSelect, target]);
-  const menu = useCallback(() => onMenu(target), [onMenu, target]);
+  const openData = useCallback(() => actions.onOpen(target), [actions, target]);
+  const copyName = useCallback(() => actions.onCopyName(target), [actions, target]);
+  const copyDdl = useCallback(() => actions.onCopyDdl(target), [actions, target]);
+  const rename = useCallback(() => actions.onRename(target), [actions, target]);
+  const truncate = useCallback(() => actions.onTruncate(target), [actions, target]);
+  const drop = useCallback(() => actions.onDrop(target), [actions, target]);
   const isView = object.kind === "view" || object.kind === "materialized_view";
   const icon = isView ? (
     <ThemedEye size={14} uniProps={mutedColor} />
@@ -464,24 +477,73 @@ function TableNode({
   if (filter && !object.name.toLowerCase().includes(filter)) return null;
   return (
     <View>
-      <Pressable
-        style={[styles.row, active && styles.rowActive]}
-        onPress={select}
-        onLongPress={menu}
-        testID={`db-table-${object.name}`}
-        {...(contextProps(menu) as object)}
-      >
-        <Pressable onPress={toggle} hitSlop={6} style={styles.chevronBtn}>
-          <Chevron expanded={expanded} />
-        </Pressable>
-        {icon}
-        <Text style={[styles.rowLabel, active && styles.rowLabelActive]} numberOfLines={1}>
-          {object.name}
-        </Text>
-        {object.columnCount != null ? (
-          <Text style={styles.rowCount}>{object.columnCount}</Text>
-        ) : null}
-      </Pressable>
+      <ContextMenu>
+        <ContextMenuTrigger
+          enabledOnMobile
+          style={[styles.row, active && styles.rowActive]}
+          onPress={select}
+          testID={`db-table-${object.name}`}
+        >
+          <Pressable onPress={toggle} hitSlop={6} style={styles.chevronBtn}>
+            <Chevron expanded={expanded} />
+          </Pressable>
+          {icon}
+          <Text style={[styles.rowLabel, active && styles.rowLabelActive]} numberOfLines={1}>
+            {object.name}
+          </Text>
+          {object.columnCount != null ? (
+            <Text style={styles.rowCount}>{object.columnCount}</Text>
+          ) : null}
+        </ContextMenuTrigger>
+        <ContextMenuContent align="start" width={220} testID={`db-table-menu-${object.name}`}>
+          <ContextMenuLabel>{`${object.schema}.${object.name}`}</ContextMenuLabel>
+          <ContextMenuItem
+            leading={<ThemedTable size={14} uniProps={mutedColor} />}
+            onSelect={openData}
+          >
+            Open data
+          </ContextMenuItem>
+          <ContextMenuItem
+            leading={<ThemedRefresh size={14} uniProps={mutedColor} />}
+            onSelect={actions.onRefresh}
+          >
+            Refresh
+          </ContextMenuItem>
+          <ContextMenuItem
+            leading={<ThemedCopy size={14} uniProps={mutedColor} />}
+            onSelect={copyName}
+          >
+            Copy name
+          </ContextMenuItem>
+          <ContextMenuItem
+            leading={<ThemedCopy size={14} uniProps={mutedColor} />}
+            onSelect={copyDdl}
+          >
+            Copy DDL
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem
+            leading={<ThemedPencil size={14} uniProps={mutedColor} />}
+            onSelect={rename}
+          >
+            Rename…
+          </ContextMenuItem>
+          <ContextMenuItem
+            destructive
+            leading={<ThemedTrash size={14} uniProps={mutedColor} />}
+            onSelect={truncate}
+          >
+            Truncate…
+          </ContextMenuItem>
+          <ContextMenuItem
+            destructive
+            leading={<ThemedTrash size={14} uniProps={mutedColor} />}
+            onSelect={drop}
+          >
+            Drop table…
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
       {expanded ? (
         <View style={styles.childIndent}>
           {columns.map((c) => (
@@ -521,7 +583,7 @@ function SchemaNode({
   refreshKey,
   selectedObject,
   onSelect,
-  onMenu,
+  actions,
   onTableCount,
 }: {
   client: DaemonClient | null;
@@ -532,7 +594,7 @@ function SchemaNode({
   refreshKey: number;
   selectedObject: SelectedDbObject | null;
   onSelect: (object: SelectedDbObject) => void;
-  onMenu: (object: SelectedDbObject) => void;
+  actions: TableActions;
   onTableCount?: (schema: string, count: number) => void;
 }) {
   const [expanded, setExpanded] = useState(autoExpand);
@@ -577,7 +639,7 @@ function SchemaNode({
       filter={filter}
       refreshKey={refreshKey}
       onSelect={onSelect}
-      onMenu={onMenu}
+      actions={actions}
     />
   );
   const body = (
@@ -618,7 +680,7 @@ function DatabaseNode({
   refreshKey,
   selectedObject,
   onSelect,
-  onMenu,
+  actions,
 }: {
   client: DaemonClient | null;
   parentId: string;
@@ -628,7 +690,7 @@ function DatabaseNode({
   refreshKey: number;
   selectedObject: SelectedDbObject | null;
   onSelect: (object: SelectedDbObject) => void;
-  onMenu: (object: SelectedDbObject) => void;
+  actions: TableActions;
 }) {
   const [expanded, setExpanded] = useState(!multiDb);
   const [schemas, setSchemas] = useState<DbSchema[]>([]);
@@ -676,7 +738,7 @@ function DatabaseNode({
       refreshKey={refreshKey}
       selectedObject={selectedObject}
       onSelect={onSelect}
-      onMenu={onMenu}
+      actions={actions}
       onTableCount={handleTableCount}
     />
   ));
@@ -693,74 +755,6 @@ function DatabaseNode({
       />
       {expanded ? <View style={styles.childIndent}>{schemaList}</View> : null}
     </View>
-  );
-}
-
-/** Right-click / long-press menu on a table. */
-function TableMenu({
-  object,
-  onClose,
-  onOpen,
-  onRefresh,
-  onCopyName,
-  onCopyDdl,
-  onRename,
-  onTruncate,
-  onDrop,
-}: {
-  object: SelectedDbObject;
-  onClose: () => void;
-  onOpen: () => void;
-  onRefresh: () => void;
-  onCopyName: () => void;
-  onCopyDdl: () => void;
-  onRename: () => void;
-  onTruncate: () => void;
-  onDrop: () => void;
-}) {
-  return (
-    <Modal transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <View style={styles.menu}>
-          <Text style={styles.menuTitle} numberOfLines={1}>
-            {object.schema}.{object.name}
-          </Text>
-          <MenuItem icon="open" label="Open data" onPress={onOpen} />
-          <MenuItem icon="refresh" label="Refresh" onPress={onRefresh} />
-          <MenuItem icon="copy" label="Copy name" onPress={onCopyName} />
-          <MenuItem icon="copy" label="Copy DDL" onPress={onCopyDdl} />
-          <View style={styles.menuSep} />
-          <MenuItem icon="rename" label="Rename…" onPress={onRename} />
-          <MenuItem icon="delete" label="Truncate…" onPress={onTruncate} />
-          <MenuItem icon="delete" label="Drop table…" onPress={onDrop} />
-        </View>
-      </Pressable>
-    </Modal>
-  );
-}
-
-type MenuIcon = "open" | "refresh" | "copy" | "rename" | "delete";
-function MenuItemIcon({ icon }: { icon: MenuIcon }) {
-  if (icon === "open") return <ThemedTable size={14} uniProps={mutedColor} />;
-  if (icon === "refresh") return <ThemedRefresh size={14} uniProps={mutedColor} />;
-  if (icon === "copy") return <ThemedCopy size={14} uniProps={mutedColor} />;
-  if (icon === "rename") return <ThemedPencil size={14} uniProps={mutedColor} />;
-  return <ThemedTrash size={14} uniProps={mutedColor} />;
-}
-function MenuItem({
-  icon,
-  label,
-  onPress,
-}: {
-  icon: MenuIcon;
-  label: string;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable style={styles.menuItem} onPress={onPress}>
-      <MenuItemIcon icon={icon} />
-      <Text style={styles.menuItemText}>{label}</Text>
-    </Pressable>
   );
 }
 
@@ -852,7 +846,6 @@ export function SidebarDatabaseNav({
   const hideChat = useDatabaseChatStore((s) => s.hideChat);
   const isCompact = useIsCompactFormFactor();
 
-  const [menuObject, setMenuObject] = useState<SelectedDbObject | null>(null);
   const [renameObject, setRenameObject] = useState<SelectedDbObject | null>(null);
   const [dropObject, setDropObject] = useState<SelectedDbObject | null>(null);
   const [truncateObject, setTruncateObject] = useState<SelectedDbObject | null>(null);
@@ -897,7 +890,6 @@ export function SidebarDatabaseNav({
     },
     [databaseId, selectObject, openTable, isCompact, showMobileAgent],
   );
-  const openMenu = useCallback((object: SelectedDbObject) => setMenuObject(object), []);
   const handleRefreshAll = useCallback(() => bumpRefresh(), [bumpRefresh]);
   const handleSelectConsole = useCallback(() => {
     selectConsole(databaseId);
@@ -927,48 +919,39 @@ export function SidebarDatabaseNav({
     },
     [client, bumpRefresh],
   );
-  const closeMenu = useCallback(() => setMenuObject(null), []);
-  const menuOpen = useCallback(() => {
-    if (menuObject) commitSelection(menuObject);
-    setMenuObject(null);
-  }, [menuObject, commitSelection]);
-  const menuRefresh = useCallback(() => {
-    bumpRefresh();
-    setMenuObject(null);
-  }, [bumpRefresh]);
-  const menuCopyName = useCallback(() => {
-    if (menuObject) void Clipboard.setStringAsync(`${menuObject.schema}.${menuObject.name}`);
-    setMenuObject(null);
-  }, [menuObject]);
-  const menuCopyDdl = useCallback(async () => {
-    const t = menuObject;
-    setMenuObject(null);
-    if (!client || !t) return;
-    const [cols, fks] = await Promise.all([
-      client
-        .databaseColumns({ id: t.databaseId, schema: t.schema, table: t.name })
-        .catch(() => null),
-      client.databaseForeignKeys({ id: t.databaseId, schema: t.schema }).catch(() => null),
-    ]);
-    if (cols && !cols.error) {
-      const edges = fks && !fks.error ? fks.foreignKeys.filter((f) => f.table === t.name) : [];
-      void Clipboard.setStringAsync(
-        buildCreateTableDdl(engine, t.schema, t.name, cols.columns, edges),
-      );
-    }
-  }, [client, menuObject, engine]);
-  const menuRename = useCallback(() => {
-    setRenameObject(menuObject);
-    setMenuObject(null);
-  }, [menuObject]);
-  const menuTruncate = useCallback(() => {
-    setTruncateObject(menuObject);
-    setMenuObject(null);
-  }, [menuObject]);
-  const menuDrop = useCallback(() => {
-    setDropObject(menuObject);
-    setMenuObject(null);
-  }, [menuObject]);
+  const copyDdl = useCallback(
+    async (t: SelectedDbObject) => {
+      if (!client) return;
+      const [cols, fks] = await Promise.all([
+        client
+          .databaseColumns({ id: t.databaseId, schema: t.schema, table: t.name })
+          .catch(() => null),
+        client.databaseForeignKeys({ id: t.databaseId, schema: t.schema }).catch(() => null),
+      ]);
+      if (cols && !cols.error) {
+        const edges = fks && !fks.error ? fks.foreignKeys.filter((f) => f.table === t.name) : [];
+        void Clipboard.setStringAsync(
+          buildCreateTableDdl(engine, t.schema, t.name, cols.columns, edges),
+        );
+      }
+    },
+    [client, engine],
+  );
+  // Per-row menu actions. Each row wires its own trigger and passes its own
+  // target here, so right-click acts on the row under the cursor — no prior
+  // selection needed.
+  const tableActions = useMemo(
+    () => ({
+      onOpen: (t: SelectedDbObject) => commitSelection(t),
+      onRefresh: () => bumpRefresh(),
+      onCopyName: (t: SelectedDbObject) => void Clipboard.setStringAsync(`${t.schema}.${t.name}`),
+      onCopyDdl: (t: SelectedDbObject) => void copyDdl(t),
+      onRename: (t: SelectedDbObject) => setRenameObject(t),
+      onTruncate: (t: SelectedDbObject) => setTruncateObject(t),
+      onDrop: (t: SelectedDbObject) => setDropObject(t),
+    }),
+    [commitSelection, bumpRefresh, copyDdl],
+  );
 
   const cancelRename = useCallback(() => setRenameObject(null), []);
   const submitRename = useCallback(
@@ -1089,24 +1072,11 @@ export function SidebarDatabaseNav({
             refreshKey={listRefreshKey}
             selectedObject={selectedObject}
             onSelect={commitSelection}
-            onMenu={openMenu}
+            actions={tableActions}
           />
         ))}
       </ScrollView>
 
-      {menuObject ? (
-        <TableMenu
-          object={menuObject}
-          onClose={closeMenu}
-          onOpen={menuOpen}
-          onRefresh={menuRefresh}
-          onCopyName={menuCopyName}
-          onCopyDdl={menuCopyDdl}
-          onRename={menuRename}
-          onTruncate={menuTruncate}
-          onDrop={menuDrop}
-        />
-      ) : null}
       {renameObject ? (
         <Prompt
           title={`Rename ${renameObject.name}`}
@@ -1251,34 +1221,6 @@ const styles = StyleSheet.create((theme: Theme) => ({
     justifyContent: "center",
     alignItems: "center",
   },
-  menu: {
-    minWidth: 220,
-    borderRadius: theme.borderRadius.md,
-    borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface0,
-    paddingVertical: theme.spacing[1],
-  },
-  menuTitle: {
-    paddingHorizontal: theme.spacing[3],
-    paddingVertical: theme.spacing[1],
-    fontSize: theme.fontSize.xs,
-    color: theme.colors.foregroundExtraMuted,
-    fontFamily: theme.fontFamily.mono,
-  },
-  menuSep: {
-    height: theme.borderWidth[1],
-    backgroundColor: theme.colors.border,
-    marginVertical: theme.spacing[1],
-  },
-  menuItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing[2],
-    paddingHorizontal: theme.spacing[3],
-    paddingVertical: theme.spacing[1.5],
-  },
-  menuItemText: { fontSize: theme.fontSize.sm, color: theme.colors.foreground },
   prompt: {
     width: 300,
     borderRadius: theme.borderRadius.md,

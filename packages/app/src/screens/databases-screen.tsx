@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
-import { Database as DatabaseIcon, CircleAlert, Plus, Trash2 } from "lucide-react-native";
+import {
+  ArrowLeft,
+  Database as DatabaseIcon,
+  CircleAlert,
+  Plus,
+  Trash2,
+} from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -355,6 +361,10 @@ export function DatabasesScreen() {
     [client, refresh, clearLastDatabase],
   );
 
+  // This screen is reached via push (from the sidebar); a deep link can land here
+  // first with no back target, so only show the back affordance when one exists.
+  const showBack = isCompact && router.canGoBack();
+  const handleBack = useCallback(() => router.back(), [router]);
   const toggleAdding = useCallback(() => setAdding((v) => !v), []);
   const handleSaveConnect = useCallback(() => void handleSave(true), [handleSave]);
   const handleSaveOnly = useCallback(() => void handleSave(false), [handleSave]);
@@ -372,6 +382,17 @@ export function DatabasesScreen() {
   return (
     <ScrollView style={styles.container} contentContainerStyle={contentContainerStyle}>
       <View style={styles.headerRow}>
+        {showBack ? (
+          <Pressable
+            style={styles.backBtn}
+            onPress={handleBack}
+            accessibilityRole="button"
+            accessibilityLabel="Back"
+            testID="db-list-back"
+          >
+            <ThemedArrowLeft size={20} uniProps={mutedColorMapping} />
+          </Pressable>
+        ) : null}
         <ThemedDatabase size={20} uniProps={foregroundColorMapping} />
         <Text style={styles.header}>Databases</Text>
         <View style={styles.headerSpacer} />
@@ -553,6 +574,7 @@ export function DatabasesScreen() {
   );
 }
 
+const ThemedArrowLeft = withUnistyles(ArrowLeft);
 const ThemedDatabase = withUnistyles(DatabaseIcon);
 const ThemedCircleAlert = withUnistyles(CircleAlert);
 const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
@@ -589,6 +611,11 @@ const styles = StyleSheet.create((theme) => ({
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[2],
+  },
+  backBtn: {
+    padding: theme.spacing[1],
+    marginLeft: -theme.spacing[1],
+    borderRadius: theme.borderRadius.md,
   },
   headerSpacer: {
     flex: 1,

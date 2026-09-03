@@ -1,8 +1,12 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
-import { ScrollView, Text, View } from "react-native";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Pressable, ScrollView, Text, View } from "react-native";
 import Svg, { Line, Rect, Text as SvgText } from "react-native-svg";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import { runOnJS } from "react-native-reanimated";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
+import { Maximize2, ZoomIn, ZoomOut } from "lucide-react-native";
 import type { DbColumn, DbForeignKey, DbObject } from "@jagentdesk/protocol/database/rpc-schemas";
+import { isNative, isWeb } from "@/constants/platform";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { useDatabaseNavStore } from "@/stores/database-nav-store";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
@@ -28,7 +32,17 @@ const GAP_Y = 40;
 const MAX_ROWS = 16;
 const MAX_COLS = 5;
 
+// Zoom bounds — matches the mermaid diagram host's lower clamp; capped at 3x so
+// the SVG canvas (and thus the scrollable area) never grows to an unusable size.
+const MIN_SCALE = 0.25;
+const MAX_SCALE = 3;
+const ZOOM_STEP = 1.2;
+const clampScale = (s: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, s));
+
 const ThemedSpinner = withUnistyles(LoadingSpinner);
+const ThemedZoomIn = withUnistyles(ZoomIn);
+const ThemedZoomOut = withUnistyles(ZoomOut);
+const ThemedZoomReset = withUnistyles(Maximize2);
 const mutedColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 
 type DbClientLike = NonNullable<ReturnType<typeof useHostRuntimeClient>>;
@@ -159,6 +173,55 @@ export function DatabaseErDiagram({
     return out;
   }, [fks, layout]);
 
+  // Zoom state. The canvas scales by resizing the SVG (width/height × scale with a
+  // fixed viewBox) so the surrounding ScrollViews grow with it and pan keeps working
+  // — desktop: ctrl/⌘ + wheel (also trackpad pinch) and the on-screen buttons;
+  // mobile: a pinch gesture. Clamped to MIN_SCALE..MAX_SCALE.
+  const [scale, setScale] = useState(1);
+  const scaleRef = useRef(1);
+  useEffect(() => {
+    scaleRef.current = scale;
+  }, [scale]);
+
+  const zoomIn = useCallback(() => setScale((s) => clampScale(s * ZOOM_STEP)), []);
+  const zoomOut = useCallback(() => setScale((s) => clampScale(s / ZOOM_STEP)), []);
+  const zoomReset = useCallback(() => setScale(1), []);
+
+  // Desktop: wheel-to-zoom while a zoom modifier is held (trackpad pinch reports
+  // ctrlKey). Plain wheel is left alone so the ScrollViews still pan/scroll.
+  const canvasRef = useRef<View | null>(null);
+  useEffect(() => {
+    if (!isWeb) return;
+    const raw: unknown = canvasRef.current;
+    if (!(raw instanceof HTMLElement)) return;
+    const node = raw;
+    const onWheel = (event: WheelEvent) => {
+      if (!(event.ctrlKey || event.metaKey)) return;
+      event.preventDefault();
+      setScale((s) => clampScale(s * Math.exp(-event.deltaY * 0.0015)));
+    };
+    node.addEventListener("wheel", onWheel, { passive: false });
+    return () => node.removeEventListener("wheel", onWheel);
+  }, []);
+
+  // Mobile: pinch to zoom, committing to scale state so the SVG (and scroll area)
+  // resize. pinchBaseRef holds the scale at gesture start so updates are relative.
+  const pinchBaseRef = useRef(1);
+  const onPinchStart = useCallback(() => {
+    pinchBaseRef.current = scaleRef.current;
+  }, []);
+  const onPinchUpdate = useCallback(
+    (factor: number) => setScale(clampScale(pinchBaseRef.current * factor)),
+    [],
+  );
+  const pinchGesture = useMemo(
+    () =>
+      Gesture.Pinch()
+        .onStart(() => runOnJS(onPinchStart)())
+        .onUpdate((event) => runOnJS(onPinchUpdate)(event.scale)),
+    [onPinchStart, onPinchUpdate],
+  );
+
   if (loading) {
     return (
       <View style={styles.center}>
@@ -174,32 +237,66 @@ export function DatabaseErDiagram({
     );
   }
 
+  const baseW = Math.max(layout.width, 1);
+  const baseH = Math.max(layout.height, 1);
+  const svg = (
+    <Svg width={baseW * scale} height={baseH * scale} viewBox={`0 0 ${baseW} ${baseH}`}>
+      {edges.map((e) => (
+        <Line
+          key={e.key}
+          x1={e.x1}
+          y1={e.y1}
+          x2={e.x2}
+          y2={e.y2}
+          stroke={EDGE}
+          strokeWidth={1.25}
+          opacity={0.65}
+        />
+      ))}
+      {layout.boxes.map((b) => (
+        <TableCard key={b.name} box={b} />
+      ))}
+    </Svg>
+  );
+
   return (
-    <View style={styles.container}>
+    <View style={styles.container} ref={canvasRef}>
       <Text style={styles.header}>
         ER diagram · {schema} · {layout.boxes.length} tables · {edges.length} relationships
       </Text>
       <ScrollView style={styles.vscroll} contentContainerStyle={styles.vcontent}>
         <ScrollView horizontal contentContainerStyle={styles.hcontent}>
-          <Svg width={Math.max(layout.width, 1)} height={Math.max(layout.height, 1)}>
-            {edges.map((e) => (
-              <Line
-                key={e.key}
-                x1={e.x1}
-                y1={e.y1}
-                x2={e.x2}
-                y2={e.y2}
-                stroke={EDGE}
-                strokeWidth={1.25}
-                opacity={0.65}
-              />
-            ))}
-            {layout.boxes.map((b) => (
-              <TableCard key={b.name} box={b} />
-            ))}
-          </Svg>
+          {isNative ? <GestureDetector gesture={pinchGesture}>{svg}</GestureDetector> : svg}
         </ScrollView>
       </ScrollView>
+      {isWeb ? (
+        <View style={styles.zoomControls}>
+          <Pressable
+            style={styles.zoomBtn}
+            onPress={zoomIn}
+            accessibilityLabel="Zoom in"
+            hitSlop={6}
+          >
+            <ThemedZoomIn size={16} uniProps={mutedColor} />
+          </Pressable>
+          <Pressable
+            style={styles.zoomBtn}
+            onPress={zoomOut}
+            accessibilityLabel="Zoom out"
+            hitSlop={6}
+          >
+            <ThemedZoomOut size={16} uniProps={mutedColor} />
+          </Pressable>
+          <Pressable
+            style={styles.zoomBtn}
+            onPress={zoomReset}
+            accessibilityLabel="Reset zoom"
+            hitSlop={6}
+          >
+            <ThemedZoomReset size={15} uniProps={mutedColor} />
+          </Pressable>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -289,6 +386,25 @@ const styles = StyleSheet.create((theme: Theme) => ({
   vscroll: { flex: 1, minHeight: 0 },
   vcontent: { padding: theme.spacing[3] },
   hcontent: { padding: theme.spacing[1] },
+  zoomControls: {
+    position: "absolute",
+    right: theme.spacing[3],
+    bottom: theme.spacing[3],
+    flexDirection: "column",
+    gap: theme.spacing[1],
+    padding: theme.spacing[1],
+    borderRadius: theme.borderRadius.md,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+  },
+  zoomBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: theme.borderRadius.md,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: theme.spacing[4] },
   emptyText: {
     fontSize: theme.fontSize.sm,

@@ -161,13 +161,17 @@ function HitRow({ hit, onOpen }: { hit: TableHit; onOpen: (hit: TableHit) => voi
   const press = useCallback(() => onOpen(hit), [onOpen, hit]);
   return (
     <Pressable style={styles.hit} onPress={press}>
-      <Text style={styles.hitTable} numberOfLines={1}>
-        {hit.schema}.{hit.table}
+      <View style={styles.hitInfo}>
+        <Text style={styles.hitTable} numberOfLines={1} ellipsizeMode="middle">
+          {hit.schema}.{hit.table}
+        </Text>
+        <Text style={styles.hitCols} numberOfLines={1}>
+          {hit.columns.join(", ")}
+        </Text>
+      </View>
+      <Text style={styles.hitCount} numberOfLines={1}>
+        {hit.matches}
       </Text>
-      <Text style={styles.hitCols} numberOfLines={1}>
-        {hit.columns.join(", ")}
-      </Text>
-      <Text style={styles.hitCount}>{hit.matches}</Text>
     </Pressable>
   );
 }
@@ -196,6 +200,9 @@ const styles = StyleSheet.create((theme: Theme) => ({
     color: theme.colors.foreground,
   },
   searchBtn: {
+    flexShrink: 0,
+    alignItems: "center",
+    justifyContent: "center",
     paddingHorizontal: theme.spacing[3],
     paddingVertical: theme.spacing[1.5],
     borderRadius: theme.borderRadius.md,
@@ -223,21 +230,24 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: theme.colors.border,
   },
+  hitInfo: {
+    flex: 1,
+    minWidth: 0,
+    gap: theme.spacing[1],
+  },
   hitTable: {
-    width: 220,
     fontSize: theme.fontSize.sm,
     fontFamily: theme.fontFamily.mono,
     fontWeight: theme.fontWeight.medium,
     color: theme.colors.foreground,
   },
   hitCols: {
-    flex: 1,
-    minWidth: 0,
     fontSize: theme.fontSize.xs,
     color: theme.colors.foregroundMuted,
     fontFamily: theme.fontFamily.mono,
   },
   hitCount: {
+    flexShrink: 0,
     fontSize: theme.fontSize.xs,
     fontFamily: theme.fontFamily.mono,
     color: theme.colors.accent,

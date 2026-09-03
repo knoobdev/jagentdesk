@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useRouter } from "expo-router";
 import { PanelLeft } from "lucide-react-native";
 import type { DatabaseInfo } from "@jagentdesk/protocol/database/rpc-schemas";
+import { BackHeader } from "@/components/headers/back-header";
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import { DatabaseDataEditor } from "@/components/database-data-editor";
 import { DatabaseStructureView } from "@/components/database-structure-view";
@@ -45,6 +47,10 @@ export function DatabaseBrowseScreen({
   const [objectView, setObjectView] = useState<"data" | "structure">("data");
   const insets = useSafeAreaInsets();
   const isCompact = useIsCompactFormFactor();
+  const router = useRouter();
+  // Deep links land here as the first stack entry (no back target); only show the
+  // back affordance when there is somewhere to return to.
+  const showBack = isCompact && router.canGoBack();
 
   const selectedObject = useDatabaseNavStore((s) => s.selectedObject);
   const showingConsole = useDatabaseNavStore((s) => s.showingConsole);
@@ -111,9 +117,22 @@ export function DatabaseBrowseScreen({
     };
   }, [client, isConnected, databaseId, bumpRefresh]);
 
-  const containerStyle = useMemo(
-    () => [styles.container, isCompact ? { paddingTop: insets.top } : null],
-    [isCompact, insets.top],
+  // Honor the safe area on all edges on compact so child bottom bars (data grid
+  // status/pagination) clear the home indicator and screen edges. When the back
+  // header is shown it already reserves the top inset, so don't double-pad.
+  const contentStyle = useMemo(
+    () => [
+      styles.content,
+      isCompact
+        ? {
+            paddingTop: showBack ? 0 : insets.top,
+            paddingBottom: insets.bottom,
+            paddingLeft: insets.left,
+            paddingRight: insets.right,
+          }
+        : null,
+    ],
+    [isCompact, showBack, insets.top, insets.bottom, insets.left, insets.right],
   );
 
   const engine = database?.engine ?? "postgres";
@@ -204,30 +223,33 @@ export function DatabaseBrowseScreen({
   }
 
   return (
-    <View style={containerStyle}>
-      <View style={styles.row}>
-        <View style={styles.leftColumn}>
-          {isCompact ? (
-            <Pressable
-              style={styles.mobileNavBar}
-              onPress={handleOpenTables}
-              accessibilityLabel="Show tables"
-              testID="database-mobile-tables"
-            >
-              <ThemedPanelLeft size={16} uniProps={mutedIconColor} />
-              <Text style={styles.mobileNavBarText} numberOfLines={1}>
-                {selectedObject ? `${selectedObject.schema}.${selectedObject.name}` : dbName}
-              </Text>
-            </Pressable>
-          ) : null}
-          {content}
+    <View style={styles.container}>
+      {showBack ? <BackHeader title={dbName} /> : null}
+      <View style={contentStyle}>
+        <View style={styles.row}>
+          <View style={styles.leftColumn}>
+            {isCompact ? (
+              <Pressable
+                style={styles.mobileNavBar}
+                onPress={handleOpenTables}
+                accessibilityLabel="Show tables"
+                testID="database-mobile-tables"
+              >
+                <ThemedPanelLeft size={16} uniProps={mutedIconColor} />
+                <Text style={styles.mobileNavBarText} numberOfLines={1}>
+                  {selectedObject ? `${selectedObject.schema}.${selectedObject.name}` : dbName}
+                </Text>
+              </Pressable>
+            ) : null}
+            {content}
+          </View>
+          <DatabaseChatDock
+            serverId={serverId}
+            databaseId={databaseId}
+            databaseName={dbName}
+            context={chatContext}
+          />
         </View>
-        <DatabaseChatDock
-          serverId={serverId}
-          databaseId={databaseId}
-          databaseName={dbName}
-          context={chatContext}
-        />
       </View>
     </View>
   );
@@ -248,6 +270,10 @@ const styles = StyleSheet.create((theme: Theme) => ({
   container: {
     flex: 1,
     backgroundColor: theme.colors.surface0,
+  },
+  content: {
+    flex: 1,
+    minHeight: 0,
   },
   row: {
     flex: 1,
