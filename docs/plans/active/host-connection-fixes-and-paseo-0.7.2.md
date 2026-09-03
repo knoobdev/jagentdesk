@@ -67,8 +67,22 @@ Outcome (typecheck 0 across every package):
 - [x] cli typecheck 0 (reverted hub/plugin/client to fork HEAD Tailscale-only; deleted 3 hub-cloud files)
 - [x] remove `paseo` keywords introduced by the port (only guard-test `@paseo/plugin` kept)
 - [x] merge port → `fix/usage-plan-skills` (ff); working tree now on the port source
-- [ ] build all packages + build desktop app + build mobile; runtime smoke test
-- [ ] reset `port/paseo-0.7.2` to the fixed HEAD + final push / land on mainline
+- [x] `npm install` restored deps; **build:server GREEN** (protocol/client/plugin/server
+  /cli + Go tsnet-bridge, 0 TS errors) after fixing `supervisor.ts`
+  (signalProcessTree→terminateWithTreeKill)
+- [x] **build:desktop GREEN**: expo web/electron export (bundle 20.3 MB) + desktop
+  package compiled
+- [x] reset `port/paseo-0.7.2` to the fixed HEAD (both branches at the same commit)
+- [x] desktop runtime smoke (Playwright + real Electron + Metro + daemon): the app
+  boots, renderer loads, and renders the host-picker ("Join your tailnet") in full.
+  2 `startup.spec` cases fail expecting `startup-splash` under a mocked pending-daemon
+  scenario, but every file those tests exercise (index.tsx, _layout.tsx,
+  startup-splash-screen, host-route-bootstrap-boundary, desktop-connection-gate,
+  startup-dsl, daemon-port) is **byte-identical to the pre-merge baseline 96a86c7ff**
+  → NOT a merge regression (pre-existing/env behavior).
+- [ ] build mobile (EAS) + runtime smoke over Tailscale — needs EAS account/simulator
+- [ ] final push / land on mainline branch (note: local `main` branch is stale; the
+  work sits on `fix/usage-plan-skills`)
 
 ### Incident: node_modules clobbered on ff-merge (fixed)
 
