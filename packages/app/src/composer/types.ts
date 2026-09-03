@@ -8,8 +8,3 @@ export interface MessagePayload {
   cwd: string;
   forceSend?: boolean;
 }
-
-export interface TextReplacement {
-  key: string;
-  text: string;
-}

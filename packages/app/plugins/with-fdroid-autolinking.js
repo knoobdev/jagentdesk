@@ -1,7 +1,6 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { withAppBuildGradle, withDangerousMod, withSettingsGradle } = require("expo/config-plugins");
-const { FDROID_ABI_VERSION_CODE_SUFFIXES } = require("../native-release-version");
 
 const EXCLUDED_ANDROID_MODULES = [
   "expo-camera",
@@ -12,15 +11,12 @@ const EXCLUDED_ANDROID_MODULES = [
   "expo-dev-menu-interface",
 ];
 
-// Generated from the shared suffix table so the Groovy literal can never drift
-// from the version codes the F-Droid changelog filenames are derived from.
-const FDROID_ABI_VERSION_CODE_ENTRIES = Object.entries(FDROID_ABI_VERSION_CODE_SUFFIXES)
-  .map(([abi, suffix]) => `    "${abi}": ${suffix},`)
-  .join("\n");
-
 const FDROID_ABI_VERSION_CODE_BLOCK = `// JAgentDesk F-Droid single-ABI version codes
 def jagentdeskAbiVersionCodes = [
-${FDROID_ABI_VERSION_CODE_ENTRIES}
+    "armeabi-v7a": 1,
+    "arm64-v8a": 2,
+    "x86": 3,
+    "x86_64": 4,
 ]
 def jagentdeskArchitectures = (findProperty("reactNativeArchitectures") ?: "")
     .toString()

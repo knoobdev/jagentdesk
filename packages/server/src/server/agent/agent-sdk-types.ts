@@ -1,9 +1,14 @@
 import type { Options as ClaudeAgentOptions } from "@anthropic-ai/claude-agent-sdk";
-import type { AgentProviderNotice } from "@jagentdesk/protocol/agent-types";
+import type {
+  AgentProviderNotice,
+  AgentTaskItem,
+  ProviderOptions,
+  ToolPolicy,
+} from "@jagentdesk/protocol/agent-types";
 import type { AgentAttachment } from "@jagentdesk/protocol/messages";
 import type { JAgentDeskToolCatalog } from "./tools/types.js";
 
-export type { AgentProviderNotice };
+export type { AgentProviderNotice, AgentTaskItem };
 
 export type AgentProvider = string;
 
@@ -82,6 +87,8 @@ export interface AgentModelDefinition {
   contextWindowMaxTokens?: number;
   thinkingOptions?: AgentSelectOption[];
   defaultThinkingOptionId?: string;
+  aliases?: string[];
+  isSelectable?: boolean;
 }
 
 export interface AgentSelectOption {
@@ -99,6 +106,12 @@ export function normalizeAgentModelDefinition(model: AgentModelDefinition): Agen
     return model;
   }
   return { ...model, defaultThinkingOptionId };
+}
+
+export function filterSelectableAgentModels(
+  models: AgentModelDefinition[] | undefined,
+): AgentModelDefinition[] {
+  return models?.filter((model) => model.isSelectable !== false) ?? [];
 }
 
 export interface ProviderSnapshotEntry {
@@ -372,7 +385,7 @@ export type AgentTimelineItem =
   | { type: "assistant_message"; text: string; messageId?: string }
   | { type: "reasoning"; text: string }
   | ToolCallTimelineItem
-  | { type: "todo"; items: { text: string; completed: boolean }[] }
+  | { type: "todo"; items: AgentTaskItem[] }
   | { type: "error"; message: string }
   | CompactionTimelineItem;
 
@@ -576,6 +589,8 @@ export interface AgentSessionConfig {
     codex?: AgentMetadata;
     claude?: Partial<ClaudeAgentOptions>;
   };
+  providerOptions?: ProviderOptions;
+  toolPolicy?: ToolPolicy;
   mcpServers?: Record<string, McpServerConfig>;
   /**
    * Internal agents are hidden from listings and don't trigger notifications.
@@ -616,12 +631,17 @@ export interface AgentPermissionResult {
   followUpPrompt?: AgentPromptInput;
 }
 
+export interface AgentSteerOptions extends AgentRunOptions {
+  /** Deny permissions that block this steer. An accepted steer must honor this contract. */
+  clearPendingPermissions?: boolean;
+}
+
 /**
  * Options for {@link AgentSession.steerActiveTurn}. `expectedTurnId` guards the
  * injection: the provider only steers if the currently-active turn still equals
  * the turn the caller observed, otherwise it returns `unavailable`. See ADR-0013.
  */
-export interface SteerActiveTurnOptions extends AgentRunOptions {
+export interface SteerActiveTurnOptions extends AgentSteerOptions {
   expectedTurnId: string;
 }
 
@@ -697,6 +717,12 @@ export type FetchCatalogOptions =
       timeoutMs?: number;
     };
 
+export interface ProviderRefreshContext {
+  readonly signal: AbortSignal;
+  /** Track an upstream operation so timeout errors identify the work still pending. */
+  runActivity<T>(name: string, operation: () => Promise<T>): Promise<T>;
+}
+
 export interface ProviderCatalog {
   models: AgentModelDefinition[];
   modes: AgentMode[];
@@ -706,6 +732,7 @@ export interface ProviderCatalog {
 export interface ResolveAgentDefaultModeInput {
   config: AgentSessionConfig;
   env?: Record<string, string>;
+  signal?: AbortSignal;
 }
 
 export interface AgentClient {
@@ -728,7 +755,12 @@ export interface AgentClient {
    * outside the provider do not get separate runtime model/mode probes.
    * The registry is responsible for merging configured model overrides.
    */
-  fetchCatalog(options: FetchCatalogOptions): Promise<ProviderCatalog>;
+  fetchCatalog(
+    options: FetchCatalogOptions,
+    context?: ProviderRefreshContext,
+  ): Promise<ProviderCatalog>;
+  /** Apply provider-owned defaults to a model supplied through provider configuration. */
+  resolveConfiguredModel?(model: AgentModelDefinition): AgentModelDefinition;
   resolveDefaultModeId?(input: ResolveAgentDefaultModeInput): Promise<string | undefined>;
   resolveCreateConfig?(input: ResolveAgentCreateConfigInput): ResolveAgentCreateConfigResult;
   isCreateConfigUnattended?(input: AgentCreateConfigUnattendedInput): boolean;
@@ -745,7 +777,7 @@ export interface AgentClient {
    * Check if this provider is available (CLI binary is installed).
    * Returns true if available, false otherwise.
    */
-  isAvailable(): Promise<boolean>;
+  isAvailable(signal?: AbortSignal): Promise<boolean>;
   getDiagnostic?(): Promise<{ diagnostic: string }>;
   /**
    * Archive a durable native session (best-effort). Runtime release belongs to AgentSession.close().

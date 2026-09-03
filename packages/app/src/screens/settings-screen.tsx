@@ -5,10 +5,10 @@ import {
   Pressable,
   ScrollView,
   Text,
+  TextInput,
   View,
   type PressableStateCallbackType,
 } from "react-native";
-import { EditingTextInput as TextInput } from "@/components/ui/text-input";
 import { useRouter } from "expo-router";
 import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -27,8 +27,6 @@ import {
   Gauge,
   Keyboard,
   Stethoscope,
-  Info,
-  Bell,
   Shield,
   Puzzle,
   Plus,
@@ -36,9 +34,7 @@ import {
   SquareTerminal,
   Code2,
   Smartphone,
-  Sparkles,
-  Blocks,
-  PanelsTopLeft,
+  GitBranch,
 } from "lucide-react-native";
 import { DropdownTrigger } from "@/components/ui/dropdown-trigger";
 import { ComboboxTrigger } from "@/components/ui/combobox-trigger";
@@ -50,18 +46,14 @@ import { ScreenTitle } from "@/components/headers/screen-title";
 import { HeaderIconBadge } from "@/components/headers/header-icon-badge";
 import { SettingsSection } from "@/screens/settings/settings-section";
 import { AppearanceSection } from "@/screens/settings/appearance/appearance-section";
-import { LayoutSection } from "@/screens/settings/layout/layout-section";
 import {
   useAppSettings,
-  useSettings,
   parseTerminalScrollbackLines,
   type AppSettings,
   type SendBehavior,
   type ServiceUrlBehavior,
-  type Settings as EffectiveSettings,
 } from "@/hooks/use-settings";
-import { useHostRuntimeIsConnected, useHosts } from "@/runtime/host-runtime";
-import { useSessionStore } from "@/stores/session-store";
+import { useHosts } from "@/runtime/host-runtime";
 import {
   orderHostsLocalFirst,
   resolveActiveHostServerId,
@@ -69,28 +61,22 @@ import {
 } from "@/types/host-connection";
 import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 import { WindowChromeRegion, WindowChromeSafeArea } from "@/utils/desktop-window";
-import { confirmDialog } from "@/utils/confirm-dialog";
 import { BackHeader } from "@/components/headers/back-header";
 import { ScreenHeader } from "@/components/headers/screen-header";
 import { AddHostMethodModal } from "@/components/add-host-method-modal";
 import { AddHostModal } from "@/components/add-host-modal";
-import { AddRemoteSshHostModal } from "@/components/add-remote-ssh-host-modal";
 import { PairLinkModal } from "@/components/pair-link-modal";
 import { KeyboardShortcutsSection } from "@/screens/settings/keyboard-shortcuts-section";
 import { EditorSection } from "@/screens/settings/editor-section";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { CommunityLinks } from "@/components/community-links";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { DesktopPermissionsSection } from "@/desktop/components/desktop-permissions-section";
-import { DesktopNotificationsSection } from "@/desktop/components/desktop-notifications-section";
 import { BrowserDataSection } from "@/desktop/browser/settings/browser-data-section";
 import { IntegrationsSection } from "@/desktop/components/integrations-section";
 import { isElectronRuntime } from "@/desktop/host";
-import { useDesktopAppUpdater } from "@/desktop/updates/use-desktop-app-updater";
-import { formatVersionWithPrefix } from "@/desktop/updates/desktop-updates";
-import { resolveAppVersion } from "@/utils/app-version";
+import { setConnectionMode, useConnectionMode } from "@/tailscale";
 import { useAppDiagnosticStore } from "@/diagnostics/store";
 import { settingsStyles } from "@/styles/settings";
 import { THINKING_TONE_NATIVE_PCM_BASE64 } from "@/utils/thinking-tone.native-pcm";
@@ -112,59 +98,55 @@ import {
   HostWorkspacesPage,
   HostTerminalsPage,
 } from "@/screens/settings/host-page";
+import { HostOrchestrationPage } from "@/screens/settings/orchestration-page";
 import { HostPluginsPage } from "@/screens/settings/plugins-page";
-import { MetadataGenerationPage } from "@/screens/settings/metadata-generation-page";
+import { useHostFeature } from "@/runtime/host-features";
 import ProjectsScreen from "@/screens/projects-screen";
 import ProjectSettingsScreen from "@/screens/project-settings-screen";
 import { SETTINGS_DESKTOP_SIDEBAR_WIDTH, useIsCompactFormFactor } from "@/constants/layout";
+import { isNative } from "@/constants/platform";
 import { useLocalDaemonServerId } from "@/hooks/use-is-local-daemon";
 import {
   type EnableBuiltInDaemonOption,
   useEnableBuiltInDaemonOption,
 } from "@/desktop/hooks/use-enable-built-in-daemon-option";
 import {
+  buildOpenProjectRoute,
   buildSettingsHostSectionRoute,
   buildSettingsSectionRoute,
   type HostSectionSlug,
   type SettingsSectionSlug,
 } from "@/utils/host-routes";
-import { useLastWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
-import { returnFromSettings, type SettingsView } from "@/navigation/settings-navigation";
-import { isNative, isWeb } from "@/constants/platform";
-
+import {
+  navigateToLastWorkspace,
+  useLastWorkspaceSelection,
+} from "@/stores/navigation-active-workspace-store";
 // ---------------------------------------------------------------------------
 // View model
 // ---------------------------------------------------------------------------
+
+export type SettingsView =
+  | { kind: "root" }
+  | { kind: "section"; section: SettingsSectionSlug }
+  | { kind: "host"; serverId: string; section: HostSectionSlug }
+  | { kind: "project"; serverId: string; projectId: string };
 
 interface SidebarSectionItem {
   id: SettingsSectionSlug;
   labelKey: string;
   icon: ComponentType<{ size: number; color: string }>;
   desktopOnly?: boolean;
-  webOnly?: boolean;
 }
 
 const SIDEBAR_SECTION_ITEMS: SidebarSectionItem[] = [
   { id: "general", labelKey: "settings.sections.general", icon: Settings },
   { id: "appearance", labelKey: "settings.sections.appearance", icon: Palette },
-  {
-    id: "layout",
-    labelKey: "settings.sections.layout",
-    icon: PanelsTopLeft,
-    desktopOnly: true,
-  },
-  { id: "editor", labelKey: "settings.sections.editor", icon: Code2, webOnly: true },
+  { id: "editor", labelKey: "settings.sections.editor", icon: Code2 },
   { id: "shortcuts", labelKey: "settings.sections.shortcuts", icon: Keyboard, desktopOnly: true },
   {
     id: "integrations",
     labelKey: "settings.sections.integrations",
     icon: Puzzle,
-    desktopOnly: true,
-  },
-  {
-    id: "notifications",
-    labelKey: "settings.sections.notifications",
-    icon: Bell,
     desktopOnly: true,
   },
   {
@@ -174,7 +156,6 @@ const SIDEBAR_SECTION_ITEMS: SidebarSectionItem[] = [
     desktopOnly: true,
   },
   { id: "diagnostics", labelKey: "settings.sections.diagnostics", icon: Stethoscope },
-  { id: "about", labelKey: "settings.sections.about", icon: Info },
 ];
 
 interface HostSectionItem {
@@ -189,29 +170,30 @@ const HOST_SECTION_ITEMS: HostSectionItem[] = [
   { id: "connections", labelKey: "settings.hostSections.connections", icon: Network },
   { id: "pair-device", labelKey: "openProject.tiles.pairDevice.title", icon: Smartphone },
   { id: "agents", labelKey: "settings.hostSections.agents", icon: Bot },
-  { id: "metadata", labelKey: "settings.hostSections.metadata", icon: Sparkles },
+  { id: "orchestration", labelKey: "settings.hostSections.orchestration", icon: GitBranch },
   { id: "workspaces", labelKey: "settings.hostSections.workspaces", icon: FolderGit2 },
   { id: "providers", labelKey: "settings.hostSections.providers", icon: Boxes },
   { id: "usage", labelKey: "settings.hostSections.usage", icon: Gauge },
   { id: "terminals", labelKey: "settings.hostSections.terminals", icon: SquareTerminal },
-  { id: "plugins", labelKey: "settings.hostSections.plugins", icon: Blocks },
+  { id: "plugins", labelKey: "settings.hostSections.plugins", icon: Puzzle },
 ];
 
 function renderHostSettingsContent(
   view: Extract<SettingsView, { kind: "host" }>,
   onHostRemoved: () => void,
+  onAddConnection: () => void,
 ): ReactNode {
   switch (view.section) {
     case "projects":
       return <ProjectsScreen serverId={view.serverId} />;
     case "connections":
-      return <HostConnectionsPage serverId={view.serverId} />;
+      return <HostConnectionsPage serverId={view.serverId} onAddConnection={onAddConnection} />;
     case "pair-device":
       return <HostPairDevicePage serverId={view.serverId} />;
     case "agents":
       return <HostAgentsPage serverId={view.serverId} />;
-    case "metadata":
-      return <MetadataGenerationPage serverId={view.serverId} />;
+    case "orchestration":
+      return <HostOrchestrationPage serverId={view.serverId} />;
     case "workspaces":
       return <HostWorkspacesPage serverId={view.serverId} />;
     case "providers":
@@ -249,8 +231,8 @@ function selectedSidebarItemStyle({ hovered }: PressableStateCallbackType & { ho
 
 function getSendBehaviorOptions(t: TFunction) {
   return [
-    { value: "interrupt" as const, label: t("settings.general.defaultSend.options.interrupt") },
     { value: "steer" as const, label: t("settings.general.defaultSend.options.steer") },
+    { value: "interrupt" as const, label: t("settings.general.defaultSend.options.interrupt") },
     { value: "queue" as const, label: t("settings.general.defaultSend.options.queue") },
   ];
 }
@@ -289,24 +271,6 @@ interface ServiceUrlBehaviorMenuItemProps {
   label: string;
   selected: boolean;
   onChange: (value: ServiceUrlBehavior) => void;
-}
-
-interface SendBehaviorMenuItemProps {
-  value: SendBehavior;
-  label: string;
-  selected: boolean;
-  onChange: (value: SendBehavior) => void;
-}
-
-function SendBehaviorMenuItem({ value, label, selected, onChange }: SendBehaviorMenuItemProps) {
-  const handleSelect = useCallback(() => {
-    onChange(value);
-  }, [onChange, value]);
-  return (
-    <DropdownMenuItem selected={selected} onSelect={handleSelect}>
-      {label}
-    </DropdownMenuItem>
-  );
 }
 
 function ServiceUrlBehaviorMenuItem({
@@ -360,9 +324,6 @@ function GeneralSection({
   const { t, i18n } = useTranslation();
   const activeLocale = getActiveLocale(i18n.language);
   const sendBehaviorOptions = useMemo(() => getSendBehaviorOptions(t), [t]);
-  const selectedSendBehaviorLabel =
-    sendBehaviorOptions.find((option) => option.value === settings.sendBehavior)?.label ??
-    settings.sendBehavior;
   const sendBehaviorDescriptionKey = `settings.general.defaultSend.descriptions.${settings.sendBehavior}`;
   const selectedLanguageOption = LANGUAGE_OPTIONS.find(
     (option) => option.value === settings.language,
@@ -407,26 +368,12 @@ function GeneralSection({
             <Text style={settingsStyles.rowTitle}>{t("settings.general.defaultSend.label")}</Text>
             <Text style={settingsStyles.rowHint}>{t(sendBehaviorDescriptionKey)}</Text>
           </View>
-          <DropdownMenu>
-            <DropdownTrigger
-              accessibilityRole="button"
-              accessibilityLabel={`${t("settings.general.defaultSend.label")}: ${selectedSendBehaviorLabel}`}
-              style={themeTriggerStyle}
-            >
-              <Text style={styles.themeTriggerText}>{selectedSendBehaviorLabel}</Text>
-            </DropdownTrigger>
-            <DropdownMenuContent side="bottom" align="end" width={200}>
-              {sendBehaviorOptions.map((option) => (
-                <SendBehaviorMenuItem
-                  key={option.value}
-                  value={option.value}
-                  label={option.label}
-                  selected={settings.sendBehavior === option.value}
-                  onChange={handleSendBehaviorChange}
-                />
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <SegmentedControl
+            size="sm"
+            value={settings.sendBehavior}
+            onValueChange={handleSendBehaviorChange}
+            options={sendBehaviorOptions}
+          />
         </View>
         <View style={[settingsStyles.row, settingsStyles.rowBorder]}>
           <View style={settingsStyles.rowContent}>
@@ -492,7 +439,7 @@ function GeneralSection({
             </Text>
           </View>
           <TextInput
-            initialValue={terminalScrollbackValue}
+            value={terminalScrollbackValue}
             onChangeText={handleTerminalScrollbackChangeText}
             onBlur={commitTerminalScrollback}
             onSubmitEditing={commitTerminalScrollback}
@@ -585,269 +532,13 @@ function DiagnosticsSection({
   );
 }
 
-interface AboutSectionProps {
-  appVersion: string | null;
-  appVersionText: string;
-  isDesktopApp: boolean;
-}
-
-function AboutSection({ appVersion, appVersionText, isDesktopApp }: AboutSectionProps) {
-  const { t } = useTranslation();
-  return (
-    <>
-      <SettingsSection title={t("settings.about.title")}>
-        <View style={settingsStyles.card}>
-          <View style={settingsStyles.row}>
-            <View style={settingsStyles.rowContent}>
-              <Text style={settingsStyles.rowTitle}>{t("settings.about.appVersion")}</Text>
-              <Text style={settingsStyles.rowHint}>{t("settings.about.thisDevice")}</Text>
-            </View>
-            <Text style={styles.aboutValue}>{appVersionText}</Text>
-          </View>
-          {isDesktopApp ? <DesktopAppUpdateRow /> : null}
-        </View>
-      </SettingsSection>
-      <ConnectedHostsSection clientVersion={appVersion} />
-      <View style={styles.aboutCommunity}>
-        <CommunityLinks />
-      </View>
-    </>
-  );
-}
-
-function normalizeVersion(version: string | null | undefined): string | null {
-  const trimmed = version?.trim();
-  if (!trimmed) return null;
-  return trimmed.replace(/^v/i, "");
-}
-
-function ConnectedHostsSection({ clientVersion }: { clientVersion: string | null }) {
-  const { t } = useTranslation();
-  const hosts = useHosts();
-  if (hosts.length === 0) {
-    return null;
-  }
-  return (
-    <SettingsSection title={t("settings.about.connectedHosts")}>
-      <View style={settingsStyles.card}>
-        {hosts.map((host, index) => (
-          <HostVersionRow
-            key={host.serverId}
-            host={host}
-            showBorder={index > 0}
-            clientVersion={clientVersion}
-          />
-        ))}
-      </View>
-    </SettingsSection>
-  );
-}
-
-function HostVersionRow({
-  host,
-  showBorder,
-  clientVersion,
-}: {
-  host: HostProfile;
-  showBorder: boolean;
-  clientVersion: string | null;
-}) {
-  const { t } = useTranslation();
-  const isConnected = useHostRuntimeIsConnected(host.serverId);
-  const daemonVersion = useSessionStore(
-    (state) => state.sessions[host.serverId]?.serverInfo?.version ?? null,
-  );
-
-  const rowStyle = useMemo(
-    () => [settingsStyles.row, showBorder && settingsStyles.rowBorder],
-    [showBorder],
-  );
-
-  const normalizedHost = normalizeVersion(daemonVersion);
-  const normalizedClient = normalizeVersion(clientVersion);
-  const isMismatch =
-    normalizedHost !== null && normalizedClient !== null && normalizedHost !== normalizedClient;
-
-  let valueText: string;
-  if (!isConnected) {
-    valueText = t("settings.about.offline");
-  } else if (normalizedHost) {
-    valueText = formatVersionWithPrefix(normalizedHost);
-  } else {
-    valueText = "—";
-  }
-
-  const valueStyle = useMemo(
-    () => [styles.aboutValue, isMismatch && styles.aboutVersionMismatch],
-    [isMismatch],
-  );
-
-  return (
-    <View style={rowStyle}>
-      <View style={settingsStyles.rowContent}>
-        <Text style={settingsStyles.rowTitle} numberOfLines={1}>
-          {host.label}
-        </Text>
-        {isMismatch ? (
-          <Text style={settingsStyles.rowHint}>{t("settings.about.versionDiffers")}</Text>
-        ) : null}
-      </View>
-      <Text style={valueStyle}>{valueText}</Text>
-    </View>
-  );
-}
-
-function getUpdateButtonLabel(
-  t: TFunction,
-  isInstalling: boolean,
-  latestVersion: string | null | undefined,
-): string {
-  if (isInstalling) return t("settings.about.updates.installing");
-  if (latestVersion) {
-    return t("settings.about.updates.updateTo", {
-      version: formatVersionWithPrefix(latestVersion),
-    });
-  }
-  return t("settings.about.updates.update");
-}
-
-function DesktopAppUpdateRow() {
-  const { t } = useTranslation();
-  const { settings, updateSettings } = useSettings();
-  const {
-    isDesktopApp,
-    statusText,
-    availableUpdate,
-    errorMessage,
-    isChecking,
-    isInstalling,
-    checkForUpdates,
-    installUpdate,
-  } = useDesktopAppUpdater();
-
-  useFocusEffect(
-    useCallback(() => {
-      if (!isDesktopApp) {
-        return undefined;
-      }
-      void checkForUpdates({ intent: "automatic", silent: true });
-      return undefined;
-    }, [checkForUpdates, isDesktopApp]),
-  );
-
-  const handleCheckForUpdates = useCallback(() => {
-    if (!isDesktopApp) {
-      return;
-    }
-    void checkForUpdates();
-  }, [checkForUpdates, isDesktopApp]);
-
-  const handleReleaseChannelChange = useCallback(
-    (releaseChannel: EffectiveSettings["releaseChannel"]) => {
-      void updateSettings({ releaseChannel });
-    },
-    [updateSettings],
-  );
-  const releaseChannelOptions = useMemo(
-    () => [
-      { value: "stable" as const, label: t("settings.about.releaseChannel.stable") },
-      { value: "beta" as const, label: t("settings.about.releaseChannel.beta") },
-    ],
-    [t],
-  );
-
-  const handleInstallUpdate = useCallback(() => {
-    if (!isDesktopApp) {
-      return;
-    }
-
-    void confirmDialog({
-      title: t("settings.about.updates.installTitle"),
-      message: t("settings.about.updates.installMessage"),
-      confirmLabel: t("settings.about.updates.installConfirm"),
-      cancelLabel: t("common.actions.cancel"),
-    })
-      .then((confirmed) => {
-        if (!confirmed) {
-          return;
-        }
-        void installUpdate();
-        return;
-      })
-      .catch((error) => {
-        console.error("[Settings] Failed to open app update confirmation", error);
-        Alert.alert(
-          t("settings.about.updates.alertTitle"),
-          t("settings.about.updates.alertMessage"),
-        );
-      });
-  }, [installUpdate, isDesktopApp, t]);
-
-  const isUpdateReady = availableUpdate?.readyToInstall === true;
-  const readyUpdateVersion = isUpdateReady ? availableUpdate?.latestVersion : null;
-
-  if (!isDesktopApp) {
-    return null;
-  }
-
-  return (
-    <>
-      <View style={[settingsStyles.row, settingsStyles.rowBorder]}>
-        <View style={settingsStyles.rowContent}>
-          <Text style={settingsStyles.rowTitle}>{t("settings.about.releaseChannel.label")}</Text>
-          <Text style={settingsStyles.rowHint}>
-            {t("settings.about.releaseChannel.description")}
-          </Text>
-        </View>
-        <SegmentedControl
-          size="sm"
-          value={settings.releaseChannel}
-          onValueChange={handleReleaseChannelChange}
-          options={releaseChannelOptions}
-        />
-      </View>
-      <View style={[settingsStyles.row, settingsStyles.rowBorder]}>
-        <View style={settingsStyles.rowContent}>
-          <Text style={settingsStyles.rowTitle}>{t("settings.about.updates.label")}</Text>
-          <Text style={settingsStyles.rowHint}>{statusText}</Text>
-          {readyUpdateVersion ? (
-            <Text style={settingsStyles.rowHint}>
-              {t("settings.about.updates.readyToInstall", {
-                version: formatVersionWithPrefix(readyUpdateVersion),
-              })}
-            </Text>
-          ) : null}
-          {errorMessage ? <Text style={styles.aboutErrorText}>{errorMessage}</Text> : null}
-        </View>
-        <View style={styles.aboutUpdateActions}>
-          <Button
-            variant="outline"
-            size="sm"
-            onPress={handleCheckForUpdates}
-            disabled={isChecking || isInstalling}
-          >
-            {isChecking ? t("settings.about.updates.checking") : t("settings.about.updates.check")}
-          </Button>
-          <Button
-            variant="default"
-            size="sm"
-            onPress={handleInstallUpdate}
-            disabled={isChecking || isInstalling || !isUpdateReady}
-          >
-            {getUpdateButtonLabel(t, isInstalling, readyUpdateVersion)}
-          </Button>
-        </View>
-      </View>
-    </>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Sidebar
 // ---------------------------------------------------------------------------
 
 /**
- * Local daemon first, then remaining hosts in their existing order.
+ * Keep the local daemon first only when the active transport is Local; a
+ * Tailscale session keeps the user's saved host order.
  */
 function useSortedHosts(hosts: HostProfile[], localServerId: string | null): HostProfile[] {
   return useMemo(() => orderHostsLocalFirst(hosts, localServerId), [hosts, localServerId]);
@@ -1045,12 +736,16 @@ function SettingsSidebar({
   const { t } = useTranslation();
   const hosts = useHosts();
   const localServerId = useLocalDaemonServerId();
-  const sortedHosts = useSortedHosts(hosts, localServerId);
+  const { mode: connectionMode } = useConnectionMode();
+  const localServerIdForOrdering = connectionMode === "local" ? localServerId : null;
+  const sortedHosts = useSortedHosts(hosts, localServerIdForOrdering);
   const hasHosts = sortedHosts.length > 0;
   const enableBuiltInDaemonOption = useEnableBuiltInDaemonOption();
   const isDesktopApp = isElectronRuntime();
-  const items = SIDEBAR_SECTION_ITEMS.filter(
-    (item) => (!item.desktopOnly || isDesktopApp) && (!item.webOnly || isWeb),
+  const items = SIDEBAR_SECTION_ITEMS.filter((item) => !item.desktopOnly || isDesktopApp);
+  const pluginManagementSupported = useHostFeature(activeHostServerId, "pluginManagement");
+  const hostSectionItems = HOST_SECTION_ITEMS.filter(
+    (item) => item.id !== "plugins" || pluginManagementSupported,
   );
   const insets = useSafeAreaInsets();
   const isDesktop = layout === "desktop";
@@ -1093,7 +788,7 @@ function SettingsSidebar({
             onAddHost={onAddHost}
             enableBuiltInDaemonOption={enableBuiltInDaemonOption}
           />
-          {HOST_SECTION_ITEMS.map((item) => (
+          {hostSectionItems.map((item) => (
             <SidebarHostSectionButton
               key={item.id}
               itemId={item.id}
@@ -1156,11 +851,7 @@ function SettingsSidebar({
               testID="settings-back-to-workspace"
             />
           </View>
-          <ScrollView
-            style={sidebarStyles.scrollBody}
-            showsVerticalScrollIndicator={false}
-            testID="settings-sidebar-scroll-body"
-          >
+          <ScrollView style={sidebarStyles.scrollBody} showsVerticalScrollIndicator={false}>
             {sidebarBody}
           </ScrollView>
         </View>
@@ -1188,20 +879,20 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
   const { settings, isLoading: settingsLoading, updateSettings } = useAppSettings();
   const [isAddHostMethodVisible, setIsAddHostMethodVisible] = useState(false);
   const [isDirectHostVisible, setIsDirectHostVisible] = useState(false);
-  const [isRemoteSshVisible, setIsRemoteSshVisible] = useState(false);
   const [isPasteLinkVisible, setIsPasteLinkVisible] = useState(false);
+  const [pairLinkTitle, setPairLinkTitle] = useState<string | undefined>(undefined);
   const [isPlaybackTestRunning, setIsPlaybackTestRunning] = useState(false);
   const [playbackTestResult, setPlaybackTestResult] = useState<string | null>(null);
   const lastOpenedAddHostIntentRef = useRef<string | null>(null);
   const isDesktopApp = isElectronRuntime();
-  const appVersion = resolveAppVersion();
-  const appVersionText = formatVersionWithPrefix(appVersion);
   const isCompactLayout = useIsCompactFormFactor();
   const insets = useSafeAreaInsets();
   const insetBottomStyle = useMemo(() => ({ paddingBottom: insets.bottom }), [insets.bottom]);
   const hosts = useHosts();
   const localServerId = useLocalDaemonServerId();
-  const sortedHosts = useSortedHosts(hosts, localServerId);
+  const { mode: connectionMode } = useConnectionMode();
+  const localServerIdForOrdering = connectionMode === "local" ? localServerId : null;
+  const sortedHosts = useSortedHosts(hosts, localServerIdForOrdering);
   const lastWorkspaceSelection = useLastWorkspaceSelection();
   const routedSettingsHostServerId =
     view.kind === "host" || view.kind === "project" ? view.serverId : null;
@@ -1222,11 +913,11 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
     if (view.kind === "host" || view.kind === "project") return view.serverId;
     return resolveActiveHostServerId({
       selectedServerId: selectedSettingsHostServerId,
-      localServerId,
+      localServerId: localServerIdForOrdering,
       hosts,
       orderedHosts: sortedHosts,
     });
-  }, [view, selectedSettingsHostServerId, localServerId, hosts, sortedHosts]);
+  }, [view, selectedSettingsHostServerId, localServerIdForOrdering, hosts, sortedHosts]);
 
   const handleSendBehaviorChange = useCallback(
     (behavior: SendBehavior) => {
@@ -1295,15 +986,8 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
   const closeAddConnectionFlow = useCallback(() => {
     setIsAddHostMethodVisible(false);
     setIsDirectHostVisible(false);
-    setIsRemoteSshVisible(false);
     setIsPasteLinkVisible(false);
-  }, []);
-
-  const goBackToAddConnectionMethods = useCallback(() => {
-    setIsDirectHostVisible(false);
-    setIsRemoteSshVisible(false);
-    setIsPasteLinkVisible(false);
-    setIsAddHostMethodVisible(true);
+    setPairLinkTitle(undefined);
   }, []);
 
   const handleAddHost = useCallback(() => {
@@ -1319,19 +1003,46 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
   }, [handleAddHost, openAddHostIntent]);
 
   const handleSelectDirectConnection = useCallback(() => {
-    setIsAddHostMethodVisible(false);
-    setIsDirectHostVisible(true);
-  }, []);
-
-  const handleSelectRemoteSsh = useCallback(() => {
-    setIsAddHostMethodVisible(false);
-    setIsRemoteSshVisible(true);
+    // Selecting the direct form is an explicit Local choice. Persist it before
+    // probing so a successful direct connection cannot be stored while the
+    // runtime is still filtering for Tailscale connections.
+    void setConnectionMode("local")
+      .then(() => {
+        setIsAddHostMethodVisible(false);
+        setIsDirectHostVisible(true);
+        return undefined;
+      })
+      .catch(() => {
+        Alert.alert("Connection setup failed", "JAgentDesk could not save Local connection mode.");
+      });
   }, []);
 
   const handleSelectPasteLink = useCallback(() => {
     setIsAddHostMethodVisible(false);
+    setPairLinkTitle(undefined);
     setIsPasteLinkVisible(true);
   }, []);
+
+  const handleSelectTailscale = useCallback(() => {
+    setIsAddHostMethodVisible(false);
+    // A tailnet offer already contains the daemon address and public key.
+    // Never ask users to manually copy protocol fields; mobile obtains them
+    // from the desktop QR/deep-link and only asks for the six-digit proof.
+    if (isNative) {
+      router.push({ pathname: "/pair-scan", params: { source: "settings" } });
+      return;
+    }
+    // Desktop is the offer source, not a QR scanner. Open its real pairing
+    // screen so it generates the QR/deep-link and six-digit proof.
+    if (activeHostServerId) {
+      router.replace(buildSettingsHostSectionRoute(activeHostServerId, "pair-device"));
+      return;
+    }
+    // On a fresh desktop there is no host yet. The explicit login gate starts
+    // the app-owned daemon, joins Tailscale, and then the runtime creates the
+    // first tailnet host from its verified status. Do not silently no-op.
+    router.replace("/tailscale-login");
+  }, [activeHostServerId, router]);
 
   const handleHostAdded = useCallback(
     ({ serverId }: { serverId: string }) => {
@@ -1409,21 +1120,34 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
   }, [closeAddConnectionFlow, router]);
 
   const handleHostRemoved = useCallback(() => {
-    const fallback = buildSettingsSectionRoute("general");
-    if (isCompactLayout) {
-      router.replace("/settings");
-    } else {
-      router.replace(fallback);
-    }
-  }, [isCompactLayout, router]);
+    // Removing a host must never silently switch transport to Local. Return to
+    // the explicit connection chooser so the user chooses Local or Tailscale.
+    router.replace(isNative ? "/pair-start" : "/tailscale-login");
+  }, [router]);
 
+  const handleBackToRoot = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace("/settings");
+    }
+  }, [router]);
+
+  const detailProjectServerId = view.kind === "project" ? view.serverId : null;
   const handleBackFromDetail = useCallback(() => {
-    returnFromSettings(view);
-  }, [view]);
+    if (detailProjectServerId) {
+      router.navigate(buildSettingsHostSectionRoute(detailProjectServerId, "projects"));
+      return;
+    }
+    handleBackToRoot();
+  }, [detailProjectServerId, handleBackToRoot, router]);
 
   const handleBackToWorkspace = useCallback(() => {
-    returnFromSettings({ kind: "root" });
-  }, []);
+    if (navigateToLastWorkspace()) {
+      return;
+    }
+    router.replace(buildOpenProjectRoute());
+  }, [router]);
 
   const detailHeader = ((): {
     title: string;
@@ -1446,76 +1170,54 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
     return null;
   })();
 
-  let content: ReactNode;
-  if (view.kind === "section" && view.section === "layout") {
-    content = isDesktopApp ? <LayoutSection /> : null;
-  } else {
-    content = (() => {
-      if (view.kind === "host") {
-        return renderHostSettingsContent(view, handleHostRemoved);
-      }
-      if (view.kind === "project") {
-        return (
-          <ProjectSettingsScreen
-            serverId={view.serverId}
-            projectId={view.projectId}
-            onBackToProjects={handleBackFromDetail}
-            showBackToProjects={!isCompactLayout}
-          />
-        );
-      }
-      if (view.kind === "section") {
-        switch (view.section) {
-          case "general":
-            return (
-              <>
-                <GeneralSection
-                  settings={settings}
-                  isDesktopApp={isDesktopApp}
-                  handleSendBehaviorChange={handleSendBehaviorChange}
-                  handleServiceUrlBehaviorChange={handleServiceUrlBehaviorChange}
-                  handleLanguageChange={handleLanguageChange}
-                  handleTerminalScrollbackLinesChange={handleTerminalScrollbackLinesChange}
-                />
-                {isDesktopApp ? <BrowserDataSection /> : null}
-              </>
-            );
-          case "appearance":
-            return <AppearanceSection />;
-          case "editor":
-            return isWeb ? <EditorSection /> : null;
-          case "shortcuts":
-            return isDesktopApp ? <KeyboardShortcutsSection /> : null;
-          case "integrations":
-            return isDesktopApp ? <IntegrationsSection /> : null;
-          case "notifications":
-            return isDesktopApp ? <DesktopNotificationsSection /> : null;
-          case "permissions":
-            return isDesktopApp ? <DesktopPermissionsSection /> : null;
-          case "diagnostics":
-            return (
-              <DiagnosticsSection
-                useLegacyTerminalRenderer={settings.useLegacyTerminalRenderer}
-                onUseLegacyTerminalRendererChange={handleUseLegacyTerminalRendererChange}
-                voiceAudioEngine={voiceAudioEngine}
-                isPlaybackTestRunning={isPlaybackTestRunning}
-                playbackTestResult={playbackTestResult}
-                handlePlaybackTest={handlePlaybackTest}
-              />
-            );
-          case "about":
-            return (
-              <AboutSection
-                appVersion={appVersion}
-                appVersionText={appVersionText}
+  const content = (() => {
+    if (view.kind === "host") {
+      return renderHostSettingsContent(view, handleHostRemoved, handleAddHost);
+    }
+    if (view.kind === "project") {
+      return <ProjectSettingsScreen serverId={view.serverId} projectId={view.projectId} />;
+    }
+    if (view.kind === "section") {
+      switch (view.section) {
+        case "general":
+          return (
+            <>
+              <GeneralSection
+                settings={settings}
                 isDesktopApp={isDesktopApp}
+                handleSendBehaviorChange={handleSendBehaviorChange}
+                handleServiceUrlBehaviorChange={handleServiceUrlBehaviorChange}
+                handleLanguageChange={handleLanguageChange}
+                handleTerminalScrollbackLinesChange={handleTerminalScrollbackLinesChange}
               />
-            );
-        }
+              {isDesktopApp ? <BrowserDataSection /> : null}
+            </>
+          );
+        case "appearance":
+          return <AppearanceSection />;
+        case "editor":
+          return <EditorSection />;
+        case "shortcuts":
+          return isDesktopApp ? <KeyboardShortcutsSection /> : null;
+        case "integrations":
+          return isDesktopApp ? <IntegrationsSection /> : null;
+        case "permissions":
+          return isDesktopApp ? <DesktopPermissionsSection /> : null;
+        case "diagnostics":
+          return (
+            <DiagnosticsSection
+              useLegacyTerminalRenderer={settings.useLegacyTerminalRenderer}
+              onUseLegacyTerminalRendererChange={handleUseLegacyTerminalRendererChange}
+              voiceAudioEngine={voiceAudioEngine}
+              isPlaybackTestRunning={isPlaybackTestRunning}
+              playbackTestResult={playbackTestResult}
+              handlePlaybackTest={handlePlaybackTest}
+            />
+          );
       }
-      return null;
-    })();
-  }
+    }
+    return null;
+  })();
 
   if (settingsLoading) {
     return (
@@ -1541,27 +1243,22 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
         visible={isAddHostMethodVisible}
         onClose={closeAddConnectionFlow}
         onDirectConnection={handleSelectDirectConnection}
-        onRemoteSsh={handleSelectRemoteSsh}
         onPasteLink={handleSelectPasteLink}
+        onTailscale={handleSelectTailscale}
         onScanQr={handleScanQr}
       />
       <AddHostModal
         visible={isDirectHostVisible}
         onClose={closeAddConnectionFlow}
-        onCancel={goBackToAddConnectionMethods}
-        onSaved={handleHostAdded}
-      />
-      <AddRemoteSshHostModal
-        visible={isRemoteSshVisible}
-        onClose={closeAddConnectionFlow}
-        onCancel={goBackToAddConnectionMethods}
+        onCancel={closeAddConnectionFlow}
         onSaved={handleHostAdded}
       />
       <PairLinkModal
         visible={isPasteLinkVisible}
         onClose={closeAddConnectionFlow}
-        onCancel={goBackToAddConnectionMethods}
+        onCancel={closeAddConnectionFlow}
         onSaved={handleHostAdded}
+        title={pairLinkTitle}
       />
     </>
   );
@@ -1653,7 +1350,7 @@ const styles = StyleSheet.create((theme) => ({
   },
   loadingText: {
     color: theme.colors.foreground,
-    fontSize: theme.fontSize.base,
+    fontSize: theme.fontSize.lg,
   },
   container: {
     flex: 1,
@@ -1669,26 +1366,6 @@ const styles = StyleSheet.create((theme) => ({
     maxWidth: 720,
     alignSelf: "center",
   },
-  aboutValue: {
-    color: theme.colors.foregroundMuted,
-    fontSize: theme.fontSize.base,
-  },
-  aboutVersionMismatch: {
-    color: theme.colors.palette.amber[500],
-  },
-  aboutErrorText: {
-    color: theme.colors.palette.red[300],
-    fontSize: theme.fontSize.sm,
-    marginTop: theme.spacing[1],
-  },
-  aboutCommunity: {
-    marginTop: theme.spacing[4],
-  },
-  aboutUpdateActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing[2],
-  },
   themeTrigger: {
     flexDirection: "row",
     alignItems: "center",
@@ -1701,7 +1378,7 @@ const styles = StyleSheet.create((theme) => ({
   },
   themeTriggerText: {
     color: theme.colors.foreground,
-    fontSize: theme.fontSize.base,
+    fontSize: theme.fontSize.sm,
   },
   terminalScrollbackInput: {
     width: 112,
@@ -1713,7 +1390,7 @@ const styles = StyleSheet.create((theme) => ({
     borderColor: theme.colors.border,
     backgroundColor: theme.colors.surface2,
     color: theme.colors.foreground,
-    fontSize: theme.fontSize.base,
+    fontSize: theme.fontSize.sm,
     textAlign: "right",
   },
   placeholder: {
@@ -1724,7 +1401,7 @@ const styles = StyleSheet.create((theme) => ({
   },
   placeholderText: {
     color: theme.colors.foregroundMuted,
-    fontSize: theme.fontSize.base,
+    fontSize: theme.fontSize.sm,
   },
 }));
 
@@ -1764,7 +1441,7 @@ const sidebarStyles = StyleSheet.create((theme) => ({
     gap: theme.spacing[1],
   },
   groupLabel: {
-    fontSize: theme.fontSize.base,
+    fontSize: theme.fontSize.sm,
     fontWeight: theme.fontWeight.medium,
     color: theme.colors.foregroundMuted,
     paddingHorizontal: theme.spacing[2],

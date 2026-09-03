@@ -4,17 +4,19 @@
  * maps its raw CI strings onto this frozen union. Forge-specific vocabularies
  * (e.g. GitLab pipeline statuses) live in the owning forge module.
  */
-export type CheckStatus = "success" | "failure" | "pending" | "skipped" | "cancelled";
+export type CheckStatus = "success" | "failure" | "pending" | "skipped";
 
 export function mapCheckStatus(status: string): CheckStatus {
   if (
     status === "success" ||
     status === "failure" ||
     status === "pending" ||
-    status === "skipped" ||
-    status === "cancelled"
+    status === "skipped"
   ) {
     return status;
+  }
+  if (status === "cancelled") {
+    return "skipped";
   }
   return "pending";
 }

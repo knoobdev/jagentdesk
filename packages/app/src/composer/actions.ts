@@ -353,9 +353,7 @@ function isForgeAttachment(
   return (
     attachment.kind === "forge_issue" ||
     attachment.kind === "forge_change_request" ||
-    // COMPAT(githubAttachmentKinds): accept legacy persisted attachment kinds
-    // until 2027-01-17, when supported floors are >= v0.2.0 and old drafts no
-    // longer require them.
+    // COMPAT(githubAttachmentKinds): added in v0.1.106, remove after 2026-12-28 once daemon floor >= v0.1.106
     attachment.kind === "github_issue" ||
     attachment.kind === "github_pr"
   );
@@ -375,17 +373,17 @@ export function toggleForgeAttachment(
   return [...current, buildForgeAttachment(item)];
 }
 
-interface ToggleForgeAttachmentFromPickerInput {
+interface ToggleGithubAttachmentFromPickerInput {
   current: UserComposerAttachment[];
   item: ForgeSearchItem;
-  markForgeAttachmentRemoved: (attachment: UserComposerAttachment) => void;
+  markGithubAttachmentRemoved: (attachment: UserComposerAttachment) => void;
 }
 
-export function toggleForgeAttachmentFromPicker({
+export function toggleGithubAttachmentFromPicker({
   current,
   item,
-  markForgeAttachmentRemoved,
-}: ToggleForgeAttachmentFromPickerInput): UserComposerAttachment[] {
+  markGithubAttachmentRemoved,
+}: ToggleGithubAttachmentFromPickerInput): UserComposerAttachment[] {
   const existingAttachment = current.find(
     (attachment) =>
       isForgeAttachment(attachment) &&
@@ -393,19 +391,19 @@ export function toggleForgeAttachmentFromPicker({
       attachment.item.number === item.number,
   );
   if (existingAttachment) {
-    markForgeAttachmentRemoved(existingAttachment);
+    markGithubAttachmentRemoved(existingAttachment);
   }
   return toggleForgeAttachment(current, item);
 }
 
-export function findForgeItemByOption(
+export function findGithubItemByOption(
   items: readonly ForgeSearchItem[],
   optionId: string,
 ): ForgeSearchItem | undefined {
   return items.find((candidate) => `${candidate.kind}:${candidate.number}` === optionId);
 }
 
-export function isAttachmentSelectedForForgeItem(
+export function isAttachmentSelectedForGithubItem(
   current: readonly ComposerAttachment[],
   item: ForgeSearchItem,
 ): boolean {
@@ -416,3 +414,5 @@ export function isAttachmentSelectedForForgeItem(
       attachment.item.number === item.number,
   );
 }
+
+export const toggleGithubAttachment = toggleForgeAttachment;

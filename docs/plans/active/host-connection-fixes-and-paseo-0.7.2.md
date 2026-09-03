@@ -34,10 +34,40 @@ Expected: returning to host-picker + re-login deletes the old connection but BAC
 
 Memory rule: never bulk `git merge upstream`; port per-feature + rebrand. Fork re-rooted history.
 
-- [ ] fetch upstream tags; get exact current base; diff base..v0.7.2 --stat
-- [ ] triage upstream changes; port valuable ones without breaking JAgentDesk features (DB IDE, K8s, Skills, Tailscale transport, pairing, orchestration, no-editor)
-- [ ] remove `paseo` keywords introduced by the port (brand map: getpaseo→jagentdesk, Paseo→JAgentDesk, etc.)
-- [ ] typecheck + build + smoke test
+Worktree: `hdc/jagentdesk-port` (branch `port/paseo-0.7.2`). Strategy that worked:
+rebranded bulk-apply of the 561-file v0.6.1→v0.7.2 delta into a WIP commit, then
+per-package subagent triage that **reverts fork-authoritative files to fork HEAD**
+where an upstream file references fork-absent APIs (editor, relay, skia diff,
+directorySync, row-store cache, `permissions`-model hub, `WorkspaceTabPlacement`),
+and **keeps upstream** where it is compatible & additive.
+
+Outcome (typecheck 0 across every package):
+
+- Backend adopted v0.7.2 substantially: **protocol +23 net files** (new message
+  schemas, capabilities, `ProviderOptions`/`ToolPolicy`, `AgentTaskItem`,
+  `hasOpenAgentTab`, managed-source plugin fields), **server +169 net files**.
+- App: **18 new upstream files adopted** (reconnect-toast, pull-request/changes
+  panels, keyboard availability, file-change-icon, file-header-presentation, …),
+  5 changed, rest kept fork HEAD. **No JAD app file deleted** (verified via comm).
+- Hub authz kept on the fork's **scope** model: `daemon-session`/protocol use the
+  v0.7.2 `permissions` names; the fork session gate stays `isSessionRpcAllowed`
+  (scopes). Bridged at `attachHubSocket` via `hubScopesForPermissions`
+  (`hub.execute`→`hub.execution.*`); `updateAttachedPermissions` is a documented
+  no-op (hub relationship is vestigial under Tailscale-only, ADR-0001).
+- `operation-permissions.ts`: added the 63 inbound + 66 outbound JAD feature
+  operations (browser/cluster/database/skills/orchestration/usage/pairing/host-data)
+  with conservative levels (daemon infra→daemon.read|manage, pairing→access.manage,
+  agent ops→workspace.\*); removed the stray `hub.execution.agent.validate.response`.
+- **fontSize.xs→sm regression** (agents wrongly assumed theme dropped `xs`; it did
+  not — `xs:12`, `sm:14`) reverted across ~42 files; `fontSize.xs` count back to 360.
+
+- [x] fetch upstream tags; get exact current base; diff base..v0.7.2 --stat (561 files)
+- [x] triage upstream changes; port valuable ones without breaking JAgentDesk features
+- [x] typecheck 0: protocol, client, server, app, desktop, plugin, highlight
+- [x] cli typecheck 0 (reverted hub/plugin/client to fork HEAD Tailscale-only; deleted 3 hub-cloud files)
+- [x] remove `paseo` keywords introduced by the port (only guard-test `@paseo/plugin` kept)
+- [ ] build all packages + build desktop app + build mobile; runtime smoke test
+- [ ] merge `port/paseo-0.7.2` → main
 
 ## Invariants to preserve
 

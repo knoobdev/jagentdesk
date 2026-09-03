@@ -1,7 +1,5 @@
-import { useMemo, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 import { QueryClient } from "@tanstack/react-query";
-import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
-import { startPluginClientSide } from "./composer-pills/lifecycle";
 import { evaluatePluginClientBundle } from "./evaluate";
 import type { InstalledPlugin } from "./types";
 
@@ -31,15 +29,9 @@ class PluginRegistry {
   installCatalog(
     serverId: string,
     catalog: CatalogPlugin[],
-    options: {
-      replacePluginId?: string;
-      client?: DaemonClient;
-    } = {},
-  ): boolean {
+    options: { replacePluginId?: string } = {},
+  ): void {
     const previous = this.byHost.get(serverId) ?? [];
-    const previousTimelineBundles = previous
-      .filter((plugin) => plugin.timelineTransformers.length > 0)
-      .map((plugin) => `${plugin.id}\0${plugin.clientBundle}`);
     const preserved = catalog.flatMap((entry) => {
       const existing = previous.find(
         (plugin) =>
@@ -66,30 +58,16 @@ class PluginRegistry {
           return [existing];
         }
         const queryClient = new QueryClient();
-        const evaluated = evaluatePluginClientBundle(entry.id, entry.clientBundle);
-        const installation: InstalledPlugin = {
-          ...evaluated,
-          serverId,
-          clientBundle: entry.clientBundle,
-          queryClient,
-        };
-        if (installation.clientSide) {
-          if (!options.client) throw new Error("Plugin client runtime is unavailable");
-          let clientCleanup;
-          try {
-            clientCleanup = startPluginClientSide(installation, options.client);
-          } catch (error) {
-            queryClient.clear();
-            void Promise.resolve(evaluated.cleanup()).catch(() => undefined);
-            throw error;
-          }
-          installation.cleanup = async () => {
-            await clientCleanup();
-            await evaluated.cleanup();
-          };
-        }
+        const evaluated = [
+          {
+            ...evaluatePluginClientBundle(entry.id, entry.clientBundle),
+            serverId,
+            clientBundle: entry.clientBundle,
+            queryClient,
+          },
+        ];
         this.evaluationErrors.delete(key);
-        return [installation];
+        return evaluated;
       } catch (error) {
         this.evaluationErrors.set(key, error instanceof Error ? error.message : String(error));
         console.warn(`[Plugins] Failed to evaluate ${serverId}/${entry.id}`, error);
@@ -104,13 +82,6 @@ class PluginRegistry {
     }
     this.byHost.set(serverId, installed);
     this.publish();
-    const installedTimelineBundles = installed
-      .filter((plugin) => plugin.timelineTransformers.length > 0)
-      .map((plugin) => `${plugin.id}\0${plugin.clientBundle}`);
-    return (
-      previousTimelineBundles.length !== installedTimelineBundles.length ||
-      previousTimelineBundles.some((bundle, index) => bundle !== installedTimelineBundles[index])
-    );
   }
 
   removeHost(serverId: string): void {
@@ -166,6 +137,5 @@ export function useInstalledPlugin(serverId: string, pluginId: string): Installe
 }
 
 export function usePluginInstallations(pluginId: string): InstalledPlugin[] {
-  const installed = useInstalledPlugins();
-  return useMemo(() => installed.filter((plugin) => plugin.id === pluginId), [installed, pluginId]);
+  return useInstalledPlugins().filter((plugin) => plugin.id === pluginId);
 }

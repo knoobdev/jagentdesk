@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { useCallback, useMemo, useRef, useSyncExternalStore } from "react";
 import equal from "fast-deep-equal";
 import { useStoreWithEqualityFn } from "zustand/traditional";
 import {
@@ -168,10 +168,6 @@ export function useProjects(options: UseProjectsOptions = {}): UseProjectsResult
     () => (enabled ? hosts.map((host) => host.serverId) : []),
     [enabled, hosts],
   );
-  useEffect(() => {
-    const releases = serverIds.map((serverId) => runtime.acquireDirectoryDemand(serverId));
-    return () => releases.forEach((release) => release());
-  }, [runtime, serverIds]);
   const replicaSelector = useMemo(
     () => selectProjectHostReplicas(hosts, enabled),
     [enabled, hosts],
@@ -184,7 +180,7 @@ export function useProjects(options: UseProjectsOptions = {}): UseProjectsResult
   );
   const refetch = useCallback(() => {
     if (!enabled) return;
-    for (const serverId of serverIds) void runtime.refreshDirectories(serverId);
+    runtime.refreshAllAgentDirectories({ serverIds });
   }, [enabled, runtime, serverIds]);
 
   return {

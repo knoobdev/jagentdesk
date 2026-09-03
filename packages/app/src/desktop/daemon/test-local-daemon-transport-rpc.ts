@@ -1,4 +1,4 @@
-import type { OpenLocalTransportSessionInput } from "./desktop-daemon";
+import type { LocalTransportTarget } from "./desktop-daemon";
 import type {
   LocalDaemonTransportEvent,
   LocalDaemonTransportRpc,
@@ -11,10 +11,10 @@ export interface RecordedSend {
 }
 
 export interface FakeLocalDaemonTransportRpc extends LocalDaemonTransportRpc {
-  readonly openCalls: OpenLocalTransportSessionInput[];
+  readonly openCalls: LocalTransportTarget[];
   readonly recordedSends: RecordedSend[];
   readonly closedSessions: string[];
-  resolveRegistration(): void;
+  resolveOpen(sessionId: string): void;
   rejectOpen(error: Error): void;
   resolveListen(cleanup: () => void): void;
   rejectListen(error: Error): void;
@@ -22,12 +22,12 @@ export interface FakeLocalDaemonTransportRpc extends LocalDaemonTransportRpc {
 }
 
 export function createFakeLocalDaemonTransportRpc(): FakeLocalDaemonTransportRpc {
-  const openCalls: OpenLocalTransportSessionInput[] = [];
+  const openCalls: LocalTransportTarget[] = [];
   const recordedSends: RecordedSend[] = [];
   const closedSessions: string[] = [];
   let eventHandler: ((event: LocalDaemonTransportEvent) => void) | null = null;
-  let resolveRegistrationPromise: (() => void) | null = null;
-  let rejectRegistrationPromise: ((error: Error) => void) | null = null;
+  let resolveOpenSession: ((sessionId: string) => void) | null = null;
+  let rejectOpenSession: ((error: Error) => void) | null = null;
   let resolveListenPromise: ((cleanup: () => void) => void) | null = null;
   let rejectListenPromise: ((error: Error) => void) | null = null;
 
@@ -35,11 +35,11 @@ export function createFakeLocalDaemonTransportRpc(): FakeLocalDaemonTransportRpc
     openCalls,
     recordedSends,
     closedSessions,
-    openSession(input) {
-      openCalls.push(input);
-      return new Promise<void>((resolve, reject) => {
-        resolveRegistrationPromise = resolve;
-        rejectRegistrationPromise = reject;
+    openSession(target) {
+      openCalls.push(target);
+      return new Promise<string>((resolve, reject) => {
+        resolveOpenSession = resolve;
+        rejectOpenSession = reject;
       });
     },
     listenToEvents(handler) {
@@ -55,17 +55,17 @@ export function createFakeLocalDaemonTransportRpc(): FakeLocalDaemonTransportRpc
     async closeSession(sessionId) {
       closedSessions.push(sessionId);
     },
-    resolveRegistration() {
-      if (!resolveRegistrationPromise) {
+    resolveOpen(sessionId) {
+      if (!resolveOpenSession) {
         throw new Error("openSession was not called");
       }
-      resolveRegistrationPromise();
+      resolveOpenSession(sessionId);
     },
     rejectOpen(error) {
-      if (!rejectRegistrationPromise) {
+      if (!rejectOpenSession) {
         throw new Error("openSession was not called");
       }
-      rejectRegistrationPromise(error);
+      rejectOpenSession(error);
     },
     resolveListen(cleanup) {
       if (!resolveListenPromise) {

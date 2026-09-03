@@ -2,14 +2,9 @@ import type { QueryClient } from "@tanstack/react-query";
 import type {
   PluginAttachmentSourceContribution,
   PluginCommandCenterItemContribution,
-  PluginClientContribution,
-  PluginCleanup,
-  PluginComposerPillContribution,
   PluginSidebarContribution,
   PluginSurfaceContribution,
   PluginThemeContribution,
-  PluginTimelineRendererContribution,
-  PluginTimelineTransformerContribution,
   PluginPanelLocation,
   PluginWorkspacePanelContribution,
 } from "@jagentdesk/plugin";
@@ -20,16 +15,13 @@ export type EvaluatedPluginWorkspacePanelContribution = PluginWorkspacePanelCont
 
 export interface EvaluatedPlugin {
   id: string;
-  cleanup: PluginCleanup;
+  cleanup: () => void;
   surfaces: PluginSurfaceContribution[];
   sidebarItems: PluginSidebarContribution[];
   workspacePanels: EvaluatedPluginWorkspacePanelContribution[];
   commandCenterItems: PluginCommandCenterItemContribution[];
-  clientSide: PluginClientContribution | null;
   attachmentSources: PluginAttachmentSourceContribution[];
   themes: PluginThemeContribution[];
-  timelineTransformers: PluginTimelineTransformerContribution[];
-  timelineRenderers: PluginTimelineRendererContribution[];
 }
 
 export interface InstalledPlugin extends EvaluatedPlugin {
@@ -41,11 +33,8 @@ export interface InstalledPlugin extends EvaluatedPlugin {
 export type {
   PluginAttachmentSourceContribution,
   PluginCommandCenterItemContribution,
-  PluginComposerPillContribution,
   PluginSidebarContribution,
   PluginSurfaceContribution,
   PluginThemeContribution,
-  PluginTimelineRendererContribution,
-  PluginTimelineTransformerContribution,
   PluginWorkspacePanelContribution,
 };

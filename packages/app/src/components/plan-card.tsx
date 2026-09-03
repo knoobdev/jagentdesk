@@ -5,12 +5,6 @@ import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
 import { createMarkdownStyles } from "@/styles/markdown-styles";
 import { getMarkdownListMarker } from "@/utils/markdown-list";
-import { createMarkdownParser } from "@/utils/markdown-parser";
-
-// Without this prop react-native-markdown-display builds its own parser with
-// `typographer: true`, which would render a plan's literal `(c)` as ©. Its
-// default also leaves linkify off, so this one keeps bare URLs as plain text.
-const planMarkdownParser = createMarkdownParser({ linkify: false });
 
 type MarkdownRuleStyles = Record<string, TextStyle & ViewStyle & { [key: string]: unknown }>;
 
@@ -225,7 +219,7 @@ export function PlanCard({
     <View testID={testID} style={containerStyle}>
       <Text style={titleStyle}>{resolvedTitle}</Text>
       {description ? <Text style={descriptionStyle}>{description}</Text> : null}
-      <Markdown style={markdownStyles} rules={markdownRules} markdownit={planMarkdownParser}>
+      <Markdown style={markdownStyles} rules={markdownRules}>
         {text}
       </Markdown>
       {footer ? <View style={styles.footer}>{footer}</View> : null}

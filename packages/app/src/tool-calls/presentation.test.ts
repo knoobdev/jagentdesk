@@ -66,7 +66,7 @@ describe("tool-call presentation", () => {
     });
 
     expect(presentation).toMatchObject({
-      displayName: "Exec command",
+      displayName: "Exec Command",
       icon: fakeIcons.wrench,
       isLoadingDetails: true,
       hasDetails: false,

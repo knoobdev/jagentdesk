@@ -2,7 +2,10 @@ import { execFile, spawn, type ChildProcess, type SpawnOptions } from "node:chil
 import { extname } from "node:path";
 import { promisify } from "node:util";
 
-import { createExternalCommandProcessEnv, type ProcessEnvRecord } from "../server/jagentdesk-env.js";
+import {
+  createExternalCommandProcessEnv,
+  type ProcessEnvRecord,
+} from "../server/jagentdesk-env.js";
 import {
   isWindowsCommandScript,
   quoteWindowsArgument,
@@ -27,6 +30,7 @@ interface ExecCommandOptions extends ExternalEnvOptions {
   timeout?: number;
   maxBuffer?: number;
   shell?: boolean | string;
+  signal?: AbortSignal;
 }
 
 interface ExecCommandResult {
@@ -77,6 +81,7 @@ export function spawnProcess(
     ...spawnOptions,
     env: childEnv,
     shell,
+    signal: options?.signal,
     windowsHide: true,
   });
 }

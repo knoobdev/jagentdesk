@@ -13,6 +13,9 @@ class FakeDaemonClient implements DaemonProbeClient {
   }
 
   async connect(): Promise<void> {
+    if (this.probe.hangNextConnection) {
+      return new Promise<void>(() => {});
+    }
     if (this.probe.nextConnectError) {
       throw this.probe.nextConnectError;
     }
@@ -36,6 +39,7 @@ class FakeDaemonProbe {
   clientIdsRequested = 0;
   nextConnectError: Error | null = null;
   nextLastError: string | null = null;
+  hangNextConnection = false;
 
   readonly deps: DaemonConnectionDependencies<FakeDaemonClient> = {
     getClientId: async () => {
@@ -43,13 +47,9 @@ class FakeDaemonProbe {
       return "cid_shared_probe_test";
     },
     resolveAppVersion: () => null,
-    createDesktopTransportFactory: () => null,
-    buildDesktopTransportUrl: (target) => {
-      if (target.transportType === "ssh") {
-        return `jagentdesk+desktop://ssh?host=${encodeURIComponent(target.host)}`;
-      }
-      return `jagentdesk+desktop://${target.transportType}?path=${encodeURIComponent(target.transportPath)}`;
-    },
+    createLocalTransportFactory: () => null,
+    buildLocalTransportUrl: ({ transportType, transportPath }) =>
+      `jagentdesk+local://${transportType}?path=${encodeURIComponent(transportPath)}`,
     createClient: (config) => {
       const client = new FakeDaemonClient(this, config);
       this.createdClients.push(client);
@@ -105,29 +105,6 @@ describe("test-daemon-connection connectToDaemon", () => {
     expect(probe.clientIdsRequested).toBe(2);
   });
 
-  it("keeps direct TCP probes on the renderer WebSocket", async () => {
-    const { connectToDaemon } = await import("./test-daemon-connection");
-    const deps = {
-      ...probe.deps,
-      createWebSocketTransportFactory: () => {
-        throw new Error("Direct TCP must not use the desktop WebSocket bridge");
-      },
-    };
-
-    const result = await connectToDaemon(
-      {
-        id: "direct:lan:6767",
-        type: "directTcp",
-        endpoint: "lan:6767",
-      },
-      undefined,
-      deps,
-    );
-    await result.client.close();
-
-    expect(probe.createdConfigs()[0]?.transportFactory).toBeUndefined();
-  });
-
   it("encodes the local socket target into the client config", async () => {
     const { connectToDaemon } = await import("./test-daemon-connection");
     const result = await connectToDaemon(
@@ -141,32 +118,9 @@ describe("test-daemon-connection connectToDaemon", () => {
     );
     await result.client.close();
 
-    expect(probe.createdConfigs()[0]?.url).toBe("jagentdesk+desktop://socket?path=%2Ftmp%2Fjagentdesk.sock");
-  });
-
-  it("uses the desktop transport for Remote SSH connections", async () => {
-    const { connectToDaemon } = await import("./test-daemon-connection");
-    const transportFactory = vi.fn();
-    const result = await connectToDaemon(
-      {
-        id: "ssh:deploy%40example.com:2222:%2Fkeys%2Fjagentdesk",
-        type: "remoteSsh",
-        host: "deploy@example.com",
-        sshPort: 2222,
-        daemonPort: 7777,
-      },
-      undefined,
-      {
-        ...probe.deps,
-        createDesktopTransportFactory: () => transportFactory,
-      },
+    expect(probe.createdConfigs()[0]?.url).toBe(
+      "jagentdesk+local://socket?path=%2Ftmp%2Fjagentdesk.sock",
     );
-    await result.client.close();
-
-    expect(probe.createdConfigs()[0]).toMatchObject({
-      url: "jagentdesk+desktop://ssh?host=deploy%40example.com",
-      transportFactory,
-    });
   });
 
   it("passes direct TCP connection passwords into the client config", async () => {
@@ -186,57 +140,39 @@ describe("test-daemon-connection connectToDaemon", () => {
     expect(probe.createdConfigs()[0]?.password).toBe("shared-secret");
   });
 
-  it("passes performance tracing into the connected client", async () => {
-    const { connectToDaemon } = await import("./test-daemon-connection");
-    const trace = {
-      isEnabled: () => true,
-      beginSection: vi.fn(),
-      endSection: vi.fn(),
-    };
-    const result = await connectToDaemon(
-      {
-        id: "direct:lan:6767",
-        type: "directTcp",
-        endpoint: "lan:6767",
-      },
-      { trace },
-      probe.deps,
-    );
-    await result.client.close();
-
-    expect(probe.createdConfigs()[0]?.trace).toBe(trace);
-  });
-
-  it("uses relay TLS from the stored connection", async () => {
+  it("dials tailnet connections directly with no e2ee config", async () => {
     const { connectToDaemon } = await import("./test-daemon-connection");
     const tlsResult = await connectToDaemon(
       {
-        id: "relay:wss:[::1]:443",
-        type: "relay",
-        relayEndpoint: "[::1]:443",
+        id: "tailnet:wss:[::1]:8443",
+        type: "tailnet",
+        tailnetAddress: "[::1]:8443",
         useTls: true,
         daemonPublicKeyB64: "pubkey",
       },
-      { serverId: "srv_probe_test" },
+      undefined,
       probe.deps,
     );
     await tlsResult.client.close();
 
     const plainResult = await connectToDaemon(
       {
-        id: "relay:relay.jagentdesk.local:443",
-        type: "relay",
-        relayEndpoint: "relay.jagentdesk.local:443",
+        id: "tailnet:tailnet.example.ts.net:6767",
+        type: "tailnet",
+        tailnetAddress: "tailnet.example.ts.net:6767",
         useTls: false,
         daemonPublicKeyB64: "pubkey",
       },
-      { serverId: "srv_probe_test" },
+      undefined,
       probe.deps,
     );
     await plainResult.client.close();
 
-    expect(probe.createdConfigs()[0]?.url).toMatch(/^wss:\/\/\[::1\]\/ws\?/);
-    expect(probe.createdConfigs()[1]?.url).toMatch(/^ws:\/\/relay\.jagentdesk\.sh:443\/ws\?/);
+    const [tlsConfig, plainConfig] = probe.createdConfigs();
+    expect(tlsConfig?.url).toBe("wss://[::1]:8443/ws");
+    expect(plainConfig?.url).toBe("ws://tailnet.example.ts.net:6767/ws");
+    expect(tlsConfig).not.toHaveProperty("e2ee");
+    expect(plainConfig).not.toHaveProperty("e2ee");
   });
 
   it("surfaces auth rejection as an incorrect password", async () => {
@@ -280,5 +216,25 @@ describe("test-daemon-connection connectToDaemon", () => {
     ).rejects.toMatchObject({
       message: "Transport error",
     });
+  });
+
+  it("cancels an in-flight probe and closes its client when the caller leaves", async () => {
+    const { connectToDaemon } = await import("./test-daemon-connection");
+    probe.hangNextConnection = true;
+    const controller = new AbortController();
+    const attempt = connectToDaemon(
+      {
+        id: "direct:tailnet-host:6768",
+        type: "directTcp",
+        endpoint: "tailnet-host:6768",
+      },
+      { signal: controller.signal, timeoutMs: 60_000 },
+      probe.deps,
+    );
+
+    controller.abort();
+
+    await expect(attempt).rejects.toMatchObject({ message: "Connection attempt cancelled" });
+    expect(probe.closedClients).toHaveLength(1);
   });
 });

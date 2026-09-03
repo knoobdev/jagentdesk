@@ -32,22 +32,22 @@ const metroTest = base.extend({
   },
 });
 
-const daemonTest = metroTest.extend<
-  { projectOwnership: void },
+const test = metroTest.extend<
   {
-    e2eForkProviders: string[];
-    e2eInjectJAgentDeskTools: boolean;
-    e2eWorker: void;
-    e2eWorkerClient: SeedDaemonClient;
-  }
+    jagentdeskE2ESetup: void;
+    projectOwnership: void;
+    outdatedDaemon: OutdatedDaemon;
+    desktopManagedOutdatedDaemon: OutdatedDaemon;
+    projectPickerFixture: TrackedProjectPickerFixture;
+    withWorkspace: WithWorkspace;
+  },
+  { e2eForkProviders: string[]; e2eWorker: void; e2eWorkerClient: SeedDaemonClient }
 >({
   e2eForkProviders: [[], { scope: "worker", option: true }],
-  e2eInjectJAgentDeskTools: [false, { scope: "worker", option: true }],
   e2eWorker: [
-    async ({ e2eForkProviders, e2eInjectJAgentDeskTools }, provide, workerInfo) => {
+    async ({ e2eForkProviders }, provide, workerInfo) => {
       const worker = await startE2EWorker(workerInfo.workerIndex, {
         forkProviders: e2eForkProviders,
-        injectJAgentDeskTools: e2eInjectJAgentDeskTools,
       });
       try {
         await provide();
@@ -93,16 +93,6 @@ const daemonTest = metroTest.extend<
     },
     { auto: true },
   ],
-});
-
-const test = daemonTest.extend<{
-  jagentdeskE2ESetup: void;
-  outdatedDaemon: OutdatedDaemon;
-  desktopManagedOutdatedDaemon: OutdatedDaemon;
-  relayConfigOutdatedDaemon: OutdatedDaemon;
-  projectPickerFixture: TrackedProjectPickerFixture;
-  withWorkspace: WithWorkspace;
-}>({
   jagentdeskE2ESetup: [
     async ({ page }, provide, testInfo) => {
       const daemonPort = getE2EDaemonPort();
@@ -141,7 +131,7 @@ const test = daemonTest.extend<{
         endpoint: `127.0.0.1:${daemonPort}`,
         nowIso,
       });
-      const createAgentPreferences = buildCreateAgentPreferences();
+      const createAgentPreferences = buildCreateAgentPreferences(testDaemon.serverId);
 
       await page.addInitScript(
         ({ daemon, preferences, seedNonce: nonce, extraHostsKey }) => {
@@ -164,7 +154,10 @@ const test = daemonTest.extend<{
           const extraHosts = rawExtraHosts ? JSON.parse(rawExtraHosts) : [];
 
           // Hard-reset anything that could point to a developer's real daemon.
-          localStorage.setItem("@jagentdesk:daemon-registry", JSON.stringify([daemon, ...extraHosts]));
+          localStorage.setItem(
+            "@jagentdesk:daemon-registry",
+            JSON.stringify([daemon, ...extraHosts]),
+          );
           localStorage.removeItem("@jagentdesk:settings");
           localStorage.setItem("@jagentdesk:create-agent-preferences", JSON.stringify(preferences));
         },
@@ -194,14 +187,6 @@ const test = daemonTest.extend<{
   },
   desktopManagedOutdatedDaemon: async ({}, provide) => {
     const daemon = await startOutdatedDaemon({ desktopManaged: true });
-    await provide(daemon);
-    await daemon.close();
-  },
-  relayConfigOutdatedDaemon: async ({}, provide) => {
-    const daemon = await startOutdatedDaemon({
-      daemonStatusRpcCapability: false,
-      relayConfigCapability: false,
-    });
     await provide(daemon);
     await daemon.close();
   },
@@ -236,4 +221,4 @@ const test = daemonTest.extend<{
   },
 });
 
-export { daemonTest, test, metroTest, expect, type Page };
+export { test, metroTest, expect, type Page };

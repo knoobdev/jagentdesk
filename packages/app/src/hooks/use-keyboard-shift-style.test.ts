@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  shouldReconcileHiddenKeyboardEnd,
-  resolveKeyboardShift,
-  shouldUseCompactExplorerKeyboardPadding,
-} from "./keyboard-shift-policy";
+import { resolveKeyboardShift } from "./keyboard-shift-policy";
 
 describe("resolveKeyboardShift", () => {
   it("keeps the existing open-keyboard offset behavior", () => {
@@ -40,36 +36,5 @@ describe("resolveKeyboardShift", () => {
         iosMinHeight: 120,
       }),
     ).toBe(0);
-  });
-});
-
-describe("shouldReconcileHiddenKeyboardEnd", () => {
-  it("closes stale iOS keyboard state without letting a late visible end resurrect it", () => {
-    expect(
-      shouldReconcileHiddenKeyboardEnd({
-        height: 0,
-        progress: 0,
-      }),
-    ).toBe(true);
-    expect(
-      shouldReconcileHiddenKeyboardEnd({
-        height: 320,
-        progress: 1,
-      }),
-    ).toBe(false);
-  });
-});
-
-describe("shouldUseCompactExplorerKeyboardPadding", () => {
-  it("keeps the changes viewport stable while preserving padding for other tabs", () => {
-    expect(shouldUseCompactExplorerKeyboardPadding({ isGit: true, explorerTab: "changes" })).toBe(
-      false,
-    );
-    expect(shouldUseCompactExplorerKeyboardPadding({ isGit: true, explorerTab: "files" })).toBe(
-      true,
-    );
-    expect(shouldUseCompactExplorerKeyboardPadding({ isGit: false, explorerTab: "changes" })).toBe(
-      true,
-    );
   });
 });

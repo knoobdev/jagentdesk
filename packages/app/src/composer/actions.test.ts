@@ -21,15 +21,15 @@ import {
   cancelComposerAgent,
   dispatchComposerAgentMessage,
   editQueuedComposerMessage,
-  findForgeItemByOption,
-  isAttachmentSelectedForForgeItem,
+  findGithubItemByOption,
+  isAttachmentSelectedForGithubItem,
   openComposerAttachment,
   pickAndPersistImages,
   queueComposerMessage,
   removeComposerAttachmentAtIndex,
   sendQueuedComposerMessageNow,
-  toggleForgeAttachment,
-  toggleForgeAttachmentFromPicker,
+  toggleGithubAttachment,
+  toggleGithubAttachmentFromPicker,
   type MessageSubmissionWriter,
   type AttachmentPersister,
   type ComposerCancelClient,
@@ -865,19 +865,19 @@ describe("openComposerAttachment", () => {
   });
 });
 
-describe("toggleForgeAttachment", () => {
+describe("toggleGithubAttachment", () => {
   it("appends a GitHub issue when not already attached", () => {
-    const next = toggleForgeAttachment([], issueItem);
+    const next = toggleGithubAttachment([], issueItem);
     expect(next).toEqual([{ kind: "forge_issue", item: issueItem }]);
   });
 
   it("appends a GitHub PR when not already attached", () => {
-    const next = toggleForgeAttachment([], prItem);
+    const next = toggleGithubAttachment([], prItem);
     expect(next).toEqual([{ kind: "forge_change_request", item: prItem }]);
   });
 
   it("removes an existing GitHub item with the same kind+number", () => {
-    const next = toggleForgeAttachment([{ kind: "github_issue", item: issueItem }], issueItem);
+    const next = toggleGithubAttachment([{ kind: "github_issue", item: issueItem }], issueItem);
     expect(next).toEqual([]);
   });
 
@@ -887,7 +887,7 @@ describe("toggleForgeAttachment", () => {
       { kind: "github_pr", item: prItem },
     ];
     const otherIssue: ForgeSearchItem = { ...issueItem, number: 999 };
-    const next = toggleForgeAttachment(start, otherIssue);
+    const next = toggleGithubAttachment(start, otherIssue);
     expect(next).toEqual([
       { kind: "github_issue", item: issueItem },
       { kind: "github_pr", item: prItem },
@@ -896,41 +896,41 @@ describe("toggleForgeAttachment", () => {
   });
 });
 
-describe("toggleForgeAttachmentFromPicker", () => {
+describe("toggleGithubAttachmentFromPicker", () => {
   it("marks an existing GitHub item as removed when picker toggle removes it", () => {
-    const markForgeAttachmentRemoved = vi.fn();
+    const markGithubAttachmentRemoved = vi.fn();
     const attachment: UserComposerAttachment = { kind: "github_pr", item: prItem };
 
-    const next = toggleForgeAttachmentFromPicker({
+    const next = toggleGithubAttachmentFromPicker({
       current: [attachment],
       item: prItem,
-      markForgeAttachmentRemoved,
+      markGithubAttachmentRemoved,
     });
 
     expect(next).toEqual([]);
-    expect(markForgeAttachmentRemoved).toHaveBeenCalledTimes(1);
-    expect(markForgeAttachmentRemoved).toHaveBeenCalledWith(attachment);
+    expect(markGithubAttachmentRemoved).toHaveBeenCalledTimes(1);
+    expect(markGithubAttachmentRemoved).toHaveBeenCalledWith(attachment);
   });
 
   it("does not mark a GitHub item removed when picker toggle adds it", () => {
-    const markForgeAttachmentRemoved = vi.fn();
+    const markGithubAttachmentRemoved = vi.fn();
 
-    const next = toggleForgeAttachmentFromPicker({
+    const next = toggleGithubAttachmentFromPicker({
       current: [],
       item: issueItem,
-      markForgeAttachmentRemoved,
+      markGithubAttachmentRemoved,
     });
 
     expect(next).toEqual([{ kind: "forge_issue", item: issueItem }]);
-    expect(markForgeAttachmentRemoved).not.toHaveBeenCalled();
+    expect(markGithubAttachmentRemoved).not.toHaveBeenCalled();
   });
 });
 
-describe("findForgeItemByOption / isAttachmentSelectedForForgeItem", () => {
+describe("findGithubItemByOption / isAttachmentSelectedForGithubItem", () => {
   it("locates items via their composite kind:number id", () => {
-    expect(findForgeItemByOption([issueItem, prItem], "issue:101")).toBe(issueItem);
-    expect(findForgeItemByOption([issueItem, prItem], "change_request:202")).toBe(prItem);
-    expect(findForgeItemByOption([issueItem], "change_request:404")).toBeUndefined();
+    expect(findGithubItemByOption([issueItem, prItem], "issue:101")).toBe(issueItem);
+    expect(findGithubItemByOption([issueItem, prItem], "change_request:202")).toBe(prItem);
+    expect(findGithubItemByOption([issueItem], "change_request:404")).toBeUndefined();
   });
 
   it("recognizes when an attachment list already contains a matching GitHub item", () => {
@@ -939,7 +939,7 @@ describe("findForgeItemByOption / isAttachmentSelectedForForgeItem", () => {
       { kind: "github_issue", item: issueItem },
       reviewWorkspaceAttachment("ignored"),
     ];
-    expect(isAttachmentSelectedForForgeItem(attachments, issueItem)).toBe(true);
-    expect(isAttachmentSelectedForForgeItem(attachments, prItem)).toBe(false);
+    expect(isAttachmentSelectedForGithubItem(attachments, issueItem)).toBe(true);
+    expect(isAttachmentSelectedForGithubItem(attachments, prItem)).toBe(false);
   });
 });

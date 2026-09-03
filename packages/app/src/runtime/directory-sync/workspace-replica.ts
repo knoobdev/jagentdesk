@@ -81,25 +81,6 @@ export class WorkspaceDirectoryReplica {
     this.commit(state, delta.kind === "remove" && "id" in delta ? [delta.id] : []);
   }
 
-  commitCached(input: {
-    workspaces: Map<string, WorkspaceDescriptor>;
-    projects: Map<string, ProjectDescriptor>;
-  }): void {
-    this.commit(input, []);
-    useSessionStore.getState().setHasWorkspaceDirectorySnapshot(this.serverId, true);
-  }
-
-  commitCachedWorkspace(
-    workspace: WorkspaceDescriptor,
-    project: ProjectDescriptor | undefined,
-  ): void {
-    if (shouldSuppressWorkspaceForLocalArchive({ serverId: this.serverId, workspace })) return;
-    const snapshot = this.read();
-    snapshot.workspaces.set(workspace.id, workspace);
-    if (project) snapshot.projects.set(project.projectId, project);
-    this.commit(snapshot, []);
-  }
-
   commitSnapshot(
     snapshot: WorkspaceDirectorySnapshot,
     deltas: readonly WorkspaceDirectoryDelta[],

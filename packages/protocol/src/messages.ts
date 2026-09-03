@@ -5,6 +5,7 @@ import { AGENT_LIFECYCLE_STATUSES } from "./agent-lifecycle.js";
 import { MAX_EXPLICIT_AGENT_TITLE_CHARS } from "./agent-title-limits.js";
 import { AgentProviderSchema } from "./provider-manifest.js";
 import { TOOL_CALL_ICON_NAMES } from "./agent-types.js";
+import { WORKSPACE_LABEL_COLORS } from "./workspace-labels.js";
 import {
   OrchestrationConfigGetRequestSchema,
   OrchestrationConfigGetResponseSchema,
@@ -184,6 +185,21 @@ export {
 // ---------------------------------------------------------------------------
 // Mutable daemon config schemas (shared between server store and client)
 // ---------------------------------------------------------------------------
+
+// Upstream v0.7.2: daemon permission grants (used by Hub relationship schemas).
+export const DAEMON_PERMISSIONS = [
+  "daemon.read",
+  "daemon.manage",
+  "tunnel.manage",
+  "access.manage",
+  "workspace.read",
+  "workspace.write",
+  "workspace.manage",
+  "automation.manage",
+  "hub.execute",
+] as const;
+export const DaemonPermissionSchema = z.enum(DAEMON_PERMISSIONS);
+export type DaemonPermission = z.infer<typeof DaemonPermissionSchema>;
 
 const MutableDaemonProviderModelSchema = z
   .object({
@@ -457,6 +473,24 @@ const McpServerConfigSchema = z.discriminatedUnion("type", [
   McpSseServerConfigSchema,
 ]);
 
+const ProviderOptionsSchema = z.record(z.string(), z.json());
+export type ProviderOptions = z.infer<typeof ProviderOptionsSchema>;
+
+const McpToolRefSchema = z
+  .object({
+    kind: z.literal("mcp"),
+    server: z.string().trim().min(1),
+    tool: z.string().trim().min(1),
+  })
+  .strict();
+
+const ToolPolicySchema = z
+  .object({
+    preapproved: z.array(McpToolRefSchema),
+  })
+  .strict();
+export type ToolPolicy = z.infer<typeof ToolPolicySchema>;
+
 const AgentSessionConfigSchema = z.object({
   provider: AgentProviderSchema,
   cwd: z.string(),
@@ -476,6 +510,9 @@ const AgentSessionConfigSchema = z.object({
     })
     .partial()
     .optional(),
+  // Upstream v0.7.2: provider-specific create-time options and MCP tool policy.
+  providerOptions: ProviderOptionsSchema.optional(),
+  toolPolicy: ToolPolicySchema.optional(),
   systemPrompt: z.string().optional(),
   mcpServers: z.record(z.string(), McpServerConfigSchema).optional(),
 });
@@ -1236,9 +1273,17 @@ export const FetchWorkspacesRequestMessageSchema = z.object({
     .optional(),
 });
 
+// COMPAT(directorySync): added upstream in v0.3.x.
+const DirectorySyncRequestSchema = z.object({
+  generation: z.string().optional(),
+  afterSeq: z.number().int().nonnegative().optional(),
+});
+
 export const ProjectListRequestMessageSchema = z.object({
   type: z.literal("project.list.request"),
   requestId: z.string(),
+  // COMPAT(directorySync): added in v0.3.x, remove optional after 2027-02-12.
+  sync: DirectorySyncRequestSchema.optional(),
 });
 
 export const FetchAgentHistoryRequestMessageSchema = z.object({
@@ -1391,6 +1436,8 @@ export const HubManagementDaemonConnectRequestSchema = z.object({
   requestId: z.string(),
   hubUrl: z.string(),
   token: z.string(),
+  // Added in upstream v0.7.2: permissions the daemon grants the Hub on connect.
+  permissions: z.array(DaemonPermissionSchema).default([]),
 });
 export const HubManagementDaemonGetStatusRequestSchema = z.object({
   type: z.literal("hub.management.daemon.get_status.request"),
@@ -2779,6 +2826,352 @@ export const HubExecutionControlRequestSchema = z.object({
 
 export type HubExecutionControlRequest = z.infer<typeof HubExecutionControlRequestSchema>;
 
+// ===========================================================================
+// Upstream v0.7.2 additions — shared data schemas + request messages.
+// (Merged in during the 0.7.2 port; defined here so both request and response
+// unions below can reference them.)
+// ===========================================================================
+
+/**
+ * A named launch bundle: a provider plus the agent-config values a client would
+ * otherwise set one control at a time. Field names mirror `AgentSessionConfig`
+ * so applying a profile is a copy rather than a translation table.
+ */
+export const AgentProfileSchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    icon: z.string().optional(),
+    color: z.string().optional(),
+    provider: z.string(),
+    model: z.string().optional(),
+    modeId: z.string().optional(),
+    thinkingOptionId: z.string().optional(),
+    featureValues: z.record(z.string(), z.unknown()).optional(),
+    notes: z.string().optional(),
+  })
+  .passthrough();
+export type AgentProfile = z.infer<typeof AgentProfileSchema>;
+
+export const AgentSkillSelectionSchema = z.discriminatedUnion("mode", [
+  z.object({ mode: z.literal("all") }).strict(),
+  z.object({ mode: z.literal("custom"), skills: z.array(z.string()) }).strict(),
+]);
+export type AgentSkillSelection = z.infer<typeof AgentSkillSelectionSchema>;
+
+// Mirrors AgentModelDefinition minus `provider`/`thinkingOptions`, plus `thinkingSet`.
+// Defined standalone (not via `.omit`) because the fork annotates
+// AgentModelDefinitionSchema as `z.ZodType<...>`, which hides ZodObject methods.
+export const CompactProviderSnapshotModelSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  description: z.string().optional(),
+  isDefault: z.boolean().optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+  contextWindowMaxTokens: z.number().optional(),
+  defaultThinkingOptionId: z.string().optional(),
+  thinkingSet: z.number().int().nonnegative().optional(),
+});
+
+export const ProviderSnapshotThinkingSetSchema = z.object({
+  options: z.array(AgentSelectOptionSchema),
+  defaultOptionId: z.string().optional(),
+});
+
+export const CompactProviderSnapshotEntrySchema = ProviderSnapshotEntrySchema.omit({
+  models: true,
+}).extend({
+  models: z.array(CompactProviderSnapshotModelSchema).optional(),
+});
+
+export const CompactProviderSnapshotSchema = z.object({
+  entries: z.array(CompactProviderSnapshotEntrySchema),
+  thinkingSets: z.array(ProviderSnapshotThinkingSetSchema),
+});
+
+export const ExternalResourceAttachmentMetadataSchema = z.object({
+  provider: z.string(),
+  providerLabel: z.string(),
+  resourceType: z.string(),
+  id: z.string(),
+  identifier: z.string(),
+  title: z.string(),
+  url: z.string(),
+});
+
+export const WorkspaceLabelColorSchema = z.enum(WORKSPACE_LABEL_COLORS);
+export const WorkspaceLabelDefinitionSchema = z.object({
+  name: z.string(),
+  color: WorkspaceLabelColorSchema,
+});
+const WorkspaceLabelSyncCursorSchema = z.object({
+  generation: z.string(),
+  afterSeq: z.number().int().nonnegative(),
+});
+const WorkspaceLabelSyncMetadataSchema = z.object({
+  mode: z.enum(["snapshot", "changes"]),
+  generation: z.string(),
+  headSeq: z.number().int().nonnegative(),
+  removals: z.array(z.object({ name: z.string(), seq: z.number().int().positive() })),
+});
+
+export const AgentSkillOperationSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("add"), name: z.string() }).strict(),
+  z.object({ kind: z.literal("update"), name: z.string() }).strict(),
+  z.object({ kind: z.literal("delete"), name: z.string() }).strict(),
+]);
+export type AgentSkillOperation = z.infer<typeof AgentSkillOperationSchema>;
+
+export const AgentSkillsStatusSchema = z.object({
+  state: z.enum(["not-installed", "up-to-date", "drift"]),
+  ops: z.array(AgentSkillOperationSchema),
+  available: z.array(z.string()),
+  installed: z.array(z.string()),
+  selection: AgentSkillSelectionSchema,
+});
+export type AgentSkillsStatus = z.infer<typeof AgentSkillsStatusSchema>;
+
+export const AgentSkillsConfirmationSchema = z.object({ removals: z.array(z.string()) }).strict();
+export type AgentSkillsConfirmation = z.infer<typeof AgentSkillsConfirmationSchema>;
+
+export const AgentSkillsSaveResultSchema = AgentSkillsStatusSchema.extend({
+  confirmationRequired: AgentSkillsConfirmationSchema.nullable(),
+});
+export type AgentSkillsSaveResult = z.infer<typeof AgentSkillsSaveResultSchema>;
+
+/**
+ * Applies a whole config bundle to one agent. `undefined` leaves a field alone;
+ * `null` on model and thinking clears them.
+ */
+export const AgentConfigApplySchema = z.object({
+  modelId: z.string().nullable().optional(),
+  modeId: z.string().optional(),
+  thinkingOptionId: z.string().nullable().optional(),
+  featureValues: z.record(z.string(), z.unknown()).optional(),
+});
+export type AgentConfigApply = z.infer<typeof AgentConfigApplySchema>;
+
+const HubExecutionAgentCreateErrorSchema = z.discriminatedUnion("code", [
+  z.object({
+    code: z.literal("provider_options_invalid"),
+    provider: z.string(),
+    issues: z.array(
+      z.object({
+        path: z.array(z.union([z.string(), z.number()])),
+        message: z.string(),
+      }),
+    ),
+    message: z.string(),
+  }),
+  z.object({
+    code: z.literal("tool_policy_unsupported"),
+    provider: z.string(),
+    message: z.string(),
+  }),
+  z.object({
+    code: z.literal("create_failed"),
+    message: z.string(),
+  }),
+]);
+export type HubExecutionAgentCreateError = z.infer<typeof HubExecutionAgentCreateErrorSchema>;
+
+export const HubExecutionAgentValidationIssueSchema = z.object({
+  path: z.array(z.union([z.string(), z.number()])),
+  message: z.string(),
+});
+export type HubExecutionAgentValidationIssue = z.infer<
+  typeof HubExecutionAgentValidationIssueSchema
+>;
+
+export const AgentSearchMatchFieldSchema = z.enum(["workspace", "title", "branch", "project"]);
+export const AgentSearchMatchSchema = z.object({
+  field: AgentSearchMatchFieldSchema,
+  ranges: z.array(
+    z.object({
+      start: z.number().int().nonnegative(),
+      length: z.number().int().positive(),
+    }),
+  ),
+});
+export type AgentSearchMatch = z.infer<typeof AgentSearchMatchSchema>;
+
+export const PluginSourceStatusItemSchema = z.object({
+  id: PluginIdSchema,
+  source: z.enum(["directory", "git"]),
+  path: z.string(),
+  remote: z.string().optional(),
+  ref: z.string().optional(),
+  currentCommit: z.string().optional(),
+  latestCommit: z.string().optional(),
+  commitsBehind: z.number().int().nonnegative().optional(),
+  updateAvailable: z.boolean().optional(),
+});
+export type PluginSourceStatusItem = z.infer<typeof PluginSourceStatusItemSchema>;
+
+export const PluginSourceUpdateItemSchema = z.object({
+  id: PluginIdSchema,
+  previousCommit: z.string(),
+  currentCommit: z.string(),
+  commits: z.number().int().nonnegative(),
+  updated: z.boolean(),
+});
+export type PluginSourceUpdateItem = z.infer<typeof PluginSourceUpdateItemSchema>;
+
+// --- Request messages (join SessionInboundMessageSchema below) -------------
+
+export const WorkspaceLabelListRequestSchema = z.object({
+  type: z.literal("workspace.label.list.request"),
+  requestId: z.string(),
+  subscribe: z.object({ subscriptionId: z.string() }),
+  sync: WorkspaceLabelSyncCursorSchema.optional(),
+});
+export const WorkspaceLabelAssignmentSetRequestSchema = z.object({
+  type: z.literal("workspace.label.assignment.set.request"),
+  requestId: z.string(),
+  workspaceId: z.string(),
+  label: WorkspaceLabelDefinitionSchema,
+  assigned: z.boolean(),
+});
+export const WorkspaceLabelUpdateRequestSchema = z.object({
+  type: z.literal("workspace.label.update.request"),
+  requestId: z.string(),
+  name: z.string(),
+  newName: z.string().optional(),
+  color: WorkspaceLabelColorSchema.optional(),
+});
+export const WorkspaceLabelDeleteRequestSchema = z.object({
+  type: z.literal("workspace.label.delete.request"),
+  requestId: z.string(),
+  name: z.string(),
+});
+export const WorkspaceLabelDeleteInspectRequestSchema = z.object({
+  type: z.literal("workspace.label.delete.inspect.request"),
+  requestId: z.string(),
+  name: z.string(),
+});
+
+export const DaemonConfigReloadRequestSchema = z.object({
+  type: z.literal("daemon.config.reload.request"),
+  requestId: z.string(),
+});
+
+export const HubManagementDaemonPermissionsUpdateRequestSchema = z.object({
+  type: z.literal("hub.management.daemon.permissions.update.request"),
+  requestId: z.string(),
+  grant: z.array(DaemonPermissionSchema).default([]),
+  revoke: z.array(DaemonPermissionSchema).default([]),
+});
+
+export const PluginSourceInstallRequestSchema = z.object({
+  type: z.literal("plugin.source.install.request"),
+  requestId: z.string(),
+  source: z.string().min(1),
+  id: PluginIdSchema.optional(),
+  ref: z.string().min(1).optional(),
+  // COMPAT(plugin-source-path): accepted for v0.7 clients; remove after 2027-09-01.
+  pluginPath: z.string().min(1).optional(),
+});
+export const PluginSourceStatusRequestSchema = z.object({
+  type: z.literal("plugin.source.status.request"),
+  requestId: z.string(),
+  pluginId: PluginIdSchema.optional(),
+});
+export const PluginSourceUpdateRequestSchema = z.object({
+  type: z.literal("plugin.source.update.request"),
+  requestId: z.string(),
+  pluginId: PluginIdSchema.optional(),
+});
+
+function agentSkillsRequest<const Type extends string>(type: Type) {
+  return z.object({ type: z.literal(type), requestId: z.string() }).strict();
+}
+
+export const AgentSkillsGetStatusRequestSchema = agentSkillsRequest(
+  "agent.skills.get_status.request",
+);
+export const AgentSkillsReconcileRequestSchema = agentSkillsRequest(
+  "agent.skills.reconcile.request",
+);
+export const AgentSkillsUninstallRequestSchema = agentSkillsRequest(
+  "agent.skills.uninstall.request",
+);
+export const AgentSkillsSaveSelectionRequestSchema = z
+  .object({
+    type: z.literal("agent.skills.save_selection.request"),
+    requestId: z.string(),
+    selection: AgentSkillSelectionSchema,
+    confirmedRemovals: z.array(z.string()).optional(),
+  })
+  .strict();
+export const AgentSkillsImportLegacySelectionRequestSchema = z
+  .object({
+    type: z.literal("agent.skills.import_legacy_selection.request"),
+    requestId: z.string(),
+    selection: AgentSkillSelectionSchema,
+  })
+  .strict();
+
+export const CheckoutDiscardChangesRequestSchema = z.object({
+  type: z.literal("checkout.discard_changes.request"),
+  cwd: z.string(),
+  paths: z.array(z.string()).min(1),
+  requestId: z.string(),
+});
+
+export const FileEntryCreateRequestSchema = z.object({
+  type: z.literal("fs.entry.create.request"),
+  cwd: z.string(),
+  parentPath: z.string(),
+  name: z.string(),
+  kind: z.enum(["file", "directory"]),
+  requestId: z.string(),
+});
+export const FileEntryRenameRequestSchema = z.object({
+  type: z.literal("fs.entry.rename.request"),
+  cwd: z.string(),
+  path: z.string(),
+  name: z.string(),
+  requestId: z.string(),
+});
+export const FileEntryDuplicateRequestSchema = z.object({
+  type: z.literal("fs.entry.duplicate.request"),
+  cwd: z.string(),
+  path: z.string(),
+  requestId: z.string(),
+});
+export const FileEntryDeleteRequestSchema = z.object({
+  type: z.literal("fs.entry.delete.request"),
+  cwd: z.string(),
+  path: z.string(),
+  requestId: z.string(),
+});
+
+export const PushUnregisterRequestSchema = z.object({
+  type: z.literal("push.unregister.request"),
+  token: z.string(),
+  requestId: z.string(),
+});
+
+export const HubExecutionAgentValidateRequestSchema = z.object({
+  type: z.literal("hub.execution.agent.validate.request"),
+  requestId: z.string(),
+  provider: z.string(),
+  model: z.string().optional(),
+  modeId: z.string().optional(),
+  thinkingOptionId: z.string().optional(),
+  providerOptions: ProviderOptionsSchema.optional(),
+});
+export type HubExecutionAgentValidateRequest = z.infer<
+  typeof HubExecutionAgentValidateRequestSchema
+>;
+
+export const AgentConfigApplyRequestMessageSchema = z.object({
+  type: z.literal("agent.config.apply.request"),
+  agentId: z.string(),
+  config: AgentConfigApplySchema,
+  requestId: z.string(),
+});
+
 export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ...DatabaseRequestSchemas,
   HubExecutionAgentCreateRequestSchema,
@@ -2995,6 +3388,30 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ClusterPfCloseRequestSchema,
   ExportHostDataRequestMessageSchema,
   ImportHostDataRequestMessageSchema,
+  // Upstream v0.7.2 request additions
+  AgentConfigApplyRequestMessageSchema,
+  AgentSkillsGetStatusRequestSchema,
+  AgentSkillsReconcileRequestSchema,
+  AgentSkillsUninstallRequestSchema,
+  AgentSkillsSaveSelectionRequestSchema,
+  AgentSkillsImportLegacySelectionRequestSchema,
+  CheckoutDiscardChangesRequestSchema,
+  DaemonConfigReloadRequestSchema,
+  FileEntryCreateRequestSchema,
+  FileEntryRenameRequestSchema,
+  FileEntryDuplicateRequestSchema,
+  FileEntryDeleteRequestSchema,
+  HubExecutionAgentValidateRequestSchema,
+  HubManagementDaemonPermissionsUpdateRequestSchema,
+  PluginSourceInstallRequestSchema,
+  PluginSourceStatusRequestSchema,
+  PluginSourceUpdateRequestSchema,
+  PushUnregisterRequestSchema,
+  WorkspaceLabelListRequestSchema,
+  WorkspaceLabelAssignmentSetRequestSchema,
+  WorkspaceLabelUpdateRequestSchema,
+  WorkspaceLabelDeleteRequestSchema,
+  WorkspaceLabelDeleteInspectRequestSchema,
 ]);
 
 export type SessionInboundMessage = z.infer<typeof SessionInboundMessageSchema>;
@@ -3162,6 +3579,8 @@ export const ServerInfoStatusPayloadSchema = z
     features: z
       .object({
         providersSnapshot: z.boolean().optional(),
+        // COMPAT(providersSnapshotCwd): added in v0.3.2, remove gate after 2027-02-10.
+        providersSnapshotCwd: z.boolean().optional(),
         // COMPAT(checkoutForgeSetAutoMerge): added in v0.1.106, remove old
         // checkoutGithubSetAutoMerge fallback after 2026-12-28.
         checkoutForgeSetAutoMerge: z.boolean().optional(),
@@ -3477,7 +3896,7 @@ const WorkspaceGitRuntimePayloadSchema = z
   .optional()
   .nullable();
 
-const WorkspaceGitHubRuntimePayloadSchema = z
+export const WorkspaceGitHubRuntimePayloadSchema = z
   .object({
     featuresEnabled: z.boolean().optional(),
     pullRequest: z
@@ -3499,6 +3918,8 @@ const WorkspaceGitHubRuntimePayloadSchema = z
               url: z.string().nullable(),
               workflow: z.string().optional(),
               duration: z.string().optional(),
+              // Upstream v0.7.2: open so future forge-neutral refinements stay parse-compatible.
+              traits: z.array(z.string()).optional(),
             }),
           )
           .optional(),
@@ -4247,7 +4668,8 @@ export const HubRelationshipStatusSchema = z.object({
   ]),
   daemonId: z.string().nullable(),
   hubOrigin: z.string().nullable(),
-  scopes: z.array(z.string()),
+  // Renamed from `scopes` in upstream v0.7.2; carries daemon permission grants.
+  permissions: z.array(DaemonPermissionSchema),
   connectedAt: z.string().nullable(),
   lastError: z.string().nullable(),
 });
@@ -4360,6 +4782,11 @@ export const PluginListItemSchema = z.object({
   path: z.string(),
   enabled: z.boolean(),
   status: PluginStatusSchema,
+  // Upstream v0.7.2 managed-source (git) fields; absent for directory plugins.
+  source: z.enum(["directory", "git"]).optional(),
+  remote: z.string().optional(),
+  ref: z.string().optional(),
+  commit: z.string().optional(),
   error: z.string().optional(),
 });
 export type PluginListItem = z.infer<typeof PluginListItemSchema>;
@@ -4668,6 +5095,8 @@ export const CheckoutPrStatusSchema = z.object({
         duration: z.string().optional(),
         checkRunId: z.number().optional(),
         workflowRunId: z.number().optional(),
+        // Upstream v0.7.2: open so future forge-neutral refinements stay parse-compatible.
+        traits: z.array(z.string()).optional(),
       }),
     )
     .optional()
@@ -4899,7 +5328,9 @@ const CheckoutPipelineJobSchema = z.object({
   name: z.string(),
   stage: z.string(),
   status: z.string(),
-  rawStatus: z.string(),
+  // COMPAT(pipelineRawStatus): upstream v0.7.2 made this optional; peers
+  // <= v0.2.0-rc.1 still validate it as required, so daemons keep emitting it.
+  rawStatus: z.string().optional(),
   url: z.string().nullable().optional().default(null),
   allowFailure: z.boolean().optional().default(false),
   durationSeconds: z.number().nullable().optional().default(null),
@@ -4914,7 +5345,8 @@ const CheckoutPipelineStageSchema = z.object({
 const CheckoutPipelineSchema = z.object({
   id: z.number(),
   status: z.string(),
-  rawStatus: z.string(),
+  // COMPAT(pipelineRawStatus): see CheckoutPipelineJobSchema.rawStatus.
+  rawStatus: z.string().optional(),
   url: z.string().nullable().optional().default(null),
   ref: z.string().nullable().optional().default(null),
   sha: z.string().nullable().optional().default(null),
@@ -5421,6 +5853,8 @@ export const ListAvailableProvidersResponseSchema = z.object({
 export const GetProvidersSnapshotResponseMessageSchema = z.object({
   type: z.literal("get_providers_snapshot_response"),
   payload: z.object({
+    // COMPAT(providersSnapshotCwd): added in v0.3.2 — the cwd the snapshot was resolved for.
+    cwd: z.string().optional(),
     entries: z.array(ProviderSnapshotEntrySchema),
     generatedAt: z.string(),
     requestId: z.string(),
@@ -5740,7 +6174,214 @@ export type HubExecutionControlResponse = z.infer<typeof HubExecutionControlResp
 export type HubExecutionAgentUpdate = z.infer<typeof HubExecutionAgentUpdateSchema>;
 export type HubExecutionAgentStream = z.infer<typeof HubExecutionAgentStreamSchema>;
 
+// ===========================================================================
+// Upstream v0.7.2 additions — response / notification messages.
+// Defined here (before both the Hub-execution and session outbound unions) so
+// they can join the discriminated unions below.
+// ===========================================================================
+
+export const HubExecutionAgentValidateResponseSchema = z.object({
+  type: z.literal("hub.execution.agent.validate.response"),
+  payload: z.object({
+    requestId: z.string(),
+    valid: z.boolean(),
+    issues: z.array(HubExecutionAgentValidationIssueSchema),
+    error: z.string().nullable(),
+  }),
+});
+
+export const AgentConfigApplyResponseMessageSchema = z.object({
+  type: z.literal("agent.config.apply.response"),
+  payload: AgentActionResponsePayloadSchema,
+});
+
+export const AgentTimelineReplacementMessageSchema = z.object({
+  type: z.literal("agent.timeline.replacement"),
+  payload: z.object({
+    agentId: z.string(),
+    epoch: z.string(),
+  }),
+});
+
+export const CheckoutDiscardChangesResponseSchema = z.object({
+  type: z.literal("checkout.discard_changes.response"),
+  payload: z.object({
+    cwd: z.string(),
+    success: z.boolean(),
+    error: CheckoutErrorSchema.nullable(),
+    requestId: z.string(),
+  }),
+});
+
+export const DaemonConfigReloadResponseSchema = z.object({
+  type: z.literal("daemon.config.reload.response"),
+  payload: z
+    .object({
+      requestId: z.string(),
+      appliedPaths: z.array(z.string()),
+      restartRequiredPaths: z.array(z.string()),
+      overrideControlledPaths: z.array(z.string()),
+    })
+    .passthrough(),
+});
+
+export const HubManagementDaemonPermissionsUpdateResponseSchema = z.object({
+  type: z.literal("hub.management.daemon.permissions.update.response"),
+  payload: z.object({ requestId: z.string(), status: HubRelationshipStatusSchema }),
+});
+
+export const PushUnregisterResponseSchema = z.object({
+  type: z.literal("push.unregister.response"),
+  payload: z.object({
+    requestId: z.string(),
+  }),
+});
+
+export const FileEntryCreateResponseSchema = z.object({
+  type: z.literal("fs.entry.create.response"),
+  payload: z.object({
+    cwd: z.string(),
+    parentPath: z.string(),
+    path: z.string().nullable(),
+    success: z.boolean(),
+    error: z.string().nullable(),
+    requestId: z.string(),
+  }),
+});
+export const FileEntryRenameResponseSchema = z.object({
+  type: z.literal("fs.entry.rename.response"),
+  payload: z.object({
+    cwd: z.string(),
+    path: z.string(),
+    renamedPath: z.string().nullable(),
+    success: z.boolean(),
+    error: z.string().nullable(),
+    requestId: z.string(),
+  }),
+});
+export const FileEntryDuplicateResponseSchema = z.object({
+  type: z.literal("fs.entry.duplicate.response"),
+  payload: z.object({
+    cwd: z.string(),
+    path: z.string(),
+    duplicatedPath: z.string().nullable(),
+    success: z.boolean(),
+    error: z.string().nullable(),
+    requestId: z.string(),
+  }),
+});
+export const FileEntryDeleteResponseSchema = z.object({
+  type: z.literal("fs.entry.delete.response"),
+  payload: z.object({
+    cwd: z.string(),
+    path: z.string(),
+    success: z.boolean(),
+    error: z.string().nullable(),
+    requestId: z.string(),
+  }),
+});
+
+export const PluginSourceInstallResponseSchema = z.object({
+  type: z.literal("plugin.source.install.response"),
+  payload: z.object({ requestId: z.string(), plugin: PluginListItemSchema }),
+});
+export const PluginSourceStatusResponseSchema = z.object({
+  type: z.literal("plugin.source.status.response"),
+  payload: z.object({ requestId: z.string(), plugins: z.array(PluginSourceStatusItemSchema) }),
+});
+export const PluginSourceUpdateResponseSchema = z.object({
+  type: z.literal("plugin.source.update.response"),
+  payload: z.object({ requestId: z.string(), plugins: z.array(PluginSourceUpdateItemSchema) }),
+});
+
+function agentSkillsStatusResponse<const Type extends string>(type: Type) {
+  return z.object({
+    type: z.literal(type),
+    payload: AgentSkillsStatusSchema.extend({ requestId: z.string() }),
+  });
+}
+
+export const AgentSkillsGetStatusResponseSchema = agentSkillsStatusResponse(
+  "agent.skills.get_status.response",
+);
+export const AgentSkillsReconcileResponseSchema = agentSkillsStatusResponse(
+  "agent.skills.reconcile.response",
+);
+export const AgentSkillsUninstallResponseSchema = agentSkillsStatusResponse(
+  "agent.skills.uninstall.response",
+);
+export const AgentSkillsSaveSelectionResponseSchema = z.object({
+  type: z.literal("agent.skills.save_selection.response"),
+  payload: AgentSkillsSaveResultSchema.extend({ requestId: z.string() }),
+});
+export const AgentSkillsImportLegacySelectionResponseSchema = z.object({
+  type: z.literal("agent.skills.import_legacy_selection.response"),
+  payload: z.object({
+    requestId: z.string(),
+    imported: z.boolean(),
+    selection: AgentSkillSelectionSchema,
+  }),
+});
+
+export const WorkspaceLabelListResponseSchema = z.object({
+  type: z.literal("workspace.label.list.response"),
+  payload: z.object({
+    requestId: z.string(),
+    labels: z.array(WorkspaceLabelDefinitionSchema),
+    sync: WorkspaceLabelSyncMetadataSchema,
+  }),
+});
+export const WorkspaceLabelUpdateSchema = z.object({
+  type: z.literal("workspace.label.update"),
+  payload: z.discriminatedUnion("kind", [
+    z.object({
+      kind: z.literal("upsert"),
+      label: WorkspaceLabelDefinitionSchema,
+      previousName: z.string().optional(),
+      generation: z.string(),
+      seq: z.number().int().positive(),
+    }),
+    z.object({
+      kind: z.literal("remove"),
+      name: z.string(),
+      generation: z.string(),
+      seq: z.number().int().positive(),
+    }),
+  ]),
+});
+export const WorkspaceLabelAssignmentSetResponseSchema = z.object({
+  type: z.literal("workspace.label.assignment.set.response"),
+  payload: z.object({
+    requestId: z.string(),
+    label: WorkspaceLabelDefinitionSchema,
+    workspaceLabels: z.array(z.string()),
+  }),
+});
+export const WorkspaceLabelUpdateResponseSchema = z.object({
+  type: z.literal("workspace.label.update.response"),
+  payload: z.object({
+    requestId: z.string(),
+    label: WorkspaceLabelDefinitionSchema,
+    affectedWorkspaceCount: z.number().int().nonnegative(),
+  }),
+});
+export const WorkspaceLabelDeleteResponseSchema = z.object({
+  type: z.literal("workspace.label.delete.response"),
+  payload: z.object({
+    requestId: z.string(),
+    affectedWorkspaceCount: z.number().int().nonnegative(),
+  }),
+});
+export const WorkspaceLabelDeleteInspectResponseSchema = z.object({
+  type: z.literal("workspace.label.delete.inspect.response"),
+  payload: z.object({
+    requestId: z.string(),
+    affectedWorkspaceCount: z.number().int().nonnegative(),
+  }),
+});
+
 export const HubExecutionOutboundMessageSchema = z.discriminatedUnion("type", [
+  HubExecutionAgentValidateResponseSchema,
   HubExecutionAgentCreateResponseSchema,
   HubExecutionControlResponseSchema,
   HubExecutionAgentUpdateSchema,
@@ -6005,6 +6646,31 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   DaemonUpdateResponseSchema,
   ExportHostDataResponseMessageSchema,
   ImportHostDataResponseMessageSchema,
+  // Upstream v0.7.2 response / notification additions
+  AgentConfigApplyResponseMessageSchema,
+  AgentTimelineReplacementMessageSchema,
+  AgentSkillsGetStatusResponseSchema,
+  AgentSkillsReconcileResponseSchema,
+  AgentSkillsUninstallResponseSchema,
+  AgentSkillsSaveSelectionResponseSchema,
+  AgentSkillsImportLegacySelectionResponseSchema,
+  CheckoutDiscardChangesResponseSchema,
+  DaemonConfigReloadResponseSchema,
+  FileEntryCreateResponseSchema,
+  FileEntryRenameResponseSchema,
+  FileEntryDuplicateResponseSchema,
+  FileEntryDeleteResponseSchema,
+  HubManagementDaemonPermissionsUpdateResponseSchema,
+  PluginSourceInstallResponseSchema,
+  PluginSourceStatusResponseSchema,
+  PluginSourceUpdateResponseSchema,
+  PushUnregisterResponseSchema,
+  WorkspaceLabelListResponseSchema,
+  WorkspaceLabelUpdateSchema,
+  WorkspaceLabelAssignmentSetResponseSchema,
+  WorkspaceLabelUpdateResponseSchema,
+  WorkspaceLabelDeleteResponseSchema,
+  WorkspaceLabelDeleteInspectResponseSchema,
 ]);
 
 export type SessionOutboundMessage = z.infer<typeof SessionOutboundMessageSchema>;
@@ -6575,3 +7241,25 @@ export function parseServerInfoStatusPayload(payload: unknown): ServerInfoStatus
   }
   return parsed.data;
 }
+
+// ===========================================================================
+// Upstream v0.7.2 additions — message type exports (schemas defined above).
+// ===========================================================================
+export type AgentConfigApplyRequestMessage = z.infer<typeof AgentConfigApplyRequestMessageSchema>;
+export type AgentConfigApplyResponseMessage = z.infer<typeof AgentConfigApplyResponseMessageSchema>;
+export type CheckoutDiscardChangesRequest = z.infer<typeof CheckoutDiscardChangesRequestSchema>;
+export type CheckoutDiscardChangesResponse = z.infer<typeof CheckoutDiscardChangesResponseSchema>;
+export type DaemonConfigReloadResponse = z.infer<typeof DaemonConfigReloadResponseSchema>;
+export type FileEntryCreateRequest = z.infer<typeof FileEntryCreateRequestSchema>;
+export type FileEntryCreateResponse = z.infer<typeof FileEntryCreateResponseSchema>;
+export type FileEntryRenameRequest = z.infer<typeof FileEntryRenameRequestSchema>;
+export type FileEntryRenameResponse = z.infer<typeof FileEntryRenameResponseSchema>;
+export type FileEntryDuplicateRequest = z.infer<typeof FileEntryDuplicateRequestSchema>;
+export type FileEntryDuplicateResponse = z.infer<typeof FileEntryDuplicateResponseSchema>;
+export type FileEntryDeleteRequest = z.infer<typeof FileEntryDeleteRequestSchema>;
+export type FileEntryDeleteResponse = z.infer<typeof FileEntryDeleteResponseSchema>;
+export type PushUnregisterRequest = z.infer<typeof PushUnregisterRequestSchema>;
+export type PushUnregisterResponse = z.infer<typeof PushUnregisterResponseSchema>;
+export type HubExecutionAgentValidateResponse = z.infer<
+  typeof HubExecutionAgentValidateResponseSchema
+>;

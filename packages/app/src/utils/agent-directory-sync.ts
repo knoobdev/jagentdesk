@@ -1,4 +1,3 @@
-import equal from "fast-deep-equal";
 import type { FetchAgentsEntry } from "@jagentdesk/client/internal/daemon-client";
 import { type Agent, useSessionStore } from "@/stores/session-store";
 import { derivePendingPermissionKey, normalizeAgentSnapshot } from "@/utils/agent-snapshots";
@@ -188,20 +187,13 @@ export function replaceFetchedAgentDirectory(input: {
     }
   }
 
-  const currentAgents = store.sessions[input.serverId]?.agents ?? new Map<string, Agent>();
-  const agents = new Map<string, Agent>();
-  for (const [agentId, fetchedAgent] of fetchedAgents) {
-    const current = currentAgents.get(agentId);
-    agents.set(agentId, current && equal(current, fetchedAgent) ? current : fetchedAgent);
-  }
-
-  store.setAgents(input.serverId, agents);
-  for (const agent of agents.values()) {
+  store.setAgents(input.serverId, fetchedAgents);
+  for (const agent of fetchedAgents.values()) {
     applyAgentTurnSnapshot(input.serverId, agent);
   }
   store.setAgentDetails(input.serverId, (prev) => {
     let next: Map<string, Agent> | null = null;
-    for (const agentId of agents.keys()) {
+    for (const agentId of fetchedAgents.keys()) {
       if (!prev.has(agentId)) {
         continue;
       }
@@ -212,12 +204,12 @@ export function replaceFetchedAgentDirectory(input: {
   });
 
   const lastActivityByAgentId = new Map<string, Date>();
-  for (const agent of agents.values()) {
+  for (const agent of fetchedAgents.values()) {
     lastActivityByAgentId.set(agent.id, agent.lastActivityAt);
   }
   store.setAgentLastActivityBatch(lastActivityByAgentId);
 
   store.setPendingPermissions(input.serverId, new Map(pendingPermissions));
   store.setHasHydratedAgents(input.serverId, true);
-  return { agents };
+  return { agents: fetchedAgents };
 }

@@ -1,22 +1,16 @@
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { View, type LayoutChangeEvent } from "react-native";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef } from "react";
+import { View } from "react-native";
 import { GestureDetector } from "react-native-gesture-handler";
 import { useActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
 import { useWorkspace } from "@/stores/session-store-hooks";
-import {
-  CompactExplorerSidebar,
-  NativeExplorerSidebarDock,
-} from "@/components/compact-explorer-sidebar";
+import { CompactExplorerSidebar } from "@/components/explorer-sidebar";
 import { useOpenFileExplorerGesture } from "@/mobile-panels/gestures";
-import { useIsMobilePanelActive } from "@/mobile-panels/provider";
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
-import { usePanelStore } from "@/stores/panel-store";
+import { selectIsFileExplorerOpen, usePanelStore } from "@/stores/panel-store";
 import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
-import type { WorkspaceTabTarget } from "@/workspace-tabs/model";
 import { useWorkspaceCheckoutStatus } from "@/screens/workspace/use-workspace-checkout-status";
 import { openWorkspaceFileFromExplorer } from "@/screens/workspace/workspace-file-open-command";
 import { isWeb } from "@/constants/platform";
-import { DiffDocumentWorkspaceCacheProvider } from "@/git/diff-document/workspace-cache";
 import {
   resolveCompactExplorerSidebarHostModel,
   type CompactExplorerSidebarHostModel,
@@ -52,7 +46,9 @@ function useActiveCompactExplorerSidebarModel(
 ): CompactExplorerSidebarHostModel | null {
   const selection = useActiveWorkspaceSelection();
   const workspace = useWorkspace(selection?.serverId ?? null, selection?.workspaceId ?? null);
-  const isExplorerActive = useIsMobilePanelActive("file-explorer");
+  const isExplorerOpen = usePanelStore((state) =>
+    selectIsFileExplorerOpen(state, { isCompact: true }),
+  );
   const showMobileAgent = usePanelStore((state) => state.showMobileAgent);
   const client = useHostRuntimeClient(selection?.serverId ?? "");
   const isConnected = useHostRuntimeIsConnected(selection?.serverId ?? "");
@@ -68,67 +64,59 @@ function useActiveCompactExplorerSidebarModel(
   const resolvedModel = useMemo(
     () =>
       resolveCompactExplorerSidebarHostModel({
-        previous: isExplorerActive ? retainedModelRef.current : null,
+        previous: isExplorerOpen ? retainedModelRef.current : null,
         selection,
         workspace,
         isGit: checkoutQuery.data?.isGit ?? false,
       }),
-    [checkoutQuery.data?.isGit, isExplorerActive, selection, workspace],
+    [checkoutQuery.data?.isGit, isExplorerOpen, selection, workspace],
   );
 
   useEffect(() => {
     if (!selection) {
       retainedModelRef.current = null;
-      if (enabled && isExplorerActive) {
+      if (enabled && isExplorerOpen) {
         showMobileAgent();
       }
       return;
     }
-    if (!isExplorerActive) {
+    if (!isExplorerOpen) {
       retainedModelRef.current = null;
       return;
     }
     if (resolvedModel) {
       retainedModelRef.current = resolvedModel;
     }
-  }, [enabled, isExplorerActive, resolvedModel, selection, showMobileAgent]);
+  }, [enabled, isExplorerOpen, resolvedModel, selection, showMobileAgent]);
 
-  return selection ? (resolvedModel ?? (isExplorerActive ? retainedModelRef.current : null)) : null;
+  return selection ? (resolvedModel ?? (isExplorerOpen ? retainedModelRef.current : null)) : null;
 }
 
 interface CompactExplorerSidebarHostProps {
   children: ReactNode;
   enabled: boolean;
-  presentation: "overlay" | "dock";
 }
 
-export function CompactExplorerSidebarHost({
-  children,
-  enabled,
-  presentation,
-}: CompactExplorerSidebarHostProps) {
+export function CompactExplorerSidebarHost({ children, enabled }: CompactExplorerSidebarHostProps) {
   const model = useActiveCompactExplorerSidebarModel(enabled);
-  const [containerWidth, setContainerWidth] = useState(0);
-  const openCompactFileExplorer = usePanelStore((state) => state.openCompactFileExplorer);
+  const openFileExplorerForCheckout = usePanelStore((state) => state.openFileExplorerForCheckout);
   const showMobileAgent = usePanelStore((state) => state.showMobileAgent);
-  const openTab = useWorkspaceLayoutStore((state) => state.openTab);
-  const openWorkspaceTabInFocusedPane = useCallback(
-    (workspaceKey: string, target: WorkspaceTabTarget) =>
-      openTab({ workspaceKey, target, intent: "reveal" }),
-    [openTab],
-  );
+  const openWorkspaceTabFocused = useWorkspaceLayoutStore((state) => state.openTabFocused);
   const focusWorkspaceTab = useWorkspaceLayoutStore((state) => state.focusTab);
 
   const handleOpenExplorer = useCallback(() => {
     if (!model?.workspaceRoot) {
       return;
     }
-    openCompactFileExplorer({
-      serverId: model.serverId,
-      cwd: model.workspaceRoot,
-      isGit: model.isGit,
+    openFileExplorerForCheckout({
+      isCompact: true,
+      checkout: {
+        serverId: model.serverId,
+        cwd: model.workspaceRoot,
+        isGit: model.isGit,
+      },
     });
-  }, [model, openCompactFileExplorer]);
+  }, [model, openFileExplorerForCheckout]);
 
   const handleOpenFile = useCallback(
     (filePath: string) => {
@@ -138,53 +126,13 @@ export function CompactExplorerSidebarHost({
       openWorkspaceFileFromExplorer({
         filePath,
         persistenceKey: model.persistenceKey,
-        closeExplorerAfterOpen: presentation === "overlay",
         showMobileAgent,
-        openWorkspaceTabInFocusedPane,
+        openWorkspaceTabFocused,
         focusWorkspaceTab,
       });
     },
-    [focusWorkspaceTab, model, openWorkspaceTabInFocusedPane, presentation, showMobileAgent],
+    [focusWorkspaceTab, model, openWorkspaceTabFocused, showMobileAgent],
   );
-
-  const handleContainerLayout = useCallback((event: LayoutChangeEvent) => {
-    const nextWidth = event.nativeEvent.layout.width;
-    setContainerWidth((current) => (current === nextWidth ? current : nextWidth));
-  }, []);
-
-  const explorer =
-    enabled && model ? (
-      <DiffDocumentWorkspaceCacheProvider key={model.persistenceKey}>
-        {presentation === "dock" ? (
-          <NativeExplorerSidebarDock
-            serverId={model.serverId}
-            workspaceId={model.workspaceId}
-            workspaceRoot={model.workspaceRoot}
-            isGit={model.isGit}
-            persistenceKey={model.persistenceKey}
-            containerWidth={containerWidth}
-            onOpenFile={handleOpenFile}
-          />
-        ) : (
-          <CompactExplorerSidebar
-            serverId={model.serverId}
-            workspaceId={model.workspaceId}
-            workspaceRoot={model.workspaceRoot}
-            isGit={model.isGit}
-            onOpenFile={handleOpenFile}
-          />
-        )}
-      </DiffDocumentWorkspaceCacheProvider>
-    ) : null;
-
-  if (presentation === "dock") {
-    return (
-      <View style={styles.row} onLayout={handleContainerLayout}>
-        <View style={styles.fill}>{children}</View>
-        {explorer}
-      </View>
-    );
-  }
 
   return (
     <>
@@ -194,7 +142,15 @@ export function CompactExplorerSidebarHost({
       >
         {children}
       </CompactExplorerOpenGestureSurface>
-      {explorer}
+      {enabled && model ? (
+        <CompactExplorerSidebar
+          serverId={model.serverId}
+          workspaceId={model.workspaceId}
+          workspaceRoot={model.workspaceRoot}
+          isGit={model.isGit}
+          onOpenFile={handleOpenFile}
+        />
+      ) : null}
     </>
   );
 }
@@ -202,9 +158,5 @@ export function CompactExplorerSidebarHost({
 const styles = {
   fill: {
     flex: 1,
-  },
-  row: {
-    flex: 1,
-    flexDirection: "row",
   },
 } as const;

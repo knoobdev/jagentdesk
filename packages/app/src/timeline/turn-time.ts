@@ -1,9 +1,9 @@
 import type { StreamItem } from "@/types/stream";
-import { startsNewTurn } from "@/agent-stream/turn-membership";
 
 export interface TurnTiming {
+  startedAt: Date;
   completedAt: Date;
-  durationMs: number | null;
+  durationMs: number;
 }
 
 export interface StreamTurnTiming {
@@ -21,17 +21,15 @@ export function deriveStreamTurnTiming(params: {
   let currentUserAt: Date | null = null;
   let currentLastItemAt: Date | null = null;
   let currentAssistantIds: string[] = [];
-  let previousItem: StreamItem | null = null;
 
   const flushCompletedTurn = () => {
-    if (!currentLastItemAt || currentAssistantIds.length === 0) {
+    if (!currentUserAt || !currentLastItemAt || currentAssistantIds.length === 0) {
       return;
     }
     const timing: TurnTiming = {
+      startedAt: currentUserAt,
       completedAt: currentLastItemAt,
-      durationMs: currentUserAt
-        ? Math.max(0, currentLastItemAt.getTime() - currentUserAt.getTime())
-        : null,
+      durationMs: Math.max(0, currentLastItemAt.getTime() - currentUserAt.getTime()),
     };
     for (const id of currentAssistantIds) {
       byAssistantId.set(id, timing);
@@ -39,17 +37,20 @@ export function deriveStreamTurnTiming(params: {
   };
 
   const visitItem = (item: StreamItem) => {
-    if (startsNewTurn(item, previousItem)) {
+    if (item.kind === "user_message") {
       flushCompletedTurn();
-      currentUserAt = item.kind === "user_message" ? item.timestamp : null;
+      currentUserAt = item.timestamp;
       currentLastItemAt = null;
       currentAssistantIds = [];
+      return;
+    }
+    if (!currentUserAt) {
+      return;
     }
     currentLastItemAt = item.timestamp;
     if (item.kind === "assistant_message") {
       currentAssistantIds.push(item.id);
     }
-    previousItem = item;
   };
 
   for (const item of params.tail) {

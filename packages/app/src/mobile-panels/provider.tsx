@@ -15,7 +15,6 @@ import type { GestureType } from "react-native-gesture-handler";
 import {
   cancelAnimation,
   Easing,
-  useAnimatedReaction,
   useSharedValue,
   withTiming,
   type SharedValue,
@@ -40,6 +39,18 @@ import {
 
 const ANIMATION_DURATION = 220;
 const ANIMATION_EASING = Easing.bezier(0.25, 0.1, 0.25, 1);
+const LEFT_PANEL_MASK = 1;
+const RIGHT_PANEL_MASK = 2;
+
+function getPanelMask(panel: MobilePanelView): number {
+  if (panel === "agent-list") {
+    return LEFT_PANEL_MASK;
+  }
+  if (panel === "file-explorer") {
+    return RIGHT_PANEL_MASK;
+  }
+  return 0;
+}
 
 interface MobilePanelsRuntime {
   beginGesture: (input: BeginGestureInput) => number;
@@ -58,6 +69,7 @@ interface MobilePanelsRuntime {
 
 interface BeginGestureInput {
   origin: MobilePanelView;
+  preview: MobilePanelView;
 }
 
 interface FinishGestureInput {
@@ -67,7 +79,7 @@ interface FinishGestureInput {
 }
 
 const MobilePanelsContext = createContext<MobilePanelsRuntime | null>(null);
-const MobilePanelActiveContext = createContext<MobilePanelView>("agent");
+const MobilePanelPresentationContext = createContext(0);
 
 export function MobilePanelsProvider({ children }: { children: ReactNode }) {
   const { width: windowWidth } = useWindowDimensions();
@@ -80,7 +92,7 @@ export function MobilePanelsProvider({ children }: { children: ReactNode }) {
   const leftCloseGestureRef = useRef<GestureType | undefined>(undefined);
   const rightOpenGestureRef = useRef<GestureType | undefined>(undefined);
   const rightCloseGestureRef = useRef<GestureType | undefined>(undefined);
-  const [activePanel, setActivePanel] = useState(initialSelection.target);
+  const [presentedPanels, setPresentedPanels] = useState(getPanelMask(initialSelection.target));
 
   const setOpenGestureBlocked = useCallback(
     (owner: symbol, blocked: boolean) => {
@@ -94,32 +106,20 @@ export function MobilePanelsProvider({ children }: { children: ReactNode }) {
     [openGesturesBlocked],
   );
 
-  const publishActivePanel = useCallback((panel: MobilePanelView, revision: number) => {
+  const presentPanel = useCallback((panel: MobilePanelView) => {
+    const mask = getPanelMask(panel);
+    if (mask) {
+      setPresentedPanels((current) => current | mask);
+    }
+  }, []);
+
+  const settlePresentation = useCallback((panel: MobilePanelView, revision: number) => {
     const selection = usePanelStore.getState().mobilePanel;
     if (selection.revision !== revision || selection.target !== panel) {
       return;
     }
-    if (isNative && panel !== "agent") {
-      Keyboard.dismiss();
-    }
-    setActivePanel(panel);
+    setPresentedPanels(getPanelMask(panel));
   }, []);
-
-  useAnimatedReaction(
-    () => ({ motionState: motionState.value, position: position.value }),
-    ({ motionState: currentState, position: currentPosition }) => {
-      const settled = transitionMobilePanel(currentState, {
-        type: "position.changed",
-        position: currentPosition,
-      });
-      if (settled.state === currentState) {
-        return;
-      }
-      motionState.value = settled.state;
-      scheduleOnRN(publishActivePanel, settled.state.settledTarget, settled.state.revision);
-    },
-    [motionState, position, publishActivePanel],
-  );
 
   const animateTransition = useCallback(
     (transition: MobilePanelTransition) => {
@@ -128,12 +128,29 @@ export function MobilePanelsProvider({ children }: { children: ReactNode }) {
         return;
       }
       const target = transition.animationTarget;
-      position.value = withTiming(getMobilePanelAnchor(target), {
-        duration: ANIMATION_DURATION,
-        easing: ANIMATION_EASING,
-      });
+      const revision = transition.state.revision;
+      position.value = withTiming(
+        getMobilePanelAnchor(target),
+        { duration: ANIMATION_DURATION, easing: ANIMATION_EASING },
+        (finished) => {
+          if (!finished) {
+            return;
+          }
+          const currentState = motionState.value;
+          const settled = transitionMobilePanel(currentState, {
+            type: "animation.finished",
+            revision,
+            target,
+          });
+          if (settled.state === currentState) {
+            return;
+          }
+          motionState.value = settled.state;
+          scheduleOnRN(settlePresentation, target, revision);
+        },
+      );
     },
-    [position],
+    [motionState, position, settlePresentation],
   );
 
   const applySelection = useCallback(
@@ -159,12 +176,18 @@ export function MobilePanelsProvider({ children }: { children: ReactNode }) {
       if (selection === previousState.mobilePanel) {
         return;
       }
+      if (selection.target !== "agent") {
+        presentPanel(selection.target);
+        if (isNative) {
+          Keyboard.dismiss();
+        }
+      }
       scheduleOnUI(applySelection, selection);
     });
-  }, [applySelection]);
+  }, [applySelection, presentPanel]);
 
   const beginGesture = useCallback(
-    ({ origin }: BeginGestureInput): number => {
+    ({ origin, preview }: BeginGestureInput): number => {
       "worklet";
       const currentState = motionState.value;
       if (!canBeginMobilePanelGesture(currentState, origin, position.value)) {
@@ -176,9 +199,10 @@ export function MobilePanelsProvider({ children }: { children: ReactNode }) {
       });
       motionState.value = transition.state;
       cancelAnimation(position);
+      scheduleOnRN(presentPanel, preview);
       return transition.state.gesture?.startedRevision ?? -1;
     },
-    [motionState, position],
+    [motionState, position, presentPanel],
   );
 
   const updateGesture = useCallback(
@@ -242,9 +266,9 @@ export function MobilePanelsProvider({ children }: { children: ReactNode }) {
 
   return (
     <MobilePanelsContext.Provider value={value}>
-      <MobilePanelActiveContext.Provider value={activePanel}>
+      <MobilePanelPresentationContext.Provider value={presentedPanels}>
         {children}
-      </MobilePanelActiveContext.Provider>
+      </MobilePanelPresentationContext.Provider>
     </MobilePanelsContext.Provider>
   );
 }
@@ -258,8 +282,9 @@ export function useMobilePanelsRuntime(): MobilePanelsRuntime {
   return context;
 }
 
-export function useIsMobilePanelActive(panel: MobilePanelView): boolean {
-  return useContext(MobilePanelActiveContext) === panel;
+export function useIsMobilePanelPresented(panel: MobilePanelView): boolean {
+  const presentedPanels = useContext(MobilePanelPresentationContext);
+  return (presentedPanels & getPanelMask(panel)) !== 0;
 }
 
 export function useBlockMobilePanelOpenGestures(blocked: boolean): void {

@@ -234,6 +234,7 @@ import {
   type HubRelationshipRemote,
 } from "./hub/relationship-remote.js";
 import { DaemonExecutions } from "./hub/daemon-executions.js";
+import { hubScopesForPermissions } from "./authorization/index.js";
 
 const MAX_MCP_DEBUG_BATCH_ITEMS = 10;
 const REDACTED_LOG_VALUE = "[redacted]";
@@ -582,7 +583,7 @@ export async function createJAgentDeskDaemon(
   const browserToolsBroker = new BrowserToolsBroker({});
   // Local-disk-only plugin service (ADR-0014). `pluginsEnabled` defaults FALSE,
   // so start() spawns nothing unless the operator has explicitly enabled plugins.
-  const pluginRuntime = new PluginService(logger, daemonConfigStore);
+  const pluginRuntime = new PluginService(logger, daemonConfigStore, daemonVersion);
 
   const serverId = getOrCreateServerId(config.jagentdeskHome, { logger });
   const daemonKeyPair = await loadOrCreateDaemonKeyPair(config.jagentdeskHome, logger);
@@ -1202,7 +1203,19 @@ export async function createJAgentDeskDaemon(
     createDaemonId: dependencies.createHubDaemonId,
     attachSocket: async (socket, options) => {
       if (!wsServer) throw new Error("WebSocket server is not running");
-      await wsServer.attachHubSocket(socket, options);
+      // The fork's hub session gate is scope-based (isSessionRpcAllowed); bridge
+      // the v0.7.2 hub permissions to the equivalent scopes at attach time.
+      await wsServer.attachHubSocket(socket, {
+        daemonId: options.daemonId,
+        scopes: hubScopesForPermissions(options.permissions),
+        agents: options.agents,
+      });
+    },
+    updateAttachedPermissions: (_principalId, _permissions) => {
+      // Fork hub sessions carry static scopes assigned at attach time. JAgentDesk
+      // is Tailscale-only (ADR-0001) and does not re-issue hub permissions on a
+      // live session; a permission change tears the relationship down and
+      // re-attaches. No in-place update is required.
     },
     createExecutionAgents: (daemonId) =>
       new DaemonExecutions({

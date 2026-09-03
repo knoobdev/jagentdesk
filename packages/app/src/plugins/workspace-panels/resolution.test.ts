@@ -23,11 +23,8 @@ function installed(): InstalledPlugin {
       },
     ],
     commandCenterItems: [],
-    clientSide: null,
     attachmentSources: [],
     themes: [],
-    timelineTransformers: [],
-    timelineRenderers: [],
   };
 }
 

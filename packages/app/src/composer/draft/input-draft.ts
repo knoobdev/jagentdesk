@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { UserComposerAttachment } from "@/attachments/types";
-import type { TextReplacement } from "@/composer/types";
 import type { DraftAgentControlsProps } from "@/composer/agent-controls";
 import type { DraftCommandConfig } from "@/hooks/use-agent-commands-query";
 import {
@@ -23,8 +22,6 @@ import {
 } from "@/provider-selection/provider-selection";
 import { useDraftStore } from "@/stores/draft-store";
 import { toDraftInputIfReady } from "@/stores/draft-store/state";
-import { AfterPaintPublication } from "@/composer/after-paint-publication";
-import { isWeb } from "@/constants/platform";
 
 type AttachmentUpdater =
   | UserComposerAttachment[]
@@ -55,9 +52,7 @@ type DraftComposerState = UseAgentFormStateResult & {
 
 export interface AgentInputDraft {
   text: string;
-  editText: (text: string) => void;
-  replaceText: (text: string) => void;
-  textReplacement: TextReplacement;
+  setText: (text: string) => void;
   attachments: UserComposerAttachment[];
   setAttachments: (updater: AttachmentUpdater) => void;
   clear: (lifecycle: "sent" | "abandoned") => void;
@@ -92,22 +87,6 @@ export function useAgentInputDraft(input: UseAgentInputDraftInput): AgentInputDr
   const text = draft?.text ?? "";
   const attachments = draft?.attachments ?? [];
   const isHydrated = hydratedDraftKey === draftKey;
-  const textReplacementRevisionRef = useRef(0);
-  const [textReplacement, setTextReplacement] = useState<TextReplacement>(() => ({
-    key: `${draftKey}:0`,
-    text,
-  }));
-
-  const publishTextReplacement = useCallback(
-    (nextText: string) => {
-      textReplacementRevisionRef.current += 1;
-      setTextReplacement({
-        key: `${draftKey}:${textReplacementRevisionRef.current}`,
-        text: nextText,
-      });
-    },
-    [draftKey],
-  );
 
   const saveDraft = useCallback(
     (
@@ -128,32 +107,11 @@ export function useAgentInputDraft(input: UseAgentInputDraftInput): AgentInputDr
     [draftKey],
   );
 
-  const textPublication = useMemo(
-    () =>
-      new AfterPaintPublication<string>((nextText) => {
-        saveDraft((current) => ({ ...current, text: nextText }));
-      }),
-    [saveDraft],
-  );
-
-  const editText = useCallback(
+  const setText = useCallback(
     (nextText: string) => {
-      if (isWeb) {
-        textPublication.stage(nextText);
-      } else {
-        saveDraft((current) => ({ ...current, text: nextText }));
-      }
-    },
-    [saveDraft, textPublication],
-  );
-
-  const replaceText = useCallback(
-    (nextText: string) => {
-      textPublication.cancel();
       saveDraft((current) => ({ ...current, text: nextText }));
-      publishTextReplacement(nextText);
     },
-    [publishTextReplacement, saveDraft, textPublication],
+    [saveDraft],
   );
 
   const setAttachments = useCallback(
@@ -168,43 +126,16 @@ export function useAgentInputDraft(input: UseAgentInputDraftInput): AgentInputDr
 
   const clear = useCallback(
     (lifecycle: "sent" | "abandoned") => {
-      textPublication.cancel();
       useDraftStore.getState().clearDraftInput({ draftKey, lifecycle });
     },
-    [draftKey, textPublication],
+    [draftKey],
   );
-
-  useEffect(() => {
-    const flushWhenHidden = () => {
-      if (document.visibilityState === "hidden") textPublication.flush();
-    };
-    const flush = () => textPublication.flush();
-    const canListenForPageHide =
-      isWeb && typeof window !== "undefined" && typeof window.addEventListener === "function";
-    if (isWeb && typeof document !== "undefined") {
-      document.addEventListener("visibilitychange", flushWhenHidden);
-    }
-    if (canListenForPageHide) {
-      window.addEventListener("pagehide", flush);
-    }
-    return () => {
-      if (isWeb && typeof document !== "undefined") {
-        document.removeEventListener("visibilitychange", flushWhenHidden);
-      }
-      if (canListenForPageHide) {
-        window.removeEventListener("pagehide", flush);
-      }
-      textPublication.flush();
-    };
-  }, [textPublication]);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       await useDraftStore.getState().hydrateDraftInput({ draftKey });
       if (!cancelled) {
-        const hydratedText = useDraftStore.getState().getDraftInput(draftKey)?.text ?? "";
-        publishTextReplacement(hydratedText);
         setHydratedDraftKey(draftKey);
       }
     })();
@@ -212,7 +143,7 @@ export function useAgentInputDraft(input: UseAgentInputDraftInput): AgentInputDr
     return () => {
       cancelled = true;
     };
-  }, [draftKey, publishTextReplacement]);
+  }, [draftKey]);
 
   const lockedWorkingDir = composerOptions?.lockedWorkingDir?.trim() ?? "";
   useEffect(() => {
@@ -259,7 +190,6 @@ export function useAgentInputDraft(input: UseAgentInputDraftInput): AgentInputDr
     features: draftFeatures,
     featureValues: draftFeatureValues,
     setFeatureValue: setDraftFeatureValue,
-    applyProfileFeatureValues,
   } = useDraftAgentFeatures({
     serverId: formState.selectedServerId,
     provider: formState.selectedProvider,
@@ -269,14 +199,6 @@ export function useAgentInputDraft(input: UseAgentInputDraftInput): AgentInputDr
     thinkingOptionId: effectiveThinkingOptionId,
     initialFeatureValues: composerOptions?.initialFeatureValues,
   });
-
-  const applyDraftAgentProfile = useCallback(
-    (profile: Parameters<typeof formState.applyProfileFromUser>[0]) => {
-      formState.applyProfileFromUser(profile);
-      applyProfileFeatureValues(profile.featureValues);
-    },
-    [applyProfileFeatureValues, formState],
-  );
 
   const commandDraftConfig = useMemo(
     () =>
@@ -314,7 +236,6 @@ export function useAgentInputDraft(input: UseAgentInputDraftInput): AgentInputDr
         formState,
         features: draftFeatures,
         onSetFeature: setDraftFeatureValue,
-        onApplyAgentProfile: applyDraftAgentProfile,
       }),
       commandDraftConfig,
     };
@@ -325,7 +246,6 @@ export function useAgentInputDraft(input: UseAgentInputDraftInput): AgentInputDr
     effectiveThinkingOptionId,
     draftFeatures,
     draftFeatureValues,
-    applyDraftAgentProfile,
     formState,
     setDraftFeatureValue,
     workingDir,
@@ -333,9 +253,7 @@ export function useAgentInputDraft(input: UseAgentInputDraftInput): AgentInputDr
 
   return {
     text,
-    editText,
-    replaceText,
-    textReplacement,
+    setText,
     attachments,
     setAttachments,
     clear,

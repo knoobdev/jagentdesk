@@ -1,5 +1,21 @@
 export const PARENT_AGENT_ID_LABEL = "jagentdesk.parent-agent-id";
 
+const OPEN_AGENT_TAB_LABEL_PREFIX = "jagentdesk.open-agent-tab.";
+
+export function getOpenAgentTabLabel(clientId: string): string {
+  return `${OPEN_AGENT_TAB_LABEL_PREFIX}${clientId}`;
+}
+
+export function isOpenAgentTabLabel(label: string): boolean {
+  return label.startsWith(OPEN_AGENT_TAB_LABEL_PREFIX);
+}
+
+export function hasOpenAgentTab(labels: Record<string, unknown> | null | undefined): boolean {
+  return Object.entries(labels ?? {}).some(
+    ([label, value]) => isOpenAgentTabLabel(label) && value === "true",
+  );
+}
+
 // Provenance stamp written on an agent record when it is imported via a
 // host-to-host migration. Value is the source daemon's serverId. Used to build
 // the "[source-host] title" display prefix and to drive reverse migration when

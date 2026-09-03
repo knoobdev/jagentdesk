@@ -3,26 +3,20 @@ import { router, type Href } from "expo-router";
 import { useTranslation } from "react-i18next";
 import {
   CalendarClock,
-  CircleDashed,
-  Folder,
   FolderPlus,
   History,
   Home,
   Keyboard,
-  PanelLeft,
   Plus,
   Settings,
 } from "lucide-react-native";
 import { withUnistyles } from "react-native-unistyles";
-import { getIsElectronRuntime, useIsCompactFormFactor } from "@/constants/layout";
+import { getIsElectronRuntime } from "@/constants/layout";
 import { useKeyboardShortcutOverrides } from "@/hooks/use-keyboard-shortcut-overrides";
 import { useOpenAddProject } from "@/hooks/use-open-add-project";
-import { useKeyboardActionDispatcher } from "@/keyboard/keyboard-action-dispatcher-context";
-import { useKeyboardShortcutsAvailable } from "@/keyboard/availability";
+import { keyboardActionDispatcher } from "@/keyboard/keyboard-action-dispatcher";
 import { resolveShortcutKeysForAction } from "@/keyboard/keyboard-shortcuts";
 import { useKeyboardShortcutsStore } from "@/stores/keyboard-shortcuts-store";
-import { usePanelStore } from "@/stores/panel-store";
-import { useSidebarViewStore } from "@/stores/sidebar-view-store";
 import { clearCommandCenterFocusRestoreElement } from "@/utils/command-center-focus-restore";
 import {
   buildOpenProjectRoute,
@@ -33,7 +27,6 @@ import {
 import { getShortcutOs } from "@/utils/shortcut-platform";
 import type { CommandCenterContribution, CommandCenterIconProps } from "./contributions";
 import { useCommandCenterActions } from "./provider";
-import { buildGroupingContribution } from "./root-contributions";
 
 const ThemedPlus = withUnistyles(Plus, (theme) => ({ color: theme.colors.foregroundMuted }));
 const ThemedFolderPlus = withUnistyles(FolderPlus, (theme) => ({
@@ -52,13 +45,6 @@ const ThemedSettings = withUnistyles(Settings, (theme) => ({
   color: theme.colors.foregroundMuted,
 }));
 const ThemedHome = withUnistyles(Home, (theme) => ({ color: theme.colors.foregroundMuted }));
-const ThemedFolder = withUnistyles(Folder, (theme) => ({ color: theme.colors.foregroundMuted }));
-const ThemedCircleDashed = withUnistyles(CircleDashed, (theme) => ({
-  color: theme.colors.foregroundMuted,
-}));
-const ThemedPanelLeft = withUnistyles(PanelLeft, (theme) => ({
-  color: theme.colors.foregroundMuted,
-}));
 
 function PlusIcon({ size }: CommandCenterIconProps) {
   return <ThemedPlus size={size} strokeWidth={2.4} />;
@@ -88,43 +74,21 @@ function HomeIcon({ size }: CommandCenterIconProps) {
   return <ThemedHome size={size} strokeWidth={2.2} />;
 }
 
-function FolderIcon({ size }: CommandCenterIconProps) {
-  return <ThemedFolder size={size} strokeWidth={2.2} />;
-}
-
-function CircleDashedIcon({ size }: CommandCenterIconProps) {
-  return <ThemedCircleDashed size={size} strokeWidth={2.2} />;
-}
-
-function PanelLeftIcon({ size }: CommandCenterIconProps) {
-  return <ThemedPanelLeft size={size} strokeWidth={2.2} />;
-}
-
 export function CommandCenterRootActions() {
-  const keyboardActionDispatcher = useKeyboardActionDispatcher();
   const { t } = useTranslation();
   const { overrides } = useKeyboardShortcutOverrides();
-  const shortcutsAvailable = useKeyboardShortcutsAvailable();
   const openAddProject = useOpenAddProject();
   const settingsRoute = useMemo<Href>(() => buildSettingsRoute(), []);
   const homeRoute = useMemo<Href>(() => buildOpenProjectRoute(), []);
   const sessionsRoute = useMemo<Href>(() => buildSessionsRoute(), []);
   const schedulesRoute = useMemo<Href>(() => buildSchedulesRoute(), []);
   const setShortcutsDialogOpen = useKeyboardShortcutsStore((state) => state.setShortcutsDialogOpen);
-  // Narrow selector on purpose: a whole-store subscription would re-register every root action
-  // each time host filters are reconciled.
-  const groupMode = useSidebarViewStore((state) => state.groupMode);
-  const setGroupMode = useSidebarViewStore((state) => state.setGroupMode);
-  const isCompact = useIsCompactFormFactor();
-  const toggleMobileAgentList = usePanelStore((state) => state.toggleMobileAgentList);
-  const toggleDesktopAgentList = usePanelStore((state) => state.toggleDesktopAgentList);
-  const toggleAgentList = isCompact ? toggleMobileAgentList : toggleDesktopAgentList;
   const shortcutPlatform = useMemo(
     () => ({ isMac: getShortcutOs() === "mac", isDesktop: getIsElectronRuntime() }),
     [],
   );
-  const actions = useMemo<CommandCenterContribution[]>(() => {
-    const availableActions: CommandCenterContribution[] = [
+  const actions = useMemo<CommandCenterContribution[]>(
+    () => [
       {
         id: "add-project",
         group: "actions",
@@ -240,37 +204,7 @@ export function CommandCenterRootActions() {
             undefined,
         },
       },
-      // Toggle left sidebar is global: it calls the panel store directly and works on every route.
-      // The right sidebar and focus toggles do NOT belong here — their handlers live in
-      // workspace-screen.tsx behind `enabled: isRouteFocused && ...`, so registering them globally
-      // would list entries that silently no-op off a workspace route. They live in
-      // workspace-contributions.ts instead. That is why the three toggles render in two
-      // non-adjacent sections; don't "tidy" them back together.
       {
-        id: "toggle-left-sidebar",
-        group: "actions",
-        groupRank: 0,
-        rank: 7,
-        keywords: ["toggle", "sidebar", "left", "panel", "workspaces"],
-        visibility: "query",
-        run: () => {
-          clearCommandCenterFocusRestoreElement();
-          toggleAgentList();
-        },
-        presentation: {
-          kind: "action",
-          title: t("settings.shortcuts.help.toggleLeftSidebar"),
-          sectionTitle: t("shell.commandCenter.actions"),
-          icon: PanelLeftIcon,
-          shortcutKeys:
-            resolveShortcutKeysForAction("toggle-left-sidebar", overrides, shortcutPlatform) ??
-            undefined,
-        },
-      },
-    ];
-
-    if (shortcutsAvailable) {
-      availableActions.push({
         id: "keyboard-shortcuts",
         group: "actions",
         groupRank: 0,
@@ -287,39 +221,20 @@ export function CommandCenterRootActions() {
             resolveShortcutKeysForAction("show-shortcuts", overrides, shortcutPlatform) ??
             undefined,
         },
-      });
-    }
-
-    availableActions.push(
-      buildGroupingContribution({
-        groupMode,
-        labels: {
-          section: t("shell.commandCenter.actions"),
-          groupByProject: t("shell.commandCenter.groupByProject"),
-          groupByStatus: t("shell.commandCenter.groupByStatus"),
-        },
-        icons: { project: FolderIcon, status: CircleDashedIcon },
-        setGroupMode,
-      }),
-    );
-
-    return availableActions;
-  }, [
-    groupMode,
-    homeRoute,
-    keyboardActionDispatcher,
-    openAddProject,
-    overrides,
-    schedulesRoute,
-    sessionsRoute,
-    setGroupMode,
-    setShortcutsDialogOpen,
-    settingsRoute,
-    shortcutPlatform,
-    shortcutsAvailable,
-    t,
-    toggleAgentList,
-  ]);
+      },
+    ],
+    [
+      homeRoute,
+      openAddProject,
+      overrides,
+      schedulesRoute,
+      sessionsRoute,
+      setShortcutsDialogOpen,
+      settingsRoute,
+      shortcutPlatform,
+      t,
+    ],
+  );
 
   useCommandCenterActions({ sourceId: "root", enabled: true, actions });
   return null;

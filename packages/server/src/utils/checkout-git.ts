@@ -4,7 +4,7 @@ import { open as openFile, readFile, stat as statFile } from "fs/promises";
 import { TTLCache } from "@isaacs/ttlcache";
 import type { CheckoutCommit, CheckoutCommitFile } from "@jagentdesk/protocol/messages";
 import { parseGitHubRemoteIdentity, parseGitRemoteLocation } from "@jagentdesk/protocol/git-remote";
-import { maxBase64EncryptedPlaintextByteLength } from "@jagentdesk/relay";
+import { maxBase64EncryptedPlaintextByteLength } from "./encrypted-frame-size.js";
 import type { Logger } from "pino";
 import type { ParsedDiffFile } from "../server/utils/diff-highlighter.js";
 import {
@@ -1041,9 +1041,13 @@ async function getMainRepoRootFromCommonDir(
         worktreesRoot: context?.worktreesRoot,
       }),
   );
-  const childrenOfBareRepo = nonBareNonJAgentDesk.filter((wt) => isDescendantPath(wt.path, normalized));
+  const childrenOfBareRepo = nonBareNonJAgentDesk.filter((wt) =>
+    isDescendantPath(wt.path, normalized),
+  );
   const mainChild = childrenOfBareRepo.find((wt) => basename(wt.path) === "main");
-  return mainChild?.path ?? childrenOfBareRepo[0]?.path ?? nonBareNonJAgentDesk[0]?.path ?? normalized;
+  return (
+    mainChild?.path ?? childrenOfBareRepo[0]?.path ?? nonBareNonJAgentDesk[0]?.path ?? normalized
+  );
 }
 
 export interface GitWorktreeEntry {

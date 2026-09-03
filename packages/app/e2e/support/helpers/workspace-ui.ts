@@ -95,12 +95,9 @@ export async function expectReconnectingToastVisible(
   page: Page,
   options?: { timeout?: number },
 ): Promise<void> {
-  const toast = page.getByTestId("agent-reconnecting-toast");
-  await expect(toast).toBeVisible({
+  await expect(page.getByTestId("agent-reconnecting-toast")).toBeVisible({
     timeout: options?.timeout ?? 30_000,
   });
-  await expect(toast).toHaveText("Reconnecting");
-  await expect(toast.getByTestId("agent-reconnecting-status-dot")).toBeVisible();
 }
 
 export async function expectReconnectingToastGone(

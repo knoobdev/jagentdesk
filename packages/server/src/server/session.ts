@@ -42,6 +42,7 @@ import {
 import { ensureAgentLoaded, ensureUnarchivedAgentLoaded } from "./agent/agent-loading.js";
 import {
   formatSystemNotificationPrompt,
+  type PromptDispatchDisposition,
   sendPromptToAgent,
   waitForAgentRunStartWithTimeout,
   unarchiveAgentState,
@@ -672,6 +673,9 @@ export class Session {
   private viewedTimelineAgentIds = new Set<string>();
   private readonly viewedTimelineAgentIdsBySource = new Map<object, Set<string>>();
   private readonly clientCapabilitiesBySource = new Map<object, ReadonlySet<ClientCapability>>();
+  // Tracks the client source that initiated an in-flight rewind so its own
+  // timeline-replacement echo can be skipped when the replacement is delivered.
+  private readonly rewindInitiators = new Map<string, object | undefined>();
   private readonly defaultTimelineSubscriptionSource = {};
   private unsubscribeTerminalWorkspaceContributionEvents: (() => void) | null = null;
   private readonly agentUpdates: AgentUpdatesService;
@@ -1637,6 +1641,11 @@ export class Session {
 
     this.unsubscribeAgentEvents = this.agentManager.subscribe(
       (event) => {
+        if (event.type === "timeline_replacement") {
+          this.deliverTimelineReplacement(event.agentId, this.rewindInitiators.get(event.agentId));
+          return;
+        }
+
         if (event.type === "agent_state") {
           this.sessionLogger.trace(
             {
@@ -4123,6 +4132,7 @@ export class Session {
     msg: Extract<SessionInboundMessage, { type: "agent.rewind.request" }>,
   ): Promise<void> {
     try {
+      this.rewindInitiators.set(msg.agentId, undefined);
       await this.agentManager.rewind(msg.agentId, msg.messageId, msg.mode);
       this.emit({
         type: "agent.rewind.response",
@@ -4143,6 +4153,72 @@ export class Session {
           error: error instanceof Error ? error.message : "Failed to rewind agent",
         },
       });
+    } finally {
+      this.rewindInitiators.delete(msg.agentId);
+    }
+  }
+
+  // Deliver a post-rewind timeline replacement to subscribed clients. Clients that
+  // support timelineReplacementInvalidation get a lightweight invalidation message
+  // and re-fetch; legacy clients receive the reconstructed timeline rows inline.
+  private deliverTimelineReplacement(agentId: string, initiatingSource?: object): void {
+    const agent = this.agentManager.getAgent(agentId);
+    if (!agent) return;
+    const timeline = this.agentManager.fetchTimeline(agentId, { limit: 0 });
+    const epoch = timeline.epoch;
+
+    if (this.clientCapabilitiesBySource.size === 0) {
+      if (!this.supports(CLIENT_CAPS.timelineReplacementInvalidation)) {
+        this.emitReconstructedTimelineRows(agentId, agent.provider, timeline.rows, epoch);
+      }
+      return;
+    }
+
+    for (const [source, capabilities] of this.clientCapabilitiesBySource) {
+      const isInitiator = source === initiatingSource;
+      const supportsReplacement = capabilities.has(CLIENT_CAPS.timelineReplacementInvalidation);
+      const isSubscribed = this.viewedTimelineAgentIdsBySource.get(source)?.has(agentId) === true;
+      if (supportsReplacement) {
+        if (isSubscribed && !isInitiator) {
+          this.emitForSource(
+            {
+              type: "agent.timeline.replacement",
+              payload: { agentId, epoch },
+            },
+            source,
+          );
+        }
+        continue;
+      }
+      // COMPAT(timelineReplacementInvalidation): replay reconstructed rows to legacy
+      // clients until the supported client floor advances.
+      this.emitReconstructedTimelineRows(agentId, agent.provider, timeline.rows, epoch, source);
+    }
+  }
+
+  private emitReconstructedTimelineRows(
+    agentId: string,
+    provider: ManagedAgent["provider"],
+    rows: AgentTimelineFetchResult["rows"],
+    epoch: string,
+    source?: object,
+  ): void {
+    for (const row of rows) {
+      const event = serializeAgentStreamEvent({
+        type: "timeline",
+        provider,
+        item: row.item,
+        ...(row.turnId ? { turnId: row.turnId } : {}),
+        timestamp: row.timestamp,
+      });
+      if (!event) continue;
+      this.emitForSource(
+        {
+          type: "agent_stream",
+          payload: { agentId, event, timestamp: row.timestamp, seq: row.seq, epoch },
+        },
+        source,
+      );
     }
   }
 
@@ -7134,7 +7210,7 @@ export class Session {
         },
         "agent.session.send_agent_message",
       );
-      let dispatchResult: { outOfBand: boolean; steered?: boolean };
+      let dispatchResult: { disposition: PromptDispatchDisposition };
       try {
         dispatchResult = await sendPromptToAgent({
           agentManager: this.agentManager,
@@ -7162,7 +7238,7 @@ export class Session {
 
       // A steered message was injected into the already-running turn — there is
       // no new run to wait for, so ack immediately (like an out-of-band prompt).
-      if (dispatchResult.outOfBand || dispatchResult.steered) {
+      if (dispatchResult.disposition !== "turn_started") {
         this.emit({
           type: "send_agent_message_response",
           payload: {

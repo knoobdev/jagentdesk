@@ -1,18 +1,19 @@
-import type { ParsedDiffFile } from "@jagentdesk/protocol/messages";
-import { buildDiffTree, flattenDiffTree } from "@/git/diff-tree";
+import type { SubscribeCheckoutDiffResponse } from "@jagentdesk/protocol/messages";
 
-// The Changes tree is the single ordering authority: `sortTree` (diff-tree.ts)
-// ranks directories before files within a level, then compares names. Surfaces
-// that render the flat file list — the scrolling diff — derive their order from
-// the tree here instead of reimplementing the rule, so the two cannot disagree.
+type ParsedDiffFile = SubscribeCheckoutDiffResponse["payload"]["files"][number];
+
+export function compareCheckoutDiffPaths(left: string, right: string): number {
+  if (left === right) {
+    return 0;
+  }
+  return left < right ? -1 : 1;
+}
+
 export function orderCheckoutDiffFiles(files: ParsedDiffFile[]): ParsedDiffFile[] {
   if (files.length < 2) {
     return files;
   }
-  // Path compression only merges display rows for single-child directory
-  // chains, so it is skipped; the collapsed set is empty because the flat list
-  // always carries every file, whatever the rail has collapsed.
-  return flattenDiffTree(buildDiffTree(files), new Set()).flatMap((row) =>
-    row.kind === "file" ? [row.file] : [],
-  );
+  const ordered = [...files];
+  ordered.sort((a, b) => compareCheckoutDiffPaths(a.path, b.path));
+  return ordered;
 }

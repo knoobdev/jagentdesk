@@ -10,7 +10,6 @@ import invariant from "tiny-invariant";
 import { Composer } from "@/composer";
 import { FileDropZone } from "@/components/file-drop/file-drop-zone";
 import { ComposerImportPill } from "@/composer/draft/import-pill";
-import { COMPOSER_PILL_CLEARANCE } from "@/composer/pill-styles";
 import { AgentStreamView } from "@/agent-stream/view";
 import { composerWorkspaceAttachment } from "@/composer/attachments/workspace";
 import { useAgentInputDraft } from "@/composer/draft/input-draft";
@@ -20,6 +19,7 @@ import { resolveTurnPresentation, TURN_LIVENESS_IDLE } from "@/timeline/turn-liv
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import { buildWorkspaceDraftAgentConfig } from "@/screens/workspace/workspace-draft-agent-config";
 import { buildDraftStoreKey } from "@/stores/draft-keys";
+import { usePanelStore } from "@/stores/panel-store";
 import { useCreateFlowStore } from "@/stores/create-flow-store";
 import type { Agent } from "@/stores/session-store";
 import { useWorkspaceFields } from "@/stores/session-store-hooks";
@@ -28,6 +28,9 @@ import { useAgentControlCommandCenterActions } from "@/command-center/agent-cont
 import { encodeImages } from "@/utils/encode-images";
 import type { WorkspaceFileOpenRequest } from "@/workspace/file-open";
 import { shouldAutoFocusWorkspaceDraftComposer } from "@/screens/workspace/workspace-draft-pane-focus";
+import { runOrchestrateClientCommand } from "@/orchestration/start-objective";
+import { useOrchestration } from "@/hooks/use-orchestration";
+import type { ClientSlashCommand } from "@/client-slash-commands";
 import {
   shouldAllowEmptyDraftText,
   validateDraftSubmission,
@@ -48,12 +51,7 @@ import {
   useIsCompactFormFactor,
 } from "@/constants/layout";
 import { isWeb } from "@/constants/platform";
-import {
-  buildWorkspaceTabPersistenceKey,
-  type WorkspaceDraftTabSetup,
-} from "@/workspace-tabs/model";
-import { openWorkspaceChanges } from "@/workspace-tabs/open-supporting-view";
-import { useSettings } from "@/hooks/use-settings";
+import type { WorkspaceDraftTabSetup } from "@/workspace-tabs/model";
 
 const EMPTY_PENDING_PERMISSIONS = new Map();
 const EMPTY_ONLINE_SERVER_IDS: string[] = [];
@@ -383,6 +381,27 @@ export function WorkspaceDraftAgentTab({
     throw new Error("Workspace draft composer state is required");
   }
 
+  // /orc from a fresh draft: start orchestration instead of creating a normal agent
+  // whose first message would be the literal "/orc …" (which a provider rejects as an
+  // unknown command). No model pick is needed — orchestration uses its configured profiles.
+  const { config: orchestrationConfig } = useOrchestration(serverId);
+  const handleDraftClientSlashCommand = useCallback(
+    async (command: ClientSlashCommand) => {
+      if (command.kind !== "orchestrate") {
+        return;
+      }
+      await runOrchestrateClientCommand({
+        client,
+        config: orchestrationConfig,
+        cwd: composerState.workingDir,
+        serverId,
+        workspaceId,
+        rawRequest: command.argument ?? "",
+      });
+    },
+    [client, orchestrationConfig, composerState.workingDir, serverId, workspaceId],
+  );
+
   const draftProvider = composerState.selectedProvider;
   const draftProviderDefinitions = composerState.providerDefinitions;
   const draftThinkingOptions = composerState.availableThinkingOptions;
@@ -395,7 +414,7 @@ export function WorkspaceDraftAgentTab({
   const draftOnSetFeature = composerState.agentControls.onSetFeature;
 
   const clearDraftInput = draftInput.clear;
-  const replaceDraftText = draftInput.replaceText;
+  const setDraftText = draftInput.setText;
   const setDraftAttachments = draftInput.setAttachments;
   const pendingAutoSubmit = useWorkspaceDraftSubmissionStore((state) => {
     const pending = state.pendingByDraftId[draftId] ?? null;
@@ -440,7 +459,6 @@ export function WorkspaceDraftAgentTab({
     workspaceId,
   });
   const draftAttachmentScopeKey = useDraftWorkspaceAttachmentScopeKey(draftId);
-  const openInSidePane = useSettings((settings) => settings.openInSidePane);
   const attachmentScopeKeys = useMemo(
     () => [draftAttachmentScopeKey, workspaceAttachmentScopeKey].filter(Boolean),
     [draftAttachmentScopeKey, workspaceAttachmentScopeKey],
@@ -448,19 +466,28 @@ export function WorkspaceDraftAgentTab({
   const clearWorkspaceAttachments = useWorkspaceAttachmentsStore(
     (state) => state.clearWorkspaceAttachments,
   );
+  const openFileExplorerForCheckout = usePanelStore((state) => state.openFileExplorerForCheckout);
+  const setExplorerTabForCheckout = usePanelStore((state) => state.setExplorerTabForCheckout);
   const handleOpenWorkspaceAttachment = useCallback(
     (attachment: WorkspaceComposerAttachment) => {
       if (attachment.kind !== "review") {
         return;
       }
-      openWorkspaceChanges({
+      const checkout = {
+        serverId,
+        cwd: attachment.attachment.cwd,
+        isGit: true,
+      };
+      openFileExplorerForCheckout({
+        checkout,
         isCompact: isCompactFormFactor,
-        workspaceKey: buildWorkspaceTabPersistenceKey({ serverId, workspaceId: workspaceId ?? "" }),
-        checkout: { serverId, cwd: composerState.workingDir, isGit: true },
-        preferences: openInSidePane,
+      });
+      setExplorerTabForCheckout({
+        ...checkout,
+        tab: "changes",
       });
     },
-    [composerState.workingDir, isCompactFormFactor, openInSidePane, serverId, workspaceId],
+    [isCompactFormFactor, openFileExplorerForCheckout, serverId, setExplorerTabForCheckout],
   );
 
   const {
@@ -584,7 +611,7 @@ export function WorkspaceDraftAgentTab({
       return;
     }
     autoSubmitKeyRef.current = submitKey;
-    replaceDraftText("");
+    setDraftText("");
     setDraftAttachments([]);
     const preparedAttempt =
       initialCreateAttempt?.clientMessageId === submission.clientMessageId
@@ -601,7 +628,7 @@ export function WorkspaceDraftAgentTab({
           cwd: submission.cwd,
         });
     void createPromise.catch(() => {
-      replaceDraftText(submission.text);
+      setDraftText(submission.text);
       setDraftAttachments(composerWorkspaceAttachment.userAttachmentsOnly(submission.attachments));
       autoSubmitKeyRef.current = null;
     });
@@ -614,7 +641,7 @@ export function WorkspaceDraftAgentTab({
     isReadyForPendingAutoSubmit,
     serverId,
     setDraftAttachments,
-    replaceDraftText,
+    setDraftText,
     workspaceId,
   ]);
 
@@ -693,11 +720,11 @@ export function WorkspaceDraftAgentTab({
           externalKeyboardShift
           isPaneFocused={isPaneFocused}
           onSubmitMessage={handleCreateFromInput}
+          onClientSlashCommand={handleDraftClientSlashCommand}
           isSubmitLoading={isSubmitting}
           blurOnSubmit={true}
           value={draftInput.text}
-          onChangeText={draftInput.editText}
-          textReplacement={draftInput.textReplacement}
+          onChangeText={draftInput.setText}
           attachments={draftInput.attachments}
           attachmentScopeKeys={attachmentScopeKeys}
           onOpenWorkspaceAttachment={handleOpenWorkspaceAttachment}
@@ -748,14 +775,8 @@ const styles = StyleSheet.create((theme) => ({
   importPillRow: {
     width: "100%",
     paddingHorizontal: theme.spacing[4],
-    paddingTop: {
-      xs: COMPOSER_PILL_CLEARANCE.compact,
-      md: COMPOSER_PILL_CLEARANCE.wide,
-    },
-    paddingBottom: {
-      xs: COMPOSER_PILL_CLEARANCE.compact,
-      md: COMPOSER_PILL_CLEARANCE.wide,
-    },
+    paddingTop: theme.spacing[3],
+    paddingBottom: theme.spacing[3],
     alignItems: "center",
   },
   importPillContent: {

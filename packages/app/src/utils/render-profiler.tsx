@@ -13,7 +13,6 @@ declare global {
   var __JAGENTDESK_RENDER_PROFILE__: RenderProfileSample[] | undefined;
   var __JAGENTDESK_RENDER_PROFILE_REASONS__: Record<string, Record<string, number>> | undefined;
   var __JAGENTDESK_RESET_RENDER_PROFILE__: (() => void) | undefined;
-  var __JAGENTDESK_RENDER_PROFILE_ENABLED__: boolean | undefined;
 }
 
 function getSearchParam(name: string): string | null {
@@ -28,10 +27,8 @@ function getSearchParam(name: string): string | null {
   return new URLSearchParams(search).get(name);
 }
 
-export function isRenderProfileEnabled(): boolean {
-  return (
-    globalThis.__JAGENTDESK_RENDER_PROFILE_ENABLED__ === true || getSearchParam("renderProfile") === "1"
-  );
+function isRenderProfileEnabled(): boolean {
+  return getSearchParam("renderProfile") === "1";
 }
 
 const onRender: ProfilerOnRenderCallback = (

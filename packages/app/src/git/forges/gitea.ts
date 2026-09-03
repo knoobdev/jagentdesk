@@ -7,8 +7,7 @@ import {
   type MergeCapability,
 } from "@/git/client-forge-module";
 import type { CheckoutPrMergeMethod } from "@jagentdesk/protocol/messages";
-import { CHECK_TRAIT_WARNING } from "@jagentdesk/protocol/check-traits";
-import { mapGiteaCommitState } from "@jagentdesk/protocol/gitea-status";
+import { mapCheckStatus, type CheckStatus } from "@/git/pull-request-panel/check-status";
 
 const GiteaMergeFactsSchema = z
   .object({
@@ -20,6 +19,18 @@ const GiteaMergeFactsSchema = z
   .passthrough();
 
 type GiteaMergeFacts = z.infer<typeof GiteaMergeFactsSchema>;
+
+// forgeSpecific.ciStatus carries Gitea's raw aggregate CI string. Server twin:
+// packages/server/src/services/gitea-service.ts (mapGiteaCommitStatus) — "warning"
+// and "error" are terminal, non-passing states, but the generic mapCheckStatus
+// would show them as pending, so interpret them here where the module owns Gitea
+// facts.
+function mapGiteaCiStatus(ciStatus: string): CheckStatus {
+  if (ciStatus === "warning" || ciStatus === "error") {
+    return "failure";
+  }
+  return mapCheckStatus(ciStatus);
+}
 
 const GITEA_MERGE_METHODS: CheckoutPrMergeMethod[] = ["merge", "squash", "rebase"];
 
@@ -51,8 +62,7 @@ export const giteaForgeLogic = {
           return {
             provider: forge,
             name: "CI",
-            status: mapGiteaCommitState(facts.ciStatus),
-            ...(facts.ciStatus === "warning" ? { traits: [CHECK_TRAIT_WARNING] } : {}),
+            status: mapGiteaCiStatus(facts.ciStatus),
             url: status.url,
           };
         },

@@ -3,32 +3,22 @@ import { useTranslation } from "react-i18next";
 import { Pressable, Text, View, ScrollView } from "react-native";
 import { useRouter } from "expo-router";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import {
-  QrCode,
-  Link2,
-  ClipboardPaste,
-  ExternalLink,
-  Settings,
-  Terminal,
-} from "lucide-react-native";
+import { QrCode, Link2, ClipboardPaste, Settings } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { HostProfile } from "@/types/host-connection";
 import { getHostRuntimeStore, isHostRuntimeConnected, useHosts } from "@/runtime/host-runtime";
 import { AddHostModal } from "./add-host-modal";
-import { AddRemoteSshHostModal } from "./add-remote-ssh-host-modal";
 import { PairLinkModal } from "./pair-link-modal";
 import { Button } from "@/components/ui/button";
 import { resolveAppVersion } from "@/utils/app-version";
-import { formatVersionWithPrefix } from "@/desktop/updates/desktop-updates";
+import { formatVersionWithPrefix } from "@/desktop/runtime";
 import { buildOpenProjectRoute } from "@/utils/host-routes";
 import { JAgentDeskLogo } from "@/components/icons/jagentdesk-logo";
-import { openExternalUrl } from "@/utils/open-external-url";
 import { isFdroidBuild } from "@/constants/build-profile";
-import { isWeb, isNative } from "@/constants/platform";
-import { isElectronRuntime } from "@/desktop/host";
+import { isWeb } from "@/constants/platform";
 
 interface WelcomeAction {
-  key: "scan-qr" | "direct-connection" | "remote-ssh" | "paste-pairing-link";
+  key: "scan-qr" | "direct-connection" | "paste-pairing-link";
   label: string;
   testID: string;
   primary: boolean;
@@ -58,13 +48,13 @@ const styles = StyleSheet.create((theme) => ({
   },
   title: {
     color: theme.colors.foreground,
-    fontSize: theme.fontSize.base,
+    fontSize: theme.fontSize.xl,
     fontWeight: theme.fontWeight.medium,
     textAlign: "center",
   },
   subtitle: {
     color: theme.colors.foregroundMuted,
-    fontSize: theme.fontSize.base,
+    fontSize: theme.fontSize.sm,
     textAlign: "center",
   },
   copyBlock: {
@@ -108,12 +98,12 @@ const styles = StyleSheet.create((theme) => ({
   },
   setupLinkText: {
     color: theme.colors.accent,
-    fontSize: theme.fontSize.base,
+    fontSize: theme.fontSize.sm,
     fontWeight: theme.fontWeight.medium,
   },
   versionLabel: {
     color: theme.colors.foregroundMuted,
-    fontSize: theme.fontSize.sm,
+    fontSize: theme.fontSize.xs,
     textAlign: "center",
     marginTop: theme.spacing[6],
   },
@@ -174,7 +164,6 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
   const appVersion = resolveAppVersion();
   const appVersionText = formatVersionWithPrefix(appVersion);
   const [isDirectOpen, setIsDirectOpen] = useState(false);
-  const [isRemoteSshOpen, setIsRemoteSshOpen] = useState(false);
   const [isPasteLinkOpen, setIsPasteLinkOpen] = useState(false);
   const hosts = useHosts();
   const anyOnlineServerId = useAnyHostOnline(hosts.map((h) => h.serverId));
@@ -188,18 +177,12 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
     router.replace(buildOpenProjectRoute());
   }, [router]);
 
-  const handleOpenJAgentDeskSite = useCallback(() => {
-    void openExternalUrl("https://jagentdesk.local");
-  }, []);
-
   const handleOpenSettings = useCallback(() => {
     router.push("/settings");
   }, [router]);
 
   const handleOpenDirect = useCallback(() => setIsDirectOpen(true), []);
   const handleCloseDirect = useCallback(() => setIsDirectOpen(false), []);
-  const handleOpenRemoteSsh = useCallback(() => setIsRemoteSshOpen(true), []);
-  const handleCloseRemoteSsh = useCallback(() => setIsRemoteSshOpen(false), []);
   const handleOpenPasteLink = useCallback(() => setIsPasteLinkOpen(true), []);
   const handleClosePasteLink = useCallback(() => setIsPasteLinkOpen(false), []);
   const handleScanQr = useCallback(() => {
@@ -261,17 +244,6 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
           },
         ];
 
-  if (isElectronRuntime()) {
-    actions.splice(1, 0, {
-      key: "remote-ssh",
-      label: t("pairing.connectionMethods.remoteSsh.title"),
-      testID: "welcome-remote-ssh",
-      primary: false,
-      icon: Terminal,
-      onPress: handleOpenRemoteSsh,
-    });
-  }
-
   const scrollContentContainerStyle = useMemo(
     () => [styles.container, { paddingBottom: theme.spacing[6] + insets.bottom }],
     [theme.spacing, insets.bottom],
@@ -290,12 +262,6 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
           <View style={styles.copyBlock}>
             <Text style={styles.title}>{t("onboarding.title")}</Text>
             <Text style={styles.subtitle}>{t("onboarding.subtitle")}</Text>
-            {isNative ? (
-              <Pressable style={styles.setupLink} onPress={handleOpenJAgentDeskSite}>
-                <Text style={styles.setupLinkText}>jagentdesk.local</Text>
-                <ExternalLink size={14} color={theme.colors.accent} />
-              </Pressable>
-            ) : null}
           </View>
 
           <View style={styles.actions}>
@@ -320,12 +286,6 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
         <AddHostModal
           visible={isDirectOpen}
           onClose={handleCloseDirect}
-          onSaved={handleHostSaved}
-        />
-
-        <AddRemoteSshHostModal
-          visible={isRemoteSshOpen}
-          onClose={handleCloseRemoteSsh}
           onSaved={handleHostSaved}
         />
 

@@ -10,4 +10,3 @@ export {
   type PluginResourceComposerAttachment,
 } from "./attachments/model";
 export { PluginResourceAttachmentPill } from "./attachments/pill";
-export { PluginComposerPills, useHasPluginComposerPills } from "./composer-pills";

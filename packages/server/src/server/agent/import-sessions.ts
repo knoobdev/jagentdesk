@@ -18,7 +18,10 @@ import type {
   ImportAgentRequestMessageSchema,
   RecentProviderSessionDescriptorPayload,
 } from "@jagentdesk/protocol/messages";
-import { getParentAgentIdFromLabels, PARENT_AGENT_ID_LABEL } from "@jagentdesk/protocol/agent-labels";
+import {
+  getParentAgentIdFromLabels,
+  PARENT_AGENT_ID_LABEL,
+} from "@jagentdesk/protocol/agent-labels";
 import { createRealpathAwarePathMatcher } from "../../utils/path.js";
 
 type ImportAgentRequestMessage = z.infer<typeof ImportAgentRequestMessageSchema>;
@@ -191,8 +194,9 @@ async function importProviderSessionNow(
 ): Promise<ImportedProviderSession> {
   const { provider, providerHandleId, labels } = input.request;
 
-  const matchingRecords = (await input.agentStorage.list()).filter((record) =>
-    recordMatchesProviderHandle(record, { provider, providerHandleId }),
+  const matchingRecords = await input.agentStorage.listByProviderSession(
+    provider,
+    providerHandleId,
   );
   const activeRecord = matchingRecords.find((record) => !record.archivedAt);
   if (activeRecord) {
@@ -272,16 +276,18 @@ async function serializeProviderSessionImport<T>(
 async function resolveProviderSessionImportMutationKey(
   input: ImportProviderSessionInput,
 ): Promise<string> {
-  const identity = {
-    provider: input.request.provider,
-    providerHandleId: input.request.providerHandleId,
-  };
-  const matchingRecord = (await input.agentStorage.list()).find((record) =>
-    recordMatchesProviderHandle(record, identity),
-  );
+  const matchingRecord = (
+    await input.agentStorage.listByProviderSession(
+      input.request.provider,
+      input.request.providerHandleId,
+    )
+  ).at(0);
   return matchingRecord
     ? `agent\0${matchingRecord.id}`
-    : `handle\0${toProviderSessionHandleKey(identity.provider, identity.providerHandleId)}`;
+    : `handle\0${toProviderSessionHandleKey(
+        input.request.provider,
+        input.request.providerHandleId,
+      )}`;
 }
 
 async function rollbackArchivedImport(
@@ -309,17 +315,6 @@ async function rollbackArchivedImport(
       "Failed to restore archived agent record after import failure",
     );
   }
-}
-
-function recordMatchesProviderHandle(
-  record: StoredAgentRecord,
-  identity: { provider: string; providerHandleId: string },
-): boolean {
-  return (
-    record.persistence?.provider === identity.provider &&
-    (record.persistence.sessionId === identity.providerHandleId ||
-      record.persistence.nativeHandle === identity.providerHandleId)
-  );
 }
 
 function parseRecentProviderSessionsSince(since: string | undefined): number | null {

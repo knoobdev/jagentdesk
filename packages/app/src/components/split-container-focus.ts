@@ -11,23 +11,6 @@ export function resolveSplitContainerRoot(input: {
   return { root: { kind: "pane", pane: focusedPane }, usesFallbackStrip: false };
 }
 
-/** Whether a workspace pane has another visible pane it can be maximized over. */
-export function hasMultipleVisiblePanes(node: SplitNode): boolean {
-  let visiblePaneCount = 0;
-  const visit = (current: SplitNode): void => {
-    if (current.kind === "pane") {
-      if (current.pane.hidden !== true) visiblePaneCount += 1;
-      return;
-    }
-    for (const child of current.group.children) {
-      visit(child);
-      if (visiblePaneCount > 1) return;
-    }
-  };
-  visit(node);
-  return visiblePaneCount > 1;
-}
-
 function findPane(node: SplitNode, paneId: string): SplitPane | null {
   if (node.kind === "pane") return node.pane.id === paneId ? node.pane : null;
   for (const child of node.group.children) {

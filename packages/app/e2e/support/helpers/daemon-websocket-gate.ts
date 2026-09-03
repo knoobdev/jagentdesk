@@ -236,9 +236,6 @@ export async function installDaemonWebSocketGate(page: Page) {
   const suppressedAgentStreamEventTypes = new Set<string>();
   const suppressedAgentStreamItemTypes = new Set<string>();
   const activeSockets = new Set<WebSocketRoute>();
-  let blockedConnectionCount = 0;
-  let blockedConnectionCountAtDrop = 0;
-  const blockedConnectionWaiters = new Set<() => void>();
   let latestServer: WebSocketRoute | null = null;
   const directoryStarts: DirectoryRequestStartCounts = {
     subscribed: { agents: 0, workspaces: 0 },
@@ -366,9 +363,6 @@ export async function installDaemonWebSocketGate(page: Page) {
 
   await page.routeWebSocket(daemonWsRoutePattern(), (ws) => {
     if (!acceptingConnections) {
-      blockedConnectionCount += 1;
-      for (const resolve of blockedConnectionWaiters) resolve();
-      blockedConnectionWaiters.clear();
       void ws.close({ code: 1008, reason: "Blocked by reconnect test." });
       return;
     }
@@ -489,7 +483,6 @@ export async function installDaemonWebSocketGate(page: Page) {
       forward?.();
     },
     async drop(): Promise<void> {
-      blockedConnectionCountAtDrop = blockedConnectionCount;
       acceptingConnections = false;
       const sockets = Array.from(activeSockets);
       activeSockets.clear();
@@ -498,10 +491,6 @@ export async function installDaemonWebSocketGate(page: Page) {
           ws.close({ code: 1008, reason: "Dropped by reconnect test." }).catch(() => undefined),
         ),
       );
-    },
-    async waitForBlockedConnection(): Promise<void> {
-      if (blockedConnectionCount > blockedConnectionCountAtDrop) return;
-      await new Promise<void>((resolve) => blockedConnectionWaiters.add(resolve));
     },
     restore(): void {
       acceptingConnections = true;

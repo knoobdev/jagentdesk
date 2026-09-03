@@ -49,6 +49,9 @@ import {
   type ListImportableSessionsOptions,
 } from "./agent-sdk-types.js";
 import { buildArchivedAgentRecord, type ArchivedStoredAgentRecord } from "./agent-archive.js";
+import { buildAgentForkContextAttachment } from "./activity-curator.js";
+import type { AgentAttachment } from "@jagentdesk/protocol/messages";
+import type { AgentUsageTotals } from "@jagentdesk/protocol/agent-types";
 import type { StoredAgentRecord, AgentStorage } from "./agent-storage.js";
 import type { AgentOwner } from "./agent-owner.js";
 import {
@@ -73,7 +76,10 @@ import {
 } from "./agent-run-state.js";
 import { invokeRewindCapability, type RewindMode } from "./rewind/rewind.js";
 import { isSystemInjectedEnvelope } from "./agent-prompt.js";
-import { stripInternalJAgentDeskMcpServer, withRuntimeJAgentDeskMcpServer } from "./runtime-mcp-config.js";
+import {
+  stripInternalJAgentDeskMcpServer,
+  withRuntimeJAgentDeskMcpServer,
+} from "./runtime-mcp-config.js";
 import { resolveCreateAgentTitles } from "./create-agent-title.js";
 import type { JAgentDeskToolCatalogFactory } from "./tools/types.js";
 import {
@@ -169,6 +175,7 @@ function buildStoredAgentConfig(record: StoredAgentRecord): AgentSessionConfig {
     config.providerOptions = record.config.providerOptions;
   }
   if (record.config.toolPolicy != null) config.toolPolicy = record.config.toolPolicy;
+  if (record.config.extra != null) config.extra = record.config.extra;
   if (record.config.systemPrompt != null) {
     config.systemPrompt = record.config.systemPrompt;
   }
@@ -276,6 +283,13 @@ export interface AgentManagerOptions {
   idFactory?: () => string;
   registry?: AgentStorage;
   onAgentAttention?: AgentAttentionCallback;
+  /** Fired once per billed turn (completed or stopped) so a usage time-series can be recorded. */
+  onUsageBilled?: (input: {
+    timestampMs: number;
+    provider: string;
+    model: string;
+    usage: AgentUsage;
+  }) => void;
   onWorkspaceStateMayHaveChanged?: (params: { cwd: string }) => void;
   durableTimelineStore?: AgentTimelineStore;
   terminalManager?: TerminalManager | null;
@@ -380,6 +394,19 @@ interface ManagedAgentBase {
   activeTurnId: string | null;
   activeTurnStartedAt: Date | null;
   lastUsage?: AgentUsage;
+  /**
+   * Cumulative usage accumulated across every completed turn. Persisted, unlike
+   * {@link lastUsage} (a per-turn snapshot). Feeds the Usage & Cost insights.
+   */
+  usageTotals?: AgentUsageTotals;
+  /**
+   * Usage reported by `usage_updated` events during the CURRENT turn. Reset when
+   * a turn starts. Used to bill into {@link usageTotals} when a turn ends without
+   * a `turn_completed` event (i.e. it was interrupted/stopped -> `turn_canceled`,
+   * or errored -> `turn_failed`), so a stopped turn's tokens are not lost. Never
+   * persisted; purely per-turn bookkeeping.
+   */
+  currentTurnUsage?: AgentUsage;
   lastError?: string;
   attention: AttentionState;
   foregroundTurnWaiters: Set<ForegroundTurnWaiter>;
@@ -701,6 +728,21 @@ export class AgentManager {
   private logger: Logger;
   private readonly rescueTimeouts: Required<AgentManagerRescueTimeouts>;
   private readonly beforeSteerUnavailableFallback?: AgentManagerOptions["beforeSteerUnavailableFallback"];
+  private readonly onUsageBilled?: AgentManagerOptions["onUsageBilled"];
+  /**
+   * Chat-history snapshot staged by a mid-conversation provider switch, keyed by
+   * agentId. Consumed (and cleared) when the next user turn seeds the new
+   * provider with the prior conversation.
+   */
+  private readonly pendingProviderSwitchSeed = new Map<string, AgentAttachment>();
+  /**
+   * In-flight host tool permission requests, keyed by requestId. Resolved when
+   * the client answers via {@link respondToPermission}.
+   */
+  private readonly hostToolPermissions = new Map<
+    string,
+    (response: AgentPermissionResponse) => void
+  >();
   private acceptingAgentRegistrations = true;
 
   constructor(options: AgentManagerOptions) {
@@ -708,6 +750,7 @@ export class AgentManager {
     this.registry = options?.registry;
     this.durableTimelineStore = options?.durableTimelineStore;
     this.onAgentAttention = options?.onAgentAttention;
+    this.onUsageBilled = options?.onUsageBilled;
     this.onWorkspaceStateMayHaveChanged = options?.onWorkspaceStateMayHaveChanged;
     this.mcpBaseUrl = options?.mcpBaseUrl ?? null;
     this.mcpAuthToken = options?.mcpAuthToken ?? null;
@@ -1358,6 +1401,7 @@ export class AgentManager {
     const rehydrateFromDisk = options?.rehydrateFromDisk ?? false;
     const preservedHistoryPrimed = existing.historyPrimed;
     const preservedLastUsage = existing.lastUsage;
+    const preservedUsageTotals = existing.usageTotals;
     const preservedLastError = existing.lastError;
     const preservedAttention = existing.attention;
     const handle = existing.persistence;
@@ -1409,6 +1453,7 @@ export class AgentManager {
         lastUserMessageAt: existing.lastUserMessageAt,
         historyPrimed: rehydrateFromDisk ? false : preservedHistoryPrimed,
         lastUsage: preservedLastUsage,
+        usageTotals: preservedUsageTotals,
         lastError: preservedLastError,
         attention: preservedAttention,
       });
@@ -1691,6 +1736,7 @@ export class AgentManager {
         historyPrimed: true,
         lastUserMessageAt: record.lastUserMessageAt ? new Date(record.lastUserMessageAt) : null,
         lastUsage: undefined,
+        usageTotals: record.usageTotals,
         lastError: record.lastError ?? undefined,
         attention: { requiresAttention: false },
         internal: record.internal,
@@ -1713,6 +1759,119 @@ export class AgentManager {
     this.touchUpdatedAt(agent);
     this.emitState(agent);
     return notice;
+  }
+
+  /**
+   * Switch a live agent to a DIFFERENT provider mid-conversation while keeping
+   * its history. A native provider session is not portable, so we snapshot the
+   * timeline as a provider-agnostic chat-history attachment, stand up a fresh
+   * session on the new provider (create, not resume — it has no handle), keep
+   * the existing timeline, and stage the snapshot so the NEXT user turn seeds
+   * the new provider with the prior conversation. A same-provider call is just a
+   * model change.
+   */
+  async switchAgentProvider(
+    agentId: string,
+    provider: AgentProvider,
+    modelId: string | null,
+  ): Promise<void> {
+    if (this.requireSessionAgent(agentId).provider === provider) {
+      await this.setAgentModel(agentId, modelId);
+      return;
+    }
+    await this.trackAgentRegistrationOperation(
+      this.switchAgentProviderInternal(agentId, provider, modelId),
+    );
+  }
+
+  private async switchAgentProviderInternal(
+    agentId: string,
+    provider: AgentProvider,
+    modelId: string | null,
+  ): Promise<void> {
+    this.assertAcceptingAgentRegistrations();
+    let existing = this.requireSessionAgent(agentId);
+    if (this.hasInFlightRun(agentId)) {
+      await this.cancelAgentRunBefore(agentId, "reload");
+      existing = this.requireSessionAgent(agentId);
+    }
+
+    // Snapshot the conversation so the new provider opens with full context.
+    const timeline = this.fetchTimeline(agentId, { direction: "tail", limit: 0 });
+    const seed = buildAgentForkContextAttachment({
+      rows: timeline.rows,
+      agentTitle: existing.config.title ?? null,
+      cwd: existing.config.cwd,
+    });
+
+    // Provider-specific selections (mode/thinking/features/extra) do not map
+    // across providers — reset them and let the new provider pick its defaults.
+    const normalizedModelId =
+      typeof modelId === "string" && modelId.trim().length > 0 ? modelId : undefined;
+    const newConfig = {
+      ...existing.config,
+      provider,
+      model: normalizedModelId,
+      modeId: undefined,
+      thinkingOptionId: undefined,
+      featureValues: undefined,
+      extra: undefined,
+    } as AgentSessionConfig;
+
+    const client = this.requireClient(provider);
+    const { storedConfig, launchConfig } = await this.prepareSessionConfig(newConfig, agentId);
+    const launchContext = await this.buildLaunchContext(agentId, client, storedConfig.cwd);
+    const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
+
+    // The new provider has no native session handle → create a fresh session.
+    const session = await client.createSession(providerLaunchConfig, launchContext);
+    await this.requireExternalMcpSupport(session, storedConfig);
+
+    let handedToRegistration = false;
+    try {
+      this.assertAcceptingAgentRegistrations();
+      const closedExisting = this.prepareAgentForClosure(existing, "provider switched");
+      try {
+        await this.persistSnapshot(closedExisting);
+      } finally {
+        await this.closeReloadedSession(existing.session, agentId);
+      }
+
+      handedToRegistration = true;
+      const registered = await this.registerSession(session, storedConfig, agentId, {
+        labels: existing.labels,
+        workspaceId: existing.workspaceId,
+        owner: existing.owner,
+        createdAt: existing.createdAt,
+        updatedAt: existing.updatedAt,
+        lastUserMessageAt: existing.lastUserMessageAt,
+        // Keep the existing timeline; the new provider has no history to stream.
+        historyPrimed: true,
+        lastUsage: existing.lastUsage,
+        usageTotals: existing.usageTotals,
+        lastError: existing.lastError,
+        attention: existing.attention,
+      });
+      // The next user turn carries the prior conversation to the new provider.
+      this.pendingProviderSwitchSeed.set(agentId, seed.attachment);
+      this.touchUpdatedAt(registered);
+      this.emitState(registered);
+    } finally {
+      if (!handedToRegistration) {
+        await this.closeUnregisteredSession(session);
+      }
+    }
+  }
+
+  /**
+   * Take (and clear) any chat-history seed staged by a mid-conversation provider
+   * switch. Returned as an attachment to prepend to the next user turn's prompt.
+   */
+  consumeProviderSwitchSeed(agentId: string): AgentAttachment | null {
+    const seed = this.pendingProviderSwitchSeed.get(agentId);
+    if (!seed) return null;
+    this.pendingProviderSwitchSeed.delete(agentId);
+    return seed;
   }
 
   async setAgentModel(agentId: string, modelId: string | null): Promise<void> {
@@ -2688,6 +2847,23 @@ export class AgentManager {
     response: AgentPermissionResponse,
   ): Promise<AgentPermissionResult | void> {
     const agent = this.requireAgent(agentId);
+
+    // Intercept host tool permissions before forwarding to agent session.
+    const hostResolve = this.hostToolPermissions.get(requestId);
+    if (hostResolve) {
+      this.hostToolPermissions.delete(requestId);
+      agent.pendingPermissions.delete(requestId);
+      this.dispatchStream(agentId, {
+        type: "permission_resolved",
+        provider: agent.session.provider,
+        requestId,
+        resolution: response,
+      });
+      this.emitState(agent);
+      hostResolve(response);
+      return;
+    }
+
     agent.inFlightPermissionResponses.add(requestId);
 
     try {
@@ -2715,6 +2891,46 @@ export class AgentManager {
       agent.inFlightPermissionResponses.delete(requestId);
       agent.bufferedPermissionResolutions.delete(requestId);
     }
+  }
+
+  async requestHostToolPermission(
+    agentId: string,
+    request: {
+      name: string;
+      kind: string;
+      title?: string;
+      description?: string;
+      input?: Record<string, unknown>;
+    },
+  ): Promise<AgentPermissionResponse> {
+    const agent = this.requireAgent(agentId);
+    const id = randomUUID();
+    const permissionRequest: AgentPermissionRequest = {
+      id,
+      provider: agent.session.provider,
+      name: request.name,
+      kind: "tool",
+      title: request.title,
+      description: request.description,
+      input: request.input as Record<string, unknown>,
+    };
+
+    const promise = new Promise<AgentPermissionResponse>((resolvePermission) => {
+      this.hostToolPermissions.set(id, resolvePermission);
+    });
+
+    agent.pendingPermissions.set(id, permissionRequest);
+    if (!agent.internal) {
+      this.broadcastAgentAttention(agent, "permission");
+    }
+    this.dispatchStream(agentId, {
+      type: "permission_requested",
+      provider: agent.session.provider,
+      request: permissionRequest,
+    });
+    this.emitState(agent);
+
+    return promise;
   }
 
   async cancelAgentRun(agentId: string): Promise<AgentRunCancellationResult> {
@@ -3152,6 +3368,7 @@ export class AgentManager {
       persistence?: AgentPersistenceHandle;
       historyPrimed?: boolean;
       lastUsage?: AgentUsage;
+      usageTotals?: AgentUsageTotals;
       lastError?: string;
       attention?: AttentionState;
       initialTitle?: string | null;
@@ -3304,6 +3521,7 @@ export class AgentManager {
           labels?: Record<string, string>;
           historyPrimed?: boolean;
           lastUsage?: AgentUsage;
+          usageTotals?: AgentUsageTotals;
           lastError?: string;
           attention?: AttentionState;
           persistence?: AgentPersistenceHandle;
@@ -3345,6 +3563,7 @@ export class AgentManager {
       historyPrimed: options?.historyPrimed ?? durableTimelineHasRows,
       lastUserMessageAt: options?.lastUserMessageAt ?? null,
       lastUsage: options?.lastUsage,
+      usageTotals: options?.usageTotals,
       lastError: options?.lastError,
       attention: resolveInitialAttention(options?.attention),
       internal: config.internal ?? false,
@@ -3953,6 +4172,9 @@ export class AgentManager {
         return undefined;
       case "usage_updated":
         agent.lastUsage = event.usage;
+        // Remember this turn's running usage so it can be billed even if the
+        // turn ends via cancel/fail (no turn_completed). Reset on turn start.
+        agent.currentTurnUsage = event.usage;
         this.emitState(agent);
         return undefined;
       case "mode_changed":
@@ -4087,6 +4309,37 @@ export class AgentManager {
     flags.shouldNotifyWaiters = true;
   }
 
+  /**
+   * Add one turn's usage into the agent's cumulative {@link usageTotals} ledger.
+   * Called on turn_completed (authoritative final usage) and on
+   * turn_canceled/turn_failed (the partial usage streamed before the stop), so a
+   * turn that the user interrupts still counts its consumed tokens.
+   */
+  private accumulateUsageTotals(agent: ManagedAgent, usage: AgentUsage): void {
+    const prev = agent.usageTotals ?? {
+      inputTokens: 0,
+      cachedInputTokens: 0,
+      outputTokens: 0,
+      totalCostUsd: 0,
+      turns: 0,
+    };
+    agent.usageTotals = {
+      inputTokens: prev.inputTokens + (usage.inputTokens ?? 0),
+      cachedInputTokens: prev.cachedInputTokens + (usage.cachedInputTokens ?? 0),
+      outputTokens: prev.outputTokens + (usage.outputTokens ?? 0),
+      totalCostUsd: prev.totalCostUsd + (usage.totalCostUsd ?? 0),
+      turns: prev.turns + 1,
+    };
+    // Record the same billed turn into the daemon's usage time-series so a
+    // day/month/year dashboard can be charted (usageTotals carry no time axis).
+    this.onUsageBilled?.({
+      timestampMs: Date.now(),
+      provider: agent.provider,
+      model: agent.config?.model ?? agent.runtimeInfo?.model ?? agent.provider,
+      usage,
+    });
+  }
+
   private onStreamTurnCompleted(params: {
     agent: ActiveManagedAgent;
     event: Extract<AgentStreamEvent, { type: "turn_completed" }>;
@@ -4109,7 +4362,12 @@ export class AgentManager {
     if (terminalDisposition === "stale") return;
     if (event.usage) {
       agent.lastUsage = { ...agent.lastUsage, ...event.usage };
+      this.accumulateUsageTotals(agent, event.usage);
     }
+    // The turn reached a clean end: its usage (if any) is now billed via
+    // `event.usage`, so drop the per-turn tracker to avoid re-billing it if a
+    // stray canceled/failed event arrives for the same turn.
+    agent.currentTurnUsage = undefined;
     // If no usage on turn_completed, keep lastUsage as-is so context window
     // data accumulated during streaming isn't lost when the provider omits
     // it from the completion event.
@@ -4151,6 +4409,13 @@ export class AgentManager {
       "handleStreamEvent: turn_failed",
     );
     if (terminalDisposition === "stale") return;
+    // A failed turn may still have consumed tokens before erroring; bill the
+    // usage streamed so far so it isn't lost from the cumulative ledger.
+    if (agent.currentTurnUsage) {
+      this.accumulateUsageTotals(agent, agent.currentTurnUsage);
+      agent.currentTurnUsage = undefined;
+      this.emitState(agent);
+    }
     if (!isForegroundEvent && !agent.activeForegroundTurnId) {
       agent.lifecycle = "error";
     }
@@ -4193,6 +4458,13 @@ export class AgentManager {
       "agent.manager.turn.canceled",
     );
     if (terminalDisposition === "stale") return;
+    // The user stopped this turn mid-flight. It still consumed tokens, so bill
+    // the usage streamed so far into the cumulative ledger + persist it.
+    if (agent.currentTurnUsage) {
+      this.accumulateUsageTotals(agent, agent.currentTurnUsage);
+      agent.currentTurnUsage = undefined;
+      this.emitState(agent);
+    }
     if (!isForegroundEvent && !agent.activeForegroundTurnId && !agent.pendingReplacement) {
       agent.lifecycle = "idle";
     }
@@ -4210,6 +4482,9 @@ export class AgentManager {
     flags: StreamEventFlags;
   }): void {
     const { agent, eventTurnId, isForegroundEvent, flags } = params;
+    // A fresh turn begins: clear last turn's per-turn usage tracker so a later
+    // cancel/fail bills only THIS turn's usage, never a prior turn's.
+    agent.currentTurnUsage = undefined;
     this.logger.trace(
       {
         agentId: agent.id,
@@ -4800,7 +5075,9 @@ export class AgentManager {
     agentId: string,
     env?: Record<string, string>,
   ): Promise<PreparedSessionConfig> {
-    const storedConfig = await this.normalizeConfig(stripInternalJAgentDeskMcpServer(config), { env });
+    const storedConfig = await this.normalizeConfig(stripInternalJAgentDeskMcpServer(config), {
+      env,
+    });
     const launchConfig = this.applyDaemonAppendSystemPrompt(
       withRuntimeJAgentDeskMcpServer({
         config: storedConfig,
@@ -4853,7 +5130,9 @@ export class AgentManager {
     launchConfig: AgentSessionConfig,
     launchContext: AgentLaunchContext,
   ): AgentSessionConfig {
-    return launchContext.jagentdeskTools ? stripInternalJAgentDeskMcpServer(launchConfig) : launchConfig;
+    return launchContext.jagentdeskTools
+      ? stripInternalJAgentDeskMcpServer(launchConfig)
+      : launchConfig;
   }
 
   private async requireAvailableClient(options: { provider: AgentProvider }): Promise<AgentClient> {

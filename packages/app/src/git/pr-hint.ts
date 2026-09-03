@@ -1,5 +1,4 @@
 import { normalizeForge, type Forge } from "@/git/forge";
-import type { PresentableCheck } from "@/git/check-presentation";
 
 export interface PrHint {
   url: string;
@@ -7,21 +6,16 @@ export interface PrHint {
   state: "open" | "merged" | "closed";
   /** Forge backing this change request, so badges render the right brand mark. */
   forge: Forge;
-  checks?: PrHintCheck[];
+  checks?: Array<{ name: string; status: string; url: string | null }>;
   checksStatus?: "none" | "pending" | "success" | "failure";
   reviewDecision?: "approved" | "changes_requested" | "pending" | null;
-}
-
-export interface PrHintCheck extends PresentableCheck {
-  name: string;
-  url: string | null;
 }
 
 interface PrStatusLike {
   url: string;
   state: string;
   isMerged: boolean;
-  checks?: PrHintCheck[];
+  checks?: Array<{ name: string; status: string; url: string | null }>;
   checksStatus?: string;
   reviewDecision?: string | null;
   forge?: string;

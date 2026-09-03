@@ -10,7 +10,6 @@ import {
   fillComposerDraft,
   submitMessage,
 } from "../support/helpers/composer";
-import { readReplicaCache, writeReplicaCache } from "../support/helpers/replica-cache-storage";
 
 // UI plumbing contract against the dev mock provider. Real-provider behavior is tested in `daemon-e2e/*-rewind.real.e2e.test.ts`.
 
@@ -26,50 +25,41 @@ async function expectUserMessageVisible(page: Page, text: string): Promise<void>
   await expect(userMessage(page, text)).toBeVisible();
 }
 
-async function rewriteCachedMessageAsLegacyRow(
-  page: Page,
-  input: { prompt: string; agentId: string; workspaceId: string },
-): Promise<void> {
+async function rewriteCachedMessageAsLegacyRow(page: Page, prompt: string): Promise<void> {
   await expect
-    .poll(async () => {
-      const cache = await readReplicaCache(page);
-      if (!cache) return false;
-      for (const host of cache.hosts ?? []) {
-        const hasAgent = host.agents.some(
-          (agent) =>
-            agent.snapshot &&
-            typeof agent.snapshot === "object" &&
-            Reflect.get(agent.snapshot, "id") === input.agentId,
-        );
-        const hasWorkspace = host.workspaces.some(
-          (workspace) => workspace.id === input.workspaceId,
-        );
-        if (!hasAgent || !hasWorkspace) continue;
-        for (const timeline of host.timelines) {
-          for (const item of timeline.items ?? []) {
-            if (
-              timeline.agentId === input.agentId &&
-              item.kind === "user_message" &&
-              item.text === input.prompt &&
-              item.messageId
-            ) {
+    .poll(() =>
+      page.evaluate((messageText) => {
+        const raw = localStorage.getItem("@jagentdesk:replica-cache");
+        if (!raw) return false;
+        const cache = JSON.parse(raw) as {
+          hosts?: Array<{ timeline?: { items?: Array<Record<string, unknown>> } | null }>;
+        };
+        for (const host of cache.hosts ?? []) {
+          for (const item of host.timeline?.items ?? []) {
+            if (item.kind === "user_message" && item.text === messageText && item.messageId) {
               return true;
             }
           }
         }
-      }
-      return false;
-    })
+        return false;
+      }, prompt),
+    )
     .toBe(true);
 
-  const cache = await readReplicaCache(page);
-  if (!cache) throw new Error("Replica cache was not persisted");
-  const cachedMessage = cache.hosts
-    ?.flatMap((host) => host.timelines.flatMap((timeline) => timeline.items ?? []))
-    .find((item) => item.kind === "user_message" && item.text === input.prompt);
-  if (!cachedMessage) throw new Error("Cached user message was not found");
-  delete cachedMessage.messageId;
-  await writeReplicaCache(page, cache);
+  await page.evaluate((messageText) => {
+    const key = "@jagentdesk:replica-cache";
+    const raw = localStorage.getItem(key);
+    if (!raw) throw new Error("Replica cache was not persisted");
+    const cache = JSON.parse(raw) as {
+      hosts?: Array<{ timeline?: { items?: Array<Record<string, unknown>> } | null }>;
+    };
+    const cachedMessage = cache.hosts
+      ?.flatMap((host) => host.timeline?.items ?? [])
+      .find((item) => item.kind === "user_message" && item.text === messageText);
+    if (!cachedMessage) throw new Error("Cached user message was not found");
+    delete cachedMessage.messageId;
+    localStorage.setItem(key, JSON.stringify(cache));
+  }, prompt);
 }
 
 async function waitForCurrentSubmissionExcludedFromCache(
@@ -77,34 +67,46 @@ async function waitForCurrentSubmissionExcludedFromCache(
   prompt: string,
 ): Promise<void> {
   await expect
-    .poll(async () => {
-      const cache = await readReplicaCache(page);
-      if (!cache) return false;
-      return !cache.hosts
-        ?.flatMap((host) => host.timelines.flatMap((timeline) => timeline.items ?? []))
-        .some(
-          (item) =>
-            item.kind === "user_message" &&
-            item.text === prompt &&
-            typeof item.clientMessageId === "string" &&
-            item.messageId === undefined,
-        );
-    })
+    .poll(() =>
+      page.evaluate((messageText) => {
+        const raw = localStorage.getItem("@jagentdesk:replica-cache");
+        if (!raw) return false;
+        const cache = JSON.parse(raw) as {
+          hosts?: Array<{ timeline?: { items?: Array<Record<string, unknown>> } | null }>;
+        };
+        return !cache.hosts
+          ?.flatMap((host) => host.timeline?.items ?? [])
+          .some(
+            (item) =>
+              item.kind === "user_message" &&
+              item.text === messageText &&
+              typeof item.clientMessageId === "string" &&
+              item.messageId === undefined,
+          );
+      }, prompt),
+    )
     .toBe(true);
 }
 
 async function waitForCachedMessageWithoutProviderId(page: Page, prompt: string): Promise<void> {
   await expect
-    .poll(async () => {
-      const cache = await readReplicaCache(page);
-      if (!cache) return false;
-      return cache.hosts
-        ?.flatMap((host) => host.timelines.flatMap((timeline) => timeline.items ?? []))
-        .some(
-          (item) =>
-            item.kind === "user_message" && item.text === prompt && item.messageId === undefined,
-        );
-    })
+    .poll(() =>
+      page.evaluate((messageText) => {
+        const raw = localStorage.getItem("@jagentdesk:replica-cache");
+        if (!raw) return false;
+        const cache = JSON.parse(raw) as {
+          hosts?: Array<{ timeline?: { items?: Array<Record<string, unknown>> } | null }>;
+        };
+        return cache.hosts
+          ?.flatMap((host) => host.timeline?.items ?? [])
+          .some(
+            (item) =>
+              item.kind === "user_message" &&
+              item.text === messageText &&
+              item.messageId === undefined,
+          );
+      }, prompt),
+    )
     .toBe(true);
 }
 
@@ -146,24 +148,24 @@ test.describe("Rewind sheet", () => {
       title: "Rewind cache upgrade e2e",
       initialPrompt: prompt,
     });
+    let heldTimelineRequest = false;
 
     try {
       await openAgentRoute(page, session);
       await expectUserMessageVisible(page, prompt);
-      await gate.drop();
-      await rewriteCachedMessageAsLegacyRow(page, {
-        prompt,
-        agentId: session.agentId,
-        workspaceId: session.workspaceId,
-      });
+      await rewriteCachedMessageAsLegacyRow(page, prompt);
+      gate.holdNextClientRequest("fetch_agent_timeline_request");
       await page.reload();
-      await waitForCachedMessageWithoutProviderId(page, prompt);
+      await gate.waitForHeldClientRequest();
+      heldTimelineRequest = true;
 
       const restoredMessage = userMessage(page, prompt);
       await expect(restoredMessage).toBeVisible();
       await restoredMessage.hover();
       await expect(restoredMessage.getByTestId("rewind-menu-trigger")).toHaveCount(0);
+      await waitForCachedMessageWithoutProviderId(page, prompt);
     } finally {
+      if (heldTimelineRequest) gate.releaseHeldClientRequest();
       gate.restore();
       await session.cleanup();
     }
@@ -177,7 +179,6 @@ test.describe("Rewind sheet", () => {
       repoPrefix: "rewind-e2e-",
       title: "Rewind e2e",
       initialPrompt: firstPrompt,
-      model: "ten-second-stream",
     });
 
     try {

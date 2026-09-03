@@ -24,6 +24,7 @@ import type {
   WorkspaceCreateRequest,
 } from "@jagentdesk/protocol/messages";
 import { DaemonClient } from "./daemon-client.js";
+export { DaemonClient };
 import type {
   FetchAgentsEntry,
   FetchAgentsOptions,
@@ -112,7 +113,10 @@ export interface JAgentDeskWorkspaceOpenOptions {
   requestId?: string;
 }
 
-export type JAgentDeskWorkspaceCreateOptions = Omit<WorkspaceCreateRequest, "type" | "requestId"> & {
+export type JAgentDeskWorkspaceCreateOptions = Omit<
+  WorkspaceCreateRequest,
+  "type" | "requestId"
+> & {
   requestId?: string;
 };
 
@@ -244,9 +248,15 @@ export interface JAgentDeskAgentCommandsOptions {
 
 export type JAgentDeskAgentCommandsResult = ListCommandsResponse["payload"];
 
-export type JAgentDeskAgentUpdate = Extract<SessionOutboundMessage, { type: "agent_update" }>["payload"];
+export type JAgentDeskAgentUpdate = Extract<
+  SessionOutboundMessage,
+  { type: "agent_update" }
+>["payload"];
 
-export type JAgentDeskAgentStream = Extract<SessionOutboundMessage, { type: "agent_stream" }>["payload"];
+export type JAgentDeskAgentStream = Extract<
+  SessionOutboundMessage,
+  { type: "agent_stream" }
+>["payload"];
 
 export type JAgentDeskAgentUpdateHandler = (update: JAgentDeskAgentUpdate) => void;
 
@@ -511,7 +521,9 @@ export function createJAgentDeskApi(daemonClient: DaemonClient): JAgentDeskApi {
   };
 }
 
-type WorkspaceHandleFactory = (workspace: string | JAgentDeskWorkspace) => JAgentDeskWorkspaceHandle;
+type WorkspaceHandleFactory = (
+  workspace: string | JAgentDeskWorkspace,
+) => JAgentDeskWorkspaceHandle;
 type AgentHandleFactory = (agent: string | JAgentDeskAgent) => JAgentDeskAgentHandle;
 type CreateAgent = (
   options: JAgentDeskAgentCreateOptions,

@@ -1,20 +1,22 @@
-import { usePathname } from "expo-router";
+import { router, usePathname } from "expo-router";
 import { useMemo } from "react";
 import { useCommandCenterActions } from "@/command-center/provider";
 import { useToast } from "@/contexts/toast-context";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
-import { useActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
+import {
+  useActiveWorkspaceSelection,
+  navigateToWorkspace,
+} from "@/stores/navigation-active-workspace-store";
 import { useSessionStore } from "@/stores/session-store";
 import { useWorkspaceExists } from "@/stores/session-store-hooks";
 import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
 import { normalizeWorkspaceOpaqueId } from "@/utils/workspace-identity";
 import { createPluginClientStateSource } from "../client-state/source";
-import { hostIdFromPathname } from "../routes";
+import { buildPluginSurfaceRoute, hostIdFromPathname } from "../routes";
 import { useInstalledPlugins } from "../registry";
 import { createPluginSurfaceRuntime } from "../surface-runtime";
 import { buildPluginCommandCenterContributions } from "./contributions";
 import { getFocusedAgentId } from "./context";
-import { createPluginNavigation } from "../navigation";
 
 export function PluginCommandCenterActions() {
   const pathname = usePathname();
@@ -61,7 +63,29 @@ export function PluginCommandCenterActions() {
       state: stateSource,
       workspaceId: workspaceExists ? workspaceId : null,
       agentId: agentExists ? focusedAgentId : null,
-      navigation: createPluginNavigation({ serverId, workspaceId }),
+      navigation: {
+        openSurface(pluginId, surfaceId) {
+          router.push(
+            buildPluginSurfaceRoute(serverId, pluginId, { kind: "surface", id: surfaceId }),
+          );
+        },
+        openWorkspacePanel(pluginId, panelId) {
+          if (!workspaceId) throw new Error("No active workspace");
+          navigateToWorkspace({
+            serverId,
+            workspaceId,
+            target: { kind: "plugin", pluginId, panelId, context: "workspace" },
+          });
+        },
+        openAgentPanel(pluginId, panelId, agentId) {
+          if (!workspaceId) throw new Error("No active workspace");
+          navigateToWorkspace({
+            serverId,
+            workspaceId,
+            target: { kind: "plugin", pluginId, panelId, context: "agent", agentId },
+          });
+        },
+      },
       reportError(error) {
         toast.error(error instanceof Error ? error.message : String(error));
       },

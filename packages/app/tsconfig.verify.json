@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["./src/*"],
+      "@jagentdesk/protocol": ["../protocol/dist/index"],
+      "@jagentdesk/protocol/*": ["../protocol/dist/*"],
+      "@jagentdesk/client": ["../client/dist/index"],
+      "@jagentdesk/client/*": ["../client/dist/*"],
+      "@jagentdesk/plugin": ["../plugin/src/index"],
+      "@jagentdesk/plugin/*": ["../plugin/src/*"]
+    }
+  }
+}

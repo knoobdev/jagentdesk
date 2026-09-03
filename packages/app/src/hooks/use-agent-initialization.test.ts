@@ -49,7 +49,7 @@ afterEach(() => {
 });
 
 describe("ensureAgentIsInitialized", () => {
-  it("catches up after loaded authoritative history", () => {
+  it("requests a bounded projected tail when authoritative history is loaded", () => {
     const client = new FakeDaemonClient();
     const runtime = new FakeTimelineRuntime();
     useSessionStore.getState().initializeSession(serverId, client as never);
@@ -74,14 +74,13 @@ describe("ensureAgentIsInitialized", () => {
         serverId,
         agentId,
         request: {
-          direction: "after",
-          cursor: { epoch: "epoch-1", seq: 42 },
+          direction: "tail",
           limit: TIMELINE_FETCH_PAGE_SIZE,
           projection: "projected",
         },
       },
     ]);
-    expect(getInitDeferred(getInitKey(serverId, agentId))?.requestDirection).toBe("after");
+    expect(getInitDeferred(getInitKey(serverId, agentId))?.requestDirection).toBe("tail");
   });
 
   it("requests a bounded projected tail when no authoritative cursor is available", () => {
@@ -114,22 +113,21 @@ describe("ensureAgentIsInitialized", () => {
   it("requests a bounded projected tail after restoring painted replica items", () => {
     const client = new FakeDaemonClient();
     const runtime = new FakeTimelineRuntime();
-    useSessionStore.getState().initializeSession(serverId, null);
-    useSessionStore.getState().applyAgentTimelineResponseState(serverId, agentId, {
-      items: [
-        {
-          kind: "assistant_message",
-          id: "painted-item",
-          text: "Painted before hydration",
-          timestamp: new Date("2026-07-27T10:00:00.000Z"),
-        },
-      ],
-      head: [],
-      range: null,
-      older: "none",
-      newer: false,
-      synchronized: false,
-      acknowledgedClientMessageIds: [],
+    useSessionStore.getState().restoreSessionReplica(serverId, {
+      agents: new Map(),
+      workspaces: new Map(),
+      projects: new Map(),
+      timeline: {
+        agentId,
+        items: [
+          {
+            kind: "assistant_message",
+            id: "painted-item",
+            text: "Painted before hydration",
+            timestamp: new Date("2026-07-27T10:00:00.000Z"),
+          },
+        ],
+      },
     });
 
     void ensureAgentIsInitialized({
@@ -151,51 +149,6 @@ describe("ensureAgentIsInitialized", () => {
         },
       },
     ]);
-  });
-
-  it("catches up after the restored canonical replica range", () => {
-    const client = new FakeDaemonClient();
-    const runtime = new FakeTimelineRuntime();
-    useSessionStore.getState().initializeSession(serverId, null);
-    useSessionStore.getState().applyAgentTimelineResponseState(serverId, agentId, {
-      items: [
-        {
-          kind: "assistant_message",
-          id: "canonical-item",
-          text: "Canonical before restart",
-          timelineCursor: { epoch: "epoch-1", seq: 12 },
-          timestamp: new Date("2026-07-27T10:00:00.000Z"),
-        },
-      ],
-      head: [],
-      range: { epoch: "epoch-1", startSeq: 10, endSeq: 12 },
-      older: "available",
-      newer: false,
-      synchronized: true,
-      acknowledgedClientMessageIds: [],
-    });
-
-    void ensureAgentIsInitialized({
-      serverId,
-      agentId,
-      client: client as never,
-      runtime,
-      setAgentInitializing: bindSetAgentInitializing(),
-    });
-
-    expect(runtime.requests).toEqual([
-      {
-        serverId,
-        agentId,
-        request: {
-          direction: "after",
-          cursor: { epoch: "epoch-1", seq: 12 },
-          limit: TIMELINE_FETCH_PAGE_SIZE,
-          projection: "projected",
-        },
-      },
-    ]);
-    expect(getInitDeferred(getInitKey(serverId, agentId))?.requestDirection).toBe("after");
   });
 
   it("times out initialization after 65 seconds", async () => {

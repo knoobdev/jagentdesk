@@ -1,23 +1,16 @@
 import { generateDraftId } from "@/stores/draft-keys";
 import { buildWorkspaceTabPersistenceKey, type WorkspaceTabTarget } from "@/workspace-tabs/model";
-import type { WorkspaceTabPlacement } from "@/stores/workspace-layout-actions";
 
 export interface PrepareWorkspaceTabInput {
   serverId: string;
   workspaceId: string;
   target: WorkspaceTabTarget;
   pin?: boolean;
-  placement?: WorkspaceTabPlacement;
 }
 
 export interface PrepareWorkspaceTabDeps {
-  openTab: (input: {
-    workspaceKey: string;
-    target: WorkspaceTabTarget;
-    intent: "reveal";
-    pin?: boolean;
-    placement?: WorkspaceTabPlacement;
-  }) => string | null;
+  openTabFocused: (workspaceKey: string, target: WorkspaceTabTarget) => string | null;
+  pinAgent: (workspaceKey: string, agentId: string) => void;
 }
 
 function getPreparedTarget(target: WorkspaceTabTarget): WorkspaceTabTarget {
@@ -38,11 +31,9 @@ export function prepareWorkspaceTab(
       workspaceId: input.workspaceId,
     }) ?? "";
 
-  deps.openTab({
-    workspaceKey: key,
-    target,
-    intent: "reveal",
-    pin: input.pin === true && target.kind === "agent",
-    placement: input.placement,
-  });
+  deps.openTabFocused(key, target);
+
+  if (input.pin && target.kind === "agent") {
+    deps.pinAgent(key, target.agentId);
+  }
 }

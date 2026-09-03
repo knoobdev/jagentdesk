@@ -5,7 +5,6 @@ import type {
   SidebarProjectEntry,
   SidebarWorkspacePlacement,
 } from "@/hooks/use-sidebar-workspaces-list";
-import { applyStoredOrdering } from "@/hooks/sidebar-workspaces-view-model";
 import { useSessionStore } from "@/stores/session-store";
 
 export interface PinnedSidebarKeys {
@@ -20,18 +19,6 @@ export interface PinnedSidebarGroups {
   pinnedChats: SidebarWorkspacePlacement[];
   // Everything else, with pinned chats removed. Feeds the draggable project list.
   unpinnedProjects: SidebarProjectEntry[];
-}
-
-function projectWithoutPinnedWorkspaces(
-  project: SidebarProjectEntry,
-  pinnedWorkspaceKeys: ReadonlySet<string>,
-): SidebarProjectEntry {
-  const workspaces = project.workspaces.filter(
-    (workspace) => !pinnedWorkspaceKeys.has(workspace.workspaceKey),
-  );
-  // Keep the project even when every chat moved to Pinned. The project row owns
-  // its settings and new-workspace actions; chats are not its ownership boundary.
-  return workspaces.length === project.workspaces.length ? project : { ...project, workspaces };
 }
 
 function buildPinnedSidebarKeys(
@@ -114,9 +101,8 @@ export function usePinnedSidebarKeys(projects: SidebarProjectEntry[]): PinnedSid
 export function splitPinnedSidebarGroups(input: {
   projects: SidebarProjectEntry[];
   keys: PinnedSidebarKeys;
-  pinnedWorkspaceOrder: string[];
 }): PinnedSidebarGroups {
-  const { projects, keys, pinnedWorkspaceOrder } = input;
+  const { projects, keys } = input;
   if (keys.pinnedWorkspaceKeys.length === 0) {
     return { pinnedChats: [], unpinnedProjects: projects };
   }
@@ -125,12 +111,25 @@ export function splitPinnedSidebarGroups(input: {
   const unpinnedProjects: SidebarProjectEntry[] = [];
 
   for (const project of projects) {
+    const remainingWorkspaces: SidebarWorkspacePlacement[] = [];
     for (const workspace of project.workspaces) {
       if (pinnedWorkspaceKeySet.has(workspace.workspaceKey)) {
         pinnedChats.push(workspace);
+      } else {
+        remainingWorkspaces.push(workspace);
       }
     }
-    unpinnedProjects.push(projectWithoutPinnedWorkspaces(project, pinnedWorkspaceKeySet));
+    // Every chat got hoisted into the Pinned section: drop the empty shell instead of
+    // leaving a duplicate project header below. A genuinely empty project (no chats to
+    // begin with) is kept so its "new workspace" row stays reachable.
+    if (remainingWorkspaces.length === 0 && project.workspaces.length > 0) {
+      continue;
+    }
+    unpinnedProjects.push(
+      remainingWorkspaces.length === project.workspaces.length
+        ? project
+        : { ...project, workspaces: remainingWorkspaces },
+    );
   }
 
   pinnedChats.sort((a, b) =>
@@ -139,12 +138,5 @@ export function splitPinnedSidebarGroups(input: {
     ),
   );
 
-  return {
-    pinnedChats: applyStoredOrdering({
-      items: pinnedChats,
-      storedOrder: pinnedWorkspaceOrder,
-      getKey: (workspace) => workspace.workspaceKey,
-    }),
-    unpinnedProjects,
-  };
+  return { pinnedChats, unpinnedProjects };
 }

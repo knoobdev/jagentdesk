@@ -61,3 +61,12 @@ export function permissionsForLegacyHubScopes(
   // COMPAT(semanticHubPermissions): added in v0.7, remove after Hub enrollment uses permissions.
   return scopes.includes(LEGACY_HUB_EXECUTION_SCOPE) ? ["hub.execute"] : [];
 }
+
+// Bridge the v0.7.2 hub permission model back onto the fork's scope-based session
+// gate (isSessionRpcAllowed). A hub principal granted `hub.execute` maps to the
+// `hub.execution.*` scope the fork's hub RPC handlers expect. JAgentDesk keeps the
+// fork's scope authorization; the Hub relationship path is vestigial under the
+// Tailscale-only transport (see docs/decisions/ADR-0001).
+export function hubScopesForPermissions(permissions: readonly DaemonPermission[]): string[] {
+  return permissions.includes("hub.execute") ? [LEGACY_HUB_EXECUTION_SCOPE] : [];
+}

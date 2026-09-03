@@ -6,7 +6,6 @@ import { getServerId } from "../support/helpers/server-id";
 import { observeTimelineSubscriptions } from "../support/helpers/timeline-delivery";
 import { waitForWorkspaceTabsVisible } from "../support/helpers/workspace-tabs";
 import { installDaemonWebSocketGate } from "../support/helpers/daemon-websocket-gate";
-import { runWorkspaceActionFromCommandCenter } from "../support/helpers/command-center-workspace-actions";
 import {
   expectAgentIdle,
   expectInlineWorkingIndicator,
@@ -98,7 +97,7 @@ async function expectAgentConsistentlyIdle(page: Page, title: string): Promise<v
 }
 
 test.describe("Viewed agent timelines", () => {
-  test("a turn that finishes while hidden reopens with consistently idle chrome", async ({
+  test("a turn that finishes while unsubscribed reopens with consistently idle chrome", async ({
     page,
   }) => {
     test.setTimeout(150_000);
@@ -106,9 +105,9 @@ test.describe("Viewed agent timelines", () => {
     const scenario = await seedViewedTimelineScenario({ firstAgentModel: "one-minute-stream" });
     try {
       await openAgent(page, scenario, scenario.firstAgentId);
-      await startVisibleTurn(page, scenario, "Finish after this chat becomes hidden.");
+      await startVisibleTurn(page, scenario, "Finish after this chat becomes unsubscribed.");
       await selectAgent(page, "Second viewed chat");
-      await subscriptions.waitForSubscribedAgents([scenario.firstAgentId, scenario.secondAgentId]);
+      await subscriptions.waitForSubscribedAgents([scenario.secondAgentId], { timeout: 45_000 });
       const finish = await scenario.client.waitForFinish(scenario.firstAgentId, 90_000);
       expect(finish.status).toBe("idle");
 
@@ -119,7 +118,33 @@ test.describe("Viewed agent timelines", () => {
     }
   });
 
-  test("a hidden hot chat stays current", async ({ page }) => {
+  test("an unsubscribed hidden chat catches up when shown", async ({ page }) => {
+    test.setTimeout(90_000);
+    const subscriptions = observeTimelineSubscriptions(page);
+    const scenario = await seedViewedTimelineScenario();
+    try {
+      await openAgent(page, scenario, scenario.firstAgentId);
+      await selectAgent(page, "Second viewed chat");
+      await subscriptions.waitForSubscribedAgents([scenario.secondAgentId], { timeout: 45_000 });
+      await commitMessage(
+        scenario,
+        scenario.firstAgentId,
+        "Committed after the first chat unsubscribed.",
+      );
+      await expect(
+        page.getByText("Committed after the first chat unsubscribed.", { exact: true }),
+      ).toHaveCount(0);
+      await selectAgent(page, "First viewed chat");
+      await expect(
+        page.getByText("Committed after the first chat unsubscribed.", { exact: true }),
+      ).toBeVisible();
+      await expect(page.getByText("(end of synthetic stream)", { exact: true })).toBeVisible();
+    } finally {
+      await scenario.cleanup();
+    }
+  });
+
+  test("a hidden retained chat stays current during unsubscribe grace", async ({ page }) => {
     test.setTimeout(60_000);
     const subscriptions = observeTimelineSubscriptions(page);
     const scenario = await seedViewedTimelineScenario();
@@ -150,7 +175,7 @@ test.describe("Viewed agent timelines", () => {
     try {
       await enableMoveTabShortcut(page);
       await openAgent(page, scenario, scenario.firstAgentId);
-      await runWorkspaceActionFromCommandCenter(page, "Split pane right");
+      await page.getByRole("button", { name: "Split pane right" }).click();
       await selectAgent(page, "Second viewed chat");
       await moveActiveTabRight(page);
       await expect(
@@ -180,43 +205,18 @@ test.describe("Viewed agent timelines", () => {
         "true",
       );
       await gate.drop();
-      await gate.waitForBlockedConnection();
+      await expectReconnectingToastVisible(page);
       await commitMessage(scenario, scenario.firstAgentId, "Committed while the chat reconnects.");
       await expect(
         page.getByText("Committed while the chat reconnects.", { exact: true }),
       ).toHaveCount(0);
-      // Hold the first authoritative catch-up response so the assertion observes
-      // the reconnect boundary instead of racing a socket that has not reopened yet.
-      gate.holdNextServerMessage("fetch_agent_timeline_response");
       gate.restore();
-      await gate.waitForHeldServerMessage("fetch_agent_timeline_response");
-      gate.releaseHeldServerMessage("fetch_agent_timeline_response");
       await expectReconnectingToastGone(page);
       const recoveredMessage = page.getByText("Committed while the chat reconnects.", {
         exact: true,
       });
       await expect(recoveredMessage).toHaveCount(1);
       await expect(recoveredMessage).toBeVisible();
-    } finally {
-      gate.restore();
-      await scenario.cleanup();
-    }
-  });
-
-  test("preserves reconnecting toast through retained tab switches", async ({ page }) => {
-    const gate = await installDaemonWebSocketGate(page);
-    const scenario = await seedViewedTimelineScenario();
-    try {
-      await openAgent(page, scenario, scenario.firstAgentId);
-      await selectAgent(page, "Second viewed chat");
-      await expect(page.getByRole("textbox", { name: "Message agent..." })).toBeVisible();
-      await selectAgent(page, "First viewed chat");
-      await gate.drop();
-      await gate.waitForBlockedConnection();
-      await expectReconnectingToastVisible(page);
-
-      await selectAgent(page, "Second viewed chat");
-      await expectReconnectingToastVisible(page, { timeout: 500 });
     } finally {
       gate.restore();
       await scenario.cleanup();

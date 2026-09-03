@@ -52,18 +52,18 @@ export interface IdleAgentSeedClient {
   ): Promise<{ status: string }>;
 }
 
-async function seedIdleAgent(
+export async function createIdleAgent(
   client: IdleAgentSeedClient,
   input: { cwd: string; workspaceId: string; title: string },
-  provider: {
-    provider: string;
-    model: string;
-    modeId: string;
-    featureValues?: Record<string, unknown>;
-  },
 ): Promise<ArchiveTabAgent> {
   const created = await client.createAgent({
-    ...provider,
+    provider: "opencode",
+    model: "opencode/gpt-5-nano",
+    // OpenCode has no "bypassPermissions" mode (that's Claude's). Use build with
+    // auto_accept for unattended full access — mode validation now rejects modes
+    // the provider doesn't define.
+    modeId: "build",
+    featureValues: { auto_accept: true },
     cwd: input.cwd,
     workspaceId: input.workspaceId,
     title: input.title,
@@ -82,32 +82,6 @@ async function seedIdleAgent(
     cwd: input.cwd,
     workspaceId: input.workspaceId,
   };
-}
-
-export async function createIdleAgent(
-  client: IdleAgentSeedClient,
-  input: { cwd: string; workspaceId: string; title: string },
-): Promise<ArchiveTabAgent> {
-  return seedIdleAgent(client, input, {
-    provider: "opencode",
-    model: "opencode/gpt-5-nano",
-    // OpenCode has no "bypassPermissions" mode (that's Claude's). Use build with
-    // auto_accept for unattended full access — mode validation now rejects modes
-    // the provider doesn't define.
-    modeId: "build",
-    featureValues: { auto_accept: true },
-  });
-}
-
-export async function createMockIdleAgent(
-  client: IdleAgentSeedClient,
-  input: { cwd: string; workspaceId: string; title: string },
-): Promise<ArchiveTabAgent> {
-  return seedIdleAgent(client, input, {
-    provider: "mock",
-    model: "e2e-fast-stream",
-    modeId: "load-test",
-  });
 }
 
 export async function archiveAgentFromDaemon(
@@ -152,7 +126,10 @@ export async function primeAdditionalPage(page: Page): Promise<void> {
       localStorage.setItem("@jagentdesk:e2e-seed-nonce", nonce);
       localStorage.setItem("@jagentdesk:daemon-registry", JSON.stringify([seededDaemon]));
       localStorage.removeItem("@jagentdesk:settings");
-      localStorage.setItem("@jagentdesk:create-agent-preferences", JSON.stringify(seededPreferences));
+      localStorage.setItem(
+        "@jagentdesk:create-agent-preferences",
+        JSON.stringify(seededPreferences),
+      );
     },
     { daemon, preferences, seedNonce },
   );
@@ -167,7 +144,10 @@ export async function resetSeededPageState(page: Page): Promise<void> {
       localStorage.clear();
       localStorage.setItem("@jagentdesk:e2e", "1");
       localStorage.setItem("@jagentdesk:daemon-registry", JSON.stringify([seededDaemon]));
-      localStorage.setItem("@jagentdesk:create-agent-preferences", JSON.stringify(seededPreferences));
+      localStorage.setItem(
+        "@jagentdesk:create-agent-preferences",
+        JSON.stringify(seededPreferences),
+      );
       localStorage.removeItem("@jagentdesk:settings");
     },
     { daemon, preferences },

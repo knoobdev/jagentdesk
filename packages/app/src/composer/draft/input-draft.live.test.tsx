@@ -224,24 +224,9 @@ describe("useAgentInputDraft live contract", () => {
       thinkingOptionId: "high",
     });
 
-    const hydratedTextReplacement = getLatest().textReplacement;
-
     await act(async () => {
-      getLatest().editText("hello world");
+      getLatest().setText("hello world");
       getLatest().setAttachments([{ kind: "image", metadata: image }]);
-    });
-
-    expect(getLatest().textReplacement).toBe(hydratedTextReplacement);
-
-    await act(async () => {
-      getLatest().replaceText("replacement text");
-    });
-
-    expect(getLatest().textReplacement).not.toBe(hydratedTextReplacement);
-    expect(getLatest().textReplacement.text).toBe("replacement text");
-
-    await act(async () => {
-      getLatest().editText("hello world");
     });
 
     await act(async () => {
@@ -331,7 +316,7 @@ describe("useAgentInputDraft live contract", () => {
         kind: "issue",
         number: 42,
         title: "Unify attachments",
-        url: "https://github.com/jagentdesk/jagentdesk/issues/42",
+        url: "https://github.com/example/example/issues/42",
         state: "open",
         body: "body",
         labels: ["composer"],
@@ -433,7 +418,7 @@ describe("useAgentInputDraft live contract", () => {
     });
 
     await act(async () => {
-      getLatest().editText("with attachment");
+      getLatest().setText("with attachment");
       getLatest().setAttachments([{ kind: "image", metadata: image }]);
     });
 
@@ -515,7 +500,7 @@ describe("useAgentInputDraft live contract", () => {
     });
 
     await act(async () => {
-      getLatest().editText("queued message");
+      getLatest().setText("queued message");
       getLatest().setAttachments([{ kind: "image", metadata: image }]);
     });
 
@@ -569,7 +554,7 @@ describe("useAgentInputDraft live contract", () => {
     });
 
     await act(async () => {
-      getLatest().editText("queued message");
+      getLatest().setText("queued message");
       getLatest().setAttachments([{ kind: "image", metadata: sentImage }]);
     });
 
@@ -585,7 +570,7 @@ describe("useAgentInputDraft live contract", () => {
     });
 
     await act(async () => {
-      getLatest().editText("draft again");
+      getLatest().setText("draft again");
     });
 
     await act(async () => {

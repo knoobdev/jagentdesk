@@ -14,6 +14,9 @@ import { FadeIn, FadeOut } from "react-native-reanimated";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import {
   Check,
+  CircleCheck,
+  CircleDot,
+  CircleX,
   Copy,
   ExternalLink,
   FileDiff,
@@ -39,14 +42,6 @@ import { useIsCompactFormFactor } from "@/constants/layout";
 import { FloatingSurface } from "@/components/ui/floating";
 import { isWeb } from "@/constants/platform";
 import { useHosts } from "@/runtime/host-runtime";
-import {
-  COUNTED_CHECK_PRESENTATIONS,
-  countCheckPresentations,
-  type CountedCheckPresentation,
-} from "@/git/check-presentation";
-import { formatCheckPresentationCountsLabel } from "@/git/check-presentation-copy";
-import { CheckPresentationIcon, getCheckPresentationTone } from "@/git/check-presentation.view";
-import { buildForgeChecksUrl } from "@/git/forge-url";
 
 interface Rect {
   x: number;
@@ -360,11 +355,17 @@ function HostRow({ serverId }: { serverId: string }): ReactElement | null {
 }
 
 const ThemedExternalLink = withUnistyles(ExternalLink);
+const ThemedCircleCheck = withUnistyles(CircleCheck);
+const ThemedCircleDot = withUnistyles(CircleDot);
+const ThemedCircleX = withUnistyles(CircleX);
 const ThemedCopy = withUnistyles(Copy);
 const ThemedCheck = withUnistyles(Check);
 
 const foregroundColorMapping = (theme: Theme) => ({ color: theme.colors.foreground });
 const foregroundMutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
+const successColorMapping = (theme: Theme) => ({ color: theme.colors.statusSuccess });
+const warningColorMapping = (theme: Theme) => ({ color: theme.colors.statusWarning });
+const dangerColorMapping = (theme: Theme) => ({ color: theme.colors.statusDanger });
 
 function InfoRow({
   icon: Icon,
@@ -454,28 +455,51 @@ function CopyableInfoRow({
   );
 }
 
-function ChecksSummaryPill({
-  count,
-  presentation,
-}: {
-  count: number;
-  presentation: CountedCheckPresentation;
-}) {
-  if (count === 0) return null;
-  return (
-    <View style={styles.checksSummaryPill}>
-      <CheckPresentationIcon presentation={presentation} size={12} />
-      <Text style={checksSummaryTextStyle(presentation)}>{count}</Text>
-    </View>
+function getChecksSummaryCounts(checks: NonNullable<PrHint["checks"]>) {
+  return checks.reduce(
+    (counts, check) => {
+      if (check.status === "success") counts.passed += 1;
+      else if (check.status === "failure") counts.failed += 1;
+      else if (check.status !== "skipped" && check.status !== "cancelled") counts.pending += 1;
+      return counts;
+    },
+    { passed: 0, failed: 0, pending: 0 },
   );
 }
 
-function checksSummaryTextStyle(presentation: CountedCheckPresentation) {
-  const tone = getCheckPresentationTone(presentation);
-  if (tone === "success") return styles.checksStatusTextPassed;
-  if (tone === "danger") return styles.checksStatusTextFailed;
-  if (tone === "warning") return styles.checksStatusTextPending;
-  return styles.checksStatusTextMuted;
+function ChecksSummaryPill({
+  count,
+  kind,
+}: {
+  count: number;
+  kind: "passed" | "failed" | "pending";
+}) {
+  if (count === 0) return null;
+
+  if (kind === "passed") {
+    return (
+      <View style={styles.checksSummaryPill}>
+        <ThemedCircleCheck size={12} uniProps={successColorMapping} />
+        <Text style={styles.checksStatusTextPassed}>{count}</Text>
+      </View>
+    );
+  }
+
+  if (kind === "failed") {
+    return (
+      <View style={styles.checksSummaryPill}>
+        <ThemedCircleX size={12} uniProps={dangerColorMapping} />
+        <Text style={styles.checksStatusTextFailed}>{count}</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.checksSummaryPill}>
+      <ThemedCircleDot size={12} uniProps={warningColorMapping} />
+      <Text style={styles.checksStatusTextPending}>{count}</Text>
+    </View>
+  );
 }
 
 function ChecksSummaryContent({
@@ -488,7 +512,7 @@ function ChecksSummaryContent({
   hovered: boolean;
 }) {
   const { t } = useTranslation();
-  const counts = countCheckPresentations(checks);
+  const { passed, failed, pending } = getChecksSummaryCounts(checks);
 
   const labelStyle = hovered
     ? [styles.checksSummaryLabel, styles.checksSummaryLabelHovered]
@@ -505,13 +529,9 @@ function ChecksSummaryContent({
       )}
       <Text style={labelStyle}>{t("workspace.git.pr.sections.checks")}</Text>
       <View style={styles.checksSummaryCounts}>
-        {COUNTED_CHECK_PRESENTATIONS.map((presentation) => (
-          <ChecksSummaryPill
-            key={presentation}
-            count={counts[presentation]}
-            presentation={presentation}
-          />
-        ))}
+        <ChecksSummaryPill count={passed} kind="passed" />
+        <ChecksSummaryPill count={failed} kind="failed" />
+        <ChecksSummaryPill count={pending} kind="pending" />
       </View>
     </>
   );
@@ -526,16 +546,9 @@ function ChecksSummaryPressable({
   forge: PrHint["forge"];
   url: string;
 }) {
-  const { t } = useTranslation();
-  const counts = countCheckPresentations(checks);
-  const accessibilityLabel = formatCheckPresentationCountsLabel(
-    counts,
-    t("workspace.git.pr.sections.checks"),
-    t,
-  );
   const handlePress = useCallback(() => {
-    void openExternalUrl(buildForgeChecksUrl(forge, url) ?? url);
-  }, [forge, url]);
+    void openExternalUrl(`${url}/checks`);
+  }, [url]);
 
   const renderChildren = useCallback(
     ({ hovered }: { pressed: boolean; hovered?: boolean }) => (
@@ -545,12 +558,7 @@ function ChecksSummaryPressable({
   );
 
   return (
-    <Pressable
-      accessibilityLabel={accessibilityLabel}
-      accessibilityRole="link"
-      style={checksSummaryPressableStyle}
-      onPress={handlePress}
-    >
+    <Pressable style={checksSummaryPressableStyle} onPress={handlePress}>
       {renderChildren}
     </Pressable>
   );
@@ -663,10 +671,5 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.xs,
     fontWeight: theme.fontWeight.normal,
     color: theme.colors.statusSuccess,
-  },
-  checksStatusTextMuted: {
-    fontSize: theme.fontSize.sm,
-    fontWeight: theme.fontWeight.normal,
-    color: theme.colors.foregroundMuted,
   },
 }));

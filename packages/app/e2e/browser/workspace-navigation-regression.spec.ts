@@ -6,7 +6,7 @@ import {
 import { expect, test, type Page } from "../support/fixtures";
 import { gotoAppShell, openSettings } from "../support/helpers/app";
 import {
-  createMockIdleAgent,
+  createIdleAgent,
   expectWorkspaceTabHidden,
   expectWorkspaceTabVisible,
   openWorkspaceWithAgents,
@@ -30,7 +30,6 @@ import {
   expectReconnectingToastGone,
   switchWorkspaceViaSidebar,
   waitForSidebarHydration,
-  waitForWorkspaceInSidebar,
   workspaceDeckEntryLocator,
   expectWorkspaceDeckEntryCount,
 } from "../support/helpers/workspace-ui";
@@ -38,8 +37,7 @@ import { clickSettingsBackToWorkspace } from "../support/helpers/settings";
 import { getServerId } from "../support/helpers/server-id";
 import { expectAppRoute } from "../support/helpers/route-assertions";
 import { installDaemonWebSocketGate } from "../support/helpers/daemon-websocket-gate";
-import { addConnectedHostAndReload, addOfflineHostAndReload } from "../support/helpers/hosts";
-import { startIsolatedHostDaemon } from "../support/helpers/isolated-host-daemon";
+import { addOfflineHostAndReload } from "../support/helpers/hosts";
 
 const LOADING_WORKSPACE_TEXT_PATTERN = /Loading workspace/i;
 async function expectNoLoadingWorkspacePane(
@@ -79,12 +77,6 @@ async function getVisibleDraftTabCount(page: Page): Promise<number> {
 }
 
 async function closeFirstVisibleDraftTab(page: Page): Promise<void> {
-  const tab = page
-    .locator('[data-testid^="workspace-tab-draft"]')
-    .filter({ visible: true })
-    .first();
-  await expect(tab).toBeVisible({ timeout: 30_000 });
-  await tab.hover();
   const closeButton = page.locator('[data-testid^="workspace-draft-close-"]').filter({
     visible: true,
   });
@@ -159,7 +151,7 @@ test.describe("Workspace navigation regression", () => {
     const workspace = await seedWorkspace({ repoPrefix: "workspace-reconnect-" });
 
     try {
-      const agent = await createMockIdleAgent(workspace.client, {
+      const agent = await createIdleAgent(workspace.client, {
         cwd: workspace.repoPath,
         workspaceId: workspace.workspaceId,
         title: `workspace-reconnect-${Date.now()}`,
@@ -180,7 +172,6 @@ test.describe("Workspace navigation regression", () => {
       await expectWorkspaceTabVisible(page, agent.id);
 
       await daemonGate.drop();
-      await daemonGate.waitForBlockedConnection();
       await expectReconnectingToastVisible(page);
       await expectWorkspaceHeader(page, {
         title: workspace.workspaceName,
@@ -205,62 +196,6 @@ test.describe("Workspace navigation regression", () => {
     } finally {
       daemonGate.restore();
       await workspace.cleanup();
-    }
-  });
-
-  test("does not show reconnecting for an inactive host workspace", async ({ page }) => {
-    const secondaryHost = await startIsolatedHostDaemon("inactive-reconnecting-host");
-    const primaryWorkspace = await seedWorkspace({ repoPrefix: "active-reconnecting-host-" });
-    const secondaryWorkspace = await seedWorkspace({
-      repoPrefix: "inactive-reconnecting-host-",
-      port: secondaryHost.port,
-    });
-
-    try {
-      await Promise.all([
-        createMockIdleAgent(primaryWorkspace.client, {
-          cwd: primaryWorkspace.repoPath,
-          workspaceId: primaryWorkspace.workspaceId,
-          title: "Active host agent",
-        }),
-        createMockIdleAgent(secondaryWorkspace.client, {
-          cwd: secondaryWorkspace.repoPath,
-          workspaceId: secondaryWorkspace.workspaceId,
-          title: "Inactive host agent",
-        }),
-      ]);
-
-      await gotoAppShell(page);
-      await addConnectedHostAndReload(page, {
-        serverId: secondaryHost.serverId,
-        label: "Inactive host",
-        port: secondaryHost.port,
-      });
-      await waitForWorkspaceInSidebar(page, {
-        serverId: secondaryHost.serverId,
-        workspaceId: secondaryWorkspace.workspaceId,
-      });
-      await switchWorkspaceViaSidebar({
-        page,
-        serverId: secondaryHost.serverId,
-        workspaceId: secondaryWorkspace.workspaceId,
-      });
-      await waitForWorkspaceTabsVisible(page);
-      await switchWorkspaceViaSidebar({
-        page,
-        serverId: getServerId(),
-        workspaceId: primaryWorkspace.workspaceId,
-      });
-      await waitForWorkspaceTabsVisible(page);
-
-      await secondaryHost.close();
-      await page.waitForTimeout(1_500);
-
-      await expectReconnectingToastGone(page, { timeout: 100 });
-    } finally {
-      await secondaryHost.close();
-      await secondaryWorkspace.cleanup();
-      await primaryWorkspace.cleanup();
     }
   });
 
@@ -320,12 +255,12 @@ test.describe("Workspace navigation regression", () => {
     const secondWorkspace = await seedWorkspace({ repoPrefix: "workspace-nav-reg-b-" });
 
     try {
-      const firstAgent = await createMockIdleAgent(firstWorkspace.client, {
+      const firstAgent = await createIdleAgent(firstWorkspace.client, {
         cwd: firstWorkspace.repoPath,
         workspaceId: firstWorkspace.workspaceId,
         title: `workspace-nav-a-${Date.now()}`,
       });
-      const secondAgent = await createMockIdleAgent(secondWorkspace.client, {
+      const secondAgent = await createIdleAgent(secondWorkspace.client, {
         cwd: secondWorkspace.repoPath,
         workspaceId: secondWorkspace.workspaceId,
         title: `workspace-nav-b-${Date.now()}`,

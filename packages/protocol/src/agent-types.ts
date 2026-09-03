@@ -351,12 +351,20 @@ export interface CompactionTimelineItem {
   preTokens?: number;
 }
 
+export interface AgentTaskItem {
+  text: string;
+  completed: boolean;
+  id?: string;
+  status?: "pending" | "in_progress" | "completed";
+  activeForm?: string;
+}
+
 export type AgentTimelineItem =
   | { type: "user_message"; text: string; messageId?: string; clientMessageId?: string }
   | { type: "assistant_message"; text: string; messageId?: string }
   | { type: "reasoning"; text: string }
   | ToolCallTimelineItem
-  | { type: "todo"; items: { text: string; completed: boolean }[] }
+  | { type: "todo"; items: AgentTaskItem[] }
   | { type: "error"; message: string }
   | CompactionTimelineItem;
 
@@ -465,6 +473,27 @@ export interface AgentRunResult {
   canceled?: boolean;
 }
 
+// Upstream v0.7.2: JSON-safe provider-native options and MCP tool policy.
+export type JsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+
+export type ProviderOptions = Record<string, JsonValue>;
+
+export interface McpToolRef {
+  kind: "mcp";
+  server: string;
+  tool: string;
+}
+
+export interface ToolPolicy {
+  preapproved: McpToolRef[];
+}
+
 export interface AgentSessionConfig {
   provider: AgentProvider;
   cwd: string;
@@ -478,6 +507,8 @@ export interface AgentSessionConfig {
   thinkingOptionId?: string;
   featureValues?: Record<string, unknown>;
   title?: string | null;
+  providerOptions?: ProviderOptions;
+  toolPolicy?: ToolPolicy;
   approvalPolicy?: string;
   sandboxMode?: string;
   networkAccess?: boolean;

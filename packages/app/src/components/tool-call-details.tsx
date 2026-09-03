@@ -10,11 +10,8 @@ import { ScrollView as GHScrollView } from "react-native-gesture-handler";
 import { StyleSheet } from "react-native-unistyles";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
+import { AppearanceStyleBoundary } from "@/components/appearance-style-boundary";
 import type { ToolCallDetail } from "@jagentdesk/protocol/agent-types";
-import {
-  buildJAgentDeskToolDetailSections,
-  type JAgentDeskToolDetailSection,
-} from "@jagentdesk/protocol/jagentdesk-tool-call-detail";
 import { buildLineDiff, parseUnifiedDiff, type DiffLine } from "@/utils/tool-call-parsers";
 import { highlightDiffLines } from "@/utils/diff-highlight";
 import { hasMeaningfulToolCallDetail } from "@/utils/tool-call-detail-state";
@@ -31,7 +28,6 @@ const ScrollView = isWeb ? RNScrollView : GHScrollView;
 // ---- Content Component ----
 
 interface ToolCallDetailsContentProps {
-  toolName?: string;
   detail?: ToolCallDetail;
   errorText?: string;
   maxHeight?: number;
@@ -631,42 +627,7 @@ function buildUnknownSections(detail: UnknownDetail, ds: DetailStyles, t: TFunct
   return out;
 }
 
-function JAgentDeskDetailSection({ section }: { section: JAgentDeskToolDetailSection }) {
-  return (
-    <View style={styles.jagentdeskSection}>
-      <Text style={styles.jagentdeskSectionTitle}>{section.title}</Text>
-      {section.kind === "prose" ? (
-        <Text selectable style={styles.jagentdeskProse}>
-          {section.text}
-        </Text>
-      ) : (
-        <View style={styles.jagentdeskFields}>
-          {section.fields.map((field) => (
-            <View key={field.label} style={styles.jagentdeskFieldRow}>
-              <Text style={styles.jagentdeskFieldLabel}>{field.label}</Text>
-              <Text selectable style={styles.jagentdeskFieldValue}>
-                {field.value}
-              </Text>
-            </View>
-          ))}
-        </View>
-      )}
-    </View>
-  );
-}
-
-function buildJAgentDeskUnknownSections(
-  toolName: string | undefined,
-  detail: UnknownDetail,
-): ReactNode[] | null {
-  if (!toolName) return null;
-  const sections = buildJAgentDeskToolDetailSections(toolName, detail.input, detail.output);
-  if (!sections) return null;
-  return sections.map((section) => <JAgentDeskDetailSection key={section.title} section={section} />);
-}
-
 function buildDetailSections(
-  toolName: string | undefined,
   detail: ToolCallDetail | undefined,
   diffLines: DiffLine[] | undefined,
   ds: DetailStyles,
@@ -741,7 +702,7 @@ function buildDetailSections(
     return [<ScrollablePlainTextSection key="plain-text" text={detail.text} ds={ds} />];
   }
   if (detail.type === "unknown") {
-    return buildJAgentDeskUnknownSections(toolName, detail) ?? buildUnknownSections(detail, ds, t);
+    return buildUnknownSections(detail, ds, t);
   }
   return [];
 }
@@ -780,8 +741,15 @@ function LoadingSkeleton({ containerStyle }: { containerStyle: StyleProp<ViewSty
   );
 }
 
-export function ToolCallDetailsContent({
-  toolName,
+export function ToolCallDetailsContent({ ...props }: ToolCallDetailsContentProps) {
+  return (
+    <AppearanceStyleBoundary>
+      <ToolCallDetailsContentInner {...props} />
+    </AppearanceStyleBoundary>
+  );
+}
+
+function ToolCallDetailsContentInner({
   detail,
   errorText,
   maxHeight,
@@ -793,7 +761,7 @@ export function ToolCallDetailsContent({
   const ds = useDetailStyles(detail, resolvedMaxHeight, fillAvailableHeight);
   const diffLines = useDiffLines(detail);
 
-  const sections: ReactNode[] = buildDetailSections(toolName, detail, diffLines, ds, t);
+  const sections: ReactNode[] = buildDetailSections(detail, diffLines, ds, t);
 
   if (errorText) {
     sections.push(<ErrorSection key="error" errorText={errorText} ds={ds} />);
@@ -834,48 +802,8 @@ const styles = StyleSheet.create((theme) => {
     },
     groupHeaderText: {
       color: theme.colors.foregroundMuted,
-      fontSize: theme.fontSize.base,
-      fontWeight: theme.fontWeight.normal,
-    },
-    jagentdeskSection: {
-      gap: theme.spacing[3],
-      paddingHorizontal: theme.spacing[4],
-      paddingVertical: theme.spacing[4],
-      borderBottomWidth: theme.borderWidth[1],
-      borderBottomColor: theme.colors.border,
-    },
-    jagentdeskSectionTitle: {
-      color: theme.colors.foreground,
-      fontSize: theme.fontSize.base,
-      fontWeight: theme.fontWeight.medium,
-    },
-    jagentdeskProse: {
-      color: theme.colors.foreground,
-      fontSize: theme.fontSize.content,
-      lineHeight: Math.round(theme.fontSize.content * 1.5),
-      overflowWrap: "anywhere",
-    },
-    jagentdeskFields: {
-      gap: theme.spacing[3],
-    },
-    jagentdeskFieldRow: {
-      flexDirection: "row",
-      alignItems: "flex-start",
-      gap: theme.spacing[4],
-    },
-    jagentdeskFieldLabel: {
-      width: 120,
-      color: theme.colors.foregroundMuted,
       fontSize: theme.fontSize.sm,
-      lineHeight: Math.round(theme.fontSize.base * 1.5),
-    },
-    jagentdeskFieldValue: {
-      flex: 1,
-      minWidth: 0,
-      color: theme.colors.foreground,
-      fontSize: theme.fontSize.base,
-      lineHeight: Math.round(theme.fontSize.base * 1.5),
-      overflowWrap: "anywhere",
+      fontWeight: theme.fontWeight.normal,
     },
     section: {
       gap: theme.spacing[2],
@@ -893,14 +821,14 @@ const styles = StyleSheet.create((theme) => {
     },
     sectionTitle: {
       color: theme.colors.foregroundMuted,
-      fontSize: theme.fontSize.sm,
+      fontSize: theme.fontSize.xs,
       fontWeight: theme.fontWeight.semibold,
       textTransform: "uppercase",
       letterSpacing: 0.5,
     },
     rangeText: {
       color: theme.colors.foregroundMuted,
-      fontSize: theme.fontSize.sm,
+      fontSize: theme.fontSize.xs,
     },
     diffContainer: {
       borderWidth: theme.borderWidth[1],
@@ -997,7 +925,7 @@ const styles = StyleSheet.create((theme) => {
     },
     emptyStateText: {
       color: theme.colors.foregroundMuted,
-      fontSize: theme.fontSize.base,
+      fontSize: theme.fontSize.sm,
       fontStyle: "italic",
     },
     loadingContainer: {

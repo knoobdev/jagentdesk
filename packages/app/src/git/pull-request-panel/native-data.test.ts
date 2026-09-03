@@ -135,7 +135,6 @@ describe("getNativeFallbackChecks", () => {
         provider: "gitea",
         name: "CI",
         status: "failure",
-        traits: ["warning"],
         url: "https://gitea.com/group/repo/pulls/7",
       },
     ]);
