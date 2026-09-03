@@ -12,6 +12,11 @@ directories:
   output: release
 files:
   - dist/**/*
+  # Production node_modules must be copied in full. The daemon loads native
+  # add-ons (better-sqlite3, oracledb, node-pty, sherpa-onnx) that are hoisted
+  # to the monorepo root; restricting `files` to dist/** left those as empty
+  # directories in the asar, so the worker crash-looped on `better-sqlite3`.
+  - node_modules/**/*
   - "!**/*.map"
   - "!node_modules/@jagentdesk/*/src/**"
   - "!node_modules/@jagentdesk/**/*.test.*"
@@ -23,9 +28,30 @@ files:
   - "!node_modules/@jagentdesk/*/.tasks/**"
   - "!node_modules/@jagentdesk/*/conversations/**"
   - "!node_modules/@jagentdesk/*/test-results/**"
+  # Dev-only native toolchains that must never ship (huge, unused at runtime).
+  - "!node_modules/@img/**"
+  - "!node_modules/sharp/**"
+  - "!node_modules/playwright/**"
+  - "!node_modules/playwright-core/**"
+  - "!node_modules/@oxc-resolver/**"
+  - "!node_modules/@oxfmt/**"
+  - "!node_modules/@oxlint/**"
+  - "!node_modules/@rollup/**"
+  - "!node_modules/@tailwindcss/**"
+  - "!node_modules/@unrs/**"
+  - "!node_modules/@parcel/**"
+  - "!node_modules/lightningcss*/**"
 asarUnpack:
   - dist/daemon/node-entrypoint-runner.js
   - node_modules/@jagentdesk/server/dist/server/terminal/shell-integration/**/*
+  # Native add-ons cannot be dlopen'd from inside the asar — unpack them.
+  - "**/*.node"
+  - node_modules/better-sqlite3/**
+  - node_modules/oracledb/**
+  - node_modules/node-pty/**
+  - node_modules/dtrace-provider/**
+  - node_modules/fsevents/**
+  - node_modules/sherpa-onnx-*/**
 extraResources:
   - from: ../app/dist
     to: app-dist
