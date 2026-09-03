@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import pino from "pino";
 import { afterEach, expect, test } from "vitest";
-import { WebSocket } from "ws";
+import { WebSocket, WebSocketServer } from "ws";
 import type { HubExecutionAgents } from "./daemon-executions.js";
 import {
   HubRelationshipController,
@@ -51,6 +51,87 @@ test("transient revocation failures remain retryable", async () => {
   ).rejects.toThrow("Hub revocation failed (503)");
 });
 
+test("permission updates use the daemon credential and preserve semantic permissions", async () => {
+  let observed: { method?: string; authorization?: string; body?: unknown } = {};
+  const server = createServer(async (request, response) => {
+    let body = "";
+    for await (const chunk of request) body += chunk;
+    observed = {
+      method: request.method,
+      authorization: request.headers.authorization,
+      body: JSON.parse(body),
+    };
+    response
+      .writeHead(200, { "content-type": "application/json" })
+      .end(JSON.stringify({ permissions: ["hub.execute"] }));
+  });
+  openServers.push(server);
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address() as AddressInfo;
+  const hubOrigin = `http://127.0.0.1:${address.port}`;
+
+  const result = await new DirectHubRelationshipRemote().updatePermissions({
+    daemonId: "daemon-1",
+    hubOrigin,
+    credential: "daemon-secret",
+    permissions: ["hub.execute"],
+  });
+
+  expect(result).toEqual({ permissions: ["hub.execute"] });
+  expect(observed).toEqual({
+    method: "PATCH",
+    authorization: "Bearer daemon-secret",
+    body: { permissions: ["hub.execute"] },
+  });
+});
+
+test.each([
+  { acknowledge: false, expected: "legacy" as const },
+  { acknowledge: true, expected: "session-v1" as const },
+])(
+  "negotiates $expected Hub session startup during WebSocket upgrade",
+  async ({ acknowledge, expected }) => {
+    const server = createServer();
+    const webSockets = new WebSocketServer({ noServer: true });
+    if (acknowledge) {
+      webSockets.on("headers", (headers) => headers.push("x-jagentdesk-session-protocol: 1"));
+    }
+    let offeredProtocol: string | string[] | undefined;
+    server.on("upgrade", (request, socket, head) => {
+      offeredProtocol = request.headers["x-jagentdesk-session-protocol"];
+      webSockets.handleUpgrade(request, socket, head, () => undefined);
+    });
+    openServers.push(server);
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    const address = server.address() as AddressInfo;
+    const negotiated = deferred<"legacy" | "session-v1">();
+    const socket = new DirectHubRelationshipRemote().openSocket(
+      {
+        daemonId: "daemon-1",
+        credential: "credential",
+        webSocketUrl: `ws://127.0.0.1:${address.port}/daemon`,
+      },
+      {
+        connected: (_connected, protocol) => negotiated.resolve(protocol),
+        rejected: () => undefined,
+        closed: () => undefined,
+        failed: () => undefined,
+      },
+    );
+
+    await expect(negotiated.promise).resolves.toBe(expected);
+    expect(offeredProtocol).toBe("1");
+    socket.close();
+    webSockets.close();
+  },
+);
+
 test.each([408, 429])("transient enrollment status %s remains retryable", async (status) => {
   const hubOrigin = await startHubReturning(status);
   const remote = new DirectHubRelationshipRemote();
@@ -64,7 +145,7 @@ test.each([408, 429])("transient enrollment status %s remains retryable", async 
       serverId: "server-1",
       daemonPublicKey: "public-key",
       credentialVerifier: "verifier",
-      scopes: ["hub.execution.*"],
+      permissions: ["hub.execute"],
     })
     .catch((caught: unknown) => caught);
 
@@ -86,7 +167,7 @@ test("enrollment rejects a transport URL that cannot open a WebSocket", async ()
       serverId: "server-1",
       daemonPublicKey: "public-key",
       credentialVerifier: "verifier",
-      scopes: ["hub.execution.*"],
+      permissions: ["hub.execute"],
     }),
   ).rejects.toThrow("Hub WebSocket URL must use ws or wss");
 });
@@ -104,7 +185,7 @@ test("enrollment rejects a WebSocket URL with a fragment", async () => {
       serverId: "server-1",
       daemonPublicKey: "public-key",
       credentialVerifier: "verifier",
-      scopes: ["hub.execution.*"],
+      permissions: ["hub.execute"],
     }),
   ).rejects.toThrow("Hub WebSocket URL cannot include a fragment");
 });
@@ -122,7 +203,7 @@ test("enrollment rejects a WebSocket outside the enrolled Hub authority", async 
       serverId: "server-1",
       daemonPublicKey: "public-key",
       credentialVerifier: "verifier",
-      scopes: ["hub.execution.*"],
+      permissions: ["hub.execute"],
     }),
   ).rejects.toThrow("Hub WebSocket URL must match the Hub origin");
 });
@@ -141,7 +222,7 @@ test.each(["enrollment", "revocation"])("%s HTTP calls are bounded", async (oper
           serverId: "server-1",
           daemonPublicKey: "public-key",
           credentialVerifier: "verifier",
-          scopes: ["hub.execution.*"],
+          permissions: ["hub.execute"],
         })
       : remote.revoke({
           daemonId: "daemon-1",
@@ -298,7 +379,7 @@ async function startEnrollmentHub(webSocketUrl: string): Promise<string> {
     response.writeHead(200, { "content-type": "application/json" }).end(
       JSON.stringify({
         daemonId: enrollment.daemonId,
-        scopes: ["hub.execution.*"],
+        permissions: ["hub.execute"],
         webSocketUrl,
       }),
     );
@@ -389,7 +470,7 @@ class UpgradeRejectingHub {
     response.writeHead(200, { "content-type": "application/json" }).end(
       JSON.stringify({
         daemonId: enrollment.daemonId,
-        scopes: ["hub.execution.*"],
+        permissions: ["hub.execute"],
         webSocketUrl: this.webSocketUrl,
       }),
     );
@@ -530,9 +611,14 @@ async function connectController(
     clock,
     retryPolicy: clock,
     attachSocket: async () => undefined,
+    updateAttachedPermissions: () => undefined,
     createExecutionAgents: () => unusedExecutionAgents,
   });
-  await controller.connect({ hubUrl: hub.origin, token: "enrollment-token" });
+  await controller.connect({
+    hubUrl: hub.origin,
+    token: "enrollment-token",
+    permissions: ["hub.execute"],
+  });
   return controller;
 }
 

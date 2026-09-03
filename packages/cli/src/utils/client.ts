@@ -1,36 +1,27 @@
-import { existsSync, readFileSync, mkdirSync, writeFileSync, chmodSync } from "node:fs";
-import { createPrivateKey, generateKeyPairSync, sign } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import { loadConfig, resolveJAgentDeskHome } from "@jagentdesk/server";
 import {
   buildDaemonWebSocketUrl,
+  buildRelayWebSocketUrl,
   normalizeHostPort,
   parseConnectionUri,
+  shouldUseTlsForDefaultHostedRelay,
 } from "@jagentdesk/protocol/daemon-endpoints";
-import { DEFAULT_JAGENTDESK_DAEMON_PORT } from "@jagentdesk/protocol/defaults";
 import {
   parseConnectionOfferFromUrl,
   type ConnectionOffer,
-  type TailnetConnectionOffer,
 } from "@jagentdesk/protocol/connection-offer";
-import {
-  DaemonClient,
-  type DaemonClientConfig,
-  type WebSocketLike,
-} from "@jagentdesk/client/internal/daemon-client";
+import { parseSshTransportUri } from "@jagentdesk/protocol/ssh-transport";
+import { DaemonClient, type WebSocketLike } from "@jagentdesk/client/internal/daemon-client";
 import path from "node:path";
 import { WebSocket } from "ws";
 import { getOrCreateCliClientId } from "./client-id.js";
 import { resolveCliVersion } from "../version.js";
+import { createSshTunnel } from "../ssh/ssh-tunnel.js";
 
 export interface ConnectOptions {
   host?: string;
   timeout?: number;
-  /**
-   * Optional client capabilities to advertise during the connect handshake, e.g.
-   * `{ browser_host: { hostKind, supportedCommands } }` to register a CLI-based
-   * browser automation host with the daemon's browser-tools broker.
-   */
-  capabilities?: Record<string, unknown>;
 }
 
 export interface DaemonConnectionCommandError {
@@ -39,34 +30,9 @@ export interface DaemonConnectionCommandError {
   details: string;
 }
 
-const DEFAULT_HOST = `localhost:${DEFAULT_JAGENTDESK_DAEMON_PORT}`;
+const DEFAULT_HOST = "localhost:6767";
 const DEFAULT_TIMEOUT = 15000;
 const PID_FILENAME = "jagentdesk.pid";
-
-interface CliDeviceKeypair {
-  publicKeyB64: string;
-  privateKeyPem: string;
-}
-
-function loadOrCreateCliDeviceKeypair(home: string): CliDeviceKeypair {
-  const pathToKey = path.join(home, "cli-device-keypair.json");
-  try {
-    const parsed = JSON.parse(readFileSync(pathToKey, "utf8")) as Partial<CliDeviceKeypair>;
-    if (typeof parsed.publicKeyB64 === "string" && typeof parsed.privateKeyPem === "string") {
-      return { publicKeyB64: parsed.publicKeyB64, privateKeyPem: parsed.privateKeyPem };
-    }
-  } catch {
-    // Generate below when the key is absent or invalid.
-  }
-  mkdirSync(home, { recursive: true });
-  const pair = generateKeyPairSync("ed25519");
-  const privateKeyPem = pair.privateKey.export({ type: "pkcs8", format: "pem" }).toString();
-  const der = pair.publicKey.export({ type: "spki", format: "der" });
-  const publicKeyB64 = Buffer.from(der).subarray(-32).toString("base64");
-  writeFileSync(pathToKey, JSON.stringify({ publicKeyB64, privateKeyPem }) + "\n", { mode: 0o600 });
-  chmodSync(pathToKey, 0o600);
-  return { publicKeyB64, privateKeyPem };
-}
 
 type DaemonTarget =
   | {
@@ -95,7 +61,9 @@ export function buildDaemonConnectionCommandError(options: {
   return {
     code: "DAEMON_NOT_RUNNING",
     message: `Cannot connect to daemon at ${host}: ${message}`,
-    details: "Start the daemon with: jagentdesk daemon start",
+    details: host.trim().startsWith("ssh://")
+      ? "Start the JAgentDesk daemon on the SSH host; SSH transport does not install or start it."
+      : "Start the daemon with: jagentdesk daemon start",
   };
 }
 
@@ -181,10 +149,7 @@ function readPidSocketTarget(jagentdeskHome: string): string | null {
   }
 }
 
-function resolveConfiguredIpcDaemonHost(
-  env: NodeJS.ProcessEnv,
-  jagentdeskHome: string,
-): string | null {
+function resolveConfiguredIpcDaemonHost(env: NodeJS.ProcessEnv, jagentdeskHome: string): string | null {
   const directEnvHost = normalizeDaemonHost(env.JAGENTDESK_LISTEN ?? "");
   if (isIpcDaemonHost(directEnvHost)) {
     return directEnvHost;
@@ -200,15 +165,12 @@ function resolveConfiguredIpcDaemonHost(
   return isIpcDaemonHost(configuredHost) ? configuredHost : null;
 }
 
-function resolveConfiguredTcpDaemonHost(
-  env: NodeJS.ProcessEnv,
-  jagentdeskHome: string,
-): string | null {
+function resolveConfiguredTcpDaemonHost(env: NodeJS.ProcessEnv, jagentdeskHome: string): string | null {
   const configuredHost = normalizeDaemonHost(loadConfig(jagentdeskHome, { env }).listen);
   if (!isTcpDaemonHost(configuredHost)) {
     return null;
   }
-  return configuredHost === `127.0.0.1:${DEFAULT_JAGENTDESK_DAEMON_PORT}` ? null : configuredHost;
+  return configuredHost === "127.0.0.1:6767" ? null : configuredHost;
 }
 
 export function resolveDefaultDaemonHosts(env: NodeJS.ProcessEnv = process.env): string[] {
@@ -315,14 +277,8 @@ async function tryConnectHost(
   clientId: string,
   timeout: number,
   nodeWebSocketFactory: ReturnType<typeof createNodeWebSocketFactory>,
-  capabilities?: Record<string, unknown>,
 ): Promise<{ client: DaemonClient } | { error: unknown }> {
   const target = resolveDaemonTarget(host);
-  // ADR-0010: a daemon that enforces local device pairing issues a challenge on
-  // direct/loopback too. Carry the CLI device signer so we can answer it. This
-  // is backward-compatible: when the daemon issues no challenge (gate off or
-  // old daemon), the client falls back to sending a plain hello on open.
-  const keypair = loadOrCreateCliDeviceKeypair(resolveJAgentDeskHome());
   const client = new DaemonClient({
     url: target.url,
     clientId,
@@ -330,7 +286,6 @@ async function tryConnectHost(
     appVersion: resolveCliVersion(),
     password,
     connectTimeoutMs: timeout,
-    ...(capabilities ? { capabilities: capabilities as DaemonClientConfig["capabilities"] } : {}),
     webSocketFactory: (
       url: string,
       config?: { headers?: Record<string, string>; protocols?: string[] },
@@ -341,19 +296,6 @@ async function tryConnectHost(
         ...(target.type === "ipc" ? { socketPath: target.socketPath } : {}),
       }),
     reconnect: { enabled: false },
-    expectChallenge: true,
-    // The daemon issues the local challenge synchronously on connect, so a short
-    // wait is enough; if none arrives (gate off / old daemon) fall back to a
-    // plain hello so the ordinary local connection keeps working.
-    challengeWaitFallbackMs: 750,
-    unsignedHelloFallbackOnChallengeTimeout: true,
-    deviceSigning: {
-      devicePublicKeyB64: keypair.publicKeyB64,
-      signNonce: (nonce: string) =>
-        sign(null, Buffer.from(nonce, "utf8"), createPrivateKey(keypair.privateKeyPem)).toString(
-          "base64",
-        ),
-    },
   });
 
   try {
@@ -365,15 +307,19 @@ async function tryConnectHost(
   }
 }
 
-async function connectViaTailnetOffer(
-  offer: TailnetConnectionOffer,
+async function connectViaRelayOffer(
+  offer: ConnectionOffer,
   clientId: string,
   timeout: number,
   nodeWebSocketFactory: ReturnType<typeof createNodeWebSocketFactory>,
 ): Promise<DaemonClient> {
-  const url = buildDaemonWebSocketUrl(offer.tailnetAddress, { useTls: offer.useTls ?? false });
+  const url = buildRelayWebSocketUrl({
+    endpoint: offer.relay.endpoint,
+    serverId: offer.serverId,
+    role: "client",
+    useTls: offer.relay.useTls ?? shouldUseTlsForDefaultHostedRelay(offer.relay.endpoint),
+  });
 
-  const keypair = loadOrCreateCliDeviceKeypair(resolveJAgentDeskHome());
   const client = new DaemonClient({
     url,
     clientId,
@@ -384,20 +330,9 @@ async function connectViaTailnetOffer(
       target: string,
       config?: { headers?: Record<string, string>; protocols?: string[] },
     ) => nodeWebSocketFactory(target, { headers: config?.headers, protocols: config?.protocols }),
+    e2ee: { enabled: true, daemonPublicKeyB64: offer.daemonPublicKeyB64 },
     reconnect: { enabled: false },
-    expectChallenge: true,
-    deviceSigning: {
-      devicePublicKeyB64: keypair.publicKeyB64,
-      signNonce: (nonce: string) =>
-        sign(null, Buffer.from(nonce, "utf8"), createPrivateKey(keypair.privateKeyPem)).toString(
-          "base64",
-        ),
-    },
-    pairingRegistration: {
-      daemonPublicKeyB64: offer.daemonPublicKeyB64,
-      deviceName: "JAgentDesk CLI",
-    },
-  } as DaemonClientConfig);
+  });
 
   try {
     await client.connect();
@@ -406,9 +341,7 @@ async function connectViaTailnetOffer(
     await client.close().catch(() => {});
     const message = error instanceof Error ? error.message : String(error);
     const lastError = client.lastError ? ` (${client.lastError})` : "";
-    throw new Error(`Failed to connect via tailnet offer: ${message}${lastError}`, {
-      cause: error,
-    });
+    throw new Error(`Failed to connect via relay offer: ${message}${lastError}`, { cause: error });
   }
 }
 
@@ -428,9 +361,27 @@ export async function connectToDaemon(options?: ConnectOptions): Promise<DaemonC
   const nodeWebSocketFactory = createNodeWebSocketFactory();
 
   const explicitHost = options?.host ?? process.env.JAGENTDESK_HOST;
+  if (explicitHost?.trim().startsWith("ssh://")) {
+    const target = parseSshTransportUri(explicitHost.trim());
+    const tunnel = await createSshTunnel(target);
+    const password = resolveDaemonPassword(explicitHost);
+    const result = await tryConnectHost(
+      tunnel.endpoint,
+      password,
+      clientId,
+      timeout,
+      nodeWebSocketFactory,
+    );
+    if ("client" in result) return result.client;
+
+    const failure = tunnel.failureDetail();
+    tunnel.close();
+    if (failure) throw new Error(`SSH connection failed: ${failure}`, { cause: result.error });
+    throw result.error;
+  }
   const offer = parseHostOfferOrNull(explicitHost);
   if (offer) {
-    return connectViaTailnetOffer(offer, clientId, timeout, nodeWebSocketFactory);
+    return connectViaRelayOffer(offer, clientId, timeout, nodeWebSocketFactory);
   }
 
   const hosts = resolveDaemonHostCandidates(options);
@@ -442,14 +393,7 @@ export async function connectToDaemon(options?: ConnectOptions): Promise<DaemonC
     }
     const host = hosts[index];
     const password = resolveDaemonPassword(host);
-    const result = await tryConnectHost(
-      host,
-      password,
-      clientId,
-      timeout,
-      nodeWebSocketFactory,
-      options?.capabilities,
-    );
+    const result = await tryConnectHost(host, password, clientId, timeout, nodeWebSocketFactory);
     if ("client" in result) {
       return result.client;
     }

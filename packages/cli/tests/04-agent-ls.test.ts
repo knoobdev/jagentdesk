@@ -72,8 +72,11 @@ try {
       output.toLowerCase().includes("connect") ||
       output.toLowerCase().includes("cannot");
     assert(hasError, "error message should mention connection issue");
-    assert(output.includes("--host <host:port>"), "error message should mention --host");
-    assert(output.includes("JAGENTDESK_HOST"), "error message should mention JAGENTDESK_HOST");
+    assert.match(
+      output,
+      /--host <host:port>.*JAGENTDESK_HOST/s,
+      "the recovery message should explain both remote connection inputs",
+    );
     console.log("✓ jagentdesk ls handles daemon not running\n");
   }
 

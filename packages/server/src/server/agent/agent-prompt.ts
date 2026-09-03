@@ -423,6 +423,10 @@ export function setupFinishNotification(params: SetupFinishNotificationParams): 
         return;
       }
 
+      if (event.type === "timeline_replacement") {
+        return;
+      }
+
       if (event.event.type === "permission_requested") {
         notifySafely("needs permission");
       }

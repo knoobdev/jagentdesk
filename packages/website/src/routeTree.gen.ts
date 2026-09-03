@@ -10,7 +10,9 @@
 
 import { Route as rootRouteImport } from "./routes/__root";
 import { Route as VtcodeRouteImport } from "./routes/vtcode";
+import { Route as TermsRouteImport } from "./routes/terms";
 import { Route as StakpakRouteImport } from "./routes/stakpak";
+import { Route as SponsorRouteImport } from "./routes/sponsor";
 import { Route as SigitRouteImport } from "./routes/sigit";
 import { Route as QwenCodeRouteImport } from "./routes/qwen-code";
 import { Route as QoderRouteImport } from "./routes/qoder";
@@ -25,6 +27,7 @@ import { Route as MinionCodeRouteImport } from "./routes/minion-code";
 import { Route as KimiRouteImport } from "./routes/kimi";
 import { Route as KiloRouteImport } from "./routes/kilo";
 import { Route as JunieRouteImport } from "./routes/junie";
+import { Route as HubRouteImport } from "./routes/hub";
 import { Route as HermesRouteImport } from "./routes/hermes";
 import { Route as GrokRouteImport } from "./routes/grok";
 import { Route as GooseRouteImport } from "./routes/goose";
@@ -47,6 +50,7 @@ import { Route as CodexRouteImport } from "./routes/codex";
 import { Route as CodebuddyRouteImport } from "./routes/codebuddy";
 import { Route as ClineRouteImport } from "./routes/cline";
 import { Route as ClaudeCodeRouteImport } from "./routes/claude-code";
+import { Route as ChangelogRouteImport } from "./routes/changelog";
 import { Route as BlogRouteImport } from "./routes/blog";
 import { Route as AutohandRouteImport } from "./routes/autohand";
 import { Route as AuggieRouteImport } from "./routes/auggie";
@@ -71,9 +75,19 @@ const VtcodeRoute = VtcodeRouteImport.update({
   path: "/vtcode",
   getParentRoute: () => rootRouteImport,
 } as any);
+const TermsRoute = TermsRouteImport.update({
+  id: "/terms",
+  path: "/terms",
+  getParentRoute: () => rootRouteImport,
+} as any);
 const StakpakRoute = StakpakRouteImport.update({
   id: "/stakpak",
   path: "/stakpak",
+  getParentRoute: () => rootRouteImport,
+} as any);
+const SponsorRoute = SponsorRouteImport.update({
+  id: "/sponsor",
+  path: "/sponsor",
   getParentRoute: () => rootRouteImport,
 } as any);
 const SigitRoute = SigitRouteImport.update({
@@ -144,6 +158,11 @@ const KiloRoute = KiloRouteImport.update({
 const JunieRoute = JunieRouteImport.update({
   id: "/junie",
   path: "/junie",
+  getParentRoute: () => rootRouteImport,
+} as any);
+const HubRoute = HubRouteImport.update({
+  id: "/hub",
+  path: "/hub",
   getParentRoute: () => rootRouteImport,
 } as any);
 const HermesRoute = HermesRouteImport.update({
@@ -256,6 +275,11 @@ const ClaudeCodeRoute = ClaudeCodeRouteImport.update({
   path: "/claude-code",
   getParentRoute: () => rootRouteImport,
 } as any);
+const ChangelogRoute = ChangelogRouteImport.update({
+  id: "/changelog",
+  path: "/changelog",
+  getParentRoute: () => rootRouteImport,
+} as any);
 const BlogRoute = BlogRouteImport.update({
   id: "/blog",
   path: "/blog",
@@ -357,6 +381,7 @@ export interface FileRoutesByFullPath {
   "/auggie": typeof AuggieRoute;
   "/autohand": typeof AutohandRoute;
   "/blog": typeof BlogRouteWithChildren;
+  "/changelog": typeof ChangelogRoute;
   "/claude-code": typeof ClaudeCodeRoute;
   "/cline": typeof ClineRoute;
   "/codebuddy": typeof CodebuddyRoute;
@@ -379,6 +404,7 @@ export interface FileRoutesByFullPath {
   "/goose": typeof GooseRoute;
   "/grok": typeof GrokRoute;
   "/hermes": typeof HermesRoute;
+  "/hub": typeof HubRoute;
   "/junie": typeof JunieRoute;
   "/kilo": typeof KiloRoute;
   "/kimi": typeof KimiRoute;
@@ -393,7 +419,9 @@ export interface FileRoutesByFullPath {
   "/qoder": typeof QoderRoute;
   "/qwen-code": typeof QwenCodeRoute;
   "/sigit": typeof SigitRoute;
+  "/sponsor": typeof SponsorRoute;
   "/stakpak": typeof StakpakRoute;
+  "/terms": typeof TermsRoute;
   "/vtcode": typeof VtcodeRoute;
   "/alternatives/claude-desktop": typeof AlternativesClaudeDesktopRoute;
   "/alternatives/codex-app": typeof AlternativesCodexAppRoute;
@@ -414,6 +442,7 @@ export interface FileRoutesByTo {
   "/amp": typeof AmpRoute;
   "/auggie": typeof AuggieRoute;
   "/autohand": typeof AutohandRoute;
+  "/changelog": typeof ChangelogRoute;
   "/claude-code": typeof ClaudeCodeRoute;
   "/cline": typeof ClineRoute;
   "/codebuddy": typeof CodebuddyRoute;
@@ -435,6 +464,7 @@ export interface FileRoutesByTo {
   "/goose": typeof GooseRoute;
   "/grok": typeof GrokRoute;
   "/hermes": typeof HermesRoute;
+  "/hub": typeof HubRoute;
   "/junie": typeof JunieRoute;
   "/kilo": typeof KiloRoute;
   "/kimi": typeof KimiRoute;
@@ -449,7 +479,9 @@ export interface FileRoutesByTo {
   "/qoder": typeof QoderRoute;
   "/qwen-code": typeof QwenCodeRoute;
   "/sigit": typeof SigitRoute;
+  "/sponsor": typeof SponsorRoute;
   "/stakpak": typeof StakpakRoute;
+  "/terms": typeof TermsRoute;
   "/vtcode": typeof VtcodeRoute;
   "/alternatives/claude-desktop": typeof AlternativesClaudeDesktopRoute;
   "/alternatives/codex-app": typeof AlternativesCodexAppRoute;
@@ -472,6 +504,7 @@ export interface FileRoutesById {
   "/auggie": typeof AuggieRoute;
   "/autohand": typeof AutohandRoute;
   "/blog": typeof BlogRouteWithChildren;
+  "/changelog": typeof ChangelogRoute;
   "/claude-code": typeof ClaudeCodeRoute;
   "/cline": typeof ClineRoute;
   "/codebuddy": typeof CodebuddyRoute;
@@ -494,6 +527,7 @@ export interface FileRoutesById {
   "/goose": typeof GooseRoute;
   "/grok": typeof GrokRoute;
   "/hermes": typeof HermesRoute;
+  "/hub": typeof HubRoute;
   "/junie": typeof JunieRoute;
   "/kilo": typeof KiloRoute;
   "/kimi": typeof KimiRoute;
@@ -508,7 +542,9 @@ export interface FileRoutesById {
   "/qoder": typeof QoderRoute;
   "/qwen-code": typeof QwenCodeRoute;
   "/sigit": typeof SigitRoute;
+  "/sponsor": typeof SponsorRoute;
   "/stakpak": typeof StakpakRoute;
+  "/terms": typeof TermsRoute;
   "/vtcode": typeof VtcodeRoute;
   "/alternatives/claude-desktop": typeof AlternativesClaudeDesktopRoute;
   "/alternatives/codex-app": typeof AlternativesCodexAppRoute;
@@ -532,6 +568,7 @@ export interface FileRouteTypes {
     | "/auggie"
     | "/autohand"
     | "/blog"
+    | "/changelog"
     | "/claude-code"
     | "/cline"
     | "/codebuddy"
@@ -554,6 +591,7 @@ export interface FileRouteTypes {
     | "/goose"
     | "/grok"
     | "/hermes"
+    | "/hub"
     | "/junie"
     | "/kilo"
     | "/kimi"
@@ -568,7 +606,9 @@ export interface FileRouteTypes {
     | "/qoder"
     | "/qwen-code"
     | "/sigit"
+    | "/sponsor"
     | "/stakpak"
+    | "/terms"
     | "/vtcode"
     | "/alternatives/claude-desktop"
     | "/alternatives/codex-app"
@@ -589,6 +629,7 @@ export interface FileRouteTypes {
     | "/amp"
     | "/auggie"
     | "/autohand"
+    | "/changelog"
     | "/claude-code"
     | "/cline"
     | "/codebuddy"
@@ -610,6 +651,7 @@ export interface FileRouteTypes {
     | "/goose"
     | "/grok"
     | "/hermes"
+    | "/hub"
     | "/junie"
     | "/kilo"
     | "/kimi"
@@ -624,7 +666,9 @@ export interface FileRouteTypes {
     | "/qoder"
     | "/qwen-code"
     | "/sigit"
+    | "/sponsor"
     | "/stakpak"
+    | "/terms"
     | "/vtcode"
     | "/alternatives/claude-desktop"
     | "/alternatives/codex-app"
@@ -646,6 +690,7 @@ export interface FileRouteTypes {
     | "/auggie"
     | "/autohand"
     | "/blog"
+    | "/changelog"
     | "/claude-code"
     | "/cline"
     | "/codebuddy"
@@ -668,6 +713,7 @@ export interface FileRouteTypes {
     | "/goose"
     | "/grok"
     | "/hermes"
+    | "/hub"
     | "/junie"
     | "/kilo"
     | "/kimi"
@@ -682,7 +728,9 @@ export interface FileRouteTypes {
     | "/qoder"
     | "/qwen-code"
     | "/sigit"
+    | "/sponsor"
     | "/stakpak"
+    | "/terms"
     | "/vtcode"
     | "/alternatives/claude-desktop"
     | "/alternatives/codex-app"
@@ -705,6 +753,7 @@ export interface RootRouteChildren {
   AuggieRoute: typeof AuggieRoute;
   AutohandRoute: typeof AutohandRoute;
   BlogRoute: typeof BlogRouteWithChildren;
+  ChangelogRoute: typeof ChangelogRoute;
   ClaudeCodeRoute: typeof ClaudeCodeRoute;
   ClineRoute: typeof ClineRoute;
   CodebuddyRoute: typeof CodebuddyRoute;
@@ -727,6 +776,7 @@ export interface RootRouteChildren {
   GooseRoute: typeof GooseRoute;
   GrokRoute: typeof GrokRoute;
   HermesRoute: typeof HermesRoute;
+  HubRoute: typeof HubRoute;
   JunieRoute: typeof JunieRoute;
   KiloRoute: typeof KiloRoute;
   KimiRoute: typeof KimiRoute;
@@ -741,7 +791,9 @@ export interface RootRouteChildren {
   QoderRoute: typeof QoderRoute;
   QwenCodeRoute: typeof QwenCodeRoute;
   SigitRoute: typeof SigitRoute;
+  SponsorRoute: typeof SponsorRoute;
   StakpakRoute: typeof StakpakRoute;
+  TermsRoute: typeof TermsRoute;
   VtcodeRoute: typeof VtcodeRoute;
   AlternativesClaudeDesktopRoute: typeof AlternativesClaudeDesktopRoute;
   AlternativesCodexAppRoute: typeof AlternativesCodexAppRoute;
@@ -761,11 +813,25 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof VtcodeRouteImport;
       parentRoute: typeof rootRouteImport;
     };
+    "/terms": {
+      id: "/terms";
+      path: "/terms";
+      fullPath: "/terms";
+      preLoaderRoute: typeof TermsRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     "/stakpak": {
       id: "/stakpak";
       path: "/stakpak";
       fullPath: "/stakpak";
       preLoaderRoute: typeof StakpakRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/sponsor": {
+      id: "/sponsor";
+      path: "/sponsor";
+      fullPath: "/sponsor";
+      preLoaderRoute: typeof SponsorRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     "/sigit": {
@@ -864,6 +930,13 @@ declare module "@tanstack/react-router" {
       path: "/junie";
       fullPath: "/junie";
       preLoaderRoute: typeof JunieRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/hub": {
+      id: "/hub";
+      path: "/hub";
+      fullPath: "/hub";
+      preLoaderRoute: typeof HubRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     "/hermes": {
@@ -1018,6 +1091,13 @@ declare module "@tanstack/react-router" {
       path: "/claude-code";
       fullPath: "/claude-code";
       preLoaderRoute: typeof ClaudeCodeRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/changelog": {
+      id: "/changelog";
+      path: "/changelog";
+      fullPath: "/changelog";
+      preLoaderRoute: typeof ChangelogRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     "/blog": {
@@ -1181,6 +1261,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuggieRoute: AuggieRoute,
   AutohandRoute: AutohandRoute,
   BlogRoute: BlogRouteWithChildren,
+  ChangelogRoute: ChangelogRoute,
   ClaudeCodeRoute: ClaudeCodeRoute,
   ClineRoute: ClineRoute,
   CodebuddyRoute: CodebuddyRoute,
@@ -1203,6 +1284,7 @@ const rootRouteChildren: RootRouteChildren = {
   GooseRoute: GooseRoute,
   GrokRoute: GrokRoute,
   HermesRoute: HermesRoute,
+  HubRoute: HubRoute,
   JunieRoute: JunieRoute,
   KiloRoute: KiloRoute,
   KimiRoute: KimiRoute,
@@ -1217,7 +1299,9 @@ const rootRouteChildren: RootRouteChildren = {
   QoderRoute: QoderRoute,
   QwenCodeRoute: QwenCodeRoute,
   SigitRoute: SigitRoute,
+  SponsorRoute: SponsorRoute,
   StakpakRoute: StakpakRoute,
+  TermsRoute: TermsRoute,
   VtcodeRoute: VtcodeRoute,
   AlternativesClaudeDesktopRoute: AlternativesClaudeDesktopRoute,
   AlternativesCodexAppRoute: AlternativesCodexAppRoute,

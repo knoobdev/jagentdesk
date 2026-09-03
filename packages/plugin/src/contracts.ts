@@ -1,15 +1,21 @@
 import type { ComponentType } from "react";
 import type { JAgentDeskApi } from "@jagentdesk/client";
+import type { AgentTimelineItem } from "@jagentdesk/protocol/agent-types";
 import type { ZodType, input as ZodInput, output as ZodOutput } from "zod";
 import type { PluginRpcContract } from "./rpc.js";
 
 export interface PluginTheme {
   readonly colors: {
     readonly surface0: string;
+    readonly surface1: string;
+    readonly surface2: string;
+    readonly border: string;
     readonly foreground: string;
     readonly foregroundMuted: string;
     readonly accent: string;
     readonly accentForeground: string;
+    readonly statusSuccess: string;
+    readonly statusWarning: string;
     readonly statusDanger: string;
   };
 }
@@ -26,7 +32,21 @@ export interface PluginHostProps {
   };
 }
 
-export interface PluginSurfaceProps extends PluginHostProps {}
+interface PluginNavigableHostProps extends PluginHostProps {
+  /** Client-owned navigation. Undefined on older hosts; hide dependent affordances when absent. */
+  readonly navigation?: {
+    readonly openAgent: (input: { readonly agentId: string }) => void;
+    readonly openWorkspace: (input: { readonly workspaceId: string }) => void;
+  };
+}
+
+export interface PluginSurfaceProps extends PluginNavigableHostProps {}
+
+export interface PluginIconProps {
+  name: string;
+  size?: number;
+  color?: string;
+}
 
 export interface PluginWorkspaceSnapshot {
   readonly id: string;
@@ -76,16 +96,42 @@ interface PluginWorkspacePanelBase {
   locations?: readonly PluginPanelLocation[];
 }
 
-export interface PluginWorkspacePanelProps extends PluginHostProps {
+export interface PluginWorkspacePanelProps extends PluginNavigableHostProps {
   context: "workspace";
   workspaceId: string;
 }
 
-export interface PluginAgentPanelProps extends PluginHostProps {
+export interface PluginAgentPanelProps extends PluginNavigableHostProps {
   context: "agent";
   workspaceId: string;
   agentId: string;
 }
+
+export interface PluginComposerPillProps extends PluginHostProps {
+  workspaceId: string;
+  agentId: string;
+}
+
+export interface PluginComposerPillContribution {
+  id: string;
+  title: string;
+  workspaceId: string;
+  agentId: string;
+  Component: ComponentType<PluginComposerPillProps>;
+  onPress(): void | Promise<void>;
+}
+
+export interface PluginClientOpenPanelOptions extends PluginOpenPanelOptions {
+  workspaceId: string;
+  agentId?: string;
+}
+
+export interface PluginClientContext extends PluginCommandCapabilities {
+  addComposerPill(contribution: PluginComposerPillContribution): PluginCleanup;
+  openPanel(id: string, options: PluginClientOpenPanelOptions): void;
+}
+
+export type PluginClientContribution = (client: PluginClientContext) => PluginCleanup;
 
 export type PluginWorkspacePanelContribution =
   | (PluginWorkspacePanelBase & {
@@ -134,6 +180,57 @@ export interface PluginAttachmentSourceContribution {
   pickerTitle: string;
   searchPlaceholder: string;
   search: PluginRpcContract;
+}
+
+export type PluginTimelineData =
+  | null
+  | boolean
+  | number
+  | string
+  | PluginTimelineData[]
+  | { [key: string]: PluginTimelineData };
+
+export interface PluginTimelineItem {
+  type: "plugin";
+  kind: string;
+  version: number;
+  data: PluginTimelineData;
+}
+
+export interface PluginTimelineTransformResult {
+  items: PluginTimelineItem[];
+}
+
+export type PluginTimelineTransformerContribution<
+  ItemType extends AgentTimelineItem["type"] = AgentTimelineItem["type"],
+> = ItemType extends AgentTimelineItem["type"]
+  ? {
+      id: string;
+      query: {
+        itemType: ItemType;
+      };
+      transform(input: {
+        item: Extract<AgentTimelineItem, { type: ItemType }>;
+      }): PluginTimelineTransformResult | undefined;
+    }
+  : never;
+
+export interface PluginTimelineItemProps<Data = unknown> extends PluginHostProps {
+  agentId: string;
+  item: {
+    type: "plugin";
+    kind: string;
+    version: number;
+    data: Data;
+  };
+  timestamp: Date;
+}
+
+export interface PluginTimelineRendererContribution<Schema extends ZodType = ZodType> {
+  kind: string;
+  version: number;
+  schema: Schema;
+  Component: ComponentType<PluginTimelineItemProps<ZodOutput<Schema>>>;
 }
 
 export interface PluginCommandCapabilities {
@@ -199,8 +296,15 @@ export interface PluginContext {
   addSidebarItem(contribution: PluginSidebarContribution): void;
   addWorkspacePanel(contribution: PluginWorkspacePanelContribution): void;
   addCommandCenterItem(contribution: PluginCommandCenterItemContribution): void;
+  addClientSide(contribution: PluginClientContribution): void;
   addAttachmentSource(contribution: PluginAttachmentSourceContribution): void;
   addTheme(contribution: PluginThemeContribution): void;
+  addTimelineTransformer<ItemType extends AgentTimelineItem["type"]>(
+    contribution: PluginTimelineTransformerContribution<ItemType>,
+  ): void;
+  addTimelineRenderer<Schema extends ZodType>(
+    contribution: PluginTimelineRendererContribution<Schema>,
+  ): void;
 }
 
 export type PluginCleanup = () => void | Promise<void>;

@@ -8,7 +8,7 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
 const repoRoot = path.resolve(__dirname, "../..");
-const siteHost = "http://localhost:8082";
+const siteHost = "https://jagentdesk.local";
 
 function discoverDocsRoutes(): string[] {
   const docsDir = path.join(repoRoot, "public-docs");
@@ -40,10 +40,14 @@ function discoverAgentRoutes(): string[] {
     "__root",
     "agents",
     "blog",
+    "changelog",
     "docs",
     "download",
+    "hub",
     "index",
+    "sponsor",
     "privacy",
+    "terms",
   ]);
   return fs
     .readdirSync(routesDir, { withFileTypes: true })
@@ -79,8 +83,11 @@ function discoverBlogRoutes(): string[] {
 const sitemapPages = [
   "/",
   "/agents",
+  "/changelog",
   "/download",
+  "/hub",
   "/privacy",
+  "/terms",
   ...discoverAgentRoutes(),
   ...discoverAlternativeRoutes(),
   ...discoverDocsRoutes(),

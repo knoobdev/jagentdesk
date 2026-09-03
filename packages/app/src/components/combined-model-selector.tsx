@@ -3,16 +3,18 @@ import { Pressable, Text, View, type PressableStateCallbackType } from "react-na
 import { useTranslation } from "react-i18next";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type { AgentProvider } from "@jagentdesk/protocol/agent-types";
+import type { AgentProfilePicker, AgentProfileSeed } from "@/agent-profiles";
 import { ComboboxTrigger } from "@/components/ui/combobox-trigger";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { Combobox, type ComboboxOption, type ComboboxProps } from "@/components/ui/combobox";
 import { ModelBrowser, ModelProviderGlyph, useModelBrowser } from "@/components/model-browser";
+import { resolveModelBrowserScrolling } from "@/components/model-browser-view";
+import { useIsCompactFormFactor } from "@/constants/layout";
 import { isNative, isWeb } from "@/constants/platform";
 import type { ProviderSelectorProvider } from "@/provider-selection/provider-selection";
 import { ICON_SIZE, type Theme } from "@/styles/theme";
 
 const EMPTY_COMBOBOX_OPTIONS: ComboboxOption[] = [];
-const EMPTY_FAVORITE_KEYS = new Set<string>();
 const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
 
 const foregroundMutedMapping = (theme: Theme) => ({
@@ -27,8 +29,11 @@ interface CombinedModelSelectorProps {
   selectedModel: string;
   onSelect: (provider: AgentProvider, modelId: string) => void;
   isLoading: boolean;
-  favoriteKeys?: Set<string>;
-  onToggleFavorite?: (provider: string, modelId: string) => void;
+  profiles?: AgentProfilePicker | null;
+  onApplyProfile?: (profileId: string) => void;
+  onEditProfiles?: () => void;
+  onCreateProfile?: (seed: AgentProfileSeed) => void;
+  onEditProfile?: (profileId: string) => void;
   renderTrigger?: (input: {
     selectedModelLabel: string;
     onPress: () => void;
@@ -66,8 +71,11 @@ export function CombinedModelSelector({
   selectedModel,
   onSelect,
   isLoading,
-  favoriteKeys = EMPTY_FAVORITE_KEYS,
-  onToggleFavorite,
+  profiles = null,
+  onApplyProfile,
+  onEditProfiles,
+  onCreateProfile,
+  onEditProfile,
   renderTrigger,
   onOpen,
   onClose,
@@ -81,6 +89,8 @@ export function CombinedModelSelector({
   toolbar,
 }: CombinedModelSelectorProps) {
   const { t } = useTranslation();
+  const isCompact = useIsCompactFormFactor();
+  const modelBrowserScrolling = resolveModelBrowserScrolling({ isNative, isCompact });
   const anchorRef = useRef<View>(null);
   const [isOpen, setIsOpen] = useState(false);
   const [isContentReady, setIsContentReady] = useState(isWeb);
@@ -89,7 +99,7 @@ export function CombinedModelSelector({
     selectedProvider,
     selectedModel,
     isLoading,
-    favoriteKeys,
+    profiles,
     serverId,
   });
   const { prepareToOpen, reset } = browser;
@@ -153,13 +163,46 @@ export function CombinedModelSelector({
     [disabled, isOpen, renderTrigger, triggerFill],
   );
 
+  const handleApplyProfile = useCallback(
+    (profileId: string) => {
+      onApplyProfile?.(profileId);
+      handleOpenChange(false);
+    },
+    [handleOpenChange, onApplyProfile],
+  );
+
+  const handleEditProfiles = useCallback(() => {
+    handleOpenChange(false);
+    onEditProfiles?.();
+  }, [handleOpenChange, onEditProfiles]);
+
+  const handleCreateProfile = useCallback(
+    (seed: AgentProfileSeed) => {
+      handleOpenChange(false);
+      onCreateProfile?.(seed);
+    },
+    [handleOpenChange, onCreateProfile],
+  );
+
+  const handleEditProfile = useCallback(
+    (profileId: string) => {
+      handleOpenChange(false);
+      onEditProfile?.(profileId);
+    },
+    [handleOpenChange, onEditProfile],
+  );
+
   const selectorBody = isContentReady ? (
     <ModelBrowser
       state={browser}
       onSelect={handleSelect}
-      onToggleFavorite={onToggleFavorite}
+      onApplyProfile={handleApplyProfile}
+      onEditProfiles={onEditProfiles ? handleEditProfiles : undefined}
+      onCreateProfile={onCreateProfile ? handleCreateProfile : undefined}
+      onEditProfile={onEditProfile ? handleEditProfile : undefined}
       onRetryProvider={onRetryProvider}
       isRetryingProvider={isRetryingProvider}
+      scrolling={modelBrowserScrolling}
     />
   ) : (
     <View style={styles.sheetLoadingState}>
@@ -230,7 +273,9 @@ export function CombinedModelSelector({
         anchorRef={anchorRef}
         desktopPlacement={desktopPlacement}
         desktopMinWidth={desktopMinWidth}
+        desktopLockWidth
         desktopFixedHeight={browser.desktopFixedHeight}
+        desktopChildrenScrollEnabled={false}
         header={browser.header}
         mobileChildrenScrollEnabled={!browser.isProviderView || !isNative}
         mobileChildrenContentContainerStyle={styles.mobileBrowserContent}
@@ -279,7 +324,7 @@ const styles = StyleSheet.create((theme) => ({
     minWidth: 0,
     flexShrink: 1,
     color: theme.colors.foregroundMuted,
-    fontSize: theme.fontSize.sm,
+    fontSize: theme.fontSize.base,
     fontWeight: theme.fontWeight.normal,
   },
   customTriggerWrapper: {
@@ -303,6 +348,6 @@ const styles = StyleSheet.create((theme) => ({
   },
   sheetLoadingText: {
     color: theme.colors.foregroundMuted,
-    fontSize: theme.fontSize.sm,
+    fontSize: theme.fontSize.base,
   },
 }));

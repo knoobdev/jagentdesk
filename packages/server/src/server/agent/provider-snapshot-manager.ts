@@ -6,18 +6,24 @@ import type { Logger } from "pino";
 
 import { expandTilde } from "../../utils/path.js";
 import { withTimeout } from "../../utils/promise-timeout.js";
-import type {
-  AgentClient,
-  AgentCreateConfigParent,
-  AgentMode,
-  AgentModelDefinition,
-  AgentProvider,
-  FetchCatalogOptions,
-  ProviderSnapshotEntry,
+import {
+  filterSelectableAgentModels,
+  type AgentClient,
+  type AgentCreateConfigParent,
+  type AgentMode,
+  type AgentModelDefinition,
+  type AgentProvider,
+  type FetchCatalogOptions,
+  type ProviderSnapshotEntry,
 } from "./agent-sdk-types.js";
+import {
+  raceProviderRefreshAbort,
+  runProviderRefreshWithDeadline,
+} from "./provider-refresh-deadline.js";
 import type { ManagedAgent } from "./agent-manager.js";
 import type { WorkspaceGitService } from "../workspace-git-service.js";
 import type { ManagedProcessRegistry } from "../managed-processes/managed-processes.js";
+import type { OpenCodeBridge } from "./providers/opencode/bridge.js";
 import type {
   AgentProviderRuntimeSettingsMap,
   ProviderOverride,
@@ -34,28 +40,34 @@ import {
   formatProviderDiagnosticError,
 } from "./providers/diagnostic-utils.js";
 import type { MutableDaemonConfig } from "../daemon-config-store.js";
+import type { HubExecutionAgentValidationIssue } from "@jagentdesk/protocol/messages";
+import {
+  type AgentConfigurationValidationInput,
+  validateAgentConfigurationAgainstProvider,
+} from "./agent-configuration-validator.js";
 
-const DEFAULT_REFRESH_TIMEOUT_MS = 60_000;
+const DEFAULT_REFRESH_TIMEOUT_MS = 120_000;
+const MAX_REFRESH_TIMEOUT_MS = 2_147_483_647;
 const DEFAULT_DIAGNOSTIC_TIMEOUT_MS = 120_000;
-const REFRESH_TIMEOUT_ENV_VAR = "JAGENTDESK_PROVIDER_REFRESH_TIMEOUT_MS";
+const PROVIDER_REFRESH_DEADLINE_ENV = "JAGENTDESK_PROVIDER_REFRESH_TIMEOUT_MS";
 export const GLOBAL_PROVIDER_SNAPSHOT_KEY = "jagentdesk:global";
 
-// Provider refresh probes can be slow on cold starts (e.g. Copilot's first
-// `copilot --acp` invocation, OpenCode workspace probes with many MCP servers).
-// Allow operators to bump the ceiling via env var without rebuilding.
-function resolveRefreshTimeoutMs(option: number | undefined): number {
-  if (typeof option === "number" && Number.isFinite(option) && option > 0) {
-    return option;
-  }
-  const fromEnv = process.env[REFRESH_TIMEOUT_ENV_VAR];
-  if (fromEnv) {
-    // Number() handles scientific notation (e.g. "6e4") which parseInt would silently truncate.
-    const parsed = Number(fromEnv);
-    if (Number.isFinite(parsed) && parsed > 0) {
-      return parsed;
-    }
-  }
-  return DEFAULT_REFRESH_TIMEOUT_MS;
+function validRefreshDeadline(value: unknown): number | undefined {
+  return typeof value === "number" &&
+    Number.isSafeInteger(value) &&
+    value > 0 &&
+    value <= MAX_REFRESH_TIMEOUT_MS
+    ? value
+    : undefined;
+}
+
+function providerRefreshDeadline(configured: number | undefined): number {
+  const explicit = validRefreshDeadline(configured);
+  if (explicit !== undefined) return explicit;
+  return (
+    validRefreshDeadline(Number(process.env[PROVIDER_REFRESH_DEADLINE_ENV])) ??
+    DEFAULT_REFRESH_TIMEOUT_MS
+  );
 }
 
 function resolveDiagnosticTimeoutMs(option: number | undefined, refreshTimeoutMs: number): number {
@@ -69,15 +81,9 @@ function omitProviderOverrides(
   overrides: Record<string, ProviderOverride> | undefined,
   providers: readonly string[],
 ): Record<string, ProviderOverride> | undefined {
-  if (!overrides || providers.length === 0) {
-    return overrides;
-  }
-
+  if (!overrides || providers.length === 0) return overrides;
   const nextOverrides = { ...overrides };
-  for (const provider of providers) {
-    delete nextOverrides[provider];
-  }
-
+  for (const provider of providers) delete nextOverrides[provider];
   return Object.keys(nextOverrides).length > 0 ? nextOverrides : undefined;
 }
 
@@ -93,6 +99,7 @@ export interface ProviderSnapshotManagerOptions {
   extraClients?: Partial<Record<AgentProvider, AgentClient>>;
   refreshTimeoutMs?: number;
   diagnosticTimeoutMs?: number;
+  openCodeBridge?: OpenCodeBridge;
 }
 
 interface ProviderSnapshotRefreshOptions {
@@ -113,6 +120,13 @@ interface ProviderSnapshotReadOptions {
 
 interface ApplyMutableProviderConfigOptions {
   removeProviders?: readonly string[];
+  replace?: boolean;
+}
+
+export interface StagedMutableProviderConfig {
+  agentManagerState: AgentManagerProviderState;
+  publish(): void;
+  rollback(): void;
 }
 
 interface ProviderSnapshotProviderOptions {
@@ -148,7 +162,13 @@ export interface ProviderDiagnosticResult {
 
 export interface AgentManagerProviderState {
   providerDefinitions: Partial<
-    Record<AgentProvider, { enabled: boolean; derivedFromProviderId: string | null }>
+    Record<
+      AgentProvider,
+      Pick<
+        ProviderDefinition,
+        "enabled" | "derivedFromProviderId" | "validateOptions" | "applyOptions" | "applyToolPolicy"
+      >
+    >
   >;
   clients: Partial<Record<AgentProvider, AgentClient>>;
 }
@@ -163,6 +183,16 @@ interface ProviderLoad {
   promise: Promise<void>;
 }
 
+interface MutableProviderState {
+  baseProviderOverrides: Record<string, ProviderOverride> | undefined;
+  runtimeSettings: AgentProviderRuntimeSettingsMap | undefined;
+  providerOverrides: Record<string, ProviderOverride> | undefined;
+  providerRegistry: Record<AgentProvider, ProviderDefinition>;
+  providerClients: Record<AgentProvider, AgentClient>;
+  snapshots: Map<string, Map<AgentProvider, ProviderSnapshotEntry>>;
+  providerLoads: Map<string, Map<AgentProvider, ProviderLoad>>;
+}
+
 type ProviderCatalogScope = { scope: "global" } | { scope: "workspace"; cwd: string };
 
 interface ProviderSnapshotTarget {
@@ -175,11 +205,12 @@ export class ProviderSnapshotManager {
   private readonly providerLoads = new Map<string, Map<AgentProvider, ProviderLoad>>();
   private readonly events = new EventEmitter();
   private destroyed = false;
-  private readonly refreshTimeoutMs: number;
-  private readonly diagnosticTimeoutMs: number;
+  private refreshTimeoutMs: number;
+  private diagnosticTimeoutMs: number;
   private readonly logger: Logger;
   private readonly workspaceGitService?: Pick<WorkspaceGitService, "resolveRepoRoot">;
   private readonly managedProcesses?: ManagedProcessRegistry;
+  private readonly openCodeBridge?: OpenCodeBridge;
   private readonly isDev: boolean;
   private readonly extraClients: Partial<Record<AgentProvider, AgentClient>>;
   private runtimeSettings: AgentProviderRuntimeSettingsMap | undefined;
@@ -187,23 +218,26 @@ export class ProviderSnapshotManager {
   private baseProviderOverrides: Record<string, ProviderOverride> | undefined;
   private providerRegistry: Record<AgentProvider, ProviderDefinition>;
   private providerClients: Record<AgentProvider, AgentClient>;
+  private readonly ownedClients = new Set<AgentClient>();
 
   constructor(options: ProviderSnapshotManagerOptions) {
     this.logger = options.logger;
     this.workspaceGitService = options.workspaceGitService;
     this.managedProcesses = options.managedProcesses;
+    this.openCodeBridge = options.openCodeBridge;
     this.isDev = options.isDev === true;
     this.extraClients = options.extraClients ?? {};
     this.runtimeSettings = options.runtimeSettings;
     this.providerOverrides = options.providerOverrides;
     this.baseProviderOverrides = options.providerOverrides;
-    this.refreshTimeoutMs = resolveRefreshTimeoutMs(options.refreshTimeoutMs);
+    this.refreshTimeoutMs = providerRefreshDeadline(options.refreshTimeoutMs);
     this.diagnosticTimeoutMs = resolveDiagnosticTimeoutMs(
       options.diagnosticTimeoutMs,
       this.refreshTimeoutMs,
     );
     this.providerRegistry = this.buildRegistry();
     this.providerClients = { ...this.extraClients } as Record<AgentProvider, AgentClient>;
+    for (const client of Object.values(this.providerClients)) this.ownedClients.add(client);
   }
 
   getSnapshot(cwd?: string): ProviderSnapshotEntry[] {
@@ -272,6 +306,9 @@ export class ProviderSnapshotManager {
       providerDefinitions[provider] = {
         enabled: definition.enabled,
         derivedFromProviderId: definition.derivedFromProviderId,
+        validateOptions: definition.validateOptions,
+        applyOptions: definition.applyOptions,
+        applyToolPolicy: definition.applyToolPolicy,
       };
       if (definition.enabled) {
         clients[provider] = this.ensureClient(provider, definition);
@@ -292,6 +329,7 @@ export class ProviderSnapshotManager {
     }
     const client = definition.createClient(this.logger);
     this.providerClients[provider] = client;
+    this.ownedClients.add(client);
     return client;
   }
 
@@ -315,9 +353,48 @@ export class ProviderSnapshotManager {
     return entry;
   }
 
+  async validateAgentConfiguration(
+    input: AgentConfigurationValidationInput,
+  ): Promise<HubExecutionAgentValidationIssue[]> {
+    if (!this.hasProvider(input.provider)) {
+      return [
+        {
+          path: ["provider"],
+          message: `Provider '${input.provider}' is not configured`,
+        },
+      ];
+    }
+
+    const provider = await this.getProvider({
+      provider: input.provider,
+      wait: true,
+    });
+    if (!provider.enabled) {
+      return [{ path: ["provider"], message: `Provider '${input.provider}' is disabled` }];
+    }
+    if (provider.status !== "ready") {
+      return [
+        {
+          path: ["provider"],
+          message:
+            provider.status === "error" && provider.error
+              ? provider.error
+              : `Provider '${input.provider}' is not available`,
+        },
+      ];
+    }
+
+    const definition = this.requireProvider(input.provider);
+    return validateAgentConfigurationAgainstProvider({
+      input,
+      provider,
+      validateOptions: definition.validateOptions,
+    });
+  }
+
   async listModels(input: ProviderSnapshotProviderOptions): Promise<AgentModelDefinition[]> {
     const entry = await this.getReadyProvider(input);
-    return entry.models ?? [];
+    return filterSelectableAgentModels(entry.models);
   }
 
   async listModes(input: ProviderSnapshotProviderOptions): Promise<AgentMode[]> {
@@ -392,24 +469,97 @@ export class ProviderSnapshotManager {
     mutableProviders: MutableDaemonConfig["providers"] | undefined,
     options: ApplyMutableProviderConfigOptions = {},
   ): AgentManagerProviderState {
-    this.baseProviderOverrides = omitProviderOverrides(
-      this.baseProviderOverrides,
-      options.removeProviders ?? [],
-    );
-    this.providerOverrides = applyMutableProviderConfigToOverrides(
-      this.baseProviderOverrides,
-      mutableProviders,
-    );
-    this.providerRegistry = this.buildRegistry();
-    this.providerClients = { ...this.extraClients } as Record<AgentProvider, AgentClient>;
-
-    for (const cwd of this.snapshots.keys()) {
-      this.providerLoads.delete(cwd);
-      this.snapshots.set(cwd, this.reconcileSnapshotForRegistry(cwd));
-      this.emitChange(cwd);
+    const staged = this.stageMutableProviderConfig(mutableProviders, options);
+    try {
+      staged.publish();
+      return staged.agentManagerState;
+    } catch (error) {
+      staged.rollback();
+      throw error;
     }
+  }
 
-    return this.getAgentManagerProviderState();
+  stageMutableProviderConfig(
+    mutableProviders: MutableDaemonConfig["providers"] | undefined,
+    options: ApplyMutableProviderConfigOptions = {},
+  ): StagedMutableProviderConfig {
+    const previous = this.captureMutableProviderState();
+    const snapshotCwds = Array.from(this.snapshots.keys());
+    try {
+      if (options.replace) {
+        this.baseProviderOverrides = undefined;
+        this.runtimeSettings = undefined;
+      } else {
+        this.baseProviderOverrides = omitProviderOverrides(
+          this.baseProviderOverrides,
+          options.removeProviders ?? [],
+        );
+      }
+      this.providerOverrides = applyMutableProviderConfigToOverrides(
+        this.baseProviderOverrides,
+        mutableProviders,
+      );
+      // The mutable config is the complete provider source after startup. Keeping
+      // startup-derived runtime settings here would retain removed command/env fields.
+      if (options.replace) this.runtimeSettings = undefined;
+      this.providerRegistry = this.buildRegistry();
+      this.providerClients = { ...this.extraClients } as Record<AgentProvider, AgentClient>;
+
+      for (const cwd of this.snapshots.keys()) {
+        this.providerLoads.delete(cwd);
+        this.snapshots.set(cwd, this.reconcileSnapshotForRegistry(cwd));
+      }
+
+      return {
+        agentManagerState: this.getAgentManagerProviderState(),
+        publish: () => {
+          for (const cwd of snapshotCwds) {
+            this.emitChange(cwd);
+            const target =
+              cwd === GLOBAL_PROVIDER_SNAPSHOT_KEY
+                ? createGlobalSnapshotTarget()
+                : createWorkspaceSnapshotTarget(cwd);
+            const providers = this.resolveProvidersToWarm(cwd);
+            if (providers.length > 0) void this.warmUp(target, providers);
+          }
+        },
+        rollback: () => this.restoreMutableProviderState(previous),
+      };
+    } catch (error) {
+      this.restoreMutableProviderState(previous);
+      throw error;
+    }
+  }
+
+  private captureMutableProviderState(): MutableProviderState {
+    return {
+      baseProviderOverrides: this.baseProviderOverrides,
+      runtimeSettings: this.runtimeSettings,
+      providerOverrides: this.providerOverrides,
+      providerRegistry: this.providerRegistry,
+      providerClients: this.providerClients,
+      // Preserve the inner map identities: in-flight refreshes close over them.
+      // Staging replaces active maps instead of mutating these originals.
+      snapshots: new Map(this.snapshots),
+      providerLoads: new Map(this.providerLoads),
+    };
+  }
+
+  private restoreMutableProviderState(previous: MutableProviderState): void {
+    this.baseProviderOverrides = previous.baseProviderOverrides;
+    this.runtimeSettings = previous.runtimeSettings;
+    this.providerOverrides = previous.providerOverrides;
+    this.providerRegistry = previous.providerRegistry;
+    this.providerClients = previous.providerClients;
+    this.snapshots.clear();
+    for (const [cwd, entries] of previous.snapshots) this.snapshots.set(cwd, entries);
+    this.providerLoads.clear();
+    for (const [cwd, loads] of previous.providerLoads) this.providerLoads.set(cwd, loads);
+  }
+
+  setRefreshTimeoutMs(refreshTimeoutMs: number | undefined): void {
+    this.refreshTimeoutMs = providerRefreshDeadline(refreshTimeoutMs);
+    this.diagnosticTimeoutMs = resolveDiagnosticTimeoutMs(undefined, this.refreshTimeoutMs);
   }
 
   on(event: "change", listener: ProviderSnapshotChangeListener): this {
@@ -426,11 +576,8 @@ export class ProviderSnapshotManager {
     // Materialize a client per enabled provider so provider-owned resources
     // (background processes, sockets, etc.) get a chance to release even when
     // a given provider hasn't been touched yet during this daemon's lifetime.
-    const state = this.getAgentManagerProviderState();
-    const clients = Object.values(state.clients).filter(
-      (client): client is AgentClient => client !== undefined,
-    );
-    await shutdownAgentClients(clients, this.logger);
+    this.getAgentManagerProviderState();
+    await shutdownAgentClients(this.ownedClients, this.logger);
   }
 
   destroy(): void {
@@ -446,6 +593,7 @@ export class ProviderSnapshotManager {
       providerOverrides: this.providerOverrides,
       workspaceGitService: this.workspaceGitService,
       managedProcesses: this.managedProcesses,
+      openCodeBridge: this.openCodeBridge,
       isDev: this.isDev,
     });
 
@@ -461,7 +609,7 @@ export class ProviderSnapshotManager {
           client.resolveCreateConfig?.bind(client) ?? definition.resolveCreateConfig,
         isCreateConfigUnattended:
           client.isCreateConfigUnattended?.bind(client) ?? definition.isCreateConfigUnattended,
-        fetchCatalog: client.fetchCatalog.bind(client),
+        fetchCatalog: (options, _client, context) => client.fetchCatalog(options, context),
       };
     }
 
@@ -601,18 +749,22 @@ export class ProviderSnapshotManager {
         defaultModeId: definition?.defaultModeId ?? null,
       };
 
-      if (!definition?.enabled || !current || current.status === "loading") {
+      if (!definition?.enabled) {
         entries.set(provider, {
           ...metadata,
           status: "unavailable",
-          enabled: definition?.enabled ?? true,
+          enabled: false,
         });
         continue;
       }
 
       entries.set(provider, {
-        ...current,
         ...metadata,
+        status: "loading",
+        enabled: true,
+        models: current?.models,
+        modes: current?.modes,
+        fetchedAt: current?.fetchedAt,
       });
     }
 
@@ -780,22 +932,25 @@ export class ProviderSnapshotManager {
       }
 
       const client = this.ensureClient(provider, definition);
-      const available = await withTimeout(
-        client.isAvailable(),
-        this.refreshTimeoutMs,
-        `Timed out checking ${definition.label} availability after ${this.refreshTimeoutMs}ms`,
-      );
-      if (!available) {
+      const catalog = await runProviderRefreshWithDeadline({
+        label: definition.label,
+        timeoutMs: this.refreshTimeoutMs,
+        operation: async (context) => {
+          const available = await context.runActivity("availability", () =>
+            raceProviderRefreshAbort(context.signal, client.isAvailable(context.signal)),
+          );
+          if (!available) {
+            return null;
+          }
+
+          const catalogOptions = createFetchCatalogOptions(catalogScope, force);
+          return await definition.fetchCatalog(catalogOptions, client, context);
+        },
+      });
+      if (!catalog) {
         setEntry({ ...base, status: "unavailable", enabled: true });
         return;
       }
-
-      const catalogOptions = createFetchCatalogOptions(catalogScope, force);
-      const catalog = await withTimeout(
-        definition.fetchCatalog({ ...catalogOptions, timeoutMs: this.refreshTimeoutMs }, client),
-        this.refreshTimeoutMs,
-        `Timed out refreshing ${definition.label} after ${this.refreshTimeoutMs}ms`,
-      );
 
       setEntry({
         ...base,

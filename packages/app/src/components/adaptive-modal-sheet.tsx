@@ -1,10 +1,10 @@
-import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode, Ref } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { Modal, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
-import type { StyleProp, TextInputProps, ViewStyle } from "react-native";
-import { StyleSheet, useUnistyles, withUnistyles } from "react-native-unistyles";
+import { Modal, Platform, Pressable, ScrollView, Text, View } from "react-native";
+import type { StyleProp, ViewStyle } from "react-native";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import {
   getOverlayRoot,
@@ -15,7 +15,7 @@ import {
 import {
   BottomSheetBackdrop,
   BottomSheetScrollView,
-  BottomSheetTextInput,
+  KEYBOARD_STATUS,
   useBottomSheetInternal,
   type BottomSheetBackgroundProps,
 } from "@gorhom/bottom-sheet";
@@ -23,12 +23,18 @@ import Animated, { useAnimatedStyle } from "react-native-reanimated";
 import { ArrowLeft, Search, X } from "lucide-react-native";
 import {
   IsolatedBottomSheetModal,
+  type ContextBridge,
   useIsolatedBottomSheetVisibility,
 } from "@/components/ui/isolated-bottom-sheet-modal";
-import { getCompactSheetSafeAreaPadding } from "@/components/adaptive-modal-sheet-layout";
-import { createControlGeometry } from "@/components/ui/control-geometry";
-import { isNative, isWeb } from "@/constants/platform";
+import {
+  getBottomSheetVisibleContentHeight,
+  getCompactSheetSafeAreaPadding,
+} from "@/components/adaptive-modal-sheet-layout";
+import { isWeb } from "@/constants/platform";
+import { useKeyboardVisibility } from "@/hooks/use-keyboard-visibility";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { AdaptiveTextInput } from "@/components/adaptive-text-input";
+export { AdaptiveTextInput, type AdaptiveTextInputProps } from "@/components/adaptive-text-input";
 
 // Horizontal indent token shared by the sheet header (title, back arrow,
 // leading icon, search input icon) and any row primitive rendered inside the
@@ -38,6 +44,8 @@ export const SHEET_HORIZONTAL_PADDING_SCALE = 6;
 
 export interface SheetHeaderSearch {
   onChange: (value: string) => void;
+  onFocus?: () => void;
+  onBlur?: () => void;
   resetKey?: string | number;
   placeholder?: string;
   autoFocus?: boolean;
@@ -105,11 +113,8 @@ const styles = StyleSheet.create((theme) => ({
     minWidth: 0,
   },
   title: {
-    fontSize: theme.fontSize.lg,
+    fontSize: theme.fontSize.base,
     fontWeight: theme.fontWeight.medium,
-  },
-  subtitle: {
-    fontSize: theme.fontSize.sm,
   },
   headerActions: {
     flexDirection: "row",
@@ -131,9 +136,13 @@ const styles = StyleSheet.create((theme) => ({
   // Horizontal padding matches the model picker's row indent: the picker uses
   // children mode (desktopChildrenScrollContent, no scroll padding), so the
   // row content starts at item.paddingHorizontal = spacing[3].
+  // The search row below owns the gap under the title: the input already
+  // carries its own vertical padding, so a paddingBottom here would stack on
+  // top of two more and push the title far off the field.
   inlineHeaderRow: {
     paddingHorizontal: theme.spacing[3],
-    paddingVertical: theme.spacing[2],
+    paddingTop: theme.spacing[2],
+    paddingBottom: 0,
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[2],
@@ -149,7 +158,7 @@ const styles = StyleSheet.create((theme) => ({
   },
   inlineTitle: {
     flex: 1,
-    fontSize: theme.fontSize.sm,
+    fontSize: theme.fontSize.base,
     fontWeight: theme.fontWeight.medium,
     color: theme.colors.foreground,
   },
@@ -157,7 +166,7 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
     paddingVertical: theme.spacing[2],
     color: theme.colors.foreground,
-    fontSize: theme.fontSize.sm,
+    fontSize: theme.fontSize.base,
   },
   desktopScrollContainer: {
     flexShrink: 1,
@@ -202,15 +211,6 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
     justifyContent: "space-between",
     gap: theme.spacing[2],
-  },
-  adaptiveInputOutline: {
-    ...createControlGeometry(theme).controlFocusRingColor,
-  },
-  adaptiveInputText: {
-    color: theme.colors.foreground,
-  },
-  adaptiveInputPlaceholder: {
-    color: theme.colors.foregroundMuted,
   },
 }));
 
@@ -261,14 +261,15 @@ function BottomSheetVisibleContent({ children }: { children: ReactNode }) {
         ? animatedPosition.get()
         : Math.min(animatedPosition.get(), initialDetentPosition);
 
+    const keyboardState = animatedKeyboardState.get();
     return {
-      height: Math.max(
-        0,
-        containerHeight -
-          contentPosition -
-          handleHeight -
-          animatedKeyboardState.get().heightWithinContainer,
-      ),
+      height: getBottomSheetVisibleContentHeight({
+        containerHeight,
+        contentPosition,
+        handleHeight,
+        keyboardHeight: keyboardState.heightWithinContainer,
+        isKeyboardVisible: keyboardState.status === KEYBOARD_STATUS.SHOWN,
+      }),
     };
   }, [animatedDetentsState, animatedKeyboardState, animatedLayoutState, animatedPosition]);
 
@@ -278,71 +279,6 @@ function BottomSheetVisibleContent({ children }: { children: ReactNode }) {
     </Animated.View>
   );
 }
-
-export type AdaptiveTextInputProps = TextInputProps & {
-  initialValue?: string;
-  resetKey?: string | number;
-  // Web-only opt-in: render a controlled input (forward `value`) instead of the
-  // default native-owned/uncontrolled behavior. The uncontrolled path drops
-  // composed characters from IMEs (Vietnamese Telex/VNI, CJK); a controlled
-  // input on web composes correctly. Native keeps the uncontrolled behavior.
-  webControlled?: boolean;
-};
-
-// React Native controlled TextInput can replay stale JS values during fast input
-// and visibly flicker/cursor-jump. Keep the rendered text native-owned; callers
-// can seed it once with initialValue and remount with resetKey for real resets.
-// See https://github.com/facebook/react-native/issues/44157
-//
-// Text color and placeholder color are owned by this leaf — not the caller.
-// `@gorhom/bottom-sheet` mounts header subtrees before the sheet is visible
-// under whatever theme is active at mount time, then keeps them mounted across
-// theme changes; any caller that paints color via `StyleSheet.create((theme) =>
-// ...)` from outside this leaf ends up with stale colors in dark mode (see
-// docs/unistyles.md "Hidden Sheet Content"). withUnistyles wraps the actual
-// TextInput so theme-driven re-renders land on the wrapper.
-const ThemedTextInput = withUnistyles(TextInput, (theme) => ({
-  placeholderTextColor: theme.colors.foregroundMuted,
-}));
-const ThemedBottomSheetTextInput = withUnistyles(BottomSheetTextInput, (theme) => ({
-  placeholderTextColor: theme.colors.foregroundMuted,
-}));
-
-export const AdaptiveTextInput = forwardRef<TextInput, AdaptiveTextInputProps>(
-  function AdaptiveTextInputInner(props, ref) {
-    const isMobile = useIsCompactFormFactor();
-    // BottomSheetTextInput calls useBottomSheetInternal(), which throws when it
-    // renders outside a BottomSheet (e.g. a plain settings page). Detect the
-    // context safely (returns null outside a sheet) and only use the sheet-aware
-    // input when actually inside one; otherwise fall back to the standard input.
-    const insideBottomSheet = useBottomSheetInternal(true) !== null;
-    const { value, initialValue, resetKey, defaultValue, style, webControlled, ...inputProps } =
-      props;
-    // IME-heavy inputs opt into a controlled input on web so composed diacritics
-    // are preserved; everything else stays native-owned/uncontrolled.
-    const controlledOnWeb = webControlled === true && !isNative;
-    // Leaf-owned color goes LAST so callers cannot override it with a stale
-    // theme read. Outline color is theme-aware on web :focus-visible.
-    const textInputProps = {
-      ...inputProps,
-      ...(controlledOnWeb
-        ? { value: value ?? "" }
-        : { defaultValue: initialValue ?? defaultValue }),
-      style: [styles.adaptiveInputOutline, style, styles.adaptiveInputText],
-    };
-
-    if (isMobile && isNative && insideBottomSheet) {
-      return (
-        <ThemedBottomSheetTextInput
-          key={resetKey}
-          ref={ref as unknown as Ref<never>}
-          {...textInputProps}
-        />
-      );
-    }
-    return <ThemedTextInput key={resetKey} ref={ref} {...textInputProps} />;
-  },
-);
 
 export function SheetHeaderView({
   header,
@@ -360,13 +296,6 @@ export function SheetHeaderView({
   const titleStyle = useMemo(
     () => [styles.title, { color: theme.colors.foreground }],
     [theme.colors.foreground],
-  );
-  // A plain string subtitle would otherwise render without a Text wrapper and
-  // inherit a non-theme (often dark) color — invisible in dark mode. Wrap it in
-  // a Text with a live theme color; element subtitles pass through unchanged.
-  const subtitleStyle = useMemo(
-    () => [styles.subtitle, { color: theme.colors.foregroundMuted }],
-    [theme.colors.foregroundMuted],
   );
   const back = header.back;
   const handleBackPress = back?.onPress;
@@ -403,13 +332,7 @@ export function SheetHeaderView({
           <Text style={titleStyle} numberOfLines={1}>
             {header.title}
           </Text>
-          {typeof header.subtitle === "string" ? (
-            <Text style={subtitleStyle} numberOfLines={1}>
-              {header.subtitle}
-            </Text>
-          ) : (
-            header.subtitle
-          )}
+          {header.subtitle}
         </View>
         {header.actions ? <View style={styles.headerActions}>{header.actions}</View> : null}
         {showCloseButton ? (
@@ -437,6 +360,8 @@ export function SheetHeaderView({
             placeholder={search.placeholder ?? t("common.actions.search")}
             resetKey={search.resetKey}
             onChangeText={handleSearchChange}
+            onFocus={search.onFocus}
+            onBlur={search.onBlur}
             autoCapitalize="none"
             autoCorrect={false}
             autoFocus={search.autoFocus}
@@ -494,6 +419,8 @@ export function InlineHeaderView({ header }: { header: SheetHeader }) {
             placeholder={header.search.placeholder ?? t("common.actions.search")}
             resetKey={header.search.resetKey}
             onChangeText={header.search.onChange}
+            onFocus={header.search.onFocus}
+            onBlur={header.search.onBlur}
             autoCapitalize="none"
             autoCorrect={false}
             autoFocus={header.search.autoFocus}
@@ -524,6 +451,8 @@ export interface AdaptiveModalSheetProps {
   contentStyle?: StyleProp<ViewStyle>;
   /** Size compact sheet content to the live snap height instead of its largest snap point. */
   sizeContentToCurrentSnapPoint?: boolean;
+  /** Re-establishes caller-owned contexts inside the compact bottom-sheet portal. */
+  contextBridge?: ContextBridge | null;
 }
 
 export function AdaptiveModalSheet({
@@ -541,22 +470,25 @@ export function AdaptiveModalSheet({
   presentation,
   contentStyle,
   sizeContentToCurrentSnapPoint = false,
+  contextBridge = null,
 }: AdaptiveModalSheetProps) {
   const { theme } = useUnistyles();
   const { t } = useTranslation();
   const isMobile = useIsCompactFormFactor();
   const insets = useSafeAreaInsets();
+  const isKeyboardVisible = useKeyboardVisibility();
   const resolvedSnapPoints = useMemo(() => snapPoints ?? ["65%", "90%"], [snapPoints]);
   const compactSafeAreaPadding = useMemo(
     () =>
       getCompactSheetSafeAreaPadding({
         isCompact: isMobile,
+        isKeyboardVisible,
         hasFooter: Boolean(footer),
         baseContentPadding: theme.spacing[SHEET_HORIZONTAL_PADDING_SCALE],
         baseFooterPadding: theme.spacing[3],
         safeAreaBottom: insets.bottom,
       }),
-    [footer, insets.bottom, isMobile, theme.spacing],
+    [footer, insets.bottom, isKeyboardVisible, isMobile, theme.spacing],
   );
   const compactContentStyle = useMemo(
     () => [
@@ -706,6 +638,7 @@ export function AdaptiveModalSheet({
     return (
       <IsolatedBottomSheetModal
         ref={sheetRef}
+        contextBridge={contextBridge}
         snapPoints={resolvedSnapPoints}
         index={0}
         enableDynamicSizing={false}

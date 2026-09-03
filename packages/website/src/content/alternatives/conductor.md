@@ -1,42 +1,43 @@
 ---
 title: Open Source Conductor Alternative With Linux, Windows, and Mobile
-description: JAgentDesk is open source, runs on macOS, Linux, and Windows, ships native iOS and Android apps, and supports 30+ agents through the in-app catalog plus any ACP or CLI agent. Conductor is macOS only and Claude Code or Codex only.
+description: JAgentDesk is an open source Conductor alternative with Linux, Windows, native mobile apps, a self-hosted daemon, and an extensible client.
 nav: Conductor
 order: 50
 ---
 
 # JAgentDesk vs Conductor
 
-Conductor is a macOS app for running Claude Code and Codex in parallel git worktrees. Closed source.
+Conductor is a proprietary macOS app for running Claude Code, Codex, Cursor, and OpenCode in parallel Git worktrees and managed cloud workspaces.
 
-JAgentDesk is an app for orchestrating coding agents, with native clients on desktop, mobile, web, and the CLI. Open source (AGPL-3.0).
+JAgentDesk is an app for orchestrating coding agents, with native clients on desktop, mobile, web, and the CLI. Open source (Apache-2.0).
 
 ![JAgentDesk desktop and mobile app](/hero-mockup.png)
 
-## Why pick JAgentDesk
+## The main difference
 
-Conductor runs on macOS, with Claude Code and Codex, in parallel git worktrees. JAgentDesk does all of that. Pick JAgentDesk if you want:
+Conductor provides free local workspaces on macOS. Its managed cloud workspaces, API, collaboration features, and forthcoming mobile app are included in the $50 per month Pro plan.
 
-- Linux or Windows alongside macOS
-- A native iOS and Android app
-- Many more agents than Claude Code and Codex
-- A CLI to script agent work and drive remote daemons
-- A self-hosted daemon you can run on a server, VM, or homelab
-- Open source you can audit and fork
+Conductor raised a $22 million Series A and is proprietary. JAgentDesk is independent, Apache 2.0 licensed, available on macOS, Linux, Windows, iOS, and Android, and can connect to machines you control.
 
 ## Architecture
 
 The JAgentDesk daemon runs as its own process. Desktop, web, mobile, and CLI all connect to it over a websocket. Run the daemon on your laptop, on a VM, in Docker, or across a fleet, and connect to any of them from any client.
 
-Conductor's desktop app is the host. Agents run inside it.
+Conductor runs local workspaces through its macOS app and cloud workspaces in managed Vercel sandboxes. It does not currently support connecting its clients to a cloud machine you operate.
 
 ## Providers
 
-JAgentDesk runs Claude Code, Codex, OpenCode, and Pi natively, plus 30+ more agents through the in-app catalog including GitHub Copilot, Cursor, Gemini CLI, and Amp. JAgentDesk speaks the [Agent Client Protocol](https://agentclientprotocol.com), so any ACP agent works. Custom providers run any CLI agent. See [Supported providers](/docs/supported-providers).
+JAgentDesk runs Claude Code, Codex, OpenCode, and Pi natively, plus 30+ more agents through the in-app catalog including GitHub Copilot, Cursor, Gemini CLI, and Amp. JAgentDesk speaks the [Agent Client Protocol](https://agentclientprotocol.com), so any ACP agent works. Custom providers run any CLI agent. See [all supported providers](/agents).
 
-Conductor runs Claude Code and Codex.
+Conductor supports Claude Code, Codex, Cursor, and OpenCode.
 
-Both tools launch the official CLIs as subprocesses with your own credentials. Neither extracts tokens or proxies model calls.
+Both tools use your provider credentials. JAgentDesk launches the provider installed on your machine. Conductor bundles managed Claude Code and Codex binaries and provides managed integrations for Cursor and OpenCode.
+
+## Application plugins
+
+[JAgentDesk plugins](/docs/plugins) extend JAgentDesk itself. They can add server behavior and native client components such as workspace panels, sidebar items, composer attachments, themes, and Command Center items across desktop, browser, iOS, and Android.
+
+Conductor does not document an application extension API for adding both server behavior and native client components.
 
 ## Panes
 
@@ -58,9 +59,9 @@ jagentdesk send <agent-id> "add tests"
 jagentdesk schedule create --cron "0 9 * * 1" "audit the codebase"
 ```
 
-`jagentdesk run --host` connects to a remote daemon. `jagentdesk schedule` runs an agent on a cron. `jagentdesk loop` retries an agent until a verification command passes.
+`jagentdesk run --host` connects to a remote daemon. `jagentdesk schedule` runs an agent on a cron.
 
-Conductor does not have a CLI.
+Conductor lists its API as a Pro feature but does not document a user-facing CLI comparable to JAgentDesk's.
 
 ## Worktrees and services
 
@@ -70,28 +71,29 @@ JAgentDesk also gives each worktree its own dev server URL. Two agents running t
 
 ## Mobile
 
-JAgentDesk ships native iOS and Android apps with the same feature set as the desktop app. Conductor has no mobile app.
+JAgentDesk ships native iOS and Android apps today. Conductor lists its mobile app as coming soon under the Pro plan.
 
 ## Voice
 
-JAgentDesk's speech-to-text and text-to-speech run locally on your device. Nothing leaves your network. Conductor does not have voice.
+JAgentDesk supports local speech-to-text and text-to-speech. Conductor does not currently document a voice interface.
 
 ## Comparison
 
-|                              | JAgentDesk                                                           | Conductor          |
-| ---------------------------- | --------------------------------------------------------------- | ------------------ |
-| License                      | Open source (AGPL-3.0)                                          | Closed source      |
-| Platforms                    | macOS, Linux, Windows                                           | macOS only         |
-| Native mobile                | iOS, Android                                                    | —                  |
-| Providers                    | Claude Code, Codex, OpenCode, Pi + 30+ via ACP catalog + custom | Claude Code, Codex |
-| Git worktrees                | Yes                                                             | Yes                |
-| Per-worktree dev server URLs | Yes                                                             | —                  |
-| Split panes and tabs         | Yes                                                             | —                  |
-| In-app terminal              | Yes                                                             | Yes                |
-| In-app browser               | Yes                                                             | —                  |
-| GitHub workflow in app       | Commit, push, PR, checks, reviews, merge                        | Yes                |
-| CLI                          | Run, `--host`, ls, send, schedule, loop                         | —                  |
-| Local voice (on-device)      | Yes                                                             | —                  |
-| Self-hosted daemon           | Yes                                                             | —                  |
+|                              | JAgentDesk                                                           | Conductor                            |
+| ---------------------------- | --------------------------------------------------------------- | ------------------------------------ |
+| License                      | Open source (Apache-2.0)                                        | Closed source                        |
+| Platforms                    | macOS, Linux, Windows                                           | macOS only                           |
+| Native mobile                | iOS, Android                                                    | Coming soon under Pro                |
+| Providers                    | Claude Code, Codex, OpenCode, Pi + 30+ via ACP catalog + custom | Claude Code, Codex, Cursor, OpenCode |
+| Git worktrees                | Yes                                                             | Yes                                  |
+| Per-worktree dev server URLs | Yes                                                             | —                                    |
+| Split panes and tabs         | Yes                                                             | —                                    |
+| In-app terminal              | Yes                                                             | Yes                                  |
+| In-app browser               | Yes                                                             | —                                    |
+| GitHub workflow in app       | Commit, push, PR, checks, reviews, merge                        | Yes                                  |
+| CLI                          | Run, `--host`, ls, send, schedule, loop                         | —                                    |
+| Application plugins          | Server code and native client components                        | No                                   |
+| Local voice                  | Yes                                                             | Not documented                       |
+| Self-hosted daemon           | Yes                                                             | —                                    |
 
 See also: [JAgentDesk vs Superset](/alternatives/superset), [JAgentDesk vs OpenChamber](/alternatives/openchamber), [JAgentDesk vs Happy Coder](/alternatives/happy-coder).

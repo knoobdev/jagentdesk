@@ -3,6 +3,8 @@ import type { Logger } from "pino";
 
 import { spawnProcess } from "../../../utils/spawn.js";
 import { terminateWithTreeKill } from "../../../utils/tree-kill.js";
+import { JsonlFrameDecoder } from "./jsonl-frame-decoder.js";
+export { supportsJsonlRpcProtocolV2 } from "./jsonl-frame-decoder.js";
 
 /** Default wall-clock timeout for control-plane / short RPC calls. */
 export const JSONL_RPC_DEFAULT_TIMEOUT_MS = 30_000;
@@ -48,6 +50,7 @@ export interface JsonlRpcProcessOptions {
   launch: JsonlRpcLaunch;
   logger: Logger;
   diagnosticName?: string;
+  defaultRequestTimeoutMs?: number;
   spawn?: (launch: JsonlRpcLaunch) => ChildProcessWithoutNullStreams;
 }
 
@@ -78,10 +81,19 @@ export class JsonlRpcProcess {
   private stderrBuffer = "";
   private nextRequestId = 1;
   private disposed = false;
-  private stdoutBuffer = "";
+  private readonly frameDecoder: JsonlFrameDecoder;
 
   constructor(private readonly options: JsonlRpcProcessOptions) {
     this.diagnosticName = options.diagnosticName ?? "JSONL RPC";
+    this.frameDecoder = new JsonlFrameDecoder({
+      frame: (message) => this.dispatchFrame(message),
+      problem: (problem, detail) => {
+        this.options.logger.warn(
+          { problem, detail },
+          `Ignoring invalid ${this.diagnosticName} frame`,
+        );
+      },
+    });
     this.child = (options.spawn ?? spawnJsonlRpcProcess)(options.launch);
     this.child.stdout.on("data", (chunk) => {
       this.handleStdoutChunk(chunk.toString());
@@ -91,6 +103,9 @@ export class JsonlRpcProcess {
       if (this.stderrBuffer.length > STDERR_BUFFER_LIMIT) {
         this.stderrBuffer = this.stderrBuffer.slice(-STDERR_BUFFER_LIMIT);
       }
+    });
+    this.child.stdin.on("error", (error) => {
+      this.handleStdinError(error);
     });
     this.child.on("error", (error) => {
       this.failAll(error instanceof Error ? error : new Error(String(error)));
@@ -123,7 +138,7 @@ export class JsonlRpcProcess {
 
   startRequest(
     command: { type: string; [key: string]: unknown },
-    timeoutMs: number | null = JSONL_RPC_DEFAULT_TIMEOUT_MS,
+    timeoutMs?: number | null,
   ): { id: string; promise: Promise<unknown> } {
     if (this.disposed) {
       return {
@@ -133,12 +148,17 @@ export class JsonlRpcProcess {
     }
     const id = `req_${this.nextRequestId}`;
     this.nextRequestId += 1;
+    const requestTimeoutMs =
+      timeoutMs === undefined
+        ? (this.options.defaultRequestTimeoutMs ?? JSONL_RPC_DEFAULT_TIMEOUT_MS)
+        : timeoutMs;
+    const startedAt = Date.now();
     const promise = new Promise<unknown>((resolve, reject) => {
-      const timer = createRequestTimeout(timeoutMs, () => {
+      const timer = createRequestTimeout(requestTimeoutMs, () => {
         this.pending.delete(id);
         reject(
           new Error(
-            `${this.diagnosticName} request timed out for ${command.type}\n${this.stderrBuffer}`.trim(),
+            `${this.diagnosticName} request timed out phase=${command.type} elapsedMs=${Date.now() - startedAt} timeoutMs=${requestTimeoutMs}\n${this.stderrBuffer}`.trim(),
           ),
         );
       });
@@ -150,16 +170,24 @@ export class JsonlRpcProcess {
 
   request(
     command: { type: string; [key: string]: unknown },
-    timeoutMs: number | null = JSONL_RPC_DEFAULT_TIMEOUT_MS,
+    timeoutMs?: number | null,
   ): Promise<unknown> {
     return this.startRequest(command, timeoutMs).promise;
   }
 
   send(message: Record<string, unknown>): void {
-    if (this.disposed || this.child.stdin.destroyed || !this.child.stdin.writable) {
+    if (this.disposed) {
       return;
     }
-    this.child.stdin.write(`${JSON.stringify(message)}\n`);
+    if (this.child.stdin.destroyed || !this.child.stdin.writable) {
+      this.handleStdinError(new Error(`${this.diagnosticName} stdin is not writable`));
+      return;
+    }
+    try {
+      this.child.stdin.write(`${JSON.stringify(message)}\n`);
+    } catch (error) {
+      this.handleStdinError(error);
+    }
   }
 
   async close(error = new Error(`${this.diagnosticName} process is closed`)): Promise<void> {
@@ -189,35 +217,11 @@ export class JsonlRpcProcess {
   }
 
   private handleStdoutChunk(chunk: string): void {
-    this.stdoutBuffer += chunk;
-    for (;;) {
-      const newlineIndex = this.stdoutBuffer.indexOf("\n");
-      if (newlineIndex === -1) {
-        break;
-      }
-      const line = this.stdoutBuffer.slice(0, newlineIndex).replace(/\r$/, "");
-      this.stdoutBuffer = this.stdoutBuffer.slice(newlineIndex + 1);
-      if (line.trim()) {
-        this.handleLine(line);
-      }
-    }
+    this.frameDecoder.write(chunk);
   }
 
-  private handleLine(line: string): void {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(line);
-    } catch (error) {
-      this.options.logger.warn(
-        { error, line },
-        `Ignoring non-JSON ${this.diagnosticName} stdout line`,
-      );
-      return;
-    }
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return;
-    }
-    const message = parsed as Record<string, unknown>;
+  /** Route a complete logical frame to its consumer (response or subscriber). */
+  private dispatchFrame(message: Record<string, unknown>): void {
     if (message.type === "response") {
       this.handleResponse(message as unknown as JsonlRpcResponse);
       return;
@@ -248,6 +252,15 @@ export class JsonlRpcProcess {
       return;
     }
     pending.resolve(response.data);
+  }
+
+  private handleStdinError(error: unknown): void {
+    if (this.disposed) {
+      return;
+    }
+    const err = error instanceof Error ? error : new Error(String(error));
+    this.options.logger.warn({ err }, `${this.diagnosticName} stdin write failed`);
+    void this.close(err);
   }
 
   private failAll(error: Error): void {

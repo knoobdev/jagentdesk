@@ -1,4 +1,8 @@
-import type { SessionOutboundMessage } from "@jagentdesk/protocol/messages";
+import equal from "fast-deep-equal";
+import type {
+  ScriptStatusUpdateMessage,
+  SessionOutboundMessage,
+} from "@jagentdesk/protocol/messages";
 import {
   normalizeProjectDescriptor,
   normalizeWorkspaceDescriptor,
@@ -11,16 +15,35 @@ import {
   clearWorkspaceArchivePending,
   shouldSuppressWorkspaceForLocalArchive,
 } from "@/contexts/session-workspace-upserts";
+import { resolveWorkspaceMapKeyByIdentity } from "@/utils/workspace-identity";
 
-export type WorkspaceDirectoryDelta = Extract<
-  SessionOutboundMessage,
-  { type: "workspace_update" | "project.update" }
->["payload"];
+export type WorkspaceDirectoryDelta =
+  | Extract<SessionOutboundMessage, { type: "workspace_update" | "project.update" }>["payload"]
+  | { kind: "script_status"; update: ScriptStatusUpdateMessage["payload"] };
 type ProjectDirectoryDelta = Extract<SessionOutboundMessage, { type: "project.update" }>["payload"];
 
 export interface WorkspaceDirectorySnapshot {
   workspaces: Map<string, WorkspaceDescriptor>;
   projects: Map<string, ProjectDescriptor>;
+}
+
+function patchWorkspaceScripts(
+  workspaces: Map<string, WorkspaceDescriptor>,
+  update: ScriptStatusUpdateMessage["payload"],
+): Map<string, WorkspaceDescriptor> {
+  const workspaceKey = resolveWorkspaceMapKeyByIdentity({
+    workspaces,
+    workspaceId: update.workspaceId,
+  });
+  if (!workspaceKey) return workspaces;
+  const existing = workspaces.get(workspaceKey);
+  if (!existing || equal(existing.scripts, update.scripts)) return workspaces;
+  const next = new Map(workspaces);
+  next.set(workspaceKey, {
+    ...existing,
+    scripts: update.scripts.map((script) => ({ ...script })),
+  });
+  return next;
 }
 
 function applyProjectDelta(
@@ -58,6 +81,25 @@ export class WorkspaceDirectoryReplica {
     this.commit(state, delta.kind === "remove" && "id" in delta ? [delta.id] : []);
   }
 
+  commitCached(input: {
+    workspaces: Map<string, WorkspaceDescriptor>;
+    projects: Map<string, ProjectDescriptor>;
+  }): void {
+    this.commit(input, []);
+    useSessionStore.getState().setHasWorkspaceDirectorySnapshot(this.serverId, true);
+  }
+
+  commitCachedWorkspace(
+    workspace: WorkspaceDescriptor,
+    project: ProjectDescriptor | undefined,
+  ): void {
+    if (shouldSuppressWorkspaceForLocalArchive({ serverId: this.serverId, workspace })) return;
+    const snapshot = this.read();
+    snapshot.workspaces.set(workspace.id, workspace);
+    if (project) snapshot.projects.set(project.projectId, project);
+    this.commit(snapshot, []);
+  }
+
   commitSnapshot(
     snapshot: WorkspaceDirectorySnapshot,
     deltas: readonly WorkspaceDirectoryDelta[],
@@ -81,7 +123,7 @@ export class WorkspaceDirectoryReplica {
     snapshot: WorkspaceDirectorySnapshot,
     deltas: readonly WorkspaceDirectoryDelta[],
   ): WorkspaceDirectorySnapshot {
-    const workspaces = new Map(snapshot.workspaces);
+    let workspaces = new Map(snapshot.workspaces);
     const projects = new Map(snapshot.projects);
     for (const [workspaceId, workspace] of workspaces) {
       if (shouldSuppressWorkspaceForLocalArchive({ serverId: this.serverId, workspace })) {
@@ -89,6 +131,10 @@ export class WorkspaceDirectoryReplica {
       }
     }
     for (const delta of deltas) {
+      if (delta.kind === "script_status") {
+        workspaces = patchWorkspaceScripts(workspaces, delta.update);
+        continue;
+      }
       if ("projectId" in delta || "project" in delta) {
         applyProjectDelta({ workspaces, projects }, delta);
         continue;

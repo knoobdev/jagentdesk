@@ -4,7 +4,15 @@ import { z } from "zod";
 import { PluginIdSchema } from "@jagentdesk/protocol/messages";
 
 const MANIFEST_FILENAME = "jagentdesk-plugin.json";
-const PluginManifestSchema = z.object({ id: PluginIdSchema }).strict();
+const PluginBuildCommandSchema = z
+  .array(z.string().refine((argument) => argument.trim().length > 0))
+  .min(1);
+const PluginManifestSchema = z
+  .object({
+    id: PluginIdSchema,
+    build: z.array(PluginBuildCommandSchema).min(1).optional(),
+  })
+  .strict();
 
 export type PluginManifest = z.infer<typeof PluginManifestSchema>;
 

@@ -2,6 +2,10 @@ import { fork, spawn, type ChildProcess } from "child_process";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { createStream as createRotatingFileStream } from "rotating-file-stream";
+import { signalProcessTree } from "../src/utils/tree-kill.js";
+
+const WORKER_HEARTBEAT_INTERVAL_MS = 1_000;
+const WORKER_TERMINATION_GRACE_MS = 10_000;
 
 interface SupervisorLogFileOptions {
   path: string;
@@ -27,6 +31,11 @@ type WorkerLifecycleMessage =
 
 interface SupervisorHeartbeatMessage {
   type: "jagentdesk:supervisor-heartbeat";
+}
+
+interface SupervisorGracefulShutdownMessage {
+  type: "jagentdesk:graceful-shutdown";
+  reason: string;
 }
 
 interface SupervisorOptions {
@@ -120,6 +129,7 @@ export function runSupervisor(options: SupervisorOptions): SupervisorController 
   let restarting = false;
   let shuttingDown = false;
   let exiting = false;
+  let forceKillTimer: NodeJS.Timeout | null = null;
   const logStream = createSupervisorLogStream(options.logFile);
 
   const writeDurableChunk = (chunk: string | Buffer): void => {
@@ -169,6 +179,43 @@ export function runSupervisor(options: SupervisorOptions): SupervisorController 
       });
   };
 
+  const clearForceKillTimer = (): void => {
+    if (forceKillTimer) {
+      clearTimeout(forceKillTimer);
+      forceKillTimer = null;
+    }
+  };
+
+  const scheduleForceKill = (reason: string): void => {
+    if (!child) {
+      return;
+    }
+    const currentChild = child;
+    clearForceKillTimer();
+    forceKillTimer = setTimeout(() => {
+      forceKillTimer = null;
+      if (child !== currentChild) {
+        return;
+      }
+      writeLifecycleLog(
+        "Worker did not exit after graceful shutdown request; forcing process tree kill",
+        {
+          reason,
+          supervisorPid: process.pid,
+          workerPid: currentChild.pid ?? null,
+        },
+      );
+      void signalProcessTree(currentChild, "SIGKILL").catch((error) => {
+        writeLifecycleLog("Failed to force-kill worker process tree", {
+          error: error instanceof Error ? error.message : String(error),
+          supervisorPid: process.pid,
+          workerPid: currentChild.pid ?? null,
+        });
+      });
+    }, WORKER_TERMINATION_GRACE_MS);
+    forceKillTimer.unref();
+  };
+
   const spawnWorker = () => {
     let workerEntry: string;
     try {
@@ -210,7 +257,7 @@ export function runSupervisor(options: SupervisorOptions): SupervisorController 
       } else {
         writeLifecycleLog("Worker heartbeat skipped because IPC channel is disconnected");
       }
-    }, 1000);
+    }, WORKER_HEARTBEAT_INTERVAL_MS);
     heartbeat.unref();
 
     child.on("disconnect", () => {
@@ -256,8 +303,9 @@ export function runSupervisor(options: SupervisorOptions): SupervisorController 
       requestRestart(reason);
     });
 
-    child.on("close", (code, signal) => {
+    child.on("exit", (code, signal) => {
       clearInterval(heartbeat);
+      clearForceKillTimer();
       const exitDescriptor = describeExit(code, signal);
       writeLifecycleLog("Worker exited", { code, signal, exit: exitDescriptor });
 
@@ -287,17 +335,38 @@ export function runSupervisor(options: SupervisorOptions): SupervisorController 
     });
   };
 
-  const signalWorker = (signal: NodeJS.Signals, reason: string): void => {
+  const requestWorkerShutdown = (reason: string): void => {
     if (!child) {
       return;
     }
-    writeLifecycleLog("Supervisor sending signal to worker", {
+    const currentChild = child;
+    const message: SupervisorGracefulShutdownMessage = {
+      type: "jagentdesk:graceful-shutdown",
       reason,
-      signal,
+    };
+    writeLifecycleLog("Supervisor requesting graceful worker shutdown", {
+      reason,
       supervisorPid: process.pid,
-      workerPid: child.pid ?? null,
+      workerPid: currentChild.pid ?? null,
     });
-    child.kill(signal);
+    if (!currentChild.connected) {
+      writeLifecycleLog("Graceful worker shutdown IPC unavailable", {
+        reason,
+        supervisorPid: process.pid,
+        workerPid: currentChild.pid ?? null,
+      });
+      return;
+    }
+    currentChild.send?.(message, (error) => {
+      if (error) {
+        writeLifecycleLog("Graceful worker shutdown IPC send failed", {
+          error: error instanceof Error ? error.message : String(error),
+          reason,
+          supervisorPid: process.pid,
+          workerPid: currentChild.pid ?? null,
+        });
+      }
+    });
   };
 
   const requestRestart = (reason: string) => {
@@ -307,7 +376,8 @@ export function runSupervisor(options: SupervisorOptions): SupervisorController 
     restarting = true;
     writeLifecycleLog("Restart requested", { reason });
     log(`${reason}. Stopping worker for restart...`);
-    signalWorker("SIGTERM", reason);
+    requestWorkerShutdown(reason);
+    scheduleForceKill(reason);
   };
 
   const requestShutdown = (reason: string) => {
@@ -322,7 +392,8 @@ export function runSupervisor(options: SupervisorOptions): SupervisorController 
       exitSupervisor(0);
       return;
     }
-    signalWorker("SIGTERM", reason);
+    requestWorkerShutdown(reason);
+    scheduleForceKill(reason);
   };
 
   const forwardSignal = (signal: NodeJS.Signals) => {

@@ -1,93 +1,76 @@
 ---
-title: OpenChamber Alternative With Linux, Windows, and Mobile
-description: JAgentDesk ships native iOS and Android apps, runs on macOS, Linux, and Windows, and supports 30+ agents. OpenChamber is macOS only with a PWA and is built around OpenCode.
+title: OpenChamber Alternative With Multi-Provider Orchestration
+description: JAgentDesk is an OpenChamber alternative for developers who want multiple agent harnesses, application plugins, and an Apache-2.0 codebase.
 nav: OpenChamber
 order: 52
 ---
 
 # JAgentDesk vs OpenChamber
 
-OpenChamber is a macOS desktop app for OpenCode. Also available as a PWA. Open source under MIT.
+OpenChamber is an MIT-licensed workspace built around OpenCode, with desktop, web, VS Code, server, and Capacitor mobile clients.
 
-JAgentDesk is an app for orchestrating coding agents, with native clients on desktop, mobile, web, and the CLI. Open source (AGPL-3.0).
+JAgentDesk orchestrates many coding-agent harnesses from desktop, mobile, web, and the CLI. Open source under Apache-2.0.
 
 ![JAgentDesk desktop and mobile app](/hero-mockup.png)
 
-## Why pick JAgentDesk
+## The main difference
 
-OpenChamber runs on macOS, around OpenCode, with a phone PWA. JAgentDesk runs OpenCode too, on macOS, and adds:
+OpenChamber builds its agent workflow around OpenCode. JAgentDesk runs OpenCode alongside Claude Code, Codex, Pi, ACP agents, and custom providers.
 
-- Linux and Windows desktop
-- A native iOS and Android app
-- Many more agents than OpenCode (Claude Code, Codex, Pi, plus 30+ more via the in-app ACP catalog)
-- A scriptable CLI to drive agents and connect to remote daemons
+OpenChamber packages its web interface for iOS and Android with Capacitor. The interface runs inside WKWebView or Android WebView, with native integrations for notifications, secure storage, QR pairing, and widgets. JAgentDesk's mobile client is built with React Native and distributed through the App Store and Google Play.
 
-## Mobile
+## Architecture
 
-JAgentDesk ships a native iOS and Android app with the same feature set as the desktop. Install from the App Store or Google Play.
+Both tools can run a server on your workstation or another machine and connect from desktop, web, and mobile clients.
 
-OpenChamber does not have a native mobile app.
-
-## Desktop
-
-JAgentDesk ships on macOS, Linux, and Windows.
-
-OpenChamber ships on macOS.
+JAgentDesk's daemon launches each provider through its own native harness or through ACP. OpenChamber manages an OpenCode server and builds its agent workflow around OpenCode sessions.
 
 ## Providers
 
-JAgentDesk runs Claude Code, Codex, OpenCode, and Pi natively, plus 30+ more agents through the in-app catalog including GitHub Copilot, Cursor, Gemini CLI, and Amp. JAgentDesk speaks the [Agent Client Protocol](https://agentclientprotocol.com), so any ACP agent works. Custom providers run any CLI agent. See [Supported providers](/docs/supported-providers).
+OpenChamber uses OpenCode as its agent runtime. OpenCode can connect to many model providers, and OpenChamber also offers integrations for subscriptions such as Claude.
 
-OpenChamber is built around OpenCode.
+JAgentDesk is multi-provider at the agent-harness layer. It runs Claude Code, Codex, OpenCode, and Pi natively, plus 30+ agents through its ACP catalog and any custom CLI agent. See [all supported providers](/agents).
 
-## Panes
+## Application plugins
 
-JAgentDesk's app has split panes and tabs (⌘D for vertical, ⌘⇧D for horizontal). Panes include a terminal alongside your agents, a diff viewer, and a browser for testing running services.
+[JAgentDesk plugins](/docs/plugins) extend JAgentDesk itself. They can add server behavior and native client components such as workspace panels, sidebar items, composer attachments, themes, and Command Center items across desktop, browser, iOS, and Android.
 
-## GitHub
+OpenChamber does not document an application extension API for adding both server behavior and native client components.
 
-JAgentDesk's app handles commit, push, opening PRs, watching checks and reviews, and merging.
+## Workspaces and review
 
-## CLI
+Both tools support isolated Git worktrees, terminals, diff review, browser previews, GitHub workflows, schedules, and remote machines.
 
-JAgentDesk has a CLI that mirrors the app:
+OpenChamber adds multi-run comparisons, Fusion, and guided changes walkthroughs. JAgentDesk adds split panes and tabs, a native Files and Changes explorer, and a full pull-request workflow across its clients.
 
-```bash
-jagentdesk run --provider codex "implement OAuth"
-jagentdesk run --host devbox:6767 "run the test suite"
-jagentdesk ls
-jagentdesk send <agent-id> "add tests"
-jagentdesk schedule create --cron "0 9 * * 1" "audit the codebase"
-```
+## Automation
 
-`jagentdesk run --host` connects to a remote daemon. `jagentdesk schedule` runs an agent on a cron. `jagentdesk loop` retries an agent until a verification command passes.
+JAgentDesk exposes workspace and agent operations through its CLI, TypeScript SDK, and MCP server. These interfaces can create workspaces, launch agents, follow progress, send messages, and manage schedules.
 
-OpenChamber does not have a CLI.
+OpenChamber's CLI runs and manages its server, remote access, and updates. Its Agent Control Tool lets an OpenCode agent create and continue sessions, create worktrees, and manage schedules.
 
-## Worktrees and services
+## Mobile and voice
 
-JAgentDesk runs each agent in its own git worktree. Each worktree gets its own dev server URL like `web.fix-auth.my-app.localhost`, so parallel agents don't fight for ports.
-
-## Voice
-
-JAgentDesk's speech-to-text and text-to-speech run locally on your device. OpenChamber does not have voice.
+Both tools provide iOS and Android clients and support dictation and spoken replies. JAgentDesk uses a React Native mobile interface. OpenChamber packages its web interface with Capacitor and adds native integrations around the WebView.
 
 ## Comparison
 
-|                              | JAgentDesk                                                           | OpenChamber       |
-| ---------------------------- | --------------------------------------------------------------- | ----------------- |
-| License                      | Open source (AGPL-3.0)                                          | Open source (MIT) |
-| Desktop platforms            | macOS, Linux, Windows                                           | macOS             |
-| Mobile                       | Native iOS, Android                                             | PWA               |
-| Providers                    | Claude Code, Codex, OpenCode, Pi + 30+ via ACP catalog + custom | OpenCode          |
-| Split panes and tabs         | Yes                                                             | —                 |
-| In-app terminal              | Yes                                                             | —                 |
-| In-app browser               | Yes                                                             | —                 |
-| GitHub workflow in app       | Commit, push, PR, checks, reviews, merge                        | Yes               |
-| CLI                          | Run, `--host`, ls, send, schedule, loop                         | —                 |
-| Git worktrees                | Yes                                                             | Yes               |
-| Per-worktree dev server URLs | Yes                                                             | —                 |
-| Local voice (on-device)      | Yes                                                             | —                 |
-| Self-hosted daemon           | Yes                                                             | —                 |
+|                              | JAgentDesk                                                           | OpenChamber                      |
+| ---------------------------- | --------------------------------------------------------------- | -------------------------------- |
+| License                      | Open source (Apache-2.0)                                        | Open source (MIT)                |
+| Desktop platforms            | macOS, Linux, Windows                                           | macOS, Linux, Windows            |
+| Mobile implementation        | React Native                                                    | Capacitor WebView                |
+| Agent harnesses              | Claude Code, Codex, OpenCode, Pi + 30+ via ACP catalog + custom | OpenCode                         |
+| Application plugins          | Server code and native client components                        | No                               |
+| Split panes and tabs         | Yes                                                             | Workspace views                  |
+| In-app terminal              | Yes                                                             | Yes                              |
+| In-app browser               | Yes                                                             | Yes                              |
+| GitHub workflow in app       | Commit, push, PR, checks, reviews, merge                        | Issue, PR, checks, review, merge |
+| Git worktrees                | Yes                                                             | Yes                              |
+| Per-worktree dev server URLs | Yes                                                             | Preview and port detection       |
+| Automation                   | CLI, SDK, MCP                                                   | Server CLI, Agent Control Tool   |
+| Schedules                    | Yes                                                             | Yes                              |
+| Voice                        | Local dictation and realtime voice                              | Dictation and spoken replies     |
+| Self-hosted daemon           | Yes                                                             | Yes                              |
 
 See also: [JAgentDesk vs Conductor](/alternatives/conductor), [JAgentDesk vs Superset](/alternatives/superset), [JAgentDesk vs Happy Coder](/alternatives/happy-coder).

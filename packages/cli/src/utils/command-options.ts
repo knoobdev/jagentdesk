@@ -1,8 +1,8 @@
 import type { Command } from "commander";
-import { DEFAULT_JAGENTDESK_DAEMON_PORT } from "@jagentdesk/protocol/defaults";
 
 const JSON_OPTION_DESCRIPTION = "Output in JSON format";
-const DAEMON_HOST_OPTION_DESCRIPTION = `Daemon host target: host:port or tcp://host:port?ssl=true&password=secret (default: local socket/pipe, then localhost:${DEFAULT_JAGENTDESK_DAEMON_PORT})`;
+const DAEMON_HOST_OPTION_DESCRIPTION =
+  "Daemon host target: host:port, tcp://host:port, or ssh://user@host (default: local socket/pipe, then localhost:6767)";
 
 export function collectMultiple(value: string, previous: string[]): string[] {
   return previous.concat([value]);

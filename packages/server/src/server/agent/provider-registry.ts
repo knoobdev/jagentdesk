@@ -36,6 +36,7 @@ import { CursorACPAgentClient } from "./providers/cursor-acp-agent.js";
 import { GenericACPAgentClient } from "./providers/generic-acp-agent.js";
 import { KiroACPAgentClient } from "./providers/kiro-acp-agent.js";
 import { OpenCodeAgentClient } from "./providers/opencode-agent.js";
+import type { OpenCodeBridge } from "./providers/opencode/bridge.js";
 import { OmpAgentClient } from "./providers/omp/agent.js";
 import type { OmpRuntime } from "./providers/omp/runtime.js";
 import { PiRpcAgentClient } from "./providers/pi/agent.js";
@@ -81,12 +82,14 @@ export interface BuildProviderRegistryOptions {
   managedProcesses?: ManagedProcessRegistry;
   isDev?: boolean;
   ompRuntime?: OmpRuntime;
+  openCodeBridge?: OpenCodeBridge;
 }
 
 interface ProviderClientFactoryOptions extends Pick<
   BuildProviderRegistryOptions,
   "workspaceGitService" | "managedProcesses" | "ompRuntime"
 > {
+  openCodeBridge?: OpenCodeBridge;
   providerParams?: unknown;
   customProvider?: {
     id: string;
@@ -138,6 +141,7 @@ const PROVIDER_CLIENT_FACTORIES: Record<string, ProviderClientFactory> = {
   opencode: (logger, runtimeSettings, options) =>
     new OpenCodeAgentClient(logger, runtimeSettings, {
       managedProcesses: options?.managedProcesses,
+      bridge: options?.openCodeBridge,
     }),
   pi: (logger, runtimeSettings, options) =>
     new PiRpcAgentClient({
@@ -581,7 +585,7 @@ function buildResolvedBuiltinProviders(
   runtimeSettings: AgentProviderRuntimeSettingsMap | undefined,
   options: Pick<
     BuildProviderRegistryOptions,
-    "workspaceGitService" | "managedProcesses" | "ompRuntime"
+    "workspaceGitService" | "managedProcesses" | "ompRuntime" | "openCodeBridge"
   >,
   isDev: boolean,
 ): Map<string, ResolvedProvider> {
@@ -613,6 +617,7 @@ function buildResolvedBuiltinProviders(
           workspaceGitService: options.workspaceGitService,
           managedProcesses: options.managedProcesses,
           ompRuntime: options.ompRuntime,
+          openCodeBridge: options.openCodeBridge,
           providerParams: override?.params,
         }),
     });
@@ -624,7 +629,7 @@ function buildResolvedBuiltinProviders(
 function addDerivedProviders(
   resolvedProviders: Map<string, ResolvedProvider>,
   providerOverrides: Record<string, ProviderOverride>,
-  options: Pick<BuildProviderRegistryOptions, "managedProcesses">,
+  options: Pick<BuildProviderRegistryOptions, "managedProcesses" | "openCodeBridge">,
 ): void {
   for (const [providerId, override] of Object.entries(providerOverrides)) {
     if (resolvedProviders.has(providerId) || BUILTIN_PROVIDER_IDS.includes(providerId)) {
@@ -713,6 +718,7 @@ function addDerivedProviders(
       createBaseClient: (logger) =>
         baseFactory(logger, mergedRuntimeSettings, {
           managedProcesses: options.managedProcesses,
+          openCodeBridge: options.openCodeBridge,
           providerParams,
           customProvider: {
             id: providerId,
@@ -737,11 +743,13 @@ export function buildProviderRegistry(
       workspaceGitService: options?.workspaceGitService,
       managedProcesses: options?.managedProcesses,
       ompRuntime: options?.ompRuntime,
+      openCodeBridge: options?.openCodeBridge,
     },
     options?.isDev === true,
   );
   addDerivedProviders(resolvedProviders, providerOverrides, {
     managedProcesses: options?.managedProcesses,
+    openCodeBridge: options?.openCodeBridge,
   });
 
   return Object.fromEntries(

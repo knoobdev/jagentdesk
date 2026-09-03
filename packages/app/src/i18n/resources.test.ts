@@ -6,6 +6,7 @@ import { en } from "./resources/en";
 import { es } from "./resources/es";
 import { fr } from "./resources/fr";
 import { ja } from "./resources/ja";
+import { ko } from "./resources/ko";
 import { ptBR } from "./resources/pt-BR";
 import { ru } from "./resources/ru";
 import { zhCN } from "./resources/zh-CN";
@@ -104,23 +105,15 @@ function findUntranslatedConnectionErrors(): string[] {
 
 describe("translation resources", () => {
   it("keeps all supported language keys in sync with English", () => {
-    // The Tailscale gate intentionally falls back to English until each
-    // locale has a native translation. Keep that optional subtree out of the
-    // structural parity assertion while still checking every required key.
-    const englishKeys = flattenKeys(en)
-      .filter((key) => !key.startsWith("tailscaleLogin."))
-      .sort();
-    const localeKeys = (resource: unknown) =>
-      flattenKeys(resource)
-        .filter((key) => !key.startsWith("tailscaleLogin."))
-        .sort();
-    expect(localeKeys(ar)).toEqual(englishKeys);
-    expect(localeKeys(es)).toEqual(englishKeys);
-    expect(localeKeys(fr)).toEqual(englishKeys);
-    expect(localeKeys(ja)).toEqual(englishKeys);
-    expect(localeKeys(ptBR)).toEqual(englishKeys);
-    expect(localeKeys(ru)).toEqual(englishKeys);
-    expect(localeKeys(zhCN)).toEqual(englishKeys);
+    const englishKeys = flattenKeys(en).sort();
+    expect(flattenKeys(ar).sort()).toEqual(englishKeys);
+    expect(flattenKeys(es).sort()).toEqual(englishKeys);
+    expect(flattenKeys(fr).sort()).toEqual(englishKeys);
+    expect(flattenKeys(ja).sort()).toEqual(englishKeys);
+    expect(flattenKeys(ko).sort()).toEqual(englishKeys);
+    expect(flattenKeys(ptBR).sort()).toEqual(englishKeys);
+    expect(flattenKeys(ru).sort()).toEqual(englishKeys);
+    expect(flattenKeys(zhCN).sort()).toEqual(englishKeys);
   });
 
   it("keeps non-English supported languages translated beyond fallback labels", () => {
@@ -130,9 +123,19 @@ describe("translation resources", () => {
     expect(countMatchingEnglishStrings(es)).toBeLessThan(maxFallbackStrings);
     expect(countMatchingEnglishStrings(fr)).toBeLessThan(maxFallbackStrings);
     expect(countMatchingEnglishStrings(ja)).toBeLessThan(maxFallbackStrings);
+    expect(countMatchingEnglishStrings(ko)).toBeLessThan(maxFallbackStrings);
     expect(countMatchingEnglishStrings(ptBR)).toBeLessThan(maxFallbackStrings);
     expect(countMatchingEnglishStrings(ru)).toBeLessThan(maxFallbackStrings);
     expect(countMatchingEnglishStrings(zhCN)).toBeLessThan(maxFallbackStrings);
+  });
+
+  it("localizes the pull request empty state in every supported language", () => {
+    for (const resource of [ar, es, fr, ja, ko, ptBR, ru, zhCN]) {
+      expect(resource.panels.pullRequest.emptyTitle).not.toBe(en.panels.pullRequest.emptyTitle);
+      expect(resource.panels.pullRequest.emptyDescription).not.toBe(
+        en.panels.pullRequest.emptyDescription,
+      );
+    }
   });
 
   it("preserves interpolation placeholders in every language", () => {
@@ -140,6 +143,7 @@ describe("translation resources", () => {
     expect(findInterpolationMismatches(es)).toEqual([]);
     expect(findInterpolationMismatches(fr)).toEqual([]);
     expect(findInterpolationMismatches(ja)).toEqual([]);
+    expect(findInterpolationMismatches(ko)).toEqual([]);
     expect(findInterpolationMismatches(ptBR)).toEqual([]);
     expect(findInterpolationMismatches(ru)).toEqual([]);
     expect(findInterpolationMismatches(zhCN)).toEqual([]);
@@ -151,11 +155,17 @@ describe("translation resources", () => {
     expect(es.settings.project.scripts.title).toBe("Scripts");
   });
 
+  it("uses the Russian term for continuing a session in copied commands", () => {
+    expect(ru.workspace.tabs.menu.copyResumeCommand).toBe("Копировать команду продолжения");
+    expect(ru.workspace.tabs.toasts.resumeCommandCopiedLabel).toBe("команда продолжения");
+  });
+
   it("keeps model count labels spaced around the count", () => {
     expect(ar.modelSelector.modelCountPlural).toBe("{{count}} نماذج");
     expect(es.modelSelector.modelCountPlural).toBe("{{count}} modelos");
     expect(fr.modelSelector.modelCountPlural).toBe("{{count}} modèles");
     expect(ja.modelSelector.modelCountPlural).toBe("{{count}}つのモデル");
+    expect(ko.modelSelector.modelCountPlural).toBe("모델 {{count}}개");
     expect(ptBR.modelSelector.modelCountPlural).toBe("{{count}} modelos");
     expect(ru.modelSelector.modelCountPlural).toBe("{{count}} моделей");
     expect(zhCN.modelSelector.modelCountPlural).toBe("{{count}} 个模型");
@@ -166,6 +176,15 @@ describe("translation resources", () => {
     expect(ptBR.settings.providers.models.many).toBe("{{count}} modelos");
     expect(ru.settings.providers.models.many).toBe("{{count}} моделей");
     expect(zhCN.settings.providers.models.many).toBe("{{count}} 个 Model");
+  });
+
+  it("preserves reviewed Korean status labels", () => {
+    expect(ko.common.states.starting).toBe("시작 중...");
+    expect(ko.desktop.daemon.status.notRunning).toBe("실행 중이 아님");
+  });
+
+  it("labels the immediate add-to-chat action without an ellipsis", () => {
+    expect(en.workspace.fileActions.addToChat).toBe("Add to chat");
   });
 
   it("keeps local connection fallback errors translated", () => {
@@ -185,7 +204,11 @@ describe("translation resources", () => {
     expect(en.shell.menu.toggleSidebar).toBe("Toggle sidebar");
     expect(en.shell.menu.open).toBe("Open menu");
     expect(en.shell.menu.close).toBe("Close menu");
-    expect(en.shell.commandCenter.placeholder).toBe("Search commands, workspaces, and agents...");
+    expect(en.shell.commandCenter.placeholder).toBe(
+      "Search commands, files, workspaces, and agents...",
+    );
+    expect(en.shell.commandCenter.filePlaceholder).toBe("Search files...");
+    expect(en.shell.commandCenter.files).toBe("Files");
     expect(en.shell.commandCenter.noMatches).toBe("No matches");
     expect(en.shell.commandCenter.actions).toBe("Actions");
     expect(en.shell.commandCenter.workspaces).toBe("Workspaces");
@@ -234,12 +257,15 @@ describe("translation resources", () => {
     expect(en.settings.diagnostics.legacyTerminalRenderer.label).toBe(
       "Use legacy terminal renderer",
     );
+    expect(en.settings.about.title).toBe("About");
+    expect(en.settings.about.releaseChannel.label).toBe("Release channel");
     expect(en.settings.appearance.theme.title).toBe("Theme");
     expect(en.settings.appearance.fonts.interfaceFont).toBe("Interface font");
     expect(en.settings.shortcuts.actions.rebind).toBe("Rebind");
     expect(en.settings.integrations.commandLine.title).toBe("Command line");
-    expect(en.settings.integrations.skills.updateAvailable).toBe("Update available");
-    expect(en.settings.permissions.notifications).toBe("Notifications");
+    expect(en.settings.notifications.playSound).toBe("Play sound");
+    expect(en.settings.notifications.permission).toBe("Notification permission");
+    expect(en.settings.notifications.sentTitle).toBe("Test notification sent");
     expect(en.settings.permissions.actions.request).toBe("Request");
   });
 
@@ -289,6 +315,16 @@ describe("translation resources", () => {
     expect(en.workspace.git.pr.empty.pipelineJobsLoadFailed).toBe("Could not load pipeline jobs");
     expect(en.workspace.git.pr.empty.allowedToFail).toBe("allowed to fail");
     expect(en.workspace.git.pr.approvals).toBe("{{given}} of {{required}} approvals");
+    expect(en.workspace.git.pr.accessibility.checkStatus).toEqual({
+      passed: "Passed",
+      failed: "Failed",
+      warning: "Warning",
+      actionRequired: "Action required",
+      manual: "Manual",
+      pending: "Pending",
+      skipped: "Skipped",
+      cancelled: "Cancelled",
+    });
     expect(en.review.comment.placeholder).toBe("Leave a comment");
   });
 
@@ -305,7 +341,7 @@ describe("translation resources", () => {
 
   it("includes provider selector and pairing keys for the Batch 4D migration", () => {
     expect(en.modelSelector.title).toBe("Select provider");
-    expect(en.modelSelector.favorites).toBe("Favorites");
+    expect(en.modelSelector.profiles).toBe("Profiles");
     expect(en.providerCatalog.title).toBe("Add provider");
     expect(en.providerCatalog.actions.installInstructions).toBe("Install instructions");
     expect(en.pairing.link.title).toBe("Paste pairing link");
@@ -380,10 +416,16 @@ describe("translation resources", () => {
     expect(en.message.question.otherPlaceholder).toBe("Other...");
     expect(en.message.todo.title).toBe("Tasks");
     expect(en.message.todo.empty).toBe("No tasks yet.");
+    expect(en.message.todo.tasksProgress).toBe("{{completed}}/{{total}} tasks");
+    expect(en.message.todo.activity).toEqual({
+      created: "Created {{count}} tasks",
+      added: "Added",
+      started: "Started",
+      completed: "Completed",
+    });
   });
 
   it("includes workspace tab toast keys for the Batch 4J migration", () => {
-    expect(en.workspace.tabs.emptyPane).toBe("No tabs in this pane.");
     expect(en.workspace.tabs.toasts.copyFailed).toBe("Copy failed");
     expect(en.workspace.tabs.toasts.agentIdCopiedLabel).toBe("Agent ID");
     expect(en.workspace.tabs.toasts.resumeCommandCopiedLabel).toBe("resume command");
@@ -410,6 +452,14 @@ describe("translation resources", () => {
     expect(en.sidebar.workspace.actions.createWorkspaceFor).toBe(
       "Create a new workspace for {{projectName}}",
     );
+    expect(en.sidebar.workspace.checks).toEqual({
+      passed: "Passed: {{count}}",
+      failed: "Failed: {{count}}",
+      warning: "Warnings: {{count}}",
+      actionRequired: "Action required: {{count}}",
+      manual: "Manual: {{count}}",
+      pending: "Pending: {{count}}",
+    });
     expect(en.sidebar.project.empty.title).toBe("No projects yet");
     expect(en.sidebar.project.empty.description).toBe("Add a project to get started");
     expect(en.settings.projectList.hostLoadFailed).toBe(
@@ -465,8 +515,11 @@ describe("translation resources", () => {
     expect(en.agentList.dateSections.recent).toBe("Recent");
     expect(en.message.attachments.imagePreviewUnavailable).toBe("Image preview unavailable.");
     expect(en.message.attachments.imagePreviewLoadFailed).toBe("Unable to load image preview.");
-    expect(en.workspace.tabs.explorer.changes).toBe("Changes");
-    expect(en.workspace.tabs.explorer.files).toBe("Files");
+    expect(en.workspace.tabs.explorerSidebar.changes).toBe("Changes");
+    expect(en.workspace.tabs.explorerSidebar.files).toBe("Files");
+    expect(en.workspace.tabs.actions.maximizePane).toBe("Maximize pane");
+    expect(en.workspace.tabs.actions.restorePane).toBe("Restore pane");
+    expect(en.branchSwitcher.triggerTooltip).toBe("Switch workspace branch");
     expect(en.branchSwitcher.uncommittedTitle).toBe("Uncommitted changes");
     expect(en.branchSwitcher.uncommittedMessage).toBe(
       "You have uncommitted changes. Stash them before switching branches?",
@@ -549,7 +602,44 @@ describe("translation resources", () => {
     );
   });
 
-  it("includes desktop runtime utility keys for the JAgentDesk build", () => {
+  it("includes desktop update utility keys for the Batch 4Q migration", () => {
+    expect(en.desktop.updates.status.checking).toBe("Checking for app updates...");
+    expect(en.desktop.updates.status.installing).toBe("Installing app update...");
+    expect(en.desktop.updates.status.upToDate).toBe("App is up to date.");
+    expect(en.desktop.updates.status.pending).toBe("We'll let you know when the update is ready.");
+    expect(en.desktop.updates.status.pendingWithLastChecked).toBe(
+      "We'll let you know when the update is ready. Last checked at {{time}}.",
+    );
+    expect(en.desktop.updates.status.pendingWithVersion).toBe(
+      "Update found: {{version}}. Downloading...",
+    );
+    expect(en.desktop.updates.status.pendingWithVersionAndLastChecked).toBe(
+      "Update found: {{version}}. Downloading... Last checked at {{time}}.",
+    );
+    expect(en.desktop.updates.status.availableWithVersion).toBe("Update ready: {{version}}");
+    expect(en.desktop.updates.status.availableWithVersionAndLastChecked).toBe(
+      "Update ready: {{version}}. Last checked at {{time}}.",
+    );
+    expect(en.desktop.updates.status.available).toBe("An app update is ready to install.");
+    expect(en.desktop.updates.status.availableWithLastChecked).toBe(
+      "An app update is ready to install. Last checked at {{time}}.",
+    );
+    expect(en.desktop.updates.status.installed).toBe("App update installed. Restart required.");
+    expect(en.desktop.updates.status.failed).toBe("Failed to update app.");
+    expect(en.desktop.updates.status.idle).toBe("Update status has not been checked yet.");
+    expect(en.desktop.updates.installError).toBe("Unable to install the desktop app update.");
+    expect(en.desktop.updates.callout.installingTitle).toBe("Installing update");
+    expect(en.desktop.updates.callout.failedTitle).toBe("Update failed");
+    expect(en.desktop.updates.callout.availableTitle).toBe("Update available");
+    expect(en.desktop.updates.callout.genericError).toBe("Something went wrong.");
+    expect(en.desktop.updates.callout.whatsNew).toBe("What's new");
+    expect(en.desktop.updates.callout.installAndRestart).toBe("Install & restart");
+    expect(en.desktop.updates.callout.installingDescription).toBe("Installing and restarting...");
+    expect(en.desktop.updates.callout.versionReady).toBe("{{version}} is ready to install.");
+    expect(en.desktop.updates.callout.newVersionReady).toBe("A new version is ready to install.");
+    expect(en.desktop.updates.callout.restartWarning).toBe(
+      "Upgrading the app will stop running agents and close terminal sessions.",
+    );
     expect(en.desktop.rosetta.title).toBe("Download the Apple Silicon build");
     expect(en.desktop.rosetta.runningIntel).toBe(
       "You're running the Intel build of JAgentDesk under Rosetta on Apple Silicon.",
@@ -557,6 +647,7 @@ describe("translation resources", () => {
     expect(en.desktop.rosetta.highCpu).toBe(
       "This causes high CPU usage. Download the Apple Silicon build to fix it.",
     );
+    expect(en.desktop.rosetta.download).toBe("Download");
   });
 
   it("includes desktop permission utility keys for the Batch 4R migration", () => {
@@ -601,9 +692,6 @@ describe("translation resources", () => {
     );
     expect(en.desktop.daemon.loadFailed).toBe("Unable to load desktop daemon status.");
     expect(en.desktop.integrations.cli.installFailed).toBe("Unable to install the JAgentDesk CLI.");
-    expect(en.desktop.integrations.skills.installFailed).toBe(
-      "Unable to install orchestration skills.",
-    );
   });
 
   it("includes remaining utility chrome keys for the Batch 4T migration", () => {

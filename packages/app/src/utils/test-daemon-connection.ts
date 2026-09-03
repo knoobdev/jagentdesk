@@ -1,20 +1,18 @@
 import { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import type { DaemonClientConfig } from "@jagentdesk/client/internal/daemon-client";
-import type {
-  DirectPipeHostConnection,
-  DirectSocketHostConnection,
-  HostConnection,
-  TailnetHostConnection,
-} from "@/types/host-connection";
+import type { HostConnection } from "@/types/host-connection";
 import { getOrCreateClientId } from "./client-id";
-import { getTailscaleLoginAdapter } from "@/tailscale";
 import { resolveAppVersion } from "./app-version";
-import { buildDaemonWebSocketUrl } from "./daemon-endpoints";
 import {
-  buildLocalDaemonTransportUrl,
-  createDesktopLocalDaemonTransportFactory,
+  buildDaemonWebSocketUrl,
+  buildRelayWebSocketUrl,
+  shouldUseTlsForDefaultHostedRelay,
+} from "./daemon-endpoints";
+import {
+  buildDesktopDaemonTransportUrl,
+  createDesktopDaemonTransportFactory,
 } from "@/desktop/daemon/desktop-daemon-transport";
-import { getMobileDeviceName } from "./device-identity";
+import type { DesktopDaemonTransportTarget } from "@/desktop/daemon/desktop-daemon";
 
 export interface DaemonProbeClient {
   readonly lastError: string | null;
@@ -23,26 +21,44 @@ export interface DaemonProbeClient {
   getLastServerInfoMessage(): { serverId: string; hostname: string | null } | null;
 }
 
-interface LocalTransportUrlInput {
-  transportType: "socket" | "pipe";
-  transportPath: string;
-}
-
 export interface DaemonConnectionDependencies<TClient extends DaemonProbeClient> {
   getClientId(): Promise<string>;
   resolveAppVersion(): string | null;
-  createLocalTransportFactory(): DaemonClientConfig["transportFactory"] | null;
-  buildLocalTransportUrl(input: LocalTransportUrlInput): string;
+  createDesktopTransportFactory(): DaemonClientConfig["transportFactory"] | null;
+  buildDesktopTransportUrl(input: DesktopDaemonTransportTarget): string;
   createClient(config: DaemonClientConfig): TClient;
 }
 
 const defaultDaemonConnectionDependencies: DaemonConnectionDependencies<DaemonClient> = {
   getClientId: getOrCreateClientId,
   resolveAppVersion,
-  createLocalTransportFactory: createDesktopLocalDaemonTransportFactory,
-  buildLocalTransportUrl: buildLocalDaemonTransportUrl,
+  createDesktopTransportFactory: createDesktopDaemonTransportFactory,
+  buildDesktopTransportUrl: buildDesktopDaemonTransportUrl,
   createClient: (config) => new DaemonClient(config),
 };
+
+function buildRemoteSshClientConfig(input: {
+  connection: Extract<HostConnection, { type: "remoteSsh" }>;
+  base: Omit<DaemonClientConfig, "url">;
+  desktopTransportFactory: DaemonClientConfig["transportFactory"] | null;
+  buildDesktopTransportUrl: (target: DesktopDaemonTransportTarget) => string;
+}): DaemonClientConfig {
+  if (!input.desktopTransportFactory) {
+    throw new Error("Remote SSH is only available in the desktop app.");
+  }
+  return {
+    ...input.base,
+    transportFactory: input.desktopTransportFactory,
+    url: input.buildDesktopTransportUrl({
+      transportType: "ssh",
+      host: input.connection.host,
+      ...(input.connection.sshPort !== undefined ? { sshPort: input.connection.sshPort } : {}),
+      ...(input.connection.daemonPort !== undefined
+        ? { daemonPort: input.connection.daemonPort }
+        : {}),
+    }),
+  };
+}
 
 function normalizeNonEmptyString(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -97,86 +113,23 @@ export class DaemonConnectionTestError extends Error {
   }
 }
 
-interface BuildClientOptions {
-  capabilities?: DaemonClientConfig["capabilities"];
-  pairingCodeProvider?: () => Promise<string>;
-  connectTimeoutMs?: number;
-}
-
-type BaseDaemonClientConfig = Omit<DaemonClientConfig, "url">;
-
-function buildLocalClientConfig(
-  connection: DirectSocketHostConnection | DirectPipeHostConnection,
-  base: BaseDaemonClientConfig,
-  deps: Pick<DaemonConnectionDependencies<DaemonProbeClient>, "buildLocalTransportUrl">,
-): DaemonClientConfig {
-  return {
-    ...base,
-    url: deps.buildLocalTransportUrl({
-      transportType: connection.type === "directSocket" ? "socket" : "pipe",
-      transportPath: connection.path,
-    }),
-  };
-}
-
-async function buildTailnetClientConfig(
-  connection: TailnetHostConnection,
-  base: BaseDaemonClientConfig,
-  options: BuildClientOptions | undefined,
-): Promise<DaemonClientConfig> {
-  const tailscaleAdapter = getTailscaleLoginAdapter();
-  if (tailscaleAdapter.platform === "desktop") {
-    const status = await tailscaleAdapter.getStatus();
-    if (status.kind !== "connected") {
-      throw new DaemonConnectionTestError("Tailscale connection is not ready", {
-        reason: "Tailscale connection is not ready",
-        lastError: null,
-      });
-    }
-  }
-
-  const proxyAddress = tailscaleAdapter.getProxyAddress?.(connection.tailnetAddress) ?? null;
-  const signing = tailscaleAdapter.getDeviceSigningMaterial?.() ?? null;
-  const deviceName =
-    tailscaleAdapter.platform === "ios" || tailscaleAdapter.platform === "android"
-      ? getMobileDeviceName()
-      : undefined;
-  const pairingCodeProvider = options?.pairingCodeProvider;
-  // A normal host health check must never create a new pairing request. The
-  // six-digit registration is only armed by the explicit mobile Pair verify
-  // screen through pairingCodeProvider; otherwise a reconnecting desktop
-  // probe could occupy the daemon's single pending request slot.
-  const pairingRegistration =
-    connection.daemonPublicKeyB64 && (pairingCodeProvider || connection.pairingCode)
-      ? {
-          daemonPublicKeyB64: connection.daemonPublicKeyB64,
-          ...(deviceName ? { deviceName } : {}),
-          ...(connection.pairingCode ? { pairingCode: connection.pairingCode } : {}),
-          ...(pairingCodeProvider ? { pairingCodeProvider } : {}),
-        }
-      : null;
-  return {
-    ...base,
-    url: buildDaemonWebSocketUrl(proxyAddress ?? connection.tailnetAddress, {
-      useTls: connection.useTls ?? false,
-    }),
-    expectChallenge: true,
-    ...(signing ? { deviceSigning: signing } : {}),
-    ...(pairingRegistration ? { pairingRegistration } : {}),
-  };
-}
-
 export async function buildClientConfig(
   connection: HostConnection,
   serverId?: string,
-  options?: BuildClientOptions,
+  options?: {
+    capabilities?: DaemonClientConfig["capabilities"];
+    trace?: DaemonClientConfig["trace"];
+  },
   deps: Pick<
     DaemonConnectionDependencies<DaemonProbeClient>,
-    "getClientId" | "resolveAppVersion" | "createLocalTransportFactory" | "buildLocalTransportUrl"
+    | "getClientId"
+    | "resolveAppVersion"
+    | "createDesktopTransportFactory"
+    | "buildDesktopTransportUrl"
   > = defaultDaemonConnectionDependencies,
 ): Promise<DaemonClientConfig> {
   const clientId = await deps.getClientId();
-  const localTransportFactory = deps.createLocalTransportFactory();
+  const desktopTransportFactory = deps.createDesktopTransportFactory();
   const base = {
     clientId,
     clientType: "mobile" as const,
@@ -184,15 +137,30 @@ export async function buildClientConfig(
     suppressSendErrors: true,
     reconnect: { enabled: false },
     ...(options?.capabilities ? { capabilities: options.capabilities } : {}),
-    ...(options?.connectTimeoutMs ? { connectTimeoutMs: options.connectTimeoutMs } : {}),
+    ...(options?.trace ? { trace: options.trace } : {}),
     ...((connection.type === "directSocket" || connection.type === "directPipe") &&
-    localTransportFactory
-      ? { transportFactory: localTransportFactory }
+    desktopTransportFactory
+      ? { transportFactory: desktopTransportFactory }
       : {}),
   };
 
   if (connection.type === "directSocket" || connection.type === "directPipe") {
-    return buildLocalClientConfig(connection, base, deps);
+    return {
+      ...base,
+      url: deps.buildDesktopTransportUrl({
+        transportType: connection.type === "directSocket" ? "socket" : "pipe",
+        transportPath: connection.path,
+      }),
+    };
+  }
+
+  if (connection.type === "remoteSsh") {
+    return buildRemoteSshClientConfig({
+      connection,
+      base,
+      desktopTransportFactory,
+      buildDesktopTransportUrl: deps.buildDesktopTransportUrl,
+    });
   }
 
   if (connection.type === "directTcp") {
@@ -203,7 +171,19 @@ export async function buildClientConfig(
     };
   }
 
-  return buildTailnetClientConfig(connection, base, options);
+  if (!serverId) {
+    throw new Error("serverId is required to probe a relay connection");
+  }
+
+  return {
+    ...base,
+    url: buildRelayWebSocketUrl({
+      endpoint: connection.relayEndpoint,
+      useTls: connection.useTls ?? shouldUseTlsForDefaultHostedRelay(connection.relayEndpoint),
+      serverId,
+    }),
+    e2ee: { enabled: true, daemonPublicKeyB64: connection.daemonPublicKeyB64 },
+  };
 }
 
 export function connectAndProbe(
@@ -214,7 +194,6 @@ export function connectAndProbe<TClient extends DaemonProbeClient>(
   config: DaemonClientConfig,
   timeoutMs: number,
   deps: Pick<DaemonConnectionDependencies<TClient>, "createClient">,
-  signal?: AbortSignal,
 ): Promise<{ client: TClient; serverId: string; hostname: string | null }>;
 export function connectAndProbe(
   config: DaemonClientConfig,
@@ -223,48 +202,14 @@ export function connectAndProbe(
     DaemonConnectionDependencies<DaemonProbeClient>,
     "createClient"
   > = defaultDaemonConnectionDependencies,
-  signal?: AbortSignal,
 ): Promise<{ client: DaemonProbeClient; serverId: string; hostname: string | null }> {
   const client = deps.createClient(config);
 
   return new Promise<{ client: DaemonProbeClient; serverId: string; hostname: string | null }>(
     (resolve, reject) => {
-      let settled = false;
-      let timer: ReturnType<typeof setTimeout> | null = null;
-      const cleanup = () => {
-        if (timer) clearTimeout(timer);
-        signal?.removeEventListener("abort", onAbort);
-      };
-      const resolveOnce = (value: {
-        client: DaemonProbeClient;
-        serverId: string;
-        hostname: string | null;
-      }) => {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        resolve(value);
-      };
-      const rejectOnce = (error: Error) => {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        reject(error);
-      };
-      const onAbort = () => {
-        const reason = "Connection attempt cancelled";
+      const timer = setTimeout(() => {
         void client.close().catch(() => undefined);
-        rejectOnce(
-          new DaemonConnectionTestError(reason, {
-            reason,
-            lastError: client.lastError ?? null,
-          }),
-        );
-      };
-
-      timer = setTimeout(() => {
-        void client.close().catch(() => undefined);
-        rejectOnce(
+        reject(
           new DaemonConnectionTestError("Connection timed out", {
             reason: "Connection timed out",
             lastError: client.lastError ?? null,
@@ -272,20 +217,14 @@ export function connectAndProbe(
         );
       }, timeoutMs);
 
-      if (signal?.aborted) {
-        onAbort();
-        return;
-      }
-      signal?.addEventListener("abort", onAbort, { once: true });
-
       void client
         .connect()
         .then(() => {
-          if (settled) return;
+          clearTimeout(timer);
           const serverInfo = client.getLastServerInfoMessage();
           if (!serverInfo) {
             void client.close().catch(() => undefined);
-            rejectOnce(
+            reject(
               new DaemonConnectionTestError("Missing server info message", {
                 reason: "Missing server info message",
                 lastError: client.lastError ?? null,
@@ -293,7 +232,7 @@ export function connectAndProbe(
             );
             return;
           }
-          resolveOnce({
+          resolve({
             client,
             serverId: serverInfo.serverId,
             hostname: serverInfo.hostname,
@@ -301,7 +240,7 @@ export function connectAndProbe(
           return;
         })
         .catch((error) => {
-          if (settled) return;
+          clearTimeout(timer);
           const reason = normalizeNonEmptyString(
             error instanceof Error ? error.message : String(error),
           );
@@ -310,7 +249,7 @@ export function connectAndProbe(
             ? "Incorrect password"
             : pickBestReason(reason, lastError);
           void client.close().catch(() => undefined);
-          rejectOnce(new DaemonConnectionTestError(message, { reason, lastError }));
+          reject(new DaemonConnectionTestError(message, { reason, lastError }));
         });
     },
   );
@@ -319,14 +258,14 @@ export function connectAndProbe(
 interface ProbeOptions {
   serverId?: string;
   timeoutMs?: number;
-  connectTimeoutMs?: number;
   capabilities?: DaemonClientConfig["capabilities"];
-  pairingCodeProvider?: () => Promise<string>;
-  signal?: AbortSignal;
+  trace?: DaemonClientConfig["trace"];
 }
 
-function resolveTimeout(_connection: HostConnection, options?: ProbeOptions): number {
+function resolveTimeout(connection: HostConnection, options?: ProbeOptions): number {
   if (options?.timeoutMs) return options.timeoutMs;
+  if (connection.type === "relay") return 10_000;
+  if (connection.type === "remoteSsh") return 15_000;
   return 6_000;
 }
 
@@ -345,5 +284,5 @@ export async function connectToDaemon(
   deps: DaemonConnectionDependencies<DaemonProbeClient> = defaultDaemonConnectionDependencies,
 ): Promise<{ client: DaemonProbeClient; serverId: string; hostname: string | null }> {
   const config = await buildClientConfig(connection, options?.serverId, options, deps);
-  return connectAndProbe(config, resolveTimeout(connection, options), deps, options?.signal);
+  return connectAndProbe(config, resolveTimeout(connection, options), deps);
 }

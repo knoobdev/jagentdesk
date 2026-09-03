@@ -23,10 +23,6 @@ type SupervisorLifecycleMessage =
       reason?: string;
     };
 
-interface SupervisorHeartbeatMessage {
-  type: "jagentdesk:supervisor-heartbeat";
-}
-
 interface BootstrapResult {
   jagentdeskHome: string;
   logger: ReturnType<typeof createRootLogger>;
@@ -239,13 +235,19 @@ async function main() {
     };
 
     process.on("message", (message: unknown) => {
-      if (
-        typeof message === "object" &&
-        message !== null &&
-        "type" in message &&
-        (message as SupervisorHeartbeatMessage).type === "jagentdesk:supervisor-heartbeat"
-      ) {
+      if (typeof message !== "object" || message === null || !("type" in message)) {
+        return;
+      }
+      const type = (message as { type?: unknown }).type;
+      if (type === "jagentdesk:supervisor-heartbeat") {
         lastSupervisorHeartbeatAt = Date.now();
+        return;
+      }
+      if (type === "jagentdesk:graceful-shutdown") {
+        const reason = (message as { reason?: unknown }).reason;
+        beginShutdown("Supervisor shutdown request", {
+          reason: typeof reason === "string" ? reason : "supervisor_requested_shutdown",
+        });
       }
     });
     process.on("disconnect", () => exitAfterSupervisorLoss("ipc_disconnect_event"));

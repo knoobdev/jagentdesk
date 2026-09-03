@@ -32,22 +32,22 @@ const metroTest = base.extend({
   },
 });
 
-const test = metroTest.extend<
+const daemonTest = metroTest.extend<
+  { projectOwnership: void },
   {
-    jagentdeskE2ESetup: void;
-    projectOwnership: void;
-    outdatedDaemon: OutdatedDaemon;
-    desktopManagedOutdatedDaemon: OutdatedDaemon;
-    projectPickerFixture: TrackedProjectPickerFixture;
-    withWorkspace: WithWorkspace;
-  },
-  { e2eForkProviders: string[]; e2eWorker: void; e2eWorkerClient: SeedDaemonClient }
+    e2eForkProviders: string[];
+    e2eInjectJAgentDeskTools: boolean;
+    e2eWorker: void;
+    e2eWorkerClient: SeedDaemonClient;
+  }
 >({
   e2eForkProviders: [[], { scope: "worker", option: true }],
+  e2eInjectJAgentDeskTools: [false, { scope: "worker", option: true }],
   e2eWorker: [
-    async ({ e2eForkProviders }, provide, workerInfo) => {
+    async ({ e2eForkProviders, e2eInjectJAgentDeskTools }, provide, workerInfo) => {
       const worker = await startE2EWorker(workerInfo.workerIndex, {
         forkProviders: e2eForkProviders,
+        injectJAgentDeskTools: e2eInjectJAgentDeskTools,
       });
       try {
         await provide();
@@ -93,6 +93,16 @@ const test = metroTest.extend<
     },
     { auto: true },
   ],
+});
+
+const test = daemonTest.extend<{
+  jagentdeskE2ESetup: void;
+  outdatedDaemon: OutdatedDaemon;
+  desktopManagedOutdatedDaemon: OutdatedDaemon;
+  relayConfigOutdatedDaemon: OutdatedDaemon;
+  projectPickerFixture: TrackedProjectPickerFixture;
+  withWorkspace: WithWorkspace;
+}>({
   jagentdeskE2ESetup: [
     async ({ page }, provide, testInfo) => {
       const daemonPort = getE2EDaemonPort();
@@ -131,7 +141,7 @@ const test = metroTest.extend<
         endpoint: `127.0.0.1:${daemonPort}`,
         nowIso,
       });
-      const createAgentPreferences = buildCreateAgentPreferences(testDaemon.serverId);
+      const createAgentPreferences = buildCreateAgentPreferences();
 
       await page.addInitScript(
         ({ daemon, preferences, seedNonce: nonce, extraHostsKey }) => {
@@ -187,6 +197,14 @@ const test = metroTest.extend<
     await provide(daemon);
     await daemon.close();
   },
+  relayConfigOutdatedDaemon: async ({}, provide) => {
+    const daemon = await startOutdatedDaemon({
+      daemonStatusRpcCapability: false,
+      relayConfigCapability: false,
+    });
+    await provide(daemon);
+    await daemon.close();
+  },
   projectPickerFixture: async ({}, provide) => {
     const resource = await createProjectPickerFixture();
     const { fixture } = resource;
@@ -218,4 +236,4 @@ const test = metroTest.extend<
   },
 });
 
-export { test, metroTest, expect, type Page };
+export { daemonTest, test, metroTest, expect, type Page };

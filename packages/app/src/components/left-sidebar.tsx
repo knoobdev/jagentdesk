@@ -1,31 +1,18 @@
 import { router, usePathname } from "expo-router";
 import {
-  Boxes,
-  BarChart3,
-  Database,
-  Sparkles,
   CalendarClock,
   FolderPlus,
+  GitBranch,
   History,
   Home,
   Plus,
   Search,
   Server,
   Settings,
-  Smartphone,
   X,
 } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
-import {
-  memo,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-  type RefObject,
-} from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
   Pressable,
   StyleSheet as RNStyleSheet,
@@ -36,14 +23,18 @@ import {
 } from "react-native";
 import { Gesture } from "react-native-gesture-handler";
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue } from "react-native-reanimated";
+import { scheduleOnRN } from "react-native-worklets";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 import { resolveDesktopSidebarWidth } from "@/components/desktop-sidebar-layout";
+import {
+  SIDEBAR_RESIZE_ACTIVATION_OFFSET,
+  SIDEBAR_RESIZE_FAIL_OFFSET,
+} from "@/components/sidebar-resize-handle-layout";
 import { HostPicker } from "@/components/hosts/host-picker";
 import { SidebarHeaderRow } from "@/components/sidebar/sidebar-header-row";
-import { PluginSidebarItems } from "@/plugins";
-import { SidebarDisplayPreferencesMenu } from "@/components/sidebar/sidebar-display-preferences-menu";
+import { SidebarDisplayPreferencesMenu } from "@/components/sidebar/display-preferences/menu";
 import { SidebarHelpMenu } from "@/components/sidebar/sidebar-help-menu";
 import { SidebarResizeHandle } from "@/components/sidebar-resize-handle";
 import { Shortcut } from "@/components/ui/shortcut";
@@ -60,7 +51,8 @@ import {
 import { useSidebarModel } from "@/components/sidebar/sidebar-model";
 import type { PinnedSidebarGroups } from "@/hooks/use-sidebar-pins";
 import { RetainedPanelActivity } from "@/components/retained-panel";
-import type { StatusGroup } from "@/hooks/sidebar-status-view-model";
+import type { SidebarWorkspaceGroup } from "@/components/sidebar/sidebar-labels";
+import type { SidebarProjectIconTarget } from "@/utils/sidebar-project-row-model";
 import { type SidebarGroupMode, useSidebarViewStore } from "@/stores/sidebar-view-store";
 import { useKeyboardShortcutsStore } from "@/stores/keyboard-shortcuts-store";
 import { useHosts } from "@/runtime/host-runtime";
@@ -70,64 +62,33 @@ import { usePanelStore } from "@/stores/panel-store";
 import { useOwnsWindowChromeCorner, WindowChromeSafeArea } from "@/utils/desktop-window";
 import { useCloseAgentListGesture } from "@/mobile-panels/gestures";
 import { MobilePanelOverlay } from "@/mobile-panels/presentation";
-import { useIsMobilePanelPresented } from "@/mobile-panels/provider";
-import { useClusterNavStore } from "@/stores/cluster-nav-store";
-import { useDatabaseNavStore } from "@/stores/database-nav-store";
 import {
-  buildClustersRoute,
-  buildDatabasesRoute,
-  buildDatabaseBrowseRoute,
-  buildSkillsRoute,
-  buildInsightsRoute,
-  buildClusterWorkloadsRoute,
   buildOpenProjectRoute,
   buildNewWorkspaceRoute,
   buildSchedulesRoute,
   buildSessionsRoute,
   buildSettingsAddHostRoute,
-  buildSettingsHostSectionRoute,
   buildSettingsRoute,
 } from "@/utils/host-routes";
+import { openHostOverview } from "@/navigation/settings-navigation";
 import type { ShortcutKey } from "@/utils/format-shortcut";
 import { SidebarAgentListSkeleton } from "./sidebar-agent-list-skeleton";
 import { SidebarCalloutSlot } from "./sidebar-callout-slot";
 import { SidebarWorkspaceList } from "./sidebar-workspace-list";
-import { SidebarClusterNav } from "./sidebar-cluster-nav";
-import { SidebarDatabaseNav } from "./sidebar-database-nav";
-
-/**
- * Pick the sidebar body for a route: a resource nav when the route points at a
- * cluster or database, otherwise the workspace list. Returned as an element and
- * rendered directly (not passed as a prop) so the two sidebar variants avoid a
- * nested ternary without tripping the prop-identity perf rules.
- */
-function resolveSidebarNavBody(
-  clusterRoute: { serverId: string; clusterId: string } | null,
-  databaseRoute: { serverId: string; databaseId: string } | null,
-  fallback: ReactNode,
-): ReactNode {
-  if (clusterRoute) {
-    return (
-      <SidebarClusterNav serverId={clusterRoute.serverId} clusterId={clusterRoute.clusterId} />
-    );
-  }
-  if (databaseRoute) {
-    return (
-      <SidebarDatabaseNav serverId={databaseRoute.serverId} databaseId={databaseRoute.databaseId} />
-    );
-  }
-  return fallback;
-}
-import { useLocalDaemonServerId } from "@/hooks/use-is-local-daemon";
-import { usePairDeviceModalStore } from "@/stores/pair-device-modal-store";
+import { PluginSidebarItems } from "@/plugins";
 
 type SidebarTheme = ReturnType<typeof useUnistyles>["theme"];
 
+const DEV_BUILD_LABEL = process.env.EXPO_PUBLIC_JAGENTDESK_DEV_BUILD_LABEL?.trim() || null;
+
 interface SidebarSharedProps {
   theme: SidebarTheme;
-  statusGroups: StatusGroup[];
+  workspaceGroups: SidebarWorkspaceGroup[];
+  projectIconTargets: SidebarProjectIconTarget[];
   pinnedGroups: PinnedSidebarGroups;
   projects: SidebarProjectEntry[];
+  hasProjectsBeforeFilter: boolean;
+  hasActiveProjectFilter: boolean;
   workspaceEntriesByKey: ReadonlyMap<string, SidebarWorkspaceEntry>;
   isInitialLoad: boolean;
   isRevalidating: boolean;
@@ -140,10 +101,6 @@ interface SidebarSharedProps {
   handleOpenProject: () => void;
   handleHome: () => void;
   handleSettings: () => void;
-  handleClusters: () => void;
-  handleDatabases: () => void;
-  handleSkills: () => void;
-  handleInsights: () => void;
   labels: SidebarLabels;
   newWorkspaceKeys: ShortcutKey[][] | null;
   handleAddHost: () => void;
@@ -155,19 +112,15 @@ interface SidebarLabels {
   newWorkspace: string;
   hosts: string;
   home: string;
-  pairDevice: string;
   settings: string;
   searchHosts: string;
   sessions: string;
   schedules: string;
-  clusters: string;
-  databases: string;
-  skills: string;
-  insights: string;
   closeSidebar: string;
 }
 
 interface MobileSidebarProps extends SidebarSharedProps {
+  active: boolean;
   insetsTop: number;
   insetsBottom: number;
   closeSidebar: () => void;
@@ -191,11 +144,14 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
 
   const {
     projects,
+    hasProjectsBeforeFilter,
+    resolvedProjectFilters,
     workspaceEntriesByKey,
     isInitialLoad,
     isRevalidating,
     refreshAll,
-    statusGroups,
+    workspaceGroups,
+    projectIconTargets,
     pinnedGroups,
     collapsedProjectKeys,
     toggleProjectCollapsed,
@@ -249,13 +205,13 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
   const handleOpenHostSettingsMobile = useCallback(
     (serverId: string) => {
       showMobileAgent();
-      router.push(buildSettingsHostSectionRoute(serverId, "connections"));
+      openHostOverview(serverId);
     },
     [showMobileAgent],
   );
 
   const handleOpenHostSettingsDesktop = useCallback((serverId: string) => {
-    router.push(buildSettingsHostSectionRoute(serverId, "connections"));
+    openHostOverview(serverId);
   }, []);
 
   const handleHomeMobile = useCallback(() => {
@@ -266,81 +222,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
   const handleHomeDesktop = useCallback(() => {
     router.push(buildOpenProjectRoute());
   }, []);
-
-  const hosts = useHosts();
-  const firstServerId = hosts[0]?.serverId ?? "";
-  const lastCluster = useClusterNavStore((s) => s.lastCluster);
-
-  // Jump straight back to the cluster the user last had open (its workloads),
-  // falling back to the cluster list when there is none.
-  const clustersRoute = useMemo(() => {
-    if (lastCluster) {
-      return buildClusterWorkloadsRoute(lastCluster.serverId, lastCluster.clusterId);
-    }
-    if (firstServerId) return buildClustersRoute(firstServerId);
-    return null;
-  }, [lastCluster, firstServerId]);
-
-  const handleClustersDesktop = useCallback(() => {
-    if (clustersRoute) router.push(clustersRoute);
-  }, [clustersRoute]);
-
-  const handleClustersMobile = useCallback(() => {
-    if (clustersRoute) {
-      showMobileAgent();
-      router.push(clustersRoute);
-    }
-  }, [clustersRoute, showMobileAgent]);
-
-  const lastDatabase = useDatabaseNavStore((s) => s.lastDatabase);
-  // Jump straight back to the database the user last had open (its browse view),
-  // falling back to the connection list when there is none.
-  const databasesRoute = useMemo(() => {
-    if (lastDatabase) {
-      return buildDatabaseBrowseRoute(lastDatabase.serverId, lastDatabase.databaseId);
-    }
-    if (firstServerId) return buildDatabasesRoute(firstServerId);
-    return null;
-  }, [lastDatabase, firstServerId]);
-
-  const handleDatabasesDesktop = useCallback(() => {
-    if (databasesRoute) router.push(databasesRoute);
-  }, [databasesRoute]);
-
-  const handleDatabasesMobile = useCallback(() => {
-    if (databasesRoute) {
-      showMobileAgent();
-      router.push(databasesRoute);
-    }
-  }, [databasesRoute, showMobileAgent]);
-
-  const skillsRoute = useMemo(
-    () => (firstServerId ? buildSkillsRoute(firstServerId) : null),
-    [firstServerId],
-  );
-  const handleSkillsDesktop = useCallback(() => {
-    if (skillsRoute) router.push(skillsRoute);
-  }, [skillsRoute]);
-  const handleSkillsMobile = useCallback(() => {
-    if (skillsRoute) {
-      showMobileAgent();
-      router.push(skillsRoute);
-    }
-  }, [skillsRoute, showMobileAgent]);
-
-  const insightsRoute = useMemo(
-    () => (firstServerId ? buildInsightsRoute(firstServerId) : null),
-    [firstServerId],
-  );
-  const handleInsightsDesktop = useCallback(() => {
-    if (insightsRoute) router.push(insightsRoute);
-  }, [insightsRoute]);
-  const handleInsightsMobile = useCallback(() => {
-    if (insightsRoute) {
-      showMobileAgent();
-      router.push(insightsRoute);
-    }
-  }, [insightsRoute, showMobileAgent]);
 
   const handleViewMoreNavigate = useCallback(() => {
     router.push(buildSessionsRoute());
@@ -357,15 +238,10 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       newWorkspace: t("sidebar.actions.newWorkspace"),
       hosts: t("sidebar.actions.hosts"),
       home: t("sidebar.actions.home"),
-      pairDevice: t("openProject.tiles.pairDevice.title"),
       settings: t("sidebar.actions.settings"),
       searchHosts: t("sidebar.host.searchPlaceholder"),
       sessions: t("sidebar.sections.sessions"),
       schedules: t("sidebar.sections.schedules"),
-      clusters: "Clusters",
-      databases: "Databases",
-      skills: "Skills",
-      insights: "Usage & Cost",
       closeSidebar: t("sidebar.actions.closeSidebar"),
     }),
     [t],
@@ -373,9 +249,12 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
 
   const sharedProps = {
     theme,
-    statusGroups,
+    workspaceGroups,
+    projectIconTargets,
     pinnedGroups,
     projects,
+    hasProjectsBeforeFilter,
+    hasActiveProjectFilter: resolvedProjectFilters.length > 0,
     workspaceEntriesByKey,
     isInitialLoad,
     isRevalidating,
@@ -385,10 +264,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     shortcutIndexByWorkspaceKey,
     toggleProjectCollapsed,
     handleRefresh,
-    handleClusters: handleClustersDesktop,
-    handleDatabases: handleDatabasesDesktop,
-    handleSkills: handleSkillsDesktop,
-    handleInsights: handleInsightsDesktop,
     labels,
     newWorkspaceKeys,
   };
@@ -398,10 +273,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       <RetainedPanelActivity active={active}>
         <MobileSidebar
           {...sharedProps}
-          handleClusters={handleClustersMobile}
-          handleDatabases={handleDatabasesMobile}
-          handleSkills={handleSkillsMobile}
-          handleInsights={handleInsightsMobile}
+          active={active}
           insetsTop={insets.top}
           insetsBottom={insets.bottom}
           closeSidebar={showMobileAgent}
@@ -421,10 +293,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     <RetainedPanelActivity active={active}>
       <DesktopSidebar
         {...sharedProps}
-        handleClusters={handleClustersDesktop}
-        handleDatabases={handleDatabasesDesktop}
-        handleSkills={handleSkillsDesktop}
-        handleInsights={handleInsightsDesktop}
         insetsTop={insets.top}
         active={active}
         handleOpenProject={handleOpenProjectDesktop}
@@ -691,7 +559,6 @@ function SidebarFooter({
     addProject: string;
     hosts: string;
     home: string;
-    pairDevice: string;
     settings: string;
     searchHosts: string;
   };
@@ -700,13 +567,6 @@ function SidebarFooter({
 }) {
   const newAgentKeys = useShortcutKeys("new-agent");
   const settingsKeys = useShortcutKeys("toggle-settings");
-  const localServerId = useLocalDaemonServerId();
-  const openPairDeviceModal = usePairDeviceModalStore((state) => state.open);
-  const handleOpenPairDevice = useCallback(() => {
-    if (localServerId) {
-      openPairDeviceModal(localServerId);
-    }
-  }, [localServerId, openPairDeviceModal]);
 
   return (
     <View style={styles.sidebarFooter}>
@@ -730,15 +590,6 @@ function SidebarFooter({
           icon={Home}
           theme={theme}
         />
-        {localServerId ? (
-          <FooterIconButton
-            onPress={handleOpenPairDevice}
-            testID="sidebar-pair-device"
-            label={labels.pairDevice}
-            icon={Smartphone}
-            theme={theme}
-          />
-        ) : null}
         <SidebarHelpMenu />
         <FooterIconButton
           onPress={handleSettings}
@@ -754,10 +605,14 @@ function SidebarFooter({
 }
 
 function MobileSidebar({
+  active,
   theme,
-  statusGroups,
+  workspaceGroups,
+  projectIconTargets,
   pinnedGroups,
   projects,
+  hasProjectsBeforeFilter,
+  hasActiveProjectFilter,
   workspaceEntriesByKey,
   isInitialLoad,
   isRevalidating,
@@ -771,10 +626,6 @@ function MobileSidebar({
   handleOpenProject,
   handleHome,
   handleSettings,
-  handleClusters,
-  handleDatabases,
-  handleSkills,
-  handleInsights,
   labels,
   handleAddHost,
   handleOpenHostSettings,
@@ -788,26 +639,7 @@ function MobileSidebar({
   const hasActiveHostFilter = useSidebarViewStore((state) => state.hostFilters.length > 0);
   const isSessionsActive = pathname.includes("/sessions");
   const isSchedulesActive = pathname.includes("/schedules");
-  const isClustersActive = pathname.includes("/clusters");
-  const isDatabasesActive = pathname.includes("/database");
-  const isSkillsActive = pathname.includes("/skills");
-  const isInsightsActive = pathname.includes("/insights");
-  const clusterRouteMatch = pathname.match(/\/h\/([^/]+)\/cluster\/([^/]+)/);
-  const clusterRoute = clusterRouteMatch
-    ? {
-        serverId: decodeURIComponent(clusterRouteMatch[1]),
-        clusterId: decodeURIComponent(clusterRouteMatch[2]),
-      }
-    : null;
-  const databaseRouteMatch = pathname.match(/\/h\/([^/]+)\/database\/([^/]+)/);
-  const databaseRoute = databaseRouteMatch
-    ? {
-        serverId: decodeURIComponent(databaseRouteMatch[1]),
-        databaseId: decodeURIComponent(databaseRouteMatch[2]),
-      }
-    : null;
   const { gesture: closeGesture, gestureRef: closeGestureRef } = useCloseAgentListGesture();
-  const dragGestureHostPresented = useIsMobilePanelPresented("agent-list");
 
   const handleViewMore = useCallback(() => {
     closeSidebar();
@@ -832,29 +664,6 @@ function MobileSidebar({
     [insetsTop, insetsBottom, theme.colors.surfaceSidebar],
   );
 
-  const mobileWorkspaceBody =
-    isInitialLoad && !hasActiveHostFilter ? (
-      <SidebarAgentListSkeleton />
-    ) : (
-      <SidebarWorkspaceList
-        collapsedProjectKeys={collapsedProjectKeys}
-        onToggleProjectCollapsed={toggleProjectCollapsed}
-        shortcutIndexByWorkspaceKey={shortcutIndexByWorkspaceKey}
-        groupMode={groupMode}
-        statusGroups={statusGroups}
-        pinnedGroups={pinnedGroups}
-        projects={projects}
-        workspaceEntriesByKey={workspaceEntriesByKey}
-        isRefreshing={isManualRefresh && isRevalidating}
-        onRefresh={handleRefresh}
-        onWorkspacePress={handleWorkspacePress}
-        onAddProject={handleOpenProject}
-        parentGestureRef={closeGestureRef}
-        dragGestureHostPresented={dragGestureHostPresented}
-        listHeaderComponent={workspacesSectionHeaderElement}
-      />
-    );
-
   return (
     <MobilePanelOverlay
       panel="agent-list"
@@ -863,66 +672,32 @@ function MobileSidebar({
     >
       <View style={styles.sidebarContent} pointerEvents="auto">
         <WindowChromeSafeArea placement="below" />
-        {clusterRoute || databaseRoute ? null : (
-          <View style={styles.sidebarHeaderGroup}>
-            <SidebarNewWorkspaceHeaderRow
-              label={labels.newWorkspace}
-              testID="sidebar-global-new-workspace"
-              variant="compact"
-              shortcutKeys={newWorkspaceKeys}
-              onBeforeNavigate={closeSidebar}
-            />
-            <SidebarHeaderRow
-              icon={History}
-              label={labels.sessions}
-              onPress={handleViewMore}
-              isActive={isSessionsActive}
-              testID="sidebar-sessions"
-              variant="compact"
-            />
-            <SidebarHeaderRow
-              icon={CalendarClock}
-              label={labels.schedules}
-              onPress={handleViewSchedules}
-              isActive={isSchedulesActive}
-              testID="sidebar-schedules"
-              variant="compact"
-            />
-            <SidebarHeaderRow
-              icon={Boxes}
-              label={labels.clusters}
-              onPress={handleClusters}
-              isActive={isClustersActive}
-              testID="sidebar-clusters-nav"
-              variant="compact"
-            />
-            <SidebarHeaderRow
-              icon={Database}
-              label={labels.databases}
-              onPress={handleDatabases}
-              isActive={isDatabasesActive}
-              testID="sidebar-databases-nav"
-              variant="compact"
-            />
-            <SidebarHeaderRow
-              icon={Sparkles}
-              label={labels.skills}
-              onPress={handleSkills}
-              isActive={isSkillsActive}
-              testID="sidebar-skills-nav"
-              variant="compact"
-            />
-            <SidebarHeaderRow
-              icon={BarChart3}
-              label={labels.insights}
-              onPress={handleInsights}
-              isActive={isInsightsActive}
-              testID="sidebar-insights-nav"
-              variant="compact"
-            />
-            <PluginSidebarItems onBeforeNavigate={closeSidebar} />
-          </View>
-        )}
+        <View style={styles.sidebarHeaderGroup}>
+          <SidebarNewWorkspaceHeaderRow
+            label={labels.newWorkspace}
+            testID="sidebar-global-new-workspace"
+            variant="compact"
+            shortcutKeys={newWorkspaceKeys}
+            onBeforeNavigate={closeSidebar}
+          />
+          <SidebarHeaderRow
+            icon={History}
+            label={labels.sessions}
+            onPress={handleViewMore}
+            isActive={isSessionsActive}
+            testID="sidebar-sessions"
+            variant="compact"
+          />
+          <SidebarHeaderRow
+            icon={CalendarClock}
+            label={labels.schedules}
+            onPress={handleViewSchedules}
+            isActive={isSchedulesActive}
+            testID="sidebar-schedules"
+            variant="compact"
+          />
+          <PluginSidebarItems onBeforeNavigate={closeSidebar} />
+        </View>
         <WindowChromeSafeArea placement="inline" style={styles.mobileCloseButtonRow}>
           <Pressable
             style={styles.mobileCloseButton}
@@ -943,7 +718,30 @@ function MobileSidebar({
           </Pressable>
         </WindowChromeSafeArea>
 
-        {resolveSidebarNavBody(clusterRoute, databaseRoute, mobileWorkspaceBody)}
+        {isInitialLoad && !hasActiveHostFilter ? (
+          <SidebarAgentListSkeleton />
+        ) : (
+          <SidebarWorkspaceList
+            collapsedProjectKeys={collapsedProjectKeys}
+            onToggleProjectCollapsed={toggleProjectCollapsed}
+            shortcutIndexByWorkspaceKey={shortcutIndexByWorkspaceKey}
+            groupMode={groupMode}
+            workspaceGroups={workspaceGroups}
+            projectIconTargets={projectIconTargets}
+            pinnedGroups={pinnedGroups}
+            projects={projects}
+            hasProjectsBeforeFilter={hasProjectsBeforeFilter}
+            hasActiveProjectFilter={hasActiveProjectFilter}
+            workspaceEntriesByKey={workspaceEntriesByKey}
+            isRefreshing={isManualRefresh && isRevalidating}
+            onRefresh={handleRefresh}
+            onWorkspacePress={handleWorkspacePress}
+            onAddProject={handleOpenProject}
+            parentGestureRef={closeGestureRef}
+            dragGestureHostActive={active}
+            listHeaderComponent={workspacesSectionHeaderElement}
+          />
+        )}
 
         <SidebarFooter
           theme={theme}
@@ -961,9 +759,12 @@ function MobileSidebar({
 
 function DesktopSidebar({
   theme,
-  statusGroups,
+  workspaceGroups,
+  projectIconTargets,
   pinnedGroups,
   projects,
+  hasProjectsBeforeFilter,
+  hasActiveProjectFilter,
   workspaceEntriesByKey,
   isInitialLoad,
   isRevalidating,
@@ -977,10 +778,6 @@ function DesktopSidebar({
   handleOpenProject,
   handleHome,
   handleSettings,
-  handleClusters,
-  handleDatabases,
-  handleSkills,
-  handleInsights,
   labels,
   handleAddHost,
   handleOpenHostSettings,
@@ -994,24 +791,6 @@ function DesktopSidebar({
   const hasActiveHostFilter = useSidebarViewStore((state) => state.hostFilters.length > 0);
   const isSessionsActive = pathname.includes("/sessions");
   const isSchedulesActive = pathname.includes("/schedules");
-  const isClustersActive = pathname.includes("/clusters");
-  const isDatabasesActive = pathname.includes("/database");
-  const isSkillsActive = pathname.includes("/skills");
-  const isInsightsActive = pathname.includes("/insights");
-  const clusterRouteMatch = pathname.match(/\/h\/([^/]+)\/cluster\/([^/]+)/);
-  const clusterRoute = clusterRouteMatch
-    ? {
-        serverId: decodeURIComponent(clusterRouteMatch[1]),
-        clusterId: decodeURIComponent(clusterRouteMatch[2]),
-      }
-    : null;
-  const databaseRouteMatch = pathname.match(/\/h\/([^/]+)\/database\/([^/]+)/);
-  const databaseRoute = databaseRouteMatch
-    ? {
-        serverId: decodeURIComponent(databaseRouteMatch[1]),
-        databaseId: decodeURIComponent(databaseRouteMatch[2]),
-      }
-    : null;
   const sidebarWidth = usePanelStore((state) => state.sidebarWidth);
   const setSidebarWidth = usePanelStore((state) => state.setSidebarWidth);
   const { width: viewportWidth } = useWindowDimensions();
@@ -1022,6 +801,9 @@ function DesktopSidebar({
 
   const startWidthRef = useRef(visibleSidebarWidth);
   const resizeWidth = useSharedValue(visibleSidebarWidth);
+  const [resizePressed, setResizePressed] = useState(false);
+  const showResizeGrip = useCallback(() => setResizePressed(true), []);
+  const hideResizeGrip = useCallback(() => setResizePressed(false), []);
 
   useEffect(() => {
     resizeWidth.value = visibleSidebarWidth;
@@ -1031,8 +813,16 @@ function DesktopSidebar({
     () =>
       Gesture.Pan()
         .hitSlop({ left: 8, right: 8, top: 0, bottom: 0 })
-        .onStart(() => {
-          startWidthRef.current = visibleSidebarWidth;
+        .onBegin(() => {
+          scheduleOnRN(showResizeGrip);
+        })
+        // Horizontal intent only, so a finger dragging down the touch grip scrolls
+        // the workspace list instead of resizing. Anchoring the start width to the
+        // activation translation keeps the extra threshold from jumping the edge.
+        .activeOffsetX([-SIDEBAR_RESIZE_ACTIVATION_OFFSET, SIDEBAR_RESIZE_ACTIVATION_OFFSET])
+        .failOffsetY([-SIDEBAR_RESIZE_FAIL_OFFSET, SIDEBAR_RESIZE_FAIL_OFFSET])
+        .onStart((event) => {
+          startWidthRef.current = visibleSidebarWidth - event.translationX;
           resizeWidth.value = visibleSidebarWidth;
         })
         .onUpdate((event) => {
@@ -1045,8 +835,18 @@ function DesktopSidebar({
         })
         .onEnd(() => {
           runOnJS(setSidebarWidth)(resizeWidth.value);
+        })
+        .onFinalize(() => {
+          scheduleOnRN(hideResizeGrip);
         }),
-    [resizeWidth, setSidebarWidth, viewportWidth, visibleSidebarWidth],
+    [
+      hideResizeGrip,
+      resizeWidth,
+      setSidebarWidth,
+      showResizeGrip,
+      viewportWidth,
+      visibleSidebarWidth,
+    ],
   );
 
   const resizeAnimatedStyle = useAnimatedStyle(() => ({
@@ -1069,25 +869,6 @@ function DesktopSidebar({
     () => [styles.sidebarHeaderGroup, ownsTopLeft && styles.sidebarHeaderGroupBelowChrome],
     [ownsTopLeft],
   );
-  const workspaceListElement =
-    isInitialLoad && !hasActiveHostFilter ? (
-      <SidebarAgentListSkeleton />
-    ) : (
-      <SidebarWorkspaceList
-        collapsedProjectKeys={collapsedProjectKeys}
-        onToggleProjectCollapsed={toggleProjectCollapsed}
-        shortcutIndexByWorkspaceKey={shortcutIndexByWorkspaceKey}
-        groupMode={groupMode}
-        statusGroups={statusGroups}
-        pinnedGroups={pinnedGroups}
-        projects={projects}
-        workspaceEntriesByKey={workspaceEntriesByKey}
-        isRefreshing={isManualRefresh && isRevalidating}
-        onRefresh={handleRefresh}
-        onAddProject={handleOpenProject}
-        listHeaderComponent={workspacesSectionHeaderElement}
-      />
-    );
   return (
     <Animated.View
       accessibilityElementsHidden={!active}
@@ -1097,75 +878,74 @@ function DesktopSidebar({
     >
       <View style={desktopSidebarBorderStyle}>
         <View style={styles.sidebarDragArea}>
-          {ownsTopLeft ? (
+          {ownsTopLeft || DEV_BUILD_LABEL ? (
             <View style={styles.desktopChromeRow}>
               <TitlebarDragRegion />
+              {DEV_BUILD_LABEL ? (
+                <View
+                  pointerEvents="none"
+                  style={styles.devBuildBadge}
+                  testID="dev-build-label"
+                  accessibilityLabel={`Development build: ${DEV_BUILD_LABEL}`}
+                >
+                  <GitBranch size={12} color={theme.colors.accentForeground} />
+                  <Text numberOfLines={1} ellipsizeMode="tail" style={styles.devBuildBadgeText}>
+                    {DEV_BUILD_LABEL}
+                  </Text>
+                </View>
+              ) : null}
             </View>
           ) : (
             <TitlebarDragRegion />
           )}
-          {clusterRoute || databaseRoute ? null : (
-            <View style={sidebarHeaderGroupStyle}>
-              <SidebarNewWorkspaceHeaderRow
-                label={labels.newWorkspace}
-                testID="sidebar-global-new-workspace"
-                variant="compact"
-                shortcutKeys={newWorkspaceKeys}
-              />
-              <SidebarHeaderRow
-                icon={History}
-                label={labels.sessions}
-                onPress={handleViewMore}
-                isActive={isSessionsActive}
-                testID="sidebar-sessions"
-                variant="compact"
-              />
-              <SidebarHeaderRow
-                icon={CalendarClock}
-                label={labels.schedules}
-                onPress={handleViewSchedules}
-                isActive={isSchedulesActive}
-                testID="sidebar-schedules"
-                variant="compact"
-              />
-              <SidebarHeaderRow
-                icon={Boxes}
-                label={labels.clusters}
-                onPress={handleClusters}
-                isActive={isClustersActive}
-                testID="sidebar-clusters-nav"
-                variant="compact"
-              />
-              <SidebarHeaderRow
-                icon={Database}
-                label={labels.databases}
-                onPress={handleDatabases}
-                isActive={isDatabasesActive}
-                testID="sidebar-databases-nav"
-                variant="compact"
-              />
-              <SidebarHeaderRow
-                icon={Sparkles}
-                label={labels.skills}
-                onPress={handleSkills}
-                isActive={isSkillsActive}
-                testID="sidebar-skills-nav"
-                variant="compact"
-              />
-              <SidebarHeaderRow
-                icon={BarChart3}
-                label={labels.insights}
-                onPress={handleInsights}
-                isActive={isInsightsActive}
-                testID="sidebar-insights-nav"
-                variant="compact"
-              />
-              <PluginSidebarItems />
-            </View>
-          )}
+          <View style={sidebarHeaderGroupStyle}>
+            <SidebarNewWorkspaceHeaderRow
+              label={labels.newWorkspace}
+              testID="sidebar-global-new-workspace"
+              variant="compact"
+              shortcutKeys={newWorkspaceKeys}
+            />
+            <SidebarHeaderRow
+              icon={History}
+              label={labels.sessions}
+              onPress={handleViewMore}
+              isActive={isSessionsActive}
+              testID="sidebar-sessions"
+              variant="compact"
+            />
+            <SidebarHeaderRow
+              icon={CalendarClock}
+              label={labels.schedules}
+              onPress={handleViewSchedules}
+              isActive={isSchedulesActive}
+              testID="sidebar-schedules"
+              variant="compact"
+            />
+            <PluginSidebarItems />
+          </View>
         </View>
 
-        {resolveSidebarNavBody(clusterRoute, databaseRoute, workspaceListElement)}
+        {isInitialLoad && !hasActiveHostFilter ? (
+          <SidebarAgentListSkeleton />
+        ) : (
+          <SidebarWorkspaceList
+            collapsedProjectKeys={collapsedProjectKeys}
+            onToggleProjectCollapsed={toggleProjectCollapsed}
+            shortcutIndexByWorkspaceKey={shortcutIndexByWorkspaceKey}
+            groupMode={groupMode}
+            workspaceGroups={workspaceGroups}
+            projectIconTargets={projectIconTargets}
+            pinnedGroups={pinnedGroups}
+            projects={projects}
+            hasProjectsBeforeFilter={hasProjectsBeforeFilter}
+            hasActiveProjectFilter={hasActiveProjectFilter}
+            workspaceEntriesByKey={workspaceEntriesByKey}
+            isRefreshing={isManualRefresh && isRevalidating}
+            onRefresh={handleRefresh}
+            onAddProject={handleOpenProject}
+            listHeaderComponent={workspacesSectionHeaderElement}
+          />
+        )}
 
         <SidebarCalloutSlot />
 
@@ -1182,6 +962,7 @@ function DesktopSidebar({
         <SidebarResizeHandle
           edge="right"
           gesture={resizeGesture}
+          pressed={resizePressed}
           testID="left-sidebar-resize-handle"
         />
       </View>
@@ -1276,17 +1057,17 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
     justifyContent: "space-between",
     gap: theme.spacing[2],
-    // Rendered inside the scroll's listContent (paddingHorizontal spacing[2]), so the
-    // title lands at spacing[2] left to align with project icons, and the trailing
-    // pill sits flush with the list edge on the right.
+    // Rendered inside the scroll's listContent (paddingHorizontal spacing[2]). The title
+    // lands at spacing[2] left to align with project icons. Settings2's painted path stops
+    // inside its 14px SVG, so 4px aligns the ink rather than the SVG box to the row rail.
     paddingLeft: theme.spacing[2],
-    paddingRight: 0,
+    paddingRight: 4,
     paddingTop: theme.spacing[1],
     paddingBottom: theme.spacing[1],
   },
   workspacesSectionTitle: {
     color: theme.colors.foregroundMuted,
-    fontSize: theme.fontSize.xs,
+    fontSize: theme.fontSize.sm,
     fontWeight: theme.fontWeight.normal,
   },
   workspacesSectionActions: {
@@ -1318,7 +1099,9 @@ const styles = StyleSheet.create((theme) => ({
     pointerEvents: "box-none",
   },
   mobileCloseButton: {
-    marginRight: theme.spacing[4],
+    // The 16px X paints farther inside its 32px hit target than the 14px Settings2 glyph.
+    // This optical inset puts their painted right edges on the same sidebar rail.
+    marginRight: theme.spacing[2] + 1.5,
     width: 32,
     height: 32,
     alignItems: "center",
@@ -1339,8 +1122,27 @@ const styles = StyleSheet.create((theme) => ({
     height: HEADER_INNER_HEIGHT,
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "flex-end",
+    paddingHorizontal: theme.spacing[3],
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: "transparent",
+  },
+  devBuildBadge: {
+    maxWidth: "60%",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[1],
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: 2,
+    borderRadius: theme.borderRadius.full,
+    backgroundColor: theme.colors.accent,
+  },
+  devBuildBadgeText: {
+    minWidth: 0,
+    flexShrink: 1,
+    color: theme.colors.accentForeground,
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
   },
   sidebarFooter: {
     flexDirection: "row",
@@ -1374,7 +1176,7 @@ const styles = StyleSheet.create((theme) => ({
   footerAddProjectLabel: {
     minWidth: 0,
     flexShrink: 1,
-    fontSize: theme.fontSize.sm,
+    fontSize: theme.fontSize.base,
     fontWeight: theme.fontWeight.normal,
     color: theme.colors.foregroundMuted,
   },
@@ -1395,7 +1197,7 @@ const styles = StyleSheet.create((theme) => ({
     gap: theme.spacing[2],
   },
   tooltipText: {
-    fontSize: theme.fontSize.sm,
+    fontSize: theme.fontSize.base,
     color: theme.colors.popoverForeground,
   },
 }));

@@ -32,7 +32,7 @@ export function SidebarModelProvider({
   active?: boolean;
   children: ReactNode;
 }) {
-  const list = useSidebarWorkspacesList();
+  const list = useSidebarWorkspacesList({ enabled: active });
   const groupMode = useSidebarViewStore((state) => state.groupMode);
   const collapsedProjectKeys = useSidebarCollapsedSectionsStore(
     (state) => state.collapsedProjectKeys,

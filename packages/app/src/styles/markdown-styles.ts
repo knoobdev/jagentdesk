@@ -8,7 +8,11 @@ const webSelectableTextStyle = isWeb ? { userSelect: "text" as const } : {};
  *
  * Usage:
  *   const markdownStyles = useMemo(() => createMarkdownStyles(theme), [theme]);
- *   <Markdown style={markdownStyles}>{content}</Markdown>
+ *   <Markdown style={markdownStyles} markdownit={parser}>{content}</Markdown>
+ *
+ * Always pass `markdownit` from `@/utils/markdown-parser`. Omit it and
+ * react-native-markdown-display builds its own parser with `typographer: true`,
+ * which rewrites a literal `(c)` as ©.
  */
 export function createMarkdownStyles(theme: Theme) {
   return {

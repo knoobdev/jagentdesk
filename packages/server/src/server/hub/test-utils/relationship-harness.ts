@@ -62,51 +62,18 @@ const execFileAsync = promisify(execFile);
 const HUB_ORIGIN = "https://hub.test";
 const SOCKET_URL = "wss://hub.test/daemon";
 const REPOSITORY_ROOT = path.resolve(import.meta.dirname, "../../../../../..");
+const REMOVAL_RETRY_CODES = new Set(["EBUSY", "ENOTEMPTY", "EPERM"]);
 
-export interface ArchiveWatcher {
-  close(): void;
-  onError(listener: (error: Error) => void): void;
-}
-
-export interface ArchiveWatchFiles {
-  watchDirectory(path: string, onChange: () => void): ArchiveWatcher;
-}
-
-const nodeArchiveWatchFiles: ArchiveWatchFiles = {
-  watchDirectory(directory, onChange) {
-    const watcher = watch(directory, onChange);
-    return {
-      close: () => watcher.close(),
-      onError: (listener) => watcher.on("error", listener),
-    };
-  },
-};
-
-export class SetupFailingArchiveWatchFiles implements ArchiveWatchFiles {
-  private attempts = 0;
-  private readonly openDirectories = new Set<string>();
-
-  constructor(private readonly failOnAttempt: number) {}
-
-  watchDirectory(directory: string): ArchiveWatcher {
-    this.attempts++;
-    if (this.attempts === this.failOnAttempt) {
-      throw new Error(`Cannot watch ${directory}`);
+async function removeDirectoryAfterWritesSettle(directory: string): Promise<void> {
+  for (let retry = 0; retry < 10; retry += 1) {
+    try {
+      await rm(directory, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (!code || !REMOVAL_RETRY_CODES.has(code) || retry === 9) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 100 * (retry + 1)));
     }
-    this.openDirectories.add(directory);
-    let open = true;
-    return {
-      close: () => {
-        if (!open) return;
-        open = false;
-        this.openDirectories.delete(directory);
-      },
-      onError: () => {},
-    };
-  }
-
-  activeDirectories(): string[] {
-    return [...this.openDirectories];
   }
 }
 
@@ -118,7 +85,7 @@ interface PersistedRelationship {
     daemonId: string;
     idempotencyKey?: string;
     hubOrigin: string;
-    scopes: string[];
+    permissions: string[];
   };
   credential?: { secret: string };
   enrollment?: { token: string };
@@ -250,7 +217,10 @@ class ControlledAgentClient implements AgentClient {
   resumes = 0;
   createdConfigs: AgentSessionConfig[] = [];
 
-  constructor(private readonly client: AgentClient) {
+  constructor(
+    private readonly client: AgentClient,
+    private readonly internalClient: AgentClient,
+  ) {
     this.provider = client.provider;
     this.capabilities = client.capabilities;
   }
@@ -277,6 +247,9 @@ class ControlledAgentClient implements AgentClient {
     launchContext?: AgentLaunchContext,
     options?: AgentCreateSessionOptions,
   ): Promise<AgentSession> {
+    if (config.internal) {
+      return this.internalClient.createSession(config, launchContext, options);
+    }
     this.creations++;
     this.createdConfigs.push({ ...config });
     this.creationObserved.resolve();
@@ -289,6 +262,9 @@ class ControlledAgentClient implements AgentClient {
     overrides?: Partial<AgentSessionConfig>,
     launchContext?: AgentLaunchContext,
   ): Promise<AgentSession> {
+    if (overrides?.internal) {
+      return this.internalClient.resumeSession(handle, overrides, launchContext);
+    }
     this.resumes++;
     return this.client.resumeSession(handle, overrides, launchContext);
   }
@@ -320,8 +296,9 @@ class InMemoryHubRelationships implements HubRelationshipRemote {
   private enrollmentObserved = deferred<void>();
   private socketObserved = deferred<void>();
   private enrollmentRejection: 401 | 403 | null = null;
-  private enrollmentScopes = ["hub.execution.*"];
+  private enrollmentPermissions: string[] | null = null;
   private revokeFailures = 0;
+  private revocationGate: Deferred<void> | null = null;
   private readonly relationships = new Set<string>();
   readonly enrollmentSnapshots: RelationshipInvocationSnapshot[] = [];
   readonly socketSnapshots: RelationshipInvocationSnapshot[] = [];
@@ -336,13 +313,13 @@ class InMemoryHubRelationships implements HubRelationshipRemote {
     this.enrollmentRejection = statusCode;
   }
 
-  returnEnrollmentScopes(scopes: string[]): void {
-    this.enrollmentScopes = scopes.slice();
+  returnEnrollmentPermissions(permissions: string[]): void {
+    this.enrollmentPermissions = permissions.slice();
   }
 
   async enroll(input: HubEnrollment): Promise<HubEnrollmentResult> {
     this.enrollmentSnapshots.push(this.captureRelationship());
-    this.enrollments.push({ ...input, scopes: input.scopes.slice() });
+    this.enrollments.push({ ...input, permissions: input.permissions.slice() });
     this.relationships.add(input.idempotencyKey);
     this.enrollmentObserved.resolve();
     if (this.enrollmentRejection) {
@@ -391,12 +368,32 @@ class InMemoryHubRelationships implements HubRelationshipRemote {
     this.revokeFailures = count;
   }
 
+  holdRevocation(): void {
+    this.revocationGate = deferred<void>();
+  }
+
+  completeRevocation(): void {
+    if (!this.revocationGate) throw new Error("No revocation is waiting");
+    this.revocationGate.resolve();
+    this.revocationGate = null;
+  }
+
   async revoke(input: HubRevocation): Promise<void> {
     this.revocations.push({ ...input });
+    await this.revocationGate?.promise;
     if (this.revokeFailures > 0) {
       this.revokeFailures--;
       throw new Error("Hub is offline");
     }
+  }
+
+  async updatePermissions(input: {
+    daemonId: string;
+    hubOrigin: string;
+    credential: string;
+    permissions: string[];
+  }): Promise<{ permissions: string[] }> {
+    return { permissions: input.permissions.slice() };
   }
 
   openSocket(input: HubSocketCredentials, events: HubSocketEvents): HubSocketConnection {
@@ -422,7 +419,7 @@ class InMemoryHubRelationships implements HubRelationshipRemote {
   private enrollmentResult(input: HubEnrollment): HubEnrollmentResult {
     return {
       daemonId: input.daemonId,
-      scopes: this.enrollmentScopes.slice(),
+      permissions: this.enrollmentPermissions?.slice() ?? input.permissions.slice(),
       webSocketUrl: SOCKET_URL,
     };
   }
@@ -466,8 +463,8 @@ export class HubRelationshipHarness {
   private readonly codex: ControlledAgentClient;
 
   private constructor(
-    private readonly archiveWatchFiles: ArchiveWatchFiles,
     private readonly mcpEnabled: boolean,
+    private readonly agentClients?: Partial<Record<AgentProvider, AgentClient>>,
   ) {
     this.codex = new ControlledAgentClient(
       createTestAgentClients({
@@ -485,26 +482,29 @@ export class HubRelationshipHarness {
           this.providerPrompts.push(prompt);
         },
       }).codex,
+      createTestAgentClients({ supportsMcpServers: mcpEnabled }).codex,
     );
   }
 
-  static async start(
-    archiveWatchFiles: ArchiveWatchFiles = nodeArchiveWatchFiles,
-  ): Promise<HubRelationshipHarness> {
-    return this.launch(archiveWatchFiles, false);
+  static async start(): Promise<HubRelationshipHarness> {
+    return this.launch(false);
   }
 
-  static async startWithAgentMcp(
-    archiveWatchFiles: ArchiveWatchFiles = nodeArchiveWatchFiles,
+  static async startWithAgentMcp(): Promise<HubRelationshipHarness> {
+    return this.launch(true);
+  }
+
+  static async startWithRealAgentClients(
+    agentClients: Partial<Record<AgentProvider, AgentClient>>,
   ): Promise<HubRelationshipHarness> {
-    return this.launch(archiveWatchFiles, true);
+    return this.launch(true, agentClients);
   }
 
   private static async launch(
-    archiveWatchFiles: ArchiveWatchFiles,
     mcpEnabled: boolean,
+    agentClients?: Partial<Record<AgentProvider, AgentClient>>,
   ): Promise<HubRelationshipHarness> {
-    const harness = new HubRelationshipHarness(archiveWatchFiles, mcpEnabled);
+    const harness = new HubRelationshipHarness(mcpEnabled, agentClients);
     await harness.createHome();
     await harness.startDaemon();
     return harness;
@@ -514,8 +514,17 @@ export class HubRelationshipHarness {
     this.remote.holdEnrollment();
   }
 
-  beginConnect(token = "ceremony-token", hubUrl = HUB_ORIGIN): CliProcess {
-    return { result: this.runCli(["hub", "connect", hubUrl, "--token", token]) };
+  beginConnect(token = "ceremony-token", hubUrl = HUB_ORIGIN, execute = true): CliProcess {
+    return {
+      result: this.runCli([
+        "hub",
+        "connect",
+        hubUrl,
+        "--api-key",
+        `hub-contract-api-key:${token}`,
+        ...(execute ? ["--permission", "hub.execute"] : []),
+      ]),
+    };
   }
 
   async status(): Promise<Record<string, unknown>> {
@@ -524,6 +533,14 @@ export class HubRelationshipHarness {
 
   async disconnect(force = false): Promise<Record<string, unknown>> {
     return this.runCli(["hub", "disconnect", ...(force ? ["--force"] : [])]);
+  }
+
+  async grantPermission(permission: string): Promise<Record<string, unknown>> {
+    return this.runCli(["hub", "permissions", "grant", permission]);
+  }
+
+  async revokePermission(permission: string): Promise<Record<string, unknown>> {
+    return this.runCli(["hub", "permissions", "revoke", permission]);
   }
 
   beginDisconnect(force = false): CliProcess {
@@ -541,6 +558,14 @@ export class HubRelationshipHarness {
     } finally {
       watcher.close();
     }
+  }
+
+  async connectionStateBecomes(expected: string): Promise<void> {
+    for (let attempt = 0; attempt < 100; attempt++) {
+      if ((await this.status()).state === expected) return;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error(`Hub connection state did not become ${expected}`);
   }
 
   async manageRelationshipFromExternalSocket(): Promise<SessionOutboundMessage[]> {
@@ -589,6 +614,7 @@ export class HubRelationshipHarness {
           requestId: "browser-hub-connect",
           hubUrl: HUB_ORIGIN,
           token: "browser-token",
+          permissions: [],
         },
       }),
     );
@@ -605,8 +631,8 @@ export class HubRelationshipHarness {
     this.remote.completeEnrollment();
   }
 
-  returnEnrollmentScopes(scopes: string[]): void {
-    this.remote.returnEnrollmentScopes(scopes);
+  returnEnrollmentPermissions(permissions: string[]): void {
+    this.remote.returnEnrollmentPermissions(permissions);
   }
 
   loseEnrollmentResponse(): void {
@@ -629,6 +655,14 @@ export class HubRelationshipHarness {
     this.remote.failRevocations(count);
   }
 
+  holdRevocation(): void {
+    this.remote.holdRevocation();
+  }
+
+  completeRevocation(): void {
+    this.remote.completeRevocation();
+  }
+
   failProviderPromptStart(prompt = "Create through the Hub"): void {
     this.promptsToFail.add(prompt);
   }
@@ -643,7 +677,18 @@ export class HubRelationshipHarness {
 
   connectLatestSocket(): void {
     const socket = this.latestSocket();
-    socket.events.connected(socket.socket);
+    socket.events.connected(socket.socket, "session-v1");
+    socket.socket.receiveEnvelope({
+      type: "hello",
+      clientId: `hub:${socket.input.daemonId}`,
+      clientType: "hub",
+      protocolVersion: 1,
+    });
+  }
+
+  connectLatestLegacySocket(): void {
+    const socket = this.latestSocket();
+    socket.events.connected(socket.socket, "legacy");
   }
 
   rejectLatestSocket(statusCode: 401 | 403): void {
@@ -667,7 +712,13 @@ export class HubRelationshipHarness {
   connectSocket(index: number): void {
     const socket = this.remote.sockets[index];
     if (!socket) throw new Error(`Socket ${index} does not exist`);
-    socket.events.connected(socket.socket);
+    socket.events.connected(socket.socket, "session-v1");
+    socket.socket.receiveEnvelope({
+      type: "hello",
+      clientId: `hub:${socket.input.daemonId}`,
+      clientType: "hub",
+      protocolVersion: 1,
+    });
   }
 
   closeSocket(index: number, code: number): void {
@@ -691,20 +742,26 @@ export class HubRelationshipHarness {
     requestId: string,
     executionId = "execution-race",
     options: {
+      provider?: AgentProvider;
+      model?: string;
+      workspaceId?: string;
       worktree?: CreateAgentWorktreeTarget;
       prompt?: string;
       modeId?: string;
+      thinkingOptionId?: string;
+      featureValues?: Record<string, unknown>;
       mcpServers?: AgentSessionConfig["mcpServers"];
+      providerOptions?: AgentSessionConfig["providerOptions"];
+      toolPolicy?: AgentSessionConfig["toolPolicy"];
     } = {},
   ): void {
-    const { prompt = "Create through the Hub", ...requestOptions } = options;
+    const { prompt = "Create through the Hub", provider = "codex", ...requestOptions } = options;
     this.latestSocket().socket.receive({
       type: "hub.execution.agent.create.request",
       requestId,
       executionId,
-      provider: "codex",
+      provider,
       cwd: this.root,
-      workspaceId: "hub-workspace",
       prompt,
       ...requestOptions,
     });
@@ -795,6 +852,31 @@ export class HubRelationshipHarness {
     return (await this.daemon!.agentStorage.get(agentId))?.archivedAt ?? null;
   }
 
+  async ownedWorkspaceArchivedAt(agentId: string): Promise<string | null> {
+    const agent = await this.daemon!.agentStorage.get(agentId);
+    if (!agent) throw new Error(`Owned agent ${agentId} does not exist`);
+    if (!agent.workspaceId) throw new Error(`Owned agent ${agentId} has no workspace`);
+    return this.workspaceArchivedAt(agent.workspaceId);
+  }
+
+  async archivedWorkspaceAt(workspaceId: string): Promise<string | null> {
+    return this.workspaceArchivedAt(workspaceId);
+  }
+
+  async createWorkspaceTerminal(workspaceId: string, cwd = this.root): Promise<string> {
+    const terminal = await this.daemon!.terminalManager.createTerminal({
+      cwd,
+      workspaceId,
+      command: process.execPath,
+      args: ["-e", "setInterval(() => {}, 1000)"],
+    });
+    return terminal.id;
+  }
+
+  terminalExists(terminalId: string): boolean {
+    return this.daemon!.terminalManager.getTerminal(terminalId) !== undefined;
+  }
+
   async createForeignExecution(executionId: string): Promise<string> {
     const agent = await this.daemon!.agentManager.createAgent(
       { provider: "codex", cwd: this.root },
@@ -836,6 +918,10 @@ export class HubRelationshipHarness {
     return this.codex.creations;
   }
 
+  executionProviderCreations(): number {
+    return this.codex.createdConfigs.filter((config) => config.internal !== true).length;
+  }
+
   providerResumes(): number {
     return this.codex.resumes;
   }
@@ -864,65 +950,6 @@ export class HubRelationshipHarness {
 
   repoExists(): boolean {
     return existsSync(this.root);
-  }
-
-  async waitForOwnedArchiveCompletion(
-    agentId: string,
-  ): Promise<{ agentArchivedAt: string; workspaceArchivedAt: string }> {
-    const created = await this.daemon!.agentStorage.get(agentId);
-    if (!created) throw new Error(`Owned agent ${agentId} does not exist`);
-    if (!created.workspaceId) throw new Error(`Owned agent ${agentId} has no workspace`);
-    return new Promise<{ agentArchivedAt: string; workspaceArchivedAt: string }>(
-      (resolve, reject) => {
-        const watchers: ArchiveWatcher[] = [];
-        let settled = false;
-        const timeout = setTimeout(
-          () => finish(new Error(`Timed out waiting for owned agent ${agentId} to archive`)),
-          15_000,
-        );
-        timeout.unref?.();
-        const closeWatchers = () => {
-          clearTimeout(timeout);
-          for (const watcher of watchers) watcher.close();
-        };
-        const finish = (
-          result: Error | { agentArchivedAt: string; workspaceArchivedAt: string },
-        ) => {
-          if (settled) return;
-          settled = true;
-          closeWatchers();
-          if (result instanceof Error) reject(result);
-          else resolve(result);
-        };
-        const observeCompletion = async () => {
-          try {
-            const archived = await this.daemon!.agentStorage.get(agentId);
-            const workspaceArchivedAt = this.workspaceArchivedAt(created.workspaceId!);
-            if (!archived?.archivedAt || !workspaceArchivedAt || existsSync(created.cwd)) return;
-            finish({ agentArchivedAt: archived.archivedAt, workspaceArchivedAt });
-          } catch (error) {
-            finish(error instanceof Error ? error : new Error(String(error)));
-          }
-        };
-        try {
-          const projectsWatcher = this.archiveWatchFiles.watchDirectory(
-            path.join(this.jagentdeskHome, "projects"),
-            observeCompletion,
-          );
-          watchers.push(projectsWatcher);
-          projectsWatcher.onError(finish);
-          const worktreeWatcher = this.archiveWatchFiles.watchDirectory(
-            path.dirname(created.cwd),
-            observeCompletion,
-          );
-          watchers.push(worktreeWatcher);
-          worktreeWatcher.onError(finish);
-          void observeCompletion();
-        } catch (error) {
-          finish(error instanceof Error ? error : new Error(String(error)));
-        }
-      },
-    );
   }
 
   private workspaceArchivedAt(workspaceId: string): string | null {
@@ -978,6 +1005,38 @@ export class HubRelationshipHarness {
 
   async allowOwnedPermission(agentId: string, requestId: string): Promise<void> {
     await this.daemon!.agentManager.respondToPermission(agentId, requestId, { behavior: "allow" });
+  }
+
+  async denyOwnedPermission(agentId: string, requestId: string): Promise<void> {
+    await this.daemon!.agentManager.respondToPermission(agentId, requestId, { behavior: "deny" });
+  }
+
+  ownedStreamEvents(agentId: string): HubExecutionAgentStream["payload"]["event"][] {
+    return this.latestSocket().socket.sent.flatMap((message) =>
+      message.type === "hub.execution.agent.stream" && message.payload.agentId === agentId
+        ? [message.payload.event]
+        : [],
+    );
+  }
+
+  ownedAgentDiagnostic(agentId: string): {
+    lifecycle: string;
+    lastError?: string;
+    assistantText?: string;
+    timelineTypes: string[];
+  } {
+    const agent = this.daemon!.agentManager.getAgent(agentId);
+    if (!agent) throw new Error(`Owned agent ${agentId} does not exist`);
+    const timeline = this.daemon!.agentManager.getTimeline(agentId);
+    const assistantText = timeline
+      .flatMap((item) => (item.type === "assistant_message" ? [item.text] : []))
+      .join("");
+    return {
+      lifecycle: agent.lifecycle,
+      ...(agent.lastError ? { lastError: agent.lastError } : {}),
+      ...(assistantText ? { assistantText } : {}),
+      timelineTypes: timeline.map((item) => item.type),
+    };
   }
 
   async listedWorktrees(): Promise<string[]> {
@@ -1126,6 +1185,16 @@ export class HubRelationshipHarness {
     );
   }
 
+  serverInfoPermissions(): string[][] {
+    return this.remote.sockets.flatMap(({ socket }) =>
+      socket.sent.flatMap((message) =>
+        message.type === "status" && message.payload.status === "server_info"
+          ? [message.payload.permissions ?? []]
+          : [],
+      ),
+    );
+  }
+
   probeTrustedHello(): number | null {
     const socket = this.latestSocket().socket;
     socket.receiveEnvelope({
@@ -1217,7 +1286,10 @@ export class HubRelationshipHarness {
   }
 
   enrollmentAttempts(): HubEnrollment[] {
-    return this.remote.enrollments.map((input) => ({ ...input, scopes: input.scopes.slice() }));
+    return this.remote.enrollments.map((input) => ({
+      ...input,
+      permissions: input.permissions.slice(),
+    }));
   }
 
   enrollmentInvocation(index = 0): RelationshipInvocationSnapshot {
@@ -1316,12 +1388,14 @@ export class HubRelationshipHarness {
       mcpEnabled: this.mcpEnabled,
       staticDir,
       mcpDebug: false,
-      agentClients: {
+      agentClients: this.agentClients ?? {
         ...createTestAgentClients(),
         codex: this.codex,
       },
       agentStoragePath: path.join(this.jagentdeskHome, "agents"),
-      appBaseUrl: "jagentdesk://app",
+      relayEnabled: false,
+      relayEndpoint: "relay.jagentdesk.local:443",
+      appBaseUrl: "https://app.jagentdesk.local",
     };
   }
 
@@ -1439,24 +1513,7 @@ export class HubRelationshipHarness {
   }
 
   private async removeRoot(): Promise<void> {
-    // Daemon may still flush into .jagentdesk/projects during teardown; recursive rm
-    // can race and hit ENOTEMPTY/EBUSY/EPERM. Observed on Linux CI as well as macOS/Windows.
-    const retryableCodes = new Set(["ENOTEMPTY", "EBUSY", "EPERM"]);
-    const attempts = 10;
-    for (let attempt = 1; attempt <= attempts; attempt++) {
-      try {
-        await rm(this.root, { recursive: true, force: true });
-        return;
-      } catch (error) {
-        if (
-          !retryableCodes.has((error as NodeJS.ErrnoException).code ?? "") ||
-          attempt === attempts
-        ) {
-          throw error;
-        }
-        await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
-      }
-    }
+    await removeDirectoryAfterWritesSettle(this.root);
   }
 
   private latestSocket(): SocketAttempt {
@@ -1485,7 +1542,6 @@ export class HubRelationshipHarness {
       executionId,
       provider: "codex",
       cwd: this.root,
-      workspaceId: "hub-workspace",
       prompt: "Create through the Hub",
     };
   }
@@ -1506,8 +1562,6 @@ export class HubRelationshipHarness {
           input,
         ),
       interruptAgent: (agentId) => manager.cancelAgentRun(agentId),
-      archiveAgent: (agentId) => manager.archiveAgent(agentId),
-      listActiveWorkspaces: async () => [],
       archiveWorkspace: async () => undefined,
     });
   }

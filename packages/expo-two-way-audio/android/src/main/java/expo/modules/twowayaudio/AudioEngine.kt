@@ -35,6 +35,7 @@ class AudioEngine (context: Context) {
     private val executorServiceMicrophone = Executors.newFixedThreadPool(1)
     private val executorServicePlayback = Executors.newFixedThreadPool(1)
     private var speakerDevice: AudioDeviceInfo? = null
+    private var communicationRouteActive = false
     private var bridgeWindowStartedAtMs = System.currentTimeMillis()
     private var micEvents = 0
     private var micBytes = 0L
@@ -82,25 +83,26 @@ class AudioEngine (context: Context) {
     @SuppressLint("NewApi")
     private fun initializeAudio(context:Context) {
         audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+        activateCommunicationRoute()
         if (!requestAudioFocus()) {
             handleAudioFocusBlocked()
         }
-
-        // Route audio to external device if connected, otherwise route to speaker
-        updateAudioRouting()
 
         // Listen for changes in audio routing
         audioManager.registerAudioDeviceCallback(object:android.media.AudioDeviceCallback(){
             override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) {
                 Log.d("AudioEngine", "onAudioDevicesAdded")
                 super.onAudioDevicesAdded(addedDevices)
-                updateAudioRouting()
+                if (communicationRouteActive) {
+                    updateAudioRouting()
+                }
             }
             override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) {
                 Log.d("AudioEngine", "onAudioDevicesRemoved")
                 super.onAudioDevicesRemoved(removedDevices)
-                updateAudioRouting()
+                if (communicationRouteActive) {
+                    updateAudioRouting()
+                }
             }
         }, null)
 
@@ -170,6 +172,73 @@ class AudioEngine (context: Context) {
     }
 
     @SuppressLint("NewApi")
+    private fun activateCommunicationRoute() {
+        communicationRouteActive = true
+        audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+        updateAudioRouting()
+    }
+
+    @SuppressLint("NewApi")
+    private fun releaseCommunicationRoute() {
+        communicationRouteActive = false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            audioManager.clearCommunicationDevice()
+        } else {
+            @Suppress("DEPRECATION")
+            audioManager.isSpeakerphoneOn = false
+        }
+        audioManager.mode = AudioManager.MODE_NORMAL
+    }
+
+    /**
+     * Give the complete communication session back once we are neither recording nor playing.
+     * Focus pauses the user's music, while MODE_IN_COMMUNICATION and the selected communication
+     * device can leave Bluetooth earbuds on their narrow-band call route after capture stops.
+     */
+    @SuppressLint("NewApi")
+    fun releaseAudioSession() {
+        if (isRecording || isPlaying) {
+            return
+        }
+        audioFocusRequest?.let { request ->
+            audioManager.abandonAudioFocusRequest(request)
+            audioFocusRequest = null
+        }
+        if (::audioTrack.isInitialized) {
+            audioTrack.pause()
+        }
+        releaseCommunicationRoute()
+    }
+
+    /**
+     * Take the audio session back before playing, mirroring iOS `activateAudioSessionIfNeeded()`.
+     *
+     * `releaseAudioSession()` abandons focus and pauses the track once we go idle, so a playback
+     * turn that starts after that release has to reclaim both. Without this, the assistant's
+     * response plays with no focus held and competes with whatever the user is listening to.
+     * A null [audioFocusRequest] is what "we released" looks like, so it is the guard against
+     * re-requesting focus mid-turn.
+     *
+     * Focus is best effort here, and deliberately not fatal. `playPCMData` is fire-and-forget
+     * from JS — `playAudio()` settles on a duration timer, not on a native ack — so refusing to
+     * queue would report a chunk as played that nobody heard. Playing unfocused is what this
+     * path did before the session was ever released, and it is the better failure. Leaving the
+     * request outstanding instead of abandoning it is also what lets a delayed grant arrive
+     * later through the listener, which is the point of `setAcceptsDelayedFocusGain(true)`.
+     */
+    @SuppressLint("NewApi")
+    private fun acquireAudioSessionIfNeeded() {
+        if (audioFocusRequest != null) {
+            return
+        }
+        activateCommunicationRoute()
+        requestAudioFocus()
+        if (::audioTrack.isInitialized) {
+            audioTrack.play()
+        }
+    }
+
+    @SuppressLint("NewApi")
     private fun requestAudioFocus(): Boolean {
         audioFocusRequest?.let { request ->
             audioManager.abandonAudioFocusRequest(request)
@@ -227,6 +296,7 @@ class AudioEngine (context: Context) {
         if (::audioTrack.isInitialized) {
             audioTrack.pause()
         }
+        releaseCommunicationRoute()
         audioSampleQueue.clear()
         isPlaying = false
         isRecordingBeforePause = false
@@ -237,6 +307,7 @@ class AudioEngine (context: Context) {
     @RequiresApi(Build.VERSION_CODES.Q)
     @SuppressLint("MissingPermission")
     private fun startRecording(): Boolean {
+        activateCommunicationRoute()
         if (!requestAudioFocus()) {
             handleAudioFocusBlocked()
             return false
@@ -327,7 +398,9 @@ class AudioEngine (context: Context) {
         return isRecording
     }
 
+    @SuppressLint("NewApi")
     fun playPCMData(data: ByteArray) {
+        acquireAudioSessionIfNeeded()
         audioSampleQueue.add(data)
         playbackEvents += 1
         playbackQueuedBytes += data.size.toLong()
@@ -397,11 +470,19 @@ class AudioEngine (context: Context) {
 
     @RequiresApi(Build.VERSION_CODES.Q)
     fun resumeRecordingAndPlayer() {
+        val wasRecordingBeforePause = isRecordingBeforePause
+        // Only take the session back if something was actually live when we backgrounded. The
+        // activity lifecycle listener calls this on every onResume, so requesting
+        // AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE unconditionally re-paused the user's music every
+        // time the app came to the foreground — the exact symptom this change exists to remove.
+        if (!wasRecordingBeforePause && !isPlaying) {
+            return
+        }
+        activateCommunicationRoute()
         if (!requestAudioFocus()) {
             handleAudioFocusBlocked()
             return
         }
-        val wasRecordingBeforePause = isRecordingBeforePause
         isRecording = toggleRecording(wasRecordingBeforePause)
         if (wasRecordingBeforePause && !isRecording) {
             return
@@ -423,7 +504,9 @@ class AudioEngine (context: Context) {
         Log.d("AudioEngine", "Playback paused")
     }
 
+    @SuppressLint("NewApi")
     fun resumePlayback() {
+        acquireAudioSessionIfNeeded()
         audioTrack.play()
         Log.d("AudioEngine", "Playback resumed")
     }
@@ -432,13 +515,11 @@ class AudioEngine (context: Context) {
     fun tearDown() {
         stopRecording()
         audioTrack.stop()
-        audioManager.mode = AudioManager.MODE_NORMAL
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            audioManager.clearCommunicationDevice()
-        }
+        releaseCommunicationRoute()
         audioFocusRequest?.let { request ->
             audioManager.abandonAudioFocusRequest(request)
         }
+        audioFocusRequest = null
         executorServiceMicrophone.shutdownNow()
     }
 

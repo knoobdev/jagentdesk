@@ -1,8 +1,9 @@
-import { constants, promises as fs, type BigIntStats } from "fs";
+import { constants, promises as fs, type BigIntStats, type Stats } from "fs";
 import type { FileHandle } from "fs/promises";
 import path from "path";
 import { randomUUID } from "crypto";
 import { expandUserPath, resolvePathFromBase } from "../path-utils.js";
+import { runGitCommand } from "../../utils/run-git-command.js";
 
 export type ExplorerEntryKind = "file" | "directory";
 export type ExplorerFileKind = "text" | "image" | "binary";
@@ -572,33 +573,255 @@ export async function getDownloadableFileInfo({ root, relativePath }: ReadFilePa
   }
 }
 
+export interface ExplorerCreateEntryParams {
+  root: string;
+  parentPath: string;
+  name: string;
+  kind: ExplorerEntryKind;
+}
+
+export interface ExplorerRenameEntryParams {
+  root: string;
+  relativePath: string;
+  name: string;
+}
+
+export type ExplorerEntryMutationResult =
+  | { status: "ok"; path: string }
+  | { status: "error"; error: string };
+
+export async function createExplorerEntry({
+  root,
+  parentPath,
+  name,
+  kind,
+}: ExplorerCreateEntryParams): Promise<ExplorerEntryMutationResult> {
+  const trimmedName = name.trim();
+  if (!trimmedName || trimmedName === "." || trimmedName === "..") {
+    return { status: "error", error: "Invalid name" };
+  }
+  if (trimmedName.includes("/") || trimmedName.includes("\\")) {
+    return { status: "error", error: "Name cannot contain path separators" };
+  }
+
+  try {
+    const parent = await resolveScopedPath({ root, relativePath: parentPath });
+    const parentStats = await fs.stat(parent.resolvedPath);
+    if (!parentStats.isDirectory()) {
+      return { status: "error", error: "Parent path is not a directory" };
+    }
+    const targetPath = path.join(parent.resolvedPath, trimmedName);
+    if (kind === "directory") {
+      await fs.mkdir(targetPath);
+    } else {
+      const handle = await fs.open(targetPath, "wx", 0o644);
+      await handle.close();
+    }
+    return {
+      status: "ok",
+      path: normalizeRelativePath({
+        root,
+        targetPath: path.join(parent.requestedPath, trimmedName),
+      }),
+    };
+  } catch (error) {
+    if (isEntryExistsError(error)) {
+      return { status: "error", error: `"${trimmedName}" already exists` };
+    }
+    return { status: "error", error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+export async function duplicateExplorerEntry({
+  root,
+  relativePath,
+}: ReadFileParams): Promise<ExplorerEntryMutationResult> {
+  try {
+    const source = await resolveScopedPath({ root, relativePath });
+    const realRoot = await fs.realpath(expandUserPath(root));
+    if (source.resolvedPath === realRoot) {
+      return { status: "error", error: "Cannot duplicate the workspace root" };
+    }
+
+    const stats = await fs.lstat(source.requestedPath);
+    const sourceName = path.basename(source.requestedPath);
+    const extension = stats.isDirectory() ? "" : path.extname(sourceName);
+    const baseName = extension ? sourceName.slice(0, -extension.length) : sourceName;
+    let targetPath = "";
+    for (let copyNumber = 1; ; copyNumber += 1) {
+      const suffix = copyNumber === 1 ? " copy" : ` copy ${copyNumber}`;
+      targetPath = path.join(
+        path.dirname(source.requestedPath),
+        `${baseName}${suffix}${extension}`,
+      );
+      try {
+        await fs.lstat(targetPath);
+      } catch (error) {
+        if (isMissingEntryError(error)) {
+          break;
+        }
+        throw error;
+      }
+    }
+
+    await fs.cp(source.requestedPath, targetPath, {
+      recursive: stats.isDirectory(),
+      errorOnExist: true,
+      force: false,
+      preserveTimestamps: true,
+    });
+    return { status: "ok", path: normalizeRelativePath({ root, targetPath }) };
+  } catch (error) {
+    if (isMissingEntryError(error)) {
+      return { status: "error", error: "File or folder no longer exists" };
+    }
+    return { status: "error", error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+export async function renameExplorerEntry({
+  root,
+  relativePath,
+  name,
+}: ExplorerRenameEntryParams): Promise<ExplorerEntryMutationResult> {
+  const trimmedName = name.trim();
+  if (!trimmedName || trimmedName === "." || trimmedName === "..") {
+    return { status: "error", error: "Invalid name" };
+  }
+  if (trimmedName.includes("/") || trimmedName.includes("\\")) {
+    return { status: "error", error: "Name cannot contain path separators" };
+  }
+
+  try {
+    const source = await resolveScopedPath({ root, relativePath });
+    const realRoot = await fs.realpath(expandUserPath(root));
+    if (source.resolvedPath === realRoot) {
+      return { status: "error", error: "Cannot rename the workspace root" };
+    }
+
+    const targetPath = path.join(path.dirname(source.requestedPath), trimmedName);
+    const sourceStats = await fs.lstat(source.requestedPath);
+    const targetStats = await fs.lstat(targetPath).catch((error: unknown) => {
+      if (isMissingEntryError(error)) {
+        return null;
+      }
+      throw error;
+    });
+    if (targetStats) {
+      if (!(await isCaseOnlyRename(source, targetPath, sourceStats, targetStats))) {
+        return { status: "error", error: `"${trimmedName}" already exists` };
+      }
+    }
+
+    const sourcePath = normalizeRelativePath({ root, targetPath: source.requestedPath });
+    const renamedPath = normalizeRelativePath({ root, targetPath });
+    if (sourcePath === renamedPath) {
+      return { status: "ok", path: renamedPath };
+    }
+    const repository = await runGitCommand(["rev-parse", "--is-inside-work-tree"], {
+      cwd: realRoot,
+      acceptExitCodes: [0, 128],
+    });
+    const tracked =
+      repository.exitCode === 0
+        ? await runGitCommand(["ls-files", "-z", "--", sourcePath], { cwd: realRoot })
+        : null;
+    if (tracked?.stdout) {
+      await runGitCommand(["mv", "--", sourcePath, renamedPath], { cwd: realRoot });
+    } else {
+      await fs.rename(source.requestedPath, targetPath);
+    }
+    return { status: "ok", path: renamedPath };
+  } catch (error) {
+    if (isEntryExistsError(error)) {
+      return { status: "error", error: `"${trimmedName}" already exists` };
+    }
+    if (isMissingEntryError(error)) {
+      return { status: "error", error: "File or folder no longer exists" };
+    }
+    return { status: "error", error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+export async function deleteExplorerEntry({
+  root,
+  relativePath,
+}: ReadFileParams): Promise<ExplorerEntryMutationResult> {
+  try {
+    const scoped = await resolveScopedPath({ root, relativePath });
+    const realRoot = await fs.realpath(expandUserPath(root));
+    if (scoped.resolvedPath === realRoot) {
+      return { status: "error", error: "Cannot delete the workspace root" };
+    }
+    // Remove the requested path, not the realpath: deleting a symlink must
+    // remove the link, never its target. lstat keeps the same guarantee.
+    const stats = await fs.lstat(scoped.requestedPath);
+    await fs.rm(scoped.requestedPath, {
+      recursive: stats.isDirectory(),
+      force: false,
+    });
+    return {
+      status: "ok",
+      path: normalizeRelativePath({ root, targetPath: scoped.requestedPath }),
+    };
+  } catch (error) {
+    if (isMissingEntryError(error)) {
+      return { status: "error", error: "File or folder no longer exists" };
+    }
+    return { status: "error", error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+function isEntryExistsError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as NodeJS.ErrnoException).code === "EEXIST"
+  );
+}
+
+async function isCaseOnlyRename(
+  source: ScopedPath,
+  targetPath: string,
+  sourceStats: Stats,
+  targetStats: Stats,
+): Promise<boolean> {
+  const hasStableFileIds =
+    sourceStats.dev !== 0 ||
+    sourceStats.ino !== 0 ||
+    targetStats.dev !== 0 ||
+    targetStats.ino !== 0;
+  const isSameEntry = hasStableFileIds
+    ? targetStats.dev === sourceStats.dev && targetStats.ino === sourceStats.ino
+    : !sourceStats.isSymbolicLink() &&
+      !targetStats.isSymbolicLink() &&
+      (await fs.realpath(targetPath)) === source.resolvedPath;
+  return isSameEntry && source.requestedPath.toLowerCase() === targetPath.toLowerCase();
+}
+
 async function resolveScopedPath({
   root,
   relativePath = ".",
 }: ScopedPathParams): Promise<ScopedPath> {
-  const normalizedRoot = expandUserPath(root);
-  const requestedPath = resolvePathFromBase(normalizedRoot, relativePath);
-  const relative = path.relative(normalizedRoot, requestedPath);
-
-  if (relative !== "" && (relative.startsWith("..") || path.isAbsolute(relative))) {
-    throw new Error(ACCESS_OUTSIDE_WORKSPACE_MESSAGE);
-  }
-
-  const realRoot = await fs.realpath(normalizedRoot);
-
+  const workspacePath = expandUserPath(root);
+  const requestedPath = resolvePathFromBase(workspacePath, relativePath);
+  assertWithinWorkspace(workspacePath, requestedPath);
+  const canonicalRoot = await fs.realpath(workspacePath);
   try {
-    const realPath = await fs.realpath(requestedPath);
-    const realRelative = path.relative(realRoot, realPath);
-    if (realRelative !== "" && (realRelative.startsWith("..") || path.isAbsolute(realRelative))) {
-      throw new Error(ACCESS_OUTSIDE_WORKSPACE_MESSAGE);
-    }
-    return { requestedPath, resolvedPath: realPath };
+    const canonicalPath = await fs.realpath(requestedPath);
+    assertWithinWorkspace(canonicalRoot, canonicalPath);
+    return { requestedPath, resolvedPath: canonicalPath };
   } catch (error) {
-    if (isMissingEntryError(error)) {
-      return { requestedPath, resolvedPath: requestedPath };
-    }
+    if (isMissingEntryError(error)) return { requestedPath, resolvedPath: requestedPath };
     throw error;
   }
+}
+
+function assertWithinWorkspace(root: string, candidate: string): void {
+  const relative = path.relative(root, candidate);
+  if (relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))) return;
+  throw new Error(ACCESS_OUTSIDE_WORKSPACE_MESSAGE);
 }
 
 async function openFileForRead(filePath: string): Promise<FileHandle> {

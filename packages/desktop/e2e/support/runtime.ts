@@ -3,9 +3,11 @@ import { appendFile } from "node:fs/promises";
 import { expect, type Page } from "@playwright/test";
 import { openSettings } from "../../../app/e2e/support/helpers/app";
 import { getE2EDaemonPort } from "../../../app/e2e/support/helpers/daemon-port";
+import { escapeRegex } from "../../../app/e2e/support/helpers/regex";
 import {
   openSettingsHost,
   openSettingsHostSection,
+  openSettingsSection,
 } from "../../../app/e2e/support/helpers/settings";
 
 interface DaemonApiStatus {
@@ -33,8 +35,7 @@ export interface RealDaemonState {
 export async function loadRealDaemonState(): Promise<RealDaemonState> {
   const port = getE2EDaemonPort();
   const jagentdeskHome = process.env.E2E_JAGENTDESK_HOME;
-  if (!jagentdeskHome)
-    throw new Error("E2E_JAGENTDESK_HOME not set — the worker fixture must run first");
+  if (!jagentdeskHome) throw new Error("E2E_JAGENTDESK_HOME not set — the worker fixture must run first");
 
   const resp = await fetch(`http://127.0.0.1:${port}/api/status`);
   const data: DaemonApiStatus = await resp.json();
@@ -46,7 +47,7 @@ export async function loadRealDaemonState(): Promise<RealDaemonState> {
     pid = pidContent.pid ?? null;
   } catch (err) {
     // PID file may not be present yet on a very fresh daemon start
-    console.warn("[desktop-e2e] jagentdesk.pid not found:", err);
+    console.warn("[desktop-updates] jagentdesk.pid not found:", err);
   }
 
   return { version: data.version, pid, logPath: `${jagentdeskHome}/daemon.log` };
@@ -54,6 +55,11 @@ export async function loadRealDaemonState(): Promise<RealDaemonState> {
 
 export interface DesktopRuntimeConfig {
   serverId: string;
+  updateAvailable?: boolean;
+  latestVersion?: string;
+  updateReadyToInstall?: boolean;
+  manualUpdateBypassesRollout?: boolean;
+  slowInstall?: boolean;
   /** Initial PID reported by desktop_daemon_status. Defaults to null. */
   daemonPid?: number | null;
   daemonVersion?: string | null;
@@ -66,10 +72,6 @@ export interface DesktopRuntimeConfig {
   hangDaemonStart?: boolean;
   /** Delay the desktop settings IPC response to exercise startup ordering. */
   desktopSettingsDelayMs?: number;
-  /** Simulated Tailscale state returned by desktop_tailscale_status. */
-  tailscaleConnected?: boolean;
-  tailnetAddress?: string | null;
-  daemonPublicKeyB64?: string | null;
   /**
    * Controls what dialog.ask returns when the daemon management confirm dialog
    * fires. True = confirm (proceed with the action), false = cancel. Defaults to
@@ -112,7 +114,8 @@ declare global {
 
 /**
  * Injects window.jagentdeskDesktop before app load so all Electron-gated code
- * activates. Daemon start/stop commands are stateful: the mock
+ * activates. The update-check IPC is mocked at the boundary so the real
+ * auto-updater never fires. Daemon start/stop commands are stateful: the mock
  * tracks running state and assigns a fresh PID on each start, letting tests
  * observe PID changes without touching the real E2E daemon process.
  * dialog.ask captures call arguments on window.__capturedDialogCall so tests
@@ -137,6 +140,7 @@ export async function installDesktopRuntime(
     let daemonRunning = true;
     let currentPid: number | null = cfg.daemonPid ?? null;
     let startCount = 0;
+    let manualUpdateAdmitted = false;
     window.__desktopDaemonStartRequested = false;
 
     function buildDaemonStatus() {
@@ -150,9 +154,6 @@ export async function installDesktopRuntime(
         version: cfg.daemonVersion ?? null,
         desktopManaged: manageDaemon,
         error: null,
-        tailscaleConnected: cfg.tailscaleConnected === true,
-        tailnetAddress: cfg.tailnetAddress ?? null,
-        daemonPublicKeyB64: cfg.daemonPublicKeyB64 ?? null,
       };
     }
 
@@ -176,6 +177,33 @@ export async function installDesktopRuntime(
       }
     }
 
+    function buildAppUpdateCheckResult(hasUpdate: boolean, readyToInstall: boolean) {
+      return {
+        hasUpdate,
+        readyToInstall,
+        currentVersion: "1.0.0",
+        latestVersion: hasUpdate ? (cfg.latestVersion ?? "1.2.3") : null,
+        body: null,
+        date: null,
+      };
+    }
+
+    function checkAppUpdate(intent: unknown) {
+      if (!cfg.manualUpdateBypassesRollout) {
+        return buildAppUpdateCheckResult(
+          cfg.updateAvailable === true,
+          cfg.updateAvailable === true && (cfg.updateReadyToInstall ?? true),
+        );
+      }
+
+      if (intent === "manual") {
+        manualUpdateAdmitted = true;
+        return buildAppUpdateCheckResult(true, false);
+      }
+
+      return buildAppUpdateCheckResult(manualUpdateAdmitted, manualUpdateAdmitted);
+    }
+
     const desktopBridge: {
       platform: string;
       invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown>;
@@ -192,6 +220,21 @@ export async function installDesktopRuntime(
     } = {
       platform: "darwin",
       invoke: async (command: string, args?: Record<string, unknown>) => {
+        if (command === "check_app_update") {
+          return checkAppUpdate(args?.intent);
+        }
+
+        if (command === "install_app_update") {
+          if (cfg.slowInstall) {
+            await new Promise<void>((resolve) => setTimeout(resolve, 3000));
+          }
+          return {
+            installed: true,
+            version: cfg.latestVersion ?? "1.2.3",
+            message: "App update installed. Restart required.",
+          };
+        }
+
         if (command === "desktop_daemon_status") {
           return buildDaemonStatus();
         }
@@ -203,8 +246,8 @@ export async function installDesktopRuntime(
         if (command === "get_desktop_settings") {
           await waitForDesktopSettingsResponse();
           return {
+            releaseChannel: "stable",
             daemon: { manageBuiltInDaemon: manageDaemon, keepRunningAfterQuit: true },
-            tailscale: { authKeyConfigured: false },
           };
         }
 
@@ -219,26 +262,9 @@ export async function installDesktopRuntime(
             manageDaemon = daemon.manageBuiltInDaemon;
           }
           return {
+            releaseChannel: "stable",
             daemon: { manageBuiltInDaemon: manageDaemon, keepRunningAfterQuit: true },
-            tailscale: { authKeyConfigured: false },
           };
-        }
-
-        if (command === "desktop_tailscale_status") {
-          return {
-            connected: cfg.tailscaleConnected === true,
-            tailnet: cfg.tailscaleConnected === true ? "e2e.tailnet.ts.net" : null,
-            daemonStatus: "running",
-            healthy: cfg.tailscaleConnected === true,
-            tailnetAddress: cfg.tailnetAddress ?? null,
-            tailnetProxyAddress: cfg.tailscaleConnected === true ? "127.0.0.1:55750" : null,
-            daemonPublicKeyB64: cfg.daemonPublicKeyB64 ?? null,
-            devicePublicKeyB64: null,
-          };
-        }
-
-        if (command === "start_tailscale_login") {
-          return { started: true, connected: false };
         }
 
         if (command === "stop_desktop_daemon") {
@@ -311,6 +337,49 @@ export async function openDesktopSettings(page: Page, serverId: string): Promise
   await expect(page.getByTestId("host-page-daemon-lifecycle-card")).toBeVisible({
     timeout: 15_000,
   });
+}
+
+export async function openDesktopAboutSettings(page: Page): Promise<void> {
+  await openSettings(page);
+  await openSettingsSection(page, "about");
+  await expect(page.getByText("App updates", { exact: true })).toBeVisible();
+}
+
+export async function expectUpdateBanner(page: Page, version: string): Promise<void> {
+  const callout = page.getByTestId("update-callout");
+  await expect(callout).toBeVisible({ timeout: 15_000 });
+  await expect(callout).toContainText(`v${version.replace(/^v/i, "")}`);
+}
+
+export async function clickCheckForUpdates(page: Page): Promise<void> {
+  await page.getByRole("button", { name: "Check" }).click();
+}
+
+export async function expectPendingUpdateCheckResult(page: Page, version: string): Promise<void> {
+  const normalizedVersion = `v${version.replace(/^v/i, "")}`;
+  await expect(
+    page.getByText(
+      new RegExp(`Update found: ${escapeRegex(normalizedVersion)}\\. Downloading\\.\\.\\.`),
+    ),
+  ).toBeVisible();
+  await expect(page.getByText(`Ready to install: ${normalizedVersion}`)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Update" })).toBeDisabled();
+}
+
+export async function expectReadyUpdateCheckResult(page: Page, version: string): Promise<void> {
+  const normalizedVersion = `v${version.replace(/^v/i, "")}`;
+  await expect(page.getByText(`Ready to install: ${normalizedVersion}`)).toBeVisible({
+    timeout: 15_000,
+  });
+  await expect(page.getByRole("button", { name: `Update to ${normalizedVersion}` })).toBeEnabled();
+}
+
+export async function clickInstallUpdate(page: Page): Promise<void> {
+  await page.getByRole("button", { name: "Install & restart" }).click();
+}
+
+export async function expectInstallInProgress(page: Page): Promise<void> {
+  await expect(page.getByRole("button", { name: "Installing..." })).toBeVisible();
 }
 
 /**
