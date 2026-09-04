@@ -871,6 +871,7 @@ export function DatabaseDataEditor({
                   edits={edits}
                   deleted={deleted.has(r)}
                   selected={selected.has(r)}
+                  isAnchor={anchor === r}
                   canEdit={canEdit}
                   selectedKey={selectedKey}
                   onRowPress={handleRowPress}
@@ -1271,6 +1272,7 @@ function ExistingRow({
   edits,
   deleted,
   selected,
+  isAnchor,
   canEdit,
   selectedKey,
   onRowPress,
@@ -1288,6 +1290,7 @@ function ExistingRow({
   edits: Record<string, Cell>;
   deleted: boolean;
   selected: boolean;
+  isAnchor: boolean;
   canEdit: boolean;
   selectedKey: string | null;
   onRowPress: (rowIdx: number, e: GestureResponderEvent) => void;
@@ -1318,6 +1321,7 @@ function ExistingRow({
         styles.bodyRow,
         rowIndex % 2 === 1 && styles.bodyRowAlt,
         selected && styles.selectedRow,
+        selected && isAnchor && styles.anchorRow,
         deleted && styles.deletedRow,
       ]}
     >
@@ -1349,6 +1353,7 @@ function ExistingRow({
             selectedCell={selectedKey === key}
             onSelectCell={onSelectCell}
             onExpand={onExpand}
+            onRowPress={onRowPress}
             fk={fkByCol.get(col)}
             rawValue={value}
             onNavigate={onNavigate}
@@ -1426,6 +1431,7 @@ function GridCell({
   selectedCell,
   onSelectCell,
   onExpand,
+  onRowPress,
   fk,
   rawValue,
   onNavigate,
@@ -1442,6 +1448,7 @@ function GridCell({
   selectedCell: boolean;
   onSelectCell: (key: string) => void;
   onExpand: (cell: ExpandedCell) => void;
+  onRowPress?: (rowIdx: number, e: GestureResponderEvent) => void;
   fk?: DbForeignKey;
   rawValue?: Cell;
   onNavigate?: (fk: DbForeignKey, value: Cell) => void;
@@ -1461,13 +1468,30 @@ function GridCell({
     onSelectCell(cellKey);
     handleExpand();
   }, [onSelectCell, cellKey, handleExpand]);
-  const handlePress = useCallback(() => {
-    const now = Date.now();
-    const isDouble = now - lastTapRef.current < DOUBLE_MS;
-    lastTapRef.current = now;
-    if (selectedCell || isDouble) enterEdit();
-    else onSelectCell(cellKey);
-  }, [selectedCell, enterEdit, onSelectCell, cellKey]);
+  // A single click/tap ANYWHERE on a row selects that whole row (SHIFT = range from
+  // the anchor, CMD/CTRL = toggle — read straight off the click event so the
+  // modifier applies no matter which cell was hit) and marks the clicked cell. A
+  // double-click — or a second click on the already-marked cell — enters edit via
+  // the value dock. Modifier clicks are pure row-selection ops and never edit, so a
+  // single SHIFT+click on any cell of the end row selects the full anchor→end range.
+  const handlePress = useCallback(
+    (e: GestureResponderEvent) => {
+      const ne = e?.nativeEvent as unknown as {
+        shiftKey?: boolean;
+        metaKey?: boolean;
+        ctrlKey?: boolean;
+      };
+      const hasMod = !!(ne && (ne.shiftKey || ne.metaKey || ne.ctrlKey));
+      const now = Date.now();
+      const isDouble = !hasMod && now - lastTapRef.current < DOUBLE_MS;
+      lastTapRef.current = now;
+      if (onRowPress && rowIndex !== undefined) onRowPress(rowIndex, e);
+      if (hasMod) return;
+      if (selectedCell || isDouble) enterEdit();
+      else onSelectCell(cellKey);
+    },
+    [selectedCell, enterEdit, onSelectCell, cellKey, onRowPress, rowIndex],
+  );
   const navigate = useCallback(() => {
     if (fk && onNavigate) onNavigate(fk, rawValue ?? null);
   }, [fk, onNavigate, rawValue]);
@@ -1861,7 +1885,9 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderRightWidth: StyleSheet.hairlineWidth,
     borderRightColor: theme.colors.border,
   },
-  gutterSelected: { backgroundColor: theme.colors.accent },
+  // Secondary cue for a selected row: a thin accent left-border on the gutter. The
+  // row FILL itself is the translucent overlay (selectedRow), not an accent tint.
+  gutterSelected: { borderLeftWidth: 2, borderLeftColor: theme.colors.accent },
   gutterText: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundExtraMuted },
   cell: {
     paddingHorizontal: theme.spacing[2],
@@ -1881,8 +1907,8 @@ const styles = StyleSheet.create((theme: Theme) => ({
   // value-editor dock.
   cellSelected: {
     borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.accent,
-    backgroundColor: theme.colors.surface2,
+    borderColor: "rgba(255, 255, 255, 0.24)",
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
   },
   headerCell: {
     flexDirection: "row",
@@ -1962,9 +1988,12 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderBottomColor: theme.colors.border,
   },
   bodyRowAlt: { backgroundColor: theme.colors.surface1 },
-  // A multi-selected row (delete/clone target). The gutter also gets an accent fill
-  // (gutterSelected); this tints the whole row so the selection reads across it.
-  selectedRow: { backgroundColor: theme.colors.surface2 },
+  // A multi-selected row (delete/clone target): a subtle translucent-white overlay
+  // fills the WHOLE row (all cells are transparent, so the row-container background
+  // shows through every column). The gutter adds a thin accent left-border as a
+  // secondary cue. The anchor/active row gets a slightly stronger overlay.
+  selectedRow: { backgroundColor: "rgba(255, 255, 255, 0.08)" },
+  anchorRow: { backgroundColor: "rgba(255, 255, 255, 0.12)" },
   deletedRow: { opacity: 0.45 },
   newRow: { backgroundColor: theme.colors.palette.green[100] },
   bodyText: {
