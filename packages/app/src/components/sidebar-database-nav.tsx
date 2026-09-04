@@ -46,6 +46,7 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { useDatabaseNavStore, type SelectedDbObject } from "@/stores/database-nav-store";
 import { useDatabaseViewStore } from "@/stores/database-view-store";
 import { useDatabaseChatStore } from "@/stores/database-chat-store";
@@ -62,22 +63,31 @@ import type { Theme } from "@/styles/theme";
  *  before the live client is ready in daemon memory. */
 const DB_NOT_CONNECTED = "database is not connected";
 
+/** Exponential-ish backoff (ms) between introspection retries while the
+ *  connection warms. A connection that settles quickly returns after the first
+ *  ~100ms sleep instead of always paying a flat 400ms step; the growing tail
+ *  keeps a ~2.55s total ceiling (sum of all delays) as a safety net for a slow
+ *  cold tailnet open. Length + 1 = number of attempts (7 attempts, 6 sleeps). */
+const CONNECT_RETRY_BACKOFF_MS = [100, 150, 250, 400, 650, 1000] as const;
+
 /** Re-issue an introspection RPC while the connection is still coming up. Only
  *  the "database is not connected" race (or a transient rejection) is retried; a
- *  real error is returned as-is. Without this a cold tailnet open renders an
- *  empty schema (only static folders) until the user manually refreshes. */
+ *  real error — or a success — is returned immediately. Without this a cold
+ *  tailnet open renders an empty schema (only static folders) until the user
+ *  manually refreshes. */
 async function retryWhileConnecting<T extends { error: string | null }>(
   call: () => Promise<T>,
   isCancelled: () => boolean,
-  attempts = 6,
-  delayMs = 400,
+  backoffMs: readonly number[] = CONNECT_RETRY_BACKOFF_MS,
 ): Promise<T | null> {
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
+  for (let attempt = 0; attempt <= backoffMs.length; attempt += 1) {
     if (isCancelled()) return null;
     const res = await call().catch(() => null);
     if (isCancelled()) return null;
     if (res && res.error !== DB_NOT_CONNECTED) return res;
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    const delay = backoffMs[attempt];
+    if (delay == null) break;
+    await new Promise((resolve) => setTimeout(resolve, delay));
   }
   return null;
 }
@@ -103,8 +113,23 @@ const ThemedHash = withUnistyles(Hash);
 const ThemedLink = withUnistyles(Link2);
 const ThemedFunc = withUnistyles(Braces);
 const ThemedFolder = withUnistyles(Folder);
+const ThemedSpinner = withUnistyles(LoadingSpinner);
 const mutedColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 const faintColor = (theme: Theme) => ({ color: theme.colors.foregroundExtraMuted });
+
+/** A single indented row showing a spinner while a node introspects on expand.
+ *  Rendered only while the RPC is in flight and no children have arrived yet. */
+function LoadingRow() {
+  return (
+    <View style={[styles.row, styles.columnRow]}>
+      <View style={styles.chevronSpace} />
+      <ThemedSpinner size="small" uniProps={faintColor} />
+      <Text style={styles.colName} numberOfLines={1}>
+        Loading…
+      </Text>
+    </View>
+  );
+}
 
 /** Expand/collapse chevron (or blank spacer when not expandable). */
 function Chevron({ expanded }: { expanded: boolean }) {
@@ -442,6 +467,7 @@ function TableNode({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [columns, setColumns] = useState<DbColumn[]>([]);
+  const [loading, setLoading] = useState(false);
   const target = useMemo<SelectedDbObject>(
     () => ({ databaseId: id, schema: object.schema, name: object.name }),
     [id, object.schema, object.name],
@@ -449,13 +475,18 @@ function TableNode({
   useEffect(() => {
     if (!expanded || !client) return;
     let cancelled = false;
+    setLoading(true);
     void client
       .databaseColumns({ id, schema: object.schema, table: object.name })
       .then((res) => {
-        if (!cancelled && !res.error) setColumns(res.columns);
+        if (cancelled) return undefined;
+        if (!res.error) setColumns(res.columns);
+        setLoading(false);
         return undefined;
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) setLoading(false);
+      });
     return () => {
       cancelled = true;
     };
@@ -546,6 +577,7 @@ function TableNode({
       </ContextMenu>
       {expanded ? (
         <View style={styles.childIndent}>
+          {loading && columns.length === 0 ? <LoadingRow /> : null}
           {columns.map((c) => (
             <ColumnRow key={c.name} column={c} />
           ))}
@@ -599,17 +631,21 @@ function SchemaNode({
 }) {
   const [expanded, setExpanded] = useState(autoExpand);
   const [objects, setObjects] = useState<DbObject[]>([]);
+  const [loading, setLoading] = useState(false);
   useEffect(() => {
     if (!expanded || !client) return;
     let cancelled = false;
+    setLoading(true);
     void retryWhileConnecting(
       () => client.databaseObjects({ id, schema }),
       () => cancelled,
     ).then((res) => {
-      if (!cancelled && res && !res.error) {
+      if (cancelled) return undefined;
+      if (res && !res.error) {
         setObjects(res.objects);
         onTableCount?.(schema, res.objects.filter((o) => o.kind === "table").length);
       }
+      setLoading(false);
       return undefined;
     });
     return () => {
@@ -644,6 +680,7 @@ function SchemaNode({
   );
   const body = (
     <>
+      {loading && objects.length === 0 ? <LoadingRow /> : null}
       {tables.map(renderObject)}
       {views.length > 0 ? (
         <View>
@@ -694,6 +731,7 @@ function DatabaseNode({
 }) {
   const [expanded, setExpanded] = useState(!multiDb);
   const [schemas, setSchemas] = useState<DbSchema[]>([]);
+  const [loading, setLoading] = useState(false);
   const [tableCounts, setTableCounts] = useState<Record<string, number>>({});
   const handleTableCount = useCallback(
     (schema: string, count: number) => setTableCounts((prev) => ({ ...prev, [schema]: count })),
@@ -707,19 +745,26 @@ function DatabaseNode({
   useEffect(() => {
     if (!expanded || !client) return;
     let cancelled = false;
+    setLoading(true);
     void (async () => {
       if (multiDb) {
         const opened = await retryWhileConnecting(
           () => client.databaseOpenDatabase({ id: parentId, database: dbName }),
           () => cancelled,
         );
-        if (cancelled || !opened || opened.error) return;
+        if (cancelled) return;
+        if (!opened || opened.error) {
+          setLoading(false);
+          return;
+        }
       }
       const res = await retryWhileConnecting(
         () => client.databaseSchemas({ id }),
         () => cancelled,
       );
-      if (!cancelled && res && !res.error) setSchemas(res.schemas);
+      if (cancelled) return;
+      if (res && !res.error) setSchemas(res.schemas);
+      setLoading(false);
     })();
     return () => {
       cancelled = true;
@@ -742,7 +787,14 @@ function DatabaseNode({
       onTableCount={handleTableCount}
     />
   ));
-  if (!multiDb) return <View>{schemaList}</View>;
+  const loadingRow = loading && schemas.length === 0 ? <LoadingRow /> : null;
+  if (!multiDb)
+    return (
+      <View>
+        {loadingRow}
+        {schemaList}
+      </View>
+    );
   return (
     <View>
       <TreeRow
@@ -753,7 +805,12 @@ function DatabaseNode({
         onPress={toggle}
         testID={`database-node-${dbName}`}
       />
-      {expanded ? <View style={styles.childIndent}>{schemaList}</View> : null}
+      {expanded ? (
+        <View style={styles.childIndent}>
+          {loadingRow}
+          {schemaList}
+        </View>
+      ) : null}
     </View>
   );
 }

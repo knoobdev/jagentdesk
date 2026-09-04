@@ -18,7 +18,7 @@ import type {
   DbForeignKey,
   QueryResult,
 } from "@jagentdesk/protocol/database/rpc-schemas";
-import type { LayoutChangeEvent } from "react-native";
+import type { GestureResponderEvent, LayoutChangeEvent } from "react-native";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { useDatabaseViewStore } from "@/stores/database-view-store";
 import { useDatabaseNavStore } from "@/stores/database-nav-store";
@@ -218,6 +218,9 @@ export function DatabaseDataEditor({
   const [result, setResult] = useState<QueryResult | null>(null);
   const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
+  // Which pager button triggered the in-flight load, so we can swap its icon for a
+  // spinner (‹ prev / › next / ↻ refresh) while `loading` is true.
+  const [pageAction, setPageAction] = useState<"prev" | "next" | "refresh" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [txMode, setTxMode] = useState<TxMode>("auto");
@@ -230,6 +233,11 @@ export function DatabaseDataEditor({
   const [newRows, setNewRows] = useState<Array<Record<string, Cell>>>([]);
   const [deleted, setDeleted] = useState<Set<number>>(new Set());
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  // Multi-row selection: `anchor` is the last row selected without a modifier (the
+  // pivot for SHIFT+click range on desktop). `selectMode` is the native long-press
+  // selection mode where a tap adds a row instead of opening the record view.
+  const [anchor, setAnchor] = useState<number | null>(null);
+  const [selectMode, setSelectMode] = useState(false);
   // The single grid cell with a visible "selected" highlight. A first click/tap
   // only selects; a second click/tap on the already-selected cell (or a
   // double-click/double-tap) enters edit via the docked value editor.
@@ -314,6 +322,8 @@ export function DatabaseDataEditor({
     setDeleted(new Set());
     setSelected(new Set());
     setSelectedKey(null);
+    setAnchor(null);
+    setSelectMode(false);
   }, []);
 
   const load = useCallback(
@@ -472,14 +482,32 @@ export function DatabaseDataEditor({
     [valueCell, commitExistingEdit, commitNewEdit],
   );
 
-  const toggleSelect = useCallback((rowIdx: number) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(rowIdx)) next.delete(rowIdx);
-      else next.add(rowIdx);
-      return next;
-    });
-  }, []);
+  // The one selection primitive: plain (replace with a single row), `additive`
+  // (CMD/CTRL toggle one row in/out), or `range` (SHIFT — the contiguous span from
+  // the anchor to this row). Used by delete/clone, which act on the `selected` set.
+  const selectRow = useCallback(
+    (rowIdx: number, mods: { range?: boolean; additive?: boolean }) => {
+      setSelected((prev) => {
+        if (mods.range && anchor !== null) {
+          const lo = Math.min(anchor, rowIdx);
+          const hi = Math.max(anchor, rowIdx);
+          const next = new Set<number>();
+          for (let i = lo; i <= hi; i++) next.add(i);
+          return next;
+        }
+        if (mods.additive) {
+          const next = new Set(prev);
+          if (next.has(rowIdx)) next.delete(rowIdx);
+          else next.add(rowIdx);
+          return next;
+        }
+        return new Set([rowIdx]);
+      });
+      // SHIFT keeps the anchor so successive range selects pivot on the same row.
+      if (!mods.range) setAnchor(rowIdx);
+    },
+    [anchor],
+  );
 
   const addRow = useCallback(() => setNewRows((prev) => [...prev, {}]), []);
   const deleteSelected = useCallback(() => {
@@ -641,6 +669,48 @@ export function DatabaseDataEditor({
   );
   const openRecord = useCallback((rowIdx: number) => setRecordRow(rowIdx), []);
   const closeRecord = useCallback(() => setRecordRow(null), []);
+
+  // Row selection gestures. Desktop: a plain click selects one row (SHIFT = range
+  // from the anchor, CMD/CTRL = toggle). Native: a tap opens the record view unless
+  // a long-press has started selection mode, where taps add rows to the selection.
+  const handleRowPress = useCallback(
+    (rowIdx: number, e: GestureResponderEvent) => {
+      if (isWeb) {
+        const ne = e.nativeEvent as unknown as {
+          shiftKey?: boolean;
+          metaKey?: boolean;
+          ctrlKey?: boolean;
+        };
+        selectRow(rowIdx, { range: !!ne.shiftKey, additive: !!(ne.metaKey || ne.ctrlKey) });
+        return;
+      }
+      if (selectMode) selectRow(rowIdx, { additive: true });
+      else openRecord(rowIdx);
+    },
+    [selectRow, selectMode, openRecord],
+  );
+  const handleRowLongPress = useCallback(
+    (rowIdx: number) => {
+      // Web keeps long-press (and right-click) as the record-view affordance; native
+      // long-press instead starts multi-select mode on the pressed row.
+      if (isWeb) {
+        openRecord(rowIdx);
+        return;
+      }
+      setSelectMode(true);
+      selectRow(rowIdx, { additive: true });
+    },
+    [selectRow, openRecord],
+  );
+  // Leaving the selection empty (e.g. after delete/clone) exits selection mode so a
+  // native tap returns to opening the record view.
+  useEffect(() => {
+    if (selectMode && selected.size === 0) setSelectMode(false);
+  }, [selectMode, selected]);
+  // Clear the per-button pager spinner once the load settles.
+  useEffect(() => {
+    if (!loading) setPageAction(null);
+  }, [loading]);
   const recordStep = useCallback(
     (delta: number) => {
       setRecordRow((cur) => {
@@ -672,12 +742,22 @@ export function DatabaseDataEditor({
   const onCommit = useCallback(() => void commit(), [commit]);
   const onRollback = useCallback(() => void rollback(), [rollback]);
   const handlePrev = useCallback(() => {
-    if (page > 0) void load(page - 1);
-  }, [page, load]);
+    if (page > 0 && !loading) {
+      setPageAction("prev");
+      void load(page - 1);
+    }
+  }, [page, load, loading]);
   const handleNext = useCallback(() => {
-    if (result?.truncated) void load(page + 1);
-  }, [page, result, load]);
-  const handleRefresh = useCallback(() => void load(page), [page, load]);
+    if (result?.truncated && !loading) {
+      setPageAction("next");
+      void load(page + 1);
+    }
+  }, [page, result, load, loading]);
+  const handleRefresh = useCallback(() => {
+    if (loading) return;
+    setPageAction("refresh");
+    void load(page);
+  }, [page, load, loading]);
   const toggleTxMode = useCallback(() => setTxMode((m) => (m === "auto" ? "manual" : "auto")), []);
   const cycleIsolation = useCallback(() => {
     setIsolation((cur) => {
@@ -738,7 +818,8 @@ export function DatabaseDataEditor({
                   selected={selected.has(r)}
                   canEdit={canEdit}
                   selectedKey={selectedKey}
-                  onSelect={toggleSelect}
+                  onRowPress={handleRowPress}
+                  onRowLongPress={handleRowLongPress}
                   onSelectCell={selectCell}
                   onExpand={handleExpandCell}
                   fkByCol={fkByCol}
@@ -762,6 +843,13 @@ export function DatabaseDataEditor({
             </ScrollView>
           </View>
         </ScrollView>
+        {loading ? (
+          <View style={styles.loadingOverlay} pointerEvents="none">
+            <View style={styles.loadingBadge}>
+              <ThemedSpinner size="small" uniProps={mutedColor} />
+            </View>
+          </View>
+        ) : null}
       </View>
     );
   } else {
@@ -862,15 +950,51 @@ export function DatabaseDataEditor({
             </View>
           ) : null}
         </View>
-        <Pressable style={styles.pageBtn} onPress={handlePrev} disabled={page === 0}>
-          <ThemedChevronLeft size={16} uniProps={mutedColor} />
+        <Pressable
+          style={({ pressed }) => [
+            styles.pageBtn,
+            pressed && styles.pageBtnPressed,
+            (page === 0 || loading) && styles.tbtnDisabled,
+          ]}
+          onPress={handlePrev}
+          disabled={page === 0 || loading}
+        >
+          {loading && pageAction === "prev" ? (
+            <ThemedSpinner size="small" uniProps={mutedColor} />
+          ) : (
+            <ThemedChevronLeft size={16} uniProps={mutedColor} />
+          )}
         </Pressable>
         <Text style={styles.pageText}>{shown === 0 ? "0" : `${from + 1}–${from + shown}`}</Text>
-        <Pressable style={styles.pageBtn} onPress={handleNext} disabled={!result?.truncated}>
-          <ThemedChevronRight size={16} uniProps={mutedColor} />
+        <Pressable
+          style={({ pressed }) => [
+            styles.pageBtn,
+            pressed && styles.pageBtnPressed,
+            (!result?.truncated || loading) && styles.tbtnDisabled,
+          ]}
+          onPress={handleNext}
+          disabled={!result?.truncated || loading}
+        >
+          {loading && pageAction === "next" ? (
+            <ThemedSpinner size="small" uniProps={mutedColor} />
+          ) : (
+            <ThemedChevronRight size={16} uniProps={mutedColor} />
+          )}
         </Pressable>
-        <Pressable style={styles.pageBtn} onPress={handleRefresh}>
-          <ThemedRefresh size={15} uniProps={mutedColor} />
+        <Pressable
+          style={({ pressed }) => [
+            styles.pageBtn,
+            pressed && styles.pageBtnPressed,
+            loading && styles.tbtnDisabled,
+          ]}
+          onPress={handleRefresh}
+          disabled={loading}
+        >
+          {loading && pageAction === "refresh" ? (
+            <ThemedSpinner size="small" uniProps={mutedColor} />
+          ) : (
+            <ThemedRefresh size={15} uniProps={mutedColor} />
+          )}
         </Pressable>
       </View>
 
@@ -1063,7 +1187,8 @@ function ExistingRow({
   selected,
   canEdit,
   selectedKey,
-  onSelect,
+  onRowPress,
+  onRowLongPress,
   onSelectCell,
   onExpand,
   fkByCol,
@@ -1079,14 +1204,19 @@ function ExistingRow({
   selected: boolean;
   canEdit: boolean;
   selectedKey: string | null;
-  onSelect: (rowIdx: number) => void;
+  onRowPress: (rowIdx: number, e: GestureResponderEvent) => void;
+  onRowLongPress: (rowIdx: number) => void;
   onSelectCell: (key: string) => void;
   onExpand: (cell: ExpandedCell) => void;
   fkByCol: Map<string, DbForeignKey>;
   onNavigate: (fk: DbForeignKey, value: Cell) => void;
   onOpenRecord: (rowIdx: number) => void;
 }) {
-  const handleSelect = useCallback(() => onSelect(rowIndex), [onSelect, rowIndex]);
+  const handlePress = useCallback(
+    (e: GestureResponderEvent) => onRowPress(rowIndex, e),
+    [onRowPress, rowIndex],
+  );
+  const handleLongPress = useCallback(() => onRowLongPress(rowIndex), [onRowLongPress, rowIndex]);
   const handleRecord = useCallback(() => onOpenRecord(rowIndex), [onOpenRecord, rowIndex]);
   const gutterCtx = isWeb
     ? {
@@ -1101,13 +1231,14 @@ function ExistingRow({
       style={[
         styles.bodyRow,
         rowIndex % 2 === 1 && styles.bodyRowAlt,
+        selected && styles.selectedRow,
         deleted && styles.deletedRow,
       ]}
     >
       <Pressable
         style={[styles.gutter, selected && styles.gutterSelected]}
-        onPress={handleSelect}
-        onLongPress={handleRecord}
+        onPress={handlePress}
+        onLongPress={handleLongPress}
         {...(gutterCtx as object)}
       >
         <Text style={styles.gutterText}>{rowIndex + 1}</Text>
@@ -1579,7 +1710,16 @@ const styles = StyleSheet.create((theme: Theme) => ({
     color: theme.colors.accentForeground,
   },
   tbtnDisabled: { opacity: 0.4 },
-  pageBtn: { padding: theme.spacing[1], borderRadius: theme.borderRadius.md },
+  pageBtn: {
+    padding: theme.spacing[1],
+    borderRadius: theme.borderRadius.md,
+    minWidth: 26,
+    alignItems: "center",
+    justifyContent: "center",
+    ...(isWeb ? { cursor: "pointer" as const } : null),
+  },
+  // Pressed/hover feedback for the pager buttons — a tinted, dimmed background.
+  pageBtnPressed: { backgroundColor: theme.colors.surface2, opacity: 0.7 },
   pageText: {
     fontSize: theme.fontSize.xs,
     color: theme.colors.foregroundMuted,
@@ -1595,6 +1735,25 @@ const styles = StyleSheet.create((theme: Theme) => ({
   errorBox: { padding: theme.spacing[3], backgroundColor: theme.colors.palette.red[100] },
   errorText: { fontSize: theme.fontSize.sm, color: theme.colors.palette.red[800] },
   center: { flex: 1, alignItems: "center", justifyContent: "center", minHeight: 120 },
+  // Subtle dim + centered spinner badge shown over the grid while paging/refreshing
+  // so it's obvious a fetch is in flight even though a previous page is still shown.
+  loadingOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0, 0, 0, 0.06)",
+  },
+  loadingBadge: {
+    padding: theme.spacing[2],
+    borderRadius: theme.borderRadius.md,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+  },
   // Outer horizontal scroll (columns) fills the pane; the inner vertical scroll
   // (rows) is bounded to the measured height so the header row stays pinned.
   gridWrap: { flex: 1, minHeight: 0 },
@@ -1717,6 +1876,9 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderBottomColor: theme.colors.border,
   },
   bodyRowAlt: { backgroundColor: theme.colors.surface1 },
+  // A multi-selected row (delete/clone target). The gutter also gets an accent fill
+  // (gutterSelected); this tints the whole row so the selection reads across it.
+  selectedRow: { backgroundColor: theme.colors.surface2 },
   deletedRow: { opacity: 0.45 },
   newRow: { backgroundColor: theme.colors.palette.green[100] },
   bodyText: {

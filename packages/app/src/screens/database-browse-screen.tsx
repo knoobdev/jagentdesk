@@ -48,20 +48,31 @@ export function DatabaseBrowseScreen({
   const insets = useSafeAreaInsets();
   const isCompact = useIsCompactFormFactor();
   const router = useRouter();
-  // Deep links land here as the first stack entry (no back target); only show the
-  // back affordance when there is somewhere to return to.
-  const showBack = isCompact && router.canGoBack();
 
   const selectedObject = useDatabaseNavStore((s) => s.selectedObject);
   const showingConsole = useDatabaseNavStore((s) => s.showingConsole);
   const showingEr = useDatabaseNavStore((s) => s.showingEr);
   const showingSearch = useDatabaseNavStore((s) => s.showingSearch);
+  const selectOverview = useDatabaseNavStore((s) => s.selectOverview);
   const setLastDatabase = useDatabaseNavStore((s) => s.setLastDatabase);
   const bumpRefresh = useDatabaseViewStore((s) => s.bumpRefresh);
   const resetViewForDatabase = useDatabaseViewStore((s) => s.resetForDatabase);
   const resetChatForDatabase = useDatabaseChatStore((s) => s.resetForDatabase);
   const chatOpen = useDatabaseChatStore((s) => s.open);
   const hideChat = useDatabaseChatStore((s) => s.hideChat);
+
+  // Deep links land here as the first stack entry (no router back target), but
+  // the section still has its own in-screen views (chat, SQL console, search, ER
+  // diagram, a selected table). Show the back affordance whenever there is an
+  // in-section view to unwind, even if the router itself can't go back.
+  const showBack =
+    isCompact &&
+    (chatOpen ||
+      showingConsole ||
+      showingSearch ||
+      showingEr ||
+      selectedObject != null ||
+      router.canGoBack());
 
   useEffect(() => {
     resetViewForDatabase(databaseId);
@@ -148,16 +159,36 @@ export function DatabaseBrowseScreen({
   // On phones the object nav is a slide-in that closes when you pick a table; this
   // bar reopens it so the table tree is always one tap away (not just the chat FAB).
   const handleOpenTables = useCallback(() => showMobileAgentList(), [showMobileAgentList]);
-  // When the full-screen chat is open on a phone, the header back arrow must
-  // just dismiss the chat (returning to the browse/table view underneath), not
-  // navigate the whole DB section back to the connection list.
+  // Back unwinds the in-section view stack before leaving the DB section: chat
+  // first, then any sub-view (SQL console / full-text search / ER diagram) or a
+  // selected table, all of which return to the connection overview + object
+  // tree. Only when already at the tree root does Back exit to the connection
+  // list. Without this, Back from a table/console jumps straight out of the DB
+  // section, losing the user's place.
   const handleBack = useCallback(() => {
     if (chatOpen) {
       hideChat();
       return;
     }
+    // These views are mutually exclusive in the nav store, so a single
+    // selectOverview clears whichever is active (and any selected table) and
+    // lands back on the overview/tree.
+    if (showingConsole || showingSearch || showingEr || selectedObject != null) {
+      selectOverview(databaseId);
+      return;
+    }
     router.back();
-  }, [chatOpen, hideChat, router]);
+  }, [
+    chatOpen,
+    hideChat,
+    showingConsole,
+    showingSearch,
+    showingEr,
+    selectedObject,
+    selectOverview,
+    databaseId,
+    router,
+  ]);
 
   let content;
   if (showingConsole) {
