@@ -12,7 +12,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useHostRuntimeClient, useHosts } from "@/runtime/host-runtime";
-import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { Skeleton, useSkeletonPulse } from "@/components/ui/skeleton";
 import { DatabaseStatusDot } from "@/components/database-dot";
 import { buildDatabaseBrowseRoute } from "@/utils/host-routes";
 import { useDatabaseNavStore } from "@/stores/database-nav-store";
@@ -371,9 +371,13 @@ export function DatabasesScreen() {
 
   if (loading) {
     return (
-      <View style={styles.centerContainer}>
-        <ThemedLoadingSpinner size="large" uniProps={mutedColorMapping} />
-      </View>
+      <ScrollView style={styles.container} contentContainerStyle={contentContainerStyle}>
+        <View style={styles.headerRow}>
+          <ThemedDatabase size={20} uniProps={foregroundColorMapping} />
+          <Text style={styles.header}>Databases</Text>
+        </View>
+        <DatabasesSkeleton />
+      </ScrollView>
     );
   }
 
@@ -577,10 +581,32 @@ export function DatabasesScreen() {
 const ThemedArrowLeft = withUnistyles(ArrowLeft);
 const ThemedDatabase = withUnistyles(DatabaseIcon);
 const ThemedCircleAlert = withUnistyles(CircleAlert);
-const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
 const ThemedPlus = withUnistyles(Plus);
 const ThemedTrash = withUnistyles(Trash2);
 const ThemedTextInput = withUnistyles(TextInput);
+
+const DB_SKELETON_KEYS = Array.from({ length: 4 }, (_, i) => `db-skel-${i}`);
+
+/** Connection-list placeholder shown while the database list loads. */
+function DatabasesSkeleton() {
+  const pulse = useSkeletonPulse();
+  return (
+    <View style={styles.sectionCard}>
+      {DB_SKELETON_KEYS.map((key) => (
+        <View key={key} style={styles.row}>
+          <View style={styles.rowHeader}>
+            <Skeleton pulse={pulse} width={10} height={10} radius={5} />
+            <View style={styles.rowInfo}>
+              <Skeleton pulse={pulse} width="45%" height={14} />
+              <Skeleton pulse={pulse} width="65%" height={11} style={styles.skelGap} />
+            </View>
+            <Skeleton pulse={pulse} width={72} height={24} radius={6} />
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
 
 const foregroundColorMapping = (theme: Theme) => ({ color: theme.colors.foreground });
 const mutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
@@ -606,6 +632,9 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
     justifyContent: "center",
     minHeight: 120,
+  },
+  skelGap: {
+    marginTop: theme.spacing[1],
   },
   headerRow: {
     flexDirection: "row",

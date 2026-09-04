@@ -16,6 +16,7 @@ import { ClusterStatusDot, PodStatusDot } from "@/components/cluster-dot";
 import { useClusterNavStore } from "@/stores/cluster-nav-store";
 import { useClusterViewStore } from "@/stores/cluster-view-store";
 import { useIsCompactFormFactor } from "@/constants/layout";
+import { Skeleton, useSkeletonPulse } from "@/components/ui/skeleton";
 import type { Theme } from "@/styles/theme";
 
 interface KindInfo {
@@ -405,11 +406,7 @@ export function ClusterResourceBrowser({
       </View>
     );
   } else if (loadingItems) {
-    content = (
-      <View style={styles.center}>
-        <Text style={styles.muted}>Loading…</Text>
-      </View>
-    );
+    content = <ResourceListSkeleton kind={selectedKind} isCompact={isCompact} />;
   } else if (error) {
     content = (
       <View style={styles.center}>
@@ -515,6 +512,44 @@ function ClusterErrorPopup({
         </View>
       </Pressable>
     </Modal>
+  );
+}
+
+const RESOURCE_SKELETON_KEYS = Array.from({ length: 10 }, (_, i) => `cluster-res-skel-${i}`);
+
+/** Table placeholder shown while a resource kind's list is loading. */
+function ResourceListSkeleton({ kind, isCompact }: { kind: string | null; isCompact: boolean }) {
+  const pulse = useSkeletonPulse();
+  return (
+    <>
+      <View style={styles.toolbar}>
+        <Text style={styles.toolbarTitle}>{kind ?? ""}</Text>
+        <Skeleton pulse={pulse} width={28} height={12} />
+      </View>
+      <View style={styles.header}>
+        <Text style={styles.headerName}>NAME</Text>
+        {isCompact ? null : <Text style={styles.headerNs}>NAMESPACE</Text>}
+        <Text style={styles.headerAge}>AGE</Text>
+      </View>
+      {RESOURCE_SKELETON_KEYS.map((key) => (
+        <View key={key} style={styles.row}>
+          <View style={styles.cellName}>
+            <Skeleton pulse={pulse} width={8} height={8} radius={4} />
+            <View style={styles.cellNameInner}>
+              <Skeleton pulse={pulse} width="70%" height={13} />
+            </View>
+          </View>
+          {isCompact ? null : (
+            <View style={styles.cellNs}>
+              <Skeleton pulse={pulse} width="80%" height={12} />
+            </View>
+          )}
+          <View style={styles.cellAge}>
+            <Skeleton pulse={pulse} width={24} height={12} />
+          </View>
+        </View>
+      ))}
+    </>
   );
 }
 

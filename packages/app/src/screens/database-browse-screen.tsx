@@ -60,6 +60,8 @@ export function DatabaseBrowseScreen({
   const bumpRefresh = useDatabaseViewStore((s) => s.bumpRefresh);
   const resetViewForDatabase = useDatabaseViewStore((s) => s.resetForDatabase);
   const resetChatForDatabase = useDatabaseChatStore((s) => s.resetForDatabase);
+  const chatOpen = useDatabaseChatStore((s) => s.open);
+  const hideChat = useDatabaseChatStore((s) => s.hideChat);
 
   useEffect(() => {
     resetViewForDatabase(databaseId);
@@ -146,6 +148,16 @@ export function DatabaseBrowseScreen({
   // On phones the object nav is a slide-in that closes when you pick a table; this
   // bar reopens it so the table tree is always one tap away (not just the chat FAB).
   const handleOpenTables = useCallback(() => showMobileAgentList(), [showMobileAgentList]);
+  // When the full-screen chat is open on a phone, the header back arrow must
+  // just dismiss the chat (returning to the browse/table view underneath), not
+  // navigate the whole DB section back to the connection list.
+  const handleBack = useCallback(() => {
+    if (chatOpen) {
+      hideChat();
+      return;
+    }
+    router.back();
+  }, [chatOpen, hideChat, router]);
 
   let content;
   if (showingConsole) {
@@ -224,7 +236,7 @@ export function DatabaseBrowseScreen({
 
   return (
     <View style={styles.container}>
-      {showBack ? <BackHeader title={dbName} /> : null}
+      {showBack ? <BackHeader title={dbName} onBack={handleBack} /> : null}
       <View style={contentStyle}>
         <View style={styles.row}>
           <View style={styles.leftColumn}>

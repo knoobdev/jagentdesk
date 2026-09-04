@@ -9,6 +9,7 @@ import type {
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { useDatabaseViewStore } from "@/stores/database-view-store";
 import { buildCreateTableDdl } from "@/utils/sql-ddl";
+import { Skeleton, useSkeletonPulse } from "@/components/ui/skeleton";
 import type { Theme } from "@/styles/theme";
 
 type Tab = "columns" | "ddl" | "relationships";
@@ -42,10 +43,19 @@ export function DatabaseStructureView({
   const [columns, setColumns] = useState<DbColumn[]>([]);
   const [fks, setFks] = useState<DbForeignKey[]>([]);
   const [tab, setTab] = useState<Tab>("columns");
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!client) return;
+    if (!client) {
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
+    // Clear stale columns/fks so switching tables shows the loading placeholder
+    // rather than the previous table's structure until the new data arrives.
+    setLoading(true);
+    setColumns([]);
+    setFks([]);
     void (async () => {
       const [cols, fkRes] = await Promise.all([
         client.databaseColumns({ id: databaseId, schema, table }).catch(() => null),
@@ -54,6 +64,7 @@ export function DatabaseStructureView({
       if (cancelled) return;
       if (cols && !cols.error) setColumns(cols.columns);
       if (fkRes && !fkRes.error) setFks(fkRes.foreignKeys);
+      setLoading(false);
     })();
     return () => {
       cancelled = true;
@@ -72,7 +83,9 @@ export function DatabaseStructureView({
   const showRel = useCallback(() => setTab("relationships"), []);
 
   let body;
-  if (tab === "columns") {
+  if (loading) {
+    body = <StructureSkeleton tab={tab} />;
+  } else if (tab === "columns") {
     body = (
       <ScrollView style={styles.gridV}>
         <ScrollView horizontal contentContainerStyle={styles.gridVContent}>
@@ -166,8 +179,66 @@ export function DatabaseStructureView({
   );
 }
 
+const SKELETON_ROW_KEYS = Array.from({ length: 8 }, (_, i) => `structure-skel-${i}`);
+
+/** Loading placeholder that mirrors the eventual tab layout (grid rows vs. text). */
+function StructureSkeleton({ tab }: { tab: Tab }) {
+  const pulse = useSkeletonPulse();
+  if (tab === "columns") {
+    return (
+      <ScrollView style={styles.gridV}>
+        <View style={styles.gridHeader}>
+          <Text style={[styles.gridHeadText, styles.cIdx]}>#</Text>
+          <Text style={[styles.gridHeadText, styles.cName]}>Name</Text>
+          <Text style={[styles.gridHeadText, styles.cType]}>Type</Text>
+          <Text style={[styles.gridHeadText, styles.cNull]}>Nullable</Text>
+          <Text style={[styles.gridHeadText, styles.cKey]}>Key</Text>
+          <Text style={[styles.gridHeadText, styles.cDefault]}>Default</Text>
+        </View>
+        {SKELETON_ROW_KEYS.map((key) => (
+          <View key={key} style={styles.gridRow}>
+            <View style={[styles.cIdx, styles.skelCell]}>
+              <Skeleton pulse={pulse} width={18} height={12} />
+            </View>
+            <View style={[styles.cName, styles.skelCell]}>
+              <Skeleton pulse={pulse} width="80%" height={12} />
+            </View>
+            <View style={[styles.cType, styles.skelCell]}>
+              <Skeleton pulse={pulse} width="70%" height={12} />
+            </View>
+            <View style={[styles.cNull, styles.skelCell]}>
+              <Skeleton pulse={pulse} width={32} height={12} />
+            </View>
+            <View style={[styles.cKey, styles.skelCell]}>
+              <Skeleton pulse={pulse} width={22} height={12} />
+            </View>
+            <View style={[styles.cDefault, styles.skelCell]}>
+              <Skeleton pulse={pulse} width="55%" height={12} />
+            </View>
+          </View>
+        ))}
+      </ScrollView>
+    );
+  }
+  return (
+    <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+      {SKELETON_ROW_KEYS.map((key, i) => (
+        <View key={key} style={styles.skelLineRow}>
+          <Skeleton
+            pulse={pulse}
+            width={i % 3 === 0 ? "90%" : i % 3 === 1 ? "75%" : "60%"}
+            height={14}
+          />
+        </View>
+      ))}
+    </ScrollView>
+  );
+}
+
 const styles = StyleSheet.create((theme: Theme) => ({
   container: { flex: 1, minHeight: 0 },
+  skelLineRow: { paddingVertical: theme.spacing[1] },
+  skelCell: { paddingHorizontal: theme.spacing[2] },
   tabs: {
     flexDirection: "row",
     gap: theme.spacing[1],

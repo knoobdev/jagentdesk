@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Pressable, ScrollView, Text, View, useWindowDimensions } from "react-native";
+import { BackHandler, Pressable, ScrollView, Text, View, useWindowDimensions } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import Animated, {
   runOnJS,
@@ -326,6 +326,20 @@ export function DatabaseChatDock({
 
   const handleClose = useCallback(() => hideChat(), [hideChat]);
   const handleOpen = useCallback(() => showChat(), [showChat]);
+
+  // On phones the chat fills the screen. Android hardware/gesture back would
+  // otherwise pop the whole DB section back to the connection list; while the
+  // chat is open, consume back to just close the overlay, leaving the user on
+  // the same browse/table view they came from.
+  useEffect(() => {
+    if (!open || !isCompact) return;
+    const handler = BackHandler.addEventListener("hardwareBackPress", () => {
+      hideChat();
+      return true;
+    });
+    return () => handler.remove();
+  }, [open, isCompact, hideChat]);
+
   const innerStyle = useMemo(() => [styles.inner, { width: target }], [target]);
 
   const databaseAgents = useMemo(

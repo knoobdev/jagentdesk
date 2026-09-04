@@ -38,6 +38,9 @@ const MIN_CELL_W = 120;
 const MAX_CELL_W = 360;
 const CHAR_W = 7.5;
 const EXPAND_THRESHOLD = 24;
+// A second press on a cell within this window counts as a double-click/tap and
+// enters edit (opens the value-editor dock) instead of just re-selecting.
+const DOUBLE_MS = 300;
 
 const ThemedChevronLeft = withUnistyles(ChevronLeft);
 const ThemedChevronRight = withUnistyles(ChevronRight);
@@ -227,7 +230,10 @@ export function DatabaseDataEditor({
   const [newRows, setNewRows] = useState<Array<Record<string, Cell>>>([]);
   const [deleted, setDeleted] = useState<Set<number>>(new Set());
   const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [editingKey, setEditingKey] = useState<string | null>(null);
+  // The single grid cell with a visible "selected" highlight. A first click/tap
+  // only selects; a second click/tap on the already-selected cell (or a
+  // double-click/double-tap) enters edit via the docked value editor.
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [sort, setSort] = useState<{ col: string; dir: "asc" | "desc" } | null>(null);
   const sortRef = useRef<{ col: string; dir: "asc" | "desc" } | null>(null);
@@ -244,10 +250,11 @@ export function DatabaseDataEditor({
   const colNames = useMemo(() => columns.map((c) => c.name), [columns]);
   const canEdit = isSqlEngine(engine) && pkCols.length > 0;
 
-  // Compact/native devices route cell editing through the docked value editor
-  // (a proper multi-line surface) instead of the cramped inline TextInput.
+  // All platforms now edit through the docked value editor (a proper multi-line
+  // surface) — the old inline TextInput was clipped by the next row on desktop.
+  // `touch` only picks the tap-vs-click wording in the status hint.
   const compact = useIsCompactFormFactor();
-  const dialogEdit = isNative || compact;
+  const touch = isNative || compact;
 
   // On compact/mobile the bottom bars must clear the home indicator and any
   // horizontal safe-area (landscape notch) so text isn't cut off at the screen
@@ -306,7 +313,7 @@ export function DatabaseDataEditor({
     setNewRows([]);
     setDeleted(new Set());
     setSelected(new Set());
-    setEditingKey(null);
+    setSelectedKey(null);
   }, []);
 
   const load = useCallback(
@@ -425,16 +432,11 @@ export function DatabaseDataEditor({
     [pkCols, colIndex],
   );
 
-  // Inline editing.
-  const startEdit = useCallback(
-    (key: string) => {
-      if (canEdit) setEditingKey(key);
-    },
-    [canEdit],
-  );
+  // Select a single cell (first click/tap). Editing is a separate gesture handled
+  // in GridCell (second click on the selected cell, or a double-click/tap).
+  const selectCell = useCallback((key: string) => setSelectedKey(key), []);
   const commitExistingEdit = useCallback(
     (rowIdx: number, col: string, text: string, original: string) => {
-      setEditingKey(null);
       setEdits((prev) => {
         const key = `${rowIdx}:${col}`;
         const next = { ...prev };
@@ -446,7 +448,6 @@ export function DatabaseDataEditor({
     [],
   );
   const commitNewEdit = useCallback((i: number, col: string, text: string) => {
-    setEditingKey(null);
     setNewRows((prev) => {
       const next = prev.map((r) => ({ ...r }));
       if (text === "") delete next[i][col];
@@ -736,11 +737,9 @@ export function DatabaseDataEditor({
                   deleted={deleted.has(r)}
                   selected={selected.has(r)}
                   canEdit={canEdit}
-                  dialogEdit={dialogEdit}
-                  editingKey={editingKey}
+                  selectedKey={selectedKey}
                   onSelect={toggleSelect}
-                  onStartEdit={startEdit}
-                  onCommitEdit={commitExistingEdit}
+                  onSelectCell={selectCell}
                   onExpand={handleExpandCell}
                   fkByCol={fkByCol}
                   onNavigate={navigateFk}
@@ -755,10 +754,8 @@ export function DatabaseDataEditor({
                   values={nr}
                   columns={colNames}
                   widths={colWidths}
-                  dialogEdit={dialogEdit}
-                  editingKey={editingKey}
-                  onStartEdit={startEdit}
-                  onCommitEdit={commitNewEdit}
+                  selectedKey={selectedKey}
+                  onSelectCell={selectCell}
                   onExpand={handleExpandCell}
                 />
               ))}
@@ -951,7 +948,11 @@ export function DatabaseDataEditor({
         <Text style={styles.statusText} numberOfLines={1}>
           {status ?? `${shown} row${shown === 1 ? "" : "s"}${result?.truncated ? "+" : ""}`}
           {txOpen ? " · transaction open" : ""}
-          {canEdit ? (dialogEdit ? " · tap a cell to edit" : " · click a cell to edit") : ""}
+          {canEdit
+            ? touch
+              ? " · tap to select, double-tap to edit"
+              : " · click to select, double-click to edit"
+            : ""}
         </Text>
       </View>
 
@@ -1061,11 +1062,9 @@ function ExistingRow({
   deleted,
   selected,
   canEdit,
-  dialogEdit,
-  editingKey,
+  selectedKey,
   onSelect,
-  onStartEdit,
-  onCommitEdit,
+  onSelectCell,
   onExpand,
   fkByCol,
   onNavigate,
@@ -1079,11 +1078,9 @@ function ExistingRow({
   deleted: boolean;
   selected: boolean;
   canEdit: boolean;
-  dialogEdit: boolean;
-  editingKey: string | null;
+  selectedKey: string | null;
   onSelect: (rowIdx: number) => void;
-  onStartEdit: (key: string) => void;
-  onCommitEdit: (rowIdx: number, col: string, text: string, original: string) => void;
+  onSelectCell: (key: string) => void;
   onExpand: (cell: ExpandedCell) => void;
   fkByCol: Map<string, DbForeignKey>;
   onNavigate: (fk: DbForeignKey, value: Cell) => void;
@@ -1132,11 +1129,8 @@ function ExistingRow({
             text={cellText(value)}
             isNull={value === null}
             dirty={edited}
-            editable={canEdit && !deleted}
-            dialogEdit={dialogEdit}
-            editing={editingKey === key}
-            onStart={onStartEdit}
-            onCommitExisting={onCommitEdit}
+            selectedCell={selectedKey === key}
+            onSelectCell={onSelectCell}
             onExpand={onExpand}
             fk={fkByCol.get(col)}
             rawValue={value}
@@ -1161,20 +1155,16 @@ function NewRow({
   values,
   columns,
   widths,
-  dialogEdit,
-  editingKey,
-  onStartEdit,
-  onCommitEdit,
+  selectedKey,
+  onSelectCell,
   onExpand,
 }: {
   index: number;
   values: Record<string, Cell>;
   columns: string[];
   widths: number[];
-  dialogEdit: boolean;
-  editingKey: string | null;
-  onStartEdit: (key: string) => void;
-  onCommitEdit: (i: number, col: string, text: string) => void;
+  selectedKey: string | null;
+  onSelectCell: (key: string) => void;
   onExpand: (cell: ExpandedCell) => void;
 }) {
   return (
@@ -1196,11 +1186,8 @@ function NewRow({
             text={has ? cellText(values[col]) : ""}
             isNull={false}
             dirty
-            editable
-            dialogEdit={dialogEdit}
-            editing={editingKey === key}
-            onStart={onStartEdit}
-            onCommitNew={onCommitEdit}
+            selectedCell={selectedKey === key}
+            onSelectCell={onSelectCell}
             onExpand={onExpand}
           />
         );
@@ -1219,12 +1206,8 @@ function GridCell({
   text,
   isNull,
   dirty,
-  editable,
-  dialogEdit,
-  editing,
-  onStart,
-  onCommitExisting,
-  onCommitNew,
+  selectedCell,
+  onSelectCell,
   onExpand,
   fk,
   rawValue,
@@ -1239,74 +1222,63 @@ function GridCell({
   text: string;
   isNull: boolean;
   dirty: boolean;
-  editable: boolean;
-  dialogEdit: boolean;
-  editing: boolean;
-  onStart: (key: string) => void;
-  onCommitExisting?: (rowIdx: number, col: string, text: string, original: string) => void;
-  onCommitNew?: (i: number, col: string, text: string) => void;
+  selectedCell: boolean;
+  onSelectCell: (key: string) => void;
   onExpand: (cell: ExpandedCell) => void;
   fk?: DbForeignKey;
   rawValue?: Cell;
   onNavigate?: (fk: DbForeignKey, value: Cell) => void;
 }) {
-  const [draft, setDraft] = useState(text);
   const handleExpand = useCallback(
     () => onExpand({ rowIndex, newIndex, col, text, original }),
     [onExpand, rowIndex, newIndex, col, text, original],
   );
-  // A single tap enters edit mode (DataGrip-style). On desktop that's the inline
-  // input; on compact/native it routes to the docked value editor which is a
-  // proper multi-line surface. Read-only cells always open the (read-only) dock.
+  // First click/tap only selects the cell. A second click/tap on the
+  // already-selected cell — or two presses within DOUBLE_MS — enters edit by
+  // opening the docked value editor (a proper multi-line surface; the old inline
+  // TextInput was clipped by the next row on desktop). Read-only cells open the
+  // same dock read-only. `lastTapRef` covers the double-tap on native and is a
+  // fallback on web alongside onDoubleClick.
+  const lastTapRef = useRef(0);
+  const enterEdit = useCallback(() => {
+    onSelectCell(cellKey);
+    handleExpand();
+  }, [onSelectCell, cellKey, handleExpand]);
   const handlePress = useCallback(() => {
-    if (editable && !dialogEdit) {
-      setDraft(text);
-      onStart(cellKey);
-    } else {
-      handleExpand();
-    }
-  }, [editable, dialogEdit, text, onStart, cellKey, handleExpand]);
+    const now = Date.now();
+    const isDouble = now - lastTapRef.current < DOUBLE_MS;
+    lastTapRef.current = now;
+    if (selectedCell || isDouble) enterEdit();
+    else onSelectCell(cellKey);
+  }, [selectedCell, enterEdit, onSelectCell, cellKey]);
   const navigate = useCallback(() => {
     if (fk && onNavigate) onNavigate(fk, rawValue ?? null);
   }, [fk, onNavigate, rawValue]);
-  const commit = useCallback(() => {
-    if (rowIndex !== undefined) onCommitExisting?.(rowIndex, col, draft, original);
-    else if (newIndex !== undefined) onCommitNew?.(newIndex, col, draft);
-  }, [rowIndex, newIndex, col, draft, original, onCommitExisting, onCommitNew]);
-  // Right-click a foreign-key cell to jump to the referenced row (web/desktop).
-  const ctx =
-    isWeb && fk
-      ? {
-          onContextMenu: (e: { preventDefault?: () => void }) => {
-            e?.preventDefault?.();
-            navigate();
-          },
-        }
-      : {};
+  // Web: double-click enters edit directly; right-click a foreign-key cell jumps
+  // to the referenced row.
+  const ctx = isWeb
+    ? {
+        onDoubleClick: enterEdit,
+        ...(fk
+          ? {
+              onContextMenu: (e: { preventDefault?: () => void }) => {
+                e?.preventDefault?.();
+                navigate();
+              },
+            }
+          : {}),
+      }
+    : {};
 
-  if (editing) {
-    return (
-      <View style={[styles.cell, styles.cellEditing, { width }]}>
-        <ThemedCellInput
-          style={styles.cellInput}
-          value={draft}
-          onChangeText={setDraft}
-          onBlur={commit}
-          onSubmitEditing={commit}
-          autoFocus
-          autoCapitalize="none"
-          autoCorrect={false}
-          uniProps={placeholderColor}
-        />
-      </View>
-    );
-  }
-  // Keep an explicit expand affordance for long values even on desktop, where a
-  // single click enters inline edit — this opens the full multi-line viewer.
   const showExpand = !isNull && text.length > EXPAND_THRESHOLD;
   return (
     <Pressable
-      style={[styles.cell, { width }, dirty && styles.cellDirty]}
+      style={[
+        styles.cell,
+        { width },
+        dirty && styles.cellDirty,
+        selectedCell && styles.cellSelected,
+      ]}
       onPress={handlePress}
       onLongPress={handleExpand}
       {...(ctx as object)}
@@ -1659,12 +1631,13 @@ const styles = StyleSheet.create((theme: Theme) => ({
   expandBtn: { paddingHorizontal: 2 },
   expandIcon: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundExtraMuted },
   cellDirty: { backgroundColor: "rgba(245, 158, 11, 0.16)" },
-  cellEditing: { backgroundColor: theme.colors.surface2, paddingVertical: 0 },
-  cellInput: {
-    fontSize: theme.fontSize.xs,
-    fontFamily: theme.fontFamily.mono,
-    color: theme.colors.foreground,
-    paddingVertical: theme.spacing[1.5],
+  // The single selected cell (first click/tap): accent outline + tint, like a
+  // DataGrip/spreadsheet selection. A second click/tap or double-click opens the
+  // value-editor dock.
+  cellSelected: {
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.accent,
+    backgroundColor: theme.colors.surface2,
   },
   headerCell: {
     flexDirection: "row",
@@ -1787,6 +1760,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
   modalScroll: { minHeight: 0 },
   valueDock: {
     height: 200,
+    zIndex: 10,
     borderTopWidth: theme.borderWidth[1],
     borderTopColor: theme.colors.border,
     backgroundColor: theme.colors.surface0,

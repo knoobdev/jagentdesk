@@ -6,6 +6,7 @@ import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { useDatabaseNavStore, type SelectedDbObject } from "@/stores/database-nav-store";
 import { useDatabaseViewStore } from "@/stores/database-view-store";
 import { qualifyTable, quoteIdent } from "@/utils/sql-ident";
+import { Skeleton, useSkeletonPulse } from "@/components/ui/skeleton";
 import type { Theme } from "@/styles/theme";
 
 const ThemedInput = withUnistyles(TextInput);
@@ -142,6 +143,7 @@ export function DatabaseFullTextSearch({
       </View>
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <ScrollView style={styles.results} contentContainerStyle={styles.resultsContent}>
+        {running ? <SearchSkeleton /> : null}
         {scanned !== null && !running ? (
           <Text style={styles.summary}>
             {hits.length === 0
@@ -176,8 +178,42 @@ function HitRow({ hit, onOpen }: { hit: TableHit; onOpen: (hit: TableHit) => voi
   );
 }
 
+const SEARCH_SKELETON_KEYS = Array.from({ length: 6 }, (_, i) => `fts-skel-${i}`);
+
+/** Placeholder rows shown while the cross-table scan is running. */
+function SearchSkeleton() {
+  const pulse = useSkeletonPulse();
+  return (
+    <View>
+      {SEARCH_SKELETON_KEYS.map((key) => (
+        <View key={key} style={styles.skelHit}>
+          <View style={styles.skelHitInfo}>
+            <Skeleton pulse={pulse} width="55%" height={13} />
+            <Skeleton pulse={pulse} width="35%" height={11} />
+          </View>
+          <Skeleton pulse={pulse} width={28} height={11} />
+        </View>
+      ))}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create((theme: Theme) => ({
   container: { flex: 1, minHeight: 0 },
+  skelHit: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1.5],
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: theme.colors.border,
+  },
+  skelHitInfo: {
+    flex: 1,
+    minWidth: 0,
+    gap: theme.spacing[1],
+  },
   bar: {
     flexDirection: "row",
     alignItems: "center",
