@@ -509,6 +509,61 @@ export function DatabaseDataEditor({
     [anchor],
   );
 
+  // Standard "select every row on the page" — the target of Cmd/Ctrl+A on desktop
+  // and the "Select all" action on mobile. The anchor moves to the first row so a
+  // subsequent SHIFT+click still has a defined pivot.
+  const selectAllRows = useCallback(() => {
+    if (!result || result.rows.length === 0) return;
+    const next = new Set<number>();
+    for (let i = 0; i < result.rows.length; i++) next.add(i);
+    setSelected(next);
+    setAnchor(0);
+  }, [result]);
+  // Standard "clear selection" — Escape on desktop, "Clear" on mobile. Also drops
+  // the anchor, the cell highlight, and (native) exits long-press selection mode.
+  const clearSelection = useCallback(() => {
+    setSelected(new Set());
+    setAnchor(null);
+    setSelectedKey(null);
+    setSelectMode(false);
+  }, []);
+
+  // Web-only keyboard selection. Cmd(mac)/Ctrl(win)+A selects every row on the
+  // page; Escape clears the selection — but only while focus is within the grid.
+  // The keydown listener lives on the focusable grid container (tabIndex set on the
+  // DOM node), so it fires only when a row/cell inside the grid has focus and never
+  // hijacks a global Cmd+A in the WHERE box, the value dock, or elsewhere.
+  const selectAllRef = useRef(selectAllRows);
+  const clearSelectionRef = useRef(clearSelection);
+  useEffect(() => {
+    selectAllRef.current = selectAllRows;
+    clearSelectionRef.current = clearSelection;
+  }, [selectAllRows, clearSelection]);
+  const gridElRef = useRef<HTMLElement | null>(null);
+  const handleGridKey = useCallback((e: KeyboardEvent) => {
+    const k = e.key.toLowerCase();
+    if ((e.metaKey || e.ctrlKey) && k === "a") {
+      e.preventDefault();
+      selectAllRef.current();
+    } else if (e.key === "Escape") {
+      clearSelectionRef.current();
+    }
+  }, []);
+  const gridWebRef = useCallback(
+    (node: View | null) => {
+      if (!isWeb) return;
+      const el = node as unknown as HTMLElement | null;
+      if (gridElRef.current) gridElRef.current.removeEventListener("keydown", handleGridKey);
+      gridElRef.current = el;
+      if (el) {
+        // Make the grid focusable (via click or Tab) so keydown scopes to it.
+        if (el.tabIndex < 0) el.tabIndex = 0;
+        el.addEventListener("keydown", handleGridKey);
+      }
+    },
+    [handleGridKey],
+  );
+
   const addRow = useCallback(() => setNewRows((prev) => [...prev, {}]), []);
   const deleteSelected = useCallback(() => {
     setDeleted((prev) => {
@@ -787,7 +842,7 @@ export function DatabaseDataEditor({
     // row stays pinned while rows scroll under it.
     const bodyH = gridH > 0 ? Math.max(0, gridH - headerH) : undefined;
     gridBody = (
-      <View style={styles.gridWrap} onLayout={onGridLayout}>
+      <View style={styles.gridWrap} onLayout={onGridLayout} ref={gridWebRef}>
         <ScrollView horizontal style={styles.hscroll} contentContainerStyle={styles.hContent}>
           <View style={styles.grid}>
             <View style={styles.headerRow} onLayout={onHeaderLayout}>
@@ -1065,6 +1120,37 @@ export function DatabaseDataEditor({
               count {aggregate.count} · distinct {aggregate.distinct}
             </Text>
           )}
+        </View>
+      ) : null}
+
+      {selectMode ? (
+        <View style={[styles.selectionBar, barHInset]}>
+          <Text style={styles.selectionCount}>{selected.size} selected</Text>
+          <View style={styles.selectionSpacer} />
+          <Pressable style={styles.tbtn} onPress={selectAllRows}>
+            <Text style={styles.tbtnText}>Select all</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.tbtn, selected.size === 0 && styles.tbtnDisabled]}
+            onPress={deleteSelected}
+            disabled={selected.size === 0}
+          >
+            <ThemedTrash size={14} uniProps={mutedColor} />
+            <Text style={styles.tbtnText}>Delete</Text>
+          </Pressable>
+          {canEdit ? (
+            <Pressable
+              style={[styles.tbtn, selected.size === 0 && styles.tbtnDisabled]}
+              onPress={cloneSelected}
+              disabled={selected.size === 0}
+            >
+              <ThemedCopy size={14} uniProps={mutedColor} />
+              <Text style={styles.tbtnText}>Clone</Text>
+            </Pressable>
+          ) : null}
+          <Pressable style={styles.tbtn} onPress={clearSelection}>
+            <Text style={styles.tbtnText}>Clear</Text>
+          </Pressable>
         </View>
       ) : null}
 
@@ -1896,6 +1982,25 @@ const styles = StyleSheet.create((theme: Theme) => ({
     backgroundColor: theme.colors.surface1,
   },
   statusText: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
+  // Native long-press selection mode: a dedicated action bar with the standard
+  // bulk controls (Select all / Clear) alongside the existing delete/clone.
+  selectionBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: theme.spacing[1.5],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[1.5],
+    borderTopWidth: theme.borderWidth[1],
+    borderTopColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+  },
+  selectionCount: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.foreground,
+  },
+  selectionSpacer: { flex: 1 },
   modalBackdrop: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.5)",
