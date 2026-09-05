@@ -1,17 +1,19 @@
-import { useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { ScrollView, Text, View } from "react-native";
-import { BarChart3, Coins, Cpu, Users } from "lucide-react-native";
+import { BarChart3, Coins, Cpu, RefreshCw, Users } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useQueryClient } from "@tanstack/react-query";
 import { useHostRouteServerId } from "@/navigation/host-route-context";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { formatTokenCount } from "@/components/context-window-meter.utils";
+import { Button } from "@/components/ui/button";
 import {
   useUsageInsights,
   type AgentUsageRow,
   type ModelUsageRow,
 } from "@/insights/use-usage-insights";
-import { useUsageHistory } from "@/insights/use-usage-history";
+import { useUsageHistory, usageHistoryQueryKey } from "@/insights/use-usage-history";
 import { UsageTimelineCard } from "@/insights/usage-timeline-card";
 import type { LifetimeUsage } from "@jagentdesk/protocol/usage-history";
 import type { Theme } from "@/styles/theme";
@@ -233,6 +235,23 @@ export function InsightsScreen() {
   const lifetimeTokens = lifetime.inputTokens + lifetime.cachedInputTokens + lifetime.outputTokens;
   const lifetimeModels = useMemo(() => lifetimeModelRows(lifetime), [lifetime]);
 
+  // Refresh re-pulls the daemon-persisted usage history for this host. The daemon
+  // owns usage totals and exposes no reset RPC, so this is a pure refetch (not a
+  // destructive clear) — it re-syncs the lifetime/by-model figures on demand
+  // instead of only when the `status:usage_changed` push arrives. Per-agent views
+  // read live from the session store and update on their own.
+  const queryClient = useQueryClient();
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const handleRefresh = useCallback(() => {
+    if (!serverId) {
+      return;
+    }
+    setIsRefreshing(true);
+    void queryClient
+      .refetchQueries({ queryKey: usageHistoryQueryKey(serverId) })
+      .finally(() => setIsRefreshing(false));
+  }, [queryClient, serverId]);
+
   const contentContainerStyle = useMemo(
     () => [styles.content, isCompact ? { paddingTop: insets.top } : null],
     [isCompact, insets.top],
@@ -256,8 +275,21 @@ export function InsightsScreen() {
     <View style={styles.root}>
       <ScrollView style={styles.container} contentContainerStyle={contentContainerStyle}>
         <View style={styles.headerRow}>
-          <ThemedBarChart size={22} uniProps={accentColor} />
-          <Text style={styles.header}>Usage &amp; Cost</Text>
+          <View style={styles.headerTitleGroup}>
+            <ThemedBarChart size={22} uniProps={accentColor} />
+            <Text style={styles.header}>Usage &amp; Cost</Text>
+          </View>
+          <Button
+            variant="outline"
+            size="sm"
+            leftIcon={RefreshCw}
+            onPress={handleRefresh}
+            loading={isRefreshing}
+            disabled={!serverId}
+            testID="insights-refresh"
+          >
+            Refresh
+          </Button>
         </View>
         <Text style={styles.hint}>
           Aggregated live from every active agent session on this host — where your tokens go and
@@ -343,7 +375,18 @@ const styles = StyleSheet.create((theme: Theme) => ({
   root: { flex: 1, backgroundColor: theme.colors.background },
   container: { flex: 1 },
   content: { padding: theme.spacing[4], paddingBottom: theme.spacing[8], gap: theme.spacing[4] },
-  headerRow: { flexDirection: "row", alignItems: "center", gap: theme.spacing[2] },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: theme.spacing[3],
+  },
+  headerTitleGroup: {
+    flexShrink: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+  },
   header: {
     fontSize: theme.fontSize["2xl"],
     fontWeight: theme.fontWeight.bold,

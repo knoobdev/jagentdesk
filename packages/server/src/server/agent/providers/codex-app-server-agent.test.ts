@@ -331,11 +331,14 @@ describe("Codex active-turn steering admission", () => {
     const commandResolution = deferred<{ commandName: string } | null>();
     const resolverEntered = deferred<void>();
     const appServer = createFakeCodexAppServer();
-    const { session, jagentdeskTurnId } = await startPublicSteeringSession(appServer, async (prompt) => {
-      if (prompt !== "/held") return null;
-      resolverEntered.resolve();
-      return commandResolution.promise;
-    });
+    const { session, jagentdeskTurnId } = await startPublicSteeringSession(
+      appServer,
+      async (prompt) => {
+        if (prompt !== "/held") return null;
+        resolverEntered.resolve();
+        return commandResolution.promise;
+      },
+    );
 
     const steer = session.steerActiveTurn!("/held", {
       expectedTurnId: jagentdeskTurnId,
@@ -952,6 +955,37 @@ describe("Codex app-server provider", () => {
       },
     });
     expect(turnStart).not.toHaveProperty("config.mcp_servers.hub.tools.reply");
+  });
+
+  test("auto-approves the internal JAgentDesk MCP server so Codex never re-prompts", async () => {
+    const session = createSession({
+      modeId: undefined,
+      providerOptions: { sandbox_mode: "read-only" },
+      mcpServers: {
+        jagentdesk: { type: "http", url: "http://127.0.0.1:6767/mcp/agents?callerAgentId=a1" },
+        hub: { type: "http", url: "http://127.0.0.1/hub" },
+      },
+    });
+    const request = vi.fn(async (method: string) => {
+      if (method === "thread/loaded/list") return { data: ["test-thread"] };
+      if (method === "turn/start") return {};
+      throw new Error(`Unexpected request: ${method}`);
+    });
+    session.activeForegroundTurnId = null;
+    session.client = createStub<CodexClientLike>({ request });
+
+    await session.startTurn("run a query");
+
+    const turnStart = request.mock.calls.find(([method]) => method === "turn/start")?.[1];
+    expect(turnStart).toMatchObject({
+      config: {
+        mcp_servers: {
+          jagentdesk: { default_tools_approval_mode: "auto" },
+        },
+      },
+    });
+    // External servers keep Codex's default approval flow.
+    expect(turnStart).not.toHaveProperty("config.mcp_servers.hub.default_tools_approval_mode");
   });
 
   test("passes ephemeral: true to thread/start when constructed as ephemeral", async () => {
@@ -2109,7 +2143,9 @@ describe("Codex app-server provider", () => {
     session.activeForegroundTurnId = null;
     session.client = createStub<CodexClientLike>({ request });
 
-    await session.startTurn("/jagentdesk-implement in a worktree, remember to use Claude for the UI");
+    await session.startTurn(
+      "/jagentdesk-implement in a worktree, remember to use Claude for the UI",
+    );
 
     const turnStartCall = request.mock.calls.find(([method]) => method === "turn/start");
     expect(turnStartCall?.[1]).toEqual(

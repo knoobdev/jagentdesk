@@ -81,6 +81,21 @@ function cellText(v: Cell): string {
   return v === null ? "" : String(v);
 }
 
+// Scale the alpha channel of an "rgba(r, g, b, a)" string. Used to derive a
+// subtler row fill from the theme's selection tint (terminal.selectionBackground),
+// which is a black overlay on light themes and a white overlay on dark themes so
+// the highlight stays visible on both.
+function scaleAlpha(color: string, factor: number): string {
+  const m = /^rgba?\(([^)]+)\)$/.exec(color.trim());
+  if (!m) return color;
+  const parts = m[1].split(",").map((s) => s.trim());
+  const r = parts[0] ?? "0";
+  const g = parts[1] ?? "0";
+  const b = parts[2] ?? "0";
+  const a = parts[3] !== undefined ? Number(parts[3]) : 1;
+  return `rgba(${r}, ${g}, ${b}, ${(a * factor).toFixed(3)})`;
+}
+
 interface AggregateResult {
   col: string;
   count: number;
@@ -564,6 +579,34 @@ export function DatabaseDataEditor({
     [handleGridKey],
   );
 
+  // Web-only: route vertical mouse-wheel to the INNER vertical scroller. The outer
+  // ScrollView is horizontal; without this the horizontal container can swallow the
+  // wheel and rows never scroll up/down. Horizontal wheel/trackpad (deltaX-dominant)
+  // is left to the outer scroller. On react-native-web the ScrollView `ref` resolves
+  // to the scrollable DOM node itself, so we can read/adjust scrollTop directly.
+  const bodyNodeRef = useRef<HTMLElement | null>(null);
+  const handleBodyWheel = useCallback((e: WheelEvent) => {
+    const el = bodyNodeRef.current;
+    if (!el) return;
+    if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+      el.scrollTop += e.deltaY;
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }, []);
+  const bodyScrollWebRef = useCallback(
+    (node: ScrollView | null) => {
+      if (!isWeb) return;
+      const el = node as unknown as HTMLElement | null;
+      if (bodyNodeRef.current) bodyNodeRef.current.removeEventListener("wheel", handleBodyWheel);
+      bodyNodeRef.current = el;
+      if (el && typeof el.addEventListener === "function") {
+        el.addEventListener("wheel", handleBodyWheel, { passive: false });
+      }
+    },
+    [handleBodyWheel],
+  );
+
   const addRow = useCallback(() => setNewRows((prev) => [...prev, {}]), []);
   const deleteSelected = useCallback(() => {
     setDeleted((prev) => {
@@ -726,8 +769,10 @@ export function DatabaseDataEditor({
   const closeRecord = useCallback(() => setRecordRow(null), []);
 
   // Row selection gestures. Desktop: a plain click selects one row (SHIFT = range
-  // from the anchor, CMD/CTRL = toggle). Native: a tap opens the record view unless
-  // a long-press has started selection mode, where taps add rows to the selection.
+  // from the anchor, CMD/CTRL = toggle). Native: a single tap SELECTS the row (it
+  // no longer opens an editor — editing is a double-tap on a cell → value dock, or a
+  // double-tap on the row number → record view). A long-press starts multi-select
+  // mode, where taps add rows to the selection.
   const handleRowPress = useCallback(
     (rowIdx: number, e: GestureResponderEvent) => {
       if (isWeb) {
@@ -739,10 +784,9 @@ export function DatabaseDataEditor({
         selectRow(rowIdx, { range: !!ne.shiftKey, additive: !!(ne.metaKey || ne.ctrlKey) });
         return;
       }
-      if (selectMode) selectRow(rowIdx, { additive: true });
-      else openRecord(rowIdx);
+      selectRow(rowIdx, { additive: selectMode });
     },
-    [selectRow, selectMode, openRecord],
+    [selectRow, selectMode],
   );
   const handleRowLongPress = useCallback(
     (rowIdx: number) => {
@@ -859,7 +903,11 @@ export function DatabaseDataEditor({
                 />
               ))}
             </View>
-            <ScrollView style={[styles.bodyScroll, bodyH !== undefined ? { height: bodyH } : null]}>
+            <ScrollView
+              ref={bodyScrollWebRef}
+              nestedScrollEnabled
+              style={[styles.bodyScroll, bodyH !== undefined ? { height: bodyH } : null]}
+            >
               {result.rows.map((row, r) => (
                 <ExistingRow
                   // eslint-disable-next-line react/no-array-index-key
@@ -1301,9 +1349,24 @@ function ExistingRow({
   onNavigate: (fk: DbForeignKey, value: Cell) => void;
   onOpenRecord: (rowIdx: number) => void;
 }) {
+  // Single tap on the row number selects the row; a double-tap opens the full
+  // record view (native's replacement for desktop's right-click/long-press, since
+  // native long-press is reserved for multi-select mode).
+  const gutterTapRef = useRef(0);
   const handlePress = useCallback(
-    (e: GestureResponderEvent) => onRowPress(rowIndex, e),
-    [onRowPress, rowIndex],
+    (e: GestureResponderEvent) => {
+      if (!isWeb) {
+        const now = Date.now();
+        if (now - gutterTapRef.current < DOUBLE_MS) {
+          gutterTapRef.current = 0;
+          onOpenRecord(rowIndex);
+          return;
+        }
+        gutterTapRef.current = now;
+      }
+      onRowPress(rowIndex, e);
+    },
+    [onRowPress, onOpenRecord, rowIndex],
   );
   const handleLongPress = useCallback(() => onRowLongPress(rowIndex), [onRowLongPress, rowIndex]);
   const handleRecord = useCallback(() => onOpenRecord(rowIndex), [onOpenRecord, rowIndex]);
@@ -1866,7 +1929,16 @@ const styles = StyleSheet.create((theme: Theme) => ({
   },
   // Outer horizontal scroll (columns) fills the pane; the inner vertical scroll
   // (rows) is bounded to the measured height so the header row stays pinned.
-  gridWrap: { flex: 1, minHeight: 0 },
+  // On web, suppress the browser's native TEXT selection across the grid so a
+  // shift+click range selection isn't fighting a text drag-select. Values are still
+  // copyable via Export or the value-editor dock (both outside this container).
+  // `userSelect` inherits in CSS, so descendant rows/cells/header are covered too;
+  // rows/cells also set it explicitly below.
+  gridWrap: {
+    flex: 1,
+    minHeight: 0,
+    ...(isWeb ? { userSelect: "none" as const } : null),
+  },
   hscroll: { flex: 1 },
   hContent: { flexGrow: 1, flexDirection: "column" },
   grid: { flexGrow: 1, minHeight: 0 },
@@ -1895,6 +1967,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderRightWidth: StyleSheet.hairlineWidth,
     borderRightColor: theme.colors.border,
     justifyContent: "center",
+    ...(isWeb ? { userSelect: "none" as const } : null),
   },
   cellInner: { flexDirection: "row", alignItems: "center", gap: theme.spacing[1] },
   fkJump: { paddingHorizontal: 2 },
@@ -1907,8 +1980,8 @@ const styles = StyleSheet.create((theme: Theme) => ({
   // value-editor dock.
   cellSelected: {
     borderWidth: theme.borderWidth[1],
-    borderColor: "rgba(255, 255, 255, 0.24)",
-    backgroundColor: "rgba(255, 255, 255, 0.12)",
+    borderColor: theme.colors.accent,
+    backgroundColor: theme.colors.terminal.selectionBackground,
   },
   headerCell: {
     flexDirection: "row",
@@ -1986,14 +2059,17 @@ const styles = StyleSheet.create((theme: Theme) => ({
     flexDirection: "row",
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: theme.colors.border,
+    ...(isWeb ? { userSelect: "none" as const } : null),
   },
   bodyRowAlt: { backgroundColor: theme.colors.surface1 },
-  // A multi-selected row (delete/clone target): a subtle translucent-white overlay
-  // fills the WHOLE row (all cells are transparent, so the row-container background
-  // shows through every column). The gutter adds a thin accent left-border as a
-  // secondary cue. The anchor/active row gets a slightly stronger overlay.
-  selectedRow: { backgroundColor: "rgba(255, 255, 255, 0.08)" },
-  anchorRow: { backgroundColor: "rgba(255, 255, 255, 0.12)" },
+  // A multi-selected row (delete/clone target): a subtle translucent overlay fills
+  // the WHOLE row (all cells are transparent, so the row-container background shows
+  // through every column). Derived from the theme's selection tint
+  // (terminal.selectionBackground) so it's visible on BOTH light (dark overlay) and
+  // dark (light overlay) themes. The gutter adds a thin accent left-border as a
+  // secondary cue. The anchor/active row gets the full-strength tint.
+  selectedRow: { backgroundColor: scaleAlpha(theme.colors.terminal.selectionBackground, 0.6) },
+  anchorRow: { backgroundColor: theme.colors.terminal.selectionBackground },
   deletedRow: { opacity: 0.45 },
   newRow: { backgroundColor: theme.colors.palette.green[100] },
   bodyText: {

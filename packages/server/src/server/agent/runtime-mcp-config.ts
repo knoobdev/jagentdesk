@@ -1,6 +1,6 @@
 import type { AgentSessionConfig, McpServerConfig } from "./agent-sdk-types.js";
 
-const JAGENTDESK_MCP_SERVER_NAME = "jagentdesk";
+export const JAGENTDESK_MCP_SERVER_NAME = "jagentdesk";
 const JAGENTDESK_MCP_PATHNAME = "/mcp/agents";
 
 export function stripInternalJAgentDeskMcpServer(config: AgentSessionConfig): AgentSessionConfig {
@@ -57,7 +57,7 @@ export function withRuntimeJAgentDeskMcpServer(params: {
   };
 }
 
-function isInternalJAgentDeskMcpServer(config: McpServerConfig): boolean {
+export function isInternalJAgentDeskMcpServer(config: McpServerConfig): boolean {
   if (config.type !== "http" && config.type !== "sse") {
     return false;
   }

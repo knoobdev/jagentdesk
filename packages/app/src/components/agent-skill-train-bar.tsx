@@ -12,7 +12,8 @@ import {
   X,
 } from "lucide-react-native";
 import { useSessionStore } from "@/stores/session-store";
-import { useSkillsStore, levelProgress } from "@/stores/skills-store";
+import { useSkillsStore, levelProgress, type Skill } from "@/stores/skills-store";
+import { useAgentSkillsStore, selectAttachedSkillIds } from "@/stores/agent-skills-store";
 import type { StreamItem } from "@/types/stream";
 import type { Theme } from "@/styles/theme";
 
@@ -27,8 +28,6 @@ const ThemedX = withUnistyles(X);
 const accentColor = (theme: Theme) => ({ color: theme.colors.accent });
 const accentFgColor = (theme: Theme) => ({ color: theme.colors.accentForeground });
 const mutedColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
-
-const SKILL_ID_LABEL = "jagentdesk.skill.id";
 
 interface LatestReply {
   text: string;
@@ -56,25 +55,51 @@ function conciseLessonFrom(text: string): string {
   return firstSentence.length > 160 ? `${firstSentence.slice(0, 159)}…` : firstSentence;
 }
 
+/** One selectable skill in the train bar's picker (shown when the agent uses
+ * more than one skill). Extracted so its onPress is a stable callback. */
+function SkillChip({
+  skill,
+  active,
+  onSelect,
+}: {
+  skill: Skill;
+  active: boolean;
+  onSelect: (skillId: string) => void;
+}) {
+  const handlePress = useCallback(() => onSelect(skill.id), [onSelect, skill.id]);
+  return (
+    <Pressable
+      style={active ? [styles.skillChip, styles.skillChipActive] : styles.skillChip}
+      onPress={handlePress}
+    >
+      <Text style={active ? styles.skillChipTextActive : styles.skillChipText} numberOfLines={1}>
+        {skill.icon} {skill.name}
+      </Text>
+    </Pressable>
+  );
+}
+
 /**
- * A floating bar shown inside an agent conversation when that agent carries a
- * Skill (the jagentdesk.skill.id label). Training happens from the REAL
- * conversation — no hand-typed instructions:
+ * A floating bar shown inside an agent conversation when that agent is using one
+ * or more Skills. Since the B3 redesign a skill is ATTACHED to an existing agent
+ * (composer skill picker → useAgentSkillsStore) or auto-loaded by message match —
+ * it is no longer a label on a skill-spawned agent — so the trainable skills are
+ * the union of the agent's attached + injected skill ids, resolved against the
+ * daemon-owned skills store. Training happens from the REAL conversation — no
+ * hand-typed instructions:
  *  - 👍 / 👎 on the agent's latest reply: 👍 captures that reply's text as approved
  *    knowledge (learnFromMessage, rating "up"); 👎 records a negative run.
  *  - "Suggested lesson": the agent proposes a concise lesson derived from its last
  *    reply; Approve keeps it (proposeLearning + resolveProposedLearning), Reject drops it.
+ * When several skills are active the user picks which one this reply trains.
  */
 export function AgentSkillTrainBar({ serverId, agentId }: { serverId: string; agentId: string }) {
-  const skillId = useSessionStore(
-    (state) => state.sessions[serverId]?.agents.get(agentId)?.labels[SKILL_ID_LABEL],
-  );
   const streamItems = useSessionStore((state) =>
     state.sessions[serverId]?.agentStreamTail?.get(agentId),
   );
-  const skill = useSkillsStore((s) =>
-    skillId ? s.skills.find((x) => x.id === skillId) : undefined,
-  );
+  const skills = useSkillsStore((s) => s.skills);
+  const attachedIds = useAgentSkillsStore(selectAttachedSkillIds(agentId));
+  const injectedIds = useAgentSkillsStore((s) => s.injected[agentId]);
   const learnFromMessage = useSkillsStore((s) => s.learnFromMessage);
   const proposeLearning = useSkillsStore((s) => s.proposeLearning);
   const resolveProposedLearning = useSkillsStore((s) => s.resolveProposedLearning);
@@ -83,6 +108,20 @@ export function AgentSkillTrainBar({ serverId, agentId }: { serverId: string; ag
   const [flash, setFlash] = useState<string | null>(null);
   // messageId of the reply whose proposed lesson the user already acted on/dismissed.
   const [proposalDoneFor, setProposalDoneFor] = useState<string | null>(null);
+  // Which active skill the reply trains when the agent uses more than one.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // Skills active on this agent: manually attached ∪ auto-loaded (injected),
+  // resolved against the daemon-owned list (drops any that no longer exist).
+  const activeSkills = useMemo<Skill[]>(() => {
+    const ids = Array.from(new Set<string>([...attachedIds, ...(injectedIds ?? [])]));
+    return ids.map((id) => skills.find((s) => s.id === id)).filter((s): s is Skill => Boolean(s));
+  }, [attachedIds, injectedIds, skills]);
+
+  const skill = useMemo<Skill | undefined>(() => {
+    if (activeSkills.length === 0) return undefined;
+    return activeSkills.find((s) => s.id === selectedId) ?? activeSkills[0];
+  }, [activeSkills, selectedId]);
 
   const latest = useMemo(() => latestReplyOf(streamItems), [streamItems]);
 
@@ -141,6 +180,18 @@ export function AgentSkillTrainBar({ serverId, agentId }: { serverId: string; ag
         {flash ? <Text style={styles.flash}>{flash}</Text> : null}
         {expanded ? (
           <View style={styles.body}>
+            {activeSkills.length > 1 ? (
+              <View style={styles.skillPicker}>
+                {activeSkills.map((s) => (
+                  <SkillChip
+                    key={s.id}
+                    skill={s}
+                    active={s.id === skill.id}
+                    onSelect={setSelectedId}
+                  />
+                ))}
+              </View>
+            ) : null}
             <Text style={styles.caption}>Latest reply</Text>
             {latest ? (
               <Text style={styles.replyPreview} numberOfLines={3}>
@@ -225,6 +276,22 @@ const styles = StyleSheet.create((theme: Theme) => ({
   level: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundExtraMuted },
   flash: { fontSize: theme.fontSize.xs, color: theme.colors.accent },
   body: { gap: theme.spacing[2] },
+  skillPicker: { flexDirection: "row", flexWrap: "wrap", gap: theme.spacing[1.5] },
+  skillChip: {
+    borderRadius: theme.borderRadius.sm,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: 2,
+    maxWidth: 150,
+  },
+  skillChipActive: { borderColor: theme.colors.accent, backgroundColor: theme.colors.surface2 },
+  skillChipText: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
+  skillChipTextActive: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.foreground,
+  },
   caption: {
     fontSize: theme.fontSize.xs,
     fontWeight: theme.fontWeight.semibold,

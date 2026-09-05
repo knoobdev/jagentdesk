@@ -39,6 +39,7 @@ import {
   type ResolveAgentDefaultModeInput,
 } from "../agent-sdk-types.js";
 import { importSessionFromPersistence } from "../provider-session-import.js";
+import { isInternalJAgentDeskMcpServer } from "../runtime-mcp-config.js";
 import { runProviderRefreshActivity } from "../provider-refresh-deadline.js";
 import type { Logger } from "pino";
 
@@ -817,6 +818,7 @@ interface CodexMcpServerConfig {
   args?: string[];
   env?: Record<string, string>;
   tool_timeout_sec?: number;
+  default_tools_approval_mode?: "auto" | "prompt" | "writes" | "approve";
 }
 
 function toCodexMcpConfig(config: McpServerConfig): CodexMcpServerConfig {
@@ -3880,7 +3882,10 @@ export class CodexAppServerAgentSession implements AgentSession {
         }
         const response = await this.client.request("thread/resume", params);
         this.rememberResolvedSandboxPolicy(response);
-        this.logger.info({ threadId }, "Unarchived Codex thread to restore active JAgentDesk agent");
+        this.logger.info(
+          { threadId },
+          "Unarchived Codex thread to restore active JAgentDesk agent",
+        );
         return;
       }
       this.logger.warn({ error, threadId }, "Failed to resume persisted Codex thread");
@@ -5082,7 +5087,19 @@ export class CodexAppServerAgentSession implements AgentSession {
     if (this.config.mcpServers) {
       const mcpServers: Record<string, CodexMcpServerConfig> = {};
       for (const [name, serverConfig] of Object.entries(this.config.mcpServers)) {
-        mcpServers[name] = toCodexMcpConfig(serverConfig);
+        const codexServer = toCodexMcpConfig(serverConfig);
+        // The internal JAgentDesk MCP server (sql_query/sql_exec/kubectl_*/…) is
+        // trusted: read-only tools are auto-approved by design and write tools
+        // gate themselves through the daemon's own permission card
+        // (requestHostToolPermission). Codex must not add a second approval
+        // layer — otherwise every internal tool call raises a redundant
+        // `mcpServer/elicitation/request`, which for user-facing DB/cluster
+        // chats loops indefinitely (the tool never runs). Tell Codex to
+        // auto-approve this server so its own approval flow stays authoritative.
+        if (isInternalJAgentDeskMcpServer(serverConfig)) {
+          codexServer.default_tools_approval_mode = "auto";
+        }
+        mcpServers[name] = codexServer;
       }
       innerConfig.mcp_servers = mcpServers;
     }

@@ -15,6 +15,8 @@ import type { AgentManager } from "./agent/agent-manager.js";
 import type { AgentStorage } from "./agent/agent-storage.js";
 import { BrowserToolsBroker } from "./browser-tools/broker.js";
 import type { CheckoutDiffManager } from "./checkout-diff-manager.js";
+import type { ClusterRegistry } from "./cluster/cluster-registry.js";
+import type { DatabaseRegistry } from "./database/database-registry.js";
 import type { FileBackedChatService } from "./chat/chat-service.js";
 import type { DaemonConfigStore } from "./daemon-config-store.js";
 import type { DownloadTokenStore } from "./file-download/token-store.js";
@@ -309,6 +311,7 @@ function createVoiceAssistantWebSocketServer(params: {
     undefined,
     createStub<FileBackedChatService>({}),
     createStub<LoopService>({}),
+    createStub<ClusterRegistry>({}),
     createStub<ScheduleService>({}),
     createStub<CheckoutDiffManager>({
       subscribe: () => {},
@@ -334,6 +337,12 @@ function createVoiceAssistantWebSocketServer(params: {
     undefined,
     undefined,
     broker,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    createStub<DatabaseRegistry>({}),
   );
 }
 
