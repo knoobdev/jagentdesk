@@ -1,6 +1,6 @@
 {
   "name": "@jagentdesk/server",
-  "version": "0.0.12",
+  "version": "0.0.13",
   "description": "JAgentDesk backend server",
   "files": [
     "dist/server",
@@ -72,10 +72,10 @@
     "@babel/parser": "^7.29.0",
     "@clickhouse/client": "^1.23.1",
     "@isaacs/ttlcache": "^2.1.4",
-    "@jagentdesk/client": "0.0.12",
-    "@jagentdesk/highlight": "0.0.12",
-    "@jagentdesk/plugin": "0.0.12",
-    "@jagentdesk/protocol": "0.0.12",
+    "@jagentdesk/client": "0.0.13",
+    "@jagentdesk/highlight": "0.0.13",
+    "@jagentdesk/plugin": "0.0.13",
+    "@jagentdesk/protocol": "0.0.13",
     "@kubernetes/client-node": "^1.4.0",
     "@modelcontextprotocol/sdk": "^1.20.1",
     "@opencode-ai/sdk": "1.14.46",
