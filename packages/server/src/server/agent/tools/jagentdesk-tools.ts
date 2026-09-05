@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { ensureValidJson } from "../../json-utils.js";
 import type { Logger } from "pino";
@@ -101,6 +102,8 @@ import type {
 } from "../../orchestration/runtime.js";
 import type { ClusterRegistry } from "../../cluster/cluster-registry.js";
 import type { DatabaseRegistry } from "../../database/database-registry.js";
+import type { SkillsStorage } from "../../skills/skills-storage.js";
+import type { Skill } from "@jagentdesk/protocol/skills";
 import type { AgentPermissionResponse } from "../agent-sdk-types.js";
 
 export interface JAgentDeskToolHostDependencies {
@@ -153,6 +156,10 @@ export interface JAgentDeskToolHostDependencies {
   orchestrationRuntime?: OrchestrationRuntime;
   clusterRegistry?: ClusterRegistry;
   databaseRegistry?: DatabaseRegistry;
+  // Daemon-owned skill store. Lets a normal chat agent author a brand-new named
+  // skill mid-conversation; the store's onChange broadcast (status:skills_changed)
+  // then surfaces it live in the Skills screen + composer picker on every device.
+  skillsStorage?: Pick<SkillsStorage, "get" | "mutate">;
   requestHostToolPermission?: (
     agentId: string,
     request: {
@@ -907,6 +914,151 @@ function registerSqlTools(params: {
             text: JSON.stringify({ count: summary.length, databases: summary }, null, 2),
           },
         ],
+      };
+    },
+  );
+}
+
+function registerSkillsTools(params: {
+  registerTool: (
+    name: string,
+    config: JAgentDeskToolConfig,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Tool handlers are schema-validated at registration boundaries.
+    handler: (input: any, context: JAgentDeskToolExecutionContext) => Promise<JAgentDeskToolResult>,
+  ) => void;
+  options: JAgentDeskToolHostDependencies;
+}): void {
+  const { registerTool, options } = params;
+
+  registerTool(
+    "create_skill",
+    {
+      title: "Create skill",
+      description:
+        "Author a brand-new named JAgentDesk skill (a reusable, trainable assistant) from a name plus instructions. Use this when the user asks you to create/make a skill. The new skill appears immediately in the Skills screen and the composer skill picker on every connected device. Auto-approved.",
+      inputSchema: {
+        name: z
+          .string()
+          .trim()
+          .min(1, "name is required")
+          .max(60, "name must be 60 characters or fewer")
+          .describe("Short skill name shown in the Skills screen and composer picker."),
+        instructions: z
+          .string()
+          .trim()
+          .min(1, "instructions are required")
+          .describe(
+            "The skill's system prompt: what it does and how it should behave when attached.",
+          ),
+        description: z
+          .string()
+          .trim()
+          .max(280)
+          .optional()
+          .describe("One-line summary shown under the name."),
+        icon: z.string().trim().max(8).optional().describe("Optional emoji icon. Defaults to ✦."),
+        tags: z.array(z.string().trim().min(1)).optional().describe("Optional freeform tags."),
+      },
+      outputSchema: {
+        id: z.string(),
+        name: z.string(),
+      },
+    },
+    async (input: {
+      name: string;
+      instructions: string;
+      description?: string;
+      icon?: string;
+      tags?: string[];
+    }) => {
+      if (!options.skillsStorage) {
+        return {
+          content: [{ type: "text", text: "Skills storage is not configured" }],
+          isError: true,
+        };
+      }
+      const now = Date.now();
+      // The daemon reducer (applySkillMutation "add") forces progress fields to
+      // baseline, so only presentation fields here are trusted. We still supply a
+      // full Skill to satisfy the schema; the id is generated daemon-side.
+      const skill: Skill = {
+        id: `skl_${randomUUID().replace(/-/g, "").slice(0, 12)}`,
+        name: input.name.trim(),
+        icon: input.icon?.trim() || "✦",
+        description: input.description?.trim() ?? "",
+        instructions: input.instructions.trim(),
+        tags: input.tags?.map((tag) => tag.trim()).filter(Boolean) ?? [],
+        status: "training",
+        xp: 0,
+        runs: 0,
+        approvals: 0,
+        consecutiveApprovals: 0,
+        examples: [],
+        learned: [],
+        createdAt: now,
+        updatedAt: now,
+      };
+      const skills = await options.skillsStorage.mutate({ op: "add", skill });
+      const created = skills.find((existing) => existing.id === skill.id) ?? skill;
+      return {
+        content: [{ type: "text", text: `Created skill "${created.name}" (${created.id})` }],
+        structuredContent: ensureValidJson({ id: created.id, name: created.name }),
+      };
+    },
+  );
+
+  registerTool(
+    "update_skill",
+    {
+      title: "Update skill",
+      description:
+        "Update an existing skill's name, description, instructions, icon, or tags by id (use the id returned by create_skill or shown in the Skills screen). Changes appear immediately in the Skills screen and composer on every device. Auto-approved.",
+      inputSchema: {
+        id: z.string().min(1).describe("Skill id to update."),
+        name: z.string().trim().min(1).max(60).optional(),
+        instructions: z.string().trim().min(1).optional(),
+        description: z.string().trim().max(280).optional(),
+        icon: z.string().trim().max(8).optional(),
+        tags: z.array(z.string().trim().min(1)).optional(),
+      },
+      outputSchema: {
+        id: z.string(),
+        name: z.string(),
+      },
+    },
+    async (input: {
+      id: string;
+      name?: string;
+      instructions?: string;
+      description?: string;
+      icon?: string;
+      tags?: string[];
+    }) => {
+      if (!options.skillsStorage) {
+        return {
+          content: [{ type: "text", text: "Skills storage is not configured" }],
+          isError: true,
+        };
+      }
+      const existing = options.skillsStorage.get().find((skill) => skill.id === input.id);
+      if (!existing) {
+        return {
+          content: [{ type: "text", text: `Skill not found: ${input.id}` }],
+          isError: true,
+        };
+      }
+      const patch = {
+        ...(input.name !== undefined ? { name: input.name } : {}),
+        ...(input.icon !== undefined ? { icon: input.icon } : {}),
+        ...(input.description !== undefined ? { description: input.description } : {}),
+        ...(input.instructions !== undefined ? { instructions: input.instructions } : {}),
+        ...(input.tags !== undefined ? { tags: input.tags } : {}),
+      };
+      const skills = await options.skillsStorage.mutate({ op: "update", id: input.id, patch });
+      const updated = skills.find((skill) => skill.id === input.id) ?? existing;
+      return {
+        content: [{ type: "text", text: `Updated skill "${updated.name}" (${updated.id})` }],
+        structuredContent: ensureValidJson({ id: updated.id, name: updated.name }),
       };
     },
   );
@@ -1797,6 +1949,10 @@ export function createJAgentDeskToolCatalog(
       resolveCallerAgent,
     });
   }
+
+  // Skill authoring is a normal chat-agent capability (not gated behind a
+  // workspace/DB/cluster), so it lives here after the voice-only early return.
+  registerSkillsTools({ registerTool, options });
 
   registerTool(
     "create_workspace",

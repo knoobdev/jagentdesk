@@ -180,6 +180,20 @@ export class UsageHistoryStorage {
     this.notify();
   }
 
+  /**
+   * Zero the whole usage time-series AND the lifetime baseline. Both the daily
+   * rollups and the one-time baseline are cleared, and the baseline is set to an
+   * empty (non-null) total rather than null so a later `seedBaselineIfEmpty` on
+   * restart does NOT re-seed it from live agents' `usageTotals` — the reset is
+   * durable. Persists and notifies listeners so every viewer sees zeros.
+   */
+  clear(): void {
+    this.byDate.clear();
+    this.baseline = emptyLifetime();
+    this.schedulePersist();
+    this.notify();
+  }
+
   /** Await any in-flight persist (used by tests to avoid write/cleanup races). */
   async flush(): Promise<void> {
     await this.persistQueue;

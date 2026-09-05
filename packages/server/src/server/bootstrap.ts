@@ -1413,6 +1413,7 @@ export async function createJAgentDeskDaemon(
     orchestrationRuntime,
     clusterRegistry,
     databaseRegistry,
+    skillsStorage,
     requestHostToolPermission: (agentId, req) =>
       agentManager.requestHostToolPermission(agentId, req),
     logger,

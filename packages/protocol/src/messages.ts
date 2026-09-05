@@ -27,6 +27,8 @@ import {
 import {
   UsageHistoryGetRequestSchema,
   UsageHistoryGetResponseSchema,
+  UsageHistoryResetRequestSchema,
+  UsageHistoryResetResponseSchema,
   UsageChangedStatusPayloadSchema,
 } from "./usage-history.js";
 import {
@@ -3233,6 +3235,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   SkillsGetRequestSchema,
   SkillsMutateRequestSchema,
   UsageHistoryGetRequestSchema,
+  UsageHistoryResetRequestSchema,
   DictationStreamStartMessageSchema,
   DictationStreamChunkMessageSchema,
   DictationStreamFinishMessageSchema,
@@ -6426,6 +6429,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   SkillsGetResponseSchema,
   SkillsMutateResponseSchema,
   UsageHistoryGetResponseSchema,
+  UsageHistoryResetResponseSchema,
   BrowserAutomationExecuteRequestSchema,
   BrowserScreenshotResponseSchema,
   BrowserListResponseSchema,

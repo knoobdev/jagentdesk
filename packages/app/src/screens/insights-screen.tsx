@@ -1,10 +1,12 @@
 import { useCallback, useMemo, useState } from "react";
 import { ScrollView, Text, View } from "react-native";
-import { BarChart3, Coins, Cpu, RefreshCw, Users } from "lucide-react-native";
+import { BarChart3, Coins, Cpu, RefreshCw, Trash2, Users } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
 import { useHostRouteServerId } from "@/navigation/host-route-context";
+import { useHostRuntimeClient } from "@/runtime/host-runtime";
+import { confirmDialog } from "@/utils/confirm-dialog";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { formatTokenCount } from "@/components/context-window-meter.utils";
 import { Button } from "@/components/ui/button";
@@ -235,12 +237,11 @@ export function InsightsScreen() {
   const lifetimeTokens = lifetime.inputTokens + lifetime.cachedInputTokens + lifetime.outputTokens;
   const lifetimeModels = useMemo(() => lifetimeModelRows(lifetime), [lifetime]);
 
-  // Refresh re-pulls the daemon-persisted usage history for this host. The daemon
-  // owns usage totals and exposes no reset RPC, so this is a pure refetch (not a
-  // destructive clear) — it re-syncs the lifetime/by-model figures on demand
-  // instead of only when the `status:usage_changed` push arrives. Per-agent views
-  // read live from the session store and update on their own.
+  // Refresh re-pulls the daemon-persisted usage history for this host — a pure
+  // refetch that re-syncs the lifetime/by-model figures on demand instead of only
+  // when the `status:usage_changed` push arrives.
   const queryClient = useQueryClient();
+  const client = useHostRuntimeClient(serverId);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const handleRefresh = useCallback(() => {
     if (!serverId) {
@@ -251,6 +252,36 @@ export function InsightsScreen() {
       .refetchQueries({ queryKey: usageHistoryQueryKey(serverId) })
       .finally(() => setIsRefreshing(false));
   }, [queryClient, serverId]);
+
+  // Reset DESTRUCTIVELY zeroes the daemon-persisted usage/cost history (time-series
+  // + lifetime baseline) via the usage.history.reset RPC, then refetches so the
+  // dashboard shows 0. The daemon broadcasts status:usage_changed on reset, so
+  // every other viewer drops to zero too. Guarded behind a confirm dialog because
+  // it cannot be undone. Per-agent live views (Top agents, Context) read
+  // server-owned per-agent totals from the session store and are not affected.
+  const [isResetting, setIsResetting] = useState(false);
+  const handleReset = useCallback(async () => {
+    if (!serverId || !client) {
+      return;
+    }
+    const confirmed = await confirmDialog({
+      title: "Reset usage statistics?",
+      message: "This clears all usage & cost history.",
+      confirmLabel: "Reset",
+      cancelLabel: "Cancel",
+      destructive: true,
+    });
+    if (!confirmed) {
+      return;
+    }
+    setIsResetting(true);
+    try {
+      await client.resetUsageHistory();
+      await queryClient.refetchQueries({ queryKey: usageHistoryQueryKey(serverId) });
+    } finally {
+      setIsResetting(false);
+    }
+  }, [client, queryClient, serverId]);
 
   const contentContainerStyle = useMemo(
     () => [styles.content, isCompact ? { paddingTop: insets.top } : null],
@@ -279,17 +310,30 @@ export function InsightsScreen() {
             <ThemedBarChart size={22} uniProps={accentColor} />
             <Text style={styles.header}>Usage &amp; Cost</Text>
           </View>
-          <Button
-            variant="outline"
-            size="sm"
-            leftIcon={RefreshCw}
-            onPress={handleRefresh}
-            loading={isRefreshing}
-            disabled={!serverId}
-            testID="insights-refresh"
-          >
-            Refresh
-          </Button>
+          <View style={styles.headerActions}>
+            <Button
+              variant="outline"
+              size="sm"
+              leftIcon={RefreshCw}
+              onPress={handleRefresh}
+              loading={isRefreshing}
+              disabled={!serverId || isResetting}
+              testID="insights-refresh"
+            >
+              Refresh
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              leftIcon={Trash2}
+              onPress={handleReset}
+              loading={isResetting}
+              disabled={!serverId || !client || isRefreshing}
+              testID="insights-reset"
+            >
+              Reset
+            </Button>
+          </View>
         </View>
         <Text style={styles.hint}>
           Aggregated live from every active agent session on this host — where your tokens go and
@@ -387,6 +431,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     alignItems: "center",
     gap: theme.spacing[2],
   },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: theme.spacing[2] },
   header: {
     fontSize: theme.fontSize["2xl"],
     fontWeight: theme.fontWeight.bold,

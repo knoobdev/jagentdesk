@@ -5030,6 +5030,18 @@ export class DaemonClient {
     });
   }
 
+  // Destructive: zero the daemon's persisted usage/cost history + lifetime
+  // baseline. Resolves with the post-reset (empty) state; the daemon also
+  // broadcasts status:usage_changed so every other viewer drops to zero.
+  async resetUsageHistory(
+    requestId?: string,
+  ): Promise<{ requestId: string; days: UsageDayRollup[]; lifetime: LifetimeUsage }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "usage.history.reset.request" },
+    });
+  }
+
   // Browser screencast (view-only): fetch the current frame of a browser tab. Polled by the
   // mobile BrowserPane to render a live view of the desktop-hosted browser.
   async requestBrowserScreenshot(input: {

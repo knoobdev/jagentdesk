@@ -88,6 +88,25 @@ export const UsageHistoryGetResponseSchema = z.object({
 });
 export type UsageHistoryGetRequest = z.infer<typeof UsageHistoryGetRequestSchema>;
 
+// ── RPC: usage.history.reset ─────────────────────────────────────────────────
+// Destructively zeroes the daemon-persisted usage time-series AND the lifetime
+// baseline. The response mirrors usage.history.get and carries the post-reset
+// (empty) state so the client can render zeros without a second round-trip; the
+// daemon also broadcasts status:usage_changed so every other viewer updates.
+export const UsageHistoryResetRequestSchema = z.object({
+  type: z.literal("usage.history.reset.request"),
+  requestId: z.string(),
+});
+export const UsageHistoryResetResponseSchema = z.object({
+  type: z.literal("usage.history.reset.response"),
+  payload: z.object({
+    requestId: z.string(),
+    days: z.array(UsageDayRollupSchema),
+    lifetime: LifetimeUsageSchema,
+  }),
+});
+export type UsageHistoryResetRequest = z.infer<typeof UsageHistoryResetRequestSchema>;
+
 // ── pushEvent: status:usage_changed ──────────────────────────────────────────
 export const UsageChangedStatusPayloadSchema = z.object({
   status: z.literal("usage_changed"),

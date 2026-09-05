@@ -218,7 +218,19 @@ import { FileBackedChatService } from "./chat/chat-service.js";
 import { LoopService } from "./loop-service.js";
 import type { SkillsStorage } from "./skills/skills-storage.js";
 import type { UsageHistoryStorage } from "./usage/usage-history-storage.js";
+import type { LifetimeUsage } from "@jagentdesk/protocol/usage-history";
 import { ScheduleService } from "./schedule/service.js";
+
+// Zeroed lifetime total, emitted when no usage-history store is wired (and as the
+// post-reset shape). Kept module-scoped so the get + reset handlers share one.
+const EMPTY_LIFETIME_USAGE: LifetimeUsage = {
+  inputTokens: 0,
+  cachedInputTokens: 0,
+  outputTokens: 0,
+  totalCostUsd: 0,
+  turns: 0,
+  byModel: {},
+};
 import {
   createGitHubService,
   GitHubAuthenticationError,
@@ -2328,24 +2340,32 @@ export class Session {
   }
 
   private dispatchUsageMessage(msg: SessionInboundMessage): Promise<void> | undefined {
-    if (msg.type !== "usage.history.get.request") {
+    if (msg.type === "usage.history.get.request") {
+      this.emit({
+        type: "usage.history.get.response",
+        payload: {
+          requestId: msg.requestId,
+          days: this.usageHistory?.get() ?? [],
+          lifetime: this.usageHistory?.lifetime() ?? EMPTY_LIFETIME_USAGE,
+        },
+      });
       return undefined;
     }
-    this.emit({
-      type: "usage.history.get.response",
-      payload: {
-        requestId: msg.requestId,
-        days: this.usageHistory?.get() ?? [],
-        lifetime: this.usageHistory?.lifetime() ?? {
-          inputTokens: 0,
-          cachedInputTokens: 0,
-          outputTokens: 0,
-          totalCostUsd: 0,
-          turns: 0,
-          byModel: {},
+    if (msg.type === "usage.history.reset.request") {
+      // Destructive: zero the persisted time-series + lifetime baseline. clear()
+      // also notifies listeners so the daemon broadcasts status:usage_changed and
+      // every other viewer's dashboard drops to zero too.
+      this.usageHistory?.clear();
+      this.emit({
+        type: "usage.history.reset.response",
+        payload: {
+          requestId: msg.requestId,
+          days: this.usageHistory?.get() ?? [],
+          lifetime: this.usageHistory?.lifetime() ?? EMPTY_LIFETIME_USAGE,
         },
-      },
-    });
+      });
+      return undefined;
+    }
     return undefined;
   }
 
