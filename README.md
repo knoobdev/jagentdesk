@@ -52,6 +52,23 @@ with a few deliberate boundaries:
 
 ## ✨ New in this release
 
+### Agentic browser — self-authored extensions, more tools & fixes (v0.2.1)
+
+- **Agents can author & run their own Chromium extensions** — `browser_scaffold_extension`
+  writes a working MV3 skeleton, `browser_load_extension` loads it, and `browser_cdp` runs
+  raw Chrome DevTools Protocol (inject before page load to bypass CSP, intercept requests,
+  drive any DevTools domain) — for event-driven page automation instead of cron polling.
+- **Fuller fingerprint‑profile control** — `browser_profile_update` / `browser_profile_delete`
+  tools, and the Settings card now shows each profile's fingerprint, lets you set a **proxy**
+  (server + auth), toggle spoofing, and cycle the WebRTC policy.
+- **Browser tools are ON by default.**
+- **Fixes:** editing a fingerprint profile no longer silently disables browser tools; the
+  profiles card layout is fixed; default starter skills are gone; the database grid clears its
+  selection on tap‑outside on mobile too; and mobile Tailscale no longer sticks on
+  "reconnecting" after the screen was off.
+
+See [CHANGELOG.md](CHANGELOG.md) for the full v0.2.1 notes.
+
 ### Agentic browser — fingerprint profiles & full customisation (v0.2.0)
 
 The agentic browser gains a coherent anti‑detect **profile system** so the agent (or you) can

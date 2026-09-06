@@ -5,6 +5,46 @@ own release line (now `0.2.0`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
 
+## v0.2.1 — 2026-09-06
+
+Agentic-browser follow-ups: more agent tools, browser tools on by default, and a
+batch of fixes found testing v0.2.0.
+
+### Added
+
+- **Agent browser customization tools** — `browser_cdp` (raw Chrome DevTools
+  Protocol: inject scripts before page load to bypass CSP, intercept requests, drive
+  any DevTools domain), `browser_scaffold_extension` (write a working MV3 extension
+  skeleton) + `browser_load_extension` (load it), so an agent can author and run its
+  own Chromium extension for event-driven page work instead of cron polling.
+- **More fingerprint-profile tools** — `browser_profile_update` (change proxy /
+  timezone / locale / extensions / init scripts / spoofing / WebRTC on an existing
+  profile) and `browser_profile_delete`.
+- **Fingerprint profiles UI** now shows each profile's fingerprint (User-Agent,
+  WebGL, timezone, screen, seeds, …), lets you configure a **proxy** (server + auth),
+  toggle spoofing, and cycle the WebRTC policy.
+- **Browser tools are ON by default** — agents can drive the agentic browser out of
+  the box (set `browserTools.enabled: false` to turn off).
+
+### Fixed
+
+- **Browser tools no longer disable themselves** — editing/selecting/deleting a
+  fingerprint profile patched the daemon config in a way that silently reset
+  `browserTools.enabled` to false (a `.partial()` schema still applied the field
+  default), so any action in the profiles box turned browser tools off. Config
+  patches now leave `enabled` untouched unless explicitly set.
+- **Fingerprint profiles card** layout/text no longer overflows.
+- **Default/starter skills removed** — the store no longer seeds K8s Doctor / PR
+  Reviewer / E2E Browser Tester, and pristine leftovers from older builds are
+  removed once on upgrade (a starter you trained is kept). `create_skill`'s
+  description now steers agents to create a JAgentDesk skill (shown in the Skills
+  screen) instead of a model-native skill file.
+- **Database grid — clear selection by tapping outside** now works on mobile
+  (native tap), not just desktop.
+- **Mobile Tailscale reconnect** — returning to the app after the screen was off no
+  longer sticks on "reconnecting"; a resume now force-reconnects (drops the stale
+  socket + frozen backoff timer) instead of waiting on a suspended timer.
+
 ## v0.2.0 — 2026-09-06
 
 The agentic-browser anti-detect release: coherent fingerprint profiles the agent
