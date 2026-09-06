@@ -1278,7 +1278,7 @@ function registerBrowserProfileTools(params: {
                 loaded: path,
                 profileId: profile.id,
                 extensions: profile.extensions,
-                note: "Open or reload a browser tab for the extension's content scripts to run.",
+                note: "Open browser tabs are reloaded automatically so the extension's content scripts inject; open a new tab if none exists yet.",
               },
               null,
               2,

@@ -702,7 +702,31 @@ ipcMain.handle(
     const browserSession = session.fromPartition(JAGENTDESK_BROWSER_PROFILE_PARTITION);
     await applyProfileProxyToSession(browserSession, profile);
     const extensions = await loadProfileExtensions(browserSession, profile);
-    log.info("[browser-stealth] active profile set", { profileId: profile.id });
+    // Content scripts only inject on a navigation AFTER the extension is loaded, so
+    // an already-open guest won't get them until it reloads. Reload the open browser
+    // guests on this partition so a just-loaded extension takes effect immediately.
+    if (extensions.length > 0) {
+      for (const contents of webContents.getAllWebContents()) {
+        if (
+          !contents.isDestroyed() &&
+          contents.getType() === "webview" &&
+          contents.session === browserSession
+        ) {
+          try {
+            contents.reload();
+          } catch (error) {
+            log.warn("[browser-stealth] guest reload after extension load failed", {
+              webContentsId: contents.id,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+      }
+    }
+    log.info("[browser-stealth] active profile set", {
+      profileId: profile.id,
+      extensions: extensions.length,
+    });
     return { ok: true, extensions };
   },
 );
