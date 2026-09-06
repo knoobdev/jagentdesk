@@ -468,7 +468,61 @@ const commandHandlers: Record<BrowserAutomationCommand["command"], CommandHandle
     fail(requestId, "browser_unsupported", "browser_resize is handled by the app runtime."),
   close_tab: ({ requestId }) =>
     fail(requestId, "browser_unsupported", "browser_close_tab is handled by the app runtime."),
+  cdp: ({ command, requestId, workspaceId, registry }) => {
+    const cdpCommand = command as Extract<BrowserAutomationCommand, { command: "cdp" }>;
+    return executeCdp(
+      requestId,
+      workspaceId,
+      cdpCommand.args.browserId,
+      cdpCommand.args.method,
+      cdpCommand.args.params,
+      registry,
+    );
+  },
 };
+
+// Raw CDP passthrough: send an arbitrary DevTools method to the tab's debugger and
+// return its JSON result. The escape hatch that lets an agent fully drive the
+// browser (inject init scripts, author/attach extensions, use any CDP domain).
+async function executeCdp(
+  requestId: string,
+  workspaceId: string | undefined,
+  browserId: string,
+  method: string,
+  params: Record<string, unknown> | undefined,
+  registry: BrowserRegistry,
+): Promise<AutomationCommandPayload> {
+  const target = resolveTabTarget({ requestId, workspaceId, browserId, registry });
+  if ("ok" in target) {
+    return target;
+  }
+  if (!target.contents.sendDebugCommand) {
+    return fail(requestId, "browser_unsupported", "Raw CDP is not supported by this browser host.");
+  }
+  try {
+    const result = await target.contents.sendDebugCommand(method, params ?? {});
+    let resultJson: string;
+    try {
+      resultJson = JSON.stringify(result ?? null);
+    } catch {
+      resultJson = '"[unserialisable CDP result]"';
+    }
+    if (resultJson.length > 200_000) {
+      resultJson = `${resultJson.slice(0, 200_000)}…`;
+    }
+    return {
+      requestId,
+      ok: true,
+      result: { command: "cdp", browserId: target.browserId, resultJson },
+    };
+  } catch (error) {
+    return fail(
+      requestId,
+      "browser_unknown_error",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+}
 
 interface ResolvedTabTarget {
   browserId: string;

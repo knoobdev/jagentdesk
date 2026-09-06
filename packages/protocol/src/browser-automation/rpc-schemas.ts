@@ -43,6 +43,7 @@ export const BROWSER_AUTOMATION_COMMAND_NAMES = [
   "scroll",
   "resize",
   "close_tab",
+  "cdp",
 ] as const;
 
 export const BrowserAutomationCommandNameSchema = z.enum(BROWSER_AUTOMATION_COMMAND_NAMES);
@@ -231,6 +232,18 @@ export const BrowserAutomationCloseTabCommandSchema = z.object({
   args: BrowserAutomationTabTargetSchema,
 });
 
+// Raw Chrome DevTools Protocol escape hatch: send an arbitrary CDP method to a tab
+// (e.g. Page.addScriptToEvaluateOnNewDocument, Network.setUserAgentOverride,
+// Runtime.evaluate, Target.*). Lets the agent fully customise the browser beyond the
+// fixed command set — write extensions, inject scripts, drive DevTools domains.
+export const BrowserAutomationCdpCommandSchema = z.object({
+  command: z.literal("cdp"),
+  args: BrowserAutomationTabTargetSchema.extend({
+    method: z.string().min(1),
+    params: z.record(z.string(), z.unknown()).optional(),
+  }),
+});
+
 export const BrowserAutomationCommandSchema = z.discriminatedUnion("command", [
   BrowserAutomationListTabsCommandSchema,
   BrowserAutomationNewTabCommandSchema,
@@ -254,6 +267,7 @@ export const BrowserAutomationCommandSchema = z.discriminatedUnion("command", [
   BrowserAutomationScrollCommandSchema,
   BrowserAutomationResizeCommandSchema,
   BrowserAutomationCloseTabCommandSchema,
+  BrowserAutomationCdpCommandSchema,
 ]);
 
 export const BrowserAutomationTabInfoSchema = z.object({
@@ -450,6 +464,12 @@ export const BrowserAutomationResizeResultSchema = z.object({
   height: z.number().int().positive(),
 });
 
+export const BrowserAutomationCdpResultSchema = z.object({
+  command: z.literal("cdp"),
+  browserId: BrowserAutomationBrowserIdSchema,
+  resultJson: z.string(),
+});
+
 export const BrowserAutomationCloseTabResultSchema = z.object({
   command: z.literal("close_tab"),
   browserId: BrowserAutomationBrowserIdSchema,
@@ -475,6 +495,7 @@ export const BrowserAutomationResultSchema = z.discriminatedUnion("command", [
   BrowserAutomationDragResultSchema,
   BrowserAutomationLogsResultSchema,
   BrowserAutomationEvaluateResultSchema,
+  BrowserAutomationCdpResultSchema,
   BrowserAutomationScrollResultSchema,
   BrowserAutomationResizeResultSchema,
   BrowserAutomationCloseTabResultSchema,

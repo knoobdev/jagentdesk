@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
+import nodePath from "node:path";
 import { z } from "zod";
 import { ensureValidJson } from "../../json-utils.js";
 import type { Logger } from "pino";
@@ -174,6 +176,7 @@ export interface JAgentDeskToolHostDependencies {
     activeId(): string | null;
     save(profile: BrowserFingerprintProfile): void;
     select(id: string | null): void;
+    remove(id: string): void;
   };
   requestHostToolPermission?: (
     agentId: string,
@@ -1125,6 +1128,276 @@ function registerBrowserProfileTools(params: {
       };
     },
   );
+
+  registerTool(
+    "browser_scaffold_extension",
+    {
+      title: "Scaffold a Chromium extension for the agentic browser",
+      description:
+        "Write a working, unpacked Manifest V3 Chromium extension skeleton to a directory (manifest.json + content.js) so you can then EDIT the content script to do what you need and load it with browser_load_extension. The template's content script runs in its own world (so it works even where the page CSP blocks injected scripts), mirrors signals onto a `data-jad-*` attribute on <html> that you can read with browser_snapshot/browser_evaluate, and listens for commands you write back — the basis for real-time, event-driven page monitoring/automation instead of polling. After scaffolding, edit content.js, then call browser_load_extension with the same path. Auto-approved.",
+      inputSchema: {
+        path: z
+          .string()
+          .trim()
+          .min(1)
+          .describe("Absolute directory to create the extension in (created if missing)."),
+        name: z.string().trim().min(1).max(60).optional().describe("Extension name."),
+        matches: z
+          .array(z.string().trim().min(1))
+          .optional()
+          .describe("URL match patterns for the content script. Defaults to ['<all_urls>']."),
+      },
+    },
+    async (input: { path: string; name?: string; matches?: string[] }) => {
+      const dir = expandUserPath(input.path.trim());
+      const name = input.name?.trim() || "JAgentDesk Agent Extension";
+      const matches = input.matches && input.matches.length > 0 ? input.matches : ["<all_urls>"];
+      const manifest = {
+        manifest_version: 3,
+        name,
+        version: "1.0.0",
+        description: "Authored by a JAgentDesk agent for the agentic browser.",
+        content_scripts: [
+          { matches, js: ["content.js"], run_at: "document_idle", all_frames: false },
+        ],
+        host_permissions: matches,
+        permissions: [],
+      };
+      const contentJs = `// Content script — runs in an isolated world, so it works even when the page's
+// CSP blocks injected page scripts. Edit the logic below for your task.
+(() => {
+  const root = document.documentElement;
+  // Push a signal the agent can read via browser_snapshot / browser_evaluate:
+  //   browser_evaluate: document.documentElement.getAttribute('data-jad-signal')
+  const emit = (value) => {
+    try { root.setAttribute('data-jad-signal', typeof value === 'string' ? value : JSON.stringify(value)); } catch (e) {}
+  };
+  // Example: report the page title once, then on every DOM mutation (real-time).
+  emit({ type: 'ready', title: document.title, url: location.href, at: Date.now() });
+  const observer = new MutationObserver(() => {
+    emit({ type: 'mutation', title: document.title, url: location.href, at: Date.now() });
+  });
+  observer.observe(root, { childList: true, subtree: true, characterData: true });
+  // Accept commands the agent writes back to a data attribute, e.g. via CDP/DOM:
+  //   root.setAttribute('data-jad-command', JSON.stringify({ action: 'click', selector: '#x' }))
+  new MutationObserver(() => {
+    const raw = root.getAttribute('data-jad-command');
+    if (!raw) return;
+    root.removeAttribute('data-jad-command');
+    try {
+      const cmd = JSON.parse(raw);
+      if (cmd && cmd.action === 'click' && cmd.selector) {
+        document.querySelector(cmd.selector)?.click();
+        emit({ type: 'command-done', action: 'click', selector: cmd.selector, at: Date.now() });
+      }
+      // Add more command handlers here.
+    } catch (e) { emit({ type: 'command-error', error: String(e && e.message) }); }
+  }).observe(root, { attributes: true, attributeFilter: ['data-jad-command'] });
+})();
+`;
+      try {
+        await mkdir(dir, { recursive: true });
+        await writeFile(
+          nodePath.join(dir, "manifest.json"),
+          `${JSON.stringify(manifest, null, 2)}\n`,
+        );
+        await writeFile(nodePath.join(dir, "content.js"), contentJs);
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Failed to scaffold extension: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                path: dir,
+                files: ["manifest.json", "content.js"],
+                next: "Edit content.js for your task, then call browser_load_extension with this path.",
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    },
+  );
+
+  registerTool(
+    "browser_load_extension",
+    {
+      title: "Load a Chromium extension into the agentic browser",
+      description:
+        "Load an unpacked Chromium extension into the agentic browser. YOU CAN AUTHOR THE EXTENSION YOURSELF: use your file tools to write a directory containing a manifest.json (manifest_version 3) plus content/background scripts, then call this with that absolute directory. This is the way to do things the fixed browser_* tools can't — a content script runs in its own world, so it works on pages whose CSP blocks injected page scripts, can watch the DOM/network continuously and push events, and can relay signals back to the page. It attaches to the active fingerprint profile (creating one if none is active) and loads on the next tab; reload or open a tab afterwards. Prefer this (event-driven) over a cron/polling loop for real-time page monitoring. Auto-approved.",
+      inputSchema: {
+        path: z
+          .string()
+          .trim()
+          .min(1)
+          .describe("Absolute path to the unpacked extension directory (contains manifest.json)."),
+      },
+    },
+    async (input: { path: string }) => {
+      const path = input.path.trim();
+      const activeId = store.activeId();
+      const current = activeId
+        ? (store.list().find((profile) => profile.id === activeId) ?? null)
+        : null;
+      const base =
+        current ??
+        generateFingerprintProfile({
+          id: `bfp_${randomUUID().replace(/-/g, "").slice(0, 12)}`,
+          nowMs: Date.now(),
+          name: "Browser (extensions)",
+        });
+      const extensions = base.extensions.includes(path)
+        ? base.extensions
+        : [...base.extensions, path];
+      const profile: BrowserFingerprintProfile = {
+        ...base,
+        extensions,
+        updatedAtMs: Date.now(),
+      };
+      store.save(profile);
+      store.select(profile.id);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                loaded: path,
+                profileId: profile.id,
+                extensions: profile.extensions,
+                note: "Open or reload a browser tab for the extension's content scripts to run.",
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    },
+  );
+
+  registerTool(
+    "browser_profile_update",
+    {
+      title: "Update a browser fingerprint profile",
+      description:
+        "Change fields on an existing anti-detect fingerprint profile by id (from browser_profile_list). Only the fields you pass are changed. Use this to attach/rotate a proxy (the only way to change the observed IP), adjust timezone/locale to match the proxy geo, add custom init scripts or extensions, toggle spoofing, or set the WebRTC leak policy. Takes effect on the next tab/navigation. Auto-approved.",
+      inputSchema: {
+        id: z.string().trim().min(1).describe("Profile id to update."),
+        name: z.string().trim().min(1).max(60).optional(),
+        timezone: z.string().trim().optional().describe("IANA timezone; match the proxy geo-IP."),
+        locale: z.string().trim().optional(),
+        languages: z.array(z.string().trim().min(1)).optional(),
+        proxyServer: z
+          .string()
+          .trim()
+          .nullable()
+          .optional()
+          .describe("Proxy URL scheme://host:port, or null to remove the proxy."),
+        proxyUsername: z.string().optional(),
+        proxyPassword: z.string().optional(),
+        webrtcPolicy: z.enum(["default", "force-proxy", "disable"]).optional(),
+        extensions: z
+          .array(z.string().trim().min(1))
+          .optional()
+          .describe("Replaces the profile's extension dir list."),
+        initScripts: z
+          .array(z.string().min(1))
+          .optional()
+          .describe(
+            "Replaces the profile's custom init scripts (JS injected before page scripts).",
+          ),
+        stealthEnabled: z.boolean().optional(),
+      },
+    },
+    async (input: {
+      id: string;
+      name?: string;
+      timezone?: string;
+      locale?: string;
+      languages?: string[];
+      proxyServer?: string | null;
+      proxyUsername?: string;
+      proxyPassword?: string;
+      webrtcPolicy?: "default" | "force-proxy" | "disable";
+      extensions?: string[];
+      initScripts?: string[];
+      stealthEnabled?: boolean;
+    }) => {
+      const current = store.list().find((profile) => profile.id === input.id.trim());
+      if (!current) {
+        return {
+          content: [{ type: "text", text: `No fingerprint profile with id ${input.id.trim()}` }],
+          isError: true,
+        };
+      }
+      const proxy =
+        input.proxyServer === undefined
+          ? current.proxy
+          : input.proxyServer === null
+            ? null
+            : {
+                server: input.proxyServer.trim(),
+                ...(input.proxyUsername ? { username: input.proxyUsername } : {}),
+                ...(input.proxyPassword ? { password: input.proxyPassword } : {}),
+              };
+      const profile: BrowserFingerprintProfile = {
+        ...current,
+        ...(input.name ? { name: input.name } : {}),
+        ...(input.timezone ? { timezone: input.timezone } : {}),
+        ...(input.locale ? { locale: input.locale } : {}),
+        ...(input.languages ? { languages: input.languages } : {}),
+        proxy,
+        ...(input.webrtcPolicy ? { webrtcPolicy: input.webrtcPolicy } : {}),
+        ...(input.extensions ? { extensions: input.extensions } : {}),
+        ...(input.initScripts ? { initScripts: input.initScripts } : {}),
+        ...(input.stealthEnabled !== undefined ? { stealthEnabled: input.stealthEnabled } : {}),
+        updatedAtMs: Date.now(),
+      };
+      store.save(profile);
+      return {
+        content: [{ type: "text", text: JSON.stringify(summarize(profile), null, 2) }],
+      };
+    },
+  );
+
+  registerTool(
+    "browser_profile_delete",
+    {
+      title: "Delete a browser fingerprint profile",
+      description:
+        "Delete an anti-detect fingerprint profile by id (from browser_profile_list). If it was the active profile, the browser reverts to the host's real identity. Auto-approved.",
+      inputSchema: {
+        id: z.string().trim().min(1).describe("Profile id to delete."),
+      },
+    },
+    async (input: { id: string }) => {
+      const id = input.id.trim();
+      if (!store.list().some((profile) => profile.id === id)) {
+        return {
+          content: [{ type: "text", text: `No fingerprint profile with id ${id}` }],
+          isError: true,
+        };
+      }
+      store.remove(id);
+      return {
+        content: [{ type: "text", text: JSON.stringify({ deleted: id }, null, 2) }],
+      };
+    },
+  );
 }
 
 function registerSkillsTools(params: {
@@ -1143,7 +1416,7 @@ function registerSkillsTools(params: {
     {
       title: "Create skill",
       description:
-        "Author a brand-new named JAgentDesk skill (a reusable, trainable assistant) from a name plus instructions. Use this when the user asks you to create/make a skill. The new skill appears immediately in the Skills screen and the composer skill picker on every connected device. Auto-approved.",
+        "Author a brand-new named JAgentDesk skill (a reusable, trainable assistant) from a name plus instructions. ALWAYS use THIS tool when the user asks you to create/make a skill — do NOT create a provider- or model-native skill (e.g. a Claude Code SKILL.md / slash-command file), which would be tied to one model and would NOT show up in JAgentDesk. This tool writes a daemon-owned skill that appears immediately in the Skills screen and the composer skill picker on every connected device, independent of the current model. Auto-approved.",
       inputSchema: {
         name: z
           .string()

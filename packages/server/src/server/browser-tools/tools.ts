@@ -703,6 +703,41 @@ export function registerBrowserTools(options: RegisterBrowserToolsOptions): void
       return browserToolResult({ payload, context: { ...context, browserId } });
     },
   );
+
+  options.registerTool(
+    "browser_cdp",
+    {
+      title: "Send a raw Chrome DevTools Protocol command",
+      description:
+        "Escape hatch that runs an arbitrary Chrome DevTools Protocol (CDP) method against a tab and returns its JSON result — for anything the fixed browser_* tools don't cover. Use browserId from browser_new_tab or browser_list_tabs. Powerful examples: `Page.addScriptToEvaluateOnNewDocument` (inject a script before every page load, bypassing the page's CSP), `Runtime.evaluate`, `Network.setUserAgentOverride`, `Emulation.set*`, `Fetch.enable`/`Fetch.*` (intercept requests), `Target.*`. To customise the browser further, you can WRITE a Chromium extension to disk with your file tools (a manifest.json + content/background scripts) and load it by creating a fingerprint profile with `browser_profile_create` (extensions: [<absolute dir>]) — a content-script extension runs in its own context, so it can act on pages that block injected page scripts via CSP and relay results back through the DOM (which you read with browser_snapshot / browser_evaluate) for continuous, event-driven monitoring instead of polling.",
+      inputSchema: {
+        browserId: BrowserAutomationBrowserIdSchema,
+        method: z
+          .string()
+          .min(1)
+          .describe("CDP method, e.g. Page.addScriptToEvaluateOnNewDocument or Runtime.evaluate."),
+        params: z.record(z.string(), z.unknown()).optional().describe("CDP method params object."),
+      },
+    },
+    async ({ browserId, method, params }) => {
+      const context = resolveBrowserToolContext(options);
+      const payload = await options.broker.execute({
+        agentId: context.agentId,
+        cwd: context.cwd,
+        ...(context.workspaceId ? { workspaceId: context.workspaceId } : {}),
+
+        command: {
+          command: "cdp",
+          args: {
+            browserId,
+            method,
+            ...(params ? { params } : {}),
+          },
+        },
+      });
+      return browserToolResult({ payload, context: { ...context, browserId } });
+    },
+  );
 }
 
 function resolveBrowserToolContext(options: RegisterBrowserToolsOptions): {
@@ -1028,6 +1063,10 @@ function summarizeBrowserControlSuccess(
 
   if (result.command === "close_tab") {
     return `Closed browser tab ${result.browserId}.`;
+  }
+
+  if (result.command === "cdp") {
+    return `CDP result: ${result.resultJson}`;
   }
 
   return null;
