@@ -1,6 +1,6 @@
 {
   "name": "@jagentdesk/protocol",
-  "version": "0.0.13",
+  "version": "0.2.0",
   "description": "JAgentDesk shared protocol schemas and wire types",
   "files": [
     "dist",

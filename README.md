@@ -42,8 +42,8 @@ with a few deliberate boundaries:
   workspace panels, command‑center items, attachment sources, and themes (off by default).
 - **Active‑turn steering** _(new)_ — send a message into a running turn without cancelling it.
 - **Agentic browser** _(new)_ — the agent drives a real built‑in browser (open tabs, click,
-  evaluate) with optional **stealth** (fingerprint/webdriver normalisation) and a **session vault**
-  for your own logins.
+  evaluate) with **anti‑detect fingerprint profiles** (coherent per‑OS identity, proxy + WebRTC
+  guard, extensions, custom scripts) and a **session vault** for your own logins.
 - **Usage & cost insights** _(new)_ — a dashboard of tokens, spend, and per‑model / per‑agent
   breakdowns.
 - **Multi‑language UI** _(new)_ — switch the app language from Settings.
@@ -51,6 +51,31 @@ with a few deliberate boundaries:
 ---
 
 ## ✨ New in this release
+
+### Agentic browser — fingerprint profiles & full customisation (v0.2.0)
+
+The agentic browser gains a coherent anti‑detect **profile system** so the agent (or you) can
+give the built‑in browser a consistent device identity for legitimate automation of **your own**
+accounts:
+
+- **Coherent fingerprint profiles** — one identity per profile (User‑Agent + UA Client Hints,
+  WebGL vendor/renderer, timezone, locale, screen, hardware, seeded canvas/audio noise), generated
+  from real‑device templates so signals never contradict each other. Spoofing applies at the engine
+  boundary (CDP `Network.setUserAgentOverride` / `Emulation.setTimezoneOverride`) plus a before‑page
+  init script that masks itself as native code.
+- **Proxy & WebRTC** — attach a per‑profile proxy (the only real way to change the observed IP) with
+  a WebRTC leak guard (`force‑proxy` / `disable`) so the real IP isn’t exposed over STUN.
+- **Extensions & custom scripts** — load your own unpacked Chromium extensions and inject custom
+  init scripts, so the agent can fully customise the browser (automation, macros).
+- **Profiles UI + agent tools** — manage profiles under **Settings → Host** (list / create per‑OS /
+  select / delete, or “Real identity”); the agent can `browser_profile_list` / `browser_profile_create`
+  / `browser_profile_use` to create or reuse a profile mid‑conversation.
+
+Also in this release: **database grid selection** now persists across pages and clears when you
+click outside the table, and the **Usage & Cost** token totals render at full precision (no more
+collapsing every large number to “1m”).
+
+See [CHANGELOG.md](CHANGELOG.md) for the full v0.2.0 notes.
 
 ### Upstream Paseo v0.7.2 merge (v0.0.5)
 
@@ -174,6 +199,10 @@ The agent drives a real Chromium `<webview>` over CDP — no external Playwright
 - **Stealth** _(opt‑in)_ normalises the classic automation tells (`navigator.webdriver`,
   languages/plugins, WebGL vendor, hardware) before any page script runs — for legitimate
   automation of **your own** accounts.
+- **Fingerprint profiles** _(v0.2.0)_ upgrade stealth to a full, coherent identity system —
+  canvas/audio/WebGL/UA‑CH/timezone/screen spoofing from real‑device templates, per‑profile proxy +
+  WebRTC leak guard, custom extensions and init scripts, managed in the UI or via agent tools. See
+  the release notes above.
 - **Session vault** _(opt‑in)_ captures/restores a domain’s logged‑in cookies, encrypted at rest
   with the OS keychain (`safeStorage`).
 
