@@ -1674,7 +1674,12 @@ export class DaemonClient {
     }
     this.shouldReconnect = true;
     if (this.connectionState.status !== "connected") {
-      this.ensureConnected();
+      // Not a plain ensureConnected(): OS suspension freezes the reconnect/connect
+      // timers and can leave a stale connect promise or a half-open "connecting"
+      // socket, so connect() would early-return the dead promise and the UI stays
+      // stuck "reconnecting" until the frozen backoff timer eventually fires. Force
+      // a fresh reconnect now.
+      this.forceReconnect();
       return;
     }
     try {
@@ -1686,6 +1691,44 @@ export class DaemonClient {
         reasonCode: "RESUME_REVALIDATE",
       });
     }
+  }
+
+  /**
+   * Force an immediate, fresh reconnect. On mobile, OS suspension (screen off)
+   * freezes the reconnect/connect timers and can leave a stale connect promise or a
+   * half-open "connecting" socket behind; a plain connect()/ensureConnected() then
+   * early-returns that dead state and the UI is stuck "reconnecting" until the
+   * frozen backoff timer finally fires (or forever, until the app is killed). This
+   * tears the stale state down and reconnects right away.
+   */
+  forceReconnect(): void {
+    if (this.connectionState.status === "disposed" || this.connectionState.status === "connected") {
+      return;
+    }
+    this.shouldReconnect = true;
+    this.reconnectAttempt = 0;
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
+    }
+    // Drop any half-open socket + its frozen connect timeout. cleanupTransport
+    // detaches the socket handlers, so this close() won't re-enter scheduleReconnect.
+    this.disposeTransport(1001, "Force reconnect on resume");
+    // Reject + clear the stale connect promise so the next connect() starts fresh
+    // instead of returning the dead promise from before suspension.
+    const staleReject = this.connectReject;
+    this.connectPromise = null;
+    this.connectResolve = null;
+    this.connectReject = null;
+    staleReject?.(new Error("Reconnecting"));
+    // Move off "connecting" so attemptConnect() doesn't early-return as a no-op.
+    if (this.connectionState.status === "connecting") {
+      this.updateConnectionState(
+        { status: "disconnected", reason: "Reconnecting" },
+        { event: "FORCE_RECONNECT", reasonCode: "FORCE_RECONNECT" },
+      );
+    }
+    void this.connect();
   }
 
   getConnectionState(): ConnectionState {
