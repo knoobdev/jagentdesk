@@ -52,6 +52,17 @@ with a few deliberate boundaries:
 
 ## ✨ New in this release
 
+### Usage-cost clarity + browser fixes (v0.2.2)
+
+- **Prompt-cache savings in Usage & Cost** — see how much prompt caching saved (aggregate
+  + per-model + per-agent, estimated). The headline cost stays provider-reported; JAgentDesk
+  surfaces the caching benefit rather than overriding the CLIs' own auto-tuned caching.
+- **Fixes:** agent-loaded extensions now inject (open tabs reload after loading); the TOKENS
+  total no longer counts cache re-reads (so it isn't wildly inflated next to the context window);
+  the fingerprint-profile detail box no longer overflows.
+
+See [CHANGELOG.md](CHANGELOG.md) for full v0.2.2 notes.
+
 ### Agentic browser — self-authored extensions, more tools & fixes (v0.2.1)
 
 - **Agents can author & run their own Chromium extensions** — `browser_scaffold_extension`

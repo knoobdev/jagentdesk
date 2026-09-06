@@ -5,6 +5,33 @@ own release line (now `0.2.0`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
 
+## v0.2.2 — 2026-09-07
+
+Usage-cost clarity + agentic-browser extension fixes.
+
+### Added
+
+- **Prompt-cache savings in Usage & Cost** — the dashboard now shows how much prompt
+  caching saved: an aggregate "served N tokens from cache · saved ≈ $X (estimated)"
+  line, plus per-model and per-agent cached-token counts and estimated savings.
+  Estimate-only (from a static per-model price table keyed on cache-read ≈ 0.1–0.5×
+  input); the headline COST stays provider-reported. Deep research (Claude Code
+  harness + provider docs) confirmed the CLIs already auto-optimize caching/TTL, so
+  JAgentDesk surfaces the benefit rather than overriding the CLI (which would raise
+  cost for API-key users) — see docs.
+
+### Fixed
+
+- **Agent-loaded extensions now inject** — after `browser_load_extension` (or a
+  profile with extensions activates), the open browser guests are reloaded so the
+  extension's content scripts actually run; previously they only applied to a tab
+  opened afterwards.
+- **Usage & Cost no longer looks inflated** — cache-READ tokens (the cached context
+  re-read every turn) are excluded from the TOKENS total and shown separately, so a
+  session no longer reads tens of millions of tokens next to a ~200k context window.
+- **Fingerprint-profile detail box** — the expanded profile details (User-Agent,
+  WebGL, etc.) stack cleanly instead of overflowing a fixed-width label column.
+
 ## v0.2.1 — 2026-09-06
 
 Agentic-browser follow-ups: more agent tools, browser tools on by default, and a
