@@ -11,6 +11,7 @@ import {
 import type { AgentProviderRuntimeSettingsMap } from "./agent/provider-launch-config.js";
 import { ensurePrivateFile, writePrivateFileAtomicSync } from "./private-files.js";
 import { TerminalProfileSchema } from "@jagentdesk/protocol/messages";
+import { BrowserFingerprintProfileSchema } from "@jagentdesk/protocol/browser-automation/fingerprint-profile";
 import { JAgentDeskServicePortAllocationSchema } from "@jagentdesk/protocol/jagentdesk-config-schema";
 import { OrchestrationConfigSchema } from "@jagentdesk/protocol/orchestration";
 
@@ -247,6 +248,8 @@ export const PersistedConfigSchema = z
         browserTools: z
           .object({
             enabled: z.boolean().optional(),
+            profiles: z.array(BrowserFingerprintProfileSchema).optional(),
+            activeProfileId: z.string().nullable().optional(),
           })
           .passthrough()
           .optional(),

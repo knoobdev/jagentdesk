@@ -86,7 +86,18 @@ import {
 import { runDesktopStartup } from "./desktop-startup.js";
 import { autoUpdateInstalledSkills } from "./integrations/skills/index.js";
 import { registerBrowserAutomationIpc } from "./features/browser-automation/ipc.js";
-import { applyStealthToWebContents, setStealthEnabled } from "./features/browser-stealth.js";
+import {
+  applyStealthToWebContents,
+  getActiveFingerprintProfile,
+  setActiveFingerprintProfile,
+  setStealthEnabled,
+} from "./features/browser-stealth.js";
+import {
+  applyProfileProxyToSession,
+  loadProfileExtensions,
+  proxyLogin,
+} from "./features/browser-network.js";
+import { BrowserFingerprintProfileSchema } from "@jagentdesk/protocol/browser-automation/fingerprint-profile";
 import {
   deleteConnectedLogin,
   listConnectedLogins,
@@ -663,6 +674,50 @@ ipcMain.handle("jagentdesk:browser:set-stealth", (_event, enabled: unknown): boo
   setStealthEnabled(on);
   log.info("[browser-stealth] toggled", { enabled: on });
   return on;
+});
+
+// Set (or clear) the active fingerprint profile. The renderer resolves the active
+// profile from the daemon config and pushes it here; we hold it for the per-guest
+// stealth injection (browser-stealth) and apply its session-level parts (proxy +
+// extensions) to the shared agentic-browser session now. `null` clears it.
+ipcMain.handle(
+  "jagentdesk:browser:set-fingerprint-profile",
+  async (_event, raw: unknown): Promise<{ ok: boolean; extensions?: string[] }> => {
+    if (raw == null) {
+      setActiveFingerprintProfile(null);
+      const browserSession = session.fromPartition(JAGENTDESK_BROWSER_PROFILE_PARTITION);
+      await applyProfileProxyToSession(browserSession, null);
+      log.info("[browser-stealth] active profile cleared");
+      return { ok: true };
+    }
+    const parsed = BrowserFingerprintProfileSchema.safeParse(raw);
+    if (!parsed.success) {
+      log.warn("[browser-stealth] invalid fingerprint profile", {
+        error: parsed.error.message,
+      });
+      return { ok: false };
+    }
+    const profile = parsed.data;
+    setActiveFingerprintProfile(profile);
+    const browserSession = session.fromPartition(JAGENTDESK_BROWSER_PROFILE_PARTITION);
+    await applyProfileProxyToSession(browserSession, profile);
+    const extensions = await loadProfileExtensions(browserSession, profile);
+    log.info("[browser-stealth] active profile set", { profileId: profile.id });
+    return { ok: true, extensions };
+  },
+);
+
+// Authenticated proxies: answer the proxy's auth challenge with the active
+// profile's credentials. Only fires for proxy (not server) auth.
+app.on("login", (event, _webContents, _request, authInfo, callback) => {
+  if (!authInfo.isProxy) {
+    return;
+  }
+  const creds = proxyLogin(getActiveFingerprintProfile());
+  if (creds) {
+    event.preventDefault();
+    callback(creds.username, creds.password);
+  }
 });
 
 ipcMain.handle("jagentdesk:browser:list-connected-logins", async () => {

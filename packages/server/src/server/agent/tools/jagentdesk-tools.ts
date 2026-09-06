@@ -84,6 +84,11 @@ import {
 } from "../../worktree/commands.js";
 import { registerBrowserTools } from "../../browser-tools/tools.js";
 import type { BrowserToolsBroker } from "../../browser-tools/broker.js";
+import {
+  generateFingerprintProfile,
+  type BrowserFingerprintProfile,
+  type FingerprintOs,
+} from "@jagentdesk/protocol/browser-automation/fingerprint-profile";
 import type {
   JAgentDeskToolCatalog,
   JAgentDeskToolConfig,
@@ -160,6 +165,16 @@ export interface JAgentDeskToolHostDependencies {
   // skill mid-conversation; the store's onChange broadcast (status:skills_changed)
   // then surfaces it live in the Skills screen + composer picker on every device.
   skillsStorage?: Pick<SkillsStorage, "get" | "mutate">;
+  // Daemon-config-backed store for the agentic browser's anti-detect fingerprint
+  // profiles. Lets a chat agent create a coherent profile and switch the active one
+  // mid-conversation; the config patch broadcasts status:daemon_config_changed, so
+  // the desktop host re-applies it to new browser guests. See ADR-0011.
+  browserFingerprintProfiles?: {
+    list(): BrowserFingerprintProfile[];
+    activeId(): string | null;
+    save(profile: BrowserFingerprintProfile): void;
+    select(id: string | null): void;
+  };
   requestHostToolPermission?: (
     agentId: string,
     request: {
@@ -914,6 +929,199 @@ function registerSqlTools(params: {
             text: JSON.stringify({ count: summary.length, databases: summary }, null, 2),
           },
         ],
+      };
+    },
+  );
+}
+
+function registerBrowserProfileTools(params: {
+  registerTool: (
+    name: string,
+    config: JAgentDeskToolConfig,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Tool handlers are schema-validated at registration boundaries.
+    handler: (input: any, context: JAgentDeskToolExecutionContext) => Promise<JAgentDeskToolResult>,
+  ) => void;
+  options: JAgentDeskToolHostDependencies;
+}): void {
+  const { registerTool, options } = params;
+  const store = options.browserFingerprintProfiles;
+  if (!store) {
+    return;
+  }
+
+  const summarize = (profile: BrowserFingerprintProfile) => ({
+    id: profile.id,
+    name: profile.name,
+    os: profile.os,
+    userAgent: profile.userAgent,
+    timezone: profile.timezone,
+    locale: profile.locale,
+    hasProxy: profile.proxy !== null,
+    webrtcPolicy: profile.webrtcPolicy,
+    extensions: profile.extensions.length,
+    stealthEnabled: profile.stealthEnabled,
+    active: profile.id === store.activeId(),
+  });
+
+  registerTool(
+    "browser_profile_list",
+    {
+      title: "List browser fingerprint profiles",
+      description:
+        "List the agentic browser's anti-detect fingerprint profiles and which one is active. Use before browser_profile_use to pick one. Auto-approved.",
+      inputSchema: {},
+    },
+    async () => {
+      const profiles = store.list().map(summarize);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              { count: profiles.length, activeProfileId: store.activeId(), profiles },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    },
+  );
+
+  registerTool(
+    "browser_profile_create",
+    {
+      title: "Create browser fingerprint profile",
+      description:
+        "Create a coherent anti-detect fingerprint profile for the agentic browser (a consistent device identity: User-Agent, UA Client Hints, WebGL, timezone, screen, seeded canvas/audio noise). Optionally attach a proxy (the ONLY way to change the observed IP — no proxy means the real IP), Chromium extensions (absolute unpacked dirs you can author first), and custom init scripts (JS injected before page scripts). Set activate=true to make it the active profile immediately. Auto-approved.",
+      inputSchema: {
+        name: z
+          .string()
+          .trim()
+          .min(1)
+          .max(60)
+          .optional()
+          .describe("Label shown in the profile list."),
+        os: z
+          .enum(["windows", "macos", "linux"])
+          .optional()
+          .describe("Device OS family the identity mimics. Defaults to windows."),
+        timezone: z
+          .string()
+          .trim()
+          .optional()
+          .describe("IANA timezone, e.g. America/New_York. Should match the proxy's geo-IP."),
+        locale: z.string().trim().optional().describe("BCP-47 locale, e.g. en-US."),
+        languages: z
+          .array(z.string().trim().min(1))
+          .optional()
+          .describe("navigator.languages list."),
+        proxyServer: z
+          .string()
+          .trim()
+          .optional()
+          .describe("Proxy URL scheme://host:port (http/https/socks5). Required to change the IP."),
+        proxyUsername: z.string().optional(),
+        proxyPassword: z.string().optional(),
+        webrtcPolicy: z
+          .enum(["default", "force-proxy", "disable"])
+          .optional()
+          .describe("force-proxy closes the WebRTC STUN IP leak behind a proxy."),
+        extensions: z
+          .array(z.string().trim().min(1))
+          .optional()
+          .describe("Absolute paths to unpacked Chromium extension directories."),
+        initScripts: z
+          .array(z.string().min(1))
+          .optional()
+          .describe("Custom JS injected into every page before its own scripts run."),
+        stealthEnabled: z
+          .boolean()
+          .optional()
+          .describe(
+            "Apply fingerprint spoofing. Default true. False = real identity + proxy/extensions only.",
+          ),
+        activate: z
+          .boolean()
+          .optional()
+          .describe("Make this the active profile now. Default true."),
+      },
+    },
+    async (input: {
+      name?: string;
+      os?: FingerprintOs;
+      timezone?: string;
+      locale?: string;
+      languages?: string[];
+      proxyServer?: string;
+      proxyUsername?: string;
+      proxyPassword?: string;
+      webrtcPolicy?: "default" | "force-proxy" | "disable";
+      extensions?: string[];
+      initScripts?: string[];
+      stealthEnabled?: boolean;
+      activate?: boolean;
+    }) => {
+      const id = `bfp_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
+      const proxy = input.proxyServer
+        ? {
+            server: input.proxyServer.trim(),
+            ...(input.proxyUsername ? { username: input.proxyUsername } : {}),
+            ...(input.proxyPassword ? { password: input.proxyPassword } : {}),
+          }
+        : null;
+      const base = generateFingerprintProfile({
+        id,
+        nowMs: Date.now(),
+        ...(input.name ? { name: input.name } : {}),
+        ...(input.os ? { os: input.os } : {}),
+        ...(input.timezone ? { timezone: input.timezone } : {}),
+        ...(input.locale ? { locale: input.locale } : {}),
+        ...(input.languages ? { languages: input.languages } : {}),
+        proxy,
+        ...(input.webrtcPolicy ? { webrtcPolicy: input.webrtcPolicy } : {}),
+      });
+      const profile: BrowserFingerprintProfile = {
+        ...base,
+        extensions: input.extensions ?? base.extensions,
+        initScripts: input.initScripts ?? base.initScripts,
+        stealthEnabled: input.stealthEnabled ?? base.stealthEnabled,
+      };
+      store.save(profile);
+      if (input.activate !== false) {
+        store.select(profile.id);
+      }
+      return {
+        content: [{ type: "text", text: JSON.stringify(summarize(profile), null, 2) }],
+      };
+    },
+  );
+
+  registerTool(
+    "browser_profile_use",
+    {
+      title: "Select active browser fingerprint profile",
+      description:
+        "Set the active anti-detect fingerprint profile applied to new browser tabs (pass an id from browser_profile_list), or pass null to use the host's real identity. Takes effect on the next tab/navigation. Auto-approved.",
+      inputSchema: {
+        id: z
+          .string()
+          .trim()
+          .nullable()
+          .describe("Profile id to activate, or null to clear (use the real browser identity)."),
+      },
+    },
+    async (input: { id: string | null }) => {
+      const targetId = input.id === null ? null : input.id.trim();
+      if (targetId !== null && !store.list().some((profile) => profile.id === targetId)) {
+        return {
+          content: [{ type: "text", text: `No fingerprint profile with id ${targetId}` }],
+          isError: true,
+        };
+      }
+      store.select(targetId);
+      return {
+        content: [{ type: "text", text: JSON.stringify({ activeProfileId: targetId }, null, 2) }],
       };
     },
   );
@@ -1948,6 +2156,10 @@ export function createJAgentDeskToolCatalog(
       callerAgentId,
       resolveCallerAgent,
     });
+  }
+
+  if (options.browserToolsEnabled && options.browserFingerprintProfiles) {
+    registerBrowserProfileTools({ registerTool, options });
   }
 
   // Skill authoring is a normal chat-agent capability (not gated behind a

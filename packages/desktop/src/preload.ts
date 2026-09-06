@@ -128,6 +128,8 @@ contextBridge.exposeInMainWorld("jagentdeskDesktop", {
       ipcRenderer.invoke("jagentdesk:browser:copy-element", payload),
     setStealthEnabled: (enabled: boolean) =>
       ipcRenderer.invoke("jagentdesk:browser:set-stealth", enabled),
+    setFingerprintProfile: (profile: unknown) =>
+      ipcRenderer.invoke("jagentdesk:browser:set-fingerprint-profile", profile),
     listConnectedLogins: () => ipcRenderer.invoke("jagentdesk:browser:list-connected-logins"),
     saveConnectedLogin: (browserId: string) =>
       ipcRenderer.invoke("jagentdesk:browser:save-connected-login", browserId),

@@ -72,6 +72,7 @@ import type { Theme } from "@/styles/theme";
 import { getProviderIcon } from "@/components/provider-icons";
 import { getConnectionMode } from "@/tailscale";
 import { BrowserToolsOptInCard } from "./browser-tools-card";
+import { BrowserFingerprintProfilesCard } from "./browser-fingerprint-profiles-card";
 import { hasDaemonReconnectedAfter, type DaemonConnectionMarker } from "./daemon-reconnect";
 import { restartDaemonFromSettings } from "./daemon-restart";
 
@@ -255,6 +256,7 @@ export function HostAgentsPage({ serverId }: { serverId: string }) {
         <SettingsSection title={t("settings.hostSections.agents")}>
           <InjectJAgentDeskToolsCard serverId={serverId} />
           <BrowserToolsOptInCard serverId={serverId} />
+          <BrowserFingerprintProfilesCard serverId={serverId} />
           <AppendSystemPromptCard serverId={serverId} />
         </SettingsSection>
       ) : (

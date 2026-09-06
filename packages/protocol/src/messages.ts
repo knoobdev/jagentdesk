@@ -31,6 +31,7 @@ import {
   UsageHistoryResetResponseSchema,
   UsageChangedStatusPayloadSchema,
 } from "./usage-history.js";
+import { BrowserFingerprintProfileSchema } from "./browser-automation/fingerprint-profile.js";
 import {
   ChatCreateRequestSchema,
   ChatListRequestSchema,
@@ -248,6 +249,12 @@ export type TerminalProfile = z.infer<typeof TerminalProfileSchema>;
 const MutableBrowserToolsConfigSchema = z
   .object({
     enabled: z.boolean().default(false),
+    // Anti-detect fingerprint profiles (ADR-0011 + agentic-browser plan). Managed
+    // through the daemon-config get/patch flow: a patch replaces the whole array.
+    // `activeProfileId` names the profile applied to new browser guests (null = the
+    // host's real, un-spoofed identity).
+    profiles: z.array(BrowserFingerprintProfileSchema).optional(),
+    activeProfileId: z.string().nullable().optional(),
   })
   .passthrough();
 // ── Plugins (see ADR-0014) ────────────────────────────────────────────────

@@ -1414,6 +1414,18 @@ export async function createJAgentDeskDaemon(
     clusterRegistry,
     databaseRegistry,
     skillsStorage,
+    browserFingerprintProfiles: {
+      list: () => daemonConfigStore.get().browserTools.profiles ?? [],
+      activeId: () => daemonConfigStore.get().browserTools.activeProfileId ?? null,
+      save: (profile) => {
+        const existing = daemonConfigStore.get().browserTools.profiles ?? [];
+        const others = existing.filter((candidate) => candidate.id !== profile.id);
+        daemonConfigStore.patch({ browserTools: { profiles: [...others, profile] } });
+      },
+      select: (id) => {
+        daemonConfigStore.patch({ browserTools: { activeProfileId: id } });
+      },
+    },
     requestHostToolPermission: (agentId, req) =>
       agentManager.requestHostToolPermission(agentId, req),
     logger,

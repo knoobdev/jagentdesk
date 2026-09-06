@@ -75,6 +75,7 @@ import {
   mountServerDataPushRouter,
 } from "@/data/push-router";
 import { mountBrowserAutomationDaemonClientHandler } from "@/desktop/browser/automation/handler";
+import { mountFingerprintProfileSync } from "@/desktop/browser/fingerprint-profile-sync";
 import { schedulesQueryBaseKey } from "@/schedules/aggregated-schedules";
 import { dispatchComposerAgentMessage, sendQueuedComposerMessageNow } from "@/composer/actions";
 import { createMessageSubmissionWriter } from "@/composer/submission/writer";
@@ -644,11 +645,17 @@ function createDefaultDeps(): HostRuntimeControllerDeps {
       const unmountBrowserAutomation = browserAutomationCapabilities
         ? mountBrowserAutomationDaemonClientHandler(client, { serverId: host.serverId })
         : null;
+      // Keep main's active fingerprint profile synced with the daemon config so it
+      // applies before any agent-driven tab opens (desktop browser host only).
+      const unmountFingerprintSync = browserAutomationCapabilities
+        ? mountFingerprintProfileSync(client)
+        : null;
       return () => {
         unmountPairingCompleted();
         unmountPairingCancelled();
         unmountPairingRequest();
         unmountBrowserAutomation?.();
+        unmountFingerprintSync?.();
         unmountServerData();
       };
     },

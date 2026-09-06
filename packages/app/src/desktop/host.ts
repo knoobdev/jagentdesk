@@ -2,6 +2,7 @@ import { Platform } from "react-native";
 import { getElectronHost } from "@/desktop/electron/host";
 import type { BrowserKeyboardPolicy } from "@/desktop/browser/shortcuts";
 import type { SessionInboundMessage, SessionOutboundMessage } from "@jagentdesk/protocol/messages";
+import type { BrowserFingerprintProfile } from "@jagentdesk/protocol/browser-automation/fingerprint-profile";
 
 type BrowserAutomationExecuteRequest = Extract<
   SessionOutboundMessage,
@@ -169,6 +170,14 @@ export interface DesktopBrowserBridge {
    * main injects webdriver/fingerprint patches and drives human-like input.
    */
   setStealthEnabled?: (enabled: boolean) => Promise<void>;
+  /**
+   * Set (or clear with `null`) the active fingerprint profile applied to new
+   * browser guests — the coherent anti-detect identity + proxy + extensions. The
+   * renderer resolves it from the daemon config and pushes it to main.
+   */
+  setFingerprintProfile?: (
+    profile: BrowserFingerprintProfile | null,
+  ) => Promise<{ ok: boolean; extensions?: string[] }>;
   /** List saved per-domain login sessions (Connected logins vault). */
   listConnectedLogins?: () => Promise<DesktopConnectedLogin[]>;
   /** Capture + encrypt the current cookies for the active tab's domain. */
