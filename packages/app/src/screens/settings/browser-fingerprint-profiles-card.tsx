@@ -352,6 +352,8 @@ export function BrowserFingerprintProfilesCard({ serverId }: { serverId: string 
 }
 
 function DetailRow({ label, value }: { label: string; value: string }) {
+  // Stacked (label above value) so long strings — User-Agent, WebGL renderer — wrap
+  // cleanly instead of fighting a fixed-width label column on a narrow window.
   return (
     <View style={styles.detailRow}>
       <Text style={styles.detailLabel}>{label}</Text>
@@ -414,17 +416,15 @@ const styles = StyleSheet.create((theme) => ({
     backgroundColor: theme.colors.surface0,
   },
   detailRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: theme.spacing[2],
+    flexDirection: "column",
+    gap: 2,
   },
   detailLabel: {
-    width: 120,
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.xs,
   },
   detailValue: {
-    flex: 1,
+    alignSelf: "stretch",
     color: theme.colors.foreground,
     fontSize: theme.fontSize.xs,
   },
