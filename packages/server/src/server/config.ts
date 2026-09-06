@@ -373,7 +373,9 @@ function resolveAppendSystemPrompt(persisted: ReturnType<typeof loadPersistedCon
 }
 
 function resolveBrowserToolsEnabled(persisted: ReturnType<typeof loadPersistedConfig>): boolean {
-  return persisted.daemon?.browserTools?.enabled ?? false;
+  // Browser tools default ON: agents can drive the built-in agentic browser out of
+  // the box. Only an explicit `false` in persisted config turns them off.
+  return persisted.daemon?.browserTools?.enabled ?? true;
 }
 
 // Default ON so agents actually receive the jagentdesk MCP tools (kubectl_get,

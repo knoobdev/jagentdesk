@@ -541,7 +541,7 @@ function createInitialMutableDaemonConfig(config: JAgentDeskDaemonConfig): Mutab
 
   const initialConfig: MutableDaemonConfig = {
     mcp: { injectIntoAgents: config.mcpInjectIntoAgents ?? true },
-    browserTools: { enabled: config.browserToolsEnabled ?? false },
+    browserTools: { enabled: config.browserToolsEnabled ?? true },
     providers,
     metadataGeneration: {
       providers: config.metadataGeneration?.providers ?? [],
@@ -1424,6 +1424,16 @@ export async function createJAgentDeskDaemon(
       },
       select: (id) => {
         daemonConfigStore.patch({ browserTools: { activeProfileId: id } });
+      },
+      remove: (id) => {
+        const existing = daemonConfigStore.get().browserTools.profiles ?? [];
+        const activeProfileId = daemonConfigStore.get().browserTools.activeProfileId ?? null;
+        daemonConfigStore.patch({
+          browserTools: {
+            profiles: existing.filter((candidate) => candidate.id !== id),
+            activeProfileId: activeProfileId === id ? null : activeProfileId,
+          },
+        });
       },
     },
     requestHostToolPermission: (agentId, req) =>

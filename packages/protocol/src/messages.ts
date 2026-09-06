@@ -248,7 +248,7 @@ export type TerminalProfile = z.infer<typeof TerminalProfileSchema>;
 
 const MutableBrowserToolsConfigSchema = z
   .object({
-    enabled: z.boolean().default(false),
+    enabled: z.boolean().default(true),
     // Anti-detect fingerprint profiles (ADR-0011 + agentic-browser plan). Managed
     // through the daemon-config get/patch flow: a patch replaces the whole array.
     // `activeProfileId` names the profile applied to new browser guests (null = the
@@ -279,7 +279,7 @@ export const MutableDaemonConfigSchema = z
         injectIntoAgents: z.boolean(),
       })
       .passthrough(),
-    browserTools: MutableBrowserToolsConfigSchema.default({ enabled: false }),
+    browserTools: MutableBrowserToolsConfigSchema.default({ enabled: true }),
     providers: z.record(z.string(), MutableDaemonProviderConfigSchema).default({}),
     metadataGeneration: MutableMetadataGenerationConfigSchema.default({ providers: [] }),
     autoArchiveAfterMerge: z.boolean().default(false),
@@ -297,7 +297,19 @@ export const MutableDaemonConfigSchema = z
 export const MutableDaemonConfigPatchSchema = z
   .object({
     mcp: MutableDaemonConfigSchema.shape.mcp.partial().optional(),
-    browserTools: MutableBrowserToolsConfigSchema.partial().optional(),
+    // Explicit optional fields (NOT MutableBrowserToolsConfigSchema.partial()):
+    // `.partial()` does not strip the `enabled` field's `.default(false)`, so a
+    // patch that only sets profiles/activeProfileId would inject `enabled: false`
+    // and silently DISABLE browser tools on every profile edit. Keeping `enabled`
+    // optional-without-default here means an omitted `enabled` stays untouched.
+    browserTools: z
+      .object({
+        enabled: z.boolean().optional(),
+        profiles: z.array(BrowserFingerprintProfileSchema).optional(),
+        activeProfileId: z.string().nullable().optional(),
+      })
+      .passthrough()
+      .optional(),
     providers: z
       .record(z.string(), MutableDaemonProviderConfigSchema.partial().passthrough())
       .optional(),
