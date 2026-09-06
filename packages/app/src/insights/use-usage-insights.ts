@@ -31,6 +31,7 @@ export interface AgentUsageRow {
   model: string;
   status: string;
   inputTokens: number;
+  cachedInputTokens: number;
   outputTokens: number;
   totalTokens: number;
   costUsd: number;
@@ -85,7 +86,10 @@ function agentTokens(agent: Agent): {
   const input = totals?.inputTokens ?? 0;
   const cached = totals?.cachedInputTokens ?? 0;
   const output = totals?.outputTokens ?? 0;
-  return { input, cached, output, total: input + cached + output };
+  // `total` excludes cache-READ tokens (Claude re-reads the cached context every
+  // turn); counting them made totals balloon into the tens of millions. Cache reads
+  // stay available via `cached` for a separate breakdown.
+  return { input, cached, output, total: input + output };
 }
 
 function upsertModel(
@@ -163,6 +167,7 @@ function buildInsights(agents: Map<string, Agent> | undefined): UsageInsights {
       model,
       status: agent.status,
       inputTokens: input,
+      cachedInputTokens: cached,
       outputTokens: output,
       totalTokens: total,
       costUsd: cost,
@@ -175,7 +180,9 @@ function buildInsights(agents: Map<string, Agent> | undefined): UsageInsights {
     }
   }
 
-  const totalTokens = totalInput + totalCached + totalOutput;
+  // Excludes cache-READ tokens (see agentTokens) so the AVG/AGENT + totals stay
+  // sane instead of ballooning with per-turn cache re-reads.
+  const totalTokens = totalInput + totalOutput;
   const agentCount = rows.length;
 
   const modelRows = Array.from(byModel.values()).sort((a, b) => b.totalTokens - a.totalTokens);

@@ -4,6 +4,11 @@ import { BarChart3, Coins, Cpu, RefreshCw, Trash2, Users } from "lucide-react-na
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
+import {
+  estimateCacheSavingsUsd,
+  formatSavingsUsd,
+  sumCacheSavingsUsd,
+} from "@/insights/token-pricing";
 import { useHostRouteServerId } from "@/navigation/host-route-context";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { confirmDialog } from "@/utils/confirm-dialog";
@@ -118,6 +123,7 @@ function ModelRow({
   maxTokens: number;
 }) {
   const color = modelColor(index);
+  const savings = estimateCacheSavingsUsd(row.model, row.cachedInputTokens);
   return (
     <View style={styles.item}>
       <View style={styles.itemTop}>
@@ -131,6 +137,12 @@ function ModelRow({
         </Text>
       </View>
       <Bar color={color} pct={barWidth(row.totalTokens, maxTokens)} />
+      {row.cachedInputTokens > 0 ? (
+        <Text style={styles.itemSub}>
+          {formatTokenCount(row.cachedInputTokens)} cached
+          {savings && savings > 0 ? ` · saved ≈ ${formatSavingsUsd(savings)}` : ""}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -144,6 +156,7 @@ function AgentRow({
   color: string;
   maxTokens: number;
 }) {
+  const savings = estimateCacheSavingsUsd(row.model, row.cachedInputTokens);
   return (
     <View style={styles.item}>
       <View style={styles.itemTop}>
@@ -157,6 +170,12 @@ function AgentRow({
         </Text>
       </View>
       <Bar color={color} pct={barWidth(row.totalTokens, maxTokens)} />
+      {row.cachedInputTokens > 0 ? (
+        <Text style={styles.itemSub}>
+          {formatTokenCount(row.cachedInputTokens)} cached
+          {savings && savings > 0 ? ` · saved ≈ ${formatSavingsUsd(savings)}` : ""}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -213,7 +232,8 @@ function lifetimeModelRows(lifetime: LifetimeUsage): ModelUsageRow[] {
       inputTokens: b.inputTokens,
       cachedInputTokens: b.cachedInputTokens,
       outputTokens: b.outputTokens,
-      totalTokens: b.inputTokens + b.cachedInputTokens + b.outputTokens,
+      // Exclude cache reads from the token total (see the TOKENS headline note).
+      totalTokens: b.inputTokens + b.outputTokens,
       costUsd: b.totalCostUsd,
     }))
     .filter((row) => row.totalTokens > 0)
@@ -234,7 +254,10 @@ export function InsightsScreen() {
   // usage that predates the time-series and never drop when an agent is deleted.
   // Per-agent views (AGENTS, Top agents, Context) stay live from `insights`.
   const { lifetime } = useUsageHistory(serverId);
-  const lifetimeTokens = lifetime.inputTokens + lifetime.cachedInputTokens + lifetime.outputTokens;
+  // Headline TOKENS = new input + output only. Cache-READ tokens (Claude re-reads
+  // the cached context every turn) are shown separately: summing them made the total
+  // balloon into the tens of millions and look unreal next to a ~200k context window.
+  const lifetimeTokens = lifetime.inputTokens + lifetime.outputTokens;
   const lifetimeModels = useMemo(() => lifetimeModelRows(lifetime), [lifetime]);
 
   // Refresh re-pulls the daemon-persisted usage history for this host — a pure
@@ -298,6 +321,19 @@ export function InsightsScreen() {
   }, [lifetimeModels]);
   const hasData = lifetimeTokens > 0 || insights.agentsWithUsage > 0;
   const lifetimeHasCost = lifetime.totalCostUsd > 0;
+  // Estimated cost saved by prompt caching: cache-READ tokens billed at ~0.1–0.5×
+  // input instead of full price. Estimate-only (see token-pricing); the headline
+  // COST stays provider-reported.
+  const lifetimeSavings = useMemo(
+    () =>
+      sumCacheSavingsUsd(
+        Object.entries(lifetime.byModel).map(([model, b]) => ({
+          model,
+          cacheReadTokens: b.cachedInputTokens,
+        })),
+      ),
+    [lifetime],
+  );
   const modelSubtitle = lifetimeHasCost
     ? `${lifetimeModels.length} model${lifetimeModels.length === 1 ? "" : "s"} · ${formatUsd(lifetime.totalCostUsd)}`
     : `${lifetimeModels.length} model${lifetimeModels.length === 1 ? "" : "s"}`;
@@ -352,7 +388,7 @@ export function InsightsScreen() {
             Icon={ThemedCpu}
             label="TOKENS"
             value={formatTokenCount(lifetimeTokens)}
-            sub={`${formatTokenCount(lifetime.inputTokens + lifetime.cachedInputTokens)} in · ${formatTokenCount(lifetime.outputTokens)} out`}
+            sub={`${formatTokenCount(lifetime.inputTokens)} in · ${formatTokenCount(lifetime.outputTokens)} out · ${formatTokenCount(lifetime.cachedInputTokens)} cache`}
           />
           <KpiTile
             Icon={ThemedCoins}
@@ -373,6 +409,22 @@ export function InsightsScreen() {
             sub="tokens per agent"
           />
         </View>
+
+        {lifetime.cachedInputTokens > 0 ? (
+          <View style={styles.savingsBar}>
+            <Text style={styles.savingsText}>
+              Prompt caching served {formatTokenCount(lifetime.cachedInputTokens)} tokens from cache
+              {lifetimeSavings.savingsUsd > 0
+                ? ` · saved ≈ ${formatSavingsUsd(lifetimeSavings.savingsUsd)}`
+                : ""}
+              {lifetimeSavings.unpricedModels > 0 ? " (+ unpriced models)" : ""}
+            </Text>
+            <Text style={styles.savingsHint}>
+              Estimated: cache reads are billed far below full input price. Actual cost is
+              provider-reported above.
+            </Text>
+          </View>
+        ) : null}
 
         <UsageTimelineCard serverId={serverId} />
 
@@ -454,6 +506,24 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderRadius: theme.borderRadius.md,
     lineHeight: 20,
   },
+  savingsBar: {
+    padding: theme.spacing[3],
+    gap: theme.spacing[1],
+    backgroundColor: theme.colors.surface1,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.md,
+  },
+  savingsText: {
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foreground,
+    fontWeight: theme.fontWeight.medium,
+  },
+  savingsHint: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+    lineHeight: 16,
+  },
   // KPI grid — auto-responsive: minWidth forces 2 cols on phones, 4 across on desktop.
   kpiRow: { flexDirection: "row", flexWrap: "wrap", gap: theme.spacing[3] },
   kpi: {
@@ -522,6 +592,10 @@ const styles = StyleSheet.create((theme: Theme) => ({
     fontSize: theme.fontSize.xs,
     color: theme.colors.foregroundMuted,
     fontVariant: ["tabular-nums"],
+  },
+  itemSub: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
   },
   barTrack: {
     height: 10,

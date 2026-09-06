@@ -27,7 +27,9 @@ interface Bucket {
 }
 
 function rollupTokens(day: UsageDayRollup): number {
-  return day.inputTokens + day.cachedInputTokens + day.outputTokens;
+  // Excludes cache-READ tokens so the chart matches the headline TOKENS total (see
+  // insights-screen); cache reads re-read the context every turn and inflate wildly.
+  return day.inputTokens + day.outputTokens;
 }
 
 const MONTH_NAMES = [
