@@ -10,7 +10,7 @@ function makeBundle(): HostDataBundle {
   return {
     version: HOST_DATA_BUNDLE_VERSION,
     sourceServerId: "srv_source",
-    sourceHostLabel: "jcode-1",
+    sourceHostLabel: "node-1",
     sourceHome: "/home/user",
     exportedAt_ms: 1_700_000_000_000,
     projects: [{ projectId: "proj_1" }],
@@ -67,7 +67,7 @@ describe("HostDataBundle schema", () => {
           result: {
             sourceServerId: "srv_source",
             targetServerId: "srv_target",
-            sourceHostLabel: "jcode-1",
+            sourceHostLabel: "node-1",
             idMap: { agent_old: "agent_new" },
             workspaceIdMap: { ws_1: "ws_1" },
             agents: [

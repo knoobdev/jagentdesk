@@ -15,7 +15,7 @@ function conn(id: string): HostConnection {
 function host(overrides: Partial<HostProfile> = {}): HostProfile {
   return {
     serverId: "srv_a",
-    label: "JCode.local",
+    label: "workstation.local",
     appearance: { color: "none", badgeDisplay: null },
     lifecycle: {},
     connections: [conn("direct:localhost:6768")],
@@ -62,11 +62,11 @@ describe("host backups", () => {
     const backup = host({
       label: "My Mac",
       appearance: { color: "blue", badgeDisplay: null },
-      connections: [conn("direct:localhost:6768"), conn("tailnet:jcode-2")],
+      connections: [conn("direct:localhost:6768"), conn("tailnet:node-2")],
       createdAt: "2025-06-01T00:00:00.000Z",
     });
     const fresh = host({
-      label: "JCode.local",
+      label: "workstation.local",
       appearance: { color: "none", badgeDisplay: null },
       connections: [conn("direct:localhost:6768")],
       createdAt: "2026-09-03T00:00:00.000Z",
@@ -80,12 +80,15 @@ describe("host backups", () => {
     // fresh connection kept + backed-up tailnet connection re-added, no dupes
     expect(restored.connections.map((entry) => entry.id)).toEqual([
       "direct:localhost:6768",
-      "tailnet:jcode-2",
+      "tailnet:node-2",
     ]);
   });
 
   it("keeps the fresh label when the backup label is blank", () => {
-    const restored = restoreHostProfile(host({ label: "JCode.local" }), host({ label: "  " }));
-    expect(restored.label).toBe("JCode.local");
+    const restored = restoreHostProfile(
+      host({ label: "workstation.local" }),
+      host({ label: "  " }),
+    );
+    expect(restored.label).toBe("workstation.local");
   });
 });

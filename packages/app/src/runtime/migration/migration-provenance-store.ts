@@ -5,7 +5,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 // Provenance for agents that arrived on a host via a host-to-host migration.
 // Keyed by the TARGET serverId, then the NEW agent id, mapping to the source
 // host's human label. Used to prefix migrated agents' display names (e.g.
-// "[jcode-1] Cluster chat") and to drive reverse migration when the source host
+// "[node-1] Cluster chat") and to drive reverse migration when the source host
 // comes back online. Persisted under `@jagentdesk:migration-provenance`.
 
 export interface MigrationProvenanceState {
@@ -116,7 +116,7 @@ export const useMigrationProvenanceStore = create<MigrationProvenanceStore>()(
 
 /**
  * Build a display name for an agent, prefixing it with its migration source host
- * label when the agent was imported via migration (e.g. "[jcode-1] Cluster chat").
+ * label when the agent was imported via migration (e.g. "[node-1] Cluster chat").
  * Returns the unmodified name when there is no provenance.
  */
 export function prefixWithMigrationSource(input: {

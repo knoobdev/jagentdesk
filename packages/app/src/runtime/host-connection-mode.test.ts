@@ -34,7 +34,7 @@ const registry = JSON.stringify([
     connections: [
       {
         type: "tailnet",
-        tailnetAddress: "jcode-1.tailf900c1.ts.net:6768",
+        tailnetAddress: "node-1.example.ts.net:6768",
         daemonPublicKeyB64: "k",
       },
     ],

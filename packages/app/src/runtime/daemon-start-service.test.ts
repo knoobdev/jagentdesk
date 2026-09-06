@@ -434,7 +434,7 @@ describe("upsertDesktopDaemonConnection", () => {
   it("upserts only the verified tailnet connection in Tailscale mode", async () => {
     const fake = createTailnetStore();
     const daemon = makeStatus({
-      tailnetAddress: "jcode-3.tailf900c1.ts.net:6768",
+      tailnetAddress: "node-3.example.ts.net:6768",
       daemonPublicKeyB64: "daemon-public-key",
       tailscaleConnected: true,
     });
@@ -446,7 +446,7 @@ describe("upsertDesktopDaemonConnection", () => {
     expect(fake.tailnetUpserts).toEqual([
       {
         serverId: "srv_desktop",
-        tailnetAddress: "jcode-3.tailf900c1.ts.net:6768",
+        tailnetAddress: "node-3.example.ts.net:6768",
         useTls: false,
         daemonPublicKeyB64: "daemon-public-key",
         label: "desktop",
@@ -471,7 +471,7 @@ describe("upsertDesktopDaemonConnection", () => {
       },
     ];
     const daemon = makeStatus({
-      tailnetAddress: "jcode-3.tailf900c1.ts.net:6768",
+      tailnetAddress: "node-3.example.ts.net:6768",
       daemonPublicKeyB64: "daemon-public-key",
       tailscaleConnected: true,
     });
@@ -482,7 +482,7 @@ describe("upsertDesktopDaemonConnection", () => {
     expect(fake.tailnetUpserts).toHaveLength(1);
     expect(fake.tailnetUpserts[0]).toMatchObject({
       serverId: "srv_desktop",
-      tailnetAddress: "jcode-3.tailf900c1.ts.net:6768",
+      tailnetAddress: "node-3.example.ts.net:6768",
       daemonPublicKeyB64: "daemon-public-key",
     });
     expect(fake.store.getHosts()[0]?.preferredConnectionId).toBe("direct:localhost:6768");

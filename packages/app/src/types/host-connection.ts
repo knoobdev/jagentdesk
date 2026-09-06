@@ -66,7 +66,7 @@ export function normalizeHostLabel(value: string | null | undefined, serverId: s
 /**
  * A short, human-readable hint for which connection a host uses, so two hosts
  * that happen to share a hostname (e.g. the same machine reachable both over
- * the tailnet and over localhost, both labelled "JCode.local") can be told
+ * the tailnet and over localhost, both labelled "workstation.local") can be told
  * apart. Prefers the host's preferred connection, falling back to the first.
  */
 export function hostConnectionHint(host: HostProfile): string {
@@ -88,8 +88,8 @@ export function hostConnectionHint(host: HostProfile): string {
 
 /**
  * Return the hosts with display labels made unique: any label shared by more
- * than one host gets its connection hint appended (e.g. "JCode.local
- * (localhost:6796)" vs "JCode.local (jcode-1.tailf900c1.ts.net:6768)"). Hosts
+ * than one host gets its connection hint appended (e.g. "workstation.local
+ * (localhost:6796)" vs "workstation.local (node-1.example.ts.net:6768)"). Hosts
  * whose label is already unique are returned unchanged. Pure and idempotent
  * when fed the raw (un-disambiguated) labels; callers should memoize on the
  * source array so the result reference stays stable.

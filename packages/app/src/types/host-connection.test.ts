@@ -36,9 +36,9 @@ const visibilitySocket: HostConnection = {
   path: "/tmp/jagentdesk.sock",
 };
 const visibilityTailnet: HostConnection = {
-  id: "tailnet:jcode-1:6768",
+  id: "tailnet:node-1:6768",
   type: "tailnet",
-  tailnetAddress: "jcode-1.tailf900c1.ts.net:6768",
+  tailnetAddress: "node-1.example.ts.net:6768",
   daemonPublicKeyB64: "k",
 };
 
@@ -78,15 +78,15 @@ describe("disambiguateHostLabels", () => {
 
   it("appends the connection hint only to hosts whose label collides", () => {
     const hosts = [
-      hostWith("srv_a", "JCode.local", {
+      hostWith("srv_a", "workstation.local", {
         id: "direct:localhost:6796",
         type: "directTcp",
         endpoint: "localhost:6796",
       }),
-      hostWith("srv_b", "JCode.local", {
-        id: "tailnet:jcode-1:6768",
+      hostWith("srv_b", "workstation.local", {
+        id: "tailnet:node-1:6768",
         type: "tailnet",
-        tailnetAddress: "jcode-1.tailf900c1.ts.net:6768",
+        tailnetAddress: "node-1.example.ts.net:6768",
         daemonPublicKeyB64: "k",
       }),
       hostWith("srv_c", "OtherBox", {
@@ -98,8 +98,8 @@ describe("disambiguateHostLabels", () => {
 
     const result = disambiguateHostLabels(hosts);
 
-    expect(result[0]?.label).toBe("JCode.local (localhost:6796)");
-    expect(result[1]?.label).toBe("JCode.local (jcode-1.tailf900c1.ts.net:6768)");
+    expect(result[0]?.label).toBe("workstation.local (localhost:6796)");
+    expect(result[1]?.label).toBe("workstation.local (node-1.example.ts.net:6768)");
     // A unique label is left untouched.
     expect(result[2]?.label).toBe("OtherBox");
     // serverIds are never mutated.

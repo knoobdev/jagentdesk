@@ -5,7 +5,8 @@
 #
 # Chay: bash orc/k8s/verify-k8s-e2e.sh
 set -uo pipefail
-REPO="/Users/ngocchanh/Project/private/organisations/hdc/jagentdesk"
+# Repo root computed from this script's location (orc/k8s/ → ../../), no hardcoded path.
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO" || exit 2
 pass=0; fail=0; skip=0
 ok(){ echo "  ✅ $1"; pass=$((pass+1)); }
