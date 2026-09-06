@@ -242,15 +242,21 @@ export function DatabaseDataEditor({
   const [txOpen, setTxOpen] = useState(false);
   const [isolation, setIsolation] = useState<IsolationLevel>("default");
 
-  // Pending edits to existing rows keyed "rowIdx:col"; appended new rows; deleted
-  // existing-row indices; current inline-editing cell.
+  // Pending edits to existing rows keyed "rowIdx:col"; appended new rows; rows
+  // staged for deletion; current inline-editing cell. `deleted` and `selected` are
+  // keyed by a STABLE row key (primary-key values, or the whole row when there is no
+  // PK) mapped to that row's cells — not the positional index — so both the
+  // selection highlight and staged deletes survive paging (a row picked on page 1
+  // stays picked, and correctly deletable, after moving to page 2) instead of
+  // "ghosting" onto whatever row now occupies that index.
   const [edits, setEdits] = useState<Record<string, Cell>>({});
   const [newRows, setNewRows] = useState<Array<Record<string, Cell>>>([]);
-  const [deleted, setDeleted] = useState<Set<number>>(new Set());
-  const [selected, setSelected] = useState<Set<number>>(new Set());
-  // Multi-row selection: `anchor` is the last row selected without a modifier (the
-  // pivot for SHIFT+click range on desktop). `selectMode` is the native long-press
-  // selection mode where a tap adds a row instead of opening the record view.
+  const [deleted, setDeleted] = useState<Map<string, Cell[]>>(new Map());
+  const [selected, setSelected] = useState<Map<string, Cell[]>>(new Map());
+  // Multi-row selection: `anchor` is the current-page index of the last row selected
+  // without a modifier (the pivot for SHIFT+click range on desktop; reset on paging
+  // since a range only spans the visible page). `selectMode` is the native
+  // long-press selection mode where a tap adds a row instead of opening the record view.
   const [anchor, setAnchor] = useState<number | null>(null);
   const [selectMode, setSelectMode] = useState(false);
   // The single grid cell with a visible "selected" highlight. A first click/tap
@@ -334,8 +340,8 @@ export function DatabaseDataEditor({
   const resetPending = useCallback(() => {
     setEdits({});
     setNewRows([]);
-    setDeleted(new Set());
-    setSelected(new Set());
+    setDeleted(new Map());
+    setSelected(new Map());
     setSelectedKey(null);
     setAnchor(null);
     setSelectMode(false);
@@ -368,6 +374,9 @@ export function DatabaseDataEditor({
         else {
           setResult(res.result);
           setPage(nextPage);
+          // Selection/staged-deletes persist across pages (keyed by row, not index),
+          // but the SHIFT-range pivot only makes sense within the page just loaded.
+          setAnchor(null);
         }
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : "Query failed");
@@ -456,6 +465,18 @@ export function DatabaseDataEditor({
     },
     [pkCols, colIndex],
   );
+  // Stable identity for a row used to key selection and staged deletes so they
+  // survive paging. Primary-key values when the table has a PK (the same identity
+  // used to target UPDATE/DELETE); otherwise the whole row, so no-PK tables still
+  // get a consistent — if coarser — key. \u0001 is a delimiter that can't collide
+  // with rendered cell text.
+  const rowKeyOf = useCallback(
+    (row: Cell[]): string =>
+      pkCols.length > 0
+        ? pkCols.map((pk) => `${row[colIndex(pk)]}`).join("\u0001")
+        : JSON.stringify(row),
+    [pkCols, colIndex],
+  );
 
   // Select a single cell (first click/tap). Editing is a separate gesture handled
   // in GridCell (second click on the selected cell, or a double-click/tap).
@@ -502,26 +523,32 @@ export function DatabaseDataEditor({
   // the anchor to this row). Used by delete/clone, which act on the `selected` set.
   const selectRow = useCallback(
     (rowIdx: number, mods: { range?: boolean; additive?: boolean }) => {
+      const row = result?.rows[rowIdx];
+      if (!row) return;
+      const key = rowKeyOf(row);
       setSelected((prev) => {
-        if (mods.range && anchor !== null) {
+        if (mods.range && anchor !== null && result) {
           const lo = Math.min(anchor, rowIdx);
           const hi = Math.max(anchor, rowIdx);
-          const next = new Set<number>();
-          for (let i = lo; i <= hi; i++) next.add(i);
+          const next = new Map<string, Cell[]>();
+          for (let i = lo; i <= hi; i++) {
+            const r = result.rows[i];
+            if (r) next.set(rowKeyOf(r), r);
+          }
           return next;
         }
         if (mods.additive) {
-          const next = new Set(prev);
-          if (next.has(rowIdx)) next.delete(rowIdx);
-          else next.add(rowIdx);
+          const next = new Map(prev);
+          if (next.has(key)) next.delete(key);
+          else next.set(key, row);
           return next;
         }
-        return new Set([rowIdx]);
+        return new Map([[key, row]]);
       });
       // SHIFT keeps the anchor so successive range selects pivot on the same row.
       if (!mods.range) setAnchor(rowIdx);
     },
-    [anchor],
+    [anchor, result, rowKeyOf],
   );
 
   // Standard "select every row on the page" — the target of Cmd/Ctrl+A on desktop
@@ -529,15 +556,15 @@ export function DatabaseDataEditor({
   // subsequent SHIFT+click still has a defined pivot.
   const selectAllRows = useCallback(() => {
     if (!result || result.rows.length === 0) return;
-    const next = new Set<number>();
-    for (let i = 0; i < result.rows.length; i++) next.add(i);
+    const next = new Map<string, Cell[]>();
+    for (const r of result.rows) next.set(rowKeyOf(r), r);
     setSelected(next);
     setAnchor(0);
-  }, [result]);
+  }, [result, rowKeyOf]);
   // Standard "clear selection" — Escape on desktop, "Clear" on mobile. Also drops
   // the anchor, the cell highlight, and (native) exits long-press selection mode.
   const clearSelection = useCallback(() => {
-    setSelected(new Set());
+    setSelected(new Map());
     setAnchor(null);
     setSelectedKey(null);
     setSelectMode(false);
@@ -579,6 +606,27 @@ export function DatabaseDataEditor({
     [handleGridKey],
   );
 
+  // Web-only: clicking outside the data grid clears the selection — including the
+  // last remaining row, which a plain in-grid click can only ever re-select. The
+  // grid itself (rows manage their own selection) and any control marked
+  // `data-jad-keep-selection` (the toolbar, whose Delete/Clone/pager act ON the
+  // selection) are exempt, so those clicks don't wipe the selection out from under
+  // the action they trigger.
+  useEffect(() => {
+    if (!isWeb || typeof document === "undefined") return;
+    const onDocMouseDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      if (gridElRef.current?.contains(target)) return;
+      if (typeof target.closest === "function" && target.closest("[data-jad-keep-selection]")) {
+        return;
+      }
+      clearSelectionRef.current();
+    };
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDocMouseDown);
+  }, []);
+
   // Web-only: route vertical mouse-wheel to the INNER vertical scroller. The outer
   // ScrollView is horizontal; without this the horizontal container can swallow the
   // wheel and rows never scroll up/down. Horizontal wheel/trackpad (deltaX-dominant)
@@ -609,21 +657,22 @@ export function DatabaseDataEditor({
 
   const addRow = useCallback(() => setNewRows((prev) => [...prev, {}]), []);
   const deleteSelected = useCallback(() => {
+    // Stage every selected row (across pages) for deletion, carrying its cell
+    // snapshot so the DELETE targets the right row even after paging away.
     setDeleted((prev) => {
-      const next = new Set(prev);
-      for (const r of selected) next.add(r);
+      const next = new Map(prev);
+      for (const [key, cells] of selected) next.set(key, cells);
       return next;
     });
-    setSelected(new Set());
+    setSelected(new Map());
   }, [selected]);
   // Clone selected rows as new rows (DataGrip's Duplicate Row) — copy every column
-  // except the primary key so the engine assigns a fresh identity.
+  // except the primary key so the engine assigns a fresh identity. Works on the
+  // selection's cell snapshots, so rows selected on other pages clone too.
   const cloneSelected = useCallback(() => {
     if (!result) return;
     const clones: Array<Record<string, Cell>> = [];
-    for (const r of selected) {
-      const src = result.rows[r];
-      if (!src) continue;
+    for (const src of selected.values()) {
       const rec: Record<string, Cell> = {};
       result.columns.forEach((c, i) => {
         if (!pkCols.includes(c.name)) rec[c.name] = src[i];
@@ -632,7 +681,7 @@ export function DatabaseDataEditor({
     }
     if (clones.length > 0) {
       setNewRows((prev) => [...prev, ...clones]);
-      setSelected(new Set());
+      setSelected(new Map());
       setStatus(`Cloned ${clones.length} row(s) — review and Submit.`);
     }
   }, [result, selected, pkCols]);
@@ -645,7 +694,8 @@ export function DatabaseDataEditor({
     for (const [key, value] of Object.entries(edits)) {
       const [rStr, col] = key.split(/:(.+)/);
       const r = Number(rStr);
-      if (deleted.has(r)) continue;
+      const row = result.rows[r];
+      if (row && deleted.has(rowKeyOf(row))) continue;
       const m = editedRows.get(r) ?? {};
       m[col] = value;
       editedRows.set(r, m);
@@ -656,20 +706,24 @@ export function DatabaseDataEditor({
     for (const nr of newRows) {
       if (Object.keys(nr).length > 0) stmts.push(buildInsert(engine, schema, table, nr));
     }
-    for (const r of deleted) {
-      stmts.push(buildDelete(engine, schema, table, keysForRow(result.rows[r])));
+    // Staged deletes carry their own cell snapshot, so a row deleted on page 1 still
+    // resolves its PK after the grid has paged to a different page.
+    for (const cells of deleted.values()) {
+      stmts.push(buildDelete(engine, schema, table, keysForRow(cells)));
     }
     return stmts;
-  }, [result, edits, deleted, newRows, engine, schema, table, keysForRow]);
+  }, [result, edits, deleted, newRows, engine, schema, table, keysForRow, rowKeyOf]);
 
   const editedRowCount = useMemo(() => {
+    if (!result) return 0;
     const rows = new Set<number>();
     for (const key of Object.keys(edits)) {
       const r = Number(key.split(":")[0]);
-      if (!deleted.has(r)) rows.add(r);
+      const row = result.rows[r];
+      if (!(row && deleted.has(rowKeyOf(row)))) rows.add(r);
     }
     return rows.size;
-  }, [edits, deleted]);
+  }, [edits, deleted, result, rowKeyOf]);
   const pendingCount =
     editedRowCount + deleted.size + newRows.filter((r) => Object.keys(r).length > 0).length;
 
@@ -908,29 +962,32 @@ export function DatabaseDataEditor({
               nestedScrollEnabled
               style={[styles.bodyScroll, bodyH !== undefined ? { height: bodyH } : null]}
             >
-              {result.rows.map((row, r) => (
-                <ExistingRow
-                  // eslint-disable-next-line react/no-array-index-key
-                  key={r}
-                  rowIndex={r}
-                  row={row}
-                  columns={colNames}
-                  widths={colWidths}
-                  edits={edits}
-                  deleted={deleted.has(r)}
-                  selected={selected.has(r)}
-                  isAnchor={anchor === r}
-                  canEdit={canEdit}
-                  selectedKey={selectedKey}
-                  onRowPress={handleRowPress}
-                  onRowLongPress={handleRowLongPress}
-                  onSelectCell={selectCell}
-                  onExpand={handleExpandCell}
-                  fkByCol={fkByCol}
-                  onNavigate={navigateFk}
-                  onOpenRecord={openRecord}
-                />
-              ))}
+              {result.rows.map((row, r) => {
+                const rk = rowKeyOf(row);
+                return (
+                  <ExistingRow
+                    // eslint-disable-next-line react/no-array-index-key
+                    key={r}
+                    rowIndex={r}
+                    row={row}
+                    columns={colNames}
+                    widths={colWidths}
+                    edits={edits}
+                    deleted={deleted.has(rk)}
+                    selected={selected.has(rk)}
+                    isAnchor={anchor === r}
+                    canEdit={canEdit}
+                    selectedKey={selectedKey}
+                    onRowPress={handleRowPress}
+                    onRowLongPress={handleRowLongPress}
+                    onSelectCell={selectCell}
+                    onExpand={handleExpandCell}
+                    fkByCol={fkByCol}
+                    onNavigate={navigateFk}
+                    onOpenRecord={openRecord}
+                  />
+                );
+              })}
               {newRows.map((nr, i) => (
                 <NewRow
                   // eslint-disable-next-line react/no-array-index-key
@@ -962,7 +1019,7 @@ export function DatabaseDataEditor({
 
   return (
     <View style={styles.container}>
-      <View style={[styles.toolbar, barHInset]}>
+      <View style={[styles.toolbar, barHInset]} dataSet={{ jadKeepSelection: "1" }}>
         <Text style={styles.title} numberOfLines={1}>
           {schema}.{table}
         </Text>
