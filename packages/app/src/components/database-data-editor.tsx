@@ -570,6 +570,14 @@ export function DatabaseDataEditor({
     setSelectMode(false);
   }, []);
 
+  // Native equivalent of the web click-outside-to-clear: a tap that lands on a
+  // non-interactive area (not a row or a toolbar button — those are Pressables that
+  // capture their own touch) bubbles up to the root container, which becomes the
+  // responder only while a selection exists and clears it on release. Web keeps the
+  // document mousedown handler below instead.
+  const hasSelection = selected.size > 0 || selectMode;
+  const onContainerShouldClear = useCallback(() => !isWeb && hasSelection, [hasSelection]);
+
   // Web-only keyboard selection. Cmd(mac)/Ctrl(win)+A selects every row on the
   // page; Escape clears the selection — but only while focus is within the grid.
   // The keydown listener lives on the focusable grid container (tabIndex set on the
@@ -1018,7 +1026,11 @@ export function DatabaseDataEditor({
   }
 
   return (
-    <View style={styles.container}>
+    <View
+      style={styles.container}
+      onStartShouldSetResponder={onContainerShouldClear}
+      onResponderRelease={clearSelection}
+    >
       <View style={[styles.toolbar, barHInset]} dataSet={{ jadKeepSelection: "1" }}>
         <Text style={styles.title} numberOfLines={1}>
           {schema}.{table}
