@@ -4,7 +4,7 @@ import { navigateToAgent } from "@/utils/navigate-to-agent";
 import { clusterChatTitle } from "@/utils/cluster-chat-title";
 import { useSkillsStore } from "@/stores/skills-store";
 import { useAgentSkillsStore } from "@/stores/agent-skills-store";
-import { matchSkillsForQuery } from "@/skills/match-skills";
+import { matchSkillsForAutoLoad } from "@/skills/match-skills";
 import { applySkillPreamble, buildSkillsPreamble } from "@/skills/skill-injection";
 
 export interface AskAgentAboutResourceInput {
@@ -50,7 +50,7 @@ export interface AskAgentAboutResourceInput {
 function resolveAutoLoadInjectedPrompt(text: string): string {
   if (!useAgentSkillsStore.getState().autoLoad) return text;
   const skills = useSkillsStore.getState().skills;
-  const matched = matchSkillsForQuery(skills, text);
+  const matched = matchSkillsForAutoLoad(skills, text);
   return applySkillPreamble(text, buildSkillsPreamble(matched));
 }
 

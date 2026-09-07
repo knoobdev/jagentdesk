@@ -1,6 +1,6 @@
 import { skillEffectivePrompt, useSkillsStore, type Skill } from "@/stores/skills-store";
 import { useAgentSkillsStore } from "@/stores/agent-skills-store";
-import { matchSkillsForQuery } from "@/skills/match-skills";
+import { matchSkillsForAutoLoad } from "@/skills/match-skills";
 
 /**
  * Turning attached / auto-matched skills into agent context (redesign B3 + B5,
@@ -88,7 +88,7 @@ export function resolveSkillInjectedText(agentId: string, text: string): string 
   const agentSkills = useAgentSkillsStore.getState();
   const attachedIds = agentSkills.attached[agentId] ?? [];
   const matchedIds = agentSkills.autoLoad
-    ? matchSkillsForQuery(skills, text).map((skill) => skill.id)
+    ? matchSkillsForAutoLoad(skills, text).map((skill) => skill.id)
     : [];
   const injection = computeSkillInjection({
     skills,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { matchSkillsForQuery } from "./match-skills";
+import { matchSkillsForAutoLoad, matchSkillsForQuery } from "./match-skills";
 import type { Skill } from "@/stores/skills-store";
 
 function mk(partial: Partial<Skill> & Pick<Skill, "id" | "name">): Skill {
@@ -65,5 +65,31 @@ describe("matchSkillsForQuery", () => {
     expect(result).toHaveLength(2);
     // Both skills match one tag each (weight 3); tie breaks on name.
     expect(result.map((s) => s.id)).toEqual([k8s.id, reviewer.id]);
+  });
+});
+
+describe("matchSkillsForAutoLoad", () => {
+  it("does NOT auto-load on a lone incidental description word", () => {
+    // "bugs" only appears in reviewer's description (weight 1) — below the
+    // auto-load threshold, so it must not silently inject the skill.
+    expect(matchSkillsForAutoLoad(skills, "there are bugs in my code")).toEqual([]);
+    expect(matchSkillsForQuery(skills, "there are bugs in my code")).toEqual([reviewer]);
+  });
+
+  it("still auto-loads on a tag or name match", () => {
+    expect(matchSkillsForAutoLoad(skills, "check the kubernetes pod")).toEqual([k8s]);
+  });
+
+  it("auto-loads when several description words overlap (real signal)", () => {
+    // "diff" + "bugs" both hit reviewer's description (weight 1 each = 2, at the
+    // threshold) without touching the "review" tag — repeated overlap is a signal.
+    expect(matchSkillsForAutoLoad(skills, "the diff has bugs")).toEqual([reviewer]);
+  });
+
+  it("caps the number of auto-loaded skills", () => {
+    const many = Array.from({ length: 6 }, (_, i) =>
+      mk({ id: `s${i}`, name: `Skill ${i}`, tags: ["shared"] }),
+    );
+    expect(matchSkillsForAutoLoad(many, "shared")).toHaveLength(3);
   });
 });
