@@ -24,6 +24,11 @@ import { useDatabaseViewStore } from "@/stores/database-view-store";
 import { useDatabaseNavStore } from "@/stores/database-nav-store";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { isSqlEngine, qualifyTable, quoteIdent } from "@/utils/sql-ident";
+import {
+  applyWhereCompletion as applyWhereCompletionText,
+  buildWhereCompletion,
+  type WhereAcItem,
+} from "@/components/database-where-completion";
 import { isNative, isWeb } from "@/constants/platform";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { buildDelete, buildInsert, buildUpdate, type Cell, type Dml } from "@/utils/sql-dml";
@@ -42,17 +47,23 @@ const EXPAND_THRESHOLD = 24;
 // enters edit (opens the value-editor dock) instead of just re-selecting.
 const DOUBLE_MS = 300;
 
-// WHERE-clause completion (DataGrip-style): column names of the current table plus
-// the operators/keywords that make sense inside a WHERE. Column names come from the
-// live schema at render time; these are the static tail.
-// prettier-ignore
-const WHERE_KEYWORDS = [
-  "and", "or", "not", "is null", "is not null", "in", "like", "ilike", "between",
-  "exists", "null", "true", "false", "asc", "desc",
-];
-// The word currently being typed at the caret end of the filter (identifiers may be
-// quoted); used to prefix-match completions.
-const FILTER_WORD_RE = /([A-Za-z_][A-Za-z0-9_]*)$/;
+// Web only: macOS/Chromium overlay scrollbars stay hidden until you actively
+// scroll, so the row body looked like it "couldn't scroll". Inject a classic,
+// always-visible scrollbar for the grid body once and tag the node with this class.
+const DB_SCROLL_CLASS = "jad-db-scroll";
+let scrollbarStyleInjected = false;
+function ensureDbScrollbarStyle(): void {
+  if (!isWeb || scrollbarStyleInjected || typeof document === "undefined") return;
+  scrollbarStyleInjected = true;
+  const style = document.createElement("style");
+  style.textContent = `
+.${DB_SCROLL_CLASS}{overflow-y:scroll;scrollbar-gutter:stable;}
+.${DB_SCROLL_CLASS}::-webkit-scrollbar{width:12px;height:12px;}
+.${DB_SCROLL_CLASS}::-webkit-scrollbar-thumb{background-color:rgba(140,140,150,0.55);border-radius:6px;border:3px solid transparent;background-clip:padding-box;}
+.${DB_SCROLL_CLASS}::-webkit-scrollbar-thumb:hover{background-color:rgba(140,140,150,0.85);}
+.${DB_SCROLL_CLASS}::-webkit-scrollbar-track{background:transparent;}`;
+  document.head.appendChild(style);
+}
 
 const ThemedChevronLeft = withUnistyles(ChevronLeft);
 const ThemedChevronRight = withUnistyles(ChevronRight);
@@ -62,12 +73,34 @@ const ThemedTrash = withUnistyles(Trash2);
 const ThemedUndo = withUnistyles(Undo2);
 const ThemedCopy = withUnistyles(Copy);
 
-/** One WHERE-completion chip; own component so the press handler stays stable. */
-function FilterSuggestionChip({ value, onPick }: { value: string; onPick: (v: string) => void }) {
-  const press = useCallback(() => onPick(value), [onPick, value]);
+/** One row in the WHERE completion dropdown; own component for a stable handler. */
+function WhereCompletionRow({
+  item,
+  active,
+  onPick,
+}: {
+  item: WhereAcItem;
+  active: boolean;
+  onPick: (item: WhereAcItem) => void;
+}) {
+  const press = useCallback(() => onPick(item), [onPick, item]);
+  // Web: prevent the pointer-down from blurring the input (which would close the
+  // dropdown before the press lands).
+  const keepFocus = useCallback((e: { preventDefault: () => void }) => e.preventDefault(), []);
   return (
-    <Pressable style={styles.suggestChip} onPress={press}>
-      <Text style={styles.suggestText}>{value}</Text>
+    <Pressable
+      style={[styles.acRow, active && styles.acRowActive]}
+      onPress={press}
+      onPointerDown={keepFocus}
+    >
+      <Text style={styles.acLabel} numberOfLines={1}>
+        {item.label}
+      </Text>
+      {item.detail ? (
+        <Text style={styles.acDetail} numberOfLines={1}>
+          {item.detail}
+        </Text>
+      ) : null}
     </Pressable>
   );
 }
@@ -348,16 +381,18 @@ export function DatabaseDataEditor({
   // Measured viewport height so the vertical body scroll can be bounded while the
   // header row stays pinned above it (see gridBody). Without a bound, nesting a
   // vertical scroll inside the horizontal scroll would grow unbounded on web.
+  // Native measures via onLayout; web measures via ResizeObserver (see gridWebRef/
+  // headerWebRef) because onLayout returns 0 for these views when they're nested in
+  // a horizontal ScrollView in the packaged build. Keeping onLayout native-only
+  // avoids a late onLayout(0) clobbering the observer's correct value on web.
   const [gridH, setGridH] = useState(0);
   const [headerH, setHeaderH] = useState(0);
-  const onGridLayout = useCallback(
-    (e: LayoutChangeEvent) => setGridH(e.nativeEvent.layout.height),
-    [],
-  );
-  const onHeaderLayout = useCallback(
-    (e: LayoutChangeEvent) => setHeaderH(e.nativeEvent.layout.height),
-    [],
-  );
+  const onGridLayout = useCallback((e: LayoutChangeEvent) => {
+    if (!isWeb) setGridH(e.nativeEvent.layout.height);
+  }, []);
+  const onHeaderLayout = useCallback((e: LayoutChangeEvent) => {
+    if (!isWeb) setHeaderH(e.nativeEvent.layout.height);
+  }, []);
 
   const resetPending = useCallback(() => {
     setEdits({});
@@ -478,41 +513,85 @@ export function DatabaseDataEditor({
     void load(0);
   }, [filterText, load]);
 
-  // DataGrip-style WHERE completion: prefix-match the word being typed against the
-  // table's column names first (weighted ahead of keywords), then WHERE operators.
-  const filterSuggestions = useMemo(() => {
-    const m = FILTER_WORD_RE.exec(filterText);
-    if (!m) return [];
-    const word = m[1].toLowerCase();
-    if (word.length < 1) return [];
-    const pool = [...colNames, ...WHERE_KEYWORDS];
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const s of pool) {
-      const low = s.toLowerCase();
-      if (low.startsWith(word) && low !== word && !seen.has(s)) {
-        seen.add(s);
-        out.push(s);
-        if (out.length >= 10) break;
-      }
-    }
-    return out;
-  }, [filterText, colNames]);
+  // DataGrip-style, context-aware WHERE completion. Three phases, never a flat mix:
+  //  • column position (start, after AND/OR, after "(") → list the table's columns
+  //  • right after a column → list comparison operators (=, LIKE, IN, IS NULL, …)
+  //  • after a complete condition → offer AND / OR
+  const [acFocused, setAcFocused] = useState(false);
+  const [acIndex, setAcIndex] = useState(0);
 
-  const applyFilterSuggestion = useCallback(
-    (value: string) => {
-      // Replace the trailing partial word with the completion; quote identifiers that
-      // aren't plain lowercase so mixed-case/reserved column names stay valid.
-      setFilterText((cur) => {
-        const isColumnLike =
-          /^[A-Za-z_][A-Za-z0-9_]*$/.test(value) && !WHERE_KEYWORDS.includes(value);
-        const needsQuote = isColumnLike && value !== value.toLowerCase();
-        const replacement = needsQuote ? quoteIdent(engine, value) : value;
-        return `${cur.replace(FILTER_WORD_RE, replacement)} `;
-      });
-    },
-    [engine],
+  const filterCompletion = useMemo(
+    () => buildWhereCompletion(filterText, columns, engine),
+    [filterText, columns, engine],
   );
+
+  // Insert a completion (replace the partial word or append), keeping focus so the
+  // next phase's suggestions appear immediately.
+  const applyWhereCompletion = useCallback((item: WhereAcItem) => {
+    setFilterText((cur) => applyWhereCompletionText(cur, item));
+    setAcFocused(true);
+    setAcIndex(0);
+  }, []);
+
+  // Keyboard nav on web: ↑/↓ move, Enter/Tab accept (and suppress the filter submit),
+  // Esc closes. Read live state through a ref so the keydown listener stays stable.
+  const acStateRef = useRef({ items: [] as WhereAcItem[], index: 0, focused: false });
+  useEffect(() => {
+    acStateRef.current.items = filterCompletion.items;
+  }, [filterCompletion]);
+  useEffect(() => {
+    acStateRef.current.index = acIndex;
+  }, [acIndex]);
+  useEffect(() => {
+    acStateRef.current.focused = acFocused;
+  }, [acFocused]);
+  useEffect(() => setAcIndex(0), [filterCompletion]);
+
+  const applyWhereCompletionRef = useRef(applyWhereCompletion);
+  useEffect(() => {
+    applyWhereCompletionRef.current = applyWhereCompletion;
+  }, [applyWhereCompletion]);
+  const handleFilterKey = useCallback((e: KeyboardEvent) => {
+    const st = acStateRef.current;
+    if (!st.focused || st.items.length === 0) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setAcIndex((i) => Math.min(st.items.length - 1, i + 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setAcIndex((i) => Math.max(0, i - 1));
+    } else if (e.key === "Enter" || e.key === "Tab") {
+      const item = st.items[st.index] ?? st.items[0];
+      if (item) {
+        e.preventDefault();
+        e.stopPropagation();
+        applyWhereCompletionRef.current(item);
+      }
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setAcFocused(false);
+    }
+  }, []);
+  const filterBoxElRef = useRef<HTMLElement | null>(null);
+  const filterBoxWebRef = useCallback(
+    (node: View | null) => {
+      if (!isWeb) return;
+      const el = node as unknown as HTMLElement | null;
+      if (filterBoxElRef.current) {
+        filterBoxElRef.current.removeEventListener("keydown", handleFilterKey, true);
+      }
+      filterBoxElRef.current = el;
+      // Capture phase so accepting a completion with Enter beats the input's submit.
+      if (el) el.addEventListener("keydown", handleFilterKey, true);
+    },
+    [handleFilterKey],
+  );
+  const onFilterFocus = useCallback(() => setAcFocused(true), []);
+  const onFilterBlur = useCallback(() => setAcFocused(false), []);
+  const onFilterChange = useCallback((t: string) => {
+    setFilterText(t);
+    setAcFocused(true);
+  }, []);
 
   const colIndex = useCallback((name: string) => colNames.indexOf(name), [colNames]);
   const keysForRow = useCallback(
@@ -657,19 +736,54 @@ export function DatabaseDataEditor({
       clearSelectionRef.current();
     }
   }, []);
+  // Web: measure the grid/header via ResizeObserver on the real DOM node. RN's
+  // onLayout returns 0 for these nested-in-a-horizontal-ScrollView views in the
+  // packaged desktop build, which left the row body falling back to a viewport cap
+  // (short table + no scrollbar). clientHeight off the observed node is reliable.
+  const gridResizeObsRef = useRef<ResizeObserver | null>(null);
+  const headerResizeObsRef = useRef<ResizeObserver | null>(null);
+  const headerElRef = useRef<HTMLElement | null>(null);
   const gridWebRef = useCallback(
     (node: View | null) => {
       if (!isWeb) return;
       const el = node as unknown as HTMLElement | null;
       if (gridElRef.current) gridElRef.current.removeEventListener("keydown", handleGridKey);
+      gridResizeObsRef.current?.disconnect();
       gridElRef.current = el;
       if (el) {
         // Make the grid focusable (via click or Tab) so keydown scopes to it.
         if (el.tabIndex < 0) el.tabIndex = 0;
         el.addEventListener("keydown", handleGridKey);
+        setGridH(el.clientHeight);
+        if (typeof ResizeObserver !== "undefined") {
+          const obs = new ResizeObserver(() => setGridH(el.clientHeight));
+          obs.observe(el);
+          gridResizeObsRef.current = obs;
+        }
       }
     },
     [handleGridKey],
+  );
+  const headerWebRef = useCallback((node: View | null) => {
+    if (!isWeb) return;
+    const el = node as unknown as HTMLElement | null;
+    headerResizeObsRef.current?.disconnect();
+    headerElRef.current = el;
+    if (el) {
+      setHeaderH(el.clientHeight);
+      if (typeof ResizeObserver !== "undefined") {
+        const obs = new ResizeObserver(() => setHeaderH(el.clientHeight));
+        obs.observe(el);
+        headerResizeObsRef.current = obs;
+      }
+    }
+  }, []);
+  useEffect(
+    () => () => {
+      gridResizeObsRef.current?.disconnect();
+      headerResizeObsRef.current?.disconnect();
+    },
+    [],
   );
 
   // Web-only: clicking outside the data grid clears the selection — including the
@@ -723,6 +837,8 @@ export function DatabaseDataEditor({
       bodyNodeRef.current = el && typeof el.addEventListener === "function" ? el : null;
       if (bodyNodeRef.current) {
         bodyNodeRef.current.addEventListener("wheel", handleBodyWheel, { passive: false });
+        ensureDbScrollbarStyle();
+        bodyNodeRef.current.classList.add(DB_SCROLL_CLASS);
       }
     },
     [handleBodyWheel],
@@ -1026,7 +1142,7 @@ export function DatabaseDataEditor({
       <View style={styles.gridWrap} onLayout={onGridLayout} ref={gridWebRef}>
         <ScrollView horizontal style={styles.hscroll} contentContainerStyle={styles.hContent}>
           <View style={styles.grid}>
-            <View style={styles.headerRow} onLayout={onHeaderLayout}>
+            <View style={styles.headerRow} onLayout={onHeaderLayout} ref={headerWebRef}>
               <View style={styles.gutter} />
               {columns.map((c, i) => (
                 <HeaderCell
@@ -1248,13 +1364,19 @@ export function DatabaseDataEditor({
       </View>
 
       <View style={styles.filterBar}>
-        <View style={styles.filterInputBox} dataSet={{ jadKeepSelection: "1" }}>
+        <View
+          style={styles.filterInputBox}
+          dataSet={{ jadKeepSelection: "1" }}
+          ref={filterBoxWebRef}
+        >
           <Text style={styles.filterLabel}>WHERE</Text>
           <ThemedCellInput
             style={styles.filterInput}
             uniProps={placeholderColor}
             value={filterText}
-            onChangeText={setFilterText}
+            onChangeText={onFilterChange}
+            onFocus={onFilterFocus}
+            onBlur={onFilterBlur}
             placeholder="filter condition, e.g. status = 'paid'"
             onSubmitEditing={applyFilter}
             autoCapitalize="none"
@@ -1262,22 +1384,26 @@ export function DatabaseDataEditor({
             spellCheck={false}
             blurOnSubmit={false}
           />
+          {acFocused && filterCompletion.items.length > 0 ? (
+            <View style={styles.acDropdown} dataSet={{ jadKeepSelection: "1" }}>
+              <ScrollView
+                style={styles.acScroll}
+                keyboardShouldPersistTaps="always"
+                showsVerticalScrollIndicator
+              >
+                {filterCompletion.items.map((item, i) => (
+                  <WhereCompletionRow
+                    key={item.key}
+                    item={item}
+                    active={i === acIndex}
+                    onPick={applyWhereCompletion}
+                  />
+                ))}
+              </ScrollView>
+            </View>
+          ) : null}
         </View>
       </View>
-      {filterSuggestions.length > 0 ? (
-        <ScrollView
-          horizontal
-          style={styles.suggestBar}
-          contentContainerStyle={styles.suggestContent}
-          keyboardShouldPersistTaps="always"
-          showsHorizontalScrollIndicator={false}
-          dataSet={{ jadKeepSelection: "1" }}
-        >
-          {filterSuggestions.map((s) => (
-            <FilterSuggestionChip key={s} value={s} onPick={applyFilterSuggestion} />
-          ))}
-        </ScrollView>
-      ) : null}
 
       {!canEdit && columns.length > 0 ? (
         <View style={styles.noteBar}>
@@ -2006,8 +2132,11 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,
     backgroundColor: theme.colors.surface1,
+    // Keep the WHERE bar (and its completion dropdown) above the grid below it.
+    zIndex: 20,
   },
   // A real bordered input box (DataGrip-like), not a bare label + naked field.
+  // Relative so the completion dropdown can anchor to its bottom edge.
   filterInputBox: {
     flex: 1,
     minWidth: 0,
@@ -2020,6 +2149,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderWidth: theme.borderWidth[1],
     borderColor: theme.colors.border,
     backgroundColor: theme.colors.surface0,
+    position: "relative",
   },
   filterLabel: {
     fontSize: 10,
@@ -2036,29 +2166,47 @@ const styles = StyleSheet.create((theme: Theme) => ({
     padding: 0,
     ...(isWeb ? ({ outlineStyle: "none" } as object) : null),
   },
-  // WHERE completion chip bar under the input (mirrors the SQL console).
-  suggestBar: {
-    flexGrow: 0,
-    borderBottomWidth: theme.borderWidth[1],
-    borderBottomColor: theme.colors.border,
+  // WHERE completion dropdown — a vertical list anchored under the input, overlaying
+  // the grid (DataGrip-style), not an inline chip bar.
+  acDropdown: {
+    position: "absolute",
+    top: "100%",
+    left: 0,
+    right: 0,
+    marginTop: theme.spacing[1],
+    maxHeight: 240,
+    borderRadius: theme.borderRadius.md,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.borderAccent,
     backgroundColor: theme.colors.surface1,
+    overflow: "hidden",
+    zIndex: 30,
+    ...theme.shadow.md,
   },
-  suggestContent: {
+  acScroll: {
+    flexGrow: 0,
+  },
+  acRow: {
+    flexDirection: "row",
     alignItems: "center",
-    gap: theme.spacing[1.5],
+    justifyContent: "space-between",
+    gap: theme.spacing[3],
+    minHeight: 30,
     paddingHorizontal: theme.spacing[3],
-    paddingVertical: theme.spacing[1],
+    paddingVertical: theme.spacing[1.5],
   },
-  suggestChip: {
-    paddingHorizontal: theme.spacing[2],
-    paddingVertical: 3,
-    borderRadius: theme.borderRadius.sm,
+  acRowActive: {
     backgroundColor: theme.colors.surface2,
   },
-  suggestText: {
+  acLabel: {
+    flexShrink: 1,
     fontSize: theme.fontSize.xs,
     fontFamily: theme.fontFamily.mono,
     color: theme.colors.foreground,
+  },
+  acDetail: {
+    fontSize: 10,
+    color: theme.colors.foregroundExtraMuted,
   },
   title: {
     fontSize: theme.fontSize.sm,
