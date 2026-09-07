@@ -7,6 +7,7 @@ import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { useDatabaseViewStore } from "@/stores/database-view-store";
 import { useDatabaseHistoryStore } from "@/stores/database-history-store";
 import { DatabaseResultTable } from "@/components/database-result-table";
+import { isWeb } from "@/constants/platform";
 import type { Theme } from "@/styles/theme";
 
 const ThemedPlay = withUnistyles(Play);
@@ -52,13 +53,27 @@ interface SchemaPool {
   columns: string[];
 }
 
-/** One completion suggestion chip — its own component so the press handler is
- *  stable (avoids react-perf's inline-function-as-prop). */
-function SuggestionChip({ value, onPick }: { value: string; onPick: (v: string) => void }) {
+/** One row in the completion dropdown — own component for a stable press handler. */
+function SuggestionRow({
+  value,
+  active,
+  onPick,
+}: {
+  value: string;
+  active: boolean;
+  onPick: (v: string) => void;
+}) {
   const press = useCallback(() => onPick(value), [onPick, value]);
+  const keepFocus = useCallback((e: { preventDefault: () => void }) => e.preventDefault(), []);
   return (
-    <Pressable style={styles.suggestChip} onPress={press}>
-      <Text style={styles.suggestText}>{value}</Text>
+    <Pressable
+      style={[styles.acRow, active && styles.acRowActive]}
+      onPress={press}
+      onPointerDown={keepFocus}
+    >
+      <Text style={styles.acText} numberOfLines={1}>
+        {value}
+      </Text>
     </Pressable>
   );
 }
@@ -185,8 +200,77 @@ export function DatabaseSqlConsole({
     return out;
   }, [sql, pool]);
 
+  // Completion dropdown (vertical, DataGrip-style) — shown while the editor is focused
+  // and there are prefix matches. Keyboard: ↑/↓ move, Enter/Tab accept, Esc closes.
+  const [acOpen, setAcOpen] = useState(false);
+  const [acIndex, setAcIndex] = useState(0);
   const applySuggestion = useCallback((value: string) => {
     setSql((cur) => `${cur.replace(WORD_RE, value)} `);
+    setAcOpen(true);
+    setAcIndex(0);
+  }, []);
+  useEffect(() => setAcIndex(0), [suggestions]);
+
+  const acStateRef = useRef({ items: [] as string[], index: 0, open: false });
+  useEffect(() => {
+    acStateRef.current.items = suggestions;
+  }, [suggestions]);
+  useEffect(() => {
+    acStateRef.current.index = acIndex;
+  }, [acIndex]);
+  useEffect(() => {
+    acStateRef.current.open = acOpen;
+  }, [acOpen]);
+  const applySuggestionRef = useRef(applySuggestion);
+  useEffect(() => {
+    applySuggestionRef.current = applySuggestion;
+  }, [applySuggestion]);
+  const handleEditorKey = useCallback((e: KeyboardEvent) => {
+    const st = acStateRef.current;
+    if (!st.open || st.items.length === 0) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setAcIndex((i) => Math.min(st.items.length - 1, i + 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setAcIndex((i) => Math.max(0, i - 1));
+    } else if (e.key === "Enter" || e.key === "Tab") {
+      // Only intercept when a completion is available; a plain Enter otherwise adds a
+      // newline (this is a multi-line editor, not a submit box).
+      const item = st.items[st.index] ?? st.items[0];
+      if (item) {
+        e.preventDefault();
+        e.stopPropagation();
+        applySuggestionRef.current(item);
+      }
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setAcOpen(false);
+    }
+  }, []);
+  const editorElRef = useRef<HTMLElement | null>(null);
+  const editorWebRef = useCallback(
+    (node: unknown) => {
+      if (!isWeb) return;
+      // Attach to the editor WRAPPER's DOM node (a View → reliable ref), capturing the
+      // textarea's bubbled keydown before the newline insert so Enter/Tab accept a
+      // completion. (withUnistyles(TextInput) ref forwarding to the DOM is unreliable.)
+      const el = node as HTMLElement | null;
+      if (editorElRef.current) {
+        editorElRef.current.removeEventListener("keydown", handleEditorKey, true);
+      }
+      editorElRef.current = el && typeof el.addEventListener === "function" ? el : null;
+      if (editorElRef.current) {
+        editorElRef.current.addEventListener("keydown", handleEditorKey, true);
+      }
+    },
+    [handleEditorKey],
+  );
+  const onEditorFocus = useCallback(() => setAcOpen(true), []);
+  const onEditorBlur = useCallback(() => setAcOpen(false), []);
+  const onEditorChange = useCallback((t: string) => {
+    setSql(t);
+    setAcOpen(true);
   }, []);
 
   // Lightweight inspection: flag table names after FROM/JOIN that the schema pool
@@ -322,6 +406,14 @@ export function DatabaseSqlConsole({
           </ScrollView>
         ) : null}
         <DatabaseResultTable result={result} />
+        <View style={styles.resultFooter}>
+          <Text style={styles.resultFooterText} numberOfLines={1}>
+            {result.rowCount} row{result.rowCount === 1 ? "" : "s"}
+            {result.truncated ? "+ (truncated)" : ""}
+            {typeof result.elapsedMs === "number" ? ` · ${result.elapsedMs} ms` : ""}
+            {` · ${result.columns.length} col${result.columns.length === 1 ? "" : "s"}`}
+          </Text>
+        </View>
       </View>
     ) : (
       <Text style={styles.hint}>Run a SELECT to see rows here.</Text>
@@ -338,11 +430,13 @@ export function DatabaseSqlConsole({
 
   return (
     <View style={styles.container}>
-      <View style={styles.editorWrap}>
+      <View style={styles.editorWrap} ref={editorWebRef}>
         <ThemedTextInput
           style={styles.editor}
           value={sql}
-          onChangeText={setSql}
+          onChangeText={onEditorChange}
+          onFocus={onEditorFocus}
+          onBlur={onEditorBlur}
           placeholder={`-- SQL for ${engine}\nselect * from ...`}
           multiline
           autoCapitalize="none"
@@ -350,20 +444,16 @@ export function DatabaseSqlConsole({
           spellCheck={false}
           uniProps={placeholderColor}
         />
+        {acOpen && suggestions.length > 0 ? (
+          <View style={styles.acDropdown}>
+            <ScrollView style={styles.acScroll} keyboardShouldPersistTaps="always">
+              {suggestions.map((s, i) => (
+                <SuggestionRow key={s} value={s} active={i === acIndex} onPick={applySuggestion} />
+              ))}
+            </ScrollView>
+          </View>
+        ) : null}
       </View>
-
-      {suggestions.length > 0 ? (
-        <ScrollView
-          horizontal
-          style={styles.suggestBar}
-          contentContainerStyle={styles.suggestContent}
-          keyboardShouldPersistTaps="always"
-        >
-          {suggestions.map((s) => (
-            <SuggestionChip key={s} value={s} onPick={applySuggestion} />
-          ))}
-        </ScrollView>
-      ) : null}
 
       {inspections.length > 0 ? (
         <View style={styles.inspectBar}>
@@ -459,42 +549,69 @@ const styles = StyleSheet.create((theme: Theme) => ({
     flex: 1,
     minHeight: 0,
   },
+  // A fixed-height, bordered editor box (DataGrip-like) — not a naked textarea that
+  // grows and shoves the layout. `position: relative` anchors the completion dropdown.
   editorWrap: {
-    minHeight: 120,
-    maxHeight: 240,
+    padding: theme.spacing[2],
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+    position: "relative",
+    zIndex: 20,
   },
   editor: {
-    flex: 1,
+    height: 150,
     padding: theme.spacing[3],
+    borderRadius: theme.borderRadius.md,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface0,
     fontSize: theme.fontSize.sm,
     fontFamily: theme.fontFamily.mono,
     color: theme.colors.foreground,
     textAlignVertical: "top",
+    ...(isWeb ? ({ outlineStyle: "none", overflowY: "auto" } as object) : null),
   },
-  suggestBar: {
-    flexGrow: 0,
-    borderBottomWidth: theme.borderWidth[1],
-    borderBottomColor: theme.colors.border,
+  // Completion dropdown anchored under the editor (vertical list, not a chip bar).
+  acDropdown: {
+    position: "absolute",
+    left: theme.spacing[2],
+    right: theme.spacing[2],
+    top: "100%",
+    marginTop: -theme.spacing[1],
+    maxHeight: 240,
+    borderRadius: theme.borderRadius.md,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.borderAccent,
     backgroundColor: theme.colors.surface1,
+    overflow: "hidden",
+    zIndex: 40,
+    ...theme.shadow.md,
   },
-  suggestContent: {
-    alignItems: "center",
-    gap: theme.spacing[1.5],
-    paddingHorizontal: theme.spacing[2],
-    paddingVertical: theme.spacing[1],
+  acScroll: { flexGrow: 0 },
+  acRow: {
+    minHeight: 30,
+    justifyContent: "center",
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[1.5],
   },
-  suggestChip: {
-    paddingHorizontal: theme.spacing[2],
-    paddingVertical: 3,
-    borderRadius: theme.borderRadius.sm,
-    backgroundColor: theme.colors.surface2,
-  },
-  suggestText: {
+  acRowActive: { backgroundColor: theme.colors.surface2 },
+  acText: {
     fontSize: theme.fontSize.xs,
     fontFamily: theme.fontFamily.mono,
     color: theme.colors.foreground,
+  },
+  resultFooter: {
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[1],
+    borderTopWidth: theme.borderWidth[1],
+    borderTopColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+  },
+  resultFooterText: {
+    fontSize: theme.fontSize.xs,
+    fontFamily: theme.fontFamily.mono,
+    color: theme.colors.foregroundMuted,
   },
   inspectBar: {
     paddingHorizontal: theme.spacing[3],

@@ -1,21 +1,29 @@
-import { useCallback, useMemo, useState } from "react";
-import { ScrollView, Text, View } from "react-native";
-import type { LayoutChangeEvent } from "react-native";
+import { useMemo } from "react";
+import { Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import type { QueryResult } from "@jagentdesk/protocol/database/rpc-schemas";
 import type { Theme } from "@/styles/theme";
+import { GridScroll } from "@/components/database-grid-scroll";
 
 const MIN_COL_WIDTH = 120;
 const MAX_COL_WIDTH = 320;
 const CHAR_WIDTH = 7.5;
+const GUTTER_WIDTH = 56;
 
 /**
- * A read-only tabular renderer for a QueryResult — the shared grid body used by
- * both the table data view and the SQL console. Horizontally + vertically
- * scrollable; column widths are estimated from the header + a sample of cells so
- * wide values stay legible without a layout pass.
+ * A read-only tabular renderer for a QueryResult — the shared grid body used by both
+ * the table data view and the SQL console. Two-axis scroll via {@link GridScroll}
+ * (viewport-edge scrollbars + pinned header on web), a row-number gutter, and column
+ * widths estimated from the header + a sample of cells so wide values stay legible.
  */
-export function DatabaseResultTable({ result }: { result: QueryResult }) {
+export function DatabaseResultTable({
+  result,
+  startRow = 1,
+}: {
+  result: QueryResult;
+  /** 1-based number of the first row (for paged views); defaults to 1. */
+  startRow?: number;
+}) {
   const widths = useMemo(() => {
     return result.columns.map((col, i) => {
       let longest = col.name.length;
@@ -31,97 +39,78 @@ export function DatabaseResultTable({ result }: { result: QueryResult }) {
       );
     });
   }, [result]);
+  const totalWidth = useMemo(() => GUTTER_WIDTH + widths.reduce((sum, w) => sum + w, 0), [widths]);
 
-  // Measured heights so the vertical (rows) scroll can be bounded while the
-  // header row stays pinned above it.
-  const [gridH, setGridH] = useState(0);
-  const [headerH, setHeaderH] = useState(0);
-  const onGridLayout = useCallback(
-    (e: LayoutChangeEvent) => setGridH(e.nativeEvent.layout.height),
-    [],
+  const header = (
+    <View style={[styles.headerRow, { width: totalWidth }]}>
+      <View style={[styles.gutterCell, styles.headerCell]}>
+        <Text style={styles.gutterHeaderText}>#</Text>
+      </View>
+      {result.columns.map((col, i) => (
+        <View key={col.name} style={[styles.headerCell, { width: widths[i] }]}>
+          <Text style={styles.headerText} numberOfLines={1}>
+            {col.name}
+          </Text>
+          {col.dataType ? (
+            <Text style={styles.headerType} numberOfLines={1}>
+              {col.dataType}
+            </Text>
+          ) : null}
+        </View>
+      ))}
+    </View>
   );
-  const onHeaderLayout = useCallback(
-    (e: LayoutChangeEvent) => setHeaderH(e.nativeEvent.layout.height),
-    [],
-  );
-  const bodyH = gridH > 0 ? Math.max(0, gridH - headerH) : undefined;
 
   return (
-    // Horizontal (columns) scroll on the outside so its scrollbar sits at the
-    // viewport edge — not below tall content — and the header + rows share it so
-    // columns stay aligned. The inner vertical (rows) scroll is bounded to the
-    // measured height so the header stays pinned. Both axes scroll independently.
-    <View style={styles.gridWrap} onLayout={onGridLayout}>
-      <ScrollView horizontal style={styles.hScroll} contentContainerStyle={styles.hContent}>
-        <View style={styles.grid}>
-          <View style={styles.headerRow} onLayout={onHeaderLayout}>
-            {result.columns.map((col, i) => (
-              <View key={col.name} style={[styles.headerCell, { width: widths[i] }]}>
-                <Text style={styles.headerText} numberOfLines={1}>
-                  {col.name}
-                </Text>
-                {col.dataType ? (
-                  <Text style={styles.headerType} numberOfLines={1}>
-                    {col.dataType}
-                  </Text>
-                ) : null}
-              </View>
-            ))}
+    <GridScroll header={header}>
+      {result.rows.map((row, r) => (
+        // Rows are positional (no stable PK in an arbitrary result set), so the row
+        // index is the correct key here.
+        // eslint-disable-next-line react/no-array-index-key
+        <View
+          key={r}
+          style={[styles.bodyRow, { width: totalWidth }, r % 2 === 1 && styles.bodyRowAlt]}
+        >
+          <View style={[styles.gutterCell, styles.bodyCell]}>
+            <Text style={styles.gutterText}>{startRow + r}</Text>
           </View>
-          <ScrollView style={[styles.bodyScroll, bodyH !== undefined ? { height: bodyH } : null]}>
-            {result.rows.map((row, r) => (
-              // Rows are positional (no stable PK is guaranteed in an arbitrary
-              // result set), so the row index is the correct key here.
-              // eslint-disable-next-line react/no-array-index-key
-              <View key={r} style={[styles.bodyRow, r % 2 === 1 && styles.bodyRowAlt]}>
-                {row.map((cell, c) => (
-                  <View
-                    key={result.columns[c]?.name ?? "col"}
-                    style={[styles.bodyCell, { width: widths[c] }]}
-                  >
-                    <Text
-                      style={[styles.bodyText, cell === null && styles.nullText]}
-                      numberOfLines={1}
-                    >
-                      {cell === null ? "NULL" : String(cell)}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            ))}
-            {result.rows.length === 0 ? <Text style={styles.emptyText}>No rows.</Text> : null}
-          </ScrollView>
+          {row.map((cell, c) => (
+            <View
+              key={result.columns[c]?.name ?? "col"}
+              style={[styles.bodyCell, { width: widths[c] }]}
+            >
+              <Text style={[styles.bodyText, cell === null && styles.nullText]} numberOfLines={1}>
+                {cell === null ? "NULL" : String(cell)}
+              </Text>
+            </View>
+          ))}
         </View>
-      </ScrollView>
-    </View>
+      ))}
+      {result.rows.length === 0 ? <Text style={styles.emptyText}>No rows.</Text> : null}
+    </GridScroll>
   );
 }
 
 const styles = StyleSheet.create((theme: Theme) => ({
-  gridWrap: {
-    flex: 1,
-    minHeight: 0,
-  },
-  hScroll: {
-    flex: 1,
-  },
-  hContent: {
-    flexGrow: 1,
-    flexDirection: "column",
-  },
-  grid: {
-    flexGrow: 1,
-    minHeight: 0,
-  },
-  bodyScroll: {
-    flexGrow: 1,
-    minHeight: 0,
-  },
   headerRow: {
     flexDirection: "row",
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,
     backgroundColor: theme.colors.surface1,
+  },
+  gutterCell: {
+    width: GUTTER_WIDTH,
+    alignItems: "flex-end",
+    backgroundColor: theme.colors.surface1,
+  },
+  gutterHeaderText: {
+    fontSize: 10,
+    color: theme.colors.foregroundExtraMuted,
+  },
+  gutterText: {
+    fontSize: 10,
+    color: theme.colors.foregroundExtraMuted,
+    fontFamily: theme.fontFamily.mono,
   },
   headerCell: {
     paddingHorizontal: theme.spacing[2],

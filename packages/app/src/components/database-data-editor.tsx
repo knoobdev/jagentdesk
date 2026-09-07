@@ -29,6 +29,7 @@ import {
   buildWhereCompletion,
   type WhereAcItem,
 } from "@/components/database-where-completion";
+import { GridScroll } from "@/components/database-grid-scroll";
 import { isNative, isWeb } from "@/constants/platform";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { buildDelete, buildInsert, buildUpdate, type Cell, type Dml } from "@/utils/sql-dml";
@@ -46,24 +47,6 @@ const EXPAND_THRESHOLD = 24;
 // A second press on a cell within this window counts as a double-click/tap and
 // enters edit (opens the value-editor dock) instead of just re-selecting.
 const DOUBLE_MS = 300;
-
-// Web only: macOS/Chromium overlay scrollbars stay hidden until you actively
-// scroll, so the row body looked like it "couldn't scroll". Inject a classic,
-// always-visible scrollbar for the grid body once and tag the node with this class.
-const DB_SCROLL_CLASS = "jad-db-scroll";
-let scrollbarStyleInjected = false;
-function ensureDbScrollbarStyle(): void {
-  if (!isWeb || scrollbarStyleInjected || typeof document === "undefined") return;
-  scrollbarStyleInjected = true;
-  const style = document.createElement("style");
-  style.textContent = `
-.${DB_SCROLL_CLASS}{overflow-y:scroll;scrollbar-gutter:stable;}
-.${DB_SCROLL_CLASS}::-webkit-scrollbar{width:12px;height:12px;}
-.${DB_SCROLL_CLASS}::-webkit-scrollbar-thumb{background-color:rgba(140,140,150,0.55);border-radius:6px;border:3px solid transparent;background-clip:padding-box;}
-.${DB_SCROLL_CLASS}::-webkit-scrollbar-thumb:hover{background-color:rgba(140,140,150,0.85);}
-.${DB_SCROLL_CLASS}::-webkit-scrollbar-track{background:transparent;}`;
-  document.head.appendChild(style);
-}
 
 const ThemedChevronLeft = withUnistyles(ChevronLeft);
 const ThemedChevronRight = withUnistyles(ChevronRight);
@@ -377,22 +360,12 @@ export function DatabaseDataEditor({
       }),
     [columns, colNames, result],
   );
-
-  // Measured viewport height so the vertical body scroll can be bounded while the
-  // header row stays pinned above it (see gridBody). Without a bound, nesting a
-  // vertical scroll inside the horizontal scroll would grow unbounded on web.
-  // Native measures via onLayout; web measures via ResizeObserver (see gridWebRef/
-  // headerWebRef) because onLayout returns 0 for these views when they're nested in
-  // a horizontal ScrollView in the packaged build. Keeping onLayout native-only
-  // avoids a late onLayout(0) clobbering the observer's correct value on web.
-  const [gridH, setGridH] = useState(0);
-  const [headerH, setHeaderH] = useState(0);
-  const onGridLayout = useCallback((e: LayoutChangeEvent) => {
-    if (!isWeb) setGridH(e.nativeEvent.layout.height);
-  }, []);
-  const onHeaderLayout = useCallback((e: LayoutChangeEvent) => {
-    if (!isWeb) setHeaderH(e.nativeEvent.layout.height);
-  }, []);
+  // Total content width (gutter + all columns) — applied to the header and every row
+  // so columns align and the content is wider than the viewport for horizontal scroll.
+  const totalGridWidth = useMemo(
+    () => GUTTER_W + colWidths.reduce((sum, w) => sum + w, 0),
+    [colWidths],
+  );
 
   const resetPending = useCallback(() => {
     setEdits({});
@@ -736,54 +709,19 @@ export function DatabaseDataEditor({
       clearSelectionRef.current();
     }
   }, []);
-  // Web: measure the grid/header via ResizeObserver on the real DOM node. RN's
-  // onLayout returns 0 for these nested-in-a-horizontal-ScrollView views in the
-  // packaged desktop build, which left the row body falling back to a viewport cap
-  // (short table + no scrollbar). clientHeight off the observed node is reliable.
-  const gridResizeObsRef = useRef<ResizeObserver | null>(null);
-  const headerResizeObsRef = useRef<ResizeObserver | null>(null);
-  const headerElRef = useRef<HTMLElement | null>(null);
+  // Web: the GridScroll scroll <div> is the focusable, keydown-scoped grid node.
+  // GridScroll owns the scroll mechanics (viewport-edge scrollbars + sticky header);
+  // here we only wire keyboard selection and the click-outside contains() check.
   const gridWebRef = useCallback(
-    (node: View | null) => {
-      if (!isWeb) return;
-      const el = node as unknown as HTMLElement | null;
+    (el: HTMLElement | null) => {
       if (gridElRef.current) gridElRef.current.removeEventListener("keydown", handleGridKey);
-      gridResizeObsRef.current?.disconnect();
       gridElRef.current = el;
       if (el) {
-        // Make the grid focusable (via click or Tab) so keydown scopes to it.
-        if (el.tabIndex < 0) el.tabIndex = 0;
+        if (el.tabIndex < 0) el.tabIndex = 0; // focusable via click/Tab so keydown scopes here
         el.addEventListener("keydown", handleGridKey);
-        setGridH(el.clientHeight);
-        if (typeof ResizeObserver !== "undefined") {
-          const obs = new ResizeObserver(() => setGridH(el.clientHeight));
-          obs.observe(el);
-          gridResizeObsRef.current = obs;
-        }
       }
     },
     [handleGridKey],
-  );
-  const headerWebRef = useCallback((node: View | null) => {
-    if (!isWeb) return;
-    const el = node as unknown as HTMLElement | null;
-    headerResizeObsRef.current?.disconnect();
-    headerElRef.current = el;
-    if (el) {
-      setHeaderH(el.clientHeight);
-      if (typeof ResizeObserver !== "undefined") {
-        const obs = new ResizeObserver(() => setHeaderH(el.clientHeight));
-        obs.observe(el);
-        headerResizeObsRef.current = obs;
-      }
-    }
-  }, []);
-  useEffect(
-    () => () => {
-      gridResizeObsRef.current?.disconnect();
-      headerResizeObsRef.current?.disconnect();
-    },
-    [],
   );
 
   // Web-only: clicking outside the data grid clears the selection — including the
@@ -806,43 +744,6 @@ export function DatabaseDataEditor({
     document.addEventListener("mousedown", onDocMouseDown);
     return () => document.removeEventListener("mousedown", onDocMouseDown);
   }, []);
-
-  // Web-only: route vertical mouse-wheel to the INNER vertical scroller. The outer
-  // ScrollView is horizontal; without this the horizontal container can swallow the
-  // wheel and rows never scroll up/down. Horizontal wheel/trackpad (deltaX-dominant)
-  // is left to the outer scroller. On react-native-web a ScrollView `ref` resolves to
-  // the component INSTANCE (not a DOM node), so reach the scrollable div via
-  // `getScrollableNode()` — casting the instance to HTMLElement leaves `scrollTop`
-  // and `addEventListener` undefined, so the wheel listener silently never attaches.
-  const bodyNodeRef = useRef<HTMLElement | null>(null);
-  const handleBodyWheel = useCallback((e: WheelEvent) => {
-    const el = bodyNodeRef.current;
-    if (!el) return;
-    if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
-      el.scrollTop += e.deltaY;
-      e.preventDefault();
-      e.stopPropagation();
-    }
-  }, []);
-  const bodyScrollWebRef = useCallback(
-    (node: ScrollView | null) => {
-      if (!isWeb) return;
-      // RNW ScrollView instances expose getScrollableNode() → the real scrollable
-      // <div>; fall back to the node itself if a future RNW returns the node.
-      const instance = node as unknown as { getScrollableNode?: () => HTMLElement } | null;
-      const el =
-        (instance?.getScrollableNode?.() as HTMLElement | undefined) ??
-        (node as unknown as HTMLElement | null);
-      if (bodyNodeRef.current) bodyNodeRef.current.removeEventListener("wheel", handleBodyWheel);
-      bodyNodeRef.current = el && typeof el.addEventListener === "function" ? el : null;
-      if (bodyNodeRef.current) {
-        bodyNodeRef.current.addEventListener("wheel", handleBodyWheel, { passive: false });
-        ensureDbScrollbarStyle();
-        bodyNodeRef.current.classList.add(DB_SCROLL_CLASS);
-      }
-    },
-    [handleBodyWheel],
-  );
 
   const addRow = useCallback(() => setNewRows((prev) => [...prev, {}]), []);
   const deleteSelected = useCallback(() => {
@@ -1122,88 +1023,72 @@ export function DatabaseDataEditor({
       </View>
     );
   } else if (result) {
-    // Both axes scroll independently: the OUTER scroll is horizontal (so its
-    // scrollbar sits at the viewport edge, not below tall content), and the
-    // header + rows share it so columns stay aligned. The INNER vertical scroll
-    // is bounded to the measured viewport height (gridH − headerH) so the header
-    // row stays pinned while rows scroll under it.
-    const bodyH = gridH > 0 ? Math.max(0, gridH - headerH) : undefined;
-    // Bound the row body's height so it overflows and scrolls. Prefer the measured
-    // viewport height; on web fall back to a viewport-relative cap until (or if)
-    // onLayout lands, so rows never grow unbounded under the horizontal scroll's
-    // overflow-y:hidden and lose their scrollbar.
-    let bodyHeightStyle: object | null = null;
-    if (bodyH !== undefined) {
-      bodyHeightStyle = { height: bodyH };
-    } else if (isWeb) {
-      bodyHeightStyle = styles.bodyScrollWebFallback;
-    }
+    // Two-axis scroll via GridScroll: on web a single overflow:auto container with a
+    // sticky header, so both scrollbars pin to the viewport edges (the vertical bar
+    // is always visible at the right, not hidden past the last column) and the header
+    // stays pinned; native keeps nested ScrollViews. Header + every row are given the
+    // same explicit width so columns line up and content overflows for scrolling.
+    const gridHeader = (
+      <View style={[styles.headerRow, { width: totalGridWidth }]}>
+        <View style={styles.gutter} />
+        {columns.map((c, i) => (
+          <HeaderCell
+            key={c.name}
+            column={c}
+            width={colWidths[i]}
+            sortDir={sort?.col === c.name ? sort.dir : null}
+            aggActive={aggCol === c.name}
+            onSort={handleSort}
+            onAggregate={handleAggregate}
+          />
+        ))}
+      </View>
+    );
     gridBody = (
-      <View style={styles.gridWrap} onLayout={onGridLayout} ref={gridWebRef}>
-        <ScrollView horizontal style={styles.hscroll} contentContainerStyle={styles.hContent}>
-          <View style={styles.grid}>
-            <View style={styles.headerRow} onLayout={onHeaderLayout} ref={headerWebRef}>
-              <View style={styles.gutter} />
-              {columns.map((c, i) => (
-                <HeaderCell
-                  key={c.name}
-                  column={c}
-                  width={colWidths[i]}
-                  sortDir={sort?.col === c.name ? sort.dir : null}
-                  aggActive={aggCol === c.name}
-                  onSort={handleSort}
-                  onAggregate={handleAggregate}
-                />
-              ))}
-            </View>
-            <ScrollView
-              ref={bodyScrollWebRef}
-              nestedScrollEnabled
-              showsVerticalScrollIndicator
-              style={[styles.bodyScroll, bodyHeightStyle]}
-            >
-              {result.rows.map((row, r) => {
-                const rk = rowKeyOf(row);
-                return (
-                  <ExistingRow
-                    // eslint-disable-next-line react/no-array-index-key
-                    key={r}
-                    rowIndex={r}
-                    row={row}
-                    columns={colNames}
-                    widths={colWidths}
-                    edits={edits}
-                    deleted={deleted.has(rk)}
-                    selected={selected.has(rk)}
-                    isAnchor={anchor === r}
-                    canEdit={canEdit}
-                    selectedKey={selectedKey}
-                    onRowPress={handleRowPress}
-                    onRowLongPress={handleRowLongPress}
-                    onSelectCell={selectCell}
-                    onExpand={handleExpandCell}
-                    fkByCol={fkByCol}
-                    onNavigate={navigateFk}
-                    onOpenRecord={openRecord}
-                  />
-                );
-              })}
-              {newRows.map((nr, i) => (
-                <NewRow
-                  // eslint-disable-next-line react/no-array-index-key
-                  key={`new-${i}`}
-                  index={i}
-                  values={nr}
-                  columns={colNames}
-                  widths={colWidths}
-                  selectedKey={selectedKey}
-                  onSelectCell={selectCell}
-                  onExpand={handleExpandCell}
-                />
-              ))}
-            </ScrollView>
-          </View>
-        </ScrollView>
+      <View style={styles.gridArea}>
+        <GridScroll header={gridHeader} webNodeRef={gridWebRef}>
+          {result.rows.map((row, r) => {
+            const rk = rowKeyOf(row);
+            return (
+              <ExistingRow
+                // eslint-disable-next-line react/no-array-index-key
+                key={r}
+                rowIndex={r}
+                row={row}
+                rowWidth={totalGridWidth}
+                columns={colNames}
+                widths={colWidths}
+                edits={edits}
+                deleted={deleted.has(rk)}
+                selected={selected.has(rk)}
+                isAnchor={anchor === r}
+                canEdit={canEdit}
+                selectedKey={selectedKey}
+                onRowPress={handleRowPress}
+                onRowLongPress={handleRowLongPress}
+                onSelectCell={selectCell}
+                onExpand={handleExpandCell}
+                fkByCol={fkByCol}
+                onNavigate={navigateFk}
+                onOpenRecord={openRecord}
+              />
+            );
+          })}
+          {newRows.map((nr, i) => (
+            <NewRow
+              // eslint-disable-next-line react/no-array-index-key
+              key={`new-${i}`}
+              index={i}
+              values={nr}
+              rowWidth={totalGridWidth}
+              columns={colNames}
+              widths={colWidths}
+              selectedKey={selectedKey}
+              onSelectCell={selectCell}
+              onExpand={handleExpandCell}
+            />
+          ))}
+        </GridScroll>
         {loading ? (
           <View style={styles.loadingOverlay} pointerEvents="none">
             <View style={styles.loadingBadge}>
@@ -1605,6 +1490,7 @@ function HeaderCell({
 function ExistingRow({
   rowIndex,
   row,
+  rowWidth,
   columns,
   widths,
   edits,
@@ -1623,6 +1509,7 @@ function ExistingRow({
 }: {
   rowIndex: number;
   row: Cell[];
+  rowWidth: number;
   columns: string[];
   widths: number[];
   edits: Record<string, Cell>;
@@ -1672,6 +1559,7 @@ function ExistingRow({
     <View
       style={[
         styles.bodyRow,
+        { width: rowWidth },
         rowIndex % 2 === 1 && styles.bodyRowAlt,
         selected && styles.selectedRow,
         selected && isAnchor && styles.anchorRow,
@@ -1728,6 +1616,7 @@ interface ExpandedCell {
 function NewRow({
   index,
   values,
+  rowWidth,
   columns,
   widths,
   selectedKey,
@@ -1736,6 +1625,7 @@ function NewRow({
 }: {
   index: number;
   values: Record<string, Cell>;
+  rowWidth: number;
   columns: string[];
   widths: number[];
   selectedKey: string | null;
@@ -1743,7 +1633,7 @@ function NewRow({
   onExpand: (cell: ExpandedCell) => void;
 }) {
   return (
-    <View style={[styles.bodyRow, styles.newRow]}>
+    <View style={[styles.bodyRow, styles.newRow, { width: rowWidth }]}>
       <View style={styles.gutter}>
         <ThemedPlus size={12} uniProps={mutedColor} />
       </View>
@@ -2277,25 +2167,15 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderColor: theme.colors.border,
     backgroundColor: theme.colors.surface1,
   },
-  // Outer horizontal scroll (columns) fills the pane; the inner vertical scroll
-  // (rows) is bounded to the measured height so the header row stays pinned.
-  // On web, suppress the browser's native TEXT selection across the grid so a
-  // shift+click range selection isn't fighting a text drag-select. Values are still
-  // copyable via Export or the value-editor dock (both outside this container).
-  // `userSelect` inherits in CSS, so descendant rows/cells/header are covered too;
-  // rows/cells also set it explicitly below.
-  gridWrap: {
+  // Wraps the two-axis GridScroll + the loading overlay. On web, suppress the
+  // browser's native TEXT selection across the grid so a shift+click range selection
+  // isn't fighting a text drag-select. Values are still copyable via Export or the
+  // value-editor dock. `userSelect` inherits, so rows/cells/header are covered too.
+  gridArea: {
     flex: 1,
     minHeight: 0,
     ...(isWeb ? { userSelect: "none" as const } : null),
   },
-  hscroll: { flex: 1 },
-  hContent: { flexGrow: 1, flexDirection: "column" },
-  grid: { flexGrow: 1, minHeight: 0 },
-  bodyScroll: { flexGrow: 1, minHeight: 0 },
-  // Web fallback bound (see gridBody) — a viewport-relative cap so rows overflow and
-  // scroll before the measured `bodyH` lands; harmless once the exact height applies.
-  bodyScrollWebFallback: { maxHeight: "70vh" } as object,
   headerRow: {
     flexDirection: "row",
     borderBottomWidth: theme.borderWidth[1],
