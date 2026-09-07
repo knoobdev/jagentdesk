@@ -5,6 +5,29 @@ own release line (now `0.2.0`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
 
+## v0.2.3 — 2026-09-07
+
+Database-grid usability + skill auto-load precision.
+
+### Fixed
+
+- **Database grid scrolls vertically on desktop** — the mouse-wheel handler was
+  attaching to the react-native-web `ScrollView` *instance* instead of its scrollable
+  DOM node (`getScrollableNode()`), so `scrollTop`/the `wheel` listener silently
+  no-op'd and rows couldn't be scrolled down (only sideways). It now targets the real
+  node, and on web the row body keeps a bounded height even before the viewport is
+  measured, so it always overflows and scrolls.
+- **WHERE filter now has autocomplete and a real input** — typing in the filter bar
+  suggests the current table's **column names** first, then WHERE operators/keywords
+  (`and`, `or`, `is null`, `in`, `like`, `between`, …); picking one inserts it (quoting
+  mixed-case/reserved identifiers). The field is now a proper bordered input instead of
+  a bare label + naked text field.
+- **Skill auto-load no longer injects unrelated skills** — auto-matching fired on a
+  single incidental description-word overlap (and was uncapped), so a skill used in one
+  chat (e.g. the database chat) could bleed its context into an unrelated workspace
+  chat. Auto-load now requires a strong signal — a tag or name hit, or ≥2 description
+  hits — and is capped to 3 skills per message. Manual attachment is unchanged.
+
 ## v0.2.2 — 2026-09-07
 
 Usage-cost clarity + agentic-browser extension fixes.
