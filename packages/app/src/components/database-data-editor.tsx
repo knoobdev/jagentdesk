@@ -42,6 +42,18 @@ const EXPAND_THRESHOLD = 24;
 // enters edit (opens the value-editor dock) instead of just re-selecting.
 const DOUBLE_MS = 300;
 
+// WHERE-clause completion (DataGrip-style): column names of the current table plus
+// the operators/keywords that make sense inside a WHERE. Column names come from the
+// live schema at render time; these are the static tail.
+// prettier-ignore
+const WHERE_KEYWORDS = [
+  "and", "or", "not", "is null", "is not null", "in", "like", "ilike", "between",
+  "exists", "null", "true", "false", "asc", "desc",
+];
+// The word currently being typed at the caret end of the filter (identifiers may be
+// quoted); used to prefix-match completions.
+const FILTER_WORD_RE = /([A-Za-z_][A-Za-z0-9_]*)$/;
+
 const ThemedChevronLeft = withUnistyles(ChevronLeft);
 const ThemedChevronRight = withUnistyles(ChevronRight);
 const ThemedRefresh = withUnistyles(RefreshCw);
@@ -49,6 +61,16 @@ const ThemedPlus = withUnistyles(Plus);
 const ThemedTrash = withUnistyles(Trash2);
 const ThemedUndo = withUnistyles(Undo2);
 const ThemedCopy = withUnistyles(Copy);
+
+/** One WHERE-completion chip; own component so the press handler stays stable. */
+function FilterSuggestionChip({ value, onPick }: { value: string; onPick: (v: string) => void }) {
+  const press = useCallback(() => onPick(value), [onPick, value]);
+  return (
+    <Pressable style={styles.suggestChip} onPress={press}>
+      <Text style={styles.suggestText}>{value}</Text>
+    </Pressable>
+  );
+}
 const ThemedSpinner = withUnistyles(LoadingSpinner);
 const mutedColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 const placeholderColor = (theme: Theme) => ({
@@ -456,6 +478,42 @@ export function DatabaseDataEditor({
     void load(0);
   }, [filterText, load]);
 
+  // DataGrip-style WHERE completion: prefix-match the word being typed against the
+  // table's column names first (weighted ahead of keywords), then WHERE operators.
+  const filterSuggestions = useMemo(() => {
+    const m = FILTER_WORD_RE.exec(filterText);
+    if (!m) return [];
+    const word = m[1].toLowerCase();
+    if (word.length < 1) return [];
+    const pool = [...colNames, ...WHERE_KEYWORDS];
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const s of pool) {
+      const low = s.toLowerCase();
+      if (low.startsWith(word) && low !== word && !seen.has(s)) {
+        seen.add(s);
+        out.push(s);
+        if (out.length >= 10) break;
+      }
+    }
+    return out;
+  }, [filterText, colNames]);
+
+  const applyFilterSuggestion = useCallback(
+    (value: string) => {
+      // Replace the trailing partial word with the completion; quote identifiers that
+      // aren't plain lowercase so mixed-case/reserved column names stay valid.
+      setFilterText((cur) => {
+        const isColumnLike =
+          /^[A-Za-z_][A-Za-z0-9_]*$/.test(value) && !WHERE_KEYWORDS.includes(value);
+        const needsQuote = isColumnLike && value !== value.toLowerCase();
+        const replacement = needsQuote ? quoteIdent(engine, value) : value;
+        return `${cur.replace(FILTER_WORD_RE, replacement)} `;
+      });
+    },
+    [engine],
+  );
+
   const colIndex = useCallback((name: string) => colNames.indexOf(name), [colNames]);
   const keysForRow = useCallback(
     (row: Cell[]): Record<string, Cell> => {
@@ -638,8 +696,10 @@ export function DatabaseDataEditor({
   // Web-only: route vertical mouse-wheel to the INNER vertical scroller. The outer
   // ScrollView is horizontal; without this the horizontal container can swallow the
   // wheel and rows never scroll up/down. Horizontal wheel/trackpad (deltaX-dominant)
-  // is left to the outer scroller. On react-native-web the ScrollView `ref` resolves
-  // to the scrollable DOM node itself, so we can read/adjust scrollTop directly.
+  // is left to the outer scroller. On react-native-web a ScrollView `ref` resolves to
+  // the component INSTANCE (not a DOM node), so reach the scrollable div via
+  // `getScrollableNode()` — casting the instance to HTMLElement leaves `scrollTop`
+  // and `addEventListener` undefined, so the wheel listener silently never attaches.
   const bodyNodeRef = useRef<HTMLElement | null>(null);
   const handleBodyWheel = useCallback((e: WheelEvent) => {
     const el = bodyNodeRef.current;
@@ -653,11 +713,16 @@ export function DatabaseDataEditor({
   const bodyScrollWebRef = useCallback(
     (node: ScrollView | null) => {
       if (!isWeb) return;
-      const el = node as unknown as HTMLElement | null;
+      // RNW ScrollView instances expose getScrollableNode() → the real scrollable
+      // <div>; fall back to the node itself if a future RNW returns the node.
+      const instance = node as unknown as { getScrollableNode?: () => HTMLElement } | null;
+      const el =
+        (instance?.getScrollableNode?.() as HTMLElement | undefined) ??
+        (node as unknown as HTMLElement | null);
       if (bodyNodeRef.current) bodyNodeRef.current.removeEventListener("wheel", handleBodyWheel);
-      bodyNodeRef.current = el;
-      if (el && typeof el.addEventListener === "function") {
-        el.addEventListener("wheel", handleBodyWheel, { passive: false });
+      bodyNodeRef.current = el && typeof el.addEventListener === "function" ? el : null;
+      if (bodyNodeRef.current) {
+        bodyNodeRef.current.addEventListener("wheel", handleBodyWheel, { passive: false });
       }
     },
     [handleBodyWheel],
@@ -947,6 +1012,16 @@ export function DatabaseDataEditor({
     // is bounded to the measured viewport height (gridH − headerH) so the header
     // row stays pinned while rows scroll under it.
     const bodyH = gridH > 0 ? Math.max(0, gridH - headerH) : undefined;
+    // Bound the row body's height so it overflows and scrolls. Prefer the measured
+    // viewport height; on web fall back to a viewport-relative cap until (or if)
+    // onLayout lands, so rows never grow unbounded under the horizontal scroll's
+    // overflow-y:hidden and lose their scrollbar.
+    let bodyHeightStyle: object | null = null;
+    if (bodyH !== undefined) {
+      bodyHeightStyle = { height: bodyH };
+    } else if (isWeb) {
+      bodyHeightStyle = styles.bodyScrollWebFallback;
+    }
     gridBody = (
       <View style={styles.gridWrap} onLayout={onGridLayout} ref={gridWebRef}>
         <ScrollView horizontal style={styles.hscroll} contentContainerStyle={styles.hContent}>
@@ -968,7 +1043,8 @@ export function DatabaseDataEditor({
             <ScrollView
               ref={bodyScrollWebRef}
               nestedScrollEnabled
-              style={[styles.bodyScroll, bodyH !== undefined ? { height: bodyH } : null]}
+              showsVerticalScrollIndicator
+              style={[styles.bodyScroll, bodyHeightStyle]}
             >
               {result.rows.map((row, r) => {
                 const rk = rowKeyOf(row);
@@ -1172,17 +1248,36 @@ export function DatabaseDataEditor({
       </View>
 
       <View style={styles.filterBar}>
-        <Text style={styles.filterLabel}>WHERE</Text>
-        <TextInput
-          style={styles.filterInput}
-          value={filterText}
-          onChangeText={setFilterText}
-          placeholder="filter condition, e.g. status = 'paid'"
-          onSubmitEditing={applyFilter}
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
+        <View style={styles.filterInputBox} dataSet={{ jadKeepSelection: "1" }}>
+          <Text style={styles.filterLabel}>WHERE</Text>
+          <ThemedCellInput
+            style={styles.filterInput}
+            uniProps={placeholderColor}
+            value={filterText}
+            onChangeText={setFilterText}
+            placeholder="filter condition, e.g. status = 'paid'"
+            onSubmitEditing={applyFilter}
+            autoCapitalize="none"
+            autoCorrect={false}
+            spellCheck={false}
+            blurOnSubmit={false}
+          />
+        </View>
       </View>
+      {filterSuggestions.length > 0 ? (
+        <ScrollView
+          horizontal
+          style={styles.suggestBar}
+          contentContainerStyle={styles.suggestContent}
+          keyboardShouldPersistTaps="always"
+          showsHorizontalScrollIndicator={false}
+          dataSet={{ jadKeepSelection: "1" }}
+        >
+          {filterSuggestions.map((s) => (
+            <FilterSuggestionChip key={s} value={s} onPick={applyFilterSuggestion} />
+          ))}
+        </ScrollView>
+      ) : null}
 
       {!canEdit && columns.length > 0 ? (
         <View style={styles.noteBar}>
@@ -1906,16 +2001,29 @@ const styles = StyleSheet.create((theme: Theme) => ({
   filterBar: {
     flexDirection: "row",
     alignItems: "center",
-    gap: theme.spacing[2],
     paddingHorizontal: theme.spacing[3],
     paddingVertical: theme.spacing[1.5],
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,
     backgroundColor: theme.colors.surface1,
   },
+  // A real bordered input box (DataGrip-like), not a bare label + naked field.
+  filterInputBox: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1.5],
+    borderRadius: theme.borderRadius.md,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface0,
+  },
   filterLabel: {
     fontSize: 10,
-    fontWeight: theme.fontWeight.medium,
+    fontWeight: theme.fontWeight.semibold,
     color: theme.colors.foregroundExtraMuted,
     letterSpacing: 0.5,
   },
@@ -1926,6 +2034,31 @@ const styles = StyleSheet.create((theme: Theme) => ({
     fontFamily: theme.fontFamily.mono,
     color: theme.colors.foreground,
     padding: 0,
+    ...(isWeb ? ({ outlineStyle: "none" } as object) : null),
+  },
+  // WHERE completion chip bar under the input (mirrors the SQL console).
+  suggestBar: {
+    flexGrow: 0,
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+  },
+  suggestContent: {
+    alignItems: "center",
+    gap: theme.spacing[1.5],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[1],
+  },
+  suggestChip: {
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: 3,
+    borderRadius: theme.borderRadius.sm,
+    backgroundColor: theme.colors.surface2,
+  },
+  suggestText: {
+    fontSize: theme.fontSize.xs,
+    fontFamily: theme.fontFamily.mono,
+    color: theme.colors.foreground,
   },
   title: {
     fontSize: theme.fontSize.sm,
@@ -2012,6 +2145,9 @@ const styles = StyleSheet.create((theme: Theme) => ({
   hContent: { flexGrow: 1, flexDirection: "column" },
   grid: { flexGrow: 1, minHeight: 0 },
   bodyScroll: { flexGrow: 1, minHeight: 0 },
+  // Web fallback bound (see gridBody) — a viewport-relative cap so rows overflow and
+  // scroll before the measured `bodyH` lands; harmless once the exact height applies.
+  bodyScrollWebFallback: { maxHeight: "70vh" } as object,
   headerRow: {
     flexDirection: "row",
     borderBottomWidth: theme.borderWidth[1],
