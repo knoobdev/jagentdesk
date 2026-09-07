@@ -5,6 +5,29 @@ own release line (now `0.2.0`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
 
+## v0.2.5 — 2026-09-08
+
+Database grids scroll like DataGrip, and the SQL console got a real UI.
+
+### Fixed
+
+- **Vertical scrollbar is pinned to the viewport (both grids)** — the table data view
+  and the SQL result table nested a vertical scroller inside the horizontal one, so
+  the scrollbar sat at the right edge of the *content* (only reachable after scrolling
+  fully right). On web both grids now use a single `overflow:auto` container with a
+  `position:sticky` header, so both scrollbars pin to the viewport edges, the header
+  stays pinned, and columns stay aligned. (Native keeps nested scrollers.) Extracted
+  to a shared `GridScroll`.
+- **SQL console query editor** — no longer a naked, unbounded textarea that overflowed
+  upward; it's a fixed-height, bordered, scrollable editor box.
+- **SQL console shows results with a footer** — row count, elapsed ms, column count
+  (and a truncated marker) show under the result grid, so you no longer have to switch
+  to the Output tab to see how many rows came back. Result rows now have a number
+  gutter (`#`).
+- **SQL console autocomplete is a vertical dropdown** — columns/tables/keywords in a
+  proper list under the editor (↑/↓ to move, Enter/Tab to accept, Esc to close),
+  replacing the horizontal chip strip that only worked on the first token.
+
 ## v0.2.4 — 2026-09-08
 
 Database-grid follow-ups after v0.2.3 — make the fixes actually land on the desktop.
