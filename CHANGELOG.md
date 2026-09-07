@@ -5,6 +5,25 @@ own release line (now `0.2.0`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
 
+## v0.2.4 — 2026-09-08
+
+Database-grid follow-ups after v0.2.3 — make the fixes actually land on the desktop.
+
+### Fixed
+
+- **Data grid shows a scrollbar and fills the pane** — the row body's viewport height
+  measured 0 via RN `onLayout` inside the horizontal scroll on the packaged desktop
+  build, so it fell back to a `70vh` cap: the table ended short with dead space below
+  and (on macOS) the overlay scrollbar stayed hidden. The body is now measured with a
+  `ResizeObserver` (native keeps `onLayout`), so it fills the available height, and a
+  classic always-visible scrollbar is forced for the grid body on web.
+- **WHERE filter autocomplete is now context-aware (DataGrip-style)** — instead of a
+  flat chip bar mixing column names with literals, the filter shows a vertical dropdown
+  that adapts to where the caret is: **columns** at the start / after `AND`/`OR` / after
+  `(`, **operators** (`=`, `LIKE`, `IN`, `IS NULL`, …) right after a column, and
+  `AND`/`OR` after a complete condition. Picking a column immediately offers operators;
+  ↑/↓ navigate, Enter/Tab accept, Esc closes. The phase logic is unit-tested.
+
 ## v0.2.3 — 2026-09-07
 
 Database-grid usability + skill auto-load precision.
