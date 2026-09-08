@@ -5,6 +5,22 @@ own release line (now `0.2.0`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
 
+## v0.2.7 — 2026-09-08
+
+Database explorer: an interactive ER canvas and DataGrip-style open-object tabs.
+
+### Added
+
+- **ER diagram is a real canvas** — plain mouse-wheel zooms centered on the cursor (no
+  modifier), dragging empty space pans, and dragging a table card moves just that table
+  (its foreign-key edges follow while the others stay put). Mobile gets pinch-to-zoom,
+  one-finger pan, and card dragging. Built on a single viewport transform (translate +
+  scale) instead of nested scroll views; the +/−/reset buttons remain.
+- **Open tables/views as tabs** — opening a table, the SQL console, the ER diagram, or
+  search now adds a tab to a strip above the content pane; click a tab to switch back,
+  and ✕ to close it (closing the active tab moves to a neighbour, or the overview when
+  none are left). Data/Structure stays as the sub-toggle within a table tab.
+
 ## v0.2.6 — 2026-09-08
 
 Data-grid correctness + right-click menu (follow-ups to the v0.2.5 scroll rewrite).
