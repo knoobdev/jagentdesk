@@ -1,4 +1,4 @@
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import {
   ScrollView,
   View,
@@ -44,15 +44,22 @@ function ensureGridScrollStyle(): void {
   gridStyleInjected = true;
   const style = document.createElement("style");
   style.id = DB_GRID_STYLE_ID;
+  // The header row lives in its OWN horizontal viewport (overflow hidden, no scrollbar)
+  // whose scrollLeft is driven to match the body — so header and rows always share the
+  // exact horizontal offset and columns can never drift (a position:sticky header did
+  // NOT track horizontal scroll and misaligned the values). The body is the single
+  // two-axis scroller, so both scrollbars pin to the viewport edges. `outline:none`
+  // removes the focus ring on the focusable grid wrapper.
   style.textContent = `
-[data-jad-gridscroll]{overflow:auto;scrollbar-gutter:stable;}
-[data-jad-gridscroll]::-webkit-scrollbar{width:12px;height:12px;}
-[data-jad-gridscroll]::-webkit-scrollbar-thumb{background-color:rgba(140,140,150,0.55);border-radius:6px;border:3px solid transparent;background-clip:padding-box;}
-[data-jad-gridscroll]::-webkit-scrollbar-thumb:hover{background-color:rgba(140,140,150,0.85);}
-[data-jad-gridscroll]::-webkit-scrollbar-track{background:transparent;}
-[data-jad-gridscroll]::-webkit-scrollbar-corner{background:transparent;}
-[data-jad-gridinner]{width:max-content;min-width:100%;}
-[data-jad-gridheader]{position:sticky;top:0;z-index:3;}`;
+[data-jad-gridwrap]{outline:none;}
+[data-jad-gridheadervp]{overflow:hidden;flex-shrink:0;}
+[data-jad-gridbody]{overflow:auto;outline:none;}
+[data-jad-gridbody]::-webkit-scrollbar{width:12px;height:12px;}
+[data-jad-gridbody]::-webkit-scrollbar-thumb{background-color:rgba(140,140,150,0.55);border-radius:6px;border:3px solid transparent;background-clip:padding-box;}
+[data-jad-gridbody]::-webkit-scrollbar-thumb:hover{background-color:rgba(140,140,150,0.85);}
+[data-jad-gridbody]::-webkit-scrollbar-track{background:transparent;}
+[data-jad-gridbody]::-webkit-scrollbar-corner{background:transparent;}
+[data-jad-gridinner]{width:max-content;min-width:100%;}`;
   document.head.appendChild(style);
 }
 
@@ -67,26 +74,49 @@ function GridScrollWeb({
   webNodeRef?: (el: HTMLElement | null) => void;
   style?: StyleProp<ViewStyle>;
 }) {
-  const scrollRef = useCallback(
+  const headerElRef = useRef<HTMLElement | null>(null);
+  const bodyElRef = useRef<HTMLElement | null>(null);
+  const syncHeaderScroll = useCallback(() => {
+    if (headerElRef.current && bodyElRef.current) {
+      headerElRef.current.scrollLeft = bodyElRef.current.scrollLeft;
+    }
+  }, []);
+  const headerRef = useCallback((node: View | null) => {
+    headerElRef.current = node as unknown as HTMLElement | null;
+  }, []);
+  const bodyRef = useCallback(
     (node: View | null) => {
       const el = node as unknown as HTMLElement | null;
-      if (el) ensureGridScrollStyle();
-      webNodeRef?.(el);
+      if (bodyElRef.current) bodyElRef.current.removeEventListener("scroll", syncHeaderScroll);
+      bodyElRef.current = el;
+      if (el) {
+        ensureGridScrollStyle();
+        el.addEventListener("scroll", syncHeaderScroll, { passive: true });
+      }
     },
+    [syncHeaderScroll],
+  );
+  const wrapRef = useCallback(
+    (node: View | null) => webNodeRef?.(node as unknown as HTMLElement | null),
     [webNodeRef],
   );
   return (
-    <View ref={scrollRef} style={[styles.webScroll, style]} dataSet={WEB_SCROLL_DATASET}>
-      <View style={styles.webInner} dataSet={WEB_INNER_DATASET}>
-        <View dataSet={WEB_HEADER_DATASET}>{header}</View>
-        {children}
+    <View ref={wrapRef} style={[styles.webWrap, style]} dataSet={WRAP_DS}>
+      <View ref={headerRef} style={styles.webHeaderVp} dataSet={HEADER_DS}>
+        {header}
+      </View>
+      <View ref={bodyRef} style={styles.webBody} dataSet={BODY_DS}>
+        <View style={styles.webInner} dataSet={INNER_DS}>
+          {children}
+        </View>
       </View>
     </View>
   );
 }
-const WEB_SCROLL_DATASET = { jadGridscroll: "1" } as const;
-const WEB_INNER_DATASET = { jadGridinner: "1" } as const;
-const WEB_HEADER_DATASET = { jadGridheader: "1" } as const;
+const WRAP_DS = { jadGridwrap: "1" } as const;
+const HEADER_DS = { jadGridheadervp: "1" } as const;
+const BODY_DS = { jadGridbody: "1" } as const;
+const INNER_DS = { jadGridinner: "1" } as const;
 
 function GridScrollNative({
   header,
@@ -126,8 +156,13 @@ function GridScrollNative({
 }
 
 const styles = StyleSheet.create((_theme: Theme) => ({
-  webScroll: { flex: 1, minHeight: 0 },
+  // Web: header viewport (fixed height, hidden overflow, scroll-synced) above the
+  // single two-axis body scroller.
+  webWrap: { flex: 1, minHeight: 0, flexDirection: "column" },
+  webHeaderVp: { flexShrink: 0, overflow: "hidden" },
+  webBody: { flex: 1, minHeight: 0 },
   webInner: { flexDirection: "column" },
+  // Native: nested scrollers.
   gridWrap: { flex: 1, minHeight: 0 },
   hScroll: { flex: 1 },
   hContent: { flexGrow: 1, flexDirection: "column" },

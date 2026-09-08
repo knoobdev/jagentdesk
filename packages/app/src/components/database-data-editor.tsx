@@ -312,6 +312,16 @@ export function DatabaseDataEditor({
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState("");
   const [recordRow, setRecordRow] = useState<number | null>(null);
+  // Custom right-click menu (web) — replaces Electron's default page context menu on
+  // the grid. `x`/`y` are viewport coords; `rowIndex` is an existing row (new rows and
+  // the header don't open it).
+  const [ctxMenu, setCtxMenu] = useState<{
+    x: number;
+    y: number;
+    rowIndex: number;
+    col: string;
+    fk?: DbForeignKey;
+  } | null>(null);
 
   const pkCols = useMemo(() => columns.filter((c) => c.isPrimaryKey).map((c) => c.name), [columns]);
   const colNames = useMemo(() => columns.map((c) => c.name), [columns]);
@@ -657,6 +667,10 @@ export function DatabaseDataEditor({
       });
       // SHIFT keeps the anchor so successive range selects pivot on the same row.
       if (!mods.range) setAnchor(rowIdx);
+      // A plain row select (no modifier) replaces everything, so drop any lingering
+      // single-cell marker — otherwise clicking a row number after a cell click left
+      // two highlights (the old cell + the new row). Cell clicks re-set it right after.
+      if (!mods.range && !mods.additive) setSelectedKey(null);
     },
     [anchor, result, rowKeyOf],
   );
@@ -1011,6 +1025,51 @@ export function DatabaseDataEditor({
   const openPreview = useCallback(() => setPreviewOpen(true), []);
   const closePreview = useCallback(() => setPreviewOpen(false), []);
 
+  // Custom right-click menu on an existing cell (web). Replaces Electron's default
+  // page menu with DataGrip-style actions on the clicked cell/row.
+  const openCellMenu = useCallback(
+    (rowIndex: number, col: string, x: number, y: number, fk?: DbForeignKey) => {
+      setCtxMenu({ x, y, rowIndex, col, fk });
+    },
+    [],
+  );
+  const closeCtxMenu = useCallback(() => setCtxMenu(null), []);
+  const ctxCopyValue = useCallback(() => {
+    if (ctxMenu && result) {
+      void Clipboard.setStringAsync(
+        cellText(result.rows[ctxMenu.rowIndex]?.[colIndex(ctxMenu.col)] ?? null),
+      );
+    }
+    closeCtxMenu();
+  }, [ctxMenu, result, colIndex, closeCtxMenu]);
+  const ctxCopyRow = useCallback(() => {
+    const row = ctxMenu && result ? result.rows[ctxMenu.rowIndex] : undefined;
+    if (row) void Clipboard.setStringAsync(row.map((c) => cellText(c)).join("\t"));
+    closeCtxMenu();
+  }, [ctxMenu, result, closeCtxMenu]);
+  const ctxOpenRecord = useCallback(() => {
+    if (ctxMenu) setRecordRow(ctxMenu.rowIndex);
+    closeCtxMenu();
+  }, [ctxMenu, closeCtxMenu]);
+  const ctxGoToRef = useCallback(() => {
+    if (ctxMenu?.fk && result) {
+      navigateFk(ctxMenu.fk, result.rows[ctxMenu.rowIndex]?.[colIndex(ctxMenu.col)] ?? null);
+    }
+    closeCtxMenu();
+  }, [ctxMenu, result, colIndex, navigateFk, closeCtxMenu]);
+  const ctxSetNull = useCallback(() => {
+    if (ctxMenu && result) {
+      const orig = cellText(result.rows[ctxMenu.rowIndex]?.[colIndex(ctxMenu.col)] ?? null);
+      commitExistingEdit(ctxMenu.rowIndex, ctxMenu.col, "NULL", orig);
+    }
+    closeCtxMenu();
+  }, [ctxMenu, result, colIndex, commitExistingEdit, closeCtxMenu]);
+  const ctxDeleteRow = useCallback(() => {
+    const row = ctxMenu && result ? result.rows[ctxMenu.rowIndex] : undefined;
+    if (row) setDeleted((prev) => new Map(prev).set(rowKeyOf(row), row));
+    closeCtxMenu();
+  }, [ctxMenu, result, rowKeyOf, closeCtxMenu]);
+
   const from = page * PAGE_SIZE;
   const shown = result?.rows.length ?? 0;
   const previewStatements = previewOpen ? buildStatements() : [];
@@ -1071,6 +1130,7 @@ export function DatabaseDataEditor({
                 fkByCol={fkByCol}
                 onNavigate={navigateFk}
                 onOpenRecord={openRecord}
+                onCellContext={openCellMenu}
               />
             );
           })}
@@ -1390,6 +1450,22 @@ export function DatabaseDataEditor({
         </Text>
       </View>
 
+      {ctxMenu ? (
+        <GridContextMenu
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          onClose={closeCtxMenu}
+          items={[
+            { label: "Copy value", onPress: ctxCopyValue },
+            { label: "Copy row", onPress: ctxCopyRow },
+            ...(ctxMenu.fk ? [{ label: "Go to referenced row", onPress: ctxGoToRef }] : []),
+            { label: "Open record", onPress: ctxOpenRecord },
+            ...(canEdit ? [{ label: "Set NULL", onPress: ctxSetNull }] : []),
+            ...(canEdit ? [{ label: "Delete row", onPress: ctxDeleteRow, danger: true }] : []),
+          ]}
+        />
+      ) : null}
+
       <PreviewModal open={previewOpen} statements={previewStatements} onClose={closePreview} />
       <ImportModal
         open={importOpen}
@@ -1399,6 +1475,39 @@ export function DatabaseDataEditor({
         onClose={closeImport}
       />
     </View>
+  );
+}
+
+interface CtxMenuItem {
+  label: string;
+  onPress: () => void;
+  danger?: boolean;
+}
+
+/** DataGrip-style right-click menu for the grid (web). A full-screen overlay closes
+ *  it on an outside click; the menu itself is fixed-positioned at the cursor. */
+function GridContextMenu({
+  x,
+  y,
+  items,
+  onClose,
+}: {
+  x: number;
+  y: number;
+  items: CtxMenuItem[];
+  onClose: () => void;
+}) {
+  return (
+    <>
+      <Pressable style={styles.ctxOverlay} onPress={onClose} />
+      <View style={[styles.ctxMenu, { left: x, top: y }]} dataSet={{ jadKeepSelection: "1" }}>
+        {items.map((it) => (
+          <Pressable key={it.label} style={styles.ctxItem} onPress={it.onPress}>
+            <Text style={[styles.ctxItemText, it.danger && styles.ctxItemDanger]}>{it.label}</Text>
+          </Pressable>
+        ))}
+      </View>
+    </>
   );
 }
 
@@ -1506,6 +1615,7 @@ function ExistingRow({
   fkByCol,
   onNavigate,
   onOpenRecord,
+  onCellContext,
 }: {
   rowIndex: number;
   row: Cell[];
@@ -1525,6 +1635,7 @@ function ExistingRow({
   fkByCol: Map<string, DbForeignKey>;
   onNavigate: (fk: DbForeignKey, value: Cell) => void;
   onOpenRecord: (rowIdx: number) => void;
+  onCellContext?: (rowIndex: number, col: string, x: number, y: number, fk?: DbForeignKey) => void;
 }) {
   // Single tap on the row number selects the row; a double-tap opens the full
   // record view (native's replacement for desktop's right-click/long-press, since
@@ -1549,9 +1660,11 @@ function ExistingRow({
   const handleRecord = useCallback(() => onOpenRecord(rowIndex), [onOpenRecord, rowIndex]);
   const gutterCtx = isWeb
     ? {
-        onContextMenu: (e: { preventDefault?: () => void }) => {
+        onContextMenu: (e: { preventDefault?: () => void; clientX?: number; clientY?: number }) => {
           e?.preventDefault?.();
-          handleRecord();
+          if (onCellContext)
+            onCellContext(rowIndex, columns[0] ?? "", e.clientX ?? 0, e.clientY ?? 0);
+          else handleRecord();
         },
       }
     : {};
@@ -1598,6 +1711,7 @@ function ExistingRow({
             fk={fkByCol.get(col)}
             rawValue={value}
             onNavigate={onNavigate}
+            onCellContext={onCellContext}
           />
         );
       })}
@@ -1678,6 +1792,7 @@ function GridCell({
   fk,
   rawValue,
   onNavigate,
+  onCellContext,
 }: {
   cellKey: string;
   rowIndex?: number;
@@ -1695,6 +1810,7 @@ function GridCell({
   fk?: DbForeignKey;
   rawValue?: Cell;
   onNavigate?: (fk: DbForeignKey, value: Cell) => void;
+  onCellContext?: (rowIndex: number, col: string, x: number, y: number, fk?: DbForeignKey) => void;
 }) {
   const handleExpand = useCallback(
     () => onExpand({ rowIndex, newIndex, col, text, original }),
@@ -1738,19 +1854,17 @@ function GridCell({
   const navigate = useCallback(() => {
     if (fk && onNavigate) onNavigate(fk, rawValue ?? null);
   }, [fk, onNavigate, rawValue]);
-  // Web: double-click enters edit directly; right-click a foreign-key cell jumps
-  // to the referenced row.
+  // Web: double-click enters edit directly; right-click opens the custom grid menu
+  // (and suppresses Electron's default page menu) for existing rows.
   const ctx = isWeb
     ? {
         onDoubleClick: enterEdit,
-        ...(fk
-          ? {
-              onContextMenu: (e: { preventDefault?: () => void }) => {
-                e?.preventDefault?.();
-                navigate();
-              },
-            }
-          : {}),
+        onContextMenu: (e: { preventDefault?: () => void; clientX?: number; clientY?: number }) => {
+          e?.preventDefault?.();
+          if (rowIndex !== undefined && onCellContext) {
+            onCellContext(rowIndex, col, e.clientX ?? 0, e.clientY ?? 0, fk);
+          }
+        },
       }
     : {};
 
@@ -2208,12 +2322,10 @@ const styles = StyleSheet.create((theme: Theme) => ({
   expandBtn: { paddingHorizontal: 2 },
   expandIcon: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundExtraMuted },
   cellDirty: { backgroundColor: "rgba(245, 158, 11, 0.16)" },
-  // The single selected cell (first click/tap): accent outline + tint, like a
-  // DataGrip/spreadsheet selection. A second click/tap or double-click opens the
-  // value-editor dock.
+  // The single selected cell (first click/tap): a subtle tint only — no accent ring,
+  // which read as an "ngứa mắt" green box. A second click/tap or double-click opens
+  // the value-editor dock.
   cellSelected: {
-    borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.accent,
     backgroundColor: theme.colors.terminal.selectionBackground,
   },
   headerCell: {
@@ -2252,6 +2364,22 @@ const styles = StyleSheet.create((theme: Theme) => ({
   },
   exportItem: { paddingHorizontal: theme.spacing[3], paddingVertical: theme.spacing[1.5] },
   exportItemText: { fontSize: theme.fontSize.xs, color: theme.colors.foreground },
+  // Custom right-click menu (web-only; opened from onContextMenu with viewport coords).
+  ctxOverlay: { position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 999 } as object,
+  ctxMenu: {
+    position: "fixed",
+    minWidth: 180,
+    zIndex: 1000,
+    paddingVertical: theme.spacing[1],
+    borderRadius: theme.borderRadius.md,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+    ...theme.shadow.md,
+  } as object,
+  ctxItem: { paddingHorizontal: theme.spacing[3], paddingVertical: theme.spacing[1.5] },
+  ctxItemText: { fontSize: theme.fontSize.xs, color: theme.colors.foreground },
+  ctxItemDanger: { color: theme.colors.palette.red[600] },
   importHint: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
   importInput: {
     minHeight: 180,
