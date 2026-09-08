@@ -63,6 +63,22 @@ import type { Theme } from "@/styles/theme";
  *  before the live client is ready in daemon memory. */
 const DB_NOT_CONNECTED = "database is not connected";
 
+/** Compact row-count label for the object tree (e.g. 950, 12.3k, 4.1m). */
+function formatRowCount(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
+  return `${(n / 1_000_000).toFixed(n < 10_000_000 ? 1 : 0)}m`;
+}
+
+/** The number shown next to a table/view: the estimated record count when the engine
+ *  provides it (DataGrip-style), else the column count. Previously this always showed
+ *  the column count, which read as a wrong record count. */
+function objectCountLabel(o: { rowCount?: number; columnCount?: number }): string | null {
+  if (o.rowCount != null) return formatRowCount(o.rowCount);
+  if (o.columnCount != null) return String(o.columnCount);
+  return null;
+}
+
 /** Exponential-ish backoff (ms) between introspection retries while the
  *  connection warms. A connection that settles quickly returns after the first
  *  ~100ms sleep instead of always paying a flat 400ms step; the growing tail
@@ -522,8 +538,8 @@ function TableNode({
           <Text style={[styles.rowLabel, active && styles.rowLabelActive]} numberOfLines={1}>
             {object.name}
           </Text>
-          {object.columnCount != null ? (
-            <Text style={styles.rowCount}>{object.columnCount}</Text>
+          {objectCountLabel(object) != null ? (
+            <Text style={styles.rowCount}>{objectCountLabel(object)}</Text>
           ) : null}
         </ContextMenuTrigger>
         <ContextMenuContent align="start" width={220} testID={`db-table-menu-${object.name}`}>

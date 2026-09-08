@@ -85,7 +85,12 @@ export class PostgresDbClient implements DbClient {
   }
 
   async listObjects(schema: string): Promise<DbObject[]> {
-    const res = await this.require().query<{ name: string; kind: string; column_count: string }>(
+    const res = await this.require().query<{
+      name: string;
+      kind: string;
+      column_count: string;
+      row_count: string | null;
+    }>(
       `select c.relname as name,
               case c.relkind
                 when 'r' then 'table'
@@ -96,7 +101,14 @@ export class PostgresDbClient implements DbClient {
                 else 'table'
               end as kind,
               (select count(*) from pg_attribute a
-                 where a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped) as column_count
+                 where a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped) as column_count,
+              -- Planner's estimated live-row count (fast; DataGrip-style). NULL for
+              -- non-tables or a table never (auto)analyzed (reltuples < 0), so the UI
+              -- can fall back instead of showing a bogus 0/-1.
+              case
+                when c.relkind in ('r','p','m') and c.reltuples >= 0 then c.reltuples::bigint
+                else null
+              end as row_count
        from pg_class c
        join pg_namespace n on n.oid = c.relnamespace
        where n.nspname = $1 and c.relkind in ('r','p','v','m','S')
@@ -108,6 +120,7 @@ export class PostgresDbClient implements DbClient {
       name: r.name,
       kind: r.kind as SchemaObjectKind,
       columnCount: Number(r.column_count),
+      rowCount: r.row_count == null ? undefined : Number(r.row_count),
     }));
   }
 

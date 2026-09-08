@@ -323,8 +323,31 @@ export function DatabaseDataEditor({
     fk?: DbForeignKey;
   } | null>(null);
 
-  const pkCols = useMemo(() => columns.filter((c) => c.isPrimaryKey).map((c) => c.name), [columns]);
-  const colNames = useMemo(() => columns.map((c) => c.name), [columns]);
+  // CRITICAL: the header + every row must iterate columns in the SAME order as the
+  // query result's cells. Introspection (`databaseColumns`) and `select *` can return
+  // columns in different orders, which put values under the wrong headers (and made
+  // PK-keyed edits target the wrong cell). Drive the grid off `result.columns` (the
+  // real cell order) and look up per-column metadata (type/PK/FK) by name.
+  const orderedColumns = useMemo<DbColumn[]>(() => {
+    const resultCols = result?.columns;
+    if (!resultCols || resultCols.length === 0) return columns;
+    const metaByName = new Map(columns.map((c) => [c.name, c]));
+    return resultCols.map(
+      (rc): DbColumn =>
+        metaByName.get(rc.name) ?? {
+          name: rc.name,
+          dataType: rc.dataType ?? "",
+          nullable: true,
+          isPrimaryKey: false,
+          isForeignKey: false,
+        },
+    );
+  }, [result, columns]);
+  const pkCols = useMemo(
+    () => orderedColumns.filter((c) => c.isPrimaryKey).map((c) => c.name),
+    [orderedColumns],
+  );
+  const colNames = useMemo(() => orderedColumns.map((c) => c.name), [orderedColumns]);
   const canEdit = isSqlEngine(engine) && pkCols.length > 0;
 
   // All platforms now edit through the docked value editor (a proper multi-line
@@ -357,18 +380,17 @@ export function DatabaseDataEditor({
   // narrow phone to a wide desktop without a measure/layout pass per cell.
   const colWidths = useMemo(
     () =>
-      columns.map((c) => {
+      orderedColumns.map((c, i) => {
         let longest = c.name.length + (c.isPrimaryKey ? 3 : 0);
-        const idx = colNames.indexOf(c.name);
         const sample = result ? Math.min(result.rows.length, 50) : 0;
         for (let r = 0; r < sample; r++) {
-          const v = result?.rows[r]?.[idx];
+          const v = result?.rows[r]?.[i];
           const len = v === null || v === undefined ? 4 : String(v).length;
           if (len > longest) longest = len;
         }
         return Math.max(MIN_CELL_W, Math.min(MAX_CELL_W, Math.round(longest * CHAR_W) + 24));
       }),
-    [columns, colNames, result],
+    [orderedColumns, result],
   );
   // Total content width (gutter + all columns) — applied to the header and every row
   // so columns align and the content is wider than the viewport for horizontal scroll.
@@ -1090,7 +1112,7 @@ export function DatabaseDataEditor({
     const gridHeader = (
       <View style={[styles.headerRow, { width: totalGridWidth }]}>
         <View style={styles.gutter} />
-        {columns.map((c, i) => (
+        {orderedColumns.map((c, i) => (
           <HeaderCell
             key={c.name}
             column={c}
