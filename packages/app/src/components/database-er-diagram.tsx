@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
-import Svg, { Line, Rect, Text as SvgText } from "react-native-svg";
+import { Pressable, Text, View } from "react-native";
+import Svg, { G, Line, Rect, Text as SvgText } from "react-native-svg";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { runOnJS } from "react-native-reanimated";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
@@ -32,8 +32,7 @@ const GAP_Y = 40;
 const MAX_ROWS = 16;
 const MAX_COLS = 5;
 
-// Zoom bounds — matches the mermaid diagram host's lower clamp; capped at 3x so
-// the SVG canvas (and thus the scrollable area) never grows to an unusable size.
+// Zoom bounds — matches the mermaid diagram host's lower clamp; capped at 3x.
 const MIN_SCALE = 0.25;
 const MAX_SCALE = 3;
 const ZOOM_STEP = 1.2;
@@ -74,11 +73,31 @@ interface TableBox {
   rowIndex: Map<string, number>;
 }
 
+/** Live position of a card in world (diagram) coordinates. */
+interface Pos {
+  x: number;
+  y: number;
+}
+
+/** Viewport transform applied to the whole canvas: pan (tx,ty px) + zoom (scale). */
+interface Viewport {
+  tx: number;
+  ty: number;
+  scale: number;
+}
+
+/** In-flight drag: either panning the canvas or moving one card. */
+type DragState =
+  | { mode: "pan"; startTx: number; startTy: number; startCX: number; startCY: number }
+  | { mode: "card"; name: string; startPos: Pos; startCX: number; startCY: number };
+
 /**
- * A DataGrip-style entity-relationship diagram: each table is a card that lists
- * its columns (with PK/FK markers + type), foreign keys are drawn as edges from
- * the FK column's row to the referenced table's header. Auto bin-packed layout;
- * scrollable both axes. Universal (react-native-svg → desktop + mobile).
+ * A DataGrip-style entity-relationship diagram on an interactive canvas: each
+ * table is a draggable card listing its columns (with PK/FK markers + type),
+ * foreign keys drawn as edges from the FK column's row to the referenced table's
+ * header. A viewport transform ({tx,ty,scale}) applied to an inner <G> gives pan
+ * + zoom; the container clips. Universal (react-native-svg → desktop + mobile):
+ * web uses pointer events + wheel-to-zoom, native uses gesture-handler.
  */
 export function DatabaseErDiagram({
   serverId,
@@ -124,7 +143,7 @@ export function DatabaseErDiagram({
 
   const layout = useMemo(() => {
     const tables = objects;
-    if (tables.length === 0) return { boxes: [], byName: new Map(), width: 0, height: 0 };
+    if (tables.length === 0) return { boxes: [], byName: new Map<string, TableBox>() };
     const cols = Math.max(1, Math.min(MAX_COLS, Math.ceil(Math.sqrt(tables.length))));
     const colHeights = Array.from({ length: cols }, () => PAD);
     const boxes: TableBox[] = [];
@@ -136,7 +155,7 @@ export function DatabaseErDiagram({
       shown.forEach((c, i) => rowIndex.set(c.name, i));
       const h =
         HEADER_H + Math.max(shown.length, 1) * ROW_H + (columns.length > MAX_ROWS ? ROW_H : 0);
-      // Bin-pack into the shortest column for a compact diagram.
+      // Bin-pack into the shortest column for a compact starting layout.
       let col = 0;
       for (let i = 1; i < cols; i++) if (colHeights[i] < colHeights[col]) col = i;
       const x = PAD + col * (BOX_W + GAP_X);
@@ -146,13 +165,32 @@ export function DatabaseErDiagram({
       boxes.push(box);
       byName.set(t.name, box);
     }
-    return {
-      boxes,
-      byName,
-      width: PAD + cols * (BOX_W + GAP_X) - GAP_X + PAD,
-      height: Math.max(...colHeights) + PAD,
-    };
+    return { boxes, byName };
   }, [objects, columnsByTable]);
+
+  // Per-table live positions, seeded from the bin-pack layout. When the layout
+  // recomputes (schema change, columns loaded), non-moved cards snap to the new
+  // auto-layout; cards the user has dragged keep their placement (movedRef).
+  const [positions, setPositions] = useState<Record<string, Pos>>({});
+  const movedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    setPositions((prev) => {
+      const next: Record<string, Pos> = {};
+      for (const b of layout.boxes) {
+        const kept = movedRef.current.has(b.name) ? prev[b.name] : undefined;
+        next[b.name] = kept ?? { x: b.x, y: b.y };
+      }
+      // Drop moved-flags for tables no longer present.
+      for (const name of movedRef.current)
+        if (!layout.byName.has(name)) movedRef.current.delete(name);
+      return next;
+    });
+  }, [layout]);
+
+  const posOf = useCallback(
+    (b: TableBox): Pos => positions[b.name] ?? { x: b.x, y: b.y },
+    [positions],
+  );
 
   const edges = useMemo(() => {
     const out: Array<{ key: string; x1: number; y1: number; x2: number; y2: number }> = [];
@@ -160,67 +198,193 @@ export function DatabaseErDiagram({
       const src = layout.byName.get(fk.table);
       const dst = layout.byName.get(fk.refTable);
       if (!src || !dst || src === dst) continue;
+      const sp = positions[src.name] ?? { x: src.x, y: src.y };
+      const dp = positions[dst.name] ?? { x: dst.x, y: dst.y };
       const ri = src.rowIndex.get(fk.column);
-      const y1 =
-        ri === undefined ? src.y + HEADER_H / 2 : src.y + HEADER_H + ri * ROW_H + ROW_H / 2;
+      const y1 = ri === undefined ? sp.y + HEADER_H / 2 : sp.y + HEADER_H + ri * ROW_H + ROW_H / 2;
       // Exit from whichever side faces the target.
-      const srcRight = dst.x >= src.x;
-      const x1 = srcRight ? src.x + BOX_W : src.x;
-      const x2 = srcRight ? dst.x : dst.x + BOX_W;
-      const y2 = dst.y + HEADER_H / 2;
+      const srcRight = dp.x >= sp.x;
+      const x1 = srcRight ? sp.x + BOX_W : sp.x;
+      const x2 = srcRight ? dp.x : dp.x + BOX_W;
+      const y2 = dp.y + HEADER_H / 2;
       out.push({ key: `${fk.table}.${fk.column}->${fk.refTable}`, x1, y1, x2, y2 });
     }
     return out;
-  }, [fks, layout]);
+  }, [fks, layout, positions]);
 
-  // Zoom state. The canvas scales by resizing the SVG (width/height × scale with a
-  // fixed viewBox) so the surrounding ScrollViews grow with it and pan keeps working
-  // — desktop: ctrl/⌘ + wheel (also trackpad pinch) and the on-screen buttons;
-  // mobile: a pinch gesture. Clamped to MIN_SCALE..MAX_SCALE.
-  const [scale, setScale] = useState(1);
-  const scaleRef = useRef(1);
+  // ---- Viewport transform + shared drag state ----------------------------
+  const [viewport, setViewport] = useState<Viewport>({ tx: 0, ty: 0, scale: 1 });
+  // Refs mirror the latest state so DOM/UI-thread handlers read current values
+  // without re-subscribing.
+  const viewportRef = useRef(viewport);
+  const positionsRef = useRef(positions);
+  const boxesRef = useRef(layout.boxes);
+  const dragRef = useRef<DragState | null>(null);
   useEffect(() => {
-    scaleRef.current = scale;
-  }, [scale]);
+    viewportRef.current = viewport;
+  }, [viewport]);
+  useEffect(() => {
+    positionsRef.current = positions;
+  }, [positions]);
+  useEffect(() => {
+    boxesRef.current = layout.boxes;
+  }, [layout]);
 
-  const zoomIn = useCallback(() => setScale((s) => clampScale(s * ZOOM_STEP)), []);
-  const zoomOut = useCallback(() => setScale((s) => clampScale(s / ZOOM_STEP)), []);
-  const zoomReset = useCallback(() => setScale(1), []);
+  // Hit-test container-relative pixel point (cx,cy) against the cards, topmost
+  // first (render order last = on top). Returns the box under the point or null.
+  const hitTest = useCallback((cx: number, cy: number): TableBox | null => {
+    const v = viewportRef.current;
+    const wx = (cx - v.tx) / v.scale;
+    const wy = (cy - v.ty) / v.scale;
+    const boxes = boxesRef.current;
+    for (let i = boxes.length - 1; i >= 0; i--) {
+      const b = boxes[i];
+      const p = positionsRef.current[b.name] ?? { x: b.x, y: b.y };
+      if (wx >= p.x && wx <= p.x + BOX_W && wy >= p.y && wy <= p.y + b.h) return b;
+    }
+    return null;
+  }, []);
 
-  // Desktop: wheel-to-zoom while a zoom modifier is held (trackpad pinch reports
-  // ctrlKey). Plain wheel is left alone so the ScrollViews still pan/scroll.
+  // Begin a drag at container-relative pixel (cx,cy): a card if one is hit, else
+  // a background pan.
+  const beginDrag = useCallback(
+    (cx: number, cy: number) => {
+      const box = hitTest(cx, cy);
+      if (box) {
+        const p = positionsRef.current[box.name] ?? { x: box.x, y: box.y };
+        dragRef.current = { mode: "card", name: box.name, startPos: p, startCX: cx, startCY: cy };
+      } else {
+        const v = viewportRef.current;
+        dragRef.current = { mode: "pan", startTx: v.tx, startTy: v.ty, startCX: cx, startCY: cy };
+      }
+    },
+    [hitTest],
+  );
+
+  // Continue the active drag to container-relative pixel (cx,cy).
+  const moveDrag = useCallback((cx: number, cy: number) => {
+    const d = dragRef.current;
+    if (!d) return;
+    if (d.mode === "card") {
+      const scale = viewportRef.current.scale;
+      const nx = d.startPos.x + (cx - d.startCX) / scale;
+      const ny = d.startPos.y + (cy - d.startCY) / scale;
+      movedRef.current.add(d.name);
+      setPositions((prev) => ({ ...prev, [d.name]: { x: nx, y: ny } }));
+    } else {
+      setViewport((prev) => ({
+        ...prev,
+        tx: d.startTx + (cx - d.startCX),
+        ty: d.startTy + (cy - d.startCY),
+      }));
+    }
+  }, []);
+
+  const endDrag = useCallback(() => {
+    dragRef.current = null;
+  }, []);
+
+  // Zoom keeping the world point under (cx,cy) fixed: t' = c - (c - t)·(new/old).
+  const zoomAt = useCallback((factor: number, cx: number, cy: number) => {
+    setViewport((v) => {
+      const scale = clampScale(v.scale * factor);
+      const k = scale / v.scale;
+      return { tx: cx - (cx - v.tx) * k, ty: cy - (cy - v.ty) * k, scale };
+    });
+  }, []);
+
+  // ---- Web: wheel-to-zoom + pointer pan/drag -----------------------------
+  // The canvas only mounts once data is ready (loading/empty return early), so the
+  // pointer/wheel effect keys off this to attach after the node exists.
+  const ready = !loading && layout.boxes.length > 0;
   const canvasRef = useRef<View | null>(null);
   useEffect(() => {
     if (!isWeb) return;
     const raw: unknown = canvasRef.current;
     if (!(raw instanceof HTMLElement)) return;
     const node = raw;
+    // Suppress native scroll/selection so drags and wheel-zoom feel like a canvas.
+    node.style.touchAction = "none";
+    node.style.userSelect = "none";
+
+    // Plain wheel zooms centered on the cursor (trackpad pinch reports ctrlKey —
+    // same behavior). No modifier required.
     const onWheel = (event: WheelEvent) => {
-      if (!(event.ctrlKey || event.metaKey)) return;
       event.preventDefault();
-      setScale((s) => clampScale(s * Math.exp(-event.deltaY * 0.0015)));
+      const rect = node.getBoundingClientRect();
+      zoomAt(Math.exp(-event.deltaY * 0.0015), event.clientX - rect.left, event.clientY - rect.top);
+    };
+    const onDown = (event: PointerEvent) => {
+      if (event.button !== 0) return;
+      const rect = node.getBoundingClientRect();
+      beginDrag(event.clientX - rect.left, event.clientY - rect.top);
+      node.setPointerCapture?.(event.pointerId);
+      event.preventDefault();
+    };
+    const onMove = (event: PointerEvent) => {
+      if (!dragRef.current) return;
+      const rect = node.getBoundingClientRect();
+      moveDrag(event.clientX - rect.left, event.clientY - rect.top);
+    };
+    const onUp = (event: PointerEvent) => {
+      if (!dragRef.current) return;
+      endDrag();
+      node.releasePointerCapture?.(event.pointerId);
     };
     node.addEventListener("wheel", onWheel, { passive: false });
-    return () => node.removeEventListener("wheel", onWheel);
-  }, []);
+    node.addEventListener("pointerdown", onDown);
+    node.addEventListener("pointermove", onMove);
+    node.addEventListener("pointerup", onUp);
+    node.addEventListener("pointercancel", onUp);
+    return () => {
+      node.removeEventListener("wheel", onWheel);
+      node.removeEventListener("pointerdown", onDown);
+      node.removeEventListener("pointermove", onMove);
+      node.removeEventListener("pointerup", onUp);
+      node.removeEventListener("pointercancel", onUp);
+    };
+    // `ready` re-runs this once the canvas node actually mounts — the loading/empty
+    // early-returns mean canvasRef is null on the first pass, and the handler
+    // callbacks are otherwise stable, so without it the listeners never attach.
+  }, [beginDrag, moveDrag, endDrag, zoomAt, ready]);
 
-  // Mobile: pinch to zoom, committing to scale state so the SVG (and scroll area)
-  // resize. pinchBaseRef holds the scale at gesture start so updates are relative.
-  const pinchBaseRef = useRef(1);
+  // ---- Native: pinch to zoom + one-finger pan/card-drag ------------------
+  const pinchBaseRef = useRef<Viewport>(viewport);
   const onPinchStart = useCallback(() => {
-    pinchBaseRef.current = scaleRef.current;
+    pinchBaseRef.current = viewportRef.current;
   }, []);
-  const onPinchUpdate = useCallback(
-    (factor: number) => setScale(clampScale(pinchBaseRef.current * factor)),
-    [],
-  );
-  const pinchGesture = useMemo(
-    () =>
-      Gesture.Pinch()
-        .onStart(() => runOnJS(onPinchStart)())
-        .onUpdate((event) => runOnJS(onPinchUpdate)(event.scale)),
-    [onPinchStart, onPinchUpdate],
-  );
+  const onPinchUpdate = useCallback((factor: number, fx: number, fy: number) => {
+    setViewport(() => {
+      const base = pinchBaseRef.current;
+      const scale = clampScale(base.scale * factor);
+      const k = scale / base.scale;
+      return { tx: fx - (fx - base.tx) * k, ty: fy - (fy - base.ty) * k, scale };
+    });
+  }, []);
+  const gesture = useMemo(() => {
+    const pinch = Gesture.Pinch()
+      .onStart(() => runOnJS(onPinchStart)())
+      .onUpdate((e) => runOnJS(onPinchUpdate)(e.scale, e.focalX, e.focalY));
+    const pan = Gesture.Pan()
+      .maxPointers(1)
+      .onStart((e) => runOnJS(beginDrag)(e.x, e.y))
+      .onUpdate((e) => runOnJS(moveDrag)(e.x, e.y))
+      .onFinalize(() => runOnJS(endDrag)());
+    return Gesture.Simultaneous(pinch, pan);
+  }, [onPinchStart, onPinchUpdate, beginDrag, moveDrag, endDrag]);
+
+  // ---- Zoom buttons (web only) — zoom about the canvas center ------------
+  const centerOf = useCallback((): [number, number] => {
+    const raw: unknown = canvasRef.current;
+    if (raw instanceof HTMLElement) {
+      const rect = raw.getBoundingClientRect();
+      return [rect.width / 2, rect.height / 2];
+    }
+    return [0, 0];
+  }, []);
+  const zoomIn = useCallback(() => zoomAt(ZOOM_STEP, ...centerOf()), [zoomAt, centerOf]);
+  const zoomOut = useCallback(() => zoomAt(1 / ZOOM_STEP, ...centerOf()), [zoomAt, centerOf]);
+  const zoomReset = useCallback(() => setViewport({ tx: 0, ty: 0, scale: 1 }), []);
 
   if (loading) {
     return (
@@ -237,38 +401,42 @@ export function DatabaseErDiagram({
     );
   }
 
-  const baseW = Math.max(layout.width, 1);
-  const baseH = Math.max(layout.height, 1);
+  const transform = `translate(${viewport.tx} ${viewport.ty}) scale(${viewport.scale})`;
   const svg = (
-    <Svg width={baseW * scale} height={baseH * scale} viewBox={`0 0 ${baseW} ${baseH}`}>
-      {edges.map((e) => (
-        <Line
-          key={e.key}
-          x1={e.x1}
-          y1={e.y1}
-          x2={e.x2}
-          y2={e.y2}
-          stroke={EDGE}
-          strokeWidth={1.25}
-          opacity={0.65}
-        />
-      ))}
-      {layout.boxes.map((b) => (
-        <TableCard key={b.name} box={b} />
-      ))}
+    <Svg width="100%" height="100%">
+      <G transform={transform}>
+        {edges.map((e) => (
+          <Line
+            key={e.key}
+            x1={e.x1}
+            y1={e.y1}
+            x2={e.x2}
+            y2={e.y2}
+            stroke={EDGE}
+            strokeWidth={1.25}
+            opacity={0.65}
+          />
+        ))}
+        {layout.boxes.map((b) => {
+          const p = posOf(b);
+          return (
+            <G key={b.name} transform={`translate(${p.x} ${p.y})`}>
+              <TableCard box={b} />
+            </G>
+          );
+        })}
+      </G>
     </Svg>
   );
 
   return (
-    <View style={styles.container} ref={canvasRef}>
+    <View style={styles.container}>
       <Text style={styles.header}>
         ER diagram · {schema} · {layout.boxes.length} tables · {edges.length} relationships
       </Text>
-      <ScrollView style={styles.vscroll} contentContainerStyle={styles.vcontent}>
-        <ScrollView horizontal contentContainerStyle={styles.hcontent}>
-          {isNative ? <GestureDetector gesture={pinchGesture}>{svg}</GestureDetector> : svg}
-        </ScrollView>
-      </ScrollView>
+      <View style={styles.canvas} ref={canvasRef}>
+        {isNative ? <GestureDetector gesture={gesture}>{svg}</GestureDetector> : svg}
+      </View>
       {isWeb ? (
         <View style={styles.zoomControls}>
           <Pressable
@@ -301,13 +469,14 @@ export function DatabaseErDiagram({
   );
 }
 
+/** Renders one table card at the local origin (0,0); the caller translates it. */
 function TableCard({ box }: { box: TableBox }) {
   const extra = box.columns.length - box.shown.length;
   return (
     <>
       <Rect
-        x={box.x}
-        y={box.y}
+        x={0}
+        y={0}
         width={BOX_W}
         height={box.h}
         rx={8}
@@ -315,44 +484,31 @@ function TableCard({ box }: { box: TableBox }) {
         stroke={BOX_STROKE}
         strokeWidth={1}
       />
-      <Rect x={box.x} y={box.y} width={BOX_W} height={HEADER_H} rx={8} fill={HEADER_FILL} />
+      <Rect x={0} y={0} width={BOX_W} height={HEADER_H} rx={8} fill={HEADER_FILL} />
       {/* square off the header's bottom corners */}
-      <Rect x={box.x} y={box.y + HEADER_H - 8} width={BOX_W} height={8} fill={HEADER_FILL} />
-      <SvgText x={box.x + 12} y={box.y + 20} fill={TEXT} fontSize={13} fontWeight="600">
+      <Rect x={0} y={HEADER_H - 8} width={BOX_W} height={8} fill={HEADER_FILL} />
+      <SvgText x={12} y={20} fill={TEXT} fontSize={13} fontWeight="600">
         {box.name.length > 28 ? `${box.name.slice(0, 27)}…` : box.name}
       </SvgText>
       {box.shown.map((c, i) => {
-        const rowY = box.y + HEADER_H + i * ROW_H;
+        const rowY = HEADER_H + i * ROW_H;
         const midY = rowY + ROW_H / 2 + 4;
         const marker = keyMarker(c);
         const nameColor = c.isPrimaryKey ? PK_COLOR : TEXT;
         return (
           <Fragment key={c.name}>
             {i > 0 ? (
-              <Line
-                x1={box.x}
-                y1={rowY}
-                x2={box.x + BOX_W}
-                y2={rowY}
-                stroke={ROW_SEP}
-                strokeWidth={0.5}
-              />
+              <Line x1={0} y1={rowY} x2={BOX_W} y2={rowY} stroke={ROW_SEP} strokeWidth={0.5} />
             ) : null}
             {marker.text ? (
-              <SvgText x={box.x + 10} y={midY} fill={marker.color} fontSize={9} fontWeight="700">
+              <SvgText x={10} y={midY} fill={marker.color} fontSize={9} fontWeight="700">
                 {marker.text}
               </SvgText>
             ) : null}
-            <SvgText x={box.x + 34} y={midY} fill={nameColor} fontSize={11}>
+            <SvgText x={34} y={midY} fill={nameColor} fontSize={11}>
               {c.name.length > 20 ? `${c.name.slice(0, 19)}…` : c.name}
             </SvgText>
-            <SvgText
-              x={box.x + BOX_W - 10}
-              y={midY}
-              fill={TEXT_MUTED}
-              fontSize={10}
-              textAnchor="end"
-            >
+            <SvgText x={BOX_W - 10} y={midY} fill={TEXT_MUTED} fontSize={10} textAnchor="end">
               {c.dataType.length > 14 ? `${c.dataType.slice(0, 13)}…` : c.dataType}
             </SvgText>
           </Fragment>
@@ -360,8 +516,8 @@ function TableCard({ box }: { box: TableBox }) {
       })}
       {extra > 0 ? (
         <SvgText
-          x={box.x + 12}
-          y={box.y + HEADER_H + box.shown.length * ROW_H + 14}
+          x={12}
+          y={HEADER_H + box.shown.length * ROW_H + 14}
           fill={TEXT_MUTED}
           fontSize={10}
           fontStyle="italic"
@@ -383,9 +539,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,
   },
-  vscroll: { flex: 1, minHeight: 0 },
-  vcontent: { padding: theme.spacing[3] },
-  hcontent: { padding: theme.spacing[1] },
+  canvas: { flex: 1, minHeight: 0, overflow: "hidden" },
   zoomControls: {
     position: "absolute",
     right: theme.spacing[3],

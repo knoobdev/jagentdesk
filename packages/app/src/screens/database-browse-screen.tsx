@@ -3,7 +3,7 @@ import { Pressable, ScrollView, Text, View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { PanelLeft } from "lucide-react-native";
+import { PanelLeft, X } from "lucide-react-native";
 import type { DatabaseInfo } from "@jagentdesk/protocol/database/rpc-schemas";
 import { BackHeader } from "@/components/headers/back-header";
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
@@ -22,7 +22,78 @@ import { usePanelStore } from "@/stores/panel-store";
 import type { Theme } from "@/styles/theme";
 
 const ThemedPanelLeft = withUnistyles(PanelLeft);
+const ThemedX = withUnistyles(X);
 const mutedIconColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
+
+/** An open editor tab (a table/view the user opened), DataGrip-style. */
+type DbTab =
+  | {
+      kind: "object";
+      id: string;
+      label: string;
+      databaseId: string;
+      schema: string;
+      name: string;
+    }
+  | { kind: "console" | "er" | "search"; id: string; label: string };
+
+/** One tab chip; own component so the press/close handlers stay stable. */
+function DbTabChip({
+  tab,
+  active,
+  onActivate,
+  onClose,
+}: {
+  tab: DbTab;
+  active: boolean;
+  onActivate: (tab: DbTab) => void;
+  onClose: (id: string) => void;
+}) {
+  const activate = useCallback(() => onActivate(tab), [onActivate, tab]);
+  const close = useCallback(() => onClose(tab.id), [onClose, tab.id]);
+  return (
+    <Pressable style={[styles.tab, active && styles.tabActive]} onPress={activate}>
+      <Text style={[styles.tabLabel, active && styles.tabLabelActive]} numberOfLines={1}>
+        {tab.label}
+      </Text>
+      <Pressable onPress={close} hitSlop={6} style={styles.tabClose} accessibilityLabel="Close tab">
+        <ThemedX size={12} uniProps={mutedIconColor} />
+      </Pressable>
+    </Pressable>
+  );
+}
+
+/** The open-tabs strip above the content pane. */
+function DbTabStrip({
+  tabs,
+  activeId,
+  onActivate,
+  onClose,
+}: {
+  tabs: DbTab[];
+  activeId: string | null;
+  onActivate: (tab: DbTab) => void;
+  onClose: (id: string) => void;
+}) {
+  return (
+    <ScrollView
+      horizontal
+      style={styles.tabBar}
+      contentContainerStyle={styles.tabBarContent}
+      showsHorizontalScrollIndicator={false}
+    >
+      {tabs.map((t) => (
+        <DbTabChip
+          key={t.id}
+          tab={t}
+          active={t.id === activeId}
+          onActivate={onActivate}
+          onClose={onClose}
+        />
+      ))}
+    </ScrollView>
+  );
+}
 
 /**
  * The content pane for a connected database. The object navigation lives in the
@@ -54,6 +125,10 @@ export function DatabaseBrowseScreen({
   const showingEr = useDatabaseNavStore((s) => s.showingEr);
   const showingSearch = useDatabaseNavStore((s) => s.showingSearch);
   const selectOverview = useDatabaseNavStore((s) => s.selectOverview);
+  const selectObject = useDatabaseNavStore((s) => s.selectObject);
+  const selectConsole = useDatabaseNavStore((s) => s.selectConsole);
+  const selectEr = useDatabaseNavStore((s) => s.selectEr);
+  const selectSearch = useDatabaseNavStore((s) => s.selectSearch);
   const setLastDatabase = useDatabaseNavStore((s) => s.setLastDatabase);
   const bumpRefresh = useDatabaseViewStore((s) => s.bumpRefresh);
   const resetViewForDatabase = useDatabaseViewStore((s) => s.resetForDatabase);
@@ -159,6 +234,70 @@ export function DatabaseBrowseScreen({
   // On phones the object nav is a slide-in that closes when you pick a table; this
   // bar reopens it so the table tree is always one tap away (not just the chat FAB).
   const handleOpenTables = useCallback(() => showMobileAgentList(), [showMobileAgentList]);
+
+  // DataGrip-style open-object tabs. Each table/view the user opens becomes a tab so
+  // they can switch back with one click; the active tab tracks the nav-store selection.
+  const activeTab = useMemo<DbTab | null>(() => {
+    if (selectedObject) {
+      return {
+        kind: "object",
+        id: `object:${selectedObject.databaseId}:${selectedObject.schema}.${selectedObject.name}`,
+        label: `${selectedObject.schema}.${selectedObject.name}`,
+        databaseId: selectedObject.databaseId,
+        schema: selectedObject.schema,
+        name: selectedObject.name,
+      };
+    }
+    if (showingConsole) return { kind: "console", id: "console", label: "SQL Console" };
+    if (showingEr) return { kind: "er", id: "er", label: "ER Diagram" };
+    if (showingSearch) return { kind: "search", id: "search", label: "Search" };
+    return null;
+  }, [selectedObject, showingConsole, showingEr, showingSearch]);
+
+  const [tabs, setTabs] = useState<DbTab[]>([]);
+  // A new connection clears the tab bar.
+  useEffect(() => setTabs([]), [databaseId]);
+  // Register the active view as a tab (append when new; existing tabs keep their order).
+  useEffect(() => {
+    if (!activeTab) return;
+    setTabs((prev) => (prev.some((t) => t.id === activeTab.id) ? prev : [...prev, activeTab]));
+  }, [activeTab]);
+
+  const activateTab = useCallback(
+    (tab: DbTab) => {
+      if (tab.kind === "object") {
+        selectObject(tab.databaseId, {
+          databaseId: tab.databaseId,
+          schema: tab.schema,
+          name: tab.name,
+        });
+      } else if (tab.kind === "console") {
+        selectConsole(databaseId);
+      } else if (tab.kind === "er") {
+        selectEr(databaseId);
+      } else {
+        selectSearch(databaseId);
+      }
+    },
+    [selectObject, selectConsole, selectEr, selectSearch, databaseId],
+  );
+  const closeTab = useCallback(
+    (tabId: string) => {
+      setTabs((prev) => {
+        const idx = prev.findIndex((t) => t.id === tabId);
+        if (idx < 0) return prev;
+        const next = prev.filter((t) => t.id !== tabId);
+        // Closing the active tab moves to a neighbour (or the overview when none remain).
+        if (activeTab?.id === tabId) {
+          const fallback = next[idx] ?? next[idx - 1] ?? null;
+          if (fallback) activateTab(fallback);
+          else selectOverview(databaseId);
+        }
+        return next;
+      });
+    },
+    [activeTab, activateTab, selectOverview, databaseId],
+  );
   // Back unwinds the in-section view stack before leaving the DB section: chat
   // first, then any sub-view (SQL console / full-text search / ER diagram) or a
   // selected table, all of which return to the connection overview + object
@@ -284,6 +423,14 @@ export function DatabaseBrowseScreen({
                 </Text>
               </Pressable>
             ) : null}
+            {tabs.length > 0 ? (
+              <DbTabStrip
+                tabs={tabs}
+                activeId={activeTab?.id ?? null}
+                onActivate={activateTab}
+                onClose={closeTab}
+              />
+            ) : null}
             {content}
           </View>
           <DatabaseChatDock
@@ -327,6 +474,47 @@ const styles = StyleSheet.create((theme: Theme) => ({
     flex: 1,
     minWidth: 0,
     minHeight: 0,
+  },
+  // Open-object tab strip (DataGrip-style) above the content pane.
+  tabBar: {
+    flexGrow: 0,
+    flexShrink: 0,
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+    backgroundColor: theme.colors.surface0,
+  },
+  tabBarContent: {
+    alignItems: "stretch",
+  },
+  tab: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[1.5],
+    maxWidth: 220,
+    paddingLeft: theme.spacing[3],
+    paddingRight: theme.spacing[2],
+    paddingVertical: theme.spacing[2],
+    borderRightWidth: theme.borderWidth[1],
+    borderRightColor: theme.colors.border,
+    borderBottomWidth: 2,
+    borderBottomColor: "transparent",
+  },
+  tabActive: {
+    backgroundColor: theme.colors.surface1,
+    borderBottomColor: theme.colors.accent,
+  },
+  tabLabel: {
+    flexShrink: 1,
+    fontSize: theme.fontSize.xs,
+    fontFamily: theme.fontFamily.mono,
+    color: theme.colors.foregroundMuted,
+  },
+  tabLabelActive: {
+    color: theme.colors.foreground,
+  },
+  tabClose: {
+    padding: 2,
+    borderRadius: theme.borderRadius.sm,
   },
   mobileNavBar: {
     flexDirection: "row",
