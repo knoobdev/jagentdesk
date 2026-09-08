@@ -1,6 +1,6 @@
 {
   "name": "@jagentdesk/expo-two-way-audio",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "description": "Native module for two way audio streaming",
   "keywords": [
     "ExpoTwoWayAudio",

@@ -5,6 +5,23 @@ own release line (now `0.2.0`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
 
+## v0.2.8 — 2026-09-08
+
+Data-grid column correctness + sidebar record counts.
+
+### Fixed
+
+- **Values are under the right columns** — the grid built its headers from schema
+  introspection (`databaseColumns`) but its rows from `select *`, and the two can
+  return columns in different orders, so cells landed under the wrong headers (and
+  PK-keyed edits/deletes could target the wrong cell). The grid now orders columns by
+  the actual query result and looks up type/PK/FK metadata by name, so header ↔ cell
+  always match. This was a data-ordering bug, not the earlier scroll issue.
+- **Sidebar shows the record count, not the column count** — each table/view in the
+  object tree showed its *column* count, which read as a wrong row count. It now shows
+  the estimated **record** count (Postgres planner estimate, DataGrip-style, compact
+  like `12.3k`), falling back to the column count on engines that don't report one yet.
+
 ## v0.2.7 — 2026-09-08
 
 Database explorer: an interactive ER canvas and DataGrip-style open-object tabs.
