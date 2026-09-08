@@ -5,6 +5,30 @@ own release line (now `0.2.0`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
 
+## v0.2.6 — 2026-09-08
+
+Data-grid correctness + right-click menu (follow-ups to the v0.2.5 scroll rewrite).
+
+### Fixed
+
+- **Columns no longer misalign when scrolled sideways** — v0.2.5 pinned the header
+  with `position:sticky`, which did NOT track horizontal scroll, so once you scrolled
+  right the values drifted under the wrong headers. The header now lives in its own
+  horizontal viewport whose scroll offset is driven to match the body, so header and
+  rows share the exact same horizontal position and columns always line up (both
+  scrollbars still pin to the viewport edges).
+- **No more green focus ring / selected-cell box** — the focus outline on the grid is
+  suppressed, and a selected cell now shows a subtle tint instead of an accent border.
+- **Clicking a row number after a cell no longer leaves two selections** — a plain row
+  select clears the single-cell marker, so you don't end up with a highlighted cell in
+  one row and a selected different row.
+
+### Added
+
+- **Right-click menu on the grid (web)** — replaces Electron's default page menu with a
+  DataGrip-style menu: Copy value, Copy row, Go to referenced row (on a foreign key),
+  Open record, and (editable tables) Set NULL / Delete row.
+
 ## v0.2.5 — 2026-09-08
 
 Database grids scroll like DataGrip, and the SQL console got a real UI.
