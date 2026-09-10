@@ -91,6 +91,9 @@ import type {
   ForgeCliStatusResponse,
   ForgeCliInstallResponse,
   ForgeCliInstallProgress,
+  ForgeConnectionLoginResponse,
+  ForgeConnectionLoginProgress,
+  ForgeConnectionLoginCancelResponse,
   ForgeReviewAction,
   ForgeMergeMethod,
   GitHubSearchResponse,
@@ -523,6 +526,8 @@ type ForgeIssueCommentPayload = ForgeIssueCommentResponse["payload"];
 type ForgeIssueClosePayload = ForgeIssueCloseResponse["payload"];
 type ForgeCliStatusPayload = ForgeCliStatusResponse["payload"];
 type ForgeCliInstallPayload = ForgeCliInstallResponse["payload"];
+type ForgeConnectionLoginResult = ForgeConnectionLoginResponse["payload"];
+type ForgeConnectionLoginCancelResult = ForgeConnectionLoginCancelResponse["payload"];
 type GitHubSearchPayload = GitHubSearchResponse["payload"];
 type DirectorySuggestionsPayload = DirectorySuggestionsResponse["payload"];
 type JAgentDeskWorktreeListPayload = JAgentDeskWorktreeListResponse["payload"];
@@ -4861,6 +4866,63 @@ export class DaemonClient {
     } finally {
       unsubscribe();
     }
+  }
+
+  async forgeConnectionLogin(
+    options: {
+      forge: string;
+      host?: string;
+      onProgress?: (p: ForgeConnectionLoginProgress) => void;
+      signal?: AbortSignal;
+    },
+    requestId?: string,
+  ): Promise<ForgeConnectionLoginResult> {
+    // Resolve the id up front so the subscription filter matches the id we send.
+    const resolvedRequestId = this.createRequestId(requestId);
+    // Subscribe BEFORE sending: login streams unsolicited progress events (device
+    // code, verification uri, pty lines) that are NOT the correlated response.
+    const unsubscribe = this.on("forge.connection.login.progress", (message) => {
+      if (message.requestId !== resolvedRequestId) {
+        return;
+      }
+      options.onProgress?.(message);
+    });
+    // Wire aborts to the cancel RPC (fire-and-forget); torn down in finally.
+    const onAbort = () => {
+      void this.forgeConnectionLoginCancel(resolvedRequestId);
+    };
+    if (options.signal) {
+      options.signal.addEventListener("abort", onAbort);
+    }
+    try {
+      return await this.sendCorrelatedSessionRequest({
+        requestId: resolvedRequestId,
+        message: {
+          type: "forge.connection.login.request",
+          forge: options.forge,
+          host: options.host,
+        },
+        responseType: "forge.connection.login.response",
+        timeout: 300000,
+      });
+    } finally {
+      unsubscribe();
+      if (options.signal) {
+        options.signal.removeEventListener("abort", onAbort);
+      }
+    }
+  }
+
+  async forgeConnectionLoginCancel(
+    targetRequestId: string,
+    requestId?: string,
+  ): Promise<ForgeConnectionLoginCancelResult> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "forge.connection.login.cancel.request", targetRequestId },
+      responseType: "forge.connection.login.cancel.response",
+      timeout: 10000,
+    });
   }
 
   async forgeListArtifacts(

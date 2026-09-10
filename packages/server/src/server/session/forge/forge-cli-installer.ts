@@ -96,13 +96,20 @@ function forgeBinary(forge: string): string | null {
   return getForgeDefinition(forge)?.signIn?.cli ?? null;
 }
 
-/** Run `<path> --version` and return the first non-empty line, or null. */
+/**
+ * Run `<path> --version` and return the bare semver string, e.g. "2.100.0".
+ * `<cli> --version` prints a decorated line (gh: "gh version 2.100.0 (2026-09-03)");
+ * returning that whole line makes the app render an ugly doubled "gh gh version …",
+ * so we extract the first `N.N.N` token. Falls back to the first non-empty line when
+ * no semver is present, and null on failure.
+ */
 async function readVersion(binaryPath: string): Promise<string | null> {
   try {
     const res = await execCommand(binaryPath, ["--version"], { timeout: VERSION_TIMEOUT_MS });
     const text = res.stdout.trim() || res.stderr.trim();
-    const first = text.split("\n", 1)[0]?.trim();
-    return first ? first : null;
+    const firstNonEmptyLine = text.split("\n", 1)[0]?.trim() || null;
+    const m = text.match(/\d+\.\d+\.\d+/);
+    return m ? m[0] : firstNonEmptyLine;
   } catch {
     return null;
   }

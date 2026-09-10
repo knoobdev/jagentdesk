@@ -24,6 +24,7 @@ import type {
 import { findExecutable } from "../../../executable-resolution/executable-resolution.js";
 import { execCommand } from "../../../utils/spawn.js";
 import { detectCliStatus, installCli } from "./forge-cli-installer.js";
+import { ForgeDeviceLogin } from "./forge-device-login.js";
 import type { SecretStore } from "../../database/secret-store.js";
 
 /**
@@ -67,7 +68,9 @@ type ForgeHubInbound = Extract<
       | "forge.issue.comment.request"
       | "forge.issue.close.request"
       | "forge.cli.status.request"
-      | "forge.cli.install.request";
+      | "forge.cli.install.request"
+      | "forge.connection.login.request"
+      | "forge.connection.login.cancel.request";
   }
 >;
 
@@ -2534,6 +2537,9 @@ function ghRunStatus(
 
 export class ForgeHubSession {
   private readonly service: ForgeHubService;
+  /** Device-flow sign-in driver; held on the session so cancel reaches the same
+   *  instance (and thus the same pty map) that started the login. */
+  private readonly deviceLogin = new ForgeDeviceLogin();
   constructor(private readonly options: ForgeHubSessionOptions) {
     this.service = new ForgeHubService(options.secretStore, options.secretStoreDir);
   }
@@ -3220,6 +3226,44 @@ export class ForgeHubSession {
           });
           return;
         }
+        // ---- app-driven device-flow sign-in (host-level; dispatch by `forge`) ---
+        case "forge.connection.login.request": {
+          const requestId = msg.requestId;
+          const result = await this.deviceLogin.start(
+            msg.forge,
+            msg.host,
+            requestId,
+            (progress) => {
+              // Progress is FLAT (requestId + fields at top level, no payload wrapper).
+              this.emit({
+                type: "forge.connection.login.progress",
+                requestId,
+                phase: progress.phase,
+                userCode: progress.userCode ?? null,
+                verificationUri: progress.verificationUri ?? null,
+                line: progress.line ?? null,
+              });
+            },
+          );
+          this.emit({
+            type: "forge.connection.login.response",
+            payload: {
+              ok: result.ok,
+              forge: result.forge,
+              error: result.error ?? null,
+              requestId,
+            },
+          });
+          return;
+        }
+        case "forge.connection.login.cancel.request": {
+          const ok = this.deviceLogin.cancel(msg.targetRequestId);
+          this.emit({
+            type: "forge.connection.login.cancel.response",
+            payload: { ok, requestId: msg.requestId },
+          });
+          return;
+        }
       }
     } catch (error) {
       this.options.logger?.warn?.("forge-hub request failed", { type: msg.type, error });
@@ -3388,6 +3432,16 @@ export class ForgeHubSession {
             error: "install failed",
             requestId: msg.requestId,
           },
+        });
+      case "forge.connection.login.request":
+        return this.emit({
+          type: "forge.connection.login.response",
+          payload: { ok: false, forge: msg.forge, error: "login failed", requestId: msg.requestId },
+        });
+      case "forge.connection.login.cancel.request":
+        return this.emit({
+          type: "forge.connection.login.cancel.response",
+          payload: { ok: false, requestId: msg.requestId },
         });
     }
   }

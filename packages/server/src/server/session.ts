@@ -2500,6 +2500,8 @@ export class Session {
       case "forge.issue.close.request":
       case "forge.cli.status.request":
       case "forge.cli.install.request":
+      case "forge.connection.login.request":
+      case "forge.connection.login.cancel.request":
         return this.forgeHubSession.handle(msg);
       case "stash_save_request":
         return this.checkoutSession.handleStashSaveRequest(msg);

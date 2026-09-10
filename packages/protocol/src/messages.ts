@@ -2663,6 +2663,19 @@ export const ForgeCliInstallRequestSchema = z.object({
   host: z.string().optional(),
   requestId: z.string(),
 });
+export const ForgeConnectionLoginRequestSchema = z.object({
+  type: z.literal("forge.connection.login.request"),
+  forge: z.string(),
+  host: z.string().optional(),
+  requestId: z.string(),
+});
+// The requestId here is a NEW id for the cancel call; targetRequestId names the
+// login request whose pty should be aborted.
+export const ForgeConnectionLoginCancelRequestSchema = z.object({
+  type: z.literal("forge.connection.login.cancel.request"),
+  targetRequestId: z.string(),
+  requestId: z.string(),
+});
 // ===== end Forge Hub Milestone C request schemas ================================
 
 export const DirectorySuggestionsRequestSchema = z.object({
@@ -3704,6 +3717,8 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ForgeIssueCloseRequestSchema,
   ForgeCliStatusRequestSchema,
   ForgeCliInstallRequestSchema,
+  ForgeConnectionLoginRequestSchema,
+  ForgeConnectionLoginCancelRequestSchema,
   GitHubSearchRequestSchema,
   DirectorySuggestionsRequestSchema,
   JAgentDeskWorktreeListRequestSchema,
@@ -4099,6 +4114,7 @@ export const ServerInfoStatusPayloadSchema = z
         forgeHubReleases: z.boolean().optional(), // Milestone C: releases/tags/artifacts
         forgeHubIssues: z.boolean().optional(), // Milestone B/C: issues create/comment/close
         forgeHubCliInstall: z.boolean().optional(), // Milestone C: detect + auto-install forge CLI (§19.3.5, ADR-0016)
+        forgeHubLogin: z.boolean().optional(), // Milestone C: app-driven device-flow sign-in (§19.3.7, ADR-0016 §7)
       })
       .optional(),
   })
@@ -6229,6 +6245,30 @@ export const ForgeCliInstallResponseSchema = z.object({
     requestId: z.string(),
   }),
 });
+// UNSOLICITED stream event: one forge.connection.login.request yields many
+// progress messages, then a single terminal forge.connection.login.response.
+// Not correlated — clients filter by top-level requestId via a subscription.
+export const ForgeConnectionLoginProgressSchema = z.object({
+  type: z.literal("forge.connection.login.progress"),
+  requestId: z.string(),
+  phase: z.enum(["starting", "awaiting_authorization", "verifying", "done", "failed"]),
+  userCode: z.string().nullable().optional(),
+  verificationUri: z.string().nullable().optional(),
+  line: z.string().nullable().optional(),
+});
+export const ForgeConnectionLoginResponseSchema = z.object({
+  type: z.literal("forge.connection.login.response"),
+  payload: z.object({
+    ok: z.boolean(),
+    forge: z.string(),
+    error: z.string().nullable().optional(),
+    requestId: z.string(),
+  }),
+});
+export const ForgeConnectionLoginCancelResponseSchema = z.object({
+  type: z.literal("forge.connection.login.cancel.response"),
+  payload: z.object({ ok: z.boolean(), requestId: z.string() }),
+});
 // ===== end Forge Hub Milestone C responses ======================================
 
 // COMPAT(githubSearchRpc): added in v0.1.106, remove after 2026-12-28 once
@@ -7187,6 +7227,9 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ForgeCliStatusResponseSchema,
   ForgeCliInstallProgressSchema,
   ForgeCliInstallResponseSchema,
+  ForgeConnectionLoginProgressSchema,
+  ForgeConnectionLoginResponseSchema,
+  ForgeConnectionLoginCancelResponseSchema,
   GitHubSearchResponseSchema,
   DirectorySuggestionsResponseSchema,
   JAgentDeskWorktreeListResponseSchema,
@@ -7733,6 +7776,15 @@ export type ForgeCliStatusResponse = z.infer<typeof ForgeCliStatusResponseSchema
 export type ForgeCliInstallRequest = z.infer<typeof ForgeCliInstallRequestSchema>;
 export type ForgeCliInstallProgress = z.infer<typeof ForgeCliInstallProgressSchema>;
 export type ForgeCliInstallResponse = z.infer<typeof ForgeCliInstallResponseSchema>;
+export type ForgeConnectionLoginRequest = z.infer<typeof ForgeConnectionLoginRequestSchema>;
+export type ForgeConnectionLoginProgress = z.infer<typeof ForgeConnectionLoginProgressSchema>;
+export type ForgeConnectionLoginResponse = z.infer<typeof ForgeConnectionLoginResponseSchema>;
+export type ForgeConnectionLoginCancelRequest = z.infer<
+  typeof ForgeConnectionLoginCancelRequestSchema
+>;
+export type ForgeConnectionLoginCancelResponse = z.infer<
+  typeof ForgeConnectionLoginCancelResponseSchema
+>;
 export type GitHubSearchItem = z.infer<typeof GitHubSearchItemSchema>;
 export type GitHubSearchKind = z.infer<typeof GitHubSearchKindSchema>;
 export type GitHubSearchRequest = z.infer<typeof GitHubSearchRequestSchema>;

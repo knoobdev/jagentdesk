@@ -2163,6 +2163,8 @@ export class VoiceAssistantWebSocketServer {
         forgeHubIssues: true,
         // CLI detect + guided auto-install (spec §19.3.5 / §19.3.6 / ADR-0016).
         forgeHubCliInstall: true,
+        // App-driven device-flow sign-in (gh/glab OAuth device flow in a pty).
+        forgeHubLogin: true,
         // Advertise the plugin management surface only when a PluginService is
         // wired; without it the plugin.* RPCs return empty/disabled results.
         ...(this.pluginRuntime
