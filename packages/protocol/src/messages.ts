@@ -2414,6 +2414,145 @@ export const ForgeChangeRequestFilesRequestSchema = z.object({
 });
 // ===== end Forge Hub Milestone A request schemas ================================
 
+// ===== Forge Hub — Milestone B schemas (code · review · merge · CI) =============
+// Item schemas exported for parsing; response arrays stay z.array(z.unknown()) to keep
+// the SessionOutbound discriminated union within TS's instantiation budget (see A note).
+export const ForgeBranchSchema = z.object({
+  name: z.string(),
+  isDefault: z.boolean().optional(),
+  commitSha: z.string().nullable().optional(),
+  protected: z.boolean().optional(),
+});
+export const ForgeCommitSchema = z.object({
+  sha: z.string(),
+  subject: z.string(),
+  authorLogin: z.string().nullable().optional(),
+  authorName: z.string().nullable().optional(),
+  committedAt_ms: z.number().nullable().optional(),
+  checksStatus: z.enum(["none", "pending", "success", "failure"]).optional(),
+});
+export const ForgePipelineRunSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  status: z.enum([
+    "success",
+    "failed",
+    "running",
+    "pending",
+    "canceled",
+    "skipped",
+    "manual",
+    "created",
+    "unknown",
+  ]),
+  ref: z.string().nullable().optional(),
+  sha: z.string().nullable().optional(),
+  trigger: z.string().nullable().optional(),
+  actor: z.string().nullable().optional(),
+  durationSeconds: z.number().nullable().optional(),
+  createdAt_ms: z.number().nullable().optional(),
+  url: z.string(),
+});
+export const ForgePipelineJobSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  stage: z.string(),
+  status: ForgePipelineRunSchema.shape.status,
+  durationSeconds: z.number().nullable().optional(),
+  url: z.string().nullable().optional(),
+});
+export const ForgePipelineStageSchema = z.object({
+  name: z.string(),
+  status: ForgePipelineRunSchema.shape.status,
+  jobs: z.array(ForgePipelineJobSchema),
+});
+export const ForgePipelineDetailSchema = z.object({
+  id: z.string(),
+  status: ForgePipelineRunSchema.shape.status,
+  ref: z.string().nullable().optional(),
+  sha: z.string().nullable().optional(),
+  url: z.string().nullable().optional(),
+  stages: z.array(ForgePipelineStageSchema),
+});
+
+export const ForgeReviewActionSchema = z.enum(["approve", "request_changes", "comment"]);
+export const ForgeMergeMethodSchema = z.enum(["merge", "squash", "rebase"]);
+
+export const ForgeBranchListRequestSchema = z.object({
+  type: z.literal("forge.branch.list.request"),
+  repo: ForgeRepoRefSchema,
+  limit: z.number().int().min(1).max(200).optional(),
+  requestId: z.string(),
+});
+export const ForgeCommitListRequestSchema = z.object({
+  type: z.literal("forge.commit.list.request"),
+  repo: ForgeRepoRefSchema,
+  ref: z.string().optional(),
+  limit: z.number().int().min(1).max(100).optional(),
+  requestId: z.string(),
+});
+export const ForgeCommitCompareRequestSchema = z.object({
+  type: z.literal("forge.commit.compare.request"),
+  repo: ForgeRepoRefSchema,
+  base: z.string(),
+  head: z.string(),
+  requestId: z.string(),
+});
+export const ForgeChangeRequestReviewRequestSchema = z.object({
+  type: z.literal("forge.change_request.review.request"),
+  repo: ForgeRepoRefSchema,
+  number: z.number().int(),
+  action: ForgeReviewActionSchema,
+  body: z.string().optional(),
+  requestId: z.string(),
+});
+export const ForgeChangeRequestMergeRequestSchema = z.object({
+  type: z.literal("forge.change_request.merge.request"),
+  repo: ForgeRepoRefSchema,
+  number: z.number().int(),
+  method: ForgeMergeMethodSchema,
+  requestId: z.string(),
+});
+export const ForgePipelineListRequestSchema = z.object({
+  type: z.literal("forge.pipeline.list.request"),
+  repo: ForgeRepoRefSchema,
+  ref: z.string().optional(),
+  limit: z.number().int().min(1).max(100).optional(),
+  requestId: z.string(),
+});
+export const ForgePipelineGetRequestSchema = z.object({
+  type: z.literal("forge.pipeline.get.request"),
+  repo: ForgeRepoRefSchema,
+  runId: z.string(),
+  requestId: z.string(),
+});
+export const ForgeJobLogRequestSchema = z.object({
+  type: z.literal("forge.job.log.request"),
+  repo: ForgeRepoRefSchema,
+  jobId: z.string(),
+  requestId: z.string(),
+});
+export const ForgePipelineRerunRequestSchema = z.object({
+  type: z.literal("forge.pipeline.rerun.request"),
+  repo: ForgeRepoRefSchema,
+  runId: z.string(),
+  onlyFailed: z.boolean().optional(),
+  requestId: z.string(),
+});
+export const ForgePipelineCancelRequestSchema = z.object({
+  type: z.literal("forge.pipeline.cancel.request"),
+  repo: ForgeRepoRefSchema,
+  runId: z.string(),
+  requestId: z.string(),
+});
+export const ForgeJobPlayRequestSchema = z.object({
+  type: z.literal("forge.job.play.request"),
+  repo: ForgeRepoRefSchema,
+  jobId: z.string(),
+  requestId: z.string(),
+});
+// ===== end Forge Hub Milestone B request schemas ================================
+
 export const DirectorySuggestionsRequestSchema = z.object({
   type: z.literal("directory_suggestions_request"),
   query: z.string(),
@@ -3431,6 +3570,17 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ForgeRepoListRequestSchema,
   ForgeChangeRequestListRequestSchema,
   ForgeChangeRequestFilesRequestSchema,
+  ForgeBranchListRequestSchema,
+  ForgeCommitListRequestSchema,
+  ForgeCommitCompareRequestSchema,
+  ForgeChangeRequestReviewRequestSchema,
+  ForgeChangeRequestMergeRequestSchema,
+  ForgePipelineListRequestSchema,
+  ForgePipelineGetRequestSchema,
+  ForgeJobLogRequestSchema,
+  ForgePipelineRerunRequestSchema,
+  ForgePipelineCancelRequestSchema,
+  ForgeJobPlayRequestSchema,
   GitHubSearchRequestSchema,
   DirectorySuggestionsRequestSchema,
   JAgentDeskWorktreeListRequestSchema,
@@ -5827,6 +5977,64 @@ export const ForgeChangeRequestFilesResponseSchema = z.object({
 });
 // ===== end Forge Hub Milestone A responses ======================================
 
+// ===== Forge Hub — Milestone B responses ========================================
+export const ForgeBranchListResponseSchema = z.object({
+  type: z.literal("forge.branch.list.response"),
+  payload: z.object({ branches: z.array(z.unknown()), requestId: z.string() }),
+});
+export const ForgeCommitListResponseSchema = z.object({
+  type: z.literal("forge.commit.list.response"),
+  payload: z.object({ commits: z.array(z.unknown()), requestId: z.string() }),
+});
+export const ForgeCommitCompareResponseSchema = z.object({
+  type: z.literal("forge.commit.compare.response"),
+  payload: z.object({
+    files: z.array(z.unknown()),
+    commits: z.array(z.unknown()),
+    requestId: z.string(),
+  }),
+});
+export const ForgeChangeRequestReviewResponseSchema = z.object({
+  type: z.literal("forge.change_request.review.response"),
+  payload: z.object({ ok: z.boolean(), requestId: z.string() }),
+});
+export const ForgeChangeRequestMergeResponseSchema = z.object({
+  type: z.literal("forge.change_request.merge.response"),
+  payload: z.object({ merged: z.boolean(), requestId: z.string() }),
+});
+export const ForgePipelineListResponseSchema = z.object({
+  type: z.literal("forge.pipeline.list.response"),
+  payload: z.object({ runs: z.array(z.unknown()), requestId: z.string() }),
+});
+export const ForgePipelineGetResponseSchema = z.object({
+  type: z.literal("forge.pipeline.get.response"),
+  // Single pipeline object (kept as unknown to avoid union bloat; parse with
+  // ForgePipelineDetailSchema).
+  payload: z.object({ pipeline: z.unknown().nullable(), requestId: z.string() }),
+});
+export const ForgeJobLogResponseSchema = z.object({
+  type: z.literal("forge.job.log.response"),
+  payload: z.object({
+    log: z.string(),
+    truncated: z.boolean(),
+    running: z.boolean(),
+    requestId: z.string(),
+  }),
+});
+export const ForgePipelineRerunResponseSchema = z.object({
+  type: z.literal("forge.pipeline.rerun.response"),
+  payload: z.object({ ok: z.boolean(), requestId: z.string() }),
+});
+export const ForgePipelineCancelResponseSchema = z.object({
+  type: z.literal("forge.pipeline.cancel.response"),
+  payload: z.object({ ok: z.boolean(), requestId: z.string() }),
+});
+export const ForgeJobPlayResponseSchema = z.object({
+  type: z.literal("forge.job.play.response"),
+  payload: z.object({ ok: z.boolean(), requestId: z.string() }),
+});
+// ===== end Forge Hub Milestone B responses ======================================
+
 // COMPAT(githubSearchRpc): added in v0.1.106, remove after 2026-12-28 once
 // clients use forge.search.*.
 export const GitHubSearchResponseSchema = z.object({
@@ -6760,6 +6968,17 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ForgeRepoListResponseSchema,
   ForgeChangeRequestListResponseSchema,
   ForgeChangeRequestFilesResponseSchema,
+  ForgeBranchListResponseSchema,
+  ForgeCommitListResponseSchema,
+  ForgeCommitCompareResponseSchema,
+  ForgeChangeRequestReviewResponseSchema,
+  ForgeChangeRequestMergeResponseSchema,
+  ForgePipelineListResponseSchema,
+  ForgePipelineGetResponseSchema,
+  ForgeJobLogResponseSchema,
+  ForgePipelineRerunResponseSchema,
+  ForgePipelineCancelResponseSchema,
+  ForgeJobPlayResponseSchema,
   GitHubSearchResponseSchema,
   DirectorySuggestionsResponseSchema,
   JAgentDeskWorktreeListResponseSchema,
@@ -7244,6 +7463,39 @@ export type ForgeChangeRequestListRequest = z.infer<typeof ForgeChangeRequestLis
 export type ForgeChangeRequestListResponse = z.infer<typeof ForgeChangeRequestListResponseSchema>;
 export type ForgeChangeRequestFilesRequest = z.infer<typeof ForgeChangeRequestFilesRequestSchema>;
 export type ForgeChangeRequestFilesResponse = z.infer<typeof ForgeChangeRequestFilesResponseSchema>;
+// Forge Hub — Milestone B types
+export type ForgeBranch = z.infer<typeof ForgeBranchSchema>;
+export type ForgeCommit = z.infer<typeof ForgeCommitSchema>;
+export type ForgePipelineRun = z.infer<typeof ForgePipelineRunSchema>;
+export type ForgePipelineJob = z.infer<typeof ForgePipelineJobSchema>;
+export type ForgePipelineStage = z.infer<typeof ForgePipelineStageSchema>;
+export type ForgePipelineDetail = z.infer<typeof ForgePipelineDetailSchema>;
+export type ForgeReviewAction = z.infer<typeof ForgeReviewActionSchema>;
+export type ForgeMergeMethod = z.infer<typeof ForgeMergeMethodSchema>;
+export type ForgeBranchListRequest = z.infer<typeof ForgeBranchListRequestSchema>;
+export type ForgeBranchListResponse = z.infer<typeof ForgeBranchListResponseSchema>;
+export type ForgeCommitListRequest = z.infer<typeof ForgeCommitListRequestSchema>;
+export type ForgeCommitListResponse = z.infer<typeof ForgeCommitListResponseSchema>;
+export type ForgeCommitCompareRequest = z.infer<typeof ForgeCommitCompareRequestSchema>;
+export type ForgeCommitCompareResponse = z.infer<typeof ForgeCommitCompareResponseSchema>;
+export type ForgeChangeRequestReviewRequest = z.infer<typeof ForgeChangeRequestReviewRequestSchema>;
+export type ForgeChangeRequestReviewResponse = z.infer<
+  typeof ForgeChangeRequestReviewResponseSchema
+>;
+export type ForgeChangeRequestMergeRequest = z.infer<typeof ForgeChangeRequestMergeRequestSchema>;
+export type ForgeChangeRequestMergeResponse = z.infer<typeof ForgeChangeRequestMergeResponseSchema>;
+export type ForgePipelineListRequest = z.infer<typeof ForgePipelineListRequestSchema>;
+export type ForgePipelineListResponse = z.infer<typeof ForgePipelineListResponseSchema>;
+export type ForgePipelineGetRequest = z.infer<typeof ForgePipelineGetRequestSchema>;
+export type ForgePipelineGetResponse = z.infer<typeof ForgePipelineGetResponseSchema>;
+export type ForgeJobLogRequest = z.infer<typeof ForgeJobLogRequestSchema>;
+export type ForgeJobLogResponse = z.infer<typeof ForgeJobLogResponseSchema>;
+export type ForgePipelineRerunRequest = z.infer<typeof ForgePipelineRerunRequestSchema>;
+export type ForgePipelineRerunResponse = z.infer<typeof ForgePipelineRerunResponseSchema>;
+export type ForgePipelineCancelRequest = z.infer<typeof ForgePipelineCancelRequestSchema>;
+export type ForgePipelineCancelResponse = z.infer<typeof ForgePipelineCancelResponseSchema>;
+export type ForgeJobPlayRequest = z.infer<typeof ForgeJobPlayRequestSchema>;
+export type ForgeJobPlayResponse = z.infer<typeof ForgeJobPlayResponseSchema>;
 export type GitHubSearchItem = z.infer<typeof GitHubSearchItemSchema>;
 export type GitHubSearchKind = z.infer<typeof GitHubSearchKindSchema>;
 export type GitHubSearchRequest = z.infer<typeof GitHubSearchRequestSchema>;

@@ -67,6 +67,19 @@ import type {
   ForgeChangeRequestListRequest,
   ForgeChangeRequestFilesResponse,
   ForgeRepoRef,
+  ForgeBranchListResponse,
+  ForgeCommitListResponse,
+  ForgeCommitCompareResponse,
+  ForgeChangeRequestReviewResponse,
+  ForgeChangeRequestMergeResponse,
+  ForgePipelineListResponse,
+  ForgePipelineGetResponse,
+  ForgeJobLogResponse,
+  ForgePipelineRerunResponse,
+  ForgePipelineCancelResponse,
+  ForgeJobPlayResponse,
+  ForgeReviewAction,
+  ForgeMergeMethod,
   GitHubSearchResponse,
   GitHubSearchRequest,
   DirectorySuggestionsResponse,
@@ -473,6 +486,18 @@ type ForgeConnectionRemovePayload = ForgeConnectionRemoveResponse["payload"];
 type ForgeRepoListPayload = ForgeRepoListResponse["payload"];
 type ForgeChangeRequestListPayload = ForgeChangeRequestListResponse["payload"];
 type ForgeChangeRequestFilesPayload = ForgeChangeRequestFilesResponse["payload"];
+// Milestone B payload aliases
+type ForgeBranchListPayload = ForgeBranchListResponse["payload"];
+type ForgeCommitListPayload = ForgeCommitListResponse["payload"];
+type ForgeCommitComparePayload = ForgeCommitCompareResponse["payload"];
+type ForgeChangeRequestReviewPayload = ForgeChangeRequestReviewResponse["payload"];
+type ForgeChangeRequestMergePayload = ForgeChangeRequestMergeResponse["payload"];
+type ForgePipelineListPayload = ForgePipelineListResponse["payload"];
+type ForgePipelineGetPayload = ForgePipelineGetResponse["payload"];
+type ForgeJobLogPayload = ForgeJobLogResponse["payload"];
+type ForgePipelineRerunPayload = ForgePipelineRerunResponse["payload"];
+type ForgePipelineCancelPayload = ForgePipelineCancelResponse["payload"];
+type ForgeJobPlayPayload = ForgeJobPlayResponse["payload"];
 type GitHubSearchPayload = GitHubSearchResponse["payload"];
 type DirectorySuggestionsPayload = DirectorySuggestionsResponse["payload"];
 type JAgentDeskWorktreeListPayload = JAgentDeskWorktreeListResponse["payload"];
@@ -4588,6 +4613,170 @@ export class DaemonClient {
       },
       responseType: "forge.change_request.files.response",
       timeout: 20000,
+    });
+  }
+
+  // ===== Forge Hub Milestone B (code · review · merge · CI) =====
+  async forgeListBranches(
+    options: { repo: ForgeRepoRef; limit?: number },
+    requestId?: string,
+  ): Promise<ForgeBranchListPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "forge.branch.list.request", repo: options.repo, limit: options.limit },
+      responseType: "forge.branch.list.response",
+      timeout: 20000,
+    });
+  }
+
+  async forgeListCommits(
+    options: { repo: ForgeRepoRef; ref?: string; limit?: number },
+    requestId?: string,
+  ): Promise<ForgeCommitListPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "forge.commit.list.request",
+        repo: options.repo,
+        ref: options.ref,
+        limit: options.limit,
+      },
+      responseType: "forge.commit.list.response",
+      timeout: 20000,
+    });
+  }
+
+  async forgeCompareCommits(
+    options: { repo: ForgeRepoRef; base: string; head: string },
+    requestId?: string,
+  ): Promise<ForgeCommitComparePayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "forge.commit.compare.request",
+        repo: options.repo,
+        base: options.base,
+        head: options.head,
+      },
+      responseType: "forge.commit.compare.response",
+      timeout: 20000,
+    });
+  }
+
+  async forgeReviewChangeRequest(
+    options: { repo: ForgeRepoRef; number: number; action: ForgeReviewAction; body?: string },
+    requestId?: string,
+  ): Promise<ForgeChangeRequestReviewPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "forge.change_request.review.request",
+        repo: options.repo,
+        number: options.number,
+        action: options.action,
+        body: options.body,
+      },
+      responseType: "forge.change_request.review.response",
+      timeout: 30000,
+    });
+  }
+
+  async forgeMergeChangeRequest(
+    options: { repo: ForgeRepoRef; number: number; method: ForgeMergeMethod },
+    requestId?: string,
+  ): Promise<ForgeChangeRequestMergePayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "forge.change_request.merge.request",
+        repo: options.repo,
+        number: options.number,
+        method: options.method,
+      },
+      responseType: "forge.change_request.merge.response",
+      timeout: 30000,
+    });
+  }
+
+  async forgeListPipelines(
+    options: { repo: ForgeRepoRef; ref?: string; limit?: number },
+    requestId?: string,
+  ): Promise<ForgePipelineListPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "forge.pipeline.list.request",
+        repo: options.repo,
+        ref: options.ref,
+        limit: options.limit,
+      },
+      responseType: "forge.pipeline.list.response",
+      timeout: 20000,
+    });
+  }
+
+  async forgeGetPipeline(
+    options: { repo: ForgeRepoRef; runId: string },
+    requestId?: string,
+  ): Promise<ForgePipelineGetPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "forge.pipeline.get.request", repo: options.repo, runId: options.runId },
+      responseType: "forge.pipeline.get.response",
+      timeout: 20000,
+    });
+  }
+
+  async forgeGetJobLog(
+    options: { repo: ForgeRepoRef; jobId: string },
+    requestId?: string,
+  ): Promise<ForgeJobLogPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "forge.job.log.request", repo: options.repo, jobId: options.jobId },
+      responseType: "forge.job.log.response",
+      timeout: 30000,
+    });
+  }
+
+  async forgeRerunPipeline(
+    options: { repo: ForgeRepoRef; runId: string; onlyFailed?: boolean },
+    requestId?: string,
+  ): Promise<ForgePipelineRerunPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "forge.pipeline.rerun.request",
+        repo: options.repo,
+        runId: options.runId,
+        onlyFailed: options.onlyFailed,
+      },
+      responseType: "forge.pipeline.rerun.response",
+      timeout: 30000,
+    });
+  }
+
+  async forgeCancelPipeline(
+    options: { repo: ForgeRepoRef; runId: string },
+    requestId?: string,
+  ): Promise<ForgePipelineCancelPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "forge.pipeline.cancel.request", repo: options.repo, runId: options.runId },
+      responseType: "forge.pipeline.cancel.response",
+      timeout: 30000,
+    });
+  }
+
+  async forgePlayJob(
+    options: { repo: ForgeRepoRef; jobId: string },
+    requestId?: string,
+  ): Promise<ForgeJobPlayPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "forge.job.play.request", repo: options.repo, jobId: options.jobId },
+      responseType: "forge.job.play.response",
+      timeout: 30000,
     });
   }
 
