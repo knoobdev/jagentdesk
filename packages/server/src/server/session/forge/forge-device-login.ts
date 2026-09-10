@@ -81,6 +81,13 @@ interface DriveOptions {
    * Used as the fallback when no explicit device URL is parsed from output.
    */
   defaultVerificationUri: string;
+  /**
+   * TERM for the child pty. glab probes the terminal (OSC 11 background-color +
+   * cursor-position queries) and BLOCKS waiting for responses node-pty never
+   * sends, so it never prints the code. TERM=dumb disables that probing and it
+   * prints plainly. gh works fine with a normal xterm.
+   */
+  term?: string;
 }
 
 export class ForgeDeviceLogin {
@@ -145,7 +152,9 @@ export class ForgeDeviceLogin {
         binPath,
         emitProgress,
         args: ["auth", "login", "--hostname", host || "gitlab.com", "--device"],
-        envOverlay: { BROWSER: "true" },
+        // TERM=dumb: glab otherwise probes the terminal and blocks (see `term`).
+        envOverlay: { BROWSER: "true", TERM: "dumb", NO_COLOR: "1" },
+        term: "dumb",
         defaultVerificationUri: `https://${host || "gitlab.com"}/oauth/device`,
       });
     }
@@ -173,15 +182,23 @@ export class ForgeDeviceLogin {
 
   /** Spawn the CLI in a pty, parse its output, and resolve the terminal result. */
   private driveLogin(opts: DriveOptions): Promise<LoginResult> {
-    const { forge, requestId, binPath, args, envOverlay, defaultVerificationUri, emitProgress } =
-      opts;
+    const {
+      forge,
+      requestId,
+      binPath,
+      args,
+      envOverlay,
+      defaultVerificationUri,
+      term,
+      emitProgress,
+    } = opts;
     return new Promise<LoginResult>((resolve) => {
       const env = createExternalCommandProcessEnv(binPath, process.env, envOverlay);
 
       let child: pty.IPty;
       try {
         child = pty.spawn(binPath, args, {
-          name: "xterm-256color",
+          name: term ?? "xterm-256color",
           cols: 120,
           rows: 40,
           env,
