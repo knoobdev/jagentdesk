@@ -75,10 +75,13 @@ forge, webhook mặc định).
     ListRepos/ListChangeRequests/GetChangeRequestFiles`) + payload types. Protocol build + client
     typecheck xanh. (Bài học: response payload phải có `requestId`; array payload dùng
     `z.array(z.unknown())` như forge.search để không phình discriminated union quá giới hạn TS.)
-  - [ ] server: forge-hub session handler + ForgeService/github adapter methods + connections
-    store (FileSecretStore cho token); advertise `features.forgeHub`.
-  - [ ] app: rail item Forge + sub-nav; Connections section; Repositories; PR detail + Files tab.
-- [ ] Mốc B: GitLab, code, review, merge (UI segmented), CI (run/log/rerun/cancel).
+  - [x] server: `ForgeHubService` + `ForgeHubSession` (GitHub qua `gh`), wire dispatch, advertise
+    `features.forgeHub`, permission entries. Server typecheck xanh. (245a18174)
+  - [x] app: rail item Forge + route `h/[serverId]/forge.tsx` + `ForgeHubScreen` (Connections/
+    Repositories/Pull requests + Files tab qua `DiffViewer`). App typecheck xanh. (c294b6a33)
+  - **Mốc A HOÀN CHỈNH end-to-end** (GitHub read-only chạy thật qua gh).
+- [ ] Mốc B: GitLab, code (branch/commit/compare), review (approve/request-changes/comment),
+  merge (repo-scoped, UI segmented), CI (pipeline list/get/job log/rerun/cancel/play).
 - [ ] Mốc C: Bitbucket REST adapter, auto-merge, artifact, release, issue.
 
 Ghi chú (quyết định implement): spec 07 mô tả capability là mảng chuỗi, nhưng code thật vẫn dùng
