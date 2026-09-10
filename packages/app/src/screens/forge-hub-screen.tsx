@@ -1595,6 +1595,193 @@ function StateFilterButton({
   );
 }
 
+// New change-request form (§19.6). Base + head branch pickers (branches load
+// lazily when the form opens, seeded from the same per-repo cache the Code/Commits
+// tabs use), a required Title, an optional Description, and a Draft toggle. On a
+// successful create the parent busts the CR list cache, reloads, closes the form,
+// and opens the created URL when the daemon returned one.
+function NewChangeRequestForm({
+  client,
+  repo,
+  onCreated,
+  onCancel,
+}: {
+  client: DaemonClient;
+  repo: ForgeRepo;
+  onCreated: (url: string | null) => void;
+  onCancel: () => void;
+}) {
+  const { theme } = useUnistyles();
+  const def = getForgeDefinitionOrNeutral(repo.forge);
+  const [branches, setBranches] = useState<ForgeBranch[]>([]);
+  const [branchesLoading, setBranchesLoading] = useState(false);
+  const [base, setBase] = useState<string | null>(repo.defaultBranch ?? null);
+  const [head, setHead] = useState<string | null>(null);
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [draft, setDraft] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const key = `code:branches:${repoCacheKey(repo)}`;
+    const cached = cacheGet<ForgeBranch[]>(key);
+    if (cached) {
+      setBranches(cached);
+      return;
+    }
+    setBranchesLoading(true);
+    void (async () => {
+      try {
+        const res = await client.forgeListBranches({ repo: repoRef(repo) });
+        const parsed = ForgeBranchSchema.array().safeParse(res.branches);
+        const list = parsed.success ? parsed.data : [];
+        if (!cancelled) {
+          setBranches(list);
+          if (parsed.success) cacheSet(key, list);
+        }
+      } catch {
+        // The pickers fall back to an empty state; the user can retry by reopening.
+      } finally {
+        if (!cancelled) setBranchesLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [client, repo]);
+
+  const toggleDraft = useCallback(() => setDraft((v) => !v), []);
+  const canSubmit = title.trim().length > 0 && !!base && !!head && !busy;
+
+  const submit = useCallback(async () => {
+    if (!base || !head || title.trim().length === 0 || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await client.forgeCreateChangeRequest({
+        repo: repoRef(repo),
+        base,
+        head,
+        title: title.trim(),
+        body: body.trim() || undefined,
+        draft,
+      });
+      if (res.number != null) {
+        onCreated(res.url ?? null);
+      } else {
+        setError(res.error ?? `Unable to create ${def.changeRequestAbbrev}.`);
+      }
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : `Unable to create ${def.changeRequestAbbrev}.`);
+    } finally {
+      setBusy(false);
+    }
+  }, [base, head, title, body, draft, busy, client, repo, def.changeRequestAbbrev, onCreated]);
+
+  return (
+    <View style={styles.formCard}>
+      <View style={styles.formHeader}>
+        <View style={styles.formTitleRow}>
+          <GitPullRequest size={16} color={theme.colors.foreground} />
+          <Text style={styles.formTitle}>New {def.changeRequestNoun}</Text>
+        </View>
+        <Text style={styles.formSubtitle}>
+          Open a new {def.changeRequestAbbrev} from a head branch into a base branch.
+        </Text>
+      </View>
+
+      <View style={styles.crBranchRow}>
+        <View style={styles.crBranchField}>
+          <Text style={styles.fieldLabel}>Base</Text>
+          <BranchPickerButton
+            branches={branches}
+            value={base}
+            loading={branchesLoading}
+            onChange={setBase}
+            testID="forge-new-cr-base"
+          />
+        </View>
+        <View style={styles.crBranchField}>
+          <Text style={styles.fieldLabel}>Head</Text>
+          <BranchPickerButton
+            branches={branches}
+            value={head}
+            loading={branchesLoading}
+            onChange={setHead}
+            testID="forge-new-cr-head"
+          />
+        </View>
+      </View>
+
+      <View style={styles.field}>
+        <Text style={styles.fieldLabel}>Title</Text>
+        <TextInput
+          style={styles.input}
+          value={title}
+          onChangeText={setTitle}
+          placeholder={`${def.changeRequestNoun} title`}
+          placeholderTextColor={theme.colors.foregroundExtraMuted}
+          editable={!busy}
+          testID="forge-new-cr-title"
+        />
+      </View>
+
+      <View style={styles.field}>
+        <Text style={styles.fieldLabel}>Description</Text>
+        <TextInput
+          style={styles.textArea}
+          value={body}
+          onChangeText={setBody}
+          placeholder="Describe the change (optional)"
+          placeholderTextColor={theme.colors.foregroundExtraMuted}
+          multiline
+          editable={!busy}
+          testID="forge-new-cr-body"
+        />
+      </View>
+
+      <Pressable
+        style={styles.autoMergeRow}
+        onPress={toggleDraft}
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked: draft, disabled: busy }}
+        disabled={busy}
+        testID="forge-new-cr-draft"
+      >
+        <View style={[styles.checkbox, draft && styles.checkboxChecked]}>
+          {draft ? <Check size={11} color={theme.colors.accentForeground} /> : null}
+        </View>
+        <Text style={styles.autoMergeLabel}>Create as draft</Text>
+      </Pressable>
+
+      {error ? <Text style={styles.reviewError}>{error}</Text> : null}
+
+      <View style={styles.formActions}>
+        <Pressable
+          style={[styles.btn, styles.btnPrimary, !canSubmit && styles.btnDisabled]}
+          onPress={submit}
+          disabled={!canSubmit}
+          testID="forge-new-cr-submit"
+        >
+          {busy ? (
+            <ActivityIndicator size="small" color={theme.colors.accentForeground} />
+          ) : (
+            <Plus size={14} color={theme.colors.accentForeground} />
+          )}
+          <Text style={styles.btnPrimaryText}>
+            {busy ? "Creating…" : `Create ${def.changeRequestAbbrev}`}
+          </Text>
+        </Pressable>
+        <Pressable style={[styles.btn, styles.btnGhost]} onPress={onCancel} disabled={busy}>
+          <Text style={styles.btnGhostText}>Cancel</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
 // ===== pull request detail =================================================
 
 type DetailTab = "conversation" | "commits" | "files" | "checks";
@@ -2156,6 +2343,69 @@ function JobCheckRow({ job }: { job: ForgePipelineJob }) {
   );
 }
 
+// Close an open change request (§19.6). Rendered alongside the review/merge boxes
+// and only for an open CR; on success the parent refreshes the summary and returns
+// to the list. The existing merge/review UI is untouched.
+function CloseChangeRequestBox({
+  client,
+  repo,
+  cr,
+  onClosed,
+}: {
+  client: DaemonClient;
+  repo: ForgeRepo;
+  cr: ForgeChangeRequestSummary;
+  onClosed: () => void;
+}) {
+  const { theme } = useUnistyles();
+  const def = getForgeDefinitionOrNeutral(repo.forge);
+  const [closing, setClosing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const close = useCallback(async () => {
+    if (closing) return;
+    setClosing(true);
+    setError(null);
+    try {
+      const res = await client.forgeCloseChangeRequest({ repo: repoRef(repo), number: cr.number });
+      if (res.ok) {
+        onClosed();
+      } else {
+        setError(`This ${def.changeRequestNoun} could not be closed.`);
+        setClosing(false);
+      }
+    } catch (e: unknown) {
+      setError(
+        e instanceof Error ? e.message : `This ${def.changeRequestNoun} could not be closed.`,
+      );
+      setClosing(false);
+    }
+  }, [closing, client, repo, cr.number, def.changeRequestNoun, onClosed]);
+
+  return (
+    <View style={styles.mergebox}>
+      <View style={styles.mergeboxBody}>
+        <Pressable
+          style={[styles.btn, styles.btnDanger, closing && styles.btnDisabled]}
+          onPress={close}
+          disabled={closing}
+          testID="forge-cr-close"
+        >
+          {closing ? (
+            <ActivityIndicator size="small" color={theme.colors.statusDanger} />
+          ) : (
+            <Ban size={13} color={theme.colors.statusDanger} />
+          )}
+          <Text style={styles.btnDangerText}>
+            {closing ? "Closing…" : `Close ${def.changeRequestAbbrev}`}
+          </Text>
+        </Pressable>
+        {error ? <Text style={styles.reviewError}>{error}</Text> : null}
+      </View>
+    </View>
+  );
+}
+
 function PullRequestDetail({
   client,
   repo,
@@ -2237,6 +2487,11 @@ function PullRequestDetail({
   const setFiles = useCallback(() => setTab("files"), []);
   const setChecks = useCallback(() => setTab("checks"), []);
 
+  const handleClosed = useCallback(() => {
+    onReviewed();
+    onBack();
+  }, [onReviewed, onBack]);
+
   const filesCount = files?.length ?? null;
   const commitsCount = commits?.length ?? null;
 
@@ -2309,6 +2564,14 @@ function PullRequestDetail({
             <>
               <ReviewBox client={client} repo={repo} cr={cr} onReviewed={onReviewed} />
               <MergeBox client={client} repo={repo} cr={cr} onMerged={onReviewed} />
+              {cr.state === "open" ? (
+                <CloseChangeRequestBox
+                  client={client}
+                  repo={repo}
+                  cr={cr}
+                  onClosed={handleClosed}
+                />
+              ) : null}
             </>
           ) : null}
         </>
@@ -3907,14 +4170,25 @@ function PipelinesView({
 
 // ===== releases · tags — Milestone C, gate forgeHubReleases ==================
 
-function ReleaseRow({ release }: { release: ForgeRelease }) {
+function ReleaseRow({
+  release,
+  onOpen,
+}: {
+  release: ForgeRelease;
+  onOpen: (release: ForgeRelease) => void;
+}) {
   const { theme } = useUnistyles();
+  const handlePress = useCallback(() => onOpen(release), [release, onOpen]);
   const handleOpen = useCallback(() => void openExternalUrl(release.url), [release.url]);
   const published = formatRelativeMs(release.publishedAt_ms);
   return (
     <View style={styles.releaseCard}>
       <View style={styles.releaseHeader}>
-        <View style={styles.rowInfo}>
+        <Pressable
+          style={styles.rowInfo}
+          onPress={handlePress}
+          testID={`forge-release-${release.id}`}
+        >
           <Text style={styles.rowTitle} numberOfLines={1}>
             {release.name || release.tagName}
           </Text>
@@ -3932,7 +4206,7 @@ function ReleaseRow({ release }: { release: ForgeRelease }) {
             ) : null}
             {published ? <Text style={styles.metaMuted}>{published}</Text> : null}
           </View>
-        </View>
+        </Pressable>
         <Pressable
           style={styles.iconBtn}
           onPress={handleOpen}
@@ -4012,11 +4286,313 @@ function TagRow({ tag }: { tag: ForgeTag }) {
   );
 }
 
+// New release form (§19.9). Tag (required), Title, Notes (markdown), an optional
+// Target (branch or commit), and Draft + Pre-release toggles. On success the parent
+// busts the releases cache and reloads. Some forges (e.g. Bitbucket) don't support
+// releases and return an error string, surfaced inline.
+function NewReleaseForm({
+  client,
+  repo,
+  onCreated,
+  onCancel,
+}: {
+  client: DaemonClient;
+  repo: ForgeRepo;
+  onCreated: () => void;
+  onCancel: () => void;
+}) {
+  const { theme } = useUnistyles();
+  const [tagName, setTagName] = useState("");
+  const [name, setName] = useState("");
+  const [body, setBody] = useState("");
+  const [target, setTarget] = useState("");
+  const [draft, setDraft] = useState(false);
+  const [prerelease, setPrerelease] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const toggleDraft = useCallback(() => setDraft((v) => !v), []);
+  const togglePrerelease = useCallback(() => setPrerelease((v) => !v), []);
+  const canSubmit = tagName.trim().length > 0 && !busy;
+
+  const submit = useCallback(async () => {
+    if (tagName.trim().length === 0 || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await client.forgeCreateRelease({
+        repo: repoRef(repo),
+        tagName: tagName.trim(),
+        name: name.trim() || undefined,
+        body: body.trim() || undefined,
+        draft,
+        prerelease,
+        target: target.trim() || undefined,
+      });
+      const parsed = ForgeReleaseSchema.safeParse(res.release);
+      if (res.release != null && parsed.success) {
+        onCreated();
+      } else {
+        setError(res.error ?? "The release could not be created.");
+      }
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "The release could not be created.");
+    } finally {
+      setBusy(false);
+    }
+  }, [tagName, name, body, target, draft, prerelease, busy, client, repo, onCreated]);
+
+  return (
+    <View style={styles.formCard}>
+      <View style={styles.formHeader}>
+        <View style={styles.formTitleRow}>
+          <Tag size={16} color={theme.colors.foreground} />
+          <Text style={styles.formTitle}>New release</Text>
+        </View>
+      </View>
+
+      <View style={styles.field}>
+        <Text style={styles.fieldLabel}>Tag</Text>
+        <TextInput
+          style={styles.input}
+          value={tagName}
+          onChangeText={setTagName}
+          placeholder="v1.0.0"
+          placeholderTextColor={theme.colors.foregroundExtraMuted}
+          autoCapitalize="none"
+          autoCorrect={false}
+          editable={!busy}
+          testID="forge-new-release-tag"
+        />
+      </View>
+
+      <View style={styles.field}>
+        <Text style={styles.fieldLabel}>Title</Text>
+        <TextInput
+          style={styles.input}
+          value={name}
+          onChangeText={setName}
+          placeholder="Release title"
+          placeholderTextColor={theme.colors.foregroundExtraMuted}
+          editable={!busy}
+          testID="forge-new-release-name"
+        />
+      </View>
+
+      <View style={styles.field}>
+        <Text style={styles.fieldLabel}>Notes</Text>
+        <TextInput
+          style={styles.textArea}
+          value={body}
+          onChangeText={setBody}
+          placeholder="Release notes (markdown, optional)"
+          placeholderTextColor={theme.colors.foregroundExtraMuted}
+          multiline
+          editable={!busy}
+          testID="forge-new-release-body"
+        />
+      </View>
+
+      <View style={styles.field}>
+        <Text style={styles.fieldLabel}>Target</Text>
+        <TextInput
+          style={styles.input}
+          value={target}
+          onChangeText={setTarget}
+          placeholder="branch or commit (optional)"
+          placeholderTextColor={theme.colors.foregroundExtraMuted}
+          autoCapitalize="none"
+          autoCorrect={false}
+          editable={!busy}
+          testID="forge-new-release-target"
+        />
+      </View>
+
+      <Pressable
+        style={styles.autoMergeRow}
+        onPress={toggleDraft}
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked: draft, disabled: busy }}
+        disabled={busy}
+        testID="forge-new-release-draft"
+      >
+        <View style={[styles.checkbox, draft && styles.checkboxChecked]}>
+          {draft ? <Check size={11} color={theme.colors.accentForeground} /> : null}
+        </View>
+        <Text style={styles.autoMergeLabel}>Draft</Text>
+      </Pressable>
+
+      <Pressable
+        style={styles.autoMergeRow}
+        onPress={togglePrerelease}
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked: prerelease, disabled: busy }}
+        disabled={busy}
+        testID="forge-new-release-prerelease"
+      >
+        <View style={[styles.checkbox, prerelease && styles.checkboxChecked]}>
+          {prerelease ? <Check size={11} color={theme.colors.accentForeground} /> : null}
+        </View>
+        <Text style={styles.autoMergeLabel}>Pre-release</Text>
+      </Pressable>
+
+      {error ? <Text style={styles.reviewError}>{error}</Text> : null}
+
+      <View style={styles.formActions}>
+        <Pressable
+          style={[styles.btn, styles.btnPrimary, !canSubmit && styles.btnDisabled]}
+          onPress={submit}
+          disabled={!canSubmit}
+          testID="forge-new-release-submit"
+        >
+          {busy ? (
+            <ActivityIndicator size="small" color={theme.colors.accentForeground} />
+          ) : (
+            <Plus size={14} color={theme.colors.accentForeground} />
+          )}
+          <Text style={styles.btnPrimaryText}>{busy ? "Creating…" : "Create release"}</Text>
+        </Pressable>
+        <Pressable style={[styles.btn, styles.btnGhost]} onPress={onCancel} disabled={busy}>
+          <Text style={styles.btnGhostText}>Cancel</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+// Release detail (§19.9). Fetches the full release (notes + assets) via
+// forge.release.get and renders the markdown notes and downloadable assets. Seeds
+// the header from the list summary so the title/chips paint before the fetch lands.
+function ReleaseDetail({
+  client,
+  repo,
+  release,
+  onBack,
+}: {
+  client: DaemonClient;
+  repo: ForgeRepo;
+  release: ForgeRelease;
+  onBack: () => void;
+}) {
+  const { theme } = useUnistyles();
+  const def = getForgeDefinitionOrNeutral(repo.forge);
+  const [detail, setDetail] = useState<ForgeRelease | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    void (async () => {
+      try {
+        const res = await client.forgeGetRelease({ repo: repoRef(repo), tagName: release.tagName });
+        const parsed = ForgeReleaseSchema.safeParse(res.release);
+        if (cancelled) return;
+        if (parsed.success) setDetail(parsed.data);
+        else setError("Unable to load this release.");
+      } catch (e: unknown) {
+        if (!cancelled) setError(e instanceof Error ? e.message : "Unable to load this release.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [client, repo, release.tagName]);
+
+  const shown = detail ?? release;
+  const published = formatRelativeMs(shown.publishedAt_ms);
+  const handleOpenExternal = useCallback(() => void openExternalUrl(shown.url), [shown.url]);
+  const handleLinkPress = useCallback((u: string) => {
+    void openExternalUrl(u);
+    return true;
+  }, []);
+
+  return (
+    <View style={styles.pane}>
+      <View style={styles.detailHeader}>
+        <Pressable
+          style={styles.iconBtn}
+          onPress={onBack}
+          accessibilityRole="button"
+          accessibilityLabel="Back to releases"
+          testID="forge-release-back"
+        >
+          <ArrowLeft size={18} color={theme.colors.foregroundMuted} />
+        </Pressable>
+        <View style={styles.rowInfo}>
+          <Text style={styles.rowTitle} numberOfLines={2}>
+            {shown.name || shown.tagName}
+          </Text>
+          <View style={styles.crMetaRow}>
+            <Text style={styles.metaMono}>{shown.tagName}</Text>
+            {shown.isDraft ? (
+              <View style={styles.plainChip}>
+                <Text style={styles.plainChipText}>Draft</Text>
+              </View>
+            ) : null}
+            {shown.isPrerelease ? (
+              <View style={styles.plainChip}>
+                <Text style={styles.plainChipText}>Prerelease</Text>
+              </View>
+            ) : null}
+            {published ? <Text style={styles.metaMuted}>{published}</Text> : null}
+          </View>
+        </View>
+        <Pressable
+          style={[styles.btn, styles.btnGhost]}
+          onPress={handleOpenExternal}
+          testID="forge-release-detail-open"
+        >
+          <ExternalLink size={13} color={theme.colors.foreground} />
+          <Text style={styles.btnGhostText}>Open on {def.displayName}</Text>
+        </Pressable>
+      </View>
+
+      {loading && detail === null ? (
+        <SkeletonRows rows={4} />
+      ) : error && detail === null ? (
+        <View style={styles.errorBanner}>
+          <CircleAlert size={16} color={theme.colors.statusDanger} />
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      ) : (
+        <>
+          <View style={styles.card}>
+            <View style={styles.releaseNotes}>
+              <MarkdownRenderer text={shown.body ?? ""} onLinkPress={handleLinkPress} />
+            </View>
+          </View>
+          {shown.assets && shown.assets.length > 0 ? (
+            <>
+              <Text style={styles.sectionTitle}>Assets</Text>
+              <View style={styles.card}>
+                {shown.assets.map((asset) => (
+                  <AssetRow
+                    key={asset.url}
+                    name={asset.name}
+                    url={asset.url}
+                    sizeBytes={asset.sizeBytes}
+                  />
+                ))}
+              </View>
+            </>
+          ) : null}
+        </>
+      )}
+    </View>
+  );
+}
+
 function ReleasesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }) {
   const { theme } = useUnistyles();
   const [releases, setReleases] = useState<ForgeRelease[] | null>(null);
   const [tags, setTags] = useState<ForgeTag[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [selected, setSelected] = useState<ForgeRelease | null>(null);
 
   const load = useCallback(
     async (force = false) => {
@@ -4065,6 +4641,19 @@ function ReleasesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo 
 
   const reload = useCallback(() => void load(true), [load]);
 
+  const openCreate = useCallback(() => setCreating(true), []);
+  const closeCreate = useCallback(() => setCreating(false), []);
+  const handleCreated = useCallback(() => {
+    setCreating(false);
+    void load(true);
+  }, [load]);
+  const openDetail = useCallback((release: ForgeRelease) => setSelected(release), []);
+  const closeDetail = useCallback(() => setSelected(null), []);
+
+  if (selected) {
+    return <ReleaseDetail client={client} repo={repo} release={selected} onBack={closeDetail} />;
+  }
+
   return (
     <View style={styles.pane}>
       <View style={styles.toolbarRow}>
@@ -4072,6 +4661,14 @@ function ReleasesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo 
           {repo.owner}/{repo.name}
         </Text>
         <View style={styles.grow} />
+        <Pressable
+          style={[styles.btn, styles.btnPrimary]}
+          onPress={openCreate}
+          testID="forge-new-release"
+        >
+          <Plus size={14} color={theme.colors.accentForeground} />
+          <Text style={styles.btnPrimaryText}>New release</Text>
+        </Pressable>
         <Pressable
           style={[styles.btn, styles.btnGhost]}
           onPress={reload}
@@ -4081,6 +4678,15 @@ function ReleasesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo 
           <Text style={styles.btnGhostText}>Refresh</Text>
         </Pressable>
       </View>
+
+      {creating ? (
+        <NewReleaseForm
+          client={client}
+          repo={repo}
+          onCreated={handleCreated}
+          onCancel={closeCreate}
+        />
+      ) : null}
 
       {error ? (
         <View style={styles.errorBanner}>
@@ -4100,7 +4706,7 @@ function ReleasesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo 
       ) : (
         <View style={styles.filesPane}>
           {releases.map((release) => (
-            <ReleaseRow key={release.id} release={release} />
+            <ReleaseRow key={release.id} release={release} onOpen={openDetail} />
           ))}
         </View>
       )}
@@ -4589,6 +5195,7 @@ export function ForgeHubScreen() {
   const [changeRequests, setChangeRequests] = useState<ForgeChangeRequestSummary[]>([]);
   const [crLoading, setCrLoading] = useState(false);
   const [crError, setCrError] = useState<string | null>(null);
+  const [newCrOpen, setNewCrOpen] = useState(false);
 
   const [selectedCr, setSelectedCr] = useState<ForgeChangeRequestSummary | null>(null);
   const [files, setFiles] = useState<ForgeChangeRequestFile[] | null>(null);
@@ -4680,6 +5287,7 @@ export function ForgeHubScreen() {
     (repo: ForgeRepo) => {
       setSelectedRepo(repo);
       setSelectedCr(null);
+      setNewCrOpen(false);
       setCrState("open");
       setTab(codeEnabled ? "code" : "pulls");
       void loadChangeRequests(repo, "open");
@@ -4697,6 +5305,7 @@ export function ForgeHubScreen() {
 
   const handleOpenCr = useCallback((cr: ForgeChangeRequestSummary) => {
     setSelectedCr(cr);
+    setNewCrOpen(false);
     setFiles(null);
     setFilesError(null);
   }, []);
@@ -4776,6 +5385,22 @@ export function ForgeHubScreen() {
   const refreshCrList = useCallback(() => {
     if (selectedRepo) void loadChangeRequests(selectedRepo, crState, true);
   }, [selectedRepo, crState, loadChangeRequests]);
+
+  const openNewCr = useCallback(() => setNewCrOpen(true), []);
+  const closeNewCr = useCallback(() => setNewCrOpen(false), []);
+  const handleCrCreated = useCallback(
+    (url: string | null) => {
+      if (selectedRepo) {
+        // Drop every cached list state for this repo so revisiting refetches, then
+        // reload the current state list in place.
+        cacheDeletePrefix(`crlist:${repoCacheKey(selectedRepo)}`);
+        void loadChangeRequests(selectedRepo, crState, true);
+      }
+      setNewCrOpen(false);
+      if (url) void openExternalUrl(url);
+    },
+    [selectedRepo, crState, loadChangeRequests],
+  );
 
   const contentContainerStyle = useMemo(
     () => [styles.contentContainer, isCompact ? { paddingTop: insets.top } : null],
@@ -4929,6 +5554,18 @@ export function ForgeHubScreen() {
                   {selectedRepo.owner}/{selectedRepo.name}
                 </Text>
                 <View style={styles.grow} />
+                {reviewEnabled ? (
+                  <Pressable
+                    style={[styles.btn, styles.btnPrimary]}
+                    onPress={openNewCr}
+                    testID="forge-new-cr"
+                  >
+                    <Plus size={14} color={theme.colors.accentForeground} />
+                    <Text style={styles.btnPrimaryText}>
+                      New {getForgeDefinitionOrNeutral(selectedRepo.forge).changeRequestAbbrev}
+                    </Text>
+                  </Pressable>
+                ) : null}
                 <Pressable
                   style={[styles.btn, styles.btnGhost]}
                   onPress={refreshCrList}
@@ -4938,6 +5575,14 @@ export function ForgeHubScreen() {
                   <Text style={styles.btnGhostText}>Refresh</Text>
                 </Pressable>
               </View>
+              {reviewEnabled && newCrOpen && client ? (
+                <NewChangeRequestForm
+                  client={client}
+                  repo={selectedRepo}
+                  onCreated={handleCrCreated}
+                  onCancel={closeNewCr}
+                />
+              ) : null}
               <StateFilter state={crState} onChange={handleChangeState} />
               {crError ? (
                 <View style={styles.errorBanner}>
@@ -6053,6 +6698,23 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.xs,
     color: theme.colors.foreground,
     fontFamily: theme.fontFamily.mono,
+  },
+  releaseNotes: {
+    padding: theme.spacing[3],
+  },
+  // New change-request form: base/head pickers side by side. Each picker owns an
+  // absolute dropdown, so the row keeps a stacking context above the fields below.
+  crBranchRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: theme.spacing[3],
+    zIndex: 20,
+  },
+  crBranchField: {
+    flex: 1,
+    minWidth: 140,
+    gap: theme.spacing[1],
+    position: "relative",
   },
   // ===== code (file tree browser) =====
   breadcrumb: {
