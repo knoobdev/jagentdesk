@@ -923,6 +923,19 @@ function ConnectionsView({
     setToken("");
   }, [choice, selfHostedForge, option, host, token, onAdd]);
 
+  // In-app sign-in succeeded: refresh the account list, then collapse the add
+  // form so the freshly-connected account is what the user sees (not a stale
+  // form). onToggleAdd closes it because the form is open here.
+  const handleLoggedIn = useCallback(async () => {
+    await onLoggedIn();
+    onToggleAdd();
+  }, [onLoggedIn, onToggleAdd]);
+
+  // The manual "Add connection" submit is only meaningful for token providers,
+  // or a cli provider on a host that can't drive in-app sign-in. Otherwise the
+  // CliInstallSection sign-in button is the single action.
+  const showManualAdd = option.method === "token" || !loginEnabled;
+
   const setForgeGithub = useCallback(() => setSelfHostedForge("github"), []);
   const setForgeGitlab = useCallback(() => setSelfHostedForge("gitlab"), []);
   const setForgeGitea = useCallback(() => setSelfHostedForge("gitea"), []);
@@ -1042,14 +1055,19 @@ function ConnectionsView({
 
           {option.method === "cli" ? (
             <>
-              <View style={styles.hintBox}>
-                <Text style={styles.hintTitle}>OAuth device flow (recommended)</Text>
-                <Text style={styles.hintBody}>
-                  Sign in on the daemon host by running the command below, then paste the one-time
-                  code at the provider. No callback server is needed.
-                </Text>
-                <Text style={styles.hintMono}>{def.signIn?.command ?? "auth login"}</Text>
-              </View>
+              {/* When the daemon can drive sign-in in-app, the CliInstallSection
+                  button is the whole flow — the static "run this on the host"
+                  hint is only shown as a fallback for hosts that can't. */}
+              {!loginEnabled ? (
+                <View style={styles.hintBox}>
+                  <Text style={styles.hintTitle}>Sign in on the daemon host</Text>
+                  <Text style={styles.hintBody}>
+                    Run the command below on the machine running the daemon, then click Add
+                    connection.
+                  </Text>
+                  <Text style={styles.hintMono}>{def.signIn?.command ?? "auth login"}</Text>
+                </View>
+              ) : null}
               <CliInstallSection
                 client={client}
                 cliInstallEnabled={cliInstallEnabled}
@@ -1057,7 +1075,7 @@ function ConnectionsView({
                 forge={choice === "selfhosted" ? selfHostedForge : option.forge}
                 host={option.needsHost ? host : ""}
                 cliName={def.signIn?.cli ?? "the CLI"}
-                onLoggedIn={onLoggedIn}
+                onLoggedIn={handleLoggedIn}
               />
             </>
           ) : (
@@ -1082,13 +1100,19 @@ function ConnectionsView({
           )}
 
           <View style={styles.formActions}>
-            <Pressable
-              style={[styles.btn, styles.btnPrimary]}
-              onPress={handleSubmit}
-              testID="forge-connection-submit"
-            >
-              <Text style={styles.btnPrimaryText}>Add connection</Text>
-            </Pressable>
+            {/* The bottom "Add connection" submit is only for the manual paths:
+                token providers, or a cli host without in-app sign-in. When the
+                in-app sign-in button is present it does the whole thing, so we
+                show only Cancel here to avoid a confusing second action. */}
+            {showManualAdd ? (
+              <Pressable
+                style={[styles.btn, styles.btnPrimary]}
+                onPress={handleSubmit}
+                testID="forge-connection-submit"
+              >
+                <Text style={styles.btnPrimaryText}>Add connection</Text>
+              </Pressable>
+            ) : null}
             <Pressable style={[styles.btn, styles.btnGhost]} onPress={onToggleAdd}>
               <Text style={styles.btnGhostText}>Cancel</Text>
             </Pressable>
@@ -4146,6 +4170,10 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
     gap: theme.spacing[2],
     flexWrap: "wrap",
+    // Establish a stacking context above the content that follows in the pane so
+    // the branch picker's absolute dropdown isn't painted under the commit list.
+    position: "relative",
+    zIndex: 30,
   },
   grow: {
     flex: 1,
