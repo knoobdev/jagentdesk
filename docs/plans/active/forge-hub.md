@@ -107,6 +107,17 @@ forge, webhook mặc định).
     Bitbucket không có API auto-merge/artifact/rerun (releases synth từ tag, issue tracker có thể tắt);
     GitLab artifact job-scoped (không URL/expiry); gh issue thiếu commentCount.
 
+- Mốc C+ (UX kết nối — §19.3.5–7, ADR-0016):
+  - [x] Dò + tự-cài CLI: `forge.cli.status`/`forge.cli.install` (stream), resolver neutral + dò
+    package manager + bảng cài-được tĩnh (bounded), UI banner + nút "Install automatically" + thanh
+    tiến trình (spec 707fc25; backend 981543698; UI 8e1d3938e). 4 package xanh; đã build desktop chạy.
+  - [x] Device-flow sign-in trong app: `forge.connection.login` (pty `gh/glab auth login`, stream
+    userCode+URL) + `.cancel`; version-string rút gọn semver (spec 65b9e8d; backend b9cb93590; UI
+    3e0079e2f). 4 package xanh.
+  - Verify: typecheck + logic + build đóng gói. `gh` flags xác nhận qua `gh auth login --help` (2.100.0).
+    CHƯA chạy device-flow tới `done` thật (cần authorize thật); brew install thật chưa chạy e2e.
+    glab device flow best-effort (menu tương tác) — degrade về hint thủ công nếu không lái được.
+
 ## Mức verify (trung thực)
 Tất cả tầng: typecheck + logic. CHƯA e2e thật (cần tài khoản GitHub/GitLab thật + bản build đóng
 gói desktop/mobile). Adapter dùng `gh`/`glab` thật (không mock), map sang shape neutral.
