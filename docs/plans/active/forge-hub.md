@@ -71,9 +71,12 @@ forge, webhook mặc định).
   - [x] protocol: feature flags `forgeHub*` + schema request/response cho
     `forge.connection.list/add/remove`, `forge.repo.list`, `forge.change_request.list/files`
     (dot-namespace) + đăng ký union. Typecheck protocol/client/server xanh.
-  - [ ] client: method daemon-client cho các RPC trên.
-  - [ ] server: forge-session handler + ForgeService/github adapter methods + connections store
-    (FileSecretStore cho token); advertise `features.forgeHub`.
+  - [x] client: 6 method daemon-client (`forgeListConnections/AddConnection/RemoveConnection/
+    ListRepos/ListChangeRequests/GetChangeRequestFiles`) + payload types. Protocol build + client
+    typecheck xanh. (Bài học: response payload phải có `requestId`; array payload dùng
+    `z.array(z.unknown())` như forge.search để không phình discriminated union quá giới hạn TS.)
+  - [ ] server: forge-hub session handler + ForgeService/github adapter methods + connections
+    store (FileSecretStore cho token); advertise `features.forgeHub`.
   - [ ] app: rail item Forge + sub-nav; Connections section; Repositories; PR detail + Files tab.
 - [ ] Mốc B: GitLab, code, review, merge (UI segmented), CI (run/log/rerun/cancel).
 - [ ] Mốc C: Bitbucket REST adapter, auto-merge, artifact, release, issue.
