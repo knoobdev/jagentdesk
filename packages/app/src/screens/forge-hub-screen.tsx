@@ -518,9 +518,17 @@ function connectionStatus(
 function ConnectionRow({
   connection,
   onRemove,
+  active,
+  showCheckbox,
+  onToggleActive,
 }: {
   connection: ForgeConnection;
   onRemove: (id: string) => void | Promise<void>;
+  /** Whether this connection is in the active browsing set. */
+  active: boolean;
+  /** Hidden when only one connection exists (it's always the one browsed). */
+  showCheckbox: boolean;
+  onToggleActive: (id: string) => void;
 }) {
   const { theme } = useUnistyles();
   const def = getForgeDefinitionOrNeutral(connection.forge);
@@ -544,8 +552,25 @@ function ConnectionRow({
     }
   }, [connection.id, onRemove, removing]);
   const methodLabel = connection.method === "cli" ? `via ${def.signIn?.cli ?? "CLI"}` : "API token";
+  const handleToggleActive = useCallback(
+    () => onToggleActive(connection.id),
+    [connection.id, onToggleActive],
+  );
   return (
     <View style={styles.row}>
+      {showCheckbox ? (
+        <Pressable
+          onPress={handleToggleActive}
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: active }}
+          accessibilityLabel="Use this account for browsing"
+          testID={`forge-connection-active-${connection.id}`}
+        >
+          <View style={[styles.checkbox, active && styles.checkboxChecked]}>
+            {active ? <Check size={11} color={theme.colors.accentForeground} /> : null}
+          </View>
+        </Pressable>
+      ) : null}
       <ProviderBadge forge={connection.forge} />
       <View style={styles.rowInfo}>
         <Text style={styles.rowTitle} numberOfLines={1}>
@@ -1095,6 +1120,8 @@ function ConnectionsView({
   cliInstallEnabled,
   loginEnabled,
   onLoggedIn,
+  activeConnectionIds,
+  onToggleActive,
 }: {
   connections: ForgeConnection[];
   onRemove: (id: string) => void | Promise<void>;
@@ -1105,6 +1132,9 @@ function ConnectionsView({
   cliInstallEnabled: boolean;
   loginEnabled: boolean;
   onLoggedIn: () => void | Promise<void>;
+  /** Connection ids used for browsing; null = all connections are active. */
+  activeConnectionIds: Set<string> | null;
+  onToggleActive: (id: string) => void;
 }) {
   const { theme } = useUnistyles();
   const [choice, setChoice] = useState<ProviderChoice>("github");
@@ -1181,7 +1211,14 @@ function ConnectionsView({
       ) : (
         <View style={styles.card}>
           {connections.map((connection) => (
-            <ConnectionRow key={connection.id} connection={connection} onRemove={onRemove} />
+            <ConnectionRow
+              key={connection.id}
+              connection={connection}
+              onRemove={onRemove}
+              active={activeConnectionIds === null || activeConnectionIds.has(connection.id)}
+              showCheckbox={connections.length > 1}
+              onToggleActive={onToggleActive}
+            />
           ))}
         </View>
       )}
@@ -1364,7 +1401,16 @@ function ConnectionsView({
 
 // ===== repositories view ===================================================
 
-function RepoRow({ repo, onOpen }: { repo: ForgeRepo; onOpen: (repo: ForgeRepo) => void }) {
+function RepoRow({
+  repo,
+  onOpen,
+  accountLabel = null,
+}: {
+  repo: ForgeRepo;
+  onOpen: (repo: ForgeRepo) => void;
+  /** Muted per-row account label; null hides it (single-account case). */
+  accountLabel?: string | null;
+}) {
   const dotColor = useDotColor();
   const def = getForgeDefinitionOrNeutral(repo.forge);
   const handlePress = useCallback(() => onOpen(repo), [repo, onOpen]);
@@ -1380,7 +1426,11 @@ function RepoRow({ repo, onOpen }: { repo: ForgeRepo; onOpen: (repo: ForgeRepo) 
         <Text style={styles.rowTitleMono} numberOfLines={1}>
           {repo.owner}/{repo.name}
         </Text>
-        {repo.description ? (
+        {accountLabel ? (
+          <Text style={styles.rowSub} numberOfLines={1}>
+            {accountLabel}
+          </Text>
+        ) : repo.description ? (
           <Text style={styles.rowSub} numberOfLines={1}>
             {repo.description}
           </Text>
@@ -1412,6 +1462,8 @@ function RepositoriesView({
   onLoadMore,
   onOpen,
   onRetry,
+  connections,
+  activeConnectionIds,
 }: {
   repos: ForgeRepo[];
   loading: boolean;
@@ -1421,42 +1473,50 @@ function RepositoriesView({
   onLoadMore: () => void;
   onOpen: (repo: ForgeRepo) => void;
   onRetry: () => void;
+  connections: ForgeConnection[];
+  /** Connection ids to browse; null = all. Controlled from the Connections tab. */
+  activeConnectionIds: Set<string> | null;
 }) {
   const { theme } = useUnistyles();
   const [query, setQuery] = useState("");
-  // Single-select provider filter: "all" or one forge id. Pure client-side view
-  // over the already-fetched repos — never triggers a fetch (pagination is about
-  // the fetch, this filter is a view over it).
-  const [repoFilter, setRepoFilter] = useState<string>("all");
 
-  const forgesPresent = useMemo(() => {
-    const set = new Set<string>();
-    for (const repo of repos) set.add(repo.forge);
-    return [...set];
-  }, [repos]);
-
-  // If the active provider filter is no longer present (e.g. a connection was
-  // removed), fall back to "all" so the list doesn't silently show nothing.
-  useEffect(() => {
-    if (repoFilter !== "all" && !forgesPresent.includes(repoFilter)) setRepoFilter("all");
-  }, [repoFilter, forgesPresent]);
+  // connectionId → host, for a fallback account label when the repo carries none.
+  const hostById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of connections) map.set(c.id, c.host);
+    return map;
+  }, [connections]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return repos.filter((repo) => {
-      if (repoFilter !== "all" && repo.forge !== repoFilter) return false;
+      if (
+        activeConnectionIds !== null &&
+        !(repo.connectionId != null && activeConnectionIds.has(repo.connectionId))
+      ) {
+        return false;
+      }
       if (!q) return true;
       return `${repo.owner}/${repo.name}`.toLowerCase().includes(q);
     });
-  }, [repos, query, repoFilter]);
+  }, [repos, query, activeConnectionIds]);
 
   // "Load more" is about the fetch, so gate it on the UNFILTERED fetched length:
   // the last page returned at least `limit` rows ⇒ there may be more to fetch.
   const canLoadMore = !loading && repos.length >= limit;
 
+  const totalAccounts = connections.length;
+  // Count only live connections in the set (a removed connection may linger there).
+  const activeCount =
+    activeConnectionIds === null
+      ? totalAccounts
+      : connections.filter((c) => activeConnectionIds.has(c.id)).length;
+
+  // Empty state distinguishes an account filter yielding nothing from a search miss.
+  const noneForSelection = activeConnectionIds !== null && activeCount === 0;
   const emptyLabel =
-    repoFilter !== "all" && !query.trim()
-      ? `No ${getForgeDefinitionOrNeutral(repoFilter).displayName} repositories.`
+    noneForSelection || (activeConnectionIds !== null && !query.trim())
+      ? "No repositories for the selected account(s)."
       : "No repositories match the current filters.";
 
   return (
@@ -1477,24 +1537,10 @@ function RepositoriesView({
         </View>
       </View>
 
-      {forgesPresent.length > 1 ? (
-        <View style={styles.chipRow}>
-          <ForgeFilterChip
-            id="all"
-            label="All"
-            active={repoFilter === "all"}
-            onSelect={setRepoFilter}
-          />
-          {forgesPresent.map((forge) => (
-            <ForgeFilterChip
-              key={forge}
-              id={forge}
-              label={getForgeDefinitionOrNeutral(forge).displayName}
-              active={repoFilter === forge}
-              onSelect={setRepoFilter}
-            />
-          ))}
-        </View>
+      {totalAccounts > 1 ? (
+        <Text style={styles.rowSub} testID="forge-repos-account-summary">
+          Browsing {activeCount} of {totalAccounts} accounts · choose accounts in Connections
+        </Text>
       ) : null}
 
       {error ? (
@@ -1514,7 +1560,18 @@ function RepositoriesView({
       ) : (
         <View style={styles.card}>
           {filtered.map((repo) => (
-            <RepoRow key={`${repo.forge}:${repo.owner}/${repo.name}`} repo={repo} onOpen={onOpen} />
+            <RepoRow
+              key={`${repo.forge}:${repo.owner}/${repo.name}`}
+              repo={repo}
+              onOpen={onOpen}
+              accountLabel={
+                totalAccounts > 1
+                  ? (repo.account ??
+                    (repo.connectionId ? hostById.get(repo.connectionId) : undefined) ??
+                    null)
+                  : null
+              }
+            />
           ))}
         </View>
       )}
@@ -1523,31 +1580,6 @@ function RepositoriesView({
         <LoadMoreButton loading={loadingMore} onPress={onLoadMore} testID="forge-repos-load-more" />
       ) : null}
     </View>
-  );
-}
-
-function ForgeFilterChip({
-  id,
-  label,
-  active,
-  onSelect,
-}: {
-  id: string;
-  label: string;
-  active: boolean;
-  onSelect: (id: string) => void;
-}) {
-  const handlePress = useCallback(() => onSelect(id), [id, onSelect]);
-  return (
-    <Pressable
-      style={[styles.providerChip, active && styles.providerChipActive]}
-      onPress={handlePress}
-      testID={`forge-filter-${id}`}
-    >
-      <Text style={[styles.providerChipText, active && styles.providerChipTextActive]}>
-        {label}
-      </Text>
-    </Pressable>
   );
 }
 
@@ -5377,6 +5409,9 @@ export function ForgeHubScreen() {
   const [connections, setConnections] = useState<ForgeConnection[]>([]);
   const [connectionsError, setConnectionsError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  // Which connections the Repositories tab browses. null = all active (default);
+  // an explicit Set restricts to those ids. Controlled from the Connections tab.
+  const [activeConnectionIds, setActiveConnectionIds] = useState<Set<string> | null>(null);
 
   const [repos, setRepos] = useState<ForgeRepo[]>([]);
   const [reposLoaded, setReposLoaded] = useState(false);
@@ -5616,6 +5651,24 @@ export function ForgeHubScreen() {
     [client, refreshConnections],
   );
 
+  const handleToggleActiveConnection = useCallback(
+    (id: string) => {
+      setActiveConnectionIds((prev) => {
+        const allIds = connections.map((c) => c.id);
+        // From "all active" (null), the first toggle-off becomes an explicit
+        // set of all-except-this so the other accounts stay selected.
+        if (prev === null) return new Set(allIds.filter((cid) => cid !== id));
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        // Everything selected again → collapse back to null ("all active").
+        if (allIds.length > 0 && allIds.every((cid) => next.has(cid))) return null;
+        return next;
+      });
+    },
+    [connections],
+  );
+
   const toggleAdding = useCallback(() => setAdding((v) => !v), []);
   const handleBackToList = useCallback(() => setSelectedCr(null), []);
   const handleRetryRepos = useCallback(() => void loadRepos(), [loadRepos]);
@@ -5746,6 +5799,8 @@ export function ForgeHubScreen() {
             cliInstallEnabled={cliInstallEnabled}
             loginEnabled={loginEnabled}
             onLoggedIn={refreshConnections}
+            activeConnectionIds={activeConnectionIds}
+            onToggleActive={handleToggleActiveConnection}
           />
         ) : null}
 
@@ -5762,6 +5817,8 @@ export function ForgeHubScreen() {
               onLoadMore={loadMoreRepos}
               onOpen={handleOpenRepo}
               onRetry={handleRetryRepos}
+              connections={connections}
+              activeConnectionIds={activeConnectionIds}
             />
           )
         ) : null}

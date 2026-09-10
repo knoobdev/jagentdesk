@@ -2331,6 +2331,13 @@ export const ForgeRepoSchema = z.object({
   forge: z.string(),
   owner: z.string(),
   name: z.string(),
+  /** Connection this repo was fetched through, matching `ForgeConnection.id`
+   *  (`${forge}:${host}`). Lets the app map a repo to its account for
+   *  per-account browsing. Optional/additive so older payloads still parse. */
+  connectionId: z.string().optional(),
+  /** Account label for the connection (gh/glab login, Bitbucket workspace/owner);
+   *  null/undefined when not cheaply known. */
+  account: z.string().nullable().optional(),
   description: z.string().nullable().optional(),
   defaultBranch: z.string().nullable().optional(),
   visibility: z.enum(["public", "private", "internal", "unknown"]).optional(),

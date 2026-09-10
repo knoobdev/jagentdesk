@@ -856,14 +856,66 @@ export class ForgeHubService {
     return true;
   }
 
-  /** Aggregate repos across every authenticated provider (GitHub + GitLab + Bitbucket). */
-  async listRepos(input: { query?: string; limit?: number }): Promise<ForgeRepo[]> {
+  /**
+   * List repos across the authenticated providers, tagging each repo with the
+   * `connectionId` (`${forge}:${host}`, matching `listConnections`) it came from
+   * so the app can browse per-account. When `connectionId` is given only that
+   * provider/connection is queried; otherwise every provider is aggregated.
+   */
+  async listRepos(input: {
+    query?: string;
+    limit?: number;
+    connectionId?: string;
+  }): Promise<ForgeRepo[]> {
+    const only = input.connectionId;
+    // Guard: skip a provider entirely when a specific connection excludes it, so
+    // selecting one account fetches only that account's repos.
+    const wantGithub = !only || only.startsWith("github:");
+    const wantGitlab = !only || only.startsWith("gitlab:");
+    const wantBitbucket = !only || only.startsWith("bitbucket:");
     const [github, gitlab, bitbucket] = await Promise.all([
-      this.listGitHubRepos(input),
-      this.listGitLabRepos(input),
-      this.listBitbucketRepos(input),
+      wantGithub ? this.listGitHubRepos(input) : Promise.resolve<ForgeRepo[]>([]),
+      wantGitlab ? this.listGitLabRepos(input) : Promise.resolve<ForgeRepo[]>([]),
+      wantBitbucket ? this.listBitbucketRepos(input) : Promise.resolve<ForgeRepo[]>([]),
     ]);
     return [...github, ...gitlab, ...bitbucket];
+  }
+
+  /** Logged-in gh login, for tagging GitHub repos with a per-account label. */
+  private async githubLogin(): Promise<string | null> {
+    const gh = await this.ghPath();
+    if (!gh) return null;
+    try {
+      const res = await execCommand(gh, ["api", "user", "-q", ".login"], {
+        timeout: GH_TIMEOUT_MS,
+      });
+      return res.stdout.trim() || null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Logged-in glab username, for tagging GitLab repos with a per-account label. */
+  private async gitlabUsername(): Promise<string | null> {
+    const glab = await this.glabPath();
+    if (!glab) return null;
+    try {
+      const res = await execCommand(glab, ["api", "user"], { timeout: GH_TIMEOUT_MS });
+      const parsed = z
+        .object({ username: z.string().optional() })
+        .safeParse(JSON.parse(res.stdout));
+      return parsed.success ? (parsed.data.username ?? null) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Id of the Bitbucket token connection repos are fetched through (mirrors
+   *  `bitbucketToken`, which uses the first persisted Bitbucket connection). */
+  private async bitbucketConnectionId(): Promise<string> {
+    const metas = await this.readConnectionIndex();
+    const bb = metas.find((m) => m.forge === "bitbucket");
+    return bb?.id ?? "bitbucket:bitbucket.org";
   }
 
   private async listGitHubRepos(input: { query?: string; limit?: number }): Promise<ForgeRepo[]> {
@@ -879,12 +931,15 @@ export class ForgeHubService {
     const rows = await this.ghJson(args, z.array(GhRepoSchema));
     if (!rows) return [];
     const query = input.query?.trim().toLowerCase();
+    const account = (await this.githubLogin()) ?? undefined;
     return rows
       .filter((r) => !query || r.nameWithOwner.toLowerCase().includes(query))
       .map((r): ForgeRepo => {
         const [owner, name] = r.nameWithOwner.split("/", 2);
         return {
           forge: "github",
+          connectionId: "github:github.com",
+          account,
           owner: owner ?? "",
           name: name ?? r.nameWithOwner,
           description: r.description ?? null,
@@ -1414,6 +1469,7 @@ export class ForgeHubService {
     );
     if (!rows) return [];
     const query = input.query?.trim().toLowerCase();
+    const account = (await this.gitlabUsername()) ?? undefined;
     return rows
       .filter((r) => !query || r.path_with_namespace.toLowerCase().includes(query))
       .map((r): ForgeRepo => {
@@ -1422,6 +1478,8 @@ export class ForgeHubService {
         const name = idx >= 0 ? r.path_with_namespace.slice(idx + 1) : r.path_with_namespace;
         return {
           forge: "gitlab",
+          connectionId: "gitlab:gitlab.com",
+          account,
           owner,
           name,
           description: r.description ?? null,
@@ -2313,6 +2371,7 @@ export class ForgeHubService {
     );
     if (!res) return [];
     const query = input.query?.trim().toLowerCase();
+    const connectionId = await this.bitbucketConnectionId();
     return res.values
       .filter((r) => !query || r.full_name.toLowerCase().includes(query))
       .map((r): ForgeRepo => {
@@ -2321,6 +2380,9 @@ export class ForgeHubService {
         const name = idx >= 0 ? r.full_name.slice(idx + 1) : r.full_name;
         return {
           forge: "bitbucket",
+          connectionId,
+          // The repo's workspace/owner is the cheapest per-repo account label.
+          account: owner || undefined,
           owner,
           name,
           description: r.description ?? null,
@@ -3227,7 +3289,11 @@ export class ForgeHubSession {
           return;
         }
         case "forge.repo.list.request": {
-          const repos = await this.service.listRepos({ query: msg.query, limit: msg.limit });
+          const repos = await this.service.listRepos({
+            query: msg.query,
+            limit: msg.limit,
+            connectionId: msg.connectionId,
+          });
           this.emit({
             type: "forge.repo.list.response",
             payload: { repos, requestId: msg.requestId },
