@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentType,
+  type MutableRefObject,
+} from "react";
 import {
   ActivityIndicator,
   Animated,
@@ -150,6 +158,12 @@ function cacheDeletePrefix(prefix: string): void {
 function repoCacheKey(repo: ForgeRepo): string {
   return `${repo.forge}:${repo.owner}/${repo.name}`;
 }
+
+// Remembers the Code tab's last directory/file per repo so switching away from
+// Code and back restores navigation instead of resetting to the repo root. Keyed
+// by repoCacheKey(repo). In-memory only (like forgeCache) — not persisted across
+// an app reload.
+const codeNavState = new Map<string, { path: string; file: string | null }>();
 
 type ProviderChoice = "github" | "gitlab" | "bitbucket" | "selfhosted";
 
@@ -449,12 +463,29 @@ function ConnectionRow({
   onRemove,
 }: {
   connection: ForgeConnection;
-  onRemove: (id: string) => void;
+  onRemove: (id: string) => void | Promise<void>;
 }) {
   const { theme } = useUnistyles();
   const def = getForgeDefinitionOrNeutral(connection.forge);
   const status = connectionStatus(connection, theme);
-  const handleRemove = useCallback(() => onRemove(connection.id), [connection.id, onRemove]);
+  const [removing, setRemoving] = useState(false);
+  // Blocks a setState after the row unmounts (removal drops it from the list).
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  const handleRemove = useCallback(async () => {
+    if (removing) return;
+    setRemoving(true);
+    try {
+      await onRemove(connection.id);
+    } finally {
+      if (mountedRef.current) setRemoving(false);
+    }
+  }, [connection.id, onRemove, removing]);
   const methodLabel = connection.method === "cli" ? `via ${def.signIn?.cli ?? "CLI"}` : "API token";
   return (
     <View style={styles.row}>
@@ -472,11 +503,16 @@ function ConnectionRow({
       <Pressable
         style={styles.iconBtn}
         onPress={handleRemove}
+        disabled={removing}
         accessibilityRole="button"
         accessibilityLabel="Remove connection"
         testID={`forge-connection-remove-${connection.id}`}
       >
-        <Trash2 size={15} color={theme.colors.foregroundMuted} />
+        {removing ? (
+          <ActivityIndicator size="small" color={theme.colors.foregroundMuted} />
+        ) : (
+          <Trash2 size={15} color={theme.colors.foregroundMuted} />
+        )}
       </Pressable>
     </View>
   );
@@ -588,6 +624,7 @@ function CliInstallSection({
   cliName,
   onLoggedIn,
   onActivity,
+  cancelRef,
 }: {
   client: DaemonClient | null;
   cliInstallEnabled: boolean;
@@ -599,6 +636,9 @@ function CliInstallSection({
   /** Report when a sign-in/install is in progress so the parent can hide its
    *  own form actions (avoids a second, confusing Cancel button). */
   onActivity?: (busy: boolean) => void;
+  /** Parent-owned ref: while a sign-in is in progress this points at the
+   *  cancel handler so the single bottom Cancel can abort it; null otherwise. */
+  cancelRef?: MutableRefObject<(() => void) | null>;
 }) {
   const { theme } = useUnistyles();
   const [probeLoading, setProbeLoading] = useState(false);
@@ -783,6 +823,17 @@ function CliInstallSection({
     loginControllerRef.current?.abort();
   }, []);
 
+  // Expose the active cancel action to the parent's single bottom Cancel while a
+  // sign-in is running (install has no trivial abort, so we leave it null and the
+  // bottom Cancel just closes the form in that case).
+  useEffect(() => {
+    if (!cancelRef) return;
+    cancelRef.current = signingIn ? handleCancelLogin : null;
+    return () => {
+      cancelRef.current = null;
+    };
+  }, [signingIn, handleCancelLogin, cancelRef]);
+
   const handleCopyCode = useCallback(() => {
     const code = loginProgress?.userCode;
     if (!code) return;
@@ -840,13 +891,6 @@ function CliInstallSection({
 
   return (
     <View style={styles.cliSection}>
-      {status?.installed ? (
-        <Text style={styles.cliDetected}>
-          {status.binary}
-          {status.version ? ` ${status.version}` : ""} detected
-        </Text>
-      ) : null}
-
       {showSignIn ? (
         <View style={styles.loginBox}>
           {signingIn && loginPhase === "awaiting_authorization" && loginProgress?.userCode ? (
@@ -884,28 +928,12 @@ function CliInstallSection({
                     <Text style={styles.btnPrimaryText}>Open {verificationHost} again</Text>
                   </Pressable>
                 ) : null}
-                <Pressable
-                  style={[styles.btn, styles.btnGhost, styles.loginActionBtn]}
-                  onPress={handleCancelLogin}
-                  testID="forge-login-cancel"
-                >
-                  <Text style={styles.btnGhostText}>Cancel</Text>
-                </Pressable>
               </View>
             </View>
           ) : signingIn ? (
             <View style={styles.loginStatusRow}>
               <ActivityIndicator size="small" color={theme.colors.accent} />
               <Text style={styles.loginStatusText}>{loginStatusLabel}</Text>
-              {loginPhase !== "verifying" ? (
-                <Pressable
-                  style={[styles.btn, styles.btnGhost]}
-                  onPress={handleCancelLogin}
-                  testID="forge-login-cancel"
-                >
-                  <Text style={styles.btnGhostText}>Cancel</Text>
-                </Pressable>
-              ) : null}
             </View>
           ) : (
             <Pressable
@@ -1004,7 +1032,7 @@ function ConnectionsView({
   onLoggedIn,
 }: {
   connections: ForgeConnection[];
-  onRemove: (id: string) => void;
+  onRemove: (id: string) => void | Promise<void>;
   onAdd: (input: { forge: string; host?: string; method: "cli" | "token"; token?: string }) => void;
   adding: boolean;
   onToggleAdd: () => void;
@@ -1018,9 +1046,20 @@ function ConnectionsView({
   const [host, setHost] = useState("");
   const [token, setToken] = useState("");
   const [selfHostedForge, setSelfHostedForge] = useState("gitlab");
-  // True while the CliInstallSection is signing in / installing — hides the
-  // form's own Cancel so there's never a second Cancel next to the card's.
+  // True while the CliInstallSection is signing in / installing. The single
+  // bottom-right Cancel uses this to decide whether to abort the in-progress
+  // action (via cancelActiveRef) or just close the form.
   const [formBusy, setFormBusy] = useState(false);
+  // Points at the CliInstallSection's cancel handler while a sign-in is running.
+  const cancelActiveRef = useRef<(() => void) | null>(null);
+
+  const handleCancel = useCallback(() => {
+    if (formBusy && cancelActiveRef.current) {
+      cancelActiveRef.current();
+    } else {
+      onToggleAdd();
+    }
+  }, [formBusy, onToggleAdd]);
 
   const option = useMemo(
     () => PROVIDER_OPTIONS.find((o) => o.choice === choice) ?? PROVIDER_OPTIONS[0],
@@ -1194,6 +1233,7 @@ function ConnectionsView({
                 cliName={def.signIn?.cli ?? "the CLI"}
                 onLoggedIn={handleLoggedIn}
                 onActivity={setFormBusy}
+                cancelRef={cancelActiveRef}
               />
             </>
           ) : (
@@ -1217,28 +1257,26 @@ function ConnectionsView({
             </View>
           )}
 
-          {/* While a sign-in/install is running, the card owns its own Cancel, so
-              hide the form actions to avoid two Cancel buttons at once. */}
-          {formBusy ? null : (
-            <View style={styles.formActions}>
-              {/* The bottom "Add connection" submit is only for the manual paths:
-                  token providers, or a cli host without in-app sign-in. When the
-                  in-app sign-in button is present it does the whole thing, so we
-                  show only Cancel here to avoid a confusing second action. */}
-              {showManualAdd ? (
-                <Pressable
-                  style={[styles.btn, styles.btnPrimary]}
-                  onPress={handleSubmit}
-                  testID="forge-connection-submit"
-                >
-                  <Text style={styles.btnPrimaryText}>Add connection</Text>
-                </Pressable>
-              ) : null}
-              <Pressable style={[styles.btn, styles.btnGhost]} onPress={onToggleAdd}>
-                <Text style={styles.btnGhostText}>Cancel</Text>
+          {/* Exactly one Cancel, pinned bottom-right. While a sign-in is running
+              it aborts that (via cancelActiveRef); otherwise it closes the form. */}
+          <View style={styles.formActions}>
+            {/* The bottom "Add connection" submit is only for the manual paths:
+                token providers, or a cli host without in-app sign-in. When the
+                in-app sign-in button is present it does the whole thing, so we
+                show only Cancel here to avoid a confusing second action. */}
+            {showManualAdd ? (
+              <Pressable
+                style={[styles.btn, styles.btnPrimary]}
+                onPress={handleSubmit}
+                testID="forge-connection-submit"
+              >
+                <Text style={styles.btnPrimaryText}>Add connection</Text>
               </Pressable>
-            </View>
-          )}
+            ) : null}
+            <Pressable style={[styles.btn, styles.btnGhost]} onPress={handleCancel}>
+              <Text style={styles.btnGhostText}>Cancel</Text>
+            </Pressable>
+          </View>
         </View>
       ) : null}
     </View>
@@ -2865,9 +2903,18 @@ function CodeView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }) {
   const [branchesLoading, setBranchesLoading] = useState(false);
   const [branch, setBranch] = useState<string | null>(repo.defaultBranch ?? null);
 
+  // Restore the last directory/file for this repo (in-memory) so returning to the
+  // Code tab doesn't reset to the root. Only `.path` of selectedFile is ever read,
+  // so a stored file path rehydrates into a minimal "file" tree entry.
+  const navKey = repoCacheKey(repo);
+
   // Current directory ("" = repo root) and the file currently open (null = tree).
-  const [path, setPath] = useState("");
-  const [selectedFile, setSelectedFile] = useState<ForgeTreeEntry | null>(null);
+  const [path, setPath] = useState(() => codeNavState.get(navKey)?.path ?? "");
+  const [selectedFile, setSelectedFile] = useState<ForgeTreeEntry | null>(() => {
+    const filePath = codeNavState.get(navKey)?.file ?? null;
+    if (!filePath) return null;
+    return { name: filePath.split("/").pop() ?? filePath, path: filePath, type: "file" };
+  });
 
   const [entries, setEntries] = useState<ForgeTreeEntry[] | null>(null);
   const [entriesLoading, setEntriesLoading] = useState(false);
@@ -2877,12 +2924,25 @@ function CodeView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }) {
   const [fileLoading, setFileLoading] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
 
-  // Selecting a different repo resets navigation to the new repo's root.
+  // Selecting a different repo resets navigation to the new repo's root. Skip the
+  // first mount so the restored path/file (from codeNavState) survives — this
+  // effect only fires when `repo` actually changes on a live instance.
+  const didMountRef = useRef(false);
   useEffect(() => {
+    if (!didMountRef.current) {
+      didMountRef.current = true;
+      return;
+    }
     setBranch(repo.defaultBranch ?? null);
     setPath("");
     setSelectedFile(null);
   }, [repo]);
+
+  // Persist the current directory/file back to the in-memory map on every change
+  // (including branch/repo resets above, which set them to root).
+  useEffect(() => {
+    codeNavState.set(navKey, { path, file: selectedFile?.path ?? null });
+  }, [navKey, path, selectedFile]);
 
   const loadBranches = useCallback(
     async (force = false) => {
@@ -3085,15 +3145,26 @@ function CodeView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }) {
           <Text style={styles.emptyText}>File too large to preview.{size ? ` (${size})` : ""}</Text>
         ) : (
           <ScrollView
-            style={styles.logSurface}
+            style={styles.codeViewer}
             contentContainerStyle={styles.logContent}
             nestedScrollEnabled
             showsVerticalScrollIndicator
           >
             <ScrollView horizontal showsHorizontalScrollIndicator>
-              <Text style={styles.logText} selectable>
-                {fileData.content || "(empty file)"}
-              </Text>
+              <View>
+                {(fileData.content ? fileData.content.split("\n") : ["(empty file)"]).map(
+                  (line, i) => (
+                    <View key={i} style={styles.codeLineRow}>
+                      <Text style={styles.codeGutter} selectable={false}>
+                        {i + 1}
+                      </Text>
+                      <Text style={styles.codeLineText} selectable>
+                        {line.length > 0 ? line : " "}
+                      </Text>
+                    </View>
+                  ),
+                )}
+              </View>
             </ScrollView>
           </ScrollView>
         )}
@@ -4543,10 +4614,10 @@ export function ForgeHubScreen() {
       setSelectedRepo(repo);
       setSelectedCr(null);
       setCrState("open");
-      setTab("pulls");
+      setTab(codeEnabled ? "code" : "pulls");
       void loadChangeRequests(repo, "open");
     },
-    [loadChangeRequests],
+    [loadChangeRequests, codeEnabled],
   );
 
   const handleChangeState = useCallback(
@@ -4622,7 +4693,7 @@ export function ForgeHubScreen() {
     (id: string) => {
       if (!client) return;
       setConnectionsError(null);
-      void client
+      return client
         .forgeRemoveConnection(id)
         .then(() => refreshConnections())
         .catch((e: unknown) =>
@@ -5256,6 +5327,7 @@ const styles = StyleSheet.create((theme) => ({
   formActions: {
     flexDirection: "row",
     flexWrap: "wrap",
+    justifyContent: "flex-end",
     gap: theme.spacing[2],
   },
   // CLI detect + guided auto-install (§19.3.5)
@@ -5744,6 +5816,36 @@ const styles = StyleSheet.create((theme) => ({
     borderWidth: theme.borderWidth[1],
     borderColor: theme.colors.border,
     backgroundColor: theme.colors.surfaceSidebar,
+  },
+  // Read-only line-numbered code view (§19 file viewer).
+  codeViewer: {
+    maxHeight: 480,
+    borderRadius: theme.borderRadius.lg,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surfaceSidebar,
+  },
+  codeLineRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
+  codeGutter: {
+    minWidth: 40,
+    paddingRight: theme.spacing[2],
+    marginRight: theme.spacing[3],
+    textAlign: "right",
+    fontFamily: theme.fontFamily.mono,
+    fontSize: theme.fontSize.code,
+    lineHeight: theme.fontSize.code * 1.5,
+    color: theme.colors.foregroundExtraMuted,
+    borderRightWidth: theme.borderWidth[1],
+    borderRightColor: theme.colors.border,
+  },
+  codeLineText: {
+    fontFamily: theme.fontFamily.mono,
+    fontSize: theme.fontSize.code,
+    lineHeight: theme.fontSize.code * 1.5,
+    color: theme.colors.foreground,
   },
   logContent: {
     padding: theme.spacing[3],
