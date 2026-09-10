@@ -154,6 +154,8 @@ import {
 } from "../utils/project-custom-icon.js";
 import { VoiceSession } from "./session/voice/voice-session.js";
 import { CheckoutSession } from "./session/checkout/checkout-session.js";
+import { ForgeHubSession } from "./session/forge/forge-hub-session.js";
+import { FileSecretStore } from "./database/secret-store.js";
 import {
   createWorkspaceGitObserverService,
   type WorkspaceGitObserverService,
@@ -717,6 +719,7 @@ export class Session {
   private readonly workspaceDirectory: WorkspaceDirectory;
   private readonly voiceSession: VoiceSession;
   private readonly checkoutSession: CheckoutSession;
+  private readonly forgeHubSession: ForgeHubSession;
   private readonly chatScheduleLoopSession: ChatScheduleLoopSession;
   private clusterSession!: ClusterSession;
   private databaseSession!: DatabaseSession;
@@ -865,6 +868,13 @@ export class Session {
       }),
       jagentdeskHome: this.jagentdeskHome,
       worktreesRoot: this.worktreesRoot,
+      logger: this.sessionLogger,
+    });
+    // Forge Hub (spec 19 / ADR-0015): repo-scoped remote-forge reads. Token secrets
+    // for method:"token" connections live in a dedicated encrypted store under home.
+    this.forgeHubSession = new ForgeHubSession({
+      host: { emit: (msg) => this.emit(msg) },
+      secretStore: new FileSecretStore(resolve(this.jagentdeskHome, "forge")),
       logger: this.sessionLogger,
     });
     this.workspaceGitObserver = createWorkspaceGitObserverService({
@@ -2459,6 +2469,13 @@ export class Session {
       case "forge.search.request":
       case "github_search_request":
         return this.checkoutSession.handleForgeSearchRequest(msg);
+      case "forge.connection.list.request":
+      case "forge.connection.add.request":
+      case "forge.connection.remove.request":
+      case "forge.repo.list.request":
+      case "forge.change_request.list.request":
+      case "forge.change_request.files.request":
+        return this.forgeHubSession.handle(msg);
       case "stash_save_request":
         return this.checkoutSession.handleStashSaveRequest(msg);
       case "stash_pop_request":

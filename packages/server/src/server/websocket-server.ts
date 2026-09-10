@@ -2152,6 +2152,9 @@ export class VoiceAssistantWebSocketServer {
         workspaceScriptManagement: true,
         // COMPAT(projectCustomIcon): added in v0.2.0, remove after 2027-01-20.
         projectCustomIcon: true,
+        // Forge Hub (spec 19 / ADR-0015). Milestone A: connections + repos + PR read.
+        // Later milestones advertise forgeHubCode/Review/Pipelines/Releases/Issues as shipped.
+        forgeHub: true,
         // Advertise the plugin management surface only when a PluginService is
         // wired; without it the plugin.* RPCs return empty/disabled results.
         ...(this.pluginRuntime
