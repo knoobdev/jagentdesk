@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Linking, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import {
+  Animated,
+  Easing,
+  Linking,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import {
   ArrowLeft,
   Ban,
@@ -51,6 +60,9 @@ import {
   type ForgeReviewAction,
   type ForgeMergeMethod,
   type ForgeTag,
+  type ForgeCliInstallProgress,
+  type ForgeCliStatusResponse,
+  type ForgeCliInstallResponse,
 } from "@jagentdesk/protocol/messages";
 import { getForgeDefinitionOrNeutral } from "@jagentdesk/protocol/forge-manifest";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
@@ -385,18 +397,248 @@ function ProviderChip({
   );
 }
 
+// ===== CLI detect + guided auto-install (§19.3.5, ADR-0016) ================
+// Payload shapes come from the committed forge.cli.* responses; the client
+// exposes the same objects (see daemon-client.forgeCliStatus/forgeCliInstall).
+type ForgeCliStatus = ForgeCliStatusResponse["payload"];
+type ForgeCliInstallResult = ForgeCliInstallResponse["payload"];
+
+const CLI_PHASE_LABEL: Record<ForgeCliInstallProgress["phase"], string> = {
+  resolving: "Resolving…",
+  downloading: "Downloading…",
+  installing: "Installing…",
+  verifying: "Verifying…",
+  done: "Done",
+  failed: "Failed",
+};
+
+function clampPercent(value: number): number {
+  if (Number.isNaN(value)) return 0;
+  return Math.max(0, Math.min(100, value));
+}
+
+/**
+ * Detect the forge CLI on the daemon host and, when the daemon advertises the
+ * capability, offer a one-tap guided install with a live progress bar. Rendered
+ * only for cli-method providers; token providers (e.g. Bitbucket) show nothing.
+ * The static sign-in command hint above this block is always the manual
+ * fallback, so when `cliInstallEnabled` is false this degrades to today's UI.
+ */
+function CliInstallSection({
+  client,
+  cliInstallEnabled,
+  forge,
+  host,
+  cliName,
+}: {
+  client: DaemonClient | null;
+  cliInstallEnabled: boolean;
+  forge: string;
+  host: string;
+  cliName: string;
+}) {
+  const { theme } = useUnistyles();
+  const [probeLoading, setProbeLoading] = useState(false);
+  const [status, setStatus] = useState<ForgeCliStatus | null>(null);
+  const [installing, setInstalling] = useState(false);
+  const [progress, setProgress] = useState<ForgeCliInstallProgress | null>(null);
+  const [installError, setInstallError] = useState<string | null>(null);
+  const [installedMsg, setInstalledMsg] = useState<string | null>(null);
+  const [trackWidth, setTrackWidth] = useState(0);
+
+  // Guards: `mountedRef` blocks setState after unmount; `probeTokenRef` drops
+  // stale probe responses when the forge/host selection changes mid-flight.
+  const mountedRef = useRef(true);
+  const probeTokenRef = useRef(0);
+  const slide = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const runProbe = useCallback(async () => {
+    if (!client) return;
+    probeTokenRef.current += 1;
+    const token = probeTokenRef.current;
+    setProbeLoading(true);
+    try {
+      const res = await client.forgeCliStatus({ forge, host: host.trim() || undefined });
+      if (mountedRef.current && token === probeTokenRef.current) setStatus(res);
+    } catch {
+      if (mountedRef.current && token === probeTokenRef.current) setStatus(null);
+    } finally {
+      if (mountedRef.current && token === probeTokenRef.current) setProbeLoading(false);
+    }
+  }, [client, forge, host]);
+
+  // Probe on mount and whenever the selected forge/host changes. Debounced so a
+  // self-hosted host typed character-by-character doesn't spam the daemon; the
+  // timer is cleared on selection change / unmount, and runProbe's token drops
+  // any response that lands after the selection moved on.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      void runProbe();
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [runProbe]);
+
+  // Indeterminate bar: a fixed-width indicator sliding across the measured track
+  // via translateX. Only runs when we have a track width and no real percent —
+  // we never fabricate a percentage.
+  const indeterminate = installing && (progress == null || progress.percent == null);
+  const indicatorWidth = trackWidth > 0 ? Math.max(48, trackWidth * 0.35) : 48;
+  useEffect(() => {
+    if (!indeterminate || trackWidth === 0) return;
+    slide.setValue(0);
+    const loop = Animated.loop(
+      Animated.timing(slide, {
+        toValue: 1,
+        duration: 1100,
+        easing: Easing.inOut(Easing.ease),
+        useNativeDriver: true,
+      }),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [indeterminate, trackWidth, slide]);
+
+  const handleInstall = useCallback(async () => {
+    if (!client || installing) return;
+    setInstalling(true);
+    setInstallError(null);
+    setInstalledMsg(null);
+    setProgress({ type: "forge.cli.install.progress", requestId: "", phase: "resolving" });
+    try {
+      const res: ForgeCliInstallResult = await client.forgeCliInstall({
+        forge,
+        host: host.trim() || undefined,
+        onProgress: (p) => {
+          if (mountedRef.current) setProgress(p);
+        },
+      });
+      if (!mountedRef.current) return;
+      if (res.ok) {
+        setInstalledMsg(`Installed ${res.binary}${res.version ? ` ${res.version}` : ""}`);
+        setProgress(null);
+        await runProbe();
+      } else {
+        setInstallError(res.error ?? `Failed to install ${res.binary}.`);
+        setProgress(null);
+      }
+    } catch (e: unknown) {
+      if (mountedRef.current) {
+        setInstallError(e instanceof Error ? e.message : "Install failed.");
+        setProgress(null);
+      }
+    } finally {
+      if (mountedRef.current) setInstalling(false);
+    }
+  }, [client, installing, forge, host, runProbe]);
+
+  const translateX = slide.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-indicatorWidth, trackWidth],
+  });
+
+  const showAutoInstall = cliInstallEnabled && status?.canAutoInstall === true;
+
+  return (
+    <View style={styles.cliSection}>
+      {status?.installed ? (
+        <Text style={styles.cliDetected}>
+          {status.binary}
+          {status.version ? ` ${status.version}` : ""} detected
+        </Text>
+      ) : null}
+
+      {status == null && probeLoading ? (
+        <Text style={styles.cliChecking}>Checking for {cliName} on the daemon host…</Text>
+      ) : null}
+
+      {status && status.installed === false ? (
+        <View style={styles.cliMissingBox}>
+          <Text style={styles.cliMissingText}>
+            {status.binary} isn't installed on the daemon host.
+          </Text>
+
+          {showAutoInstall ? (
+            <Pressable
+              style={[styles.btn, styles.btnPrimary, installing && styles.btnDisabled]}
+              onPress={handleInstall}
+              disabled={installing}
+              testID="forge-cli-install"
+            >
+              <Download size={14} color={theme.colors.accentForeground} />
+              <Text style={styles.btnPrimaryText}>Install {status.binary} automatically</Text>
+            </Pressable>
+          ) : null}
+
+          {installing || progress ? (
+            <View style={styles.cliProgressWrap}>
+              <View
+                style={styles.cliProgressTrack}
+                onLayout={(e) => setTrackWidth(e.nativeEvent.layout.width)}
+              >
+                {progress && progress.percent != null ? (
+                  <View
+                    style={[
+                      styles.cliProgressFill,
+                      { width: `${clampPercent(progress.percent)}%` },
+                    ]}
+                  />
+                ) : (
+                  <Animated.View
+                    style={[
+                      styles.cliProgressFill,
+                      styles.cliProgressIndicator,
+                      { width: indicatorWidth, transform: [{ translateX }] },
+                    ]}
+                  />
+                )}
+              </View>
+              {progress ? (
+                <Text style={styles.cliProgressPhase}>{CLI_PHASE_LABEL[progress.phase]}</Text>
+              ) : null}
+              {progress?.line ? (
+                <Text style={styles.cliProgressLog} numberOfLines={1}>
+                  {progress.line}
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
+
+          {installError ? <Text style={styles.cliInstallError}>{installError}</Text> : null}
+
+          <Text style={styles.cliManualHint}>
+            Or install manually with the command above, then sign in.
+          </Text>
+        </View>
+      ) : null}
+
+      {installedMsg ? <Text style={styles.cliDetected}>{installedMsg}</Text> : null}
+    </View>
+  );
+}
+
 function ConnectionsView({
   connections,
   onRemove,
   onAdd,
   adding,
   onToggleAdd,
+  client,
+  cliInstallEnabled,
 }: {
   connections: ForgeConnection[];
   onRemove: (id: string) => void;
   onAdd: (input: { forge: string; host?: string; method: "cli" | "token"; token?: string }) => void;
   adding: boolean;
   onToggleAdd: () => void;
+  client: DaemonClient | null;
+  cliInstallEnabled: boolean;
 }) {
   const { theme } = useUnistyles();
   const [choice, setChoice] = useState<ProviderChoice>("github");
@@ -540,14 +782,23 @@ function ConnectionsView({
           ) : null}
 
           {option.method === "cli" ? (
-            <View style={styles.hintBox}>
-              <Text style={styles.hintTitle}>OAuth device flow (recommended)</Text>
-              <Text style={styles.hintBody}>
-                Sign in on the daemon host by running the command below, then paste the one-time
-                code at the provider. No callback server is needed.
-              </Text>
-              <Text style={styles.hintMono}>{def.signIn?.command ?? "auth login"}</Text>
-            </View>
+            <>
+              <View style={styles.hintBox}>
+                <Text style={styles.hintTitle}>OAuth device flow (recommended)</Text>
+                <Text style={styles.hintBody}>
+                  Sign in on the daemon host by running the command below, then paste the one-time
+                  code at the provider. No callback server is needed.
+                </Text>
+                <Text style={styles.hintMono}>{def.signIn?.command ?? "auth login"}</Text>
+              </View>
+              <CliInstallSection
+                client={client}
+                cliInstallEnabled={cliInstallEnabled}
+                forge={choice === "selfhosted" ? selfHostedForge : option.forge}
+                host={option.needsHost ? host : ""}
+                cliName={def.signIn?.cli ?? "the CLI"}
+              />
+            </>
           ) : (
             <View style={styles.field}>
               <Text style={styles.fieldLabel}>Personal access token / API token</Text>
@@ -3173,6 +3424,8 @@ export function ForgeHubScreen() {
   const pipelinesEnabled = useHostFeature(serverId, "forgeHubPipelines");
   const releasesEnabled = useHostFeature(serverId, "forgeHubReleases");
   const issuesEnabled = useHostFeature(serverId, "forgeHubIssues");
+  // Milestone C (§19.3.5, ADR-0016): guided forge-CLI detect + auto-install.
+  const cliInstallEnabled = useHostFeature(serverId, "forgeHubCliInstall");
 
   const [tab, setTab] = useState<SubNav>("connections");
   const [connections, setConnections] = useState<ForgeConnection[]>([]);
@@ -3430,6 +3683,8 @@ export function ForgeHubScreen() {
             onAdd={handleAddConnection}
             adding={adding}
             onToggleAdd={toggleAdding}
+            client={client}
+            cliInstallEnabled={cliInstallEnabled}
           />
         ) : null}
 
@@ -3881,6 +4136,68 @@ const styles = StyleSheet.create((theme) => ({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: theme.spacing[2],
+  },
+  // CLI detect + guided auto-install (§19.3.5)
+  cliSection: {
+    gap: theme.spacing[2],
+  },
+  cliDetected: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.statusSuccess,
+  },
+  cliChecking: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+  },
+  cliMissingBox: {
+    gap: theme.spacing[2],
+    padding: theme.spacing[3],
+    borderRadius: theme.borderRadius.lg,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface0,
+  },
+  cliMissingText: {
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foregroundMuted,
+  },
+  cliProgressWrap: {
+    gap: theme.spacing[1],
+  },
+  cliProgressTrack: {
+    height: 6,
+    borderRadius: theme.borderRadius.full,
+    backgroundColor: theme.colors.surface2,
+    overflow: "hidden",
+  },
+  cliProgressFill: {
+    height: "100%",
+    borderRadius: theme.borderRadius.full,
+    backgroundColor: theme.colors.accent,
+  },
+  cliProgressIndicator: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+  },
+  cliProgressPhase: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foregroundMuted,
+  },
+  cliProgressLog: {
+    fontSize: theme.fontSize.xs,
+    fontFamily: theme.fontFamily.mono,
+    color: theme.colors.foregroundExtraMuted,
+  },
+  cliInstallError: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.statusDanger,
+  },
+  cliManualHint: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundExtraMuted,
   },
   // search
   searchField: {
