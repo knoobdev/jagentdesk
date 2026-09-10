@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Animated,
   Easing,
   Linking,
@@ -16,11 +17,13 @@ import {
   ChevronDown,
   CircleAlert,
   CircleDot,
+  Copy,
   Download,
   ExternalLink,
   GitBranch,
   GitCompare,
   GitPullRequest,
+  LogIn,
   MessageSquare,
   Play,
   Plus,
@@ -30,6 +33,7 @@ import {
   Trash2,
   X,
 } from "lucide-react-native";
+import * as Clipboard from "expo-clipboard";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
@@ -63,6 +67,7 @@ import {
   type ForgeCliInstallProgress,
   type ForgeCliStatusResponse,
   type ForgeCliInstallResponse,
+  type ForgeConnectionLoginProgress,
 } from "@jagentdesk/protocol/messages";
 import { getForgeDefinitionOrNeutral } from "@jagentdesk/protocol/forge-manifest";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
@@ -417,6 +422,40 @@ function clampPercent(value: number): number {
   return Math.max(0, Math.min(100, value));
 }
 
+// In-app device-flow sign-in (§19.3.7). Progress arrives as unsolicited events
+// over `client.forgeConnectionLogin(..., onProgress)`; the local UI mirrors the
+// same login state the CliInstallSection probe already owns.
+type LoginProgress = {
+  phase: ForgeConnectionLoginProgress["phase"];
+  userCode: string | null;
+  verificationUri: string | null;
+  line: string | null;
+};
+
+// Map the daemon's short error codes to readable copy; fall back to the raw
+// error/pty line so we never swallow an unexpected failure.
+const LOGIN_ERROR_LABEL: Record<string, string> = {
+  "cli-missing": "The CLI isn't installed on the daemon host.",
+  "no-device-flow": "This provider doesn't support device-flow sign-in.",
+  "unsupported-provider": "Sign-in isn't supported for this provider.",
+  cancelled: "Sign-in cancelled.",
+  timeout: "Sign-in timed out. Please try again.",
+};
+
+function describeLoginError(error: string | null | undefined, line: string | null): string {
+  const code = error?.trim();
+  if (code && LOGIN_ERROR_LABEL[code]) return LOGIN_ERROR_LABEL[code];
+  return code || line?.trim() || "Sign-in failed.";
+}
+
+// Best-effort host label for the verification URL. RN's URL polyfill is partial,
+// so parse the authority with a small regex rather than `new URL()`.
+function verificationHostLabel(uri: string | null | undefined): string {
+  if (!uri) return "the provider";
+  const authority = uri.replace(/^[a-z]+:\/\//i, "").split(/[/?#]/, 1)[0];
+  return authority || uri;
+}
+
 /**
  * Detect the forge CLI on the daemon host and, when the daemon advertises the
  * capability, offer a one-tap guided install with a live progress bar. Rendered
@@ -427,15 +466,19 @@ function clampPercent(value: number): number {
 function CliInstallSection({
   client,
   cliInstallEnabled,
+  loginEnabled,
   forge,
   host,
   cliName,
+  onLoggedIn,
 }: {
   client: DaemonClient | null;
   cliInstallEnabled: boolean;
+  loginEnabled: boolean;
   forge: string;
   host: string;
   cliName: string;
+  onLoggedIn: () => void | Promise<void>;
 }) {
   const { theme } = useUnistyles();
   const [probeLoading, setProbeLoading] = useState(false);
@@ -446,11 +489,24 @@ function CliInstallSection({
   const [installedMsg, setInstalledMsg] = useState<string | null>(null);
   const [trackWidth, setTrackWidth] = useState(0);
 
+  // In-app device-flow sign-in state (§19.3.7).
+  const [signingIn, setSigningIn] = useState(false);
+  const [loginProgress, setLoginProgress] = useState<LoginProgress | null>(null);
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [loggedIn, setLoggedIn] = useState(false);
+  const [copied, setCopied] = useState(false);
+
   // Guards: `mountedRef` blocks setState after unmount; `probeTokenRef` drops
   // stale probe responses when the forge/host selection changes mid-flight.
   const mountedRef = useRef(true);
   const probeTokenRef = useRef(0);
   const slide = useRef(new Animated.Value(0)).current;
+  // Active login controller: identity-checked so a resolve/onProgress from a
+  // superseded (aborted) login can't write state for the current selection.
+  const loginControllerRef = useRef<AbortController | null>(null);
+  const lastLoginLineRef = useRef<string | null>(null);
+
+  const displayName = getForgeDefinitionOrNeutral(forge).displayName;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -543,7 +599,99 @@ function CliInstallSection({
     outputRange: [-indicatorWidth, trackWidth],
   });
 
+  const handleSignIn = useCallback(async () => {
+    if (!client || signingIn) return;
+    const controller = new AbortController();
+    loginControllerRef.current = controller;
+    lastLoginLineRef.current = null;
+    setSigningIn(true);
+    setLoginError(null);
+    setLoggedIn(false);
+    setCopied(false);
+    setLoginProgress({ phase: "starting", userCode: null, verificationUri: null, line: null });
+    try {
+      const res = await client.forgeConnectionLogin({
+        forge,
+        host: host.trim() || undefined,
+        signal: controller.signal,
+        onProgress: (p: ForgeConnectionLoginProgress) => {
+          if (!mountedRef.current || loginControllerRef.current !== controller) return;
+          if (p.line) lastLoginLineRef.current = p.line;
+          setLoginProgress({
+            phase: p.phase,
+            userCode: p.userCode ?? null,
+            verificationUri: p.verificationUri ?? null,
+            line: p.line ?? null,
+          });
+        },
+      });
+      if (!mountedRef.current || loginControllerRef.current !== controller) return;
+      if (res.ok) {
+        setLoginProgress(null);
+        setLoggedIn(true);
+        await onLoggedIn();
+        await runProbe();
+      } else {
+        setLoginProgress(null);
+        setLoginError(describeLoginError(res.error, lastLoginLineRef.current));
+      }
+    } catch (e: unknown) {
+      if (!mountedRef.current || loginControllerRef.current !== controller) return;
+      setLoginProgress(null);
+      setLoginError(
+        describeLoginError(e instanceof Error ? e.message : null, lastLoginLineRef.current),
+      );
+    } finally {
+      if (loginControllerRef.current === controller) {
+        loginControllerRef.current = null;
+        if (mountedRef.current) setSigningIn(false);
+      }
+    }
+  }, [client, signingIn, forge, host, onLoggedIn, runProbe]);
+
+  const handleCancelLogin = useCallback(() => {
+    loginControllerRef.current?.abort();
+  }, []);
+
+  const handleCopyCode = useCallback(() => {
+    const code = loginProgress?.userCode;
+    if (!code) return;
+    void Clipboard.setStringAsync(code);
+    setCopied(true);
+  }, [loginProgress?.userCode]);
+
+  const handleOpenVerification = useCallback(() => {
+    const uri = loginProgress?.verificationUri;
+    if (uri) void Linking.openURL(uri);
+  }, [loginProgress?.verificationUri]);
+
+  // Abort a dangling login (and reset its UI) when the selected provider/host
+  // changes mid-flight, and on unmount — so the daemon-side pty is always
+  // cancelled. Resetting here also clears any stale code/error for the previous
+  // selection; the identity guard above drops the superseded resolve.
+  useEffect(() => {
+    return () => {
+      loginControllerRef.current?.abort();
+      loginControllerRef.current = null;
+      if (!mountedRef.current) return;
+      setSigningIn(false);
+      setLoginProgress(null);
+      setLoginError(null);
+      setLoggedIn(false);
+      setCopied(false);
+    };
+  }, [forge, host]);
+
   const showAutoInstall = cliInstallEnabled && status?.canAutoInstall === true;
+  const showSignIn = loginEnabled && status?.installed === true;
+  const loginPhase = loginProgress?.phase;
+  const loginStatusLabel =
+    loginPhase === "verifying"
+      ? "Completing sign-in…"
+      : loginPhase === "awaiting_authorization"
+        ? "Waiting for authorization…"
+        : `Starting ${cliName}…`;
+  const verificationHost = verificationHostLabel(loginProgress?.verificationUri);
 
   return (
     <View style={styles.cliSection}>
@@ -552,6 +700,72 @@ function CliInstallSection({
           {status.binary}
           {status.version ? ` ${status.version}` : ""} detected
         </Text>
+      ) : null}
+
+      {showSignIn ? (
+        <View style={styles.loginBox}>
+          {signingIn && loginPhase === "awaiting_authorization" && loginProgress?.userCode ? (
+            <View style={styles.loginCodeWrap}>
+              <Text style={styles.loginCodeInstruction}>Enter this code at {verificationHost}</Text>
+              <View style={styles.loginCodeBox}>
+                <Text style={styles.loginCode} selectable testID="forge-login-code">
+                  {loginProgress.userCode}
+                </Text>
+                <Pressable
+                  style={styles.loginCopyBtn}
+                  onPress={handleCopyCode}
+                  testID="forge-login-copy"
+                >
+                  <Copy size={13} color={theme.colors.foregroundMuted} />
+                  <Text style={styles.loginCopyText}>{copied ? "Copied" : "Copy code"}</Text>
+                </Pressable>
+              </View>
+              {loginProgress.verificationUri ? (
+                <Pressable
+                  style={[styles.btn, styles.btnPrimary]}
+                  onPress={handleOpenVerification}
+                  testID="forge-login-open"
+                >
+                  <ExternalLink size={14} color={theme.colors.accentForeground} />
+                  <Text style={styles.btnPrimaryText}>Open {verificationHost}</Text>
+                </Pressable>
+              ) : null}
+              <Pressable
+                style={[styles.btn, styles.btnGhost]}
+                onPress={handleCancelLogin}
+                testID="forge-login-cancel"
+              >
+                <Text style={styles.btnGhostText}>Cancel</Text>
+              </Pressable>
+            </View>
+          ) : signingIn ? (
+            <View style={styles.loginStatusRow}>
+              <ActivityIndicator size="small" color={theme.colors.accent} />
+              <Text style={styles.loginStatusText}>{loginStatusLabel}</Text>
+              {loginPhase !== "verifying" ? (
+                <Pressable
+                  style={[styles.btn, styles.btnGhost]}
+                  onPress={handleCancelLogin}
+                  testID="forge-login-cancel"
+                >
+                  <Text style={styles.btnGhostText}>Cancel</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          ) : (
+            <Pressable
+              style={[styles.btn, styles.btnPrimary]}
+              onPress={handleSignIn}
+              testID="forge-login-signin"
+            >
+              <LogIn size={14} color={theme.colors.accentForeground} />
+              <Text style={styles.btnPrimaryText}>Sign in with {displayName}</Text>
+            </Pressable>
+          )}
+
+          {loggedIn ? <Text style={styles.loginSuccess}>Signed in</Text> : null}
+          {loginError ? <Text style={styles.loginError}>{loginError}</Text> : null}
+        </View>
       ) : null}
 
       {status == null && probeLoading ? (
@@ -631,6 +845,8 @@ function ConnectionsView({
   onToggleAdd,
   client,
   cliInstallEnabled,
+  loginEnabled,
+  onLoggedIn,
 }: {
   connections: ForgeConnection[];
   onRemove: (id: string) => void;
@@ -639,6 +855,8 @@ function ConnectionsView({
   onToggleAdd: () => void;
   client: DaemonClient | null;
   cliInstallEnabled: boolean;
+  loginEnabled: boolean;
+  onLoggedIn: () => void | Promise<void>;
 }) {
   const { theme } = useUnistyles();
   const [choice, setChoice] = useState<ProviderChoice>("github");
@@ -794,9 +1012,11 @@ function ConnectionsView({
               <CliInstallSection
                 client={client}
                 cliInstallEnabled={cliInstallEnabled}
+                loginEnabled={loginEnabled}
                 forge={choice === "selfhosted" ? selfHostedForge : option.forge}
                 host={option.needsHost ? host : ""}
                 cliName={def.signIn?.cli ?? "the CLI"}
+                onLoggedIn={onLoggedIn}
               />
             </>
           ) : (
@@ -3426,6 +3646,8 @@ export function ForgeHubScreen() {
   const issuesEnabled = useHostFeature(serverId, "forgeHubIssues");
   // Milestone C (§19.3.5, ADR-0016): guided forge-CLI detect + auto-install.
   const cliInstallEnabled = useHostFeature(serverId, "forgeHubCliInstall");
+  // §19.3.7: in-app device-flow sign-in for cli-method providers.
+  const loginEnabled = useHostFeature(serverId, "forgeHubLogin");
 
   const [tab, setTab] = useState<SubNav>("connections");
   const [connections, setConnections] = useState<ForgeConnection[]>([]);
@@ -3685,6 +3907,8 @@ export function ForgeHubScreen() {
             onToggleAdd={toggleAdding}
             client={client}
             cliInstallEnabled={cliInstallEnabled}
+            loginEnabled={loginEnabled}
+            onLoggedIn={refreshConnections}
           />
         ) : null}
 
@@ -4198,6 +4422,66 @@ const styles = StyleSheet.create((theme) => ({
   cliManualHint: {
     fontSize: theme.fontSize.xs,
     color: theme.colors.foregroundExtraMuted,
+  },
+  // In-app device-flow sign-in (§19.3.7)
+  loginBox: {
+    gap: theme.spacing[2],
+    alignItems: "flex-start",
+  },
+  loginStatusRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: theme.spacing[2],
+  },
+  loginStatusText: {
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foregroundMuted,
+  },
+  loginCodeWrap: {
+    gap: theme.spacing[2],
+    alignSelf: "stretch",
+  },
+  loginCodeInstruction: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+  },
+  loginCodeBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: theme.spacing[3],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    borderRadius: theme.borderRadius.lg,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.borderAccent,
+    backgroundColor: theme.colors.surface0,
+  },
+  loginCode: {
+    fontSize: theme.fontSize["2xl"],
+    fontWeight: theme.fontWeight.semibold,
+    fontFamily: theme.fontFamily.mono,
+    letterSpacing: 2,
+    color: theme.colors.foreground,
+  },
+  loginCopyBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[1],
+  },
+  loginCopyText: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+  },
+  loginSuccess: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.statusSuccess,
+  },
+  loginError: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.statusDanger,
   },
   // search
   searchField: {
