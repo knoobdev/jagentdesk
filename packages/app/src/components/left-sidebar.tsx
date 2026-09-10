@@ -3,6 +3,7 @@ import {
   Boxes,
   BarChart3,
   Database,
+  GitPullRequest,
   Sparkles,
   CalendarClock,
   FolderPlus,
@@ -63,6 +64,7 @@ import { RetainedPanelActivity } from "@/components/retained-panel";
 import type { StatusGroup } from "@/hooks/sidebar-status-view-model";
 import { type SidebarGroupMode, useSidebarViewStore } from "@/stores/sidebar-view-store";
 import { useKeyboardShortcutsStore } from "@/stores/keyboard-shortcuts-store";
+import { useSessionStore } from "@/stores/session-store";
 import { useHosts } from "@/runtime/host-runtime";
 import { useActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
 import { useWorkspace } from "@/stores/session-store-hooks";
@@ -79,6 +81,7 @@ import {
   buildDatabaseBrowseRoute,
   buildSkillsRoute,
   buildInsightsRoute,
+  buildForgeRoute,
   buildClusterWorkloadsRoute,
   buildOpenProjectRoute,
   buildNewWorkspaceRoute,
@@ -144,6 +147,8 @@ interface SidebarSharedProps {
   handleDatabases: () => void;
   handleSkills: () => void;
   handleInsights: () => void;
+  handleForge: () => void;
+  supportsForgeHub: boolean;
   labels: SidebarLabels;
   newWorkspaceKeys: ShortcutKey[][] | null;
   handleAddHost: () => void;
@@ -164,6 +169,7 @@ interface SidebarLabels {
   databases: string;
   skills: string;
   insights: string;
+  forge: string;
   closeSidebar: string;
 }
 
@@ -342,6 +348,25 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     }
   }, [insightsRoute, showMobileAgent]);
 
+  // Forge Hub is a post-ADR-0003 surface gated per release milestone (spec 19.12):
+  // only advertise the rail entry when the first/active daemon reports forgeHub.
+  const supportsForgeHub = useSessionStore(
+    (state) => state.sessions[firstServerId]?.serverInfo?.features?.forgeHub === true,
+  );
+  const forgeRoute = useMemo(
+    () => (firstServerId ? buildForgeRoute(firstServerId) : null),
+    [firstServerId],
+  );
+  const handleForgeDesktop = useCallback(() => {
+    if (forgeRoute) router.push(forgeRoute);
+  }, [forgeRoute]);
+  const handleForgeMobile = useCallback(() => {
+    if (forgeRoute) {
+      showMobileAgent();
+      router.push(forgeRoute);
+    }
+  }, [forgeRoute, showMobileAgent]);
+
   const handleViewMoreNavigate = useCallback(() => {
     router.push(buildSessionsRoute());
   }, []);
@@ -366,6 +391,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       databases: "Databases",
       skills: "Skills",
       insights: "Usage & Cost",
+      forge: "Forge",
       closeSidebar: t("sidebar.actions.closeSidebar"),
     }),
     [t],
@@ -389,6 +415,8 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     handleDatabases: handleDatabasesDesktop,
     handleSkills: handleSkillsDesktop,
     handleInsights: handleInsightsDesktop,
+    handleForge: handleForgeDesktop,
+    supportsForgeHub,
     labels,
     newWorkspaceKeys,
   };
@@ -402,6 +430,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
           handleDatabases={handleDatabasesMobile}
           handleSkills={handleSkillsMobile}
           handleInsights={handleInsightsMobile}
+          handleForge={handleForgeMobile}
           insetsTop={insets.top}
           insetsBottom={insets.bottom}
           closeSidebar={showMobileAgent}
@@ -425,6 +454,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
         handleDatabases={handleDatabasesDesktop}
         handleSkills={handleSkillsDesktop}
         handleInsights={handleInsightsDesktop}
+        handleForge={handleForgeDesktop}
         insetsTop={insets.top}
         active={active}
         handleOpenProject={handleOpenProjectDesktop}
@@ -775,6 +805,8 @@ function MobileSidebar({
   handleDatabases,
   handleSkills,
   handleInsights,
+  handleForge,
+  supportsForgeHub,
   labels,
   handleAddHost,
   handleOpenHostSettings,
@@ -792,6 +824,7 @@ function MobileSidebar({
   const isDatabasesActive = pathname.includes("/database");
   const isSkillsActive = pathname.includes("/skills");
   const isInsightsActive = pathname.includes("/insights");
+  const isForgeActive = pathname.includes("/forge");
   const clusterRouteMatch = pathname.match(/\/h\/([^/]+)\/cluster\/([^/]+)/);
   const clusterRoute = clusterRouteMatch
     ? {
@@ -920,6 +953,16 @@ function MobileSidebar({
               testID="sidebar-insights-nav"
               variant="compact"
             />
+            {supportsForgeHub ? (
+              <SidebarHeaderRow
+                icon={GitPullRequest}
+                label={labels.forge}
+                onPress={handleForge}
+                isActive={isForgeActive}
+                testID="sidebar-forge-nav"
+                variant="compact"
+              />
+            ) : null}
             <PluginSidebarItems onBeforeNavigate={closeSidebar} />
           </View>
         )}
@@ -981,6 +1024,8 @@ function DesktopSidebar({
   handleDatabases,
   handleSkills,
   handleInsights,
+  handleForge,
+  supportsForgeHub,
   labels,
   handleAddHost,
   handleOpenHostSettings,
@@ -998,6 +1043,7 @@ function DesktopSidebar({
   const isDatabasesActive = pathname.includes("/database");
   const isSkillsActive = pathname.includes("/skills");
   const isInsightsActive = pathname.includes("/insights");
+  const isForgeActive = pathname.includes("/forge");
   const clusterRouteMatch = pathname.match(/\/h\/([^/]+)\/cluster\/([^/]+)/);
   const clusterRoute = clusterRouteMatch
     ? {
@@ -1160,6 +1206,16 @@ function DesktopSidebar({
                 testID="sidebar-insights-nav"
                 variant="compact"
               />
+              {supportsForgeHub ? (
+                <SidebarHeaderRow
+                  icon={GitPullRequest}
+                  label={labels.forge}
+                  onPress={handleForge}
+                  isActive={isForgeActive}
+                  testID="sidebar-forge-nav"
+                  variant="compact"
+                />
+              ) : null}
               <PluginSidebarItems />
             </View>
           )}
