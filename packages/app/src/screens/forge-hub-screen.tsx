@@ -16,6 +16,7 @@ import {
   Text,
   TextInput,
   View,
+  type TextStyle,
 } from "react-native";
 import {
   ArrowLeft,
@@ -90,14 +91,30 @@ import {
 import { getForgeDefinitionOrNeutral } from "@jagentdesk/protocol/forge-manifest";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import { useIsCompactFormFactor } from "@/constants/layout";
+import { isWeb } from "@/constants/platform";
 import { useHostRouteServerId } from "@/navigation/host-route-context";
 import { useHostRuntimeClient, useHosts } from "@/runtime/host-runtime";
 import { useHostFeature } from "@/runtime/host-features";
 import { DiffViewer } from "@/components/diff-viewer";
+import { HighlightedCodeBlock } from "@/components/highlighted-code-block";
+import { MarkdownRenderer } from "@/components/markdown/renderer";
 import { parseUnifiedDiff } from "@/utils/tool-call-parsers";
 import { openExternalUrl } from "@/utils/open-external-url";
 import { highlightDiffLines } from "@/utils/diff-highlight";
 import type { Theme } from "@/styles/theme";
+
+// HighlightedCodeBlock keeps all box chrome (bg/border/padding) on its own
+// wrapper via `textStyle`; nothing is inherited from an outer markdown context
+// here, so a single stable empty object satisfies the required prop.
+const CODE_BLOCK_INHERITED: TextStyle = {};
+
+// File extension used both to pick a HighlightedCodeBlock language and to detect
+// markdown. Returns null for dotfiles / files without an extension.
+function fileExtension(filePath: string): string | null {
+  const name = filePath.split("/").pop() ?? "";
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(dot + 1).toLowerCase() : null;
+}
 
 // ---------------------------------------------------------------------------
 // Forge Hub (spec 19 / ADR-0015). Milestone A: connections, repositories, and
@@ -2948,6 +2965,10 @@ function CodeView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }) {
   const [fileLoading, setFileLoading] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
 
+  // Markdown files can toggle between rendered preview and raw source; every
+  // newly opened file resets to "preview" (§19 file viewer).
+  const [viewMode, setViewMode] = useState<"preview" | "source">("preview");
+
   // Selecting a different repo resets navigation to the new repo's root. Skip the
   // first mount so the restored path/file (from codeNavState) survives — this
   // effect only fires when `repo` actually changes on a live instance.
@@ -3102,6 +3123,7 @@ function CodeView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }) {
   const openFile = useCallback((entry: ForgeTreeEntry) => {
     setFileData(null);
     setFileError(null);
+    setViewMode("preview");
     setSelectedFile(entry);
   }, []);
 
@@ -3124,6 +3146,8 @@ function CodeView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }) {
   // ---- file viewer -------------------------------------------------------
   if (selectedFile) {
     const size = formatBytes(fileData?.size ?? null);
+    const ext = fileExtension(selectedFile.path);
+    const isMarkdown = ext === "md" || ext === "markdown";
     return (
       <View style={styles.pane}>
         <View style={styles.fileViewerHeader}>
@@ -3141,6 +3165,32 @@ function CodeView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }) {
               {selectedFile.path}
             </Text>
           </View>
+          {isMarkdown ? (
+            <View style={styles.segmented}>
+              <Pressable
+                style={[styles.segmentBtn, viewMode === "preview" && styles.segmentBtnActive]}
+                onPress={() => setViewMode("preview")}
+                testID="forge-code-view-preview"
+              >
+                <Text
+                  style={[styles.segmentText, viewMode === "preview" && styles.segmentTextActive]}
+                >
+                  Preview
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[styles.segmentBtn, viewMode === "source" && styles.segmentBtnActive]}
+                onPress={() => setViewMode("source")}
+                testID="forge-code-view-source"
+              >
+                <Text
+                  style={[styles.segmentText, viewMode === "source" && styles.segmentTextActive]}
+                >
+                  Source
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
           <Pressable
             style={[styles.btn, styles.btnGhost]}
             onPress={refreshCode}
@@ -3167,30 +3217,23 @@ function CodeView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }) {
           </Text>
         ) : fileData.truncated || fileData.content === null ? (
           <Text style={styles.emptyText}>File too large to preview.{size ? ` (${size})` : ""}</Text>
+        ) : isMarkdown && viewMode === "preview" ? (
+          // Render inline so the screen's outer ScrollView owns vertical scroll:
+          // the viewer grows with the file instead of a fixed-height inner box.
+          <MarkdownRenderer
+            text={fileData.content}
+            onLinkPress={(url) => {
+              void openExternalUrl(url);
+              return true;
+            }}
+          />
         ) : (
-          <ScrollView
-            style={styles.codeViewer}
-            contentContainerStyle={styles.logContent}
-            nestedScrollEnabled
-            showsVerticalScrollIndicator
-          >
-            <ScrollView horizontal showsHorizontalScrollIndicator>
-              <View>
-                {(fileData.content ? fileData.content.split("\n") : ["(empty file)"]).map(
-                  (line, i) => (
-                    <View key={i} style={styles.codeLineRow}>
-                      <Text style={styles.codeGutter} selectable={false}>
-                        {i + 1}
-                      </Text>
-                      <Text style={styles.codeLineText} selectable>
-                        {line.length > 0 ? line : " "}
-                      </Text>
-                    </View>
-                  ),
-                )}
-              </View>
-            </ScrollView>
-          </ScrollView>
+          <HighlightedCodeBlock
+            code={fileData.content}
+            language={ext}
+            inheritedStyles={CODE_BLOCK_INHERITED}
+            textStyle={styles.codeBlockText}
+          />
         )}
       </View>
     );
@@ -5571,18 +5614,27 @@ const styles = StyleSheet.create((theme) => ({
     gap: theme.spacing[2],
     flex: 1,
     maxWidth: 360,
-    height: 34,
+    height: 36,
     paddingHorizontal: theme.spacing[3],
     borderRadius: theme.borderRadius.lg,
     borderWidth: theme.borderWidth[1],
     borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface1,
+    backgroundColor: theme.colors.surface2,
   },
   searchInput: {
     flex: 1,
     minWidth: 0,
     fontSize: theme.fontSize.sm,
     color: theme.colors.foreground,
+    // Drop the browser's default focus ring; the searchField border is the
+    // only affordance. RN native ignores these web-only properties.
+    ...(isWeb
+      ? ({
+          outlineStyle: "none",
+          outlineWidth: 0,
+          outlineColor: "transparent",
+        } as object)
+      : {}),
   },
   // segmented state filter
   segmented: {
@@ -5823,7 +5875,7 @@ const styles = StyleSheet.create((theme) => ({
     borderWidth: theme.borderWidth[1],
     borderColor: theme.colors.borderAccent,
     backgroundColor: theme.colors.surface1,
-    padding: theme.spacing[2],
+    padding: theme.spacing[3],
     gap: theme.spacing[2],
     zIndex: 20,
   },
@@ -5902,6 +5954,8 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
     gap: theme.spacing[2],
   },
+  // Pipeline job-log surface: a terminal-like panel. Logs are long streams, so
+  // this stays scroll-capped (unlike the file viewer, which grows inline).
   logSurface: {
     maxHeight: 480,
     borderRadius: theme.borderRadius.lg,
@@ -5909,44 +5963,28 @@ const styles = StyleSheet.create((theme) => ({
     borderColor: theme.colors.border,
     backgroundColor: theme.colors.surfaceSidebar,
   },
-  // Read-only line-numbered code view (§19 file viewer).
-  codeViewer: {
-    maxHeight: 480,
+  // Read-only file viewer (§19). Box chrome + font for HighlightedCodeBlock,
+  // which paints these onto its own wrapper. No maxHeight: the block renders
+  // inline and grows with the file so the outer ScrollView owns vertical scroll.
+  codeBlockText: {
+    fontFamily: theme.fontFamily.mono,
+    fontSize: theme.fontSize.code,
+    color: theme.colors.foreground,
+    backgroundColor: theme.colors.surfaceSidebar,
+    padding: theme.spacing[3],
     borderRadius: theme.borderRadius.lg,
     borderWidth: theme.borderWidth[1],
     borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surfaceSidebar,
-  },
-  codeLineRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-  },
-  codeGutter: {
-    minWidth: 40,
-    paddingRight: theme.spacing[2],
-    marginRight: theme.spacing[3],
-    textAlign: "right",
-    fontFamily: theme.fontFamily.mono,
-    fontSize: theme.fontSize.code,
-    lineHeight: theme.fontSize.code * 1.5,
-    color: theme.colors.foregroundExtraMuted,
-    borderRightWidth: theme.borderWidth[1],
-    borderRightColor: theme.colors.border,
-  },
-  codeLineText: {
-    fontFamily: theme.fontFamily.mono,
-    fontSize: theme.fontSize.code,
-    lineHeight: theme.fontSize.code * 1.5,
-    color: theme.colors.foreground,
   },
   logContent: {
-    padding: theme.spacing[3],
+    paddingVertical: theme.spacing[3],
+    paddingHorizontal: theme.spacing[4],
   },
   logText: {
     fontFamily: theme.fontFamily.mono,
     fontSize: theme.fontSize.code,
-    lineHeight: theme.fontSize.code * 1.5,
-    color: theme.colors.foreground,
+    lineHeight: Math.round(theme.fontSize.code * 1.6),
+    color: theme.colors.foregroundMuted,
   },
   logTruncated: {
     fontSize: theme.fontSize.xs,
