@@ -6,6 +6,8 @@ import {
   Check,
   ChevronDown,
   CircleAlert,
+  CircleDot,
+  Download,
   ExternalLink,
   GitBranch,
   GitCompare,
@@ -15,31 +17,40 @@ import {
   Plus,
   RotateCcw,
   Search,
+  Tag,
   Trash2,
   X,
 } from "lucide-react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
+  ForgeArtifactSchema,
   ForgeBranchSchema,
   ForgeChangeRequestFileSchema,
   ForgeChangeRequestSummarySchema,
   ForgeCommitSchema,
+  ForgeIssueSchema,
   ForgePipelineDetailSchema,
   ForgePipelineRunSchema,
+  ForgeReleaseSchema,
   ForgeRepoSchema,
+  ForgeTagSchema,
+  type ForgeArtifact,
   type ForgeBranch,
   type ForgeChangeRequestFile,
   type ForgeChangeRequestSummary,
   type ForgeCommit,
   type ForgeConnection,
+  type ForgeIssue,
   type ForgePipelineDetail,
   type ForgePipelineJob,
   type ForgePipelineRun,
+  type ForgeRelease,
   type ForgeRepo,
   type ForgeRepoRef,
   type ForgeReviewAction,
   type ForgeMergeMethod,
+  type ForgeTag,
 } from "@jagentdesk/protocol/messages";
 import { getForgeDefinitionOrNeutral } from "@jagentdesk/protocol/forge-manifest";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
@@ -62,7 +73,14 @@ import type { Theme } from "@/styles/theme";
 // RPCs on the DaemonClient — this screen only renders UI.
 // ---------------------------------------------------------------------------
 
-type SubNav = "connections" | "repositories" | "code" | "pulls" | "pipelines";
+type SubNav =
+  | "connections"
+  | "repositories"
+  | "code"
+  | "pulls"
+  | "pipelines"
+  | "releases"
+  | "issues";
 
 /** A repo coordinate for every repo-scoped Forge Hub RPC. */
 function repoRef(repo: ForgeRepo): ForgeRepoRef {
@@ -241,6 +259,18 @@ function formatDuration(seconds: number | null | undefined): string {
   if (m < 60) return `${m}m ${s.toString().padStart(2, "0")}s`;
   const h = Math.floor(m / 60);
   return `${h}h ${(m % 60).toString().padStart(2, "0")}m`;
+}
+
+function formatBytes(bytes: number | null | undefined): string {
+  if (bytes == null || bytes <= 0) return "";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${unit === 0 ? value : value.toFixed(1)} ${units[unit]}`;
 }
 
 // ===== small presentational pieces =========================================
@@ -1105,7 +1135,10 @@ function ReviewBox({
 }
 
 // Merge box (§19.6.5). Segmented method + "Merge {{abbrev}}". Disabled unless the
-// PR is open per the summary. Auto-merge is Milestone C and intentionally absent.
+// PR is open per the summary. Milestone C adds an auto-merge toggle below the button
+// (§19.12 forgeHubReview): the box only renders inside the review-gated block, so the
+// toggle inherits that gate. Some forges (e.g. Bitbucket) have no auto-merge API and
+// report enabled:false even when the user asked to enable — surfaced as a note.
 function MergeBox({
   client,
   repo,
@@ -1117,14 +1150,44 @@ function MergeBox({
   cr: ForgeChangeRequestSummary;
   onMerged: () => void;
 }) {
+  const { theme } = useUnistyles();
   const def = getForgeDefinitionOrNeutral(repo.forge);
   const [method, setMethod] = useState<ForgeMergeMethod>("merge");
   const [status, setStatus] = useState<"idle" | "running" | "done">("idle");
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Auto-merge (Milestone C). `autoMerge` mirrors the enabled state the daemon
+  // reports back; `autoNote` surfaces a provider caveat when the request to enable
+  // came back disabled.
+  const [autoMerge, setAutoMerge] = useState(false);
+  const [autoBusy, setAutoBusy] = useState(false);
+  const [autoNote, setAutoNote] = useState<string | null>(null);
+
   const mergeable = cr.state === "open";
   const running = status === "running";
+
+  const toggleAutoMerge = useCallback(async () => {
+    const next = !autoMerge;
+    setAutoBusy(true);
+    setAutoNote(null);
+    try {
+      const res = await client.forgeSetAutoMerge({
+        repo: repoRef(repo),
+        number: cr.number,
+        enabled: next,
+        method,
+      });
+      setAutoMerge(res.enabled);
+      if (next && !res.enabled) {
+        setAutoNote(`Auto-merge isn't available for ${def.displayName}.`);
+      }
+    } catch (e: unknown) {
+      setAutoNote(e instanceof Error ? e.message : "Couldn't update auto-merge.");
+    } finally {
+      setAutoBusy(false);
+    }
+  }, [autoMerge, client, repo, cr.number, method, def.displayName]);
 
   const submit = useCallback(async () => {
     setStatus("running");
@@ -1186,6 +1249,20 @@ function MergeBox({
             {running ? "Merging…" : `Merge ${def.changeRequestAbbrev}`}
           </Text>
         </Pressable>
+        <Pressable
+          style={[styles.autoMergeRow, (!mergeable || autoBusy) && styles.btnDisabled]}
+          onPress={toggleAutoMerge}
+          disabled={!mergeable || autoBusy}
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: autoMerge, disabled: !mergeable || autoBusy }}
+          testID="forge-auto-merge-toggle"
+        >
+          <View style={[styles.checkbox, autoMerge && styles.checkboxChecked]}>
+            {autoMerge ? <Check size={11} color={theme.colors.accentForeground} /> : null}
+          </View>
+          <Text style={styles.autoMergeLabel}>Enable auto-merge (merge when checks pass)</Text>
+        </Pressable>
+        {autoNote ? <Text style={styles.mergeReason}>{autoNote}</Text> : null}
         {result ? <Text style={styles.mergeResultOk}>{result}</Text> : null}
         {error ? <Text style={styles.reviewError}>{error}</Text> : null}
         {disabledReason && !result ? (
@@ -2064,11 +2141,13 @@ function PipelineRunDetail({
   client,
   repo,
   run,
+  releasesEnabled,
   onBack,
 }: {
   client: DaemonClient;
   repo: ForgeRepo;
   run: ForgePipelineRun;
+  releasesEnabled: boolean;
   onBack: () => void;
 }) {
   const { theme } = useUnistyles();
@@ -2238,7 +2317,129 @@ function PipelineRunDetail({
           </View>
         </View>
       ) : null}
+
+      {releasesEnabled ? <ArtifactsPanel client={client} repo={repo} runId={run.id} /> : null}
     </View>
+  );
+}
+
+// Artifacts panel (§19 Milestone C, gate forgeHubReleases). Lists a run's build
+// artifacts; tapping resolves a signed download URL via the daemon and opens it.
+// Some forges (GitLab / Bitbucket) return a null URL — that row shows a note.
+function ArtifactsPanel({
+  client,
+  repo,
+  runId,
+}: {
+  client: DaemonClient;
+  repo: ForgeRepo;
+  runId: string;
+}) {
+  const { theme } = useUnistyles();
+  const [artifacts, setArtifacts] = useState<ForgeArtifact[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      const res = await client.forgeListArtifacts({ repo: repoRef(repo), runId });
+      const parsed = ForgeArtifactSchema.array().safeParse(res.artifacts);
+      setArtifacts(parsed.success ? parsed.data : []);
+      if (!parsed.success) setError("Unable to load artifacts.");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Unable to load artifacts.");
+    }
+  }, [client, repo, runId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const download = useCallback(
+    async (artifact: ForgeArtifact) => {
+      setDownloadingId(artifact.id);
+      setNote(null);
+      try {
+        const res = await client.forgeDownloadArtifact({
+          repo: repoRef(repo),
+          artifactId: artifact.id,
+        });
+        if (res.url) void Linking.openURL(res.url);
+        else setNote(`No download URL for ${artifact.name}.`);
+      } catch (e: unknown) {
+        setNote(e instanceof Error ? e.message : "Couldn't download the artifact.");
+      } finally {
+        setDownloadingId(null);
+      }
+    },
+    [client, repo],
+  );
+
+  return (
+    <View style={styles.pane}>
+      <Text style={styles.sectionTitle}>Artifacts</Text>
+      {error ? (
+        <View style={styles.errorBanner}>
+          <CircleAlert size={16} color={theme.colors.statusDanger} />
+          <Text style={styles.errorText}>{error}</Text>
+          <Pressable style={[styles.btn, styles.btnGhost]} onPress={load}>
+            <Text style={styles.btnGhostText}>Retry</Text>
+          </Pressable>
+        </View>
+      ) : artifacts === null ? (
+        <Text style={styles.emptyText}>Loading artifacts…</Text>
+      ) : artifacts.length === 0 ? (
+        <Text style={styles.emptyText}>No artifacts for this run.</Text>
+      ) : (
+        <View style={styles.card}>
+          {artifacts.map((artifact) => (
+            <ArtifactRow
+              key={artifact.id}
+              artifact={artifact}
+              busy={downloadingId === artifact.id}
+              onDownload={download}
+            />
+          ))}
+        </View>
+      )}
+      {note ? <Text style={styles.mergeReason}>{note}</Text> : null}
+    </View>
+  );
+}
+
+function ArtifactRow({
+  artifact,
+  busy,
+  onDownload,
+}: {
+  artifact: ForgeArtifact;
+  busy: boolean;
+  onDownload: (artifact: ForgeArtifact) => void;
+}) {
+  const { theme } = useUnistyles();
+  const handlePress = useCallback(() => onDownload(artifact), [artifact, onDownload]);
+  const size = formatBytes(artifact.sizeBytes);
+  const expiry = artifact.expiresAt_ms ? `expires ${formatRelativeMs(artifact.expiresAt_ms)}` : "";
+  return (
+    <Pressable
+      style={[styles.row, busy && styles.btnDisabled]}
+      onPress={handlePress}
+      disabled={busy}
+      testID={`forge-artifact-${artifact.id}`}
+    >
+      <View style={styles.rowInfo}>
+        <Text style={styles.rowTitle} numberOfLines={1}>
+          {artifact.name}
+        </Text>
+        <View style={styles.crMetaRow}>
+          {size ? <Text style={styles.metaMono}>{size}</Text> : null}
+          {expiry ? <Text style={styles.metaMuted}>{expiry}</Text> : null}
+        </View>
+      </View>
+      <Download size={15} color={theme.colors.foregroundMuted} />
+    </Pressable>
   );
 }
 
@@ -2287,7 +2488,15 @@ function JobTreeRow({
   );
 }
 
-function PipelinesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }) {
+function PipelinesView({
+  client,
+  repo,
+  releasesEnabled,
+}: {
+  client: DaemonClient;
+  repo: ForgeRepo;
+  releasesEnabled: boolean;
+}) {
   const { theme } = useUnistyles();
   const [runs, setRuns] = useState<ForgePipelineRun[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -2316,7 +2525,15 @@ function PipelinesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo
   const backToRuns = useCallback(() => setSelectedRun(null), []);
 
   if (selectedRun) {
-    return <PipelineRunDetail client={client} repo={repo} run={selectedRun} onBack={backToRuns} />;
+    return (
+      <PipelineRunDetail
+        client={client}
+        repo={repo}
+        run={selectedRun}
+        releasesEnabled={releasesEnabled}
+        onBack={backToRuns}
+      />
+    );
   }
 
   return (
@@ -2342,6 +2559,570 @@ function PipelinesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo
         <View style={styles.card}>
           {runs.map((run) => (
             <PipelineRunRow key={run.id} run={run} onOpen={setSelectedRun} />
+          ))}
+        </View>
+      )}
+    </View>
+  );
+}
+
+// ===== releases · tags — Milestone C, gate forgeHubReleases ==================
+
+function ReleaseRow({ release }: { release: ForgeRelease }) {
+  const { theme } = useUnistyles();
+  const handleOpen = useCallback(() => void Linking.openURL(release.url), [release.url]);
+  const published = formatRelativeMs(release.publishedAt_ms);
+  return (
+    <View style={styles.releaseCard}>
+      <View style={styles.releaseHeader}>
+        <View style={styles.rowInfo}>
+          <Text style={styles.rowTitle} numberOfLines={1}>
+            {release.name || release.tagName}
+          </Text>
+          <View style={styles.crMetaRow}>
+            <Text style={styles.metaMono}>{release.tagName}</Text>
+            {release.isDraft ? (
+              <View style={styles.plainChip}>
+                <Text style={styles.plainChipText}>Draft</Text>
+              </View>
+            ) : null}
+            {release.isPrerelease ? (
+              <View style={styles.plainChip}>
+                <Text style={styles.plainChipText}>Prerelease</Text>
+              </View>
+            ) : null}
+            {published ? <Text style={styles.metaMuted}>{published}</Text> : null}
+          </View>
+        </View>
+        <Pressable
+          style={styles.iconBtn}
+          onPress={handleOpen}
+          accessibilityRole="button"
+          accessibilityLabel="Open release"
+          testID={`forge-release-open-${release.id}`}
+        >
+          <ExternalLink size={15} color={theme.colors.foregroundMuted} />
+        </Pressable>
+      </View>
+      {release.assets && release.assets.length > 0 ? (
+        <View style={styles.assetList}>
+          {release.assets.map((asset) => (
+            <AssetRow
+              key={asset.url}
+              name={asset.name}
+              url={asset.url}
+              sizeBytes={asset.sizeBytes}
+            />
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function AssetRow({
+  name,
+  url,
+  sizeBytes,
+}: {
+  name: string;
+  url: string;
+  sizeBytes?: number | null;
+}) {
+  const { theme } = useUnistyles();
+  const handleOpen = useCallback(() => void Linking.openURL(url), [url]);
+  const size = formatBytes(sizeBytes);
+  return (
+    <Pressable style={styles.assetRow} onPress={handleOpen} testID={`forge-asset-${name}`}>
+      <Download size={13} color={theme.colors.foregroundMuted} />
+      <Text style={styles.assetName} numberOfLines={1}>
+        {name}
+      </Text>
+      <View style={styles.grow} />
+      {size ? <Text style={styles.metaMono}>{size}</Text> : null}
+    </Pressable>
+  );
+}
+
+function TagRow({ tag }: { tag: ForgeTag }) {
+  const { theme } = useUnistyles();
+  const handleOpen = useCallback(() => {
+    if (tag.url) void Linking.openURL(tag.url);
+  }, [tag.url]);
+  return (
+    <View style={styles.row}>
+      <Tag size={14} color={theme.colors.foregroundMuted} />
+      <View style={styles.rowInfo}>
+        <Text style={styles.rowTitleMono} numberOfLines={1}>
+          {tag.name}
+        </Text>
+        {tag.commitSha ? <Text style={styles.metaMono}>{shortSha(tag.commitSha)}</Text> : null}
+      </View>
+      {tag.url ? (
+        <Pressable
+          style={styles.iconBtn}
+          onPress={handleOpen}
+          accessibilityRole="button"
+          accessibilityLabel="Open tag"
+          testID={`forge-tag-open-${tag.name}`}
+        >
+          <ExternalLink size={15} color={theme.colors.foregroundMuted} />
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+function ReleasesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }) {
+  const { theme } = useUnistyles();
+  const [releases, setReleases] = useState<ForgeRelease[] | null>(null);
+  const [tags, setTags] = useState<ForgeTag[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setError(null);
+    setReleases(null);
+    setTags(null);
+    try {
+      const [releaseRes, tagRes] = await Promise.all([
+        client.forgeListReleases({ repo: repoRef(repo), limit: 50 }),
+        client.forgeListTags({ repo: repoRef(repo), limit: 50 }),
+      ]);
+      const parsedReleases = ForgeReleaseSchema.array().safeParse(releaseRes.releases);
+      const parsedTags = ForgeTagSchema.array().safeParse(tagRes.tags);
+      setReleases(parsedReleases.success ? parsedReleases.data : []);
+      setTags(parsedTags.success ? parsedTags.data : []);
+      if (!parsedReleases.success || !parsedTags.success) {
+        setError("Unable to load releases.");
+      }
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Unable to load releases.");
+    }
+  }, [client, repo]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  return (
+    <View style={styles.pane}>
+      <View style={styles.toolbarRow}>
+        <Text style={styles.rowTitleMono} numberOfLines={1}>
+          {repo.owner}/{repo.name}
+        </Text>
+      </View>
+
+      {error ? (
+        <View style={styles.errorBanner}>
+          <CircleAlert size={16} color={theme.colors.statusDanger} />
+          <Text style={styles.errorText}>{error}</Text>
+          <Pressable style={[styles.btn, styles.btnGhost]} onPress={load}>
+            <Text style={styles.btnGhostText}>Retry</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      <Text style={styles.sectionTitle}>Releases</Text>
+      {releases === null ? (
+        <Text style={styles.emptyText}>Loading releases…</Text>
+      ) : releases.length === 0 ? (
+        <Text style={styles.emptyText}>No releases yet.</Text>
+      ) : (
+        <View style={styles.filesPane}>
+          {releases.map((release) => (
+            <ReleaseRow key={release.id} release={release} />
+          ))}
+        </View>
+      )}
+
+      <Text style={styles.sectionTitle}>Tags</Text>
+      {tags === null ? (
+        <Text style={styles.emptyText}>Loading tags…</Text>
+      ) : tags.length === 0 ? (
+        <Text style={styles.emptyText}>No tags yet.</Text>
+      ) : (
+        <View style={styles.card}>
+          {tags.map((tag) => (
+            <TagRow key={tag.name} tag={tag} />
+          ))}
+        </View>
+      )}
+    </View>
+  );
+}
+
+// ===== issues — Milestone C, gate forgeHubIssues =============================
+
+const ISSUE_STATES = ["open", "closed", "all"] as const;
+type IssueState = (typeof ISSUE_STATES)[number];
+
+function issueStateColor(state: ForgeIssue["state"], theme: Theme): string {
+  return state === "open" ? theme.colors.statusSuccess : theme.colors.statusMerged;
+}
+
+function IssueRow({ issue, onOpen }: { issue: ForgeIssue; onOpen: (issue: ForgeIssue) => void }) {
+  const { theme } = useUnistyles();
+  const handlePress = useCallback(() => onOpen(issue), [issue, onOpen]);
+  return (
+    <Pressable style={styles.row} onPress={handlePress} testID={`forge-issue-${issue.number}`}>
+      <View style={styles.rowInfo}>
+        <Text style={styles.rowTitle} numberOfLines={1}>
+          {issue.title}
+        </Text>
+        <View style={styles.crMetaRow}>
+          <Text style={styles.metaMono}>#{issue.number}</Text>
+          {issue.authorLogin ? <Text style={styles.metaMuted}>@{issue.authorLogin}</Text> : null}
+          {issue.commentCount != null ? (
+            <Text style={styles.metaMuted}>{issue.commentCount} comments</Text>
+          ) : null}
+          {issue.labels?.slice(0, 3).map((label) => (
+            <View key={label} style={styles.plainChip}>
+              <Text style={styles.plainChipText}>{label}</Text>
+            </View>
+          ))}
+        </View>
+      </View>
+      <Chip
+        label={issue.state === "open" ? "Open" : "Closed"}
+        color={issueStateColor(issue.state, theme)}
+      />
+      <Text style={styles.metaWhen}>{formatRelativeMs(issue.updatedAt_ms)}</Text>
+    </Pressable>
+  );
+}
+
+function IssueStateFilterButton({
+  value,
+  active,
+  onChange,
+}: {
+  value: IssueState;
+  active: boolean;
+  onChange: (state: IssueState) => void;
+}) {
+  const handlePress = useCallback(() => onChange(value), [value, onChange]);
+  const label = value === "all" ? "All" : value.charAt(0).toUpperCase() + value.slice(1);
+  return (
+    <Pressable
+      style={[styles.segmentBtn, active && styles.segmentBtnActive]}
+      onPress={handlePress}
+      testID={`forge-issue-state-${value}`}
+    >
+      <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function IssueDetail({
+  client,
+  repo,
+  issue,
+  onBack,
+  onChanged,
+}: {
+  client: DaemonClient;
+  repo: ForgeRepo;
+  issue: ForgeIssue;
+  onBack: () => void;
+  onChanged: () => void;
+}) {
+  const { theme } = useUnistyles();
+  const [comment, setComment] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+
+  const handleOpenExternal = useCallback(() => void Linking.openURL(issue.url), [issue.url]);
+
+  const submitComment = useCallback(async () => {
+    const body = comment.trim();
+    if (!body) return;
+    setBusy(true);
+    setNote(null);
+    try {
+      const res = await client.forgeCommentIssue({
+        repo: repoRef(repo),
+        number: issue.number,
+        body,
+      });
+      if (res.ok) {
+        setComment("");
+        setNote("Comment posted.");
+        onChanged();
+      } else {
+        setNote("The comment could not be posted.");
+      }
+    } catch (e: unknown) {
+      setNote(e instanceof Error ? e.message : "The comment could not be posted.");
+    } finally {
+      setBusy(false);
+    }
+  }, [comment, client, repo, issue.number, onChanged]);
+
+  const closeIssue = useCallback(async () => {
+    setBusy(true);
+    setNote(null);
+    try {
+      const res = await client.forgeCloseIssue({ repo: repoRef(repo), number: issue.number });
+      if (res.ok) {
+        setNote("Issue closed.");
+        onChanged();
+      } else {
+        setNote("The issue could not be closed.");
+      }
+    } catch (e: unknown) {
+      setNote(e instanceof Error ? e.message : "The issue could not be closed.");
+    } finally {
+      setBusy(false);
+    }
+  }, [client, repo, issue.number, onChanged]);
+
+  const canComment = comment.trim().length > 0 && !busy;
+
+  return (
+    <View style={styles.pane}>
+      <View style={styles.detailHeader}>
+        <Pressable
+          style={styles.iconBtn}
+          onPress={onBack}
+          accessibilityRole="button"
+          accessibilityLabel="Back to issues"
+          testID="forge-issue-back"
+        >
+          <ArrowLeft size={18} color={theme.colors.foregroundMuted} />
+        </Pressable>
+        <View style={styles.rowInfo}>
+          <Text style={styles.rowTitle} numberOfLines={2}>
+            {issue.title}
+          </Text>
+          <Text style={styles.rowSubMono} numberOfLines={1}>
+            {repo.owner}/{repo.name} · #{issue.number}
+          </Text>
+        </View>
+        <Chip
+          label={issue.state === "open" ? "Open" : "Closed"}
+          color={issueStateColor(issue.state, theme)}
+        />
+        <Pressable
+          style={[styles.btn, styles.btnGhost]}
+          onPress={handleOpenExternal}
+          testID="forge-issue-open-external"
+        >
+          <ExternalLink size={13} color={theme.colors.foreground} />
+          <Text style={styles.btnGhostText}>Open</Text>
+        </Pressable>
+      </View>
+
+      <View style={styles.mergebox}>
+        <View style={styles.mergeboxBody}>
+          <Text style={styles.fieldLabel}>Add a comment</Text>
+          <TextInput
+            style={styles.textArea}
+            value={comment}
+            onChangeText={setComment}
+            placeholder="Leave a comment"
+            placeholderTextColor={theme.colors.foregroundExtraMuted}
+            multiline
+            editable={!busy}
+            testID="forge-issue-comment-body"
+          />
+          <View style={styles.formActions}>
+            <Pressable
+              style={[styles.btn, styles.btnPrimary, !canComment && styles.btnDisabled]}
+              onPress={submitComment}
+              disabled={!canComment}
+              testID="forge-issue-comment-submit"
+            >
+              <Text style={styles.btnPrimaryText}>{busy ? "Posting…" : "Comment"}</Text>
+            </Pressable>
+            {issue.state === "open" ? (
+              <Pressable
+                style={[styles.btn, styles.btnDanger, busy && styles.btnDisabled]}
+                onPress={closeIssue}
+                disabled={busy}
+                testID="forge-issue-close"
+              >
+                <Ban size={13} color={theme.colors.statusDanger} />
+                <Text style={styles.btnDangerText}>Close issue</Text>
+              </Pressable>
+            ) : null}
+          </View>
+          {note ? <Text style={styles.mergeReason}>{note}</Text> : null}
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function IssuesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }) {
+  const { theme } = useUnistyles();
+  const [state, setState] = useState<IssueState>("open");
+  const [issues, setIssues] = useState<ForgeIssue[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<ForgeIssue | null>(null);
+
+  const [creating, setCreating] = useState(false);
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [createBusy, setCreateBusy] = useState(false);
+  const [createNote, setCreateNote] = useState<string | null>(null);
+
+  const load = useCallback(
+    async (nextState: IssueState) => {
+      setError(null);
+      setIssues(null);
+      try {
+        const res = await client.forgeListIssues({ repo: repoRef(repo), state: nextState });
+        const parsed = ForgeIssueSchema.array().safeParse(res.issues);
+        setIssues(parsed.success ? parsed.data : []);
+        if (!parsed.success) setError("Unable to load issues.");
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : "Unable to load issues.");
+      }
+    },
+    [client, repo],
+  );
+
+  useEffect(() => {
+    void load(state);
+  }, [load, state]);
+
+  const handleChangeState = useCallback((next: IssueState) => setState(next), []);
+  const toggleCreating = useCallback(() => setCreating((v) => !v), []);
+  const openIssue = useCallback((issue: ForgeIssue) => setSelected(issue), []);
+  const backToList = useCallback(() => setSelected(null), []);
+  const refresh = useCallback(() => {
+    setSelected(null);
+    void load(state);
+  }, [load, state]);
+
+  const submitCreate = useCallback(async () => {
+    const t = title.trim();
+    if (!t) return;
+    setCreateBusy(true);
+    setCreateNote(null);
+    try {
+      const res = await client.forgeCreateIssue({
+        repo: repoRef(repo),
+        title: t,
+        body: body.trim() || undefined,
+      });
+      if (res.issue) {
+        setTitle("");
+        setBody("");
+        setCreating(false);
+        void load(state);
+      } else {
+        setCreateNote("The issue could not be created.");
+      }
+    } catch (e: unknown) {
+      setCreateNote(e instanceof Error ? e.message : "The issue could not be created.");
+    } finally {
+      setCreateBusy(false);
+    }
+  }, [title, body, client, repo, state, load]);
+
+  if (selected) {
+    return (
+      <IssueDetail
+        client={client}
+        repo={repo}
+        issue={selected}
+        onBack={backToList}
+        onChanged={refresh}
+      />
+    );
+  }
+
+  const canCreate = title.trim().length > 0 && !createBusy;
+
+  return (
+    <View style={styles.pane}>
+      <View style={styles.toolbarRow}>
+        <Text style={styles.rowTitleMono} numberOfLines={1}>
+          {repo.owner}/{repo.name}
+        </Text>
+        <View style={styles.grow} />
+        <Pressable
+          style={[styles.btn, styles.btnPrimary]}
+          onPress={toggleCreating}
+          testID="forge-issue-new"
+        >
+          <Plus size={14} color={theme.colors.accentForeground} />
+          <Text style={styles.btnPrimaryText}>New issue</Text>
+        </Pressable>
+      </View>
+
+      {creating ? (
+        <View style={styles.formCard}>
+          <Text style={styles.formTitle}>New issue</Text>
+          <View style={styles.field}>
+            <Text style={styles.fieldLabel}>Title</Text>
+            <TextInput
+              style={styles.input}
+              value={title}
+              onChangeText={setTitle}
+              placeholder="Issue title"
+              placeholderTextColor={theme.colors.foregroundExtraMuted}
+              editable={!createBusy}
+              testID="forge-issue-title-input"
+            />
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.fieldLabel}>Description (optional)</Text>
+            <TextInput
+              style={styles.textArea}
+              value={body}
+              onChangeText={setBody}
+              placeholder="Describe the issue"
+              placeholderTextColor={theme.colors.foregroundExtraMuted}
+              multiline
+              editable={!createBusy}
+              testID="forge-issue-body-input"
+            />
+          </View>
+          <View style={styles.formActions}>
+            <Pressable
+              style={[styles.btn, styles.btnPrimary, !canCreate && styles.btnDisabled]}
+              onPress={submitCreate}
+              disabled={!canCreate}
+              testID="forge-issue-create-submit"
+            >
+              <Text style={styles.btnPrimaryText}>{createBusy ? "Creating…" : "Create issue"}</Text>
+            </Pressable>
+            <Pressable style={[styles.btn, styles.btnGhost]} onPress={toggleCreating}>
+              <Text style={styles.btnGhostText}>Cancel</Text>
+            </Pressable>
+          </View>
+          {createNote ? <Text style={styles.reviewError}>{createNote}</Text> : null}
+        </View>
+      ) : null}
+
+      <View style={styles.segmented}>
+        {ISSUE_STATES.map((s) => (
+          <IssueStateFilterButton
+            key={s}
+            value={s}
+            active={state === s}
+            onChange={handleChangeState}
+          />
+        ))}
+      </View>
+
+      {error ? (
+        <View style={styles.errorBanner}>
+          <CircleAlert size={16} color={theme.colors.statusDanger} />
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      ) : null}
+
+      {issues === null ? (
+        <Text style={styles.emptyText}>Loading issues…</Text>
+      ) : issues.length === 0 ? (
+        <Text style={styles.emptyText}>No issues here yet.</Text>
+      ) : (
+        <View style={styles.card}>
+          {issues.map((issue) => (
+            <IssueRow key={issue.number} issue={issue} onOpen={openIssue} />
           ))}
         </View>
       )}
@@ -2390,6 +3171,8 @@ export function ForgeHubScreen() {
   const codeEnabled = useHostFeature(serverId, "forgeHubCode");
   const reviewEnabled = useHostFeature(serverId, "forgeHubReview");
   const pipelinesEnabled = useHostFeature(serverId, "forgeHubPipelines");
+  const releasesEnabled = useHostFeature(serverId, "forgeHubReleases");
+  const issuesEnabled = useHostFeature(serverId, "forgeHubIssues");
 
   const [tab, setTab] = useState<SubNav>("connections");
   const [connections, setConnections] = useState<ForgeConnection[]>([]);
@@ -2619,6 +3402,17 @@ export function ForgeHubScreen() {
             onSelect={setTab}
           />
         ) : null}
+        {releasesEnabled ? (
+          <SubNavButton
+            label="Releases"
+            value="releases"
+            active={tab === "releases"}
+            onSelect={setTab}
+          />
+        ) : null}
+        {issuesEnabled ? (
+          <SubNavButton label="Issues" value="issues" active={tab === "issues"} onSelect={setTab} />
+        ) : null}
       </View>
 
       {connectionsError ? (
@@ -2728,7 +3522,31 @@ export function ForgeHubScreen() {
               Pick a repository from the Repositories tab to view its pipelines.
             </Text>
           ) : (
-            <PipelinesView client={client} repo={selectedRepo} />
+            <PipelinesView client={client} repo={selectedRepo} releasesEnabled={releasesEnabled} />
+          )
+        ) : null}
+
+        {tab === "releases" && releasesEnabled ? (
+          !hasConnections ? (
+            <Text style={styles.emptyText}>{CONNECTION_EMPTY_STATE}</Text>
+          ) : !selectedRepo || !client ? (
+            <Text style={styles.emptyText}>
+              Pick a repository from the Repositories tab to view its releases.
+            </Text>
+          ) : (
+            <ReleasesView client={client} repo={selectedRepo} />
+          )
+        ) : null}
+
+        {tab === "issues" && issuesEnabled ? (
+          !hasConnections ? (
+            <Text style={styles.emptyText}>{CONNECTION_EMPTY_STATE}</Text>
+          ) : !selectedRepo || !client ? (
+            <Text style={styles.emptyText}>
+              Pick a repository from the Repositories tab to view its issues.
+            </Text>
+          ) : (
+            <IssuesView client={client} repo={selectedRepo} />
           )
         ) : null}
       </ScrollView>
@@ -3421,5 +4239,68 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.xs,
     color: theme.colors.statusWarning,
     marginBottom: theme.spacing[2],
+  },
+  // ===== Milestone C =====
+  // auto-merge toggle
+  autoMergeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
+  },
+  checkbox: {
+    width: 18,
+    height: 18,
+    borderRadius: theme.borderRadius.sm,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface0,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  checkboxChecked: {
+    borderColor: theme.colors.accent,
+    backgroundColor: theme.colors.accent,
+  },
+  autoMergeLabel: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foreground,
+  },
+  // releases + tags
+  releaseCard: {
+    borderRadius: theme.borderRadius.lg,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+    overflow: "hidden",
+  },
+  releaseHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[3],
+  },
+  assetList: {
+    borderTopWidth: theme.borderWidth[1],
+    borderTopColor: theme.colors.border,
+  },
+  assetRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+  },
+  assetName: {
+    flexShrink: 1,
+    minWidth: 0,
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foreground,
+    fontFamily: theme.fontFamily.mono,
   },
 }));
