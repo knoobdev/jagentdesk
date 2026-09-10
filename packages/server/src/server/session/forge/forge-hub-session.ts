@@ -70,6 +70,10 @@ type ForgeHubInbound = Extract<
       | "forge.issue.create.request"
       | "forge.issue.comment.request"
       | "forge.issue.close.request"
+      | "forge.change_request.create.request"
+      | "forge.change_request.close.request"
+      | "forge.release.create.request"
+      | "forge.release.get.request"
       | "forge.cli.status.request"
       | "forge.cli.install.request"
       | "forge.connection.login.request"
@@ -2771,6 +2775,349 @@ export class ForgeHubService {
     const base = this.bbRepo(input.owner, input.name);
     return this.bbSend("PUT", `${base}/issues/${input.number}`, { state: "closed" });
   }
+
+  // ===== Milestone D — create/close change request · create/get release ==========
+
+  async createChangeRequest(input: {
+    owner: string;
+    name: string;
+    base: string;
+    head: string;
+    title: string;
+    body?: string;
+    draft?: boolean;
+  }): Promise<ForgeCreateChangeRequestResult> {
+    const gh = await this.ghPath();
+    if (!gh) return { number: null, url: null, error: "gh CLI not found" };
+    const args = [
+      "pr",
+      "create",
+      "--repo",
+      `${input.owner}/${input.name}`,
+      "--base",
+      input.base,
+      "--head",
+      input.head,
+      "--title",
+      input.title,
+      "--body",
+      input.body ?? "",
+    ];
+    if (input.draft) args.push("--draft");
+    try {
+      const res = await execCommand(gh, args, { timeout: GH_TIMEOUT_MS });
+      // `gh pr create` prints the created PR URL as the last non-empty stdout line.
+      const url = lastNonEmptyLine(res.stdout);
+      const m = url?.match(/\/pull\/(\d+)/);
+      return { number: m ? Number(m[1]) : null, url: url ?? null };
+    } catch (error) {
+      return { number: null, url: null, error: shortForgeError(error) };
+    }
+  }
+
+  async createGitLabChangeRequest(input: {
+    owner: string;
+    name: string;
+    base: string;
+    head: string;
+    title: string;
+    body?: string;
+    draft?: boolean;
+  }): Promise<ForgeCreateChangeRequestResult> {
+    const glab = await this.glabPath();
+    if (!glab) return { number: null, url: null, error: "glab CLI not found" };
+    const args = [
+      "mr",
+      "create",
+      "-R",
+      `${input.owner}/${input.name}`,
+      "--source-branch",
+      input.head,
+      "--target-branch",
+      input.base,
+      "--title",
+      input.title,
+      // --description is required to avoid the interactive editor; pass a space when empty.
+      "--description",
+      input.body && input.body.length > 0 ? input.body : " ",
+      "--yes",
+    ];
+    if (input.draft) args.push("--draft");
+    try {
+      const res = await execCommand(glab, args, { timeout: GH_TIMEOUT_MS });
+      const url = lastMatchingLine(res.stdout, /\/merge_requests\/\d+/);
+      const m = url?.match(/\/merge_requests\/(\d+)/);
+      return { number: m ? Number(m[1]) : null, url: url ?? null };
+    } catch (error) {
+      return { number: null, url: null, error: shortForgeError(error) };
+    }
+  }
+
+  async createBitbucketChangeRequest(input: {
+    owner: string;
+    name: string;
+    base: string;
+    head: string;
+    title: string;
+    body?: string;
+  }): Promise<ForgeCreateChangeRequestResult> {
+    const base = this.bbRepo(input.owner, input.name);
+    const body: Record<string, unknown> = {
+      title: input.title,
+      source: { branch: { name: input.head } },
+      destination: { branch: { name: input.base } },
+    };
+    if (input.body) body.description = input.body;
+    const res = await this.bbJson(
+      `${base}/pullrequests`,
+      z.object({
+        id: z.number(),
+        links: z
+          .object({ html: z.object({ href: z.string() }).nullable().optional() })
+          .nullable()
+          .optional(),
+      }),
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+        headers: { "Content-Type": "application/json" },
+      },
+    );
+    if (!res) return { number: null, url: null, error: "bitbucket request failed" };
+    return { number: res.id, url: res.links?.html?.href ?? null };
+  }
+
+  async closeChangeRequest(input: {
+    owner: string;
+    name: string;
+    number: number;
+  }): Promise<boolean> {
+    return this.ghOk([
+      "pr",
+      "close",
+      String(input.number),
+      "--repo",
+      `${input.owner}/${input.name}`,
+    ]);
+  }
+
+  async closeGitLabChangeRequest(input: {
+    owner: string;
+    name: string;
+    number: number;
+  }): Promise<boolean> {
+    return this.glabOk(["mr", "close", String(input.number), "-R", `${input.owner}/${input.name}`]);
+  }
+
+  async closeBitbucketChangeRequest(input: {
+    owner: string;
+    name: string;
+    number: number;
+  }): Promise<boolean> {
+    const base = this.bbRepo(input.owner, input.name);
+    return this.bbSend("POST", `${base}/pullrequests/${input.number}/decline`);
+  }
+
+  /** Read one gh release back as a neutral ForgeRelease (used by create + get). */
+  private async ghReleaseView(
+    owner: string,
+    name: string,
+    tagName: string,
+  ): Promise<ForgeRelease | null> {
+    const r = await this.ghJson(
+      [
+        "release",
+        "view",
+        tagName,
+        "--repo",
+        `${owner}/${name}`,
+        "--json",
+        "tagName,name,body,isDraft,isPrerelease,publishedAt,url,assets",
+      ],
+      z.object({
+        tagName: z.string(),
+        name: z.string().nullable().optional(),
+        body: z.string().nullable().optional(),
+        isDraft: z.boolean().optional(),
+        isPrerelease: z.boolean().optional(),
+        publishedAt: z.string().nullable().optional(),
+        url: z.string(),
+        assets: z
+          .array(
+            z.object({
+              name: z.string(),
+              url: z.string().optional(),
+              size: z.number().optional(),
+            }),
+          )
+          .optional()
+          .default([]),
+      }),
+    );
+    if (!r) return null;
+    return {
+      id: r.tagName,
+      tagName: r.tagName,
+      name: r.name ?? null,
+      body: r.body ?? null,
+      isDraft: r.isDraft ?? false,
+      isPrerelease: r.isPrerelease ?? false,
+      publishedAt_ms: isoToMs(r.publishedAt ?? undefined),
+      url: r.url,
+      assets: r.assets.map(
+        (a): ForgeReleaseAsset => ({ name: a.name, url: a.url ?? "", sizeBytes: a.size ?? null }),
+      ),
+    };
+  }
+
+  async createRelease(input: {
+    owner: string;
+    name: string;
+    tagName: string;
+    releaseName?: string;
+    body?: string;
+    draft?: boolean;
+    prerelease?: boolean;
+    target?: string;
+  }): Promise<ForgeCreateReleaseResult> {
+    const gh = await this.ghPath();
+    if (!gh) return { release: null, error: "gh CLI not found" };
+    const repo = `${input.owner}/${input.name}`;
+    const args = [
+      "release",
+      "create",
+      input.tagName,
+      "--repo",
+      repo,
+      "--title",
+      input.releaseName ?? input.tagName,
+      "--notes",
+      input.body ?? "",
+    ];
+    if (input.draft) args.push("--draft");
+    if (input.prerelease) args.push("--prerelease");
+    if (input.target) args.push("--target", input.target);
+    try {
+      await execCommand(gh, args, { timeout: GH_TIMEOUT_MS });
+    } catch (error) {
+      return { release: null, error: shortForgeError(error) };
+    }
+    return { release: await this.ghReleaseView(input.owner, input.name, input.tagName) };
+  }
+
+  async getRelease(input: {
+    owner: string;
+    name: string;
+    tagName: string;
+  }): Promise<ForgeRelease | null> {
+    return this.ghReleaseView(input.owner, input.name, input.tagName);
+  }
+
+  /** Read one glab release back via the REST API as a neutral ForgeRelease. */
+  private async glabReleaseView(
+    owner: string,
+    name: string,
+    tagName: string,
+  ): Promise<ForgeRelease | null> {
+    const enc = glProjectId(owner, name);
+    const r = await this.glabJson(
+      ["api", `projects/${enc}/releases/${encodeURIComponent(tagName)}`],
+      z.object({
+        tag_name: z.string(),
+        name: z.string().nullable().optional(),
+        description: z.string().nullable().optional(),
+        released_at: z.string().nullable().optional(),
+        created_at: z.string().nullable().optional(),
+        upcoming_release: z.boolean().optional(),
+        _links: z.object({ self: z.string().optional() }).nullable().optional(),
+        assets: z
+          .object({
+            links: z.array(z.object({ name: z.string(), url: z.string() })).optional(),
+          })
+          .nullable()
+          .optional(),
+      }),
+    );
+    if (!r) return null;
+    return {
+      id: r.tag_name,
+      tagName: r.tag_name,
+      name: r.name ?? null,
+      body: r.description ?? null,
+      isDraft: false, // GitLab has no draft-release concept
+      isPrerelease: r.upcoming_release ?? false,
+      publishedAt_ms: isoToMs(r.released_at ?? r.created_at ?? undefined),
+      url: r._links?.self ?? "",
+      assets: (r.assets?.links ?? []).map(
+        (a): ForgeReleaseAsset => ({ name: a.name, url: a.url, sizeBytes: null }),
+      ),
+    };
+  }
+
+  async createGitLabRelease(input: {
+    owner: string;
+    name: string;
+    tagName: string;
+    releaseName?: string;
+    body?: string;
+    target?: string;
+  }): Promise<ForgeCreateReleaseResult> {
+    const glab = await this.glabPath();
+    if (!glab) return { release: null, error: "glab CLI not found" };
+    const args = ["release", "create", input.tagName, "-R", `${input.owner}/${input.name}`];
+    if (input.releaseName) args.push("--name", input.releaseName);
+    args.push("--notes", input.body ?? "");
+    if (input.target) args.push("--ref", input.target);
+    try {
+      await execCommand(glab, args, { timeout: GH_TIMEOUT_MS });
+    } catch (error) {
+      return { release: null, error: shortForgeError(error) };
+    }
+    return { release: await this.glabReleaseView(input.owner, input.name, input.tagName) };
+  }
+
+  async getGitLabRelease(input: {
+    owner: string;
+    name: string;
+    tagName: string;
+  }): Promise<ForgeRelease | null> {
+    return this.glabReleaseView(input.owner, input.name, input.tagName);
+  }
+
+  async createBitbucketRelease(_input: {
+    owner: string;
+    name: string;
+    tagName: string;
+  }): Promise<ForgeCreateReleaseResult> {
+    // Bitbucket Cloud has no releases API.
+    return { release: null, error: "unsupported" };
+  }
+
+  async getBitbucketRelease(input: {
+    owner: string;
+    name: string;
+    tagName: string;
+  }): Promise<ForgeRelease | null> {
+    // No releases API → synthesize a release from the tag (name = tag, body = null),
+    // matching listBitbucketReleases.
+    const base = this.bbRepo(input.owner, input.name);
+    const t = await this.bbJson(
+      `${base}/refs/tags/${encodeURIComponent(input.tagName)}`,
+      BbTagSchema,
+    );
+    if (!t) return null;
+    return {
+      id: t.name,
+      tagName: t.name,
+      name: t.name,
+      body: null,
+      isDraft: false,
+      isPrerelease: false,
+      publishedAt_ms: null,
+      url: t.links?.html?.href ?? "",
+      assets: [],
+    };
+  }
 }
 
 /** Map GitHub run status+conclusion onto the neutral pipeline status enum. */
@@ -2792,6 +3139,50 @@ function ghRunStatus(
   if (s === "queued" || s === "waiting" || s === "pending" || s === "requested") return "pending";
   if (s === "completed") return "success";
   return "unknown";
+}
+
+/** Result of a create-change-request across providers. */
+interface ForgeCreateChangeRequestResult {
+  number: number | null;
+  url: string | null;
+  error?: string | null;
+}
+/** Result of a create-release across providers. */
+interface ForgeCreateReleaseResult {
+  release: ForgeRelease | null;
+  error?: string | null;
+}
+
+/** Extract a short one-line error from a rejected execCommand (prefer stderr). */
+function shortForgeError(error: unknown): string {
+  const stderr = (error as { stderr?: unknown })?.stderr;
+  const raw =
+    typeof stderr === "string" && stderr.trim().length > 0
+      ? stderr
+      : ((error as { message?: unknown })?.message ?? "");
+  const line = String(raw)
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .find((l) => l.length > 0);
+  return (line ?? "command failed").slice(0, 500);
+}
+
+/** Last non-empty line of stdout (where `gh pr create` prints the PR URL). */
+function lastNonEmptyLine(text: string): string | null {
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+  return lines.length > 0 ? lines[lines.length - 1]! : null;
+}
+
+/** Last stdout line matching a pattern (glab prints extra lines around the MR URL). */
+function lastMatchingLine(text: string, pattern: RegExp): string | null {
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => pattern.test(l));
+  return lines.length > 0 ? lines[lines.length - 1]! : null;
 }
 
 export class ForgeHubSession {
@@ -3516,6 +3907,142 @@ export class ForgeHubSession {
           });
           return;
         }
+        case "forge.change_request.create.request": {
+          const result =
+            msg.repo.forge === "github"
+              ? await this.service.createChangeRequest({
+                  owner: msg.repo.owner,
+                  name: msg.repo.name,
+                  base: msg.base,
+                  head: msg.head,
+                  title: msg.title,
+                  body: msg.body,
+                  draft: msg.draft,
+                })
+              : msg.repo.forge === "gitlab"
+                ? await this.service.createGitLabChangeRequest({
+                    owner: msg.repo.owner,
+                    name: msg.repo.name,
+                    base: msg.base,
+                    head: msg.head,
+                    title: msg.title,
+                    body: msg.body,
+                    draft: msg.draft,
+                  })
+                : msg.repo.forge === "bitbucket"
+                  ? await this.service.createBitbucketChangeRequest({
+                      owner: msg.repo.owner,
+                      name: msg.repo.name,
+                      base: msg.base,
+                      head: msg.head,
+                      title: msg.title,
+                      body: msg.body,
+                    })
+                  : { number: null, url: null, error: "unsupported forge" };
+          this.emit({
+            type: "forge.change_request.create.response",
+            payload: {
+              number: result.number,
+              url: result.url,
+              error: result.error ?? null,
+              requestId: msg.requestId,
+            },
+          });
+          return;
+        }
+        case "forge.change_request.close.request": {
+          const ok =
+            msg.repo.forge === "github"
+              ? await this.service.closeChangeRequest({
+                  owner: msg.repo.owner,
+                  name: msg.repo.name,
+                  number: msg.number,
+                })
+              : msg.repo.forge === "gitlab"
+                ? await this.service.closeGitLabChangeRequest({
+                    owner: msg.repo.owner,
+                    name: msg.repo.name,
+                    number: msg.number,
+                  })
+                : msg.repo.forge === "bitbucket"
+                  ? await this.service.closeBitbucketChangeRequest({
+                      owner: msg.repo.owner,
+                      name: msg.repo.name,
+                      number: msg.number,
+                    })
+                  : false;
+          this.emit({
+            type: "forge.change_request.close.response",
+            payload: { ok, requestId: msg.requestId },
+          });
+          return;
+        }
+        case "forge.release.create.request": {
+          const result =
+            msg.repo.forge === "github"
+              ? await this.service.createRelease({
+                  owner: msg.repo.owner,
+                  name: msg.repo.name,
+                  tagName: msg.tagName,
+                  releaseName: msg.name,
+                  body: msg.body,
+                  draft: msg.draft,
+                  prerelease: msg.prerelease,
+                  target: msg.target,
+                })
+              : msg.repo.forge === "gitlab"
+                ? await this.service.createGitLabRelease({
+                    owner: msg.repo.owner,
+                    name: msg.repo.name,
+                    tagName: msg.tagName,
+                    releaseName: msg.name,
+                    body: msg.body,
+                    target: msg.target,
+                  })
+                : msg.repo.forge === "bitbucket"
+                  ? await this.service.createBitbucketRelease({
+                      owner: msg.repo.owner,
+                      name: msg.repo.name,
+                      tagName: msg.tagName,
+                    })
+                  : { release: null, error: "unsupported forge" };
+          this.emit({
+            type: "forge.release.create.response",
+            payload: {
+              release: result.release,
+              error: result.error ?? null,
+              requestId: msg.requestId,
+            },
+          });
+          return;
+        }
+        case "forge.release.get.request": {
+          const release =
+            msg.repo.forge === "github"
+              ? await this.service.getRelease({
+                  owner: msg.repo.owner,
+                  name: msg.repo.name,
+                  tagName: msg.tagName,
+                })
+              : msg.repo.forge === "gitlab"
+                ? await this.service.getGitLabRelease({
+                    owner: msg.repo.owner,
+                    name: msg.repo.name,
+                    tagName: msg.tagName,
+                  })
+                : msg.repo.forge === "bitbucket"
+                  ? await this.service.getBitbucketRelease({
+                      owner: msg.repo.owner,
+                      name: msg.repo.name,
+                      tagName: msg.tagName,
+                    })
+                  : null;
+          this.emit({
+            type: "forge.release.get.response",
+            payload: { release, requestId: msg.requestId },
+          });
+          return;
+        }
         // ---- CLI detect + guided auto-install (host-level; dispatch by `forge`) --
         case "forge.cli.status.request": {
           const status = await detectCliStatus(msg.forge);
@@ -3755,6 +4282,26 @@ export class ForgeHubSession {
         return this.emit({
           type: "forge.issue.close.response",
           payload: { ok: false, requestId: msg.requestId },
+        });
+      case "forge.change_request.create.request":
+        return this.emit({
+          type: "forge.change_request.create.response",
+          payload: { number: null, url: null, error: null, requestId: msg.requestId },
+        });
+      case "forge.change_request.close.request":
+        return this.emit({
+          type: "forge.change_request.close.response",
+          payload: { ok: false, requestId: msg.requestId },
+        });
+      case "forge.release.create.request":
+        return this.emit({
+          type: "forge.release.create.response",
+          payload: { release: null, error: null, requestId: msg.requestId },
+        });
+      case "forge.release.get.request":
+        return this.emit({
+          type: "forge.release.get.response",
+          payload: { release: null, requestId: msg.requestId },
         });
       case "forge.cli.status.request":
         return this.emit({

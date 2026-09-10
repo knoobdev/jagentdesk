@@ -2500,6 +2500,10 @@ export class Session {
       case "forge.issue.create.request":
       case "forge.issue.comment.request":
       case "forge.issue.close.request":
+      case "forge.change_request.create.request":
+      case "forge.change_request.close.request":
+      case "forge.release.create.request":
+      case "forge.release.get.request":
       case "forge.cli.status.request":
       case "forge.cli.install.request":
       case "forge.connection.login.request":

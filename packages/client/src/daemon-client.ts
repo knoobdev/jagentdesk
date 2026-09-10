@@ -90,6 +90,10 @@ import type {
   ForgeIssueCreateResponse,
   ForgeIssueCommentResponse,
   ForgeIssueCloseResponse,
+  ForgeChangeRequestCreateResponse,
+  ForgeChangeRequestCloseResponse,
+  ForgeReleaseCreateResponse,
+  ForgeReleaseGetResponse,
   ForgeCliStatusResponse,
   ForgeCliInstallResponse,
   ForgeCliInstallProgress,
@@ -528,6 +532,11 @@ type ForgeIssueListPayload = ForgeIssueListResponse["payload"];
 type ForgeIssueCreatePayload = ForgeIssueCreateResponse["payload"];
 type ForgeIssueCommentPayload = ForgeIssueCommentResponse["payload"];
 type ForgeIssueClosePayload = ForgeIssueCloseResponse["payload"];
+// Forge Hub (spec 19) — Milestone D payload aliases
+type ForgeChangeRequestCreatePayload = ForgeChangeRequestCreateResponse["payload"];
+type ForgeChangeRequestClosePayload = ForgeChangeRequestCloseResponse["payload"];
+type ForgeReleaseCreatePayload = ForgeReleaseCreateResponse["payload"];
+type ForgeReleaseGetPayload = ForgeReleaseGetResponse["payload"];
 type ForgeCliStatusPayload = ForgeCliStatusResponse["payload"];
 type ForgeCliInstallPayload = ForgeCliInstallResponse["payload"];
 type ForgeConnectionLoginResult = ForgeConnectionLoginResponse["payload"];
@@ -5075,6 +5084,94 @@ export class DaemonClient {
       message: { type: "forge.issue.close.request", repo: options.repo, number: options.number },
       responseType: "forge.issue.close.response",
       timeout: 30000,
+    });
+  }
+
+  async forgeCreateChangeRequest(
+    options: {
+      repo: ForgeRepoRef;
+      base: string;
+      head: string;
+      title: string;
+      body?: string;
+      draft?: boolean;
+    },
+    requestId?: string,
+  ): Promise<ForgeChangeRequestCreatePayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "forge.change_request.create.request",
+        repo: options.repo,
+        base: options.base,
+        head: options.head,
+        title: options.title,
+        body: options.body,
+        draft: options.draft,
+      },
+      responseType: "forge.change_request.create.response",
+      timeout: 30000,
+    });
+  }
+
+  async forgeCloseChangeRequest(
+    options: { repo: ForgeRepoRef; number: number },
+    requestId?: string,
+  ): Promise<ForgeChangeRequestClosePayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "forge.change_request.close.request",
+        repo: options.repo,
+        number: options.number,
+      },
+      responseType: "forge.change_request.close.response",
+      timeout: 30000,
+    });
+  }
+
+  async forgeCreateRelease(
+    options: {
+      repo: ForgeRepoRef;
+      tagName: string;
+      name?: string;
+      body?: string;
+      draft?: boolean;
+      prerelease?: boolean;
+      target?: string;
+    },
+    requestId?: string,
+  ): Promise<ForgeReleaseCreatePayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "forge.release.create.request",
+        repo: options.repo,
+        tagName: options.tagName,
+        name: options.name,
+        body: options.body,
+        draft: options.draft,
+        prerelease: options.prerelease,
+        target: options.target,
+      },
+      responseType: "forge.release.create.response",
+      timeout: 30000,
+    });
+  }
+
+  async forgeGetRelease(
+    options: { repo: ForgeRepoRef; tagName: string },
+    requestId?: string,
+  ): Promise<ForgeReleaseGetPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "forge.release.get.request",
+        repo: options.repo,
+        tagName: options.tagName,
+      },
+      responseType: "forge.release.get.response",
+      timeout: 20000,
     });
   }
 

@@ -112,6 +112,10 @@ const INBOUND_PERMISSION = {
   "forge.issue.create.request": "workspace.write",
   "forge.issue.comment.request": "workspace.write",
   "forge.issue.close.request": "workspace.write",
+  "forge.change_request.create.request": "workspace.write",
+  "forge.change_request.close.request": "workspace.write",
+  "forge.release.create.request": "workspace.write",
+  "forge.release.get.request": "workspace.read",
   "forge.cli.status.request": "workspace.read",
   "forge.cli.install.request": "workspace.write",
   // App-driven device-flow sign-in: request/cancel touch auth state (write); the
@@ -423,6 +427,10 @@ const OUTBOUND_PERMISSION = {
   "forge.issue.create.response": "workspace.write",
   "forge.issue.comment.response": "workspace.write",
   "forge.issue.close.response": "workspace.write",
+  "forge.change_request.create.response": "workspace.write",
+  "forge.change_request.close.response": "workspace.write",
+  "forge.release.create.response": "workspace.write",
+  "forge.release.get.response": "workspace.read",
   "forge.cli.status.response": "workspace.read",
   "forge.cli.install.response": "workspace.write",
   // UNSOLICITED outbound stream (mirrors agent_stream) → workspace.read.

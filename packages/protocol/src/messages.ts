@@ -2592,6 +2592,8 @@ export const ForgeReleaseSchema = z.object({
   id: z.string(),
   tagName: z.string(),
   name: z.string().nullable().optional(),
+  /** Release notes / body; only populated by the release-detail RPC (forge.release.get). */
+  body: z.string().nullable().optional(),
   isDraft: z.boolean().optional(),
   isPrerelease: z.boolean().optional(),
   publishedAt_ms: z.number().nullable().optional(),
@@ -2699,6 +2701,43 @@ export const ForgeConnectionLoginCancelRequestSchema = z.object({
   requestId: z.string(),
 });
 // ===== end Forge Hub Milestone C request schemas ================================
+
+// ===== Forge Hub — Milestone D schemas (create/close change request · create/get release) =
+export const ForgeChangeRequestCreateRequestSchema = z.object({
+  type: z.literal("forge.change_request.create.request"),
+  repo: ForgeRepoRefSchema,
+  base: z.string(),
+  head: z.string(),
+  title: z.string(),
+  body: z.string().optional(),
+  draft: z.boolean().optional(),
+  requestId: z.string(),
+});
+export const ForgeChangeRequestCloseRequestSchema = z.object({
+  type: z.literal("forge.change_request.close.request"),
+  repo: ForgeRepoRefSchema,
+  number: z.number().int(),
+  requestId: z.string(),
+});
+export const ForgeReleaseCreateRequestSchema = z.object({
+  type: z.literal("forge.release.create.request"),
+  repo: ForgeRepoRefSchema,
+  tagName: z.string(),
+  name: z.string().optional(),
+  body: z.string().optional(),
+  draft: z.boolean().optional(),
+  prerelease: z.boolean().optional(),
+  /** Commitish/branch the tag is cut from; forge default (HEAD of default branch) when omitted. */
+  target: z.string().optional(),
+  requestId: z.string(),
+});
+export const ForgeReleaseGetRequestSchema = z.object({
+  type: z.literal("forge.release.get.request"),
+  repo: ForgeRepoRefSchema,
+  tagName: z.string(),
+  requestId: z.string(),
+});
+// ===== end Forge Hub Milestone D request schemas ================================
 
 export const DirectorySuggestionsRequestSchema = z.object({
   type: z.literal("directory_suggestions_request"),
@@ -3739,6 +3778,10 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ForgeIssueCreateRequestSchema,
   ForgeIssueCommentRequestSchema,
   ForgeIssueCloseRequestSchema,
+  ForgeChangeRequestCreateRequestSchema,
+  ForgeChangeRequestCloseRequestSchema,
+  ForgeReleaseCreateRequestSchema,
+  ForgeReleaseGetRequestSchema,
   ForgeCliStatusRequestSchema,
   ForgeCliInstallRequestSchema,
   ForgeConnectionLoginRequestSchema,
@@ -6310,6 +6353,35 @@ export const ForgeConnectionLoginCancelResponseSchema = z.object({
 });
 // ===== end Forge Hub Milestone C responses ======================================
 
+// ===== Forge Hub — Milestone D responses ========================================
+export const ForgeChangeRequestCreateResponseSchema = z.object({
+  type: z.literal("forge.change_request.create.response"),
+  payload: z.object({
+    number: z.number().int().nullable(),
+    url: z.string().nullable(),
+    error: z.string().nullable().optional(),
+    requestId: z.string(),
+  }),
+});
+export const ForgeChangeRequestCloseResponseSchema = z.object({
+  type: z.literal("forge.change_request.close.response"),
+  payload: z.object({ ok: z.boolean(), requestId: z.string() }),
+});
+export const ForgeReleaseCreateResponseSchema = z.object({
+  type: z.literal("forge.release.create.response"),
+  // Single release object (kept as unknown to avoid union bloat; parse with ForgeReleaseSchema).
+  payload: z.object({
+    release: z.unknown().nullable(),
+    error: z.string().nullable().optional(),
+    requestId: z.string(),
+  }),
+});
+export const ForgeReleaseGetResponseSchema = z.object({
+  type: z.literal("forge.release.get.response"),
+  payload: z.object({ release: z.unknown().nullable(), requestId: z.string() }),
+});
+// ===== end Forge Hub Milestone D responses ======================================
+
 // COMPAT(githubSearchRpc): added in v0.1.106, remove after 2026-12-28 once
 // clients use forge.search.*.
 export const GitHubSearchResponseSchema = z.object({
@@ -7265,6 +7337,10 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ForgeIssueCreateResponseSchema,
   ForgeIssueCommentResponseSchema,
   ForgeIssueCloseResponseSchema,
+  ForgeChangeRequestCreateResponseSchema,
+  ForgeChangeRequestCloseResponseSchema,
+  ForgeReleaseCreateResponseSchema,
+  ForgeReleaseGetResponseSchema,
   ForgeCliStatusResponseSchema,
   ForgeCliInstallProgressSchema,
   ForgeCliInstallResponseSchema,
@@ -7817,6 +7893,17 @@ export type ForgeIssueCommentRequest = z.infer<typeof ForgeIssueCommentRequestSc
 export type ForgeIssueCommentResponse = z.infer<typeof ForgeIssueCommentResponseSchema>;
 export type ForgeIssueCloseRequest = z.infer<typeof ForgeIssueCloseRequestSchema>;
 export type ForgeIssueCloseResponse = z.infer<typeof ForgeIssueCloseResponseSchema>;
+// Forge Hub — Milestone D types
+export type ForgeChangeRequestCreateRequest = z.infer<typeof ForgeChangeRequestCreateRequestSchema>;
+export type ForgeChangeRequestCreateResponse = z.infer<
+  typeof ForgeChangeRequestCreateResponseSchema
+>;
+export type ForgeChangeRequestCloseRequest = z.infer<typeof ForgeChangeRequestCloseRequestSchema>;
+export type ForgeChangeRequestCloseResponse = z.infer<typeof ForgeChangeRequestCloseResponseSchema>;
+export type ForgeReleaseCreateRequest = z.infer<typeof ForgeReleaseCreateRequestSchema>;
+export type ForgeReleaseCreateResponse = z.infer<typeof ForgeReleaseCreateResponseSchema>;
+export type ForgeReleaseGetRequest = z.infer<typeof ForgeReleaseGetRequestSchema>;
+export type ForgeReleaseGetResponse = z.infer<typeof ForgeReleaseGetResponseSchema>;
 export type ForgeCliStatusRequest = z.infer<typeof ForgeCliStatusRequestSchema>;
 export type ForgeCliStatusResponse = z.infer<typeof ForgeCliStatusResponseSchema>;
 export type ForgeCliInstallRequest = z.infer<typeof ForgeCliInstallRequestSchema>;
