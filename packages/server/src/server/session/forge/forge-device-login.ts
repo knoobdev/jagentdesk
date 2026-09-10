@@ -151,7 +151,23 @@ export class ForgeDeviceLogin {
         requestId,
         binPath,
         emitProgress,
-        args: ["auth", "login", "--hostname", host || "gitlab.com", "--device"],
+        // Pass every setup flag glab would otherwise PROMPT for before printing
+        // the device code — without these it blocks on an interactive question
+        // ("What domains does this host use for the container registry…?") in a
+        // pty and never emits the code. Verified against glab 1.117.0 in node-pty.
+        args: [
+          "auth",
+          "login",
+          "--hostname",
+          host || "gitlab.com",
+          "--device",
+          "--git-protocol",
+          "https",
+          "--api-protocol",
+          "https",
+          "--container-registry-domains",
+          `registry.${host || "gitlab.com"}`,
+        ],
         // TERM=dumb: glab otherwise probes the terminal and blocks (see `term`).
         envOverlay: { BROWSER: "true", TERM: "dumb", NO_COLOR: "1" },
         term: "dumb",
