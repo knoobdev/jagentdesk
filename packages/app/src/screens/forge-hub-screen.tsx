@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Animated,
   Easing,
-  Linking,
   Pressable,
   ScrollView,
   Text,
@@ -77,6 +76,7 @@ import { useHostRuntimeClient, useHosts } from "@/runtime/host-runtime";
 import { useHostFeature } from "@/runtime/host-features";
 import { DiffViewer } from "@/components/diff-viewer";
 import { parseUnifiedDiff } from "@/utils/tool-call-parsers";
+import { openExternalUrl } from "@/utils/open-external-url";
 import { highlightDiffLines } from "@/utils/diff-highlight";
 import type { Theme } from "@/styles/theme";
 
@@ -456,6 +456,18 @@ function verificationHostLabel(uri: string | null | undefined): string {
   return authority || uri;
 }
 
+/** True only for a real http(s) URL — guards the "Open" button so glab flows that
+ * never emitted a verification URL don't render a button that opens nothing. */
+function isHttpUrl(value: string | null | undefined): boolean {
+  if (!value) return false;
+  try {
+    const u = new URL(value);
+    return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Detect the forge CLI on the daemon host and, when the daemon advertises the
  * capability, offer a one-tap guided install with a live progress bar. Rendered
@@ -505,6 +517,9 @@ function CliInstallSection({
   // superseded (aborted) login can't write state for the current selection.
   const loginControllerRef = useRef<AbortController | null>(null);
   const lastLoginLineRef = useRef<string | null>(null);
+  // The code we've already auto-opened the browser for, so the auto-open effect
+  // fires exactly once per one-time code (not on every re-render).
+  const autoOpenedCodeRef = useRef<string | null>(null);
 
   const displayName = getForgeDefinitionOrNeutral(forge).displayName;
 
@@ -604,6 +619,7 @@ function CliInstallSection({
     const controller = new AbortController();
     loginControllerRef.current = controller;
     lastLoginLineRef.current = null;
+    autoOpenedCodeRef.current = null;
     setSigningIn(true);
     setLoginError(null);
     setLoggedIn(false);
@@ -662,8 +678,22 @@ function CliInstallSection({
 
   const handleOpenVerification = useCallback(() => {
     const uri = loginProgress?.verificationUri;
-    if (uri) void Linking.openURL(uri);
+    if (uri) void openExternalUrl(uri);
   }, [loginProgress?.verificationUri]);
+
+  // As soon as the CLI hands us a one-time code, copy it and open the system
+  // browser (where the user is already signed in) so they just paste + approve —
+  // no hunting for a button. Fires once per code; the "Open again" button is the
+  // manual fallback. Only opens when the verification URL is a real http(s) URL.
+  useEffect(() => {
+    const code = loginProgress?.userCode;
+    const uri = loginProgress?.verificationUri;
+    if (!code || autoOpenedCodeRef.current === code) return;
+    autoOpenedCodeRef.current = code;
+    void Clipboard.setStringAsync(code);
+    if (mountedRef.current) setCopied(true);
+    if (uri && isHttpUrl(uri)) void openExternalUrl(uri);
+  }, [loginProgress?.userCode, loginProgress?.verificationUri]);
 
   // Abort a dangling login (and reset its UI) when the selected provider/host
   // changes mid-flight, and on unmount — so the daemon-side pty is always
@@ -673,6 +703,7 @@ function CliInstallSection({
     return () => {
       loginControllerRef.current?.abort();
       loginControllerRef.current = null;
+      autoOpenedCodeRef.current = null;
       if (!mountedRef.current) return;
       setSigningIn(false);
       setLoginProgress(null);
@@ -706,7 +737,11 @@ function CliInstallSection({
         <View style={styles.loginBox}>
           {signingIn && loginPhase === "awaiting_authorization" && loginProgress?.userCode ? (
             <View style={styles.loginCodeWrap}>
-              <Text style={styles.loginCodeInstruction}>Enter this code at {verificationHost}</Text>
+              <Text style={styles.loginCardTitle}>Approve in your browser</Text>
+              <Text style={styles.loginCodeInstruction}>
+                We opened {verificationHost} in your browser and copied the code below. Paste it
+                there and approve — then come back here.
+              </Text>
               <View style={styles.loginCodeBox}>
                 <Text style={styles.loginCode} selectable testID="forge-login-code">
                   {loginProgress.userCode}
@@ -717,26 +752,32 @@ function CliInstallSection({
                   testID="forge-login-copy"
                 >
                   <Copy size={13} color={theme.colors.foregroundMuted} />
-                  <Text style={styles.loginCopyText}>{copied ? "Copied" : "Copy code"}</Text>
+                  <Text style={styles.loginCopyText}>{copied ? "Copied" : "Copy"}</Text>
                 </Pressable>
               </View>
-              {loginProgress.verificationUri ? (
+              <View style={styles.loginWaitRow}>
+                <ActivityIndicator size="small" color={theme.colors.accent} />
+                <Text style={styles.loginStatusText}>Waiting for you to approve…</Text>
+              </View>
+              <View style={styles.loginActionRow}>
+                {isHttpUrl(loginProgress.verificationUri) ? (
+                  <Pressable
+                    style={[styles.btn, styles.btnPrimary, styles.loginActionBtn]}
+                    onPress={handleOpenVerification}
+                    testID="forge-login-open"
+                  >
+                    <ExternalLink size={14} color={theme.colors.accentForeground} />
+                    <Text style={styles.btnPrimaryText}>Open {verificationHost} again</Text>
+                  </Pressable>
+                ) : null}
                 <Pressable
-                  style={[styles.btn, styles.btnPrimary]}
-                  onPress={handleOpenVerification}
-                  testID="forge-login-open"
+                  style={[styles.btn, styles.btnGhost, styles.loginActionBtn]}
+                  onPress={handleCancelLogin}
+                  testID="forge-login-cancel"
                 >
-                  <ExternalLink size={14} color={theme.colors.accentForeground} />
-                  <Text style={styles.btnPrimaryText}>Open {verificationHost}</Text>
+                  <Text style={styles.btnGhostText}>Cancel</Text>
                 </Pressable>
-              ) : null}
-              <Pressable
-                style={[styles.btn, styles.btnGhost]}
-                onPress={handleCancelLogin}
-                testID="forge-login-cancel"
-              >
-                <Text style={styles.btnGhostText}>Cancel</Text>
-              </Pressable>
+              </View>
             </View>
           ) : signingIn ? (
             <View style={styles.loginStatusRow}>
@@ -1939,7 +1980,7 @@ function PullRequestDetail({
   }, [tab, commits, commitsLoading, commitsError, loadCommits]);
 
   const handleOpenExternal = useCallback(() => {
-    void Linking.openURL(cr.url);
+    void openExternalUrl(cr.url);
   }, [cr.url]);
 
   const setConversation = useCallback(() => setTab("conversation"), []);
@@ -2837,7 +2878,7 @@ function ArtifactsPanel({
           repo: repoRef(repo),
           artifactId: artifact.id,
         });
-        if (res.url) void Linking.openURL(res.url);
+        if (res.url) void openExternalUrl(res.url);
         else setNote(`No download URL for ${artifact.name}.`);
       } catch (e: unknown) {
         setNote(e instanceof Error ? e.message : "Couldn't download the artifact.");
@@ -3041,7 +3082,7 @@ function PipelinesView({
 
 function ReleaseRow({ release }: { release: ForgeRelease }) {
   const { theme } = useUnistyles();
-  const handleOpen = useCallback(() => void Linking.openURL(release.url), [release.url]);
+  const handleOpen = useCallback(() => void openExternalUrl(release.url), [release.url]);
   const published = formatRelativeMs(release.publishedAt_ms);
   return (
     <View style={styles.releaseCard}>
@@ -3101,7 +3142,7 @@ function AssetRow({
   sizeBytes?: number | null;
 }) {
   const { theme } = useUnistyles();
-  const handleOpen = useCallback(() => void Linking.openURL(url), [url]);
+  const handleOpen = useCallback(() => void openExternalUrl(url), [url]);
   const size = formatBytes(sizeBytes);
   return (
     <Pressable style={styles.assetRow} onPress={handleOpen} testID={`forge-asset-${name}`}>
@@ -3118,7 +3159,7 @@ function AssetRow({
 function TagRow({ tag }: { tag: ForgeTag }) {
   const { theme } = useUnistyles();
   const handleOpen = useCallback(() => {
-    if (tag.url) void Linking.openURL(tag.url);
+    if (tag.url) void openExternalUrl(tag.url);
   }, [tag.url]);
   return (
     <View style={styles.row}>
@@ -3302,7 +3343,7 @@ function IssueDetail({
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
 
-  const handleOpenExternal = useCallback(() => void Linking.openURL(issue.url), [issue.url]);
+  const handleOpenExternal = useCallback(() => void openExternalUrl(issue.url), [issue.url]);
 
   const submitComment = useCallback(async () => {
     const body = comment.trim();
@@ -4446,9 +4487,15 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.xs,
     color: theme.colors.foregroundMuted,
   },
+  loginCardTitle: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.foreground,
+  },
   loginCodeBox: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
     flexWrap: "wrap",
     gap: theme.spacing[3],
     paddingHorizontal: theme.spacing[3],
@@ -4457,6 +4504,20 @@ const styles = StyleSheet.create((theme) => ({
     borderWidth: theme.borderWidth[1],
     borderColor: theme.colors.borderAccent,
     backgroundColor: theme.colors.surface0,
+  },
+  loginWaitRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+  },
+  loginActionRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: theme.spacing[2],
+  },
+  loginActionBtn: {
+    flexGrow: 1,
+    flexBasis: 0,
   },
   loginCode: {
     fontSize: theme.fontSize["2xl"],
