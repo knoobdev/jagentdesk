@@ -91,7 +91,21 @@ forge, webhook mặc định).
     aggregate connections/repos. Server typecheck xanh. Ghi chú giới hạn trong code (MR list
     thiếu review/CI rollup; pipeline detail thiếu ref/sha/url; onlyFailed không có analogue).
   - **Mốc B HOÀN CHỈNH** cho GitHub + GitLab (compile/typecheck verified). Toàn bộ 4 package xanh.
-- [ ] Mốc C (ngoài "hết B"): Bitbucket REST adapter, auto-merge, artifact, release, issue.
+- Mốc C (Bitbucket · auto-merge · artifact · release · tag · issue):
+  - [x] protocol + client + manifest (d952ab414): entry `bitbucket`; 9 RPC dot-namespace
+    (`forge.change_request.set_auto_merge`, `forge.artifact.list/download`, `forge.release.list`,
+    `forge.tag.list`, `forge.issue.list/create/comment/close`) + item schemas
+    (ForgeArtifact/ReleaseAsset/Release/Tag/Issue) + DaemonClient methods + union. Protocol/client xanh.
+  - [x] server (69dfe297c): Bitbucket provider REST 2.0 + Bearer token (FileSecretStore, không CLI),
+    full A+B+C surface; C methods cho gh/glab/bitbucket; token-connection persistence
+    (`connections.json` atomic index + probe); 9 dispatch cases; permission entries; advertise
+    forgeHubReleases/forgeHubIssues. Server typecheck xanh.
+  - [x] app UI (d7d44d551): auto-merge checkbox (forgeHubReview), Releases sub-nav (releases+tags+
+    assets, forgeHubReleases), Issues sub-nav (list/create/comment/close, forgeHubIssues), artifacts
+    panel trong pipeline run detail (forgeHubReleases). Gating §19.12 (không dead tab). App typecheck xanh.
+  - **Mốc C HOÀN CHỈNH** (typecheck + logic, cả 4 package xanh). Caveat provider ghi trong code + hiện trên UI:
+    Bitbucket không có API auto-merge/artifact/rerun (releases synth từ tag, issue tracker có thể tắt);
+    GitLab artifact job-scoped (không URL/expiry); gh issue thiếu commentCount.
 
 ## Mức verify (trung thực)
 Tất cả tầng: typecheck + logic. CHƯA e2e thật (cần tài khoản GitHub/GitLab thật + bản build đóng
