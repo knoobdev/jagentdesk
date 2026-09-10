@@ -14,6 +14,7 @@ import {
   Ban,
   Check,
   ChevronDown,
+  ChevronRight,
   CircleAlert,
   CircleDot,
   Code,
@@ -1513,15 +1514,32 @@ function StateFilterButton({
 
 type DetailTab = "conversation" | "commits" | "files" | "checks";
 
-function FileDiffCard({ file }: { file: ForgeChangeRequestFile }) {
+// A changed file: a clickable header (path + +/-) that expands its diff. Collapsed
+// by default so a many-file commit/PR reads as a tidy file list instead of one
+// endless scroll — tap a file to view its diff.
+function FileDiffCard({
+  file,
+  defaultOpen = false,
+}: {
+  file: ForgeChangeRequestFile;
+  defaultOpen?: boolean;
+}) {
+  const { theme } = useUnistyles();
+  const [open, setOpen] = useState(defaultOpen);
+  const toggle = useCallback(() => setOpen((v) => !v), []);
   const diffLines = useMemo(() => {
-    if (!file.patch) return null;
+    if (!open || !file.patch) return null;
     return highlightDiffLines(parseUnifiedDiff(file.patch), file.path);
-  }, [file.patch, file.path]);
+  }, [open, file.patch, file.path]);
 
   return (
     <View style={styles.fileCard}>
-      <View style={styles.fileHeader}>
+      <Pressable style={styles.fileHeader} onPress={toggle} testID={`forge-file-${file.path}`}>
+        {open ? (
+          <ChevronDown size={14} color={theme.colors.foregroundMuted} />
+        ) : (
+          <ChevronRight size={14} color={theme.colors.foregroundMuted} />
+        )}
         <Text style={styles.fileName} numberOfLines={1}>
           {file.previousPath && file.status === "renamed"
             ? `${file.previousPath} → ${file.path}`
@@ -1530,12 +1548,14 @@ function FileDiffCard({ file }: { file: ForgeChangeRequestFile }) {
         <View style={styles.grow} />
         <Text style={styles.diffAdd}>+{file.additions}</Text>
         <Text style={styles.diffDel}>−{file.deletions}</Text>
-      </View>
-      {diffLines ? (
-        <DiffViewer diffLines={diffLines} maxHeight={420} />
-      ) : (
-        <Text style={styles.fileEmpty}>No diff available for this file.</Text>
-      )}
+      </Pressable>
+      {open ? (
+        diffLines ? (
+          <DiffViewer diffLines={diffLines} maxHeight={420} />
+        ) : (
+          <Text style={styles.fileEmpty}>No diff available for this file.</Text>
+        )
+      ) : null}
     </View>
   );
 }
@@ -1606,8 +1626,13 @@ function DiffFileList({
   }
   return (
     <View style={styles.filesPane}>
-      {files.map((file) => (
-        <FileDiffCard key={file.path} file={file} />
+      {files.length > 1 ? (
+        <Text style={styles.sectionTitle}>
+          {files.length} files changed — tap a file to view its diff
+        </Text>
+      ) : null}
+      {files.map((file, index) => (
+        <FileDiffCard key={file.path} file={file} defaultOpen={files.length === 1 || index === 0} />
       ))}
     </View>
   );
@@ -5174,8 +5199,9 @@ const styles = StyleSheet.create((theme) => ({
     position: "absolute",
     top: 40,
     left: 0,
-    width: 280,
-    maxWidth: "90%",
+    // Fixed width: the old maxWidth:"90%" resolved against the narrow picker
+    // button box, squeezing the sheet to ~100px and truncating branch names.
+    width: 300,
     borderRadius: theme.borderRadius.lg,
     borderWidth: theme.borderWidth[1],
     borderColor: theme.colors.borderAccent,
