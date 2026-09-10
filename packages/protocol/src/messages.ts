@@ -2305,6 +2305,115 @@ export const GitHubSearchRequestSchema = z.object({
   requestId: z.string(),
 });
 
+// ===== Forge Hub (spec 19 / ADR-0015) — Milestone A schemas =====================
+// Standalone remote-forge management (NOT workspace-attached): these RPCs address a
+// repo by forge+owner+name, never a `cwd`. Neutral shapes over the ForgeService
+// registry (github/gitlab/gitea + a future bitbucket REST adapter).
+
+export const ForgeConnectionSchema = z.object({
+  /** Stable connection id assigned by the daemon. */
+  id: z.string(),
+  /** Forge registry id: "github" | "gitlab" | "bitbucket" | "gitea" | ... */
+  forge: z.string(),
+  host: z.string(),
+  /** Account login/workspace as the forge reports it; null before first probe. */
+  account: z.string().nullable(),
+  /** How the daemon authenticates: a CLI (gh/glab/tea) or a stored token. */
+  method: z.enum(["cli", "token"]),
+  /** Neutral auth state (mirrors ForgeAuthState) plus token-expiry surface (19.3.4). */
+  authState: z.enum(["authenticated", "token_expiring", "unauthenticated", "cli_missing", "error"]),
+  scopes: z.array(z.string()).optional(),
+  /** Epoch ms when a stored token expires; null/absent for CLI or non-expiring. */
+  tokenExpiresAt_ms: z.number().nullable().optional(),
+});
+
+export const ForgeRepoSchema = z.object({
+  forge: z.string(),
+  owner: z.string(),
+  name: z.string(),
+  description: z.string().nullable().optional(),
+  defaultBranch: z.string().nullable().optional(),
+  visibility: z.enum(["public", "private", "internal", "unknown"]).optional(),
+  openChangeRequests: z.number().int().optional(),
+  /** Checks status of the default branch tip, if cheaply known (19.6.6). */
+  checksStatus: z.enum(["none", "pending", "success", "failure"]).optional(),
+  updatedAt_ms: z.number().nullable().optional(),
+  url: z.string(),
+});
+
+/** A repo coordinate used by every repo-scoped Forge Hub RPC. */
+export const ForgeRepoRefSchema = z.object({
+  forge: z.string(),
+  owner: z.string(),
+  name: z.string(),
+});
+
+export const ForgeChangeRequestSummarySchema = z.object({
+  number: z.number().int(),
+  title: z.string(),
+  url: z.string(),
+  state: z.enum(["open", "draft", "merged", "closed"]),
+  authorLogin: z.string().nullable().optional(),
+  headRef: z.string().optional(),
+  baseRef: z.string().optional(),
+  labels: z.array(z.string()).optional(),
+  reviewDecision: z.enum(["approved", "changes_requested", "pending"]).nullable().optional(),
+  checksStatus: z.enum(["none", "pending", "success", "failure"]).optional(),
+  updatedAt_ms: z.number().nullable().optional(),
+});
+
+export const ForgeChangeRequestFileSchema = z.object({
+  path: z.string(),
+  /** Previous path when the file was renamed. */
+  previousPath: z.string().nullable().optional(),
+  status: z.enum(["added", "modified", "removed", "renamed"]),
+  additions: z.number().int(),
+  deletions: z.number().int(),
+  /** Unified diff patch for this file; null when the forge omits it (binary/too large). */
+  patch: z.string().nullable().optional(),
+});
+
+export const ForgeConnectionListRequestSchema = z.object({
+  type: z.literal("forge.connection.list.request"),
+  requestId: z.string(),
+});
+export const ForgeConnectionAddRequestSchema = z.object({
+  type: z.literal("forge.connection.add.request"),
+  forge: z.string(),
+  host: z.string().optional(),
+  method: z.enum(["cli", "token"]),
+  /** Only for method "token"; stored encrypted in the daemon, never echoed back. */
+  token: z.string().optional(),
+  requestId: z.string(),
+});
+export const ForgeConnectionRemoveRequestSchema = z.object({
+  type: z.literal("forge.connection.remove.request"),
+  connectionId: z.string(),
+  requestId: z.string(),
+});
+export const ForgeRepoListRequestSchema = z.object({
+  type: z.literal("forge.repo.list.request"),
+  /** Restrict to one connection; omit to aggregate across all connections. */
+  connectionId: z.string().optional(),
+  query: z.string().optional(),
+  limit: z.number().int().min(1).max(100).optional(),
+  requestId: z.string(),
+});
+export const ForgeChangeRequestListRequestSchema = z.object({
+  type: z.literal("forge.change_request.list.request"),
+  repo: ForgeRepoRefSchema,
+  state: z.enum(["open", "draft", "merged", "closed", "all"]).optional(),
+  limit: z.number().int().min(1).max(100).optional(),
+  requestId: z.string(),
+});
+export const ForgeChangeRequestFilesRequestSchema = z.object({
+  type: z.literal("forge.change_request.files.request"),
+  repo: ForgeRepoRefSchema,
+  number: z.number().int(),
+  requestId: z.string(),
+});
+// ===== end Forge Hub Milestone A request schemas ================================
+
 export const DirectorySuggestionsRequestSchema = z.object({
   type: z.literal("directory_suggestions_request"),
   query: z.string(),
@@ -3316,6 +3425,12 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ValidateBranchRequestSchema,
   BranchSuggestionsRequestSchema,
   ForgeSearchRequestSchema,
+  ForgeConnectionListRequestSchema,
+  ForgeConnectionAddRequestSchema,
+  ForgeConnectionRemoveRequestSchema,
+  ForgeRepoListRequestSchema,
+  ForgeChangeRequestListRequestSchema,
+  ForgeChangeRequestFilesRequestSchema,
   GitHubSearchRequestSchema,
   DirectorySuggestionsRequestSchema,
   JAgentDeskWorktreeListRequestSchema,
@@ -3698,6 +3813,18 @@ export const ServerInfoStatusPayloadSchema = z
         pluginLogs: z.boolean().optional(),
         // COMPAT(pluginThemes): added in v0.5.0, remove gate after 2027-08-20.
         pluginThemes: z.boolean().optional(),
+        // Forge Hub (spec 19 / ADR-0015): standalone remote forge management surface.
+        // Advertised per release milestone so old clients don't call the new RPCs blind.
+        // NOTE: spec 07 describes capabilities as an array of strings, but the daemon
+        // still uses this Paseo-style `features` boolean object (see forgeProviders /
+        // forgeSearch above); Forge Hub follows the working code pattern. Aligning the
+        // wire to spec 07's capability array is a separate refactor (out of scope here).
+        forgeHub: z.boolean().optional(), // Milestone A: framework + connections + repos + PR read
+        forgeHubCode: z.boolean().optional(), // Milestone B: branches/commits/compare
+        forgeHubReview: z.boolean().optional(), // Milestone B: approve/request-changes/comment + merge
+        forgeHubPipelines: z.boolean().optional(), // Milestone B: CI runs/jobs/logs/rerun/cancel
+        forgeHubReleases: z.boolean().optional(), // Milestone C: releases/tags/artifacts
+        forgeHubIssues: z.boolean().optional(), // Milestone B/C: issues create/comment/close
       })
       .optional(),
   })
@@ -5655,6 +5782,40 @@ export const ForgeSearchResponseSchema = z.object({
   payload: ForgeSearchResponsePayloadSchema,
 });
 
+// ===== Forge Hub (spec 19 / ADR-0015) — Milestone A responses ===================
+export const ForgeConnectionListResponseSchema = z.object({
+  type: z.literal("forge.connection.list.response"),
+  payload: z.object({ connections: z.array(ForgeConnectionSchema) }),
+});
+export const ForgeConnectionAddResponseSchema = z.object({
+  type: z.literal("forge.connection.add.response"),
+  payload: z.object({ connection: ForgeConnectionSchema }),
+});
+export const ForgeConnectionRemoveResponseSchema = z.object({
+  type: z.literal("forge.connection.remove.response"),
+  payload: z.object({ removed: z.boolean() }),
+});
+export const ForgeRepoListResponseSchema = z.object({
+  type: z.literal("forge.repo.list.response"),
+  payload: z.object({
+    repos: z.array(ForgeRepoSchema),
+    /** True when a query matched more than `limit`; client can page/refine. */
+    truncated: z.boolean().optional(),
+  }),
+});
+export const ForgeChangeRequestListResponseSchema = z.object({
+  type: z.literal("forge.change_request.list.response"),
+  payload: z.object({ changeRequests: z.array(ForgeChangeRequestSummarySchema) }),
+});
+export const ForgeChangeRequestFilesResponseSchema = z.object({
+  type: z.literal("forge.change_request.files.response"),
+  payload: z.object({
+    files: z.array(ForgeChangeRequestFileSchema),
+    truncated: z.boolean().optional(),
+  }),
+});
+// ===== end Forge Hub Milestone A responses ======================================
+
 // COMPAT(githubSearchRpc): added in v0.1.106, remove after 2026-12-28 once
 // clients use forge.search.*.
 export const GitHubSearchResponseSchema = z.object({
@@ -6582,6 +6743,12 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ValidateBranchResponseSchema,
   BranchSuggestionsResponseSchema,
   ForgeSearchResponseSchema,
+  ForgeConnectionListResponseSchema,
+  ForgeConnectionAddResponseSchema,
+  ForgeConnectionRemoveResponseSchema,
+  ForgeRepoListResponseSchema,
+  ForgeChangeRequestListResponseSchema,
+  ForgeChangeRequestFilesResponseSchema,
   GitHubSearchResponseSchema,
   DirectorySuggestionsResponseSchema,
   JAgentDeskWorktreeListResponseSchema,
