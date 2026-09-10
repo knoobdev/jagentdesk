@@ -154,6 +154,166 @@ function fileStatus(s: string): ForgeChangeRequestFile["status"] {
   return "modified";
 }
 
+// ---- glab (GitLab REST v4) JSON shapes (loose; we only read what we map) --------
+const GlRepoSchema = z.object({
+  path_with_namespace: z.string(),
+  description: z.string().nullable().optional(),
+  default_branch: z.string().nullable().optional(),
+  visibility: z.string().optional(),
+  last_activity_at: z.string().optional(),
+  web_url: z.string(),
+});
+const GlMrSchema = z.object({
+  iid: z.number(),
+  title: z.string(),
+  web_url: z.string(),
+  state: z.string(),
+  draft: z.boolean().optional(),
+  work_in_progress: z.boolean().optional(),
+  source_branch: z.string().optional(),
+  target_branch: z.string().optional(),
+  labels: z.array(z.string()).optional(),
+  updated_at: z.string().optional(),
+  author: z.object({ username: z.string() }).nullable().optional(),
+});
+const GlChangeSchema = z.object({
+  old_path: z.string(),
+  new_path: z.string(),
+  new_file: z.boolean().optional(),
+  deleted_file: z.boolean().optional(),
+  renamed_file: z.boolean().optional(),
+  diff: z.string().optional(),
+});
+const GlBranchSchema = z.object({
+  name: z.string(),
+  default: z.boolean().optional(),
+  protected: z.boolean().optional(),
+  commit: z.object({ id: z.string() }).nullable().optional(),
+});
+const GlCommitSchema = z.object({
+  id: z.string(),
+  title: z.string().nullable().optional(),
+  message: z.string().optional(),
+  author_name: z.string().nullable().optional(),
+  authored_date: z.string().optional(),
+});
+const GlPipelineSchema = z.object({
+  id: z.number(),
+  ref: z.string().nullable().optional(),
+  sha: z.string().nullable().optional(),
+  status: z.string().optional(),
+  source: z.string().nullable().optional(),
+  web_url: z.string(),
+  created_at: z.string().optional(),
+});
+const GlJobSchema = z.object({
+  id: z.number(),
+  name: z.string(),
+  stage: z.string(),
+  status: z.string().optional(),
+  duration: z.number().nullable().optional(),
+  web_url: z.string().nullable().optional(),
+});
+
+/** URL-encoded GitLab project id ("owner/name"). */
+function glProjectId(owner: string, name: string): string {
+  return encodeURIComponent(`${owner}/${name}`);
+}
+
+/** Count added/removed lines in a GitLab unified diff body (header lines excluded). */
+function countDiffLines(diff: string | undefined): { additions: number; deletions: number } {
+  if (!diff) return { additions: 0, deletions: 0 };
+  let additions = 0;
+  let deletions = 0;
+  for (const line of diff.split("\n")) {
+    if (line.startsWith("+") && !line.startsWith("+++")) additions++;
+    else if (line.startsWith("-") && !line.startsWith("---")) deletions++;
+  }
+  return { additions, deletions };
+}
+
+/** Map a GitLab MR/compare change entry onto the neutral file shape. */
+function glChangeToFile(c: z.infer<typeof GlChangeSchema>): ForgeChangeRequestFile {
+  const status: ForgeChangeRequestFile["status"] = c.new_file
+    ? "added"
+    : c.deleted_file
+      ? "removed"
+      : c.renamed_file
+        ? "renamed"
+        : "modified";
+  const { additions, deletions } = countDiffLines(c.diff);
+  return {
+    path: c.new_path,
+    previousPath: c.renamed_file ? c.old_path : null,
+    status,
+    additions,
+    deletions,
+    patch: c.diff ?? null,
+  };
+}
+
+/** Map a GitLab commit onto the neutral commit shape (GitLab commits carry no login). */
+function glCommit(c: z.infer<typeof GlCommitSchema>): ForgeCommit {
+  return {
+    sha: c.id,
+    subject: c.title ?? c.message?.split("\n", 1)[0] ?? "",
+    authorLogin: null,
+    authorName: c.author_name ?? null,
+    committedAt_ms: isoToMs(c.authored_date),
+  };
+}
+
+function glMrState(state: string, draft: boolean): ForgeChangeRequestSummary["state"] {
+  const s = state.toLowerCase();
+  if (s === "merged") return "merged";
+  if (s === "closed" || s === "locked") return "closed";
+  return draft ? "draft" : "open";
+}
+
+/** Normalize a GitLab pipeline/job status onto the neutral pipeline status enum. */
+function glPipelineStatus(status: string | undefined): ForgePipelineRun["status"] {
+  switch ((status ?? "").toLowerCase()) {
+    case "success":
+      return "success";
+    case "failed":
+      return "failed";
+    case "running":
+      return "running";
+    case "pending":
+    case "waiting_for_resource":
+    case "preparing":
+    case "scheduled":
+      return "pending";
+    case "canceled":
+    case "cancelled":
+      return "canceled";
+    case "skipped":
+      return "skipped";
+    case "manual":
+      return "manual";
+    case "created":
+      return "created";
+    default:
+      return "unknown";
+  }
+}
+
+/** Aggregate job statuses into one stage/pipeline status
+ *  (failed > running > pending > manual > canceled > skipped > success). */
+function aggregateGlStatus(statuses: ForgePipelineRun["status"][]): ForgePipelineRun["status"] {
+  const precedence: ForgePipelineRun["status"][] = [
+    "failed",
+    "running",
+    "pending",
+    "manual",
+    "canceled",
+    "skipped",
+    "success",
+  ];
+  for (const s of precedence) if (statuses.includes(s)) return s;
+  return statuses[0] ?? "unknown";
+}
+
 export class ForgeHubService {
   constructor(private readonly secretStore: SecretStore) {}
 
@@ -196,6 +356,30 @@ export class ForgeHubService {
         forge: "github",
         host: "github.com",
         account: login,
+        method: "cli",
+        authState: "authenticated",
+      });
+    }
+    // GitLab via glab: a connection exists when `glab api user` resolves a username.
+    let glUsername: string | null = null;
+    const glab = await this.glabPath();
+    if (glab) {
+      try {
+        const res = await execCommand(glab, ["api", "user"], { timeout: GH_TIMEOUT_MS });
+        const parsed = z
+          .object({ username: z.string().optional() })
+          .safeParse(JSON.parse(res.stdout));
+        if (parsed.success && parsed.data.username) glUsername = parsed.data.username;
+      } catch {
+        /* glab missing or not authenticated */
+      }
+    }
+    if (glUsername) {
+      out.push({
+        id: "gitlab:gitlab.com",
+        forge: "gitlab",
+        host: "gitlab.com",
+        account: glUsername,
         method: "cli",
         authState: "authenticated",
       });
@@ -255,7 +439,16 @@ export class ForgeHubService {
     return true;
   }
 
+  /** Aggregate repos across every authenticated provider (GitHub + GitLab). */
   async listRepos(input: { query?: string; limit?: number }): Promise<ForgeRepo[]> {
+    const [github, gitlab] = await Promise.all([
+      this.listGitHubRepos(input),
+      this.listGitLabRepos(input),
+    ]);
+    return [...github, ...gitlab];
+  }
+
+  private async listGitHubRepos(input: { query?: string; limit?: number }): Promise<ForgeRepo[]> {
     const limit = input.limit ?? 50;
     const args = [
       "repo",
@@ -691,6 +884,345 @@ export class ForgeHubService {
   async cancelPipeline(input: { owner: string; name: string; runId: string }): Promise<boolean> {
     return this.ghOk(["run", "cancel", input.runId, "--repo", `${input.owner}/${input.name}`]);
   }
+
+  // ===== GitLab provider (glab CLI, REST v4) ====================================
+  // `glab api <path>` is uniform: it hits the REST v4 endpoint and rejects on a
+  // non-zero exit, so a resolved result means success (mirrors the gh helpers).
+
+  private async glabPath(): Promise<string | null> {
+    return findExecutable("glab");
+  }
+
+  /** Run `glab` and return parsed JSON stdout, or null on any failure. */
+  private async glabJson<T>(args: string[], schema: z.ZodType<T>): Promise<T | null> {
+    const glab = await this.glabPath();
+    if (!glab) return null;
+    try {
+      const res = await execCommand(glab, args, { timeout: GH_TIMEOUT_MS });
+      return schema.parse(JSON.parse(res.stdout));
+    } catch {
+      return null;
+    }
+  }
+
+  /** Run `glab` for its side effect; resolve true on success, false on any failure. */
+  private async glabOk(args: string[]): Promise<boolean> {
+    const glab = await this.glabPath();
+    if (!glab) return false;
+    try {
+      await execCommand(glab, args, { timeout: GH_TIMEOUT_MS });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Run `glab` and return raw stdout, or null on failure. */
+  private async glabText(args: string[]): Promise<string | null> {
+    const glab = await this.glabPath();
+    if (!glab) return null;
+    try {
+      const res = await execCommand(glab, args, { timeout: GH_TIMEOUT_MS });
+      return res.stdout;
+    } catch {
+      return null;
+    }
+  }
+
+  async listGitLabRepos(input: { query?: string; limit?: number }): Promise<ForgeRepo[]> {
+    const limit = input.limit ?? 50;
+    const rows = await this.glabJson(
+      ["api", `projects?membership=true&per_page=${limit}&order_by=last_activity_at`],
+      z.array(GlRepoSchema),
+    );
+    if (!rows) return [];
+    const query = input.query?.trim().toLowerCase();
+    return rows
+      .filter((r) => !query || r.path_with_namespace.toLowerCase().includes(query))
+      .map((r): ForgeRepo => {
+        const idx = r.path_with_namespace.lastIndexOf("/");
+        const owner = idx >= 0 ? r.path_with_namespace.slice(0, idx) : "";
+        const name = idx >= 0 ? r.path_with_namespace.slice(idx + 1) : r.path_with_namespace;
+        return {
+          forge: "gitlab",
+          owner,
+          name,
+          description: r.description ?? null,
+          defaultBranch: r.default_branch ?? null,
+          visibility: mapVisibility(r.visibility, undefined),
+          updatedAt_ms: isoToMs(r.last_activity_at),
+          url: r.web_url,
+        };
+      });
+  }
+
+  async listGitLabChangeRequests(input: {
+    owner: string;
+    name: string;
+    state?: "open" | "draft" | "merged" | "closed" | "all";
+    limit?: number;
+  }): Promise<ForgeChangeRequestSummary[]> {
+    const limit = input.limit ?? 50;
+    // GitLab MR states: opened|closed|merged|all (draft is a flag, not a state).
+    const glState =
+      input.state === "merged"
+        ? "merged"
+        : input.state === "closed"
+          ? "closed"
+          : input.state === "all"
+            ? "all"
+            : "opened";
+    const enc = glProjectId(input.owner, input.name);
+    const rows = await this.glabJson(
+      ["api", `projects/${enc}/merge_requests?state=${glState}&per_page=${limit}`],
+      z.array(GlMrSchema),
+    );
+    if (!rows) return [];
+    return rows
+      .filter((r) => (input.state === "draft" ? (r.draft ?? r.work_in_progress) === true : true))
+      .map((r): ForgeChangeRequestSummary => {
+        const draft = (r.draft ?? r.work_in_progress) === true;
+        return {
+          number: r.iid,
+          title: r.title,
+          url: r.web_url,
+          state: glMrState(r.state, draft),
+          authorLogin: r.author?.username ?? null,
+          headRef: r.source_branch,
+          baseRef: r.target_branch,
+          labels: r.labels ?? [],
+          reviewDecision: null,
+          checksStatus: "none",
+          updatedAt_ms: isoToMs(r.updated_at),
+        };
+      });
+  }
+
+  async getGitLabChangeRequestFiles(input: {
+    owner: string;
+    name: string;
+    number: number;
+  }): Promise<{ files: ForgeChangeRequestFile[]; truncated: boolean }> {
+    const enc = glProjectId(input.owner, input.name);
+    const res = await this.glabJson(
+      ["api", `projects/${enc}/merge_requests/${input.number}/changes`],
+      z.object({ changes: z.array(GlChangeSchema).optional().default([]) }),
+    );
+    if (!res) return { files: [], truncated: false };
+    return { files: res.changes.map(glChangeToFile), truncated: false };
+  }
+
+  async listGitLabBranches(input: {
+    owner: string;
+    name: string;
+    limit?: number;
+  }): Promise<ForgeBranch[]> {
+    const enc = glProjectId(input.owner, input.name);
+    const rows = await this.glabJson(
+      ["api", `projects/${enc}/repository/branches?per_page=${input.limit ?? 100}`],
+      z.array(GlBranchSchema),
+    );
+    if (!rows) return [];
+    return rows.map(
+      (b): ForgeBranch => ({
+        name: b.name,
+        isDefault: b.default,
+        commitSha: b.commit?.id ?? null,
+        protected: b.protected,
+      }),
+    );
+  }
+
+  async listGitLabCommits(input: {
+    owner: string;
+    name: string;
+    ref?: string;
+    limit?: number;
+  }): Promise<ForgeCommit[]> {
+    const enc = glProjectId(input.owner, input.name);
+    const per = input.limit ?? 50;
+    const qs = `per_page=${per}${input.ref ? `&ref_name=${encodeURIComponent(input.ref)}` : ""}`;
+    const rows = await this.glabJson(
+      ["api", `projects/${enc}/repository/commits?${qs}`],
+      z.array(GlCommitSchema),
+    );
+    if (!rows) return [];
+    return rows.map(glCommit);
+  }
+
+  async compareGitLabCommits(input: {
+    owner: string;
+    name: string;
+    base: string;
+    head: string;
+  }): Promise<{ files: ForgeChangeRequestFile[]; commits: ForgeCommit[] }> {
+    const enc = glProjectId(input.owner, input.name);
+    const res = await this.glabJson(
+      [
+        "api",
+        `projects/${enc}/repository/compare?from=${encodeURIComponent(input.base)}&to=${encodeURIComponent(input.head)}`,
+      ],
+      z.object({
+        diffs: z.array(GlChangeSchema).optional().default([]),
+        commits: z.array(GlCommitSchema).optional().default([]),
+      }),
+    );
+    if (!res) return { files: [], commits: [] };
+    return {
+      files: res.diffs.map(glChangeToFile),
+      commits: res.commits.map(glCommit),
+    };
+  }
+
+  async reviewGitLabChangeRequest(input: {
+    owner: string;
+    name: string;
+    number: number;
+    action: ForgeReviewAction;
+    body?: string;
+  }): Promise<boolean> {
+    const enc = glProjectId(input.owner, input.name);
+    const mr = `projects/${enc}/merge_requests/${input.number}`;
+    if (input.action === "approve") {
+      return this.glabOk(["api", "-X", "POST", `${mr}/approve`]);
+    }
+    if (input.action === "request_changes") {
+      // GitLab has no native "request changes": unapprove (best-effort) + leave a note.
+      await this.glabOk(["api", "-X", "POST", `${mr}/unapprove`]);
+      const body = input.body ?? "Changes requested.";
+      return this.glabOk(["api", "-X", "POST", `${mr}/notes`, "-f", `body=${body}`]);
+    }
+    // comment
+    return this.glabOk(["api", "-X", "POST", `${mr}/notes`, "-f", `body=${input.body ?? ""}`]);
+  }
+
+  async mergeGitLabChangeRequest(input: {
+    owner: string;
+    name: string;
+    number: number;
+    method: ForgeMergeMethod;
+  }): Promise<boolean> {
+    const enc = glProjectId(input.owner, input.name);
+    const mr = `projects/${enc}/merge_requests/${input.number}`;
+    if (input.method === "rebase") {
+      // GitLab merge has no rebase mode; rebase best-effort then merge.
+      await this.glabOk(["api", "-X", "PUT", `${mr}/rebase`]);
+      return this.glabOk(["api", "-X", "PUT", `${mr}/merge`]);
+    }
+    const args = ["api", "-X", "PUT", `${mr}/merge`];
+    if (input.method === "squash") args.push("-f", "squash=true");
+    return this.glabOk(args);
+  }
+
+  async listGitLabPipelines(input: {
+    owner: string;
+    name: string;
+    ref?: string;
+    limit?: number;
+  }): Promise<ForgePipelineRun[]> {
+    const enc = glProjectId(input.owner, input.name);
+    const qs = `per_page=${input.limit ?? 30}${input.ref ? `&ref=${encodeURIComponent(input.ref)}` : ""}`;
+    const rows = await this.glabJson(
+      ["api", `projects/${enc}/pipelines?${qs}`],
+      z.array(GlPipelineSchema),
+    );
+    if (!rows) return [];
+    return rows.map(
+      (r): ForgePipelineRun => ({
+        id: String(r.id),
+        name: `Pipeline #${r.id}`,
+        status: glPipelineStatus(r.status),
+        ref: r.ref ?? null,
+        sha: r.sha ?? null,
+        trigger: r.source ?? null,
+        actor: null,
+        durationSeconds: null,
+        createdAt_ms: isoToMs(r.created_at),
+        url: r.web_url,
+      }),
+    );
+  }
+
+  async getGitLabPipeline(input: {
+    owner: string;
+    name: string;
+    runId: string;
+  }): Promise<ForgePipelineDetail | null> {
+    const enc = glProjectId(input.owner, input.name);
+    const jobs = await this.glabJson(
+      ["api", `projects/${enc}/pipelines/${input.runId}/jobs`],
+      z.array(GlJobSchema),
+    );
+    if (!jobs) return null;
+    const mapped: ForgePipelineJob[] = jobs.map((j) => ({
+      id: String(j.id),
+      name: j.name,
+      stage: j.stage,
+      status: glPipelineStatus(j.status),
+      durationSeconds: j.duration != null ? Math.max(0, Math.round(j.duration)) : null,
+      url: j.web_url ?? null,
+    }));
+    // Group jobs into stages, preserving first-seen stage order.
+    const order: string[] = [];
+    const byStage = new Map<string, ForgePipelineJob[]>();
+    for (const j of mapped) {
+      let bucket = byStage.get(j.stage);
+      if (!bucket) {
+        bucket = [];
+        byStage.set(j.stage, bucket);
+        order.push(j.stage);
+      }
+      bucket.push(j);
+    }
+    const stages = order.map((name) => {
+      const stageJobs = byStage.get(name) ?? [];
+      return { name, status: aggregateGlStatus(stageJobs.map((j) => j.status)), jobs: stageJobs };
+    });
+    return {
+      id: input.runId,
+      // The jobs endpoint carries no pipeline-level ref/sha/url; aggregate status from jobs.
+      status: aggregateGlStatus(mapped.map((j) => j.status)),
+      url: null,
+      stages,
+    };
+  }
+
+  async getGitLabJobLog(input: {
+    owner: string;
+    name: string;
+    jobId: string;
+  }): Promise<{ log: string; truncated: boolean; running: boolean }> {
+    const enc = glProjectId(input.owner, input.name);
+    const text = await this.glabText(["api", `projects/${enc}/jobs/${input.jobId}/trace`]);
+    const MAX = 2 * 1024 * 1024;
+    if (text == null) return { log: "", truncated: false, running: false };
+    if (text.length > MAX) return { log: text.slice(0, MAX), truncated: true, running: false };
+    return { log: text, truncated: false, running: false };
+  }
+
+  async rerunGitLabPipeline(input: {
+    owner: string;
+    name: string;
+    runId: string;
+  }): Promise<boolean> {
+    // GitLab retry re-runs the pipeline's failed/canceled jobs (there is no full re-run).
+    const enc = glProjectId(input.owner, input.name);
+    return this.glabOk(["api", "-X", "POST", `projects/${enc}/pipelines/${input.runId}/retry`]);
+  }
+
+  async cancelGitLabPipeline(input: {
+    owner: string;
+    name: string;
+    runId: string;
+  }): Promise<boolean> {
+    const enc = glProjectId(input.owner, input.name);
+    return this.glabOk(["api", "-X", "POST", `projects/${enc}/pipelines/${input.runId}/cancel`]);
+  }
+
+  async playGitLabJob(input: { owner: string; name: string; jobId: string }): Promise<boolean> {
+    const enc = glProjectId(input.owner, input.name);
+    return this.glabOk(["api", "-X", "POST", `projects/${enc}/jobs/${input.jobId}/play`]);
+  }
 }
 
 /** Map GitHub run status+conclusion onto the neutral pipeline status enum. */
@@ -761,12 +1293,22 @@ export class ForgeHubSession {
           return;
         }
         case "forge.change_request.list.request": {
-          const changeRequests = await this.service.listChangeRequests({
-            owner: msg.repo.owner,
-            name: msg.repo.name,
-            state: msg.state,
-            limit: msg.limit,
-          });
+          const changeRequests =
+            msg.repo.forge === "github"
+              ? await this.service.listChangeRequests({
+                  owner: msg.repo.owner,
+                  name: msg.repo.name,
+                  state: msg.state,
+                  limit: msg.limit,
+                })
+              : msg.repo.forge === "gitlab"
+                ? await this.service.listGitLabChangeRequests({
+                    owner: msg.repo.owner,
+                    name: msg.repo.name,
+                    state: msg.state,
+                    limit: msg.limit,
+                  })
+                : [];
           this.emit({
             type: "forge.change_request.list.response",
             payload: { changeRequests, requestId: msg.requestId },
@@ -774,11 +1316,20 @@ export class ForgeHubSession {
           return;
         }
         case "forge.change_request.files.request": {
-          const { files, truncated } = await this.service.getChangeRequestFiles({
-            owner: msg.repo.owner,
-            name: msg.repo.name,
-            number: msg.number,
-          });
+          const { files, truncated } =
+            msg.repo.forge === "github"
+              ? await this.service.getChangeRequestFiles({
+                  owner: msg.repo.owner,
+                  name: msg.repo.name,
+                  number: msg.number,
+                })
+              : msg.repo.forge === "gitlab"
+                ? await this.service.getGitLabChangeRequestFiles({
+                    owner: msg.repo.owner,
+                    name: msg.repo.name,
+                    number: msg.number,
+                  })
+                : { files: [], truncated: false };
           this.emit({
             type: "forge.change_request.files.response",
             payload: { files, truncated, requestId: msg.requestId },
@@ -787,13 +1338,20 @@ export class ForgeHubSession {
         }
         // ---- Milestone B (GitHub via gh; other forges return empty for now) ----
         case "forge.branch.list.request": {
-          const branches = this.isGitHub(msg.repo.forge)
-            ? await this.service.listBranches({
-                owner: msg.repo.owner,
-                name: msg.repo.name,
-                limit: msg.limit,
-              })
-            : [];
+          const branches =
+            msg.repo.forge === "github"
+              ? await this.service.listBranches({
+                  owner: msg.repo.owner,
+                  name: msg.repo.name,
+                  limit: msg.limit,
+                })
+              : msg.repo.forge === "gitlab"
+                ? await this.service.listGitLabBranches({
+                    owner: msg.repo.owner,
+                    name: msg.repo.name,
+                    limit: msg.limit,
+                  })
+                : [];
           this.emit({
             type: "forge.branch.list.response",
             payload: { branches, requestId: msg.requestId },
@@ -801,14 +1359,22 @@ export class ForgeHubSession {
           return;
         }
         case "forge.commit.list.request": {
-          const commits = this.isGitHub(msg.repo.forge)
-            ? await this.service.listCommits({
-                owner: msg.repo.owner,
-                name: msg.repo.name,
-                ref: msg.ref,
-                limit: msg.limit,
-              })
-            : [];
+          const commits =
+            msg.repo.forge === "github"
+              ? await this.service.listCommits({
+                  owner: msg.repo.owner,
+                  name: msg.repo.name,
+                  ref: msg.ref,
+                  limit: msg.limit,
+                })
+              : msg.repo.forge === "gitlab"
+                ? await this.service.listGitLabCommits({
+                    owner: msg.repo.owner,
+                    name: msg.repo.name,
+                    ref: msg.ref,
+                    limit: msg.limit,
+                  })
+                : [];
           this.emit({
             type: "forge.commit.list.response",
             payload: { commits, requestId: msg.requestId },
@@ -816,14 +1382,22 @@ export class ForgeHubSession {
           return;
         }
         case "forge.commit.compare.request": {
-          const res = this.isGitHub(msg.repo.forge)
-            ? await this.service.compareCommits({
-                owner: msg.repo.owner,
-                name: msg.repo.name,
-                base: msg.base,
-                head: msg.head,
-              })
-            : { files: [], commits: [] };
+          const res =
+            msg.repo.forge === "github"
+              ? await this.service.compareCommits({
+                  owner: msg.repo.owner,
+                  name: msg.repo.name,
+                  base: msg.base,
+                  head: msg.head,
+                })
+              : msg.repo.forge === "gitlab"
+                ? await this.service.compareGitLabCommits({
+                    owner: msg.repo.owner,
+                    name: msg.repo.name,
+                    base: msg.base,
+                    head: msg.head,
+                  })
+                : { files: [], commits: [] };
           this.emit({
             type: "forge.commit.compare.response",
             payload: { files: res.files, commits: res.commits, requestId: msg.requestId },
@@ -831,15 +1405,24 @@ export class ForgeHubSession {
           return;
         }
         case "forge.change_request.review.request": {
-          const ok = this.isGitHub(msg.repo.forge)
-            ? await this.service.reviewChangeRequest({
-                owner: msg.repo.owner,
-                name: msg.repo.name,
-                number: msg.number,
-                action: msg.action,
-                body: msg.body,
-              })
-            : false;
+          const ok =
+            msg.repo.forge === "github"
+              ? await this.service.reviewChangeRequest({
+                  owner: msg.repo.owner,
+                  name: msg.repo.name,
+                  number: msg.number,
+                  action: msg.action,
+                  body: msg.body,
+                })
+              : msg.repo.forge === "gitlab"
+                ? await this.service.reviewGitLabChangeRequest({
+                    owner: msg.repo.owner,
+                    name: msg.repo.name,
+                    number: msg.number,
+                    action: msg.action,
+                    body: msg.body,
+                  })
+                : false;
           this.emit({
             type: "forge.change_request.review.response",
             payload: { ok, requestId: msg.requestId },
@@ -847,14 +1430,22 @@ export class ForgeHubSession {
           return;
         }
         case "forge.change_request.merge.request": {
-          const merged = this.isGitHub(msg.repo.forge)
-            ? await this.service.mergeChangeRequest({
-                owner: msg.repo.owner,
-                name: msg.repo.name,
-                number: msg.number,
-                method: msg.method,
-              })
-            : false;
+          const merged =
+            msg.repo.forge === "github"
+              ? await this.service.mergeChangeRequest({
+                  owner: msg.repo.owner,
+                  name: msg.repo.name,
+                  number: msg.number,
+                  method: msg.method,
+                })
+              : msg.repo.forge === "gitlab"
+                ? await this.service.mergeGitLabChangeRequest({
+                    owner: msg.repo.owner,
+                    name: msg.repo.name,
+                    number: msg.number,
+                    method: msg.method,
+                  })
+                : false;
           this.emit({
             type: "forge.change_request.merge.response",
             payload: { merged, requestId: msg.requestId },
@@ -862,14 +1453,22 @@ export class ForgeHubSession {
           return;
         }
         case "forge.pipeline.list.request": {
-          const runs = this.isGitHub(msg.repo.forge)
-            ? await this.service.listPipelines({
-                owner: msg.repo.owner,
-                name: msg.repo.name,
-                ref: msg.ref,
-                limit: msg.limit,
-              })
-            : [];
+          const runs =
+            msg.repo.forge === "github"
+              ? await this.service.listPipelines({
+                  owner: msg.repo.owner,
+                  name: msg.repo.name,
+                  ref: msg.ref,
+                  limit: msg.limit,
+                })
+              : msg.repo.forge === "gitlab"
+                ? await this.service.listGitLabPipelines({
+                    owner: msg.repo.owner,
+                    name: msg.repo.name,
+                    ref: msg.ref,
+                    limit: msg.limit,
+                  })
+                : [];
           this.emit({
             type: "forge.pipeline.list.response",
             payload: { runs, requestId: msg.requestId },
@@ -877,13 +1476,20 @@ export class ForgeHubSession {
           return;
         }
         case "forge.pipeline.get.request": {
-          const pipeline = this.isGitHub(msg.repo.forge)
-            ? await this.service.getPipeline({
-                owner: msg.repo.owner,
-                name: msg.repo.name,
-                runId: msg.runId,
-              })
-            : null;
+          const pipeline =
+            msg.repo.forge === "github"
+              ? await this.service.getPipeline({
+                  owner: msg.repo.owner,
+                  name: msg.repo.name,
+                  runId: msg.runId,
+                })
+              : msg.repo.forge === "gitlab"
+                ? await this.service.getGitLabPipeline({
+                    owner: msg.repo.owner,
+                    name: msg.repo.name,
+                    runId: msg.runId,
+                  })
+                : null;
           this.emit({
             type: "forge.pipeline.get.response",
             payload: { pipeline, requestId: msg.requestId },
@@ -891,13 +1497,20 @@ export class ForgeHubSession {
           return;
         }
         case "forge.job.log.request": {
-          const res = this.isGitHub(msg.repo.forge)
-            ? await this.service.getJobLog({
-                owner: msg.repo.owner,
-                name: msg.repo.name,
-                jobId: msg.jobId,
-              })
-            : { log: "", truncated: false, running: false };
+          const res =
+            msg.repo.forge === "github"
+              ? await this.service.getJobLog({
+                  owner: msg.repo.owner,
+                  name: msg.repo.name,
+                  jobId: msg.jobId,
+                })
+              : msg.repo.forge === "gitlab"
+                ? await this.service.getGitLabJobLog({
+                    owner: msg.repo.owner,
+                    name: msg.repo.name,
+                    jobId: msg.jobId,
+                  })
+                : { log: "", truncated: false, running: false };
           this.emit({
             type: "forge.job.log.response",
             payload: {
@@ -910,14 +1523,21 @@ export class ForgeHubSession {
           return;
         }
         case "forge.pipeline.rerun.request": {
-          const ok = this.isGitHub(msg.repo.forge)
-            ? await this.service.rerunPipeline({
-                owner: msg.repo.owner,
-                name: msg.repo.name,
-                runId: msg.runId,
-                onlyFailed: msg.onlyFailed,
-              })
-            : false;
+          const ok =
+            msg.repo.forge === "github"
+              ? await this.service.rerunPipeline({
+                  owner: msg.repo.owner,
+                  name: msg.repo.name,
+                  runId: msg.runId,
+                  onlyFailed: msg.onlyFailed,
+                })
+              : msg.repo.forge === "gitlab"
+                ? await this.service.rerunGitLabPipeline({
+                    owner: msg.repo.owner,
+                    name: msg.repo.name,
+                    runId: msg.runId,
+                  })
+                : false;
           this.emit({
             type: "forge.pipeline.rerun.response",
             payload: { ok, requestId: msg.requestId },
@@ -925,13 +1545,20 @@ export class ForgeHubSession {
           return;
         }
         case "forge.pipeline.cancel.request": {
-          const ok = this.isGitHub(msg.repo.forge)
-            ? await this.service.cancelPipeline({
-                owner: msg.repo.owner,
-                name: msg.repo.name,
-                runId: msg.runId,
-              })
-            : false;
+          const ok =
+            msg.repo.forge === "github"
+              ? await this.service.cancelPipeline({
+                  owner: msg.repo.owner,
+                  name: msg.repo.name,
+                  runId: msg.runId,
+                })
+              : msg.repo.forge === "gitlab"
+                ? await this.service.cancelGitLabPipeline({
+                    owner: msg.repo.owner,
+                    name: msg.repo.name,
+                    runId: msg.runId,
+                  })
+                : false;
           this.emit({
             type: "forge.pipeline.cancel.response",
             payload: { ok, requestId: msg.requestId },
@@ -939,11 +1566,19 @@ export class ForgeHubSession {
           return;
         }
         case "forge.job.play.request": {
-          // GitHub has no per-job "play" (manual gates are environment approvals); report
-          // unsupported. GitLab (glab `ci play`) lands with the GitLab provider.
+          // GitHub has no per-job "play" (manual gates are environment approvals) → ok:false.
+          // GitLab plays a manual job via POST /jobs/{id}/play.
+          const ok =
+            msg.repo.forge === "gitlab"
+              ? await this.service.playGitLabJob({
+                  owner: msg.repo.owner,
+                  name: msg.repo.name,
+                  jobId: msg.jobId,
+                })
+              : false;
           this.emit({
             type: "forge.job.play.response",
-            payload: { ok: false, requestId: msg.requestId },
+            payload: { ok, requestId: msg.requestId },
           });
           return;
         }
@@ -958,6 +1593,9 @@ export class ForgeHubSession {
   private emit(message: SessionOutboundMessage): void {
     this.options.host.emit(message);
   }
+
+  // (forge dispatch is inline in handle(): "github" → gh impl, "gitlab" → glab impl,
+  //  any other forge → the neutral empty result.)
 
   private emitEmptyFor(msg: ForgeHubInbound): void {
     switch (msg.type) {
@@ -1044,11 +1682,5 @@ export class ForgeHubSession {
           payload: { ok: false, requestId: msg.requestId },
         });
     }
-  }
-
-  /** Milestone B methods are implemented for GitHub in this checkpoint; other forges
-   *  (glab/bitbucket) return empty until their provider lands. */
-  private isGitHub(forge: string): boolean {
-    return forge === "github";
   }
 }
