@@ -85,10 +85,17 @@ forge, webhook mặc định).
     pipeline list/get, job log, rerun/cancel, play) + item schemas + methods. (fe37fcee3)
   - [x] server (GitHub qua gh): ForgeHubService B methods + dispatch + permissions + advertise
     forgeHubCode/Review/Pipelines. Server typecheck xanh. (a88458239)
-  - [ ] app UI (đang chạy subagent): Code sub-nav, review actions, merge box, Pipelines run+log
-    viewer + rerun/cancel, fill Commits/Checks tabs.
-  - [ ] GitLab (glab) provider cho A+B (hiện non-github trả empty) — CÒN LẠI.
-- [ ] Mốc C: Bitbucket REST adapter, auto-merge, artifact, release, issue.
+  - [x] app UI (fdf8286e9): Code sub-nav, review actions, merge box, Pipelines run+log viewer +
+    rerun/cancel, Commits/Checks tabs. App typecheck xanh.
+  - [x] GitLab (glab) provider (e40e70aae): 14 method mirror qua `glab api`, dispatch theo forge,
+    aggregate connections/repos. Server typecheck xanh. Ghi chú giới hạn trong code (MR list
+    thiếu review/CI rollup; pipeline detail thiếu ref/sha/url; onlyFailed không có analogue).
+  - **Mốc B HOÀN CHỈNH** cho GitHub + GitLab (compile/typecheck verified). Toàn bộ 4 package xanh.
+- [ ] Mốc C (ngoài "hết B"): Bitbucket REST adapter, auto-merge, artifact, release, issue.
+
+## Mức verify (trung thực)
+Tất cả tầng: typecheck + logic. CHƯA e2e thật (cần tài khoản GitHub/GitLab thật + bản build đóng
+gói desktop/mobile). Adapter dùng `gh`/`glab` thật (không mock), map sang shape neutral.
 - [ ] Mốc C: Bitbucket REST adapter, auto-merge, artifact, release, issue.
 
 Ghi chú (quyết định implement): spec 07 mô tả capability là mảng chuỗi, nhưng code thật vẫn dùng
