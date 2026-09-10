@@ -872,9 +872,12 @@ export class Session {
     });
     // Forge Hub (spec 19 / ADR-0015): repo-scoped remote-forge reads. Token secrets
     // for method:"token" connections live in a dedicated encrypted store under home.
+    const forgeSecretDir = resolve(this.jagentdeskHome, "forge");
     this.forgeHubSession = new ForgeHubSession({
       host: { emit: (msg) => this.emit(msg) },
-      secretStore: new FileSecretStore(resolve(this.jagentdeskHome, "forge")),
+      secretStore: new FileSecretStore(forgeSecretDir),
+      // Token-connection index (connections.json) is persisted alongside the secrets.
+      secretStoreDir: forgeSecretDir,
       logger: this.sessionLogger,
     });
     this.workspaceGitObserver = createWorkspaceGitObserverService({
@@ -2486,6 +2489,15 @@ export class Session {
       case "forge.pipeline.rerun.request":
       case "forge.pipeline.cancel.request":
       case "forge.job.play.request":
+      case "forge.change_request.set_auto_merge.request":
+      case "forge.artifact.list.request":
+      case "forge.artifact.download.request":
+      case "forge.release.list.request":
+      case "forge.tag.list.request":
+      case "forge.issue.list.request":
+      case "forge.issue.create.request":
+      case "forge.issue.comment.request":
+      case "forge.issue.close.request":
         return this.forgeHubSession.handle(msg);
       case "stash_save_request":
         return this.checkoutSession.handleStashSaveRequest(msg);

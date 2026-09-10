@@ -1,3 +1,5 @@
+import { promises as fs } from "node:fs";
+import path from "node:path";
 import { z } from "zod";
 import type {
   ForgeConnection,
@@ -11,6 +13,11 @@ import type {
   ForgePipelineJob,
   ForgeReviewAction,
   ForgeMergeMethod,
+  ForgeArtifact,
+  ForgeRelease,
+  ForgeReleaseAsset,
+  ForgeTag,
+  ForgeIssue,
   SessionInboundMessage,
   SessionOutboundMessage,
 } from "@jagentdesk/protocol/messages";
@@ -48,7 +55,16 @@ type ForgeHubInbound = Extract<
       | "forge.job.log.request"
       | "forge.pipeline.rerun.request"
       | "forge.pipeline.cancel.request"
-      | "forge.job.play.request";
+      | "forge.job.play.request"
+      | "forge.change_request.set_auto_merge.request"
+      | "forge.artifact.list.request"
+      | "forge.artifact.download.request"
+      | "forge.release.list.request"
+      | "forge.tag.list.request"
+      | "forge.issue.list.request"
+      | "forge.issue.create.request"
+      | "forge.issue.comment.request"
+      | "forge.issue.close.request";
   }
 >;
 
@@ -56,11 +72,21 @@ export interface ForgeHubSessionOptions {
   host: { emit: (message: SessionOutboundMessage) => void };
   /** Daemon secret store for method:"token" connections (id → token). */
   secretStore: SecretStore;
+  /**
+   * Directory the token secret store lives in. Token-connection metadata is
+   * persisted alongside the secrets as `connections.json` so token connections
+   * (Bitbucket / self-hosted) survive restarts and can be enumerated. When
+   * omitted (tests with a MemorySecretStore), token connections are not
+   * persisted and do not enumerate.
+   */
+  secretStoreDir?: string;
   logger?: { warn?: (msg: string, meta?: unknown) => void };
 }
 
 const GH_TIMEOUT_MS = 20_000;
+const BB_TIMEOUT_MS = 20_000;
 const SECRET_PREFIX = "forge.connection.token:";
+const BITBUCKET_API = "https://api.bitbucket.org/2.0";
 
 // ---- gh JSON shapes (loose; we only read what we map) --------------------------
 const GhRepoSchema = z.object({
@@ -314,8 +340,232 @@ function aggregateGlStatus(statuses: ForgePipelineRun["status"][]): ForgePipelin
   return statuses[0] ?? "unknown";
 }
 
+// ---- token-connection index (persisted next to the secret store) ---------------
+const TokenConnectionMetaSchema = z.object({
+  id: z.string(),
+  forge: z.string(),
+  host: z.string(),
+  method: z.literal("token"),
+});
+const TokenConnectionIndexSchema = z.array(TokenConnectionMetaSchema);
+type TokenConnectionMeta = z.infer<typeof TokenConnectionMetaSchema>;
+
+// ---- Bitbucket Cloud REST 2.0 shapes (loose; we only read what we map) ----------
+// Bitbucket has no first-party CLI, so this provider talks REST directly with the
+// daemon-stored token. We default to `Authorization: Bearer <token>` (Bitbucket
+// access tokens / OAuth bearer). App-password auth would instead use HTTP Basic
+// (`user:app_password`); we cannot e2e-verify that path here, so Bearer is the
+// default and the only mode wired.
+const BbRepoSchema = z.object({
+  full_name: z.string(),
+  description: z.string().nullable().optional(),
+  is_private: z.boolean().optional(),
+  updated_on: z.string().optional(),
+  mainbranch: z.object({ name: z.string() }).nullable().optional(),
+  links: z.object({ html: z.object({ href: z.string() }).optional() }).optional(),
+});
+const BbPrSchema = z.object({
+  id: z.number(),
+  title: z.string(),
+  state: z.string(),
+  draft: z.boolean().optional(),
+  source: z.object({ branch: z.object({ name: z.string() }).nullable().optional() }).optional(),
+  destination: z
+    .object({ branch: z.object({ name: z.string() }).nullable().optional() })
+    .optional(),
+  author: z
+    .object({ nickname: z.string().optional(), display_name: z.string().optional() })
+    .nullable()
+    .optional(),
+  updated_on: z.string().optional(),
+  links: z.object({ html: z.object({ href: z.string() }).optional() }).optional(),
+});
+const BbDiffstatSchema = z.object({
+  status: z.string(),
+  lines_added: z.number().optional(),
+  lines_removed: z.number().optional(),
+  old: z.object({ path: z.string() }).nullable().optional(),
+  new: z.object({ path: z.string() }).nullable().optional(),
+});
+const BbBranchSchema = z.object({
+  name: z.string(),
+  target: z.object({ hash: z.string() }).nullable().optional(),
+});
+const BbCommitSchema = z.object({
+  hash: z.string(),
+  message: z.string().optional(),
+  date: z.string().optional(),
+  author: z
+    .object({
+      raw: z.string().optional(),
+      user: z.object({ nickname: z.string() }).nullable().optional(),
+    })
+    .nullable()
+    .optional(),
+});
+const BbPipelineSchema = z.object({
+  uuid: z.string(),
+  build_number: z.number().optional(),
+  state: z
+    .object({
+      name: z.string().optional(),
+      result: z.object({ name: z.string() }).nullable().optional(),
+    })
+    .nullable()
+    .optional(),
+  target: z
+    .object({
+      ref_name: z.string().nullable().optional(),
+      commit: z.object({ hash: z.string() }).nullable().optional(),
+    })
+    .nullable()
+    .optional(),
+  trigger: z.object({ name: z.string().optional() }).nullable().optional(),
+  created_on: z.string().optional(),
+});
+const BbStepSchema = z.object({
+  uuid: z.string(),
+  name: z.string().optional(),
+  state: z
+    .object({
+      name: z.string().optional(),
+      result: z.object({ name: z.string() }).nullable().optional(),
+    })
+    .nullable()
+    .optional(),
+  started_on: z.string().nullable().optional(),
+  completed_on: z.string().nullable().optional(),
+});
+const BbTagSchema = z.object({
+  name: z.string(),
+  target: z.object({ hash: z.string() }).nullable().optional(),
+  links: z.object({ html: z.object({ href: z.string() }).optional() }).optional(),
+});
+const BbIssueSchema = z.object({
+  id: z.number(),
+  title: z.string(),
+  state: z.string(),
+  reporter: z.object({ nickname: z.string().optional() }).nullable().optional(),
+  updated_on: z.string().optional(),
+  links: z.object({ html: z.object({ href: z.string() }).optional() }).optional(),
+});
+function bbPaged<T>(item: z.ZodType<T>) {
+  return z.object({ values: z.array(item).optional().default([]) });
+}
+
+/** Map a Bitbucket PR state (OPEN|MERGED|DECLINED|SUPERSEDED) onto the neutral enum. */
+function bbPrState(state: string, draft: boolean | undefined): ForgeChangeRequestSummary["state"] {
+  const s = state.toUpperCase();
+  if (s === "MERGED") return "merged";
+  if (s === "DECLINED" || s === "SUPERSEDED") return "closed";
+  return draft ? "draft" : "open";
+}
+
+/** Map a Bitbucket diffstat status onto the neutral file status. */
+function bbFileStatus(s: string): ForgeChangeRequestFile["status"] {
+  const v = s.toLowerCase();
+  if (v === "added") return "added";
+  if (v === "removed") return "removed";
+  if (v === "renamed") return "renamed";
+  return "modified";
+}
+
+/** Map a Bitbucket pipeline/step state onto the neutral pipeline status enum. */
+function bbPipelineStatus(
+  name: string | undefined,
+  result: string | undefined,
+): ForgePipelineRun["status"] {
+  const s = (name ?? "").toUpperCase();
+  if (s === "COMPLETED") {
+    switch ((result ?? "").toUpperCase()) {
+      case "SUCCESSFUL":
+        return "success";
+      case "FAILED":
+      case "ERROR":
+        return "failed";
+      case "STOPPED":
+        return "canceled";
+      default:
+        return "unknown";
+    }
+  }
+  if (s === "IN_PROGRESS" || s === "RUNNING") return "running";
+  if (s === "PENDING") return "pending";
+  if (s === "PAUSED") return "manual";
+  if (s === "HALTED" || s === "STOPPED") return "canceled";
+  return "unknown";
+}
+
+/** Map a Bitbucket issue state onto the neutral open/closed issue enum. */
+function bbIssueState(state: string): ForgeIssue["state"] {
+  const s = state.toLowerCase();
+  // Bitbucket tracker states: new · open · on hold · resolved · closed · invalid · duplicate · wontfix.
+  return s === "new" || s === "open" || s === "on hold" ? "open" : "closed";
+}
+
+/** Map a Bitbucket commit onto the neutral commit shape. */
+function bbCommit(c: z.infer<typeof BbCommitSchema>): ForgeCommit {
+  return {
+    sha: c.hash,
+    subject: (c.message ?? "").split("\n", 1)[0] ?? "",
+    authorLogin: c.author?.user?.nickname ?? null,
+    authorName: c.author?.raw ?? null,
+    committedAt_ms: isoToMs(c.date),
+  };
+}
+
+/** Bitbucket pipelines have no API-returned html link; build the results page URL. */
+function bbPipelineUrl(owner: string, name: string, buildNumber: number): string {
+  return `https://bitbucket.org/${owner}/${name}/pipelines/results/${buildNumber}`;
+}
+
+/** Parse a git-style unified diff into per-file neutral file entries (best-effort).
+ *  Bitbucket compare/PR diffs come as one raw blob; split on the `diff --git` headers. */
+function parseDiffToFiles(diff: string | null): ForgeChangeRequestFile[] {
+  if (!diff) return [];
+  const files: ForgeChangeRequestFile[] = [];
+  for (const chunk of diff.split(/^diff --git /m)) {
+    if (!chunk.trim()) continue;
+    const body = `diff --git ${chunk}`;
+    const m = chunk.match(/^a\/(.+?) b\/(.+?)\n/);
+    const oldPath = m?.[1];
+    const newPath = m?.[2] ?? oldPath ?? "";
+    let status: ForgeChangeRequestFile["status"] = "modified";
+    if (/^new file mode/m.test(chunk)) status = "added";
+    else if (/^deleted file mode/m.test(chunk)) status = "removed";
+    else if (/^rename from /m.test(chunk)) status = "renamed";
+    const { additions, deletions } = countDiffLines(body);
+    files.push({
+      path: newPath,
+      previousPath: status === "renamed" ? (oldPath ?? null) : null,
+      status,
+      additions,
+      deletions,
+      patch: body,
+    });
+  }
+  return files;
+}
+
+/** Index per-file patch bodies from a raw unified diff, keyed by the new-side path. */
+function splitUnifiedDiff(diff: string | null): Map<string, string> {
+  const out = new Map<string, string>();
+  if (!diff) return out;
+  for (const chunk of diff.split(/^diff --git /m)) {
+    if (!chunk.trim()) continue;
+    const m = chunk.match(/^a\/(.+?) b\/(.+?)\n/);
+    const newPath = m?.[2];
+    if (newPath) out.set(newPath, `diff --git ${chunk}`);
+  }
+  return out;
+}
+
 export class ForgeHubService {
-  constructor(private readonly secretStore: SecretStore) {}
+  constructor(
+    private readonly secretStore: SecretStore,
+    /** Directory the secret store lives in; token-connection index is written here. */
+    private readonly secretStoreDir?: string,
+  ) {}
 
   private async ghPath(): Promise<string | null> {
     return findExecutable("gh");
@@ -391,13 +641,69 @@ export class ForgeHubService {
     return out;
   }
 
-  // Token connection metadata is kept next to the secret (id-encoded), keyless for
-  // Milestone A: only the fields the UI shows. Bitbucket adapter (Milestone C) fills
-  // account/expiry via a REST probe.
+  // ---- token-connection index -------------------------------------------------
+  // SecretStore has no list(), so token connections (Bitbucket / self-hosted without
+  // a CLI) are enumerated from a small JSON index written next to the secrets. Only
+  // keyless metadata is stored (never the token); the token stays in the SecretStore.
+
+  private connectionsPath(): string | null {
+    return this.secretStoreDir ? path.join(this.secretStoreDir, "connections.json") : null;
+  }
+
+  private async readConnectionIndex(): Promise<TokenConnectionMeta[]> {
+    const file = this.connectionsPath();
+    if (!file) return [];
+    try {
+      const parsed = TokenConnectionIndexSchema.safeParse(
+        JSON.parse(await fs.readFile(file, "utf8")),
+      );
+      return parsed.success ? parsed.data : [];
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      return [];
+    }
+  }
+
+  /** Atomically replace the token-connection index (temp file + rename). */
+  private async writeConnectionIndex(metas: TokenConnectionMeta[]): Promise<void> {
+    const file = this.connectionsPath();
+    if (!file) return;
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    const tmp = `${file}.${process.pid}.tmp`;
+    await fs.writeFile(tmp, JSON.stringify(metas, null, 2), { mode: 0o600 });
+    await fs.rename(tmp, file);
+  }
+
+  // Enumerate persisted token connections and probe each for account + auth state.
+  // Bitbucket probes `GET /2.0/user`; other token forges have no cheap probe here, so
+  // their state reflects only whether a secret is present.
   private async listTokenConnectionMeta(): Promise<ForgeConnection[]> {
-    // SecretStore has no list(); token connections are enumerated from their ids that
-    // callers added this session. Milestone A persists none by default, so return [].
-    return [];
+    const metas = await this.readConnectionIndex();
+    return Promise.all(
+      metas.map(async (m): Promise<ForgeConnection> => {
+        const token = await this.secretStore.get(`${SECRET_PREFIX}${m.id}`);
+        if (m.forge === "bitbucket") {
+          const account = token ? await this.bitbucketAccount() : null;
+          return {
+            id: m.id,
+            forge: m.forge,
+            host: m.host,
+            account,
+            method: "token",
+            // Token missing, or present but the /user probe failed → "error".
+            authState: token && account ? "authenticated" : "error",
+          };
+        }
+        return {
+          id: m.id,
+          forge: m.forge,
+          host: m.host,
+          account: null,
+          method: "token",
+          authState: token ? "authenticated" : "error",
+        };
+      }),
+    );
   }
 
   async addConnection(input: {
@@ -411,13 +717,20 @@ export class ForgeHubService {
     if (input.method === "token") {
       if (!input.token) throw new Error("A token is required for token authentication.");
       await this.secretStore.set(`${SECRET_PREFIX}${id}`, input.token);
+      // Persist keyless metadata so the connection enumerates after restart.
+      const metas = await this.readConnectionIndex();
+      const next = metas.filter((m) => m.id !== id);
+      next.push({ id, forge: input.forge, host, method: "token" });
+      await this.writeConnectionIndex(next);
+      // Probe Bitbucket for the account label so the first list reflects it.
+      const account = input.forge === "bitbucket" ? await this.bitbucketAccount() : null;
       return {
         id,
         forge: input.forge,
         host,
-        account: null,
+        account,
         method: "token",
-        authState: "authenticated",
+        authState: input.forge === "bitbucket" && !account ? "error" : "authenticated",
       };
     }
     // CLI method: verify the CLI is authenticated for this forge.
@@ -436,16 +749,20 @@ export class ForgeHubService {
 
   async removeConnection(connectionId: string): Promise<boolean> {
     await this.secretStore.delete(`${SECRET_PREFIX}${connectionId}`);
+    const metas = await this.readConnectionIndex();
+    const next = metas.filter((m) => m.id !== connectionId);
+    if (next.length !== metas.length) await this.writeConnectionIndex(next);
     return true;
   }
 
-  /** Aggregate repos across every authenticated provider (GitHub + GitLab). */
+  /** Aggregate repos across every authenticated provider (GitHub + GitLab + Bitbucket). */
   async listRepos(input: { query?: string; limit?: number }): Promise<ForgeRepo[]> {
-    const [github, gitlab] = await Promise.all([
+    const [github, gitlab, bitbucket] = await Promise.all([
       this.listGitHubRepos(input),
       this.listGitLabRepos(input),
+      this.listBitbucketRepos(input),
     ]);
-    return [...github, ...gitlab];
+    return [...github, ...gitlab, ...bitbucket];
   }
 
   private async listGitHubRepos(input: { query?: string; limit?: number }): Promise<ForgeRepo[]> {
@@ -1223,6 +1540,972 @@ export class ForgeHubService {
     const enc = glProjectId(input.owner, input.name);
     return this.glabOk(["api", "-X", "POST", `projects/${enc}/jobs/${input.jobId}/play`]);
   }
+
+  // ===== Milestone C — GitHub (auto-merge · artifacts · releases · tags · issues) =
+
+  async setAutoMerge(input: {
+    owner: string;
+    name: string;
+    number: number;
+    enabled: boolean;
+    method: ForgeMergeMethod;
+  }): Promise<boolean> {
+    const repo = `${input.owner}/${input.name}`;
+    if (!input.enabled) {
+      const ok = await this.ghOk([
+        "pr",
+        "merge",
+        String(input.number),
+        "--repo",
+        repo,
+        "--disable-auto",
+      ]);
+      return ok ? false : true; // on failure the prior (enabled) state is unchanged
+    }
+    const flag =
+      input.method === "squash" ? "--squash" : input.method === "rebase" ? "--rebase" : "--merge";
+    const ok = await this.ghOk([
+      "pr",
+      "merge",
+      String(input.number),
+      "--repo",
+      repo,
+      "--auto",
+      flag,
+    ]);
+    return ok;
+  }
+
+  async listArtifacts(input: {
+    owner: string;
+    name: string;
+    runId: string;
+  }): Promise<ForgeArtifact[]> {
+    const repo = `${input.owner}/${input.name}`;
+    const res = await this.ghJson(
+      ["api", `repos/${repo}/actions/runs/${input.runId}/artifacts`],
+      z.object({
+        artifacts: z
+          .array(
+            z.object({
+              id: z.number(),
+              name: z.string(),
+              size_in_bytes: z.number().optional(),
+              archive_download_url: z.string().optional(),
+              expires_at: z.string().nullable().optional(),
+            }),
+          )
+          .optional()
+          .default([]),
+      }),
+    );
+    if (!res) return [];
+    return res.artifacts.map(
+      (a): ForgeArtifact => ({
+        id: String(a.id),
+        name: a.name,
+        sizeBytes: a.size_in_bytes ?? null,
+        url: a.archive_download_url ?? null,
+        expiresAt_ms: isoToMs(a.expires_at ?? undefined),
+      }),
+    );
+  }
+
+  /** Resolve a downloadable URL for an artifact; null when the forge has none. */
+  async downloadArtifact(input: {
+    owner: string;
+    name: string;
+    artifactId: string;
+  }): Promise<string | null> {
+    const repo = `${input.owner}/${input.name}`;
+    const res = await this.ghJson(
+      ["api", `repos/${repo}/actions/artifacts/${input.artifactId}`],
+      z.object({ archive_download_url: z.string().optional() }),
+    );
+    return res?.archive_download_url ?? null;
+  }
+
+  async listReleases(input: {
+    owner: string;
+    name: string;
+    limit?: number;
+  }): Promise<ForgeRelease[]> {
+    const repo = `${input.owner}/${input.name}`;
+    const rows = await this.ghJson(
+      ["api", `repos/${repo}/releases?per_page=${input.limit ?? 30}`],
+      z.array(
+        z.object({
+          id: z.number(),
+          tag_name: z.string(),
+          name: z.string().nullable().optional(),
+          draft: z.boolean().optional(),
+          prerelease: z.boolean().optional(),
+          published_at: z.string().nullable().optional(),
+          html_url: z.string(),
+          assets: z
+            .array(
+              z.object({
+                name: z.string(),
+                browser_download_url: z.string(),
+                size: z.number().optional(),
+              }),
+            )
+            .optional()
+            .default([]),
+        }),
+      ),
+    );
+    if (!rows) return [];
+    return rows.map(
+      (r): ForgeRelease => ({
+        id: String(r.id),
+        tagName: r.tag_name,
+        name: r.name ?? null,
+        isDraft: r.draft ?? false,
+        isPrerelease: r.prerelease ?? false,
+        publishedAt_ms: isoToMs(r.published_at ?? undefined),
+        url: r.html_url,
+        assets: r.assets.map(
+          (a): ForgeReleaseAsset => ({
+            name: a.name,
+            url: a.browser_download_url,
+            sizeBytes: a.size ?? null,
+          }),
+        ),
+      }),
+    );
+  }
+
+  async listTags(input: { owner: string; name: string; limit?: number }): Promise<ForgeTag[]> {
+    const repo = `${input.owner}/${input.name}`;
+    const rows = await this.ghJson(
+      ["api", `repos/${repo}/tags?per_page=${input.limit ?? 100}`],
+      z.array(
+        z.object({ name: z.string(), commit: z.object({ sha: z.string() }).nullable().optional() }),
+      ),
+    );
+    if (!rows) return [];
+    return rows.map(
+      (t): ForgeTag => ({ name: t.name, commitSha: t.commit?.sha ?? null, url: null }),
+    );
+  }
+
+  async listIssues(input: {
+    owner: string;
+    name: string;
+    state?: "open" | "closed" | "all";
+    limit?: number;
+  }): Promise<ForgeIssue[]> {
+    const repo = `${input.owner}/${input.name}`;
+    // `gh issue list` excludes PRs (unlike the /issues REST endpoint), which is what we want.
+    const rows = await this.ghJson(
+      [
+        "issue",
+        "list",
+        "--repo",
+        repo,
+        "--state",
+        input.state ?? "open",
+        "--json",
+        "number,title,url,state,author,labels,updatedAt",
+        "--limit",
+        String(input.limit ?? 50),
+      ],
+      z.array(
+        z.object({
+          number: z.number(),
+          title: z.string(),
+          url: z.string(),
+          state: z.string(),
+          author: z.object({ login: z.string() }).nullable().optional(),
+          labels: z.array(z.object({ name: z.string() })).optional(),
+          updatedAt: z.string().optional(),
+        }),
+      ),
+    );
+    if (!rows) return [];
+    return rows.map(
+      (i): ForgeIssue => ({
+        number: i.number,
+        title: i.title,
+        url: i.url,
+        state: i.state.toLowerCase() === "closed" ? "closed" : "open",
+        authorLogin: i.author?.login ?? null,
+        labels: i.labels?.map((l) => l.name) ?? [],
+        updatedAt_ms: isoToMs(i.updatedAt),
+      }),
+    );
+  }
+
+  async createIssue(input: {
+    owner: string;
+    name: string;
+    title: string;
+    body?: string;
+  }): Promise<ForgeIssue | null> {
+    const repo = `${input.owner}/${input.name}`;
+    // `gh api` (vs `gh issue create`) returns the created issue as JSON to map back.
+    const args = ["api", "-X", "POST", `repos/${repo}/issues`, "-f", `title=${input.title}`];
+    if (input.body) args.push("-f", `body=${input.body}`);
+    const res = await this.ghJson(
+      args,
+      z.object({
+        number: z.number(),
+        title: z.string(),
+        html_url: z.string(),
+        state: z.string(),
+        user: z.object({ login: z.string() }).nullable().optional(),
+        labels: z.array(z.object({ name: z.string() })).optional(),
+        updated_at: z.string().optional(),
+      }),
+    );
+    if (!res) return null;
+    return {
+      number: res.number,
+      title: res.title,
+      url: res.html_url,
+      state: res.state.toLowerCase() === "closed" ? "closed" : "open",
+      authorLogin: res.user?.login ?? null,
+      labels: res.labels?.map((l) => l.name) ?? [],
+      updatedAt_ms: isoToMs(res.updated_at),
+    };
+  }
+
+  async commentIssue(input: {
+    owner: string;
+    name: string;
+    number: number;
+    body: string;
+  }): Promise<boolean> {
+    const repo = `${input.owner}/${input.name}`;
+    return this.ghOk([
+      "issue",
+      "comment",
+      String(input.number),
+      "--repo",
+      repo,
+      "--body",
+      input.body,
+    ]);
+  }
+
+  async closeIssue(input: { owner: string; name: string; number: number }): Promise<boolean> {
+    const repo = `${input.owner}/${input.name}`;
+    return this.ghOk(["issue", "close", String(input.number), "--repo", repo]);
+  }
+
+  // ===== Milestone C — GitLab ====================================================
+
+  async setGitLabAutoMerge(input: {
+    owner: string;
+    name: string;
+    number: number;
+    enabled: boolean;
+  }): Promise<boolean> {
+    const enc = glProjectId(input.owner, input.name);
+    const mr = `projects/${enc}/merge_requests/${input.number}`;
+    // "auto-merge" on GitLab == merge-when-pipeline-succeeds (MWPS).
+    const ok = input.enabled
+      ? await this.glabOk([
+          "api",
+          "-X",
+          "PUT",
+          `${mr}/merge`,
+          "-f",
+          "merge_when_pipeline_succeeds=true",
+        ])
+      : await this.glabOk(["api", "-X", "POST", `${mr}/cancel_merge_when_pipeline_succeeds`]);
+    return ok ? input.enabled : !input.enabled;
+  }
+
+  async listGitLabArtifacts(input: {
+    owner: string;
+    name: string;
+    runId: string;
+  }): Promise<ForgeArtifact[]> {
+    // GitLab artifacts are job-scoped (no pipeline-level artifact list), so runId is
+    // interpreted as a job id here. The job payload's `artifacts` array carries only
+    // filename + size — no per-artifact download URL or expiry — so those stay null.
+    const enc = glProjectId(input.owner, input.name);
+    const res = await this.glabJson(
+      ["api", `projects/${enc}/jobs/${input.runId}`],
+      z.object({
+        artifacts: z
+          .array(z.object({ filename: z.string().optional(), size: z.number().optional() }))
+          .nullable()
+          .optional(),
+      }),
+    );
+    if (!res?.artifacts) return [];
+    return res.artifacts.map(
+      (a, i): ForgeArtifact => ({
+        id: `${input.runId}:${i}`,
+        name: a.filename ?? `artifact-${i}`,
+        sizeBytes: a.size ?? null,
+        url: null,
+        expiresAt_ms: null,
+      }),
+    );
+  }
+
+  async listGitLabReleases(input: {
+    owner: string;
+    name: string;
+    limit?: number;
+  }): Promise<ForgeRelease[]> {
+    const enc = glProjectId(input.owner, input.name);
+    const rows = await this.glabJson(
+      ["api", `projects/${enc}/releases?per_page=${input.limit ?? 30}`],
+      z.array(
+        z.object({
+          tag_name: z.string(),
+          name: z.string().nullable().optional(),
+          released_at: z.string().nullable().optional(),
+          created_at: z.string().nullable().optional(),
+          upcoming_release: z.boolean().optional(),
+          _links: z.object({ self: z.string().optional() }).nullable().optional(),
+          assets: z
+            .object({
+              links: z.array(z.object({ name: z.string(), url: z.string() })).optional(),
+            })
+            .nullable()
+            .optional(),
+        }),
+      ),
+    );
+    if (!rows) return [];
+    return rows.map(
+      (r): ForgeRelease => ({
+        id: r.tag_name,
+        tagName: r.tag_name,
+        name: r.name ?? null,
+        isDraft: false, // GitLab has no draft-release concept
+        isPrerelease: r.upcoming_release ?? false,
+        publishedAt_ms: isoToMs(r.released_at ?? r.created_at ?? undefined),
+        url: r._links?.self ?? "",
+        assets: (r.assets?.links ?? []).map(
+          (a): ForgeReleaseAsset => ({ name: a.name, url: a.url, sizeBytes: null }),
+        ),
+      }),
+    );
+  }
+
+  async listGitLabTags(input: {
+    owner: string;
+    name: string;
+    limit?: number;
+  }): Promise<ForgeTag[]> {
+    const enc = glProjectId(input.owner, input.name);
+    const rows = await this.glabJson(
+      ["api", `projects/${enc}/repository/tags?per_page=${input.limit ?? 100}`],
+      z.array(
+        z.object({ name: z.string(), commit: z.object({ id: z.string() }).nullable().optional() }),
+      ),
+    );
+    if (!rows) return [];
+    return rows.map(
+      (t): ForgeTag => ({ name: t.name, commitSha: t.commit?.id ?? null, url: null }),
+    );
+  }
+
+  async listGitLabIssues(input: {
+    owner: string;
+    name: string;
+    state?: "open" | "closed" | "all";
+    limit?: number;
+  }): Promise<ForgeIssue[]> {
+    const enc = glProjectId(input.owner, input.name);
+    const state = input.state === "closed" ? "closed" : input.state === "all" ? "all" : "opened";
+    const qs = `per_page=${input.limit ?? 50}${state === "all" ? "" : `&state=${state}`}`;
+    const rows = await this.glabJson(
+      ["api", `projects/${enc}/issues?${qs}`],
+      z.array(
+        z.object({
+          iid: z.number(),
+          title: z.string(),
+          web_url: z.string(),
+          state: z.string(),
+          author: z.object({ username: z.string() }).nullable().optional(),
+          labels: z.array(z.string()).optional(),
+          user_notes_count: z.number().optional(),
+          updated_at: z.string().optional(),
+        }),
+      ),
+    );
+    if (!rows) return [];
+    return rows.map(
+      (i): ForgeIssue => ({
+        number: i.iid,
+        title: i.title,
+        url: i.web_url,
+        state: i.state.toLowerCase() === "opened" ? "open" : "closed",
+        authorLogin: i.author?.username ?? null,
+        labels: i.labels ?? [],
+        commentCount: i.user_notes_count,
+        updatedAt_ms: isoToMs(i.updated_at),
+      }),
+    );
+  }
+
+  async createGitLabIssue(input: {
+    owner: string;
+    name: string;
+    title: string;
+    body?: string;
+  }): Promise<ForgeIssue | null> {
+    const enc = glProjectId(input.owner, input.name);
+    const args = ["api", "-X", "POST", `projects/${enc}/issues`, "-f", `title=${input.title}`];
+    if (input.body) args.push("-f", `description=${input.body}`);
+    const res = await this.glabJson(
+      args,
+      z.object({
+        iid: z.number(),
+        title: z.string(),
+        web_url: z.string(),
+        state: z.string(),
+        author: z.object({ username: z.string() }).nullable().optional(),
+        labels: z.array(z.string()).optional(),
+        updated_at: z.string().optional(),
+      }),
+    );
+    if (!res) return null;
+    return {
+      number: res.iid,
+      title: res.title,
+      url: res.web_url,
+      state: res.state.toLowerCase() === "opened" ? "open" : "closed",
+      authorLogin: res.author?.username ?? null,
+      labels: res.labels ?? [],
+      updatedAt_ms: isoToMs(res.updated_at),
+    };
+  }
+
+  async commentGitLabIssue(input: {
+    owner: string;
+    name: string;
+    number: number;
+    body: string;
+  }): Promise<boolean> {
+    const enc = glProjectId(input.owner, input.name);
+    return this.glabOk([
+      "api",
+      "-X",
+      "POST",
+      `projects/${enc}/issues/${input.number}/notes`,
+      "-f",
+      `body=${input.body}`,
+    ]);
+  }
+
+  async closeGitLabIssue(input: { owner: string; name: string; number: number }): Promise<boolean> {
+    const enc = glProjectId(input.owner, input.name);
+    return this.glabOk([
+      "api",
+      "-X",
+      "PUT",
+      `projects/${enc}/issues/${input.number}`,
+      "-f",
+      "state_event=close",
+    ]);
+  }
+
+  // ===== Bitbucket Cloud provider (REST 2.0 + token; no CLI) =====================
+  // Auth is `Authorization: Bearer <token>` (Bitbucket access tokens / OAuth). App
+  // passwords would use HTTP Basic (user:app_password); we default to Bearer since we
+  // cannot e2e-verify the Basic path. Every helper degrades to a safe empty/false.
+
+  private async bitbucketToken(): Promise<string | null> {
+    const metas = await this.readConnectionIndex();
+    const bb = metas.find((m) => m.forge === "bitbucket");
+    const id = bb?.id ?? "bitbucket:bitbucket.org";
+    return this.secretStore.get(`${SECRET_PREFIX}${id}`);
+  }
+
+  private bbRepo(owner: string, name: string): string {
+    return `/repositories/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
+  }
+
+  private async bbJson<T>(
+    pathAndQuery: string,
+    schema: z.ZodType<T>,
+    init?: RequestInit,
+  ): Promise<T | null> {
+    const token = await this.bitbucketToken();
+    if (!token) return null;
+    try {
+      const res = await fetch(`${BITBUCKET_API}${pathAndQuery}`, {
+        ...init,
+        signal: AbortSignal.timeout(BB_TIMEOUT_MS),
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+          ...(init?.headers ?? {}),
+        },
+      });
+      if (!res.ok) return null;
+      const text = await res.text();
+      return schema.parse(text ? JSON.parse(text) : {});
+    } catch {
+      return null;
+    }
+  }
+
+  private async bbText(pathAndQuery: string): Promise<string | null> {
+    const token = await this.bitbucketToken();
+    if (!token) return null;
+    try {
+      const res = await fetch(`${BITBUCKET_API}${pathAndQuery}`, {
+        signal: AbortSignal.timeout(BB_TIMEOUT_MS),
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return null;
+      return await res.text();
+    } catch {
+      return null;
+    }
+  }
+
+  /** POST/PUT for a side effect; resolve true on a 2xx, false on any failure. */
+  private async bbSend(method: string, pathAndQuery: string, body?: unknown): Promise<boolean> {
+    const token = await this.bitbucketToken();
+    if (!token) return false;
+    try {
+      const res = await fetch(`${BITBUCKET_API}${pathAndQuery}`, {
+        method,
+        signal: AbortSignal.timeout(BB_TIMEOUT_MS),
+        headers: {
+          Authorization: `Bearer ${token}`,
+          ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+        },
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Probe the token's account label via GET /2.0/user; null on any failure. */
+  private async bitbucketAccount(): Promise<string | null> {
+    const res = await this.bbJson(
+      "/user",
+      z.object({
+        username: z.string().optional(),
+        nickname: z.string().optional(),
+        display_name: z.string().optional(),
+      }),
+    );
+    return res?.username ?? res?.nickname ?? res?.display_name ?? null;
+  }
+
+  async listBitbucketRepos(input: { query?: string; limit?: number }): Promise<ForgeRepo[]> {
+    const limit = Math.min(input.limit ?? 50, 100);
+    const res = await this.bbJson(
+      `/repositories?role=member&sort=-updated_on&pagelen=${limit}`,
+      bbPaged(BbRepoSchema),
+    );
+    if (!res) return [];
+    const query = input.query?.trim().toLowerCase();
+    return res.values
+      .filter((r) => !query || r.full_name.toLowerCase().includes(query))
+      .map((r): ForgeRepo => {
+        const idx = r.full_name.indexOf("/");
+        const owner = idx >= 0 ? r.full_name.slice(0, idx) : "";
+        const name = idx >= 0 ? r.full_name.slice(idx + 1) : r.full_name;
+        return {
+          forge: "bitbucket",
+          owner,
+          name,
+          description: r.description ?? null,
+          defaultBranch: r.mainbranch?.name ?? null,
+          visibility:
+            r.is_private === true ? "private" : r.is_private === false ? "public" : "unknown",
+          updatedAt_ms: isoToMs(r.updated_on),
+          url: r.links?.html?.href ?? "",
+        };
+      });
+  }
+
+  async listBitbucketChangeRequests(input: {
+    owner: string;
+    name: string;
+    state?: "open" | "draft" | "merged" | "closed" | "all";
+    limit?: number;
+  }): Promise<ForgeChangeRequestSummary[]> {
+    const base = this.bbRepo(input.owner, input.name);
+    const limit = Math.min(input.limit ?? 50, 50);
+    // Bitbucket PR states: OPEN|MERGED|DECLINED|SUPERSEDED (the query repeats `state`).
+    const states =
+      input.state === "merged"
+        ? ["MERGED"]
+        : input.state === "closed"
+          ? ["DECLINED", "SUPERSEDED"]
+          : input.state === "all"
+            ? ["OPEN", "MERGED", "DECLINED"]
+            : ["OPEN"];
+    const stateQs = states.map((s) => `state=${s}`).join("&");
+    const res = await this.bbJson(
+      `${base}/pullrequests?${stateQs}&pagelen=${limit}`,
+      bbPaged(BbPrSchema),
+    );
+    if (!res) return [];
+    return res.values
+      .filter((r) => (input.state === "draft" ? r.draft === true : true))
+      .map(
+        (r): ForgeChangeRequestSummary => ({
+          number: r.id,
+          title: r.title,
+          url: r.links?.html?.href ?? "",
+          state: bbPrState(r.state, r.draft),
+          authorLogin: r.author?.nickname ?? r.author?.display_name ?? null,
+          headRef: r.source?.branch?.name,
+          baseRef: r.destination?.branch?.name,
+          labels: [],
+          reviewDecision: null,
+          checksStatus: "none",
+          updatedAt_ms: isoToMs(r.updated_on),
+        }),
+      );
+  }
+
+  async getBitbucketChangeRequestFiles(input: {
+    owner: string;
+    name: string;
+    number: number;
+  }): Promise<{ files: ForgeChangeRequestFile[]; truncated: boolean }> {
+    const base = this.bbRepo(input.owner, input.name);
+    const stat = await this.bbJson(
+      `${base}/pullrequests/${input.number}/diffstat?pagelen=500`,
+      bbPaged(BbDiffstatSchema),
+    );
+    if (!stat) return { files: [], truncated: false };
+    const patchByPath = splitUnifiedDiff(
+      await this.bbText(`${base}/pullrequests/${input.number}/diff`),
+    );
+    const files = stat.values.map((d): ForgeChangeRequestFile => {
+      const p = d.new?.path ?? d.old?.path ?? "";
+      return {
+        path: p,
+        previousPath: d.status.toLowerCase() === "renamed" ? (d.old?.path ?? null) : null,
+        status: bbFileStatus(d.status),
+        additions: d.lines_added ?? 0,
+        deletions: d.lines_removed ?? 0,
+        patch: patchByPath.get(p) ?? null,
+      };
+    });
+    return { files, truncated: false };
+  }
+
+  async listBitbucketBranches(input: {
+    owner: string;
+    name: string;
+    limit?: number;
+  }): Promise<ForgeBranch[]> {
+    const base = this.bbRepo(input.owner, input.name);
+    const [repo, res] = await Promise.all([
+      this.bbJson(
+        base,
+        z.object({ mainbranch: z.object({ name: z.string() }).nullable().optional() }),
+      ),
+      this.bbJson(
+        `${base}/refs/branches?pagelen=${Math.min(input.limit ?? 100, 100)}`,
+        bbPaged(BbBranchSchema),
+      ),
+    ]);
+    if (!res) return [];
+    const def = repo?.mainbranch?.name;
+    return res.values.map(
+      (b): ForgeBranch => ({
+        name: b.name,
+        isDefault: def ? b.name === def : undefined,
+        commitSha: b.target?.hash ?? null,
+        protected: undefined, // branch-restriction lookups are a separate paginated API
+      }),
+    );
+  }
+
+  async listBitbucketCommits(input: {
+    owner: string;
+    name: string;
+    ref?: string;
+    limit?: number;
+  }): Promise<ForgeCommit[]> {
+    const base = this.bbRepo(input.owner, input.name);
+    const p = input.ref ? `${base}/commits/${encodeURIComponent(input.ref)}` : `${base}/commits`;
+    const res = await this.bbJson(
+      `${p}?pagelen=${Math.min(input.limit ?? 50, 100)}`,
+      bbPaged(BbCommitSchema),
+    );
+    if (!res) return [];
+    return res.values.map(bbCommit);
+  }
+
+  async compareBitbucketCommits(input: {
+    owner: string;
+    name: string;
+    base: string;
+    head: string;
+  }): Promise<{ files: ForgeChangeRequestFile[]; commits: ForgeCommit[] }> {
+    const base = this.bbRepo(input.owner, input.name);
+    const spec = `${encodeURIComponent(input.head)}..${encodeURIComponent(input.base)}`;
+    const [diffText, commitsRes] = await Promise.all([
+      this.bbText(`${base}/diff/${spec}`),
+      this.bbJson(
+        `${base}/commits/${encodeURIComponent(input.head)}?exclude=${encodeURIComponent(input.base)}&pagelen=100`,
+        bbPaged(BbCommitSchema),
+      ),
+    ]);
+    return {
+      files: parseDiffToFiles(diffText),
+      commits: (commitsRes?.values ?? []).map(bbCommit),
+    };
+  }
+
+  async reviewBitbucketChangeRequest(input: {
+    owner: string;
+    name: string;
+    number: number;
+    action: ForgeReviewAction;
+    body?: string;
+  }): Promise<boolean> {
+    const pr = `${this.bbRepo(input.owner, input.name)}/pullrequests/${input.number}`;
+    if (input.action === "approve") return this.bbSend("POST", `${pr}/approve`);
+    if (input.action === "request_changes") return this.bbSend("POST", `${pr}/request-changes`);
+    return this.bbSend("POST", `${pr}/comments`, { content: { raw: input.body ?? "" } });
+  }
+
+  async mergeBitbucketChangeRequest(input: {
+    owner: string;
+    name: string;
+    number: number;
+    method: ForgeMergeMethod;
+  }): Promise<boolean> {
+    const base = this.bbRepo(input.owner, input.name);
+    // Bitbucket has no rebase-merge; map rebase → fast_forward (closest available).
+    const strategy =
+      input.method === "squash"
+        ? "squash"
+        : input.method === "rebase"
+          ? "fast_forward"
+          : "merge_commit";
+    return this.bbSend("POST", `${base}/pullrequests/${input.number}/merge`, {
+      merge_strategy: strategy,
+    });
+  }
+
+  async listBitbucketPipelines(input: {
+    owner: string;
+    name: string;
+    ref?: string;
+    limit?: number;
+  }): Promise<ForgePipelineRun[]> {
+    const base = this.bbRepo(input.owner, input.name);
+    const res = await this.bbJson(
+      `${base}/pipelines/?sort=-created_on&pagelen=${Math.min(input.limit ?? 30, 100)}`,
+      bbPaged(BbPipelineSchema),
+    );
+    if (!res) return [];
+    return res.values
+      .filter((p) => !input.ref || p.target?.ref_name === input.ref)
+      .map(
+        (p): ForgePipelineRun => ({
+          id: p.uuid,
+          name: p.build_number != null ? `Pipeline #${p.build_number}` : "Pipeline",
+          status: bbPipelineStatus(p.state?.name, p.state?.result?.name ?? undefined),
+          ref: p.target?.ref_name ?? null,
+          sha: p.target?.commit?.hash ?? null,
+          trigger: p.trigger?.name ?? null,
+          actor: null,
+          durationSeconds: null,
+          createdAt_ms: isoToMs(p.created_on),
+          url: p.build_number != null ? bbPipelineUrl(input.owner, input.name, p.build_number) : "",
+        }),
+      );
+  }
+
+  async getBitbucketPipeline(input: {
+    owner: string;
+    name: string;
+    runId: string;
+  }): Promise<ForgePipelineDetail | null> {
+    const base = this.bbRepo(input.owner, input.name);
+    const uuid = encodeURIComponent(input.runId);
+    const [pipe, steps] = await Promise.all([
+      this.bbJson(`${base}/pipelines/${uuid}`, BbPipelineSchema),
+      this.bbJson(`${base}/pipelines/${uuid}/steps/`, bbPaged(BbStepSchema)),
+    ]);
+    if (!steps) return null;
+    const jobs: ForgePipelineJob[] = steps.values.map((s) => ({
+      // The step-log endpoint needs the pipeline uuid AND the step uuid, but the neutral
+      // job.log RPC only carries jobId — so encode "pipelineUuid:stepUuid" (uuids have no ":").
+      id: `${input.runId}:${s.uuid}`,
+      name: s.name ?? "step",
+      stage: "steps",
+      status: bbPipelineStatus(s.state?.name, s.state?.result?.name ?? undefined),
+      durationSeconds:
+        s.started_on && s.completed_on
+          ? Math.max(0, Math.round((Date.parse(s.completed_on) - Date.parse(s.started_on)) / 1000))
+          : null,
+      url: null,
+    }));
+    const status = pipe
+      ? bbPipelineStatus(pipe.state?.name, pipe.state?.result?.name ?? undefined)
+      : aggregateGlStatus(jobs.map((j) => j.status));
+    return {
+      id: input.runId,
+      status,
+      url:
+        pipe?.build_number != null
+          ? bbPipelineUrl(input.owner, input.name, pipe.build_number)
+          : null,
+      stages: [{ name: "steps", status, jobs }],
+    };
+  }
+
+  async getBitbucketJobLog(input: {
+    owner: string;
+    name: string;
+    jobId: string;
+  }): Promise<{ log: string; truncated: boolean; running: boolean }> {
+    // jobId is "pipelineUuid:stepUuid" (see getBitbucketPipeline).
+    const sep = input.jobId.indexOf(":");
+    const pipelineUuid = sep >= 0 ? input.jobId.slice(0, sep) : "";
+    const stepUuid = sep >= 0 ? input.jobId.slice(sep + 1) : "";
+    if (!pipelineUuid || !stepUuid) return { log: "", truncated: false, running: false };
+    const base = this.bbRepo(input.owner, input.name);
+    const text = await this.bbText(
+      `${base}/pipelines/${encodeURIComponent(pipelineUuid)}/steps/${encodeURIComponent(stepUuid)}/log`,
+    );
+    const MAX = 2 * 1024 * 1024;
+    if (text == null) return { log: "", truncated: false, running: false };
+    if (text.length > MAX) return { log: text.slice(0, MAX), truncated: true, running: false };
+    return { log: text, truncated: false, running: false };
+  }
+
+  async cancelBitbucketPipeline(input: {
+    owner: string;
+    name: string;
+    runId: string;
+  }): Promise<boolean> {
+    const base = this.bbRepo(input.owner, input.name);
+    return this.bbSend("POST", `${base}/pipelines/${encodeURIComponent(input.runId)}/stopPipeline`);
+  }
+
+  async listBitbucketTags(input: {
+    owner: string;
+    name: string;
+    limit?: number;
+  }): Promise<ForgeTag[]> {
+    const base = this.bbRepo(input.owner, input.name);
+    const res = await this.bbJson(
+      `${base}/refs/tags?pagelen=${Math.min(input.limit ?? 100, 100)}`,
+      bbPaged(BbTagSchema),
+    );
+    if (!res) return [];
+    return res.values.map(
+      (t): ForgeTag => ({
+        name: t.name,
+        commitSha: t.target?.hash ?? null,
+        url: t.links?.html?.href ?? null,
+      }),
+    );
+  }
+
+  async listBitbucketReleases(input: {
+    owner: string;
+    name: string;
+    limit?: number;
+  }): Promise<ForgeRelease[]> {
+    // Bitbucket Cloud has no releases API; synthesize one release per tag (name = tag).
+    const tags = await this.listBitbucketTags(input);
+    return tags.map(
+      (t): ForgeRelease => ({
+        id: t.name,
+        tagName: t.name,
+        name: t.name,
+        isDraft: false,
+        isPrerelease: false,
+        publishedAt_ms: null,
+        url: t.url ?? "",
+        assets: [],
+      }),
+    );
+  }
+
+  async listBitbucketIssues(input: {
+    owner: string;
+    name: string;
+    state?: "open" | "closed" | "all";
+    limit?: number;
+  }): Promise<ForgeIssue[]> {
+    const base = this.bbRepo(input.owner, input.name);
+    // The issue tracker may be disabled → the endpoint 404s → bbJson returns null → [].
+    const res = await this.bbJson(
+      `${base}/issues?pagelen=${Math.min(input.limit ?? 50, 50)}&sort=-updated_on`,
+      bbPaged(BbIssueSchema),
+    );
+    if (!res) return [];
+    return res.values
+      .map(
+        (i): ForgeIssue => ({
+          number: i.id,
+          title: i.title,
+          url: i.links?.html?.href ?? "",
+          state: bbIssueState(i.state),
+          authorLogin: i.reporter?.nickname ?? null,
+          labels: [],
+          updatedAt_ms: isoToMs(i.updated_on),
+        }),
+      )
+      .filter((i) => (input.state && input.state !== "all" ? i.state === input.state : true));
+  }
+
+  async createBitbucketIssue(input: {
+    owner: string;
+    name: string;
+    title: string;
+    body?: string;
+  }): Promise<ForgeIssue | null> {
+    const base = this.bbRepo(input.owner, input.name);
+    const payload: Record<string, unknown> = { title: input.title };
+    if (input.body) payload.content = { raw: input.body };
+    const res = await this.bbJson(`${base}/issues`, BbIssueSchema, {
+      method: "POST",
+      body: JSON.stringify(payload),
+      headers: { "Content-Type": "application/json" },
+    });
+    if (!res) return null;
+    return {
+      number: res.id,
+      title: res.title,
+      url: res.links?.html?.href ?? "",
+      state: bbIssueState(res.state),
+      authorLogin: res.reporter?.nickname ?? null,
+      labels: [],
+      updatedAt_ms: isoToMs(res.updated_on),
+    };
+  }
+
+  async commentBitbucketIssue(input: {
+    owner: string;
+    name: string;
+    number: number;
+    body: string;
+  }): Promise<boolean> {
+    const base = this.bbRepo(input.owner, input.name);
+    return this.bbSend("POST", `${base}/issues/${input.number}/comments`, {
+      content: { raw: input.body },
+    });
+  }
+
+  async closeBitbucketIssue(input: {
+    owner: string;
+    name: string;
+    number: number;
+  }): Promise<boolean> {
+    const base = this.bbRepo(input.owner, input.name);
+    return this.bbSend("PUT", `${base}/issues/${input.number}`, { state: "closed" });
+  }
 }
 
 /** Map GitHub run status+conclusion onto the neutral pipeline status enum. */
@@ -1249,7 +2532,7 @@ function ghRunStatus(
 export class ForgeHubSession {
   private readonly service: ForgeHubService;
   constructor(private readonly options: ForgeHubSessionOptions) {
-    this.service = new ForgeHubService(options.secretStore);
+    this.service = new ForgeHubService(options.secretStore, options.secretStoreDir);
   }
 
   async handle(msg: ForgeHubInbound): Promise<void> {
@@ -1308,7 +2591,14 @@ export class ForgeHubSession {
                     state: msg.state,
                     limit: msg.limit,
                   })
-                : [];
+                : msg.repo.forge === "bitbucket"
+                  ? await this.service.listBitbucketChangeRequests({
+                      owner: msg.repo.owner,
+                      name: msg.repo.name,
+                      state: msg.state,
+                      limit: msg.limit,
+                    })
+                  : [];
           this.emit({
             type: "forge.change_request.list.response",
             payload: { changeRequests, requestId: msg.requestId },
@@ -1329,7 +2619,13 @@ export class ForgeHubSession {
                     name: msg.repo.name,
                     number: msg.number,
                   })
-                : { files: [], truncated: false };
+                : msg.repo.forge === "bitbucket"
+                  ? await this.service.getBitbucketChangeRequestFiles({
+                      owner: msg.repo.owner,
+                      name: msg.repo.name,
+                      number: msg.number,
+                    })
+                  : { files: [], truncated: false };
           this.emit({
             type: "forge.change_request.files.response",
             payload: { files, truncated, requestId: msg.requestId },
@@ -1351,7 +2647,13 @@ export class ForgeHubSession {
                     name: msg.repo.name,
                     limit: msg.limit,
                   })
-                : [];
+                : msg.repo.forge === "bitbucket"
+                  ? await this.service.listBitbucketBranches({
+                      owner: msg.repo.owner,
+                      name: msg.repo.name,
+                      limit: msg.limit,
+                    })
+                  : [];
           this.emit({
             type: "forge.branch.list.response",
             payload: { branches, requestId: msg.requestId },
@@ -1374,7 +2676,14 @@ export class ForgeHubSession {
                     ref: msg.ref,
                     limit: msg.limit,
                   })
-                : [];
+                : msg.repo.forge === "bitbucket"
+                  ? await this.service.listBitbucketCommits({
+                      owner: msg.repo.owner,
+                      name: msg.repo.name,
+                      ref: msg.ref,
+                      limit: msg.limit,
+                    })
+                  : [];
           this.emit({
             type: "forge.commit.list.response",
             payload: { commits, requestId: msg.requestId },
@@ -1397,7 +2706,14 @@ export class ForgeHubSession {
                     base: msg.base,
                     head: msg.head,
                   })
-                : { files: [], commits: [] };
+                : msg.repo.forge === "bitbucket"
+                  ? await this.service.compareBitbucketCommits({
+                      owner: msg.repo.owner,
+                      name: msg.repo.name,
+                      base: msg.base,
+                      head: msg.head,
+                    })
+                  : { files: [], commits: [] };
           this.emit({
             type: "forge.commit.compare.response",
             payload: { files: res.files, commits: res.commits, requestId: msg.requestId },
@@ -1422,7 +2738,15 @@ export class ForgeHubSession {
                     action: msg.action,
                     body: msg.body,
                   })
-                : false;
+                : msg.repo.forge === "bitbucket"
+                  ? await this.service.reviewBitbucketChangeRequest({
+                      owner: msg.repo.owner,
+                      name: msg.repo.name,
+                      number: msg.number,
+                      action: msg.action,
+                      body: msg.body,
+                    })
+                  : false;
           this.emit({
             type: "forge.change_request.review.response",
             payload: { ok, requestId: msg.requestId },
@@ -1445,7 +2769,14 @@ export class ForgeHubSession {
                     number: msg.number,
                     method: msg.method,
                   })
-                : false;
+                : msg.repo.forge === "bitbucket"
+                  ? await this.service.mergeBitbucketChangeRequest({
+                      owner: msg.repo.owner,
+                      name: msg.repo.name,
+                      number: msg.number,
+                      method: msg.method,
+                    })
+                  : false;
           this.emit({
             type: "forge.change_request.merge.response",
             payload: { merged, requestId: msg.requestId },
@@ -1468,7 +2799,14 @@ export class ForgeHubSession {
                     ref: msg.ref,
                     limit: msg.limit,
                   })
-                : [];
+                : msg.repo.forge === "bitbucket"
+                  ? await this.service.listBitbucketPipelines({
+                      owner: msg.repo.owner,
+                      name: msg.repo.name,
+                      ref: msg.ref,
+                      limit: msg.limit,
+                    })
+                  : [];
           this.emit({
             type: "forge.pipeline.list.response",
             payload: { runs, requestId: msg.requestId },
@@ -1489,7 +2827,13 @@ export class ForgeHubSession {
                     name: msg.repo.name,
                     runId: msg.runId,
                   })
-                : null;
+                : msg.repo.forge === "bitbucket"
+                  ? await this.service.getBitbucketPipeline({
+                      owner: msg.repo.owner,
+                      name: msg.repo.name,
+                      runId: msg.runId,
+                    })
+                  : null;
           this.emit({
             type: "forge.pipeline.get.response",
             payload: { pipeline, requestId: msg.requestId },
@@ -1510,7 +2854,13 @@ export class ForgeHubSession {
                     name: msg.repo.name,
                     jobId: msg.jobId,
                   })
-                : { log: "", truncated: false, running: false };
+                : msg.repo.forge === "bitbucket"
+                  ? await this.service.getBitbucketJobLog({
+                      owner: msg.repo.owner,
+                      name: msg.repo.name,
+                      jobId: msg.jobId,
+                    })
+                  : { log: "", truncated: false, running: false };
           this.emit({
             type: "forge.job.log.response",
             payload: {
@@ -1558,7 +2908,13 @@ export class ForgeHubSession {
                     name: msg.repo.name,
                     runId: msg.runId,
                   })
-                : false;
+                : msg.repo.forge === "bitbucket"
+                  ? await this.service.cancelBitbucketPipeline({
+                      owner: msg.repo.owner,
+                      name: msg.repo.name,
+                      runId: msg.runId,
+                    })
+                  : false;
           this.emit({
             type: "forge.pipeline.cancel.response",
             payload: { ok, requestId: msg.requestId },
@@ -1578,6 +2934,243 @@ export class ForgeHubSession {
               : false;
           this.emit({
             type: "forge.job.play.response",
+            payload: { ok, requestId: msg.requestId },
+          });
+          return;
+        }
+        // ---- Milestone C (auto-merge · artifacts · releases · tags · issues) ----
+        case "forge.change_request.set_auto_merge.request": {
+          // Bitbucket has no auto-merge API → report disabled.
+          const enabled =
+            msg.repo.forge === "github"
+              ? await this.service.setAutoMerge({
+                  owner: msg.repo.owner,
+                  name: msg.repo.name,
+                  number: msg.number,
+                  enabled: msg.enabled,
+                  method: msg.method,
+                })
+              : msg.repo.forge === "gitlab"
+                ? await this.service.setGitLabAutoMerge({
+                    owner: msg.repo.owner,
+                    name: msg.repo.name,
+                    number: msg.number,
+                    enabled: msg.enabled,
+                  })
+                : false;
+          this.emit({
+            type: "forge.change_request.set_auto_merge.response",
+            payload: { enabled, requestId: msg.requestId },
+          });
+          return;
+        }
+        case "forge.artifact.list.request": {
+          // GitHub: workflow-run artifacts. GitLab: job-scoped (best-effort). Bitbucket:
+          // no run-scoped artifacts API → empty.
+          const artifacts =
+            msg.repo.forge === "github"
+              ? await this.service.listArtifacts({
+                  owner: msg.repo.owner,
+                  name: msg.repo.name,
+                  runId: msg.runId,
+                })
+              : msg.repo.forge === "gitlab"
+                ? await this.service.listGitLabArtifacts({
+                    owner: msg.repo.owner,
+                    name: msg.repo.name,
+                    runId: msg.runId,
+                  })
+                : [];
+          this.emit({
+            type: "forge.artifact.list.response",
+            payload: { artifacts, requestId: msg.requestId },
+          });
+          return;
+        }
+        case "forge.artifact.download.request": {
+          // Only GitHub exposes a per-artifact download URL; others → null.
+          const url =
+            msg.repo.forge === "github"
+              ? await this.service.downloadArtifact({
+                  owner: msg.repo.owner,
+                  name: msg.repo.name,
+                  artifactId: msg.artifactId,
+                })
+              : null;
+          this.emit({
+            type: "forge.artifact.download.response",
+            payload: { url, requestId: msg.requestId },
+          });
+          return;
+        }
+        case "forge.release.list.request": {
+          // Bitbucket has no releases API → synthesized from tags.
+          const releases =
+            msg.repo.forge === "github"
+              ? await this.service.listReleases({
+                  owner: msg.repo.owner,
+                  name: msg.repo.name,
+                  limit: msg.limit,
+                })
+              : msg.repo.forge === "gitlab"
+                ? await this.service.listGitLabReleases({
+                    owner: msg.repo.owner,
+                    name: msg.repo.name,
+                    limit: msg.limit,
+                  })
+                : msg.repo.forge === "bitbucket"
+                  ? await this.service.listBitbucketReleases({
+                      owner: msg.repo.owner,
+                      name: msg.repo.name,
+                      limit: msg.limit,
+                    })
+                  : [];
+          this.emit({
+            type: "forge.release.list.response",
+            payload: { releases, requestId: msg.requestId },
+          });
+          return;
+        }
+        case "forge.tag.list.request": {
+          const tags =
+            msg.repo.forge === "github"
+              ? await this.service.listTags({
+                  owner: msg.repo.owner,
+                  name: msg.repo.name,
+                  limit: msg.limit,
+                })
+              : msg.repo.forge === "gitlab"
+                ? await this.service.listGitLabTags({
+                    owner: msg.repo.owner,
+                    name: msg.repo.name,
+                    limit: msg.limit,
+                  })
+                : msg.repo.forge === "bitbucket"
+                  ? await this.service.listBitbucketTags({
+                      owner: msg.repo.owner,
+                      name: msg.repo.name,
+                      limit: msg.limit,
+                    })
+                  : [];
+          this.emit({
+            type: "forge.tag.list.response",
+            payload: { tags, requestId: msg.requestId },
+          });
+          return;
+        }
+        case "forge.issue.list.request": {
+          const issues =
+            msg.repo.forge === "github"
+              ? await this.service.listIssues({
+                  owner: msg.repo.owner,
+                  name: msg.repo.name,
+                  state: msg.state,
+                  limit: msg.limit,
+                })
+              : msg.repo.forge === "gitlab"
+                ? await this.service.listGitLabIssues({
+                    owner: msg.repo.owner,
+                    name: msg.repo.name,
+                    state: msg.state,
+                    limit: msg.limit,
+                  })
+                : msg.repo.forge === "bitbucket"
+                  ? await this.service.listBitbucketIssues({
+                      owner: msg.repo.owner,
+                      name: msg.repo.name,
+                      state: msg.state,
+                      limit: msg.limit,
+                    })
+                  : [];
+          this.emit({
+            type: "forge.issue.list.response",
+            payload: { issues, requestId: msg.requestId },
+          });
+          return;
+        }
+        case "forge.issue.create.request": {
+          const issue =
+            msg.repo.forge === "github"
+              ? await this.service.createIssue({
+                  owner: msg.repo.owner,
+                  name: msg.repo.name,
+                  title: msg.title,
+                  body: msg.body,
+                })
+              : msg.repo.forge === "gitlab"
+                ? await this.service.createGitLabIssue({
+                    owner: msg.repo.owner,
+                    name: msg.repo.name,
+                    title: msg.title,
+                    body: msg.body,
+                  })
+                : msg.repo.forge === "bitbucket"
+                  ? await this.service.createBitbucketIssue({
+                      owner: msg.repo.owner,
+                      name: msg.repo.name,
+                      title: msg.title,
+                      body: msg.body,
+                    })
+                  : null;
+          this.emit({
+            type: "forge.issue.create.response",
+            payload: { issue, requestId: msg.requestId },
+          });
+          return;
+        }
+        case "forge.issue.comment.request": {
+          const ok =
+            msg.repo.forge === "github"
+              ? await this.service.commentIssue({
+                  owner: msg.repo.owner,
+                  name: msg.repo.name,
+                  number: msg.number,
+                  body: msg.body,
+                })
+              : msg.repo.forge === "gitlab"
+                ? await this.service.commentGitLabIssue({
+                    owner: msg.repo.owner,
+                    name: msg.repo.name,
+                    number: msg.number,
+                    body: msg.body,
+                  })
+                : msg.repo.forge === "bitbucket"
+                  ? await this.service.commentBitbucketIssue({
+                      owner: msg.repo.owner,
+                      name: msg.repo.name,
+                      number: msg.number,
+                      body: msg.body,
+                    })
+                  : false;
+          this.emit({
+            type: "forge.issue.comment.response",
+            payload: { ok, requestId: msg.requestId },
+          });
+          return;
+        }
+        case "forge.issue.close.request": {
+          const ok =
+            msg.repo.forge === "github"
+              ? await this.service.closeIssue({
+                  owner: msg.repo.owner,
+                  name: msg.repo.name,
+                  number: msg.number,
+                })
+              : msg.repo.forge === "gitlab"
+                ? await this.service.closeGitLabIssue({
+                    owner: msg.repo.owner,
+                    name: msg.repo.name,
+                    number: msg.number,
+                  })
+                : msg.repo.forge === "bitbucket"
+                  ? await this.service.closeBitbucketIssue({
+                      owner: msg.repo.owner,
+                      name: msg.repo.name,
+                      number: msg.number,
+                    })
+                  : false;
+          this.emit({
+            type: "forge.issue.close.response",
             payload: { ok, requestId: msg.requestId },
           });
           return;
@@ -1679,6 +3272,51 @@ export class ForgeHubSession {
       case "forge.job.play.request":
         return this.emit({
           type: "forge.job.play.response",
+          payload: { ok: false, requestId: msg.requestId },
+        });
+      case "forge.change_request.set_auto_merge.request":
+        return this.emit({
+          type: "forge.change_request.set_auto_merge.response",
+          payload: { enabled: false, requestId: msg.requestId },
+        });
+      case "forge.artifact.list.request":
+        return this.emit({
+          type: "forge.artifact.list.response",
+          payload: { artifacts: [], requestId: msg.requestId },
+        });
+      case "forge.artifact.download.request":
+        return this.emit({
+          type: "forge.artifact.download.response",
+          payload: { url: null, requestId: msg.requestId },
+        });
+      case "forge.release.list.request":
+        return this.emit({
+          type: "forge.release.list.response",
+          payload: { releases: [], requestId: msg.requestId },
+        });
+      case "forge.tag.list.request":
+        return this.emit({
+          type: "forge.tag.list.response",
+          payload: { tags: [], requestId: msg.requestId },
+        });
+      case "forge.issue.list.request":
+        return this.emit({
+          type: "forge.issue.list.response",
+          payload: { issues: [], requestId: msg.requestId },
+        });
+      case "forge.issue.create.request":
+        return this.emit({
+          type: "forge.issue.create.response",
+          payload: { issue: null, requestId: msg.requestId },
+        });
+      case "forge.issue.comment.request":
+        return this.emit({
+          type: "forge.issue.comment.response",
+          payload: { ok: false, requestId: msg.requestId },
+        });
+      case "forge.issue.close.request":
+        return this.emit({
+          type: "forge.issue.close.response",
           payload: { ok: false, requestId: msg.requestId },
         });
     }
