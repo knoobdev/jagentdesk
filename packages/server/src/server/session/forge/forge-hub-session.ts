@@ -22,7 +22,7 @@ import type {
   SessionOutboundMessage,
 } from "@jagentdesk/protocol/messages";
 import { findExecutable } from "../../../executable-resolution/executable-resolution.js";
-import { execCommand } from "../../../utils/spawn.js";
+import { execCommand, spawnProcess } from "../../../utils/spawn.js";
 import { detectCliStatus, installCli } from "./forge-cli-installer.js";
 import { ForgeDeviceLogin } from "./forge-device-login.js";
 import type { SecretStore } from "../../database/secret-store.js";
@@ -712,6 +712,25 @@ export class ForgeHubService {
     );
   }
 
+  /**
+   * Run a CLI that reads a secret from stdin (gh/glab token login), feeding the
+   * token in without it ever touching argv (which would leak via the process
+   * table). Rejects with the CLI's stderr on non-zero exit.
+   */
+  private async runCliWithStdin(bin: string, args: string[], input: string): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      const child = spawnProcess(bin, args, { stdio: ["pipe", "ignore", "pipe"] });
+      let stderr = "";
+      child.stderr?.on("data", (d) => (stderr += d.toString()));
+      child.on("error", reject);
+      child.on("exit", (code) =>
+        code === 0 ? resolve() : reject(new Error(stderr.trim() || `exited with code ${code}`)),
+      );
+      child.stdin?.write(input);
+      child.stdin?.end();
+    });
+  }
+
   async addConnection(input: {
     forge: string;
     host?: string;
@@ -722,6 +741,31 @@ export class ForgeHubService {
     const id = `${input.forge}:${host || "default"}`;
     if (input.method === "token") {
       if (!input.token) throw new Error("A token is required for token authentication.");
+      // GitHub/GitLab: hand the token to the CLI's own token login so every
+      // existing gh/glab code path (list/repos/PRs/…) works unchanged and the
+      // token lives in the CLI's store, not ours. glab's device flow is
+      // unreliable (no code emitted), so a pasted token is the primary path.
+      if (input.forge === "github" || input.forge === "gitlab") {
+        const bin = input.forge === "github" ? await this.ghPath() : await this.glabPath();
+        const cli = input.forge === "github" ? "gh" : "glab";
+        if (!bin) throw new Error(`${cli} is not installed on the daemon host.`);
+        const hostname = host || (input.forge === "github" ? "github.com" : "gitlab.com");
+        const args =
+          input.forge === "github"
+            ? ["auth", "login", "--hostname", hostname, "--git-protocol", "https", "--with-token"]
+            : ["auth", "login", "--hostname", hostname, "--stdin"];
+        await this.runCliWithStdin(bin, args, `${input.token.trim()}\n`);
+        const found = (await this.listConnections()).find((c) => c.id === id);
+        if (found) return found;
+        return {
+          id,
+          forge: input.forge,
+          host: hostname,
+          account: null,
+          method: "cli",
+          authState: "unauthenticated",
+        };
+      }
       await this.secretStore.set(`${SECRET_PREFIX}${id}`, input.token);
       // Persist keyless metadata so the connection enumerates after restart.
       const metas = await this.readConnectionIndex();
@@ -754,6 +798,18 @@ export class ForgeHubService {
   }
 
   async removeConnection(connectionId: string): Promise<boolean> {
+    // A GitHub/GitLab connection is derived live from `gh/glab api user`, so
+    // deleting a stored secret alone leaves it logged in and it reappears on the
+    // next list. Log the CLI out of that host so removal actually sticks.
+    const [forge, hostPart] = connectionId.split(":", 2);
+    const host = hostPart || (forge === "github" ? "github.com" : "gitlab.com");
+    if (forge === "github") {
+      const gh = await this.ghPath();
+      if (gh) await this.ghOk(["auth", "logout", "--hostname", host]);
+    } else if (forge === "gitlab") {
+      const glab = await this.glabPath();
+      if (glab) await this.glabOk(["auth", "logout", "--hostname", host]);
+    }
     await this.secretStore.delete(`${SECRET_PREFIX}${connectionId}`);
     const metas = await this.readConnectionIndex();
     const next = metas.filter((m) => m.id !== connectionId);

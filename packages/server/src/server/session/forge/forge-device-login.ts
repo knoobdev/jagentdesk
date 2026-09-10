@@ -25,6 +25,10 @@ import { createExternalCommandProcessEnv } from "../../jagentdesk-env.js";
  */
 
 const LOGIN_TIMEOUT_MS = 5 * 60_000;
+// If the CLI hasn't printed a one-time code within this window, the device flow
+// never started (e.g. glab's interactive menu we can't drive) — fail fast with a
+// clear error instead of spinning on "Starting …" forever.
+const NO_CODE_TIMEOUT_MS = 30_000;
 
 /** Strip ANSI escape sequences (gh/glab colorize their output). */
 function stripAnsi(text: string): string {
@@ -32,10 +36,14 @@ function stripAnsi(text: string): string {
   return text.replace(/\x1B\[[0-9;?]*[A-Za-z]/g, "");
 }
 
-/** A device one-time code, e.g. `ABCD-1234` (two 4-char groups). */
+// The one-time code, matched off the CLI's label so both formats work:
+// gh prints "one-time code: 1A2B-3C4D" (dashed), glab "one-time code: SW63YQXV"
+// (8 chars, no dash). Fall back to a bare dashed code if the label ever changes.
+const CODE_LABEL_RE = /one-time code:\s*([A-Z0-9][A-Z0-9-]{4,14})/i;
 const CODE_RE = /([A-Z0-9]{4}-[A-Z0-9]{4})/;
-/** The verification URL the human opens, e.g. https://github.com/login/device. */
-const URL_RE = /(https?:\/\/\S*?\/login\/device)/;
+// The verification URL the human opens. gh: https://github.com/login/device,
+// glab: https://gitlab.com/oauth/device — both contain "device".
+const URL_RE = /(https?:\/\/[^\s]*device[^\s]*)/i;
 /** A line that signals the CLI finished authenticating. */
 const DONE_RE = /Authentication complete|Logged in as|Configured git/i;
 
@@ -68,11 +76,11 @@ interface DriveOptions {
   envOverlay: Record<string, string>;
   emitProgress: (progress: LoginProgress) => void;
   /**
-   * Optional per-chunk driver for CLIs that gate the web flow behind an
-   * interactive menu (glab). Receives the ANSI-stripped accumulated output and a
-   * `write` callback to answer a prompt. Called on every data chunk.
+   * Verification URL to show when the CLI prints a code but not the full URL
+   * (gh relies on auto-opening the browser and only says "open github.com…").
+   * Used as the fallback when no explicit device URL is parsed from output.
    */
-  menuResponder?: (accumulated: string, write: (s: string) => void) => void;
+  defaultVerificationUri: string;
 }
 
 export class ForgeDeviceLogin {
@@ -120,34 +128,25 @@ export class ForgeDeviceLogin {
           "--skip-ssh-key",
         ],
         envOverlay: { BROWSER: "true", GH_PROMPT_DISABLED: "" },
+        defaultVerificationUri: `https://${host || "github.com"}/login/device`,
       });
     }
 
     if (cli === "glab") {
-      // Best-effort GitLab. `glab auth login` is menu-driven ("How would you like
-      // to sign in?" → Web/Token), unlike gh's flag-driven flow, so it is far less
-      // reliable to drive from a pty. We attempt it and reuse the same code/URL
-      // parsing (glab's web flow also prints a device code + a `/login/device` URL);
-      // `menuResponder` nudges the first sign-in-method prompt toward the default
-      // (Enter). This path is UNVERIFIED against a live GitLab (see report); on any
-      // failure the app falls back to the manual sign-in hint.
-      let nudged = false;
+      // GitLab via glab's OAuth 2.0 device flow (`--device`): flag-driven and
+      // poll-based, exactly like gh — it prints "one-time code: XXXX" + the
+      // https://gitlab.com/oauth/device URL, then waits. This is cross-device
+      // (the code is entered on ANY browser), so it works from the app the same
+      // way gh does. `--device` skips glab's interactive sign-in-method menu, so
+      // no pty menu-nudging is needed. (Requires GitLab 17.9+ per glab docs.)
       return this.driveLogin({
         forge,
         requestId,
         binPath,
         emitProgress,
-        args: ["auth", "login", signIn.hostnameFlag ?? "--hostname", host || "gitlab.com"],
+        args: ["auth", "login", "--hostname", host || "gitlab.com", "--device"],
         envOverlay: { BROWSER: "true" },
-        menuResponder: (accumulated, write) => {
-          if (nudged) return;
-          // glab presents a survey Select for the login method before printing a
-          // code. Accept the highlighted default once when that prompt appears.
-          if (/how would you like to (sign in|login)|select .*method/i.test(accumulated)) {
-            nudged = true;
-            write("\n");
-          }
-        },
+        defaultVerificationUri: `https://${host || "gitlab.com"}/oauth/device`,
       });
     }
 
@@ -174,7 +173,8 @@ export class ForgeDeviceLogin {
 
   /** Spawn the CLI in a pty, parse its output, and resolve the terminal result. */
   private driveLogin(opts: DriveOptions): Promise<LoginResult> {
-    const { forge, requestId, binPath, args, envOverlay, menuResponder, emitProgress } = opts;
+    const { forge, requestId, binPath, args, envOverlay, defaultVerificationUri, emitProgress } =
+      opts;
     return new Promise<LoginResult>((resolve) => {
       const env = createExternalCommandProcessEnv(binPath, process.env, envOverlay);
 
@@ -203,6 +203,7 @@ export class ForgeDeviceLogin {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        clearTimeout(codeTimer);
         this.ptys.delete(requestId);
         this.cancelled.delete(requestId);
         try {
@@ -218,6 +219,13 @@ export class ForgeDeviceLogin {
         finish({ ok: false, forge, error: "timeout" });
       }, LOGIN_TIMEOUT_MS);
 
+      // No one-time code within the window → the flow never really started.
+      const codeTimer = setTimeout(() => {
+        if (codeEmitted) return;
+        emitProgress({ phase: "failed", line: "no-device-code" });
+        finish({ ok: false, forge, error: "no-device-code" });
+      }, NO_CODE_TIMEOUT_MS);
+
       const write = (s: string): void => {
         try {
           child.write(s);
@@ -226,16 +234,19 @@ export class ForgeDeviceLogin {
         }
       };
 
-      // Look for the one-time code + verification URL. `text` may be a full line or
-      // the un-terminated tail (gh prints the "Press Enter…" prompt without a \n).
-      const inspect = (text: string): void => {
+      // Scan the ACCUMULATED output (not a single line): gh and glab print the
+      // one-time code and the URL on separate lines/bursts, and gh may not print
+      // the full URL at all (it auto-opens the browser). Emit as soon as we have a
+      // code; use the parsed device URL when present, else the per-forge default.
+      const tryEmit = (accumulatedText: string): void => {
         if (codeEmitted) return;
-        const cm = text.match(CODE_RE);
+        const cm = accumulatedText.match(CODE_LABEL_RE) ?? accumulatedText.match(CODE_RE);
         if (!cm) return;
-        const um = text.match(URL_RE);
+        const um = accumulatedText.match(URL_RE);
         const userCode = cm[1] ?? null;
-        const verificationUri = um ? (um[1] ?? null) : "https://github.com/login/device";
+        const verificationUri = um?.[1] ?? defaultVerificationUri;
         codeEmitted = true;
+        clearTimeout(codeTimer);
         emitProgress({ phase: "awaiting_authorization", userCode, verificationUri });
         // Dismiss the CLI's "Press Enter to open in your browser…" prompt ONCE so it
         // proceeds to poll for authorization instead of waiting on stdin.
@@ -245,7 +256,6 @@ export class ForgeDeviceLogin {
       const handleLine = (line: string): void => {
         const trimmed = line.trim();
         if (trimmed) lastLine = trimmed;
-        inspect(line);
         if (DONE_RE.test(line)) emitProgress({ phase: "verifying" });
       };
 
@@ -257,11 +267,10 @@ export class ForgeDeviceLogin {
           handleLine(stripAnsi(buffer.slice(0, idx)));
           buffer = buffer.slice(idx + 1);
         }
-        // Inspect the un-terminated tail too (the code/prompt may lack a newline).
-        const tail = stripAnsi(buffer);
-        inspect(tail);
+        // Scan the full accumulated output (incl. the un-terminated tail) so a
+        // code and URL split across lines/chunks are both detected.
         accumulated += stripAnsi(data);
-        menuResponder?.(accumulated, write);
+        tryEmit(accumulated + stripAnsi(buffer));
       });
 
       child.onExit((event: { exitCode: number }) => {

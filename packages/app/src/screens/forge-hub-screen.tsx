@@ -534,6 +534,7 @@ const LOGIN_ERROR_LABEL: Record<string, string> = {
   "cli-missing": "The CLI isn't installed on the daemon host.",
   "no-device-flow": "This provider doesn't support device-flow sign-in.",
   "unsupported-provider": "Sign-in isn't supported for this provider.",
+  "no-device-code": "Couldn't start the sign-in flow (no code from the CLI). Try again.",
   cancelled: "Sign-in cancelled.",
   timeout: "Sign-in timed out. Please try again.",
 };
@@ -579,6 +580,7 @@ function CliInstallSection({
   host,
   cliName,
   onLoggedIn,
+  onActivity,
 }: {
   client: DaemonClient | null;
   cliInstallEnabled: boolean;
@@ -587,6 +589,9 @@ function CliInstallSection({
   host: string;
   cliName: string;
   onLoggedIn: () => void | Promise<void>;
+  /** Report when a sign-in/install is in progress so the parent can hide its
+   *  own form actions (avoids a second, confusing Cancel button). */
+  onActivity?: (busy: boolean) => void;
 }) {
   const { theme } = useUnistyles();
   const [probeLoading, setProbeLoading] = useState(false);
@@ -603,6 +608,12 @@ function CliInstallSection({
   const [loginError, setLoginError] = useState<string | null>(null);
   const [loggedIn, setLoggedIn] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  // Tell the parent when a sign-in/install is running so it can hide its own
+  // form Cancel — otherwise the card shows two "Cancel" buttons at once.
+  useEffect(() => {
+    onActivity?.(signingIn || installing);
+  }, [signingIn, installing, onActivity]);
 
   // Guards: `mountedRef` blocks setState after unmount; `probeTokenRef` drops
   // stale probe responses when the forge/host selection changes mid-flight.
@@ -1000,6 +1011,9 @@ function ConnectionsView({
   const [host, setHost] = useState("");
   const [token, setToken] = useState("");
   const [selfHostedForge, setSelfHostedForge] = useState("gitlab");
+  // True while the CliInstallSection is signing in / installing — hides the
+  // form's own Cancel so there's never a second Cancel next to the card's.
+  const [formBusy, setFormBusy] = useState(false);
 
   const option = useMemo(
     () => PROVIDER_OPTIONS.find((o) => o.choice === choice) ?? PROVIDER_OPTIONS[0],
@@ -1172,6 +1186,7 @@ function ConnectionsView({
                 host={option.needsHost ? host : ""}
                 cliName={def.signIn?.cli ?? "the CLI"}
                 onLoggedIn={handleLoggedIn}
+                onActivity={setFormBusy}
               />
             </>
           ) : (
@@ -1195,24 +1210,28 @@ function ConnectionsView({
             </View>
           )}
 
-          <View style={styles.formActions}>
-            {/* The bottom "Add connection" submit is only for the manual paths:
-                token providers, or a cli host without in-app sign-in. When the
-                in-app sign-in button is present it does the whole thing, so we
-                show only Cancel here to avoid a confusing second action. */}
-            {showManualAdd ? (
-              <Pressable
-                style={[styles.btn, styles.btnPrimary]}
-                onPress={handleSubmit}
-                testID="forge-connection-submit"
-              >
-                <Text style={styles.btnPrimaryText}>Add connection</Text>
+          {/* While a sign-in/install is running, the card owns its own Cancel, so
+              hide the form actions to avoid two Cancel buttons at once. */}
+          {formBusy ? null : (
+            <View style={styles.formActions}>
+              {/* The bottom "Add connection" submit is only for the manual paths:
+                  token providers, or a cli host without in-app sign-in. When the
+                  in-app sign-in button is present it does the whole thing, so we
+                  show only Cancel here to avoid a confusing second action. */}
+              {showManualAdd ? (
+                <Pressable
+                  style={[styles.btn, styles.btnPrimary]}
+                  onPress={handleSubmit}
+                  testID="forge-connection-submit"
+                >
+                  <Text style={styles.btnPrimaryText}>Add connection</Text>
+                </Pressable>
+              ) : null}
+              <Pressable style={[styles.btn, styles.btnGhost]} onPress={onToggleAdd}>
+                <Text style={styles.btnGhostText}>Cancel</Text>
               </Pressable>
-            ) : null}
-            <Pressable style={[styles.btn, styles.btnGhost]} onPress={onToggleAdd}>
-              <Text style={styles.btnGhostText}>Cancel</Text>
-            </Pressable>
-          </View>
+            </View>
+          )}
         </View>
       ) : null}
     </View>
