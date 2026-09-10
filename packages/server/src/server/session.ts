@@ -2481,6 +2481,8 @@ export class Session {
       case "forge.branch.list.request":
       case "forge.commit.list.request":
       case "forge.commit.compare.request":
+      case "forge.tree.list.request":
+      case "forge.file.get.request":
       case "forge.change_request.review.request":
       case "forge.change_request.merge.request":
       case "forge.pipeline.list.request":

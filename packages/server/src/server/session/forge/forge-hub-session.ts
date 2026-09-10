@@ -8,6 +8,7 @@ import type {
   ForgeChangeRequestFile,
   ForgeBranch,
   ForgeCommit,
+  ForgeTreeEntry,
   ForgePipelineRun,
   ForgePipelineDetail,
   ForgePipelineJob,
@@ -50,6 +51,8 @@ type ForgeHubInbound = Extract<
       | "forge.branch.list.request"
       | "forge.commit.list.request"
       | "forge.commit.compare.request"
+      | "forge.tree.list.request"
+      | "forge.file.get.request"
       | "forge.change_request.review.request"
       | "forge.change_request.merge.request"
       | "forge.pipeline.list.request"
@@ -93,6 +96,8 @@ const GH_TIMEOUT_MS = 20_000;
 const BB_TIMEOUT_MS = 20_000;
 const SECRET_PREFIX = "forge.connection.token:";
 const BITBUCKET_API = "https://api.bitbucket.org/2.0";
+/** Files larger than this are returned as { content: null, truncated: true }. */
+const MAX_FILE_BYTES = 512 * 1024;
 
 // ---- gh JSON shapes (loose; we only read what we map) --------------------------
 const GhRepoSchema = z.object({
@@ -145,6 +150,36 @@ function mapVisibility(
   const s = (v ?? (isPrivate ? "private" : "")).toLowerCase();
   if (s === "public" || s === "private" || s === "internal") return s;
   return "unknown";
+}
+
+/** Percent-encode each path segment while keeping "/" separators intact. */
+function encodePath(p: string): string {
+  return p.split("/").map(encodeURIComponent).join("/");
+}
+
+/** Shape returned by every getFile*() (before the requestId is attached). */
+type ForgeFileResult = {
+  path: string;
+  content: string | null;
+  isBinary: boolean;
+  size: number | null;
+  truncated: boolean;
+};
+
+/**
+ * Turn raw file bytes into a ForgeFileResult: over the size cap → truncated; a NUL
+ * byte → binary; otherwise a utf8 string. `reportedSize` is the forge-reported size
+ * when known (github/gitlab), else the byte length is used (bitbucket raw read).
+ */
+function decodeForgeFile(path: string, buf: Buffer, reportedSize?: number | null): ForgeFileResult {
+  const size = reportedSize ?? buf.byteLength;
+  if (buf.byteLength > MAX_FILE_BYTES) {
+    return { path, content: null, isBinary: false, size, truncated: true };
+  }
+  if (buf.includes(0)) {
+    return { path, content: null, isBinary: true, size, truncated: false };
+  }
+  return { path, content: buf.toString("utf8"), isBinary: false, size, truncated: false };
 }
 
 function rollupToChecks(
@@ -1080,6 +1115,65 @@ export class ForgeHubService {
     };
   }
 
+  async listTree(input: {
+    owner: string;
+    name: string;
+    ref: string;
+    path: string;
+  }): Promise<ForgeTreeEntry[]> {
+    const repo = `${input.owner}/${input.name}`;
+    const enc = encodePath(input.path);
+    const res = await this.ghJson(
+      ["api", `repos/${repo}/contents${enc ? `/${enc}` : ""}?ref=${encodeURIComponent(input.ref)}`],
+      z.union([
+        z.array(
+          z.object({
+            name: z.string(),
+            path: z.string(),
+            type: z.string(),
+            size: z.number().optional(),
+          }),
+        ),
+        // A single object means `path` was a file, not a directory.
+        z.object({ type: z.string() }),
+      ]),
+    );
+    if (!res || !Array.isArray(res)) return [];
+    return res.map(
+      (e): ForgeTreeEntry => ({
+        name: e.name,
+        path: e.path,
+        type: e.type === "dir" ? "dir" : "file",
+        size: e.size ?? null,
+      }),
+    );
+  }
+
+  async getFile(input: {
+    owner: string;
+    name: string;
+    ref: string;
+    path: string;
+  }): Promise<ForgeFileResult> {
+    const repo = `${input.owner}/${input.name}`;
+    const res = await this.ghJson(
+      [
+        "api",
+        `repos/${repo}/contents/${encodePath(input.path)}?ref=${encodeURIComponent(input.ref)}`,
+      ],
+      z.object({
+        content: z.string().optional(),
+        encoding: z.string().optional(),
+        size: z.number().optional(),
+      }),
+    );
+    const size = res?.size ?? null;
+    if (!res || res.content == null || (res.size != null && res.size > MAX_FILE_BYTES)) {
+      return { path: input.path, content: null, isBinary: false, size, truncated: true };
+    }
+    return decodeForgeFile(input.path, Buffer.from(res.content, "base64"), size);
+  }
+
   async reviewChangeRequest(input: {
     owner: string;
     name: string;
@@ -1451,6 +1545,53 @@ export class ForgeHubService {
       files: res.diffs.map(glChangeToFile),
       commits: res.commits.map(glCommit),
     };
+  }
+
+  async listGitLabTree(input: {
+    owner: string;
+    name: string;
+    ref: string;
+    path: string;
+  }): Promise<ForgeTreeEntry[]> {
+    const enc = glProjectId(input.owner, input.name);
+    const pathParam = input.path ? `&path=${encodeURIComponent(input.path)}` : "";
+    const rows = await this.glabJson(
+      [
+        "api",
+        `projects/${enc}/repository/tree?ref=${encodeURIComponent(input.ref)}${pathParam}&per_page=100`,
+      ],
+      z.array(z.object({ name: z.string(), path: z.string(), type: z.string() })),
+    );
+    if (!rows) return [];
+    return rows.map(
+      (e): ForgeTreeEntry => ({
+        name: e.name,
+        path: e.path,
+        type: e.type === "tree" ? "dir" : "file",
+        size: null, // GitLab's tree API does not report blob sizes
+      }),
+    );
+  }
+
+  async getGitLabFile(input: {
+    owner: string;
+    name: string;
+    ref: string;
+    path: string;
+  }): Promise<ForgeFileResult> {
+    const enc = glProjectId(input.owner, input.name);
+    const res = await this.glabJson(
+      [
+        "api",
+        `projects/${enc}/repository/files/${encodeURIComponent(input.path)}?ref=${encodeURIComponent(input.ref)}`,
+      ],
+      z.object({ content: z.string().optional(), size: z.number().optional() }),
+    );
+    const size = res?.size ?? null;
+    if (!res || res.content == null || (res.size != null && res.size > MAX_FILE_BYTES)) {
+      return { path: input.path, content: null, isBinary: false, size, truncated: true };
+    }
+    return decodeForgeFile(input.path, Buffer.from(res.content, "base64"), size);
   }
 
   async reviewGitLabChangeRequest(input: {
@@ -2323,6 +2464,68 @@ export class ForgeHubService {
     };
   }
 
+  async listBitbucketTree(input: {
+    owner: string;
+    name: string;
+    ref: string;
+    path: string;
+  }): Promise<ForgeTreeEntry[]> {
+    const base = this.bbRepo(input.owner, input.name);
+    const enc = encodePath(input.path);
+    // A trailing slash requests a directory listing; root = /src/{ref}/.
+    // Best-effort: only the first page is read (the `next` cursor is ignored).
+    const res = await this.bbJson(
+      `${base}/src/${encodeURIComponent(input.ref)}/${enc}${enc ? "/" : ""}`,
+      z.object({
+        values: z.array(
+          z.object({ path: z.string(), type: z.string(), size: z.number().optional() }),
+        ),
+      }),
+    );
+    if (!res) return [];
+    return res.values.map((e): ForgeTreeEntry => {
+      const seg = e.path.split("/");
+      return {
+        name: seg[seg.length - 1] ?? e.path,
+        path: e.path,
+        type: e.type === "commit_directory" ? "dir" : "file",
+        size: e.size ?? null,
+      };
+    });
+  }
+
+  async getBitbucketFile(input: {
+    owner: string;
+    name: string;
+    ref: string;
+    path: string;
+  }): Promise<ForgeFileResult> {
+    // Bitbucket's /src/{ref}/{path} returns RAW bytes for a file (not JSON), so read
+    // the arrayBuffer directly rather than via bbJson/bbText.
+    const token = await this.bitbucketToken();
+    const miss: ForgeFileResult = {
+      path: input.path,
+      content: null,
+      isBinary: false,
+      size: null,
+      truncated: false,
+    };
+    if (!token) return miss;
+    try {
+      const res = await fetch(
+        `${BITBUCKET_API}${this.bbRepo(input.owner, input.name)}/src/${encodeURIComponent(input.ref)}/${encodePath(input.path)}`,
+        {
+          signal: AbortSignal.timeout(BB_TIMEOUT_MS),
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      );
+      if (!res.ok) return miss;
+      return decodeForgeFile(input.path, Buffer.from(await res.arrayBuffer()));
+    } catch {
+      return miss;
+    }
+  }
+
   async reviewBitbucketChangeRequest(input: {
     owner: string;
     name: string;
@@ -2782,6 +2985,79 @@ export class ForgeHubSession {
           this.emit({
             type: "forge.commit.compare.response",
             payload: { files: res.files, commits: res.commits, requestId: msg.requestId },
+          });
+          return;
+        }
+        case "forge.tree.list.request": {
+          const entries =
+            msg.repo.forge === "github"
+              ? await this.service.listTree({
+                  owner: msg.repo.owner,
+                  name: msg.repo.name,
+                  ref: msg.ref,
+                  path: msg.path,
+                })
+              : msg.repo.forge === "gitlab"
+                ? await this.service.listGitLabTree({
+                    owner: msg.repo.owner,
+                    name: msg.repo.name,
+                    ref: msg.ref,
+                    path: msg.path,
+                  })
+                : msg.repo.forge === "bitbucket"
+                  ? await this.service.listBitbucketTree({
+                      owner: msg.repo.owner,
+                      name: msg.repo.name,
+                      ref: msg.ref,
+                      path: msg.path,
+                    })
+                  : [];
+          this.emit({
+            type: "forge.tree.list.response",
+            payload: { entries, requestId: msg.requestId },
+          });
+          return;
+        }
+        case "forge.file.get.request": {
+          const file =
+            msg.repo.forge === "github"
+              ? await this.service.getFile({
+                  owner: msg.repo.owner,
+                  name: msg.repo.name,
+                  ref: msg.ref,
+                  path: msg.path,
+                })
+              : msg.repo.forge === "gitlab"
+                ? await this.service.getGitLabFile({
+                    owner: msg.repo.owner,
+                    name: msg.repo.name,
+                    ref: msg.ref,
+                    path: msg.path,
+                  })
+                : msg.repo.forge === "bitbucket"
+                  ? await this.service.getBitbucketFile({
+                      owner: msg.repo.owner,
+                      name: msg.repo.name,
+                      ref: msg.ref,
+                      path: msg.path,
+                    })
+                  : {
+                      path: msg.path,
+                      content: null,
+                      isBinary: false,
+                      size: null,
+                      truncated: false,
+                    };
+          this.emit({
+            type: "forge.file.get.response",
+            payload: {
+              path: file.path,
+              content: file.content,
+              isBinary: file.isBinary,
+              size: file.size,
+              truncated: file.truncated,
+              requestId: msg.requestId,
+            },
           });
           return;
         }
@@ -3378,6 +3654,22 @@ export class ForgeHubSession {
         return this.emit({
           type: "forge.commit.compare.response",
           payload: { files: [], commits: [], requestId: msg.requestId },
+        });
+      case "forge.tree.list.request":
+        return this.emit({
+          type: "forge.tree.list.response",
+          payload: { entries: [], requestId: msg.requestId },
+        });
+      case "forge.file.get.request":
+        return this.emit({
+          type: "forge.file.get.response",
+          payload: {
+            path: msg.path,
+            content: null,
+            isBinary: false,
+            truncated: false,
+            requestId: msg.requestId,
+          },
         });
       case "forge.change_request.review.request":
         return this.emit({

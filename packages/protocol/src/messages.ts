@@ -2431,6 +2431,13 @@ export const ForgeCommitSchema = z.object({
   committedAt_ms: z.number().nullable().optional(),
   checksStatus: z.enum(["none", "pending", "success", "failure"]).optional(),
 });
+/** One entry in a repo tree listing (a directory or file at a ref). */
+export const ForgeTreeEntrySchema = z.object({
+  name: z.string(),
+  path: z.string(),
+  type: z.enum(["dir", "file"]),
+  size: z.number().nullable().optional(),
+});
 export const ForgePipelineRunSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -2496,6 +2503,21 @@ export const ForgeCommitCompareRequestSchema = z.object({
   repo: ForgeRepoRefSchema,
   base: z.string(),
   head: z.string(),
+  requestId: z.string(),
+});
+export const ForgeTreeListRequestSchema = z.object({
+  type: z.literal("forge.tree.list.request"),
+  repo: ForgeRepoRefSchema,
+  ref: z.string(),
+  /** Directory to list; "" = repo root. */
+  path: z.string(),
+  requestId: z.string(),
+});
+export const ForgeFileGetRequestSchema = z.object({
+  type: z.literal("forge.file.get.request"),
+  repo: ForgeRepoRefSchema,
+  ref: z.string(),
+  path: z.string(),
   requestId: z.string(),
 });
 export const ForgeChangeRequestReviewRequestSchema = z.object({
@@ -3698,6 +3720,8 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ForgeBranchListRequestSchema,
   ForgeCommitListRequestSchema,
   ForgeCommitCompareRequestSchema,
+  ForgeTreeListRequestSchema,
+  ForgeFileGetRequestSchema,
   ForgeChangeRequestReviewRequestSchema,
   ForgeChangeRequestMergeRequestSchema,
   ForgePipelineListRequestSchema,
@@ -6134,6 +6158,21 @@ export const ForgeCommitCompareResponseSchema = z.object({
     requestId: z.string(),
   }),
 });
+export const ForgeTreeListResponseSchema = z.object({
+  type: z.literal("forge.tree.list.response"),
+  payload: z.object({ entries: z.array(z.unknown()), requestId: z.string() }),
+});
+export const ForgeFileGetResponseSchema = z.object({
+  type: z.literal("forge.file.get.response"),
+  payload: z.object({
+    path: z.string(),
+    content: z.string().nullable(),
+    isBinary: z.boolean(),
+    size: z.number().nullable().optional(),
+    truncated: z.boolean(),
+    requestId: z.string(),
+  }),
+});
 export const ForgeChangeRequestReviewResponseSchema = z.object({
   type: z.literal("forge.change_request.review.response"),
   payload: z.object({ ok: z.boolean(), requestId: z.string() }),
@@ -7207,6 +7246,8 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ForgeBranchListResponseSchema,
   ForgeCommitListResponseSchema,
   ForgeCommitCompareResponseSchema,
+  ForgeTreeListResponseSchema,
+  ForgeFileGetResponseSchema,
   ForgeChangeRequestReviewResponseSchema,
   ForgeChangeRequestMergeResponseSchema,
   ForgePipelineListResponseSchema,
@@ -7729,6 +7770,11 @@ export type ForgeCommitListRequest = z.infer<typeof ForgeCommitListRequestSchema
 export type ForgeCommitListResponse = z.infer<typeof ForgeCommitListResponseSchema>;
 export type ForgeCommitCompareRequest = z.infer<typeof ForgeCommitCompareRequestSchema>;
 export type ForgeCommitCompareResponse = z.infer<typeof ForgeCommitCompareResponseSchema>;
+export type ForgeTreeEntry = z.infer<typeof ForgeTreeEntrySchema>;
+export type ForgeTreeListRequest = z.infer<typeof ForgeTreeListRequestSchema>;
+export type ForgeTreeListResponse = z.infer<typeof ForgeTreeListResponseSchema>;
+export type ForgeFileGetRequest = z.infer<typeof ForgeFileGetRequestSchema>;
+export type ForgeFileGetResponse = z.infer<typeof ForgeFileGetResponseSchema>;
 export type ForgeChangeRequestReviewRequest = z.infer<typeof ForgeChangeRequestReviewRequestSchema>;
 export type ForgeChangeRequestReviewResponse = z.infer<
   typeof ForgeChangeRequestReviewResponseSchema

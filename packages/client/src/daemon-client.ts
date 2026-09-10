@@ -70,6 +70,8 @@ import type {
   ForgeBranchListResponse,
   ForgeCommitListResponse,
   ForgeCommitCompareResponse,
+  ForgeTreeListResponse,
+  ForgeFileGetResponse,
   ForgeChangeRequestReviewResponse,
   ForgeChangeRequestMergeResponse,
   ForgePipelineListResponse,
@@ -506,6 +508,8 @@ type ForgeChangeRequestFilesPayload = ForgeChangeRequestFilesResponse["payload"]
 type ForgeBranchListPayload = ForgeBranchListResponse["payload"];
 type ForgeCommitListPayload = ForgeCommitListResponse["payload"];
 type ForgeCommitComparePayload = ForgeCommitCompareResponse["payload"];
+type ForgeTreeListPayload = ForgeTreeListResponse["payload"];
+type ForgeFileGetPayload = ForgeFileGetResponse["payload"];
 type ForgeChangeRequestReviewPayload = ForgeChangeRequestReviewResponse["payload"];
 type ForgeChangeRequestMergePayload = ForgeChangeRequestMergeResponse["payload"];
 type ForgePipelineListPayload = ForgePipelineListResponse["payload"];
@@ -4689,6 +4693,40 @@ export class DaemonClient {
         head: options.head,
       },
       responseType: "forge.commit.compare.response",
+      timeout: 20000,
+    });
+  }
+
+  async forgeListTree(
+    options: { repo: ForgeRepoRef; ref: string; path: string },
+    requestId?: string,
+  ): Promise<ForgeTreeListPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "forge.tree.list.request",
+        repo: options.repo,
+        ref: options.ref,
+        path: options.path,
+      },
+      responseType: "forge.tree.list.response",
+      timeout: 20000,
+    });
+  }
+
+  async forgeGetFile(
+    options: { repo: ForgeRepoRef; ref: string; path: string },
+    requestId?: string,
+  ): Promise<ForgeFileGetPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "forge.file.get.request",
+        repo: options.repo,
+        ref: options.ref,
+        path: options.path,
+      },
+      responseType: "forge.file.get.response",
       timeout: 20000,
     });
   }
