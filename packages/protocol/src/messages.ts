@@ -2651,6 +2651,18 @@ export const ForgeIssueCloseRequestSchema = z.object({
   number: z.number().int(),
   requestId: z.string(),
 });
+export const ForgeCliStatusRequestSchema = z.object({
+  type: z.literal("forge.cli.status.request"),
+  forge: z.string(),
+  host: z.string().optional(),
+  requestId: z.string(),
+});
+export const ForgeCliInstallRequestSchema = z.object({
+  type: z.literal("forge.cli.install.request"),
+  forge: z.string(),
+  host: z.string().optional(),
+  requestId: z.string(),
+});
 // ===== end Forge Hub Milestone C request schemas ================================
 
 export const DirectorySuggestionsRequestSchema = z.object({
@@ -3690,6 +3702,8 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ForgeIssueCreateRequestSchema,
   ForgeIssueCommentRequestSchema,
   ForgeIssueCloseRequestSchema,
+  ForgeCliStatusRequestSchema,
+  ForgeCliInstallRequestSchema,
   GitHubSearchRequestSchema,
   DirectorySuggestionsRequestSchema,
   JAgentDeskWorktreeListRequestSchema,
@@ -4084,6 +4098,7 @@ export const ServerInfoStatusPayloadSchema = z
         forgeHubPipelines: z.boolean().optional(), // Milestone B: CI runs/jobs/logs/rerun/cancel
         forgeHubReleases: z.boolean().optional(), // Milestone C: releases/tags/artifacts
         forgeHubIssues: z.boolean().optional(), // Milestone B/C: issues create/comment/close
+        forgeHubCliInstall: z.boolean().optional(), // Milestone C: detect + auto-install forge CLI (§19.3.5, ADR-0016)
       })
       .optional(),
   })
@@ -6181,6 +6196,39 @@ export const ForgeIssueCloseResponseSchema = z.object({
   type: z.literal("forge.issue.close.response"),
   payload: z.object({ ok: z.boolean(), requestId: z.string() }),
 });
+export const ForgeCliStatusResponseSchema = z.object({
+  type: z.literal("forge.cli.status.response"),
+  payload: z.object({
+    binary: z.string(),
+    installed: z.boolean(),
+    version: z.string().nullable().optional(),
+    path: z.string().nullable().optional(),
+    packageManager: z.string().nullable().optional(),
+    canAutoInstall: z.boolean(),
+    requestId: z.string(),
+  }),
+});
+// UNSOLICITED stream event: one forge.cli.install.request yields many progress
+// messages, then a single terminal forge.cli.install.response. Not correlated —
+// clients filter by top-level requestId via a subscription (see daemon-client).
+export const ForgeCliInstallProgressSchema = z.object({
+  type: z.literal("forge.cli.install.progress"),
+  requestId: z.string(),
+  phase: z.enum(["resolving", "downloading", "installing", "verifying", "done", "failed"]),
+  percent: z.number().nullable().optional(),
+  line: z.string().nullable().optional(),
+});
+export const ForgeCliInstallResponseSchema = z.object({
+  type: z.literal("forge.cli.install.response"),
+  payload: z.object({
+    ok: z.boolean(),
+    binary: z.string(),
+    version: z.string().nullable().optional(),
+    packageManager: z.string().nullable().optional(),
+    error: z.string().nullable().optional(),
+    requestId: z.string(),
+  }),
+});
 // ===== end Forge Hub Milestone C responses ======================================
 
 // COMPAT(githubSearchRpc): added in v0.1.106, remove after 2026-12-28 once
@@ -7136,6 +7184,9 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ForgeIssueCreateResponseSchema,
   ForgeIssueCommentResponseSchema,
   ForgeIssueCloseResponseSchema,
+  ForgeCliStatusResponseSchema,
+  ForgeCliInstallProgressSchema,
+  ForgeCliInstallResponseSchema,
   GitHubSearchResponseSchema,
   DirectorySuggestionsResponseSchema,
   JAgentDeskWorktreeListResponseSchema,
@@ -7677,6 +7728,11 @@ export type ForgeIssueCommentRequest = z.infer<typeof ForgeIssueCommentRequestSc
 export type ForgeIssueCommentResponse = z.infer<typeof ForgeIssueCommentResponseSchema>;
 export type ForgeIssueCloseRequest = z.infer<typeof ForgeIssueCloseRequestSchema>;
 export type ForgeIssueCloseResponse = z.infer<typeof ForgeIssueCloseResponseSchema>;
+export type ForgeCliStatusRequest = z.infer<typeof ForgeCliStatusRequestSchema>;
+export type ForgeCliStatusResponse = z.infer<typeof ForgeCliStatusResponseSchema>;
+export type ForgeCliInstallRequest = z.infer<typeof ForgeCliInstallRequestSchema>;
+export type ForgeCliInstallProgress = z.infer<typeof ForgeCliInstallProgressSchema>;
+export type ForgeCliInstallResponse = z.infer<typeof ForgeCliInstallResponseSchema>;
 export type GitHubSearchItem = z.infer<typeof GitHubSearchItemSchema>;
 export type GitHubSearchKind = z.infer<typeof GitHubSearchKindSchema>;
 export type GitHubSearchRequest = z.infer<typeof GitHubSearchRequestSchema>;

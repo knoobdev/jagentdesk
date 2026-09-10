@@ -2161,6 +2161,8 @@ export class VoiceAssistantWebSocketServer {
         // Milestone C: auto-merge, artifacts, releases/tags, and issues.
         forgeHubReleases: true,
         forgeHubIssues: true,
+        // CLI detect + guided auto-install (spec §19.3.5 / §19.3.6 / ADR-0016).
+        forgeHubCliInstall: true,
         // Advertise the plugin management surface only when a PluginService is
         // wired; without it the plugin.* RPCs return empty/disabled results.
         ...(this.pluginRuntime

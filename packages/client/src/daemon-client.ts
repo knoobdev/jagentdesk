@@ -88,6 +88,9 @@ import type {
   ForgeIssueCreateResponse,
   ForgeIssueCommentResponse,
   ForgeIssueCloseResponse,
+  ForgeCliStatusResponse,
+  ForgeCliInstallResponse,
+  ForgeCliInstallProgress,
   ForgeReviewAction,
   ForgeMergeMethod,
   GitHubSearchResponse,
@@ -518,6 +521,8 @@ type ForgeIssueListPayload = ForgeIssueListResponse["payload"];
 type ForgeIssueCreatePayload = ForgeIssueCreateResponse["payload"];
 type ForgeIssueCommentPayload = ForgeIssueCommentResponse["payload"];
 type ForgeIssueClosePayload = ForgeIssueCloseResponse["payload"];
+type ForgeCliStatusPayload = ForgeCliStatusResponse["payload"];
+type ForgeCliInstallPayload = ForgeCliInstallResponse["payload"];
 type GitHubSearchPayload = GitHubSearchResponse["payload"];
 type DirectorySuggestionsPayload = DirectorySuggestionsResponse["payload"];
 type JAgentDeskWorktreeListPayload = JAgentDeskWorktreeListResponse["payload"];
@@ -4817,6 +4822,45 @@ export class DaemonClient {
       responseType: "forge.change_request.set_auto_merge.response",
       timeout: 30000,
     });
+  }
+
+  async forgeCliStatus(
+    options: { forge: string; host?: string },
+    requestId?: string,
+  ): Promise<ForgeCliStatusPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "forge.cli.status.request", forge: options.forge, host: options.host },
+      responseType: "forge.cli.status.response",
+      timeout: 15000,
+    });
+  }
+
+  async forgeCliInstall(
+    options: { forge: string; host?: string; onProgress?: (p: ForgeCliInstallProgress) => void },
+    requestId?: string,
+  ): Promise<ForgeCliInstallPayload> {
+    // Resolve the id up front so the subscription filter matches the id we send.
+    const resolvedRequestId = this.createRequestId(requestId);
+    // Subscribe BEFORE sending: install streams unsolicited progress events that
+    // are NOT the correlated response. The typed on(type) overload hands us a
+    // fully-typed ForgeCliInstallProgress, mirroring the agent_stream consumer.
+    const unsubscribe = this.on("forge.cli.install.progress", (message) => {
+      if (message.requestId !== resolvedRequestId) {
+        return;
+      }
+      options.onProgress?.(message);
+    });
+    try {
+      return await this.sendCorrelatedSessionRequest({
+        requestId: resolvedRequestId,
+        message: { type: "forge.cli.install.request", forge: options.forge, host: options.host },
+        responseType: "forge.cli.install.response",
+        timeout: 300000,
+      });
+    } finally {
+      unsubscribe();
+    }
   }
 
   async forgeListArtifacts(

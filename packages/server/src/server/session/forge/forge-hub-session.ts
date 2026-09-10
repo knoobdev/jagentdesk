@@ -23,6 +23,7 @@ import type {
 } from "@jagentdesk/protocol/messages";
 import { findExecutable } from "../../../executable-resolution/executable-resolution.js";
 import { execCommand } from "../../../utils/spawn.js";
+import { detectCliStatus, installCli } from "./forge-cli-installer.js";
 import type { SecretStore } from "../../database/secret-store.js";
 
 /**
@@ -64,7 +65,9 @@ type ForgeHubInbound = Extract<
       | "forge.issue.list.request"
       | "forge.issue.create.request"
       | "forge.issue.comment.request"
-      | "forge.issue.close.request";
+      | "forge.issue.close.request"
+      | "forge.cli.status.request"
+      | "forge.cli.install.request";
   }
 >;
 
@@ -3175,6 +3178,48 @@ export class ForgeHubSession {
           });
           return;
         }
+        // ---- CLI detect + guided auto-install (host-level; dispatch by `forge`) --
+        case "forge.cli.status.request": {
+          const status = await detectCliStatus(msg.forge);
+          this.emit({
+            type: "forge.cli.status.response",
+            payload: {
+              binary: status.binary,
+              installed: status.installed,
+              version: status.version,
+              path: status.path,
+              packageManager: status.packageManager,
+              canAutoInstall: status.canAutoInstall,
+              requestId: msg.requestId,
+            },
+          });
+          return;
+        }
+        case "forge.cli.install.request": {
+          const requestId = msg.requestId;
+          const result = await installCli(msg.forge, (progress) => {
+            // Progress is FLAT (requestId at top level, no payload wrapper).
+            this.emit({
+              type: "forge.cli.install.progress",
+              requestId,
+              phase: progress.phase,
+              percent: progress.percent ?? null,
+              line: progress.line ?? null,
+            });
+          });
+          this.emit({
+            type: "forge.cli.install.response",
+            payload: {
+              ok: result.ok,
+              binary: result.binary,
+              version: result.version ?? null,
+              packageManager: result.packageManager ?? null,
+              error: result.error ?? null,
+              requestId,
+            },
+          });
+          return;
+        }
       }
     } catch (error) {
       this.options.logger?.warn?.("forge-hub request failed", { type: msg.type, error });
@@ -3318,6 +3363,31 @@ export class ForgeHubSession {
         return this.emit({
           type: "forge.issue.close.response",
           payload: { ok: false, requestId: msg.requestId },
+        });
+      case "forge.cli.status.request":
+        return this.emit({
+          type: "forge.cli.status.response",
+          payload: {
+            binary: "",
+            installed: false,
+            version: null,
+            path: null,
+            packageManager: null,
+            canAutoInstall: false,
+            requestId: msg.requestId,
+          },
+        });
+      case "forge.cli.install.request":
+        return this.emit({
+          type: "forge.cli.install.response",
+          payload: {
+            ok: false,
+            binary: "",
+            version: null,
+            packageManager: null,
+            error: "install failed",
+            requestId: msg.requestId,
+          },
         });
     }
   }
