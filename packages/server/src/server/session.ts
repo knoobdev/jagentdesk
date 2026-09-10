@@ -2475,6 +2475,17 @@ export class Session {
       case "forge.repo.list.request":
       case "forge.change_request.list.request":
       case "forge.change_request.files.request":
+      case "forge.branch.list.request":
+      case "forge.commit.list.request":
+      case "forge.commit.compare.request":
+      case "forge.change_request.review.request":
+      case "forge.change_request.merge.request":
+      case "forge.pipeline.list.request":
+      case "forge.pipeline.get.request":
+      case "forge.job.log.request":
+      case "forge.pipeline.rerun.request":
+      case "forge.pipeline.cancel.request":
+      case "forge.job.play.request":
         return this.forgeHubSession.handle(msg);
       case "stash_save_request":
         return this.checkoutSession.handleStashSaveRequest(msg);

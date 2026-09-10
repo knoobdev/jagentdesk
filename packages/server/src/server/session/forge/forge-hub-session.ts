@@ -4,6 +4,13 @@ import type {
   ForgeRepo,
   ForgeChangeRequestSummary,
   ForgeChangeRequestFile,
+  ForgeBranch,
+  ForgeCommit,
+  ForgePipelineRun,
+  ForgePipelineDetail,
+  ForgePipelineJob,
+  ForgeReviewAction,
+  ForgeMergeMethod,
   SessionInboundMessage,
   SessionOutboundMessage,
 } from "@jagentdesk/protocol/messages";
@@ -30,7 +37,18 @@ type ForgeHubInbound = Extract<
       | "forge.connection.remove.request"
       | "forge.repo.list.request"
       | "forge.change_request.list.request"
-      | "forge.change_request.files.request";
+      | "forge.change_request.files.request"
+      | "forge.branch.list.request"
+      | "forge.commit.list.request"
+      | "forge.commit.compare.request"
+      | "forge.change_request.review.request"
+      | "forge.change_request.merge.request"
+      | "forge.pipeline.list.request"
+      | "forge.pipeline.get.request"
+      | "forge.job.log.request"
+      | "forge.pipeline.rerun.request"
+      | "forge.pipeline.cancel.request"
+      | "forge.job.play.request";
   }
 >;
 
@@ -340,6 +358,360 @@ export class ForgeHubService {
     );
     return { files, truncated: false };
   }
+
+  // ===== Milestone B (code · review · merge · CI) — GitHub via gh ===============
+  // GitHub-only for this checkpoint; other forges return empty/unsupported until the
+  // glab/bitbucket providers land. Each method degrades to a safe empty result.
+
+  /** Run gh for its side effect; resolve true on success, false on any failure. */
+  private async ghOk(args: string[]): Promise<boolean> {
+    const gh = await this.ghPath();
+    if (!gh) return false;
+    try {
+      await execCommand(gh, args, { timeout: GH_TIMEOUT_MS });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Run gh and return raw stdout, or null on failure. */
+  private async ghText(args: string[]): Promise<string | null> {
+    const gh = await this.ghPath();
+    if (!gh) return null;
+    try {
+      const res = await execCommand(gh, args, { timeout: GH_TIMEOUT_MS });
+      return res.stdout;
+    } catch {
+      return null;
+    }
+  }
+
+  async listBranches(input: {
+    owner: string;
+    name: string;
+    limit?: number;
+  }): Promise<ForgeBranch[]> {
+    const repo = `${input.owner}/${input.name}`;
+    const def = (
+      await this.ghText([
+        "repo",
+        "view",
+        repo,
+        "--json",
+        "defaultBranchRef",
+        "-q",
+        ".defaultBranchRef.name",
+      ])
+    )?.trim();
+    const rows = await this.ghJson(
+      ["api", "--paginate", `repos/${repo}/branches?per_page=${input.limit ?? 100}`],
+      z.array(
+        z.object({
+          name: z.string(),
+          protected: z.boolean().optional(),
+          commit: z.object({ sha: z.string() }).optional(),
+        }),
+      ),
+    );
+    if (!rows) return [];
+    return rows.map((b) => ({
+      name: b.name,
+      isDefault: def ? b.name === def : undefined,
+      commitSha: b.commit?.sha ?? null,
+      protected: b.protected,
+    }));
+  }
+
+  async listCommits(input: {
+    owner: string;
+    name: string;
+    ref?: string;
+    limit?: number;
+  }): Promise<ForgeCommit[]> {
+    const repo = `${input.owner}/${input.name}`;
+    const per = input.limit ?? 50;
+    const qs = `per_page=${per}${input.ref ? `&sha=${encodeURIComponent(input.ref)}` : ""}`;
+    const rows = await this.ghJson(
+      ["api", `repos/${repo}/commits?${qs}`],
+      z.array(
+        z.object({
+          sha: z.string(),
+          commit: z.object({
+            message: z.string(),
+            author: z
+              .object({ name: z.string().optional(), date: z.string().optional() })
+              .optional(),
+          }),
+          author: z.object({ login: z.string() }).nullable().optional(),
+        }),
+      ),
+    );
+    if (!rows) return [];
+    return rows.map((c) => ({
+      sha: c.sha,
+      subject: c.commit.message.split("\n", 1)[0] ?? c.commit.message,
+      authorLogin: c.author?.login ?? null,
+      authorName: c.commit.author?.name ?? null,
+      committedAt_ms: isoToMs(c.commit.author?.date),
+    }));
+  }
+
+  async compareCommits(input: {
+    owner: string;
+    name: string;
+    base: string;
+    head: string;
+  }): Promise<{ files: ForgeChangeRequestFile[]; commits: ForgeCommit[] }> {
+    const repo = `${input.owner}/${input.name}`;
+    const res = await this.ghJson(
+      [
+        "api",
+        `repos/${repo}/compare/${encodeURIComponent(input.base)}...${encodeURIComponent(input.head)}`,
+      ],
+      z.object({
+        files: z.array(GhFileSchema).optional().default([]),
+        commits: z
+          .array(
+            z.object({
+              sha: z.string(),
+              commit: z.object({
+                message: z.string(),
+                author: z
+                  .object({ name: z.string().optional(), date: z.string().optional() })
+                  .optional(),
+              }),
+              author: z.object({ login: z.string() }).nullable().optional(),
+            }),
+          )
+          .optional()
+          .default([]),
+      }),
+    );
+    if (!res) return { files: [], commits: [] };
+    return {
+      files: res.files.map((f) => ({
+        path: f.filename,
+        previousPath: f.previous_filename ?? null,
+        status: fileStatus(f.status),
+        additions: f.additions,
+        deletions: f.deletions,
+        patch: f.patch ?? null,
+      })),
+      commits: res.commits.map((c) => ({
+        sha: c.sha,
+        subject: c.commit.message.split("\n", 1)[0] ?? c.commit.message,
+        authorLogin: c.author?.login ?? null,
+        authorName: c.commit.author?.name ?? null,
+        committedAt_ms: isoToMs(c.commit.author?.date),
+      })),
+    };
+  }
+
+  async reviewChangeRequest(input: {
+    owner: string;
+    name: string;
+    number: number;
+    action: ForgeReviewAction;
+    body?: string;
+  }): Promise<boolean> {
+    const flag =
+      input.action === "approve"
+        ? "--approve"
+        : input.action === "request_changes"
+          ? "--request-changes"
+          : "--comment";
+    const args = [
+      "pr",
+      "review",
+      String(input.number),
+      "--repo",
+      `${input.owner}/${input.name}`,
+      flag,
+    ];
+    if (input.body) args.push("--body", input.body);
+    return this.ghOk(args);
+  }
+
+  async mergeChangeRequest(input: {
+    owner: string;
+    name: string;
+    number: number;
+    method: ForgeMergeMethod;
+  }): Promise<boolean> {
+    const flag =
+      input.method === "squash" ? "--squash" : input.method === "rebase" ? "--rebase" : "--merge";
+    return this.ghOk([
+      "pr",
+      "merge",
+      String(input.number),
+      "--repo",
+      `${input.owner}/${input.name}`,
+      flag,
+    ]);
+  }
+
+  async listPipelines(input: {
+    owner: string;
+    name: string;
+    ref?: string;
+    limit?: number;
+  }): Promise<ForgePipelineRun[]> {
+    const args = [
+      "run",
+      "list",
+      "--repo",
+      `${input.owner}/${input.name}`,
+      "--json",
+      "databaseId,name,displayTitle,status,conclusion,headBranch,headSha,event,createdAt,url",
+      "--limit",
+      String(input.limit ?? 30),
+    ];
+    if (input.ref) args.push("--branch", input.ref);
+    const rows = await this.ghJson(
+      args,
+      z.array(
+        z.object({
+          databaseId: z.number(),
+          name: z.string().optional(),
+          displayTitle: z.string().optional(),
+          status: z.string().optional(),
+          conclusion: z.string().nullable().optional(),
+          headBranch: z.string().nullable().optional(),
+          headSha: z.string().nullable().optional(),
+          event: z.string().nullable().optional(),
+          createdAt: z.string().optional(),
+          url: z.string(),
+        }),
+      ),
+    );
+    if (!rows) return [];
+    return rows.map((r) => ({
+      id: String(r.databaseId),
+      name: r.name ?? r.displayTitle ?? "workflow",
+      status: ghRunStatus(r.status, r.conclusion),
+      ref: r.headBranch ?? null,
+      sha: r.headSha ?? null,
+      trigger: r.event ?? null,
+      actor: null,
+      durationSeconds: null,
+      createdAt_ms: isoToMs(r.createdAt),
+      url: r.url,
+    }));
+  }
+
+  async getPipeline(input: {
+    owner: string;
+    name: string;
+    runId: string;
+  }): Promise<ForgePipelineDetail | null> {
+    const res = await this.ghJson(
+      [
+        "run",
+        "view",
+        input.runId,
+        "--repo",
+        `${input.owner}/${input.name}`,
+        "--json",
+        "status,conclusion,url,jobs",
+      ],
+      z.object({
+        status: z.string().optional(),
+        conclusion: z.string().nullable().optional(),
+        url: z.string().nullable().optional(),
+        jobs: z
+          .array(
+            z.object({
+              databaseId: z.number(),
+              name: z.string(),
+              status: z.string().optional(),
+              conclusion: z.string().nullable().optional(),
+              startedAt: z.string().nullable().optional(),
+              completedAt: z.string().nullable().optional(),
+            }),
+          )
+          .optional()
+          .default([]),
+      }),
+    );
+    if (!res) return null;
+    // GitHub has no stages; present a single "jobs" stage.
+    const jobs: ForgePipelineJob[] = res.jobs.map((j) => ({
+      id: String(j.databaseId),
+      name: j.name,
+      stage: "jobs",
+      status: ghRunStatus(j.status, j.conclusion),
+      durationSeconds:
+        j.startedAt && j.completedAt
+          ? Math.max(0, Math.round((Date.parse(j.completedAt) - Date.parse(j.startedAt)) / 1000))
+          : null,
+      url: null,
+    }));
+    return {
+      id: input.runId,
+      status: ghRunStatus(res.status, res.conclusion),
+      url: res.url ?? null,
+      stages: [{ name: "jobs", status: ghRunStatus(res.status, res.conclusion), jobs }],
+    };
+  }
+
+  async getJobLog(input: {
+    owner: string;
+    name: string;
+    jobId: string;
+  }): Promise<{ log: string; truncated: boolean; running: boolean }> {
+    // `gh run view --job <id> --log` prints the job log; while running, gh needs
+    // `--log-failed`/live logs aren't available, so a running job may return empty.
+    const text = await this.ghText([
+      "run",
+      "view",
+      "--repo",
+      `${input.owner}/${input.name}`,
+      "--job",
+      input.jobId,
+      "--log",
+    ]);
+    const MAX = 2 * 1024 * 1024;
+    if (text == null) return { log: "", truncated: false, running: false };
+    if (text.length > MAX) return { log: text.slice(0, MAX), truncated: true, running: false };
+    return { log: text, truncated: false, running: false };
+  }
+
+  async rerunPipeline(input: {
+    owner: string;
+    name: string;
+    runId: string;
+    onlyFailed?: boolean;
+  }): Promise<boolean> {
+    const args = ["run", "rerun", input.runId, "--repo", `${input.owner}/${input.name}`];
+    if (input.onlyFailed) args.push("--failed");
+    return this.ghOk(args);
+  }
+
+  async cancelPipeline(input: { owner: string; name: string; runId: string }): Promise<boolean> {
+    return this.ghOk(["run", "cancel", input.runId, "--repo", `${input.owner}/${input.name}`]);
+  }
+}
+
+/** Map GitHub run status+conclusion onto the neutral pipeline status enum. */
+function ghRunStatus(
+  status: string | undefined,
+  conclusion: string | null | undefined,
+): ForgePipelineRun["status"] {
+  const c = (conclusion ?? "").toLowerCase();
+  if (c) {
+    if (c === "success") return "success";
+    if (c === "failure" || c === "timed_out" || c === "startup_failure") return "failed";
+    if (c === "cancelled") return "canceled";
+    if (c === "skipped") return "skipped";
+    if (c === "action_required" || c === "neutral") return "manual";
+    return "unknown";
+  }
+  const s = (status ?? "").toLowerCase();
+  if (s === "in_progress") return "running";
+  if (s === "queued" || s === "waiting" || s === "pending" || s === "requested") return "pending";
+  if (s === "completed") return "success";
+  return "unknown";
 }
 
 export class ForgeHubSession {
@@ -413,6 +785,168 @@ export class ForgeHubSession {
           });
           return;
         }
+        // ---- Milestone B (GitHub via gh; other forges return empty for now) ----
+        case "forge.branch.list.request": {
+          const branches = this.isGitHub(msg.repo.forge)
+            ? await this.service.listBranches({
+                owner: msg.repo.owner,
+                name: msg.repo.name,
+                limit: msg.limit,
+              })
+            : [];
+          this.emit({
+            type: "forge.branch.list.response",
+            payload: { branches, requestId: msg.requestId },
+          });
+          return;
+        }
+        case "forge.commit.list.request": {
+          const commits = this.isGitHub(msg.repo.forge)
+            ? await this.service.listCommits({
+                owner: msg.repo.owner,
+                name: msg.repo.name,
+                ref: msg.ref,
+                limit: msg.limit,
+              })
+            : [];
+          this.emit({
+            type: "forge.commit.list.response",
+            payload: { commits, requestId: msg.requestId },
+          });
+          return;
+        }
+        case "forge.commit.compare.request": {
+          const res = this.isGitHub(msg.repo.forge)
+            ? await this.service.compareCommits({
+                owner: msg.repo.owner,
+                name: msg.repo.name,
+                base: msg.base,
+                head: msg.head,
+              })
+            : { files: [], commits: [] };
+          this.emit({
+            type: "forge.commit.compare.response",
+            payload: { files: res.files, commits: res.commits, requestId: msg.requestId },
+          });
+          return;
+        }
+        case "forge.change_request.review.request": {
+          const ok = this.isGitHub(msg.repo.forge)
+            ? await this.service.reviewChangeRequest({
+                owner: msg.repo.owner,
+                name: msg.repo.name,
+                number: msg.number,
+                action: msg.action,
+                body: msg.body,
+              })
+            : false;
+          this.emit({
+            type: "forge.change_request.review.response",
+            payload: { ok, requestId: msg.requestId },
+          });
+          return;
+        }
+        case "forge.change_request.merge.request": {
+          const merged = this.isGitHub(msg.repo.forge)
+            ? await this.service.mergeChangeRequest({
+                owner: msg.repo.owner,
+                name: msg.repo.name,
+                number: msg.number,
+                method: msg.method,
+              })
+            : false;
+          this.emit({
+            type: "forge.change_request.merge.response",
+            payload: { merged, requestId: msg.requestId },
+          });
+          return;
+        }
+        case "forge.pipeline.list.request": {
+          const runs = this.isGitHub(msg.repo.forge)
+            ? await this.service.listPipelines({
+                owner: msg.repo.owner,
+                name: msg.repo.name,
+                ref: msg.ref,
+                limit: msg.limit,
+              })
+            : [];
+          this.emit({
+            type: "forge.pipeline.list.response",
+            payload: { runs, requestId: msg.requestId },
+          });
+          return;
+        }
+        case "forge.pipeline.get.request": {
+          const pipeline = this.isGitHub(msg.repo.forge)
+            ? await this.service.getPipeline({
+                owner: msg.repo.owner,
+                name: msg.repo.name,
+                runId: msg.runId,
+              })
+            : null;
+          this.emit({
+            type: "forge.pipeline.get.response",
+            payload: { pipeline, requestId: msg.requestId },
+          });
+          return;
+        }
+        case "forge.job.log.request": {
+          const res = this.isGitHub(msg.repo.forge)
+            ? await this.service.getJobLog({
+                owner: msg.repo.owner,
+                name: msg.repo.name,
+                jobId: msg.jobId,
+              })
+            : { log: "", truncated: false, running: false };
+          this.emit({
+            type: "forge.job.log.response",
+            payload: {
+              log: res.log,
+              truncated: res.truncated,
+              running: res.running,
+              requestId: msg.requestId,
+            },
+          });
+          return;
+        }
+        case "forge.pipeline.rerun.request": {
+          const ok = this.isGitHub(msg.repo.forge)
+            ? await this.service.rerunPipeline({
+                owner: msg.repo.owner,
+                name: msg.repo.name,
+                runId: msg.runId,
+                onlyFailed: msg.onlyFailed,
+              })
+            : false;
+          this.emit({
+            type: "forge.pipeline.rerun.response",
+            payload: { ok, requestId: msg.requestId },
+          });
+          return;
+        }
+        case "forge.pipeline.cancel.request": {
+          const ok = this.isGitHub(msg.repo.forge)
+            ? await this.service.cancelPipeline({
+                owner: msg.repo.owner,
+                name: msg.repo.name,
+                runId: msg.runId,
+              })
+            : false;
+          this.emit({
+            type: "forge.pipeline.cancel.response",
+            payload: { ok, requestId: msg.requestId },
+          });
+          return;
+        }
+        case "forge.job.play.request": {
+          // GitHub has no per-job "play" (manual gates are environment approvals); report
+          // unsupported. GitLab (glab `ci play`) lands with the GitLab provider.
+          this.emit({
+            type: "forge.job.play.response",
+            payload: { ok: false, requestId: msg.requestId },
+          });
+          return;
+        }
       }
     } catch (error) {
       this.options.logger?.warn?.("forge-hub request failed", { type: msg.type, error });
@@ -454,6 +988,67 @@ export class ForgeHubSession {
           type: "forge.change_request.files.response",
           payload: { files: [], requestId: msg.requestId },
         });
+      case "forge.branch.list.request":
+        return this.emit({
+          type: "forge.branch.list.response",
+          payload: { branches: [], requestId: msg.requestId },
+        });
+      case "forge.commit.list.request":
+        return this.emit({
+          type: "forge.commit.list.response",
+          payload: { commits: [], requestId: msg.requestId },
+        });
+      case "forge.commit.compare.request":
+        return this.emit({
+          type: "forge.commit.compare.response",
+          payload: { files: [], commits: [], requestId: msg.requestId },
+        });
+      case "forge.change_request.review.request":
+        return this.emit({
+          type: "forge.change_request.review.response",
+          payload: { ok: false, requestId: msg.requestId },
+        });
+      case "forge.change_request.merge.request":
+        return this.emit({
+          type: "forge.change_request.merge.response",
+          payload: { merged: false, requestId: msg.requestId },
+        });
+      case "forge.pipeline.list.request":
+        return this.emit({
+          type: "forge.pipeline.list.response",
+          payload: { runs: [], requestId: msg.requestId },
+        });
+      case "forge.pipeline.get.request":
+        return this.emit({
+          type: "forge.pipeline.get.response",
+          payload: { pipeline: null, requestId: msg.requestId },
+        });
+      case "forge.job.log.request":
+        return this.emit({
+          type: "forge.job.log.response",
+          payload: { log: "", truncated: false, running: false, requestId: msg.requestId },
+        });
+      case "forge.pipeline.rerun.request":
+        return this.emit({
+          type: "forge.pipeline.rerun.response",
+          payload: { ok: false, requestId: msg.requestId },
+        });
+      case "forge.pipeline.cancel.request":
+        return this.emit({
+          type: "forge.pipeline.cancel.response",
+          payload: { ok: false, requestId: msg.requestId },
+        });
+      case "forge.job.play.request":
+        return this.emit({
+          type: "forge.job.play.response",
+          payload: { ok: false, requestId: msg.requestId },
+        });
     }
+  }
+
+  /** Milestone B methods are implemented for GitHub in this checkpoint; other forges
+   *  (glab/bitbucket) return empty until their provider lands. */
+  private isGitHub(forge: string): boolean {
+    return forge === "github";
   }
 }
