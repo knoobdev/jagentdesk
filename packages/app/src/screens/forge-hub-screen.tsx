@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import {
   ActivityIndicator,
   Animated,
@@ -16,15 +16,18 @@ import {
   ChevronDown,
   CircleAlert,
   CircleDot,
+  Code,
   Copy,
   Download,
   ExternalLink,
+  FolderGit2,
   GitBranch,
   GitCompare,
   GitPullRequest,
   LogIn,
   MessageSquare,
   Play,
+  Plug,
   Plus,
   RotateCcw,
   Search,
@@ -107,6 +110,38 @@ function repoRef(repo: ForgeRepo): ForgeRepoRef {
 /** Short SHA (7 chars) for mono display, matching §19.5.2. */
 function shortSha(sha: string): string {
   return sha.slice(0, 7);
+}
+
+// ---------------------------------------------------------------------------
+// Session cache. In-memory only (cleared on app reload) so revisiting a tab or
+// repo shows instantly instead of refetching on every remount. Keys are stable
+// strings built from the forge coordinate + list parameters; each load* helper
+// seeds state from the cache before fetching and writes back on success. A
+// Refresh control on each list busts its key and refetches. Never persisted.
+// ---------------------------------------------------------------------------
+const forgeCache = new Map<string, unknown>();
+
+function cacheGet<T>(key: string): T | undefined {
+  return forgeCache.get(key) as T | undefined;
+}
+
+function cacheSet(key: string, val: unknown): void {
+  forgeCache.set(key, val);
+}
+
+function cacheDelete(key: string): void {
+  forgeCache.delete(key);
+}
+
+function cacheDeletePrefix(prefix: string): void {
+  for (const key of [...forgeCache.keys()]) {
+    if (key.startsWith(prefix)) forgeCache.delete(key);
+  }
+}
+
+/** Stable per-repo key fragment shared by every repo-scoped cache key. */
+function repoCacheKey(repo: ForgeRepo): string {
+  return `${repo.forge}:${repo.owner}/${repo.name}`;
 }
 
 type ProviderChoice = "github" | "gitlab" | "bitbucket" | "selfhosted";
@@ -312,6 +347,67 @@ function ProviderBadge({ forge }: { forge: string }) {
   return (
     <View style={styles.badge}>
       <Text style={styles.badgeText}>{forgeBadge(forge)}</Text>
+    </View>
+  );
+}
+
+// Placeholder loading rows shown while a list is fetching for the first time
+// (no cached data). Each row is a couple of muted bars of varied widths with a
+// gentle opacity pulse; the loop is native-driven and stops on unmount. The
+// `compact` variant renders a single narrow bar for tight surfaces (e.g. the
+// branch picker sheet).
+const SKELETON_TITLE_WIDTHS = ["68%", "52%", "74%", "46%", "60%", "57%"] as const;
+
+function SkeletonRows({
+  rows = 5,
+  variant = "full",
+}: {
+  rows?: number;
+  variant?: "full" | "compact";
+}) {
+  const pulse = useRef(new Animated.Value(0.4)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 900,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          toValue: 0.4,
+          duration: 900,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [pulse]);
+
+  const items = useMemo(() => Array.from({ length: Math.max(1, rows) }, (_, i) => i), [rows]);
+
+  return (
+    <View style={styles.card} accessibilityLabel="Loading" testID="forge-skeleton">
+      {items.map((i) => (
+        <View
+          key={i}
+          style={variant === "compact" ? styles.skeletonRowCompact : styles.skeletonRow}
+        >
+          <Animated.View
+            style={[
+              styles.skeletonBarTitle,
+              { width: SKELETON_TITLE_WIDTHS[i % SKELETON_TITLE_WIDTHS.length], opacity: pulse },
+            ]}
+          />
+          {variant === "full" ? (
+            <Animated.View style={[styles.skeletonBarSub, { opacity: pulse }]} />
+          ) : null}
+        </View>
+      ))}
     </View>
   );
 }
@@ -1245,7 +1341,7 @@ function RepositoriesView({
       ) : null}
 
       {loading ? (
-        <Text style={styles.emptyText}>Loading repositories…</Text>
+        <SkeletonRows rows={6} />
       ) : filtered.length === 0 ? (
         <Text style={styles.emptyText}>No repositories match the current filters.</Text>
       ) : (
@@ -2099,7 +2195,7 @@ function PullRequestDetail({
             </Pressable>
           </View>
         ) : commitsLoading || commits === null ? (
-          <Text style={styles.emptyText}>Loading commits…</Text>
+          <SkeletonRows />
         ) : commits.length === 0 ? (
           <Text style={styles.emptyText}>No commits in this range.</Text>
         ) : (
@@ -2274,7 +2370,7 @@ function BranchPickerButton({
           </View>
           <ScrollView style={styles.branchList} nestedScrollEnabled>
             {loading ? (
-              <Text style={styles.emptyText}>Loading branches…</Text>
+              <SkeletonRows rows={5} variant="compact" />
             ) : filtered.length === 0 ? (
               <Text style={styles.emptyText}>No branches found.</Text>
             ) : (
@@ -2344,48 +2440,81 @@ function CodeView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }) {
   const [compareBase, setCompareBase] = useState<string | null>(repo.defaultBranch ?? null);
   const [compareHead, setCompareHead] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    setBranchesLoading(true);
-    void (async () => {
+  const loadBranches = useCallback(
+    async (force = false) => {
+      const key = `code:branches:${repoCacheKey(repo)}`;
+      if (force) cacheDelete(key);
+      else {
+        const cached = cacheGet<ForgeBranch[]>(key);
+        if (cached) {
+          setBranches(cached);
+          setBranch(
+            (prev) => prev ?? cached.find((b) => b.isDefault)?.name ?? cached[0]?.name ?? null,
+          );
+          return;
+        }
+      }
+      setBranchesLoading(true);
       try {
         const res = await client.forgeListBranches({ repo: repoRef(repo) });
         const parsed = ForgeBranchSchema.array().safeParse(res.branches);
-        if (cancelled) return;
         const list = parsed.success ? parsed.data : [];
         setBranches(list);
         setBranch((prev) => prev ?? list.find((b) => b.isDefault)?.name ?? list[0]?.name ?? null);
+        if (parsed.success) cacheSet(key, list);
       } catch {
         // Branch picker shows an empty state; commits still load from default ref.
       } finally {
-        if (!cancelled) setBranchesLoading(false);
+        setBranchesLoading(false);
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [client, repo]);
+    },
+    [client, repo],
+  );
 
-  const loadCommits = useCallback(async () => {
-    if (!branch) return;
-    setCommitsLoading(true);
-    setCommitsError(null);
-    try {
-      const res = await client.forgeListCommits({ repo: repoRef(repo), ref: branch });
-      const parsed = ForgeCommitSchema.array().safeParse(res.commits);
-      setCommits(parsed.success ? parsed.data : []);
-      if (!parsed.success) setCommitsError("Unable to load commits.");
-    } catch (e: unknown) {
-      setCommitsError(e instanceof Error ? e.message : "Unable to load commits.");
-    } finally {
-      setCommitsLoading(false);
-    }
-  }, [client, repo, branch]);
+  useEffect(() => {
+    void loadBranches();
+  }, [loadBranches]);
+
+  const loadCommits = useCallback(
+    async (force = false) => {
+      if (!branch) return;
+      const key = `code:commits:${repoCacheKey(repo)}:${branch}`;
+      if (force) cacheDelete(key);
+      else {
+        const cached = cacheGet<ForgeCommit[]>(key);
+        if (cached) {
+          setCommits(cached);
+          setCommitsError(null);
+          return;
+        }
+      }
+      setCommitsLoading(true);
+      setCommitsError(null);
+      try {
+        const res = await client.forgeListCommits({ repo: repoRef(repo), ref: branch });
+        const parsed = ForgeCommitSchema.array().safeParse(res.commits);
+        setCommits(parsed.success ? parsed.data : []);
+        if (!parsed.success) setCommitsError("Unable to load commits.");
+        else cacheSet(key, parsed.data);
+      } catch (e: unknown) {
+        setCommitsError(e instanceof Error ? e.message : "Unable to load commits.");
+      } finally {
+        setCommitsLoading(false);
+      }
+    },
+    [client, repo, branch],
+  );
 
   useEffect(() => {
     if (branch) void loadCommits();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [branch]);
+
+  const retryCommits = useCallback(() => void loadCommits(true), [loadCommits]);
+  const refreshCode = useCallback(() => {
+    void loadBranches(true);
+    void loadCommits(true);
+  }, [loadBranches, loadCommits]);
 
   const runCompare = useCallback(
     async (base: string, head: string, title: string) => {
@@ -2476,6 +2605,14 @@ function CodeView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }) {
         <View style={styles.grow} />
         <Pressable
           style={[styles.btn, styles.btnGhost]}
+          onPress={refreshCode}
+          testID="forge-code-refresh"
+        >
+          <RotateCcw size={13} color={theme.colors.foreground} />
+          <Text style={styles.btnGhostText}>Refresh</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.btn, styles.btnGhost]}
           onPress={toggleCompare}
           testID="forge-code-compare-toggle"
         >
@@ -2523,12 +2660,12 @@ function CodeView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }) {
         <View style={styles.errorBanner}>
           <CircleAlert size={16} color={theme.colors.statusDanger} />
           <Text style={styles.errorText}>{commitsError}</Text>
-          <Pressable style={[styles.btn, styles.btnGhost]} onPress={loadCommits}>
+          <Pressable style={[styles.btn, styles.btnGhost]} onPress={retryCommits}>
             <Text style={styles.btnGhostText}>Retry</Text>
           </Pressable>
         </View>
       ) : commitsLoading || commits === null ? (
-        <Text style={styles.emptyText}>Loading commits…</Text>
+        <SkeletonRows />
       ) : commits.length === 0 ? (
         <Text style={styles.emptyText}>No commits on this branch.</Text>
       ) : (
@@ -2877,21 +3014,37 @@ function ArtifactsPanel({
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setError(null);
-    try {
-      const res = await client.forgeListArtifacts({ repo: repoRef(repo), runId });
-      const parsed = ForgeArtifactSchema.array().safeParse(res.artifacts);
-      setArtifacts(parsed.success ? parsed.data : []);
-      if (!parsed.success) setError("Unable to load artifacts.");
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Unable to load artifacts.");
-    }
-  }, [client, repo, runId]);
+  const load = useCallback(
+    async (force = false) => {
+      const key = `artifacts:${repoCacheKey(repo)}:${runId}`;
+      if (force) cacheDelete(key);
+      else {
+        const cached = cacheGet<ForgeArtifact[]>(key);
+        if (cached) {
+          setArtifacts(cached);
+          setError(null);
+          return;
+        }
+      }
+      setError(null);
+      try {
+        const res = await client.forgeListArtifacts({ repo: repoRef(repo), runId });
+        const parsed = ForgeArtifactSchema.array().safeParse(res.artifacts);
+        setArtifacts(parsed.success ? parsed.data : []);
+        if (!parsed.success) setError("Unable to load artifacts.");
+        else cacheSet(key, parsed.data);
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : "Unable to load artifacts.");
+      }
+    },
+    [client, repo, runId],
+  );
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  const reload = useCallback(() => void load(true), [load]);
 
   const download = useCallback(
     async (artifact: ForgeArtifact) => {
@@ -2915,17 +3068,28 @@ function ArtifactsPanel({
 
   return (
     <View style={styles.pane}>
-      <Text style={styles.sectionTitle}>Artifacts</Text>
+      <View style={styles.toolbarRow}>
+        <Text style={styles.sectionTitle}>Artifacts</Text>
+        <View style={styles.grow} />
+        <Pressable
+          style={[styles.btn, styles.btnGhost]}
+          onPress={reload}
+          testID="forge-artifacts-refresh"
+        >
+          <RotateCcw size={13} color={theme.colors.foreground} />
+          <Text style={styles.btnGhostText}>Refresh</Text>
+        </Pressable>
+      </View>
       {error ? (
         <View style={styles.errorBanner}>
           <CircleAlert size={16} color={theme.colors.statusDanger} />
           <Text style={styles.errorText}>{error}</Text>
-          <Pressable style={[styles.btn, styles.btnGhost]} onPress={load}>
+          <Pressable style={[styles.btn, styles.btnGhost]} onPress={reload}>
             <Text style={styles.btnGhostText}>Retry</Text>
           </Pressable>
         </View>
       ) : artifacts === null ? (
-        <Text style={styles.emptyText}>Loading artifacts…</Text>
+        <SkeletonRows rows={3} />
       ) : artifacts.length === 0 ? (
         <Text style={styles.emptyText}>No artifacts for this run.</Text>
       ) : (
@@ -3039,25 +3203,41 @@ function PipelinesView({
   const [error, setError] = useState<string | null>(null);
   const [selectedRun, setSelectedRun] = useState<ForgePipelineRun | null>(null);
 
-  const loadRuns = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await client.forgeListPipelines({ repo: repoRef(repo) });
-      const parsed = ForgePipelineRunSchema.array().safeParse(res.runs);
-      setRuns(parsed.success ? parsed.data : []);
-      if (!parsed.success) setError("Unable to load pipelines.");
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Unable to load pipelines.");
-    } finally {
-      setLoading(false);
-    }
-  }, [client, repo]);
+  const loadRuns = useCallback(
+    async (force = false) => {
+      const key = `pipelines:${repoCacheKey(repo)}`;
+      if (force) cacheDelete(key);
+      else {
+        const cached = cacheGet<ForgePipelineRun[]>(key);
+        if (cached) {
+          setRuns(cached);
+          setError(null);
+          setLoading(false);
+          return;
+        }
+      }
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await client.forgeListPipelines({ repo: repoRef(repo) });
+        const parsed = ForgePipelineRunSchema.array().safeParse(res.runs);
+        setRuns(parsed.success ? parsed.data : []);
+        if (!parsed.success) setError("Unable to load pipelines.");
+        else cacheSet(key, parsed.data);
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : "Unable to load pipelines.");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [client, repo],
+  );
 
   useEffect(() => {
     void loadRuns();
   }, [loadRuns]);
 
+  const reloadRuns = useCallback(() => void loadRuns(true), [loadRuns]);
   const backToRuns = useCallback(() => setSelectedRun(null), []);
 
   if (selectedRun) {
@@ -3078,17 +3258,26 @@ function PipelinesView({
         <Text style={styles.rowTitleMono} numberOfLines={1}>
           {repo.owner}/{repo.name}
         </Text>
+        <View style={styles.grow} />
+        <Pressable
+          style={[styles.btn, styles.btnGhost]}
+          onPress={reloadRuns}
+          testID="forge-pipelines-refresh"
+        >
+          <RotateCcw size={13} color={theme.colors.foreground} />
+          <Text style={styles.btnGhostText}>Refresh</Text>
+        </Pressable>
       </View>
       {error ? (
         <View style={styles.errorBanner}>
           <CircleAlert size={16} color={theme.colors.statusDanger} />
           <Text style={styles.errorText}>{error}</Text>
-          <Pressable style={[styles.btn, styles.btnGhost]} onPress={loadRuns}>
+          <Pressable style={[styles.btn, styles.btnGhost]} onPress={reloadRuns}>
             <Text style={styles.btnGhostText}>Retry</Text>
           </Pressable>
         </View>
       ) : loading || runs === null ? (
-        <Text style={styles.emptyText}>Loading pipelines…</Text>
+        <SkeletonRows />
       ) : runs.length === 0 ? (
         <Text style={styles.emptyText}>No pipeline runs yet.</Text>
       ) : (
@@ -3215,30 +3404,52 @@ function ReleasesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo 
   const [tags, setTags] = useState<ForgeTag[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setError(null);
-    setReleases(null);
-    setTags(null);
-    try {
-      const [releaseRes, tagRes] = await Promise.all([
-        client.forgeListReleases({ repo: repoRef(repo), limit: 50 }),
-        client.forgeListTags({ repo: repoRef(repo), limit: 50 }),
-      ]);
-      const parsedReleases = ForgeReleaseSchema.array().safeParse(releaseRes.releases);
-      const parsedTags = ForgeTagSchema.array().safeParse(tagRes.tags);
-      setReleases(parsedReleases.success ? parsedReleases.data : []);
-      setTags(parsedTags.success ? parsedTags.data : []);
-      if (!parsedReleases.success || !parsedTags.success) {
-        setError("Unable to load releases.");
+  const load = useCallback(
+    async (force = false) => {
+      const releasesKey = `releases:${repoCacheKey(repo)}`;
+      const tagsKey = `tags:${repoCacheKey(repo)}`;
+      if (force) {
+        cacheDelete(releasesKey);
+        cacheDelete(tagsKey);
+      } else {
+        const cachedReleases = cacheGet<ForgeRelease[]>(releasesKey);
+        const cachedTags = cacheGet<ForgeTag[]>(tagsKey);
+        if (cachedReleases && cachedTags) {
+          setReleases(cachedReleases);
+          setTags(cachedTags);
+          setError(null);
+          return;
+        }
       }
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Unable to load releases.");
-    }
-  }, [client, repo]);
+      setError(null);
+      setReleases(null);
+      setTags(null);
+      try {
+        const [releaseRes, tagRes] = await Promise.all([
+          client.forgeListReleases({ repo: repoRef(repo), limit: 50 }),
+          client.forgeListTags({ repo: repoRef(repo), limit: 50 }),
+        ]);
+        const parsedReleases = ForgeReleaseSchema.array().safeParse(releaseRes.releases);
+        const parsedTags = ForgeTagSchema.array().safeParse(tagRes.tags);
+        setReleases(parsedReleases.success ? parsedReleases.data : []);
+        setTags(parsedTags.success ? parsedTags.data : []);
+        if (parsedReleases.success) cacheSet(releasesKey, parsedReleases.data);
+        if (parsedTags.success) cacheSet(tagsKey, parsedTags.data);
+        if (!parsedReleases.success || !parsedTags.success) {
+          setError("Unable to load releases.");
+        }
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : "Unable to load releases.");
+      }
+    },
+    [client, repo],
+  );
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  const reload = useCallback(() => void load(true), [load]);
 
   return (
     <View style={styles.pane}>
@@ -3246,13 +3457,22 @@ function ReleasesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo 
         <Text style={styles.rowTitleMono} numberOfLines={1}>
           {repo.owner}/{repo.name}
         </Text>
+        <View style={styles.grow} />
+        <Pressable
+          style={[styles.btn, styles.btnGhost]}
+          onPress={reload}
+          testID="forge-releases-refresh"
+        >
+          <RotateCcw size={13} color={theme.colors.foreground} />
+          <Text style={styles.btnGhostText}>Refresh</Text>
+        </Pressable>
       </View>
 
       {error ? (
         <View style={styles.errorBanner}>
           <CircleAlert size={16} color={theme.colors.statusDanger} />
           <Text style={styles.errorText}>{error}</Text>
-          <Pressable style={[styles.btn, styles.btnGhost]} onPress={load}>
+          <Pressable style={[styles.btn, styles.btnGhost]} onPress={reload}>
             <Text style={styles.btnGhostText}>Retry</Text>
           </Pressable>
         </View>
@@ -3260,7 +3480,7 @@ function ReleasesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo 
 
       <Text style={styles.sectionTitle}>Releases</Text>
       {releases === null ? (
-        <Text style={styles.emptyText}>Loading releases…</Text>
+        <SkeletonRows rows={4} />
       ) : releases.length === 0 ? (
         <Text style={styles.emptyText}>No releases yet.</Text>
       ) : (
@@ -3273,7 +3493,7 @@ function ReleasesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo 
 
       <Text style={styles.sectionTitle}>Tags</Text>
       {tags === null ? (
-        <Text style={styles.emptyText}>Loading tags…</Text>
+        <SkeletonRows rows={4} />
       ) : tags.length === 0 ? (
         <Text style={styles.emptyText}>No tags yet.</Text>
       ) : (
@@ -3503,7 +3723,17 @@ function IssuesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo })
   const [createNote, setCreateNote] = useState<string | null>(null);
 
   const load = useCallback(
-    async (nextState: IssueState) => {
+    async (nextState: IssueState, force = false) => {
+      const key = `issues:${repoCacheKey(repo)}:${nextState}`;
+      if (force) cacheDelete(key);
+      else {
+        const cached = cacheGet<ForgeIssue[]>(key);
+        if (cached) {
+          setIssues(cached);
+          setError(null);
+          return;
+        }
+      }
       setError(null);
       setIssues(null);
       try {
@@ -3511,6 +3741,7 @@ function IssuesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo })
         const parsed = ForgeIssueSchema.array().safeParse(res.issues);
         setIssues(parsed.success ? parsed.data : []);
         if (!parsed.success) setError("Unable to load issues.");
+        else cacheSet(key, parsed.data);
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : "Unable to load issues.");
       }
@@ -3526,9 +3757,11 @@ function IssuesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo })
   const toggleCreating = useCallback(() => setCreating((v) => !v), []);
   const openIssue = useCallback((issue: ForgeIssue) => setSelected(issue), []);
   const backToList = useCallback(() => setSelected(null), []);
+  const refreshList = useCallback(() => void load(state, true), [load, state]);
+  // A write from the detail view invalidates the cached list, so force a refetch.
   const refresh = useCallback(() => {
     setSelected(null);
-    void load(state);
+    void load(state, true);
   }, [load, state]);
 
   const submitCreate = useCallback(async () => {
@@ -3546,7 +3779,7 @@ function IssuesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo })
         setTitle("");
         setBody("");
         setCreating(false);
-        void load(state);
+        void load(state, true);
       } else {
         setCreateNote("The issue could not be created.");
       }
@@ -3578,6 +3811,14 @@ function IssuesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo })
           {repo.owner}/{repo.name}
         </Text>
         <View style={styles.grow} />
+        <Pressable
+          style={[styles.btn, styles.btnGhost]}
+          onPress={refreshList}
+          testID="forge-issues-refresh"
+        >
+          <RotateCcw size={13} color={theme.colors.foreground} />
+          <Text style={styles.btnGhostText}>Refresh</Text>
+        </Pressable>
         <Pressable
           style={[styles.btn, styles.btnPrimary]}
           onPress={toggleCreating}
@@ -3652,7 +3893,7 @@ function IssuesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo })
       ) : null}
 
       {issues === null ? (
-        <Text style={styles.emptyText}>Loading issues…</Text>
+        <SkeletonRows />
       ) : issues.length === 0 ? (
         <Text style={styles.emptyText}>No issues here yet.</Text>
       ) : (
@@ -3673,19 +3914,24 @@ function SubNavButton({
   value,
   active,
   onSelect,
+  Icon,
 }: {
   label: string;
   value: SubNav;
   active: boolean;
   onSelect: (value: SubNav) => void;
+  Icon: ComponentType<{ size?: number; color?: string }>;
 }) {
+  const { theme } = useUnistyles();
   const handlePress = useCallback(() => onSelect(value), [value, onSelect]);
+  const tint = active ? theme.colors.accentForeground : theme.colors.foregroundMuted;
   return (
     <Pressable
-      style={[styles.subNavBtn, active && styles.subNavBtnActive]}
+      style={[styles.subNavPill, active && styles.subNavPillActive]}
       onPress={handlePress}
       testID={`forge-subnav-${value}`}
     >
+      <Icon size={14} color={tint} />
       <Text style={[styles.subNavText, active && styles.subNavTextActive]}>{label}</Text>
     </Pressable>
   );
@@ -3774,8 +4020,19 @@ export function ForgeHubScreen() {
   }, [tab, reposLoaded, reposLoading, loadRepos]);
 
   const loadChangeRequests = useCallback(
-    async (repo: ForgeRepo, state: CrState) => {
+    async (repo: ForgeRepo, state: CrState, force = false) => {
       if (!client) return;
+      const key = `crlist:${repoCacheKey(repo)}:${state}`;
+      if (force) cacheDelete(key);
+      else {
+        const cached = cacheGet<ForgeChangeRequestSummary[]>(key);
+        if (cached) {
+          setChangeRequests(cached);
+          setCrError(null);
+          setCrLoading(false);
+          return;
+        }
+      }
       setCrLoading(true);
       setCrError(null);
       try {
@@ -3789,6 +4046,8 @@ export function ForgeHubScreen() {
           setCrError(
             `Unable to load ${getForgeDefinitionOrNeutral(repo.forge).changeRequestNoun} list.`,
           );
+        } else {
+          cacheSet(key, parsed.data);
         }
       } catch (e: unknown) {
         setCrError(
@@ -3857,6 +4116,9 @@ export function ForgeHubScreen() {
       });
       const parsed = ForgeChangeRequestSummarySchema.array().safeParse(res.changeRequests);
       if (!parsed.success) return;
+      // A review/merge changed the CR: drop every cached list state for this repo
+      // so revisiting refetches fresh, then reflect the update in place.
+      cacheDeletePrefix(`crlist:${repoCacheKey(selectedRepo)}:`);
       setChangeRequests(parsed.data);
       const match = parsed.data.find((c) => c.number === selectedCr.number);
       if (match) setSelectedCr(match);
@@ -3897,6 +4159,9 @@ export function ForgeHubScreen() {
   const toggleAdding = useCallback(() => setAdding((v) => !v), []);
   const handleBackToList = useCallback(() => setSelectedCr(null), []);
   const handleRetryRepos = useCallback(() => void loadRepos(), [loadRepos]);
+  const refreshCrList = useCallback(() => {
+    if (selectedRepo) void loadChangeRequests(selectedRepo, crState, true);
+  }, [selectedRepo, crState, loadChangeRequests]);
 
   const contentContainerStyle = useMemo(
     () => [styles.contentContainer, isCompact ? { paddingTop: insets.top } : null],
@@ -3912,27 +4177,41 @@ export function ForgeHubScreen() {
         <Text style={styles.header}>Forge Hub</Text>
       </View>
 
-      <View style={styles.subNavRow}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.subNavRow}
+        contentContainerStyle={styles.subNavContent}
+      >
         <SubNavButton
           label="Connections"
           value="connections"
           active={tab === "connections"}
           onSelect={setTab}
+          Icon={Plug}
         />
         <SubNavButton
           label="Repositories"
           value="repositories"
           active={tab === "repositories"}
           onSelect={setTab}
+          Icon={FolderGit2}
         />
         {codeEnabled ? (
-          <SubNavButton label="Code" value="code" active={tab === "code"} onSelect={setTab} />
+          <SubNavButton
+            label="Code"
+            value="code"
+            active={tab === "code"}
+            onSelect={setTab}
+            Icon={Code}
+          />
         ) : null}
         <SubNavButton
           label="Pull requests"
           value="pulls"
           active={tab === "pulls"}
           onSelect={setTab}
+          Icon={GitPullRequest}
         />
         {pipelinesEnabled ? (
           <SubNavButton
@@ -3940,6 +4219,7 @@ export function ForgeHubScreen() {
             value="pipelines"
             active={tab === "pipelines"}
             onSelect={setTab}
+            Icon={Play}
           />
         ) : null}
         {releasesEnabled ? (
@@ -3948,12 +4228,19 @@ export function ForgeHubScreen() {
             value="releases"
             active={tab === "releases"}
             onSelect={setTab}
+            Icon={Tag}
           />
         ) : null}
         {issuesEnabled ? (
-          <SubNavButton label="Issues" value="issues" active={tab === "issues"} onSelect={setTab} />
+          <SubNavButton
+            label="Issues"
+            value="issues"
+            active={tab === "issues"}
+            onSelect={setTab}
+            Icon={CircleDot}
+          />
         ) : null}
-      </View>
+      </ScrollView>
 
       {connectionsError ? (
         <View style={styles.errorBanner}>
@@ -4018,6 +4305,15 @@ export function ForgeHubScreen() {
                 <Text style={styles.rowTitleMono} numberOfLines={1}>
                   {selectedRepo.owner}/{selectedRepo.name}
                 </Text>
+                <View style={styles.grow} />
+                <Pressable
+                  style={[styles.btn, styles.btnGhost]}
+                  onPress={refreshCrList}
+                  testID="forge-cr-refresh"
+                >
+                  <RotateCcw size={13} color={theme.colors.foreground} />
+                  <Text style={styles.btnGhostText}>Refresh</Text>
+                </Pressable>
               </View>
               <StateFilter state={crState} onChange={handleChangeState} />
               {crError ? (
@@ -4027,7 +4323,7 @@ export function ForgeHubScreen() {
                 </View>
               ) : null}
               {crLoading ? (
-                <Text style={styles.emptyText}>Loading…</Text>
+                <SkeletonRows />
               ) : changeRequests.length === 0 ? (
                 <Text style={styles.emptyText}>Nothing here yet.</Text>
               ) : (
@@ -4126,29 +4422,64 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.foreground,
   },
   subNavRow: {
-    flexDirection: "row",
-    gap: theme.spacing[1],
-    paddingHorizontal: theme.spacing[4],
+    flexGrow: 0,
+    flexShrink: 0,
     paddingTop: theme.spacing[3],
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,
   },
-  subNavBtn: {
+  subNavContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[1],
+    paddingHorizontal: theme.spacing[4],
+    paddingBottom: theme.spacing[2],
+  },
+  subNavPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[1.5],
     paddingHorizontal: theme.spacing[3],
     paddingVertical: theme.spacing[2],
-    borderBottomWidth: 2,
-    borderBottomColor: "transparent",
+    borderRadius: theme.borderRadius.full,
+    backgroundColor: "transparent",
   },
-  subNavBtnActive: {
-    borderBottomColor: theme.colors.accent,
+  subNavPillActive: {
+    backgroundColor: theme.colors.accent,
   },
   subNavText: {
     fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
     color: theme.colors.foregroundMuted,
   },
   subNavTextActive: {
-    color: theme.colors.foreground,
+    color: theme.colors.accentForeground,
     fontWeight: theme.fontWeight.semibold,
+  },
+  // skeleton loaders
+  skeletonRow: {
+    gap: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[3],
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+  },
+  skeletonRowCompact: {
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[2],
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+  },
+  skeletonBarTitle: {
+    height: 10,
+    borderRadius: theme.borderRadius.sm,
+    backgroundColor: theme.colors.surface2,
+  },
+  skeletonBarSub: {
+    height: 8,
+    width: "34%",
+    borderRadius: theme.borderRadius.sm,
+    backgroundColor: theme.colors.surface2,
   },
   pane: {
     gap: theme.spacing[3],
