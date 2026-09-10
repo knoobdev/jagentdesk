@@ -1129,7 +1129,7 @@ async function bootstrap(): Promise<void> {
   }
 
   const appDistDir = getAppDistDir();
-  protocol.handle(APP_SCHEME, (request) => {
+  protocol.handle(APP_SCHEME, async (request) => {
     const { pathname, search, hash } = new URL(request.url);
     const decodedPath = decodeURIComponent(pathname);
 
@@ -1147,9 +1147,16 @@ async function bootstrap(): Promise<void> {
       return new Response("Not found", { status: 404 });
     }
 
-    // SPA fallback: serve index.html for routes without a file extension
+    // SPA fallback: serve index.html for routes without a file extension. The
+    // entrypoint HTML references content-hashed JS, so it MUST NOT be cached —
+    // otherwise a cached index.html keeps pointing at a previous build's bundle
+    // and new releases render stale until the user wipes the cache. Static
+    // hashed assets stay cacheable (their name changes when content changes).
     if (!relativePath || !path.extname(relativePath)) {
-      return net.fetch(pathToFileURL(path.join(appDistDir, "index.html")).toString());
+      const res = await net.fetch(pathToFileURL(path.join(appDistDir, "index.html")).toString());
+      const headers = new Headers(res.headers);
+      headers.set("Cache-Control", "no-store, must-revalidate");
+      return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
     }
 
     return net.fetch(pathToFileURL(filePath).toString());
