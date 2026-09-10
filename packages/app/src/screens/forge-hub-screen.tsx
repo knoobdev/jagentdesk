@@ -36,6 +36,7 @@ import {
   GitCommit,
   GitCompare,
   GitPullRequest,
+  KeyRound,
   LogIn,
   MessageSquare,
   Play,
@@ -43,6 +44,7 @@ import {
   Plus,
   RotateCcw,
   Search,
+  Server,
   Tag,
   Trash2,
   X,
@@ -527,14 +529,22 @@ function ProviderChip({
   active: boolean;
   onSelect: (choice: ProviderChoice) => void;
 }) {
+  const { theme } = useUnistyles();
   const handlePress = useCallback(() => onSelect(option.choice), [option.choice, onSelect]);
   return (
     <Pressable
-      style={[styles.providerChip, active && styles.providerChipActive]}
+      style={[styles.providerCard, active && styles.providerCardActive]}
       onPress={handlePress}
       testID={`forge-provider-${option.choice}`}
     >
-      <Text style={[styles.providerChipText, active && styles.providerChipTextActive]}>
+      {option.choice === "selfhosted" ? (
+        <View style={styles.providerGlyph}>
+          <Server size={24} color={theme.colors.foreground} />
+        </View>
+      ) : (
+        <ProviderBadge forge={option.forge} />
+      )}
+      <Text style={[styles.providerCardLabel, active && styles.providerCardLabelActive]}>
         {option.label}
       </Text>
     </Pressable>
@@ -1123,10 +1133,18 @@ function ConnectionsView({
 
       {adding ? (
         <View style={styles.formCard}>
-          <Text style={styles.formTitle}>Add a connection</Text>
+          <View style={styles.formHeader}>
+            <View style={styles.formTitleRow}>
+              <Plug size={16} color={theme.colors.foreground} />
+              <Text style={styles.formTitle}>Add a connection</Text>
+            </View>
+            <Text style={styles.formSubtitle}>
+              Connect a GitHub, GitLab, or Bitbucket account to browse and manage it here.
+            </Text>
+          </View>
 
           <Text style={styles.fieldLabel}>Provider</Text>
-          <View style={styles.chipRow}>
+          <View style={styles.providerGrid}>
             {PROVIDER_OPTIONS.map((o) => (
               <ProviderChip
                 key={o.choice}
@@ -1209,8 +1227,11 @@ function ConnectionsView({
             </View>
           ) : null}
 
+          <View style={styles.formDivider} />
+
           {option.method === "cli" ? (
             <>
+              <Text style={styles.fieldLabel}>Sign in</Text>
               {/* When the daemon can drive sign-in in-app, the CliInstallSection
                   button is the whole flow — the static "run this on the host"
                   hint is only shown as a fallback for hosts that can't. */}
@@ -1238,7 +1259,10 @@ function ConnectionsView({
             </>
           ) : (
             <View style={styles.field}>
-              <Text style={styles.fieldLabel}>Personal access token / API token</Text>
+              <View style={styles.fieldLabelRow}>
+                <KeyRound size={13} color={theme.colors.foregroundMuted} />
+                <Text style={styles.fieldLabel}>Personal access token / API token</Text>
+              </View>
               <TextInput
                 style={styles.input}
                 value={token}
@@ -5250,18 +5274,80 @@ const styles = StyleSheet.create((theme) => ({
     borderWidth: theme.borderWidth[1],
     borderColor: theme.colors.border,
     backgroundColor: theme.colors.surface1,
-    padding: theme.spacing[3],
-    gap: theme.spacing[3],
+    padding: theme.spacing[4],
+    gap: theme.spacing[4],
+  },
+  formHeader: {
+    gap: theme.spacing[1],
+  },
+  formTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
   },
   formTitle: {
     fontSize: theme.fontSize.base,
     fontWeight: theme.fontWeight.semibold,
     color: theme.colors.foreground,
   },
+  formSubtitle: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+  },
+  formDivider: {
+    height: 1,
+    backgroundColor: theme.colors.border,
+    marginVertical: theme.spacing[1],
+  },
   chipRow: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: theme.spacing[2],
+  },
+  providerGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: theme.spacing[2],
+  },
+  providerCard: {
+    flexDirection: "column",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    paddingVertical: theme.spacing[3],
+    paddingHorizontal: theme.spacing[3],
+    borderRadius: theme.borderRadius.lg,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface0,
+    minWidth: 104,
+    flexGrow: 1,
+    flexBasis: 0,
+  },
+  providerCardActive: {
+    borderColor: theme.colors.accent,
+    borderWidth: 2,
+    // Compensate the +1 border so the card doesn't shift when selected.
+    paddingVertical: theme.spacing[3] - 1,
+    paddingHorizontal: theme.spacing[3] - 1,
+    backgroundColor: theme.colors.surface2,
+  },
+  providerCardLabel: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foregroundMuted,
+  },
+  providerCardLabelActive: {
+    color: theme.colors.foreground,
+  },
+  providerGlyph: {
+    width: 26,
+    height: 26,
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.surface2,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    alignItems: "center",
+    justifyContent: "center",
   },
   providerChip: {
     paddingHorizontal: theme.spacing[3],
@@ -5284,6 +5370,11 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.accentForeground,
   },
   field: {
+    gap: theme.spacing[1],
+  },
+  fieldLabelRow: {
+    flexDirection: "row",
+    alignItems: "center",
     gap: theme.spacing[1],
   },
   fieldLabel: {
@@ -5329,6 +5420,7 @@ const styles = StyleSheet.create((theme) => ({
     flexWrap: "wrap",
     justifyContent: "flex-end",
     gap: theme.spacing[2],
+    marginTop: theme.spacing[1],
   },
   // CLI detect + guided auto-install (§19.3.5)
   cliSection: {
