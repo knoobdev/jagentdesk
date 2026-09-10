@@ -80,8 +80,15 @@ forge, webhook mặc định).
   - [x] app: rail item Forge + route `h/[serverId]/forge.tsx` + `ForgeHubScreen` (Connections/
     Repositories/Pull requests + Files tab qua `DiffViewer`). App typecheck xanh. (c294b6a33)
   - **Mốc A HOÀN CHỈNH end-to-end** (GitHub read-only chạy thật qua gh).
-- [ ] Mốc B: GitLab, code (branch/commit/compare), review (approve/request-changes/comment),
-  merge (repo-scoped, UI segmented), CI (pipeline list/get/job log/rerun/cancel/play).
+- Mốc B (code · review · merge · CI):
+  - [x] protocol + client: 11 RPC dot-namespace (branch/commit/compare, review, merge repo-scoped,
+    pipeline list/get, job log, rerun/cancel, play) + item schemas + methods. (fe37fcee3)
+  - [x] server (GitHub qua gh): ForgeHubService B methods + dispatch + permissions + advertise
+    forgeHubCode/Review/Pipelines. Server typecheck xanh. (a88458239)
+  - [ ] app UI (đang chạy subagent): Code sub-nav, review actions, merge box, Pipelines run+log
+    viewer + rerun/cancel, fill Commits/Checks tabs.
+  - [ ] GitLab (glab) provider cho A+B (hiện non-github trả empty) — CÒN LẠI.
+- [ ] Mốc C: Bitbucket REST adapter, auto-merge, artifact, release, issue.
 - [ ] Mốc C: Bitbucket REST adapter, auto-merge, artifact, release, issue.
 
 Ghi chú (quyết định implement): spec 07 mô tả capability là mảng chuỗi, nhưng code thật vẫn dùng
