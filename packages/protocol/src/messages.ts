@@ -5785,33 +5785,44 @@ export const ForgeSearchResponseSchema = z.object({
 // ===== Forge Hub (spec 19 / ADR-0015) — Milestone A responses ===================
 export const ForgeConnectionListResponseSchema = z.object({
   type: z.literal("forge.connection.list.response"),
-  payload: z.object({ connections: z.array(ForgeConnectionSchema) }),
+  payload: z.object({ connections: z.array(ForgeConnectionSchema), requestId: z.string() }),
 });
 export const ForgeConnectionAddResponseSchema = z.object({
   type: z.literal("forge.connection.add.response"),
-  payload: z.object({ connection: ForgeConnectionSchema }),
+  payload: z.object({ connection: ForgeConnectionSchema, requestId: z.string() }),
 });
 export const ForgeConnectionRemoveResponseSchema = z.object({
   type: z.literal("forge.connection.remove.response"),
-  payload: z.object({ removed: z.boolean() }),
+  payload: z.object({ removed: z.boolean(), requestId: z.string() }),
 });
+// NOTE: the array payloads below use z.array(z.unknown()) — the SAME pattern as
+// ForgeSearchResponsePayloadSchema (`items: z.array(z.unknown())`). Inlining the full
+// item schemas here bloats the 250+-member SessionOutbound discriminated union past
+// TypeScript's instantiation budget (the most complex member gets dropped from the
+// inferred union). Producers/consumers validate items against the exported item
+// schemas (ForgeRepoSchema / ForgeChangeRequestSummarySchema / ForgeChangeRequestFileSchema).
 export const ForgeRepoListResponseSchema = z.object({
   type: z.literal("forge.repo.list.response"),
   payload: z.object({
-    repos: z.array(ForgeRepoSchema),
+    repos: z.array(z.unknown()),
     /** True when a query matched more than `limit`; client can page/refine. */
     truncated: z.boolean().optional(),
+    requestId: z.string(),
   }),
 });
 export const ForgeChangeRequestListResponseSchema = z.object({
   type: z.literal("forge.change_request.list.response"),
-  payload: z.object({ changeRequests: z.array(ForgeChangeRequestSummarySchema) }),
+  payload: z.object({
+    changeRequests: z.array(z.unknown()),
+    requestId: z.string(),
+  }),
 });
 export const ForgeChangeRequestFilesResponseSchema = z.object({
   type: z.literal("forge.change_request.files.response"),
   payload: z.object({
-    files: z.array(ForgeChangeRequestFileSchema),
+    files: z.array(z.unknown()),
     truncated: z.boolean().optional(),
+    requestId: z.string(),
   }),
 });
 // ===== end Forge Hub Milestone A responses ======================================
@@ -7215,6 +7226,24 @@ export type ForgeSearchItem = z.infer<typeof ForgeSearchItemSchema>;
 export type ForgeSearchKind = "issue" | "change_request";
 export type ForgeSearchRequest = z.infer<typeof ForgeSearchRequestSchema>;
 export type ForgeSearchResponse = z.infer<typeof ForgeSearchResponseSchema>;
+// Forge Hub (spec 19) — Milestone A types
+export type ForgeConnection = z.infer<typeof ForgeConnectionSchema>;
+export type ForgeRepo = z.infer<typeof ForgeRepoSchema>;
+export type ForgeRepoRef = z.infer<typeof ForgeRepoRefSchema>;
+export type ForgeChangeRequestSummary = z.infer<typeof ForgeChangeRequestSummarySchema>;
+export type ForgeChangeRequestFile = z.infer<typeof ForgeChangeRequestFileSchema>;
+export type ForgeConnectionListRequest = z.infer<typeof ForgeConnectionListRequestSchema>;
+export type ForgeConnectionListResponse = z.infer<typeof ForgeConnectionListResponseSchema>;
+export type ForgeConnectionAddRequest = z.infer<typeof ForgeConnectionAddRequestSchema>;
+export type ForgeConnectionAddResponse = z.infer<typeof ForgeConnectionAddResponseSchema>;
+export type ForgeConnectionRemoveRequest = z.infer<typeof ForgeConnectionRemoveRequestSchema>;
+export type ForgeConnectionRemoveResponse = z.infer<typeof ForgeConnectionRemoveResponseSchema>;
+export type ForgeRepoListRequest = z.infer<typeof ForgeRepoListRequestSchema>;
+export type ForgeRepoListResponse = z.infer<typeof ForgeRepoListResponseSchema>;
+export type ForgeChangeRequestListRequest = z.infer<typeof ForgeChangeRequestListRequestSchema>;
+export type ForgeChangeRequestListResponse = z.infer<typeof ForgeChangeRequestListResponseSchema>;
+export type ForgeChangeRequestFilesRequest = z.infer<typeof ForgeChangeRequestFilesRequestSchema>;
+export type ForgeChangeRequestFilesResponse = z.infer<typeof ForgeChangeRequestFilesResponseSchema>;
 export type GitHubSearchItem = z.infer<typeof GitHubSearchItemSchema>;
 export type GitHubSearchKind = z.infer<typeof GitHubSearchKindSchema>;
 export type GitHubSearchRequest = z.infer<typeof GitHubSearchRequestSchema>;

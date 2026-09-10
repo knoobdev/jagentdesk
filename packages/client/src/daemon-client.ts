@@ -58,6 +58,15 @@ import type {
   BranchSuggestionsResponse,
   ForgeSearchResponse,
   ForgeSearchRequest,
+  ForgeConnectionListResponse,
+  ForgeConnectionAddResponse,
+  ForgeConnectionRemoveResponse,
+  ForgeRepoListResponse,
+  ForgeRepoListRequest,
+  ForgeChangeRequestListResponse,
+  ForgeChangeRequestListRequest,
+  ForgeChangeRequestFilesResponse,
+  ForgeRepoRef,
   GitHubSearchResponse,
   GitHubSearchRequest,
   DirectorySuggestionsResponse,
@@ -457,6 +466,13 @@ type StashListPayload = StashListResponse["payload"];
 type ValidateBranchPayload = ValidateBranchResponse["payload"];
 type BranchSuggestionsPayload = BranchSuggestionsResponse["payload"];
 type ForgeSearchPayload = ForgeSearchResponse["payload"];
+// Forge Hub (spec 19) — Milestone A payload aliases
+type ForgeConnectionListPayload = ForgeConnectionListResponse["payload"];
+type ForgeConnectionAddPayload = ForgeConnectionAddResponse["payload"];
+type ForgeConnectionRemovePayload = ForgeConnectionRemoveResponse["payload"];
+type ForgeRepoListPayload = ForgeRepoListResponse["payload"];
+type ForgeChangeRequestListPayload = ForgeChangeRequestListResponse["payload"];
+type ForgeChangeRequestFilesPayload = ForgeChangeRequestFilesResponse["payload"];
 type GitHubSearchPayload = GitHubSearchResponse["payload"];
 type DirectorySuggestionsPayload = DirectorySuggestionsResponse["payload"];
 type JAgentDeskWorktreeListPayload = JAgentDeskWorktreeListResponse["payload"];
@@ -4478,6 +4494,100 @@ export class DaemonClient {
         kinds: options.kinds,
       },
       responseType: "github_search_response",
+    });
+  }
+
+  // ===== Forge Hub (spec 19 / ADR-0015) — Milestone A =====
+  async forgeListConnections(requestId?: string): Promise<ForgeConnectionListPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "forge.connection.list.request" },
+      responseType: "forge.connection.list.response",
+      timeout: 15000,
+    });
+  }
+
+  async forgeAddConnection(
+    options: { forge: string; host?: string; method: "cli" | "token"; token?: string },
+    requestId?: string,
+  ): Promise<ForgeConnectionAddPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "forge.connection.add.request",
+        forge: options.forge,
+        host: options.host,
+        method: options.method,
+        token: options.token,
+      },
+      responseType: "forge.connection.add.response",
+      timeout: 30000,
+    });
+  }
+
+  async forgeRemoveConnection(
+    connectionId: string,
+    requestId?: string,
+  ): Promise<ForgeConnectionRemovePayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "forge.connection.remove.request", connectionId },
+      responseType: "forge.connection.remove.response",
+      timeout: 15000,
+    });
+  }
+
+  async forgeListRepos(
+    options: { connectionId?: string; query?: string; limit?: ForgeRepoListRequest["limit"] } = {},
+    requestId?: string,
+  ): Promise<ForgeRepoListPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "forge.repo.list.request",
+        connectionId: options.connectionId,
+        query: options.query,
+        limit: options.limit,
+      },
+      responseType: "forge.repo.list.response",
+      timeout: 20000,
+    });
+  }
+
+  async forgeListChangeRequests(
+    options: {
+      repo: ForgeRepoRef;
+      state?: ForgeChangeRequestListRequest["state"];
+      limit?: ForgeChangeRequestListRequest["limit"];
+    },
+    requestId?: string,
+  ): Promise<ForgeChangeRequestListPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "forge.change_request.list.request",
+        repo: options.repo,
+        state: options.state,
+        limit: options.limit,
+      },
+      responseType: "forge.change_request.list.response",
+      timeout: 20000,
+    });
+  }
+
+  async forgeGetChangeRequestFiles(
+    options: { repo: ForgeRepoRef; number: number },
+    requestId?: string,
+  ): Promise<ForgeChangeRequestFilesPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "forge.change_request.files.request",
+        repo: options.repo,
+        number: options.number,
+      },
+      responseType: "forge.change_request.files.response",
+      timeout: 20000,
     });
   }
 
