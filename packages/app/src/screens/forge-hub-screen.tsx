@@ -21,8 +21,11 @@ import {
   Copy,
   Download,
   ExternalLink,
+  File,
+  Folder,
   FolderGit2,
   GitBranch,
+  GitCommit,
   GitCompare,
   GitPullRequest,
   LogIn,
@@ -51,6 +54,7 @@ import {
   ForgeReleaseSchema,
   ForgeRepoSchema,
   ForgeTagSchema,
+  ForgeTreeEntrySchema,
   type ForgeArtifact,
   type ForgeBranch,
   type ForgeChangeRequestFile,
@@ -67,6 +71,7 @@ import {
   type ForgeReviewAction,
   type ForgeMergeMethod,
   type ForgeTag,
+  type ForgeTreeEntry,
   type ForgeCliInstallProgress,
   type ForgeCliStatusResponse,
   type ForgeCliInstallResponse,
@@ -98,6 +103,7 @@ type SubNav =
   | "connections"
   | "repositories"
   | "code"
+  | "commits"
   | "pulls"
   | "pipelines"
   | "releases"
@@ -2340,7 +2346,8 @@ function TabButton({
   );
 }
 
-// ===== code (branches · commits · diff) — Milestone B, gate forgeHubCode =====
+// ===== code (file tree) + commits (branches · commits · diff) — Milestone B,
+//        gate forgeHubCode =====
 
 // Branch picker (§19.5.1): trigger shows the current branch, an inline sheet with
 // a filter and a default-first list. Universal (no platform Modal).
@@ -2462,7 +2469,11 @@ function BranchRow({
   );
 }
 
-function CodeView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }) {
+// CommitsView (§19.5.2): branch picker + commit list; tapping a commit shows its
+// changed files, and Compare (base/head) shows a range diff. This is the commit
+// history that used to live under the Code tab — it now has its own sub-nav tab
+// so the Code tab can be a file-tree browser (like GitHub's Code tab).
+function CommitsView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }) {
   const { theme } = useUnistyles();
 
   const [branches, setBranches] = useState<ForgeBranch[]>([]);
@@ -2555,7 +2566,7 @@ function CodeView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }) {
   }, [branch]);
 
   const retryCommits = useCallback(() => void loadCommits(true), [loadCommits]);
-  const refreshCode = useCallback(() => {
+  const refreshCommits = useCallback(() => {
     void loadBranches(true);
     void loadCommits(true);
   }, [loadBranches, loadCommits]);
@@ -2649,8 +2660,8 @@ function CodeView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }) {
         <View style={styles.grow} />
         <Pressable
           style={[styles.btn, styles.btnGhost]}
-          onPress={refreshCode}
-          testID="forge-code-refresh"
+          onPress={refreshCommits}
+          testID="forge-commits-refresh"
         >
           <RotateCcw size={13} color={theme.colors.foreground} />
           <Text style={styles.btnGhostText}>Refresh</Text>
@@ -2716,6 +2727,427 @@ function CodeView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }) {
         <View style={styles.card}>
           {commits.map((commit) => (
             <CommitRow key={commit.sha} commit={commit} onOpen={openCommitDiff} />
+          ))}
+        </View>
+      )}
+    </View>
+  );
+}
+
+// A cached forge.file.get payload (subset the viewer renders).
+type CodeFile = {
+  path: string;
+  content: string | null;
+  isBinary: boolean;
+  size?: number | null;
+  truncated: boolean;
+};
+
+/** Dir of a repo-relative path ("" for a top-level file). */
+function pathDir(path: string): string {
+  const i = path.lastIndexOf("/");
+  return i < 0 ? "" : path.slice(0, i);
+}
+
+// Directory listing sort (§ GitHub Code tab): dirs first, then files, each
+// alphabetical by name (case-insensitive, stable via localeCompare).
+function sortTreeEntries(entries: ForgeTreeEntry[]): ForgeTreeEntry[] {
+  return [...entries].sort((a, b) => {
+    if (a.type !== b.type) return a.type === "dir" ? -1 : 1;
+    return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+  });
+}
+
+// A single breadcrumb segment. The final (current) segment is inert; earlier
+// segments navigate to their directory.
+function CrumbSegment({
+  label,
+  path,
+  isLast,
+  onNavigate,
+}: {
+  label: string;
+  path: string;
+  isLast: boolean;
+  onNavigate: (path: string) => void;
+}) {
+  const { theme } = useUnistyles();
+  const handlePress = useCallback(() => onNavigate(path), [path, onNavigate]);
+  return (
+    <View style={styles.crumbWrap}>
+      <Pressable
+        onPress={handlePress}
+        disabled={isLast}
+        testID={`forge-crumb-${path === "" ? "root" : path}`}
+      >
+        <Text style={[styles.crumb, isLast && styles.crumbActive]} numberOfLines={1}>
+          {label}
+        </Text>
+      </Pressable>
+      {isLast ? null : (
+        <ChevronRight size={12} color={theme.colors.foregroundExtraMuted} style={styles.crumbSep} />
+      )}
+    </View>
+  );
+}
+
+function Breadcrumb({
+  repo,
+  path,
+  onNavigate,
+}: {
+  repo: ForgeRepo;
+  path: string;
+  onNavigate: (path: string) => void;
+}) {
+  const crumbs = useMemo(() => {
+    const segs = path ? path.split("/") : [];
+    const list: { label: string; path: string }[] = [{ label: repo.name, path: "" }];
+    segs.forEach((seg, i) => {
+      list.push({ label: seg, path: segs.slice(0, i + 1).join("/") });
+    });
+    return list;
+  }, [repo.name, path]);
+
+  return (
+    <View style={styles.breadcrumb}>
+      {crumbs.map((c, i) => (
+        <CrumbSegment
+          key={c.path || "root"}
+          label={c.label}
+          path={c.path}
+          isLast={i === crumbs.length - 1}
+          onNavigate={onNavigate}
+        />
+      ))}
+    </View>
+  );
+}
+
+// One directory/file row in the tree. Tapping a dir navigates into it; tapping a
+// file opens the read-only viewer.
+function TreeEntryRow({
+  entry,
+  onOpenDir,
+  onOpenFile,
+}: {
+  entry: ForgeTreeEntry;
+  onOpenDir: (path: string) => void;
+  onOpenFile: (entry: ForgeTreeEntry) => void;
+}) {
+  const { theme } = useUnistyles();
+  const isDir = entry.type === "dir";
+  const handlePress = useCallback(() => {
+    if (isDir) onOpenDir(entry.path);
+    else onOpenFile(entry);
+  }, [isDir, entry, onOpenDir, onOpenFile]);
+  return (
+    <Pressable style={styles.treeRow} onPress={handlePress} testID={`forge-tree-${entry.path}`}>
+      {isDir ? (
+        <Folder size={15} color={theme.colors.accent} />
+      ) : (
+        <File size={15} color={theme.colors.foregroundMuted} />
+      )}
+      <Text style={styles.treeName} numberOfLines={1}>
+        {entry.name}
+      </Text>
+    </Pressable>
+  );
+}
+
+// Code tab = a file-tree browser of the repo at the selected branch (like the
+// GitHub Code tab). Directory listing + breadcrumb navigation + a read-only file
+// viewer. Commit history lives in the separate Commits tab (CommitsView).
+function CodeView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }) {
+  const { theme } = useUnistyles();
+
+  const [branches, setBranches] = useState<ForgeBranch[]>([]);
+  const [branchesLoading, setBranchesLoading] = useState(false);
+  const [branch, setBranch] = useState<string | null>(repo.defaultBranch ?? null);
+
+  // Current directory ("" = repo root) and the file currently open (null = tree).
+  const [path, setPath] = useState("");
+  const [selectedFile, setSelectedFile] = useState<ForgeTreeEntry | null>(null);
+
+  const [entries, setEntries] = useState<ForgeTreeEntry[] | null>(null);
+  const [entriesLoading, setEntriesLoading] = useState(false);
+  const [entriesError, setEntriesError] = useState<string | null>(null);
+
+  const [fileData, setFileData] = useState<CodeFile | null>(null);
+  const [fileLoading, setFileLoading] = useState(false);
+  const [fileError, setFileError] = useState<string | null>(null);
+
+  // Selecting a different repo resets navigation to the new repo's root.
+  useEffect(() => {
+    setBranch(repo.defaultBranch ?? null);
+    setPath("");
+    setSelectedFile(null);
+  }, [repo]);
+
+  const loadBranches = useCallback(
+    async (force = false) => {
+      const key = `code:branches:${repoCacheKey(repo)}`;
+      if (force) cacheDelete(key);
+      else {
+        const cached = cacheGet<ForgeBranch[]>(key);
+        if (cached) {
+          setBranches(cached);
+          setBranch(
+            (prev) => prev ?? cached.find((b) => b.isDefault)?.name ?? cached[0]?.name ?? null,
+          );
+          return;
+        }
+      }
+      setBranchesLoading(true);
+      try {
+        const res = await client.forgeListBranches({ repo: repoRef(repo) });
+        const parsed = ForgeBranchSchema.array().safeParse(res.branches);
+        const list = parsed.success ? parsed.data : [];
+        setBranches(list);
+        setBranch((prev) => prev ?? list.find((b) => b.isDefault)?.name ?? list[0]?.name ?? null);
+        if (parsed.success) cacheSet(key, list);
+      } catch {
+        // Branch picker shows an empty state; the tree still loads from the default ref.
+      } finally {
+        setBranchesLoading(false);
+      }
+    },
+    [client, repo],
+  );
+
+  useEffect(() => {
+    void loadBranches();
+  }, [loadBranches]);
+
+  const loadTree = useCallback(
+    async (force = false) => {
+      if (!branch) return;
+      const key = `code:tree:${repoCacheKey(repo)}:${branch}:${path}`;
+      if (force) cacheDelete(key);
+      else {
+        const cached = cacheGet<ForgeTreeEntry[]>(key);
+        if (cached) {
+          setEntries(cached);
+          setEntriesError(null);
+          return;
+        }
+      }
+      setEntriesLoading(true);
+      setEntriesError(null);
+      try {
+        const res = await client.forgeListTree({ repo: repoRef(repo), ref: branch, path });
+        const parsed = ForgeTreeEntrySchema.array().safeParse(res.entries);
+        if (parsed.success) {
+          const sorted = sortTreeEntries(parsed.data);
+          setEntries(sorted);
+          cacheSet(key, sorted);
+        } else {
+          setEntries([]);
+          setEntriesError("Unable to load files.");
+        }
+      } catch (e: unknown) {
+        setEntriesError(e instanceof Error ? e.message : "Unable to load files.");
+      } finally {
+        setEntriesLoading(false);
+      }
+    },
+    [client, repo, branch, path],
+  );
+
+  useEffect(() => {
+    if (branch) void loadTree();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [branch, path]);
+
+  const loadFile = useCallback(
+    async (force = false) => {
+      if (!selectedFile || !branch) return;
+      const key = `code:file:${repoCacheKey(repo)}:${branch}:${selectedFile.path}`;
+      if (force) cacheDelete(key);
+      else {
+        const cached = cacheGet<CodeFile>(key);
+        if (cached) {
+          setFileData(cached);
+          setFileError(null);
+          return;
+        }
+      }
+      setFileLoading(true);
+      setFileError(null);
+      try {
+        const res = await client.forgeGetFile({
+          repo: repoRef(repo),
+          ref: branch,
+          path: selectedFile.path,
+        });
+        const data: CodeFile = {
+          path: res.path,
+          content: res.content,
+          isBinary: res.isBinary,
+          size: res.size,
+          truncated: res.truncated,
+        };
+        setFileData(data);
+        cacheSet(key, data);
+      } catch (e: unknown) {
+        setFileError(e instanceof Error ? e.message : "Unable to load file.");
+      } finally {
+        setFileLoading(false);
+      }
+    },
+    [client, repo, branch, selectedFile],
+  );
+
+  useEffect(() => {
+    if (selectedFile) void loadFile();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedFile]);
+
+  // Changing branch resets navigation to the branch root and closes any file.
+  const handleBranchChange = useCallback((next: string) => {
+    setBranch(next);
+    setPath("");
+    setSelectedFile(null);
+  }, []);
+
+  const navigateDir = useCallback((next: string) => {
+    setSelectedFile(null);
+    setPath(next);
+  }, []);
+
+  const openFile = useCallback((entry: ForgeTreeEntry) => {
+    setFileData(null);
+    setFileError(null);
+    setSelectedFile(entry);
+  }, []);
+
+  const backToTree = useCallback(() => {
+    // Return to the tree at the file's directory (already the current path when
+    // opened from the listing; setting it explicitly keeps that invariant).
+    if (selectedFile) setPath(pathDir(selectedFile.path));
+    setSelectedFile(null);
+  }, [selectedFile]);
+
+  const retryTree = useCallback(() => void loadTree(true), [loadTree]);
+  const retryFile = useCallback(() => void loadFile(true), [loadFile]);
+
+  // Refresh busts the tree/file cache for the current path and refetches.
+  const refreshCode = useCallback(() => {
+    if (selectedFile) void loadFile(true);
+    else void loadTree(true);
+  }, [selectedFile, loadFile, loadTree]);
+
+  // ---- file viewer -------------------------------------------------------
+  if (selectedFile) {
+    const size = formatBytes(fileData?.size ?? null);
+    return (
+      <View style={styles.pane}>
+        <View style={styles.fileViewerHeader}>
+          <Pressable
+            style={styles.iconBtn}
+            onPress={backToTree}
+            accessibilityRole="button"
+            accessibilityLabel="Back to files"
+            testID="forge-code-file-back"
+          >
+            <ArrowLeft size={18} color={theme.colors.foregroundMuted} />
+          </Pressable>
+          <View style={styles.rowInfo}>
+            <Text style={styles.rowTitleMono} numberOfLines={1}>
+              {selectedFile.path}
+            </Text>
+          </View>
+          <Pressable
+            style={[styles.btn, styles.btnGhost]}
+            onPress={refreshCode}
+            testID="forge-code-refresh"
+          >
+            <RotateCcw size={13} color={theme.colors.foreground} />
+            <Text style={styles.btnGhostText}>Refresh</Text>
+          </Pressable>
+        </View>
+
+        {fileError ? (
+          <View style={styles.errorBanner}>
+            <CircleAlert size={16} color={theme.colors.statusDanger} />
+            <Text style={styles.errorText}>{fileError}</Text>
+            <Pressable style={[styles.btn, styles.btnGhost]} onPress={retryFile}>
+              <Text style={styles.btnGhostText}>Retry</Text>
+            </Pressable>
+          </View>
+        ) : fileLoading || fileData === null ? (
+          <Text style={styles.emptyText}>Loading file…</Text>
+        ) : fileData.isBinary ? (
+          <Text style={styles.emptyText}>
+            Binary file — can't preview.{size ? ` (${size})` : ""}
+          </Text>
+        ) : fileData.truncated || fileData.content === null ? (
+          <Text style={styles.emptyText}>File too large to preview.{size ? ` (${size})` : ""}</Text>
+        ) : (
+          <ScrollView
+            style={styles.logSurface}
+            contentContainerStyle={styles.logContent}
+            nestedScrollEnabled
+            showsVerticalScrollIndicator
+          >
+            <ScrollView horizontal showsHorizontalScrollIndicator>
+              <Text style={styles.logText} selectable>
+                {fileData.content || "(empty file)"}
+              </Text>
+            </ScrollView>
+          </ScrollView>
+        )}
+      </View>
+    );
+  }
+
+  // ---- directory listing -------------------------------------------------
+  return (
+    <View style={styles.pane}>
+      <View style={styles.toolbarRow}>
+        <BranchPickerButton
+          branches={branches}
+          value={branch}
+          loading={branchesLoading}
+          onChange={handleBranchChange}
+        />
+        <Text style={styles.rowTitleMono} numberOfLines={1}>
+          {repo.owner}/{repo.name}
+        </Text>
+        <View style={styles.grow} />
+        <Pressable
+          style={[styles.btn, styles.btnGhost]}
+          onPress={refreshCode}
+          testID="forge-code-refresh"
+        >
+          <RotateCcw size={13} color={theme.colors.foreground} />
+          <Text style={styles.btnGhostText}>Refresh</Text>
+        </Pressable>
+      </View>
+
+      <Breadcrumb repo={repo} path={path} onNavigate={navigateDir} />
+
+      {entriesError ? (
+        <View style={styles.errorBanner}>
+          <CircleAlert size={16} color={theme.colors.statusDanger} />
+          <Text style={styles.errorText}>{entriesError}</Text>
+          <Pressable style={[styles.btn, styles.btnGhost]} onPress={retryTree}>
+            <Text style={styles.btnGhostText}>Retry</Text>
+          </Pressable>
+        </View>
+      ) : entriesLoading || entries === null ? (
+        <SkeletonRows />
+      ) : entries.length === 0 ? (
+        <Text style={styles.emptyText}>This folder is empty.</Text>
+      ) : (
+        <View style={styles.card}>
+          {entries.map((entry) => (
+            <TreeEntryRow
+              key={entry.path}
+              entry={entry}
+              onOpenDir={navigateDir}
+              onOpenFile={openFile}
+            />
           ))}
         </View>
       )}
@@ -4250,6 +4682,15 @@ export function ForgeHubScreen() {
             Icon={Code}
           />
         ) : null}
+        {codeEnabled ? (
+          <SubNavButton
+            label="Commits"
+            value="commits"
+            active={tab === "commits"}
+            onSelect={setTab}
+            Icon={GitCommit}
+          />
+        ) : null}
         <SubNavButton
           label="Pull requests"
           value="pulls"
@@ -4395,6 +4836,18 @@ export function ForgeHubScreen() {
             </Text>
           ) : (
             <CodeView client={client} repo={selectedRepo} />
+          )
+        ) : null}
+
+        {tab === "commits" && codeEnabled ? (
+          !hasConnections ? (
+            <Text style={styles.emptyText}>{CONNECTION_EMPTY_STATE}</Text>
+          ) : !selectedRepo || !client ? (
+            <Text style={styles.emptyText}>
+              Pick a repository from the Repositories tab to view its commits.
+            </Text>
+          ) : (
+            <CommitsView client={client} repo={selectedRepo} />
           )
         ) : null}
 
@@ -5368,5 +5821,48 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.xs,
     color: theme.colors.foreground,
     fontFamily: theme.fontFamily.mono,
+  },
+  // ===== code (file tree browser) =====
+  breadcrumb: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+  },
+  crumbWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  crumb: {
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.accent,
+    fontFamily: theme.fontFamily.mono,
+  },
+  crumbActive: {
+    color: theme.colors.foreground,
+    fontWeight: theme.fontWeight.semibold,
+  },
+  crumbSep: {
+    marginHorizontal: theme.spacing[1],
+  },
+  treeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+  },
+  treeName: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foreground,
+    fontFamily: theme.fontFamily.mono,
+  },
+  fileViewerHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
   },
 }));
