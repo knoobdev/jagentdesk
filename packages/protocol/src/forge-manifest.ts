@@ -79,6 +79,19 @@ export const FORGE_DEFINITIONS: ForgeDefinition[] = [
     cloudHosts: ["gitlab.com"],
   },
   {
+    // Forge Hub (spec 19 / ADR-0015). No first-party CLI → REST 2.0 + API token
+    // (signIn:null; the daemon authenticates with a stored token, not a CLI login).
+    id: "bitbucket",
+    displayName: "Bitbucket",
+    changeRequestAbbrev: "PR",
+    changeRequestNoun: "pull request",
+    changeRequestNumberPrefix: "#",
+    issueNumberPrefix: "#",
+    iconKind: "bitbucket",
+    signIn: null,
+    cloudHosts: ["bitbucket.org"],
+  },
+  {
     id: "gitea",
     displayName: "Gitea",
     changeRequestAbbrev: "PR",

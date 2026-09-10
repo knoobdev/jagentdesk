@@ -2553,6 +2553,106 @@ export const ForgeJobPlayRequestSchema = z.object({
 });
 // ===== end Forge Hub Milestone B request schemas ================================
 
+// ===== Forge Hub — Milestone C schemas (auto-merge · artifacts · releases · issues) =
+export const ForgeArtifactSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  sizeBytes: z.number().nullable().optional(),
+  url: z.string().nullable().optional(),
+  expiresAt_ms: z.number().nullable().optional(),
+});
+export const ForgeReleaseAssetSchema = z.object({
+  name: z.string(),
+  url: z.string(),
+  sizeBytes: z.number().nullable().optional(),
+});
+export const ForgeReleaseSchema = z.object({
+  id: z.string(),
+  tagName: z.string(),
+  name: z.string().nullable().optional(),
+  isDraft: z.boolean().optional(),
+  isPrerelease: z.boolean().optional(),
+  publishedAt_ms: z.number().nullable().optional(),
+  url: z.string(),
+  assets: z.array(ForgeReleaseAssetSchema).optional(),
+});
+export const ForgeTagSchema = z.object({
+  name: z.string(),
+  commitSha: z.string().nullable().optional(),
+  url: z.string().nullable().optional(),
+});
+export const ForgeIssueSchema = z.object({
+  number: z.number().int(),
+  title: z.string(),
+  url: z.string(),
+  state: z.enum(["open", "closed"]),
+  authorLogin: z.string().nullable().optional(),
+  labels: z.array(z.string()).optional(),
+  commentCount: z.number().int().optional(),
+  updatedAt_ms: z.number().nullable().optional(),
+});
+
+export const ForgeSetAutoMergeRequestSchema = z.object({
+  type: z.literal("forge.change_request.set_auto_merge.request"),
+  repo: ForgeRepoRefSchema,
+  number: z.number().int(),
+  enabled: z.boolean(),
+  method: ForgeMergeMethodSchema,
+  requestId: z.string(),
+});
+export const ForgeArtifactListRequestSchema = z.object({
+  type: z.literal("forge.artifact.list.request"),
+  repo: ForgeRepoRefSchema,
+  runId: z.string(),
+  requestId: z.string(),
+});
+export const ForgeArtifactDownloadRequestSchema = z.object({
+  type: z.literal("forge.artifact.download.request"),
+  repo: ForgeRepoRefSchema,
+  artifactId: z.string(),
+  requestId: z.string(),
+});
+export const ForgeReleaseListRequestSchema = z.object({
+  type: z.literal("forge.release.list.request"),
+  repo: ForgeRepoRefSchema,
+  limit: z.number().int().min(1).max(100).optional(),
+  requestId: z.string(),
+});
+export const ForgeTagListRequestSchema = z.object({
+  type: z.literal("forge.tag.list.request"),
+  repo: ForgeRepoRefSchema,
+  limit: z.number().int().min(1).max(200).optional(),
+  requestId: z.string(),
+});
+export const ForgeIssueListRequestSchema = z.object({
+  type: z.literal("forge.issue.list.request"),
+  repo: ForgeRepoRefSchema,
+  state: z.enum(["open", "closed", "all"]).optional(),
+  limit: z.number().int().min(1).max(100).optional(),
+  requestId: z.string(),
+});
+export const ForgeIssueCreateRequestSchema = z.object({
+  type: z.literal("forge.issue.create.request"),
+  repo: ForgeRepoRefSchema,
+  title: z.string(),
+  body: z.string().optional(),
+  requestId: z.string(),
+});
+export const ForgeIssueCommentRequestSchema = z.object({
+  type: z.literal("forge.issue.comment.request"),
+  repo: ForgeRepoRefSchema,
+  number: z.number().int(),
+  body: z.string(),
+  requestId: z.string(),
+});
+export const ForgeIssueCloseRequestSchema = z.object({
+  type: z.literal("forge.issue.close.request"),
+  repo: ForgeRepoRefSchema,
+  number: z.number().int(),
+  requestId: z.string(),
+});
+// ===== end Forge Hub Milestone C request schemas ================================
+
 export const DirectorySuggestionsRequestSchema = z.object({
   type: z.literal("directory_suggestions_request"),
   query: z.string(),
@@ -3581,6 +3681,15 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ForgePipelineRerunRequestSchema,
   ForgePipelineCancelRequestSchema,
   ForgeJobPlayRequestSchema,
+  ForgeSetAutoMergeRequestSchema,
+  ForgeArtifactListRequestSchema,
+  ForgeArtifactDownloadRequestSchema,
+  ForgeReleaseListRequestSchema,
+  ForgeTagListRequestSchema,
+  ForgeIssueListRequestSchema,
+  ForgeIssueCreateRequestSchema,
+  ForgeIssueCommentRequestSchema,
+  ForgeIssueCloseRequestSchema,
   GitHubSearchRequestSchema,
   DirectorySuggestionsRequestSchema,
   JAgentDeskWorktreeListRequestSchema,
@@ -6035,6 +6144,45 @@ export const ForgeJobPlayResponseSchema = z.object({
 });
 // ===== end Forge Hub Milestone B responses ======================================
 
+// ===== Forge Hub — Milestone C responses ========================================
+export const ForgeSetAutoMergeResponseSchema = z.object({
+  type: z.literal("forge.change_request.set_auto_merge.response"),
+  payload: z.object({ enabled: z.boolean(), requestId: z.string() }),
+});
+export const ForgeArtifactListResponseSchema = z.object({
+  type: z.literal("forge.artifact.list.response"),
+  payload: z.object({ artifacts: z.array(z.unknown()), requestId: z.string() }),
+});
+export const ForgeArtifactDownloadResponseSchema = z.object({
+  type: z.literal("forge.artifact.download.response"),
+  payload: z.object({ url: z.string().nullable(), requestId: z.string() }),
+});
+export const ForgeReleaseListResponseSchema = z.object({
+  type: z.literal("forge.release.list.response"),
+  payload: z.object({ releases: z.array(z.unknown()), requestId: z.string() }),
+});
+export const ForgeTagListResponseSchema = z.object({
+  type: z.literal("forge.tag.list.response"),
+  payload: z.object({ tags: z.array(z.unknown()), requestId: z.string() }),
+});
+export const ForgeIssueListResponseSchema = z.object({
+  type: z.literal("forge.issue.list.response"),
+  payload: z.object({ issues: z.array(z.unknown()), requestId: z.string() }),
+});
+export const ForgeIssueCreateResponseSchema = z.object({
+  type: z.literal("forge.issue.create.response"),
+  payload: z.object({ issue: z.unknown().nullable(), requestId: z.string() }),
+});
+export const ForgeIssueCommentResponseSchema = z.object({
+  type: z.literal("forge.issue.comment.response"),
+  payload: z.object({ ok: z.boolean(), requestId: z.string() }),
+});
+export const ForgeIssueCloseResponseSchema = z.object({
+  type: z.literal("forge.issue.close.response"),
+  payload: z.object({ ok: z.boolean(), requestId: z.string() }),
+});
+// ===== end Forge Hub Milestone C responses ======================================
+
 // COMPAT(githubSearchRpc): added in v0.1.106, remove after 2026-12-28 once
 // clients use forge.search.*.
 export const GitHubSearchResponseSchema = z.object({
@@ -6979,6 +7127,15 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ForgePipelineRerunResponseSchema,
   ForgePipelineCancelResponseSchema,
   ForgeJobPlayResponseSchema,
+  ForgeSetAutoMergeResponseSchema,
+  ForgeArtifactListResponseSchema,
+  ForgeArtifactDownloadResponseSchema,
+  ForgeReleaseListResponseSchema,
+  ForgeTagListResponseSchema,
+  ForgeIssueListResponseSchema,
+  ForgeIssueCreateResponseSchema,
+  ForgeIssueCommentResponseSchema,
+  ForgeIssueCloseResponseSchema,
   GitHubSearchResponseSchema,
   DirectorySuggestionsResponseSchema,
   JAgentDeskWorktreeListResponseSchema,
@@ -7496,6 +7653,30 @@ export type ForgePipelineCancelRequest = z.infer<typeof ForgePipelineCancelReque
 export type ForgePipelineCancelResponse = z.infer<typeof ForgePipelineCancelResponseSchema>;
 export type ForgeJobPlayRequest = z.infer<typeof ForgeJobPlayRequestSchema>;
 export type ForgeJobPlayResponse = z.infer<typeof ForgeJobPlayResponseSchema>;
+// Forge Hub — Milestone C types
+export type ForgeArtifact = z.infer<typeof ForgeArtifactSchema>;
+export type ForgeRelease = z.infer<typeof ForgeReleaseSchema>;
+export type ForgeReleaseAsset = z.infer<typeof ForgeReleaseAssetSchema>;
+export type ForgeTag = z.infer<typeof ForgeTagSchema>;
+export type ForgeIssue = z.infer<typeof ForgeIssueSchema>;
+export type ForgeSetAutoMergeRequest = z.infer<typeof ForgeSetAutoMergeRequestSchema>;
+export type ForgeSetAutoMergeResponse = z.infer<typeof ForgeSetAutoMergeResponseSchema>;
+export type ForgeArtifactListRequest = z.infer<typeof ForgeArtifactListRequestSchema>;
+export type ForgeArtifactListResponse = z.infer<typeof ForgeArtifactListResponseSchema>;
+export type ForgeArtifactDownloadRequest = z.infer<typeof ForgeArtifactDownloadRequestSchema>;
+export type ForgeArtifactDownloadResponse = z.infer<typeof ForgeArtifactDownloadResponseSchema>;
+export type ForgeReleaseListRequest = z.infer<typeof ForgeReleaseListRequestSchema>;
+export type ForgeReleaseListResponse = z.infer<typeof ForgeReleaseListResponseSchema>;
+export type ForgeTagListRequest = z.infer<typeof ForgeTagListRequestSchema>;
+export type ForgeTagListResponse = z.infer<typeof ForgeTagListResponseSchema>;
+export type ForgeIssueListRequest = z.infer<typeof ForgeIssueListRequestSchema>;
+export type ForgeIssueListResponse = z.infer<typeof ForgeIssueListResponseSchema>;
+export type ForgeIssueCreateRequest = z.infer<typeof ForgeIssueCreateRequestSchema>;
+export type ForgeIssueCreateResponse = z.infer<typeof ForgeIssueCreateResponseSchema>;
+export type ForgeIssueCommentRequest = z.infer<typeof ForgeIssueCommentRequestSchema>;
+export type ForgeIssueCommentResponse = z.infer<typeof ForgeIssueCommentResponseSchema>;
+export type ForgeIssueCloseRequest = z.infer<typeof ForgeIssueCloseRequestSchema>;
+export type ForgeIssueCloseResponse = z.infer<typeof ForgeIssueCloseResponseSchema>;
 export type GitHubSearchItem = z.infer<typeof GitHubSearchItemSchema>;
 export type GitHubSearchKind = z.infer<typeof GitHubSearchKindSchema>;
 export type GitHubSearchRequest = z.infer<typeof GitHubSearchRequestSchema>;
