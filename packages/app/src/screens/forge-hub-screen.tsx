@@ -178,6 +178,12 @@ function repoCacheKey(repo: ForgeRepo): string {
   return `${repo.forge}:${repo.owner}/${repo.name}`;
 }
 
+// Every Forge Hub list starts at this many rows and grows by the same step when
+// the user taps "Load more". The list RPCs are limit-only (no cursor), so a
+// load-more re-fetches the whole list at the larger limit and overwrites the
+// cache — simple and good enough for the row counts these lists reach.
+const PAGE_SIZE = 30;
+
 // Remembers the Code tab's last directory/file per repo so switching away from
 // Code and back restores navigation instead of resetting to the repo root. Keyed
 // by repoCacheKey(repo). In-memory only (like forgeCache) — not persisted across
@@ -449,6 +455,38 @@ function SkeletonRows({
         </View>
       ))}
     </View>
+  );
+}
+
+// Full-width "Load more" control shown beneath a list whose last fetch returned
+// at least `limit` rows (so there may be more). Pressing it grows the limit and
+// re-fetches; while that follow-up load runs it shows a small spinner in place
+// of the label. Shared by every paginated Forge Hub list.
+function LoadMoreButton({
+  loading,
+  onPress,
+  testID,
+}: {
+  loading: boolean;
+  onPress: () => void;
+  testID?: string;
+}) {
+  const { theme } = useUnistyles();
+  return (
+    <Pressable
+      style={[styles.btn, styles.btnGhost, styles.loadMoreBtn, loading && styles.btnDisabled]}
+      onPress={onPress}
+      disabled={loading}
+      accessibilityRole="button"
+      accessibilityLabel="Load more"
+      testID={testID}
+    >
+      {loading ? (
+        <ActivityIndicator size="small" color={theme.colors.foregroundMuted} />
+      ) : (
+        <Text style={styles.btnGhostText}>Load more</Text>
+      )}
+    </Pressable>
   );
 }
 
@@ -1369,18 +1407,27 @@ function RepositoriesView({
   repos,
   loading,
   error,
+  limit,
+  loadingMore,
+  onLoadMore,
   onOpen,
   onRetry,
 }: {
   repos: ForgeRepo[];
   loading: boolean;
   error: string | null;
+  limit: number;
+  loadingMore: boolean;
+  onLoadMore: () => void;
   onOpen: (repo: ForgeRepo) => void;
   onRetry: () => void;
 }) {
   const { theme } = useUnistyles();
   const [query, setQuery] = useState("");
-  const [disabledForges, setDisabledForges] = useState<Set<string>>(() => new Set());
+  // Single-select provider filter: "all" or one forge id. Pure client-side view
+  // over the already-fetched repos — never triggers a fetch (pagination is about
+  // the fetch, this filter is a view over it).
+  const [repoFilter, setRepoFilter] = useState<string>("all");
 
   const forgesPresent = useMemo(() => {
     const set = new Set<string>();
@@ -1388,23 +1435,29 @@ function RepositoriesView({
     return [...set];
   }, [repos]);
 
-  const toggleForge = useCallback((forge: string) => {
-    setDisabledForges((prev) => {
-      const next = new Set(prev);
-      if (next.has(forge)) next.delete(forge);
-      else next.add(forge);
-      return next;
-    });
-  }, []);
+  // If the active provider filter is no longer present (e.g. a connection was
+  // removed), fall back to "all" so the list doesn't silently show nothing.
+  useEffect(() => {
+    if (repoFilter !== "all" && !forgesPresent.includes(repoFilter)) setRepoFilter("all");
+  }, [repoFilter, forgesPresent]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return repos.filter((repo) => {
-      if (disabledForges.has(repo.forge)) return false;
+      if (repoFilter !== "all" && repo.forge !== repoFilter) return false;
       if (!q) return true;
       return `${repo.owner}/${repo.name}`.toLowerCase().includes(q);
     });
-  }, [repos, query, disabledForges]);
+  }, [repos, query, repoFilter]);
+
+  // "Load more" is about the fetch, so gate it on the UNFILTERED fetched length:
+  // the last page returned at least `limit` rows ⇒ there may be more to fetch.
+  const canLoadMore = !loading && repos.length >= limit;
+
+  const emptyLabel =
+    repoFilter !== "all" && !query.trim()
+      ? `No ${getForgeDefinitionOrNeutral(repoFilter).displayName} repositories.`
+      : "No repositories match the current filters.";
 
   return (
     <View style={styles.pane}>
@@ -1426,12 +1479,21 @@ function RepositoriesView({
 
       {forgesPresent.length > 1 ? (
         <View style={styles.chipRow}>
-          {forgesPresent.map((forge) => {
-            const active = !disabledForges.has(forge);
-            return (
-              <ForgeFilterChip key={forge} forge={forge} active={active} onToggle={toggleForge} />
-            );
-          })}
+          <ForgeFilterChip
+            id="all"
+            label="All"
+            active={repoFilter === "all"}
+            onSelect={setRepoFilter}
+          />
+          {forgesPresent.map((forge) => (
+            <ForgeFilterChip
+              key={forge}
+              id={forge}
+              label={getForgeDefinitionOrNeutral(forge).displayName}
+              active={repoFilter === forge}
+              onSelect={setRepoFilter}
+            />
+          ))}
         </View>
       ) : null}
 
@@ -1448,7 +1510,7 @@ function RepositoriesView({
       {loading ? (
         <SkeletonRows rows={6} />
       ) : filtered.length === 0 ? (
-        <Text style={styles.emptyText}>No repositories match the current filters.</Text>
+        <Text style={styles.emptyText}>{emptyLabel}</Text>
       ) : (
         <View style={styles.card}>
           {filtered.map((repo) => (
@@ -1456,29 +1518,34 @@ function RepositoriesView({
           ))}
         </View>
       )}
+
+      {canLoadMore ? (
+        <LoadMoreButton loading={loadingMore} onPress={onLoadMore} testID="forge-repos-load-more" />
+      ) : null}
     </View>
   );
 }
 
 function ForgeFilterChip({
-  forge,
+  id,
+  label,
   active,
-  onToggle,
+  onSelect,
 }: {
-  forge: string;
+  id: string;
+  label: string;
   active: boolean;
-  onToggle: (forge: string) => void;
+  onSelect: (id: string) => void;
 }) {
-  const handlePress = useCallback(() => onToggle(forge), [forge, onToggle]);
-  const def = getForgeDefinitionOrNeutral(forge);
+  const handlePress = useCallback(() => onSelect(id), [id, onSelect]);
   return (
     <Pressable
       style={[styles.providerChip, active && styles.providerChipActive]}
       onPress={handlePress}
-      testID={`forge-filter-${forge}`}
+      testID={`forge-filter-${id}`}
     >
       <Text style={[styles.providerChipText, active && styles.providerChipTextActive]}>
-        {def.displayName}
+        {label}
       </Text>
     </Pressable>
   );
@@ -2825,6 +2892,12 @@ function CommitsView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }
   const [commits, setCommits] = useState<ForgeCommit[] | null>(null);
   const [commitsLoading, setCommitsLoading] = useState(false);
   const [commitsError, setCommitsError] = useState<string | null>(null);
+  const [commitsLimit, setCommitsLimit] = useState(PAGE_SIZE);
+  const [commitsLoadingMore, setCommitsLoadingMore] = useState(false);
+  // Read inside loadCommits so a load-more that bumps the limit and immediately
+  // re-fetches uses the new value without waiting for a re-render.
+  const commitsLimitRef = useRef(commitsLimit);
+  commitsLimitRef.current = commitsLimit;
 
   // Commit / compare diff (null = list mode).
   const [diffTitle, setDiffTitle] = useState<string | null>(null);
@@ -2873,7 +2946,9 @@ function CommitsView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }
   }, [loadBranches]);
 
   const loadCommits = useCallback(
-    async (force = false) => {
+    // `silent` keeps the current list on screen (no skeleton) so a load-more can
+    // show its spinner on the button instead of blanking the list.
+    async (force = false, silent = false) => {
       if (!branch) return;
       const key = `code:commits:${repoCacheKey(repo)}:${branch}`;
       if (force) cacheDelete(key);
@@ -2885,10 +2960,14 @@ function CommitsView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }
           return;
         }
       }
-      setCommitsLoading(true);
+      if (!silent) setCommitsLoading(true);
       setCommitsError(null);
       try {
-        const res = await client.forgeListCommits({ repo: repoRef(repo), ref: branch });
+        const res = await client.forgeListCommits({
+          repo: repoRef(repo),
+          ref: branch,
+          limit: commitsLimitRef.current,
+        });
         const parsed = ForgeCommitSchema.array().safeParse(res.commits);
         setCommits(parsed.success ? parsed.data : []);
         if (!parsed.success) setCommitsError("Unable to load commits.");
@@ -2896,14 +2975,18 @@ function CommitsView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }
       } catch (e: unknown) {
         setCommitsError(e instanceof Error ? e.message : "Unable to load commits.");
       } finally {
-        setCommitsLoading(false);
+        if (!silent) setCommitsLoading(false);
       }
     },
     [client, repo, branch],
   );
 
+  // Switching branch starts pagination fresh, mirroring the reload on branch change.
   useEffect(() => {
-    if (branch) void loadCommits();
+    if (!branch) return;
+    commitsLimitRef.current = PAGE_SIZE;
+    setCommitsLimit(PAGE_SIZE);
+    void loadCommits();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [branch]);
 
@@ -2912,6 +2995,17 @@ function CommitsView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }
     void loadBranches(true);
     void loadCommits(true);
   }, [loadBranches, loadCommits]);
+  const loadMoreCommits = useCallback(async () => {
+    setCommitsLoadingMore(true);
+    const next = commitsLimitRef.current + PAGE_SIZE;
+    commitsLimitRef.current = next;
+    setCommitsLimit(next);
+    try {
+      await loadCommits(true, true);
+    } finally {
+      setCommitsLoadingMore(false);
+    }
+  }, [loadCommits]);
 
   const runCompare = useCallback(
     async (base: string, head: string, title: string) => {
@@ -3066,11 +3160,20 @@ function CommitsView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }
       ) : commits.length === 0 ? (
         <Text style={styles.emptyText}>No commits on this branch.</Text>
       ) : (
-        <View style={styles.card}>
-          {commits.map((commit) => (
-            <CommitRow key={commit.sha} commit={commit} onOpen={openCommitDiff} />
-          ))}
-        </View>
+        <>
+          <View style={styles.card}>
+            {commits.map((commit) => (
+              <CommitRow key={commit.sha} commit={commit} onOpen={openCommitDiff} />
+            ))}
+          </View>
+          {commits.length >= commitsLimit ? (
+            <LoadMoreButton
+              loading={commitsLoadingMore}
+              onPress={loadMoreCommits}
+              testID="forge-commits-load-more"
+            />
+          ) : null}
+        </>
       )}
     </View>
   );
@@ -4079,9 +4182,14 @@ function PipelinesView({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedRun, setSelectedRun] = useState<ForgePipelineRun | null>(null);
+  const [limit, setLimit] = useState(PAGE_SIZE);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const limitRef = useRef(limit);
+  limitRef.current = limit;
 
   const loadRuns = useCallback(
-    async (force = false) => {
+    // `silent` keeps the list on screen for a load-more (spinner on the button).
+    async (force = false, silent = false) => {
       const key = `pipelines:${repoCacheKey(repo)}`;
       if (force) cacheDelete(key);
       else {
@@ -4093,10 +4201,13 @@ function PipelinesView({
           return;
         }
       }
-      setLoading(true);
+      if (!silent) setLoading(true);
       setError(null);
       try {
-        const res = await client.forgeListPipelines({ repo: repoRef(repo) });
+        const res = await client.forgeListPipelines({
+          repo: repoRef(repo),
+          limit: limitRef.current,
+        });
         const parsed = ForgePipelineRunSchema.array().safeParse(res.runs);
         setRuns(parsed.success ? parsed.data : []);
         if (!parsed.success) setError("Unable to load pipelines.");
@@ -4104,7 +4215,7 @@ function PipelinesView({
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : "Unable to load pipelines.");
       } finally {
-        setLoading(false);
+        if (!silent) setLoading(false);
       }
     },
     [client, repo],
@@ -4115,6 +4226,17 @@ function PipelinesView({
   }, [loadRuns]);
 
   const reloadRuns = useCallback(() => void loadRuns(true), [loadRuns]);
+  const loadMoreRuns = useCallback(async () => {
+    setLoadingMore(true);
+    const next = limitRef.current + PAGE_SIZE;
+    limitRef.current = next;
+    setLimit(next);
+    try {
+      await loadRuns(true, true);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadRuns]);
   const backToRuns = useCallback(() => setSelectedRun(null), []);
 
   if (selectedRun) {
@@ -4158,11 +4280,20 @@ function PipelinesView({
       ) : runs.length === 0 ? (
         <Text style={styles.emptyText}>No pipeline runs yet.</Text>
       ) : (
-        <View style={styles.card}>
-          {runs.map((run) => (
-            <PipelineRunRow key={run.id} run={run} onOpen={setSelectedRun} />
-          ))}
-        </View>
+        <>
+          <View style={styles.card}>
+            {runs.map((run) => (
+              <PipelineRunRow key={run.id} run={run} onOpen={setSelectedRun} />
+            ))}
+          </View>
+          {runs.length >= limit ? (
+            <LoadMoreButton
+              loading={loadingMore}
+              onPress={loadMoreRuns}
+              testID="forge-pipelines-load-more"
+            />
+          ) : null}
+        </>
       )}
     </View>
   );
@@ -4593,9 +4724,15 @@ function ReleasesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo 
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [selected, setSelected] = useState<ForgeRelease | null>(null);
+  // Load-more grows only the releases list; tags keep their own fixed page.
+  const [releasesLimit, setReleasesLimit] = useState(PAGE_SIZE);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const releasesLimitRef = useRef(releasesLimit);
+  releasesLimitRef.current = releasesLimit;
 
   const load = useCallback(
-    async (force = false) => {
+    // `silent` keeps releases/tags on screen (no skeleton) for a load-more.
+    async (force = false, silent = false) => {
       const releasesKey = `releases:${repoCacheKey(repo)}`;
       const tagsKey = `tags:${repoCacheKey(repo)}`;
       if (force) {
@@ -4612,11 +4749,13 @@ function ReleasesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo 
         }
       }
       setError(null);
-      setReleases(null);
-      setTags(null);
+      if (!silent) {
+        setReleases(null);
+        setTags(null);
+      }
       try {
         const [releaseRes, tagRes] = await Promise.all([
-          client.forgeListReleases({ repo: repoRef(repo), limit: 50 }),
+          client.forgeListReleases({ repo: repoRef(repo), limit: releasesLimitRef.current }),
           client.forgeListTags({ repo: repoRef(repo), limit: 50 }),
         ]);
         const parsedReleases = ForgeReleaseSchema.array().safeParse(releaseRes.releases);
@@ -4640,6 +4779,17 @@ function ReleasesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo 
   }, [load]);
 
   const reload = useCallback(() => void load(true), [load]);
+  const loadMoreReleases = useCallback(async () => {
+    setLoadingMore(true);
+    const next = releasesLimitRef.current + PAGE_SIZE;
+    releasesLimitRef.current = next;
+    setReleasesLimit(next);
+    try {
+      await load(true, true);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [load]);
 
   const openCreate = useCallback(() => setCreating(true), []);
   const closeCreate = useCallback(() => setCreating(false), []);
@@ -4704,11 +4854,20 @@ function ReleasesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo 
       ) : releases.length === 0 ? (
         <Text style={styles.emptyText}>No releases yet.</Text>
       ) : (
-        <View style={styles.filesPane}>
-          {releases.map((release) => (
-            <ReleaseRow key={release.id} release={release} onOpen={openDetail} />
-          ))}
-        </View>
+        <>
+          <View style={styles.filesPane}>
+            {releases.map((release) => (
+              <ReleaseRow key={release.id} release={release} onOpen={openDetail} />
+            ))}
+          </View>
+          {releases.length >= releasesLimit ? (
+            <LoadMoreButton
+              loading={loadingMore}
+              onPress={loadMoreReleases}
+              testID="forge-releases-load-more"
+            />
+          ) : null}
+        </>
       )}
 
       <Text style={styles.sectionTitle}>Tags</Text>
@@ -4935,6 +5094,10 @@ function IssuesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo })
   const [issues, setIssues] = useState<ForgeIssue[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<ForgeIssue | null>(null);
+  const [limit, setLimit] = useState(PAGE_SIZE);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const limitRef = useRef(limit);
+  limitRef.current = limit;
 
   const [creating, setCreating] = useState(false);
   const [title, setTitle] = useState("");
@@ -4943,7 +5106,8 @@ function IssuesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo })
   const [createNote, setCreateNote] = useState<string | null>(null);
 
   const load = useCallback(
-    async (nextState: IssueState, force = false) => {
+    // `silent` keeps the list on screen for a load-more (spinner on the button).
+    async (nextState: IssueState, force = false, silent = false) => {
       const key = `issues:${repoCacheKey(repo)}:${nextState}`;
       if (force) cacheDelete(key);
       else {
@@ -4955,9 +5119,13 @@ function IssuesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo })
         }
       }
       setError(null);
-      setIssues(null);
+      if (!silent) setIssues(null);
       try {
-        const res = await client.forgeListIssues({ repo: repoRef(repo), state: nextState });
+        const res = await client.forgeListIssues({
+          repo: repoRef(repo),
+          state: nextState,
+          limit: limitRef.current,
+        });
         const parsed = ForgeIssueSchema.array().safeParse(res.issues);
         setIssues(parsed.success ? parsed.data : []);
         if (!parsed.success) setError("Unable to load issues.");
@@ -4973,7 +5141,23 @@ function IssuesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo })
     void load(state);
   }, [load, state]);
 
-  const handleChangeState = useCallback((next: IssueState) => setState(next), []);
+  // Switching state starts pagination fresh (reset before the load effect runs).
+  const handleChangeState = useCallback((next: IssueState) => {
+    limitRef.current = PAGE_SIZE;
+    setLimit(PAGE_SIZE);
+    setState(next);
+  }, []);
+  const loadMoreIssues = useCallback(async () => {
+    setLoadingMore(true);
+    const next = limitRef.current + PAGE_SIZE;
+    limitRef.current = next;
+    setLimit(next);
+    try {
+      await load(state, true, true);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [load, state]);
   const toggleCreating = useCallback(() => setCreating((v) => !v), []);
   const openIssue = useCallback((issue: ForgeIssue) => setSelected(issue), []);
   const backToList = useCallback(() => setSelected(null), []);
@@ -5117,11 +5301,20 @@ function IssuesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo })
       ) : issues.length === 0 ? (
         <Text style={styles.emptyText}>No issues here yet.</Text>
       ) : (
-        <View style={styles.card}>
-          {issues.map((issue) => (
-            <IssueRow key={issue.number} issue={issue} onOpen={openIssue} />
-          ))}
-        </View>
+        <>
+          <View style={styles.card}>
+            {issues.map((issue) => (
+              <IssueRow key={issue.number} issue={issue} onOpen={openIssue} />
+            ))}
+          </View>
+          {issues.length >= limit ? (
+            <LoadMoreButton
+              loading={loadingMore}
+              onPress={loadMoreIssues}
+              testID="forge-issues-load-more"
+            />
+          ) : null}
+        </>
       )}
     </View>
   );
@@ -5189,6 +5382,10 @@ export function ForgeHubScreen() {
   const [reposLoaded, setReposLoaded] = useState(false);
   const [reposLoading, setReposLoading] = useState(false);
   const [reposError, setReposError] = useState<string | null>(null);
+  const [reposLimit, setReposLimit] = useState(PAGE_SIZE);
+  const [reposLoadingMore, setReposLoadingMore] = useState(false);
+  const reposLimitRef = useRef(reposLimit);
+  reposLimitRef.current = reposLimit;
 
   const [selectedRepo, setSelectedRepo] = useState<ForgeRepo | null>(null);
   const [crState, setCrState] = useState<CrState>("open");
@@ -5196,6 +5393,10 @@ export function ForgeHubScreen() {
   const [crLoading, setCrLoading] = useState(false);
   const [crError, setCrError] = useState<string | null>(null);
   const [newCrOpen, setNewCrOpen] = useState(false);
+  const [crLimit, setCrLimit] = useState(PAGE_SIZE);
+  const [crLoadingMore, setCrLoadingMore] = useState(false);
+  const crLimitRef = useRef(crLimit);
+  crLimitRef.current = crLimit;
 
   const [selectedCr, setSelectedCr] = useState<ForgeChangeRequestSummary | null>(null);
   const [files, setFiles] = useState<ForgeChangeRequestFile[] | null>(null);
@@ -5217,22 +5418,37 @@ export function ForgeHubScreen() {
     void refreshConnections();
   }, [refreshConnections]);
 
-  const loadRepos = useCallback(async () => {
-    if (!client) return;
-    setReposLoading(true);
-    setReposError(null);
+  const loadRepos = useCallback(
+    async (silent = false) => {
+      if (!client) return;
+      if (!silent) setReposLoading(true);
+      setReposError(null);
+      try {
+        const res = await client.forgeListRepos({ limit: reposLimitRef.current });
+        const parsed = ForgeRepoSchema.array().safeParse(res.repos);
+        setRepos(parsed.success ? parsed.data : []);
+        if (!parsed.success) setReposError("Unable to load repositories.");
+        setReposLoaded(true);
+      } catch (e: unknown) {
+        setReposError(e instanceof Error ? e.message : "Unable to load repositories.");
+      } finally {
+        if (!silent) setReposLoading(false);
+      }
+    },
+    [client],
+  );
+
+  const loadMoreRepos = useCallback(async () => {
+    setReposLoadingMore(true);
+    const next = reposLimitRef.current + PAGE_SIZE;
+    reposLimitRef.current = next;
+    setReposLimit(next);
     try {
-      const res = await client.forgeListRepos({ limit: 100 });
-      const parsed = ForgeRepoSchema.array().safeParse(res.repos);
-      setRepos(parsed.success ? parsed.data : []);
-      if (!parsed.success) setReposError("Unable to load repositories.");
-      setReposLoaded(true);
-    } catch (e: unknown) {
-      setReposError(e instanceof Error ? e.message : "Unable to load repositories.");
+      await loadRepos(true);
     } finally {
-      setReposLoading(false);
+      setReposLoadingMore(false);
     }
-  }, [client]);
+  }, [loadRepos]);
 
   useEffect(() => {
     if (tab === "repositories" && !reposLoaded && !reposLoading) {
@@ -5241,7 +5457,8 @@ export function ForgeHubScreen() {
   }, [tab, reposLoaded, reposLoading, loadRepos]);
 
   const loadChangeRequests = useCallback(
-    async (repo: ForgeRepo, state: CrState, force = false) => {
+    // `silent` keeps the list on screen for a load-more (spinner on the button).
+    async (repo: ForgeRepo, state: CrState, force = false, silent = false) => {
       if (!client) return;
       const key = `crlist:${repoCacheKey(repo)}:${state}`;
       if (force) cacheDelete(key);
@@ -5254,12 +5471,13 @@ export function ForgeHubScreen() {
           return;
         }
       }
-      setCrLoading(true);
+      if (!silent) setCrLoading(true);
       setCrError(null);
       try {
         const res = await client.forgeListChangeRequests({
           repo: { forge: repo.forge, owner: repo.owner, name: repo.name },
           state,
+          limit: crLimitRef.current,
         });
         const parsed = ForgeChangeRequestSummarySchema.array().safeParse(res.changeRequests);
         setChangeRequests(parsed.success ? parsed.data : []);
@@ -5277,11 +5495,24 @@ export function ForgeHubScreen() {
             : `Unable to load ${getForgeDefinitionOrNeutral(repo.forge).changeRequestNoun} list.`,
         );
       } finally {
-        setCrLoading(false);
+        if (!silent) setCrLoading(false);
       }
     },
     [client],
   );
+
+  const loadMoreChangeRequests = useCallback(async () => {
+    if (!selectedRepo) return;
+    setCrLoadingMore(true);
+    const next = crLimitRef.current + PAGE_SIZE;
+    crLimitRef.current = next;
+    setCrLimit(next);
+    try {
+      await loadChangeRequests(selectedRepo, crState, true, true);
+    } finally {
+      setCrLoadingMore(false);
+    }
+  }, [selectedRepo, crState, loadChangeRequests]);
 
   const handleOpenRepo = useCallback(
     (repo: ForgeRepo) => {
@@ -5289,6 +5520,9 @@ export function ForgeHubScreen() {
       setSelectedCr(null);
       setNewCrOpen(false);
       setCrState("open");
+      // A different repo starts the PR/MR list fresh.
+      crLimitRef.current = PAGE_SIZE;
+      setCrLimit(PAGE_SIZE);
       setTab(codeEnabled ? "code" : "pulls");
       void loadChangeRequests(repo, "open");
     },
@@ -5298,6 +5532,9 @@ export function ForgeHubScreen() {
   const handleChangeState = useCallback(
     (state: CrState) => {
       setCrState(state);
+      // A different state starts the PR/MR list fresh.
+      crLimitRef.current = PAGE_SIZE;
+      setCrLimit(PAGE_SIZE);
       if (selectedRepo) void loadChangeRequests(selectedRepo, state);
     },
     [selectedRepo, loadChangeRequests],
@@ -5520,6 +5757,9 @@ export function ForgeHubScreen() {
               repos={repos}
               loading={reposLoading}
               error={reposError}
+              limit={reposLimit}
+              loadingMore={reposLoadingMore}
+              onLoadMore={loadMoreRepos}
               onOpen={handleOpenRepo}
               onRetry={handleRetryRepos}
             />
@@ -5595,16 +5835,25 @@ export function ForgeHubScreen() {
               ) : changeRequests.length === 0 ? (
                 <Text style={styles.emptyText}>Nothing here yet.</Text>
               ) : (
-                <View style={styles.card}>
-                  {changeRequests.map((cr) => (
-                    <PullRequestRow
-                      key={cr.number}
-                      cr={cr}
-                      forge={selectedRepo.forge}
-                      onOpen={handleOpenCr}
+                <>
+                  <View style={styles.card}>
+                    {changeRequests.map((cr) => (
+                      <PullRequestRow
+                        key={cr.number}
+                        cr={cr}
+                        forge={selectedRepo.forge}
+                        onOpen={handleOpenCr}
+                      />
+                    ))}
+                  </View>
+                  {changeRequests.length >= crLimit ? (
+                    <LoadMoreButton
+                      loading={crLoadingMore}
+                      onPress={loadMoreChangeRequests}
+                      testID="forge-cr-load-more"
                     />
-                  ))}
-                </View>
+                  ) : null}
+                </>
               )}
             </View>
           )
@@ -5955,6 +6204,12 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.xs,
     fontWeight: theme.fontWeight.medium,
     color: theme.colors.foreground,
+  },
+  // Full-width "Load more" beneath a list; taller tap target, centered content.
+  loadMoreBtn: {
+    alignSelf: "stretch",
+    justifyContent: "center",
+    paddingVertical: theme.spacing[2],
   },
   // form
   formCard: {
