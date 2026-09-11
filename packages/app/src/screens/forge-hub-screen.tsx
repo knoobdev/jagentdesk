@@ -5695,7 +5695,16 @@ function IssueRow({ issue, onOpen }: { issue: ForgeIssue; onOpen: (issue: ForgeI
   const when = formatRelativeMs(issue.updatedAt_ms);
   return (
     <Pressable style={styles.row} onPress={handlePress} testID={`forge-issue-${issue.number}`}>
-      <StatusDot color={issueStateColor(issue.state, theme)} />
+      <View
+        style={[
+          styles.issueGlyph,
+          issue.state === "open" ? styles.issueGlyphOpen : styles.issueGlyphClosed,
+        ]}
+      >
+        <Text style={[styles.issueGlyphText, { color: issueStateColor(issue.state, theme) }]}>
+          ◎
+        </Text>
+      </View>
       <View style={styles.rowInfo}>
         <Text style={styles.rowTitle} numberOfLines={1}>
           {issue.title}
@@ -7519,9 +7528,9 @@ const styles = StyleSheet.create((theme) => ({
   row: {
     flexDirection: "row",
     alignItems: "center",
-    gap: theme.spacing[3],
-    paddingHorizontal: theme.spacing[3],
-    paddingVertical: theme.spacing[3],
+    gap: 12, // mockup exact value (.row gap)
+    paddingHorizontal: 14, // mockup exact value (.row padding 14px)
+    paddingVertical: 13, // mockup exact value (.row padding 13px)
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,
   },
@@ -7682,12 +7691,12 @@ const styles = StyleSheet.create((theme) => ({
   tableHeadRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: theme.spacing[3],
-    paddingHorizontal: theme.spacing[3],
-    paddingVertical: theme.spacing[2],
+    gap: 12, // mockup exact value (.row gap)
+    paddingHorizontal: 14, // mockup exact value (.row padding 14px)
+    paddingVertical: 13, // mockup exact value (.row padding 13px)
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,
-    backgroundColor: theme.colors.surface0,
+    backgroundColor: theme.colors.surface0, // mockup exact value (.row.head --surface0)
   },
   tableHeadText: {
     fontSize: theme.fontSize.xs,
@@ -7699,10 +7708,9 @@ const styles = StyleSheet.create((theme) => ({
   tableRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: theme.spacing[3],
-    paddingHorizontal: theme.spacing[3],
-    paddingVertical: theme.spacing[2],
-    minHeight: 46,
+    gap: 12, // mockup exact value (.row gap)
+    paddingHorizontal: 14, // mockup exact value (.row padding 14px)
+    paddingVertical: 13, // mockup exact value (.row padding 13px)
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,
   },
@@ -7733,23 +7741,23 @@ const styles = StyleSheet.create((theme) => ({
     width: 110,
   },
   colDot: {
-    width: 20,
+    width: 34, // mockup exact value (artboard 5 leading-dot column)
     alignItems: "flex-start",
   },
   colAuthor: {
-    width: 120,
+    width: 120, // mockup exact value (Author column)
   },
   colSha: {
-    width: 90,
+    width: 120, // mockup exact value (SHA column)
   },
   colCiCol: {
-    width: 90,
+    width: 120, // mockup exact value (CI column)
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[1],
   },
   colWhen2: {
-    width: 72,
+    width: 90, // mockup exact value (When column)
   },
   commitDot: {
     width: 8,
@@ -7776,6 +7784,25 @@ const styles = StyleSheet.create((theme) => ({
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[1],
+  },
+  // ".g" issue glyph disc (mockup artboard 6 issues) — 16px round tinted circle
+  // with the ◎ issue mark centered, open (green tint) vs closed (surface2).
+  issueGlyph: {
+    width: 16, // mockup exact value (.g)
+    height: 16,
+    borderRadius: 9999, // mockup exact value (--r-full)
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  issueGlyphOpen: {
+    backgroundColor: "rgba(34,197,94,0.16)", // mockup exact value (.g.ok)
+  },
+  issueGlyphClosed: {
+    backgroundColor: "#272A29", // mockup exact value (closed .g --surface2)
+  },
+  issueGlyphText: {
+    fontSize: 10, // mockup exact value (.g font-size)
+    fontWeight: "800", // mockup exact value (.g font-weight)
   },
   dot: {
     width: 8,
@@ -7903,10 +7930,12 @@ const styles = StyleSheet.create((theme) => ({
     paddingHorizontal: 9, // mockup exact value (9px)
     borderRadius: 6, // mockup exact value (.btn.sm --r-md)
   },
+  // ".btn-outline" (mockup) — transparent fill, accent-border, used for every
+  // toolbar/action button (Refresh · Compare · Rerun · Open on … · Retry, etc.).
   btnGhost: {
-    borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface1,
+    borderWidth: 1, // mockup exact value (.btn-outline border)
+    borderColor: "#2F3534", // mockup exact value (--borderAccent)
+    backgroundColor: "transparent", // mockup exact value (.btn-outline)
   },
   btnGhostText: {
     fontSize: theme.fontSize.xs,
@@ -8320,13 +8349,13 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
     gap: theme.spacing[2],
     flex: 1,
-    maxWidth: 360,
-    height: 36,
+    maxWidth: 360, // mockup exact value (.field max-width)
+    height: 34, // mockup exact value (.field height)
     paddingHorizontal: theme.spacing[3],
     borderRadius: theme.borderRadius.lg,
     borderWidth: theme.borderWidth[1],
     borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface2,
+    backgroundColor: theme.colors.surface1, // mockup exact value (.field --surface1)
   },
   searchInput: {
     flex: 1,
@@ -8444,8 +8473,8 @@ const styles = StyleSheet.create((theme) => ({
   railCheckRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: theme.spacing[2],
-    paddingVertical: theme.spacing[1.5],
+    gap: 10, // mockup exact value (.checkrow gap)
+    paddingVertical: 7, // mockup exact value (.checkrow padding 7 0)
   },
   railCheckRowDivider: {
     borderTopWidth: theme.borderWidth[1],
@@ -8484,7 +8513,7 @@ const styles = StyleSheet.create((theme) => ({
     borderBottomColor: theme.colors.accent,
   },
   tabText: {
-    fontSize: theme.fontSize.sm,
+    fontSize: 13, // mockup exact value (.tab font-size)
     color: theme.colors.foregroundMuted,
   },
   tabTextActive: {
@@ -8492,25 +8521,25 @@ const styles = StyleSheet.create((theme) => ({
     fontWeight: theme.fontWeight.semibold,
   },
   tabCount: {
-    fontSize: theme.fontSize.xs,
+    fontSize: 11, // mockup exact value (.tab .n font-size)
     color: theme.colors.foregroundMuted,
     backgroundColor: theme.colors.surface2,
-    paddingHorizontal: theme.spacing[1.5],
+    paddingHorizontal: theme.spacing[1.5], // mockup exact value (.tab .n padding 0 6)
     borderRadius: theme.borderRadius.full,
     overflow: "hidden",
   },
   metaGrid: {
     padding: theme.spacing[3],
-    gap: theme.spacing[2],
+    gap: 6, // mockup exact value (.metagrid row gap 6 12)
   },
   metaRow: {
     flexDirection: "row",
-    gap: theme.spacing[3],
+    gap: 12, // mockup exact value (.metagrid column gap)
   },
   metaKey: {
-    width: 90,
+    width: 110, // mockup exact value (.metagrid grid-template-columns 110px)
     fontSize: theme.fontSize.xs,
-    color: theme.colors.foregroundExtraMuted,
+    color: theme.colors.foregroundExtraMuted, // mockup exact value (.metagrid .k)
   },
   metaVal: {
     flex: 1,
@@ -8603,9 +8632,9 @@ const styles = StyleSheet.create((theme) => ({
   mergeboxHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: theme.spacing[2],
-    paddingHorizontal: theme.spacing[3],
-    paddingVertical: theme.spacing[3],
+    gap: 10, // mockup exact value (.mergebox .hd gap)
+    paddingHorizontal: 14, // mockup exact value (.mergebox .hd padding 12 14)
+    paddingVertical: 12, // mockup exact value
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,
   },
@@ -8615,7 +8644,8 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.foreground,
   },
   mergeboxBody: {
-    padding: theme.spacing[3],
+    paddingHorizontal: 14, // mockup exact value (.mergebox .bd padding 12 14)
+    paddingVertical: 12, // mockup exact value
     gap: theme.spacing[2],
   },
   reviewActionsRow: {
@@ -8748,25 +8778,32 @@ const styles = StyleSheet.create((theme) => ({
     fontFamily: theme.fontFamily.mono,
   },
   stageHeader: {
-    fontSize: theme.fontSize.xs,
+    fontSize: 11, // mockup exact value (.stage-h font-size)
     fontWeight: theme.fontWeight.semibold,
     color: theme.colors.foregroundMuted,
     textTransform: "uppercase",
-    letterSpacing: 0.4,
-    paddingHorizontal: theme.spacing[2],
-    paddingTop: theme.spacing[2],
-    paddingBottom: theme.spacing[1],
+    letterSpacing: 0.4, // mockup exact value (.stage-h letter-spacing)
+    paddingLeft: 10, // mockup exact value (.stage-h padding 12 10 5 10)
+    paddingRight: 10, // mockup exact value
+    paddingTop: 12, // mockup exact value
+    paddingBottom: 5, // mockup exact value
   },
   jobRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: theme.spacing[2],
-    paddingHorizontal: theme.spacing[2],
-    paddingVertical: theme.spacing[2],
+    gap: 9, // mockup exact value (.job gap)
+    // Reserve the 2px inset-accent bar width so the active bar (mockup
+    // `.job.active` inset box-shadow) doesn't shift the row's content.
+    borderLeftWidth: 2,
+    borderLeftColor: "transparent",
+    paddingLeft: 8, // 8 + 2px border = mockup .job left padding 10
+    paddingRight: 10, // mockup exact value (.job padding 8 10)
+    paddingVertical: 8, // mockup exact value
     borderRadius: theme.borderRadius.md,
   },
   jobRowActive: {
-    backgroundColor: theme.colors.surface2,
+    backgroundColor: theme.colors.surface2, // mockup exact value (.job.active --surface2)
+    borderLeftColor: theme.colors.accent, // mockup exact value (.job.active inset accent bar)
   },
   jobName: {
     flexShrink: 1,
@@ -8792,9 +8829,9 @@ const styles = StyleSheet.create((theme) => ({
   logHeaderBar: {
     flexDirection: "row",
     alignItems: "center",
-    gap: theme.spacing[2],
-    paddingHorizontal: theme.spacing[3],
-    paddingVertical: theme.spacing[2],
+    gap: 10, // mockup exact value (log header gap)
+    paddingHorizontal: 14, // mockup exact value (log header padding 9 14)
+    paddingVertical: 9, // mockup exact value
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,
   },
@@ -8812,9 +8849,9 @@ const styles = StyleSheet.create((theme) => ({
   logFooterBar: {
     flexDirection: "row",
     alignItems: "center",
-    gap: theme.spacing[2],
-    paddingHorizontal: theme.spacing[3],
-    paddingVertical: theme.spacing[2],
+    gap: 10, // mockup exact value (log footer gap)
+    paddingHorizontal: 14, // mockup exact value (log footer padding 9 14)
+    paddingVertical: 9, // mockup exact value
     borderTopWidth: theme.borderWidth[1],
     borderTopColor: theme.colors.border,
   },
@@ -8832,7 +8869,7 @@ const styles = StyleSheet.create((theme) => ({
   // file viewer, which grows inline).
   logSurface: {
     maxHeight: 480,
-    backgroundColor: theme.colors.surfaceSidebar,
+    backgroundColor: "#0c0f0e", // mockup exact value (.log background)
   },
   // Read-only file viewer (§19). Box chrome + font for HighlightedCodeBlock,
   // which paints these onto its own wrapper. No maxHeight: the block renders
@@ -8854,8 +8891,8 @@ const styles = StyleSheet.create((theme) => ({
   logText: {
     fontFamily: theme.fontFamily.mono,
     fontSize: theme.fontSize.code,
-    lineHeight: Math.round(theme.fontSize.code * 1.6),
-    color: theme.colors.foregroundMuted,
+    lineHeight: Math.round(theme.fontSize.code * 1.6), // mockup exact value (.log line-height 1.6)
+    color: "#c9d1d9", // mockup exact value (.log color)
   },
   logTruncated: {
     fontSize: theme.fontSize.xs,
