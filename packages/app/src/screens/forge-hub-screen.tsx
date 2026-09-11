@@ -6581,7 +6581,20 @@ export function ForgeHubScreen() {
       setConnectionsError(null);
       return client
         .forgeRemoveConnection(id)
-        .then(() => refreshConnections())
+        .then(() => {
+          // Removing a connection invalidates the repo list (the Switch-repo
+          // sidebar, Jump-to-repo filter and main picker all read `repos`).
+          // Drop the cached repos and reset `reposLoaded` so the eager-load
+          // effect refetches when connections remain — and, when the last
+          // connection is gone, leaves the list empty instead of stale.
+          setRepos([]);
+          setReposLoaded(false);
+          setReposLimit(PAGE_SIZE);
+          // If the open repo belonged to the removed connection, close it so
+          // we don't keep rendering a repo whose account no longer exists.
+          setSelectedRepo((cur) => (cur && cur.connectionId === id ? null : cur));
+          return refreshConnections();
+        })
         .catch((e: unknown) =>
           setConnectionsError(e instanceof Error ? e.message : "Failed to remove connection."),
         );
