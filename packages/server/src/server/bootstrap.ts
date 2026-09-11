@@ -158,6 +158,8 @@ import { BrowserToolsBroker } from "./browser-tools/broker.js";
 import { DaemonConfigBrowserToolsPolicy } from "./browser-tools/policy.js";
 import { WorkspaceGitServiceImpl } from "./workspace-git-service.js";
 import { resolveWorkspaceIdForPath } from "./resolve-workspace-id-for-path.js";
+import { ForgeHubService } from "./session/forge/forge-hub-session.js";
+import { FileSecretStore } from "./database/secret-store.js";
 import {
   archiveByScope,
   archivePersistedWorkspaceRecord,
@@ -1256,6 +1258,12 @@ export async function createJAgentDeskDaemon(
   });
   await databaseRegistry.initialize();
   logger.info("Database registry created");
+  // Daemon-wide Forge Hub service (spec 19 / ADR-0015). One instance shared across
+  // all agents' tool catalogs, mirroring how session.ts builds it per-session. Token
+  // secrets + the connection index live under <home>/forge.
+  const forgeSecretDir = path.resolve(config.jagentdeskHome, "forge");
+  const forgeHubService = new ForgeHubService(new FileSecretStore(forgeSecretDir), forgeSecretDir);
+  logger.info("Forge Hub service created");
   const createScheduleLocalWorkspaceExternal = async (input: {
     cwd: string;
     firstAgentContext: FirstAgentContext;
@@ -1414,6 +1422,7 @@ export async function createJAgentDeskDaemon(
     clusterRegistry,
     databaseRegistry,
     skillsStorage,
+    forgeHub: forgeHubService,
     browserFingerprintProfiles: {
       list: () => daemonConfigStore.get().browserTools.profiles ?? [],
       activeId: () => daemonConfigStore.get().browserTools.activeProfileId ?? null,
