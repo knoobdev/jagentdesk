@@ -126,15 +126,30 @@ function fileExtension(filePath: string): string | null {
 // RPCs on the DaemonClient — this screen only renders UI.
 // ---------------------------------------------------------------------------
 
-type SubNav =
+// The active main-pane section. Replaces the old top pill "tab" model: there is
+// no standalone "repositories" section — when no repo is selected the main pane
+// shows the repository picker (RepositoriesView). "overview" is the per-repo
+// landing added for the sidebar shell (§19 mockup).
+type Section =
+  | "overview"
   | "connections"
-  | "repositories"
   | "code"
   | "commits"
   | "pulls"
   | "pipelines"
   | "releases"
   | "issues";
+
+const SECTION_LABEL: Record<Section, string> = {
+  overview: "Overview",
+  connections: "Connections",
+  code: "Code",
+  commits: "Commits",
+  pulls: "Pull requests",
+  pipelines: "Pipelines",
+  releases: "Releases",
+  issues: "Issues",
+};
 
 /** A repo coordinate for every repo-scoped Forge Hub RPC. */
 function repoRef(repo: ForgeRepo): ForgeRepoRef {
@@ -389,10 +404,10 @@ function Chip({ label, color }: { label: string; color: string }) {
   );
 }
 
-function ProviderBadge({ forge }: { forge: string }) {
+function ProviderBadge({ forge, small = false }: { forge: string; small?: boolean }) {
   return (
-    <View style={styles.badge}>
-      <Text style={styles.badgeText}>{forgeBadge(forge)}</Text>
+    <View style={small ? styles.badgeSm : styles.badge}>
+      <Text style={small ? styles.badgeSmText : styles.badgeText}>{forgeBadge(forge)}</Text>
     </View>
   );
 }
@@ -5352,32 +5367,139 @@ function IssuesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo })
   );
 }
 
-// ===== sub-nav =============================================================
+// ===== repo overview =======================================================
 
-function SubNavButton({
+// Lightweight per-repo landing (sidebar "Overview" item). Renders only data the
+// repos list already carries (§19 ForgeRepo: description / defaultBranch /
+// visibility / openChangeRequests / checksStatus / url) plus jump buttons — no
+// new RPCs. Recent-commits is intentionally omitted to stay minimal.
+function OverviewView({
+  repo,
+  codeEnabled,
+  onNavigate,
+}: {
+  repo: ForgeRepo;
+  codeEnabled: boolean;
+  onNavigate: (section: Section) => void;
+}) {
+  const { theme } = useUnistyles();
+  const dotColor = useDotColor();
+  const def = getForgeDefinitionOrNeutral(repo.forge);
+  const ciColor = dotColor(repo.checksStatus);
+  const ciLabel = repo.checksStatus && repo.checksStatus !== "none" ? repo.checksStatus : "—";
+  const openExternal = useCallback(() => void openExternalUrl(repo.url), [repo.url]);
+  const goCode = useCallback(() => onNavigate("code"), [onNavigate]);
+  const goPulls = useCallback(() => onNavigate("pulls"), [onNavigate]);
+
+  return (
+    <View style={styles.pane}>
+      <View style={styles.card}>
+        <View style={styles.row}>
+          <ProviderBadge forge={repo.forge} />
+          <View style={styles.rowInfo}>
+            <Text style={styles.rowTitleMono} numberOfLines={1}>
+              {repo.owner}/{repo.name}
+            </Text>
+            {repo.description ? (
+              <Text style={styles.rowSub} numberOfLines={2}>
+                {repo.description}
+              </Text>
+            ) : null}
+          </View>
+        </View>
+        <View style={styles.metaGrid}>
+          <View style={styles.metaRow}>
+            <Text style={styles.metaKey}>Default</Text>
+            <Text style={styles.metaValMono}>{repo.defaultBranch ?? "—"}</Text>
+          </View>
+          <View style={styles.metaRow}>
+            <Text style={styles.metaKey}>Visibility</Text>
+            <Text style={styles.metaVal}>
+              {repo.visibility && repo.visibility !== "unknown" ? repo.visibility : "—"}
+            </Text>
+          </View>
+          <View style={styles.metaRow}>
+            <Text style={styles.metaKey}>Open {def.changeRequestAbbrev}</Text>
+            <Text style={styles.metaVal}>{repo.openChangeRequests ?? 0}</Text>
+          </View>
+          <View style={styles.metaRow}>
+            <Text style={styles.metaKey}>Checks</Text>
+            <View style={styles.summaryInline}>
+              {ciColor ? <StatusDot color={ciColor} /> : null}
+              <Text style={styles.metaVal}>{ciLabel}</Text>
+            </View>
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.toolbarRow}>
+        <Pressable
+          style={[styles.btn, styles.btnGhost]}
+          onPress={openExternal}
+          testID="forge-overview-open-external"
+        >
+          <ExternalLink size={13} color={theme.colors.foreground} />
+          <Text style={styles.btnGhostText}>Open on {def.displayName}</Text>
+        </Pressable>
+        {codeEnabled ? (
+          <Pressable
+            style={[styles.btn, styles.btnGhost]}
+            onPress={goCode}
+            testID="forge-overview-code"
+          >
+            <Code size={13} color={theme.colors.foreground} />
+            <Text style={styles.btnGhostText}>Browse code</Text>
+          </Pressable>
+        ) : null}
+        <Pressable
+          style={[styles.btn, styles.btnGhost]}
+          onPress={goPulls}
+          testID="forge-overview-pulls"
+        >
+          <GitPullRequest size={13} color={theme.colors.foreground} />
+          <Text style={styles.btnGhostText}>{def.changeRequestNoun}</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+// ===== forge sidebar =======================================================
+
+function SidebarNavItem({
   label,
-  value,
+  section,
   active,
   onSelect,
   Icon,
+  count,
 }: {
   label: string;
-  value: SubNav;
+  section: Section;
   active: boolean;
-  onSelect: (value: SubNav) => void;
+  onSelect: (section: Section) => void;
   Icon: ComponentType<{ size?: number; color?: string }>;
+  /** Right-aligned count/badge shown only when cheaply known (e.g. branch name). */
+  count?: string;
 }) {
   const { theme } = useUnistyles();
-  const handlePress = useCallback(() => onSelect(value), [value, onSelect]);
-  const tint = active ? theme.colors.accentForeground : theme.colors.foregroundMuted;
+  const handlePress = useCallback(() => onSelect(section), [section, onSelect]);
+  const tint = active ? theme.colors.foreground : theme.colors.foregroundMuted;
   return (
     <Pressable
-      style={[styles.subNavPill, active && styles.subNavPillActive]}
+      style={[styles.navItem, active && styles.navItemActive]}
       onPress={handlePress}
-      testID={`forge-subnav-${value}`}
+      testID={`forge-nav-${section}`}
     >
-      <Icon size={14} color={tint} />
-      <Text style={[styles.subNavText, active && styles.subNavTextActive]}>{label}</Text>
+      <Icon size={15} color={tint} />
+      <Text style={[styles.navItemText, active && styles.navItemTextActive]} numberOfLines={1}>
+        {label}
+      </Text>
+      {count ? (
+        <Text style={styles.navItemCount} numberOfLines={1}>
+          {count}
+        </Text>
+      ) : null}
     </Pressable>
   );
 }
@@ -5405,7 +5527,11 @@ export function ForgeHubScreen() {
   // §19.3.7: in-app device-flow sign-in for cli-method providers.
   const loginEnabled = useHostFeature(serverId, "forgeHubLogin");
 
-  const [tab, setTab] = useState<SubNav>("connections");
+  // Active main-pane section + the sidebar "Jump to repo…" filter query. First
+  // run lands on Connections so a user with no accounts can connect; opening a
+  // repo moves the section to Code/Overview (see handleOpenRepo).
+  const [section, setSection] = useState<Section>("connections");
+  const [repoQuery, setRepoQuery] = useState("");
   const [connections, setConnections] = useState<ForgeConnection[]>([]);
   const [connectionsError, setConnectionsError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -5485,11 +5611,14 @@ export function ForgeHubScreen() {
     }
   }, [loadRepos]);
 
+  // Load repos eagerly once at least one connection exists: the sidebar's
+  // Jump-to-repo filter, the Switch-repo list, and the main-pane repo picker all
+  // read the same `repos` list, so there's no per-section trigger anymore.
   useEffect(() => {
-    if (tab === "repositories" && !reposLoaded && !reposLoading) {
+    if (connections.length > 0 && !reposLoaded && !reposLoading) {
       void loadRepos();
     }
-  }, [tab, reposLoaded, reposLoading, loadRepos]);
+  }, [connections.length, reposLoaded, reposLoading, loadRepos]);
 
   const loadChangeRequests = useCallback(
     // `silent` keeps the list on screen for a load-more (spinner on the button).
@@ -5555,10 +5684,12 @@ export function ForgeHubScreen() {
       setSelectedCr(null);
       setNewCrOpen(false);
       setCrState("open");
+      setRepoQuery("");
       // A different repo starts the PR/MR list fresh.
       crLimitRef.current = PAGE_SIZE;
       setCrLimit(PAGE_SIZE);
-      setTab(codeEnabled ? "code" : "pulls");
+      // Land on Code when available, else the gate-free Overview.
+      setSection(codeEnabled ? "code" : "overview");
       void loadChangeRequests(repo, "open");
     },
     [loadChangeRequests, codeEnabled],
@@ -5692,290 +5823,476 @@ export function ForgeHubScreen() {
     [selectedRepo, crState, loadChangeRequests],
   );
 
-  const contentContainerStyle = useMemo(
-    () => [styles.contentContainer, isCompact ? { paddingTop: insets.top } : null],
-    [isCompact, insets.top],
+  const hasConnections = connections.length > 0;
+
+  // Sidebar navigation handlers.
+  const handleSelectSection = useCallback((next: Section) => setSection(next), []);
+  // The sidebar header doubles as "home": clear the repo and show the picker.
+  const goToRepoList = useCallback(() => {
+    setSelectedRepo(null);
+    setSelectedCr(null);
+    setRepoQuery("");
+    setSection("overview");
+  }, []);
+  const goToConnections = useCallback(() => setSection("connections"), []);
+
+  // Connection footer status dot per §19.3.4 (authenticated=success,
+  // token_expiring=warning, error=danger; everything else muted).
+  const connDotColor = useCallback(
+    (state: ForgeConnection["authState"]): string => {
+      switch (state) {
+        case "authenticated":
+          return theme.colors.statusSuccess;
+        case "token_expiring":
+          return theme.colors.statusWarning;
+        case "error":
+          return theme.colors.statusDanger;
+        default:
+          return theme.colors.foregroundMuted;
+      }
+    },
+    [theme],
   );
 
-  const hasConnections = connections.length > 0;
+  const inActiveSet = useCallback(
+    (repo: ForgeRepo): boolean =>
+      activeConnectionIds === null ||
+      (repo.connectionId != null && activeConnectionIds.has(repo.connectionId)),
+    [activeConnectionIds],
+  );
+
+  // Repos visible for the active account filter (powers the no-repo sidebar list).
+  const visibleRepos = useMemo(() => repos.filter(inActiveSet), [repos, inActiveSet]);
+
+  // Jump-to-repo results (only while the field has a query).
+  const jumpMatches = useMemo(() => {
+    const q = repoQuery.trim().toLowerCase();
+    if (!q) return [];
+    return visibleRepos.filter((r) => `${r.owner}/${r.name}`.toLowerCase().includes(q)).slice(0, 8);
+  }, [visibleRepos, repoQuery]);
+
+  // Other repos to switch to (excludes the current one).
+  const otherRepos = useMemo(() => {
+    if (!selectedRepo) return [];
+    return visibleRepos
+      .filter(
+        (r) =>
+          !(
+            r.forge === selectedRepo.forge &&
+            r.owner === selectedRepo.owner &&
+            r.name === selectedRepo.name
+          ),
+      )
+      .slice(0, 12);
+  }, [visibleRepos, selectedRepo]);
+
+  const repoDef = selectedRepo ? getForgeDefinitionOrNeutral(selectedRepo.forge) : null;
+
+  const renderSidebarRepoRow = (repo: ForgeRepo) => (
+    <Pressable
+      key={`${repo.forge}:${repo.owner}/${repo.name}`}
+      style={styles.navItem}
+      onPress={() => handleOpenRepo(repo)}
+      testID={`forge-switch-${repo.forge}-${repo.owner}-${repo.name}`}
+    >
+      <ProviderBadge forge={repo.forge} small />
+      <Text style={styles.navItemText} numberOfLines={1}>
+        {repo.owner}/{repo.name}
+      </Text>
+    </Pressable>
+  );
+
+  const navInner = repoQuery.trim() ? (
+    <>
+      <Text style={styles.navGroupLabel}>Matching repos</Text>
+      {jumpMatches.length === 0 ? (
+        <Text style={styles.navEmpty}>No matches</Text>
+      ) : (
+        jumpMatches.map(renderSidebarRepoRow)
+      )}
+    </>
+  ) : selectedRepo && repoDef ? (
+    <>
+      <Text style={styles.navGroupLabel} numberOfLines={1}>
+        {selectedRepo.owner}/{selectedRepo.name} · {selectedRepo.forge}
+      </Text>
+      <SidebarNavItem
+        label="Overview"
+        section="overview"
+        Icon={FolderGit2}
+        active={section === "overview"}
+        onSelect={handleSelectSection}
+      />
+      {codeEnabled ? (
+        <SidebarNavItem
+          label="Code"
+          section="code"
+          Icon={Code}
+          count={selectedRepo.defaultBranch ?? undefined}
+          active={section === "code"}
+          onSelect={handleSelectSection}
+        />
+      ) : null}
+      {codeEnabled ? (
+        <SidebarNavItem
+          label="Commits"
+          section="commits"
+          Icon={GitCommit}
+          active={section === "commits"}
+          onSelect={handleSelectSection}
+        />
+      ) : null}
+      <SidebarNavItem
+        label="Pull requests"
+        section="pulls"
+        Icon={GitPullRequest}
+        count={
+          selectedRepo.openChangeRequests != null
+            ? String(selectedRepo.openChangeRequests)
+            : undefined
+        }
+        active={section === "pulls"}
+        onSelect={handleSelectSection}
+      />
+      {pipelinesEnabled ? (
+        <SidebarNavItem
+          label="Pipelines"
+          section="pipelines"
+          Icon={Play}
+          active={section === "pipelines"}
+          onSelect={handleSelectSection}
+        />
+      ) : null}
+      {releasesEnabled ? (
+        <SidebarNavItem
+          label="Releases"
+          section="releases"
+          Icon={Tag}
+          active={section === "releases"}
+          onSelect={handleSelectSection}
+        />
+      ) : null}
+      {issuesEnabled ? (
+        <SidebarNavItem
+          label="Issues"
+          section="issues"
+          Icon={CircleDot}
+          active={section === "issues"}
+          onSelect={handleSelectSection}
+        />
+      ) : null}
+      {otherRepos.length > 0 ? (
+        <>
+          <Text style={styles.navGroupLabel}>Switch repo</Text>
+          {otherRepos.map(renderSidebarRepoRow)}
+        </>
+      ) : null}
+    </>
+  ) : (
+    <>
+      <Text style={styles.navGroupLabel}>Repositories</Text>
+      {visibleRepos.length === 0 ? (
+        <Text style={styles.navEmpty}>
+          {hasConnections ? "No repositories" : "Connect an account"}
+        </Text>
+      ) : (
+        visibleRepos.slice(0, 14).map(renderSidebarRepoRow)
+      )}
+    </>
+  );
+
+  const footer = (
+    <View style={styles.connFooter}>
+      {connections.slice(0, 4).map((c) => (
+        <Pressable
+          key={c.id}
+          style={styles.connMini}
+          onPress={goToConnections}
+          testID={`forge-conn-mini-${c.id}`}
+        >
+          <StatusDot color={connDotColor(c.authState)} />
+          <Text style={styles.connMiniText} numberOfLines={1}>
+            {getForgeDefinitionOrNeutral(c.forge).displayName}
+            {c.account ? ` · ${c.account}` : ""}
+          </Text>
+        </Pressable>
+      ))}
+      <Pressable
+        style={[styles.connMini, styles.connManage]}
+        onPress={goToConnections}
+        testID="forge-conn-manage"
+      >
+        <Plug size={13} color={theme.colors.foregroundMuted} />
+        <Text style={styles.connManageText}>
+          {hasConnections ? "Manage / Add" : "Add connection"}
+        </Text>
+      </Pressable>
+    </View>
+  );
+
+  const renderToolbar = () => {
+    if (selectedRepo && repoDef && section !== "connections") {
+      return (
+        <>
+          <ProviderBadge forge={selectedRepo.forge} />
+          <Text style={styles.toolbarTitleMono} numberOfLines={1}>
+            {selectedRepo.owner}/{selectedRepo.name}
+          </Text>
+          <Text style={styles.toolbarSep}>·</Text>
+          <Text style={styles.toolbarSection}>{SECTION_LABEL[section]}</Text>
+          <View style={styles.grow} />
+          <Pressable
+            style={[styles.btn, styles.btnGhost]}
+            onPress={() => void openExternalUrl(selectedRepo.url)}
+            testID="forge-toolbar-open-external"
+          >
+            <ExternalLink size={13} color={theme.colors.foreground} />
+            <Text style={styles.btnGhostText}>Open on {repoDef.displayName}</Text>
+          </Pressable>
+        </>
+      );
+    }
+    return (
+      <Text style={styles.toolbarTitle}>
+        {section === "connections" ? "Forge connections" : "Repositories"}
+      </Text>
+    );
+  };
+
+  const renderMain = () => {
+    if (section === "connections") {
+      return (
+        <ConnectionsView
+          connections={connections}
+          onRemove={handleRemoveConnection}
+          onAdd={handleAddConnection}
+          adding={adding}
+          onToggleAdd={toggleAdding}
+          client={client}
+          cliInstallEnabled={cliInstallEnabled}
+          loginEnabled={loginEnabled}
+          onLoggedIn={refreshConnections}
+          activeConnectionIds={activeConnectionIds}
+          onToggleActive={handleToggleActiveConnection}
+        />
+      );
+    }
+
+    if (!hasConnections) {
+      return <Text style={styles.emptyText}>{CONNECTION_EMPTY_STATE}</Text>;
+    }
+
+    // No repo selected → the repository picker is the main pane.
+    if (!selectedRepo) {
+      return (
+        <RepositoriesView
+          repos={repos}
+          loading={reposLoading}
+          error={reposError}
+          limit={reposLimit}
+          loadingMore={reposLoadingMore}
+          onLoadMore={loadMoreRepos}
+          onOpen={handleOpenRepo}
+          onRetry={handleRetryRepos}
+          connections={connections}
+          activeConnectionIds={activeConnectionIds}
+        />
+      );
+    }
+
+    if (section === "overview") {
+      return (
+        <OverviewView
+          repo={selectedRepo}
+          codeEnabled={codeEnabled}
+          onNavigate={handleSelectSection}
+        />
+      );
+    }
+
+    if (section === "code") {
+      return codeEnabled && client ? (
+        <CodeView client={client} repo={selectedRepo} />
+      ) : (
+        <Text style={styles.emptyText}>This section is unavailable.</Text>
+      );
+    }
+
+    if (section === "commits") {
+      return codeEnabled && client ? (
+        <CommitsView client={client} repo={selectedRepo} />
+      ) : (
+        <Text style={styles.emptyText}>This section is unavailable.</Text>
+      );
+    }
+
+    if (section === "pipelines") {
+      return pipelinesEnabled && client ? (
+        <PipelinesView client={client} repo={selectedRepo} releasesEnabled={releasesEnabled} />
+      ) : (
+        <Text style={styles.emptyText}>This section is unavailable.</Text>
+      );
+    }
+
+    if (section === "releases") {
+      return releasesEnabled && client ? (
+        <ReleasesView client={client} repo={selectedRepo} />
+      ) : (
+        <Text style={styles.emptyText}>This section is unavailable.</Text>
+      );
+    }
+
+    if (section === "issues") {
+      return issuesEnabled && client ? (
+        <IssuesView client={client} repo={selectedRepo} />
+      ) : (
+        <Text style={styles.emptyText}>This section is unavailable.</Text>
+      );
+    }
+
+    // section === "pulls"
+    return selectedCr && client ? (
+      <PullRequestDetail
+        client={client}
+        repo={selectedRepo}
+        cr={selectedCr}
+        files={files}
+        filesLoading={filesLoading}
+        filesError={filesError}
+        reviewEnabled={reviewEnabled}
+        pipelinesEnabled={pipelinesEnabled}
+        onBack={handleBackToList}
+        onLoadFiles={loadFiles}
+        onReviewed={refreshCrSummary}
+      />
+    ) : (
+      <View style={styles.pane}>
+        <View style={styles.toolbarRow}>
+          <Text style={styles.rowTitleMono} numberOfLines={1}>
+            {selectedRepo.owner}/{selectedRepo.name}
+          </Text>
+          <View style={styles.grow} />
+          {reviewEnabled ? (
+            <Pressable
+              style={[styles.btn, styles.btnPrimary]}
+              onPress={openNewCr}
+              testID="forge-new-cr"
+            >
+              <Plus size={14} color={theme.colors.accentForeground} />
+              <Text style={styles.btnPrimaryText}>
+                New {getForgeDefinitionOrNeutral(selectedRepo.forge).changeRequestAbbrev}
+              </Text>
+            </Pressable>
+          ) : null}
+          <Pressable
+            style={[styles.btn, styles.btnGhost]}
+            onPress={refreshCrList}
+            testID="forge-cr-refresh"
+          >
+            <RotateCcw size={13} color={theme.colors.foreground} />
+            <Text style={styles.btnGhostText}>Refresh</Text>
+          </Pressable>
+        </View>
+        {reviewEnabled && newCrOpen && client ? (
+          <NewChangeRequestForm
+            client={client}
+            repo={selectedRepo}
+            onCreated={handleCrCreated}
+            onCancel={closeNewCr}
+          />
+        ) : null}
+        <StateFilter state={crState} onChange={handleChangeState} />
+        {crError ? (
+          <View style={styles.errorBanner}>
+            <CircleAlert size={16} color={theme.colors.statusDanger} />
+            <Text style={styles.errorText}>{crError}</Text>
+          </View>
+        ) : null}
+        {crLoading ? (
+          <SkeletonRows />
+        ) : changeRequests.length === 0 ? (
+          <Text style={styles.emptyText}>Nothing here yet.</Text>
+        ) : (
+          <>
+            <View style={styles.card}>
+              {changeRequests.map((cr) => (
+                <PullRequestRow
+                  key={cr.number}
+                  cr={cr}
+                  forge={selectedRepo.forge}
+                  onOpen={handleOpenCr}
+                />
+              ))}
+            </View>
+            {changeRequests.length >= crLimit ? (
+              <LoadMoreButton
+                loading={crLoadingMore}
+                onPress={loadMoreChangeRequests}
+                testID="forge-cr-load-more"
+              />
+            ) : null}
+          </>
+        )}
+      </View>
+    );
+  };
 
   return (
     <View style={styles.container}>
-      <View style={styles.headerRow}>
-        <GitPullRequest size={20} color={theme.colors.foreground} />
-        <Text style={styles.header}>Forge Hub</Text>
-      </View>
+      <View style={[styles.shell, isCompact && styles.shellStacked]}>
+        <View style={[styles.sidebar, isCompact && styles.sidebarStacked]}>
+          <Pressable
+            style={[styles.sidebarHeader, isCompact ? { paddingTop: insets.top + 12 } : null]}
+            onPress={goToRepoList}
+            testID="forge-sidebar-home"
+          >
+            <GitBranch size={18} color={theme.colors.foreground} />
+            <Text style={styles.sidebarTitle}>Forge Hub</Text>
+          </Pressable>
 
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.subNavRow}
-        contentContainerStyle={styles.subNavContent}
-      >
-        <SubNavButton
-          label="Connections"
-          value="connections"
-          active={tab === "connections"}
-          onSelect={setTab}
-          Icon={Plug}
-        />
-        <SubNavButton
-          label="Repositories"
-          value="repositories"
-          active={tab === "repositories"}
-          onSelect={setTab}
-          Icon={FolderGit2}
-        />
-        {codeEnabled ? (
-          <SubNavButton
-            label="Code"
-            value="code"
-            active={tab === "code"}
-            onSelect={setTab}
-            Icon={Code}
-          />
-        ) : null}
-        {codeEnabled ? (
-          <SubNavButton
-            label="Commits"
-            value="commits"
-            active={tab === "commits"}
-            onSelect={setTab}
-            Icon={GitCommit}
-          />
-        ) : null}
-        <SubNavButton
-          label="Pull requests"
-          value="pulls"
-          active={tab === "pulls"}
-          onSelect={setTab}
-          Icon={GitPullRequest}
-        />
-        {pipelinesEnabled ? (
-          <SubNavButton
-            label="Pipelines"
-            value="pipelines"
-            active={tab === "pipelines"}
-            onSelect={setTab}
-            Icon={Play}
-          />
-        ) : null}
-        {releasesEnabled ? (
-          <SubNavButton
-            label="Releases"
-            value="releases"
-            active={tab === "releases"}
-            onSelect={setTab}
-            Icon={Tag}
-          />
-        ) : null}
-        {issuesEnabled ? (
-          <SubNavButton
-            label="Issues"
-            value="issues"
-            active={tab === "issues"}
-            onSelect={setTab}
-            Icon={CircleDot}
-          />
-        ) : null}
-      </ScrollView>
+          <View style={styles.sidebarField}>
+            <Search size={14} color={theme.colors.foregroundMuted} />
+            <TextInput
+              style={styles.sidebarFieldInput}
+              value={repoQuery}
+              onChangeText={setRepoQuery}
+              placeholder="Jump to repo…"
+              placeholderTextColor={theme.colors.foregroundExtraMuted}
+              autoCapitalize="none"
+              autoCorrect={false}
+              testID="forge-jump-to-repo"
+            />
+          </View>
 
-      {connectionsError ? (
-        <View style={styles.errorBanner}>
-          <CircleAlert size={16} color={theme.colors.statusDanger} />
-          <Text style={styles.errorText}>{connectionsError}</Text>
+          {isCompact ? (
+            <View style={styles.sidebarScrollContent}>{navInner}</View>
+          ) : (
+            <ScrollView
+              style={styles.sidebarScroll}
+              contentContainerStyle={styles.sidebarScrollContent}
+            >
+              {navInner}
+            </ScrollView>
+          )}
+
+          {footer}
         </View>
-      ) : null}
 
-      <ScrollView style={styles.scroll} contentContainerStyle={contentContainerStyle}>
-        {tab === "connections" ? (
-          <ConnectionsView
-            connections={connections}
-            onRemove={handleRemoveConnection}
-            onAdd={handleAddConnection}
-            adding={adding}
-            onToggleAdd={toggleAdding}
-            client={client}
-            cliInstallEnabled={cliInstallEnabled}
-            loginEnabled={loginEnabled}
-            onLoggedIn={refreshConnections}
-            activeConnectionIds={activeConnectionIds}
-            onToggleActive={handleToggleActiveConnection}
-          />
-        ) : null}
+        <View style={styles.main}>
+          <View style={styles.toolbar}>{renderToolbar()}</View>
 
-        {tab === "repositories" ? (
-          !hasConnections ? (
-            <Text style={styles.emptyText}>{CONNECTION_EMPTY_STATE}</Text>
-          ) : (
-            <RepositoriesView
-              repos={repos}
-              loading={reposLoading}
-              error={reposError}
-              limit={reposLimit}
-              loadingMore={reposLoadingMore}
-              onLoadMore={loadMoreRepos}
-              onOpen={handleOpenRepo}
-              onRetry={handleRetryRepos}
-              connections={connections}
-              activeConnectionIds={activeConnectionIds}
-            />
-          )
-        ) : null}
-
-        {tab === "pulls" ? (
-          !hasConnections ? (
-            <Text style={styles.emptyText}>{CONNECTION_EMPTY_STATE}</Text>
-          ) : !selectedRepo ? (
-            <Text style={styles.emptyText}>
-              Pick a repository from the Repositories tab to view its pull requests.
-            </Text>
-          ) : selectedCr && client ? (
-            <PullRequestDetail
-              client={client}
-              repo={selectedRepo}
-              cr={selectedCr}
-              files={files}
-              filesLoading={filesLoading}
-              filesError={filesError}
-              reviewEnabled={reviewEnabled}
-              pipelinesEnabled={pipelinesEnabled}
-              onBack={handleBackToList}
-              onLoadFiles={loadFiles}
-              onReviewed={refreshCrSummary}
-            />
-          ) : (
-            <View style={styles.pane}>
-              <View style={styles.toolbarRow}>
-                <Text style={styles.rowTitleMono} numberOfLines={1}>
-                  {selectedRepo.owner}/{selectedRepo.name}
-                </Text>
-                <View style={styles.grow} />
-                {reviewEnabled ? (
-                  <Pressable
-                    style={[styles.btn, styles.btnPrimary]}
-                    onPress={openNewCr}
-                    testID="forge-new-cr"
-                  >
-                    <Plus size={14} color={theme.colors.accentForeground} />
-                    <Text style={styles.btnPrimaryText}>
-                      New {getForgeDefinitionOrNeutral(selectedRepo.forge).changeRequestAbbrev}
-                    </Text>
-                  </Pressable>
-                ) : null}
-                <Pressable
-                  style={[styles.btn, styles.btnGhost]}
-                  onPress={refreshCrList}
-                  testID="forge-cr-refresh"
-                >
-                  <RotateCcw size={13} color={theme.colors.foreground} />
-                  <Text style={styles.btnGhostText}>Refresh</Text>
-                </Pressable>
-              </View>
-              {reviewEnabled && newCrOpen && client ? (
-                <NewChangeRequestForm
-                  client={client}
-                  repo={selectedRepo}
-                  onCreated={handleCrCreated}
-                  onCancel={closeNewCr}
-                />
-              ) : null}
-              <StateFilter state={crState} onChange={handleChangeState} />
-              {crError ? (
-                <View style={styles.errorBanner}>
-                  <CircleAlert size={16} color={theme.colors.statusDanger} />
-                  <Text style={styles.errorText}>{crError}</Text>
-                </View>
-              ) : null}
-              {crLoading ? (
-                <SkeletonRows />
-              ) : changeRequests.length === 0 ? (
-                <Text style={styles.emptyText}>Nothing here yet.</Text>
-              ) : (
-                <>
-                  <View style={styles.card}>
-                    {changeRequests.map((cr) => (
-                      <PullRequestRow
-                        key={cr.number}
-                        cr={cr}
-                        forge={selectedRepo.forge}
-                        onOpen={handleOpenCr}
-                      />
-                    ))}
-                  </View>
-                  {changeRequests.length >= crLimit ? (
-                    <LoadMoreButton
-                      loading={crLoadingMore}
-                      onPress={loadMoreChangeRequests}
-                      testID="forge-cr-load-more"
-                    />
-                  ) : null}
-                </>
-              )}
+          {connectionsError ? (
+            <View style={styles.errorBanner}>
+              <CircleAlert size={16} color={theme.colors.statusDanger} />
+              <Text style={styles.errorText}>{connectionsError}</Text>
             </View>
-          )
-        ) : null}
+          ) : null}
 
-        {tab === "code" && codeEnabled ? (
-          !hasConnections ? (
-            <Text style={styles.emptyText}>{CONNECTION_EMPTY_STATE}</Text>
-          ) : !selectedRepo || !client ? (
-            <Text style={styles.emptyText}>
-              Pick a repository from the Repositories tab to browse its code.
-            </Text>
-          ) : (
-            <CodeView client={client} repo={selectedRepo} />
-          )
-        ) : null}
-
-        {tab === "commits" && codeEnabled ? (
-          !hasConnections ? (
-            <Text style={styles.emptyText}>{CONNECTION_EMPTY_STATE}</Text>
-          ) : !selectedRepo || !client ? (
-            <Text style={styles.emptyText}>
-              Pick a repository from the Repositories tab to view its commits.
-            </Text>
-          ) : (
-            <CommitsView client={client} repo={selectedRepo} />
-          )
-        ) : null}
-
-        {tab === "pipelines" && pipelinesEnabled ? (
-          !hasConnections ? (
-            <Text style={styles.emptyText}>{CONNECTION_EMPTY_STATE}</Text>
-          ) : !selectedRepo || !client ? (
-            <Text style={styles.emptyText}>
-              Pick a repository from the Repositories tab to view its pipelines.
-            </Text>
-          ) : (
-            <PipelinesView client={client} repo={selectedRepo} releasesEnabled={releasesEnabled} />
-          )
-        ) : null}
-
-        {tab === "releases" && releasesEnabled ? (
-          !hasConnections ? (
-            <Text style={styles.emptyText}>{CONNECTION_EMPTY_STATE}</Text>
-          ) : !selectedRepo || !client ? (
-            <Text style={styles.emptyText}>
-              Pick a repository from the Repositories tab to view its releases.
-            </Text>
-          ) : (
-            <ReleasesView client={client} repo={selectedRepo} />
-          )
-        ) : null}
-
-        {tab === "issues" && issuesEnabled ? (
-          !hasConnections ? (
-            <Text style={styles.emptyText}>{CONNECTION_EMPTY_STATE}</Text>
-          ) : !selectedRepo || !client ? (
-            <Text style={styles.emptyText}>
-              Pick a repository from the Repositories tab to view its issues.
-            </Text>
-          ) : (
-            <IssuesView client={client} repo={selectedRepo} />
-          )
-        ) : null}
-      </ScrollView>
+          <ScrollView style={styles.scroll} contentContainerStyle={styles.contentContainer}>
+            {renderMain()}
+          </ScrollView>
+        </View>
+      </View>
     </View>
   );
 }
@@ -5995,52 +6312,184 @@ const styles = StyleSheet.create((theme) => ({
     flexGrow: 1,
     gap: theme.spacing[3],
   },
-  headerRow: {
+  // ===== forge shell (sidebar + main), §19 mockup =====
+  shell: {
+    flex: 1,
+    minHeight: 0,
     flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing[2],
-    paddingHorizontal: theme.spacing[4],
-    paddingTop: theme.spacing[4],
   },
-  header: {
-    fontSize: theme.fontSize["2xl"],
-    fontWeight: theme.fontWeight.bold,
-    color: theme.colors.foreground,
+  // On a narrow width the two columns stack instead of sitting side by side.
+  shellStacked: {
+    flexDirection: "column",
   },
-  subNavRow: {
-    flexGrow: 0,
+  sidebar: {
+    width: 236,
+    flexBasis: 236,
     flexShrink: 0,
-    paddingTop: theme.spacing[3],
+    flexDirection: "column",
+    backgroundColor: theme.colors.surfaceSidebar,
+    borderRightWidth: theme.borderWidth[1],
+    borderRightColor: theme.colors.border,
+  },
+  sidebarStacked: {
+    width: "100%",
+    flexBasis: "auto",
+    borderRightWidth: 0,
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,
   },
-  subNavContent: {
+  sidebarHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: theme.spacing[1],
-    paddingHorizontal: theme.spacing[4],
+    gap: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
+    paddingTop: theme.spacing[3],
     paddingBottom: theme.spacing[2],
   },
-  subNavPill: {
+  sidebarTitle: {
+    fontSize: theme.fontSize.base,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.foreground,
+  },
+  sidebarField: {
     flexDirection: "row",
     alignItems: "center",
-    gap: theme.spacing[1.5],
+    gap: theme.spacing[2],
+    height: 34,
+    marginHorizontal: theme.spacing[2],
+    marginBottom: theme.spacing[2],
     paddingHorizontal: theme.spacing[3],
-    paddingVertical: theme.spacing[2],
-    borderRadius: theme.borderRadius.full,
-    backgroundColor: "transparent",
+    borderRadius: theme.borderRadius.lg,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
   },
-  subNavPillActive: {
-    backgroundColor: theme.colors.accent,
-  },
-  subNavText: {
+  sidebarFieldInput: {
+    flex: 1,
+    minWidth: 0,
     fontSize: theme.fontSize.sm,
-    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foreground,
+    ...(isWeb
+      ? ({
+          outlineStyle: "none",
+          outlineWidth: 0,
+          outlineColor: "transparent",
+        } as object)
+      : {}),
+  },
+  sidebarScroll: {
+    flex: 1,
+    minHeight: 0,
+  },
+  sidebarScrollContent: {
+    paddingHorizontal: theme.spacing[2],
+    paddingBottom: theme.spacing[2],
+  },
+  navGroupLabel: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.semibold,
+    letterSpacing: 0.4,
+    textTransform: "uppercase",
+    color: theme.colors.foregroundMuted,
+    paddingHorizontal: theme.spacing[2],
+    paddingTop: theme.spacing[2],
+    paddingBottom: theme.spacing[1],
+  },
+  navEmpty: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundExtraMuted,
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
+  },
+  navItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    minHeight: 32,
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1.5],
+    borderRadius: theme.borderRadius.lg,
+  },
+  navItemActive: {
+    backgroundColor: theme.colors.surfaceSidebarHover,
+  },
+  navItemText: {
+    flexShrink: 1,
+    fontSize: theme.fontSize.sm,
     color: theme.colors.foregroundMuted,
   },
-  subNavTextActive: {
-    color: theme.colors.accentForeground,
+  navItemTextActive: {
+    color: theme.colors.foreground,
+  },
+  navItemCount: {
+    marginLeft: "auto",
+    fontSize: theme.fontSize.xs,
+    fontFamily: theme.fontFamily.mono,
+    color: theme.colors.foregroundExtraMuted,
+  },
+  connFooter: {
+    borderTopWidth: theme.borderWidth[1],
+    borderTopColor: theme.colors.border,
+    padding: theme.spacing[2],
+    gap: 2,
+  },
+  connMini: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1.5],
+    borderRadius: theme.borderRadius.md,
+  },
+  connMiniText: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+  },
+  connManage: {
+    marginTop: 2,
+  },
+  connManageText: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foreground,
+  },
+  main: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 0,
+    flexDirection: "column",
+    backgroundColor: theme.colors.surface0,
+  },
+  toolbar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    height: 52,
+    flexShrink: 0,
+    paddingHorizontal: theme.spacing[4],
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+  },
+  toolbarTitle: {
+    fontSize: theme.fontSize.base,
     fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.foreground,
+  },
+  toolbarTitleMono: {
+    flexShrink: 1,
+    fontSize: theme.fontSize.sm,
+    fontFamily: theme.fontFamily.mono,
+    color: theme.colors.foreground,
+  },
+  toolbarSep: {
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foregroundExtraMuted,
+  },
+  toolbarSection: {
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foregroundMuted,
   },
   // skeleton loaders
   skeletonRow: {
@@ -6209,6 +6658,21 @@ const styles = StyleSheet.create((theme) => ({
   },
   badgeText: {
     fontSize: 11,
+    fontWeight: theme.fontWeight.bold,
+    color: theme.colors.foreground,
+  },
+  badgeSm: {
+    width: 20,
+    height: 20,
+    borderRadius: theme.borderRadius.base,
+    backgroundColor: theme.colors.surface2,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  badgeSmText: {
+    fontSize: 9,
     fontWeight: theme.fontWeight.bold,
     color: theme.colors.foreground,
   },
