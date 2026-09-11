@@ -116,6 +116,7 @@ import { MarkdownRenderer } from "@/components/markdown/renderer";
 import { parseUnifiedDiff } from "@/utils/tool-call-parsers";
 import { openExternalUrl } from "@/utils/open-external-url";
 import { highlightDiffLines } from "@/utils/diff-highlight";
+import { ForgeAssistantPanel } from "@/screens/forge-assistant-panel";
 import type { Theme } from "@/styles/theme";
 
 // HighlightedCodeBlock keeps all box chrome (bg/border/padding) on its own
@@ -6347,6 +6348,10 @@ export function ForgeHubScreen() {
   // content. Nav actions flip this to `true`; the toolbar back button flips it
   // back. Ignored on wide layouts (both panes always visible).
   const [compactDetail, setCompactDetail] = useState(false);
+  // Forge assistant chat panel: a right-side dock on desktop, full-screen on
+  // compact. Toggled from the toolbar; provisions/reuses one dedicated agent
+  // per host (see forge-assistant-panel.tsx).
+  const [assistantOpen, setAssistantOpen] = useState(false);
   const [repoQuery, setRepoQuery] = useState("");
   const [connections, setConnections] = useState<ForgeConnection[]>([]);
   const [connectionsError, setConnectionsError] = useState<string | null>(null);
@@ -6610,6 +6615,8 @@ export function ForgeHubScreen() {
   );
 
   const toggleAdding = useCallback(() => setAdding((v) => !v), []);
+  const toggleAssistant = useCallback(() => setAssistantOpen((v) => !v), []);
+  const closeAssistant = useCallback(() => setAssistantOpen(false), []);
   const handleBackToList = useCallback(() => setSelectedCr(null), []);
   const handleRetryRepos = useCallback(() => void loadRepos(), [loadRepos]);
   const refreshCrList = useCallback(() => {
@@ -6881,6 +6888,22 @@ export function ForgeHubScreen() {
     </View>
   );
 
+  // Toolbar toggle for the Forge assistant chat. Only meaningful once a host is
+  // resolved (the assistant runs an agent on that host).
+  const assistantButton = client ? (
+    <Pressable
+      style={[styles.btn, styles.btnGhost, assistantOpen && styles.btnGhostActive]}
+      onPress={toggleAssistant}
+      testID="forge-assistant-toggle"
+      accessibilityRole="button"
+      accessibilityLabel="Forge assistant"
+      accessibilityState={{ selected: assistantOpen }}
+    >
+      <MessageSquare size={13} color={theme.colors.foreground} />
+      <Text style={styles.btnGhostText}>Assistant</Text>
+    </Pressable>
+  ) : null;
+
   const renderToolbar = () => {
     // "connections" and "repositories" are repo-independent full-pane sections,
     // so they show a plain title even when a repo happens to be selected.
@@ -6894,6 +6917,7 @@ export function ForgeHubScreen() {
           <Text style={styles.toolbarSep}>·</Text>
           <Text style={styles.toolbarSection}>{SECTION_LABEL[section]}</Text>
           <View style={styles.grow} />
+          {assistantButton}
           <Pressable
             style={[styles.btn, styles.btnGhost]}
             onPress={() => void openExternalUrl(selectedRepo.url)}
@@ -6910,19 +6934,18 @@ export function ForgeHubScreen() {
         <Text style={styles.toolbarTitle}>
           {section === "connections" ? "Forge connections" : "Repositories"}
         </Text>
+        <View style={styles.grow} />
         {section === "connections" ? (
-          <>
-            <View style={styles.grow} />
-            <Pressable
-              style={[styles.btn, styles.btnPrimary, styles.btnSm]}
-              onPress={toggleAdding}
-              testID="forge-add-connection"
-            >
-              <Plus size={14} color={theme.colors.accentForeground} />
-              <Text style={styles.btnPrimaryText}>Add connection</Text>
-            </Pressable>
-          </>
+          <Pressable
+            style={[styles.btn, styles.btnPrimary, styles.btnSm]}
+            onPress={toggleAdding}
+            testID="forge-add-connection"
+          >
+            <Plus size={14} color={theme.colors.accentForeground} />
+            <Text style={styles.btnPrimaryText}>Add connection</Text>
+          </Pressable>
         ) : null}
+        {assistantButton}
       </>
     );
   };
@@ -7238,7 +7261,33 @@ export function ForgeHubScreen() {
             </ScrollView>
           </View>
         ) : null}
+
+        {/* Desktop: the assistant sits as a right-side dock alongside the main
+            content without disturbing the rail/sidebar/main layout. */}
+        {assistantOpen && !isCompact ? (
+          <View style={styles.assistantDock}>
+            <ForgeAssistantPanel
+              serverId={serverId}
+              repo={selectedRepo}
+              isCompact={false}
+              onClose={closeAssistant}
+            />
+          </View>
+        ) : null}
       </View>
+
+      {/* Compact (mobile): the assistant takes over the screen; its header
+          carries a back control. */}
+      {assistantOpen && isCompact ? (
+        <View style={[styles.assistantOverlay, { paddingTop: insets.top }]}>
+          <ForgeAssistantPanel
+            serverId={serverId}
+            repo={selectedRepo}
+            isCompact
+            onClose={closeAssistant}
+          />
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -7991,6 +8040,30 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.xs,
     fontWeight: theme.fontWeight.medium,
     color: theme.colors.foreground,
+  },
+  // Active (open) state for the ghost-style assistant toggle.
+  btnGhostActive: {
+    backgroundColor: theme.colors.surface2,
+  },
+  // ===== forge assistant chat =====
+  // Desktop: right-side dock beside the main pane.
+  assistantDock: {
+    width: 380,
+    flexBasis: 380,
+    flexShrink: 0,
+    borderLeftWidth: theme.borderWidth[1],
+    borderLeftColor: theme.colors.border,
+    backgroundColor: theme.colors.surface0,
+  },
+  // Compact: full-screen overlay above the shell.
+  assistantOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: theme.colors.surface0,
+    zIndex: 30,
   },
   // Full-width "Load more" beneath a list; taller tap target, centered content.
   loadMoreBtn: {
