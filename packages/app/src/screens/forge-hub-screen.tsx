@@ -1619,6 +1619,7 @@ function RepoRow({
   /** Muted per-row account label; null hides it (single-account case). */
   accountLabel?: string | null;
 }) {
+  const isCompact = useIsCompactFormFactor();
   const def = getForgeDefinitionOrNeutral(repo.forge);
   const handlePress = useCallback(() => onOpen(repo), [repo, onOpen]);
   const openCount = repo.openChangeRequests ?? 0;
@@ -1628,6 +1629,43 @@ function RepoRow({
     accountLabel && repo.description
       ? `${repo.description} · ${accountLabel}`
       : (accountLabel ?? repo.description ?? null);
+
+  // Compact: there are no columns to line up, so collapse the fixed-width cells
+  // into a stacked list row — provider + repo name on top, useful meta below.
+  if (isCompact) {
+    const metaParts = [
+      repo.defaultBranch ?? "—",
+      ...(repo.visibility && repo.visibility !== "unknown" ? [repo.visibility] : []),
+      `${openCount} ${def.changeRequestAbbrev}`,
+      formatRelativeMs(repo.updatedAt_ms),
+    ];
+    return (
+      <Pressable
+        style={styles.repoRowCompact}
+        onPress={handlePress}
+        testID={`forge-repo-${repo.forge}-${repo.owner}-${repo.name}`}
+      >
+        <View style={styles.colLogo}>
+          <ProviderBadge forge={repo.forge} small />
+        </View>
+        <View style={styles.colGrow}>
+          <Text style={styles.rowTitleMono} numberOfLines={1}>
+            {repo.owner}/{repo.name}
+          </Text>
+          {subtitle ? (
+            <Text style={styles.rowSub} numberOfLines={1}>
+              {subtitle}
+            </Text>
+          ) : null}
+          <Text style={styles.rowSubMeta} numberOfLines={1}>
+            {metaParts.join(" · ")}
+          </Text>
+        </View>
+        <CiGlyph status={repo.checksStatus} />
+      </Pressable>
+    );
+  }
+
   return (
     <Pressable
       style={styles.tableRow}
@@ -1731,6 +1769,7 @@ function RepositoriesView({
   connections: ForgeConnection[];
 }) {
   const { theme } = useUnistyles();
+  const isCompact = useIsCompactFormFactor();
   const [query, setQuery] = useState("");
   // Account filter: null = All, else a connectionId. Local to this view — the
   // account-selection the user asked for, in Repositories rather than Connections.
@@ -1855,14 +1894,16 @@ function RepositoriesView({
         <Text style={styles.emptyText}>{emptyLabel}</Text>
       ) : (
         <View style={styles.card}>
-          <View style={styles.tableHeadRow}>
-            <View style={styles.colLogo} />
-            <Text style={[styles.colGrow, styles.tableHeadText]}>Repository</Text>
-            <Text style={[styles.colDefault, styles.tableHeadText]}>Default</Text>
-            <Text style={[styles.colVisibility, styles.tableHeadText]}>Visibility</Text>
-            <Text style={[styles.colOpenCr, styles.tableHeadText]}>Open PR/MR · CI</Text>
-            <Text style={[styles.colUpdated, styles.tableHeadText]}>Updated</Text>
-          </View>
+          {!isCompact ? (
+            <View style={styles.tableHeadRow}>
+              <View style={styles.colLogo} />
+              <Text style={[styles.colGrow, styles.tableHeadText]}>Repository</Text>
+              <Text style={[styles.colDefault, styles.tableHeadText]}>Default</Text>
+              <Text style={[styles.colVisibility, styles.tableHeadText]}>Visibility</Text>
+              <Text style={[styles.colOpenCr, styles.tableHeadText]}>Open PR/MR · CI</Text>
+              <Text style={[styles.colUpdated, styles.tableHeadText]}>Updated</Text>
+            </View>
+          ) : null}
           {sorted.map((repo) => (
             <RepoRow
               key={`${repo.forge}:${repo.owner}/${repo.name}`}
@@ -2247,9 +2288,51 @@ function CommitRow({
   isFirst?: boolean;
 }) {
   const { theme } = useUnistyles();
+  const isCompact = useIsCompactFormFactor();
   const handlePress = useCallback(() => onOpen?.(commit), [commit, onOpen]);
   const author = commit.authorLogin ? `@${commit.authorLogin}` : (commit.authorName ?? "");
   const label = ciLabel(commit.checksStatus);
+
+  // Compact: stack the commit onto a single list row — leading dot + subject on
+  // top, a muted meta line (author · sha · CI · when) below. No fixed columns.
+  if (isCompact) {
+    const metaParts = [
+      ...(author ? [author] : []),
+      shortSha(commit.sha),
+      ...(label ? [label] : []),
+      formatRelativeMs(commit.committedAt_ms),
+    ];
+    return (
+      <Pressable
+        style={styles.repoRowCompact}
+        onPress={handlePress}
+        disabled={!onOpen}
+        testID={`forge-commit-${commit.sha}`}
+      >
+        <View style={styles.colDot}>
+          <View
+            style={[
+              styles.commitDot,
+              {
+                backgroundColor: isFirst
+                  ? theme.colors.accentBright
+                  : theme.colors.foregroundExtraMuted,
+              },
+            ]}
+          />
+        </View>
+        <View style={styles.colGrow}>
+          <Text style={styles.rowTitle} numberOfLines={2}>
+            {commit.subject}
+          </Text>
+          <Text style={styles.rowSubMeta} numberOfLines={1}>
+            {metaParts.join(" · ")}
+          </Text>
+        </View>
+      </Pressable>
+    );
+  }
+
   return (
     <Pressable
       style={styles.tableRow}
@@ -3494,6 +3577,7 @@ function BranchRow({
 // so the Code tab can be a file-tree browser (like GitHub's Code tab).
 function CommitsView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }) {
   const { theme } = useUnistyles();
+  const isCompact = useIsCompactFormFactor();
 
   const [branches, setBranches] = useState<ForgeBranch[]>([]);
   const [branchesLoading, setBranchesLoading] = useState(false);
@@ -3772,14 +3856,16 @@ function CommitsView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }
       ) : (
         <>
           <View style={styles.card}>
-            <View style={styles.tableHeadRow}>
-              <View style={styles.colDot} />
-              <Text style={[styles.colGrow, styles.tableHeadText]}>Commit</Text>
-              <Text style={[styles.colAuthor, styles.tableHeadText]}>Author</Text>
-              <Text style={[styles.colSha, styles.tableHeadText]}>SHA</Text>
-              <Text style={[styles.colCiCol, styles.tableHeadText]}>CI</Text>
-              <Text style={[styles.colWhen2, styles.tableHeadText]}>When</Text>
-            </View>
+            {!isCompact ? (
+              <View style={styles.tableHeadRow}>
+                <View style={styles.colDot} />
+                <Text style={[styles.colGrow, styles.tableHeadText]}>Commit</Text>
+                <Text style={[styles.colAuthor, styles.tableHeadText]}>Author</Text>
+                <Text style={[styles.colSha, styles.tableHeadText]}>SHA</Text>
+                <Text style={[styles.colCiCol, styles.tableHeadText]}>CI</Text>
+                <Text style={[styles.colWhen2, styles.tableHeadText]}>When</Text>
+              </View>
+            ) : null}
             {commits.map((commit, i) => (
               <CommitRow
                 key={commit.sha}
@@ -7235,6 +7321,9 @@ export function ForgeHubScreen() {
 
         {!isCompact || compactDetail ? (
           <View style={styles.main}>
+            {/* Compact detail: clear the status bar — the master-detail main pane
+                is a full-screen takeover with no parent safe-area padding. */}
+            {isCompact ? <View style={{ height: insets.top }} /> : null}
             <View style={styles.toolbar}>
               {isCompact ? (
                 <Pressable
@@ -7758,6 +7847,12 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.foregroundMuted,
     fontFamily: theme.fontFamily.mono,
   },
+  // Compact list rows fold the fixed columns into one muted meta line beneath the
+  // primary title (repo name / commit subject).
+  rowSubMeta: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundExtraMuted,
+  },
   crMetaRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -7810,6 +7905,17 @@ const styles = StyleSheet.create((theme) => ({
     gap: 12, // mockup exact value (.row gap)
     paddingHorizontal: 14, // mockup exact value (.row padding 14px)
     paddingVertical: 13, // mockup exact value (.row padding 13px)
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+  },
+  // Compact variant of tableRow: same separators/padding, but top-aligned so the
+  // stacked title + meta lines (and a taller 2-line commit subject) read cleanly.
+  repoRowCompact: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,
   },
