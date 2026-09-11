@@ -1,6 +1,6 @@
 {
   "name": "@jagentdesk/cli",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "description": "JAgentDesk CLI - control your AI coding agents from the command line",
   "bin": {
     "jagentdesk": "bin/jagentdesk"
