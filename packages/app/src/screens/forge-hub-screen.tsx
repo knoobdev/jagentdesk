@@ -4190,17 +4190,29 @@ function JobLogViewer({
   client,
   repo,
   job,
+  failedCount,
+  onRerunFailed,
 }: {
   client: DaemonClient;
   repo: ForgeRepo;
   job: ForgePipelineJob;
+  // Failed-job count for the footer's "N job(s) need attention" line, and the
+  // parent's rerun-failed handler wired to that footer's action. Rendered only
+  // when failedCount > 0 (matches mockup artboard 4).
+  failedCount: number;
+  onRerunFailed: () => void;
 }) {
   const { theme } = useUnistyles();
+  const statusColor = usePipelineStatusColor();
   const [log, setLog] = useState<string>("");
   const [truncated, setTruncated] = useState(false);
   const [running, setRunning] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Auto-scroll pins the view to the tail as the running job's log streams in;
+  // toggling off lets the reader scroll back without being yanked to the end.
+  const [autoScroll, setAutoScroll] = useState(true);
+  const scrollRef = useRef<ScrollView>(null);
 
   const jobId = job.id;
   const activeRef = useRef(true);
@@ -4249,13 +4261,50 @@ function JobLogViewer({
     };
   }, [fetchLog]);
 
+  // Keep the tail visible as new lines arrive, but only while auto-scroll is on.
+  useEffect(() => {
+    if (autoScroll) scrollRef.current?.scrollToEnd({ animated: false });
+  }, [log, autoScroll]);
+
+  const toggleAutoScroll = useCallback(() => setAutoScroll((v) => !v), []);
+  // No native "download to disk" on the log RPC; copy the raw text instead and
+  // label the action honestly (§ mockup shows "Download log").
+  const copyLog = useCallback(() => {
+    void Clipboard.setStringAsync(log);
+  }, [log]);
+
   return (
-    <View style={styles.logPane}>
-      <View style={styles.logHeader}>
-        <Text style={styles.rowTitle} numberOfLines={1}>
+    <View style={styles.logCard}>
+      <View style={styles.logHeaderBar}>
+        <Text style={[styles.ciGlyph, { color: statusColor(job.status) }]}>
+          {pipelineStatusGlyph(job.status)}
+        </Text>
+        <Text style={styles.logJobName} numberOfLines={1}>
           {job.name}
         </Text>
-        {running ? <Chip label="Running" color={theme.colors.palette.blue[500]} /> : null}
+        {running ? <Text style={styles.logStepMeta}>running</Text> : null}
+        <View style={styles.grow} />
+        <Pressable
+          style={[styles.plainChip, autoScroll && styles.plainChipActive]}
+          onPress={toggleAutoScroll}
+          accessibilityRole="button"
+          accessibilityLabel="Toggle auto-scroll"
+          testID="forge-log-autoscroll"
+        >
+          <Text style={[styles.plainChipText, autoScroll && styles.plainChipActiveText]}>
+            auto-scroll
+          </Text>
+        </Pressable>
+        <Pressable
+          style={[styles.btn, styles.btnGhost]}
+          onPress={copyLog}
+          accessibilityRole="button"
+          accessibilityLabel="Copy log"
+          testID="forge-log-copy"
+        >
+          <Copy size={13} color={theme.colors.foreground} />
+          <Text style={styles.btnGhostText}>Copy log</Text>
+        </Pressable>
       </View>
       {loading ? (
         <Text style={styles.emptyText}>Loading log…</Text>
@@ -4266,17 +4315,33 @@ function JobLogViewer({
         </View>
       ) : (
         <ScrollView
+          ref={scrollRef}
           style={styles.logSurface}
           contentContainerStyle={styles.logContent}
           nestedScrollEnabled
           showsVerticalScrollIndicator
         >
           {truncated ? (
-            <Text style={styles.logTruncated}>Log truncated — download the full log</Text>
+            <Text style={styles.logTruncated}>Log truncated — copy the full log</Text>
           ) : null}
           <Text style={styles.logText}>{log || "(no output)"}</Text>
         </ScrollView>
       )}
+      {failedCount > 0 ? (
+        <View style={styles.logFooterBar}>
+          <Chip label="failed" color={theme.colors.statusDanger} />
+          <Pressable
+            onPress={onRerunFailed}
+            accessibilityRole="button"
+            testID="forge-log-rerun-failed"
+          >
+            <Text style={styles.logFooterText}>
+              {failedCount} job{failedCount === 1 ? "" : "s"} need attention —{" "}
+              <Text style={styles.logFooterAction}>Rerun failed jobs</Text>
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -4373,9 +4438,33 @@ function PipelineRunDetail({
     [client, repo, loadPipeline],
   );
 
+  // Second toolbar line "on {ref} · {shortSha} · pushed by {actor}" — only the
+  // fields the run actually carries (ForgePipelineRun leaves ref/sha/actor
+  // optional per provider). Empty when none are known.
+  const refLine = useMemo(() => {
+    const bits: string[] = [];
+    if (run.ref) bits.push(`on ${run.ref}`);
+    if (run.sha) bits.push(shortSha(run.sha));
+    if (run.actor) bits.push(`pushed by ${run.actor}`);
+    return bits.join(" · ");
+  }, [run.ref, run.sha, run.actor]);
+
+  // Count of failed jobs across every stage — drives the log footer's
+  // "N job(s) need attention" line and its Rerun-failed action.
+  const failedCount = useMemo(
+    () =>
+      pipeline
+        ? pipeline.stages.reduce(
+            (n, s) => n + s.jobs.filter((j) => j.status === "failed").length,
+            0,
+          )
+        : 0,
+    [pipeline],
+  );
+
   return (
     <View style={styles.pane}>
-      <View style={styles.detailHeader}>
+      <View style={styles.runToolbar}>
         <Pressable
           style={styles.iconBtn}
           onPress={onBack}
@@ -4385,18 +4474,23 @@ function PipelineRunDetail({
         >
           <ArrowLeft size={18} color={theme.colors.foregroundMuted} />
         </Pressable>
-        <View style={styles.rowInfo}>
-          <Text style={styles.rowTitle} numberOfLines={1}>
-            {run.name}
-          </Text>
-          <Text style={styles.rowSubMono} numberOfLines={1}>
-            {run.ref ?? ""} {run.sha ? `· ${shortSha(run.sha)}` : ""}
-          </Text>
+        <ProviderBadge forge={repo.forge} small />
+        <View style={styles.grow}>
+          <View style={styles.runTitleRow}>
+            <Text style={styles.runNameText} numberOfLines={1}>
+              {run.name}
+            </Text>
+            <Text style={styles.runMetaMono} numberOfLines={1}>
+              workflow · run #{run.id}
+            </Text>
+          </View>
+          {refLine ? (
+            <Text style={styles.runRefLine} numberOfLines={1}>
+              {refLine}
+            </Text>
+          ) : null}
         </View>
         <Chip label={pipelineStatusLabel(run.status)} color={statusColor(run.status)} />
-      </View>
-
-      <View style={styles.toolbarRow}>
         <Pressable
           style={[styles.btn, styles.btnGhost]}
           onPress={rerunAll}
@@ -4421,8 +4515,8 @@ function PipelineRunDetail({
           <Ban size={13} color={theme.colors.statusDanger} />
           <Text style={styles.btnDangerText}>Cancel</Text>
         </Pressable>
-        {actionNote ? <Text style={styles.metaMuted}>{actionNote}</Text> : null}
       </View>
+      {actionNote ? <Text style={styles.metaMuted}>{actionNote}</Text> : null}
 
       {loading ? (
         <Text style={styles.emptyText}>Loading pipeline…</Text>
@@ -4436,10 +4530,16 @@ function PipelineRunDetail({
         </View>
       ) : pipeline ? (
         <View style={styles.runSplit}>
-          <View style={styles.jobTree}>
-            {pipeline.stages.map((stage) => (
-              <View key={stage.name}>
-                <Text style={styles.stageHeader}>{stage.name}</Text>
+          <ScrollView
+            style={styles.jobTree}
+            contentContainerStyle={styles.jobTreeContent}
+            nestedScrollEnabled
+          >
+            {pipeline.stages.map((stage, i) => (
+              <View key={`${stage.name}:${i}`}>
+                {/* Providers without explicit stage grouping report a single,
+                    possibly unnamed stage — fall back to a "Jobs" header. */}
+                <Text style={styles.stageHeader}>{stage.name.trim() || "Jobs"}</Text>
                 {stage.jobs.map((job) => (
                   <JobTreeRow
                     key={job.id}
@@ -4451,18 +4551,27 @@ function PipelineRunDetail({
                 ))}
               </View>
             ))}
-          </View>
+            {releasesEnabled ? (
+              <View style={styles.artifactsSection}>
+                <ArtifactsPanel client={client} repo={repo} runId={run.id} />
+              </View>
+            ) : null}
+          </ScrollView>
           <View style={styles.logColumn}>
             {selectedJob ? (
-              <JobLogViewer client={client} repo={repo} job={selectedJob} />
+              <JobLogViewer
+                client={client}
+                repo={repo}
+                job={selectedJob}
+                failedCount={failedCount}
+                onRerunFailed={rerunFailed}
+              />
             ) : (
               <Text style={styles.emptyText}>Select a job to view its log.</Text>
             )}
           </View>
         </View>
       ) : null}
-
-      {releasesEnabled ? <ArtifactsPanel client={client} repo={repo} runId={run.id} /> : null}
     </View>
   );
 }
@@ -4537,43 +4646,38 @@ function ArtifactsPanel({
     [client, repo],
   );
 
+  // Compact section pinned to the bottom of the run-detail left column (mockup
+  // artboard 4): an uppercase "Artifacts" label over borderless filename rows.
   return (
-    <View style={styles.pane}>
-      <View style={styles.toolbarRow}>
+    <View style={styles.artifactsBody}>
+      <View style={styles.artifactsLabelRow}>
         <Text style={styles.sectionTitle}>Artifacts</Text>
         <View style={styles.grow} />
         <Pressable
-          style={[styles.btn, styles.btnGhost]}
+          style={styles.iconBtn}
           onPress={reload}
+          accessibilityRole="button"
+          accessibilityLabel="Refresh artifacts"
           testID="forge-artifacts-refresh"
         >
-          <RotateCcw size={13} color={theme.colors.foreground} />
-          <Text style={styles.btnGhostText}>Refresh</Text>
+          <RotateCcw size={12} color={theme.colors.foregroundMuted} />
         </Pressable>
       </View>
       {error ? (
-        <View style={styles.errorBanner}>
-          <CircleAlert size={16} color={theme.colors.statusDanger} />
-          <Text style={styles.errorText}>{error}</Text>
-          <Pressable style={[styles.btn, styles.btnGhost]} onPress={reload}>
-            <Text style={styles.btnGhostText}>Retry</Text>
-          </Pressable>
-        </View>
+        <Text style={styles.mergeReason}>{error}</Text>
       ) : artifacts === null ? (
-        <SkeletonRows rows={3} />
+        <SkeletonRows rows={2} variant="compact" />
       ) : artifacts.length === 0 ? (
-        <Text style={styles.emptyText}>No artifacts for this run.</Text>
+        <Text style={styles.emptyText}>No artifacts.</Text>
       ) : (
-        <View style={styles.card}>
-          {artifacts.map((artifact) => (
-            <ArtifactRow
-              key={artifact.id}
-              artifact={artifact}
-              busy={downloadingId === artifact.id}
-              onDownload={download}
-            />
-          ))}
-        </View>
+        artifacts.map((artifact) => (
+          <ArtifactRow
+            key={artifact.id}
+            artifact={artifact}
+            busy={downloadingId === artifact.id}
+            onDownload={download}
+          />
+        ))
       )}
       {note ? <Text style={styles.mergeReason}>{note}</Text> : null}
     </View>
@@ -4591,25 +4695,19 @@ function ArtifactRow({
 }) {
   const { theme } = useUnistyles();
   const handlePress = useCallback(() => onDownload(artifact), [artifact, onDownload]);
-  const size = formatBytes(artifact.sizeBytes);
-  const expiry = artifact.expiresAt_ms ? `expires ${formatRelativeMs(artifact.expiresAt_ms)}` : "";
   return (
     <Pressable
-      style={[styles.row, busy && styles.btnDisabled]}
+      style={[styles.artifactRow, busy && styles.btnDisabled]}
       onPress={handlePress}
       disabled={busy}
       testID={`forge-artifact-${artifact.id}`}
     >
-      <View style={styles.rowInfo}>
-        <Text style={styles.rowTitle} numberOfLines={1}>
-          {artifact.name}
-        </Text>
-        <View style={styles.crMetaRow}>
-          {size ? <Text style={styles.metaMono}>{size}</Text> : null}
-          {expiry ? <Text style={styles.metaMuted}>{expiry}</Text> : null}
-        </View>
-      </View>
-      <Download size={15} color={theme.colors.foregroundMuted} />
+      <File size={13} color={theme.colors.foregroundMuted} />
+      <Text style={styles.artifactNameMono} numberOfLines={1}>
+        {artifact.name}
+      </Text>
+      <View style={styles.grow} />
+      <Download size={13} color={theme.colors.foregroundMuted} />
     </Pressable>
   );
 }
@@ -4636,23 +4734,29 @@ function JobTreeRow({
       onPress={handlePress}
       testID={`forge-job-${job.id}`}
     >
-      <StatusDot color={statusColor(job.status)} />
+      <Text style={[styles.ciGlyph, { color: statusColor(job.status) }]}>
+        {pipelineStatusGlyph(job.status)}
+      </Text>
       <Text style={styles.jobName} numberOfLines={1}>
         {job.name}
       </Text>
       <View style={styles.grow} />
       {canPlay ? (
-        <Pressable
-          style={styles.iconBtn}
-          onPress={handlePlay}
-          accessibilityRole="button"
-          accessibilityLabel="Run job"
-          testID={`forge-job-play-${job.id}`}
-        >
-          <Play size={12} color={theme.colors.foregroundMuted} />
-        </Pressable>
-      ) : null}
-      {job.durationSeconds ? (
+        <>
+          <Pressable
+            style={styles.iconBtn}
+            onPress={handlePlay}
+            accessibilityRole="button"
+            accessibilityLabel="Run job"
+            testID={`forge-job-play-${job.id}`}
+          >
+            <Play size={12} color={theme.colors.foregroundMuted} />
+          </Pressable>
+          <View style={styles.plainChip}>
+            <Text style={styles.plainChipText}>manual</Text>
+          </View>
+        </>
+      ) : job.durationSeconds ? (
         <Text style={styles.metaMono}>{formatDuration(job.durationSeconds)}</Text>
       ) : null}
     </Pressable>
@@ -7354,6 +7458,14 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.xs,
     color: theme.colors.foregroundMuted,
   },
+  // "auto-scroll" toggle pill in its on state (log header, mockup artboard 4).
+  plainChipActive: {
+    borderColor: theme.colors.accent,
+    backgroundColor: theme.colors.surface2,
+  },
+  plainChipActiveText: {
+    color: theme.colors.accentBright,
+  },
   badge: {
     width: 26,
     height: 26,
@@ -7798,6 +7910,35 @@ const styles = StyleSheet.create((theme) => ({
     gap: theme.spacing[2],
     flexWrap: "wrap",
   },
+  // Run-detail toolbar (mockup artboard 4): back + provider badge + title block
+  // (grows) + status pill + rerun/cancel actions on one wrapping row.
+  runToolbar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    flexWrap: "wrap",
+  },
+  runTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    flexWrap: "wrap",
+  },
+  runNameText: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.bold,
+    color: theme.colors.foreground,
+  },
+  runMetaMono: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+    fontFamily: theme.fontFamily.mono,
+  },
+  runRefLine: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+    marginTop: 1,
+  },
   // two-column PR body: tabbed left column + fixed-width mergebox rail (mockup
   // artboard 1). Stacks to a single column on a compact form factor.
   detailBody: {
@@ -8095,14 +8236,50 @@ const styles = StyleSheet.create((theme) => ({
     gap: theme.spacing[3],
     minHeight: 0,
   },
+  // Left column of the run detail: a scrolling stage/job list with a right
+  // border (mockup artboard 4). Capped so long pipelines scroll in place while
+  // the artifacts section stays pinned at the bottom of the same scroll.
   jobTree: {
-    width: 260,
+    width: 300,
     flexShrink: 0,
-    borderRadius: theme.borderRadius.lg,
-    borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface1,
-    padding: theme.spacing[2],
+    maxHeight: 540,
+    borderRightWidth: theme.borderWidth[1],
+    borderRightColor: theme.colors.border,
+  },
+  jobTreeContent: {
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
+  },
+  // Artifacts pinned to the bottom of the left column.
+  artifactsSection: {
+    marginTop: theme.spacing[3],
+    paddingTop: theme.spacing[3],
+    paddingHorizontal: theme.spacing[2],
+    borderTopWidth: theme.borderWidth[1],
+    borderTopColor: theme.colors.border,
+  },
+  artifactsBody: {
+    gap: theme.spacing[1],
+  },
+  artifactsLabelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: theme.spacing[1],
+  },
+  artifactRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
+    paddingHorizontal: theme.spacing[1],
+    borderRadius: theme.borderRadius.sm,
+  },
+  artifactNameMono: {
+    flexShrink: 1,
+    minWidth: 0,
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foreground,
+    fontFamily: theme.fontFamily.mono,
   },
   stageHeader: {
     fontSize: theme.fontSize.xs,
@@ -8135,21 +8312,60 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
     minWidth: 0,
   },
-  logPane: {
-    gap: theme.spacing[2],
-  },
-  logHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing[2],
-  },
-  // Pipeline job-log surface: a terminal-like panel. Logs are long streams, so
-  // this stays scroll-capped (unlike the file viewer, which grows inline).
-  logSurface: {
-    maxHeight: 480,
+  // Main log panel: header (job + actions) over the terminal surface, with an
+  // optional failed-jobs footer — one bordered card (mockup artboard 4).
+  logCard: {
+    flex: 1,
+    minWidth: 0,
     borderRadius: theme.borderRadius.lg,
     borderWidth: theme.borderWidth[1],
     borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+    overflow: "hidden",
+  },
+  logHeaderBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+  },
+  logJobName: {
+    flexShrink: 1,
+    minWidth: 0,
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.foreground,
+  },
+  logStepMeta: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+  },
+  logFooterBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    borderTopWidth: theme.borderWidth[1],
+    borderTopColor: theme.colors.border,
+  },
+  logFooterText: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+  },
+  logFooterAction: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.accentBright,
+    fontWeight: theme.fontWeight.medium,
+  },
+  // Pipeline job-log surface: a terminal-like panel inside logCard, so no border
+  // of its own. Logs are long streams, so this stays scroll-capped (unlike the
+  // file viewer, which grows inline).
+  logSurface: {
+    maxHeight: 480,
     backgroundColor: theme.colors.surfaceSidebar,
   },
   // Read-only file viewer (§19). Box chrome + font for HighlightedCodeBlock,
