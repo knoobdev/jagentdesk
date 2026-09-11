@@ -6968,6 +6968,14 @@ export function ForgeHubScreen() {
 
   return (
     <View style={styles.container}>
+      {isCompact ? null : (
+        // Transparent, full-width DRAG strip. Hiding the app rail on Forge also
+        // removed the window-chrome drag region, so the window could not be
+        // moved. This restores it (WebkitAppRegion:"drag" on web/Electron) while
+        // staying invisible; the traffic lights + toggle overlay sit on top with
+        // their own no-drag. It also gives the shell below top clearance.
+        <View style={[styles.dragStrip, isWeb ? ({ WebkitAppRegion: "drag" } as object) : null]} />
+      )}
       <View style={[styles.shell, isCompact && styles.shellStacked]}>
         {isCompact ? null : (
           <View style={styles.railCol}>
@@ -7033,9 +7041,7 @@ export function ForgeHubScreen() {
           <View
             style={[
               styles.sidebarField,
-              // Clear the traffic lights + window toggle at top (desktop); keep
-              // the safe-area inset on compact.
-              isCompact ? { marginTop: insets.top + 12 } : { marginTop: 38 },
+              isCompact ? { marginTop: insets.top + 12 } : { marginTop: theme.spacing[3] },
             ]}
           >
             <Search size={14} color={theme.colors.foregroundMuted} />
@@ -7090,6 +7096,13 @@ const styles = StyleSheet.create((theme) => ({
     minHeight: 0,
     backgroundColor: theme.colors.surface0,
   },
+  // Transparent draggable strip at the top of the Forge window (desktop). Height
+  // fits the macOS traffic lights; no background so it reads as empty window
+  // chrome, not a titlebar. WebkitAppRegion:"drag" is applied inline (web only).
+  dragStrip: {
+    height: 38,
+    flexShrink: 0,
+  },
   scroll: {
     flex: 1,
     minHeight: 0,
@@ -7116,11 +7129,9 @@ const styles = StyleSheet.create((theme) => ({
     flexShrink: 0,
     flexDirection: "column",
     alignItems: "center",
-    // Top padding clears the macOS traffic lights + the app window-sidebar
-    // toggle overlay (top-left). The empty strip above stays draggable so the
-    // window can still be moved.
-    paddingTop: 38,
-    paddingBottom: theme.spacing[3],
+    // The drag strip above the shell provides top clearance for the window
+    // controls, so the rail uses normal vertical padding.
+    paddingVertical: theme.spacing[3],
     gap: theme.spacing[1.5],
     backgroundColor: theme.colors.surfaceSidebar,
     borderRightWidth: theme.borderWidth[1],
