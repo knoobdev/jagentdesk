@@ -539,20 +539,18 @@ function connectionStatus(
   }
 }
 
+// One row of the connected-accounts table (mockup artboard 2). Columns line up
+// with the header in ConnectionsView: Account (grow) · Auth · Status · actions.
+// No per-account checkbox — account selection lives in Repositories now.
 function ConnectionRow({
   connection,
   onRemove,
-  active,
-  showCheckbox,
-  onToggleActive,
+  onReauth,
 }: {
   connection: ForgeConnection;
   onRemove: (id: string) => void | Promise<void>;
-  /** Whether this connection is in the active browsing set. */
-  active: boolean;
-  /** Hidden when only one connection exists (it's always the one browsed). */
-  showCheckbox: boolean;
-  onToggleActive: (id: string) => void;
+  /** Opens the add/sign-in form; shown as "Re-auth" when the token has failed. */
+  onReauth?: () => void;
 }) {
   const { theme } = useUnistyles();
   const def = getForgeDefinitionOrNeutral(connection.forge);
@@ -575,51 +573,66 @@ function ConnectionRow({
       if (mountedRef.current) setRemoving(false);
     }
   }, [connection.id, onRemove, removing]);
-  const methodLabel = connection.method === "cli" ? `via ${def.signIn?.cli ?? "CLI"}` : "API token";
-  const handleToggleActive = useCallback(
-    () => onToggleActive(connection.id),
-    [connection.id, onToggleActive],
-  );
+  const cli = def.signIn?.cli ?? "CLI";
+  const isBitbucket = connection.forge === "bitbucket";
+  // Auth column label per mockup: OAuth (gh) / OAuth (glab) / API token / PAT.
+  const authLabel =
+    connection.method === "cli" ? `OAuth (${cli})` : isBitbucket ? "API token" : "PAT";
+  // Line-2 transport hint: "via gh" for CLI, "REST + token" for token forges.
+  const subLabel =
+    connection.method === "cli" ? `via ${cli}` : isBitbucket ? "REST + token" : "token";
+  // Only offer Re-auth when the credential has actually failed/expired.
+  const showReauth = connection.authState === "error" && !!onReauth;
   return (
-    <View style={styles.row}>
-      {showCheckbox ? (
-        <Pressable
-          onPress={handleToggleActive}
-          accessibilityRole="checkbox"
-          accessibilityState={{ checked: active }}
-          accessibilityLabel="Use this account for browsing"
-          testID={`forge-connection-active-${connection.id}`}
-        >
-          <View style={[styles.checkbox, active && styles.checkboxChecked]}>
-            {active ? <Check size={11} color={theme.colors.accentForeground} /> : null}
-          </View>
-        </Pressable>
-      ) : null}
-      <ProviderBadge forge={connection.forge} />
-      <View style={styles.rowInfo}>
-        <Text style={styles.rowTitle} numberOfLines={1}>
-          {def.displayName}
-          {connection.account ? ` · ${connection.account}` : ""}
-        </Text>
-        <Text style={styles.rowSubMono} numberOfLines={1}>
-          {connection.host} · {methodLabel}
-        </Text>
+    <View style={styles.connRow}>
+      <View style={styles.connColAccount}>
+        <ProviderBadge forge={connection.forge} />
+        <View style={styles.rowInfo}>
+          <Text style={styles.rowTitle} numberOfLines={1}>
+            {def.displayName}
+            {connection.account ? " · " : ""}
+            {connection.account ? (
+              <Text style={styles.connAccountName}>{connection.account}</Text>
+            ) : null}
+          </Text>
+          <Text style={styles.rowSubMono} numberOfLines={1}>
+            {connection.host} · {subLabel}
+          </Text>
+        </View>
       </View>
-      <Chip label={status.label} color={status.color} />
-      <Pressable
-        style={styles.iconBtn}
-        onPress={handleRemove}
-        disabled={removing}
-        accessibilityRole="button"
-        accessibilityLabel="Remove connection"
-        testID={`forge-connection-remove-${connection.id}`}
-      >
-        {removing ? (
-          <ActivityIndicator size="small" color={theme.colors.foregroundMuted} />
-        ) : (
-          <Trash2 size={15} color={theme.colors.foregroundMuted} />
-        )}
-      </Pressable>
+      <Text style={[styles.connColAuth, styles.connAuthText]} numberOfLines={1}>
+        {authLabel}
+      </Text>
+      <View style={styles.connColStatus}>
+        <Chip label={status.label} color={status.color} />
+      </View>
+      <View style={styles.connColActions}>
+        {showReauth ? (
+          <Pressable
+            style={[styles.btn, styles.btnGhost, styles.connReauthBtn]}
+            onPress={onReauth}
+            accessibilityRole="button"
+            accessibilityLabel="Re-authenticate connection"
+            testID={`forge-connection-reauth-${connection.id}`}
+          >
+            <Text style={styles.btnGhostText}>Re-auth</Text>
+          </Pressable>
+        ) : null}
+        <Pressable
+          style={styles.iconBtn}
+          onPress={handleRemove}
+          disabled={removing}
+          accessibilityRole="button"
+          accessibilityLabel="Remove connection"
+          testID={`forge-connection-remove-${connection.id}`}
+        >
+          {removing ? (
+            <ActivityIndicator size="small" color={theme.colors.foregroundMuted} />
+          ) : (
+            <Trash2 size={15} color={theme.colors.foregroundMuted} />
+          )}
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -1144,8 +1157,6 @@ function ConnectionsView({
   cliInstallEnabled,
   loginEnabled,
   onLoggedIn,
-  activeConnectionIds,
-  onToggleActive,
 }: {
   connections: ForgeConnection[];
   onRemove: (id: string) => void | Promise<void>;
@@ -1156,9 +1167,6 @@ function ConnectionsView({
   cliInstallEnabled: boolean;
   loginEnabled: boolean;
   onLoggedIn: () => void | Promise<void>;
-  /** Connection ids used for browsing; null = all connections are active. */
-  activeConnectionIds: Set<string> | null;
-  onToggleActive: (id: string) => void;
 }) {
   const { theme } = useUnistyles();
   const [choice, setChoice] = useState<ProviderChoice>("github");
@@ -1179,6 +1187,12 @@ function ConnectionsView({
       onToggleAdd();
     }
   }, [formBusy, onToggleAdd]);
+
+  // A failed connection's "Re-auth" affordance just opens the add/sign-in form
+  // (no bespoke re-auth flow — the same sign-in path re-establishes the token).
+  const handleReauth = useCallback(() => {
+    if (!adding) onToggleAdd();
+  }, [adding, onToggleAdd]);
 
   const option = useMemo(
     () => PROVIDER_OPTIONS.find((o) => o.choice === choice) ?? PROVIDER_OPTIONS[0],
@@ -1234,14 +1248,18 @@ function ConnectionsView({
         <Text style={styles.emptyText}>{CONNECTION_EMPTY_STATE}</Text>
       ) : (
         <View style={styles.card}>
+          <View style={styles.connHeadRow}>
+            <Text style={[styles.connColGrow, styles.connHeadText]}>Account</Text>
+            <Text style={[styles.connColAuth, styles.connHeadText]}>Auth</Text>
+            <Text style={[styles.connColStatus, styles.connHeadText]}>Status</Text>
+            <View style={styles.connColActions} />
+          </View>
           {connections.map((connection) => (
             <ConnectionRow
               key={connection.id}
               connection={connection}
               onRemove={onRemove}
-              active={activeConnectionIds === null || activeConnectionIds.has(connection.id)}
-              showCheckbox={connections.length > 1}
-              onToggleActive={onToggleActive}
+              onReauth={handleReauth}
             />
           ))}
         </View>
@@ -1477,6 +1495,39 @@ function RepoRow({
   );
 }
 
+// One chip in the Repositories account filter. `id === null` is the "All" chip;
+// otherwise it scopes the list to a single connectionId. Selection is local to
+// RepositoriesView (this is where account selection lives now, not Connections).
+function AccountFilterChip({
+  id,
+  label,
+  active,
+  onSelect,
+}: {
+  id: string | null;
+  label: string;
+  active: boolean;
+  onSelect: (id: string | null) => void;
+}) {
+  const handlePress = useCallback(() => onSelect(id), [id, onSelect]);
+  return (
+    <Pressable
+      style={[styles.providerChip, active && styles.providerChipActive]}
+      onPress={handlePress}
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
+      testID={`forge-repos-account-${id ?? "all"}`}
+    >
+      <Text
+        style={[styles.providerChipText, active && styles.providerChipTextActive]}
+        numberOfLines={1}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
 function RepositoriesView({
   repos,
   loading,
@@ -1487,7 +1538,6 @@ function RepositoriesView({
   onOpen,
   onRetry,
   connections,
-  activeConnectionIds,
 }: {
   repos: ForgeRepo[];
   loading: boolean;
@@ -1498,11 +1548,12 @@ function RepositoriesView({
   onOpen: (repo: ForgeRepo) => void;
   onRetry: () => void;
   connections: ForgeConnection[];
-  /** Connection ids to browse; null = all. Controlled from the Connections tab. */
-  activeConnectionIds: Set<string> | null;
 }) {
   const { theme } = useUnistyles();
   const [query, setQuery] = useState("");
+  // Account filter: null = All, else a connectionId. Local to this view — the
+  // account-selection the user asked for, in Repositories rather than Connections.
+  const [accountFilter, setAccountFilter] = useState<string | null>(null);
 
   // connectionId → host, for a fallback account label when the repo carries none.
   const hostById = useMemo(() => {
@@ -1514,33 +1565,22 @@ function RepositoriesView({
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return repos.filter((repo) => {
-      if (
-        activeConnectionIds !== null &&
-        !(repo.connectionId != null && activeConnectionIds.has(repo.connectionId))
-      ) {
-        return false;
-      }
+      if (accountFilter !== null && repo.connectionId !== accountFilter) return false;
       if (!q) return true;
       return `${repo.owner}/${repo.name}`.toLowerCase().includes(q);
     });
-  }, [repos, query, activeConnectionIds]);
+  }, [repos, query, accountFilter]);
 
   // "Load more" is about the fetch, so gate it on the UNFILTERED fetched length:
   // the last page returned at least `limit` rows ⇒ there may be more to fetch.
   const canLoadMore = !loading && repos.length >= limit;
 
-  const totalAccounts = connections.length;
-  // Count only live connections in the set (a removed connection may linger there).
-  const activeCount =
-    activeConnectionIds === null
-      ? totalAccounts
-      : connections.filter((c) => activeConnectionIds.has(c.id)).length;
+  const multiAccount = connections.length > 1;
 
   // Empty state distinguishes an account filter yielding nothing from a search miss.
-  const noneForSelection = activeConnectionIds !== null && activeCount === 0;
   const emptyLabel =
-    noneForSelection || (activeConnectionIds !== null && !query.trim())
-      ? "No repositories for the selected account(s)."
+    accountFilter !== null && !query.trim()
+      ? "No repositories for the selected account."
       : "No repositories match the current filters.";
 
   return (
@@ -1561,10 +1601,28 @@ function RepositoriesView({
         </View>
       </View>
 
-      {totalAccounts > 1 ? (
-        <Text style={styles.rowSub} testID="forge-repos-account-summary">
-          Browsing {activeCount} of {totalAccounts} accounts · choose accounts in Connections
-        </Text>
+      {multiAccount ? (
+        <View style={styles.chipRow} testID="forge-repos-account-filter">
+          <AccountFilterChip
+            id={null}
+            label="All"
+            active={accountFilter === null}
+            onSelect={setAccountFilter}
+          />
+          {connections.map((c) => {
+            const cdef = getForgeDefinitionOrNeutral(c.forge);
+            const label = c.account ? `${cdef.displayName} · ${c.account}` : c.host;
+            return (
+              <AccountFilterChip
+                key={c.id}
+                id={c.id}
+                label={label}
+                active={accountFilter === c.id}
+                onSelect={setAccountFilter}
+              />
+            );
+          })}
+        </View>
       ) : null}
 
       {error ? (
@@ -1589,7 +1647,7 @@ function RepositoriesView({
               repo={repo}
               onOpen={onOpen}
               accountLabel={
-                totalAccounts > 1
+                multiAccount
                   ? (repo.account ??
                     (repo.connectionId ? hostById.get(repo.connectionId) : undefined) ??
                     null)
@@ -5544,9 +5602,6 @@ export function ForgeHubScreen() {
   const [connections, setConnections] = useState<ForgeConnection[]>([]);
   const [connectionsError, setConnectionsError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
-  // Which connections the Repositories tab browses. null = all active (default);
-  // an explicit Set restricts to those ids. Controlled from the Connections tab.
-  const [activeConnectionIds, setActiveConnectionIds] = useState<Set<string> | null>(null);
 
   const [repos, setRepos] = useState<ForgeRepo[]>([]);
   const [reposLoaded, setReposLoaded] = useState(false);
@@ -5791,24 +5846,6 @@ export function ForgeHubScreen() {
     [client, refreshConnections],
   );
 
-  const handleToggleActiveConnection = useCallback(
-    (id: string) => {
-      setActiveConnectionIds((prev) => {
-        const allIds = connections.map((c) => c.id);
-        // From "all active" (null), the first toggle-off becomes an explicit
-        // set of all-except-this so the other accounts stay selected.
-        if (prev === null) return new Set(allIds.filter((cid) => cid !== id));
-        const next = new Set(prev);
-        if (next.has(id)) next.delete(id);
-        else next.add(id);
-        // Everything selected again → collapse back to null ("all active").
-        if (allIds.length > 0 && allIds.every((cid) => next.has(cid))) return null;
-        return next;
-      });
-    },
-    [connections],
-  );
-
   const toggleAdding = useCallback(() => setAdding((v) => !v), []);
   const handleBackToList = useCallback(() => setSelectedCr(null), []);
   const handleRetryRepos = useCallback(() => void loadRepos(), [loadRepos]);
@@ -5870,15 +5907,9 @@ export function ForgeHubScreen() {
     [theme],
   );
 
-  const inActiveSet = useCallback(
-    (repo: ForgeRepo): boolean =>
-      activeConnectionIds === null ||
-      (repo.connectionId != null && activeConnectionIds.has(repo.connectionId)),
-    [activeConnectionIds],
-  );
-
-  // Repos visible for the active account filter (powers the no-repo sidebar list).
-  const visibleRepos = useMemo(() => repos.filter(inActiveSet), [repos, inActiveSet]);
+  // The sidebar quick list shows every fetched repo across all accounts; account
+  // scoping now lives as a filter inside the full RepositoriesView, not here.
+  const visibleRepos = repos;
 
   // Jump-to-repo results (only while the field has a query).
   const jumpMatches = useMemo(() => {
@@ -6124,8 +6155,6 @@ export function ForgeHubScreen() {
           cliInstallEnabled={cliInstallEnabled}
           loginEnabled={loginEnabled}
           onLoggedIn={refreshConnections}
-          activeConnectionIds={activeConnectionIds}
-          onToggleActive={handleToggleActiveConnection}
         />
       );
     }
@@ -6150,7 +6179,6 @@ export function ForgeHubScreen() {
           onOpen={handleOpenRepo}
           onRetry={handleRetryRepos}
           connections={connections}
-          activeConnectionIds={activeConnectionIds}
         />
       );
     }
@@ -6627,6 +6655,72 @@ const styles = StyleSheet.create((theme) => ({
     paddingVertical: theme.spacing[3],
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,
+  },
+  // ===== connected-accounts table (mockup artboard 2) =====
+  connHeadRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[3],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+    backgroundColor: theme.colors.surface0,
+  },
+  connHeadText: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.foregroundMuted,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  connRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[3],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    minHeight: 48,
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+  },
+  connColGrow: {
+    flex: 1,
+    minWidth: 0,
+  },
+  connColAccount: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[3],
+  },
+  connColAuth: {
+    width: 150,
+  },
+  connColStatus: {
+    width: 120,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  connColActions: {
+    width: 90,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: theme.spacing[1],
+  },
+  connAccountName: {
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.foreground,
+  },
+  connAuthText: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+  },
+  connReauthBtn: {
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
   },
   rowInfo: {
     flex: 1,
