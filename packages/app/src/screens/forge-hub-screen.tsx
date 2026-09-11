@@ -281,6 +281,25 @@ const PROVIDER_OPTIONS: ProviderOption[] = [
   },
 ];
 
+// macOS traffic-light window controls overlay the top-left corner. On desktop
+// the wide app rail is hidden on the Forge screen, so the icon rail and the
+// "Forge Hub" sidebar header now start at y=0 directly beneath those buttons.
+// Add top clearance so the first rail icon and the header clear them (§19 /
+// mockup artboard 2 titlebar).
+const WINDOW_CONTROLS_TOP = 30;
+
+// Exact brand colors for the provider logo squares, lifted from the Forge Hub
+// Connections mockup (docs/design/connectors/forge-hub-mockup.html — CSS
+// `.logo.gh/.gl/.bb`). These specific hexes are allowed as literals here
+// because they are the mockup's exact brand colors, not theme tokens. The
+// self-hosted / unknown case falls back to the accentBright theme color
+// (mockup `.logo.self{color:var(--accentBright)}`).
+const FORGE_LOGO_COLOR: Record<string, string> = {
+  github: "#e6edf3",
+  gitlab: "#fc6d26",
+  bitbucket: "#2684ff",
+};
+
 function forgeBadge(forge: string): string {
   switch (forge) {
     case "github":
@@ -429,9 +448,14 @@ function Chip({ label, color }: { label: string; color: string }) {
 }
 
 function ProviderBadge({ forge, small = false }: { forge: string; small?: boolean }) {
+  const { theme } = useUnistyles();
+  // Colored brand text on the neutral surface2 square (mockup `.logo.gh/.gl/.bb`).
+  const color = FORGE_LOGO_COLOR[forge] ?? theme.colors.accentBright;
   return (
     <View style={small ? styles.badgeSm : styles.badge}>
-      <Text style={small ? styles.badgeSmText : styles.badgeText}>{forgeBadge(forge)}</Text>
+      <Text style={[small ? styles.badgeSmText : styles.badgeText, { color }]}>
+        {forgeBadge(forge)}
+      </Text>
     </View>
   );
 }
@@ -652,6 +676,20 @@ function ConnectionRow({
       <Text style={[styles.connColAuth, styles.connAuthText]} numberOfLines={1}>
         {authLabel}
       </Text>
+      <View style={styles.connColScopes}>
+        {connection.scopes && connection.scopes.length > 0 ? (
+          <View style={styles.connScopesWrap}>
+            {connection.scopes.map((scope) => (
+              <View key={scope} style={styles.plainChip}>
+                <Text style={styles.plainChipText}>{scope}</Text>
+              </View>
+            ))}
+          </View>
+        ) : (
+          // Honest placeholder: most connections don't expose scopes yet.
+          <Text style={styles.connScopesEmpty}>—</Text>
+        )}
+      </View>
       <View style={styles.connColStatus}>
         <Chip label={status.label} color={status.color} />
       </View>
@@ -1293,13 +1331,14 @@ function ConnectionsView({
         </Pressable>
       </View>
 
-      {connections.length === 0 && !adding ? (
+      {connections.length === 0 ? (
         <Text style={styles.emptyText}>{CONNECTION_EMPTY_STATE}</Text>
       ) : (
         <View style={styles.card}>
           <View style={styles.connHeadRow}>
             <Text style={[styles.connColGrow, styles.connHeadText]}>Account</Text>
             <Text style={[styles.connColAuth, styles.connHeadText]}>Auth</Text>
+            <Text style={[styles.connColScopes, styles.connHeadText]}>Scopes</Text>
             <Text style={[styles.connColStatus, styles.connHeadText]}>Status</Text>
             <View style={styles.connColActions} />
           </View>
@@ -1314,163 +1353,157 @@ function ConnectionsView({
         </View>
       )}
 
-      {adding ? (
-        <View style={styles.formCard}>
-          <View style={styles.formHeader}>
-            <View style={styles.formTitleRow}>
-              <Plug size={16} color={theme.colors.foreground} />
-              <Text style={styles.formTitle}>Add a connection</Text>
+      {/* "Add a connection" is always visible (mockup artboard 2) — no collapse
+          toggle. The top-right "+ Add connection" button and Re-auth still call
+          onToggleAdd (kept for parity/back-compat), but visibility no longer
+          depends on the `adding` flag. */}
+      <Text style={styles.sectionTitle}>Add a connection</Text>
+      <View style={styles.formCard}>
+        <Text style={styles.fieldLabel}>Provider</Text>
+        <View style={styles.providerGrid}>
+          {PROVIDER_OPTIONS.map((o) => (
+            <ProviderChip
+              key={o.choice}
+              option={o}
+              active={choice === o.choice}
+              onSelect={setChoice}
+            />
+          ))}
+        </View>
+
+        {choice === "selfhosted" ? (
+          <>
+            <Text style={styles.fieldLabel}>Forge type</Text>
+            <View style={styles.chipRow}>
+              <Pressable
+                style={[
+                  styles.providerChip,
+                  selfHostedForge === "github" && styles.providerChipActive,
+                ]}
+                onPress={setForgeGithub}
+              >
+                <Text
+                  style={[
+                    styles.providerChipText,
+                    selfHostedForge === "github" && styles.providerChipTextActive,
+                  ]}
+                >
+                  GitHub Enterprise
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.providerChip,
+                  selfHostedForge === "gitlab" && styles.providerChipActive,
+                ]}
+                onPress={setForgeGitlab}
+              >
+                <Text
+                  style={[
+                    styles.providerChipText,
+                    selfHostedForge === "gitlab" && styles.providerChipTextActive,
+                  ]}
+                >
+                  GitLab self-managed
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.providerChip,
+                  selfHostedForge === "gitea" && styles.providerChipActive,
+                ]}
+                onPress={setForgeGitea}
+              >
+                <Text
+                  style={[
+                    styles.providerChipText,
+                    selfHostedForge === "gitea" && styles.providerChipTextActive,
+                  ]}
+                >
+                  Gitea
+                </Text>
+              </Pressable>
             </View>
-            <Text style={styles.formSubtitle}>
-              Connect a GitHub, GitLab, or Bitbucket account to browse and manage it here.
-            </Text>
+          </>
+        ) : null}
+
+        {option.needsHost ? (
+          <View style={styles.field}>
+            <Text style={styles.fieldLabel}>Host</Text>
+            <TextInput
+              style={styles.input}
+              value={host}
+              onChangeText={setHost}
+              placeholder="git.example.com"
+              placeholderTextColor={theme.colors.foregroundExtraMuted}
+              autoCapitalize="none"
+              autoCorrect={false}
+              testID="forge-host-input"
+            />
           </View>
+        ) : null}
 
-          <Text style={styles.fieldLabel}>Provider</Text>
-          <View style={styles.providerGrid}>
-            {PROVIDER_OPTIONS.map((o) => (
-              <ProviderChip
-                key={o.choice}
-                option={o}
-                active={choice === o.choice}
-                onSelect={setChoice}
-              />
-            ))}
-          </View>
+        <View style={styles.formDivider} />
 
-          {choice === "selfhosted" ? (
-            <>
-              <Text style={styles.fieldLabel}>Forge type</Text>
-              <View style={styles.chipRow}>
-                <Pressable
-                  style={[
-                    styles.providerChip,
-                    selfHostedForge === "github" && styles.providerChipActive,
-                  ]}
-                  onPress={setForgeGithub}
-                >
-                  <Text
-                    style={[
-                      styles.providerChipText,
-                      selfHostedForge === "github" && styles.providerChipTextActive,
-                    ]}
-                  >
-                    GitHub Enterprise
-                  </Text>
-                </Pressable>
-                <Pressable
-                  style={[
-                    styles.providerChip,
-                    selfHostedForge === "gitlab" && styles.providerChipActive,
-                  ]}
-                  onPress={setForgeGitlab}
-                >
-                  <Text
-                    style={[
-                      styles.providerChipText,
-                      selfHostedForge === "gitlab" && styles.providerChipTextActive,
-                    ]}
-                  >
-                    GitLab self-managed
-                  </Text>
-                </Pressable>
-                <Pressable
-                  style={[
-                    styles.providerChip,
-                    selfHostedForge === "gitea" && styles.providerChipActive,
-                  ]}
-                  onPress={setForgeGitea}
-                >
-                  <Text
-                    style={[
-                      styles.providerChipText,
-                      selfHostedForge === "gitea" && styles.providerChipTextActive,
-                    ]}
-                  >
-                    Gitea
-                  </Text>
-                </Pressable>
-              </View>
-            </>
-          ) : null}
-
-          {option.needsHost ? (
-            <View style={styles.field}>
-              <Text style={styles.fieldLabel}>Host</Text>
-              <TextInput
-                style={styles.input}
-                value={host}
-                onChangeText={setHost}
-                placeholder="git.example.com"
-                placeholderTextColor={theme.colors.foregroundExtraMuted}
-                autoCapitalize="none"
-                autoCorrect={false}
-                testID="forge-host-input"
-              />
-            </View>
-          ) : null}
-
-          <View style={styles.formDivider} />
-
-          {option.method === "cli" ? (
-            <>
-              <Text style={styles.fieldLabel}>Sign in</Text>
-              {/* When the daemon can drive sign-in in-app, the CliInstallSection
+        {option.method === "cli" ? (
+          <>
+            <Text style={styles.fieldLabel}>Sign in</Text>
+            {/* When the daemon can drive sign-in in-app, the CliInstallSection
                   button is the whole flow — the static "run this on the host"
                   hint is only shown as a fallback for hosts that can't. */}
-              {!loginEnabled ? (
-                <View style={styles.hintBox}>
-                  <Text style={styles.hintTitle}>Sign in on the daemon host</Text>
-                  <Text style={styles.hintBody}>
-                    Run the command below on the machine running the daemon, then click Add
-                    connection.
-                  </Text>
-                  <Text style={styles.hintMono}>{def.signIn?.command ?? "auth login"}</Text>
-                </View>
-              ) : null}
-              <CliInstallSection
-                client={client}
-                cliInstallEnabled={cliInstallEnabled}
-                loginEnabled={loginEnabled}
-                forge={choice === "selfhosted" ? selfHostedForge : option.forge}
-                host={option.needsHost ? host : ""}
-                cliName={def.signIn?.cli ?? "the CLI"}
-                onLoggedIn={handleLoggedIn}
-                onActivity={setFormBusy}
-                cancelRef={cancelActiveRef}
-              />
-            </>
-          ) : (
-            <View style={styles.field}>
-              <View style={styles.fieldLabelRow}>
-                <KeyRound size={13} color={theme.colors.foregroundMuted} />
-                <Text style={styles.fieldLabel}>Personal access token / API token</Text>
+            {!loginEnabled ? (
+              <View style={styles.hintBox}>
+                <Text style={styles.hintTitle}>Sign in on the daemon host</Text>
+                <Text style={styles.hintBody}>
+                  Run the command below on the machine running the daemon, then click Add
+                  connection.
+                </Text>
+                <Text style={styles.hintMono}>{def.signIn?.command ?? "auth login"}</Text>
               </View>
-              <TextInput
-                style={styles.input}
-                value={token}
-                onChangeText={setToken}
-                placeholder="Paste token"
-                placeholderTextColor={theme.colors.foregroundExtraMuted}
-                secureTextEntry
-                autoCapitalize="none"
-                autoCorrect={false}
-                testID="forge-token-input"
-              />
-              <Text style={styles.hintBody}>
-                Stored encrypted (AES-256-GCM) in the daemon secret store. The token never leaves
-                the daemon.
-              </Text>
+            ) : null}
+            <CliInstallSection
+              client={client}
+              cliInstallEnabled={cliInstallEnabled}
+              loginEnabled={loginEnabled}
+              forge={choice === "selfhosted" ? selfHostedForge : option.forge}
+              host={option.needsHost ? host : ""}
+              cliName={def.signIn?.cli ?? "the CLI"}
+              onLoggedIn={handleLoggedIn}
+              onActivity={setFormBusy}
+              cancelRef={cancelActiveRef}
+            />
+          </>
+        ) : (
+          <View style={styles.field}>
+            <View style={styles.fieldLabelRow}>
+              <KeyRound size={13} color={theme.colors.foregroundMuted} />
+              <Text style={styles.fieldLabel}>Personal access token / API token</Text>
             </View>
-          )}
+            <TextInput
+              style={styles.input}
+              value={token}
+              onChangeText={setToken}
+              placeholder="Paste token"
+              placeholderTextColor={theme.colors.foregroundExtraMuted}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              testID="forge-token-input"
+            />
+            <Text style={styles.hintBody}>
+              Stored encrypted (AES-256-GCM) in the daemon secret store. The token never leaves the
+              daemon.
+            </Text>
+          </View>
+        )}
 
-          {/* Exactly one Cancel, pinned bottom-right. While a sign-in is running
-              it aborts that (via cancelActiveRef); otherwise it closes the form. */}
+        {/* The submit is only for the manual paths: token providers, or a cli
+              host without in-app sign-in. When the in-app sign-in button is
+              present it does the whole thing. Cancel is only meaningful while a
+              sign-in is running (it aborts via cancelActiveRef); with the
+              section always open there is nothing to collapse otherwise. */}
+        {showManualAdd || formBusy ? (
           <View style={styles.formActions}>
-            {/* The bottom "Add connection" submit is only for the manual paths:
-                token providers, or a cli host without in-app sign-in. When the
-                in-app sign-in button is present it does the whole thing, so we
-                show only Cancel here to avoid a confusing second action. */}
             {showManualAdd ? (
               <Pressable
                 style={[styles.btn, styles.btnPrimary]}
@@ -1480,12 +1513,14 @@ function ConnectionsView({
                 <Text style={styles.btnPrimaryText}>Add connection</Text>
               </Pressable>
             ) : null}
-            <Pressable style={[styles.btn, styles.btnGhost]} onPress={handleCancel}>
-              <Text style={styles.btnGhostText}>Cancel</Text>
-            </Pressable>
+            {formBusy ? (
+              <Pressable style={[styles.btn, styles.btnGhost]} onPress={handleCancel}>
+                <Text style={styles.btnGhostText}>Cancel</Text>
+              </Pressable>
+            ) : null}
           </View>
-        </View>
-      ) : null}
+        ) : null}
+      </View>
     </View>
   );
 }
@@ -7001,7 +7036,13 @@ export function ForgeHubScreen() {
         )}
         <View style={[styles.sidebar, isCompact && styles.sidebarStacked]}>
           <Pressable
-            style={[styles.sidebarHeader, isCompact ? { paddingTop: insets.top + 12 } : null]}
+            style={[
+              styles.sidebarHeader,
+              // Compact keeps the safe-area inset; desktop clears the macOS
+              // traffic-light window controls now that the wide app rail is
+              // hidden on Forge and this header sits at y=0.
+              isCompact ? { paddingTop: insets.top + 12 } : { paddingTop: WINDOW_CONTROLS_TOP },
+            ]}
             onPress={goToRepoList}
             testID="forge-sidebar-home"
           >
@@ -7088,7 +7129,10 @@ const styles = StyleSheet.create((theme) => ({
     flexShrink: 0,
     flexDirection: "column",
     alignItems: "center",
-    paddingVertical: theme.spacing[3],
+    // Desktop only (rail is hidden when compact). Clear the macOS traffic-light
+    // window controls that overlay the top-left corner.
+    paddingTop: WINDOW_CONTROLS_TOP,
+    paddingBottom: theme.spacing[3],
     gap: theme.spacing[1.5],
     backgroundColor: theme.colors.surfaceSidebar,
     borderRightWidth: theme.borderWidth[1],
@@ -7410,6 +7454,23 @@ const styles = StyleSheet.create((theme) => ({
   },
   connColAuth: {
     width: 150,
+  },
+  connColScopes: {
+    width: 180,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  connScopesWrap: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: theme.spacing[1],
+  },
+  connScopesEmpty: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundExtraMuted,
   },
   connColStatus: {
     width: 120,
