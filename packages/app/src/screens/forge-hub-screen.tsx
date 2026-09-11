@@ -421,6 +421,40 @@ function ProviderBadge({ forge, small = false }: { forge: string; small?: boolea
   );
 }
 
+// CI status glyph for the dense forge tables (§19 mockup artboards 3 & 5). Maps a
+// ForgeRepo/ForgeCommit `checksStatus` to a single colored glyph — ✓ success ·
+// ✕ failure · ◷ pending. `none`/undefined renders nothing. The schema has no
+// separate "running" state, so the mockup's ◷-running glyph is only reachable as
+// "pending" here (see report note).
+function CiGlyph({ status }: { status?: "none" | "pending" | "success" | "failure" }) {
+  const { theme } = useUnistyles();
+  switch (status) {
+    case "success":
+      return <Text style={[styles.ciGlyph, { color: theme.colors.statusSuccess }]}>✓</Text>;
+    case "failure":
+      return <Text style={[styles.ciGlyph, { color: theme.colors.statusDanger }]}>✕</Text>;
+    case "pending":
+      return <Text style={[styles.ciGlyph, { color: theme.colors.statusWarning }]}>◷</Text>;
+    default:
+      return null;
+  }
+}
+
+// Short CI label paired with the glyph in the commits table (§19 mockup artboard
+// 5): "passed" / "failed" / "pending". Null when nothing is cheaply known.
+function ciLabel(status?: "none" | "pending" | "success" | "failure"): string | null {
+  switch (status) {
+    case "success":
+      return "passed";
+    case "failure":
+      return "failed";
+    case "pending":
+      return "pending";
+    default:
+      return null;
+  }
+}
+
 // Placeholder loading rows shown while a list is fetching for the first time
 // (no cached data). Each row is a couple of muted bars of varied widths with a
 // gentle opacity pulse; the loop is native-driven and stops on unmount. The
@@ -1453,44 +1487,59 @@ function RepoRow({
   /** Muted per-row account label; null hides it (single-account case). */
   accountLabel?: string | null;
 }) {
-  const dotColor = useDotColor();
   const def = getForgeDefinitionOrNeutral(repo.forge);
   const handlePress = useCallback(() => onOpen(repo), [repo, onOpen]);
-  const ciColor = dotColor(repo.checksStatus);
+  const openCount = repo.openChangeRequests ?? 0;
+  // Fold the per-account label into the description cell when browsing multiple
+  // accounts, so the table keeps a single two-line "Repository" column.
+  const subtitle =
+    accountLabel && repo.description
+      ? `${repo.description} · ${accountLabel}`
+      : (accountLabel ?? repo.description ?? null);
   return (
     <Pressable
-      style={styles.row}
+      style={styles.tableRow}
       onPress={handlePress}
       testID={`forge-repo-${repo.forge}-${repo.owner}-${repo.name}`}
     >
-      <ProviderBadge forge={repo.forge} />
-      <View style={styles.rowInfo}>
+      <View style={styles.colLogo}>
+        <ProviderBadge forge={repo.forge} small />
+      </View>
+      <View style={styles.colGrow}>
         <Text style={styles.rowTitleMono} numberOfLines={1}>
           {repo.owner}/{repo.name}
         </Text>
-        {accountLabel ? (
+        {subtitle ? (
           <Text style={styles.rowSub} numberOfLines={1}>
-            {accountLabel}
-          </Text>
-        ) : repo.description ? (
-          <Text style={styles.rowSub} numberOfLines={1}>
-            {repo.description}
+            {subtitle}
           </Text>
         ) : null}
       </View>
-      <Text style={styles.metaMono}>{repo.defaultBranch ?? "—"}</Text>
-      {repo.visibility && repo.visibility !== "unknown" ? (
-        <View style={styles.plainChip}>
-          <Text style={styles.plainChipText}>{repo.visibility}</Text>
-        </View>
-      ) : null}
-      <View style={styles.repoTrailing}>
-        <Text style={styles.metaMuted}>
-          {repo.openChangeRequests ?? 0} {def.changeRequestAbbrev}
-        </Text>
-        {ciColor ? <StatusDot color={ciColor} /> : null}
+      <Text style={[styles.colDefault, styles.metaMono]} numberOfLines={1}>
+        {repo.defaultBranch ?? "—"}
+      </Text>
+      <View style={styles.colVisibility}>
+        {repo.visibility && repo.visibility !== "unknown" ? (
+          <View style={styles.plainChip}>
+            <Text style={styles.plainChipText}>{repo.visibility}</Text>
+          </View>
+        ) : null}
       </View>
-      <Text style={styles.metaWhen}>{formatRelativeMs(repo.updatedAt_ms)}</Text>
+      <View style={styles.colOpenCr}>
+        {openCount > 0 ? (
+          <View style={styles.countPill}>
+            <Text style={styles.countPillText}>
+              {openCount} {def.changeRequestAbbrev}
+            </Text>
+          </View>
+        ) : (
+          <Text style={styles.metaMuted}>0 {def.changeRequestAbbrev}</Text>
+        )}
+        <CiGlyph status={repo.checksStatus} />
+      </View>
+      <Text style={[styles.colUpdated, styles.metaMuted]} numberOfLines={1}>
+        {formatRelativeMs(repo.updatedAt_ms)}
+      </Text>
     </Pressable>
   );
 }
@@ -1554,6 +1603,13 @@ function RepositoriesView({
   // Account filter: null = All, else a connectionId. Local to this view — the
   // account-selection the user asked for, in Repositories rather than Connections.
   const [accountFilter, setAccountFilter] = useState<string | null>(null);
+  // Toolbar sort control (§19 mockup artboard 3 "Sort: Updated ▾"). Toggles the
+  // list between most-recently-updated and alphabetical; purely client-side.
+  const [sortBy, setSortBy] = useState<"updated" | "name">("updated");
+  const toggleSort = useCallback(
+    () => setSortBy((s) => (s === "updated" ? "name" : "updated")),
+    [],
+  );
 
   // connectionId → host, for a fallback account label when the repo carries none.
   const hostById = useMemo(() => {
@@ -1570,6 +1626,20 @@ function RepositoriesView({
       return `${repo.owner}/${repo.name}`.toLowerCase().includes(q);
     });
   }, [repos, query, accountFilter]);
+
+  const sorted = useMemo(() => {
+    const list = [...filtered];
+    if (sortBy === "name") {
+      list.sort((a, b) =>
+        `${a.owner}/${a.name}`.localeCompare(`${b.owner}/${b.name}`, undefined, {
+          sensitivity: "base",
+        }),
+      );
+    } else {
+      list.sort((a, b) => (b.updatedAt_ms ?? 0) - (a.updatedAt_ms ?? 0));
+    }
+    return list;
+  }, [filtered, sortBy]);
 
   // "Load more" is about the fetch, so gate it on the UNFILTERED fetched length:
   // the last page returned at least `limit` rows ⇒ there may be more to fetch.
@@ -1599,6 +1669,18 @@ function RepositoriesView({
             testID="forge-repo-search"
           />
         </View>
+        <View style={styles.grow} />
+        <Pressable
+          style={[styles.btn, styles.btnGhost]}
+          onPress={toggleSort}
+          accessibilityRole="button"
+          accessibilityLabel="Toggle sort order"
+          testID="forge-repos-sort"
+        >
+          <Text style={styles.btnGhostText}>
+            Sort: {sortBy === "updated" ? "Updated" : "Name"} ▾
+          </Text>
+        </Pressable>
       </View>
 
       {multiAccount ? (
@@ -1637,11 +1719,19 @@ function RepositoriesView({
 
       {loading ? (
         <SkeletonRows rows={6} />
-      ) : filtered.length === 0 ? (
+      ) : sorted.length === 0 ? (
         <Text style={styles.emptyText}>{emptyLabel}</Text>
       ) : (
         <View style={styles.card}>
-          {filtered.map((repo) => (
+          <View style={styles.tableHeadRow}>
+            <View style={styles.colLogo} />
+            <Text style={[styles.colGrow, styles.tableHeadText]}>Repository</Text>
+            <Text style={[styles.colDefault, styles.tableHeadText]}>Default</Text>
+            <Text style={[styles.colVisibility, styles.tableHeadText]}>Visibility</Text>
+            <Text style={[styles.colOpenCr, styles.tableHeadText]}>Open PR/MR · CI</Text>
+            <Text style={[styles.colUpdated, styles.tableHeadText]}>Updated</Text>
+          </View>
+          {sorted.map((repo) => (
             <RepoRow
               key={`${repo.forge}:${repo.owner}/${repo.name}`}
               repo={repo}
@@ -2017,32 +2107,58 @@ function FileDiffCard({
 function CommitRow({
   commit,
   onOpen,
+  isFirst = false,
 }: {
   commit: ForgeCommit;
   onOpen?: (commit: ForgeCommit) => void;
+  /** The list head gets an accent leading dot; older rows a muted one (mockup). */
+  isFirst?: boolean;
 }) {
-  const dotColor = useDotColor();
-  const ciColor = dotColor(commit.checksStatus);
+  const { theme } = useUnistyles();
   const handlePress = useCallback(() => onOpen?.(commit), [commit, onOpen]);
   const author = commit.authorLogin ? `@${commit.authorLogin}` : (commit.authorName ?? "");
+  const label = ciLabel(commit.checksStatus);
   return (
     <Pressable
-      style={styles.row}
+      style={styles.tableRow}
       onPress={handlePress}
       disabled={!onOpen}
       testID={`forge-commit-${commit.sha}`}
     >
-      <View style={styles.rowInfo}>
+      <View style={styles.colDot}>
+        <View
+          style={[
+            styles.commitDot,
+            {
+              backgroundColor: isFirst
+                ? theme.colors.accentBright
+                : theme.colors.foregroundExtraMuted,
+            },
+          ]}
+        />
+      </View>
+      <View style={styles.colGrow}>
         <Text style={styles.rowTitle} numberOfLines={1}>
           {commit.subject}
         </Text>
-        <View style={styles.crMetaRow}>
-          <Text style={styles.metaMono}>{shortSha(commit.sha)}</Text>
-          {author ? <Text style={styles.metaMuted}>{author}</Text> : null}
-        </View>
       </View>
-      {ciColor ? <StatusDot color={ciColor} /> : null}
-      <Text style={styles.metaWhen}>{formatRelativeMs(commit.committedAt_ms)}</Text>
+      <Text style={[styles.colAuthor, styles.metaMuted]} numberOfLines={1}>
+        {author}
+      </Text>
+      <Text style={[styles.colSha, styles.metaMono]} numberOfLines={1}>
+        {shortSha(commit.sha)}
+      </Text>
+      <View style={styles.colCiCol}>
+        <CiGlyph status={commit.checksStatus} />
+        {label ? (
+          <Text style={styles.metaMuted} numberOfLines={1}>
+            {label}
+          </Text>
+        ) : null}
+      </View>
+      <Text style={[styles.colWhen2, styles.metaMuted]} numberOfLines={1}>
+        {formatRelativeMs(commit.committedAt_ms)}
+      </Text>
     </Pressable>
   );
 }
@@ -3276,8 +3392,21 @@ function CommitsView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }
       ) : (
         <>
           <View style={styles.card}>
-            {commits.map((commit) => (
-              <CommitRow key={commit.sha} commit={commit} onOpen={openCommitDiff} />
+            <View style={styles.tableHeadRow}>
+              <View style={styles.colDot} />
+              <Text style={[styles.colGrow, styles.tableHeadText]}>Commit</Text>
+              <Text style={[styles.colAuthor, styles.tableHeadText]}>Author</Text>
+              <Text style={[styles.colSha, styles.tableHeadText]}>SHA</Text>
+              <Text style={[styles.colCiCol, styles.tableHeadText]}>CI</Text>
+              <Text style={[styles.colWhen2, styles.tableHeadText]}>When</Text>
+            </View>
+            {commits.map((commit, i) => (
+              <CommitRow
+                key={commit.sha}
+                commit={commit}
+                onOpen={openCommitDiff}
+                isFirst={i === 0}
+              />
             ))}
           </View>
           {commits.length >= commitsLimit ? (
@@ -4415,6 +4544,85 @@ function PipelinesView({
 
 // ===== releases · tags — Milestone C, gate forgeHubReleases ==================
 
+// The newest release rendered as a prominent card (§19 mockup artboard 6): a
+// "latest" chip, the version in bold, notes/name + asset count, and asset pills
+// with a "+N" overflow. Tapping opens the same detail view as the compact rows.
+function LatestReleaseCard({
+  release,
+  onOpen,
+}: {
+  release: ForgeRelease;
+  onOpen: (release: ForgeRelease) => void;
+}) {
+  const { theme } = useUnistyles();
+  const handlePress = useCallback(() => onOpen(release), [release, onOpen]);
+  const handleOpen = useCallback(() => void openExternalUrl(release.url), [release.url]);
+  const assets = release.assets ?? [];
+  const shownAssets = assets.slice(0, 4);
+  const overflow = assets.length - shownAssets.length;
+  const notesParts: string[] = [];
+  if (release.name && release.name !== release.tagName) notesParts.push(release.name);
+  if (assets.length > 0) notesParts.push(`${assets.length} assets`);
+  const notes = notesParts.join(" · ");
+  return (
+    <View style={styles.releaseCard}>
+      <View style={styles.latestBody}>
+        <View style={styles.latestTopRow}>
+          <Chip label="latest" color={theme.colors.statusMerged} />
+          <Pressable
+            style={styles.rowInfo}
+            onPress={handlePress}
+            testID={`forge-release-${release.id}`}
+          >
+            <View style={styles.crMetaRow}>
+              <Text style={styles.releaseVersionText} numberOfLines={1}>
+                {release.tagName}
+              </Text>
+              {release.isDraft ? (
+                <View style={styles.plainChip}>
+                  <Text style={styles.plainChipText}>Draft</Text>
+                </View>
+              ) : null}
+              {release.isPrerelease ? (
+                <View style={styles.plainChip}>
+                  <Text style={styles.plainChipText}>Prerelease</Text>
+                </View>
+              ) : null}
+            </View>
+            {notes ? (
+              <Text style={styles.rowSub} numberOfLines={2}>
+                {notes}
+              </Text>
+            ) : null}
+          </Pressable>
+          <Pressable
+            style={styles.iconBtn}
+            onPress={handleOpen}
+            accessibilityRole="button"
+            accessibilityLabel="Open release"
+            testID={`forge-release-open-${release.id}`}
+          >
+            <ExternalLink size={15} color={theme.colors.foregroundMuted} />
+          </Pressable>
+        </View>
+        {shownAssets.length > 0 ? (
+          <View style={styles.assetPillRow}>
+            {shownAssets.map((asset) => (
+              <View key={asset.url} style={styles.plainChip}>
+                <Text style={styles.plainChipText}>{asset.name}</Text>
+              </View>
+            ))}
+            {overflow > 0 ? <Text style={styles.metaMuted}>+{overflow}</Text> : null}
+          </View>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+// A compact row for an older release (§19 mockup artboard 6): a state chip + the
+// tag (mono) + name, published time, and an open-externally affordance. The list
+// summary carries no assets, so those live on the latest card and the detail view.
 function ReleaseRow({
   release,
   onOpen,
@@ -4426,54 +4634,36 @@ function ReleaseRow({
   const handlePress = useCallback(() => onOpen(release), [release, onOpen]);
   const handleOpen = useCallback(() => void openExternalUrl(release.url), [release.url]);
   const published = formatRelativeMs(release.publishedAt_ms);
+  const tagLabel = release.isDraft ? "draft" : release.isPrerelease ? "pre" : "release";
   return (
-    <View style={styles.releaseCard}>
-      <View style={styles.releaseHeader}>
-        <Pressable
-          style={styles.rowInfo}
-          onPress={handlePress}
-          testID={`forge-release-${release.id}`}
-        >
-          <Text style={styles.rowTitle} numberOfLines={1}>
-            {release.name || release.tagName}
-          </Text>
-          <View style={styles.crMetaRow}>
-            <Text style={styles.metaMono}>{release.tagName}</Text>
-            {release.isDraft ? (
-              <View style={styles.plainChip}>
-                <Text style={styles.plainChipText}>Draft</Text>
-              </View>
-            ) : null}
-            {release.isPrerelease ? (
-              <View style={styles.plainChip}>
-                <Text style={styles.plainChipText}>Prerelease</Text>
-              </View>
-            ) : null}
-            {published ? <Text style={styles.metaMuted}>{published}</Text> : null}
-          </View>
-        </Pressable>
-        <Pressable
-          style={styles.iconBtn}
-          onPress={handleOpen}
-          accessibilityRole="button"
-          accessibilityLabel="Open release"
-          testID={`forge-release-open-${release.id}`}
-        >
-          <ExternalLink size={15} color={theme.colors.foregroundMuted} />
-        </Pressable>
+    <View style={styles.row}>
+      <View style={styles.plainChip}>
+        <Text style={styles.plainChipText}>{tagLabel}</Text>
       </View>
-      {release.assets && release.assets.length > 0 ? (
-        <View style={styles.assetList}>
-          {release.assets.map((asset) => (
-            <AssetRow
-              key={asset.url}
-              name={asset.name}
-              url={asset.url}
-              sizeBytes={asset.sizeBytes}
-            />
-          ))}
-        </View>
-      ) : null}
+      <Pressable
+        style={styles.rowInfo}
+        onPress={handlePress}
+        testID={`forge-release-${release.id}`}
+      >
+        <Text style={styles.rowTitleMono} numberOfLines={1}>
+          {release.tagName}
+        </Text>
+        {release.name && release.name !== release.tagName ? (
+          <Text style={styles.rowSub} numberOfLines={1}>
+            {release.name}
+          </Text>
+        ) : null}
+      </Pressable>
+      {published ? <Text style={styles.metaWhen}>{published}</Text> : null}
+      <Pressable
+        style={styles.iconBtn}
+        onPress={handleOpen}
+        accessibilityRole="button"
+        accessibilityLabel="Open release"
+        testID={`forge-release-open-${release.id}`}
+      >
+        <ExternalLink size={15} color={theme.colors.foregroundMuted} />
+      </Pressable>
     </View>
   );
 }
@@ -4970,9 +5160,14 @@ function ReleasesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo 
       ) : (
         <>
           <View style={styles.filesPane}>
-            {releases.map((release) => (
-              <ReleaseRow key={release.id} release={release} onOpen={openDetail} />
-            ))}
+            <LatestReleaseCard release={releases[0]} onOpen={openDetail} />
+            {releases.length > 1 ? (
+              <View style={styles.card}>
+                {releases.slice(1).map((release) => (
+                  <ReleaseRow key={release.id} release={release} onOpen={openDetail} />
+                ))}
+              </View>
+            ) : null}
           </View>
           {releases.length >= releasesLimit ? (
             <LoadMoreButton
@@ -5012,18 +5207,20 @@ function issueStateColor(state: ForgeIssue["state"], theme: Theme): string {
 function IssueRow({ issue, onOpen }: { issue: ForgeIssue; onOpen: (issue: ForgeIssue) => void }) {
   const { theme } = useUnistyles();
   const handlePress = useCallback(() => onOpen(issue), [issue, onOpen]);
+  // No created timestamp in the schema (only updatedAt_ms), so the meta line uses
+  // the last-updated relative time rather than the mockup's literal "opened".
+  const when = formatRelativeMs(issue.updatedAt_ms);
   return (
     <Pressable style={styles.row} onPress={handlePress} testID={`forge-issue-${issue.number}`}>
+      <StatusDot color={issueStateColor(issue.state, theme)} />
       <View style={styles.rowInfo}>
         <Text style={styles.rowTitle} numberOfLines={1}>
           {issue.title}
         </Text>
         <View style={styles.crMetaRow}>
           <Text style={styles.metaMono}>#{issue.number}</Text>
+          {when ? <Text style={styles.metaMuted}>{when}</Text> : null}
           {issue.authorLogin ? <Text style={styles.metaMuted}>@{issue.authorLogin}</Text> : null}
-          {issue.commentCount != null ? (
-            <Text style={styles.metaMuted}>{issue.commentCount} comments</Text>
-          ) : null}
           {issue.labels?.slice(0, 3).map((label) => (
             <View key={label} style={styles.plainChip}>
               <Text style={styles.plainChipText}>{label}</Text>
@@ -5031,11 +5228,12 @@ function IssueRow({ issue, onOpen }: { issue: ForgeIssue; onOpen: (issue: ForgeI
           ))}
         </View>
       </View>
-      <Chip
-        label={issue.state === "open" ? "Open" : "Closed"}
-        color={issueStateColor(issue.state, theme)}
-      />
-      <Text style={styles.metaWhen}>{formatRelativeMs(issue.updatedAt_ms)}</Text>
+      {issue.commentCount != null ? (
+        <View style={styles.commentPill}>
+          <MessageSquare size={12} color={theme.colors.foregroundMuted} />
+          <Text style={styles.metaMuted}>{issue.commentCount}</Text>
+        </View>
+      ) : null}
     </Pressable>
   );
 }
@@ -6773,6 +6971,107 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
     gap: theme.spacing[2],
   },
+  // ===== dense forge tables (§19 mockup artboards 3 & 5) =====
+  // Header row + compact rows with thin separators shared by Repositories and
+  // Commits. Columns are fixed-width cells that line up header ↔ body.
+  tableHeadRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[3],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+    backgroundColor: theme.colors.surface0,
+  },
+  tableHeadText: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.foregroundMuted,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  tableRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[3],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    minHeight: 46,
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+  },
+  colGrow: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  colLogo: {
+    width: 26,
+    alignItems: "center",
+  },
+  colDefault: {
+    width: 120,
+  },
+  colVisibility: {
+    width: 100,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  colOpenCr: {
+    width: 140,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+  },
+  colUpdated: {
+    width: 110,
+  },
+  colDot: {
+    width: 20,
+    alignItems: "flex-start",
+  },
+  colAuthor: {
+    width: 120,
+  },
+  colSha: {
+    width: 90,
+  },
+  colCiCol: {
+    width: 90,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[1],
+  },
+  colWhen2: {
+    width: 72,
+  },
+  commitDot: {
+    width: 8,
+    height: 8,
+    borderRadius: theme.borderRadius.full,
+  },
+  ciGlyph: {
+    fontSize: 13,
+    fontWeight: theme.fontWeight.semibold,
+    lineHeight: 16,
+  },
+  countPill: {
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: 1,
+    borderRadius: theme.borderRadius.full,
+    backgroundColor: theme.colors.surface2,
+  },
+  countPillText: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.statusSuccess,
+  },
+  commentPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[1],
+  },
   dot: {
     width: 8,
     height: 8,
@@ -7615,6 +7914,27 @@ const styles = StyleSheet.create((theme) => ({
     gap: theme.spacing[2],
     paddingHorizontal: theme.spacing[3],
     paddingVertical: theme.spacing[3],
+  },
+  // Prominent "latest" release card (§19 mockup artboard 6).
+  latestBody: {
+    padding: theme.spacing[3],
+    gap: theme.spacing[2],
+  },
+  latestTopRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: theme.spacing[2],
+  },
+  releaseVersionText: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.bold,
+    color: theme.colors.foreground,
+  },
+  assetPillRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: theme.spacing[2],
   },
   assetList: {
     borderTopWidth: theme.borderWidth[1],
