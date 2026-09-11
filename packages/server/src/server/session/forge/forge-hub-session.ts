@@ -1463,8 +1463,10 @@ export class ForgeHubService {
 
   async listGitLabRepos(input: { query?: string; limit?: number }): Promise<ForgeRepo[]> {
     const limit = input.limit ?? 50;
+    // NOTE: GitLab.com returns HTTP 500 for `order_by=last_activity_at` WITHOUT
+    // an explicit `sort` — always pass `sort=desc` (verified against gitlab.com).
     const rows = await this.glabJson(
-      ["api", `projects?membership=true&per_page=${limit}&order_by=last_activity_at`],
+      ["api", `projects?membership=true&per_page=${limit}&order_by=last_activity_at&sort=desc`],
       z.array(GlRepoSchema),
     );
     if (!rows) return [];

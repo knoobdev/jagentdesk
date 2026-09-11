@@ -126,12 +126,15 @@ function fileExtension(filePath: string): string | null {
 // RPCs on the DaemonClient — this screen only renders UI.
 // ---------------------------------------------------------------------------
 
-// The active main-pane section. Replaces the old top pill "tab" model: there is
-// no standalone "repositories" section — when no repo is selected the main pane
-// shows the repository picker (RepositoriesView). "overview" is the per-repo
+// The active main-pane section. Replaces the old top pill "tab" model.
+// "repositories" is a first-class section: the full repo browser (search +
+// account filter + Load more + per-account labels) reachable any time from the
+// sidebar, independent of whether a repo is selected. The sidebar "Switch repo"
+// list is only a capped quick-switcher into it. "overview" is the per-repo
 // landing added for the sidebar shell (§19 mockup).
 type Section =
   | "overview"
+  | "repositories"
   | "connections"
   | "code"
   | "commits"
@@ -142,6 +145,7 @@ type Section =
 
 const SECTION_LABEL: Record<Section, string> = {
   overview: "Overview",
+  repositories: "Repositories",
   connections: "Connections",
   code: "Code",
   commits: "Commits",
@@ -198,6 +202,11 @@ function repoCacheKey(repo: ForgeRepo): string {
 // load-more re-fetches the whole list at the larger limit and overwrites the
 // cache — simple and good enough for the row counts these lists reach.
 const PAGE_SIZE = 30;
+
+// The sidebar "Switch repo" list is a quick-switcher only, capped at this many
+// rows; beyond it a "Browse all repositories →" row hands off to the full
+// RepositoriesView (the "repositories" section). Never the full browser itself.
+const SWITCH_REPO_CAP = 8;
 
 // Remembers the Code tab's last directory/file per repo so switching away from
 // Code and back restores navigation instead of resetting to the repo root. Keyed
@@ -5835,6 +5844,13 @@ export function ForgeHubScreen() {
     setSection("overview");
   }, []);
   const goToConnections = useCallback(() => setSection("connections"), []);
+  // Open the full repo browser (search + account filter + Load more). Keeps any
+  // selected repo so the user can jump back to it; the main pane swaps to the
+  // full RepositoriesView because the section takes precedence over selectedRepo.
+  const goToRepositories = useCallback(() => {
+    setRepoQuery("");
+    setSection("repositories");
+  }, []);
 
   // Connection footer status dot per §19.3.4 (authenticated=success,
   // token_expiring=warning, error=danger; everything else muted).
@@ -5871,20 +5887,23 @@ export function ForgeHubScreen() {
     return visibleRepos.filter((r) => `${r.owner}/${r.name}`.toLowerCase().includes(q)).slice(0, 8);
   }, [visibleRepos, repoQuery]);
 
-  // Other repos to switch to (excludes the current one).
-  const otherRepos = useMemo(() => {
-    if (!selectedRepo) return [];
-    return visibleRepos
-      .filter(
-        (r) =>
-          !(
-            r.forge === selectedRepo.forge &&
-            r.owner === selectedRepo.owner &&
-            r.name === selectedRepo.name
-          ),
-      )
-      .slice(0, 12);
+  // Candidates for the sidebar "Switch repo" quick list (account-filtered, and
+  // excluding the currently-open repo). The list itself is capped at
+  // SWITCH_REPO_CAP; when there are more, a "Browse all repositories →" row hands
+  // off to the full RepositoriesView instead of pretending this is the browser.
+  const switchCandidates = useMemo(() => {
+    if (!selectedRepo) return visibleRepos;
+    return visibleRepos.filter(
+      (r) =>
+        !(
+          r.forge === selectedRepo.forge &&
+          r.owner === selectedRepo.owner &&
+          r.name === selectedRepo.name
+        ),
+    );
   }, [visibleRepos, selectedRepo]);
+  const quickRepos = useMemo(() => switchCandidates.slice(0, SWITCH_REPO_CAP), [switchCandidates]);
+  const showBrowseAll = switchCandidates.length > SWITCH_REPO_CAP;
 
   const repoDef = selectedRepo ? getForgeDefinitionOrNeutral(selectedRepo.forge) : null;
 
@@ -5896,14 +5915,39 @@ export function ForgeHubScreen() {
       testID={`forge-switch-${repo.forge}-${repo.owner}-${repo.name}`}
     >
       <ProviderBadge forge={repo.forge} small />
-      <Text style={styles.navItemText} numberOfLines={1}>
+      {/* flex + minWidth:0 lets the name use the full sidebar width and ellipsize
+          instead of being squeezed to a couple of characters next to the badge. */}
+      <Text style={[styles.navItemText, styles.navItemTextGrow]} numberOfLines={1}>
         {repo.owner}/{repo.name}
       </Text>
     </Pressable>
   );
 
+  // Muted hand-off row shown beneath the capped quick list → opens the full
+  // RepositoriesView (search + account filter + Load more + account labels).
+  const browseAllRow = (
+    <Pressable style={styles.navItem} onPress={goToRepositories} testID="forge-switch-browse-all">
+      <Text style={styles.navBrowseAll} numberOfLines={1}>
+        Browse all repositories →
+      </Text>
+    </Pressable>
+  );
+
+  // Top-level "Repositories" nav item — always present, above any repo-context
+  // group. It is the primary way to browse/select repos (full RepositoriesView).
+  const repositoriesNavItem = (
+    <SidebarNavItem
+      label="Repositories"
+      section="repositories"
+      Icon={Folder}
+      active={section === "repositories"}
+      onSelect={goToRepositories}
+    />
+  );
+
   const navInner = repoQuery.trim() ? (
     <>
+      {repositoriesNavItem}
       <Text style={styles.navGroupLabel}>Matching repos</Text>
       {jumpMatches.length === 0 ? (
         <Text style={styles.navEmpty}>No matches</Text>
@@ -5913,6 +5957,7 @@ export function ForgeHubScreen() {
     </>
   ) : selectedRepo && repoDef ? (
     <>
+      {repositoriesNavItem}
       <Text style={styles.navGroupLabel} numberOfLines={1}>
         {selectedRepo.owner}/{selectedRepo.name} · {selectedRepo.forge}
       </Text>
@@ -5981,22 +6026,27 @@ export function ForgeHubScreen() {
           onSelect={handleSelectSection}
         />
       ) : null}
-      {otherRepos.length > 0 ? (
+      {quickRepos.length > 0 ? (
         <>
           <Text style={styles.navGroupLabel}>Switch repo</Text>
-          {otherRepos.map(renderSidebarRepoRow)}
+          {quickRepos.map(renderSidebarRepoRow)}
+          {showBrowseAll ? browseAllRow : null}
         </>
       ) : null}
     </>
   ) : (
     <>
-      <Text style={styles.navGroupLabel}>Repositories</Text>
-      {visibleRepos.length === 0 ? (
+      {repositoriesNavItem}
+      <Text style={styles.navGroupLabel}>Switch repo</Text>
+      {quickRepos.length === 0 ? (
         <Text style={styles.navEmpty}>
           {hasConnections ? "No repositories" : "Connect an account"}
         </Text>
       ) : (
-        visibleRepos.slice(0, 14).map(renderSidebarRepoRow)
+        <>
+          {quickRepos.map(renderSidebarRepoRow)}
+          {showBrowseAll ? browseAllRow : null}
+        </>
       )}
     </>
   );
@@ -6024,14 +6074,16 @@ export function ForgeHubScreen() {
       >
         <Plug size={13} color={theme.colors.foregroundMuted} />
         <Text style={styles.connManageText}>
-          {hasConnections ? "Manage / Add" : "Add connection"}
+          {hasConnections ? "Manage connections" : "Add connection"}
         </Text>
       </Pressable>
     </View>
   );
 
   const renderToolbar = () => {
-    if (selectedRepo && repoDef && section !== "connections") {
+    // "connections" and "repositories" are repo-independent full-pane sections,
+    // so they show a plain title even when a repo happens to be selected.
+    if (selectedRepo && repoDef && section !== "connections" && section !== "repositories") {
       return (
         <>
           <ProviderBadge forge={selectedRepo.forge} />
@@ -6082,8 +6134,11 @@ export function ForgeHubScreen() {
       return <Text style={styles.emptyText}>{CONNECTION_EMPTY_STATE}</Text>;
     }
 
-    // No repo selected → the repository picker is the main pane.
-    if (!selectedRepo) {
+    // The full repo browser: shown for the first-class "repositories" section
+    // (reachable any time from the sidebar, even with a repo open) and as the
+    // fallback whenever no repo is selected. Section takes precedence over the
+    // selected repo so "Browse all repositories" works without deselecting.
+    if (section === "repositories" || !selectedRepo) {
       return (
         <RepositoriesView
           repos={repos}
@@ -6415,6 +6470,18 @@ const styles = StyleSheet.create((theme) => ({
   },
   navItemText: {
     flexShrink: 1,
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foregroundMuted,
+  },
+  // Quick-switch repo rows: let the name claim the full remaining sidebar width
+  // and ellipsize, instead of collapsing to a few characters beside the badge.
+  navItemTextGrow: {
+    flex: 1,
+    minWidth: 0,
+  },
+  navBrowseAll: {
+    flex: 1,
+    minWidth: 0,
     fontSize: theme.fontSize.sm,
     color: theme.colors.foregroundMuted,
   },
