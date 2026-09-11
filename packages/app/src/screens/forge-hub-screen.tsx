@@ -281,13 +281,6 @@ const PROVIDER_OPTIONS: ProviderOption[] = [
   },
 ];
 
-// macOS traffic-light window controls overlay the top-left corner. On desktop
-// the wide app rail is hidden on the Forge screen, so the icon rail and the
-// "Forge Hub" sidebar header now start at y=0 directly beneath those buttons.
-// Add top clearance so the first rail icon and the header clear them (§19 /
-// mockup artboard 2 titlebar).
-const WINDOW_CONTROLS_TOP = 30;
-
 // Exact brand colors for the provider logo squares, lifted from the Forge Hub
 // Connections mockup (docs/design/connectors/forge-hub-mockup.html — CSS
 // `.logo.gh/.gl/.bb`). These specific hexes are allowed as literals here
@@ -6975,6 +6968,14 @@ export function ForgeHubScreen() {
 
   return (
     <View style={styles.container}>
+      {isCompact ? null : (
+        // Top titlebar strip: reserves the top-left zone for the macOS traffic
+        // lights + the app window-sidebar toggle so the rail/sidebar below never
+        // sit under them (mockup's titlebar). Left padding clears both controls.
+        <View style={styles.titlebar}>
+          <Text style={styles.titlebarText}>JAgentDesk · Forge Hub</Text>
+        </View>
+      )}
       <View style={[styles.shell, isCompact && styles.shellStacked]}>
         {isCompact ? null : (
           <View style={styles.railCol}>
@@ -7038,10 +7039,9 @@ export function ForgeHubScreen() {
           <Pressable
             style={[
               styles.sidebarHeader,
-              // Compact keeps the safe-area inset; desktop clears the macOS
-              // traffic-light window controls now that the wide app rail is
-              // hidden on Forge and this header sits at y=0.
-              isCompact ? { paddingTop: insets.top + 12 } : { paddingTop: WINDOW_CONTROLS_TOP },
+              // Compact keeps the safe-area inset; on desktop the titlebar strip
+              // above the shell already clears the window controls.
+              isCompact ? { paddingTop: insets.top + 12 } : null,
             ]}
             onPress={goToRepoList}
             testID="forge-sidebar-home"
@@ -7103,6 +7103,24 @@ const styles = StyleSheet.create((theme) => ({
     minHeight: 0,
     backgroundColor: theme.colors.surface0,
   },
+  // Top titlebar strip (desktop). Height fits the macOS traffic lights; the left
+  // pad clears the lights + the app window-sidebar toggle so the title/shell are
+  // never covered. Mirrors the mockup's window titlebar.
+  titlebar: {
+    height: 38,
+    flexShrink: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingLeft: 96,
+    paddingRight: theme.spacing[3],
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+    backgroundColor: theme.colors.surface0,
+  },
+  titlebarText: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+  },
   scroll: {
     flex: 1,
     minHeight: 0,
@@ -7129,10 +7147,9 @@ const styles = StyleSheet.create((theme) => ({
     flexShrink: 0,
     flexDirection: "column",
     alignItems: "center",
-    // Desktop only (rail is hidden when compact). Clear the macOS traffic-light
-    // window controls that overlay the top-left corner.
-    paddingTop: WINDOW_CONTROLS_TOP,
-    paddingBottom: theme.spacing[3],
+    // Clearance for the top window controls is handled by the titlebar strip
+    // above the shell, so the rail uses normal vertical padding.
+    paddingVertical: theme.spacing[3],
     gap: theme.spacing[1.5],
     backgroundColor: theme.colors.surfaceSidebar,
     borderRightWidth: theme.borderWidth[1],
