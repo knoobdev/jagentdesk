@@ -2301,7 +2301,10 @@ function ReviewBox({
   return (
     <View style={styles.mergebox}>
       <View style={styles.mergeboxHeader}>
-        <Text style={styles.mergeboxTitle}>Review</Text>
+        <ReviewGlyph decision={cr.reviewDecision} />
+        <Text style={styles.mergeboxTitle}>
+          {cr.reviewDecision === "changes_requested" ? "Changes requested" : "Reviews"}
+        </Text>
         <View style={styles.grow} />
         <ReviewSummary decision={cr.reviewDecision} />
       </View>
@@ -2469,6 +2472,7 @@ function MergeBox({
   return (
     <View style={styles.mergebox}>
       <View style={styles.mergeboxHeader}>
+        <MergeGlyph mergeable={mergeable} />
         <Text style={styles.mergeboxTitle}>Merge</Text>
         <View style={styles.grow} />
         <ChecksSummary status={cr.checksStatus} />
@@ -2541,26 +2545,35 @@ function MergeMethodButton({
   );
 }
 
-// Checks tab body: if the PR head has a pipeline run, render its stage→job tree;
-// otherwise keep the summary aggregate (§19.6.3 Checks).
-function ChecksTab({
-  client,
-  repo,
-  cr,
-  pipelinesEnabled,
-}: {
-  client: DaemonClient;
-  repo: ForgeRepo;
-  cr: ForgeChangeRequestSummary;
-  pipelinesEnabled: boolean;
-}) {
+// Loads the newest pipeline run for the CR head and returns its stage→job detail.
+// Lifted out of ChecksTab (§19.6.3 Checks) so both the Checks tab and the right-rail
+// Checks panel read one shared fetch instead of firing the request twice. Auto-loads
+// once on mount when pipelines are enabled; `load` re-arms it for the manual affordance.
+function usePipelineChecks(
+  client: DaemonClient,
+  repo: ForgeRepo,
+  cr: ForgeChangeRequestSummary,
+  pipelinesEnabled: boolean,
+): {
+  pipeline: ForgePipelineDetail | null;
+  loading: boolean;
+  loaded: boolean;
+  load: () => void;
+} {
   const [pipeline, setPipeline] = useState<ForgePipelineDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const load = useCallback(() => {
     if (!pipelinesEnabled || loaded || loading) return;
-    let cancelled = false;
     setLoading(true);
     void (async () => {
       try {
@@ -2577,22 +2590,118 @@ function ChecksTab({
             runId: newest.id,
           });
           const parsed = ForgePipelineDetailSchema.safeParse(detail.pipeline);
-          if (!cancelled && parsed.success) setPipeline(parsed.data);
+          if (mountedRef.current && parsed.success) setPipeline(parsed.data);
         }
       } catch {
-        // Fall back to the summary aggregate below.
+        // Fall back to the summary aggregate.
       } finally {
-        if (!cancelled) {
+        if (mountedRef.current) {
           setLoading(false);
           setLoaded(true);
         }
       }
     })();
-    return () => {
-      cancelled = true;
-    };
   }, [client, repo, cr.headRef, pipelinesEnabled, loaded, loading]);
 
+  useEffect(() => {
+    if (pipelinesEnabled && !loaded && !loading) load();
+  }, [pipelinesEnabled, loaded, loading, load]);
+
+  return { pipeline, loading, loaded, load };
+}
+
+// Aggregates a pipeline's jobs into a "N passed · N running · …" summary for the
+// rail header. Returns null when nothing is countable so the caller can fall back
+// to the CR-level checks status. Durations/counts come straight from the loaded
+// pipeline — the CR summary alone has no per-job breakdown (see report note).
+function summarizePipelineJobs(pipeline: ForgePipelineDetail | null): string | null {
+  if (!pipeline) return null;
+  let passed = 0;
+  let running = 0;
+  let pending = 0;
+  let failed = 0;
+  for (const stage of pipeline.stages) {
+    for (const job of stage.jobs) {
+      switch (job.status) {
+        case "success":
+          passed += 1;
+          break;
+        case "running":
+          running += 1;
+          break;
+        case "pending":
+        case "created":
+        case "manual":
+          pending += 1;
+          break;
+        case "failed":
+          failed += 1;
+          break;
+        default:
+          break;
+      }
+    }
+  }
+  const parts: string[] = [];
+  if (passed > 0) parts.push(`${passed} passed`);
+  if (running > 0) parts.push(`${running} running`);
+  if (pending > 0) parts.push(`${pending} pending`);
+  if (failed > 0) parts.push(`${failed} failed`);
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+// Single-char status glyph for the compact rail check rows (mockup ✓ / ✕ / ◷ / ▸ / ○).
+function pipelineStatusGlyph(status: ForgePipelineRun["status"]): string {
+  switch (status) {
+    case "success":
+      return "✓";
+    case "failed":
+      return "✕";
+    case "running":
+    case "pending":
+    case "created":
+      return "◷";
+    case "manual":
+      return "▸";
+    case "canceled":
+    case "skipped":
+      return "○";
+    default:
+      return "◦";
+  }
+}
+
+// Header glyph for the review panel, colored to the review decision.
+function ReviewGlyph({ decision }: { decision: ForgeChangeRequestSummary["reviewDecision"] }) {
+  const { theme } = useUnistyles();
+  const color = reviewDotColor(decision, theme);
+  if (!color) {
+    return <Text style={[styles.ciGlyph, { color: theme.colors.foregroundMuted }]}>○</Text>;
+  }
+  const ch = decision === "approved" ? "✓" : decision === "changes_requested" ? "✕" : "◷";
+  return <Text style={[styles.ciGlyph, { color }]}>{ch}</Text>;
+}
+
+// Header glyph for the merge panel: "!" (warning) while the CR is open and mergeable,
+// muted "○" once it is merged/closed/draft.
+function MergeGlyph({ mergeable }: { mergeable: boolean }) {
+  const { theme } = useUnistyles();
+  const color = mergeable ? theme.colors.statusWarning : theme.colors.foregroundMuted;
+  return <Text style={[styles.ciGlyph, { color }]}>{mergeable ? "!" : "○"}</Text>;
+}
+
+// Checks tab body: if the PR head has a pipeline run, render its stage→job tree;
+// otherwise keep the summary aggregate (§19.6.3 Checks). Presentational — the fetch
+// lives in usePipelineChecks at the PullRequestDetail level.
+function ChecksTab({
+  pipeline,
+  loading,
+  cr,
+}: {
+  pipeline: ForgePipelineDetail | null;
+  loading: boolean;
+  cr: ForgeChangeRequestSummary;
+}) {
   if (pipeline) {
     return (
       <View style={styles.card}>
@@ -2607,6 +2716,8 @@ function ChecksTab({
     );
   }
 
+  if (loading) return <SkeletonRows rows={4} />;
+
   return (
     <View style={styles.card}>
       <View style={styles.checkRow}>
@@ -2618,6 +2729,114 @@ function ChecksTab({
         <Text style={styles.rowSub}>Review</Text>
         <View style={styles.grow} />
         <ReviewSummary decision={cr.reviewDecision} />
+      </View>
+    </View>
+  );
+}
+
+// Right-rail Checks panel (mockup artboard 1). Header: status glyph + "Checks" + a
+// derived "N passed · N running · …" summary; body: one compact row per job. Reuses
+// the shared pipeline fetch; falls back to a "Load checks" affordance / the CR-level
+// aggregate when no per-job data is available.
+function ChecksRailPanel({
+  pipeline,
+  loading,
+  loaded,
+  onLoad,
+  cr,
+  pipelinesEnabled,
+}: {
+  pipeline: ForgePipelineDetail | null;
+  loading: boolean;
+  loaded: boolean;
+  onLoad: () => void;
+  cr: ForgeChangeRequestSummary;
+  pipelinesEnabled: boolean;
+}) {
+  const summary = summarizePipelineJobs(pipeline);
+  const jobs = pipeline ? pipeline.stages.flatMap((stage) => stage.jobs) : [];
+  return (
+    <View style={styles.mergebox}>
+      <View style={styles.mergeboxHeader}>
+        <CiGlyph status={cr.checksStatus} />
+        <Text style={styles.mergeboxTitle}>Checks</Text>
+        <View style={styles.grow} />
+        {summary ? (
+          <Text style={styles.railSummary}>{summary}</Text>
+        ) : (
+          <ChecksSummary status={cr.checksStatus} />
+        )}
+      </View>
+      <View style={styles.mergeboxBody}>
+        {jobs.length > 0 ? (
+          jobs.map((job, index) => <RailCheckRow key={job.id} job={job} divider={index > 0} />)
+        ) : loading ? (
+          <Text style={styles.mergeReason}>Loading checks…</Text>
+        ) : !loaded && pipelinesEnabled ? (
+          <Pressable
+            style={[styles.btn, styles.btnGhost]}
+            onPress={onLoad}
+            testID="forge-rail-load-checks"
+          >
+            <Text style={styles.btnGhostText}>Load checks</Text>
+          </Pressable>
+        ) : (
+          <ChecksSummary status={cr.checksStatus} />
+        )}
+      </View>
+    </View>
+  );
+}
+
+// Compact rail check row: glyph + job name + duration (or status label when the
+// forge omits the duration).
+function RailCheckRow({ job, divider }: { job: ForgePipelineJob; divider: boolean }) {
+  const statusColor = usePipelineStatusColor();
+  const color = statusColor(job.status);
+  const duration = formatDuration(job.durationSeconds);
+  return (
+    <View style={[styles.railCheckRow, divider && styles.railCheckRowDivider]}>
+      <Text style={[styles.ciGlyph, { color }]}>{pipelineStatusGlyph(job.status)}</Text>
+      <Text style={styles.railCheckName} numberOfLines={1}>
+        {job.name}
+      </Text>
+      <View style={styles.grow} />
+      <Text style={[styles.metaMuted, { color }]}>
+        {duration || pipelineStatusLabel(job.status)}
+      </Text>
+    </View>
+  );
+}
+
+// Right-rail "Details" metagrid (mockup artboard 1). Renders only the fields the CR
+// summary actually carries — Labels (as chips), Base→head branches, Author. Milestone,
+// linked issue, and a per-assignee field aren't in ForgeChangeRequestSummary, so they
+// are omitted rather than fabricated (see report note).
+function DetailsRailPanel({ cr }: { cr: ForgeChangeRequestSummary }) {
+  const hasLabels = Boolean(cr.labels && cr.labels.length > 0);
+  const hasBranches = Boolean(cr.headRef || cr.baseRef);
+  const hasAuthor = Boolean(cr.authorLogin);
+  if (!hasLabels && !hasBranches && !hasAuthor) return null;
+  return (
+    <View style={styles.railDetails}>
+      <Text style={styles.sectionTitle}>Details</Text>
+      <View style={styles.metaGrid}>
+        {hasLabels ? (
+          <View style={styles.metaRow}>
+            <Text style={styles.metaKey}>Labels</Text>
+            <View style={styles.railLabels}>
+              {cr.labels?.map((label) => (
+                <View key={label} style={styles.plainChip}>
+                  <Text style={styles.plainChipText}>{label}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        ) : null}
+        {hasBranches ? (
+          <MetaRow k="Branches" v={`${cr.headRef ?? "?"} → ${cr.baseRef ?? "?"}`} mono />
+        ) : null}
+        {hasAuthor ? <MetaRow k="Author" v={`@${cr.authorLogin}`} /> : null}
       </View>
     </View>
   );
@@ -2729,12 +2948,21 @@ function PullRequestDetail({
   onReviewed: () => void;
 }) {
   const { theme } = useUnistyles();
+  const isCompact = useIsCompactFormFactor();
   const [tab, setTab] = useState<DetailTab>("conversation");
   const def = getForgeDefinitionOrNeutral(repo.forge);
 
   const [commits, setCommits] = useState<ForgeCommit[] | null>(null);
   const [commitsLoading, setCommitsLoading] = useState(false);
   const [commitsError, setCommitsError] = useState<string | null>(null);
+
+  // Shared pipeline fetch: feeds both the Checks tab (left) and the rail Checks panel.
+  const {
+    pipeline,
+    loading: checksLoading,
+    loaded: checksLoaded,
+    load: loadChecks,
+  } = usePipelineChecks(client, repo, cr, pipelinesEnabled);
 
   useEffect(() => {
     if (tab === "files" && files === null && !filesLoading) {
@@ -2825,38 +3053,92 @@ function PullRequestDetail({
         </Pressable>
       </View>
 
-      <View
-        style={styles.tabsRow}
-        accessibilityLabel={`${def.changeRequestNoun} ${def.changeRequestNumberPrefix}${cr.number}`}
-      >
-        <TabButton label="Conversation" active={tab === "conversation"} onPress={setConversation} />
-        <TabButton
-          label="Commits"
-          count={commitsCount}
-          active={tab === "commits"}
-          onPress={setCommitsTab}
-        />
-        <TabButton
-          label="Files changed"
-          count={filesCount}
-          active={tab === "files"}
-          onPress={setFiles}
-        />
-        <TabButton label="Checks" active={tab === "checks"} onPress={setChecks} />
-      </View>
-
-      {tab === "conversation" ? (
-        <>
-          <View style={styles.card}>
-            <View style={styles.metaGrid}>
-              <MetaRow k="Branches" v={`${cr.headRef ?? "?"} → ${cr.baseRef ?? "?"}`} mono />
-              <MetaRow k="Author" v={cr.authorLogin ? `@${cr.authorLogin}` : "—"} />
-              <MetaRow k="Updated" v={formatRelativeMs(cr.updatedAt_ms) || "—"} />
-              {cr.labels && cr.labels.length > 0 ? (
-                <MetaRow k="Labels" v={cr.labels.join(", ")} />
-              ) : null}
-            </View>
+      <View style={[styles.detailBody, isCompact && styles.detailBodyColumn]}>
+        {/* Left column: tab bar + tab content (conversation · commits · files · checks). */}
+        <View style={[styles.detailLeft, isCompact && styles.detailLeftCompact]}>
+          <View
+            style={styles.tabsRow}
+            accessibilityLabel={`${def.changeRequestNoun} ${def.changeRequestNumberPrefix}${cr.number}`}
+          >
+            <TabButton
+              label="Conversation"
+              active={tab === "conversation"}
+              onPress={setConversation}
+            />
+            <TabButton
+              label="Commits"
+              count={commitsCount}
+              active={tab === "commits"}
+              onPress={setCommitsTab}
+            />
+            <TabButton
+              label="Files changed"
+              count={filesCount}
+              active={tab === "files"}
+              onPress={setFiles}
+            />
+            <TabButton label="Checks" active={tab === "checks"} onPress={setChecks} />
           </View>
+
+          {tab === "conversation" ? (
+            <View style={styles.card}>
+              <View style={styles.metaGrid}>
+                <MetaRow k="Branches" v={`${cr.headRef ?? "?"} → ${cr.baseRef ?? "?"}`} mono />
+                <MetaRow k="Author" v={cr.authorLogin ? `@${cr.authorLogin}` : "—"} />
+                <MetaRow k="Updated" v={formatRelativeMs(cr.updatedAt_ms) || "—"} />
+                {cr.labels && cr.labels.length > 0 ? (
+                  <MetaRow k="Labels" v={cr.labels.join(", ")} />
+                ) : null}
+              </View>
+            </View>
+          ) : null}
+
+          {tab === "commits" ? (
+            commitsError ? (
+              <View style={styles.errorBanner}>
+                <CircleAlert size={16} color={theme.colors.statusDanger} />
+                <Text style={styles.errorText}>{commitsError}</Text>
+                <Pressable style={[styles.btn, styles.btnGhost]} onPress={loadCommits}>
+                  <Text style={styles.btnGhostText}>Retry</Text>
+                </Pressable>
+              </View>
+            ) : commitsLoading || commits === null ? (
+              <SkeletonRows />
+            ) : commits.length === 0 ? (
+              <Text style={styles.emptyText}>No commits in this range.</Text>
+            ) : (
+              <View style={styles.card}>
+                {commits.map((commit) => (
+                  <CommitRow key={commit.sha} commit={commit} />
+                ))}
+              </View>
+            )
+          ) : null}
+
+          {tab === "checks" ? (
+            <ChecksTab pipeline={pipeline} loading={checksLoading} cr={cr} />
+          ) : null}
+
+          {tab === "files" ? (
+            <DiffFileList
+              files={files}
+              loading={filesLoading}
+              error={filesError}
+              onRetry={onLoadFiles}
+            />
+          ) : null}
+        </View>
+
+        {/* Right rail: mergebox-style panels — Checks · Reviews · Merge · Details. */}
+        <View style={[styles.detailRail, isCompact && styles.detailRailCompact]}>
+          <ChecksRailPanel
+            pipeline={pipeline}
+            loading={checksLoading}
+            loaded={checksLoaded}
+            onLoad={loadChecks}
+            cr={cr}
+            pipelinesEnabled={pipelinesEnabled}
+          />
           {reviewEnabled ? (
             <>
               <ReviewBox client={client} repo={repo} cr={cr} onReviewed={onReviewed} />
@@ -2871,43 +3153,9 @@ function PullRequestDetail({
               ) : null}
             </>
           ) : null}
-        </>
-      ) : null}
-
-      {tab === "commits" ? (
-        commitsError ? (
-          <View style={styles.errorBanner}>
-            <CircleAlert size={16} color={theme.colors.statusDanger} />
-            <Text style={styles.errorText}>{commitsError}</Text>
-            <Pressable style={[styles.btn, styles.btnGhost]} onPress={loadCommits}>
-              <Text style={styles.btnGhostText}>Retry</Text>
-            </Pressable>
-          </View>
-        ) : commitsLoading || commits === null ? (
-          <SkeletonRows />
-        ) : commits.length === 0 ? (
-          <Text style={styles.emptyText}>No commits in this range.</Text>
-        ) : (
-          <View style={styles.card}>
-            {commits.map((commit) => (
-              <CommitRow key={commit.sha} commit={commit} />
-            ))}
-          </View>
-        )
-      ) : null}
-
-      {tab === "checks" ? (
-        <ChecksTab client={client} repo={repo} cr={cr} pipelinesEnabled={pipelinesEnabled} />
-      ) : null}
-
-      {tab === "files" ? (
-        <DiffFileList
-          files={files}
-          loading={filesLoading}
-          error={filesError}
-          onRetry={onLoadFiles}
-        />
-      ) : null}
+          <DetailsRailPanel cr={cr} />
+        </View>
+      </View>
     </View>
   );
 }
@@ -7549,6 +7797,66 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
     gap: theme.spacing[2],
     flexWrap: "wrap",
+  },
+  // two-column PR body: tabbed left column + fixed-width mergebox rail (mockup
+  // artboard 1). Stacks to a single column on a compact form factor.
+  detailBody: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
+  detailBodyColumn: {
+    flexDirection: "column",
+    gap: theme.spacing[4],
+  },
+  detailLeft: {
+    flex: 1,
+    minWidth: 0,
+    gap: theme.spacing[3],
+    borderRightWidth: theme.borderWidth[1],
+    borderRightColor: theme.colors.border,
+    paddingRight: theme.spacing[4],
+  },
+  detailLeftCompact: {
+    borderRightWidth: 0,
+    paddingRight: 0,
+  },
+  detailRail: {
+    width: 340,
+    flexShrink: 0,
+    gap: theme.spacing[3],
+    paddingLeft: theme.spacing[4],
+  },
+  detailRailCompact: {
+    width: "100%",
+    paddingLeft: 0,
+  },
+  railSummary: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+  },
+  railCheckRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    paddingVertical: theme.spacing[1.5],
+  },
+  railCheckRowDivider: {
+    borderTopWidth: theme.borderWidth[1],
+    borderTopColor: theme.colors.border,
+  },
+  railCheckName: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foreground,
+    flexShrink: 1,
+  },
+  railDetails: {
+    gap: theme.spacing[2],
+  },
+  railLabels: {
+    flex: 1,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: theme.spacing[1],
   },
   tabsRow: {
     flexDirection: "row",
