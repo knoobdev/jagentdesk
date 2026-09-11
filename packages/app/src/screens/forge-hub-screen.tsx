@@ -7036,21 +7036,14 @@ export function ForgeHubScreen() {
           </View>
         )}
         <View style={[styles.sidebar, isCompact && styles.sidebarStacked]}>
-          <Pressable
+          {/* No big "Forge Hub" header — the titlebar already labels the screen.
+              The sidebar starts with the Jump-to-repo field. */}
+          <View
             style={[
-              styles.sidebarHeader,
-              // Compact keeps the safe-area inset; on desktop the titlebar strip
-              // above the shell already clears the window controls.
-              isCompact ? { paddingTop: insets.top + 12 } : null,
+              styles.sidebarField,
+              isCompact ? { marginTop: insets.top + 12 } : { marginTop: theme.spacing[3] },
             ]}
-            onPress={goToRepoList}
-            testID="forge-sidebar-home"
           >
-            <GitBranch size={18} color={theme.colors.foreground} />
-            <Text style={styles.sidebarTitle}>Forge Hub</Text>
-          </Pressable>
-
-          <View style={styles.sidebarField}>
             <Search size={14} color={theme.colors.foregroundMuted} />
             <TextInput
               style={styles.sidebarFieldInput}
@@ -7111,7 +7104,9 @@ const styles = StyleSheet.create((theme) => ({
     flexShrink: 0,
     flexDirection: "row",
     alignItems: "center",
-    paddingLeft: 96,
+    // Clear BOTH the macOS traffic lights and the app's window-sidebar toggle,
+    // which overlay the top-left, so the title text isn't covered by them.
+    paddingLeft: 148,
     paddingRight: theme.spacing[3],
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,
