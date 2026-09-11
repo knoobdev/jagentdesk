@@ -6968,14 +6968,6 @@ export function ForgeHubScreen() {
 
   return (
     <View style={styles.container}>
-      {isCompact ? null : (
-        // Top titlebar strip: reserves the top-left zone for the macOS traffic
-        // lights + the app window-sidebar toggle so the rail/sidebar below never
-        // sit under them (mockup's titlebar). Left padding clears both controls.
-        <View style={styles.titlebar}>
-          <Text style={styles.titlebarText}>JAgentDesk · Forge Hub</Text>
-        </View>
-      )}
       <View style={[styles.shell, isCompact && styles.shellStacked]}>
         {isCompact ? null : (
           <View style={styles.railCol}>
@@ -7041,7 +7033,9 @@ export function ForgeHubScreen() {
           <View
             style={[
               styles.sidebarField,
-              isCompact ? { marginTop: insets.top + 12 } : { marginTop: theme.spacing[3] },
+              // Clear the traffic lights + window toggle at top (desktop); keep
+              // the safe-area inset on compact.
+              isCompact ? { marginTop: insets.top + 12 } : { marginTop: 38 },
             ]}
           >
             <Search size={14} color={theme.colors.foregroundMuted} />
@@ -7096,26 +7090,6 @@ const styles = StyleSheet.create((theme) => ({
     minHeight: 0,
     backgroundColor: theme.colors.surface0,
   },
-  // Top titlebar strip (desktop). Height fits the macOS traffic lights; the left
-  // pad clears the lights + the app window-sidebar toggle so the title/shell are
-  // never covered. Mirrors the mockup's window titlebar.
-  titlebar: {
-    height: 38,
-    flexShrink: 0,
-    flexDirection: "row",
-    alignItems: "center",
-    // Clear BOTH the macOS traffic lights and the app's window-sidebar toggle,
-    // which overlay the top-left, so the title text isn't covered by them.
-    paddingLeft: 148,
-    paddingRight: theme.spacing[3],
-    borderBottomWidth: theme.borderWidth[1],
-    borderBottomColor: theme.colors.border,
-    backgroundColor: theme.colors.surface0,
-  },
-  titlebarText: {
-    fontSize: theme.fontSize.xs,
-    color: theme.colors.foregroundMuted,
-  },
   scroll: {
     flex: 1,
     minHeight: 0,
@@ -7142,9 +7116,11 @@ const styles = StyleSheet.create((theme) => ({
     flexShrink: 0,
     flexDirection: "column",
     alignItems: "center",
-    // Clearance for the top window controls is handled by the titlebar strip
-    // above the shell, so the rail uses normal vertical padding.
-    paddingVertical: theme.spacing[3],
+    // Top padding clears the macOS traffic lights + the app window-sidebar
+    // toggle overlay (top-left). The empty strip above stays draggable so the
+    // window can still be moved.
+    paddingTop: 38,
+    paddingBottom: theme.spacing[3],
     gap: theme.spacing[1.5],
     backgroundColor: theme.colors.surfaceSidebar,
     borderRightWidth: theme.borderWidth[1],
