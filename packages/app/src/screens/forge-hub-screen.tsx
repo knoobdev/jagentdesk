@@ -614,7 +614,7 @@ function ConnStatusPill({ connection }: { connection: ForgeConnection }) {
   const { label } = connectionStatus(connection, theme);
   let containerStyle = styles.statusPillNeutral;
   let textStyle = styles.statusPillNeutralText;
-  let dotColor = "#717574"; // mockup exact value (--fgExtraMuted)
+  let dotColor = theme.colors.foregroundExtraMuted; // neutral dot; theme-aware
   switch (connection.authState) {
     case "authenticated":
       containerStyle = styles.statusPillSuccess;
@@ -6341,6 +6341,12 @@ export function ForgeHubScreen() {
   // run lands on Connections so a user with no accounts can connect; opening a
   // repo moves the section to Code/Overview (see handleOpenRepo).
   const [section, setSection] = useState<Section>("connections");
+  // Compact (mobile) master-detail: the rail+sidebar and the main pane cannot
+  // both stack in a bounded column without squeezing the content to nothing, so
+  // on a narrow width we show ONE at a time — the nav ("menu"), or the selected
+  // content. Nav actions flip this to `true`; the toolbar back button flips it
+  // back. Ignored on wide layouts (both panes always visible).
+  const [compactDetail, setCompactDetail] = useState(false);
   const [repoQuery, setRepoQuery] = useState("");
   const [connections, setConnections] = useState<ForgeConnection[]>([]);
   const [connectionsError, setConnectionsError] = useState<string | null>(null);
@@ -6497,6 +6503,7 @@ export function ForgeHubScreen() {
       setCrLimit(PAGE_SIZE);
       // Land on Code when available, else the gate-free Overview.
       setSection(codeEnabled ? "code" : "overview");
+      setCompactDetail(true);
       void loadChangeRequests(repo, "open");
     },
     [loadChangeRequests, codeEnabled],
@@ -6628,7 +6635,10 @@ export function ForgeHubScreen() {
   const hasConnections = connections.length > 0;
 
   // Sidebar navigation handlers.
-  const handleSelectSection = useCallback((next: Section) => setSection(next), []);
+  const handleSelectSection = useCallback((next: Section) => {
+    setSection(next);
+    setCompactDetail(true);
+  }, []);
   // The sidebar header doubles as "home": clear the repo and show the picker.
   const goToRepoList = useCallback(() => {
     setSelectedRepo(null);
@@ -6636,13 +6646,17 @@ export function ForgeHubScreen() {
     setRepoQuery("");
     setSection("overview");
   }, []);
-  const goToConnections = useCallback(() => setSection("connections"), []);
+  const goToConnections = useCallback(() => {
+    setSection("connections");
+    setCompactDetail(true);
+  }, []);
   // Open the full repo browser (search + account filter + Load more). Keeps any
   // selected repo so the user can jump back to it; the main pane swaps to the
   // full RepositoriesView because the section takes precedence over selectedRepo.
   const goToRepositories = useCallback(() => {
     setRepoQuery("");
     setSection("repositories");
+    setCompactDetail(true);
   }, []);
 
   // Connection footer status dot per §19.3.4 (authenticated=success,
@@ -7160,56 +7174,70 @@ export function ForgeHubScreen() {
             />
           </View>
         )}
-        <View style={[styles.sidebar, isCompact && styles.sidebarStacked]}>
-          {/* No big "Forge Hub" header — the titlebar already labels the screen.
+        {/* On compact we show the sidebar (nav) OR the main pane, never both
+            stacked — stacking squeezes the content to zero height. */}
+        {!isCompact || !compactDetail ? (
+          <View style={[styles.sidebar, isCompact && styles.sidebarStacked]}>
+            {/* No big "Forge Hub" header — the titlebar already labels the screen.
               The sidebar starts with the Jump-to-repo field. */}
-          <View
-            style={[
-              styles.sidebarField,
-              isCompact ? { marginTop: insets.top + 12 } : { marginTop: theme.spacing[3] },
-            ]}
-          >
-            <Search size={14} color={theme.colors.foregroundMuted} />
-            <TextInput
-              style={styles.sidebarFieldInput}
-              value={repoQuery}
-              onChangeText={setRepoQuery}
-              placeholder="Jump to repo…"
-              placeholderTextColor={theme.colors.foregroundExtraMuted}
-              autoCapitalize="none"
-              autoCorrect={false}
-              testID="forge-jump-to-repo"
-            />
-          </View>
+            <View
+              style={[
+                styles.sidebarField,
+                isCompact ? { marginTop: insets.top + 12 } : { marginTop: theme.spacing[3] },
+              ]}
+            >
+              <Search size={14} color={theme.colors.foregroundMuted} />
+              <TextInput
+                style={styles.sidebarFieldInput}
+                value={repoQuery}
+                onChangeText={setRepoQuery}
+                placeholder="Jump to repo…"
+                placeholderTextColor={theme.colors.foregroundExtraMuted}
+                autoCapitalize="none"
+                autoCorrect={false}
+                testID="forge-jump-to-repo"
+              />
+            </View>
 
-          {isCompact ? (
-            <View style={styles.sidebarScrollContent}>{navInner}</View>
-          ) : (
             <ScrollView
               style={styles.sidebarScroll}
               contentContainerStyle={styles.sidebarScrollContent}
             >
               {navInner}
             </ScrollView>
-          )}
 
-          {footer}
-        </View>
+            {footer}
+          </View>
+        ) : null}
 
-        <View style={styles.main}>
-          <View style={styles.toolbar}>{renderToolbar()}</View>
-
-          {connectionsError ? (
-            <View style={styles.errorBanner}>
-              <CircleAlert size={16} color={theme.colors.statusDanger} />
-              <Text style={styles.errorText}>{connectionsError}</Text>
+        {!isCompact || compactDetail ? (
+          <View style={styles.main}>
+            <View style={styles.toolbar}>
+              {isCompact ? (
+                <Pressable
+                  onPress={() => setCompactDetail(false)}
+                  style={styles.compactBack}
+                  testID="forge-compact-back"
+                  accessibilityLabel="Back to menu"
+                >
+                  <ArrowLeft size={18} color={theme.colors.foreground} />
+                </Pressable>
+              ) : null}
+              {renderToolbar()}
             </View>
-          ) : null}
 
-          <ScrollView style={styles.scroll} contentContainerStyle={styles.contentContainer}>
-            {renderMain()}
-          </ScrollView>
-        </View>
+            {connectionsError ? (
+              <View style={styles.errorBanner}>
+                <CircleAlert size={16} color={theme.colors.statusDanger} />
+                <Text style={styles.errorText}>{connectionsError}</Text>
+              </View>
+            ) : null}
+
+            <ScrollView style={styles.scroll} contentContainerStyle={styles.contentContainer}>
+              {renderMain()}
+            </ScrollView>
+          </View>
+        ) : null}
       </View>
     </View>
   );
@@ -7296,11 +7324,20 @@ const styles = StyleSheet.create((theme) => ({
     borderRightColor: theme.colors.border,
   },
   sidebarStacked: {
+    // On compact the sidebar is shown alone (master-detail), so it fills the
+    // screen and its inner ScrollView scrolls the nav.
+    flex: 1,
     width: "100%",
     flexBasis: "auto",
     borderRightWidth: 0,
-    borderBottomWidth: theme.borderWidth[1],
-    borderBottomColor: theme.colors.border,
+  },
+  // Back-to-menu control in the compact toolbar.
+  compactBack: {
+    width: 32,
+    height: 32,
+    marginLeft: -4,
+    alignItems: "center",
+    justifyContent: "center",
   },
   sidebarHeader: {
     flexDirection: "row",
@@ -7511,7 +7548,7 @@ const styles = StyleSheet.create((theme) => ({
   connSecTitle: {
     fontSize: 12, // mockup exact value (.sec-title font-size)
     fontWeight: "600", // mockup exact value
-    color: "#A1A5A4", // mockup exact value (--fgMuted)
+    color: theme.colors.foregroundMuted, // mockup exact value (--fgMuted)
     textTransform: "uppercase",
     letterSpacing: 0.4, // mockup exact value
     marginBottom: 10, // mockup exact value (.sec-title margin 0 0 10 2)
@@ -7534,8 +7571,8 @@ const styles = StyleSheet.create((theme) => ({
   card: {
     borderRadius: 8, // mockup exact value (.card border-radius --r-lg)
     borderWidth: 1, // mockup exact value (.card border)
-    borderColor: "#252B2A", // mockup exact value (--border)
-    backgroundColor: "#1E2120", // mockup exact value (--surface1)
+    borderColor: theme.colors.border, // mockup exact value (--border)
+    backgroundColor: theme.colors.surface1, // mockup exact value (--surface1)
     overflow: "hidden",
   },
   row: {
@@ -7555,12 +7592,12 @@ const styles = StyleSheet.create((theme) => ({
     gap: 12, // mockup exact value (.row gap)
     paddingHorizontal: 14, // mockup exact value (.row padding 14px)
     paddingVertical: 13, // mockup exact value (.row padding 13px)
-    backgroundColor: "#181B1A", // mockup exact value (.row.head --surface0)
+    backgroundColor: theme.colors.surface0, // mockup exact value (.row.head --surface0)
   },
   connHeadText: {
     fontSize: 11, // mockup exact value (.row.head font-size)
     fontWeight: "600", // mockup exact value
-    color: "#A1A5A4", // mockup exact value (--fgMuted)
+    color: theme.colors.foregroundMuted, // mockup exact value (--fgMuted)
     textTransform: "uppercase",
     letterSpacing: 0.4, // mockup exact value
   },
@@ -7573,7 +7610,7 @@ const styles = StyleSheet.create((theme) => ({
     paddingHorizontal: 14, // mockup exact value (.row padding 14px)
     paddingVertical: 13, // mockup exact value (.row padding 13px)
     borderTopWidth: 1, // mockup exact value (.row + .row border-top)
-    borderTopColor: "#252B2A", // mockup exact value (--border)
+    borderTopColor: theme.colors.border, // mockup exact value (--border)
   },
   connColGrow: {
     flex: 1,
@@ -7626,18 +7663,18 @@ const styles = StyleSheet.create((theme) => ({
   // handle is bolded via connAccountName (mockup `<b>@user</b>`).
   connRowTitle: {
     fontSize: 14, // mockup exact value (.row .t font-size)
-    color: "#fafafa", // mockup exact value (--fg)
+    color: theme.colors.foreground, // mockup exact value (--fg)
   },
   // ".row .h" — mono transport hint under the title.
   connRowSub: {
     fontSize: 12, // mockup exact value (.row .h font-size)
-    color: "#A1A5A4", // mockup exact value (--fgMuted)
+    color: theme.colors.foregroundMuted, // mockup exact value (--fgMuted)
     marginTop: 3, // mockup exact value (.row .h margin-top)
     fontFamily: theme.fontFamily.mono,
   },
   connAccountName: {
     fontWeight: "700", // mockup exact value (.row .t <b>)
-    color: "#fafafa", // mockup exact value (--fg)
+    color: theme.colors.foreground, // mockup exact value (--fg)
   },
   connAuthText: {
     fontSize: theme.fontSize.xs,
@@ -7811,7 +7848,7 @@ const styles = StyleSheet.create((theme) => ({
     backgroundColor: "rgba(34,197,94,0.16)", // mockup exact value (.g.ok)
   },
   issueGlyphClosed: {
-    backgroundColor: "#272A29", // mockup exact value (closed .g --surface2)
+    backgroundColor: theme.colors.surface2, // mockup exact value (closed .g --surface2)
   },
   issueGlyphText: {
     fontSize: 10, // mockup exact value (.g font-size)
@@ -7847,13 +7884,13 @@ const styles = StyleSheet.create((theme) => ({
     paddingVertical: 1, // mockup exact value (1px)
     borderRadius: 9999, // mockup exact value (--r-full)
     borderWidth: 1, // mockup exact value
-    borderColor: "#252B2A", // mockup exact value (.pill.plain border --border)
+    borderColor: theme.colors.border, // mockup exact value (.pill.plain border --border)
     backgroundColor: "transparent", // mockup exact value (.pill.plain)
   },
   plainChipText: {
     fontSize: 11.5, // mockup exact value (.pill font-size)
     fontWeight: "600", // mockup exact value (.pill font-weight)
-    color: "#A1A5A4", // mockup exact value (--fgMuted)
+    color: theme.colors.foregroundMuted, // mockup exact value (--fgMuted)
   },
   // "auto-scroll" toggle pill in its on state (log header, mockup artboard 4).
   plainChipActive: {
@@ -7869,32 +7906,32 @@ const styles = StyleSheet.create((theme) => ({
     width: 26, // mockup exact value (.logo)
     height: 26,
     borderRadius: 6, // mockup exact value (.logo --r-md)
-    backgroundColor: "#272A29", // mockup exact value (--surface2)
+    backgroundColor: theme.colors.surface2, // mockup exact value (--surface2)
     borderWidth: 1, // mockup exact value
-    borderColor: "#252B2A", // mockup exact value (--border)
+    borderColor: theme.colors.border, // mockup exact value (--border)
     alignItems: "center",
     justifyContent: "center",
   },
   badgeText: {
     fontSize: 12, // mockup exact value (.logo font-size)
     fontWeight: "700", // mockup exact value (.logo font-weight)
-    color: "#fafafa", // mockup exact value (--fg) — overridden per-forge inline
+    color: theme.colors.foreground, // mockup exact value (--fg) — overridden per-forge inline
   },
   // ".logo.sm" (mockup) — 20x20 at font-size 10, radius --r-base.
   badgeSm: {
     width: 20, // mockup exact value (.logo.sm)
     height: 20,
     borderRadius: 4, // mockup exact value (.logo.sm --r-base)
-    backgroundColor: "#272A29", // mockup exact value (--surface2)
+    backgroundColor: theme.colors.surface2, // mockup exact value (--surface2)
     borderWidth: 1, // mockup exact value
-    borderColor: "#252B2A", // mockup exact value (--border)
+    borderColor: theme.colors.border, // mockup exact value (--border)
     alignItems: "center",
     justifyContent: "center",
   },
   badgeSmText: {
     fontSize: 10, // mockup exact value (.logo.sm font-size)
     fontWeight: "700", // mockup exact value
-    color: "#fafafa", // mockup exact value (--fg) — overridden per-forge inline
+    color: theme.colors.foreground, // mockup exact value (--fg) — overridden per-forge inline
   },
   iconBtn: {
     padding: theme.spacing[1],
@@ -7929,7 +7966,7 @@ const styles = StyleSheet.create((theme) => ({
     borderRadius: theme.borderRadius.md,
   },
   btnPrimary: {
-    backgroundColor: "#20744A", // mockup exact value (.btn-primary --accent)
+    backgroundColor: theme.colors.accent,
   },
   btnPrimaryText: {
     fontSize: 12, // mockup exact value (.btn.sm font-size)
@@ -7947,7 +7984,7 @@ const styles = StyleSheet.create((theme) => ({
   // toolbar/action button (Refresh · Compare · Rerun · Open on … · Retry, etc.).
   btnGhost: {
     borderWidth: 1, // mockup exact value (.btn-outline border)
-    borderColor: "#2F3534", // mockup exact value (--borderAccent)
+    borderColor: theme.colors.borderAccent, // mockup exact value (--borderAccent)
     backgroundColor: "transparent", // mockup exact value (.btn-outline)
   },
   btnGhostText: {
@@ -8013,26 +8050,26 @@ const styles = StyleSheet.create((theme) => ({
     paddingHorizontal: 11, // mockup exact value (11px)
     borderRadius: 9999, // mockup exact value (--r-full)
     borderWidth: 1, // mockup exact value
-    borderColor: "#2F3534", // mockup exact value (--borderAccent)
-    backgroundColor: "#272A29", // mockup exact value (--surface2)
+    borderColor: theme.colors.borderAccent, // mockup exact value (--borderAccent)
+    backgroundColor: theme.colors.surface2, // mockup exact value (--surface2)
   },
   providerPillActive: {
-    borderColor: "#20744A", // mockup exact value (selected border --accent)
+    borderColor: theme.colors.accent,
   },
   providerPillText: {
     fontSize: 11.5, // mockup exact value (.pill font-size)
     fontWeight: "600", // mockup exact value (.pill font-weight)
-    color: "#A1A5A4", // mockup exact value (--fgMuted)
+    color: theme.colors.foregroundMuted, // mockup exact value (--fgMuted)
   },
   providerPillActiveText: {
-    color: "#fafafa", // mockup exact value (selected --fg)
+    color: theme.colors.foreground, // mockup exact value (selected --fg)
   },
   // ".card" nested under "Sign-in method" (mockup) — surface0 fill.
   signInCard: {
     borderRadius: 8, // mockup exact value (.card --r-lg)
     borderWidth: 1, // mockup exact value
-    borderColor: "#252B2A", // mockup exact value (--border)
-    backgroundColor: "#181B1A", // mockup exact value (--surface0)
+    borderColor: theme.colors.border, // mockup exact value (--border)
+    backgroundColor: theme.colors.surface0, // mockup exact value (--surface0)
     overflow: "hidden",
   },
   // ".row" inside the sign-in-method card (mockup padding 11px 13px).
@@ -8045,10 +8082,10 @@ const styles = StyleSheet.create((theme) => ({
   },
   signInRowBordered: {
     borderTopWidth: 1, // mockup exact value (.row + .row border-top)
-    borderTopColor: "#252B2A", // mockup exact value (--border)
+    borderTopColor: theme.colors.border, // mockup exact value (--border)
   },
   signInRowActive: {
-    backgroundColor: "#272A29", // mockup exact value (selection highlight --surface2)
+    backgroundColor: theme.colors.surface2, // mockup exact value (selection highlight --surface2)
   },
   // ".g" status glyph disc (mockup) — 16px circle with a centered dot.
   signInDot: {
@@ -8064,26 +8101,26 @@ const styles = StyleSheet.create((theme) => ({
   signInDotOkGlyph: {
     fontSize: 10, // mockup exact value (.g font-size)
     fontWeight: "800", // mockup exact value (.g font-weight)
-    color: "#4ade80", // mockup exact value (--green400)
+    color: theme.colors.statusSuccess,
   },
   signInDotSkip: {
-    backgroundColor: "#272A29", // mockup exact value (.g.skip --surface2)
+    backgroundColor: theme.colors.surface2, // mockup exact value (.g.skip --surface2)
   },
   signInDotSkipGlyph: {
     fontSize: 10, // mockup exact value (.g font-size)
     fontWeight: "800", // mockup exact value
-    color: "#717574", // mockup exact value (--fgExtraMuted)
+    color: theme.colors.foregroundExtraMuted, // mockup exact value (--fgExtraMuted)
   },
   signInTitle: {
     fontSize: 13, // mockup exact value (.t inline font-size:13px)
-    color: "#fafafa", // mockup exact value (--fg)
+    color: theme.colors.foreground, // mockup exact value (--fg)
   },
   signInMuted: {
-    color: "#A1A5A4", // mockup exact value (--fgMuted)
+    color: theme.colors.foregroundMuted, // mockup exact value (--fgMuted)
   },
   signInSub: {
     fontSize: 12, // mockup exact value (.row .h font-size)
-    color: "#A1A5A4", // mockup exact value (--fgMuted)
+    color: theme.colors.foregroundMuted, // mockup exact value (--fgMuted)
     marginTop: 3, // mockup exact value (.row .h margin-top)
   },
   // Status pill (mockup `.pill.success / .pending / .failed`).
@@ -8112,28 +8149,28 @@ const styles = StyleSheet.create((theme) => ({
     borderColor: "transparent", // mockup exact value (.pill.success border transparent)
   },
   statusPillSuccessText: {
-    color: "#7ee0a3", // mockup exact value (.pill.success color)
+    color: theme.colors.statusSuccess,
   },
   statusPillWarning: {
     backgroundColor: "rgba(245,158,11,0.13)", // mockup exact value (.pill.pending)
     borderColor: "transparent", // mockup exact value (.pill.pending border transparent)
   },
   statusPillWarningText: {
-    color: "#f0c273", // mockup exact value (.pill.pending color)
+    color: theme.colors.statusWarning,
   },
   statusPillDanger: {
     backgroundColor: "rgba(239,68,68,0.14)", // mockup exact value (.pill.failed)
     borderColor: "transparent", // mockup exact value (.pill.failed border transparent)
   },
   statusPillDangerText: {
-    color: "#fca5a5", // mockup exact value (--red300)
+    color: theme.colors.statusDanger,
   },
   statusPillNeutral: {
-    backgroundColor: "#272A29", // mockup exact value (.pill.manual --surface2)
-    borderColor: "#252B2A", // mockup exact value (.pill --border)
+    backgroundColor: theme.colors.surface2, // mockup exact value (.pill.manual --surface2)
+    borderColor: theme.colors.border, // mockup exact value (.pill --border)
   },
   statusPillNeutralText: {
-    color: "#A1A5A4", // mockup exact value (--fgMuted)
+    color: theme.colors.foregroundMuted, // mockup exact value (--fgMuted)
   },
   providerChip: {
     paddingHorizontal: theme.spacing[3],
@@ -8166,7 +8203,7 @@ const styles = StyleSheet.create((theme) => ({
   // "Provider" / "Sign-in method" labels (mockup `.muted` at font-size 12).
   connFieldLabel: {
     fontSize: 12, // mockup exact value
-    color: "#A1A5A4", // mockup exact value (--fgMuted)
+    color: theme.colors.foregroundMuted, // mockup exact value (--fgMuted)
     marginBottom: 8, // mockup exact value (label margin-bottom)
   },
   fieldLabel: {
@@ -8882,7 +8919,7 @@ const styles = StyleSheet.create((theme) => ({
   // file viewer, which grows inline).
   logSurface: {
     maxHeight: 480,
-    backgroundColor: "#0c0f0e", // mockup exact value (.log background)
+    backgroundColor: theme.colors.surface0, // mockup exact value (.log background)
   },
   // Read-only file viewer (§19). Box chrome + font for HighlightedCodeBlock,
   // which paints these onto its own wrapper. No maxHeight: the block renders
@@ -8905,7 +8942,7 @@ const styles = StyleSheet.create((theme) => ({
     fontFamily: theme.fontFamily.mono,
     fontSize: theme.fontSize.code,
     lineHeight: Math.round(theme.fontSize.code * 1.6), // mockup exact value (.log line-height 1.6)
-    color: "#c9d1d9", // mockup exact value (.log color)
+    color: theme.colors.foreground, // theme-aware (readable on light + dark)
   },
   logTruncated: {
     fontSize: theme.fontSize.xs,
