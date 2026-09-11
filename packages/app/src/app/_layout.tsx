@@ -518,6 +518,9 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
   const isCompactLayout = useIsCompactFormFactor();
   useCompactWebViewportZoomLock(isCompactLayout);
   const pathname = usePathname();
+  // Forge Hub renders its own thin icon-rail (forge-hub-screen.tsx), so on that
+  // route the wide app rail is hidden and Forge fills the full window width.
+  const onForge = !!pathname && pathname.endsWith("/forge");
   const isWorkspaceRoute = parseHostWorkspaceRouteFromPathname(pathname) !== null;
   const isWorkspaceFocusModeEnabled = isWorkspaceRoute && isFocusModeEnabled;
   const chromeEnabled = chromeEnabledOverride ?? daemons.length > 0;
@@ -590,7 +593,7 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
   );
   const workspaceChrome = (
     <View style={rowStyle}>
-      {!isCompactLayout ? (
+      {!isCompactLayout && !onForge ? (
         <WindowChromeRegion corners={appChromeLayout.sidebarCorners}>
           {sidebarChrome}
         </WindowChromeRegion>
@@ -602,7 +605,9 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
           </WindowChromeRegion>
         </CompactExplorerSidebarHost>
       ) : (
-        <WindowChromeRegion corners={appChromeLayout.contentCorners}>
+        // With the wide rail hidden on Forge, the content sits against the left
+        // window edge, so it must own both corners to keep the window rounded.
+        <WindowChromeRegion corners={onForge ? "both" : appChromeLayout.contentCorners}>
           <View style={flexStyle}>{children}</View>
         </WindowChromeRegion>
       )}

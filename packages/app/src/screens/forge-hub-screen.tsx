@@ -21,6 +21,8 @@ import {
 import {
   ArrowLeft,
   Ban,
+  BarChart3,
+  Boxes,
   Check,
   ChevronDown,
   ChevronRight,
@@ -28,6 +30,7 @@ import {
   CircleDot,
   Code,
   Copy,
+  Database,
   Download,
   ExternalLink,
   File,
@@ -37,6 +40,7 @@ import {
   GitCommit,
   GitCompare,
   GitPullRequest,
+  House,
   KeyRound,
   LogIn,
   MessageSquare,
@@ -46,6 +50,8 @@ import {
   RotateCcw,
   Search,
   Server,
+  Settings,
+  Sparkles,
   Tag,
   Trash2,
   X,
@@ -90,6 +96,15 @@ import {
 } from "@jagentdesk/protocol/messages";
 import { getForgeDefinitionOrNeutral } from "@jagentdesk/protocol/forge-manifest";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
+import { router } from "expo-router";
+import {
+  buildClustersRoute,
+  buildDatabasesRoute,
+  buildInsightsRoute,
+  buildOpenProjectRoute,
+  buildSettingsRoute,
+  buildSkillsRoute,
+} from "@/utils/host-routes";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { isWeb } from "@/constants/platform";
 import { useHostRouteServerId } from "@/navigation/host-route-context";
@@ -6123,6 +6138,40 @@ function SidebarNavItem({
 
 // ===== screen root =========================================================
 
+// One icon button in the Forge thin rail (mockup `.ri`). Active shows the accent
+// inset bar on the left; the icon brightens from muted to foreground.
+function ForgeRailButton({
+  icon: Icon,
+  label,
+  onPress,
+  active = false,
+  theme,
+  testID,
+}: {
+  icon: ComponentType<{ size?: number; color?: string }>;
+  label: string;
+  onPress?: () => void;
+  active?: boolean;
+  theme: Theme;
+  testID: string;
+}) {
+  return (
+    <Pressable
+      style={[styles.railItem, active && styles.railItemActive]}
+      onPress={onPress}
+      disabled={active}
+      accessible
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ selected: active }}
+      testID={testID}
+    >
+      {active ? <View style={styles.railAccent} /> : null}
+      <Icon size={20} color={active ? theme.colors.foreground : theme.colors.foregroundMuted} />
+    </Pressable>
+  );
+}
+
 export function ForgeHubScreen() {
   const { theme } = useUnistyles();
   const routeServerId = useHostRouteServerId();
@@ -6143,6 +6192,25 @@ export function ForgeHubScreen() {
   const cliInstallEnabled = useHostFeature(serverId, "forgeHubCliInstall");
   // §19.3.7: in-app device-flow sign-in for cli-method providers.
   const loginEnabled = useHostFeature(serverId, "forgeHubLogin");
+
+  // Thin icon-rail (mockup `.rail`): replicates the app's top-level nav as icons
+  // because the wide app rail is hidden while Forge fills the window (_layout.tsx).
+  // House leaves Forge back to the host home; the other destinations `router.push`
+  // to their surface. Only wired when a host is resolved.
+  const goAppHome = useCallback(() => router.push(buildOpenProjectRoute()), []);
+  const goClusters = useCallback(() => {
+    if (serverId) router.push(buildClustersRoute(serverId));
+  }, [serverId]);
+  const goDatabases = useCallback(() => {
+    if (serverId) router.push(buildDatabasesRoute(serverId));
+  }, [serverId]);
+  const goSkills = useCallback(() => {
+    if (serverId) router.push(buildSkillsRoute(serverId));
+  }, [serverId]);
+  const goInsights = useCallback(() => {
+    if (serverId) router.push(buildInsightsRoute(serverId));
+  }, [serverId]);
+  const goSettings = useCallback(() => router.push(buildSettingsRoute()), []);
 
   // Active main-pane section + the sidebar "Jump to repo…" filter query. First
   // run lands on Connections so a user with no accounts can connect; opening a
@@ -6873,6 +6941,64 @@ export function ForgeHubScreen() {
   return (
     <View style={styles.container}>
       <View style={[styles.shell, isCompact && styles.shellStacked]}>
+        {isCompact ? null : (
+          <View style={styles.railCol}>
+            <ForgeRailButton
+              icon={House}
+              label="Home"
+              onPress={goAppHome}
+              theme={theme}
+              testID="forge-rail-home"
+            />
+            {serverId ? (
+              <>
+                <ForgeRailButton
+                  icon={Boxes}
+                  label="Clusters"
+                  onPress={goClusters}
+                  theme={theme}
+                  testID="forge-rail-clusters"
+                />
+                <ForgeRailButton
+                  icon={Database}
+                  label="Databases"
+                  onPress={goDatabases}
+                  theme={theme}
+                  testID="forge-rail-databases"
+                />
+                <ForgeRailButton
+                  icon={Sparkles}
+                  label="Skills"
+                  onPress={goSkills}
+                  theme={theme}
+                  testID="forge-rail-skills"
+                />
+                <ForgeRailButton
+                  icon={BarChart3}
+                  label="Usage & Cost"
+                  onPress={goInsights}
+                  theme={theme}
+                  testID="forge-rail-insights"
+                />
+              </>
+            ) : null}
+            <ForgeRailButton
+              icon={GitPullRequest}
+              label="Forge"
+              active
+              theme={theme}
+              testID="forge-rail-forge"
+            />
+            <View style={styles.railSpacer} />
+            <ForgeRailButton
+              icon={Settings}
+              label="Settings"
+              onPress={goSettings}
+              theme={theme}
+              testID="forge-rail-settings"
+            />
+          </View>
+        )}
         <View style={[styles.sidebar, isCompact && styles.sidebarStacked]}>
           <Pressable
             style={[styles.sidebarHeader, isCompact ? { paddingTop: insets.top + 12 } : null]}
@@ -6954,6 +7080,43 @@ const styles = StyleSheet.create((theme) => ({
   // On a narrow width the two columns stack instead of sitting side by side.
   shellStacked: {
     flexDirection: "column",
+  },
+  // ===== thin icon rail (mockup `.rail`), desktop only =====
+  railCol: {
+    width: 56,
+    flexBasis: 56,
+    flexShrink: 0,
+    flexDirection: "column",
+    alignItems: "center",
+    paddingVertical: theme.spacing[3],
+    gap: theme.spacing[1.5],
+    backgroundColor: theme.colors.surfaceSidebar,
+    borderRightWidth: theme.borderWidth[1],
+    borderRightColor: theme.colors.border,
+  },
+  railItem: {
+    position: "relative",
+    width: 36,
+    height: 36,
+    borderRadius: theme.borderRadius.lg,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  railItemActive: {
+    backgroundColor: theme.colors.surfaceSidebarHover,
+  },
+  // The accent inset bar on the active rail item (mockup `.ri.active` box-shadow).
+  railAccent: {
+    position: "absolute",
+    left: 0,
+    top: 6,
+    bottom: 6,
+    width: 2,
+    borderRadius: 1,
+    backgroundColor: theme.colors.accent,
+  },
+  railSpacer: {
+    flex: 1,
   },
   sidebar: {
     width: 236,
