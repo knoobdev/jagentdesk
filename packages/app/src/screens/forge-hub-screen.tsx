@@ -605,6 +605,43 @@ function connectionStatus(
   }
 }
 
+// Status cell of the connected-accounts table (mockup artboard 2 `.pill.success
+// / .pending / .failed`): a tinted pill with a colored dot + label, keyed off
+// the connection's authState. Neutral states (never signed in / CLI missing)
+// fall back to the `.pill.manual` surface2 look.
+function ConnStatusPill({ connection }: { connection: ForgeConnection }) {
+  const { theme } = useUnistyles();
+  const { label } = connectionStatus(connection, theme);
+  let containerStyle = styles.statusPillNeutral;
+  let textStyle = styles.statusPillNeutralText;
+  let dotColor = "#717574"; // mockup exact value (--fgExtraMuted)
+  switch (connection.authState) {
+    case "authenticated":
+      containerStyle = styles.statusPillSuccess;
+      textStyle = styles.statusPillSuccessText;
+      dotColor = "#16a34a"; // mockup exact value (--success)
+      break;
+    case "token_expiring":
+      containerStyle = styles.statusPillWarning;
+      textStyle = styles.statusPillWarningText;
+      dotColor = "#f59e0b"; // mockup exact value (--warning)
+      break;
+    case "error":
+      containerStyle = styles.statusPillDanger;
+      textStyle = styles.statusPillDangerText;
+      dotColor = "#dc2626"; // mockup exact value (--danger)
+      break;
+    default:
+      break;
+  }
+  return (
+    <View style={[styles.statusPill, containerStyle]}>
+      <View style={[styles.statusPillDot, { backgroundColor: dotColor }]} />
+      <Text style={[styles.statusPillText, textStyle]}>{label}</Text>
+    </View>
+  );
+}
+
 // One row of the connected-accounts table (mockup artboard 2). Columns line up
 // with the header in ConnectionsView: Account (grow) · Auth · Status · actions.
 // No per-account checkbox — account selection lives in Repositories now.
@@ -620,7 +657,6 @@ function ConnectionRow({
 }) {
   const { theme } = useUnistyles();
   const def = getForgeDefinitionOrNeutral(connection.forge);
-  const status = connectionStatus(connection, theme);
   const [removing, setRemoving] = useState(false);
   // Blocks a setState after the row unmounts (removal drops it from the list).
   const mountedRef = useRef(true);
@@ -653,15 +689,15 @@ function ConnectionRow({
     <View style={styles.connRow}>
       <View style={styles.connColAccount}>
         <ProviderBadge forge={connection.forge} />
-        <View style={styles.rowInfo}>
-          <Text style={styles.rowTitle} numberOfLines={1}>
+        <View style={styles.connRowInfo}>
+          <Text style={styles.connRowTitle} numberOfLines={1}>
             {def.displayName}
             {connection.account ? " · " : ""}
             {connection.account ? (
               <Text style={styles.connAccountName}>{connection.account}</Text>
             ) : null}
           </Text>
-          <Text style={styles.rowSubMono} numberOfLines={1}>
+          <Text style={styles.connRowSub} numberOfLines={1}>
             {connection.host} · {subLabel}
           </Text>
         </View>
@@ -684,7 +720,7 @@ function ConnectionRow({
         )}
       </View>
       <View style={styles.connColStatus}>
-        <Chip label={status.label} color={status.color} />
+        <ConnStatusPill connection={connection} />
       </View>
       <View style={styles.connColActions}>
         {showReauth ? (
@@ -730,18 +766,18 @@ function ProviderChip({
   const handlePress = useCallback(() => onSelect(option.choice), [option.choice, onSelect]);
   return (
     <Pressable
-      style={[styles.providerCard, active && styles.providerCardActive]}
+      style={[styles.providerPill, active && styles.providerPillActive]}
       onPress={handlePress}
       testID={`forge-provider-${option.choice}`}
     >
       {option.choice === "selfhosted" ? (
-        <View style={styles.providerGlyph}>
-          <Server size={24} color={theme.colors.foreground} />
+        <View style={styles.badgeSm}>
+          <Server size={12} color={theme.colors.accentBright} />
         </View>
       ) : (
-        <ProviderBadge forge={option.forge} />
+        <ProviderBadge forge={option.forge} small />
       )}
-      <Text style={[styles.providerCardLabel, active && styles.providerCardLabelActive]}>
+      <Text style={[styles.providerPillText, active && styles.providerPillActiveText]}>
         {option.label}
       </Text>
     </Pressable>
@@ -1250,6 +1286,10 @@ function ConnectionsView({
 }) {
   const { theme } = useUnistyles();
   const [choice, setChoice] = useState<ProviderChoice>("github");
+  // Sign-in method selector (mockup artboard 2 "Sign-in method" rows). Defaults
+  // to the provider's native method and is re-synced when the provider changes,
+  // but the two method rows let the user override which input renders below.
+  const [method, setMethod] = useState<"cli" | "token">("cli");
   const [host, setHost] = useState("");
   const [token, setToken] = useState("");
   const [selfHostedForge, setSelfHostedForge] = useState("gitlab");
@@ -1278,6 +1318,14 @@ function ConnectionsView({
     () => PROVIDER_OPTIONS.find((o) => o.choice === choice) ?? PROVIDER_OPTIONS[0],
     [choice],
   );
+  // Re-sync the method to the provider's native default whenever the provider
+  // changes (GitHub/GitLab → cli, Bitbucket/Self-hosted → token). The method
+  // rows can still override it within a provider.
+  useEffect(() => {
+    setMethod(option.method);
+  }, [option.method]);
+  const selectCli = useCallback(() => setMethod("cli"), []);
+  const selectToken = useCallback(() => setMethod("token"), []);
   const def = getForgeDefinitionOrNeutral(choice === "selfhosted" ? selfHostedForge : option.forge);
 
   const handleSubmit = useCallback(() => {
@@ -1285,12 +1333,12 @@ function ConnectionsView({
     onAdd({
       forge,
       host: option.needsHost ? host.trim() || undefined : undefined,
-      method: option.method,
-      token: option.needsToken ? token.trim() || undefined : undefined,
+      method,
+      token: method === "token" ? token.trim() || undefined : undefined,
     });
     setHost("");
     setToken("");
-  }, [choice, selfHostedForge, option, host, token, onAdd]);
+  }, [choice, selfHostedForge, option, method, host, token, onAdd]);
 
   // In-app sign-in succeeded: refresh the account list, then collapse the add
   // form so the freshly-connected account is what the user sees (not a stale
@@ -1303,7 +1351,7 @@ function ConnectionsView({
   // The manual "Add connection" submit is only meaningful for token providers,
   // or a cli provider on a host that can't drive in-app sign-in. Otherwise the
   // CliInstallSection sign-in button is the single action.
-  const showManualAdd = option.method === "token" || !loginEnabled;
+  const showManualAdd = method === "token" || !loginEnabled;
 
   const setForgeGithub = useCallback(() => setSelfHostedForge("github"), []);
   const setForgeGitlab = useCallback(() => setSelfHostedForge("gitlab"), []);
@@ -1311,18 +1359,7 @@ function ConnectionsView({
 
   return (
     <View style={styles.pane}>
-      <View style={styles.sectionHeaderRow}>
-        <Text style={styles.sectionTitle}>Connected accounts</Text>
-        <View style={styles.grow} />
-        <Pressable
-          style={[styles.btn, styles.btnPrimary]}
-          onPress={onToggleAdd}
-          testID="forge-add-connection"
-        >
-          <Plus size={14} color={theme.colors.accentForeground} />
-          <Text style={styles.btnPrimaryText}>Add connection</Text>
-        </Pressable>
-      </View>
+      <Text style={styles.connSecTitle}>Connected accounts</Text>
 
       {connections.length === 0 ? (
         <Text style={styles.emptyText}>{CONNECTION_EMPTY_STATE}</Text>
@@ -1347,21 +1384,72 @@ function ConnectionsView({
       )}
 
       {/* "Add a connection" is always visible (mockup artboard 2) — no collapse
-          toggle. The top-right "+ Add connection" button and Re-auth still call
+          toggle. The toolbar "+ Add connection" button and Re-auth still call
           onToggleAdd (kept for parity/back-compat), but visibility no longer
           depends on the `adding` flag. */}
-      <Text style={styles.sectionTitle}>Add a connection</Text>
+      <Text style={styles.connSecTitle}>Add a connection</Text>
       <View style={styles.formCard}>
-        <Text style={styles.fieldLabel}>Provider</Text>
-        <View style={styles.providerGrid}>
-          {PROVIDER_OPTIONS.map((o) => (
-            <ProviderChip
-              key={o.choice}
-              option={o}
-              active={choice === o.choice}
-              onSelect={setChoice}
-            />
-          ))}
+        <View>
+          <Text style={styles.connFieldLabel}>Provider</Text>
+          <View style={styles.providerGrid}>
+            {PROVIDER_OPTIONS.map((o) => (
+              <ProviderChip
+                key={o.choice}
+                option={o}
+                active={choice === o.choice}
+                onSelect={setChoice}
+              />
+            ))}
+          </View>
+        </View>
+
+        <View>
+          <Text style={styles.connFieldLabel}>Sign-in method</Text>
+          <View style={styles.signInCard}>
+            <Pressable
+              style={[styles.signInRow, method === "cli" && styles.signInRowActive]}
+              onPress={selectCli}
+              testID="forge-method-cli"
+            >
+              <View style={[styles.signInDot, styles.signInDotOk]}>
+                <Text style={styles.signInDotOkGlyph}>●</Text>
+              </View>
+              <View style={styles.grow}>
+                <Text style={styles.signInTitle}>
+                  OAuth device flow <Text style={styles.signInMuted}>(recommended)</Text>
+                </Text>
+                <Text style={styles.signInSub}>
+                  Paste a one-time code at the provider — no callback server needed.
+                </Text>
+              </View>
+              <View style={styles.plainChip}>
+                <Text style={styles.plainChipText}>gh / glab</Text>
+              </View>
+            </Pressable>
+            <Pressable
+              style={[
+                styles.signInRow,
+                styles.signInRowBordered,
+                method === "token" && styles.signInRowActive,
+              ]}
+              onPress={selectToken}
+              testID="forge-method-token"
+            >
+              <View style={[styles.signInDot, styles.signInDotSkip]}>
+                <Text style={styles.signInDotSkipGlyph}>○</Text>
+              </View>
+              <View style={styles.grow}>
+                <Text style={styles.signInTitle}>Personal access token / API token</Text>
+                <Text style={styles.signInSub}>
+                  For Bitbucket & self-hosted. Stored encrypted (AES-256-GCM) in the daemon secret
+                  store.
+                </Text>
+              </View>
+              <View style={styles.plainChip}>
+                <Text style={styles.plainChipText}>FileSecretStore</Text>
+              </View>
+            </Pressable>
+          </View>
         </View>
 
         {choice === "selfhosted" ? (
@@ -1438,7 +1526,7 @@ function ConnectionsView({
 
         <View style={styles.formDivider} />
 
-        {option.method === "cli" ? (
+        {method === "cli" ? (
           <>
             <Text style={styles.fieldLabel}>Sign in</Text>
             {/* When the daemon can drive sign-in in-app, the CliInstallSection
@@ -6782,9 +6870,24 @@ export function ForgeHubScreen() {
       );
     }
     return (
-      <Text style={styles.toolbarTitle}>
-        {section === "connections" ? "Forge connections" : "Repositories"}
-      </Text>
+      <>
+        <Text style={styles.toolbarTitle}>
+          {section === "connections" ? "Forge connections" : "Repositories"}
+        </Text>
+        {section === "connections" ? (
+          <>
+            <View style={styles.grow} />
+            <Pressable
+              style={[styles.btn, styles.btnPrimary, styles.btnSm]}
+              onPress={toggleAdding}
+              testID="forge-add-connection"
+            >
+              <Plus size={14} color={theme.colors.accentForeground} />
+              <Text style={styles.btnPrimaryText}>Add connection</Text>
+            </Pressable>
+          </>
+        ) : null}
+      </>
     );
   };
 
@@ -7382,6 +7485,16 @@ const styles = StyleSheet.create((theme) => ({
     textTransform: "uppercase",
     letterSpacing: 0.4,
   },
+  // ".sec-title" (mockup artboard 2 section labels). Exact mockup values.
+  connSecTitle: {
+    fontSize: 12, // mockup exact value (.sec-title font-size)
+    fontWeight: "600", // mockup exact value
+    color: "#A1A5A4", // mockup exact value (--fgMuted)
+    textTransform: "uppercase",
+    letterSpacing: 0.4, // mockup exact value
+    marginBottom: 10, // mockup exact value (.sec-title margin 0 0 10 2)
+    marginLeft: 2, // mockup exact value
+  },
   toolbarRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -7397,10 +7510,10 @@ const styles = StyleSheet.create((theme) => ({
     minWidth: 0,
   },
   card: {
-    borderRadius: theme.borderRadius.lg,
-    borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface1,
+    borderRadius: 8, // mockup exact value (.card border-radius --r-lg)
+    borderWidth: 1, // mockup exact value (.card border)
+    borderColor: "#252B2A", // mockup exact value (--border)
+    backgroundColor: "#1E2120", // mockup exact value (--surface1)
     overflow: "hidden",
   },
   row: {
@@ -7413,32 +7526,32 @@ const styles = StyleSheet.create((theme) => ({
     borderBottomColor: theme.colors.border,
   },
   // ===== connected-accounts table (mockup artboard 2) =====
+  // ".row.head" (mockup artboard 2 table header). Exact mockup values.
   connHeadRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: theme.spacing[3],
-    paddingHorizontal: theme.spacing[3],
-    paddingVertical: theme.spacing[2],
-    borderBottomWidth: theme.borderWidth[1],
-    borderBottomColor: theme.colors.border,
-    backgroundColor: theme.colors.surface0,
+    gap: 12, // mockup exact value (.row gap)
+    paddingHorizontal: 14, // mockup exact value (.row padding 14px)
+    paddingVertical: 13, // mockup exact value (.row padding 13px)
+    backgroundColor: "#181B1A", // mockup exact value (.row.head --surface0)
   },
   connHeadText: {
-    fontSize: theme.fontSize.xs,
-    fontWeight: theme.fontWeight.semibold,
-    color: theme.colors.foregroundMuted,
+    fontSize: 11, // mockup exact value (.row.head font-size)
+    fontWeight: "600", // mockup exact value
+    color: "#A1A5A4", // mockup exact value (--fgMuted)
     textTransform: "uppercase",
-    letterSpacing: 0.4,
+    letterSpacing: 0.4, // mockup exact value
   },
+  // ".row" (mockup artboard 2 data row). ".row + .row" contributes the top
+  // border; the header row is always first so every data row gets one.
   connRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: theme.spacing[3],
-    paddingHorizontal: theme.spacing[3],
-    paddingVertical: theme.spacing[2],
-    minHeight: 48,
-    borderBottomWidth: theme.borderWidth[1],
-    borderBottomColor: theme.colors.border,
+    gap: 12, // mockup exact value (.row gap)
+    paddingHorizontal: 14, // mockup exact value (.row padding 14px)
+    paddingVertical: 13, // mockup exact value (.row padding 13px)
+    borderTopWidth: 1, // mockup exact value (.row + .row border-top)
+    borderTopColor: "#252B2A", // mockup exact value (--border)
   },
   connColGrow: {
     flex: 1,
@@ -7449,13 +7562,13 @@ const styles = StyleSheet.create((theme) => ({
     minWidth: 0,
     flexDirection: "row",
     alignItems: "center",
-    gap: theme.spacing[3],
+    gap: 12, // mockup exact value (.row gap)
   },
   connColAuth: {
-    width: 150,
+    width: 150, // mockup exact value (Auth column width)
   },
   connColScopes: {
-    width: 180,
+    width: 210, // mockup exact value (Scopes column width)
     flexDirection: "row",
     alignItems: "center",
   },
@@ -7472,20 +7585,37 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.foregroundExtraMuted,
   },
   connColStatus: {
-    width: 120,
+    width: 110, // mockup exact value (Status column width)
     flexDirection: "row",
     alignItems: "center",
   },
   connColActions: {
-    width: 90,
+    width: 90, // mockup exact value (actions column width)
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "flex-end",
     gap: theme.spacing[1],
   },
+  connRowInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  // ".row .t" — account title. The provider name is normal weight; the account
+  // handle is bolded via connAccountName (mockup `<b>@user</b>`).
+  connRowTitle: {
+    fontSize: 14, // mockup exact value (.row .t font-size)
+    color: "#fafafa", // mockup exact value (--fg)
+  },
+  // ".row .h" — mono transport hint under the title.
+  connRowSub: {
+    fontSize: 12, // mockup exact value (.row .h font-size)
+    color: "#A1A5A4", // mockup exact value (--fgMuted)
+    marginTop: 3, // mockup exact value (.row .h margin-top)
+    fontFamily: theme.fontFamily.mono,
+  },
   connAccountName: {
-    fontWeight: theme.fontWeight.semibold,
-    color: theme.colors.foreground,
+    fontWeight: "700", // mockup exact value (.row .t <b>)
+    color: "#fafafa", // mockup exact value (--fg)
   },
   connAuthText: {
     fontSize: theme.fontSize.xs,
@@ -7670,16 +7800,20 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.xs,
     fontWeight: theme.fontWeight.semibold,
   },
+  // ".pill.plain" (mockup) — transparent bg, muted text, used for scopes and
+  // the sign-in-method "gh / glab" / "FileSecretStore" tags at padding 1px 7px.
   plainChip: {
-    paddingHorizontal: theme.spacing[2],
-    paddingVertical: 1,
-    borderRadius: theme.borderRadius.full,
-    borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.border,
+    paddingHorizontal: 7, // mockup exact value (.pill.plain scopes padding 7px)
+    paddingVertical: 1, // mockup exact value (1px)
+    borderRadius: 9999, // mockup exact value (--r-full)
+    borderWidth: 1, // mockup exact value
+    borderColor: "#252B2A", // mockup exact value (.pill.plain border --border)
+    backgroundColor: "transparent", // mockup exact value (.pill.plain)
   },
   plainChipText: {
-    fontSize: theme.fontSize.xs,
-    color: theme.colors.foregroundMuted,
+    fontSize: 11.5, // mockup exact value (.pill font-size)
+    fontWeight: "600", // mockup exact value (.pill font-weight)
+    color: "#A1A5A4", // mockup exact value (--fgMuted)
   },
   // "auto-scroll" toggle pill in its on state (log header, mockup artboard 4).
   plainChipActive: {
@@ -7689,35 +7823,38 @@ const styles = StyleSheet.create((theme) => ({
   plainChipActiveText: {
     color: theme.colors.accentBright,
   },
+  // ".logo" provider square (mockup). Colored brand text is applied inline per
+  // forge; the square itself is neutral surface2 with a --border outline.
   badge: {
-    width: 26,
+    width: 26, // mockup exact value (.logo)
     height: 26,
-    borderRadius: theme.borderRadius.md,
-    backgroundColor: theme.colors.surface2,
-    borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.border,
+    borderRadius: 6, // mockup exact value (.logo --r-md)
+    backgroundColor: "#272A29", // mockup exact value (--surface2)
+    borderWidth: 1, // mockup exact value
+    borderColor: "#252B2A", // mockup exact value (--border)
     alignItems: "center",
     justifyContent: "center",
   },
   badgeText: {
-    fontSize: 11,
-    fontWeight: theme.fontWeight.bold,
-    color: theme.colors.foreground,
+    fontSize: 12, // mockup exact value (.logo font-size)
+    fontWeight: "700", // mockup exact value (.logo font-weight)
+    color: "#fafafa", // mockup exact value (--fg) — overridden per-forge inline
   },
+  // ".logo.sm" (mockup) — 20x20 at font-size 10, radius --r-base.
   badgeSm: {
-    width: 20,
+    width: 20, // mockup exact value (.logo.sm)
     height: 20,
-    borderRadius: theme.borderRadius.base,
-    backgroundColor: theme.colors.surface2,
-    borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.border,
+    borderRadius: 4, // mockup exact value (.logo.sm --r-base)
+    backgroundColor: "#272A29", // mockup exact value (--surface2)
+    borderWidth: 1, // mockup exact value
+    borderColor: "#252B2A", // mockup exact value (--border)
     alignItems: "center",
     justifyContent: "center",
   },
   badgeSmText: {
-    fontSize: 9,
-    fontWeight: theme.fontWeight.bold,
-    color: theme.colors.foreground,
+    fontSize: 10, // mockup exact value (.logo.sm font-size)
+    fontWeight: "700", // mockup exact value
+    color: "#fafafa", // mockup exact value (--fg) — overridden per-forge inline
   },
   iconBtn: {
     padding: theme.spacing[1],
@@ -7752,12 +7889,19 @@ const styles = StyleSheet.create((theme) => ({
     borderRadius: theme.borderRadius.md,
   },
   btnPrimary: {
-    backgroundColor: theme.colors.accent,
+    backgroundColor: "#20744A", // mockup exact value (.btn-primary --accent)
   },
   btnPrimaryText: {
-    fontSize: theme.fontSize.xs,
-    fontWeight: theme.fontWeight.medium,
-    color: theme.colors.accentForeground,
+    fontSize: 12, // mockup exact value (.btn.sm font-size)
+    fontWeight: "500", // mockup exact value (.btn font-weight)
+    color: "#ffffff", // mockup exact value (--accentFg)
+  },
+  // ".btn.sm" (mockup) — the compact primary toolbar button.
+  btnSm: {
+    height: 26, // mockup exact value (.btn.sm height)
+    paddingVertical: 0, // mockup exact value (.btn.sm padding 0 9)
+    paddingHorizontal: 9, // mockup exact value (9px)
+    borderRadius: 6, // mockup exact value (.btn.sm --r-md)
   },
   btnGhost: {
     borderWidth: theme.borderWidth[1],
@@ -7811,50 +7955,143 @@ const styles = StyleSheet.create((theme) => ({
     flexWrap: "wrap",
     gap: theme.spacing[2],
   },
+  // Wrap row of provider pills (mockup artboard 2 "Provider").
   providerGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: theme.spacing[2],
+    gap: 8, // mockup exact value (provider pill row gap)
   },
-  providerCard: {
-    flexDirection: "column",
+  // Provider selector pill (mockup `.pill` at padding 6px 11px). Selected pill
+  // keeps the surface2 fill and switches to an accent border + fg text.
+  providerPill: {
+    flexDirection: "row",
     alignItems: "center",
-    gap: theme.spacing[2],
-    paddingVertical: theme.spacing[3],
-    paddingHorizontal: theme.spacing[3],
-    borderRadius: theme.borderRadius.lg,
-    borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface0,
-    minWidth: 104,
-    flexGrow: 1,
-    flexBasis: 0,
+    gap: 6, // mockup exact value (.pill gap)
+    paddingVertical: 6, // mockup exact value (provider pill padding 6px)
+    paddingHorizontal: 11, // mockup exact value (11px)
+    borderRadius: 9999, // mockup exact value (--r-full)
+    borderWidth: 1, // mockup exact value
+    borderColor: "#2F3534", // mockup exact value (--borderAccent)
+    backgroundColor: "#272A29", // mockup exact value (--surface2)
   },
-  providerCardActive: {
-    borderColor: theme.colors.accent,
-    borderWidth: 2,
-    // Compensate the +1 border so the card doesn't shift when selected.
-    paddingVertical: theme.spacing[3] - 1,
-    paddingHorizontal: theme.spacing[3] - 1,
-    backgroundColor: theme.colors.surface2,
+  providerPillActive: {
+    borderColor: "#20744A", // mockup exact value (selected border --accent)
   },
-  providerCardLabel: {
-    fontSize: theme.fontSize.sm,
-    fontWeight: theme.fontWeight.medium,
-    color: theme.colors.foregroundMuted,
+  providerPillText: {
+    fontSize: 11.5, // mockup exact value (.pill font-size)
+    fontWeight: "600", // mockup exact value (.pill font-weight)
+    color: "#A1A5A4", // mockup exact value (--fgMuted)
   },
-  providerCardLabelActive: {
-    color: theme.colors.foreground,
+  providerPillActiveText: {
+    color: "#fafafa", // mockup exact value (selected --fg)
   },
-  providerGlyph: {
-    width: 26,
-    height: 26,
-    borderRadius: theme.borderRadius.md,
-    backgroundColor: theme.colors.surface2,
-    borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.border,
+  // ".card" nested under "Sign-in method" (mockup) — surface0 fill.
+  signInCard: {
+    borderRadius: 8, // mockup exact value (.card --r-lg)
+    borderWidth: 1, // mockup exact value
+    borderColor: "#252B2A", // mockup exact value (--border)
+    backgroundColor: "#181B1A", // mockup exact value (--surface0)
+    overflow: "hidden",
+  },
+  // ".row" inside the sign-in-method card (mockup padding 11px 13px).
+  signInRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12, // mockup exact value (.row gap)
+    paddingVertical: 11, // mockup exact value (sign-in row padding 11px)
+    paddingHorizontal: 13, // mockup exact value (13px)
+  },
+  signInRowBordered: {
+    borderTopWidth: 1, // mockup exact value (.row + .row border-top)
+    borderTopColor: "#252B2A", // mockup exact value (--border)
+  },
+  signInRowActive: {
+    backgroundColor: "#272A29", // mockup exact value (selection highlight --surface2)
+  },
+  // ".g" status glyph disc (mockup) — 16px circle with a centered dot.
+  signInDot: {
+    width: 16, // mockup exact value (.g)
+    height: 16,
+    borderRadius: 9999,
     alignItems: "center",
     justifyContent: "center",
+  },
+  signInDotOk: {
+    backgroundColor: "rgba(34,197,94,0.16)", // mockup exact value (.g.ok)
+  },
+  signInDotOkGlyph: {
+    fontSize: 10, // mockup exact value (.g font-size)
+    fontWeight: "800", // mockup exact value (.g font-weight)
+    color: "#4ade80", // mockup exact value (--green400)
+  },
+  signInDotSkip: {
+    backgroundColor: "#272A29", // mockup exact value (.g.skip --surface2)
+  },
+  signInDotSkipGlyph: {
+    fontSize: 10, // mockup exact value (.g font-size)
+    fontWeight: "800", // mockup exact value
+    color: "#717574", // mockup exact value (--fgExtraMuted)
+  },
+  signInTitle: {
+    fontSize: 13, // mockup exact value (.t inline font-size:13px)
+    color: "#fafafa", // mockup exact value (--fg)
+  },
+  signInMuted: {
+    color: "#A1A5A4", // mockup exact value (--fgMuted)
+  },
+  signInSub: {
+    fontSize: 12, // mockup exact value (.row .h font-size)
+    color: "#A1A5A4", // mockup exact value (--fgMuted)
+    marginTop: 3, // mockup exact value (.row .h margin-top)
+  },
+  // Status pill (mockup `.pill.success / .pending / .failed`).
+  statusPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6, // mockup exact value (.pill gap)
+    paddingVertical: 3, // mockup exact value (.pill padding 3px)
+    paddingHorizontal: 9, // mockup exact value (9px)
+    borderRadius: 9999, // mockup exact value (--r-full)
+    borderWidth: 1, // mockup exact value
+    borderColor: "transparent", // mockup exact value (tinted pills use transparent border)
+    alignSelf: "flex-start",
+  },
+  statusPillDot: {
+    width: 7, // mockup exact value (.pill .d)
+    height: 7,
+    borderRadius: 9999,
+  },
+  statusPillText: {
+    fontSize: 11.5, // mockup exact value (.pill font-size)
+    fontWeight: "600", // mockup exact value
+  },
+  statusPillSuccess: {
+    backgroundColor: "rgba(34,197,94,0.14)", // mockup exact value (.pill.success)
+    borderColor: "transparent", // mockup exact value (.pill.success border transparent)
+  },
+  statusPillSuccessText: {
+    color: "#7ee0a3", // mockup exact value (.pill.success color)
+  },
+  statusPillWarning: {
+    backgroundColor: "rgba(245,158,11,0.13)", // mockup exact value (.pill.pending)
+    borderColor: "transparent", // mockup exact value (.pill.pending border transparent)
+  },
+  statusPillWarningText: {
+    color: "#f0c273", // mockup exact value (.pill.pending color)
+  },
+  statusPillDanger: {
+    backgroundColor: "rgba(239,68,68,0.14)", // mockup exact value (.pill.failed)
+    borderColor: "transparent", // mockup exact value (.pill.failed border transparent)
+  },
+  statusPillDangerText: {
+    color: "#fca5a5", // mockup exact value (--red300)
+  },
+  statusPillNeutral: {
+    backgroundColor: "#272A29", // mockup exact value (.pill.manual --surface2)
+    borderColor: "#252B2A", // mockup exact value (.pill --border)
+  },
+  statusPillNeutralText: {
+    color: "#A1A5A4", // mockup exact value (--fgMuted)
   },
   providerChip: {
     paddingHorizontal: theme.spacing[3],
@@ -7883,6 +8120,12 @@ const styles = StyleSheet.create((theme) => ({
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[1],
+  },
+  // "Provider" / "Sign-in method" labels (mockup `.muted` at font-size 12).
+  connFieldLabel: {
+    fontSize: 12, // mockup exact value
+    color: "#A1A5A4", // mockup exact value (--fgMuted)
+    marginBottom: 8, // mockup exact value (label margin-bottom)
   },
   fieldLabel: {
     fontSize: theme.fontSize.xs,
