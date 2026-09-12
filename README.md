@@ -60,6 +60,18 @@ with a few deliberate boundaries:
 
 ## ✨ New in this release
 
+### Forge Hub polish — Issue detail + mobile fixes (v0.9.10)
+
+- **Issue detail** — issues now show their full body and comment thread (markdown), not just
+  the title; the list shows number, age, author, labels and comment count. New `forge.issue.get` RPC.
+- **Mobile layout fixes** — Pipelines (legible title, stage→job graph, in‑app log viewer, clean
+  toolbar), Pull request tabs (early counts + horizontal scroll), Commits (wrapping titles),
+  Connections (no overflow, slim "N connected · Manage" footer), and list loading skeletons.
+- **Forge assistant repo scope** — switching repos then opening the chat now targets the new
+  repo with a fresh context instead of the previously selected one.
+
+See [CHANGELOG.md](CHANGELOG.md) for full v0.9.10 notes.
+
 ### Forge Hub + Forge assistant + mobile (v0.9.9)
 
 - **Forge Hub** — remote GitHub / GitLab / Bitbucket management (connections, repos, code
@@ -69,15 +81,15 @@ with a few deliberate boundaries:
 - **Forge on mobile** — compact master‑detail so repo Code/Commits render, light‑theme colour
   fixes (no more black boxes), status‑bar‑safe toolbar, and stacked repo/commit rows for phones.
 - **Paseo 0.8.0 selective port** — Gajae Code provider, Android Studio editor target, `workspace
-  rename` CLI (rebranded, additive).
+rename` CLI (rebranded, additive).
 
 See [CHANGELOG.md](CHANGELOG.md) for full v0.9.9 notes.
 
 ### Usage-cost clarity + browser fixes (v0.2.2)
 
 - **Prompt-cache savings in Usage & Cost** — see how much prompt caching saved (aggregate
-  + per-model + per-agent, estimated). The headline cost stays provider-reported; JAgentDesk
-  surfaces the caching benefit rather than overriding the CLIs' own auto-tuned caching.
+  - per-model + per-agent, estimated). The headline cost stays provider-reported; JAgentDesk
+    surfaces the caching benefit rather than overriding the CLIs' own auto-tuned caching.
 - **Fixes:** agent-loaded extensions now inject (open tabs reload after loading); the TOKENS
   total no longer counts cache re-reads (so it isn't wildly inflated next to the context window);
   the fingerprint-profile detail box no longer overflows.

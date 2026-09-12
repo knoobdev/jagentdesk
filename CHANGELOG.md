@@ -1,9 +1,45 @@
 # Changelog
 
 All notable changes to JAgentDesk are documented here. JAgentDesk versions its
-own release line (now `0.9.9`); the many `v0.1.x`–`v1.0.x` tags in history are
+own release line (now `0.9.10`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
+
+## v0.9.10 — 2026-09-13
+
+Forge Hub polish: Issues get real bodies and comments, and a batch of mobile
+layout fixes across Pipelines, Pull requests, Commits, Connections, and the chat
+assistant.
+
+### Added
+
+- **Issue detail — body + comments** — opening an issue now shows its full
+  description and the comment thread (rendered as markdown), across GitHub, GitLab
+  and Bitbucket, instead of just the title. Backed by a new `forge.issue.get` RPC.
+  The issues list also shows number, age, author, labels and comment count per row.
+
+### Fixed
+
+- **Issue detail RPC never answered** — `forge.issue.get.request` was missing from
+  the daemon's forge-request allowlist in `session.ts`, so the request reached the
+  daemon but was never routed to `ForgeHubSession.handle()` — no response was
+  emitted and the client timed out (detail showed title only). Now routed.
+- **Mobile Pipelines are usable** — pipeline title is legible, the run detail shows
+  a stage → job graph, an in-app log viewer (auto-scroll + copy), a clean
+  retry/rerun/cancel toolbar and a "Rerun failed jobs" action bar.
+- **Mobile Pull request tabs** — Conversation / Commits / Files changed counts now
+  populate up front (no tap required) and the tab row scrolls horizontally so the
+  last tab is no longer clipped.
+- **Mobile Commits** — long commit titles wrap inside the card instead of
+  overflowing off the right edge.
+- **Mobile Connections** — the accounts table no longer overflows (badge/text
+  overlap, cut-off buttons); on compact it stacks into a card. The connection-list
+  footer is redesigned into a slim "N connected · Manage" row on desktop and mobile.
+- **Loading placeholders** — repo/commit/code lists now show skeletons while
+  loading instead of a bare "loading repository" string.
+- **Forge assistant repo scope** — after switching repositories, opening the chat
+  now targets the currently selected repo with a fresh context, instead of reusing
+  the previously selected repo's assistant.
 
 ## v0.9.9 — 2026-09-12
 
@@ -57,7 +93,7 @@ Data-grid column correctness + sidebar record counts.
   the actual query result and looks up type/PK/FK metadata by name, so header ↔ cell
   always match. This was a data-ordering bug, not the earlier scroll issue.
 - **Sidebar shows the record count, not the column count** — each table/view in the
-  object tree showed its *column* count, which read as a wrong row count. It now shows
+  object tree showed its _column_ count, which read as a wrong row count. It now shows
   the estimated **record** count (Postgres planner estimate, DataGrip-style, compact
   like `12.3k`), falling back to the column count on engines that don't report one yet.
 
@@ -109,7 +145,7 @@ Database grids scroll like DataGrip, and the SQL console got a real UI.
 
 - **Vertical scrollbar is pinned to the viewport (both grids)** — the table data view
   and the SQL result table nested a vertical scroller inside the horizontal one, so
-  the scrollbar sat at the right edge of the *content* (only reachable after scrolling
+  the scrollbar sat at the right edge of the _content_ (only reachable after scrolling
   fully right). On web both grids now use a single `overflow:auto` container with a
   `position:sticky` header, so both scrollbars pin to the viewport edges, the header
   stays pinned, and columns stay aligned. (Native keeps nested scrollers.) Extracted
@@ -150,7 +186,7 @@ Database-grid usability + skill auto-load precision.
 ### Fixed
 
 - **Database grid scrolls vertically on desktop** — the mouse-wheel handler was
-  attaching to the react-native-web `ScrollView` *instance* instead of its scrollable
+  attaching to the react-native-web `ScrollView` _instance_ instead of its scrollable
   DOM node (`getScrollableNode()`), so `scrollTop`/the `wheel` listener silently
   no-op'd and rows couldn't be scrolled down (only sideways). It now targets the real
   node, and on web the row body keeps a bounded height even before the viewport is
