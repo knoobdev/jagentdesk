@@ -1,9 +1,48 @@
 # Changelog
 
 All notable changes to JAgentDesk are documented here. JAgentDesk versions its
-own release line (now `0.2.0`); the many `v0.1.x`–`v1.0.x` tags in history are
+own release line (now `0.9.9`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
+
+## v0.9.9 — 2026-09-12
+
+Forge Hub: manage GitHub / GitLab / Bitbucket from afar — plus a Forge chat
+assistant, mobile support, and a selective port of new features from Paseo 0.8.0.
+
+### Added
+
+- **Forge Hub** — manage **GitHub · GitLab · Bitbucket** (cloud + self‑hosted)
+  remotely, like their web apps but inside JAgentDesk: connections (OAuth device
+  flow via `gh`/`glab`, or PAT/API token stored encrypted in the daemon secret
+  store), a repositories browser across all accounts, **Code** (server‑side file
+  tree), **Commits**, **Pull/Merge requests** (list · review · merge/squash/rebase
+  · auto‑merge), **Pipelines/CI** (run → stage → job → log, rerun/cancel,
+  artifacts), **Releases & tags**, and **Issues**. Not local git — it drives the
+  forges' own APIs (`gh`/`glab` CLIs + Bitbucket REST) from the daemon; tokens
+  never leave it.
+- **Forge assistant (chat agent)** — a chat panel inside Forge that operates the
+  forges via `forge_*` agent tools (list repos/PRs/pipelines/issues, read files &
+  commits; and gated writes: comment, create issue, rerun pipeline, merge PR,
+  create PR — each write asks for pairing approval). The `forge_*` tools are in the
+  shared agent tool catalog, so any workspace agent can use them too. On mobile a
+  floating chat widget opens the assistant from anywhere in Forge.
+- **Paseo 0.8.0 selective port** — Gajae Code ACP provider, Android Studio editor
+  target, and a `workspace rename` CLI command (rebranded; additive only). Full
+  gap analysis + remaining plan tracked separately.
+
+### Fixed
+
+- **Forge on mobile now renders** — the compact layout stacked the nav over the
+  content pane and squeezed it to zero height, so opening a repo showed nothing;
+  compact now uses a master‑detail (nav ⟷ content) and the repo Code/Commits views
+  render. The sign‑in/card/log backgrounds were hard‑coded to the mockup's dark
+  colours and showed as black boxes on the light theme — they now use theme tokens
+  and adapt. The detail toolbar clears the status bar, and the wide repo/commit
+  tables collapse into readable stacked rows on phones.
+- **Removing a Forge connection clears its repos** — the Switch‑repo list, the
+  jump‑to‑repo filter, and any open repo from the removed account are now reset
+  instead of leaving a stale list.
 
 ## v0.2.8 — 2026-09-08
 

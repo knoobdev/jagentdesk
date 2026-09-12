@@ -36,6 +36,14 @@ with a few deliberate boundaries:
   MySQL, SQLite, SQL Server, Oracle, MongoDB, ClickHouse), multiple databases per connection, an
   object explorer with counts, a data grid with inline editing, a SQL console with autocomplete and
   query plans, ER diagram, and an AI chat with SQL tools — credentials never leave the daemon.
+- **Forge Hub** _(new)_ — manage **GitHub · GitLab · Bitbucket** (cloud + self‑hosted) from
+  afar, like their web apps: connections, a cross‑account repositories browser, server‑side
+  Code tree, commits, Pull/Merge requests (review · merge/squash/rebase · auto‑merge),
+  Pipelines/CI (job · log · rerun/cancel · artifacts), releases & tags, and issues — driven by
+  `gh`/`glab` + Bitbucket REST from the daemon, tokens never leaving it.
+- **Forge assistant** _(new)_ — a chat agent inside Forge that operates the forges via `forge_*`
+  tools (reads plus pairing‑gated writes: comment, create issue, rerun pipeline, merge/create
+  PR); the tools are shared, so any agent can use them, and a mobile chat widget opens it anywhere.
 - **Skills** _(new)_ — reusable expertise agents **use** (attach many from the composer) and
   **learn** from real conversations; auto‑loaded by message, no hand‑typed corrections.
 - **Plugins** _(new)_ — extend the app with local, trusted code: surfaces, sidebar items,
@@ -51,6 +59,19 @@ with a few deliberate boundaries:
 ---
 
 ## ✨ New in this release
+
+### Forge Hub + Forge assistant + mobile (v0.9.9)
+
+- **Forge Hub** — remote GitHub / GitLab / Bitbucket management (connections, repos, code
+  tree, commits, PR/MR review & merge, CI pipelines, releases, issues) driven from the daemon.
+- **Forge assistant** — a chat agent that operates the forges via `forge_*` tools (reads +
+  pairing‑gated writes), usable from the Forge panel on desktop and a floating chat widget on mobile.
+- **Forge on mobile** — compact master‑detail so repo Code/Commits render, light‑theme colour
+  fixes (no more black boxes), status‑bar‑safe toolbar, and stacked repo/commit rows for phones.
+- **Paseo 0.8.0 selective port** — Gajae Code provider, Android Studio editor target, `workspace
+  rename` CLI (rebranded, additive).
+
+See [CHANGELOG.md](CHANGELOG.md) for full v0.9.9 notes.
 
 ### Usage-cost clarity + browser fixes (v0.2.2)
 
