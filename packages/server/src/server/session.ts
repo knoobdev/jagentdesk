@@ -2497,6 +2497,7 @@ export class Session {
       case "forge.release.list.request":
       case "forge.tag.list.request":
       case "forge.issue.list.request":
+      case "forge.issue.get.request":
       case "forge.issue.create.request":
       case "forge.issue.comment.request":
       case "forge.issue.close.request":
