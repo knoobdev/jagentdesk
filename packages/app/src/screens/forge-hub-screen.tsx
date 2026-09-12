@@ -7365,6 +7365,20 @@ export function ForgeHubScreen() {
         ) : null}
       </View>
 
+      {/* Compact (mobile): a persistent floating chat widget so the assistant is
+          reachable from anywhere in Forge, not just the detail toolbar. Hidden
+          while the assistant is open (its own header carries the close). */}
+      {isCompact && client && !assistantOpen ? (
+        <Pressable
+          style={[styles.assistantFab, { bottom: insets.bottom + theme.spacing[6] }]}
+          onPress={toggleAssistant}
+          testID="forge-assistant-fab"
+          accessibilityLabel="Open Forge assistant"
+        >
+          <MessageSquare size={24} color={theme.colors.accentForeground} />
+        </Pressable>
+      ) : null}
+
       {/* Compact (mobile): the assistant takes over the screen; its header
           carries a back control. */}
       {assistantOpen && isCompact ? (
@@ -8170,6 +8184,24 @@ const styles = StyleSheet.create((theme) => ({
     bottom: 0,
     backgroundColor: theme.colors.surface0,
     zIndex: 30,
+  },
+  // Compact: floating chat widget (FAB) to open the assistant from anywhere.
+  assistantFab: {
+    position: "absolute",
+    right: theme.spacing[4],
+    width: 52,
+    height: 52,
+    borderRadius: theme.borderRadius.full,
+    backgroundColor: theme.colors.accent,
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 25,
+    // Subtle lift so it reads as floating above the content.
+    shadowColor: "#000",
+    shadowOpacity: 0.28,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 6,
   },
   // Full-width "Load more" beneath a list; taller tap target, centered content.
   loadMoreBtn: {
