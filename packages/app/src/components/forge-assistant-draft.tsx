@@ -12,10 +12,19 @@ import type { AgentSnapshotPayload, ForgeRepoRef } from "@jagentdesk/protocol/me
 import type { CreateAgentRequestOptions } from "@jagentdesk/client/internal/daemon-client";
 import type { Theme } from "@/styles/theme";
 
-// A single dedicated Forge assistant per host; reused across opens (see
-// forge-assistant-panel.tsx). The value is constant — repo focus is expressed
-// through the system prompt at creation, not the label.
+// A dedicated Forge assistant per host + repo scope; reused across opens (see
+// forge-assistant-panel.tsx). FORGE_ASSISTANT_LABEL marks the agent as a Forge
+// assistant; FORGE_ASSISTANT_REPO_LABEL records the repo whose context is baked
+// into its system prompt, so switching repos reuses that repo's OWN assistant
+// (correct context) instead of answering about the previously selected repo.
 export const FORGE_ASSISTANT_LABEL = "jagentdesk.forge.assistant";
+export const FORGE_ASSISTANT_REPO_LABEL = "jagentdesk.forge.assistant.repo";
+
+/** Stable key for the repo baked into an assistant's context — `null` (no repo
+ *  in context) maps to "__all__" so that case reuses its own dedicated agent. */
+export function repoScopeKey(repo: ForgeRepoRef | null): string {
+  return repo ? `${repo.forge}/${repo.owner}/${repo.name}` : "__all__";
+}
 
 /**
  * The Forge assistant's provider-agnostic instructions. It drives the shared
@@ -74,7 +83,10 @@ function buildForgeCreateOptions(input: {
     provider,
     cwd,
     systemPrompt: buildForgeAssistantSystemPrompt(repo),
-    labels: { [FORGE_ASSISTANT_LABEL]: "true" },
+    labels: {
+      [FORGE_ASSISTANT_LABEL]: "true",
+      [FORGE_ASSISTANT_REPO_LABEL]: repoScopeKey(repo),
+    },
     clientMessageId: input.clientMessageId,
   };
   if (input.modeId) options.modeId = input.modeId;

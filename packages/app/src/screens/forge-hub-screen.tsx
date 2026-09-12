@@ -549,6 +549,51 @@ function SkeletonRows({
   );
 }
 
+// Animated loading placeholder for the sidebar's "Switch repo" list while the
+// first repository fetch is in flight. A few pulsing bars sized to the sidebar
+// rows read as "loading" — matching the SkeletonRows aesthetic without the
+// bordered card chrome, which would look out of place in the nav.
+const SIDEBAR_SKELETON_WIDTHS = ["72%", "54%", "63%"] as const;
+
+function SidebarRepoSkeleton() {
+  const pulse = useRef(new Animated.Value(0.4)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 900,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          toValue: 0.4,
+          duration: 900,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [pulse]);
+
+  return (
+    <View
+      style={styles.sidebarSkeleton}
+      accessibilityLabel="Loading repositories"
+      testID="forge-sidebar-repo-skeleton"
+    >
+      {SIDEBAR_SKELETON_WIDTHS.map((width, i) => (
+        <View key={i} style={styles.sidebarSkeletonRow}>
+          <Animated.View style={[styles.sidebarSkeletonBar, { width, opacity: pulse }]} />
+        </View>
+      ))}
+    </View>
+  );
+}
+
 // Full-width "Load more" control shown beneath a list whose last fetch returned
 // at least `limit` rows (so there may be more). Pressing it grows the limit and
 // re-fetches; while that follow-up load runs it shows a small spinner in place
@@ -724,15 +769,15 @@ function ConnectionRow({
             <Text style={styles.plainChipText}>{authLabel}</Text>
           </View>
           <ConnStatusPill connection={connection} />
-          {connection.scopes && connection.scopes.length > 0 ? (
-            connection.scopes.map((scope) => (
-              <View key={scope} style={styles.plainChip}>
-                <Text style={styles.plainChipText}>{scope}</Text>
-              </View>
-            ))
-          ) : (
-            <Text style={styles.connScopesEmpty}>—</Text>
-          )}
+          {/* Scopes are optional; when a connection exposes none, omit them
+              entirely rather than dangling a bare "—" after the status pill. */}
+          {connection.scopes && connection.scopes.length > 0
+            ? connection.scopes.map((scope) => (
+                <View key={scope} style={styles.plainChip}>
+                  <Text style={styles.plainChipText}>{scope}</Text>
+                </View>
+              ))
+            : null}
         </View>
         <View style={styles.connStackActions}>
           {showReauth ? (
@@ -3266,11 +3311,13 @@ function PullRequestDetail({
     load: loadChecks,
   } = usePipelineChecks(client, repo, cr, pipelinesEnabled);
 
+  // Eager-load the files list as soon as the PR detail opens (not only when the
+  // Files tab is active) so the "Files changed" tab count is populated up front.
   useEffect(() => {
-    if (tab === "files" && files === null && !filesLoading) {
+    if (files === null && !filesLoading) {
       onLoadFiles();
     }
-  }, [tab, files, filesLoading, onLoadFiles]);
+  }, [files, filesLoading, onLoadFiles]);
 
   const loadCommits = useCallback(async () => {
     setCommitsLoading(true);
@@ -3299,11 +3346,13 @@ function PullRequestDetail({
     }
   }, [client, repo, cr.baseRef, cr.headRef]);
 
+  // Eager-load the commit list as soon as the PR detail opens (not only when the
+  // Commits tab is active) so the "Commits" tab count is populated up front.
   useEffect(() => {
-    if (tab === "commits" && commits === null && !commitsLoading && !commitsError) {
+    if (commits === null && !commitsLoading && !commitsError) {
       void loadCommits();
     }
-  }, [tab, commits, commitsLoading, commitsError, loadCommits]);
+  }, [commits, commitsLoading, commitsError, loadCommits]);
 
   const handleOpenExternal = useCallback(() => {
     void openExternalUrl(cr.url);
@@ -3358,8 +3407,11 @@ function PullRequestDetail({
       <View style={[styles.detailBody, isCompact && styles.detailBodyColumn]}>
         {/* Left column: tab bar + tab content (conversation · commits · files · checks). */}
         <View style={[styles.detailLeft, isCompact && styles.detailLeftCompact]}>
-          <View
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
             style={styles.tabsRow}
+            contentContainerStyle={styles.tabsRowContent}
             accessibilityLabel={`${def.changeRequestNoun} ${def.changeRequestNumberPrefix}${cr.number}`}
           >
             <TabButton
@@ -3380,7 +3432,7 @@ function PullRequestDetail({
               onPress={setFiles}
             />
             <TabButton label="Checks" active={tab === "checks"} onPress={setChecks} />
-          </View>
+          </ScrollView>
 
           {tab === "conversation" ? (
             <View style={styles.card}>
@@ -4665,6 +4717,7 @@ function PipelineRunDetail({
   onBack: () => void;
 }) {
   const { theme } = useUnistyles();
+  const isCompact = useIsCompactFormFactor();
   const statusColor = usePipelineStatusColor();
   const [pipeline, setPipeline] = useState<ForgePipelineDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -4767,60 +4820,164 @@ function PipelineRunDetail({
     [pipeline],
   );
 
+  // Stage → job list (+ optional artifacts). Shared between the desktop side-by
+  // -side split (scrolls inside its own capped column) and the compact stack
+  // (rendered as a plain list so the screen's outer ScrollView owns the scroll).
+  const jobsNode = pipeline ? (
+    <>
+      {pipeline.stages.map((stage, i) => (
+        <View key={`${stage.name}:${i}`}>
+          {/* Providers without explicit stage grouping report a single,
+              possibly unnamed stage — fall back to a "Jobs" header. */}
+          <Text style={styles.stageHeader}>{stage.name.trim() || "Jobs"}</Text>
+          {stage.jobs.map((job) => (
+            <JobTreeRow
+              key={job.id}
+              job={job}
+              active={selectedJob?.id === job.id}
+              onSelect={setSelectedJob}
+              onPlay={playJob}
+            />
+          ))}
+        </View>
+      ))}
+      {releasesEnabled ? (
+        <View style={styles.artifactsSection}>
+          <ArtifactsPanel client={client} repo={repo} runId={run.id} />
+        </View>
+      ) : null}
+    </>
+  ) : null;
+
+  const logNode = selectedJob ? (
+    <JobLogViewer
+      client={client}
+      repo={repo}
+      job={selectedJob}
+      failedCount={failedCount}
+      onRerunFailed={rerunFailed}
+    />
+  ) : (
+    <Text style={styles.emptyText}>Select a job to view its log.</Text>
+  );
+
   return (
     <View style={styles.pane}>
-      <View style={styles.runToolbar}>
-        <Pressable
-          style={styles.iconBtn}
-          onPress={onBack}
-          accessibilityRole="button"
-          accessibilityLabel="Back to runs"
-          testID="forge-run-back"
-        >
-          <ArrowLeft size={18} color={theme.colors.foregroundMuted} />
-        </Pressable>
-        <ProviderBadge forge={repo.forge} small />
-        <View style={styles.grow}>
-          <View style={styles.runTitleRow}>
-            <Text style={styles.runNameText} numberOfLines={1}>
-              {run.name}
-            </Text>
-            <Text style={styles.runMetaMono} numberOfLines={1}>
-              workflow · run #{run.id}
-            </Text>
+      {isCompact ? (
+        // Compact toolbar: keep the title readable by giving it a full line
+        // (back + badge + run name + status), then a wrapping row of icon-only
+        // actions below so nothing is crushed to "Pip…/work…/on m…".
+        <View style={styles.runToolbarCompact}>
+          <View style={styles.runToolbarLineCompact}>
+            <Pressable
+              style={styles.iconBtn}
+              onPress={onBack}
+              accessibilityRole="button"
+              accessibilityLabel="Back to runs"
+              testID="forge-run-back"
+            >
+              <ArrowLeft size={18} color={theme.colors.foregroundMuted} />
+            </Pressable>
+            <ProviderBadge forge={repo.forge} small />
+            <View style={styles.grow}>
+              <Text style={styles.runNameText} numberOfLines={1}>
+                {run.name}
+              </Text>
+              <Text style={styles.runMetaMono} numberOfLines={1}>
+                workflow · run #{run.id}
+              </Text>
+            </View>
+            <Chip label={pipelineStatusLabel(run.status)} color={statusColor(run.status)} />
           </View>
           {refLine ? (
             <Text style={styles.runRefLine} numberOfLines={1}>
               {refLine}
             </Text>
           ) : null}
+          <View style={styles.runActionsRowCompact}>
+            <Pressable
+              style={[styles.btn, styles.btnGhost]}
+              onPress={rerunAll}
+              accessibilityRole="button"
+              accessibilityLabel="Rerun"
+              testID="forge-run-rerun"
+            >
+              <RotateCcw size={13} color={theme.colors.foreground} />
+            </Pressable>
+            <Pressable
+              style={[styles.btn, styles.btnGhost]}
+              onPress={rerunFailed}
+              accessibilityRole="button"
+              accessibilityLabel="Rerun failed jobs"
+              testID="forge-run-rerun-failed"
+            >
+              <RotateCcw size={13} color={theme.colors.statusWarning} />
+            </Pressable>
+            <Pressable
+              style={[styles.btn, styles.btnDanger]}
+              onPress={cancel}
+              accessibilityRole="button"
+              accessibilityLabel="Cancel"
+              testID="forge-run-cancel"
+            >
+              <Ban size={13} color={theme.colors.statusDanger} />
+            </Pressable>
+          </View>
         </View>
-        <Chip label={pipelineStatusLabel(run.status)} color={statusColor(run.status)} />
-        <Pressable
-          style={[styles.btn, styles.btnGhost]}
-          onPress={rerunAll}
-          testID="forge-run-rerun"
-        >
-          <RotateCcw size={13} color={theme.colors.foreground} />
-          <Text style={styles.btnGhostText}>Rerun</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.btn, styles.btnGhost]}
-          onPress={rerunFailed}
-          testID="forge-run-rerun-failed"
-        >
-          <RotateCcw size={13} color={theme.colors.statusWarning} />
-          <Text style={styles.btnGhostText}>Rerun failed</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.btn, styles.btnDanger]}
-          onPress={cancel}
-          testID="forge-run-cancel"
-        >
-          <Ban size={13} color={theme.colors.statusDanger} />
-          <Text style={styles.btnDangerText}>Cancel</Text>
-        </Pressable>
-      </View>
+      ) : (
+        <View style={styles.runToolbar}>
+          <Pressable
+            style={styles.iconBtn}
+            onPress={onBack}
+            accessibilityRole="button"
+            accessibilityLabel="Back to runs"
+            testID="forge-run-back"
+          >
+            <ArrowLeft size={18} color={theme.colors.foregroundMuted} />
+          </Pressable>
+          <ProviderBadge forge={repo.forge} small />
+          <View style={styles.grow}>
+            <View style={styles.runTitleRow}>
+              <Text style={styles.runNameText} numberOfLines={1}>
+                {run.name}
+              </Text>
+              <Text style={styles.runMetaMono} numberOfLines={1}>
+                workflow · run #{run.id}
+              </Text>
+            </View>
+            {refLine ? (
+              <Text style={styles.runRefLine} numberOfLines={1}>
+                {refLine}
+              </Text>
+            ) : null}
+          </View>
+          <Chip label={pipelineStatusLabel(run.status)} color={statusColor(run.status)} />
+          <Pressable
+            style={[styles.btn, styles.btnGhost]}
+            onPress={rerunAll}
+            testID="forge-run-rerun"
+          >
+            <RotateCcw size={13} color={theme.colors.foreground} />
+            <Text style={styles.btnGhostText}>Rerun</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.btn, styles.btnGhost]}
+            onPress={rerunFailed}
+            testID="forge-run-rerun-failed"
+          >
+            <RotateCcw size={13} color={theme.colors.statusWarning} />
+            <Text style={styles.btnGhostText}>Rerun failed</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.btn, styles.btnDanger]}
+            onPress={cancel}
+            testID="forge-run-cancel"
+          >
+            <Ban size={13} color={theme.colors.statusDanger} />
+            <Text style={styles.btnDangerText}>Cancel</Text>
+          </Pressable>
+        </View>
+      )}
       {actionNote ? <Text style={styles.metaMuted}>{actionNote}</Text> : null}
 
       {loading ? (
@@ -4834,48 +4991,27 @@ function PipelineRunDetail({
           </Pressable>
         </View>
       ) : pipeline ? (
-        <View style={styles.runSplit}>
-          <ScrollView
-            style={styles.jobTree}
-            contentContainerStyle={styles.jobTreeContent}
-            nestedScrollEnabled
-          >
-            {pipeline.stages.map((stage, i) => (
-              <View key={`${stage.name}:${i}`}>
-                {/* Providers without explicit stage grouping report a single,
-                    possibly unnamed stage — fall back to a "Jobs" header. */}
-                <Text style={styles.stageHeader}>{stage.name.trim() || "Jobs"}</Text>
-                {stage.jobs.map((job) => (
-                  <JobTreeRow
-                    key={job.id}
-                    job={job}
-                    active={selectedJob?.id === job.id}
-                    onSelect={setSelectedJob}
-                    onPlay={playJob}
-                  />
-                ))}
-              </View>
-            ))}
-            {releasesEnabled ? (
-              <View style={styles.artifactsSection}>
-                <ArtifactsPanel client={client} repo={repo} runId={run.id} />
-              </View>
-            ) : null}
-          </ScrollView>
-          <View style={styles.logColumn}>
-            {selectedJob ? (
-              <JobLogViewer
-                client={client}
-                repo={repo}
-                job={selectedJob}
-                failedCount={failedCount}
-                onRerunFailed={rerunFailed}
-              />
-            ) : (
-              <Text style={styles.emptyText}>Select a job to view its log.</Text>
-            )}
+        isCompact ? (
+          // Stack vertically on a phone: the jobs list first (as a plain View so
+          // the screen's outer ScrollView owns the vertical scroll — no competing
+          // fixed-height inner scroller), then the selected job's log below with a
+          // bounded height so the log surface scrolls in place and is viewable.
+          <View style={styles.runStackCompact}>
+            <View style={styles.jobListCompact}>{jobsNode}</View>
+            <View style={styles.runLogCompact}>{logNode}</View>
           </View>
-        </View>
+        ) : (
+          <View style={styles.runSplit}>
+            <ScrollView
+              style={styles.jobTree}
+              contentContainerStyle={styles.jobTreeContent}
+              nestedScrollEnabled
+            >
+              {jobsNode}
+            </ScrollView>
+            <View style={styles.logColumn}>{logNode}</View>
+          </View>
+        )
       ) : null}
     </View>
   );
@@ -7036,13 +7172,13 @@ export function ForgeHubScreen() {
       {connectionsNavItem}
       <Text style={styles.navGroupLabel}>Switch repo</Text>
       {quickRepos.length === 0 ? (
-        <Text style={styles.navEmpty}>
-          {reposLoading && !reposLoaded
-            ? "Loading repositories…"
-            : hasConnections
-              ? "No repositories"
-              : "Connect an account"}
-        </Text>
+        reposLoading && !reposLoaded ? (
+          <SidebarRepoSkeleton />
+        ) : (
+          <Text style={styles.navEmpty}>
+            {hasConnections ? "No repositories" : "Connect an account"}
+          </Text>
+        )
       ) : (
         <>
           {quickRepos.map(renderSidebarRepoRow)}
@@ -7801,6 +7937,21 @@ const styles = StyleSheet.create((theme) => ({
     borderRadius: theme.borderRadius.sm,
     backgroundColor: theme.colors.surface2,
   },
+  // Sidebar "Switch repo" loading placeholder — bars sized to the nav rows.
+  sidebarSkeleton: {
+    gap: theme.spacing[1],
+  },
+  sidebarSkeletonRow: {
+    minHeight: 32,
+    justifyContent: "center",
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1.5],
+  },
+  sidebarSkeletonBar: {
+    height: 10,
+    borderRadius: theme.borderRadius.sm,
+    backgroundColor: theme.colors.surface2,
+  },
   pane: {
     gap: theme.spacing[3],
   },
@@ -7982,6 +8133,9 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
     justifyContent: "flex-end",
     gap: theme.spacing[2],
+    // A small top margin sets the remove/re-auth actions off as a deliberate
+    // footer of the stacked card rather than a stray trailing icon.
+    marginTop: theme.spacing[1],
   },
   rowInfo: {
     flex: 1,
@@ -8902,11 +9056,16 @@ const styles = StyleSheet.create((theme) => ({
     flexWrap: "wrap",
     gap: theme.spacing[1],
   },
+  // Horizontally scrollable so every tab (incl. the last one) stays reachable on
+  // a phone; the border stays a full-width baseline under the row. On desktop the
+  // tabs fit without scrolling, so this reads identically there.
   tabsRow: {
-    flexDirection: "row",
-    gap: theme.spacing[1],
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,
+  },
+  tabsRowContent: {
+    flexDirection: "row",
+    gap: theme.spacing[1],
   },
   tab: {
     flexDirection: "row",
@@ -8998,6 +9157,9 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.foreground,
     fontFamily: theme.fontFamily.mono,
     flexShrink: 1,
+    // Let a long path ellipsize within the card instead of pushing the +/- stats
+    // off the right edge on a narrow (compact) screen.
+    minWidth: 0,
   },
   fileEmpty: {
     fontSize: theme.fontSize.xs,
@@ -9139,6 +9301,34 @@ const styles = StyleSheet.create((theme) => ({
     flexDirection: "row",
     gap: theme.spacing[3],
     minHeight: 0,
+  },
+  // Compact run-detail toolbar: title line + optional ref line + wrapped actions
+  // row stacked vertically so the run name stays readable on a phone.
+  runToolbarCompact: {
+    gap: theme.spacing[2],
+  },
+  runToolbarLineCompact: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+  },
+  runActionsRowCompact: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: theme.spacing[2],
+  },
+  // Compact run body: jobs list stacked above a bounded-height log section so the
+  // log is actually viewable and scrolls in place (the outer screen ScrollView
+  // owns the page scroll; only the log is a bounded inner scroller here).
+  runStackCompact: {
+    gap: theme.spacing[3],
+  },
+  jobListCompact: {
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
+  },
+  runLogCompact: {
+    minHeight: 320,
   },
   // Left column of the run detail: a scrolling stage/job list with a right
   // border (mockup artboard 4). Capped so long pipelines scroll in place while

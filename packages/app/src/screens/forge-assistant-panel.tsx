@@ -10,7 +10,12 @@ import {
   createPaneFocusContextValue,
   type PaneContextValue,
 } from "@/panels/pane-context";
-import { ForgeAssistantDraft, FORGE_ASSISTANT_LABEL } from "@/components/forge-assistant-draft";
+import {
+  ForgeAssistantDraft,
+  FORGE_ASSISTANT_LABEL,
+  FORGE_ASSISTANT_REPO_LABEL,
+  repoScopeKey,
+} from "@/components/forge-assistant-draft";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
 import { useSessionStore, type Agent } from "@/stores/session-store";
@@ -23,13 +28,21 @@ const ThemedPlus = withUnistyles(Plus);
 const mutedColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 const noop = () => {};
 
-/** Most recently active, non-archived Forge assistant agent for this host. */
-function findLatestForgeAgent(agents: Map<string, Agent> | undefined): Agent | null {
+/** Most recently active, non-archived Forge assistant agent for this host whose
+ *  baked repo context matches `currentRepo`. Matching the repo-scope label (not
+ *  just the assistant label) is what keeps a repo switch from reusing the
+ *  previous repo's assistant, which would answer about the wrong repository. */
+function findLatestForgeAgent(
+  agents: Map<string, Agent> | undefined,
+  currentRepo: ForgeRepoRef | null,
+): Agent | null {
   if (!agents) return null;
+  const scope = repoScopeKey(currentRepo);
   let latest: Agent | null = null;
   for (const agent of agents.values()) {
     if (agent.archivedAt) continue;
     if (agent.labels?.[FORGE_ASSISTANT_LABEL] !== "true") continue;
+    if (agent.labels?.[FORGE_ASSISTANT_REPO_LABEL] !== scope) continue;
     if (!latest || agent.lastActivityAt > latest.lastActivityAt) latest = agent;
   }
   return latest;
@@ -154,20 +167,28 @@ export function ForgeAssistantPanel({
     setWorkspaceId(null);
   }, []);
 
-  // Reopen the most recent assistant conversation for this host once ready, so
-  // opening the panel reuses the existing agent instead of showing a blank
-  // composer. Never auto-create a blank agent just because the panel is open.
-  const reopenedRef = useRef(false);
+  // Reopen the assistant conversation for the CURRENT repo scope, so opening the
+  // panel — or switching repos — reuses that repo's own assistant (correct baked
+  // context) instead of a blank composer or the previous repo's agent. Keyed on
+  // the repo scope: when the user switches repos we re-resolve (falling back to a
+  // fresh draft when that repo has no assistant yet), but agents-map churn from
+  // creating/streaming within the same scope does NOT clobber the open agent or
+  // a deliberate "New chat". Never auto-create a blank agent just to be open.
+  const repoScope = useMemo(() => repoScopeKey(repoRef), [repoRef]);
+  const resolvedScopeRef = useRef<string | null>(null);
   useEffect(() => {
-    if (agentId || !ready) return;
-    if (reopenedRef.current) return;
-    reopenedRef.current = true;
-    const existing = findLatestForgeAgent(agents);
+    if (!ready) return;
+    if (resolvedScopeRef.current === repoScope) return;
+    resolvedScopeRef.current = repoScope;
+    const existing = findLatestForgeAgent(agents, repoRef);
     if (existing) {
       setAgentId(existing.id);
       setWorkspaceId(existing.workspaceId ?? null);
+    } else {
+      setAgentId(null);
+      setWorkspaceId(null);
     }
-  }, [agentId, ready, agents]);
+  }, [ready, repoScope, repoRef, agents]);
 
   // Keep the viewed-timeline sync aware of the assistant thread so its history
   // hydrates while the panel is visible (mirrors DatabaseChatDock).
