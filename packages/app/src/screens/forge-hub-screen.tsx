@@ -66,6 +66,7 @@ import {
   ForgeChangeRequestSummarySchema,
   ForgeCommitSchema,
   ForgeIssueSchema,
+  ForgeIssueDetailSchema,
   ForgePipelineDetailSchema,
   ForgePipelineRunSchema,
   ForgeReleaseSchema,
@@ -79,6 +80,7 @@ import {
   type ForgeCommit,
   type ForgeConnection,
   type ForgeIssue,
+  type ForgeIssueDetail,
   type ForgePipelineDetail,
   type ForgePipelineJob,
   type ForgePipelineRun,
@@ -6079,8 +6081,33 @@ function IssueDetail({
   const [comment, setComment] = useState("");
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  // Full issue (body + comments), fetched via forge.issue.get. The header seeds from
+  // the list summary so the title/chip paint before this lands.
+  const [detail, setDetail] = useState<ForgeIssueDetail | null>(null);
+  const [loadingDetail, setLoadingDetail] = useState(true);
 
   const handleOpenExternal = useCallback(() => void openExternalUrl(issue.url), [issue.url]);
+  const handleLinkPress = useCallback((u: string) => {
+    void openExternalUrl(u);
+    return true;
+  }, []);
+
+  const loadDetail = useCallback(async () => {
+    setLoadingDetail(true);
+    try {
+      const res = await client.forgeGetIssue({ repo: repoRef(repo), number: issue.number });
+      const parsed = ForgeIssueDetailSchema.safeParse(res.issue);
+      setDetail(parsed.success ? parsed.data : null);
+    } catch {
+      setDetail(null);
+    } finally {
+      setLoadingDetail(false);
+    }
+  }, [client, repo, issue.number]);
+
+  useEffect(() => {
+    void loadDetail();
+  }, [loadDetail]);
 
   const submitComment = useCallback(async () => {
     const body = comment.trim();
@@ -6097,6 +6124,8 @@ function IssueDetail({
         setComment("");
         setNote("Comment posted.");
         onChanged();
+        // Refetch so the just-posted comment appears in the timeline.
+        void loadDetail();
       } else {
         setNote("The comment could not be posted.");
       }
@@ -6105,7 +6134,7 @@ function IssueDetail({
     } finally {
       setBusy(false);
     }
-  }, [comment, client, repo, issue.number, onChanged]);
+  }, [comment, client, repo, issue.number, onChanged, loadDetail]);
 
   const closeIssue = useCallback(async () => {
     setBusy(true);
@@ -6115,6 +6144,8 @@ function IssueDetail({
       if (res.ok) {
         setNote("Issue closed.");
         onChanged();
+        // Refetch so the state (and any auto-added activity) reflects the close.
+        void loadDetail();
       } else {
         setNote("The issue could not be closed.");
       }
@@ -6123,9 +6154,11 @@ function IssueDetail({
     } finally {
       setBusy(false);
     }
-  }, [client, repo, issue.number, onChanged]);
+  }, [client, repo, issue.number, onChanged, loadDetail]);
 
   const canComment = comment.trim().length > 0 && !busy;
+  const body = detail?.body?.trim() ?? "";
+  const comments = detail?.comments ?? [];
 
   return (
     <View style={styles.pane}>
@@ -6160,6 +6193,49 @@ function IssueDetail({
           <Text style={styles.btnGhostText}>Open</Text>
         </Pressable>
       </View>
+
+      {loadingDetail && detail === null ? (
+        <SkeletonRows rows={3} />
+      ) : (
+        <>
+          <View style={styles.card} testID="forge-issue-detail">
+            <View style={styles.releaseNotes}>
+              {body ? (
+                <MarkdownRenderer text={body} onLinkPress={handleLinkPress} />
+              ) : (
+                <Text style={styles.metaMuted}>No description.</Text>
+              )}
+            </View>
+          </View>
+          {comments.length > 0 ? (
+            <>
+              <Text style={styles.sectionTitle}>Comments</Text>
+              <View style={styles.card}>
+                {comments.map((c, i) => {
+                  const when = formatRelativeMs(c.createdAt_ms);
+                  return (
+                    <View
+                      key={`${i}-${c.createdAt_ms ?? ""}`}
+                      style={[styles.issueComment, i > 0 && styles.issueCommentDivider]}
+                      testID={`forge-issue-comment-${i}`}
+                    >
+                      <View style={styles.issueCommentHeader}>
+                        <Text style={styles.issueCommentAuthor}>{c.author ?? "Unknown"}</Text>
+                        {when ? <Text style={styles.metaMuted}>{when}</Text> : null}
+                      </View>
+                      {c.body.trim() ? (
+                        <MarkdownRenderer text={c.body} onLinkPress={handleLinkPress} />
+                      ) : (
+                        <Text style={styles.metaMuted}>No content.</Text>
+                      )}
+                    </View>
+                  );
+                })}
+              </View>
+            </>
+          ) : null}
+        </>
+      )}
 
       <View style={styles.mergebox}>
         <View style={styles.mergeboxBody}>
@@ -9583,6 +9659,27 @@ const styles = StyleSheet.create((theme) => ({
   },
   releaseNotes: {
     padding: theme.spacing[3],
+  },
+  // Issue-detail comment timeline: each comment is a padded row inside a card, with
+  // a top divider from the second comment onward.
+  issueComment: {
+    padding: theme.spacing[3],
+    gap: theme.spacing[2],
+  },
+  issueCommentDivider: {
+    borderTopWidth: theme.borderWidth[1],
+    borderTopColor: theme.colors.border,
+  },
+  issueCommentHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    flexWrap: "wrap",
+  },
+  issueCommentAuthor: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.foreground,
   },
   // New change-request form: base/head pickers side by side. Each picker owns an
   // absolute dropdown, so the row keeps a stacking context above the fields below.

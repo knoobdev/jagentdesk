@@ -2622,6 +2622,18 @@ export const ForgeIssueSchema = z.object({
   commentCount: z.number().int().optional(),
   updatedAt_ms: z.number().nullable().optional(),
 });
+// One comment on an issue; only populated by the issue-detail RPC (forge.issue.get).
+export const ForgeIssueCommentSchema = z.object({
+  author: z.string().nullable().optional(),
+  body: z.string(),
+  createdAt_ms: z.number().nullable().optional(),
+});
+// Full issue: the list summary fields PLUS body + comments, populated by forge.issue.get.
+export const ForgeIssueDetailSchema = ForgeIssueSchema.extend({
+  body: z.string().nullable().optional(),
+  createdAt_ms: z.number().nullable().optional(),
+  comments: z.array(ForgeIssueCommentSchema).optional(),
+});
 
 export const ForgeSetAutoMergeRequestSchema = z.object({
   type: z.literal("forge.change_request.set_auto_merge.request"),
@@ -2678,6 +2690,12 @@ export const ForgeIssueCommentRequestSchema = z.object({
 });
 export const ForgeIssueCloseRequestSchema = z.object({
   type: z.literal("forge.issue.close.request"),
+  repo: ForgeRepoRefSchema,
+  number: z.number().int(),
+  requestId: z.string(),
+});
+export const ForgeIssueGetRequestSchema = z.object({
+  type: z.literal("forge.issue.get.request"),
   repo: ForgeRepoRefSchema,
   number: z.number().int(),
   requestId: z.string(),
@@ -3785,6 +3803,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ForgeIssueCreateRequestSchema,
   ForgeIssueCommentRequestSchema,
   ForgeIssueCloseRequestSchema,
+  ForgeIssueGetRequestSchema,
   ForgeChangeRequestCreateRequestSchema,
   ForgeChangeRequestCloseRequestSchema,
   ForgeReleaseCreateRequestSchema,
@@ -6301,6 +6320,10 @@ export const ForgeIssueCloseResponseSchema = z.object({
   type: z.literal("forge.issue.close.response"),
   payload: z.object({ ok: z.boolean(), requestId: z.string() }),
 });
+export const ForgeIssueGetResponseSchema = z.object({
+  type: z.literal("forge.issue.get.response"),
+  payload: z.object({ issue: ForgeIssueDetailSchema.nullable(), requestId: z.string() }),
+});
 export const ForgeCliStatusResponseSchema = z.object({
   type: z.literal("forge.cli.status.response"),
   payload: z.object({
@@ -7344,6 +7367,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ForgeIssueCreateResponseSchema,
   ForgeIssueCommentResponseSchema,
   ForgeIssueCloseResponseSchema,
+  ForgeIssueGetResponseSchema,
   ForgeChangeRequestCreateResponseSchema,
   ForgeChangeRequestCloseResponseSchema,
   ForgeReleaseCreateResponseSchema,
@@ -7882,6 +7906,8 @@ export type ForgeRelease = z.infer<typeof ForgeReleaseSchema>;
 export type ForgeReleaseAsset = z.infer<typeof ForgeReleaseAssetSchema>;
 export type ForgeTag = z.infer<typeof ForgeTagSchema>;
 export type ForgeIssue = z.infer<typeof ForgeIssueSchema>;
+export type ForgeIssueComment = z.infer<typeof ForgeIssueCommentSchema>;
+export type ForgeIssueDetail = z.infer<typeof ForgeIssueDetailSchema>;
 export type ForgeSetAutoMergeRequest = z.infer<typeof ForgeSetAutoMergeRequestSchema>;
 export type ForgeSetAutoMergeResponse = z.infer<typeof ForgeSetAutoMergeResponseSchema>;
 export type ForgeArtifactListRequest = z.infer<typeof ForgeArtifactListRequestSchema>;
@@ -7900,6 +7926,8 @@ export type ForgeIssueCommentRequest = z.infer<typeof ForgeIssueCommentRequestSc
 export type ForgeIssueCommentResponse = z.infer<typeof ForgeIssueCommentResponseSchema>;
 export type ForgeIssueCloseRequest = z.infer<typeof ForgeIssueCloseRequestSchema>;
 export type ForgeIssueCloseResponse = z.infer<typeof ForgeIssueCloseResponseSchema>;
+export type ForgeIssueGetRequest = z.infer<typeof ForgeIssueGetRequestSchema>;
+export type ForgeIssueGetResponse = z.infer<typeof ForgeIssueGetResponseSchema>;
 // Forge Hub — Milestone D types
 export type ForgeChangeRequestCreateRequest = z.infer<typeof ForgeChangeRequestCreateRequestSchema>;
 export type ForgeChangeRequestCreateResponse = z.infer<

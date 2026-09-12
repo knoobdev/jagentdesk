@@ -19,6 +19,7 @@ import type {
   ForgeReleaseAsset,
   ForgeTag,
   ForgeIssue,
+  ForgeIssueDetail,
   SessionInboundMessage,
   SessionOutboundMessage,
 } from "@jagentdesk/protocol/messages";
@@ -70,6 +71,7 @@ type ForgeHubInbound = Extract<
       | "forge.issue.create.request"
       | "forge.issue.comment.request"
       | "forge.issue.close.request"
+      | "forge.issue.get.request"
       | "forge.change_request.create.request"
       | "forge.change_request.close.request"
       | "forge.release.create.request"
@@ -2061,6 +2063,63 @@ export class ForgeHubService {
     return this.ghOk(["issue", "close", String(input.number), "--repo", repo]);
   }
 
+  async getIssue(input: {
+    owner: string;
+    name: string;
+    number: number;
+  }): Promise<ForgeIssueDetail | null> {
+    const repo = `${input.owner}/${input.name}`;
+    const res = await this.ghJson(
+      [
+        "issue",
+        "view",
+        String(input.number),
+        "--repo",
+        repo,
+        "--json",
+        "number,title,state,body,author,createdAt,updatedAt,labels,url,comments",
+      ],
+      z.object({
+        number: z.number(),
+        title: z.string(),
+        state: z.string(),
+        body: z.string().nullable().optional(),
+        author: z.object({ login: z.string() }).nullable().optional(),
+        createdAt: z.string().nullable().optional(),
+        updatedAt: z.string().nullable().optional(),
+        labels: z.array(z.object({ name: z.string() })).optional(),
+        url: z.string(),
+        comments: z
+          .array(
+            z.object({
+              author: z.object({ login: z.string() }).nullable().optional(),
+              body: z.string(),
+              createdAt: z.string().nullable().optional(),
+            }),
+          )
+          .optional()
+          .default([]),
+      }),
+    );
+    if (!res) return null;
+    return {
+      number: res.number,
+      title: res.title,
+      url: res.url,
+      state: res.state.toLowerCase() === "closed" ? "closed" : "open",
+      authorLogin: res.author?.login ?? null,
+      labels: res.labels?.map((l) => l.name) ?? [],
+      updatedAt_ms: isoToMs(res.updatedAt ?? undefined),
+      body: res.body ?? null,
+      createdAt_ms: isoToMs(res.createdAt ?? undefined),
+      comments: res.comments.map((c) => ({
+        author: c.author?.login ?? null,
+        body: c.body,
+        createdAt_ms: isoToMs(c.createdAt ?? undefined),
+      })),
+    };
+  }
+
   // ===== Milestone C — GitLab ====================================================
 
   async setGitLabAutoMerge(input: {
@@ -2274,6 +2333,62 @@ export class ForgeHubService {
       "-f",
       "state_event=close",
     ]);
+  }
+
+  async getGitLabIssue(input: {
+    owner: string;
+    name: string;
+    number: number;
+  }): Promise<ForgeIssueDetail | null> {
+    const enc = glProjectId(input.owner, input.name);
+    const issue = await this.glabJson(
+      ["api", `projects/${enc}/issues/${input.number}`],
+      z.object({
+        iid: z.number(),
+        title: z.string(),
+        web_url: z.string(),
+        state: z.string(),
+        description: z.string().nullable().optional(),
+        author: z.object({ username: z.string() }).nullable().optional(),
+        labels: z.array(z.string()).optional(),
+        user_notes_count: z.number().optional(),
+        created_at: z.string().nullable().optional(),
+        updated_at: z.string().nullable().optional(),
+      }),
+    );
+    if (!issue) return null;
+    // Notes include system notes (label changes, state events); skip those so only
+    // human comments surface.
+    const notes = await this.glabJson(
+      ["api", `projects/${enc}/issues/${input.number}/notes?per_page=100&sort=asc`],
+      z.array(
+        z.object({
+          body: z.string(),
+          system: z.boolean().optional(),
+          author: z.object({ username: z.string() }).nullable().optional(),
+          created_at: z.string().nullable().optional(),
+        }),
+      ),
+    );
+    return {
+      number: issue.iid,
+      title: issue.title,
+      url: issue.web_url,
+      state: issue.state.toLowerCase() === "opened" ? "open" : "closed",
+      authorLogin: issue.author?.username ?? null,
+      labels: issue.labels ?? [],
+      commentCount: issue.user_notes_count,
+      updatedAt_ms: isoToMs(issue.updated_at ?? undefined),
+      body: issue.description ?? null,
+      createdAt_ms: isoToMs(issue.created_at ?? undefined),
+      comments: (notes ?? [])
+        .filter((n) => n.system !== true)
+        .map((n) => ({
+          author: n.author?.username ?? null,
+          body: n.body,
+          createdAt_ms: isoToMs(n.created_at ?? undefined),
+        })),
+    };
   }
 
   // ===== Bitbucket Cloud provider (REST 2.0 + token; no CLI) =====================
@@ -2838,6 +2953,50 @@ export class ForgeHubService {
   }): Promise<boolean> {
     const base = this.bbRepo(input.owner, input.name);
     return this.bbSend("PUT", `${base}/issues/${input.number}`, { state: "closed" });
+  }
+
+  async getBitbucketIssue(input: {
+    owner: string;
+    name: string;
+    number: number;
+  }): Promise<ForgeIssueDetail | null> {
+    const base = this.bbRepo(input.owner, input.name);
+    // The issue tracker may be disabled → the endpoint 404s → bbJson returns null.
+    const issue = await this.bbJson(
+      `${base}/issues/${input.number}`,
+      BbIssueSchema.extend({
+        content: z.object({ raw: z.string().nullable().optional() }).optional(),
+      }),
+    );
+    if (!issue) return null;
+    const comments = await this.bbJson(
+      `${base}/issues/${input.number}/comments?pagelen=100&sort=created_on`,
+      bbPaged(
+        z.object({
+          content: z.object({ raw: z.string().nullable().optional() }).optional(),
+          user: z.object({ nickname: z.string().optional() }).nullable().optional(),
+          created_on: z.string().optional(),
+        }),
+      ),
+    );
+    return {
+      number: issue.id,
+      title: issue.title,
+      url: issue.links?.html?.href ?? "",
+      state: bbIssueState(issue.state),
+      authorLogin: issue.reporter?.nickname ?? null,
+      labels: [],
+      updatedAt_ms: isoToMs(issue.updated_on),
+      body: issue.content?.raw ?? null,
+      comments: (comments?.values ?? [])
+        // A deleted comment carries no content; drop it so the timeline stays clean.
+        .filter((c) => c.content?.raw != null)
+        .map((c) => ({
+          author: c.user?.nickname ?? null,
+          body: c.content?.raw ?? "",
+          createdAt_ms: isoToMs(c.created_on),
+        })),
+    };
   }
 
   // ===== Milestone D — create/close change request · create/get release ==========
@@ -3975,6 +4134,33 @@ export class ForgeHubSession {
           });
           return;
         }
+        case "forge.issue.get.request": {
+          const issue =
+            msg.repo.forge === "github"
+              ? await this.service.getIssue({
+                  owner: msg.repo.owner,
+                  name: msg.repo.name,
+                  number: msg.number,
+                })
+              : msg.repo.forge === "gitlab"
+                ? await this.service.getGitLabIssue({
+                    owner: msg.repo.owner,
+                    name: msg.repo.name,
+                    number: msg.number,
+                  })
+                : msg.repo.forge === "bitbucket"
+                  ? await this.service.getBitbucketIssue({
+                      owner: msg.repo.owner,
+                      name: msg.repo.name,
+                      number: msg.number,
+                    })
+                  : null;
+          this.emit({
+            type: "forge.issue.get.response",
+            payload: { issue, requestId: msg.requestId },
+          });
+          return;
+        }
         case "forge.change_request.create.request": {
           const result =
             msg.repo.forge === "github"
@@ -4350,6 +4536,11 @@ export class ForgeHubSession {
         return this.emit({
           type: "forge.issue.close.response",
           payload: { ok: false, requestId: msg.requestId },
+        });
+      case "forge.issue.get.request":
+        return this.emit({
+          type: "forge.issue.get.response",
+          payload: { issue: null, requestId: msg.requestId },
         });
       case "forge.change_request.create.request":
         return this.emit({

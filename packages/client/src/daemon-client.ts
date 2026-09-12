@@ -90,6 +90,7 @@ import type {
   ForgeIssueCreateResponse,
   ForgeIssueCommentResponse,
   ForgeIssueCloseResponse,
+  ForgeIssueGetResponse,
   ForgeChangeRequestCreateResponse,
   ForgeChangeRequestCloseResponse,
   ForgeReleaseCreateResponse,
@@ -532,6 +533,7 @@ type ForgeIssueListPayload = ForgeIssueListResponse["payload"];
 type ForgeIssueCreatePayload = ForgeIssueCreateResponse["payload"];
 type ForgeIssueCommentPayload = ForgeIssueCommentResponse["payload"];
 type ForgeIssueClosePayload = ForgeIssueCloseResponse["payload"];
+type ForgeIssueGetPayload = ForgeIssueGetResponse["payload"];
 // Forge Hub (spec 19) — Milestone D payload aliases
 type ForgeChangeRequestCreatePayload = ForgeChangeRequestCreateResponse["payload"];
 type ForgeChangeRequestClosePayload = ForgeChangeRequestCloseResponse["payload"];
@@ -5084,6 +5086,18 @@ export class DaemonClient {
       message: { type: "forge.issue.close.request", repo: options.repo, number: options.number },
       responseType: "forge.issue.close.response",
       timeout: 30000,
+    });
+  }
+
+  async forgeGetIssue(
+    options: { repo: ForgeRepoRef; number: number },
+    requestId?: string,
+  ): Promise<ForgeIssueGetPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "forge.issue.get.request", repo: options.repo, number: options.number },
+      responseType: "forge.issue.get.response",
+      timeout: 20000,
     });
   }
 
