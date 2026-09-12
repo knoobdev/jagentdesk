@@ -606,6 +606,17 @@ function connectionStatus(
   }
 }
 
+// Aggregate health color for the sidebar "Connections" nav dot (§19.3.4): red if
+// any credential has failed, amber if any is expiring, green when every account
+// is authenticated, and muted when there are none / nothing else applies.
+function connectionsHealthColor(connections: ForgeConnection[], theme: Theme): string {
+  if (connections.length === 0) return theme.colors.foregroundMuted;
+  if (connections.some((c) => c.authState === "error")) return theme.colors.statusDanger;
+  if (connections.some((c) => c.authState === "token_expiring")) return theme.colors.statusWarning;
+  if (connections.every((c) => c.authState === "authenticated")) return theme.colors.statusSuccess;
+  return theme.colors.foregroundMuted;
+}
+
 // Status cell of the connected-accounts table (mockup artboard 2 `.pill.success
 // / .pending / .failed`): a tinted pill with a colored dot + label, keyed off
 // the connection's authState. Neutral states (never signed in / CLI missing)
@@ -657,6 +668,7 @@ function ConnectionRow({
   onReauth?: () => void;
 }) {
   const { theme } = useUnistyles();
+  const isCompact = useIsCompactFormFactor();
   const def = getForgeDefinitionOrNeutral(connection.forge);
   const [removing, setRemoving] = useState(false);
   // Blocks a setState after the row unmounts (removal drops it from the list).
@@ -686,6 +698,73 @@ function ConnectionRow({
     connection.method === "cli" ? `via ${cli}` : isBitbucket ? "REST + token" : "token";
   // Only offer Re-auth when the credential has actually failed/expired.
   const showReauth = connection.authState === "error" && !!onReauth;
+
+  // Compact (mobile): the fixed column layout overflows on a phone (the account
+  // column collapses and the provider badge overlaps the auth text). Stack the
+  // same fields into a card row instead — title, host/transport, a wrap row of
+  // chips (auth · status · scopes), and a right-aligned actions row.
+  if (isCompact) {
+    return (
+      <View style={styles.connStackRow}>
+        <View style={styles.connStackHead}>
+          <ProviderBadge forge={connection.forge} />
+          <Text style={[styles.connRowTitle, styles.grow]} numberOfLines={1}>
+            {def.displayName}
+            {connection.account ? " · " : ""}
+            {connection.account ? (
+              <Text style={styles.connAccountName}>{connection.account}</Text>
+            ) : null}
+          </Text>
+        </View>
+        <Text style={styles.connRowSub} numberOfLines={1}>
+          {connection.host} · {subLabel}
+        </Text>
+        <View style={styles.connStackChips}>
+          <View style={styles.plainChip}>
+            <Text style={styles.plainChipText}>{authLabel}</Text>
+          </View>
+          <ConnStatusPill connection={connection} />
+          {connection.scopes && connection.scopes.length > 0 ? (
+            connection.scopes.map((scope) => (
+              <View key={scope} style={styles.plainChip}>
+                <Text style={styles.plainChipText}>{scope}</Text>
+              </View>
+            ))
+          ) : (
+            <Text style={styles.connScopesEmpty}>—</Text>
+          )}
+        </View>
+        <View style={styles.connStackActions}>
+          {showReauth ? (
+            <Pressable
+              style={[styles.btn, styles.btnGhost, styles.connReauthBtn]}
+              onPress={onReauth}
+              accessibilityRole="button"
+              accessibilityLabel="Re-authenticate connection"
+              testID={`forge-connection-reauth-${connection.id}`}
+            >
+              <Text style={styles.btnGhostText}>Re-auth</Text>
+            </Pressable>
+          ) : null}
+          <Pressable
+            style={styles.iconBtn}
+            onPress={handleRemove}
+            disabled={removing}
+            accessibilityRole="button"
+            accessibilityLabel="Remove connection"
+            testID={`forge-connection-remove-${connection.id}`}
+          >
+            {removing ? (
+              <ActivityIndicator size="small" color={theme.colors.foregroundMuted} />
+            ) : (
+              <Trash2 size={15} color={theme.colors.foregroundMuted} />
+            )}
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.connRow}>
       <View style={styles.connColAccount}>
@@ -1274,6 +1353,7 @@ function ConnectionsView({
   cliInstallEnabled,
   loginEnabled,
   onLoggedIn,
+  loading,
 }: {
   connections: ForgeConnection[];
   onRemove: (id: string) => void | Promise<void>;
@@ -1284,8 +1364,11 @@ function ConnectionsView({
   cliInstallEnabled: boolean;
   loginEnabled: boolean;
   onLoggedIn: () => void | Promise<void>;
+  /** True while the first connection fetch is in flight (no cached accounts). */
+  loading?: boolean;
 }) {
   const { theme } = useUnistyles();
+  const isCompact = useIsCompactFormFactor();
   const [choice, setChoice] = useState<ProviderChoice>("github");
   // Sign-in method selector (mockup artboard 2 "Sign-in method" rows). Defaults
   // to the provider's native method and is re-synced when the provider changes,
@@ -1362,17 +1445,21 @@ function ConnectionsView({
     <View style={styles.pane}>
       <Text style={styles.connSecTitle}>Connected accounts</Text>
 
-      {connections.length === 0 ? (
+      {loading && connections.length === 0 ? (
+        <SkeletonRows rows={3} />
+      ) : connections.length === 0 ? (
         <Text style={styles.emptyText}>{CONNECTION_EMPTY_STATE}</Text>
       ) : (
         <View style={styles.card}>
-          <View style={styles.connHeadRow}>
-            <Text style={[styles.connColGrow, styles.connHeadText]}>Account</Text>
-            <Text style={[styles.connColAuth, styles.connHeadText]}>Auth</Text>
-            <Text style={[styles.connColScopes, styles.connHeadText]}>Scopes</Text>
-            <Text style={[styles.connColStatus, styles.connHeadText]}>Status</Text>
-            <View style={styles.connColActions} />
-          </View>
+          {!isCompact ? (
+            <View style={styles.connHeadRow}>
+              <Text style={[styles.connColGrow, styles.connHeadText]}>Account</Text>
+              <Text style={[styles.connColAuth, styles.connHeadText]}>Auth</Text>
+              <Text style={[styles.connColScopes, styles.connHeadText]}>Scopes</Text>
+              <Text style={[styles.connColStatus, styles.connHeadText]}>Status</Text>
+              <View style={styles.connColActions} />
+            </View>
+          ) : null}
           {connections.map((connection) => (
             <ConnectionRow
               key={connection.id}
@@ -6317,6 +6404,7 @@ function SidebarNavItem({
   onSelect,
   Icon,
   count,
+  dotColor,
 }: {
   label: string;
   section: Section;
@@ -6325,6 +6413,9 @@ function SidebarNavItem({
   Icon: ComponentType<{ size?: number; color?: string }>;
   /** Right-aligned count/badge shown only when cheaply known (e.g. branch name). */
   count?: string;
+  /** Right-aligned 8px status dot (takes precedence over `count`) — e.g. the
+   *  aggregate connection health on the Connections item. */
+  dotColor?: string;
 }) {
   const { theme } = useUnistyles();
   const handlePress = useCallback(() => onSelect(section), [section, onSelect]);
@@ -6339,7 +6430,9 @@ function SidebarNavItem({
       <Text style={[styles.navItemText, active && styles.navItemTextActive]} numberOfLines={1}>
         {label}
       </Text>
-      {count ? (
+      {dotColor ? (
+        <View style={[styles.navDot, { backgroundColor: dotColor }]} />
+      ) : count ? (
         <Text style={styles.navItemCount} numberOfLines={1}>
           {count}
         </Text>
@@ -6441,6 +6534,7 @@ export function ForgeHubScreen() {
   const [repoQuery, setRepoQuery] = useState("");
   const [connections, setConnections] = useState<ForgeConnection[]>([]);
   const [connectionsError, setConnectionsError] = useState<string | null>(null);
+  const [connectionsLoading, setConnectionsLoading] = useState(false);
   const [adding, setAdding] = useState(false);
 
   const [repos, setRepos] = useState<ForgeRepo[]>([]);
@@ -6468,16 +6562,24 @@ export function ForgeHubScreen() {
   const [filesLoading, setFilesLoading] = useState(false);
   const [filesError, setFilesError] = useState<string | null>(null);
 
-  const refreshConnections = useCallback(async () => {
-    if (!client) return;
-    setConnectionsError(null);
-    try {
-      const res = await client.forgeListConnections();
-      setConnections(res.connections);
-    } catch (e: unknown) {
-      setConnectionsError(e instanceof Error ? e.message : "Failed to load connections.");
-    }
-  }, [client]);
+  const refreshConnections = useCallback(
+    async (silent = false) => {
+      if (!client) return;
+      setConnectionsError(null);
+      // Show the skeleton only on a non-silent (initial / user-triggered) fetch;
+      // background refreshes after add/remove keep the current list in place.
+      if (!silent) setConnectionsLoading(true);
+      try {
+        const res = await client.forgeListConnections();
+        setConnections(res.connections);
+      } catch (e: unknown) {
+        setConnectionsError(e instanceof Error ? e.message : "Failed to load connections.");
+      } finally {
+        if (!silent) setConnectionsLoading(false);
+      }
+    },
+    [client],
+  );
 
   useEffect(() => {
     void refreshConnections();
@@ -6665,7 +6767,7 @@ export function ForgeHubScreen() {
       try {
         await client.forgeAddConnection(input);
         setAdding(false);
-        await refreshConnections();
+        await refreshConnections(true);
       } catch (e: unknown) {
         setConnectionsError(e instanceof Error ? e.message : "Failed to add connection.");
       }
@@ -6691,7 +6793,7 @@ export function ForgeHubScreen() {
           // If the open repo belonged to the removed connection, close it so
           // we don't keep rendering a repo whose account no longer exists.
           setSelectedRepo((cur) => (cur && cur.connectionId === id ? null : cur));
-          return refreshConnections();
+          return refreshConnections(true);
         })
         .catch((e: unknown) =>
           setConnectionsError(e instanceof Error ? e.message : "Failed to remove connection."),
@@ -6751,24 +6853,6 @@ export function ForgeHubScreen() {
     setSection("repositories");
     setCompactDetail(true);
   }, []);
-
-  // Connection footer status dot per §19.3.4 (authenticated=success,
-  // token_expiring=warning, error=danger; everything else muted).
-  const connDotColor = useCallback(
-    (state: ForgeConnection["authState"]): string => {
-      switch (state) {
-        case "authenticated":
-          return theme.colors.statusSuccess;
-        case "token_expiring":
-          return theme.colors.statusWarning;
-        case "error":
-          return theme.colors.statusDanger;
-        default:
-          return theme.colors.foregroundMuted;
-      }
-    },
-    [theme],
-  );
 
   // The sidebar quick list shows every fetched repo across all accounts; account
   // scoping now lives as a filter inside the full RepositoriesView, not here.
@@ -6839,9 +6923,26 @@ export function ForgeHubScreen() {
     />
   );
 
+  // Aggregate connection health for the sidebar dot + footer status row.
+  const connHealth = connectionsHealthColor(connections, theme);
+
+  // First-class "Connections" nav item — sits right below Repositories in every
+  // nav variant. The trailing dot summarizes account health at a glance.
+  const connectionsNavItem = (
+    <SidebarNavItem
+      label="Connections"
+      section="connections"
+      Icon={Plug}
+      active={section === "connections"}
+      onSelect={goToConnections}
+      dotColor={connHealth}
+    />
+  );
+
   const navInner = repoQuery.trim() ? (
     <>
       {repositoriesNavItem}
+      {connectionsNavItem}
       <Text style={styles.navGroupLabel}>Matching repos</Text>
       {jumpMatches.length === 0 ? (
         <Text style={styles.navEmpty}>No matches</Text>
@@ -6852,6 +6953,7 @@ export function ForgeHubScreen() {
   ) : selectedRepo && repoDef ? (
     <>
       {repositoriesNavItem}
+      {connectionsNavItem}
       <Text style={styles.navGroupLabel} numberOfLines={1}>
         {selectedRepo.owner}/{selectedRepo.name} · {selectedRepo.forge}
       </Text>
@@ -6931,10 +7033,15 @@ export function ForgeHubScreen() {
   ) : (
     <>
       {repositoriesNavItem}
+      {connectionsNavItem}
       <Text style={styles.navGroupLabel}>Switch repo</Text>
       {quickRepos.length === 0 ? (
         <Text style={styles.navEmpty}>
-          {hasConnections ? "No repositories" : "Connect an account"}
+          {reposLoading && !reposLoaded
+            ? "Loading repositories…"
+            : hasConnections
+              ? "No repositories"
+              : "Connect an account"}
         </Text>
       ) : (
         <>
@@ -6945,50 +7052,51 @@ export function ForgeHubScreen() {
     </>
   );
 
+  // A single slim account/status row (VSCode bottom-bar feel) — the per-account
+  // list now lives in the "Connections" nav item + ConnectionsView, so the
+  // footer just summarizes health and hands off to the full view. On compact it
+  // clears the home indicator so the row stays tappable.
   const footer = (
-    <View style={styles.connFooter}>
-      {connections.slice(0, 4).map((c) => (
-        <Pressable
-          key={c.id}
-          style={styles.connMini}
-          onPress={goToConnections}
-          testID={`forge-conn-mini-${c.id}`}
-        >
-          <StatusDot color={connDotColor(c.authState)} />
-          <Text style={styles.connMiniText} numberOfLines={1}>
-            {getForgeDefinitionOrNeutral(c.forge).displayName}
-            {c.account ? ` · ${c.account}` : ""}
-          </Text>
-        </Pressable>
-      ))}
+    <View
+      style={[
+        styles.connFooter,
+        isCompact ? { paddingBottom: insets.bottom + theme.spacing[2] } : null,
+      ]}
+    >
       <Pressable
-        style={[styles.connMini, styles.connManage]}
+        style={styles.connFooterRow}
         onPress={goToConnections}
         testID="forge-conn-manage"
+        accessibilityRole="button"
+        accessibilityLabel="Manage connections"
       >
-        <Plug size={13} color={theme.colors.foregroundMuted} />
-        <Text style={styles.connManageText}>
-          {hasConnections ? "Manage connections" : "Add connection"}
+        <StatusDot color={connHealth} />
+        <Text style={styles.connFooterText} numberOfLines={1}>
+          {hasConnections ? `${connections.length} connected` : "No accounts"}
         </Text>
+        <Text style={styles.connManageText}>Manage</Text>
+        <ChevronRight size={14} color={theme.colors.foregroundMuted} />
       </Pressable>
     </View>
   );
 
   // Toolbar toggle for the Forge assistant chat. Only meaningful once a host is
-  // resolved (the assistant runs an agent on that host).
-  const assistantButton = client ? (
-    <Pressable
-      style={[styles.btn, styles.btnGhost, assistantOpen && styles.btnGhostActive]}
-      onPress={toggleAssistant}
-      testID="forge-assistant-toggle"
-      accessibilityRole="button"
-      accessibilityLabel="Forge assistant"
-      accessibilityState={{ selected: assistantOpen }}
-    >
-      <MessageSquare size={13} color={theme.colors.foreground} />
-      <Text style={styles.btnGhostText}>Assistant</Text>
-    </Pressable>
-  ) : null;
+  // resolved (the assistant runs an agent on that host). On compact the floating
+  // chat FAB already provides this, so the toolbar button is dropped as redundant.
+  const assistantButton =
+    client && !isCompact ? (
+      <Pressable
+        style={[styles.btn, styles.btnGhost, assistantOpen && styles.btnGhostActive]}
+        onPress={toggleAssistant}
+        testID="forge-assistant-toggle"
+        accessibilityRole="button"
+        accessibilityLabel="Forge assistant"
+        accessibilityState={{ selected: assistantOpen }}
+      >
+        <MessageSquare size={13} color={theme.colors.foreground} />
+        <Text style={styles.btnGhostText}>Assistant</Text>
+      </Pressable>
+    ) : null;
 
   const renderToolbar = () => {
     // "connections" and "repositories" are repo-independent full-pane sections,
@@ -7008,16 +7116,20 @@ export function ForgeHubScreen() {
             style={[styles.btn, styles.btnGhost]}
             onPress={() => void openExternalUrl(selectedRepo.url)}
             testID="forge-toolbar-open-external"
+            accessibilityRole="button"
+            accessibilityLabel={`Open on ${repoDef.displayName}`}
           >
             <ExternalLink size={13} color={theme.colors.foreground} />
-            <Text style={styles.btnGhostText}>Open on {repoDef.displayName}</Text>
+            {!isCompact ? (
+              <Text style={styles.btnGhostText}>Open on {repoDef.displayName}</Text>
+            ) : null}
           </Pressable>
         </>
       );
     }
     return (
       <>
-        <Text style={styles.toolbarTitle}>
+        <Text style={styles.toolbarTitle} numberOfLines={1}>
           {section === "connections" ? "Forge connections" : "Repositories"}
         </Text>
         <View style={styles.grow} />
@@ -7026,9 +7138,11 @@ export function ForgeHubScreen() {
             style={[styles.btn, styles.btnPrimary, styles.btnSm]}
             onPress={toggleAdding}
             testID="forge-add-connection"
+            accessibilityRole="button"
+            accessibilityLabel="Add connection"
           >
             <Plus size={14} color={theme.colors.accentForeground} />
-            <Text style={styles.btnPrimaryText}>Add connection</Text>
+            {!isCompact ? <Text style={styles.btnPrimaryText}>Add connection</Text> : null}
           </Pressable>
         ) : null}
         {assistantButton}
@@ -7049,6 +7163,7 @@ export function ForgeHubScreen() {
           cliInstallEnabled={cliInstallEnabled}
           loginEnabled={loginEnabled}
           onLoggedIn={refreshConnections}
+          loading={connectionsLoading}
         />
       );
     }
@@ -7592,13 +7707,21 @@ const styles = StyleSheet.create((theme) => ({
     fontFamily: theme.fontFamily.mono,
     color: theme.colors.foregroundExtraMuted,
   },
+  // Right-aligned 8px health dot on a nav item (e.g. the Connections item).
+  navDot: {
+    marginLeft: "auto",
+    width: 8,
+    height: 8,
+    borderRadius: theme.borderRadius.full,
+  },
   connFooter: {
     borderTopWidth: theme.borderWidth[1],
     borderTopColor: theme.colors.border,
     padding: theme.spacing[2],
     gap: 2,
   },
-  connMini: {
+  // Slim single-line account/status footer row (VSCode bottom-bar feel).
+  connFooterRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[2],
@@ -7606,14 +7729,11 @@ const styles = StyleSheet.create((theme) => ({
     paddingVertical: theme.spacing[1.5],
     borderRadius: theme.borderRadius.md,
   },
-  connMiniText: {
+  connFooterText: {
     flex: 1,
     minWidth: 0,
     fontSize: theme.fontSize.xs,
     color: theme.colors.foregroundMuted,
-  },
-  connManage: {
-    marginTop: 2,
   },
   connManageText: {
     fontSize: theme.fontSize.xs,
@@ -7835,6 +7955,33 @@ const styles = StyleSheet.create((theme) => ({
   connReauthBtn: {
     paddingHorizontal: theme.spacing[2],
     paddingVertical: theme.spacing[1],
+  },
+  // ===== compact (mobile) stacked connection row =====
+  // The desktop column layout overflows on a phone, so on compact the same
+  // fields stack vertically inside the card row.
+  connStackRow: {
+    gap: theme.spacing[1.5],
+    paddingHorizontal: 14, // matches connRow horizontal padding
+    paddingVertical: 13, // matches connRow vertical padding
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.border,
+  },
+  connStackHead: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+  },
+  connStackChips: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: theme.spacing[1],
+  },
+  connStackActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: theme.spacing[2],
   },
   rowInfo: {
     flex: 1,
