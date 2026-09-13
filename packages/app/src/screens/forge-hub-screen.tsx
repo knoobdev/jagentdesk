@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   Animated,
   Easing,
+  Image,
   Pressable,
   ScrollView,
   Text,
@@ -54,6 +55,8 @@ import {
   Sparkles,
   Tag,
   Trash2,
+  UserPlus,
+  Users,
   X,
 } from "lucide-react-native";
 import * as Clipboard from "expo-clipboard";
@@ -67,6 +70,7 @@ import {
   ForgeCommitSchema,
   ForgeIssueSchema,
   ForgeIssueDetailSchema,
+  ForgeMemberSchema,
   ForgePipelineDetailSchema,
   ForgePipelineRunSchema,
   ForgeReleaseSchema,
@@ -81,6 +85,8 @@ import {
   type ForgeConnection,
   type ForgeIssue,
   type ForgeIssueDetail,
+  type ForgeMember,
+  type ForgeMemberRole,
   type ForgePipelineDetail,
   type ForgePipelineJob,
   type ForgePipelineRun,
@@ -159,7 +165,8 @@ type Section =
   | "pulls"
   | "pipelines"
   | "releases"
-  | "issues";
+  | "issues"
+  | "members";
 
 const SECTION_LABEL: Record<Section, string> = {
   overview: "Overview",
@@ -171,6 +178,7 @@ const SECTION_LABEL: Record<Section, string> = {
   pipelines: "Pipelines",
   releases: "Releases",
   issues: "Issues",
+  members: "Members",
 };
 
 /** A repo coordinate for every repo-scoped Forge Hub RPC. */
@@ -589,6 +597,9 @@ function SidebarRepoSkeleton() {
     >
       {SIDEBAR_SKELETON_WIDTHS.map((width, i) => (
         <View key={i} style={styles.sidebarSkeletonRow}>
+          {/* Badge-shaped block + text bar so the row clearly reads as a repo
+              placeholder (matches renderSidebarRepoRow: ProviderBadge + name). */}
+          <Animated.View style={[styles.sidebarSkeletonBadge, { opacity: pulse }]} />
           <Animated.View style={[styles.sidebarSkeletonBar, { width, opacity: pulse }]} />
         </View>
       ))}
@@ -6510,6 +6521,266 @@ function IssuesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo })
   );
 }
 
+// ===== members (§19.10) — list · invite · remove ===========================
+
+// Neutral roles offered in the invite picker, ordered least→most privileged. The
+// daemon maps each to the forge-native permission (GitHub perm / GitLab access level).
+const MEMBER_ROLES: ForgeMemberRole[] = ["read", "triage", "write", "maintain", "admin"];
+const MEMBER_ROLE_LABEL: Record<ForgeMemberRole, string> = {
+  read: "Read",
+  triage: "Triage",
+  write: "Write",
+  maintain: "Maintainer",
+  admin: "Admin",
+};
+
+function MemberRow({
+  member,
+  onRemove,
+  removing,
+}: {
+  member: ForgeMember;
+  onRemove: (member: ForgeMember) => void;
+  removing: boolean;
+}) {
+  const { theme } = useUnistyles();
+  const handleRemove = useCallback(() => onRemove(member), [member, onRemove]);
+  return (
+    <View style={styles.row} testID={`forge-member-${member.login}`}>
+      {member.avatarUrl ? (
+        <Image source={{ uri: member.avatarUrl }} style={styles.memberAvatar} />
+      ) : (
+        <View style={[styles.memberAvatar, styles.memberAvatarFallback]}>
+          <Text style={styles.memberAvatarInitial}>{member.login.charAt(0).toUpperCase()}</Text>
+        </View>
+      )}
+      <View style={styles.rowInfo}>
+        <Text style={styles.rowTitle} numberOfLines={1}>
+          {member.name?.trim() || member.login}
+        </Text>
+        <View style={styles.crMetaRow}>
+          <Text style={styles.metaMuted}>@{member.login}</Text>
+          {member.state === "invited" ? (
+            <View style={styles.plainChip}>
+              <Text style={styles.plainChipText}>invited</Text>
+            </View>
+          ) : null}
+        </View>
+      </View>
+      <View style={styles.memberRolePill}>
+        <Text style={styles.memberRoleText}>{member.roleLabel}</Text>
+      </View>
+      <Pressable
+        style={styles.memberRemoveBtn}
+        onPress={handleRemove}
+        disabled={removing}
+        testID={`forge-member-remove-${member.login}`}
+        accessibilityRole="button"
+        accessibilityLabel={`Remove ${member.login}`}
+      >
+        {removing ? (
+          <ActivityIndicator size="small" color={theme.colors.foregroundMuted} />
+        ) : (
+          <Trash2 size={14} color={theme.colors.statusDanger} />
+        )}
+      </Pressable>
+    </View>
+  );
+}
+
+// Members list + invite form + per-row remove (§19.10). GitHub/GitLab support the
+// full set; Bitbucket lists best-effort. Roles are neutral; the daemon maps them.
+function MembersView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }) {
+  const { theme } = useUnistyles();
+  const [members, setMembers] = useState<ForgeMember[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [inviting, setInviting] = useState(false);
+  const [username, setUsername] = useState("");
+  const [role, setRole] = useState<ForgeMemberRole>("write");
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const [inviteNote, setInviteNote] = useState<string | null>(null);
+  const [removingId, setRemovingId] = useState<string | null>(null);
+
+  const load = useCallback(
+    async (force = false) => {
+      const key = `members:${repoCacheKey(repo)}`;
+      if (force) cacheDelete(key);
+      else {
+        const cached = cacheGet<ForgeMember[]>(key);
+        if (cached) {
+          setMembers(cached);
+          setError(null);
+          return;
+        }
+      }
+      setError(null);
+      setMembers(null);
+      try {
+        const res = await client.forgeListMembers({ repo: repoRef(repo) });
+        const parsed = ForgeMemberSchema.array().safeParse(res.members);
+        setMembers(parsed.success ? parsed.data : []);
+        if (!parsed.success) setError("Unable to load members.");
+        else cacheSet(key, parsed.data);
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : "Unable to load members.");
+      }
+    },
+    [client, repo],
+  );
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const refresh = useCallback(() => void load(true), [load]);
+  const toggleInviting = useCallback(() => {
+    setInviteNote(null);
+    setInviting((v) => !v);
+  }, []);
+
+  const submitInvite = useCallback(async () => {
+    const u = username.trim();
+    if (!u) return;
+    setInviteBusy(true);
+    setInviteNote(null);
+    try {
+      const res = await client.forgeAddMember({ repo: repoRef(repo), username: u, role });
+      if (res.ok) {
+        setUsername("");
+        setInviting(false);
+        void load(true);
+      } else {
+        setInviteNote(res.error ?? "The invite could not be sent.");
+      }
+    } catch (e: unknown) {
+      setInviteNote(e instanceof Error ? e.message : "The invite could not be sent.");
+    } finally {
+      setInviteBusy(false);
+    }
+  }, [username, role, client, repo, load]);
+
+  const handleRemove = useCallback(
+    async (member: ForgeMember) => {
+      setRemovingId(member.id);
+      try {
+        const res = await client.forgeRemoveMember({ repo: repoRef(repo), memberId: member.id });
+        if (res.ok) void load(true);
+      } catch {
+        // Non-fatal; the row stays and the user can retry.
+      } finally {
+        setRemovingId(null);
+      }
+    },
+    [client, repo, load],
+  );
+
+  const canInvite = username.trim().length > 0 && !inviteBusy;
+
+  return (
+    <View style={styles.pane}>
+      <View style={styles.toolbarRow}>
+        <Text style={styles.rowTitleMono} numberOfLines={1}>
+          {repo.owner}/{repo.name}
+        </Text>
+        <View style={styles.grow} />
+        <Pressable
+          style={[styles.btn, styles.btnGhost]}
+          onPress={refresh}
+          testID="forge-members-refresh"
+        >
+          <RotateCcw size={13} color={theme.colors.foreground} />
+          <Text style={styles.btnGhostText}>Refresh</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.btn, styles.btnPrimary]}
+          onPress={toggleInviting}
+          testID="forge-member-invite"
+        >
+          <UserPlus size={14} color={theme.colors.accentForeground} />
+          <Text style={styles.btnPrimaryText}>Invite</Text>
+        </Pressable>
+      </View>
+
+      {inviting ? (
+        <View style={styles.formCard}>
+          <Text style={styles.formTitle}>Invite a member</Text>
+          <View style={styles.field}>
+            <Text style={styles.fieldLabel}>Username</Text>
+            <TextInput
+              style={styles.input}
+              value={username}
+              onChangeText={setUsername}
+              placeholder="e.g. octocat"
+              placeholderTextColor={theme.colors.foregroundExtraMuted}
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={!inviteBusy}
+              testID="forge-member-username-input"
+            />
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.fieldLabel}>Role</Text>
+            <View style={styles.segmented}>
+              {MEMBER_ROLES.map((r) => (
+                <Pressable
+                  key={r}
+                  style={[styles.segmentBtn, role === r && styles.segmentBtnActive]}
+                  onPress={() => setRole(r)}
+                  testID={`forge-member-role-${r}`}
+                >
+                  <Text style={[styles.segmentText, role === r && styles.segmentTextActive]}>
+                    {MEMBER_ROLE_LABEL[r]}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+          <View style={styles.formActions}>
+            <Pressable
+              style={[styles.btn, styles.btnPrimary, !canInvite && styles.btnDisabled]}
+              onPress={submitInvite}
+              disabled={!canInvite}
+              testID="forge-member-invite-submit"
+            >
+              <Text style={styles.btnPrimaryText}>{inviteBusy ? "Inviting…" : "Send invite"}</Text>
+            </Pressable>
+            <Pressable style={[styles.btn, styles.btnGhost]} onPress={toggleInviting}>
+              <Text style={styles.btnGhostText}>Cancel</Text>
+            </Pressable>
+          </View>
+          {inviteNote ? <Text style={styles.reviewError}>{inviteNote}</Text> : null}
+        </View>
+      ) : null}
+
+      {error ? (
+        <View style={styles.errorBanner}>
+          <CircleAlert size={16} color={theme.colors.statusDanger} />
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      ) : null}
+
+      {members === null ? (
+        <SkeletonRows />
+      ) : members.length === 0 ? (
+        <Text style={styles.emptyText}>
+          No members visible. This needs admin access on the repository.
+        </Text>
+      ) : (
+        <View style={styles.card}>
+          {members.map((m) => (
+            <MemberRow
+              key={m.id}
+              member={m}
+              onRemove={handleRemove}
+              removing={removingId === m.id}
+            />
+          ))}
+        </View>
+      )}
+    </View>
+  );
+}
+
 // ===== repo overview =======================================================
 
 // Lightweight per-repo landing (sidebar "Overview" item). Renders only data the
@@ -6533,6 +6804,7 @@ function OverviewView({
   const openExternal = useCallback(() => void openExternalUrl(repo.url), [repo.url]);
   const goCode = useCallback(() => onNavigate("code"), [onNavigate]);
   const goPulls = useCallback(() => onNavigate("pulls"), [onNavigate]);
+  const goMembers = useCallback(() => onNavigate("members"), [onNavigate]);
 
   return (
     <View style={styles.pane}>
@@ -6601,6 +6873,14 @@ function OverviewView({
         >
           <GitPullRequest size={13} color={theme.colors.foreground} />
           <Text style={styles.btnGhostText}>{def.changeRequestNoun}</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.btn, styles.btnGhost]}
+          onPress={goMembers}
+          testID="forge-overview-members"
+        >
+          <Users size={13} color={theme.colors.foreground} />
+          <Text style={styles.btnGhostText}>Members</Text>
         </Pressable>
       </View>
     </View>
@@ -7234,13 +7514,26 @@ export function ForgeHubScreen() {
           onSelect={handleSelectSection}
         />
       ) : null}
-      {quickRepos.length > 0 ? (
+      <SidebarNavItem
+        label="Members"
+        section="members"
+        Icon={Users}
+        active={section === "members"}
+        onSelect={handleSelectSection}
+      />
+      <Text style={styles.navGroupLabel}>Switch repo</Text>
+      {quickRepos.length === 0 ? (
+        reposLoading && !reposLoaded ? (
+          <SidebarRepoSkeleton />
+        ) : (
+          <Text style={styles.navEmpty}>No other repositories</Text>
+        )
+      ) : (
         <>
-          <Text style={styles.navGroupLabel}>Switch repo</Text>
           {quickRepos.map(renderSidebarRepoRow)}
           {showBrowseAll ? browseAllRow : null}
         </>
-      ) : null}
+      )}
     </>
   ) : (
     <>
@@ -7362,6 +7655,48 @@ export function ForgeHubScreen() {
     );
   };
 
+  // Repo-scoped sections in header order, gated by advertised host features. Drives
+  // the always-visible horizontal tab strip on compact so switching sections no
+  // longer requires backing out to the nav menu (§19 mobile). "members" has no
+  // feature gate — the daemon degrades to an empty list on forges that lack it.
+  const repoTabSections = useMemo<Section[]>(() => {
+    const out: Section[] = ["overview"];
+    if (codeEnabled) out.push("code", "commits");
+    out.push("pulls");
+    if (pipelinesEnabled) out.push("pipelines");
+    if (releasesEnabled) out.push("releases");
+    if (issuesEnabled) out.push("issues");
+    out.push("members");
+    return out;
+  }, [codeEnabled, pipelinesEnabled, releasesEnabled, issuesEnabled]);
+
+  // The compact section tab strip: shown whenever a repo is open and the active
+  // section is repo-scoped (connections/repositories are full-pane and keep a plain
+  // header). Horizontally scrollable so the last tab is never clipped.
+  const sectionTabsRow =
+    isCompact && selectedRepo && section !== "connections" && section !== "repositories" ? (
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.sectionTabs}
+        contentContainerStyle={styles.sectionTabsContent}
+        testID="forge-section-tabs"
+      >
+        {repoTabSections.map((s) => (
+          <Pressable
+            key={s}
+            style={[styles.sectionTab, section === s && styles.sectionTabActive]}
+            onPress={() => handleSelectSection(s)}
+            testID={`forge-section-tab-${s}`}
+          >
+            <Text style={[styles.sectionTabText, section === s && styles.sectionTabTextActive]}>
+              {SECTION_LABEL[s]}
+            </Text>
+          </Pressable>
+        ))}
+      </ScrollView>
+    ) : null;
+
   const renderMain = () => {
     if (section === "connections") {
       return (
@@ -7449,6 +7784,14 @@ export function ForgeHubScreen() {
     if (section === "issues") {
       return issuesEnabled && client ? (
         <IssuesView client={client} repo={selectedRepo} />
+      ) : (
+        <Text style={styles.emptyText}>This section is unavailable.</Text>
+      );
+    }
+
+    if (section === "members") {
+      return client ? (
+        <MembersView client={client} repo={selectedRepo} />
       ) : (
         <Text style={styles.emptyText}>This section is unavailable.</Text>
       );
@@ -7664,6 +8007,8 @@ export function ForgeHubScreen() {
               ) : null}
               {renderToolbar()}
             </View>
+
+            {sectionTabsRow}
 
             {connectionsError ? (
               <View style={styles.errorBanner}>
@@ -8019,9 +8364,17 @@ const styles = StyleSheet.create((theme) => ({
   },
   sidebarSkeletonRow: {
     minHeight: 32,
-    justifyContent: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
     paddingHorizontal: theme.spacing[2],
     paddingVertical: theme.spacing[1.5],
+  },
+  sidebarSkeletonBadge: {
+    width: 18,
+    height: 18,
+    borderRadius: theme.borderRadius.sm,
+    backgroundColor: theme.colors.surface2,
   },
   sidebarSkeletonBar: {
     height: 10,
@@ -9033,6 +9386,67 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.foregroundMuted,
   },
   segmentTextActive: {
+    color: theme.colors.foreground,
+    fontWeight: theme.fontWeight.medium,
+  },
+  // members
+  memberAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 9999,
+    backgroundColor: theme.colors.surface2,
+  },
+  memberAvatarFallback: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  memberAvatarInitial: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foregroundMuted,
+  },
+  memberRolePill: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 9999,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  memberRoleText: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foregroundMuted,
+  },
+  memberRemoveBtn: {
+    width: 32,
+    height: 32,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  // compact section tab strip (always-visible header nav on mobile)
+  sectionTabs: {
+    flexGrow: 0,
+    flexShrink: 0,
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+  },
+  sectionTabsContent: {
+    paddingHorizontal: theme.spacing[2],
+  },
+  sectionTab: {
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    borderBottomWidth: 2,
+    borderBottomColor: "transparent",
+  },
+  sectionTabActive: {
+    borderBottomColor: theme.colors.accent,
+  },
+  sectionTabText: {
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foregroundMuted,
+  },
+  sectionTabTextActive: {
     color: theme.colors.foreground,
     fontWeight: theme.fontWeight.medium,
   },

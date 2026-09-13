@@ -20,6 +20,8 @@ import type {
   ForgeTag,
   ForgeIssue,
   ForgeIssueDetail,
+  ForgeMember,
+  ForgeMemberRole,
   SessionInboundMessage,
   SessionOutboundMessage,
 } from "@jagentdesk/protocol/messages";
@@ -72,6 +74,9 @@ type ForgeHubInbound = Extract<
       | "forge.issue.comment.request"
       | "forge.issue.close.request"
       | "forge.issue.get.request"
+      | "forge.member.list.request"
+      | "forge.member.add.request"
+      | "forge.member.remove.request"
       | "forge.change_request.create.request"
       | "forge.change_request.close.request"
       | "forge.release.create.request"
@@ -291,6 +296,74 @@ const GlJobSchema = z.object({
 /** URL-encoded GitLab project id ("owner/name"). */
 function glProjectId(owner: string, name: string): string {
   return encodeURIComponent(`${owner}/${name}`);
+}
+
+// ---- Member role mapping between the neutral protocol role and each forge -----
+// GitHub collaborator permission slugs.
+function ghPermissionToRole(perm: string): ForgeMemberRole {
+  switch (perm) {
+    case "admin":
+      return "admin";
+    case "maintain":
+      return "maintain";
+    case "triage":
+      return "triage";
+    case "pull":
+    case "read":
+      return "read";
+    default:
+      return "write"; // "push"/"write" and anything else
+  }
+}
+function roleToGhPermission(role: ForgeMemberRole): string {
+  switch (role) {
+    case "admin":
+      return "admin";
+    case "maintain":
+      return "maintain";
+    case "triage":
+      return "triage";
+    case "read":
+      return "pull";
+    default:
+      return "push";
+  }
+}
+// GitLab numeric access levels (10 Guest · 20 Reporter · 30 Developer · 40 Maintainer · 50 Owner).
+function glAccessLevelToRole(level: number): ForgeMemberRole {
+  if (level >= 50) return "admin";
+  if (level >= 40) return "maintain";
+  if (level >= 30) return "write";
+  if (level >= 20) return "triage";
+  return "read";
+}
+function roleToGlAccessLevel(role: ForgeMemberRole): number {
+  switch (role) {
+    case "admin":
+      return 50;
+    case "maintain":
+      return 40;
+    case "write":
+      return 30;
+    case "triage":
+      return 20;
+    default:
+      return 10; // read → Guest
+  }
+}
+function roleLabel(role: ForgeMemberRole): string {
+  switch (role) {
+    case "admin":
+      return "Admin";
+    case "maintain":
+      return "Maintainer";
+    case "write":
+      return "Write";
+    case "triage":
+      return "Triage";
+    default:
+      return "Read";
+  }
 }
 
 /** Count added/removed lines in a GitLab unified diff body (header lines excluded). */
@@ -2999,6 +3072,200 @@ export class ForgeHubService {
     };
   }
 
+  // ===== Members (§19.10) — list · invite/add · remove =========================
+  // Repo collaborators/members with a neutral role. Each forge degrades to a safe
+  // empty list; add/remove return {ok,error} so the UI can surface a reason.
+
+  async listMembers(input: { owner: string; name: string }): Promise<ForgeMember[]> {
+    const repo = `${input.owner}/${input.name}`;
+    const rows = await this.ghJson(
+      ["api", `repos/${repo}/collaborators?per_page=100`, "--paginate"],
+      z.array(
+        z.object({
+          login: z.string(),
+          id: z.number(),
+          avatar_url: z.string().nullable().optional(),
+          html_url: z.string().nullable().optional(),
+          role_name: z.string().nullable().optional(),
+          permissions: z
+            .object({
+              admin: z.boolean().optional(),
+              maintain: z.boolean().optional(),
+              push: z.boolean().optional(),
+              triage: z.boolean().optional(),
+              pull: z.boolean().optional(),
+            })
+            .nullable()
+            .optional(),
+        }),
+      ),
+    );
+    if (!rows) return [];
+    return rows.map((m): ForgeMember => {
+      const role = m.role_name
+        ? ghPermissionToRole(m.role_name)
+        : m.permissions?.admin
+          ? "admin"
+          : m.permissions?.maintain
+            ? "maintain"
+            : m.permissions?.push
+              ? "write"
+              : m.permissions?.triage
+                ? "triage"
+                : "read";
+      return {
+        id: m.login,
+        login: m.login,
+        avatarUrl: m.avatar_url ?? null,
+        url: m.html_url ?? null,
+        role,
+        roleLabel: roleLabel(role),
+        state: "active",
+      };
+    });
+  }
+
+  async addMember(input: {
+    owner: string;
+    name: string;
+    username: string;
+    role: ForgeMemberRole;
+  }): Promise<{ ok: boolean; error?: string }> {
+    const repo = `${input.owner}/${input.name}`;
+    const ok = await this.ghOk([
+      "api",
+      "-X",
+      "PUT",
+      `repos/${repo}/collaborators/${encodeURIComponent(input.username)}`,
+      "-f",
+      `permission=${roleToGhPermission(input.role)}`,
+    ]);
+    return ok
+      ? { ok: true }
+      : { ok: false, error: "Invite failed. Check the username and your admin access." };
+  }
+
+  async removeMember(input: { owner: string; name: string; memberId: string }): Promise<boolean> {
+    const repo = `${input.owner}/${input.name}`;
+    return this.ghOk([
+      "api",
+      "-X",
+      "DELETE",
+      `repos/${repo}/collaborators/${encodeURIComponent(input.memberId)}`,
+    ]);
+  }
+
+  async listGitLabMembers(input: { owner: string; name: string }): Promise<ForgeMember[]> {
+    const enc = glProjectId(input.owner, input.name);
+    const rows = await this.glabJson(
+      ["api", `projects/${enc}/members/all?per_page=100`],
+      z.array(
+        z.object({
+          id: z.number(),
+          username: z.string(),
+          name: z.string().nullable().optional(),
+          avatar_url: z.string().nullable().optional(),
+          web_url: z.string().nullable().optional(),
+          access_level: z.number(),
+          membership_state: z.string().nullable().optional(),
+        }),
+      ),
+    );
+    if (!rows) return [];
+    return rows.map((m): ForgeMember => {
+      const role = glAccessLevelToRole(m.access_level);
+      return {
+        id: String(m.id),
+        login: m.username,
+        name: m.name ?? null,
+        avatarUrl: m.avatar_url ?? null,
+        url: m.web_url ?? null,
+        role,
+        roleLabel: roleLabel(role),
+        state: m.membership_state === "awaiting" ? "invited" : "active",
+      };
+    });
+  }
+
+  async addGitLabMember(input: {
+    owner: string;
+    name: string;
+    username: string;
+    role: ForgeMemberRole;
+  }): Promise<{ ok: boolean; error?: string }> {
+    const enc = glProjectId(input.owner, input.name);
+    // Resolve the username → numeric user id (members POST needs user_id).
+    const users = await this.glabJson(
+      ["api", `users?username=${encodeURIComponent(input.username)}`],
+      z.array(z.object({ id: z.number(), username: z.string() })),
+    );
+    const user = users?.[0];
+    if (!user) return { ok: false, error: `No GitLab user "${input.username}".` };
+    const ok = await this.glabOk([
+      "api",
+      "-X",
+      "POST",
+      `projects/${enc}/members`,
+      "-f",
+      `user_id=${user.id}`,
+      "-f",
+      `access_level=${roleToGlAccessLevel(input.role)}`,
+    ]);
+    return ok
+      ? { ok: true }
+      : { ok: false, error: "Invite failed. Check your Maintainer/Owner access." };
+  }
+
+  async removeGitLabMember(input: {
+    owner: string;
+    name: string;
+    memberId: string;
+  }): Promise<boolean> {
+    const enc = glProjectId(input.owner, input.name);
+    return this.glabOk([
+      "api",
+      "-X",
+      "DELETE",
+      `projects/${enc}/members/${encodeURIComponent(input.memberId)}`,
+    ]);
+  }
+
+  async listBitbucketMembers(input: { owner: string; name: string }): Promise<ForgeMember[]> {
+    const base = this.bbRepo(input.owner, input.name);
+    // Repo permissions-config needs repo admin; 403/404 → bbJson null → [].
+    const res = await this.bbJson(
+      `${base}/permissions-config/users?pagelen=100`,
+      bbPaged(
+        z.object({
+          permission: z.string(),
+          user: z.object({
+            uuid: z.string().optional(),
+            nickname: z.string().optional(),
+            display_name: z.string().optional(),
+            account_id: z.string().optional(),
+            links: z.object({ avatar: z.object({ href: z.string() }).optional() }).optional(),
+          }),
+        }),
+      ),
+    );
+    if (!res) return [];
+    return res.values.map((m): ForgeMember => {
+      // Bitbucket repo permissions: admin | write | read.
+      const role: ForgeMemberRole =
+        m.permission === "admin" ? "admin" : m.permission === "write" ? "write" : "read";
+      const login = m.user.nickname ?? m.user.display_name ?? m.user.account_id ?? "user";
+      return {
+        id: m.user.uuid ?? login,
+        login,
+        name: m.user.display_name ?? null,
+        avatarUrl: m.user.links?.avatar?.href ?? null,
+        role,
+        roleLabel: roleLabel(role),
+        state: "active",
+      };
+    });
+  }
+
   // ===== Milestone D — create/close change request · create/get release ==========
 
   async createChangeRequest(input: {
@@ -3417,6 +3684,7 @@ export class ForgeHubSession {
     this.service = new ForgeHubService(options.secretStore, options.secretStoreDir);
   }
 
+  // oxlint-disable-next-line complexity
   async handle(msg: ForgeHubInbound): Promise<void> {
     try {
       switch (msg.type) {
@@ -4161,6 +4429,71 @@ export class ForgeHubSession {
           });
           return;
         }
+        case "forge.member.list.request": {
+          const members =
+            msg.repo.forge === "github"
+              ? await this.service.listMembers({ owner: msg.repo.owner, name: msg.repo.name })
+              : msg.repo.forge === "gitlab"
+                ? await this.service.listGitLabMembers({
+                    owner: msg.repo.owner,
+                    name: msg.repo.name,
+                  })
+                : msg.repo.forge === "bitbucket"
+                  ? await this.service.listBitbucketMembers({
+                      owner: msg.repo.owner,
+                      name: msg.repo.name,
+                    })
+                  : [];
+          this.emit({
+            type: "forge.member.list.response",
+            payload: { members, requestId: msg.requestId },
+          });
+          return;
+        }
+        case "forge.member.add.request": {
+          const result =
+            msg.repo.forge === "github"
+              ? await this.service.addMember({
+                  owner: msg.repo.owner,
+                  name: msg.repo.name,
+                  username: msg.username,
+                  role: msg.role,
+                })
+              : msg.repo.forge === "gitlab"
+                ? await this.service.addGitLabMember({
+                    owner: msg.repo.owner,
+                    name: msg.repo.name,
+                    username: msg.username,
+                    role: msg.role,
+                  })
+                : { ok: false, error: "Adding members isn't supported for this forge yet." };
+          this.emit({
+            type: "forge.member.add.response",
+            payload: { ok: result.ok, error: result.error ?? null, requestId: msg.requestId },
+          });
+          return;
+        }
+        case "forge.member.remove.request": {
+          const ok =
+            msg.repo.forge === "github"
+              ? await this.service.removeMember({
+                  owner: msg.repo.owner,
+                  name: msg.repo.name,
+                  memberId: msg.memberId,
+                })
+              : msg.repo.forge === "gitlab"
+                ? await this.service.removeGitLabMember({
+                    owner: msg.repo.owner,
+                    name: msg.repo.name,
+                    memberId: msg.memberId,
+                  })
+                : false;
+          this.emit({
+            type: "forge.member.remove.response",
+            payload: { ok, requestId: msg.requestId },
+          });
+          return;
+        }
         case "forge.change_request.create.request": {
           const result =
             msg.repo.forge === "github"
@@ -4392,6 +4725,7 @@ export class ForgeHubSession {
   // (forge dispatch is inline in handle(): "github" → gh impl, "gitlab" → glab impl,
   //  any other forge → the neutral empty result.)
 
+  // oxlint-disable-next-line complexity
   private emitEmptyFor(msg: ForgeHubInbound): void {
     switch (msg.type) {
       case "forge.connection.list.request":
@@ -4541,6 +4875,21 @@ export class ForgeHubSession {
         return this.emit({
           type: "forge.issue.get.response",
           payload: { issue: null, requestId: msg.requestId },
+        });
+      case "forge.member.list.request":
+        return this.emit({
+          type: "forge.member.list.response",
+          payload: { members: [], requestId: msg.requestId },
+        });
+      case "forge.member.add.request":
+        return this.emit({
+          type: "forge.member.add.response",
+          payload: { ok: false, error: "add failed", requestId: msg.requestId },
+        });
+      case "forge.member.remove.request":
+        return this.emit({
+          type: "forge.member.remove.response",
+          payload: { ok: false, requestId: msg.requestId },
         });
       case "forge.change_request.create.request":
         return this.emit({

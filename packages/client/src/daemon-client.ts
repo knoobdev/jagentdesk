@@ -91,6 +91,10 @@ import type {
   ForgeIssueCommentResponse,
   ForgeIssueCloseResponse,
   ForgeIssueGetResponse,
+  ForgeMemberListResponse,
+  ForgeMemberAddResponse,
+  ForgeMemberRemoveResponse,
+  ForgeMemberRole,
   ForgeChangeRequestCreateResponse,
   ForgeChangeRequestCloseResponse,
   ForgeReleaseCreateResponse,
@@ -534,6 +538,9 @@ type ForgeIssueCreatePayload = ForgeIssueCreateResponse["payload"];
 type ForgeIssueCommentPayload = ForgeIssueCommentResponse["payload"];
 type ForgeIssueClosePayload = ForgeIssueCloseResponse["payload"];
 type ForgeIssueGetPayload = ForgeIssueGetResponse["payload"];
+type ForgeMemberListPayload = ForgeMemberListResponse["payload"];
+type ForgeMemberAddPayload = ForgeMemberAddResponse["payload"];
+type ForgeMemberRemovePayload = ForgeMemberRemoveResponse["payload"];
 // Forge Hub (spec 19) — Milestone D payload aliases
 type ForgeChangeRequestCreatePayload = ForgeChangeRequestCreateResponse["payload"];
 type ForgeChangeRequestClosePayload = ForgeChangeRequestCloseResponse["payload"];
@@ -5098,6 +5105,51 @@ export class DaemonClient {
       message: { type: "forge.issue.get.request", repo: options.repo, number: options.number },
       responseType: "forge.issue.get.response",
       timeout: 20000,
+    });
+  }
+
+  async forgeListMembers(
+    options: { repo: ForgeRepoRef },
+    requestId?: string,
+  ): Promise<ForgeMemberListPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "forge.member.list.request", repo: options.repo },
+      responseType: "forge.member.list.response",
+      timeout: 20000,
+    });
+  }
+
+  async forgeAddMember(
+    options: { repo: ForgeRepoRef; username: string; role: ForgeMemberRole },
+    requestId?: string,
+  ): Promise<ForgeMemberAddPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "forge.member.add.request",
+        repo: options.repo,
+        username: options.username,
+        role: options.role,
+      },
+      responseType: "forge.member.add.response",
+      timeout: 30000,
+    });
+  }
+
+  async forgeRemoveMember(
+    options: { repo: ForgeRepoRef; memberId: string },
+    requestId?: string,
+  ): Promise<ForgeMemberRemovePayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "forge.member.remove.request",
+        repo: options.repo,
+        memberId: options.memberId,
+      },
+      responseType: "forge.member.remove.response",
+      timeout: 30000,
     });
   }
 

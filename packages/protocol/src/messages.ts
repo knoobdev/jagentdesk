@@ -2700,6 +2700,39 @@ export const ForgeIssueGetRequestSchema = z.object({
   number: z.number().int(),
   requestId: z.string(),
 });
+// A repository member/collaborator. `id` is the forge-native member id needed for
+// remove (GitLab user id, GitHub login, Bitbucket account uuid); `login` is the
+// display handle. `role` is a neutral access level shared across forges.
+export const ForgeMemberRoleSchema = z.enum(["read", "triage", "write", "maintain", "admin"]);
+export const ForgeMemberSchema = z.object({
+  id: z.string(),
+  login: z.string(),
+  name: z.string().nullable().optional(),
+  avatarUrl: z.string().nullable().optional(),
+  role: ForgeMemberRoleSchema,
+  roleLabel: z.string(),
+  state: z.enum(["active", "invited"]).optional(),
+  url: z.string().nullable().optional(),
+});
+export const ForgeMemberListRequestSchema = z.object({
+  type: z.literal("forge.member.list.request"),
+  repo: ForgeRepoRefSchema,
+  requestId: z.string(),
+});
+export const ForgeMemberAddRequestSchema = z.object({
+  type: z.literal("forge.member.add.request"),
+  repo: ForgeRepoRefSchema,
+  username: z.string(),
+  role: ForgeMemberRoleSchema,
+  requestId: z.string(),
+});
+export const ForgeMemberRemoveRequestSchema = z.object({
+  type: z.literal("forge.member.remove.request"),
+  repo: ForgeRepoRefSchema,
+  // forge-native member id (login for github, user id for gitlab, uuid for bitbucket)
+  memberId: z.string(),
+  requestId: z.string(),
+});
 export const ForgeCliStatusRequestSchema = z.object({
   type: z.literal("forge.cli.status.request"),
   forge: z.string(),
@@ -3804,6 +3837,9 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ForgeIssueCommentRequestSchema,
   ForgeIssueCloseRequestSchema,
   ForgeIssueGetRequestSchema,
+  ForgeMemberListRequestSchema,
+  ForgeMemberAddRequestSchema,
+  ForgeMemberRemoveRequestSchema,
   ForgeChangeRequestCreateRequestSchema,
   ForgeChangeRequestCloseRequestSchema,
   ForgeReleaseCreateRequestSchema,
@@ -6324,6 +6360,22 @@ export const ForgeIssueGetResponseSchema = z.object({
   type: z.literal("forge.issue.get.response"),
   payload: z.object({ issue: ForgeIssueDetailSchema.nullable(), requestId: z.string() }),
 });
+export const ForgeMemberListResponseSchema = z.object({
+  type: z.literal("forge.member.list.response"),
+  payload: z.object({ members: z.array(ForgeMemberSchema), requestId: z.string() }),
+});
+export const ForgeMemberAddResponseSchema = z.object({
+  type: z.literal("forge.member.add.response"),
+  payload: z.object({
+    ok: z.boolean(),
+    error: z.string().nullable().optional(),
+    requestId: z.string(),
+  }),
+});
+export const ForgeMemberRemoveResponseSchema = z.object({
+  type: z.literal("forge.member.remove.response"),
+  payload: z.object({ ok: z.boolean(), requestId: z.string() }),
+});
 export const ForgeCliStatusResponseSchema = z.object({
   type: z.literal("forge.cli.status.response"),
   payload: z.object({
@@ -7368,6 +7420,9 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ForgeIssueCommentResponseSchema,
   ForgeIssueCloseResponseSchema,
   ForgeIssueGetResponseSchema,
+  ForgeMemberListResponseSchema,
+  ForgeMemberAddResponseSchema,
+  ForgeMemberRemoveResponseSchema,
   ForgeChangeRequestCreateResponseSchema,
   ForgeChangeRequestCloseResponseSchema,
   ForgeReleaseCreateResponseSchema,
@@ -7928,6 +7983,14 @@ export type ForgeIssueCloseRequest = z.infer<typeof ForgeIssueCloseRequestSchema
 export type ForgeIssueCloseResponse = z.infer<typeof ForgeIssueCloseResponseSchema>;
 export type ForgeIssueGetRequest = z.infer<typeof ForgeIssueGetRequestSchema>;
 export type ForgeIssueGetResponse = z.infer<typeof ForgeIssueGetResponseSchema>;
+export type ForgeMemberRole = z.infer<typeof ForgeMemberRoleSchema>;
+export type ForgeMember = z.infer<typeof ForgeMemberSchema>;
+export type ForgeMemberListRequest = z.infer<typeof ForgeMemberListRequestSchema>;
+export type ForgeMemberListResponse = z.infer<typeof ForgeMemberListResponseSchema>;
+export type ForgeMemberAddRequest = z.infer<typeof ForgeMemberAddRequestSchema>;
+export type ForgeMemberAddResponse = z.infer<typeof ForgeMemberAddResponseSchema>;
+export type ForgeMemberRemoveRequest = z.infer<typeof ForgeMemberRemoveRequestSchema>;
+export type ForgeMemberRemoveResponse = z.infer<typeof ForgeMemberRemoveResponseSchema>;
 // Forge Hub — Milestone D types
 export type ForgeChangeRequestCreateRequest = z.infer<typeof ForgeChangeRequestCreateRequestSchema>;
 export type ForgeChangeRequestCreateResponse = z.infer<
