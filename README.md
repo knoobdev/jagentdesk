@@ -60,6 +60,18 @@ with a few deliberate boundaries:
 
 ## ✨ New in this release
 
+### Forge Hub — repo Members + mobile navigation (v0.9.11)
+
+- **Members** — manage repo access from a new per-repo section: list members (avatar · name ·
+  role), **invite** by username with a role (Read/Triage/Write/Maintainer/Admin), or remove —
+  across GitHub & GitLab. New `forge.member.*` RPCs.
+- **Mobile section tabs** — a scrollable tab strip (Overview · Code · Commits · Pull requests ·
+  Pipelines · Releases · Issues · Members) now shows on every repo screen, so switching sections
+  no longer requires backing out to the menu.
+- **Clearer "Switch repo" loading** — a repo-shaped skeleton while repositories load (desktop + mobile).
+
+See [CHANGELOG.md](CHANGELOG.md) for full v0.9.11 notes.
+
 ### Forge Hub polish — Issue detail + mobile fixes (v0.9.10)
 
 - **Issue detail** — issues now show their full body and comment thread (markdown), not just

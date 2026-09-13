@@ -1,9 +1,33 @@
 # Changelog
 
 All notable changes to JAgentDesk are documented here. JAgentDesk versions its
-own release line (now `0.9.10`); the many `v0.1.x`–`v1.0.x` tags in history are
+own release line (now `0.9.11`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
+
+## v0.9.11 — 2026-09-13
+
+Repository Members management, plus mobile Forge navigation upgrades.
+
+### Added
+
+- **Members** — a new per-repo section to manage who has access: list members
+  (avatar · name · handle · role) and **invite** by username with a neutral role
+  (Read · Triage · Write · Maintainer · Admin), or remove a member. Works across
+  GitHub and GitLab (Bitbucket lists best-effort); driven by new
+  `forge.member.list/add/remove` RPCs. Reachable from the sidebar, the mobile
+  section tabs, and an Overview quick-link.
+- **Always-visible section tabs on mobile** — a horizontal, scrollable tab strip
+  (Overview · Code · Commits · Pull requests · Pipelines · Releases · Issues ·
+  Members) now sits in the content header on every repo screen, so switching
+  sections no longer means backing out to the nav menu. Opening a repo still lands
+  on Code.
+
+### Fixed
+
+- **Clearer "Switch repo" loading state** — the sidebar quick-switch list now shows
+  a repo-shaped skeleton (badge block + name bar) while repositories load, on both
+  desktop and mobile, instead of appearing empty.
 
 ## v0.9.10 — 2026-09-13
 
