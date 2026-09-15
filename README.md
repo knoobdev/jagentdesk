@@ -60,6 +60,21 @@ with a few deliberate boundaries:
 
 ## ✨ New in this release
 
+### Forge Hub readability + fixes (v0.9.12)
+
+- **Pipeline logs**: real ANSI colours, a line-number gutter, a Refresh button, and clean copy
+  (no more raw `\x1b[0;m` escape codes / `section_*` markers).
+- **Code viewer**: line-number gutter + syntax highlighting, slightly larger font.
+- **Pull requests**: real conflict detection (banner + list chip, merge disabled on conflict) and
+  up-front Commits / Files-changed counts.
+- **Author** shown on Pipelines (who triggered) and Releases (who published).
+- **Resizable assistant**: the desktop Forge assistant is a first-class right dock — open by
+  default, drag to resize, collapse to hide.
+- **Fix**: New workspace no longer occasionally creates two agents; mobile switch-repo shows a
+  loading skeleton.
+
+See [CHANGELOG.md](CHANGELOG.md) for full v0.9.12 notes.
+
 ### Forge Hub — repo Members + mobile navigation (v0.9.11)
 
 - **Members** — manage repo access from a new per-repo section: list members (avatar · name ·

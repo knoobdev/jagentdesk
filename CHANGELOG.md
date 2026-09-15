@@ -1,9 +1,39 @@
 # Changelog
 
 All notable changes to JAgentDesk are documented here. JAgentDesk versions its
-own release line (now `0.9.11`); the many `v0.1.x`–`v1.0.x` tags in history are
+own release line (now `0.9.12`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
+
+## v0.9.12 — 2026-09-15
+
+Forge Hub readability + a workspace-creation fix.
+
+### Fixed
+
+- **New workspace no longer occasionally creates two agents** — a submit race
+  (two events both passing the async guard) could create a duplicate
+  workspace/agent; the submit is now guarded synchronously.
+- **Pipeline logs are readable** — the raw runner output (ANSI colour codes like
+  `\x1b[0;m`, erase-line codes, GitLab `section_*` fold markers) is now parsed and
+  rendered with real colours, a line-number gutter, and a **Refresh** button; the
+  Copy action emits clean, escape-free text.
+- **Code viewer has line numbers** — the file viewer shows a line-number gutter
+  alongside syntax highlighting, and the code font is a bit larger.
+- **Pull requests show real conflict status** — merge/conflict now comes from the
+  forge (previously it only checked "is the PR open"), with a conflict banner in the
+  detail and a "conflict" chip in the list; the Merge button is disabled on conflict.
+- **Pull request tab counts show up front** — Commits / Files-changed counts come
+  from the list where the forge provides them, instead of only after opening a tab.
+- **Switch-repo loading placeholder on mobile** — the skeleton shows whenever repos
+  are still loading and an account is connected.
+
+### Added
+
+- **Author on Pipelines & Releases** — the run-detail shows who triggered a pipeline
+  (GitHub + GitLab); releases show who published them.
+- **Resizable Forge assistant** — the desktop assistant is a first-class right dock,
+  open by default, with a drag handle to resize and a toggle to collapse it.
 
 ## v0.9.11 — 2026-09-13
 
