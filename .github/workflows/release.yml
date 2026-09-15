@@ -234,6 +234,12 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The action's default package list is "tools platform-tools", but the
+          # legacy "tools" package was removed from the SDK repo and now fails setup
+          # ("Failed to find package 'tools'" → sdkmanager exit 1). Skip the default
+          # install; the next step installs exactly the components we need.
+          packages: ""
 
       - name: Install Android SDK components
         shell: bash
