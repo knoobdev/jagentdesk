@@ -42,6 +42,7 @@ import {
   type DraftAgentControlsProps,
 } from "@/composer/agent-controls";
 import { SkillsControl } from "@/composer/agent-controls/skills-control";
+import { AutonomousControl } from "@/composer/agent-controls/autonomous-control";
 import { resolveSkillInjectedText } from "@/skills/skill-injection";
 import { ContextWindowMeter } from "@/components/context-window-meter";
 import { useImageAttachmentPicker } from "@/hooks/use-image-attachment-picker";
@@ -301,6 +302,7 @@ function renderLeftContent(args: RenderLeftContentArgs): ReactElement {
         isCompactLayout={isCompactLayout}
       />
       <SkillsControl agentId={agentId} />
+      <AutonomousControl agentId={agentId} serverId={serverId} />
     </View>
   );
 }

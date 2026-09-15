@@ -152,6 +152,7 @@ import { buildLifetimeBaseline, UsageHistoryStorage } from "./usage/usage-histor
 import { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { DatabaseRegistry } from "./database/database-registry.js";
 import { ScheduleService } from "./schedule/service.js";
+import { AutorunService } from "./autorun/service.js";
 import { DaemonConfigStore, type MutableDaemonConfig } from "./daemon-config-store.js";
 import { PluginService } from "./plugins/index.js";
 import { BrowserToolsBroker } from "./browser-tools/broker.js";
@@ -410,6 +411,9 @@ export interface JAgentDeskDaemonConfig {
   mcpEnabled?: boolean;
   mcpInjectIntoAgents?: boolean;
   browserToolsEnabled?: boolean;
+  // Autonomous run (spec §20). Default OFF; only exposes the autorun.* RPC surface +
+  // `features.autorun` capability when explicitly enabled in persisted config.
+  autorunEnabled?: boolean;
   git?: {
     maxProcessesPerSecond: number;
     maxProcessConcurrency: number;
@@ -544,6 +548,7 @@ function createInitialMutableDaemonConfig(config: JAgentDeskDaemonConfig): Mutab
   const initialConfig: MutableDaemonConfig = {
     mcp: { injectIntoAgents: config.mcpInjectIntoAgents ?? true },
     browserTools: { enabled: config.browserToolsEnabled ?? true },
+    autorun: { enabled: config.autorunEnabled ?? false },
     providers,
     metadataGeneration: {
       providers: config.metadataGeneration?.providers ?? [],
@@ -1341,6 +1346,25 @@ export async function createJAgentDeskDaemon(
     }
   });
   logger.info({ elapsed: elapsed() }, "Schedule service initialized");
+  // Autonomous run driver (spec §20 / ADR-0017). Default OFF (spec §20.12): the service —
+  // and with it the whole autorun.* RPC surface + `features.autorun` capability — only
+  // exists when the daemon config opts in. onUpdate broadcasts the run snapshot to every
+  // connected client as `autorun.stream`. Reuses the schedule workspace-creator.
+  const autorunService = config.autorunEnabled
+    ? new AutorunService({
+        jagentdeskHome: config.jagentdeskHome,
+        logger,
+        agentManager,
+        onUpdate: (state) =>
+          emitExternalSessionMessage({ type: "autorun.stream", payload: { state } }),
+        onStopped: (state) => wsServer?.notifyAutorunStopped(state),
+      })
+    : null;
+  await autorunService?.initialize();
+  logger.info(
+    { elapsed: elapsed(), enabled: config.autorunEnabled === true },
+    "Autorun service initialized",
+  );
   logger.info({ elapsed: elapsed() }, "Loading persisted agent registry");
   const persistedRecords = await agentStorage.list();
   logger.info(
@@ -1716,6 +1740,7 @@ export async function createJAgentDeskDaemon(
               skillsStorage,
               usageHistory,
               databaseRegistry,
+              autorunService,
             );
             // Bind the plugin session host and start configured plugins before any
             // external ingress attaches, mirroring upstream's pre-accept ordering.
@@ -1789,6 +1814,7 @@ export async function createJAgentDeskDaemon(
     terminalManager.killAll();
     speechService.stop();
     await scheduleService.stop().catch(() => undefined);
+    await autorunService?.stop().catch(() => undefined);
     await tsnetListener?.stop().catch(() => undefined);
     if (wsServer) {
       await wsServer.close();

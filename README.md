@@ -52,6 +52,12 @@ with a few deliberate boundaries:
 - **Agentic browser** _(new)_ — the agent drives a real built‑in browser (open tabs, click,
   evaluate) with **anti‑detect fingerprint profiles** (coherent per‑OS identity, proxy + WebRTC
   guard, extensions, custom scripts) and a **session vault** for your own logins.
+- **Autonomous run** _(new)_ — a toggle in the agent chat that keeps the **same** agent going,
+  turn after turn, unattended — it keeps its open browser tab + context, works toward what you
+  asked, and **stays alive to react to things that arrive over time** (e.g. new replies) instead
+  of stopping after one batch. Not cron/schedule: one agent re‑invoked back‑to‑back, with a
+  durable "already‑done" record so it never repeats itself. Off by default; you pick the model
+  and mode, safety caps are built in.
 - **Usage & cost insights** _(new)_ — a dashboard of tokens, spend, and per‑model / per‑agent
   breakdowns.
 - **Multi‑language UI** _(new)_ — switch the app language from Settings.
@@ -59,6 +65,21 @@ with a few deliberate boundaries:
 ---
 
 ## ✨ New in this release
+
+### Autonomous run (v0.9.13)
+
+- **Keep the agent going, unattended** — a new **∞ toggle** in the chat composer turns on
+  _autonomous mode_ for the agent you're already talking to. The daemon re‑invokes that **same
+  agent/session** turn after turn (keeping its open browser tab + context) so it keeps working
+  toward what you asked — until it reports the goal is done, or you turn it off.
+- **Runs for hours, reacts over time** — "nothing to do right now" (e.g. waiting for replies)
+  no longer stops it: it stays alive, re‑checks on a growing backoff, and acts when something
+  new appears. This is what lets it operate continuously, not finish in one batch.
+- **Never repeats itself** — a compact, durable _done_ record is fed back every turn (survives
+  context compaction + daemon restart), so the agent skips work it already did.
+- **You stay in control** — off by default (`daemon.autorun.enabled`, toggle in Settings); you
+  pick the model and mode in the composer — autonomous never changes them; hidden safety caps
+  bound cost/time. Not cron/schedule.
 
 ### Forge Hub readability + fixes (v0.9.12)
 

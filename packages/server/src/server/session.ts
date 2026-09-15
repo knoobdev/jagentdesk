@@ -165,6 +165,8 @@ import {
   createGitMetadataGenerator,
 } from "./session/checkout/git-metadata-generator.js";
 import { ChatScheduleLoopSession } from "./session/chat/chat-schedule-loop-session.js";
+import { AutorunSession } from "./session/autorun/autorun-session.js";
+import type { AutorunService } from "./autorun/service.js";
 import { ClusterSession } from "./session/cluster/cluster-session.js";
 import { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { DatabaseSession } from "./session/database/database-session.js";
@@ -462,6 +464,7 @@ export interface SessionOptions {
   filesystem?: SessionFileSystem;
   chatService: FileBackedChatService;
   scheduleService: ScheduleService;
+  autorunService?: AutorunService | null;
   loopService: LoopService;
   skillsStorage?: SkillsStorage | null;
   usageHistory?: UsageHistoryStorage | null;
@@ -721,6 +724,7 @@ export class Session {
   private readonly checkoutSession: CheckoutSession;
   private readonly forgeHubSession: ForgeHubSession;
   private readonly chatScheduleLoopSession: ChatScheduleLoopSession;
+  private readonly autorunSession: AutorunSession | null;
   private clusterSession!: ClusterSession;
   private databaseSession!: DatabaseSession;
   private readonly providerCatalogSession: ProviderCatalogSession;
@@ -757,6 +761,7 @@ export class Session {
       filesystem,
       chatService,
       scheduleService,
+      autorunService,
       loopService,
       checkoutDiffManager,
       github,
@@ -914,6 +919,13 @@ export class Session {
       clientId: this.clientId,
       logger: this.sessionLogger,
     });
+    this.autorunSession = autorunService
+      ? new AutorunSession({
+          host: { emit: (msg) => this.emit(msg) },
+          autorunService,
+          logger: this.sessionLogger,
+        })
+      : null;
     this.initClusterSession(options);
     this.initDatabaseSession(options);
     this.providerCatalogSession = new ProviderCatalogSession({
@@ -1977,6 +1989,7 @@ export class Session {
       () => this.dispatchProviderMessage(msg),
       () => this.dispatchTerminalMessage(msg),
       () => this.dispatchChatScheduleLoopMessage(msg),
+      () => this.dispatchAutorunMessage(msg),
       () => this.dispatchClusterMessage(msg),
       () => this.dispatchDatabaseMessage(msg),
       () => this.dispatchMigrationMessage(msg),
@@ -2694,6 +2707,23 @@ export class Session {
         return this.chatScheduleLoopSession.handleScheduleRunOnceRequest(msg);
       case "schedule/update":
         return this.chatScheduleLoopSession.handleScheduleUpdateRequest(msg);
+      default:
+        return undefined;
+    }
+  }
+
+  private dispatchAutorunMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    const autorun = this.autorunSession;
+    if (!autorun) return undefined;
+    switch (msg.type) {
+      case "autorun.start.request":
+        return autorun.handleStartRequest(msg);
+      case "autorun.stop.request":
+        return autorun.handleStopRequest(msg);
+      case "autorun.get.request":
+        return autorun.handleGetRequest(msg);
+      case "autorun.list.request":
+        return autorun.handleListRequest(msg);
       default:
         return undefined;
     }

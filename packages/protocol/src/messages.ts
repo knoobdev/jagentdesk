@@ -280,6 +280,8 @@ export const MutableDaemonConfigSchema = z
       })
       .passthrough(),
     browserTools: MutableBrowserToolsConfigSchema.default({ enabled: true }),
+    // Autonomous run (spec §20.12). Default OFF: opt-in per daemon.
+    autorun: z.object({ enabled: z.boolean() }).default({ enabled: false }),
     providers: z.record(z.string(), MutableDaemonProviderConfigSchema).default({}),
     metadataGeneration: MutableMetadataGenerationConfigSchema.default({ providers: [] }),
     autoArchiveAfterMerge: z.boolean().default(false),
@@ -315,6 +317,7 @@ export const MutableDaemonConfigPatchSchema = z
       .optional(),
     removeProviders: z.array(z.string().min(1)).optional(),
     metadataGeneration: MutableMetadataGenerationConfigSchema.partial().optional(),
+    autorun: z.object({ enabled: z.boolean().optional() }).passthrough().optional(),
     autoArchiveAfterMerge: z.boolean().optional(),
     enableTerminalAgentHooks: z.boolean().optional(),
     appendSystemPrompt: z.string().optional(),
@@ -2744,6 +2747,62 @@ export const ForgeMemberRemoveRequestSchema = z.object({
   memberId: z.string(),
   requestId: z.string(),
 });
+
+// ===== Autonomous run (autorun) — spec 20 / ADR-0017 ==========================
+// Autonomous mode is a switch ON an EXISTING agent's chat: while on, the daemon re-invokes
+// the SAME agent/session turn-after-turn (keeping its open browser tab + context) so it
+// keeps working toward what the user asked in chat — until it reports done / nothing new,
+// or the user turns it off. Keyed by agentId. There is NO objective/budget/config on the
+// wire: the goal is the conversation; safety caps live inside the daemon. `doneItems` is
+// the compact "already did this" record fed back each turn so it never repeats/spams.
+export const AutorunStatusSchema = z.enum(["running", "stopped"]);
+export const AutorunStopReasonSchema = z.enum([
+  "done", // the agent reported the goal is fully complete
+  "nothing-new", // no new work to do (e.g. no new replies / accounts) — soft stop
+  "no-progress", // repeated turns with no forward movement — guard
+  "error", // repeated failures
+  "guard", // hit a hidden safety cap (max turns / cost / wall-clock)
+  "user", // the user toggled it off
+]);
+export const AutorunStateSchema = z.object({
+  agentId: z.string(),
+  status: AutorunStatusSchema,
+  iteration: z.number().int(),
+  startedAt_ms: z.number().int().nullable().optional(),
+  updatedAt_ms: z.number().int().nullable().optional(),
+  // Last time the agent made real forward progress (did a new thing).
+  lastActivityAt_ms: z.number().int().nullable().optional(),
+  // Compact running record of concrete things already done (anti-repeat). Streamed so the
+  // chat can show "what it's done so far"; NOT a user-editable form.
+  doneItems: z.array(z.string()),
+  // One-line summary of the most recent turn.
+  lastNote: z.string().nullable().optional(),
+  // Read-only accumulated model spend for display (no budget input from the user).
+  spendUsd: z.number(),
+  stopReason: AutorunStopReasonSchema.nullable().optional(),
+  stopDetail: z.string().nullable().optional(),
+});
+// Turn autonomous mode ON for the agent the user is chatting with.
+export const AutorunStartRequestSchema = z.object({
+  type: z.literal("autorun.start.request"),
+  agentId: z.string(),
+  requestId: z.string(),
+});
+export const AutorunStopRequestSchema = z.object({
+  type: z.literal("autorun.stop.request"),
+  agentId: z.string(),
+  requestId: z.string(),
+});
+export const AutorunGetRequestSchema = z.object({
+  type: z.literal("autorun.get.request"),
+  agentId: z.string(),
+  requestId: z.string(),
+});
+export const AutorunListRequestSchema = z.object({
+  type: z.literal("autorun.list.request"),
+  requestId: z.string(),
+});
+
 export const ForgeCliStatusRequestSchema = z.object({
   type: z.literal("forge.cli.status.request"),
   forge: z.string(),
@@ -3851,6 +3910,10 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ForgeMemberListRequestSchema,
   ForgeMemberAddRequestSchema,
   ForgeMemberRemoveRequestSchema,
+  AutorunStartRequestSchema,
+  AutorunStopRequestSchema,
+  AutorunGetRequestSchema,
+  AutorunListRequestSchema,
   ForgeChangeRequestCreateRequestSchema,
   ForgeChangeRequestCloseRequestSchema,
   ForgeReleaseCreateRequestSchema,
@@ -4255,6 +4318,8 @@ export const ServerInfoStatusPayloadSchema = z
         forgeHubIssues: z.boolean().optional(), // Milestone B/C: issues create/comment/close
         forgeHubCliInstall: z.boolean().optional(), // Milestone C: detect + auto-install forge CLI (§19.3.5, ADR-0016)
         forgeHubLogin: z.boolean().optional(), // Milestone C: app-driven device-flow sign-in (§19.3.7, ADR-0016 §7)
+        autorun: z.boolean().optional(), // Autonomous run (spec §20 / ADR-0017); default OFF, opt-in per daemon
+        autorunApproval: z.boolean().optional(), // Per-action approval mode for autorun (§20.7.3)
       })
       .optional(),
   })
@@ -6387,6 +6452,36 @@ export const ForgeMemberRemoveResponseSchema = z.object({
   type: z.literal("forge.member.remove.response"),
   payload: z.object({ ok: z.boolean(), requestId: z.string() }),
 });
+
+// ===== Autonomous run (autorun) responses + stream — spec 20 / ADR-0017 =======
+// `state` is null when the agent has never had autonomous mode turned on.
+const AutorunStatePayload = z.object({
+  state: AutorunStateSchema.nullable(),
+  error: z.string().nullable().optional(),
+  requestId: z.string(),
+});
+export const AutorunStartResponseSchema = z.object({
+  type: z.literal("autorun.start.response"),
+  payload: AutorunStatePayload,
+});
+export const AutorunStopResponseSchema = z.object({
+  type: z.literal("autorun.stop.response"),
+  payload: AutorunStatePayload,
+});
+export const AutorunGetResponseSchema = z.object({
+  type: z.literal("autorun.get.response"),
+  payload: AutorunStatePayload,
+});
+export const AutorunListResponseSchema = z.object({
+  type: z.literal("autorun.list.response"),
+  payload: z.object({ states: z.array(AutorunStateSchema), requestId: z.string() }),
+});
+// Live push whenever an agent's autonomous state changes (turn done, stopped, new item).
+export const AutorunStreamSchema = z.object({
+  type: z.literal("autorun.stream"),
+  payload: z.object({ state: AutorunStateSchema }),
+});
+
 export const ForgeCliStatusResponseSchema = z.object({
   type: z.literal("forge.cli.status.response"),
   payload: z.object({
@@ -7434,6 +7529,11 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ForgeMemberListResponseSchema,
   ForgeMemberAddResponseSchema,
   ForgeMemberRemoveResponseSchema,
+  AutorunStartResponseSchema,
+  AutorunStopResponseSchema,
+  AutorunGetResponseSchema,
+  AutorunListResponseSchema,
+  AutorunStreamSchema,
   ForgeChangeRequestCreateResponseSchema,
   ForgeChangeRequestCloseResponseSchema,
   ForgeReleaseCreateResponseSchema,
@@ -8002,6 +8102,19 @@ export type ForgeMemberAddRequest = z.infer<typeof ForgeMemberAddRequestSchema>;
 export type ForgeMemberAddResponse = z.infer<typeof ForgeMemberAddResponseSchema>;
 export type ForgeMemberRemoveRequest = z.infer<typeof ForgeMemberRemoveRequestSchema>;
 export type ForgeMemberRemoveResponse = z.infer<typeof ForgeMemberRemoveResponseSchema>;
+// Autonomous run (autorun) — spec 20 / ADR-0017
+export type AutorunStatus = z.infer<typeof AutorunStatusSchema>;
+export type AutorunStopReason = z.infer<typeof AutorunStopReasonSchema>;
+export type AutorunState = z.infer<typeof AutorunStateSchema>;
+export type AutorunStartRequest = z.infer<typeof AutorunStartRequestSchema>;
+export type AutorunStartResponse = z.infer<typeof AutorunStartResponseSchema>;
+export type AutorunStopRequest = z.infer<typeof AutorunStopRequestSchema>;
+export type AutorunStopResponse = z.infer<typeof AutorunStopResponseSchema>;
+export type AutorunGetRequest = z.infer<typeof AutorunGetRequestSchema>;
+export type AutorunGetResponse = z.infer<typeof AutorunGetResponseSchema>;
+export type AutorunListRequest = z.infer<typeof AutorunListRequestSchema>;
+export type AutorunListResponse = z.infer<typeof AutorunListResponseSchema>;
+export type AutorunStream = z.infer<typeof AutorunStreamSchema>;
 // Forge Hub — Milestone D types
 export type ForgeChangeRequestCreateRequest = z.infer<typeof ForgeChangeRequestCreateRequestSchema>;
 export type ForgeChangeRequestCreateResponse = z.infer<
