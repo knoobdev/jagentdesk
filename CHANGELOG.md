@@ -1,9 +1,34 @@
 # Changelog
 
 All notable changes to JAgentDesk are documented here. JAgentDesk versions its
-own release line (now `0.9.12`); the many `v0.1.x`–`v1.0.x` tags in history are
+own release line (now `0.9.13`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
+
+## v0.9.13 — 2026-09-16
+
+Autonomous run — keep an agent working unattended, reacting to events over time.
+
+### Added
+
+- **Autonomous run (spec §20 / ADR-0017)** — a **∞ toggle** in the chat composer
+  turns on _autonomous mode_ for the current agent. The daemon re-invokes the
+  **same agent/session** turn after turn (keeping its open browser tab + context)
+  so it keeps working toward what you asked — one agent driven back-to-back, **not**
+  cron/schedule.
+- **Reacts over time, not one batch** — when the agent reports "nothing to do
+  right now" (e.g. waiting for replies) the run does **not** stop; it stays alive,
+  re-checks on a growing backoff (30s→5m), and acts when something new appears.
+  Only a genuine `done`, the user turning it off, repeated errors, or hidden safety
+  caps (2000 turns / 12h / \$50) end it.
+- **Never repeats work** — a compact, durable `doneItems` record lives on disk
+  (`$JAGENTDESK_HOME/autoruns/{agentId}.json`), is fed back into every turn, and
+  survives context compaction + daemon restart, so the agent skips what it already did.
+- **User keeps control** — off by default (`daemon.autorun.enabled`, Settings toggle,
+  restart to apply); autonomous never changes the model or mode you chose in the composer.
+- **Protocol/UI** — `autorun.start/stop/get {agentId}` + `autorun.list` + `autorun.stream`
+  events; capability `features.autorun` (+ `features.autorunApproval`); a per-agent toggle
+  in the composer (`AutonomousControl`), a Settings opt-in card, and a stopped-run push.
 
 ## v0.9.12 — 2026-09-15
 

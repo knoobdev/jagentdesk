@@ -331,6 +331,7 @@ function mergeMutableConfigIntoPersistedConfig(params: {
 }): PersistedConfig {
   const { persisted, mutable, removeProviders } = params;
   const browserToolsEnabled = readBrowserToolsEnabled(mutable);
+  const autorunEnabled = readAutorunEnabled(mutable);
   const metadataGenerationProviders = readMetadataGenerationProviders(mutable);
   const persistedProviderOverrides = omitProvidersFromOverrides(
     persisted.agents?.providers as Record<string, ProviderOverride> | undefined,
@@ -375,6 +376,10 @@ function mergeMutableConfigIntoPersistedConfig(params: {
         ...persisted.daemon?.browserTools,
         enabled: browserToolsEnabled,
       },
+      autorun: {
+        ...persisted.daemon?.autorun,
+        enabled: autorunEnabled,
+      },
       autoArchiveAfterMerge: mutable.autoArchiveAfterMerge,
       enableTerminalAgentHooks: mutable.enableTerminalAgentHooks,
       appendSystemPrompt: mutable.appendSystemPrompt,
@@ -393,6 +398,14 @@ function readBrowserToolsEnabled(mutable: MutableDaemonConfig): boolean {
     return false;
   }
   return browserTools["enabled"] === true;
+}
+
+function readAutorunEnabled(mutable: MutableDaemonConfig): boolean {
+  const autorun = (mutable as { autorun?: unknown }).autorun;
+  if (!isRecord(autorun)) {
+    return false;
+  }
+  return autorun["enabled"] === true;
 }
 
 function readMetadataGenerationProviders(

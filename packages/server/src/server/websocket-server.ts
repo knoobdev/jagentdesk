@@ -20,6 +20,8 @@ import type { LifetimeUsage, UsageDayRollup } from "@jagentdesk/protocol/usage-h
 import type { ClusterRegistry } from "./cluster/cluster-registry.js";
 import type { DatabaseRegistry } from "./database/database-registry.js";
 import type { ScheduleService } from "./schedule/service.js";
+import type { AutorunService } from "./autorun/service.js";
+import type { AutorunState } from "@jagentdesk/protocol/messages";
 import type { CheckoutDiffManager, CheckoutDiffMetrics } from "./checkout-diff-manager.js";
 import type { DaemonConfigStore, MutableDaemonConfig } from "./daemon-config-store.js";
 import {
@@ -603,6 +605,7 @@ export class VoiceAssistantWebSocketServer {
   private readonly clusterRegistry: ClusterRegistry;
   private readonly databaseRegistry: DatabaseRegistry;
   private readonly scheduleService: ScheduleService;
+  private autorunService!: AutorunService | null;
   private readonly checkoutDiffManager: CheckoutDiffManager;
   private readonly github: ForgeService;
   private readonly workspaceGitService: WorkspaceGitService;
@@ -725,6 +728,7 @@ export class VoiceAssistantWebSocketServer {
     skillsStorage?: SkillsStorage | null,
     usageHistory?: UsageHistoryStorage | null,
     databaseRegistry?: DatabaseRegistry,
+    autorunService?: AutorunService | null,
   ) {
     this.logger = logger.child({ module: "websocket-server" });
     this.advertiseDaemonStatusRpc = wsConfig.daemonStatusRpc !== false;
@@ -776,6 +780,7 @@ export class VoiceAssistantWebSocketServer {
       getDaemonTcpHost,
       serviceProxyPublicBaseUrl,
       resolveScriptHealth,
+      autorunService,
     });
     if (!providerSnapshotManager) {
       throw new Error("providerSnapshotManager is required");
@@ -835,7 +840,9 @@ export class VoiceAssistantWebSocketServer {
     getDaemonTcpHost: (() => string | null) | undefined;
     serviceProxyPublicBaseUrl: string | null | undefined;
     resolveScriptHealth: ((hostname: string) => ScriptHealthState | null) | undefined;
+    autorunService: AutorunService | null | undefined;
   }): void {
+    this.autorunService = params.autorunService ?? null;
     this.speech = params.speech ?? null;
     this.terminalManager = params.terminalManager ?? null;
     if (this.terminalManager) {
@@ -1726,6 +1733,7 @@ export class VoiceAssistantWebSocketServer {
       clusterRegistry: this.clusterRegistry,
       databaseRegistry: this.databaseRegistry,
       scheduleService: this.scheduleService,
+      autorunService: this.autorunService,
       checkoutDiffManager: this.checkoutDiffManager,
       github: this.github,
       workspaceGitService: this.workspaceGitService,
@@ -2165,6 +2173,10 @@ export class VoiceAssistantWebSocketServer {
         forgeHubCliInstall: true,
         // App-driven device-flow sign-in (gh/glab OAuth device flow in a pty).
         forgeHubLogin: true,
+        // Autonomous run (spec §20 / ADR-0017). Default OFF: advertised only when the
+        // daemon opted in (autorunService wired). Gates the whole autorun.* surface;
+        // autorunApproval gates the per-action-approval mode toggle (§20.7.3).
+        ...(this.autorunService ? { autorun: true, autorunApproval: true } : {}),
         // Advertise the plugin management surface only when a PluginService is
         // wired; without it the plugin.* RPCs return empty/disabled results.
         ...(this.pluginRuntime
@@ -2197,6 +2209,25 @@ export class VoiceAssistantWebSocketServer {
         config,
       },
     });
+  }
+
+  // Push notification when an autonomous run reaches a terminal state (spec §14). The
+  // live `autorun.stream` already updates open clients; this reaches a phone that isn't
+  // watching. Wired from AutorunService.onStopped in bootstrap.
+  public notifyAutorunStopped(state: AutorunState): void {
+    const reason = state.stopReason ?? "stopped";
+    void this.pushNotificationSender
+      .send({
+        title: "Autonomous mode stopped",
+        body: `${reason}${state.lastNote ? `: ${state.lastNote}` : ""}`.slice(0, 140),
+        data: { serverId: this.serverId, agentId: state.agentId, stopReason: reason },
+      })
+      .catch((err) => {
+        this.logger.warn(
+          { err, agentId: state.agentId },
+          "Failed to send autorun push notification",
+        );
+      });
   }
 
   private broadcastCapabilitiesUpdate(): void {

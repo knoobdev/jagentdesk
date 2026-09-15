@@ -378,6 +378,13 @@ function resolveBrowserToolsEnabled(persisted: ReturnType<typeof loadPersistedCo
   return persisted.daemon?.browserTools?.enabled ?? true;
 }
 
+function resolveAutorunEnabled(persisted: ReturnType<typeof loadPersistedConfig>): boolean {
+  // Autonomous run defaults OFF (spec §20.12): it runs an agent unattended across many
+  // turns until a budget or the objective stops it, so it is opt-in per daemon. Only an
+  // explicit `true` in persisted config exposes the feature; normal agents are untouched.
+  return persisted.daemon?.autorun?.enabled ?? false;
+}
+
 // Default ON so agents actually receive the jagentdesk MCP tools (kubectl_get,
 // orchestration, schedules, …). The config snapshot bootstrap reports already
 // assumes this default, and the whole point of the /mcp/agents endpoint is for
@@ -400,6 +407,7 @@ function resolveStaticLoadConfigSettings(
     mcpEnabled: cli?.mcpEnabled ?? persisted.daemon?.mcp?.enabled ?? true,
     mcpInjectIntoAgents: resolveMcpInjectIntoAgents(cli, persisted),
     browserToolsEnabled: resolveBrowserToolsEnabled(persisted),
+    autorunEnabled: resolveAutorunEnabled(persisted),
     autoArchiveAfterMerge: persisted.daemon?.autoArchiveAfterMerge ?? false,
     appendSystemPrompt: resolveAppendSystemPrompt(persisted),
     terminalProfiles: persisted.daemon?.terminalProfiles,
@@ -429,6 +437,7 @@ export function loadConfig(
     mcpEnabled,
     mcpInjectIntoAgents,
     browserToolsEnabled,
+    autorunEnabled,
     autoArchiveAfterMerge,
     appendSystemPrompt,
     terminalProfiles,
@@ -463,6 +472,7 @@ export function loadConfig(
     mcpEnabled,
     mcpInjectIntoAgents,
     browserToolsEnabled,
+    autorunEnabled,
     git: resolveGitProcessConfig(env, persisted),
     autoArchiveAfterMerge,
     enableTerminalAgentHooks: persisted.daemon?.enableTerminalAgentHooks ?? false,

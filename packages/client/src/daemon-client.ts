@@ -157,6 +157,7 @@ import type {
   WorkspaceRecoveryState,
   PluginListItem,
   PluginLogEntry,
+  AutorunState,
 } from "@jagentdesk/protocol/messages";
 import type {
   AgentPermissionRequest,
@@ -7463,6 +7464,90 @@ export class DaemonClient {
         resolve(event);
       });
     });
+  }
+
+  // ============================================================================
+  // Autonomous mode (autorun) — spec §20 / ADR-0017. A switch on an EXISTING agent's
+  // chat, keyed by agentId. Gated by features.autorun.
+  // ============================================================================
+
+  async autorunStart(agentId: string, requestId?: string): Promise<AutorunState> {
+    const resolved = this.createRequestId(requestId);
+    const message = SessionInboundMessageSchema.parse({
+      type: "autorun.start.request",
+      agentId,
+      requestId: resolved,
+    });
+    return this.autorunStateRequest(resolved, message, "autorun.start.response");
+  }
+
+  async autorunStop(agentId: string, requestId?: string): Promise<AutorunState> {
+    const resolved = this.createRequestId(requestId);
+    const message = SessionInboundMessageSchema.parse({
+      type: "autorun.stop.request",
+      agentId,
+      requestId: resolved,
+    });
+    return this.autorunStateRequest(resolved, message, "autorun.stop.response");
+  }
+
+  // Returns null when the agent has never had autonomous mode turned on.
+  async autorunGet(agentId: string, requestId?: string): Promise<AutorunState | null> {
+    const resolved = this.createRequestId(requestId);
+    const message = SessionInboundMessageSchema.parse({
+      type: "autorun.get.request",
+      agentId,
+      requestId: resolved,
+    });
+    const payload = await this.sendRequest({
+      requestId: resolved,
+      message,
+      options: { skipQueue: true },
+      select: (msg) =>
+        msg.type === "autorun.get.response" && msg.payload.requestId === resolved
+          ? msg.payload
+          : null,
+    });
+    if (payload.error) throw new Error(payload.error);
+    return payload.state;
+  }
+
+  async autorunList(requestId?: string): Promise<AutorunState[]> {
+    const resolved = this.createRequestId(requestId);
+    const message = SessionInboundMessageSchema.parse({
+      type: "autorun.list.request",
+      requestId: resolved,
+    });
+    return this.sendRequest({
+      requestId: resolved,
+      message,
+      options: { skipQueue: true },
+      select: (msg) =>
+        msg.type === "autorun.list.response" && msg.payload.requestId === resolved
+          ? msg.payload.states
+          : null,
+    });
+  }
+
+  subscribeAutorunStream(handler: (state: AutorunState) => void): () => void {
+    return this.on("autorun.stream", (message) => handler(message.payload.state));
+  }
+
+  private async autorunStateRequest(
+    requestId: string,
+    message: SessionInboundMessage,
+    responseType: "autorun.start.response" | "autorun.stop.response",
+  ): Promise<AutorunState> {
+    const payload = await this.sendRequest({
+      requestId,
+      message,
+      options: { skipQueue: true },
+      select: (msg) =>
+        msg.type === responseType && msg.payload.requestId === requestId ? msg.payload : null,
+    });
+    if (payload.error) throw new Error(payload.error);
+    if (!payload.state) throw new Error("Autorun response missing state");
+    return payload.state;
   }
 
   // ============================================================================

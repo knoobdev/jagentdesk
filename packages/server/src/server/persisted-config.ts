@@ -253,6 +253,13 @@ export const PersistedConfigSchema = z
           })
           .passthrough()
           .optional(),
+        // Autonomous run (spec §20.12). Default OFF; opt-in per daemon.
+        autorun: z
+          .object({
+            enabled: z.boolean().optional(),
+          })
+          .passthrough()
+          .optional(),
         git: z
           .object({
             maxProcessesPerSecond: z.number().int().positive().optional(),
