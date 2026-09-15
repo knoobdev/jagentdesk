@@ -132,6 +132,9 @@ const GhPrSchema = z.object({
   updatedAt: z.string().optional(),
   author: z.object({ login: z.string() }).nullable().optional(),
   reviewDecision: z.string().nullable().optional(),
+  mergeable: z.string().nullable().optional(),
+  changedFiles: z.number().nullable().optional(),
+  commits: z.array(z.unknown()).nullable().optional(),
   statusCheckRollup: z
     .array(
       z.object({ status: z.string().optional(), conclusion: z.string().nullable().optional() }),
@@ -224,6 +227,33 @@ function mapReviewDecision(
   return null;
 }
 
+// gh `mergeable`: MERGEABLE | CONFLICTING | UNKNOWN.
+function mapGhMergeable(m: string | null | undefined): ForgeChangeRequestSummary["mergeable"] {
+  const s = (m ?? "").toUpperCase();
+  if (s === "MERGEABLE") return "mergeable";
+  if (s === "CONFLICTING") return "conflicting";
+  return "unknown";
+}
+
+// GitLab `detailed_merge_status` (or legacy `merge_status`): only "conflict" means
+// the branch has real merge conflicts. Everything else (CI states, not_open on a
+// merged/closed MR, need_rebase, draft, …) is not a conflict → mergeable/unknown.
+function mapGlMergeable(
+  detailed: string | null | undefined,
+  legacy: string | null | undefined,
+): ForgeChangeRequestSummary["mergeable"] {
+  const d = (detailed ?? "").toLowerCase();
+  if (d) {
+    if (d === "conflict") return "conflicting";
+    if (d === "mergeable") return "mergeable";
+    return "unknown";
+  }
+  const l = (legacy ?? "").toLowerCase();
+  if (l === "cannot_be_merged") return "conflicting";
+  if (l === "can_be_merged") return "mergeable";
+  return "unknown";
+}
+
 function fileStatus(s: string): ForgeChangeRequestFile["status"] {
   const v = s.toLowerCase();
   if (v === "added") return "added";
@@ -253,6 +283,8 @@ const GlMrSchema = z.object({
   labels: z.array(z.string()).optional(),
   updated_at: z.string().optional(),
   author: z.object({ username: z.string() }).nullable().optional(),
+  merge_status: z.string().nullable().optional(),
+  detailed_merge_status: z.string().nullable().optional(),
 });
 const GlChangeSchema = z.object({
   old_path: z.string(),
@@ -1050,7 +1082,7 @@ export class ForgeHubService {
       "--state",
       ghState,
       "--json",
-      "number,title,url,state,isDraft,headRefName,baseRefName,labels,updatedAt,author,reviewDecision,statusCheckRollup",
+      "number,title,url,state,isDraft,headRefName,baseRefName,labels,updatedAt,author,reviewDecision,statusCheckRollup,mergeable,changedFiles,commits",
       "--limit",
       String(limit),
     ];
@@ -1071,6 +1103,9 @@ export class ForgeHubService {
           reviewDecision: mapReviewDecision(r.reviewDecision),
           checksStatus: rollupToChecks(r.statusCheckRollup),
           updatedAt_ms: isoToMs(r.updatedAt),
+          mergeable: mapGhMergeable(r.mergeable),
+          changedFilesCount: r.changedFiles ?? null,
+          commitCount: r.commits?.length ?? null,
         }),
       );
   }
@@ -1435,6 +1470,17 @@ export class ForgeHubService {
       }),
     );
     if (!res) return null;
+    // `gh run view --json` has no actor field; the raw runs API does. Best-effort;
+    // triggering_actor is who re-ran it, actor is the original trigger.
+    const meta = await this.ghJson(
+      ["api", `repos/${input.owner}/${input.name}/actions/runs/${input.runId}`],
+      z.object({
+        head_branch: z.string().nullable().optional(),
+        head_sha: z.string().nullable().optional(),
+        actor: z.object({ login: z.string() }).nullable().optional(),
+        triggering_actor: z.object({ login: z.string() }).nullable().optional(),
+      }),
+    );
     // GitHub has no stages; present a single "jobs" stage.
     const jobs: ForgePipelineJob[] = res.jobs.map((j) => ({
       id: String(j.databaseId),
@@ -1450,6 +1496,9 @@ export class ForgeHubService {
     return {
       id: input.runId,
       status: ghRunStatus(res.status, res.conclusion),
+      ref: meta?.head_branch ?? null,
+      sha: meta?.head_sha ?? null,
+      actor: meta?.triggering_actor?.login ?? meta?.actor?.login ?? null,
       url: res.url ?? null,
       stages: [{ name: "jobs", status: ghRunStatus(res.status, res.conclusion), jobs }],
     };
@@ -1606,6 +1655,7 @@ export class ForgeHubService {
           reviewDecision: null,
           checksStatus: "none",
           updatedAt_ms: isoToMs(r.updated_at),
+          mergeable: mapGlMergeable(r.detailed_merge_status, r.merge_status),
         };
       });
   }
@@ -1808,10 +1858,21 @@ export class ForgeHubService {
     runId: string;
   }): Promise<ForgePipelineDetail | null> {
     const enc = glProjectId(input.owner, input.name);
-    const jobs = await this.glabJson(
-      ["api", `projects/${enc}/pipelines/${input.runId}/jobs`],
-      z.array(GlJobSchema),
-    );
+    // Fetch the jobs (for stages) and the pipeline object (for who triggered it +
+    // ref/sha/url) in parallel; the jobs endpoint alone carries no pipeline-level
+    // metadata.
+    const [jobs, pipeline] = await Promise.all([
+      this.glabJson(["api", `projects/${enc}/pipelines/${input.runId}/jobs`], z.array(GlJobSchema)),
+      this.glabJson(
+        ["api", `projects/${enc}/pipelines/${input.runId}`],
+        z.object({
+          ref: z.string().nullable().optional(),
+          sha: z.string().nullable().optional(),
+          web_url: z.string().nullable().optional(),
+          user: z.object({ username: z.string() }).nullable().optional(),
+        }),
+      ),
+    ]);
     if (!jobs) return null;
     const mapped: ForgePipelineJob[] = jobs.map((j) => ({
       id: String(j.id),
@@ -1839,9 +1900,11 @@ export class ForgeHubService {
     });
     return {
       id: input.runId,
-      // The jobs endpoint carries no pipeline-level ref/sha/url; aggregate status from jobs.
       status: aggregateGlStatus(mapped.map((j) => j.status)),
-      url: null,
+      ref: pipeline?.ref ?? null,
+      sha: pipeline?.sha ?? null,
+      actor: pipeline?.user?.username ?? null,
+      url: pipeline?.web_url ?? null,
       stages,
     };
   }
@@ -1983,6 +2046,7 @@ export class ForgeHubService {
           draft: z.boolean().optional(),
           prerelease: z.boolean().optional(),
           published_at: z.string().nullable().optional(),
+          author: z.object({ login: z.string() }).nullable().optional(),
           html_url: z.string(),
           assets: z
             .array(
@@ -2006,6 +2070,7 @@ export class ForgeHubService {
         isDraft: r.draft ?? false,
         isPrerelease: r.prerelease ?? false,
         publishedAt_ms: isoToMs(r.published_at ?? undefined),
+        authorLogin: r.author?.login ?? null,
         url: r.html_url,
         assets: r.assets.map(
           (a): ForgeReleaseAsset => ({
@@ -2262,6 +2327,7 @@ export class ForgeHubService {
           released_at: z.string().nullable().optional(),
           created_at: z.string().nullable().optional(),
           upcoming_release: z.boolean().optional(),
+          author: z.object({ username: z.string() }).nullable().optional(),
           _links: z.object({ self: z.string().optional() }).nullable().optional(),
           assets: z
             .object({
@@ -2281,6 +2347,7 @@ export class ForgeHubService {
         isDraft: false, // GitLab has no draft-release concept
         isPrerelease: r.upcoming_release ?? false,
         publishedAt_ms: isoToMs(r.released_at ?? r.created_at ?? undefined),
+        authorLogin: r.author?.username ?? null,
         url: r._links?.self ?? "",
         assets: (r.assets?.links ?? []).map(
           (a): ForgeReleaseAsset => ({ name: a.name, url: a.url, sizeBytes: null }),
@@ -3422,7 +3489,7 @@ export class ForgeHubService {
         "--repo",
         `${owner}/${name}`,
         "--json",
-        "tagName,name,body,isDraft,isPrerelease,publishedAt,url,assets",
+        "tagName,name,body,isDraft,isPrerelease,publishedAt,author,url,assets",
       ],
       z.object({
         tagName: z.string(),
@@ -3431,6 +3498,7 @@ export class ForgeHubService {
         isDraft: z.boolean().optional(),
         isPrerelease: z.boolean().optional(),
         publishedAt: z.string().nullable().optional(),
+        author: z.object({ login: z.string() }).nullable().optional(),
         url: z.string(),
         assets: z
           .array(
@@ -3453,6 +3521,7 @@ export class ForgeHubService {
       isDraft: r.isDraft ?? false,
       isPrerelease: r.isPrerelease ?? false,
       publishedAt_ms: isoToMs(r.publishedAt ?? undefined),
+      authorLogin: r.author?.login ?? null,
       url: r.url,
       assets: r.assets.map(
         (a): ForgeReleaseAsset => ({ name: a.name, url: a.url ?? "", sizeBytes: a.size ?? null }),
@@ -3519,6 +3588,7 @@ export class ForgeHubService {
         released_at: z.string().nullable().optional(),
         created_at: z.string().nullable().optional(),
         upcoming_release: z.boolean().optional(),
+        author: z.object({ username: z.string() }).nullable().optional(),
         _links: z.object({ self: z.string().optional() }).nullable().optional(),
         assets: z
           .object({
@@ -3537,6 +3607,7 @@ export class ForgeHubService {
       isDraft: false, // GitLab has no draft-release concept
       isPrerelease: r.upcoming_release ?? false,
       publishedAt_ms: isoToMs(r.released_at ?? r.created_at ?? undefined),
+      authorLogin: r.author?.username ?? null,
       url: r._links?.self ?? "",
       assets: (r.assets?.links ?? []).map(
         (a): ForgeReleaseAsset => ({ name: a.name, url: a.url, sizeBytes: null }),

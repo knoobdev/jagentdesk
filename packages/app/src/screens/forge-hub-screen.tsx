@@ -12,6 +12,7 @@ import {
   Animated,
   Easing,
   Image,
+  PanResponder,
   Pressable,
   ScrollView,
   Text,
@@ -119,20 +120,17 @@ import { useHostRouteServerId } from "@/navigation/host-route-context";
 import { useHostRuntimeClient, useHosts } from "@/runtime/host-runtime";
 import { useHostFeature } from "@/runtime/host-features";
 import { DiffViewer } from "@/components/diff-viewer";
-import { HighlightedCodeBlock } from "@/components/highlighted-code-block";
 import { MarkdownRenderer } from "@/components/markdown/renderer";
 import { parseUnifiedDiff } from "@/utils/tool-call-parsers";
 import { openExternalUrl } from "@/utils/open-external-url";
 import { highlightDiffLines } from "@/utils/diff-highlight";
+import { parseAnsiLog, stripAnsi, type AnsiLine } from "@/utils/ansi-log";
+import { tokenizeToLines } from "@/utils/highlight-cache";
+import { syntaxTokenStyleFor } from "@/styles/syntax-token-styles";
 import { ForgeAssistantPanel } from "@/screens/forge-assistant-panel";
 import type { Theme } from "@/styles/theme";
 
-// HighlightedCodeBlock keeps all box chrome (bg/border/padding) on its own
-// wrapper via `textStyle`; nothing is inherited from an outer markdown context
-// here, so a single stable empty object satisfies the required prop.
-const CODE_BLOCK_INHERITED: TextStyle = {};
-
-// File extension used both to pick a HighlightedCodeBlock language and to detect
+// File extension used both to pick a syntax-highlight language and to detect
 // markdown. Returns null for dotfiles / files without an extension.
 function fileExtension(filePath: string): string | null {
   const name = filePath.split("/").pop() ?? "";
@@ -2143,6 +2141,12 @@ function PullRequestRow({
           ))}
         </View>
       </View>
+      {cr.state === "open" && cr.mergeable === "conflicting" ? (
+        <View style={styles.conflictChip}>
+          <CircleAlert size={11} color={theme.colors.statusDanger} />
+          <Text style={styles.conflictChipText}>conflict</Text>
+        </View>
+      ) : null}
       {reviewColor ? <StatusDot color={reviewColor} /> : null}
       {ciColor ? <StatusDot color={ciColor} /> : null}
       <Chip label={crStateLabel(cr.state)} color={crStateColor(cr.state, theme)} />
@@ -2773,6 +2777,9 @@ function MergeBox({
   const [autoNote, setAutoNote] = useState<string | null>(null);
 
   const mergeable = cr.state === "open";
+  // Real conflict state from the forge (§19.6). Only meaningful for open PRs.
+  const hasConflict = cr.state === "open" && cr.mergeable === "conflicting";
+  const canMerge = mergeable && !hasConflict;
   const running = status === "running";
 
   const toggleAutoMerge = useCallback(async () => {
@@ -2821,23 +2828,40 @@ function MergeBox({
     }
   }, [client, repo, cr.number, method, def.changeRequestAbbrev, onMerged]);
 
-  const disabledReason = mergeable
+  const disabledReason = canMerge
     ? null
-    : cr.state === "merged"
-      ? `This ${def.changeRequestNoun} is already merged.`
-      : cr.state === "closed"
-        ? `This ${def.changeRequestNoun} is closed.`
-        : `Draft ${def.changeRequestNoun}s can't be merged.`;
+    : hasConflict
+      ? `This ${def.changeRequestNoun} has conflicts that must be resolved before it can merge.`
+      : cr.state === "merged"
+        ? `This ${def.changeRequestNoun} is already merged.`
+        : cr.state === "closed"
+          ? `This ${def.changeRequestNoun} is closed.`
+          : cr.state === "draft"
+            ? `Draft ${def.changeRequestNoun}s can't be merged.`
+            : null;
 
   return (
     <View style={styles.mergebox}>
       <View style={styles.mergeboxHeader}>
-        <MergeGlyph mergeable={mergeable} />
+        <MergeGlyph mergeable={canMerge} />
         <Text style={styles.mergeboxTitle}>Merge</Text>
         <View style={styles.grow} />
         <ChecksSummary status={cr.checksStatus} />
       </View>
       <View style={styles.mergeboxBody}>
+        {hasConflict ? (
+          <View style={styles.conflictBanner}>
+            <CircleAlert size={15} color={theme.colors.statusDanger} />
+            <Text style={styles.conflictBannerText}>
+              This branch has conflicts with {cr.baseRef ?? "the base branch"}.
+            </Text>
+          </View>
+        ) : cr.state === "open" && cr.mergeable === "mergeable" ? (
+          <View style={styles.mergeableRow}>
+            <Check size={15} color={theme.colors.statusSuccess} />
+            <Text style={styles.mergeableText}>No conflicts with the base branch.</Text>
+          </View>
+        ) : null}
         <View style={styles.segmented}>
           {MERGE_METHODS.map((m) => (
             <MergeMethodButton key={m} value={m} active={method === m} onSelect={setMethod} />
@@ -2848,10 +2872,10 @@ function MergeBox({
             styles.btn,
             styles.btnPrimary,
             styles.mergeBtn,
-            (!mergeable || running) && styles.btnDisabled,
+            (!canMerge || running) && styles.btnDisabled,
           ]}
           onPress={submit}
-          disabled={!mergeable || running}
+          disabled={!canMerge || running}
           testID="forge-merge-submit"
         >
           <Text style={styles.btnPrimaryText}>
@@ -2859,11 +2883,11 @@ function MergeBox({
           </Text>
         </Pressable>
         <Pressable
-          style={[styles.autoMergeRow, (!mergeable || autoBusy) && styles.btnDisabled]}
+          style={[styles.autoMergeRow, (!canMerge || autoBusy) && styles.btnDisabled]}
           onPress={toggleAutoMerge}
-          disabled={!mergeable || autoBusy}
+          disabled={!canMerge || autoBusy}
           accessibilityRole="checkbox"
-          accessibilityState={{ checked: autoMerge, disabled: !mergeable || autoBusy }}
+          accessibilityState={{ checked: autoMerge, disabled: !canMerge || autoBusy }}
           testID="forge-auto-merge-toggle"
         >
           <View style={[styles.checkbox, autoMerge && styles.checkboxChecked]}>
@@ -3381,8 +3405,10 @@ function PullRequestDetail({
     onBack();
   }, [onReviewed, onBack]);
 
-  const filesCount = files?.length ?? null;
-  const commitsCount = commits?.length ?? null;
+  // Prefer the up-front summary counts (from the list RPC) so the tab numbers show
+  // immediately; refine to the exact loaded-array length once the tab data arrives.
+  const filesCount = files?.length ?? cr.changedFilesCount ?? null;
+  const commitsCount = commits?.length ?? cr.commitCount ?? null;
 
   return (
     <View style={styles.pane}>
@@ -4161,6 +4187,49 @@ function TreeEntryRow({
   );
 }
 
+// Read-only file viewer with a line-number gutter + syntax highlighting. Reuses
+// the shared tokenizer (@jagentdesk/highlight via highlight-cache); when the
+// language is unsupported it still shows numbered plain lines. Long lines wrap
+// under the gutter rather than forcing a second horizontal scroll on mobile.
+function CodeFileLines({ code, ext }: { code: string; ext: string | null }) {
+  const tokenized = useMemo(() => tokenizeToLines(code, ext), [code, ext]);
+  if (tokenized) {
+    return (
+      <View style={styles.codeLines}>
+        {tokenized.map((tokens, i) => (
+          <View key={i} style={styles.codeLineRow}>
+            <Text style={styles.codeGutter} selectable={false}>
+              {i + 1}
+            </Text>
+            <Text style={styles.codeLineText}>
+              {tokens.length === 0
+                ? " "
+                : tokens.map((tok, j) => (
+                    <Text key={j} style={tok.style ? syntaxTokenStyleFor(tok.style) : undefined}>
+                      {tok.text}
+                    </Text>
+                  ))}
+            </Text>
+          </View>
+        ))}
+      </View>
+    );
+  }
+  const lines = code.split("\n");
+  return (
+    <View style={styles.codeLines}>
+      {lines.map((text, i) => (
+        <View key={i} style={styles.codeLineRow}>
+          <Text style={styles.codeGutter} selectable={false}>
+            {i + 1}
+          </Text>
+          <Text style={styles.codeLineText}>{text || " "}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
 // Code tab = a file-tree browser of the repo at the selected branch (like the
 // GitHub Code tab). Directory listing + breadcrumb navigation + a read-only file
 // viewer. Commit history lives in the separate Commits tab (CommitsView).
@@ -4455,12 +4524,7 @@ function CodeView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }) {
             }}
           />
         ) : (
-          <HighlightedCodeBlock
-            code={fileData.content}
-            language={ext}
-            inheritedStyles={CODE_BLOCK_INHERITED}
-            textStyle={styles.codeBlockText}
-          />
+          <CodeFileLines code={fileData.content} ext={ext} />
         )}
       </View>
     );
@@ -4573,6 +4637,7 @@ function JobLogViewer({
   onRerunFailed: () => void;
 }) {
   const { theme } = useUnistyles();
+  const isCompact = useIsCompactFormFactor();
   const statusColor = usePipelineStatusColor();
   const [log, setLog] = useState<string>("");
   const [truncated, setTruncated] = useState(false);
@@ -4637,10 +4702,19 @@ function JobLogViewer({
   }, [log, autoScroll]);
 
   const toggleAutoScroll = useCallback(() => setAutoScroll((v) => !v), []);
-  // No native "download to disk" on the log RPC; copy the raw text instead and
-  // label the action honestly (§ mockup shows "Download log").
+  // Manual re-fetch: the incremental poll only runs while the job is running, so a
+  // finished job's log is static — a Refresh lets the reader pull the latest.
+  const refreshLog = useCallback(() => {
+    setLoading(true);
+    void fetchLog();
+  }, [fetchLog]);
+  // Parse ANSI (colors), strip erase/section control codes, split to styled lines
+  // for the line-numbered renderer. Memoized so we don't re-parse on every scroll.
+  const logLines = useMemo<AnsiLine[]>(() => parseAnsiLog(log), [log]);
+  // Copy a clean, ANSI-free version — pasting raw escape codes into an editor is
+  // unreadable.
   const copyLog = useCallback(() => {
-    void Clipboard.setStringAsync(log);
+    void Clipboard.setStringAsync(stripAnsi(log));
   }, [log]);
 
   return (
@@ -4667,13 +4741,23 @@ function JobLogViewer({
         </Pressable>
         <Pressable
           style={[styles.btn, styles.btnGhost]}
+          onPress={refreshLog}
+          accessibilityRole="button"
+          accessibilityLabel="Refresh log"
+          testID="forge-log-refresh"
+        >
+          <RotateCcw size={13} color={theme.colors.foreground} />
+          {!isCompact ? <Text style={styles.btnGhostText}>Refresh</Text> : null}
+        </Pressable>
+        <Pressable
+          style={[styles.btn, styles.btnGhost]}
           onPress={copyLog}
           accessibilityRole="button"
           accessibilityLabel="Copy log"
           testID="forge-log-copy"
         >
           <Copy size={13} color={theme.colors.foreground} />
-          <Text style={styles.btnGhostText}>Copy log</Text>
+          {!isCompact ? <Text style={styles.btnGhostText}>Copy log</Text> : null}
         </Pressable>
       </View>
       {loading ? (
@@ -4694,7 +4778,31 @@ function JobLogViewer({
           {truncated ? (
             <Text style={styles.logTruncated}>Log truncated — copy the full log</Text>
           ) : null}
-          <Text style={styles.logText}>{log || "(no output)"}</Text>
+          {logLines.length === 0 ? (
+            <Text style={styles.logText}>(no output)</Text>
+          ) : (
+            logLines.map((line, i) => (
+              <View key={i} style={styles.logLineRow}>
+                <Text style={styles.logGutter} selectable={false}>
+                  {i + 1}
+                </Text>
+                <Text style={styles.logLineText}>
+                  {line.segments.map((seg, j) => (
+                    <Text
+                      key={j}
+                      style={[
+                        seg.color ? { color: seg.color } : null,
+                        seg.bold ? styles.logSegBold : null,
+                        seg.dim ? styles.logSegDim : null,
+                      ]}
+                    >
+                      {seg.text}
+                    </Text>
+                  ))}
+                </Text>
+              </View>
+            ))
+          )}
         </ScrollView>
       )}
       {failedCount > 0 ? (
@@ -4813,12 +4921,17 @@ function PipelineRunDetail({
   // fields the run actually carries (ForgePipelineRun leaves ref/sha/actor
   // optional per provider). Empty when none are known.
   const refLine = useMemo(() => {
+    // The list item (run) may lack ref/sha/actor on some forges (e.g. GitLab's
+    // pipelines list); the fetched detail backfills them.
+    const ref = run.ref ?? pipeline?.ref ?? null;
+    const sha = run.sha ?? pipeline?.sha ?? null;
+    const actor = run.actor ?? pipeline?.actor ?? null;
     const bits: string[] = [];
-    if (run.ref) bits.push(`on ${run.ref}`);
-    if (run.sha) bits.push(shortSha(run.sha));
-    if (run.actor) bits.push(`pushed by ${run.actor}`);
+    if (ref) bits.push(`on ${ref}`);
+    if (sha) bits.push(shortSha(sha));
+    if (actor) bits.push(`pushed by ${actor}`);
     return bits.join(" · ");
-  }, [run.ref, run.sha, run.actor]);
+  }, [run.ref, run.sha, run.actor, pipeline?.ref, pipeline?.sha, pipeline?.actor]);
 
   // Count of failed jobs across every stage — drives the log footer's
   // "N job(s) need attention" line and its Rerun-failed action.
@@ -5368,6 +5481,7 @@ function LatestReleaseCard({
   const overflow = assets.length - shownAssets.length;
   const notesParts: string[] = [];
   if (release.name && release.name !== release.tagName) notesParts.push(release.name);
+  if (release.authorLogin) notesParts.push(`by @${release.authorLogin}`);
   if (assets.length > 0) notesParts.push(`${assets.length} assets`);
   const notes = notesParts.join(" · ");
   return (
@@ -5454,10 +5568,17 @@ function ReleaseRow({
         <Text style={styles.rowTitleMono} numberOfLines={1}>
           {release.tagName}
         </Text>
-        {release.name && release.name !== release.tagName ? (
-          <Text style={styles.rowSub} numberOfLines={1}>
-            {release.name}
-          </Text>
+        {(release.name && release.name !== release.tagName) || release.authorLogin ? (
+          <View style={styles.crMetaRow}>
+            {release.name && release.name !== release.tagName ? (
+              <Text style={styles.rowSub} numberOfLines={1}>
+                {release.name}
+              </Text>
+            ) : null}
+            {release.authorLogin ? (
+              <Text style={styles.metaMuted}>@{release.authorLogin}</Text>
+            ) : null}
+          </View>
         ) : null}
       </Pressable>
       {published ? <Text style={styles.metaWhen}>{published}</Text> : null}
@@ -5769,6 +5890,7 @@ function ReleaseDetail({
           </Text>
           <View style={styles.crMetaRow}>
             <Text style={styles.metaMono}>{shown.tagName}</Text>
+            {shown.authorLogin ? <Text style={styles.metaMuted}>@{shown.authorLogin}</Text> : null}
             {shown.isDraft ? (
               <View style={styles.plainChip}>
                 <Text style={styles.plainChipText}>Draft</Text>
@@ -7019,10 +7141,33 @@ export function ForgeHubScreen() {
   // content. Nav actions flip this to `true`; the toolbar back button flips it
   // back. Ignored on wide layouts (both panes always visible).
   const [compactDetail, setCompactDetail] = useState(false);
-  // Forge assistant chat panel: a right-side dock on desktop, full-screen on
-  // compact. Toggled from the toolbar; provisions/reuses one dedicated agent
-  // per host (see forge-assistant-panel.tsx).
-  const [assistantOpen, setAssistantOpen] = useState(false);
+  // Forge assistant chat panel: a first-class right-side dock on desktop (open by
+  // default like the other big features' assistants — mounting it only *reuses* an
+  // existing agent, it never provisions one until you send a message), full-screen
+  // on compact where the floating chat FAB is the entry point instead. Collapsible
+  // via the toolbar Assistant toggle.
+  const [assistantOpen, setAssistantOpen] = useState(!isCompact);
+  // Draggable width for the desktop assistant dock (the left-edge handle resizes
+  // it; the toolbar Assistant toggle / the panel's × collapse it). Kept in a ref so
+  // the PanResponder — created once — always reads the live width without being
+  // recreated mid-drag.
+  const [assistantWidth, setAssistantWidth] = useState(380);
+  const assistantWidthRef = useRef(380);
+  assistantWidthRef.current = assistantWidth;
+  const assistantDragStartRef = useRef(380);
+  const assistantResizer = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: () => {
+        assistantDragStartRef.current = assistantWidthRef.current;
+      },
+      onPanResponderMove: (_e, gesture) => {
+        // Handle is on the dock's LEFT edge; dragging left (negative dx) widens.
+        setAssistantWidth(Math.min(760, Math.max(300, assistantDragStartRef.current - gesture.dx)));
+      },
+    }),
+  ).current;
   const [repoQuery, setRepoQuery] = useState("");
   const [connections, setConnections] = useState<ForgeConnection[]>([]);
   const [connectionsError, setConnectionsError] = useState<string | null>(null);
@@ -7523,7 +7668,7 @@ export function ForgeHubScreen() {
       />
       <Text style={styles.navGroupLabel}>Switch repo</Text>
       {quickRepos.length === 0 ? (
-        reposLoading && !reposLoaded ? (
+        !reposLoaded && hasConnections ? (
           <SidebarRepoSkeleton />
         ) : (
           <Text style={styles.navEmpty}>No other repositories</Text>
@@ -7541,7 +7686,7 @@ export function ForgeHubScreen() {
       {connectionsNavItem}
       <Text style={styles.navGroupLabel}>Switch repo</Text>
       {quickRepos.length === 0 ? (
-        reposLoading && !reposLoaded ? (
+        !reposLoaded && hasConnections ? (
           <SidebarRepoSkeleton />
         ) : (
           <Text style={styles.navEmpty}>
@@ -8026,13 +8171,23 @@ export function ForgeHubScreen() {
         {/* Desktop: the assistant sits as a right-side dock alongside the main
             content without disturbing the rail/sidebar/main layout. */}
         {assistantOpen && !isCompact ? (
-          <View style={styles.assistantDock}>
-            <ForgeAssistantPanel
-              serverId={serverId}
-              repo={selectedRepo}
-              isCompact={false}
-              onClose={closeAssistant}
+          <View
+            style={[styles.assistantDock, { width: assistantWidth, flexBasis: assistantWidth }]}
+          >
+            {/* Left-edge drag handle to resize the dock (col-resize cursor on web). */}
+            <View
+              style={styles.assistantResizer}
+              {...assistantResizer.panHandlers}
+              testID="forge-assistant-resizer"
             />
+            <View style={styles.assistantDockInner}>
+              <ForgeAssistantPanel
+                serverId={serverId}
+                repo={selectedRepo}
+                isCompact={false}
+                onClose={closeAssistant}
+              />
+            </View>
           </View>
         ) : null}
       </View>
@@ -8901,9 +9056,21 @@ const styles = StyleSheet.create((theme) => ({
     width: 380,
     flexBasis: 380,
     flexShrink: 0,
+    flexDirection: "row",
     borderLeftWidth: theme.borderWidth[1],
     borderLeftColor: theme.colors.border,
     backgroundColor: theme.colors.surface0,
+  },
+  assistantResizer: {
+    width: 6,
+    flexShrink: 0,
+    backgroundColor: "transparent",
+    // Web-only cursor affordance; ignored on native (dock is desktop-only anyway).
+    ...(isWeb ? ({ cursor: "col-resize" } as object) : null),
+  },
+  assistantDockInner: {
+    flex: 1,
+    minWidth: 0,
   },
   // Compact: full-screen overlay above the shell.
   assistantOverlay: {
@@ -9708,6 +9875,43 @@ const styles = StyleSheet.create((theme) => ({
     paddingVertical: 12, // mockup exact value
     gap: theme.spacing[2],
   },
+  conflictBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1.5],
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: "rgba(239,68,68,0.12)",
+  },
+  conflictBannerText: {
+    flex: 1,
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.statusDanger,
+  },
+  mergeableRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+  },
+  mergeableText: {
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foregroundMuted,
+  },
+  conflictChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 9999,
+    backgroundColor: "rgba(239,68,68,0.12)",
+  },
+  conflictChipText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: theme.colors.statusDanger,
+  },
   reviewActionsRow: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -9981,6 +10185,57 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.code,
     lineHeight: Math.round(theme.fontSize.code * 1.6), // mockup exact value (.log line-height 1.6)
     color: theme.colors.foreground, // theme-aware (readable on light + dark)
+  },
+  // Line-numbered ANSI log rows: fixed-width gutter + flexible colored content.
+  logLineRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
+  logGutter: {
+    fontFamily: theme.fontFamily.mono,
+    fontSize: theme.fontSize.code,
+    lineHeight: Math.round(theme.fontSize.code * 1.6),
+    color: theme.colors.foregroundExtraMuted,
+    textAlign: "right",
+    minWidth: 34,
+    marginRight: theme.spacing[3],
+  },
+  logLineText: {
+    flex: 1,
+    fontFamily: theme.fontFamily.mono,
+    fontSize: theme.fontSize.code,
+    lineHeight: Math.round(theme.fontSize.code * 1.6),
+    color: theme.colors.foreground,
+  },
+  logSegBold: {
+    fontWeight: theme.fontWeight.bold,
+  },
+  logSegDim: {
+    color: theme.colors.foregroundMuted,
+  },
+  // Line-numbered code file viewer (gutter + syntax-highlighted content).
+  codeLines: {
+    paddingVertical: theme.spacing[2],
+  },
+  codeLineRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
+  codeGutter: {
+    fontFamily: theme.fontFamily.mono,
+    fontSize: theme.fontSize.sm,
+    lineHeight: Math.round(theme.fontSize.sm * 1.55),
+    color: theme.colors.foregroundExtraMuted,
+    textAlign: "right",
+    minWidth: 44,
+    paddingRight: theme.spacing[3],
+  },
+  codeLineText: {
+    flex: 1,
+    fontFamily: theme.fontFamily.mono,
+    fontSize: theme.fontSize.sm,
+    lineHeight: Math.round(theme.fontSize.sm * 1.55),
+    color: theme.colors.foreground,
   },
   logTruncated: {
     fontSize: theme.fontSize.xs,

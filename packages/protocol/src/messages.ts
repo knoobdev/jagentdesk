@@ -2367,6 +2367,13 @@ export const ForgeChangeRequestSummarySchema = z.object({
   reviewDecision: z.enum(["approved", "changes_requested", "pending"]).nullable().optional(),
   checksStatus: z.enum(["none", "pending", "success", "failure"]).optional(),
   updatedAt_ms: z.number().nullable().optional(),
+  // Merge/conflict status for open PRs (§19.6): "conflicting" = the branch has
+  // conflicts and cannot merge cleanly; "unknown" while the forge is still
+  // computing mergeability. Populated best-effort from the forge list API.
+  mergeable: z.enum(["mergeable", "conflicting", "unknown"]).optional(),
+  // Up-front counts so the detail tabs show numbers without a per-PR fetch.
+  commitCount: z.number().int().nullable().optional(),
+  changedFilesCount: z.number().int().nullable().optional(),
 });
 
 export const ForgeChangeRequestFileSchema = z.object({
@@ -2485,6 +2492,8 @@ export const ForgePipelineDetailSchema = z.object({
   status: ForgePipelineRunSchema.shape.status,
   ref: z.string().nullable().optional(),
   sha: z.string().nullable().optional(),
+  /** Login/username of who triggered the pipeline run. */
+  actor: z.string().nullable().optional(),
   url: z.string().nullable().optional(),
   stages: z.array(ForgePipelineStageSchema),
 });
@@ -2604,6 +2613,8 @@ export const ForgeReleaseSchema = z.object({
   isDraft: z.boolean().optional(),
   isPrerelease: z.boolean().optional(),
   publishedAt_ms: z.number().nullable().optional(),
+  /** Login/username of who published the release. */
+  authorLogin: z.string().nullable().optional(),
   url: z.string(),
   assets: z.array(ForgeReleaseAssetSchema).optional(),
 });

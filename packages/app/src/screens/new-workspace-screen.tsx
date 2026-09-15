@@ -1616,6 +1616,12 @@ export function NewWorkspaceScreen({
     typeof normalizeWorkspaceDescriptor
   > | null>(null);
   const [pendingAction, setPendingAction] = useState<"chat" | "empty" | null>(null);
+  // Synchronous guard against a double-submit race: `pendingAction` is async React
+  // state, so two submit events fired in the same tick (double-tap, re-render, or a
+  // keyboard+button double-fire) can both pass the `createdWorkspace`/isPending check
+  // and each create a workspace+agent. This ref flips synchronously at entry so the
+  // second call returns immediately. Reset once the submission settles.
+  const submitInFlightRef = useRef(false);
   const [orchestrationRequested] = useState(startWithOrchestration);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
@@ -2057,6 +2063,12 @@ export function NewWorkspaceScreen({
 
   const handleSubmitNewWorkspace = useCallback(
     async (payload: MessagePayload) => {
+      // Synchronous re-entrancy guard (see submitInFlightRef): drop a second submit
+      // that races the first before pendingAction/createdWorkspace state settles.
+      if (submitInFlightRef.current) {
+        return;
+      }
+      submitInFlightRef.current = true;
       try {
         setErrorMessage(null);
         await composerState?.persistFormPreferences();
@@ -2093,6 +2105,10 @@ export function NewWorkspaceScreen({
           },
         });
       } catch (error) {
+        // Failed submit: release the guard so the user can retry. On success the
+        // flow navigates to the new workspace and this component unmounts, so the
+        // ref staying true is fine (and blocks any late duplicate event).
+        submitInFlightRef.current = false;
         const message = toErrorMessage(error);
         setPendingAction(null);
         setErrorMessage(message);
