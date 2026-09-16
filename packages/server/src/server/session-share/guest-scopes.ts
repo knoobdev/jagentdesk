@@ -67,6 +67,25 @@ export function guestScopesForCapabilities(caps: SessionShareCapabilities): stri
       "checkout_diff_update",
     );
   }
+  if (caps.terminal) {
+    // Read-only terminal viewing, confined to the shared agent's workspace root by Session's
+    // terminal-containment guard (cwd-keyed list/subscribe + terminalId-keyed subscribe/capture
+    // resolved to the terminal's cwd). WRITE types (create_terminal, terminal_input, kill_terminal,
+    // terminal.rename) are deliberately absent, so the guest can watch output but never type into,
+    // spawn, or kill a terminal. Live output streams over the binary channel (not a JSON type).
+    scopes.push(
+      "list_terminals_request",
+      "list_terminals_response",
+      "subscribe_terminals_request",
+      "unsubscribe_terminals_request",
+      "terminals_changed",
+      "subscribe_terminal_request",
+      "subscribe_terminal_response",
+      "unsubscribe_terminal_request",
+      "capture_terminal_request",
+      "capture_terminal_response",
+    );
+  }
   if (caps.modelMode) {
     scopes.push(
       "set_agent_mode_request",

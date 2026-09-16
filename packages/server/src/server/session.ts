@@ -657,6 +657,19 @@ const GUEST_FILE_CWD_RPC_TYPES: ReadonlySet<string> = new Set([
   "file_download_token_request",
   "fs.file.subscribe.request",
   "subscribe_checkout_diff_request",
+  // Terminal RPCs keyed by a raw `cwd` (read-only viewing). Same containment as file cwd types.
+  "list_terminals_request",
+  "subscribe_terminals_request",
+  "unsubscribe_terminals_request",
+]);
+
+// Read-only terminal RPCs keyed by a `terminalId` rather than a cwd. For a guest these are confined
+// by resolving the terminal's own cwd (via the terminal manager) and checking it against the shared
+// workspace root — a guest must not subscribe to a terminal living in another workspace (ADR-0019).
+const GUEST_TERMINAL_ID_RPC_TYPES: ReadonlySet<string> = new Set([
+  "subscribe_terminal_request",
+  "unsubscribe_terminal_request",
+  "capture_terminal_request",
 ]);
 
 /**
@@ -1980,8 +1993,13 @@ export class Session {
         }
         return;
       }
-      // File/diff RPCs are cwd-keyed; confine the guest to the shared agent's workspace root.
-      if (this.guestAgentId !== null && !this.isGuestFileMessageWithinWorkspace(msg)) {
+      // File/diff (cwd-keyed) and terminal (cwd- or terminalId-keyed) RPCs confine the guest to the
+      // shared agent's workspace root.
+      if (
+        this.guestAgentId !== null &&
+        (!this.isGuestFileMessageWithinWorkspace(msg) ||
+          !this.isGuestTerminalMessageWithinWorkspace(msg))
+      ) {
         const requestId = sessionRequestId(msg);
         if (requestId) {
           this.emit({
@@ -2068,22 +2086,45 @@ export class Session {
   // agentId, so the per-agent guard cannot confine them. Reject any such RPC whose resolved target
   // escapes the shared agent's workspace root — defense-in-depth on top of the capability scope.
   // Non-file messages and trusted (non-guest) sessions are unaffected.
+  // True iff `target` (already-resolved or to-be-resolved absolute path) stays within the guest's
+  // shared workspace root. Returns false when there is no root (no file/terminal access).
+  private isPathWithinGuestWorkspace(target: string): boolean {
+    const root = this.guestWorkspaceCwd;
+    if (!root) return false;
+    const resolvedRoot = resolve(root);
+    const resolved = resolve(target);
+    return resolved === resolvedRoot || resolved.startsWith(resolvedRoot + sep);
+  }
+
   private isGuestFileMessageWithinWorkspace(msg: SessionInboundMessage): boolean {
     if (this.guestAgentId === null) return true;
     if (!GUEST_FILE_CWD_RPC_TYPES.has(msg.type)) return true;
-    const root = this.guestWorkspaceCwd;
-    if (!root) return false; // file capability but no resolvable workspace → deny.
     const cwd = (msg as { cwd?: unknown }).cwd;
     if (typeof cwd !== "string" || cwd.length === 0) return false;
-    const resolvedRoot = resolve(root);
-    const withinRoot = (target: string): boolean =>
-      target === resolvedRoot || target.startsWith(resolvedRoot + sep);
-    if (!withinRoot(resolve(cwd))) return false;
+    if (!this.isPathWithinGuestWorkspace(cwd)) return false;
     // file_explorer/file_download carry a `path` relative to cwd — it must also stay contained
     // (blocks `..`/absolute-path traversal out of the workspace).
     const rel = (msg as { path?: unknown }).path;
-    if (typeof rel === "string" && rel.length > 0 && !withinRoot(resolve(cwd, rel))) return false;
+    if (
+      typeof rel === "string" &&
+      rel.length > 0 &&
+      !this.isPathWithinGuestWorkspace(resolve(cwd, rel))
+    )
+      return false;
     return true;
+  }
+
+  // Terminal RPCs keyed by `terminalId` (read-only). Resolve the terminal's own cwd via the terminal
+  // manager and require it to be within the shared workspace root — so a guest cannot subscribe to,
+  // or capture, a terminal that lives in another workspace (ADR-0019). Unknown terminal → deny.
+  private isGuestTerminalMessageWithinWorkspace(msg: SessionInboundMessage): boolean {
+    if (this.guestAgentId === null) return true;
+    if (!GUEST_TERMINAL_ID_RPC_TYPES.has(msg.type)) return true;
+    const terminalId = (msg as { terminalId?: unknown }).terminalId;
+    if (typeof terminalId !== "string" || terminalId.length === 0) return false;
+    const terminalCwd = this.terminalManager?.getTerminal(terminalId)?.cwd;
+    if (typeof terminalCwd !== "string" || terminalCwd.length === 0) return false;
+    return this.isPathWithinGuestWorkspace(terminalCwd);
   }
 
   private async dispatchInboundMessage(msg: SessionInboundMessage, source?: object): Promise<void> {

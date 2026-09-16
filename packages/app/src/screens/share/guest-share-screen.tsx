@@ -4,7 +4,10 @@ import { StyleSheet } from "react-native-unistyles";
 import { AgentConversationPanel } from "@/panels/agent-panel";
 import { filePanelRegistration } from "@/panels/file-panel";
 import { workingDiffPanelRegistration } from "@/panels/diff-panel";
+import { terminalPanelRegistration } from "@/panels/terminal-panel";
 import { FileExplorerPane } from "@/components/file-explorer-pane";
+import { useFetchQuery } from "@/data/query";
+import { buildTerminalsQueryKey } from "@/screens/workspace/terminals/state";
 import {
   PaneFocusProvider,
   PaneProvider,
@@ -20,6 +23,7 @@ import { applyLegacyDaemonWorkspaceOwnership } from "@/workspace/legacy-daemon-w
 
 const WorkingDiffPanel = workingDiffPanelRegistration.component;
 const FilePanel = filePanelRegistration.component;
+const TerminalPanel = terminalPanelRegistration.component;
 
 // Seed a minimal workspace descriptor so useWorkspaceDirectory(serverId, workspaceId) resolves to
 // the shared agent's cwd — required by the file + working-diff panels (they read the directory from
@@ -277,11 +281,11 @@ export function GuestShareScreen({ hint }: { hint: GuestShareHint }): ReactEleme
   );
 }
 
-type GuestTab = "chat" | "files" | "changes";
+type GuestTab = "chat" | "files" | "changes" | "terminal";
 
-// The connected guest surface: the real agent chat, plus (when the host granted `files`) read-only
-// Files and Changes tabs backed by the real app panels, all confined to the shared agent's
-// workspace by the daemon guest guard (ADR-0019).
+// The connected guest surface: the real agent chat, plus (when the host granted them) read-only
+// Files, Changes, and Terminal tabs backed by the real app panels, all confined to the shared
+// agent's workspace by the daemon guest guard (ADR-0019).
 function GuestReadyView({
   serverId,
   workspaceId,
@@ -297,29 +301,35 @@ function GuestReadyView({
 }): ReactElement {
   const [tab, setTab] = useState<GuestTab>("chat");
   const [openFilePath, setOpenFilePath] = useState<string | null>(null);
+  const [openTerminalId, setOpenTerminalId] = useState<string | null>(null);
   const showFiles = capabilities.files;
+  const showTerminal = capabilities.terminal;
+  const needsWorkspace = showFiles || showTerminal;
   // The session entry may not exist in the store yet when we first mount (the guest runtime fills
   // it asynchronously on connect), and mergeWorkspaces is a no-op until it does. Seed reactively
-  // once the session appears so the Files/Changes panels can resolve the workspace directory.
+  // once the session appears so the Files/Changes/Terminal panels can resolve the workspace dir.
   const sessionReady = useSessionStore((s) => Boolean(s.sessions[serverId]));
   useEffect(() => {
-    if (showFiles && sessionReady && workspaceId && workspaceCwd) {
+    if (needsWorkspace && sessionReady && workspaceId && workspaceCwd) {
       seedGuestWorkspace(serverId, workspaceId, workspaceCwd);
     }
-  }, [showFiles, sessionReady, serverId, workspaceId, workspaceCwd]);
+  }, [needsWorkspace, sessionReady, serverId, workspaceId, workspaceCwd]);
   const workspaceRoot = useWorkspaceDirectory(serverId, workspaceId) ?? "";
 
   const target = useMemo<WorkspaceTabTarget>(() => {
     if (tab === "changes") return { kind: "working_diff" };
     if (tab === "files" && openFilePath) return { kind: "file", path: openFilePath };
+    if (tab === "terminal" && openTerminalId)
+      return { kind: "terminal", terminalId: openTerminalId };
     return { kind: "agent", agentId };
-  }, [tab, openFilePath, agentId]);
+  }, [tab, openFilePath, openTerminalId, agentId]);
 
   const openFile = useCallback((filePath: string) => {
     setOpenFilePath(filePath);
     setTab("files");
   }, []);
   const closeFile = useCallback(() => setOpenFilePath(null), []);
+  const closeTerminal = useCallback(() => setOpenTerminalId(null), []);
 
   const paneValue = useMemo<PaneContextValue>(
     () => ({
@@ -343,6 +353,23 @@ function GuestReadyView({
     body = <AgentConversationPanel />;
   } else if (tab === "changes") {
     body = <WorkingDiffPanel />;
+  } else if (tab === "terminal") {
+    body = openTerminalId ? (
+      <View style={styles.fileViewRoot}>
+        <Pressable style={styles.backRow} onPress={closeTerminal}>
+          <Text style={styles.backText}>‹ Terminals</Text>
+        </Pressable>
+        <View style={styles.paneBody}>
+          <TerminalPanel />
+        </View>
+      </View>
+    ) : (
+      <GuestTerminalPicker
+        serverId={serverId}
+        workspaceRoot={workspaceRoot}
+        onOpenTerminal={setOpenTerminalId}
+      />
+    );
   } else if (openFilePath) {
     body = (
       <View style={styles.fileViewRoot}>
@@ -367,16 +394,33 @@ function GuestReadyView({
 
   return (
     <View style={styles.readyRoot}>
-      {showFiles ? (
+      {showFiles || showTerminal ? (
         <View style={styles.tabBar}>
           <GuestTabButton label="Chat" value="chat" active={tab === "chat"} onSelect={setTab} />
-          <GuestTabButton label="Files" value="files" active={tab === "files"} onSelect={setTab} />
-          <GuestTabButton
-            label="Changes"
-            value="changes"
-            active={tab === "changes"}
-            onSelect={setTab}
-          />
+          {showFiles ? (
+            <>
+              <GuestTabButton
+                label="Files"
+                value="files"
+                active={tab === "files"}
+                onSelect={setTab}
+              />
+              <GuestTabButton
+                label="Changes"
+                value="changes"
+                active={tab === "changes"}
+                onSelect={setTab}
+              />
+            </>
+          ) : null}
+          {showTerminal ? (
+            <GuestTabButton
+              label="Terminal"
+              value="terminal"
+              active={tab === "terminal"}
+              onSelect={setTab}
+            />
+          ) : null}
         </View>
       ) : null}
       <PaneProvider value={paneValue}>
@@ -387,6 +431,71 @@ function GuestReadyView({
         </PaneFocusProvider>
       </PaneProvider>
     </View>
+  );
+}
+
+// Read-only terminal picker for the guest: lists the shared workspace's terminals; selecting one
+// opens it in the real TerminalPanel (input is rejected server-side — the guest can only watch).
+function GuestTerminalPicker({
+  serverId,
+  workspaceRoot,
+  onOpenTerminal,
+}: {
+  serverId: string;
+  workspaceRoot: string;
+  onOpenTerminal: (terminalId: string) => void;
+}): ReactElement {
+  const client = useSessionStore((s) => s.sessions[serverId]?.client ?? null);
+  // Query by cwd only. The guest's synthetic workspaceId (the cwd) does not match the daemon's real
+  // workspaceId for the terminal, so passing it would filter every terminal out.
+  const terminalsQuery = useFetchQuery({
+    queryKey: buildTerminalsQueryKey(serverId, workspaceRoot, null),
+    enabled: Boolean(client && workspaceRoot),
+    dataShape: "list",
+    staleTimeMs: 4000,
+    refetchInterval: 4000,
+    queryFn: async () => {
+      if (!client || !workspaceRoot) throw new Error("Workspace directory not found");
+      return client.listTerminals(workspaceRoot);
+    },
+  });
+  const terminals = terminalsQuery.data?.terminals ?? [];
+
+  if (terminals.length === 0) {
+    return (
+      <View style={styles.terminalEmpty}>
+        <Text style={styles.sub}>No terminals open in this workspace yet.</Text>
+      </View>
+    );
+  }
+  return (
+    <View style={styles.terminalList}>
+      {terminals.map((term) => (
+        <GuestTerminalRow
+          key={term.id}
+          terminalId={term.id}
+          label={term.title || term.name || term.id}
+          onOpen={onOpenTerminal}
+        />
+      ))}
+    </View>
+  );
+}
+
+function GuestTerminalRow({
+  terminalId,
+  label,
+  onOpen,
+}: {
+  terminalId: string;
+  label: string;
+  onOpen: (terminalId: string) => void;
+}): ReactElement {
+  const onPress = useCallback(() => onOpen(terminalId), [onOpen, terminalId]);
+  return (
+    <Pressable style={styles.terminalRow} onPress={onPress} testID="guest-terminal-row">
+      <Text style={styles.terminalRowText}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -535,6 +644,17 @@ const styles = StyleSheet.create((theme) => ({
     borderBottomColor: theme.colors.border,
   },
   backText: { color: theme.colors.accent, fontSize: theme.fontSize.sm },
+  terminalEmpty: { flex: 1, alignItems: "center", justifyContent: "center", padding: 16 },
+  terminalList: { padding: theme.spacing[2], gap: theme.spacing[1] },
+  terminalRow: {
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[3],
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.surface1,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+  },
+  terminalRowText: { color: theme.colors.foreground, fontSize: theme.fontSize.base },
   card: {
     width: "100%",
     maxWidth: 380,

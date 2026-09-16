@@ -377,4 +377,64 @@ describe("session sharing — real daemon", () => {
     await guest.close();
     await ctx.client.sessionShareStop(share.shareId);
   }, 90000);
+
+  test("guest terminal capability: read-only, confined to the shared workspace (ADR-0019)", async () => {
+    let sharePort = 0;
+    const logger = pino(
+      { level: "info" },
+      {
+        write: (line: string) => {
+          try {
+            const o = JSON.parse(line);
+            if (o.msg === "Share server listening" && typeof o.port === "number")
+              sharePort = o.port;
+          } catch {
+            /* ignore */
+          }
+        },
+      },
+    );
+    ctx = await createDaemonTestContext({ sessionSharingEnabled: true, logger });
+
+    const workspace = await mkdtemp(path.join(tmpdir(), "jad-share-term-"));
+    const agentId = await makeAgentWithCwd(ctx, workspace);
+
+    // The host opens a terminal in the shared workspace.
+    const created = await ctx.client.createTerminal(workspace);
+    const terminalId = created.terminal?.id ?? "";
+    expect(terminalId).toBeTruthy();
+
+    const streamed: SessionShare[] = [];
+    const unsub = ctx.client.subscribeSessionShareStream((s) => {
+      if (s.agentId === agentId) streamed.push(s);
+    });
+    const share = await ctx.client.sessionShareCreate(agentId, {
+      capabilities: { terminal: true },
+    });
+    expect(share.capabilities.terminal).toBe(true);
+    expect(sharePort).toBeGreaterThan(0);
+
+    const guest = await pairGuestClient(ctx, sharePort, share.shareId, streamed, "Terminal Guest");
+
+    // Allowed: list the shared workspace's terminals — the host's terminal is visible.
+    const list = await guest.listTerminals(workspace);
+    expect(list.terminals.some((tItem) => tItem.id === terminalId)).toBe(true);
+
+    // Allowed: subscribe to that terminal (read-only view of its output).
+    const sub = await guest.subscribeTerminal(terminalId);
+    expect(sub.error).toBeNull();
+
+    // Denied: listing terminals for a cwd OUTSIDE the shared workspace.
+    await expect(guest.listTerminals("/etc")).rejects.toThrow();
+
+    // Denied: subscribing to an unknown terminal id (cannot be resolved into the workspace).
+    await expect(guest.subscribeTerminal("term_does_not_exist")).rejects.toThrow();
+
+    // Denied (read-only): spawning a terminal is a WRITE the guest scope never grants.
+    await expect(guest.createTerminal(workspace)).rejects.toThrow();
+
+    unsub();
+    await guest.close();
+    await ctx.client.sessionShareStop(share.shareId);
+  }, 90000);
 });

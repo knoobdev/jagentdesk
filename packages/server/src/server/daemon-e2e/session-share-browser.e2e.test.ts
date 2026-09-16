@@ -196,7 +196,7 @@ describe.skipIf(!hasBundle)("session sharing — real app guest surface (browser
     await ctx.client.sessionShareStop(share.shareId);
   }, 120000);
 
-  test("files capability: guest gets Files/Changes tabs and browses the shared workspace", async () => {
+  test("files + terminal: guest gets Files/Changes/Terminal tabs and browses the shared workspace", async () => {
     process.env.JAGENTDESK_SHARE_APP_DIST = APP_DIST;
 
     let sharePort = 0;
@@ -208,13 +208,17 @@ describe.skipIf(!hasBundle)("session sharing — real app guest surface (browser
     const workspace = await mkdtemp(path.join(tmpdir(), "jad-share-ui-"));
     await writeFile(path.join(workspace, "READY.md"), "# guest can read me\n");
     const agentId = await makeAgent(ctx, workspace);
+    // A terminal the guest should be able to see under the Terminal tab.
+    await ctx.client.createTerminal(workspace, "guestterm");
 
     const streamed: SessionShare[] = [];
     const unsub = ctx.client.subscribeSessionShareStream((s) => {
       if (s.agentId === agentId) streamed.push(s);
     });
-    // Share WITH the files capability so the guest surface shows the Files/Changes tabs.
-    const share = await ctx.client.sessionShareCreate(agentId, { capabilities: { files: true } });
+    // Share WITH files + terminal so the guest surface shows Files/Changes/Terminal tabs.
+    const share = await ctx.client.sessionShareCreate(agentId, {
+      capabilities: { files: true, terminal: true },
+    });
     expect(sharePort).toBeGreaterThan(0);
 
     try {
@@ -257,6 +261,21 @@ describe.skipIf(!hasBundle)("session sharing — real app guest surface (browser
     // Changes tab renders the working-diff panel without crashing.
     await page.getByText("Changes", { exact: true }).click();
     await sleep(1500);
+
+    // Terminal tab lists the workspace's terminal; opening it mounts the real terminal panel.
+    await page.getByText("Terminal", { exact: true }).click();
+    try {
+      const row = page.locator('[data-testid="guest-terminal-row"]').first();
+      await row.waitFor({ timeout: 30000 });
+      await row.click();
+      await page.getByText("‹ Terminals", { exact: false }).waitFor({ timeout: 30000 });
+    } catch (e) {
+      const body = await page.evaluate(() => document.body?.innerText ?? "").catch(() => "");
+      throw new Error(
+        `Terminal tab did not show the terminal: ${String(e)}\npageErrors=${errors.join(" | ")}\nbodyText=${body.slice(0, 800)}`,
+        { cause: e },
+      );
+    }
 
     expect(errors, `no uncaught page errors: ${errors.join(" | ")}`).toEqual([]);
 
