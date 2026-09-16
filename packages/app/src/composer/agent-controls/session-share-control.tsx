@@ -129,6 +129,19 @@ export function SessionShareControl({
     [client],
   );
 
+  // Grant/revoke a capability live (files / terminal). The daemon re-derives the guest scope from the
+  // share's capabilities, so already-connected guests gain/lose the tabs on their next request.
+  const onToggleCapability = useCallback(
+    (shareId: string, cap: "files" | "terminal", next: boolean) => {
+      if (!client) return;
+      void client
+        .sessionShareSetOptions(shareId, { capabilities: { [cap]: next } })
+        .then((updated) => setShares((prev) => upsert(prev, updated)))
+        .catch(() => undefined);
+    },
+    [client],
+  );
+
   const onCopy = useCallback(
     (shareId: string) => {
       const url = shares.find((s) => s.shareId === shareId)?.tunnelUrl;
@@ -197,6 +210,7 @@ export function SessionShareControl({
         onKick={onKick}
         onRespond={onRespond}
         onToggleModelMode={onToggleModelMode}
+        onToggleCapability={onToggleCapability}
       />
     </>
   );
@@ -282,6 +296,7 @@ const ManageSheet = memo(function ManageSheet({
   onKick,
   onRespond,
   onToggleModelMode,
+  onToggleCapability,
 }: {
   shares: SessionShare[];
   visible: boolean;
@@ -295,6 +310,7 @@ const ManageSheet = memo(function ManageSheet({
   onKick: (shareId: string, memberId: string) => void;
   onRespond: (shareId: string, joinRequestId: string, accept: boolean) => void;
   onToggleModelMode: (shareId: string, next: boolean) => void;
+  onToggleCapability: (shareId: string, cap: "files" | "terminal", next: boolean) => void;
 }): ReactElement {
   const empty = shares.length === 0;
   return (
@@ -334,6 +350,7 @@ const ManageSheet = memo(function ManageSheet({
                 onKick={onKick}
                 onRespond={onRespond}
                 onToggleModelMode={onToggleModelMode}
+                onToggleCapability={onToggleCapability}
               />
             ))}
             {!empty ? (
@@ -361,6 +378,7 @@ const ShareCard = memo(function ShareCard({
   onKick,
   onRespond,
   onToggleModelMode,
+  onToggleCapability,
 }: {
   share: SessionShare;
   index: number;
@@ -371,6 +389,7 @@ const ShareCard = memo(function ShareCard({
   onKick: (shareId: string, memberId: string) => void;
   onRespond: (shareId: string, joinRequestId: string, accept: boolean) => void;
   onToggleModelMode: (shareId: string, next: boolean) => void;
+  onToggleCapability: (shareId: string, cap: "files" | "terminal", next: boolean) => void;
 }): ReactElement {
   const copyThis = useCallback(() => onCopy(share.shareId), [onCopy, share.shareId]);
   const stopThis = useCallback(() => onStop(share.shareId), [onStop, share.shareId]);
@@ -381,6 +400,14 @@ const ShareCard = memo(function ShareCard({
   const toggleThis = useCallback(
     (next: boolean) => onToggleModelMode(share.shareId, next),
     [onToggleModelMode, share.shareId],
+  );
+  const toggleFiles = useCallback(
+    (next: boolean) => onToggleCapability(share.shareId, "files", next),
+    [onToggleCapability, share.shareId],
+  );
+  const toggleTerminal = useCallback(
+    (next: boolean) => onToggleCapability(share.shareId, "terminal", next),
+    [onToggleCapability, share.shareId],
   );
 
   const pending = share.pendingRequests.filter((r) => r.status === "pending");
@@ -411,8 +438,25 @@ const ShareCard = memo(function ShareCard({
         />
       ))}
 
+      <Text style={styles.sectionLabel}>Guest permissions</Text>
       <View style={styles.toggleRow}>
-        <Text style={styles.toggleLabel}>Let guests change the agent&apos;s mode</Text>
+        <Text style={styles.toggleLabel}>View files &amp; diff (read-only)</Text>
+        <Switch
+          value={share.capabilities?.files ?? false}
+          onValueChange={toggleFiles}
+          accessibilityLabel="Allow guests to view files and diff"
+        />
+      </View>
+      <View style={styles.toggleRow}>
+        <Text style={styles.toggleLabel}>View terminals (read-only)</Text>
+        <Switch
+          value={share.capabilities?.terminal ?? false}
+          onValueChange={toggleTerminal}
+          accessibilityLabel="Allow guests to view terminals"
+        />
+      </View>
+      <View style={styles.toggleRow}>
+        <Text style={styles.toggleLabel}>Change the agent&apos;s model &amp; mode</Text>
         <Switch
           value={share.allowGuestModelMode}
           onValueChange={toggleThis}
