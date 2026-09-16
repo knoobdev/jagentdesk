@@ -2266,7 +2266,15 @@ export class Session {
       case "agent.provider_subagents.timeline.get.request":
         return this.handleProviderSubagentTimelineRequest(msg);
       case "agent.timeline.set_subscription.request": {
-        const agentIds = [...new Set(msg.agentIds)].sort();
+        // Guests may only subscribe to the one shared agent. The per-agent guard inspects singular
+        // `agentId`, not this plural `agentIds` array, and agent_stream/attention frames reach the
+        // subscriber via onMessageToSource (which bypasses the outbound emit guard) — so clamp here
+        // or a guest could subscribe to, and receive the live stream of, another agent (ADR-0019).
+        const requestedAgentIds = [...new Set(msg.agentIds)].sort();
+        const agentIds =
+          this.guestAgentId !== null
+            ? requestedAgentIds.filter((id) => id === this.guestAgentId)
+            : requestedAgentIds;
         if (
           source
             ? this.supportsForSource(CLIENT_CAPS.selectiveAgentTimeline, source)
@@ -5732,6 +5740,18 @@ export class Session {
   private async handleFetchAgents(
     request: Extract<SessionInboundMessage, { type: "fetch_agents_request" }>,
   ): Promise<void> {
+    // Guest session (ADR-0019): confine the directory to the one shared agent and skip the live
+    // subscription entirely — a guest must never learn about other agents, even via later pushes.
+    if (this.guestAgentId !== null) {
+      const payload = await this.listFetchAgentsEntries(request);
+      const entries = payload.entries.filter((e) => e.agent.id === this.guestAgentId);
+      this.emit({
+        type: "fetch_agents_response",
+        payload: { requestId: request.requestId, ...payload, entries },
+      });
+      return;
+    }
+
     const requestedSubscriptionId = request.subscribe?.subscriptionId?.trim();
     const subscriptionId = resolveSubscriptionId(request.subscribe, requestedSubscriptionId);
 
@@ -5933,6 +5953,12 @@ export class Session {
   }
 
   private async handleProjectListRequest(requestId: string): Promise<void> {
+    // Guests (ADR-0019) don't browse projects — return empty so the runtime bootstrap succeeds
+    // without exposing the host's project list.
+    if (this.guestAgentId !== null) {
+      this.emit({ type: "project.list.response", payload: { requestId, projects: [] } });
+      return;
+    }
     try {
       const projects = (await this.projectRegistry.list())
         .filter((project) => !project.archivedAt)

@@ -248,8 +248,11 @@ describe("session sharing — real daemon", () => {
       guest.fetchAgentTimeline(otherAgentId, { direction: "tail", limit: 5 }),
     ).rejects.toThrow();
 
-    // Denied: an out-of-scope RPC that would list every agent (no cross-agent leak).
-    await expect(guest.fetchAgents({})).rejects.toThrow();
+    // fetch_agents is allowed but FILTERED to the shared agent only (no cross-agent leak).
+    const dir = await guest.fetchAgents({});
+    const ids = (dir.entries ?? []).map((e) => e.agent.id);
+    expect(ids).toContain(agentId);
+    expect(ids).not.toContain(otherAgentId);
 
     unsub();
     await guest.close();

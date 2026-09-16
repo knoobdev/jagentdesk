@@ -237,6 +237,12 @@ export class ShareServer {
     this.conns.clear();
     await new Promise<void>((resolve) => {
       if (!this.server) return resolve();
+      // Forcibly terminate any live sockets first. wss.close() only stops NEW upgrades — it leaves
+      // already-upgraded sockets open, and http server.close() waits for every open connection to
+      // drain before its callback fires. A connected scoped /ws guest would therefore hang stop()
+      // (and the host's Stop-share RPC) indefinitely. terminate() drops them immediately.
+      for (const client of this.wss?.clients ?? []) client.terminate();
+      for (const client of this.guestWss?.clients ?? []) client.terminate();
       this.wss?.close();
       this.guestWss?.close();
       this.server.close(() => resolve());

@@ -74,9 +74,10 @@ export function GuestShareScreen({ hint }: { hint: GuestShareHint }): ReactEleme
           password: guestToken,
           label: hint.agentLabel,
         });
-        // The guest scope forbids the host's fetch_agents/project.list directory bootstraps, so the
-        // session store won't auto-populate. Fetch the ONE shared agent (agentId-guarded) and place
-        // it in the store ourselves so the real AgentConversationPanel renders it.
+        // The guest's fetch_agents/project.list are answered but FILTERED server-side to the one
+        // shared agent / empty projects, so the store may not carry the workspaceId we need. Fetch
+        // the ONE shared agent (agentId-guarded) and place it in the store ourselves so the real
+        // AgentConversationPanel renders it with the right workspace binding.
         const client = store.getSnapshot(serverId)?.client ?? null;
         let workspaceId = "";
         try {
