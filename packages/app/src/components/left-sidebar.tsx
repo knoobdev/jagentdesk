@@ -1,4 +1,4 @@
-import { router, usePathname } from "expo-router";
+import { router, usePathname, type Href } from "expo-router";
 import {
   Boxes,
   BarChart3,
@@ -6,6 +6,7 @@ import {
   GitPullRequest,
   Sparkles,
   CalendarClock,
+  Share2,
   FolderPlus,
   History,
   Home,
@@ -86,6 +87,7 @@ import {
   buildOpenProjectRoute,
   buildNewWorkspaceRoute,
   buildSchedulesRoute,
+  buildSharedSessionsRoute,
   buildSessionsRoute,
   buildSettingsAddHostRoute,
   buildSettingsHostSectionRoute,
@@ -165,6 +167,7 @@ interface SidebarLabels {
   searchHosts: string;
   sessions: string;
   schedules: string;
+  sharedSessions: string;
   clusters: string;
   databases: string;
   skills: string;
@@ -179,6 +182,7 @@ interface MobileSidebarProps extends SidebarSharedProps {
   closeSidebar: () => void;
   handleViewMoreNavigate: () => void;
   handleViewSchedulesNavigate: () => void;
+  handleViewSharedSessionsNavigate: () => void;
 }
 
 interface DesktopSidebarProps extends SidebarSharedProps {
@@ -186,6 +190,7 @@ interface DesktopSidebarProps extends SidebarSharedProps {
   active: boolean;
   handleViewMore: () => void;
   handleViewSchedules: () => void;
+  handleViewSharedSessions: () => void;
 }
 
 export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boolean }) {
@@ -375,6 +380,12 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     router.push(buildSchedulesRoute());
   }, []);
 
+  const handleViewSharedSessionsNavigate = useCallback(() => {
+    // Cast: expo-router's typed-routes manifest re-indexes /shared-sessions on the next dev run; the
+    // route file exists and resolves at runtime.
+    router.push(buildSharedSessionsRoute() as Href);
+  }, []);
+
   const newWorkspaceKeys = useShortcutKeys("new-workspace");
   const labels = useMemo(
     (): SidebarLabels => ({
@@ -387,6 +398,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       searchHosts: t("sidebar.host.searchPlaceholder"),
       sessions: t("sidebar.sections.sessions"),
       schedules: t("sidebar.sections.schedules"),
+      sharedSessions: "Shared sessions",
       clusters: "Clusters",
       databases: "Databases",
       skills: "Skills",
@@ -441,6 +453,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
           handleOpenHostSettings={handleOpenHostSettingsMobile}
           handleViewMoreNavigate={handleViewMoreNavigate}
           handleViewSchedulesNavigate={handleViewSchedulesNavigate}
+          handleViewSharedSessionsNavigate={handleViewSharedSessionsNavigate}
         />
       </RetainedPanelActivity>
     );
@@ -464,6 +477,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
         handleOpenHostSettings={handleOpenHostSettingsDesktop}
         handleViewMore={handleViewMoreNavigate}
         handleViewSchedules={handleViewSchedulesNavigate}
+        handleViewSharedSessions={handleViewSharedSessionsNavigate}
       />
     </RetainedPanelActivity>
   );
@@ -815,11 +829,13 @@ function MobileSidebar({
   closeSidebar,
   handleViewMoreNavigate,
   handleViewSchedulesNavigate,
+  handleViewSharedSessionsNavigate,
 }: MobileSidebarProps) {
   const pathname = usePathname();
   const hasActiveHostFilter = useSidebarViewStore((state) => state.hostFilters.length > 0);
   const isSessionsActive = pathname.includes("/sessions");
   const isSchedulesActive = pathname.includes("/schedules");
+  const isSharedSessionsActive = pathname.includes("/shared-sessions");
   const isClustersActive = pathname.includes("/clusters");
   const isDatabasesActive = pathname.includes("/database");
   const isSkillsActive = pathname.includes("/skills");
@@ -851,6 +867,11 @@ function MobileSidebar({
     closeSidebar();
     handleViewSchedulesNavigate();
   }, [closeSidebar, handleViewSchedulesNavigate]);
+
+  const handleViewSharedSessions = useCallback(() => {
+    closeSidebar();
+    handleViewSharedSessionsNavigate();
+  }, [closeSidebar, handleViewSharedSessionsNavigate]);
 
   const handleWorkspacePress = useCallback(() => {
     closeSidebar();
@@ -919,6 +940,14 @@ function MobileSidebar({
               onPress={handleViewSchedules}
               isActive={isSchedulesActive}
               testID="sidebar-schedules"
+              variant="compact"
+            />
+            <SidebarHeaderRow
+              icon={Share2}
+              label={labels.sharedSessions}
+              onPress={handleViewSharedSessions}
+              isActive={isSharedSessionsActive}
+              testID="sidebar-shared-sessions"
               variant="compact"
             />
             <SidebarHeaderRow
@@ -1033,12 +1062,14 @@ function DesktopSidebar({
   active,
   handleViewMore,
   handleViewSchedules,
+  handleViewSharedSessions,
 }: DesktopSidebarProps) {
   const ownsTopLeft = useOwnsWindowChromeCorner("top-left");
   const pathname = usePathname();
   const hasActiveHostFilter = useSidebarViewStore((state) => state.hostFilters.length > 0);
   const isSessionsActive = pathname.includes("/sessions");
   const isSchedulesActive = pathname.includes("/schedules");
+  const isSharedSessionsActive = pathname.includes("/shared-sessions");
   const isClustersActive = pathname.includes("/clusters");
   const isDatabasesActive = pathname.includes("/database");
   const isSkillsActive = pathname.includes("/skills");
@@ -1172,6 +1203,14 @@ function DesktopSidebar({
                 onPress={handleViewSchedules}
                 isActive={isSchedulesActive}
                 testID="sidebar-schedules"
+                variant="compact"
+              />
+              <SidebarHeaderRow
+                icon={Share2}
+                label={labels.sharedSessions}
+                onPress={handleViewSharedSessions}
+                isActive={isSharedSessionsActive}
+                testID="sidebar-shared-sessions"
                 variant="compact"
               />
               <SidebarHeaderRow
