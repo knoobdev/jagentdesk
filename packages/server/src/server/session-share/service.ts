@@ -58,6 +58,9 @@ export interface GuestGrant {
   memberId: string;
   label: string;
   device: string;
+  // Workspace root (the shared agent's cwd) the guest's file/diff RPCs are confined to. null when
+  // the agent has no resolvable cwd — the file guard then denies every file RPC (ADR-0019).
+  workspaceCwd: string | null;
 }
 
 interface LiveShare {
@@ -111,6 +114,13 @@ function coalesceRows(rows: TranscriptRow[]): TranscriptRow[] {
   return out;
 }
 
+// The workspace root a guest's file/diff RPCs are confined to (the shared agent's cwd). null when
+// the agent has no usable cwd → the Session file guard then denies every file RPC (ADR-0019).
+function resolveWorkspaceCwd(record: { cwd?: string } | null | undefined): string | null {
+  const cwd = record?.cwd;
+  return typeof cwd === "string" && cwd.trim().length > 0 ? cwd : null;
+}
+
 export class SessionShareService {
   private readonly logger: Logger;
   private readonly agentManager: ShareAgentManager;
@@ -125,11 +135,17 @@ export class SessionShareService {
   // scoped real-protocol session (ADR-0019). Kept as a setter to break the bootstrap ordering
   // cycle (service is constructed before the websocket-server).
   private guestAttacher:
-    | ((ws: WsSocket, params: { agentId: string; scopes: readonly string[] }) => void)
+    | ((
+        ws: WsSocket,
+        params: { agentId: string; scopes: readonly string[]; workspaceCwd: string | null },
+      ) => void)
     | null = null;
 
   setGuestAttacher(
-    fn: (ws: WsSocket, params: { agentId: string; scopes: readonly string[] }) => void,
+    fn: (
+      ws: WsSocket,
+      params: { agentId: string; scopes: readonly string[]; workspaceCwd: string | null },
+    ) => void,
   ): void {
     this.guestAttacher = fn;
   }
@@ -183,6 +199,9 @@ export class SessionShareService {
     const now = this.now();
     const record = await this.agentStorage.get(agentId);
     const agentLabel = record?.title?.trim() || "Agent";
+    // The workspace root the guest's file/diff RPCs are confined to (defense-in-depth on top of the
+    // capability scope). null when the agent has no cwd → the file guard denies all file RPCs.
+    const workspaceCwd = resolveWorkspaceCwd(record);
     // Default ON so a guest lands in the existing conversation (spec §21.4): joining a share and
     // seeing an empty pane is confusing. The host can still create a from-now share explicitly.
     const shareFullHistory = input.shareFullHistory ?? true;
@@ -256,6 +275,7 @@ export class SessionShareService {
           memberId: member.memberId,
           label: member.label,
           device: member.device,
+          workspaceCwd,
         });
         return token;
       },
@@ -267,6 +287,7 @@ export class SessionShareService {
         this.guestAttacher(ws, {
           agentId: resolved.grant.agentId,
           scopes: guestScopesForCapabilities(resolved.capabilities),
+          workspaceCwd: resolved.grant.workspaceCwd,
         });
         return true;
       },

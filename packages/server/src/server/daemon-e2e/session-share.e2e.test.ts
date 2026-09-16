@@ -1,3 +1,6 @@
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, test, expect, afterEach } from "vitest";
 import { WebSocket } from "ws";
 import pino from "pino";
@@ -32,6 +35,71 @@ async function makeAgent(ctx: DaemonTestContext): Promise<string> {
     title: "Share E2E Agent",
   });
   return agent.id;
+}
+
+async function makeAgentWithCwd(ctx: DaemonTestContext, cwd: string): Promise<string> {
+  const agent = await ctx.client.createAgent({
+    provider: "codex",
+    model: CODEX_MODEL,
+    cwd,
+    title: "Share Files Agent",
+  });
+  return agent.id;
+}
+
+// Pair a guest over the bespoke /guest channel and return a scoped-/ws DaemonClient (ADR-0019).
+async function pairGuestClient(
+  ctx: DaemonTestContext,
+  sharePort: number,
+  shareId: string,
+  streamed: SessionShare[],
+  label: string,
+): Promise<DaemonClient> {
+  const guestWs = new WebSocket(`ws://127.0.0.1:${sharePort}/guest`);
+  const msgs: Record<string, unknown>[] = [];
+  guestWs.on("message", (d) => {
+    try {
+      msgs.push(JSON.parse(d.toString()));
+    } catch {
+      /* ignore */
+    }
+  });
+  await new Promise<void>((res, rej) => {
+    guestWs.on("open", () => res());
+    guestWs.on("error", rej);
+  });
+  guestWs.send(JSON.stringify({ t: "request", name: label }));
+  let req: SessionShare["pendingRequests"][number] | undefined;
+  for (let i = 0; i < 40 && !req; i++) {
+    req = findPendingFrom(streamed, label)?.pendingRequests.find((r) => r.status === "pending");
+    if (!req) await sleep(150);
+  }
+  if (!req) throw new Error("host never saw the join request");
+  await ctx.client.sessionShareRespond(shareId, req.requestId, true);
+  let code: string | undefined;
+  for (let i = 0; i < 40 && !code; i++) {
+    code = streamed[streamed.length - 1]?.pendingRequests.find(
+      (r) => r.requestId === req!.requestId,
+    )?.code;
+    if (!code) await sleep(150);
+  }
+  guestWs.send(JSON.stringify({ t: "pair", code }));
+  let guestToken: string | undefined;
+  for (let i = 0; i < 40 && !guestToken; i++) {
+    guestToken = msgs.find((m) => m.t === "pair_result" && m.ok === true)?.guestToken as
+      | string
+      | undefined;
+    if (!guestToken) await sleep(100);
+  }
+  if (!guestToken) throw new Error("pairing did not return a guest token");
+  const guest = new DaemonClient({
+    url: `ws://127.0.0.1:${sharePort}/ws`,
+    clientId: `guest-files-${label}`,
+    password: guestToken,
+  });
+  await guest.connect();
+  guestWs.close();
+  return guest;
 }
 
 describe("session sharing — real daemon", () => {
@@ -257,6 +325,56 @@ describe("session sharing — real daemon", () => {
     unsub();
     await guest.close();
     guestWs.close();
+    await ctx.client.sessionShareStop(share.shareId);
+  }, 90000);
+
+  test("guest files capability: reads inside the shared workspace, DENIED outside / on traversal (ADR-0019)", async () => {
+    let sharePort = 0;
+    const logger = pino(
+      { level: "info" },
+      {
+        write: (line: string) => {
+          try {
+            const o = JSON.parse(line);
+            if (o.msg === "Share server listening" && typeof o.port === "number")
+              sharePort = o.port;
+          } catch {
+            /* ignore */
+          }
+        },
+      },
+    );
+    ctx = await createDaemonTestContext({ sessionSharingEnabled: true, logger });
+
+    // A real workspace with a marker file the guest is allowed to see.
+    const workspace = await mkdtemp(path.join(tmpdir(), "jad-share-ws-"));
+    await writeFile(path.join(workspace, "READY.md"), "# guest can read me\n");
+    const agentId = await makeAgentWithCwd(ctx, workspace);
+
+    const streamed: SessionShare[] = [];
+    const unsub = ctx.client.subscribeSessionShareStream((s) => {
+      if (s.agentId === agentId) streamed.push(s);
+    });
+    // Share WITH the files capability granted.
+    const share = await ctx.client.sessionShareCreate(agentId, { capabilities: { files: true } });
+    expect(share.capabilities.files).toBe(true);
+    expect(sharePort).toBeGreaterThan(0);
+
+    const guest = await pairGuestClient(ctx, sharePort, share.shareId, streamed, "Files Guest");
+
+    // Allowed: list the shared workspace root — the marker file is visible.
+    const dir = await guest.listDirectory(workspace, ".");
+    const names = (dir.entries ?? []).map((e) => e.name);
+    expect(names).toContain("READY.md");
+
+    // Denied: a cwd OUTSIDE the shared workspace (arbitrary host path).
+    await expect(guest.listDirectory("/etc", ".")).rejects.toThrow();
+
+    // Denied: `..` traversal that resolves out of the workspace root.
+    await expect(guest.listDirectory(workspace, "../../../../etc")).rejects.toThrow();
+
+    unsub();
+    await guest.close();
     await ctx.client.sessionShareStop(share.shareId);
   }, 90000);
 });

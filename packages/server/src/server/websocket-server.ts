@@ -168,7 +168,7 @@ interface PendingConnection {
    * with a validated guest token. Its hello skips signed-hello/device pairing and yields a session
    * limited to `scopes` and confined to `agentId`.
    */
-  guestGrant?: { agentId: string; scopes: readonly string[] };
+  guestGrant?: { agentId: string; scopes: readonly string[]; workspaceCwd: string | null };
 }
 
 type PendingPairingRequestPayload = Extract<
@@ -519,6 +519,7 @@ interface SocketSessionOptions {
   clientCapabilities: Record<string, unknown> | null;
   scopes: readonly string[];
   guestAgentId?: string | null;
+  guestWorkspaceCwd?: string | null;
   connectionLogger: pino.Logger;
   onMessage: (message: SessionOutboundMessage) => void;
   onMessageToSource?: (source: object, message: SessionOutboundMessage) => void;
@@ -1643,6 +1644,7 @@ export class VoiceAssistantWebSocketServer {
     connectionLogger: pino.Logger;
     scopes?: readonly string[];
     guestAgentId?: string | null;
+    guestWorkspaceCwd?: string | null;
   }): TrustedSessionConnection {
     const { ws, clientId, appVersion, clientCapabilities, connectionLogger } = params;
     let connection: TrustedSessionConnection | null = null;
@@ -1653,6 +1655,7 @@ export class VoiceAssistantWebSocketServer {
       clientCapabilities,
       scopes: params.scopes ?? ["*"],
       guestAgentId: params.guestAgentId ?? null,
+      guestWorkspaceCwd: params.guestWorkspaceCwd ?? null,
       connectionLogger,
       onMessage: (msg) => {
         if (!connection) {
@@ -1723,7 +1726,7 @@ export class VoiceAssistantWebSocketServer {
    */
   public attachGuestSocket(
     ws: WebSocketLike,
-    params: { agentId: string; scopes: readonly string[] },
+    params: { agentId: string; scopes: readonly string[]; workspaceCwd: string | null },
   ): void {
     if (!this.acceptingConnections) {
       try {
@@ -1743,7 +1746,11 @@ export class VoiceAssistantWebSocketServer {
       connectionLogger,
       helloTimeout: null,
       identity,
-      guestGrant: { agentId: params.agentId, scopes: params.scopes },
+      guestGrant: {
+        agentId: params.agentId,
+        scopes: params.scopes,
+        workspaceCwd: params.workspaceCwd,
+      },
     };
     const timeout = setTimeout(() => {
       if (this.pendingConnections.get(ws) !== pending) return;
@@ -1770,6 +1777,7 @@ export class VoiceAssistantWebSocketServer {
       clientCapabilities: options.clientCapabilities,
       scopes: options.scopes,
       guestAgentId: options.guestAgentId ?? null,
+      guestWorkspaceCwd: options.guestWorkspaceCwd ?? null,
       onMessage: options.onMessage,
       onMessageToSource: options.onMessageToSource,
       onBinaryMessage: options.onBinaryMessage,
@@ -2042,6 +2050,7 @@ export class VoiceAssistantWebSocketServer {
       connectionLogger,
       scopes: pending.guestGrant?.scopes,
       guestAgentId: pending.guestGrant?.agentId ?? null,
+      guestWorkspaceCwd: pending.guestGrant?.workspaceCwd ?? null,
     });
     this.sessions.set(ws, connection);
     this.externalSessionsByKey.set(clientId, connection);

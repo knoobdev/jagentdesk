@@ -450,6 +450,10 @@ export interface SessionOptions {
   // agentId is rejected, on top of the (already narrow) scope allowlist. Null/undefined = trusted
   // host session (full access, subject to scopes).
   guestAgentId?: string | null;
+  // Session-share guest file/diff confinement (ADR-0019): the shared agent's workspace root. Guest
+  // file/diff RPCs (keyed by a raw `cwd`) are rejected unless their resolved path stays within this
+  // root — defense-in-depth on top of the capability scope. null → the guest has no file access.
+  guestWorkspaceCwd?: string | null;
   appVersion?: string | null;
   clientCapabilities?: Record<string, unknown> | null;
   onMessage: (msg: SessionOutboundMessage) => void;
@@ -643,6 +647,18 @@ function describeRegistryTransition(record: ArchivedRecordSnapshot | null): Regi
   return record.archivedAt ? "unarchived" : "existing";
 }
 
+// Inbound RPC types that are keyed by a raw `cwd` (filesystem path) rather than an agentId. For a
+// session-share guest these are confined to the shared agent's workspace root by
+// isGuestFileMessageWithinWorkspace (ADR-0019). Only READ-only file/diff types are ever placed in a
+// guest's scope; write types (fs.file.write, checkout_commit, …) are never scoped in, so they are
+// already unreachable — this set is the containment layer for the read types that ARE reachable.
+const GUEST_FILE_CWD_RPC_TYPES: ReadonlySet<string> = new Set([
+  "file_explorer_request",
+  "file_download_token_request",
+  "fs.file.subscribe.request",
+  "subscribe_checkout_diff_request",
+]);
+
 /**
  * Session represents a single connected client session.
  * It owns all state management, orchestration logic, and message processing.
@@ -652,6 +668,7 @@ export class Session {
   private readonly clientId: string;
   private scopes: readonly string[];
   private readonly guestAgentId: string | null;
+  private readonly guestWorkspaceCwd: string | null;
   private appVersion: string | null;
   private clientCapabilities: ReadonlySet<ClientCapability>;
   private readonly sessionId: string;
@@ -803,6 +820,7 @@ export class Session {
     this.clientId = clientId;
     this.scopes = [...scopes];
     this.guestAgentId = options.guestAgentId ?? null;
+    this.guestWorkspaceCwd = options.guestWorkspaceCwd ?? null;
     this.appVersion = appVersion ?? null;
     this.clientCapabilities = parseClientCapabilities(clientCapabilities);
     this.sessionId = uuidv4();
@@ -1962,6 +1980,22 @@ export class Session {
         }
         return;
       }
+      // File/diff RPCs are cwd-keyed; confine the guest to the shared agent's workspace root.
+      if (this.guestAgentId !== null && !this.isGuestFileMessageWithinWorkspace(msg)) {
+        const requestId = sessionRequestId(msg);
+        if (requestId) {
+          this.emit({
+            type: "rpc_error",
+            payload: {
+              requestId,
+              requestType: msg.type,
+              error: "Guest session is limited to the shared workspace",
+              code: "access_denied",
+            },
+          });
+        }
+        return;
+      }
       try {
         await this.dispatchInboundMessage(msg, source);
       } catch (error) {
@@ -2028,6 +2062,28 @@ export class Session {
 
   private isGuestMessageAllowed(msg: SessionInboundMessage): boolean {
     return !this.guestMessageTouchesOtherAgent(msg);
+  }
+
+  // Guest file/diff RPCs (ADR-0019) are keyed by a raw `cwd` (+ optional `path`) rather than an
+  // agentId, so the per-agent guard cannot confine them. Reject any such RPC whose resolved target
+  // escapes the shared agent's workspace root — defense-in-depth on top of the capability scope.
+  // Non-file messages and trusted (non-guest) sessions are unaffected.
+  private isGuestFileMessageWithinWorkspace(msg: SessionInboundMessage): boolean {
+    if (this.guestAgentId === null) return true;
+    if (!GUEST_FILE_CWD_RPC_TYPES.has(msg.type)) return true;
+    const root = this.guestWorkspaceCwd;
+    if (!root) return false; // file capability but no resolvable workspace → deny.
+    const cwd = (msg as { cwd?: unknown }).cwd;
+    if (typeof cwd !== "string" || cwd.length === 0) return false;
+    const resolvedRoot = resolve(root);
+    const withinRoot = (target: string): boolean =>
+      target === resolvedRoot || target.startsWith(resolvedRoot + sep);
+    if (!withinRoot(resolve(cwd))) return false;
+    // file_explorer/file_download carry a `path` relative to cwd — it must also stay contained
+    // (blocks `..`/absolute-path traversal out of the workspace).
+    const rel = (msg as { path?: unknown }).path;
+    if (typeof rel === "string" && rel.length > 0 && !withinRoot(resolve(cwd, rel))) return false;
+    return true;
   }
 
   private async dispatchInboundMessage(msg: SessionInboundMessage, source?: object): Promise<void> {

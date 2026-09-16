@@ -47,6 +47,26 @@ export function guestScopesForCapabilities(caps: SessionShareCapabilities): stri
     "agent_update",
     "agent_attention_required",
   ];
+  if (caps.files) {
+    // Read-only file + diff surface, confined to the shared agent's workspace root by Session's
+    // file-containment guard (isGuestFileMessageWithinWorkspace). WRITE types (fs.file.write,
+    // checkout_commit) are deliberately absent, so the guest can view but never mutate. Download
+    // tokens are omitted too — the download endpoint lives on the main Tailscale-only daemon, not the
+    // tunnel, so file content reaches the guest inline via file_explorer mode:"file" / fs.file.update.
+    scopes.push(
+      "file_explorer_request",
+      "file_explorer_response",
+      "fs.file.subscribe.request",
+      "fs.file.subscribe.response",
+      "fs.file.unsubscribe.request",
+      "fs.file.unsubscribe.response",
+      "fs.file.update",
+      "subscribe_checkout_diff_request",
+      "subscribe_checkout_diff_response",
+      "unsubscribe_checkout_diff_request",
+      "checkout_diff_update",
+    );
+  }
   if (caps.modelMode) {
     scopes.push(
       "set_agent_mode_request",
