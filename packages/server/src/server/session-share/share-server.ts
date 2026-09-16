@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { join, normalize, extname } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { Logger } from "pino";
+import type { SessionShareCapabilities } from "@jagentdesk/protocol/messages";
 import { renderGuestPage } from "./guest-page.js";
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -26,8 +27,12 @@ const CONTENT_TYPES: Record<string, string> = {
   ".txt": "text/plain; charset=utf-8",
 };
 
-function shareHintScript(agentId: string, agentLabel: string): string {
-  const json = JSON.stringify({ agentId, agentLabel }).replace(/</g, "\\u003c");
+function shareHintScript(
+  agentId: string,
+  agentLabel: string,
+  capabilities: SessionShareCapabilities,
+): string {
+  const json = JSON.stringify({ agentId, agentLabel, capabilities }).replace(/</g, "\\u003c");
   return `<script>window.__JAGENTDESK_SHARE__=${json};</script>`;
 }
 
@@ -90,6 +95,9 @@ export interface ShareServerOptions {
   // server honors guest set-mode; when OFF the control is hidden and set-mode is rejected. The
   // host toggles this live via setAllowGuestModelMode().
   allowGuestModelMode: boolean;
+  // Live capabilities of this share, read at page-serve time to seed the guest app's share hint so
+  // it shows only the tabs the host granted (chat/files/…). Reflects the grant at page load.
+  getCapabilities?: () => SessionShareCapabilities;
   getModes?: () => ShareModesSnapshot;
   setMode?: (modeId: string) => Promise<void>;
   // Mint a guest token on successful pairing; the real app uses it to open the scoped /ws.
@@ -295,15 +303,19 @@ export class ShareServer {
   private serveApp(url: string, res: import("node:http").ServerResponse): void {
     const distDir = this.opts.appDistDir as string;
     const pathname = decodeURIComponent(url.split("?")[0] || "/");
+    const caps = this.opts.getCapabilities?.() ?? {
+      chat: true,
+      files: false,
+      terminal: false,
+      modelMode: this.opts.allowGuestModelMode,
+    };
+    const hint = shareHintScript(this.opts.agentId, this.opts.agentLabel, caps);
     const serveIndex = (): void => {
       try {
         const html = readFileSync(join(distDir, "index.html"), "utf8");
         const injected = html.includes("</head>")
-          ? html.replace(
-              "</head>",
-              `${shareHintScript(this.opts.agentId, this.opts.agentLabel)}</head>`,
-            )
-          : shareHintScript(this.opts.agentId, this.opts.agentLabel) + html;
+          ? html.replace("</head>", `${hint}</head>`)
+          : hint + html;
         res.writeHead(200, {
           "content-type": "text/html; charset=utf-8",
           "cache-control": "no-store",

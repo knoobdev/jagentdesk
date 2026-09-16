@@ -252,6 +252,8 @@ export class SessionShareService {
       fetchTranscript,
       shareDraftPreview,
       allowGuestModelMode,
+      // Live capabilities so the guest app's share hint shows only the granted tabs (ADR-0019).
+      getCapabilities: () => this.shares.get(shareId)?.share.capabilities ?? capabilities,
       // Guest model/mode change (spec §21.6) — honored by ShareServer only while the share's
       // allowGuestModelMode is ON. Modes come straight off the live agent snapshot.
       getModes: () => {
