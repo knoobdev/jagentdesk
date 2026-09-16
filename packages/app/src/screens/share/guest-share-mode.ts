@@ -14,3 +14,11 @@ export function isGuestShareMode(): boolean {
   }
   return false;
 }
+
+// True when the current guest share is read-only (chat-only view) — the composer is hidden and the
+// daemon denies sending. Read from the injected share hint's capabilities.
+export function isGuestReadOnlyShare(): boolean {
+  const g = (globalThis as { __JAGENTDESK_SHARE__?: { capabilities?: { readOnly?: unknown } } })
+    .__JAGENTDESK_SHARE__;
+  return isGuestShareMode() && g?.capabilities?.readOnly === true;
+}

@@ -121,6 +121,21 @@ function resolveWorkspaceCwd(record: { cwd?: string } | null | undefined): strin
   return typeof cwd === "string" && cwd.trim().length > 0 ? cwd : null;
 }
 
+// Build the initial capability set for a share (chat always on; everything else opt-in). Extracted
+// to keep SessionShareService.create's cyclomatic complexity within budget.
+function resolveInitialCapabilities(
+  requested: Partial<SessionShareCapabilities> | undefined,
+  allowGuestModelMode: boolean | undefined,
+): SessionShareCapabilities {
+  return {
+    chat: true,
+    files: requested?.files ?? false,
+    terminal: requested?.terminal ?? false,
+    modelMode: requested?.modelMode ?? allowGuestModelMode ?? false,
+    readOnly: requested?.readOnly ?? false,
+  };
+}
+
 export class SessionShareService {
   private readonly logger: Logger;
   private readonly agentManager: ShareAgentManager;
@@ -216,12 +231,7 @@ export class SessionShareService {
     // seeing an empty pane is confusing. The host can still create a from-now share explicitly.
     const shareFullHistory = input.shareFullHistory ?? true;
     const shareDraftPreview = input.shareDraftPreview ?? false;
-    const capabilities: SessionShareCapabilities = {
-      chat: true,
-      files: input.capabilities?.files ?? false,
-      terminal: input.capabilities?.terminal ?? false,
-      modelMode: input.capabilities?.modelMode ?? input.allowGuestModelMode ?? false,
-    };
+    const capabilities = resolveInitialCapabilities(input.capabilities, input.allowGuestModelMode);
     const allowGuestModelMode = capabilities.modelMode;
 
     const startSeq = shareFullHistory ? -1 : this.currentMaxSeq(agentId);

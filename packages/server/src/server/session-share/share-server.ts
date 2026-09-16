@@ -334,6 +334,7 @@ export class ShareServer {
       files: false,
       terminal: false,
       modelMode: this.opts.allowGuestModelMode,
+      readOnly: false,
     };
     const hint = shareHintScript(
       this.opts.agentId,

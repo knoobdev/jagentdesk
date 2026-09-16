@@ -1,6 +1,6 @@
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { SessionShareControl } from "@/composer/agent-controls/session-share-control";
-import { isGuestShareMode } from "@/screens/share/guest-share-mode";
+import { isGuestReadOnlyShare, isGuestShareMode } from "@/screens/share/guest-share-mode";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import type { TFunction } from "i18next";
 import { SquarePen } from "lucide-react-native";
@@ -1481,8 +1481,10 @@ function ActiveAgentComposer({
     return false;
   });
   const isSupervisorThread = activeAgentRole === "supervisor";
+  const guestReadOnly = isGuestReadOnlyShare();
   const composerViewOnly =
-    (activeAgentRole === "lead" || activeAgentRole === "peer") && isOrchestrationRunActive;
+    guestReadOnly ||
+    ((activeAgentRole === "lead" || activeAgentRole === "peer") && isOrchestrationRunActive);
   const { archiveAgent } = useArchiveAgent();
   const closeWorkspaceTab = useWorkspaceLayoutStore((state) => state.closeTab);
   const hideWorkspaceAgent = useWorkspaceLayoutStore((state) => state.hideAgent);
@@ -1627,8 +1629,9 @@ function ActiveAgentComposer({
       {composerViewOnly ? (
         <View style={styles.composerViewOnly} testID="orchestration-composer-view-only">
           <Text style={styles.composerViewOnlyText}>
-            View-only while the run is active. Steer it by chatting with the Supervisor; this thread
-            unlocks when the run is idle.
+            {guestReadOnly
+              ? "View-only session — you can follow the conversation but not send messages."
+              : "View-only while the run is active. Steer it by chatting with the Supervisor; this thread unlocks when the run is idle."}
           </Text>
         </View>
       ) : (

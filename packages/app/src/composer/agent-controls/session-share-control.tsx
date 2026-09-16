@@ -132,7 +132,7 @@ export function SessionShareControl({
   // Grant/revoke a capability live (files / terminal). The daemon re-derives the guest scope from the
   // share's capabilities, so already-connected guests gain/lose the tabs on their next request.
   const onToggleCapability = useCallback(
-    (shareId: string, cap: "files" | "terminal", next: boolean) => {
+    (shareId: string, cap: "files" | "terminal" | "readOnly", next: boolean) => {
       if (!client) return;
       void client
         .sessionShareSetOptions(shareId, { capabilities: { [cap]: next } })
@@ -310,7 +310,11 @@ const ManageSheet = memo(function ManageSheet({
   onKick: (shareId: string, memberId: string) => void;
   onRespond: (shareId: string, joinRequestId: string, accept: boolean) => void;
   onToggleModelMode: (shareId: string, next: boolean) => void;
-  onToggleCapability: (shareId: string, cap: "files" | "terminal", next: boolean) => void;
+  onToggleCapability: (
+    shareId: string,
+    cap: "files" | "terminal" | "readOnly",
+    next: boolean,
+  ) => void;
 }): ReactElement {
   const empty = shares.length === 0;
   return (
@@ -389,7 +393,11 @@ const ShareCard = memo(function ShareCard({
   onKick: (shareId: string, memberId: string) => void;
   onRespond: (shareId: string, joinRequestId: string, accept: boolean) => void;
   onToggleModelMode: (shareId: string, next: boolean) => void;
-  onToggleCapability: (shareId: string, cap: "files" | "terminal", next: boolean) => void;
+  onToggleCapability: (
+    shareId: string,
+    cap: "files" | "terminal" | "readOnly",
+    next: boolean,
+  ) => void;
 }): ReactElement {
   const copyThis = useCallback(() => onCopy(share.shareId), [onCopy, share.shareId]);
   const stopThis = useCallback(() => onStop(share.shareId), [onStop, share.shareId]);
@@ -407,6 +415,10 @@ const ShareCard = memo(function ShareCard({
   );
   const toggleTerminal = useCallback(
     (next: boolean) => onToggleCapability(share.shareId, "terminal", next),
+    [onToggleCapability, share.shareId],
+  );
+  const toggleReadOnly = useCallback(
+    (next: boolean) => onToggleCapability(share.shareId, "readOnly", next),
     [onToggleCapability, share.shareId],
   );
 
@@ -439,6 +451,14 @@ const ShareCard = memo(function ShareCard({
       ))}
 
       <Text style={styles.sectionLabel}>Guest permissions</Text>
+      <View style={styles.toggleRow}>
+        <Text style={styles.toggleLabel}>Read-only (watch chat, no sending)</Text>
+        <Switch
+          value={share.capabilities?.readOnly ?? false}
+          onValueChange={toggleReadOnly}
+          accessibilityLabel="Make the shared chat read-only"
+        />
+      </View>
       <View style={styles.toggleRow}>
         <Text style={styles.toggleLabel}>View files &amp; diff (read-only)</Text>
         <Switch

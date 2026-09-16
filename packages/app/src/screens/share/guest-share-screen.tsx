@@ -58,6 +58,7 @@ export interface GuestShareCapabilities {
   files: boolean;
   terminal: boolean;
   modelMode: boolean;
+  readOnly: boolean;
 }
 
 export interface GuestShareHint {
@@ -75,6 +76,7 @@ function readCapabilities(raw: unknown): GuestShareCapabilities {
     files: c.files === true,
     terminal: c.terminal === true,
     modelMode: c.modelMode === true,
+    readOnly: c.readOnly === true,
   };
 }
 

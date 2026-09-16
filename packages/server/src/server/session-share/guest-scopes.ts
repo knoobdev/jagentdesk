@@ -25,8 +25,6 @@ export function guestScopesForCapabilities(caps: SessionShareCapabilities): stri
     "agent.timeline.list_prompts.response",
     "agent.timeline.set_subscription.request",
     "agent.timeline.set_subscription.response",
-    "send_agent_message_request",
-    "send_agent_message_response",
     // the shared agent's snapshot (agentId-guarded single fetch).
     "fetch_agent_request",
     "fetch_agent_response",
@@ -47,6 +45,11 @@ export function guestScopesForCapabilities(caps: SessionShareCapabilities): stri
     "agent_update",
     "agent_attention_required",
   ];
+  if (!caps.readOnly) {
+    // Sending is allowed only when the share is NOT read-only (chat-only view). Read-only guests can
+    // watch the conversation but never send a prompt (composer hidden client-side + denied here).
+    scopes.push("send_agent_message_request", "send_agent_message_response");
+  }
   if (caps.files) {
     // Read-only file + diff surface, confined to the shared agent's workspace root by Session's
     // file-containment guard (isGuestFileMessageWithinWorkspace). WRITE types (fs.file.write,
@@ -86,7 +89,7 @@ export function guestScopesForCapabilities(caps: SessionShareCapabilities): stri
       "capture_terminal_response",
     );
   }
-  if (caps.modelMode) {
+  if (caps.modelMode && !caps.readOnly) {
     scopes.push(
       "set_agent_mode_request",
       "set_agent_mode_response",

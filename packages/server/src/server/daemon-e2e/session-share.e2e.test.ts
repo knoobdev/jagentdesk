@@ -425,6 +425,47 @@ describe("session sharing — real daemon", () => {
     await ctx.client.sessionShareStop(share.shareId);
   }, 90000);
 
+  test("read-only share: guest can view the timeline but CANNOT send (ADR-0019)", async () => {
+    let sharePort = 0;
+    const logger = pino(
+      { level: "info" },
+      {
+        write: (line: string) => {
+          try {
+            const o = JSON.parse(line);
+            if (o.msg === "Share server listening" && typeof o.port === "number")
+              sharePort = o.port;
+          } catch {
+            /* ignore */
+          }
+        },
+      },
+    );
+    ctx = await createDaemonTestContext({ sessionSharingEnabled: true, logger });
+    const agentId = await makeAgent(ctx);
+
+    const streamed: SessionShare[] = [];
+    const unsub = ctx.client.subscribeSessionShareStream((s) => {
+      if (s.agentId === agentId) streamed.push(s);
+    });
+    const share = await ctx.client.sessionShareCreate(agentId, {
+      capabilities: { readOnly: true },
+    });
+    expect(share.capabilities.readOnly).toBe(true);
+    const guest = await pairGuestClient(ctx, sharePort, share.shareId, streamed, "ReadOnly Guest");
+
+    // Allowed: view the timeline.
+    const tl = await guest.fetchAgentTimeline(agentId, { direction: "tail", limit: 5 });
+    expect(tl).toBeTruthy();
+
+    // Denied: sending is not in the read-only guest scope.
+    await expect(guest.sendMessage(agentId, "should be rejected")).rejects.toThrow();
+
+    unsub();
+    await guest.close();
+    await ctx.client.sessionShareStop(share.shareId);
+  }, 90000);
+
   test("guest terminal capability: read-only, confined to the shared workspace (ADR-0019)", async () => {
     let sharePort = 0;
     const logger = pino(
