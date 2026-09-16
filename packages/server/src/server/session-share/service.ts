@@ -137,14 +137,24 @@ export class SessionShareService {
   private guestAttacher:
     | ((
         ws: WsSocket,
-        params: { agentId: string; scopes: readonly string[]; workspaceCwd: string | null },
+        params: {
+          agentId: string;
+          scopes: readonly string[];
+          workspaceCwd: string | null;
+          onGuestActivity?: (text: string) => void;
+        },
       ) => void)
     | null = null;
 
   setGuestAttacher(
     fn: (
       ws: WsSocket,
-      params: { agentId: string; scopes: readonly string[]; workspaceCwd: string | null },
+      params: {
+        agentId: string;
+        scopes: readonly string[];
+        workspaceCwd: string | null;
+        onGuestActivity?: (text: string) => void;
+      },
     ) => void,
   ): void {
     this.guestAttacher = fn;
@@ -287,10 +297,20 @@ export class SessionShareService {
       attachGuestWs: (ws, token) => {
         const resolved = this.validateGuestToken(token);
         if (!resolved || !this.guestAttacher) return false;
+        const grant = resolved.grant;
         this.guestAttacher(ws, {
-          agentId: resolved.grant.agentId,
+          agentId: grant.agentId,
           scopes: guestScopesForCapabilities(resolved.capabilities),
-          workspaceCwd: resolved.grant.workspaceCwd,
+          workspaceCwd: grant.workspaceCwd,
+          // Attribute the guest's real-protocol messages back onto the share so the host sees
+          // who·device·what (recentActivity), like the bespoke channel did (ADR-0019).
+          onGuestActivity: (text) =>
+            this.shares
+              .get(grant.shareId)
+              ?.server.recordGuestActivity(
+                { memberId: grant.memberId, label: grant.label, device: grant.device },
+                text,
+              ),
         });
         return true;
       },

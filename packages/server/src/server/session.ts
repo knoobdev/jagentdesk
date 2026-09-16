@@ -454,6 +454,9 @@ export interface SessionOptions {
   // file/diff RPCs (keyed by a raw `cwd`) are rejected unless their resolved path stays within this
   // root — defense-in-depth on top of the capability scope. null → the guest has no file access.
   guestWorkspaceCwd?: string | null;
+  // Session-share guest activity sink (ADR-0019): called with the text of each message a guest
+  // sends, so the host sees who·device·what. No-op for trusted (non-guest) sessions.
+  onGuestActivity?: (text: string) => void;
   appVersion?: string | null;
   clientCapabilities?: Record<string, unknown> | null;
   onMessage: (msg: SessionOutboundMessage) => void;
@@ -672,6 +675,20 @@ const GUEST_TERMINAL_ID_RPC_TYPES: ReadonlySet<string> = new Set([
   "capture_terminal_request",
 ]);
 
+// Resolve the session-share guest grant off SessionOptions (ADR-0019). Extracted to keep the
+// Session constructor's cyclomatic complexity in check.
+function resolveGuestGrant(options: SessionOptions): {
+  agentId: string | null;
+  workspaceCwd: string | null;
+  onActivity: ((text: string) => void) | null;
+} {
+  return {
+    agentId: options.guestAgentId ?? null,
+    workspaceCwd: options.guestWorkspaceCwd ?? null,
+    onActivity: options.onGuestActivity ?? null,
+  };
+}
+
 /**
  * Session represents a single connected client session.
  * It owns all state management, orchestration logic, and message processing.
@@ -682,6 +699,7 @@ export class Session {
   private scopes: readonly string[];
   private readonly guestAgentId: string | null;
   private readonly guestWorkspaceCwd: string | null;
+  private readonly onGuestActivity: ((text: string) => void) | null;
   private appVersion: string | null;
   private clientCapabilities: ReadonlySet<ClientCapability>;
   private readonly sessionId: string;
@@ -832,8 +850,10 @@ export class Session {
     } = options;
     this.clientId = clientId;
     this.scopes = [...scopes];
-    this.guestAgentId = options.guestAgentId ?? null;
-    this.guestWorkspaceCwd = options.guestWorkspaceCwd ?? null;
+    const guestGrant = resolveGuestGrant(options);
+    this.guestAgentId = guestGrant.agentId;
+    this.guestWorkspaceCwd = guestGrant.workspaceCwd;
+    this.onGuestActivity = guestGrant.onActivity;
     this.appVersion = appVersion ?? null;
     this.clientCapabilities = parseClientCapabilities(clientCapabilities);
     this.sessionId = uuidv4();
@@ -1974,45 +1994,27 @@ export class Session {
         }
         return;
       }
-      // Guest session (session-share, ADR-0019): confined to exactly one agent. The scope allowlist
-      // above already limits WHICH rpc types are reachable; this additionally rejects any message
-      // that targets a different agentId — the scope model matches rpc-name only, so per-agent
-      // isolation is enforced here, centrally, for every agent-scoped message.
-      if (this.guestAgentId !== null && !this.isGuestMessageAllowed(msg)) {
-        const requestId = sessionRequestId(msg);
-        if (requestId) {
-          this.emit({
-            type: "rpc_error",
-            payload: {
-              requestId,
-              requestType: msg.type,
-              error: "Guest session is limited to the shared agent",
-              code: "access_denied",
-            },
-          });
+      // Guest session (session-share, ADR-0019): confined to one agent + its workspace. All the
+      // per-agent / file / terminal containment checks + activity attribution live in one helper so
+      // this dispatch stays simple. A non-null return is the denial reason.
+      if (this.guestAgentId !== null) {
+        const denyReason = this.guestDenyReason(msg);
+        if (denyReason) {
+          const requestId = sessionRequestId(msg);
+          if (requestId) {
+            this.emit({
+              type: "rpc_error",
+              payload: {
+                requestId,
+                requestType: msg.type,
+                error: denyReason,
+                code: "access_denied",
+              },
+            });
+          }
+          return;
         }
-        return;
-      }
-      // File/diff (cwd-keyed) and terminal (cwd- or terminalId-keyed) RPCs confine the guest to the
-      // shared agent's workspace root.
-      if (
-        this.guestAgentId !== null &&
-        (!this.isGuestFileMessageWithinWorkspace(msg) ||
-          !this.isGuestTerminalMessageWithinWorkspace(msg))
-      ) {
-        const requestId = sessionRequestId(msg);
-        if (requestId) {
-          this.emit({
-            type: "rpc_error",
-            payload: {
-              requestId,
-              requestType: msg.type,
-              error: "Guest session is limited to the shared workspace",
-              code: "access_denied",
-            },
-          });
-        }
-        return;
+        this.trackGuestActivity(msg);
       }
       try {
         await this.dispatchInboundMessage(msg, source);
@@ -2080,6 +2082,26 @@ export class Session {
 
   private isGuestMessageAllowed(msg: SessionInboundMessage): boolean {
     return !this.guestMessageTouchesOtherAgent(msg);
+  }
+
+  // Single entry point for guest containment (ADR-0019): per-agent + file/terminal workspace scope.
+  // Returns a human-readable denial reason, or null when the message is allowed.
+  private guestDenyReason(msg: SessionInboundMessage): string | null {
+    if (!this.isGuestMessageAllowed(msg)) return "Guest session is limited to the shared agent";
+    if (
+      !this.isGuestFileMessageWithinWorkspace(msg) ||
+      !this.isGuestTerminalMessageWithinWorkspace(msg)
+    ) {
+      return "Guest session is limited to the shared workspace";
+    }
+    return null;
+  }
+
+  // Attribute a guest's outgoing chat message onto the share (host presence/activity, ADR-0019).
+  private trackGuestActivity(msg: SessionInboundMessage): void {
+    if (!this.onGuestActivity || msg.type !== "send_agent_message_request") return;
+    const text = (msg as { text?: unknown }).text;
+    if (typeof text === "string" && text.trim()) this.onGuestActivity(text);
   }
 
   // Guest file/diff RPCs (ADR-0019) are keyed by a raw `cwd` (+ optional `path`) rather than an

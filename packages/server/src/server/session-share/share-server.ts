@@ -289,6 +289,25 @@ export class ShareServer {
     this.emitState();
   }
 
+  // Record a message a guest sent over the SCOPED /ws (real protocol), so the host sees guest
+  // activity attribution just like the bespoke channel did. Called by the daemon guest session.
+  recordGuestActivity(
+    member: { memberId: string; label: string; device: string },
+    text: string,
+  ): void {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    this.activity.push({
+      memberId: member.memberId,
+      label: member.label,
+      device: member.device,
+      text: trimmed.slice(0, 500),
+      at_ms: Date.now(),
+    });
+    if (this.activity.length > 30) this.activity.shift();
+    this.emitState();
+  }
+
   kick(memberId: string): void {
     for (const [rid, c] of this.conns) {
       if (c.member.memberId === memberId) {

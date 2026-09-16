@@ -380,6 +380,51 @@ describe("session sharing — real daemon", () => {
     await ctx.client.sessionShareStop(share.shareId);
   }, 90000);
 
+  test("host sees guest activity: a guest's message lands in the share's recentActivity (ADR-0019)", async () => {
+    let sharePort = 0;
+    const logger = pino(
+      { level: "info" },
+      {
+        write: (line: string) => {
+          try {
+            const o = JSON.parse(line);
+            if (o.msg === "Share server listening" && typeof o.port === "number")
+              sharePort = o.port;
+          } catch {
+            /* ignore */
+          }
+        },
+      },
+    );
+    ctx = await createDaemonTestContext({ sessionSharingEnabled: true, logger });
+    const agentId = await makeAgent(ctx);
+
+    const streamed: SessionShare[] = [];
+    const unsub = ctx.client.subscribeSessionShareStream((s) => {
+      if (s.agentId === agentId) streamed.push(s);
+    });
+    const share = await ctx.client.sessionShareCreate(agentId);
+    const guest = await pairGuestClient(ctx, sharePort, share.shareId, streamed, "Active Guest");
+
+    // The guest sends a message over the scoped /ws (real protocol, not the bespoke channel).
+    await guest.sendMessage(agentId, "hello from the guest activity test");
+
+    // The host's share stream must surface it in recentActivity, attributed to the guest member.
+    let activity: SessionShare["recentActivity"][number] | undefined;
+    for (let i = 0; i < 50 && !activity; i++) {
+      activity = streamed
+        .flatMap((s) => s.recentActivity ?? [])
+        .find((a) => a.text.includes("hello from the guest activity test"));
+      if (!activity) await sleep(150);
+    }
+    expect(activity, "guest message surfaced in host recentActivity").toBeTruthy();
+    expect(activity!.label).toBe("Active Guest");
+
+    unsub();
+    await guest.close();
+    await ctx.client.sessionShareStop(share.shareId);
+  }, 90000);
+
   test("guest terminal capability: read-only, confined to the shared workspace (ADR-0019)", async () => {
     let sharePort = 0;
     const logger = pino(
