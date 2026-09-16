@@ -130,9 +130,16 @@ export function GuestShareScreen({ hint }: { hint: GuestShareHint }): ReactEleme
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const pairingRef = useRef(false);
+  const phaseRef = useRef<Phase>({ k: "request" });
+  const nameRef = useRef("");
+  const reconnectAttemptsRef = useRef(0);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const goReady = useCallback(
     async (guestToken: string) => {
+      // Pairing succeeded — cancel any pending pairing-reconnect so it can't fire after we're ready.
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+      reconnectAttemptsRef.current = 0;
       setPhase({ k: "connecting" });
       try {
         const store = getHostRuntimeStore();
@@ -216,21 +223,40 @@ export function GuestShareScreen({ hint }: { hint: GuestShareHint }): ReactEleme
         setPhase({ k: "ended", reason: (m.reason as string) ?? "Session ended." });
     });
     ws.addEventListener("close", () => {
-      setPhase((p) =>
-        p.k === "ready" || p.k === "ended" ? p : { k: "ended", reason: "Disconnected." },
-      );
+      // A drop DURING the handshake (e.g. phone screen turned off while "Requesting to join") used
+      // to dead-end at "Disconnected". Auto-reconnect + re-send the request a few times so the guest
+      // recovers on wake. After ready, the scoped /ws (DaemonClient) owns the connection and the
+      // pairing channel is disposable, so leave that phase alone.
+      const cur = phaseRef.current.k;
+      if (cur === "ready" || cur === "ended") return;
+      if (reconnectAttemptsRef.current >= 8) {
+        setPhase({ k: "ended", reason: "Disconnected. Reload the page to try again." });
+        return;
+      }
+      reconnectAttemptsRef.current += 1;
+      setPhase({ k: "pending" });
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = setTimeout(() => sendJoinRequestRef.current?.(), 1200);
     });
     return ws;
   }, [goReady]);
 
-  const onRequest = useCallback(() => {
+  const sendJoinRequest = useCallback(() => {
     setError(null);
     const ws = wsRef.current && wsRef.current.readyState === 1 ? wsRef.current : connectPairing();
-    const payload = JSON.stringify({ t: "request", name: name.trim().slice(0, 40) });
+    const payload = JSON.stringify({ t: "request", name: nameRef.current.trim().slice(0, 40) });
     if (ws.readyState === 1) ws.send(payload);
     else ws.addEventListener("open", () => ws.send(payload), { once: true });
     setPhase({ k: "pending" });
-  }, [connectPairing, name]);
+  }, [connectPairing]);
+  const sendJoinRequestRef = useRef<(() => void) | null>(null);
+  sendJoinRequestRef.current = sendJoinRequest;
+
+  const onRequest = useCallback(() => {
+    nameRef.current = name;
+    reconnectAttemptsRef.current = 0;
+    sendJoinRequest();
+  }, [name, sendJoinRequest]);
 
   const onCodeChange = useCallback((next: string) => {
     const digits = next.replace(/\D/g, "").slice(0, 6);
@@ -243,7 +269,12 @@ export function GuestShareScreen({ hint }: { hint: GuestShareHint }): ReactEleme
   }, []);
 
   useEffect(() => {
+    phaseRef.current = phase;
+  }, [phase]);
+
+  useEffect(() => {
     return () => {
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
       try {
         wsRef.current?.close();
       } catch {
@@ -576,6 +607,9 @@ function GuestGate({
         <Text style={styles.sub}>
           The host is deciding whether to let you in. Keep this tab open.
         </Text>
+        <Pressable onPress={onRequest} hitSlop={8}>
+          <Text style={styles.link}>Start over</Text>
+        </Pressable>
       </>
     );
   }
@@ -605,6 +639,9 @@ function GuestGate({
           autoFocus
         />
         {error ? <Text style={styles.error}>{error}</Text> : null}
+        <Pressable onPress={onRequest} hitSlop={8}>
+          <Text style={styles.link}>Get a new code</Text>
+        </Pressable>
       </>
     );
   }
@@ -618,9 +655,12 @@ function GuestGate({
         style={styles.input}
         value={name}
         onChangeText={onName}
+        onSubmitEditing={onRequest}
+        returnKeyType="go"
         placeholder="Your name"
         placeholderTextColor={styles.mutedText.color}
         maxLength={40}
+        autoFocus
       />
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <Pressable style={styles.btn} onPress={onRequest}>
@@ -748,4 +788,10 @@ const styles = StyleSheet.create((theme) => ({
   },
   accentText: { color: theme.colors.accent },
   mutedText: { color: theme.colors.foregroundMuted },
+  link: {
+    color: theme.colors.accent,
+    fontSize: theme.fontSize.sm,
+    textAlign: "center",
+    marginTop: theme.spacing[2],
+  },
 }));
