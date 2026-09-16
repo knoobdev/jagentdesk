@@ -54,6 +54,7 @@ async function pairGuestClient(
   shareId: string,
   streamed: SessionShare[],
   label: string,
+  capabilities?: Record<string, unknown>,
 ): Promise<DaemonClient> {
   const guestWs = new WebSocket(`ws://127.0.0.1:${sharePort}/guest`);
   const msgs: Record<string, unknown>[] = [];
@@ -96,6 +97,7 @@ async function pairGuestClient(
     url: `ws://127.0.0.1:${sharePort}/ws`,
     clientId: `guest-files-${label}`,
     password: guestToken,
+    ...(capabilities ? { capabilities } : {}),
   });
   await guest.connect();
   guestWs.close();

@@ -320,6 +320,25 @@ function GuestReadyView({
   }, [needsWorkspace, sessionReady, serverId, workspaceId, workspaceCwd]);
   const workspaceRoot = useWorkspaceDirectory(serverId, workspaceId) ?? "";
 
+  // Subscribe to the shared agent's timeline so the guest receives LIVE agent_stream pushes (the
+  // agent's responses). In the host app this is driven by the workspace screen registering "visible"
+  // agents; the guest surface bypasses that, so without this the guest only ever sees its own message
+  // and spins forever waiting for a reply. Prefer the app's viewedTimelineSync (it also repairs the
+  // subscription on reconnect); fall back to a direct subscription when it isn't available.
+  const viewedTimelineSync = useSessionStore(
+    (s) => s.sessions[serverId]?.viewedTimelineSync ?? null,
+  );
+  const client = useSessionStore((s) => s.sessions[serverId]?.client ?? null);
+  useEffect(() => {
+    if (!sessionReady) return undefined;
+    if (viewedTimelineSync) {
+      viewedTimelineSync.replaceVisibleAgentIds("guest-share", [agentId]);
+      return () => viewedTimelineSync.replaceVisibleAgentIds("guest-share", []);
+    }
+    if (client) void client.setAgentTimelineSubscription([agentId]).catch(() => undefined);
+    return undefined;
+  }, [sessionReady, viewedTimelineSync, client, agentId]);
+
   const target = useMemo<WorkspaceTabTarget>(() => {
     if (tab === "changes") return { kind: "working_diff" };
     if (tab === "files" && openFilePath) return { kind: "file", path: openFilePath };

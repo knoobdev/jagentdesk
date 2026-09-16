@@ -171,22 +171,33 @@ describe.skipIf(!hasBundle)("session sharing — real app guest surface (browser
 
     expect(errors, `no uncaught page errors: ${errors.join(" | ")}`).toEqual([]);
 
-    // Stage 4: the guest sends a message through the real composer and the host sees it in the
-    // shared agent's timeline — proving send_agent_message flows over the scoped session (and that
-    // the real composer does not truncate the text the way the old bespoke page did).
-    const guestText = `hello from guest ${Date.now()}`;
+    // Stage 4: the guest sends a message through the real composer — the fake agent answers
+    // deterministically ("state saved"). The host must see the message, AND the guest page must
+    // render the agent's REPLY live (regression: the guest used to spin forever because it never
+    // subscribed to the timeline, so agent_stream pushes never arrived).
     const composer = page.locator('[placeholder^="Message"]').first();
     await composer.click();
-    await composer.fill(guestText);
+    await composer.fill("say 'state saved'");
     await composer.press("Enter");
 
     let sawGuestMessage = false;
     for (let i = 0; i < 40 && !sawGuestMessage; i++) {
       const tl = await ctx.client.fetchAgentTimeline(agentId, { direction: "tail", limit: 20 });
-      sawGuestMessage = JSON.stringify(tl ?? {}).includes(guestText);
+      sawGuestMessage = JSON.stringify(tl ?? {}).includes("state saved");
       if (!sawGuestMessage) await sleep(200);
     }
     expect(sawGuestMessage, "host timeline received the guest's message").toBe(true);
+
+    // The agent's reply must appear in the GUEST page (live agent_stream rendered).
+    try {
+      await page.getByText("state saved", { exact: false }).first().waitFor({ timeout: 30000 });
+    } catch (e) {
+      const body = await page.evaluate(() => document.body?.innerText ?? "").catch(() => "");
+      throw new Error(
+        `guest never rendered the agent reply: ${String(e)}\npageErrors=${errors.join(" | ")}\nbodyText=${body.slice(0, 800)}`,
+        { cause: e },
+      );
+    }
 
     unsub();
     // Close the guest browser (drops the scoped /ws) BEFORE stopping the share, so teardown does not
