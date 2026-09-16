@@ -156,6 +156,9 @@ export function GuestShareScreen({ hint }: { hint: GuestShareHint }): ReactEleme
           useTls,
           password: guestToken,
           label: hint.agentLabel,
+          // Guest is a remote tunnel connection — keep retrying on idle/network drops instead of
+          // hitting the local-daemon retry cap (which would leave the guest stuck disconnected).
+          keepRetrying: true,
         });
         // The guest's fetch_agents/project.list are answered but FILTERED server-side to the one
         // shared agent / empty projects, so the store may not carry the workspaceId we need. Fetch
