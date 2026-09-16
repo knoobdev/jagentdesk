@@ -9,6 +9,9 @@ import {
   type PaneContextValue,
 } from "@/panels/pane-context";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
+import { useSessionStore } from "@/stores/session-store";
+import { normalizeAgentSnapshot } from "@/utils/agent-snapshots";
+import { applyLegacyDaemonWorkspaceOwnership } from "@/workspace/legacy-daemon-workspaces";
 
 /**
  * Guest session screen (spec §21 / ADR-0019). Served as the REAL app through the Cloudflare tunnel;
@@ -71,12 +74,25 @@ export function GuestShareScreen({ hint }: { hint: GuestShareHint }): ReactEleme
           password: guestToken,
           label: hint.agentLabel,
         });
-        // Resolve the agent's workspace (agentId-guarded fetch) so the chat pane has its context.
+        // The guest scope forbids the host's fetch_agents/project.list directory bootstraps, so the
+        // session store won't auto-populate. Fetch the ONE shared agent (agentId-guarded) and place
+        // it in the store ourselves so the real AgentConversationPanel renders it.
         const client = store.getSnapshot(serverId)?.client ?? null;
         let workspaceId = "";
         try {
           const res = await client?.fetchAgent({ agentId: hint.agentId });
-          workspaceId = res?.agent?.workspaceId ?? "";
+          if (res?.agent) {
+            workspaceId = res.agent.workspaceId ?? "";
+            const normalized = applyLegacyDaemonWorkspaceOwnership({
+              serverId,
+              agent: normalizeAgentSnapshot(res.agent, serverId),
+            });
+            useSessionStore.getState().setAgents(serverId, (prev) => {
+              const next = new Map(prev);
+              next.set(hint.agentId, normalized);
+              return next;
+            });
+          }
         } catch {
           // proceed without it
         }

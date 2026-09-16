@@ -1,6 +1,6 @@
 {
   "name": "@jagentdesk/desktop",
-  "version": "0.9.18",
+  "version": "0.9.19",
   "private": true,
   "description": "JAgentDesk desktop app (Electron wrapper)",
   "homepage": "https://github.com/knoobdev/jagentdesk",
@@ -14,7 +14,7 @@
   },
   "main": "dist/main.js",
   "scripts": {
-    "build": "npm --prefix ../.. run build:server:clean && npm run build:main && electron-builder --config electron-builder.yml",
+    "build": "npm --prefix ../.. run build:server:clean && node ../../scripts/build-share-app-dist.mjs && npm run build:main && electron-builder --config electron-builder.yml",
     "build:main": "tsc -p tsconfig.json",
     "capture-harness": "./capture-harness/run.sh",
     "dev": "./scripts/dev.sh",
