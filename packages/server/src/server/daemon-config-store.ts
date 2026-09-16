@@ -332,6 +332,7 @@ function mergeMutableConfigIntoPersistedConfig(params: {
   const { persisted, mutable, removeProviders } = params;
   const browserToolsEnabled = readBrowserToolsEnabled(mutable);
   const autorunEnabled = readAutorunEnabled(mutable);
+  const sessionSharingEnabled = readSessionSharingEnabled(mutable);
   const metadataGenerationProviders = readMetadataGenerationProviders(mutable);
   const persistedProviderOverrides = omitProvidersFromOverrides(
     persisted.agents?.providers as Record<string, ProviderOverride> | undefined,
@@ -380,6 +381,10 @@ function mergeMutableConfigIntoPersistedConfig(params: {
         ...persisted.daemon?.autorun,
         enabled: autorunEnabled,
       },
+      sessionSharing: {
+        ...persisted.daemon?.sessionSharing,
+        enabled: sessionSharingEnabled,
+      },
       autoArchiveAfterMerge: mutable.autoArchiveAfterMerge,
       enableTerminalAgentHooks: mutable.enableTerminalAgentHooks,
       appendSystemPrompt: mutable.appendSystemPrompt,
@@ -406,6 +411,14 @@ function readAutorunEnabled(mutable: MutableDaemonConfig): boolean {
     return false;
   }
   return autorun["enabled"] === true;
+}
+
+function readSessionSharingEnabled(mutable: MutableDaemonConfig): boolean {
+  const sharing = (mutable as { sessionSharing?: unknown }).sessionSharing;
+  if (!isRecord(sharing)) {
+    return false;
+  }
+  return sharing["enabled"] === true;
 }
 
 function readMetadataGenerationProviders(

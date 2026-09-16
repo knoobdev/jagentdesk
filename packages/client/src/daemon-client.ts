@@ -158,6 +158,7 @@ import type {
   PluginListItem,
   PluginLogEntry,
   AutorunState,
+  SessionShare,
 } from "@jagentdesk/protocol/messages";
 import type {
   AgentPermissionRequest,
@@ -7548,6 +7549,137 @@ export class DaemonClient {
     if (payload.error) throw new Error(payload.error);
     if (!payload.state) throw new Error("Autorun response missing state");
     return payload.state;
+  }
+
+  // ============================================================================
+  // Session sharing (spec §21 / ADR-0018). Host-side. Gated by features.sessionSharing.
+  // ============================================================================
+
+  async sessionShareCreate(
+    agentId: string,
+    opts?: {
+      shareFullHistory?: boolean;
+      shareDraftPreview?: boolean;
+      requireHostApproval?: boolean;
+      requestId?: string;
+    },
+  ): Promise<SessionShare> {
+    const requestId = this.createRequestId(opts?.requestId);
+    const message = SessionInboundMessageSchema.parse({
+      type: "session.share.create.request",
+      agentId,
+      ...(opts?.shareFullHistory !== undefined ? { shareFullHistory: opts.shareFullHistory } : {}),
+      ...(opts?.shareDraftPreview !== undefined
+        ? { shareDraftPreview: opts.shareDraftPreview }
+        : {}),
+      ...(opts?.requireHostApproval !== undefined
+        ? { requireHostApproval: opts.requireHostApproval }
+        : {}),
+      requestId,
+    });
+    return this.sessionShareRequest(requestId, message, "session.share.create.response");
+  }
+
+  async sessionShareStop(shareId: string, requestId?: string): Promise<SessionShare> {
+    const resolved = this.createRequestId(requestId);
+    const message = SessionInboundMessageSchema.parse({
+      type: "session.share.stop.request",
+      shareId,
+      requestId: resolved,
+    });
+    return this.sessionShareRequest(resolved, message, "session.share.stop.response");
+  }
+
+  async sessionShareRespond(
+    shareId: string,
+    joinRequestId: string,
+    accept: boolean,
+    requestId?: string,
+  ): Promise<SessionShare> {
+    const resolved = this.createRequestId(requestId);
+    const message = SessionInboundMessageSchema.parse({
+      type: "session.share.respond.request",
+      shareId,
+      joinRequestId,
+      accept,
+      requestId: resolved,
+    });
+    return this.sessionShareRequest(resolved, message, "session.share.respond.response");
+  }
+
+  async sessionShareSetOptions(
+    shareId: string,
+    opts: { allowGuestModelMode?: boolean },
+    requestId?: string,
+  ): Promise<SessionShare> {
+    const resolved = this.createRequestId(requestId);
+    const message = SessionInboundMessageSchema.parse({
+      type: "session.share.set_options.request",
+      shareId,
+      ...(opts.allowGuestModelMode !== undefined
+        ? { allowGuestModelMode: opts.allowGuestModelMode }
+        : {}),
+      requestId: resolved,
+    });
+    return this.sessionShareRequest(resolved, message, "session.share.set_options.response");
+  }
+
+  async sessionShareKick(
+    shareId: string,
+    memberId: string,
+    requestId?: string,
+  ): Promise<SessionShare> {
+    const resolved = this.createRequestId(requestId);
+    const message = SessionInboundMessageSchema.parse({
+      type: "session.share.kick.request",
+      shareId,
+      memberId,
+      requestId: resolved,
+    });
+    return this.sessionShareRequest(resolved, message, "session.share.kick.response");
+  }
+
+  async sessionShareList(requestId?: string): Promise<SessionShare[]> {
+    const resolved = this.createRequestId(requestId);
+    const message = SessionInboundMessageSchema.parse({
+      type: "session.share.list.request",
+      requestId: resolved,
+    });
+    return this.sendRequest({
+      requestId: resolved,
+      message,
+      options: { skipQueue: true },
+      select: (msg) =>
+        msg.type === "session.share.list.response" && msg.payload.requestId === resolved
+          ? msg.payload.shares
+          : null,
+    });
+  }
+
+  subscribeSessionShareStream(handler: (share: SessionShare) => void): () => void {
+    return this.on("session.share.stream", (message) => handler(message.payload.share));
+  }
+
+  private async sessionShareRequest(
+    requestId: string,
+    message: SessionInboundMessage,
+    responseType:
+      | "session.share.create.response"
+      | "session.share.stop.response"
+      | "session.share.respond.response"
+      | "session.share.set_options.response"
+      | "session.share.kick.response",
+  ): Promise<SessionShare> {
+    const payload = await this.sendRequest({
+      requestId,
+      message,
+      options: { skipQueue: true },
+      select: (msg) =>
+        msg.type === responseType && msg.payload.requestId === requestId ? msg.payload : null,
+    });
+    if (payload.error) throw new Error(payload.error);
+    if (!payload.share) throw new Error("Session share response missing share");
+    return payload.share;
   }
 
   // ============================================================================

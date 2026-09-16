@@ -167,6 +167,8 @@ import {
 import { ChatScheduleLoopSession } from "./session/chat/chat-schedule-loop-session.js";
 import { AutorunSession } from "./session/autorun/autorun-session.js";
 import type { AutorunService } from "./autorun/service.js";
+import { SessionShareSession } from "./session/session-share/session-share-session.js";
+import type { SessionShareService } from "./session-share/service.js";
 import { ClusterSession } from "./session/cluster/cluster-session.js";
 import { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { DatabaseSession } from "./session/database/database-session.js";
@@ -465,6 +467,7 @@ export interface SessionOptions {
   chatService: FileBackedChatService;
   scheduleService: ScheduleService;
   autorunService?: AutorunService | null;
+  sessionShareService?: SessionShareService | null;
   loopService: LoopService;
   skillsStorage?: SkillsStorage | null;
   usageHistory?: UsageHistoryStorage | null;
@@ -725,6 +728,7 @@ export class Session {
   private readonly forgeHubSession: ForgeHubSession;
   private readonly chatScheduleLoopSession: ChatScheduleLoopSession;
   private readonly autorunSession: AutorunSession | null;
+  private readonly sessionShareSession: SessionShareSession | null;
   private clusterSession!: ClusterSession;
   private databaseSession!: DatabaseSession;
   private readonly providerCatalogSession: ProviderCatalogSession;
@@ -762,6 +766,7 @@ export class Session {
       chatService,
       scheduleService,
       autorunService,
+      sessionShareService,
       loopService,
       checkoutDiffManager,
       github,
@@ -923,6 +928,13 @@ export class Session {
       ? new AutorunSession({
           host: { emit: (msg) => this.emit(msg) },
           autorunService,
+          logger: this.sessionLogger,
+        })
+      : null;
+    this.sessionShareSession = sessionShareService
+      ? new SessionShareSession({
+          host: { emit: (msg) => this.emit(msg) },
+          sessionShareService,
           logger: this.sessionLogger,
         })
       : null;
@@ -1990,6 +2002,7 @@ export class Session {
       () => this.dispatchTerminalMessage(msg),
       () => this.dispatchChatScheduleLoopMessage(msg),
       () => this.dispatchAutorunMessage(msg),
+      () => this.dispatchSessionShareMessage(msg),
       () => this.dispatchClusterMessage(msg),
       () => this.dispatchDatabaseMessage(msg),
       () => this.dispatchMigrationMessage(msg),
@@ -2724,6 +2737,27 @@ export class Session {
         return autorun.handleGetRequest(msg);
       case "autorun.list.request":
         return autorun.handleListRequest(msg);
+      default:
+        return undefined;
+    }
+  }
+
+  private dispatchSessionShareMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    const share = this.sessionShareSession;
+    if (!share) return undefined;
+    switch (msg.type) {
+      case "session.share.create.request":
+        return share.handleCreateRequest(msg);
+      case "session.share.stop.request":
+        return share.handleStopRequest(msg);
+      case "session.share.kick.request":
+        return share.handleKickRequest(msg);
+      case "session.share.respond.request":
+        return share.handleRespondRequest(msg);
+      case "session.share.set_options.request":
+        return share.handleSetOptionsRequest(msg);
+      case "session.share.list.request":
+        return share.handleListRequest(msg);
       default:
         return undefined;
     }

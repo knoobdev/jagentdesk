@@ -21,6 +21,7 @@ import type { ClusterRegistry } from "./cluster/cluster-registry.js";
 import type { DatabaseRegistry } from "./database/database-registry.js";
 import type { ScheduleService } from "./schedule/service.js";
 import type { AutorunService } from "./autorun/service.js";
+import type { SessionShareService } from "./session-share/service.js";
 import type { AutorunState } from "@jagentdesk/protocol/messages";
 import type { CheckoutDiffManager, CheckoutDiffMetrics } from "./checkout-diff-manager.js";
 import type { DaemonConfigStore, MutableDaemonConfig } from "./daemon-config-store.js";
@@ -606,6 +607,7 @@ export class VoiceAssistantWebSocketServer {
   private readonly databaseRegistry: DatabaseRegistry;
   private readonly scheduleService: ScheduleService;
   private autorunService!: AutorunService | null;
+  private sessionShareService!: SessionShareService | null;
   private readonly checkoutDiffManager: CheckoutDiffManager;
   private readonly github: ForgeService;
   private readonly workspaceGitService: WorkspaceGitService;
@@ -729,6 +731,7 @@ export class VoiceAssistantWebSocketServer {
     usageHistory?: UsageHistoryStorage | null,
     databaseRegistry?: DatabaseRegistry,
     autorunService?: AutorunService | null,
+    sessionShareService?: SessionShareService | null,
   ) {
     this.logger = logger.child({ module: "websocket-server" });
     this.advertiseDaemonStatusRpc = wsConfig.daemonStatusRpc !== false;
@@ -781,6 +784,7 @@ export class VoiceAssistantWebSocketServer {
       serviceProxyPublicBaseUrl,
       resolveScriptHealth,
       autorunService,
+      sessionShareService,
     });
     if (!providerSnapshotManager) {
       throw new Error("providerSnapshotManager is required");
@@ -841,8 +845,10 @@ export class VoiceAssistantWebSocketServer {
     serviceProxyPublicBaseUrl: string | null | undefined;
     resolveScriptHealth: ((hostname: string) => ScriptHealthState | null) | undefined;
     autorunService: AutorunService | null | undefined;
+    sessionShareService: SessionShareService | null | undefined;
   }): void {
     this.autorunService = params.autorunService ?? null;
+    this.sessionShareService = params.sessionShareService ?? null;
     this.speech = params.speech ?? null;
     this.terminalManager = params.terminalManager ?? null;
     if (this.terminalManager) {
@@ -1734,6 +1740,7 @@ export class VoiceAssistantWebSocketServer {
       databaseRegistry: this.databaseRegistry,
       scheduleService: this.scheduleService,
       autorunService: this.autorunService,
+      sessionShareService: this.sessionShareService,
       checkoutDiffManager: this.checkoutDiffManager,
       github: this.github,
       workspaceGitService: this.workspaceGitService,
@@ -2177,6 +2184,8 @@ export class VoiceAssistantWebSocketServer {
         // daemon opted in (autorunService wired). Gates the whole autorun.* surface;
         // autorunApproval gates the per-action-approval mode toggle (§20.7.3).
         ...(this.autorunService ? { autorun: true, autorunApproval: true } : {}),
+        // Session sharing (spec §21 / ADR-0018); advertised only when the daemon opted in.
+        ...(this.sessionShareService ? { sessionSharing: true } : {}),
         // Advertise the plugin management surface only when a PluginService is
         // wired; without it the plugin.* RPCs return empty/disabled results.
         ...(this.pluginRuntime

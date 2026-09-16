@@ -385,6 +385,12 @@ function resolveAutorunEnabled(persisted: ReturnType<typeof loadPersistedConfig>
   return persisted.daemon?.autorun?.enabled ?? false;
 }
 
+function resolveSessionSharingEnabled(persisted: ReturnType<typeof loadPersistedConfig>): boolean {
+  // Session sharing defaults OFF (spec §21.11): it exposes one agent chat to the public
+  // internet via a Cloudflare tunnel, so it is dangerous and strictly opt-in per daemon.
+  return persisted.daemon?.sessionSharing?.enabled ?? false;
+}
+
 // Default ON so agents actually receive the jagentdesk MCP tools (kubectl_get,
 // orchestration, schedules, …). The config snapshot bootstrap reports already
 // assumes this default, and the whole point of the /mcp/agents endpoint is for
@@ -408,6 +414,7 @@ function resolveStaticLoadConfigSettings(
     mcpInjectIntoAgents: resolveMcpInjectIntoAgents(cli, persisted),
     browserToolsEnabled: resolveBrowserToolsEnabled(persisted),
     autorunEnabled: resolveAutorunEnabled(persisted),
+    sessionSharingEnabled: resolveSessionSharingEnabled(persisted),
     autoArchiveAfterMerge: persisted.daemon?.autoArchiveAfterMerge ?? false,
     appendSystemPrompt: resolveAppendSystemPrompt(persisted),
     terminalProfiles: persisted.daemon?.terminalProfiles,
@@ -438,6 +445,7 @@ export function loadConfig(
     mcpInjectIntoAgents,
     browserToolsEnabled,
     autorunEnabled,
+    sessionSharingEnabled,
     autoArchiveAfterMerge,
     appendSystemPrompt,
     terminalProfiles,
@@ -473,6 +481,7 @@ export function loadConfig(
     mcpInjectIntoAgents,
     browserToolsEnabled,
     autorunEnabled,
+    sessionSharingEnabled,
     git: resolveGitProcessConfig(env, persisted),
     autoArchiveAfterMerge,
     enableTerminalAgentHooks: persisted.daemon?.enableTerminalAgentHooks ?? false,
