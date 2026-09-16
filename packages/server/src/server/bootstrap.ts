@@ -153,6 +153,8 @@ import { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { DatabaseRegistry } from "./database/database-registry.js";
 import { ScheduleService } from "./schedule/service.js";
 import { AutorunService } from "./autorun/service.js";
+import { SessionShareService } from "./session-share/service.js";
+import { TunnelManager } from "./session-share/tunnel-manager.js";
 import { DaemonConfigStore, type MutableDaemonConfig } from "./daemon-config-store.js";
 import { PluginService } from "./plugins/index.js";
 import { BrowserToolsBroker } from "./browser-tools/broker.js";
@@ -414,6 +416,8 @@ export interface JAgentDeskDaemonConfig {
   // Autonomous run (spec §20). Default OFF; only exposes the autorun.* RPC surface +
   // `features.autorun` capability when explicitly enabled in persisted config.
   autorunEnabled?: boolean;
+  // Session sharing (spec §21). Default OFF; exposes one agent chat via a Cloudflare tunnel.
+  sessionSharingEnabled?: boolean;
   git?: {
     maxProcessesPerSecond: number;
     maxProcessConcurrency: number;
@@ -549,6 +553,7 @@ function createInitialMutableDaemonConfig(config: JAgentDeskDaemonConfig): Mutab
     mcp: { injectIntoAgents: config.mcpInjectIntoAgents ?? true },
     browserTools: { enabled: config.browserToolsEnabled ?? true },
     autorun: { enabled: config.autorunEnabled ?? false },
+    sessionSharing: { enabled: config.sessionSharingEnabled ?? false },
     providers,
     metadataGeneration: {
       providers: config.metadataGeneration?.providers ?? [],
@@ -1365,6 +1370,22 @@ export async function createJAgentDeskDaemon(
     { elapsed: elapsed(), enabled: config.autorunEnabled === true },
     "Autorun service initialized",
   );
+  // Session sharing (spec §21 / ADR-0018). Default OFF: the service + `features.sessionSharing`
+  // only exist when the daemon opted in. Cloudflare quick tunnel + a scoped per-share server.
+  const sessionShareService = config.sessionSharingEnabled
+    ? new SessionShareService({
+        logger,
+        agentManager,
+        agentStorage,
+        tunnelManager: new TunnelManager(logger),
+        onUpdate: (share) =>
+          emitExternalSessionMessage({ type: "session.share.stream", payload: { share } }),
+      })
+    : null;
+  logger.info(
+    { elapsed: elapsed(), enabled: config.sessionSharingEnabled === true },
+    "Session share service initialized",
+  );
   logger.info({ elapsed: elapsed() }, "Loading persisted agent registry");
   const persistedRecords = await agentStorage.list();
   logger.info(
@@ -1741,6 +1762,7 @@ export async function createJAgentDeskDaemon(
               usageHistory,
               databaseRegistry,
               autorunService,
+              sessionShareService,
             );
             // Bind the plugin session host and start configured plugins before any
             // external ingress attaches, mirroring upstream's pre-accept ordering.
@@ -1815,6 +1837,7 @@ export async function createJAgentDeskDaemon(
     speechService.stop();
     await scheduleService.stop().catch(() => undefined);
     await autorunService?.stop().catch(() => undefined);
+    await sessionShareService?.stop().catch(() => undefined);
     await tsnetListener?.stop().catch(() => undefined);
     if (wsServer) {
       await wsServer.close();

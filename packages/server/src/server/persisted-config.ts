@@ -260,6 +260,13 @@ export const PersistedConfigSchema = z
           })
           .passthrough()
           .optional(),
+        // Session sharing (spec §21.11). Default OFF; opt-in per daemon.
+        sessionSharing: z
+          .object({
+            enabled: z.boolean().optional(),
+          })
+          .passthrough()
+          .optional(),
         git: z
           .object({
             maxProcessesPerSecond: z.number().int().positive().optional(),

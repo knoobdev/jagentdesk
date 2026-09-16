@@ -39,6 +39,7 @@ const daemonConfig: MutableDaemonConfig = {
   mcp: { injectIntoAgents: true },
   browserTools: { enabled: false },
   autorun: { enabled: false },
+  sessionSharing: { enabled: false },
   providers: {},
   metadataGeneration: { providers: [] },
   autoArchiveAfterMerge: false,

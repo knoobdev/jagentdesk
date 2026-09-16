@@ -282,6 +282,8 @@ export const MutableDaemonConfigSchema = z
     browserTools: MutableBrowserToolsConfigSchema.default({ enabled: true }),
     // Autonomous run (spec §20.12). Default OFF: opt-in per daemon.
     autorun: z.object({ enabled: z.boolean() }).default({ enabled: false }),
+    // Session sharing (spec §21.11). Default OFF: opt-in per daemon.
+    sessionSharing: z.object({ enabled: z.boolean() }).default({ enabled: false }),
     providers: z.record(z.string(), MutableDaemonProviderConfigSchema).default({}),
     metadataGeneration: MutableMetadataGenerationConfigSchema.default({ providers: [] }),
     autoArchiveAfterMerge: z.boolean().default(false),
@@ -318,6 +320,7 @@ export const MutableDaemonConfigPatchSchema = z
     removeProviders: z.array(z.string().min(1)).optional(),
     metadataGeneration: MutableMetadataGenerationConfigSchema.partial().optional(),
     autorun: z.object({ enabled: z.boolean().optional() }).passthrough().optional(),
+    sessionSharing: z.object({ enabled: z.boolean().optional() }).passthrough().optional(),
     autoArchiveAfterMerge: z.boolean().optional(),
     enableTerminalAgentHooks: z.boolean().optional(),
     appendSystemPrompt: z.string().optional(),
@@ -2803,6 +2806,93 @@ export const AutorunListRequestSchema = z.object({
   requestId: z.string(),
 });
 
+// ===== Session sharing (spec 21 / ADR-0018) — HOST-side surface ==============
+// Host shares ONE agent's chat out via a Cloudflare quick tunnel; guests join a scoped web
+// app with a 6-digit code. These messages are host↔daemon over the main /ws. The guest↔
+// scoped-server wire is a separate protocol (session-share/guest-protocol.ts).
+export const SessionShareStatusSchema = z.enum(["active", "revoked", "expired"]);
+export const SessionShareMemberSchema = z.object({
+  memberId: z.string(),
+  kind: z.enum(["host", "guest"]),
+  label: z.string(),
+  joinedAt_ms: z.number().int(),
+  lastSeen_ms: z.number().int(),
+  typing: z.boolean(),
+});
+// A guest who opened the link and asked to join. The host must Accept/Reject first (spec
+// §21.5); on accept the daemon mints a 6-digit `code` (shown ONLY to the host, who relays it
+// to the guest). `pending` = awaiting host decision; `approved` = code issued, awaiting the
+// guest to enter it. The code is minted by the DAEMON (single source) so dialogs on multiple
+// host devices never conflict.
+export const SessionShareRequestSchema = z.object({
+  requestId: z.string(),
+  label: z.string(),
+  requestedAt_ms: z.number().int(),
+  status: z.enum(["pending", "approved"]),
+  code: z.string().nullable().optional(),
+});
+export const SessionShareSchema = z.object({
+  shareId: z.string(),
+  agentId: z.string(),
+  status: SessionShareStatusSchema,
+  // The public tunnel URL guests open; null until the tunnel is up.
+  tunnelUrl: z.string().nullable().optional(),
+  createdAt_ms: z.number().int(),
+  expiresAt_ms: z.number().int(),
+  // Options (spec 21.6/21.7); all default OFF for safety.
+  shareFullHistory: z.boolean(),
+  shareDraftPreview: z.boolean(),
+  requireHostApproval: z.boolean(),
+  // When ON, guests may change the agent's model/mode from the web surface (spec §21.6). Default
+  // OFF: the guest surface shows no model/mode control and the daemon rejects guest set-mode/
+  // set-model. The host grants this at connect time and can toggle it live via set-options.
+  allowGuestModelMode: z.boolean(),
+  // Guests awaiting host Accept/Reject, and approved ones with their code (host-only).
+  pendingRequests: z.array(SessionShareRequestSchema),
+  members: z.array(SessionShareMemberSchema),
+});
+export const SessionShareCreateRequestSchema = z.object({
+  type: z.literal("session.share.create.request"),
+  agentId: z.string(),
+  shareFullHistory: z.boolean().optional(),
+  shareDraftPreview: z.boolean().optional(),
+  requireHostApproval: z.boolean().optional(),
+  allowGuestModelMode: z.boolean().optional(),
+  requestId: z.string(),
+});
+// Host toggles share options live (spec §21.6) — currently the model/mode grant. Effective
+// immediately for connected guests (the guest surface shows/hides its model/mode control).
+export const SessionShareSetOptionsRequestSchema = z.object({
+  type: z.literal("session.share.set_options.request"),
+  shareId: z.string(),
+  allowGuestModelMode: z.boolean().optional(),
+  requestId: z.string(),
+});
+export const SessionShareStopRequestSchema = z.object({
+  type: z.literal("session.share.stop.request"),
+  shareId: z.string(),
+  requestId: z.string(),
+});
+export const SessionShareListRequestSchema = z.object({
+  type: z.literal("session.share.list.request"),
+  requestId: z.string(),
+});
+export const SessionShareKickRequestSchema = z.object({
+  type: z.literal("session.share.kick.request"),
+  shareId: z.string(),
+  memberId: z.string(),
+  requestId: z.string(),
+});
+// Host Accept/Reject of a guest's join request (spec §21.5). `joinRequestId` identifies the
+// pending request; `accept:true` mints + reveals the 6-digit code to the host.
+export const SessionShareRespondRequestSchema = z.object({
+  type: z.literal("session.share.respond.request"),
+  shareId: z.string(),
+  joinRequestId: z.string(),
+  accept: z.boolean(),
+  requestId: z.string(),
+});
+
 export const ForgeCliStatusRequestSchema = z.object({
   type: z.literal("forge.cli.status.request"),
   forge: z.string(),
@@ -3914,6 +4004,12 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   AutorunStopRequestSchema,
   AutorunGetRequestSchema,
   AutorunListRequestSchema,
+  SessionShareCreateRequestSchema,
+  SessionShareStopRequestSchema,
+  SessionShareListRequestSchema,
+  SessionShareKickRequestSchema,
+  SessionShareRespondRequestSchema,
+  SessionShareSetOptionsRequestSchema,
   ForgeChangeRequestCreateRequestSchema,
   ForgeChangeRequestCloseRequestSchema,
   ForgeReleaseCreateRequestSchema,
@@ -4320,6 +4416,7 @@ export const ServerInfoStatusPayloadSchema = z
         forgeHubLogin: z.boolean().optional(), // Milestone C: app-driven device-flow sign-in (§19.3.7, ADR-0016 §7)
         autorun: z.boolean().optional(), // Autonomous run (spec §20 / ADR-0017); default OFF, opt-in per daemon
         autorunApproval: z.boolean().optional(), // Per-action approval mode for autorun (§20.7.3)
+        sessionSharing: z.boolean().optional(), // Session sharing via Cloudflare tunnel (spec §21 / ADR-0018); default OFF
       })
       .optional(),
   })
@@ -6482,6 +6579,42 @@ export const AutorunStreamSchema = z.object({
   payload: z.object({ state: AutorunStateSchema }),
 });
 
+// ===== Session sharing responses + stream — spec 21 / ADR-0018 ===============
+const SessionSharePayload = z.object({
+  share: SessionShareSchema.nullable(),
+  error: z.string().nullable().optional(),
+  requestId: z.string(),
+});
+export const SessionShareCreateResponseSchema = z.object({
+  type: z.literal("session.share.create.response"),
+  payload: SessionSharePayload,
+});
+export const SessionShareStopResponseSchema = z.object({
+  type: z.literal("session.share.stop.response"),
+  payload: SessionSharePayload,
+});
+export const SessionShareKickResponseSchema = z.object({
+  type: z.literal("session.share.kick.response"),
+  payload: SessionSharePayload,
+});
+export const SessionShareRespondResponseSchema = z.object({
+  type: z.literal("session.share.respond.response"),
+  payload: SessionSharePayload,
+});
+export const SessionShareSetOptionsResponseSchema = z.object({
+  type: z.literal("session.share.set_options.response"),
+  payload: SessionSharePayload,
+});
+export const SessionShareListResponseSchema = z.object({
+  type: z.literal("session.share.list.response"),
+  payload: z.object({ shares: z.array(SessionShareSchema), requestId: z.string() }),
+});
+// Live push whenever a share changes (guest join/leave, presence, typing, status).
+export const SessionShareStreamSchema = z.object({
+  type: z.literal("session.share.stream"),
+  payload: z.object({ share: SessionShareSchema }),
+});
+
 export const ForgeCliStatusResponseSchema = z.object({
   type: z.literal("forge.cli.status.response"),
   payload: z.object({
@@ -7534,6 +7667,13 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   AutorunGetResponseSchema,
   AutorunListResponseSchema,
   AutorunStreamSchema,
+  SessionShareCreateResponseSchema,
+  SessionShareStopResponseSchema,
+  SessionShareKickResponseSchema,
+  SessionShareRespondResponseSchema,
+  SessionShareSetOptionsResponseSchema,
+  SessionShareListResponseSchema,
+  SessionShareStreamSchema,
   ForgeChangeRequestCreateResponseSchema,
   ForgeChangeRequestCloseResponseSchema,
   ForgeReleaseCreateResponseSchema,
@@ -8115,6 +8255,23 @@ export type AutorunGetResponse = z.infer<typeof AutorunGetResponseSchema>;
 export type AutorunListRequest = z.infer<typeof AutorunListRequestSchema>;
 export type AutorunListResponse = z.infer<typeof AutorunListResponseSchema>;
 export type AutorunStream = z.infer<typeof AutorunStreamSchema>;
+export type SessionShareStatus = z.infer<typeof SessionShareStatusSchema>;
+export type SessionShareMember = z.infer<typeof SessionShareMemberSchema>;
+export type SessionShareRequest = z.infer<typeof SessionShareRequestSchema>;
+export type SessionShare = z.infer<typeof SessionShareSchema>;
+export type SessionShareRespondRequest = z.infer<typeof SessionShareRespondRequestSchema>;
+export type SessionShareRespondResponse = z.infer<typeof SessionShareRespondResponseSchema>;
+export type SessionShareSetOptionsRequest = z.infer<typeof SessionShareSetOptionsRequestSchema>;
+export type SessionShareSetOptionsResponse = z.infer<typeof SessionShareSetOptionsResponseSchema>;
+export type SessionShareCreateRequest = z.infer<typeof SessionShareCreateRequestSchema>;
+export type SessionShareCreateResponse = z.infer<typeof SessionShareCreateResponseSchema>;
+export type SessionShareStopRequest = z.infer<typeof SessionShareStopRequestSchema>;
+export type SessionShareStopResponse = z.infer<typeof SessionShareStopResponseSchema>;
+export type SessionShareListRequest = z.infer<typeof SessionShareListRequestSchema>;
+export type SessionShareListResponse = z.infer<typeof SessionShareListResponseSchema>;
+export type SessionShareKickRequest = z.infer<typeof SessionShareKickRequestSchema>;
+export type SessionShareKickResponse = z.infer<typeof SessionShareKickResponseSchema>;
+export type SessionShareStream = z.infer<typeof SessionShareStreamSchema>;
 // Forge Hub — Milestone D types
 export type ForgeChangeRequestCreateRequest = z.infer<typeof ForgeChangeRequestCreateRequestSchema>;
 export type ForgeChangeRequestCreateResponse = z.infer<

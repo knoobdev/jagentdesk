@@ -13,6 +13,7 @@ function makeConfig(browserToolsEnabled = false): MutableDaemonConfig {
     mcp: { injectIntoAgents: false },
     browserTools: { enabled: browserToolsEnabled },
     autorun: { enabled: false },
+    sessionSharing: { enabled: false },
     providers: {},
     metadataGeneration: { providers: [] },
     autoArchiveAfterMerge: false,

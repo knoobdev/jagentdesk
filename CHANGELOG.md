@@ -1,9 +1,42 @@
 # Changelog
 
 All notable changes to JAgentDesk are documented here. JAgentDesk versions its
-own release line (now `0.9.13`); the many `v0.1.x`–`v1.0.x` tags in history are
+own release line (now `0.9.14`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
+
+## v0.9.14 — 2026-09-16
+
+Session sharing — hand one agent chat to someone outside your tailnet through a
+web link, with your approval and a 6-digit code.
+
+### Added
+
+- **Session sharing (spec §21 / ADR-0018)** — a **Share button** in the chat
+  composer turns the current agent's chat into a public **Cloudflare quick-tunnel
+  web link**. A guest opens it **in any browser — no app install** — asks to join,
+  and (once you approve) enters a **6-digit code** to chat in that session. Default
+  **OFF**; enable it in **Settings → Host** (takes effect after the daemon restarts).
+- **Host approves every guest** — when someone asks to join, an **Accept/Reject
+  dialog pops up automatically on every one of your devices** (desktop + mobile).
+  The 6-digit code is minted by the **daemon** (single source) so the dialogs never
+  hand out conflicting codes. Reject, or **Kick** / **Stop sharing** at any time.
+- **Presence** — you see each guest viewing, and who is **typing…**, live; the guest
+  sees the agent's turns stream in as you do.
+- **Scoped by construction** — the tunnel exposes only a bespoke, minimal guest
+  surface for that **one agent** (read its transcript, send prompts, presence) — not
+  the daemon's main `/ws`, no other agent, no files/terminal/git/config.
+- **Dangerous actions still ask you** — a guest-triggered turn runs under the real
+  agent; any permission request routes to the **host app**, never the guest (the
+  guest isn't a trusted session).
+- **Model/mode stays yours by default** — guests can't change the agent's model or
+  mode unless you flip **"Let guests change the agent's mode"** in the share sheet
+  (`allowGuestModelMode`, off by default). Even then the daemon re-checks the grant
+  on every change — the hidden control isn't the guard.
+- **Ephemeral + revocable** — the tunnel is a child process of the daemon: stopping
+  the share or the daemon kills it and the URL dies; shares expire after 60 minutes.
+  Needs `cloudflared` on the host; if it's missing, sharing reports `cloudflared_missing`
+  with install guidance.
 
 ## v0.9.13 — 2026-09-16
 
