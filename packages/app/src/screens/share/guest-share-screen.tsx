@@ -2,16 +2,46 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } 
 import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { AgentConversationPanel } from "@/panels/agent-panel";
+import { filePanelRegistration } from "@/panels/file-panel";
+import { workingDiffPanelRegistration } from "@/panels/diff-panel";
+import { FileExplorerPane } from "@/components/file-explorer-pane";
 import {
   PaneFocusProvider,
   PaneProvider,
   createPaneFocusContextValue,
   type PaneContextValue,
 } from "@/panels/pane-context";
+import type { WorkspaceTabTarget } from "@/workspace-tabs/model";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
-import { useSessionStore } from "@/stores/session-store";
+import { useSessionStore, type WorkspaceDescriptor } from "@/stores/session-store";
+import { useWorkspaceDirectory } from "@/stores/session-store-hooks";
 import { normalizeAgentSnapshot } from "@/utils/agent-snapshots";
 import { applyLegacyDaemonWorkspaceOwnership } from "@/workspace/legacy-daemon-workspaces";
+
+const WorkingDiffPanel = workingDiffPanelRegistration.component;
+const FilePanel = filePanelRegistration.component;
+
+// Seed a minimal workspace descriptor so useWorkspaceDirectory(serverId, workspaceId) resolves to
+// the shared agent's cwd — required by the file + working-diff panels (they read the directory from
+// the store). Keyed by workspaceId so the pane's workspaceId lookup finds it.
+function seedGuestWorkspace(serverId: string, workspaceId: string, cwd: string): void {
+  const descriptor: WorkspaceDescriptor = {
+    id: workspaceId,
+    projectId: "guest",
+    projectDisplayName: "Shared workspace",
+    projectRootPath: cwd,
+    workspaceDirectory: cwd,
+    projectKind: "directory",
+    workspaceKind: "directory",
+    name: "Shared workspace",
+    status: "done",
+    statusEnteredAt: null,
+    archivingAt: null,
+    diffStat: null,
+    scripts: [],
+  };
+  useSessionStore.getState().mergeWorkspaces(serverId, [descriptor]);
+}
 
 /**
  * Guest session screen (spec §21 / ADR-0019). Served as the REAL app through the Cloudflare tunnel;
@@ -19,25 +49,61 @@ import { applyLegacyDaemonWorkspaceOwnership } from "@/workspace/legacy-daemon-w
  * runtime pointed at the scoped /ws with the guest token and render the actual agent chat
  * (`AgentConversationPanel` + real composer). No editor/workspace chrome — just the shared agent.
  */
+export interface GuestShareCapabilities {
+  chat: boolean;
+  files: boolean;
+  terminal: boolean;
+  modelMode: boolean;
+}
+
 export interface GuestShareHint {
   agentId: string;
   agentLabel: string;
+  capabilities: GuestShareCapabilities;
+  workspaceCwd: string;
+}
+
+// chat is always on; everything else defaults OFF (host must grant). Read from the injected hint.
+function readCapabilities(raw: unknown): GuestShareCapabilities {
+  const c = (raw ?? {}) as Partial<Record<keyof GuestShareCapabilities, unknown>>;
+  return {
+    chat: true,
+    files: c.files === true,
+    terminal: c.terminal === true,
+    modelMode: c.modelMode === true,
+  };
 }
 
 export function readGuestShareHint(): GuestShareHint | null {
-  const g = (globalThis as { __JAGENTDESK_SHARE__?: { agentId?: unknown; agentLabel?: unknown } })
-    .__JAGENTDESK_SHARE__;
+  const g = (
+    globalThis as {
+      __JAGENTDESK_SHARE__?: {
+        agentId?: unknown;
+        agentLabel?: unknown;
+        capabilities?: unknown;
+        workspaceCwd?: unknown;
+      };
+    }
+  ).__JAGENTDESK_SHARE__;
   if (g && typeof g.agentId === "string" && g.agentId) {
     return {
       agentId: g.agentId,
       agentLabel: typeof g.agentLabel === "string" ? g.agentLabel : "Agent",
+      capabilities: readCapabilities(g.capabilities),
+      workspaceCwd: typeof g.workspaceCwd === "string" ? g.workspaceCwd : "",
     };
   }
   if (typeof location !== "undefined") {
     try {
       const p = new URLSearchParams(location.search);
       const a = p.get("agentId");
-      if (a) return { agentId: a, agentLabel: p.get("agentLabel") ?? "Agent" };
+      if (a)
+        return {
+          agentId: a,
+          agentLabel: p.get("agentLabel") ?? "Agent",
+          capabilities: readCapabilities(null),
+          workspaceCwd: p.get("workspaceCwd") ?? "",
+        };
     } catch {
       // ignore
     }
@@ -50,7 +116,7 @@ type Phase =
   | { k: "pending" }
   | { k: "gate" }
   | { k: "connecting" }
-  | { k: "ready"; serverId: string; workspaceId: string }
+  | { k: "ready"; serverId: string; workspaceId: string; workspaceCwd: string }
   | { k: "ended"; reason: string };
 
 export function GuestShareScreen({ hint }: { hint: GuestShareHint }): ReactElement {
@@ -78,12 +144,17 @@ export function GuestShareScreen({ hint }: { hint: GuestShareHint }): ReactEleme
         // shared agent / empty projects, so the store may not carry the workspaceId we need. Fetch
         // the ONE shared agent (agentId-guarded) and place it in the store ourselves so the real
         // AgentConversationPanel renders it with the right workspace binding.
+        // The workspace directory comes straight from the daemon-injected share hint (no dependency
+        // on a fetch_agent round-trip). Use it as the unified workspace key for the guest surface so
+        // the Files/Changes panels resolve the directory; the actual store seed happens reactively in
+        // GuestReadyView once the session entry exists.
+        const workspaceCwd = hint.workspaceCwd;
+        const workspaceId = workspaceCwd;
+        // Best-effort: place the shared agent snapshot in the store so the chat panel has it early.
         const client = store.getSnapshot(serverId)?.client ?? null;
-        let workspaceId = "";
         try {
           const res = await client?.fetchAgent({ agentId: hint.agentId });
           if (res?.agent) {
-            workspaceId = res.agent.workspaceId ?? "";
             const normalized = applyLegacyDaemonWorkspaceOwnership({
               serverId,
               agent: normalizeAgentSnapshot(res.agent, serverId),
@@ -97,13 +168,13 @@ export function GuestShareScreen({ hint }: { hint: GuestShareHint }): ReactEleme
         } catch {
           // proceed without it
         }
-        setPhase({ k: "ready", serverId, workspaceId });
+        setPhase({ k: "ready", serverId, workspaceId, workspaceCwd });
       } catch (e) {
         setError(e instanceof Error ? e.message : "Couldn't connect to the shared session.");
         setPhase({ k: "request" });
       }
     },
-    [hint.agentId, hint.agentLabel],
+    [hint.agentId, hint.agentLabel, hint.workspaceCwd],
   );
 
   const connectPairing = useCallback(() => {
@@ -173,32 +244,15 @@ export function GuestShareScreen({ hint }: { hint: GuestShareHint }): ReactEleme
     };
   }, []);
 
-  const paneValue = useMemo<PaneContextValue | null>(() => {
-    if (phase.k !== "ready") return null;
-    return {
-      serverId: phase.serverId,
-      workspaceId: phase.workspaceId,
-      tabId: "guest",
-      target: { kind: "agent", agentId: hint.agentId },
-      openTab: () => {},
-      closeCurrentTab: () => {},
-      retargetCurrentTab: () => {},
-      openFileInWorkspace: () => {},
-      openImportSheet: () => {},
-    };
-  }, [phase, hint.agentId]);
-
-  if (phase.k === "ready" && paneValue) {
+  if (phase.k === "ready") {
     return (
-      <PaneProvider value={paneValue}>
-        <PaneFocusProvider
-          value={createPaneFocusContextValue({ isWorkspaceFocused: true, isPaneFocused: true })}
-        >
-          <View style={styles.chatRoot}>
-            <AgentConversationPanel />
-          </View>
-        </PaneFocusProvider>
-      </PaneProvider>
+      <GuestReadyView
+        serverId={phase.serverId}
+        workspaceId={phase.workspaceId}
+        workspaceCwd={phase.workspaceCwd}
+        agentId={hint.agentId}
+        capabilities={hint.capabilities}
+      />
     );
   }
 
@@ -220,6 +274,138 @@ export function GuestShareScreen({ hint }: { hint: GuestShareHint }): ReactEleme
         />
       </View>
     </View>
+  );
+}
+
+type GuestTab = "chat" | "files" | "changes";
+
+// The connected guest surface: the real agent chat, plus (when the host granted `files`) read-only
+// Files and Changes tabs backed by the real app panels, all confined to the shared agent's
+// workspace by the daemon guest guard (ADR-0019).
+function GuestReadyView({
+  serverId,
+  workspaceId,
+  workspaceCwd,
+  agentId,
+  capabilities,
+}: {
+  serverId: string;
+  workspaceId: string;
+  workspaceCwd: string;
+  agentId: string;
+  capabilities: GuestShareCapabilities;
+}): ReactElement {
+  const [tab, setTab] = useState<GuestTab>("chat");
+  const [openFilePath, setOpenFilePath] = useState<string | null>(null);
+  const showFiles = capabilities.files;
+  // The session entry may not exist in the store yet when we first mount (the guest runtime fills
+  // it asynchronously on connect), and mergeWorkspaces is a no-op until it does. Seed reactively
+  // once the session appears so the Files/Changes panels can resolve the workspace directory.
+  const sessionReady = useSessionStore((s) => Boolean(s.sessions[serverId]));
+  useEffect(() => {
+    if (showFiles && sessionReady && workspaceId && workspaceCwd) {
+      seedGuestWorkspace(serverId, workspaceId, workspaceCwd);
+    }
+  }, [showFiles, sessionReady, serverId, workspaceId, workspaceCwd]);
+  const workspaceRoot = useWorkspaceDirectory(serverId, workspaceId) ?? "";
+
+  const target = useMemo<WorkspaceTabTarget>(() => {
+    if (tab === "changes") return { kind: "working_diff" };
+    if (tab === "files" && openFilePath) return { kind: "file", path: openFilePath };
+    return { kind: "agent", agentId };
+  }, [tab, openFilePath, agentId]);
+
+  const openFile = useCallback((filePath: string) => {
+    setOpenFilePath(filePath);
+    setTab("files");
+  }, []);
+  const closeFile = useCallback(() => setOpenFilePath(null), []);
+
+  const paneValue = useMemo<PaneContextValue>(
+    () => ({
+      serverId,
+      workspaceId,
+      tabId: "guest",
+      target,
+      openFileInWorkspace: (req) => openFile(req.location.path),
+      openTab: (t) => {
+        if (t.kind === "file") openFile(t.path);
+      },
+      closeCurrentTab: () => {},
+      retargetCurrentTab: () => {},
+      openImportSheet: () => {},
+    }),
+    [serverId, workspaceId, target, openFile],
+  );
+
+  let body: ReactElement | null = null;
+  if (tab === "chat") {
+    body = <AgentConversationPanel />;
+  } else if (tab === "changes") {
+    body = <WorkingDiffPanel />;
+  } else if (openFilePath) {
+    body = (
+      <View style={styles.fileViewRoot}>
+        <Pressable style={styles.backRow} onPress={closeFile}>
+          <Text style={styles.backText}>‹ Files</Text>
+        </Pressable>
+        <View style={styles.paneBody}>
+          <FilePanel />
+        </View>
+      </View>
+    );
+  } else {
+    body = (
+      <FileExplorerPane
+        serverId={serverId}
+        workspaceId={workspaceId}
+        workspaceRoot={workspaceRoot}
+        onOpenFile={openFile}
+      />
+    );
+  }
+
+  return (
+    <View style={styles.readyRoot}>
+      {showFiles ? (
+        <View style={styles.tabBar}>
+          <GuestTabButton label="Chat" value="chat" active={tab === "chat"} onSelect={setTab} />
+          <GuestTabButton label="Files" value="files" active={tab === "files"} onSelect={setTab} />
+          <GuestTabButton
+            label="Changes"
+            value="changes"
+            active={tab === "changes"}
+            onSelect={setTab}
+          />
+        </View>
+      ) : null}
+      <PaneProvider value={paneValue}>
+        <PaneFocusProvider
+          value={createPaneFocusContextValue({ isWorkspaceFocused: true, isPaneFocused: true })}
+        >
+          <View style={styles.paneBody}>{body}</View>
+        </PaneFocusProvider>
+      </PaneProvider>
+    </View>
+  );
+}
+
+function GuestTabButton({
+  label,
+  value,
+  active,
+  onSelect,
+}: {
+  label: string;
+  value: GuestTab;
+  active: boolean;
+  onSelect: (tab: GuestTab) => void;
+}): ReactElement {
+  const onPress = useCallback(() => onSelect(value), [onSelect, value]);
+  return (
+    <Pressable style={[styles.tabBtn, active ? styles.tabBtnActive : null]} onPress={onPress}>
+      <Text style={[styles.tabBtnText, active ? styles.tabBtnTextActive : null]}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -321,6 +507,34 @@ const styles = StyleSheet.create((theme) => ({
     padding: theme.spacing[4],
   },
   chatRoot: { flex: 1, backgroundColor: theme.colors.surface0 },
+  readyRoot: { flex: 1, backgroundColor: theme.colors.surface0 },
+  paneBody: { flex: 1 },
+  fileViewRoot: { flex: 1 },
+  tabBar: {
+    flexDirection: "row",
+    gap: theme.spacing[1],
+    paddingHorizontal: theme.spacing[2],
+    paddingTop: theme.spacing[2],
+    paddingBottom: theme.spacing[1],
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+  },
+  tabBtn: {
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    borderRadius: theme.borderRadius.md,
+  },
+  tabBtnActive: { backgroundColor: theme.colors.surface2 },
+  tabBtnText: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm },
+  tabBtnTextActive: { color: theme.colors.foreground, fontWeight: theme.fontWeight.semibold },
+  backRow: {
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+  },
+  backText: { color: theme.colors.accent, fontSize: theme.fontSize.sm },
   card: {
     width: "100%",
     maxWidth: 380,

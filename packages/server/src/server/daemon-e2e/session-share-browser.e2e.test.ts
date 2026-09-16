@@ -1,8 +1,10 @@
 import { existsSync } from "node:fs";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, test, expect, afterEach } from "vitest";
 import pino from "pino";
-import { chromium, type Browser } from "playwright";
+import { chromium, type Browser, type Page } from "playwright";
 import type { SessionShare } from "@jagentdesk/protocol/messages";
 import { createDaemonTestContext, type DaemonTestContext } from "../test-utils/index.js";
 
@@ -21,14 +23,65 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 
 const hasBundle = existsSync(path.join(APP_DIST, "index.html"));
 
-async function makeAgent(ctx: DaemonTestContext): Promise<string> {
+async function makeAgent(ctx: DaemonTestContext, cwd = "/tmp"): Promise<string> {
   const agent = await ctx.client.createAgent({
     provider: "codex",
     model: CODEX_MODEL,
-    cwd: "/tmp",
+    cwd,
     title: "Share Browser Agent",
   });
   return agent.id;
+}
+
+// A pino logger that captures the loopback ShareServer port from the daemon's own logs.
+function makePortCapturingLogger(setPort: (p: number) => void) {
+  return pino(
+    { level: "info" },
+    {
+      write: (line: string) => {
+        try {
+          const o = JSON.parse(line);
+          if (o.msg === "Share server listening" && typeof o.port === "number") setPort(o.port);
+        } catch {
+          /* ignore */
+        }
+      },
+    },
+  );
+}
+
+// Drive the guest join screen in the browser through to the approved 6-digit code (host approves
+// via the real host client), leaving the page on the connected guest surface.
+async function pairInBrowser(
+  page: Page,
+  ctx: DaemonTestContext,
+  shareId: string,
+  streamed: SessionShare[],
+  label: string,
+): Promise<void> {
+  await page.getByText("Join this session", { exact: false }).waitFor({ timeout: 30000 });
+  await page.getByPlaceholder("Your name").fill(label);
+  await page.getByText("Request to join", { exact: false }).click();
+
+  let req: SessionShare["pendingRequests"][number] | undefined;
+  for (let i = 0; i < 60 && !req; i++) {
+    req = streamed
+      .flatMap((s) => s.pendingRequests)
+      .find((r) => r.status === "pending" && r.label === label);
+    if (!req) await sleep(150);
+  }
+  if (!req) throw new Error("host never saw the join request");
+  await ctx.client.sessionShareRespond(shareId, req.requestId, true);
+
+  let code: string | undefined;
+  for (let i = 0; i < 60 && !code; i++) {
+    code = streamed[streamed.length - 1]?.pendingRequests.find(
+      (r) => r.requestId === req!.requestId,
+    )?.code;
+    if (!code) await sleep(150);
+  }
+  if (!code) throw new Error("no 6-digit code minted");
+  await page.getByPlaceholder("••••••").fill(code);
 }
 
 describe.skipIf(!hasBundle)("session sharing — real app guest surface (browser)", () => {
@@ -138,6 +191,76 @@ describe.skipIf(!hasBundle)("session sharing — real app guest surface (browser
     unsub();
     // Close the guest browser (drops the scoped /ws) BEFORE stopping the share, so teardown does not
     // race an active guest connection.
+    await browser.close().catch(() => {});
+    browser = undefined;
+    await ctx.client.sessionShareStop(share.shareId);
+  }, 120000);
+
+  test("files capability: guest gets Files/Changes tabs and browses the shared workspace", async () => {
+    process.env.JAGENTDESK_SHARE_APP_DIST = APP_DIST;
+
+    let sharePort = 0;
+    const logger = makePortCapturingLogger((p) => {
+      sharePort = p;
+    });
+    ctx = await createDaemonTestContext({ sessionSharingEnabled: true, logger });
+
+    const workspace = await mkdtemp(path.join(tmpdir(), "jad-share-ui-"));
+    await writeFile(path.join(workspace, "READY.md"), "# guest can read me\n");
+    const agentId = await makeAgent(ctx, workspace);
+
+    const streamed: SessionShare[] = [];
+    const unsub = ctx.client.subscribeSessionShareStream((s) => {
+      if (s.agentId === agentId) streamed.push(s);
+    });
+    // Share WITH the files capability so the guest surface shows the Files/Changes tabs.
+    const share = await ctx.client.sessionShareCreate(agentId, { capabilities: { files: true } });
+    expect(sharePort).toBeGreaterThan(0);
+
+    try {
+      browser = await chromium.launch({ headless: true });
+    } catch {
+      unsub();
+      await ctx.client.sessionShareStop(share.shareId);
+      return;
+    }
+    const page = await browser.newPage();
+    const errors: string[] = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await page.goto(`http://127.0.0.1:${sharePort}/`, { waitUntil: "domcontentloaded" });
+
+    try {
+      await pairInBrowser(page, ctx, share.shareId, streamed, "Files UI Guest");
+    } catch (e) {
+      const body = await page.evaluate(() => document.body?.innerText ?? "").catch(() => "");
+      throw new Error(
+        `pairing failed: ${String(e)}\npageErrors=${errors.join(" | ")}\nbodyText=${body.slice(0, 500)}`,
+        { cause: e },
+      );
+    }
+
+    // Chat renders first (the default tab).
+    await page.locator('[placeholder^="Message"]').first().waitFor({ timeout: 30000 });
+
+    // The capability granted the Files + Changes tabs; open Files and browse the workspace.
+    await page.getByText("Files", { exact: true }).click();
+    try {
+      await page.getByText("READY.md", { exact: false }).first().waitFor({ timeout: 30000 });
+    } catch (e) {
+      const body = await page.evaluate(() => document.body?.innerText ?? "").catch(() => "");
+      throw new Error(
+        `Files tab did not list READY.md: ${String(e)}\npageErrors=${errors.join(" | ")}\nbodyText=${body.slice(0, 800)}`,
+        { cause: e },
+      );
+    }
+
+    // Changes tab renders the working-diff panel without crashing.
+    await page.getByText("Changes", { exact: true }).click();
+    await sleep(1500);
+
+    expect(errors, `no uncaught page errors: ${errors.join(" | ")}`).toEqual([]);
+
+    unsub();
     await browser.close().catch(() => {});
     browser = undefined;
     await ctx.client.sessionShareStop(share.shareId);

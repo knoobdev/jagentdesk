@@ -238,6 +238,7 @@ export class SessionShareService {
     const server = new ShareServer({
       agentLabel,
       agentId,
+      workspaceCwd,
       appDistDir: this.appDistDir,
       sendPrompt: async (text) => {
         await sendPromptToAgent({

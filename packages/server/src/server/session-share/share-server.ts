@@ -31,8 +31,12 @@ function shareHintScript(
   agentId: string,
   agentLabel: string,
   capabilities: SessionShareCapabilities,
+  workspaceCwd: string | null,
 ): string {
-  const json = JSON.stringify({ agentId, agentLabel, capabilities }).replace(/</g, "\\u003c");
+  const json = JSON.stringify({ agentId, agentLabel, capabilities, workspaceCwd }).replace(
+    /</g,
+    "\\u003c",
+  );
   return `<script>window.__JAGENTDESK_SHARE__=${json};</script>`;
 }
 
@@ -85,6 +89,9 @@ export interface ShareModesSnapshot {
 export interface ShareServerOptions {
   agentLabel: string;
   agentId: string;
+  // The shared agent's workspace root, injected into the guest app share hint so the Files/Changes
+  // tabs can resolve the directory without depending on a fetch_agent round-trip. null → no cwd.
+  workspaceCwd?: string | null;
   // Directory of the app web build (app-dist) to serve as the guest surface (ADR-0019). When set,
   // `/` serves the real app SPA with an injected share hint; when absent, the bespoke page is used.
   appDistDir?: string;
@@ -309,7 +316,12 @@ export class ShareServer {
       terminal: false,
       modelMode: this.opts.allowGuestModelMode,
     };
-    const hint = shareHintScript(this.opts.agentId, this.opts.agentLabel, caps);
+    const hint = shareHintScript(
+      this.opts.agentId,
+      this.opts.agentLabel,
+      caps,
+      this.opts.workspaceCwd ?? null,
+    );
     const serveIndex = (): void => {
       try {
         const html = readFileSync(join(distDir, "index.html"), "utf8");
