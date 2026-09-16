@@ -100,7 +100,12 @@ export function SessionShareControl({
     (shareId: string) => {
       if (!client) return;
       void client.sessionShareStop(shareId).catch(() => undefined);
-      setShares((prev) => prev.filter((s) => s.shareId !== shareId));
+      setShares((prev) => {
+        const next = prev.filter((s) => s.shareId !== shareId);
+        // Stopping the last link closes the manage sheet — nothing left to manage.
+        if (next.length === 0) setSheetOpen(false);
+        return next;
+      });
     },
     [client],
   );

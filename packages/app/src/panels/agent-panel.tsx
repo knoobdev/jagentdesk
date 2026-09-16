@@ -1,4 +1,6 @@
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { SessionShareControl } from "@/composer/agent-controls/session-share-control";
+import { isGuestShareMode } from "@/screens/share/guest-share-mode";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import type { TFunction } from "i18next";
 import { SquarePen } from "lucide-react-native";
@@ -1252,6 +1254,11 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
     <RewindComposerRestoreProvider text={agentInputDraft.text} setText={agentInputDraft.setText}>
       <View style={styles.root}>
         <FileDropZone style={styles.container} disabled={isArchivingCurrentAgent}>
+          {isGuestShareMode() ? null : (
+            <View style={styles.shareHeader}>
+              <SessionShareControl agentId={agentId} serverId={serverId} />
+            </View>
+          )}
           {contentContainer}
 
           {showHistorySyncError ? (
@@ -1745,6 +1752,13 @@ const styles = StyleSheet.create((theme) => ({
   root: {
     flex: 1,
     backgroundColor: theme.colors.surface0,
+  },
+  shareHeader: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    alignItems: "center",
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
   },
   composerViewOnly: {
     marginHorizontal: theme.spacing[4],

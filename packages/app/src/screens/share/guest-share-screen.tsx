@@ -137,7 +137,11 @@ export function GuestShareScreen({ hint }: { hint: GuestShareHint }): ReactEleme
       try {
         const store = getHostRuntimeStore();
         const useTls = typeof location !== "undefined" && location.protocol === "https:";
-        const endpoint = typeof location !== "undefined" ? location.host : "127.0.0.1";
+        // probeAndUpsertDirectConnection parses `endpoint` as host:PORT (port mandatory). A tunnel
+        // URL (https://<name>.trycloudflare.com) has no explicit port, so append the scheme default
+        // — otherwise pairing fails with "Invalid host:port". Loopback shares already carry a port.
+        const rawHost = typeof location !== "undefined" ? location.host : "127.0.0.1:6767";
+        const endpoint = /:\d+$/.test(rawHost) ? rawHost : `${rawHost}:${useTls ? 443 : 80}`;
         const { serverId } = await store.probeAndUpsertDirectConnection({
           endpoint,
           useTls,
