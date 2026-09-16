@@ -418,6 +418,8 @@ export interface JAgentDeskDaemonConfig {
   autorunEnabled?: boolean;
   // Session sharing (spec §21). Default OFF; exposes one agent chat via a Cloudflare tunnel.
   sessionSharingEnabled?: boolean;
+  // Directory of the app web build served to session-share guests as the real UI (ADR-0019).
+  sessionShareAppDistDir?: string;
   git?: {
     maxProcessesPerSecond: number;
     maxProcessConcurrency: number;
@@ -1372,12 +1374,15 @@ export async function createJAgentDeskDaemon(
   );
   // Session sharing (spec §21 / ADR-0018). Default OFF: the service + `features.sessionSharing`
   // only exist when the daemon opted in. Cloudflare quick tunnel + a scoped per-share server.
+  const shareAppDistDir =
+    config.sessionShareAppDistDir ?? process.env.JAGENTDESK_SHARE_APP_DIST ?? undefined;
   const sessionShareService = config.sessionSharingEnabled
     ? new SessionShareService({
         logger,
         agentManager,
         agentStorage,
         tunnelManager: new TunnelManager(logger),
+        appDistDir: shareAppDistDir,
         onUpdate: (share) =>
           emitExternalSessionMessage({ type: "session.share.stream", payload: { share } }),
       })

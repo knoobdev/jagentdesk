@@ -1,8 +1,35 @@
 import { createServer, type Server } from "node:http";
 import { randomUUID, timingSafeEqual } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join, normalize, extname } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { Logger } from "pino";
 import { renderGuestPage } from "./guest-page.js";
+
+const CONTENT_TYPES: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".map": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".ico": "image/x-icon",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".ttf": "font/ttf",
+  ".txt": "text/plain; charset=utf-8",
+};
+
+function shareHintScript(agentId: string, agentLabel: string): string {
+  const json = JSON.stringify({ agentId, agentLabel }).replace(/</g, "\\u003c");
+  return `<script>window.__JAGENTDESK_SHARE__=${json};</script>`;
+}
 
 // Scoped per-share HTTP + WebSocket server (spec §21 / ADR-0018). The ONLY thing the
 // Cloudflare tunnel exposes. Bespoke, minimal surface: a guest requests to join, the host
@@ -52,6 +79,10 @@ export interface ShareModesSnapshot {
 
 export interface ShareServerOptions {
   agentLabel: string;
+  agentId: string;
+  // Directory of the app web build (app-dist) to serve as the guest surface (ADR-0019). When set,
+  // `/` serves the real app SPA with an injected share hint; when absent, the bespoke page is used.
+  appDistDir?: string;
   sendPrompt: (text: string) => Promise<void>;
   fetchTranscript: () => TranscriptRow[];
   shareDraftPreview: boolean;
@@ -124,7 +155,17 @@ export class ShareServer {
 
   async start(): Promise<number> {
     const server = createServer((req, res) => {
-      if (req.method === "GET" && (req.url === "/" || req.url?.startsWith("/?"))) {
+      if (req.method !== "GET") {
+        res.writeHead(404, { "content-type": "text/plain" });
+        res.end("Not found");
+        return;
+      }
+      if (this.opts.appDistDir) {
+        this.serveApp(req.url ?? "/", res);
+        return;
+      }
+      // Fallback (no app build available): bespoke minimal page.
+      if (req.url === "/" || req.url?.startsWith("/?")) {
         res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
         res.end(renderGuestPage(this.opts.agentLabel));
         return;
@@ -240,6 +281,58 @@ export class ShareServer {
         this.emitState();
         return;
       }
+    }
+  }
+
+  // Serve the app web build (SPA) as the guest surface. index.html gets the share hint injected;
+  // unknown non-file paths fall back to index.html (client-side routing). Guards path traversal.
+  private serveApp(url: string, res: import("node:http").ServerResponse): void {
+    const distDir = this.opts.appDistDir as string;
+    const pathname = decodeURIComponent(url.split("?")[0] || "/");
+    const serveIndex = (): void => {
+      try {
+        const html = readFileSync(join(distDir, "index.html"), "utf8");
+        const injected = html.includes("</head>")
+          ? html.replace(
+              "</head>",
+              `${shareHintScript(this.opts.agentId, this.opts.agentLabel)}</head>`,
+            )
+          : shareHintScript(this.opts.agentId, this.opts.agentLabel) + html;
+        res.writeHead(200, {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-store",
+        });
+        res.end(injected);
+      } catch {
+        res.writeHead(500, { "content-type": "text/plain" });
+        res.end("App build unavailable");
+      }
+    };
+    if (pathname === "/" || pathname === "" || pathname === "/index.html") {
+      serveIndex();
+      return;
+    }
+    const target = normalize(join(distDir, pathname));
+    if (!target.startsWith(normalize(distDir))) {
+      res.writeHead(403, { "content-type": "text/plain" });
+      res.end("Forbidden");
+      return;
+    }
+    const ext = extname(target).toLowerCase();
+    if (!ext) {
+      // No extension → treat as a client-side route.
+      serveIndex();
+      return;
+    }
+    try {
+      const body = readFileSync(target);
+      res.writeHead(200, {
+        "content-type": CONTENT_TYPES[ext] ?? "application/octet-stream",
+        "cache-control": "public, max-age=31536000, immutable",
+      });
+      res.end(body);
+    } catch {
+      serveIndex();
     }
   }
 

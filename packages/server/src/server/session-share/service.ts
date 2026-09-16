@@ -74,6 +74,8 @@ export interface SessionShareServiceOptions {
   tunnelManager: TunnelManager;
   onUpdate?: (share: SessionShare) => void;
   now?: () => number;
+  // App web build directory served to guests as the real UI (ADR-0019); bespoke page if unset.
+  appDistDir?: string;
 }
 
 function toTranscript(items: { seq: number; item: AgentTimelineItem }[]): TranscriptRow[] {
@@ -116,6 +118,7 @@ export class SessionShareService {
   private readonly tunnelManager: TunnelManager;
   private readonly onUpdate?: (share: SessionShare) => void;
   private readonly now: () => number;
+  private readonly appDistDir?: string;
   private readonly shares = new Map<string, LiveShare>();
   private readonly guestTokens = new Map<string, GuestGrant>(); // token → grant
   // Set by bootstrap once the websocket-server exists: attaches a validated guest socket as a
@@ -150,6 +153,7 @@ export class SessionShareService {
     this.tunnelManager = options.tunnelManager;
     this.onUpdate = options.onUpdate;
     this.now = options.now ?? (() => Date.now());
+    this.appDistDir = options.appDistDir;
   }
 
   async stop(): Promise<void> {
@@ -214,6 +218,8 @@ export class SessionShareService {
 
     const server = new ShareServer({
       agentLabel,
+      agentId,
+      appDistDir: this.appDistDir,
       sendPrompt: async (text) => {
         await sendPromptToAgent({
           agentId,
