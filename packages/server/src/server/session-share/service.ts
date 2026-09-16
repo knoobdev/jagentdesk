@@ -4,15 +4,19 @@ import type { AgentManager } from "../agent/agent-manager.js";
 import type { AgentStorage } from "../agent/agent-storage.js";
 import { sendPromptToAgent } from "../agent/agent-prompt.js";
 import type { AgentTimelineItem } from "../agent/agent-sdk-types.js";
+import type { WebSocket as WsSocket } from "ws";
 import { TunnelManager, CloudflaredMissingError } from "./tunnel-manager.js";
+import { guestScopesForCapabilities } from "./guest-scopes.js";
 import {
   ShareServer,
   type GuestMember,
+  type ShareActivity,
   type ShareRequestSnapshot,
   type TranscriptRow,
 } from "./share-server.js";
 import type {
   SessionShare,
+  SessionShareCapabilities,
   SessionShareMember,
   SessionShareRequest,
 } from "@jagentdesk/protocol/messages";
@@ -45,6 +49,17 @@ type ShareAgentManager = Pick<
   "getAgent" | "fetchTimeline" | "setAgentMode" | "setAgentModel"
 >;
 
+// A minted guest token → the scope it unlocks. Capabilities are resolved LIVE from the share at
+// connect time (so host toggles apply), so we only store identity here.
+export interface GuestGrant {
+  token: string;
+  shareId: string;
+  agentId: string;
+  memberId: string;
+  label: string;
+  device: string;
+}
+
 interface LiveShare {
   share: SessionShare;
   server: ShareServer;
@@ -73,7 +88,25 @@ function toTranscript(items: { seq: number; item: AgentTimelineItem }[]): Transc
       rows.push({ seq, role: "tool", text: `⚙ ${label}` });
     }
   }
-  return rows;
+  return coalesceRows(rows);
+}
+
+// While the agent is streaming, its assistant message arrives as many small delta rows; the raw
+// timeline (and thus the guest) would otherwise shatter one reply into dozens of bubbles. Merge
+// adjacent rows of the same non-tool role into a single bubble so the guest sees one clean message
+// (matching how the desktop/mobile composer coalesces a turn). Tool calls stay individual.
+function coalesceRows(rows: TranscriptRow[]): TranscriptRow[] {
+  const out: TranscriptRow[] = [];
+  for (const row of rows) {
+    const prev = out[out.length - 1];
+    if (prev && prev.role === row.role && row.role !== "tool") {
+      prev.text = `${prev.text}${row.text}`;
+      prev.seq = row.seq;
+    } else {
+      out.push({ ...row });
+    }
+  }
+  return out;
 }
 
 export class SessionShareService {
@@ -84,6 +117,31 @@ export class SessionShareService {
   private readonly onUpdate?: (share: SessionShare) => void;
   private readonly now: () => number;
   private readonly shares = new Map<string, LiveShare>();
+  private readonly guestTokens = new Map<string, GuestGrant>(); // token → grant
+  // Set by bootstrap once the websocket-server exists: attaches a validated guest socket as a
+  // scoped real-protocol session (ADR-0019). Kept as a setter to break the bootstrap ordering
+  // cycle (service is constructed before the websocket-server).
+  private guestAttacher:
+    | ((ws: WsSocket, params: { agentId: string; scopes: readonly string[] }) => void)
+    | null = null;
+
+  setGuestAttacher(
+    fn: (ws: WsSocket, params: { agentId: string; scopes: readonly string[] }) => void,
+  ): void {
+    this.guestAttacher = fn;
+  }
+
+  // Resolve a guest token to its grant + the share's CURRENT capabilities (live, so host toggles
+  // apply). Returns null if the token is unknown or its share is gone. Used by the scoped /ws path.
+  validateGuestToken(
+    token: string,
+  ): { grant: GuestGrant; capabilities: SessionShareCapabilities } | null {
+    const grant = this.guestTokens.get(token);
+    if (!grant) return null;
+    const live = this.shares.get(grant.shareId);
+    if (!live || live.share.status !== "active") return null;
+    return { grant, capabilities: live.share.capabilities };
+  }
 
   constructor(options: SessionShareServiceOptions) {
     this.logger = options.logger.child({ module: "session-share-service" });
@@ -108,22 +166,30 @@ export class SessionShareService {
     shareDraftPreview?: boolean;
     requireHostApproval?: boolean;
     allowGuestModelMode?: boolean;
+    capabilities?: Partial<SessionShareCapabilities>;
   }): Promise<SessionShare> {
     const { agentId } = input;
     if (!this.agentManager.getAgent(agentId)) {
       throw new Error(`Agent ${agentId} is not active`);
     }
-    for (const [id, live] of this.shares) {
-      if (live.share.agentId === agentId) await this.teardown(id, "revoked");
-    }
+    // An agent may have several concurrent shares (separate links/codes for different people or
+    // groups, each revocable on its own). We no longer tear down the agent's existing shares here.
 
     const shareId = `share_${randomBytes(6).toString("hex")}`;
     const now = this.now();
     const record = await this.agentStorage.get(agentId);
     const agentLabel = record?.title?.trim() || "Agent";
-    const shareFullHistory = input.shareFullHistory ?? false;
+    // Default ON so a guest lands in the existing conversation (spec §21.4): joining a share and
+    // seeing an empty pane is confusing. The host can still create a from-now share explicitly.
+    const shareFullHistory = input.shareFullHistory ?? true;
     const shareDraftPreview = input.shareDraftPreview ?? false;
-    const allowGuestModelMode = input.allowGuestModelMode ?? false;
+    const capabilities: SessionShareCapabilities = {
+      chat: true,
+      files: input.capabilities?.files ?? false,
+      terminal: input.capabilities?.terminal ?? false,
+      modelMode: input.capabilities?.modelMode ?? input.allowGuestModelMode ?? false,
+    };
+    const allowGuestModelMode = capabilities.modelMode;
 
     const startSeq = shareFullHistory ? -1 : this.currentMaxSeq(agentId);
     const fetchTranscript = (): TranscriptRow[] =>
@@ -140,8 +206,10 @@ export class SessionShareService {
       shareDraftPreview,
       requireHostApproval: input.requireHostApproval ?? true,
       allowGuestModelMode,
+      capabilities,
       pendingRequests: [],
       members: [],
+      recentActivity: [],
     };
 
     const server = new ShareServer({
@@ -170,6 +238,31 @@ export class SessionShareService {
       },
       setMode: async (modeId) => {
         await this.agentManager.setAgentMode(agentId, modeId);
+      },
+      // On successful pairing, mint a guest token the real app uses to open the scoped /ws and
+      // render the actual chat UI (ADR-0019). Token → {shareId, agentId, member}.
+      mintGuestToken: (member) => {
+        const token = `gt_${randomBytes(24).toString("hex")}`;
+        this.guestTokens.set(token, {
+          token,
+          shareId,
+          agentId,
+          memberId: member.memberId,
+          label: member.label,
+          device: member.device,
+        });
+        return token;
+      },
+      // Validate a guest token on the scoped /ws and hand the socket to the daemon as a real,
+      // agent-confined session (ADR-0019). Capabilities are resolved live.
+      attachGuestWs: (ws, token) => {
+        const resolved = this.validateGuestToken(token);
+        if (!resolved || !this.guestAttacher) return false;
+        this.guestAttacher(ws, {
+          agentId: resolved.grant.agentId,
+          scopes: guestScopesForCapabilities(resolved.capabilities),
+        });
+        return true;
       },
       onStateChanged: (snapshot) => this.applyState(shareId, snapshot),
       logger: this.logger,
@@ -215,15 +308,22 @@ export class SessionShareService {
     return live.share;
   }
 
-  // Host toggles the model/mode grant live (spec §21.6). Takes effect immediately: the guest
-  // surface shows/hides its mode control and the daemon starts/stops honoring guest set-mode.
-  setOptions(shareId: string, opts: { allowGuestModelMode?: boolean }): SessionShare {
+  // Host toggles share capabilities live (spec §21.6 / ADR-0019): model/mode grant or any other
+  // capability. Takes effect immediately for connected guests.
+  setOptions(
+    shareId: string,
+    opts: { allowGuestModelMode?: boolean; capabilities?: Partial<SessionShareCapabilities> },
+  ): SessionShare {
     const live = this.shares.get(shareId);
     if (!live) throw new Error(`Share not found: ${shareId}`);
-    if (opts.allowGuestModelMode !== undefined) {
-      live.share = { ...live.share, allowGuestModelMode: opts.allowGuestModelMode };
-      live.server.setAllowGuestModelMode(opts.allowGuestModelMode);
-    }
+    const capabilities: SessionShareCapabilities = {
+      ...live.share.capabilities,
+      ...opts.capabilities,
+      chat: true,
+    };
+    if (opts.allowGuestModelMode !== undefined) capabilities.modelMode = opts.allowGuestModelMode;
+    live.share = { ...live.share, capabilities, allowGuestModelMode: capabilities.modelMode };
+    live.server.setAllowGuestModelMode(capabilities.modelMode);
     this.emit(live.share);
     return live.share;
   }
@@ -244,6 +344,9 @@ export class SessionShareService {
     const live = this.shares.get(shareId);
     if (!live) throw new Error(`Share not found: ${shareId}`);
     this.shares.delete(shareId);
+    for (const [token, grant] of this.guestTokens) {
+      if (grant.shareId === shareId) this.guestTokens.delete(token);
+    }
     clearTimeout(live.expiryTimer);
     await live.server.stop().catch(() => undefined);
     await live.stopTunnel().catch(() => undefined);
@@ -261,7 +364,11 @@ export class SessionShareService {
 
   private applyState(
     shareId: string,
-    snapshot: { members: GuestMember[]; requests: ShareRequestSnapshot[] },
+    snapshot: {
+      members: GuestMember[];
+      requests: ShareRequestSnapshot[];
+      activity: ShareActivity[];
+    },
   ): void {
     const live = this.shares.get(shareId);
     if (!live) return;
@@ -272,6 +379,7 @@ export class SessionShareService {
       joinedAt_ms: g.joinedAt_ms,
       lastSeen_ms: g.lastSeen_ms,
       typing: g.typing,
+      device: g.device,
     }));
     const pendingRequests: SessionShareRequest[] = snapshot.requests.map((r) => ({
       requestId: r.requestId,
@@ -279,8 +387,11 @@ export class SessionShareService {
       requestedAt_ms: r.requestedAt_ms,
       status: r.status,
       code: r.code,
+      device: r.device,
+      failedAttempts: r.failedAttempts,
+      lockedUntil_ms: r.lockedUntil_ms,
     }));
-    live.share = { ...live.share, members, pendingRequests };
+    live.share = { ...live.share, members, pendingRequests, recentActivity: snapshot.activity };
     this.emit(live.share);
   }
 

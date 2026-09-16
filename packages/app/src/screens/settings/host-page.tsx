@@ -74,6 +74,7 @@ import { getConnectionMode } from "@/tailscale";
 import { BrowserToolsOptInCard } from "./browser-tools-card";
 import { AutorunOptInCard } from "./autorun-card";
 import { SessionShareOptInCard } from "./session-share-card";
+import { SessionSharesCard } from "./session-shares-card";
 import { BrowserFingerprintProfilesCard } from "./browser-fingerprint-profiles-card";
 import { hasDaemonReconnectedAfter, type DaemonConnectionMarker } from "./daemon-reconnect";
 import { restartDaemonFromSettings } from "./daemon-restart";
@@ -260,6 +261,7 @@ export function HostAgentsPage({ serverId }: { serverId: string }) {
           <BrowserToolsOptInCard serverId={serverId} />
           <AutorunOptInCard serverId={serverId} />
           <SessionShareOptInCard serverId={serverId} />
+          <SessionSharesCard serverId={serverId} />
           <BrowserFingerprintProfilesCard serverId={serverId} />
           <AppendSystemPromptCard serverId={serverId} />
         </SettingsSection>

@@ -1764,6 +1764,11 @@ export async function createJAgentDeskDaemon(
               autorunService,
               sessionShareService,
             );
+            // Session-share guests (ADR-0019): let the scoped ShareServer /ws hand validated guest
+            // sockets to the daemon as agent-confined real sessions.
+            sessionShareService?.setGuestAttacher((ws, params) =>
+              wsServer?.attachGuestSocket(ws, params),
+            );
             // Bind the plugin session host and start configured plugins before any
             // external ingress attaches, mirroring upstream's pre-accept ordering.
             pluginRuntime.bindJAgentDeskSessionHost(wsServer);

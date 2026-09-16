@@ -445,6 +445,11 @@ type AgentMcpTransportFactory = () => Promise<unknown>;
 export interface SessionOptions {
   clientId: string;
   scopes: readonly string[];
+  // Session-share guest sessions (spec §21 / ADR-0019): when set, this session may only touch this
+  // one agent. Enforced centrally in handleMessage — any inbound message carrying a different
+  // agentId is rejected, on top of the (already narrow) scope allowlist. Null/undefined = trusted
+  // host session (full access, subject to scopes).
+  guestAgentId?: string | null;
   appVersion?: string | null;
   clientCapabilities?: Record<string, unknown> | null;
   onMessage: (msg: SessionOutboundMessage) => void;
@@ -646,6 +651,7 @@ function describeRegistryTransition(record: ArchivedRecordSnapshot | null): Regi
 export class Session {
   private readonly clientId: string;
   private scopes: readonly string[];
+  private readonly guestAgentId: string | null;
   private appVersion: string | null;
   private clientCapabilities: ReadonlySet<ClientCapability>;
   private readonly sessionId: string;
@@ -796,6 +802,7 @@ export class Session {
     } = options;
     this.clientId = clientId;
     this.scopes = [...scopes];
+    this.guestAgentId = options.guestAgentId ?? null;
     this.appVersion = appVersion ?? null;
     this.clientCapabilities = parseClientCapabilities(clientCapabilities);
     this.sessionId = uuidv4();
@@ -1936,6 +1943,25 @@ export class Session {
         }
         return;
       }
+      // Guest session (session-share, ADR-0019): confined to exactly one agent. The scope allowlist
+      // above already limits WHICH rpc types are reachable; this additionally rejects any message
+      // that targets a different agentId — the scope model matches rpc-name only, so per-agent
+      // isolation is enforced here, centrally, for every agent-scoped message.
+      if (this.guestAgentId !== null && !this.isGuestMessageAllowed(msg)) {
+        const requestId = sessionRequestId(msg);
+        if (requestId) {
+          this.emit({
+            type: "rpc_error",
+            payload: {
+              requestId,
+              requestType: msg.type,
+              error: "Guest session is limited to the shared agent",
+              code: "access_denied",
+            },
+          });
+        }
+        return;
+      }
       try {
         await this.dispatchInboundMessage(msg, source);
       } catch (error) {
@@ -1977,6 +2003,31 @@ export class Session {
 
   public setScopes(scopes: readonly string[]): void {
     this.scopes = [...scopes];
+  }
+
+  // For a guest session, any message that names an agent must name THE shared agent — applied to
+  // BOTH inbound RPCs and outbound pushes/responses (defense in depth: even if a broadcast type
+  // were ever in scope, another agent's data can never reach the guest). Messages with no
+  // detectable agentId are governed solely by the tight scope allowlist.
+  private guestMessageTouchesOtherAgent(
+    msg: SessionInboundMessage | SessionOutboundMessage,
+  ): boolean {
+    if (this.guestAgentId === null) return false;
+    const direct = (msg as { agentId?: unknown }).agentId;
+    if (typeof direct === "string" && direct !== this.guestAgentId) return true;
+    const payload = (msg as { payload?: unknown }).payload as
+      | { agentId?: unknown; agent?: { id?: unknown } }
+      | undefined;
+    if (payload && typeof payload === "object") {
+      if (typeof payload.agentId === "string" && payload.agentId !== this.guestAgentId) return true;
+      const nested = payload.agent?.id;
+      if (typeof nested === "string" && nested !== this.guestAgentId) return true;
+    }
+    return false;
+  }
+
+  private isGuestMessageAllowed(msg: SessionInboundMessage): boolean {
+    return !this.guestMessageTouchesOtherAgent(msg);
   }
 
   private async dispatchInboundMessage(msg: SessionInboundMessage, source?: object): Promise<void> {
@@ -7553,6 +7604,10 @@ export class Session {
    */
   private emit(msg: SessionOutboundMessage): void {
     if (msg.type !== "rpc_error" && !isSessionRpcAllowed(this.scopes, msg.type)) {
+      return;
+    }
+    // Guest sessions never receive another agent's data, even via broadcast (ADR-0019).
+    if (this.guestAgentId !== null && this.guestMessageTouchesOtherAgent(msg)) {
       return;
     }
     // JSON.stringify(msg) is only computed when trace is enabled — it runs for

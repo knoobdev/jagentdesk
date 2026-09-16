@@ -159,6 +159,7 @@ import type {
   PluginLogEntry,
   AutorunState,
   SessionShare,
+  SessionShareCapabilities,
 } from "@jagentdesk/protocol/messages";
 import type {
   AgentPermissionRequest,
@@ -7561,6 +7562,7 @@ export class DaemonClient {
       shareFullHistory?: boolean;
       shareDraftPreview?: boolean;
       requireHostApproval?: boolean;
+      capabilities?: Partial<SessionShareCapabilities>;
       requestId?: string;
     },
   ): Promise<SessionShare> {
@@ -7575,6 +7577,7 @@ export class DaemonClient {
       ...(opts?.requireHostApproval !== undefined
         ? { requireHostApproval: opts.requireHostApproval }
         : {}),
+      ...(opts?.capabilities !== undefined ? { capabilities: opts.capabilities } : {}),
       requestId,
     });
     return this.sessionShareRequest(requestId, message, "session.share.create.response");
@@ -7609,7 +7612,7 @@ export class DaemonClient {
 
   async sessionShareSetOptions(
     shareId: string,
-    opts: { allowGuestModelMode?: boolean },
+    opts: { allowGuestModelMode?: boolean; capabilities?: Partial<SessionShareCapabilities> },
     requestId?: string,
   ): Promise<SessionShare> {
     const resolved = this.createRequestId(requestId);
@@ -7619,6 +7622,7 @@ export class DaemonClient {
       ...(opts.allowGuestModelMode !== undefined
         ? { allowGuestModelMode: opts.allowGuestModelMode }
         : {}),
+      ...(opts.capabilities !== undefined ? { capabilities: opts.capabilities } : {}),
       requestId: resolved,
     });
     return this.sessionShareRequest(resolved, message, "session.share.set_options.response");

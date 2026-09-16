@@ -22,6 +22,7 @@ interface TestJAgentDeskDaemonOptions {
   logger?: Parameters<typeof createJAgentDeskDaemon>[1];
   mcpEnabled?: boolean;
   mcpDebug?: boolean;
+  sessionSharingEnabled?: boolean;
   isDev?: boolean;
   daemonStatusRpcCapability?: boolean;
   agentClients?: Partial<Record<AgentProvider, AgentClient>>;
@@ -87,7 +88,8 @@ export async function createTestJAgentDeskDaemon(
   let lastError: unknown;
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const { config, jagentdeskHomeRoot, jagentdeskHome, staticDir } = await prepareTestDaemonConfig(options);
+    const { config, jagentdeskHomeRoot, jagentdeskHome, staticDir } =
+      await prepareTestDaemonConfig(options);
     const logger = options.logger ?? pino({ level: "silent" });
     const daemon = await createJAgentDeskDaemon(config, logger, {
       serverFeatureOverrides: {
@@ -107,7 +109,12 @@ export async function createTestJAgentDeskDaemon(
         if (options.cleanup ?? true) {
           await new Promise((r) => setTimeout(r, 50));
           await Promise.all([
-            rm(jagentdeskHomeRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }),
+            rm(jagentdeskHomeRoot, {
+              recursive: true,
+              force: true,
+              maxRetries: 3,
+              retryDelay: 100,
+            }),
             rm(staticDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }),
           ]);
         }
@@ -155,7 +162,8 @@ async function prepareTestDaemonConfig(
     options.jagentdeskHomeRoot ?? (await mkdtemp(path.join(os.tmpdir(), "jagentdesk-home-")));
   const jagentdeskHome = path.join(jagentdeskHomeRoot, ".jagentdesk");
   await mkdir(jagentdeskHome, { recursive: true });
-  const staticDir = options.staticDir ?? (await mkdtemp(path.join(os.tmpdir(), "jagentdesk-static-")));
+  const staticDir =
+    options.staticDir ?? (await mkdtemp(path.join(os.tmpdir(), "jagentdesk-static-")));
   const listenHost = options.listen ?? "127.0.0.1";
   const config: JAgentDeskDaemonConfig = {
     listen: `${listenHost}:0`,
@@ -167,6 +175,7 @@ async function prepareTestDaemonConfig(
     mcpEnabled: options.mcpEnabled ?? true,
     staticDir,
     mcpDebug: options.mcpDebug ?? false,
+    sessionSharingEnabled: options.sessionSharingEnabled,
     isDev: options.isDev,
     agentClients: options.agentClients ?? createTestAgentClients(),
     providerOverrides: options.providerOverrides,

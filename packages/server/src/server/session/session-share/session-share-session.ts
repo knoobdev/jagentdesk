@@ -63,6 +63,7 @@ export class SessionShareSession {
         shareDraftPreview: request.shareDraftPreview,
         requireHostApproval: request.requireHostApproval,
         allowGuestModelMode: request.allowGuestModelMode,
+        capabilities: request.capabilities,
       });
       this.host.emit({
         type: "session.share.create.response",
@@ -121,6 +122,7 @@ export class SessionShareSession {
     try {
       const share = this.service.setOptions(request.shareId, {
         allowGuestModelMode: request.allowGuestModelMode,
+        capabilities: request.capabilities,
       });
       this.host.emit({
         type: "session.share.set_options.response",

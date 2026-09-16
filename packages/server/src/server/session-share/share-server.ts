@@ -23,6 +23,7 @@ export interface GuestMember {
   draft: string | null;
   joinedAt_ms: number;
   lastSeen_ms: number;
+  device: string;
 }
 
 export interface ShareRequestSnapshot {
@@ -31,6 +32,17 @@ export interface ShareRequestSnapshot {
   requestedAt_ms: number;
   status: "pending" | "approved";
   code: string | null;
+  device: string;
+  failedAttempts: number;
+  lockedUntil_ms: number | null;
+}
+
+export interface ShareActivity {
+  memberId: string;
+  label: string;
+  device: string;
+  text: string;
+  at_ms: number;
 }
 
 export interface ShareModesSnapshot {
@@ -49,9 +61,19 @@ export interface ShareServerOptions {
   allowGuestModelMode: boolean;
   getModes?: () => ShareModesSnapshot;
   setMode?: (modeId: string) => Promise<void>;
+  // Mint a guest token on successful pairing; the real app uses it to open the scoped /ws.
+  mintGuestToken?: (member: { memberId: string; label: string; device: string }) => string;
+  // Validate a guest token + attach the socket as a scoped real-protocol session (ADR-0019).
+  // Returns true if accepted; false → the socket is closed. Wired by bootstrap to the daemon's
+  // websocket-server.attachGuestSocket after resolving the token to {agentId, capabilities}.
+  attachGuestWs?: (ws: WebSocket, token: string) => boolean;
   // Reports the full live snapshot (authed members + pending/approved join requests) whenever
   // it changes, so the service can mirror it onto the share + stream it to host devices.
-  onStateChanged: (snapshot: { members: GuestMember[]; requests: ShareRequestSnapshot[] }) => void;
+  onStateChanged: (snapshot: {
+    members: GuestMember[];
+    requests: ShareRequestSnapshot[];
+    activity: ShareActivity[];
+  }) => void;
   logger: Logger;
 }
 
@@ -68,7 +90,9 @@ interface GuestConn {
   label: string;
   code: string | null; // set by the service on approve; the guest must enter it
   member: GuestMember;
-  failed: number;
+  device: string;
+  failed: number; // rolling count within the current window (drives lockout)
+  totalFailed: number; // cumulative wrong-code attempts, shown to the host
   lockoutUntil: number;
 }
 
@@ -77,11 +101,13 @@ export class ShareServer {
   private readonly logger: Logger;
   private server: Server | null = null;
   private wss: WebSocketServer | null = null;
+  private guestWss: WebSocketServer | null = null;
   private readonly conns = new Map<string, GuestConn>(); // keyed by requestId
   private pollTimer: ReturnType<typeof setInterval> | null = null;
-  private lastSeq = 0;
+  private lastTranscriptJson = "";
   private guestCounter = 0;
   private allowGuestModelMode: boolean;
+  private readonly activity: ShareActivity[] = []; // recent guest messages, capped
 
   constructor(options: ShareServerOptions) {
     this.opts = options;
@@ -106,13 +132,40 @@ export class ShareServer {
       res.writeHead(404, { "content-type": "text/plain" });
       res.end("Not found");
     });
-    const wss = new WebSocketServer({ server, path: "/guest" });
-    wss.on("connection", (ws) => this.onGuest(ws));
+    // Two WS endpoints on one http server: `/guest` (bespoke pairing channel) and `/ws` (scoped
+    // real-protocol channel, ADR-0019). Use `noServer` + a single upgrade router — attaching two
+    // `WebSocketServer`s via the `server` option makes both try to handle every upgrade (ws gotcha).
+    const wss = new WebSocketServer({ noServer: true });
+    wss.on("connection", (ws, req) => this.onGuest(ws, parseDevice(req.headers["user-agent"])));
+    const guestWss = new WebSocketServer({
+      noServer: true,
+      handleProtocols: (protocols) => [...protocols][0] ?? false,
+    });
+    guestWss.on("connection", (ws, req) => {
+      const token = extractBearerToken(req.headers["sec-websocket-protocol"]);
+      if (!token || !this.opts.attachGuestWs?.(ws, token)) {
+        try {
+          ws.close();
+        } catch {
+          // ignore
+        }
+      }
+    });
+    server.on("upgrade", (req, socket, head) => {
+      const path = (req.url ?? "").split("?")[0];
+      if (path === "/guest") {
+        wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
+      } else if (path === "/ws") {
+        guestWss.handleUpgrade(req, socket, head, (ws) => guestWss.emit("connection", ws, req));
+      } else {
+        socket.destroy();
+      }
+    });
     this.server = server;
     this.wss = wss;
+    this.guestWss = guestWss;
 
-    const initial = this.opts.fetchTranscript();
-    this.lastSeq = initial.length > 0 ? (initial[initial.length - 1]?.seq ?? 0) : 0;
+    this.lastTranscriptJson = JSON.stringify(this.opts.fetchTranscript());
 
     await new Promise<void>((resolve, reject) => {
       server.once("error", reject);
@@ -144,6 +197,7 @@ export class ShareServer {
     await new Promise<void>((resolve) => {
       if (!this.server) return resolve();
       this.wss?.close();
+      this.guestWss?.close();
       this.server.close(() => resolve());
       this.server = null;
     });
@@ -189,7 +243,7 @@ export class ShareServer {
     }
   }
 
-  private onGuest(ws: WebSocket): void {
+  private onGuest(ws: WebSocket, device: string): void {
     const requestId = randomUUID();
     const conn: GuestConn = {
       ws,
@@ -197,7 +251,9 @@ export class ShareServer {
       requestId,
       label: "",
       code: null,
+      device,
       failed: 0,
+      totalFailed: 0,
       lockoutUntil: 0,
       member: {
         memberId: randomUUID(),
@@ -206,9 +262,11 @@ export class ShareServer {
         draft: null,
         joinedAt_ms: Date.now(),
         lastSeen_ms: Date.now(),
+        device,
       },
     };
     this.conns.set(requestId, conn);
+    this.logger.info({ requestId, device }, "Guest connected to share server");
     this.safeSend(ws, { t: "hello", agentLabel: this.opts.agentLabel });
 
     ws.on("message", (data) => {
@@ -251,6 +309,10 @@ export class ShareServer {
     conn.label = name || `Guest ${this.guestCounter}`;
     conn.member.label = conn.label;
     conn.phase = "pending";
+    this.logger.info(
+      { requestId: conn.requestId, label: conn.label },
+      "Guest requested to join — awaiting host approval",
+    );
     this.safeSend(conn.ws, { t: "pending" });
     this.emitState();
   }
@@ -269,16 +331,41 @@ export class ShareServer {
     const input = typeof msg.code === "string" ? msg.code : "";
     if (!conn.code || !codesMatch(input, conn.code)) {
       conn.failed += 1;
+      conn.totalFailed += 1;
+      let locked = false;
       if (conn.failed >= MAX_FAILED_ATTEMPTS) {
         conn.lockoutUntil = now + LOCKOUT_WINDOW_MS;
         conn.failed = 0;
+        locked = true;
       }
-      this.safeSend(conn.ws, { t: "pair_result", ok: false, error: "Incorrect code." });
+      this.logger.warn(
+        { requestId: conn.requestId, device: conn.device, totalFailed: conn.totalFailed, locked },
+        "Guest entered an incorrect pairing code",
+      );
+      this.safeSend(conn.ws, {
+        t: "pair_result",
+        ok: false,
+        error: locked
+          ? `Too many attempts. Locked for ${Math.ceil(LOCKOUT_WINDOW_MS / 1000)}s.`
+          : "Incorrect code.",
+      });
+      // Notify the host (desktop/mobile) so they see the device + failed-attempt count (spec §21.8).
+      this.emitState();
       return;
     }
     conn.phase = "authed";
     conn.failed = 0;
-    this.safeSend(conn.ws, { t: "pair_result", ok: true, memberId: conn.member.memberId });
+    const guestToken = this.opts.mintGuestToken?.({
+      memberId: conn.member.memberId,
+      label: conn.label,
+      device: conn.device,
+    });
+    this.safeSend(conn.ws, {
+      t: "pair_result",
+      ok: true,
+      memberId: conn.member.memberId,
+      guestToken,
+    });
     this.safeSend(conn.ws, { t: "transcript", rows: this.opts.fetchTranscript() });
     this.sendModes(conn);
     this.emitState();
@@ -292,6 +379,19 @@ export class ShareServer {
         if (!text) return;
         conn.member.typing = false;
         conn.member.draft = null;
+        // Record who sent what (name + device) so the host can attribute guest messages.
+        this.activity.push({
+          memberId: conn.member.memberId,
+          label: conn.label,
+          device: conn.device,
+          text: text.slice(0, 500),
+          at_ms: Date.now(),
+        });
+        if (this.activity.length > 30) this.activity.shift();
+        this.logger.info(
+          { requestId: conn.requestId, label: conn.label, device: conn.device },
+          "Guest sent a message",
+        );
         this.emitState();
         this.broadcastPresence();
         try {
@@ -359,13 +459,16 @@ export class ShareServer {
     }
   }
 
+  // Push the FULL coalesced transcript snapshot whenever it changes (not per-row deltas): the
+  // guest re-renders it, so a streaming reply reconciles into one clean bubble instead of many
+  // fragments. Cheap: a share transcript is a handful of messages.
   private pumpTranscript(): void {
     const rows = this.opts.fetchTranscript();
-    const fresh = rows.filter((r) => r.seq > this.lastSeq);
-    if (fresh.length === 0) return;
-    this.lastSeq = fresh[fresh.length - 1]?.seq ?? this.lastSeq;
+    const json = JSON.stringify(rows);
+    if (json === this.lastTranscriptJson) return;
+    this.lastTranscriptJson = json;
     for (const c of this.conns.values()) {
-      if (c.phase === "authed") this.safeSend(c.ws, { t: "append", rows: fresh });
+      if (c.phase === "authed") this.safeSend(c.ws, { t: "transcript", rows });
     }
   }
 
@@ -389,8 +492,15 @@ export class ShareServer {
         requestedAt_ms: c.member.joinedAt_ms,
         status: c.phase === "approved" ? "approved" : "pending",
         code: c.code,
+        device: c.device,
+        failedAttempts: c.totalFailed,
+        lockedUntil_ms: c.lockoutUntil > Date.now() ? c.lockoutUntil : null,
       }));
-    this.opts.onStateChanged({ members: this.authedMembers(), requests });
+    this.opts.onStateChanged({
+      members: this.authedMembers(),
+      requests,
+      activity: [...this.activity],
+    });
   }
 
   private safeSend(ws: WebSocket, payload: unknown): void {
@@ -400,6 +510,37 @@ export class ShareServer {
       // ignore
     }
   }
+}
+
+// The guest token rides as a WS bearer subprotocol (reusing DaemonClient's `jagentdesk.bearer.<x>`
+// wiring). Extract it from the Sec-WebSocket-Protocol header.
+export function extractBearerToken(header: string | undefined): string | null {
+  if (!header) return null;
+  for (const raw of header.split(",")) {
+    const proto = raw.trim();
+    if (proto.startsWith("jagentdesk.bearer.")) return proto.slice("jagentdesk.bearer.".length);
+  }
+  return null;
+}
+
+// Best-effort human-readable device from a User-Agent, e.g. "Chrome on iPhone". Not for security —
+// only so the host recognizes who is asking to join / entering a wrong code (spec §21.8).
+export function parseDevice(ua: string | undefined): string {
+  if (!ua) return "Unknown device";
+  let os = "Unknown OS";
+  if (/iPhone/.test(ua)) os = "iPhone";
+  else if (/iPad/.test(ua)) os = "iPad";
+  else if (/Android/.test(ua)) os = "Android";
+  else if (/Macintosh|Mac OS X/.test(ua)) os = "macOS";
+  else if (/Windows/.test(ua)) os = "Windows";
+  else if (/Linux/.test(ua)) os = "Linux";
+  let browser = "browser";
+  if (/Edg\//.test(ua)) browser = "Edge";
+  else if (/OPR\/|Opera/.test(ua)) browser = "Opera";
+  else if (/Chrome\//.test(ua)) browser = "Chrome";
+  else if (/Firefox\//.test(ua)) browser = "Firefox";
+  else if (/Safari\//.test(ua)) browser = "Safari";
+  return `${browser} on ${os}`;
 }
 
 // Constant-time 6-digit comparison.
