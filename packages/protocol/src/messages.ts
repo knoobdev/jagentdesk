@@ -4485,6 +4485,7 @@ export const ServerInfoStatusPayloadSchema = z
         autorun: z.boolean().optional(), // Autonomous run (spec §20 / ADR-0017); default OFF, opt-in per daemon
         autorunApproval: z.boolean().optional(), // Per-action approval mode for autorun (§20.7.3)
         sessionSharing: z.boolean().optional(), // Session sharing via Cloudflare tunnel (spec §21 / ADR-0018); default OFF
+        agentForum: z.boolean().optional(), // Agent Forum / Team mode (docs/plans/active/agent-forum.md)
       })
       .optional(),
   })

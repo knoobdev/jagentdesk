@@ -2312,6 +2312,7 @@ export class VoiceAssistantWebSocketServer {
         ...(this.autorunService ? { autorun: true, autorunApproval: true } : {}),
         // Session sharing (spec §21 / ADR-0018); advertised only when the daemon opted in.
         ...(this.sessionShareService ? { sessionSharing: true } : {}),
+        ...(this.agentForumService ? { agentForum: true } : {}),
         // Advertise the plugin management surface only when a PluginService is
         // wired; without it the plugin.* RPCs return empty/disabled results.
         ...(this.pluginRuntime

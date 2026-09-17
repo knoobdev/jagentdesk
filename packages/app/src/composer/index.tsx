@@ -43,6 +43,8 @@ import {
 } from "@/composer/agent-controls";
 import { SkillsControl } from "@/composer/agent-controls/skills-control";
 import { AutonomousControl } from "@/composer/agent-controls/autonomous-control";
+import { TeamModeControl } from "@/composer/agent-controls/team-mode-control";
+import { getTeamModeEnabled } from "@/composer/agent-controls/team-mode-store";
 import { resolveSkillInjectedText } from "@/skills/skill-injection";
 import { ContextWindowMeter } from "@/components/context-window-meter";
 import { useImageAttachmentPicker } from "@/hooks/use-image-attachment-picker";
@@ -303,6 +305,7 @@ function renderLeftContent(args: RenderLeftContentArgs): ReactElement {
       />
       <SkillsControl agentId={agentId} />
       <AutonomousControl agentId={agentId} serverId={serverId} />
+      <TeamModeControl agentId={agentId} serverId={serverId} />
     </View>
   );
 }
@@ -1394,6 +1397,25 @@ export function Composer({
       outgoingAttachments: ComposerAttachment[],
       forceSend?: boolean,
     ) => {
+      // Team mode (docs/plans/active/agent-forum.md): route a real coding request to a forum topic
+      // instead of a normal turn. The daemon seeds the topic and hands this agent the team-lead brief.
+      const teamPrompt = outgoingMessage.trim();
+      if (teamPrompt && client && getTeamModeEnabled(serverId, agentId)) {
+        setSendError(null);
+        try {
+          await client.forumCreate({
+            prompt: teamPrompt,
+            originAgentId: agentId,
+            bootstrapLead: true,
+          });
+          clearDraft("sent");
+          setUserInput("");
+        } catch (error) {
+          console.error("[AgentInput] Team mode start failed:", error);
+          setSendError(t("composer.errors.failedToSend"));
+        }
+        return;
+      }
       const result = await submitAgentInput({
         message: outgoingMessage,
         attachments: outgoingAttachments,
@@ -1439,15 +1461,19 @@ export function Composer({
       });
     },
     [
+      agentId,
       allowEmptySubmit,
       appSettings.sendBehavior,
       beginSubmit,
       clearDraft,
+      client,
       completeSubmit,
       hasExternalContent,
       isAgentRunning,
       queueMessage,
+      serverId,
       setSelectedAttachments,
+      setSendError,
       setUserInput,
       submitBehavior,
       submitMessage,
