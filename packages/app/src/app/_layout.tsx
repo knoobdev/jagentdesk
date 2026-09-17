@@ -996,6 +996,9 @@ function RootStack() {
   return (
     <ThemedStack screenOptions={ROOT_STACK_SCREEN_OPTIONS}>
       <Stack.Screen name="index" />
+      {/* Session-share guest mode (ADR-0019): reachable without pairing/host — it registers its
+          own scoped guest runtime from the served hint. */}
+      <Stack.Screen name="share" />
       <Stack.Screen name="pair-start" />
       {/* The gate route stays outside Stack.Protected so it remains reachable
           while the background Tailscale health check is in progress. */}
@@ -1021,6 +1024,7 @@ function RootStack() {
         <Stack.Screen name="open-project" />
         <Stack.Screen name="sessions" />
         <Stack.Screen name="schedules" />
+        <Stack.Screen name="shared-sessions" />
       </Stack.Protected>
       <Stack.Screen name="h/[serverId]" />
       <Stack.Screen name="settings/hosts/[serverId]/index" />

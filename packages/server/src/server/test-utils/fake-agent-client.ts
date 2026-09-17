@@ -959,21 +959,38 @@ class FakeAgentSession implements AgentSession {
     };
   }
 
-  private buildAssistantText(prompt: string): string {
-    const lower = prompt.toLowerCase();
-
-    // Special-case for tests that ask the agent to run pwd but use a placeholder in the
-    // "respond with exactly" instruction.
+  // Explicit "run pwd" / "respond with exactly:" overrides, split out so buildAssistantText stays
+  // under the complexity cap. Returns null when no explicit instruction matched.
+  private resolveExplicitReply(prompt: string, lower: string): string | null {
     if (lower.includes("run `pwd`") && lower.includes("respond with exactly: cwd:")) {
-      const cwd = this.config.cwd ?? process.cwd();
-      return `CWD: ${cwd}`;
+      return `CWD: ${this.config.cwd ?? process.cwd()}`;
     }
-
     const respondExactlyMatch =
       /respond with exactly:\s*([^\n\r]+)\s*$/i.exec(prompt) ??
       /respond with exactly:\s*([^\n\r]+)/i.exec(prompt);
-    if (respondExactlyMatch) {
-      return (respondExactlyMatch[1] ?? "").trim();
+    return respondExactlyMatch ? (respondExactlyMatch[1] ?? "").trim() : null;
+  }
+
+  private buildAssistantText(prompt: string): string {
+    const lower = prompt.toLowerCase();
+
+    const explicit = this.resolveExplicitReply(prompt, lower);
+    if (explicit !== null) return explicit;
+
+    if (lower.includes("emit artifact")) {
+      // Deterministic assistant reply carrying a fenced HTML block so the Artifacts canvas has a
+      // real artifact to render (ADR-0019 guest surface screenshot/e2e).
+      return [
+        "Here is a small page:",
+        "",
+        "```html",
+        "<!doctype html>",
+        '<html><body style="font-family:sans-serif;padding:24px">',
+        "<h1>Shared Artifact</h1>",
+        "<p>Rendered in the guest canvas.</p>",
+        "</body></html>",
+        "```",
+      ].join("\n");
     }
     if (lower.includes("state saved")) return "state saved";
     if (lower.includes("timeline test")) return "timeline test";

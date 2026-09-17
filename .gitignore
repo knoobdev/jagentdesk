@@ -91,3 +91,11 @@ packages/protocol/src/generated/validation/*.aot.ts
 packages/desktop/.cache/
 packages/desktop/src-tauri/resources/managed-runtime/
 app.json
+
+# session-share guest web build + local test scripts
+packages/app/dist-share/
+guest-browser-test.mjs
+share-host.mjs
+list-agents.mjs
+probe-local-daemon.mjs
+inspect-timeline.mjs

@@ -2818,6 +2818,8 @@ export const SessionShareMemberSchema = z.object({
   joinedAt_ms: z.number().int(),
   lastSeen_ms: z.number().int(),
   typing: z.boolean(),
+  // Human-readable guest device, parsed from the browser User-Agent (e.g. "Chrome on macOS").
+  device: z.string().optional(),
 });
 // A guest who opened the link and asked to join. The host must Accept/Reject first (spec
 // §21.5); on accept the daemon mints a 6-digit `code` (shown ONLY to the host, who relays it
@@ -2830,6 +2832,38 @@ export const SessionShareRequestSchema = z.object({
   requestedAt_ms: z.number().int(),
   status: z.enum(["pending", "approved"]),
   code: z.string().nullable().optional(),
+  // Guest device parsed from the User-Agent, so the host knows who is asking / entering the code.
+  device: z.string().optional(),
+  // Wrong-code attempts on this approved request, and lockout expiry — surfaced so the host sees a
+  // guest fumbling or being brute-forced (spec §21.8).
+  failedAttempts: z.number().int().optional(),
+  lockedUntil_ms: z.number().int().nullable().optional(),
+  // When the minted 6-digit code expires (Unix ms). The host + guest show a countdown; after this
+  // the guest must request a fresh code. Null/absent for pending (not-yet-approved) requests.
+  codeExpiresAt_ms: z.number().int().nullable().optional(),
+});
+// A message a guest sent into the shared session — so the host can see who (name + device) sent
+// what, since the agent timeline itself carries no guest attribution (spec §21.6/§21.7).
+export const SessionShareActivitySchema = z.object({
+  memberId: z.string(),
+  label: z.string(),
+  device: z.string().optional(),
+  text: z.string(),
+  at_ms: z.number().int(),
+});
+// What a guest may do in a share (spec §21 / ADR-0019). `chat` is always on; the rest are granted
+// by the host at connect time or live via set-options, and enforced at the daemon dispatch.
+export const SessionShareCapabilitiesSchema = z.object({
+  chat: z.boolean(),
+  files: z.boolean(),
+  terminal: z.boolean(),
+  modelMode: z.boolean(),
+  // Read-only chat: the guest can watch the conversation but not send (no composer). Default false.
+  // When true, the guest scope excludes send/model/mode/cancel and the guest UI hides the composer.
+  readOnly: z.boolean().default(false),
+  // Artifacts (Canvas): the guest sees an Artifacts tab that renders the code/HTML/SVG/diagrams the
+  // agent produced. Derived from the shared timeline the guest already receives (no extra scope).
+  artifacts: z.boolean().default(false),
 });
 export const SessionShareSchema = z.object({
   shareId: z.string(),
@@ -2847,9 +2881,13 @@ export const SessionShareSchema = z.object({
   // OFF: the guest surface shows no model/mode control and the daemon rejects guest set-mode/
   // set-model. The host grants this at connect time and can toggle it live via set-options.
   allowGuestModelMode: z.boolean(),
+  // Capabilities the guest surface may use (ADR-0019). `modelMode` mirrors allowGuestModelMode.
+  capabilities: SessionShareCapabilitiesSchema,
   // Guests awaiting host Accept/Reject, and approved ones with their code (host-only).
   pendingRequests: z.array(SessionShareRequestSchema),
   members: z.array(SessionShareMemberSchema),
+  // Recent guest-sent messages (capped), so the host sees who sent what.
+  recentActivity: z.array(SessionShareActivitySchema),
 });
 export const SessionShareCreateRequestSchema = z.object({
   type: z.literal("session.share.create.request"),
@@ -2858,6 +2896,7 @@ export const SessionShareCreateRequestSchema = z.object({
   shareDraftPreview: z.boolean().optional(),
   requireHostApproval: z.boolean().optional(),
   allowGuestModelMode: z.boolean().optional(),
+  capabilities: SessionShareCapabilitiesSchema.partial().optional(),
   requestId: z.string(),
 });
 // Host toggles share options live (spec §21.6) — currently the model/mode grant. Effective
@@ -2866,6 +2905,7 @@ export const SessionShareSetOptionsRequestSchema = z.object({
   type: z.literal("session.share.set_options.request"),
   shareId: z.string(),
   allowGuestModelMode: z.boolean().optional(),
+  capabilities: SessionShareCapabilitiesSchema.partial().optional(),
   requestId: z.string(),
 });
 export const SessionShareStopRequestSchema = z.object({
@@ -8257,6 +8297,8 @@ export type AutorunListResponse = z.infer<typeof AutorunListResponseSchema>;
 export type AutorunStream = z.infer<typeof AutorunStreamSchema>;
 export type SessionShareStatus = z.infer<typeof SessionShareStatusSchema>;
 export type SessionShareMember = z.infer<typeof SessionShareMemberSchema>;
+export type SessionShareActivity = z.infer<typeof SessionShareActivitySchema>;
+export type SessionShareCapabilities = z.infer<typeof SessionShareCapabilitiesSchema>;
 export type SessionShareRequest = z.infer<typeof SessionShareRequestSchema>;
 export type SessionShare = z.infer<typeof SessionShareSchema>;
 export type SessionShareRespondRequest = z.infer<typeof SessionShareRespondRequestSchema>;

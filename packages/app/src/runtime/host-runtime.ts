@@ -689,6 +689,15 @@ export class HostRuntimeController {
   // Reset to 0 whenever the host reaches online, its active connection changes,
   // or the connection mode changes.
   private localRetryCount = 0;
+  // Session-share GUEST connections are remote (over a Cloudflare tunnel), not a local daemon, so
+  // they must keep retrying on transient drops (idle/network change) instead of hitting the
+  // local-daemon retry cap. Set via probeAndUpsertDirectConnection({ keepRetrying: true }).
+  private keepRetryingDirect = false;
+
+  // Exempt this host from the local-daemon retry cap (guest tunnel connections keep retrying).
+  setKeepRetryingDirect(value: boolean): void {
+    this.keepRetryingDirect = value;
+  }
 
   constructor(input: {
     host: HostProfile;
@@ -894,7 +903,8 @@ export class HostRuntimeController {
     nextTag: HostRuntimeConnectionMachineState["tag"],
   ): void {
     const result = nextLocalRetryState({
-      connectionType: connection.type,
+      // Guest tunnel connections keep retrying (treated like tailnet) — no local-daemon retry cap.
+      connectionType: this.keepRetryingDirect ? "tailnet" : connection.type,
       previousTag,
       nextTag,
       currentCount: this.localRetryCount,
@@ -2163,10 +2173,11 @@ export class HostRuntimeStore {
     useTls?: boolean;
     password?: string;
     label?: string;
+    keepRetrying?: boolean;
   }): Promise<{ profile: HostProfile; serverId: string; hostname: string | null }> {
     const endpoint = normalizeHostPort(input.endpoint);
     const password = input.password?.trim();
-    return this.probeAndUpsertConnection({
+    const result = await this.probeAndUpsertConnection({
       label: input.label,
       connection: {
         id: `direct:${endpoint}`,
@@ -2176,6 +2187,10 @@ export class HostRuntimeStore {
         ...(password ? { password } : {}),
       },
     });
+    // Guest tunnel connections must keep retrying on transient drops (idle/network) instead of
+    // hitting the local-daemon retry cap. Exempt this host's controller from that cap.
+    if (input.keepRetrying) this.controllers.get(result.serverId)?.setKeepRetryingDirect(true);
+    return result;
   }
 
   async upsertTailnetConnection(input: {
@@ -3038,6 +3053,7 @@ export interface HostMutations {
     useTls?: boolean;
     password?: string;
     label?: string;
+    keepRetrying?: boolean;
   }) => Promise<{ profile: HostProfile; serverId: string; hostname: string | null }>;
   upsertTailnetConnection: (input: {
     serverId: string;

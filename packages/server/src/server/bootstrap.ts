@@ -5,6 +5,7 @@ import { open } from "fs/promises";
 import { randomUUID } from "node:crypto";
 import { hostname as getHostname } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { Logger } from "pino";
 import { z } from "zod";
@@ -418,6 +419,8 @@ export interface JAgentDeskDaemonConfig {
   autorunEnabled?: boolean;
   // Session sharing (spec §21). Default OFF; exposes one agent chat via a Cloudflare tunnel.
   sessionSharingEnabled?: boolean;
+  // Directory of the app web build served to session-share guests as the real UI (ADR-0019).
+  sessionShareAppDistDir?: string;
   git?: {
     maxProcessesPerSecond: number;
     maxProcessConcurrency: number;
@@ -1372,12 +1375,17 @@ export async function createJAgentDeskDaemon(
   );
   // Session sharing (spec §21 / ADR-0018). Default OFF: the service + `features.sessionSharing`
   // only exist when the daemon opted in. Cloudflare quick tunnel + a scoped per-share server.
+  const shareAppDistDir =
+    config.sessionShareAppDistDir ??
+    process.env.JAGENTDESK_SHARE_APP_DIST ??
+    resolveBundledShareAppDist();
   const sessionShareService = config.sessionSharingEnabled
     ? new SessionShareService({
         logger,
         agentManager,
         agentStorage,
         tunnelManager: new TunnelManager(logger),
+        appDistDir: shareAppDistDir,
         onUpdate: (share) =>
           emitExternalSessionMessage({ type: "session.share.stream", payload: { share } }),
       })
@@ -1764,6 +1772,11 @@ export async function createJAgentDeskDaemon(
               autorunService,
               sessionShareService,
             );
+            // Session-share guests (ADR-0019): let the scoped ShareServer /ws hand validated guest
+            // sockets to the daemon as agent-confined real sessions.
+            sessionShareService?.setGuestAttacher((ws, params) =>
+              wsServer?.attachGuestSocket(ws, params),
+            );
             // Bind the plugin session host and start configured plugins before any
             // external ingress attaches, mirroring upstream's pre-accept ordering.
             pluginRuntime.bindJAgentDeskSessionHost(wsServer);
@@ -1872,6 +1885,24 @@ export async function createJAgentDeskDaemon(
     stop,
     getListenTarget: () => boundListenTarget,
   };
+}
+
+// The app web build bundled next to the server dist (dist/server/share-app-dist), copied there by
+// the build (scripts/build-share-app-dist.mjs) so the ShareServer can serve the real app to guests
+// (ADR-0019). bootstrap.js lives at dist/server/server/bootstrap.js, so the sibling is "../share-app-dist".
+function resolveBundledShareAppDist(): string | undefined {
+  try {
+    let dir = fileURLToPath(new URL("../share-app-dist", import.meta.url));
+    // In a packaged Electron app the daemon may resolve inside app.asar, but static assets live in
+    // app.asar.unpacked (real files readFileSync can read). Prefer the unpacked copy when present.
+    if (dir.includes(`app.asar${path.sep}`)) {
+      const unpacked = dir.replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
+      if (existsSync(path.join(unpacked, "index.html"))) return unpacked;
+    }
+    return existsSync(path.join(dir, "index.html")) ? dir : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 async function closeAllAgents(logger: Logger, agentManager: AgentManager): Promise<void> {

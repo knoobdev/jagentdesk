@@ -5,6 +5,53 @@ own release line (now `0.9.14`); the many `v0.1.x`–`v1.0.x` tags in history ar
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
 
+## v0.9.29 — 2026-09-17
+
+Session sharing v2 — the guest joins the **real app** (scoped to one agent by the daemon), instead
+of a bespoke mini-page (ADR-0019). This supersedes the v0.9.14 guest surface and rolls up the whole
+v2 line (0.9.15–0.9.29).
+
+### Added
+
+- **Real-app guest surface (ADR-0019)** — a guest connects a real client to a scoped `/ws` on the
+  per-share server using the guest token; the daemon confines it by capability scope + per-agent
+  guard + workspace path-containment. The guest sees the same chat, panels, and composer the host
+  uses — not a hand-rolled page.
+- **Per-share capabilities** — beyond chat (always on), the host can grant **Files**, **Changes**,
+  **Terminal**, **model/mode**, **read-only** (chat-only, composer hidden), and **Artifacts**. Each
+  defaults **off**. The guest scope gates both inbound requests and outbound frames; file/terminal
+  access is contained to the shared agent's workspace.
+- **Artifacts canvas** — a dedicated panel that live-renders the substantial fenced blocks the agent
+  produces (HTML/SVG in a sandboxed iframe, Mermaid diagrams, Markdown, code), derived from the
+  timeline the guest already has — no extra daemon scope.
+- **Dedicated "Shared sessions" page** — manage every live share across connected hosts from the
+  main menu (outside a chat and outside Settings), showing each guest's device and a live
+  **typing…** indicator per agent.
+- **Pairing code countdown** — the 6-digit code shows a live expiry countdown with a refresh path.
+
+### Changed
+
+- **Guests cannot fork or re-share** — the assistant fork menu (both the completed-turn and
+  in-flight-turn footers) and the Share button are hidden on the guest surface; `fork_context` and
+  the host share RPCs are out of the guest scope regardless.
+- **Presence typing reaches the host** — the guest signals typing from the composer draft; the
+  daemon flips `member.typing` and re-emits the share so the host (chat manage sheet and the global
+  Shared sessions page) sees who is typing on which agent.
+
+### Fixed
+
+- **Model/mode change no longer fails** with `Session is not authorized for
+switch_agent_provider_request` when the host granted "change model & mode" — the guest scope now
+  includes the provider/thinking/feature switch request+response types.
+- **Guest reconnects** through idle, screen-lock, network changes, and browser refresh (F5): the
+  guest token persists and remote (tunnel) guests are exempt from the non-tailnet local-retry cap
+  that used to disable reconnect after three tries.
+- **Shared sessions screen** is a normal in-shell page (MenuHeader + sidebar nav), not a
+  full-screen-locked route with no way back.
+- **Artifacts tab no longer crashes the app** (React #185 infinite render loop) when opened over a
+  non-empty timeline — the canvas now selects a stable store reference and derives artifacts in a
+  memo instead of returning a fresh array from the store selector each render.
+
 ## v0.9.14 — 2026-09-16
 
 Session sharing — hand one agent chat to someone outside your tailnet through a

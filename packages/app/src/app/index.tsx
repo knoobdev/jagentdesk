@@ -15,6 +15,7 @@ import {
 import { shouldUseDesktopDaemon } from "@/desktop/daemon/desktop-daemon";
 import { isNative } from "@/constants/platform";
 import { useConnectionMode } from "@/tailscale";
+import { readGuestShareHint } from "@/screens/share/guest-share-screen";
 
 const isDesktop = shouldUseDesktopDaemon();
 let nativePairingOnboardingLatched = false;
@@ -51,6 +52,12 @@ export default function Index() {
     workspaceSelectionWorkspaceId,
   );
   const { mode: connectionMode, loaded: connectionModeLoaded } = useConnectionMode();
+
+  // Session-share guest mode (ADR-0019): a served share page carries a hint — go straight to the
+  // guest screen (its own scoped runtime), skipping host list / pairing / workspace selection.
+  if (readGuestShareHint()) {
+    return <Redirect href={"/share" as Href} />;
+  }
 
   // Hydrate the user's selected transport before routing. Tailscale health is
   // deliberately not part of this gate: the native node is restored in the

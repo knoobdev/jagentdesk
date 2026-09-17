@@ -491,6 +491,10 @@ export function buildSchedulesRoute() {
   return "/schedules" as const;
 }
 
+export function buildSharedSessionsRoute() {
+  return "/shared-sessions" as const;
+}
+
 export function buildOpenProjectRoute() {
   return "/open-project" as const;
 }

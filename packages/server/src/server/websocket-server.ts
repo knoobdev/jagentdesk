@@ -163,6 +163,17 @@ interface PendingConnection {
   pairingRequestId?: string;
   /** Created only after the mobile client has sent its pairing identity hint. */
   pairingCode?: PairingCodeDetails;
+  /**
+   * Session-share guest (ADR-0019): set when this socket arrived via the scoped ShareServer /ws
+   * with a validated guest token. Its hello skips signed-hello/device pairing and yields a session
+   * limited to `scopes` and confined to `agentId`.
+   */
+  guestGrant?: {
+    agentId: string;
+    scopes: readonly string[];
+    workspaceCwd: string | null;
+    onGuestActivity?: (text: string) => void;
+  };
 }
 
 type PendingPairingRequestPayload = Extract<
@@ -512,6 +523,9 @@ interface SocketSessionOptions {
   appVersion: string | null;
   clientCapabilities: Record<string, unknown> | null;
   scopes: readonly string[];
+  guestAgentId?: string | null;
+  guestWorkspaceCwd?: string | null;
+  onGuestActivity?: (text: string) => void;
   connectionLogger: pino.Logger;
   onMessage: (message: SessionOutboundMessage) => void;
   onMessageToSource?: (source: object, message: SessionOutboundMessage) => void;
@@ -1634,6 +1648,10 @@ export class VoiceAssistantWebSocketServer {
     appVersion: string | null;
     clientCapabilities: Record<string, unknown> | null;
     connectionLogger: pino.Logger;
+    scopes?: readonly string[];
+    guestAgentId?: string | null;
+    guestWorkspaceCwd?: string | null;
+    onGuestActivity?: (text: string) => void;
   }): TrustedSessionConnection {
     const { ws, clientId, appVersion, clientCapabilities, connectionLogger } = params;
     let connection: TrustedSessionConnection | null = null;
@@ -1642,7 +1660,10 @@ export class VoiceAssistantWebSocketServer {
       clientId,
       appVersion,
       clientCapabilities,
-      scopes: ["*"],
+      scopes: params.scopes ?? ["*"],
+      guestAgentId: params.guestAgentId ?? null,
+      guestWorkspaceCwd: params.guestWorkspaceCwd ?? null,
+      onGuestActivity: params.onGuestActivity,
       connectionLogger,
       onMessage: (msg) => {
         if (!connection) {
@@ -1704,12 +1725,74 @@ export class VoiceAssistantWebSocketServer {
     return connection;
   }
 
+  /**
+   * Attach a session-share GUEST socket (spec §21 / ADR-0019). Unlike the main /ws flow this skips
+   * device pairing / hello (the guest already paired with a 6-digit code and holds a guest token,
+   * validated by the caller). It creates a session limited to `scopes` and confined to exactly
+   * `agentId` (Session's guest guard). The socket comes from the scoped ShareServer, never the main
+   * daemon port — so no full-scope path is ever exposed to the tunnel.
+   */
+  public attachGuestSocket(
+    ws: WebSocketLike,
+    params: {
+      agentId: string;
+      scopes: readonly string[];
+      workspaceCwd: string | null;
+      onGuestActivity?: (text: string) => void;
+    },
+  ): void {
+    if (!this.acceptingConnections) {
+      try {
+        ws.close(WS_CLOSE_SERVER_SHUTDOWN, "Server shutting down");
+      } catch {
+        // ignore
+      }
+      return;
+    }
+    const identity = createWebSocketConnectionIdentity(
+      extractSocketRequestMetadata(undefined),
+      undefined,
+    );
+    this.socketIdentities.set(ws, identity);
+    const connectionLogger = this.logger.child({ guest: true, agentId: params.agentId });
+    const pending: PendingConnection = {
+      connectionLogger,
+      helloTimeout: null,
+      identity,
+      guestGrant: {
+        agentId: params.agentId,
+        scopes: params.scopes,
+        workspaceCwd: params.workspaceCwd,
+        onGuestActivity: params.onGuestActivity,
+      },
+    };
+    const timeout = setTimeout(() => {
+      if (this.pendingConnections.get(ws) !== pending) return;
+      pending.helloTimeout = null;
+      this.pendingConnections.delete(ws);
+      try {
+        ws.close(WS_CLOSE_HELLO_TIMEOUT, "Hello timeout");
+      } catch {
+        // ignore
+      }
+    }, HELLO_TIMEOUT_MS);
+    pending.helloTimeout = timeout;
+    (timeout as unknown as { unref?: () => void }).unref?.();
+    this.pendingConnections.set(ws, pending);
+    this.incrementRuntimeCounter("connectedAwaitingHello");
+    this.bindSocketHandlers(ws);
+    connectionLogger.info("Guest socket attached; awaiting hello");
+  }
+
   private createSocketSession(options: SocketSessionOptions): Session {
     return new Session({
       clientId: options.clientId,
       appVersion: options.appVersion,
       clientCapabilities: options.clientCapabilities,
       scopes: options.scopes,
+      guestAgentId: options.guestAgentId ?? null,
+      guestWorkspaceCwd: options.guestWorkspaceCwd ?? null,
+      onGuestActivity: options.onGuestActivity,
       onMessage: options.onMessage,
       onMessageToSource: options.onMessageToSource,
       onBinaryMessage: options.onBinaryMessage,
@@ -1912,8 +1995,10 @@ export class VoiceAssistantWebSocketServer {
   }): void {
     const { ws, message, pending } = params;
 
-    // In-process plugin sockets are trusted and never carry a signed hello.
+    // Session-share guests (ADR-0019) authenticate by their guest token (already validated by the
+    // scoped ShareServer before this socket was attached), not by a signed/device hello.
     if (
+      !pending.guestGrant &&
       !this.pluginSocketIds.has(ws) &&
       this.requiresSignedHello(pending.identity) &&
       !this.verifyTailnetSignedHello(params)
@@ -1978,6 +2063,10 @@ export class VoiceAssistantWebSocketServer {
       appVersion: message.appVersion ?? null,
       clientCapabilities: message.capabilities ?? null,
       connectionLogger,
+      scopes: pending.guestGrant?.scopes,
+      guestAgentId: pending.guestGrant?.agentId ?? null,
+      guestWorkspaceCwd: pending.guestGrant?.workspaceCwd ?? null,
+      onGuestActivity: pending.guestGrant?.onGuestActivity,
     });
     this.sessions.set(ws, connection);
     this.externalSessionsByKey.set(clientId, connection);

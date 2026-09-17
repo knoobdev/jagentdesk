@@ -106,6 +106,7 @@ import type { AgentCapabilityFlags } from "@jagentdesk/protocol/agent-types";
 import { RewindMenu, type RewindMode } from "@/components/rewind/rewind-menu";
 import { useRewindAgentMutation } from "@/components/rewind/use-rewind-agent-mutation";
 import { AssistantForkMenu, type AssistantForkTarget } from "@/components/assistant-fork-menu";
+import { isGuestShareMode } from "@/screens/share/guest-share-mode";
 import { useRetainedPanelActive } from "@/components/retained-panel";
 import {
   markdownCopyDataSet,
@@ -661,7 +662,9 @@ export const AssistantTurnFooter = memo(function AssistantTurnFooter({
     },
     [onFork],
   );
-  const canFork = Boolean(onFork);
+  // Guests must not fork the agent (fork_context isn't in the guest scope — the daemon would deny
+  // it anyway; hide the control so a guest never sees a dead button). ADR-0019.
+  const canFork = Boolean(onFork) && !isGuestShareMode();
 
   return (
     <View style={assistantTurnFooterStylesheet.container}>

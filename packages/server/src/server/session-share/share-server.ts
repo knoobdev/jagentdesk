@@ -1,8 +1,44 @@
 import { createServer, type Server } from "node:http";
 import { randomUUID, timingSafeEqual } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join, normalize, extname } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { Logger } from "pino";
+import type { SessionShareCapabilities } from "@jagentdesk/protocol/messages";
 import { renderGuestPage } from "./guest-page.js";
+
+const CONTENT_TYPES: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".map": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".ico": "image/x-icon",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".ttf": "font/ttf",
+  ".txt": "text/plain; charset=utf-8",
+};
+
+function shareHintScript(
+  agentId: string,
+  agentLabel: string,
+  capabilities: SessionShareCapabilities,
+  workspaceCwd: string | null,
+): string {
+  const json = JSON.stringify({ agentId, agentLabel, capabilities, workspaceCwd }).replace(
+    /</g,
+    "\\u003c",
+  );
+  return `<script>window.__JAGENTDESK_SHARE__=${json};</script>`;
+}
 
 // Scoped per-share HTTP + WebSocket server (spec §21 / ADR-0018). The ONLY thing the
 // Cloudflare tunnel exposes. Bespoke, minimal surface: a guest requests to join, the host
@@ -23,6 +59,7 @@ export interface GuestMember {
   draft: string | null;
   joinedAt_ms: number;
   lastSeen_ms: number;
+  device: string;
 }
 
 export interface ShareRequestSnapshot {
@@ -31,6 +68,18 @@ export interface ShareRequestSnapshot {
   requestedAt_ms: number;
   status: "pending" | "approved";
   code: string | null;
+  device: string;
+  failedAttempts: number;
+  lockedUntil_ms: number | null;
+  codeExpiresAt_ms: number | null;
+}
+
+export interface ShareActivity {
+  memberId: string;
+  label: string;
+  device: string;
+  text: string;
+  at_ms: number;
 }
 
 export interface ShareModesSnapshot {
@@ -40,6 +89,13 @@ export interface ShareModesSnapshot {
 
 export interface ShareServerOptions {
   agentLabel: string;
+  agentId: string;
+  // The shared agent's workspace root, injected into the guest app share hint so the Files/Changes
+  // tabs can resolve the directory without depending on a fetch_agent round-trip. null → no cwd.
+  workspaceCwd?: string | null;
+  // Directory of the app web build (app-dist) to serve as the guest surface (ADR-0019). When set,
+  // `/` serves the real app SPA with an injected share hint; when absent, the bespoke page is used.
+  appDistDir?: string;
   sendPrompt: (text: string) => Promise<void>;
   fetchTranscript: () => TranscriptRow[];
   shareDraftPreview: boolean;
@@ -47,17 +103,33 @@ export interface ShareServerOptions {
   // server honors guest set-mode; when OFF the control is hidden and set-mode is rejected. The
   // host toggles this live via setAllowGuestModelMode().
   allowGuestModelMode: boolean;
+  // Live capabilities of this share, read at page-serve time to seed the guest app's share hint so
+  // it shows only the tabs the host granted (chat/files/…). Reflects the grant at page load.
+  getCapabilities?: () => SessionShareCapabilities;
   getModes?: () => ShareModesSnapshot;
   setMode?: (modeId: string) => Promise<void>;
+  // Mint a guest token on successful pairing; the real app uses it to open the scoped /ws.
+  mintGuestToken?: (member: { memberId: string; label: string; device: string }) => string;
+  // Validate a guest token + attach the socket as a scoped real-protocol session (ADR-0019).
+  // Returns true if accepted; false → the socket is closed. Wired by bootstrap to the daemon's
+  // websocket-server.attachGuestSocket after resolving the token to {agentId, capabilities}.
+  attachGuestWs?: (ws: WebSocket, token: string) => boolean;
   // Reports the full live snapshot (authed members + pending/approved join requests) whenever
   // it changes, so the service can mirror it onto the share + stream it to host devices.
-  onStateChanged: (snapshot: { members: GuestMember[]; requests: ShareRequestSnapshot[] }) => void;
+  onStateChanged: (snapshot: {
+    members: GuestMember[];
+    requests: ShareRequestSnapshot[];
+    activity: ShareActivity[];
+  }) => void;
   logger: Logger;
 }
 
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_WINDOW_MS = 60_000;
 const POLL_MS = 1500;
+// A minted pairing code is valid for this long after the host approves; then the guest must ask for
+// a fresh one. Host + guest show a live countdown (spec §21.8 / ADR-0019).
+const CODE_TTL_MS = 5 * 60_000;
 
 type Phase = "new" | "pending" | "approved" | "authed";
 
@@ -67,8 +139,11 @@ interface GuestConn {
   requestId: string;
   label: string;
   code: string | null; // set by the service on approve; the guest must enter it
+  codeExpiresAt: number; // Unix ms the code stops working (0 until approved)
   member: GuestMember;
-  failed: number;
+  device: string;
+  failed: number; // rolling count within the current window (drives lockout)
+  totalFailed: number; // cumulative wrong-code attempts, shown to the host
   lockoutUntil: number;
 }
 
@@ -77,11 +152,13 @@ export class ShareServer {
   private readonly logger: Logger;
   private server: Server | null = null;
   private wss: WebSocketServer | null = null;
+  private guestWss: WebSocketServer | null = null;
   private readonly conns = new Map<string, GuestConn>(); // keyed by requestId
   private pollTimer: ReturnType<typeof setInterval> | null = null;
-  private lastSeq = 0;
+  private lastTranscriptJson = "";
   private guestCounter = 0;
   private allowGuestModelMode: boolean;
+  private readonly activity: ShareActivity[] = []; // recent guest messages, capped
 
   constructor(options: ShareServerOptions) {
     this.opts = options;
@@ -98,7 +175,17 @@ export class ShareServer {
 
   async start(): Promise<number> {
     const server = createServer((req, res) => {
-      if (req.method === "GET" && (req.url === "/" || req.url?.startsWith("/?"))) {
+      if (req.method !== "GET") {
+        res.writeHead(404, { "content-type": "text/plain" });
+        res.end("Not found");
+        return;
+      }
+      if (this.opts.appDistDir) {
+        this.serveApp(req.url ?? "/", res);
+        return;
+      }
+      // Fallback (no app build available): bespoke minimal page.
+      if (req.url === "/" || req.url?.startsWith("/?")) {
         res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
         res.end(renderGuestPage(this.opts.agentLabel));
         return;
@@ -106,13 +193,40 @@ export class ShareServer {
       res.writeHead(404, { "content-type": "text/plain" });
       res.end("Not found");
     });
-    const wss = new WebSocketServer({ server, path: "/guest" });
-    wss.on("connection", (ws) => this.onGuest(ws));
+    // Two WS endpoints on one http server: `/guest` (bespoke pairing channel) and `/ws` (scoped
+    // real-protocol channel, ADR-0019). Use `noServer` + a single upgrade router — attaching two
+    // `WebSocketServer`s via the `server` option makes both try to handle every upgrade (ws gotcha).
+    const wss = new WebSocketServer({ noServer: true });
+    wss.on("connection", (ws, req) => this.onGuest(ws, parseDevice(req.headers["user-agent"])));
+    const guestWss = new WebSocketServer({
+      noServer: true,
+      handleProtocols: (protocols) => [...protocols][0] ?? false,
+    });
+    guestWss.on("connection", (ws, req) => {
+      const token = extractBearerToken(req.headers["sec-websocket-protocol"]);
+      if (!token || !this.opts.attachGuestWs?.(ws, token)) {
+        try {
+          ws.close();
+        } catch {
+          // ignore
+        }
+      }
+    });
+    server.on("upgrade", (req, socket, head) => {
+      const path = (req.url ?? "").split("?")[0];
+      if (path === "/guest") {
+        wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
+      } else if (path === "/ws") {
+        guestWss.handleUpgrade(req, socket, head, (ws) => guestWss.emit("connection", ws, req));
+      } else {
+        socket.destroy();
+      }
+    });
     this.server = server;
     this.wss = wss;
+    this.guestWss = guestWss;
 
-    const initial = this.opts.fetchTranscript();
-    this.lastSeq = initial.length > 0 ? (initial[initial.length - 1]?.seq ?? 0) : 0;
+    this.lastTranscriptJson = JSON.stringify(this.opts.fetchTranscript());
 
     await new Promise<void>((resolve, reject) => {
       server.once("error", reject);
@@ -143,7 +257,14 @@ export class ShareServer {
     this.conns.clear();
     await new Promise<void>((resolve) => {
       if (!this.server) return resolve();
+      // Forcibly terminate any live sockets first. wss.close() only stops NEW upgrades — it leaves
+      // already-upgraded sockets open, and http server.close() waits for every open connection to
+      // drain before its callback fires. A connected scoped /ws guest would therefore hang stop()
+      // (and the host's Stop-share RPC) indefinitely. terminate() drops them immediately.
+      for (const client of this.wss?.clients ?? []) client.terminate();
+      for (const client of this.guestWss?.clients ?? []) client.terminate();
       this.wss?.close();
+      this.guestWss?.close();
       this.server.close(() => resolve());
       this.server = null;
     });
@@ -156,7 +277,8 @@ export class ShareServer {
     if (!c || c.phase !== "pending") return;
     c.phase = "approved";
     c.code = code;
-    this.safeSend(c.ws, { t: "approved" });
+    c.codeExpiresAt = Date.now() + CODE_TTL_MS;
+    this.safeSend(c.ws, { t: "approved", codeExpiresAt_ms: c.codeExpiresAt });
     this.emitState();
   }
 
@@ -170,6 +292,25 @@ export class ShareServer {
       // ignore
     }
     this.conns.delete(requestId);
+    this.emitState();
+  }
+
+  // Record a message a guest sent over the SCOPED /ws (real protocol), so the host sees guest
+  // activity attribution just like the bespoke channel did. Called by the daemon guest session.
+  recordGuestActivity(
+    member: { memberId: string; label: string; device: string },
+    text: string,
+  ): void {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    this.activity.push({
+      memberId: member.memberId,
+      label: member.label,
+      device: member.device,
+      text: trimmed.slice(0, 500),
+      at_ms: Date.now(),
+    });
+    if (this.activity.length > 30) this.activity.shift();
     this.emitState();
   }
 
@@ -189,7 +330,70 @@ export class ShareServer {
     }
   }
 
-  private onGuest(ws: WebSocket): void {
+  // Serve the app web build (SPA) as the guest surface. index.html gets the share hint injected;
+  // unknown non-file paths fall back to index.html (client-side routing). Guards path traversal.
+  private serveApp(url: string, res: import("node:http").ServerResponse): void {
+    const distDir = this.opts.appDistDir as string;
+    const pathname = decodeURIComponent(url.split("?")[0] || "/");
+    const caps = this.opts.getCapabilities?.() ?? {
+      chat: true,
+      files: false,
+      terminal: false,
+      modelMode: this.opts.allowGuestModelMode,
+      readOnly: false,
+      artifacts: false,
+    };
+    const hint = shareHintScript(
+      this.opts.agentId,
+      this.opts.agentLabel,
+      caps,
+      this.opts.workspaceCwd ?? null,
+    );
+    const serveIndex = (): void => {
+      try {
+        const html = readFileSync(join(distDir, "index.html"), "utf8");
+        const injected = html.includes("</head>")
+          ? html.replace("</head>", `${hint}</head>`)
+          : hint + html;
+        res.writeHead(200, {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-store",
+        });
+        res.end(injected);
+      } catch {
+        res.writeHead(500, { "content-type": "text/plain" });
+        res.end("App build unavailable");
+      }
+    };
+    if (pathname === "/" || pathname === "" || pathname === "/index.html") {
+      serveIndex();
+      return;
+    }
+    const target = normalize(join(distDir, pathname));
+    if (!target.startsWith(normalize(distDir))) {
+      res.writeHead(403, { "content-type": "text/plain" });
+      res.end("Forbidden");
+      return;
+    }
+    const ext = extname(target).toLowerCase();
+    if (!ext) {
+      // No extension → treat as a client-side route.
+      serveIndex();
+      return;
+    }
+    try {
+      const body = readFileSync(target);
+      res.writeHead(200, {
+        "content-type": CONTENT_TYPES[ext] ?? "application/octet-stream",
+        "cache-control": "public, max-age=31536000, immutable",
+      });
+      res.end(body);
+    } catch {
+      serveIndex();
+    }
+  }
+
+  private onGuest(ws: WebSocket, device: string): void {
     const requestId = randomUUID();
     const conn: GuestConn = {
       ws,
@@ -197,7 +401,10 @@ export class ShareServer {
       requestId,
       label: "",
       code: null,
+      codeExpiresAt: 0,
+      device,
       failed: 0,
+      totalFailed: 0,
       lockoutUntil: 0,
       member: {
         memberId: randomUUID(),
@@ -206,9 +413,11 @@ export class ShareServer {
         draft: null,
         joinedAt_ms: Date.now(),
         lastSeen_ms: Date.now(),
+        device,
       },
     };
     this.conns.set(requestId, conn);
+    this.logger.info({ requestId, device }, "Guest connected to share server");
     this.safeSend(ws, { t: "hello", agentLabel: this.opts.agentLabel });
 
     ws.on("message", (data) => {
@@ -251,6 +460,10 @@ export class ShareServer {
     conn.label = name || `Guest ${this.guestCounter}`;
     conn.member.label = conn.label;
     conn.phase = "pending";
+    this.logger.info(
+      { requestId: conn.requestId, label: conn.label },
+      "Guest requested to join — awaiting host approval",
+    );
     this.safeSend(conn.ws, { t: "pending" });
     this.emitState();
   }
@@ -266,19 +479,53 @@ export class ShareServer {
       });
       return;
     }
+    // Expired code: force a fresh request rather than accepting a stale one.
+    if (conn.phase === "approved" && conn.codeExpiresAt > 0 && now > conn.codeExpiresAt) {
+      this.safeSend(conn.ws, {
+        t: "pair_result",
+        ok: false,
+        error: "This code has expired. Request a new one.",
+      });
+      return;
+    }
     const input = typeof msg.code === "string" ? msg.code : "";
     if (!conn.code || !codesMatch(input, conn.code)) {
       conn.failed += 1;
+      conn.totalFailed += 1;
+      let locked = false;
       if (conn.failed >= MAX_FAILED_ATTEMPTS) {
         conn.lockoutUntil = now + LOCKOUT_WINDOW_MS;
         conn.failed = 0;
+        locked = true;
       }
-      this.safeSend(conn.ws, { t: "pair_result", ok: false, error: "Incorrect code." });
+      this.logger.warn(
+        { requestId: conn.requestId, device: conn.device, totalFailed: conn.totalFailed, locked },
+        "Guest entered an incorrect pairing code",
+      );
+      this.safeSend(conn.ws, {
+        t: "pair_result",
+        ok: false,
+        error: locked
+          ? `Too many attempts. Locked for ${Math.ceil(LOCKOUT_WINDOW_MS / 1000)}s.`
+          : "Incorrect code.",
+      });
+      // Notify the host (desktop/mobile) so they see the device + failed-attempt count (spec §21.8).
+      this.emitState();
       return;
     }
     conn.phase = "authed";
     conn.failed = 0;
-    this.safeSend(conn.ws, { t: "pair_result", ok: true, memberId: conn.member.memberId });
+    const guestToken = this.opts.mintGuestToken?.({
+      memberId: conn.member.memberId,
+      label: conn.label,
+      device: conn.device,
+    });
+    this.safeSend(conn.ws, {
+      t: "pair_result",
+      ok: true,
+      memberId: conn.member.memberId,
+      guestToken,
+    });
     this.safeSend(conn.ws, { t: "transcript", rows: this.opts.fetchTranscript() });
     this.sendModes(conn);
     this.emitState();
@@ -292,6 +539,19 @@ export class ShareServer {
         if (!text) return;
         conn.member.typing = false;
         conn.member.draft = null;
+        // Record who sent what (name + device) so the host can attribute guest messages.
+        this.activity.push({
+          memberId: conn.member.memberId,
+          label: conn.label,
+          device: conn.device,
+          text: text.slice(0, 500),
+          at_ms: Date.now(),
+        });
+        if (this.activity.length > 30) this.activity.shift();
+        this.logger.info(
+          { requestId: conn.requestId, label: conn.label, device: conn.device },
+          "Guest sent a message",
+        );
         this.emitState();
         this.broadcastPresence();
         try {
@@ -359,13 +619,16 @@ export class ShareServer {
     }
   }
 
+  // Push the FULL coalesced transcript snapshot whenever it changes (not per-row deltas): the
+  // guest re-renders it, so a streaming reply reconciles into one clean bubble instead of many
+  // fragments. Cheap: a share transcript is a handful of messages.
   private pumpTranscript(): void {
     const rows = this.opts.fetchTranscript();
-    const fresh = rows.filter((r) => r.seq > this.lastSeq);
-    if (fresh.length === 0) return;
-    this.lastSeq = fresh[fresh.length - 1]?.seq ?? this.lastSeq;
+    const json = JSON.stringify(rows);
+    if (json === this.lastTranscriptJson) return;
+    this.lastTranscriptJson = json;
     for (const c of this.conns.values()) {
-      if (c.phase === "authed") this.safeSend(c.ws, { t: "append", rows: fresh });
+      if (c.phase === "authed") this.safeSend(c.ws, { t: "transcript", rows });
     }
   }
 
@@ -389,8 +652,16 @@ export class ShareServer {
         requestedAt_ms: c.member.joinedAt_ms,
         status: c.phase === "approved" ? "approved" : "pending",
         code: c.code,
+        device: c.device,
+        failedAttempts: c.totalFailed,
+        lockedUntil_ms: c.lockoutUntil > Date.now() ? c.lockoutUntil : null,
+        codeExpiresAt_ms: c.phase === "approved" && c.codeExpiresAt > 0 ? c.codeExpiresAt : null,
       }));
-    this.opts.onStateChanged({ members: this.authedMembers(), requests });
+    this.opts.onStateChanged({
+      members: this.authedMembers(),
+      requests,
+      activity: [...this.activity],
+    });
   }
 
   private safeSend(ws: WebSocket, payload: unknown): void {
@@ -400,6 +671,37 @@ export class ShareServer {
       // ignore
     }
   }
+}
+
+// The guest token rides as a WS bearer subprotocol (reusing DaemonClient's `jagentdesk.bearer.<x>`
+// wiring). Extract it from the Sec-WebSocket-Protocol header.
+export function extractBearerToken(header: string | undefined): string | null {
+  if (!header) return null;
+  for (const raw of header.split(",")) {
+    const proto = raw.trim();
+    if (proto.startsWith("jagentdesk.bearer.")) return proto.slice("jagentdesk.bearer.".length);
+  }
+  return null;
+}
+
+// Best-effort human-readable device from a User-Agent, e.g. "Chrome on iPhone". Not for security —
+// only so the host recognizes who is asking to join / entering a wrong code (spec §21.8).
+export function parseDevice(ua: string | undefined): string {
+  if (!ua) return "Unknown device";
+  let os = "Unknown OS";
+  if (/iPhone/.test(ua)) os = "iPhone";
+  else if (/iPad/.test(ua)) os = "iPad";
+  else if (/Android/.test(ua)) os = "Android";
+  else if (/Macintosh|Mac OS X/.test(ua)) os = "macOS";
+  else if (/Windows/.test(ua)) os = "Windows";
+  else if (/Linux/.test(ua)) os = "Linux";
+  let browser = "browser";
+  if (/Edg\//.test(ua)) browser = "Edge";
+  else if (/OPR\/|Opera/.test(ua)) browser = "Opera";
+  else if (/Chrome\//.test(ua)) browser = "Chrome";
+  else if (/Firefox\//.test(ua)) browser = "Firefox";
+  else if (/Safari\//.test(ua)) browser = "Safari";
+  return `${browser} on ${os}`;
 }
 
 // Constant-time 6-digit comparison.

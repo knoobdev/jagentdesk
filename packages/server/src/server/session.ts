@@ -445,6 +445,18 @@ type AgentMcpTransportFactory = () => Promise<unknown>;
 export interface SessionOptions {
   clientId: string;
   scopes: readonly string[];
+  // Session-share guest sessions (spec §21 / ADR-0019): when set, this session may only touch this
+  // one agent. Enforced centrally in handleMessage — any inbound message carrying a different
+  // agentId is rejected, on top of the (already narrow) scope allowlist. Null/undefined = trusted
+  // host session (full access, subject to scopes).
+  guestAgentId?: string | null;
+  // Session-share guest file/diff confinement (ADR-0019): the shared agent's workspace root. Guest
+  // file/diff RPCs (keyed by a raw `cwd`) are rejected unless their resolved path stays within this
+  // root — defense-in-depth on top of the capability scope. null → the guest has no file access.
+  guestWorkspaceCwd?: string | null;
+  // Session-share guest activity sink (ADR-0019): called with the text of each message a guest
+  // sends, so the host sees who·device·what. No-op for trusted (non-guest) sessions.
+  onGuestActivity?: (text: string) => void;
   appVersion?: string | null;
   clientCapabilities?: Record<string, unknown> | null;
   onMessage: (msg: SessionOutboundMessage) => void;
@@ -638,6 +650,45 @@ function describeRegistryTransition(record: ArchivedRecordSnapshot | null): Regi
   return record.archivedAt ? "unarchived" : "existing";
 }
 
+// Inbound RPC types that are keyed by a raw `cwd` (filesystem path) rather than an agentId. For a
+// session-share guest these are confined to the shared agent's workspace root by
+// isGuestFileMessageWithinWorkspace (ADR-0019). Only READ-only file/diff types are ever placed in a
+// guest's scope; write types (fs.file.write, checkout_commit, …) are never scoped in, so they are
+// already unreachable — this set is the containment layer for the read types that ARE reachable.
+const GUEST_FILE_CWD_RPC_TYPES: ReadonlySet<string> = new Set([
+  "file_explorer_request",
+  "file_download_token_request",
+  "fs.file.subscribe.request",
+  "subscribe_checkout_diff_request",
+  // Terminal RPCs keyed by a raw `cwd` (read-only viewing). Same containment as file cwd types.
+  "list_terminals_request",
+  "subscribe_terminals_request",
+  "unsubscribe_terminals_request",
+]);
+
+// Read-only terminal RPCs keyed by a `terminalId` rather than a cwd. For a guest these are confined
+// by resolving the terminal's own cwd (via the terminal manager) and checking it against the shared
+// workspace root — a guest must not subscribe to a terminal living in another workspace (ADR-0019).
+const GUEST_TERMINAL_ID_RPC_TYPES: ReadonlySet<string> = new Set([
+  "subscribe_terminal_request",
+  "unsubscribe_terminal_request",
+  "capture_terminal_request",
+]);
+
+// Resolve the session-share guest grant off SessionOptions (ADR-0019). Extracted to keep the
+// Session constructor's cyclomatic complexity in check.
+function resolveGuestGrant(options: SessionOptions): {
+  agentId: string | null;
+  workspaceCwd: string | null;
+  onActivity: ((text: string) => void) | null;
+} {
+  return {
+    agentId: options.guestAgentId ?? null,
+    workspaceCwd: options.guestWorkspaceCwd ?? null,
+    onActivity: options.onGuestActivity ?? null,
+  };
+}
+
 /**
  * Session represents a single connected client session.
  * It owns all state management, orchestration logic, and message processing.
@@ -646,6 +697,9 @@ function describeRegistryTransition(record: ArchivedRecordSnapshot | null): Regi
 export class Session {
   private readonly clientId: string;
   private scopes: readonly string[];
+  private readonly guestAgentId: string | null;
+  private readonly guestWorkspaceCwd: string | null;
+  private readonly onGuestActivity: ((text: string) => void) | null;
   private appVersion: string | null;
   private clientCapabilities: ReadonlySet<ClientCapability>;
   private readonly sessionId: string;
@@ -796,6 +850,10 @@ export class Session {
     } = options;
     this.clientId = clientId;
     this.scopes = [...scopes];
+    const guestGrant = resolveGuestGrant(options);
+    this.guestAgentId = guestGrant.agentId;
+    this.guestWorkspaceCwd = guestGrant.workspaceCwd;
+    this.onGuestActivity = guestGrant.onActivity;
     this.appVersion = appVersion ?? null;
     this.clientCapabilities = parseClientCapabilities(clientCapabilities);
     this.sessionId = uuidv4();
@@ -1936,6 +1994,28 @@ export class Session {
         }
         return;
       }
+      // Guest session (session-share, ADR-0019): confined to one agent + its workspace. All the
+      // per-agent / file / terminal containment checks + activity attribution live in one helper so
+      // this dispatch stays simple. A non-null return is the denial reason.
+      if (this.guestAgentId !== null) {
+        const denyReason = this.guestDenyReason(msg);
+        if (denyReason) {
+          const requestId = sessionRequestId(msg);
+          if (requestId) {
+            this.emit({
+              type: "rpc_error",
+              payload: {
+                requestId,
+                requestType: msg.type,
+                error: denyReason,
+                code: "access_denied",
+              },
+            });
+          }
+          return;
+        }
+        this.trackGuestActivity(msg);
+      }
       try {
         await this.dispatchInboundMessage(msg, source);
       } catch (error) {
@@ -1977,6 +2057,96 @@ export class Session {
 
   public setScopes(scopes: readonly string[]): void {
     this.scopes = [...scopes];
+  }
+
+  // For a guest session, any message that names an agent must name THE shared agent — applied to
+  // BOTH inbound RPCs and outbound pushes/responses (defense in depth: even if a broadcast type
+  // were ever in scope, another agent's data can never reach the guest). Messages with no
+  // detectable agentId are governed solely by the tight scope allowlist.
+  private guestMessageTouchesOtherAgent(
+    msg: SessionInboundMessage | SessionOutboundMessage,
+  ): boolean {
+    if (this.guestAgentId === null) return false;
+    const direct = (msg as { agentId?: unknown }).agentId;
+    if (typeof direct === "string" && direct !== this.guestAgentId) return true;
+    const payload = (msg as { payload?: unknown }).payload as
+      | { agentId?: unknown; agent?: { id?: unknown } }
+      | undefined;
+    if (payload && typeof payload === "object") {
+      if (typeof payload.agentId === "string" && payload.agentId !== this.guestAgentId) return true;
+      const nested = payload.agent?.id;
+      if (typeof nested === "string" && nested !== this.guestAgentId) return true;
+    }
+    return false;
+  }
+
+  private isGuestMessageAllowed(msg: SessionInboundMessage): boolean {
+    return !this.guestMessageTouchesOtherAgent(msg);
+  }
+
+  // Single entry point for guest containment (ADR-0019): per-agent + file/terminal workspace scope.
+  // Returns a human-readable denial reason, or null when the message is allowed.
+  private guestDenyReason(msg: SessionInboundMessage): string | null {
+    if (!this.isGuestMessageAllowed(msg)) return "Guest session is limited to the shared agent";
+    if (
+      !this.isGuestFileMessageWithinWorkspace(msg) ||
+      !this.isGuestTerminalMessageWithinWorkspace(msg)
+    ) {
+      return "Guest session is limited to the shared workspace";
+    }
+    return null;
+  }
+
+  // Attribute a guest's outgoing chat message onto the share (host presence/activity, ADR-0019).
+  private trackGuestActivity(msg: SessionInboundMessage): void {
+    if (!this.onGuestActivity || msg.type !== "send_agent_message_request") return;
+    const text = (msg as { text?: unknown }).text;
+    if (typeof text === "string" && text.trim()) this.onGuestActivity(text);
+  }
+
+  // Guest file/diff RPCs (ADR-0019) are keyed by a raw `cwd` (+ optional `path`) rather than an
+  // agentId, so the per-agent guard cannot confine them. Reject any such RPC whose resolved target
+  // escapes the shared agent's workspace root — defense-in-depth on top of the capability scope.
+  // Non-file messages and trusted (non-guest) sessions are unaffected.
+  // True iff `target` (already-resolved or to-be-resolved absolute path) stays within the guest's
+  // shared workspace root. Returns false when there is no root (no file/terminal access).
+  private isPathWithinGuestWorkspace(target: string): boolean {
+    const root = this.guestWorkspaceCwd;
+    if (!root) return false;
+    const resolvedRoot = resolve(root);
+    const resolved = resolve(target);
+    return resolved === resolvedRoot || resolved.startsWith(resolvedRoot + sep);
+  }
+
+  private isGuestFileMessageWithinWorkspace(msg: SessionInboundMessage): boolean {
+    if (this.guestAgentId === null) return true;
+    if (!GUEST_FILE_CWD_RPC_TYPES.has(msg.type)) return true;
+    const cwd = (msg as { cwd?: unknown }).cwd;
+    if (typeof cwd !== "string" || cwd.length === 0) return false;
+    if (!this.isPathWithinGuestWorkspace(cwd)) return false;
+    // file_explorer/file_download carry a `path` relative to cwd — it must also stay contained
+    // (blocks `..`/absolute-path traversal out of the workspace).
+    const rel = (msg as { path?: unknown }).path;
+    if (
+      typeof rel === "string" &&
+      rel.length > 0 &&
+      !this.isPathWithinGuestWorkspace(resolve(cwd, rel))
+    )
+      return false;
+    return true;
+  }
+
+  // Terminal RPCs keyed by `terminalId` (read-only). Resolve the terminal's own cwd via the terminal
+  // manager and require it to be within the shared workspace root — so a guest cannot subscribe to,
+  // or capture, a terminal that lives in another workspace (ADR-0019). Unknown terminal → deny.
+  private isGuestTerminalMessageWithinWorkspace(msg: SessionInboundMessage): boolean {
+    if (this.guestAgentId === null) return true;
+    if (!GUEST_TERMINAL_ID_RPC_TYPES.has(msg.type)) return true;
+    const terminalId = (msg as { terminalId?: unknown }).terminalId;
+    if (typeof terminalId !== "string" || terminalId.length === 0) return false;
+    const terminalCwd = this.terminalManager?.getTerminal(terminalId)?.cwd;
+    if (typeof terminalCwd !== "string" || terminalCwd.length === 0) return false;
+    return this.isPathWithinGuestWorkspace(terminalCwd);
   }
 
   private async dispatchInboundMessage(msg: SessionInboundMessage, source?: object): Promise<void> {
@@ -2215,7 +2385,15 @@ export class Session {
       case "agent.provider_subagents.timeline.get.request":
         return this.handleProviderSubagentTimelineRequest(msg);
       case "agent.timeline.set_subscription.request": {
-        const agentIds = [...new Set(msg.agentIds)].sort();
+        // Guests may only subscribe to the one shared agent. The per-agent guard inspects singular
+        // `agentId`, not this plural `agentIds` array, and agent_stream/attention frames reach the
+        // subscriber via onMessageToSource (which bypasses the outbound emit guard) — so clamp here
+        // or a guest could subscribe to, and receive the live stream of, another agent (ADR-0019).
+        const requestedAgentIds = [...new Set(msg.agentIds)].sort();
+        const agentIds =
+          this.guestAgentId !== null
+            ? requestedAgentIds.filter((id) => id === this.guestAgentId)
+            : requestedAgentIds;
         if (
           source
             ? this.supportsForSource(CLIENT_CAPS.selectiveAgentTimeline, source)
@@ -5681,6 +5859,18 @@ export class Session {
   private async handleFetchAgents(
     request: Extract<SessionInboundMessage, { type: "fetch_agents_request" }>,
   ): Promise<void> {
+    // Guest session (ADR-0019): confine the directory to the one shared agent and skip the live
+    // subscription entirely — a guest must never learn about other agents, even via later pushes.
+    if (this.guestAgentId !== null) {
+      const payload = await this.listFetchAgentsEntries(request);
+      const entries = payload.entries.filter((e) => e.agent.id === this.guestAgentId);
+      this.emit({
+        type: "fetch_agents_response",
+        payload: { requestId: request.requestId, ...payload, entries },
+      });
+      return;
+    }
+
     const requestedSubscriptionId = request.subscribe?.subscriptionId?.trim();
     const subscriptionId = resolveSubscriptionId(request.subscribe, requestedSubscriptionId);
 
@@ -5882,6 +6072,12 @@ export class Session {
   }
 
   private async handleProjectListRequest(requestId: string): Promise<void> {
+    // Guests (ADR-0019) don't browse projects — return empty so the runtime bootstrap succeeds
+    // without exposing the host's project list.
+    if (this.guestAgentId !== null) {
+      this.emit({ type: "project.list.response", payload: { requestId, projects: [] } });
+      return;
+    }
     try {
       const projects = (await this.projectRegistry.list())
         .filter((project) => !project.archivedAt)
@@ -7553,6 +7749,10 @@ export class Session {
    */
   private emit(msg: SessionOutboundMessage): void {
     if (msg.type !== "rpc_error" && !isSessionRpcAllowed(this.scopes, msg.type)) {
+      return;
+    }
+    // Guest sessions never receive another agent's data, even via broadcast (ADR-0019).
+    if (this.guestAgentId !== null && this.guestMessageTouchesOtherAgent(msg)) {
       return;
     }
     // JSON.stringify(msg) is only computed when trace is enabled — it runs for
