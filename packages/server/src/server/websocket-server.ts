@@ -1784,6 +1784,19 @@ export class VoiceAssistantWebSocketServer {
     connectionLogger.info("Guest socket attached; awaiting hello");
   }
 
+  /**
+   * Re-scope every live guest session confined to `agentId` when the host toggles that share's
+   * capabilities (ADR-0019). The guest's daemon session was scoped at connect time, so without this a
+   * capability granted mid-session would be denied until the guest reloads.
+   */
+  public updateGuestScopesForAgent(agentId: string, scopes: readonly string[]): number {
+    let updated = 0;
+    for (const connection of this.sessions.values()) {
+      if (connection.session.updateGuestScopesIfForAgent(agentId, scopes)) updated++;
+    }
+    return updated;
+  }
+
   private createSocketSession(options: SocketSessionOptions): Session {
     return new Session({
       clientId: options.clientId,

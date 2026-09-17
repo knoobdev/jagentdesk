@@ -335,4 +335,73 @@ describe.skipIf(!hasBundle)("session sharing — real app guest surface (browser
     browser = undefined;
     await ctx.client.sessionShareStop(share.shareId);
   }, 120000);
+
+  test("host grants a capability LIVE: guest gains the tab + access without reload (ADR-0019)", async () => {
+    process.env.JAGENTDESK_SHARE_APP_DIST = APP_DIST;
+
+    let sharePort = 0;
+    const logger = makePortCapturingLogger((p) => {
+      sharePort = p;
+    });
+    ctx = await createDaemonTestContext({ sessionSharingEnabled: true, logger });
+
+    const workspace = await mkdtemp(path.join(tmpdir(), "jad-share-live-"));
+    await writeFile(path.join(workspace, "LIVE.md"), "# granted live\n");
+    const agentId = await makeAgent(ctx, workspace);
+
+    const streamed: SessionShare[] = [];
+    const unsub = ctx.client.subscribeSessionShareStream((s) => {
+      if (s.agentId === agentId) streamed.push(s);
+    });
+    // Share with NO files capability — the Files tab must be absent at first.
+    const share = await ctx.client.sessionShareCreate(agentId);
+    expect(sharePort).toBeGreaterThan(0);
+
+    try {
+      browser = await chromium.launch({ headless: true });
+    } catch {
+      unsub();
+      await ctx.client.sessionShareStop(share.shareId);
+      return;
+    }
+    const page = await browser.newPage();
+    const errors: string[] = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await page.goto(`http://127.0.0.1:${sharePort}/`, { waitUntil: "domcontentloaded" });
+    await pairInBrowser(page, ctx, share.shareId, streamed, "Live Grant Guest");
+    await page.locator('[placeholder^="Message"]').first().waitFor({ timeout: 30000 });
+
+    // No Files tab yet (files not granted).
+    expect(await page.getByText("Files", { exact: true }).count()).toBe(0);
+
+    // Host grants files LIVE — no page reload on the guest.
+    await ctx.client.sessionShareSetOptions(share.shareId, { capabilities: { files: true } });
+
+    // The guest is notified (access banner), the Files tab appears, and browsing works — proof the
+    // daemon re-scoped the live guest session (regression: it used to fail "Session is not
+    // authorized" until the guest reloaded).
+    await page
+      .getByText("The host enabled Files & changes", { exact: false })
+      .first()
+      .waitFor({ timeout: 30000 });
+    const filesTab = page.getByText("Files", { exact: true }).first();
+    await filesTab.waitFor({ timeout: 30000 });
+    await filesTab.click();
+    try {
+      await page.getByText("LIVE.md", { exact: false }).first().waitFor({ timeout: 30000 });
+    } catch (e) {
+      const body = await page.evaluate(() => document.body?.innerText ?? "").catch(() => "");
+      throw new Error(
+        `live-granted Files tab did not browse the workspace: ${String(e)}\npageErrors=${errors.join(" | ")}\nbodyText=${body.slice(0, 800)}`,
+        { cause: e },
+      );
+    }
+
+    expect(errors, `no uncaught page errors: ${errors.join(" | ")}`).toEqual([]);
+
+    unsub();
+    await browser.close().catch(() => {});
+    browser = undefined;
+    await ctx.client.sessionShareStop(share.shareId);
+  }, 120000);
 });

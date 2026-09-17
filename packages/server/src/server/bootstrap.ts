@@ -1777,6 +1777,10 @@ export async function createJAgentDeskDaemon(
             sessionShareService?.setGuestAttacher((ws, params) =>
               wsServer?.attachGuestSocket(ws, params),
             );
+            // Let a live capability toggle re-scope already-connected guest sessions (ADR-0019).
+            sessionShareService?.setGuestScopeUpdater((agentId, scopes) =>
+              wsServer?.updateGuestScopesForAgent(agentId, scopes),
+            );
             // Bind the plugin session host and start configured plugins before any
             // external ingress attaches, mirroring upstream's pre-accept ordering.
             pluginRuntime.bindJAgentDeskSessionHost(wsServer);

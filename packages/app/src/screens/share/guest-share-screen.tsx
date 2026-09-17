@@ -115,6 +115,36 @@ function readCapabilities(raw: unknown): GuestShareCapabilities {
   };
 }
 
+const CAPABILITY_LABELS: Record<keyof GuestShareCapabilities, string> = {
+  chat: "Chat",
+  files: "Files & changes",
+  terminal: "Terminal",
+  modelMode: "Model & mode",
+  readOnly: "Read-only",
+  artifacts: "Artifacts",
+};
+
+// Human-readable summary of what the host just changed, for the guest's access banner. Returns null
+// when nothing changed. A single flip names the capability; multiple at once collapse to a generic
+// line (ADR-0019).
+function describeCapabilityChange(
+  prev: GuestShareCapabilities,
+  next: GuestShareCapabilities,
+): string | null {
+  const changed = (Object.keys(CAPABILITY_LABELS) as (keyof GuestShareCapabilities)[]).filter(
+    (k) => prev[k] !== next[k],
+  );
+  if (changed.length === 0) return null;
+  if (changed.length > 1) return "The host updated your access.";
+  const key = changed[0] as keyof GuestShareCapabilities;
+  const on = next[key];
+  if (key === "readOnly")
+    return on ? "The host made this chat read-only." : "The host enabled sending.";
+  return on
+    ? `The host enabled ${CAPABILITY_LABELS[key]}.`
+    : `The host disabled ${CAPABILITY_LABELS[key]}.`;
+}
+
 export function readGuestShareHint(): GuestShareHint | null {
   const g = (
     globalThis as {
@@ -170,6 +200,10 @@ export function GuestShareScreen({ hint }: { hint: GuestShareHint }): ReactEleme
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // Live capabilities: seeded from the page-load hint, then updated in place when the host toggles a
+  // grant (the daemon pushes {t:"capabilities"} over the pairing channel), so tabs appear/disappear
+  // without an F5 (ADR-0019).
+  const [capabilities, setCapabilities] = useState<GuestShareCapabilities>(hint.capabilities);
   const pairingRef = useRef(false);
   const phaseRef = useRef<Phase>({ k: "request" });
   const nameRef = useRef("");
@@ -280,6 +314,7 @@ export function GuestShareScreen({ hint }: { hint: GuestShareHint }): ReactEleme
         }
       } else if (m.t === "ended")
         setPhase({ k: "ended", reason: (m.reason as string) ?? "Session ended." });
+      else if (m.t === "capabilities") setCapabilities(readCapabilities(m.capabilities));
     });
     ws.addEventListener("close", () => {
       // A drop DURING the handshake (e.g. phone screen turned off while "Requesting to join") used
@@ -363,7 +398,7 @@ export function GuestShareScreen({ hint }: { hint: GuestShareHint }): ReactEleme
         workspaceId={phase.workspaceId}
         workspaceCwd={phase.workspaceCwd}
         agentId={hint.agentId}
-        capabilities={hint.capabilities}
+        capabilities={capabilities}
         onTyping={sendTyping}
       />
     );
@@ -440,6 +475,28 @@ function GuestReadyView({
     const idle = setTimeout(() => onTyping(false), 4000);
     return () => clearTimeout(idle);
   }, [draftText, tab, onTyping]);
+
+  // When the host revokes the capability behind the active tab, fall back to Chat so the guest is
+  // never left on a dead panel whose requests would now be denied (ADR-0019).
+  useEffect(() => {
+    const gone =
+      ((tab === "files" || tab === "changes") && !showFiles) ||
+      (tab === "terminal" && !showTerminal) ||
+      (tab === "artifacts" && !showArtifacts);
+    if (gone) setTab("chat");
+  }, [tab, showFiles, showTerminal, showArtifacts]);
+
+  // Notify the guest with a transient banner whenever the host changes their access live (ADR-0019).
+  const [accessNotice, setAccessNotice] = useState<string | null>(null);
+  const prevCapsRef = useRef<GuestShareCapabilities>(capabilities);
+  useEffect(() => {
+    const notice = describeCapabilityChange(prevCapsRef.current, capabilities);
+    prevCapsRef.current = capabilities;
+    if (!notice) return undefined;
+    setAccessNotice(notice);
+    const clear = setTimeout(() => setAccessNotice(null), 5000);
+    return () => clearTimeout(clear);
+  }, [capabilities]);
 
   // Subscribe to the shared agent's timeline so the guest receives LIVE agent_stream pushes (the
   // agent's responses). In the host app this is driven by the workspace screen registering "visible"
@@ -540,6 +597,11 @@ function GuestReadyView({
 
   return (
     <View style={styles.readyRoot}>
+      {accessNotice ? (
+        <View style={styles.accessNotice}>
+          <Text style={styles.accessNoticeText}>{accessNotice}</Text>
+        </View>
+      ) : null}
       {showFiles || showTerminal || showArtifacts ? (
         <View style={styles.tabBar}>
           <GuestTabButton label="Chat" value="chat" active={tab === "chat"} onSelect={setTab} />
@@ -799,6 +861,17 @@ const styles = StyleSheet.create((theme) => ({
   readyRoot: { flex: 1, backgroundColor: theme.colors.surface0 },
   paneBody: { flex: 1 },
   fileViewRoot: { flex: 1 },
+  accessNotice: {
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    backgroundColor: theme.colors.primary,
+  },
+  accessNoticeText: {
+    color: theme.colors.accentForeground,
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
+    textAlign: "center",
+  },
   tabBar: {
     flexDirection: "row",
     gap: theme.spacing[1],
