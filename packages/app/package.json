@@ -1,6 +1,6 @@
 {
   "name": "@jagentdesk/app",
-  "version": "0.9.30",
+  "version": "0.9.31",
   "private": true,
   "main": "index.ts",
   "scripts": {

@@ -1,6 +1,6 @@
 {
   "name": "@jagentdesk/desktop",
-  "version": "0.9.30",
+  "version": "0.9.31",
   "private": true,
   "description": "JAgentDesk desktop app (Electron wrapper)",
   "homepage": "https://github.com/knoobdev/jagentdesk",
@@ -15,7 +15,7 @@
   "main": "dist/main.js",
   "scripts": {
     "build": "npm --prefix ../.. run build:server:clean && npm run build:renderer && node ../../scripts/build-share-app-dist.mjs && npm run build:main && electron-builder --config electron-builder.yml",
-    "build:renderer": "cd ../app && JAGENTDESK_WEB_PLATFORM=electron npx expo export --platform web --output-dir dist",
+    "build:renderer": "cd ../app && cross-env JAGENTDESK_WEB_PLATFORM=electron npx expo export --platform web --output-dir dist",
     "build:main": "tsc -p tsconfig.json",
     "capture-harness": "./capture-harness/run.sh",
     "dev": "./scripts/dev.sh",
