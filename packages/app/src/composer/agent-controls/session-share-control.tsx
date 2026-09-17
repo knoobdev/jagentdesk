@@ -132,7 +132,7 @@ export function SessionShareControl({
   // Grant/revoke a capability live (files / terminal). The daemon re-derives the guest scope from the
   // share's capabilities, so already-connected guests gain/lose the tabs on their next request.
   const onToggleCapability = useCallback(
-    (shareId: string, cap: "files" | "terminal" | "readOnly", next: boolean) => {
+    (shareId: string, cap: "files" | "terminal" | "readOnly" | "artifacts", next: boolean) => {
       if (!client) return;
       void client
         .sessionShareSetOptions(shareId, { capabilities: { [cap]: next } })
@@ -312,7 +312,7 @@ const ManageSheet = memo(function ManageSheet({
   onToggleModelMode: (shareId: string, next: boolean) => void;
   onToggleCapability: (
     shareId: string,
-    cap: "files" | "terminal" | "readOnly",
+    cap: "files" | "terminal" | "readOnly" | "artifacts",
     next: boolean,
   ) => void;
 }): ReactElement {
@@ -395,7 +395,7 @@ const ShareCard = memo(function ShareCard({
   onToggleModelMode: (shareId: string, next: boolean) => void;
   onToggleCapability: (
     shareId: string,
-    cap: "files" | "terminal" | "readOnly",
+    cap: "files" | "terminal" | "readOnly" | "artifacts",
     next: boolean,
   ) => void;
 }): ReactElement {
@@ -419,6 +419,10 @@ const ShareCard = memo(function ShareCard({
   );
   const toggleReadOnly = useCallback(
     (next: boolean) => onToggleCapability(share.shareId, "readOnly", next),
+    [onToggleCapability, share.shareId],
+  );
+  const toggleArtifacts = useCallback(
+    (next: boolean) => onToggleCapability(share.shareId, "artifacts", next),
     [onToggleCapability, share.shareId],
   );
 
@@ -473,6 +477,14 @@ const ShareCard = memo(function ShareCard({
           value={share.capabilities?.terminal ?? false}
           onValueChange={toggleTerminal}
           accessibilityLabel="Allow guests to view terminals"
+        />
+      </View>
+      <View style={styles.toggleRow}>
+        <Text style={styles.toggleLabel}>View artifacts (Canvas)</Text>
+        <Switch
+          value={share.capabilities?.artifacts ?? false}
+          onValueChange={toggleArtifacts}
+          accessibilityLabel="Allow guests to view artifacts"
         />
       </View>
       <View style={styles.toggleRow}>

@@ -2858,6 +2858,9 @@ export const SessionShareCapabilitiesSchema = z.object({
   // Read-only chat: the guest can watch the conversation but not send (no composer). Default false.
   // When true, the guest scope excludes send/model/mode/cancel and the guest UI hides the composer.
   readOnly: z.boolean().default(false),
+  // Artifacts (Canvas): the guest sees an Artifacts tab that renders the code/HTML/SVG/diagrams the
+  // agent produced. Derived from the shared timeline the guest already receives (no extra scope).
+  artifacts: z.boolean().default(false),
 });
 export const SessionShareSchema = z.object({
   shareId: z.string(),

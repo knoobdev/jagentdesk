@@ -6,6 +6,7 @@ import { filePanelRegistration } from "@/panels/file-panel";
 import { workingDiffPanelRegistration } from "@/panels/diff-panel";
 import { terminalPanelRegistration } from "@/panels/terminal-panel";
 import { FileExplorerPane } from "@/components/file-explorer-pane";
+import { ArtifactCanvas } from "@/artifacts/artifact-canvas";
 import { useFetchQuery } from "@/data/query";
 import { buildTerminalsQueryKey } from "@/screens/workspace/terminals/state";
 import {
@@ -59,6 +60,7 @@ export interface GuestShareCapabilities {
   terminal: boolean;
   modelMode: boolean;
   readOnly: boolean;
+  artifacts: boolean;
 }
 
 export interface GuestShareHint {
@@ -77,6 +79,7 @@ function readCapabilities(raw: unknown): GuestShareCapabilities {
     terminal: c.terminal === true,
     modelMode: c.modelMode === true,
     readOnly: c.readOnly === true,
+    artifacts: c.artifacts === true,
   };
 }
 
@@ -321,7 +324,7 @@ export function GuestShareScreen({ hint }: { hint: GuestShareHint }): ReactEleme
   );
 }
 
-type GuestTab = "chat" | "files" | "changes" | "terminal";
+type GuestTab = "chat" | "files" | "changes" | "terminal" | "artifacts";
 
 // The connected guest surface: the real agent chat, plus (when the host granted them) read-only
 // Files, Changes, and Terminal tabs backed by the real app panels, all confined to the shared
@@ -344,6 +347,7 @@ function GuestReadyView({
   const [openTerminalId, setOpenTerminalId] = useState<string | null>(null);
   const showFiles = capabilities.files;
   const showTerminal = capabilities.terminal;
+  const showArtifacts = capabilities.artifacts;
   const needsWorkspace = showFiles || showTerminal;
   // The session entry may not exist in the store yet when we first mount (the guest runtime fills
   // it asynchronously on connect), and mergeWorkspaces is a no-op until it does. Seed reactively
@@ -429,6 +433,8 @@ function GuestReadyView({
         onOpenTerminal={setOpenTerminalId}
       />
     );
+  } else if (tab === "artifacts") {
+    body = <ArtifactCanvas serverId={serverId} agentId={agentId} />;
   } else if (openFilePath) {
     body = (
       <View style={styles.fileViewRoot}>
@@ -453,7 +459,7 @@ function GuestReadyView({
 
   return (
     <View style={styles.readyRoot}>
-      {showFiles || showTerminal ? (
+      {showFiles || showTerminal || showArtifacts ? (
         <View style={styles.tabBar}>
           <GuestTabButton label="Chat" value="chat" active={tab === "chat"} onSelect={setTab} />
           {showFiles ? (
@@ -477,6 +483,14 @@ function GuestReadyView({
               label="Terminal"
               value="terminal"
               active={tab === "terminal"}
+              onSelect={setTab}
+            />
+          ) : null}
+          {showArtifacts ? (
+            <GuestTabButton
+              label="Artifacts"
+              value="artifacts"
+              active={tab === "artifacts"}
               onSelect={setTab}
             />
           ) : null}

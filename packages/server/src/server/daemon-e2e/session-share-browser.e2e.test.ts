@@ -226,9 +226,9 @@ describe.skipIf(!hasBundle)("session sharing — real app guest surface (browser
     const unsub = ctx.client.subscribeSessionShareStream((s) => {
       if (s.agentId === agentId) streamed.push(s);
     });
-    // Share WITH files + terminal so the guest surface shows Files/Changes/Terminal tabs.
+    // Share WITH files + terminal + artifacts so the guest surface shows all the tabs.
     const share = await ctx.client.sessionShareCreate(agentId, {
-      capabilities: { files: true, terminal: true },
+      capabilities: { files: true, terminal: true, artifacts: true },
     });
     expect(sharePort).toBeGreaterThan(0);
 
@@ -272,6 +272,10 @@ describe.skipIf(!hasBundle)("session sharing — real app guest surface (browser
     // Changes tab renders the working-diff panel without crashing.
     await page.getByText("Changes", { exact: true }).click();
     await sleep(1500);
+
+    // Artifacts tab mounts the Canvas (empty state here — the fake agent emits no fenced blocks).
+    await page.getByText("Artifacts", { exact: true }).click();
+    await page.getByText("No artifacts yet", { exact: false }).first().waitFor({ timeout: 30000 });
 
     // Terminal tab lists the workspace's terminal; opening it mounts the real terminal panel.
     await page.getByText("Terminal", { exact: true }).click();

@@ -133,6 +133,7 @@ function resolveInitialCapabilities(
     terminal: requested?.terminal ?? false,
     modelMode: requested?.modelMode ?? allowGuestModelMode ?? false,
     readOnly: requested?.readOnly ?? false,
+    artifacts: requested?.artifacts ?? false,
   };
 }
 
