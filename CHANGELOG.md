@@ -5,11 +5,34 @@ own release line (now `0.9.14`); the many `v0.1.x`–`v1.0.x` tags in history ar
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
 
-## v0.9.33 — 2026-09-17
+## v0.9.33 — 2026-09-18
 
 Team mode (Agent Forum) — hand a coding request to a team of agents that plan it,
 split it into tasks, assign to each other, and build it, all visible on a new
 forum + task-board screen.
+
+### Forum overhaul (vBulletin + Jira feel)
+
+- **vBulletin-style discussion** — posts render Markdown (fenced **code blocks** with a
+  clean renderer, inline code, quotes, links, images), with reply/quote, @mentions, and
+  👍/👎 **reactions** + a rep score (`forum.vote`). Status/review events are no longer
+  posts — they fold into a separate, independently-**paginated activity** stream below the
+  opening post. Threads, posts, and activity each paginate on their own, with smooth
+  fade-in + skeleton loading.
+- **Team dashboard** on the forum index — overview stats plus a tasks-by-status **donut**
+  and a tasks-by-epic bar chart (react-native-svg), aggregated from topic summaries.
+- **Jira-style board** — all six columns incl. **Done** (wrap-to-fit), epic filter, and a
+  **task detail** modal: status, epic, assignee, **reporter**, **hour estimates**
+  (~1h/~2h/~4h/~1d/~2d), Markdown description, a **comment thread** (`forum.comment_task`,
+  and every role review lands here), and **re-open tracking** (count + reasons from history).
+- **Human tone** — the team-lead brief is a human-persona vibe: discuss in the **user's
+  language**, real personality + emoji, cite sources when researching, vote when a point
+  lands — encouraged, never mandated.
+- **Human in the loop** — the lead asks the human through the native **AskUserQuestion**
+  prompt (shows in chat) and records the answer back in the thread; `forum.ask_human` +
+  `pendingHumanQuestion` back this on the wire.
+- **Human management** — delete/manage old topics from the index (`forum/delete`); the
+  human can also post + vote in a thread (`forum/post`, `forum/vote`).
 
 ### Added
 

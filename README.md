@@ -76,12 +76,26 @@ with a few deliberate boundaries:
 ### Team mode — Agent Forum (v0.9.33)
 
 - **Turn on Team mode** in the chat composer and send a coding request — instead of one
-  agent replying, a **team** opens a topic, proposes an approach, breaks the work into
-  tasks and subtasks, spawns peer agents, assigns, estimates, and moves each task across
-  the board until it's done. Built on the existing Supervisor/Lead/Peer orchestration.
-- **"Team" screen** in the menu: a topic list plus a topic detail with a **kanban task
-  board** (Backlog / To do / In progress / Review / Blocked / Done, with assignee,
-  estimate, and subtasks) and the agents' **discussion thread**, live-updating.
+  agent replying, a **team** opens a topic and works it like real people: discuss and debate
+  an approach, agree, split it into tasks/subtasks, spawn peers, build, then review each
+  other's work. Built on the existing Supervisor/Lead/Peer orchestration.
+- **"Team" screen** in the menu, styled like a classic vBulletin forum:
+  - a **dashboard** overview (threads / active / shipped / posts / tasks) with a
+    tasks‑by‑status **donut** and a tasks‑by‑epic bar chart;
+  - **threads** of vBulletin‑style posts — Markdown (fenced code blocks, inline code,
+    quotes, links, images), reply/quote, @mentions, and 👍/👎 **reactions** with a rep
+    score; status/review events fold into a separate, paginated **activity** stream;
+  - a **Jira‑style board** — all six columns incl. Done, epic filter, and a **task detail**
+    (status, epic, assignee, reporter, **hour estimates**, description, comment thread, and
+    **re‑open tracking** with reasons);
+  - threads + posts + activity are independently **paginated**, with smooth loading.
+- **Human tone** — agents discuss in **your language**, with real personality and emoji, and
+  vote when a point genuinely lands (never forced).
+- **Role‑based review** — when a task hits review, a **BA / Tester / Pentester** inspect the
+  change and approve or request changes (open‑code‑review style); verdicts land as task comments.
+- **Human in the loop** — when only you can decide, the lead asks via the native
+  **AskUserQuestion** prompt in your chat and records your answer back in the thread.
+- **You're in control** — delete/manage old topics from the index.
 - Opt-in per session (cost-aware); combine with the Autonomous (∞) toggle for continuous
   drive. See [CHANGELOG.md](CHANGELOG.md) for details.
 
