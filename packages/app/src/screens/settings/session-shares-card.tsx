@@ -50,13 +50,15 @@ export function SessionSharesCard({ serverId }: { serverId: string }): ReactElem
 
   return (
     <View style={settingsStyles.card} testID="host-page-session-shares-card">
-      <View style={settingsStyles.rowContent}>
-        <Text style={settingsStyles.rowTitle}>Shared sessions</Text>
-        <Text style={settingsStyles.rowHint}>
-          {shares.length === 0
-            ? "No sessions are being shared right now. Use the Share button in an agent chat to start one."
-            : `${shares.length} ${shares.length === 1 ? "session is" : "sessions are"} shared. Anyone with the link + an approved code can chat with that agent.`}
-        </Text>
+      <View style={settingsStyles.row}>
+        <View style={settingsStyles.rowContent}>
+          <Text style={settingsStyles.rowTitle}>Shared sessions</Text>
+          <Text style={settingsStyles.rowHint}>
+            {shares.length === 0
+              ? "No sessions are being shared right now. Use the Share button in an agent chat to start one."
+              : `${shares.length} ${shares.length === 1 ? "session is" : "sessions are"} shared. Anyone with the link + an approved code can chat with that agent.`}
+          </Text>
+        </View>
       </View>
       {shares.map((s) => (
         <ShareRow key={s.shareId} share={s} onStop={onStop} />
@@ -105,9 +107,10 @@ const styles = StyleSheet.create((theme) => ({
   shareRow: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
     gap: theme.spacing[3],
-    paddingTop: theme.spacing[3],
-    marginTop: theme.spacing[3],
+    paddingVertical: theme.spacing[4],
+    paddingHorizontal: theme.spacing[4],
     borderTopWidth: theme.borderWidth[1],
     borderTopColor: theme.colors.border,
   },

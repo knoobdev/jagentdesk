@@ -173,6 +173,15 @@ export class ShareServer {
     this.broadcastModes();
   }
 
+  // Host toggled a share capability live (ADR-0019). Push the full capability set to connected
+  // guests so their surface shows/hides the Files/Terminal/Artifacts tabs (and read-only composer)
+  // immediately and can notify the guest — no reload required.
+  setCapabilities(capabilities: SessionShareCapabilities): void {
+    for (const c of this.conns.values()) {
+      if (c.phase === "authed") this.safeSend(c.ws, { t: "capabilities", capabilities });
+    }
+  }
+
   async start(): Promise<number> {
     const server = createServer((req, res) => {
       if (req.method !== "GET") {

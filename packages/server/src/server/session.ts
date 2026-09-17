@@ -2059,6 +2059,16 @@ export class Session {
     this.scopes = [...scopes];
   }
 
+  // Re-scope a LIVE guest session when the host toggles share capabilities (ADR-0019). Without this
+  // an already-connected guest keeps its connect-time scope, so a newly-granted tab's request is
+  // denied ("Session is not authorized") until the guest reloads. Only affects the guest confined to
+  // `agentId`; returns true if this session was re-scoped.
+  public updateGuestScopesIfForAgent(agentId: string, scopes: readonly string[]): boolean {
+    if (this.guestAgentId === null || this.guestAgentId !== agentId) return false;
+    this.setScopes(scopes);
+    return true;
+  }
+
   // For a guest session, any message that names an agent must name THE shared agent — applied to
   // BOTH inbound RPCs and outbound pushes/responses (defense in depth: even if a broadcast type
   // were ever in scope, another agent's data can never reach the guest). Messages with no

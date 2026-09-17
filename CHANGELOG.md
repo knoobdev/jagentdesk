@@ -5,6 +5,36 @@ own release line (now `0.9.14`); the many `v0.1.x`–`v1.0.x` tags in history ar
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
 
+## v0.9.32 — 2026-09-17
+
+Session sharing v2 polish — live capability toggles, guest notifications, and management-card
+styling.
+
+### Added
+
+- **Live capability toggles reach connected guests** — when the host grants a capability (Files,
+  Terminal, Artifacts, model/mode, read-only) from the share sheet, the daemon re-scopes the live
+  guest session AND pushes the new capabilities to the guest surface. Tabs appear/disappear and the
+  granted panels work immediately — no page reload.
+- **Guest access banner** — the guest sees a brief in-app notice ("The host enabled Files &
+  changes", "The host made this chat read-only", …) whenever the host changes their access. If the
+  active tab's capability is revoked, the guest falls back to Chat instead of a dead panel.
+
+### Fixed
+
+- **Toggling one capability no longer resets the others** — the set-options request used
+  `SessionShareCapabilitiesSchema.partial()`, which keeps the `.default(false)` on `readOnly`/
+  `artifacts` (zod default trap), so a `{ files: … }` patch silently reset those siblings. Partial
+  capability requests now use an explicit no-default schema, so each toggle changes only itself
+  (e.g. turning Files off no longer turns Read-only off).
+- **"Session is not authorized" after a live grant** — a guest who was already connected kept its
+  connect-time scope, so a newly-granted tab's request was denied until reload. The daemon now
+  re-scopes live guest sessions on toggle.
+- **Shared sessions card styling** — the card's title/rows had no inner padding, so text sat flush
+  against the card background and overflowed. It now uses the standard settings row padding. The
+  redundant copy inside Settings → Agents is removed (management lives on the dedicated Shared
+  sessions page).
+
 ## v0.9.31 — 2026-09-17
 
 Session sharing v2 — the guest joins the **real app** (scoped to one agent by the daemon), instead

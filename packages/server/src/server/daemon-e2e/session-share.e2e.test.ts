@@ -149,6 +149,38 @@ describe("session sharing — real daemon", () => {
     expect(afterStop.some((s) => s.shareId === share.shareId)).toBe(false);
   }, 90000);
 
+  test("set_options patches ONE capability without resetting its siblings (ADR-0019)", async () => {
+    ctx = await createDaemonTestContext({ sessionSharingEnabled: true });
+    const agentId = await makeAgent(ctx);
+
+    // Start read-only with artifacts on. Toggling an unrelated capability (files) must NOT clear
+    // readOnly/artifacts — the set_options request schema must be a true partial with no injected
+    // defaults (regression: SessionShareCapabilitiesSchema.partial() kept .default(false), so a
+    // `{files:true}` patch silently reset readOnly + artifacts to false).
+    const share = await ctx.client.sessionShareCreate(agentId, {
+      capabilities: { readOnly: true, artifacts: true },
+    });
+    expect(share.capabilities.readOnly).toBe(true);
+    expect(share.capabilities.artifacts).toBe(true);
+
+    const afterFiles = await ctx.client.sessionShareSetOptions(share.shareId, {
+      capabilities: { files: true },
+    });
+    expect(afterFiles.capabilities.files).toBe(true);
+    expect(afterFiles.capabilities.readOnly).toBe(true);
+    expect(afterFiles.capabilities.artifacts).toBe(true);
+
+    // And turning files back off leaves the rest intact too.
+    const afterOff = await ctx.client.sessionShareSetOptions(share.shareId, {
+      capabilities: { files: false },
+    });
+    expect(afterOff.capabilities.files).toBe(false);
+    expect(afterOff.capabilities.readOnly).toBe(true);
+    expect(afterOff.capabilities.artifacts).toBe(true);
+
+    await ctx.client.sessionShareStop(share.shareId);
+  }, 90000);
+
   test("guest join reaches the host: request → session.share.stream with a pending request", async () => {
     // Capture the loopback ShareServer port from the daemon's own logs so we can connect a
     // guest WS directly (the public tunnel URL is unreachable from CI/localhost networks).

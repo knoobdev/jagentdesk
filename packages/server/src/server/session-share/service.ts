@@ -176,6 +176,13 @@ export class SessionShareService {
     this.guestAttacher = fn;
   }
 
+  // Re-scope live guest daemon sessions for an agent when the host toggles capabilities (ADR-0019).
+  private guestScopeUpdater: ((agentId: string, scopes: readonly string[]) => void) | null = null;
+
+  setGuestScopeUpdater(fn: (agentId: string, scopes: readonly string[]) => void): void {
+    this.guestScopeUpdater = fn;
+  }
+
   // Resolve a guest token to its grant + the share's CURRENT capabilities (live, so host toggles
   // apply). Returns null if the token is unknown or its share is gone. Used by the scoped /ws path.
   validateGuestToken(
@@ -385,6 +392,11 @@ export class SessionShareService {
     if (opts.allowGuestModelMode !== undefined) capabilities.modelMode = opts.allowGuestModelMode;
     live.share = { ...live.share, capabilities, allowGuestModelMode: capabilities.modelMode };
     live.server.setAllowGuestModelMode(capabilities.modelMode);
+    // Apply the new grant to already-connected guests immediately (no reload): re-scope the live
+    // daemon session so a newly-granted tab's request is authorized, and push the capabilities to the
+    // guest surface so it shows/hides the tabs and can notify the guest (ADR-0019).
+    this.guestScopeUpdater?.(live.share.agentId, guestScopesForCapabilities(capabilities));
+    live.server.setCapabilities(capabilities);
     this.emit(live.share);
     return live.share;
   }

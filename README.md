@@ -73,7 +73,7 @@ with a few deliberate boundaries:
 
 ## ✨ New in this release
 
-### Session sharing v2 — real‑app guest surface (v0.9.31)
+### Session sharing v2 — real‑app guest surface (v0.9.32)
 
 The guest no longer sees a bespoke mini‑page: they join the **real app**, scoped to one agent by the
 daemon (ADR‑0019). Everything the host grants renders with the same components the host uses.

@@ -2865,6 +2865,19 @@ export const SessionShareCapabilitiesSchema = z.object({
   // agent produced. Derived from the shared timeline the guest already receives (no extra scope).
   artifacts: z.boolean().default(false),
 });
+// Partial capabilities for create/set-options requests. Do NOT use SessionShareCapabilitiesSchema
+// .partial() here: zod's `.partial()` keeps each field's `.default(false)`, so parsing a patch like
+// `{ files: false }` would ALSO inject `readOnly: false` + `artifacts: false` and silently reset
+// those siblings (the zod default trap). This explicit all-optional, no-default schema leaves omitted
+// keys `undefined` so a live toggle only changes the one capability it names.
+export const SessionShareCapabilitiesPatchSchema = z.object({
+  chat: z.boolean().optional(),
+  files: z.boolean().optional(),
+  terminal: z.boolean().optional(),
+  modelMode: z.boolean().optional(),
+  readOnly: z.boolean().optional(),
+  artifacts: z.boolean().optional(),
+});
 export const SessionShareSchema = z.object({
   shareId: z.string(),
   agentId: z.string(),
@@ -2896,7 +2909,7 @@ export const SessionShareCreateRequestSchema = z.object({
   shareDraftPreview: z.boolean().optional(),
   requireHostApproval: z.boolean().optional(),
   allowGuestModelMode: z.boolean().optional(),
-  capabilities: SessionShareCapabilitiesSchema.partial().optional(),
+  capabilities: SessionShareCapabilitiesPatchSchema.optional(),
   requestId: z.string(),
 });
 // Host toggles share options live (spec §21.6) — currently the model/mode grant. Effective
@@ -2905,7 +2918,7 @@ export const SessionShareSetOptionsRequestSchema = z.object({
   type: z.literal("session.share.set_options.request"),
   shareId: z.string(),
   allowGuestModelMode: z.boolean().optional(),
-  capabilities: SessionShareCapabilitiesSchema.partial().optional(),
+  capabilities: SessionShareCapabilitiesPatchSchema.optional(),
   requestId: z.string(),
 });
 export const SessionShareStopRequestSchema = z.object({
