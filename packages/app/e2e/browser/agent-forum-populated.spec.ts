@@ -270,15 +270,22 @@ test("Team mode on the real app: agent toggle + forum list + populated board", a
     await expect(card).toBeVisible({ timeout: 30_000 });
     await page.screenshot({ path: "/tmp/share-shots/21-forum-list.png" });
 
-    // 3) Populated topic — discussion thread + kanban board.
+    // 3) Populated topic — the discussion thread (default THREAD tab).
     await card.click();
+    await expect(page.getByText("Persist from the start", { exact: false }).first()).toBeVisible({
+      timeout: 30_000,
+    });
+    await page.screenshot({ path: "/tmp/share-shots/22-forum-topic-thread.png" });
+
+    // 4) Switch to the BOARD tab — the kanban of tasks the team created.
+    await page.getByText("BOARD", { exact: false }).first().click();
     await expect(page.getByText("Add / remove todo UI", { exact: false }).first()).toBeVisible({
       timeout: 30_000,
     });
     await expect(
       page.getByText("localStorage persistence", { exact: false }).first(),
     ).toBeVisible();
-    await page.screenshot({ path: "/tmp/share-shots/22-forum-topic-board.png" });
+    await page.screenshot({ path: "/tmp/share-shots/23-forum-kanban.png" });
   } finally {
     await project.cleanup();
   }

@@ -317,6 +317,7 @@ const TopicThread = memo(function TopicThread({
     for (const m of topic?.messages ?? []) map.set(m.id, m);
     return map;
   }, [topic]);
+  const [tab, setTab] = useState<"thread" | "board">("thread");
 
   return (
     <View style={styles.threadRoot}>
@@ -334,10 +335,14 @@ const TopicThread = memo(function TopicThread({
         <ScrollView contentContainerStyle={styles.threadBody}>
           <Text style={styles.postTitle}>{topic.title}</Text>
           <PhaseBar status={topic.status} />
-          {topic.messages.map((m, i) => (
-            <PostCard key={m.id} message={m} index={i + 1} quoted={quotedOf(m, byId)} />
-          ))}
-          {topic.tasks.length > 0 ? <TasksSection tasks={topic.tasks} /> : null}
+          <TabBar tab={tab} onTab={setTab} boardCount={topic.tasks.length} />
+          {tab === "thread" ? (
+            topic.messages.map((m, i) => (
+              <PostCard key={m.id} message={m} index={i + 1} quoted={quotedOf(m, byId)} />
+            ))
+          ) : (
+            <KanbanBoard tasks={topic.tasks} />
+          )}
         </ScrollView>
       )}
     </View>
@@ -407,30 +412,87 @@ const PostCard = memo(function PostCard({
   );
 });
 
-const TasksSection = memo(function TasksSection({ tasks }: { tasks: ForumTask[] }): ReactElement {
+const TabBar = memo(function TabBar({
+  tab,
+  onTab,
+  boardCount,
+}: {
+  tab: "thread" | "board";
+  onTab: (t: "thread" | "board") => void;
+  boardCount: number;
+}): ReactElement {
+  const onThread = useCallback(() => onTab("thread"), [onTab]);
+  const onBoard = useCallback(() => onTab("board"), [onTab]);
   return (
-    <View style={styles.tasksSection}>
-      <Text style={styles.sectionLabel}>DECISIONS &amp; TASKS</Text>
-      {tasks.map((task) => (
-        <View key={task.id} style={styles.taskRow}>
-          <TaskDot status={task.status} />
-          <Text style={styles.taskTitle} numberOfLines={2}>
-            {task.parentTaskId ? "↳ " : ""}
-            {task.title}
-          </Text>
-          <Text style={styles.taskMeta}>
-            {task.status.replace("_", " ")}
-            {task.estimate !== "unknown" ? ` · ${task.estimate.toUpperCase()}` : ""}
-            {task.assigneeAgentId ? ` · ${task.assigneeAgentId.slice(0, 6)}` : ""}
-          </Text>
-        </View>
-      ))}
+    <View style={styles.tabBar}>
+      <Pressable
+        onPress={onThread}
+        style={[styles.tabBtn, tab === "thread" ? styles.tabBtnOn : null]}
+      >
+        <Text style={[styles.tabTxt, tab === "thread" ? styles.tabTxtOn : null]}>THREAD</Text>
+      </Pressable>
+      <Pressable
+        onPress={onBoard}
+        style={[styles.tabBtn, tab === "board" ? styles.tabBtnOn : null]}
+      >
+        <Text style={[styles.tabTxt, tab === "board" ? styles.tabTxtOn : null]}>
+          BOARD · {boardCount}
+        </Text>
+      </Pressable>
     </View>
   );
 });
 
-const TaskDot = memo(function TaskDot({ status }: { status: ForumTaskStatus }): ReactElement {
-  return <View style={[styles.taskDot, { backgroundColor: taskDotColor(status) }]} />;
+const KANBAN: { status: ForumTaskStatus; label: string }[] = [
+  { status: "backlog", label: "Backlog" },
+  { status: "todo", label: "To do" },
+  { status: "in_progress", label: "In progress" },
+  { status: "review", label: "Review" },
+  { status: "blocked", label: "Blocked" },
+  { status: "done", label: "Done" },
+];
+
+const KanbanBoard = memo(function KanbanBoard({ tasks }: { tasks: ForumTask[] }): ReactElement {
+  if (tasks.length === 0) {
+    return (
+      <Text style={styles.emptyBoard}>
+        No tasks yet — the team is still discussing. Tasks appear here once they agree a plan.
+      </Text>
+    );
+  }
+  return (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.kanban}>
+      <View style={styles.kanbanRow}>
+        {KANBAN.map((col) => {
+          const colTasks = tasks.filter((t) => t.status === col.status);
+          return (
+            <View key={col.status} style={styles.column}>
+              <Text style={styles.columnHead}>
+                {col.label.toUpperCase()} · {colTasks.length}
+              </Text>
+              {colTasks.map((task) => (
+                <View key={task.id} style={styles.kanbanCard}>
+                  <View
+                    style={[styles.cardStripe, { backgroundColor: taskDotColor(task.status) }]}
+                  />
+                  <Text style={styles.kanbanCardTitle} numberOfLines={3}>
+                    {task.parentTaskId ? "↳ " : ""}
+                    {task.title}
+                  </Text>
+                  <Text style={styles.kanbanCardMeta}>
+                    {task.estimate !== "unknown" ? task.estimate.toUpperCase() : "—"}
+                    {task.assigneeAgentId
+                      ? ` · ${task.assigneeAgentId.slice(0, 8)}`
+                      : " · unassigned"}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          );
+        })}
+      </View>
+    </ScrollView>
+  );
 });
 
 // ---- styles -----------------------------------------------------------------------------------
@@ -602,18 +664,51 @@ const styles = StyleSheet.create((_theme) => ({
     lineHeight: 18,
   },
   postBody: { color: C.text, fontSize: 14, lineHeight: 21, fontFamily: FONT_SANS },
-  tasksSection: {
-    marginTop: 10,
-    gap: 8,
+  tabBar: { flexDirection: "row", gap: 6, marginTop: 4 },
+  tabBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.card,
+  },
+  tabBtnOn: { backgroundColor: C.cardAlt, borderColor: C.faint },
+  tabTxt: {
+    fontFamily: FONT_MONO,
+    letterSpacing: 0.5,
+    color: C.muted,
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  tabTxtOn: { color: C.text },
+  emptyBoard: {
+    color: C.muted,
+    fontSize: 13,
+    fontFamily: FONT_SANS,
+    paddingVertical: 24,
+    textAlign: "center",
+  },
+  kanban: { flexGrow: 0 },
+  kanbanRow: { flexDirection: "row", gap: 12, paddingBottom: 8 },
+  column: { width: 208, gap: 8 },
+  columnHead: {
+    fontFamily: FONT_MONO,
+    letterSpacing: 0.5,
+    color: C.muted,
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  kanbanCard: {
     borderWidth: 1,
     borderColor: C.border,
     borderRadius: 8,
     backgroundColor: C.card,
-    padding: 14,
+    padding: 12,
+    gap: 6,
+    overflow: "hidden",
   },
-  sectionLabel: { fontFamily: FONT_MONO, letterSpacing: 0.5, color: C.muted, fontSize: 11 },
-  taskRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-  taskDot: { width: 8, height: 8, borderRadius: 4 },
-  taskTitle: { flex: 1, color: C.text, fontSize: 13, fontFamily: FONT_SANS },
-  taskMeta: { fontFamily: FONT_MONO, letterSpacing: 0.5, color: C.muted, fontSize: 11 },
+  cardStripe: { position: "absolute", left: 0, top: 0, bottom: 0, width: 3 },
+  kanbanCardTitle: { color: C.text, fontSize: 13, fontFamily: FONT_SANS, lineHeight: 18 },
+  kanbanCardMeta: { fontFamily: FONT_MONO, letterSpacing: 0.5, color: C.muted, fontSize: 11 },
 }));
