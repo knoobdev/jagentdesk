@@ -1,4 +1,5 @@
 import { describe, test, expect, afterEach } from "vitest";
+import pino from "pino";
 import type { StoredForumTopic } from "@jagentdesk/protocol/messages";
 import { createDaemonTestContext, type DaemonTestContext } from "../test-utils/index.js";
 
@@ -57,4 +58,41 @@ describe("agent forum — data + RPC layer", () => {
 
     unsub();
   }, 60000);
+
+  test("chat trigger: bootstrapLead hands the origin agent the team-lead brief", async () => {
+    const logs: string[] = [];
+    const logger = pino({ level: "debug" }, { write: (line: string) => logs.push(line) });
+    ctx = await createDaemonTestContext({ logger });
+    const agent = await ctx.client.createAgent({
+      provider: "codex",
+      model: "gpt-5.4-mini",
+      cwd: "/tmp",
+      title: "Team Lead Agent",
+    });
+
+    // This is what the composer's Team-mode send does: create the topic AND bootstrap the lead.
+    const topic = await ctx.client.forumCreate({
+      prompt: "Build a landing page like example.com",
+      originAgentId: agent.id,
+      bootstrapLead: true,
+    });
+    expect(topic?.leadAgentId).toBe(agent.id);
+
+    // The bootstrap dispatches the team-lead brief to the origin agent, so its timeline receives a
+    // turn containing the lead instructions + the user's request.
+    // The bootstrap dispatches the team-lead brief to the origin agent, which runs a turn. The fresh
+    // agent had no turns before; after the brief it has recorded one (assistant reply present + a
+    // completed turn). That proves the chat trigger actually started the agent as the lead.
+    let ranTurn = false;
+    for (let i = 0; i < 60 && !ranTurn; i++) {
+      const tl = await ctx.client.fetchAgentTimeline(agent.id, { direction: "tail", limit: 30 });
+      const turns = (tl as { agent?: { usageTotals?: { turns?: number } } })?.agent?.usageTotals
+        ?.turns;
+      ranTurn = typeof turns === "number" && turns >= 1;
+      if (!ranTurn) await new Promise((r) => setTimeout(r, 300));
+    }
+    const bootstrapLog = logs.some((l) => /Forum bootstrap dispatched/.test(l));
+    expect(ranTurn, "origin agent ran a turn from the team-lead brief").toBe(true);
+    expect(bootstrapLog, "the bootstrap dispatched the brief").toBe(true);
+  }, 90000);
 });

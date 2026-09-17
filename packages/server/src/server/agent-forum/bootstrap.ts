@@ -55,13 +55,22 @@ export function createForumBootstrap(deps: ForumBootstrapDeps) {
       );
       return;
     }
-    await sendPromptToAgent({
-      agentManager: deps.agentManager,
-      agentStorage: deps.agentStorage,
-      agentId: input.originAgentId,
-      prompt: buildTeamLeadPrompt(input.topicId, input.prompt),
-      unarchive: false,
-      logger: deps.logger,
-    });
+    try {
+      const result = await sendPromptToAgent({
+        agentManager: deps.agentManager,
+        agentStorage: deps.agentStorage,
+        agentId: input.originAgentId,
+        prompt: buildTeamLeadPrompt(input.topicId, input.prompt),
+        unarchive: false,
+        logger: deps.logger,
+      });
+      deps.logger.info(
+        { topicId: input.topicId, disposition: result.disposition },
+        "Forum bootstrap dispatched",
+      );
+    } catch (error) {
+      deps.logger.error({ err: error, topicId: input.topicId }, "Forum bootstrap dispatch error");
+      throw error;
+    }
   };
 }
