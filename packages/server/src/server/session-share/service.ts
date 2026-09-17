@@ -451,6 +451,7 @@ export class SessionShareService {
       device: r.device,
       failedAttempts: r.failedAttempts,
       lockedUntil_ms: r.lockedUntil_ms,
+      codeExpiresAt_ms: r.codeExpiresAt_ms,
     }));
     live.share = { ...live.share, members, pendingRequests, recentActivity: snapshot.activity };
     this.emit(live.share);

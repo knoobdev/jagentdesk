@@ -71,6 +71,7 @@ export interface ShareRequestSnapshot {
   device: string;
   failedAttempts: number;
   lockedUntil_ms: number | null;
+  codeExpiresAt_ms: number | null;
 }
 
 export interface ShareActivity {
@@ -126,6 +127,9 @@ export interface ShareServerOptions {
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_WINDOW_MS = 60_000;
 const POLL_MS = 1500;
+// A minted pairing code is valid for this long after the host approves; then the guest must ask for
+// a fresh one. Host + guest show a live countdown (spec §21.8 / ADR-0019).
+const CODE_TTL_MS = 5 * 60_000;
 
 type Phase = "new" | "pending" | "approved" | "authed";
 
@@ -135,6 +139,7 @@ interface GuestConn {
   requestId: string;
   label: string;
   code: string | null; // set by the service on approve; the guest must enter it
+  codeExpiresAt: number; // Unix ms the code stops working (0 until approved)
   member: GuestMember;
   device: string;
   failed: number; // rolling count within the current window (drives lockout)
@@ -272,7 +277,8 @@ export class ShareServer {
     if (!c || c.phase !== "pending") return;
     c.phase = "approved";
     c.code = code;
-    this.safeSend(c.ws, { t: "approved" });
+    c.codeExpiresAt = Date.now() + CODE_TTL_MS;
+    this.safeSend(c.ws, { t: "approved", codeExpiresAt_ms: c.codeExpiresAt });
     this.emitState();
   }
 
@@ -395,6 +401,7 @@ export class ShareServer {
       requestId,
       label: "",
       code: null,
+      codeExpiresAt: 0,
       device,
       failed: 0,
       totalFailed: 0,
@@ -469,6 +476,15 @@ export class ShareServer {
         t: "pair_result",
         ok: false,
         error: `Too many attempts. Try again in ${Math.ceil((conn.lockoutUntil - now) / 1000)}s.`,
+      });
+      return;
+    }
+    // Expired code: force a fresh request rather than accepting a stale one.
+    if (conn.phase === "approved" && conn.codeExpiresAt > 0 && now > conn.codeExpiresAt) {
+      this.safeSend(conn.ws, {
+        t: "pair_result",
+        ok: false,
+        error: "This code has expired. Request a new one.",
       });
       return;
     }
@@ -639,6 +655,7 @@ export class ShareServer {
         device: c.device,
         failedAttempts: c.totalFailed,
         lockedUntil_ms: c.lockoutUntil > Date.now() ? c.lockoutUntil : null,
+        codeExpiresAt_ms: c.phase === "approved" && c.codeExpiresAt > 0 ? c.codeExpiresAt : null,
       }));
     this.opts.onStateChanged({
       members: this.authedMembers(),

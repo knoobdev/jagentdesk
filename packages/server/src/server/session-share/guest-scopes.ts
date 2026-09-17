@@ -90,11 +90,19 @@ export function guestScopesForCapabilities(caps: SessionShareCapabilities): stri
     );
   }
   if (caps.modelMode && !caps.readOnly) {
+    // The app's model/mode pickers use several RPCs (switching provider swaps model+provider; the
+    // mode/thinking/feature toggles are separate) — grant the whole set, all agentId-guarded.
     scopes.push(
       "set_agent_mode_request",
       "set_agent_mode_response",
       "set_agent_model_request",
       "set_agent_model_response",
+      "switch_agent_provider_request",
+      "switch_agent_provider_response",
+      "set_agent_thinking_request",
+      "set_agent_thinking_response",
+      "set_agent_feature_request",
+      "set_agent_feature_response",
       "cancel_agent_request",
       "cancel_agent_response",
     );

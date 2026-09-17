@@ -22,6 +22,36 @@ import { useWorkspaceDirectory } from "@/stores/session-store-hooks";
 import { normalizeAgentSnapshot } from "@/utils/agent-snapshots";
 import { applyLegacyDaemonWorkspaceOwnership } from "@/workspace/legacy-daemon-workspaces";
 
+// Persist the guest token per-share so a page reload (F5) reconnects without re-pairing. Kept in
+// sessionStorage (same-tab, cleared when the tab closes) — the token stays valid until the host
+// stops the share, and a stale one just falls back to the join screen.
+function guestTokenKey(agentId: string): string {
+  return `jad-guest-token:${agentId}`;
+}
+function readStoredGuestToken(agentId: string): string | null {
+  try {
+    return typeof sessionStorage !== "undefined"
+      ? sessionStorage.getItem(guestTokenKey(agentId))
+      : null;
+  } catch {
+    return null;
+  }
+}
+function writeStoredGuestToken(agentId: string, token: string): void {
+  try {
+    sessionStorage?.setItem(guestTokenKey(agentId), token);
+  } catch {
+    // ignore (private mode / disabled storage)
+  }
+}
+function clearStoredGuestToken(agentId: string): void {
+  try {
+    sessionStorage?.removeItem(guestTokenKey(agentId));
+  } catch {
+    // ignore
+  }
+}
+
 const WorkingDiffPanel = workingDiffPanelRegistration.component;
 const FilePanel = filePanelRegistration.component;
 const TerminalPanel = terminalPanelRegistration.component;
@@ -123,14 +153,18 @@ export function readGuestShareHint(): GuestShareHint | null {
 type Phase =
   | { k: "request" }
   | { k: "pending" }
-  | { k: "gate" }
+  | { k: "gate"; codeExpiresAt: number | null }
   | { k: "connecting" }
   | { k: "ready"; serverId: string; workspaceId: string; workspaceCwd: string }
   | { k: "ended"; reason: string };
 
 export function GuestShareScreen({ hint }: { hint: GuestShareHint }): ReactElement {
   const wsRef = useRef<WebSocket | null>(null);
-  const [phase, setPhase] = useState<Phase>({ k: "request" });
+  // Start in "connecting" (not the join screen) when we already hold a token, so an F5 reconnects
+  // silently instead of flashing the "Join this session" form.
+  const [phase, setPhase] = useState<Phase>(() =>
+    readStoredGuestToken(hint.agentId) ? { k: "connecting" } : { k: "request" },
+  );
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -191,14 +225,26 @@ export function GuestShareScreen({ hint }: { hint: GuestShareHint }): ReactEleme
         } catch {
           // proceed without it
         }
+        // Persist so an F5 reconnects straight away with the same token (no re-pairing).
+        writeStoredGuestToken(hint.agentId, guestToken);
         setPhase({ k: "ready", serverId, workspaceId, workspaceCwd });
       } catch (e) {
+        // Token likely stale (share stopped) — drop it and fall back to the join screen.
+        clearStoredGuestToken(hint.agentId);
         setError(e instanceof Error ? e.message : "Couldn't connect to the shared session.");
         setPhase({ k: "request" });
       }
     },
     [hint.agentId, hint.agentLabel, hint.workspaceCwd],
   );
+
+  // On load, if we still hold a valid guest token (e.g. after F5), reconnect without re-pairing.
+  useEffect(() => {
+    const stored = readStoredGuestToken(hint.agentId);
+    if (stored) void goReady(stored);
+    // Only on mount for this agent.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hint.agentId]);
 
   const connectPairing = useCallback(() => {
     const proto =
@@ -215,7 +261,10 @@ export function GuestShareScreen({ hint }: { hint: GuestShareHint }): ReactEleme
       }
       if (m.t === "pending") setPhase({ k: "pending" });
       else if (m.t === "approved") {
-        setPhase({ k: "gate" });
+        setPhase({
+          k: "gate",
+          codeExpiresAt: typeof m.codeExpiresAt_ms === "number" ? m.codeExpiresAt_ms : null,
+        });
         setError(null);
       } else if (m.t === "rejected")
         setPhase({ k: "ended", reason: "The host declined the request." });
@@ -591,6 +640,22 @@ function GuestTabButton({
   );
 }
 
+// Live countdown to the pairing code's expiry, shown under the code input on the guest gate screen.
+function GateCountdown({ expiresAt }: { expiresAt: number | null }): ReactElement | null {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!expiresAt) return undefined;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [expiresAt]);
+  if (!expiresAt) return null;
+  const remaining = Math.max(0, expiresAt - now);
+  if (remaining <= 0) return <Text style={styles.error}>Code expired — get a new one.</Text>;
+  const total = Math.ceil(remaining / 1000);
+  const label = `${Math.floor(total / 60)}:${(total % 60).toString().padStart(2, "0")}`;
+  return <Text style={styles.sub}>Code expires in {label}</Text>;
+}
+
 function GuestGate({
   phase,
   agentLabel,
@@ -657,6 +722,7 @@ function GuestGate({
           placeholderTextColor={styles.mutedText.color}
           autoFocus
         />
+        <GateCountdown expiresAt={phase.codeExpiresAt} />
         {error ? <Text style={styles.error}>{error}</Text> : null}
         <Pressable onPress={onRequest} hitSlop={8}>
           <Text style={styles.link}>Get a new code</Text>

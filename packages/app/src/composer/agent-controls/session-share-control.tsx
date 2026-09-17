@@ -519,9 +519,30 @@ const ShareCard = memo(function ShareCard({
   );
 });
 
+// Remaining ms until `expiresAt` (Unix ms), ticking each second; 0 when absent/passed.
+function useCountdownMs(expiresAt: number | null | undefined): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!expiresAt) return undefined;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [expiresAt]);
+  if (!expiresAt) return 0;
+  return Math.max(0, expiresAt - now);
+}
+
+export function formatCountdown(ms: number): string {
+  const total = Math.ceil(ms / 1000);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
 const CodeRow = memo(function CodeRow({ request }: { request: SessionShareRequest }): ReactElement {
   const locked = (request.lockedUntil_ms ?? 0) > Date.now();
   const failed = request.failedAttempts ?? 0;
+  const remaining = useCountdownMs(request.codeExpiresAt_ms);
+  const expired = Boolean(request.codeExpiresAt_ms) && remaining <= 0;
   let note = request.device ?? "";
   if (locked) note = note ? `${note} · locked (too many tries)` : "locked (too many tries)";
   else if (failed > 0) {
@@ -535,8 +556,15 @@ const CodeRow = memo(function CodeRow({ request }: { request: SessionShareReques
         {note ? (
           <Text style={failed > 0 || locked ? styles.reqDeviceWarn : styles.reqDevice}>{note}</Text>
         ) : null}
+        {request.codeExpiresAt_ms ? (
+          <Text style={expired ? styles.reqDeviceWarn : styles.reqDevice}>
+            {expired
+              ? "Code expired — guest must request a new one"
+              : `Expires in ${formatCountdown(remaining)}`}
+          </Text>
+        ) : null}
       </View>
-      <Text style={styles.code}>{request.code ?? "------"}</Text>
+      <Text style={expired ? styles.codeExpired : styles.code}>{request.code ?? "------"}</Text>
     </View>
   );
 });
@@ -709,6 +737,14 @@ const styles = StyleSheet.create((theme) => ({
     fontWeight: theme.fontWeight.bold,
     letterSpacing: 4,
     fontFamily: theme.fontFamily.mono,
+  },
+  codeExpired: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.xl,
+    fontWeight: theme.fontWeight.bold,
+    letterSpacing: 4,
+    fontFamily: theme.fontFamily.mono,
+    textDecorationLine: "line-through",
   },
   guestRow: {
     flexDirection: "row",

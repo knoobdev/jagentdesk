@@ -2838,6 +2838,9 @@ export const SessionShareRequestSchema = z.object({
   // guest fumbling or being brute-forced (spec §21.8).
   failedAttempts: z.number().int().optional(),
   lockedUntil_ms: z.number().int().nullable().optional(),
+  // When the minted 6-digit code expires (Unix ms). The host + guest show a countdown; after this
+  // the guest must request a fresh code. Null/absent for pending (not-yet-approved) requests.
+  codeExpiresAt_ms: z.number().int().nullable().optional(),
 });
 // A message a guest sent into the shared session — so the host can see who (name + device) sent
 // what, since the agent timeline itself carries no guest attribution (spec §21.6/§21.7).
