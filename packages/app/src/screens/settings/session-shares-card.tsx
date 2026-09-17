@@ -78,18 +78,21 @@ const ShareRow = memo(function ShareRow({
   onStop: (shareId: string) => void;
 }): ReactElement {
   const onPress = useCallback(() => onStop(share.shareId), [onStop, share.shareId]);
-  const guests = share.members;
+  const guests = share.members.filter((m) => m.kind === "guest");
   return (
     <View style={styles.shareRow}>
       <View style={styles.shareInfo}>
         <Text style={styles.shareTitle}>Agent {share.agentId.slice(0, 8)}</Text>
-        <Text style={styles.shareMeta}>
-          {guests.length === 0
-            ? "No one has joined yet"
-            : `${guests.length} ${guests.length === 1 ? "guest" : "guests"}: ${guests
-                .map((g) => (g.device ? `${g.label} (${g.device})` : g.label))
-                .join(", ")}`}
-        </Text>
+        {guests.length === 0 ? (
+          <Text style={styles.shareMeta}>No one has joined yet</Text>
+        ) : (
+          guests.map((g) => (
+            <Text key={g.memberId} style={styles.shareMeta}>
+              {g.device ? `${g.label} (${g.device})` : g.label}
+              {g.typing ? <Text style={styles.typing}> · typing…</Text> : null}
+            </Text>
+          ))
+        )}
       </View>
       <Pressable style={styles.stopBtn} onPress={onPress}>
         <Text style={styles.stopText}>Stop</Text>
@@ -115,6 +118,7 @@ const styles = StyleSheet.create((theme) => ({
     fontWeight: theme.fontWeight.medium,
   },
   shareMeta: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.xs },
+  typing: { color: theme.colors.primary, fontWeight: theme.fontWeight.medium },
   stopBtn: {
     borderRadius: theme.borderRadius.md,
     paddingVertical: theme.spacing[2],

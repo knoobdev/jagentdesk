@@ -7,6 +7,8 @@ import { workingDiffPanelRegistration } from "@/panels/diff-panel";
 import { terminalPanelRegistration } from "@/panels/terminal-panel";
 import { FileExplorerPane } from "@/components/file-explorer-pane";
 import { ArtifactCanvas } from "@/artifacts/artifact-canvas";
+import { useAgentInputDraft } from "@/composer/draft/input-draft";
+import { buildDraftStoreKey } from "@/stores/draft-keys";
 import { useFetchQuery } from "@/data/query";
 import { buildTerminalsQueryKey } from "@/screens/workspace/terminals/state";
 import {
@@ -315,6 +317,20 @@ export function GuestShareScreen({ hint }: { hint: GuestShareHint }): ReactEleme
     sendJoinRequest();
   }, [name, sendJoinRequest]);
 
+  // Report the guest's typing state to the host over the (still-open) pairing channel, so the host
+  // sees "<name> is typing" on this agent. No-op if the pairing socket isn't open (e.g. an F5
+  // token-reconnect has no pairing channel) — presence is best-effort.
+  const sendTyping = useCallback((typing: boolean) => {
+    const ws = wsRef.current;
+    if (ws && ws.readyState === 1) {
+      try {
+        ws.send(JSON.stringify({ t: "typing", typing }));
+      } catch {
+        // ignore
+      }
+    }
+  }, []);
+
   const onCodeChange = useCallback((next: string) => {
     const digits = next.replace(/\D/g, "").slice(0, 6);
     setCode(digits);
@@ -348,6 +364,7 @@ export function GuestShareScreen({ hint }: { hint: GuestShareHint }): ReactEleme
         workspaceCwd={phase.workspaceCwd}
         agentId={hint.agentId}
         capabilities={hint.capabilities}
+        onTyping={sendTyping}
       />
     );
   }
@@ -384,12 +401,14 @@ function GuestReadyView({
   workspaceCwd,
   agentId,
   capabilities,
+  onTyping,
 }: {
   serverId: string;
   workspaceId: string;
   workspaceCwd: string;
   agentId: string;
   capabilities: GuestShareCapabilities;
+  onTyping: (typing: boolean) => void;
 }): ReactElement {
   const [tab, setTab] = useState<GuestTab>("chat");
   const [openFilePath, setOpenFilePath] = useState<string | null>(null);
@@ -408,6 +427,19 @@ function GuestReadyView({
     }
   }, [needsWorkspace, sessionReady, serverId, workspaceId, workspaceCwd]);
   const workspaceRoot = useWorkspaceDirectory(serverId, workspaceId) ?? "";
+
+  // Signal the host when the guest is typing in the chat composer (presence). Watch the same draft
+  // the composer writes; send typing=true on non-empty text and typing=false after a short idle or
+  // when cleared/sent. Only meaningful on the chat tab.
+  const draft = useAgentInputDraft({ draftKey: buildDraftStoreKey({ serverId, agentId }) });
+  const draftText = draft.text;
+  useEffect(() => {
+    const typing = tab === "chat" && draftText.trim().length > 0;
+    onTyping(typing);
+    if (!typing) return undefined;
+    const idle = setTimeout(() => onTyping(false), 4000);
+    return () => clearTimeout(idle);
+  }, [draftText, tab, onTyping]);
 
   // Subscribe to the shared agent's timeline so the guest receives LIVE agent_stream pushes (the
   // agent's responses). In the host app this is driven by the workspace screen registering "visible"

@@ -62,7 +62,9 @@ with a few deliberate boundaries:
   **Cloudflare‑tunnel web link** they open in any browser (no app install). They ask to join, you
   **Accept** on any of your devices, and they enter a **6‑digit code** to chat in that session; you
   see them typing live and can kick or stop anytime. Off by default, scoped to that one agent,
-  dangerous actions still ask you.
+  dangerous actions still ask you. Grant extra capabilities per share — **Files, Changes, Terminal,
+  model/mode, read‑only (chat‑only), and an Artifacts canvas** — and manage every live share from a
+  dedicated **Shared sessions** page in the menu.
 - **Usage & cost insights** _(new)_ — a dashboard of tokens, spend, and per‑model / per‑agent
   breakdowns.
 - **Multi‑language UI** _(new)_ — switch the app language from Settings.
@@ -71,23 +73,27 @@ with a few deliberate boundaries:
 
 ## ✨ New in this release
 
-### Session sharing (v0.9.14)
+### Session sharing v2 — real‑app guest surface (v0.9.29)
 
-- **Share one agent chat as a web link** — a **Share button** in the composer opens a public
-  **Cloudflare quick‑tunnel** URL. A guest opens it **in any browser (no app install)**, asks to
-  join, and after you approve enters a **6‑digit code** to view the chat and message the agent.
-- **You approve every guest** — an **Accept/Reject dialog pops up automatically on all your
-  devices** (desktop + mobile); the code is minted by the **daemon** (single source) so the
-  dialogs never hand out conflicting codes. Reject, **Kick**, or **Stop sharing** at any time.
-- **Live presence** — see each guest viewing and who is **typing…**; the guest sees the agent's
-  turns stream in as you do.
-- **Safe by construction** — off by default (toggle in **Settings → Host**, restart to apply);
-  the tunnel exposes only a bespoke surface for that **one agent** (transcript + prompts +
-  presence), never the daemon or other agents. Guest‑triggered dangerous actions still raise a
-  permission request to **your** app, and guests can't change the model/mode unless you flip
-  **"Let guests change the agent's mode"**. Needs `cloudflared` on the host.
+The guest no longer sees a bespoke mini‑page: they join the **real app**, scoped to one agent by the
+daemon (ADR‑0019). Everything the host grants renders with the same components the host uses.
 
-See [CHANGELOG.md](CHANGELOG.md) for full v0.9.14 notes.
+- **Grant capabilities per share** — beyond chat, toggle **Files, Changes, Terminal, model/mode,
+  read‑only (chat‑only, no composer), and an Artifacts canvas** (live‑renders the HTML/SVG/Mermaid/
+  code the agent produces). Each defaults **off**; the daemon enforces every grant on the wire —
+  the hidden control is never the guard — and confines file/terminal access to the agent's workspace.
+- **Guests can't fork or re‑share** — host‑only actions (fork the agent, the Share button) are hidden
+  on the guest surface and denied by the guest scope even if reached.
+- **Dedicated Shared sessions page** — manage every live share across hosts from the **main menu**
+  (not buried in Settings), with each guest's device and a live **typing…** indicator per agent.
+- **Sturdier connection** — guests survive **idle, screen‑lock, network changes, and F5** and
+  auto‑reconnect (the token persists; remote guests are exempt from the local‑retry cap). The pairing
+  code shows a **live expiry countdown** with refresh.
+- **Fixes** — model/mode changes no longer fail with `access_denied`; the Artifacts tab no longer
+  crashes the app on a non‑empty timeline.
+
+Still off by default (toggle in **Settings → Host**, restart to apply); needs `cloudflared` on the
+host. See [CHANGELOG.md](CHANGELOG.md) for full notes.
 
 ### Autonomous run (v0.9.13)
 

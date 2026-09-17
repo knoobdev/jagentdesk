@@ -23,6 +23,16 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 
 const hasBundle = existsSync(path.join(APP_DIST, "index.html"));
 
+// True once any streamed share snapshot shows a guest member flagged typing (host presence).
+function anyGuestTyping(shares: SessionShare[]): boolean {
+  for (const s of shares) {
+    for (const m of s.members) {
+      if (m.kind === "guest" && m.typing) return true;
+    }
+  }
+  return false;
+}
+
 async function makeAgent(ctx: DaemonTestContext, cwd = "/tmp"): Promise<string> {
   const agent = await ctx.client.createAgent({
     provider: "codex",
@@ -178,6 +188,17 @@ describe.skipIf(!hasBundle)("session sharing — real app guest surface (browser
     const composer = page.locator('[placeholder^="Message"]').first();
     await composer.click();
     await composer.fill("say 'state saved'");
+
+    // Presence: typing in the composer must reach the HOST as member.typing=true (spec §21 — the
+    // host sees which guest is typing on which agent). The guest sends {t:"typing"} over the
+    // pairing socket; the daemon flips the member flag and re-emits the share.
+    let sawTyping = false;
+    for (let i = 0; i < 40 && !sawTyping; i++) {
+      sawTyping = anyGuestTyping(streamed);
+      if (!sawTyping) await sleep(150);
+    }
+    expect(sawTyping, "host saw the guest typing").toBe(true);
+
     await composer.press("Enter");
 
     let sawGuestMessage = false;
@@ -198,6 +219,12 @@ describe.skipIf(!hasBundle)("session sharing — real app guest surface (browser
         { cause: e },
       );
     }
+
+    // Fork is host-only: the assistant fork menu must NOT render for a guest (ADR-0019 —
+    // fork_context is out of the guest scope; the trigger is hidden via isGuestShareMode()). The
+    // reply is an assistant message, so an un-gated fork trigger would be present.
+    const forkTriggers = await page.locator('[data-testid="assistant-fork-menu-trigger"]').count();
+    expect(forkTriggers, "guest has no assistant fork control").toBe(0);
 
     unsub();
     // Close the guest browser (drops the scoped /ws) BEFORE stopping the share, so teardown does not
@@ -254,8 +281,16 @@ describe.skipIf(!hasBundle)("session sharing — real app guest surface (browser
       );
     }
 
-    // Chat renders first (the default tab).
-    await page.locator('[placeholder^="Message"]').first().waitFor({ timeout: 30000 });
+    // Chat renders first (the default tab). Send a message so the timeline is NON-EMPTY before the
+    // tab tour — the Artifacts canvas derives from the live stream, and a non-empty stream is exactly
+    // what used to spin an infinite render loop (React #185) via an unstable useSyncExternalStore
+    // snapshot. With an empty timeline the crash hides; sending first makes the tour a real guard.
+    const chatComposer = page.locator('[placeholder^="Message"]').first();
+    await chatComposer.waitFor({ timeout: 30000 });
+    await chatComposer.click();
+    await chatComposer.fill("say 'state saved'");
+    await chatComposer.press("Enter");
+    await page.getByText("state saved", { exact: false }).first().waitFor({ timeout: 30000 });
 
     // The capability granted the Files + Changes tabs; open Files and browse the workspace.
     await page.getByText("Files", { exact: true }).click();
@@ -273,7 +308,8 @@ describe.skipIf(!hasBundle)("session sharing — real app guest surface (browser
     await page.getByText("Changes", { exact: true }).click();
     await sleep(1500);
 
-    // Artifacts tab mounts the Canvas (empty state here — the fake agent emits no fenced blocks).
+    // Artifacts tab mounts the Canvas over a NON-EMPTY stream (the fake agent's reply carried no
+    // fenced block, so it lands on the empty state) — the point is it must NOT crash the app.
     await page.getByText("Artifacts", { exact: true }).click();
     await page.getByText("No artifacts yet", { exact: false }).first().waitFor({ timeout: 30000 });
 

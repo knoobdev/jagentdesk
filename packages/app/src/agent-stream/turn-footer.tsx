@@ -18,6 +18,7 @@ import {
 } from "@/components/message";
 import type { TurnFooterHost } from "./layout";
 import { AssistantForkMenu } from "@/components/assistant-fork-menu";
+import { isGuestShareMode } from "@/screens/share/guest-share-mode";
 import { SyncedLoader } from "@/components/synced-loader";
 import { useRetainedPanelActive } from "@/components/retained-panel";
 
@@ -130,8 +131,11 @@ const WorkingIndicator = memo(function WorkingIndicator({
       <View style={stylesheet.workingLoader}>
         <ThemedSyncedLoader size={14} uniProps={workingIndicatorColorMapping} />
       </View>
-      {/* Match the completed-turn footer: actions precede timing metadata. */}
-      {onForkInFlightTurn ? <AssistantForkMenu onFork={onForkInFlightTurn} /> : null}
+      {/* Match the completed-turn footer: actions precede timing metadata. Guests must not fork the
+          agent (ADR-0019 — fork_context is out of the guest scope), so hide it on the guest surface. */}
+      {onForkInFlightTurn && !isGuestShareMode() ? (
+        <AssistantForkMenu onFork={onForkInFlightTurn} />
+      ) : null}
       {inFlightTurnStartedAt ? (
         <LiveElapsed
           startedAt={inFlightTurnStartedAt}

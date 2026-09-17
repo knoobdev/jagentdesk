@@ -1,7 +1,6 @@
 import { useCallback, useMemo, useState, type ReactElement } from "react";
 import { Pressable, ScrollView, Text, View, type TextStyle } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
-import { useShallow } from "zustand/react/shallow";
 import { HighlightedCodeBlock } from "@/components/highlighted-code-block";
 import { MarkdownRenderer } from "@/components/markdown/renderer";
 import { useSessionStore } from "@/stores/session-store";
@@ -21,16 +20,21 @@ export function ArtifactCanvas({
   serverId: string;
   agentId: string;
 }): ReactElement {
-  const sourceItems = useSessionStore(
-    useShallow((state) => {
-      const tail = state.sessions[serverId]?.agentStreamTail?.get(agentId) ?? [];
-      return tail.map((item) => ({
-        type: item.kind,
-        text: "text" in item && typeof item.text === "string" ? item.text : undefined,
-      }));
-    }),
+  // Select the STABLE tail array reference straight from the store (Object.is-stable between renders
+  // until the stream actually changes). Mapping/extracting here would return a fresh array of fresh
+  // objects every call, which breaks useSyncExternalStore's snapshot caching and spins an infinite
+  // render loop (React #185). Do the derivation in useMemo instead, keyed on the stable reference.
+  const tail = useSessionStore((state) => state.sessions[serverId]?.agentStreamTail?.get(agentId));
+  const artifacts = useMemo(
+    () =>
+      extractArtifacts(
+        (tail ?? []).map((item) => ({
+          type: item.kind,
+          text: "text" in item && typeof item.text === "string" ? item.text : undefined,
+        })),
+      ),
+    [tail],
   );
-  const artifacts = useMemo(() => extractArtifacts(sourceItems), [sourceItems]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showSource, setShowSource] = useState(false);
   const toggleSource = useCallback(() => setShowSource((v) => !v), []);
