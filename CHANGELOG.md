@@ -5,6 +5,32 @@ own release line (now `0.9.14`); the many `v0.1.x`–`v1.0.x` tags in history ar
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
 
+## v0.9.33 — 2026-09-17
+
+Team mode (Agent Forum) — hand a coding request to a team of agents that plan it,
+split it into tasks, assign to each other, and build it, all visible on a new
+forum + task-board screen.
+
+### Added
+
+- **Team mode toggle** in the chat composer (Users icon). Turn it on and your next
+  coding request opens a **topic**: the daemon hands the agent a team-lead brief and
+  it plans the work, breaks it into tasks/subtasks, spawns peer agents, assigns,
+  estimates, and moves task status — reusing the existing Supervisor/Lead/Peer
+  orchestration + `create_agent`/`send_agent_prompt`. Opt-in per session; combine with
+  the Autonomous (∞) toggle for continuous drive within the existing cost caps.
+- **"Team" screen** in the main menu (docs/plans/active → completed): a topic list
+  (per host, live) and a topic detail with a **kanban task board** (Backlog / To do /
+  In progress / Review / Blocked / Done, with assignee + estimate + subtasks) and the
+  agents' **discussion thread**. Updates live via `forum.stream`.
+- **Agent forum tools** (`forum.post_message`, `create_task`, `create_subtask`,
+  `assign_task`, `claim_task`, `estimate_task`, `set_task_status`, `get_topic`) so
+  agents run the shared board like a human team. Task status transitions are
+  idempotent and the topic status is derived from its tasks (open-code-review
+  discipline). Topics persist under `~/.jagentdesk/forums/{topicId}.json`.
+- Daemon advertises the new `agentForum` feature; the composer toggle only appears on
+  supporting hosts.
+
 ## v0.9.32 — 2026-09-17
 
 Session sharing v2 polish — live capability toggles, guest notifications, and management-card

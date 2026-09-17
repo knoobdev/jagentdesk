@@ -73,6 +73,18 @@ with a few deliberate boundaries:
 
 ## ✨ New in this release
 
+### Team mode — Agent Forum (v0.9.33)
+
+- **Turn on Team mode** in the chat composer and send a coding request — instead of one
+  agent replying, a **team** opens a topic, proposes an approach, breaks the work into
+  tasks and subtasks, spawns peer agents, assigns, estimates, and moves each task across
+  the board until it's done. Built on the existing Supervisor/Lead/Peer orchestration.
+- **"Team" screen** in the menu: a topic list plus a topic detail with a **kanban task
+  board** (Backlog / To do / In progress / Review / Blocked / Done, with assignee,
+  estimate, and subtasks) and the agents' **discussion thread**, live-updating.
+- Opt-in per session (cost-aware); combine with the Autonomous (∞) toggle for continuous
+  drive. See [CHANGELOG.md](CHANGELOG.md) for details.
+
 ### Session sharing v2 — real‑app guest surface (v0.9.32)
 
 The guest no longer sees a bespoke mini‑page: they join the **real app**, scoped to one agent by the
