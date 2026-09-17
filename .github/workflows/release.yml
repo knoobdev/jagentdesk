@@ -198,7 +198,15 @@ jobs:
             echo "No desktop release files were produced."
             exit 1
           fi
-          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+          # uploads.github.com returns transient 502s under concurrent load — retry before failing.
+          for attempt in 1 2 3 4 5; do
+            if gh release upload "$RELEASE_TAG" "${files[@]}" --clobber --repo "$GITHUB_REPOSITORY"; then
+              exit 0
+            fi
+            echo "Upload attempt $attempt failed; retrying in $((attempt * 15))s…"
+            sleep $((attempt * 15))
+          done
+          echo "Upload failed after retries." && exit 1
 
       - name: Upload desktop workflow artifact
         uses: actions/upload-artifact@v4
@@ -305,7 +313,16 @@ jobs:
       - name: Upload Android APK to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$RELEASE_TAG" "${{ steps.artifact.outputs.asset_path }}" --clobber --repo "$GITHUB_REPOSITORY"
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5; do
+            if gh release upload "$RELEASE_TAG" "${{ steps.artifact.outputs.asset_path }}" --clobber --repo "$GITHUB_REPOSITORY"; then
+              exit 0
+            fi
+            echo "Upload attempt $attempt failed; retrying in $((attempt * 15))s…"
+            sleep $((attempt * 15))
+          done
+          echo "Upload failed after retries." && exit 1
 
       - name: Upload Android APK workflow artifact
         uses: actions/upload-artifact@v4
@@ -411,7 +428,16 @@ jobs:
       - name: Upload iOS IPA to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$RELEASE_TAG" "${{ steps.artifact.outputs.asset_path }}" --clobber --repo "$GITHUB_REPOSITORY"
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5; do
+            if gh release upload "$RELEASE_TAG" "${{ steps.artifact.outputs.asset_path }}" --clobber --repo "$GITHUB_REPOSITORY"; then
+              exit 0
+            fi
+            echo "Upload attempt $attempt failed; retrying in $((attempt * 15))s…"
+            sleep $((attempt * 15))
+          done
+          echo "Upload failed after retries." && exit 1
 
       - name: Remove obsolete simulator release asset
         env:
