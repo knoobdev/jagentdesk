@@ -37,6 +37,8 @@ const C = {
 } as const;
 const FONT_MONO = '"Geist Mono","SFMono-Regular",Menlo,monospace';
 const FONT_SANS = '"Geist",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
+const THREADS_PER_PAGE = 8;
+const POSTS_PER_PAGE = 10;
 
 const PHASES: { key: ForumTopicStatus; label: string }[] = [
   { key: "discussion", label: "Discussion" },
@@ -115,6 +117,12 @@ function upsertSummary(prev: ForumTopicSummary[], topic: StoredForumTopic): Foru
   return topic.status === "archived" ? rest : [toSummary(topic), ...rest];
 }
 function toSummary(topic: StoredForumTopic): ForumTopicSummary {
+  const taskStatusCounts: Record<string, number> = {};
+  const epicSet = new Set<string>();
+  for (const t of topic.tasks) {
+    taskStatusCounts[t.status] = (taskStatusCounts[t.status] ?? 0) + 1;
+    if (t.epic) epicSet.add(t.epic);
+  }
   return {
     id: topic.id,
     projectKey: topic.projectKey,
@@ -126,10 +134,23 @@ function toSummary(topic: StoredForumTopic): ForumTopicSummary {
     messageCount: topic.messages.length,
     taskCount: topic.tasks.length,
     doneTaskCount: topic.tasks.filter((t) => t.status === "done").length,
+    taskStatusCounts,
+    epics: [...epicSet],
   };
 }
 function quotedOf(m: ForumMessage, byId: Map<string, ForumMessage>): ForumMessage | null {
   return m.quotedMessageId ? (byId.get(m.quotedMessageId) ?? null) : null;
+}
+function epicSummaries(tasks: ForumTask[]): { name: string; done: number; total: number }[] {
+  const map = new Map<string, { name: string; done: number; total: number }>();
+  for (const t of tasks) {
+    if (!t.epic) continue;
+    const e = map.get(t.epic) ?? { name: t.epic, done: 0, total: 0 };
+    e.total += 1;
+    if (t.status === "done") e.done += 1;
+    map.set(t.epic, e);
+  }
+  return [...map.values()];
 }
 
 // ---- screen -----------------------------------------------------------------------------------
@@ -207,24 +228,26 @@ const HostTopics = memo(function HostTopics({
     () => [...topics].sort((a, b) => b.updatedAt_ms - a.updatedAt_ms),
     [topics],
   );
+  const [page, setPage] = useState(0);
   if (sorted.length === 0) return null;
+
+  const pageCount = Math.max(1, Math.ceil(sorted.length / THREADS_PER_PAGE));
+  const clamped = Math.min(page, pageCount - 1);
+  const pageItems = sorted.slice(clamped * THREADS_PER_PAGE, (clamped + 1) * THREADS_PER_PAGE);
 
   return (
     <View style={styles.board}>
-      <View style={styles.statsRow}>
-        <Stat n={sorted.length} label="threads" />
-        <Stat n={sorted.filter((t) => t.status !== "done").length} label="active" />
-        <Stat n={sorted.filter((t) => t.status === "done").length} label="shipped" />
-      </View>
+      <Dashboard summaries={sorted} />
       <View style={styles.threadList}>
         <View style={styles.threadListHead}>
           <Text style={styles.colTopic}>THREAD</Text>
           <Text style={styles.colPhase}>PHASE</Text>
         </View>
-        {sorted.map((topic) => (
+        {pageItems.map((topic) => (
           <TopicRow key={topic.id} serverId={serverId} topic={topic} onOpen={onOpen} />
         ))}
       </View>
+      {pageCount > 1 ? <Pager page={clamped} pageCount={pageCount} onPage={setPage} /> : null}
     </View>
   );
 });
@@ -235,6 +258,137 @@ const Stat = memo(function Stat({ n, label }: { n: number; label: string }): Rea
       <Text style={styles.statN}>{n}</Text>
       <Text style={styles.statLabel}>{label}</Text>
     </View>
+  );
+});
+
+// ---- dashboard (overview + charts) ------------------------------------------------------------
+const STATUS_META: { key: ForumTaskStatus; label: string }[] = [
+  { key: "backlog", label: "Backlog" },
+  { key: "todo", label: "To do" },
+  { key: "in_progress", label: "In progress" },
+  { key: "review", label: "Review" },
+  { key: "blocked", label: "Blocked" },
+  { key: "done", label: "Done" },
+];
+
+const Dashboard = memo(function Dashboard({
+  summaries,
+}: {
+  summaries: ForumTopicSummary[];
+}): ReactElement {
+  const agg = useMemo(() => {
+    const status: Record<string, number> = {};
+    const epics = new Set<string>();
+    let posts = 0;
+    let tasks = 0;
+    for (const s of summaries) {
+      posts += s.messageCount;
+      tasks += s.taskCount;
+      for (const e of s.epics) epics.add(e);
+      for (const [k, v] of Object.entries(s.taskStatusCounts)) status[k] = (status[k] ?? 0) + v;
+    }
+    const active = summaries.filter((s) => s.status !== "done" && s.status !== "archived").length;
+    const done = summaries.filter((s) => s.status === "done").length;
+    return { status, epics: [...epics], posts, tasks, active, done };
+  }, [summaries]);
+  const maxStatus = Math.max(1, ...STATUS_META.map((s) => agg.status[s.key] ?? 0));
+
+  return (
+    <View style={styles.dashboard}>
+      <Text style={styles.dashLabel}>OVERVIEW</Text>
+      <View style={styles.statsRow}>
+        <Stat n={summaries.length} label="threads" />
+        <Stat n={agg.active} label="active" />
+        <Stat n={agg.done} label="shipped" />
+        <Stat n={agg.posts} label="posts" />
+        <Stat n={agg.tasks} label="tasks" />
+      </View>
+      <View style={styles.chartCard}>
+        <Text style={styles.chartTitle}>TASKS BY STATUS</Text>
+        {STATUS_META.map((s) => {
+          const n = agg.status[s.key] ?? 0;
+          return (
+            <View key={s.key} style={styles.barRow}>
+              <Text style={styles.barLabel}>{s.label}</Text>
+              <View style={styles.barTrack}>
+                <View
+                  style={[
+                    styles.barFill,
+                    { width: `${(n / maxStatus) * 100}%`, backgroundColor: taskDotColor(s.key) },
+                  ]}
+                />
+              </View>
+              <Text style={styles.barN}>{n}</Text>
+            </View>
+          );
+        })}
+      </View>
+      {agg.epics.length > 0 ? (
+        <View style={styles.epicChips}>
+          <Text style={styles.chartTitle}>EPICS</Text>
+          <View style={styles.epicChipRow}>
+            {agg.epics.map((e) => (
+              <View key={e} style={styles.epicChip}>
+                <Text style={styles.epicChipText}>{e}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      ) : null}
+    </View>
+  );
+});
+
+const Pager = memo(function Pager({
+  page,
+  pageCount,
+  onPage,
+}: {
+  page: number;
+  pageCount: number;
+  onPage: (p: number) => void;
+}): ReactElement {
+  const prev = useCallback(() => onPage(Math.max(0, page - 1)), [onPage, page]);
+  const next = useCallback(
+    () => onPage(Math.min(pageCount - 1, page + 1)),
+    [onPage, page, pageCount],
+  );
+  return (
+    <View style={styles.pager}>
+      <Pressable onPress={prev} disabled={page === 0} style={styles.pagerBtn}>
+        <Text style={[styles.pagerTxt, page === 0 ? styles.pagerTxtOff : null]}>‹ Prev</Text>
+      </Pressable>
+      <Text style={styles.pagerInfo}>
+        {page + 1} / {pageCount}
+      </Text>
+      <Pressable onPress={next} disabled={page >= pageCount - 1} style={styles.pagerBtn}>
+        <Text style={[styles.pagerTxt, page >= pageCount - 1 ? styles.pagerTxtOff : null]}>
+          Next ›
+        </Text>
+      </Pressable>
+    </View>
+  );
+});
+
+const ThreadPosts = memo(function ThreadPosts({
+  messages,
+  byId,
+}: {
+  messages: ForumMessage[];
+  byId: Map<string, ForumMessage>;
+}): ReactElement {
+  const [page, setPage] = useState(0);
+  const pageCount = Math.max(1, Math.ceil(messages.length / POSTS_PER_PAGE));
+  const clamped = Math.min(page, pageCount - 1);
+  const start = clamped * POSTS_PER_PAGE;
+  const items = messages.slice(start, start + POSTS_PER_PAGE);
+  return (
+    <>
+      {items.map((m, i) => (
+        <PostCard key={m.id} message={m} index={start + i + 1} quoted={quotedOf(m, byId)} />
+      ))}
+      {pageCount > 1 ? <Pager page={clamped} pageCount={pageCount} onPage={setPage} /> : null}
+    </>
   );
 });
 
@@ -337,9 +491,7 @@ const TopicThread = memo(function TopicThread({
           <PhaseBar status={topic.status} />
           <TabBar tab={tab} onTab={setTab} boardCount={topic.tasks.length} />
           {tab === "thread" ? (
-            topic.messages.map((m, i) => (
-              <PostCard key={m.id} message={m} index={i + 1} quoted={quotedOf(m, byId)} />
-            ))
+            <ThreadPosts messages={topic.messages} byId={byId} />
           ) : (
             <KanbanBoard tasks={topic.tasks} />
           )}
@@ -460,38 +612,59 @@ const KanbanBoard = memo(function KanbanBoard({ tasks }: { tasks: ForumTask[] })
       </Text>
     );
   }
+  const epics = epicSummaries(tasks);
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.kanban}>
-      <View style={styles.kanbanRow}>
-        {KANBAN.map((col) => {
-          const colTasks = tasks.filter((t) => t.status === col.status);
-          return (
-            <View key={col.status} style={styles.column}>
-              <Text style={styles.columnHead}>
-                {col.label.toUpperCase()} · {colTasks.length}
-              </Text>
-              {colTasks.map((task) => (
-                <View key={task.id} style={styles.kanbanCard}>
-                  <View
-                    style={[styles.cardStripe, { backgroundColor: taskDotColor(task.status) }]}
-                  />
-                  <Text style={styles.kanbanCardTitle} numberOfLines={3}>
-                    {task.parentTaskId ? "↳ " : ""}
-                    {task.title}
-                  </Text>
-                  <Text style={styles.kanbanCardMeta}>
-                    {task.estimate !== "unknown" ? task.estimate.toUpperCase() : "—"}
-                    {task.assigneeAgentId
-                      ? ` · ${task.assigneeAgentId.slice(0, 8)}`
-                      : " · unassigned"}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          );
-        })}
-      </View>
-    </ScrollView>
+    <View style={styles.boardWrap}>
+      {epics.length > 0 ? (
+        <View style={styles.epicStrip}>
+          <Text style={styles.chartTitle}>EPICS</Text>
+          <View style={styles.epicChipRow}>
+            {epics.map((e) => (
+              <View key={e.name} style={styles.epicChip}>
+                <Text style={styles.epicChipText}>{e.name}</Text>
+                <Text style={styles.epicChipCount}>
+                  {e.done}/{e.total}
+                </Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      ) : null}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.kanban}>
+        <View style={styles.kanbanRow}>
+          {KANBAN.map((col) => {
+            const colTasks = tasks.filter((t) => t.status === col.status);
+            return (
+              <View key={col.status} style={styles.column}>
+                <Text style={styles.columnHead}>
+                  {col.label.toUpperCase()} · {colTasks.length}
+                </Text>
+                {colTasks.map((task) => (
+                  <View key={task.id} style={styles.kanbanCard}>
+                    <View
+                      style={[styles.cardStripe, { backgroundColor: taskDotColor(task.status) }]}
+                    />
+                    {task.epic ? (
+                      <Text style={styles.cardEpic}>{task.epic.toUpperCase()}</Text>
+                    ) : null}
+                    <Text style={styles.kanbanCardTitle} numberOfLines={3}>
+                      {task.parentTaskId ? "↳ " : ""}
+                      {task.title}
+                    </Text>
+                    <Text style={styles.kanbanCardMeta}>
+                      {task.estimate !== "unknown" ? task.estimate.toUpperCase() : "—"}
+                      {task.assigneeAgentId
+                        ? ` · ${task.assigneeAgentId.slice(0, 8)}`
+                        : " · unassigned"}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            );
+          })}
+        </View>
+      </ScrollView>
+    </View>
   );
 });
 
@@ -711,4 +884,58 @@ const styles = StyleSheet.create((_theme) => ({
   cardStripe: { position: "absolute", left: 0, top: 0, bottom: 0, width: 3 },
   kanbanCardTitle: { color: C.text, fontSize: 13, fontFamily: FONT_SANS, lineHeight: 18 },
   kanbanCardMeta: { fontFamily: FONT_MONO, letterSpacing: 0.5, color: C.muted, fontSize: 11 },
+  cardEpic: {
+    fontFamily: FONT_MONO,
+    letterSpacing: 0.5,
+    color: C.amber,
+    fontSize: 9,
+    fontWeight: "700",
+  },
+  // dashboard
+  dashboard: {
+    gap: 12,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 10,
+    backgroundColor: C.surface,
+    padding: 16,
+  },
+  dashLabel: { fontFamily: FONT_MONO, letterSpacing: 0.5, color: C.muted, fontSize: 11 },
+  chartCard: { gap: 8 },
+  chartTitle: { fontFamily: FONT_MONO, letterSpacing: 0.5, color: C.muted, fontSize: 11 },
+  barRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  barLabel: { width: 92, color: C.soft, fontSize: 12, fontFamily: FONT_SANS },
+  barTrack: { flex: 1, height: 8, backgroundColor: C.cardAlt, borderRadius: 4, overflow: "hidden" },
+  barFill: { height: 8, borderRadius: 4 },
+  barN: { width: 28, textAlign: "right", fontFamily: FONT_MONO, color: C.text, fontSize: 12 },
+  epicChips: { gap: 6 },
+  epicChipRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  epicChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    backgroundColor: C.card,
+  },
+  epicChipText: { fontFamily: FONT_MONO, letterSpacing: 0.5, color: C.amber, fontSize: 11 },
+  epicChipCount: { fontFamily: FONT_MONO, color: C.muted, fontSize: 11 },
+  // pager
+  pager: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 16,
+    paddingVertical: 10,
+  },
+  pagerBtn: { paddingVertical: 6, paddingHorizontal: 10 },
+  pagerTxt: { fontFamily: FONT_MONO, color: C.text, fontSize: 12 },
+  pagerTxtOff: { color: C.faint },
+  pagerInfo: { fontFamily: FONT_MONO, color: C.muted, fontSize: 12 },
+  // board wrap + epic strip
+  boardWrap: { gap: 12 },
+  epicStrip: { gap: 6 },
 }));

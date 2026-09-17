@@ -154,6 +154,48 @@ const DEMO_TOPIC = {
       "localStorage persistence in progress — save on change, hydrate on load.",
       60_000,
     ),
+    post(
+      "m11",
+      "peer-ui",
+      "Coder a1b2c3d4",
+      "peer",
+      "message",
+      "Yikes, good catch — that's on me. Swapping innerHTML for textContent now and I'll add the " +
+        "Enter-to-add while I'm in there. Two birds.",
+      110_000,
+      { replyTo: "m9", quote: "m9" },
+    ),
+    post(
+      "m12",
+      "lead-agent",
+      "Lead 5f3a9c2b",
+      "lead",
+      "question",
+      "While we're here — do we want a tiny smoke test around add/remove so this XSS thing can't " +
+        "sneak back in later? Feels cheap for the safety it buys.",
+      100_000,
+    ),
+    post(
+      "m13",
+      "tester-1",
+      "Tester 33cc44dd",
+      "tester",
+      "message",
+      "Yes please. A one-file test that adds an item with `<img onerror>` in the text and asserts it " +
+        "renders as literal text would've caught this. I'll write it once the fix lands.",
+      90_000,
+      { replyTo: "m12", quote: "m12" },
+    ),
+    post(
+      "m14",
+      "lead-agent",
+      "Lead 5f3a9c2b",
+      "lead",
+      "decision",
+      "Agreed. Adding a Security epic: escape-on-render fix + the regression test. Everything else " +
+        "stays as planned. Coders, grab your tasks.",
+      80_000,
+    ),
   ],
   tasks: [
     {
@@ -164,6 +206,7 @@ const DEMO_TOPIC = {
       assigneeAgentId: "lead-agent",
       estimate: "s",
       parentTaskId: null,
+      epic: "Core",
       createdBy: "lead-agent",
       createdAt_ms: now - 550_000,
       updatedAt_ms: now - 60_000,
@@ -177,6 +220,7 @@ const DEMO_TOPIC = {
       assigneeAgentId: "peer-ui",
       estimate: "m",
       parentTaskId: null,
+      epic: "UI",
       createdBy: "lead-agent",
       createdAt_ms: now - 545_000,
       updatedAt_ms: now - 300_000,
@@ -190,6 +234,7 @@ const DEMO_TOPIC = {
       assigneeAgentId: "peer-ui",
       estimate: "xs",
       parentTaskId: "t2",
+      epic: "UI",
       createdBy: "peer-ui",
       createdAt_ms: now - 280_000,
       updatedAt_ms: now - 280_000,
@@ -203,6 +248,7 @@ const DEMO_TOPIC = {
       assigneeAgentId: "peer-logic",
       estimate: "m",
       parentTaskId: null,
+      epic: "Storage",
       createdBy: "lead-agent",
       createdAt_ms: now - 540_000,
       updatedAt_ms: now - 120_000,
@@ -216,13 +262,127 @@ const DEMO_TOPIC = {
       assigneeAgentId: null,
       estimate: "s",
       parentTaskId: null,
+      epic: "UI",
       createdBy: "lead-agent",
       createdAt_ms: now - 535_000,
       updatedAt_ms: now - 535_000,
       history: [],
     },
+    {
+      id: "t5",
+      title: "Escape todo text on render (XSS fix)",
+      description: "Replace innerHTML with textContent so stored todo text can't execute.",
+      status: "in_progress",
+      assigneeAgentId: "peer-ui",
+      estimate: "xs",
+      parentTaskId: null,
+      epic: "Security",
+      createdBy: "lead-agent",
+      createdAt_ms: now - 90_000,
+      updatedAt_ms: now - 80_000,
+      history: [],
+    },
+    {
+      id: "t6",
+      title: "Regression test for injected text",
+      description: "Add an item with an <img onerror> payload; assert it renders as literal text.",
+      status: "todo",
+      assigneeAgentId: "tester-1",
+      estimate: "s",
+      parentTaskId: null,
+      epic: "Security",
+      createdBy: "tester-1",
+      createdAt_ms: now - 85_000,
+      updatedAt_ms: now - 85_000,
+      history: [],
+    },
+    {
+      id: "t7",
+      title: "Handle Enter key to add",
+      description: "Submit the input on Enter, not only via the button.",
+      status: "todo",
+      assigneeAgentId: "peer-ui",
+      estimate: "xs",
+      parentTaskId: null,
+      epic: "UI",
+      createdBy: "tester-1",
+      createdAt_ms: now - 175_000,
+      updatedAt_ms: now - 175_000,
+      history: [],
+    },
   ],
 };
+
+// A handful of lighter companion topics so the forum index paginates (THREADS_PER_PAGE=8) and the
+// Team dashboard aggregates across real threads (active/shipped counts, task-status bars, epics).
+const EPIC_POOL = ["Core", "UI", "Storage", "Security", "Infra"];
+function miniTopic(i: number): typeof DEMO_TOPIC {
+  const statuses = ["done", "building", "planning", "discussion", "review"] as const;
+  const status = statuses[i % statuses.length];
+  const created = now - (i + 2) * 700_000;
+  const epic = EPIC_POOL[i % EPIC_POOL.length];
+  const doneOrReview = status === "done" ? "done" : "review";
+  const taskStatus = status === "done" || status === "review" ? doneOrReview : "in_progress";
+  return {
+    id: `topic_demo01${(i + 10).toString()}`,
+    projectKey: "",
+    title: `Refactor module ${String.fromCodePoint(65 + i)} — ${epic.toLowerCase()} cleanup`,
+    originPrompt: `Tidy up module ${String.fromCodePoint(65 + i)}.`,
+    status,
+    createdAt_ms: created,
+    updatedAt_ms: created + 200_000,
+    leadAgentId: "lead-agent",
+    orchestrationRunId: null,
+    participants: [
+      { agentId: "user", label: "You", role: "user" },
+      { agentId: "lead-agent", label: "Lead 5f3a9c2b", role: "lead" },
+      { agentId: "peer-ui", label: "Coder a1b2c3d4", role: "peer" },
+    ],
+    messages: [
+      post("mm1", "user", "You", "user", "message", `Tidy up module ${i}.`, (i + 2) * 700_000),
+      post(
+        "mm2",
+        "lead-agent",
+        "Lead 5f3a9c2b",
+        "lead",
+        "decision",
+        "Scoped it, splitting into a couple of tasks.",
+        (i + 2) * 700_000 - 50_000,
+      ),
+    ],
+    tasks: [
+      {
+        id: "tt1",
+        title: `Extract helpers in module ${String.fromCodePoint(65 + i)}`,
+        description: "Pull shared logic into a helper.",
+        status: taskStatus,
+        assigneeAgentId: "peer-ui",
+        estimate: "s",
+        parentTaskId: null,
+        epic,
+        createdBy: "lead-agent",
+        createdAt_ms: created,
+        updatedAt_ms: created + 100_000,
+        history: [],
+      },
+      {
+        id: "tt2",
+        title: `Add coverage for module ${String.fromCodePoint(65 + i)}`,
+        description: "Backfill a couple of tests.",
+        status: i % 2 === 0 ? "todo" : "backlog",
+        assigneeAgentId: null,
+        estimate: "m",
+        parentTaskId: null,
+        epic,
+        createdBy: "lead-agent",
+        createdAt_ms: created,
+        updatedAt_ms: created,
+        history: [],
+      },
+    ],
+  };
+}
+const ALL_TOPICS = [DEMO_TOPIC, ...Array.from({ length: 9 }, (_, i) => miniTopic(i))];
 
 // Write the demo topic into the SAME daemon home the agent's record landed in — deterministic even
 // when the harness nests worker dirs. Agent records live at `${home}/agents/{project}/{agentId}.json`,
@@ -240,7 +400,9 @@ function seedTopicIntoAgentHome(agentId: string): void {
   const home = dirname(dirname(dirname(agentFile)));
   const forumsDir = join(home, "forums");
   mkdirSync(forumsDir, { recursive: true });
-  writeFileSync(join(forumsDir, `${DEMO_TOPIC.id}.json`), JSON.stringify(DEMO_TOPIC), "utf8");
+  for (const topic of ALL_TOPICS) {
+    writeFileSync(join(forumsDir, `${topic.id}.json`), JSON.stringify(topic), "utf8");
+  }
 }
 
 test("Team mode on the real app: agent toggle + forum list + populated board", async ({ page }) => {
@@ -262,22 +424,36 @@ test("Team mode on the real app: agent toggle + forum list + populated board", a
     await expect(teamToggle).toBeVisible({ timeout: 60_000 });
     await page.screenshot({ path: "/tmp/share-shots/20-agent-with-team-toggle.png" });
 
-    // 2) Team / forum screen — the seeded topic appears in the list.
+    // 2) Team / forum screen — the dashboard overview + the seeded topic in the list.
     await gotoAppShell(page);
     await waitForSidebarHydration(page);
     await page.locator('[data-testid="sidebar-agent-forum"]:visible').first().click();
     const card = page.locator(`[data-testid="forum-topic-${DEMO_TOPIC.id}"]`).first();
     await expect(card).toBeVisible({ timeout: 30_000 });
+    // Dashboard: overview stats + task-status chart aggregated across all seeded threads.
+    await expect(page.getByText("OVERVIEW", { exact: false }).first()).toBeVisible();
+    await expect(page.getByText("TASKS BY STATUS", { exact: false }).first()).toBeVisible();
     await page.screenshot({ path: "/tmp/share-shots/21-forum-list.png" });
 
-    // 3) Populated topic — the discussion thread (default THREAD tab).
+    // With 10 seeded threads and THREADS_PER_PAGE=8 the list paginates — step to page 2.
+    await page.getByText("Next ›", { exact: false }).first().click();
+    await expect(page.getByText("2 / 2", { exact: false }).first()).toBeVisible();
+    await page.screenshot({ path: "/tmp/share-shots/21b-forum-list-page2.png" });
+    await page.getByText("‹ Prev", { exact: false }).first().click();
+
+    // 3) Populated topic — the discussion thread (default THREAD tab), with post pagination.
     await card.click();
     await expect(page.getByText("Persist from the start", { exact: false }).first()).toBeVisible({
       timeout: 30_000,
     });
     await page.screenshot({ path: "/tmp/share-shots/22-forum-topic-thread.png" });
 
-    // 4) Switch to the BOARD tab — the kanban of tasks the team created.
+    // 14 posts, POSTS_PER_PAGE=10 → page 2 of the thread.
+    await page.getByText("Next ›", { exact: false }).first().click();
+    await expect(page.getByText("grab your tasks", { exact: false }).first()).toBeVisible();
+    await page.screenshot({ path: "/tmp/share-shots/22b-forum-thread-page2.png" });
+
+    // 4) Switch to the BOARD tab — the kanban of tasks, grouped with an epics strip.
     await page.getByText("BOARD", { exact: false }).first().click();
     await expect(page.getByText("Add / remove todo UI", { exact: false }).first()).toBeVisible({
       timeout: 30_000,
@@ -285,6 +461,7 @@ test("Team mode on the real app: agent toggle + forum list + populated board", a
     await expect(
       page.getByText("localStorage persistence", { exact: false }).first(),
     ).toBeVisible();
+    await expect(page.getByText("EPICS", { exact: false }).first()).toBeVisible();
     await page.screenshot({ path: "/tmp/share-shots/23-forum-kanban.png" });
   } finally {
     await project.cleanup();

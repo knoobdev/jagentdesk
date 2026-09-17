@@ -82,6 +82,8 @@ export const ForumTaskSchema = z.object({
   estimate: ForumEstimateSchema.default("unknown"),
   // Subtasks are tasks with a parent. One level is enough for V1; deeper nesting is a flat parent ref.
   parentTaskId: z.string().nullable().default(null),
+  // Optional epic label to group related tasks on the board (e.g. "Auth", "UI", "Payments").
+  epic: z.string().nullable().default(null),
   createdBy: z.string(),
   createdAt_ms: z.number().int(),
   updatedAt_ms: z.number().int(),
@@ -151,5 +153,10 @@ export const ForumTopicSummarySchema = z.object({
   messageCount: z.number().int(),
   taskCount: z.number().int(),
   doneTaskCount: z.number().int(),
+  // Task counts per status (keyed by ForumTaskStatus), for the Team dashboard charts — kept on the
+  // summary so the overview needs no full-topic fetch.
+  taskStatusCounts: z.record(z.string(), z.number().int()).default({}),
+  // Distinct epic labels used in this topic, for the epics breakdown.
+  epics: z.array(z.string()).default([]),
 });
 export type ForumTopicSummary = z.infer<typeof ForumTopicSummarySchema>;

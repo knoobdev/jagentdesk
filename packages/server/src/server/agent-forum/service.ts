@@ -41,6 +41,12 @@ function deriveTopicStatus(current: ForumTopicStatus, tasks: ForumTask[]): Forum
 }
 
 function toSummary(topic: StoredForumTopic): ForumTopicSummary {
+  const taskStatusCounts: Record<string, number> = {};
+  const epicSet = new Set<string>();
+  for (const t of topic.tasks) {
+    taskStatusCounts[t.status] = (taskStatusCounts[t.status] ?? 0) + 1;
+    if (t.epic) epicSet.add(t.epic);
+  }
   return {
     id: topic.id,
     projectKey: topic.projectKey,
@@ -52,6 +58,8 @@ function toSummary(topic: StoredForumTopic): ForumTopicSummary {
     messageCount: topic.messages.length,
     taskCount: topic.tasks.length,
     doneTaskCount: topic.tasks.filter((t) => t.status === "done").length,
+    taskStatusCounts,
+    epics: [...epicSet],
   };
 }
 
@@ -163,6 +171,7 @@ export class AgentForumService {
       parentTaskId?: string | null;
       assigneeAgentId?: string | null;
       estimate?: ForumEstimate;
+      epic?: string | null;
     },
   ): Promise<StoredForumTopic | null> {
     return this.mutate(topicId, (topic) => {
@@ -175,6 +184,7 @@ export class AgentForumService {
         assigneeAgentId: input.assigneeAgentId ?? null,
         estimate: input.estimate ?? "unknown",
         parentTaskId: input.parentTaskId ?? null,
+        epic: input.epic ?? null,
         createdBy: input.createdBy,
         createdAt_ms: now,
         updatedAt_ms: now,

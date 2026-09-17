@@ -103,20 +103,23 @@ export function registerForumTools(params: {
     {
       title: "Create a forum task",
       description:
-        "Create a task on the topic's board. Optionally set an estimate and claim it for yourself. Break large work into several tasks; use forum.create_subtask for subtasks of a task.",
+        'Create a task on the topic\'s board. Group related tasks under an `epic` label (e.g. "Auth", ' +
+        '"UI"). Optionally set an estimate and claim it. Use forum.create_subtask for subtasks.',
       inputSchema: {
         topicId: z.string(),
         title: z.string().trim().min(1).max(200),
         description: z.string().max(8000).optional(),
         estimate: ESTIMATE.optional(),
+        epic: z.string().trim().max(60).optional(),
         claim: z.boolean().optional(),
       },
     },
-    async ({ topicId, title, description, estimate, claim }) => {
+    async ({ topicId, title, description, estimate, epic, claim }) => {
       const topic = await forum.createTask(topicId, {
         title,
         description,
         estimate,
+        epic,
         createdBy: callerAgentId,
         assigneeAgentId: claim ? callerAgentId : null,
       });
@@ -135,14 +138,16 @@ export function registerForumTools(params: {
         title: z.string().trim().min(1).max(200),
         description: z.string().max(8000).optional(),
         estimate: ESTIMATE.optional(),
+        epic: z.string().trim().max(60).optional(),
         claim: z.boolean().optional(),
       },
     },
-    async ({ topicId, parentTaskId, title, description, estimate, claim }) => {
+    async ({ topicId, parentTaskId, title, description, estimate, epic, claim }) => {
       const topic = await forum.createTask(topicId, {
         title,
         description,
         estimate,
+        epic,
         parentTaskId,
         createdBy: callerAgentId,
         assigneeAgentId: claim ? callerAgentId : null,
