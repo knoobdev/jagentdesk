@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
-import { Pressable, ScrollView, Text, View, type TextStyle, type ViewStyle } from "react-native";
-import { useIsFocused } from "@react-navigation/native";
+import { Pressable, ScrollView, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
+import { useIsFocused } from "@react-navigation/native";
 import { MenuHeader } from "@/components/headers/menu-header";
 import { useHosts, useHostRuntimeClient } from "@/runtime/host-runtime";
 import type {
@@ -14,11 +14,30 @@ import type {
   StoredForumTopic,
 } from "@jagentdesk/protocol/messages";
 
-// Team mode / Agent Forum (docs/plans/completed/agent-forum.md), styled as a classic discussion
-// forum (vBulletin-ish): a board of topic threads → each topic is a thread of posts where the agents
-// research, debate, plan and review like a human team; the resulting tasks are a secondary board.
+// Team mode / Agent Forum, styled as a classic vBulletin discussion forum with a dark "geist" palette:
+// a board of thread rows → each topic is a thread of postbit posts (avatar/username column + post
+// body, with quote + reply-to), where the agents research, debate, plan and review like a human team.
 
-// ---- phases -----------------------------------------------------------------------------------
+// ---- palette (dark, geist-style) --------------------------------------------------------------
+const C = {
+  bg: "#000000",
+  surface: "#0e0e0e",
+  card: "#161616",
+  cardAlt: "#1a1a1a",
+  border: "#2e2e2e",
+  borderSoft: "#242424",
+  faint: "#454545",
+  muted: "#878787",
+  soft: "#a1a1a1",
+  text: "#ededed",
+  green: "#2d852d",
+  greenDim: "#236b23",
+  amber: "#f5a623",
+  red: "#c83030",
+} as const;
+const FONT_MONO = '"Geist Mono","SFMono-Regular",Menlo,monospace';
+const FONT_SANS = '"Geist",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
+
 const PHASES: { key: ForumTopicStatus; label: string }[] = [
   { key: "discussion", label: "Discussion" },
   { key: "planning", label: "Planning" },
@@ -36,7 +55,6 @@ function phaseIndex(status: ForumTopicStatus): number {
   return i < 0 ? 0 : i;
 }
 
-// ---- roles ------------------------------------------------------------------------------------
 const ROLE_LABEL: Record<ForumRole, string> = {
   supervisor: "Supervisor",
   lead: "Lead",
@@ -48,11 +66,35 @@ const ROLE_LABEL: Record<ForumRole, string> = {
   user: "You",
   system: "System",
 };
-function roleAvatarStyle(role: ForumRole): ViewStyle {
-  return styles[`avatar_${role}`] ?? styles.avatar_peer;
+function roleColor(role: ForumRole): string {
+  switch (role) {
+    case "lead":
+      return C.green;
+    case "ba":
+    case "reviewer":
+      return C.amber;
+    case "tester":
+      return C.greenDim;
+    case "pentester":
+      return C.red;
+    case "supervisor":
+      return C.text;
+    default:
+      return C.faint;
+  }
 }
-function roleBadgeStyle(role: ForumRole): TextStyle {
-  return styles[`badge_${role}`] ?? styles.badge_peer;
+function phaseChipColor(status: ForumTopicStatus): string {
+  if (status === "done") return C.green;
+  if (status === "review") return C.amber;
+  if (status === "archived") return C.faint;
+  return C.soft;
+}
+function taskDotColor(status: ForumTaskStatus): string {
+  if (status === "done") return C.green;
+  if (status === "review") return C.amber;
+  if (status === "blocked") return C.red;
+  if (status === "in_progress") return C.soft;
+  return C.faint;
 }
 function initial(label: string): string {
   const c = label.trim()[0];
@@ -85,6 +127,9 @@ function toSummary(topic: StoredForumTopic): ForumTopicSummary {
     taskCount: topic.tasks.length,
     doneTaskCount: topic.tasks.filter((t) => t.status === "done").length,
   };
+}
+function quotedOf(m: ForumMessage, byId: Map<string, ForumMessage>): ForumMessage | null {
+  return m.quotedMessageId ? (byId.get(m.quotedMessageId) ?? null) : null;
 }
 
 // ---- screen -----------------------------------------------------------------------------------
@@ -164,15 +209,18 @@ const HostTopics = memo(function HostTopics({
   );
   if (sorted.length === 0) return null;
 
-  const doneTopics = sorted.filter((t) => t.status === "done").length;
   return (
     <View style={styles.board}>
       <View style={styles.statsRow}>
         <Stat n={sorted.length} label="threads" />
         <Stat n={sorted.filter((t) => t.status !== "done").length} label="active" />
-        <Stat n={doneTopics} label="done" />
+        <Stat n={sorted.filter((t) => t.status === "done").length} label="shipped" />
       </View>
       <View style={styles.threadList}>
+        <View style={styles.threadListHead}>
+          <Text style={styles.colTopic}>THREAD</Text>
+          <Text style={styles.colPhase}>PHASE</Text>
+        </View>
         {sorted.map((topic) => (
           <TopicRow key={topic.id} serverId={serverId} topic={topic} onOpen={onOpen} />
         ))}
@@ -205,8 +253,8 @@ const TopicRow = memo(function TopicRow({
   );
   return (
     <Pressable style={styles.threadRow} onPress={onPress} testID={`forum-topic-${topic.id}`}>
-      <View style={[styles.avatar, styles.avatar_lead]}>
-        <Text style={styles.avatarText}>{initial(topic.title)}</Text>
+      <View style={styles.avatarSm}>
+        <Text style={styles.avatarSmText}>{initial(topic.title)}</Text>
       </View>
       <View style={styles.threadMain}>
         <Text style={styles.threadTitle} numberOfLines={1}>
@@ -223,14 +271,15 @@ const TopicRow = memo(function TopicRow({
 });
 
 const PhaseChip = memo(function PhaseChip({ status }: { status: ForumTopicStatus }): ReactElement {
+  const color = phaseChipColor(status);
   return (
-    <View style={[styles.chip, styles[`chip_${status}`] ?? styles.chip_discussion]}>
-      <Text style={styles.chipText}>{phaseLabel(status)}</Text>
+    <View style={[styles.chip, { borderColor: color }]}>
+      <Text style={[styles.chipText, { color }]}>{phaseLabel(status).toUpperCase()}</Text>
     </View>
   );
 });
 
-// ---- topic thread -----------------------------------------------------------------------------
+// ---- topic thread (vBulletin postbit) ---------------------------------------------------------
 const TopicThread = memo(function TopicThread({
   serverId,
   topicId,
@@ -263,11 +312,17 @@ const TopicThread = memo(function TopicThread({
     };
   }, [client, topicId]);
 
+  const byId = useMemo(() => {
+    const map = new Map<string, ForumMessage>();
+    for (const m of topic?.messages ?? []) map.set(m.id, m);
+    return map;
+  }, [topic]);
+
   return (
     <View style={styles.threadRoot}>
       <View style={styles.threadBar}>
         <Pressable onPress={onBack} testID="forum-back">
-          <Text style={styles.backText}>‹ Forum</Text>
+          <Text style={styles.backText}>‹ Forum index</Text>
         </Pressable>
         {topic ? <PhaseChip status={topic.status} /> : null}
       </View>
@@ -279,8 +334,8 @@ const TopicThread = memo(function TopicThread({
         <ScrollView contentContainerStyle={styles.threadBody}>
           <Text style={styles.postTitle}>{topic.title}</Text>
           <PhaseBar status={topic.status} />
-          {topic.messages.map((m) => (
-            <PostCard key={m.id} message={m} />
+          {topic.messages.map((m, i) => (
+            <PostCard key={m.id} message={m} index={i + 1} quoted={quotedOf(m, byId)} />
           ))}
           {topic.tasks.length > 0 ? <TasksSection tasks={topic.tasks} /> : null}
         </ScrollView>
@@ -296,30 +351,57 @@ const PhaseBar = memo(function PhaseBar({ status }: { status: ForumTopicStatus }
       {PHASES.map((p, i) => (
         <View key={p.key} style={styles.phaseStep}>
           <View style={[styles.phaseDot, i <= active ? styles.phaseDotOn : null]} />
-          <Text style={[styles.phaseText, i <= active ? styles.phaseTextOn : null]}>{p.label}</Text>
+          <Text style={[styles.phaseText, i <= active ? styles.phaseTextOn : null]}>
+            {p.label.toUpperCase()}
+          </Text>
         </View>
       ))}
     </View>
   );
 });
 
-const PostCard = memo(function PostCard({ message }: { message: ForumMessage }): ReactElement {
+const PostCard = memo(function PostCard({
+  message,
+  index,
+  quoted,
+}: {
+  message: ForumMessage;
+  index: number;
+  quoted: ForumMessage | null;
+}): ReactElement {
   const role = message.role;
+  const color = roleColor(role);
   return (
     <View style={styles.post}>
-      <View style={styles.postSide}>
-        <View style={[styles.avatar, roleAvatarStyle(role)]}>
+      <View style={styles.postbit}>
+        <View style={[styles.avatar, { backgroundColor: color }]}>
           <Text style={styles.avatarText}>{initial(message.authorLabel)}</Text>
         </View>
+        <Text style={styles.postUser} numberOfLines={1}>
+          {message.authorLabel}
+        </Text>
+        <Text style={[styles.postRank, { color }]}>{ROLE_LABEL[role]}</Text>
       </View>
       <View style={styles.postMain}>
         <View style={styles.postHead}>
-          <Text style={styles.postAuthor}>{message.authorLabel}</Text>
-          <Text style={[styles.roleBadge, roleBadgeStyle(role)]}>{ROLE_LABEL[role]}</Text>
-          {message.kind !== "message" ? <Text style={styles.kindBadge}>{message.kind}</Text> : null}
+          <Text style={styles.postNo}>#{index}</Text>
+          {message.kind !== "message" ? <Text style={styles.kindTag}>{message.kind}</Text> : null}
           <Text style={styles.postTime}>{timeAgo(message.createdAt_ms)}</Text>
         </View>
-        <Text style={styles.postBody}>{message.text}</Text>
+        <View style={styles.postContent}>
+          {message.replyToId ? (
+            <Text style={styles.replyTo}>↳ in reply to an earlier post</Text>
+          ) : null}
+          {quoted ? (
+            <View style={styles.quote}>
+              <Text style={styles.quoteHead}>{quoted.authorLabel} wrote:</Text>
+              <Text style={styles.quoteBody} numberOfLines={3}>
+                {quoted.text}
+              </Text>
+            </View>
+          ) : null}
+          <Text style={styles.postBody}>{message.text}</Text>
+        </View>
       </View>
     </View>
   );
@@ -328,7 +410,7 @@ const PostCard = memo(function PostCard({ message }: { message: ForumMessage }):
 const TasksSection = memo(function TasksSection({ tasks }: { tasks: ForumTask[] }): ReactElement {
   return (
     <View style={styles.tasksSection}>
-      <Text style={styles.sectionLabel}>Decisions &amp; tasks</Text>
+      <Text style={styles.sectionLabel}>DECISIONS &amp; TASKS</Text>
       {tasks.map((task) => (
         <View key={task.id} style={styles.taskRow}>
           <TaskDot status={task.status} />
@@ -348,202 +430,190 @@ const TasksSection = memo(function TasksSection({ tasks }: { tasks: ForumTask[] 
 });
 
 const TaskDot = memo(function TaskDot({ status }: { status: ForumTaskStatus }): ReactElement {
-  return <View style={[styles.taskDot, styles[`task_${status}`] ?? styles.task_backlog]} />;
+  return <View style={[styles.taskDot, { backgroundColor: taskDotColor(status) }]} />;
 });
 
-const styles = StyleSheet.create((theme) => ({
-  container: { flex: 1, backgroundColor: theme.colors.surface0 },
-  boardBody: { padding: theme.spacing[4], gap: theme.spacing[4] },
-  tagline: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm, lineHeight: 20 },
-  emptyWrap: { flex: 1, alignItems: "center", justifyContent: "center", padding: theme.spacing[8] },
-  emptyText: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm },
-  board: { gap: theme.spacing[3] },
-  statsRow: { flexDirection: "row", gap: theme.spacing[6] },
+// ---- styles -----------------------------------------------------------------------------------
+
+// Forum uses a fixed dark palette (independent of the app light/dark theme); the theme arg is unused.
+const styles = StyleSheet.create((_theme) => ({
+  container: { flex: 1, backgroundColor: C.bg },
+  boardBody: { padding: 20, gap: 20, maxWidth: 900, width: "100%", alignSelf: "center" },
+  tagline: { color: C.muted, fontSize: 13, lineHeight: 20, fontFamily: FONT_SANS },
+  emptyWrap: { flex: 1, alignItems: "center", justifyContent: "center", padding: 48 },
+  emptyText: { color: C.muted, fontSize: 13, fontFamily: FONT_SANS },
+  board: { gap: 16 },
+  statsRow: { flexDirection: "row", gap: 32 },
   stat: { alignItems: "flex-start" },
-  statN: {
-    color: theme.colors.foreground,
-    fontSize: theme.fontSize.xl,
-    fontWeight: theme.fontWeight.bold,
-  },
+  statN: { color: C.text, fontSize: 26, fontFamily: FONT_MONO, fontWeight: "600" },
   statLabel: {
-    color: theme.colors.foregroundMuted,
-    fontSize: theme.fontSize.xs,
-    textTransform: "uppercase",
+    fontFamily: FONT_MONO,
     letterSpacing: 0.5,
+    color: C.muted,
+    fontSize: 11,
+    textTransform: "uppercase",
   },
   threadList: {
-    borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.border,
-    borderRadius: theme.borderRadius.lg,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 10,
     overflow: "hidden",
-    backgroundColor: theme.colors.surface1,
+    backgroundColor: C.surface,
   },
+  threadListHead: {
+    flexDirection: "row",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: C.card,
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
+  },
+  colTopic: { fontFamily: FONT_MONO, letterSpacing: 0.5, flex: 1, color: C.muted, fontSize: 11 },
+  colPhase: { fontFamily: FONT_MONO, letterSpacing: 0.5, color: C.muted, fontSize: 11 },
   threadRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: theme.spacing[3],
-    paddingVertical: theme.spacing[3],
-    paddingHorizontal: theme.spacing[4],
-    borderTopWidth: theme.borderWidth[1],
-    borderTopColor: theme.colors.border,
+    gap: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderTopWidth: 1,
+    borderTopColor: C.borderSoft,
   },
-  threadMain: { flex: 1, gap: 2 },
-  threadTitle: {
-    color: theme.colors.foreground,
-    fontSize: theme.fontSize.base,
-    fontWeight: theme.fontWeight.semibold,
-  },
-  threadMeta: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.xs },
-  // avatars
-  avatar: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+  avatarSm: {
     alignItems: "center",
     justifyContent: "center",
+    width: 30,
+    height: 30,
+    borderRadius: 6,
+    backgroundColor: C.green,
   },
-  avatarText: {
-    color: theme.colors.accentForeground,
-    fontSize: theme.fontSize.sm,
-    fontWeight: theme.fontWeight.bold,
-  },
-  avatar_supervisor: { backgroundColor: theme.colors.foreground },
-  avatar_lead: { backgroundColor: theme.colors.primary },
-  avatar_peer: { backgroundColor: theme.colors.accent },
-  avatar_ba: { backgroundColor: theme.colors.statusWarning },
-  avatar_tester: { backgroundColor: theme.colors.statusSuccess },
-  avatar_pentester: { backgroundColor: theme.colors.statusDanger },
-  avatar_reviewer: { backgroundColor: theme.colors.accent },
-  avatar_user: { backgroundColor: theme.colors.surface3 },
-  avatar_system: { backgroundColor: theme.colors.surface3 },
-  // chips (phase)
-  chip: {
-    borderRadius: theme.borderRadius.full,
-    paddingHorizontal: theme.spacing[2],
-    paddingVertical: 2,
-    backgroundColor: theme.colors.surface2,
-  },
-  chipText: {
-    color: theme.colors.foreground,
-    fontSize: theme.fontSize.xs,
-    fontWeight: theme.fontWeight.medium,
-  },
-  chip_discussion: { backgroundColor: theme.colors.surface2 },
-  chip_planning: { backgroundColor: theme.colors.surface3 },
-  chip_building: { backgroundColor: theme.colors.primary },
-  chip_review: { backgroundColor: theme.colors.statusWarning },
-  chip_done: { backgroundColor: theme.colors.statusSuccess },
-  chip_archived: { backgroundColor: theme.colors.surface2 },
-  // thread detail
-  threadRoot: { flex: 1 },
+  avatarSmText: { color: C.bg, fontSize: 13, fontWeight: "700", fontFamily: FONT_MONO },
+  threadMain: { flex: 1, gap: 3 },
+  threadTitle: { color: C.text, fontSize: 15, fontWeight: "600", fontFamily: FONT_SANS },
+  threadMeta: { fontFamily: FONT_MONO, letterSpacing: 0.5, color: C.muted, fontSize: 12 },
+  chip: { borderRadius: 4, paddingHorizontal: 8, paddingVertical: 2, borderWidth: 1 },
+  chipText: { fontFamily: FONT_MONO, letterSpacing: 0.5, fontSize: 10, fontWeight: "700" },
+  threadRoot: { flex: 1, backgroundColor: C.bg },
   threadBar: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: theme.spacing[4],
-    paddingVertical: theme.spacing[3],
-    borderBottomWidth: theme.borderWidth[1],
-    borderBottomColor: theme.colors.border,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
   },
-  backText: {
-    color: theme.colors.primary,
-    fontSize: theme.fontSize.sm,
-    fontWeight: theme.fontWeight.medium,
-  },
-  threadBody: {
-    padding: theme.spacing[4],
-    gap: theme.spacing[3],
-    maxWidth: 860,
-    width: "100%",
-    alignSelf: "center",
-  },
-  postTitle: {
-    color: theme.colors.foreground,
-    fontSize: theme.fontSize.xl,
-    fontWeight: theme.fontWeight.bold,
-  },
-  // phase bar
-  phaseBar: { flexDirection: "row", gap: theme.spacing[3], marginBottom: theme.spacing[2] },
-  phaseStep: { flexDirection: "row", alignItems: "center", gap: theme.spacing[1] },
-  phaseDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: theme.colors.surface3 },
-  phaseDotOn: { backgroundColor: theme.colors.primary },
-  phaseText: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.xs },
-  phaseTextOn: { color: theme.colors.foreground, fontWeight: theme.fontWeight.medium },
-  // posts
+  backText: { color: C.green, fontSize: 13, fontFamily: FONT_MONO },
+  threadBody: { padding: 20, gap: 12, maxWidth: 900, width: "100%", alignSelf: "center" },
+  postTitle: { color: C.text, fontSize: 22, fontWeight: "700", fontFamily: FONT_SANS },
+  phaseBar: { flexDirection: "row", flexWrap: "wrap", gap: 14, marginBottom: 6 },
+  phaseStep: { flexDirection: "row", alignItems: "center", gap: 6 },
+  phaseDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: C.faint },
+  phaseDotOn: { backgroundColor: C.green },
+  phaseText: { fontFamily: FONT_MONO, letterSpacing: 0.5, color: C.muted, fontSize: 10 },
+  phaseTextOn: { color: C.text },
   post: {
     flexDirection: "row",
-    gap: theme.spacing[3],
-    backgroundColor: theme.colors.surface1,
-    borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.border,
-    borderRadius: theme.borderRadius.lg,
-    padding: theme.spacing[3],
-  },
-  postSide: { alignItems: "center" },
-  postMain: { flex: 1, gap: theme.spacing[1] },
-  postHead: { flexDirection: "row", alignItems: "center", gap: theme.spacing[2], flexWrap: "wrap" },
-  postAuthor: {
-    color: theme.colors.foreground,
-    fontSize: theme.fontSize.sm,
-    fontWeight: theme.fontWeight.semibold,
-  },
-  roleBadge: {
-    fontSize: 10,
-    fontWeight: theme.fontWeight.bold,
-    color: theme.colors.accentForeground,
-    paddingHorizontal: theme.spacing[2],
-    paddingVertical: 1,
-    borderRadius: theme.borderRadius.full,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 8,
+    backgroundColor: C.card,
     overflow: "hidden",
-    textTransform: "uppercase",
   },
-  badge_supervisor: { backgroundColor: theme.colors.foreground },
-  badge_lead: { backgroundColor: theme.colors.primary },
-  badge_peer: { backgroundColor: theme.colors.accent },
-  badge_ba: { backgroundColor: theme.colors.statusWarning },
-  badge_tester: { backgroundColor: theme.colors.statusSuccess },
-  badge_pentester: { backgroundColor: theme.colors.statusDanger },
-  badge_reviewer: { backgroundColor: theme.colors.accent },
-  badge_user: { backgroundColor: theme.colors.surface3, color: theme.colors.foreground },
-  badge_system: { backgroundColor: theme.colors.surface3, color: theme.colors.foreground },
-  kindBadge: {
+  postbit: {
+    width: 116,
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 14,
+    paddingHorizontal: 8,
+    backgroundColor: C.cardAlt,
+    borderRightWidth: 1,
+    borderRightColor: C.border,
+  },
+  avatar: {
+    alignItems: "center",
+    justifyContent: "center",
+    width: 44,
+    height: 44,
+    borderRadius: 6,
+  },
+  avatarText: { color: C.bg, fontSize: 18, fontWeight: "700", fontFamily: FONT_MONO },
+  postUser: {
+    color: C.text,
+    fontSize: 12,
+    fontWeight: "600",
+    textAlign: "center",
+    fontFamily: FONT_SANS,
+  },
+  postRank: {
+    fontFamily: FONT_MONO,
+    letterSpacing: 0.5,
     fontSize: 10,
-    color: theme.colors.foregroundMuted,
-    borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.border,
-    borderRadius: theme.borderRadius.full,
-    paddingHorizontal: theme.spacing[2],
-    overflow: "hidden",
     textTransform: "uppercase",
+    fontWeight: "700",
+  },
+  postMain: { flex: 1 },
+  postHead: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: C.borderSoft,
+  },
+  postNo: { fontFamily: FONT_MONO, letterSpacing: 0.5, color: C.muted, fontSize: 11 },
+  kindTag: {
+    fontFamily: FONT_MONO,
+    letterSpacing: 0.5,
+    fontSize: 10,
+    color: C.soft,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    textTransform: "uppercase",
+    overflow: "hidden",
   },
   postTime: {
-    color: theme.colors.foregroundMuted,
-    fontSize: theme.fontSize.xs,
+    fontFamily: FONT_MONO,
+    letterSpacing: 0.5,
+    color: C.muted,
+    fontSize: 11,
     marginLeft: "auto",
   },
-  postBody: { color: theme.colors.foreground, fontSize: theme.fontSize.sm, lineHeight: 20 },
-  // tasks
+  postContent: { padding: 14, gap: 8 },
+  replyTo: { fontFamily: FONT_MONO, letterSpacing: 0.5, color: C.muted, fontSize: 11 },
+  quote: {
+    borderLeftWidth: 2,
+    borderLeftColor: C.green,
+    backgroundColor: C.surface,
+    borderRadius: 4,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    gap: 4,
+  },
+  quoteHead: { fontFamily: FONT_MONO, letterSpacing: 0.5, color: C.soft, fontSize: 11 },
+  quoteBody: {
+    color: C.muted,
+    fontSize: 13,
+    fontStyle: "italic",
+    fontFamily: FONT_SANS,
+    lineHeight: 18,
+  },
+  postBody: { color: C.text, fontSize: 14, lineHeight: 21, fontFamily: FONT_SANS },
   tasksSection: {
-    marginTop: theme.spacing[3],
-    gap: theme.spacing[2],
-    borderTopWidth: theme.borderWidth[1],
-    borderTopColor: theme.colors.border,
-    paddingTop: theme.spacing[3],
+    marginTop: 10,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 8,
+    backgroundColor: C.card,
+    padding: 14,
   },
-  sectionLabel: {
-    color: theme.colors.foregroundMuted,
-    fontSize: theme.fontSize.xs,
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
-  taskRow: { flexDirection: "row", alignItems: "center", gap: theme.spacing[2] },
+  sectionLabel: { fontFamily: FONT_MONO, letterSpacing: 0.5, color: C.muted, fontSize: 11 },
+  taskRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   taskDot: { width: 8, height: 8, borderRadius: 4 },
-  task_backlog: { backgroundColor: theme.colors.surface3 },
-  task_todo: { backgroundColor: theme.colors.surface3 },
-  task_in_progress: { backgroundColor: theme.colors.primary },
-  task_review: { backgroundColor: theme.colors.statusWarning },
-  task_blocked: { backgroundColor: theme.colors.statusDanger },
-  task_done: { backgroundColor: theme.colors.statusSuccess },
-  taskTitle: { flex: 1, color: theme.colors.foreground, fontSize: theme.fontSize.sm },
-  taskMeta: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.xs },
+  taskTitle: { flex: 1, color: C.text, fontSize: 13, fontFamily: FONT_SANS },
+  taskMeta: { fontFamily: FONT_MONO, letterSpacing: 0.5, color: C.muted, fontSize: 11 },
 }));

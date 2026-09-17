@@ -110,6 +110,8 @@ export class AgentForumService {
           text: input.prompt,
           createdAt_ms: now,
           taskRefs: [],
+          replyToId: null,
+          quotedMessageId: null,
         },
       ],
       tasks: [],
@@ -129,6 +131,8 @@ export class AgentForumService {
       kind?: ForumMessageKind;
       text: string;
       taskRefs?: string[];
+      replyToId?: string | null;
+      quotedMessageId?: string | null;
     },
   ): Promise<StoredForumTopic | null> {
     return this.mutate(topicId, (topic) => {
@@ -141,6 +145,8 @@ export class AgentForumService {
         text: message.text,
         createdAt_ms: Date.now(),
         taskRefs: message.taskRefs ?? [],
+        replyToId: message.replyToId ?? null,
+        quotedMessageId: message.quotedMessageId ?? null,
       };
       topic.messages.push(entry);
       ensureParticipant(topic, message.authorAgentId, message.authorLabel, message.role);
@@ -265,6 +271,8 @@ export class AgentForumService {
         text: input.findings,
         createdAt_ms: now,
         taskRefs: [input.taskId],
+        replyToId: null,
+        quotedMessageId: null,
       });
       ensureParticipant(topic, input.reviewerAgentId, input.reviewerLabel, input.role);
       const to: ForumTaskStatus = input.verdict === "approve" ? "done" : "in_progress";

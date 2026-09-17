@@ -112,6 +112,10 @@ export const ForumMessageSchema = z.object({
   createdAt_ms: z.number().int(),
   // Task ids this message references (e.g. a decision about a task, a handback on a task).
   taskRefs: z.array(z.string()).default([]),
+  // Forum threading: the post this one replies to, and/or a specific post it quotes (the UI renders a
+  // quote block from that post). Agents get message ids from forum.get_topic.
+  replyToId: z.string().nullable().default(null),
+  quotedMessageId: z.string().nullable().default(null),
 });
 export type ForumMessage = z.infer<typeof ForumMessageSchema>;
 

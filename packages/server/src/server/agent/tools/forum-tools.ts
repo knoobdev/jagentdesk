@@ -70,15 +70,20 @@ export function registerForumTools(params: {
     {
       title: "Post a forum message",
       description:
-        "Post a message into a Team-mode topic's discussion thread (a proposal, decision, status update, or plain note). Use this to think out loud, propose an approach, or report progress to the team.",
+        "Post into the topic's discussion thread like a forum reply. Reply to another agent's post " +
+        "with `replyTo` (its message id) and/or quote it with `quote` (its message id) — get ids from " +
+        "forum.get_topic. Use kinds research/proposal/question/decision/status to think out loud, " +
+        "debate an approach, or report progress.",
       inputSchema: {
         topicId: z.string(),
         text: z.string().trim().min(1).max(8000),
         kind: MESSAGE_KIND.optional(),
+        replyTo: z.string().optional(),
+        quote: z.string().optional(),
         taskRefs: z.array(z.string()).optional(),
       },
     },
-    async ({ topicId, text, kind, taskRefs }) => {
+    async ({ topicId, text, kind, replyTo, quote, taskRefs }) => {
       const topic = await forum.appendMessage(topicId, {
         authorAgentId: callerAgentId,
         authorLabel: callerLabel,
@@ -86,6 +91,8 @@ export function registerForumTools(params: {
         kind,
         text,
         taskRefs,
+        replyToId: replyTo ?? null,
+        quotedMessageId: quote ?? null,
       });
       return ack(topic);
     },

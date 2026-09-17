@@ -24,6 +24,7 @@ const post = (
   kind: string,
   text: string,
   ago: number,
+  refs?: { replyTo?: string; quote?: string },
 ) => ({
   id,
   authorAgentId: agentId,
@@ -33,6 +34,8 @@ const post = (
   text,
   createdAt_ms: now - ago,
   taskRefs: [],
+  replyToId: refs?.replyTo ?? null,
+  quotedMessageId: refs?.quote ?? null,
 });
 
 const DEMO_TOPIC = {
@@ -92,6 +95,7 @@ const DEMO_TOPIC = {
       "Persist from the start — it's cheap. Plan: 1) scaffold, 2) add/remove UI, 3) localStorage, " +
         "4) polish. I'll pull in two coders (UI + storage), then BA/Tester/Pentester review each task.",
       520_000,
+      { quote: "m3" },
     ),
     post(
       "m5",
@@ -139,6 +143,7 @@ const DEMO_TOPIC = {
       "review",
       "Pentester: todo text is injected via innerHTML → stored XSS. Use textContent. Blocking until fixed.",
       120_000,
+      { replyTo: "m6" },
     ),
     post(
       "m10",
