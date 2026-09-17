@@ -425,6 +425,16 @@ export class AgentForumService {
         downvoters: [],
       });
       ensureParticipant(topic, input.reviewerAgentId, input.reviewerLabel, input.role);
+      // The review also lands as a comment on the task itself, so a task's detail always carries its
+      // review history (not just the thread).
+      task.comments.push({
+        id: generateForumId("cmt"),
+        authorAgentId: input.reviewerAgentId,
+        authorLabel: input.reviewerLabel,
+        role: input.role,
+        text: `**${input.verdict === "approve" ? "✅ Approved" : "🔴 Changes requested"}** — ${input.findings}`,
+        createdAt_ms: now,
+      });
       const to: ForumTaskStatus = input.verdict === "approve" ? "done" : "in_progress";
       if (task.status !== to) {
         task.updatedAt_ms = now;

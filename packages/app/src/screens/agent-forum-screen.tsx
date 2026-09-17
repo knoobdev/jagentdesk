@@ -130,6 +130,18 @@ const STATUS_LABEL: Record<ForumTaskStatus, string> = {
 function statusLabel(status: ForumTaskStatus): string {
   return STATUS_LABEL[status] ?? status;
 }
+// Turn the t-shirt estimate into a readable hours figure (what humans actually track).
+const ESTIMATE_HOURS: Record<string, string> = {
+  unknown: "—",
+  xs: "~1h",
+  s: "~2h",
+  m: "~4h",
+  l: "~1d (8h)",
+  xl: "~2d (16h)",
+};
+function estimateLabel(estimate: string): string {
+  return ESTIMATE_HOURS[estimate] ?? "—";
+}
 function myVote(message: ForumMessage): "up" | "down" | null {
   if (message.upvoters.includes("user")) return "up";
   if (message.downvoters.includes("user")) return "down";
@@ -203,6 +215,21 @@ function epicSummaries(tasks: ForumTask[]): { name: string; done: number; total:
     map.set(t.epic, e);
   }
   return [...map.values()];
+}
+
+// How many times a task was kicked back into work from review/done (a reviewer's request_changes, or
+// a done task re-opened), plus the reason recorded on each — surfaced so the board explains churn.
+function reopenInfo(task: ForumTask): {
+  count: number;
+  reasons: { at_ms: number; note: string }[];
+} {
+  const evs = task.history.filter(
+    (h) => h.to === "in_progress" && (h.from === "review" || h.from === "done"),
+  );
+  return {
+    count: evs.length,
+    reasons: evs.map((e) => ({ at_ms: e.at_ms, note: e.note ?? "changes requested" })),
+  };
 }
 
 // ---- screen -----------------------------------------------------------------------------------
@@ -1200,16 +1227,22 @@ const KanbanCard = memo(function KanbanCard({
   const press = useCallback(() => onOpen(task.id), [onOpen, task.id]);
   const who =
     task.assigneeLabel ?? (task.assigneeAgentId ? task.assigneeAgentId.slice(0, 8) : null);
+  const reopen = reopenInfo(task);
   return (
     <Pressable style={styles.kanbanCard} onPress={press} testID={`forum-task-${task.id}`}>
       <View style={[styles.cardStripe, { backgroundColor: taskDotColor(task.status) }]} />
-      {task.epic ? <Text style={styles.cardEpic}>{task.epic.toUpperCase()}</Text> : null}
+      <View style={styles.cardTagRow}>
+        {task.epic ? <Text style={styles.cardEpic}>{task.epic.toUpperCase()}</Text> : null}
+        {reopen.count > 0 ? (
+          <Text style={styles.reopenBadge}>↩ RE-OPENED ×{reopen.count}</Text>
+        ) : null}
+      </View>
       <Text style={styles.kanbanCardTitle} numberOfLines={3}>
         {task.parentTaskId ? "↳ " : ""}
         {task.title}
       </Text>
       <Text style={styles.kanbanCardMeta}>
-        {task.estimate !== "unknown" ? task.estimate.toUpperCase() : "—"}
+        {estimateLabel(task.estimate)}
         {who ? ` · ${who}` : " · unassigned"}
         {task.comments.length > 0 ? ` · 💬 ${task.comments.length}` : ""}
       </Text>
@@ -1282,6 +1315,7 @@ const TaskDetailModal = memo(function TaskDetailModal({
   if (!task) return null;
   const who = task.assigneeLabel ?? (task.assigneeAgentId ? task.assigneeAgentId.slice(0, 8) : "—");
   const reporter = task.createdByLabel ?? task.createdBy.slice(0, 8);
+  const reopen = reopenInfo(task);
   return (
     <Modal transparent animationType="fade" visible onRequestClose={onClose}>
       <Pressable style={styles.modalBackdrop} onPress={onClose}>
@@ -1306,11 +1340,21 @@ const TaskDetailModal = memo(function TaskDetailModal({
               <TaskMeta label="Epic" value={task.epic ?? "—"} />
               <TaskMeta label="Assignee" value={who} />
               <TaskMeta label="Reporter" value={reporter} />
-              <TaskMeta
-                label="Estimate"
-                value={task.estimate !== "unknown" ? task.estimate.toUpperCase() : "—"}
-              />
+              <TaskMeta label="Estimate" value={estimateLabel(task.estimate)} />
+              {reopen.count > 0 ? (
+                <TaskMeta label="Re-opened" value={`×${reopen.count}`} color={C.amber} />
+              ) : null}
             </View>
+            {reopen.count > 0 ? (
+              <>
+                <Text style={styles.modalSection}>RE-OPENS · {reopen.count}</Text>
+                {reopen.reasons.map((r) => (
+                  <Text key={r.at_ms} style={styles.reopenReason}>
+                    ↩ {r.note} · {timeAgo(r.at_ms)}
+                  </Text>
+                ))}
+              </>
+            ) : null}
             <Text style={styles.modalSection}>DESCRIPTION</Text>
             {task.description.trim() ? (
               <ForumMarkdown text={task.description} />
@@ -1596,6 +1640,7 @@ const styles = StyleSheet.create((_theme) => ({
   cardStripe: { position: "absolute", left: 0, top: 0, bottom: 0, width: 3 },
   kanbanCardTitle: { color: C.text, fontSize: 13, fontFamily: FONT_SANS, lineHeight: 18 },
   kanbanCardMeta: { fontFamily: FONT_MONO, letterSpacing: 0.5, color: C.muted, fontSize: 11 },
+  cardTagRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 },
   cardEpic: {
     fontFamily: FONT_MONO,
     letterSpacing: 0.5,
@@ -1603,6 +1648,14 @@ const styles = StyleSheet.create((_theme) => ({
     fontSize: 9,
     fontWeight: "700",
   },
+  reopenBadge: {
+    fontFamily: FONT_MONO,
+    letterSpacing: 0.5,
+    color: "#e04a3a",
+    fontSize: 9,
+    fontWeight: "700",
+  },
+  reopenReason: { color: C.soft, fontSize: 12, fontFamily: FONT_SANS, lineHeight: 18 },
   // dashboard
   dashboard: {
     gap: 12,
