@@ -10,7 +10,10 @@ import type {
 
 const TASK_STATUS = z.enum(["backlog", "todo", "in_progress", "review", "blocked", "done"]);
 const ESTIMATE = z.enum(["unknown", "xs", "s", "m", "l", "xl"]);
-const MESSAGE_KIND = z.enum(["message", "proposal", "decision", "handback", "status"]);
+const MESSAGE_KIND = z.enum(["message", "research", "proposal", "question", "decision", "status"]);
+const PHASE = z.enum(["discussion", "planning", "building", "review", "done"]);
+const REVIEW_ROLE = z.enum(["ba", "tester", "pentester", "reviewer"]);
+const VERDICT = z.enum(["approve", "request_changes"]);
 
 // Compact acknowledgement so a chatty team loop doesn't blow the context with full topic dumps every
 // call. Agents call forum.get_topic when they need the whole board.
@@ -195,6 +198,52 @@ export function registerForumTools(params: {
     },
     async ({ topicId, taskId, status }) => {
       const topic = await forum.setTaskStatus(topicId, taskId, status, callerAgentId);
+      return ack(topic);
+    },
+  );
+
+  registerTool(
+    "forum.set_phase",
+    {
+      title: "Advance the forum phase",
+      description:
+        "Lead-only: move the topic through its phases — discussion → planning → building → review → " +
+        "done. Stay in 'discussion' until the team has researched, debated and agreed an approach; " +
+        "move to 'planning' when you start creating tasks.",
+      inputSchema: { topicId: z.string(), phase: PHASE },
+    },
+    async ({ topicId, phase }) => {
+      const topic = await forum.setPhase(topicId, phase);
+      return ack(topic);
+    },
+  );
+
+  registerTool(
+    "forum.review_task",
+    {
+      title: "Review a task as BA / Tester / Pentester",
+      description:
+        "Record a role-based review of a coder's finished task and either approve it (→ done) or " +
+        "request changes (→ back to in_progress). Use role 'ba' for requirements/acceptance, " +
+        "'tester' for QA/behaviour, 'pentester' for security. Put concrete findings in `findings`.",
+      inputSchema: {
+        topicId: z.string(),
+        taskId: z.string(),
+        role: REVIEW_ROLE,
+        verdict: VERDICT,
+        findings: z.string().trim().min(1).max(8000),
+      },
+    },
+    async ({ topicId, taskId, role, verdict, findings }) => {
+      const reviewRoleTitle = role.charAt(0).toUpperCase() + role.slice(1);
+      const topic = await forum.reviewTask(topicId, {
+        taskId,
+        role,
+        reviewerAgentId: callerAgentId,
+        reviewerLabel: `${reviewRoleTitle} ${callerAgentId.slice(0, 8)}`,
+        verdict,
+        findings,
+      });
       return ack(topic);
     },
   );

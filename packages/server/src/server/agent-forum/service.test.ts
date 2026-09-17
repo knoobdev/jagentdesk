@@ -90,4 +90,44 @@ describe("AgentForumService", () => {
     expect(after!.participants.filter((p) => p.agentId === "lead1")).toHaveLength(1);
     expect(after!.messages.at(-1)!.text).toBe("update");
   });
+
+  test("phase transitions + role review (BA/Tester/Pentester)", async () => {
+    const topic = await service.createTopic({ prompt: "Build a thing" });
+    // Lead advances discussion → planning explicitly.
+    const planning = await service.setPhase(topic.id, "planning");
+    expect(planning!.status).toBe("planning");
+
+    const withTask = await service.createTask(topic.id, { title: "Do X", createdBy: "lead1" });
+    const taskId = withTask!.tasks[0]!.id;
+    await service.setTaskStatus(topic.id, taskId, "review", "coder1");
+
+    // Pentester requests changes → task returns to in_progress and the finding is posted.
+    const changed = await service.reviewTask(topic.id, {
+      taskId,
+      role: "pentester",
+      reviewerAgentId: "pen1",
+      reviewerLabel: "Pentester 1",
+      verdict: "request_changes",
+      findings: "XSS via innerHTML",
+    });
+    expect(changed!.tasks[0]!.status).toBe("in_progress");
+    const review = changed!.messages.at(-1)!;
+    expect(review.role).toBe("pentester");
+    expect(review.kind).toBe("review");
+    expect(review.text).toContain("XSS");
+    expect(changed!.participants.some((p) => p.role === "pentester")).toBe(true);
+
+    // Re-review + approve → task done → topic done.
+    await service.setTaskStatus(topic.id, taskId, "review", "coder1");
+    const approved = await service.reviewTask(topic.id, {
+      taskId,
+      role: "tester",
+      reviewerAgentId: "qa1",
+      reviewerLabel: "Tester 1",
+      verdict: "approve",
+      findings: "All green.",
+    });
+    expect(approved!.tasks[0]!.status).toBe("done");
+    expect(approved!.status).toBe("done");
+  });
 });

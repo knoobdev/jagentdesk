@@ -229,6 +229,62 @@ export class AgentForumService {
     });
   }
 
+  // The lead advances the topic phase (discussion → planning → building → review → done). Never
+  // overrides "archived"; task-driven derivation still applies afterwards on any task change.
+  async setPhase(topicId: string, phase: ForumTopicStatus): Promise<StoredForumTopic | null> {
+    return this.mutate(topicId, (topic) => {
+      if (topic.status !== "archived") topic.status = phase;
+      return topic;
+    });
+  }
+
+  // A reviewer (BA / Tester / Pentester) records a role-based review of a task and either approves it
+  // (→ done) or requests changes (→ in_progress), posting the findings into the thread (ADR-0019 /
+  // open-code-review role review).
+  async reviewTask(
+    topicId: string,
+    input: {
+      taskId: string;
+      role: ForumRole;
+      reviewerAgentId: string;
+      reviewerLabel: string;
+      verdict: "approve" | "request_changes";
+      findings: string;
+    },
+  ): Promise<StoredForumTopic | null> {
+    return this.mutate(topicId, (topic) => {
+      const task = topic.tasks.find((t) => t.id === input.taskId);
+      if (!task) throw new Error(`Task not found: ${input.taskId}`);
+      const now = Date.now();
+      topic.messages.push({
+        id: generateForumId("msg"),
+        authorAgentId: input.reviewerAgentId,
+        authorLabel: input.reviewerLabel,
+        role: input.role,
+        kind: "review",
+        text: input.findings,
+        createdAt_ms: now,
+        taskRefs: [input.taskId],
+      });
+      ensureParticipant(topic, input.reviewerAgentId, input.reviewerLabel, input.role);
+      const to: ForumTaskStatus = input.verdict === "approve" ? "done" : "in_progress";
+      if (task.status !== to) {
+        task.updatedAt_ms = now;
+        task.history.push({
+          at_ms: now,
+          actorAgentId: input.reviewerAgentId,
+          kind: "status",
+          from: task.status,
+          to,
+          note: `${input.role} ${input.verdict}`,
+        });
+        task.status = to;
+      }
+      topic.status = deriveTopicStatus(topic.status, topic.tasks);
+      return topic;
+    });
+  }
+
   // Shared task-mutation path: applies `apply`, records a history event if it changed, bumps
   // timestamps, and re-derives the topic status. `apply` returns the event to record, or null for a
   // no-op (idempotent).
