@@ -924,18 +924,19 @@ const PhaseBar = memo(function PhaseBar({ status }: { status: ForumTopicStatus }
 // Markdown for forum posts / task descriptions / comments: fenced + inline code, quotes, links,
 // images, bold — styled to the dark clawskills palette. (react-native-markdown-display over markdown-it.)
 const MD_STYLES = {
-  body: { color: C.text, fontFamily: FONT_SANS, fontSize: 13, lineHeight: 20 },
+  body: { color: C.text, fontFamily: FONT_SANS, fontSize: 13, lineHeight: 22 },
   paragraph: { marginTop: 0, marginBottom: 8 },
   strong: { color: C.text, fontWeight: "700" as const },
   em: { fontStyle: "italic" as const },
   link: { color: "#4a9df0", textDecorationLine: "underline" as const },
   code_inline: {
-    backgroundColor: "#23262b",
-    color: "#e6c07b",
+    // On-brand with the clawskills green accent: soft green mono on a faint green-tinted panel — reads
+    // clearly as code without the amber glare, and roomier line-height keeps chips from overlapping.
+    backgroundColor: "#16211a",
+    color: "#7ee787",
     fontFamily: FONT_MONO,
     fontSize: 12,
     borderRadius: 4,
-    // No border/vertical padding: bordered inline chips overlap across wrapped lines on RN-web.
     borderWidth: 0,
   },
   fence: {
@@ -991,12 +992,7 @@ const CodeBlock = memo(function CodeBlock({
   return (
     <View style={styles.codeBlock}>
       <View style={styles.codeBar}>
-        <View style={styles.codeDots}>
-          <View style={[styles.codeDot, { backgroundColor: "#e04a3a" }]} />
-          <View style={[styles.codeDot, { backgroundColor: C.amber }]} />
-          <View style={[styles.codeDot, { backgroundColor: C.green }]} />
-        </View>
-        {lang ? <Text style={styles.codeLang}>{lang}</Text> : null}
+        <Text style={styles.codeLang}>{lang || "code"}</Text>
       </View>
       <ScrollView
         horizontal
@@ -1678,9 +1674,9 @@ const styles = StyleSheet.create((_theme) => ({
   // code block (custom markdown renderer)
   codeBlock: {
     borderWidth: 1,
-    borderColor: C.border,
+    borderColor: C.borderSoft,
     borderRadius: 8,
-    backgroundColor: "#0a0a0a",
+    backgroundColor: "#0d0d0d",
     marginVertical: 6,
     overflow: "hidden",
   },
@@ -1688,23 +1684,20 @@ const styles = StyleSheet.create((_theme) => ({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: C.borderSoft,
-    backgroundColor: "#111111",
+    paddingHorizontal: 12,
+    paddingVertical: 3,
+    backgroundColor: "#0d0d0d",
   },
-  codeDots: { flexDirection: "row", gap: 5 },
-  codeDot: { width: 8, height: 8, borderRadius: 4, opacity: 0.7 },
   codeLang: {
     fontFamily: FONT_MONO,
-    letterSpacing: 0.5,
-    color: C.muted,
-    fontSize: 10,
+    letterSpacing: 1,
+    color: C.faint,
+    fontSize: 9,
+    fontWeight: "700",
     textTransform: "uppercase",
   },
-  codeScroll: { padding: 12 },
-  codeText: { fontFamily: FONT_MONO, color: "#d4d4d4", fontSize: 12, lineHeight: 18 },
+  codeScroll: { paddingHorizontal: 12, paddingBottom: 10, paddingTop: 2 },
+  codeText: { fontFamily: FONT_MONO, color: "#cfd6dd", fontSize: 12, lineHeight: 18 },
   // activity section (separate from discussion posts)
   activitySection: {
     gap: 2,
