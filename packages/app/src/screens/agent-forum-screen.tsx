@@ -1,10 +1,12 @@
 import { memo, useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
+import Svg, { Circle, G, Rect, Text as SvgText } from "react-native-svg";
 import { StyleSheet } from "react-native-unistyles";
 import { useIsFocused } from "@react-navigation/native";
 import { MenuHeader } from "@/components/headers/menu-header";
 import { useHosts, useHostRuntimeClient } from "@/runtime/host-runtime";
 import type {
+  ForumEpicStat,
   ForumMessage,
   ForumRole,
   ForumTask,
@@ -39,6 +41,17 @@ const FONT_MONO = '"Geist Mono","SFMono-Regular",Menlo,monospace';
 const FONT_SANS = '"Geist",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
 const THREADS_PER_PAGE = 8;
 const POSTS_PER_PAGE = 10;
+
+// Distinct, dark-safe status hues for the dashboard charts + kanban stripes (validated for CVD
+// separation; always shown alongside a text label, never color alone). One hue per status, fixed.
+const STATUS_COLOR: Record<ForumTaskStatus, string> = {
+  backlog: "#8a8f98",
+  todo: "#3f8fd6",
+  in_progress: "#17b8b0",
+  review: "#f5a623",
+  blocked: "#e05442",
+  done: "#35b45a",
+};
 
 const PHASES: { key: ForumTopicStatus; label: string }[] = [
   { key: "discussion", label: "Discussion" },
@@ -92,11 +105,7 @@ function phaseChipColor(status: ForumTopicStatus): string {
   return C.soft;
 }
 function taskDotColor(status: ForumTaskStatus): string {
-  if (status === "done") return C.green;
-  if (status === "review") return C.amber;
-  if (status === "blocked") return C.red;
-  if (status === "in_progress") return C.soft;
-  return C.faint;
+  return STATUS_COLOR[status] ?? C.faint;
 }
 function initial(label: string): string {
   const c = label.trim()[0];
@@ -118,10 +127,15 @@ function upsertSummary(prev: ForumTopicSummary[], topic: StoredForumTopic): Foru
 }
 function toSummary(topic: StoredForumTopic): ForumTopicSummary {
   const taskStatusCounts: Record<string, number> = {};
-  const epicSet = new Set<string>();
+  const epicMap = new Map<string, ForumEpicStat>();
   for (const t of topic.tasks) {
     taskStatusCounts[t.status] = (taskStatusCounts[t.status] ?? 0) + 1;
-    if (t.epic) epicSet.add(t.epic);
+    if (t.epic) {
+      const entry = epicMap.get(t.epic) ?? { name: t.epic, done: 0, total: 0 };
+      entry.total += 1;
+      if (t.status === "done") entry.done += 1;
+      epicMap.set(t.epic, entry);
+    }
   }
   return {
     id: topic.id,
@@ -135,7 +149,7 @@ function toSummary(topic: StoredForumTopic): ForumTopicSummary {
     taskCount: topic.tasks.length,
     doneTaskCount: topic.tasks.filter((t) => t.status === "done").length,
     taskStatusCounts,
-    epics: [...epicSet],
+    epics: [...epicMap.values()],
   };
 }
 function quotedOf(m: ForumMessage, byId: Map<string, ForumMessage>): ForumMessage | null {
@@ -271,6 +285,144 @@ const STATUS_META: { key: ForumTaskStatus; label: string }[] = [
   { key: "done", label: "Done" },
 ];
 
+const DONUT_SIZE = 168;
+const DONUT_STROKE = 22;
+
+// A real SVG donut of the task-status composition, drawn as stroked arcs via strokeDasharray with a
+// 2px surface gap between segments; the hero total sits in the hole. Legend lives beside it (identity
+// is never color-alone).
+const StatusDonut = memo(function StatusDonut({
+  segments,
+  total,
+}: {
+  segments: { key: ForumTaskStatus; label: string; value: number; color: string }[];
+  total: number;
+}): ReactElement {
+  const r = (DONUT_SIZE - DONUT_STROKE) / 2;
+  const circ = 2 * Math.PI * r;
+  const center = DONUT_SIZE / 2;
+  const gap = total > 1 ? 0.012 : 0; // fraction of the ring left as a spacer between arcs
+  let acc = 0;
+  const arcs = segments
+    .filter((s) => s.value > 0)
+    .map((s) => {
+      const frac = s.value / total;
+      const dash = Math.max(0, (frac - gap) * circ);
+      const arc = (
+        <Circle
+          key={s.key}
+          cx={center}
+          cy={center}
+          r={r}
+          fill="none"
+          stroke={s.color}
+          strokeWidth={DONUT_STROKE}
+          strokeDasharray={`${dash} ${circ - dash}`}
+          strokeDashoffset={-acc * circ}
+        />
+      );
+      acc += frac;
+      return arc;
+    });
+  return (
+    <Svg width={DONUT_SIZE} height={DONUT_SIZE}>
+      <G rotation={-90} origin={`${center}, ${center}`}>
+        <Circle
+          cx={center}
+          cy={center}
+          r={r}
+          fill="none"
+          stroke={C.cardAlt}
+          strokeWidth={DONUT_STROKE}
+        />
+        {total > 0 ? arcs : null}
+      </G>
+      <SvgText
+        x={center}
+        y={center + 2}
+        fill={C.text}
+        fontSize={34}
+        fontWeight="700"
+        fontFamily={FONT_MONO}
+        textAnchor="middle"
+      >
+        {total}
+      </SvgText>
+      <SvgText
+        x={center}
+        y={center + 22}
+        fill={C.muted}
+        fontSize={11}
+        fontFamily={FONT_MONO}
+        textAnchor="middle"
+      >
+        TASKS
+      </SvgText>
+    </Svg>
+  );
+});
+
+const EPIC_BAR_W = 260;
+const EPIC_ROW_H = 30;
+const EPIC_LABEL_W = 76;
+
+// A real SVG horizontal bar chart of tasks per epic: a muted track (total) with a green fill (done)
+// and a done/total tag — a progress-by-epic view, direct-labelled.
+const EpicBars = memo(function EpicBars({ epics }: { epics: ForumEpicStat[] }): ReactElement {
+  const max = Math.max(1, ...epics.map((e) => e.total));
+  const plotW = EPIC_BAR_W - EPIC_LABEL_W - 40;
+  const height = epics.length * EPIC_ROW_H + 4;
+  return (
+    <Svg width={EPIC_BAR_W} height={height}>
+      {epics.map((e, i) => {
+        const y = i * EPIC_ROW_H + 4;
+        const totalW = Math.max(3, (e.total / max) * plotW);
+        const doneW = (e.done / max) * plotW;
+        return (
+          <G key={e.name}>
+            <SvgText x={0} y={y + 14} fill={C.soft} fontSize={12} fontFamily={FONT_SANS}>
+              {e.name}
+            </SvgText>
+            <Rect x={EPIC_LABEL_W} y={y + 2} width={totalW} height={14} rx={4} fill={C.cardAlt} />
+            {doneW > 0 ? (
+              <Rect
+                x={EPIC_LABEL_W}
+                y={y + 2}
+                width={Math.max(4, doneW)}
+                height={14}
+                rx={4}
+                fill={STATUS_COLOR.done}
+              />
+            ) : null}
+            <SvgText
+              x={EPIC_LABEL_W + totalW + 8}
+              y={y + 14}
+              fill={C.muted}
+              fontSize={12}
+              fontFamily={FONT_MONO}
+            >
+              {e.done}/{e.total}
+            </SvgText>
+          </G>
+        );
+      })}
+    </Svg>
+  );
+});
+
+function aggregateEpics(summaries: ForumTopicSummary[]): ForumEpicStat[] {
+  const map = new Map<string, ForumEpicStat>();
+  for (const s of summaries) {
+    for (const e of s.epics) {
+      const entry = map.get(e.name) ?? { name: e.name, done: 0, total: 0 };
+      entry.done += e.done;
+      entry.total += e.total;
+      map.set(e.name, entry);
+    }
+  }
+  return [...map.values()].sort((a, b) => b.total - a.total);
+}
+
 const Dashboard = memo(function Dashboard({
   summaries,
 }: {
@@ -278,20 +430,23 @@ const Dashboard = memo(function Dashboard({
 }): ReactElement {
   const agg = useMemo(() => {
     const status: Record<string, number> = {};
-    const epics = new Set<string>();
     let posts = 0;
     let tasks = 0;
     for (const s of summaries) {
       posts += s.messageCount;
       tasks += s.taskCount;
-      for (const e of s.epics) epics.add(e);
       for (const [k, v] of Object.entries(s.taskStatusCounts)) status[k] = (status[k] ?? 0) + v;
     }
     const active = summaries.filter((s) => s.status !== "done" && s.status !== "archived").length;
     const done = summaries.filter((s) => s.status === "done").length;
-    return { status, epics: [...epics], posts, tasks, active, done };
+    return { status, epics: aggregateEpics(summaries), posts, tasks, active, done };
   }, [summaries]);
-  const maxStatus = Math.max(1, ...STATUS_META.map((s) => agg.status[s.key] ?? 0));
+  const segments = STATUS_META.map((s) => ({
+    key: s.key,
+    label: s.label,
+    value: agg.status[s.key] ?? 0,
+    color: STATUS_COLOR[s.key],
+  }));
 
   return (
     <View style={styles.dashboard}>
@@ -303,38 +458,31 @@ const Dashboard = memo(function Dashboard({
         <Stat n={agg.posts} label="posts" />
         <Stat n={agg.tasks} label="tasks" />
       </View>
-      <View style={styles.chartCard}>
-        <Text style={styles.chartTitle}>TASKS BY STATUS</Text>
-        {STATUS_META.map((s) => {
-          const n = agg.status[s.key] ?? 0;
-          return (
-            <View key={s.key} style={styles.barRow}>
-              <Text style={styles.barLabel}>{s.label}</Text>
-              <View style={styles.barTrack}>
-                <View
-                  style={[
-                    styles.barFill,
-                    { width: `${(n / maxStatus) * 100}%`, backgroundColor: taskDotColor(s.key) },
-                  ]}
-                />
-              </View>
-              <Text style={styles.barN}>{n}</Text>
+      <View style={styles.chartsRow}>
+        <View style={styles.chartCard}>
+          <Text style={styles.chartTitle}>TASKS BY STATUS</Text>
+          <View style={styles.donutRow}>
+            <StatusDonut segments={segments} total={agg.tasks} />
+            <View style={styles.legend}>
+              {segments
+                .filter((s) => s.value > 0)
+                .map((s) => (
+                  <View key={s.key} style={styles.legendRow}>
+                    <View style={[styles.legendDot, { backgroundColor: s.color }]} />
+                    <Text style={styles.legendLabel}>{s.label}</Text>
+                    <Text style={styles.legendN}>{s.value}</Text>
+                  </View>
+                ))}
             </View>
-          );
-        })}
-      </View>
-      {agg.epics.length > 0 ? (
-        <View style={styles.epicChips}>
-          <Text style={styles.chartTitle}>EPICS</Text>
-          <View style={styles.epicChipRow}>
-            {agg.epics.map((e) => (
-              <View key={e} style={styles.epicChip}>
-                <Text style={styles.epicChipText}>{e}</Text>
-              </View>
-            ))}
           </View>
         </View>
-      ) : null}
+        {agg.epics.length > 0 ? (
+          <View style={styles.chartCard}>
+            <Text style={styles.chartTitle}>TASKS BY EPIC</Text>
+            <EpicBars epics={agg.epics} />
+          </View>
+        ) : null}
+      </View>
     </View>
   );
 });
@@ -901,14 +1049,24 @@ const styles = StyleSheet.create((_theme) => ({
     padding: 16,
   },
   dashLabel: { fontFamily: FONT_MONO, letterSpacing: 0.5, color: C.muted, fontSize: 11 },
-  chartCard: { gap: 8 },
+  chartsRow: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
+  chartCard: {
+    gap: 12,
+    flexGrow: 1,
+    flexBasis: 300,
+    borderWidth: 1,
+    borderColor: C.borderSoft,
+    borderRadius: 10,
+    backgroundColor: C.card,
+    padding: 16,
+  },
   chartTitle: { fontFamily: FONT_MONO, letterSpacing: 0.5, color: C.muted, fontSize: 11 },
-  barRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-  barLabel: { width: 92, color: C.soft, fontSize: 12, fontFamily: FONT_SANS },
-  barTrack: { flex: 1, height: 8, backgroundColor: C.cardAlt, borderRadius: 4, overflow: "hidden" },
-  barFill: { height: 8, borderRadius: 4 },
-  barN: { width: 28, textAlign: "right", fontFamily: FONT_MONO, color: C.text, fontSize: 12 },
-  epicChips: { gap: 6 },
+  donutRow: { flexDirection: "row", alignItems: "center", gap: 20 },
+  legend: { flex: 1, gap: 7 },
+  legendRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  legendDot: { width: 10, height: 10, borderRadius: 3 },
+  legendLabel: { flex: 1, color: C.soft, fontSize: 12, fontFamily: FONT_SANS },
+  legendN: { fontFamily: FONT_MONO, color: C.text, fontSize: 12 },
   epicChipRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   epicChip: {
     flexDirection: "row",

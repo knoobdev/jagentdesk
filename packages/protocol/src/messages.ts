@@ -8360,6 +8360,7 @@ export type {
   ForumMessageKind,
   ForumMessage,
   StoredForumTopic,
+  ForumEpicStat,
   ForumTopicSummary,
 } from "./agent-forum/types.js";
 export type ForumCreateRequest = z.infer<typeof ForumCreateRequestSchema>;

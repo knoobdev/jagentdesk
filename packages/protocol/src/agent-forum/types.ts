@@ -141,6 +141,15 @@ export const StoredForumTopicSchema = z.object({
 });
 export type StoredForumTopic = z.infer<typeof StoredForumTopicSchema>;
 
+// Per-epic progress on a topic: the epic label plus how many of its tasks are done vs total. Kept on
+// the summary so the dashboard's "tasks by epic" chart needs no full-topic fetch.
+export const ForumEpicStatSchema = z.object({
+  name: z.string(),
+  done: z.number().int(),
+  total: z.number().int(),
+});
+export type ForumEpicStat = z.infer<typeof ForumEpicStatSchema>;
+
 // Compact list-view shape (omits messages/tasks arrays; carries counts) for the topic list.
 export const ForumTopicSummarySchema = z.object({
   id: z.string(),
@@ -156,7 +165,8 @@ export const ForumTopicSummarySchema = z.object({
   // Task counts per status (keyed by ForumTaskStatus), for the Team dashboard charts — kept on the
   // summary so the overview needs no full-topic fetch.
   taskStatusCounts: z.record(z.string(), z.number().int()).default({}),
-  // Distinct epic labels used in this topic, for the epics breakdown.
-  epics: z.array(z.string()).default([]),
+  // Per-epic progress (name + done/total task counts) used in this topic, for the epics breakdown
+  // chart on the dashboard. Kept on the summary so the overview needs no full-topic fetch.
+  epics: z.array(ForumEpicStatSchema).default([]),
 });
 export type ForumTopicSummary = z.infer<typeof ForumTopicSummarySchema>;

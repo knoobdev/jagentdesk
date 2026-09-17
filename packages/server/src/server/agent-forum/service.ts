@@ -42,10 +42,15 @@ function deriveTopicStatus(current: ForumTopicStatus, tasks: ForumTask[]): Forum
 
 function toSummary(topic: StoredForumTopic): ForumTopicSummary {
   const taskStatusCounts: Record<string, number> = {};
-  const epicSet = new Set<string>();
+  const epicMap = new Map<string, { name: string; done: number; total: number }>();
   for (const t of topic.tasks) {
     taskStatusCounts[t.status] = (taskStatusCounts[t.status] ?? 0) + 1;
-    if (t.epic) epicSet.add(t.epic);
+    if (t.epic) {
+      const entry = epicMap.get(t.epic) ?? { name: t.epic, done: 0, total: 0 };
+      entry.total += 1;
+      if (t.status === "done") entry.done += 1;
+      epicMap.set(t.epic, entry);
+    }
   }
   return {
     id: topic.id,
@@ -59,7 +64,7 @@ function toSummary(topic: StoredForumTopic): ForumTopicSummary {
     taskCount: topic.tasks.length,
     doneTaskCount: topic.tasks.filter((t) => t.status === "done").length,
     taskStatusCounts,
-    epics: [...epicSet],
+    epics: [...epicMap.values()],
   };
 }
 
