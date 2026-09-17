@@ -31,12 +31,13 @@ const ACTIVE_TASK_STATUSES: ReadonlySet<ForumTaskStatus> = new Set([
 
 function deriveTopicStatus(current: ForumTopicStatus, tasks: ForumTask[]): ForumTopicStatus {
   if (current === "archived") return "archived";
-  if (tasks.length === 0) return "planning";
+  // No tasks yet → the team is still discussing (unless the lead already advanced the phase).
+  if (tasks.length === 0) return current === "planning" ? "planning" : "discussion";
   if (tasks.every((t) => t.status === "done")) return "done";
   const anyActive = tasks.some((t) => ACTIVE_TASK_STATUSES.has(t.status));
   const anyReview = tasks.some((t) => t.status === "review");
   if (!anyActive && anyReview) return "review";
-  return "in_progress";
+  return "building";
 }
 
 function toSummary(topic: StoredForumTopic): ForumTopicSummary {
@@ -93,7 +94,7 @@ export class AgentForumService {
       projectKey: input.projectKey ?? "",
       title: (input.title ?? deriveTitle(input.prompt)).slice(0, 200),
       originPrompt: input.prompt,
-      status: "planning",
+      status: "discussion",
       createdAt_ms: now,
       updatedAt_ms: now,
       leadAgentId: input.leadAgentId ?? null,

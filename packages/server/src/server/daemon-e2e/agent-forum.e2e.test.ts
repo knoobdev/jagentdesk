@@ -26,7 +26,7 @@ describe("agent forum — data + RPC layer", () => {
       bootstrapLead: false,
     });
     expect(created).toBeTruthy();
-    expect(created?.status).toBe("planning");
+    expect(created?.status).toBe("discussion");
     // The originating prompt is seeded as the first (user) message.
     expect(created?.messages.at(0)?.role).toBe("user");
     expect(created?.messages.at(0)?.text).toContain("landing page");
@@ -49,7 +49,7 @@ describe("agent forum — data + RPC layer", () => {
     expect(archived?.status).toBe("archived");
 
     // The stream fired at least for create + archive.
-    expect(streamed.some((t) => t.id === topicId && t.status === "planning")).toBe(true);
+    expect(streamed.some((t) => t.id === topicId && t.status === "discussion")).toBe(true);
     expect(streamed.some((t) => t.id === topicId && t.status === "archived")).toBe(true);
 
     // get on a missing topic is a clean null (not a hang).

@@ -23,7 +23,7 @@ describe("AgentForumService", () => {
 
   test("topic + task lifecycle drives the derived status and audit trail", async () => {
     const topic = await service.createTopic({ prompt: "Build a todo app" });
-    expect(topic.status).toBe("planning"); // no tasks yet
+    expect(topic.status).toBe("discussion"); // no tasks yet — still discussing
     expect(topic.messages).toHaveLength(1); // origin prompt seeded
 
     // Create a task → topic moves to in_progress (has active work).
@@ -32,7 +32,7 @@ describe("AgentForumService", () => {
       createdBy: "lead1",
     });
     const taskId = withTask!.tasks[0]!.id;
-    expect(withTask!.status).toBe("in_progress");
+    expect(withTask!.status).toBe("building");
     expect(withTask!.tasks[0]!.status).toBe("backlog");
 
     // A subtask references its parent.

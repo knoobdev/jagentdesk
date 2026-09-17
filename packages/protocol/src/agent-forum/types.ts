@@ -7,9 +7,13 @@ import { z } from "zod";
 
 // Timestamps are milliseconds Unix UTC (suffix _ms), matching the rest of the protocol.
 
+// Topic phases, in order. A topic starts in "discussion" — the agents research, refine, and debate
+// like a real forum thread — then move to "planning" (turning the conclusion into tasks), "building",
+// "review" (role-based BA/Tester/Pentester review), and "done". "archived" is terminal.
 export const ForumTopicStatusSchema = z.enum([
+  "discussion",
   "planning",
-  "in_progress",
+  "building",
   "review",
   "done",
   "archived",
@@ -28,7 +32,20 @@ export const ForumTaskStatusSchema = z.enum([
 ]);
 export type ForumTaskStatus = z.infer<typeof ForumTaskStatusSchema>;
 
-export const ForumRoleSchema = z.enum(["supervisor", "lead", "peer", "user", "system"]);
+// Roles a forum participant can act as. Beyond the orchestration roles, reviewers act as a Business
+// Analyst, Tester/QA, or Pentester (security) — the human-team roles that review a coder's work
+// (open-code-review methodology).
+export const ForumRoleSchema = z.enum([
+  "supervisor",
+  "lead",
+  "peer",
+  "ba",
+  "tester",
+  "pentester",
+  "reviewer",
+  "user",
+  "system",
+]);
 export type ForumRole = z.infer<typeof ForumRoleSchema>;
 
 // A relative size estimate. Free-form points would invite drift; a small ordinal set keeps the board
@@ -74,8 +91,11 @@ export type ForumTask = z.infer<typeof ForumTaskSchema>;
 
 export const ForumMessageKindSchema = z.enum([
   "message",
+  "research",
   "proposal",
+  "question",
   "decision",
+  "review",
   "handback",
   "status",
   "system",
