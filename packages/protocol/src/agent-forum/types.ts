@@ -73,20 +73,39 @@ export const ForumTaskEventSchema = z.object({
 });
 export type ForumTaskEvent = z.infer<typeof ForumTaskEventSchema>;
 
+// A comment on a task (Jira-style): agents discuss the task itself in its detail view. Body is
+// Markdown (code blocks, quotes, links, images, @mentions all render in the UI).
+export const ForumTaskCommentSchema = z.object({
+  id: z.string(),
+  authorAgentId: z.string(),
+  authorLabel: z.string(),
+  role: ForumRoleSchema,
+  text: z.string(),
+  createdAt_ms: z.number().int(),
+});
+export type ForumTaskComment = z.infer<typeof ForumTaskCommentSchema>;
+
 export const ForumTaskSchema = z.object({
   id: z.string(),
   title: z.string(),
+  // Markdown description of the task (rendered in the Jira-style detail view).
   description: z.string().default(""),
   status: ForumTaskStatusSchema,
   assigneeAgentId: z.string().nullable().default(null),
+  // Human-readable assignee label (agent name/role) so the board needn't resolve agent ids.
+  assigneeLabel: z.string().nullable().default(null),
   estimate: ForumEstimateSchema.default("unknown"),
   // Subtasks are tasks with a parent. One level is enough for V1; deeper nesting is a flat parent ref.
   parentTaskId: z.string().nullable().default(null),
   // Optional epic label to group related tasks on the board (e.g. "Auth", "UI", "Payments").
   epic: z.string().nullable().default(null),
+  // The reporter: the agent that created the task (Jira "reporter"), with a display label.
   createdBy: z.string(),
+  createdByLabel: z.string().nullable().default(null),
   createdAt_ms: z.number().int(),
   updatedAt_ms: z.number().int(),
+  // Jira-style comment thread on the task itself.
+  comments: z.array(ForumTaskCommentSchema).default([]),
   history: z.array(ForumTaskEventSchema).default([]),
 });
 export type ForumTask = z.infer<typeof ForumTaskSchema>;
@@ -118,6 +137,13 @@ export const ForumMessageSchema = z.object({
   // quote block from that post). Agents get message ids from forum.get_topic.
   replyToId: z.string().nullable().default(null),
   quotedMessageId: z.string().nullable().default(null),
+  // When an agent needs the human to answer/approve, it posts a question with this flag set; the UI
+  // surfaces it in the agent chat and the thread until the human replies.
+  awaitingHuman: z.boolean().default(false),
+  // vBulletin-style reactions: the agentIds (or "user") who up/down-voted this post. The UI shows the
+  // score (ups − downs); participants vote posts up when a point is solid, down when it's weak.
+  upvoters: z.array(z.string()).default([]),
+  downvoters: z.array(z.string()).default([]),
 });
 export type ForumMessage = z.infer<typeof ForumMessageSchema>;
 
@@ -138,6 +164,12 @@ export const StoredForumTopicSchema = z.object({
   participants: z.array(ForumParticipantSchema).default([]),
   messages: z.array(ForumMessageSchema).default([]),
   tasks: z.array(ForumTaskSchema).default([]),
+  // Set when an agent is blocked on a human answer/approval (the id of the awaiting-human question
+  // message + its text). Cleared when the human replies. Surfaced in the agent chat + thread.
+  pendingHumanQuestion: z
+    .object({ messageId: z.string(), text: z.string(), askedByLabel: z.string() })
+    .nullable()
+    .default(null),
 });
 export type StoredForumTopic = z.infer<typeof StoredForumTopicSchema>;
 

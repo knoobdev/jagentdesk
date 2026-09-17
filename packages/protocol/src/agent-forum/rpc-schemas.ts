@@ -35,6 +35,31 @@ export const ForumArchiveRequestSchema = z.object({
   topicId: z.string(),
 });
 
+// Human posts a reply into a thread (e.g. answering an agent's ask_human question).
+export const ForumPostRequestSchema = z.object({
+  type: z.literal("forum/post"),
+  requestId: z.string(),
+  topicId: z.string(),
+  text: z.string().min(1),
+  replyToId: z.string().nullable().optional(),
+});
+
+// Human votes a post up/down (or clears their vote).
+export const ForumVoteRequestSchema = z.object({
+  type: z.literal("forum/vote"),
+  requestId: z.string(),
+  topicId: z.string(),
+  messageId: z.string(),
+  direction: z.enum(["up", "down", "clear"]),
+});
+
+// Human-only: permanently delete a topic (manage/clean up old forums).
+export const ForumDeleteRequestSchema = z.object({
+  type: z.literal("forum/delete"),
+  requestId: z.string(),
+  topicId: z.string(),
+});
+
 export const ForumCreateResponseSchema = z.object({
   type: z.literal("forum/create/response"),
   payload: z.object({
@@ -67,6 +92,34 @@ export const ForumArchiveResponseSchema = z.object({
   payload: z.object({
     requestId: z.string(),
     topic: StoredForumTopicSchema.nullable(),
+    error: z.string().nullable(),
+  }),
+});
+
+export const ForumPostResponseSchema = z.object({
+  type: z.literal("forum/post/response"),
+  payload: z.object({
+    requestId: z.string(),
+    topic: StoredForumTopicSchema.nullable(),
+    error: z.string().nullable(),
+  }),
+});
+
+export const ForumVoteResponseSchema = z.object({
+  type: z.literal("forum/vote/response"),
+  payload: z.object({
+    requestId: z.string(),
+    topic: StoredForumTopicSchema.nullable(),
+    error: z.string().nullable(),
+  }),
+});
+
+export const ForumDeleteResponseSchema = z.object({
+  type: z.literal("forum/delete/response"),
+  payload: z.object({
+    requestId: z.string(),
+    topicId: z.string(),
+    deleted: z.boolean(),
     error: z.string().nullable(),
   }),
 });

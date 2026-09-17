@@ -24,7 +24,16 @@ export interface AgentForumSessionOptions {
 
 type ForumRequest = Extract<
   SessionInboundMessage,
-  { type: "forum/create" | "forum/list" | "forum/get" | "forum/archive" }
+  {
+    type:
+      | "forum/create"
+      | "forum/list"
+      | "forum/get"
+      | "forum/archive"
+      | "forum/delete"
+      | "forum/post"
+      | "forum/vote";
+  }
 >;
 
 export class AgentForumSession {
@@ -120,6 +129,56 @@ export class AgentForumSession {
       const topic = await this.service.archiveTopic(request.topicId);
       this.host.emit({
         type: "forum/archive/response",
+        payload: { requestId: request.requestId, topic, error: null },
+      });
+    } catch (error) {
+      this.emitRpcError(request, error);
+    }
+  }
+
+  async handleDeleteRequest(
+    request: Extract<SessionInboundMessage, { type: "forum/delete" }>,
+  ): Promise<void> {
+    try {
+      const deleted = await this.service.deleteTopic(request.topicId);
+      this.host.emit({
+        type: "forum/delete/response",
+        payload: { requestId: request.requestId, topicId: request.topicId, deleted, error: null },
+      });
+    } catch (error) {
+      this.emitRpcError(request, error);
+    }
+  }
+
+  async handlePostRequest(
+    request: Extract<SessionInboundMessage, { type: "forum/post" }>,
+  ): Promise<void> {
+    try {
+      const topic = await this.service.postHumanMessage(request.topicId, {
+        text: request.text,
+        replyToId: request.replyToId ?? null,
+      });
+      this.host.emit({
+        type: "forum/post/response",
+        payload: { requestId: request.requestId, topic, error: null },
+      });
+    } catch (error) {
+      this.emitRpcError(request, error);
+    }
+  }
+
+  async handleVoteRequest(
+    request: Extract<SessionInboundMessage, { type: "forum/vote" }>,
+  ): Promise<void> {
+    try {
+      const topic = await this.service.voteMessage(
+        request.topicId,
+        request.messageId,
+        "user",
+        request.direction,
+      );
+      this.host.emit({
+        type: "forum/vote/response",
         payload: { requestId: request.requestId, topic, error: null },
       });
     } catch (error) {

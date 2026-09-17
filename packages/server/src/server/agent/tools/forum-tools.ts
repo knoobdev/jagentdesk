@@ -73,7 +73,10 @@ export function registerForumTools(params: {
         "Post into the topic's discussion thread like a forum reply. Reply to another agent's post " +
         "with `replyTo` (its message id) and/or quote it with `quote` (its message id) — get ids from " +
         "forum.get_topic. Use kinds research/proposal/question/decision/status to think out loud, " +
-        "debate an approach, or report progress.",
+        "debate an approach, or report progress. Write in the SAME LANGUAGE the human used in their " +
+        "request, and sound human — show real feelings and attitude, and use emoji. Markdown renders: " +
+        "``` fenced code blocks ```, `inline code`, > quotes, [links](url), ![image](url), @name. When " +
+        "you research something tricky, back it up with source links.",
       inputSchema: {
         topicId: z.string(),
         text: z.string().trim().min(1).max(8000),
@@ -93,6 +96,29 @@ export function registerForumTools(params: {
         taskRefs,
         replyToId: replyTo ?? null,
         quotedMessageId: quote ?? null,
+      });
+      return ack(topic);
+    },
+  );
+
+  registerTool(
+    "forum.ask_human",
+    {
+      title: "Ask the human a question",
+      description:
+        "When the team is blocked on a decision only the human can make (approval, a product choice, " +
+        "missing info), post the question with this tool. It appears in the thread AND pops an " +
+        "ask-question in the human's agent chat; their answer comes back as a post in the thread. " +
+        "Ask in the human's language, be specific, and then wait (forum.get_topic) for their reply " +
+        "before proceeding.",
+      inputSchema: { topicId: z.string(), question: z.string().trim().min(1).max(4000) },
+    },
+    async ({ topicId, question }) => {
+      const topic = await forum.askHuman(topicId, {
+        authorAgentId: callerAgentId,
+        authorLabel: callerLabel,
+        role: callerRole,
+        text: question,
       });
       return ack(topic);
     },
@@ -121,7 +147,9 @@ export function registerForumTools(params: {
         estimate,
         epic,
         createdBy: callerAgentId,
+        createdByLabel: callerLabel,
         assigneeAgentId: claim ? callerAgentId : null,
+        assigneeLabel: claim ? callerLabel : null,
       });
       return ack(topic);
     },
@@ -150,7 +178,9 @@ export function registerForumTools(params: {
         epic,
         parentTaskId,
         createdBy: callerAgentId,
+        createdByLabel: callerLabel,
         assigneeAgentId: claim ? callerAgentId : null,
+        assigneeLabel: claim ? callerLabel : null,
       });
       return ack(topic);
     },
@@ -170,6 +200,52 @@ export function registerForumTools(params: {
     },
     async ({ topicId, taskId, assigneeAgentId }) => {
       const topic = await forum.assignTask(topicId, taskId, assigneeAgentId, callerAgentId);
+      return ack(topic);
+    },
+  );
+
+  registerTool(
+    "forum.vote",
+    {
+      title: "Vote on a forum post",
+      description:
+        "React to a post like on a forum: vote it up when the point is solid/you agree, down when it's " +
+        "weak/you disagree. Voting the same way again removes your vote. Get message ids from " +
+        "forum.get_topic. Vote honestly on your teammates' posts as the discussion goes.",
+      inputSchema: {
+        topicId: z.string(),
+        messageId: z.string(),
+        direction: z.enum(["up", "down", "clear"]),
+      },
+    },
+    async ({ topicId, messageId, direction }) => {
+      const topic = await forum.voteMessage(topicId, messageId, callerAgentId, direction);
+      return ack(topic);
+    },
+  );
+
+  registerTool(
+    "forum.comment_task",
+    {
+      title: "Comment on a forum task",
+      description:
+        "Add a Jira-style comment onto a task's detail thread (progress notes, questions, findings on " +
+        "that specific task). Markdown works: ``` fenced code blocks ```, `inline code`, > quotes, " +
+        "[links](url), ![images](url), @name mentions — and feel free to use emoji.",
+      inputSchema: {
+        topicId: z.string(),
+        taskId: z.string(),
+        text: z.string().trim().min(1).max(8000),
+      },
+    },
+    async ({ topicId, taskId, text }) => {
+      const topic = await forum.addTaskComment(topicId, {
+        taskId,
+        authorAgentId: callerAgentId,
+        authorLabel: callerLabel,
+        role: callerRole,
+        text,
+      });
       return ack(topic);
     },
   );

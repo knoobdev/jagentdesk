@@ -7752,6 +7752,77 @@ export class DaemonClient {
     return payload.topic;
   }
 
+  async forumDelete(topicId: string, requestId?: string): Promise<boolean> {
+    const resolved = this.createRequestId(requestId);
+    const message = SessionInboundMessageSchema.parse({
+      type: "forum/delete",
+      requestId: resolved,
+      topicId,
+    });
+    const payload = await this.sendRequest({
+      requestId: resolved,
+      message,
+      options: { skipQueue: true },
+      select: (msg) =>
+        msg.type === "forum/delete/response" && msg.payload.requestId === resolved
+          ? msg.payload
+          : null,
+    });
+    return payload.deleted;
+  }
+
+  async forumPost(
+    topicId: string,
+    text: string,
+    replyToId?: string | null,
+    requestId?: string,
+  ): Promise<StoredForumTopic | null> {
+    const resolved = this.createRequestId(requestId);
+    const message = SessionInboundMessageSchema.parse({
+      type: "forum/post",
+      requestId: resolved,
+      topicId,
+      text,
+      replyToId: replyToId ?? null,
+    });
+    const payload = await this.sendRequest({
+      requestId: resolved,
+      message,
+      options: { skipQueue: true },
+      select: (msg) =>
+        msg.type === "forum/post/response" && msg.payload.requestId === resolved
+          ? msg.payload
+          : null,
+    });
+    return payload.topic;
+  }
+
+  async forumVote(
+    topicId: string,
+    messageId: string,
+    direction: "up" | "down" | "clear",
+    requestId?: string,
+  ): Promise<StoredForumTopic | null> {
+    const resolved = this.createRequestId(requestId);
+    const message = SessionInboundMessageSchema.parse({
+      type: "forum/vote",
+      requestId: resolved,
+      topicId,
+      messageId,
+      direction,
+    });
+    const payload = await this.sendRequest({
+      requestId: resolved,
+      message,
+      options: { skipQueue: true },
+      select: (msg) =>
+        msg.type === "forum/vote/response" && msg.payload.requestId === resolved
+          ? msg.payload
+          : null,
+    });
+    return payload.topic;
+  }
+
   subscribeForumStream(handler: (topic: StoredForumTopic) => void): () => void {
     return this.on("forum.stream", (message) => handler(message.payload.topic));
   }

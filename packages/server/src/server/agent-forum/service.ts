@@ -125,9 +125,13 @@ export class AgentForumService {
           taskRefs: [],
           replyToId: null,
           quotedMessageId: null,
+          awaitingHuman: false,
+          upvoters: [],
+          downvoters: [],
         },
       ],
       tasks: [],
+      pendingHumanQuestion: null,
     };
     const created = await this.store.create(topic);
     this.emit(created);
@@ -146,6 +150,7 @@ export class AgentForumService {
       taskRefs?: string[];
       replyToId?: string | null;
       quotedMessageId?: string | null;
+      awaitingHuman?: boolean;
     },
   ): Promise<StoredForumTopic | null> {
     return this.mutate(topicId, (topic) => {
@@ -160,9 +165,71 @@ export class AgentForumService {
         taskRefs: message.taskRefs ?? [],
         replyToId: message.replyToId ?? null,
         quotedMessageId: message.quotedMessageId ?? null,
+        awaitingHuman: message.awaitingHuman ?? false,
+        upvoters: [],
+        downvoters: [],
       };
       topic.messages.push(entry);
       ensureParticipant(topic, message.authorAgentId, message.authorLabel, message.role);
+      return topic;
+    });
+  }
+
+  // An agent blocks on a human answer/approval: post a question into the thread and mark the topic as
+  // awaiting the human. The agent chat surfaces this so the human can reply; their reply clears it.
+  async askHuman(
+    topicId: string,
+    input: { authorAgentId: string; authorLabel: string; role: ForumRole; text: string },
+  ): Promise<StoredForumTopic | null> {
+    return this.mutate(topicId, (topic) => {
+      const messageId = generateForumId("msg");
+      topic.messages.push({
+        id: messageId,
+        authorAgentId: input.authorAgentId,
+        authorLabel: input.authorLabel,
+        role: input.role,
+        kind: "question",
+        text: input.text,
+        createdAt_ms: Date.now(),
+        taskRefs: [],
+        replyToId: null,
+        quotedMessageId: null,
+        awaitingHuman: true,
+        upvoters: [],
+        downvoters: [],
+      });
+      ensureParticipant(topic, input.authorAgentId, input.authorLabel, input.role);
+      topic.pendingHumanQuestion = { messageId, text: input.text, askedByLabel: input.authorLabel };
+      return topic;
+    });
+  }
+
+  // The human answers a pending question: append their post (role "user") and clear the pending flag
+  // (and the awaitingHuman marker on the question it answers).
+  async postHumanMessage(
+    topicId: string,
+    input: { text: string; replyToId?: string | null },
+  ): Promise<StoredForumTopic | null> {
+    return this.mutate(topicId, (topic) => {
+      const pendingId = topic.pendingHumanQuestion?.messageId ?? null;
+      topic.messages.push({
+        id: generateForumId("msg"),
+        authorAgentId: "user",
+        authorLabel: "You",
+        role: "user",
+        kind: "message",
+        text: input.text,
+        createdAt_ms: Date.now(),
+        taskRefs: [],
+        replyToId: input.replyToId ?? pendingId,
+        quotedMessageId: null,
+        awaitingHuman: false,
+        upvoters: [],
+        downvoters: [],
+      });
+      const pending = topic.messages.find((m) => m.id === pendingId);
+      if (pending) pending.awaitingHuman = false;
+      topic.pendingHumanQuestion = null;
       return topic;
     });
   }
@@ -173,8 +240,10 @@ export class AgentForumService {
       title: string;
       description?: string;
       createdBy: string;
+      createdByLabel?: string | null;
       parentTaskId?: string | null;
       assigneeAgentId?: string | null;
+      assigneeLabel?: string | null;
       estimate?: ForumEstimate;
       epic?: string | null;
     },
@@ -187,12 +256,15 @@ export class AgentForumService {
         description: input.description ?? "",
         status: "backlog",
         assigneeAgentId: input.assigneeAgentId ?? null,
+        assigneeLabel: input.assigneeLabel ?? null,
         estimate: input.estimate ?? "unknown",
         parentTaskId: input.parentTaskId ?? null,
         epic: input.epic ?? null,
         createdBy: input.createdBy,
+        createdByLabel: input.createdByLabel ?? null,
         createdAt_ms: now,
         updatedAt_ms: now,
+        comments: [],
         history: [{ at_ms: now, actorAgentId: input.createdBy, kind: "created", to: "backlog" }],
       };
       topic.tasks.push(task);
@@ -201,16 +273,76 @@ export class AgentForumService {
     });
   }
 
+  // Add a Jira-style comment onto a task (agents discuss the task in its detail view).
+  async addTaskComment(
+    topicId: string,
+    input: {
+      taskId: string;
+      authorAgentId: string;
+      authorLabel: string;
+      role: ForumRole;
+      text: string;
+    },
+  ): Promise<StoredForumTopic | null> {
+    return this.mutate(topicId, (topic) => {
+      const task = topic.tasks.find((t) => t.id === input.taskId);
+      if (!task) throw new Error(`Task not found: ${input.taskId}`);
+      const now = Date.now();
+      task.comments.push({
+        id: generateForumId("cmt"),
+        authorAgentId: input.authorAgentId,
+        authorLabel: input.authorLabel,
+        role: input.role,
+        text: input.text,
+        createdAt_ms: now,
+      });
+      task.updatedAt_ms = now;
+      ensureParticipant(topic, input.authorAgentId, input.authorLabel, input.role);
+      return topic;
+    });
+  }
+
+  // vBulletin-style vote on a post. direction "up"/"down" toggles that voter's reaction (voting the
+  // same way again clears it, like flipping a thumbs-up off); "clear" removes any reaction.
+  async voteMessage(
+    topicId: string,
+    messageId: string,
+    voterId: string,
+    direction: "up" | "down" | "clear",
+  ): Promise<StoredForumTopic | null> {
+    return this.mutate(topicId, (topic) => {
+      const msg = topic.messages.find((m) => m.id === messageId);
+      if (!msg) throw new Error(`Message not found: ${messageId}`);
+      const hadUp = msg.upvoters.includes(voterId);
+      const hadDown = msg.downvoters.includes(voterId);
+      msg.upvoters = msg.upvoters.filter((v) => v !== voterId);
+      msg.downvoters = msg.downvoters.filter((v) => v !== voterId);
+      if (direction === "up" && !hadUp) msg.upvoters.push(voterId);
+      if (direction === "down" && !hadDown) msg.downvoters.push(voterId);
+      return topic;
+    });
+  }
+
+  // Human-only: permanently delete a topic (manage/clean up old forums).
+  async deleteTopic(topicId: string): Promise<boolean> {
+    const existing = await this.store.get(topicId);
+    if (!existing) return false;
+    await this.store.delete(topicId);
+    return true;
+  }
+
   async assignTask(
     topicId: string,
     taskId: string,
     assigneeAgentId: string | null,
     actorAgentId: string,
+    assigneeLabel?: string | null,
   ): Promise<StoredForumTopic | null> {
     return this.updateTask(topicId, taskId, actorAgentId, (task) => {
       if (task.assigneeAgentId === assigneeAgentId) return null;
       const from = task.assigneeAgentId ?? "";
       task.assigneeAgentId = assigneeAgentId;
+      task.assigneeLabel = assigneeAgentId ? (assigneeLabel ?? task.assigneeLabel) : null;
       return { kind: "assigned", from, to: assigneeAgentId ?? "" };
     });
   }
@@ -288,6 +420,9 @@ export class AgentForumService {
         taskRefs: [input.taskId],
         replyToId: null,
         quotedMessageId: null,
+        awaitingHuman: false,
+        upvoters: [],
+        downvoters: [],
       });
       ensureParticipant(topic, input.reviewerAgentId, input.reviewerLabel, input.role);
       const to: ForumTaskStatus = input.verdict === "approve" ? "done" : "in_progress";

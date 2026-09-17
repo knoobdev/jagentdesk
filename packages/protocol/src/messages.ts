@@ -73,10 +73,16 @@ import {
   ForumListRequestSchema,
   ForumGetRequestSchema,
   ForumArchiveRequestSchema,
+  ForumDeleteRequestSchema,
+  ForumPostRequestSchema,
+  ForumVoteRequestSchema,
   ForumCreateResponseSchema,
   ForumListResponseSchema,
   ForumGetResponseSchema,
   ForumArchiveResponseSchema,
+  ForumDeleteResponseSchema,
+  ForumPostResponseSchema,
+  ForumVoteResponseSchema,
   ForumStreamSchema,
 } from "./agent-forum/rpc-schemas.js";
 import {
@@ -4145,6 +4151,9 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ForumListRequestSchema,
   ForumGetRequestSchema,
   ForumArchiveRequestSchema,
+  ForumDeleteRequestSchema,
+  ForumPostRequestSchema,
+  ForumVoteRequestSchema,
   LoopRunRequestSchema,
   LoopListRequestSchema,
   LoopInspectRequestSchema,
@@ -7747,6 +7756,9 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ForumListResponseSchema,
   ForumGetResponseSchema,
   ForumArchiveResponseSchema,
+  ForumDeleteResponseSchema,
+  ForumPostResponseSchema,
+  ForumVoteResponseSchema,
   ForumStreamSchema,
   ForgeChangeRequestCreateResponseSchema,
   ForgeChangeRequestCloseResponseSchema,
@@ -8357,6 +8369,7 @@ export type {
   ForumParticipant,
   ForumTaskEvent,
   ForumTask,
+  ForumTaskComment,
   ForumMessageKind,
   ForumMessage,
   StoredForumTopic,
@@ -8367,6 +8380,9 @@ export type ForumCreateRequest = z.infer<typeof ForumCreateRequestSchema>;
 export type ForumListRequest = z.infer<typeof ForumListRequestSchema>;
 export type ForumGetRequest = z.infer<typeof ForumGetRequestSchema>;
 export type ForumArchiveRequest = z.infer<typeof ForumArchiveRequestSchema>;
+export type ForumDeleteRequest = z.infer<typeof ForumDeleteRequestSchema>;
+export type ForumPostRequest = z.infer<typeof ForumPostRequestSchema>;
+export type ForumVoteRequest = z.infer<typeof ForumVoteRequestSchema>;
 export type ForumStream = z.infer<typeof ForumStreamSchema>;
 // Forge Hub — Milestone D types
 export type ForgeChangeRequestCreateRequest = z.infer<typeof ForgeChangeRequestCreateRequestSchema>;

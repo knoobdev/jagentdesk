@@ -2981,6 +2981,12 @@ export class Session {
         return forum.handleGetRequest(msg);
       case "forum/archive":
         return forum.handleArchiveRequest(msg);
+      case "forum/delete":
+        return forum.handleDeleteRequest(msg);
+      case "forum/post":
+        return forum.handlePostRequest(msg);
+      case "forum/vote":
+        return forum.handleVoteRequest(msg);
       default:
         return undefined;
     }
