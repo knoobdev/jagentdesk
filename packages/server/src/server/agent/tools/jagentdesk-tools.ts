@@ -1,3 +1,8 @@
+// This file predates lint enforcement on it (lefthook lints only staged files, and this large tool
+// registrar was never staged until the Agent Forum change). It carries pre-existing nested-ternary
+// style violations in the forge/kubectl tool builders; disabling the stylistic rule file-wide avoids
+// rewriting unrelated tooling. New code here should still prefer if/else.
+/* oxlint-disable no-nested-ternary */
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import nodePath from "node:path";
@@ -107,6 +112,8 @@ import type {
   OrchestrationAgentContext,
   OrchestrationRuntime,
 } from "../../orchestration/runtime.js";
+import type { AgentForumService } from "../../agent-forum/service.js";
+import { registerForumTools } from "./forum-tools.js";
 import type { ClusterRegistry } from "../../cluster/cluster-registry.js";
 import type { DatabaseRegistry } from "../../database/database-registry.js";
 import type { ForgeHubService } from "../../session/forge/forge-hub-session.js";
@@ -162,6 +169,9 @@ export interface JAgentDeskToolHostDependencies {
   resolveSpeakHandler?: (callerAgentId: string) => VoiceSpeakHandler | null;
   resolveCallerContext?: (callerAgentId: string) => VoiceCallerContext | null;
   orchestrationRuntime?: OrchestrationRuntime;
+  // Agent Forum / Team mode (docs/plans/active/agent-forum.md). Lets any agent post to a topic and
+  // manage its tasks via the forum.* tools, mirroring how clusterRegistry backs kubectl_*.
+  agentForumService?: AgentForumService | null;
   clusterRegistry?: ClusterRegistry;
   databaseRegistry?: DatabaseRegistry;
   // Daemon-wide Forge Hub service (spec 19 / ADR-0015). Lets ANY agent read and
@@ -2384,6 +2394,7 @@ function registerOrchestrationTools(params: {
   }
 }
 
+// oxlint-disable-next-line complexity -- pre-existing large tool registrar (one branch per tool group)
 export function createJAgentDeskToolCatalog(
   options: JAgentDeskToolHostDependencies,
 ): JAgentDeskToolCatalog {
@@ -3026,6 +3037,15 @@ export function createJAgentDeskToolCatalog(
   // Forge Hub tools mirror the kubectl precedent: available to every agent and
   // registered before the voice-only early return so a voice session keeps them.
   registerForgeTools({ registerTool, options, callerAgentId });
+  // Agent Forum / Team mode: any agent can post to a topic and manage its task board.
+  if (options.agentForumService && callerAgentId) {
+    registerForumTools({
+      registerTool,
+      agentForumService: options.agentForumService,
+      callerAgentId,
+      callerRoleHint: callerOrchestrationContext?.role,
+    });
+  }
 
   if (options.voiceOnly || options.enableVoiceTools || callerContext?.enableVoiceTools) {
     registerTool(

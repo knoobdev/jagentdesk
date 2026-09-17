@@ -156,6 +156,7 @@ import { ScheduleService } from "./schedule/service.js";
 import { AutorunService } from "./autorun/service.js";
 import { SessionShareService } from "./session-share/service.js";
 import { AgentForumService } from "./agent-forum/service.js";
+import { createForumBootstrap } from "./agent-forum/bootstrap.js";
 import { TunnelManager } from "./session-share/tunnel-manager.js";
 import { DaemonConfigStore, type MutableDaemonConfig } from "./daemon-config-store.js";
 import { PluginService } from "./plugins/index.js";
@@ -1480,6 +1481,7 @@ export async function createJAgentDeskDaemon(
     resolveSpeakHandler: (agentId) => wsServer?.resolveVoiceSpeakHandler(agentId) ?? null,
     resolveCallerContext: (agentId) => wsServer?.resolveVoiceCallerContext(agentId) ?? null,
     orchestrationRuntime,
+    agentForumService,
     clusterRegistry,
     databaseRegistry,
     skillsStorage,
@@ -1789,9 +1791,12 @@ export async function createJAgentDeskDaemon(
             sessionShareService?.setGuestScopeUpdater((agentId, scopes) =>
               wsServer?.updateGuestScopesForAgent(agentId, scopes),
             );
-            // Agent Forum / Team mode: expose the service to sessions. The orchestration-bootstrap
-            // hook is wired in a later stage; null keeps topics as a pure data layer for now.
-            wsServer?.setAgentForum(agentForumService, null);
+            // Agent Forum / Team mode: expose the service to sessions + the bootstrap hook that turns
+            // the origin chat agent into the topic's lead (it then spawns/delegates peers).
+            wsServer?.setAgentForum(
+              agentForumService,
+              createForumBootstrap({ agentManager, agentStorage, logger }),
+            );
             // Bind the plugin session host and start configured plugins before any
             // external ingress attaches, mirroring upstream's pre-accept ordering.
             pluginRuntime.bindJAgentDeskSessionHost(wsServer);
