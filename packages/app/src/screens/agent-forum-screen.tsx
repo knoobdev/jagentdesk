@@ -1,5 +1,15 @@
-import { memo, useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from "react";
+import { Animated, Modal, Pressable, ScrollView, Text, View } from "react-native";
+import Markdown from "react-native-markdown-display";
 import Svg, { Circle, G, Rect, Text as SvgText } from "react-native-svg";
 import { StyleSheet } from "react-native-unistyles";
 import { useIsFocused } from "@react-navigation/native";
@@ -10,6 +20,7 @@ import type {
   ForumMessage,
   ForumRole,
   ForumTask,
+  ForumTaskComment,
   ForumTaskStatus,
   ForumTopicStatus,
   ForumTopicSummary,
@@ -40,7 +51,8 @@ const C = {
 const FONT_MONO = '"Geist Mono","SFMono-Regular",Menlo,monospace';
 const FONT_SANS = '"Geist",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
 const THREADS_PER_PAGE = 8;
-const POSTS_PER_PAGE = 10;
+const POSTS_PER_PAGE = 5;
+const ACTIVITY_PER_PAGE = 8;
 
 // Distinct, dark-safe status hues for the dashboard charts + kanban stripes (validated for CVD
 // separation; always shown alongside a text label, never color alone). One hue per status, fixed.
@@ -106,6 +118,32 @@ function phaseChipColor(status: ForumTopicStatus): string {
 }
 function taskDotColor(status: ForumTaskStatus): string {
   return STATUS_COLOR[status] ?? C.faint;
+}
+const STATUS_LABEL: Record<ForumTaskStatus, string> = {
+  backlog: "Backlog",
+  todo: "To do",
+  in_progress: "In progress",
+  review: "Review",
+  blocked: "Blocked",
+  done: "Done",
+};
+function statusLabel(status: ForumTaskStatus): string {
+  return STATUS_LABEL[status] ?? status;
+}
+function myVote(message: ForumMessage): "up" | "down" | null {
+  if (message.upvoters.includes("user")) return "up";
+  if (message.downvoters.includes("user")) return "down";
+  return null;
+}
+function scoreColorOf(score: number): string {
+  if (score > 0) return C.green;
+  if (score < 0) return C.red;
+  return C.muted;
+}
+// Stable no-op to stop backdrop-press propagation without allocating a new fn each render.
+const NOOP = (): void => undefined;
+function withoutTopic(list: ForumTopicSummary[], topicId: string): ForumTopicSummary[] {
+  return list.filter((t) => t.id !== topicId);
 }
 function initial(label: string): string {
   const c = label.trim()[0];
@@ -207,6 +245,70 @@ export function AgentForumScreen(): ReactElement {
   );
 }
 
+// Smooth mount/transition fade — remount (via `key`) on tab/page change to re-run.
+const FadeIn = memo(function FadeIn({ children }: { children: ReactNode }): ReactElement {
+  const opacity = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    opacity.setValue(0);
+    Animated.timing(opacity, { toValue: 1, duration: 200, useNativeDriver: true }).start();
+  }, [opacity]);
+  const style = useMemo(() => ({ opacity }), [opacity]);
+  return <Animated.View style={style}>{children}</Animated.View>;
+});
+
+// A gently pulsing placeholder block for loading states.
+const SkeletonBlock = memo(function SkeletonBlock({
+  height,
+  width,
+  radius,
+}: {
+  height: number;
+  width?: number | `${number}%`;
+  radius?: number;
+}): ReactElement {
+  const pulse = useRef(new Animated.Value(0.4)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1, duration: 700, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0.4, duration: 700, useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [pulse]);
+  const style = useMemo(
+    () => ({
+      height,
+      width: width ?? ("100%" as const),
+      borderRadius: radius ?? 6,
+      backgroundColor: C.card,
+      opacity: pulse,
+    }),
+    [height, width, radius, pulse],
+  );
+  return <Animated.View style={style} />;
+});
+
+const ThreadSkeleton = memo(function ThreadSkeleton(): ReactElement {
+  return (
+    <View style={styles.threadBody}>
+      <SkeletonBlock height={22} width="60%" />
+      <SkeletonBlock height={14} width="40%" />
+      {[0, 1, 2].map((i) => (
+        <View key={i} style={styles.skeletonPost}>
+          <SkeletonBlock height={44} width={44} radius={6} />
+          <View style={styles.skeletonBody}>
+            <SkeletonBlock height={12} width="90%" />
+            <SkeletonBlock height={12} width="80%" />
+            <SkeletonBlock height={12} width="55%" />
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+});
+
 const HostTopics = memo(function HostTopics({
   serverId,
   onOpen,
@@ -238,6 +340,14 @@ const HostTopics = memo(function HostTopics({
     };
   }, [client, onStreamed]);
 
+  const onDelete = useCallback(
+    (topicId: string) => {
+      setTopics((prev) => withoutTopic(prev, topicId));
+      void client?.forumDelete(topicId).catch(NOOP);
+    },
+    [client],
+  );
+
   const sorted = useMemo(
     () => [...topics].sort((a, b) => b.updatedAt_ms - a.updatedAt_ms),
     [topics],
@@ -258,7 +368,13 @@ const HostTopics = memo(function HostTopics({
           <Text style={styles.colPhase}>PHASE</Text>
         </View>
         {pageItems.map((topic) => (
-          <TopicRow key={topic.id} serverId={serverId} topic={topic} onOpen={onOpen} />
+          <TopicRow
+            key={topic.id}
+            serverId={serverId}
+            topic={topic}
+            onOpen={onOpen}
+            onDelete={onDelete}
+          />
         ))}
       </View>
       {pageCount > 1 ? <Pager page={clamped} pageCount={pageCount} onPage={setPage} /> : null}
@@ -518,25 +634,75 @@ const Pager = memo(function Pager({
   );
 });
 
-const ThreadPosts = memo(function ThreadPosts({
-  messages,
-  byId,
+// Only these kinds are real DISCUSSION and get a full post card; the rest (status updates, role
+// reviews, handbacks, system notes) are board activity — rendered as a compact activity row, not a post.
+const DISCUSSION_KINDS = new Set(["message", "research", "proposal", "question", "decision"]);
+function isDiscussion(m: ForumMessage): boolean {
+  return DISCUSSION_KINDS.has(m.kind);
+}
+function firstLine(text: string): string {
+  return (
+    text
+      .split("\n")
+      .find((l) => l.trim().length > 0)
+      ?.trim() ?? text
+  );
+}
+
+// A slim, non-post activity line for status/review/system events, so the thread stays about discussion.
+const ActivityRow = memo(function ActivityRow({
+  message,
 }: {
-  messages: ForumMessage[];
-  byId: Map<string, ForumMessage>;
+  message: ForumMessage;
 }): ReactElement {
+  const color = roleColor(message.role);
+  return (
+    <View style={styles.activityRow}>
+      <View style={[styles.activityDot, { backgroundColor: color }]} />
+      <Text style={styles.activityText} numberOfLines={2}>
+        <Text style={styles.activityWho}>{message.authorLabel}</Text>
+        <Text style={styles.activityKind}> · {message.kind} · </Text>
+        {firstLine(message.text)}
+      </Text>
+      <Text style={styles.activityTime}>{timeAgo(message.createdAt_ms)}</Text>
+    </View>
+  );
+});
+
+// Discussion posts only (activity lives in ActivitySection), paginated on their own. `startIndex` is
+// the post number of the first item (the opening #1 post is rendered separately by the thread).
+const DiscussionPosts = memo(function DiscussionPosts({
+  posts,
+  byId,
+  onVote,
+  startIndex,
+}: {
+  posts: ForumMessage[];
+  byId: Map<string, ForumMessage>;
+  onVote: (messageId: string, direction: "up" | "down" | "clear") => void;
+  startIndex: number;
+}): ReactElement | null {
   const [page, setPage] = useState(0);
-  const pageCount = Math.max(1, Math.ceil(messages.length / POSTS_PER_PAGE));
+  if (posts.length === 0) return null;
+  const pageCount = Math.max(1, Math.ceil(posts.length / POSTS_PER_PAGE));
   const clamped = Math.min(page, pageCount - 1);
   const start = clamped * POSTS_PER_PAGE;
-  const items = messages.slice(start, start + POSTS_PER_PAGE);
+  const items = posts.slice(start, start + POSTS_PER_PAGE);
   return (
-    <>
-      {items.map((m, i) => (
-        <PostCard key={m.id} message={m} index={start + i + 1} quoted={quotedOf(m, byId)} />
-      ))}
-      {pageCount > 1 ? <Pager page={clamped} pageCount={pageCount} onPage={setPage} /> : null}
-    </>
+    <FadeIn key={clamped}>
+      <View style={styles.postStack}>
+        {items.map((m, i) => (
+          <PostCard
+            key={m.id}
+            message={m}
+            index={startIndex + start + i}
+            quoted={quotedOf(m, byId)}
+            onVote={onVote}
+          />
+        ))}
+        {pageCount > 1 ? <Pager page={clamped} pageCount={pageCount} onPage={setPage} /> : null}
+      </View>
+    </FadeIn>
   );
 });
 
@@ -544,15 +710,25 @@ const TopicRow = memo(function TopicRow({
   serverId,
   topic,
   onOpen,
+  onDelete,
 }: {
   serverId: string;
   topic: ForumTopicSummary;
   onOpen: (sel: { serverId: string; topicId: string }) => void;
+  onDelete: (topicId: string) => void;
 }): ReactElement {
   const onPress = useCallback(
     () => onOpen({ serverId, topicId: topic.id }),
     [onOpen, serverId, topic.id],
   );
+  const [confirm, setConfirm] = useState(false);
+  const onDeletePress = useCallback(() => {
+    if (confirm) {
+      onDelete(topic.id);
+    } else {
+      setConfirm(true);
+    }
+  }, [confirm, onDelete, topic.id]);
   return (
     <Pressable style={styles.threadRow} onPress={onPress} testID={`forum-topic-${topic.id}`}>
       <View style={styles.avatarSm}>
@@ -568,6 +744,16 @@ const TopicRow = memo(function TopicRow({
         </Text>
       </View>
       <PhaseChip status={topic.status} />
+      <Pressable
+        onPress={onDeletePress}
+        hitSlop={8}
+        style={[styles.deleteBtn, confirm ? styles.deleteBtnConfirm : null]}
+        testID={`forum-delete-${topic.id}`}
+      >
+        <Text style={[styles.deleteBtnText, confirm ? { color: C.red } : null]}>
+          {confirm ? "Confirm" : "🗑"}
+        </Text>
+      </Pressable>
     </Pressable>
   );
 });
@@ -619,7 +805,24 @@ const TopicThread = memo(function TopicThread({
     for (const m of topic?.messages ?? []) map.set(m.id, m);
     return map;
   }, [topic]);
+  const { posts, activity } = useMemo(() => {
+    const p: ForumMessage[] = [];
+    const a: ForumMessage[] = [];
+    for (const m of topic?.messages ?? []) (isDiscussion(m) ? p : a).push(m);
+    return { posts: p, activity: a };
+  }, [topic]);
   const [tab, setTab] = useState<"thread" | "board">("thread");
+  const [openTaskId, setOpenTaskId] = useState<string | null>(null);
+
+  const onVote = useCallback(
+    (messageId: string, direction: "up" | "down" | "clear") => {
+      void client?.forumVote(topicId, messageId, direction).catch(NOOP);
+    },
+    [client, topicId],
+  );
+
+  const openTask = topic?.tasks.find((t) => t.id === openTaskId) ?? null;
+  const closeTask = useCallback(() => setOpenTaskId(null), []);
 
   return (
     <View style={styles.threadRoot}>
@@ -630,21 +833,74 @@ const TopicThread = memo(function TopicThread({
         {topic ? <PhaseChip status={topic.status} /> : null}
       </View>
       {!topic ? (
-        <View style={styles.emptyWrap}>
-          <Text style={styles.emptyText}>Loading…</Text>
-        </View>
+        <ThreadSkeleton />
       ) : (
         <ScrollView contentContainerStyle={styles.threadBody}>
           <Text style={styles.postTitle}>{topic.title}</Text>
           <PhaseBar status={topic.status} />
           <TabBar tab={tab} onTab={setTab} boardCount={topic.tasks.length} />
           {tab === "thread" ? (
-            <ThreadPosts messages={topic.messages} byId={byId} />
+            <FadeIn key="thread">
+              <View style={styles.threadStack}>
+                {topic.pendingHumanQuestion ? (
+                  <View style={styles.askBanner}>
+                    <Text style={styles.askBannerTitle}>
+                      ⚠ {topic.pendingHumanQuestion.askedByLabel} needs your answer
+                    </Text>
+                    <Text style={styles.askBannerText}>{topic.pendingHumanQuestion.text}</Text>
+                    <Text style={styles.askBannerHint}>
+                      Answer it in the agent chat — your reply posts back here automatically.
+                    </Text>
+                  </View>
+                ) : null}
+                {posts[0] ? (
+                  <PostCard
+                    message={posts[0]}
+                    index={1}
+                    quoted={quotedOf(posts[0], byId)}
+                    onVote={onVote}
+                  />
+                ) : null}
+                <ActivitySection activity={activity} />
+                <DiscussionPosts
+                  posts={posts.slice(1)}
+                  byId={byId}
+                  onVote={onVote}
+                  startIndex={2}
+                />
+              </View>
+            </FadeIn>
           ) : (
-            <KanbanBoard tasks={topic.tasks} />
+            <FadeIn key="board">
+              <KanbanBoard tasks={topic.tasks} onOpenTask={setOpenTaskId} />
+            </FadeIn>
           )}
         </ScrollView>
       )}
+      <TaskDetailModal task={openTask} onClose={closeTask} />
+    </View>
+  );
+});
+
+// Separately-paginated activity/status stream (task moves, role reviews, system notes), placed below
+// the discussion posts — it isn't discussion, so it lives in its own compact section.
+const ActivitySection = memo(function ActivitySection({
+  activity,
+}: {
+  activity: ForumMessage[];
+}): ReactElement | null {
+  const [page, setPage] = useState(0);
+  if (activity.length === 0) return null;
+  const pageCount = Math.max(1, Math.ceil(activity.length / ACTIVITY_PER_PAGE));
+  const clamped = Math.min(page, pageCount - 1);
+  const items = activity.slice(clamped * ACTIVITY_PER_PAGE, (clamped + 1) * ACTIVITY_PER_PAGE);
+  return (
+    <View style={styles.activitySection}>
+      <Text style={styles.activityHeader}>ACTIVITY · {activity.length}</Text>
+      {items.map((m) => (
+        <ActivityRow key={m.id} message={m} />
+      ))}
+      {pageCount > 1 ? <Pager page={clamped} pageCount={pageCount} onPage={setPage} /> : null}
     </View>
   );
 });
@@ -665,19 +921,180 @@ const PhaseBar = memo(function PhaseBar({ status }: { status: ForumTopicStatus }
   );
 });
 
+// Markdown for forum posts / task descriptions / comments: fenced + inline code, quotes, links,
+// images, bold — styled to the dark clawskills palette. (react-native-markdown-display over markdown-it.)
+const MD_STYLES = {
+  body: { color: C.text, fontFamily: FONT_SANS, fontSize: 13, lineHeight: 20 },
+  paragraph: { marginTop: 0, marginBottom: 8 },
+  strong: { color: C.text, fontWeight: "700" as const },
+  em: { fontStyle: "italic" as const },
+  link: { color: "#4a9df0", textDecorationLine: "underline" as const },
+  code_inline: {
+    backgroundColor: "#23262b",
+    color: "#e6c07b",
+    fontFamily: FONT_MONO,
+    fontSize: 12,
+    borderRadius: 4,
+    // No border/vertical padding: bordered inline chips overlap across wrapped lines on RN-web.
+    borderWidth: 0,
+  },
+  fence: {
+    backgroundColor: "#0b0b0b",
+    borderColor: C.border,
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    marginVertical: 6,
+    color: "#d4d4d4",
+    fontFamily: FONT_MONO,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  code_block: {
+    backgroundColor: "#0b0b0b",
+    borderColor: C.border,
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    marginVertical: 6,
+    color: "#d4d4d4",
+    fontFamily: FONT_MONO,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  blockquote: {
+    backgroundColor: C.cardAlt,
+    borderLeftColor: C.green,
+    borderLeftWidth: 3,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    marginBottom: 8,
+    color: C.soft,
+  },
+  bullet_list: { marginBottom: 8 },
+  ordered_list: { marginBottom: 8 },
+  heading1: { color: C.text, fontSize: 18, fontWeight: "700" as const, marginBottom: 6 },
+  heading2: { color: C.text, fontSize: 16, fontWeight: "700" as const, marginBottom: 6 },
+  heading3: { color: C.text, fontSize: 14, fontWeight: "700" as const, marginBottom: 4 },
+  hr: { backgroundColor: C.border, height: 1, marginVertical: 8 },
+  image: { borderRadius: 6, marginVertical: 6 },
+};
+// A clean code block: monospace on a flat dark panel, horizontally scrollable so long lines never
+// wrap/overlap, with a thin top bar. Used to override the markdown lib's default fence rendering.
+const CodeBlock = memo(function CodeBlock({
+  content,
+  lang,
+}: {
+  content: string;
+  lang?: string;
+}): ReactElement {
+  return (
+    <View style={styles.codeBlock}>
+      <View style={styles.codeBar}>
+        <View style={styles.codeDots}>
+          <View style={[styles.codeDot, { backgroundColor: "#e04a3a" }]} />
+          <View style={[styles.codeDot, { backgroundColor: C.amber }]} />
+          <View style={[styles.codeDot, { backgroundColor: C.green }]} />
+        </View>
+        {lang ? <Text style={styles.codeLang}>{lang}</Text> : null}
+      </View>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.codeScroll}
+      >
+        <Text style={styles.codeText}>{content.replace(/\n$/, "")}</Text>
+      </ScrollView>
+    </View>
+  );
+});
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- markdown-it node type isn't exported
+const renderCode = (node: any): ReactElement => (
+  <CodeBlock
+    key={node.key}
+    content={String(node.content ?? "")}
+    lang={node.sourceInfo || undefined}
+  />
+);
+const MD_RULES = { fence: renderCode, code_block: renderCode };
+
+const ForumMarkdown = memo(function ForumMarkdown({ text }: { text: string }): ReactElement {
+  return (
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- lib style/rules maps aren't typed
+    <Markdown style={MD_STYLES as any} rules={MD_RULES as any}>
+      {text}
+    </Markdown>
+  );
+});
+
+// vBulletin-style reaction footer: a rounded pill with up/down thumbs and the running reputation
+// score, plus the reactor count. Agents vote via tools; the human clicks here (forum/vote).
+const VoteBar = memo(function VoteBar({
+  message,
+  onVote,
+}: {
+  message: ForumMessage;
+  onVote: (messageId: string, direction: "up" | "down" | "clear") => void;
+}): ReactElement {
+  const ups = message.upvoters.length;
+  const downs = message.downvoters.length;
+  const score = ups - downs;
+  const mine = myVote(message);
+  const up = useCallback(
+    () => onVote(message.id, mine === "up" ? "clear" : "up"),
+    [message.id, mine, onVote],
+  );
+  const down = useCallback(
+    () => onVote(message.id, mine === "down" ? "clear" : "down"),
+    [message.id, mine, onVote],
+  );
+  const scoreColor = scoreColorOf(score);
+  return (
+    <View style={styles.voteFooter}>
+      <Pressable
+        onPress={up}
+        style={[styles.voteBtn, mine === "up" ? styles.voteBtnUpOn : null]}
+        hitSlop={4}
+      >
+        <Text style={[styles.voteBtnText, mine === "up" ? { color: C.green } : null]}>
+          👍 {ups}
+        </Text>
+      </Pressable>
+      <Pressable
+        onPress={down}
+        style={[styles.voteBtn, mine === "down" ? styles.voteBtnDownOn : null]}
+        hitSlop={4}
+      >
+        <Text style={[styles.voteBtnText, mine === "down" ? { color: C.red } : null]}>
+          👎 {downs}
+        </Text>
+      </Pressable>
+      <View style={styles.repPill}>
+        <Text style={styles.repLabel}>rep</Text>
+        <Text style={[styles.repScore, { color: scoreColor }]}>
+          {score > 0 ? `+${score}` : score}
+        </Text>
+      </View>
+    </View>
+  );
+});
+
 const PostCard = memo(function PostCard({
   message,
   index,
   quoted,
+  onVote,
 }: {
   message: ForumMessage;
   index: number;
   quoted: ForumMessage | null;
+  onVote: (messageId: string, direction: "up" | "down" | "clear") => void;
 }): ReactElement {
   const role = message.role;
   const color = roleColor(role);
   return (
-    <View style={styles.post}>
+    <View style={[styles.post, message.awaitingHuman ? styles.postAwaiting : null]}>
       <View style={styles.postbit}>
         <View style={[styles.avatar, { backgroundColor: color }]}>
           <Text style={styles.avatarText}>{initial(message.authorLabel)}</Text>
@@ -691,6 +1108,7 @@ const PostCard = memo(function PostCard({
         <View style={styles.postHead}>
           <Text style={styles.postNo}>#{index}</Text>
           {message.kind !== "message" ? <Text style={styles.kindTag}>{message.kind}</Text> : null}
+          {message.awaitingHuman ? <Text style={styles.awaitTag}>NEEDS YOUR ANSWER</Text> : null}
           <Text style={styles.postTime}>{timeAgo(message.createdAt_ms)}</Text>
         </View>
         <View style={styles.postContent}>
@@ -705,8 +1123,9 @@ const PostCard = memo(function PostCard({
               </Text>
             </View>
           ) : null}
-          <Text style={styles.postBody}>{message.text}</Text>
+          <ForumMarkdown text={message.text} />
         </View>
+        <VoteBar message={message} onVote={onVote} />
       </View>
     </View>
   );
@@ -752,7 +1171,64 @@ const KANBAN: { status: ForumTaskStatus; label: string }[] = [
   { status: "done", label: "Done" },
 ];
 
-const KanbanBoard = memo(function KanbanBoard({ tasks }: { tasks: ForumTask[] }): ReactElement {
+const EpicChip = memo(function EpicChip({
+  epic,
+  active,
+  onToggle,
+}: {
+  epic: { name: string; done: number; total: number };
+  active: boolean;
+  onToggle: (name: string | null) => void;
+}): ReactElement {
+  const press = useCallback(
+    () => onToggle(active ? null : epic.name),
+    [active, epic.name, onToggle],
+  );
+  return (
+    <Pressable style={[styles.epicChip, active ? styles.epicChipOn : null]} onPress={press}>
+      <Text style={styles.epicChipText}>{epic.name}</Text>
+      <Text style={styles.epicChipCount}>
+        {epic.done}/{epic.total}
+      </Text>
+    </Pressable>
+  );
+});
+
+const KanbanCard = memo(function KanbanCard({
+  task,
+  onOpen,
+}: {
+  task: ForumTask;
+  onOpen: (taskId: string) => void;
+}): ReactElement {
+  const press = useCallback(() => onOpen(task.id), [onOpen, task.id]);
+  const who =
+    task.assigneeLabel ?? (task.assigneeAgentId ? task.assigneeAgentId.slice(0, 8) : null);
+  return (
+    <Pressable style={styles.kanbanCard} onPress={press} testID={`forum-task-${task.id}`}>
+      <View style={[styles.cardStripe, { backgroundColor: taskDotColor(task.status) }]} />
+      {task.epic ? <Text style={styles.cardEpic}>{task.epic.toUpperCase()}</Text> : null}
+      <Text style={styles.kanbanCardTitle} numberOfLines={3}>
+        {task.parentTaskId ? "↳ " : ""}
+        {task.title}
+      </Text>
+      <Text style={styles.kanbanCardMeta}>
+        {task.estimate !== "unknown" ? task.estimate.toUpperCase() : "—"}
+        {who ? ` · ${who}` : " · unassigned"}
+        {task.comments.length > 0 ? ` · 💬 ${task.comments.length}` : ""}
+      </Text>
+    </Pressable>
+  );
+});
+
+const KanbanBoard = memo(function KanbanBoard({
+  tasks,
+  onOpenTask,
+}: {
+  tasks: ForumTask[];
+  onOpenTask: (taskId: string) => void;
+}): ReactElement {
+  const [epicFilter, setEpicFilter] = useState<string | null>(null);
   if (tasks.length === 0) {
     return (
       <Text style={styles.emptyBoard}>
@@ -761,6 +1237,7 @@ const KanbanBoard = memo(function KanbanBoard({ tasks }: { tasks: ForumTask[] })
     );
   }
   const epics = epicSummaries(tasks);
+  const shown = epicFilter ? tasks.filter((t) => t.epic === epicFilter) : tasks;
   return (
     <View style={styles.boardWrap}>
       {epics.length > 0 ? (
@@ -768,50 +1245,128 @@ const KanbanBoard = memo(function KanbanBoard({ tasks }: { tasks: ForumTask[] })
           <Text style={styles.chartTitle}>EPICS</Text>
           <View style={styles.epicChipRow}>
             {epics.map((e) => (
-              <View key={e.name} style={styles.epicChip}>
-                <Text style={styles.epicChipText}>{e.name}</Text>
-                <Text style={styles.epicChipCount}>
-                  {e.done}/{e.total}
-                </Text>
-              </View>
+              <EpicChip
+                key={e.name}
+                epic={e}
+                active={epicFilter === e.name}
+                onToggle={setEpicFilter}
+              />
             ))}
           </View>
         </View>
       ) : null}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.kanban}>
-        <View style={styles.kanbanRow}>
-          {KANBAN.map((col) => {
-            const colTasks = tasks.filter((t) => t.status === col.status);
-            return (
-              <View key={col.status} style={styles.column}>
-                <Text style={styles.columnHead}>
-                  {col.label.toUpperCase()} · {colTasks.length}
-                </Text>
-                {colTasks.map((task) => (
-                  <View key={task.id} style={styles.kanbanCard}>
-                    <View
-                      style={[styles.cardStripe, { backgroundColor: taskDotColor(task.status) }]}
-                    />
-                    {task.epic ? (
-                      <Text style={styles.cardEpic}>{task.epic.toUpperCase()}</Text>
-                    ) : null}
-                    <Text style={styles.kanbanCardTitle} numberOfLines={3}>
-                      {task.parentTaskId ? "↳ " : ""}
-                      {task.title}
-                    </Text>
-                    <Text style={styles.kanbanCardMeta}>
-                      {task.estimate !== "unknown" ? task.estimate.toUpperCase() : "—"}
-                      {task.assigneeAgentId
-                        ? ` · ${task.assigneeAgentId.slice(0, 8)}`
-                        : " · unassigned"}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            );
-          })}
-        </View>
-      </ScrollView>
+      <View style={styles.kanbanRow}>
+        {KANBAN.map((col) => {
+          const colTasks = shown.filter((t) => t.status === col.status);
+          return (
+            <View key={col.status} style={styles.column}>
+              <Text style={styles.columnHead}>
+                {col.label.toUpperCase()} · {colTasks.length}
+              </Text>
+              {colTasks.map((task) => (
+                <KanbanCard key={task.id} task={task} onOpen={onOpenTask} />
+              ))}
+            </View>
+          );
+        })}
+      </View>
+    </View>
+  );
+});
+
+// Jira-style task detail: title, status, epic, assignee, reporter, estimate, Markdown description,
+// and the task's comment thread. Opened by tapping a board card.
+const TaskDetailModal = memo(function TaskDetailModal({
+  task,
+  onClose,
+}: {
+  task: ForumTask | null;
+  onClose: () => void;
+}): ReactElement | null {
+  if (!task) return null;
+  const who = task.assigneeLabel ?? (task.assigneeAgentId ? task.assigneeAgentId.slice(0, 8) : "—");
+  const reporter = task.createdByLabel ?? task.createdBy.slice(0, 8);
+  return (
+    <Modal transparent animationType="fade" visible onRequestClose={onClose}>
+      <Pressable style={styles.modalBackdrop} onPress={onClose}>
+        <Pressable style={styles.modalCard} onPress={NOOP}>
+          <View style={styles.modalHead}>
+            <View style={[styles.cardStripe, { backgroundColor: taskDotColor(task.status) }]} />
+            <Text style={styles.modalTitle}>
+              {task.parentTaskId ? "↳ " : ""}
+              {task.title}
+            </Text>
+            <Pressable onPress={onClose} hitSlop={8}>
+              <Text style={styles.modalClose}>✕</Text>
+            </Pressable>
+          </View>
+          <ScrollView contentContainerStyle={styles.modalBody}>
+            <View style={styles.metaGrid}>
+              <TaskMeta
+                label="Status"
+                value={statusLabel(task.status)}
+                color={taskDotColor(task.status)}
+              />
+              <TaskMeta label="Epic" value={task.epic ?? "—"} />
+              <TaskMeta label="Assignee" value={who} />
+              <TaskMeta label="Reporter" value={reporter} />
+              <TaskMeta
+                label="Estimate"
+                value={task.estimate !== "unknown" ? task.estimate.toUpperCase() : "—"}
+              />
+            </View>
+            <Text style={styles.modalSection}>DESCRIPTION</Text>
+            {task.description.trim() ? (
+              <ForumMarkdown text={task.description} />
+            ) : (
+              <Text style={styles.modalMuted}>No description.</Text>
+            )}
+            <Text style={styles.modalSection}>COMMENTS · {task.comments.length}</Text>
+            {task.comments.length === 0 ? (
+              <Text style={styles.modalMuted}>No comments yet.</Text>
+            ) : (
+              task.comments.map((c) => <TaskCommentRow key={c.id} comment={c} />)
+            )}
+          </ScrollView>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+});
+
+const TaskMeta = memo(function TaskMeta({
+  label,
+  value,
+  color,
+}: {
+  label: string;
+  value: string;
+  color?: string;
+}): ReactElement {
+  return (
+    <View style={styles.metaCell}>
+      <Text style={styles.metaLabel}>{label}</Text>
+      <Text style={[styles.metaValue, color ? { color } : null]} numberOfLines={1}>
+        {value}
+      </Text>
+    </View>
+  );
+});
+
+const TaskCommentRow = memo(function TaskCommentRow({
+  comment,
+}: {
+  comment: ForumTaskComment;
+}): ReactElement {
+  const color = roleColor(comment.role);
+  return (
+    <View style={styles.commentRow}>
+      <View style={styles.commentHead}>
+        <View style={[styles.commentDot, { backgroundColor: color }]} />
+        <Text style={styles.commentWho}>{comment.authorLabel}</Text>
+        <Text style={styles.commentTime}>{timeAgo(comment.createdAt_ms)}</Text>
+      </View>
+      <ForumMarkdown text={comment.text} />
     </View>
   );
 });
@@ -888,6 +1443,8 @@ const styles = StyleSheet.create((_theme) => ({
   },
   backText: { color: C.green, fontSize: 13, fontFamily: FONT_MONO },
   threadBody: { padding: 20, gap: 12, maxWidth: 900, width: "100%", alignSelf: "center" },
+  threadStack: { gap: 12 },
+  postStack: { gap: 12 },
   postTitle: { color: C.text, fontSize: 22, fontWeight: "700", fontFamily: FONT_SANS },
   phaseBar: { flexDirection: "row", flexWrap: "wrap", gap: 14, marginBottom: 6 },
   phaseStep: { flexDirection: "row", alignItems: "center", gap: 6 },
@@ -1011,8 +1568,19 @@ const styles = StyleSheet.create((_theme) => ({
     textAlign: "center",
   },
   kanban: { flexGrow: 0 },
-  kanbanRow: { flexDirection: "row", gap: 12, paddingBottom: 8 },
-  column: { width: 208, gap: 8 },
+  // Wrap so all six columns (incl. Done) stay visible; each column flexes to share the width.
+  kanbanRow: { flexDirection: "row", flexWrap: "wrap", gap: 10, paddingBottom: 8 },
+  column: {
+    flexGrow: 1,
+    flexBasis: 150,
+    minWidth: 140,
+    gap: 8,
+    backgroundColor: C.surface,
+    borderWidth: 1,
+    borderColor: C.borderSoft,
+    borderRadius: 8,
+    padding: 8,
+  },
   columnHead: {
     fontFamily: FONT_MONO,
     letterSpacing: 0.5,
@@ -1096,4 +1664,234 @@ const styles = StyleSheet.create((_theme) => ({
   // board wrap + epic strip
   boardWrap: { gap: 12 },
   epicStrip: { gap: 6 },
+  epicChipOn: { borderColor: C.amber, backgroundColor: "#241f10" },
+  // delete topic (human management)
+  deleteBtn: {
+    borderWidth: 1,
+    borderColor: C.borderSoft,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  deleteBtnConfirm: { borderColor: C.red, backgroundColor: "#2a1212" },
+  deleteBtnText: { fontFamily: FONT_MONO, color: C.muted, fontSize: 12 },
+  // code block (custom markdown renderer)
+  codeBlock: {
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 8,
+    backgroundColor: "#0a0a0a",
+    marginVertical: 6,
+    overflow: "hidden",
+  },
+  codeBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: C.borderSoft,
+    backgroundColor: "#111111",
+  },
+  codeDots: { flexDirection: "row", gap: 5 },
+  codeDot: { width: 8, height: 8, borderRadius: 4, opacity: 0.7 },
+  codeLang: {
+    fontFamily: FONT_MONO,
+    letterSpacing: 0.5,
+    color: C.muted,
+    fontSize: 10,
+    textTransform: "uppercase",
+  },
+  codeScroll: { padding: 12 },
+  codeText: { fontFamily: FONT_MONO, color: "#d4d4d4", fontSize: 12, lineHeight: 18 },
+  // activity section (separate from discussion posts)
+  activitySection: {
+    gap: 2,
+    borderWidth: 1,
+    borderColor: C.borderSoft,
+    borderRadius: 10,
+    backgroundColor: C.surface,
+    padding: 10,
+  },
+  activityHeader: {
+    fontFamily: FONT_MONO,
+    letterSpacing: 0.5,
+    color: C.muted,
+    fontSize: 11,
+    fontWeight: "700",
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+  },
+  askBannerHint: { color: C.muted, fontSize: 11, fontFamily: FONT_SANS, fontStyle: "italic" },
+  // skeleton loading
+  skeletonPost: { flexDirection: "row", gap: 12, paddingVertical: 10 },
+  skeletonBody: { flex: 1, gap: 8 },
+  // vote footer (vBulletin reactions)
+  voteFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: C.borderSoft,
+  },
+  voteBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    backgroundColor: C.card,
+  },
+  voteBtnUpOn: { borderColor: C.green, backgroundColor: "#12240f" },
+  voteBtnDownOn: { borderColor: C.red, backgroundColor: "#2a1212" },
+  voteBtnText: { fontFamily: FONT_MONO, color: C.soft, fontSize: 12 },
+  repPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    marginLeft: "auto",
+    borderWidth: 1,
+    borderColor: C.borderSoft,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  repLabel: {
+    fontFamily: FONT_MONO,
+    letterSpacing: 0.5,
+    color: C.faint,
+    fontSize: 10,
+    textTransform: "uppercase",
+  },
+  repScore: { fontFamily: FONT_MONO, fontSize: 12, fontWeight: "700" },
+  // activity rows (status/review/system — not discussion posts)
+  activityRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderLeftWidth: 2,
+    borderLeftColor: C.borderSoft,
+  },
+  activityDot: { width: 7, height: 7, borderRadius: 4 },
+  activityText: { flex: 1, color: C.muted, fontSize: 12, fontFamily: FONT_SANS, lineHeight: 17 },
+  activityWho: { color: C.soft, fontFamily: FONT_MONO, fontSize: 11 },
+  activityKind: { color: C.faint, fontFamily: FONT_MONO, fontSize: 11 },
+  activityTime: { color: C.faint, fontFamily: FONT_MONO, fontSize: 10 },
+  // ask-human banner
+  askBanner: {
+    borderWidth: 1,
+    borderColor: C.amber,
+    backgroundColor: "#241f10",
+    borderRadius: 8,
+    padding: 12,
+    gap: 4,
+  },
+  askBannerTitle: { color: C.amber, fontFamily: FONT_MONO, fontSize: 12, fontWeight: "700" },
+  askBannerText: { color: C.text, fontSize: 13, fontFamily: FONT_SANS, lineHeight: 19 },
+  // human reply composer
+  replyBox: {
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 8,
+    backgroundColor: C.card,
+    padding: 8,
+    gap: 8,
+  },
+  replyInput: {
+    color: C.text,
+    fontSize: 13,
+    fontFamily: FONT_SANS,
+    minHeight: 44,
+    padding: 6,
+  },
+  replySend: {
+    alignSelf: "flex-end",
+    borderWidth: 1,
+    borderColor: C.green,
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: "#12240f",
+  },
+  replySendText: { color: C.green, fontFamily: FONT_MONO, fontSize: 12, fontWeight: "700" },
+  // post awaiting-human highlight + tag
+  postAwaiting: { borderColor: C.amber },
+  awaitTag: {
+    fontFamily: FONT_MONO,
+    letterSpacing: 0.5,
+    color: C.amber,
+    fontSize: 9,
+    fontWeight: "700",
+    borderWidth: 1,
+    borderColor: C.amber,
+    borderRadius: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+  },
+  // task detail modal (Jira)
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+  },
+  modalCard: {
+    width: "100%",
+    maxWidth: 680,
+    maxHeight: "86%",
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 12,
+    backgroundColor: C.surface,
+    overflow: "hidden",
+  },
+  modalHead: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
+  },
+  modalTitle: { flex: 1, color: C.text, fontSize: 16, fontWeight: "700", fontFamily: FONT_SANS },
+  modalClose: { color: C.muted, fontSize: 18, paddingHorizontal: 4 },
+  modalBody: { padding: 16, gap: 10 },
+  modalSection: {
+    fontFamily: FONT_MONO,
+    letterSpacing: 0.5,
+    color: C.muted,
+    fontSize: 11,
+    fontWeight: "700",
+    marginTop: 6,
+  },
+  modalMuted: { color: C.faint, fontSize: 13, fontFamily: FONT_SANS },
+  metaGrid: { flexDirection: "row", flexWrap: "wrap", gap: 16 },
+  metaCell: { minWidth: 96, gap: 2 },
+  metaLabel: {
+    fontFamily: FONT_MONO,
+    letterSpacing: 0.5,
+    color: C.faint,
+    fontSize: 10,
+    textTransform: "uppercase",
+  },
+  metaValue: { color: C.text, fontSize: 13, fontFamily: FONT_MONO },
+  commentRow: {
+    gap: 4,
+    borderTopWidth: 1,
+    borderTopColor: C.borderSoft,
+    paddingTop: 8,
+  },
+  commentHead: { flexDirection: "row", alignItems: "center", gap: 6 },
+  commentDot: { width: 8, height: 8, borderRadius: 4 },
+  commentWho: { color: C.soft, fontFamily: FONT_MONO, fontSize: 12 },
+  commentTime: { color: C.faint, fontFamily: FONT_MONO, fontSize: 10, marginLeft: "auto" },
 }));
