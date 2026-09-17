@@ -5,11 +5,11 @@ own release line (now `0.9.14`); the many `v0.1.x`–`v1.0.x` tags in history ar
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
 
-## v0.9.30 — 2026-09-17
+## v0.9.31 — 2026-09-17
 
 Session sharing v2 — the guest joins the **real app** (scoped to one agent by the daemon), instead
 of a bespoke mini-page (ADR-0019). This supersedes the v0.9.14 guest surface and rolls up the whole
-v2 line (0.9.15–0.9.30).
+v2 line (0.9.15–0.9.31).
 
 ### Added
 
@@ -53,6 +53,9 @@ switch_agent_provider_request` when the host granted "change model & mode" — t
 - **Artifacts tab no longer crashes the app** (React #185 infinite render loop) when opened over a
   non-empty timeline — the canvas now selects a stable store reference and derives artifacts in a
   memo instead of returning a fresh array from the store selector each render.
+- **Windows desktop build** — the desktop `build:renderer` script set its env var with bash-only
+  inline syntax (`VAR=value cmd`), which npm runs through `cmd.exe` on Windows and fails; it now uses
+  `cross-env`, so the Windows release binary builds again (macOS/Linux were unaffected).
 
 ## v0.9.14 — 2026-09-16
 
