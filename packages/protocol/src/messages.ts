@@ -69,6 +69,23 @@ import {
   ScheduleUpdateResponseSchema,
 } from "./schedule/rpc-schemas.js";
 import {
+  ForumCreateRequestSchema,
+  ForumListRequestSchema,
+  ForumGetRequestSchema,
+  ForumArchiveRequestSchema,
+  ForumDeleteRequestSchema,
+  ForumPostRequestSchema,
+  ForumVoteRequestSchema,
+  ForumCreateResponseSchema,
+  ForumListResponseSchema,
+  ForumGetResponseSchema,
+  ForumArchiveResponseSchema,
+  ForumDeleteResponseSchema,
+  ForumPostResponseSchema,
+  ForumVoteResponseSchema,
+  ForumStreamSchema,
+} from "./agent-forum/rpc-schemas.js";
+import {
   LoopRunRequestSchema,
   LoopListRequestSchema,
   LoopInspectRequestSchema,
@@ -4130,6 +4147,13 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ScheduleDeleteRequestSchema,
   ScheduleRunOnceRequestSchema,
   ScheduleUpdateRequestSchema,
+  ForumCreateRequestSchema,
+  ForumListRequestSchema,
+  ForumGetRequestSchema,
+  ForumArchiveRequestSchema,
+  ForumDeleteRequestSchema,
+  ForumPostRequestSchema,
+  ForumVoteRequestSchema,
   LoopRunRequestSchema,
   LoopListRequestSchema,
   LoopInspectRequestSchema,
@@ -4470,6 +4494,7 @@ export const ServerInfoStatusPayloadSchema = z
         autorun: z.boolean().optional(), // Autonomous run (spec §20 / ADR-0017); default OFF, opt-in per daemon
         autorunApproval: z.boolean().optional(), // Per-action approval mode for autorun (§20.7.3)
         sessionSharing: z.boolean().optional(), // Session sharing via Cloudflare tunnel (spec §21 / ADR-0018); default OFF
+        agentForum: z.boolean().optional(), // Agent Forum / Team mode (docs/plans/active/agent-forum.md)
       })
       .optional(),
   })
@@ -7727,6 +7752,14 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   SessionShareSetOptionsResponseSchema,
   SessionShareListResponseSchema,
   SessionShareStreamSchema,
+  ForumCreateResponseSchema,
+  ForumListResponseSchema,
+  ForumGetResponseSchema,
+  ForumArchiveResponseSchema,
+  ForumDeleteResponseSchema,
+  ForumPostResponseSchema,
+  ForumVoteResponseSchema,
+  ForumStreamSchema,
   ForgeChangeRequestCreateResponseSchema,
   ForgeChangeRequestCloseResponseSchema,
   ForgeReleaseCreateResponseSchema,
@@ -8327,6 +8360,30 @@ export type SessionShareListResponse = z.infer<typeof SessionShareListResponseSc
 export type SessionShareKickRequest = z.infer<typeof SessionShareKickRequestSchema>;
 export type SessionShareKickResponse = z.infer<typeof SessionShareKickResponseSchema>;
 export type SessionShareStream = z.infer<typeof SessionShareStreamSchema>;
+// Agent Forum / Team mode types (docs/plans/active/agent-forum.md)
+export type {
+  ForumTopicStatus,
+  ForumTaskStatus,
+  ForumRole,
+  ForumEstimate,
+  ForumParticipant,
+  ForumTaskEvent,
+  ForumTask,
+  ForumTaskComment,
+  ForumMessageKind,
+  ForumMessage,
+  StoredForumTopic,
+  ForumEpicStat,
+  ForumTopicSummary,
+} from "./agent-forum/types.js";
+export type ForumCreateRequest = z.infer<typeof ForumCreateRequestSchema>;
+export type ForumListRequest = z.infer<typeof ForumListRequestSchema>;
+export type ForumGetRequest = z.infer<typeof ForumGetRequestSchema>;
+export type ForumArchiveRequest = z.infer<typeof ForumArchiveRequestSchema>;
+export type ForumDeleteRequest = z.infer<typeof ForumDeleteRequestSchema>;
+export type ForumPostRequest = z.infer<typeof ForumPostRequestSchema>;
+export type ForumVoteRequest = z.infer<typeof ForumVoteRequestSchema>;
+export type ForumStream = z.infer<typeof ForumStreamSchema>;
 // Forge Hub — Milestone D types
 export type ForgeChangeRequestCreateRequest = z.infer<typeof ForgeChangeRequestCreateRequestSchema>;
 export type ForgeChangeRequestCreateResponse = z.infer<

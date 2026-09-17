@@ -168,6 +168,8 @@ import { ChatScheduleLoopSession } from "./session/chat/chat-schedule-loop-sessi
 import { AutorunSession } from "./session/autorun/autorun-session.js";
 import type { AutorunService } from "./autorun/service.js";
 import { SessionShareSession } from "./session/session-share/session-share-session.js";
+import { AgentForumSession } from "./session/agent-forum/agent-forum-session.js";
+import type { AgentForumService } from "./agent-forum/service.js";
 import type { SessionShareService } from "./session-share/service.js";
 import { ClusterSession } from "./session/cluster/cluster-session.js";
 import { ClusterRegistry } from "./cluster/cluster-registry.js";
@@ -480,6 +482,11 @@ export interface SessionOptions {
   scheduleService: ScheduleService;
   autorunService?: AutorunService | null;
   sessionShareService?: SessionShareService | null;
+  agentForumService?: AgentForumService | null;
+  // Bootstraps the orchestration lead for a freshly created forum topic (wired in bootstrap.ts).
+  agentForumBootstrap?:
+    | ((input: { topicId: string; prompt: string; originAgentId?: string }) => void | Promise<void>)
+    | null;
   loopService: LoopService;
   skillsStorage?: SkillsStorage | null;
   usageHistory?: UsageHistoryStorage | null;
@@ -783,6 +790,7 @@ export class Session {
   private readonly chatScheduleLoopSession: ChatScheduleLoopSession;
   private readonly autorunSession: AutorunSession | null;
   private readonly sessionShareSession: SessionShareSession | null;
+  private readonly agentForumSession: AgentForumSession | null;
   private clusterSession!: ClusterSession;
   private databaseSession!: DatabaseSession;
   private readonly providerCatalogSession: ProviderCatalogSession;
@@ -821,6 +829,7 @@ export class Session {
       scheduleService,
       autorunService,
       sessionShareService,
+      agentForumService,
       loopService,
       checkoutDiffManager,
       github,
@@ -994,6 +1003,14 @@ export class Session {
           host: { emit: (msg) => this.emit(msg) },
           sessionShareService,
           logger: this.sessionLogger,
+        })
+      : null;
+    this.agentForumSession = agentForumService
+      ? new AgentForumSession({
+          host: { emit: (msg) => this.emit(msg) },
+          agentForumService,
+          logger: this.sessionLogger,
+          bootstrapTopic: options.agentForumBootstrap,
         })
       : null;
     this.initClusterSession(options);
@@ -2183,6 +2200,7 @@ export class Session {
       () => this.dispatchChatScheduleLoopMessage(msg),
       () => this.dispatchAutorunMessage(msg),
       () => this.dispatchSessionShareMessage(msg),
+      () => this.dispatchAgentForumMessage(msg),
       () => this.dispatchClusterMessage(msg),
       () => this.dispatchDatabaseMessage(msg),
       () => this.dispatchMigrationMessage(msg),
@@ -2946,6 +2964,29 @@ export class Session {
         return share.handleSetOptionsRequest(msg);
       case "session.share.list.request":
         return share.handleListRequest(msg);
+      default:
+        return undefined;
+    }
+  }
+
+  private dispatchAgentForumMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    const forum = this.agentForumSession;
+    if (!forum) return undefined;
+    switch (msg.type) {
+      case "forum/create":
+        return forum.handleCreateRequest(msg);
+      case "forum/list":
+        return forum.handleListRequest(msg);
+      case "forum/get":
+        return forum.handleGetRequest(msg);
+      case "forum/archive":
+        return forum.handleArchiveRequest(msg);
+      case "forum/delete":
+        return forum.handleDeleteRequest(msg);
+      case "forum/post":
+        return forum.handlePostRequest(msg);
+      case "forum/vote":
+        return forum.handleVoteRequest(msg);
       default:
         return undefined;
     }

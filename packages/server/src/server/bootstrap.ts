@@ -155,6 +155,8 @@ import { DatabaseRegistry } from "./database/database-registry.js";
 import { ScheduleService } from "./schedule/service.js";
 import { AutorunService } from "./autorun/service.js";
 import { SessionShareService } from "./session-share/service.js";
+import { AgentForumService } from "./agent-forum/service.js";
+import { createForumBootstrap } from "./agent-forum/bootstrap.js";
 import { TunnelManager } from "./session-share/tunnel-manager.js";
 import { DaemonConfigStore, type MutableDaemonConfig } from "./daemon-config-store.js";
 import { PluginService } from "./plugins/index.js";
@@ -1394,6 +1396,13 @@ export async function createJAgentDeskDaemon(
     { elapsed: elapsed(), enabled: config.sessionSharingEnabled === true },
     "Session share service initialized",
   );
+  // Agent Forum / Team mode (docs/plans/active/agent-forum.md). Persists per-topic JSON under
+  // ~/.jagentdesk/forums and streams topic changes to all connected clients.
+  const agentForumService = new AgentForumService({
+    dir: path.join(config.jagentdeskHome, "forums"),
+    logger,
+    onUpdate: (topic) => emitExternalSessionMessage({ type: "forum.stream", payload: { topic } }),
+  });
   logger.info({ elapsed: elapsed() }, "Loading persisted agent registry");
   const persistedRecords = await agentStorage.list();
   logger.info(
@@ -1472,6 +1481,7 @@ export async function createJAgentDeskDaemon(
     resolveSpeakHandler: (agentId) => wsServer?.resolveVoiceSpeakHandler(agentId) ?? null,
     resolveCallerContext: (agentId) => wsServer?.resolveVoiceCallerContext(agentId) ?? null,
     orchestrationRuntime,
+    agentForumService,
     clusterRegistry,
     databaseRegistry,
     skillsStorage,
@@ -1780,6 +1790,12 @@ export async function createJAgentDeskDaemon(
             // Let a live capability toggle re-scope already-connected guest sessions (ADR-0019).
             sessionShareService?.setGuestScopeUpdater((agentId, scopes) =>
               wsServer?.updateGuestScopesForAgent(agentId, scopes),
+            );
+            // Agent Forum / Team mode: expose the service to sessions + the bootstrap hook that turns
+            // the origin chat agent into the topic's lead (it then spawns/delegates peers).
+            wsServer?.setAgentForum(
+              agentForumService,
+              createForumBootstrap({ agentManager, agentStorage, logger }),
             );
             // Bind the plugin session host and start configured plugins before any
             // external ingress attaches, mirroring upstream's pre-accept ordering.
