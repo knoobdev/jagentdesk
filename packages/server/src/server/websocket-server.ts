@@ -22,6 +22,7 @@ import type { DatabaseRegistry } from "./database/database-registry.js";
 import type { ScheduleService } from "./schedule/service.js";
 import type { AutorunService } from "./autorun/service.js";
 import type { SessionShareService } from "./session-share/service.js";
+import type { AgentForumService } from "./agent-forum/service.js";
 import type { AutorunState } from "@jagentdesk/protocol/messages";
 import type { CheckoutDiffManager, CheckoutDiffMetrics } from "./checkout-diff-manager.js";
 import type { DaemonConfigStore, MutableDaemonConfig } from "./daemon-config-store.js";
@@ -622,6 +623,12 @@ export class VoiceAssistantWebSocketServer {
   private readonly scheduleService: ScheduleService;
   private autorunService!: AutorunService | null;
   private sessionShareService!: SessionShareService | null;
+  // Agent Forum / Team mode (docs/plans/active/agent-forum.md). Injected post-construction via
+  // setAgentForum() so the giant positional constructor need not grow.
+  private agentForumService: AgentForumService | null = null;
+  private agentForumBootstrap:
+    | ((input: { topicId: string; prompt: string; originAgentId?: string }) => void | Promise<void>)
+    | null = null;
   private readonly checkoutDiffManager: CheckoutDiffManager;
   private readonly github: ForgeService;
   private readonly workspaceGitService: WorkspaceGitService;
@@ -1797,6 +1804,21 @@ export class VoiceAssistantWebSocketServer {
     return updated;
   }
 
+  // Inject the Agent Forum service + its orchestration-bootstrap hook after construction (Team mode).
+  public setAgentForum(
+    service: AgentForumService | null,
+    bootstrap:
+      | ((input: {
+          topicId: string;
+          prompt: string;
+          originAgentId?: string;
+        }) => void | Promise<void>)
+      | null,
+  ): void {
+    this.agentForumService = service;
+    this.agentForumBootstrap = bootstrap;
+  }
+
   private createSocketSession(options: SocketSessionOptions): Session {
     return new Session({
       clientId: options.clientId,
@@ -1837,6 +1859,8 @@ export class VoiceAssistantWebSocketServer {
       scheduleService: this.scheduleService,
       autorunService: this.autorunService,
       sessionShareService: this.sessionShareService,
+      agentForumService: this.agentForumService,
+      agentForumBootstrap: this.agentForumBootstrap,
       checkoutDiffManager: this.checkoutDiffManager,
       github: this.github,
       workspaceGitService: this.workspaceGitService,

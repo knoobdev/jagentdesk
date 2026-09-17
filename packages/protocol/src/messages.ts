@@ -69,6 +69,17 @@ import {
   ScheduleUpdateResponseSchema,
 } from "./schedule/rpc-schemas.js";
 import {
+  ForumCreateRequestSchema,
+  ForumListRequestSchema,
+  ForumGetRequestSchema,
+  ForumArchiveRequestSchema,
+  ForumCreateResponseSchema,
+  ForumListResponseSchema,
+  ForumGetResponseSchema,
+  ForumArchiveResponseSchema,
+  ForumStreamSchema,
+} from "./agent-forum/rpc-schemas.js";
+import {
   LoopRunRequestSchema,
   LoopListRequestSchema,
   LoopInspectRequestSchema,
@@ -4130,6 +4141,10 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ScheduleDeleteRequestSchema,
   ScheduleRunOnceRequestSchema,
   ScheduleUpdateRequestSchema,
+  ForumCreateRequestSchema,
+  ForumListRequestSchema,
+  ForumGetRequestSchema,
+  ForumArchiveRequestSchema,
   LoopRunRequestSchema,
   LoopListRequestSchema,
   LoopInspectRequestSchema,
@@ -7727,6 +7742,11 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   SessionShareSetOptionsResponseSchema,
   SessionShareListResponseSchema,
   SessionShareStreamSchema,
+  ForumCreateResponseSchema,
+  ForumListResponseSchema,
+  ForumGetResponseSchema,
+  ForumArchiveResponseSchema,
+  ForumStreamSchema,
   ForgeChangeRequestCreateResponseSchema,
   ForgeChangeRequestCloseResponseSchema,
   ForgeReleaseCreateResponseSchema,
@@ -8327,6 +8347,25 @@ export type SessionShareListResponse = z.infer<typeof SessionShareListResponseSc
 export type SessionShareKickRequest = z.infer<typeof SessionShareKickRequestSchema>;
 export type SessionShareKickResponse = z.infer<typeof SessionShareKickResponseSchema>;
 export type SessionShareStream = z.infer<typeof SessionShareStreamSchema>;
+// Agent Forum / Team mode types (docs/plans/active/agent-forum.md)
+export type {
+  ForumTopicStatus,
+  ForumTaskStatus,
+  ForumRole,
+  ForumEstimate,
+  ForumParticipant,
+  ForumTaskEvent,
+  ForumTask,
+  ForumMessageKind,
+  ForumMessage,
+  StoredForumTopic,
+  ForumTopicSummary,
+} from "./agent-forum/types.js";
+export type ForumCreateRequest = z.infer<typeof ForumCreateRequestSchema>;
+export type ForumListRequest = z.infer<typeof ForumListRequestSchema>;
+export type ForumGetRequest = z.infer<typeof ForumGetRequestSchema>;
+export type ForumArchiveRequest = z.infer<typeof ForumArchiveRequestSchema>;
+export type ForumStream = z.infer<typeof ForumStreamSchema>;
 // Forge Hub — Milestone D types
 export type ForgeChangeRequestCreateRequest = z.infer<typeof ForgeChangeRequestCreateRequestSchema>;
 export type ForgeChangeRequestCreateResponse = z.infer<
