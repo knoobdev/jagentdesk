@@ -5,11 +5,11 @@ own release line (now `0.9.14`); the many `v0.1.x`–`v1.0.x` tags in history ar
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
 
-## v0.9.29 — 2026-09-17
+## v0.9.30 — 2026-09-17
 
 Session sharing v2 — the guest joins the **real app** (scoped to one agent by the daemon), instead
 of a bespoke mini-page (ADR-0019). This supersedes the v0.9.14 guest surface and rolls up the whole
-v2 line (0.9.15–0.9.29).
+v2 line (0.9.15–0.9.30).
 
 ### Added
 
@@ -46,8 +46,10 @@ switch_agent_provider_request` when the host granted "change model & mode" — t
 - **Guest reconnects** through idle, screen-lock, network changes, and browser refresh (F5): the
   guest token persists and remote (tunnel) guests are exempt from the non-tailnet local-retry cap
   that used to disable reconnect after three tries.
-- **Shared sessions screen** is a normal in-shell page (MenuHeader + sidebar nav), not a
-  full-screen-locked route with no way back.
+- **Shared sessions screen renders the full app shell** — the left sidebar (and every nav entry:
+  Home, Schedules, Settings, workspaces, …) stays mounted on `/shared-sessions`, matching
+  `/sessions` and `/schedules`. It was previously a full-screen page with no sidebar and no way back
+  (the route was missing from the layout's app-chrome allowlist); now you can navigate away normally.
 - **Artifacts tab no longer crashes the app** (React #185 infinite render loop) when opened over a
   non-empty timeline — the canvas now selects a stable store reference and derives artifacts in a
   memo instead of returning a fresh array from the store selector each render.
