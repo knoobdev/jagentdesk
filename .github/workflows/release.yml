@@ -149,10 +149,14 @@ jobs:
         env:
           EP_GH_IGNORE_TIME: "true"
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          # The generated ws-outbound validation AOT is ~11 MB; Metro's transform worker OOMs on the
+          # 7 GB macOS runners with the default heap. Give workers more heap and cap their count so
+          # peak memory stays under the runner's RAM.
+          NODE_OPTIONS: "--max-old-space-size=6144"
         run: |
           set -euo pipefail
           npm --prefix ../.. run build:app-deps:clean
-          (cd ../app && JAGENTDESK_WEB_PLATFORM=electron npx expo export --platform web)
+          (cd ../app && JAGENTDESK_WEB_PLATFORM=electron npx expo export --platform web --max-workers 2)
           desktop_dir="$PWD"
           extra_args=()
           if [[ "${{ matrix.name }}" == macos-* ]]; then
@@ -276,6 +280,8 @@ jobs:
       - name: Build Android APK locally
         id: artifact
         shell: bash
+        env:
+          NODE_OPTIONS: "--max-old-space-size=6144"
         run: |
           set -euo pipefail
           export APP_VARIANT=production
@@ -367,6 +373,8 @@ jobs:
       - name: Build unsigned iOS device IPA with Xcode
         id: artifact
         shell: bash
+        env:
+          NODE_OPTIONS: "--max-old-space-size=6144"
         run: |
           set -euo pipefail
           export APP_VARIANT=production
