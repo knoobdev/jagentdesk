@@ -23,7 +23,6 @@ import { Combobox, ComboboxItem } from "@/components/ui/combobox";
 import type { ComboboxOption as ComboboxOptionType, ComboboxProps } from "@/components/ui/combobox";
 import { ComboboxTrigger } from "@/components/ui/combobox-trigger";
 import { Shortcut } from "@/components/ui/shortcut";
-import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 import { SidebarMenuToggle } from "@/components/headers/menu-header";
@@ -52,6 +51,11 @@ import { uniqueTitle } from "@/utils/unique-title";
 import { useWorkspace } from "@/stores/session-store-hooks";
 import { buildNewWorkspaceDraftKey, generateDraftId } from "@/stores/draft-keys";
 import { useDraftStore } from "@/stores/draft-store";
+import {
+  getTeamModeEnabled,
+  teamModeKey,
+  useTeamModeStore,
+} from "@/composer/agent-controls/team-mode-store";
 import { useOpenAddProject } from "@/hooks/use-open-add-project";
 import { isActiveCreateFlowForDraft, useCreateFlowStore } from "@/stores/create-flow-store";
 import {
@@ -1063,6 +1067,13 @@ function submitWorkspaceDraft(input: SubmitDraftInput): void {
     initialSetup,
   } = input;
   const draftId = draftIdInput?.trim() || generateDraftId();
+  // Team mode is armed on the new-workspace composer (keyed by draftKey), but the agent is actually
+  // provisioned later by the workspace draft tab (keyed by draftId). Carry the armed flag across that
+  // handoff so the tab's create flow can open a forum instead of a solo turn (one-shot arming).
+  if (getTeamModeEnabled(serverId, draftKey)) {
+    useTeamModeStore.getState().set(teamModeKey(serverId, draftId), true);
+    useTeamModeStore.getState().set(teamModeKey(serverId, draftKey), false);
+  }
   const clientMessageId = generateMessageId();
   const timestamp = Date.now();
   const wirePayload = splitComposerAttachmentsForSubmit(attachments, {
@@ -2128,7 +2139,9 @@ export function NewWorkspaceScreen({
       toast,
     ],
   );
-  const handleOpenOrchestration = useCallback(() => {
+  // Orchestration entry point, kept wired for a future launcher affordance; underscore-prefixed to
+  // mark it intentionally unreferenced for now.
+  const _handleOpenOrchestration = useCallback(() => {
     const existing = useSessionStore.getState().sessions[selectedServerId]?.workspaces;
     const titles = existing ? Array.from(existing.values(), (w) => w.title || w.name) : [];
     return openOrchestrationWorkspace({

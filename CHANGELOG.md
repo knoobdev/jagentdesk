@@ -5,6 +5,43 @@ own release line (now `0.9.14`); the many `v0.1.x`–`v1.0.x` tags in history ar
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
 
+## v0.9.35 — 2026-09-18
+
+Team mode one-shot arming: toggling Team mode on a brand-new workspace now turns the
+very first message into a team, instead of silently running it as a solo agent.
+
+### Fixed
+
+- **One-shot Team mode on a new workspace.** Previously, arming Team mode on the
+  new-workspace composer and sending the first message created a lone agent and ran the
+  prompt as an ordinary turn — the forum never opened. The arming state lived under the
+  new-workspace composer's draft key, but the agent is actually provisioned later by the
+  workspace draft tab under a different key, so the flag was lost across that handoff. The
+  fix carries the armed flag across the handoff and provisions the team correctly:
+  - The workspace draft tab now performs the one-shot itself — it creates the real agent
+    first, then (when Team mode is armed) opens a forum topic with that **real** agent as
+    origin/lead via `forumCreate({ bootstrapLead: true })`, rather than running the prompt
+    as a solo turn. Verified live: first message → real agent created → forum topic opened
+    with that agent as origin → team bootstrap dispatched → lead starts planning.
+  - The composer's team-mode short-circuit is now skipped for parent-managed create
+    (draft) composers. A draft has no real agent yet, so routing there would have opened a
+    forum whose origin points at a non-existent draft id; team routing now happens after
+    the agent exists.
+  - The new-workspace screen transfers the armed flag from the composer's draft key onto
+    the draft id the workspace tab reads, so the one-shot survives the navigation handoff.
+  - Once consumed, the flag is cleared so a follow-up solo agent on the same tab is never
+    silently forced into a forum.
+- **Team-lead tab stuck on "loading agent title".** A one-shot lead never runs the prompt as
+  its own turn, so the usual first-message title generation never fired and its workspace tab
+  sat on the loading skeleton forever. The lead is now created with an explicit title derived
+  from the brief (same first-line/120-char rule as the forum topic), so the tab reads
+  correctly the moment it opens.
+
+### Changed
+
+- Removed a dead `Button` import and marked an unreferenced orchestration handler in the
+  new-workspace screen intentionally-unused, clearing two latent lint errors in the file.
+
 ## v0.9.34 — 2026-09-18
 
 Team mode follow-up: a live "virtual office", code review integrated into the daemon

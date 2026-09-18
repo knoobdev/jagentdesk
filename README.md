@@ -73,6 +73,17 @@ with a few deliberate boundaries:
 
 ## ✨ New in this release
 
+### Team mode — one-shot on a new workspace (v0.9.35)
+
+- **Turn on Team mode, send one message, get a team.** Arming the Team-mode toggle on a
+  brand-new workspace and sending the first message now spins up the full team instead of a
+  lone agent: it creates the real lead agent, then opens a forum topic with that agent as
+  origin/lead and dispatches the bootstrap — the lead plans, splits tasks, and brings in
+  reviewers. Previously that first message silently ran as a solo turn (the forum never
+  opened) because the armed flag was lost in the new-workspace → workspace-tab handoff.
+- **The lead's tab shows its title right away** instead of hanging on "loading agent title"
+  (a one-shot lead has no first turn to summarize, so it's now titled from the brief).
+
 ### Team mode — office, real code review & fixes (v0.9.34)
 
 - **Virtual office** — a new **OFFICE** tab renders the team working in real time: each

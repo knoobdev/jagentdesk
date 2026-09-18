@@ -1404,8 +1404,16 @@ export function Composer({
     ) => {
       // Team mode (docs/plans/active/agent-forum.md): route a real coding request to a forum topic
       // instead of a normal turn. The daemon seeds the topic and hands this agent the team-lead brief.
+      // Skip this for parent-managed create composers (drafts): there is no real agent yet, so its
+      // one-shot arming must run AFTER the agent is provisioned (see workspace-tab createDraftAgent),
+      // otherwise we'd open a forum whose origin/lead points at a non-existent draft id.
       const teamPrompt = outgoingMessage.trim();
-      if (teamPrompt && client && getTeamModeEnabled(serverId, agentId)) {
+      if (
+        teamPrompt &&
+        client &&
+        !onSubmitMessageRef.current &&
+        getTeamModeEnabled(serverId, agentId)
+      ) {
         setSendError(null);
         try {
           await client.forumCreate({
