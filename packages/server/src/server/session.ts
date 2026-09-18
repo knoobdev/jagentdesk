@@ -4015,6 +4015,76 @@ export class Session {
   /**
    * Handle create agent request
    */
+  // Idempotency for createAgent: a repeated request carrying the same clientMessageId (double
+  // dispatch, WS resend/reconnect) returns the already-created agent instead of spawning a duplicate.
+  private readonly createdAgentByClientMessageId = new Map<string, string>();
+  private readonly createAgentInFlight = new Map<string, Promise<string | null>>();
+
+  private async emitExistingAgentCreated(agentId: string, requestId?: string): Promise<void> {
+    if (!requestId) return;
+    const agent = this.agentManager.getAgent(agentId);
+    if (!agent) return;
+    const agentPayload = await this.buildAgentPayload(agent);
+    this.emit({
+      type: "status",
+      payload: { status: "agent_created", agentId, requestId, agent: agentPayload },
+    });
+  }
+
+  // Returns true (and re-emits the existing agent) if this clientMessageId already produced — or is
+  // producing — an agent, so the caller can skip creating a duplicate.
+  private async reuseExistingCreateAgent(
+    clientMessageId: string,
+    requestId?: string,
+  ): Promise<boolean> {
+    const existingId = this.createdAgentByClientMessageId.get(clientMessageId);
+    if (existingId && this.agentManager.getAgent(existingId)) {
+      await this.emitExistingAgentCreated(existingId, requestId);
+      return true;
+    }
+    const inFlight = this.createAgentInFlight.get(clientMessageId);
+    if (inFlight) {
+      const id = await inFlight.catch(() => null);
+      if (id && this.agentManager.getAgent(id)) {
+        await this.emitExistingAgentCreated(id, requestId);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Register an in-flight create for a clientMessageId (no-op when absent); returns its resolver.
+  private beginCreateInFlight(clientMessageId: string | undefined): (id: string | null) => void {
+    if (!clientMessageId) return () => {};
+    let resolveFn: (id: string | null) => void = () => {};
+    this.createAgentInFlight.set(
+      clientMessageId,
+      new Promise<string | null>((r) => {
+        resolveFn = r;
+      }),
+    );
+    return resolveFn;
+  }
+
+  private endCreateInFlight(
+    clientMessageId: string | undefined,
+    resolveInFlight: (id: string | null) => void,
+    createdAgentId: string | null,
+  ): void {
+    if (!clientMessageId) return;
+    resolveInFlight(createdAgentId);
+    this.createAgentInFlight.delete(clientMessageId);
+  }
+
+  private recordCreatedAgent(clientMessageId: string | undefined, agentId: string): void {
+    if (!clientMessageId) return;
+    this.createdAgentByClientMessageId.set(clientMessageId, agentId);
+    if (this.createdAgentByClientMessageId.size > 500) {
+      const oldest = this.createdAgentByClientMessageId.keys().next().value;
+      if (oldest !== undefined) this.createdAgentByClientMessageId.delete(oldest);
+    }
+  }
+
   private async handleCreateAgentRequest(msg: CreateAgentRequestMessage): Promise<void> {
     const {
       config,
@@ -4030,6 +4100,11 @@ export class Session {
       attachments,
       env,
     } = msg;
+
+    // De-duplicate by clientMessageId: a repeated create returns the already-created agent.
+    if (clientMessageId && (await this.reuseExistingCreateAgent(clientMessageId, requestId)))
+      return;
+    const resolveInFlight = this.beginCreateInFlight(clientMessageId);
     this.sessionLogger.info(
       { cwd: config.cwd, provider: config.provider, worktreeName },
       `Creating agent in ${config.cwd} (${config.provider})${
@@ -4103,6 +4178,7 @@ export class Session {
         },
       );
       createdAgentId = snapshot.id;
+      this.recordCreatedAgent(clientMessageId, snapshot.id);
       await this.agentUpdates.forwardLiveAgent(snapshot);
       if (resolvedIntent.createdDirectoryWorkspace && trimmedPrompt) {
         this.workspaceAutoName.scheduleForDirectory(
@@ -4163,6 +4239,8 @@ export class Session {
           content: `Failed to create agent: ${wireError.message}`,
         },
       });
+    } finally {
+      this.endCreateInFlight(clientMessageId, resolveInFlight, createdAgentId);
     }
   }
 

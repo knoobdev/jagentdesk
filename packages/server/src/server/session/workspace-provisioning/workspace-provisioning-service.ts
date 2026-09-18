@@ -316,6 +316,18 @@ export function createWorkspaceProvisioningService(deps: {
   ): Promise<string> {
     if (input.createdWorktree) return input.createdWorktree.workspace.workspaceId;
     if (input.requestedWorkspaceId) return input.requestedWorkspaceId;
+    // Reuse an existing active workspace for this cwd rather than minting a duplicate — otherwise
+    // no-workspaceId creates (e.g. an agent-to-agent create_agent that fell back to the cwd) scatter
+    // agents across several workspace records for the same directory.
+    const normalizedCwd = resolve(input.cwd);
+    const active = (await workspaceRegistry.list())
+      .filter((w) => !w.archivedAt && areEquivalentPaths(w.cwd, normalizedCwd))
+      .sort(
+        (left, right) =>
+          Date.parse(left.createdAt) - Date.parse(right.createdAt) ||
+          left.workspaceId.localeCompare(right.workspaceId),
+      )[0];
+    if (active) return active.workspaceId;
     return (
       await createWorkspaceForDirectory(input.cwd, input.initialTitle, undefined, {
         expectsInitialAgent: true,
