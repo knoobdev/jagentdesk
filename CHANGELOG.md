@@ -5,6 +5,54 @@ own release line (now `0.9.14`); the many `v0.1.x`–`v1.0.x` tags in history ar
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
 
+## v0.9.34 — 2026-09-18
+
+Team mode follow-up: a live "virtual office", code review integrated into the daemon
+core (open-code-review), an in-thread + native "ask the boss" flow, mobile responsive,
+and workspace/agent-creation fixes.
+
+### Added
+
+- **Virtual office (OFFICE tab)** — a live, animated scene of the team working: each
+  participant is an original vector character at a desk whose pose + status badge are
+  derived from the topic (working with a lit monitor + typing bob, reviewing, waiting on
+  the boss, talking, shipped ✓, or idle). Built with react-native-svg so it runs on
+  desktop and mobile without a GPU dependency (a team is only a handful of agents).
+  Architecture informed by petdex/archify (state-machine + lifecycle→pose mapping).
+- **Structured code review in the core (open-code-review methodology).** New protocol
+  types `ForumReviewFinding` (path + line range + category + severity + content +
+  suggestion) and `ForumTaskReview` (role, findings, coverage, verdict); tasks carry
+  `reviews[]`. `forum.review_task` now takes structured findings + coverage — the agent no
+  longer sets the verdict. The **daemon derives it**: any critical/high finding, or a
+  medium in the role's own dimension (BA = maintainability/docs, Tester = test/bug,
+  Pentester = security) → `request_changes`; otherwise `approve`. A task is `done` only
+  when BA, Tester **and** Pentester all approve; one `request_changes` returns it to
+  `in_progress`. The task detail renders a real review panel (per-role verdict + coverage;
+  each finding a severity badge + category + file:line + issue + suggestion).
+- **Ask the boss** — the team lead now escalates human decisions two ways at once:
+  `forum.ask_human` posts the question into the thread (board shows "waiting on boss") and
+  the native **AskUserQuestion** tool pops a real prompt in the agent chat. Recording the
+  boss's answer as a `decision` clears the pending state.
+
+### Changed
+
+- **Mobile responsive Team screen** (Unistyles `xs`/`md`): the dashboard stats wrap, the
+  status donut + legend stack, the kanban goes one-column, the postbit/avatar shrink, post
+  headers wrap, and the task-detail modal becomes a near-full-height bottom sheet.
+- Team-lead brief rewritten: reviewers follow the open-code-review dimensions with
+  evidence-carrying findings, precision-over-recall, a reflection pass, and no
+  workspace/cwd argument when spawning peers (peers inherit the lead's workspace).
+
+### Fixed
+
+- **Team-mode peers scattering into duplicate workspaces** — workspace provisioning now
+  reuses an existing active workspace for a directory instead of always minting a new one
+  when a create resolves via cwd (e.g. an agent-to-agent `create_agent`).
+- **Creating a workspace could spawn two agents** — `createAgent` is now idempotent by
+  `clientMessageId`; a double dispatch / WS resend returns the already-created agent.
+- **Team-mode toggle missing on a new workspace** — the draft composer now renders the
+  Team-mode toggle (gated by the `agentForum` host feature).
+
 ## v0.9.33 — 2026-09-18
 
 Team mode (Agent Forum) — hand a coding request to a team of agents that plan it,

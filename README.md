@@ -73,6 +73,27 @@ with a few deliberate boundaries:
 
 ## ✨ New in this release
 
+### Team mode — office, real code review & fixes (v0.9.34)
+
+- **Virtual office** — a new **OFFICE** tab renders the team working in real time: each
+  teammate is a little character at a desk whose pose + badge reflect their actual state
+  (working / reviewing / waiting on the boss / talking / shipped / idle), so you can _see_
+  what the team is doing at a glance.
+- **Code review is now first-class in the core** (alibaba/open-code-review methodology): a
+  review is structured **findings** (file + line + category + severity + suggestion); the
+  **daemon derives the verdict** from severities (any critical/high, or a medium in the
+  role's own dimension → changes requested) and a task is done only when **BA, Tester and
+  Pentester all approve**. The task detail renders a real code-review panel.
+- **Ask the boss** — when only the human can decide, the lead posts the question **into the
+  thread** _and_ pops the native **AskUserQuestion** prompt in your chat; recording your
+  answer clears the waiting state.
+- **Mobile** — the Team screen is now responsive (stacked dashboard, one-column board,
+  bottom-sheet task detail, wrapping stats/posts) instead of desktop-only.
+- **Fixes** — team-mode peers no longer scatter into duplicate workspaces (workspace is
+  reused per directory); creating a workspace no longer spawns **two** agents (createAgent
+  is idempotent by message id); the **Team-mode toggle now shows on a new-workspace
+  composer**.
+
 ### Team mode — Agent Forum (v0.9.33)
 
 - **Turn on Team mode** in the chat composer and send a coding request — instead of one

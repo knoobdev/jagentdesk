@@ -1,6 +1,6 @@
 {
   "name": "@jagentdesk/desktop",
-  "version": "0.9.33",
+  "version": "0.9.34",
   "private": true,
   "description": "JAgentDesk desktop app (Electron wrapper)",
   "homepage": "https://github.com/knoobdev/jagentdesk",
