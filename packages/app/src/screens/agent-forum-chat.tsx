@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
-import { Animated, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Animated, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import type { ForumChatMessage, ForumRole, StoredForumTopic } from "@jagentdesk/protocol/messages";
@@ -29,6 +29,12 @@ const CH = {
   red: "#e2564d",
   reactionBg: "#182a1e",
 } as const;
+
+// Kill the browser's blue focus ring on the web textarea (RN has no style for this).
+const WEB_INPUT_RESET =
+  Platform.OS === "web"
+    ? ({ outlineStyle: "none", outlineWidth: 0, outlineColor: "transparent" } as object)
+    : null;
 
 const STICKER_EMOJI: Record<string, string> = {
   shipit: "🚢",
@@ -148,13 +154,21 @@ const ReactionChip = memo(function ReactionChip({
   );
 });
 
+function previewOf(message: ForumChatMessage): string {
+  if (message.kind === "sticker") return `${STICKER_EMOJI[message.stickerId ?? ""] ?? "🖼"} sticker`;
+  const line = message.text.split("\n", 1)[0] ?? "";
+  return line.length > 60 ? `${line.slice(0, 59)}…` : line;
+}
+
 const ChatBubble = memo(function ChatBubble({
   message,
+  repliedTo,
   showHeader,
   onReact,
   onPickReaction,
 }: {
   message: ForumChatMessage;
+  repliedTo: ForumChatMessage | null;
   showHeader: boolean;
   onReact: (messageId: string, emoji: string) => void;
   onPickReaction: (messageId: string) => void;
@@ -196,6 +210,16 @@ const ChatBubble = memo(function ChatBubble({
               <Text style={[styles.author, { color }]} numberOfLines={1}>
                 {message.authorLabel}
               </Text>
+            ) : null}
+            {repliedTo ? (
+              <View style={styles.reply}>
+                <Text style={styles.replyAuthor} numberOfLines={1}>
+                  {repliedTo.authorAgentId === "user" ? "You" : repliedTo.authorLabel}
+                </Text>
+                <Text style={styles.replyText} numberOfLines={1}>
+                  {previewOf(repliedTo)}
+                </Text>
+              </View>
             ) : null}
             <Text style={styles.bubbleText}>{message.text}</Text>
             <Text style={[styles.time, mine ? styles.timeOut : null]}>
@@ -349,7 +373,12 @@ export const ChatTab = memo(function ChatTab({
   client: DaemonClient | null;
 }): ReactElement {
   const rooms = topic.chatRooms;
-  const [selectedRoom, setSelectedRoom] = useState<string>(() => rooms[0]?.id ?? "");
+  // Open on the room with the freshest banter (so you land where the action is), not always #general.
+  const [selectedRoom, setSelectedRoom] = useState<string>(() => {
+    const last = topic.chatMessages[topic.chatMessages.length - 1];
+    if (last && rooms.some((r) => r.id === last.roomId)) return last.roomId;
+    return rooms[0]?.id ?? "";
+  });
   const activeRoom = rooms.some((r) => r.id === selectedRoom) ? selectedRoom : (rooms[0]?.id ?? "");
   const [text, setText] = useState("");
   const [showStickers, setShowStickers] = useState(false);
@@ -360,6 +389,10 @@ export const ChatTab = memo(function ChatTab({
   const messages = useMemo(
     () => topic.chatMessages.filter((m) => m.roomId === activeRoom),
     [topic.chatMessages, activeRoom],
+  );
+  const byId = useMemo(
+    () => new Map(topic.chatMessages.map((m) => [m.id, m])),
+    [topic.chatMessages],
   );
 
   useEffect(() => {
@@ -464,6 +497,7 @@ export const ChatTab = memo(function ChatTab({
             <ChatBubble
               key={r.m.id}
               message={r.m}
+              repliedTo={r.m.replyToId ? (byId.get(r.m.replyToId) ?? null) : null}
               showHeader={r.showHeader}
               onReact={react}
               onPickReaction={setReactingTo}
@@ -485,7 +519,7 @@ export const ChatTab = memo(function ChatTab({
             onChangeText={setText}
             placeholder="Message the team…"
             placeholderTextColor={CH.muted}
-            style={styles.input}
+            style={[styles.input, WEB_INPUT_RESET]}
             onSubmitEditing={send}
             returnKeyType="send"
             multiline
@@ -507,9 +541,9 @@ const styles = StyleSheet.create(() => ({
   root: { flex: 1, backgroundColor: CH.bg, alignItems: "center" },
   // Constrain the conversation to a centered column so it doesn't stretch full-width on desktop, but
   // keep the same background as the rest of the app (no distinct wallpaper / bordered box).
-  container: { flex: 1, width: "100%", maxWidth: 860, alignSelf: "center" },
+  container: { flex: 1, width: "100%", maxWidth: 900, alignSelf: "center" },
   roomHeader: { paddingTop: 6 },
-  roomBar: { gap: 6, paddingHorizontal: 16, paddingVertical: 6, alignItems: "center" },
+  roomBar: { gap: 6, paddingHorizontal: 20, paddingVertical: 6, alignItems: "center" },
   roomChip: {
     paddingHorizontal: 12,
     paddingVertical: 5,
@@ -521,10 +555,10 @@ const styles = StyleSheet.create(() => ({
   roomChipTextOn: { color: CH.text },
   roomNew: { paddingHorizontal: 10, paddingVertical: 5 },
   roomNewText: { color: CH.muted, fontSize: 12 },
-  blurb: { color: CH.faint, fontSize: 11, paddingHorizontal: 16, paddingBottom: 6 },
+  blurb: { color: CH.faint, fontSize: 11, paddingHorizontal: 20, paddingBottom: 6 },
   list: { flex: 1 },
   listContent: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
     paddingTop: 16,
     paddingBottom: 8,
     gap: 2,
@@ -567,6 +601,15 @@ const styles = StyleSheet.create(() => ({
   bubbleOut: { backgroundColor: CH.outBubble, borderBottomRightRadius: 5 },
   bubbleInLead: { borderTopLeftRadius: 5 },
   bubbleOutLead: { borderTopRightRadius: 5 },
+  reply: {
+    borderLeftWidth: 2,
+    borderLeftColor: CH.accent,
+    paddingLeft: 7,
+    marginBottom: 4,
+    opacity: 0.9,
+  },
+  replyAuthor: { color: CH.accent, fontSize: 11.5, fontWeight: "700" },
+  replyText: { color: CH.soft, fontSize: 12 },
   bubbleText: { color: CH.text, fontSize: 14.5, lineHeight: 20 },
   time: { color: CH.muted, fontSize: 10, alignSelf: "flex-end", marginTop: 1 },
   timeOut: { color: "#7fb28f" },
@@ -632,9 +675,9 @@ const styles = StyleSheet.create(() => ({
   composer: {
     flexDirection: "row",
     alignItems: "flex-end",
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 8,
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     borderTopWidth: 1,
     borderColor: CH.border,
     backgroundColor: CH.header,
