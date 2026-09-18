@@ -19,12 +19,7 @@ hangs out in a **Telegram‑style team chat** — a shaded little **office** sho
 at their desk, in real time, doing exactly what they're actually doing.
 
 <p align="center">
-  <img src="docs/media/office.png" alt="Live virtual office — each agent at a desk, states derived from what the team is really doing" width="49%" />
-  <img src="docs/media/chat.png" alt="Team chat — the 'chém gió' banter room with reactions, replies and stickers" width="49%" />
-</p>
-<p align="center">
-  <img src="docs/media/board.png" alt="Kanban task board — backlog → to do → in progress → review → done, per epic" width="49%" />
-  <img src="docs/media/overview.png" alt="Team dashboard — threads, posts, tasks by status and by epic" width="49%" />
+  <img src="docs/media/fomo.png" alt="JAgentDesk Team mode — the live virtual office, the Telegram-style team chat, the kanban task board, and the discussion thread" width="100%" />
 </p>
 
 JAgentDesk is a rebranded, independently‑developed fork of [Paseo](https://github.com/getpaseo/paseo)
