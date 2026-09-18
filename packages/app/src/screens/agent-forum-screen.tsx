@@ -15,6 +15,7 @@ import { StyleSheet } from "react-native-unistyles";
 import { useIsFocused } from "@react-navigation/native";
 import { MenuHeader } from "@/components/headers/menu-header";
 import { OfficeScene } from "@/screens/agent-forum-office";
+import { ChatTab } from "@/screens/agent-forum-chat";
 import { useHosts, useHostRuntimeClient } from "@/runtime/host-runtime";
 import type {
   ForumEpicStat,
@@ -912,57 +913,68 @@ const TopicThread = memo(function TopicThread({
         </Pressable>
         {topic ? <PhaseChip status={topic.status} /> : null}
       </View>
-      {!topic ? (
-        <ThreadSkeleton />
-      ) : (
-        <ScrollView contentContainerStyle={styles.threadBody}>
-          <Text style={styles.postTitle}>{topic.title}</Text>
-          <PhaseBar status={topic.status} />
-          <TabBar tab={tab} onTab={setTab} boardCount={topic.tasks.length} />
-          {tab === "thread" ? (
-            <FadeIn key="thread">
-              <View style={styles.threadStack}>
-                {topic.pendingHumanQuestion ? (
-                  <View style={styles.askBanner}>
-                    <Text style={styles.askBannerTitle}>
-                      ⚠ {topic.pendingHumanQuestion.askedByLabel} needs your answer
-                    </Text>
-                    <Text style={styles.askBannerText}>{topic.pendingHumanQuestion.text}</Text>
-                    <Text style={styles.askBannerHint}>
-                      Answer it in the agent chat — your reply posts back here automatically.
-                    </Text>
+      {!topic ? <ThreadSkeleton /> : null}
+      {topic ? (
+        <View style={styles.threadContent}>
+          <View style={styles.threadHeader}>
+            <Text style={styles.postTitle}>{topic.title}</Text>
+            <PhaseBar status={topic.status} />
+            <TabBar
+              tab={tab}
+              onTab={setTab}
+              boardCount={topic.tasks.length}
+              chatCount={topic.chatMessages.length}
+            />
+          </View>
+          {tab === "chat" ? <ChatTab topic={topic} client={client} /> : null}
+          {tab !== "chat" ? (
+            <ScrollView contentContainerStyle={styles.threadBody}>
+              {tab === "thread" ? (
+                <FadeIn key="thread">
+                  <View style={styles.threadStack}>
+                    {topic.pendingHumanQuestion ? (
+                      <View style={styles.askBanner}>
+                        <Text style={styles.askBannerTitle}>
+                          ⚠ {topic.pendingHumanQuestion.askedByLabel} needs your answer
+                        </Text>
+                        <Text style={styles.askBannerText}>{topic.pendingHumanQuestion.text}</Text>
+                        <Text style={styles.askBannerHint}>
+                          Answer it in the agent chat — your reply posts back here automatically.
+                        </Text>
+                      </View>
+                    ) : null}
+                    {posts[0] ? (
+                      <PostCard
+                        message={posts[0]}
+                        index={1}
+                        quoted={quotedOf(posts[0], byId)}
+                        onVote={onVote}
+                      />
+                    ) : null}
+                    <ActivitySection activity={activity} />
+                    <DiscussionPosts
+                      posts={posts.slice(1)}
+                      byId={byId}
+                      onVote={onVote}
+                      startIndex={2}
+                    />
                   </View>
-                ) : null}
-                {posts[0] ? (
-                  <PostCard
-                    message={posts[0]}
-                    index={1}
-                    quoted={quotedOf(posts[0], byId)}
-                    onVote={onVote}
-                  />
-                ) : null}
-                <ActivitySection activity={activity} />
-                <DiscussionPosts
-                  posts={posts.slice(1)}
-                  byId={byId}
-                  onVote={onVote}
-                  startIndex={2}
-                />
-              </View>
-            </FadeIn>
+                </FadeIn>
+              ) : null}
+              {tab === "board" ? (
+                <FadeIn key="board">
+                  <KanbanBoard tasks={topic.tasks} onOpenTask={setOpenTaskId} />
+                </FadeIn>
+              ) : null}
+              {tab === "office" ? (
+                <FadeIn key="office">
+                  <OfficeScene topic={topic} />
+                </FadeIn>
+              ) : null}
+            </ScrollView>
           ) : null}
-          {tab === "board" ? (
-            <FadeIn key="board">
-              <KanbanBoard tasks={topic.tasks} onOpenTask={setOpenTaskId} />
-            </FadeIn>
-          ) : null}
-          {tab === "office" ? (
-            <FadeIn key="office">
-              <OfficeScene topic={topic} />
-            </FadeIn>
-          ) : null}
-        </ScrollView>
-      )}
+        </View>
+      ) : null}
       <TaskDetailModal task={openTask} onClose={closeTask} />
     </View>
   );
@@ -1235,20 +1247,23 @@ const PostCard = memo(function PostCard({
   );
 });
 
-type ForumTab = "thread" | "board" | "office";
+type ForumTab = "thread" | "board" | "office" | "chat";
 
 const TabBar = memo(function TabBar({
   tab,
   onTab,
   boardCount,
+  chatCount,
 }: {
   tab: ForumTab;
   onTab: (t: ForumTab) => void;
   boardCount: number;
+  chatCount: number;
 }): ReactElement {
   const onThread = useCallback(() => onTab("thread"), [onTab]);
   const onBoard = useCallback(() => onTab("board"), [onTab]);
   const onOffice = useCallback(() => onTab("office"), [onTab]);
+  const onChat = useCallback(() => onTab("chat"), [onTab]);
   return (
     <View style={styles.tabBar}>
       <Pressable
@@ -1263,6 +1278,11 @@ const TabBar = memo(function TabBar({
       >
         <Text style={[styles.tabTxt, tab === "board" ? styles.tabTxtOn : null]}>
           BOARD · {boardCount}
+        </Text>
+      </Pressable>
+      <Pressable onPress={onChat} style={[styles.tabBtn, tab === "chat" ? styles.tabBtnOn : null]}>
+        <Text style={[styles.tabTxt, tab === "chat" ? styles.tabTxtOn : null]}>
+          CHAT{chatCount > 0 ? ` · ${chatCount}` : ""}
         </Text>
       </Pressable>
       <Pressable
@@ -1645,6 +1665,16 @@ const styles = StyleSheet.create((_theme) => ({
     borderBottomColor: C.border,
   },
   backText: { color: C.green, fontSize: 13, fontFamily: FONT_MONO },
+  threadContent: { flex: 1, width: "100%" },
+  threadHeader: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 8,
+    gap: 12,
+    maxWidth: 900,
+    width: "100%",
+    alignSelf: "center",
+  },
   threadBody: { padding: 20, gap: 12, maxWidth: 900, width: "100%", alignSelf: "center" },
   threadStack: { gap: 12 },
   postStack: { gap: 12 },

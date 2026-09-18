@@ -53,6 +53,37 @@ export const ForumVoteRequestSchema = z.object({
   direction: z.enum(["up", "down", "clear"]),
 });
 
+// Human joins the banter chat: post a casual message (text or a sticker) into a room (default
+// #general). For a sticker send kind:"sticker" + stickerId (and text may be empty).
+export const ForumChatPostRequestSchema = z.object({
+  type: z.literal("forum/chat-post"),
+  requestId: z.string(),
+  topicId: z.string(),
+  text: z.string().max(2000).default(""),
+  kind: z.enum(["text", "sticker"]).optional(),
+  stickerId: z.string().nullable().optional(),
+  roomId: z.string().nullable().optional(),
+  replyToId: z.string().nullable().optional(),
+});
+
+// Human toggles an emoji reaction on a banter message.
+export const ForumChatReactRequestSchema = z.object({
+  type: z.literal("forum/chat-react"),
+  requestId: z.string(),
+  topicId: z.string(),
+  messageId: z.string(),
+  emoji: z.string().min(1).max(8),
+});
+
+// Human opens a new banter room.
+export const ForumChatRoomRequestSchema = z.object({
+  type: z.literal("forum/chat-room"),
+  requestId: z.string(),
+  topicId: z.string(),
+  name: z.string().min(1).max(60),
+  purpose: z.string().max(200).optional(),
+});
+
 // Human-only: permanently delete a topic (manage/clean up old forums).
 export const ForumDeleteRequestSchema = z.object({
   type: z.literal("forum/delete"),
@@ -110,6 +141,32 @@ export const ForumVoteResponseSchema = z.object({
   payload: z.object({
     requestId: z.string(),
     topic: StoredForumTopicSchema.nullable(),
+    error: z.string().nullable(),
+  }),
+});
+
+const ForumChatTopicResponse = z.object({
+  requestId: z.string(),
+  topic: StoredForumTopicSchema.nullable(),
+  error: z.string().nullable(),
+});
+
+export const ForumChatPostResponseSchema = z.object({
+  type: z.literal("forum/chat-post/response"),
+  payload: ForumChatTopicResponse,
+});
+
+export const ForumChatReactResponseSchema = z.object({
+  type: z.literal("forum/chat-react/response"),
+  payload: ForumChatTopicResponse,
+});
+
+export const ForumChatRoomResponseSchema = z.object({
+  type: z.literal("forum/chat-room/response"),
+  payload: z.object({
+    requestId: z.string(),
+    topic: StoredForumTopicSchema.nullable(),
+    roomId: z.string().nullable(),
     error: z.string().nullable(),
   }),
 });

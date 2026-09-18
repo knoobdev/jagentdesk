@@ -76,6 +76,9 @@ import {
   ForumDeleteRequestSchema,
   ForumPostRequestSchema,
   ForumVoteRequestSchema,
+  ForumChatPostRequestSchema,
+  ForumChatReactRequestSchema,
+  ForumChatRoomRequestSchema,
   ForumCreateResponseSchema,
   ForumListResponseSchema,
   ForumGetResponseSchema,
@@ -83,6 +86,9 @@ import {
   ForumDeleteResponseSchema,
   ForumPostResponseSchema,
   ForumVoteResponseSchema,
+  ForumChatPostResponseSchema,
+  ForumChatReactResponseSchema,
+  ForumChatRoomResponseSchema,
   ForumStreamSchema,
 } from "./agent-forum/rpc-schemas.js";
 import {
@@ -4154,6 +4160,9 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ForumDeleteRequestSchema,
   ForumPostRequestSchema,
   ForumVoteRequestSchema,
+  ForumChatPostRequestSchema,
+  ForumChatReactRequestSchema,
+  ForumChatRoomRequestSchema,
   LoopRunRequestSchema,
   LoopListRequestSchema,
   LoopInspectRequestSchema,
@@ -7759,6 +7768,9 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ForumDeleteResponseSchema,
   ForumPostResponseSchema,
   ForumVoteResponseSchema,
+  ForumChatPostResponseSchema,
+  ForumChatReactResponseSchema,
+  ForumChatRoomResponseSchema,
   ForumStreamSchema,
   ForgeChangeRequestCreateResponseSchema,
   ForgeChangeRequestCloseResponseSchema,
@@ -8376,6 +8388,10 @@ export type {
   ForumTaskReview,
   ForumMessageKind,
   ForumMessage,
+  ForumChatReaction,
+  ForumChatMessageKind,
+  ForumChatMessage,
+  ForumChatRoom,
   StoredForumTopic,
   ForumEpicStat,
   ForumTopicSummary,
@@ -8387,6 +8403,9 @@ export type ForumArchiveRequest = z.infer<typeof ForumArchiveRequestSchema>;
 export type ForumDeleteRequest = z.infer<typeof ForumDeleteRequestSchema>;
 export type ForumPostRequest = z.infer<typeof ForumPostRequestSchema>;
 export type ForumVoteRequest = z.infer<typeof ForumVoteRequestSchema>;
+export type ForumChatPostRequest = z.infer<typeof ForumChatPostRequestSchema>;
+export type ForumChatReactRequest = z.infer<typeof ForumChatReactRequestSchema>;
+export type ForumChatRoomRequest = z.infer<typeof ForumChatRoomRequestSchema>;
 export type ForumStream = z.infer<typeof ForumStreamSchema>;
 // Forge Hub — Milestone D types
 export type ForgeChangeRequestCreateRequest = z.infer<typeof ForgeChangeRequestCreateRequestSchema>;

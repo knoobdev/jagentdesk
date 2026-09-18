@@ -32,7 +32,10 @@ type ForumRequest = Extract<
       | "forum/archive"
       | "forum/delete"
       | "forum/post"
-      | "forum/vote";
+      | "forum/vote"
+      | "forum/chat-post"
+      | "forum/chat-react"
+      | "forum/chat-room";
   }
 >;
 
@@ -180,6 +183,72 @@ export class AgentForumSession {
       this.host.emit({
         type: "forum/vote/response",
         payload: { requestId: request.requestId, topic, error: null },
+      });
+    } catch (error) {
+      this.emitRpcError(request, error);
+    }
+  }
+
+  async handleChatPostRequest(
+    request: Extract<SessionInboundMessage, { type: "forum/chat-post" }>,
+  ): Promise<void> {
+    try {
+      const topic = await this.service.postChatMessage(request.topicId, {
+        roomId: request.roomId ?? null,
+        authorAgentId: "user",
+        authorLabel: "You",
+        role: "user",
+        kind: request.kind ?? "text",
+        text: request.text,
+        stickerId: request.stickerId ?? null,
+        replyToId: request.replyToId ?? null,
+      });
+      this.host.emit({
+        type: "forum/chat-post/response",
+        payload: { requestId: request.requestId, topic, error: null },
+      });
+    } catch (error) {
+      this.emitRpcError(request, error);
+    }
+  }
+
+  async handleChatReactRequest(
+    request: Extract<SessionInboundMessage, { type: "forum/chat-react" }>,
+  ): Promise<void> {
+    try {
+      const topic = await this.service.reactChatMessage(request.topicId, {
+        messageId: request.messageId,
+        emoji: request.emoji,
+        by: "user",
+      });
+      this.host.emit({
+        type: "forum/chat-react/response",
+        payload: { requestId: request.requestId, topic, error: null },
+      });
+    } catch (error) {
+      this.emitRpcError(request, error);
+    }
+  }
+
+  async handleChatRoomRequest(
+    request: Extract<SessionInboundMessage, { type: "forum/chat-room" }>,
+  ): Promise<void> {
+    try {
+      const result = await this.service.createChatRoom(request.topicId, {
+        name: request.name,
+        topic: request.purpose,
+        byAgentId: "user",
+        byLabel: "You",
+        role: "user",
+      });
+      this.host.emit({
+        type: "forum/chat-room/response",
+        payload: {
+          requestId: request.requestId,
+          topic: result?.topic ?? null,
+          roomId: result?.roomId ?? null,
+          error: null,
+        },
       });
     } catch (error) {
       this.emitRpcError(request, error);

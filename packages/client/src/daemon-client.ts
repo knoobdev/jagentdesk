@@ -7823,6 +7823,88 @@ export class DaemonClient {
     return payload.topic;
   }
 
+  async forumChatPost(
+    input: {
+      topicId: string;
+      text?: string;
+      kind?: "text" | "sticker";
+      stickerId?: string | null;
+      roomId?: string | null;
+      replyToId?: string | null;
+    },
+    requestId?: string,
+  ): Promise<StoredForumTopic | null> {
+    const resolved = this.createRequestId(requestId);
+    const message = SessionInboundMessageSchema.parse({
+      type: "forum/chat-post",
+      requestId: resolved,
+      topicId: input.topicId,
+      text: input.text ?? "",
+      ...(input.kind !== undefined ? { kind: input.kind } : {}),
+      ...(input.stickerId !== undefined ? { stickerId: input.stickerId } : {}),
+      ...(input.roomId !== undefined ? { roomId: input.roomId } : {}),
+      ...(input.replyToId !== undefined ? { replyToId: input.replyToId } : {}),
+    });
+    const payload = await this.sendRequest({
+      requestId: resolved,
+      message,
+      options: { skipQueue: true },
+      select: (msg) =>
+        msg.type === "forum/chat-post/response" && msg.payload.requestId === resolved
+          ? msg.payload
+          : null,
+    });
+    return payload.topic;
+  }
+
+  async forumChatReact(
+    input: { topicId: string; messageId: string; emoji: string },
+    requestId?: string,
+  ): Promise<StoredForumTopic | null> {
+    const resolved = this.createRequestId(requestId);
+    const message = SessionInboundMessageSchema.parse({
+      type: "forum/chat-react",
+      requestId: resolved,
+      topicId: input.topicId,
+      messageId: input.messageId,
+      emoji: input.emoji,
+    });
+    const payload = await this.sendRequest({
+      requestId: resolved,
+      message,
+      options: { skipQueue: true },
+      select: (msg) =>
+        msg.type === "forum/chat-react/response" && msg.payload.requestId === resolved
+          ? msg.payload
+          : null,
+    });
+    return payload.topic;
+  }
+
+  async forumChatRoom(
+    input: { topicId: string; name: string; purpose?: string },
+    requestId?: string,
+  ): Promise<{ topic: StoredForumTopic | null; roomId: string | null }> {
+    const resolved = this.createRequestId(requestId);
+    const message = SessionInboundMessageSchema.parse({
+      type: "forum/chat-room",
+      requestId: resolved,
+      topicId: input.topicId,
+      name: input.name,
+      ...(input.purpose !== undefined ? { purpose: input.purpose } : {}),
+    });
+    const payload = await this.sendRequest({
+      requestId: resolved,
+      message,
+      options: { skipQueue: true },
+      select: (msg) =>
+        msg.type === "forum/chat-room/response" && msg.payload.requestId === resolved
+          ? msg.payload
+          : null,
+    });
+    return { topic: payload.topic, roomId: payload.roomId };
+  }
+
   subscribeForumStream(handler: (topic: StoredForumTopic) => void): () => void {
     return this.on("forum.stream", (message) => handler(message.payload.topic));
   }

@@ -197,6 +197,48 @@ export const ForumMessageSchema = z.object({
 });
 export type ForumMessage = z.infer<typeof ForumMessageSchema>;
 
+// The "chém gió" (banter) side-channel: a Telegram-style set of casual chat rooms living alongside the
+// task thread. Agents drop into these organically while they work — a running group chat, ad-hoc side
+// rooms, reactions, emoji and small original stickers — so the team feels like people hanging out,
+// not just a task board. It is deliberately separate from `messages` (the on-record discussion): banter
+// is off-the-record chatter and never drives task state.
+export const ForumChatReactionSchema = z.object({
+  // A single emoji (or short combo) and everyone who reacted with it (agentIds or "user").
+  emoji: z.string(),
+  by: z.array(z.string()).default([]),
+});
+export type ForumChatReaction = z.infer<typeof ForumChatReactionSchema>;
+
+// "text" carries `text` (may include emoji); "sticker" carries a `stickerId` from the built-in original
+// sticker set (rendered as vector art in the app — our animated, dependency-free stand-in for GIFs).
+export const ForumChatMessageKindSchema = z.enum(["text", "sticker"]);
+export type ForumChatMessageKind = z.infer<typeof ForumChatMessageKindSchema>;
+
+export const ForumChatMessageSchema = z.object({
+  id: z.string(),
+  roomId: z.string(),
+  authorAgentId: z.string(),
+  authorLabel: z.string(),
+  role: ForumRoleSchema,
+  kind: ForumChatMessageKindSchema.default("text"),
+  text: z.string().default(""),
+  stickerId: z.string().nullable().default(null),
+  replyToId: z.string().nullable().default(null),
+  reactions: z.array(ForumChatReactionSchema).default([]),
+  createdAt_ms: z.number().int(),
+});
+export type ForumChatMessage = z.infer<typeof ForumChatMessageSchema>;
+
+export const ForumChatRoomSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  // A short blurb for the room ("bikeshedding the API names", "post your best bugs", …).
+  topic: z.string().default(""),
+  createdByLabel: z.string().default(""),
+  createdAt_ms: z.number().int(),
+});
+export type ForumChatRoom = z.infer<typeof ForumChatRoomSchema>;
+
 export const StoredForumTopicSchema = z.object({
   id: z.string(),
   // Project the topic belongs to (per-project persistence). Empty for host-global topics.
@@ -214,6 +256,10 @@ export const StoredForumTopicSchema = z.object({
   participants: z.array(ForumParticipantSchema).default([]),
   messages: z.array(ForumMessageSchema).default([]),
   tasks: z.array(ForumTaskSchema).default([]),
+  // The banter side-channel (see ForumChatRoom/ForumChatMessage): casual rooms + chatter that run
+  // alongside the work. Defaulted so older persisted topics load without them.
+  chatRooms: z.array(ForumChatRoomSchema).default([]),
+  chatMessages: z.array(ForumChatMessageSchema).default([]),
   // Set when an agent is blocked on a human answer/approval (the id of the awaiting-human question
   // message + its text). Cleared when the human replies. Surfaced in the agent chat + thread.
   pendingHumanQuestion: z

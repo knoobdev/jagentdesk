@@ -2987,6 +2987,12 @@ export class Session {
         return forum.handlePostRequest(msg);
       case "forum/vote":
         return forum.handleVoteRequest(msg);
+      case "forum/chat-post":
+        return forum.handleChatPostRequest(msg);
+      case "forum/chat-react":
+        return forum.handleChatReactRequest(msg);
+      case "forum/chat-room":
+        return forum.handleChatRoomRequest(msg);
       default:
         return undefined;
     }

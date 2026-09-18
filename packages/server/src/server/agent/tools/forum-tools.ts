@@ -24,6 +24,24 @@ const REVIEW_CATEGORY = z.enum([
   "other",
 ]);
 const REVIEW_SEVERITY = z.enum(["critical", "high", "medium", "low"]);
+// Built-in original stickers the app renders as vector art (see chat-stickers in the app). Keep this in
+// sync with that renderer's ids.
+const CHAT_STICKERS = [
+  "shipit",
+  "fire",
+  "party",
+  "bug",
+  "eyes",
+  "coffee",
+  "thumbsup",
+  "brain",
+  "rocket",
+  "sob",
+  "clown",
+  "hundred",
+  "heart",
+  "facepalm",
+] as const;
 
 // Compact acknowledgement so a chatty team loop doesn't blow the context with full topic dumps every
 // call. Agents call forum.get_topic when they need the whole board.
@@ -385,6 +403,119 @@ export function registerForumTools(params: {
       return {
         content: [],
         structuredContent: ensureValidJson(topic ?? { error: "topic_not_found" }),
+      };
+    },
+  );
+
+  // --- Banter side-channel: the team's "chém gió" rooms (casual chat while they work) ----------------
+
+  registerTool(
+    "forum.chat",
+    {
+      title: "Say something in the team chat",
+      description:
+        "Drop a casual message in the team's banter chat (the 'chém gió' room) — the Telegram-style " +
+        "side channel that runs alongside the work. This is NOT the on-record discussion (use " +
+        "forum.post_message for that): it's for reactions, jokes, quick 'nice one', venting about a bug, " +
+        "hyping a teammate, coordinating loosely. Do it ORGANICALLY — only when you actually feel like " +
+        "chatting, like a real dev dropping a line in Slack, never on a schedule. Same language as the " +
+        "human; emoji welcome. Reply to a line with `replyTo`. Omit `roomId` for #general.",
+      inputSchema: {
+        topicId: z.string(),
+        text: z.string().trim().min(1).max(2000),
+        roomId: z.string().optional(),
+        replyTo: z.string().optional(),
+      },
+    },
+    async ({ topicId, text, roomId, replyTo }) => {
+      const topic = await forum.postChatMessage(topicId, {
+        roomId: roomId ?? null,
+        authorAgentId: callerAgentId,
+        authorLabel: callerLabel,
+        role: callerRole,
+        kind: "text",
+        text,
+        replyToId: replyTo ?? null,
+      });
+      return ack(topic);
+    },
+  );
+
+  registerTool(
+    "forum.chat_sticker",
+    {
+      title: "Send a sticker in the team chat",
+      description:
+        "Send a fun little sticker into the banter chat instead of words — like a Telegram sticker. " +
+        "Pick one that matches the vibe. Only when you feel like it. Omit `roomId` for #general. " +
+        `Available: ${CHAT_STICKERS.join(", ")}.`,
+      inputSchema: {
+        topicId: z.string(),
+        stickerId: z.enum(CHAT_STICKERS),
+        roomId: z.string().optional(),
+      },
+    },
+    async ({ topicId, stickerId, roomId }) => {
+      const topic = await forum.postChatMessage(topicId, {
+        roomId: roomId ?? null,
+        authorAgentId: callerAgentId,
+        authorLabel: callerLabel,
+        role: callerRole,
+        kind: "sticker",
+        stickerId,
+      });
+      return ack(topic);
+    },
+  );
+
+  registerTool(
+    "forum.chat_react",
+    {
+      title: "React to a chat message",
+      description:
+        "Tap an emoji reaction onto a banter message (toggles on/off), like reacting in Telegram. Get " +
+        "message ids from forum.get_topic (chatMessages). Only react when you genuinely feel it.",
+      inputSchema: {
+        topicId: z.string(),
+        messageId: z.string(),
+        emoji: z.string().trim().min(1).max(8),
+      },
+    },
+    async ({ topicId, messageId, emoji }) => {
+      const topic = await forum.reactChatMessage(topicId, {
+        messageId,
+        emoji,
+        by: callerAgentId,
+      });
+      return ack(topic);
+    },
+  );
+
+  registerTool(
+    "forum.open_chat_room",
+    {
+      title: "Open a new team chat room",
+      description:
+        "Spin up a new banter room when the team wants a dedicated side channel (e.g. '#bug-safari', " +
+        "'#bikeshed', '#ship-it'). Returns the new room id to chat into. #general already exists.",
+      inputSchema: {
+        topicId: z.string(),
+        name: z.string().trim().min(1).max(60),
+        purpose: z.string().max(200).optional(),
+      },
+    },
+    async ({ topicId, name, purpose }) => {
+      const result = await forum.createChatRoom(topicId, {
+        name,
+        topic: purpose,
+        byAgentId: callerAgentId,
+        byLabel: callerLabel,
+        role: callerRole,
+      });
+      if (!result) return ack(null);
+      return {
+        content: [],
+        structuredContent: ensureValidJson({ ok: true, topicId, roomId: result.roomId }),
       };
     },
   );

@@ -1,5 +1,8 @@
 import type { Logger } from "pino";
 import type {
+  ForumChatMessage,
+  ForumChatMessageKind,
+  ForumChatRoom,
   ForumEstimate,
   ForumMessage,
   ForumMessageKind,
@@ -197,6 +200,17 @@ export class AgentForumService {
       ],
       tasks: [],
       pendingHumanQuestion: null,
+      // Seed a default "general" banter room so the team always has somewhere to chat while they work.
+      chatRooms: [
+        {
+          id: generateForumId("room"),
+          name: "general",
+          topic: "team banter while we build",
+          createdByLabel: "You",
+          createdAt_ms: now,
+        },
+      ],
+      chatMessages: [],
     };
     const created = await this.store.create(topic);
     this.emit(created);
@@ -242,6 +256,89 @@ export class AgentForumService {
         const pending = topic.messages.find((m) => m.id === topic.pendingHumanQuestion?.messageId);
         if (pending) pending.awaitingHuman = false;
         topic.pendingHumanQuestion = null;
+      }
+      return topic;
+    });
+  }
+
+  // --- Banter side-channel (see ForumChatRoom/ForumChatMessage) ---------------------------------------
+
+  // Open a new casual chat room in a topic. Returns the room's id so the caller can post into it.
+  async createChatRoom(
+    topicId: string,
+    input: { name: string; topic?: string; byAgentId: string; byLabel: string; role: ForumRole },
+  ): Promise<{ topic: StoredForumTopic; roomId: string } | null> {
+    const roomId = generateForumId("room");
+    const updated = await this.mutate(topicId, (topic) => {
+      const room: ForumChatRoom = {
+        id: roomId,
+        name: input.name.trim().slice(0, 60) || "room",
+        topic: (input.topic ?? "").slice(0, 200),
+        createdByLabel: input.byLabel,
+        createdAt_ms: Date.now(),
+      };
+      topic.chatRooms.push(room);
+      ensureParticipant(topic, input.byAgentId, input.byLabel, input.role);
+      return topic;
+    });
+    return updated ? { topic: updated, roomId } : null;
+  }
+
+  // Post a banter message (text or a built-in sticker) into a room. Falls back to the "general" room
+  // when the caller doesn't name a valid one, so a quick chat never fails on a stale room id.
+  async postChatMessage(
+    topicId: string,
+    input: {
+      roomId?: string | null;
+      authorAgentId: string;
+      authorLabel: string;
+      role: ForumRole;
+      kind?: ForumChatMessageKind;
+      text?: string;
+      stickerId?: string | null;
+      replyToId?: string | null;
+    },
+  ): Promise<StoredForumTopic | null> {
+    return this.mutate(topicId, (topic) => {
+      const room = resolveChatRoom(topic, input.roomId);
+      const entry: ForumChatMessage = {
+        id: generateForumId("chat"),
+        roomId: room.id,
+        authorAgentId: input.authorAgentId,
+        authorLabel: input.authorLabel,
+        role: input.role,
+        kind: input.kind ?? "text",
+        text: (input.text ?? "").slice(0, 2000),
+        stickerId: input.stickerId ?? null,
+        replyToId: input.replyToId ?? null,
+        reactions: [],
+        createdAt_ms: Date.now(),
+      };
+      topic.chatMessages.push(entry);
+      ensureParticipant(topic, input.authorAgentId, input.authorLabel, input.role);
+      return topic;
+    });
+  }
+
+  // Toggle an emoji reaction on a banter message (like tapping a reaction in Telegram).
+  async reactChatMessage(
+    topicId: string,
+    input: { messageId: string; emoji: string; by: string },
+  ): Promise<StoredForumTopic | null> {
+    return this.mutate(topicId, (topic) => {
+      const message = topic.chatMessages.find((m) => m.id === input.messageId);
+      if (!message) return topic;
+      const emoji = input.emoji.slice(0, 8);
+      const existing = message.reactions.find((r) => r.emoji === emoji);
+      if (!existing) {
+        message.reactions.push({ emoji, by: [input.by] });
+        return topic;
+      }
+      if (existing.by.includes(input.by)) {
+        existing.by = existing.by.filter((b) => b !== input.by);
+        message.reactions = message.reactions.filter((r) => r.by.length > 0);
+      } else {
+        existing.by.push(input.by);
       }
       return topic;
     });
@@ -591,6 +688,26 @@ function ensureParticipant(
 ): void {
   if (topic.participants.some((p) => p.agentId === agentId)) return;
   topic.participants.push({ agentId, label, role });
+}
+
+// Resolve the target banter room: the named room, else the first (usually "general"), else mint a
+// "general" room in place (covers topics persisted before the banter channel existed).
+function resolveChatRoom(topic: StoredForumTopic, roomId?: string | null): ForumChatRoom {
+  if (roomId) {
+    const match = topic.chatRooms.find((r) => r.id === roomId);
+    if (match) return match;
+  }
+  const first = topic.chatRooms[0];
+  if (first) return first;
+  const general: ForumChatRoom = {
+    id: generateForumId("room"),
+    name: "general",
+    topic: "team banter while we build",
+    createdByLabel: "",
+    createdAt_ms: Date.now(),
+  };
+  topic.chatRooms.push(general);
+  return general;
 }
 
 function deriveTitle(prompt: string): string {
