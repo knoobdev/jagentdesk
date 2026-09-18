@@ -13,7 +13,17 @@ const ESTIMATE = z.enum(["unknown", "xs", "s", "m", "l", "xl"]);
 const MESSAGE_KIND = z.enum(["message", "research", "proposal", "question", "decision", "status"]);
 const PHASE = z.enum(["discussion", "planning", "building", "review", "done"]);
 const REVIEW_ROLE = z.enum(["ba", "tester", "pentester", "reviewer"]);
-const VERDICT = z.enum(["approve", "request_changes"]);
+const REVIEW_CATEGORY = z.enum([
+  "bug",
+  "security",
+  "performance",
+  "maintainability",
+  "test",
+  "style",
+  "documentation",
+  "other",
+]);
+const REVIEW_SEVERITY = z.enum(["critical", "high", "medium", "low"]);
 
 // Compact acknowledgement so a chatty team loop doesn't blow the context with full topic dumps every
 // call. Agents call forum.get_topic when they need the whole board.
@@ -311,26 +321,52 @@ export function registerForumTools(params: {
     {
       title: "Review a task as BA / Tester / Pentester",
       description:
-        "Record a role-based review of a coder's finished task and either approve it (→ done) or " +
-        "request changes (→ back to in_progress). Use role 'ba' for requirements/acceptance, " +
-        "'tester' for QA/behaviour, 'pentester' for security. Put concrete findings in `findings`.",
+        "Record a role review of a coder's finished task as STRUCTURED findings (open-code-review). Use " +
+        "role 'ba' for requirements/acceptance + maintainability/docs, 'tester' for behaviour/bugs/edge " +
+        "cases + tests, 'pentester' for security. Each finding needs a file `path`, a `category`, a " +
+        "`severity`, and a `content` description (add line numbers + a `suggestion` when you can). Favor " +
+        "precision — omit anything you're not sure is real. You do NOT set the verdict: the system " +
+        "derives it (any critical/high, or a medium in your dimension → changes requested; else " +
+        "approved) and the task is done only when BA, Tester AND Pentester all approve. Note what you " +
+        "reviewed in `coverage`.",
       inputSchema: {
         topicId: z.string(),
         taskId: z.string(),
         role: REVIEW_ROLE,
-        verdict: VERDICT,
-        findings: z.string().trim().min(1).max(8000),
+        findings: z
+          .array(
+            z.object({
+              path: z.string().trim().min(1),
+              startLine: z.number().int().optional(),
+              endLine: z.number().int().optional(),
+              category: REVIEW_CATEGORY,
+              severity: REVIEW_SEVERITY,
+              content: z.string().trim().min(1).max(4000),
+              suggestion: z.string().trim().max(4000).optional(),
+            }),
+          )
+          .max(50),
+        coverage: z.string().trim().max(500).optional(),
       },
     },
-    async ({ topicId, taskId, role, verdict, findings }) => {
+    async ({ topicId, taskId, role, findings, coverage }) => {
       const reviewRoleTitle = role.charAt(0).toUpperCase() + role.slice(1);
       const topic = await forum.reviewTask(topicId, {
         taskId,
         role,
         reviewerAgentId: callerAgentId,
         reviewerLabel: `${reviewRoleTitle} ${callerAgentId.slice(0, 8)}`,
-        verdict,
-        findings,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- schema-validated at the boundary
+        findings: findings.map((f: any) => ({
+          path: f.path,
+          startLine: f.startLine ?? null,
+          endLine: f.endLine ?? null,
+          category: f.category,
+          severity: f.severity,
+          content: f.content,
+          suggestion: f.suggestion ?? null,
+        })),
+        coverage,
       });
       return ack(topic);
     },

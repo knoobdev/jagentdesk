@@ -18,9 +18,11 @@ import { useHosts, useHostRuntimeClient } from "@/runtime/host-runtime";
 import type {
   ForumEpicStat,
   ForumMessage,
+  ForumReviewFinding,
   ForumRole,
   ForumTask,
   ForumTaskComment,
+  ForumTaskReview,
   ForumTaskStatus,
   ForumTopicStatus,
   ForumTopicSummary,
@@ -1305,6 +1307,78 @@ const KanbanBoard = memo(function KanbanBoard({
 
 // Jira-style task detail: title, status, epic, assignee, reporter, estimate, Markdown description,
 // and the task's comment thread. Opened by tapping a board card.
+const SEVERITY_COLOR: Record<string, string> = {
+  critical: "#e04a3a",
+  high: "#f5a623",
+  medium: "#e6c07b",
+  low: C.muted,
+};
+function verdictColor(v: string): string {
+  return v === "approve" ? STATUS_COLOR.done : "#e04a3a";
+}
+
+// One structured finding (open-code-review): severity badge + category + file:line + issue + suggestion.
+const ReviewFindingRow = memo(function ReviewFindingRow({
+  finding,
+}: {
+  finding: ForumReviewFinding;
+}): ReactElement {
+  const color = SEVERITY_COLOR[finding.severity] ?? C.muted;
+  const where = finding.startLine ? `${finding.path}:${finding.startLine}` : finding.path;
+  return (
+    <View style={styles.findingRow}>
+      <View style={styles.findingHead}>
+        <Text style={[styles.sevBadge, { color, borderColor: color }]}>
+          {finding.severity.toUpperCase()}
+        </Text>
+        <Text style={styles.findingCat}>{finding.category}</Text>
+        <Text style={styles.findingWhere} numberOfLines={1}>
+          {where}
+        </Text>
+      </View>
+      <Text style={styles.findingText}>{finding.content}</Text>
+      {finding.suggestion ? (
+        <Text style={styles.findingSuggestion}>↳ {finding.suggestion}</Text>
+      ) : null}
+    </View>
+  );
+});
+
+// The role reviews (BA / Tester / Pentester) with their daemon-derived verdicts + findings.
+const ReviewSection = memo(function ReviewSection({
+  reviews,
+}: {
+  reviews: ForumTaskReview[];
+}): ReactElement | null {
+  if (reviews.length === 0) return null;
+  return (
+    <>
+      <Text style={styles.modalSection}>REVIEWS · {reviews.length}</Text>
+      {reviews.map((r) => (
+        <View key={r.id} style={styles.reviewCard}>
+          <View style={styles.reviewHead}>
+            <Text style={styles.reviewRole}>{ROLE_LABEL[r.role] ?? r.role}</Text>
+            <Text style={[styles.reviewVerdict, { color: verdictColor(r.verdict) }]}>
+              {r.verdict === "approve" ? "✅ APPROVED" : "🔴 CHANGES REQUESTED"}
+            </Text>
+            {r.coverage ? <Text style={styles.reviewCoverage}>{r.coverage}</Text> : null}
+          </View>
+          {r.findings.length === 0 ? (
+            <Text style={styles.modalMuted}>No blocking findings.</Text>
+          ) : (
+            r.findings.map((f) => (
+              <ReviewFindingRow
+                key={`${f.path}:${f.startLine ?? "?"}:${f.severity}:${f.category}`}
+                finding={f}
+              />
+            ))
+          )}
+        </View>
+      ))}
+    </>
+  );
+});
+
 const TaskDetailModal = memo(function TaskDetailModal({
   task,
   onClose,
@@ -1361,6 +1435,7 @@ const TaskDetailModal = memo(function TaskDetailModal({
             ) : (
               <Text style={styles.modalMuted}>No description.</Text>
             )}
+            <ReviewSection reviews={task.reviews} />
             <Text style={styles.modalSection}>COMMENTS · {task.comments.length}</Text>
             {task.comments.length === 0 ? (
               <Text style={styles.modalMuted}>No comments yet.</Text>
@@ -1947,4 +2022,51 @@ const styles = StyleSheet.create((_theme) => ({
   commentDot: { width: 8, height: 8, borderRadius: 4 },
   commentWho: { color: C.soft, fontFamily: FONT_MONO, fontSize: 12 },
   commentTime: { color: C.faint, fontFamily: FONT_MONO, fontSize: 10, marginLeft: "auto" },
+  // structured code-review (open-code-review)
+  reviewCard: {
+    gap: 6,
+    borderWidth: 1,
+    borderColor: C.borderSoft,
+    borderRadius: 8,
+    backgroundColor: C.card,
+    padding: 10,
+  },
+  reviewHead: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 },
+  reviewRole: { color: C.soft, fontFamily: FONT_MONO, fontSize: 12, fontWeight: "700" },
+  reviewVerdict: { fontFamily: FONT_MONO, fontSize: 11, fontWeight: "700" },
+  reviewCoverage: { color: C.faint, fontFamily: FONT_MONO, fontSize: 10, marginLeft: "auto" },
+  findingRow: {
+    gap: 3,
+    borderLeftWidth: 2,
+    borderLeftColor: C.borderSoft,
+    paddingLeft: 8,
+    paddingVertical: 2,
+  },
+  findingHead: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6 },
+  sevBadge: {
+    fontFamily: FONT_MONO,
+    fontSize: 8,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+    borderWidth: 1,
+    borderRadius: 3,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+  },
+  findingCat: {
+    fontFamily: FONT_MONO,
+    fontSize: 9,
+    color: C.muted,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  findingWhere: { flex: 1, fontFamily: FONT_MONO, fontSize: 10, color: "#4a9df0" },
+  findingText: { color: C.text, fontSize: 12, lineHeight: 17, fontFamily: FONT_SANS },
+  findingSuggestion: {
+    color: C.soft,
+    fontSize: 11,
+    lineHeight: 16,
+    fontFamily: FONT_SANS,
+    fontStyle: "italic",
+  },
 }));

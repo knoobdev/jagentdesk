@@ -73,6 +73,53 @@ export const ForumTaskEventSchema = z.object({
 });
 export type ForumTaskEvent = z.infer<typeof ForumTaskEventSchema>;
 
+// Code-review model (alibaba/open-code-review methodology, integrated into the daemon core rather than
+// left to the reviewer's prose). A review is a set of evidence-carrying findings; the daemon — not the
+// agent — derives the verdict from finding severities, and a task is only "done" once every required
+// role has approved. Categories/severities mirror open-code-review's taxonomy.
+export const ForumReviewCategorySchema = z.enum([
+  "bug",
+  "security",
+  "performance",
+  "maintainability",
+  "test",
+  "style",
+  "documentation",
+  "other",
+]);
+export type ForumReviewCategory = z.infer<typeof ForumReviewCategorySchema>;
+
+export const ForumReviewSeveritySchema = z.enum(["critical", "high", "medium", "low"]);
+export type ForumReviewSeverity = z.infer<typeof ForumReviewSeveritySchema>;
+
+// One evidence-carrying finding: where (file + line range), what kind, how bad, the issue, and an
+// optional suggested fix. Line anchors + description are the evidence contract (a finding without a
+// path is rejected upstream).
+export const ForumReviewFindingSchema = z.object({
+  path: z.string(),
+  startLine: z.number().int().nullable().default(null),
+  endLine: z.number().int().nullable().default(null),
+  category: ForumReviewCategorySchema,
+  severity: ForumReviewSeveritySchema,
+  content: z.string(),
+  suggestion: z.string().nullable().default(null),
+});
+export type ForumReviewFinding = z.infer<typeof ForumReviewFindingSchema>;
+
+// A completed role review of a task: the findings + the daemon-derived verdict + a coverage note.
+export const ForumTaskReviewSchema = z.object({
+  id: z.string(),
+  role: ForumRoleSchema,
+  reviewerAgentId: z.string(),
+  reviewerLabel: z.string(),
+  verdict: z.enum(["approve", "request_changes"]),
+  findings: z.array(ForumReviewFindingSchema).default([]),
+  // Free-text coverage note (e.g. "reviewed 3/3 changed files"), open-code-review's coverage accounting.
+  coverage: z.string().default(""),
+  createdAt_ms: z.number().int(),
+});
+export type ForumTaskReview = z.infer<typeof ForumTaskReviewSchema>;
+
 // A comment on a task (Jira-style): agents discuss the task itself in its detail view. Body is
 // Markdown (code blocks, quotes, links, images, @mentions all render in the UI).
 export const ForumTaskCommentSchema = z.object({
@@ -106,6 +153,9 @@ export const ForumTaskSchema = z.object({
   updatedAt_ms: z.number().int(),
   // Jira-style comment thread on the task itself.
   comments: z.array(ForumTaskCommentSchema).default([]),
+  // Structured role reviews (open-code-review): findings + daemon-derived verdicts. The board renders
+  // these and derives the task's done-ness from them.
+  reviews: z.array(ForumTaskReviewSchema).default([]),
   history: z.array(ForumTaskEventSchema).default([]),
 });
 export type ForumTask = z.infer<typeof ForumTaskSchema>;
