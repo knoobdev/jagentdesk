@@ -14,6 +14,7 @@ import Svg, { Circle, G, Rect, Text as SvgText } from "react-native-svg";
 import { StyleSheet } from "react-native-unistyles";
 import { useIsFocused } from "@react-navigation/native";
 import { MenuHeader } from "@/components/headers/menu-header";
+import { OfficeScene } from "@/screens/agent-forum-office";
 import { useHosts, useHostRuntimeClient } from "@/runtime/host-runtime";
 import type {
   ForumEpicStat,
@@ -840,7 +841,7 @@ const TopicThread = memo(function TopicThread({
     for (const m of topic?.messages ?? []) (isDiscussion(m) ? p : a).push(m);
     return { posts: p, activity: a };
   }, [topic]);
-  const [tab, setTab] = useState<"thread" | "board">("thread");
+  const [tab, setTab] = useState<ForumTab>("thread");
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
 
   const onVote = useCallback(
@@ -899,11 +900,17 @@ const TopicThread = memo(function TopicThread({
                 />
               </View>
             </FadeIn>
-          ) : (
+          ) : null}
+          {tab === "board" ? (
             <FadeIn key="board">
               <KanbanBoard tasks={topic.tasks} onOpenTask={setOpenTaskId} />
             </FadeIn>
-          )}
+          ) : null}
+          {tab === "office" ? (
+            <FadeIn key="office">
+              <OfficeScene topic={topic} />
+            </FadeIn>
+          ) : null}
         </ScrollView>
       )}
       <TaskDetailModal task={openTask} onClose={closeTask} />
@@ -1156,17 +1163,20 @@ const PostCard = memo(function PostCard({
   );
 });
 
+type ForumTab = "thread" | "board" | "office";
+
 const TabBar = memo(function TabBar({
   tab,
   onTab,
   boardCount,
 }: {
-  tab: "thread" | "board";
-  onTab: (t: "thread" | "board") => void;
+  tab: ForumTab;
+  onTab: (t: ForumTab) => void;
   boardCount: number;
 }): ReactElement {
   const onThread = useCallback(() => onTab("thread"), [onTab]);
   const onBoard = useCallback(() => onTab("board"), [onTab]);
+  const onOffice = useCallback(() => onTab("office"), [onTab]);
   return (
     <View style={styles.tabBar}>
       <Pressable
@@ -1182,6 +1192,12 @@ const TabBar = memo(function TabBar({
         <Text style={[styles.tabTxt, tab === "board" ? styles.tabTxtOn : null]}>
           BOARD · {boardCount}
         </Text>
+      </Pressable>
+      <Pressable
+        onPress={onOffice}
+        style={[styles.tabBtn, tab === "office" ? styles.tabBtnOn : null]}
+      >
+        <Text style={[styles.tabTxt, tab === "office" ? styles.tabTxtOn : null]}>OFFICE</Text>
       </Pressable>
     </View>
   );
