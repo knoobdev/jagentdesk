@@ -18,6 +18,12 @@ into a live **task board**, builds, cross‑reviews itself (BA / Tester / Pentes
 hangs out in a **Telegram‑style team chat** — a shaded little **office** shows every teammate
 at their desk, in real time, doing exactly what they're actually doing.
 
+**▶️ Watch the 2‑minute live demo** — a real team building a small app end‑to‑end (real agents, real chat, real reviews):
+
+<video src="https://github.com/knoobdev/jagentdesk/raw/main/docs/media/team-mode-demo.mp4" poster="docs/media/fomo.png" controls muted width="100%"></video>
+
+> If the player doesn't load in your Markdown viewer, [download the demo](docs/media/team-mode-demo.mp4) or see the stills below.
+
 <p align="center">
   <img src="docs/media/fomo.png" alt="JAgentDesk Team mode — the live virtual office, the Telegram-style team chat, the kanban task board, and the discussion thread" width="100%" />
 </p>
