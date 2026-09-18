@@ -8,7 +8,7 @@ import {
   type ReactElement,
   type ReactNode,
 } from "react";
-import { Animated, Modal, Pressable, ScrollView, Text, View } from "react-native";
+import { Animated, Easing, Modal, Pressable, ScrollView, Text, View } from "react-native";
 import Markdown from "react-native-markdown-display";
 import Svg, { Circle, G, Rect, Text as SvgText } from "react-native-svg";
 import { StyleSheet } from "react-native-unistyles";
@@ -283,6 +283,34 @@ const FadeIn = memo(function FadeIn({ children }: { children: ReactNode }): Reac
     Animated.timing(opacity, { toValue: 1, duration: 200, useNativeDriver: true }).start();
   }, [opacity]);
   const style = useMemo(() => ({ opacity }), [opacity]);
+  return <Animated.View style={style}>{children}</Animated.View>;
+});
+
+// A page of thread posts that slides + fades in when you turn the page, so paging (and the live
+// auto-advance to the newest post) feels smooth. `direction` is +1 turning forward, -1 turning back;
+// the new page slides in from that side.
+const SlidePage = memo(function SlidePage({
+  children,
+  direction,
+}: {
+  children: ReactNode;
+  direction: number;
+}): ReactElement {
+  const anim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    anim.setValue(0);
+    Animated.timing(anim, {
+      toValue: 1,
+      duration: 260,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [anim]);
+  const translateX = anim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [direction * 26, 0],
+  });
+  const style = useMemo(() => ({ opacity: anim, transform: [{ translateX }] }), [anim, translateX]);
   return <Animated.View style={style}>{children}</Animated.View>;
 });
 
@@ -713,13 +741,35 @@ const DiscussionPosts = memo(function DiscussionPosts({
   startIndex: number;
 }): ReactElement | null {
   const [page, setPage] = useState(0);
-  if (posts.length === 0) return null;
   const pageCount = Math.max(1, Math.ceil(posts.length / POSTS_PER_PAGE));
   const clamped = Math.min(page, pageCount - 1);
+
+  // Live auto-advance: when a new post lands on a later page AND the reader was already on the last
+  // page (following the conversation), turn to the newest page so the fresh post is never hidden. If
+  // they've paged back to read older posts, leave them where they are.
+  const prevLenRef = useRef(posts.length);
+  useEffect(() => {
+    const prevLen = prevLenRef.current;
+    prevLenRef.current = posts.length;
+    if (posts.length <= prevLen) return;
+    const prevPageCount = Math.max(1, Math.ceil(prevLen / POSTS_PER_PAGE));
+    const nextPageCount = Math.max(1, Math.ceil(posts.length / POSTS_PER_PAGE));
+    if (nextPageCount === prevPageCount) return;
+    setPage((p) => (Math.min(p, prevPageCount - 1) >= prevPageCount - 1 ? nextPageCount - 1 : p));
+  }, [posts.length]);
+
+  // Direction the page is turning, for the slide transition (forward slides in from the right).
+  const prevPageRef = useRef(clamped);
+  const direction = clamped >= prevPageRef.current ? 1 : -1;
+  useEffect(() => {
+    prevPageRef.current = clamped;
+  }, [clamped]);
+
+  if (posts.length === 0) return null;
   const start = clamped * POSTS_PER_PAGE;
   const items = posts.slice(start, start + POSTS_PER_PAGE);
   return (
-    <FadeIn key={clamped}>
+    <SlidePage key={clamped} direction={direction}>
       <View style={styles.postStack}>
         {items.map((m, i) => (
           <PostCard
@@ -732,7 +782,7 @@ const DiscussionPosts = memo(function DiscussionPosts({
         ))}
         {pageCount > 1 ? <Pager page={clamped} pageCount={pageCount} onPage={setPage} /> : null}
       </View>
-    </FadeIn>
+    </SlidePage>
   );
 });
 
@@ -926,17 +976,39 @@ const ActivitySection = memo(function ActivitySection({
   activity: ForumMessage[];
 }): ReactElement | null {
   const [page, setPage] = useState(0);
-  if (activity.length === 0) return null;
   const pageCount = Math.max(1, Math.ceil(activity.length / ACTIVITY_PER_PAGE));
   const clamped = Math.min(page, pageCount - 1);
+
+  // Follow the newest activity: when a new row spills onto a later page and the reader was on the last
+  // page, turn to it (same live auto-advance as the discussion posts).
+  const prevLenRef = useRef(activity.length);
+  useEffect(() => {
+    const prevLen = prevLenRef.current;
+    prevLenRef.current = activity.length;
+    if (activity.length <= prevLen) return;
+    const prevPageCount = Math.max(1, Math.ceil(prevLen / ACTIVITY_PER_PAGE));
+    const nextPageCount = Math.max(1, Math.ceil(activity.length / ACTIVITY_PER_PAGE));
+    if (nextPageCount === prevPageCount) return;
+    setPage((p) => (Math.min(p, prevPageCount - 1) >= prevPageCount - 1 ? nextPageCount - 1 : p));
+  }, [activity.length]);
+
+  const prevPageRef = useRef(clamped);
+  const direction = clamped >= prevPageRef.current ? 1 : -1;
+  useEffect(() => {
+    prevPageRef.current = clamped;
+  }, [clamped]);
+
+  if (activity.length === 0) return null;
   const items = activity.slice(clamped * ACTIVITY_PER_PAGE, (clamped + 1) * ACTIVITY_PER_PAGE);
   return (
     <View style={styles.activitySection}>
       <Text style={styles.activityHeader}>ACTIVITY · {activity.length}</Text>
-      {items.map((m) => (
-        <ActivityRow key={m.id} message={m} />
-      ))}
-      {pageCount > 1 ? <Pager page={clamped} pageCount={pageCount} onPage={setPage} /> : null}
+      <SlidePage key={clamped} direction={direction}>
+        {items.map((m) => (
+          <ActivityRow key={m.id} message={m} />
+        ))}
+        {pageCount > 1 ? <Pager page={clamped} pageCount={pageCount} onPage={setPage} /> : null}
+      </SlidePage>
     </View>
   );
 });
