@@ -116,6 +116,7 @@ import {
 import { hostHasTailnetConnection } from "@/types/host-connection";
 import { getDaemonStartService } from "@/runtime/daemon-start-service";
 import { ConnectionNotifications } from "@/runtime/connection-notifications";
+import { ForumNotifications } from "@/runtime/forum-notifications";
 import { applyAppearance } from "@/screens/settings/appearance/apply-appearance";
 import { selectIsAgentListOpen, usePanelStore } from "@/stores/panel-store";
 import { flushDraftPersistStorage } from "@/stores/draft-store";
@@ -741,6 +742,7 @@ function ProvidersWrapper({ children }: { children: ReactNode }) {
       <OfferLinkListener />
       <HostSessionManager />
       <ConnectionNotifications />
+      <ForumNotifications />
       <FaviconStatusSync />
       {children}
     </VoiceProvider>

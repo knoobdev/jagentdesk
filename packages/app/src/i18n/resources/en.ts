@@ -910,6 +910,15 @@ export const en = {
       },
     },
   },
+  forumNotifications: {
+    newPost: "💬 {{author}} posted in “{{topic}}”",
+    question: "❓ {{author}} needs the boss in “{{topic}}”",
+    decision: "✅ Decision recorded in “{{topic}}”",
+    review: "🔍 {{author}} posted a review in “{{topic}}”",
+    manyPosts: "💬 {{count}} new posts in “{{topic}}”",
+    taskDone: "✅ Task “{{task}}” shipped in “{{topic}}”",
+    topicDone: "🎉 The team wrapped up “{{topic}}”",
+  },
   connection: {
     localMode: {
       mobileWarning:
@@ -2309,6 +2318,10 @@ type WidenStringLeaves<T> = {
 // `tailscaleLogin` is optional in the resource type: until the other locales
 // ship translations for the gate screen they fall back to English via
 // i18next's fallbackLng.
-export type TranslationResources = WidenStringLeaves<Omit<typeof en, "tailscaleLogin">> & {
+export type TranslationResources = WidenStringLeaves<
+  Omit<typeof en, "tailscaleLogin" | "forumNotifications">
+> & {
   tailscaleLogin?: WidenStringLeaves<typeof en>["tailscaleLogin"];
+  // Newer sections default to English until each locale is translated (i18next fallbackLng: "en").
+  forumNotifications?: WidenStringLeaves<typeof en>["forumNotifications"];
 };
