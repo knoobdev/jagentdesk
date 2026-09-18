@@ -292,7 +292,12 @@ interface RenderLeftContentArgs {
 function renderLeftContent(args: RenderLeftContentArgs): ReactElement {
   const { agentControls, agentId, serverId, focusInput, isCompactLayout, isPaneFocused } = args;
   if (resolveAgentControlsMode(agentControls) === "draft" && agentControls) {
-    return <DraftAgentControls {...agentControls} isCompactLayout={isCompactLayout} />;
+    return (
+      <View style={styles.leftContentRow}>
+        <DraftAgentControls {...agentControls} isCompactLayout={isCompactLayout} />
+        <TeamModeControl agentId={agentId} serverId={serverId} />
+      </View>
+    );
   }
   return (
     <View style={styles.leftContentRow}>
