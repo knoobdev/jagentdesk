@@ -171,6 +171,13 @@ export class AgentForumService {
       };
       topic.messages.push(entry);
       ensureParticipant(topic, message.authorAgentId, message.authorLabel, message.role);
+      // Recording a decision resolves any outstanding "waiting on the boss" state (the lead posts the
+      // boss's answer as a decision after AskUserQuestion), so the thread banner clears.
+      if (entry.kind === "decision" && topic.pendingHumanQuestion) {
+        const pending = topic.messages.find((m) => m.id === topic.pendingHumanQuestion?.messageId);
+        if (pending) pending.awaitingHuman = false;
+        topic.pendingHumanQuestion = null;
+      }
       return topic;
     });
   }
