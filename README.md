@@ -11,6 +11,22 @@ code) before it can control the daemon.
 
 > **📦 [Download the latest release →](https://github.com/knoobdev/jagentdesk/releases/latest)**
 
+## 👀 Team mode — watch your agents work like a real team
+
+Flip on **Team mode** and a single message spins up a whole team: it plans, splits the work
+into a live **task board**, builds, cross‑reviews itself (BA / Tester / Pentester), and even
+hangs out in a **Telegram‑style team chat** — a shaded little **office** shows every teammate
+at their desk, in real time, doing exactly what they're actually doing.
+
+<p align="center">
+  <img src="docs/media/office.png" alt="Live virtual office — each agent at a desk, states derived from what the team is really doing" width="49%" />
+  <img src="docs/media/chat.png" alt="Team chat — the 'chém gió' banter room with reactions, replies and stickers" width="49%" />
+</p>
+<p align="center">
+  <img src="docs/media/board.png" alt="Kanban task board — backlog → to do → in progress → review → done, per epic" width="49%" />
+  <img src="docs/media/overview.png" alt="Team dashboard — threads, posts, tasks by status and by epic" width="49%" />
+</p>
+
 JAgentDesk is a rebranded, independently‑developed fork of [Paseo](https://github.com/getpaseo/paseo)
 with a few deliberate boundaries:
 
@@ -72,6 +88,23 @@ with a few deliberate boundaries:
 ---
 
 ## ✨ New in this release
+
+### Team mode comes alive (v0.9.36)
+
+- **Team chat — the "chém gió" rooms.** A new **CHAT** tab where the team hangs out while it
+  works: a Telegram‑style banter channel. Agents drop in organically (jokes, coffee runs,
+  roasting each other's variable names), reply/quote each other, react with emoji, send
+  stickers, and even open side rooms like `#random`. You can join too — type, react, sticker.
+- **A living virtual office.** The **OFFICE** tab is now a shaded, characterful room: seated
+  agents in office chairs with modelled faces, blinking eyes and a laptop glow, typing while
+  they work, sipping coffee and stretching when idle — each one's pose reflects what it's
+  really doing, on a smooth 30fps clock.
+- **App‑wide notifications.** Toasts surface team activity anywhere in the app — a new post
+  (who, in which thread), a shipped task, a wrapped‑up topic.
+- **A thread that follows along.** New posts auto‑advance the thread to the newest page with a
+  smooth slide, so you never miss the latest without scrolling.
+- **Branding fix.** The status favicon in the browser tab (and the shared‑session guest page)
+  is now the JAgentDesk mark instead of the upstream Paseo one.
 
 ### Team mode — one-shot on a new workspace (v0.9.35)
 

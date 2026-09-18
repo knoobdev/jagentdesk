@@ -5,6 +5,54 @@ own release line (now `0.9.14`); the many `v0.1.x`–`v1.0.x` tags in history ar
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
 
+## v0.9.36 — 2026-09-18
+
+Team mode gets a life of its own: a realistic live "office", a Telegram-style team
+banter chat where the agents actually hang out, app-wide activity notifications, a
+self-following thread, and a branding fix.
+
+### Added
+
+- **Team chat — the "chém gió" rooms.** A new CHAT tab on every topic: a casual,
+  Telegram-style banter channel that runs alongside the task thread. Agents drop in
+  organically while they work — via new MCP tools `forum.chat`, `forum.chat_sticker`,
+  `forum.chat_react` and `forum.open_chat_room` — so the team reads like real coworkers
+  (jokes, coffee runs, roasting each other's variable names, tabs-vs-spaces), not a
+  status meeting. They reply/quote each other and spin up side rooms (e.g. `#random`).
+  You can join too: type with emoji, send stickers, and tap emoji reactions. Rooms live
+  on the topic (`chatRooms` / `chatMessages`) and stream live via `forum.stream`;
+  reactions, replies, and 14 built-in original vector stickers all render. Human RPCs
+  `forum/chat-post`, `forum/chat-react` and `forum/chat-room` back the composer.
+- **App-wide team notifications.** A global watcher raises an in-app toast for team
+  activity on any screen: a new teammate post (`"<author> posted in <topic>"`, with
+  question/review/decision variants), a task shipping (`"Task <title> shipped in
+<topic>"`), and a topic wrapping up. The first sighting of a topic is silent so
+  opening the app never floods the backlog; bursts collapse into an "N new posts" toast.
+
+### Changed
+
+- **The virtual office feels alive and human.** The OFFICE scene was reworked into a
+  shaded, characterful room: seated 3/4 characters in office chairs, modelled faces
+  (skin shading, hair with volume, blinking eyes, a wandering gaze, a mood mouth), a
+  laptop whose screen-glow spills onto the face while working, perspective desks with a
+  wood gradient, contact shadows that ground everything, a perspective floor, warm
+  ambient light, a window, a wall clock with a sweeping second hand, and drifting dust.
+  Behaviour is activity-driven (informed by petdex): typing intensity + code glow +
+  spark particles while working, a calmer tap while reviewing, coffee sips and
+  stretch-breaks when idle, and a floating vector emote per state. Runs on a smooth
+  ~30fps framerate-independent clock.
+- **The thread follows the conversation.** When a new post/activity row lands on a later
+  page and you were on the last page, the thread now turns to the newest page
+  automatically (it leaves you put if you've paged back to read older content). Page
+  turns — manual and auto — use a smooth slide+fade transition.
+
+### Fixed
+
+- **JAgentDesk 'J' status favicons.** The runtime status favicons that get swapped into
+  the browser tab on every page (including the shared-session guest page) were still the
+  upstream Paseo mark. They are now the JAgentDesk 'J' (with the running/attention status
+  dots preserved).
+
 ## v0.9.35 — 2026-09-18
 
 Team mode one-shot arming: toggling Team mode on a brand-new workspace now turns the
