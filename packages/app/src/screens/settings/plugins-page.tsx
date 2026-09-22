@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
+import { useRouter } from "expo-router";
+import { Store } from "lucide-react-native";
 import { useMutation } from "@tanstack/react-query";
 import type { PluginListItem, PluginLogEntry } from "@jagentdesk/protocol/messages";
 import { AdaptiveModalSheet, type SheetHeader } from "@/components/adaptive-modal-sheet";
@@ -19,6 +21,7 @@ import { resolvePluginPageState } from "@/screens/settings/plugins-page-state";
 import { pluginRegistry, useInstalledPlugins } from "@/plugins/registry";
 import { settingsStyles } from "@/styles/settings";
 import { confirmDialog } from "@/utils/confirm-dialog";
+import { buildMarketplaceRoute } from "@/utils/host-routes";
 
 const pluginQueryKey = (serverId: string) => ["plugins", serverId] as const;
 type PluginRowAction = "reload" | "enable" | "disable" | "remove";
@@ -179,6 +182,10 @@ function PluginLogsSheet({
 
 export function HostPluginsPage({ serverId }: { serverId: string }) {
   const { t } = useTranslation();
+  const router = useRouter();
+  const openMarketplace = useCallback(() => {
+    router.push(buildMarketplaceRoute(serverId));
+  }, [router, serverId]);
   const client = useHostRuntimeClient(serverId);
   const connected = useHostRuntimeIsConnected(serverId);
   const supported = useHostFeature(serverId, "pluginManagement");
@@ -373,6 +380,17 @@ export function HostPluginsPage({ serverId }: { serverId: string }) {
   return (
     <View>
       <SettingsSection title={t("settings.plugins.title")}>
+        <View style={settingsStyles.card}>
+          <View style={settingsStyles.row}>
+            <View style={settingsStyles.rowContent}>
+              <Text style={settingsStyles.rowTitle}>{t("marketplace.browseTitle")}</Text>
+              <Text style={settingsStyles.rowHint}>{t("marketplace.browseHint")}</Text>
+            </View>
+            <Button variant="secondary" size="sm" leftIcon={Store} onPress={openMarketplace}>
+              {t("marketplace.browseButton")}
+            </Button>
+          </View>
+        </View>
         <Alert
           variant="warning"
           title={t("settings.plugins.trustedTitle")}

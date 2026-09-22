@@ -474,6 +474,14 @@ export function buildForgeRoute(serverId: string) {
   return `/h/${encodeSegment(normalized)}/forge` as const;
 }
 
+export function buildMarketplaceRoute(serverId: string) {
+  const normalized = trimNonEmpty(serverId);
+  if (!normalized) {
+    return "/" as const;
+  }
+  return `/h/${encodeSegment(normalized)}/marketplace` as const;
+}
+
 export function buildClusterWorkloadsRoute(serverId: string, clusterId: string) {
   const normalizedServer = trimNonEmpty(serverId);
   const normalizedCluster = trimNonEmpty(clusterId);
