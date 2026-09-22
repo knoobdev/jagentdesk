@@ -524,6 +524,11 @@ export interface AgentSlashCommand {
 export interface ListImportableSessionsOptions {
   limit?: number;
   /**
+   * How many candidate sessions to scan before ranking down to `limit`. Lets a
+   * host-wide search page deeper than the returned window; capped by the provider.
+   */
+  scanLimit?: number;
+  /**
    * Optional cwd hint. Providers that can cheaply pre-filter importable
    * sessions by working directory should do so before doing expensive work.
    */
