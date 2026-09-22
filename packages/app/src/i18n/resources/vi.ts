@@ -4,6 +4,13 @@ import { pluginSettings } from "./plugin-settings";
 
 export const vi = {
   paneFind: {
+    connectionFailure: "Không tìm được trong đoạn chat này. Kiểm tra kết nối tới host rồi thử lại.",
+    historyChangedFailure: "Đoạn chat đã thay đổi trong lúc tìm. Hãy tìm lại.",
+    revealFailure: "Không hiển thị được kết quả này. Thử lại.",
+    searching: "Đang tìm…",
+    loading: "Đang tải…",
+    failed: "Thất bại",
+    retry: "Thử lại",
     title: "Tìm",
     placeholder: "Tìm trong khung",
     close: "Đóng tìm kiếm",

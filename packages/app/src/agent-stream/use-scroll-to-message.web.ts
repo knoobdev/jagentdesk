@@ -1,7 +1,8 @@
 import type React from "react";
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { Virtualizer } from "@tanstack/react-virtual";
 import { createPromptJumpSettleController, PROMPT_JUMP_TOP_INSET_PX } from "./prompt-jump-settle";
+import type { ScrollToMessageOccurrence } from "./strategy";
 
 interface UseScrollToMessageInput {
   scrollContainerRef: React.RefObject<HTMLElement | null>;
@@ -30,11 +31,18 @@ export function useScrollToMessage({
   setFollowOutput,
   onNearBottomChange,
 }: UseScrollToMessageInput) {
+  const occurrenceRef = useRef<ScrollToMessageOccurrence | undefined>(undefined);
+  const removeAbortListener = useRef<(() => void) | null>(null);
   const settleController = useMemo(
     () =>
       createPromptJumpSettleController({
         viewport: {
           findTargetTop(itemId) {
+            // Chat find pins the viewport to the exact match it revealed; without an
+            // occurrence this falls back to the top of the row.
+            const occurrence = occurrenceRef.current;
+            if (occurrence?.signal.aborted) return null;
+            if (occurrence) return occurrence.targetTop();
             const container = scrollContainerRef.current;
             const target = container?.querySelector<HTMLElement>(
               `[data-history-row-id="${CSS.escape(itemId)}"]`,
@@ -78,10 +86,21 @@ export function useScrollToMessage({
     [scrollContainerRef],
   );
 
-  useEffect(() => () => settleController.cancel(), [settleController]);
+  useEffect(
+    () => () => {
+      removeAbortListener.current?.();
+      settleController.cancel();
+    },
+    [settleController],
+  );
 
   const scrollToMessage = useCallback(
-    (itemId: string) => {
+    (itemId: string, occurrence?: ScrollToMessageOccurrence) => {
+      occurrenceRef.current = occurrence;
+      removeAbortListener.current?.();
+      const cancel = () => settleController.cancel();
+      occurrence?.signal.addEventListener("abort", cancel, { once: true });
+      removeAbortListener.current = () => occurrence?.signal.removeEventListener("abort", cancel);
       const container = scrollContainerRef.current;
       if (!container) return;
       cancelPendingStickToBottom();

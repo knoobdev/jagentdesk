@@ -24,6 +24,17 @@ import {
 } from "@/components/ui/control-geometry";
 import { isWeb } from "@/constants/platform";
 import { isImeComposingKeyboardEvent } from "@/utils/keyboard-ime";
+import { getShortcutOs } from "@/utils/shortcut-platform";
+
+export { isFindShortcut } from "@/terminal/runtime/terminal-find-shortcut";
+export interface FindShortcutPlatform {
+  isMac: boolean;
+}
+
+/** The platform every Find surface judges the shortcut against. */
+export function findShortcutPlatform(): FindShortcutPlatform {
+  return { isMac: getShortcutOs() === "mac" };
+}
 
 const iconColorMapping = (theme: { colors: { foregroundMuted: string } }) => ({
   color: theme.colors.foregroundMuted,

@@ -7388,7 +7388,13 @@ export const AgentTimelineSearchResponseMessageSchema = z.object({
     agentId: z.string(),
     epoch: z.string(),
     locations: z.array(
-      z.object({ seq: z.number().int().nonnegative(), role: z.enum(["user", "assistant"]) }),
+      z.object({
+        seq: z.number().int().nonnegative(),
+        role: z.enum(["user", "assistant"]),
+        // The host's estimate of occurrences in this message; optional until the
+        // server counts them, so the client falls back to 1.
+        count: z.number().int().nonnegative().optional(),
+      }),
     ),
     nextCursor: z.number().int().nonnegative().nullable(),
     error: z.string().nullable(),

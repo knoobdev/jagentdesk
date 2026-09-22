@@ -199,6 +199,9 @@ const SCROLL_EDGE_EPSILON = 0.5;
 // Font size for stream metadata (timestamps, durations, live elapsed timer).
 // Lives between theme.fontSize.xs (12) and theme.fontSize.sm (14); no token.
 export const STREAM_METADATA_FONT_SIZE = 13;
+// Marks the text-bearing container of a message so web chat find can walk its
+// rendered text nodes. Web-only dataSet; ignored on native.
+const MESSAGE_TEXT_DATASET = { messageText: "true" } as const;
 type ScrollAxis = "x" | "y";
 
 function ensureWebToolCallShimmerKeyframes() {
@@ -532,7 +535,7 @@ export const UserMessage = memo(function UserMessage({
             </View>
           ) : null}
           {hasText ? (
-            <Text selectable style={userMessageStylesheet.text}>
+            <Text selectable style={userMessageStylesheet.text} dataSet={MESSAGE_TEXT_DATASET}>
               {message}
             </Text>
           ) : null}
@@ -1929,7 +1932,7 @@ export const AssistantMessage = memo(function AssistantMessage({
   );
 
   return (
-    <View testID="assistant-message" style={assistantContainerStyle}>
+    <View testID="assistant-message" style={assistantContainerStyle} dataSet={MESSAGE_TEXT_DATASET}>
       {keyedBlocks.map(({ key, block }, index) => (
         <AssistantMessageBlockContainer
           key={key}

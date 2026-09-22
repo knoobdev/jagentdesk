@@ -813,7 +813,12 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
   );
   const mountedHistoryRows = useMemo(() => {
     return segments.historyMounted.map((item, index) => (
-      <div key={item.id} data-history-row-id={item.id} style={streamRowStyle}>
+      <div
+        key={item.id}
+        data-history-row-id={item.id}
+        data-message-id={item.id}
+        style={streamRowStyle}
+      >
         {renderHistoryMountedRow(item, index, segments.historyMounted)}
       </div>
     ));
@@ -821,7 +826,12 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
   const liveHeadRows = useMemo(() => {
     void liveHeadRowRevision;
     return segments.liveHead.map((item, index) => (
-      <div key={item.id} data-history-row-id={item.id} style={streamRowStyle}>
+      <div
+        key={item.id}
+        data-history-row-id={item.id}
+        data-message-id={item.id}
+        style={streamRowStyle}
+      >
         {renderLiveHeadRow(item, index, segments.liveHead)}
       </div>
     ));
@@ -868,6 +878,7 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
                   key={virtualRow.key}
                   data-index={virtualRow.index}
                   data-history-row-id={item.id}
+                  data-message-id={item.id}
                   ref={measureVirtualizedRowElement}
                   style={renderVirtualRowStyle(virtualRow.start)}
                 >

@@ -3,6 +3,13 @@ import { pluginSettings } from "./plugin-settings";
 
 export const ar: TranslationResources = {
   paneFind: {
+    connectionFailure: "Could not search this chat. Check the host connection and retry.",
+    historyChangedFailure: "The chat changed while searching. Search again.",
+    revealFailure: "Could not show this match. Retry.",
+    searching: "Searching…",
+    loading: "Loading…",
+    failed: "Failed",
+    retry: "Retry",
     title: "Find",
     placeholder: "Find in pane",
     close: "Close Find",

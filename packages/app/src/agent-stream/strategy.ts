@@ -39,10 +39,15 @@ export interface StreamEdgeSlotProps {
   ListFooterComponentStyle?: StyleProp<ViewStyle>;
 }
 
+export interface ScrollToMessageOccurrence {
+  signal: AbortSignal;
+  targetTop(): number | null;
+}
+
 export interface StreamViewportHandle {
   scrollToBottom: (reason?: BottomAnchorLocalRequest["reason"]) => void;
   prepareForViewportChange: () => void;
-  scrollToMessage?: (itemId: string) => void;
+  scrollToMessage?: (itemId: string, occurrence?: ScrollToMessageOccurrence) => void;
 }
 
 export interface StreamSegmentRenderers {

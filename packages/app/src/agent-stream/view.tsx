@@ -69,6 +69,7 @@ import { resolveStreamRenderStrategy } from "./strategy-resolver";
 import { type StreamSegmentRenderers, type StreamViewportHandle } from "./strategy";
 import { ChatOutlineRail } from "@/agent-stream/chat-outline/rail";
 import { useChatOutline } from "@/agent-stream/chat-outline/use-chat-outline";
+import { ChatFind } from "@/agent-stream/chat-find";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import { planTimelineTailFetch } from "@/timeline/timeline-sync-plan";
 import {
@@ -549,6 +550,25 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       onJumpError: handleTimelineHistoryLoadError,
     });
 
+    // Chat find addresses a message by id; a message is one loaded row here, so a
+    // visible id set and a reveal that scrolls to a loaded row are all it needs.
+    const chatFindItems = useMemo(
+      () => [...effectiveStreamItems, ...(effectiveStreamHead ?? EMPTY_STREAM_HEAD)],
+      [effectiveStreamItems, effectiveStreamHead],
+    );
+    const chatFindVisibleMessageIds = useMemo(
+      () => new Set(chatFindItems.map((item) => item.id)),
+      [chatFindItems],
+    );
+    const revealLoadedMessage = useCallback(
+      (messageId: string) => {
+        if (!chatFindVisibleMessageIds.has(messageId)) return false;
+        viewportRef.current?.scrollToMessage?.(messageId);
+        return true;
+      },
+      [chatFindVisibleMessageIds],
+    );
+
     useImperativeHandle(
       ref,
       () => ({
@@ -980,28 +1000,38 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       <ToolCallSheetProvider>
         <AssistantSelectionCopySurface style={stylesheet.container}>
           <MessageOuterSpacingProvider disableOuterSpacing>
-            {streamRenderStrategy.render({
-              agentId,
-              segments: renderModel.segments,
-              historyRowRevision,
-              liveHeadRowRevision: expandedToolCallGroupIds,
-              boundary,
-              renderers,
-              listEmptyComponent,
-              viewportRef,
-              routeBottomAnchorRequest,
-              isAuthoritativeHistoryReady,
-              onNearBottomChange: setIsNearBottom,
-              onReadingPositionChange: chatOutline.reportReadingPosition,
-              onNearHistoryStart: loadOlder,
-              isLoadingOlderHistory: isLoadingOlder,
-              hasOlderHistory: hasOlder,
-              olderHistoryProgressKey: progressKey,
-              scrollEnabled: streamScrollEnabled,
-              listStyle: stylesheet.list,
-              baseListContentContainerStyle: stylesheet.listContentContainer,
-              forwardListContentContainerStyle: stylesheet.forwardListContentContainer,
-            })}
+            <ChatFind
+              agentId={agentId}
+              serverId={resolvedServerId}
+              epoch={timelineEpoch}
+              items={chatFindItems}
+              viewportRef={viewportRef}
+              revealLoadedMessage={revealLoadedMessage}
+              visibleMessageIds={chatFindVisibleMessageIds}
+            >
+              {streamRenderStrategy.render({
+                agentId,
+                segments: renderModel.segments,
+                historyRowRevision,
+                liveHeadRowRevision: expandedToolCallGroupIds,
+                boundary,
+                renderers,
+                listEmptyComponent,
+                viewportRef,
+                routeBottomAnchorRequest,
+                isAuthoritativeHistoryReady,
+                onNearBottomChange: setIsNearBottom,
+                onReadingPositionChange: chatOutline.reportReadingPosition,
+                onNearHistoryStart: loadOlder,
+                isLoadingOlderHistory: isLoadingOlder,
+                hasOlderHistory: hasOlder,
+                olderHistoryProgressKey: progressKey,
+                scrollEnabled: streamScrollEnabled,
+                listStyle: stylesheet.list,
+                baseListContentContainerStyle: stylesheet.listContentContainer,
+                forwardListContentContainerStyle: stylesheet.forwardListContentContainer,
+              })}
+            </ChatFind>
           </MessageOuterSpacingProvider>
           <ChatOutlineRail
             prompts={chatOutline.prompts}
