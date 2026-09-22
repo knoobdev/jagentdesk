@@ -8,6 +8,7 @@ import { runGitCommand } from "../../utils/run-git-command.js";
 import { ensurePrivateDirectory, writePrivateFileAtomicSync } from "../private-files.js";
 import { readPluginManifest } from "./manifest.js";
 import type { PluginManifest } from "./manifest.js";
+import { rebrandPaseoPlugin } from "./paseo-rebrand.js";
 
 const GIT_TIMEOUT_MS = 120_000;
 const GIT_ENV = { GIT_TERMINAL_PROMPT: "0" } as const;
@@ -78,6 +79,7 @@ export class ManagedPluginSources {
       await checkout(checkoutRoot, resolution.commit);
       const directory = path.resolve(checkoutRoot, pluginPath);
       assertPluginPath(checkoutRoot, directory);
+      await rebrandPaseoPlugin(directory);
       const { id: defaultId, build } = await readPluginManifest(directory);
       return {
         build,

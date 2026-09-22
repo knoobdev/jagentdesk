@@ -11,6 +11,9 @@ const PluginManifestSchema = z
   .object({
     id: PluginIdSchema,
     build: z.array(PluginBuildCommandSchema).min(1).optional(),
+    // A host-version gate the plugin declares (e.g. { jagentdesk: ">=0.9.0" }). Preserved
+    // when a Paseo plugin is rebranded on install so the marketplace can report it.
+    requirements: z.record(z.string(), z.string()).optional(),
   })
   .strict();
 
