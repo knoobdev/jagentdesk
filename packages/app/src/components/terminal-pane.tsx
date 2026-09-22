@@ -1,3 +1,5 @@
+import { TerminalFind, type TerminalPaneFindHandle } from "@/terminal/find";
+import type { TerminalFindResult } from "@/terminal/runtime/terminal-emulator-runtime";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { useRetainedPanelActive } from "@/components/retained-panel";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -266,6 +268,12 @@ export function TerminalPane({
   const [resizeRequestToken, setResizeRequestToken] = useState(0);
   useBlockMobilePanelOpenGestures(isMobile && isWorkspaceFocused && isPaneFocused && hasSelection);
   const emulatorRef = useRef<TerminalEmulatorHandle>(null);
+  const findRef = useRef<TerminalPaneFindHandle>(null);
+  const handleFindRequest = useCallback(() => findRef.current?.open(), []);
+  const handleFindResult = useCallback(
+    (result: TerminalFindResult) => findRef.current?.update(result),
+    [],
+  );
   const terminalIdRef = useRef<string>(terminalId);
   const terminalActiveRef = useRef(isTerminalActive);
   terminalActiveRef.current = isTerminalActive;
@@ -325,6 +333,7 @@ export function TerminalPane({
   }, [isMobile, isWorkspaceFocused, mobileView]);
   const handleRendererReadyChange = useCallback(
     (change: TerminalRendererReadyChange) => {
+      if (!change.isReady && change.streamKey === terminalStreamKey) findRef.current?.reset();
       setRendererReadyStreamKey((current) => applyTerminalRendererReadyChange(current, change));
       if (!shouldReplayTerminalSnapshotForRenderer({ change, terminalStreamKey })) {
         return;
@@ -1058,6 +1067,8 @@ export function TerminalPane({
             onRendererReadyChange={handleRendererReadyChange}
             onSwipeRight={handleSwipeRight}
             onSwipeLeft={handleSwipeLeft}
+            onFindRequest={handleFindRequest}
+            onFindResult={handleFindResult}
             onInput={handleTerminalData}
             onFocus={handleTerminalFocus}
             onResize={handleTerminalResize}
@@ -1072,6 +1083,14 @@ export function TerminalPane({
             resizeRequestToken={resizeRequestToken}
           />
         </View>
+
+        <TerminalFind
+          key={terminalStreamKey}
+          ref={findRef}
+          terminal={emulatorRef}
+          active={isTerminalActive && isPaneFocused && rendererReadyStreamKey === terminalStreamKey}
+          focusTerminal={requestTerminalFocus}
+        />
 
         {showLoadingOverlay ? (
           <View style={styles.attachOverlay} pointerEvents="none" testID="terminal-attach-loading">

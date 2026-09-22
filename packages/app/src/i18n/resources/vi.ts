@@ -3,6 +3,21 @@
 import { pluginSettings } from "./plugin-settings";
 
 export const vi = {
+  paneFind: {
+    title: "Tìm",
+    placeholder: "Tìm trong khung",
+    close: "Đóng tìm kiếm",
+    matches: "Kết quả tìm kiếm",
+    previous: "Kết quả trước",
+    next: "Kết quả tiếp theo",
+    toggleReplace: "Bật/tắt thay thế",
+    replaceWith: "Thay bằng",
+    replace: "Thay thế",
+    replaceAll: "Thay tất cả",
+    noMatches: "Không có kết quả",
+    position: "{{current}} trên {{total}}",
+    total: "{{total}} kết quả",
+  },
   common: {
     back: "Quay lại",
     loading: "Đang tải...",
