@@ -4,6 +4,7 @@ import { lstat, mkdir, mkdtemp, rename, rm, stat } from "node:fs/promises";
 import { basename, resolve, sep } from "path";
 import { homedir } from "node:os";
 import { CLIENT_CAPS, type ClientCapability } from "@jagentdesk/protocol/client-capabilities";
+import { formatPluginSourceReference } from "@jagentdesk/protocol/plugin-source-reference";
 import type { PairingCodeManager } from "./pairing/pairing-code.js";
 import {
   serializeAgentStreamEvent,
@@ -559,6 +560,11 @@ export interface SessionOptions {
     installDirectory(input: {
       path: string;
       id?: string;
+    }): Promise<import("@jagentdesk/protocol/messages").PluginListItem>;
+    installSource(input: {
+      source: string;
+      id?: string;
+      ref?: string;
     }): Promise<import("@jagentdesk/protocol/messages").PluginListItem>;
     inspectDirectory(path: string): Promise<{ id: string }>;
     reloadPlugin(pluginId: string): Promise<import("@jagentdesk/protocol/messages").PluginListItem>;
@@ -2321,6 +2327,23 @@ export class Session {
         });
         return undefined;
       });
+    }
+    if (msg.type === "plugin.source.install.request") {
+      if (!this.pluginRuntime) throw new Error("Plugin service is unavailable");
+      // A subdirectory plugin arrives with its path in the COMPAT `pluginPath` field;
+      // fold it back into the source reference the runtime parses.
+      const source = msg.pluginPath
+        ? formatPluginSourceReference(msg.source, msg.pluginPath)
+        : msg.source;
+      return this.pluginRuntime
+        .installSource({ source, id: msg.id, ref: msg.ref })
+        .then((plugin) => {
+          this.emit({
+            type: "plugin.source.install.response",
+            payload: { requestId: msg.requestId, plugin },
+          });
+          return undefined;
+        });
     }
     if (msg.type === "plugin.directory.inspect.request") {
       if (!this.pluginRuntime) throw new Error("Plugin service is unavailable");

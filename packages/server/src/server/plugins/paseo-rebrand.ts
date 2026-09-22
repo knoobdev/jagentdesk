@@ -1,4 +1,4 @@
-import { readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 // A plugin authored for Paseo reaches the SDK under the @getpaseo/@paseo scope and
@@ -66,32 +66,55 @@ function rebrandManifest(raw: unknown): Record<string, unknown> {
   return result;
 }
 
+const FORK_ENTRY_FILENAMES = ["index.ts", "index.tsx"];
+// Paseo splits its entry into client/server files; the fork compiles a single index.ts
+// (client-only plugins default-export their contribute function). A client entry is
+// renamed to the fork's entry so themes and other client plugins load; a server-only
+// plugin still needs API parity and is out of scope here.
+const PASEO_CLIENT_ENTRIES = [
+  ["index.client.ts", "index.ts"],
+  ["index.client.tsx", "index.tsx"],
+  ["index.client.js", "index.ts"],
+  ["index.client.jsx", "index.tsx"],
+] as const;
+
+async function isFile(filePath: string): Promise<boolean> {
+  return stat(filePath).then(
+    (info) => info.isFile(),
+    () => false,
+  );
+}
+
+async function bridgeEntryPoint(directory: string): Promise<void> {
+  for (const filename of FORK_ENTRY_FILENAMES) {
+    if (await isFile(path.join(directory, filename))) return;
+  }
+  for (const [paseoEntry, forkEntry] of PASEO_CLIENT_ENTRIES) {
+    const source = path.join(directory, paseoEntry);
+    if (await isFile(source)) {
+      await rename(source, path.join(directory, forkEntry));
+      return;
+    }
+  }
+}
+
 /**
  * Rebrand a checked-out Paseo plugin so the fork's manifest reader and compiler accept it.
  * A no-op when the plugin already targets JAgentDesk. Returns whether anything was rewritten.
  */
 export async function rebrandPaseoPlugin(directory: string): Promise<boolean> {
-  const jagentdeskManifest = path.join(directory, JAGENTDESK_MANIFEST_FILENAME);
-  if (
-    await stat(jagentdeskManifest).then(
-      (info) => info.isFile(),
-      () => false,
-    )
-  ) {
+  if (await isFile(path.join(directory, JAGENTDESK_MANIFEST_FILENAME))) {
     return false;
   }
   const paseoManifest = path.join(directory, PASEO_MANIFEST_FILENAME);
-  if (
-    !(await stat(paseoManifest).then(
-      (info) => info.isFile(),
-      () => false,
-    ))
-  ) {
+  if (!(await isFile(paseoManifest))) {
     return false;
   }
   const parsed = JSON.parse(await readFile(paseoManifest, "utf8")) as unknown;
+  const jagentdeskManifest = path.join(directory, JAGENTDESK_MANIFEST_FILENAME);
   await writeFile(jagentdeskManifest, `${JSON.stringify(rebrandManifest(parsed), null, 2)}\n`);
   await rm(paseoManifest, { force: true });
   await rewriteSourceTree(directory);
+  await bridgeEntryPoint(directory);
   return true;
 }

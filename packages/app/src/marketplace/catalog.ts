@@ -313,6 +313,28 @@ export function topPluginsByStars(
   return [...plugins].sort((a, b) => b.repoMeta.stars - a.repoMeta.stars).slice(0, limit);
 }
 
+export interface GithubSourceRef {
+  source: string;
+  ref?: string;
+  pluginPath?: string;
+}
+
+// A marketplace URL may point into a monorepo subdirectory via GitHub's
+// /tree/<branch>/<path> (or /blob/) form. Split it into the clone URL, the ref, and
+// the relative plugin path the daemon expects; a plain repo URL passes through.
+export function parseGithubSource(url: string | undefined): GithubSourceRef {
+  const trimmed = (url ?? "").trim().replace(/\/+$/, "");
+  const match =
+    /^(https?:\/\/[^/]+\/[^/]+\/[^/]+?)(?:\.git)?\/(?:tree|blob)\/([^/]+)(?:\/(.+))?$/.exec(
+      trimmed,
+    );
+  if (!match) {
+    return { source: trimmed };
+  }
+  const [, source, ref, pluginPath] = match;
+  return { source, ref, pluginPath: pluginPath || undefined };
+}
+
 // Normalize a git remote/URL to `host/owner/repo` so an installed plugin whose
 // daemon-side `remote` was rewritten (protocol, trailing .git, casing) still
 // matches its marketplace entry's `url`.

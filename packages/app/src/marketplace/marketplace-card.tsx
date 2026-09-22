@@ -70,7 +70,7 @@ export function MarketplaceCard({
   const installVariant = installStatus === "installed" ? "outline" : "default";
 
   return (
-    <Pressable style={styles.card} onPress={handleOpen} accessibilityRole="button">
+    <Pressable style={styles.card} onPress={handleOpen}>
       <View style={styles.head}>
         <Text style={styles.name} numberOfLines={1}>
           {plugin.name}

@@ -40,7 +40,8 @@ describe("rebrandPaseoPlugin", () => {
     expect(manifest.id).toBe("catppuccin");
     expect(manifest.requirements).toEqual({ jagentdesk: ">=0.8.0" });
 
-    const source = await readFile(path.join(directory, "index.client.ts"), "utf8");
+    // The client entry is renamed to the fork's index.ts and its SDK scope rewritten.
+    const source = await readFile(path.join(directory, "index.ts"), "utf8");
     // /client collapses to the fork's package root; /server keeps its subpath.
     expect(source).toContain('from "@jagentdesk/plugin"');
     expect(source).toContain('from "@jagentdesk/plugin/server"');
@@ -61,13 +62,29 @@ describe("rebrandPaseoPlugin", () => {
 
     await rebrandPaseoPlugin(directory);
 
-    expect(await readFile(path.join(directory, "index.client.tsx"), "utf8")).toContain(
+    expect(await readFile(path.join(directory, "index.tsx"), "utf8")).toContain(
       '"@jagentdesk/plugin"',
     );
     // A vendored dependency is left untouched.
     expect(
       await readFile(path.join(directory, "node_modules", "dep", "index.js"), "utf8"),
     ).toContain("@getpaseo/plugin");
+  });
+
+  it("bridges a Paseo client entry to the fork's single index entry", async () => {
+    await writeFile(path.join(directory, "paseo-plugin.json"), JSON.stringify({ id: "gruvbox" }));
+    await writeFile(
+      path.join(directory, "index.client.ts"),
+      'import type { PluginClientContext } from "@getpaseo/plugin/client";\nexport default function contribute(c: PluginClientContext) { c.addTheme({ id: "g" }); return () => {}; }\n',
+    );
+
+    await rebrandPaseoPlugin(directory);
+
+    // index.client.ts becomes index.ts (the fork's entry) with the SDK scope rewritten.
+    await expect(stat(path.join(directory, "index.client.ts"))).rejects.toThrow();
+    const entry = await readFile(path.join(directory, "index.ts"), "utf8");
+    expect(entry).toContain('from "@jagentdesk/plugin"');
+    expect(entry).toContain("export default function contribute");
   });
 
   it("leaves a plugin that already targets JAgentDesk alone", async () => {

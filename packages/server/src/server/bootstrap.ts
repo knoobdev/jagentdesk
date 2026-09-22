@@ -160,6 +160,7 @@ import { createForumBootstrap, createForumNotify } from "./agent-forum/bootstrap
 import { TunnelManager } from "./session-share/tunnel-manager.js";
 import { DaemonConfigStore, type MutableDaemonConfig } from "./daemon-config-store.js";
 import { PluginService } from "./plugins/index.js";
+import { ManagedPluginSources } from "./plugins/managed-source.js";
 import { BrowserToolsBroker } from "./browser-tools/broker.js";
 import { DaemonConfigBrowserToolsPolicy } from "./browser-tools/policy.js";
 import { WorkspaceGitServiceImpl } from "./workspace-git-service.js";
@@ -601,9 +602,12 @@ export async function createJAgentDeskDaemon(
   );
   const browserToolsPolicy = new DaemonConfigBrowserToolsPolicy(daemonConfigStore);
   const browserToolsBroker = new BrowserToolsBroker({});
-  // Local-disk-only plugin service (ADR-0014). `pluginsEnabled` defaults FALSE,
-  // so start() spawns nothing unless the operator has explicitly enabled plugins.
-  const pluginRuntime = new PluginService(logger, daemonConfigStore, daemonVersion);
+  // `pluginsEnabled` defaults FALSE, so start() spawns nothing unless the operator
+  // has explicitly enabled plugins. Managed git sources back the marketplace install
+  // flow (a checked-out Paseo plugin is auto-rebranded before it is compiled).
+  const pluginRuntime = new PluginService(logger, daemonConfigStore, daemonVersion, {
+    managedSources: new ManagedPluginSources(config.jagentdeskHome),
+  });
 
   const serverId = getOrCreateServerId(config.jagentdeskHome, { logger });
   const daemonKeyPair = await loadOrCreateDaemonKeyPair(config.jagentdeskHome, logger);

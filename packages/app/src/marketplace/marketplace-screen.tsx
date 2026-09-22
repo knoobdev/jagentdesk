@@ -19,6 +19,7 @@ import {
   filterAndSortPlugins,
   isThemePlugin,
   normalizeRepoUrl,
+  parseGithubSource,
   useMarketplaceCatalog,
   type MarketplacePlugin,
   type MarketplaceSort,
@@ -176,7 +177,8 @@ export function MarketplaceScreen() {
   const install = useMutation({
     mutationFn: async (plugin: MarketplacePlugin) => {
       if (!client) throw new Error("Plugin host is offline");
-      await client.installSourcePlugin(plugin.url);
+      const { source, ref, pluginPath } = parseGithubSource(plugin.url);
+      await client.installSourcePlugin(source, { ref, pluginPath });
       return plugin;
     },
     onMutate: (plugin) => {
@@ -204,7 +206,7 @@ export function MarketplaceScreen() {
       if (local === "pending") return "pending";
       const installed =
         installedLookup.ids.has(plugin.id) ||
-        installedLookup.remotes.has(normalizeRepoUrl(plugin.url));
+        installedLookup.remotes.has(normalizeRepoUrl(parseGithubSource(plugin.url).source));
       if (installed) return "installed";
       if (local === "failed") return "failed";
       return "idle";
