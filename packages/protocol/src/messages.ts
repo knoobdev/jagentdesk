@@ -1778,6 +1778,16 @@ export const FetchAgentTimelineRequestMessageSchema = z.object({
   mergeWindow: z.boolean().optional(),
 });
 
+// Chat Find (0.9.0): search an agent's whole timeline server-side for a query; returns match
+// locations (seq + role) the client scrolls to and verifies. Paginated via cursor.
+export const AgentTimelineSearchRequestMessageSchema = z.object({
+  type: z.literal("agent.timeline.search.request"),
+  agentId: z.string(),
+  requestId: z.string(),
+  query: z.string(),
+  cursor: z.number().int().nonnegative().optional(),
+});
+
 export const AgentTimelineListPromptsRequestMessageSchema = z.object({
   type: z.literal("agent.timeline.list_prompts.request"),
   agentId: z.string(),
@@ -4012,6 +4022,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   RestartServerRequestMessageSchema,
   DaemonUpdateRequestMessageSchema,
   FetchAgentTimelineRequestMessageSchema,
+  AgentTimelineSearchRequestMessageSchema,
   AgentTimelineListPromptsRequestMessageSchema,
   ProviderSubagentListRequestMessageSchema,
   ProviderSubagentTimelineRequestMessageSchema,
@@ -7368,6 +7379,22 @@ export const AgentTimelineReplacementMessageSchema = z.object({
   }),
 });
 
+// Chat Find (0.9.0) response: match locations for a search query. `epoch` lets the client discard
+// results computed against a stale timeline.
+export const AgentTimelineSearchResponseMessageSchema = z.object({
+  type: z.literal("agent.timeline.search.response"),
+  payload: z.object({
+    requestId: z.string(),
+    agentId: z.string(),
+    epoch: z.string(),
+    locations: z.array(
+      z.object({ seq: z.number().int().nonnegative(), role: z.enum(["user", "assistant"]) }),
+    ),
+    nextCursor: z.number().int().nonnegative().nullable(),
+    error: z.string().nullable(),
+  }),
+});
+
 export const CheckoutDiscardChangesResponseSchema = z.object({
   type: z.literal("checkout.discard_changes.response"),
   payload: z.object({
@@ -7880,6 +7907,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   // Upstream v0.7.2 response / notification additions
   AgentConfigApplyResponseMessageSchema,
   AgentTimelineReplacementMessageSchema,
+  AgentTimelineSearchResponseMessageSchema,
   AgentSkillsGetStatusResponseSchema,
   AgentSkillsReconcileResponseSchema,
   AgentSkillsUninstallResponseSchema,

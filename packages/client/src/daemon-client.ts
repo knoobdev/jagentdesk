@@ -885,6 +885,17 @@ export type AgentTimelinePromptIndexPayload = Extract<
   { type: "agent.timeline.list_prompts.response" }
 >["payload"];
 
+export interface AgentTimelineSearchOptions {
+  agentId: string;
+  query: string;
+  cursor?: number;
+}
+
+export type AgentTimelineSearchPayload = Extract<
+  SessionOutboundMessage,
+  { type: "agent.timeline.search.response" }
+>["payload"];
+
 export type ProviderSubagentListPayload = Extract<
   SessionOutboundMessage,
   { type: "agent.provider_subagents.list.response" }
@@ -3205,6 +3216,41 @@ export class DaemonClient {
       options: { skipQueue: true },
       select: (response) =>
         response.type === "agent.timeline.list_prompts.response" &&
+        response.payload.requestId === requestId
+          ? response.payload
+          : null,
+    });
+    if (payload.error) {
+      throw new Error(payload.error);
+    }
+    return payload;
+  }
+
+  async searchAgentTimeline({
+    agentId,
+    query,
+    cursor,
+    requestId: requestIdOption,
+    timeout,
+  }: AgentTimelineSearchOptions & {
+    requestId?: string;
+    timeout?: number;
+  }): Promise<AgentTimelineSearchPayload> {
+    const requestId = this.createRequestId(requestIdOption);
+    const message = SessionInboundMessageSchema.parse({
+      type: "agent.timeline.search.request",
+      agentId,
+      query,
+      requestId,
+      ...(cursor !== undefined ? { cursor } : {}),
+    });
+    const payload = await this.sendRequest({
+      requestId,
+      message,
+      timeout,
+      options: { skipQueue: true },
+      select: (response) =>
+        response.type === "agent.timeline.search.response" &&
         response.payload.requestId === requestId
           ? response.payload
           : null,
