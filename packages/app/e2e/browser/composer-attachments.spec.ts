@@ -23,6 +23,8 @@ import {
   selectGithubOption,
   expectGithubAttachmentPill,
   openGithubWorkspace,
+  attachFileFromMenu,
+  controlFileUploadCompletion,
 } from "../support/helpers/composer";
 import {
   delayBrowserAgentCreatedStatus,
@@ -50,6 +52,31 @@ const TEST_JSON = {
 };
 
 test.describe("Composer attachments", () => {
+  test("selected file shows a loading attachment until upload is acknowledged", async ({
+    page,
+    withWorkspace,
+  }) => {
+    const upload = await controlFileUploadCompletion(page);
+    const workspace = await withWorkspace({ prefix: "attach-upload-pending-" });
+    await workspace.navigateTo();
+    await clickNewChat(page);
+    await expectComposerVisible(page);
+
+    upload.hold();
+    await attachFileFromMenu(page, TEST_JSON);
+    await upload.waitForUpload();
+
+    const pending = page.getByTestId("composer-pending-file-attachment");
+    await expect(pending).toContainText(TEST_JSON.name);
+    await expect(pending.getByRole("progressbar")).toBeVisible();
+    await expect(page.getByTestId("composer-file-attachment-pill")).toHaveCount(0);
+
+    upload.complete();
+    await expect(pending).toHaveCount(0);
+    await expect(page.getByTestId("composer-file-attachment-pill")).toContainText(TEST_JSON.name);
+    await expectComposerEditable(page);
+  });
+
   test("Plus menu shows image and GitHub options", async ({ page, withWorkspace }) => {
     test.setTimeout(60_000);
     const workspace = await withWorkspace({ prefix: "attach-plus-" });

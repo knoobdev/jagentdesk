@@ -7,6 +7,16 @@ import { connectWorkspaceSetupClient } from "./workspace-setup";
 import { selectWorkspaceInSidebar } from "./sidebar";
 import { getServerId } from "./server-id";
 import { waitForTabBar } from "./launcher";
+import { installDaemonWebSocketGate } from "./daemon-websocket-gate";
+
+export async function controlFileUploadCompletion(page: Page) {
+  const gate = await installDaemonWebSocketGate(page);
+  return {
+    hold: () => gate.holdNextServerMessage("file.upload.response"),
+    waitForUpload: () => gate.waitForHeldServerMessage("file.upload.response"),
+    complete: () => gate.releaseHeldServerMessage("file.upload.response"),
+  };
+}
 
 function composerInput(page: Page) {
   return page.getByRole("textbox", { name: "Message agent..." }).first();
@@ -93,6 +103,16 @@ export async function attachImageFromMenu(
 
 export async function expectAttachmentPill(page: Page, testID: string): Promise<void> {
   await expect(page.getByTestId(testID).first()).toBeVisible({ timeout: 10_000 });
+}
+
+export async function attachFileFromMenu(
+  page: Page,
+  file: { name: string; mimeType: string; buffer: Buffer },
+): Promise<void> {
+  await openAttachmentMenu(page);
+  const chooserPromise = page.waitForEvent("filechooser");
+  await page.getByRole("menuitem", { name: "Upload file", exact: true }).click();
+  await (await chooserPromise).setFiles(file);
 }
 
 export async function dropFileOnComposer(

@@ -2,10 +2,10 @@ import { getFileExtension } from "@/attachments/file-types";
 import { copyDesktopAttachmentFile } from "@/desktop/attachments/desktop-file-commands";
 import { readDesktopFileBase64 } from "@/desktop/attachments/desktop-preview-url";
 
-export interface PickedFile {
+export interface SelectedFile {
   fileName: string;
   mimeType: string;
-  bytes: Uint8Array;
+  readBytes(): Promise<Uint8Array>;
 }
 
 function base64ToUint8Array(base64: string): Uint8Array {
