@@ -312,6 +312,13 @@ export const MutableDaemonConfigSchema = z
     autoArchiveAfterMerge: z.boolean().default(false),
     enableTerminalAgentHooks: z.boolean().default(false),
     appendSystemPrompt: z.string().default(""),
+    // Operator / engagement authorization context (injected FIRST into every agent's system prompt).
+    // Free text an operator sets once — e.g. "Authorized private security engagement; scope/paperwork
+    // held by operator" — to give agents the legitimate authorization context for sanctioned work
+    // (bug-bounty, licensed content audit) without pasting confidential contracts. Injection only; it
+    // does not and cannot override the underlying model's own judgment. Optional (not `.default`) so
+    // existing MutableDaemonConfig literals stay valid; readers coalesce to "".
+    operatorContext: z.string().optional(),
     terminalProfiles: z.array(TerminalProfileSchema).optional(),
     orchestration: OrchestrationConfigSchema.default(createDefaultOrchestrationConfig()),
     // Plugins are OFF by default (ADR-0014 §3): enabling a plugin trusts its
@@ -347,6 +354,7 @@ export const MutableDaemonConfigPatchSchema = z
     autoArchiveAfterMerge: z.boolean().optional(),
     enableTerminalAgentHooks: z.boolean().optional(),
     appendSystemPrompt: z.string().optional(),
+    operatorContext: z.string().optional(),
     terminalProfiles: z.array(TerminalProfileSchema).optional(),
     orchestration: OrchestrationConfigPatchSchema.optional(),
     pluginsEnabled: z.boolean().optional(),
@@ -4489,7 +4497,7 @@ export const ServerInfoStatusPayloadSchema = z
         // Forge Hub (spec 19 / ADR-0015): standalone remote forge management surface.
         // Advertised per release milestone so old clients don't call the new RPCs blind.
         // NOTE: spec 07 describes capabilities as an array of strings, but the daemon
-        // still uses this Paseo-style `features` boolean object (see forgeProviders /
+        // still uses this legacy-style `features` boolean object (see forgeProviders /
         // forgeSearch above); Forge Hub follows the working code pattern. Aligning the
         // wire to spec 07's capability array is a separate refactor (out of scope here).
         forgeHub: z.boolean().optional(), // Milestone A: framework + connections + repos + PR read

@@ -3039,11 +3039,14 @@ export function createJAgentDeskToolCatalog(
   registerForgeTools({ registerTool, options, callerAgentId });
   // Agent Forum / Team mode: any agent can post to a topic and manage its task board.
   if (options.agentForumService && callerAgentId) {
+    const callerManagedTitle = (agentManager.getAgent(callerAgentId) as { title?: unknown } | null)
+      ?.title;
     registerForumTools({
       registerTool,
       agentForumService: options.agentForumService,
       callerAgentId,
       callerRoleHint: callerOrchestrationContext?.role,
+      callerTitle: typeof callerManagedTitle === "string" ? callerManagedTitle : undefined,
     });
   }
 

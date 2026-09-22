@@ -262,6 +262,7 @@ export function HostAgentsPage({ serverId }: { serverId: string }) {
           <SessionShareOptInCard serverId={serverId} />
           <BrowserFingerprintProfilesCard serverId={serverId} />
           <AppendSystemPromptCard serverId={serverId} />
+          <OperatorContextCard serverId={serverId} />
         </SettingsSection>
       ) : (
         <View style={[settingsStyles.card, styles.emptyCard]}>
@@ -1197,6 +1198,116 @@ function AppendSystemPromptCard({ serverId }: { serverId: string }) {
               {isSaving
                 ? t("settings.host.orchestration.systemPrompt.saving")
                 : t("settings.host.orchestration.systemPrompt.save")}
+            </Button>
+          </View>
+        </AdaptiveModalSheet>
+      ) : null}
+    </>
+  );
+}
+
+// Operator / engagement authorization context. Free text an operator sets once (per daemon) that is
+// injected FIRST into every agent's system prompt — the legitimate way to give agents authorization
+// context for sanctioned work (bug-bounty, licensed content audit) without pasting confidential
+// contracts. Mirrors AppendSystemPromptCard; injection only (never overrides the model's own judgment).
+function OperatorContextCard({ serverId }: { serverId: string }) {
+  const { t } = useTranslation();
+  const isConnected = useHostRuntimeIsConnected(serverId);
+  const { config, patchConfig } = useDaemonConfig(serverId);
+  const persistedContext = config?.operatorContext ?? "";
+  const [draft, setDraft] = useState(persistedContext);
+  const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const header = useMemo<SheetHeader>(() => ({ title: t("operatorContext.sheetTitle") }), [t]);
+
+  useEffect(() => {
+    setDraft(persistedContext);
+  }, [persistedContext]);
+
+  const hasChanges = draft !== persistedContext;
+
+  const handleOpen = useCallback(() => {
+    setDraft(persistedContext);
+    setIsEditing(true);
+  }, [persistedContext]);
+
+  const handleClose = useCallback(() => {
+    if (isSaving) return;
+    setDraft(persistedContext);
+    setIsEditing(false);
+  }, [isSaving, persistedContext]);
+
+  const handleSave = useCallback(() => {
+    setIsSaving(true);
+    void patchConfig({ operatorContext: draft })
+      .then(() => {
+        setIsEditing(false);
+        return;
+      })
+      .catch((error) => {
+        console.error("[HostPage] Failed to save operator context", error);
+      })
+      .finally(() => setIsSaving(false));
+  }, [draft, patchConfig]);
+
+  const handleReset = useCallback(() => {
+    setDraft(persistedContext);
+  }, [persistedContext]);
+
+  if (!isConnected) return null;
+
+  return (
+    <>
+      <View style={settingsStyles.card} testID="host-page-operator-context-card">
+        <View style={settingsStyles.row}>
+          <View style={settingsStyles.rowContent}>
+            <Text style={settingsStyles.rowTitle}>{t("operatorContext.title")}</Text>
+            <Text style={settingsStyles.rowHint}>{t("operatorContext.hint")}</Text>
+          </View>
+          <Button
+            variant="outline"
+            size="sm"
+            onPress={handleOpen}
+            testID="host-page-operator-context-edit"
+          >
+            {t("operatorContext.edit")}
+          </Button>
+        </View>
+      </View>
+
+      {isEditing ? (
+        <AdaptiveModalSheet
+          header={header}
+          visible
+          onClose={handleClose}
+          testID="host-page-operator-context-sheet"
+          desktopMaxWidth={560}
+        >
+          <SettingsTextAreaCard
+            testID="host-page-operator-context-input"
+            accessibilityLabel={t("operatorContext.accessibilityLabel")}
+            value={draft}
+            onChangeText={setDraft}
+            placeholder={t("operatorContext.placeholder")}
+          />
+          <View style={styles.appendPromptActions}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onPress={handleReset}
+              disabled={!hasChanges || isSaving}
+              testID="host-page-operator-context-reset"
+            >
+              {t("operatorContext.reset")}
+            </Button>
+            <Button
+              variant="default"
+              size="sm"
+              onPress={handleSave}
+              disabled={!hasChanges || isSaving}
+              testID="host-page-operator-context-save"
+            >
+              {isSaving ? t("operatorContext.saving") : t("operatorContext.save")}
             </Button>
           </View>
         </AdaptiveModalSheet>

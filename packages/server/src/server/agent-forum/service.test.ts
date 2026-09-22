@@ -108,7 +108,17 @@ describe("AgentForumService", () => {
       reviewerAgentId: "pen1",
       reviewerLabel: "Pentester 1",
       verdict: "request_changes",
-      findings: "XSS via innerHTML",
+      findings: [
+        {
+          path: "src/render.ts",
+          startLine: 42,
+          endLine: 44,
+          category: "security",
+          severity: "high",
+          content: "XSS via innerHTML with untrusted input",
+          suggestion: "Use textContent or sanitize",
+        },
+      ],
     });
     expect(changed!.tasks[0]!.status).toBe("in_progress");
     const review = changed!.messages.at(-1)!;
@@ -117,17 +127,74 @@ describe("AgentForumService", () => {
     expect(review.text).toContain("XSS");
     expect(changed!.participants.some((p) => p.role === "pentester")).toBe(true);
 
-    // Re-review + approve → task done → topic done.
+    // Re-review: the task is done only when ALL required roles (ba/tester/pentester) approve.
     await service.setTaskStatus(topic.id, taskId, "review", "coder1");
-    const approved = await service.reviewTask(topic.id, {
+    await service.reviewTask(topic.id, {
+      taskId,
+      role: "ba",
+      reviewerAgentId: "ba1",
+      reviewerLabel: "BA 1",
+      verdict: "approve",
+      findings: [],
+    });
+    await service.reviewTask(topic.id, {
       taskId,
       role: "tester",
       reviewerAgentId: "qa1",
       reviewerLabel: "Tester 1",
       verdict: "approve",
-      findings: "All green.",
+      findings: [],
+    });
+    // Pentester's latest verdict is still request_changes → task stays in_progress, not done.
+    const partial = await service.getTopic(topic.id);
+    expect(partial!.tasks[0]!.status).toBe("in_progress");
+    // Pentester (who requested changes) now approves → all three approved → done.
+    const approved = await service.reviewTask(topic.id, {
+      taskId,
+      role: "pentester",
+      reviewerAgentId: "pen1",
+      reviewerLabel: "Pentester 1",
+      verdict: "approve",
+      findings: [],
     });
     expect(approved!.tasks[0]!.status).toBe("done");
     expect(approved!.status).toBe("done");
+  });
+
+  test("createBootstrapTopic dedupes near-duplicate forum/create for the same lead", async () => {
+    // A double-fired forum/create (Enter + keyboard send, or a draft handoff replay) must not mint two
+    // teams: reuse the same topic and report created:false so the caller skips a second lead bootstrap.
+    const first = await service.createBootstrapTopic({
+      prompt: "Build a weather card",
+      leadAgentId: "agent_lead1",
+    });
+    expect(first.created).toBe(true);
+    const second = await service.createBootstrapTopic({
+      prompt: "Build a weather card",
+      leadAgentId: "agent_lead1",
+    });
+    expect(second.created).toBe(false);
+    expect(second.topic.id).toBe(first.topic.id);
+    // Only one topic exists.
+    expect(await service.listSummaries()).toHaveLength(1);
+  });
+
+  test("createBootstrapTopic dedupes concurrent calls for the same lead (race-safe)", async () => {
+    const [a, b] = await Promise.all([
+      service.createBootstrapTopic({ prompt: "Ship it", leadAgentId: "agent_lead2" }),
+      service.createBootstrapTopic({ prompt: "Ship it", leadAgentId: "agent_lead2" }),
+    ]);
+    expect(a.topic.id).toBe(b.topic.id);
+    expect([a.created, b.created].filter(Boolean)).toHaveLength(1); // exactly one bootstrap
+    expect(await service.listSummaries()).toHaveLength(1);
+  });
+
+  test("createBootstrapTopic keeps distinct leads independent", async () => {
+    const a = await service.createBootstrapTopic({ prompt: "A", leadAgentId: "agent_a" });
+    const b = await service.createBootstrapTopic({ prompt: "B", leadAgentId: "agent_b" });
+    expect(a.created).toBe(true);
+    expect(b.created).toBe(true);
+    expect(a.topic.id).not.toBe(b.topic.id);
+    expect(await service.listSummaries()).toHaveLength(2);
   });
 });

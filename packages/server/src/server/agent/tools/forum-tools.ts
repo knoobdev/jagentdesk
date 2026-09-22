@@ -1,7 +1,46 @@
+import { readFile } from "node:fs/promises";
+import { extname } from "node:path";
 import { z } from "zod";
 import type { ForumRole, StoredForumTopic } from "@jagentdesk/protocol/agent-forum/types";
 import { ensureValidJson } from "../../json-utils.js";
 import type { AgentForumService } from "../../agent-forum/service.js";
+
+const IMAGE_MIME: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".svg": "image/svg+xml",
+};
+const MAX_IMAGES = 6;
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024; // 4MB per image, inlined as a data: URL
+
+// Resolve agent-supplied image references for a forum post/chat: pass http(s) and data: URLs straight
+// through; read a local image file and inline it as a self-contained data: URL (so it renders in the
+// app with no extra media server). Silently drops anything unreadable / too big / not an image.
+async function resolveForumImages(refs: string[] | undefined): Promise<string[]> {
+  if (!refs || refs.length === 0) return [];
+  const out: string[] = [];
+  for (const raw of refs.slice(0, MAX_IMAGES)) {
+    const ref = raw.trim();
+    if (!ref) continue;
+    if (/^(https?:|data:image\/)/i.test(ref)) {
+      out.push(ref.slice(0, 8_000_000));
+      continue;
+    }
+    const mime = IMAGE_MIME[extname(ref).toLowerCase()];
+    if (!mime) continue;
+    try {
+      const buf = await readFile(ref);
+      if (buf.byteLength > MAX_IMAGE_BYTES) continue;
+      out.push(`data:${mime};base64,${buf.toString("base64")}`);
+    } catch {
+      // unreadable path — skip it rather than failing the whole post
+    }
+  }
+  return out;
+}
 import type {
   JAgentDeskToolConfig,
   JAgentDeskToolExecutionContext,
@@ -87,11 +126,37 @@ export function registerForumTools(params: {
   agentForumService: AgentForumService;
   callerAgentId: string;
   callerRoleHint?: string;
+  // The caller agent's own title, used to label peers by their name/role (e.g. "BA", "Tester", or a
+  // personality name the lead gave them) instead of an opaque "Peer <id>".
+  callerTitle?: string;
 }): void {
   const { registerTool, agentForumService: forum, callerAgentId } = params;
-  const callerRole = toForumRole(params.callerRoleHint);
-  const roleTitle = callerRole.charAt(0).toUpperCase() + callerRole.slice(1);
-  const callerLabel = `${roleTitle} ${callerAgentId.slice(0, 8)}`;
+  const callerTitle = (params.callerTitle ?? "").trim();
+
+  // Resolve the caller's forum identity PER CALL against the topic. The bootstrapped lead is a plain
+  // chat agent with no orchestration role, so a static hint would mislabel it (and every peer) as
+  // "Peer <id>" — indistinguishable, which is why peers looked like the lead. Here the agent that owns
+  // topic.leadAgentId is authoritatively the "lead"; everyone else keeps their peer/reviewer identity
+  // and is labeled by their own title.
+  const resolveIdentity = async (topicId: string): Promise<{ label: string; role: ForumRole }> => {
+    let role = toForumRole(params.callerRoleHint);
+    try {
+      const topic = await forum.getTopic(topicId);
+      if (topic?.leadAgentId === callerAgentId) {
+        role = "lead";
+      }
+    } catch {
+      // fall back to the hint role if the topic can't be read
+    }
+    if (role === "lead") {
+      return { label: "Lead", role };
+    }
+    if (callerTitle.length > 0) {
+      return { label: callerTitle, role };
+    }
+    const roleTitle = role.charAt(0).toUpperCase() + role.slice(1);
+    return { label: `${roleTitle} ${callerAgentId.slice(0, 8)}`, role };
+  };
 
   registerTool(
     "forum.post_message",
@@ -104,7 +169,9 @@ export function registerForumTools(params: {
         "debate an approach, or report progress. Write in the SAME LANGUAGE the human used in their " +
         "request, and sound human — show real feelings and attitude, and use emoji. Markdown renders: " +
         "``` fenced code blocks ```, `inline code`, > quotes, [links](url), ![image](url), @name. When " +
-        "you research something tricky, back it up with source links.",
+        "you research something tricky, back it up with source links. To SHOW an image (a screenshot, " +
+        "diagram or mockup), pass `images`: each entry is an http(s) URL or an absolute local file path " +
+        "(png/jpg/gif/webp/svg) — the daemon inlines local files so they render for everyone.",
       inputSchema: {
         topicId: z.string(),
         text: z.string().trim().min(1).max(8000),
@@ -112,9 +179,11 @@ export function registerForumTools(params: {
         replyTo: z.string().optional(),
         quote: z.string().optional(),
         taskRefs: z.array(z.string()).optional(),
+        images: z.array(z.string()).max(6).optional(),
       },
     },
-    async ({ topicId, text, kind, replyTo, quote, taskRefs }) => {
+    async ({ topicId, text, kind, replyTo, quote, taskRefs, images }) => {
+      const { label: callerLabel, role: callerRole } = await resolveIdentity(topicId);
       const topic = await forum.appendMessage(topicId, {
         authorAgentId: callerAgentId,
         authorLabel: callerLabel,
@@ -124,6 +193,7 @@ export function registerForumTools(params: {
         taskRefs,
         replyToId: replyTo ?? null,
         quotedMessageId: quote ?? null,
+        images: await resolveForumImages(images),
       });
       return ack(topic);
     },
@@ -142,6 +212,7 @@ export function registerForumTools(params: {
       inputSchema: { topicId: z.string(), question: z.string().trim().min(1).max(4000) },
     },
     async ({ topicId, question }) => {
+      const { label: callerLabel, role: callerRole } = await resolveIdentity(topicId);
       const topic = await forum.askHuman(topicId, {
         authorAgentId: callerAgentId,
         authorLabel: callerLabel,
@@ -169,6 +240,7 @@ export function registerForumTools(params: {
       },
     },
     async ({ topicId, title, description, estimate, epic, claim }) => {
+      const { label: callerLabel } = await resolveIdentity(topicId);
       const topic = await forum.createTask(topicId, {
         title,
         description,
@@ -199,6 +271,7 @@ export function registerForumTools(params: {
       },
     },
     async ({ topicId, parentTaskId, title, description, estimate, epic, claim }) => {
+      const { label: callerLabel } = await resolveIdentity(topicId);
       const topic = await forum.createTask(topicId, {
         title,
         description,
@@ -267,6 +340,7 @@ export function registerForumTools(params: {
       },
     },
     async ({ topicId, taskId, text }) => {
+      const { label: callerLabel, role: callerRole } = await resolveIdentity(topicId);
       const topic = await forum.addTaskComment(topicId, {
         taskId,
         authorAgentId: callerAgentId,
@@ -395,7 +469,11 @@ export function registerForumTools(params: {
     {
       title: "Read a forum topic",
       description:
-        "Read the full topic: its discussion messages and the whole task board (tasks, subtasks, assignees, estimates, statuses). Use this to see what the team has done before acting.",
+        "Read the full topic: its discussion messages (`messages`), the whole task board (`tasks` with " +
+        "subtasks, assignees, estimates, statuses), AND the team chat — `chatRooms` plus `chatMessages` " +
+        "(the Telegram-style banter, with reply/quote/reaction ids). ALWAYS read this before you post or " +
+        "chat, so you reply with real context (who said what, latest decisions, the boss's messages) " +
+        "instead of drifting off-topic or repeating yourself.",
       inputSchema: { topicId: z.string() },
     },
     async ({ topicId }) => {
@@ -419,15 +497,18 @@ export function registerForumTools(params: {
         "forum.post_message for that): it's for reactions, jokes, quick 'nice one', venting about a bug, " +
         "hyping a teammate, coordinating loosely. Do it ORGANICALLY — only when you actually feel like " +
         "chatting, like a real dev dropping a line in Slack, never on a schedule. Same language as the " +
-        "human; emoji welcome. Reply to a line with `replyTo`. Omit `roomId` for #general.",
+        "human; emoji welcome. Reply to a line with `replyTo`. Omit `roomId` for #general. Share an " +
+        "image (screenshot/meme/diagram) with `images`: http(s) URLs or absolute local file paths.",
       inputSchema: {
         topicId: z.string(),
         text: z.string().trim().min(1).max(2000),
         roomId: z.string().optional(),
         replyTo: z.string().optional(),
+        images: z.array(z.string()).max(6).optional(),
       },
     },
-    async ({ topicId, text, roomId, replyTo }) => {
+    async ({ topicId, text, roomId, replyTo, images }) => {
+      const { label: callerLabel, role: callerRole } = await resolveIdentity(topicId);
       const topic = await forum.postChatMessage(topicId, {
         roomId: roomId ?? null,
         authorAgentId: callerAgentId,
@@ -436,6 +517,7 @@ export function registerForumTools(params: {
         kind: "text",
         text,
         replyToId: replyTo ?? null,
+        images: await resolveForumImages(images),
       });
       return ack(topic);
     },
@@ -456,6 +538,7 @@ export function registerForumTools(params: {
       },
     },
     async ({ topicId, stickerId, roomId }) => {
+      const { label: callerLabel, role: callerRole } = await resolveIdentity(topicId);
       const topic = await forum.postChatMessage(topicId, {
         roomId: roomId ?? null,
         authorAgentId: callerAgentId,
@@ -505,6 +588,7 @@ export function registerForumTools(params: {
       },
     },
     async ({ topicId, name, purpose }) => {
+      const { label: callerLabel, role: callerRole } = await resolveIdentity(topicId);
       const result = await forum.createChatRoom(topicId, {
         name,
         topic: purpose,

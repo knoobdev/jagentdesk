@@ -372,6 +372,10 @@ function resolveAppendSystemPrompt(persisted: ReturnType<typeof loadPersistedCon
   return persisted.daemon?.appendSystemPrompt ?? "";
 }
 
+function resolveOperatorContext(persisted: ReturnType<typeof loadPersistedConfig>): string {
+  return persisted.daemon?.operatorContext ?? "";
+}
+
 function resolveBrowserToolsEnabled(persisted: ReturnType<typeof loadPersistedConfig>): boolean {
   // Browser tools default ON: agents can drive the built-in agentic browser out of
   // the box. Only an explicit `false` in persisted config turns them off.
@@ -417,6 +421,7 @@ function resolveStaticLoadConfigSettings(
     sessionSharingEnabled: resolveSessionSharingEnabled(persisted),
     autoArchiveAfterMerge: persisted.daemon?.autoArchiveAfterMerge ?? false,
     appendSystemPrompt: resolveAppendSystemPrompt(persisted),
+    operatorContext: resolveOperatorContext(persisted),
     terminalProfiles: persisted.daemon?.terminalProfiles,
     orchestration: persisted.daemon?.orchestration,
     hostnames: mergeHostnames([
@@ -448,6 +453,7 @@ export function loadConfig(
     sessionSharingEnabled,
     autoArchiveAfterMerge,
     appendSystemPrompt,
+    operatorContext,
     terminalProfiles,
     orchestration,
     hostnames,
@@ -486,6 +492,7 @@ export function loadConfig(
     autoArchiveAfterMerge,
     enableTerminalAgentHooks: persisted.daemon?.enableTerminalAgentHooks ?? false,
     appendSystemPrompt,
+    operatorContext,
     terminalProfiles,
     orchestration,
     mcpDebug: env.MCP_DEBUG === "1",

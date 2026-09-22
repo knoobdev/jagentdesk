@@ -41,11 +41,23 @@ function countMatchingEnglishStrings(resource: unknown): number {
     .length;
 }
 
+// These subtrees intentionally fall back to English (i18next fallbackLng) until each locale ships a
+// native translation, so they are exempt from the structural parity + interpolation assertions.
+const OPTIONAL_ENGLISH_FALLBACK_PREFIXES = [
+  "tailscaleLogin.",
+  "forumNotifications.",
+  "operatorContext.",
+];
+function isOptionalEnglishFallbackKey(key: string): boolean {
+  return OPTIONAL_ENGLISH_FALLBACK_PREFIXES.some((prefix) => key.startsWith(prefix));
+}
+
 function findInterpolationMismatches(resource: unknown): string[] {
   const interpolationPattern = /\{\{[^}]+\}\}/g;
   const englishStrings = flattenStrings(en);
   const localeStrings = flattenStrings(resource);
   return Object.entries(englishStrings).flatMap(([key, value]) => {
+    if (isOptionalEnglishFallbackKey(key)) return [];
     const expected = [...value.matchAll(interpolationPattern)].map((match) => match[0]).sort();
     const actual = [...(localeStrings[key] ?? "").matchAll(interpolationPattern)]
       .map((match) => match[0])
@@ -104,15 +116,14 @@ function findUntranslatedConnectionErrors(): string[] {
 
 describe("translation resources", () => {
   it("keeps all supported language keys in sync with English", () => {
-    // The Tailscale gate intentionally falls back to English until each
-    // locale has a native translation. Keep that optional subtree out of the
-    // structural parity assertion while still checking every required key.
+    // Optional English-fallback subtrees (see OPTIONAL_ENGLISH_FALLBACK_PREFIXES) are kept out of the
+    // structural parity assertion while every required key is still checked.
     const englishKeys = flattenKeys(en)
-      .filter((key) => !key.startsWith("tailscaleLogin."))
+      .filter((key) => !isOptionalEnglishFallbackKey(key))
       .sort();
     const localeKeys = (resource: unknown) =>
       flattenKeys(resource)
-        .filter((key) => !key.startsWith("tailscaleLogin."))
+        .filter((key) => !isOptionalEnglishFallbackKey(key))
         .sort();
     expect(localeKeys(ar)).toEqual(englishKeys);
     expect(localeKeys(es)).toEqual(englishKeys);

@@ -20,6 +20,18 @@ export interface AgentForumSessionOptions {
   bootstrapTopic?:
     | ((input: { topicId: string; prompt: string; originAgentId?: string }) => void | Promise<void>)
     | null;
+  // Wake teammates when the HUMAN posts in a topic's thread or chat so agents actually reply to the
+  // boss (Stage 3+). Optional/null so the data layer works standalone.
+  notifyForumActivity?:
+    | ((input: {
+        topicId: string;
+        kind: "chat" | "thread";
+        text: string;
+        roomName?: string | null;
+        leadAgentId: string | null;
+        participants: { agentId: string; label: string; role: string }[];
+      }) => void | Promise<void>)
+    | null;
 }
 
 type ForumRequest = Extract<
@@ -44,12 +56,43 @@ export class AgentForumSession {
   private readonly service: AgentForumService;
   private readonly logger: pino.Logger;
   private readonly bootstrapTopic?: AgentForumSessionOptions["bootstrapTopic"];
+  private readonly notifyForumActivity?: AgentForumSessionOptions["notifyForumActivity"];
 
   constructor(options: AgentForumSessionOptions) {
     this.host = options.host;
     this.service = options.agentForumService;
     this.logger = options.logger;
     this.bootstrapTopic = options.bootstrapTopic;
+    this.notifyForumActivity = options.notifyForumActivity;
+  }
+
+  // Wake the lead + any @mentioned teammate after the human posts in a thread/chat. Best-effort and
+  // fire-and-forget: the human's post already succeeded; a wake failure must not fail their request.
+  private wakeAgentsForHumanPost(
+    topic: {
+      id: string;
+      leadAgentId: string | null;
+      participants: { agentId: string; label: string; role: string }[];
+    } | null,
+    input: { kind: "chat" | "thread"; text: string; roomName?: string | null },
+  ): void {
+    if (!topic || !this.notifyForumActivity) return;
+    void Promise.resolve(
+      this.notifyForumActivity({
+        topicId: topic.id,
+        kind: input.kind,
+        text: input.text,
+        roomName: input.roomName ?? null,
+        leadAgentId: topic.leadAgentId,
+        participants: topic.participants.map((p) => ({
+          agentId: p.agentId,
+          label: p.label,
+          role: p.role,
+        })),
+      }),
+    ).catch((error) => {
+      this.logger.error({ err: error, topicId: topic.id }, "Forum human-post notify failed");
+    });
   }
 
   private emitRpcError(request: ForumRequest, error: unknown): void {
@@ -70,14 +113,16 @@ export class AgentForumSession {
     request: Extract<SessionInboundMessage, { type: "forum/create" }>,
   ): Promise<void> {
     try {
-      const topic = await this.service.createTopic({
+      const { topic, created } = await this.service.createBootstrapTopic({
         prompt: request.prompt,
         title: request.title,
         projectKey: request.projectKey,
         leadAgentId: request.originAgentId ?? null,
       });
-      // Kick off the real orchestration run (best-effort; the topic exists regardless).
-      if (request.bootstrapLead !== false && this.bootstrapTopic) {
+      // Kick off the real orchestration run (best-effort; the topic exists regardless). Skip when the
+      // topic was reused from a near-duplicate forum/create so we don't re-dispatch the team-lead prompt
+      // and spawn phantom peers.
+      if (created && request.bootstrapLead !== false && this.bootstrapTopic) {
         try {
           await this.bootstrapTopic({
             topicId: topic.id,
@@ -161,6 +206,7 @@ export class AgentForumSession {
         text: request.text,
         replyToId: request.replyToId ?? null,
       });
+      this.wakeAgentsForHumanPost(topic, { kind: "thread", text: request.text });
       this.host.emit({
         type: "forum/post/response",
         payload: { requestId: request.requestId, topic, error: null },
@@ -203,6 +249,12 @@ export class AgentForumSession {
         stickerId: request.stickerId ?? null,
         replyToId: request.replyToId ?? null,
       });
+      const roomName =
+        topic?.chatRooms?.find((room) => room.id === request.roomId)?.name ?? "general";
+      // Stickers carry no words to answer; only wake teammates for a real text message from the boss.
+      if ((request.kind ?? "text") !== "sticker") {
+        this.wakeAgentsForHumanPost(topic, { kind: "chat", text: request.text, roomName });
+      }
       this.host.emit({
         type: "forum/chat-post/response",
         payload: { requestId: request.requestId, topic, error: null },

@@ -194,6 +194,9 @@ export const ForumMessageSchema = z.object({
   // score (ups − downs); participants vote posts up when a point is solid, down when it's weak.
   upvoters: z.array(z.string()).default([]),
   downvoters: z.array(z.string()).default([]),
+  // Attached images (screenshots, diagrams, mockups) rendered under the post. Each entry is an http(s)
+  // URL or a self-contained data: URL (a local file the agent attached, inlined by the daemon).
+  images: z.array(z.string()).default([]),
 });
 export type ForumMessage = z.infer<typeof ForumMessageSchema>;
 
@@ -225,6 +228,8 @@ export const ForumChatMessageSchema = z.object({
   stickerId: z.string().nullable().default(null),
   replyToId: z.string().nullable().default(null),
   reactions: z.array(ForumChatReactionSchema).default([]),
+  // Attached images (http(s) or data: URLs) rendered inline in the chat bubble.
+  images: z.array(z.string()).default([]),
   createdAt_ms: z.number().int(),
 });
 export type ForumChatMessage = z.infer<typeof ForumChatMessageSchema>;

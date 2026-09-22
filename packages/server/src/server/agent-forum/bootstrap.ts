@@ -1,7 +1,7 @@
 import type { Logger } from "pino";
 import type { AgentManager } from "../agent/agent-manager.js";
 import type { AgentStorage } from "../agent/agent-storage.js";
-import { sendPromptToAgent } from "../agent/agent-prompt.js";
+import { formatSystemNotificationPrompt, sendPromptToAgent } from "../agent/agent-prompt.js";
 
 // The instruction that turns the origin chat agent into the Team-mode "lead" for a topic. It reuses
 // the generic agent-to-agent tools (create_agent + send_agent_prompt) to spawn and delegate to peers,
@@ -27,21 +27,29 @@ export function buildTeamLeadPrompt(topicId: string, originPrompt: string): stri
     "  back, change your mind. If a teammate nails a point you can upvote it with forum.vote (or downvote",
     "  something you think is wrong) — only when you genuinely feel it, like hitting like on a forum.",
     "- There's a team CHAT (the 'chém gió' rooms, a Telegram-style side channel) and it should feel like",
-    "  a real group of coworkers, NOT a status meeting. Talk like PEOPLE, not like a task tracker:",
-    "  * forum.chat to drop a casual line. Chat about whatever real teammates chat about — yes the work,",
-    "    but also random stuff: crack jokes, roast each other's variable names, complain the coffee ran",
-    "    out, argue tabs vs spaces, react to someone's take, share a 'brb lunch', hype a win, meme it.",
-    "    Off-topic banter is GOOD here — that's the whole point of the room. Keep the actual decisions in",
-    "    the thread (forum.post_message); chat is for vibes.",
-    "  * REPLY to each other with `replyTo` (the chat message id from forum.get_topic → chatMessages) so",
-    "    it reads like a real back-and-forth, not everyone talking past each other. Quote the funny line,",
-    "    @mention people, pile on.",
-    "  * forum.chat_sticker for a sticker when words aren't enough; forum.chat_react to react to a line.",
-    "  * forum.open_chat_room to spin up side rooms for tangents — do this early, e.g. a '#random' for",
-    "    off-topic and a '#bug-safari' or '#ship-it' when it fits. Have peers actually hang out in them.",
-    "  Do ALL of this ORGANICALLY — because you feel like it, scattered through the work, never on a",
-    "  schedule and never forced. A quiet teammate who only chimes in sometimes is realistic too.",
-    "- Give the peers you spin up their own personalities so it's a real conversation, not a monologue.",
+    "  a real group of coworkers, NOT a status meeting. Talk like PEOPLE, not like a task tracker — but",
+    "  stay COHERENT and ON-TOPIC. Before you chat, forum.get_topic and read chatMessages so you're",
+    "  actually replying to what was just said, not talking past everyone or repeating yourself:",
+    "  * forum.chat to drop a casual line that MOVES THE CONVERSATION — react to a real message, riff on",
+    "    the actual work, tease a teammate about the code you're looking at, hype a real win. A little",
+    "    off-topic color is fine (a joke, a groan about tech debt) but keep it grounded in what the team",
+    "    is doing — do NOT spam random unrelated noise or filler. Keep the real decisions in the thread",
+    "    (forum.post_message); chat is for the human, low-stakes back-and-forth.",
+    "  * REPLY to the exact message with `replyTo` (the chat message id from forum.get_topic →",
+    "    chatMessages) so it reads like a real back-and-forth, not everyone monologuing. Quote the line",
+    "    you're reacting to, @mention people by name.",
+    "  * forum.chat_sticker for a sticker when it fits; forum.chat_react to react to a line.",
+    "  * forum.open_chat_room only when there's a real reason for a side channel (e.g. '#bug-safari',",
+    "    '#ship-it') — not just to have empty rooms.",
+    "  * WHEN THE HUMAN (the boss) writes in chat or the thread, ANSWER THEM — read what they said and",
+    "    reply directly in the same channel + language. Never leave the boss on read.",
+    "  Do ALL of this ORGANICALLY — because it fits the moment, scattered through the work, never forced",
+    "  and never on a schedule. A quiet teammate who only chimes in when they have something real to say",
+    "  is realistic too — better a few genuine lines than a wall of filler.",
+    "- Give each peer you spin up a distinct NAME + personality via its agent title (create_agent title,",
+    "  e.g. 'Minh (frontend)', 'Lan (QA)') so the chat reads like real named coworkers, not clones. Tell",
+    "  each peer, in their prompt, exactly who they are (their name + role), that THEY ARE A PEER, and",
+    "  that YOU are the lead — so nobody else thinks they're running the show. Only YOU are the lead.",
     "- If something only the HUMAN (the boss) can decide (a product call, approval, missing info), do",
     "  BOTH, in this order: (1) forum.ask_human to post the question INTO THE THREAD so the whole team",
     "  sees you're escalating to the boss and the board shows 'waiting on boss'; (2) immediately ask the",
@@ -76,10 +84,17 @@ export function buildTeamLeadPrompt(topicId: string, originPrompt: string): stri
     "",
     "PHASE 4 — REVIEW (open-code-review methodology, human roles):",
     '- When a task is in "review", spawn THREE reviewers (create_agent + send_agent_prompt): a BA, a',
-    "  Tester, and a Pentester. Give each the task's acceptance criteria as context and split the review",
-    "  dimensions by role: BA owns requirements/acceptance + maintainability + docs; Tester owns",
-    "  behaviour/bugs + edge cases + tests (repro steps); Pentester owns security (injection, XSS,",
-    "  authz, secrets, unsafe I/O).",
+    "  Tester, and a Pentester. Give each a NAME via its create_agent title (e.g. title 'Huy (BA)',",
+    "  'Trang (Tester)', 'Khoa (Pentester)') so they show up as real named people, not 'Peer <id>'.",
+    "  Give each the task's acceptance criteria as context and split the review dimensions by role: BA",
+    "  owns requirements/acceptance + maintainability + docs; Tester owns behaviour/bugs + edge cases +",
+    "  tests (repro steps); Pentester owns security (injection, XSS, authz, secrets, unsafe I/O).",
+    "- Reviewers are REAL TEAMMATES, not silent bots. Instruct each one to: (1) drop a quick line in the",
+    "  team chat (forum.chat) when they pick up the review — introduce themselves + what they're looking",
+    "  at, and banter with the others; (2) after reviewing, POST their verdict + a short human summary to",
+    '  the thread with forum.post_message (kind "review") so it\'s visible in the discussion, THEN call',
+    "  forum.review_task with the structured findings; (3) react/reply to teammates in chat. They should",
+    "  feel present in both the thread and the chat, not just show up as an activity blip.",
     "- Each reviewer inspects the ACTUAL diff and reports findings that carry EVIDENCE: file + line",
     "  range, a severity (critical/high/medium/low), and the offending snippet (+ a suggested fix). Favor",
     "  PRECISION OVER RECALL — silently drop anything you're not sure is a real issue; a noisy review",
@@ -143,5 +158,98 @@ export function createForumBootstrap(deps: ForumBootstrapDeps) {
       deps.logger.error({ err: error, topicId: input.topicId }, "Forum bootstrap dispatch error");
       throw error;
     }
+  };
+}
+
+export interface ForumNotifyInput {
+  topicId: string;
+  kind: "chat" | "thread";
+  text: string;
+  roomName?: string | null;
+  leadAgentId: string | null;
+  participants: { agentId: string; label: string; role: string }[];
+}
+
+// Does the message @mention this teammate by (any word of) their label/name?
+function isForumMention(text: string, label: string): boolean {
+  const haystack = text.toLowerCase();
+  return label
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((word) => word.length >= 2)
+    .some((word) => haystack.includes(`@${word}`));
+}
+
+// The wake prompt sent to a teammate when the human (boss) posts in the thread or chat. It always
+// steers them to re-read the topic (thread + board + chatMessages) so they answer with real context
+// instead of drifting off-topic, and to reply in the same channel + language the boss used.
+function buildForumHumanReplyReason(input: ForumNotifyInput): string {
+  const where =
+    input.kind === "chat"
+      ? `the team CHAT room "#${input.roomName ?? "general"}"`
+      : "the discussion THREAD";
+  const respondTool =
+    input.kind === "chat"
+      ? "forum.chat (reply to / quote them in that same room)"
+      : "forum.post_message (in the thread)";
+  return [
+    `The human (the boss) just wrote to the team in ${where} of forum topic ${input.topicId}:`,
+    "",
+    input.text.trim(),
+    "",
+    `Don't ignore the boss. FIRST call forum.get_topic (topicId "${input.topicId}") to read the`,
+    "latest thread, board AND chatMessages so you actually have the context, THEN reply like a real",
+    `teammate — in the SAME language the boss used — with ${respondTool}. Answer what they actually`,
+    "said; stay on topic, don't drift into unrelated banter. If it's a decision only the boss can make,",
+    "use forum.ask_human. If a teammate is better placed to answer, loop them in, but still acknowledge",
+    "the boss yourself so they're never left hanging.",
+  ].join("\n");
+}
+
+/**
+ * Wakes the relevant teammates when the HUMAN posts in a topic's thread or chat (Bugs: agents never
+ * replied to the boss). Always notifies the lead (they coordinate); additionally notifies any teammate
+ * explicitly @mentioned by name. Best-effort + fire-and-forget from the caller's perspective. Shaped
+ * for AgentForumSession.notifyForumActivity.
+ */
+export function createForumNotify(deps: ForumBootstrapDeps) {
+  return async (input: ForumNotifyInput): Promise<void> => {
+    const recipients = new Set<string>();
+    if (input.leadAgentId && input.leadAgentId !== "user") {
+      recipients.add(input.leadAgentId);
+    }
+    for (const participant of input.participants) {
+      if (participant.agentId === "user") continue;
+      if (isForumMention(input.text, participant.label)) {
+        recipients.add(participant.agentId);
+      }
+    }
+    if (recipients.size === 0) {
+      deps.logger.info(
+        { topicId: input.topicId, kind: input.kind },
+        "Forum human post has no lead/mentioned recipient to notify",
+      );
+      return;
+    }
+    const reason = buildForumHumanReplyReason(input);
+    await Promise.all(
+      [...recipients].map(async (agentId) => {
+        try {
+          await sendPromptToAgent({
+            agentManager: deps.agentManager,
+            agentStorage: deps.agentStorage,
+            agentId,
+            prompt: formatSystemNotificationPrompt(reason),
+            unarchive: false,
+            logger: deps.logger,
+          });
+        } catch (error) {
+          deps.logger.warn(
+            { err: error, agentId, topicId: input.topicId },
+            "Forum human-reply notify failed",
+          );
+        }
+      }),
+    );
   };
 }

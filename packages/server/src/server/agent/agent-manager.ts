@@ -298,6 +298,7 @@ export interface AgentManagerOptions {
   jagentdeskToolsEnabled?: boolean;
   jagentdeskToolCatalogFactory?: JAgentDeskToolCatalogFactory;
   appendSystemPrompt?: string;
+  operatorContext?: string;
   agentStreamCoalesceWindowMs?: number;
   rescueTimeouts?: AgentManagerRescueTimeouts;
   beforeSteerUnavailableFallback?: (input: {
@@ -722,6 +723,7 @@ export class AgentManager {
   private jagentdeskToolsEnabled = true;
   private jagentdeskToolCatalogFactory: JAgentDeskToolCatalogFactory | null = null;
   private appendSystemPrompt: string;
+  private operatorContext = "";
   private onAgentAttention?: AgentAttentionCallback;
   private onAgentArchived?: AgentArchivedCallback;
   private onWorkspaceStateMayHaveChanged?: (params: { cwd: string }) => void;
@@ -756,6 +758,7 @@ export class AgentManager {
     this.mcpAuthToken = options?.mcpAuthToken ?? null;
     this.configureJAgentDeskTools(options);
     this.appendSystemPrompt = options.appendSystemPrompt ?? "";
+    this.setOperatorContext(options.operatorContext);
     this.logger = options.logger.child({ module: "agent", component: "agent-manager" });
     this.rescueTimeouts = {
       reloadSessionCloseMs:
@@ -848,6 +851,10 @@ export class AgentManager {
 
   setAppendSystemPrompt(prompt: string | null | undefined): void {
     this.appendSystemPrompt = prompt ?? "";
+  }
+
+  setOperatorContext(context: string | null | undefined): void {
+    this.operatorContext = context ?? "";
   }
 
   public getMetricsSnapshot(): AgentMetricsSnapshot {
@@ -5091,15 +5098,23 @@ export class AgentManager {
 
   private applyDaemonAppendSystemPrompt(config: AgentSessionConfig): AgentSessionConfig {
     const daemonAppendSystemPrompt = this.appendSystemPrompt.trim();
+    const operatorContext = this.operatorContext.trim();
     const next = { ...config };
     delete next.daemonAppendSystemPrompt;
 
-    return daemonAppendSystemPrompt
-      ? {
-          ...next,
-          daemonAppendSystemPrompt,
-        }
-      : next;
+    if (daemonAppendSystemPrompt) {
+      next.daemonAppendSystemPrompt = daemonAppendSystemPrompt;
+    }
+    // Operator / engagement authorization context leads the system prompt so every provider (which all
+    // compose config.systemPrompt first) surfaces it as leading context ahead of persona/task
+    // instructions. Runtime-only: applied to the launch copy, never persisted per-agent, so operator
+    // setting changes apply cleanly. Injection only — the underlying model still applies its own judgment.
+    if (operatorContext) {
+      next.systemPrompt = next.systemPrompt?.trim()
+        ? `${operatorContext}\n\n${next.systemPrompt}`
+        : operatorContext;
+    }
+    return next;
   }
 
   private async buildLaunchContext(

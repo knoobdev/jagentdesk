@@ -156,7 +156,7 @@ import { ScheduleService } from "./schedule/service.js";
 import { AutorunService } from "./autorun/service.js";
 import { SessionShareService } from "./session-share/service.js";
 import { AgentForumService } from "./agent-forum/service.js";
-import { createForumBootstrap } from "./agent-forum/bootstrap.js";
+import { createForumBootstrap, createForumNotify } from "./agent-forum/bootstrap.js";
 import { TunnelManager } from "./session-share/tunnel-manager.js";
 import { DaemonConfigStore, type MutableDaemonConfig } from "./daemon-config-store.js";
 import { PluginService } from "./plugins/index.js";
@@ -430,6 +430,8 @@ export interface JAgentDeskDaemonConfig {
   autoArchiveAfterMerge?: boolean;
   enableTerminalAgentHooks?: boolean;
   appendSystemPrompt?: string;
+  // Operator / engagement authorization context injected first into every agent's system prompt.
+  operatorContext?: string;
   terminalProfiles?: TerminalProfile[];
   orchestration?: OrchestrationConfig;
   staticDir: string;
@@ -566,6 +568,7 @@ function createInitialMutableDaemonConfig(config: JAgentDeskDaemonConfig): Mutab
     autoArchiveAfterMerge: config.autoArchiveAfterMerge ?? false,
     enableTerminalAgentHooks: config.enableTerminalAgentHooks ?? false,
     appendSystemPrompt: config.appendSystemPrompt ?? "",
+    operatorContext: config.operatorContext ?? "",
     orchestration: config.orchestration ?? createDefaultOrchestrationConfig(),
   };
 
@@ -913,6 +916,7 @@ export async function createJAgentDeskDaemon(
     providerDefinitions: initialAgentManagerState.providerDefinitions,
     registry: agentStorage,
     appendSystemPrompt: config.appendSystemPrompt,
+    operatorContext: config.operatorContext,
     onWorkspaceStateMayHaveChanged: ({ cwd }) => {
       workspaceGitService.onWorkspaceStateMayHaveChanged(cwd);
     },
@@ -1687,6 +1691,9 @@ export async function createJAgentDeskDaemon(
             daemonConfigStore.onFieldChange("appendSystemPrompt", (value) => {
               agentManager.setAppendSystemPrompt(typeof value === "string" ? value : "");
             });
+            daemonConfigStore.onFieldChange("operatorContext", (value) => {
+              agentManager.setOperatorContext(typeof value === "string" ? value : "");
+            });
             if (boundListenTarget.type === "tcp") {
               logger.info(
                 {
@@ -1796,6 +1803,7 @@ export async function createJAgentDeskDaemon(
             wsServer?.setAgentForum(
               agentForumService,
               createForumBootstrap({ agentManager, agentStorage, logger }),
+              createForumNotify({ agentManager, agentStorage, logger }),
             );
             // Bind the plugin session host and start configured plugins before any
             // external ingress attaches, mirroring upstream's pre-accept ordering.

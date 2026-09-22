@@ -1246,6 +1246,9 @@ export function Composer({
     | null
   >(null);
   const onSubmitMessageRef = useRef(onSubmitMessage);
+  // Guards the team-mode start against a double submit (input onSubmit + keyboard "send", or a fast
+  // double-tap): without it, two forum/create calls mint duplicate threads and re-dispatch the lead.
+  const teamStartInFlightRef = useRef(false);
 
   const addImages = useCallback(
     (images: ImageAttachment[]) => {
@@ -1414,6 +1417,10 @@ export function Composer({
         !onSubmitMessageRef.current &&
         getTeamModeEnabled(serverId, agentId)
       ) {
+        if (teamStartInFlightRef.current) {
+          return;
+        }
+        teamStartInFlightRef.current = true;
         setSendError(null);
         try {
           await client.forumCreate({
@@ -1426,6 +1433,8 @@ export function Composer({
         } catch (error) {
           console.error("[AgentInput] Team mode start failed:", error);
           setSendError(t("composer.errors.failedToSend"));
+        } finally {
+          teamStartInFlightRef.current = false;
         }
         return;
       }

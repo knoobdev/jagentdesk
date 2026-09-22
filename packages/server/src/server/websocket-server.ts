@@ -629,6 +629,16 @@ export class VoiceAssistantWebSocketServer {
   private agentForumBootstrap:
     | ((input: { topicId: string; prompt: string; originAgentId?: string }) => void | Promise<void>)
     | null = null;
+  private agentForumNotify:
+    | ((input: {
+        topicId: string;
+        kind: "chat" | "thread";
+        text: string;
+        roomName?: string | null;
+        leadAgentId: string | null;
+        participants: { agentId: string; label: string; role: string }[];
+      }) => void | Promise<void>)
+    | null = null;
   private readonly checkoutDiffManager: CheckoutDiffManager;
   private readonly github: ForgeService;
   private readonly workspaceGitService: WorkspaceGitService;
@@ -1814,9 +1824,20 @@ export class VoiceAssistantWebSocketServer {
           originAgentId?: string;
         }) => void | Promise<void>)
       | null,
+    notify:
+      | ((input: {
+          topicId: string;
+          kind: "chat" | "thread";
+          text: string;
+          roomName?: string | null;
+          leadAgentId: string | null;
+          participants: { agentId: string; label: string; role: string }[];
+        }) => void | Promise<void>)
+      | null = null,
   ): void {
     this.agentForumService = service;
     this.agentForumBootstrap = bootstrap;
+    this.agentForumNotify = notify;
   }
 
   private createSocketSession(options: SocketSessionOptions): Session {
@@ -1861,6 +1882,7 @@ export class VoiceAssistantWebSocketServer {
       sessionShareService: this.sessionShareService,
       agentForumService: this.agentForumService,
       agentForumBootstrap: this.agentForumBootstrap,
+      agentForumNotify: this.agentForumNotify,
       checkoutDiffManager: this.checkoutDiffManager,
       github: this.github,
       workspaceGitService: this.workspaceGitService,

@@ -145,11 +145,80 @@ export class AgentForumService {
   private readonly store: AgentForumStore;
   private readonly logger: Logger;
   private readonly onUpdate?: (topic: StoredForumTopic) => void;
+  // Idempotency for team bootstrap: one origin/lead agent should own exactly one bootstrapped topic
+  // per create burst. A double-fired forum/create (Enter + keyboard "send", a draft handoff replay, a
+  // double-tap) would otherwise mint N topics and re-dispatch the team-lead prompt N times, spawning
+  // phantom peers. We reserve the lead synchronously (in-flight promise) and remember the last topic it
+  // created for a short window so near-duplicate calls reuse it instead of creating another team.
+  private readonly leadBootstrapInFlight = new Map<string, Promise<StoredForumTopic>>();
+  private readonly recentLeadTopic = new Map<string, { topicId: string; at_ms: number }>();
+  private static readonly LEAD_DEDUPE_WINDOW_MS = 30_000;
 
   constructor(options: AgentForumServiceOptions) {
     this.store = new AgentForumStore(options.dir);
     this.logger = options.logger.child({ module: "agent-forum" });
     this.onUpdate = options.onUpdate;
+  }
+
+  // Create a topic for a team bootstrap, deduping by the lead/origin agent so a repeated forum/create
+  // for the same lead returns the already-created topic instead of a duplicate. `created` is false when
+  // an existing topic was reused, so the caller can skip re-dispatching the (expensive) lead bootstrap.
+  async createBootstrapTopic(input: {
+    prompt: string;
+    title?: string;
+    projectKey?: string;
+    leadAgentId?: string | null;
+    orchestrationRunId?: string | null;
+    participants?: ForumParticipant[];
+  }): Promise<{ topic: StoredForumTopic; created: boolean }> {
+    const lead = input.leadAgentId ?? null;
+    if (!lead) {
+      return { topic: await this.createTopic(input), created: true };
+    }
+    // A concurrent forum/create for the same lead is already resolving this burst — join it. Checked
+    // and reserved with NO await in between so two simultaneous calls cannot both pass the guard.
+    const inFlight = this.leadBootstrapInFlight.get(lead);
+    if (inFlight) {
+      return { topic: await inFlight, created: false };
+    }
+    let created = true;
+    const work = (async (): Promise<StoredForumTopic> => {
+      const reused = await this.findRecentTopicForLead(lead);
+      if (reused) {
+        created = false;
+        this.logger.info(
+          { leadAgentId: lead, topicId: reused.id },
+          "Forum bootstrap deduped: reusing recent topic for lead",
+        );
+        return reused;
+      }
+      const topic = await this.createTopic(input);
+      this.recentLeadTopic.set(lead, { topicId: topic.id, at_ms: Date.now() });
+      return topic;
+    })();
+    this.leadBootstrapInFlight.set(lead, work);
+    try {
+      const topic = await work;
+      return { topic, created };
+    } finally {
+      this.leadBootstrapInFlight.delete(lead);
+    }
+  }
+
+  // The most recent still-existing topic this lead created inside the dedupe window, or null.
+  private async findRecentTopicForLead(lead: string): Promise<StoredForumTopic | null> {
+    const recent = this.recentLeadTopic.get(lead);
+    if (!recent) return null;
+    if (Date.now() - recent.at_ms > AgentForumService.LEAD_DEDUPE_WINDOW_MS) {
+      this.recentLeadTopic.delete(lead);
+      return null;
+    }
+    const topic = await this.store.get(recent.topicId);
+    if (!topic) {
+      this.recentLeadTopic.delete(lead);
+      return null;
+    }
+    return topic;
   }
 
   async listSummaries(): Promise<ForumTopicSummary[]> {
@@ -196,6 +265,7 @@ export class AgentForumService {
           awaitingHuman: false,
           upvoters: [],
           downvoters: [],
+          images: [],
         },
       ],
       tasks: [],
@@ -230,6 +300,7 @@ export class AgentForumService {
       replyToId?: string | null;
       quotedMessageId?: string | null;
       awaitingHuman?: boolean;
+      images?: string[];
     },
   ): Promise<StoredForumTopic | null> {
     return this.mutate(topicId, (topic) => {
@@ -247,6 +318,7 @@ export class AgentForumService {
         awaitingHuman: message.awaitingHuman ?? false,
         upvoters: [],
         downvoters: [],
+        images: message.images ?? [],
       };
       topic.messages.push(entry);
       ensureParticipant(topic, message.authorAgentId, message.authorLabel, message.role);
@@ -297,6 +369,7 @@ export class AgentForumService {
       text?: string;
       stickerId?: string | null;
       replyToId?: string | null;
+      images?: string[];
     },
   ): Promise<StoredForumTopic | null> {
     return this.mutate(topicId, (topic) => {
@@ -312,6 +385,7 @@ export class AgentForumService {
         stickerId: input.stickerId ?? null,
         replyToId: input.replyToId ?? null,
         reactions: [],
+        images: input.images ?? [],
         createdAt_ms: Date.now(),
       };
       topic.chatMessages.push(entry);
@@ -366,6 +440,7 @@ export class AgentForumService {
         awaitingHuman: true,
         upvoters: [],
         downvoters: [],
+        images: [],
       });
       ensureParticipant(topic, input.authorAgentId, input.authorLabel, input.role);
       topic.pendingHumanQuestion = { messageId, text: input.text, askedByLabel: input.authorLabel };
@@ -395,6 +470,7 @@ export class AgentForumService {
         awaitingHuman: false,
         upvoters: [],
         downvoters: [],
+        images: [],
       });
       const pending = topic.messages.find((m) => m.id === pendingId);
       if (pending) pending.awaitingHuman = false;
@@ -609,6 +685,7 @@ export class AgentForumService {
         awaitingHuman: false,
         upvoters: [],
         downvoters: [],
+        images: [],
       });
       ensureParticipant(topic, input.reviewerAgentId, input.reviewerLabel, input.role);
       task.comments.push({

@@ -8,11 +8,22 @@ import {
   type ReactElement,
   type ReactNode,
 } from "react";
-import { Animated, Easing, Modal, Pressable, ScrollView, Text, View } from "react-native";
+import {
+  Animated,
+  Easing,
+  Image,
+  Modal,
+  Pressable,
+  ScrollView,
+  Text,
+  useWindowDimensions,
+  View,
+} from "react-native";
 import Markdown from "react-native-markdown-display";
 import Svg, { Circle, G, Rect, Text as SvgText } from "react-native-svg";
 import { StyleSheet } from "react-native-unistyles";
 import { useIsFocused } from "@react-navigation/native";
+import { useIsCompactFormFactor } from "@/constants/layout";
 import { MenuHeader } from "@/components/headers/menu-header";
 import { OfficeScene } from "@/screens/agent-forum-office";
 import { ChatTab } from "@/screens/agent-forum-chat";
@@ -1050,14 +1061,13 @@ const MD_STYLES = {
   em: { fontStyle: "italic" as const },
   link: { color: "#4a9df0", textDecorationLine: "underline" as const },
   code_inline: {
-    // On-brand with the clawskills green accent: soft green mono on a faint green-tinted panel — reads
-    // clearly as code without the amber glare, and roomier line-height keeps chips from overlapping.
-    backgroundColor: "#16211a",
-    color: "#7ee787",
-    fontFamily: FONT_MONO,
-    fontSize: 12,
-    borderRadius: 4,
+    // No box at all — must set transparent EXPLICITLY or the markdown lib's light default shows through
+    // as an ugly white chip. Inline code is just soft-tinted monospace, legible without a bulky block.
+    backgroundColor: "transparent",
     borderWidth: 0,
+    color: "#9fc0d6",
+    fontFamily: FONT_MONO,
+    fontSize: 12.5,
   },
   fence: {
     backgroundColor: "#0b0b0b",
@@ -1134,6 +1144,27 @@ const renderCode = (node: any): ReactElement => (
   />
 );
 const MD_RULES = { fence: renderCode, code_block: renderCode };
+
+const ForumImage = memo(function ForumImage({ uri }: { uri: string }): ReactElement {
+  const source = useMemo(() => ({ uri }), [uri]);
+  return <Image source={source} style={styles.attachedImage} resizeMode="cover" />;
+});
+
+// Attached images under a post/comment: responsive thumbnails (agents attach screenshots/diagrams).
+const ForumImages = memo(function ForumImages({
+  images,
+}: {
+  images?: string[];
+}): ReactElement | null {
+  if (!images || images.length === 0) return null;
+  return (
+    <View style={styles.imageRow}>
+      {images.slice(0, 6).map((uri) => (
+        <ForumImage key={uri.slice(0, 48)} uri={uri} />
+      ))}
+    </View>
+  );
+});
 
 const ForumMarkdown = memo(function ForumMarkdown({ text }: { text: string }): ReactElement {
   return (
@@ -1240,6 +1271,7 @@ const PostCard = memo(function PostCard({
             </View>
           ) : null}
           <ForumMarkdown text={message.text} />
+          <ForumImages images={message.images} />
         </View>
         <VoteBar message={message} onVote={onVote} />
       </View>
@@ -1487,6 +1519,117 @@ const ReviewSection = memo(function ReviewSection({
   );
 });
 
+// The scrollable head + body of a task detail, shared by the desktop modal and the mobile slide-in.
+// `mobile` swaps the close affordance to a back chevron and lets the ScrollView flex to fill the
+// full-height mobile panel (a percentage-height modal card cannot scroll on RN-Web / iOS).
+const TaskDetailContent = memo(function TaskDetailContent({
+  task,
+  onClose,
+  mobile,
+}: {
+  task: ForumTask;
+  onClose: () => void;
+  mobile: boolean;
+}): ReactElement {
+  const who = task.assigneeLabel ?? (task.assigneeAgentId ? task.assigneeAgentId.slice(0, 8) : "—");
+  const reporter = task.createdByLabel ?? task.createdBy.slice(0, 8);
+  const reopen = reopenInfo(task);
+  return (
+    <>
+      <View style={styles.modalHead}>
+        {mobile ? (
+          <Pressable onPress={onClose} hitSlop={10}>
+            <Text style={styles.sheetBack}>‹</Text>
+          </Pressable>
+        ) : null}
+        <View style={[styles.cardStripe, { backgroundColor: taskDotColor(task.status) }]} />
+        <Text style={styles.modalTitle} numberOfLines={mobile ? 2 : undefined}>
+          {task.parentTaskId ? "↳ " : ""}
+          {task.title}
+        </Text>
+        {mobile ? null : (
+          <Pressable onPress={onClose} hitSlop={8}>
+            <Text style={styles.modalClose}>✕</Text>
+          </Pressable>
+        )}
+      </View>
+      <ScrollView
+        style={mobile ? styles.sheetScroll : undefined}
+        contentContainerStyle={styles.modalBody}
+      >
+        <View style={styles.metaGrid}>
+          <TaskMeta
+            label="Status"
+            value={statusLabel(task.status)}
+            color={taskDotColor(task.status)}
+          />
+          <TaskMeta label="Epic" value={task.epic ?? "—"} />
+          <TaskMeta label="Assignee" value={who} />
+          <TaskMeta label="Reporter" value={reporter} />
+          <TaskMeta label="Estimate" value={estimateLabel(task.estimate)} />
+          {reopen.count > 0 ? (
+            <TaskMeta label="Re-opened" value={`×${reopen.count}`} color={C.amber} />
+          ) : null}
+        </View>
+        {reopen.count > 0 ? (
+          <>
+            <Text style={styles.modalSection}>RE-OPENS · {reopen.count}</Text>
+            {reopen.reasons.map((r) => (
+              <Text key={r.at_ms} style={styles.reopenReason}>
+                ↩ {r.note} · {timeAgo(r.at_ms)}
+              </Text>
+            ))}
+          </>
+        ) : null}
+        <Text style={styles.modalSection}>DESCRIPTION</Text>
+        {task.description.trim() ? (
+          <ForumMarkdown text={task.description} />
+        ) : (
+          <Text style={styles.modalMuted}>No description.</Text>
+        )}
+        <ReviewSection reviews={task.reviews} />
+        <Text style={styles.modalSection}>COMMENTS · {task.comments.length}</Text>
+        {task.comments.length === 0 ? (
+          <Text style={styles.modalMuted}>No comments yet.</Text>
+        ) : (
+          task.comments.map((c) => <TaskCommentRow key={c.id} comment={c} />)
+        )}
+      </ScrollView>
+    </>
+  );
+});
+
+// Mobile task detail: a full-height main view that slides in from the right (like a pushed screen)
+// instead of a cramped popup. Rendered in the component tree (no RN Modal) so its flex:1 ScrollView
+// gets a bounded height and scrolls smoothly, and so it plays nicely with the app gesture tree.
+const TaskDetailSheet = memo(function TaskDetailSheet({
+  task,
+  onClose,
+}: {
+  task: ForumTask;
+  onClose: () => void;
+}): ReactElement {
+  const { width } = useWindowDimensions();
+  const anim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    anim.setValue(0);
+    Animated.timing(anim, {
+      toValue: 1,
+      duration: 260,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [anim]);
+  const translateX = anim.interpolate({ inputRange: [0, 1], outputRange: [width, 0] });
+  return (
+    <View style={styles.sheetOverlay} pointerEvents="box-none">
+      <Animated.View style={[styles.sheetPanel, { transform: [{ translateX }] }]}>
+        <TaskDetailContent task={task} onClose={onClose} mobile />
+      </Animated.View>
+    </View>
+  );
+});
+
 const TaskDetailModal = memo(function TaskDetailModal({
   task,
   onClose,
@@ -1494,63 +1637,16 @@ const TaskDetailModal = memo(function TaskDetailModal({
   task: ForumTask | null;
   onClose: () => void;
 }): ReactElement | null {
+  const isMobile = useIsCompactFormFactor();
   if (!task) return null;
-  const who = task.assigneeLabel ?? (task.assigneeAgentId ? task.assigneeAgentId.slice(0, 8) : "—");
-  const reporter = task.createdByLabel ?? task.createdBy.slice(0, 8);
-  const reopen = reopenInfo(task);
+  if (isMobile) {
+    return <TaskDetailSheet task={task} onClose={onClose} />;
+  }
   return (
     <Modal transparent animationType="fade" visible onRequestClose={onClose}>
       <Pressable style={styles.modalBackdrop} onPress={onClose}>
         <Pressable style={styles.modalCard} onPress={NOOP}>
-          <View style={styles.modalHead}>
-            <View style={[styles.cardStripe, { backgroundColor: taskDotColor(task.status) }]} />
-            <Text style={styles.modalTitle}>
-              {task.parentTaskId ? "↳ " : ""}
-              {task.title}
-            </Text>
-            <Pressable onPress={onClose} hitSlop={8}>
-              <Text style={styles.modalClose}>✕</Text>
-            </Pressable>
-          </View>
-          <ScrollView contentContainerStyle={styles.modalBody}>
-            <View style={styles.metaGrid}>
-              <TaskMeta
-                label="Status"
-                value={statusLabel(task.status)}
-                color={taskDotColor(task.status)}
-              />
-              <TaskMeta label="Epic" value={task.epic ?? "—"} />
-              <TaskMeta label="Assignee" value={who} />
-              <TaskMeta label="Reporter" value={reporter} />
-              <TaskMeta label="Estimate" value={estimateLabel(task.estimate)} />
-              {reopen.count > 0 ? (
-                <TaskMeta label="Re-opened" value={`×${reopen.count}`} color={C.amber} />
-              ) : null}
-            </View>
-            {reopen.count > 0 ? (
-              <>
-                <Text style={styles.modalSection}>RE-OPENS · {reopen.count}</Text>
-                {reopen.reasons.map((r) => (
-                  <Text key={r.at_ms} style={styles.reopenReason}>
-                    ↩ {r.note} · {timeAgo(r.at_ms)}
-                  </Text>
-                ))}
-              </>
-            ) : null}
-            <Text style={styles.modalSection}>DESCRIPTION</Text>
-            {task.description.trim() ? (
-              <ForumMarkdown text={task.description} />
-            ) : (
-              <Text style={styles.modalMuted}>No description.</Text>
-            )}
-            <ReviewSection reviews={task.reviews} />
-            <Text style={styles.modalSection}>COMMENTS · {task.comments.length}</Text>
-            {task.comments.length === 0 ? (
-              <Text style={styles.modalMuted}>No comments yet.</Text>
-            ) : (
-              task.comments.map((c) => <TaskCommentRow key={c.id} comment={c} />)
-            )}
-          </ScrollView>
+          <TaskDetailContent task={task} onClose={onClose} mobile={false} />
         </Pressable>
       </Pressable>
     </Modal>
@@ -1951,6 +2047,15 @@ const styles = StyleSheet.create((_theme) => ({
   },
   codeScroll: { paddingHorizontal: 12, paddingBottom: 10, paddingTop: 2 },
   codeText: { fontFamily: FONT_MONO, color: "#cfd6dd", fontSize: 12, lineHeight: 18 },
+  imageRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 },
+  attachedImage: {
+    width: 160,
+    height: 110,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: "#000",
+  },
   // activity section (separate from discussion posts)
   activitySection: {
     gap: 2,
@@ -2099,6 +2204,32 @@ const styles = StyleSheet.create((_theme) => ({
     borderRadius: 12,
     backgroundColor: C.surface,
     overflow: "hidden",
+  },
+  // Mobile task detail slide-in (full-height main view pushed from the right).
+  sheetOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 50,
+  },
+  sheetPanel: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: C.surface,
+    flexDirection: "column",
+  },
+  sheetScroll: { flex: 1 },
+  sheetBack: {
+    color: C.text,
+    fontSize: 26,
+    lineHeight: 26,
+    paddingHorizontal: 4,
+    fontFamily: FONT_SANS,
   },
   modalHead: {
     flexDirection: "row",

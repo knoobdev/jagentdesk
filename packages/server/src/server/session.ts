@@ -487,6 +487,17 @@ export interface SessionOptions {
   agentForumBootstrap?:
     | ((input: { topicId: string; prompt: string; originAgentId?: string }) => void | Promise<void>)
     | null;
+  // Wakes the lead + @mentioned teammates when the human posts in a topic's thread/chat.
+  agentForumNotify?:
+    | ((input: {
+        topicId: string;
+        kind: "chat" | "thread";
+        text: string;
+        roomName?: string | null;
+        leadAgentId: string | null;
+        participants: { agentId: string; label: string; role: string }[];
+      }) => void | Promise<void>)
+    | null;
   loopService: LoopService;
   skillsStorage?: SkillsStorage | null;
   usageHistory?: UsageHistoryStorage | null;
@@ -1011,6 +1022,7 @@ export class Session {
           agentForumService,
           logger: this.sessionLogger,
           bootstrapTopic: options.agentForumBootstrap,
+          notifyForumActivity: options.agentForumNotify,
         })
       : null;
     this.initClusterSession(options);

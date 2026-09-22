@@ -1,5 +1,14 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
-import { Animated, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import {
+  Animated,
+  Image,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import type { ForumChatMessage, ForumRole, StoredForumTopic } from "@jagentdesk/protocol/messages";
@@ -160,6 +169,11 @@ function previewOf(message: ForumChatMessage): string {
   return line.length > 60 ? `${line.slice(0, 59)}…` : line;
 }
 
+const ChatImage = memo(function ChatImage({ uri }: { uri: string }): ReactElement {
+  const source = useMemo(() => ({ uri }), [uri]);
+  return <Image source={source} style={styles.bubbleImage} resizeMode="cover" />;
+});
+
 const ChatBubble = memo(function ChatBubble({
   message,
   repliedTo,
@@ -222,6 +236,13 @@ const ChatBubble = memo(function ChatBubble({
               </View>
             ) : null}
             <Text style={styles.bubbleText}>{message.text}</Text>
+            {message.images && message.images.length > 0 ? (
+              <View style={styles.bubbleImages}>
+                {message.images.slice(0, 4).map((uri) => (
+                  <ChatImage key={uri.slice(0, 48)} uri={uri} />
+                ))}
+              </View>
+            ) : null}
             <Text style={[styles.time, mine ? styles.timeOut : null]}>
               {timeAgo(message.createdAt_ms)}
             </Text>
@@ -408,6 +429,19 @@ export const ChatTab = memo(function ChatTab({
     void client.forumChatPost({ topicId: topic.id, text: body, roomId: activeRoom }).catch(NOOP);
   }, [text, client, topic.id, activeRoom]);
 
+  // On web the input is multiline (onSubmitEditing never fires on Enter), so wire Enter→send and keep
+  // Shift+Enter for a newline — the behaviour people expect from a chat box.
+  const handleKeyPress = useCallback(
+    (e: { nativeEvent: { key: string; shiftKey?: boolean }; preventDefault?: () => void }) => {
+      if (Platform.OS !== "web") return;
+      if (e.nativeEvent.key === "Enter" && !e.nativeEvent.shiftKey) {
+        e.preventDefault?.();
+        send();
+      }
+    },
+    [send],
+  );
+
   const sendSticker = useCallback(
     (stickerId: string) => {
       setShowStickers(false);
@@ -521,6 +555,7 @@ export const ChatTab = memo(function ChatTab({
             placeholderTextColor={CH.muted}
             style={[styles.input, WEB_INPUT_RESET]}
             onSubmitEditing={send}
+            onKeyPress={handleKeyPress}
             returnKeyType="send"
             multiline
           />
@@ -611,6 +646,8 @@ const styles = StyleSheet.create(() => ({
   replyAuthor: { color: CH.accent, fontSize: 11.5, fontWeight: "700" },
   replyText: { color: CH.soft, fontSize: 12 },
   bubbleText: { color: CH.text, fontSize: 14.5, lineHeight: 20 },
+  bubbleImages: { flexDirection: "row", flexWrap: "wrap", gap: 5, marginTop: 6 },
+  bubbleImage: { width: 128, height: 90, borderRadius: 8, backgroundColor: "#000" },
   time: { color: CH.muted, fontSize: 10, alignSelf: "flex-end", marginTop: 1 },
   timeOut: { color: "#7fb28f" },
   stickerWrap: { paddingVertical: 2 },

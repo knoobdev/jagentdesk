@@ -229,41 +229,6 @@ const Emote = memo(function Emote({
   }
 });
 
-// Rising "typing spark" particles off the keyboard while a character is heads-down working.
-const Sparks = memo(function Sparks({
-  x,
-  y,
-  t,
-  intensity,
-}: {
-  x: number;
-  y: number;
-  t: number;
-  intensity: number;
-}): ReactElement | null {
-  if (intensity < 0.55) return null;
-  const parts = [0, 1, 2];
-  return (
-    <G>
-      {parts.map((k) => {
-        const life = (t * 1.4 + k * 0.33) % 1;
-        const sx = x - 8 + k * 8 + Math.sin((t + k) * 3) * 2;
-        const sy = y - 6 - life * 12;
-        return (
-          <Circle
-            key={`spark-${k}`}
-            cx={sx}
-            cy={sy}
-            r={0.9}
-            fill={O.spark}
-            opacity={(1 - life) * 0.8}
-          />
-        );
-      })}
-    </G>
-  );
-});
-
 // The head: shaded skin, volumetric hair with a highlight, ears, brows, eyes with catchlights + a
 // wandering gaze, a nose and a mood-tinted mouth. A soft laptop-glow tints the face while working.
 const Head = memo(function Head({
@@ -384,141 +349,225 @@ const Head = memo(function Head({
   );
 });
 
-// The desk (in slight perspective), a laptop whose lid glows when working, keyboard, and coffee mug.
-const Workstation = memo(function Workstation({
+type ArmMode = "typing" | "pointing" | "gesturing" | "walk";
+
+function poseMode(typing: boolean, pointing: boolean, gesturing: boolean): ArmMode {
+  if (typing) return "typing";
+  if (pointing) return "pointing";
+  if (gesturing) return "gesturing";
+  return "walk";
+}
+
+// Head gaze (−1..1) by activity: on the screen while working, on the board while reviewing, toward the
+// boss while waiting, around the circle while chatting, wandering when idle.
+function gazeFor(state: OfficeState, seed: number, t: number, facing: number): number {
+  if (state === "working") return 0.4 * facing;
+  if (state === "reviewing") return -0.9 + Math.sin(t * 2 + seed) * 0.15;
+  if (state === "waiting") return Math.sin(t * 3 + seed) * 0.3;
+  if (state === "talking") return Math.sin(t * 1.4 + seed) * 0.8;
+  return Math.sin(t * 0.6 + seed) * (state === "idle" ? 1 : 0.4);
+}
+
+// The three review poses so a huddle reads like real people: 0 = pointing at the board, 1 = reading a
+// tablet (hands forward), 2 = hand on chin, scrutinising.
+function reviewArms(
+  x: number,
+  shoulderY: number,
+  hipY: number,
+  gesture: number,
+  variant: number,
+): ReactElement {
+  if (variant === 1) {
+    return (
+      <>
+        <Line x1={x - 6} y1={shoulderY + 3} x2={x - 4} y2={shoulderY + 9} />
+        <Line x1={x + 6} y1={shoulderY + 3} x2={x + 4} y2={shoulderY + 9} />
+      </>
+    );
+  }
+  if (variant === 2) {
+    return (
+      <>
+        <Line x1={x - 6} y1={shoulderY + 3} x2={x - 2} y2={shoulderY - 6 + gesture * 1.5} />
+        <Line x1={x + 6} y1={shoulderY + 3} x2={x + 5} y2={hipY} />
+      </>
+    );
+  }
+  return (
+    <>
+      <Line x1={x - 6} y1={shoulderY + 3} x2={x - 12} y2={shoulderY - 7 - gesture * 4} />
+      <Line x1={x + 6} y1={shoulderY + 3} x2={x + 4} y2={hipY + 1} />
+    </>
+  );
+}
+
+const CharacterArms = memo(function CharacterArms({
+  mode,
   x,
-  y,
-  working,
-  steam,
+  shoulderY,
+  hipY,
+  skin,
+  walk,
+  gesture,
+  typeL,
+  typeR,
+  variant,
 }: {
+  mode: ArmMode;
   x: number;
-  y: number;
-  working: boolean;
-  steam: number;
+  shoulderY: number;
+  hipY: number;
+  skin: string;
+  walk: number;
+  gesture: number;
+  typeL: number;
+  typeR: number;
+  variant: number;
+}): ReactElement {
+  let lines: ReactElement;
+  if (mode === "typing") {
+    lines = (
+      <>
+        <Line x1={x - 6} y1={shoulderY + 3} x2={x - 5} y2={hipY - 1 + typeL} />
+        <Line x1={x + 6} y1={shoulderY + 3} x2={x + 5} y2={hipY - 1 + typeR} />
+      </>
+    );
+  } else if (mode === "pointing") {
+    lines = reviewArms(x, shoulderY, hipY, gesture, variant);
+  } else if (mode === "gesturing") {
+    lines = (
+      <>
+        <Line x1={x - 6} y1={shoulderY + 3} x2={x - 9} y2={shoulderY - 2 - gesture * 5} />
+        <Line x1={x + 6} y1={shoulderY + 3} x2={x + 9} y2={shoulderY - 1 - (1 - gesture) * 5} />
+      </>
+    );
+  } else {
+    lines = (
+      <>
+        <Line x1={x - 6} y1={shoulderY + 3} x2={x - 7 - walk * 2} y2={hipY + 2} />
+        <Line x1={x + 6} y1={shoulderY + 3} x2={x + 7 + walk * 2} y2={hipY + 2} />
+      </>
+    );
+  }
+  return (
+    <G stroke={skin} strokeWidth={3} strokeLinecap="round">
+      {lines}
+    </G>
+  );
+});
+
+// The back of a head — hair covering it with ears — shown when a character walks away from the viewer,
+// so movement reads as turning like a real person rather than sliding.
+const BackHead = memo(function BackHead({
+  cx,
+  cy,
+  skin,
+  hair,
+}: {
+  cx: number;
+  cy: number;
+  skin: string;
+  hair: string;
 }): ReactElement {
   return (
     <G>
-      {/* desk top in perspective (back edge narrower) + front panel + legs */}
+      <Ellipse cx={cx - 8.6} cy={cy + 1} rx={1.8} ry={2.6} fill={skin} />
+      <Ellipse cx={cx + 8.6} cy={cy + 1} rx={1.8} ry={2.6} fill={skin} />
+      <Circle cx={cx} cy={cy} r={9} fill={skin} />
       <Path
-        d={`M ${x - 30} ${y - 4} L ${x + 30} ${y - 4} L ${x + 40} ${y + 4} L ${x - 40} ${y + 4} Z`}
-        fill="url(#deskWood)"
-        stroke={O.deskEdge}
-        strokeWidth={0.6}
-      />
-      <Rect x={x - 40} y={y + 4} width={80} height={22} fill={O.deskFront} />
-      <Rect x={x - 40} y={y + 4} width={80} height={2} fill={O.deskEdge} opacity={0.5} />
-      <Rect x={x - 37} y={y + 26} width={4} height={12} fill="#1b150f" />
-      <Rect x={x + 33} y={y + 26} width={4} height={12} fill="#1b150f" />
-      {/* laptop: base + lid (we see the outside of the lid) */}
-      <Path
-        d={`M ${x - 13} ${y + 2} L ${x + 13} ${y + 2} L ${x + 15} ${y + 6} L ${x - 15} ${y + 6} Z`}
-        fill={O.keyboard}
-      />
-      <Rect
-        x={x - 12}
-        y={y - 12}
-        width={24}
-        height={15}
-        rx={1.6}
-        fill="url(#laptop)"
-        stroke={working ? O.monitorScan : O.faint}
-        strokeWidth={working ? 0.8 : 0.5}
-        opacity={0.98}
-      />
-      {working ? (
-        <>
-          <Circle cx={x} cy={y - 4.5} r={1.6} fill={O.monitorScan} opacity={0.75} />
-          <Ellipse cx={x} cy={y - 4} rx={18} ry={9} fill={O.teal} opacity={0.1} />
-        </>
-      ) : (
-        <Circle cx={x} cy={y - 4.5} r={1.4} fill={O.faint} />
-      )}
-      {/* mug + steam */}
-      <Rect x={x + 20} y={y - 3} width={6} height={6} rx={1} fill={O.mug} />
-      <Path d={`M ${x + 26} ${y - 1} h 2 v 2 h -2`} fill="none" stroke={O.mug} strokeWidth={0.8} />
-      <Path
-        d={`M ${x + 23} ${y - 5} q ${2 * Math.sin(steam * 6)} -3 0 -6`}
-        fill="none"
-        stroke={O.steam}
-        strokeWidth={0.8}
-        strokeLinecap="round"
-        opacity={0.3}
+        d={`M ${cx - 9} ${cy + 4} A 9 9 0 1 1 ${cx + 9} ${cy + 4} Q ${cx} ${cy + 2} ${cx - 9} ${cy + 4} Z`}
+        fill={hair}
       />
     </G>
   );
 });
 
-interface WorkerMotion {
-  working: boolean;
-  intensity: number;
-  stretch: number;
-  eyeOpen: number;
-  look: number;
+interface CharMotion {
+  yb: number;
+  legSwing: number;
+  hipY: number;
   shoulderY: number;
   headCY: number;
-  emotePop: number;
-  armPose: "sip" | "stretch" | "rest";
-  leftHandY: number;
-  rightHandY: number;
+  typeL: number;
+  typeR: number;
+  eyeOpen: number;
+  walk: number;
+  gesture: number;
 }
 
-// Derive all of a character's per-frame motion from the shared clock + their personal seed. Kept out
-// of the component so the render stays simple: blink cadence, gaze, typing intensity (+ alternating
-// hands), breathing, idle stretch, and coffee sips are all deterministic functions of (state, seed, t).
-function computeMotion(state: OfficeState, seed: number, t: number, y: number): WorkerMotion {
-  const working = state === "working";
-  let intensity = 0;
-  if (working) intensity = 1;
-  else if (state === "reviewing") intensity = 0.5;
-  const typeFreq = 9 + rand(seed) * 3;
-  const type = intensity > 0 ? (Math.sin(t * typeFreq + seed) * 0.5 + 0.5) * intensity : 0;
-  const typeAlt = Math.sin(t * typeFreq + seed + Math.PI) * 0.5 + 0.5;
-
-  const breathe = Math.sin(t * 1.5 + seed) * 0.7;
-  const stretchCycle = (t * 0.12 + rand(seed) * 5) % 5;
-  const stretch = state === "idle" && stretchCycle > 4.2 ? (stretchCycle - 4.2) / 0.8 : 0;
-  const sipCycle = (t * 0.1 + rand(seed + 1) * 7) % 7;
-  const sipping = (state === "idle" || state === "talking") && sipCycle > 6.3;
-
-  const blinkCycle = (t + rand(seed) * 6) % (3.5 + rand(seed + 2) * 1.5);
-  const eyeOpen = blinkCycle < 0.13 ? 0 : 1;
-  const idleGaze = state === "idle" ? 1 : 0.4;
-  const look = working ? 0.7 : Math.sin(t * 0.6 + seed) * idleGaze;
-
-  const lift = breathe - stretch * 3;
-  let armPose: "sip" | "stretch" | "rest" = "rest";
-  if (sipping) armPose = "sip";
-  else if (stretch > 0) armPose = "stretch";
-  const resting = armPose === "rest";
-
+// Per-frame body geometry: walking bob + leg swing, idle sway, active lean, typing hands, blink.
+function characterMotion(input: {
+  state: OfficeState;
+  seed: number;
+  t: number;
+  moving: boolean;
+  typing: boolean;
+  pointing: boolean;
+  gesturing: boolean;
+  baseY: number;
+}): CharMotion {
+  const { state, seed, t, moving, typing, pointing, gesturing, baseY } = input;
+  const gesture = Math.sin(t * 3.4 + seed) * 0.5 + 0.5;
+  const nod = Math.sin(t * 2.2 + seed);
+  const walk = moving ? Math.sin(t * 9 + seed) : 0;
+  const idleShift =
+    !moving && (state === "idle" || state === "done") ? Math.sin(t * 1.1 + seed) * 0.6 : 0;
+  const activeLean = pointing || gesturing ? nod * 0.8 : 0;
+  const bob = moving
+    ? Math.abs(Math.cos(t * 9 + seed)) * 1.4
+    : Math.sin(t * 1.6 + seed) * 0.5 + idleShift;
+  const yb = -bob;
+  const blinkPeriod = 3.5 + rand(seed + 2) * 1.5;
   return {
-    working,
-    intensity,
-    stretch,
-    eyeOpen,
-    look,
-    shoulderY: y - 20 + lift,
-    headCY: y - 33 + lift - stretch * 2,
-    emotePop: (Math.sin(t * 0.9 + seed) + 1) / 2,
-    armPose,
-    leftHandY: y + 1 + (resting ? type * 1.6 : 0),
-    rightHandY: y + 1 + (resting ? typeAlt * intensity * 1.6 : 0),
+    yb,
+    legSwing: walk * 3.6,
+    hipY: baseY - 15 + yb,
+    shoulderY: baseY - 29 + yb,
+    headCY: baseY - 39 + yb + activeLean,
+    typeL: typing ? (Math.sin(t * 11 + seed) * 0.5 + 0.5) * 2 : 0,
+    typeR: typing ? (Math.sin(t * 11 + seed + Math.PI) * 0.5 + 0.5) * 2 : 0,
+    eyeOpen: (t + rand(seed) * 6) % blinkPeriod < 0.13 ? 0 : 1,
+    walk,
+    gesture,
   };
 }
 
-// One full workstation: contact shadow + office chair + a shaded, breathing, blinking, typing/sipping/
-// stretching seated character + its mood emote.
-const Worker = memo(function Worker({
+// Which way a walking character faces: a mostly-sideways step turns them left/right; heading up (away
+// from the viewer) shows their back. `leanX` tilts the upper body into the direction of travel.
+function headingFor(
+  dirX: number,
+  dirY: number,
+  moving: boolean,
+): { mv: boolean; away: boolean; sideDir: number; leanX: number } {
+  const mag = Math.hypot(dirX, dirY);
+  const mv = moving && mag > 0.4;
+  if (!mv) return { mv: false, away: false, sideDir: 0, leanX: 0 };
+  const away = dirY < -Math.abs(dirX) * 0.5;
+  let sideDir = 0;
+  if (Math.abs(dirX) > Math.abs(dirY) * 0.55) sideDir = dirX >= 0 ? 1 : -1;
+  const leanX = sideDir * 2.4 + (dirX / (mag || 1)) * 1.6;
+  return { mv, away, sideDir, leanX };
+}
+
+// A teammate as a small figure that WALKS between places: it turns to face where it's going (shows its
+// back when heading away), and sits/types/points/gestures based on its real state.
+const GameCharacter = memo(function GameCharacter({
   p,
   state,
   x,
-  y,
+  baseY,
+  dirX,
+  dirY,
+  moving,
   t,
 }: {
   p: ForumParticipant;
   state: OfficeState;
   x: number;
-  y: number;
+  baseY: number;
+  dirX: number;
+  dirY: number;
+  moving: boolean;
   t: number;
 }): ReactElement {
   const shirt = roleShirt(p.role);
@@ -526,95 +575,345 @@ const Worker = memo(function Worker({
   const seed = (p.agentId.charCodeAt(0) || 7) + (p.agentId.charCodeAt(3) || 3) * 2;
   const hair = HAIRS[Math.floor(rand(seed) * HAIRS.length) % HAIRS.length] ?? HAIRS[0];
   const skin = SKINS[Math.floor(rand(seed + 5) * SKINS.length) % SKINS.length] ?? SKINS[0];
-  const m = computeMotion(state, seed, t, y);
-  const { working, intensity, shoulderY, headCY, armPose, leftHandY, rightHandY } = m;
+  const working = state === "working";
+  const typing = working && !moving;
+  const pointing = state === "reviewing" && !moving;
+  const gesturing = state === "talking" && !moving;
+  const { yb, legSwing, hipY, shoulderY, headCY, typeL, typeR, eyeOpen, walk, gesture } =
+    characterMotion({ state, seed, t, moving, typing, pointing, gesturing, baseY });
+  const mode = poseMode(typing, pointing, gesturing);
+  const variant = seed % 3;
+  const heading = headingFor(dirX, dirY, moving);
+  const away = heading.away;
+  const look = heading.mv ? heading.sideDir * 0.95 : gazeFor(state, seed, t, 1);
+  const sx = x + heading.leanX;
 
   return (
     <G>
-      {/* contact shadow grounds the whole station */}
-      <Ellipse cx={x} cy={y + 40} rx={38} ry={6} fill={O.shadow} opacity={0.32} />
-      {/* office chair back behind the torso */}
-      <Rect x={x - 15} y={shoulderY - 6} width={30} height={30} rx={9} fill="url(#chair)" />
-      <Rect x={x - 11} y={shoulderY - 10} width={22} height={9} rx={5} fill="url(#chair)" />
-      {/* torso: shirt with shading */}
+      <Ellipse cx={x} cy={baseY + 2} rx={12} ry={3.2} fill={O.shadow} opacity={0.34} />
+      {/* legs */}
+      <G stroke="#2b2f38" strokeWidth={3.2} strokeLinecap="round">
+        <Line x1={x - 3} y1={hipY} x2={x - 3 + legSwing} y2={baseY + yb} />
+        <Line x1={x + 3} y1={hipY} x2={x + 3 - legSwing} y2={baseY + yb} />
+      </G>
+      {/* torso (leans toward travel direction) */}
       <Path
-        d={`M ${x - 13} ${y + 6} L ${x - 12} ${shoulderY + 2} Q ${x} ${shoulderY - 5} ${x + 12} ${shoulderY + 2} L ${x + 13} ${y + 6} Z`}
+        d={`M ${x - 8} ${hipY} L ${sx - 7} ${shoulderY} Q ${sx} ${shoulderY - 4} ${sx + 7} ${shoulderY} L ${x + 8} ${hipY} Z`}
         fill={shirt}
       />
       <Path
-        d={`M ${x - 13} ${y + 6} L ${x - 12} ${shoulderY + 2} Q ${x - 8} ${shoulderY} ${x - 5} ${shoulderY + 1} L ${x - 5} ${y + 6} Z`}
+        d={`M ${x - 8} ${hipY} L ${sx - 7} ${shoulderY} Q ${sx - 4} ${shoulderY - 2} ${sx - 2} ${shoulderY - 1} L ${x - 2} ${hipY} Z`}
         fill="#fff"
         opacity={0.08}
       />
-      <Path
-        d={`M ${x + 5} ${y + 6} L ${x + 5} ${shoulderY + 1} Q ${x + 9} ${shoulderY} ${x + 12} ${shoulderY + 2} L ${x + 13} ${y + 6} Z`}
-        fill="#000"
-        opacity={0.14}
-      />
-      {/* collar + neck */}
-      <Rect x={x - 2.5} y={headCY + 6} width={5} height={5} fill={skin} />
-      <Path
-        d={`M ${x - 4} ${shoulderY + 1} L ${x} ${headCY + 9} L ${x + 4} ${shoulderY + 1}`}
-        fill="none"
-        stroke="#000"
-        strokeWidth={0.6}
-        opacity={0.15}
-      />
-      {/* arms + hands */}
-      {armPose === "sip" ? (
-        <G stroke={skin} strokeWidth={3.4} strokeLinecap="round">
-          <Line x1={x - 9} y1={shoulderY + 8} x2={x - 13} y2={y + 2} />
-          <Line x1={x + 9} y1={shoulderY + 8} x2={x + 2} y2={headCY + 5} />
-        </G>
+      {/* a tablet for the "reading the diff" reviewer */}
+      {pointing && variant === 1 ? (
+        <Rect
+          x={sx - 5}
+          y={shoulderY + 5}
+          width={10}
+          height={7}
+          rx={1}
+          fill="#11141a"
+          stroke={O.monitorScan}
+          strokeWidth={0.6}
+        />
       ) : null}
-      {armPose === "stretch" ? (
-        <G stroke={skin} strokeWidth={3.4} strokeLinecap="round">
-          <Line x1={x - 9} y1={shoulderY + 6} x2={x - 13} y2={headCY - 2 - m.stretch * 3} />
-          <Line x1={x + 9} y1={shoulderY + 6} x2={x + 13} y2={headCY - 2 - m.stretch * 3} />
-        </G>
-      ) : null}
-      {armPose === "rest" ? (
-        <G stroke={skin} strokeWidth={3.4} strokeLinecap="round">
-          <Line x1={x - 9} y1={shoulderY + 8} x2={x - 9} y2={leftHandY} />
-          <Line x1={x + 9} y1={shoulderY + 8} x2={x + 9} y2={rightHandY} />
-        </G>
-      ) : null}
-      <Head
-        cx={x}
-        cy={headCY}
+      <CharacterArms
+        mode={mode}
+        x={sx}
+        shoulderY={shoulderY}
+        hipY={hipY}
         skin={skin}
-        hair={hair}
-        look={m.look}
-        eyeOpen={m.eyeOpen}
-        mood={state}
-        glow={working ? 1 : 0}
+        walk={walk}
+        gesture={gesture}
+        typeL={typeL}
+        typeR={typeR}
+        variant={variant}
       />
-      {/* laptop drawn in front so hands rest on it and it occludes the lower torso */}
-      <Workstation x={x} y={y} working={working} steam={t + seed} />
-      <Sparks x={x} y={y} t={t} intensity={intensity} />
-      {/* status dot + emote */}
-      <Circle cx={x + 13} cy={headCY - 7} r={3} fill={meta.color} />
-      <Emote state={state} x={x + 21} y={headCY - 12} pop={m.emotePop} />
-      {/* name + role */}
+      <Rect x={sx - 2} y={headCY + 6} width={4} height={5} fill={skin} />
+      {away ? (
+        <BackHead cx={sx} cy={headCY} skin={skin} hair={hair} />
+      ) : (
+        <Head
+          cx={sx}
+          cy={headCY}
+          skin={skin}
+          hair={hair}
+          look={look}
+          eyeOpen={eyeOpen}
+          mood={state}
+          glow={working ? 1 : 0}
+        />
+      )}
+      <Circle cx={x + 10} cy={headCY - 6} r={2.6} fill={meta.color} />
+      <Emote state={state} x={x + 18} y={headCY - 11} pop={(Math.sin(t * 0.9 + seed) + 1) / 2} />
       <SvgText
         x={x}
-        y={y + 50}
+        y={baseY + 13}
         fill={O.text}
-        fontSize={9}
+        fontSize={8}
         textAnchor="middle"
         fontFamily={FONT_MONO}
       >
-        {p.label.length > 16 ? `${p.label.slice(0, 15)}…` : p.label}
+        {p.label.length > 14 ? `${p.label.slice(0, 13)}…` : p.label}
       </SvgText>
       <SvgText
         x={x}
-        y={y + 60}
+        y={baseY + 22}
         fill={meta.color}
-        fontSize={7.5}
+        fontSize={7}
         textAnchor="middle"
         fontFamily={FONT_MONO}
       >
         {meta.label.toUpperCase()}
+      </SvgText>
+    </G>
+  );
+});
+
+// A small worker desk with a laptop that glows when someone is sitting there working.
+const WorkerDesk = memo(function WorkerDesk({
+  x,
+  y,
+  busy,
+}: {
+  x: number;
+  y: number;
+  busy: boolean;
+}): ReactElement {
+  return (
+    <G>
+      <Path
+        d={`M ${x - 26} ${y - 4} L ${x + 26} ${y - 4} L ${x + 34} ${y + 4} L ${x - 34} ${y + 4} Z`}
+        fill="url(#deskWood)"
+        stroke={O.deskEdge}
+        strokeWidth={0.6}
+      />
+      <Rect x={x - 34} y={y + 4} width={68} height={16} fill={O.deskFront} />
+      <Rect
+        x={x - 12}
+        y={y - 11}
+        width={24}
+        height={14}
+        rx={1.5}
+        fill="url(#laptop)"
+        stroke={busy ? O.monitorScan : O.faint}
+        strokeWidth={busy ? 0.8 : 0.5}
+      />
+      {busy ? <Ellipse cx={x} cy={y - 4} rx={18} ry={8} fill={O.teal} opacity={0.12} /> : null}
+    </G>
+  );
+});
+
+// A framed glass office door on the back wall, lit from the hallway, with a handle + sign.
+const OfficeDoor = memo(function OfficeDoor({
+  x,
+  y,
+  h,
+}: {
+  x: number;
+  y: number;
+  h: number;
+}): ReactElement {
+  const w = 48;
+  return (
+    <G>
+      <Rect x={x - 3} y={y - h - 3} width={w + 6} height={h + 3} rx={2} fill="#2b303a" />
+      <Rect x={x} y={y - h} width={w} height={h} fill="#161a21" />
+      <Rect
+        x={x + 6}
+        y={y - h + 9}
+        width={w - 12}
+        height={h * 0.52}
+        rx={2}
+        fill="url(#winGrad)"
+        opacity={0.55}
+      />
+      <Rect x={x + 3} y={y - 10} width={w - 6} height={7} fill="#20242c" />
+      <Circle cx={x + w - 8} cy={y - h * 0.5} r={1.7} fill="#c9cfd8" />
+      <Ellipse cx={x + w / 2} cy={y + 6} rx={w * 0.7} ry={8} fill="#ffe6b0" opacity={0.05} />
+      <Rect
+        x={x + 5}
+        y={y - h - 13}
+        width={w - 10}
+        height={9}
+        rx={2}
+        fill="#12141a"
+        stroke="#2b303a"
+        strokeWidth={0.5}
+      />
+      <SvgText
+        x={x + w / 2}
+        y={y - h - 6}
+        fill="#6fe08a"
+        fontSize={5.4}
+        textAnchor="middle"
+        fontFamily={FONT_MONO}
+      >
+        OFFICE
+      </SvgText>
+    </G>
+  );
+});
+
+// The boss's desk at the head of the room: a bigger executive desk, monitor, nameplate, crowned boss.
+const BossDesk = memo(function BossDesk({
+  x,
+  y,
+  waiting,
+  t,
+}: {
+  x: number;
+  y: number;
+  waiting: boolean;
+  t: number;
+}): ReactElement {
+  const pulse = (Math.sin(t * 3) + 1) / 2;
+  return (
+    <G>
+      {waiting ? (
+        <Ellipse cx={x} cy={y + 6} rx={72} ry={26} fill="#ffcf7a" opacity={0.06 + pulse * 0.06} />
+      ) : null}
+      <Path
+        d={`M ${x - 60} ${y + 6} L ${x + 60} ${y + 6} L ${x + 72} ${y + 18} L ${x - 72} ${y + 18} Z`}
+        fill="url(#deskWood)"
+        stroke={O.deskEdge}
+        strokeWidth={0.8}
+      />
+      <Rect x={x - 72} y={y + 18} width={144} height={20} fill={O.deskFront} />
+      <Rect
+        x={x - 18}
+        y={y - 8}
+        width={36}
+        height={16}
+        rx={2}
+        fill="url(#laptop)"
+        stroke={O.monitorScan}
+        strokeWidth={0.7}
+      />
+      <Ellipse cx={x} cy={y - 14} rx={9} ry={9} fill="#e7c6a0" />
+      <Path
+        d={`M ${x - 9} ${y - 15} C ${x - 10} ${y - 26}, ${x + 10} ${y - 26}, ${x + 9} ${y - 15} Z`}
+        fill="#20242c"
+      />
+      <Path d={`M ${x - 7} ${y - 24} l 2 -5 l 3 4 l 2 -6 l 2 6 l 3 -4 l 2 5 Z`} fill="#f6c945" />
+      <Rect
+        x={x - 30}
+        y={y + 22}
+        width={60}
+        height={11}
+        rx={2}
+        fill="#12141a"
+        stroke={O.deskEdge}
+        strokeWidth={0.5}
+      />
+      <SvgText
+        x={x}
+        y={y + 30}
+        fill="#f6c945"
+        fontSize={7.5}
+        fontWeight="700"
+        textAnchor="middle"
+        fontFamily={FONT_MONO}
+      >
+        BOSS · YOU
+      </SvgText>
+      {waiting ? (
+        <SvgText
+          x={x + 40}
+          y={y - 14}
+          fill="#ffcf7a"
+          fontSize={14}
+          fontWeight="700"
+          textAnchor="middle"
+          opacity={0.5 + pulse * 0.5}
+        >
+          !
+        </SvgText>
+      ) : null}
+    </G>
+  );
+});
+
+// A round collaboration rug where teammates gather when they're chatting.
+const CollabRug = memo(function CollabRug({ x, y }: { x: number; y: number }): ReactElement {
+  return (
+    <G>
+      <Ellipse cx={x} cy={y + 26} rx={64} ry={26} fill="#171a22" />
+      <Ellipse
+        cx={x}
+        cy={y + 26}
+        rx={64}
+        ry={26}
+        fill="none"
+        stroke={O.teal}
+        strokeWidth={0.6}
+        opacity={0.25}
+      />
+      <Ellipse
+        cx={x}
+        cy={y + 24}
+        rx={16}
+        ry={7}
+        fill="url(#deskWood)"
+        stroke={O.deskEdge}
+        strokeWidth={0.5}
+      />
+    </G>
+  );
+});
+
+// A whiteboard on the side wall where reviewers stand to go over the diff.
+const Whiteboard = memo(function Whiteboard({ x, y }: { x: number; y: number }): ReactElement {
+  return (
+    <G>
+      <Rect
+        x={x - 34}
+        y={y - 26}
+        width={68}
+        height={40}
+        rx={2}
+        fill="#eef1f4"
+        stroke={O.deskEdge}
+        strokeWidth={1}
+      />
+      <Line
+        x1={x - 26}
+        y1={y - 16}
+        x2={x + 20}
+        y2={y - 16}
+        stroke="#3b7d4f"
+        strokeWidth={1.4}
+        strokeLinecap="round"
+      />
+      <Line
+        x1={x - 26}
+        y1={y - 8}
+        x2={x + 8}
+        y2={y - 8}
+        stroke="#c0563c"
+        strokeWidth={1.4}
+        strokeLinecap="round"
+      />
+      <Line
+        x1={x - 26}
+        y1={y}
+        x2={x + 24}
+        y2={y}
+        stroke="#3b6bd6"
+        strokeWidth={1.4}
+        strokeLinecap="round"
+      />
+      <SvgText
+        x={x}
+        y={y + 26}
+        fill={O.muted}
+        fontSize={7}
+        textAnchor="middle"
+        fontFamily={FONT_MONO}
+      >
+        REVIEW
       </SvgText>
     </G>
   );
@@ -698,11 +997,54 @@ const Dust = memo(function Dust({
 });
 
 const SCENE_W = 640;
-const DESK_COLS = 3;
-const CELL_W = 184;
-const CELL_H = 168;
-const MARGIN_X = 68;
-const MARGIN_TOP = 92;
+const SCENE_H = 400;
+const HORIZON = 96; // wall/floor junction — the back wall rises to here
+const BOSS_POS = { x: SCENE_W / 2, y: 108 };
+const COLLAB_POS = { x: 300, y: 214 };
+const BOARD_POS = { x: 96, y: 150 };
+const WALK_STEP = 3.2; // px/frame (~30fps → ~96px/s walking speed)
+
+// Each teammate's home desk, laid out in up to two rows along the lower half of the room.
+function homeDesks(n: number): { x: number; y: number }[] {
+  const out: { x: number; y: number }[] = [];
+  const perRow = Math.min(5, Math.max(1, n));
+  for (let i = 0; i < n; i++) {
+    const row = Math.floor(i / perRow);
+    const col = i % perRow;
+    const inRow = Math.min(perRow, n - row * perRow);
+    const spread = SCENE_W - 150;
+    const step = inRow > 1 ? spread / (inRow - 1) : 0;
+    const startX = inRow > 1 ? 75 : SCENE_W / 2;
+    out.push({ x: startX + col * step, y: 316 + row * 58 });
+  }
+  return out;
+}
+
+// Where a teammate should be RIGHT NOW given what they're doing: at their desk (working/done/idle), on
+// the collab rug (talking), at the whiteboard (reviewing), or in front of the boss's desk (waiting).
+function targetFor(
+  state: OfficeState,
+  home: { x: number; y: number },
+  gi: number,
+  gsize: number,
+  seed: number,
+  t: number,
+): { x: number; y: number } {
+  const driftX = Math.sin(t * 0.55 + seed) * 4;
+  const driftY = Math.cos(t * 0.4 + seed * 1.3) * 2.5;
+  if (state === "talking") {
+    const a = (gi / Math.max(1, gsize)) * Math.PI * 2 - Math.PI / 2;
+    return {
+      x: COLLAB_POS.x + Math.cos(a) * 58 + driftX,
+      y: COLLAB_POS.y + 34 + Math.sin(a) * 20 + driftY,
+    };
+  }
+  if (state === "reviewing") return { x: 72 + gi * 58 + driftX, y: BOARD_POS.y + 80 + driftY };
+  if (state === "waiting")
+    return { x: BOSS_POS.x - 70 + gi * 56 + driftX * 0.6, y: BOSS_POS.y + 64 };
+  const sway = state === "idle" ? Math.sin(t * 0.5 + seed) * 10 : driftX * 0.4;
+  return { x: home.x + sway, y: home.y };
+}
 
 export const OfficeScene = memo(function OfficeScene({
   topic,
@@ -713,8 +1055,7 @@ export const OfficeScene = memo(function OfficeScene({
     () => topic.participants.filter((p) => p.agentId !== "user" && p.agentId !== "system"),
     [topic.participants],
   );
-  const rows = Math.max(1, Math.ceil(workers.length / DESK_COLS));
-  const sceneH = MARGIN_TOP + rows * CELL_H + 44;
+  const sceneH = SCENE_H;
   const [width, setWidth] = useState(SCENE_W);
   const onLayout = useCallback(
     (e: LayoutChangeEvent): void => setWidth(e.nativeEvent.layout.width),
@@ -722,8 +1063,8 @@ export const OfficeScene = memo(function OfficeScene({
   );
   const scale = width / SCENE_W;
 
-  // Continuous, framerate-independent clock (seconds). ~30fps keeps micro-animations smooth while a
-  // handful of workers keeps the redraw cheap on both desktop and mobile.
+  // Continuous, framerate-independent clock (seconds). ~30fps keeps the walking + micro-animations
+  // smooth while a handful of workers keeps the redraw cheap on both desktop and mobile.
   const [t, setT] = useState(() => 0);
   const startRef = useRef(Date.now());
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -736,6 +1077,48 @@ export const OfficeScene = memo(function OfficeScene({
   }, [tick]);
 
   const states = useMemo(() => workers.map((p) => deriveOfficeState(topic, p)), [workers, topic]);
+  const desks = useMemo(() => homeDesks(workers.length), [workers.length]);
+
+  // Persistent per-worker positions so movement is continuous across frames: each tick we step the
+  // current position toward the state-derived target, which reads as walking to that spot.
+  const posRef = useRef<Map<string, { x: number; y: number }>>(new Map());
+  const placed = useMemo(() => {
+    const positions = posRef.current;
+    const groupSizes = { talking: 0, reviewing: 0, waiting: 0 } as Record<string, number>;
+    for (const s of states) if (s in groupSizes) groupSizes[s] = (groupSizes[s] ?? 0) + 1;
+    const counters = { talking: 0, reviewing: 0, waiting: 0 } as Record<string, number>;
+    return workers.map((p, i) => {
+      const state = states[i] ?? "idle";
+      const home = desks[i] ?? { x: SCENE_W / 2, y: 316 };
+      const gi = state in counters ? counters[state]++ : 0;
+      const gsize = groupSizes[state] ?? 1;
+      const seed = (p.agentId.charCodeAt(0) || 7) * 3 + i;
+      const target = targetFor(state, home, gi, gsize, seed, t);
+      const prev = positions.get(p.agentId) ?? { x: target.x, y: target.y };
+      const dx = target.x - prev.x;
+      const dy = target.y - prev.y;
+      const dist = Math.hypot(dx, dy);
+      const stepLen = WALK_STEP * (0.72 + rand(seed) * 0.6);
+      let nx = target.x;
+      let ny = target.y;
+      let moving = false;
+      if (dist > stepLen) {
+        nx = prev.x + (dx / dist) * stepLen;
+        ny = prev.y + (dy / dist) * stepLen;
+        moving = dist > stepLen * 1.15;
+      }
+      positions.set(p.agentId, { x: nx, y: ny });
+      return { p, state, home, x: nx, y: ny, moving, dirX: dx, dirY: dy };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally re-steps every clock tick
+  }, [workers, states, desks, t]);
+
+  // Depth order: characters further back (smaller y) draw first so nearer ones overlap them.
+  const drawOrder = useMemo(
+    () => placed.map((_, i) => i).sort((a, b) => (placed[a]!.y ?? 0) - (placed[b]!.y ?? 0)),
+    [placed],
+  );
+  const bossWaiting = topic.pendingHumanQuestion != null || states.some((s) => s === "waiting");
 
   return (
     <View style={styles.wrap} onLayout={onLayout}>
@@ -770,73 +1153,118 @@ export const OfficeScene = memo(function OfficeScene({
             <Stop offset="1" stopColor="#ffd9a0" stopOpacity="0" />
           </RadialGradient>
         </Defs>
-        {/* room */}
-        <Rect x={0} y={0} width={SCENE_W} height={sceneH} fill="url(#wallGrad)" />
-        <Rect x={0} y={54} width={SCENE_W} height={sceneH - 54} fill="url(#floorGrad)" />
-        <Rect x={0} y={54} width={SCENE_W} height={3} fill="#000" opacity={0.35} />
-        {/* warm ambient pools */}
+        {/* ── room as a 3D box: ceiling, back wall, side walls, floor ── */}
+        <Rect x={0} y={0} width={SCENE_W} height={16} fill="#0a0c11" />
+        {[0.22, 0.4, 0.6, 0.78].map((f) => (
+          <Rect
+            key={`ceil-${f}`}
+            x={SCENE_W * f - 15}
+            y={6}
+            width={30}
+            height={4}
+            rx={2}
+            fill="#ffe6b0"
+            opacity={0.5}
+          />
+        ))}
+        <Rect x={0} y={16} width={SCENE_W} height={HORIZON - 16} fill="url(#wallGrad)" />
+        {[0.12, 0.88].map((f) => (
+          <Rect
+            key={`pil-${f}`}
+            x={SCENE_W * f - 2}
+            y={18}
+            width={4}
+            height={HORIZON - 22}
+            fill="#000"
+            opacity={0.13}
+          />
+        ))}
+        <Path
+          d={`M 0 0 L 36 22 L 36 ${sceneH - 26} L 0 ${sceneH} Z`}
+          fill="#0c0e13"
+          opacity={0.6}
+        />
+        <Path
+          d={`M ${SCENE_W} 0 L ${SCENE_W - 36} 22 L ${SCENE_W - 36} ${sceneH - 26} L ${SCENE_W} ${sceneH} Z`}
+          fill="#0c0e13"
+          opacity={0.6}
+        />
+        <Rect x={0} y={HORIZON} width={SCENE_W} height={sceneH - HORIZON} fill="url(#floorGrad)" />
+        <Rect x={0} y={HORIZON - 3} width={SCENE_W} height={3} fill="#20242c" opacity={0.7} />
+        <Rect x={0} y={HORIZON} width={SCENE_W} height={4} fill="#000" opacity={0.4} />
         <Rect x={0} y={0} width={SCENE_W} height={sceneH} fill="url(#lamp)" />
-        {/* floor grid in perspective (fans out toward the viewer) */}
         {Array.from({ length: 11 }, (_, i) => {
           const fx = (SCENE_W / 10) * i;
-          const bx = SCENE_W / 2 + (fx - SCENE_W / 2) * 0.55;
+          const bx = SCENE_W / 2 + (fx - SCENE_W / 2) * 0.5;
           return (
             <Line
               key={`v${i}`}
               x1={bx}
-              y1={57}
+              y1={HORIZON + 2}
               x2={fx}
               y2={sceneH}
               stroke={O.grid}
-              strokeWidth={0.5}
+              strokeWidth={0.45}
+              opacity={0.5}
             />
           );
         })}
         {[0, 1, 2].map((r) => {
-          const gy = 70 + r * ((sceneH - 70) / 3);
+          const gy = HORIZON + 14 + r * ((sceneH - HORIZON - 14) / 3);
           return (
             <Line
               key={`h${r}`}
-              x1={0}
+              x1={36}
               y1={gy}
-              x2={SCENE_W}
+              x2={SCENE_W - 36}
               y2={gy}
               stroke={O.grid}
               strokeWidth={0.4}
-              opacity={0.6}
+              opacity={0.4}
             />
           );
         })}
-        {/* window with daylight */}
+        <Rect x={0} y={HORIZON + 4} width={SCENE_W} height={16} fill="#ffffff" opacity={0.02} />
+        <OfficeDoor x={96} y={HORIZON} h={HORIZON - 26} />
         <Rect
-          x={SCENE_W - 122}
-          y={12}
-          width={100}
-          height={32}
+          x={SCENE_W - 132}
+          y={26}
+          width={104}
+          height={40}
           rx={3}
           fill="url(#winGrad)"
           opacity={0.85}
         />
-        <Line
-          x1={SCENE_W - 72}
-          y1={12}
-          x2={SCENE_W - 72}
-          y2={44}
-          stroke={O.wallBottom}
+        <Rect
+          x={SCENE_W - 132}
+          y={26}
+          width={104}
+          height={40}
+          rx={3}
+          fill="none"
+          stroke="#2b303a"
           strokeWidth={2}
         />
         <Line
-          x1={SCENE_W - 122}
-          y1={28}
-          x2={SCENE_W - 22}
-          y2={28}
-          stroke={O.wallBottom}
-          strokeWidth={2}
+          x1={SCENE_W - 80}
+          y1={26}
+          x2={SCENE_W - 80}
+          y2={66}
+          stroke="#2b303a"
+          strokeWidth={1.6}
         />
-        <WallClock x={64} y={32} t={t} />
+        <Line
+          x1={SCENE_W - 132}
+          y1={46}
+          x2={SCENE_W - 28}
+          y2={46}
+          stroke="#2b303a"
+          strokeWidth={1.6}
+        />
+        <WallClock x={SCENE_W / 2 - 128} y={44} t={t} />
         <Dust t={t} width={SCENE_W} height={sceneH} />
-        <Plant x={26} y={sceneH - 44} t={t} />
-        <Plant x={SCENE_W - 26} y={sceneH - 44} t={t} />
+        <Plant x={48} y={sceneH - 30} t={t} />
+        <Plant x={SCENE_W - 48} y={sceneH - 30} t={t} />
         {/* header sign */}
         <SvgText
           x={SCENE_W / 2}
@@ -849,12 +1277,35 @@ export const OfficeScene = memo(function OfficeScene({
         >
           TEAM OFFICE · LIVE
         </SvgText>
-        {workers.map((p, i) => {
-          const col = i % DESK_COLS;
-          const row = Math.floor(i / DESK_COLS);
-          const x = MARGIN_X + col * CELL_W + CELL_W / 2 - 20;
-          const y = MARGIN_TOP + row * CELL_H + 44;
-          return <Worker key={p.agentId} p={p} state={states[i] ?? "idle"} x={x} y={y} t={t} />;
+        {/* fixed furniture: whiteboard (review), boss desk (head of room), collab rug (chat) */}
+        <Whiteboard x={BOARD_POS.x} y={BOARD_POS.y} />
+        <BossDesk x={BOSS_POS.x} y={BOSS_POS.y} waiting={bossWaiting} t={t} />
+        <CollabRug x={COLLAB_POS.x} y={COLLAB_POS.y} />
+        {/* each teammate's home desk (glows when they're sitting there working) */}
+        {placed.map((w) => (
+          <WorkerDesk
+            key={`desk-${w.p.agentId}`}
+            x={w.home.x}
+            y={w.home.y}
+            busy={w.state === "working" && !w.moving}
+          />
+        ))}
+        {/* teammates, drawn back-to-front so nearer figures overlap */}
+        {drawOrder.map((i) => {
+          const w = placed[i]!;
+          return (
+            <GameCharacter
+              key={w.p.agentId}
+              p={w.p}
+              state={w.state}
+              x={w.x}
+              baseY={w.y}
+              dirX={w.dirX}
+              dirY={w.dirY}
+              moving={w.moving}
+              t={t}
+            />
+          );
         })}
         {workers.length === 0 ? (
           <SvgText

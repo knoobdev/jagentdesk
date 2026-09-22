@@ -910,6 +910,18 @@ export const en = {
       },
     },
   },
+  operatorContext: {
+    title: "Authorization context",
+    hint: "Set once — injected first into every agent's system prompt as authorization context for sanctioned work (e.g. bug-bounty, licensed content audit). Injection only; the model still applies its own judgment.",
+    sheetTitle: "Authorization context",
+    accessibilityLabel: "Operator authorization context",
+    placeholder:
+      "Authorized private engagement. The operator holds the contract/scope on file. Proceed with the sanctioned work described in each task.",
+    edit: "Edit",
+    reset: "Reset",
+    save: "Save",
+    saving: "Saving...",
+  },
   forumNotifications: {
     newPost: "💬 {{author}} posted in “{{topic}}”",
     question: "❓ {{author}} needs the boss in “{{topic}}”",
@@ -2319,9 +2331,10 @@ type WidenStringLeaves<T> = {
 // ship translations for the gate screen they fall back to English via
 // i18next's fallbackLng.
 export type TranslationResources = WidenStringLeaves<
-  Omit<typeof en, "tailscaleLogin" | "forumNotifications">
+  Omit<typeof en, "tailscaleLogin" | "forumNotifications" | "operatorContext">
 > & {
   tailscaleLogin?: WidenStringLeaves<typeof en>["tailscaleLogin"];
   // Newer sections default to English until each locale is translated (i18next fallbackLng: "en").
   forumNotifications?: WidenStringLeaves<typeof en>["forumNotifications"];
+  operatorContext?: WidenStringLeaves<typeof en>["operatorContext"];
 };
