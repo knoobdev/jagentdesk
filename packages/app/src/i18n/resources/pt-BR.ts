@@ -997,6 +997,7 @@ export const ptBR: TranslationResources = {
       hosts: "Hosts",
       home: "Início",
       settings: "Configurações",
+      marketplace: "Mercado",
       closeSidebar: "Fechar barra lateral",
     },
     help: {
@@ -2309,6 +2310,12 @@ export const ptBR: TranslationResources = {
     browseTitle: "Plugin marketplace",
     browseHint: "Browse and install community plugins and themes.",
     browseButton: "Browse marketplace",
+    tabs: {
+      browse: "Browse",
+      installed: "Installed",
+      installedEmpty: "No plugins installed yet.",
+      loadMore: "Load more",
+    },
     browse: {
       title: "All plugins",
     },

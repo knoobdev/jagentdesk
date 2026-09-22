@@ -177,6 +177,11 @@ const styles = StyleSheet.create((theme: Theme) => ({
     paddingVertical: theme.spacing[2],
     fontSize: theme.fontSize.sm,
     color: theme.colors.foreground,
+    // Kill the browser's accent focus ring on web (the shared AdaptiveTextInput
+    // paints `outlineColor: accent`; this caller style lands after it). No accent
+    // border/background on focus — the resting border is the only affordance.
+    outlineWidth: 0,
+    outlineColor: "transparent",
   },
   sortRow: { flexDirection: "row", flexWrap: "wrap", gap: theme.spacing[2] },
   sortTab: {

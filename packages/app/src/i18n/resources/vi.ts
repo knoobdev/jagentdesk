@@ -193,6 +193,7 @@ export const vi = {
       hosts: "Host",
       home: "Trang chủ",
       settings: "Cài đặt",
+      marketplace: "Chợ ứng dụng",
       closeSidebar: "Đóng thanh bên",
     },
     help: {
@@ -299,6 +300,12 @@ export const vi = {
     browseTitle: "Chợ plugin",
     browseHint: "Duyệt và cài đặt plugin, theme từ cộng đồng.",
     browseButton: "Mở chợ plugin",
+    tabs: {
+      browse: "Khám phá",
+      installed: "Đã cài",
+      installedEmpty: "Chưa cài plugin nào.",
+      loadMore: "Xem thêm",
+    },
     browse: {
       title: "Tất cả plugin",
     },

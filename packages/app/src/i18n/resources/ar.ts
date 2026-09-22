@@ -975,6 +975,7 @@ export const ar: TranslationResources = {
       hosts: "المضيفون",
       home: "بيت",
       settings: "إعدادات",
+      marketplace: "المتجر",
       closeSidebar: "إغلاق الشريط الجانبي",
     },
     help: {
@@ -2274,6 +2275,12 @@ export const ar: TranslationResources = {
     browseTitle: "Plugin marketplace",
     browseHint: "Browse and install community plugins and themes.",
     browseButton: "Browse marketplace",
+    tabs: {
+      browse: "Browse",
+      installed: "Installed",
+      installedEmpty: "No plugins installed yet.",
+      loadMore: "Load more",
+    },
     browse: {
       title: "All plugins",
     },

@@ -1007,6 +1007,7 @@ export const en = {
       hosts: "Hosts",
       home: "Home",
       settings: "Settings",
+      marketplace: "Marketplace",
       closeSidebar: "Close sidebar",
     },
     help: {
@@ -2349,6 +2350,12 @@ export const en = {
     browseTitle: "Plugin marketplace",
     browseHint: "Browse and install community plugins and themes.",
     browseButton: "Browse marketplace",
+    tabs: {
+      browse: "Browse",
+      installed: "Installed",
+      installedEmpty: "No plugins installed yet.",
+      loadMore: "Load more",
+    },
     browse: {
       title: "All plugins",
     },

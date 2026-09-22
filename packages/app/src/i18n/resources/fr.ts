@@ -1005,6 +1005,7 @@ export const fr: TranslationResources = {
       hosts: "Hôtes",
       home: "Maison",
       settings: "Paramètres",
+      marketplace: "Place de marché",
       closeSidebar: "Fermer la barre latérale",
     },
     help: {
@@ -2328,6 +2329,12 @@ export const fr: TranslationResources = {
     browseTitle: "Plugin marketplace",
     browseHint: "Browse and install community plugins and themes.",
     browseButton: "Browse marketplace",
+    tabs: {
+      browse: "Browse",
+      installed: "Installed",
+      installedEmpty: "No plugins installed yet.",
+      loadMore: "Load more",
+    },
     browse: {
       title: "All plugins",
     },

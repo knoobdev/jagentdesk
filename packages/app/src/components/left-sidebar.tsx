@@ -16,6 +16,7 @@ import {
   Server,
   Settings,
   Smartphone,
+  Store,
   X,
 } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
@@ -84,6 +85,7 @@ import {
   buildSkillsRoute,
   buildInsightsRoute,
   buildForgeRoute,
+  buildMarketplaceRoute,
   buildClusterWorkloadsRoute,
   buildOpenProjectRoute,
   buildNewWorkspaceRoute,
@@ -152,6 +154,7 @@ interface SidebarSharedProps {
   handleSkills: () => void;
   handleInsights: () => void;
   handleForge: () => void;
+  handleMarketplace: () => void;
   supportsForgeHub: boolean;
   labels: SidebarLabels;
   newWorkspaceKeys: ShortcutKey[][] | null;
@@ -176,6 +179,7 @@ interface SidebarLabels {
   skills: string;
   insights: string;
   forge: string;
+  marketplace: string;
   closeSidebar: string;
 }
 
@@ -377,6 +381,20 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     }
   }, [forgeRoute, showMobileAgent]);
 
+  const marketplaceRoute = useMemo(
+    () => (firstServerId ? buildMarketplaceRoute(firstServerId) : null),
+    [firstServerId],
+  );
+  const handleMarketplaceDesktop = useCallback(() => {
+    if (marketplaceRoute) router.push(marketplaceRoute);
+  }, [marketplaceRoute]);
+  const handleMarketplaceMobile = useCallback(() => {
+    if (marketplaceRoute) {
+      showMobileAgent();
+      router.push(marketplaceRoute);
+    }
+  }, [marketplaceRoute, showMobileAgent]);
+
   const handleViewMoreNavigate = useCallback(() => {
     router.push(buildSessionsRoute());
   }, []);
@@ -415,6 +433,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       skills: "Skills",
       insights: "Usage & Cost",
       forge: "Forge",
+      marketplace: t("sidebar.actions.marketplace"),
       closeSidebar: t("sidebar.actions.closeSidebar"),
     }),
     [t],
@@ -439,6 +458,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     handleSkills: handleSkillsDesktop,
     handleInsights: handleInsightsDesktop,
     handleForge: handleForgeDesktop,
+    handleMarketplace: handleMarketplaceDesktop,
     supportsForgeHub,
     labels,
     newWorkspaceKeys,
@@ -454,6 +474,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
           handleSkills={handleSkillsMobile}
           handleInsights={handleInsightsMobile}
           handleForge={handleForgeMobile}
+          handleMarketplace={handleMarketplaceMobile}
           insetsTop={insets.top}
           insetsBottom={insets.bottom}
           closeSidebar={showMobileAgent}
@@ -480,6 +501,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
         handleSkills={handleSkillsDesktop}
         handleInsights={handleInsightsDesktop}
         handleForge={handleForgeDesktop}
+        handleMarketplace={handleMarketplaceDesktop}
         insetsTop={insets.top}
         active={active}
         handleOpenProject={handleOpenProjectDesktop}
@@ -833,6 +855,7 @@ function MobileSidebar({
   handleSkills,
   handleInsights,
   handleForge,
+  handleMarketplace,
   supportsForgeHub,
   labels,
   handleAddHost,
@@ -856,6 +879,7 @@ function MobileSidebar({
   const isSkillsActive = pathname.includes("/skills");
   const isInsightsActive = pathname.includes("/insights");
   const isForgeActive = pathname.includes("/forge");
+  const isMarketplaceActive = pathname.includes("/marketplace");
   const clusterRouteMatch = pathname.match(/\/h\/([^/]+)\/cluster\/([^/]+)/);
   const clusterRoute = clusterRouteMatch
     ? {
@@ -1003,6 +1027,14 @@ function MobileSidebar({
               variant="compact"
             />
             <SidebarHeaderRow
+              icon={Store}
+              label={labels.marketplace}
+              onPress={handleMarketplace}
+              isActive={isMarketplaceActive}
+              testID="sidebar-marketplace-nav"
+              variant="compact"
+            />
+            <SidebarHeaderRow
               icon={BarChart3}
               label={labels.insights}
               onPress={handleInsights}
@@ -1082,6 +1114,7 @@ function DesktopSidebar({
   handleSkills,
   handleInsights,
   handleForge,
+  handleMarketplace,
   supportsForgeHub,
   labels,
   handleAddHost,
@@ -1105,6 +1138,7 @@ function DesktopSidebar({
   const isSkillsActive = pathname.includes("/skills");
   const isInsightsActive = pathname.includes("/insights");
   const isForgeActive = pathname.includes("/forge");
+  const isMarketplaceActive = pathname.includes("/marketplace");
   const clusterRouteMatch = pathname.match(/\/h\/([^/]+)\/cluster\/([^/]+)/);
   const clusterRoute = clusterRouteMatch
     ? {
@@ -1273,6 +1307,14 @@ function DesktopSidebar({
                 onPress={handleSkills}
                 isActive={isSkillsActive}
                 testID="sidebar-skills-nav"
+                variant="compact"
+              />
+              <SidebarHeaderRow
+                icon={Store}
+                label={labels.marketplace}
+                onPress={handleMarketplace}
+                isActive={isMarketplaceActive}
+                testID="sidebar-marketplace-nav"
                 variant="compact"
               />
               <SidebarHeaderRow

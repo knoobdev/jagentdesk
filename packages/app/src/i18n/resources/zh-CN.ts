@@ -963,6 +963,7 @@ export const zhCN: TranslationResources = {
       hosts: "Hosts",
       home: "首页",
       settings: "设置",
+      marketplace: "应用市场",
       closeSidebar: "关闭侧边栏",
     },
     help: {
@@ -2245,6 +2246,12 @@ export const zhCN: TranslationResources = {
     browseTitle: "Plugin marketplace",
     browseHint: "Browse and install community plugins and themes.",
     browseButton: "Browse marketplace",
+    tabs: {
+      browse: "Browse",
+      installed: "Installed",
+      installedEmpty: "No plugins installed yet.",
+      loadMore: "Load more",
+    },
     browse: {
       title: "All plugins",
     },

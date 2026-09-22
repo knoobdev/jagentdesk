@@ -9,11 +9,6 @@ import {
   type MarketplacePlugin,
 } from "@/marketplace/catalog";
 
-// Validated categorical palette (dataviz skill, dark-safe, CVD-checked). Two
-// fixed hues assigned in rank order — stars use the blue mark, category counts
-// the green mark — so the two ranked lists never blur into one rainbow.
-const STARS_BAR_COLOR = "#3f8fd6";
-const CATEGORY_BAR_COLOR = "#2aa876";
 const TOP_STARS_LIMIT = 5;
 const TOP_CATEGORIES_LIMIT = 6;
 
@@ -21,7 +16,7 @@ function trackWidth(value: number, max: number): `${number}%` {
   if (max <= 0) {
     return "0%";
   }
-  const pct = Math.max(2, Math.round((value / max) * 100));
+  const pct = Math.max(3, Math.round((value / max) * 100));
   return `${pct}%`;
 }
 
@@ -29,25 +24,21 @@ interface RankedBarProps {
   label: string;
   value: string;
   width: `${number}%`;
-  color: string;
 }
 
-function RankedBar({ label, value, width, color }: RankedBarProps) {
-  const fillStyle = useMemo(
-    () => [styles.barFill, { width, backgroundColor: color }],
-    [width, color],
-  );
+function RankedBar({ label, value, width }: RankedBarProps) {
+  const fillStyle = useMemo(() => [styles.barFill, { width }], [width]);
   return (
     <View style={styles.barRow}>
-      <View style={styles.barHeader}>
-        <Text style={styles.barLabel} numberOfLines={1}>
-          {label}
-        </Text>
-        <Text style={styles.barValue}>{value}</Text>
-      </View>
+      <Text style={styles.barLabel} numberOfLines={1}>
+        {label}
+      </Text>
       <View style={styles.barTrack}>
         <View style={fillStyle} />
       </View>
+      <Text style={styles.barValue} numberOfLines={1}>
+        {value}
+      </Text>
     </View>
   );
 }
@@ -90,32 +81,38 @@ export function MarketplaceOverview({ plugins }: { plugins: MarketplacePlugin[] 
       <View style={styles.panels}>
         <View style={styles.panel}>
           <Text style={styles.panelTitle}>{t("marketplace.overview.topByStars")}</Text>
-          {topStars.map((plugin) => (
-            <RankedBar
-              key={plugin.id}
-              label={plugin.name}
-              value={String(plugin.repoMeta.stars)}
-              width={trackWidth(plugin.repoMeta.stars, maxStars)}
-              color={STARS_BAR_COLOR}
-            />
-          ))}
+          <View style={styles.barList}>
+            {topStars.map((plugin) => (
+              <RankedBar
+                key={plugin.id}
+                label={plugin.name}
+                value={String(plugin.repoMeta.stars)}
+                width={trackWidth(plugin.repoMeta.stars, maxStars)}
+              />
+            ))}
+          </View>
         </View>
         <View style={styles.panel}>
           <Text style={styles.panelTitle}>{t("marketplace.overview.categoryDistribution")}</Text>
-          {categories.map((entry) => (
-            <RankedBar
-              key={entry.category}
-              label={entry.category}
-              value={String(entry.count)}
-              width={trackWidth(entry.count, maxCategory)}
-              color={CATEGORY_BAR_COLOR}
-            />
-          ))}
+          <View style={styles.barList}>
+            {categories.map((entry) => (
+              <RankedBar
+                key={entry.category}
+                label={entry.category}
+                value={String(entry.count)}
+                width={trackWidth(entry.count, maxCategory)}
+              />
+            ))}
+          </View>
         </View>
       </View>
     </View>
   );
 }
+
+const BAR_HEIGHT = 8;
+const LABEL_WIDTH = 96;
+const VALUE_WIDTH = 40;
 
 const styles = StyleSheet.create((theme: Theme) => ({
   container: { gap: theme.spacing[3] },
@@ -151,15 +148,30 @@ const styles = StyleSheet.create((theme: Theme) => ({
     fontWeight: theme.fontWeight.semibold,
     color: theme.colors.foreground,
   },
-  barRow: { gap: theme.spacing[1] },
-  barHeader: { flexDirection: "row", justifyContent: "space-between", gap: theme.spacing[2] },
-  barLabel: { flex: 1, fontSize: theme.fontSize.xs, color: theme.colors.foreground },
-  barValue: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
+  barList: { gap: theme.spacing[2] },
+  barRow: { flexDirection: "row", alignItems: "center", gap: theme.spacing[2] },
+  barLabel: {
+    width: LABEL_WIDTH,
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foreground,
+  },
   barTrack: {
-    height: 8,
-    borderRadius: 4,
+    flex: 1,
+    height: BAR_HEIGHT,
+    borderRadius: BAR_HEIGHT / 2,
     backgroundColor: theme.colors.surface2,
     overflow: "hidden",
   },
-  barFill: { height: 8, borderRadius: 4 },
+  barFill: {
+    height: BAR_HEIGHT,
+    borderRadius: BAR_HEIGHT / 2,
+    backgroundColor: theme.colors.accent,
+  },
+  barValue: {
+    width: VALUE_WIDTH,
+    textAlign: "right",
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foregroundMuted,
+  },
 }));

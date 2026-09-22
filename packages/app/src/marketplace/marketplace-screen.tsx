@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { FlatList, Pressable, Text, View, type ListRenderItemInfo } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -30,6 +30,31 @@ import { MarketplaceDetail } from "@/marketplace/marketplace-detail";
 import { MarketplaceOverview } from "@/marketplace/marketplace-overview";
 
 type LocalStatus = "pending" | "failed";
+type MarketplaceTab = "browse" | "installed";
+
+const BROWSE_PAGE_SIZE = 24;
+
+interface MarketplaceTabButtonProps {
+  label: string;
+  active: boolean;
+  onPress: () => void;
+  testID: string;
+}
+
+function MarketplaceTabButton({ label, active, onPress, testID }: MarketplaceTabButtonProps) {
+  const state = useMemo(() => ({ selected: active }), [active]);
+  return (
+    <Pressable
+      onPress={onPress}
+      style={active ? styles.tabActive : styles.tab}
+      accessibilityRole="button"
+      accessibilityState={state}
+      testID={testID}
+    >
+      <Text style={active ? styles.tabTextActive : styles.tabText}>{label}</Text>
+    </Pressable>
+  );
+}
 
 function toggleValue(list: string[], value: string): string[] {
   return list.includes(value) ? list.filter((entry) => entry !== value) : [...list, value];
@@ -166,6 +191,8 @@ export function MarketplaceScreen() {
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([]);
   const [detailPlugin, setDetailPlugin] = useState<MarketplacePlugin | null>(null);
   const [localStatuses, setLocalStatuses] = useState<Record<string, LocalStatus>>({});
+  const [tab, setTab] = useState<MarketplaceTab>("browse");
+  const [visibleCount, setVisibleCount] = useState(BROWSE_PAGE_SIZE);
 
   const platforms = useMemo(() => collectPlatforms(plugins), [plugins]);
   const themePlugins = useMemo(() => plugins.filter(isThemePlugin), [plugins]);
@@ -213,6 +240,30 @@ export function MarketplaceScreen() {
     },
     [installedLookup, localStatuses],
   );
+
+  const installedPlugins = useMemo(
+    () => visiblePlugins.filter((plugin) => resolveStatus(plugin) === "installed"),
+    [visiblePlugins, resolveStatus],
+  );
+  const browsePlugins = useMemo(
+    () => visiblePlugins.slice(0, visibleCount),
+    [visiblePlugins, visibleCount],
+  );
+  const listData = tab === "installed" ? installedPlugins : browsePlugins;
+  const activeCount = tab === "installed" ? installedPlugins.length : visiblePlugins.length;
+  const canLoadMore = tab === "browse" && visibleCount < visiblePlugins.length;
+
+  // Reset paging to the first page whenever the filtered set can change or the
+  // active tab switches, so "Load more" never carries a stale offset.
+  useEffect(() => {
+    setVisibleCount(BROWSE_PAGE_SIZE);
+  }, [search, categories, selectedPlatforms, sort, tab]);
+
+  const handleLoadMore = useCallback(() => {
+    setVisibleCount((count) => count + BROWSE_PAGE_SIZE);
+  }, []);
+  const handleSelectBrowse = useCallback(() => setTab("browse"), []);
+  const handleSelectInstalled = useCallback(() => setTab("installed"), []);
 
   const handleInstall = useCallback(
     (plugin: MarketplacePlugin) => {
@@ -267,6 +318,11 @@ export function MarketplaceScreen() {
   );
   const keyExtractor = useCallback((item: MarketplacePlugin) => item.id, []);
 
+  const installedTabLabel =
+    installedPlugins.length > 0
+      ? `${t("marketplace.tabs.installed")} (${installedPlugins.length})`
+      : t("marketplace.tabs.installed");
+  const isBrowseTab = tab === "browse";
   const listHeader = useMemo(
     () => (
       <View style={styles.header}>
@@ -274,8 +330,22 @@ export function MarketplaceScreen() {
           <Text style={styles.title}>{t("marketplace.title")}</Text>
           <Text style={styles.subtitle}>{t("marketplace.subtitle")}</Text>
         </View>
+        <View style={styles.tabRow}>
+          <MarketplaceTabButton
+            label={t("marketplace.tabs.browse")}
+            active={isBrowseTab}
+            onPress={handleSelectBrowse}
+            testID="marketplace-tab-browse"
+          />
+          <MarketplaceTabButton
+            label={installedTabLabel}
+            active={!isBrowseTab}
+            onPress={handleSelectInstalled}
+            testID="marketplace-tab-installed"
+          />
+        </View>
         {!connected ? <Alert variant="warning" title={t("marketplace.states.offline")} /> : null}
-        {plugins.length > 0 ? <MarketplaceOverview plugins={plugins} /> : null}
+        {isBrowseTab && plugins.length > 0 ? <MarketplaceOverview plugins={plugins} /> : null}
         <MarketplaceControls
           search={search}
           searchResetKey={searchResetKey}
@@ -288,19 +358,28 @@ export function MarketplaceScreen() {
           selectedPlatforms={selectedPlatforms}
           onTogglePlatform={handleTogglePlatform}
           onClearFilters={handleClearFilters}
-          resultCount={visiblePlugins.length}
+          resultCount={activeCount}
         />
-        <ThemeGallery plugins={themePlugins} onOpenDetail={handleOpenDetail} />
-        <Text style={styles.sectionTitle}>{t("marketplace.browse.title")}</Text>
+        {isBrowseTab ? (
+          <ThemeGallery plugins={themePlugins} onOpenDetail={handleOpenDetail} />
+        ) : null}
+        <Text style={styles.sectionTitle}>
+          {isBrowseTab ? t("marketplace.browse.title") : t("marketplace.tabs.installed")}
+        </Text>
       </View>
     ),
     [
+      activeCount,
       categories,
       connected,
       handleClearFilters,
       handleOpenDetail,
+      handleSelectBrowse,
+      handleSelectInstalled,
       handleToggleCategory,
       handleTogglePlatform,
+      installedTabLabel,
+      isBrowseTab,
       platforms,
       plugins,
       search,
@@ -309,30 +388,44 @@ export function MarketplaceScreen() {
       sort,
       t,
       themePlugins,
-      visiblePlugins.length,
     ],
   );
 
+  const listFooter = useMemo(() => {
+    if (!canLoadMore) return null;
+    return (
+      <View style={styles.loadMoreRow}>
+        <Button variant="outline" onPress={handleLoadMore} testID="marketplace-load-more">
+          {t("marketplace.tabs.loadMore")}
+        </Button>
+      </View>
+    );
+  }, [canLoadMore, handleLoadMore, t]);
+
   const emptyStatus = resolveEmptyStatus(catalog.isLoading, catalog.isError);
   const emptyErrorText = errorMessage(catalog.error);
-  const renderEmpty = useCallback(
-    () => (
+  const showInstalledEmpty = !isBrowseTab && emptyStatus === "empty";
+  const renderEmpty = useCallback(() => {
+    if (showInstalledEmpty) {
+      return <Text style={styles.empty}>{t("marketplace.tabs.installedEmpty")}</Text>;
+    }
+    return (
       <MarketplaceEmpty status={emptyStatus} errorText={emptyErrorText} onRetry={handleRetry} />
-    ),
-    [emptyStatus, emptyErrorText, handleRetry],
-  );
+    );
+  }, [showInstalledEmpty, emptyStatus, emptyErrorText, handleRetry, t]);
 
   return (
     <View style={styles.root}>
       <BackHeader title={t("marketplace.title")} onBack={handleBack} />
       <FlatList
         key={`marketplace-cols-${numColumns}`}
-        data={visiblePlugins}
+        data={listData}
         renderItem={renderItem}
         keyExtractor={keyExtractor}
         numColumns={numColumns}
         columnWrapperStyle={columnWrapperStyle}
         ListHeaderComponent={listHeader}
+        ListFooterComponent={listFooter}
         ListEmptyComponent={renderEmpty}
         contentContainerStyle={contentStyle}
         showsVerticalScrollIndicator={false}
@@ -358,6 +451,38 @@ const styles = StyleSheet.create((theme: Theme) => ({
   cell: { flex: 1, marginBottom: theme.spacing[3] },
   header: { gap: theme.spacing[3], marginBottom: theme.spacing[1] },
   titleBlock: { gap: theme.spacing[1] },
+  tabRow: {
+    flexDirection: "row",
+    gap: theme.spacing[1],
+    padding: theme.spacing[1],
+    backgroundColor: theme.colors.surface1,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.lg,
+    alignSelf: "flex-start",
+  },
+  tab: {
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[1.5],
+    borderRadius: theme.borderRadius.md,
+  },
+  tabActive: {
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[1.5],
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.surface2,
+  },
+  tabText: { fontSize: theme.fontSize.sm, color: theme.colors.foregroundMuted },
+  tabTextActive: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.foreground,
+  },
+  loadMoreRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    paddingTop: theme.spacing[4],
+  },
   title: {
     fontSize: theme.fontSize.xl,
     fontWeight: theme.fontWeight.bold,
