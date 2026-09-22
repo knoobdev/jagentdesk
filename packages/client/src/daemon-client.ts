@@ -5699,6 +5699,26 @@ export class DaemonClient {
     return payload.plugin;
   }
 
+  async installSourcePlugin(
+    source: string,
+    options: { id?: string; ref?: string; pluginPath?: string } = {},
+  ): Promise<PluginListItem> {
+    const requestId = this.createRequestId();
+    const payload = await this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "plugin.source.install.request",
+        requestId,
+        source,
+        ...(options.id ? { id: options.id } : {}),
+        ...(options.ref ? { ref: options.ref } : {}),
+        ...(options.pluginPath ? { pluginPath: options.pluginPath } : {}),
+      },
+      responseType: "plugin.source.install.response",
+    });
+    return payload.plugin;
+  }
+
   async inspectDirectoryPlugin(path: string): Promise<{ id: string }> {
     const requestId = this.createRequestId();
     const payload = await this.sendCorrelatedSessionRequest({
