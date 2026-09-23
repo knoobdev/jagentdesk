@@ -8,6 +8,10 @@ import type {
   DockerCpPayload,
   DockerExecPayload,
   DockerFsListPayload,
+  DockerFsOp,
+  DockerFsOpPayload,
+  DockerFsReadPayload,
+  DockerFsWritePayload,
   DockerImageAction,
   DockerImageActionPayload,
   DockerInspectPayload,
@@ -7004,6 +7008,56 @@ export class DaemonClient {
         hostPath: options.hostPath,
       },
       responseType: "docker/cp/response",
+    });
+  }
+
+  async dockerFsRead(options: {
+    requestId?: string;
+    container: string;
+    path: string;
+  }): Promise<DockerFsReadPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "docker/fs/read", container: options.container, path: options.path },
+      responseType: "docker/fs/read/response",
+    });
+  }
+
+  async dockerFsWrite(options: {
+    requestId?: string;
+    container: string;
+    path: string;
+    content: string;
+  }): Promise<DockerFsWritePayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "docker/fs/write",
+        container: options.container,
+        path: options.path,
+        content: options.content,
+      },
+      responseType: "docker/fs/write/response",
+    });
+  }
+
+  async dockerFsOp(options: {
+    requestId?: string;
+    container: string;
+    op: DockerFsOp;
+    path: string;
+    newPath?: string;
+  }): Promise<DockerFsOpPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "docker/fs/op",
+        container: options.container,
+        op: options.op,
+        path: options.path,
+        newPath: options.newPath ?? "",
+      },
+      responseType: "docker/fs/op/response",
     });
   }
 

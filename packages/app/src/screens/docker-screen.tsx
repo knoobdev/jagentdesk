@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import {
   ArrowDownToLine,
   ArrowLeft,
@@ -12,11 +12,15 @@ import {
   Container as ContainerIcon,
   Copy,
   Download,
+  Eye,
   File as FileIcon,
   Folder,
+  FolderPlus,
   FolderUp,
   HardDrive,
+  MoreVertical,
   Pause,
+  Pencil,
   Play,
   RotateCw,
   Search,
@@ -137,6 +141,10 @@ const ThemedFolder = withUnistyles(Folder);
 const ThemedFolderUp = withUnistyles(FolderUp);
 const ThemedUpload = withUnistyles(Upload);
 const ThemedX = withUnistyles(X);
+const ThemedMore = withUnistyles(MoreVertical);
+const ThemedEye = withUnistyles(Eye);
+const ThemedPencil = withUnistyles(Pencil);
+const ThemedFolderPlus = withUnistyles(FolderPlus);
 
 const fg = (theme: Theme) => ({ color: theme.colors.foreground });
 const muted = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
@@ -1217,16 +1225,38 @@ function FileRow({
   busy,
   onOpen,
   onCopyToHost,
+  onMenu,
 }: {
   entry: DockerFsEntry;
   busy: boolean;
-  onOpen: (name: string) => void;
+  onOpen: (entry: DockerFsEntry) => void;
   onCopyToHost: (name: string) => void;
+  onMenu: (entry: DockerFsEntry, x: number, y: number) => void;
 }) {
-  const open = useCallback(() => onOpen(entry.name), [onOpen, entry.name]);
+  const rowRef = useRef<View>(null);
+  const open = useCallback(() => onOpen(entry), [onOpen, entry]);
   const copy = useCallback(() => onCopyToHost(entry.name), [onCopyToHost, entry.name]);
+  const openMenu = useCallback(
+    (e: { nativeEvent: { pageX: number; pageY: number } }) => {
+      onMenu(entry, e.nativeEvent.pageX, e.nativeEvent.pageY);
+    },
+    [onMenu, entry],
+  );
+  // Native right-click (web) opens the same menu at the cursor.
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const node = rowRef.current as unknown as HTMLElement | null;
+    if (!node?.addEventListener) return;
+    const handler = (ev: MouseEvent) => {
+      ev.preventDefault();
+      onMenu(entry, ev.clientX, ev.clientY);
+    };
+    node.addEventListener("contextmenu", handler);
+    return () => node.removeEventListener("contextmenu", handler);
+  }, [entry, onMenu]);
+
   return (
-    <Pressable style={styles.trow} onPress={entry.isDir ? open : undefined}>
+    <Pressable ref={rowRef} style={styles.trow} onPress={open}>
       <View style={styles.colNameWide}>
         {entry.isDir ? (
           <ThemedFolder size={15} uniProps={fg} />
@@ -1247,6 +1277,389 @@ function FileRow({
             disabled={busy}
           />
         )}
+        <Pressable style={styles.iconBtn} onPress={openMenu} accessibilityLabel="More actions">
+          <ThemedMore size={16} uniProps={muted} />
+        </Pressable>
+      </View>
+    </Pressable>
+  );
+}
+
+// ── overlays (Modal-based so coordinates are screen-relative) ──
+type MenuAction = "view" | "edit" | "rename" | "delete";
+
+function MenuItem({
+  action,
+  label,
+  icon: Icon,
+  tint,
+  danger,
+  onAction,
+}: {
+  action: MenuAction;
+  label: string;
+  icon: IconComponent;
+  tint: (t: Theme) => object;
+  danger: boolean;
+  onAction: (action: MenuAction) => void;
+}) {
+  const press = useCallback(() => onAction(action), [onAction, action]);
+  return (
+    <Pressable style={styles.menuItem} onPress={press}>
+      <Icon size={14} uniProps={tint} />
+      <Text style={[styles.menuItemText, danger ? styles.menuItemDanger : null]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function RowMenu({
+  entry,
+  x,
+  y,
+  onAction,
+  onClose,
+}: {
+  entry: DockerFsEntry;
+  x: number;
+  y: number;
+  onAction: (action: MenuAction) => void;
+  onClose: () => void;
+}) {
+  const pos = useMemo(() => ({ left: Math.min(x, 1200), top: y }), [x, y]);
+  return (
+    <Modal transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={styles.overlayBackdrop} onPress={onClose}>
+        <View style={[styles.menu, pos]}>
+          {entry.isDir ? null : (
+            <MenuItem
+              action="view"
+              label="View"
+              icon={ThemedEye}
+              tint={muted}
+              danger={false}
+              onAction={onAction}
+            />
+          )}
+          {entry.isDir ? null : (
+            <MenuItem
+              action="edit"
+              label="Edit"
+              icon={ThemedPencil}
+              tint={muted}
+              danger={false}
+              onAction={onAction}
+            />
+          )}
+          <MenuItem
+            action="rename"
+            label="Rename"
+            icon={ThemedPencil}
+            tint={muted}
+            danger={false}
+            onAction={onAction}
+          />
+          <MenuItem
+            action="delete"
+            label="Delete"
+            icon={ThemedTrash}
+            tint={red}
+            danger
+            onAction={onAction}
+          />
+        </View>
+      </Pressable>
+    </Modal>
+  );
+}
+
+function PromptModal({
+  title,
+  initial,
+  confirmLabel,
+  onSubmit,
+  onClose,
+}: {
+  title: string;
+  initial: string;
+  confirmLabel: string;
+  onSubmit: (value: string) => void;
+  onClose: () => void;
+}) {
+  const [value, setValue] = useState(initial);
+  const submit = useCallback(() => {
+    if (value.trim()) onSubmit(value.trim());
+  }, [value, onSubmit]);
+  return (
+    <Modal transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={styles.overlayCenter} onPress={onClose}>
+        <Pressable style={styles.dialog}>
+          <Text style={styles.dialogTitle}>{title}</Text>
+          <ThemedTextInput
+            style={styles.pullInput}
+            value={value}
+            onChangeText={setValue}
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoFocus
+            onSubmitEditing={submit}
+            uniProps={placeholderColor}
+          />
+          <View style={styles.dialogActions}>
+            <Pressable style={[styles.btn, styles.btnGhost]} onPress={onClose}>
+              <Text style={styles.btnGhostText}>Cancel</Text>
+            </Pressable>
+            <Pressable style={[styles.btn, styles.btnPrimary]} onPress={submit}>
+              <Text style={styles.btnPrimaryText}>{confirmLabel}</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+function FileViewer({
+  client,
+  container,
+  path,
+  name,
+  startEditing,
+  onClose,
+  onSaved,
+}: {
+  client: DaemonClient | null;
+  container: string;
+  path: string;
+  name: string;
+  startEditing: boolean;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [content, setContent] = useState<string | null>(null);
+  const [editing, setEditing] = useState(startEditing);
+  const [draft, setDraft] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [truncated, setTruncated] = useState(false);
+
+  useEffect(() => {
+    if (!client) return;
+    let alive = true;
+    void client
+      .dockerFsRead({ container, path })
+      .then((res) => {
+        if (!alive) return undefined;
+        if (res.error) setError(res.error);
+        else {
+          setContent(res.content);
+          setDraft(res.content);
+          setTruncated(res.truncated);
+        }
+        return undefined;
+      })
+      .catch((e: unknown) => {
+        if (alive) setError(e instanceof Error ? e.message : "Failed to read file");
+      });
+    return () => {
+      alive = false;
+    };
+  }, [client, container, path]);
+
+  const startEdit = useCallback(() => setEditing(true), []);
+  const save = useCallback(async () => {
+    if (!client) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await client.dockerFsWrite({ container, path, content: draft });
+      if (res.error) setError(res.error);
+      else {
+        setContent(draft);
+        setEditing(false);
+        onSaved();
+      }
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }, [client, container, path, draft, onSaved]);
+
+  return (
+    <Modal transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.overlayFull}>
+        <View style={styles.viewerHeader}>
+          <ThemedFile size={15} uniProps={muted} />
+          <Text style={styles.viewerTitle} numberOfLines={1}>
+            {name}
+          </Text>
+          {truncated ? <Text style={styles.viewerBadge}>truncated</Text> : null}
+          <View style={styles.headerSpacer} />
+          {editing ? (
+            <Pressable
+              style={[styles.btn, styles.btnPrimary, saving && styles.btnDisabled]}
+              onPress={save}
+              disabled={saving}
+            >
+              <Text style={styles.btnPrimaryText}>{saving ? "Saving…" : "Save"}</Text>
+            </Pressable>
+          ) : (
+            <Pressable style={[styles.btn, styles.btnGhost]} onPress={startEdit}>
+              <ThemedPencil size={13} uniProps={fg} />
+              <Text style={styles.btnGhostText}>Edit</Text>
+            </Pressable>
+          )}
+          <Pressable style={styles.iconBtn} onPress={onClose} accessibilityLabel="Close">
+            <ThemedX size={18} uniProps={muted} />
+          </Pressable>
+        </View>
+        {error ? (
+          <View style={styles.errorBanner}>
+            <ThemedCircleAlert size={15} uniProps={red} />
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        ) : null}
+        {editing ? (
+          <ThemedTextInput
+            style={styles.viewerEditor}
+            value={draft}
+            onChangeText={setDraft}
+            multiline
+            autoCapitalize="none"
+            autoCorrect={false}
+            uniProps={placeholderColor}
+          />
+        ) : (
+          <ScrollView style={styles.console} contentContainerStyle={styles.consoleContent}>
+            <Text style={styles.consoleText} selectable>
+              {content ?? (error ? "" : "Loading…")}
+            </Text>
+          </ScrollView>
+        )}
+      </View>
+    </Modal>
+  );
+}
+
+interface HostEntry {
+  name: string;
+  path: string;
+  kind: "file" | "directory";
+}
+
+function HostPicker({
+  client,
+  mode,
+  initialPath,
+  onPick,
+  onClose,
+}: {
+  client: DaemonClient | null;
+  mode: "dir" | "file";
+  initialPath: string;
+  onPick: (path: string) => void;
+  onClose: () => void;
+}) {
+  const [path, setPath] = useState(initialPath || "/");
+  const [entries, setEntries] = useState<HostEntry[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(
+    async (p: string) => {
+      if (!client) return;
+      setLoading(true);
+      setError(null);
+      try {
+        const dir = await client.listDirectory(p, p);
+        setEntries(dir.entries as HostEntry[]);
+        setPath(dir.path);
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : "Failed to list");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [client],
+  );
+  useEffect(() => {
+    void load(initialPath || "/");
+  }, [load, initialPath]);
+
+  const up = useCallback(() => void load(parentPath(path)), [load, path]);
+  const choose = useCallback(() => onPick(path), [onPick, path]);
+  const shown = mode === "dir" ? entries.filter((e) => e.kind === "directory") : entries;
+
+  return (
+    <Modal transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={styles.overlayCenter} onPress={onClose}>
+        <Pressable style={styles.picker}>
+          <View style={styles.pickerHeader}>
+            <Pressable style={styles.iconBtn} onPress={up} accessibilityLabel="Up">
+              <ThemedFolderUp size={16} uniProps={fg} />
+            </Pressable>
+            <Text style={styles.filesPathText} numberOfLines={1}>
+              {path}
+            </Text>
+            <View style={styles.headerSpacer} />
+            <Pressable style={styles.iconBtn} onPress={onClose} accessibilityLabel="Close">
+              <ThemedX size={18} uniProps={muted} />
+            </Pressable>
+          </View>
+          {error ? (
+            <View style={styles.errorBanner}>
+              <ThemedCircleAlert size={15} uniProps={red} />
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          ) : null}
+          <ScrollView style={styles.pickerList}>
+            {loading && shown.length === 0 ? (
+              <Text style={styles.consoleHint}>Loading…</Text>
+            ) : (
+              shown.map((e) => (
+                <HostPickerRow key={e.path} entry={e} mode={mode} onNav={load} onPick={onPick} />
+              ))
+            )}
+          </ScrollView>
+          {mode === "dir" ? (
+            <View style={styles.dialogActions}>
+              <Pressable style={[styles.btn, styles.btnPrimary]} onPress={choose}>
+                <Text style={styles.btnPrimaryText}>Use this folder</Text>
+              </Pressable>
+            </View>
+          ) : null}
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+function HostPickerRow({
+  entry,
+  mode,
+  onNav,
+  onPick,
+}: {
+  entry: HostEntry;
+  mode: "dir" | "file";
+  onNav: (path: string) => void;
+  onPick: (path: string) => void;
+}) {
+  const press = useCallback(() => {
+    if (entry.kind === "directory") onNav(entry.path);
+    else if (mode === "file") onPick(entry.path);
+  }, [entry, mode, onNav, onPick]);
+  return (
+    <Pressable style={styles.trow} onPress={press}>
+      <View style={styles.colNameWide}>
+        {entry.kind === "directory" ? (
+          <ThemedFolder size={15} uniProps={fg} />
+        ) : (
+          <ThemedFile size={15} uniProps={muted} />
+        )}
+        <Text style={styles.cellStrong} numberOfLines={1}>
+          {entry.name}
+        </Text>
       </View>
     </Pressable>
   );
@@ -1294,9 +1707,34 @@ function FilesTab({
     void load("/");
   }, [load]);
 
-  const openDir = useCallback((name: string) => void load(joinPath(path, name)), [load, path]);
+  const [menu, setMenu] = useState<{ entry: DockerFsEntry; x: number; y: number } | null>(null);
+  const [viewer, setViewer] = useState<{ path: string; name: string; edit: boolean } | null>(null);
+  const [prompt, setPrompt] = useState<{ kind: "rename" | "mkdir"; entry?: DockerFsEntry } | null>(
+    null,
+  );
+  const [picker, setPicker] = useState<{
+    mode: "dir" | "file";
+    target: "hostDir" | "import";
+  } | null>(null);
+
+  const onOpen = useCallback(
+    (entry: DockerFsEntry) => {
+      if (entry.isDir) void load(joinPath(path, entry.name));
+      else setViewer({ path: joinPath(path, entry.name), name: entry.name, edit: false });
+    },
+    [load, path],
+  );
   const goUp = useCallback(() => void load(parentPath(path)), [load, path]);
   const refresh = useCallback(() => void load(path), [load, path]);
+
+  const onMenu = useCallback(
+    (entry: DockerFsEntry, x: number, y: number) => setMenu({ entry, x, y }),
+    [],
+  );
+  const openMkdir = useCallback(() => setPrompt({ kind: "mkdir" }), []);
+  const openHostDirPicker = useCallback(() => setPicker({ mode: "dir", target: "hostDir" }), []);
+  const openImportPicker = useCallback(() => setPicker({ mode: "file", target: "import" }), []);
+
   const copyToHost = useCallback(
     async (name: string) => {
       if (!client) return;
@@ -1353,8 +1791,9 @@ function FilesTab({
           key={entry.name}
           entry={entry}
           busy={busy === entry.name}
-          onOpen={openDir}
+          onOpen={onOpen}
           onCopyToHost={copyToHost}
+          onMenu={onMenu}
         />
       ))}
     </View>
@@ -1366,73 +1805,269 @@ function FilesTab({
   }
 
   return (
-    <ScrollView style={styles.tabBody} contentContainerStyle={styles.filesContent}>
-      <View style={styles.filesToolbar}>
-        <Pressable
-          style={[styles.btn, styles.btnGhost, path === "/" && styles.btnDisabled]}
-          onPress={goUp}
-          disabled={path === "/"}
-        >
-          <ThemedFolderUp size={14} uniProps={fg} />
-          <Text style={styles.btnGhostText}>Up</Text>
-        </Pressable>
-        <View style={styles.filesPath}>
-          <Text style={styles.filesPathText} numberOfLines={1}>
-            {path}
-          </Text>
+    <>
+      <ScrollView style={styles.tabBody} contentContainerStyle={styles.filesContent}>
+        <View style={styles.filesToolbar}>
+          <Pressable
+            style={[styles.btn, styles.btnGhost, path === "/" && styles.btnDisabled]}
+            onPress={goUp}
+            disabled={path === "/"}
+          >
+            <ThemedFolderUp size={14} uniProps={fg} />
+            <Text style={styles.btnGhostText}>Up</Text>
+          </Pressable>
+          <View style={styles.filesPath}>
+            <Text style={styles.filesPathText} numberOfLines={1}>
+              {path}
+            </Text>
+          </View>
+          <Pressable style={[styles.btn, styles.btnGhost]} onPress={openMkdir}>
+            <ThemedFolderPlus size={14} uniProps={fg} />
+            <Text style={styles.btnGhostText}>New folder</Text>
+          </Pressable>
+          <Pressable style={[styles.btn, styles.btnGhost]} onPress={refresh}>
+            <ThemedRotate size={14} uniProps={fg} />
+            <Text style={styles.btnGhostText}>Refresh</Text>
+          </Pressable>
         </View>
-        <Pressable style={[styles.btn, styles.btnGhost]} onPress={refresh}>
-          <ThemedRotate size={14} uniProps={fg} />
-          <Text style={styles.btnGhostText}>Refresh</Text>
-        </Pressable>
-      </View>
 
-      <View style={styles.filesCpRow}>
-        <Text style={styles.filesCpLabel}>Host dir for downloads</Text>
-        <ThemedTextInput
-          style={styles.pullInput}
-          value={hostDir}
-          onChangeText={setHostDir}
-          placeholder="/path/on/host"
-          autoCapitalize="none"
-          autoCorrect={false}
-          uniProps={placeholderColor}
-        />
-      </View>
-      <View style={styles.filesCpRow}>
-        <ThemedTextInput
-          style={styles.pullInput}
-          value={importPath}
-          onChangeText={setImportPath}
-          placeholder="Host file to copy into this folder"
-          autoCapitalize="none"
-          autoCorrect={false}
-          uniProps={placeholderColor}
-        />
-        <Pressable
-          style={[
-            styles.btn,
-            styles.btnPrimary,
-            (busy === "__import__" || !importPath) && styles.btnDisabled,
-          ]}
-          onPress={copyFromHost}
-          disabled={busy === "__import__" || !importPath}
-        >
-          <ThemedUpload size={13} uniProps={accentFg} />
-          <Text style={styles.btnPrimaryText}>{busy === "__import__" ? "Copying…" : "Upload"}</Text>
-        </Pressable>
-      </View>
-
-      {error ? (
-        <View style={styles.errorBanner}>
-          <ThemedCircleAlert size={15} uniProps={red} />
-          <Text style={styles.errorText}>{error}</Text>
+        <View style={styles.filesCpRow}>
+          <Text style={styles.filesCpLabel}>Host dir for downloads</Text>
+          <ThemedTextInput
+            style={styles.pullInput}
+            value={hostDir}
+            onChangeText={setHostDir}
+            placeholder="/path/on/host"
+            autoCapitalize="none"
+            autoCorrect={false}
+            uniProps={placeholderColor}
+          />
+          <Pressable style={[styles.btn, styles.btnGhost]} onPress={openHostDirPicker}>
+            <ThemedFolder size={14} uniProps={fg} />
+            <Text style={styles.btnGhostText}>Browse</Text>
+          </Pressable>
         </View>
+        <View style={styles.filesCpRow}>
+          <ThemedTextInput
+            style={styles.pullInput}
+            value={importPath}
+            onChangeText={setImportPath}
+            placeholder="Host file to copy into this folder"
+            autoCapitalize="none"
+            autoCorrect={false}
+            uniProps={placeholderColor}
+          />
+          <Pressable style={[styles.btn, styles.btnGhost]} onPress={openImportPicker}>
+            <ThemedFile size={14} uniProps={fg} />
+            <Text style={styles.btnGhostText}>Browse</Text>
+          </Pressable>
+          <Pressable
+            style={[
+              styles.btn,
+              styles.btnPrimary,
+              (busy === "__import__" || !importPath) && styles.btnDisabled,
+            ]}
+            onPress={copyFromHost}
+            disabled={busy === "__import__" || !importPath}
+          >
+            <ThemedUpload size={13} uniProps={accentFg} />
+            <Text style={styles.btnPrimaryText}>
+              {busy === "__import__" ? "Copying…" : "Upload"}
+            </Text>
+          </Pressable>
+        </View>
+
+        {error ? (
+          <View style={styles.errorBanner}>
+            <ThemedCircleAlert size={15} uniProps={red} />
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        ) : null}
+        {notice ? <Text style={styles.filesNotice}>{notice}</Text> : null}
+
+        {list}
+      </ScrollView>
+
+      <FilesOverlays
+        client={client}
+        containerId={container.id}
+        path={path}
+        hostDir={hostDir}
+        refresh={refresh}
+        setError={setError}
+        setNotice={setNotice}
+        setHostDir={setHostDir}
+        setImportPath={setImportPath}
+        menu={menu}
+        setMenu={setMenu}
+        viewer={viewer}
+        setViewer={setViewer}
+        prompt={prompt}
+        setPrompt={setPrompt}
+        picker={picker}
+        setPicker={setPicker}
+      />
+    </>
+  );
+}
+
+type MenuState = { entry: DockerFsEntry; x: number; y: number } | null;
+type ViewerState = { path: string; name: string; edit: boolean } | null;
+type PromptState = { kind: "rename" | "mkdir"; entry?: DockerFsEntry } | null;
+type PickerState = { mode: "dir" | "file"; target: "hostDir" | "import" } | null;
+
+function FilesOverlays({
+  client,
+  containerId,
+  path,
+  hostDir,
+  refresh,
+  setError,
+  setNotice,
+  setHostDir,
+  setImportPath,
+  menu,
+  setMenu,
+  viewer,
+  setViewer,
+  prompt,
+  setPrompt,
+  picker,
+  setPicker,
+}: {
+  client: DaemonClient | null;
+  containerId: string;
+  path: string;
+  hostDir: string;
+  refresh: () => void;
+  setError: (v: string | null) => void;
+  setNotice: (v: string | null) => void;
+  setHostDir: (v: string) => void;
+  setImportPath: (v: string) => void;
+  menu: MenuState;
+  setMenu: (v: MenuState) => void;
+  viewer: ViewerState;
+  setViewer: (v: ViewerState) => void;
+  prompt: PromptState;
+  setPrompt: (v: PromptState) => void;
+  picker: PickerState;
+  setPicker: (v: PickerState) => void;
+}) {
+  const runOp = useCallback(
+    async (fn: () => Promise<{ error: string | null }>, successMsg: string) => {
+      setError(null);
+      setNotice(null);
+      try {
+        const res = await fn();
+        if (res.error) setError(res.error);
+        else {
+          setNotice(successMsg);
+          refresh();
+        }
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : "Operation failed");
+      }
+    },
+    [setError, setNotice, refresh],
+  );
+  const closeMenu = useCallback(() => setMenu(null), [setMenu]);
+  const onMenuAction = useCallback(
+    (action: MenuAction) => {
+      if (!menu) return;
+      const entry = menu.entry;
+      setMenu(null);
+      const full = joinPath(path, entry.name);
+      if (action === "view") setViewer({ path: full, name: entry.name, edit: false });
+      else if (action === "edit") setViewer({ path: full, name: entry.name, edit: true });
+      else if (action === "rename") setPrompt({ kind: "rename", entry });
+      else if (client)
+        void runOp(
+          () => client.dockerFsOp({ container: containerId, op: "delete", path: full }),
+          `Deleted ${entry.name}`,
+        );
+    },
+    [menu, path, client, containerId, runOp, setMenu, setViewer, setPrompt],
+  );
+  const closeViewer = useCallback(() => setViewer(null), [setViewer]);
+  const closePrompt = useCallback(() => setPrompt(null), [setPrompt]);
+  const onPromptSubmit = useCallback(
+    (value: string) => {
+      if (!client || !prompt) return;
+      const p = prompt;
+      setPrompt(null);
+      if (p.kind === "mkdir") {
+        void runOp(
+          () =>
+            client.dockerFsOp({ container: containerId, op: "mkdir", path: joinPath(path, value) }),
+          `Created ${value}`,
+        );
+      } else if (p.entry) {
+        const from = p.entry.name;
+        void runOp(
+          () =>
+            client.dockerFsOp({
+              container: containerId,
+              op: "rename",
+              path: joinPath(path, from),
+              newPath: joinPath(path, value),
+            }),
+          `Renamed to ${value}`,
+        );
+      }
+    },
+    [client, prompt, containerId, path, runOp, setPrompt],
+  );
+  const closePicker = useCallback(() => setPicker(null), [setPicker]);
+  const onPickerPick = useCallback(
+    (picked: string) => {
+      if (picker?.target === "hostDir") setHostDir(picked);
+      else if (picker?.target === "import") setImportPath(picked);
+      setPicker(null);
+    },
+    [picker, setHostDir, setImportPath, setPicker],
+  );
+
+  return (
+    <>
+      {menu ? (
+        <RowMenu
+          entry={menu.entry}
+          x={menu.x}
+          y={menu.y}
+          onAction={onMenuAction}
+          onClose={closeMenu}
+        />
       ) : null}
-      {notice ? <Text style={styles.filesNotice}>{notice}</Text> : null}
-
-      {list}
-    </ScrollView>
+      {viewer ? (
+        <FileViewer
+          client={client}
+          container={containerId}
+          path={viewer.path}
+          name={viewer.name}
+          startEditing={viewer.edit}
+          onClose={closeViewer}
+          onSaved={refresh}
+        />
+      ) : null}
+      {prompt ? (
+        <PromptModal
+          title={prompt.kind === "mkdir" ? "New folder name" : `Rename ${prompt.entry?.name ?? ""}`}
+          initial={prompt.kind === "rename" ? (prompt.entry?.name ?? "") : ""}
+          confirmLabel={prompt.kind === "mkdir" ? "Create" : "Rename"}
+          onSubmit={onPromptSubmit}
+          onClose={closePrompt}
+        />
+      ) : null}
+      {picker ? (
+        <HostPicker
+          client={client}
+          mode={picker.mode}
+          initialPath={hostDir}
+          onPick={onPickerPick}
+          onClose={closePicker}
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -2468,6 +3103,121 @@ const styles = StyleSheet.create((theme) => ({
   filesNotice: {
     fontSize: theme.fontSize.xs,
     color: theme.colors.palette.green[600],
+  },
+  // ── overlays ──
+  overlayBackdrop: {
+    flex: 1,
+  },
+  overlayCenter: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.35)",
+    padding: theme.spacing[4],
+  },
+  overlayFull: {
+    flex: 1,
+    backgroundColor: theme.colors.surface0,
+  },
+  menu: {
+    position: "absolute",
+    minWidth: 160,
+    paddingVertical: theme.spacing[1],
+    borderRadius: theme.borderRadius.md,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+  },
+  menuItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+  },
+  menuItemText: {
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foreground,
+  },
+  menuItemDanger: {
+    color: theme.colors.palette.red[500],
+  },
+  dialog: {
+    width: 420,
+    maxWidth: "100%",
+    gap: theme.spacing[3],
+    padding: theme.spacing[4],
+    borderRadius: theme.borderRadius.lg,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface0,
+  },
+  dialogTitle: {
+    fontSize: theme.fontSize.base,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.foreground,
+  },
+  dialogActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: theme.spacing[2],
+  },
+  picker: {
+    width: 560,
+    maxWidth: "100%",
+    height: 480,
+    maxHeight: "100%",
+    gap: theme.spacing[2],
+    padding: theme.spacing[3],
+    borderRadius: theme.borderRadius.lg,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface0,
+  },
+  pickerHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+  },
+  pickerList: {
+    flex: 1,
+    minHeight: 0,
+    borderRadius: theme.borderRadius.md,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+  },
+  viewerHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    paddingHorizontal: theme.spacing[4],
+    paddingTop: theme.spacing[3],
+    paddingBottom: theme.spacing[2],
+  },
+  viewerTitle: {
+    fontSize: theme.fontSize.base,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.foreground,
+    flexShrink: 1,
+  },
+  viewerBadge: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.palette.amber[700],
+  },
+  viewerEditor: {
+    flex: 1,
+    minHeight: 0,
+    margin: theme.spacing[4],
+    marginTop: theme.spacing[2],
+    padding: theme.spacing[3],
+    borderRadius: theme.borderRadius.lg,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.palette.zinc[900],
+    color: theme.colors.palette.zinc[100],
+    fontFamily: "monospace",
+    fontSize: theme.fontSize.xs,
+    textAlignVertical: "top",
   },
   console: {
     flex: 1,

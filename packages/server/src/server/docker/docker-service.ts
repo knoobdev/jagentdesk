@@ -1,15 +1,30 @@
-import { execCommand } from "../../utils/spawn.js";
+import { execCommand, spawnProcess } from "../../utils/spawn.js";
 import type {
   DockerAction,
   DockerContainer,
   DockerCpDirection,
   DockerFsEntry,
+  DockerFsOp,
   DockerImage,
   DockerImageAction,
   DockerStats,
   DockerVolume,
   DockerVolumeAction,
 } from "@jagentdesk/protocol/docker/rpc-schemas";
+
+const FS_READ_CAP = 512 * 1024;
+
+// execFileAsync rejects with a rich error whose `.stderr` holds the real reason (e.g.
+// "Permission denied"); surface that instead of a generic "command failed".
+function stderrMessage(error: unknown): string {
+  if (error && typeof error === "object") {
+    const e = error as { stderr?: unknown; message?: unknown };
+    const s = typeof e.stderr === "string" ? e.stderr.trim() : "";
+    if (s) return s;
+    if (typeof e.message === "string") return e.message;
+  }
+  return String(error);
+}
 
 export interface DockerSnapshot {
   available: boolean;
@@ -91,11 +106,17 @@ export class DockerService {
   async fsList(container: string, path: string): Promise<DockerFsEntry[]> {
     // `-1` one per line, `-A` all but . / .., `-p` marks directories with a trailing slash.
     // Portable across coreutils and busybox (alpine).
-    const result = await execCommand("docker", ["exec", container, "ls", "-1Ap", "--", path], {
-      timeout: 30_000,
-      maxBuffer: 8 * 1024 * 1024,
-    });
-    return (result.stdout ?? "")
+    let stdout: string;
+    try {
+      const result = await execCommand("docker", ["exec", container, "ls", "-1Ap", "--", path], {
+        timeout: 30_000,
+        maxBuffer: 8 * 1024 * 1024,
+      });
+      stdout = result.stdout ?? "";
+    } catch (error) {
+      throw new Error(stderrMessage(error), { cause: error });
+    }
+    return stdout
       .split("\n")
       .map((line) => line.replace(/\r$/, ""))
       .filter((line) => line.length > 0)
@@ -104,6 +125,59 @@ export class DockerService {
         return { name: isDir ? line.slice(0, -1) : line, isDir };
       })
       .sort((a, b) => Number(b.isDir) - Number(a.isDir) || a.name.localeCompare(b.name));
+  }
+
+  async fsRead(container: string, path: string): Promise<{ content: string; truncated: boolean }> {
+    // Cap the read; pass the path as $0 so it is never shell-interpolated.
+    try {
+      const result = await execCommand(
+        "docker",
+        ["exec", container, "sh", "-c", `head -c ${FS_READ_CAP + 1} -- "$0"`, path],
+        { timeout: 30_000, maxBuffer: 8 * 1024 * 1024 },
+      );
+      const content = result.stdout ?? "";
+      return { content: content.slice(0, FS_READ_CAP), truncated: content.length > FS_READ_CAP };
+    } catch (error) {
+      throw new Error(stderrMessage(error), { cause: error });
+    }
+  }
+
+  async fsWrite(container: string, path: string, content: string): Promise<void> {
+    // execFile can't stream stdin; spawn and pipe the new contents into `cat > path`.
+    await new Promise<void>((resolve, reject) => {
+      const child = spawnProcess("docker", [
+        "exec",
+        "-i",
+        container,
+        "sh",
+        "-c",
+        'cat > "$0"',
+        path,
+      ]);
+      let stderr = "";
+      child.stderr?.on("data", (d: Buffer) => {
+        stderr += d.toString("utf8");
+      });
+      child.on("error", reject);
+      child.on("close", (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(stderr.trim() || `write failed (exit ${code})`));
+      });
+      child.stdin?.write(content);
+      child.stdin?.end();
+    });
+  }
+
+  async fsOp(container: string, op: DockerFsOp, path: string, newPath: string): Promise<void> {
+    let args: string[];
+    if (op === "delete") args = ["exec", container, "rm", "-rf", "--", path];
+    else if (op === "rename") args = ["exec", container, "mv", "--", path, newPath];
+    else args = ["exec", container, "mkdir", "-p", "--", path];
+    try {
+      await execCommand("docker", args, { timeout: 30_000 });
+    } catch (error) {
+      throw new Error(stderrMessage(error), { cause: error });
+    }
   }
 
   async cp(

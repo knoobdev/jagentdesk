@@ -3279,6 +3279,57 @@ export class Session {
           return undefined;
         });
     }
+    if (msg.type === "docker/fs/read") {
+      const { requestId } = msg;
+      return this.dockerService
+        .fsRead(msg.container, msg.path)
+        .then(({ content, truncated }) => {
+          this.emit({
+            type: "docker/fs/read/response",
+            payload: { requestId, error: null, content, truncated },
+          });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({
+            type: "docker/fs/read/response",
+            payload: { requestId, error: fail(error), content: "", truncated: false },
+          });
+          return undefined;
+        });
+    }
+    if (msg.type === "docker/fs/write") {
+      const { requestId } = msg;
+      return this.dockerService
+        .fsWrite(msg.container, msg.path, msg.content)
+        .then(() => {
+          this.emit({ type: "docker/fs/write/response", payload: { requestId, error: null } });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({
+            type: "docker/fs/write/response",
+            payload: { requestId, error: fail(error) },
+          });
+          return undefined;
+        });
+    }
+    if (msg.type === "docker/fs/op") {
+      const { requestId } = msg;
+      return this.dockerService
+        .fsOp(msg.container, msg.op, msg.path, msg.newPath)
+        .then(() => {
+          this.emit({ type: "docker/fs/op/response", payload: { requestId, error: null } });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({
+            type: "docker/fs/op/response",
+            payload: { requestId, error: fail(error) },
+          });
+          return undefined;
+        });
+    }
     if (msg.type === "docker/subscribe") {
       const { requestId, subscriptionId } = msg;
       this.emit({

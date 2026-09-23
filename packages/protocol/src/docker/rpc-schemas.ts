@@ -136,6 +136,38 @@ export const DockerCpRequestSchema = req("docker/cp", {
 export const DockerCpResponseSchema = resp("docker/cp/response", {});
 export type DockerCpPayload = z.infer<typeof DockerCpResponseSchema>["payload"];
 
+// Read a file inside the container (capped) for the viewer/editor.
+export const DockerFsReadRequestSchema = req("docker/fs/read", {
+  container: z.string(),
+  path: z.string(),
+});
+export const DockerFsReadResponseSchema = resp("docker/fs/read/response", {
+  content: z.string(),
+  truncated: z.boolean(),
+});
+export type DockerFsReadPayload = z.infer<typeof DockerFsReadResponseSchema>["payload"];
+
+// Write file contents back (editor save / new file).
+export const DockerFsWriteRequestSchema = req("docker/fs/write", {
+  container: z.string(),
+  path: z.string(),
+  content: z.string(),
+});
+export const DockerFsWriteResponseSchema = resp("docker/fs/write/response", {});
+export type DockerFsWritePayload = z.infer<typeof DockerFsWriteResponseSchema>["payload"];
+
+// Delete / rename / mkdir inside the container.
+export const DockerFsOpSchema = z.enum(["delete", "rename", "mkdir"]);
+export type DockerFsOp = z.infer<typeof DockerFsOpSchema>;
+export const DockerFsOpRequestSchema = req("docker/fs/op", {
+  container: z.string(),
+  op: DockerFsOpSchema,
+  path: z.string(),
+  newPath: z.string(),
+});
+export const DockerFsOpResponseSchema = resp("docker/fs/op/response", {});
+export type DockerFsOpPayload = z.infer<typeof DockerFsOpResponseSchema>["payload"];
+
 // Unsolicited server→client push, keyed by subscriptionId (no requestId).
 function push<T extends string, S extends z.ZodRawShape>(type: T, extra: S) {
   return z.object({
@@ -246,6 +278,9 @@ export const DockerRequestSchemas = [
   DockerVolumeActionRequestSchema,
   DockerFsListRequestSchema,
   DockerCpRequestSchema,
+  DockerFsReadRequestSchema,
+  DockerFsWriteRequestSchema,
+  DockerFsOpRequestSchema,
 ] as const;
 
 export const DockerResponseSchemas = [
@@ -264,6 +299,9 @@ export const DockerResponseSchemas = [
   DockerVolumeActionResponseSchema,
   DockerFsListResponseSchema,
   DockerCpResponseSchema,
+  DockerFsReadResponseSchema,
+  DockerFsWriteResponseSchema,
+  DockerFsOpResponseSchema,
 ] as const;
 
 // Unsolicited server→client pushes (subscription streams).
