@@ -116,6 +116,7 @@ import type { AgentForumService } from "../../agent-forum/service.js";
 import { registerForumTools } from "./forum-tools.js";
 import type { ClusterRegistry } from "../../cluster/cluster-registry.js";
 import type { DatabaseRegistry } from "../../database/database-registry.js";
+import type { DatabaseEngine } from "../../database/database-dto.js";
 import type { ForgeHubService } from "../../session/forge/forge-hub-session.js";
 import type { SkillsStorage } from "../../skills/skills-storage.js";
 import type { Skill } from "@jagentdesk/protocol/skills";
@@ -1467,6 +1468,78 @@ function registerSqlTools(params: {
   callerAgentId: string | undefined;
 }): void {
   const { registerTool, options, callerAgentId } = params;
+
+  registerTool(
+    "sql_connect",
+    {
+      title: "Connect a database",
+      description:
+        "Register + open a database connection so it appears in the human's Databases panel (they can watch the schema you design and the data live) and so you can query it with sql_query / sql_exec. Pass the engine and the connection fields (host/port/database/user/password, or a full dsn; for sqlite pass file). Returns the databaseId to use. Use this for the database you set up or work on — e.g. after a devops/dev peer provisions one — with the REAL credentials you configured; never invent credentials.",
+      inputSchema: {
+        engine: z.enum(["postgres", "mysql", "sqlite", "mssql", "oracle", "mongodb", "clickhouse"]),
+        host: z.string().optional(),
+        port: z.number().optional(),
+        database: z.string().optional(),
+        user: z.string().optional(),
+        password: z.string().optional(),
+        dsn: z.string().optional(),
+        file: z.string().optional(),
+        displayName: z.string().optional(),
+      },
+    },
+    async (input: {
+      engine: DatabaseEngine;
+      host?: string;
+      port?: number;
+      database?: string;
+      user?: string;
+      password?: string;
+      dsn?: string;
+      file?: string;
+      displayName?: string;
+    }) => {
+      if (!options.databaseRegistry) {
+        return {
+          content: [{ type: "text", text: "Database service is not available in this session." }],
+          isError: true,
+        };
+      }
+      try {
+        const info = await options.databaseRegistry.addConnection({
+          engine: input.engine,
+          ...(input.displayName ? { displayName: input.displayName } : {}),
+          config: {
+            host: input.host,
+            port: input.port,
+            database: input.database,
+            user: input.user,
+            password: input.password,
+            dsn: input.dsn,
+            file: input.file,
+          },
+        });
+        await options.databaseRegistry.connect(info.id).catch(() => undefined);
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Connected database "${info.displayName}" (databaseId=${info.id}). It now shows in the human's Databases panel; query/inspect it with sql_query and sql_exec.`,
+            },
+          ],
+        };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Failed to connect database: ${err instanceof Error ? err.message : String(err)}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    },
+  );
 
   registerTool(
     "sql_query",
