@@ -2,6 +2,7 @@ import { router, usePathname, type Href } from "expo-router";
 import {
   Boxes,
   BarChart3,
+  Container,
   Database,
   GitPullRequest,
   Sparkles,
@@ -86,6 +87,7 @@ import {
   buildInsightsRoute,
   buildForgeRoute,
   buildMarketplaceRoute,
+  buildDockerRoute,
   buildClusterWorkloadsRoute,
   buildOpenProjectRoute,
   buildNewWorkspaceRoute,
@@ -155,6 +157,7 @@ interface SidebarSharedProps {
   handleInsights: () => void;
   handleForge: () => void;
   handleMarketplace: () => void;
+  handleDocker: () => void;
   supportsForgeHub: boolean;
   labels: SidebarLabels;
   newWorkspaceKeys: ShortcutKey[][] | null;
@@ -180,6 +183,7 @@ interface SidebarLabels {
   insights: string;
   forge: string;
   marketplace: string;
+  docker: string;
   closeSidebar: string;
 }
 
@@ -395,6 +399,20 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     }
   }, [marketplaceRoute, showMobileAgent]);
 
+  const dockerRoute = useMemo(
+    () => (firstServerId ? buildDockerRoute(firstServerId) : null),
+    [firstServerId],
+  );
+  const handleDockerDesktop = useCallback(() => {
+    if (dockerRoute) router.push(dockerRoute as Href);
+  }, [dockerRoute]);
+  const handleDockerMobile = useCallback(() => {
+    if (dockerRoute) {
+      showMobileAgent();
+      router.push(dockerRoute as Href);
+    }
+  }, [dockerRoute, showMobileAgent]);
+
   const handleViewMoreNavigate = useCallback(() => {
     router.push(buildSessionsRoute());
   }, []);
@@ -434,6 +452,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       insights: "Usage & Cost",
       forge: "Forge",
       marketplace: t("sidebar.actions.marketplace"),
+      docker: "Docker",
       closeSidebar: t("sidebar.actions.closeSidebar"),
     }),
     [t],
@@ -459,6 +478,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     handleInsights: handleInsightsDesktop,
     handleForge: handleForgeDesktop,
     handleMarketplace: handleMarketplaceDesktop,
+    handleDocker: handleDockerDesktop,
     supportsForgeHub,
     labels,
     newWorkspaceKeys,
@@ -475,6 +495,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
           handleInsights={handleInsightsMobile}
           handleForge={handleForgeMobile}
           handleMarketplace={handleMarketplaceMobile}
+          handleDocker={handleDockerMobile}
           insetsTop={insets.top}
           insetsBottom={insets.bottom}
           closeSidebar={showMobileAgent}
@@ -502,6 +523,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
         handleInsights={handleInsightsDesktop}
         handleForge={handleForgeDesktop}
         handleMarketplace={handleMarketplaceDesktop}
+        handleDocker={handleDockerDesktop}
         insetsTop={insets.top}
         active={active}
         handleOpenProject={handleOpenProjectDesktop}
@@ -856,6 +878,7 @@ function MobileSidebar({
   handleInsights,
   handleForge,
   handleMarketplace,
+  handleDocker,
   supportsForgeHub,
   labels,
   handleAddHost,
@@ -880,6 +903,7 @@ function MobileSidebar({
   const isInsightsActive = pathname.includes("/insights");
   const isForgeActive = pathname.includes("/forge");
   const isMarketplaceActive = pathname.includes("/marketplace");
+  const isDockerActive = pathname.includes("/docker");
   const clusterRouteMatch = pathname.match(/\/h\/([^/]+)\/cluster\/([^/]+)/);
   const clusterRoute = clusterRouteMatch
     ? {
@@ -1035,6 +1059,14 @@ function MobileSidebar({
               variant="compact"
             />
             <SidebarHeaderRow
+              icon={Container}
+              label={labels.docker}
+              onPress={handleDocker}
+              isActive={isDockerActive}
+              testID="sidebar-docker-nav"
+              variant="compact"
+            />
+            <SidebarHeaderRow
               icon={BarChart3}
               label={labels.insights}
               onPress={handleInsights}
@@ -1115,6 +1147,7 @@ function DesktopSidebar({
   handleInsights,
   handleForge,
   handleMarketplace,
+  handleDocker,
   supportsForgeHub,
   labels,
   handleAddHost,
@@ -1139,6 +1172,7 @@ function DesktopSidebar({
   const isInsightsActive = pathname.includes("/insights");
   const isForgeActive = pathname.includes("/forge");
   const isMarketplaceActive = pathname.includes("/marketplace");
+  const isDockerActive = pathname.includes("/docker");
   const clusterRouteMatch = pathname.match(/\/h\/([^/]+)\/cluster\/([^/]+)/);
   const clusterRoute = clusterRouteMatch
     ? {
@@ -1315,6 +1349,14 @@ function DesktopSidebar({
                 onPress={handleMarketplace}
                 isActive={isMarketplaceActive}
                 testID="sidebar-marketplace-nav"
+                variant="compact"
+              />
+              <SidebarHeaderRow
+                icon={Container}
+                label={labels.docker}
+                onPress={handleDocker}
+                isActive={isDockerActive}
+                testID="sidebar-docker-nav"
                 variant="compact"
               />
               <SidebarHeaderRow

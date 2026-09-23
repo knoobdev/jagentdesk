@@ -176,6 +176,7 @@ import type { SessionShareService } from "./session-share/service.js";
 import { ClusterSession } from "./session/cluster/cluster-session.js";
 import { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { DatabaseSession } from "./session/database/database-session.js";
+import { DockerService } from "./docker/docker-service.js";
 import { DatabaseRegistry } from "./database/database-registry.js";
 import { ProviderCatalogSession } from "./session/provider/provider-catalog-session.js";
 import { WorkspaceFilesSession } from "./session/files/workspace-files-session.js";
@@ -811,6 +812,7 @@ export class Session {
   private readonly agentForumSession: AgentForumSession | null;
   private clusterSession!: ClusterSession;
   private databaseSession!: DatabaseSession;
+  private readonly dockerService = new DockerService();
   private readonly providerCatalogSession: ProviderCatalogSession;
   private readonly workspaceFilesSession: WorkspaceFilesSession;
   private readonly agentConfigSession: AgentConfigSession;
@@ -2222,6 +2224,7 @@ export class Session {
       () => this.dispatchAgentForumMessage(msg),
       () => this.dispatchClusterMessage(msg),
       () => this.dispatchDatabaseMessage(msg),
+      () => this.dispatchDockerMessage(msg),
       () => this.dispatchMigrationMessage(msg),
       () => this.dispatchPluginMessage(msg),
       () => this.dispatchPluginDirectoryMessage(msg),
@@ -3110,6 +3113,69 @@ export class Session {
       default:
         return undefined;
     }
+  }
+
+  private dispatchDockerMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    const fail = (error: unknown): string =>
+      error instanceof Error ? error.message : String(error);
+    if (msg.type === "docker/list") {
+      const { requestId } = msg;
+      return this.dockerService
+        .list()
+        .then((result) => {
+          this.emit({
+            type: "docker/list/response",
+            payload: { requestId, error: null, ...result },
+          });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({
+            type: "docker/list/response",
+            payload: {
+              requestId,
+              error: fail(error),
+              available: false,
+              containers: [],
+              images: [],
+            },
+          });
+          return undefined;
+        });
+    }
+    if (msg.type === "docker/logs") {
+      const { requestId } = msg;
+      return this.dockerService
+        .logs(msg.container, msg.tail)
+        .then((logs) => {
+          this.emit({ type: "docker/logs/response", payload: { requestId, error: null, logs } });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({
+            type: "docker/logs/response",
+            payload: { requestId, error: fail(error), logs: "" },
+          });
+          return undefined;
+        });
+    }
+    if (msg.type === "docker/action") {
+      const { requestId } = msg;
+      return this.dockerService
+        .action(msg.container, msg.action)
+        .then(() => {
+          this.emit({ type: "docker/action/response", payload: { requestId, error: null } });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({
+            type: "docker/action/response",
+            payload: { requestId, error: fail(error) },
+          });
+          return undefined;
+        });
+    }
+    return undefined;
   }
 
   private dispatchDatabaseMessage(msg: SessionInboundMessage): Promise<void> | undefined {

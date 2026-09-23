@@ -482,6 +482,14 @@ export function buildMarketplaceRoute(serverId: string) {
   return `/h/${encodeSegment(normalized)}/marketplace` as const;
 }
 
+export function buildDockerRoute(serverId: string) {
+  const normalized = trimNonEmpty(serverId);
+  if (!normalized) {
+    return "/" as const;
+  }
+  return `/h/${encodeSegment(normalized)}/docker` as const;
+}
+
 export function buildClusterWorkloadsRoute(serverId: string, clusterId: string) {
   const normalizedServer = trimNonEmpty(serverId);
   const normalizedCluster = trimNonEmpty(clusterId);

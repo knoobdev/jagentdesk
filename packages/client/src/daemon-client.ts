@@ -1,6 +1,12 @@
 import type { z } from "zod";
 import { CLIENT_CAPS, type ClientCapability } from "@jagentdesk/protocol/client-capabilities";
 import type { DatabaseEngine, DbConnectionConfig } from "@jagentdesk/protocol/database/rpc-schemas";
+import type {
+  DockerAction,
+  DockerActionPayload,
+  DockerListPayload,
+  DockerLogsPayload,
+} from "@jagentdesk/protocol/docker/rpc-schemas";
 import type { AgentAttentionNotificationPayload } from "@jagentdesk/protocol/agent-attention-notification";
 import {
   AgentCreateFailedStatusPayloadSchema,
@@ -6871,6 +6877,42 @@ export class DaemonClient {
       requestId,
       message: { type: "database/list" },
       responseType: "database/list/response",
+    });
+  }
+
+  async dockerList(requestId?: string): Promise<DockerListPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "docker/list" },
+      responseType: "docker/list/response",
+    });
+  }
+
+  async dockerLogs(options: {
+    requestId?: string;
+    container: string;
+    tail?: number;
+  }): Promise<DockerLogsPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "docker/logs",
+        container: options.container,
+        ...(options.tail !== undefined ? { tail: options.tail } : {}),
+      },
+      responseType: "docker/logs/response",
+    });
+  }
+
+  async dockerAction(options: {
+    requestId?: string;
+    container: string;
+    action: DockerAction;
+  }): Promise<DockerActionPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "docker/action", container: options.container, action: options.action },
+      responseType: "docker/action/response",
     });
   }
 
