@@ -14,13 +14,29 @@ const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
 const SKIP_DIRECTORIES = new Set(["node_modules", ".git", "dist", "build", ".turbo", ".next"]);
 
 // The SDK specifier inside an import/require/export string: the quote, the scope, and an
-// optional subpath. Paseo splits the client API under /client; the fork re-exports it from
-// the package root, so that one subpath collapses while the rest are preserved.
+// optional subpath. Paseo splits its SDK across many subpaths (./client, ./client/react-native,
+// ./client/ui, ./server/provider, ./server/acp, …); the fork publishes only ., ./server, ./host
+// and ./react-native, so each upstream subpath is mapped onto the fork's real entry points.
 const SDK_SPECIFIER = /(['"])@(?:getpaseo|paseo)\/plugin((?:\/[a-z0-9-]+)*)\1/g;
 
+// Explicit map from a Paseo subpath to the fork's. Anything under /client collapses toward the
+// package root (the fork re-exports the client API from `.`), /client/react-native and
+// /client/host land on the fork's own ./react-native and ./host, and every ./server/* leaf
+// folds onto ./server (the fork has no provider/acp split).
+const SUBPATH_MAP: Record<string, string> = {
+  "": "",
+  "/client": "",
+  "/client/ui": "",
+  "/client/react-native": "/react-native",
+  "/client/host": "/host",
+  "/react-native": "/react-native",
+  "/host": "/host",
+  "/server": "/server",
+};
+
 function mapSpecifierSubpath(subpath: string): string {
-  const normalized = subpath === "/client" ? "" : subpath;
-  return `@jagentdesk/plugin${normalized}`;
+  const mapped = SUBPATH_MAP[subpath] ?? (subpath.startsWith("/server") ? "/server" : "");
+  return `@jagentdesk/plugin${mapped}`;
 }
 
 function rewriteSdkSpecifiers(source: string): string {

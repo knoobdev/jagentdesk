@@ -24,7 +24,10 @@ describe("rebrandPaseoPlugin", () => {
       path.join(directory, "index.client.ts"),
       [
         'import type { PluginClientContext } from "@getpaseo/plugin/client";',
+        'import { useHost } from "@getpaseo/plugin/client/react-native";',
+        'import { ui } from "@getpaseo/plugin/client/ui";',
         'import { serverThing } from "@getpaseo/plugin/server";',
+        'import { provide } from "@getpaseo/plugin/server/provider";',
         "export default function contribute(client: PluginClientContext) {",
         "  client.addTheme({ id: 'mocha' });",
         "  return () => {};",
@@ -40,11 +43,13 @@ describe("rebrandPaseoPlugin", () => {
     expect(manifest.id).toBe("catppuccin");
     expect(manifest.requirements).toEqual({ jagentdesk: ">=0.8.0" });
 
-    // The client entry is renamed to the fork's index.ts and its SDK scope rewritten.
+    // The client entry is renamed to the fork's index.ts and every SDK subpath is mapped
+    // onto an entry point the fork actually publishes (. / ./server / ./host / ./react-native).
     const source = await readFile(path.join(directory, "index.ts"), "utf8");
-    // /client collapses to the fork's package root; /server keeps its subpath.
-    expect(source).toContain('from "@jagentdesk/plugin"');
-    expect(source).toContain('from "@jagentdesk/plugin/server"');
+    expect(source).toContain('from "@jagentdesk/plugin"'); // /client -> root
+    expect(source).toContain('from "@jagentdesk/plugin/react-native"'); // /client/react-native
+    expect(source).toContain('from "@jagentdesk/plugin/server"'); // /server and /server/provider
+    expect(source).not.toContain("/client"); // no /client/* subpath survives
     expect(source).not.toContain("getpaseo");
   });
 
