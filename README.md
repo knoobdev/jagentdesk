@@ -98,6 +98,24 @@ with a few deliberate boundaries:
 
 ## ✨ New in this release
 
+### Docker for the team, DB registration & a live architecture diagram (v0.9.39)
+
+- **Docker, end to end.** Team agents stand up and manage their own containers with `docker_*`
+  tools (run / exec / build / logs / inspect / stop / rm, through the normal tool‑approval flow),
+  and you watch and control them from a **realtime cockpit** — live `docker events` (no polling),
+  Compose‑project grouping, and a container detail view with **Logs** (find/follow), **Stats**,
+  **Inspect**, a `docker cp` **Files** manager, and a **real interactive Exec terminal**.
+- **Agents register the databases they work on** — the new `sql_connect` tool opens a connection
+  (Postgres / MySQL / SQLite / … via fields, a DSN, or a file) so a database the team provisions
+  shows up in your **Databases** panel to watch live.
+- **A living architecture diagram** — the team publishes what it's designing to a new **ARCH** tab
+  (versioned Mermaid, one pill per revision) so you can step back through how the design evolved.
+- **In‑app code editing is back** — workspace files open in a CodeMirror 6 editor with autosave,
+  alongside the existing file/diff viewers.
+- **Realtime browsing, not polling** — the browser agent now engineers event‑driven capture (page
+  hooks / CDP interception) for live‑monitoring tasks instead of re‑snapshotting on a loop.
+- **Fix:** plugins that call `defineSettings` now load and enable (the SDK exports it again).
+
 ### A stronger browser agent + fixes (v0.9.38)
 
 - **Sees & clicks inside web components and iframes** — the page snapshot pierces open shadow
@@ -146,223 +164,10 @@ with a few deliberate boundaries:
 - **Branding fix.** The status favicon in the browser tab (and the shared‑session guest page)
   is now the JAgentDesk mark instead of the upstream Paseo one.
 
-### Team mode — one-shot on a new workspace (v0.9.35)
+### Older releases
 
-- **Turn on Team mode, send one message, get a team.** Arming the Team-mode toggle on a
-  brand-new workspace and sending the first message now spins up the full team instead of a
-  lone agent: it creates the real lead agent, then opens a forum topic with that agent as
-  origin/lead and dispatches the bootstrap — the lead plans, splits tasks, and brings in
-  reviewers. Previously that first message silently ran as a solo turn (the forum never
-  opened) because the armed flag was lost in the new-workspace → workspace-tab handoff.
-- **The lead's tab shows its title right away** instead of hanging on "loading agent title"
-  (a one-shot lead has no first turn to summarize, so it's now titled from the brief).
-
-### Team mode — office, real code review & fixes (v0.9.34)
-
-- **Virtual office** — a new **OFFICE** tab renders the team working in real time: each
-  teammate is a little character at a desk whose pose + badge reflect their actual state
-  (working / reviewing / waiting on the boss / talking / shipped / idle), so you can _see_
-  what the team is doing at a glance.
-- **Code review is now first-class in the core** (alibaba/open-code-review methodology): a
-  review is structured **findings** (file + line + category + severity + suggestion); the
-  **daemon derives the verdict** from severities (any critical/high, or a medium in the
-  role's own dimension → changes requested) and a task is done only when **BA, Tester and
-  Pentester all approve**. The task detail renders a real code-review panel.
-- **Ask the boss** — when only the human can decide, the lead posts the question **into the
-  thread** _and_ pops the native **AskUserQuestion** prompt in your chat; recording your
-  answer clears the waiting state.
-- **Mobile** — the Team screen is now responsive (stacked dashboard, one-column board,
-  bottom-sheet task detail, wrapping stats/posts) instead of desktop-only.
-- **Fixes** — team-mode peers no longer scatter into duplicate workspaces (workspace is
-  reused per directory); creating a workspace no longer spawns **two** agents (createAgent
-  is idempotent by message id); the **Team-mode toggle now shows on a new-workspace
-  composer**.
-
-### Team mode — Agent Forum (v0.9.33)
-
-- **Turn on Team mode** in the chat composer and send a coding request — instead of one
-  agent replying, a **team** opens a topic and works it like real people: discuss and debate
-  an approach, agree, split it into tasks/subtasks, spawn peers, build, then review each
-  other's work. Built on the existing Supervisor/Lead/Peer orchestration.
-- **"Team" screen** in the menu, styled like a classic vBulletin forum:
-  - a **dashboard** overview (threads / active / shipped / posts / tasks) with a
-    tasks‑by‑status **donut** and a tasks‑by‑epic bar chart;
-  - **threads** of vBulletin‑style posts — Markdown (fenced code blocks, inline code,
-    quotes, links, images), reply/quote, @mentions, and 👍/👎 **reactions** with a rep
-    score; status/review events fold into a separate, paginated **activity** stream;
-  - a **Jira‑style board** — all six columns incl. Done, epic filter, and a **task detail**
-    (status, epic, assignee, reporter, **hour estimates**, description, comment thread, and
-    **re‑open tracking** with reasons);
-  - threads + posts + activity are independently **paginated**, with smooth loading.
-- **Human tone** — agents discuss in **your language**, with real personality and emoji, and
-  vote when a point genuinely lands (never forced).
-- **Role‑based review** — when a task hits review, a **BA / Tester / Pentester** inspect the
-  change and approve or request changes (open‑code‑review style); verdicts land as task comments.
-- **Human in the loop** — when only you can decide, the lead asks via the native
-  **AskUserQuestion** prompt in your chat and records your answer back in the thread.
-- **You're in control** — delete/manage old topics from the index.
-- Opt-in per session (cost-aware); combine with the Autonomous (∞) toggle for continuous
-  drive. See [CHANGELOG.md](CHANGELOG.md) for details.
-
-### Session sharing v2 — real‑app guest surface (v0.9.32)
-
-The guest no longer sees a bespoke mini‑page: they join the **real app**, scoped to one agent by the
-daemon (ADR‑0019). Everything the host grants renders with the same components the host uses.
-
-- **Grant capabilities per share** — beyond chat, toggle **Files, Changes, Terminal, model/mode,
-  read‑only (chat‑only, no composer), and an Artifacts canvas** (live‑renders the HTML/SVG/Mermaid/
-  code the agent produces). Each defaults **off**; the daemon enforces every grant on the wire —
-  the hidden control is never the guard — and confines file/terminal access to the agent's workspace.
-- **Guests can't fork or re‑share** — host‑only actions (fork the agent, the Share button) are hidden
-  on the guest surface and denied by the guest scope even if reached.
-- **Dedicated Shared sessions page** — manage every live share across hosts from the **main menu**
-  (not buried in Settings), with each guest's device and a live **typing…** indicator per agent.
-- **Sturdier connection** — guests survive **idle, screen‑lock, network changes, and F5** and
-  auto‑reconnect (the token persists; remote guests are exempt from the local‑retry cap). The pairing
-  code shows a **live expiry countdown** with refresh.
-- **Fixes** — model/mode changes no longer fail with `access_denied`; the Artifacts tab no longer
-  crashes the app on a non‑empty timeline.
-
-Still off by default (toggle in **Settings → Host**, restart to apply); needs `cloudflared` on the
-host. See [CHANGELOG.md](CHANGELOG.md) for full notes.
-
-### Autonomous run (v0.9.13)
-
-- **Keep the agent going, unattended** — a new **∞ toggle** in the chat composer turns on
-  _autonomous mode_ for the agent you're already talking to. The daemon re‑invokes that **same
-  agent/session** turn after turn (keeping its open browser tab + context) so it keeps working
-  toward what you asked — until it reports the goal is done, or you turn it off.
-- **Runs for hours, reacts over time** — "nothing to do right now" (e.g. waiting for replies)
-  no longer stops it: it stays alive, re‑checks on a growing backoff, and acts when something
-  new appears. This is what lets it operate continuously, not finish in one batch.
-- **Never repeats itself** — a compact, durable _done_ record is fed back every turn (survives
-  context compaction + daemon restart), so the agent skips work it already did.
-- **You stay in control** — off by default (`daemon.autorun.enabled`, toggle in Settings); you
-  pick the model and mode in the composer — autonomous never changes them; hidden safety caps
-  bound cost/time. Not cron/schedule.
-
-### Forge Hub readability + fixes (v0.9.12)
-
-- **Pipeline logs**: real ANSI colours, a line-number gutter, a Refresh button, and clean copy
-  (no more raw `\x1b[0;m` escape codes / `section_*` markers).
-- **Code viewer**: line-number gutter + syntax highlighting, slightly larger font.
-- **Pull requests**: real conflict detection (banner + list chip, merge disabled on conflict) and
-  up-front Commits / Files-changed counts.
-- **Author** shown on Pipelines (who triggered) and Releases (who published).
-- **Resizable assistant**: the desktop Forge assistant is a first-class right dock — open by
-  default, drag to resize, collapse to hide.
-- **Fix**: New workspace no longer occasionally creates two agents; mobile switch-repo shows a
-  loading skeleton.
-
-See [CHANGELOG.md](CHANGELOG.md) for full v0.9.12 notes.
-
-### Forge Hub — repo Members + mobile navigation (v0.9.11)
-
-- **Members** — manage repo access from a new per-repo section: list members (avatar · name ·
-  role), **invite** by username with a role (Read/Triage/Write/Maintainer/Admin), or remove —
-  across GitHub & GitLab. New `forge.member.*` RPCs.
-- **Mobile section tabs** — a scrollable tab strip (Overview · Code · Commits · Pull requests ·
-  Pipelines · Releases · Issues · Members) now shows on every repo screen, so switching sections
-  no longer requires backing out to the menu.
-- **Clearer "Switch repo" loading** — a repo-shaped skeleton while repositories load (desktop + mobile).
-
-See [CHANGELOG.md](CHANGELOG.md) for full v0.9.11 notes.
-
-### Forge Hub polish — Issue detail + mobile fixes (v0.9.10)
-
-- **Issue detail** — issues now show their full body and comment thread (markdown), not just
-  the title; the list shows number, age, author, labels and comment count. New `forge.issue.get` RPC.
-- **Mobile layout fixes** — Pipelines (legible title, stage→job graph, in‑app log viewer, clean
-  toolbar), Pull request tabs (early counts + horizontal scroll), Commits (wrapping titles),
-  Connections (no overflow, slim "N connected · Manage" footer), and list loading skeletons.
-- **Forge assistant repo scope** — switching repos then opening the chat now targets the new
-  repo with a fresh context instead of the previously selected one.
-
-See [CHANGELOG.md](CHANGELOG.md) for full v0.9.10 notes.
-
-### Forge Hub + Forge assistant + mobile (v0.9.9)
-
-- **Forge Hub** — remote GitHub / GitLab / Bitbucket management (connections, repos, code
-  tree, commits, PR/MR review & merge, CI pipelines, releases, issues) driven from the daemon.
-- **Forge assistant** — a chat agent that operates the forges via `forge_*` tools (reads +
-  pairing‑gated writes), usable from the Forge panel on desktop and a floating chat widget on mobile.
-- **Forge on mobile** — compact master‑detail so repo Code/Commits render, light‑theme colour
-  fixes (no more black boxes), status‑bar‑safe toolbar, and stacked repo/commit rows for phones.
-- **Paseo 0.8.0 selective port** — Gajae Code provider, Android Studio editor target, `workspace
-rename` CLI (rebranded, additive).
-
-See [CHANGELOG.md](CHANGELOG.md) for full v0.9.9 notes.
-
-### Usage-cost clarity + browser fixes (v0.2.2)
-
-- **Prompt-cache savings in Usage & Cost** — see how much prompt caching saved (aggregate
-  - per-model + per-agent, estimated). The headline cost stays provider-reported; JAgentDesk
-    surfaces the caching benefit rather than overriding the CLIs' own auto-tuned caching.
-- **Fixes:** agent-loaded extensions now inject (open tabs reload after loading); the TOKENS
-  total no longer counts cache re-reads (so it isn't wildly inflated next to the context window);
-  the fingerprint-profile detail box no longer overflows.
-
-See [CHANGELOG.md](CHANGELOG.md) for full v0.2.2 notes.
-
-### Agentic browser — self-authored extensions, more tools & fixes (v0.2.1)
-
-- **Agents can author & run their own Chromium extensions** — `browser_scaffold_extension`
-  writes a working MV3 skeleton, `browser_load_extension` loads it, and `browser_cdp` runs
-  raw Chrome DevTools Protocol (inject before page load to bypass CSP, intercept requests,
-  drive any DevTools domain) — for event-driven page automation instead of cron polling.
-- **Fuller fingerprint‑profile control** — `browser_profile_update` / `browser_profile_delete`
-  tools, and the Settings card now shows each profile's fingerprint, lets you set a **proxy**
-  (server + auth), toggle spoofing, and cycle the WebRTC policy.
-- **Browser tools are ON by default.**
-- **Fixes:** editing a fingerprint profile no longer silently disables browser tools; the
-  profiles card layout is fixed; default starter skills are gone; the database grid clears its
-  selection on tap‑outside on mobile too; and mobile Tailscale no longer sticks on
-  "reconnecting" after the screen was off.
-
-See [CHANGELOG.md](CHANGELOG.md) for the full v0.2.1 notes.
-
-### Agentic browser — fingerprint profiles & full customisation (v0.2.0)
-
-The agentic browser gains a coherent anti‑detect **profile system** so the agent (or you) can
-give the built‑in browser a consistent device identity for legitimate automation of **your own**
-accounts:
-
-- **Coherent fingerprint profiles** — one identity per profile (User‑Agent + UA Client Hints,
-  WebGL vendor/renderer, timezone, locale, screen, hardware, seeded canvas/audio noise), generated
-  from real‑device templates so signals never contradict each other. Spoofing applies at the engine
-  boundary (CDP `Network.setUserAgentOverride` / `Emulation.setTimezoneOverride`) plus a before‑page
-  init script that masks itself as native code.
-- **Proxy & WebRTC** — attach a per‑profile proxy (the only real way to change the observed IP) with
-  a WebRTC leak guard (`force‑proxy` / `disable`) so the real IP isn’t exposed over STUN.
-- **Extensions & custom scripts** — load your own unpacked Chromium extensions and inject custom
-  init scripts, so the agent can fully customise the browser (automation, macros).
-- **Profiles UI + agent tools** — manage profiles under **Settings → Host** (list / create per‑OS /
-  select / delete, or “Real identity”); the agent can `browser_profile_list` / `browser_profile_create`
-  / `browser_profile_use` to create or reuse a profile mid‑conversation.
-
-Also in this release: **database grid selection** now persists across pages and clears when you
-click outside the table, and the **Usage & Cost** token totals render at full precision (no more
-collapsing every large number to “1m”).
-
-See [CHANGELOG.md](CHANGELOG.md) for the full v0.2.0 notes.
-
-### Upstream Paseo v0.7.2 merge (v0.0.5)
-
-JAgentDesk now tracks Paseo **v0.7.2**, folding in its agent, file, and forge improvements while
-keeping every JAgentDesk feature (DB IDE, Kubernetes, Skills, no in‑app editor, Tailscale‑only):
-
-- **Provider options & tool policy** — pass provider‑native JSON settings per agent and pre‑approve
-  specific tools, validated by the daemon.
-- **File‑system operations** — create, rename, duplicate, and delete files straight from the explorer.
-- **Forge CI checks** — GitHub / GitLab / Gitea pull‑request check status, with a dedicated
-  pull‑request panel and a changes panel.
-- **Plugins from git sources** — install and update plugins directly from a git repo, not just a
-  local folder.
-- **Workspace labels**, **live daemon‑config reload**, agent **timeline rewind**, and a **reconnect
-  toast** for flaky networks.
-
-See the [v0.0.5 release notes](https://github.com/knoobdev/jagentdesk/releases/tag/v0.0.5) for the
-full merge changelog.
+See **[CHANGELOG.md](CHANGELOG.md)** and the [releases page](https://github.com/knoobdev/jagentdesk/releases)
+for v0.9.35 and earlier.
 
 ### Databases — a full database IDE (desktop **and** mobile)
 
