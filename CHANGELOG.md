@@ -7,20 +7,56 @@ do not correspond to JAgentDesk releases.
 
 ## v0.9.39 — 2026-09-24
 
-A Docker Desktop-class container cockpit for watching and controlling the team's
-containers, and the return of in-app code editing for workspace files.
+End-to-end Docker for the team — agents stand up and manage their own containers, and a
+Docker Desktop-class cockpit lets the human watch and control them. Plus agent-registered
+database connections, a versioned architecture diagram the team publishes for the human,
+event-driven realtime browsing, the return of in-app code editing, and a plugin settings fix.
 
 ### Added
 
-- **Realtime Docker cockpit.** A host screen that streams live `docker events` (no polling)
-  into a container table with Compose-project grouping, and a container detail view with
-  **Logs** (find/follow), **Stats**, **Inspect** (JSON tree), **Files**, and **Exec**. A
-  **Files** manager copies both ways with `docker cp`, offers a right-click context menu
-  (view / edit / rename / delete / mkdir) with native OS file/dir pickers, a bounded file
-  viewer, and volumes + images tabs. Columns collapse responsively on mobile.
+- **Docker for the team (agent tools + human cockpit).** Team-mode agents (devops/dev/lead)
+  stand up and manage containers themselves via host-`docker` tools — `docker_ps` /
+  `docker_images` / `docker_logs` / `docker_inspect` (read) and `docker_run` / `docker_exec`
+  / `docker_build` / `docker_stop` / `docker_rm` (write, through the normal tool-approval
+  flow). The human watches and controls them from a **realtime cockpit**: a host screen that
+  streams live `docker events` (no polling) into a container table with Compose-project
+  grouping, and a container detail view with **Logs** (find/follow), **Stats**, **Inspect**
+  (JSON tree), **Files**, and a **real interactive Exec terminal**. The **Files** manager
+  copies both ways with `docker cp`, offers a right-click context menu (view / edit / rename
+  / delete / mkdir) with native OS file/dir pickers, a bounded file viewer, and volumes +
+  images tabs. Columns collapse responsively on mobile.
+- **Agents register the databases they work on (`sql_connect`).** Agents could already query
+  connected databases but not create a connection, so a DB a dev/devops peer provisioned
+  never surfaced for the human. The new `sql_connect` tool registers and opens a connection
+  (engine + host/port/database/user/password, a DSN, or a SQLite file) through the existing
+  registry, so it appears in the human's **Databases** panel — they can watch the schema and
+  data the team designs — and returns a `databaseId` for `sql_query` / `sql_exec`.
+- **Versioned architecture diagram (ARCH tab).** The team publishes the architecture it's
+  designing so the human can see it: a `forum.set_diagram` agent tool appends a new
+  **Mermaid** diagram version each call, and an **ARCH** tab renders the current diagram with
+  a pill per version so the human can step back through how the design evolved (the lead
+  publishes the agreed architecture during planning and revises it whenever the design
+  changes).
 - **In-app code editing is back.** Workspace files open in a CodeMirror 6 editor (ported from
   upstream) wired into the file pane, with autosave to disk. Viewing files and diffs still
   works as before; editing is now available again alongside it.
+
+### Changed
+
+- **The browser agent monitors in real time instead of polling.** For continuous tasks (watch
+  an inbox, a feed/chat/dashboard for live changes) `browser_snapshot`'s guidance now steers
+  every model to engineer event-driven capture — a content-script it writes and loads that
+  hooks the page's own updates (MutationObserver / fetch / XHR / WebSocket), or
+  `browser_cdp` Fetch/Network interception — and read what it relays, rather than
+  re-snapshotting on a loop. Model-agnostic (lives in the tool description).
+
+### Fixed
+
+- **Plugins that call `defineSettings` now enable.** Enabling such a plugin failed with
+  "defineSettings is not a function" — the SDK never exported it. `defineSettings` /
+  `settingsRpc` / `SettingsDefinition` (a brand-neutral zod + `defineRpc` helper) are now
+  exported from `@jagentdesk/plugin` and `/server` and exposed on both the server-side and
+  client-side runtimes plugins receive, so plugins declaring settings load and enable.
 
 ## v0.9.38 — 2026-09-23
 
