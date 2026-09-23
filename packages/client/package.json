@@ -1,6 +1,6 @@
 {
   "name": "@jagentdesk/client",
-  "version": "0.9.36",
+  "version": "0.9.37",
   "description": "JAgentDesk client SDK package",
   "files": [
     "dist",
@@ -35,7 +35,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@jagentdesk/protocol": "0.9.36",
+    "@jagentdesk/protocol": "0.9.37",
     "zod": "^4.4.3"
   },
   "devDependencies": {

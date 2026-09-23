@@ -1,9 +1,71 @@
 # Changelog
 
 All notable changes to JAgentDesk are documented here. JAgentDesk versions its
-own release line (now `0.9.14`); the many `v0.1.x`–`v1.0.x` tags in history are
+own release line (now `0.9.37`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
+
+## v0.9.37 — 2026-09-23
+
+A Plugin & Theme Marketplace that installs any Paseo plugin (auto-rebranded on the
+way in), a large batch of upstream Paseo 0.9.0 / 0.9.1 features ported into the fork
+(chat Find, terminal Find, chronological history search, pending attachments, Opus 5.5,
+Codex import paging, faster voice replies), and a round of Team-mode reliability fixes.
+
+### Added
+
+- **Plugin & Theme Marketplace.** A new host screen (reachable from the left sidebar and
+  from Settings → Plugins) that browses the community catalog at `paseo.cafe`: 106
+  plugins across 18 categories with search, category/platform filters, sort
+  (popular / recently added / recently released / A–Z), an overview dashboard (totals,
+  top plugins by stars, category distribution), a dedicated themes gallery, and a detail
+  sheet with screenshots, a Markdown-rendered description, health indicators, caveats and
+  the version requirement. A **Browse / Installed** tab pair marks what the host already
+  has, and Browse pages incrementally with a **Load more** control.
+- **Install any Paseo plugin, auto-rebranded.** Installing from the marketplace clones the
+  plugin's Git repo (GitHub `/tree/<branch>/<subdir>` monorepo paths are understood) and
+  rewrites the checked-out copy — on a throwaway staging copy, never the author's tree —
+  so it runs on JAgentDesk: `paseo-plugin.json` → `jagentdesk-plugin.json`, the
+  `requirements.paseo` gate → `jagentdesk`, the SDK scope `@getpaseo|@paseo/plugin` →
+  `@jagentdesk/plugin` (the `/client` subpath collapses to the package root), and a Paseo
+  `index.client.*` entry is bridged to the fork's single `index.ts`. Git-source plugin
+  installation (previously stubbed out) is now wired end to end.
+- **Chat Find.** Cmd/Ctrl+F in the agent chat searches the whole conversation timeline —
+  the daemon locates matches across history, the web client highlights them with the CSS
+  Custom Highlight API, and next/previous step through every occurrence with a
+  whole-chat position count ("N of M"). Opens even when focus is in the composer.
+- **Terminal Find.** Cmd/Ctrl+F searches the terminal scrollback via `@xterm/addon-search`,
+  with a floating find widget, viewport preservation, and match decorations.
+- **Pending file attachments.** The composer shows attachments while they upload and keeps
+  the UI responsive during large uploads (chunked, yielding, abort-aware).
+- **Claude Opus 5.5** with its model capabilities (1M context, medium default effort,
+  always-on thinking).
+- **Team image attachments & authorization context.** Posts and team-chat messages carry
+  images; an operator can inject a persistent authorization/operator context that is
+  prepended to agent system prompts.
+
+### Changed
+
+- **Chronological history search** matches within a single whitespace-delimited word and
+  anchors highlight ranges to the matched word.
+- **Codex "Import session" reaches every conversation** — the adapter pages through Codex
+  `thread/list` (previously capped at the newest 100) with a `scanLimit`, bounded against
+  cursor cycles.
+- **Faster voice replies** — reduced reply latency in the speech pipeline.
+- **Team chat feels human and stays on-topic** — peers and the lead reply when a human
+  chats, reviewers (BA / Tester / Pentester) post their findings, the lead posts in
+  topics, peers no longer mis-identify as "lead", Enter sends in the chat composer, and
+  code blocks render cleanly instead of the oversized green box.
+
+### Fixed
+
+- **Team mode no longer creates duplicate agents/threads** — a race in bootstrap could turn
+  one requested agent into four; a dedupe guard (per-lead, race-safe) prevents it.
+- **Mobile team board** — the task detail opens as a slide-in panel that scrolls, instead
+  of a popup that could not be scrolled.
+- **Marketplace card** no longer nests an install `<button>` inside a `<button>` (invalid
+  HTML / hydration warning); the plugin detail sheet scrolls correctly on mobile; input
+  focus no longer paints a blue outline.
 
 ## v0.9.36 — 2026-09-18
 

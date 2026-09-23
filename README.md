@@ -67,8 +67,12 @@ with a few deliberate boundaries:
   PR); the tools are shared, so any agent can use them, and a mobile chat widget opens it anywhere.
 - **Skills** _(new)_ — reusable expertise agents **use** (attach many from the composer) and
   **learn** from real conversations; auto‑loaded by message, no hand‑typed corrections.
-- **Plugins** _(new)_ — extend the app with local, trusted code: surfaces, sidebar items,
-  workspace panels, command‑center items, attachment sources, and themes (off by default).
+- **Plugins & Marketplace** _(new)_ — extend the app with surfaces, sidebar items, workspace
+  panels, command‑center items, attachment sources, and themes. Browse the community catalog at
+  **paseo.cafe** from inside the app and install **any Paseo plugin** in one tap — it is
+  auto‑rebranded on install so it runs on JAgentDesk (off by default).
+- **Find in chat & terminal** _(new)_ — Cmd/Ctrl+F searches the whole chat timeline (highlight +
+  next/previous with a whole‑chat match count) and the terminal scrollback.
 - **Active‑turn steering** _(new)_ — send a message into a running turn without cancelling it.
 - **Agentic browser** _(new)_ — the agent drives a real built‑in browser (open tabs, click,
   evaluate) with **anti‑detect fingerprint profiles** (coherent per‑OS identity, proxy + WebRTC
@@ -93,6 +97,24 @@ with a few deliberate boundaries:
 ---
 
 ## ✨ New in this release
+
+### Plugin Marketplace + a Paseo 0.9.0/0.9.1 port (v0.9.37)
+
+- **Plugin & Theme Marketplace.** Browse **paseo.cafe** from the left sidebar — 106 community
+  plugins across 18 categories with search, filters, sort, an overview dashboard, a themes
+  gallery, and a detail sheet (screenshots, Markdown description, health, requirements). A
+  **Browse / Installed** tab pair shows what you already have; Browse loads more incrementally.
+- **Install any Paseo plugin, auto‑rebranded.** Installing clones the plugin's Git repo (monorepo
+  subdirectory URLs included) and rewrites the staging copy so it runs on JAgentDesk — manifest,
+  version gate, the `@getpaseo/@paseo/plugin` SDK scope, and the `index.client.*` entry are all
+  mapped automatically. Nothing touches the author's repo.
+- **Chat Find & Terminal Find.** Cmd/Ctrl+F searches the whole chat timeline (highlight +
+  next/previous with an "N of M" count, opens from the composer too) and the terminal scrollback.
+- **Pending attachments** show while uploading, with responsive chunked uploads.
+- **Claude Opus 5.5** (1M context, always‑on thinking) and **faster voice replies**.
+- **Codex "Import session"** now reaches every conversation instead of the newest 100.
+- **Team‑mode fixes** — no more duplicate agents/threads, a scrollable mobile task‑detail
+  slide‑in, human‑aware team chat with posting reviewers, Enter‑to‑send, and tidy code blocks.
 
 ### Team mode comes alive (v0.9.36)
 
