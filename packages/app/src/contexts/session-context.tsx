@@ -267,7 +267,12 @@ function finalizeTimelineApplication(input: {
     useCreateFlowStore.getState().clearByAgent({ serverId, agentId });
     const session = useSessionStore.getState().sessions[serverId];
     const agent = session?.agents.get(agentId) ?? session?.agentDetails.get(agentId);
-    if (agent && agent.status !== "running") {
+    // Only drain a queued message the first time the agent becomes ready (it just
+    // cleared initializing) — not on every later authoritative re-apply. Otherwise
+    // switching to another tab and back re-applies history and surprise-sends a
+    // message the user had queued. Queue-while-running is still drained by
+    // onAgentStoppedRunning when the turn ends.
+    if (result.clearInitializing && agent && agent.status !== "running") {
       getHostRuntimeStore().drainQueuedAgentMessage(serverId, agentId);
     }
   }
