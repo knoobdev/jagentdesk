@@ -5,6 +5,23 @@ own release line (now `0.9.38`); the many `v0.1.x`–`v1.0.x` tags in history ar
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
 
+## v0.9.39 — 2026-09-24
+
+A Docker Desktop-class container cockpit for watching and controlling the team's
+containers, and the return of in-app code editing for workspace files.
+
+### Added
+
+- **Realtime Docker cockpit.** A host screen that streams live `docker events` (no polling)
+  into a container table with Compose-project grouping, and a container detail view with
+  **Logs** (find/follow), **Stats**, **Inspect** (JSON tree), **Files**, and **Exec**. A
+  **Files** manager copies both ways with `docker cp`, offers a right-click context menu
+  (view / edit / rename / delete / mkdir) with native OS file/dir pickers, a bounded file
+  viewer, and volumes + images tabs. Columns collapse responsively on mobile.
+- **In-app code editing is back.** Workspace files open in a CodeMirror 6 editor (ported from
+  upstream) wired into the file pane, with autosave to disk. Viewing files and diffs still
+  works as before; editing is now available again alongside it.
+
 ## v0.9.38 — 2026-09-23
 
 A stronger agentic browser (it sees and reaches more of the page, and knows when to
