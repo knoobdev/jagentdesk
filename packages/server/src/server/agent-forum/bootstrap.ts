@@ -110,6 +110,15 @@ export function buildTeamLeadPrompt(topicId: string, originPrompt: string): stri
     "PHASE 5 — DONE:",
     '- When every task is done, post a final summary (kind "decision") and forum.set_phase "done".',
     "",
+    "FOLLOW-UPS (the boss asks for more in this topic, even after it was marked done):",
+    "- Treat it as NEW work inside THIS topic, and run the SAME cycle — never shortcut it. First",
+    '  forum.set_phase back to "building" if the topic was in review/done. Create the new task(s)',
+    "  (forum.create_task + forum.estimate_task). Then ALWAYS put a coder on each task before it can",
+    "  move on: spawn one (create_agent + send_agent_prompt) or forum.claim_task yourself, and",
+    '  forum.assign_task it. NEVER leave a task unassigned, and NEVER move a task to "review" until a',
+    "  coder has actually done the work — a task sitting in review with nobody assigned is a bug. Only",
+    "  after the coder finishes does it go to review (Phase 4).",
+    "",
     "Always forum.get_topic before acting to see the current thread + board. Here is the user's request:",
     "",
     originPrompt,
@@ -183,7 +192,10 @@ function isForumMention(text: string, label: string): boolean {
 // The wake prompt sent to a teammate when the human (boss) posts in the thread or chat. It always
 // steers them to re-read the topic (thread + board + chatMessages) so they answer with real context
 // instead of drifting off-topic, and to reply in the same channel + language the boss used.
-function buildForumHumanReplyReason(input: ForumNotifyInput): string {
+function buildForumHumanReplyReason(
+  input: ForumNotifyInput,
+  role: { isLead: boolean; isMentioned: boolean },
+): string {
   const where =
     input.kind === "chat"
       ? `the team CHAT room "#${input.roomName ?? "general"}"`
@@ -192,17 +204,32 @@ function buildForumHumanReplyReason(input: ForumNotifyInput): string {
     input.kind === "chat"
       ? "forum.chat (reply to / quote them in that same room)"
       : "forum.post_message (in the thread)";
+  const mustAnswer = role.isLead || role.isMentioned;
+  // The lead (and anyone @mentioned) must answer. Other teammates are woken so the team
+  // feels alive — they jump in when it's their area or they can add something, react/upvote
+  // when they just agree, and stay quiet rather than echo — but they should NOT all pile on.
+  const engagement = mustAnswer
+    ? [
+        `You need to respond. FIRST call forum.get_topic (topicId "${input.topicId}") to read the`,
+        "latest thread, board AND chatMessages for real context, THEN reply like a real teammate —",
+        `in the SAME language the boss used — with ${respondTool}. Answer what they actually said;`,
+        "if it's a decision only the boss can make, use forum.ask_human. You own making sure the boss",
+        "is never left hanging.",
+      ]
+    : [
+        `FIRST call forum.get_topic (topicId "${input.topicId}") to read the latest thread, board AND`,
+        "chatMessages. Then join in like a real teammate IF it's your area or you can add something",
+        `real — reply with ${respondTool} in the boss's language. If you just agree, react/upvote`,
+        "instead of repeating. It's fine to stay quiet if others have it covered — but don't all go",
+        "silent; the team should feel alive, so chime in naturally (and banter with teammates while",
+        "you're at it). Don't pile on identical answers.",
+      ];
   return [
     `The human (the boss) just wrote to the team in ${where} of forum topic ${input.topicId}:`,
     "",
     input.text.trim(),
     "",
-    `Don't ignore the boss. FIRST call forum.get_topic (topicId "${input.topicId}") to read the`,
-    "latest thread, board AND chatMessages so you actually have the context, THEN reply like a real",
-    `teammate — in the SAME language the boss used — with ${respondTool}. Answer what they actually`,
-    "said; stay on topic, don't drift into unrelated banter. If it's a decision only the boss can make,",
-    "use forum.ask_human. If a teammate is better placed to answer, loop them in, but still acknowledge",
-    "the boss yourself so they're never left hanging.",
+    ...engagement,
   ].join("\n");
 }
 
@@ -214,26 +241,38 @@ function buildForumHumanReplyReason(input: ForumNotifyInput): string {
  */
 export function createForumNotify(deps: ForumBootstrapDeps) {
   return async (input: ForumNotifyInput): Promise<void> => {
-    const recipients = new Set<string>();
-    if (input.leadAgentId && input.leadAgentId !== "user") {
-      recipients.add(input.leadAgentId);
-    }
+    const leadAgentId =
+      input.leadAgentId && input.leadAgentId !== "user" ? input.leadAgentId : null;
+    const mentioned = new Set<string>();
     for (const participant of input.participants) {
       if (participant.agentId === "user") continue;
       if (isForumMention(input.text, participant.label)) {
-        recipients.add(participant.agentId);
+        mentioned.add(participant.agentId);
       }
+    }
+    // Wake the WHOLE active team, not just the lead: the lead (and anyone @mentioned) must
+    // answer, while the other teammates are woken so peers actually reply and the chat/thread
+    // feels like a group. Their prompt tells them to chime in selectively (and banter), not
+    // pile on — so this revives peer replies + banter without N identical answers.
+    const recipients = new Set<string>();
+    if (leadAgentId) recipients.add(leadAgentId);
+    for (const participant of input.participants) {
+      if (participant.agentId === "user") continue;
+      recipients.add(participant.agentId);
     }
     if (recipients.size === 0) {
       deps.logger.info(
         { topicId: input.topicId, kind: input.kind },
-        "Forum human post has no lead/mentioned recipient to notify",
+        "Forum human post has no team recipient to notify",
       );
       return;
     }
-    const reason = buildForumHumanReplyReason(input);
     await Promise.all(
       [...recipients].map(async (agentId) => {
+        const reason = buildForumHumanReplyReason(input, {
+          isLead: agentId === leadAgentId,
+          isMentioned: mentioned.has(agentId),
+        });
         try {
           await sendPromptToAgent({
             agentManager: deps.agentManager,

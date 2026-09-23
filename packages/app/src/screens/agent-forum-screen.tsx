@@ -210,7 +210,9 @@ function toSummary(topic: StoredForumTopic): ForumTopicSummary {
     createdAt_ms: topic.createdAt_ms,
     updatedAt_ms: topic.updatedAt_ms,
     participantCount: topic.participants.length,
-    messageCount: topic.messages.length,
+    // "posts" means real discussion posts only — status/review/handback/system entries
+    // are board activity, counted and shown separately (ACTIVITY), never as posts.
+    messageCount: topic.messages.filter(isDiscussion).length,
     taskCount: topic.tasks.length,
     doneTaskCount: topic.tasks.filter((t) => t.status === "done").length,
     taskStatusCounts,
