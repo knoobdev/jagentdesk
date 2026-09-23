@@ -198,6 +198,11 @@ export function prepareBrowserWebview(
   webview.setAttribute("allowpopups", "true");
   webview.setAttribute("spellcheck", "false");
   webview.setAttribute("autosize", "on");
+  // Keep the guest running full-speed even when its tab is off screen: an agent
+  // routinely drives a tab that isn't the visible one, and Chromium's background
+  // throttling would otherwise stall its timers/rAF. Pairs with the CDP focus
+  // emulation enabled when the automation debugger attaches.
+  webview.setAttribute("webpreferences", "backgroundThrottling=false");
   if (input.initialUrl) {
     // Use the `src` ATTRIBUTE, not the `.src` property. The property setter
     // navigates the guest and requires the <webview> to already be attached +

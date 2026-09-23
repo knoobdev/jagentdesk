@@ -136,6 +136,17 @@ export function adaptWebContents(contents: BrowserAutomationWebContents): TabCon
       cdpQueue.run(async () => {
         if (!contents.debugger.isAttached()) {
           contents.debugger.attach("1.3");
+          // Treat an automated tab as focused so a backgrounded/hidden tab is not
+          // throttled — timers, requestAnimationFrame, and layout keep running while
+          // the agent drives it, instead of stalling because the tab isn't on screen.
+          // Best-effort: ignored on Chromium builds that don't support it.
+          try {
+            await contents.debugger.sendCommand("Emulation.setFocusEmulationEnabled", {
+              enabled: true,
+            });
+          } catch {
+            // Unsupported CDP method — the tab still works, just without focus emulation.
+          }
         }
         return contents.debugger.sendCommand(command, params ?? {});
       }),
@@ -392,36 +403,39 @@ function createRegistry(hostWebContentsId: number): BrowserRegistry {
 export function registerBrowserAutomationIpc(options?: { ipc?: IpcHandlerRegistry }): void {
   const ipc = options?.ipc ?? ipcMain;
 
-  ipc.handle("jagentdesk:browser:execute-automation-command", async (event, rawRequest: unknown) => {
-    const hostContents = (event as { sender?: HostWebContents }).sender;
-    const hostWebContentsId = hostContents?.id;
-    if (!hostContents || typeof hostWebContentsId !== "number") {
-      return {
-        requestId: readRequestId(rawRequest),
-        ok: false as const,
-        error: {
-          code: "browser_unsupported" as const,
-          message: "Browser automation requires a host window.",
-        },
-      };
-    }
-    const registry = createRegistry(hostWebContentsId);
-    const parsed = BrowserAutomationExecuteRequestSchema.safeParse(rawRequest);
-    if (!parsed.success) {
-      return {
-        requestId: readRequestId(rawRequest),
-        ok: false as const,
-        error: {
-          code: "browser_unsupported" as const,
-          message: `Invalid automation request: ${parsed.error.message}`,
-          retryable: false,
-        },
-      };
-    }
-    return executeAutomationCommand(parsed.data, registry, {
-      snapshotEngine: hostSnapshotEngines.get(hostContents),
-    });
-  });
+  ipc.handle(
+    "jagentdesk:browser:execute-automation-command",
+    async (event, rawRequest: unknown) => {
+      const hostContents = (event as { sender?: HostWebContents }).sender;
+      const hostWebContentsId = hostContents?.id;
+      if (!hostContents || typeof hostWebContentsId !== "number") {
+        return {
+          requestId: readRequestId(rawRequest),
+          ok: false as const,
+          error: {
+            code: "browser_unsupported" as const,
+            message: "Browser automation requires a host window.",
+          },
+        };
+      }
+      const registry = createRegistry(hostWebContentsId);
+      const parsed = BrowserAutomationExecuteRequestSchema.safeParse(rawRequest);
+      if (!parsed.success) {
+        return {
+          requestId: readRequestId(rawRequest),
+          ok: false as const,
+          error: {
+            code: "browser_unsupported" as const,
+            message: `Invalid automation request: ${parsed.error.message}`,
+            retryable: false,
+          },
+        };
+      }
+      return executeAutomationCommand(parsed.data, registry, {
+        snapshotEngine: hostSnapshotEngines.get(hostContents),
+      });
+    },
+  );
 }
 
 function readRequestId(rawRequest: unknown): string {
