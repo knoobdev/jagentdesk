@@ -5,6 +5,7 @@ import type {
   ForumChatRoom,
   ForumEstimate,
   ForumMessage,
+  ForumDiagram,
   ForumMessageKind,
   ForumParticipant,
   ForumReviewFinding,
@@ -281,6 +282,7 @@ export class AgentForumService {
         },
       ],
       chatMessages: [],
+      diagrams: [],
     };
     const created = await this.store.create(topic);
     this.emit(created);
@@ -354,6 +356,41 @@ export class AgentForumService {
       return topic;
     });
     return updated ? { topic: updated, roomId } : null;
+  }
+
+  // Publish a new version of the topic's architecture diagram (Mermaid). Each call appends a
+  // version so the human can step through how the design evolved (early ones can be wrong).
+  async setDiagram(
+    topicId: string,
+    input: {
+      title?: string;
+      source: string;
+      note?: string;
+      byAgentId: string;
+      byLabel: string;
+      role: ForumRole;
+    },
+  ): Promise<{ topic: StoredForumTopic; diagramId: string; version: number } | null> {
+    const diagramId = generateForumId("diagram");
+    let version = 1;
+    const updated = await this.mutate(topicId, (topic) => {
+      version = (topic.diagrams.at(-1)?.version ?? 0) + 1;
+      const diagram: ForumDiagram = {
+        id: diagramId,
+        version,
+        title: (input.title ?? "Architecture").trim().slice(0, 120) || "Architecture",
+        format: "mermaid",
+        source: input.source,
+        authorAgentId: input.byAgentId,
+        authorLabel: input.byLabel,
+        note: (input.note ?? "").slice(0, 500),
+        createdAt_ms: Date.now(),
+      };
+      topic.diagrams.push(diagram);
+      ensureParticipant(topic, input.byAgentId, input.byLabel, input.role);
+      return topic;
+    });
+    return updated ? { topic: updated, diagramId, version } : null;
   }
 
   // Post a banter message (text or a built-in sticker) into a room. Falls back to the "general" room

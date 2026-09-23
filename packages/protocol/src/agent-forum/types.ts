@@ -244,6 +244,23 @@ export const ForumChatRoomSchema = z.object({
 });
 export type ForumChatRoom = z.infer<typeof ForumChatRoomSchema>;
 
+// A versioned architecture diagram the team publishes so the human can see the system being
+// designed. Each entry is one VERSION (Mermaid source); the team revises it as the design
+// changes — the human can step back through the history because early architectures can be wrong
+// and get fixed. The newest version is the current one.
+export const ForumDiagramSchema = z.object({
+  id: z.string(),
+  version: z.number().int(),
+  title: z.string().default("Architecture"),
+  format: z.enum(["mermaid"]).default("mermaid"),
+  source: z.string(),
+  authorAgentId: z.string(),
+  authorLabel: z.string(),
+  note: z.string().default(""),
+  createdAt_ms: z.number().int(),
+});
+export type ForumDiagram = z.infer<typeof ForumDiagramSchema>;
+
 export const StoredForumTopicSchema = z.object({
   id: z.string(),
   // Project the topic belongs to (per-project persistence). Empty for host-global topics.
@@ -265,6 +282,9 @@ export const StoredForumTopicSchema = z.object({
   // alongside the work. Defaulted so older persisted topics load without them.
   chatRooms: z.array(ForumChatRoomSchema).default([]),
   chatMessages: z.array(ForumChatMessageSchema).default([]),
+  // Versioned architecture diagrams the team publishes (see ForumDiagram). Defaulted so older
+  // persisted topics load without them.
+  diagrams: z.array(ForumDiagramSchema).default([]),
   // Set when an agent is blocked on a human answer/approval (the id of the awaiting-human question
   // message + its text). Cleared when the human replies. Surfaced in the agent chat + thread.
   pendingHumanQuestion: z

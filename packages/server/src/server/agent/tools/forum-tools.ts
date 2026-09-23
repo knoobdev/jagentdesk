@@ -200,6 +200,46 @@ export function registerForumTools(params: {
   );
 
   registerTool(
+    "forum.set_diagram",
+    {
+      title: "Publish the architecture diagram",
+      description:
+        "Publish or update the topic's architecture diagram as a Mermaid graph so the human can see the " +
+        "system you're designing. Each call adds a NEW VERSION — revise it whenever the design changes; " +
+        "the human steps back through the versions (early designs can be wrong and get fixed). `source` is " +
+        "Mermaid syntax, e.g. 'graph TD; Client-->API; API-->DB'. Keep it clean, professional, and current " +
+        "with the real design the team agreed on.",
+      inputSchema: {
+        topicId: z.string(),
+        source: z.string().trim().min(1),
+        title: z.string().max(120).optional(),
+        note: z.string().max(500).optional(),
+      },
+    },
+    async ({ topicId, source, title, note }) => {
+      const { label: callerLabel, role: callerRole } = await resolveIdentity(topicId);
+      const result = await forum.setDiagram(topicId, {
+        source,
+        title,
+        note,
+        byAgentId: callerAgentId,
+        byLabel: callerLabel,
+        role: callerRole,
+      });
+      if (!result) return ack(null);
+      return {
+        content: [],
+        structuredContent: ensureValidJson({
+          ok: true,
+          topicId,
+          diagramId: result.diagramId,
+          version: result.version,
+        }),
+      };
+    },
+  );
+
+  registerTool(
     "forum.ask_human",
     {
       title: "Ask the human a question",

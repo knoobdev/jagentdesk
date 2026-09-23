@@ -8434,6 +8434,7 @@ export type {
   ForumChatMessageKind,
   ForumChatMessage,
   ForumChatRoom,
+  ForumDiagram,
   StoredForumTopic,
   ForumEpicStat,
   ForumTopicSummary,

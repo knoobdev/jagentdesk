@@ -28,7 +28,9 @@ import { MenuHeader } from "@/components/headers/menu-header";
 import { OfficeScene } from "@/screens/agent-forum-office";
 import { ChatTab } from "@/screens/agent-forum-chat";
 import { useHosts, useHostRuntimeClient } from "@/runtime/host-runtime";
+import { MarkdownRenderer } from "@/components/markdown/renderer";
 import type {
+  ForumDiagram,
   ForumEpicStat,
   ForumMessage,
   ForumReviewFinding,
@@ -937,6 +939,7 @@ const TopicThread = memo(function TopicThread({
               onTab={setTab}
               boardCount={topic.tasks.length}
               chatCount={topic.chatMessages.length}
+              archCount={topic.diagrams.length}
             />
           </View>
           {tab === "chat" ? <ChatTab topic={topic} client={client} /> : null}
@@ -977,6 +980,11 @@ const TopicThread = memo(function TopicThread({
               {tab === "board" ? (
                 <FadeIn key="board">
                   <KanbanBoard tasks={topic.tasks} onOpenTask={setOpenTaskId} />
+                </FadeIn>
+              ) : null}
+              {tab === "arch" ? (
+                <FadeIn key="arch">
+                  <DiagramTab diagrams={topic.diagrams} />
                 </FadeIn>
               ) : null}
               {tab === "office" ? (
@@ -1281,23 +1289,94 @@ const PostCard = memo(function PostCard({
   );
 });
 
-type ForumTab = "thread" | "board" | "office" | "chat";
+type ForumTab = "thread" | "board" | "office" | "chat" | "arch";
+
+const DiagramVersionPill = memo(function DiagramVersionPill({
+  diagram,
+  active,
+  onSelect,
+}: {
+  diagram: ForumDiagram;
+  active: boolean;
+  onSelect: (id: string) => void;
+}): ReactElement {
+  const handle = useCallback(() => onSelect(diagram.id), [onSelect, diagram.id]);
+  return (
+    <Pressable onPress={handle} style={[styles.versionPill, active ? styles.versionPillOn : null]}>
+      <Text style={[styles.versionPillTxt, active ? styles.versionPillTxtOn : null]}>
+        v{diagram.version}
+      </Text>
+    </Pressable>
+  );
+});
+
+// The ARCH tab: the team's architecture diagram (Mermaid), with a pill per version so the human
+// can step back through how the design evolved. Defaults to the newest version.
+const DiagramTab = memo(function DiagramTab({
+  diagrams,
+}: {
+  diagrams: ForumDiagram[];
+}): ReactElement {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const current = useMemo(() => {
+    if (diagrams.length === 0) return null;
+    return diagrams.find((d) => d.id === selectedId) ?? diagrams[diagrams.length - 1];
+  }, [diagrams, selectedId]);
+  if (!current) {
+    return (
+      <View style={styles.diagramEmpty}>
+        <Text style={styles.diagramEmptyText}>
+          No architecture diagram yet — the team publishes one with forum.set_diagram as the design
+          takes shape, and revises it as it changes.
+        </Text>
+      </View>
+    );
+  }
+  const mermaid = `\`\`\`mermaid\n${current.source}\n\`\`\``;
+  return (
+    <View style={styles.diagramWrap}>
+      {diagrams.length > 1 ? (
+        <View style={styles.diagramVersions}>
+          {diagrams.map((d) => (
+            <DiagramVersionPill
+              key={d.id}
+              diagram={d}
+              active={d.id === current.id}
+              onSelect={setSelectedId}
+            />
+          ))}
+        </View>
+      ) : null}
+      <Text style={styles.diagramTitle}>
+        {current.title} · v{current.version}
+      </Text>
+      <Text style={styles.diagramMeta}>
+        by {current.authorLabel}
+        {current.note ? ` — ${current.note}` : ""}
+      </Text>
+      <MarkdownRenderer text={mermaid} />
+    </View>
+  );
+});
 
 const TabBar = memo(function TabBar({
   tab,
   onTab,
   boardCount,
   chatCount,
+  archCount,
 }: {
   tab: ForumTab;
   onTab: (t: ForumTab) => void;
   boardCount: number;
   chatCount: number;
+  archCount: number;
 }): ReactElement {
   const onThread = useCallback(() => onTab("thread"), [onTab]);
   const onBoard = useCallback(() => onTab("board"), [onTab]);
   const onOffice = useCallback(() => onTab("office"), [onTab]);
   const onChat = useCallback(() => onTab("chat"), [onTab]);
+  const onArch = useCallback(() => onTab("arch"), [onTab]);
   return (
     <View style={styles.tabBar}>
       <Pressable
@@ -1317,6 +1396,11 @@ const TabBar = memo(function TabBar({
       <Pressable onPress={onChat} style={[styles.tabBtn, tab === "chat" ? styles.tabBtnOn : null]}>
         <Text style={[styles.tabTxt, tab === "chat" ? styles.tabTxtOn : null]}>
           CHAT{chatCount > 0 ? ` · ${chatCount}` : ""}
+        </Text>
+      </Pressable>
+      <Pressable onPress={onArch} style={[styles.tabBtn, tab === "arch" ? styles.tabBtnOn : null]}>
+        <Text style={[styles.tabTxt, tab === "arch" ? styles.tabTxtOn : null]}>
+          ARCH{archCount > 0 ? ` · ${archCount}` : ""}
         </Text>
       </Pressable>
       <Pressable
@@ -2123,6 +2207,24 @@ const styles = StyleSheet.create((_theme) => ({
     textTransform: "uppercase",
   },
   repScore: { fontFamily: FONT_MONO, fontSize: 12, fontWeight: "700" },
+  // architecture diagram tab
+  diagramWrap: { gap: 8, paddingVertical: 4 },
+  diagramVersions: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  versionPill: {
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.card,
+  },
+  versionPillOn: { borderColor: C.amber, backgroundColor: C.cardAlt },
+  versionPillTxt: { color: C.muted, fontFamily: FONT_MONO, fontSize: 12 },
+  versionPillTxtOn: { color: C.amber },
+  diagramTitle: { color: C.text, fontFamily: FONT_MONO, fontSize: 14 },
+  diagramMeta: { color: C.muted, fontFamily: FONT_MONO, fontSize: 11 },
+  diagramEmpty: { padding: 16 },
+  diagramEmptyText: { color: C.muted, fontFamily: FONT_MONO, fontSize: 12, lineHeight: 18 },
   // activity rows (status/review/system — not discussion posts)
   activityRow: {
     flexDirection: "row",
