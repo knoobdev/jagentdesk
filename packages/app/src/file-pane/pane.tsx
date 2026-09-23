@@ -1,12 +1,20 @@
 import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import type { DaemonClient, FileReadResult } from "@jagentdesk/client/internal/daemon-client";
 import { Image as RNImage, ScrollView as RNScrollView, Text, View } from "react-native";
 import { StyleSheet, UnistylesRuntime, withUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
 import { MarkdownRenderer } from "@/components/markdown/renderer";
 import { useIsCompactFormFactor } from "@/constants/layout";
+import { isWeb } from "@/constants/platform";
 import { useSessionStore, type ExplorerFile } from "@/stores/session-store";
 import { highlightCode, type HighlightToken } from "@jagentdesk/highlight";
 import { syntaxTokenStyleFor } from "@/styles/syntax-token-styles";
@@ -14,6 +22,13 @@ import { inlineUnistylesStyle } from "@/styles/unistyles-inline-style";
 import { lineNumberGutterWidth } from "@/components/code-insets";
 import { CODE_SURFACE_DATASET } from "@/styles/code-surface";
 import { filePreviewRenderKind } from "@/components/file-pane-render-mode";
+import { confirmDialog } from "@/utils/confirm-dialog";
+import { usePublishPanelInstanceAttributes } from "@/panels/panel-instance-attributes";
+import { FileEditorModel, getFileConflictCallout, type FileConflictCallout } from "./editor/model";
+import { createFileObservationSource } from "./editor/observation-source";
+import { FileEditorView } from "./editor/view";
+import { FileConflictAlert, type FileConflictAlertState } from "./conflict-alert";
+import type { LiveFileModel } from "./live-file/model";
 import type { AttachmentMetadata } from "@/attachments/types";
 import { useAttachmentPreviewUrl } from "@/attachments/use-attachment-preview-url";
 import { persistAttachmentFromBytes } from "@/attachments/service";
@@ -457,11 +472,29 @@ export function FilePane({
     preview?.kind === "text" ? (preview.content ?? "").split("\n").length : undefined;
   const errorMessage = getFileErrorMessage(liveFile.error, t("panels.file.failedToLoad"));
 
+  // COMPAT(workspaceFileEditing): the daemon advertises this once it supports fs.file.write.
+  const supportsEditing = useSessionStore(
+    (state) => state.sessions[serverId]?.serverInfo?.features?.workspaceFileEditing === true,
+  );
+  // Edit plain code/text files in place (web only). Rendered markdown/HTML and line-target
+  // navigation stay in the read-only preview; a size cap keeps CodeMirror responsive.
+  const editable = Boolean(
+    isWeb &&
+    supportsEditing &&
+    preview?.kind === "text" &&
+    preview.size <= 1024 * 1024 &&
+    !location.lineStart &&
+    filePreviewRenderKind(location.path) === null,
+  );
+
   return (
     <FilePanePresentation
+      serverId={serverId}
       client={client}
       readTarget={readTarget}
       preview={preview}
+      liveFileModel={liveFile.model}
+      editable={editable}
       onRetryRead={liveFile.refresh}
       retryingRead={liveFile.isRetrying}
       retryLabel={t("common.actions.retry")}
@@ -484,9 +517,12 @@ function getFileErrorMessage(error: unknown, fallback: string): string | null {
 }
 
 function FilePanePresentation({
+  serverId,
   client,
   readTarget,
   preview,
+  liveFileModel,
+  editable,
   onRetryRead,
   retryingRead,
   retryLabel,
@@ -499,9 +535,12 @@ function FilePanePresentation({
   navigationRevision,
   imagePreviewUri,
 }: {
+  serverId: string;
   client: DaemonClient | null;
   readTarget: { cwd: string; path: string } | null;
   preview: ExplorerFile | null;
+  liveFileModel: LiveFileModel;
+  editable: boolean;
   onRetryRead: () => void;
   retryingRead: boolean;
   retryLabel: string;
@@ -521,6 +560,24 @@ function FilePanePresentation({
           <Text style={styles.errorText}>{disconnectedMessage}</Text>
         </View>
       </View>
+    );
+  }
+
+  if (editable && client && readTarget && preview?.kind === "text") {
+    return (
+      <EditableFilePane
+        key={`${serverId}:${readTarget.cwd}:${readTarget.path}`}
+        client={client}
+        cwd={readTarget.cwd}
+        path={readTarget.path}
+        preview={preview}
+        liveFileModel={liveFileModel}
+        filename={getFileNameFromPath(location.path) ?? location.path}
+        location={location}
+        navigationRevision={navigationRevision}
+        onRetryRead={onRetryRead}
+        retryingRead={retryingRead}
+      />
     );
   }
 
@@ -552,11 +609,200 @@ function FilePanePresentation({
   );
 }
 
+function fileConflictAlertState(input: {
+  callout: FileConflictCallout | null;
+  onOverwrite: () => void;
+  onReload: () => void;
+  onRetry: () => void;
+  retrying: boolean;
+}): FileConflictAlertState | null {
+  const callout = input.callout;
+  if (!callout) return null;
+  if (callout.kind === "changed") {
+    return {
+      kind: "changed",
+      canOverwrite: callout.canOverwrite,
+      onReload: input.onReload,
+      onOverwrite: input.onOverwrite,
+    };
+  }
+  if (callout.kind === "deleted") return { kind: "deleted" };
+  return { kind: "checkFailed", retrying: input.retrying, onRetry: input.onRetry };
+}
+
+const noopCursor = (_position: { line: number; column: number }): void => {};
+const noopVimMode = (_mode: string | null): void => {};
+
+function EditableFilePane({
+  client,
+  cwd,
+  path,
+  preview,
+  liveFileModel,
+  filename,
+  location,
+  navigationRevision,
+  onRetryRead,
+  retryingRead,
+}: {
+  client: DaemonClient;
+  cwd: string;
+  path: string;
+  preview: ExplorerFile;
+  liveFileModel: LiveFileModel;
+  filename: string;
+  location: WorkspaceFileLocation;
+  navigationRevision: number;
+  onRetryRead: () => void;
+  retryingRead: boolean;
+}) {
+  const { t } = useTranslation();
+  const theme = UnistylesRuntime.getTheme();
+  const session = useMemo(
+    () => ({
+      write(input: { content: string; expectedModifiedAt: string; expectedRevision?: string }) {
+        return client.writeFile({ cwd, path, ...input });
+      },
+    }),
+    [client, cwd, path],
+  );
+  const [model] = useState(
+    () =>
+      new FileEditorModel({
+        file: {
+          content: preview.content ?? "",
+          hasBom: preview.hasBom,
+          version: {
+            status: "ready",
+            cwd,
+            path,
+            size: preview.size,
+            modifiedAt: preview.modifiedAt,
+            revision: preview.revision,
+          },
+        },
+        session,
+      }),
+  );
+  useEffect(() => {
+    const source = createFileObservationSource(liveFileModel);
+    model.connectFileObservations(source);
+    return () => model.disconnectFileObservations();
+  }, [liveFileModel, model]);
+  useEffect(() => () => model.dispose(), [model]);
+
+  const snapshot = useSyncExternalStore(model.subscribe, model.getSnapshot, model.getSnapshot);
+  const suspendPendingSave = useCallback(() => model.suspendAutosave(), [model]);
+  usePublishPanelInstanceAttributes({ modified: snapshot.modified, suspendPendingSave });
+
+  const visualTheme = useMemo(
+    () => ({
+      background: theme.colors.surface0,
+      foreground: theme.colors.foreground,
+      foregroundMuted: theme.colors.foregroundMuted,
+      border: theme.colors.border,
+      cursor: theme.colors.terminal.cursor,
+      selection: theme.colors.terminal.selectionBackground,
+      monoFont: theme.fontFamily.mono,
+      codeFontSize: theme.fontSize.code,
+      syntax: theme.colors.syntax,
+    }),
+    [
+      theme.colors.border,
+      theme.colors.foreground,
+      theme.colors.foregroundMuted,
+      theme.colors.surface0,
+      theme.colors.syntax,
+      theme.colors.terminal.cursor,
+      theme.colors.terminal.selectionBackground,
+      theme.fontFamily.mono,
+      theme.fontSize.code,
+    ],
+  );
+
+  const handleReload = useCallback(() => {
+    if (!snapshot.modified) {
+      void model.reload();
+      return;
+    }
+    void (async () => {
+      const confirmed = await confirmDialog({
+        title: t("panels.file.editor.reloadTitle"),
+        message: t("panels.file.editor.reloadMessage"),
+        confirmLabel: t("panels.file.editor.reload"),
+        destructive: true,
+      });
+      if (confirmed) void model.reload();
+    })();
+  }, [model, snapshot.modified, t]);
+  const handleOverwrite = useCallback(() => void model.overwrite(), [model]);
+  const conflict = fileConflictAlertState({
+    callout: getFileConflictCallout(snapshot),
+    onOverwrite: handleOverwrite,
+    onReload: handleReload,
+    onRetry: onRetryRead,
+    retrying: retryingRead,
+  });
+
+  let statusLabel: string | null = null;
+  if (snapshot.status === "saving") statusLabel = t("panels.file.editor.saving");
+  else if (snapshot.status === "dirty") statusLabel = t("panels.file.editor.unsavedChanges");
+  else if (snapshot.status === "error") statusLabel = snapshot.error;
+
+  return (
+    <View style={styles.container} testID="workspace-file-pane">
+      <FilePanelBar
+        size={
+          snapshot.observedVersion.status === "ready" ? snapshot.observedVersion.size : preview.size
+        }
+        lineCount={snapshot.content.split("\n").length}
+      />
+      {statusLabel ? (
+        <View style={styles.editorStatusRow}>
+          <Text
+            style={[
+              styles.editorStatusText,
+              snapshot.status === "error" ? styles.editorStatusError : null,
+            ]}
+          >
+            {statusLabel}
+          </Text>
+        </View>
+      ) : null}
+      {conflict ? <FileConflictAlert state={conflict} /> : null}
+      <FileEditorView
+        model={model}
+        filename={filename}
+        location={location}
+        navigationRevision={navigationRevision}
+        vimEnabled={false}
+        theme={visualTheme}
+        onCursorChange={noopCursor}
+        onVimModeChange={noopVimMode}
+      />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create((theme) => ({
   container: {
     flex: 1,
     minHeight: 0,
     backgroundColor: theme.colors.surface0,
+  },
+  editorStatusRow: {
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[1],
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+  },
+  editorStatusText: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+  },
+  editorStatusError: {
+    color: theme.colors.destructive,
   },
   centerState: {
     flex: 1,
