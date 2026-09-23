@@ -98,6 +98,19 @@ with a few deliberate boundaries:
 
 ## ✨ New in this release
 
+### A stronger browser agent + fixes (v0.9.38)
+
+- **Sees & clicks inside web components and iframes** — the page snapshot pierces open shadow
+  DOM and recurses into same-origin iframes, so custom-element internals and embedded frames
+  are visible and clickable (hit-test + click coordinates follow through both).
+- **Scrolls on its own** — snapshots report scroll position and tell the agent to scroll for
+  more content below the fold before giving up, so you don't have to prompt it to keep looking.
+- **Automated tabs stay full-speed off screen** (focus emulation + no background throttling).
+- **Fixes:** marketplace install of Paseo plugins that import `@getpaseo/plugin/client/*`;
+  switching agent tabs no longer re-sends a queued message; Team-mode forum post count is
+  accurate, peers (not just the lead) reply and banter again, and a follow-up in a finished
+  thread reopens and assigns a coder instead of leaving a task unassigned in review.
+
 ### Plugin Marketplace + a Paseo 0.9.0/0.9.1 port (v0.9.37)
 
 - **Plugin & Theme Marketplace.** Browse **paseo.cafe** from the left sidebar — 106 community

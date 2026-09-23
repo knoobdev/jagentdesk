@@ -1,9 +1,44 @@
 # Changelog
 
 All notable changes to JAgentDesk are documented here. JAgentDesk versions its
-own release line (now `0.9.37`); the many `v0.1.x`–`v1.0.x` tags in history are
+own release line (now `0.9.38`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
+
+## v0.9.38 — 2026-09-23
+
+A stronger agentic browser (it sees and reaches more of the page, and knows when to
+scroll), plus fixes to the marketplace install, agent-tab handling, and Team-mode forum.
+
+### Added
+
+- **The browser agent sees and clicks inside web components and iframes.** The page
+  snapshot now pierces open **shadow DOM** and recurses into **same-origin iframes**, so
+  elements rendered inside custom elements or embedded frames get refs and are clickable
+  (the click hit-test and coordinates follow through shadow roots and into frames). Modern
+  component-based sites and embedded forms/editors are no longer invisible to the agent.
+- **The browser agent scrolls on its own.** Every snapshot reports scroll position and, when
+  the page is scrollable with content below the fold (or the snapshot was truncated), tells
+  the agent to scroll and snapshot again before concluding something isn't there — so you no
+  longer have to prompt it to "scroll down and look".
+- **Automated tabs stay full-speed off screen.** Focus emulation + disabled background
+  throttling keep an agent-driven tab's timers and layout running when it isn't the visible
+  tab.
+
+### Fixed
+
+- **Marketplace install of Paseo plugins** that import `@getpaseo/plugin/client/react-native`
+  (and other client subpaths) — the rebrand now maps every Paseo SDK subpath onto the fork's
+  real entry points, so installs no longer fail with "subpath not defined by exports".
+- **Switching agent tabs no longer re-sends a queued message.** A message queued while an
+  agent was initializing was re-drained every time authoritative history re-applied; returning
+  to the tab surprise-sent it. It now drains only when the agent first becomes ready.
+- **Team-mode forum:** the thread post count now counts only real discussion posts (status /
+  review / handback / system entries are activity, counted separately) instead of showing an
+  inflated total; peers — not just the lead — reply when the human writes and banter again
+  (the whole active team is woken, with role-aware prompts so they don't pile on); and a
+  follow-up request in a finished thread now reopens to building and always assigns a coder
+  instead of leaving a task unassigned in review.
 
 ## v0.9.37 — 2026-09-23
 
