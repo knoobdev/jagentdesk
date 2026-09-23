@@ -259,6 +259,15 @@ export const ARIA_SNAPSHOT_SCRIPT = String.raw`(() => {
       if (childSnapshot) children.push(childSnapshot);
       if (truncated) break;
     }
+    // Pierce open shadow roots so web-component internals (buttons, inputs, links
+    // rendered inside a custom element) are visible and actionable, not just the host.
+    if (domNode.shadowRoot) {
+      for (const shadowChild of Array.from(domNode.shadowRoot.childNodes)) {
+        if (truncated) break;
+        const childSnapshot = visitNode(shadowChild, depth + 1);
+        if (childSnapshot) children.push(childSnapshot);
+      }
+    }
 
     if (domNode.tagName.toLowerCase() === 'iframe') {
       iframeCount += 1;

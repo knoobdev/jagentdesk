@@ -146,9 +146,30 @@ function buildActionabilityScript(input: {
         Number(style.opacity || '1') !== 0
       );
     };
+    // elementFromPoint stops at a shadow host, so descend through open shadow roots to
+    // find the element that would actually receive the event.
+    const deepElementFromPoint = (x, y) => {
+      let node = document.elementFromPoint(x, y);
+      while (node && node.shadowRoot) {
+        const inner = node.shadowRoot.elementFromPoint(x, y);
+        if (!inner || inner === node) break;
+        node = inner;
+      }
+      return node;
+    };
+    // The click reaches the target if the hit is the target, a descendant of it, or the
+    // target is an ancestor across shadow boundaries (walk up via host).
     const hitTargetReceivesEvents = (element, point) => {
-      const hit = document.elementFromPoint(point.x, point.y);
-      return Boolean(hit && (hit === element || element.contains(hit)));
+      const hit = deepElementFromPoint(point.x, point.y);
+      if (!hit) return false;
+      if (hit === element || element.contains(hit)) return true;
+      let node = hit;
+      while (node) {
+        if (node === element) return true;
+        const root = node.getRootNode ? node.getRootNode() : null;
+        node = node.parentNode || (root && root.host) || null;
+      }
+      return false;
     };
     const resolveElement = () => (${input.elementExpression});
 
