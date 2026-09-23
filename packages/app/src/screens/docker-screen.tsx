@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Dimensions, Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import {
   ArrowDownToLine,
   ArrowLeft,
@@ -35,6 +35,7 @@ import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useWorkspaceDirectory, useWorkspaceKeys } from "@/stores/session-store-hooks";
+import { getDesktopHost } from "@/desktop/host";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useHostRuntimeClient, useHosts } from "@/runtime/host-runtime";
 import { Skeleton, useSkeletonPulse } from "@/components/ui/skeleton";
@@ -58,6 +59,21 @@ type DetailTab = "logs" | "inspect" | "stats" | "files" | "exec";
 
 function randomId(prefix: string): string {
   return `${prefix}-${Math.random().toString(36).slice(2)}`;
+}
+
+// Native OS file/folder dialog (Electron). Returns a path on the machine running the desktop app
+// — which is the daemon host for a local daemon, exactly what `docker cp` needs.
+async function pickHostPath(mode: "dir" | "file"): Promise<string | null> {
+  const open = getDesktopHost()?.dialog?.open;
+  if (typeof open !== "function") return null;
+  const sel = await open({
+    directory: mode === "dir",
+    multiple: false,
+    createDirectory: mode === "dir",
+  });
+  if (typeof sel === "string") return sel;
+  if (Array.isArray(sel)) return sel[0] ?? null;
+  return null;
 }
 
 // Cmd/Ctrl+F toggles an in-panel find bar; Escape closes it. Web-only (Electron renderer).
@@ -207,6 +223,7 @@ function ContainerRow({
   const remove = useCallback(() => onAction(container.id, "remove"), [onAction, container.id]);
   const open = useCallback(() => onOpen(container.id), [onOpen, container.id]);
 
+  const compact = useIsCompactFormFactor();
   return (
     <Pressable style={[styles.trow, nested ? styles.trowNested : null]} onPress={open}>
       <View style={styles.colName}>
@@ -217,18 +234,22 @@ function ContainerRow({
             : container.name || container.id.slice(0, 12)}
         </Text>
       </View>
-      <Text style={[styles.cell, styles.colImage]} numberOfLines={1}>
-        {container.image}
-      </Text>
+      {compact ? null : (
+        <Text style={[styles.cell, styles.colImage]} numberOfLines={1}>
+          {container.image}
+        </Text>
+      )}
       <Text
         style={[styles.cell, styles.colStatus, running ? styles.statusRunning : null]}
         numberOfLines={1}
       >
         {container.status}
       </Text>
-      <Text style={[styles.cell, styles.colPorts]} numberOfLines={1}>
-        {container.ports || "—"}
-      </Text>
+      {compact ? null : (
+        <Text style={[styles.cell, styles.colPorts]} numberOfLines={1}>
+          {container.ports || "—"}
+        </Text>
+      )}
       <View style={styles.colActions}>
         {running ? (
           <IconBtn icon={ThemedSquare} tint={fg} label="Stop" onPress={stop} disabled={busy} />
@@ -258,12 +279,13 @@ function ContainerRow({
 }
 
 function TableHead() {
+  const compact = useIsCompactFormFactor();
   return (
     <View style={styles.thead}>
       <Text style={[styles.th, styles.colNameHead]}>NAME</Text>
-      <Text style={[styles.th, styles.colImage]}>IMAGE</Text>
+      {compact ? null : <Text style={[styles.th, styles.colImage]}>IMAGE</Text>}
       <Text style={[styles.th, styles.colStatus]}>STATUS</Text>
-      <Text style={[styles.th, styles.colPorts]}>PORTS</Text>
+      {compact ? null : <Text style={[styles.th, styles.colPorts]}>PORTS</Text>}
       <View style={styles.colActions} />
     </View>
   );
@@ -458,6 +480,7 @@ function ImageRow({
   const ref = image.repository === "<none>" ? image.id : `${image.repository}:${image.tag}`;
   const run = useCallback(() => onAction(ref, "run"), [onAction, ref]);
   const remove = useCallback(() => onAction(ref, "remove"), [onAction, ref]);
+  const compact = useIsCompactFormFactor();
   return (
     <View style={styles.trow}>
       <View style={styles.colNameWide}>
@@ -468,9 +491,11 @@ function ImageRow({
       <Text style={[styles.cell, styles.colStatus]} numberOfLines={1}>
         {image.size}
       </Text>
-      <Text style={[styles.cell, styles.colPorts]} numberOfLines={1}>
-        {image.createdSince}
-      </Text>
+      {compact ? null : (
+        <Text style={[styles.cell, styles.colPorts]} numberOfLines={1}>
+          {image.createdSince}
+        </Text>
+      )}
       <View style={styles.colActions}>
         <IconBtn icon={ThemedPlay} tint={green} label="Run" onPress={run} disabled={busy} />
         <IconBtn
@@ -500,6 +525,7 @@ function ImagesPanel({
   onPull: () => void;
   onAction: (ref: string, action: DockerImageAction) => void;
 }) {
+  const compact = useIsCompactFormFactor();
   return (
     <>
       <View style={styles.pullRow}>
@@ -534,7 +560,7 @@ function ImagesPanel({
           <View style={styles.thead}>
             <Text style={[styles.th, styles.colNameWide]}>REPOSITORY:TAG</Text>
             <Text style={[styles.th, styles.colStatus]}>SIZE</Text>
-            <Text style={[styles.th, styles.colPorts]}>CREATED</Text>
+            {compact ? null : <Text style={[styles.th, styles.colPorts]}>CREATED</Text>}
             <View style={styles.colActions} />
           </View>
           {images.map((img) => (
@@ -562,6 +588,7 @@ function VolumeRow({
   onRemove: (name: string) => void;
 }) {
   const remove = useCallback(() => onRemove(volume.name), [onRemove, volume.name]);
+  const compact = useIsCompactFormFactor();
   return (
     <View style={styles.trow}>
       <View style={styles.colNameWide}>
@@ -573,9 +600,11 @@ function VolumeRow({
       <Text style={[styles.cell, styles.colStatus]} numberOfLines={1}>
         {volume.driver}
       </Text>
-      <Text style={[styles.cell, styles.colPorts]} numberOfLines={1}>
-        {volume.scope}
-      </Text>
+      {compact ? null : (
+        <Text style={[styles.cell, styles.colPorts]} numberOfLines={1}>
+          {volume.scope}
+        </Text>
+      )}
       <View style={styles.colActions}>
         <IconBtn
           icon={ThemedTrash}
@@ -600,6 +629,7 @@ function VolumesPanel({
   onPrune: () => void;
   onRemove: (name: string) => void;
 }) {
+  const compact = useIsCompactFormFactor();
   return (
     <>
       <View style={styles.pullRow}>
@@ -620,7 +650,7 @@ function VolumesPanel({
           <View style={styles.thead}>
             <Text style={[styles.th, styles.colNameWide]}>NAME</Text>
             <Text style={[styles.th, styles.colStatus]}>DRIVER</Text>
-            <Text style={[styles.th, styles.colPorts]}>SCOPE</Text>
+            {compact ? null : <Text style={[styles.th, styles.colPorts]}>SCOPE</Text>}
             <View style={styles.colActions} />
           </View>
           {volumes.map((v) => (
@@ -1325,7 +1355,15 @@ function RowMenu({
   onAction: (action: MenuAction) => void;
   onClose: () => void;
 }) {
-  const pos = useMemo(() => ({ left: Math.min(x, 1200), top: y }), [x, y]);
+  // Kebabs sit at the right edge, so open the menu to the LEFT of the cursor and keep it on-screen.
+  const pos = useMemo(() => {
+    const win = Dimensions.get("window");
+    const menuW = 180;
+    const menuH = entry.isDir ? 100 : 176;
+    const left = Math.max(8, Math.min(x - menuW, win.width - menuW - 8));
+    const top = Math.max(8, Math.min(y, win.height - menuH - 8));
+    return { left, top };
+  }, [x, y, entry.isDir]);
   return (
     <Modal transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.overlayBackdrop} onPress={onClose}>
@@ -1487,181 +1525,59 @@ function FileViewer({
 
   return (
     <Modal transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.overlayFull}>
-        <View style={styles.viewerHeader}>
-          <ThemedFile size={15} uniProps={muted} />
-          <Text style={styles.viewerTitle} numberOfLines={1}>
-            {name}
-          </Text>
-          {truncated ? <Text style={styles.viewerBadge}>truncated</Text> : null}
-          <View style={styles.headerSpacer} />
-          {editing ? (
-            <Pressable
-              style={[styles.btn, styles.btnPrimary, saving && styles.btnDisabled]}
-              onPress={save}
-              disabled={saving}
-            >
-              <Text style={styles.btnPrimaryText}>{saving ? "Saving…" : "Save"}</Text>
-            </Pressable>
-          ) : (
-            <Pressable style={[styles.btn, styles.btnGhost]} onPress={startEdit}>
-              <ThemedPencil size={13} uniProps={fg} />
-              <Text style={styles.btnGhostText}>Edit</Text>
-            </Pressable>
-          )}
-          <Pressable style={styles.iconBtn} onPress={onClose} accessibilityLabel="Close">
-            <ThemedX size={18} uniProps={muted} />
-          </Pressable>
-        </View>
-        {error ? (
-          <View style={styles.errorBanner}>
-            <ThemedCircleAlert size={15} uniProps={red} />
-            <Text style={styles.errorText}>{error}</Text>
-          </View>
-        ) : null}
-        {editing ? (
-          <ThemedTextInput
-            style={styles.viewerEditor}
-            value={draft}
-            onChangeText={setDraft}
-            multiline
-            autoCapitalize="none"
-            autoCorrect={false}
-            uniProps={placeholderColor}
-          />
-        ) : (
-          <ScrollView style={styles.console} contentContainerStyle={styles.consoleContent}>
-            <Text style={styles.consoleText} selectable>
-              {content ?? (error ? "" : "Loading…")}
-            </Text>
-          </ScrollView>
-        )}
-      </View>
-    </Modal>
-  );
-}
-
-interface HostEntry {
-  name: string;
-  path: string;
-  kind: "file" | "directory";
-}
-
-function HostPicker({
-  client,
-  mode,
-  initialPath,
-  onPick,
-  onClose,
-}: {
-  client: DaemonClient | null;
-  mode: "dir" | "file";
-  initialPath: string;
-  onPick: (path: string) => void;
-  onClose: () => void;
-}) {
-  const [path, setPath] = useState(initialPath || "/");
-  const [entries, setEntries] = useState<HostEntry[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  const load = useCallback(
-    async (p: string) => {
-      if (!client) return;
-      setLoading(true);
-      setError(null);
-      try {
-        const dir = await client.listDirectory(p, p);
-        setEntries(dir.entries as HostEntry[]);
-        setPath(dir.path);
-      } catch (e: unknown) {
-        setError(e instanceof Error ? e.message : "Failed to list");
-      } finally {
-        setLoading(false);
-      }
-    },
-    [client],
-  );
-  useEffect(() => {
-    void load(initialPath || "/");
-  }, [load, initialPath]);
-
-  const up = useCallback(() => void load(parentPath(path)), [load, path]);
-  const choose = useCallback(() => onPick(path), [onPick, path]);
-  const shown = mode === "dir" ? entries.filter((e) => e.kind === "directory") : entries;
-
-  return (
-    <Modal transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.overlayCenter} onPress={onClose}>
-        <Pressable style={styles.picker}>
-          <View style={styles.pickerHeader}>
-            <Pressable style={styles.iconBtn} onPress={up} accessibilityLabel="Up">
-              <ThemedFolderUp size={16} uniProps={fg} />
-            </Pressable>
-            <Text style={styles.filesPathText} numberOfLines={1}>
-              {path}
+        <Pressable style={styles.viewerPanel}>
+          <View style={styles.viewerHeader}>
+            <ThemedFile size={15} uniProps={muted} />
+            <Text style={styles.viewerTitle} numberOfLines={1}>
+              {name}
             </Text>
+            {truncated ? <Text style={styles.viewerBadge}>truncated</Text> : null}
             <View style={styles.headerSpacer} />
+            {editing ? (
+              <Pressable
+                style={[styles.btn, styles.btnPrimary, saving && styles.btnDisabled]}
+                onPress={save}
+                disabled={saving}
+              >
+                <Text style={styles.btnPrimaryText}>{saving ? "Saving…" : "Save"}</Text>
+              </Pressable>
+            ) : (
+              <Pressable style={[styles.btn, styles.btnGhost]} onPress={startEdit}>
+                <ThemedPencil size={13} uniProps={fg} />
+                <Text style={styles.btnGhostText}>Edit</Text>
+              </Pressable>
+            )}
             <Pressable style={styles.iconBtn} onPress={onClose} accessibilityLabel="Close">
               <ThemedX size={18} uniProps={muted} />
             </Pressable>
           </View>
           {error ? (
-            <View style={styles.errorBanner}>
+            <View style={styles.viewerError}>
               <ThemedCircleAlert size={15} uniProps={red} />
               <Text style={styles.errorText}>{error}</Text>
             </View>
           ) : null}
-          <ScrollView style={styles.pickerList}>
-            {loading && shown.length === 0 ? (
-              <Text style={styles.consoleHint}>Loading…</Text>
-            ) : (
-              shown.map((e) => (
-                <HostPickerRow key={e.path} entry={e} mode={mode} onNav={load} onPick={onPick} />
-              ))
-            )}
-          </ScrollView>
-          {mode === "dir" ? (
-            <View style={styles.dialogActions}>
-              <Pressable style={[styles.btn, styles.btnPrimary]} onPress={choose}>
-                <Text style={styles.btnPrimaryText}>Use this folder</Text>
-              </Pressable>
-            </View>
-          ) : null}
+          {editing ? (
+            <ThemedTextInput
+              style={styles.viewerEditor}
+              value={draft}
+              onChangeText={setDraft}
+              multiline
+              autoCapitalize="none"
+              autoCorrect={false}
+              uniProps={placeholderColor}
+            />
+          ) : (
+            <ScrollView style={styles.viewerBody} contentContainerStyle={styles.consoleContent}>
+              <Text style={styles.consoleText} selectable>
+                {content ?? (error ? "" : "Loading…")}
+              </Text>
+            </ScrollView>
+          )}
         </Pressable>
       </Pressable>
     </Modal>
-  );
-}
-
-function HostPickerRow({
-  entry,
-  mode,
-  onNav,
-  onPick,
-}: {
-  entry: HostEntry;
-  mode: "dir" | "file";
-  onNav: (path: string) => void;
-  onPick: (path: string) => void;
-}) {
-  const press = useCallback(() => {
-    if (entry.kind === "directory") onNav(entry.path);
-    else if (mode === "file") onPick(entry.path);
-  }, [entry, mode, onNav, onPick]);
-  return (
-    <Pressable style={styles.trow} onPress={press}>
-      <View style={styles.colNameWide}>
-        {entry.kind === "directory" ? (
-          <ThemedFolder size={15} uniProps={fg} />
-        ) : (
-          <ThemedFile size={15} uniProps={muted} />
-        )}
-        <Text style={styles.cellStrong} numberOfLines={1}>
-          {entry.name}
-        </Text>
-      </View>
-    </Pressable>
   );
 }
 
@@ -1712,10 +1628,7 @@ function FilesTab({
   const [prompt, setPrompt] = useState<{ kind: "rename" | "mkdir"; entry?: DockerFsEntry } | null>(
     null,
   );
-  const [picker, setPicker] = useState<{
-    mode: "dir" | "file";
-    target: "hostDir" | "import";
-  } | null>(null);
+  const hasNativePicker = typeof getDesktopHost()?.dialog?.open === "function";
 
   const onOpen = useCallback(
     (entry: DockerFsEntry) => {
@@ -1732,8 +1645,18 @@ function FilesTab({
     [],
   );
   const openMkdir = useCallback(() => setPrompt({ kind: "mkdir" }), []);
-  const openHostDirPicker = useCallback(() => setPicker({ mode: "dir", target: "hostDir" }), []);
-  const openImportPicker = useCallback(() => setPicker({ mode: "file", target: "import" }), []);
+  const browseHostDir = useCallback(() => {
+    void pickHostPath("dir").then((p) => {
+      if (p) setHostDir(p);
+      return undefined;
+    });
+  }, []);
+  const browseImport = useCallback(() => {
+    void pickHostPath("file").then((p) => {
+      if (p) setImportPath(p);
+      return undefined;
+    });
+  }, []);
 
   const copyToHost = useCallback(
     async (name: string) => {
@@ -1842,10 +1765,12 @@ function FilesTab({
             autoCorrect={false}
             uniProps={placeholderColor}
           />
-          <Pressable style={[styles.btn, styles.btnGhost]} onPress={openHostDirPicker}>
-            <ThemedFolder size={14} uniProps={fg} />
-            <Text style={styles.btnGhostText}>Browse</Text>
-          </Pressable>
+          {hasNativePicker ? (
+            <Pressable style={[styles.btn, styles.btnGhost]} onPress={browseHostDir}>
+              <ThemedFolder size={14} uniProps={fg} />
+              <Text style={styles.btnGhostText}>Browse</Text>
+            </Pressable>
+          ) : null}
         </View>
         <View style={styles.filesCpRow}>
           <ThemedTextInput
@@ -1857,10 +1782,12 @@ function FilesTab({
             autoCorrect={false}
             uniProps={placeholderColor}
           />
-          <Pressable style={[styles.btn, styles.btnGhost]} onPress={openImportPicker}>
-            <ThemedFile size={14} uniProps={fg} />
-            <Text style={styles.btnGhostText}>Browse</Text>
-          </Pressable>
+          {hasNativePicker ? (
+            <Pressable style={[styles.btn, styles.btnGhost]} onPress={browseImport}>
+              <ThemedFile size={14} uniProps={fg} />
+              <Text style={styles.btnGhostText}>Browse</Text>
+            </Pressable>
+          ) : null}
           <Pressable
             style={[
               styles.btn,
@@ -1892,20 +1819,15 @@ function FilesTab({
         client={client}
         containerId={container.id}
         path={path}
-        hostDir={hostDir}
         refresh={refresh}
         setError={setError}
         setNotice={setNotice}
-        setHostDir={setHostDir}
-        setImportPath={setImportPath}
         menu={menu}
         setMenu={setMenu}
         viewer={viewer}
         setViewer={setViewer}
         prompt={prompt}
         setPrompt={setPrompt}
-        picker={picker}
-        setPicker={setPicker}
       />
     </>
   );
@@ -1914,44 +1836,32 @@ function FilesTab({
 type MenuState = { entry: DockerFsEntry; x: number; y: number } | null;
 type ViewerState = { path: string; name: string; edit: boolean } | null;
 type PromptState = { kind: "rename" | "mkdir"; entry?: DockerFsEntry } | null;
-type PickerState = { mode: "dir" | "file"; target: "hostDir" | "import" } | null;
-
 function FilesOverlays({
   client,
   containerId,
   path,
-  hostDir,
   refresh,
   setError,
   setNotice,
-  setHostDir,
-  setImportPath,
   menu,
   setMenu,
   viewer,
   setViewer,
   prompt,
   setPrompt,
-  picker,
-  setPicker,
 }: {
   client: DaemonClient | null;
   containerId: string;
   path: string;
-  hostDir: string;
   refresh: () => void;
   setError: (v: string | null) => void;
   setNotice: (v: string | null) => void;
-  setHostDir: (v: string) => void;
-  setImportPath: (v: string) => void;
   menu: MenuState;
   setMenu: (v: MenuState) => void;
   viewer: ViewerState;
   setViewer: (v: ViewerState) => void;
   prompt: PromptState;
   setPrompt: (v: PromptState) => void;
-  picker: PickerState;
-  setPicker: (v: PickerState) => void;
 }) {
   const runOp = useCallback(
     async (fn: () => Promise<{ error: string | null }>, successMsg: string) => {
@@ -2017,16 +1927,6 @@ function FilesOverlays({
     },
     [client, prompt, containerId, path, runOp, setPrompt],
   );
-  const closePicker = useCallback(() => setPicker(null), [setPicker]);
-  const onPickerPick = useCallback(
-    (picked: string) => {
-      if (picker?.target === "hostDir") setHostDir(picked);
-      else if (picker?.target === "import") setImportPath(picked);
-      setPicker(null);
-    },
-    [picker, setHostDir, setImportPath, setPicker],
-  );
-
   return (
     <>
       {menu ? (
@@ -2056,15 +1956,6 @@ function FilesOverlays({
           confirmLabel={prompt.kind === "mkdir" ? "Create" : "Rename"}
           onSubmit={onPromptSubmit}
           onClose={closePrompt}
-        />
-      ) : null}
-      {picker ? (
-        <HostPicker
-          client={client}
-          mode={picker.mode}
-          initialPath={hostDir}
-          onPick={onPickerPick}
-          onClose={closePicker}
         />
       ) : null}
     </>
@@ -2213,7 +2104,7 @@ function ContainerDetail({
       </ScrollView>
 
       <View style={styles.detailTabsWrap}>
-        <View style={styles.tabRow}>
+        <View style={isCompact ? styles.tabRowWrap : styles.tabRow}>
           <TabButton label="Logs" active={tab === "logs"} onPress={showLogs} />
           <TabButton label="Stats" active={tab === "stats"} onPress={showStats} />
           <TabButton label="Inspect" active={tab === "inspect"} onPress={showInspect} />
@@ -2940,6 +2831,17 @@ const styles = StyleSheet.create((theme) => ({
     marginTop: theme.spacing[2],
     marginBottom: theme.spacing[1],
   },
+  tabRowWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: theme.spacing[1],
+    padding: theme.spacing[1],
+    backgroundColor: theme.colors.surface1,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.lg,
+    alignSelf: "stretch",
+  },
   tabBody: {
     flex: 1,
     minHeight: 0,
@@ -3115,10 +3017,6 @@ const styles = StyleSheet.create((theme) => ({
     backgroundColor: "rgba(0,0,0,0.35)",
     padding: theme.spacing[4],
   },
-  overlayFull: {
-    flex: 1,
-    backgroundColor: theme.colors.surface0,
-  },
   menu: {
     position: "absolute",
     minWidth: 160,
@@ -3162,37 +3060,25 @@ const styles = StyleSheet.create((theme) => ({
     justifyContent: "flex-end",
     gap: theme.spacing[2],
   },
-  picker: {
-    width: 560,
+  viewerPanel: {
+    width: 900,
     maxWidth: "100%",
-    height: 480,
+    height: 640,
     maxHeight: "100%",
-    gap: theme.spacing[2],
-    padding: theme.spacing[3],
     borderRadius: theme.borderRadius.lg,
     borderWidth: theme.borderWidth[1],
     borderColor: theme.colors.border,
     backgroundColor: theme.colors.surface0,
-  },
-  pickerHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing[2],
-  },
-  pickerList: {
-    flex: 1,
-    minHeight: 0,
-    borderRadius: theme.borderRadius.md,
-    borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.border,
+    overflow: "hidden",
   },
   viewerHeader: {
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[2],
-    paddingHorizontal: theme.spacing[4],
-    paddingTop: theme.spacing[3],
-    paddingBottom: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
   },
   viewerTitle: {
     fontSize: theme.fontSize.base,
@@ -3204,15 +3090,22 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.xs,
     color: theme.colors.palette.amber[700],
   },
+  viewerError: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    padding: theme.spacing[2],
+    backgroundColor: theme.colors.palette.red[100],
+  },
+  viewerBody: {
+    flex: 1,
+    minHeight: 0,
+    backgroundColor: theme.colors.palette.zinc[900],
+  },
   viewerEditor: {
     flex: 1,
     minHeight: 0,
-    margin: theme.spacing[4],
-    marginTop: theme.spacing[2],
     padding: theme.spacing[3],
-    borderRadius: theme.borderRadius.lg,
-    borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.border,
     backgroundColor: theme.colors.palette.zinc[900],
     color: theme.colors.palette.zinc[100],
     fontFamily: "monospace",
