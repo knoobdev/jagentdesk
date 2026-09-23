@@ -125,7 +125,7 @@ export function registerBrowserTools(options: RegisterBrowserToolsOptions): void
     {
       title: "Snapshot browser page",
       description:
-        "Return a model-readable snapshot of a JAgentDesk browser tab. Use browserId from browser_new_tab or browser_list_tabs; refs come from the latest browser_snapshot of the same tab and expire when the page changes.",
+        "Return a model-readable snapshot of a JAgentDesk browser tab. Use browserId from browser_new_tab or browser_list_tabs; refs come from the latest browser_snapshot of the same tab and expire when the page changes. The snapshot shows only what is currently in the DOM; if a [hint] line says the page is scrollable with content below the fold, or the target you need is not present, scroll the page yourself with browser_scroll and snapshot again (repeat to load infinite-scroll/lazy content) before telling the user it isn't there — do not wait to be asked to scroll.",
       inputSchema: {
         browserId: BrowserAutomationBrowserIdSchema,
       },

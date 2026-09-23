@@ -123,7 +123,9 @@ describe("BrowserSnapshotEngine", () => {
     const snapshot = await engine.snapshot({ browserId: "browser-1", page });
 
     expect(snapshot.truncated).toBe(true);
-    expect(snapshot.snapshot.endsWith('- text: "Snapshot truncated."')).toBe(true);
+    expect(snapshot.snapshot).toContain('- text: "Snapshot truncated."');
+    // A truncated snapshot appends a discovery hint so the agent keeps looking.
+    expect(snapshot.snapshot).toContain("[hint]");
     expect(snapshot.stats.textLength).toBeLessThanOrEqual(80_000);
   });
 
@@ -153,7 +155,7 @@ describe("BrowserSnapshotEngine", () => {
     const snapshot = await engine.snapshot({ browserId: "browser-1", page });
 
     expect(snapshot.truncated).toBe(true);
-    expect(snapshot.snapshot).toBe(
+    expect(snapshot.snapshot).toContain(
       [
         '- document "Fixture"',
         '  - button "Final action" [ref=@e1]',

@@ -40,11 +40,18 @@ interface BrowserRefFingerprint {
   ariaLabel: string;
 }
 
+interface SnapshotScroll {
+  top: number;
+  height: number;
+  viewport: number;
+}
+
 interface RawAriaSnapshot {
   marker: string;
   root: SnapshotNode;
   refs: BrowserRefMetadata[];
   truncated: boolean;
+  scroll: SnapshotScroll;
   stats: BrowserAriaSnapshotStats;
 }
 
@@ -77,9 +84,17 @@ export class BrowserSnapshotEngine {
     this.statesByBrowserId.set(input.browserId, {
       refs: new Map(rawSnapshot.refs.map((ref) => [ref.ref, ref])),
     });
+    const hints = snapshotDiscoveryHints({
+      truncated: capped.truncated,
+      scroll: rawSnapshot.scroll,
+    });
+    const snapshotText =
+      hints.length > 0
+        ? `${capped.snapshot}\n\n${hints.map((hint) => `[hint] ${hint}`).join("\n")}`
+        : capped.snapshot;
     return {
       format: "aria-yaml",
-      snapshot: capped.snapshot,
+      snapshot: snapshotText,
       truncated: capped.truncated,
       stats: {
         ...rawSnapshot.stats,
@@ -177,8 +192,40 @@ function parseAriaSnapshot(value: unknown): RawAriaSnapshot {
     root: root ?? emptySnapshot().root,
     refs: parseRefs(record.refs),
     truncated: record.truncated === true,
+    scroll: parseScroll(record.scroll),
     stats: parseStats(record.stats),
   };
+}
+
+function parseScroll(value: unknown): SnapshotScroll {
+  const record = (value ?? {}) as Record<string, unknown>;
+  const viewport = readNumber(record.viewport) ?? 0;
+  return {
+    top: readNumber(record.top) ?? 0,
+    height: readNumber(record.height) ?? viewport,
+    viewport,
+  };
+}
+
+// A short, model-facing note appended to the snapshot so the agent knows to keep
+// looking (scroll / narrow scope) instead of concluding content isn't there.
+function snapshotDiscoveryHints(input: { truncated: boolean; scroll: SnapshotScroll }): string[] {
+  const hints: string[] = [];
+  if (input.truncated) {
+    hints.push(
+      "This snapshot was truncated (node/character cap) — more content exists. Scroll (browser_scroll) or act on a narrower part of the page before concluding something is absent.",
+    );
+  }
+  const { top, height, viewport } = input.scroll;
+  const below = height - top - viewport;
+  if (viewport > 0 && below > 8) {
+    const total = Math.max(height - viewport, 1);
+    const percent = Math.min(100, Math.max(0, Math.round((top / total) * 100)));
+    hints.push(
+      `The page is scrollable and only partly shown: about ${percent}% down, roughly ${Math.round(below)}px still below the fold. If you don't see what you need, scroll down (browser_scroll) to reveal or lazy-load more before giving up — the user should not have to ask.`,
+    );
+  }
+  return hints;
 }
 
 function emptySnapshot(): RawAriaSnapshot {
@@ -187,6 +234,7 @@ function emptySnapshot(): RawAriaSnapshot {
     root: { kind: "role", role: "document", name: "", tagName: "document", children: [] },
     refs: [],
     truncated: false,
+    scroll: { top: 0, height: 0, viewport: 0 },
     stats: { nodeCount: 0, refCount: 0, textLength: 0, iframeCount: 0, maxDepth: 0 },
   };
 }

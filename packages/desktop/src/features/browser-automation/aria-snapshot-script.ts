@@ -334,6 +334,15 @@ export const ARIA_SNAPSHOT_SCRIPT = String.raw`(() => {
       return { ref, fingerprint: fingerprintFor(element, role, name) };
     }),
     truncated,
+    scroll: (() => {
+      const scroller = document.scrollingElement || document.documentElement;
+      const viewport = window.innerHeight || (scroller && scroller.clientHeight) || 0;
+      return {
+        top: Math.round((scroller && scroller.scrollTop) || 0),
+        height: Math.round((scroller && scroller.scrollHeight) || viewport),
+        viewport: Math.round(viewport),
+      };
+    })(),
     stats: { nodeCount, refCount, textLength: 0, iframeCount, maxDepth }
   });
 })()`;
