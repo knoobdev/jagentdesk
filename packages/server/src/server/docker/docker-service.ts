@@ -2,6 +2,8 @@ import { execCommand } from "../../utils/spawn.js";
 import type {
   DockerAction,
   DockerContainer,
+  DockerCpDirection,
+  DockerFsEntry,
   DockerImage,
   DockerImageAction,
   DockerStats,
@@ -84,6 +86,35 @@ export class DockerService {
     } else {
       await execCommand("docker", ["rmi", image], { timeout: 60_000 });
     }
+  }
+
+  async fsList(container: string, path: string): Promise<DockerFsEntry[]> {
+    // `-1` one per line, `-A` all but . / .., `-p` marks directories with a trailing slash.
+    // Portable across coreutils and busybox (alpine).
+    const result = await execCommand("docker", ["exec", container, "ls", "-1Ap", "--", path], {
+      timeout: 30_000,
+      maxBuffer: 8 * 1024 * 1024,
+    });
+    return (result.stdout ?? "")
+      .split("\n")
+      .map((line) => line.replace(/\r$/, ""))
+      .filter((line) => line.length > 0)
+      .map((line) => {
+        const isDir = line.endsWith("/");
+        return { name: isDir ? line.slice(0, -1) : line, isDir };
+      })
+      .sort((a, b) => Number(b.isDir) - Number(a.isDir) || a.name.localeCompare(b.name));
+  }
+
+  async cp(
+    container: string,
+    direction: DockerCpDirection,
+    containerPath: string,
+    hostPath: string,
+  ): Promise<void> {
+    const spec = `${container}:${containerPath}`;
+    const args = direction === "to_host" ? ["cp", spec, hostPath] : ["cp", hostPath, spec];
+    await execCommand("docker", args, { timeout: 120_000, maxBuffer: 8 * 1024 * 1024 });
   }
 
   async volumeAction(name: string, action: DockerVolumeAction): Promise<void> {

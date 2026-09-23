@@ -107,6 +107,35 @@ export const DockerActionRequestSchema = req("docker/action", {
 export const DockerActionResponseSchema = resp("docker/action/response", {});
 export type DockerActionPayload = z.infer<typeof DockerActionResponseSchema>["payload"];
 
+// ── files: browse container fs + copy between container and daemon host ──
+export const DockerFsEntrySchema = z.object({
+  name: z.string(),
+  isDir: z.boolean(),
+});
+export type DockerFsEntry = z.infer<typeof DockerFsEntrySchema>;
+
+export const DockerFsListRequestSchema = req("docker/fs/list", {
+  container: z.string(),
+  path: z.string(),
+});
+export const DockerFsListResponseSchema = resp("docker/fs/list/response", {
+  path: z.string(),
+  entries: z.array(DockerFsEntrySchema),
+});
+export type DockerFsListPayload = z.infer<typeof DockerFsListResponseSchema>["payload"];
+
+export const DockerCpDirectionSchema = z.enum(["to_host", "to_container"]);
+export type DockerCpDirection = z.infer<typeof DockerCpDirectionSchema>;
+
+export const DockerCpRequestSchema = req("docker/cp", {
+  container: z.string(),
+  direction: DockerCpDirectionSchema,
+  containerPath: z.string(),
+  hostPath: z.string(),
+});
+export const DockerCpResponseSchema = resp("docker/cp/response", {});
+export type DockerCpPayload = z.infer<typeof DockerCpResponseSchema>["payload"];
+
 // Unsolicited server→client push, keyed by subscriptionId (no requestId).
 function push<T extends string, S extends z.ZodRawShape>(type: T, extra: S) {
   return z.object({
@@ -215,6 +244,8 @@ export const DockerRequestSchemas = [
   DockerExecRequestSchema,
   DockerImageActionRequestSchema,
   DockerVolumeActionRequestSchema,
+  DockerFsListRequestSchema,
+  DockerCpRequestSchema,
 ] as const;
 
 export const DockerResponseSchemas = [
@@ -231,6 +262,8 @@ export const DockerResponseSchemas = [
   DockerExecResponseSchema,
   DockerImageActionResponseSchema,
   DockerVolumeActionResponseSchema,
+  DockerFsListResponseSchema,
+  DockerCpResponseSchema,
 ] as const;
 
 // Unsolicited server→client pushes (subscription streams).

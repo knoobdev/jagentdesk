@@ -1,14 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import {
+  ArrowDownToLine,
   ArrowLeft,
   Boxes,
   ChevronDown,
   ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
   CircleAlert,
   Container as ContainerIcon,
   Copy,
   Download,
+  File as FileIcon,
+  Folder,
+  FolderUp,
   HardDrive,
   Pause,
   Play,
@@ -16,8 +22,10 @@ import {
   Search,
   Square,
   Trash2,
+  Upload,
+  X,
 } from "lucide-react-native";
-import type { ComponentType, ReactNode } from "react";
+import type { ComponentType } from "react";
 import * as Clipboard from "expo-clipboard";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -32,6 +40,7 @@ import type { Theme } from "@/styles/theme";
 import type {
   DockerAction,
   DockerContainer,
+  DockerFsEntry,
   DockerImage,
   DockerImageAction,
   DockerStats,
@@ -41,10 +50,59 @@ import type {
 
 const RUNNING_STATES = new Set(["running", "restarting"]);
 type DockerTab = "containers" | "images" | "volumes";
-type DetailTab = "logs" | "inspect" | "stats" | "exec";
+type DetailTab = "logs" | "inspect" | "stats" | "files" | "exec";
 
 function randomId(prefix: string): string {
   return `${prefix}-${Math.random().toString(36).slice(2)}`;
+}
+
+// Cmd/Ctrl+F toggles an in-panel find bar; Escape closes it. Web-only (Electron renderer).
+function useCmdF(onToggle: () => void, onClose: () => void) {
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        onToggle();
+      } else if (e.key === "Escape") {
+        onClose();
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onToggle, onClose]);
+}
+
+function FindBar({
+  query,
+  count,
+  onQuery,
+  onClose,
+}: {
+  query: string;
+  count: number;
+  onQuery: (v: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <View style={styles.findBar}>
+      <ThemedSearch size={13} uniProps={muted} />
+      <ThemedTextInput
+        style={styles.findInput}
+        value={query}
+        onChangeText={onQuery}
+        placeholder="Find"
+        autoCapitalize="none"
+        autoCorrect={false}
+        autoFocus
+        uniProps={placeholderColor}
+      />
+      <Text style={styles.findCount}>{query ? `${count}` : ""}</Text>
+      <Pressable style={styles.iconBtn} onPress={onClose} accessibilityLabel="Close find">
+        <ThemedX size={14} uniProps={muted} />
+      </Pressable>
+    </View>
+  );
 }
 
 function StatusDot({ state }: { state: string }) {
@@ -71,6 +129,14 @@ const ThemedSearch = withUnistyles(Search);
 const ThemedSquare = withUnistyles(Square);
 const ThemedTrash = withUnistyles(Trash2);
 const ThemedTextInput = withUnistyles(TextInput);
+const ThemedArrowDown = withUnistyles(ArrowDownToLine);
+const ThemedCollapseAll = withUnistyles(ChevronsDownUp);
+const ThemedExpandAll = withUnistyles(ChevronsUpDown);
+const ThemedFile = withUnistyles(FileIcon);
+const ThemedFolder = withUnistyles(Folder);
+const ThemedFolderUp = withUnistyles(FolderUp);
+const ThemedUpload = withUnistyles(Upload);
+const ThemedX = withUnistyles(X);
 
 const fg = (theme: Theme) => ({ color: theme.colors.foreground });
 const muted = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
@@ -567,14 +633,17 @@ function LogsTab({
   container: DockerContainer;
 }) {
   const [text, setText] = useState("");
+  const [stuck, setStuck] = useState(true);
+  const [findOpen, setFindOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const scrollRef = useRef<ScrollView>(null);
-  // Stick to the bottom (live tail) until the reader scrolls up, then stop fighting them.
-  const stick = useRef(true);
+  const stickRef = useRef(true);
   useEffect(() => {
     if (!client) return;
     const subscriptionId = randomId("dlogs");
     setText("");
-    stick.current = true;
+    stickRef.current = true;
+    setStuck(true);
     const off = client.onDockerLogChunk(subscriptionId, ({ chunk }) => {
       setText((prev) => (prev + chunk).slice(-400_000));
     });
@@ -584,8 +653,16 @@ function LogsTab({
       client.dockerLogsUnsubscribe({ subscriptionId });
     };
   }, [client, container.id]);
+
+  const toggleFind = useCallback(() => setFindOpen((v) => !v), []);
+  const closeFind = useCallback(() => {
+    setFindOpen(false);
+    setQuery("");
+  }, []);
+  useCmdF(toggleFind, closeFind);
+
   const onContentSizeChange = useCallback(() => {
-    if (stick.current) scrollRef.current?.scrollToEnd({ animated: false });
+    if (stickRef.current) scrollRef.current?.scrollToEnd({ animated: false });
   }, []);
   const onScroll = useCallback(
     (e: {
@@ -596,72 +673,359 @@ function LogsTab({
       };
     }) => {
       const { layoutMeasurement, contentOffset, contentSize } = e.nativeEvent;
-      stick.current = layoutMeasurement.height + contentOffset.y >= contentSize.height - 48;
+      const atBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - 48;
+      stickRef.current = atBottom;
+      setStuck(atBottom);
     },
     [],
   );
+  const jumpToBottom = useCallback(() => {
+    stickRef.current = true;
+    setStuck(true);
+    scrollRef.current?.scrollToEnd({ animated: true });
+  }, []);
+
+  const q = query.trim().toLowerCase();
+  const shown = useMemo(() => {
+    if (!q) return text;
+    return text
+      .split("\n")
+      .filter((line) => line.toLowerCase().includes(q))
+      .join("\n");
+  }, [text, q]);
+  const matchCount = useMemo(
+    () => (q ? shown.split("\n").filter((l) => l.length > 0).length : 0),
+    [shown, q],
+  );
+
   return (
-    <ScrollView
-      ref={scrollRef}
-      style={styles.console}
-      contentContainerStyle={styles.consoleContent}
-      onContentSizeChange={onContentSizeChange}
-      onScroll={onScroll}
-      scrollEventThrottle={80}
-    >
-      <Text style={styles.consoleText} selectable>
-        {text || "Waiting for output…"}
-      </Text>
-    </ScrollView>
+    <View style={styles.tabBody}>
+      {findOpen ? (
+        <FindBar query={query} count={matchCount} onQuery={setQuery} onClose={closeFind} />
+      ) : null}
+      <View style={styles.consoleWrap}>
+        <ScrollView
+          ref={scrollRef}
+          style={styles.console}
+          contentContainerStyle={styles.consoleContent}
+          onContentSizeChange={onContentSizeChange}
+          onScroll={onScroll}
+          scrollEventThrottle={80}
+        >
+          <Text style={styles.consoleText} selectable>
+            {shown || (q ? "No matching lines." : "Waiting for output…")}
+          </Text>
+        </ScrollView>
+        {stuck ? null : (
+          <Pressable
+            style={styles.followBtn}
+            onPress={jumpToBottom}
+            accessibilityLabel="Follow logs"
+          >
+            <ThemedArrowDown size={16} uniProps={accentFg} />
+            <Text style={styles.followText}>Follow</Text>
+          </Pressable>
+        )}
+      </View>
+    </View>
   );
 }
 
-// Lightweight JSON syntax highlighting for the Inspect tab — keys, strings, numbers,
-// booleans/null get distinct colors so the config reads like an editor, not a dump.
-const JSON_TOKEN =
-  /("(?:\\.|[^"\\])*")(\s*:)?|\b(true|false|null)\b|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g;
+// ── collapsible JSON viewer for Inspect: fold/expand, line numbers, colors, find ──
+type JsonKind = "key" | "str" | "num" | "kw" | "punct" | "muted" | "plain";
+interface JsonToken {
+  t: string;
+  k: JsonKind;
+}
+interface JsonRow {
+  id: string;
+  depth: number;
+  tokens: JsonToken[];
+  path: string;
+  collapsible: boolean;
+}
 
-function JsonHighlight({ text }: { text: string }) {
-  const nodes = useMemo(() => {
-    const out: ReactNode[] = [];
-    let last = 0;
-    let key = 0;
-    let match: RegExpExecArray | null;
-    JSON_TOKEN.lastIndex = 0;
-    while ((match = JSON_TOKEN.exec(text)) !== null) {
-      if (match.index > last) out.push(text.slice(last, match.index));
-      const [whole, str, colon, keyword, num] = match;
-      if (str !== undefined) {
-        out.push(
-          <Text key={key++} style={colon ? styles.jsonKey : styles.jsonStr}>
-            {str}
-          </Text>,
-        );
-        if (colon) out.push(colon);
-      } else if (keyword !== undefined) {
-        out.push(
-          <Text key={key++} style={styles.jsonKeyword}>
-            {keyword}
-          </Text>,
-        );
-      } else if (num !== undefined) {
-        out.push(
-          <Text key={key++} style={styles.jsonNum}>
-            {num}
-          </Text>,
-        );
-      } else {
-        out.push(whole);
+// Module-level cache so the indent spacer's style object isn't recreated each render.
+const jsonIndentCache = new Map<number, { width: number }>();
+function jsonIndent(depth: number): { width: number } {
+  let s = jsonIndentCache.get(depth);
+  if (!s) {
+    s = { width: depth * 14 };
+    jsonIndentCache.set(depth, s);
+  }
+  return s;
+}
+
+function primitiveToken(val: unknown): JsonToken {
+  if (typeof val === "string") return { t: JSON.stringify(val), k: "str" };
+  if (typeof val === "number") return { t: String(val), k: "num" };
+  if (typeof val === "boolean" || val === null) return { t: String(val), k: "kw" };
+  return { t: String(val), k: "plain" };
+}
+
+function buildJsonRows(
+  root: unknown,
+  collapsed: ReadonlySet<string>,
+  forceExpand: boolean,
+): { rows: JsonRow[]; collapsiblePaths: string[] } {
+  const rows: JsonRow[] = [];
+  const collapsiblePaths: string[] = [];
+  const keyToks = (key: string | undefined): JsonToken[] =>
+    key === undefined
+      ? []
+      : [
+          { t: JSON.stringify(key), k: "key" },
+          { t: ": ", k: "punct" },
+        ];
+
+  const walk = (
+    key: string | undefined,
+    val: unknown,
+    depth: number,
+    path: string,
+    comma: boolean,
+  ) => {
+    const tail = comma ? "," : "";
+    if (Array.isArray(val)) {
+      if (val.length === 0) {
+        rows.push({
+          id: path,
+          depth,
+          path,
+          collapsible: false,
+          tokens: [...keyToks(key), { t: `[]${tail}`, k: "punct" }],
+        });
+        return;
       }
-      last = match.index + whole.length;
+      collapsiblePaths.push(path);
+      const isCollapsed = !forceExpand && collapsed.has(path);
+      if (isCollapsed) {
+        rows.push({
+          id: path,
+          depth,
+          path,
+          collapsible: true,
+          tokens: [
+            ...keyToks(key),
+            { t: "[", k: "punct" },
+            { t: ` ⋯ ${val.length} `, k: "muted" },
+            { t: `]${tail}`, k: "punct" },
+          ],
+        });
+      } else {
+        rows.push({
+          id: path,
+          depth,
+          path,
+          collapsible: true,
+          tokens: [...keyToks(key), { t: "[", k: "punct" }],
+        });
+        val.forEach((v, i) => walk(undefined, v, depth + 1, `${path}/${i}`, i < val.length - 1));
+        rows.push({
+          id: `${path}~c`,
+          depth,
+          path,
+          collapsible: false,
+          tokens: [{ t: `]${tail}`, k: "punct" }],
+        });
+      }
+    } else if (val && typeof val === "object") {
+      const keys = Object.keys(val as Record<string, unknown>);
+      if (keys.length === 0) {
+        rows.push({
+          id: path,
+          depth,
+          path,
+          collapsible: false,
+          tokens: [...keyToks(key), { t: `{}${tail}`, k: "punct" }],
+        });
+        return;
+      }
+      collapsiblePaths.push(path);
+      const isCollapsed = !forceExpand && collapsed.has(path);
+      if (isCollapsed) {
+        rows.push({
+          id: path,
+          depth,
+          path,
+          collapsible: true,
+          tokens: [
+            ...keyToks(key),
+            { t: "{", k: "punct" },
+            { t: ` ⋯ ${keys.length} `, k: "muted" },
+            { t: `}${tail}`, k: "punct" },
+          ],
+        });
+      } else {
+        rows.push({
+          id: path,
+          depth,
+          path,
+          collapsible: true,
+          tokens: [...keyToks(key), { t: "{", k: "punct" }],
+        });
+        keys.forEach((k, i) =>
+          walk(
+            k,
+            (val as Record<string, unknown>)[k],
+            depth + 1,
+            `${path}/${k}`,
+            i < keys.length - 1,
+          ),
+        );
+        rows.push({
+          id: `${path}~c`,
+          depth,
+          path,
+          collapsible: false,
+          tokens: [{ t: `}${tail}`, k: "punct" }],
+        });
+      }
+    } else {
+      rows.push({
+        id: path,
+        depth,
+        path,
+        collapsible: false,
+        tokens: [
+          ...keyToks(key),
+          primitiveToken(val),
+          ...(comma ? [{ t: ",", k: "punct" as JsonKind }] : []),
+        ],
+      });
     }
-    if (last < text.length) out.push(text.slice(last));
-    return out;
-  }, [text]);
+  };
+
+  walk(undefined, root, 0, "$", false);
+  return { rows, collapsiblePaths };
+}
+
+const JSON_TOKEN_STYLE: Record<
+  JsonKind,
+  "jsonKey" | "jsonStr" | "jsonNum" | "jsonKeyword" | "jsonPunct" | "jsonMuted" | "jsonPlain"
+> = {
+  key: "jsonKey",
+  str: "jsonStr",
+  num: "jsonNum",
+  kw: "jsonKeyword",
+  punct: "jsonPunct",
+  muted: "jsonMuted",
+  plain: "jsonPlain",
+};
+
+function JsonRowView({
+  row,
+  lineNo,
+  query,
+  onToggle,
+  collapsed,
+}: {
+  row: JsonRow;
+  lineNo: number;
+  query: string;
+  onToggle: (path: string) => void;
+  collapsed: boolean;
+}) {
+  const toggle = useCallback(() => onToggle(row.path), [onToggle, row.path]);
+  const keyedTokens = useMemo(
+    () => row.tokens.map((tok, i) => ({ tok, key: `${row.id}#${i}` })),
+    [row.tokens, row.id],
+  );
+  let chevron = <View style={styles.jsonChevronSpacer} />;
+  if (row.collapsible) {
+    chevron = collapsed ? (
+      <ThemedChevronRight size={13} uniProps={muted} />
+    ) : (
+      <ThemedChevronDown size={13} uniProps={muted} />
+    );
+  }
   return (
-    <Text style={styles.consoleText} selectable>
-      {nodes}
-    </Text>
+    <Pressable style={styles.jsonRow} onPress={row.collapsible ? toggle : undefined}>
+      <Text style={styles.jsonGutter} selectable={false}>
+        {lineNo}
+      </Text>
+      <View style={jsonIndent(row.depth)} />
+      {chevron}
+      <Text style={styles.jsonLine} selectable>
+        {keyedTokens.map(({ tok, key }) => (
+          <Text
+            key={key}
+            style={[
+              styles[JSON_TOKEN_STYLE[tok.k]],
+              query.length > 0 && tok.t.toLowerCase().includes(query) ? styles.jsonMatch : null,
+            ]}
+          >
+            {tok.t}
+          </Text>
+        ))}
+      </Text>
+    </Pressable>
+  );
+}
+
+function JsonTree({ value }: { value: unknown }) {
+  const [collapsedSet, setCollapsedSet] = useState<ReadonlySet<string>>(new Set());
+  const [findOpen, setFindOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+
+  const toggleFind = useCallback(() => setFindOpen((v) => !v), []);
+  const closeFind = useCallback(() => {
+    setFindOpen(false);
+    setQuery("");
+  }, []);
+  useCmdF(toggleFind, closeFind);
+
+  const { rows, collapsiblePaths } = useMemo(
+    () => buildJsonRows(value, collapsedSet, q.length > 0),
+    [value, collapsedSet, q],
+  );
+  const toggle = useCallback((path: string) => {
+    setCollapsedSet((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  }, []);
+  const expandAll = useCallback(() => setCollapsedSet(new Set()), []);
+  const collapseAll = useCallback(
+    () => setCollapsedSet(new Set(collapsiblePaths.filter((p) => p !== "$"))),
+    [collapsiblePaths],
+  );
+  const matchCount = useMemo(
+    () => (q ? rows.filter((r) => r.tokens.some((t) => t.t.toLowerCase().includes(q))).length : 0),
+    [rows, q],
+  );
+
+  return (
+    <View style={styles.tabBody}>
+      <View style={styles.jsonToolbar}>
+        <Pressable style={styles.miniBtn} onPress={expandAll}>
+          <ThemedExpandAll size={13} uniProps={muted} />
+          <Text style={styles.miniBtnText}>Expand all</Text>
+        </Pressable>
+        <Pressable style={styles.miniBtn} onPress={collapseAll}>
+          <ThemedCollapseAll size={13} uniProps={muted} />
+          <Text style={styles.miniBtnText}>Collapse all</Text>
+        </Pressable>
+      </View>
+      {findOpen ? (
+        <FindBar query={query} count={matchCount} onQuery={setQuery} onClose={closeFind} />
+      ) : null}
+      <ScrollView style={styles.console} contentContainerStyle={styles.jsonContent}>
+        {rows.map((row, i) => (
+          <JsonRowView
+            key={row.id}
+            row={row}
+            lineNo={i + 1}
+            query={q}
+            onToggle={toggle}
+            collapsed={collapsedSet.has(row.path)}
+          />
+        ))}
+      </ScrollView>
+    </View>
   );
 }
 
@@ -672,28 +1036,50 @@ function InspectTab({
   client: DaemonClient | null;
   container: DockerContainer;
 }) {
-  const [text, setText] = useState("Loading…");
+  const [value, setValue] = useState<unknown>(null);
+  const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     if (!client) return;
     let alive = true;
+    setValue(null);
+    setError(null);
     void client
       .dockerInspect({ container: container.id })
       .then((res) => {
-        if (alive) setText(res.error ? `Error: ${res.error}` : res.inspect);
+        if (!alive) return undefined;
+        if (res.error) {
+          setError(res.error);
+          return undefined;
+        }
+        try {
+          const parsed = JSON.parse(res.inspect) as unknown;
+          setValue(Array.isArray(parsed) && parsed.length === 1 ? parsed[0] : parsed);
+        } catch {
+          setError(res.inspect);
+        }
         return undefined;
       })
       .catch((e: unknown) => {
-        if (alive) setText(e instanceof Error ? e.message : "Failed to inspect");
+        if (alive) setError(e instanceof Error ? e.message : "Failed to inspect");
       });
     return () => {
       alive = false;
     };
   }, [client, container.id]);
-  return (
-    <ScrollView style={styles.console} contentContainerStyle={styles.consoleContent}>
-      <JsonHighlight text={text} />
-    </ScrollView>
-  );
+
+  if (error) {
+    return (
+      <ScrollView style={styles.console} contentContainerStyle={styles.consoleContent}>
+        <Text style={styles.consoleText} selectable>
+          {error}
+        </Text>
+      </ScrollView>
+    );
+  }
+  if (value === null) {
+    return <Text style={styles.consoleHint}>Loading…</Text>;
+  }
+  return <JsonTree value={value} />;
 }
 
 function StatMetric({ label, value }: { label: string; value: string }) {
@@ -816,6 +1202,240 @@ function ExecTab({
   );
 }
 
+// ── Files: browse the container filesystem and copy files to/from the daemon host ──
+function joinPath(base: string, name: string): string {
+  return base === "/" ? `/${name}` : `${base}/${name}`;
+}
+function parentPath(path: string): string {
+  if (path === "/" || path === "") return "/";
+  const idx = path.replace(/\/$/, "").lastIndexOf("/");
+  return idx <= 0 ? "/" : path.slice(0, idx);
+}
+
+function FileRow({
+  entry,
+  busy,
+  onOpen,
+  onCopyToHost,
+}: {
+  entry: DockerFsEntry;
+  busy: boolean;
+  onOpen: (name: string) => void;
+  onCopyToHost: (name: string) => void;
+}) {
+  const open = useCallback(() => onOpen(entry.name), [onOpen, entry.name]);
+  const copy = useCallback(() => onCopyToHost(entry.name), [onCopyToHost, entry.name]);
+  return (
+    <Pressable style={styles.trow} onPress={entry.isDir ? open : undefined}>
+      <View style={styles.colNameWide}>
+        {entry.isDir ? (
+          <ThemedFolder size={15} uniProps={fg} />
+        ) : (
+          <ThemedFile size={15} uniProps={muted} />
+        )}
+        <Text style={styles.cellStrong} numberOfLines={1}>
+          {entry.name}
+        </Text>
+      </View>
+      <View style={styles.colActions}>
+        {entry.isDir ? null : (
+          <IconBtn
+            icon={ThemedDownload}
+            tint={muted}
+            label="Copy to host"
+            onPress={copy}
+            disabled={busy}
+          />
+        )}
+      </View>
+    </Pressable>
+  );
+}
+
+function FilesTab({
+  client,
+  container,
+  defaultHostDir,
+}: {
+  client: DaemonClient | null;
+  container: DockerContainer;
+  defaultHostDir: string;
+}) {
+  const [path, setPath] = useState("/");
+  const [entries, setEntries] = useState<DockerFsEntry[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [hostDir, setHostDir] = useState(defaultHostDir);
+  const [importPath, setImportPath] = useState("");
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const load = useCallback(
+    async (p: string) => {
+      if (!client) return;
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await client.dockerFsList({ container: container.id, path: p });
+        if (res.error) setError(res.error);
+        else {
+          setEntries(res.entries);
+          setPath(p);
+        }
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : "Failed to list files");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [client, container.id],
+  );
+  useEffect(() => {
+    void load("/");
+  }, [load]);
+
+  const openDir = useCallback((name: string) => void load(joinPath(path, name)), [load, path]);
+  const goUp = useCallback(() => void load(parentPath(path)), [load, path]);
+  const refresh = useCallback(() => void load(path), [load, path]);
+  const copyToHost = useCallback(
+    async (name: string) => {
+      if (!client) return;
+      setBusy(name);
+      setError(null);
+      setNotice(null);
+      try {
+        const res = await client.dockerCp({
+          container: container.id,
+          direction: "to_host",
+          containerPath: joinPath(path, name),
+          hostPath: joinPath(hostDir, name),
+        });
+        if (res.error) setError(res.error);
+        else setNotice(`Copied ${name} → ${joinPath(hostDir, name)}`);
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : "Copy failed");
+      } finally {
+        setBusy(null);
+      }
+    },
+    [client, container.id, path, hostDir],
+  );
+  const copyFromHost = useCallback(async () => {
+    const hp = importPath.trim();
+    if (!client || !hp) return;
+    setBusy("__import__");
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await client.dockerCp({
+        container: container.id,
+        direction: "to_container",
+        containerPath: path,
+        hostPath: hp,
+      });
+      if (res.error) setError(res.error);
+      else {
+        setNotice(`Copied ${hp} → ${path}`);
+        setImportPath("");
+        await load(path);
+      }
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Copy failed");
+    } finally {
+      setBusy(null);
+    }
+  }, [client, container.id, path, importPath, load]);
+
+  let list = (
+    <View style={styles.sectionCard}>
+      {entries.map((entry) => (
+        <FileRow
+          key={entry.name}
+          entry={entry}
+          busy={busy === entry.name}
+          onOpen={openDir}
+          onCopyToHost={copyToHost}
+        />
+      ))}
+    </View>
+  );
+  if (loading && entries.length === 0) {
+    list = <Text style={styles.consoleHint}>Loading…</Text>;
+  } else if (entries.length === 0) {
+    list = <Text style={styles.emptyText}>Empty directory.</Text>;
+  }
+
+  return (
+    <ScrollView style={styles.tabBody} contentContainerStyle={styles.filesContent}>
+      <View style={styles.filesToolbar}>
+        <Pressable
+          style={[styles.btn, styles.btnGhost, path === "/" && styles.btnDisabled]}
+          onPress={goUp}
+          disabled={path === "/"}
+        >
+          <ThemedFolderUp size={14} uniProps={fg} />
+          <Text style={styles.btnGhostText}>Up</Text>
+        </Pressable>
+        <View style={styles.filesPath}>
+          <Text style={styles.filesPathText} numberOfLines={1}>
+            {path}
+          </Text>
+        </View>
+        <Pressable style={[styles.btn, styles.btnGhost]} onPress={refresh}>
+          <ThemedRotate size={14} uniProps={fg} />
+          <Text style={styles.btnGhostText}>Refresh</Text>
+        </Pressable>
+      </View>
+
+      <View style={styles.filesCpRow}>
+        <Text style={styles.filesCpLabel}>Host dir for downloads</Text>
+        <ThemedTextInput
+          style={styles.pullInput}
+          value={hostDir}
+          onChangeText={setHostDir}
+          placeholder="/path/on/host"
+          autoCapitalize="none"
+          autoCorrect={false}
+          uniProps={placeholderColor}
+        />
+      </View>
+      <View style={styles.filesCpRow}>
+        <ThemedTextInput
+          style={styles.pullInput}
+          value={importPath}
+          onChangeText={setImportPath}
+          placeholder="Host file to copy into this folder"
+          autoCapitalize="none"
+          autoCorrect={false}
+          uniProps={placeholderColor}
+        />
+        <Pressable
+          style={[
+            styles.btn,
+            styles.btnPrimary,
+            (busy === "__import__" || !importPath) && styles.btnDisabled,
+          ]}
+          onPress={copyFromHost}
+          disabled={busy === "__import__" || !importPath}
+        >
+          <ThemedUpload size={13} uniProps={accentFg} />
+          <Text style={styles.btnPrimaryText}>{busy === "__import__" ? "Copying…" : "Upload"}</Text>
+        </Pressable>
+      </View>
+
+      {error ? (
+        <View style={styles.errorBanner}>
+          <ThemedCircleAlert size={15} uniProps={red} />
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      ) : null}
+      {notice ? <Text style={styles.filesNotice}>{notice}</Text> : null}
+
+      {list}
+    </ScrollView>
+  );
+}
+
 function MetaChip({
   label,
   value,
@@ -882,6 +1502,7 @@ function ContainerDetail({
   const showLogs = useCallback(() => setTab("logs"), []);
   const showInspect = useCallback(() => setTab("inspect"), []);
   const showStats = useCallback(() => setTab("stats"), []);
+  const showFiles = useCallback(() => setTab("files"), []);
   const showExec = useCallback(() => setTab("exec"), []);
   const stop = useCallback(() => onAction(container.id, "stop"), [onAction, container.id]);
   const start = useCallback(() => onAction(container.id, "start"), [onAction, container.id]);
@@ -892,6 +1513,8 @@ function ContainerDetail({
   let content = <LogsTab client={client} container={container} />;
   if (tab === "inspect") content = <InspectTab client={client} container={container} />;
   else if (tab === "stats") content = <StatsTab client={client} container={container} />;
+  else if (tab === "files")
+    content = <FilesTab client={client} container={container} defaultHostDir={cwd} />;
   else if (tab === "exec")
     content = (
       <ExecTab
@@ -959,6 +1582,7 @@ function ContainerDetail({
           <TabButton label="Logs" active={tab === "logs"} onPress={showLogs} />
           <TabButton label="Stats" active={tab === "stats"} onPress={showStats} />
           <TabButton label="Inspect" active={tab === "inspect"} onPress={showInspect} />
+          <TabButton label="Files" active={tab === "files"} onPress={showFiles} />
           <TabButton label="Exec" active={tab === "exec"} onPress={showExec} />
         </View>
       </View>
@@ -1678,6 +2302,109 @@ const styles = StyleSheet.create((theme) => ({
   },
   detailTabsWrap: {
     paddingHorizontal: theme.spacing[4],
+    marginTop: theme.spacing[2],
+    marginBottom: theme.spacing[1],
+  },
+  tabBody: {
+    flex: 1,
+    minHeight: 0,
+  },
+  consoleWrap: {
+    flex: 1,
+    minHeight: 0,
+  },
+  followBtn: {
+    position: "absolute",
+    right: theme.spacing[6],
+    bottom: theme.spacing[6],
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[1],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[1.5],
+    borderRadius: theme.borderRadius.full,
+    backgroundColor: theme.colors.surface2,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+  },
+  followText: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foreground,
+  },
+  findBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    marginHorizontal: theme.spacing[4],
+    marginTop: theme.spacing[2],
+    paddingHorizontal: theme.spacing[2],
+    height: 34,
+    borderRadius: theme.borderRadius.md,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+  },
+  findInput: {
+    flex: 1,
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foreground,
+  },
+  findCount: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+    minWidth: 24,
+    textAlign: "right",
+  },
+  jsonToolbar: {
+    flexDirection: "row",
+    gap: theme.spacing[2],
+    paddingHorizontal: theme.spacing[4],
+    marginTop: theme.spacing[2],
+  },
+  miniBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[1],
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
+    borderRadius: theme.borderRadius.md,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+  },
+  miniBtnText: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foreground,
+  },
+  jsonContent: {
+    paddingVertical: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
+  },
+  jsonRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    paddingVertical: 1,
+  },
+  jsonGutter: {
+    width: 40,
+    textAlign: "right",
+    marginRight: theme.spacing[2],
+    fontSize: 11,
+    lineHeight: 18,
+    color: theme.colors.palette.zinc[500],
+    fontFamily: "monospace",
+  },
+  jsonChevronSpacer: {
+    width: 13,
+  },
+  jsonLine: {
+    flex: 1,
+    fontSize: theme.fontSize.xs,
+    lineHeight: 18,
+    fontFamily: "monospace",
+    color: theme.colors.palette.zinc[100],
   },
   jsonKey: {
     color: theme.colors.palette.blue[400],
@@ -1690,6 +2417,57 @@ const styles = StyleSheet.create((theme) => ({
   },
   jsonKeyword: {
     color: theme.colors.palette.purple[500],
+  },
+  jsonPunct: {
+    color: theme.colors.palette.zinc[400],
+  },
+  jsonMuted: {
+    color: theme.colors.palette.zinc[500],
+  },
+  jsonPlain: {
+    color: theme.colors.palette.zinc[100],
+  },
+  jsonMatch: {
+    backgroundColor: theme.colors.palette.amber[500],
+    color: theme.colors.palette.zinc[900],
+  },
+  filesContent: {
+    padding: theme.spacing[4],
+    gap: theme.spacing[3],
+  },
+  filesToolbar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+  },
+  filesPath: {
+    flex: 1,
+    height: 34,
+    justifyContent: "center",
+    paddingHorizontal: theme.spacing[3],
+    borderRadius: theme.borderRadius.md,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+  },
+  filesPathText: {
+    fontSize: theme.fontSize.sm,
+    fontFamily: "monospace",
+    color: theme.colors.foreground,
+  },
+  filesCpRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+  },
+  filesCpLabel: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+    width: 160,
+  },
+  filesNotice: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.palette.green[600],
   },
   console: {
     flex: 1,

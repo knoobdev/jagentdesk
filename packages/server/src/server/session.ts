@@ -3244,6 +3244,41 @@ export class Session {
           return undefined;
         });
     }
+    if (msg.type === "docker/fs/list") {
+      const { requestId } = msg;
+      return this.dockerService
+        .fsList(msg.container, msg.path)
+        .then((entries) => {
+          this.emit({
+            type: "docker/fs/list/response",
+            payload: { requestId, error: null, path: msg.path, entries },
+          });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({
+            type: "docker/fs/list/response",
+            payload: { requestId, error: fail(error), path: msg.path, entries: [] },
+          });
+          return undefined;
+        });
+    }
+    if (msg.type === "docker/cp") {
+      const { requestId } = msg;
+      return this.dockerService
+        .cp(msg.container, msg.direction, msg.containerPath, msg.hostPath)
+        .then(() => {
+          this.emit({ type: "docker/cp/response", payload: { requestId, error: null } });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({
+            type: "docker/cp/response",
+            payload: { requestId, error: fail(error) },
+          });
+          return undefined;
+        });
+    }
     if (msg.type === "docker/subscribe") {
       const { requestId, subscriptionId } = msg;
       this.emit({

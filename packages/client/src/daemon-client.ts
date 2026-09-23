@@ -4,7 +4,10 @@ import type { DatabaseEngine, DbConnectionConfig } from "@jagentdesk/protocol/da
 import type {
   DockerAction,
   DockerActionPayload,
+  DockerCpDirection,
+  DockerCpPayload,
   DockerExecPayload,
+  DockerFsListPayload,
   DockerImageAction,
   DockerImageActionPayload,
   DockerInspectPayload,
@@ -6969,6 +6972,38 @@ export class DaemonClient {
       requestId: options.requestId,
       message: { type: "docker/volume/action", name: options.name, action: options.action },
       responseType: "docker/volume/action/response",
+    });
+  }
+
+  async dockerFsList(options: {
+    requestId?: string;
+    container: string;
+    path: string;
+  }): Promise<DockerFsListPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "docker/fs/list", container: options.container, path: options.path },
+      responseType: "docker/fs/list/response",
+    });
+  }
+
+  async dockerCp(options: {
+    requestId?: string;
+    container: string;
+    direction: DockerCpDirection;
+    containerPath: string;
+    hostPath: string;
+  }): Promise<DockerCpPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "docker/cp",
+        container: options.container,
+        direction: options.direction,
+        containerPath: options.containerPath,
+        hostPath: options.hostPath,
+      },
+      responseType: "docker/cp/response",
     });
   }
 
