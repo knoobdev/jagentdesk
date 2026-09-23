@@ -3,6 +3,8 @@ import { createRequire } from "node:module";
 import {
   defineAttachmentSource,
   defineRpc,
+  defineSettings,
+  settingsRpc,
   type PluginHandlerContext,
   type PluginRpcContract,
 } from "@jagentdesk/plugin/server";
@@ -65,6 +67,8 @@ function register(contract: PluginRpcContract, handler: RpcHandler): void {
 const pluginAuthorRuntime = {
   defineAttachmentSource,
   defineRpc,
+  defineSettings,
+  settingsRpc,
   Icon() {
     throw new Error("Icon is available only in plugin client code");
   },

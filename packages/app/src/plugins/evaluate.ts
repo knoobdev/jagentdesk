@@ -8,6 +8,8 @@ import * as Zod from "zod";
 import {
   defineAttachmentSource,
   defineRpc,
+  defineSettings,
+  settingsRpc,
   type PluginAttachmentSourceContribution,
   type PluginCommandCenterItemContribution,
   type PluginSidebarContribution,
@@ -192,6 +194,8 @@ export function evaluatePluginClientBundle(id: string, bundle: string): Evaluate
       return {
         defineAttachmentSource,
         defineRpc,
+        defineSettings,
+        settingsRpc,
         useJAgentDesk,
         useAgent,
         useWorkspace,
@@ -199,7 +203,7 @@ export function evaluatePluginClientBundle(id: string, bundle: string): Evaluate
       };
     }
     if (name === "@jagentdesk/plugin/server") {
-      return { defineAttachmentSource, defineRpc };
+      return { defineAttachmentSource, defineRpc, defineSettings, settingsRpc };
     }
     if (name === "@tanstack/react-query") return ReactQuery;
     if (name === "zod") return Zod;

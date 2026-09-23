@@ -50,6 +50,10 @@ export type {
   PluginWorkspacePanelProps,
   PluginWorkspaceSnapshot,
 } from "./contracts.js";
+// Pure client-SDK settings helpers (declare a plugin's host-scoped settings schema + its
+// read/write/reset RPC). Exported so Paseo plugins that call defineSettings load and enable;
+// the settings UI itself is a separate host feature.
+export { defineSettings, settingsRpc, type SettingsDefinition } from "./settings.js";
 export { useJAgentDesk } from "./jagentdesk-context.js";
 export { useAgent, useWorkspace } from "./client-state.js";
 export { useRpc } from "./rpc-context.js";
