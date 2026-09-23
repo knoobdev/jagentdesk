@@ -163,7 +163,11 @@ import {
   ClusterPfCloseResponseSchema,
 } from "./cluster/rpc-schemas.js";
 import { DatabaseRequestSchemas, DatabaseResponseSchemas } from "./database/rpc-schemas.js";
-import { DockerRequestSchemas, DockerResponseSchemas } from "./docker/rpc-schemas.js";
+import {
+  DockerRequestSchemas,
+  DockerResponseSchemas,
+  DockerPushSchemas,
+} from "./docker/rpc-schemas.js";
 import {
   ExportHostDataRequestMessageSchema,
   ExportHostDataResponseMessageSchema,
@@ -7617,6 +7621,7 @@ export type DaemonUpdateProgressMessage = z.infer<typeof DaemonUpdateProgressMes
 export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ...DatabaseResponseSchemas,
   ...DockerResponseSchemas,
+  ...DockerPushSchemas,
   HubExecutionAgentCreateResponseSchema,
   HubExecutionControlResponseSchema,
   HubExecutionAgentUpdateSchema,

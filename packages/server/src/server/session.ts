@@ -177,6 +177,7 @@ import { ClusterSession } from "./session/cluster/cluster-session.js";
 import { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { DatabaseSession } from "./session/database/database-session.js";
 import { DockerService } from "./docker/docker-service.js";
+import { DockerStreams } from "./docker/docker-streams.js";
 import { DatabaseRegistry } from "./database/database-registry.js";
 import { ProviderCatalogSession } from "./session/provider/provider-catalog-session.js";
 import { WorkspaceFilesSession } from "./session/files/workspace-files-session.js";
@@ -813,6 +814,7 @@ export class Session {
   private clusterSession!: ClusterSession;
   private databaseSession!: DatabaseSession;
   private readonly dockerService = new DockerService();
+  private readonly dockerStreams = new DockerStreams(this.dockerService);
   private readonly providerCatalogSession: ProviderCatalogSession;
   private readonly workspaceFilesSession: WorkspaceFilesSession;
   private readonly agentConfigSession: AgentConfigSession;
@@ -3159,6 +3161,25 @@ export class Session {
           return undefined;
         });
     }
+    if (msg.type === "docker/inspect") {
+      const { requestId } = msg;
+      return this.dockerService
+        .inspect(msg.container)
+        .then((inspect) => {
+          this.emit({
+            type: "docker/inspect/response",
+            payload: { requestId, error: null, inspect },
+          });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({
+            type: "docker/inspect/response",
+            payload: { requestId, error: fail(error), inspect: "" },
+          });
+          return undefined;
+        });
+    }
     if (msg.type === "docker/action") {
       const { requestId } = msg;
       return this.dockerService
@@ -3174,6 +3195,114 @@ export class Session {
           });
           return undefined;
         });
+    }
+    if (msg.type === "docker/exec") {
+      const { requestId } = msg;
+      return this.dockerService
+        .exec(msg.container, msg.command)
+        .then((output) => {
+          this.emit({ type: "docker/exec/response", payload: { requestId, error: null, output } });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({
+            type: "docker/exec/response",
+            payload: { requestId, error: fail(error), output: "" },
+          });
+          return undefined;
+        });
+    }
+    if (msg.type === "docker/image/action") {
+      const { requestId } = msg;
+      return this.dockerService
+        .imageAction(msg.image, msg.action)
+        .then(() => {
+          this.emit({ type: "docker/image/action/response", payload: { requestId, error: null } });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({
+            type: "docker/image/action/response",
+            payload: { requestId, error: fail(error) },
+          });
+          return undefined;
+        });
+    }
+    if (msg.type === "docker/volume/action") {
+      const { requestId } = msg;
+      return this.dockerService
+        .volumeAction(msg.name, msg.action)
+        .then(() => {
+          this.emit({ type: "docker/volume/action/response", payload: { requestId, error: null } });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({
+            type: "docker/volume/action/response",
+            payload: { requestId, error: fail(error) },
+          });
+          return undefined;
+        });
+    }
+    if (msg.type === "docker/subscribe") {
+      const { requestId, subscriptionId } = msg;
+      this.emit({
+        type: "docker/subscribe/response",
+        payload: { requestId, error: null, subscriptionId },
+      });
+      void this.dockerStreams.subscribeSnapshot(subscriptionId, (snapshot) => {
+        this.emit({ type: "docker/snapshot", payload: { subscriptionId, ...snapshot } });
+      });
+      return undefined;
+    }
+    if (msg.type === "docker/unsubscribe") {
+      const { requestId, subscriptionId } = msg;
+      this.dockerStreams.unsubscribeSnapshot(subscriptionId);
+      this.emit({
+        type: "docker/unsubscribe/response",
+        payload: { requestId, error: null, subscriptionId },
+      });
+      return undefined;
+    }
+    if (msg.type === "docker/logs/subscribe") {
+      const { requestId, subscriptionId } = msg;
+      this.emit({
+        type: "docker/logs/subscribe/response",
+        payload: { requestId, error: null, subscriptionId },
+      });
+      this.dockerStreams.subscribeLogs(subscriptionId, msg.container, msg.tail ?? 500, (chunk) => {
+        this.emit({ type: "docker/log-chunk", payload: { subscriptionId, chunk } });
+      });
+      return undefined;
+    }
+    if (msg.type === "docker/logs/unsubscribe") {
+      const { requestId, subscriptionId } = msg;
+      this.dockerStreams.unsubscribeLogs(subscriptionId);
+      this.emit({
+        type: "docker/logs/unsubscribe/response",
+        payload: { requestId, error: null, subscriptionId },
+      });
+      return undefined;
+    }
+    if (msg.type === "docker/stats/subscribe") {
+      const { requestId, subscriptionId } = msg;
+      this.emit({
+        type: "docker/stats/subscribe/response",
+        payload: { requestId, error: null, subscriptionId },
+      });
+      this.dockerStreams.subscribeStats(subscriptionId, msg.container, (stats) => {
+        this.emit({ type: "docker/stats-data", payload: { subscriptionId, stats } });
+      });
+      return undefined;
+    }
+    if (msg.type === "docker/stats/unsubscribe") {
+      const { requestId, subscriptionId } = msg;
+      this.dockerStreams.unsubscribeStats(subscriptionId);
+      this.emit({
+        type: "docker/stats/unsubscribe/response",
+        payload: { requestId, error: null, subscriptionId },
+      });
+      return undefined;
     }
     return undefined;
   }
@@ -8118,6 +8247,7 @@ export class Session {
 
     await this.voiceSession.cleanup();
 
+    this.dockerStreams.disposeAll();
     this.terminalController.dispose();
 
     this.checkoutSession.cleanup();

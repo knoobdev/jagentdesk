@@ -4,8 +4,17 @@ import type { DatabaseEngine, DbConnectionConfig } from "@jagentdesk/protocol/da
 import type {
   DockerAction,
   DockerActionPayload,
+  DockerExecPayload,
+  DockerImageAction,
+  DockerImageActionPayload,
+  DockerInspectPayload,
   DockerListPayload,
+  DockerLogChunkPayload,
   DockerLogsPayload,
+  DockerSnapshotPayload,
+  DockerStatsPayload,
+  DockerVolumeAction,
+  DockerVolumeActionPayload,
 } from "@jagentdesk/protocol/docker/rpc-schemas";
 import type { AgentAttentionNotificationPayload } from "@jagentdesk/protocol/agent-attention-notification";
 import {
@@ -6904,6 +6913,17 @@ export class DaemonClient {
     });
   }
 
+  async dockerInspect(options: {
+    requestId?: string;
+    container: string;
+  }): Promise<DockerInspectPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "docker/inspect", container: options.container },
+      responseType: "docker/inspect/response",
+    });
+  }
+
   async dockerAction(options: {
     requestId?: string;
     container: string;
@@ -6913,6 +6933,133 @@ export class DaemonClient {
       requestId: options.requestId,
       message: { type: "docker/action", container: options.container, action: options.action },
       responseType: "docker/action/response",
+    });
+  }
+
+  async dockerExec(options: {
+    requestId?: string;
+    container: string;
+    command: string;
+  }): Promise<DockerExecPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "docker/exec", container: options.container, command: options.command },
+      responseType: "docker/exec/response",
+    });
+  }
+
+  async dockerImageAction(options: {
+    requestId?: string;
+    image: string;
+    action: DockerImageAction;
+  }): Promise<DockerImageActionPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "docker/image/action", image: options.image, action: options.action },
+      responseType: "docker/image/action/response",
+    });
+  }
+
+  async dockerVolumeAction(options: {
+    requestId?: string;
+    name: string;
+    action: DockerVolumeAction;
+  }): Promise<DockerVolumeActionPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "docker/volume/action", name: options.name, action: options.action },
+      responseType: "docker/volume/action/response",
+    });
+  }
+
+  // ── realtime streams (no polling): subscribe, then listen for pushed snapshots/chunks ──
+  async dockerSubscribe(options: { subscriptionId: string; requestId?: string }): Promise<void> {
+    await this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "docker/subscribe", subscriptionId: options.subscriptionId },
+      responseType: "docker/subscribe/response",
+    });
+  }
+
+  dockerUnsubscribe(options: { subscriptionId: string }): void {
+    this.sendSessionMessage({
+      type: "docker/unsubscribe",
+      requestId: this.createRequestId(),
+      subscriptionId: options.subscriptionId,
+    });
+  }
+
+  onDockerSnapshot(
+    subscriptionId: string,
+    handler: (snapshot: DockerSnapshotPayload) => void,
+  ): () => void {
+    return this.on("docker/snapshot", (message) => {
+      if (message.payload.subscriptionId === subscriptionId) handler(message.payload);
+    });
+  }
+
+  async dockerLogsSubscribe(options: {
+    subscriptionId: string;
+    container: string;
+    tail?: number;
+    requestId?: string;
+  }): Promise<void> {
+    await this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "docker/logs/subscribe",
+        subscriptionId: options.subscriptionId,
+        container: options.container,
+        ...(options.tail !== undefined ? { tail: options.tail } : {}),
+      },
+      responseType: "docker/logs/subscribe/response",
+    });
+  }
+
+  dockerLogsUnsubscribe(options: { subscriptionId: string }): void {
+    this.sendSessionMessage({
+      type: "docker/logs/unsubscribe",
+      requestId: this.createRequestId(),
+      subscriptionId: options.subscriptionId,
+    });
+  }
+
+  onDockerLogChunk(
+    subscriptionId: string,
+    handler: (chunk: DockerLogChunkPayload) => void,
+  ): () => void {
+    return this.on("docker/log-chunk", (message) => {
+      if (message.payload.subscriptionId === subscriptionId) handler(message.payload);
+    });
+  }
+
+  async dockerStatsSubscribe(options: {
+    subscriptionId: string;
+    container: string;
+    requestId?: string;
+  }): Promise<void> {
+    await this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "docker/stats/subscribe",
+        subscriptionId: options.subscriptionId,
+        container: options.container,
+      },
+      responseType: "docker/stats/subscribe/response",
+    });
+  }
+
+  dockerStatsUnsubscribe(options: { subscriptionId: string }): void {
+    this.sendSessionMessage({
+      type: "docker/stats/unsubscribe",
+      requestId: this.createRequestId(),
+      subscriptionId: options.subscriptionId,
+    });
+  }
+
+  onDockerStats(subscriptionId: string, handler: (stats: DockerStatsPayload) => void): () => void {
+    return this.on("docker/stats-data", (message) => {
+      if (message.payload.subscriptionId === subscriptionId) handler(message.payload);
     });
   }
 
