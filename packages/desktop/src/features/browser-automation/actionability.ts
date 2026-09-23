@@ -136,8 +136,9 @@ function buildActionabilityScript(input: {
       if (['button', 'checkbox', 'color', 'file', 'hidden', 'image', 'radio', 'range', 'reset', 'submit'].includes(type)) return false;
       return !element.readOnly && !isDisabled(element);
     };
+    const ownerView = (element) => (element.ownerDocument && element.ownerDocument.defaultView) || window;
     const isVisible = (element, rect) => {
-      const style = getComputedStyle(element);
+      const style = ownerView(element).getComputedStyle(element);
       return (
         rect.width > 0 &&
         rect.height > 0 &&
@@ -146,28 +147,78 @@ function buildActionabilityScript(input: {
         Number(style.opacity || '1') !== 0
       );
     };
-    // elementFromPoint stops at a shadow host, so descend through open shadow roots to
-    // find the element that would actually receive the event.
-    const deepElementFromPoint = (x, y) => {
+    const frameInset = (frame) => {
+      const style = ownerView(frame).getComputedStyle(frame);
+      return {
+        left: (parseFloat(style.borderLeftWidth) || 0) + (parseFloat(style.paddingLeft) || 0),
+        top: (parseFloat(style.borderTopWidth) || 0) + (parseFloat(style.paddingTop) || 0),
+      };
+    };
+    // An element inside a same-origin iframe reports frame-local coordinates; project
+    // them into the top frame so CDP dispatches the click at the right screen point.
+    const absoluteRect = (element) => {
+      const rect = element.getBoundingClientRect();
+      let left = rect.left;
+      let top = rect.top;
+      let view = ownerView(element);
+      let guard = 0;
+      while (view && view.frameElement && guard < 20) {
+        guard += 1;
+        const frameRect = view.frameElement.getBoundingClientRect();
+        const inset = frameInset(view.frameElement);
+        left += frameRect.left + inset.left;
+        top += frameRect.top + inset.top;
+        view = view.parent !== view ? view.parent : null;
+      }
+      return { left, top, width: rect.width, height: rect.height };
+    };
+    // elementFromPoint stops at a shadow host or iframe boundary, so descend through
+    // open shadow roots and same-origin frames to the element that receives the event.
+    const deepElementFromPoint = (startX, startY) => {
+      let x = startX;
+      let y = startY;
       let node = document.elementFromPoint(x, y);
-      while (node && node.shadowRoot) {
-        const inner = node.shadowRoot.elementFromPoint(x, y);
-        if (!inner || inner === node) break;
-        node = inner;
+      let guard = 0;
+      while (node && guard < 20) {
+        guard += 1;
+        if (node.shadowRoot) {
+          const inner = node.shadowRoot.elementFromPoint(x, y);
+          if (!inner || inner === node) break;
+          node = inner;
+          continue;
+        }
+        if (node.tagName === 'IFRAME' || node.tagName === 'FRAME') {
+          let doc = null;
+          try {
+            doc = node.contentDocument;
+          } catch (error) {
+            doc = null;
+          }
+          if (!doc) break;
+          const frameRect = node.getBoundingClientRect();
+          const inset = frameInset(node);
+          x = x - frameRect.left - inset.left;
+          y = y - frameRect.top - inset.top;
+          const inner = doc.elementFromPoint(x, y);
+          if (!inner) break;
+          node = inner;
+          continue;
+        }
+        break;
       }
       return node;
     };
-    // The click reaches the target if the hit is the target, a descendant of it, or the
-    // target is an ancestor across shadow boundaries (walk up via host).
+    // The click reaches the target if walking up from the hit (through parents, shadow
+    // hosts, and frame owners) arrives at the target.
     const hitTargetReceivesEvents = (element, point) => {
-      const hit = deepElementFromPoint(point.x, point.y);
-      if (!hit) return false;
-      if (hit === element || element.contains(hit)) return true;
-      let node = hit;
-      while (node) {
+      let node = deepElementFromPoint(point.x, point.y);
+      let guard = 0;
+      while (node && guard < 40) {
+        guard += 1;
         if (node === element) return true;
         const root = node.getRootNode ? node.getRootNode() : null;
-        node = node.parentNode || (root && root.host) || null;
+        const view = node.ownerDocument && node.ownerDocument.defaultView;
+        node = node.parentNode || (root && root.host) || (view && view.frameElement) || null;
       }
       return false;
     };
@@ -207,7 +258,9 @@ function buildActionabilityScript(input: {
         continue;
       }
 
-      const point = centerPoint(secondRect);
+      // Click coordinates must be top-frame absolute; the stability check above stays
+      // frame-local (it only compares movement between samples).
+      const point = centerPoint(absoluteRect(element));
       if (!hitTargetReceivesEvents(element, point)) {
         detail = 'covered';
         await sleep(25);

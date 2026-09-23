@@ -29,8 +29,11 @@ export const ARIA_SNAPSHOT_SCRIPT = String.raw`(() => {
   }
 
   function visibilityFor(element) {
-    if (!(element instanceof Element)) return false;
-    const style = window.getComputedStyle(element);
+    if (!element || element.nodeType !== 1) return false;
+    // Use the element's own document view so elements inside a same-origin iframe
+    // resolve real computed styles instead of the top frame's defaults.
+    const view = (element.ownerDocument && element.ownerDocument.defaultView) || window;
+    const style = view.getComputedStyle(element);
     if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return false;
     const rect = element.getBoundingClientRect();
     return rect.width > 0 && rect.height > 0 ? 'box' : 'boxless';
@@ -49,7 +52,7 @@ export const ARIA_SNAPSHOT_SCRIPT = String.raw`(() => {
     if (tag === 'button') return 'button';
     if (tag === 'select') return 'combobox';
     if (tag === 'textarea') return 'textbox';
-    if (element instanceof HTMLElement && element.isContentEditable) return 'textbox';
+    if (element.isContentEditable) return 'textbox';
     if (tag === 'summary') return 'button';
     if (tag === 'main') return 'main';
     if (tag === 'nav') return 'navigation';
@@ -82,7 +85,7 @@ export const ARIA_SNAPSHOT_SCRIPT = String.raw`(() => {
   }
 
   function labelText(element) {
-    if (!(element instanceof HTMLElement)) return '';
+    if (!element || element.nodeType !== 1) return '';
     if (element.id) {
       const escapedId = window.CSS && typeof window.CSS.escape === 'function'
         ? window.CSS.escape(element.id)
@@ -125,7 +128,7 @@ export const ARIA_SNAPSHOT_SCRIPT = String.raw`(() => {
   }
 
   function inheritedDisabled(element) {
-    if (!(element instanceof Element)) return false;
+    if (!element || element.nodeType !== 1) return false;
     if (element.hasAttribute('disabled') || element.getAttribute('aria-disabled') === 'true') return true;
     if (element.closest('fieldset[disabled]')) return true;
     return element.closest('[aria-disabled="true"]') !== null;
@@ -246,7 +249,7 @@ export const ARIA_SNAPSHOT_SCRIPT = String.raw`(() => {
       if (!text) return null;
       return textNode(text);
     }
-    if (!(domNode instanceof Element)) return null;
+    if (domNode.nodeType !== 1) return null;
     const visibility = visibilityFor(domNode);
     if (!visibility) return null;
     if (domNode.getAttribute('aria-hidden') === 'true') return null;
@@ -271,6 +274,22 @@ export const ARIA_SNAPSHOT_SCRIPT = String.raw`(() => {
 
     if (domNode.tagName.toLowerCase() === 'iframe') {
       iframeCount += 1;
+      // Descend into a same-origin iframe so its content is part of the snapshot and
+      // gets refs. Cross-origin frames throw on contentDocument access — skip them.
+      let iframeDocument = null;
+      try {
+        iframeDocument = domNode.contentDocument;
+      } catch (error) {
+        iframeDocument = null;
+      }
+      const iframeRoot = iframeDocument && (iframeDocument.body || iframeDocument.documentElement);
+      if (iframeRoot) {
+        for (const iframeChild of Array.from(iframeRoot.childNodes)) {
+          if (truncated) break;
+          const childSnapshot = visitNode(iframeChild, depth + 1);
+          if (childSnapshot) children.push(childSnapshot);
+        }
+      }
     }
 
     if (visibility === 'boxless') {
