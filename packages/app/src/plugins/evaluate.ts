@@ -12,6 +12,7 @@ import {
   settingsRpc,
   type PluginAttachmentSourceContribution,
   type PluginCommandCenterItemContribution,
+  type PluginSettingsScreenContribution,
   type PluginSidebarContribution,
   type PluginSurfaceProps,
   type PluginThemeContribution,
@@ -59,6 +60,7 @@ function requireId(value: string, label: string): string {
 export function evaluatePluginClientBundle(id: string, bundle: string): EvaluatedPlugin {
   const collector: PluginRegistrationCollector = {
     surfaces: [],
+    settingsScreens: [],
     sidebarItems: [],
     workspacePanels: [],
     commandCenterItems: [],
@@ -66,6 +68,7 @@ export function evaluatePluginClientBundle(id: string, bundle: string): Evaluate
     themes: [],
   };
   const surfaceIds = new Set<string>();
+  const settingsScreenIds = new Set<string>();
   const sidebarItemIds = new Set<string>();
   const workspacePanelIds = new Set<string>();
   const commandCenterItemIds = new Set<string>();
@@ -79,6 +82,27 @@ export function evaluatePluginClientBundle(id: string, bundle: string): Evaluate
         throw new Error(`Surface ${normalizedId} is not a component`);
       surfaceIds.add(normalizedId);
       collector.surfaces.push({ id: normalizedId, Component });
+    },
+    addSettingsScreen(contribution: PluginSettingsScreenContribution) {
+      const normalizedId = requireId(contribution.id, "settings screen id");
+      if (settingsScreenIds.has(normalizedId)) {
+        throw new Error(`Duplicate settings screen: ${normalizedId}`);
+      }
+      const title = contribution.title.trim();
+      const icon = contribution.icon.trim();
+      if (!title) throw new Error(`Settings screen ${normalizedId} has no title`);
+      if (!icon) throw new Error(`Settings screen ${normalizedId} has no icon`);
+      if (typeof contribution.Component !== "function") {
+        throw new Error(`Settings screen ${normalizedId} is not a component`);
+      }
+      resolvePluginIcon(icon);
+      settingsScreenIds.add(normalizedId);
+      collector.settingsScreens.push({
+        id: normalizedId,
+        title,
+        icon,
+        Component: contribution.Component,
+      });
     },
     addSidebarItem(contribution: PluginSidebarContribution) {
       const normalizedId = requireId(contribution.id, "sidebar item id");
@@ -244,6 +268,7 @@ export function evaluatePluginClientBundle(id: string, bundle: string): Evaluate
     id,
     cleanup,
     surfaces: collector.surfaces,
+    settingsScreens: collector.settingsScreens,
     sidebarItems: collector.sidebarItems,
     workspacePanels: collector.workspacePanels as EvaluatedPlugin["workspacePanels"],
     commandCenterItems: collector.commandCenterItems,

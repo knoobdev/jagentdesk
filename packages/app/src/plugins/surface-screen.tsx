@@ -39,6 +39,31 @@ function routeParam(value: string | string[] | undefined): string {
   return typeof value === "string" ? value : "";
 }
 
+function parseContributionIdentity(
+  kind: string,
+  id: string,
+): PluginSurfaceContributionIdentity | null {
+  if (kind === "sidebar" || kind === "surface" || kind === "settings") {
+    return { kind, id };
+  }
+  return null;
+}
+
+function deriveSurfaceHeader(
+  resolved: ReturnType<typeof resolvePluginSurfaceContribution>,
+  pluginId: string,
+): { title: string; iconName: string | null } {
+  const { sidebarItem, surface, settingsScreen } = resolved;
+  const title =
+    sidebarItem?.title ??
+    settingsScreen?.title ??
+    surface?.id ??
+    settingsScreen?.id ??
+    (pluginId || "Plugin");
+  const iconName = sidebarItem?.icon ?? settingsScreen?.icon ?? null;
+  return { title, iconName };
+}
+
 function PluginHeaderIcon({
   Icon,
   color = "",
@@ -151,28 +176,29 @@ export function PluginSurfaceScreen() {
   const pluginId = routeParam(params.pluginId);
   const contributionKind = routeParam(params.contributionKind);
   const contributionId = routeParam(params.contributionId);
-  const identity = useMemo<PluginSurfaceContributionIdentity | null>(() => {
-    if (contributionKind !== "sidebar" && contributionKind !== "surface") return null;
-    return { kind: contributionKind, id: contributionId };
-  }, [contributionId, contributionKind]);
+  const identity = useMemo<PluginSurfaceContributionIdentity | null>(
+    () => parseContributionIdentity(contributionKind, contributionId),
+    [contributionId, contributionKind],
+  );
   const plugin = useInstalledPlugin(serverId, pluginId);
   const installations = usePluginInstallations(pluginId);
   const hosts = useHosts();
   const client = useHostRuntimeClient(serverId);
   const runtime = useMemo(() => createPluginSurfaceRuntime(client, pluginId), [client, pluginId]);
   const compact = useIsCompactFormFactor();
-  const { sidebarItem, surface } = useMemo(
+  const resolved = useMemo(
     () => resolvePluginSurfaceContribution(plugin, identity),
     [identity, plugin],
   );
+  const activeSurface = resolved.surface ?? resolved.settingsScreen;
   const hostLabel = hosts.find((host) => host.serverId === serverId)?.label ?? serverId;
   const contributionServerIds = useMemo(
     () =>
       identity ? getPluginSurfaceContributionServerIds(installations, pluginId, identity) : [],
     [identity, installations, pluginId],
   );
-  const title = sidebarItem?.title ?? surface?.id ?? (pluginId || "Plugin");
-  const Icon = sidebarItem ? resolvePluginIcon(sidebarItem.icon) : null;
+  const { title, iconName } = deriveSurfaceHeader(resolved, pluginId);
+  const Icon = iconName ? resolvePluginIcon(iconName) : null;
   const close = useCallback(() => {
     if (router.canGoBack()) router.back();
     else router.replace(`/h/${encodeURIComponent(serverId)}`);
@@ -222,14 +248,14 @@ export function PluginSurfaceScreen() {
     <View style={styles.screen}>
       <ScreenHeader left={headerLeft} right={headerRight} />
       <View style={styles.body}>
-        {plugin && surface && runtime ? (
+        {plugin && activeSurface && runtime ? (
           <SurfaceErrorBoundary
             key={`${serverId}/${pluginId}/${identity?.kind}/${contributionId}`}
             installation={plugin}
-            Surface={surface.Component}
+            Surface={activeSurface.Component}
           >
             <ThemedSurfaceRenderer
-              Surface={surface.Component}
+              Surface={activeSurface.Component}
               runtime={runtime}
               plugin={plugin}
               host={host}
@@ -239,7 +265,9 @@ export function PluginSurfaceScreen() {
           </SurfaceErrorBoundary>
         ) : (
           <Text style={styles.errorText}>
-            {plugin && surface ? "Plugin host is offline." : "This plugin surface is unavailable."}
+            {plugin && activeSurface
+              ? "Plugin host is offline."
+              : "This plugin surface is unavailable."}
           </Text>
         )}
       </View>

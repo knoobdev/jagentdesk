@@ -148,6 +148,13 @@ export interface PluginSurfaceContribution {
   Component: ComponentType<PluginSurfaceProps>;
 }
 
+export interface PluginSettingsScreenContribution {
+  id: string;
+  title: string;
+  icon: string;
+  Component: ComponentType<PluginSurfaceProps>;
+}
+
 export interface PluginSidebarContribution {
   id: string;
   title: string;
@@ -293,6 +300,7 @@ export interface PluginContext {
     ) => ZodInput<OutputSchema> | Promise<ZodInput<OutputSchema>>,
   ): void;
   addSurface(id: string, Component: ComponentType<PluginSurfaceProps>): void;
+  addSettingsScreen(contribution: PluginSettingsScreenContribution): void;
   addSidebarItem(contribution: PluginSidebarContribution): void;
   addWorkspacePanel(contribution: PluginWorkspacePanelContribution): void;
   addCommandCenterItem(contribution: PluginCommandCenterItemContribution): void;

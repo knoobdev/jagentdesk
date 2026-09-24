@@ -4,6 +4,7 @@ import type {
   PluginAttachmentSourceContribution,
   PluginCommandCenterItemContribution,
   PluginContext,
+  PluginSettingsScreenContribution,
   PluginSidebarContribution,
   PluginSurfaceContribution,
   PluginSurfaceProps,
@@ -17,6 +18,7 @@ import type { ComponentType } from "react";
 
 interface PluginCollector {
   addSurface(id: string, Component: ComponentType<PluginSurfaceProps>): void;
+  addSettingsScreen(contribution: PluginSettingsScreenContribution): void;
   addSidebarItem(contribution: PluginSidebarContribution): void;
   addWorkspacePanel(contribution: PluginWorkspacePanelContribution): void;
   addCommandCenterItem(contribution: PluginCommandCenterItemContribution): void;
@@ -26,6 +28,7 @@ interface PluginCollector {
 
 export interface PluginRegistrationCollector {
   surfaces: PluginSurfaceContribution[];
+  settingsScreens: PluginSettingsScreenContribution[];
   sidebarItems: PluginSidebarContribution[];
   workspacePanels: PluginWorkspacePanelContribution[];
   commandCenterItems: PluginCommandCenterItemContribution[];
@@ -38,6 +41,7 @@ export function createPluginContext(
 ): Pick<
   PluginContext,
   | "addSurface"
+  | "addSettingsScreen"
   | "addSidebarItem"
   | "addWorkspacePanel"
   | "addCommandCenterItem"
@@ -47,6 +51,9 @@ export function createPluginContext(
   return {
     addSurface(id, Component) {
       collector.addSurface(id, Component);
+    },
+    addSettingsScreen(contribution) {
+      collector.addSettingsScreen(contribution);
     },
     addSidebarItem(contribution) {
       collector.addSidebarItem(contribution);

@@ -351,3 +351,24 @@ export function normalizeRepoUrl(value: string | undefined): string {
     .replace(/\.git$/, "")
     .replace(/\/+$/, "");
 }
+
+function normalizePluginPathKey(pluginPath: string | undefined): string {
+  return (pluginPath ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/^\.?\/+/, "")
+    .replace(/\/+$/, "")
+    .replace(/^\.$/, "");
+}
+
+// Identity of an installed plugin as `host/owner/repo` — or `host/owner/repo#subdir`
+// when it lives in a monorepo subdirectory. Using the subdir keeps sibling plugins in
+// the same repo distinct, so installing one no longer marks every sibling installed.
+export function repoSourceKey(remote: string | undefined, pluginPath: string | undefined): string {
+  const repo = normalizeRepoUrl(remote);
+  if (!repo) {
+    return "";
+  }
+  const subdir = normalizePluginPathKey(pluginPath);
+  return subdir ? `${repo}#${subdir}` : repo;
+}

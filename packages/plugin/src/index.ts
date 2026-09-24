@@ -34,6 +34,7 @@ export type {
   PluginIconProps,
   PluginPanelLocation,
   PluginTheme,
+  PluginSettingsScreenContribution,
   PluginSidebarContribution,
   PluginSurfaceContribution,
   PluginSurfaceProps,

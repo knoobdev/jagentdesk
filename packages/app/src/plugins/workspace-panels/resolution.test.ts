@@ -11,6 +11,7 @@ function installed(): InstalledPlugin {
     queryClient: new QueryClient(),
     cleanup: () => {},
     surfaces: [],
+    settingsScreens: [],
     sidebarItems: [],
     workspacePanels: [
       {

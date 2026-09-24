@@ -18,8 +18,8 @@ import {
   collectPlatforms,
   filterAndSortPlugins,
   isThemePlugin,
-  normalizeRepoUrl,
   parseGithubSource,
+  repoSourceKey,
   useMarketplaceCatalog,
   type MarketplacePlugin,
   type MarketplaceSort,
@@ -97,20 +97,22 @@ function MarketplaceEmpty({
   return <Text style={styles.empty}>{t("marketplace.states.empty")}</Text>;
 }
 
-function buildInstalledLookup(installed: { id: string; remote?: string }[] | undefined): {
-  remotes: Set<string>;
+function buildInstalledLookup(
+  installed: { id: string; remote?: string; pluginPath?: string }[] | undefined,
+): {
+  sources: Set<string>;
   ids: Set<string>;
 } {
-  const remotes = new Set<string>();
+  const sources = new Set<string>();
   const ids = new Set<string>();
   for (const plugin of installed ?? []) {
     ids.add(plugin.id);
-    const remote = normalizeRepoUrl(plugin.remote);
-    if (remote) {
-      remotes.add(remote);
+    const source = repoSourceKey(plugin.remote, plugin.pluginPath);
+    if (source) {
+      sources.add(source);
     }
   }
-  return { remotes, ids };
+  return { sources, ids };
 }
 
 interface ThemeGalleryProps {
@@ -231,9 +233,10 @@ export function MarketplaceScreen() {
     (plugin: MarketplacePlugin): MarketplaceInstallStatus => {
       const local = localStatuses[plugin.id];
       if (local === "pending") return "pending";
+      const parsed = parseGithubSource(plugin.url);
       const installed =
         installedLookup.ids.has(plugin.id) ||
-        installedLookup.remotes.has(normalizeRepoUrl(parseGithubSource(plugin.url).source));
+        installedLookup.sources.has(repoSourceKey(parsed.source, parsed.pluginPath));
       if (installed) return "installed";
       if (local === "failed") return "failed";
       return "idle";

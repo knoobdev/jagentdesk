@@ -5638,6 +5638,10 @@ export const PluginListItemSchema = z.object({
   // Upstream v0.7.2 managed-source (git) fields; absent for directory plugins.
   source: z.enum(["directory", "git"]).optional(),
   remote: z.string().optional(),
+  // Monorepo subdirectory the plugin was installed from ("." or absent = repo root).
+  // Needed so the marketplace can tell sibling plugins in one repo apart — otherwise
+  // installing one marks every plugin sharing the repo remote as installed.
+  pluginPath: z.string().optional(),
   ref: z.string().optional(),
   commit: z.string().optional(),
   error: z.string().optional(),

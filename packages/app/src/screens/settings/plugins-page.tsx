@@ -18,7 +18,9 @@ import { useHostFeature } from "@/runtime/host-features";
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import { SettingsSection } from "@/screens/settings/settings-section";
 import { resolvePluginPageState } from "@/screens/settings/plugins-page-state";
-import { pluginRegistry, useInstalledPlugins } from "@/plugins/registry";
+import { pluginRegistry, useInstalledPlugin, useInstalledPlugins } from "@/plugins/registry";
+import { buildPluginSurfaceRoute } from "@/plugins/routes";
+import { resolvePluginIcon } from "@/plugins/icons";
 import { settingsStyles } from "@/styles/settings";
 import { confirmDialog } from "@/utils/confirm-dialog";
 import { buildMarketplaceRoute } from "@/utils/host-routes";
@@ -37,7 +39,29 @@ function pluginRowAction(action: string | undefined): PluginRowAction | undefine
   return undefined;
 }
 
+function SettingsScreenButton({
+  serverId,
+  pluginId,
+  screen,
+}: {
+  serverId: string;
+  pluginId: string;
+  screen: { id: string; title: string; icon: string };
+}) {
+  const router = useRouter();
+  const Icon = useMemo(() => resolvePluginIcon(screen.icon), [screen.icon]);
+  const open = useCallback(() => {
+    router.push(buildPluginSurfaceRoute(serverId, pluginId, { kind: "settings", id: screen.id }));
+  }, [pluginId, router, screen.id, serverId]);
+  return (
+    <Button variant="outline" size="sm" leftIcon={Icon} onPress={open}>
+      {screen.title}
+    </Button>
+  );
+}
+
 function PluginRow({
+  serverId,
   plugin,
   clientError,
   pending,
@@ -46,6 +70,7 @@ function PluginRow({
   onOpenLogs,
   supportsLogs,
 }: {
+  serverId: string;
   plugin: PluginListItem;
   clientError?: string;
   pending: boolean;
@@ -55,6 +80,8 @@ function PluginRow({
   supportsLogs: boolean;
 }) {
   const { t } = useTranslation();
+  const installed = useInstalledPlugin(serverId, plugin.id);
+  const settingsScreens = installed?.settingsScreens ?? [];
   const reload = useCallback(() => onAction("reload", plugin), [onAction, plugin]);
   const toggle = useCallback(
     () => onAction(plugin.enabled ? "disable" : "enable", plugin),
@@ -82,6 +109,18 @@ function PluginRow({
         <Text style={settingsStyles.rowHint}>{plugin.path}</Text>
         {clientError || plugin.error ? (
           <Text style={styles.error}>{clientError ?? plugin.error}</Text>
+        ) : null}
+        {plugin.enabled && settingsScreens.length > 0 ? (
+          <View style={styles.settingsScreens}>
+            {settingsScreens.map((screen) => (
+              <SettingsScreenButton
+                key={screen.id}
+                serverId={serverId}
+                pluginId={plugin.id}
+                screen={screen}
+              />
+            ))}
+          </View>
         ) : null}
       </View>
       <View style={styles.actions}>
@@ -358,6 +397,7 @@ export function HostPluginsPage({ serverId }: { serverId: string }) {
             return (
               <PluginRow
                 key={plugin.id}
+                serverId={serverId}
                 plugin={plugin}
                 clientError={clientError}
                 pending={mutation.isPending}
@@ -473,6 +513,12 @@ const styles = StyleSheet.create((theme) => ({
   },
   pluginTitle: { flexDirection: "row", alignItems: "center", gap: theme.spacing[2] },
   actions: { flexDirection: "row", flexWrap: "wrap", gap: theme.spacing[2] },
+  settingsScreens: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: theme.spacing[2],
+    marginTop: theme.spacing[2],
+  },
   error: { color: theme.colors.statusDanger, fontSize: theme.fontSize.sm },
   empty: { padding: theme.spacing[4], alignItems: "center" },
   logsState: {

@@ -119,6 +119,8 @@ export class PluginService {
           item.source = "git";
           const remote = this.managedSources?.displayRemote(id);
           if (remote) item.remote = remote;
+          if (managed.pluginPath && managed.pluginPath !== ".")
+            item.pluginPath = managed.pluginPath;
           item.ref = managed.requestedRef ?? managed.trackingBranch ?? managed.commit;
           item.commit = managed.commit;
         }
