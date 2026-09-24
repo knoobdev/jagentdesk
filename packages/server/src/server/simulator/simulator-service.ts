@@ -64,7 +64,9 @@ export class SimulatorService {
       return availability;
     }
     availability.simctl = await this.probe("xcrun", ["simctl", "help"]);
-    availability.idb = await this.probe("idb", ["--version"]);
+    // `idb list-targets` exits 0 only when the idb CLI *and* its idb_companion are functional
+    // (`idb --version` is not a valid flag; `idb --help` passes even without a working companion).
+    availability.idb = await this.probe("idb", ["list-targets"]);
     try {
       const result = await execCommand("xcode-select", ["-p"], { timeout: 10_000 });
       availability.xcode = (result.stdout ?? "").includes("Xcode.app");
