@@ -178,6 +178,8 @@ import { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { DatabaseSession } from "./session/database/database-session.js";
 import { DockerService } from "./docker/docker-service.js";
 import { DockerStreams } from "./docker/docker-streams.js";
+import { SimulatorService } from "./simulator/simulator-service.js";
+import { SimulatorStreams } from "./simulator/simulator-streams.js";
 import { DatabaseRegistry } from "./database/database-registry.js";
 import { ProviderCatalogSession } from "./session/provider/provider-catalog-session.js";
 import { WorkspaceFilesSession } from "./session/files/workspace-files-session.js";
@@ -815,6 +817,8 @@ export class Session {
   private databaseSession!: DatabaseSession;
   private readonly dockerService = new DockerService();
   private readonly dockerStreams = new DockerStreams(this.dockerService);
+  private readonly simulatorService = new SimulatorService();
+  private readonly simulatorStreams = new SimulatorStreams(this.simulatorService);
   private readonly providerCatalogSession: ProviderCatalogSession;
   private readonly workspaceFilesSession: WorkspaceFilesSession;
   private readonly agentConfigSession: AgentConfigSession;
@@ -2227,6 +2231,7 @@ export class Session {
       () => this.dispatchClusterMessage(msg),
       () => this.dispatchDatabaseMessage(msg),
       () => this.dispatchDockerMessage(msg),
+      () => this.dispatchSimulatorMessage(msg),
       () => this.dispatchMigrationMessage(msg),
       () => this.dispatchPluginMessage(msg),
       () => this.dispatchPluginDirectoryMessage(msg),
@@ -3386,6 +3391,302 @@ export class Session {
       this.dockerStreams.unsubscribeStats(subscriptionId);
       this.emit({
         type: "docker/stats/unsubscribe/response",
+        payload: { requestId, error: null, subscriptionId },
+      });
+      return undefined;
+    }
+    return undefined;
+  }
+
+  private dispatchSimulatorMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    const fail = (error: unknown): string =>
+      error instanceof Error ? error.message : String(error);
+    if (msg.type === "simulator/list") {
+      const { requestId } = msg;
+      return this.simulatorService
+        .list()
+        .then((result) => {
+          this.emit({
+            type: "simulator/list/response",
+            payload: { requestId, error: null, ...result },
+          });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({
+            type: "simulator/list/response",
+            payload: {
+              requestId,
+              error: fail(error),
+              availability: { simctl: false, idb: false, xcode: false },
+              devices: [],
+            },
+          });
+          return undefined;
+        });
+    }
+    if (msg.type === "simulator/action") {
+      const { requestId, udid } = msg;
+      return this.simulatorService
+        .action(udid, msg.action)
+        .then(() => {
+          this.emit({
+            type: "simulator/action/response",
+            payload: { requestId, error: null, udid },
+          });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({
+            type: "simulator/action/response",
+            payload: { requestId, error: fail(error), udid },
+          });
+          return undefined;
+        });
+    }
+    if (msg.type === "simulator/tap") {
+      const { requestId } = msg;
+      return this.simulatorService
+        .tap(msg.udid, msg.x, msg.y)
+        .then(() => {
+          this.emit({ type: "simulator/tap/response", payload: { requestId, error: null } });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({ type: "simulator/tap/response", payload: { requestId, error: fail(error) } });
+          return undefined;
+        });
+    }
+    if (msg.type === "simulator/swipe") {
+      const { requestId } = msg;
+      return this.simulatorService
+        .swipe(msg.udid, msg.x1, msg.y1, msg.x2, msg.y2, msg.durationMs)
+        .then(() => {
+          this.emit({ type: "simulator/swipe/response", payload: { requestId, error: null } });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({
+            type: "simulator/swipe/response",
+            payload: { requestId, error: fail(error) },
+          });
+          return undefined;
+        });
+    }
+    if (msg.type === "simulator/input-text") {
+      const { requestId } = msg;
+      return this.simulatorService
+        .inputText(msg.udid, msg.text)
+        .then(() => {
+          this.emit({ type: "simulator/input-text/response", payload: { requestId, error: null } });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({
+            type: "simulator/input-text/response",
+            payload: { requestId, error: fail(error) },
+          });
+          return undefined;
+        });
+    }
+    if (msg.type === "simulator/button") {
+      const { requestId } = msg;
+      return this.simulatorService
+        .button(msg.udid, msg.button)
+        .then(() => {
+          this.emit({ type: "simulator/button/response", payload: { requestId, error: null } });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({
+            type: "simulator/button/response",
+            payload: { requestId, error: fail(error) },
+          });
+          return undefined;
+        });
+    }
+    if (msg.type === "simulator/describe-ui") {
+      const { requestId } = msg;
+      return this.simulatorService
+        .describeUi(msg.udid)
+        .then((elements) => {
+          this.emit({
+            type: "simulator/describe-ui/response",
+            payload: { requestId, error: null, elements },
+          });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({
+            type: "simulator/describe-ui/response",
+            payload: { requestId, error: fail(error), elements: [] },
+          });
+          return undefined;
+        });
+    }
+    if (msg.type === "simulator/screenshot") {
+      const { requestId } = msg;
+      return this.simulatorService
+        .screenshot(msg.udid)
+        .then((pngBase64) => {
+          this.emit({
+            type: "simulator/screenshot/response",
+            payload: { requestId, error: null, pngBase64 },
+          });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({
+            type: "simulator/screenshot/response",
+            payload: { requestId, error: fail(error), pngBase64: "" },
+          });
+          return undefined;
+        });
+    }
+    if (msg.type === "simulator/install-app") {
+      const { requestId } = msg;
+      return this.simulatorService
+        .installApp(msg.udid, msg.appPath)
+        .then(() => {
+          this.emit({
+            type: "simulator/install-app/response",
+            payload: { requestId, error: null },
+          });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({
+            type: "simulator/install-app/response",
+            payload: { requestId, error: fail(error) },
+          });
+          return undefined;
+        });
+    }
+    if (msg.type === "simulator/launch-app") {
+      const { requestId } = msg;
+      return this.simulatorService
+        .launchApp(msg.udid, msg.bundleId, msg.terminateExisting)
+        .then(() => {
+          this.emit({ type: "simulator/launch-app/response", payload: { requestId, error: null } });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({
+            type: "simulator/launch-app/response",
+            payload: { requestId, error: fail(error) },
+          });
+          return undefined;
+        });
+    }
+    if (msg.type === "simulator/terminate-app") {
+      const { requestId } = msg;
+      return this.simulatorService
+        .terminateApp(msg.udid, msg.bundleId)
+        .then(() => {
+          this.emit({
+            type: "simulator/terminate-app/response",
+            payload: { requestId, error: null },
+          });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({
+            type: "simulator/terminate-app/response",
+            payload: { requestId, error: fail(error) },
+          });
+          return undefined;
+        });
+    }
+    if (msg.type === "simulator/open-url") {
+      const { requestId } = msg;
+      return this.simulatorService
+        .openUrl(msg.udid, msg.url)
+        .then(() => {
+          this.emit({ type: "simulator/open-url/response", payload: { requestId, error: null } });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({
+            type: "simulator/open-url/response",
+            payload: { requestId, error: fail(error) },
+          });
+          return undefined;
+        });
+    }
+    if (msg.type === "simulator/slim") {
+      const { requestId, udid } = msg;
+      return this.simulatorService
+        .slim(udid, msg.reboot ?? false)
+        .then((slimState) => {
+          this.emit({
+            type: "simulator/slim/response",
+            payload: { requestId, error: null, udid, slimState },
+          });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({
+            type: "simulator/slim/response",
+            payload: { requestId, error: fail(error), udid, slimState: "unknown" },
+          });
+          return undefined;
+        });
+    }
+    if (msg.type === "simulator/unslim") {
+      const { requestId, udid } = msg;
+      return this.simulatorService
+        .unslim(udid)
+        .then((slimState) => {
+          this.emit({
+            type: "simulator/unslim/response",
+            payload: { requestId, error: null, udid, slimState },
+          });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({
+            type: "simulator/unslim/response",
+            payload: { requestId, error: fail(error), udid, slimState: "unknown" },
+          });
+          return undefined;
+        });
+    }
+    if (msg.type === "simulator/subscribe") {
+      const { requestId, subscriptionId } = msg;
+      this.emit({
+        type: "simulator/subscribe/response",
+        payload: { requestId, error: null, subscriptionId },
+      });
+      void this.simulatorStreams.subscribeFleet(subscriptionId, (snapshot) => {
+        this.emit({ type: "simulator/snapshot", payload: { subscriptionId, ...snapshot } });
+      });
+      return undefined;
+    }
+    if (msg.type === "simulator/unsubscribe") {
+      const { requestId, subscriptionId } = msg;
+      this.simulatorStreams.unsubscribeFleet(subscriptionId);
+      this.emit({
+        type: "simulator/unsubscribe/response",
+        payload: { requestId, error: null, subscriptionId },
+      });
+      return undefined;
+    }
+    if (msg.type === "simulator/logs/subscribe") {
+      const { requestId, subscriptionId } = msg;
+      this.emit({
+        type: "simulator/logs/subscribe/response",
+        payload: { requestId, error: null, subscriptionId },
+      });
+      this.simulatorStreams.subscribeLogs(subscriptionId, msg.udid, (chunk) => {
+        this.emit({ type: "simulator/log-chunk", payload: { subscriptionId, chunk } });
+      });
+      return undefined;
+    }
+    if (msg.type === "simulator/logs/unsubscribe") {
+      const { requestId, subscriptionId } = msg;
+      this.simulatorStreams.unsubscribeLogs(subscriptionId);
+      this.emit({
+        type: "simulator/logs/unsubscribe/response",
         payload: { requestId, error: null, subscriptionId },
       });
       return undefined;
@@ -8334,6 +8635,7 @@ export class Session {
     await this.voiceSession.cleanup();
 
     this.dockerStreams.disposeAll();
+    this.simulatorStreams.disposeAll();
     this.terminalController.dispose();
 
     this.checkoutSession.cleanup();

@@ -490,6 +490,14 @@ export function buildDockerRoute(serverId: string) {
   return `/h/${encodeSegment(normalized)}/docker` as const;
 }
 
+export function buildSimulatorRoute(serverId: string) {
+  const normalized = trimNonEmpty(serverId);
+  if (!normalized) {
+    return "/" as const;
+  }
+  return `/h/${encodeSegment(normalized)}/simulator` as const;
+}
+
 export function buildClusterWorkloadsRoute(serverId: string, clusterId: string) {
   const normalizedServer = trimNonEmpty(serverId);
   const normalizedCluster = trimNonEmpty(clusterId);

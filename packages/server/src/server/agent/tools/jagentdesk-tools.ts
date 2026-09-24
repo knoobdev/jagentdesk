@@ -118,6 +118,8 @@ import type { ClusterRegistry } from "../../cluster/cluster-registry.js";
 import type { DatabaseRegistry } from "../../database/database-registry.js";
 import type { DatabaseEngine } from "../../database/database-dto.js";
 import { execCommand } from "../../../utils/spawn.js";
+import { SimulatorService } from "../../simulator/simulator-service.js";
+import type { SimButton } from "@jagentdesk/protocol/simulator/rpc-schemas";
 import type { ForgeHubService } from "../../session/forge/forge-hub-session.js";
 import type { SkillsStorage } from "../../skills/skills-storage.js";
 import type { Skill } from "@jagentdesk/protocol/skills";
@@ -787,6 +789,329 @@ function registerDockerTools(params: {
     },
     async (input: { container: string; force?: boolean }) =>
       runDocker(["rm", ...(input.force ? ["-f"] : []), input.container]),
+  );
+}
+
+// SimFleet — iOS Simulator control for agents. Lets an agent list/boot/drive MANY simulators
+// concurrently (tap/swipe/type via idb, inspect the accessibility tree, screenshot, launch apps,
+// deep-link) and slim them for density, all through the daemon's SimulatorService — the same
+// control plane the human SimFleet UI uses. macOS-only; tools surface a clear error otherwise.
+const simulatorToolService = new SimulatorService();
+
+function textResult(text: string): JAgentDeskToolResult {
+  return { content: [{ type: "text", text: text || "(ok)" }] };
+}
+function simErrorResult(err: unknown): JAgentDeskToolResult {
+  const e = err as { stderr?: string; message?: string };
+  return {
+    content: [
+      { type: "text", text: `simulator failed: ${(e.stderr || e.message || String(err)).trim()}` },
+    ],
+    isError: true,
+  };
+}
+
+function registerSimulatorTools(params: {
+  registerTool: (
+    name: string,
+    config: JAgentDeskToolConfig,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Tool handlers are schema-validated at registration boundaries.
+    handler: (input: any, context: JAgentDeskToolExecutionContext) => Promise<JAgentDeskToolResult>,
+  ) => void;
+}): void {
+  const { registerTool } = params;
+
+  registerTool(
+    "sim_list",
+    {
+      title: "Simulator list",
+      description:
+        "List iOS simulators (udid, name, runtime, boot state, slim state). bootedOnly=true limits to running ones. Auto-approved (read-only).",
+      inputSchema: { bootedOnly: z.boolean().optional() },
+    },
+    async (input: { bootedOnly?: boolean }) => {
+      try {
+        const { availability, devices } = await simulatorToolService.list();
+        if (!availability.simctl) {
+          return textResult("iOS simulators unavailable: this daemon host has no Xcode/simctl.");
+        }
+        const rows = devices
+          .filter((d) => !input.bootedOnly || d.isBooted)
+          .map(
+            (d) =>
+              `${d.isBooted ? "●" : "○"} ${d.name}  [${d.runtime}]  ${d.state}  slim=${d.slimState}  ${d.udid}`,
+          );
+        const idbNote = availability.idb ? "" : "\n(idb not installed — tap/swipe/type disabled)";
+        return textResult((rows.join("\n") || "(no simulators)") + idbNote);
+      } catch (err) {
+        return simErrorResult(err);
+      }
+    },
+  );
+
+  const actionTool = (
+    name: string,
+    action: "boot" | "shutdown" | "erase" | "delete",
+    description: string,
+  ) =>
+    registerTool(
+      name,
+      { title: name, description, inputSchema: { udid: z.string().min(1) } },
+      async (input: { udid: string }) => {
+        try {
+          await simulatorToolService.action(input.udid, action);
+          return textResult(`${action} ${input.udid} ok`);
+        } catch (err) {
+          return simErrorResult(err);
+        }
+      },
+    );
+  actionTool("sim_boot", "boot", "Boot an iOS simulator and wait until ready.");
+  actionTool("sim_shutdown", "shutdown", "Shut down a booted iOS simulator.");
+  actionTool("sim_erase", "erase", "Erase a simulator's data + settings (factory reset).");
+  actionTool("sim_delete", "delete", "Delete a simulator permanently.");
+
+  registerTool(
+    "sim_tap",
+    {
+      title: "Simulator tap",
+      description: "Tap at (x, y) in points on a simulator (needs idb).",
+      inputSchema: { udid: z.string().min(1), x: z.number(), y: z.number() },
+    },
+    async (input: { udid: string; x: number; y: number }) => {
+      try {
+        await simulatorToolService.tap(input.udid, input.x, input.y);
+        return textResult(`tapped ${input.x},${input.y}`);
+      } catch (err) {
+        return simErrorResult(err);
+      }
+    },
+  );
+
+  registerTool(
+    "sim_swipe",
+    {
+      title: "Simulator swipe",
+      description: "Swipe from (x1,y1) to (x2,y2) in points; optional durationMs (needs idb).",
+      inputSchema: {
+        udid: z.string().min(1),
+        x1: z.number(),
+        y1: z.number(),
+        x2: z.number(),
+        y2: z.number(),
+        durationMs: z.number().int().nonnegative().optional(),
+      },
+    },
+    async (input: {
+      udid: string;
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+      durationMs?: number;
+    }) => {
+      try {
+        await simulatorToolService.swipe(
+          input.udid,
+          input.x1,
+          input.y1,
+          input.x2,
+          input.y2,
+          input.durationMs,
+        );
+        return textResult("swiped");
+      } catch (err) {
+        return simErrorResult(err);
+      }
+    },
+  );
+
+  registerTool(
+    "sim_type",
+    {
+      title: "Simulator type text",
+      description: "Type text into the focused field on a simulator (needs idb).",
+      inputSchema: { udid: z.string().min(1), text: z.string() },
+    },
+    async (input: { udid: string; text: string }) => {
+      try {
+        await simulatorToolService.inputText(input.udid, input.text);
+        return textResult("typed");
+      } catch (err) {
+        return simErrorResult(err);
+      }
+    },
+  );
+
+  registerTool(
+    "sim_button",
+    {
+      title: "Simulator hardware button",
+      description: "Press a hardware button: home, lock, side-button, siri, apple-pay (needs idb).",
+      inputSchema: {
+        udid: z.string().min(1),
+        button: z.enum(["home", "lock", "side-button", "siri", "apple-pay"]),
+      },
+    },
+    async (input: { udid: string; button: SimButton }) => {
+      try {
+        await simulatorToolService.button(input.udid, input.button);
+        return textResult(`pressed ${input.button}`);
+      } catch (err) {
+        return simErrorResult(err);
+      }
+    },
+  );
+
+  registerTool(
+    "sim_describe_ui",
+    {
+      title: "Simulator accessibility tree",
+      description:
+        "Dump the on-screen accessibility elements (role, label, identifier, frame). Prefer this over screenshots to locate a control, then tap its frame center — faster and deterministic. Needs idb. Auto-approved (read-only).",
+      inputSchema: { udid: z.string().min(1) },
+    },
+    async (input: { udid: string }) => {
+      try {
+        const elements = await simulatorToolService.describeUi(input.udid);
+        const lines = elements.map(
+          (e) =>
+            `${e.role}${e.label ? ` "${e.label}"` : ""}${e.identifier ? ` #${e.identifier}` : ""} @ ${Math.round(e.x + e.width / 2)},${Math.round(e.y + e.height / 2)} [${Math.round(e.x)},${Math.round(e.y)},${Math.round(e.width)}x${Math.round(e.height)}]${e.enabled ? "" : " (disabled)"}`,
+        );
+        return textResult(lines.join("\n") || "(no elements)");
+      } catch (err) {
+        return simErrorResult(err);
+      }
+    },
+  );
+
+  registerTool(
+    "sim_screenshot",
+    {
+      title: "Simulator screenshot",
+      description: "Capture the simulator screen as a PNG image. Auto-approved (read-only).",
+      inputSchema: { udid: z.string().min(1) },
+    },
+    async (input: { udid: string }) => {
+      try {
+        const pngBase64 = await simulatorToolService.screenshot(input.udid);
+        return {
+          content: [
+            { type: "image", data: pngBase64, mimeType: "image/png" },
+            { type: "text", text: "screenshot captured" },
+          ],
+        };
+      } catch (err) {
+        return simErrorResult(err);
+      }
+    },
+  );
+
+  registerTool(
+    "sim_install_app",
+    {
+      title: "Simulator install app",
+      description: "Install a .app bundle (absolute path) onto a booted simulator.",
+      inputSchema: { udid: z.string().min(1), appPath: z.string().min(1) },
+    },
+    async (input: { udid: string; appPath: string }) => {
+      try {
+        await simulatorToolService.installApp(input.udid, input.appPath);
+        return textResult("installed");
+      } catch (err) {
+        return simErrorResult(err);
+      }
+    },
+  );
+
+  registerTool(
+    "sim_launch_app",
+    {
+      title: "Simulator launch app",
+      description: "Launch an installed app by bundle id; terminateExisting relaunches it.",
+      inputSchema: {
+        udid: z.string().min(1),
+        bundleId: z.string().min(1),
+        terminateExisting: z.boolean().optional(),
+      },
+    },
+    async (input: { udid: string; bundleId: string; terminateExisting?: boolean }) => {
+      try {
+        await simulatorToolService.launchApp(input.udid, input.bundleId, input.terminateExisting);
+        return textResult(`launched ${input.bundleId}`);
+      } catch (err) {
+        return simErrorResult(err);
+      }
+    },
+  );
+
+  registerTool(
+    "sim_terminate_app",
+    {
+      title: "Simulator terminate app",
+      description: "Terminate a running app by bundle id.",
+      inputSchema: { udid: z.string().min(1), bundleId: z.string().min(1) },
+    },
+    async (input: { udid: string; bundleId: string }) => {
+      try {
+        await simulatorToolService.terminateApp(input.udid, input.bundleId);
+        return textResult(`terminated ${input.bundleId}`);
+      } catch (err) {
+        return simErrorResult(err);
+      }
+    },
+  );
+
+  registerTool(
+    "sim_open_url",
+    {
+      title: "Simulator open URL",
+      description: "Open a URL / deep link on a simulator (https:// or a custom scheme).",
+      inputSchema: { udid: z.string().min(1), url: z.string().min(1) },
+    },
+    async (input: { udid: string; url: string }) => {
+      try {
+        await simulatorToolService.openUrl(input.udid, input.url);
+        return textResult(`opened ${input.url}`);
+      } catch (err) {
+        return simErrorResult(err);
+      }
+    },
+  );
+
+  registerTool(
+    "sim_slim",
+    {
+      title: "Simulator slim",
+      description:
+        "Disable background daemons on a simulator to free RAM so more simulators fit on this Mac. reboot=true reapplies from a clean boot. Returns the new slim state.",
+      inputSchema: { udid: z.string().min(1), reboot: z.boolean().optional() },
+    },
+    async (input: { udid: string; reboot?: boolean }) => {
+      try {
+        const slimState = await simulatorToolService.slim(input.udid, input.reboot ?? false);
+        return textResult(`slimmed → ${slimState}`);
+      } catch (err) {
+        return simErrorResult(err);
+      }
+    },
+  );
+
+  registerTool(
+    "sim_unslim",
+    {
+      title: "Simulator unslim",
+      description: "Re-enable the background daemons a previous slim disabled (restore stock).",
+      inputSchema: { udid: z.string().min(1) },
+    },
+    async (input: { udid: string }) => {
+      try {
+        const slimState = await simulatorToolService.unslim(input.udid);
+        return textResult(`unslimmed → ${slimState}`);
+      } catch (err) {
+        return simErrorResult(err);
+      }
+    },
   );
 }
 
@@ -3296,6 +3621,7 @@ export function createJAgentDeskToolCatalog(
   registerKubectlTools({ registerTool, options, callerAgentId });
   registerSqlTools({ registerTool, options, callerAgentId });
   registerDockerTools({ registerTool });
+  registerSimulatorTools({ registerTool });
   // Forge Hub tools mirror the kubectl precedent: available to every agent and
   // registered before the voice-only early return so a voice session keeps them.
   registerForgeTools({ registerTool, options, callerAgentId });

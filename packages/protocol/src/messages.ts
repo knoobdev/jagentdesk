@@ -169,6 +169,11 @@ import {
   DockerPushSchemas,
 } from "./docker/rpc-schemas.js";
 import {
+  SimulatorRequestSchemas,
+  SimulatorResponseSchemas,
+  SimulatorPushSchemas,
+} from "./simulator/rpc-schemas.js";
+import {
   ExportHostDataRequestMessageSchema,
   ExportHostDataResponseMessageSchema,
   ImportHostDataRequestMessageSchema,
@@ -3947,6 +3952,7 @@ export const AgentConfigApplyRequestMessageSchema = z.object({
 export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ...DatabaseRequestSchemas,
   ...DockerRequestSchemas,
+  ...SimulatorRequestSchemas,
   HubExecutionAgentCreateRequestSchema,
   HubExecutionControlRequestSchema,
   BrowserAutomationExecuteResponseSchema,
@@ -7626,6 +7632,8 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ...DatabaseResponseSchemas,
   ...DockerResponseSchemas,
   ...DockerPushSchemas,
+  ...SimulatorResponseSchemas,
+  ...SimulatorPushSchemas,
   HubExecutionAgentCreateResponseSchema,
   HubExecutionControlResponseSchema,
   HubExecutionAgentUpdateSchema,

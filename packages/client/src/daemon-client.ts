@@ -23,6 +23,26 @@ import type {
   DockerVolumeAction,
   DockerVolumeActionPayload,
 } from "@jagentdesk/protocol/docker/rpc-schemas";
+import type {
+  SimAction,
+  SimActionPayload,
+  SimButton,
+  SimButtonPayload,
+  SimDescribeUiPayload,
+  SimInputTextPayload,
+  SimInstallAppPayload,
+  SimLaunchAppPayload,
+  SimListPayload,
+  SimLogChunkPayload,
+  SimOpenUrlPayload,
+  SimScreenshotPayload,
+  SimSlimPayload,
+  SimSnapshotPayload,
+  SimSwipePayload,
+  SimTapPayload,
+  SimTerminateAppPayload,
+  SimUnslimPayload,
+} from "@jagentdesk/protocol/simulator/rpc-schemas";
 import type { AgentAttentionNotificationPayload } from "@jagentdesk/protocol/agent-attention-notification";
 import {
   AgentCreateFailedStatusPayloadSchema,
@@ -7148,6 +7168,248 @@ export class DaemonClient {
 
   onDockerStats(subscriptionId: string, handler: (stats: DockerStatsPayload) => void): () => void {
     return this.on("docker/stats-data", (message) => {
+      if (message.payload.subscriptionId === subscriptionId) handler(message.payload);
+    });
+  }
+
+  // ── SimFleet: iOS Simulator control ──
+  async simulatorList(requestId?: string): Promise<SimListPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "simulator/list" },
+      responseType: "simulator/list/response",
+    });
+  }
+
+  async simulatorAction(options: {
+    requestId?: string;
+    udid: string;
+    action: SimAction;
+  }): Promise<SimActionPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "simulator/action", udid: options.udid, action: options.action },
+      responseType: "simulator/action/response",
+    });
+  }
+
+  async simulatorTap(options: {
+    requestId?: string;
+    udid: string;
+    x: number;
+    y: number;
+  }): Promise<SimTapPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "simulator/tap", udid: options.udid, x: options.x, y: options.y },
+      responseType: "simulator/tap/response",
+    });
+  }
+
+  async simulatorSwipe(options: {
+    requestId?: string;
+    udid: string;
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    durationMs?: number;
+  }): Promise<SimSwipePayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "simulator/swipe",
+        udid: options.udid,
+        x1: options.x1,
+        y1: options.y1,
+        x2: options.x2,
+        y2: options.y2,
+        ...(options.durationMs !== undefined ? { durationMs: options.durationMs } : {}),
+      },
+      responseType: "simulator/swipe/response",
+    });
+  }
+
+  async simulatorInputText(options: {
+    requestId?: string;
+    udid: string;
+    text: string;
+  }): Promise<SimInputTextPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "simulator/input-text", udid: options.udid, text: options.text },
+      responseType: "simulator/input-text/response",
+    });
+  }
+
+  async simulatorButton(options: {
+    requestId?: string;
+    udid: string;
+    button: SimButton;
+  }): Promise<SimButtonPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "simulator/button", udid: options.udid, button: options.button },
+      responseType: "simulator/button/response",
+    });
+  }
+
+  async simulatorDescribeUi(options: {
+    requestId?: string;
+    udid: string;
+  }): Promise<SimDescribeUiPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "simulator/describe-ui", udid: options.udid },
+      responseType: "simulator/describe-ui/response",
+    });
+  }
+
+  async simulatorScreenshot(options: {
+    requestId?: string;
+    udid: string;
+  }): Promise<SimScreenshotPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "simulator/screenshot", udid: options.udid },
+      responseType: "simulator/screenshot/response",
+    });
+  }
+
+  async simulatorInstallApp(options: {
+    requestId?: string;
+    udid: string;
+    appPath: string;
+  }): Promise<SimInstallAppPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "simulator/install-app", udid: options.udid, appPath: options.appPath },
+      responseType: "simulator/install-app/response",
+    });
+  }
+
+  async simulatorLaunchApp(options: {
+    requestId?: string;
+    udid: string;
+    bundleId: string;
+    terminateExisting?: boolean;
+  }): Promise<SimLaunchAppPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "simulator/launch-app",
+        udid: options.udid,
+        bundleId: options.bundleId,
+        ...(options.terminateExisting !== undefined
+          ? { terminateExisting: options.terminateExisting }
+          : {}),
+      },
+      responseType: "simulator/launch-app/response",
+    });
+  }
+
+  async simulatorTerminateApp(options: {
+    requestId?: string;
+    udid: string;
+    bundleId: string;
+  }): Promise<SimTerminateAppPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "simulator/terminate-app", udid: options.udid, bundleId: options.bundleId },
+      responseType: "simulator/terminate-app/response",
+    });
+  }
+
+  async simulatorOpenUrl(options: {
+    requestId?: string;
+    udid: string;
+    url: string;
+  }): Promise<SimOpenUrlPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "simulator/open-url", udid: options.udid, url: options.url },
+      responseType: "simulator/open-url/response",
+    });
+  }
+
+  async simulatorSlim(options: {
+    requestId?: string;
+    udid: string;
+    reboot?: boolean;
+  }): Promise<SimSlimPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "simulator/slim",
+        udid: options.udid,
+        ...(options.reboot !== undefined ? { reboot: options.reboot } : {}),
+      },
+      responseType: "simulator/slim/response",
+    });
+  }
+
+  async simulatorUnslim(options: { requestId?: string; udid: string }): Promise<SimUnslimPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "simulator/unslim", udid: options.udid },
+      responseType: "simulator/unslim/response",
+    });
+  }
+
+  async simulatorSubscribe(options: { subscriptionId: string; requestId?: string }): Promise<void> {
+    await this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "simulator/subscribe", subscriptionId: options.subscriptionId },
+      responseType: "simulator/subscribe/response",
+    });
+  }
+
+  simulatorUnsubscribe(options: { subscriptionId: string }): void {
+    this.sendSessionMessage({
+      type: "simulator/unsubscribe",
+      requestId: this.createRequestId(),
+      subscriptionId: options.subscriptionId,
+    });
+  }
+
+  onSimulatorSnapshot(
+    subscriptionId: string,
+    handler: (snapshot: SimSnapshotPayload) => void,
+  ): () => void {
+    return this.on("simulator/snapshot", (message) => {
+      if (message.payload.subscriptionId === subscriptionId) handler(message.payload);
+    });
+  }
+
+  async simulatorLogsSubscribe(options: {
+    subscriptionId: string;
+    udid: string;
+    requestId?: string;
+  }): Promise<void> {
+    await this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "simulator/logs/subscribe",
+        subscriptionId: options.subscriptionId,
+        udid: options.udid,
+      },
+      responseType: "simulator/logs/subscribe/response",
+    });
+  }
+
+  simulatorLogsUnsubscribe(options: { subscriptionId: string }): void {
+    this.sendSessionMessage({
+      type: "simulator/logs/unsubscribe",
+      requestId: this.createRequestId(),
+      subscriptionId: options.subscriptionId,
+    });
+  }
+
+  onSimulatorLogChunk(
+    subscriptionId: string,
+    handler: (chunk: SimLogChunkPayload) => void,
+  ): () => void {
+    return this.on("simulator/log-chunk", (message) => {
       if (message.payload.subscriptionId === subscriptionId) handler(message.payload);
     });
   }
