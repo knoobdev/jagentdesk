@@ -8,12 +8,16 @@ import { z } from "zod";
 // `{ type, payload: { requestId, ...data, error } }`. Backed by the host `xcrun simctl` + `idb`.
 // macOS-only; the daemon reports availability rather than erroring on other platforms.
 
-// What the daemon can actually do, probed at request time. `idb` unlocks HID input + the
-// accessibility tree; without it the daemon runs in simctl-only mode (lifecycle + screenshot +
-// logs + open-url still work). `xcode` is false when only the Command Line Tools are selected.
+// What the daemon can actually do, probed at request time. HID input (tap/swipe/type) + the
+// element tree come from either `idb` (fast, native CoreSimulator HID) OR `maestro` (an
+// on-device XCUITest driver that also works where idb_companion can't install, e.g. older
+// macOS) — SimFleet prefers idb and falls back to Maestro. Without either it runs simctl-only
+// (lifecycle + screenshot + logs + open-url still work). `xcode` is false when only the Command
+// Line Tools are selected.
 export const SimAvailabilitySchema = z.object({
   simctl: z.boolean(),
   idb: z.boolean(),
+  maestro: z.boolean(),
   xcode: z.boolean(),
 });
 export type SimAvailability = z.infer<typeof SimAvailabilitySchema>;

@@ -11,6 +11,7 @@ import type {
   SimUiElement,
 } from "@jagentdesk/protocol/simulator/rpc-schemas";
 import { readSlimState, slim, unslim } from "./simulator-slim.js";
+import { MaestroBackend, probeMaestro } from "./simulator-maestro.js";
 
 export interface SimSnapshot {
   availability: SimAvailability;
@@ -55,10 +56,21 @@ function deviceTypeLabel(identifier: string | undefined): string {
 // method degrades or reports unavailable instead of throwing on non-mac / missing tooling.
 export class SimulatorService {
   private cachedAvailability: SimAvailability | null = null;
+  private maestro: MaestroBackend | null = null;
+
+  private maestroBackend(): MaestroBackend {
+    this.maestro ??= new MaestroBackend();
+    return this.maestro;
+  }
 
   async availability(): Promise<SimAvailability> {
     if (this.cachedAvailability) return this.cachedAvailability;
-    const availability: SimAvailability = { simctl: false, idb: false, xcode: false };
+    const availability: SimAvailability = {
+      simctl: false,
+      idb: false,
+      maestro: false,
+      xcode: false,
+    };
     if (process.platform !== "darwin") {
       this.cachedAvailability = availability;
       return availability;
@@ -67,6 +79,7 @@ export class SimulatorService {
     // `idb list-targets` exits 0 only when the idb CLI *and* its idb_companion are functional
     // (`idb --version` is not a valid flag; `idb --help` passes even without a working companion).
     availability.idb = await this.probe("idb", ["list-targets"]);
+    availability.maestro = await probeMaestro();
     try {
       const result = await execCommand("xcode-select", ["-p"], { timeout: 10_000 });
       availability.xcode = (result.stdout ?? "").includes("Xcode.app");
@@ -75,6 +88,17 @@ export class SimulatorService {
     }
     this.cachedAvailability = availability;
     return availability;
+  }
+
+  // HID (tap/swipe/type + element tree) comes from idb when present, else Maestro. Throws a clear
+  // error when neither backend is available.
+  private async hidMode(): Promise<"idb" | "maestro"> {
+    const a = await this.availability();
+    if (a.idb) return "idb";
+    if (a.maestro) return "maestro";
+    throw new Error(
+      "No simulator input backend: install idb (idb_companion) or Maestro to tap/swipe/type",
+    );
   }
 
   private async probe(command: string, args: string[]): Promise<boolean> {
@@ -142,6 +166,7 @@ export class SimulatorService {
   }
 
   async tap(udid: string, x: number, y: number): Promise<void> {
+    if ((await this.hidMode()) === "maestro") return this.maestroBackend().tap(udid, x, y);
     await this.idb(["ui", "tap", "--udid", udid, String(Math.round(x)), String(Math.round(y))]);
   }
 
@@ -153,6 +178,9 @@ export class SimulatorService {
     y2: number,
     durationMs?: number,
   ): Promise<void> {
+    if ((await this.hidMode()) === "maestro") {
+      return this.maestroBackend().swipe(udid, x1, y1, x2, y2, durationMs);
+    }
     const args = [
       "ui",
       "swipe",
@@ -168,14 +196,19 @@ export class SimulatorService {
   }
 
   async inputText(udid: string, text: string): Promise<void> {
+    if ((await this.hidMode()) === "maestro") return this.maestroBackend().inputText(udid, text);
     await this.idb(["ui", "text", "--udid", udid, text]);
   }
 
   async button(udid: string, button: SimButton): Promise<void> {
+    // Hardware buttons need idb; Maestro has no reliable iOS hardware-button command.
+    const a = await this.availability();
+    if (!a.idb) throw new Error("Hardware buttons require idb (idb_companion)");
     await this.idb(["ui", "button", "--udid", udid, IDB_BUTTON[button]]);
   }
 
   async describeUi(udid: string): Promise<SimUiElement[]> {
+    if ((await this.hidMode()) === "maestro") return this.maestroBackend().describeUi(udid);
     const out = await this.idb(["ui", "describe-all", "--udid", udid, "--json"]);
     return parseUiElements(out);
   }

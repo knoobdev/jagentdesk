@@ -841,8 +841,11 @@ function registerSimulatorTools(params: {
             (d) =>
               `${d.isBooted ? "●" : "○"} ${d.name}  [${d.runtime}]  ${d.state}  slim=${d.slimState}  ${d.udid}`,
           );
-        const idbNote = availability.idb ? "" : "\n(idb not installed — tap/swipe/type disabled)";
-        return textResult((rows.join("\n") || "(no simulators)") + idbNote);
+        const hidNote =
+          availability.idb || availability.maestro
+            ? ""
+            : "\n(no idb or Maestro — tap/swipe/type disabled; lifecycle + screenshot still work)";
+        return textResult((rows.join("\n") || "(no simulators)") + hidNote);
       } catch (err) {
         return simErrorResult(err);
       }
@@ -875,7 +878,7 @@ function registerSimulatorTools(params: {
     "sim_tap",
     {
       title: "Simulator tap",
-      description: "Tap at (x, y) in points on a simulator (needs idb).",
+      description: "Tap at (x, y) in points on a simulator (needs idb or Maestro).",
       inputSchema: { udid: z.string().min(1), x: z.number(), y: z.number() },
     },
     async (input: { udid: string; x: number; y: number }) => {
@@ -892,7 +895,8 @@ function registerSimulatorTools(params: {
     "sim_swipe",
     {
       title: "Simulator swipe",
-      description: "Swipe from (x1,y1) to (x2,y2) in points; optional durationMs (needs idb).",
+      description:
+        "Swipe from (x1,y1) to (x2,y2) in points; optional durationMs (needs idb or Maestro).",
       inputSchema: {
         udid: z.string().min(1),
         x1: z.number(),
@@ -930,7 +934,7 @@ function registerSimulatorTools(params: {
     "sim_type",
     {
       title: "Simulator type text",
-      description: "Type text into the focused field on a simulator (needs idb).",
+      description: "Type text into the focused field on a simulator (needs idb or Maestro).",
       inputSchema: { udid: z.string().min(1), text: z.string() },
     },
     async (input: { udid: string; text: string }) => {
@@ -968,7 +972,7 @@ function registerSimulatorTools(params: {
     {
       title: "Simulator accessibility tree",
       description:
-        "Dump the on-screen accessibility elements (role, label, identifier, frame). Prefer this over screenshots to locate a control, then tap its frame center — faster and deterministic. Needs idb. Auto-approved (read-only).",
+        "Dump the on-screen accessibility elements (role, label, identifier, frame). Prefer this over screenshots to locate a control, then tap its frame center — faster and deterministic. Needs idb or Maestro. Auto-approved (read-only).",
       inputSchema: { udid: z.string().min(1) },
     },
     async (input: { udid: string }) => {

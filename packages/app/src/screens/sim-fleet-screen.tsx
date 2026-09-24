@@ -146,6 +146,7 @@ function DeviceCard({
 
 function DetailPane({
   device,
+  hidAvailable,
   idbAvailable,
   screenshot,
   logs,
@@ -157,6 +158,7 @@ function DetailPane({
   onScreenTap,
 }: {
   device: SimDevice;
+  hidAvailable: boolean;
   idbAvailable: boolean;
   screenshot: string | null;
   logs: string;
@@ -224,9 +226,9 @@ function DetailPane({
 
       <View style={styles.stage}>{stage}</View>
 
-      {!idbAvailable && device.isBooted ? (
+      {!hidAvailable && device.isBooted ? (
         <Text style={styles.tapHint}>
-          Install `idb` (brew install idb-companion) to tap, swipe and type here.
+          Install idb (idb_companion) or Maestro to tap, swipe and type here.
         </Text>
       ) : null}
 
@@ -244,7 +246,12 @@ export function SimFleetScreen() {
   const insets = useSafeAreaInsets();
   const isCompact = useIsCompactFormFactor();
 
-  const [availability, setAvailability] = useState({ simctl: true, idb: false, xcode: false });
+  const [availability, setAvailability] = useState({
+    simctl: true,
+    idb: false,
+    maestro: false,
+    xcode: false,
+  });
   const [devices, setDevices] = useState<SimDevice[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -303,8 +310,8 @@ export function SimFleetScreen() {
     };
     grab();
     const timer = setInterval(grab, SCREENSHOT_POLL_MS);
-    // Screen point size (for tap mapping) from the accessibility tree — idb only.
-    if (availability.idb) {
+    // Screen point size (for tap mapping) from the accessibility tree (idb or Maestro backend).
+    if (availability.idb || availability.maestro) {
       void (async () => {
         try {
           const res = await client.simulatorDescribeUi({ udid });
@@ -333,7 +340,7 @@ export function SimFleetScreen() {
       offLog();
       client.simulatorLogsUnsubscribe({ subscriptionId: logSub });
     };
-  }, [client, selected, availability.idb]);
+  }, [client, selected, availability.idb, availability.maestro]);
 
   const runAction = useCallback(
     async (udid: string, action: SimAction) => {
@@ -460,6 +467,7 @@ export function SimFleetScreen() {
         {selected ? (
           <DetailPane
             device={selected}
+            hidAvailable={availability.idb || availability.maestro}
             idbAvailable={availability.idb}
             screenshot={screenshot}
             logs={logs}

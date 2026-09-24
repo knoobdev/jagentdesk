@@ -3418,7 +3418,7 @@ export class Session {
             payload: {
               requestId,
               error: fail(error),
-              availability: { simctl: false, idb: false, xcode: false },
+              availability: { simctl: false, idb: false, maestro: false, xcode: false },
               devices: [],
             },
           });
