@@ -1,9 +1,64 @@
 # Changelog
 
 All notable changes to JAgentDesk are documented here. JAgentDesk versions its
-own release line (now `0.9.38`); the many `v0.1.x`–`v1.0.x` tags in history are
+own release line (now `0.9.40`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
+
+## v0.9.40 — 2026-09-25
+
+SimFleet: one control plane for the host's iOS simulators, shared by a new **Simulators**
+screen and agent tools, with a Simulator agent chat right on the screen. Plus a batch of
+Paseo 0.9.2 fixes and plugin install fixes.
+
+### Added
+
+- **SimFleet — iOS simulators for agents and humans.** A **Simulators** screen lists every
+  simulator on the host as a live device mockup, and a resizable detail panel shows a live,
+  tappable **Screen** tab and a streaming **Logs** tab. It can boot, shut down, erase
+  (confirmed) and delete (confirmed) devices and press Home / Lock. Agents get the same
+  control through `sim_*` tools on the `jagentdesk` MCP server: `sim_list`,
+  `sim_device_types`, `sim_create`, `sim_boot` / `sim_shutdown` / `sim_erase` /
+  `sim_delete`, `sim_describe_ui` (element tree, so taps target element centers),
+  `sim_tap` / `sim_swipe` / `sim_type` / `sim_button`, `sim_screenshot`,
+  `sim_install_app` / `sim_launch_app` / `sim_terminate_app`, and `sim_open_url`.
+  See [docs/simulators.md](docs/simulators.md).
+- **Simulator agent chat.** The SimFleet screen has its own agent dock, open beside the fleet
+  on desktop and a floating button on phones. The agent is created on the first message and
+  grounded in the current fleet and the open device. Earlier chats are listed in its history.
+- **Create simulators from the app or from chat.** “New simulator” offers every device type ×
+  installed iOS runtime pair from `simctl list runtimes`, plus a name, a quantity (1–10, with
+  copies named “iPhone 15 Pro 2”, “… 3”) and create or create‑and‑boot. Agents use
+  `sim_device_types` + `sim_create`.
+- **Device‑accurate mockups.** Tiles and the detail view draw the real hardware. Touch‑ID
+  devices (iPhone SE / 6s–8, iPod touch, home‑button iPads) get a rectangular screen with
+  forehead, chin and home button. Face‑ID devices get Apple's per‑generation screen corner
+  radius. Bezels come from each model's enclosure size versus its display size, and the
+  screenshot fills the screen with no crop.
+- **Maestro input backend.** Tap / swipe / type and the element tree work through Maestro's
+  on‑device driver where idb can't be installed (macOS 14); idb is still preferred when
+  present.
+- **Loading states everywhere.** Waits show a skeleton or spinner instead of an empty or
+  jumping screen: the fleet, the device catalog, a booting device, the first frame, “Preparing
+  touch input…”, and each action button.
+- **Phone layout.** The device detail slides in from the right; “New simulator” is a
+  scrollable bottom sheet.
+
+### Fixed
+
+- **`Transport closed (code 1006)` while viewing simulators.** Live frames are now JPEG capped
+  to the drawn size (~20 KB per tile instead of 1–5 MB PNG), fetched one at a time, so the
+  socket no longer starves the liveness ping.
+- **Quitting Simulator.app no longer kills running simulators.** Before booting, SimFleet sets
+  Simulator.app to detach (not shut down) on quit / window close.
+- **Plugins that call `addSettingsScreen` install again.** The server build now strips the
+  client‑only registration (`client.addSettingsScreen is not a function`), and the
+  marketplace counts installed plugins from monorepo siblings correctly.
+- **Paseo 0.9.2 ports.** New branches are created with `--no-track`, so a first push can't
+  land on `main`. Sidebar order keys ending in whitespace can't hang the app. Degraded git
+  polling backs off instead of pinning a CPU core. Directory suggestions in Add Project stop
+  timing out. A refreshed agent keeps one copy of its timeline. Workspaces on an unmounted
+  disk or share are kept instead of dropped.
 
 ## v0.9.39 — 2026-09-24
 
