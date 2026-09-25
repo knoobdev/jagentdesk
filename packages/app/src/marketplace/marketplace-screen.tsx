@@ -1,5 +1,16 @@
+import { clickUpTabStyles } from "@/components/clickup-shell/list-styles";
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { FlatList, Pressable, Text, View, type ListRenderItemInfo } from "react-native";
+import {
+  FlatList,
+  Pressable,
+  Text,
+  View,
+  type ListRenderItemInfo,
+  type StyleProp,
+  type TextStyle,
+  type ViewStyle,
+} from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StyleSheet } from "react-native-unistyles";
@@ -17,20 +28,30 @@ import type { Theme } from "@/styles/theme";
 import {
   collectPlatforms,
   filterAndSortPlugins,
+  filterThemeEntries,
   isThemePlugin,
   parseGithubSource,
   repoSourceKey,
+  themeVariants,
   useMarketplaceCatalog,
   type MarketplacePlugin,
   type MarketplaceSort,
+  type ThemeAppearanceFilter,
+  type ThemeEntry,
 } from "@/marketplace/catalog";
 import { MarketplaceCard, type MarketplaceInstallStatus } from "@/marketplace/marketplace-card";
 import { MarketplaceControls } from "@/marketplace/marketplace-controls";
 import { MarketplaceDetail } from "@/marketplace/marketplace-detail";
 import { MarketplaceOverview } from "@/marketplace/marketplace-overview";
+import { ThemeCard, ThemeControls } from "@/marketplace/theme-card";
 
 type LocalStatus = "pending" | "failed";
-type MarketplaceTab = "browse" | "installed";
+type MarketplaceTab = "browse" | "themes" | "installed";
+
+// One list renders every tab; theme rows carry their parsed palettes.
+type MarketplaceItem =
+  | { kind: "plugin"; plugin: MarketplacePlugin }
+  | { kind: "theme"; entry: ThemeEntry };
 
 const BROWSE_PAGE_SIZE = 24;
 
@@ -43,15 +64,22 @@ interface MarketplaceTabButtonProps {
 
 function MarketplaceTabButton({ label, active, onPress, testID }: MarketplaceTabButtonProps) {
   const state = useMemo(() => ({ selected: active }), [active]);
+  const isClickUp = useIsClickUpTheme();
+  let tabStyle: StyleProp<ViewStyle> = active ? styles.tabActive : styles.tab;
+  let textStyle: StyleProp<TextStyle> = active ? styles.tabTextActive : styles.tabText;
+  if (isClickUp) {
+    tabStyle = active ? clickUpTabStyles.tabActive : clickUpTabStyles.tab;
+    textStyle = active ? clickUpTabStyles.textActive : clickUpTabStyles.text;
+  }
   return (
     <Pressable
       onPress={onPress}
-      style={active ? styles.tabActive : styles.tab}
+      style={tabStyle}
       accessibilityRole="button"
       accessibilityState={state}
       testID={testID}
     >
-      <Text style={active ? styles.tabTextActive : styles.tabText}>{label}</Text>
+      <Text style={textStyle}>{label}</Text>
     </Pressable>
   );
 }
@@ -115,50 +143,8 @@ function buildInstalledLookup(
   return { sources, ids };
 }
 
-interface ThemeGalleryProps {
-  plugins: MarketplacePlugin[];
-  onOpenDetail: (plugin: MarketplacePlugin) => void;
-}
-
-function ThemeChip({
-  plugin,
-  onOpenDetail,
-}: {
-  plugin: MarketplacePlugin;
-  onOpenDetail: (plugin: MarketplacePlugin) => void;
-}) {
-  const handlePress = useCallback(() => onOpenDetail(plugin), [onOpenDetail, plugin]);
-  return (
-    <Pressable style={styles.themeCard} onPress={handlePress} accessibilityRole="button">
-      <Text style={styles.themeName} numberOfLines={1}>
-        {plugin.name}
-      </Text>
-      <Text style={styles.themeAuthor} numberOfLines={1}>
-        {plugin.author || plugin.repo}
-      </Text>
-    </Pressable>
-  );
-}
-
-function ThemeGallery({ plugins, onOpenDetail }: ThemeGalleryProps) {
-  const { t } = useTranslation();
-  if (plugins.length === 0) {
-    return null;
-  }
-  return (
-    <View style={styles.themeSection}>
-      <Text style={styles.sectionTitle}>{t("marketplace.themes.title")}</Text>
-      <Text style={styles.sectionHint}>{t("marketplace.themes.subtitle")}</Text>
-      <View style={styles.themeGrid}>
-        {plugins.map((plugin) => (
-          <ThemeChip key={plugin.id} plugin={plugin} onOpenDetail={onOpenDetail} />
-        ))}
-      </View>
-    </View>
-  );
-}
-
 export function MarketplaceScreen() {
+  const isClickUp = useIsClickUpTheme();
   const { t } = useTranslation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -195,10 +181,42 @@ export function MarketplaceScreen() {
   const [localStatuses, setLocalStatuses] = useState<Record<string, LocalStatus>>({});
   const [tab, setTab] = useState<MarketplaceTab>("browse");
   const [visibleCount, setVisibleCount] = useState(BROWSE_PAGE_SIZE);
+  const [themeSearch, setThemeSearch] = useState("");
+  const [themeAppearance, setThemeAppearance] = useState<ThemeAppearanceFilter>("all");
 
   const platforms = useMemo(() => collectPlatforms(plugins), [plugins]);
-  const themePlugins = useMemo(() => plugins.filter(isThemePlugin), [plugins]);
+  const nonThemePlugins = useMemo(
+    () => plugins.filter((plugin) => !isThemePlugin(plugin)),
+    [plugins],
+  );
+  // Themes keep the catalog's popularity order; the Themes tab has its own search/appearance filter.
+  const themeEntries = useMemo<ThemeEntry[]>(
+    () =>
+      filterAndSortPlugins({
+        plugins: plugins.filter(isThemePlugin),
+        search: "",
+        categories: [],
+        platforms: [],
+        sort: "popular",
+      }).map((plugin) => ({ plugin, variants: themeVariants(plugin) })),
+    [plugins],
+  );
+  const visibleThemes = useMemo(
+    () => filterThemeEntries(themeEntries, themeSearch, themeAppearance),
+    [themeEntries, themeSearch, themeAppearance],
+  );
   const visiblePlugins = useMemo(
+    () =>
+      filterAndSortPlugins({
+        plugins: nonThemePlugins,
+        search,
+        categories,
+        platforms: selectedPlatforms,
+        sort,
+      }),
+    [nonThemePlugins, search, categories, selectedPlatforms, sort],
+  );
+  const matchingPlugins = useMemo(
     () => filterAndSortPlugins({ plugins, search, categories, platforms: selectedPlatforms, sort }),
     [plugins, search, categories, selectedPlatforms, sort],
   );
@@ -245,27 +263,33 @@ export function MarketplaceScreen() {
   );
 
   const installedPlugins = useMemo(
-    () => visiblePlugins.filter((plugin) => resolveStatus(plugin) === "installed"),
-    [visiblePlugins, resolveStatus],
+    () => matchingPlugins.filter((plugin) => resolveStatus(plugin) === "installed"),
+    [matchingPlugins, resolveStatus],
   );
-  const browsePlugins = useMemo(
-    () => visiblePlugins.slice(0, visibleCount),
-    [visiblePlugins, visibleCount],
-  );
-  const listData = tab === "installed" ? installedPlugins : browsePlugins;
+  const listData = useMemo<MarketplaceItem[]>(() => {
+    if (tab === "themes") {
+      return visibleThemes
+        .slice(0, visibleCount)
+        .map((entry) => ({ kind: "theme" as const, entry }));
+    }
+    const source = tab === "installed" ? installedPlugins : visiblePlugins.slice(0, visibleCount);
+    return source.map((plugin) => ({ kind: "plugin" as const, plugin }));
+  }, [tab, visibleThemes, installedPlugins, visiblePlugins, visibleCount]);
   const activeCount = tab === "installed" ? installedPlugins.length : visiblePlugins.length;
-  const canLoadMore = tab === "browse" && visibleCount < visiblePlugins.length;
+  const pagedTotal = tab === "themes" ? visibleThemes.length : visiblePlugins.length;
+  const canLoadMore = tab !== "installed" && visibleCount < pagedTotal;
 
   // Reset paging to the first page whenever the filtered set can change or the
   // active tab switches, so "Load more" never carries a stale offset.
   useEffect(() => {
     setVisibleCount(BROWSE_PAGE_SIZE);
-  }, [search, categories, selectedPlatforms, sort, tab]);
+  }, [search, categories, selectedPlatforms, sort, tab, themeSearch, themeAppearance]);
 
   const handleLoadMore = useCallback(() => {
     setVisibleCount((count) => count + BROWSE_PAGE_SIZE);
   }, []);
   const handleSelectBrowse = useCallback(() => setTab("browse"), []);
+  const handleSelectThemes = useCallback(() => setTab("themes"), []);
   const handleSelectInstalled = useCallback(() => setTab("installed"), []);
 
   const handleInstall = useCallback(
@@ -299,7 +323,9 @@ export function MarketplaceScreen() {
     void catalog.refetch();
   }, [catalog]);
 
-  const numColumns = isCompact ? 1 : 2;
+  const isThemesTab = tab === "themes";
+  let numColumns = isCompact ? 1 : 2;
+  if (isThemesTab) numColumns = isCompact ? 2 : 3;
   const columnWrapperStyle = numColumns > 1 ? styles.columnWrap : undefined;
   const contentStyle = useMemo(
     () => [styles.listContent, { paddingBottom: insets.bottom + 24 }],
@@ -307,25 +333,50 @@ export function MarketplaceScreen() {
   );
 
   const renderItem = useCallback(
-    ({ item }: ListRenderItemInfo<MarketplacePlugin>) => (
-      <View style={styles.cell}>
-        <MarketplaceCard
-          plugin={item}
-          installStatus={resolveStatus(item)}
-          onOpenDetail={handleOpenDetail}
-          onInstall={handleInstall}
-        />
-      </View>
-    ),
+    ({ item }: ListRenderItemInfo<MarketplaceItem>) => {
+      if (item.kind === "theme") {
+        return (
+          <View style={styles.cell}>
+            <ThemeCard
+              plugin={item.entry.plugin}
+              variants={item.entry.variants}
+              installStatus={resolveStatus(item.entry.plugin)}
+              onOpenDetail={handleOpenDetail}
+              onInstall={handleInstall}
+            />
+          </View>
+        );
+      }
+      return (
+        <View style={styles.cell}>
+          <MarketplaceCard
+            plugin={item.plugin}
+            installStatus={resolveStatus(item.plugin)}
+            onOpenDetail={handleOpenDetail}
+            onInstall={handleInstall}
+          />
+        </View>
+      );
+    },
     [handleInstall, handleOpenDetail, resolveStatus],
   );
-  const keyExtractor = useCallback((item: MarketplacePlugin) => item.id, []);
+  const keyExtractor = useCallback(
+    (item: MarketplaceItem) => (item.kind === "theme" ? item.entry.plugin.id : item.plugin.id),
+    [],
+  );
 
   const installedTabLabel =
     installedPlugins.length > 0
       ? `${t("marketplace.tabs.installed")} (${installedPlugins.length})`
       : t("marketplace.tabs.installed");
   const isBrowseTab = tab === "browse";
+  const themesTabLabel =
+    themeEntries.length > 0
+      ? `${t("marketplace.tabs.themes")} (${themeEntries.length})`
+      : t("marketplace.tabs.themes");
+  let sectionTitle = t("marketplace.tabs.installed");
+  if (isBrowseTab) sectionTitle = t("marketplace.browse.title");
+  else if (isThemesTab) sectionTitle = t("marketplace.themes.title");
   const listHeader = useMemo(
     () => (
       <View style={styles.header}>
@@ -333,7 +384,7 @@ export function MarketplaceScreen() {
           <Text style={styles.title}>{t("marketplace.title")}</Text>
           <Text style={styles.subtitle}>{t("marketplace.subtitle")}</Text>
         </View>
-        <View style={styles.tabRow}>
+        <View style={isClickUp ? clickUpTabStyles.row : styles.tabRow}>
           <MarketplaceTabButton
             label={t("marketplace.tabs.browse")}
             active={isBrowseTab}
@@ -341,56 +392,80 @@ export function MarketplaceScreen() {
             testID="marketplace-tab-browse"
           />
           <MarketplaceTabButton
+            label={themesTabLabel}
+            active={isThemesTab}
+            onPress={handleSelectThemes}
+            testID="marketplace-tab-themes"
+          />
+          <MarketplaceTabButton
             label={installedTabLabel}
-            active={!isBrowseTab}
+            active={tab === "installed"}
             onPress={handleSelectInstalled}
             testID="marketplace-tab-installed"
           />
         </View>
         {!connected ? <Alert variant="warning" title={t("marketplace.states.offline")} /> : null}
         {isBrowseTab && plugins.length > 0 ? <MarketplaceOverview plugins={plugins} /> : null}
-        <MarketplaceControls
-          search={search}
-          searchResetKey={searchResetKey}
-          onSearchChange={setSearch}
-          sort={sort}
-          onSortChange={setSort}
-          selectedCategories={categories}
-          onToggleCategory={handleToggleCategory}
-          platforms={platforms}
-          selectedPlatforms={selectedPlatforms}
-          onTogglePlatform={handleTogglePlatform}
-          onClearFilters={handleClearFilters}
-          resultCount={activeCount}
-        />
-        {isBrowseTab ? (
-          <ThemeGallery plugins={themePlugins} onOpenDetail={handleOpenDetail} />
-        ) : null}
-        <Text style={styles.sectionTitle}>
-          {isBrowseTab ? t("marketplace.browse.title") : t("marketplace.tabs.installed")}
-        </Text>
+        {isThemesTab ? (
+          <ThemeControls
+            search={themeSearch}
+            searchResetKey={searchResetKey}
+            onSearchChange={setThemeSearch}
+            appearance={themeAppearance}
+            onAppearanceChange={setThemeAppearance}
+            resultCount={visibleThemes.length}
+          />
+        ) : (
+          <MarketplaceControls
+            search={search}
+            searchResetKey={searchResetKey}
+            onSearchChange={setSearch}
+            sort={sort}
+            onSortChange={setSort}
+            selectedCategories={categories}
+            onToggleCategory={handleToggleCategory}
+            platforms={platforms}
+            selectedPlatforms={selectedPlatforms}
+            onTogglePlatform={handleTogglePlatform}
+            onClearFilters={handleClearFilters}
+            resultCount={activeCount}
+          />
+        )}
+        <View style={styles.sectionHead}>
+          <Text style={styles.sectionTitle}>{sectionTitle}</Text>
+          {isThemesTab ? (
+            <Text style={styles.sectionHint}>{t("marketplace.themes.subtitle")}</Text>
+          ) : null}
+        </View>
       </View>
     ),
     [
       activeCount,
       categories,
       connected,
+      isClickUp,
       handleClearFilters,
-      handleOpenDetail,
       handleSelectBrowse,
+      handleSelectThemes,
       handleSelectInstalled,
       handleToggleCategory,
       handleTogglePlatform,
       installedTabLabel,
       isBrowseTab,
+      isThemesTab,
       platforms,
       plugins,
       search,
       searchResetKey,
+      sectionTitle,
       selectedPlatforms,
       sort,
       t,
-      themePlugins,
+      tab,
+      themeAppearance,
+      themeSearch,
+      themesTabLabel,
+      visibleThemes.length,
     ],
   );
 
@@ -407,21 +482,25 @@ export function MarketplaceScreen() {
 
   const emptyStatus = resolveEmptyStatus(catalog.isLoading, catalog.isError);
   const emptyErrorText = errorMessage(catalog.error);
-  const showInstalledEmpty = !isBrowseTab && emptyStatus === "empty";
+  const showInstalledEmpty = tab === "installed" && emptyStatus === "empty";
+  const showThemesEmpty = isThemesTab && emptyStatus === "empty";
   const renderEmpty = useCallback(() => {
     if (showInstalledEmpty) {
       return <Text style={styles.empty}>{t("marketplace.tabs.installedEmpty")}</Text>;
     }
+    if (showThemesEmpty) {
+      return <Text style={styles.empty}>{t("marketplace.themes.empty")}</Text>;
+    }
     return (
       <MarketplaceEmpty status={emptyStatus} errorText={emptyErrorText} onRetry={handleRetry} />
     );
-  }, [showInstalledEmpty, emptyStatus, emptyErrorText, handleRetry, t]);
+  }, [showInstalledEmpty, showThemesEmpty, emptyStatus, emptyErrorText, handleRetry, t]);
 
   return (
     <View style={styles.root}>
       <BackHeader title={t("marketplace.title")} onBack={handleBack} />
       <FlatList
-        key={`marketplace-cols-${numColumns}`}
+        key={`marketplace-${isThemesTab ? "themes" : "plugins"}-${numColumns}`}
         data={listData}
         renderItem={renderItem}
         keyExtractor={keyExtractor}
@@ -497,24 +576,8 @@ const styles = StyleSheet.create((theme: Theme) => ({
     fontWeight: theme.fontWeight.semibold,
     color: theme.colors.foreground,
   },
+  sectionHead: { gap: theme.spacing[1] },
   sectionHint: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
-  themeSection: { gap: theme.spacing[2] },
-  themeGrid: { flexDirection: "row", flexWrap: "wrap", gap: theme.spacing[2] },
-  themeCard: {
-    minWidth: 140,
-    backgroundColor: theme.colors.surface1,
-    borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.border,
-    borderRadius: theme.borderRadius.md,
-    padding: theme.spacing[3],
-    gap: theme.spacing[1],
-  },
-  themeName: {
-    fontSize: theme.fontSize.sm,
-    fontWeight: theme.fontWeight.semibold,
-    color: theme.colors.foreground,
-  },
-  themeAuthor: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
   empty: {
     fontSize: theme.fontSize.sm,
     color: theme.colors.foregroundMuted,

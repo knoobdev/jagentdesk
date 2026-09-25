@@ -291,6 +291,7 @@ export const ar: TranslationResources = {
       zoomIn: "Zoom in",
       zoomOut: "Zoom out",
       resetZoom: "Reset view",
+      fullscreen: "ملء الشاشة",
       viewSource: "View source",
       viewDiagram: "View diagram",
     },
@@ -1792,6 +1793,8 @@ export const ar: TranslationResources = {
           claude: "كلود",
           ghostty: "شبحي",
           pureBlack: "أسود نقي",
+          clickup: "ClickUp",
+          clickupDark: "ClickUp Dark",
           auto: "نظام",
         },
       },
@@ -2269,6 +2272,11 @@ export const ar: TranslationResources = {
       },
     },
   },
+  clickupShell: {
+    search: "بحث",
+    newWorkspace: "جديد",
+    workspaces: "مساحات العمل",
+  },
   marketplace: {
     title: "Plugin Marketplace",
     subtitle: "Discover and install community plugins for JAgentDesk.",
@@ -2277,6 +2285,7 @@ export const ar: TranslationResources = {
     browseButton: "Browse marketplace",
     tabs: {
       browse: "Browse",
+      themes: "السمات",
       installed: "Installed",
       installedEmpty: "No plugins installed yet.",
       loadMore: "Load more",
@@ -2340,6 +2349,13 @@ export const ar: TranslationResources = {
     themes: {
       title: "Themes",
       subtitle: "Palettes and appearance packs from the community.",
+      searchPlaceholder: "البحث في السمات",
+      count: "{{count}} سمة",
+      noPreview: "لا توجد معاينة",
+      variants: "{{count}} متغيرات",
+      empty: "لا توجد سمات تطابق هذا الفلتر.",
+      filter: { all: "الكل" },
+      appearance: { dark: "داكن", light: "فاتح" },
     },
     states: {
       loading: "Loading marketplace…",

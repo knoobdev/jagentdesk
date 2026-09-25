@@ -62,6 +62,12 @@ import {
 } from "lucide-react-native";
 import * as Clipboard from "expo-clipboard";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import {
+  clickUpChipStyles,
+  clickUpListStyles,
+  clickUpTabStyles,
+} from "@/components/clickup-shell/list-styles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   ForgeArtifactSchema,
@@ -898,11 +904,12 @@ function ProviderChip({
   active: boolean;
   onSelect: (choice: ProviderChoice) => void;
 }) {
+  const isClickUp = useIsClickUpTheme();
   const { theme } = useUnistyles();
   const handlePress = useCallback(() => onSelect(option.choice), [option.choice, onSelect]);
   return (
     <Pressable
-      style={[styles.providerPill, active && styles.providerPillActive]}
+      style={providerPillStyle(isClickUp, active)}
       onPress={handlePress}
       testID={`forge-provider-${option.choice}`}
     >
@@ -913,9 +920,7 @@ function ProviderChip({
       ) : (
         <ProviderBadge forge={option.forge} small />
       )}
-      <Text style={[styles.providerPillText, active && styles.providerPillActiveText]}>
-        {option.label}
-      </Text>
+      <Text style={providerPillTextStyle(isClickUp, active)}>{option.label}</Text>
     </Pressable>
   );
 }
@@ -1423,6 +1428,7 @@ function ConnectionsView({
   /** True while the first connection fetch is in flight (no cached accounts). */
   loading?: boolean;
 }) {
+  const isClickUp = useIsClickUpTheme();
   const { theme } = useUnistyles();
   const isCompact = useIsCompactFormFactor();
   const [choice, setChoice] = useState<ProviderChoice>("github");
@@ -1499,7 +1505,9 @@ function ConnectionsView({
 
   return (
     <View style={styles.pane}>
-      <Text style={styles.connSecTitle}>Connected accounts</Text>
+      <Text style={[styles.connSecTitle, isClickUp && styles.sectionTitleClickUp]}>
+        Connected accounts
+      </Text>
 
       {loading && connections.length === 0 ? (
         <SkeletonRows rows={3} />
@@ -1509,10 +1517,42 @@ function ConnectionsView({
         <View style={styles.card}>
           {!isCompact ? (
             <View style={styles.connHeadRow}>
-              <Text style={[styles.connColGrow, styles.connHeadText]}>Account</Text>
-              <Text style={[styles.connColAuth, styles.connHeadText]}>Auth</Text>
-              <Text style={[styles.connColScopes, styles.connHeadText]}>Scopes</Text>
-              <Text style={[styles.connColStatus, styles.connHeadText]}>Status</Text>
+              <Text
+                style={[
+                  styles.connColGrow,
+                  styles.connHeadText,
+                  isClickUp && clickUpListStyles.columnHeader,
+                ]}
+              >
+                Account
+              </Text>
+              <Text
+                style={[
+                  styles.connColAuth,
+                  styles.connHeadText,
+                  isClickUp && clickUpListStyles.columnHeader,
+                ]}
+              >
+                Auth
+              </Text>
+              <Text
+                style={[
+                  styles.connColScopes,
+                  styles.connHeadText,
+                  isClickUp && clickUpListStyles.columnHeader,
+                ]}
+              >
+                Scopes
+              </Text>
+              <Text
+                style={[
+                  styles.connColStatus,
+                  styles.connHeadText,
+                  isClickUp && clickUpListStyles.columnHeader,
+                ]}
+              >
+                Status
+              </Text>
               <View style={styles.connColActions} />
             </View>
           ) : null}
@@ -1531,7 +1571,9 @@ function ConnectionsView({
           toggle. The toolbar "+ Add connection" button and Re-auth still call
           onToggleAdd (kept for parity/back-compat), but visibility no longer
           depends on the `adding` flag. */}
-      <Text style={styles.connSecTitle}>Add a connection</Text>
+      <Text style={[styles.connSecTitle, isClickUp && styles.sectionTitleClickUp]}>
+        Add a connection
+      </Text>
       <View style={styles.formCard}>
         <View>
           <Text style={styles.connFieldLabel}>Provider</Text>
@@ -1601,50 +1643,26 @@ function ConnectionsView({
             <Text style={styles.fieldLabel}>Forge type</Text>
             <View style={styles.chipRow}>
               <Pressable
-                style={[
-                  styles.providerChip,
-                  selfHostedForge === "github" && styles.providerChipActive,
-                ]}
+                style={providerChipStyle(isClickUp, selfHostedForge === "github")}
                 onPress={setForgeGithub}
               >
-                <Text
-                  style={[
-                    styles.providerChipText,
-                    selfHostedForge === "github" && styles.providerChipTextActive,
-                  ]}
-                >
+                <Text style={providerChipTextStyle(isClickUp, selfHostedForge === "github")}>
                   GitHub Enterprise
                 </Text>
               </Pressable>
               <Pressable
-                style={[
-                  styles.providerChip,
-                  selfHostedForge === "gitlab" && styles.providerChipActive,
-                ]}
+                style={providerChipStyle(isClickUp, selfHostedForge === "gitlab")}
                 onPress={setForgeGitlab}
               >
-                <Text
-                  style={[
-                    styles.providerChipText,
-                    selfHostedForge === "gitlab" && styles.providerChipTextActive,
-                  ]}
-                >
+                <Text style={providerChipTextStyle(isClickUp, selfHostedForge === "gitlab")}>
                   GitLab self-managed
                 </Text>
               </Pressable>
               <Pressable
-                style={[
-                  styles.providerChip,
-                  selfHostedForge === "gitea" && styles.providerChipActive,
-                ]}
+                style={providerChipStyle(isClickUp, selfHostedForge === "gitea")}
                 onPress={setForgeGitea}
               >
-                <Text
-                  style={[
-                    styles.providerChipText,
-                    selfHostedForge === "gitea" && styles.providerChipTextActive,
-                  ]}
-                >
+                <Text style={providerChipTextStyle(isClickUp, selfHostedForge === "gitea")}>
                   Gitea
                 </Text>
               </Pressable>
@@ -1871,19 +1889,17 @@ function AccountFilterChip({
   active: boolean;
   onSelect: (id: string | null) => void;
 }) {
+  const isClickUp = useIsClickUpTheme();
   const handlePress = useCallback(() => onSelect(id), [id, onSelect]);
   return (
     <Pressable
-      style={[styles.providerChip, active && styles.providerChipActive]}
+      style={providerChipStyle(isClickUp, active)}
       onPress={handlePress}
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
       testID={`forge-repos-account-${id ?? "all"}`}
     >
-      <Text
-        style={[styles.providerChipText, active && styles.providerChipTextActive]}
-        numberOfLines={1}
-      >
+      <Text style={providerChipTextStyle(isClickUp, active)} numberOfLines={1}>
         {label}
       </Text>
     </Pressable>
@@ -1911,6 +1927,7 @@ function RepositoriesView({
   onRetry: () => void;
   connections: ForgeConnection[];
 }) {
+  const isClickUp = useIsClickUpTheme();
   const { theme } = useUnistyles();
   const isCompact = useIsCompactFormFactor();
   const [query, setQuery] = useState("");
@@ -2040,11 +2057,51 @@ function RepositoriesView({
           {!isCompact ? (
             <View style={styles.tableHeadRow}>
               <View style={styles.colLogo} />
-              <Text style={[styles.colGrow, styles.tableHeadText]}>Repository</Text>
-              <Text style={[styles.colDefault, styles.tableHeadText]}>Default</Text>
-              <Text style={[styles.colVisibility, styles.tableHeadText]}>Visibility</Text>
-              <Text style={[styles.colOpenCr, styles.tableHeadText]}>Open PR/MR · CI</Text>
-              <Text style={[styles.colUpdated, styles.tableHeadText]}>Updated</Text>
+              <Text
+                style={[
+                  styles.colGrow,
+                  styles.tableHeadText,
+                  isClickUp && clickUpListStyles.columnHeader,
+                ]}
+              >
+                Repository
+              </Text>
+              <Text
+                style={[
+                  styles.colDefault,
+                  styles.tableHeadText,
+                  isClickUp && clickUpListStyles.columnHeader,
+                ]}
+              >
+                Default
+              </Text>
+              <Text
+                style={[
+                  styles.colVisibility,
+                  styles.tableHeadText,
+                  isClickUp && clickUpListStyles.columnHeader,
+                ]}
+              >
+                Visibility
+              </Text>
+              <Text
+                style={[
+                  styles.colOpenCr,
+                  styles.tableHeadText,
+                  isClickUp && clickUpListStyles.columnHeader,
+                ]}
+              >
+                Open PR/MR · CI
+              </Text>
+              <Text
+                style={[
+                  styles.colUpdated,
+                  styles.tableHeadText,
+                  isClickUp && clickUpListStyles.columnHeader,
+                ]}
+              >
+                Updated
+              </Text>
             </View>
           ) : null}
           {sorted.map((repo) => (
@@ -2156,8 +2213,9 @@ function PullRequestRow({
 }
 
 function StateFilter({ state, onChange }: { state: CrState; onChange: (state: CrState) => void }) {
+  const isClickUp = useIsClickUpTheme();
   return (
-    <View style={styles.segmented}>
+    <View style={isClickUp ? clickUpTabStyles.row : styles.segmented}>
       {CR_STATES.map((s) => (
         <StateFilterButton key={s} value={s} active={state === s} onChange={onChange} />
       ))}
@@ -2174,14 +2232,15 @@ function StateFilterButton({
   active: boolean;
   onChange: (state: CrState) => void;
 }) {
+  const isClickUp = useIsClickUpTheme();
   const handlePress = useCallback(() => onChange(value), [value, onChange]);
   return (
     <Pressable
-      style={[styles.segmentBtn, active && styles.segmentBtnActive]}
+      style={segmentBtnStyle(isClickUp, active)}
       onPress={handlePress}
       testID={`forge-cr-state-${value}`}
     >
-      <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
+      <Text style={segmentTextStyle(isClickUp, active)}>
         {value === "all" ? "All" : crStateLabel(value)}
       </Text>
     </Pressable>
@@ -2539,6 +2598,7 @@ function DiffFileList({
   error: string | null;
   onRetry: () => void;
 }) {
+  const isClickUp = useIsClickUpTheme();
   const { theme } = useUnistyles();
   if (error) {
     return (
@@ -2560,7 +2620,7 @@ function DiffFileList({
   return (
     <View style={styles.filesPane}>
       {files.length > 1 ? (
-        <Text style={styles.sectionTitle}>
+        <Text style={[styles.sectionTitle, isClickUp && styles.sectionTitleClickUp]}>
           {files.length} files changed — tap a file to view its diff
         </Text>
       ) : null}
@@ -2762,6 +2822,7 @@ function MergeBox({
   cr: ForgeChangeRequestSummary;
   onMerged: () => void;
 }) {
+  const isClickUp = useIsClickUpTheme();
   const { theme } = useUnistyles();
   const def = getForgeDefinitionOrNeutral(repo.forge);
   const [method, setMethod] = useState<ForgeMergeMethod>("merge");
@@ -2862,7 +2923,7 @@ function MergeBox({
             <Text style={styles.mergeableText}>No conflicts with the base branch.</Text>
           </View>
         ) : null}
-        <View style={styles.segmented}>
+        <View style={isClickUp ? clickUpTabStyles.row : styles.segmented}>
           {MERGE_METHODS.map((m) => (
             <MergeMethodButton key={m} value={m} active={method === m} onSelect={setMethod} />
           ))}
@@ -2915,16 +2976,15 @@ function MergeMethodButton({
   active: boolean;
   onSelect: (method: ForgeMergeMethod) => void;
 }) {
+  const isClickUp = useIsClickUpTheme();
   const handlePress = useCallback(() => onSelect(value), [value, onSelect]);
   return (
     <Pressable
-      style={[styles.segmentBtn, active && styles.segmentBtnActive]}
+      style={segmentBtnStyle(isClickUp, active)}
       onPress={handlePress}
       testID={`forge-merge-method-${value}`}
     >
-      <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
-        {MERGE_METHOD_LABELS[value]}
-      </Text>
+      <Text style={segmentTextStyle(isClickUp, active)}>{MERGE_METHOD_LABELS[value]}</Text>
     </Pressable>
   );
 }
@@ -3197,13 +3257,14 @@ function RailCheckRow({ job, divider }: { job: ForgePipelineJob; divider: boolea
 // linked issue, and a per-assignee field aren't in ForgeChangeRequestSummary, so they
 // are omitted rather than fabricated (see report note).
 function DetailsRailPanel({ cr }: { cr: ForgeChangeRequestSummary }) {
+  const isClickUp = useIsClickUpTheme();
   const hasLabels = Boolean(cr.labels && cr.labels.length > 0);
   const hasBranches = Boolean(cr.headRef || cr.baseRef);
   const hasAuthor = Boolean(cr.authorLogin);
   if (!hasLabels && !hasBranches && !hasAuthor) return null;
   return (
     <View style={styles.railDetails}>
-      <Text style={styles.sectionTitle}>Details</Text>
+      <Text style={[styles.sectionTitle, isClickUp && styles.sectionTitleClickUp]}>Details</Text>
       <View style={styles.metaGrid}>
         {hasLabels ? (
           <View style={styles.metaRow}>
@@ -3618,8 +3679,16 @@ function TabButton({
   active: boolean;
   onPress: () => void;
 }) {
+  const isClickUp = useIsClickUpTheme();
   return (
-    <Pressable style={[styles.tab, active && styles.tabActive]} onPress={onPress}>
+    <Pressable
+      style={[
+        styles.tab,
+        active && styles.tabActive,
+        active && isClickUp && styles.tabActiveClickUp,
+      ]}
+      onPress={onPress}
+    >
       <Text style={[styles.tabText, active && styles.tabTextActive]}>{label}</Text>
       {count != null ? <Text style={styles.tabCount}>{count}</Text> : null}
     </Pressable>
@@ -3754,6 +3823,7 @@ function BranchRow({
 // history that used to live under the Code tab — it now has its own sub-nav tab
 // so the Code tab can be a file-tree browser (like GitHub's Code tab).
 function CommitsView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }) {
+  const isClickUp = useIsClickUpTheme();
   const { theme } = useUnistyles();
   const isCompact = useIsCompactFormFactor();
 
@@ -4037,11 +4107,51 @@ function CommitsView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }
             {!isCompact ? (
               <View style={styles.tableHeadRow}>
                 <View style={styles.colDot} />
-                <Text style={[styles.colGrow, styles.tableHeadText]}>Commit</Text>
-                <Text style={[styles.colAuthor, styles.tableHeadText]}>Author</Text>
-                <Text style={[styles.colSha, styles.tableHeadText]}>SHA</Text>
-                <Text style={[styles.colCiCol, styles.tableHeadText]}>CI</Text>
-                <Text style={[styles.colWhen2, styles.tableHeadText]}>When</Text>
+                <Text
+                  style={[
+                    styles.colGrow,
+                    styles.tableHeadText,
+                    isClickUp && clickUpListStyles.columnHeader,
+                  ]}
+                >
+                  Commit
+                </Text>
+                <Text
+                  style={[
+                    styles.colAuthor,
+                    styles.tableHeadText,
+                    isClickUp && clickUpListStyles.columnHeader,
+                  ]}
+                >
+                  Author
+                </Text>
+                <Text
+                  style={[
+                    styles.colSha,
+                    styles.tableHeadText,
+                    isClickUp && clickUpListStyles.columnHeader,
+                  ]}
+                >
+                  SHA
+                </Text>
+                <Text
+                  style={[
+                    styles.colCiCol,
+                    styles.tableHeadText,
+                    isClickUp && clickUpListStyles.columnHeader,
+                  ]}
+                >
+                  CI
+                </Text>
+                <Text
+                  style={[
+                    styles.colWhen2,
+                    styles.tableHeadText,
+                    isClickUp && clickUpListStyles.columnHeader,
+                  ]}
+                >
+                  When
+                </Text>
               </View>
             ) : null}
             {commits.map((commit, i) => (
@@ -4234,6 +4344,7 @@ function CodeFileLines({ code, ext }: { code: string; ext: string | null }) {
 // GitHub Code tab). Directory listing + breadcrumb navigation + a read-only file
 // viewer. Commit history lives in the separate Commits tab (CommitsView).
 function CodeView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }) {
+  const isClickUp = useIsClickUpTheme();
   const { theme } = useUnistyles();
 
   const [branches, setBranches] = useState<ForgeBranch[]>([]);
@@ -4462,28 +4573,20 @@ function CodeView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }) {
             </Text>
           </View>
           {isMarkdown ? (
-            <View style={styles.segmented}>
+            <View style={isClickUp ? clickUpTabStyles.row : styles.segmented}>
               <Pressable
-                style={[styles.segmentBtn, viewMode === "preview" && styles.segmentBtnActive]}
+                style={segmentBtnStyle(isClickUp, viewMode === "preview")}
                 onPress={() => setViewMode("preview")}
                 testID="forge-code-view-preview"
               >
-                <Text
-                  style={[styles.segmentText, viewMode === "preview" && styles.segmentTextActive]}
-                >
-                  Preview
-                </Text>
+                <Text style={segmentTextStyle(isClickUp, viewMode === "preview")}>Preview</Text>
               </Pressable>
               <Pressable
-                style={[styles.segmentBtn, viewMode === "source" && styles.segmentBtnActive]}
+                style={segmentBtnStyle(isClickUp, viewMode === "source")}
                 onPress={() => setViewMode("source")}
                 testID="forge-code-view-source"
               >
-                <Text
-                  style={[styles.segmentText, viewMode === "source" && styles.segmentTextActive]}
-                >
-                  Source
-                </Text>
+                <Text style={segmentTextStyle(isClickUp, viewMode === "source")}>Source</Text>
               </Pressable>
             </View>
           ) : null}
@@ -4837,6 +4940,7 @@ function PipelineRunDetail({
   releasesEnabled: boolean;
   onBack: () => void;
 }) {
+  const isClickUp = useIsClickUpTheme();
   const { theme } = useUnistyles();
   const isCompact = useIsCompactFormFactor();
   const statusColor = usePipelineStatusColor();
@@ -4955,7 +5059,9 @@ function PipelineRunDetail({
         <View key={`${stage.name}:${i}`}>
           {/* Providers without explicit stage grouping report a single,
               possibly unnamed stage — fall back to a "Jobs" header. */}
-          <Text style={styles.stageHeader}>{stage.name.trim() || "Jobs"}</Text>
+          <Text style={[styles.stageHeader, isClickUp && clickUpListStyles.columnHeader]}>
+            {stage.name.trim() || "Jobs"}
+          </Text>
           {stage.jobs.map((job) => (
             <JobTreeRow
               key={job.id}
@@ -5155,6 +5261,7 @@ function ArtifactsPanel({
   repo: ForgeRepo;
   runId: string;
 }) {
+  const isClickUp = useIsClickUpTheme();
   const { theme } = useUnistyles();
   const [artifacts, setArtifacts] = useState<ForgeArtifact[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -5218,7 +5325,9 @@ function ArtifactsPanel({
   return (
     <View style={styles.artifactsBody}>
       <View style={styles.artifactsLabelRow}>
-        <Text style={styles.sectionTitle}>Artifacts</Text>
+        <Text style={[styles.sectionTitle, isClickUp && styles.sectionTitleClickUp]}>
+          Artifacts
+        </Text>
         <View style={styles.grow} />
         <Pressable
           style={styles.iconBtn}
@@ -5836,6 +5945,7 @@ function ReleaseDetail({
   release: ForgeRelease;
   onBack: () => void;
 }) {
+  const isClickUp = useIsClickUpTheme();
   const { theme } = useUnistyles();
   const def = getForgeDefinitionOrNeutral(repo.forge);
   const [detail, setDetail] = useState<ForgeRelease | null>(null);
@@ -5930,7 +6040,9 @@ function ReleaseDetail({
           </View>
           {shown.assets && shown.assets.length > 0 ? (
             <>
-              <Text style={styles.sectionTitle}>Assets</Text>
+              <Text style={[styles.sectionTitle, isClickUp && styles.sectionTitleClickUp]}>
+                Assets
+              </Text>
               <View style={styles.card}>
                 {shown.assets.map((asset) => (
                   <AssetRow
@@ -5950,6 +6062,7 @@ function ReleaseDetail({
 }
 
 function ReleasesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }) {
+  const isClickUp = useIsClickUpTheme();
   const { theme } = useUnistyles();
   const [releases, setReleases] = useState<ForgeRelease[] | null>(null);
   const [tags, setTags] = useState<ForgeTag[] | null>(null);
@@ -6080,7 +6193,7 @@ function ReleasesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo 
         </View>
       ) : null}
 
-      <Text style={styles.sectionTitle}>Releases</Text>
+      <Text style={[styles.sectionTitle, isClickUp && styles.sectionTitleClickUp]}>Releases</Text>
       {releases === null ? (
         <SkeletonRows rows={4} />
       ) : releases.length === 0 ? (
@@ -6107,7 +6220,7 @@ function ReleasesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo 
         </>
       )}
 
-      <Text style={styles.sectionTitle}>Tags</Text>
+      <Text style={[styles.sectionTitle, isClickUp && styles.sectionTitleClickUp]}>Tags</Text>
       {tags === null ? (
         <SkeletonRows rows={4} />
       ) : tags.length === 0 ? (
@@ -6184,15 +6297,16 @@ function IssueStateFilterButton({
   active: boolean;
   onChange: (state: IssueState) => void;
 }) {
+  const isClickUp = useIsClickUpTheme();
   const handlePress = useCallback(() => onChange(value), [value, onChange]);
   const label = value === "all" ? "All" : value.charAt(0).toUpperCase() + value.slice(1);
   return (
     <Pressable
-      style={[styles.segmentBtn, active && styles.segmentBtnActive]}
+      style={segmentBtnStyle(isClickUp, active)}
       onPress={handlePress}
       testID={`forge-issue-state-${value}`}
     >
-      <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{label}</Text>
+      <Text style={segmentTextStyle(isClickUp, active)}>{label}</Text>
     </Pressable>
   );
 }
@@ -6210,6 +6324,7 @@ function IssueDetail({
   onBack: () => void;
   onChanged: () => void;
 }) {
+  const isClickUp = useIsClickUpTheme();
   const { theme } = useUnistyles();
   const [comment, setComment] = useState("");
   const [busy, setBusy] = useState(false);
@@ -6342,7 +6457,9 @@ function IssueDetail({
           </View>
           {comments.length > 0 ? (
             <>
-              <Text style={styles.sectionTitle}>Comments</Text>
+              <Text style={[styles.sectionTitle, isClickUp && styles.sectionTitleClickUp]}>
+                Comments
+              </Text>
               <View style={styles.card}>
                 {comments.map((c, i) => {
                   const when = formatRelativeMs(c.createdAt_ms);
@@ -6412,6 +6529,7 @@ function IssueDetail({
 }
 
 function IssuesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }) {
+  const isClickUp = useIsClickUpTheme();
   const { theme } = useUnistyles();
   const [state, setState] = useState<IssueState>("open");
   const [issues, setIssues] = useState<ForgeIssue[] | null>(null);
@@ -6601,7 +6719,7 @@ function IssuesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo })
         </View>
       ) : null}
 
-      <View style={styles.segmented}>
+      <View style={isClickUp ? clickUpTabStyles.row : styles.segmented}>
         {ISSUE_STATES.map((s) => (
           <IssueStateFilterButton
             key={s}
@@ -6713,6 +6831,7 @@ function MemberRow({
 // Members list + invite form + per-row remove (§19.10). GitHub/GitLab support the
 // full set; Bitbucket lists best-effort. Roles are neutral; the daemon maps them.
 function MembersView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }) {
+  const isClickUp = useIsClickUpTheme();
   const { theme } = useUnistyles();
   const [members, setMembers] = useState<ForgeMember[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -6842,15 +6961,15 @@ function MembersView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }
           </View>
           <View style={styles.field}>
             <Text style={styles.fieldLabel}>Role</Text>
-            <View style={styles.segmented}>
+            <View style={isClickUp ? clickUpTabStyles.row : styles.segmented}>
               {MEMBER_ROLES.map((r) => (
                 <Pressable
                   key={r}
-                  style={[styles.segmentBtn, role === r && styles.segmentBtnActive]}
+                  style={segmentBtnStyle(isClickUp, role === r)}
                   onPress={() => setRole(r)}
                   testID={`forge-member-role-${r}`}
                 >
-                  <Text style={[styles.segmentText, role === r && styles.segmentTextActive]}>
+                  <Text style={segmentTextStyle(isClickUp, role === r)}>
                     {MEMBER_ROLE_LABEL[r]}
                   </Text>
                 </Pressable>
@@ -7031,12 +7150,17 @@ function SidebarNavItem({
    *  aggregate connection health on the Connections item. */
   dotColor?: string;
 }) {
+  const isClickUp = useIsClickUpTheme();
   const { theme } = useUnistyles();
   const handlePress = useCallback(() => onSelect(section), [section, onSelect]);
   const tint = active ? theme.colors.foreground : theme.colors.foregroundMuted;
   return (
     <Pressable
-      style={[styles.navItem, active && styles.navItemActive]}
+      style={[
+        styles.navItem,
+        active && styles.navItemActive,
+        active && isClickUp && styles.navItemActiveClickUp,
+      ]}
       onPress={handlePress}
       testID={`forge-nav-${section}`}
     >
@@ -7074,9 +7198,14 @@ function ForgeRailButton({
   theme: Theme;
   testID: string;
 }) {
+  const isClickUp = useIsClickUpTheme();
   return (
     <Pressable
-      style={[styles.railItem, active && styles.railItemActive]}
+      style={[
+        styles.railItem,
+        active && styles.railItemActive,
+        active && isClickUp && styles.navItemActiveClickUp,
+      ]}
       onPress={onPress}
       disabled={active}
       accessible
@@ -7092,6 +7221,7 @@ function ForgeRailButton({
 }
 
 export function ForgeHubScreen() {
+  const isClickUp = useIsClickUpTheme();
   const { theme } = useUnistyles();
   const routeServerId = useHostRouteServerId();
   const hosts = useHosts();
@@ -7580,7 +7710,9 @@ export function ForgeHubScreen() {
     <>
       {repositoriesNavItem}
       {connectionsNavItem}
-      <Text style={styles.navGroupLabel}>Matching repos</Text>
+      <Text style={[styles.navGroupLabel, isClickUp && clickUpListStyles.columnHeader]}>
+        Matching repos
+      </Text>
       {jumpMatches.length === 0 ? (
         <Text style={styles.navEmpty}>No matches</Text>
       ) : (
@@ -7591,7 +7723,10 @@ export function ForgeHubScreen() {
     <>
       {repositoriesNavItem}
       {connectionsNavItem}
-      <Text style={styles.navGroupLabel} numberOfLines={1}>
+      <Text
+        style={[styles.navGroupLabel, isClickUp && clickUpListStyles.columnHeader]}
+        numberOfLines={1}
+      >
         {selectedRepo.owner}/{selectedRepo.name} · {selectedRepo.forge}
       </Text>
       <SidebarNavItem
@@ -7666,7 +7801,9 @@ export function ForgeHubScreen() {
         active={section === "members"}
         onSelect={handleSelectSection}
       />
-      <Text style={styles.navGroupLabel}>Switch repo</Text>
+      <Text style={[styles.navGroupLabel, isClickUp && clickUpListStyles.columnHeader]}>
+        Switch repo
+      </Text>
       {quickRepos.length === 0 ? (
         !reposLoaded && hasConnections ? (
           <SidebarRepoSkeleton />
@@ -7684,7 +7821,9 @@ export function ForgeHubScreen() {
     <>
       {repositoriesNavItem}
       {connectionsNavItem}
-      <Text style={styles.navGroupLabel}>Switch repo</Text>
+      <Text style={[styles.navGroupLabel, isClickUp && clickUpListStyles.columnHeader]}>
+        Switch repo
+      </Text>
       {quickRepos.length === 0 ? (
         !reposLoaded && hasConnections ? (
           <SidebarRepoSkeleton />
@@ -7830,7 +7969,11 @@ export function ForgeHubScreen() {
         {repoTabSections.map((s) => (
           <Pressable
             key={s}
-            style={[styles.sectionTab, section === s && styles.sectionTabActive]}
+            style={[
+              styles.sectionTab,
+              section === s && styles.sectionTabActive,
+              section === s && isClickUp && styles.tabActiveClickUp,
+            ]}
             onPress={() => handleSelectSection(s)}
             testID={`forge-section-tab-${s}`}
           >
@@ -8222,6 +8365,38 @@ export function ForgeHubScreen() {
   );
 }
 
+// ClickUp swaps the boxed segmented filters for its underlined text tabs.
+function segmentBtnStyle(isClickUp: boolean, active: boolean) {
+  if (isClickUp) return active ? clickUpTabStyles.tabActive : clickUpTabStyles.tab;
+  return [styles.segmentBtn, active && styles.segmentBtnActive];
+}
+
+function segmentTextStyle(isClickUp: boolean, active: boolean) {
+  if (isClickUp) return active ? clickUpTabStyles.textActive : clickUpTabStyles.text;
+  return [styles.segmentText, active && styles.segmentTextActive];
+}
+
+// ClickUp filter chips: white with a light border, the selected one lavender with violet text.
+function providerChipStyle(isClickUp: boolean, active: boolean) {
+  if (isClickUp) return active ? clickUpChipStyles.chipActive : clickUpChipStyles.chip;
+  return [styles.providerChip, active && styles.providerChipActive];
+}
+
+function providerChipTextStyle(isClickUp: boolean, active: boolean) {
+  if (isClickUp) return active ? clickUpChipStyles.textActive : clickUpChipStyles.text;
+  return [styles.providerChipText, active && styles.providerChipTextActive];
+}
+
+function providerPillStyle(isClickUp: boolean, active: boolean) {
+  if (isClickUp) return active ? clickUpChipStyles.chipActive : clickUpChipStyles.chip;
+  return [styles.providerPill, active && styles.providerPillActive];
+}
+
+function providerPillTextStyle(isClickUp: boolean, active: boolean) {
+  if (isClickUp) return active ? clickUpChipStyles.textActive : clickUpChipStyles.text;
+  return [styles.providerPillText, active && styles.providerPillActiveText];
+}
+
 const styles = StyleSheet.create((theme) => ({
   container: {
     flex: 1,
@@ -8393,6 +8568,9 @@ const styles = StyleSheet.create((theme) => ({
   navItemActive: {
     backgroundColor: theme.colors.surfaceSidebarHover,
   },
+  navItemActiveClickUp: {
+    backgroundColor: theme.chrome.selectedRow,
+  },
   navItemText: {
     flexShrink: 1,
     fontSize: theme.fontSize.sm,
@@ -8539,6 +8717,14 @@ const styles = StyleSheet.create((theme) => ({
   pane: {
     gap: theme.spacing[3],
   },
+  // ClickUp section titles: sentence case, ink, semibold (no small uppercase eyebrow).
+  sectionTitleClickUp: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.chrome.sectionTitleColor,
+    textTransform: "none",
+    letterSpacing: 0,
+  },
   sectionHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -8575,11 +8761,13 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
     minWidth: 0,
   },
+  // Card tokens come from theme.chrome: classic themes carry the mockup's 8 / --border /
+  // --surface1, ClickUp its white 10px card with the #ececec hairline.
   card: {
-    borderRadius: 8, // mockup exact value (.card border-radius --r-lg)
+    borderRadius: theme.chrome.cardRadius, // mockup exact value (.card border-radius --r-lg)
     borderWidth: 1, // mockup exact value (.card border)
-    borderColor: theme.colors.border, // mockup exact value (--border)
-    backgroundColor: theme.colors.surface1, // mockup exact value (--surface1)
+    borderColor: theme.chrome.cardBorder, // mockup exact value (--border)
+    backgroundColor: theme.chrome.cardBackground, // mockup exact value (--surface1)
     overflow: "hidden",
   },
   row: {
@@ -9108,10 +9296,10 @@ const styles = StyleSheet.create((theme) => ({
   },
   // form
   formCard: {
-    borderRadius: theme.borderRadius.lg,
+    borderRadius: theme.chrome.cardRadius,
     borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface1,
+    borderColor: theme.chrome.cardBorder,
+    backgroundColor: theme.chrome.cardBackground,
     padding: theme.spacing[4],
     gap: theme.spacing[4],
   },
@@ -9609,6 +9797,10 @@ const styles = StyleSheet.create((theme) => ({
   sectionTabActive: {
     borderBottomColor: theme.colors.accent,
   },
+  // ClickUp underlines the active tab in ink rather than the accent.
+  tabActiveClickUp: {
+    borderBottomColor: theme.colors.foreground,
+  },
   sectionTabText: {
     fontSize: theme.fontSize.sm,
     color: theme.colors.foregroundMuted,
@@ -9850,10 +10042,10 @@ const styles = StyleSheet.create((theme) => ({
   },
   // review + merge boxes
   mergebox: {
-    borderRadius: theme.borderRadius.lg,
+    borderRadius: theme.chrome.cardRadius,
     borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface1,
+    borderColor: theme.chrome.cardBorder,
+    backgroundColor: theme.chrome.cardBackground,
     overflow: "hidden",
   },
   mergeboxHeader: {
@@ -10112,10 +10304,10 @@ const styles = StyleSheet.create((theme) => ({
   logCard: {
     flex: 1,
     minWidth: 0,
-    borderRadius: theme.borderRadius.lg,
+    borderRadius: theme.chrome.cardRadius,
     borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface1,
+    borderColor: theme.chrome.cardBorder,
+    backgroundColor: theme.chrome.cardBackground,
     overflow: "hidden",
   },
   logHeaderBar: {
@@ -10272,10 +10464,10 @@ const styles = StyleSheet.create((theme) => ({
   },
   // releases + tags
   releaseCard: {
-    borderRadius: theme.borderRadius.lg,
+    borderRadius: theme.chrome.cardRadius,
     borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface1,
+    borderColor: theme.chrome.cardBorder,
+    backgroundColor: theme.chrome.cardBackground,
     overflow: "hidden",
   },
   releaseHeader: {

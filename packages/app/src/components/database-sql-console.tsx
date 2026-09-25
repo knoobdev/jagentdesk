@@ -9,6 +9,8 @@ import { useDatabaseHistoryStore } from "@/stores/database-history-store";
 import { DatabaseResultTable } from "@/components/database-result-table";
 import { isWeb } from "@/constants/platform";
 import type { Theme } from "@/styles/theme";
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { clickUpChipStyles, clickUpTabStyles } from "@/components/clickup-shell/list-styles";
 
 const ThemedPlay = withUnistyles(Play);
 const ThemedTextInput = withUnistyles(TextInput);
@@ -78,6 +80,36 @@ function SuggestionRow({
   );
 }
 
+/** Result-set tabs: boxed in classic, ClickUp's underlined text tabs otherwise. */
+function rsTabStyle(isClickUp: boolean, active: boolean) {
+  if (!isClickUp) return [styles.rsTab, active && styles.rsTabActive];
+  return active ? clickUpTabStyles.tabActive : clickUpTabStyles.tab;
+}
+
+function rsTabTextStyle(isClickUp: boolean, active: boolean) {
+  if (!isClickUp) return [styles.rsTabText, active && styles.rsTabTextActive];
+  return active ? clickUpTabStyles.textActive : clickUpTabStyles.text;
+}
+
+/** Toolbar toggles (History, Result / Query Plan / Output) read as ClickUp filter chips. */
+function toggleBtnStyle(isClickUp: boolean, active: boolean) {
+  if (!isClickUp) return active ? [styles.tabBtn, styles.tabBtnActive] : styles.tabBtn;
+  return active ? clickUpChipStyles.chipActive : clickUpChipStyles.chip;
+}
+
+function toggleTextStyle(isClickUp: boolean, active: boolean) {
+  if (!isClickUp) return [styles.tabText, active && styles.tabTextActive];
+  return active ? clickUpChipStyles.textActive : clickUpChipStyles.text;
+}
+
+function rsBarStyle(isClickUp: boolean) {
+  return isClickUp ? styles.rsBarClickUp : styles.rsBar;
+}
+
+function rsBarContentStyle(isClickUp: boolean) {
+  return isClickUp ? styles.rsBarContentClickUp : styles.rsBarContent;
+}
+
 /** One result-set tab (its own component for a stable press handler). */
 function ResultSetTab({
   id,
@@ -91,9 +123,10 @@ function ResultSetTab({
   onPick: (id: number) => void;
 }) {
   const press = useCallback(() => onPick(id), [onPick, id]);
+  const isClickUp = useIsClickUpTheme();
   return (
-    <Pressable style={[styles.rsTab, active && styles.rsTabActive]} onPress={press}>
-      <Text style={[styles.rsTabText, active && styles.rsTabTextActive]} numberOfLines={1}>
+    <Pressable style={rsTabStyle(isClickUp, active)} onPress={press}>
+      <Text style={rsTabTextStyle(isClickUp, active)} numberOfLines={1}>
         {label}
       </Text>
     </Pressable>
@@ -122,6 +155,7 @@ export function DatabaseSqlConsole({
   engine: DatabaseEngine;
 }) {
   const client = useHostRuntimeClient(serverId);
+  const isClickUp = useIsClickUpTheme();
   const bumpRefresh = useDatabaseViewStore((s) => s.bumpRefresh);
   const recordHistory = useDatabaseHistoryStore((s) => s.record);
   const history = useDatabaseHistoryStore((s) => s.byDatabase[databaseId] ?? EMPTY_HISTORY);
@@ -390,8 +424,8 @@ export function DatabaseSqlConsole({
         {resultSets.length > 1 ? (
           <ScrollView
             horizontal
-            style={styles.rsBar}
-            contentContainerStyle={styles.rsBarContent}
+            style={rsBarStyle(isClickUp)}
+            contentContainerStyle={rsBarContentStyle(isClickUp)}
             keyboardShouldPersistTaps="always"
           >
             {resultSets.map((rs) => (
@@ -477,34 +511,22 @@ export function DatabaseSqlConsole({
         <Pressable style={styles.tabBtn} onPress={handleExplain} disabled={running}>
           <Text style={styles.tabText}>Explain</Text>
         </Pressable>
-        <Pressable
-          style={historyOpen ? [styles.tabBtn, styles.tabBtnActive] : styles.tabBtn}
-          onPress={toggleHistory}
-        >
-          <Text style={[styles.tabText, historyOpen && styles.tabTextActive]}>History</Text>
+        <Pressable style={toggleBtnStyle(isClickUp, historyOpen)} onPress={toggleHistory}>
+          <Text style={toggleTextStyle(isClickUp, historyOpen)}>History</Text>
         </Pressable>
         <View style={styles.writesToggle}>
           <Switch value={allowWrites} onValueChange={setAllowWrites} />
           <Text style={styles.writesLabel}>Allow writes</Text>
         </View>
         <View style={styles.toolbarSpacer} />
-        <Pressable
-          style={[styles.tabBtn, tab === "result" && styles.tabBtnActive]}
-          onPress={showResult}
-        >
-          <Text style={[styles.tabText, tab === "result" && styles.tabTextActive]}>Result</Text>
+        <Pressable style={toggleBtnStyle(isClickUp, tab === "result")} onPress={showResult}>
+          <Text style={toggleTextStyle(isClickUp, tab === "result")}>Result</Text>
         </Pressable>
-        <Pressable
-          style={[styles.tabBtn, tab === "plan" && styles.tabBtnActive]}
-          onPress={showPlan}
-        >
-          <Text style={[styles.tabText, tab === "plan" && styles.tabTextActive]}>Query Plan</Text>
+        <Pressable style={toggleBtnStyle(isClickUp, tab === "plan")} onPress={showPlan}>
+          <Text style={toggleTextStyle(isClickUp, tab === "plan")}>Query Plan</Text>
         </Pressable>
-        <Pressable
-          style={[styles.tabBtn, tab === "output" && styles.tabBtnActive]}
-          onPress={showOutput}
-        >
-          <Text style={[styles.tabText, tab === "output" && styles.tabTextActive]}>Output</Text>
+        <Pressable style={toggleBtnStyle(isClickUp, tab === "output")} onPress={showOutput}>
+          <Text style={toggleTextStyle(isClickUp, tab === "output")}>Output</Text>
         </Pressable>
       </View>
 
@@ -630,6 +652,18 @@ const styles = StyleSheet.create((theme: Theme) => ({
     backgroundColor: theme.colors.surface1,
   },
   rsBarContent: { gap: theme.spacing[1], paddingHorizontal: theme.spacing[2], paddingVertical: 4 },
+  rsBarClickUp: {
+    flexGrow: 0,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.chrome.cardBorder,
+    backgroundColor: theme.chrome.cardBackground,
+  },
+  rsBarContentClickUp: {
+    alignItems: "flex-end",
+    gap: theme.spacing[4],
+    paddingHorizontal: theme.spacing[3],
+    paddingTop: theme.spacing[1],
+  },
   rsTab: {
     paddingHorizontal: theme.spacing[2],
     paddingVertical: 3,

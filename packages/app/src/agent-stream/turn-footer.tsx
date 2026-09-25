@@ -1,3 +1,5 @@
+import { CLICKUP_MESSAGE_INDENT } from "@/components/clickup-shell/chat-layout";
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
 import React, { memo, useCallback, useMemo, type ReactNode } from "react";
 import { View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
@@ -216,7 +218,16 @@ function CompletedTurnFooter({
 }
 
 function TurnFooterRow({ children }: { children: ReactNode }) {
-  const rowStyle = useMemo(() => [stylesheet.streamItemWrapper, stylesheet.turnFooterRow], []);
+  // The ClickUp chat indents agent turns under the avatar; the footer follows.
+  const isClickUp = useIsClickUpTheme();
+  const rowStyle = useMemo(
+    () => [
+      stylesheet.streamItemWrapper,
+      stylesheet.turnFooterRow,
+      isClickUp && stylesheet.turnFooterRowClickUp,
+    ],
+    [isClickUp],
+  );
   return <View style={rowStyle}>{children}</View>;
 }
 
@@ -229,6 +240,9 @@ const stylesheet = StyleSheet.create((theme) => ({
   },
   turnFooterRow: {
     marginTop: theme.spacing[4],
+  },
+  turnFooterRowClickUp: {
+    paddingLeft: CLICKUP_MESSAGE_INDENT,
   },
   turnFooterSlot: {
     flexDirection: "row",

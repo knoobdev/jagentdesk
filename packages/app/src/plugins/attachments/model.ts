@@ -49,9 +49,6 @@ export function togglePluginResourceAttachment(
   return [...current, attachment];
 }
 
-// JAgentDesk's AgentAttachment text variant carries no external-resource metadata
-// block (see TextAttachmentSchema), so the plugin resource is delivered to the
-// agent as a titled text attachment rather than a typed external reference.
 export function pluginResourceAttachmentToAgentAttachment(
   attachment: PluginResourceComposerAttachment,
 ): AgentAttachment {
@@ -60,5 +57,14 @@ export function pluginResourceAttachmentToAgentAttachment(
     mimeType: "text/plain",
     title: `${attachment.item.identifier} ${attachment.item.title}`,
     text: attachment.item.text,
+    externalResource: {
+      provider: attachment.pluginId,
+      providerLabel: attachment.sourceTitle,
+      resourceType: attachment.item.resourceType,
+      id: attachment.item.id,
+      identifier: attachment.item.identifier,
+      title: attachment.item.title,
+      url: attachment.item.url,
+    },
   };
 }

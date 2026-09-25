@@ -291,6 +291,7 @@ export const zhCN: TranslationResources = {
       zoomIn: "Zoom in",
       zoomOut: "Zoom out",
       resetZoom: "Reset view",
+      fullscreen: "全屏",
       viewSource: "View source",
       viewDiagram: "View diagram",
     },
@@ -1767,6 +1768,8 @@ export const zhCN: TranslationResources = {
           claude: "Claude",
           ghostty: "Ghostty",
           pureBlack: "纯黑",
+          clickup: "ClickUp",
+          clickupDark: "ClickUp Dark",
           auto: "系统",
         },
       },
@@ -2240,6 +2243,11 @@ export const zhCN: TranslationResources = {
       },
     },
   },
+  clickupShell: {
+    search: "搜索",
+    newWorkspace: "新建",
+    workspaces: "工作区",
+  },
   marketplace: {
     title: "Plugin Marketplace",
     subtitle: "Discover and install community plugins for JAgentDesk.",
@@ -2248,6 +2256,7 @@ export const zhCN: TranslationResources = {
     browseButton: "Browse marketplace",
     tabs: {
       browse: "Browse",
+      themes: "主题",
       installed: "Installed",
       installedEmpty: "No plugins installed yet.",
       loadMore: "Load more",
@@ -2311,6 +2320,13 @@ export const zhCN: TranslationResources = {
     themes: {
       title: "Themes",
       subtitle: "Palettes and appearance packs from the community.",
+      searchPlaceholder: "搜索主题",
+      count: "{{count}} 个主题",
+      noPreview: "无预览",
+      variants: "{{count}} 个变体",
+      empty: "没有符合此筛选条件的主题。",
+      filter: { all: "全部" },
+      appearance: { dark: "深色", light: "浅色" },
     },
     states: {
       loading: "Loading marketplace…",

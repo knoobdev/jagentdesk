@@ -94,7 +94,7 @@ const styles = StyleSheet.create((theme) => {
       alignItems: "center",
       justifyContent: "center",
       gap: theme.spacing[2],
-      borderRadius: theme.borderRadius.lg,
+      borderRadius: theme.chrome.controlRadius,
       borderWidth: 1,
       borderColor: "transparent",
     },
@@ -119,8 +119,8 @@ const styles = StyleSheet.create((theme) => {
       borderColor: theme.colors.surface3,
     },
     outline: {
-      backgroundColor: "transparent",
-      borderColor: theme.colors.borderAccent,
+      backgroundColor: theme.chrome.outlineBackground,
+      borderColor: theme.chrome.outlineBorder,
     },
     ghost: {
       backgroundColor: "transparent",
@@ -139,7 +139,7 @@ const styles = StyleSheet.create((theme) => {
     text: {
       color: theme.colors.foreground,
       ...geometry.buttonText,
-      fontWeight: theme.fontWeight.normal,
+      fontWeight: theme.chrome.buttonTextWeight,
     },
     textXs: {
       ...geometry.buttonTextXs,

@@ -4,6 +4,8 @@ import { StyleSheet } from "react-native-unistyles";
 import type { QueryResult } from "@jagentdesk/protocol/database/rpc-schemas";
 import type { Theme } from "@/styles/theme";
 import { GridScroll } from "@/components/database-grid-scroll";
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { clickUpListStyles } from "@/components/clickup-shell/list-styles";
 
 const MIN_COL_WIDTH = 120;
 const MAX_COL_WIDTH = 320;
@@ -16,6 +18,12 @@ const GUTTER_WIDTH = 56;
  * (viewport-edge scrollbars + pinned header on web), a row-number gutter, and column
  * widths estimated from the header + a sample of cells so wide values stay legible.
  */
+/** Classic zebra-stripes the grid; ClickUp separates rows with its hairline divider only. */
+function rowStripe(isClickUp: boolean, r: number) {
+  if (isClickUp) return clickUpListStyles.row;
+  return r % 2 === 1 && styles.bodyRowAlt;
+}
+
 export function DatabaseResultTable({
   result,
   startRow = 1,
@@ -40,25 +48,32 @@ export function DatabaseResultTable({
     });
   }, [result]);
   const totalWidth = useMemo(() => GUTTER_WIDTH + widths.reduce((sum, w) => sum + w, 0), [widths]);
+  const isClickUp = useIsClickUpTheme();
 
-  const header = (
-    <View style={[styles.headerRow, { width: totalWidth }]}>
-      <View style={[styles.gutterCell, styles.headerCell]}>
-        <Text style={styles.gutterHeaderText}>#</Text>
-      </View>
-      {result.columns.map((col, i) => (
-        <View key={col.name} style={[styles.headerCell, { width: widths[i] }]}>
-          <Text style={styles.headerText} numberOfLines={1}>
-            {col.name}
-          </Text>
-          {col.dataType ? (
-            <Text style={styles.headerType} numberOfLines={1}>
-              {col.dataType}
-            </Text>
-          ) : null}
+  const header = useMemo(
+    () => (
+      <View style={[styles.headerRow, { width: totalWidth }]}>
+        <View style={[styles.gutterCell, styles.headerCell]}>
+          <Text style={styles.gutterHeaderText}>#</Text>
         </View>
-      ))}
-    </View>
+        {result.columns.map((col, i) => (
+          <View key={col.name} style={[styles.headerCell, { width: widths[i] }]}>
+            <Text
+              style={[styles.headerText, isClickUp && clickUpListStyles.columnHeader]}
+              numberOfLines={1}
+            >
+              {col.name}
+            </Text>
+            {col.dataType ? (
+              <Text style={styles.headerType} numberOfLines={1}>
+                {col.dataType}
+              </Text>
+            ) : null}
+          </View>
+        ))}
+      </View>
+    ),
+    [totalWidth, result.columns, widths, isClickUp],
   );
 
   return (
@@ -67,10 +82,7 @@ export function DatabaseResultTable({
         // Rows are positional (no stable PK in an arbitrary result set), so the row
         // index is the correct key here.
         // eslint-disable-next-line react/no-array-index-key
-        <View
-          key={r}
-          style={[styles.bodyRow, { width: totalWidth }, r % 2 === 1 && styles.bodyRowAlt]}
-        >
+        <View key={r} style={[styles.bodyRow, { width: totalWidth }, rowStripe(isClickUp, r)]}>
           <View style={[styles.gutterCell, styles.bodyCell]}>
             <Text style={styles.gutterText}>{startRow + r}</Text>
           </View>

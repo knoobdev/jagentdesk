@@ -8,9 +8,9 @@ import {
 import { splitComposerAttachmentsForSubmit } from "@/composer/attachments/submit";
 
 const source = {
-  pluginId: "tracker",
+  pluginId: "linear",
   sourceId: "issues",
-  sourceTitle: "Tracker issue",
+  sourceTitle: "Linear issue",
   sourceIcon: "CircleDot",
 };
 
@@ -18,9 +18,9 @@ const item = {
   id: "issue-uuid",
   identifier: "ENG-123",
   title: "Plugin attachments",
-  subtitle: "In progress",
-  url: "https://tracker.example/issue/ENG-123/plugin-attachments",
-  text: "Tracker issue ENG-123: Plugin attachments\nStatus: In progress",
+  subtitle: "In progress · Mohamed",
+  url: "https://linear.app/acme/issue/ENG-123/plugin-attachments",
+  text: "Linear issue ENG-123: Plugin attachments\nStatus: In progress",
   resourceType: "issue",
 };
 
@@ -51,6 +51,15 @@ describe("plugin resource attachments", () => {
       mimeType: "text/plain",
       title: "ENG-123 Plugin attachments",
       text: item.text,
+      externalResource: {
+        provider: "linear",
+        providerLabel: "Linear issue",
+        resourceType: "issue",
+        id: "issue-uuid",
+        identifier: "ENG-123",
+        title: "Plugin attachments",
+        url: item.url,
+      },
     });
     expect(splitComposerAttachmentsForSubmit([attachment])).toEqual({
       images: [],

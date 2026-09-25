@@ -43,13 +43,14 @@ describe("rebrandPaseoPlugin", () => {
     expect(manifest.id).toBe("catppuccin");
     expect(manifest.requirements).toEqual({ jagentdesk: ">=0.8.0" });
 
-    // The client entry is renamed to the fork's index.ts and every SDK subpath is mapped
-    // onto an entry point the fork actually publishes (. / ./server / ./host / ./react-native).
-    const source = await readFile(path.join(directory, "index.ts"), "utf8");
-    expect(source).toContain('from "@jagentdesk/plugin"'); // /client -> root
-    expect(source).toContain('from "@jagentdesk/plugin/react-native"'); // /client/react-native
-    expect(source).toContain('from "@jagentdesk/plugin/server"'); // /server and /server/provider
-    expect(source).not.toContain("/client"); // no /client/* subpath survives
+    // The split entry keeps its name (the runtime loads index.client.* / index.server.*);
+    // only the SDK scope changes, every subpath is preserved.
+    const source = await readFile(path.join(directory, "index.client.ts"), "utf8");
+    expect(source).toContain('from "@jagentdesk/plugin/client"');
+    expect(source).toContain('from "@jagentdesk/plugin/client/react-native"');
+    expect(source).toContain('from "@jagentdesk/plugin/client/ui"');
+    expect(source).toContain('from "@jagentdesk/plugin/server"');
+    expect(source).toContain('from "@jagentdesk/plugin/server/provider"');
     expect(source).not.toContain("getpaseo");
   });
 
@@ -67,7 +68,7 @@ describe("rebrandPaseoPlugin", () => {
 
     await rebrandPaseoPlugin(directory);
 
-    expect(await readFile(path.join(directory, "index.tsx"), "utf8")).toContain(
+    expect(await readFile(path.join(directory, "index.client.tsx"), "utf8")).toContain(
       '"@jagentdesk/plugin"',
     );
     // A vendored dependency is left untouched.
@@ -76,20 +77,51 @@ describe("rebrandPaseoPlugin", () => {
     ).toContain("@getpaseo/plugin");
   });
 
-  it("bridges a Paseo client entry to the fork's single index entry", async () => {
-    await writeFile(path.join(directory, "paseo-plugin.json"), JSON.stringify({ id: "gruvbox" }));
+  it("keeps split client and server entries in place", async () => {
+    await writeFile(path.join(directory, "paseo-plugin.json"), JSON.stringify({ id: "monitor" }));
     await writeFile(
-      path.join(directory, "index.client.ts"),
-      'import type { PluginClientContext } from "@getpaseo/plugin/client";\nexport default function contribute(c: PluginClientContext) { c.addTheme({ id: "g" }); return () => {}; }\n',
+      path.join(directory, "index.client.tsx"),
+      'import type { PluginClientContext } from "@getpaseo/plugin/client";\nexport default function contribute(c: PluginClientContext) { return () => {}; }\n',
+    );
+    await writeFile(
+      path.join(directory, "index.server.ts"),
+      'import type { PluginServerContext } from "@getpaseo/plugin/server";\nexport default function contribute(s: PluginServerContext) { return () => {}; }\n',
     );
 
     await rebrandPaseoPlugin(directory);
 
-    // index.client.ts becomes index.ts (the fork's entry) with the SDK scope rewritten.
-    await expect(stat(path.join(directory, "index.client.ts"))).rejects.toThrow();
-    const entry = await readFile(path.join(directory, "index.ts"), "utf8");
-    expect(entry).toContain('from "@jagentdesk/plugin"');
-    expect(entry).toContain("export default function contribute");
+    // Renaming the client entry to index.tsx used to make the runtime evaluate client code on
+    // the server ("client.addSettingsScreen is not a function") and skip index.server.ts.
+    await expect(stat(path.join(directory, "index.tsx"))).rejects.toThrow();
+    expect(await readFile(path.join(directory, "index.client.tsx"), "utf8")).toContain(
+      '"@jagentdesk/plugin/client"',
+    );
+    expect(await readFile(path.join(directory, "index.server.ts"), "utf8")).toContain(
+      '"@jagentdesk/plugin/server"',
+    );
+  });
+
+  it("renames the SDK's branded runtime exports in files that import the SDK", async () => {
+    await writeFile(path.join(directory, "paseo-plugin.json"), JSON.stringify({ id: "monitor" }));
+    await writeFile(
+      path.join(directory, "index.client.tsx"),
+      [
+        'import { usePaseo, getPaseoClient } from "@getpaseo/plugin/client";',
+        "const usePaseoLocalHelper = 1;",
+        'export default function contribute() { usePaseo(); getPaseoClient("s"); return () => usePaseoLocalHelper; }',
+      ].join("\n"),
+    );
+    await writeFile(path.join(directory, "notes.ts"), "export const usePaseo = 1;\n");
+
+    await rebrandPaseoPlugin(directory);
+
+    const entry = await readFile(path.join(directory, "index.client.tsx"), "utf8");
+    expect(entry).toContain("import { useJAgentDesk, getJAgentDeskClient }");
+    expect(entry).toContain("useJAgentDesk();");
+    // A plugin's own identifier that merely starts with the name is left alone.
+    expect(entry).toContain("usePaseoLocalHelper");
+    // A file that does not import the SDK keeps its own names.
+    expect(await readFile(path.join(directory, "notes.ts"), "utf8")).toContain("usePaseo = 1");
   });
 
   it("leaves a plugin that already targets JAgentDesk alone", async () => {

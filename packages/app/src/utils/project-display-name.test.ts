@@ -6,9 +6,7 @@ import {
 
 describe("projectDisplayNameFromProjectId", () => {
   it("shows owner and repo for GitHub remote ids", () => {
-    expect(projectDisplayNameFromProjectId("remote:github.com/acme/example")).toBe(
-      "acme/example",
-    );
+    expect(projectDisplayNameFromProjectId("remote:github.com/acme/example")).toBe("acme/example");
   });
 
   it("shows the trailing directory name for local projects", () => {

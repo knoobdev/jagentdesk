@@ -8,6 +8,8 @@ import { useDatabaseViewStore } from "@/stores/database-view-store";
 import { qualifyTable, quoteIdent } from "@/utils/sql-ident";
 import { Skeleton, useSkeletonPulse } from "@/components/ui/skeleton";
 import type { Theme } from "@/styles/theme";
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { clickUpListStyles } from "@/components/clickup-shell/list-styles";
 
 const ThemedInput = withUnistyles(TextInput);
 const placeholderColor = (theme: Theme) => ({
@@ -161,8 +163,9 @@ export function DatabaseFullTextSearch({
 
 function HitRow({ hit, onOpen }: { hit: TableHit; onOpen: (hit: TableHit) => void }) {
   const press = useCallback(() => onOpen(hit), [onOpen, hit]);
+  const isClickUp = useIsClickUpTheme();
   return (
-    <Pressable style={styles.hit} onPress={press}>
+    <Pressable style={[styles.hit, isClickUp && clickUpListStyles.row]} onPress={press}>
       <View style={styles.hitInfo}>
         <Text style={styles.hitTable} numberOfLines={1} ellipsizeMode="middle">
           {hit.schema}.{hit.table}

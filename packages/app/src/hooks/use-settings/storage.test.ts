@@ -34,12 +34,51 @@ function makeDeps(
 }
 
 describe("loadAppSettingsFromStorage", () => {
-  it("defaults theme to auto when storage is empty", async () => {
+  it("defaults theme to ClickUp when storage is empty", async () => {
     const deps = makeDeps();
 
     const result = await loadAppSettingsFromStorage(deps);
 
-    expect(result.theme).toBe("auto");
+    expect(result.theme).toBe("clickup");
+  });
+
+  it("moves a settings file still on the old default (auto) to ClickUp once", async () => {
+    const legacy = makeDeps({
+      storage: createInMemoryKeyValueStorage({
+        [APP_SETTINGS_KEY]: JSON.stringify({ theme: "auto" }),
+      }),
+    });
+    expect((await loadAppSettingsFromStorage(legacy)).theme).toBe("clickup");
+
+    // After the move, choosing System again is kept.
+    const chosen = makeDeps({
+      storage: createInMemoryKeyValueStorage({
+        [APP_SETTINGS_KEY]: JSON.stringify({ theme: "auto", defaultThemeVersion: 1 }),
+      }),
+    });
+    expect((await loadAppSettingsFromStorage(chosen)).theme).toBe("auto");
+  });
+
+  it("keeps a theme the user picked and a selected plugin theme", async () => {
+    const picked = makeDeps({
+      storage: createInMemoryKeyValueStorage({
+        [APP_SETTINGS_KEY]: JSON.stringify({ theme: "zinc" }),
+      }),
+    });
+    expect((await loadAppSettingsFromStorage(picked)).theme).toBe("zinc");
+
+    const plugin = makeDeps({
+      storage: createInMemoryKeyValueStorage({
+        [APP_SETTINGS_KEY]: JSON.stringify({
+          theme: "plugin",
+          pluginThemeId: "atom/theme/dark",
+          defaultThemeVersion: 1,
+        }),
+      }),
+    });
+    const loaded = await loadAppSettingsFromStorage(plugin);
+    expect(loaded.theme).toBe("plugin");
+    expect(loaded.pluginThemeId).toBe("atom/theme/dark");
   });
 
   it("seeds storage with the client defaults when nothing is persisted", async () => {

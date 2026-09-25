@@ -291,6 +291,7 @@ export const en = {
       zoomIn: "Zoom in",
       zoomOut: "Zoom out",
       resetZoom: "Reset view",
+      fullscreen: "Fullscreen",
       viewSource: "View source",
       viewDiagram: "View diagram",
     },
@@ -1865,6 +1866,8 @@ export const en = {
           claude: "Claude",
           ghostty: "Ghostty",
           pureBlack: "Pure black",
+          clickup: "ClickUp",
+          clickupDark: "ClickUp Dark",
           auto: "System",
         },
       },
@@ -2344,6 +2347,11 @@ export const en = {
       },
     },
   },
+  clickupShell: {
+    search: "Search",
+    newWorkspace: "New",
+    workspaces: "Workspaces",
+  },
   marketplace: {
     title: "Plugin Marketplace",
     subtitle: "Discover and install community plugins for JAgentDesk.",
@@ -2352,6 +2360,7 @@ export const en = {
     browseButton: "Browse marketplace",
     tabs: {
       browse: "Browse",
+      themes: "Themes",
       installed: "Installed",
       installedEmpty: "No plugins installed yet.",
       loadMore: "Load more",
@@ -2415,6 +2424,13 @@ export const en = {
     themes: {
       title: "Themes",
       subtitle: "Palettes and appearance packs from the community.",
+      searchPlaceholder: "Search themes",
+      count: "{{count}} themes",
+      noPreview: "No preview",
+      variants: "{{count}} variants",
+      empty: "No themes match this filter.",
+      filter: { all: "All" },
+      appearance: { dark: "Dark", light: "Light" },
     },
     states: {
       loading: "Loading marketplace…",

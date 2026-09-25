@@ -1,3 +1,12 @@
+import { PluginIdSchema, PluginRequirementsSchema, PluginSourceSchema } from "./plugin-config.js";
+export {
+  PluginIdSchema,
+  PluginRequirementsSchema,
+  DirectoryPluginSourceSchema,
+  PluginSourceSchema,
+  type PluginRequirements,
+  type PluginSource,
+} from "./plugin-config.js";
 import { z } from "zod";
 import { TerminalActivitySchema } from "./terminal-activity.js";
 import { CLIENT_CAPS } from "./client-capabilities.js";
@@ -290,20 +299,6 @@ const MutableBrowserToolsConfigSchema = z
     activeProfileId: z.string().nullable().optional(),
   })
   .passthrough();
-// ── Plugins (see ADR-0014) ────────────────────────────────────────────────
-// Plugins are local-disk-only, trusted, unsandboxed daemon subprocesses. No Hub.
-export const PluginIdSchema = z.string().regex(/^[a-z][a-z0-9-]*$/);
-
-export const DirectoryPluginSourceSchema = z
-  .object({
-    source: z.literal("directory"),
-    path: z.string().min(1),
-    enabled: z.boolean().optional(),
-  })
-  .strict();
-
-export const PluginSourceSchema = z.discriminatedUnion("source", [DirectoryPluginSourceSchema]);
-export type PluginSource = z.infer<typeof PluginSourceSchema>;
 
 export const MutableDaemonConfigSchema = z
   .object({
@@ -1163,6 +1158,18 @@ export const ForgeIssueAttachmentSchema = z.object({
   projectPath: z.string().optional(),
 });
 
+// Where a plugin-sourced text attachment came from (e.g. an issue in a tracker), so the UI can
+// show and link the original resource.
+export const ExternalResourceAttachmentMetadataSchema = z.object({
+  provider: z.string(),
+  providerLabel: z.string(),
+  resourceType: z.string(),
+  id: z.string(),
+  identifier: z.string(),
+  title: z.string(),
+  url: z.string(),
+});
+
 export const TextAttachmentSchema = z
   .object({
     type: z.literal("text"),
@@ -1170,6 +1177,7 @@ export const TextAttachmentSchema = z
     contextKind: z.string().optional(),
     title: z.string().nullable().optional(),
     text: z.string(),
+    externalResource: ExternalResourceAttachmentMetadataSchema.optional(),
   })
   .transform(({ contextKind, ...attachment }) => ({
     ...attachment,
@@ -1549,6 +1557,75 @@ export const PluginDirectoryInspectRequestSchema = z.object({
   type: z.literal("plugin.directory.inspect.request"),
   requestId: z.string(),
   path: z.string().min(1),
+});
+
+export const PluginSourceInstallRequestSchema = z.object({
+  type: z.literal("plugin.source.install.request"),
+  requestId: z.string(),
+  source: z.string().min(1),
+  id: PluginIdSchema.optional(),
+  ref: z.string().min(1).optional(),
+  // COMPAT(plugin-source-path): accepted for v0.7 clients; remove after 2027-09-01.
+  pluginPath: z.string().min(1).optional(),
+});
+
+export const PluginSourceIdentitySchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("directory"), path: z.string() }),
+  z.object({ kind: z.literal("git"), remote: z.string(), pluginPath: z.string() }),
+  z.object({ kind: z.literal("npm"), packageName: z.string(), pluginPath: z.string() }),
+]);
+export const PluginInstallationSchema = z.object({
+  identity: PluginSourceIdentitySchema,
+  currentRevision: z.string().optional(),
+});
+export type PluginInstallation = z.infer<typeof PluginInstallationSchema>;
+export const PluginUpdateTargetSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("git"), commit: z.string().regex(/^[0-9a-f]{40,64}$/) }),
+  z.object({
+    kind: z.literal("npm"),
+    version: z.string().min(1),
+    resolved: z.string().url(),
+    integrity: z.string().min(1),
+  }),
+]);
+export type PluginUpdateTarget = z.infer<typeof PluginUpdateTargetSchema>;
+export const PluginUpdateProposalSchema = z.object({
+  id: PluginIdSchema,
+  expected: z.object({
+    identity: PluginSourceIdentitySchema,
+    installationRoot: z.string(),
+    revision: z.string(),
+  }),
+  target: PluginUpdateTargetSchema,
+});
+export type PluginUpdateProposal = z.infer<typeof PluginUpdateProposalSchema>;
+export const PluginUpdateSelectionSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("git"), ref: z.string().min(1) }),
+  z.object({ kind: z.literal("npm"), version: z.string().min(1) }),
+]);
+export type PluginUpdateSelection = z.infer<typeof PluginUpdateSelectionSchema>;
+export const PluginUpdatePreviewRequestSchema = z.object({
+  type: z.literal("plugin.source.update.preview.request"),
+  requestId: z.string(),
+  pluginId: PluginIdSchema.optional(),
+  target: PluginUpdateSelectionSchema.optional(),
+});
+export const PluginUpdateApplyRequestSchema = z.object({
+  type: z.literal("plugin.source.update.apply.request"),
+  requestId: z.string(),
+  proposals: z.array(PluginUpdateProposalSchema).min(1),
+});
+
+export const PluginSourceStatusRequestSchema = z.object({
+  type: z.literal("plugin.source.status.request"),
+  requestId: z.string(),
+  pluginId: PluginIdSchema.optional(),
+});
+
+export const PluginSourceUpdateRequestSchema = z.object({
+  type: z.literal("plugin.source.update.request"),
+  requestId: z.string(),
+  pluginId: PluginIdSchema.optional(),
 });
 
 function pluginIdRequest<const Type extends string>(type: Type) {
@@ -3666,16 +3743,6 @@ export const CompactProviderSnapshotSchema = z.object({
   thinkingSets: z.array(ProviderSnapshotThinkingSetSchema),
 });
 
-export const ExternalResourceAttachmentMetadataSchema = z.object({
-  provider: z.string(),
-  providerLabel: z.string(),
-  resourceType: z.string(),
-  id: z.string(),
-  identifier: z.string(),
-  title: z.string(),
-  url: z.string(),
-});
-
 export const WorkspaceLabelColorSchema = z.enum(WORKSPACE_LABEL_COLORS);
 export const WorkspaceLabelDefinitionSchema = z.object({
   name: z.string(),
@@ -3772,28 +3839,6 @@ export const AgentSearchMatchSchema = z.object({
 });
 export type AgentSearchMatch = z.infer<typeof AgentSearchMatchSchema>;
 
-export const PluginSourceStatusItemSchema = z.object({
-  id: PluginIdSchema,
-  source: z.enum(["directory", "git"]),
-  path: z.string(),
-  remote: z.string().optional(),
-  ref: z.string().optional(),
-  currentCommit: z.string().optional(),
-  latestCommit: z.string().optional(),
-  commitsBehind: z.number().int().nonnegative().optional(),
-  updateAvailable: z.boolean().optional(),
-});
-export type PluginSourceStatusItem = z.infer<typeof PluginSourceStatusItemSchema>;
-
-export const PluginSourceUpdateItemSchema = z.object({
-  id: PluginIdSchema,
-  previousCommit: z.string(),
-  currentCommit: z.string(),
-  commits: z.number().int().nonnegative(),
-  updated: z.boolean(),
-});
-export type PluginSourceUpdateItem = z.infer<typeof PluginSourceUpdateItemSchema>;
-
 // --- Request messages (join SessionInboundMessageSchema below) -------------
 
 export const WorkspaceLabelListRequestSchema = z.object({
@@ -3837,26 +3882,6 @@ export const HubManagementDaemonPermissionsUpdateRequestSchema = z.object({
   requestId: z.string(),
   grant: z.array(DaemonPermissionSchema).default([]),
   revoke: z.array(DaemonPermissionSchema).default([]),
-});
-
-export const PluginSourceInstallRequestSchema = z.object({
-  type: z.literal("plugin.source.install.request"),
-  requestId: z.string(),
-  source: z.string().min(1),
-  id: PluginIdSchema.optional(),
-  ref: z.string().min(1).optional(),
-  // COMPAT(plugin-source-path): accepted for v0.7 clients; remove after 2027-09-01.
-  pluginPath: z.string().min(1).optional(),
-});
-export const PluginSourceStatusRequestSchema = z.object({
-  type: z.literal("plugin.source.status.request"),
-  requestId: z.string(),
-  pluginId: PluginIdSchema.optional(),
-});
-export const PluginSourceUpdateRequestSchema = z.object({
-  type: z.literal("plugin.source.update.request"),
-  requestId: z.string(),
-  pluginId: PluginIdSchema.optional(),
 });
 
 function agentSkillsRequest<const Type extends string>(type: Type) {
@@ -4247,6 +4272,8 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   PluginSourceInstallRequestSchema,
   PluginSourceStatusRequestSchema,
   PluginSourceUpdateRequestSchema,
+  PluginUpdatePreviewRequestSchema,
+  PluginUpdateApplyRequestSchema,
   PushUnregisterRequestSchema,
   WorkspaceLabelListRequestSchema,
   WorkspaceLabelAssignmentSetRequestSchema,
@@ -4517,6 +4544,8 @@ export const ServerInfoStatusPayloadSchema = z
         pluginLogs: z.boolean().optional(),
         // COMPAT(pluginThemes): added in v0.5.0, remove gate after 2027-08-20.
         pluginThemes: z.boolean().optional(),
+        // Plugin settings screens + host-scoped plugin settings storage (split client/server API).
+        pluginSettings: z.boolean().optional(),
         // Forge Hub (spec 19 / ADR-0015): standalone remote forge management surface.
         // Advertised per release milestone so old clients don't call the new RPCs blind.
         // NOTE: spec 07 describes capabilities as an array of strings, but the daemon
@@ -4635,6 +4664,12 @@ export const PluginCatalogChangedStatusPayloadSchema = z.object({
   pluginId: PluginIdSchema,
 });
 
+export const PluginSettingsChangedStatusPayloadSchema = z.object({
+  status: z.literal("plugin_settings_changed"),
+  pluginId: PluginIdSchema,
+  settingsId: z.string(),
+});
+
 export const KnownStatusPayloadSchema = z.discriminatedUnion("status", [
   AgentCreatedStatusPayloadSchema,
   AgentCreateFailedStatusPayloadSchema,
@@ -4644,6 +4679,7 @@ export const KnownStatusPayloadSchema = z.discriminatedUnion("status", [
   RestartRequestedStatusPayloadSchema,
   DaemonConfigChangedStatusPayloadSchema,
   PluginCatalogChangedStatusPayloadSchema,
+  PluginSettingsChangedStatusPayloadSchema,
   SkillsChangedStatusPayloadSchema,
   UsageChangedStatusPayloadSchema,
 ]);
@@ -5628,6 +5664,7 @@ export const PluginCatalogGetResponseSchema = z.object({
       z.object({
         id: PluginIdSchema,
         clientBundle: z.string(),
+        requirements: PluginRequirementsSchema.optional(),
       }),
     ),
   }),
@@ -5636,18 +5673,23 @@ export const PluginCatalogGetResponseSchema = z.object({
 export const PluginStatusSchema = z.enum(["running", "disabled", "failed"]);
 export type PluginStatus = z.infer<typeof PluginStatusSchema>;
 
+export const PluginNpmInstallationSchema = z.object({
+  packageName: z.string(),
+  requestedSpec: z.string(),
+  version: z.string(),
+  integrity: z.string(),
+});
+
 export const PluginListItemSchema = z.object({
   id: PluginIdSchema,
+  description: z.string().optional(),
   path: z.string(),
   enabled: z.boolean(),
   status: PluginStatusSchema,
-  // Upstream v0.7.2 managed-source (git) fields; absent for directory plugins.
   source: z.enum(["directory", "git"]).optional(),
+  npm: PluginNpmInstallationSchema.optional(),
+  installation: PluginInstallationSchema.optional(),
   remote: z.string().optional(),
-  // Monorepo subdirectory the plugin was installed from ("." or absent = repo root).
-  // Needed so the marketplace can tell sibling plugins in one repo apart — otherwise
-  // installing one marks every plugin sharing the repo remote as installed.
-  pluginPath: z.string().optional(),
   ref: z.string().optional(),
   commit: z.string().optional(),
   error: z.string().optional(),
@@ -5684,6 +5726,72 @@ export const PluginDirectoryInstallResponseSchema = z.object({
 export const PluginDirectoryInspectResponseSchema = z.object({
   type: z.literal("plugin.directory.inspect.response"),
   payload: z.object({ requestId: z.string(), id: PluginIdSchema }),
+});
+
+export const PluginSourceInstallResponseSchema = z.object({
+  type: z.literal("plugin.source.install.response"),
+  payload: z.object({ requestId: z.string(), plugin: PluginListItemSchema }),
+});
+
+export const PluginSourceStatusItemSchema = z.object({
+  id: PluginIdSchema,
+  source: z.enum(["directory", "git"]),
+  npm: PluginNpmInstallationSchema.optional(),
+  installation: PluginInstallationSchema.optional(),
+  path: z.string(),
+  remote: z.string().optional(),
+  ref: z.string().optional(),
+  currentCommit: z.string().optional(),
+  latestCommit: z.string().optional(),
+  commitsBehind: z.number().int().nonnegative().optional(),
+  updateAvailable: z.boolean().optional(),
+});
+export type PluginSourceStatusItem = z.infer<typeof PluginSourceStatusItemSchema>;
+
+export const PluginSourceStatusResponseSchema = z.object({
+  type: z.literal("plugin.source.status.response"),
+  payload: z.object({ requestId: z.string(), plugins: z.array(PluginSourceStatusItemSchema) }),
+});
+
+export const PluginSourceUpdateItemSchema = z.object({
+  id: PluginIdSchema,
+  previousCommit: z.string(),
+  currentCommit: z.string(),
+  commits: z.number().int().nonnegative(),
+  updated: z.boolean(),
+});
+export type PluginSourceUpdateItem = z.infer<typeof PluginSourceUpdateItemSchema>;
+
+export const PluginSourceUpdateResponseSchema = z.object({
+  type: z.literal("plugin.source.update.response"),
+  payload: z.object({ requestId: z.string(), plugins: z.array(PluginSourceUpdateItemSchema) }),
+});
+
+export const PluginUpdatePreviewSchema = z.object({
+  id: PluginIdSchema,
+  outcome: z.enum(["update", "current", "installed-newer", "local", "error"]),
+  current: PluginInstallationSchema.optional(),
+  target: PluginUpdateTargetSchema.optional(),
+  links: z.array(z.string()),
+  proposal: PluginUpdateProposalSchema.optional(),
+  error: z.string().optional(),
+});
+export type PluginUpdatePreview = z.infer<typeof PluginUpdatePreviewSchema>;
+export const PluginUpdateResultSchema = z.object({
+  id: PluginIdSchema,
+  outcome: z.enum(["updated", "error"]),
+  plugin: PluginListItemSchema.optional(),
+  error: z.string().optional(),
+  warning: z.string().optional(),
+});
+export type PluginUpdateResult = z.infer<typeof PluginUpdateResultSchema>;
+export const PluginUpdatePreviewResponseSchema = z.object({
+  type: z.literal("plugin.source.update.preview.response"),
+  payload: z.object({ requestId: z.string(), plugins: z.array(PluginUpdatePreviewSchema) }),
+});
+export const PluginUpdateApplyResponseSchema = z.object({
+  type: z.literal("plugin.source.update.apply.response"),
+  payload: z.object({ requestId: z.string(), plugins: z.array(PluginUpdateResultSchema) }),
 });
 
 function pluginActionResponse<const Type extends string>(type: Type) {
@@ -7495,19 +7603,6 @@ export const FileEntryDeleteResponseSchema = z.object({
   }),
 });
 
-export const PluginSourceInstallResponseSchema = z.object({
-  type: z.literal("plugin.source.install.response"),
-  payload: z.object({ requestId: z.string(), plugin: PluginListItemSchema }),
-});
-export const PluginSourceStatusResponseSchema = z.object({
-  type: z.literal("plugin.source.status.response"),
-  payload: z.object({ requestId: z.string(), plugins: z.array(PluginSourceStatusItemSchema) }),
-});
-export const PluginSourceUpdateResponseSchema = z.object({
-  type: z.literal("plugin.source.update.response"),
-  payload: z.object({ requestId: z.string(), plugins: z.array(PluginSourceUpdateItemSchema) }),
-});
-
 function agentSkillsStatusResponse<const Type extends string>(type: Type) {
   return z.object({
     type: z.literal(type),
@@ -7949,6 +8044,8 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   PluginSourceInstallResponseSchema,
   PluginSourceStatusResponseSchema,
   PluginSourceUpdateResponseSchema,
+  PluginUpdatePreviewResponseSchema,
+  PluginUpdateApplyResponseSchema,
   PushUnregisterResponseSchema,
   WorkspaceLabelListResponseSchema,
   WorkspaceLabelUpdateSchema,

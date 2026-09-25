@@ -20,6 +20,8 @@ import { useDatabaseViewStore } from "@/stores/database-view-store";
 import { useDatabaseChatStore } from "@/stores/database-chat-store";
 import { usePanelStore } from "@/stores/panel-store";
 import type { Theme } from "@/styles/theme";
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { clickUpListStyles, clickUpTabStyles } from "@/components/clickup-shell/list-styles";
 
 const ThemedPanelLeft = withUnistyles(PanelLeft);
 const ThemedX = withUnistyles(X);
@@ -37,6 +39,28 @@ type DbTab =
     }
   | { kind: "console" | "er" | "search"; id: string; label: string };
 
+/** Open-tab chip: ClickUp's underlined text tab replaces the boxed editor tab. */
+function dbTabStyle(isClickUp: boolean, active: boolean) {
+  if (!isClickUp) return [styles.tab, active && styles.tabActive];
+  return [styles.tabClickUp, active ? clickUpTabStyles.tabActive : clickUpTabStyles.tab];
+}
+
+function dbTabLabelStyle(isClickUp: boolean, active: boolean) {
+  if (!isClickUp) return [styles.tabLabel, active && styles.tabLabelActive];
+  return [styles.tabLabelClickUp, active ? clickUpTabStyles.textActive : clickUpTabStyles.text];
+}
+
+/** Data / Structure switch: pill segments in classic, underlined text tabs in ClickUp. */
+function switchBtnStyle(isClickUp: boolean, active: boolean) {
+  if (!isClickUp) return [styles.switchBtn, active && styles.switchBtnActive];
+  return active ? clickUpTabStyles.tabActive : clickUpTabStyles.tab;
+}
+
+function switchTextStyle(isClickUp: boolean, active: boolean) {
+  if (!isClickUp) return [styles.switchText, active && styles.switchTextActive];
+  return active ? clickUpTabStyles.textActive : clickUpTabStyles.text;
+}
+
 /** One tab chip; own component so the press/close handlers stay stable. */
 function DbTabChip({
   tab,
@@ -51,9 +75,10 @@ function DbTabChip({
 }) {
   const activate = useCallback(() => onActivate(tab), [onActivate, tab]);
   const close = useCallback(() => onClose(tab.id), [onClose, tab.id]);
+  const isClickUp = useIsClickUpTheme();
   return (
-    <Pressable style={[styles.tab, active && styles.tabActive]} onPress={activate}>
-      <Text style={[styles.tabLabel, active && styles.tabLabelActive]} numberOfLines={1}>
+    <Pressable style={dbTabStyle(isClickUp, active)} onPress={activate}>
+      <Text style={dbTabLabelStyle(isClickUp, active)} numberOfLines={1}>
         {tab.label}
       </Text>
       <Pressable onPress={close} hitSlop={6} style={styles.tabClose} accessibilityLabel="Close tab">
@@ -75,11 +100,12 @@ function DbTabStrip({
   onActivate: (tab: DbTab) => void;
   onClose: (id: string) => void;
 }) {
+  const isClickUp = useIsClickUpTheme();
   return (
     <ScrollView
       horizontal
-      style={styles.tabBar}
-      contentContainerStyle={styles.tabBarContent}
+      style={isClickUp ? styles.tabBarClickUp : styles.tabBar}
+      contentContainerStyle={isClickUp ? styles.tabBarContentClickUp : styles.tabBarContent}
       showsHorizontalScrollIndicator={false}
     >
       {tabs.map((t) => (
@@ -119,6 +145,7 @@ export function DatabaseBrowseScreen({
   const insets = useSafeAreaInsets();
   const isCompact = useIsCompactFormFactor();
   const router = useRouter();
+  const isClickUp = useIsClickUpTheme();
 
   const selectedObject = useDatabaseNavStore((s) => s.selectedObject);
   const showingConsole = useDatabaseNavStore((s) => s.showingConsole);
@@ -362,24 +389,18 @@ export function DatabaseBrowseScreen({
       );
     content = (
       <View style={styles.leftColumn}>
-        <View style={styles.viewSwitch}>
+        <View style={isClickUp ? styles.viewSwitchClickUp : styles.viewSwitch}>
           <Pressable
-            style={[styles.switchBtn, objectView === "data" && styles.switchBtnActive]}
+            style={switchBtnStyle(isClickUp, objectView === "data")}
             onPress={showDataView}
           >
-            <Text style={[styles.switchText, objectView === "data" && styles.switchTextActive]}>
-              Data
-            </Text>
+            <Text style={switchTextStyle(isClickUp, objectView === "data")}>Data</Text>
           </Pressable>
           <Pressable
-            style={[styles.switchBtn, objectView === "structure" && styles.switchBtnActive]}
+            style={switchBtnStyle(isClickUp, objectView === "structure")}
             onPress={showStructureView}
           >
-            <Text
-              style={[styles.switchText, objectView === "structure" && styles.switchTextActive]}
-            >
-              Structure
-            </Text>
+            <Text style={switchTextStyle(isClickUp, objectView === "structure")}>Structure</Text>
           </Pressable>
         </View>
         {inner}
@@ -446,9 +467,10 @@ export function DatabaseBrowseScreen({
 }
 
 function Meta({ label, value }: { label: string; value: string }) {
+  const isClickUp = useIsClickUpTheme();
   return (
     <View style={styles.meta}>
-      <Text style={styles.metaLabel}>{label}</Text>
+      <Text style={[styles.metaLabel, isClickUp && clickUpListStyles.columnHeader]}>{label}</Text>
       <Text style={styles.metaValue} numberOfLines={1}>
         {value}
       </Text>
@@ -485,6 +507,28 @@ const styles = StyleSheet.create((theme: Theme) => ({
   },
   tabBarContent: {
     alignItems: "stretch",
+  },
+  tabBarClickUp: {
+    flexGrow: 0,
+    flexShrink: 0,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.chrome.cardBorder,
+    backgroundColor: theme.chrome.cardBackground,
+  },
+  tabBarContentClickUp: {
+    alignItems: "flex-end",
+    gap: theme.spacing[4],
+    paddingHorizontal: theme.spacing[4],
+    paddingTop: theme.spacing[1.5],
+  },
+  tabClickUp: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[1.5],
+    maxWidth: 220,
+  },
+  tabLabelClickUp: {
+    flexShrink: 1,
   },
   tab: {
     flexDirection: "row",
@@ -540,6 +584,15 @@ const styles = StyleSheet.create((theme: Theme) => ({
     paddingVertical: theme.spacing[1.5],
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,
+  },
+  viewSwitchClickUp: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: theme.spacing[6],
+    paddingHorizontal: theme.spacing[4],
+    paddingTop: theme.spacing[1.5],
+    borderBottomWidth: 1,
+    borderBottomColor: theme.chrome.cardBorder,
   },
   switchBtn: {
     paddingHorizontal: theme.spacing[3],

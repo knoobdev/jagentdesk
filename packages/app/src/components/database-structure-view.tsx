@@ -11,6 +11,8 @@ import { useDatabaseViewStore } from "@/stores/database-view-store";
 import { buildCreateTableDdl } from "@/utils/sql-ddl";
 import { Skeleton, useSkeletonPulse } from "@/components/ui/skeleton";
 import type { Theme } from "@/styles/theme";
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { clickUpListStyles, clickUpTabStyles } from "@/components/clickup-shell/list-styles";
 
 type Tab = "columns" | "ddl" | "relationships";
 
@@ -18,6 +20,43 @@ function keyLabel(c: DbColumn): string {
   if (c.isPrimaryKey) return "PK";
   if (c.isForeignKey) return "FK";
   return "";
+}
+
+/** Columns / DDL / Relationships: pill tabs in classic, underlined text tabs in ClickUp. */
+function tabStyle(isClickUp: boolean, active: boolean) {
+  if (!isClickUp) return [styles.tab, active && styles.tabActive];
+  return active ? clickUpTabStyles.tabActive : clickUpTabStyles.tab;
+}
+
+function tabTextStyle(isClickUp: boolean, active: boolean) {
+  if (!isClickUp) return [styles.tabText, active && styles.tabTextActive];
+  return active ? clickUpTabStyles.textActive : clickUpTabStyles.text;
+}
+
+/** ClickUp rows are separated by a hairline only; classic keeps the zebra stripe. */
+function gridRowStyle(isClickUp: boolean, alt: boolean) {
+  if (!isClickUp) return [styles.gridRow, alt && styles.gridRowAlt];
+  return [styles.gridRow, clickUpListStyles.row];
+}
+
+function relHeaderStyle(isClickUp: boolean) {
+  return isClickUp ? [styles.relHeader, styles.relHeaderClickUp] : styles.relHeader;
+}
+
+function GridHeader({ isClickUp }: { isClickUp: boolean }) {
+  const head = isClickUp
+    ? [styles.gridHeadText, clickUpListStyles.columnHeader]
+    : styles.gridHeadText;
+  return (
+    <View style={isClickUp ? styles.gridHeaderClickUp : styles.gridHeader}>
+      <Text style={[head, styles.cIdx]}>#</Text>
+      <Text style={[head, styles.cName]}>Name</Text>
+      <Text style={[head, styles.cType]}>Type</Text>
+      <Text style={[head, styles.cNull]}>Nullable</Text>
+      <Text style={[head, styles.cKey]}>Key</Text>
+      <Text style={[head, styles.cDefault]}>Default</Text>
+    </View>
+  );
 }
 
 /**
@@ -39,6 +78,7 @@ export function DatabaseStructureView({
   table: string;
 }) {
   const client = useHostRuntimeClient(serverId);
+  const isClickUp = useIsClickUpTheme();
   const listRefreshKey = useDatabaseViewStore((s) => s.listRefreshKey);
   const [columns, setColumns] = useState<DbColumn[]>([]);
   const [fks, setFks] = useState<DbForeignKey[]>([]);
@@ -90,16 +130,9 @@ export function DatabaseStructureView({
       <ScrollView style={styles.gridV}>
         <ScrollView horizontal contentContainerStyle={styles.gridVContent}>
           <View>
-            <View style={styles.gridHeader}>
-              <Text style={[styles.gridHeadText, styles.cIdx]}>#</Text>
-              <Text style={[styles.gridHeadText, styles.cName]}>Name</Text>
-              <Text style={[styles.gridHeadText, styles.cType]}>Type</Text>
-              <Text style={[styles.gridHeadText, styles.cNull]}>Nullable</Text>
-              <Text style={[styles.gridHeadText, styles.cKey]}>Key</Text>
-              <Text style={[styles.gridHeadText, styles.cDefault]}>Default</Text>
-            </View>
+            <GridHeader isClickUp={isClickUp} />
             {columns.map((c, i) => (
-              <View key={c.name} style={[styles.gridRow, i % 2 === 1 && styles.gridRowAlt]}>
+              <View key={c.name} style={gridRowStyle(isClickUp, i % 2 === 1)}>
                 <Text style={[styles.cIdx, styles.gridMuted]}>{i + 1}</Text>
                 <Text style={[styles.cName, styles.gridName]} numberOfLines={1}>
                   {c.name}
@@ -129,7 +162,7 @@ export function DatabaseStructureView({
   } else {
     body = (
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
-        <Text style={styles.relHeader}>References (outgoing)</Text>
+        <Text style={relHeaderStyle(isClickUp)}>References (outgoing)</Text>
         {outgoing.length === 0 ? (
           <Text style={styles.relEmpty}>None.</Text>
         ) : (
@@ -139,7 +172,7 @@ export function DatabaseStructureView({
             </Text>
           ))
         )}
-        <Text style={styles.relHeader}>Referenced by (incoming)</Text>
+        <Text style={relHeaderStyle(isClickUp)}>Referenced by (incoming)</Text>
         {incoming.length === 0 ? (
           <Text style={styles.relEmpty}>None.</Text>
         ) : (
@@ -155,23 +188,15 @@ export function DatabaseStructureView({
 
   return (
     <View style={styles.container}>
-      <View style={styles.tabs}>
-        <Pressable
-          style={[styles.tab, tab === "columns" && styles.tabActive]}
-          onPress={showColumns}
-        >
-          <Text style={[styles.tabText, tab === "columns" && styles.tabTextActive]}>Columns</Text>
+      <View style={isClickUp ? styles.tabsClickUp : styles.tabs}>
+        <Pressable style={tabStyle(isClickUp, tab === "columns")} onPress={showColumns}>
+          <Text style={tabTextStyle(isClickUp, tab === "columns")}>Columns</Text>
         </Pressable>
-        <Pressable style={[styles.tab, tab === "ddl" && styles.tabActive]} onPress={showDdl}>
-          <Text style={[styles.tabText, tab === "ddl" && styles.tabTextActive]}>DDL</Text>
+        <Pressable style={tabStyle(isClickUp, tab === "ddl")} onPress={showDdl}>
+          <Text style={tabTextStyle(isClickUp, tab === "ddl")}>DDL</Text>
         </Pressable>
-        <Pressable
-          style={[styles.tab, tab === "relationships" && styles.tabActive]}
-          onPress={showRel}
-        >
-          <Text style={[styles.tabText, tab === "relationships" && styles.tabTextActive]}>
-            Relationships
-          </Text>
+        <Pressable style={tabStyle(isClickUp, tab === "relationships")} onPress={showRel}>
+          <Text style={tabTextStyle(isClickUp, tab === "relationships")}>Relationships</Text>
         </Pressable>
       </View>
       {body}
@@ -180,23 +205,18 @@ export function DatabaseStructureView({
 }
 
 const SKELETON_ROW_KEYS = Array.from({ length: 8 }, (_, i) => `structure-skel-${i}`);
+const SKELETON_LINE_WIDTHS = ["90%", "75%", "60%"] as const;
 
 /** Loading placeholder that mirrors the eventual tab layout (grid rows vs. text). */
 function StructureSkeleton({ tab }: { tab: Tab }) {
   const pulse = useSkeletonPulse();
+  const isClickUp = useIsClickUpTheme();
   if (tab === "columns") {
     return (
       <ScrollView style={styles.gridV}>
-        <View style={styles.gridHeader}>
-          <Text style={[styles.gridHeadText, styles.cIdx]}>#</Text>
-          <Text style={[styles.gridHeadText, styles.cName]}>Name</Text>
-          <Text style={[styles.gridHeadText, styles.cType]}>Type</Text>
-          <Text style={[styles.gridHeadText, styles.cNull]}>Nullable</Text>
-          <Text style={[styles.gridHeadText, styles.cKey]}>Key</Text>
-          <Text style={[styles.gridHeadText, styles.cDefault]}>Default</Text>
-        </View>
+        <GridHeader isClickUp={isClickUp} />
         {SKELETON_ROW_KEYS.map((key) => (
-          <View key={key} style={styles.gridRow}>
+          <View key={key} style={gridRowStyle(isClickUp, false)}>
             <View style={[styles.cIdx, styles.skelCell]}>
               <Skeleton pulse={pulse} width={18} height={12} />
             </View>
@@ -226,7 +246,7 @@ function StructureSkeleton({ tab }: { tab: Tab }) {
         <View key={key} style={styles.skelLineRow}>
           <Skeleton
             pulse={pulse}
-            width={i % 3 === 0 ? "90%" : i % 3 === 1 ? "75%" : "60%"}
+            width={SKELETON_LINE_WIDTHS[i % SKELETON_LINE_WIDTHS.length]}
             height={14}
           />
         </View>
@@ -247,6 +267,15 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,
   },
+  tabsClickUp: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: theme.spacing[6],
+    paddingHorizontal: theme.spacing[4],
+    paddingTop: theme.spacing[1.5],
+    borderBottomWidth: 1,
+    borderBottomColor: theme.chrome.cardBorder,
+  },
   tab: {
     paddingHorizontal: theme.spacing[2],
     paddingVertical: theme.spacing[1],
@@ -265,6 +294,12 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,
     backgroundColor: theme.colors.surface1,
+  },
+  gridHeaderClickUp: {
+    flexDirection: "row",
+    paddingVertical: theme.spacing[1.5],
+    borderBottomWidth: 1,
+    borderBottomColor: theme.chrome.cardBorder,
   },
   gridHeadText: {
     fontSize: theme.fontSize.xs,
@@ -326,6 +361,12 @@ const styles = StyleSheet.create((theme: Theme) => ({
     textTransform: "uppercase" as const,
     letterSpacing: 0.5,
     marginTop: theme.spacing[2],
+  },
+  relHeaderClickUp: {
+    fontSize: theme.fontSize.sm,
+    color: theme.chrome.sectionTitleColor,
+    textTransform: "none" as const,
+    letterSpacing: 0,
   },
   relRow: {
     fontSize: theme.fontSize.sm,

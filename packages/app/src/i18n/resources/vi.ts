@@ -289,10 +289,17 @@ export const vi = {
           claude: "Claude",
           ghostty: "Ghostty",
           pureBlack: "Đen tuyền",
+          clickup: "ClickUp",
+          clickupDark: "ClickUp Dark",
           auto: "Theo hệ thống",
         },
       },
     },
+  },
+  clickupShell: {
+    search: "Tìm kiếm",
+    newWorkspace: "Mới",
+    workspaces: "Workspace",
   },
   marketplace: {
     title: "Chợ plugin",
@@ -302,6 +309,7 @@ export const vi = {
     browseButton: "Mở chợ plugin",
     tabs: {
       browse: "Khám phá",
+      themes: "Theme",
       installed: "Đã cài",
       installedEmpty: "Chưa cài plugin nào.",
       loadMore: "Xem thêm",
@@ -365,6 +373,13 @@ export const vi = {
     themes: {
       title: "Theme",
       subtitle: "Bảng màu và gói giao diện từ cộng đồng.",
+      searchPlaceholder: "Tìm theme",
+      count: "{{count}} theme",
+      noPreview: "Không có bản xem trước",
+      variants: "{{count}} biến thể",
+      empty: "Không có theme nào khớp bộ lọc.",
+      filter: { all: "Tất cả" },
+      appearance: { dark: "Tối", light: "Sáng" },
     },
     states: {
       loading: "Đang tải chợ plugin…",

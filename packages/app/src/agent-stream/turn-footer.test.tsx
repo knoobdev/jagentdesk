@@ -29,6 +29,10 @@ vi.mock("react-native-unistyles", () => ({
   withUnistyles: <T,>(component: T) => component,
 }));
 
+vi.mock("@/components/clickup-shell/use-clickup-chrome", () => ({
+  useIsClickUpTheme: () => false,
+}));
+
 vi.mock("@/components/message", () => ({
   AssistantTurnFooter: () => null,
   LiveElapsed: () => <span data-testid="running-turn-timestamp" />,

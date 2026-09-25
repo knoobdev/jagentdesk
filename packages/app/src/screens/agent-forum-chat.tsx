@@ -10,6 +10,7 @@ import {
   View,
 } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import type { ForumChatMessage, ForumRole, StoredForumTopic } from "@jagentdesk/protocol/messages";
 
@@ -127,6 +128,7 @@ const ReactionChips = memo(function ReactionChips({
   message: ForumChatMessage;
   onReact: (messageId: string, emoji: string) => void;
 }): ReactElement | null {
+  const styles = chatStyles(useIsClickUpTheme());
   if (message.reactions.length === 0) return null;
   return (
     <View style={styles.reactionRow}>
@@ -154,6 +156,7 @@ const ReactionChip = memo(function ReactionChip({
   count: number;
   onReact: (messageId: string, emoji: string) => void;
 }): ReactElement {
+  const styles = chatStyles(useIsClickUpTheme());
   const press = useCallback(() => onReact(messageId, emoji), [messageId, emoji, onReact]);
   return (
     <Pressable onPress={press} style={styles.reactionChip}>
@@ -170,6 +173,7 @@ function previewOf(message: ForumChatMessage): string {
 }
 
 const ChatImage = memo(function ChatImage({ uri }: { uri: string }): ReactElement {
+  const styles = chatStyles(useIsClickUpTheme());
   const source = useMemo(() => ({ uri }), [uri]);
   return <Image source={source} style={styles.bubbleImage} resizeMode="cover" />;
 });
@@ -187,6 +191,7 @@ const ChatBubble = memo(function ChatBubble({
   onReact: (messageId: string, emoji: string) => void;
   onPickReaction: (messageId: string) => void;
 }): ReactElement {
+  const styles = chatStyles(useIsClickUpTheme());
   const mine = message.authorAgentId === "user";
   const color = roleColor(message.role);
   const openReactions = useCallback(() => onPickReaction(message.id), [message.id, onPickReaction]);
@@ -265,6 +270,7 @@ const RoomChips = memo(function RoomChips({
   onSelect: (roomId: string) => void;
   onNewRoom: () => void;
 }): ReactElement {
+  const styles = chatStyles(useIsClickUpTheme());
   return (
     <ScrollView
       horizontal
@@ -298,6 +304,7 @@ const RoomChip = memo(function RoomChip({
   active: boolean;
   onSelect: (roomId: string) => void;
 }): ReactElement {
+  const styles = chatStyles(useIsClickUpTheme());
   const press = useCallback(() => onSelect(id), [id, onSelect]);
   return (
     <Pressable onPress={press} style={[styles.roomChip, active ? styles.roomChipOn : null]}>
@@ -311,6 +318,7 @@ const StickerPicker = memo(function StickerPicker({
 }: {
   onPick: (id: string) => void;
 }): ReactElement {
+  const styles = chatStyles(useIsClickUpTheme());
   return (
     <View style={styles.pickerWrap}>
       {STICKER_IDS.map((id) => (
@@ -327,6 +335,7 @@ const StickerButton = memo(function StickerButton({
   id: string;
   onPick: (id: string) => void;
 }): ReactElement {
+  const styles = chatStyles(useIsClickUpTheme());
   const press = useCallback(() => onPick(id), [id, onPick]);
   return (
     <Pressable onPress={press} style={styles.pickerCell}>
@@ -340,6 +349,7 @@ const EmojiRow = memo(function EmojiRow({
 }: {
   onPick: (emoji: string) => void;
 }): ReactElement {
+  const styles = chatStyles(useIsClickUpTheme());
   return (
     <View style={styles.emojiRow}>
       {QUICK_EMOJIS.map((e) => (
@@ -356,6 +366,7 @@ const EmojiButton = memo(function EmojiButton({
   emoji: string;
   onPick: (emoji: string) => void;
 }): ReactElement {
+  const styles = chatStyles(useIsClickUpTheme());
   const press = useCallback(() => onPick(emoji), [emoji, onPick]);
   return (
     <Pressable onPress={press} style={styles.emojiBtn}>
@@ -372,6 +383,7 @@ const ReactionPalette = memo(function ReactionPalette({
   onReact: (emoji: string) => void;
   onClose: () => void;
 }): ReactElement {
+  const styles = chatStyles(useIsClickUpTheme());
   return (
     <View style={styles.palette}>
       {REACT_EMOJIS.map((e) => (
@@ -393,6 +405,7 @@ export const ChatTab = memo(function ChatTab({
   topic: StoredForumTopic;
   client: DaemonClient | null;
 }): ReactElement {
+  const styles = chatStyles(useIsClickUpTheme());
   const rooms = topic.chatRooms;
   // Open on the room with the freshest banter (so you land where the action is), not always #general.
   const [selectedRoom, setSelectedRoom] = useState<string>(() => {
@@ -572,7 +585,7 @@ export const ChatTab = memo(function ChatTab({
   );
 });
 
-const styles = StyleSheet.create(() => ({
+const classicStyles = StyleSheet.create(() => ({
   root: { flex: 1, backgroundColor: CH.bg, alignItems: "center" },
   // Constrain the conversation to a centered column so it doesn't stretch full-width on desktop, but
   // keep the same background as the rest of the app (no distinct wallpaper / bordered box).
@@ -744,3 +757,192 @@ const styles = StyleSheet.create(() => ({
   sendGlyph: { fontSize: 16, color: CH.faint, fontWeight: "700" },
   sendGlyphOn: { color: "#04140a" },
 }));
+
+// ClickUp variant of the chat sheet: same keys, drawn from the theme (white canvas, gray incoming
+// bubbles, lavender outgoing bubbles and chips, violet accent) instead of the fixed dark palette.
+const clickUpStyles = StyleSheet.create((theme) => ({
+  root: { flex: 1, backgroundColor: theme.colors.surface0, alignItems: "center" },
+  // Constrain the conversation to a centered column so it doesn't stretch full-width on desktop, but
+  // keep the same background as the rest of the app (no distinct wallpaper / bordered box).
+  container: { flex: 1, width: "100%", maxWidth: 900, alignSelf: "center" },
+  roomHeader: { paddingTop: 6 },
+  roomBar: { gap: 6, paddingHorizontal: 20, paddingVertical: 6, alignItems: "center" },
+  roomChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: theme.borderRadius.full,
+    borderWidth: 1,
+    borderColor: theme.chrome.outlineBorder,
+    backgroundColor: theme.chrome.outlineBackground,
+  },
+  roomChipOn: {
+    borderColor: theme.chrome.chipActiveForeground,
+    backgroundColor: theme.chrome.chipActiveBackground,
+  },
+  roomChipText: { color: theme.colors.foreground, fontSize: 12, fontWeight: "500" },
+  roomChipTextOn: { color: theme.chrome.chipActiveForeground },
+  roomNew: { paddingHorizontal: 10, paddingVertical: 5 },
+  roomNewText: { color: theme.colors.foregroundMuted, fontSize: 12 },
+  blurb: {
+    color: theme.colors.foregroundExtraMuted,
+    fontSize: 11,
+    paddingHorizontal: 20,
+    paddingBottom: 6,
+  },
+  list: { flex: 1 },
+  listContent: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 8,
+    gap: 2,
+    flexGrow: 1,
+    justifyContent: "flex-end",
+  },
+  emptyWrap: {
+    alignItems: "center",
+    justifyContent: "center",
+    flex: 1,
+    gap: 8,
+    paddingVertical: 40,
+  },
+  emptyGlyph: { fontSize: 40, opacity: 0.5 },
+  empty: { color: theme.colors.foregroundMuted, fontSize: 13, textAlign: "center" },
+  row: { flexDirection: "row", gap: 6, maxWidth: "100%", alignItems: "flex-end" },
+  rowIn: { justifyContent: "flex-start" },
+  rowMine: { justifyContent: "flex-end" },
+  rowLead: { marginTop: 8 },
+  rowTight: { marginTop: 1 },
+  avatarSlot: { width: 30, alignItems: "center", justifyContent: "flex-end" },
+  avatar: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarText: { fontSize: 12, fontWeight: "700", color: "#ffffff" },
+  bubbleCol: { maxWidth: "74%", alignItems: "flex-start", gap: 2 },
+  bubbleColMine: { alignItems: "flex-end" },
+  author: { fontSize: 12, fontWeight: "700", marginBottom: 2 },
+  bubble: {
+    borderRadius: 14,
+    paddingHorizontal: 11,
+    paddingTop: 6,
+    paddingBottom: 5,
+  },
+  bubbleIn: { backgroundColor: theme.colors.surface2, borderBottomLeftRadius: 5 },
+  bubbleOut: { backgroundColor: theme.chrome.chipActiveBackground, borderBottomRightRadius: 5 },
+  bubbleInLead: { borderTopLeftRadius: 5 },
+  bubbleOutLead: { borderTopRightRadius: 5 },
+  reply: {
+    borderLeftWidth: 2,
+    borderLeftColor: theme.colors.accent,
+    paddingLeft: 7,
+    marginBottom: 4,
+    opacity: 0.9,
+  },
+  replyAuthor: { color: theme.colors.accent, fontSize: 11.5, fontWeight: "700" },
+  replyText: { color: theme.colors.foregroundMuted, fontSize: 12 },
+  bubbleText: { color: theme.colors.foreground, fontSize: 14.5, lineHeight: 20 },
+  bubbleImages: { flexDirection: "row", flexWrap: "wrap", gap: 5, marginTop: 6 },
+  bubbleImage: { width: 128, height: 90, borderRadius: 8, backgroundColor: theme.colors.surface2 },
+  time: { color: theme.colors.foregroundMuted, fontSize: 10, alignSelf: "flex-end", marginTop: 1 },
+  timeOut: { color: theme.colors.foregroundMuted },
+  stickerWrap: { paddingVertical: 2 },
+  reactionRow: { flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: 2, marginBottom: 2 },
+  reactionChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: theme.chrome.chipActiveBackground,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: theme.chrome.outlineBorder,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  reactionEmoji: { fontSize: 12 },
+  reactionCount: { color: theme.chrome.chipActiveForeground, fontSize: 11, fontWeight: "700" },
+  palette: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    padding: 8,
+    backgroundColor: theme.chrome.cardBackground,
+    borderTopWidth: 1,
+    borderColor: theme.chrome.cardBorder,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  paletteClose: { color: theme.colors.foregroundMuted, fontSize: 14 },
+  pickerWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    padding: 10,
+    backgroundColor: theme.chrome.cardBackground,
+    borderTopWidth: 1,
+    borderColor: theme.chrome.cardBorder,
+    justifyContent: "center",
+  },
+  pickerCell: {
+    width: 46,
+    height: 46,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 12,
+    backgroundColor: theme.colors.surface2,
+  },
+  pickerGlyph: { fontSize: 28 },
+  emojiRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: theme.chrome.cardBackground,
+    borderTopWidth: 1,
+    borderColor: theme.chrome.cardBorder,
+    justifyContent: "center",
+  },
+  emojiBtn: { padding: 4 },
+  emojiGlyph: { fontSize: 24 },
+  composer: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderColor: theme.chrome.cardBorder,
+    backgroundColor: theme.chrome.cardBackground,
+  },
+  iconBtn: { paddingHorizontal: 4, paddingVertical: 8 },
+  icon: { fontSize: 22 },
+  input: {
+    flex: 1,
+    color: theme.colors.foreground,
+    fontSize: 14.5,
+    maxHeight: 110,
+    minHeight: 40,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    backgroundColor: theme.colors.surface1,
+    borderRadius: 20,
+  },
+  sendBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: theme.colors.surface2,
+  },
+  sendBtnOn: { backgroundColor: theme.colors.accent },
+  sendGlyph: { fontSize: 16, color: theme.colors.foregroundExtraMuted, fontWeight: "700" },
+  sendGlyphOn: { color: "#ffffff" },
+}));
+
+function chatStyles(isClickUp: boolean) {
+  return isClickUp ? clickUpStyles : classicStyles;
+}

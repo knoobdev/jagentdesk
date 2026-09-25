@@ -1,3 +1,5 @@
+import { createDockWorkspace } from "@/components/dock-workspace";
+import { CLUSTER_AGENT_LABEL } from "@/utils/dock-agents";
 import { useMemo } from "react";
 import { Keyboard, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
@@ -14,8 +16,6 @@ import type { ClusterComposerResource } from "@/components/cluster-composer";
 import type { AgentSnapshotPayload } from "@jagentdesk/protocol/messages";
 import type { CreateAgentRequestOptions } from "@jagentdesk/client/internal/daemon-client";
 import type { Theme } from "@/styles/theme";
-
-const CLUSTER_AGENT_LABEL = "jagentdesk.cluster.id";
 
 function resolveModeId(modeOptionIds: readonly string[], selectedMode: string): string | undefined {
   if (modeOptionIds.length === 0) return undefined;
@@ -149,6 +149,15 @@ export function ClusterDraftChat({
         images: imagesData,
         attachments: Array.isArray(attachments) ? attachments : undefined,
       });
+      // Its own workspace in the project, so the chat is listed under the project.
+      const home = await createDockWorkspace({
+        client,
+        serverId,
+        cwd: options.cwd ?? submitCwd,
+        title: options.title ?? undefined,
+      });
+      options.workspaceId = home.workspaceId;
+      options.cwd = home.cwd;
       const result = await client.createAgent(options);
       return { agentId: result.id, result };
     },

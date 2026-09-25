@@ -493,6 +493,8 @@ export function loadConfig(
     enableTerminalAgentHooks: persisted.daemon?.enableTerminalAgentHooks ?? false,
     appendSystemPrompt,
     operatorContext,
+    pluginsEnabled: persisted.pluginsEnabled,
+    plugins: persisted.plugins,
     terminalProfiles,
     orchestration,
     mcpDebug: env.MCP_DEBUG === "1",

@@ -1,0 +1,29 @@
+{
+  "name": "@jagentdesk/plugin-example-modal-ui",
+  "version": "0.1.1",
+  "description": "Interactive JAgentDesk plugin example for modal forms, scrolling, and clipboard actions",
+  "homepage": "https://jagentdesk.local/docs/plugins",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jagentdesk/jagentdesk.git",
+    "directory": "plugin-examples/modal-ui"
+  },
+  "files": [
+    "jagentdesk-plugin.json",
+    "index.client.tsx",
+    "client/",
+    "screenshots/",
+    "LICENSE"
+  ],
+  "type": "module",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
+  "peerDependencies": {
+    "@jagentdesk/plugin": ">=0.8.0",
+    "react": ">=19",
+    "react-native": ">=0.81"
+  }
+}

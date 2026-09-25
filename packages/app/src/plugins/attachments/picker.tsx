@@ -3,7 +3,7 @@ import { View } from "react-native";
 import { withUnistyles } from "react-native-unistyles";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import type { PluginAttachmentItem, PluginAttachmentSourceContribution } from "@jagentdesk/plugin";
-import { searchPluginAttachments } from "@jagentdesk/plugin/host";
+import { searchPluginAttachments } from "@jagentdesk/plugin/client/host";
 import type { LucideIcon } from "lucide-react-native";
 import type { UserComposerAttachment } from "@/attachments/types";
 import type { AttachmentMenuItem } from "@/composer/input/input";
@@ -86,27 +86,30 @@ export function usePluginAttachmentPicker(
   const [query, setQuery] = useState("");
   const active = sources.find((candidate) => candidate.key === activeKey) ?? null;
   const trimmedQuery = query.trim();
-  const search = useFetchQuery({
-    queryKey: [
-      "plugin-attachment-search",
-      input.serverId,
-      active?.plugin.id ?? "",
-      active?.source.id ?? "",
-      trimmedQuery,
-    ],
-    queryFn: async () => {
-      if (!input.client || !active) throw new Error("Plugin host is offline");
-      const client = input.client;
-      return searchPluginAttachments(
-        active.source,
-        (method, rpcInput) => client.invokePluginRpc(active.plugin.id, method, rpcInput),
+  const search = useFetchQuery(
+    {
+      queryKey: [
+        "plugin-attachment-search",
+        input.serverId,
+        active?.plugin.id ?? "",
+        active?.source.id ?? "",
         trimmedQuery,
-      );
+      ],
+      queryFn: async () => {
+        if (!input.client || !active) throw new Error("Plugin host is offline");
+        const client = input.client;
+        return searchPluginAttachments(
+          active.source,
+          (method, rpcInput) => client.invokePluginRpc(active.plugin.id, method, rpcInput),
+          trimmedQuery,
+        );
+      },
+      enabled: input.connected && active !== null,
+      dataShape: "list",
+      staleTimeMs: SEARCH_STALE_TIME_MS,
     },
-    enabled: input.connected && active !== null,
-    dataShape: "list",
-    staleTimeMs: SEARCH_STALE_TIME_MS,
-  });
+    active?.plugin.queryClient,
+  );
   const items = search.error
     ? EMPTY_ATTACHMENT_ITEMS
     : (search.data?.items ?? EMPTY_ATTACHMENT_ITEMS);

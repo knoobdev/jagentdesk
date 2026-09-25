@@ -417,6 +417,8 @@ export interface JAgentDeskDaemonConfig {
   mcpEnabled?: boolean;
   mcpInjectIntoAgents?: boolean;
   browserToolsEnabled?: boolean;
+  pluginsEnabled?: boolean;
+  plugins?: MutableDaemonConfig["plugins"];
   // Autonomous run (spec §20). Default OFF; only exposes the autorun.* RPC surface +
   // `features.autorun` capability when explicitly enabled in persisted config.
   autorunEnabled?: boolean;
@@ -576,6 +578,8 @@ function createInitialMutableDaemonConfig(config: JAgentDeskDaemonConfig): Mutab
   if (config.terminalProfiles !== undefined) {
     initialConfig.terminalProfiles = config.terminalProfiles;
   }
+  if (config.pluginsEnabled !== undefined) initialConfig.pluginsEnabled = config.pluginsEnabled;
+  if (config.plugins !== undefined) initialConfig.plugins = config.plugins;
 
   return initialConfig;
 }
@@ -607,6 +611,7 @@ export async function createJAgentDeskDaemon(
   // flow (a checked-out Paseo plugin is auto-rebranded before it is compiled).
   const pluginRuntime = new PluginService(logger, daemonConfigStore, daemonVersion, {
     managedSources: new ManagedPluginSources(config.jagentdeskHome),
+    settingsDirectory: path.join(config.jagentdeskHome, "plugin-settings"),
   });
 
   const serverId = getOrCreateServerId(config.jagentdeskHome, { logger });

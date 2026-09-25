@@ -1,3 +1,5 @@
+import { clickUpListStyles } from "@/components/clickup-shell/list-styles";
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
 import {
   View,
   Text,
@@ -247,15 +249,17 @@ function SessionRow({
   const ProviderIcon = getProviderIcon(agent.provider);
   const pendingPermissionCount = agent.pendingPermissionCount ?? 0;
   const orchestrationRoleBadge = orchestrationRoleBadgeLabel(agent.labels);
+  const isClickUp = useIsClickUpTheme();
 
   const pressableStyle = useCallback(
     ({ pressed, hovered = false }: PressableStateCallbackType & { hovered?: boolean }) => [
       styles.row,
+      isClickUp && clickUpListStyles.row,
       isSelected && styles.rowSelected,
       Boolean(hovered) && styles.rowHovered,
       pressed && styles.rowPressed,
     ],
-    [isSelected],
+    [isClickUp, isSelected],
   );
 
   const handlePress = useCallback(() => onPress(agent), [onPress, agent]);
@@ -474,9 +478,21 @@ export function AgentList({
     return result;
   }, [agents]);
 
+  const isClickUp = useIsClickUpTheme();
   const renderItem: ListRenderItem<FlatListItem> = useCallback(
     ({ item }) => {
       if (item.type === "header") {
+        if (isClickUp) {
+          return (
+            <View style={clickUpListStyles.groupRow}>
+              <View style={clickUpListStyles.groupPill}>
+                <Text style={clickUpListStyles.groupPillText}>
+                  {formatDateSectionLabel(t, item.section)}
+                </Text>
+              </View>
+            </View>
+          );
+        }
         return (
           <View style={styles.sectionHeading}>
             <Text style={styles.sectionTitle}>{formatDateSectionLabel(t, item.section)}</Text>
@@ -498,6 +514,7 @@ export function AgentList({
     [
       handleAgentLongPress,
       handleAgentPress,
+      isClickUp,
       isMobile,
       selectedAgentId,
       showAttentionIndicator,

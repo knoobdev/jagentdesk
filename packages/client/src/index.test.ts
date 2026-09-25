@@ -228,6 +228,7 @@ test("createJAgentDeskApi borrows daemon capabilities without exposing connectio
   expect(Object.keys(jagentdesk).sort()).toEqual([
     "agents",
     "config",
+    "dispose",
     "projects",
     "providers",
     "workspaces",

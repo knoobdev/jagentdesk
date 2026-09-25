@@ -397,10 +397,11 @@ const styles = StyleSheet.create((theme) => ({
   errorsBannerWrap: {
     paddingHorizontal: { xs: theme.spacing[3], md: theme.spacing[6] },
   },
+  // chrome card tokens: classic themes carry border / lg, ClickUp #ececec / 10.
   errorsBanner: {
     borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: theme.borderRadius.lg,
+    borderColor: theme.chrome.cardBorder,
+    borderRadius: theme.chrome.cardRadius,
     padding: theme.spacing[3],
     gap: theme.spacing[1],
   },

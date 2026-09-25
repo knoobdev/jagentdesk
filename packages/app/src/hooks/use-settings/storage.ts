@@ -2,7 +2,12 @@ import { isSyntaxThemeId, type SyntaxThemeId } from "@jagentdesk/highlight";
 import type { QueryClient } from "@tanstack/react-query";
 import type { DesktopSettings } from "@/desktop/settings/desktop-settings";
 import { parseAppLanguage, type AppLanguage } from "@/i18n/locales";
-import { THEME_TO_UNISTYLES, type ThemeName } from "@/styles/theme";
+import {
+  DEFAULT_THEME,
+  PLUGIN_THEME_PREFERENCE,
+  THEME_TO_UNISTYLES,
+  type ThemeName,
+} from "@/styles/theme";
 
 export const APP_SETTINGS_KEY = "@jagentdesk:app-settings";
 export const APP_SETTINGS_QUERY_KEY = ["app-settings"];
@@ -15,7 +20,15 @@ export type ServiceUrlBehavior = "ask" | "in-app" | "external";
 export type WorkspaceTitleSource = "title" | "branch";
 export type ToolCallDetailLevel = "overview" | "detailed";
 
-const VALID_THEMES = new Set<string>([...Object.keys(THEME_TO_UNISTYLES), "auto"]);
+const VALID_THEMES = new Set<string>([
+  ...Object.keys(THEME_TO_UNISTYLES),
+  "auto",
+  PLUGIN_THEME_PREFERENCE,
+]);
+// Bumped when the default theme changes. A settings file written before the bump that still has
+// the old default ("auto" = follow the system with the built-in themes) moves to the new
+// default once; any theme the user picked on purpose is kept, and so is a later choice of auto.
+const DEFAULT_THEME_VERSION = 1;
 const VALID_SERVICE_URL_BEHAVIORS = new Set<ServiceUrlBehavior>(["ask", "in-app", "external"]);
 const VALID_WORKSPACE_TITLE_SOURCES = new Set<WorkspaceTitleSource>(["title", "branch"]);
 const VALID_TOOL_CALL_DETAIL_LEVELS = new Set<ToolCallDetailLevel>(["overview", "detailed"]);
@@ -31,7 +44,10 @@ export const MAX_CODE_FONT_SIZE = 22; // line-height 1.5×22=33 stays safe
 export const MAX_FONT_FAMILY_LENGTH = 200;
 
 export interface AppSettings {
-  theme: ThemeName | "auto";
+  theme: ThemeName | "auto" | typeof PLUGIN_THEME_PREFERENCE;
+  /** The selected plugin-contributed theme when `theme` is "plugin". */
+  pluginThemeId: string | null;
+  defaultThemeVersion: number;
   language: AppLanguage;
   sendBehavior: SendBehavior;
   serviceUrlBehavior: ServiceUrlBehavior;
@@ -56,7 +72,9 @@ export interface Settings extends AppSettings {
 type StoredAppSettings = Partial<AppSettings> & { compactToolCalls?: unknown };
 
 export const DEFAULT_CLIENT_SETTINGS: AppSettings = {
-  theme: "auto",
+  theme: DEFAULT_THEME,
+  pluginThemeId: null,
+  defaultThemeVersion: DEFAULT_THEME_VERSION,
   language: "system",
   sendBehavior: "steer",
   serviceUrlBehavior: "ask",
@@ -165,7 +183,17 @@ export function normalizeAppSettings(value: unknown): AppSettings {
     typeof value === "object" && value !== null && !Array.isArray(value)
       ? (value as StoredAppSettings)
       : {};
-  return { ...DEFAULT_CLIENT_SETTINGS, ...pickAppSettings(stored) };
+  const settings = { ...DEFAULT_CLIENT_SETTINGS, ...pickAppSettings(stored) };
+  const storedVersion =
+    typeof stored.defaultThemeVersion === "number" ? stored.defaultThemeVersion : 0;
+  if (
+    storedVersion < DEFAULT_THEME_VERSION &&
+    (stored.theme === undefined || stored.theme === "auto")
+  ) {
+    settings.theme = DEFAULT_THEME;
+  }
+  settings.defaultThemeVersion = DEFAULT_THEME_VERSION;
+  return settings;
 }
 
 function parseToolCallDetailLevel(stored: StoredAppSettings): ToolCallDetailLevel | null {
@@ -201,11 +229,18 @@ function pickBooleanAppSettings(stored: StoredAppSettings): Partial<AppSettings>
   return result;
 }
 
-function pickAppSettings(stored: StoredAppSettings): Partial<AppSettings> {
-  const result: Partial<AppSettings> = {};
+function pickThemeSettings(stored: StoredAppSettings, result: Partial<AppSettings>): void {
   if (typeof stored.theme === "string" && VALID_THEMES.has(stored.theme)) {
     result.theme = stored.theme;
   }
+  if (typeof stored.pluginThemeId === "string" || stored.pluginThemeId === null) {
+    result.pluginThemeId = stored.pluginThemeId;
+  }
+}
+
+function pickAppSettings(stored: StoredAppSettings): Partial<AppSettings> {
+  const result: Partial<AppSettings> = {};
+  pickThemeSettings(stored, result);
   const language = parseAppLanguage(stored.language);
   if (language !== null) {
     result.language = language;

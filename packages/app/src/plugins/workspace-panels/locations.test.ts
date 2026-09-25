@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { PluginWorkspacePanelContribution } from "@jagentdesk/plugin";
+import type { PluginWorkspacePanelContribution } from "@jagentdesk/plugin/client";
 import {
   getPluginPanelLocations,
   pluginPanelSupportsLocation,

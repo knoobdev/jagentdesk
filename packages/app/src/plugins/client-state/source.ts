@@ -1,4 +1,4 @@
-import type { PluginClientStateSource } from "@jagentdesk/plugin/host";
+import type { PluginClientStateSource } from "@jagentdesk/plugin/client/host";
 import { useSessionStore } from "@/stores/session-store";
 import { selectWorkspace } from "@/stores/session-store-hooks/selectors";
 import { normalizeWorkspaceOpaqueId } from "@/utils/workspace-identity";

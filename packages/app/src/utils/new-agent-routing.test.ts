@@ -17,9 +17,9 @@ describe("resolveNewAgentWorkingDir", () => {
   });
 
   it("supports windows-style jagentdesk worktree paths without checkout metadata", () => {
-    expect(resolveNewAgentWorkingDir("C:\\Users\\me\\repo\\.jagentdesk\\worktrees\\feature", null)).toBe(
-      "C:\\Users\\me\\repo",
-    );
+    expect(
+      resolveNewAgentWorkingDir("C:\\Users\\me\\repo\\.jagentdesk\\worktrees\\feature", null),
+    ).toBe("C:\\Users\\me\\repo");
   });
 
   it("returns the main repo root for jagentdesk-owned worktrees", () => {

@@ -4,6 +4,8 @@ import { StyleSheet } from "react-native-unistyles";
 import TerminalEmulator, { type TerminalEmulatorHandle } from "@/components/terminal-emulator";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import type { Theme } from "@/styles/theme";
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { clickUpChipStyles } from "@/components/clickup-shell/list-styles";
 
 interface ClusterPodShellProps {
   serverId: string;
@@ -18,6 +20,17 @@ interface ClusterPodShellProps {
 
 const encoder = new TextEncoder();
 
+/** Container picker: ClickUp's filter chips replace the classic bordered chips. */
+function containerChipStyle(isClickUp: boolean, selected: boolean) {
+  if (!isClickUp) return [styles.containerChip, selected && styles.containerChipActive];
+  return selected ? clickUpChipStyles.chipActive : clickUpChipStyles.chip;
+}
+
+function containerChipTextStyle(isClickUp: boolean, selected: boolean) {
+  if (!isClickUp) return [styles.containerChipText, selected && styles.containerChipTextActive];
+  return selected ? clickUpChipStyles.textActive : clickUpChipStyles.text;
+}
+
 function ContainerChip({
   name,
   selected,
@@ -28,15 +41,10 @@ function ContainerChip({
   onSelect: (name: string) => void;
 }) {
   const handlePress = useCallback(() => onSelect(name), [name, onSelect]);
+  const isClickUp = useIsClickUpTheme();
   return (
-    <Pressable
-      style={[styles.containerChip, selected && styles.containerChipActive]}
-      onPress={handlePress}
-    >
-      <Text
-        style={[styles.containerChipText, selected && styles.containerChipTextActive]}
-        numberOfLines={1}
-      >
+    <Pressable style={containerChipStyle(isClickUp, selected)} onPress={handlePress}>
+      <Text style={containerChipTextStyle(isClickUp, selected)} numberOfLines={1}>
         {name}
       </Text>
     </Pressable>
@@ -140,10 +148,12 @@ export function ClusterPodShell({
     onClose();
   }, [onClose]);
 
+  const isClickUp = useIsClickUpTheme();
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerText}>Shell</Text>
+        <Text style={isClickUp ? styles.headerTextClickUp : styles.headerText}>Shell</Text>
         <Pressable style={styles.closeButton} onPress={handleClose}>
           <Text style={styles.closeButtonText}>Close</Text>
         </Pressable>
@@ -208,6 +218,11 @@ const styles = StyleSheet.create((theme: Theme) => ({
     color: theme.colors.foregroundExtraMuted,
     textTransform: "uppercase" as const,
     letterSpacing: 0.5,
+  },
+  headerTextClickUp: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.chrome.sectionTitleColor,
   },
   closeButton: {
     paddingHorizontal: theme.spacing[2],

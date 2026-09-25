@@ -5,6 +5,8 @@ import { X } from "lucide-react-native";
 import { useClusterNavStore } from "@/stores/cluster-nav-store";
 import { useClusterViewStore } from "@/stores/cluster-view-store";
 import type { Theme } from "@/styles/theme";
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { clickUpTabStyles } from "@/components/clickup-shell/list-styles";
 
 const ThemedX = withUnistyles(X);
 const mutedColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
@@ -20,9 +22,10 @@ function Tab({
   onPress: () => void;
   onClose?: () => void;
 }) {
+  const isClickUp = useIsClickUpTheme();
   return (
-    <Pressable style={[styles.tab, active && styles.tabActive]} onPress={onPress}>
-      <Text style={[styles.tabLabel, active && styles.tabLabelActive]} numberOfLines={1}>
+    <Pressable style={tabStyle(isClickUp, active)} onPress={onPress}>
+      <Text style={tabLabelStyle(isClickUp, active)} numberOfLines={1}>
         {label}
       </Text>
       {onClose ? (
@@ -39,6 +42,17 @@ function Tab({
   );
 }
 
+/** ClickUp swaps the boxed tabs for its underlined text tabs; classic keeps the pill. */
+function tabStyle(isClickUp: boolean, active: boolean) {
+  if (!isClickUp) return [styles.tab, active && styles.tabActive];
+  return [styles.tabClickUp, active ? clickUpTabStyles.tabActive : clickUpTabStyles.tab];
+}
+
+function tabLabelStyle(isClickUp: boolean, active: boolean) {
+  if (!isClickUp) return [styles.tabLabel, active && styles.tabLabelActive];
+  return [styles.tabLabel, active ? clickUpTabStyles.textActive : clickUpTabStyles.text];
+}
+
 /**
  * Tab strip for the cluster content area. Shown only once at least one resource
  * detail is open: the first tab returns to the resource list, the rest are open
@@ -52,6 +66,8 @@ export function ClusterTabBar() {
   const selectedKind = useClusterNavStore((s) => s.selectedKind);
   const showingHelm = useClusterNavStore((s) => s.showingHelm);
 
+  const isClickUp = useIsClickUpTheme();
+
   const showList = useCallback(() => setActive(null), [setActive]);
 
   if (tabs.length === 0) return null;
@@ -59,11 +75,11 @@ export function ClusterTabBar() {
   const listLabel = showingHelm ? "Releases" : (selectedKind ?? "Resources");
 
   return (
-    <View style={styles.bar}>
+    <View style={isClickUp ? styles.barClickUp : styles.bar}>
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.barContent}
+        contentContainerStyle={isClickUp ? styles.barContentClickUp : styles.barContent}
       >
         <Tab label={listLabel} active={activeTabId === null} onPress={showList} />
         {tabs.map((tab) => (
@@ -111,6 +127,24 @@ const styles = StyleSheet.create((theme: Theme) => ({
     gap: theme.spacing[1],
     paddingHorizontal: theme.spacing[2],
     paddingVertical: theme.spacing[1.5],
+  },
+  barClickUp: {
+    borderBottomWidth: 1,
+    borderBottomColor: theme.chrome.cardBorder,
+    backgroundColor: theme.chrome.cardBackground,
+  },
+  barContentClickUp: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: theme.spacing[4],
+    paddingHorizontal: theme.spacing[4],
+    paddingTop: theme.spacing[1.5],
+  },
+  tabClickUp: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[1.5],
+    maxWidth: 200,
   },
   tab: {
     flexDirection: "row",

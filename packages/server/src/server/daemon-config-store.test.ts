@@ -333,6 +333,37 @@ describe("DaemonConfigStore", () => {
     expect(persisted.agents?.metadataGeneration).toEqual({ providers: [] });
   });
 
+  test("patch persists plugins and the global plugin switch across restarts", () => {
+    // Before this, plugins lived only in memory: a daemon restart dropped every installed plugin.
+    const jagentdeskHome = mkdtempSync(path.join(tmpdir(), "jagentdesk-daemon-config-store-"));
+    tempDirs.push(jagentdeskHome);
+    const initial = {
+      mcp: { injectIntoAgents: false },
+      browserTools: { enabled: false },
+      providers: {},
+      metadataGeneration: { providers: [] },
+      autoArchiveAfterMerge: false,
+      enableTerminalAgentHooks: false,
+      appendSystemPrompt: "",
+    };
+    const store = new DaemonConfigStore(jagentdeskHome, initial, undefined);
+
+    store.patch({
+      pluginsEnabled: true,
+      plugins: {
+        monitor: { source: "directory", path: "/plugins/monitor", enabled: true },
+        themes: { source: "directory", path: "/plugins/themes", enabled: false },
+      },
+    });
+    let persisted = loadPersistedConfig(jagentdeskHome);
+    expect(persisted.pluginsEnabled).toBe(true);
+    expect(Object.keys(persisted.plugins ?? {}).sort()).toEqual(["monitor", "themes"]);
+
+    store.patch({ removePlugins: ["themes"] });
+    persisted = loadPersistedConfig(jagentdeskHome);
+    expect(Object.keys(persisted.plugins ?? {})).toEqual(["monitor"]);
+  });
+
   test("patch persists append system prompt into config.json", () => {
     const jagentdeskHome = mkdtempSync(path.join(tmpdir(), "jagentdesk-daemon-config-store-"));
     tempDirs.push(jagentdeskHome);

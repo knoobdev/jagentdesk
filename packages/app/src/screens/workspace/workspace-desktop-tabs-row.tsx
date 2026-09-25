@@ -1,4 +1,5 @@
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
 import React, {
   useCallback,
   useEffect,
@@ -631,9 +632,15 @@ function TabChip({
   );
 
   const tabAccessibilityState = useMemo(() => ({ selected: isActive }), [isActive]);
+  // ClickUp marks the active view tab with an underline; the classic shell uses a top edge.
+  const isClickUp = useIsClickUpTheme();
   const tabFocusIndicatorStyle = useMemo(
-    () => [styles.tabFocusIndicator, !isFocused && styles.tabFocusIndicatorUnfocused],
-    [isFocused],
+    () => [
+      styles.tabFocusIndicator,
+      isClickUp && styles.tabFocusIndicatorUnderline,
+      !isFocused && styles.tabFocusIndicatorUnfocused,
+    ],
+    [isClickUp, isFocused],
   );
   const tabLabelSkeletonStyle = useMemo(
     () => [
@@ -1303,6 +1310,10 @@ const styles = StyleSheet.create((theme) => ({
     right: 0,
     height: 2,
     backgroundColor: theme.colors.accent,
+  },
+  tabFocusIndicatorUnderline: {
+    top: undefined,
+    bottom: 0,
   },
   tabFocusIndicatorUnfocused: {
     backgroundColor: theme.colors.borderAccent,

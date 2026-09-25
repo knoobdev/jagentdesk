@@ -26,6 +26,21 @@ const { theme, pressablePropsByLabel } = vi.hoisted(() => {
   Object.assign(globalThis, { __DEV__: false });
   return {
     theme: {
+      chrome: {
+        titleWeight: "300",
+        titleWeightCompact: "400",
+        buttonTextWeight: "400",
+        controlRadius: 8,
+        outlineBackground: "transparent",
+        outlineBorder: "#444",
+        pageCanvas: "#000",
+        cardBackground: "#111",
+        cardBorder: "#444",
+        cardRadius: 8,
+        sectionTitleColor: "#aaa",
+        sectionTitleWeight: "400",
+        rowTitleWeight: "400",
+      },
       spacing: { 1: 4, 2: 8, 3: 12 },
       borderWidth: { 1: 1 },
       borderRadius: { base: 4, md: 6, lg: 8, xl: 12, full: 999 },

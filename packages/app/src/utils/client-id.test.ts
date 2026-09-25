@@ -44,7 +44,9 @@ describe("clientIdResolver", () => {
     });
 
     expect(await resolver.getOrCreate()).toBe("cid_123456781234123412341234567890ab");
-    expect(storage.items.get("@jagentdesk:client-id-v1")).toBe("cid_123456781234123412341234567890ab");
+    expect(storage.items.get("@jagentdesk:client-id-v1")).toBe(
+      "cid_123456781234123412341234567890ab",
+    );
   });
 
   it("dedupes concurrent callers behind a single storage write", async () => {

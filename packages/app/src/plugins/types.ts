@@ -1,14 +1,22 @@
 import type { QueryClient } from "@tanstack/react-query";
+import type { PluginRequirements } from "@jagentdesk/protocol/messages";
 import type {
   PluginAttachmentSourceContribution,
+  PluginCleanup,
+  PluginThemeContribution,
+} from "@jagentdesk/plugin";
+import type {
   PluginCommandCenterItemContribution,
-  PluginSettingsScreenContribution,
+  PluginClientSlashCommandContribution,
+  PluginComposerPillContribution,
   PluginSidebarContribution,
   PluginSurfaceContribution,
-  PluginThemeContribution,
+  PluginSettingsScreenContribution,
+  PluginTimelineRendererContribution,
+  PluginTimelineTransformerContribution,
   PluginPanelLocation,
   PluginWorkspacePanelContribution,
-} from "@jagentdesk/plugin";
+} from "@jagentdesk/plugin/client";
 
 export type EvaluatedPluginWorkspacePanelContribution = PluginWorkspacePanelContribution & {
   locations: readonly PluginPanelLocation[];
@@ -16,18 +24,23 @@ export type EvaluatedPluginWorkspacePanelContribution = PluginWorkspacePanelCont
 
 export interface EvaluatedPlugin {
   id: string;
-  cleanup: () => void;
+  cleanup: PluginCleanup;
   surfaces: PluginSurfaceContribution[];
   settingsScreens: PluginSettingsScreenContribution[];
   sidebarItems: PluginSidebarContribution[];
   workspacePanels: EvaluatedPluginWorkspacePanelContribution[];
   commandCenterItems: PluginCommandCenterItemContribution[];
+  clientSlashCommands: PluginClientSlashCommandContribution[];
   attachmentSources: PluginAttachmentSourceContribution[];
   themes: PluginThemeContribution[];
+  timelineTransformers: PluginTimelineTransformerContribution[];
+  timelineRenderers: PluginTimelineRendererContribution[];
 }
 
 export interface InstalledPlugin extends EvaluatedPlugin {
+  lifetime: AbortController;
   serverId: string;
+  requirements?: PluginRequirements;
   clientBundle: string;
   queryClient: QueryClient;
 }
@@ -35,9 +48,13 @@ export interface InstalledPlugin extends EvaluatedPlugin {
 export type {
   PluginAttachmentSourceContribution,
   PluginCommandCenterItemContribution,
-  PluginSettingsScreenContribution,
+  PluginClientSlashCommandContribution,
+  PluginComposerPillContribution,
   PluginSidebarContribution,
   PluginSurfaceContribution,
+  PluginSettingsScreenContribution,
   PluginThemeContribution,
+  PluginTimelineRendererContribution,
+  PluginTimelineTransformerContribution,
   PluginWorkspacePanelContribution,
 };

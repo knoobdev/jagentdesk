@@ -13,6 +13,8 @@ import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import type { SimDeviceType, SimRuntime } from "@jagentdesk/protocol/simulator/rpc-schemas";
 import type { Theme } from "@/styles/theme";
 import { uniqueNames } from "@/screens/sim-names";
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { clickUpChipStyles, clickUpListStyles } from "@/components/clickup-shell/list-styles";
 
 const SELECTED = { selected: true } as const;
 const UNSELECTED = { selected: false } as const;
@@ -105,6 +107,8 @@ export function SimAddSheet({
   const [pending, setPending] = useState<"create" | "boot" | null>(null);
   const [done, setDone] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const isClickUp = useIsClickUpTheme();
+  const labelStyle = [styles.label, isClickUp && clickUpListStyles.columnHeader];
 
   useEffect(() => {
     if (!visible || !client) return;
@@ -215,7 +219,7 @@ export function SimAddSheet({
 
         {runtimes && runtimes.length > 0 ? (
           <>
-            <Text style={styles.label}>Runtime</Text>
+            <Text style={labelStyle}>Runtime</Text>
             <View style={styles.chips}>
               {runtimes.map((r) => (
                 <Chip
@@ -228,7 +232,7 @@ export function SimAddSheet({
               ))}
             </View>
 
-            <Text style={styles.label}>Device</Text>
+            <Text style={labelStyle}>Device</Text>
             <View style={styles.chips}>
               {families.map((f) => (
                 <Chip key={f} label={f} value={f} active={f === family} onPick={setFamily} />
@@ -247,7 +251,7 @@ export function SimAddSheet({
 
             <View style={styles.nameRow}>
               <View style={styles.nameCol}>
-                <Text style={styles.label}>Name</Text>
+                <Text style={labelStyle}>Name</Text>
                 <AdaptiveTextInput
                   resetKey={type?.identifier ?? "none"}
                   initialValue=""
@@ -261,7 +265,7 @@ export function SimAddSheet({
                 />
               </View>
               <View style={styles.countCol}>
-                <Text style={styles.label}>Quantity</Text>
+                <Text style={labelStyle}>Quantity</Text>
                 <CountStepper value={count} onChange={setCount} disabled={busy} />
               </View>
             </View>
@@ -322,14 +326,15 @@ function Chip<T extends string>({
   onPick: (value: T) => void;
 }) {
   const onPress = useCallback(() => onPick(value), [onPick, value]);
+  const isClickUp = useIsClickUpTheme();
   return (
     <Pressable
       onPress={onPress}
-      style={[styles.chip, active ? styles.chipActive : null]}
+      style={chipStyle(isClickUp, active)}
       accessibilityRole="button"
       accessibilityState={active ? SELECTED : UNSELECTED}
     >
-      <Text style={[styles.chipText, active ? styles.chipTextActive : null]}>{label}</Text>
+      <Text style={chipTextStyle(isClickUp, active)}>{label}</Text>
     </Pressable>
   );
 }
@@ -344,16 +349,39 @@ function TypeRow({
   onPick: (identifier: string) => void;
 }) {
   const onPress = useCallback(() => onPick(type.identifier), [onPick, type.identifier]);
+  const isClickUp = useIsClickUpTheme();
   return (
     <Pressable
       onPress={onPress}
-      style={[styles.typeRow, active ? styles.typeRowActive : null]}
+      style={typeRowStyle(isClickUp, active)}
       accessibilityRole="button"
       accessibilityState={active ? SELECTED : UNSELECTED}
     >
-      <Text style={[styles.typeText, active ? styles.chipTextActive : null]}>{type.name}</Text>
+      <Text style={typeTextStyle(isClickUp, active)}>{type.name}</Text>
     </Pressable>
   );
+}
+
+// ClickUp: white bordered filter chips, the picked one lavender with violet text.
+function chipStyle(isClickUp: boolean, active: boolean) {
+  if (isClickUp) return active ? clickUpChipStyles.chipActive : clickUpChipStyles.chip;
+  return [styles.chip, active ? styles.chipActive : null];
+}
+
+function chipTextStyle(isClickUp: boolean, active: boolean) {
+  if (isClickUp) return active ? clickUpChipStyles.textActive : clickUpChipStyles.text;
+  return [styles.chipText, active ? styles.chipTextActive : null];
+}
+
+// ClickUp highlights the picked device type with the same lavender selection as its chips.
+function typeRowStyle(isClickUp: boolean, active: boolean) {
+  if (isClickUp && active) return [styles.typeRow, styles.typeRowActiveClickUp];
+  return [styles.typeRow, active ? styles.typeRowActive : null];
+}
+
+function typeTextStyle(isClickUp: boolean, active: boolean) {
+  if (isClickUp && active) return [styles.typeText, clickUpChipStyles.textActive];
+  return [styles.typeText, active ? styles.chipTextActive : null];
 }
 
 const styles = StyleSheet.create((theme) => ({
@@ -390,6 +418,7 @@ const styles = StyleSheet.create((theme) => ({
     borderBottomColor: theme.colors.border,
   },
   typeRowActive: { backgroundColor: theme.colors.surface2 },
+  typeRowActiveClickUp: { backgroundColor: theme.chrome.chipActiveBackground },
   typeText: { fontSize: theme.fontSize.sm, color: theme.colors.foregroundMuted },
   input: {
     backgroundColor: theme.colors.surface0,

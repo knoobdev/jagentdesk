@@ -20,7 +20,8 @@ function readPositiveIntegerOverride(value: unknown): number | null {
 
 export function getWebPartialVirtualizationThreshold(): number {
   const override = readPositiveIntegerOverride(
-    (globalThis as BottomAnchorE2ETestGlobals).__JAGENTDESK_E2E_WEB_PARTIAL_VIRTUALIZATION_THRESHOLD,
+    (globalThis as BottomAnchorE2ETestGlobals)
+      .__JAGENTDESK_E2E_WEB_PARTIAL_VIRTUALIZATION_THRESHOLD,
   );
   return override ?? DEFAULT_WEB_PARTIAL_VIRTUALIZATION_THRESHOLD;
 }

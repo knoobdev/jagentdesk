@@ -367,6 +367,9 @@ function mergeMutableConfigIntoPersistedConfig(params: {
 
   return {
     ...persisted,
+    // The live plugin map already has removePlugins applied, so it replaces the stored one.
+    ...(mutable.pluginsEnabled !== undefined ? { pluginsEnabled: mutable.pluginsEnabled } : {}),
+    ...(mutable.plugins !== undefined ? { plugins: mutable.plugins } : {}),
     daemon: {
       ...persisted.daemon,
       mcp: {

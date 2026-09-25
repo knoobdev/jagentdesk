@@ -1,3 +1,4 @@
+import { buildPluginSettingsRoute } from "@/plugins/settings/routes";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Text, View } from "react-native";
@@ -19,7 +20,6 @@ import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-
 import { SettingsSection } from "@/screens/settings/settings-section";
 import { resolvePluginPageState } from "@/screens/settings/plugins-page-state";
 import { pluginRegistry, useInstalledPlugin, useInstalledPlugins } from "@/plugins/registry";
-import { buildPluginSurfaceRoute } from "@/plugins/routes";
 import { resolvePluginIcon } from "@/plugins/icons";
 import { settingsStyles } from "@/styles/settings";
 import { confirmDialog } from "@/utils/confirm-dialog";
@@ -51,7 +51,7 @@ function SettingsScreenButton({
   const router = useRouter();
   const Icon = useMemo(() => resolvePluginIcon(screen.icon), [screen.icon]);
   const open = useCallback(() => {
-    router.push(buildPluginSurfaceRoute(serverId, pluginId, { kind: "settings", id: screen.id }));
+    router.push(buildPluginSettingsRoute(serverId, pluginId, screen.id));
   }, [pluginId, router, screen.id, serverId]);
   return (
     <Button variant="outline" size="sm" leftIcon={Icon} onPress={open}>

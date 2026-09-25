@@ -1,0 +1,1 @@
+{ "id": "host-agents", "requirements": { "jagentdesk": ">=0.8.0" } }

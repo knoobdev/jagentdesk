@@ -51,7 +51,8 @@ export function resolveSystemWindowTheme(): WindowTheme {
 }
 
 export function getWindowBackgroundColor(theme: WindowTheme): string {
-  return theme === "dark" ? "#181B1A" : "#ffffff";
+  // The ClickUp themes paint #111111 (ClickUp Dark) / #ffffff (ClickUp), so the first frame matches.
+  return theme === "dark" ? "#111111" : "#ffffff";
 }
 
 export function createWindowControlsOverlayState(theme: WindowTheme): WindowControlsOverlayState {
@@ -65,7 +66,7 @@ export function createWindowControlsOverlayState(theme: WindowTheme): WindowCont
 
 export function getTitleBarOverlayOptions(theme: WindowTheme): Electron.TitleBarOverlayOptions {
   if (theme === "dark") {
-    return { color: "#181B1A", symbolColor: "#e4e4e7", height: 29 };
+    return { color: "#111111", symbolColor: "#e4e4e7", height: 29 };
   }
 
   return { color: "#ffffff", symbolColor: "#09090b", height: 29 };

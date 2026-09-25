@@ -9,6 +9,21 @@ import type { ProjectHostError, UseProjectsResult } from "@/hooks/use-projects";
 
 const { theme, projectsState, navigate } = vi.hoisted(() => ({
   theme: {
+    chrome: {
+      titleWeight: "300",
+      titleWeightCompact: "400",
+      buttonTextWeight: "400",
+      controlRadius: 8,
+      outlineBackground: "transparent",
+      outlineBorder: "#444",
+      pageCanvas: "#000",
+      cardBackground: "#111",
+      cardBorder: "#444",
+      cardRadius: 8,
+      sectionTitleColor: "#aaa",
+      sectionTitleWeight: "400",
+      rowTitleWeight: "400",
+    },
     spacing: { 0: 0, 1: 4, "1.5": 6, 2: 8, 3: 12, 4: 16, 6: 24, 8: 32 },
     iconSize: { sm: 14, md: 20 },
     fontSize: { xs: 11, sm: 13, base: 15 },

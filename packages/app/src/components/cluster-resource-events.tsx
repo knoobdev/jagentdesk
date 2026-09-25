@@ -3,6 +3,8 @@ import { Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import type { Theme } from "@/styles/theme";
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { clickUpListStyles } from "@/components/clickup-shell/list-styles";
 
 type Obj = Record<string, unknown>;
 const asObj = (v: unknown): Obj => (v && typeof v === "object" ? (v as Obj) : {});
@@ -51,6 +53,7 @@ export function ClusterResourceEvents({
   kind: string;
 }) {
   const client = useHostRuntimeClient(serverId);
+  const isClickUp = useIsClickUpTheme();
   const [events, setEvents] = useState<EventRow[] | null>(null);
 
   useEffect(() => {
@@ -99,9 +102,18 @@ export function ClusterResourceEvents({
 
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionTitle}>Events</Text>
+      {isClickUp ? (
+        <View style={styles.groupRowClickUp}>
+          <View style={clickUpListStyles.groupPill}>
+            <Text style={clickUpListStyles.groupPillText}>Events</Text>
+          </View>
+          <Text style={clickUpListStyles.groupCount}>{events.length}</Text>
+        </View>
+      ) : (
+        <Text style={styles.sectionTitle}>Events</Text>
+      )}
       {events.map((e) => (
-        <View key={e.key} style={styles.row}>
+        <View key={e.key} style={[styles.row, isClickUp && clickUpListStyles.row]}>
           <View style={styles.badge}>
             <Text
               style={[styles.badgeText, e.type === "Warning" ? styles.warnText : styles.normalText]}
@@ -132,6 +144,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     textTransform: "uppercase" as const,
     letterSpacing: 0.5,
   },
+  groupRowClickUp: { flexDirection: "row", alignItems: "center", gap: theme.spacing[2] },
   row: {
     flexDirection: "row",
     alignItems: "center",

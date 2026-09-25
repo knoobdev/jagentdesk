@@ -24,6 +24,8 @@ import { useUsageHistory, usageHistoryQueryKey } from "@/insights/use-usage-hist
 import { UsageTimelineCard } from "@/insights/usage-timeline-card";
 import type { LifetimeUsage } from "@jagentdesk/protocol/usage-history";
 import type { Theme } from "@/styles/theme";
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { clickUpListStyles } from "@/components/clickup-shell/list-styles";
 
 const ThemedBarChart = withUnistyles(BarChart3);
 const ThemedCoins = withUnistyles(Coins);
@@ -74,17 +76,19 @@ function KpiTile({
   label,
   value,
   sub,
+  isClickUp,
 }: {
   Icon: KpiIcon;
   label: string;
   value: string;
   sub: string;
+  isClickUp: boolean;
 }) {
   return (
     <View style={styles.kpi}>
       <View style={styles.kpiHead}>
         <Icon size={13} uniProps={mutedColor} />
-        <Text style={styles.kpiLabel}>{label}</Text>
+        <Text style={[styles.kpiLabel, isClickUp && clickUpListStyles.columnHeader]}>{label}</Text>
       </View>
       <Text style={styles.kpiValue} numberOfLines={1}>
         {value}
@@ -248,6 +252,7 @@ export function InsightsScreen() {
   const serverId = useHostRouteServerId() ?? "";
   const insets = useSafeAreaInsets();
   const isCompact = useIsCompactFormFactor();
+  const isClickUp = useIsClickUpTheme();
   const insights = useUsageInsights(serverId);
   // Headline TOKENS/COST/by-model come from the daemon-persisted LIFETIME total
   // (baseline + every recorded day), NOT the live per-agent sum — so they include
@@ -388,6 +393,7 @@ export function InsightsScreen() {
             Icon={ThemedCpu}
             label="TOKENS"
             value={formatTokenCount(lifetimeTokens)}
+            isClickUp={isClickUp}
             sub={`${formatTokenCount(lifetime.inputTokens)} in · ${formatTokenCount(lifetime.outputTokens)} out · ${formatTokenCount(lifetime.cachedInputTokens)} cache`}
           />
           <KpiTile
@@ -395,18 +401,21 @@ export function InsightsScreen() {
             label="COST"
             value={lifetimeHasCost ? formatUsd(lifetime.totalCostUsd) : "—"}
             sub={lifetimeHasCost ? "reported by provider" : "not reported"}
+            isClickUp={isClickUp}
           />
           <KpiTile
             Icon={ThemedUsers}
             label="AGENTS"
             value={String(insights.agentsWithUsage)}
             sub={`of ${insights.agentCount} on host`}
+            isClickUp={isClickUp}
           />
           <KpiTile
             Icon={ThemedCpu}
             label="AVG / AGENT"
             value={formatTokenCount(insights.avgTokensPerAgent)}
             sub="tokens per agent"
+            isClickUp={isClickUp}
           />
         </View>
 
@@ -500,18 +509,18 @@ const styles = StyleSheet.create((theme: Theme) => ({
     padding: theme.spacing[3],
     fontSize: theme.fontSize.sm,
     color: theme.colors.foregroundMuted,
-    backgroundColor: theme.colors.surface1,
+    backgroundColor: theme.chrome.cardBackground,
     borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.border,
+    borderColor: theme.chrome.cardBorder,
     borderRadius: theme.borderRadius.md,
     lineHeight: 20,
   },
   savingsBar: {
     padding: theme.spacing[3],
     gap: theme.spacing[1],
-    backgroundColor: theme.colors.surface1,
+    backgroundColor: theme.chrome.cardBackground,
     borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.border,
+    borderColor: theme.chrome.cardBorder,
     borderRadius: theme.borderRadius.md,
   },
   savingsText: {
@@ -530,10 +539,10 @@ const styles = StyleSheet.create((theme: Theme) => ({
     flexGrow: 1,
     flexBasis: "22%",
     minWidth: 150,
-    backgroundColor: theme.colors.surface1,
+    backgroundColor: theme.chrome.cardBackground,
     borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.border,
-    borderRadius: theme.borderRadius.lg,
+    borderColor: theme.chrome.cardBorder,
+    borderRadius: theme.chrome.cardRadius,
     paddingVertical: theme.spacing[4],
     paddingHorizontal: theme.spacing[4],
     gap: theme.spacing[2],
@@ -555,11 +564,12 @@ const styles = StyleSheet.create((theme: Theme) => ({
   kpiSub: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
   // Card grid
   cardsRow: { flexDirection: "row", flexWrap: "wrap", gap: theme.spacing[4] },
+  // chrome card tokens: classic themes carry surface1 / border / lg, ClickUp white / #ececec / 10.
   card: {
-    backgroundColor: theme.colors.surface1,
+    backgroundColor: theme.chrome.cardBackground,
     borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.border,
-    borderRadius: theme.borderRadius.lg,
+    borderColor: theme.chrome.cardBorder,
+    borderRadius: theme.chrome.cardRadius,
     padding: theme.spacing[4],
     gap: theme.spacing[4],
   },

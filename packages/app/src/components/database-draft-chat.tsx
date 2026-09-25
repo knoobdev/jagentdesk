@@ -1,3 +1,5 @@
+import { createDockWorkspace } from "@/components/dock-workspace";
+import { DATABASE_AGENT_LABEL } from "@/utils/dock-agents";
 import { useMemo } from "react";
 import { Keyboard, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
@@ -13,8 +15,6 @@ import { databaseChatTitle } from "@/utils/database-chat-title";
 import type { AgentSnapshotPayload } from "@jagentdesk/protocol/messages";
 import type { CreateAgentRequestOptions } from "@jagentdesk/client/internal/daemon-client";
 import type { Theme } from "@/styles/theme";
-
-const DATABASE_AGENT_LABEL = "jagentdesk.database.id";
 
 export interface DatabaseComposerContext {
   engine: string;
@@ -151,6 +151,15 @@ export function DatabaseDraftChat({
         images: imagesData,
         attachments: Array.isArray(attachments) ? attachments : undefined,
       });
+      // Its own workspace in the project, so the chat is listed under the project.
+      const home = await createDockWorkspace({
+        client,
+        serverId,
+        cwd: options.cwd ?? submitCwd,
+        title: options.title ?? undefined,
+      });
+      options.workspaceId = home.workspaceId;
+      options.cwd = home.cwd;
       const result = await client.createAgent(options);
       return { agentId: result.id, result };
     },

@@ -1,5 +1,11 @@
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
+  CLICKUP_COMPOSER_RADIUS,
+  ClickUpComposerFrame,
+  ClickUpSendGradient,
+} from "@/components/clickup-shell/composer-frame";
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import {
   View,
   Text,
   TextInput,
@@ -743,6 +749,7 @@ function SendButtonTooltip({
   buttonIconSize,
   sendKeys,
   sendTooltipLabel,
+  gradient = false,
 }: {
   shouldShow: boolean;
   canPressLoadingButton: boolean;
@@ -757,6 +764,7 @@ function SendButtonTooltip({
   buttonIconSize: number;
   sendKeys: ShortcutChord | null | undefined;
   sendTooltipLabel: string;
+  gradient?: boolean;
 }) {
   if (!shouldShow) return null;
   return (
@@ -769,11 +777,15 @@ function SendButtonTooltip({
         testID={submitButtonTestID}
         style={sendButtonCombinedStyle}
       >
-        <SendButtonContent
-          isSubmitLoading={isSubmitLoading}
-          submitIcon={submitIcon}
-          buttonIconSize={buttonIconSize}
-        />
+        {gradient && !isSendButtonDisabled ? <ClickUpSendGradient /> : null}
+        {/* Positioned so the icon paints above the absolutely filled gradient. */}
+        <View style={styles.sendButtonIconLayer}>
+          <SendButtonContent
+            isSubmitLoading={isSubmitLoading}
+            submitIcon={submitIcon}
+            buttonIconSize={buttonIconSize}
+          />
+        </View>
       </TooltipTrigger>
       <TooltipContent side="top" align="center" offset={8}>
         <SendTooltipBody label={sendTooltipLabel} sendKeys={sendKeys} />
@@ -1662,21 +1674,27 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
       void handleStopRealtimeVoice();
     }, [handleStopRealtimeVoice]);
 
+    const isClickUp = useIsClickUpTheme();
     const inputWrapperCombinedStyle = useMemo(
       () => [
         styles.inputWrapper,
+        isClickUp && styles.inputWrapperClickUp,
         inputWrapperStyle,
         { opacity: surfacePresentation.input.opacity },
       ],
-      [inputWrapperStyle, surfacePresentation.input.opacity],
+      [inputWrapperStyle, isClickUp, surfacePresentation.input.opacity],
     );
     const textInputStyle = useMemo(
       () => [styles.textInput, computeTextInputHeightStyle(inputHeight, maxInputHeight)],
       [inputHeight, maxInputHeight],
     );
     const sendButtonCombinedStyle = useMemo(
-      () => [styles.sendButton, isSendButtonDisabled && styles.buttonDisabled],
-      [isSendButtonDisabled],
+      () => [
+        styles.sendButton,
+        isClickUp && styles.sendButtonClickUp,
+        isSendButtonDisabled && styles.buttonDisabled,
+      ],
+      [isClickUp, isSendButtonDisabled],
     );
     const overlayContainerStyle = useMemo(
       () => [styles.overlayContainer, { opacity: surfacePresentation.overlay.opacity }],
@@ -1708,93 +1726,98 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
 
     return (
       <View ref={rootRef} style={styles.container} testID="message-input-root">
-        {/* Regular input */}
-        <View
-          ref={inputWrapperRef}
-          style={inputWrapperCombinedStyle}
-          pointerEvents={surfacePresentation.input.pointerEvents}
-        >
-          {attachmentSlot}
-          {/* Text input */}
-          <View style={styles.textInputScrollWrapper}>
-            <ThemedTextInput
-              ref={textInputRef}
-              dataSet={COMPOSER_INPUT_DATASET}
-              value={value}
-              onChangeText={handleInputChange}
-              placeholder={placeholder ?? t("composer.placeholders.fallback")}
-              uniProps={textInputPlaceholderColorMapping}
-              accessibilityLabel={t("composer.input.accessibilityLabel")}
-              onFocus={handleInputFocus}
-              onBlur={handleInputBlur}
-              style={textInputStyle}
-              multiline
-              scrollEnabled={isWeb ? inputHeight >= maxInputHeight : true}
-              onContentSizeChange={handleContentSizeChange}
-              editable={!isDictating && !isRealtimeVoiceForCurrentAgent && !disabled}
-              onKeyPress={shouldHandleWebKeyPress ? handleDesktopKeyPress : undefined}
-              onSelectionChange={handleSelectionChange}
-              autoFocus={isWeb && autoFocus}
-            />
-            <FocusHint
-              visible={isWeb && isPaneFocused && !isInputFocused && !value}
-              focusInputKeys={focusInputKeys}
-              label={t("composer.input.focusHint", {
-                shortcut: focusInputKeys ? formatShortcut(focusInputKeys[0], getShortcutOs()) : "",
-              })}
-            />
-          </View>
-
-          {/* Button row */}
-          <View style={styles.buttonRow}>
-            {/* Toolbar left: attachment button + agent controls */}
-            <View style={styles.leftButtonGroup}>
-              <AttachmentDropdown
-                isConnected={isConnected}
-                disabled={disabled}
-                attachButtonStyle={attachButtonStyle}
-                renderAttachButtonIcon={renderAttachButtonIcon}
-                attachmentMenuItems={attachmentMenuItems}
-                addAttachmentLabel={t("composer.input.addAttachment")}
+        {/* Regular input; the ClickUp theme frames it with ClickUp Brain's gradient border */}
+        <ClickUpComposerFrame enabled={isClickUp}>
+          <View
+            ref={inputWrapperRef}
+            style={inputWrapperCombinedStyle}
+            pointerEvents={surfacePresentation.input.pointerEvents}
+          >
+            {attachmentSlot}
+            {/* Text input */}
+            <View style={styles.textInputScrollWrapper}>
+              <ThemedTextInput
+                ref={textInputRef}
+                dataSet={COMPOSER_INPUT_DATASET}
+                value={value}
+                onChangeText={handleInputChange}
+                placeholder={placeholder ?? t("composer.placeholders.fallback")}
+                uniProps={textInputPlaceholderColorMapping}
+                accessibilityLabel={t("composer.input.accessibilityLabel")}
+                onFocus={handleInputFocus}
+                onBlur={handleInputBlur}
+                style={textInputStyle}
+                multiline
+                scrollEnabled={isWeb ? inputHeight >= maxInputHeight : true}
+                onContentSizeChange={handleContentSizeChange}
+                editable={!isDictating && !isRealtimeVoiceForCurrentAgent && !disabled}
+                onKeyPress={shouldHandleWebKeyPress ? handleDesktopKeyPress : undefined}
+                onSelectionChange={handleSelectionChange}
+                autoFocus={isWeb && autoFocus}
               />
-              {leftContent}
-            </View>
-
-            {/* Right: voice button, contextual button (realtime/send/cancel) */}
-            <View style={styles.rightButtonGroup}>
-              {beforeVoiceContent}
-              <VoiceButtonTooltip
-                onVoicePress={handleVoicePress}
-                isDictationStartEnabled={isDictationStartEnabled}
-                voiceButtonAccessibilityLabel={voiceButtonAccessibilityLabel}
-                voiceButtonStyle={voiceButtonStyle}
-                renderVoiceButtonIcon={renderVoiceButtonIcon}
-                voiceTooltipText={voiceTooltipText}
-                isRealtimeVoiceForCurrentAgent={isRealtimeVoiceForCurrentAgent}
-                voiceMuteToggleKeys={voiceMuteToggleKeys}
-                dictationToggleKeys={dictationToggleKeys}
-              />
-              {rightContent}
-              <PrimaryAction
-                kind={primaryActionKind}
-                activeActionContent={activeActionContent}
-                shouldShow
-                canPressLoadingButton={canPressLoadingButton}
-                onSubmitLoadingPress={onSubmitLoadingPress}
-                onDefaultSendAction={handleDefaultSendAction}
-                isSendButtonDisabled={isSendButtonDisabled}
-                submitAccessibilityLabel={submitAccessibilityLabel}
-                sendButtonCombinedStyle={sendButtonCombinedStyle}
-                isSubmitLoading={isSubmitLoading}
-                submitIcon={submitIcon}
-                submitButtonTestID={submitButtonTestID}
-                buttonIconSize={buttonIconSize}
-                sendKeys={DEFAULT_SEND_KEYS}
-                sendTooltipLabel={sendTooltipLabel}
+              <FocusHint
+                visible={isWeb && isPaneFocused && !isInputFocused && !value}
+                focusInputKeys={focusInputKeys}
+                label={t("composer.input.focusHint", {
+                  shortcut: focusInputKeys
+                    ? formatShortcut(focusInputKeys[0], getShortcutOs())
+                    : "",
+                })}
               />
             </View>
+
+            {/* Button row */}
+            <View style={styles.buttonRow}>
+              {/* Toolbar left: attachment button + agent controls */}
+              <View style={styles.leftButtonGroup}>
+                <AttachmentDropdown
+                  isConnected={isConnected}
+                  disabled={disabled}
+                  attachButtonStyle={attachButtonStyle}
+                  renderAttachButtonIcon={renderAttachButtonIcon}
+                  attachmentMenuItems={attachmentMenuItems}
+                  addAttachmentLabel={t("composer.input.addAttachment")}
+                />
+                {leftContent}
+              </View>
+
+              {/* Right: voice button, contextual button (realtime/send/cancel) */}
+              <View style={styles.rightButtonGroup}>
+                {beforeVoiceContent}
+                <VoiceButtonTooltip
+                  onVoicePress={handleVoicePress}
+                  isDictationStartEnabled={isDictationStartEnabled}
+                  voiceButtonAccessibilityLabel={voiceButtonAccessibilityLabel}
+                  voiceButtonStyle={voiceButtonStyle}
+                  renderVoiceButtonIcon={renderVoiceButtonIcon}
+                  voiceTooltipText={voiceTooltipText}
+                  isRealtimeVoiceForCurrentAgent={isRealtimeVoiceForCurrentAgent}
+                  voiceMuteToggleKeys={voiceMuteToggleKeys}
+                  dictationToggleKeys={dictationToggleKeys}
+                />
+                {rightContent}
+                <PrimaryAction
+                  kind={primaryActionKind}
+                  activeActionContent={activeActionContent}
+                  shouldShow
+                  canPressLoadingButton={canPressLoadingButton}
+                  onSubmitLoadingPress={onSubmitLoadingPress}
+                  onDefaultSendAction={handleDefaultSendAction}
+                  isSendButtonDisabled={isSendButtonDisabled}
+                  submitAccessibilityLabel={submitAccessibilityLabel}
+                  sendButtonCombinedStyle={sendButtonCombinedStyle}
+                  isSubmitLoading={isSubmitLoading}
+                  submitIcon={submitIcon}
+                  submitButtonTestID={submitButtonTestID}
+                  buttonIconSize={buttonIconSize}
+                  sendKeys={DEFAULT_SEND_KEYS}
+                  sendTooltipLabel={sendTooltipLabel}
+                  gradient={isClickUp}
+                />
+              </View>
+            </View>
           </View>
-        </View>
+        </ClickUpComposerFrame>
 
         <View
           style={overlayContainerStyle}
@@ -1849,6 +1872,12 @@ const styles = StyleSheet.create((theme: Theme) => ({
           transitionTimingFunction: "ease-in-out",
         }
       : {}),
+  },
+  // Inside ClickUpComposerFrame the gradient is the border, so the box drops its own.
+  inputWrapperClickUp: {
+    borderWidth: 0,
+    borderRadius: CLICKUP_COMPOSER_RADIUS,
+    backgroundColor: theme.colors.surface0,
   },
   textInputScrollWrapper: {
     position: "relative",
@@ -1926,6 +1955,16 @@ const styles = StyleSheet.create((theme: Theme) => ({
     alignItems: "center",
     justifyContent: "center",
     marginLeft: theme.spacing[1],
+  },
+  // ClickUp Brain: a rounded square whose violet → magenta fill is drawn by ClickUpSendGradient.
+  sendButtonIconLayer: {
+    position: "relative",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sendButtonClickUp: {
+    borderRadius: theme.borderRadius.md,
+    overflow: "hidden",
   },
   iconButtonHovered: {
     backgroundColor: theme.colors.surface2,

@@ -11,7 +11,14 @@ import { ContextStatusDot, ClusterStatusDot } from "@/components/cluster-dot";
 import { buildClusterWorkloadsRoute } from "@/utils/host-routes";
 import { useClusterNavStore } from "@/stores/cluster-nav-store";
 import type { Theme } from "@/styles/theme";
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { clickUpListStyles } from "@/components/clickup-shell/list-styles";
 import type { ClusterInfo, KubeContextInfo } from "@jagentdesk/protocol/cluster/rpc-schemas";
+
+/** Context rows: ClickUp's hairline divider color instead of the classic border. */
+function contextRowStyle(isClickUp: boolean) {
+  return isClickUp ? [styles.contextRow, clickUpListStyles.row] : styles.contextRow;
+}
 
 function ContextRow({
   ctx,
@@ -39,12 +46,13 @@ function ContextRow({
     if (cluster) onDisconnect(cluster.id);
   }, [onDisconnect, cluster]);
 
+  const isClickUp = useIsClickUpTheme();
   let connectLabel = "Connect";
   if (busy) connectLabel = "Connecting…";
   else if (errored) connectLabel = "Retry";
 
   return (
-    <View style={styles.contextRow}>
+    <View style={contextRowStyle(isClickUp)}>
       <View style={styles.contextHeader}>
         {cluster ? (
           <ClusterStatusDot state={cluster.state} />
@@ -106,6 +114,7 @@ export function ClustersScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const isCompact = useIsCompactFormFactor();
+  const isClickUp = useIsClickUpTheme();
 
   // Phones render this screen with no native header, so pad past the status
   // bar / notch. 0 on desktop, real inset on iOS + Android.
@@ -236,7 +245,7 @@ export function ClustersScreen() {
       {contexts.length === 0 ? (
         <Text style={styles.emptyText}>No Kubernetes contexts detected in ~/.kube/config.</Text>
       ) : (
-        <View style={styles.sectionCard}>
+        <View style={isClickUp ? styles.sectionCardClickUp : styles.sectionCard}>
           {contexts.map((ctx) => (
             <ContextRow
               key={ctx.name}
@@ -266,7 +275,8 @@ const styles = StyleSheet.create((theme) => ({
   container: {
     flex: 1,
     minHeight: 0,
-    backgroundColor: theme.colors.surface0,
+    // pageCanvas is surface0 in classic themes, ClickUp's gray canvas behind white cards.
+    backgroundColor: theme.chrome.pageCanvas,
   },
   contentContainer: {
     padding: theme.spacing[4],
@@ -323,6 +333,13 @@ const styles = StyleSheet.create((theme) => ({
     borderRadius: theme.borderRadius.lg,
     borderWidth: theme.borderWidth[1],
     borderColor: theme.colors.border,
+    overflow: "hidden",
+  },
+  sectionCardClickUp: {
+    borderRadius: theme.chrome.cardRadius,
+    borderWidth: 1,
+    borderColor: theme.chrome.cardBorder,
+    backgroundColor: theme.chrome.cardBackground,
     overflow: "hidden",
   },
   emptyText: {

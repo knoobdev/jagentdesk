@@ -1,3 +1,5 @@
+import { clickUpChipStyles } from "@/components/clickup-shell/list-styles";
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
 import { useCallback, useMemo } from "react";
 import { Pressable, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
@@ -20,17 +22,36 @@ interface ChipProps {
   onToggle: (value: string) => void;
 }
 
+// ClickUp chips (lavender when selected) replace both the category chips and the sort pills.
+function chipStyle(isClickUp: boolean, active: boolean) {
+  if (isClickUp) return active ? clickUpChipStyles.chipActive : clickUpChipStyles.chip;
+  return active ? styles.chipActiveWrap : styles.chip;
+}
+function chipTextStyle(isClickUp: boolean, active: boolean) {
+  if (isClickUp) return active ? clickUpChipStyles.textActive : clickUpChipStyles.text;
+  return active ? styles.chipTextActive : styles.chipText;
+}
+function sortStyle(isClickUp: boolean, active: boolean) {
+  if (isClickUp) return active ? clickUpChipStyles.chipActive : clickUpChipStyles.chip;
+  return active ? styles.sortTabActiveWrap : styles.sortTab;
+}
+function sortTextStyle(isClickUp: boolean, active: boolean) {
+  if (isClickUp) return active ? clickUpChipStyles.textActive : clickUpChipStyles.text;
+  return active ? styles.sortTabTextActive : styles.sortTabText;
+}
+
 function FilterChip({ value, label, active, onToggle }: ChipProps) {
+  const isClickUp = useIsClickUpTheme();
   const handlePress = useCallback(() => onToggle(value), [onToggle, value]);
   const state = useMemo(() => ({ selected: active }), [active]);
   return (
     <Pressable
       onPress={handlePress}
-      style={active ? styles.chipActiveWrap : styles.chip}
+      style={chipStyle(isClickUp, active)}
       accessibilityRole="button"
       accessibilityState={state}
     >
-      <Text style={active ? styles.chipTextActive : styles.chipText}>{label}</Text>
+      <Text style={chipTextStyle(isClickUp, active)}>{label}</Text>
     </Pressable>
   );
 }
@@ -43,16 +64,17 @@ interface SortOptionProps {
 }
 
 function SortOption({ value, label, active, onSelect }: SortOptionProps) {
+  const isClickUp = useIsClickUpTheme();
   const handlePress = useCallback(() => onSelect(value), [onSelect, value]);
   const state = useMemo(() => ({ selected: active }), [active]);
   return (
     <Pressable
       onPress={handlePress}
-      style={active ? styles.sortTabActiveWrap : styles.sortTab}
+      style={sortStyle(isClickUp, active)}
       accessibilityRole="button"
       accessibilityState={state}
     >
-      <Text style={active ? styles.sortTabTextActive : styles.sortTabText}>{label}</Text>
+      <Text style={sortTextStyle(isClickUp, active)}>{label}</Text>
     </Pressable>
   );
 }

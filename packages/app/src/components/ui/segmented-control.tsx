@@ -8,6 +8,7 @@ import {
   type SegmentedControlSize,
 } from "@/components/ui/control-geometry";
 import type { Theme } from "@/styles/theme";
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
 
 type SegmentedControlIconRenderer = (props: { color: string; size: number }) => ReactNode;
 
@@ -43,6 +44,12 @@ const ThemedSegmentIcon = withUnistyles(SegmentIcon);
 
 const selectedIconMapping = (theme: Theme) => ({ iconColor: theme.colors.surface0 });
 const mutedIconMapping = (theme: Theme) => ({ iconColor: theme.colors.foregroundMuted });
+const inkIconMapping = (theme: Theme) => ({ iconColor: theme.colors.foreground });
+
+function iconMappingFor(isSelected: boolean, underline: boolean) {
+  if (!isSelected) return mutedIconMapping;
+  return underline ? inkIconMapping : selectedIconMapping;
+}
 
 export function SegmentedControl<T extends string>({
   options,
@@ -63,9 +70,11 @@ export function SegmentedControl<T extends string>({
   const labelSizeStyle = sizeStyles.label;
   const iconSize = segmentedIconSize[size];
 
+  // ClickUp shows these choices as underlined text tabs (To Do / Done / Delegated).
+  const underline = useIsClickUpTheme();
   const containerStyle = useMemo(
-    () => [styles.container, containerSizeStyle, style],
-    [containerSizeStyle, style],
+    () => [styles.container, containerSizeStyle, underline && styles.containerUnderline, style],
+    [containerSizeStyle, style, underline],
   );
 
   return (
@@ -84,6 +93,7 @@ export function SegmentedControl<T extends string>({
             labelSizeStyle={labelSizeStyle}
             currentValue={value}
             onValueChange={onValueChange}
+            underline={underline}
           />
         );
       })}
@@ -100,7 +110,9 @@ function SegmentItem<T extends string>({
   labelSizeStyle,
   currentValue,
   onValueChange,
+  underline,
 }: {
+  underline: boolean;
   option: SegmentedControlOption<T>;
   isSelected: boolean;
   iconSize: number;
@@ -110,25 +122,37 @@ function SegmentItem<T extends string>({
   currentValue: T;
   onValueChange: (value: T) => void;
 }) {
-  const labelStyle = useMemo(
-    () => [styles.label, labelSizeStyle, isSelected && styles.labelSelected],
-    [labelSizeStyle, isSelected],
-  );
+  const labelStyle = useMemo(() => {
+    if (underline) {
+      return [styles.label, labelSizeStyle, isSelected && styles.labelUnderlineSelected];
+    }
+    return [styles.label, labelSizeStyle, isSelected && styles.labelSelected];
+  }, [labelSizeStyle, isSelected, underline]);
   const handlePress = useCallback(() => {
     if (!option.disabled && option.value !== currentValue) {
       onValueChange(option.value);
     }
   }, [option.disabled, option.value, currentValue, onValueChange]);
   const pressableStyle = useCallback(
-    ({ hovered, pressed }: PressableStateCallbackType & { hovered?: boolean }) => [
-      styles.segment,
-      segmentSizeStyle,
-      isSelected && styles.segmentSelected,
-      Boolean(hovered) && !isSelected && styles.segmentHover,
-      pressed && !isSelected && styles.segmentPressed,
-      option.disabled && styles.segmentDisabled,
-    ],
-    [isSelected, option.disabled, segmentSizeStyle],
+    ({ hovered, pressed }: PressableStateCallbackType & { hovered?: boolean }) =>
+      underline
+        ? [
+            styles.segment,
+            segmentSizeStyle,
+            styles.segmentUnderline,
+            isSelected && styles.segmentUnderlineSelected,
+            Boolean(hovered) && !isSelected && styles.segmentUnderlineHover,
+            option.disabled && styles.segmentDisabled,
+          ]
+        : [
+            styles.segment,
+            segmentSizeStyle,
+            isSelected && styles.segmentSelected,
+            Boolean(hovered) && !isSelected && styles.segmentHover,
+            pressed && !isSelected && styles.segmentPressed,
+            option.disabled && styles.segmentDisabled,
+          ],
+    [isSelected, option.disabled, segmentSizeStyle, underline],
   );
   const accessibilityState = useMemo(
     () => ({ selected: isSelected, disabled: option.disabled }),
@@ -148,7 +172,7 @@ function SegmentItem<T extends string>({
         <ThemedSegmentIcon
           icon={option.icon}
           iconSize={iconSize}
-          uniProps={isSelected ? selectedIconMapping : mutedIconMapping}
+          uniProps={iconMappingFor(isSelected, underline)}
         />
       ) : null}
       {hideLabels ? null : (
@@ -226,6 +250,31 @@ const styles = StyleSheet.create((theme) => {
     },
     labelSelected: {
       color: theme.colors.surface0,
+    },
+    // ClickUp underline tabs: no pill, an ink bar under the selected label.
+    containerUnderline: {
+      gap: theme.spacing[4],
+      paddingHorizontal: 0,
+      paddingVertical: 0,
+      backgroundColor: "transparent",
+      borderWidth: 0,
+    },
+    segmentUnderline: {
+      paddingHorizontal: 0,
+      borderRadius: 0,
+      backgroundColor: "transparent",
+      borderBottomWidth: 2,
+      borderBottomColor: "transparent",
+    },
+    segmentUnderlineSelected: {
+      borderBottomColor: theme.colors.foreground,
+    },
+    segmentUnderlineHover: {
+      borderBottomColor: theme.colors.border,
+    },
+    labelUnderlineSelected: {
+      color: theme.colors.foreground,
+      fontWeight: theme.fontWeight.semibold,
     },
   };
 });

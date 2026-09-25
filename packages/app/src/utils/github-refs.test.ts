@@ -71,10 +71,7 @@ describe("parseGithubRef", () => {
 
   it("returns null for non-GitHub remotes and empty text", () => {
     expect(
-      parseGithubRef(
-        "https://github.com/acme/example/pull/994",
-        "git@gitlab.com:acme/example.git",
-      ),
+      parseGithubRef("https://github.com/acme/example/pull/994", "git@gitlab.com:acme/example.git"),
     ).toBeNull();
     expect(parseGithubRef("", httpsRemote)).toBeNull();
     expect(parseGithubRef("https://github.com/acme/example/pull/994", null)).toBeNull();

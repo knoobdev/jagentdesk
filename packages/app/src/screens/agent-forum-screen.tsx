@@ -21,7 +21,7 @@ import {
 } from "react-native";
 import Markdown from "react-native-markdown-display";
 import Svg, { Circle, G, Rect, Text as SvgText } from "react-native-svg";
-import { StyleSheet } from "react-native-unistyles";
+import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useIsFocused } from "@react-navigation/native";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { MenuHeader } from "@/components/headers/menu-header";
@@ -29,6 +29,8 @@ import { OfficeScene } from "@/screens/agent-forum-office";
 import { ChatTab } from "@/screens/agent-forum-chat";
 import { useHosts, useHostRuntimeClient } from "@/runtime/host-runtime";
 import { MarkdownRenderer } from "@/components/markdown/renderer";
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import type { Theme } from "@/styles/theme";
 import type {
   ForumDiagram,
   ForumEpicStat,
@@ -110,7 +112,16 @@ const ROLE_LABEL: Record<ForumRole, string> = {
   user: "You",
   system: "System",
 };
-function roleColor(role: ForumRole): string {
+// ClickUp's light canvas can't carry the dark palette's near-white / near-black neutrals, so the
+// neutral roles and phases fall back to mid grays there (readable on both ClickUp halves).
+const CLICKUP_NEUTRAL = "#6b6f76";
+const CLICKUP_NEUTRAL_FAINT = "#8a8f98";
+
+function roleColor(role: ForumRole, isClickUp = false): string {
+  if (isClickUp && role === "supervisor") return CLICKUP_NEUTRAL;
+  if (isClickUp && !["lead", "ba", "reviewer", "tester", "pentester"].includes(role)) {
+    return CLICKUP_NEUTRAL_FAINT;
+  }
   switch (role) {
     case "lead":
       return C.green;
@@ -127,11 +138,11 @@ function roleColor(role: ForumRole): string {
       return C.faint;
   }
 }
-function phaseChipColor(status: ForumTopicStatus): string {
+function phaseChipColor(status: ForumTopicStatus, isClickUp = false): string {
   if (status === "done") return C.green;
   if (status === "review") return C.amber;
-  if (status === "archived") return C.faint;
-  return C.soft;
+  if (status === "archived") return isClickUp ? CLICKUP_NEUTRAL_FAINT : C.faint;
+  return isClickUp ? CLICKUP_NEUTRAL : C.soft;
 }
 function taskDotColor(status: ForumTaskStatus): string {
   return STATUS_COLOR[status] ?? C.faint;
@@ -253,6 +264,8 @@ function reopenInfo(task: ForumTask): {
 
 // ---- screen -----------------------------------------------------------------------------------
 export function AgentForumScreen(): ReactElement {
+  const isClickUp = useIsClickUpTheme();
+  const styles = forumStyles(isClickUp);
   const isFocused = useIsFocused();
   const hosts = useHosts();
   const [selected, setSelected] = useState<{ serverId: string; topicId: string } | null>(null);
@@ -340,6 +353,8 @@ const SkeletonBlock = memo(function SkeletonBlock({
   width?: number | `${number}%`;
   radius?: number;
 }): ReactElement {
+  const isClickUp = useIsClickUpTheme();
+  const styles = forumStyles(isClickUp);
   const pulse = useRef(new Animated.Value(0.4)).current;
   useEffect(() => {
     const loop = Animated.loop(
@@ -356,15 +371,23 @@ const SkeletonBlock = memo(function SkeletonBlock({
       height,
       width: width ?? ("100%" as const),
       borderRadius: radius ?? 6,
-      backgroundColor: C.card,
+      // ClickUp paints the fill with a themed child view (Animated.View keeps static styles only).
+      backgroundColor: isClickUp ? "transparent" : C.card,
+      overflow: "hidden" as const,
       opacity: pulse,
     }),
-    [height, width, radius, pulse],
+    [height, width, radius, pulse, isClickUp],
   );
-  return <Animated.View style={style} />;
+  return (
+    <Animated.View style={style}>
+      {isClickUp ? <View style={styles.skeletonFill} /> : null}
+    </Animated.View>
+  );
 });
 
 const ThreadSkeleton = memo(function ThreadSkeleton(): ReactElement {
+  const isClickUp = useIsClickUpTheme();
+  const styles = forumStyles(isClickUp);
   return (
     <View style={styles.threadBody}>
       <SkeletonBlock height={22} width="60%" />
@@ -390,6 +413,8 @@ const HostTopics = memo(function HostTopics({
   serverId: string;
   onOpen: (sel: { serverId: string; topicId: string }) => void;
 }): ReactElement | null {
+  const isClickUp = useIsClickUpTheme();
+  const styles = forumStyles(isClickUp);
   const client = useHostRuntimeClient(serverId);
   const [topics, setTopics] = useState<ForumTopicSummary[]>([]);
   const onStreamed = useCallback((topic: StoredForumTopic) => {
@@ -438,8 +463,8 @@ const HostTopics = memo(function HostTopics({
       <Dashboard summaries={sorted} />
       <View style={styles.threadList}>
         <View style={styles.threadListHead}>
-          <Text style={styles.colTopic}>THREAD</Text>
-          <Text style={styles.colPhase}>PHASE</Text>
+          <Text style={styles.colTopic}>{isClickUp ? "Thread" : "THREAD"}</Text>
+          <Text style={styles.colPhase}>{isClickUp ? "Phase" : "PHASE"}</Text>
         </View>
         {pageItems.map((topic) => (
           <TopicRow
@@ -457,6 +482,8 @@ const HostTopics = memo(function HostTopics({
 });
 
 const Stat = memo(function Stat({ n, label }: { n: number; label: string }): ReactElement {
+  const isClickUp = useIsClickUpTheme();
+  const styles = forumStyles(isClickUp);
   return (
     <View style={styles.stat}>
       <Text style={styles.statN}>{n}</Text>
@@ -481,6 +508,23 @@ const DONUT_STROKE = 22;
 // A real SVG donut of the task-status composition, drawn as stroked arcs via strokeDasharray with a
 // 2px surface gap between segments; the hero total sits in the hole. Legend lives beside it (identity
 // is never color-alone).
+// withUnistyles on the <Svg> root only (its web wrapper is a div, invalid inside an <svg>): ClickUp
+// feeds the ink color in as `color` and the chart's neutrals paint with currentColor + opacity.
+const ThemedSvg = withUnistyles(Svg);
+const inkSvgColor = (theme: Theme) => ({ color: theme.colors.foreground });
+const CLICKUP_SVG = { uniProps: inkSvgColor };
+const CLASSIC_SVG = {};
+function svgRootProps(isClickUp: boolean) {
+  return isClickUp ? CLICKUP_SVG : CLASSIC_SVG;
+}
+// Neutral paint: classic keeps its fixed dark-palette hex, ClickUp tints currentColor.
+function neutralPaint(isClickUp: boolean, classic: string): string {
+  return isClickUp ? "currentColor" : classic;
+}
+function neutralOpacity(isClickUp: boolean, opacity: number): number | undefined {
+  return isClickUp ? opacity : undefined;
+}
+
 const StatusDonut = memo(function StatusDonut({
   segments,
   total,
@@ -488,6 +532,7 @@ const StatusDonut = memo(function StatusDonut({
   segments: { key: ForumTaskStatus; label: string; value: number; color: string }[];
   total: number;
 }): ReactElement {
+  const isClickUp = useIsClickUpTheme();
   const r = (DONUT_SIZE - DONUT_STROKE) / 2;
   const circ = 2 * Math.PI * r;
   const center = DONUT_SIZE / 2;
@@ -515,14 +560,15 @@ const StatusDonut = memo(function StatusDonut({
       return arc;
     });
   return (
-    <Svg width={DONUT_SIZE} height={DONUT_SIZE}>
+    <ThemedSvg width={DONUT_SIZE} height={DONUT_SIZE} {...svgRootProps(isClickUp)}>
       <G rotation={-90} origin={`${center}, ${center}`}>
         <Circle
           cx={center}
           cy={center}
           r={r}
           fill="none"
-          stroke={C.cardAlt}
+          stroke={neutralPaint(isClickUp, C.cardAlt)}
+          strokeOpacity={neutralOpacity(isClickUp, 0.08)}
           strokeWidth={DONUT_STROKE}
         />
         {total > 0 ? arcs : null}
@@ -530,7 +576,7 @@ const StatusDonut = memo(function StatusDonut({
       <SvgText
         x={center}
         y={center + 2}
-        fill={C.text}
+        fill={neutralPaint(isClickUp, C.text)}
         fontSize={34}
         fontWeight="700"
         fontFamily={FONT_MONO}
@@ -541,14 +587,15 @@ const StatusDonut = memo(function StatusDonut({
       <SvgText
         x={center}
         y={center + 22}
-        fill={C.muted}
+        fill={neutralPaint(isClickUp, C.muted)}
+        fillOpacity={neutralOpacity(isClickUp, 0.6)}
         fontSize={11}
         fontFamily={FONT_MONO}
         textAnchor="middle"
       >
         TASKS
       </SvgText>
-    </Svg>
+    </ThemedSvg>
   );
 });
 
@@ -559,21 +606,37 @@ const EPIC_LABEL_W = 76;
 // A real SVG horizontal bar chart of tasks per epic: a muted track (total) with a green fill (done)
 // and a done/total tag — a progress-by-epic view, direct-labelled.
 const EpicBars = memo(function EpicBars({ epics }: { epics: ForumEpicStat[] }): ReactElement {
+  const isClickUp = useIsClickUpTheme();
   const max = Math.max(1, ...epics.map((e) => e.total));
   const plotW = EPIC_BAR_W - EPIC_LABEL_W - 40;
   const height = epics.length * EPIC_ROW_H + 4;
   return (
-    <Svg width={EPIC_BAR_W} height={height}>
+    <ThemedSvg width={EPIC_BAR_W} height={height} {...svgRootProps(isClickUp)}>
       {epics.map((e, i) => {
         const y = i * EPIC_ROW_H + 4;
         const totalW = Math.max(3, (e.total / max) * plotW);
         const doneW = (e.done / max) * plotW;
         return (
           <G key={e.name}>
-            <SvgText x={0} y={y + 14} fill={C.soft} fontSize={12} fontFamily={FONT_SANS}>
+            <SvgText
+              x={0}
+              y={y + 14}
+              fill={neutralPaint(isClickUp, C.soft)}
+              fillOpacity={neutralOpacity(isClickUp, 0.75)}
+              fontSize={12}
+              fontFamily={FONT_SANS}
+            >
               {e.name}
             </SvgText>
-            <Rect x={EPIC_LABEL_W} y={y + 2} width={totalW} height={14} rx={4} fill={C.cardAlt} />
+            <Rect
+              x={EPIC_LABEL_W}
+              y={y + 2}
+              width={totalW}
+              height={14}
+              rx={4}
+              fill={neutralPaint(isClickUp, C.cardAlt)}
+              fillOpacity={neutralOpacity(isClickUp, 0.08)}
+            />
             {doneW > 0 ? (
               <Rect
                 x={EPIC_LABEL_W}
@@ -587,7 +650,8 @@ const EpicBars = memo(function EpicBars({ epics }: { epics: ForumEpicStat[] }): 
             <SvgText
               x={EPIC_LABEL_W + totalW + 8}
               y={y + 14}
-              fill={C.muted}
+              fill={neutralPaint(isClickUp, C.muted)}
+              fillOpacity={neutralOpacity(isClickUp, 0.6)}
               fontSize={12}
               fontFamily={FONT_MONO}
             >
@@ -596,7 +660,7 @@ const EpicBars = memo(function EpicBars({ epics }: { epics: ForumEpicStat[] }): 
           </G>
         );
       })}
-    </Svg>
+    </ThemedSvg>
   );
 });
 
@@ -618,6 +682,8 @@ const Dashboard = memo(function Dashboard({
 }: {
   summaries: ForumTopicSummary[];
 }): ReactElement {
+  const isClickUp = useIsClickUpTheme();
+  const styles = forumStyles(isClickUp);
   const agg = useMemo(() => {
     const status: Record<string, number> = {};
     let posts = 0;
@@ -686,6 +752,8 @@ const Pager = memo(function Pager({
   pageCount: number;
   onPage: (p: number) => void;
 }): ReactElement {
+  const isClickUp = useIsClickUpTheme();
+  const styles = forumStyles(isClickUp);
   const prev = useCallback(() => onPage(Math.max(0, page - 1)), [onPage, page]);
   const next = useCallback(
     () => onPage(Math.min(pageCount - 1, page + 1)),
@@ -729,7 +797,9 @@ const ActivityRow = memo(function ActivityRow({
 }: {
   message: ForumMessage;
 }): ReactElement {
-  const color = roleColor(message.role);
+  const isClickUp = useIsClickUpTheme();
+  const styles = forumStyles(isClickUp);
+  const color = roleColor(message.role, isClickUp);
   return (
     <View style={styles.activityRow}>
       <View style={[styles.activityDot, { backgroundColor: color }]} />
@@ -756,6 +826,8 @@ const DiscussionPosts = memo(function DiscussionPosts({
   onVote: (messageId: string, direction: "up" | "down" | "clear") => void;
   startIndex: number;
 }): ReactElement | null {
+  const isClickUp = useIsClickUpTheme();
+  const styles = forumStyles(isClickUp);
   const [page, setPage] = useState(0);
   const pageCount = Math.max(1, Math.ceil(posts.length / POSTS_PER_PAGE));
   const clamped = Math.min(page, pageCount - 1);
@@ -813,6 +885,8 @@ const TopicRow = memo(function TopicRow({
   onOpen: (sel: { serverId: string; topicId: string }) => void;
   onDelete: (topicId: string) => void;
 }): ReactElement {
+  const isClickUp = useIsClickUpTheme();
+  const styles = forumStyles(isClickUp);
   const onPress = useCallback(
     () => onOpen({ serverId, topicId: topic.id }),
     [onOpen, serverId, topic.id],
@@ -855,7 +929,9 @@ const TopicRow = memo(function TopicRow({
 });
 
 const PhaseChip = memo(function PhaseChip({ status }: { status: ForumTopicStatus }): ReactElement {
-  const color = phaseChipColor(status);
+  const isClickUp = useIsClickUpTheme();
+  const styles = forumStyles(isClickUp);
+  const color = phaseChipColor(status, isClickUp);
   return (
     <View style={[styles.chip, { borderColor: color }]}>
       <Text style={[styles.chipText, { color }]}>{phaseLabel(status).toUpperCase()}</Text>
@@ -873,6 +949,8 @@ const TopicThread = memo(function TopicThread({
   topicId: string;
   onBack: () => void;
 }): ReactElement {
+  const isClickUp = useIsClickUpTheme();
+  const styles = forumStyles(isClickUp);
   const client = useHostRuntimeClient(serverId);
   const [topic, setTopic] = useState<StoredForumTopic | null>(null);
 
@@ -1008,6 +1086,8 @@ const ActivitySection = memo(function ActivitySection({
 }: {
   activity: ForumMessage[];
 }): ReactElement | null {
+  const isClickUp = useIsClickUpTheme();
+  const styles = forumStyles(isClickUp);
   const [page, setPage] = useState(0);
   const pageCount = Math.max(1, Math.ceil(activity.length / ACTIVITY_PER_PAGE));
   const clamped = Math.min(page, pageCount - 1);
@@ -1047,6 +1127,8 @@ const ActivitySection = memo(function ActivitySection({
 });
 
 const PhaseBar = memo(function PhaseBar({ status }: { status: ForumTopicStatus }): ReactElement {
+  const isClickUp = useIsClickUpTheme();
+  const styles = forumStyles(isClickUp);
   const active = phaseIndex(status);
   return (
     <View style={styles.phaseBar}>
@@ -1129,6 +1211,8 @@ const CodeBlock = memo(function CodeBlock({
   content: string;
   lang?: string;
 }): ReactElement {
+  const isClickUp = useIsClickUpTheme();
+  const styles = forumStyles(isClickUp);
   return (
     <View style={styles.codeBlock}>
       <View style={styles.codeBar}>
@@ -1156,6 +1240,8 @@ const renderCode = (node: any): ReactElement => (
 const MD_RULES = { fence: renderCode, code_block: renderCode };
 
 const ForumImage = memo(function ForumImage({ uri }: { uri: string }): ReactElement {
+  const isClickUp = useIsClickUpTheme();
+  const styles = forumStyles(isClickUp);
   const source = useMemo(() => ({ uri }), [uri]);
   return <Image source={source} style={styles.attachedImage} resizeMode="cover" />;
 });
@@ -1166,6 +1252,8 @@ const ForumImages = memo(function ForumImages({
 }: {
   images?: string[];
 }): ReactElement | null {
+  const isClickUp = useIsClickUpTheme();
+  const styles = forumStyles(isClickUp);
   if (!images || images.length === 0) return null;
   return (
     <View style={styles.imageRow}>
@@ -1177,6 +1265,9 @@ const ForumImages = memo(function ForumImages({
 });
 
 const ForumMarkdown = memo(function ForumMarkdown({ text }: { text: string }): ReactElement {
+  const isClickUp = useIsClickUpTheme();
+  // ClickUp renders posts with the app's theme-aware markdown instead of the fixed dark styles.
+  if (isClickUp) return <MarkdownRenderer text={text} />;
   return (
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- lib style/rules maps aren't typed
     <Markdown style={MD_STYLES as any} rules={MD_RULES as any}>
@@ -1194,6 +1285,8 @@ const VoteBar = memo(function VoteBar({
   message: ForumMessage;
   onVote: (messageId: string, direction: "up" | "down" | "clear") => void;
 }): ReactElement {
+  const isClickUp = useIsClickUpTheme();
+  const styles = forumStyles(isClickUp);
   const ups = message.upvoters.length;
   const downs = message.downvoters.length;
   const score = ups - downs;
@@ -1248,8 +1341,10 @@ const PostCard = memo(function PostCard({
   quoted: ForumMessage | null;
   onVote: (messageId: string, direction: "up" | "down" | "clear") => void;
 }): ReactElement {
+  const isClickUp = useIsClickUpTheme();
+  const styles = forumStyles(isClickUp);
   const role = message.role;
-  const color = roleColor(role);
+  const color = roleColor(role, isClickUp);
   return (
     <View style={[styles.post, message.awaitingHuman ? styles.postAwaiting : null]}>
       <View style={styles.postbit}>
@@ -1300,6 +1395,8 @@ const DiagramVersionPill = memo(function DiagramVersionPill({
   active: boolean;
   onSelect: (id: string) => void;
 }): ReactElement {
+  const isClickUp = useIsClickUpTheme();
+  const styles = forumStyles(isClickUp);
   const handle = useCallback(() => onSelect(diagram.id), [onSelect, diagram.id]);
   return (
     <Pressable onPress={handle} style={[styles.versionPill, active ? styles.versionPillOn : null]}>
@@ -1317,6 +1414,8 @@ const DiagramTab = memo(function DiagramTab({
 }: {
   diagrams: ForumDiagram[];
 }): ReactElement {
+  const isClickUp = useIsClickUpTheme();
+  const styles = forumStyles(isClickUp);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const current = useMemo(() => {
     if (diagrams.length === 0) return null;
@@ -1372,6 +1471,8 @@ const TabBar = memo(function TabBar({
   chatCount: number;
   archCount: number;
 }): ReactElement {
+  const isClickUp = useIsClickUpTheme();
+  const styles = forumStyles(isClickUp);
   const onThread = useCallback(() => onTab("thread"), [onTab]);
   const onBoard = useCallback(() => onTab("board"), [onTab]);
   const onOffice = useCallback(() => onTab("office"), [onTab]);
@@ -1383,31 +1484,37 @@ const TabBar = memo(function TabBar({
         onPress={onThread}
         style={[styles.tabBtn, tab === "thread" ? styles.tabBtnOn : null]}
       >
-        <Text style={[styles.tabTxt, tab === "thread" ? styles.tabTxtOn : null]}>THREAD</Text>
+        <Text style={[styles.tabTxt, tab === "thread" ? styles.tabTxtOn : null]}>
+          {isClickUp ? "Thread" : "THREAD"}
+        </Text>
       </Pressable>
       <Pressable
         onPress={onBoard}
         style={[styles.tabBtn, tab === "board" ? styles.tabBtnOn : null]}
       >
         <Text style={[styles.tabTxt, tab === "board" ? styles.tabTxtOn : null]}>
-          BOARD · {boardCount}
+          {isClickUp ? "Board" : "BOARD"} · {boardCount}
         </Text>
       </Pressable>
       <Pressable onPress={onChat} style={[styles.tabBtn, tab === "chat" ? styles.tabBtnOn : null]}>
         <Text style={[styles.tabTxt, tab === "chat" ? styles.tabTxtOn : null]}>
-          CHAT{chatCount > 0 ? ` · ${chatCount}` : ""}
+          {isClickUp ? "Chat" : "CHAT"}
+          {chatCount > 0 ? ` · ${chatCount}` : ""}
         </Text>
       </Pressable>
       <Pressable onPress={onArch} style={[styles.tabBtn, tab === "arch" ? styles.tabBtnOn : null]}>
         <Text style={[styles.tabTxt, tab === "arch" ? styles.tabTxtOn : null]}>
-          ARCH{archCount > 0 ? ` · ${archCount}` : ""}
+          {isClickUp ? "Arch" : "ARCH"}
+          {archCount > 0 ? ` · ${archCount}` : ""}
         </Text>
       </Pressable>
       <Pressable
         onPress={onOffice}
         style={[styles.tabBtn, tab === "office" ? styles.tabBtnOn : null]}
       >
-        <Text style={[styles.tabTxt, tab === "office" ? styles.tabTxtOn : null]}>OFFICE</Text>
+        <Text style={[styles.tabTxt, tab === "office" ? styles.tabTxtOn : null]}>
+          {isClickUp ? "Office" : "OFFICE"}
+        </Text>
       </Pressable>
     </View>
   );
@@ -1431,6 +1538,8 @@ const EpicChip = memo(function EpicChip({
   active: boolean;
   onToggle: (name: string | null) => void;
 }): ReactElement {
+  const isClickUp = useIsClickUpTheme();
+  const styles = forumStyles(isClickUp);
   const press = useCallback(
     () => onToggle(active ? null : epic.name),
     [active, epic.name, onToggle],
@@ -1452,6 +1561,8 @@ const KanbanCard = memo(function KanbanCard({
   task: ForumTask;
   onOpen: (taskId: string) => void;
 }): ReactElement {
+  const isClickUp = useIsClickUpTheme();
+  const styles = forumStyles(isClickUp);
   const press = useCallback(() => onOpen(task.id), [onOpen, task.id]);
   const who =
     task.assigneeLabel ?? (task.assigneeAgentId ? task.assigneeAgentId.slice(0, 8) : null);
@@ -1485,6 +1596,8 @@ const KanbanBoard = memo(function KanbanBoard({
   tasks: ForumTask[];
   onOpenTask: (taskId: string) => void;
 }): ReactElement {
+  const isClickUp = useIsClickUpTheme();
+  const styles = forumStyles(isClickUp);
   const [epicFilter, setEpicFilter] = useState<string | null>(null);
   if (tasks.length === 0) {
     return (
@@ -1549,6 +1662,8 @@ const ReviewFindingRow = memo(function ReviewFindingRow({
 }: {
   finding: ForumReviewFinding;
 }): ReactElement {
+  const isClickUp = useIsClickUpTheme();
+  const styles = forumStyles(isClickUp);
   const color = SEVERITY_COLOR[finding.severity] ?? C.muted;
   const where = finding.startLine ? `${finding.path}:${finding.startLine}` : finding.path;
   return (
@@ -1576,6 +1691,8 @@ const ReviewSection = memo(function ReviewSection({
 }: {
   reviews: ForumTaskReview[];
 }): ReactElement | null {
+  const isClickUp = useIsClickUpTheme();
+  const styles = forumStyles(isClickUp);
   if (reviews.length === 0) return null;
   return (
     <>
@@ -1617,6 +1734,8 @@ const TaskDetailContent = memo(function TaskDetailContent({
   onClose: () => void;
   mobile: boolean;
 }): ReactElement {
+  const isClickUp = useIsClickUpTheme();
+  const styles = forumStyles(isClickUp);
   const who = task.assigneeLabel ?? (task.assigneeAgentId ? task.assigneeAgentId.slice(0, 8) : "—");
   const reporter = task.createdByLabel ?? task.createdBy.slice(0, 8);
   const reopen = reopenInfo(task);
@@ -1695,6 +1814,8 @@ const TaskDetailSheet = memo(function TaskDetailSheet({
   task: ForumTask;
   onClose: () => void;
 }): ReactElement {
+  const isClickUp = useIsClickUpTheme();
+  const styles = forumStyles(isClickUp);
   const { width } = useWindowDimensions();
   const anim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
@@ -1723,6 +1844,8 @@ const TaskDetailModal = memo(function TaskDetailModal({
   task: ForumTask | null;
   onClose: () => void;
 }): ReactElement | null {
+  const isClickUp = useIsClickUpTheme();
+  const styles = forumStyles(isClickUp);
   const isMobile = useIsCompactFormFactor();
   if (!task) return null;
   if (isMobile) {
@@ -1748,6 +1871,8 @@ const TaskMeta = memo(function TaskMeta({
   value: string;
   color?: string;
 }): ReactElement {
+  const isClickUp = useIsClickUpTheme();
+  const styles = forumStyles(isClickUp);
   return (
     <View style={styles.metaCell}>
       <Text style={styles.metaLabel}>{label}</Text>
@@ -1763,7 +1888,9 @@ const TaskCommentRow = memo(function TaskCommentRow({
 }: {
   comment: ForumTaskComment;
 }): ReactElement {
-  const color = roleColor(comment.role);
+  const isClickUp = useIsClickUpTheme();
+  const styles = forumStyles(isClickUp);
+  const color = roleColor(comment.role, isClickUp);
   return (
     <View style={styles.commentRow}>
       <View style={styles.commentHead}>
@@ -1779,7 +1906,9 @@ const TaskCommentRow = memo(function TaskCommentRow({
 // ---- styles -----------------------------------------------------------------------------------
 
 // Forum uses a fixed dark palette (independent of the app light/dark theme); the theme arg is unused.
-const styles = StyleSheet.create((_theme) => ({
+const classicStyles = StyleSheet.create((_theme) => ({
+  // skeleton pulse fill (the Animated.View only carries size + opacity)
+  skeletonFill: { flex: 1, backgroundColor: C.card },
   container: { flex: 1, backgroundColor: C.bg },
   boardBody: { padding: 20, gap: 20, maxWidth: 900, width: "100%", alignSelf: "center" },
   tagline: { color: C.muted, fontSize: 13, lineHeight: 20, fontFamily: FONT_SANS },
@@ -2423,3 +2552,668 @@ const styles = StyleSheet.create((_theme) => ({
     fontStyle: "italic",
   },
 }));
+
+// ClickUp variant of the forum sheet: same keys, drawn from the theme (white cards, #ececec
+// hairlines, ink text, violet accent, sans labels, underlined tabs) instead of the fixed dark palette.
+const clickUpStyles = StyleSheet.create((theme) => ({
+  // skeleton pulse fill (the Animated.View only carries size + opacity)
+  skeletonFill: { flex: 1, backgroundColor: theme.colors.surface2 },
+  container: { flex: 1, backgroundColor: theme.colors.surface0 },
+  boardBody: { padding: 20, gap: 20, maxWidth: 900, width: "100%", alignSelf: "center" },
+  tagline: { color: theme.colors.foregroundMuted, fontSize: 13, lineHeight: 20 },
+  emptyWrap: { flex: 1, alignItems: "center", justifyContent: "center", padding: 48 },
+  emptyText: { color: theme.colors.foregroundMuted, fontSize: 13 },
+  board: { gap: 16 },
+  statsRow: { flexDirection: "row", flexWrap: "wrap", rowGap: 12, gap: { xs: 16, md: 32 } },
+  stat: { alignItems: "flex-start" },
+  statN: { color: theme.colors.foreground, fontSize: 26, fontWeight: "600" },
+  statLabel: {
+    letterSpacing: 0,
+    color: theme.colors.foregroundMuted,
+    fontSize: 11,
+    textTransform: "capitalize",
+  },
+  threadList: {
+    borderWidth: 1,
+    borderColor: theme.chrome.cardBorder,
+    borderRadius: 10,
+    overflow: "hidden",
+    backgroundColor: theme.chrome.cardBackground,
+  },
+  threadListHead: {
+    flexDirection: "row",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: theme.chrome.cardBackground,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.chrome.cardBorder,
+  },
+  colTopic: {
+    flex: 1,
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.medium,
+  },
+  colPhase: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.medium,
+  },
+  threadRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderTopWidth: 1,
+    borderTopColor: theme.chrome.cardBorder,
+  },
+  avatarSm: {
+    alignItems: "center",
+    justifyContent: "center",
+    width: 30,
+    height: 30,
+    borderRadius: 6,
+    backgroundColor: theme.colors.accent,
+  },
+  avatarSmText: { color: "#ffffff", fontSize: 13, fontWeight: "700" },
+  threadMain: { flex: 1, gap: 3 },
+  threadTitle: { color: theme.colors.foreground, fontSize: 15, fontWeight: "600" },
+  threadMeta: { letterSpacing: 0, color: theme.colors.foregroundMuted, fontSize: 12 },
+  chip: { borderRadius: 4, paddingHorizontal: 8, paddingVertical: 2, borderWidth: 1 },
+  chipText: { letterSpacing: 0, fontSize: 10, fontWeight: "700" },
+  threadRoot: { flex: 1, backgroundColor: theme.colors.surface0 },
+  threadBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.chrome.cardBorder,
+  },
+  backText: { color: theme.colors.accent, fontSize: 13 },
+  threadContent: { flex: 1, width: "100%" },
+  threadHeader: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 8,
+    gap: 12,
+    maxWidth: 900,
+    width: "100%",
+    alignSelf: "center",
+  },
+  threadBody: { padding: 20, gap: 12, maxWidth: 900, width: "100%", alignSelf: "center" },
+  threadStack: { gap: 12 },
+  postStack: { gap: 12 },
+  postTitle: { color: theme.colors.foreground, fontSize: 22, fontWeight: "700" },
+  phaseBar: { flexDirection: "row", flexWrap: "wrap", gap: 14, marginBottom: 6 },
+  phaseStep: { flexDirection: "row", alignItems: "center", gap: 6 },
+  phaseDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: theme.colors.foregroundExtraMuted,
+  },
+  phaseDotOn: { backgroundColor: theme.colors.accent },
+  phaseText: { letterSpacing: 0, color: theme.colors.foregroundMuted, fontSize: 10 },
+  phaseTextOn: { color: theme.colors.foreground },
+  post: {
+    flexDirection: "row",
+    borderWidth: 1,
+    borderColor: theme.chrome.cardBorder,
+    borderRadius: 8,
+    backgroundColor: theme.chrome.cardBackground,
+    overflow: "hidden",
+  },
+  postbit: {
+    width: { xs: 68, md: 116 },
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: { xs: 10, md: 14 },
+    paddingHorizontal: { xs: 6, md: 8 },
+    backgroundColor: theme.colors.surface1,
+    borderRightWidth: 1,
+    borderRightColor: theme.chrome.cardBorder,
+  },
+  avatar: {
+    alignItems: "center",
+    justifyContent: "center",
+    width: { xs: 34, md: 44 },
+    height: { xs: 34, md: 44 },
+    borderRadius: 6,
+  },
+  avatarText: { color: "#ffffff", fontSize: 18, fontWeight: "700" },
+  postUser: {
+    color: theme.colors.foreground,
+    fontSize: 12,
+    fontWeight: "600",
+    textAlign: "center",
+  },
+  postRank: {
+    letterSpacing: 0,
+    fontSize: 10,
+    textTransform: "none",
+    fontWeight: "700",
+  },
+  postMain: { flex: 1 },
+  postHead: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    rowGap: 4,
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.chrome.cardBorder,
+  },
+  postNo: { letterSpacing: 0, color: theme.colors.foregroundMuted, fontSize: 11 },
+  kindTag: {
+    letterSpacing: 0,
+    fontSize: 10,
+    color: theme.colors.foregroundMuted,
+    borderWidth: 1,
+    borderColor: theme.chrome.cardBorder,
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    textTransform: "none",
+    overflow: "hidden",
+  },
+  postTime: {
+    letterSpacing: 0,
+    color: theme.colors.foregroundMuted,
+    fontSize: 11,
+    marginLeft: "auto",
+  },
+  postContent: { padding: 14, gap: 8 },
+  replyTo: { letterSpacing: 0, color: theme.colors.foregroundMuted, fontSize: 11 },
+  quote: {
+    borderLeftWidth: 2,
+    borderLeftColor: theme.colors.accent,
+    backgroundColor: theme.colors.surface1,
+    borderRadius: 4,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    gap: 4,
+  },
+  quoteHead: { letterSpacing: 0, color: theme.colors.foregroundMuted, fontSize: 11 },
+  quoteBody: {
+    color: theme.colors.foregroundMuted,
+    fontSize: 13,
+    fontStyle: "italic",
+    lineHeight: 18,
+  },
+  postBody: { color: theme.colors.foreground, fontSize: 14, lineHeight: 21 },
+  tabBar: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: theme.spacing[6],
+    marginTop: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.chrome.cardBorder,
+  },
+  tabBtn: {
+    paddingTop: theme.spacing[1],
+    paddingBottom: theme.spacing[2],
+    borderBottomWidth: 2,
+    borderBottomColor: "transparent",
+    marginBottom: -1,
+  },
+  tabBtnOn: { borderBottomColor: theme.colors.foreground },
+  tabTxt: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm },
+  tabTxtOn: { color: theme.colors.foreground, fontWeight: theme.fontWeight.semibold },
+  emptyBoard: {
+    color: theme.colors.foregroundMuted,
+    fontSize: 13,
+    paddingVertical: 24,
+    textAlign: "center",
+  },
+  kanban: { flexGrow: 0 },
+  // Wrap so all six columns (incl. Done) stay visible; each column flexes to share the width.
+  kanbanRow: { flexDirection: "row", flexWrap: "wrap", gap: 10, paddingBottom: 8 },
+  column: {
+    flexGrow: 1,
+    // Phone: one status per row (full width) so cards stay readable; desktop: 6 columns share width.
+    flexBasis: { xs: "100%", md: 150 },
+    minWidth: { xs: 0, md: 140 },
+    gap: 8,
+    backgroundColor: theme.colors.surface1,
+    borderWidth: 1,
+    borderColor: theme.chrome.cardBorder,
+    borderRadius: 8,
+    padding: 8,
+  },
+  columnHead: {
+    letterSpacing: 0.3,
+    color: theme.colors.foreground,
+    fontSize: 11,
+    fontWeight: theme.fontWeight.semibold,
+  },
+  kanbanCard: {
+    borderWidth: 1,
+    borderColor: theme.chrome.cardBorder,
+    borderRadius: 8,
+    backgroundColor: theme.chrome.cardBackground,
+    padding: 12,
+    gap: 6,
+    overflow: "hidden",
+  },
+  cardStripe: { position: "absolute", left: 0, top: 0, bottom: 0, width: 3 },
+  kanbanCardTitle: { color: theme.colors.foreground, fontSize: 13, lineHeight: 18 },
+  kanbanCardMeta: { letterSpacing: 0, color: theme.colors.foregroundMuted, fontSize: 11 },
+  cardTagRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 },
+  cardEpic: {
+    letterSpacing: 0,
+    color: C.amber,
+    fontSize: 9,
+    fontWeight: "700",
+  },
+  reopenBadge: {
+    letterSpacing: 0,
+    color: "#e04a3a",
+    fontSize: 9,
+    fontWeight: "700",
+  },
+  reopenReason: { color: theme.colors.foregroundMuted, fontSize: 12, lineHeight: 18 },
+  // dashboard
+  dashboard: {
+    gap: 12,
+    borderWidth: 1,
+    borderColor: theme.chrome.cardBorder,
+    borderRadius: 10,
+    backgroundColor: theme.chrome.cardBackground,
+    padding: 16,
+  },
+  dashLabel: {
+    letterSpacing: 0.3,
+    color: theme.colors.foreground,
+    fontWeight: theme.fontWeight.semibold,
+    fontSize: 11,
+  },
+  chartsRow: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
+  chartCard: {
+    gap: 12,
+    flexGrow: 1,
+    flexBasis: 300,
+    borderWidth: 1,
+    borderColor: theme.chrome.cardBorder,
+    borderRadius: 10,
+    backgroundColor: theme.chrome.cardBackground,
+    padding: 16,
+  },
+  chartTitle: {
+    letterSpacing: 0.3,
+    color: theme.colors.foreground,
+    fontWeight: theme.fontWeight.semibold,
+    fontSize: 11,
+  },
+  donutRow: {
+    flexDirection: { xs: "column", md: "row" },
+    alignItems: "center",
+    gap: { xs: 12, md: 20 },
+  },
+  legend: { alignSelf: "stretch", flexShrink: 1, gap: 7 },
+  legendRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  legendDot: { width: 10, height: 10, borderRadius: 3 },
+  legendLabel: { flex: 1, color: theme.colors.foregroundMuted, fontSize: 12 },
+  legendN: { color: theme.colors.foreground, fontSize: 12 },
+  epicChipRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  epicChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderColor: theme.chrome.cardBorder,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    backgroundColor: theme.chrome.cardBackground,
+  },
+  epicChipText: { letterSpacing: 0, color: C.amber, fontSize: 11 },
+  epicChipCount: { color: theme.colors.foregroundMuted, fontSize: 11 },
+  // pager
+  pager: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 16,
+    paddingVertical: 10,
+  },
+  pagerBtn: { paddingVertical: 6, paddingHorizontal: 10 },
+  pagerTxt: { color: theme.colors.foreground, fontSize: 12 },
+  pagerTxtOff: { color: theme.colors.foregroundExtraMuted },
+  pagerInfo: { color: theme.colors.foregroundMuted, fontSize: 12 },
+  // board wrap + epic strip
+  boardWrap: { gap: 12 },
+  epicStrip: { gap: 6 },
+  epicChipOn: { borderColor: C.amber, backgroundColor: "rgba(245, 166, 35, 0.12)" },
+  // delete topic (human management)
+  deleteBtn: {
+    borderWidth: 1,
+    borderColor: theme.chrome.cardBorder,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  deleteBtnConfirm: { borderColor: C.red, backgroundColor: "rgba(200, 48, 48, 0.12)" },
+  deleteBtnText: { color: theme.colors.foregroundMuted, fontSize: 12 },
+  // code block (custom markdown renderer)
+  codeBlock: {
+    borderWidth: 1,
+    borderColor: theme.chrome.cardBorder,
+    borderRadius: 8,
+    backgroundColor: theme.colors.surface1,
+    marginVertical: 6,
+    overflow: "hidden",
+  },
+  codeBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 3,
+    backgroundColor: theme.colors.surface1,
+  },
+  codeLang: {
+    fontFamily: theme.fontFamily.mono,
+    letterSpacing: 0,
+    color: theme.colors.foregroundExtraMuted,
+    fontSize: 9,
+    fontWeight: "700",
+    textTransform: "none",
+  },
+  codeScroll: { paddingHorizontal: 12, paddingBottom: 10, paddingTop: 2 },
+  codeText: {
+    fontFamily: theme.fontFamily.mono,
+    color: theme.colors.foreground,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  imageRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 },
+  attachedImage: {
+    width: 160,
+    height: 110,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: theme.chrome.cardBorder,
+    backgroundColor: theme.colors.surface2,
+  },
+  // activity section (separate from discussion posts)
+  activitySection: {
+    gap: 2,
+    borderWidth: 1,
+    borderColor: theme.chrome.cardBorder,
+    borderRadius: 10,
+    backgroundColor: theme.chrome.cardBackground,
+    padding: 10,
+  },
+  activityHeader: {
+    letterSpacing: 0.3,
+    color: theme.colors.foreground,
+    fontSize: 11,
+    fontWeight: theme.fontWeight.semibold,
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+  },
+  askBannerHint: { color: theme.colors.foregroundMuted, fontSize: 11, fontStyle: "italic" },
+  // skeleton loading
+  skeletonPost: { flexDirection: "row", gap: 12, paddingVertical: 10 },
+  skeletonBody: { flex: 1, gap: 8 },
+  // vote footer (vBulletin reactions)
+  voteFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: theme.chrome.cardBorder,
+  },
+  voteBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderWidth: 1,
+    borderColor: theme.chrome.cardBorder,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    backgroundColor: theme.chrome.cardBackground,
+  },
+  voteBtnUpOn: {
+    borderColor: theme.colors.accent,
+    backgroundColor: theme.chrome.chipActiveBackground,
+  },
+  voteBtnDownOn: { borderColor: C.red, backgroundColor: "rgba(200, 48, 48, 0.12)" },
+  voteBtnText: { color: theme.colors.foregroundMuted, fontSize: 12 },
+  repPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    marginLeft: "auto",
+    borderWidth: 1,
+    borderColor: theme.chrome.cardBorder,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  repLabel: {
+    letterSpacing: 0,
+    color: theme.colors.foregroundExtraMuted,
+    fontSize: 10,
+    textTransform: "none",
+  },
+  repScore: { fontSize: 12, fontWeight: "700" },
+  // architecture diagram tab
+  diagramWrap: { gap: 8, paddingVertical: 4 },
+  diagramVersions: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  versionPill: {
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: theme.chrome.cardBorder,
+    backgroundColor: theme.chrome.cardBackground,
+  },
+  versionPillOn: { borderColor: C.amber, backgroundColor: theme.colors.surface1 },
+  versionPillTxt: { color: theme.colors.foregroundMuted, fontSize: 12 },
+  versionPillTxtOn: { color: C.amber },
+  diagramTitle: { color: theme.colors.foreground, fontSize: 14 },
+  diagramMeta: { color: theme.colors.foregroundMuted, fontSize: 11 },
+  diagramEmpty: { padding: 16 },
+  diagramEmptyText: { color: theme.colors.foregroundMuted, fontSize: 12, lineHeight: 18 },
+  // activity rows (status/review/system — not discussion posts)
+  activityRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderLeftWidth: 2,
+    borderLeftColor: theme.chrome.cardBorder,
+  },
+  activityDot: { width: 7, height: 7, borderRadius: 4 },
+  activityText: { flex: 1, color: theme.colors.foregroundMuted, fontSize: 12, lineHeight: 17 },
+  activityWho: { color: theme.colors.foregroundMuted, fontSize: 11 },
+  activityKind: { color: theme.colors.foregroundExtraMuted, fontSize: 11 },
+  activityTime: { color: theme.colors.foregroundExtraMuted, fontSize: 10 },
+  // ask-human banner
+  askBanner: {
+    borderWidth: 1,
+    borderColor: C.amber,
+    backgroundColor: "rgba(245, 166, 35, 0.12)",
+    borderRadius: 8,
+    padding: 12,
+    gap: 4,
+  },
+  askBannerTitle: { color: C.amber, fontSize: 12, fontWeight: "700" },
+  askBannerText: { color: theme.colors.foreground, fontSize: 13, lineHeight: 19 },
+  // human reply composer
+  replyBox: {
+    borderWidth: 1,
+    borderColor: theme.chrome.cardBorder,
+    borderRadius: 8,
+    backgroundColor: theme.chrome.cardBackground,
+    padding: 8,
+    gap: 8,
+  },
+  replyInput: {
+    color: theme.colors.foreground,
+    fontSize: 13,
+    minHeight: 44,
+    padding: 6,
+  },
+  replySend: {
+    alignSelf: "flex-end",
+    borderWidth: 1,
+    borderColor: theme.colors.accent,
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: theme.chrome.chipActiveBackground,
+  },
+  replySendText: { color: theme.colors.accent, fontSize: 12, fontWeight: "700" },
+  // post awaiting-human highlight + tag
+  postAwaiting: { borderColor: C.amber },
+  awaitTag: {
+    letterSpacing: 0,
+    color: C.amber,
+    fontSize: 9,
+    fontWeight: "700",
+    borderWidth: 1,
+    borderColor: C.amber,
+    borderRadius: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+  },
+  // task detail modal (Jira)
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.32)",
+    alignItems: "center",
+    justifyContent: { xs: "flex-end", md: "center" },
+    padding: { xs: 8, md: 24 },
+  },
+  modalCard: {
+    width: "100%",
+    maxWidth: 680,
+    maxHeight: { xs: "92%", md: "86%" },
+    borderWidth: 1,
+    borderColor: theme.chrome.cardBorder,
+    borderRadius: 12,
+    backgroundColor: theme.chrome.cardBackground,
+    overflow: "hidden",
+  },
+  // Mobile task detail slide-in (full-height main view pushed from the right).
+  sheetOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 50,
+  },
+  sheetPanel: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: theme.chrome.cardBackground,
+    flexDirection: "column",
+  },
+  sheetScroll: { flex: 1 },
+  sheetBack: {
+    color: theme.colors.foreground,
+    fontSize: 26,
+    lineHeight: 26,
+    paddingHorizontal: 4,
+  },
+  modalHead: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.chrome.cardBorder,
+  },
+  modalTitle: { flex: 1, color: theme.colors.foreground, fontSize: 16, fontWeight: "700" },
+  modalClose: { color: theme.colors.foregroundMuted, fontSize: 18, paddingHorizontal: 4 },
+  modalBody: { padding: 16, gap: 10 },
+  modalSection: {
+    letterSpacing: 0.3,
+    color: theme.colors.foreground,
+    fontSize: 11,
+    fontWeight: theme.fontWeight.semibold,
+    marginTop: 6,
+  },
+  modalMuted: { color: theme.colors.foregroundExtraMuted, fontSize: 13 },
+  metaGrid: { flexDirection: "row", flexWrap: "wrap", gap: 16 },
+  metaCell: { minWidth: 96, gap: 2 },
+  metaLabel: {
+    letterSpacing: 0,
+    color: theme.colors.foregroundExtraMuted,
+    fontSize: 10,
+    textTransform: "none",
+  },
+  metaValue: { color: theme.colors.foreground, fontSize: 13 },
+  commentRow: {
+    gap: 4,
+    borderTopWidth: 1,
+    borderTopColor: theme.chrome.cardBorder,
+    paddingTop: 8,
+  },
+  commentHead: { flexDirection: "row", alignItems: "center", gap: 6 },
+  commentDot: { width: 8, height: 8, borderRadius: 4 },
+  commentWho: { color: theme.colors.foregroundMuted, fontSize: 12 },
+  commentTime: { color: theme.colors.foregroundExtraMuted, fontSize: 10, marginLeft: "auto" },
+  // structured code-review (open-code-review)
+  reviewCard: {
+    gap: 6,
+    borderWidth: 1,
+    borderColor: theme.chrome.cardBorder,
+    borderRadius: 8,
+    backgroundColor: theme.chrome.cardBackground,
+    padding: 10,
+  },
+  reviewHead: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 },
+  reviewRole: { color: theme.colors.foregroundMuted, fontSize: 12, fontWeight: "700" },
+  reviewVerdict: { fontSize: 11, fontWeight: "700" },
+  reviewCoverage: { color: theme.colors.foregroundExtraMuted, fontSize: 10, marginLeft: "auto" },
+  findingRow: {
+    gap: 3,
+    borderLeftWidth: 2,
+    borderLeftColor: theme.chrome.cardBorder,
+    paddingLeft: 8,
+    paddingVertical: 2,
+  },
+  findingHead: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6 },
+  sevBadge: {
+    fontSize: 8,
+    fontWeight: "700",
+    letterSpacing: 0,
+    borderWidth: 1,
+    borderRadius: 3,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+  },
+  findingCat: {
+    fontSize: 9,
+    color: theme.colors.foregroundMuted,
+    textTransform: "none",
+    letterSpacing: 0,
+  },
+  findingWhere: { flex: 1, fontFamily: theme.fontFamily.mono, fontSize: 10, color: "#4a9df0" },
+  findingText: { color: theme.colors.foreground, fontSize: 12, lineHeight: 17 },
+  findingSuggestion: {
+    color: theme.colors.foregroundMuted,
+    fontSize: 11,
+    lineHeight: 16,
+    fontStyle: "italic",
+  },
+}));
+
+function forumStyles(isClickUp: boolean) {
+  return isClickUp ? clickUpStyles : classicStyles;
+}

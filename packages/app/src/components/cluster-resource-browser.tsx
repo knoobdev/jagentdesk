@@ -18,6 +18,8 @@ import { useClusterViewStore } from "@/stores/cluster-view-store";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { Skeleton, useSkeletonPulse } from "@/components/ui/skeleton";
 import type { Theme } from "@/styles/theme";
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { clickUpListStyles } from "@/components/clickup-shell/list-styles";
 
 interface KindInfo {
   kind: string;
@@ -132,9 +134,10 @@ function ResourceRow({
   metrics: MetricsEntry | undefined;
   onPress: () => void;
 }) {
+  const isClickUp = useIsClickUpTheme();
   const sub = isPod && item.phase ? `${item.namespace} · ${item.phase}` : item.namespace;
   return (
-    <Pressable style={styles.row} onPress={onPress}>
+    <Pressable style={[styles.row, isClickUp && clickUpListStyles.row]} onPress={onPress}>
       <View style={styles.cellName}>
         {isPod && item.phase ? (
           <PodStatusDot phase={item.phase} statusReason={item.phase} />
@@ -167,6 +170,15 @@ function ResourceRow({
 }
 
 /** Friendly message for a failed list — flags RBAC/permission errors clearly. */
+/** Column header: classic keeps its uppercase caption, ClickUp reads sentence-case gray. */
+function columnHeaderStyle<T>(isClickUp: boolean, base: T) {
+  return isClickUp ? [base, clickUpListStyles.columnHeader] : base;
+}
+
+function toolbarTitleStyle(isClickUp: boolean) {
+  return isClickUp ? [styles.toolbarTitle, styles.toolbarTitleClickUp] : styles.toolbarTitle;
+}
+
 function describeClusterListError(kind: string, raw: string): string {
   if (/forbidden|cannot list|not allowed|unauthorized|permission|rbac/i.test(raw)) {
     return `You don't have permission to view ${kind} in this cluster.\n\n${raw}`;
@@ -192,6 +204,7 @@ export function ClusterResourceBrowser({
   const showingOverview = useClusterNavStore((s) => s.showingOverview);
   const selectedNamespace = useClusterNavStore((s) => s.selectedNamespace);
   const isCompact = useIsCompactFormFactor();
+  const isClickUp = useIsClickUpTheme();
 
   const [kinds, setKinds] = useState<KindInfo[]>([]);
   const [items, setItems] = useState<ResourceItem[]>([]);
@@ -419,7 +432,7 @@ export function ClusterResourceBrowser({
     content = (
       <>
         <View style={styles.toolbar}>
-          <Text style={styles.toolbarTitle}>{selectedKind}</Text>
+          <Text style={toolbarTitleStyle(isClickUp)}>{selectedKind}</Text>
           <Text style={styles.toolbarCount}>
             {query ? `${visibleItems.length}/${items.length}` : items.length}
           </Text>
@@ -441,28 +454,34 @@ export function ClusterResourceBrowser({
         </View>
         <View style={styles.header}>
           <Pressable style={styles.headerNameBtn} onPress={sortByName}>
-            <Text style={styles.headerName}>NAME{sortArrow("name")}</Text>
+            <Text style={columnHeaderStyle(isClickUp, styles.headerName)}>
+              Name{sortArrow("name")}
+            </Text>
           </Pressable>
-          {isCompact ? null : <Text style={styles.headerNs}>NAMESPACE</Text>}
+          {isCompact ? null : (
+            <Text style={columnHeaderStyle(isClickUp, styles.headerNs)}>Namespace</Text>
+          )}
           {isPodKind ? (
             <>
-              <Text style={styles.headerNarrow}>READY</Text>
+              <Text style={columnHeaderStyle(isClickUp, styles.headerNarrow)}>Ready</Text>
               {isCompact ? null : (
                 <>
-                  <Text style={styles.headerNarrow}>RESTARTS</Text>
-                  <Text style={styles.headerStatus}>STATUS</Text>
+                  <Text style={columnHeaderStyle(isClickUp, styles.headerNarrow)}>Restarts</Text>
+                  <Text style={columnHeaderStyle(isClickUp, styles.headerStatus)}>Status</Text>
                 </>
               )}
             </>
           ) : null}
           {!isCompact && isNodeOrPodKind && hasMetrics ? (
             <>
-              <Text style={styles.headerMetric}>CPU</Text>
-              <Text style={styles.headerMetric}>MEM</Text>
+              <Text style={columnHeaderStyle(isClickUp, styles.headerMetric)}>CPU</Text>
+              <Text style={columnHeaderStyle(isClickUp, styles.headerMetric)}>Mem</Text>
             </>
           ) : null}
           <Pressable onPress={sortByAge}>
-            <Text style={styles.headerAge}>AGE{sortArrow("age")}</Text>
+            <Text style={columnHeaderStyle(isClickUp, styles.headerAge)}>
+              Age{sortArrow("age")}
+            </Text>
           </Pressable>
         </View>
         {visibleItems.length === 0 ? (
@@ -520,19 +539,22 @@ const RESOURCE_SKELETON_KEYS = Array.from({ length: 10 }, (_, i) => `cluster-res
 /** Table placeholder shown while a resource kind's list is loading. */
 function ResourceListSkeleton({ kind, isCompact }: { kind: string | null; isCompact: boolean }) {
   const pulse = useSkeletonPulse();
+  const isClickUp = useIsClickUpTheme();
   return (
     <>
       <View style={styles.toolbar}>
-        <Text style={styles.toolbarTitle}>{kind ?? ""}</Text>
+        <Text style={toolbarTitleStyle(isClickUp)}>{kind ?? ""}</Text>
         <Skeleton pulse={pulse} width={28} height={12} />
       </View>
       <View style={styles.header}>
-        <Text style={styles.headerName}>NAME</Text>
-        {isCompact ? null : <Text style={styles.headerNs}>NAMESPACE</Text>}
-        <Text style={styles.headerAge}>AGE</Text>
+        <Text style={columnHeaderStyle(isClickUp, styles.headerName)}>Name</Text>
+        {isCompact ? null : (
+          <Text style={columnHeaderStyle(isClickUp, styles.headerNs)}>Namespace</Text>
+        )}
+        <Text style={columnHeaderStyle(isClickUp, styles.headerAge)}>Age</Text>
       </View>
       {RESOURCE_SKELETON_KEYS.map((key) => (
-        <View key={key} style={styles.row}>
+        <View key={key} style={[styles.row, isClickUp && clickUpListStyles.row]}>
           <View style={styles.cellName}>
             <Skeleton pulse={pulse} width={8} height={8} radius={4} />
             <View style={styles.cellNameInner}>
@@ -607,6 +629,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     fontWeight: theme.fontWeight.medium,
     color: theme.colors.foreground,
   },
+  toolbarTitleClickUp: { fontWeight: theme.fontWeight.semibold },
   toolbarCount: { fontSize: theme.fontSize.sm, color: theme.colors.foregroundMuted },
   toolbarSpacer: { flex: 1 },
   toolbarNs: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },

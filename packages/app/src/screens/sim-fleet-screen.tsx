@@ -22,6 +22,7 @@ import { useSimChatStore } from "@/stores/sim-chat-store";
 import { SimAddSheet } from "@/screens/sim-add-sheet";
 import { SimDrivePanel } from "@/screens/sim-drive-panel";
 import { PhoneScreen, TILE_MAX_DIM, TILE_POLL_MS, useScreenshot } from "@/screens/sim-phone";
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
 
 // Tiles share one size so rows stay aligned; the device (real aspect) is centered inside.
 const FRAME_H = 190;
@@ -70,11 +71,12 @@ function DeviceTile({
   const shot = useScreenshot(client, device.udid, device.isBooted, TILE_POLL_MS, TILE_MAX_DIM);
   const select = useCallback(() => onSelect(device.udid), [device.udid, onSelect]);
   const boot = useCallback(() => onBoot(device.udid), [device.udid, onBoot]);
+  const isClickUp = useIsClickUpTheme();
 
   return (
     <Pressable
       onPress={select}
-      style={[styles.card, selected ? styles.cardSelected : null]}
+      style={[styles.card, selected ? selectedCardStyle(isClickUp) : null]}
       accessibilityRole="button"
       accessibilityLabel={`Simulator ${device.name}`}
       testID={`sim-tile-${device.udid}`}
@@ -103,6 +105,11 @@ function DeviceTile({
       </Text>
     </Pressable>
   );
+}
+
+// ClickUp marks the selected tile with its lavender/violet selection instead of the accent border.
+function selectedCardStyle(isClickUp: boolean) {
+  return isClickUp ? styles.cardSelectedClickUp : styles.cardSelected;
 }
 
 // First tile of the grid: always in view, same footprint as a device card.
@@ -567,16 +574,21 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.sm,
   },
+  // chrome card tokens: classic themes carry surface1 / lg / border, ClickUp white / 10 / #ececec.
   card: {
     width: CARD_W,
-    backgroundColor: theme.colors.surface1,
-    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.chrome.cardBackground,
+    borderRadius: theme.chrome.cardRadius,
     borderWidth: 1,
-    borderColor: theme.colors.border,
+    borderColor: theme.chrome.cardBorder,
     padding: theme.spacing[2],
     gap: theme.spacing[2],
   },
   cardSelected: { borderColor: theme.colors.accent, backgroundColor: theme.colors.surface2 },
+  cardSelectedClickUp: {
+    borderColor: theme.chrome.chipActiveForeground,
+    backgroundColor: theme.chrome.chipActiveBackground,
+  },
   cardHead: {
     flexDirection: "row",
     alignItems: "center",
@@ -593,10 +605,10 @@ const styles = StyleSheet.create((theme) => ({
   addCard: {
     width: CARD_W,
     height: FRAME_H + 64,
-    borderRadius: theme.borderRadius.lg,
+    borderRadius: theme.chrome.cardRadius,
     borderWidth: 1,
     borderStyle: "dashed",
-    borderColor: theme.colors.border,
+    borderColor: theme.chrome.cardBorder,
     alignItems: "center",
     justifyContent: "center",
     gap: theme.spacing[2],

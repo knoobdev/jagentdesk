@@ -1,3 +1,5 @@
+import { createDockWorkspace } from "@/components/dock-workspace";
+import { CLUSTER_AGENT_LABEL } from "@/utils/dock-agents";
 import { Alert } from "react-native";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import { navigateToAgent } from "@/utils/navigate-to-agent";
@@ -126,11 +128,14 @@ export async function askAgentAboutResource(input: AskAgentAboutResourceInput): 
     // but distinguishable per cluster). An explicit `title` still wins.
     const resolvedTitle =
       title ?? (trimmed && clusterName ? clusterChatTitle(clusterName, trimmed) : undefined);
+    // Its own workspace in the project, so the chat is listed under the project.
+    const home = await createDockWorkspace({ client, serverId, cwd, title: resolvedTitle });
     const agent = await client.createAgent({
       provider,
-      cwd,
+      cwd: home.cwd,
+      workspaceId: home.workspaceId,
       systemPrompt: context,
-      labels: { "jagentdesk.cluster.id": clusterId },
+      labels: { [CLUSTER_AGENT_LABEL]: clusterId },
       ...(resolvedTitle ? { title: resolvedTitle } : {}),
       // When the user typed a question in the composer, send it as the first
       // message; otherwise open an empty chat for them to type.

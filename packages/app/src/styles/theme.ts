@@ -107,7 +107,16 @@ export const baseColors = {
   },
 } as const;
 
-export type ThemeName = "light" | "dark" | "zinc" | "midnight" | "claude" | "ghostty" | "pureBlack";
+export type ThemeName =
+  | "light"
+  | "dark"
+  | "zinc"
+  | "midnight"
+  | "claude"
+  | "ghostty"
+  | "pureBlack"
+  | "clickup"
+  | "clickupDark";
 
 // Diff colors — light uses muted tones, dark uses the brighter palette values.
 //
@@ -149,6 +158,7 @@ const darkStatusColors = {
 
 // Semantic color tokens - Layer-based system
 const lightSemanticColors = {
+  interactionHighlight: "rgba(0, 0, 0, 0.06)",
   // Surfaces (layers) - shifted one step lighter
   surface0: "#ffffff", // App background
   surface1: "#fafafa", // Subtle hover (was zinc-100, now zinc-50)
@@ -232,7 +242,7 @@ const lightSemanticColors = {
 // Dark theme variant builder
 // ---------------------------------------------------------------------------
 
-interface DarkThemeConfig {
+export interface DarkThemeConfig {
   surface0: string;
   surface1: string;
   surface2: string;
@@ -240,10 +250,16 @@ interface DarkThemeConfig {
   surface4: string;
   surfaceDiffEmpty: string;
   surfaceSidebar: string;
-  surfaceSidebarHover: string;
+  /** Defaults to surface2. */
+  surfaceSidebarHover?: string;
+  /** Defaults to near-white (#fafafa). */
+  foreground?: string;
   foregroundMuted: string;
   foregroundExtraMuted: string;
-  scrollbarHandle: string;
+  /** Defaults to foregroundExtraMuted. */
+  scrollbarHandle?: string;
+  /** Focus ring; defaults to zinc-300. */
+  ring?: string;
   border: string;
   borderAccent: string;
   accent: string;
@@ -271,7 +287,8 @@ const darkTerminalAnsi = {
   brightWhite: "#f0f0f2",
 } as const;
 
-function buildDarkSemanticColors(tint: DarkThemeConfig) {
+export function buildDarkSemanticColors(tint: DarkThemeConfig) {
+  const foreground = tint.foreground ?? "#fafafa";
   return {
     surface0: tint.surface0,
     surface1: tint.surface1,
@@ -280,14 +297,15 @@ function buildDarkSemanticColors(tint: DarkThemeConfig) {
     surface4: tint.surface4,
     surfaceDiffEmpty: tint.surfaceDiffEmpty,
     surfaceSidebar: tint.surfaceSidebar,
-    surfaceSidebarHover: tint.surfaceSidebarHover,
+    surfaceSidebarHover: tint.surfaceSidebarHover ?? tint.surface2,
     surfaceWorkspace: tint.surface1,
+    interactionHighlight: "rgba(255, 255, 255, 0.08)",
 
-    foreground: "#fafafa",
+    foreground,
     foregroundMuted: tint.foregroundMuted,
     foregroundExtraMuted: tint.foregroundExtraMuted,
 
-    scrollbarHandle: tint.scrollbarHandle,
+    scrollbarHandle: tint.scrollbarHandle ?? tint.foregroundExtraMuted,
 
     border: tint.border,
     borderAccent: tint.borderAccent,
@@ -304,27 +322,27 @@ function buildDarkSemanticColors(tint: DarkThemeConfig) {
     // Legacy aliases (for gradual migration)
     background: tint.surface0,
     popover: tint.surface2,
-    popoverForeground: "#fafafa",
-    primary: "#fafafa",
+    popoverForeground: foreground,
+    primary: foreground,
     primaryForeground: tint.surface0,
     secondary: tint.surface2,
-    secondaryForeground: "#fafafa",
+    secondaryForeground: foreground,
     muted: tint.surface2,
     mutedForeground: tint.foregroundMuted,
     accentBorder: tint.borderAccent,
     input: tint.surface2,
-    ring: "#d4d4d8",
+    ring: tint.ring ?? "#d4d4d8",
 
     ...darkDiffColors,
     ...darkStatusColors,
 
     terminal: {
       background: tint.surface0,
-      foreground: "#fafafa",
-      cursor: "#fafafa",
+      foreground,
+      cursor: foreground,
       cursorAccent: tint.surface0,
       selectionBackground: "rgba(255, 255, 255, 0.2)",
-      selectionForeground: "#fafafa",
+      selectionForeground: foreground,
       black: tint.terminalBlack,
       ...darkTerminalAnsi,
       brightBlack: tint.terminalBrightBlack,
@@ -581,6 +599,127 @@ const commonTheme: CommonTheme = {
   opacity: OPACITY,
 };
 
+/**
+ * Window-level chrome a theme can bring besides colors. "classic" is the JAgentDesk shell
+ * (sidebar with the nav list). "clickup" swaps in ClickUp's shell on desktop and mobile: a
+ * global top bar, a vertical icon rail, a rounded content panel, a gradient composer and a
+ * bottom tab bar on phones. Values are measured from ClickUp (see docs/themes.md).
+ */
+export interface ShellChrome {
+  kind: "classic" | "clickup";
+  /** Window background behind the top bar, rail and panel. */
+  canvas: string;
+  topBar: string;
+  /** Rail fill, top to bottom. One stop paints a solid rail. */
+  railGradient: readonly string[];
+  railForeground: string;
+  railForegroundMuted: string;
+  railActiveBackground: string;
+  railActiveForeground: string;
+  panelBorder: string;
+  /** Sidebar "+ New" button, which is violet in light and ink-on-light in dark. */
+  createBackground: string;
+  createForeground: string;
+  searchBackground: string;
+  searchBorder: string;
+  searchForeground: string;
+  selectedRow: string;
+  /** Composer border gradient, bottom-left to top-right. */
+  composerGradient: readonly string[];
+  /** Send button gradient, left to right. */
+  sendGradient: readonly string[];
+  /** Soft wash at the top-right of an empty agent screen. */
+  heroGlow: string;
+  /** Phone bottom tab bar (ClickUp iOS). */
+  tabBar: string;
+  tabBarBorder: string;
+  tabIdle: string;
+  tabCreateBackground: string;
+  tabCreateForeground: string;
+  /** Typography and control shape the shared components read directly. */
+  titleWeight: "300" | "400" | "500" | "600" | "700";
+  titleWeightCompact: "300" | "400" | "500" | "600" | "700";
+  buttonTextWeight: "400" | "500" | "600";
+  controlRadius: number;
+  outlineBackground: string;
+  outlineBorder: string;
+  /** Settings/list page canvas behind white cards. */
+  pageCanvas: string;
+  cardBackground: string;
+  cardBorder: string;
+  cardRadius: number;
+  sectionTitleColor: string;
+  /** Selected filter chip (ClickUp iOS "Unread": lavender fill, violet text). */
+  chipActiveBackground: string;
+  chipActiveForeground: string;
+  sectionTitleWeight: "400" | "500" | "600";
+  rowTitleWeight: "400" | "500" | "600";
+}
+
+/** Kept as an alias: the ClickUp values are one instance of the shell tokens. */
+export type ClickUpShellChrome = ShellChrome;
+
+interface ClassicChromeSource {
+  borderAccent: string;
+  surface0: string;
+  surface1: string;
+  surface2: string;
+  surface3: string;
+  border: string;
+  foreground: string;
+  foregroundMuted: string;
+  accent: string;
+  accentForeground: string;
+}
+
+/**
+ * Shell tokens for a theme without its own shell. Every theme carries the full set because Unistyles
+ * on web compiles styles once against CSS variables, so a style reads `theme.chrome.topBar`
+ * directly instead of branching on the theme. The classic shell never renders these.
+ */
+function classicChrome(c: ClassicChromeSource): ShellChrome {
+  return {
+    kind: "classic",
+    canvas: c.surface0,
+    topBar: c.surface0,
+    railGradient: [c.surface1],
+    railForeground: c.foreground,
+    railForegroundMuted: c.foregroundMuted,
+    railActiveBackground: c.surface3,
+    railActiveForeground: c.foreground,
+    panelBorder: c.border,
+    createBackground: c.accent,
+    createForeground: c.accentForeground,
+    searchBackground: c.surface1,
+    searchBorder: c.border,
+    searchForeground: c.foregroundMuted,
+    selectedRow: c.surface3,
+    composerGradient: [c.border, c.border],
+    sendGradient: [c.accent, c.accent],
+    heroGlow: c.surface1,
+    tabBar: c.surface0,
+    tabBarBorder: c.border,
+    tabIdle: c.foregroundMuted,
+    tabCreateBackground: c.accent,
+    tabCreateForeground: c.accentForeground,
+    titleWeight: "300",
+    titleWeightCompact: "400",
+    buttonTextWeight: "400",
+    controlRadius: BORDER_RADIUS.lg,
+    outlineBackground: "transparent",
+    outlineBorder: c.borderAccent,
+    pageCanvas: c.surface0,
+    cardBackground: c.surface1,
+    cardBorder: c.border,
+    cardRadius: BORDER_RADIUS.lg,
+    sectionTitleColor: c.foregroundMuted,
+    chipActiveBackground: c.surface3,
+    chipActiveForeground: c.foreground,
+    sectionTitleWeight: "400",
+    rowTitleWeight: "400",
+  };
+}
+
 const darkShadow = {
   sm: {
     shadowColor: "rgba(0, 0, 0, 0.25)",
@@ -602,9 +741,13 @@ const darkShadow = {
   },
 } as const;
 
-function buildDarkTheme(semanticColors: ReturnType<typeof buildDarkSemanticColors>) {
+export function buildDarkTheme(
+  semanticColors: ReturnType<typeof buildDarkSemanticColors>,
+  chrome: ShellChrome = classicChrome(semanticColors),
+) {
   return {
     colorScheme: "dark" as const,
+    chrome,
     colors: {
       ...semanticColors,
       palette: baseColors,
@@ -622,35 +765,291 @@ export const darkClaudeTheme = buildDarkTheme(claudeDarkColors);
 export const darkGhosttyTheme = buildDarkTheme(ghosttyDarkColors);
 export const darkPureBlackTheme = buildDarkTheme(pureBlackDarkColors);
 
-export const lightTheme = {
-  colorScheme: "light" as const,
-  colors: {
+// Literal hex types from the `as const` palette, widened so a builder can return any color.
+type Widen<T> = T extends string
+  ? string
+  : T extends number
+    ? number
+    : T extends object
+      ? { [K in keyof T]: Widen<T[K]> }
+      : T;
+type LightSemanticColors = Widen<typeof lightSemanticColors>;
+
+/** A light palette: every token defaults to the built-in light theme, the tint overrides. */
+export interface LightThemeConfig {
+  surface0: string;
+  surface1: string;
+  surface2: string;
+  surface3: string;
+  surface4: string;
+  surfaceDiffEmpty: string;
+  surfaceSidebar: string;
+  foreground: string;
+  foregroundMuted: string;
+  foregroundExtraMuted: string;
+  border: string;
+  borderAccent: string;
+  accent: string;
+  accentBright: string;
+  accentForeground?: string;
+  primary?: string;
+  primaryForeground?: string;
+  destructive: string;
+  terminalBlack: string;
+  terminalBrightBlack: string;
+  ring?: string;
+}
+
+export function buildLightSemanticColors(tint: LightThemeConfig): LightSemanticColors {
+  return {
     ...lightSemanticColors,
-    palette: baseColors,
-    syntax: lightHighlightColors,
+    surface0: tint.surface0,
+    surface1: tint.surface1,
+    surface2: tint.surface2,
+    surface3: tint.surface3,
+    surface4: tint.surface4,
+    surfaceDiffEmpty: tint.surfaceDiffEmpty,
+    surfaceSidebar: tint.surfaceSidebar,
+    surfaceSidebarHover: tint.surface1,
+    surfaceWorkspace: tint.surface0,
+    foreground: tint.foreground,
+    foregroundMuted: tint.foregroundMuted,
+    foregroundExtraMuted: tint.foregroundExtraMuted,
+    border: tint.border,
+    borderAccent: tint.borderAccent,
+    accent: tint.accent,
+    accentBright: tint.accentBright,
+    accentForeground: tint.accentForeground ?? tint.surface0,
+    destructive: tint.destructive,
+    destructiveForeground: tint.surface0,
+    background: tint.surface0,
+    popover: tint.surface0,
+    popoverForeground: tint.foreground,
+    primary: tint.primary ?? tint.foreground,
+    primaryForeground: tint.primaryForeground ?? tint.surface0,
+    secondary: tint.surface2,
+    secondaryForeground: tint.foreground,
+    muted: tint.surface2,
+    mutedForeground: tint.foregroundMuted,
+    accentBorder: tint.borderAccent,
+    input: tint.surface2,
+    ring: tint.ring ?? lightSemanticColors.ring,
+    terminal: {
+      ...lightSemanticColors.terminal,
+      background: tint.surface0,
+      foreground: tint.foreground,
+      cursor: tint.foreground,
+      cursorAccent: tint.surface0,
+      selectionForeground: tint.foreground,
+      black: tint.terminalBlack,
+      brightBlack: tint.terminalBrightBlack,
+    },
+  };
+}
+
+const lightShadow = {
+  sm: {
+    shadowColor: "rgba(0, 0, 0, 0.02)",
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 8,
+    elevation: 2,
   },
-  shadow: {
-    sm: {
-      shadowColor: "rgba(0, 0, 0, 0.02)",
-      shadowOffset: { width: 0, height: 2 },
-      shadowRadius: 8,
-      elevation: 2,
-    },
-    md: {
-      shadowColor: "rgba(0, 0, 0, 0.04)",
-      shadowOffset: { width: 0, height: 4 },
-      shadowRadius: 16,
-      elevation: 4,
-    },
-    lg: {
-      shadowColor: "rgba(0, 0, 0, 0.08)",
-      shadowOffset: { width: 0, height: 8 },
-      shadowRadius: 24,
-      elevation: 8,
-    },
+  md: {
+    shadowColor: "rgba(0, 0, 0, 0.04)",
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 16,
+    elevation: 4,
   },
-  ...commonTheme,
+  lg: {
+    shadowColor: "rgba(0, 0, 0, 0.08)",
+    shadowOffset: { width: 0, height: 8 },
+    shadowRadius: 24,
+    elevation: 8,
+  },
 } as const;
+
+export function buildLightTheme(
+  semanticColors: LightSemanticColors,
+  chrome: ShellChrome = classicChrome(semanticColors),
+) {
+  return {
+    colorScheme: "light" as const,
+    chrome,
+    colors: {
+      ...semanticColors,
+      palette: baseColors,
+      syntax: lightHighlightColors,
+    },
+    shadow: lightShadow,
+    ...commonTheme,
+  } as const;
+}
+
+export const lightTheme = buildLightTheme(lightSemanticColors);
+
+// ---------------------------------------------------------------------------
+// ClickUp — a violet, productivity-app palette. Values are measured from ClickUp's own web and
+// iOS UI (Mobbin captures); the per-token evidence lives in docs/themes.md. It follows the
+// system appearance, so it has a light and a dark half.
+// ---------------------------------------------------------------------------
+
+const CLICKUP_VIOLET = "#6149e7";
+
+// ClickUp shell, measured from w_purple_home (light, ClickUp's "Purple" theme) and
+// w_dark_home (dark); ids in docs/themes.md. The Brain composer gradient comes from
+// fef108fd-aab3-46a3-bf67-d41cdedd8553.
+export const CLICKUP_LIGHT_CHROME: ClickUpShellChrome = {
+  kind: "clickup",
+  canvas: "#fcfcfc",
+  topBar: "#fcfcfc",
+  railGradient: ["#5741d2", "#4332a2", "#2e2371"],
+  railForeground: "#ffffff",
+  railForegroundMuted: "rgba(255, 255, 255, 0.78)",
+  railActiveBackground: "#ffffff",
+  railActiveForeground: CLICKUP_VIOLET,
+  panelBorder: "#eaeaea",
+  createBackground: CLICKUP_VIOLET,
+  createForeground: "#ffffff",
+  searchBackground: "#ffffff",
+  searchBorder: "#e4e4e4",
+  searchForeground: "#676767",
+  selectedRow: "#eaeaea",
+  composerGradient: ["#40c8f4", "#912eff", "#ec02f7"],
+  sendGradient: ["#912eff", "#ec02f7"],
+  heroGlow: "#ffecee",
+  tabBar: "#ffffff",
+  tabBarBorder: "#f1f1f1",
+  tabIdle: "#8c8c8c",
+  tabCreateBackground: "#5b43d7",
+  tabCreateForeground: "#ffffff",
+  titleWeight: "600",
+  titleWeightCompact: "600",
+  buttonTextWeight: "500",
+  controlRadius: BORDER_RADIUS.md,
+  outlineBackground: "#ffffff",
+  outlineBorder: "#e4e4e4",
+  pageCanvas: "#f9f9f9",
+  cardBackground: "#ffffff",
+  cardBorder: "#ececec",
+  cardRadius: 10,
+  sectionTitleColor: "#202020",
+  chipActiveBackground: "#f2f2fe",
+  chipActiveForeground: CLICKUP_VIOLET,
+  sectionTitleWeight: "600",
+  rowTitleWeight: "500",
+};
+
+export const CLICKUP_DARK_CHROME: ClickUpShellChrome = {
+  kind: "clickup",
+  canvas: "#111111",
+  topBar: "#111111",
+  railGradient: ["#191919"],
+  railForeground: "#ffffff",
+  railForegroundMuted: "#b8b8b8",
+  railActiveBackground: "#2a2a2a",
+  railActiveForeground: "#ffffff",
+  panelBorder: "#1f1f1f",
+  createBackground: "#ededed",
+  createForeground: "#111111",
+  searchBackground: "#2a2a2a",
+  searchBorder: "#2d2d2d",
+  searchForeground: "#b8b8b8",
+  selectedRow: "#2a2a2a",
+  composerGradient: ["#40c8f4", "#912eff", "#ec02f7"],
+  sendGradient: ["#912eff", "#ec02f7"],
+  heroGlow: "#1d1426",
+  tabBar: "#1e1e1e",
+  tabBarBorder: "#292929",
+  tabIdle: "#6d6d6d",
+  tabCreateBackground: "#a59ff7",
+  tabCreateForeground: "#1e1e1e",
+  titleWeight: "600",
+  titleWeightCompact: "600",
+  buttonTextWeight: "500",
+  controlRadius: BORDER_RADIUS.md,
+  outlineBackground: "#111111",
+  outlineBorder: "#2d2d2d",
+  pageCanvas: "#090909",
+  cardBackground: "#111111",
+  cardBorder: "#1f1f1f",
+  cardRadius: 10,
+  sectionTitleColor: "#fafafa",
+  chipActiveBackground: "#231e3d",
+  chipActiveForeground: "#a6a0f8",
+  sectionTitleWeight: "600",
+  rowTitleWeight: "500",
+};
+
+export const clickupDarkTheme = buildDarkTheme(
+  {
+    ...buildDarkSemanticColors({
+      surface0: "#090909",
+      surface1: "#111111",
+      surface2: "#191919",
+      surface3: "#2a2a2a",
+      surface4: "#414141",
+      surfaceDiffEmpty: "#161616",
+      surfaceSidebar: "#191919",
+      surfaceSidebarHover: "#222222",
+      foreground: "#fafafa",
+      foregroundMuted: "#b8b8b8",
+      foregroundExtraMuted: "#757575",
+      scrollbarHandle: "#757575",
+      border: "#272727",
+      borderAccent: "#414141",
+      accent: CLICKUP_VIOLET,
+      // Violet text on #111111 needs the lighter tint to stay readable (8.1:1).
+      accentBright: "#a6a0f8",
+      accentForeground: "#ffffff",
+      destructive: "#cf2f2f",
+      terminalBlack: "#191919",
+      terminalBrightBlack: "#414141",
+      ring: CLICKUP_VIOLET,
+    }),
+    statusSuccess: "#6bba9a",
+    statusDanger: "#f98689",
+    statusWarning: "#ffc539",
+    statusMerged: "#a6a0f8",
+  },
+  CLICKUP_DARK_CHROME,
+);
+
+export const clickupLightTheme = buildLightTheme(
+  {
+    ...buildLightSemanticColors({
+      surface0: "#ffffff",
+      surface1: "#f9f9f9",
+      surface2: "#f0f0f0",
+      surface3: "#eaeaea",
+      surface4: "#cecece",
+      surfaceDiffEmpty: "#f4f4f4",
+      surfaceSidebar: "#f9f9f9",
+      foreground: "#202020",
+      foregroundMuted: "#676767",
+      foregroundExtraMuted: "#919191",
+      border: "#e9e9e9",
+      borderAccent: "#cecece",
+      accent: CLICKUP_VIOLET,
+      accentBright: "#7868e5",
+      accentForeground: "#ffffff",
+      primary: "#202020",
+      primaryForeground: "#ffffff",
+      destructive: "#cf2f2f",
+      terminalBlack: "#202020",
+      terminalBrightBlack: "#3f3f46",
+      ring: CLICKUP_VIOLET,
+    }),
+    surfaceSidebarHover: "#f0f0f0",
+    scrollbarHandle: "#919191",
+    input: "#ffffff",
+    success: "#279566",
+    statusSuccess: "#1f7a52",
+    statusDanger: "#cf2f2f",
+    statusWarning: "#9a6700",
+    statusMerged: "#5d47cd",
+  },
+  CLICKUP_LIGHT_CHROME,
+);
 
 // Keep compatibility with existing code
 export const theme = darkTheme;
@@ -665,7 +1064,9 @@ type UnistylesThemeKey =
   | "darkMidnight"
   | "darkClaude"
   | "darkGhostty"
-  | "darkPureBlack";
+  | "darkPureBlack"
+  | "clickupLight"
+  | "clickupDark";
 
 export const THEME_TO_UNISTYLES: Record<ThemeName, UnistylesThemeKey> = {
   light: "light",
@@ -675,7 +1076,28 @@ export const THEME_TO_UNISTYLES: Record<ThemeName, UnistylesThemeKey> = {
   claude: "darkClaude",
   ghostty: "darkGhostty",
   pureBlack: "darkPureBlack",
+  // ClickUp is a light product; its dark half is its own, opt-in theme.
+  clickup: "clickupLight",
+  clickupDark: "clickupDark",
 };
+
+/** Themes with a light and a dark half that switch with the system appearance. */
+export const SCHEME_FOLLOWING_THEMES: Partial<
+  Record<ThemeName, { light: UnistylesThemeKey; dark: UnistylesThemeKey }>
+> = {};
+
+/** The theme a fresh install starts with. Every other theme stays selectable. */
+export const DEFAULT_THEME: ThemeName = "clickup";
+
+/**
+ * A theme contributed by a plugin is applied into one of these two slots (by its
+ * colorScheme) at run time; the preference value marks that one is selected.
+ */
+export const PLUGIN_THEME_PREFERENCE = "plugin";
+export const PLUGIN_THEME_NAMES = {
+  light: "pluginLight",
+  dark: "pluginDark",
+} as const;
 
 export const THEME_SWATCHES: Record<ThemeName, string> = {
   light: "#ffffff",
@@ -685,4 +1107,6 @@ export const THEME_SWATCHES: Record<ThemeName, string> = {
   claude: "#D97757",
   ghostty: "#8caaee",
   pureBlack: "#000000",
+  clickup: CLICKUP_VIOLET,
+  clickupDark: "#191919",
 };

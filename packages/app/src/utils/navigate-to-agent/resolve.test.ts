@@ -62,20 +62,16 @@ describe("resolveNavigateToAgent", () => {
     ]);
   });
 
-  it("uses the input workspaceId without reading the nav target", () => {
-    const readTargets: { serverId: string; agentId: string }[] = [];
-    const { deps, tabNavigations } = createFakeNavigators({ agentWorkspaceId: null });
-    deps.readAgentNavTarget = (input) => {
-      readTargets.push(input);
-      return { agentWorkspaceId: null };
-    };
+  it("prefers the input workspaceId over the stored one", () => {
+    // The store is still read (a screen dock agent must be recognised even when the caller
+    // passes a workspace), but an explicit workspaceId wins for the tab target.
+    const { deps, tabNavigations } = createFakeNavigators({ agentWorkspaceId: "stale-workspace" });
 
     resolveNavigateToAgent(
       { serverId: SERVER_ID, agentId: AGENT_ID, workspaceId: WORKSPACE_ID },
       deps,
     );
 
-    expect(readTargets).toEqual([]);
     expect(tabNavigations).toEqual([
       {
         serverId: SERVER_ID,
@@ -96,5 +92,37 @@ describe("resolveNavigateToAgent", () => {
     expect(route).toBe("/h/server-1/agent/missing-agent");
     expect(hostNavigations).toEqual([{ route: "/h/server-1/agent/missing-agent" }]);
     expect(tabNavigations).toEqual([]);
+  });
+});
+
+describe("resolveNavigateToAgent for screen dock agents", () => {
+  it("opens the agent in its screen dock instead of a workspace tab", () => {
+    const { deps, hostNavigations, tabNavigations } = createFakeNavigators({
+      agentWorkspaceId: WORKSPACE_ID,
+      dockOwner: { kind: "simfleet", serverId: SERVER_ID },
+    });
+    const docked: unknown[] = [];
+    const route = resolveNavigateToAgent(
+      { serverId: SERVER_ID, agentId: AGENT_ID, pin: true },
+      {
+        ...deps,
+        openDockAgent: (input) => {
+          docked.push(input);
+          return `/h/${input.serverId}/simulator`;
+        },
+      },
+    );
+
+    expect(route).toBe(`/h/${SERVER_ID}/simulator`);
+    expect(docked).toEqual([
+      {
+        serverId: SERVER_ID,
+        agentId: AGENT_ID,
+        workspaceId: WORKSPACE_ID,
+        owner: { kind: "simfleet", serverId: SERVER_ID },
+      },
+    ]);
+    expect(tabNavigations).toEqual([]);
+    expect(hostNavigations).toEqual([]);
   });
 });

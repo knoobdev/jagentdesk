@@ -4,6 +4,8 @@ import { StyleSheet } from "react-native-unistyles";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { AdaptiveModalSheet } from "@/components/adaptive-modal-sheet";
 import type { Theme } from "@/styles/theme";
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { clickUpListStyles, clickUpTabStyles } from "@/components/clickup-shell/list-styles";
 
 // ── Types ──
 
@@ -80,6 +82,7 @@ interface ClusterHelmViewProps {
 
 export function ClusterHelmView({ serverId, clusterId }: ClusterHelmViewProps) {
   const client = useHostRuntimeClient(serverId);
+  const isClickUp = useIsClickUpTheme();
   const [releases, setReleases] = useState<HelmRelease[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -187,12 +190,24 @@ export function ClusterHelmView({ serverId, clusterId }: ClusterHelmViewProps) {
   return (
     <View style={styles.container}>
       <View style={styles.tableHeader}>
-        <Text style={styles.tableHeaderName}>NAME</Text>
-        <Text style={styles.tableHeaderNamespace}>NAMESPACE</Text>
-        <Text style={styles.tableHeaderChart}>CHART</Text>
-        <Text style={styles.tableHeaderRev}>REV</Text>
-        <Text style={styles.tableHeaderStatus}>STATUS</Text>
-        <Text style={styles.tableHeaderUpdated}>UPDATED</Text>
+        <Text style={[styles.tableHeaderName, isClickUp && clickUpListStyles.columnHeader]}>
+          Name
+        </Text>
+        <Text style={[styles.tableHeaderNamespace, isClickUp && clickUpListStyles.columnHeader]}>
+          Namespace
+        </Text>
+        <Text style={[styles.tableHeaderChart, isClickUp && clickUpListStyles.columnHeader]}>
+          Chart
+        </Text>
+        <Text style={[styles.tableHeaderRev, isClickUp && clickUpListStyles.columnHeader]}>
+          Rev
+        </Text>
+        <Text style={[styles.tableHeaderStatus, isClickUp && clickUpListStyles.columnHeader]}>
+          Status
+        </Text>
+        <Text style={[styles.tableHeaderUpdated, isClickUp && clickUpListStyles.columnHeader]}>
+          Updated
+        </Text>
       </View>
       <FlatList
         data={releases}
@@ -226,9 +241,13 @@ const HelmReleaseRow = React.memo(function HelmReleaseRow({
   onSelectRelease,
 }: HelmReleaseRowProps) {
   const handlePress = useCallback(() => onSelectRelease(release), [onSelectRelease, release]);
+  const isClickUp = useIsClickUpTheme();
 
   return (
-    <Pressable style={styles.releaseRow} onPress={handlePress}>
+    <Pressable
+      style={[styles.releaseRow, isClickUp && clickUpListStyles.row]}
+      onPress={handlePress}
+    >
       <Text style={styles.releaseName} numberOfLines={1}>
         {release.name}
       </Text>
@@ -248,6 +267,17 @@ const HelmReleaseRow = React.memo(function HelmReleaseRow({
 });
 
 // ── Detail Modal ──
+
+/** Values / History: boxed buttons in classic, ClickUp's underlined text tabs otherwise. */
+function tabItemStyle(isClickUp: boolean, active: boolean) {
+  if (!isClickUp) return [styles.tabItem, active && styles.tabItemActive];
+  return active ? clickUpTabStyles.tabActive : clickUpTabStyles.tab;
+}
+
+function tabItemTextStyle(isClickUp: boolean, active: boolean) {
+  if (!isClickUp) return [styles.tabItemText, active && styles.tabItemTextActive];
+  return active ? clickUpTabStyles.textActive : clickUpTabStyles.text;
+}
 
 type HelmDetailTab = "values" | "history";
 
@@ -324,25 +354,16 @@ function ClusterHelmDetail({
 
   const handleTabValues = useCallback(() => setTab("values"), []);
   const handleTabHistory = useCallback(() => setTab("history"), []);
+  const isClickUp = useIsClickUpTheme();
 
   return (
     <AdaptiveModalSheet header={header} visible onClose={onClose} scrollable={false}>
-      <View style={styles.tabBar}>
-        <Pressable
-          style={[styles.tabItem, tab === "values" && styles.tabItemActive]}
-          onPress={handleTabValues}
-        >
-          <Text style={[styles.tabItemText, tab === "values" && styles.tabItemTextActive]}>
-            Values
-          </Text>
+      <View style={isClickUp ? styles.tabBarClickUp : styles.tabBar}>
+        <Pressable style={tabItemStyle(isClickUp, tab === "values")} onPress={handleTabValues}>
+          <Text style={tabItemTextStyle(isClickUp, tab === "values")}>Values</Text>
         </Pressable>
-        <Pressable
-          style={[styles.tabItem, tab === "history" && styles.tabItemActive]}
-          onPress={handleTabHistory}
-        >
-          <Text style={[styles.tabItemText, tab === "history" && styles.tabItemTextActive]}>
-            History
-          </Text>
+        <Pressable style={tabItemStyle(isClickUp, tab === "history")} onPress={handleTabHistory}>
+          <Text style={tabItemTextStyle(isClickUp, tab === "history")}>History</Text>
         </Pressable>
       </View>
 
@@ -479,8 +500,10 @@ function HelmRevisionRow({ revision, rollbackRev, rollingBack, onRollback }: Hel
     [onRollback, revision.revision],
   );
 
+  const isClickUp = useIsClickUpTheme();
+
   return (
-    <View style={styles.historyRow}>
+    <View style={[styles.historyRow, isClickUp && clickUpListStyles.row]}>
       <Text style={styles.historyRev}>{revision.revision}</Text>
       <Text style={styles.historyStatus} numberOfLines={1}>
         {revision.status}
@@ -518,6 +541,7 @@ function HelmHistoryContent({ client, clusterId, namespace, name }: HelmHistoryC
   const [rollingBack, setRollingBack] = useState(false);
   const [rollbackError, setRollbackError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const isClickUp = useIsClickUpTheme();
 
   const loadHistory = useCallback(() => {
     if (!client) {
@@ -610,9 +634,15 @@ function HelmHistoryContent({ client, clusterId, namespace, name }: HelmHistoryC
       ) : null}
       <View style={styles.historyTable}>
         <View style={styles.historyHeader}>
-          <Text style={styles.historyHeaderRev}>REV</Text>
-          <Text style={styles.historyHeaderStatus}>STATUS</Text>
-          <Text style={styles.historyHeaderUpdated}>UPDATED</Text>
+          <Text style={[styles.historyHeaderRev, isClickUp && clickUpListStyles.columnHeader]}>
+            Rev
+          </Text>
+          <Text style={[styles.historyHeaderStatus, isClickUp && clickUpListStyles.columnHeader]}>
+            Status
+          </Text>
+          <Text style={[styles.historyHeaderUpdated, isClickUp && clickUpListStyles.columnHeader]}>
+            Updated
+          </Text>
           <View style={styles.historyHeaderAction} />
         </View>
         {revisions.map((rev) => (
@@ -787,6 +817,14 @@ const styles = StyleSheet.create((theme: Theme) => ({
     paddingBottom: theme.spacing[3],
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,
+    marginBottom: theme.spacing[3],
+  },
+  tabBarClickUp: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: theme.spacing[6],
+    borderBottomWidth: 1,
+    borderBottomColor: theme.chrome.cardBorder,
     marginBottom: theme.spacing[3],
   },
   tabItem: {

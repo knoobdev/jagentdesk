@@ -1,6 +1,6 @@
-import type { PluginWorkspacePanelContribution } from "@jagentdesk/plugin";
-import type { PluginWorkspaceTabTarget } from "@/workspace-tabs/model";
+import type { PluginWorkspacePanelContribution } from "@jagentdesk/plugin/client";
 import type { InstalledPlugin } from "../types";
+import type { PluginWorkspaceTabTarget } from "@/workspace-tabs/model";
 
 export function resolvePluginWorkspacePanel(
   plugin: InstalledPlugin | null,

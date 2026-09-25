@@ -19,7 +19,10 @@ describe("buildWorkingDirectorySuggestions", () => {
       query: "pso",
     });
 
-    expect(results).toEqual(["/Users/me/projects/jagentdesk-desktop", "/Users/me/projects/jagentdesk-plan"]);
+    expect(results).toEqual([
+      "/Users/me/projects/jagentdesk-desktop",
+      "/Users/me/projects/jagentdesk-plan",
+    ]);
   });
 
   it("does not reinterpret daemon-ranked suggestions", () => {

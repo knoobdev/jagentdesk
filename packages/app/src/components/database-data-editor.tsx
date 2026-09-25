@@ -18,7 +18,7 @@ import type {
   DbForeignKey,
   QueryResult,
 } from "@jagentdesk/protocol/database/rpc-schemas";
-import type { GestureResponderEvent, LayoutChangeEvent } from "react-native";
+import type { GestureResponderEvent } from "react-native";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { useDatabaseViewStore } from "@/stores/database-view-store";
 import { useDatabaseNavStore } from "@/stores/database-nav-store";
@@ -34,6 +34,8 @@ import { isNative, isWeb } from "@/constants/platform";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { buildDelete, buildInsert, buildUpdate, type Cell, type Dml } from "@/utils/sql-dml";
 import type { Theme } from "@/styles/theme";
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { clickUpListStyles } from "@/components/clickup-shell/list-styles";
 
 const PAGE_SIZE = 100;
 const GUTTER_W = 52;
@@ -1464,11 +1466,7 @@ export function DatabaseDataEditor({
         <Text style={styles.statusText} numberOfLines={1}>
           {status ?? `${shown} row${shown === 1 ? "" : "s"}${result?.truncated ? "+" : ""}`}
           {txOpen ? " · transaction open" : ""}
-          {canEdit
-            ? touch
-              ? " · tap to select, double-tap to edit"
-              : " · click to select, double-click to edit"
-            : ""}
+          {editHint(canEdit, touch)}
         </Text>
       </View>
 
@@ -1596,13 +1594,17 @@ function HeaderCell({
 }) {
   const press = useCallback(() => onSort(column.name), [onSort, column.name]);
   const agg = useCallback(() => onAggregate(column.name), [onAggregate, column.name]);
+  const isClickUp = useIsClickUpTheme();
   let arrow = "";
   if (sortDir === "asc") arrow = " ↑";
   else if (sortDir === "desc") arrow = " ↓";
   return (
     <View style={[styles.headerCell, { width }]}>
       <Pressable style={styles.headerMain} onPress={press}>
-        <Text style={styles.headerText} numberOfLines={1}>
+        <Text
+          style={[styles.headerText, isClickUp && clickUpListStyles.columnHeader]}
+          numberOfLines={1}
+        >
           {column.name}
           {arrow}
         </Text>
@@ -1618,6 +1620,20 @@ function HeaderCell({
   );
 }
 
+/** Status-bar hint for how to select and edit cells, worded for touch vs. pointer. */
+function editHint(canEdit: boolean, touch: boolean): string {
+  if (!canEdit) return "";
+  return touch
+    ? " · tap to select, double-tap to edit"
+    : " · click to select, double-click to edit";
+}
+
+/** Classic zebra-stripes the grid; ClickUp separates rows with its hairline divider only. */
+function rowStripeStyle(isClickUp: boolean, rowIndex: number) {
+  if (isClickUp) return clickUpListStyles.row;
+  return rowIndex % 2 === 1 && styles.bodyRowAlt;
+}
+
 function ExistingRow({
   rowIndex,
   row,
@@ -1628,7 +1644,7 @@ function ExistingRow({
   deleted,
   selected,
   isAnchor,
-  canEdit,
+  canEdit: _canEdit,
   selectedKey,
   onRowPress,
   onRowLongPress,
@@ -1680,6 +1696,7 @@ function ExistingRow({
   );
   const handleLongPress = useCallback(() => onRowLongPress(rowIndex), [onRowLongPress, rowIndex]);
   const handleRecord = useCallback(() => onOpenRecord(rowIndex), [onOpenRecord, rowIndex]);
+  const isClickUp = useIsClickUpTheme();
   const gutterCtx = isWeb
     ? {
         onContextMenu: (e: { preventDefault?: () => void; clientX?: number; clientY?: number }) => {
@@ -1695,7 +1712,7 @@ function ExistingRow({
       style={[
         styles.bodyRow,
         { width: rowWidth },
-        rowIndex % 2 === 1 && styles.bodyRowAlt,
+        rowStripeStyle(isClickUp, rowIndex),
         selected && styles.selectedRow,
         selected && isAnchor && styles.anchorRow,
         deleted && styles.deletedRow,

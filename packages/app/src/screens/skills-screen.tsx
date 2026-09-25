@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
-import { Sparkles, Plus, Pencil, Trash2, X, Dumbbell, GraduationCap } from "lucide-react-native";
+import { Sparkles, Plus, Pencil, Trash2, X, Dumbbell } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useHosts } from "@/runtime/host-runtime";
@@ -12,6 +12,8 @@ import { SkillTrainingView } from "@/components/skill-training-view";
 import { useSkillsStore, levelProgress, approvalRate, type Skill } from "@/stores/skills-store";
 import { useAgentSkillsStore } from "@/stores/agent-skills-store";
 import type { Theme } from "@/styles/theme";
+import { clickUpTabStyles } from "@/components/clickup-shell/list-styles";
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
 
 const ThemedSparkles = withUnistyles(Sparkles);
 const ThemedPlus = withUnistyles(Plus);
@@ -19,7 +21,6 @@ const ThemedPencil = withUnistyles(Pencil);
 const ThemedTrash = withUnistyles(Trash2);
 const ThemedX = withUnistyles(X);
 const ThemedDumbbell = withUnistyles(Dumbbell);
-const ThemedGraduationCap = withUnistyles(GraduationCap);
 const accentColor = (theme: Theme) => ({ color: theme.colors.accent });
 const accentFgColor = (theme: Theme) => ({ color: theme.colors.accentForeground });
 const mutedColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
@@ -128,6 +129,7 @@ function SkillCard({
 }
 
 export function SkillsScreen() {
+  const isClickUp = useIsClickUpTheme();
   const hosts = useHosts();
   const serverId = hosts[0]?.serverId ?? "";
   const insets = useSafeAreaInsets();
@@ -157,6 +159,7 @@ export function SkillsScreen() {
     [filter, skills],
   );
   const handleTrain = useCallback((skill: Skill) => setTrainingId(skill.id), []);
+  const handleCloseTraining = useCallback(() => setTrainingId(null), []);
 
   const contentContainerStyle = useMemo(
     () => [styles.content, isCompact ? { paddingTop: insets.top } : null],
@@ -258,17 +261,15 @@ export function SkillsScreen() {
         </Text>
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
-        <View style={styles.filterRow}>
-          {(["all", "training", "graduated"] as const).map((f) => (
-            <Pressable
+        <View style={isClickUp ? clickUpTabStyles.row : styles.filterRow}>
+          {SKILL_FILTERS.map((f) => (
+            <SkillFilterTab
               key={f}
-              style={filter === f ? [styles.filterTab, styles.filterTabActive] : styles.filterTab}
-              onPress={() => setFilter(f)}
-            >
-              <Text style={filter === f ? styles.filterTabTextActive : styles.filterTabText}>
-                {f === "all" ? "All" : f === "training" ? "In training" : "Graduated"}
-              </Text>
-            </Pressable>
+              filter={f}
+              active={filter === f}
+              isClickUp={isClickUp}
+              onSelect={setFilter}
+            />
           ))}
         </View>
 
@@ -295,11 +296,7 @@ export function SkillsScreen() {
       </ScrollView>
 
       {trainingSkill ? (
-        <SkillTrainingView
-          skill={trainingSkill}
-          onClose={() => setTrainingId(null)}
-          onUse={handleUse}
-        />
+        <SkillTrainingView skill={trainingSkill} onClose={handleCloseTraining} onUse={handleUse} />
       ) : null}
 
       {edit ? (
@@ -378,6 +375,42 @@ export function SkillsScreen() {
       ) : null}
     </View>
   );
+}
+
+const SKILL_FILTERS = ["all", "training", "graduated"] as const;
+const SKILL_FILTER_LABELS: Record<SkillFilter, string> = {
+  all: "All",
+  training: "In training",
+  graduated: "Graduated",
+};
+
+function SkillFilterTab({
+  filter,
+  active,
+  isClickUp,
+  onSelect,
+}: {
+  filter: SkillFilter;
+  active: boolean;
+  isClickUp: boolean;
+  onSelect: (filter: SkillFilter) => void;
+}) {
+  const handlePress = useCallback(() => onSelect(filter), [filter, onSelect]);
+  return (
+    <Pressable style={filterTabStyle(isClickUp, active)} onPress={handlePress}>
+      <Text style={filterTabTextStyle(isClickUp, active)}>{SKILL_FILTER_LABELS[filter]}</Text>
+    </Pressable>
+  );
+}
+
+function filterTabStyle(isClickUp: boolean, active: boolean) {
+  if (isClickUp) return active ? clickUpTabStyles.tabActive : clickUpTabStyles.tab;
+  return active ? [styles.filterTab, styles.filterTabActive] : styles.filterTab;
+}
+
+function filterTabTextStyle(isClickUp: boolean, active: boolean) {
+  if (isClickUp) return active ? clickUpTabStyles.textActive : clickUpTabStyles.text;
+  return active ? styles.filterTabTextActive : styles.filterTabText;
 }
 
 const styles = StyleSheet.create((theme: Theme) => ({

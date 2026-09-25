@@ -15,6 +15,7 @@ function makeAgent(input: {
   archivedAt?: Date | null;
   createdAt?: Date;
   lastActivityAt?: Date;
+  labels?: Record<string, string>;
 }): Agent {
   const createdAt = input.createdAt ?? new Date("2026-03-04T00:00:00.000Z");
   const lastActivityAt = input.lastActivityAt ?? createdAt;
@@ -50,7 +51,7 @@ function makeAgent(input: {
     model: null,
     thinkingOptionId: null,
     parentAgentId: input.parentAgentId ?? null,
-    labels: {},
+    labels: input.labels ?? {},
     requiresAttention: false,
     attentionReason: null,
     attentionTimestamp: null,
@@ -417,5 +418,81 @@ describe("workspace agent visibility", () => {
       };
       expect(workspaceAgentVisibilityEqual(a, b)).toBe(true);
     });
+  });
+});
+
+describe("screen dock agents", () => {
+  const older = new Date("2026-03-01T00:00:00.000Z");
+  const newer = new Date("2026-03-05T00:00:00.000Z");
+
+  it("keeps a dock chat filed into another conversation's workspace out of its tabs", () => {
+    const workspaceId = "wks_shared";
+    const agents = new Map<string, Agent>([
+      ["chat", makeAgent({ id: "chat", cwd: "/repo", workspaceId, createdAt: older })],
+      [
+        "sim",
+        makeAgent({
+          id: "sim",
+          cwd: "/repo",
+          workspaceId,
+          createdAt: newer,
+          labels: { "jagentdesk.simfleet.server": "srv" },
+        }),
+      ],
+      [
+        "db",
+        makeAgent({
+          id: "db",
+          cwd: "/repo",
+          workspaceId,
+          createdAt: newer,
+          labels: { "jagentdesk.database.id": "d1" },
+        }),
+      ],
+      [
+        "k8s",
+        makeAgent({
+          id: "k8s",
+          cwd: "/repo",
+          workspaceId,
+          createdAt: newer,
+          labels: { "jagentdesk.cluster.id": "c1" },
+        }),
+      ],
+    ]);
+
+    const visibility = deriveWorkspaceAgentVisibility({ sessionAgents: agents, workspaceId });
+
+    expect([...visibility.autoOpenAgentIds]).toEqual(["chat"]);
+    expect([...visibility.activeAgentIds]).toEqual(["chat"]);
+    // The tab auto-opened for the misfiled sim chat is pruned once agents hydrate.
+    expect(
+      shouldPruneWorkspaceAgentTab({
+        agentId: "sim",
+        agentsHydrated: true,
+        activeAgentIds: visibility.activeAgentIds,
+      }),
+    ).toBe(true);
+  });
+
+  it("opens a dock chat as a tab in its own workspace", () => {
+    const workspaceId = "wks_sim_chat";
+    const agents = new Map<string, Agent>([
+      [
+        "sim",
+        makeAgent({
+          id: "sim",
+          cwd: "/repo",
+          workspaceId,
+          createdAt: newer,
+          labels: { "jagentdesk.simfleet.server": "srv" },
+        }),
+      ],
+    ]);
+
+    const visibility = deriveWorkspaceAgentVisibility({ sessionAgents: agents, workspaceId });
+
+    expect([...visibility.autoOpenAgentIds]).toEqual(["sim"]);
+    expect([...visibility.activeAgentIds]).toEqual(["sim"]);
   });
 });

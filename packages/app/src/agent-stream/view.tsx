@@ -1,3 +1,6 @@
+import { ClickUpAgentHeader } from "@/components/clickup-shell/chat-headers";
+import { CLICKUP_MESSAGE_INDENT } from "@/components/clickup-shell/chat-layout";
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import React, {
   forwardRef,
@@ -234,6 +237,42 @@ export interface AgentStreamViewHandle {
   scrollToBottom(reason?: BottomAnchorLocalRequest["reason"]): void;
   prepareForViewportChange(): void;
 }
+
+/**
+ * ClickUp chat: an agent turn opens with an avatar + provider + model header, and its items sit
+ * indented under the name. A turn starts at the first non-user item after a user message.
+ */
+function wrapClickUpAgentItem(input: {
+  layoutItem: StreamLayoutItem;
+  content: ReactNode;
+  provider?: string;
+  model: string | null;
+}): ReactNode {
+  const { item, aboveItem } = input.layoutItem;
+  if (item.kind === "user_message") return input.content;
+  const startsTurn = aboveItem === null || aboveItem.kind === "user_message";
+  return (
+    <View style={clickUpStreamStyles.agentItem}>
+      {startsTurn ? (
+        <View style={clickUpStreamStyles.agentHeader}>
+          <ClickUpAgentHeader provider={input.provider} model={input.model} />
+        </View>
+      ) : null}
+      <View style={clickUpStreamStyles.agentBody}>{input.content}</View>
+    </View>
+  );
+}
+
+/** Model label for an agent turn header: the running model, else the configured one. */
+function agentModelLabel(agent: AgentScreenAgent): string | null {
+  return agent.runtimeInfo?.model ?? agent.model ?? null;
+}
+
+const clickUpStreamStyles = StyleSheet.create((theme) => ({
+  agentItem: { width: "100%" },
+  agentHeader: { marginTop: theme.spacing[3] },
+  agentBody: { paddingLeft: CLICKUP_MESSAGE_INDENT },
+}));
 
 export interface AgentStreamViewProps {
   agentId: string;
@@ -789,6 +828,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       ],
     );
 
+    const isClickUp = useIsClickUpTheme();
     const renderStreamItemContent = useCallback(
       (layoutItem: StreamLayoutItem) => {
         const item = layoutItem.item;
@@ -838,7 +878,15 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
 
     const renderStreamItem = useCallback(
       (layoutItem: StreamLayoutItem) => {
-        const content = renderStreamItemContent(layoutItem);
+        const rawContent = renderStreamItemContent(layoutItem);
+        const content = isClickUp
+          ? wrapClickUpAgentItem({
+              layoutItem,
+              content: rawContent,
+              provider: context.provider,
+              model: agentModelLabel(context),
+            })
+          : rawContent;
         return renderStreamItemWithTurnFooter({
           content,
           layoutItem,
@@ -848,7 +896,9 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         });
       },
       [
+        context,
         handleForkAssistantTurn,
+        isClickUp,
         readOnly,
         renderStreamItemContent,
         streamRenderStrategy,

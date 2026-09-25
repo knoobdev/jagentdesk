@@ -1,4 +1,7 @@
-import type { PluginPanelLocation, PluginWorkspacePanelContribution } from "@jagentdesk/plugin";
+import type {
+  PluginPanelLocation,
+  PluginWorkspacePanelContribution,
+} from "@jagentdesk/plugin/client";
 
 const DEFAULT_LOCATIONS: readonly PluginPanelLocation[] = ["workspace"];
 

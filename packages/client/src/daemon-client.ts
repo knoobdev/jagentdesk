@@ -223,7 +223,11 @@ import type {
 } from "@jagentdesk/protocol/orchestration";
 import type { Skill, SkillMutation } from "@jagentdesk/protocol/skills";
 import type { LifetimeUsage, UsageDayRollup } from "@jagentdesk/protocol/usage-history";
-import type { MutableDaemonConfig, MutableDaemonConfigPatch } from "@jagentdesk/protocol/messages";
+import type {
+  MutableDaemonConfig,
+  MutableDaemonConfigPatch,
+  PluginRequirements,
+} from "@jagentdesk/protocol/messages";
 import { terminalSubscriptionKey } from "@jagentdesk/protocol/terminal-subscription-key";
 import {
   asUint8Array,
@@ -5687,7 +5691,9 @@ export class DaemonClient {
     });
   }
 
-  async getPluginCatalog(): Promise<Array<{ id: string; clientBundle: string }>> {
+  async getPluginCatalog(): Promise<
+    Array<{ id: string; clientBundle: string; requirements?: PluginRequirements }>
+  > {
     const requestId = this.createRequestId();
     const payload = await this.sendCorrelatedSessionRequest({
       requestId,

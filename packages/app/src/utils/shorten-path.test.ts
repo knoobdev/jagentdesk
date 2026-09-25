@@ -15,7 +15,9 @@ describe("shortenPath", () => {
   });
 
   it("leaves Windows paths unchanged", () => {
-    expect(shortenPath("C:\\Users\\moboudra\\dev\\jagentdesk")).toBe("C:\\Users\\moboudra\\dev\\jagentdesk");
+    expect(shortenPath("C:\\Users\\moboudra\\dev\\jagentdesk")).toBe(
+      "C:\\Users\\moboudra\\dev\\jagentdesk",
+    );
   });
 
   it("returns an empty string for null or undefined", () => {

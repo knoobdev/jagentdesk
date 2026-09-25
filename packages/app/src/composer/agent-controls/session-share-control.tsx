@@ -7,6 +7,7 @@ import { AgentControlTrigger } from "@/composer/agent-controls/control";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useHostFeature } from "@/runtime/host-features";
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import type {
   SessionShare,
@@ -426,6 +427,12 @@ const ShareCard = memo(function ShareCard({
     [onToggleCapability, share.shareId],
   );
 
+  const isClickUp = useIsClickUpTheme();
+  // ClickUp drops the small uppercase eyebrow labels for sentence-case ink section titles.
+  const cardTitleStyle = isClickUp ? styles.sectionLabelClickUp : styles.cardTitle;
+  const sectionLabelStyle = isClickUp
+    ? [styles.sectionLabelClickUp, styles.sectionLabelGap]
+    : styles.sectionLabel;
   const pending = share.pendingRequests.filter((r) => r.status === "pending");
   const approved = share.pendingRequests.filter((r) => r.status === "approved");
   const guests = share.members;
@@ -433,7 +440,7 @@ const ShareCard = memo(function ShareCard({
 
   return (
     <View style={styles.card}>
-      {total > 1 ? <Text style={styles.cardTitle}>{`Link ${index + 1}`}</Text> : null}
+      {total > 1 ? <Text style={cardTitleStyle}>{`Link ${index + 1}`}</Text> : null}
       <Pressable style={styles.urlRow} onPress={copyThis}>
         <Text style={styles.urlText} numberOfLines={1}>
           {share.tunnelUrl ?? "Starting tunnel…"}
@@ -454,7 +461,7 @@ const ShareCard = memo(function ShareCard({
         />
       ))}
 
-      <Text style={styles.sectionLabel}>Guest permissions</Text>
+      <Text style={sectionLabelStyle}>Guest permissions</Text>
       <View style={styles.toggleRow}>
         <Text style={styles.toggleLabel}>Read-only (watch chat, no sending)</Text>
         <Switch
@@ -496,18 +503,18 @@ const ShareCard = memo(function ShareCard({
         />
       </View>
 
-      {approved.length > 0 ? <Text style={styles.sectionLabel}>Codes to give guests</Text> : null}
+      {approved.length > 0 ? <Text style={sectionLabelStyle}>Codes to give guests</Text> : null}
       {approved.map((r) => (
         <CodeRow key={r.requestId} request={r} />
       ))}
 
-      <Text style={styles.sectionLabel}>Guests ({guests.length})</Text>
+      <Text style={sectionLabelStyle}>Guests ({guests.length})</Text>
       {guests.length === 0 ? <Text style={styles.muted}>No one has joined yet.</Text> : null}
       {guests.map((g) => (
         <GuestRow key={g.memberId} member={g} onKick={kickThis} />
       ))}
 
-      {activity.length > 0 ? <Text style={styles.sectionLabel}>Recent guest messages</Text> : null}
+      {activity.length > 0 ? <Text style={sectionLabelStyle}>Recent guest messages</Text> : null}
       {activity.slice(-6).map((a) => (
         <ActivityRow key={`${a.memberId}-${a.at_ms}`} item={a} />
       ))}
@@ -694,6 +701,12 @@ const styles = StyleSheet.create((theme) => ({
     letterSpacing: 0.5,
     marginTop: theme.spacing[2],
   },
+  sectionLabelClickUp: {
+    color: theme.colors.foreground,
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.semibold,
+  },
+  sectionLabelGap: { marginTop: theme.spacing[2] },
   urlRow: {
     flexDirection: "row",
     alignItems: "center",

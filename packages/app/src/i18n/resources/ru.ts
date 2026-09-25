@@ -293,6 +293,7 @@ export const ru: TranslationResources = {
       zoomIn: "Zoom in",
       zoomOut: "Zoom out",
       resetZoom: "Reset view",
+      fullscreen: "Полноэкранный режим",
       viewSource: "View source",
       viewDiagram: "View diagram",
     },
@@ -1824,6 +1825,8 @@ export const ru: TranslationResources = {
           claude: "Клод",
           ghostty: "Призрачный",
           pureBlack: "Чистый чёрный",
+          clickup: "ClickUp",
+          clickupDark: "ClickUp Dark",
           auto: "Система",
         },
       },
@@ -2308,6 +2311,11 @@ export const ru: TranslationResources = {
       },
     },
   },
+  clickupShell: {
+    search: "Поиск",
+    newWorkspace: "Новый",
+    workspaces: "Рабочие пространства",
+  },
   marketplace: {
     title: "Plugin Marketplace",
     subtitle: "Discover and install community plugins for JAgentDesk.",
@@ -2316,6 +2324,7 @@ export const ru: TranslationResources = {
     browseButton: "Browse marketplace",
     tabs: {
       browse: "Browse",
+      themes: "Темы",
       installed: "Installed",
       installedEmpty: "No plugins installed yet.",
       loadMore: "Load more",
@@ -2379,6 +2388,13 @@ export const ru: TranslationResources = {
     themes: {
       title: "Themes",
       subtitle: "Palettes and appearance packs from the community.",
+      searchPlaceholder: "Поиск тем",
+      count: "Тем: {{count}}",
+      noPreview: "Нет предпросмотра",
+      variants: "Вариантов: {{count}}",
+      empty: "Нет тем, подходящих под этот фильтр.",
+      filter: { all: "Все" },
+      appearance: { dark: "Тёмная", light: "Светлая" },
     },
     states: {
       loading: "Loading marketplace…",

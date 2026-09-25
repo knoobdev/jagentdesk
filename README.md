@@ -98,6 +98,32 @@ with a few deliberate boundaries:
 
 ## ✨ New in this release
 
+### ClickUp theme & shell, Paseo's split plugins, zoomable images (v0.9.41)
+
+<p align="center">
+  <img src="docs/media/clickup-theme.jpg" alt="The ClickUp theme — top bar with host switcher and Search, violet icon rail, Workspaces panel with a violet New button, and the Simulator agent chat with its result table" width="100%" />
+</p>
+
+- **ClickUp theme, now the default.** Not just ClickUp's palette but its shell: a top bar with
+  the host switcher and a **Search ⌘K** pill, a violet icon rail with every destination, the
+  sidebar and content in one rounded panel with a violet **+ New**, a ClickUp Brain composer
+  with a gradient border, ClickUp‑style chat (avatar, name, time), underlined tabs, list
+  groups with row dividers and lavender filter chips on every screen — and on phones a bottom
+  tab bar with a violet Create button. **ClickUp Dark** and every previous theme are still in
+  Settings › Appearance.
+- **Marketplace › Themes.** A preview card per theme (a mini window painted with its palette),
+  variant dots, search and an All / Dark / Light filter. Installed plugin themes show up in
+  Settings › Appearance.
+- **Plugins built for Paseo's split API load again** (`index.client` + `index.server`,
+  plugin settings screens, npm / GitHub sources) — this fixes
+  `Plugin failed to load: client.addSettingsScreen is not a function`. Installed plugins now
+  survive a daemon restart.
+- **Zoomable images.** Chat images open in a lightbox with wheel / pinch zoom, pan, reset and
+  a toolbar; image files zoom in the file pane; Mermaid diagrams go fullscreen.
+- **Screen chats live in the project.** Simulator, Database and Cluster chats get their own
+  workspace in the project (listed under it like any chat) instead of landing as a tab in
+  another conversation.
+
 ### SimFleet — agents drive a fleet of iOS simulators (v0.9.40)
 
 <p align="center">
@@ -226,9 +252,10 @@ and **learn** from real conversations — not throwaway one‑off agents:
 Install local plugins that contribute surfaces, sidebar items, workspace panels, command‑center
 items, attachment sources, and themes:
 
-- **Local‑disk only** — `jagentdesk plugin install <dir>`; no marketplace, no network install.
-- **Compiled + run on the daemon** — an esbuild pipeline splits client/server code; each plugin
-  runs in its own subprocess and reaches the daemon over an internal session.
+- **Marketplace or local** — browse and install community plugins and themes from
+  **Marketplace**, or `jagentdesk plugin install <dir|npm:…|github:…>`.
+- **Split client / server entries** — `index.client` runs in the app and `index.server` in its
+  own subprocess on the daemon (Paseo's plugin API); older single‑entry plugins still load.
 - **Trusted, off by default** — plugins run unsandboxed with a full daemon session, so
   `pluginsEnabled` defaults to **false**; a reserved `plugin:<id>` identity keeps a tailnet node
   from ever impersonating a plugin. Manage them under **Settings → Plugins** (list / install /

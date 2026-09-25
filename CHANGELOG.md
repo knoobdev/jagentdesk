@@ -1,9 +1,77 @@
 # Changelog
 
 All notable changes to JAgentDesk are documented here. JAgentDesk versions its
-own release line (now `0.9.40`); the many `v0.1.x`–`v1.0.x` tags in history are
+own release line (now `0.9.41`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
+
+## v0.9.41 — 2026-09-25
+
+A ClickUp theme that is now the default — not just its colors but ClickUp's whole shell, on
+desktop and phones. Plugins built for Paseo's new split client/server API load again, the
+Marketplace has a real Themes gallery, chat images zoom, and Simulator / Database / Cluster
+chats get their own workspace in the project.
+
+### Added
+
+- **ClickUp theme (new default).** A light theme measured from ClickUp's own web and iOS UI
+  (violet `#6149e7`, `#f9f9f9` / `#ffffff` surfaces), plus an opt-in **ClickUp Dark**. It
+  brings ClickUp's shell, not only its palette:
+  - a global top bar with the host switcher, a centered **Search ⌘K** pill and help;
+  - a violet vertical icon rail with every destination (Home, History, Schedules, Shared,
+    Team, Skills, Market, Docker, Sims, Data, Clusters, Usage, Forge, plugin entries, Pair,
+    Settings) that stays when the sidebar is collapsed;
+  - the sidebar and content inside one rounded, bordered panel, a “Workspaces” header with a
+    violet **+ New** button, and projects listed below;
+  - a ClickUp Brain composer with a cyan → violet → magenta gradient border and a gradient
+    send button;
+  - chat messages laid out like ClickUp chat: round avatar, bold name and time for your
+    messages, provider mark + model at the start of each agent turn;
+  - a breadcrumb workspace header (`project / workspace`) and underlined view tabs;
+  - on phones, a bottom tab bar (Home, Workspaces, violet Create, History, Settings) and
+    centered screen titles.
+    Every screen follows it: bold titles, underlined text tabs instead of pills, white cards on
+    a gray canvas, ClickUp list groups (`TODAY`, `THIS WEEK`) with row dividers, sentence-case
+    column headers and lavender filter chips — Settings, History, Skills, Docker, Marketplace,
+    Clusters, Databases, Forge, Team (now with a full light variant), Usage, Simulators, Shared
+    sessions and Schedules. Every previous theme is still available and renders unchanged.
+- **Marketplace › Themes.** Themes have their own tab with a live preview card per theme
+  (a mini app window painted with its palette), variant dots, Dark / Light tags, search and an
+  All / Dark / Light filter — instead of a wall of name chips. Installed plugin themes appear
+  in Settings › Appearance and apply immediately.
+- **Paseo's split plugin API.** Plugins with separate `index.client` / `index.server` entries
+  run each side in its own runtime, with `registerSettings`, plugin settings screens, the
+  `client` / `server` / `server/provider` SDK subpaths, update preview / apply, and npm /
+  GitHub / git sources. Plugins written for Paseo are rebranded on install; older
+  single-entry plugins still load, and a plugin without declared requirements is accepted.
+- **Zoomable images.** Images open in a lightbox with zoom in / out / reset, wheel zoom around
+  the cursor, drag to pan, double-click to reset and Escape to close (without interrupting a
+  running agent). Images in agent answers now open the lightbox too, image files zoom in place
+  in the file pane, and Mermaid diagrams get a fullscreen viewer. Pinch and double-tap on
+  phones.
+- **Screen chats live in the project.** A Simulator, Database or Cluster chat is created in
+  its own workspace in the chosen project, so it is listed under the project like any chat
+  and still shows in its screen's agent dock. Opening one from History or Search lands on its
+  screen with the dock showing it.
+
+### Fixed
+
+- **`Plugin failed to load: client.addSettingsScreen is not a function`.** The client entry
+  of split plugins was compiled for the server; each entry now runs where it belongs.
+- **Installed plugins survive a daemon restart.** The plugin list and the global plugins
+  switch are saved in `config.json`; removing a plugin no longer leaves it behind.
+- **Plugin settings are stored on the host** instead of failing with “settings storage is
+  unavailable”.
+- **Screen chats no longer open as a tab in another conversation.** A Simulator / Database /
+  Cluster chat was filed into whichever workspace already used the project folder and showed
+  up as a tab there.
+
+### Notes
+
+- Plugin lifecycle hooks and plugin-provided agent providers are accepted but not run yet;
+  the plugin log says so.
+- Theme reference and measurements: `docs/themes.md`; plugin differences from Paseo:
+  `docs/plugins.md`.
 
 ## v0.9.40 — 2026-09-25
 

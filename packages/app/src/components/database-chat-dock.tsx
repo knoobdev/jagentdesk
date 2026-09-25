@@ -1,3 +1,4 @@
+import { DATABASE_AGENT_LABEL } from "@/utils/dock-agents";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { BackHandler, Pressable, ScrollView, Text, View, useWindowDimensions } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
@@ -39,8 +40,6 @@ const accentColor = (theme: Theme) => ({ color: theme.colors.accent });
 const mutedColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 const fabIconColor = (theme: Theme) => ({ color: theme.colors.accentForeground });
 const noop = () => {};
-
-const DATABASE_AGENT_LABEL = "jagentdesk.database.id";
 
 /** Most recently active, non-archived agent created for this database. */
 function findLatestDatabaseAgent(

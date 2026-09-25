@@ -4,6 +4,8 @@ import { StyleSheet } from "react-native-unistyles";
 import { PodStatusDot } from "@/components/cluster-dot";
 import { ClusterResourceEvents } from "@/components/cluster-resource-events";
 import type { Theme } from "@/styles/theme";
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { clickUpChipStyles, clickUpListStyles } from "@/components/clickup-shell/list-styles";
 
 type Obj = Record<string, unknown>;
 const asObj = (v: unknown): Obj => (v && typeof v === "object" ? (v as Obj) : {});
@@ -166,11 +168,48 @@ function buildRows(kind: string, spec: Obj, status: Obj, md: Obj, data?: Obj): R
   return rows;
 }
 
-function SummarySection({ rows }: { rows: Row[] }) {
+/** Section label: small uppercase caption in classic, ClickUp's bordered group pill otherwise. */
+function SectionTitle({ title, count }: { title: string; count?: number }) {
+  const isClickUp = useIsClickUpTheme();
+  if (!isClickUp) return <Text style={styles.sectionTitle}>{title}</Text>;
   return (
-    <View style={styles.grid}>
+    <View style={styles.groupRowClickUp}>
+      <View style={clickUpListStyles.groupPill}>
+        <Text style={clickUpListStyles.groupPillText}>{title}</Text>
+      </View>
+      {count === undefined ? null : <Text style={clickUpListStyles.groupCount}>{count}</Text>}
+    </View>
+  );
+}
+
+function revealLabel(revealing: boolean, shown: boolean): string {
+  if (revealing && !shown) return "Revealing…";
+  return shown ? "Hide" : "Show";
+}
+
+function RevealButton({
+  dataKey,
+  label,
+  onToggle,
+}: {
+  dataKey: string;
+  label: string;
+  onToggle: (key: string) => void;
+}) {
+  const press = useCallback(() => onToggle(dataKey), [onToggle, dataKey]);
+  return (
+    <Pressable style={styles.revealBtn} onPress={press}>
+      <Text style={styles.revealBtnText}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function SummarySection({ rows }: { rows: Row[] }) {
+  const isClickUp = useIsClickUpTheme();
+  return (
+    <View style={isClickUp ? styles.gridClickUp : styles.grid}>
       {rows.map((r) => (
-        <View key={r.label} style={styles.gridRow}>
+        <View key={r.label} style={[styles.gridRow, isClickUp && clickUpListStyles.row]}>
           <Text style={styles.gridLabel}>{r.label}</Text>
           <Text style={styles.gridValue} numberOfLines={2}>
             {r.value}
@@ -182,10 +221,11 @@ function SummarySection({ rows }: { rows: Row[] }) {
 }
 
 function ChipList({ entries }: { entries: [string, string][] }) {
+  const isClickUp = useIsClickUpTheme();
   return (
     <View style={styles.chips}>
       {entries.map(([k, v]) => (
-        <View key={k} style={styles.chip}>
+        <View key={k} style={[styles.chip, isClickUp && clickUpChipStyles.chip]}>
           <Text style={styles.chipText} numberOfLines={1}>
             {k}
             {v ? `: ${v}` : ""}
@@ -215,6 +255,7 @@ export function ClusterResourceOverview({
   // inline per-key Show/Hide toggle on the Data rows.
   revealSecret?: () => Promise<{ data: Record<string, string> | null; error: string | null }>;
 }) {
+  const isClickUp = useIsClickUpTheme();
   const [revealedData, setRevealedData] = useState<Record<string, string> | null>(null);
   const [shownKeys, setShownKeys] = useState<Set<string>>(() => new Set());
   const [revealing, setRevealing] = useState(false);
@@ -296,14 +337,14 @@ export function ClusterResourceOverview({
     <ScrollView style={styles.container} contentContainerStyle={styles.content} nestedScrollEnabled>
       {rows.length > 0 ? (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Details</Text>
+          <SectionTitle title="Details" />
           <SummarySection rows={rows} />
         </View>
       ) : null}
 
       {dataEntries.length > 0 ? (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Data</Text>
+          <SectionTitle title="Data" count={dataEntries.length} />
           {dataEntries.map(([k, v]) => {
             const isSecret = kind === "Secret";
             const shown = shownKeys.has(k);
@@ -316,11 +357,11 @@ export function ClusterResourceOverview({
                     {k}
                   </Text>
                   {isSecret ? (
-                    <Pressable style={styles.revealBtn} onPress={() => toggleSecretKey(k)}>
-                      <Text style={styles.revealBtnText}>
-                        {revealing && !shown ? "Revealing…" : shown ? "Hide" : "Show"}
-                      </Text>
-                    </Pressable>
+                    <RevealButton
+                      dataKey={k}
+                      label={revealLabel(revealing, shown)}
+                      onToggle={toggleSecretKey}
+                    />
                   ) : (
                     <Text style={styles.dataEntryMeta}>{dataMeta(v)}</Text>
                   )}
@@ -340,9 +381,7 @@ export function ClusterResourceOverview({
                   </ScrollView>
                 ) : (
                   <View style={styles.secretMasked}>
-                    <Text style={styles.secretMaskedText}>
-                      {revealError ?? "••••••••••••"}
-                    </Text>
+                    <Text style={styles.secretMaskedText}>{revealError ?? "••••••••••••"}</Text>
                   </View>
                 )}
               </View>
@@ -353,9 +392,9 @@ export function ClusterResourceOverview({
 
       {containers.length > 0 ? (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Containers</Text>
+          <SectionTitle title="Containers" count={containers.length} />
           {containers.map((c) => (
-            <View key={c.name} style={styles.containerRow}>
+            <View key={c.name} style={[styles.containerRow, isClickUp && clickUpListStyles.row]}>
               {c.ready === undefined ? null : (
                 <PodStatusDot phase={c.ready ? "Running" : "Pending"} />
               )}
@@ -377,9 +416,9 @@ export function ClusterResourceOverview({
 
       {conditions.length > 0 ? (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Conditions</Text>
+          <SectionTitle title="Conditions" count={conditions.length} />
           {conditions.map((c) => (
-            <View key={c.type} style={styles.condRow}>
+            <View key={c.type} style={[styles.condRow, isClickUp && clickUpListStyles.row]}>
               <Text style={styles.condType} numberOfLines={1}>
                 {c.type}
               </Text>
@@ -396,14 +435,14 @@ export function ClusterResourceOverview({
 
       {labels.length > 0 ? (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Labels</Text>
+          <SectionTitle title="Labels" count={labels.length} />
           <ChipList entries={labels} />
         </View>
       ) : null}
 
       {annotations.length > 0 ? (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Annotations</Text>
+          <SectionTitle title="Annotations" count={annotations.length} />
           <ChipList entries={annotations} />
         </View>
       ) : null}
@@ -431,6 +470,14 @@ const styles = StyleSheet.create((theme: Theme) => ({
     color: theme.colors.foregroundExtraMuted,
     textTransform: "uppercase" as const,
     letterSpacing: 0.5,
+  },
+  groupRowClickUp: { flexDirection: "row", alignItems: "center", gap: theme.spacing[2] },
+  gridClickUp: {
+    borderWidth: 1,
+    borderColor: theme.chrome.cardBorder,
+    borderRadius: theme.chrome.cardRadius,
+    backgroundColor: theme.chrome.cardBackground,
+    overflow: "hidden",
   },
   grid: {
     borderWidth: theme.borderWidth[1],

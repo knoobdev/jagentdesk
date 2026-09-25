@@ -1,0 +1,6 @@
+{
+  "id": "provider-acp-transformer-example",
+  "requirements": {
+    "jagentdesk": ">=0.8.0"
+  }
+}

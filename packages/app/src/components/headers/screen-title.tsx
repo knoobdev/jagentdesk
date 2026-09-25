@@ -29,8 +29,8 @@ const styles = StyleSheet.create((theme) => ({
     minWidth: 0,
     fontSize: theme.fontSize.base,
     fontWeight: {
-      xs: "400",
-      md: "300",
+      xs: theme.chrome.titleWeightCompact,
+      md: theme.chrome.titleWeight,
     },
     color: theme.colors.foreground,
   },

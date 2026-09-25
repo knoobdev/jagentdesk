@@ -295,6 +295,7 @@ export const fr: TranslationResources = {
       zoomIn: "Zoom in",
       zoomOut: "Zoom out",
       resetZoom: "Reset view",
+      fullscreen: "Plein écran",
       viewSource: "View source",
       viewDiagram: "View diagram",
     },
@@ -1837,6 +1838,8 @@ export const fr: TranslationResources = {
           claude: "Claude",
           ghostty: "Fantôme",
           pureBlack: "Noir pur",
+          clickup: "ClickUp",
+          clickupDark: "ClickUp Dark",
           auto: "Système",
         },
       },
@@ -2323,6 +2326,11 @@ export const fr: TranslationResources = {
       },
     },
   },
+  clickupShell: {
+    search: "Rechercher",
+    newWorkspace: "Nouveau",
+    workspaces: "Espaces de travail",
+  },
   marketplace: {
     title: "Plugin Marketplace",
     subtitle: "Discover and install community plugins for JAgentDesk.",
@@ -2331,6 +2339,7 @@ export const fr: TranslationResources = {
     browseButton: "Browse marketplace",
     tabs: {
       browse: "Browse",
+      themes: "Thèmes",
       installed: "Installed",
       installedEmpty: "No plugins installed yet.",
       loadMore: "Load more",
@@ -2394,6 +2403,13 @@ export const fr: TranslationResources = {
     themes: {
       title: "Themes",
       subtitle: "Palettes and appearance packs from the community.",
+      searchPlaceholder: "Rechercher des thèmes",
+      count: "{{count}} thèmes",
+      noPreview: "Aucun aperçu",
+      variants: "{{count}} variantes",
+      empty: "Aucun thème ne correspond à ce filtre.",
+      filter: { all: "Tous" },
+      appearance: { dark: "Sombre", light: "Clair" },
     },
     states: {
       loading: "Loading marketplace…",

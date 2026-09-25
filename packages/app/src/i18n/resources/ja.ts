@@ -294,6 +294,7 @@ export const ja: TranslationResources = {
       zoomIn: "Zoom in",
       zoomOut: "Zoom out",
       resetZoom: "Reset view",
+      fullscreen: "全画面表示",
       viewSource: "View source",
       viewDiagram: "View diagram",
     },
@@ -1804,6 +1805,8 @@ export const ja: TranslationResources = {
           claude: "Claude",
           ghostty: "Ghostty",
           pureBlack: "ピュアブラック",
+          clickup: "ClickUp",
+          clickupDark: "ClickUp Dark",
           auto: "システム",
         },
       },
@@ -2289,6 +2292,11 @@ export const ja: TranslationResources = {
       },
     },
   },
+  clickupShell: {
+    search: "検索",
+    newWorkspace: "新規",
+    workspaces: "ワークスペース",
+  },
   marketplace: {
     title: "Plugin Marketplace",
     subtitle: "Discover and install community plugins for JAgentDesk.",
@@ -2297,6 +2305,7 @@ export const ja: TranslationResources = {
     browseButton: "Browse marketplace",
     tabs: {
       browse: "Browse",
+      themes: "テーマ",
       installed: "Installed",
       installedEmpty: "No plugins installed yet.",
       loadMore: "Load more",
@@ -2360,6 +2369,13 @@ export const ja: TranslationResources = {
     themes: {
       title: "Themes",
       subtitle: "Palettes and appearance packs from the community.",
+      searchPlaceholder: "テーマを検索",
+      count: "{{count}} 件のテーマ",
+      noPreview: "プレビューなし",
+      variants: "{{count}} 種類",
+      empty: "このフィルターに一致するテーマはありません。",
+      filter: { all: "すべて" },
+      appearance: { dark: "ダーク", light: "ライト" },
     },
     states: {
       loading: "Loading marketplace…",

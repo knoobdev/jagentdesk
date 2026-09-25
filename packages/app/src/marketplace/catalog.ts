@@ -142,7 +142,7 @@ function normalizeNpm(value: unknown): MarketplaceNpm | undefined {
   };
 }
 
-function normalizePlugin(value: unknown): MarketplacePlugin | null {
+export function normalizePlugin(value: unknown): MarketplacePlugin | null {
   if (!value || typeof value !== "object") {
     return null;
   }
@@ -212,6 +212,105 @@ export function useMarketplaceCatalog() {
 
 export function isThemePlugin(plugin: MarketplacePlugin): boolean {
   return plugin.categories.includes("theme") || plugin.themes.length > 0;
+}
+
+/** One color variant a theme plugin ships, as published in the catalog. */
+export interface ThemeVariant {
+  id: string;
+  name: string;
+  appearance: "light" | "dark";
+  colors: {
+    background: string;
+    foreground: string;
+    raised: string;
+    control: string;
+    border: string;
+    accent: string;
+    mutedForeground: string;
+  };
+}
+
+const HEX_COLOR = /^#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+const VARIANT_COLOR_KEYS = [
+  "background",
+  "foreground",
+  "raised",
+  "control",
+  "border",
+  "accent",
+  "mutedForeground",
+] as const;
+
+function parseThemeVariant(value: unknown): ThemeVariant | null {
+  if (typeof value !== "object" || value === null) return null;
+  const record = value as Record<string, unknown>;
+  const colors = record.colors as Record<string, unknown> | undefined;
+  if (typeof colors !== "object" || colors === null) return null;
+  const parsed: Partial<ThemeVariant["colors"]> = {};
+  for (const key of VARIANT_COLOR_KEYS) {
+    const color = colors[key] ?? (key === "accent" ? colors.foreground : undefined);
+    if (typeof color !== "string" || !HEX_COLOR.test(color)) return null;
+    parsed[key] = color;
+  }
+  return {
+    id: asString(record.id),
+    name: asString(record.name),
+    appearance: record.appearance === "light" ? "light" : "dark",
+    colors: parsed as ThemeVariant["colors"],
+  };
+}
+
+/** The theme's variants with a complete, valid palette (malformed entries are skipped). */
+export function themeVariants(plugin: MarketplacePlugin): ThemeVariant[] {
+  return plugin.themes.flatMap((entry) => {
+    const variant = parseThemeVariant(entry);
+    return variant ? [variant] : [];
+  });
+}
+
+/**
+ * A readable title for a theme plugin: most community theme ids are `paseo-<name>-theme`, so
+ * "paseo-tokyo-night-storm-theme" reads as "Tokyo Night Storm".
+ */
+export function displayThemeName(plugin: MarketplacePlugin): string {
+  const core = plugin.name
+    .replace(/^(?:paseo|jagentdesk)-/i, "")
+    .replace(/-theme$/i, "")
+    .trim();
+  const words = (core || plugin.name).split(/[-_\s]+/).filter(Boolean);
+  return words.map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
+}
+
+export type ThemeAppearanceFilter = "all" | "dark" | "light";
+
+export interface ThemeEntry {
+  plugin: MarketplacePlugin;
+  variants: ThemeVariant[];
+}
+
+/** Theme plugins matching the search text and, unless "all", having a variant of that appearance. */
+export function filterThemeEntries(
+  entries: readonly ThemeEntry[],
+  search: string,
+  appearance: ThemeAppearanceFilter,
+): ThemeEntry[] {
+  const query = search.trim().toLowerCase();
+  return entries.filter(({ plugin, variants }) => {
+    if (appearance !== "all" && !variants.some((variant) => variant.appearance === appearance)) {
+      return false;
+    }
+    if (!query) return true;
+    const haystack = [
+      displayThemeName(plugin),
+      plugin.name,
+      plugin.author,
+      plugin.repo,
+      ...variants.map((variant) => variant.name),
+    ]
+      .join(" ")
+      .toLowerCase();
+    return haystack.includes(query);
+  });
 }
 
 export function npmDownloads(plugin: MarketplacePlugin): number | undefined {

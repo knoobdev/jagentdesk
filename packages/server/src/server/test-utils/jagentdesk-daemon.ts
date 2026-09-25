@@ -23,6 +23,8 @@ interface TestJAgentDeskDaemonOptions {
   mcpEnabled?: boolean;
   mcpDebug?: boolean;
   sessionSharingEnabled?: boolean;
+  pluginsEnabled?: JAgentDeskDaemonConfig["pluginsEnabled"];
+  plugins?: JAgentDeskDaemonConfig["plugins"];
   isDev?: boolean;
   daemonStatusRpcCapability?: boolean;
   agentClients?: Partial<Record<AgentProvider, AgentClient>>;
@@ -176,6 +178,8 @@ async function prepareTestDaemonConfig(
     staticDir,
     mcpDebug: options.mcpDebug ?? false,
     sessionSharingEnabled: options.sessionSharingEnabled,
+    pluginsEnabled: options.pluginsEnabled,
+    plugins: options.plugins,
     isDev: options.isDev,
     agentClients: options.agentClients ?? createTestAgentClients(),
     providerOverrides: options.providerOverrides,

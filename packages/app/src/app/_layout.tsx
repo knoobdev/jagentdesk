@@ -16,7 +16,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { Alert, AppState, useWindowDimensions, View } from "react-native";
+import { Alert, AppState, useColorScheme, useWindowDimensions, View } from "react-native";
 import { GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -118,17 +118,24 @@ import { getDaemonStartService } from "@/runtime/daemon-start-service";
 import { ConnectionNotifications } from "@/runtime/connection-notifications";
 import { ForumNotifications } from "@/runtime/forum-notifications";
 import { applyAppearance } from "@/screens/settings/appearance/apply-appearance";
+import { resolveThemeTarget } from "@/screens/settings/appearance/theme-target";
+import { usePluginThemeCatalog } from "@/plugins/themes";
 import { selectIsAgentListOpen, usePanelStore } from "@/stores/panel-store";
 import { flushDraftPersistStorage } from "@/stores/draft-store";
 import { usePairDeviceModalStore } from "@/stores/pair-device-modal-store";
-import { THEME_TO_UNISTYLES, type ThemeName } from "@/styles/theme";
+import type { ThemeName } from "@/styles/theme";
 import { installWebScrollbarStyles } from "@/styles/install-web-scrollbar-styles";
 import type { HostProfile } from "@/types/host-connection";
 import { toggleDesktopSidebarsWithCheckoutIntent } from "@/utils/desktop-sidebar-toggle";
+import { ClickUpMobileTabBar } from "@/components/clickup-shell/clickup-mobile-tab-bar";
+import { ClickUpRail } from "@/components/clickup-shell/clickup-rail";
+import { ClickUpTopBar } from "@/components/clickup-shell/clickup-top-bar";
+import { useClickUpDesktopShell } from "@/components/clickup-shell/use-clickup-chrome";
 import {
   useHasWindowChromeObstruction,
   WindowChromeProvider,
   WindowChromeRegion,
+  WindowChromeRootRegion,
   WindowChromeSafeArea,
 } from "@/utils/desktop-window";
 import {
@@ -459,7 +466,16 @@ interface AppContainerProps {
   chromeEnabled?: boolean;
 }
 
-const THEME_CYCLE_ORDER: ThemeName[] = ["dark", "zinc", "midnight", "claude", "ghostty", "light"];
+const THEME_CYCLE_ORDER: ThemeName[] = [
+  "clickup",
+  "clickupDark",
+  "dark",
+  "zinc",
+  "midnight",
+  "claude",
+  "ghostty",
+  "light",
+];
 const WINDOW_SIDEBAR_TOGGLE_HORIZONTAL_PADDING = 12;
 
 function PairDeviceRequestAutoOpener() {
@@ -525,6 +541,7 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
   const isWorkspaceRoute = parseHostWorkspaceRouteFromPathname(pathname) !== null;
   const isWorkspaceFocusModeEnabled = isWorkspaceRoute && isFocusModeEnabled;
   const chromeEnabled = chromeEnabledOverride ?? daemons.length > 0;
+  const clickUpShell = useClickUpDesktopShell(chromeEnabled);
   const hasMountedDesktopSidebar = useLatchedBoolean(chromeEnabled);
   const toggleAgentList = isCompactLayout ? toggleMobileAgentList : toggleDesktopAgentList;
   const toggleDesktopSidebars = useCallback(() => {
@@ -615,21 +632,8 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
     </View>
   );
 
-  const surface = (
-    <View style={layoutStyles.surfaceFill}>
-      {workspaceChrome}
-      {!isCompactLayout && appChromeLayout.sidebarToggleOwner === "window" ? (
-        <WindowChromeRegion corners="top-left">
-          <WindowChromeSafeArea
-            placement="inline"
-            horizontalPadding={WINDOW_SIDEBAR_TOGGLE_HORIZONTAL_PADDING}
-            pointerEvents="box-none"
-            style={layoutStyles.windowSidebarToggle}
-          >
-            <WindowSidebarMenuToggle />
-          </WindowChromeSafeArea>
-        </WindowChromeRegion>
-      ) : null}
+  const overlays = (
+    <>
       <FloatingPanelPortalHost />
       {isCompactLayout ? sidebarChrome : null}
       <DownloadToast />
@@ -649,6 +653,30 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
       <KeyboardShortcutsDialog />
       <AppDiagnosticHost />
       <QuittingOverlay />
+    </>
+  );
+
+  // The ClickUp theme brings ClickUp's desktop shell: a global top bar, a vertical icon rail and
+  // the sidebar plus content inside one rounded, bordered panel. Other themes keep the classic shell.
+  const surface = clickUpShell ? (
+    <View style={layoutStyles.clickUpCanvas}>
+      <ClickUpTopBar />
+      <WindowChromeRootRegion corners="none">
+        <View style={rowStyle}>
+          <ClickUpRail />
+          <View style={layoutStyles.clickUpPanel}>{workspaceChrome}</View>
+        </View>
+      </WindowChromeRootRegion>
+      {overlays}
+    </View>
+  ) : (
+    <View style={layoutStyles.surfaceFill}>
+      {workspaceChrome}
+      <ClickUpMobileTabBar chromeEnabled={chromeEnabled} />
+      <WindowSidebarToggleSlot
+        visible={!isCompactLayout && appChromeLayout.sidebarToggleOwner === "window"}
+      />
+      {overlays}
     </View>
   );
 
@@ -659,6 +687,23 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
   );
 
   return <CommandCenterProvider>{content}</CommandCenterProvider>;
+}
+
+/** The floating sidebar toggle beside the macOS traffic lights (classic shell only). */
+function WindowSidebarToggleSlot({ visible }: { visible: boolean }) {
+  if (!visible) return null;
+  return (
+    <WindowChromeRegion corners="top-left">
+      <WindowChromeSafeArea
+        placement="inline"
+        horizontalPadding={WINDOW_SIDEBAR_TOGGLE_HORIZONTAL_PADDING}
+        pointerEvents="box-none"
+        style={layoutStyles.windowSidebarToggle}
+      >
+        <WindowSidebarMenuToggle />
+      </WindowChromeSafeArea>
+    </WindowChromeRegion>
+  );
 }
 
 function SidebarChrome({
@@ -704,22 +749,27 @@ function MobileGestureWrapper({
 function ProvidersWrapper({ children }: { children: ReactNode }) {
   const { settings, isLoading: settingsLoading } = useAppSettings();
 
-  // Apply theme setting on mount and when it changes
+  const systemScheme = useColorScheme();
+  const pluginThemeOptions = usePluginThemeCatalog();
+
+  // Apply the theme, then the font / size / syntax settings over every registered theme key.
+  // One effect, in this order: a plugin theme replaces its whole slot, so the appearance patch
+  // has to land after it.
   useEffect(() => {
     if (settingsLoading) return;
-    if (settings.theme === "auto") {
+    const target = resolveThemeTarget({
+      preference: settings.theme,
+      pluginThemeId: settings.pluginThemeId,
+      pluginOptions: pluginThemeOptions,
+      systemScheme,
+    });
+    if (target.kind === "adaptive") {
       UnistylesRuntime.setAdaptiveThemes(true);
     } else {
+      if (target.kind === "plugin") UnistylesRuntime.updateTheme(target.key, () => target.theme);
       UnistylesRuntime.setAdaptiveThemes(false);
-      UnistylesRuntime.setTheme(THEME_TO_UNISTYLES[settings.theme]);
+      UnistylesRuntime.setTheme(target.key);
     }
-  }, [settingsLoading, settings.theme]);
-
-  // Apply font / size / syntax appearance settings on mount and when they change.
-  // Sibling to the theme effect above; order is irrelevant because both patch all
-  // six registered theme keys, so the active key is always current.
-  useEffect(() => {
-    if (settingsLoading) return;
     applyAppearance({
       uiFontFamily: settings.uiFontFamily,
       monoFontFamily: settings.monoFontFamily,
@@ -729,6 +779,10 @@ function ProvidersWrapper({ children }: { children: ReactNode }) {
     });
   }, [
     settingsLoading,
+    settings.theme,
+    settings.pluginThemeId,
+    pluginThemeOptions,
+    systemScheme,
     settings.uiFontFamily,
     settings.monoFontFamily,
     settings.uiFontSize,
@@ -1213,6 +1267,21 @@ export default function RootLayout() {
 const layoutStyles = StyleSheet.create((theme) => ({
   surfaceFill: {
     flex: 1,
+    backgroundColor: theme.colors.surface0,
+  },
+  clickUpCanvas: {
+    flex: 1,
+    backgroundColor: theme.chrome.canvas,
+  },
+  clickUpPanel: {
+    flex: 1,
+    borderColor: theme.chrome.panelBorder,
+    marginLeft: theme.spacing[2],
+    marginRight: theme.spacing[2],
+    marginBottom: theme.spacing[2],
+    borderWidth: 1,
+    borderRadius: 10,
+    overflow: "hidden",
     backgroundColor: theme.colors.surface0,
   },
   windowSidebarToggle: {

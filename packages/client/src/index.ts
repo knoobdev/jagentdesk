@@ -81,7 +81,25 @@ export interface JAgentDeskClientConfig {
 
 export type JAgentDeskWorkspace = WorkspaceDescriptorPayload;
 export type JAgentDeskAgent = AgentSnapshotPayload;
-export type JAgentDeskAgentListOptions = FetchAgentsOptions;
+/**
+ * A list subscription owned by the API: the first snapshot plus live updates until released.
+ * Mirrors the upstream plugin API shape; the fork's daemon already pushes agent/workspace
+ * updates to every session, so an update is forwarded as it arrives.
+ */
+export type SubscriptionSnapshot<T> = T & { subscriptionId: string };
+export interface SubscriptionObserver<T> {
+  snapshot(snapshot: T): void;
+  update(message: SessionOutboundMessage): void;
+  error?(error: unknown): void;
+}
+export interface OwnedSubscription<T> {
+  readonly subscriptionId: string | null;
+  readonly ready: Promise<SubscriptionSnapshot<T>>;
+  subscribe(observer: SubscriptionObserver<SubscriptionSnapshot<T>>): () => void;
+  release(): Promise<void>;
+}
+
+export type JAgentDeskAgentListOptions = FetchAgentsOptions & { signal?: AbortSignal };
 export type JAgentDeskProject = WorkspaceProjectDescriptorPayload;
 export type JAgentDeskProjectListOptions = Omit<ProjectListRequestMessage, "type" | "requestId"> & {
   requestId?: string;
@@ -91,6 +109,7 @@ export type JAgentDeskProjectListResult = ProjectListResponseMessage["payload"];
 export interface JAgentDeskAgentListResult {
   requestId: string;
   subscriptionId?: string | null;
+  subscription?: OwnedSubscription<JAgentDeskAgentListResult>;
   entries: FetchAgentsEntry[];
   pageInfo: FetchAgentsPageInfo;
 }
@@ -99,11 +118,13 @@ export type JAgentDeskWorkspaceListOptions = Omit<
   "type" | "requestId"
 > & {
   requestId?: string;
+  signal?: AbortSignal;
 };
 
 export interface JAgentDeskWorkspaceListResult {
   requestId: string;
   subscriptionId?: string | null;
+  subscription?: OwnedSubscription<JAgentDeskWorkspaceListResult>;
   entries: JAgentDeskWorkspace[];
   pageInfo: FetchWorkspacesResponseMessage["payload"]["pageInfo"];
 }
@@ -156,11 +177,24 @@ export interface JAgentDeskWorkspaceHandle {
   subscribe(handler: (update: JAgentDeskWorkspaceUpdate) => void): () => void;
 }
 
+export type JAgentDeskProjectUpdate = Extract<
+  SessionOutboundMessage,
+  { type: "project.update" }
+>["payload"];
+export type JAgentDeskProjectUpdateHandler = (update: JAgentDeskProjectUpdate) => void;
+
 export interface JAgentDeskProjectActions {
   list(options?: JAgentDeskProjectListOptions): Promise<JAgentDeskProjectListResult>;
+  subscribe(handler: JAgentDeskProjectUpdateHandler): () => void;
 }
 
 export interface JAgentDeskWorkspaceActions {
+  list(options: JAgentDeskWorkspaceListOptions & { subscribe: {} }): Promise<
+    JAgentDeskWorkspaceListResult & {
+      subscriptionId: string | null;
+      subscription: OwnedSubscription<JAgentDeskWorkspaceListResult>;
+    }
+  >;
   list(options?: JAgentDeskWorkspaceListOptions): Promise<JAgentDeskWorkspaceListResult>;
   ref(workspace: string | JAgentDeskWorkspace): JAgentDeskWorkspaceHandle;
   open(
@@ -313,10 +347,23 @@ export interface JAgentDeskAgentHandle {
   commands(options?: JAgentDeskAgentCommandsOptions): Promise<JAgentDeskAgentCommandsResult>;
   archive(): Promise<{ archivedAt: string }>;
   detach(): Promise<void>;
+  respondToPermission(options: JAgentDeskAgentRespondToPermissionOptions): Promise<void>;
   subscribe(handler: (update: JAgentDeskAgentUpdate) => void): () => void;
 }
 
+export type JAgentDeskAgentPermissionResponse = Parameters<DaemonClient["respondToPermission"]>[2];
+export interface JAgentDeskAgentRespondToPermissionOptions {
+  requestId: string;
+  response: JAgentDeskAgentPermissionResponse;
+}
+
 export interface JAgentDeskAgentActions {
+  list(options: JAgentDeskAgentListOptions & { subscribe: {} }): Promise<
+    JAgentDeskAgentListResult & {
+      subscriptionId: string | null;
+      subscription: OwnedSubscription<JAgentDeskAgentListResult>;
+    }
+  >;
   list(options?: JAgentDeskAgentListOptions): Promise<JAgentDeskAgentListResult>;
   ref(agent: string | JAgentDeskAgent): JAgentDeskAgentHandle;
   create(options: JAgentDeskAgentCreateOptions): Promise<JAgentDeskAgentHandle>;
@@ -413,6 +460,8 @@ export interface JAgentDeskApi {
   readonly agents: JAgentDeskAgentActions;
   readonly providers: JAgentDeskProviderActions;
   readonly config: JAgentDeskConfigActions;
+  /** Stop every subscription this API opened (a plugin calls this when it stops). */
+  dispose(): Promise<void>;
 }
 
 export interface JAgentDeskClient extends JAgentDeskApi {
@@ -437,7 +486,10 @@ export function createJAgentDeskClient(config: JAgentDeskClientConfig): JAgentDe
   };
 }
 
-export function createJAgentDeskApi(daemonClient: DaemonClient): JAgentDeskApi {
+export function createJAgentDeskApi(
+  daemonClient: DaemonClient,
+  apiOptions: { signal?: AbortSignal } = {},
+): JAgentDeskApi {
   const createAgentHandle = createAgentHandleFactory(daemonClient);
   const createAgent = async (
     options: JAgentDeskAgentCreateOptions,
@@ -464,13 +516,83 @@ export function createJAgentDeskApi(daemonClient: DaemonClient): JAgentDeskApi {
     return createAgentHandle(agent);
   };
   const createWorkspaceHandle = createWorkspaceHandleFactory(daemonClient, createAgent);
+  // Subscriptions opened through this API, released together by dispose().
+  const subscriptions = new Set<() => void>();
+  let disposed = false;
+  // Fails fast once disposed, before touching a connection the host may already have released.
+  const live = <T>(open: () => T): T => {
+    if (disposed) throw new Error("JAgentDesk API is disposed");
+    return open();
+  };
+  const track = (unsubscribe: () => void): (() => void) => {
+    subscriptions.add(unsubscribe);
+    return () => {
+      if (subscriptions.delete(unsubscribe)) unsubscribe();
+    };
+  };
+
+  const dispose = async (): Promise<void> => {
+    disposed = true;
+    for (const unsubscribe of subscriptions) unsubscribe();
+    subscriptions.clear();
+  };
+  // A plugin's lifetime signal: everything this API opened is released when it aborts.
+  apiOptions.signal?.addEventListener("abort", () => void dispose(), { once: true });
+
+  // A `subscribe: {}` list returns the snapshot plus an owned subscription that forwards the
+  // matching update events; releasing it (or dispose) stops forwarding.
+  function ownList<T extends { subscriptionId?: string | null }>(
+    result: T,
+    event: "agent_update" | "workspace_update",
+  ): T & { subscription: OwnedSubscription<T> } {
+    const subscriptionId = result.subscriptionId ?? null;
+    const snapshot = { ...result, subscriptionId: subscriptionId ?? "" } as SubscriptionSnapshot<T>;
+    const observers = new Set<() => void>();
+    const release = async () => {
+      for (const stop of observers) stop();
+      observers.clear();
+    };
+    const subscription: OwnedSubscription<T> = {
+      subscriptionId,
+      ready: Promise.resolve(snapshot),
+      subscribe(observer) {
+        observer.snapshot(snapshot);
+        const stop = track(daemonClient.on(event, (message) => observer.update(message)));
+        observers.add(stop);
+        return () => {
+          observers.delete(stop);
+          stop();
+        };
+      },
+      release,
+    };
+    return { ...result, subscription };
+  }
+  const withoutSignal = <O extends { signal?: AbortSignal }>(options?: O) => {
+    if (options?.signal?.aborted) throw new Error("The request was aborted");
+    if (!options) return undefined;
+    const { signal: _signal, ...rest } = options;
+    return rest;
+  };
 
   return {
+    dispose,
     projects: {
       list: (options) => daemonClient.listProjects(options),
+      subscribe: (handler) =>
+        live(() =>
+          track(
+            daemonClient.on("project.update", (message) => {
+              handler(message.payload);
+            }),
+          ),
+        ),
     },
     workspaces: {
-      list: (options) => daemonClient.fetchWorkspaces(options),
+      list: (async (options?: JAgentDeskWorkspaceListOptions) => {
+        const result = await daemonClient.fetchWorkspaces(withoutSignal(options));
+        return options?.subscribe ? ownList(result, "workspace_update") : result;
+      }) as unknown as JAgentDeskWorkspaceActions["list"],
       ref: (workspace) => createWorkspaceHandle(workspace),
       open: (input, requestId) =>
         openWorkspace(daemonClient, createWorkspaceHandle, input, requestId),
@@ -484,18 +606,29 @@ export function createJAgentDeskApi(daemonClient: DaemonClient): JAgentDeskApi {
       archive: (workspace, requestId) =>
         daemonClient.archiveWorkspace(resolveWorkspaceId(workspace), requestId),
       subscribe: (handler) =>
-        daemonClient.on("workspace_update", (message) => {
-          handler(message.payload);
-        }),
+        live(() =>
+          track(
+            daemonClient.on("workspace_update", (message) => {
+              handler(message.payload);
+            }),
+          ),
+        ),
     },
     agents: {
-      list: (options) => daemonClient.fetchAgents(options),
+      list: (async (options?: JAgentDeskAgentListOptions) => {
+        const result = await daemonClient.fetchAgents(withoutSignal(options));
+        return options?.subscribe ? ownList(result, "agent_update") : result;
+      }) as JAgentDeskAgentActions["list"],
       ref: (agent) => createAgentHandle(agent),
       create: (options) => createAgent(options),
       subscribe: (handler) =>
-        daemonClient.on("agent_update", (message) => {
-          handler(message.payload);
-        }),
+        live(() =>
+          track(
+            daemonClient.on("agent_update", (message) => {
+              handler(message.payload);
+            }),
+          ),
+        ),
     },
     providers: {
       listModels: (provider, options) => daemonClient.listProviderModels(provider, options),
@@ -510,9 +643,13 @@ export function createJAgentDeskApi(daemonClient: DaemonClient): JAgentDeskApi {
       refresh: (options) => daemonClient.refreshProvidersSnapshot(options),
       diagnostic: (provider, options) => daemonClient.getProviderDiagnostic(provider, options),
       subscribe: (handler) =>
-        daemonClient.on("providers_snapshot_update", (message) => {
-          handler(message.payload);
-        }),
+        live(() =>
+          track(
+            daemonClient.on("providers_snapshot_update", (message) => {
+              handler(message.payload);
+            }),
+          ),
+        ),
     },
     config: {
       get: (requestId) => daemonClient.getDaemonConfig(requestId),
@@ -676,6 +813,9 @@ function createAgentHandleFactory(daemonClient: DaemonClient): AgentHandleFactor
       },
       send: async (text, options) => {
         await daemonClient.sendAgentMessage(id, text, options);
+      },
+      respondToPermission: async ({ requestId, response }) => {
+        await daemonClient.respondToPermission(id, requestId, response);
       },
       run: async (text, options) => {
         const { timeoutMs, ...sendOptions } = options ?? {};

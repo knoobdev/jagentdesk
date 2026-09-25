@@ -4,6 +4,8 @@ import { StyleSheet } from "react-native-unistyles";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { useClusterViewStore } from "@/stores/cluster-view-store";
 import type { Theme } from "@/styles/theme";
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { clickUpListStyles } from "@/components/clickup-shell/list-styles";
 
 /**
  * k8s-Lens-style cluster Overview: the default view when a cluster opens.
@@ -68,6 +70,7 @@ export function ClusterOverviewDashboard({
   clusterName?: string;
 }) {
   const client = useHostRuntimeClient(serverId);
+  const isClickUp = useIsClickUpTheme();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<OverviewData | null>(null);
@@ -177,10 +180,19 @@ export function ClusterOverviewDashboard({
 
       {data && data.nodes.length > 0 ? (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Nodes</Text>
-          <View style={styles.list}>
+          {isClickUp ? (
+            <View style={styles.groupRowClickUp}>
+              <View style={clickUpListStyles.groupPill}>
+                <Text style={clickUpListStyles.groupPillText}>Nodes</Text>
+              </View>
+              <Text style={clickUpListStyles.groupCount}>{data.nodes.length}</Text>
+            </View>
+          ) : (
+            <Text style={styles.sectionTitle}>Nodes</Text>
+          )}
+          <View style={isClickUp ? styles.listClickUp : styles.list}>
             {data.nodes.map((n) => (
-              <View key={nameOf(n)} style={styles.listRow}>
+              <View key={nameOf(n)} style={[styles.listRow, isClickUp && clickUpListStyles.row]}>
                 <View style={styles.dotRun} />
                 <Text style={styles.listName} numberOfLines={1}>
                   {nameOf(n)}
@@ -197,9 +209,10 @@ export function ClusterOverviewDashboard({
 function PodHealthBar({ podStats }: { podStats: PodStats }) {
   const total = podStats.total || 1;
   const seg = (n: number) => `${(n / total) * 100}%` as const;
+  const isClickUp = useIsClickUpTheme();
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionTitle}>Pod health</Text>
+      <Text style={isClickUp ? styles.sectionTitleClickUp : styles.sectionTitle}>Pod health</Text>
       <View style={styles.bar}>
         {podStats.running > 0 ? (
           <View style={[styles.barRun, { width: seg(podStats.running) }]} />
@@ -237,10 +250,11 @@ function Kpi({
   sub?: string;
   tone?: "default" | "warn";
 }) {
+  const isClickUp = useIsClickUpTheme();
   return (
-    <View style={styles.kpi}>
+    <View style={isClickUp ? styles.kpiClickUp : styles.kpi}>
       <Text style={tone === "warn" ? styles.kpiValueWarn : styles.kpiValue}>{value}</Text>
-      <Text style={styles.kpiLabel}>{label}</Text>
+      <Text style={[styles.kpiLabel, isClickUp && clickUpListStyles.columnHeader]}>{label}</Text>
       {sub ? <Text style={styles.kpiSub}>{sub}</Text> : null}
     </View>
   );
@@ -281,6 +295,17 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderRadius: theme.borderRadius.lg,
     backgroundColor: theme.colors.surface1,
   },
+  kpiClickUp: {
+    minWidth: 120,
+    flexGrow: 1,
+    flexBasis: 120,
+    gap: theme.spacing[1],
+    padding: theme.spacing[3],
+    borderWidth: 1,
+    borderColor: theme.chrome.cardBorder,
+    borderRadius: theme.chrome.cardRadius,
+    backgroundColor: theme.chrome.cardBackground,
+  },
   kpiValue: {
     fontSize: theme.fontSize["2xl"],
     fontWeight: theme.fontWeight.bold,
@@ -305,6 +330,16 @@ const styles = StyleSheet.create((theme: Theme) => ({
     color: theme.colors.foregroundExtraMuted,
     textTransform: "uppercase" as const,
     letterSpacing: 0.5,
+  },
+  sectionTitleClickUp: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.chrome.sectionTitleColor,
+  },
+  groupRowClickUp: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
   },
   bar: {
     flexDirection: "row",
@@ -343,6 +378,13 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderWidth: theme.borderWidth[1],
     borderColor: theme.colors.border,
     borderRadius: theme.borderRadius.lg,
+    overflow: "hidden",
+  },
+  listClickUp: {
+    borderWidth: 1,
+    borderColor: theme.chrome.cardBorder,
+    borderRadius: theme.chrome.cardRadius,
+    backgroundColor: theme.chrome.cardBackground,
     overflow: "hidden",
   },
   listRow: {

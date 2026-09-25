@@ -1,5 +1,6 @@
 import { router, useLocalSearchParams } from "expo-router";
-import type { PluginSurfaceProps, PluginTheme } from "@jagentdesk/plugin";
+import type { PluginSurfaceProps } from "@jagentdesk/plugin/client";
+import type { PluginTheme } from "@jagentdesk/plugin";
 import { ChevronDown, X } from "lucide-react-native";
 import { useCallback, useMemo, useRef, useState, type ComponentType } from "react";
 import { Platform, Pressable, Text, View } from "react-native";
@@ -13,13 +14,14 @@ import { useIsCompactFormFactor } from "@/constants/layout";
 import { useHostRuntimeClient, useHosts } from "@/runtime/host-runtime";
 import type { Theme } from "@/styles/theme";
 import type { ShortcutKey } from "@/utils/format-shortcut";
+import { usePluginHostNavigation } from "./host-navigation";
 import { resolvePluginIcon } from "./icons";
 import { toPluginTheme } from "./theme";
 import { useInstalledPlugin, usePluginInstallations } from "./registry";
 import { buildPluginSurfaceRoute } from "./routes";
 import { rememberPluginContributionHost } from "./contribution-host";
 import { SurfaceErrorBoundary } from "./surface-error-boundary";
-import { createPluginSurfaceRuntime } from "./surface-runtime";
+import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import { PluginRuntimeBoundary } from "./runtime-boundary";
 import {
   getPluginSurfaceContributionServerIds,
@@ -39,31 +41,6 @@ function routeParam(value: string | string[] | undefined): string {
   return typeof value === "string" ? value : "";
 }
 
-function parseContributionIdentity(
-  kind: string,
-  id: string,
-): PluginSurfaceContributionIdentity | null {
-  if (kind === "sidebar" || kind === "surface" || kind === "settings") {
-    return { kind, id };
-  }
-  return null;
-}
-
-function deriveSurfaceHeader(
-  resolved: ReturnType<typeof resolvePluginSurfaceContribution>,
-  pluginId: string,
-): { title: string; iconName: string | null } {
-  const { sidebarItem, surface, settingsScreen } = resolved;
-  const title =
-    sidebarItem?.title ??
-    settingsScreen?.title ??
-    surface?.id ??
-    settingsScreen?.id ??
-    (pluginId || "Plugin");
-  const iconName = sidebarItem?.icon ?? settingsScreen?.icon ?? null;
-  return { title, iconName };
-}
-
 function PluginHeaderIcon({
   Icon,
   color = "",
@@ -78,22 +55,23 @@ const ThemedPluginHeaderIcon = withUnistyles(PluginHeaderIcon);
 
 function SurfaceRenderer({
   Surface,
-  runtime,
+  client,
   plugin,
   layout,
   host,
   theme,
 }: {
   Surface: ComponentType<PluginSurfaceProps>;
-  runtime: NonNullable<ReturnType<typeof createPluginSurfaceRuntime>>;
+  client: DaemonClient;
   plugin: NonNullable<ReturnType<typeof useInstalledPlugin>>;
   layout: PluginSurfaceProps["layout"];
   host: PluginSurfaceProps["host"];
   theme: PluginTheme;
 }) {
+  const navigation = usePluginHostNavigation(host.id);
   return (
-    <PluginRuntimeBoundary plugin={plugin} runtime={runtime}>
-      <Surface theme={theme} host={host} layout={layout} />
+    <PluginRuntimeBoundary plugin={plugin} client={client}>
+      <Surface theme={theme} host={host} layout={layout} navigation={navigation} />
     </PluginRuntimeBoundary>
   );
 }
@@ -176,29 +154,27 @@ export function PluginSurfaceScreen() {
   const pluginId = routeParam(params.pluginId);
   const contributionKind = routeParam(params.contributionKind);
   const contributionId = routeParam(params.contributionId);
-  const identity = useMemo<PluginSurfaceContributionIdentity | null>(
-    () => parseContributionIdentity(contributionKind, contributionId),
-    [contributionId, contributionKind],
-  );
+  const identity = useMemo<PluginSurfaceContributionIdentity | null>(() => {
+    if (contributionKind !== "sidebar" && contributionKind !== "surface") return null;
+    return { kind: contributionKind, id: contributionId };
+  }, [contributionId, contributionKind]);
   const plugin = useInstalledPlugin(serverId, pluginId);
   const installations = usePluginInstallations(pluginId);
   const hosts = useHosts();
   const client = useHostRuntimeClient(serverId);
-  const runtime = useMemo(() => createPluginSurfaceRuntime(client, pluginId), [client, pluginId]);
   const compact = useIsCompactFormFactor();
-  const resolved = useMemo(
+  const { sidebarItem, surface } = useMemo(
     () => resolvePluginSurfaceContribution(plugin, identity),
     [identity, plugin],
   );
-  const activeSurface = resolved.surface ?? resolved.settingsScreen;
   const hostLabel = hosts.find((host) => host.serverId === serverId)?.label ?? serverId;
   const contributionServerIds = useMemo(
     () =>
       identity ? getPluginSurfaceContributionServerIds(installations, pluginId, identity) : [],
     [identity, installations, pluginId],
   );
-  const { title, iconName } = deriveSurfaceHeader(resolved, pluginId);
-  const Icon = iconName ? resolvePluginIcon(iconName) : null;
+  const title = sidebarItem?.title ?? surface?.id ?? (pluginId || "Plugin");
+  const Icon = sidebarItem ? resolvePluginIcon(sidebarItem.icon) : null;
   const close = useCallback(() => {
     if (router.canGoBack()) router.back();
     else router.replace(`/h/${encodeURIComponent(serverId)}`);
@@ -248,15 +224,15 @@ export function PluginSurfaceScreen() {
     <View style={styles.screen}>
       <ScreenHeader left={headerLeft} right={headerRight} />
       <View style={styles.body}>
-        {plugin && activeSurface && runtime ? (
+        {plugin && surface && client ? (
           <SurfaceErrorBoundary
             key={`${serverId}/${pluginId}/${identity?.kind}/${contributionId}`}
             installation={plugin}
-            Surface={activeSurface.Component}
+            Surface={surface.Component}
           >
             <ThemedSurfaceRenderer
-              Surface={activeSurface.Component}
-              runtime={runtime}
+              Surface={surface.Component}
+              client={client}
               plugin={plugin}
               host={host}
               layout={layout}
@@ -265,9 +241,7 @@ export function PluginSurfaceScreen() {
           </SurfaceErrorBoundary>
         ) : (
           <Text style={styles.errorText}>
-            {plugin && activeSurface
-              ? "Plugin host is offline."
-              : "This plugin surface is unavailable."}
+            {plugin && surface ? "Plugin host is offline." : "This plugin surface is unavailable."}
           </Text>
         )}
       </View>

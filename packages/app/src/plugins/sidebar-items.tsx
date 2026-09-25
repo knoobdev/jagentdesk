@@ -2,7 +2,6 @@ import { router, usePathname } from "expo-router";
 import { useCallback, useMemo } from "react";
 import { SidebarHeaderRow } from "@/components/sidebar/sidebar-header-row";
 import { resolvePluginIcon } from "./icons";
-import { useInstalledPlugins } from "./registry";
 import { buildPluginSurfaceRoute, hostIdFromPathname } from "./routes";
 import {
   getPreferredPluginContributionHost,
@@ -13,6 +12,7 @@ import {
   type PluginSidebarGroup,
   type PluginSidebarTarget,
 } from "./sidebar-groups";
+import { useInstalledPlugins } from "./registry";
 
 function selectTarget(
   group: PluginSidebarGroup,
@@ -25,35 +25,13 @@ function selectTarget(
   return remembered ?? group.targets[0];
 }
 
-export function PluginSidebarItems({ onBeforeNavigate }: { onBeforeNavigate?: () => void }) {
-  const plugins = useInstalledPlugins();
+/** Where a plugin sidebar contribution navigates, and whether the current route is it. */
+export function usePluginSidebarNavigation(
+  group: PluginSidebarGroup,
+  onBeforeNavigate?: () => void,
+): { navigate: () => void; isActive: boolean } {
   const pathname = usePathname();
-  const groups = useMemo(() => groupPluginSidebarContributions(plugins), [plugins]);
-  const currentHostId = hostIdFromPathname(pathname);
-
-  return groups.map((group) => (
-    <PluginSidebarItemRow
-      key={group.key}
-      group={group}
-      currentHostId={currentHostId}
-      pathname={pathname}
-      onBeforeNavigate={onBeforeNavigate}
-    />
-  ));
-}
-
-function PluginSidebarItemRow({
-  group,
-  currentHostId,
-  pathname,
-  onBeforeNavigate,
-}: {
-  group: PluginSidebarGroup;
-  currentHostId: string | null;
-  pathname: string;
-  onBeforeNavigate?: () => void;
-}) {
-  const target = selectTarget(group, currentHostId);
+  const target = selectTarget(group, hostIdFromPathname(pathname));
   const route = buildPluginSurfaceRoute(target.plugin.serverId, group.pluginId, {
     kind: "sidebar",
     id: group.contributionId,
@@ -71,6 +49,22 @@ function PluginSidebarItemRow({
     onBeforeNavigate?.();
     router.push(route);
   }, [group.key, onBeforeNavigate, route, target.plugin.serverId]);
+  return { navigate, isActive };
+}
+
+export function usePluginSidebarGroups(): PluginSidebarGroup[] {
+  const plugins = useInstalledPlugins();
+  return useMemo(() => groupPluginSidebarContributions(plugins), [plugins]);
+}
+
+export function PluginSidebarItemRow({
+  group,
+  onBeforeNavigate,
+}: {
+  group: PluginSidebarGroup;
+  onBeforeNavigate?: () => void;
+}) {
+  const { navigate, isActive } = usePluginSidebarNavigation(group, onBeforeNavigate);
   return (
     <SidebarHeaderRow
       icon={resolvePluginIcon(group.icon)}
@@ -80,5 +74,18 @@ function PluginSidebarItemRow({
       testID={`plugin-sidebar-${group.pluginId}-${group.contributionId}`}
       variant="compact"
     />
+  );
+}
+
+// Every plugin sidebar contribution as a row, for the fork's left sidebar (upstream renders
+// these through its configurable sidebar-nav model instead).
+export function PluginSidebarItems({ onBeforeNavigate }: { onBeforeNavigate?: () => void }) {
+  const groups = usePluginSidebarGroups();
+  return (
+    <>
+      {groups.map((group) => (
+        <PluginSidebarItemRow key={group.key} group={group} onBeforeNavigate={onBeforeNavigate} />
+      ))}
+    </>
   );
 }

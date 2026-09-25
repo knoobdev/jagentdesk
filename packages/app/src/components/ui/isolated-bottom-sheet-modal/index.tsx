@@ -4,7 +4,7 @@ import {
 } from "@gorhom/bottom-sheet";
 import React from "react";
 import { forwardRef, useCallback, useEffect, useMemo, useRef } from "react";
-import type { ElementRef } from "react";
+import type { ElementRef, ReactNode } from "react";
 import {
   type BottomSheetController,
   createBottomSheetVisibilityTracker,
@@ -12,11 +12,18 @@ import {
 
 type GorhomBottomSheetModalMethods = ElementRef<typeof GorhomBottomSheetModal>;
 
+/**
+ * Gorhom renders sheet content in a portal outside the caller's React tree, so context
+ * providers above the sheet are lost. A bridge re-wraps the content in the providers it needs.
+ */
+export type ContextBridge = (children: ReactNode) => ReactNode;
+
 type IsolatedBottomSheetModalProps = Omit<
   BottomSheetModalProps,
   "enableDismissOnClose" | "stackBehavior"
 > & {
   presentation?: "push" | "replace";
+  contextBridge?: ContextBridge | null;
 };
 
 export type IsolatedBottomSheetModalRef = GorhomBottomSheetModalMethods;
@@ -25,7 +32,7 @@ export const IsolatedBottomSheetModal = forwardRef<
   IsolatedBottomSheetModalRef,
   IsolatedBottomSheetModalProps
 >(function IsolatedBottomSheetModal(props, ref) {
-  const { children, presentation = "push", ...bottomSheetProps } = props;
+  const { children, presentation = "push", contextBridge, ...bottomSheetProps } = props;
   const modal = (
     <GorhomBottomSheetModal
       {...bottomSheetProps}
@@ -33,7 +40,7 @@ export const IsolatedBottomSheetModal = forwardRef<
       enableDismissOnClose
       stackBehavior={presentation}
     >
-      {children}
+      {contextBridge ? contextBridge(children as ReactNode) : children}
     </GorhomBottomSheetModal>
   );
 

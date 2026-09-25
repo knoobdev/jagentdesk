@@ -1,3 +1,4 @@
+import { pluginSettingsKey } from "./settings/use-settings";
 import { useEffect } from "react";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import { useHostFeature } from "@/runtime/host-features";
@@ -31,7 +32,10 @@ export function PluginCatalogSync({
           .getPluginCatalog()
           .then((catalog) => {
             if (!cancelled) {
-              pluginRegistry.installCatalog(serverId, catalog, { replacePluginId });
+              pluginRegistry.installCatalog(serverId, catalog, {
+                replacePluginId,
+                client,
+              });
             }
             return undefined;
           })
@@ -44,8 +48,19 @@ export function PluginCatalogSync({
       );
       return refreshQueue;
     };
+    // The fork's daemon pushes status events to every session (no explicit event
+    // subscriptions), so load the catalog now and react to the two plugin statuses.
     void refresh();
     const unsubscribe = client.on("status", (message) => {
+      if (message.payload.status === "plugin_settings_changed") {
+        const { pluginId, settingsId } = message.payload;
+        if (typeof settingsId === "string") {
+          const plugin = pluginRegistry
+            .getSnapshot()
+            .find((item) => item.serverId === serverId && item.id === pluginId);
+          void plugin?.queryClient.invalidateQueries({ queryKey: pluginSettingsKey(settingsId) });
+        }
+      }
       if (message.payload.status === "plugin_catalog_changed") {
         const pluginId = message.payload.pluginId;
         if (typeof pluginId === "string") void refresh(pluginId);

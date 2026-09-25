@@ -57,6 +57,7 @@ import { buildCreateTableDdl } from "@/utils/sql-ddl";
 import { qualifyTable, quoteIdent } from "@/utils/sql-ident";
 import type { DatabaseEngine } from "@jagentdesk/protocol/database/rpc-schemas";
 import type { Theme } from "@/styles/theme";
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
 
 /** The daemon returns this while introspection races ahead of the parent
  *  connect — common on a cold tailnet open, where a deep link mounts the tree
@@ -240,6 +241,12 @@ function LeafRow({
 }
 
 /** The generic collapsible folder header (Indexes / Foreign keys / Views / …). */
+/** Selected table row: ClickUp's gray selected-row fill instead of the sidebar hover tint. */
+function tableRowStyle(isClickUp: boolean, active: boolean) {
+  if (!isClickUp) return [styles.row, active && styles.rowActive];
+  return [styles.row, active && styles.rowActiveClickUp];
+}
+
 function FolderRow({
   label,
   count,
@@ -251,11 +258,12 @@ function FolderRow({
   expanded: boolean;
   onPress: () => void;
 }) {
+  const isClickUp = useIsClickUpTheme();
   return (
     <Pressable style={styles.row} onPress={onPress}>
       <Chevron expanded={expanded} />
       <ThemedFolder size={13} uniProps={faintColor} />
-      <Text style={styles.folderLabel} numberOfLines={1}>
+      <Text style={[styles.folderLabel, isClickUp && styles.folderLabelClickUp]} numberOfLines={1}>
         {label}
       </Text>
       {count != null ? <Text style={styles.folderCount}>{count}</Text> : null}
@@ -450,7 +458,7 @@ function ObjectFolder({ label, objects }: { label: string; objects: DbObject[] }
 /** The right-click / long-press actions for a table/object row. Each row wires
  *  its own trigger, so right-click hits the row under the cursor directly —
  *  no prior selection required. */
-type TableActions = {
+interface TableActions {
   onOpen: (target: SelectedDbObject) => void;
   onRefresh: () => void;
   onCopyName: (target: SelectedDbObject) => void;
@@ -458,7 +466,14 @@ type TableActions = {
   onRename: (target: SelectedDbObject) => void;
   onTruncate: (target: SelectedDbObject) => void;
   onDrop: (target: SelectedDbObject) => void;
-};
+}
+
+// Context-menu leading icons, hoisted so each row doesn't allocate new elements per render.
+const MENU_ICON_TABLE = <ThemedTable size={14} uniProps={mutedColor} />;
+const MENU_ICON_REFRESH = <ThemedRefresh size={14} uniProps={mutedColor} />;
+const MENU_ICON_COPY = <ThemedCopy size={14} uniProps={mutedColor} />;
+const MENU_ICON_RENAME = <ThemedPencil size={14} uniProps={mutedColor} />;
+const MENU_ICON_TRASH = <ThemedTrash size={14} uniProps={mutedColor} />;
 
 /** A table/view node: expand → columns; select → open data; right-click → menu. */
 // eslint-disable-next-line complexity
@@ -481,6 +496,7 @@ function TableNode({
   onSelect: (object: SelectedDbObject) => void;
   actions: TableActions;
 }) {
+  const isClickUp = useIsClickUpTheme();
   const [expanded, setExpanded] = useState(false);
   const [columns, setColumns] = useState<DbColumn[]>([]);
   const [loading, setLoading] = useState(false);
@@ -527,7 +543,7 @@ function TableNode({
       <ContextMenu>
         <ContextMenuTrigger
           enabledOnMobile
-          style={[styles.row, active && styles.rowActive]}
+          style={tableRowStyle(isClickUp, active)}
           onPress={select}
           testID={`db-table-${object.name}`}
         >
@@ -544,49 +560,26 @@ function TableNode({
         </ContextMenuTrigger>
         <ContextMenuContent align="start" width={220} testID={`db-table-menu-${object.name}`}>
           <ContextMenuLabel>{`${object.schema}.${object.name}`}</ContextMenuLabel>
-          <ContextMenuItem
-            leading={<ThemedTable size={14} uniProps={mutedColor} />}
-            onSelect={openData}
-          >
+          <ContextMenuItem leading={MENU_ICON_TABLE} onSelect={openData}>
             Open data
           </ContextMenuItem>
-          <ContextMenuItem
-            leading={<ThemedRefresh size={14} uniProps={mutedColor} />}
-            onSelect={actions.onRefresh}
-          >
+          <ContextMenuItem leading={MENU_ICON_REFRESH} onSelect={actions.onRefresh}>
             Refresh
           </ContextMenuItem>
-          <ContextMenuItem
-            leading={<ThemedCopy size={14} uniProps={mutedColor} />}
-            onSelect={copyName}
-          >
+          <ContextMenuItem leading={MENU_ICON_COPY} onSelect={copyName}>
             Copy name
           </ContextMenuItem>
-          <ContextMenuItem
-            leading={<ThemedCopy size={14} uniProps={mutedColor} />}
-            onSelect={copyDdl}
-          >
+          <ContextMenuItem leading={MENU_ICON_COPY} onSelect={copyDdl}>
             Copy DDL
           </ContextMenuItem>
           <ContextMenuSeparator />
-          <ContextMenuItem
-            leading={<ThemedPencil size={14} uniProps={mutedColor} />}
-            onSelect={rename}
-          >
+          <ContextMenuItem leading={MENU_ICON_RENAME} onSelect={rename}>
             Rename…
           </ContextMenuItem>
-          <ContextMenuItem
-            destructive
-            leading={<ThemedTrash size={14} uniProps={mutedColor} />}
-            onSelect={truncate}
-          >
+          <ContextMenuItem destructive leading={MENU_ICON_TRASH} onSelect={truncate}>
             Truncate…
           </ContextMenuItem>
-          <ContextMenuItem
-            destructive
-            leading={<ThemedTrash size={14} uniProps={mutedColor} />}
-            onSelect={drop}
-          >
+          <ContextMenuItem destructive leading={MENU_ICON_TRASH} onSelect={drop}>
             Drop table…
           </ContextMenuItem>
         </ContextMenuContent>
@@ -1252,6 +1245,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     paddingHorizontal: theme.spacing[2],
   },
   rowActive: { backgroundColor: theme.colors.surfaceSidebarHover },
+  rowActiveClickUp: { backgroundColor: theme.chrome.selectedRow },
   rowLabel: { flex: 1, minWidth: 0, fontSize: theme.fontSize.sm, color: theme.colors.foreground },
   rowLabelActive: { fontWeight: theme.fontWeight.medium },
   childIndent: { paddingLeft: theme.spacing[3] },
@@ -1276,6 +1270,11 @@ const styles = StyleSheet.create((theme: Theme) => ({
     color: theme.colors.foregroundMuted,
     textTransform: "uppercase" as const,
     letterSpacing: 0.4,
+  },
+  folderLabelClickUp: {
+    color: theme.colors.foregroundMuted,
+    textTransform: "none" as const,
+    letterSpacing: 0,
   },
   folderCount: {
     fontSize: 10,

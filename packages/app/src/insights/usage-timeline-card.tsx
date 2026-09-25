@@ -6,6 +6,8 @@ import type { UsageDayRollup } from "@jagentdesk/protocol/usage-history";
 import { formatTokenCount } from "@/components/context-window-meter.utils";
 import { useUsageHistory } from "@/insights/use-usage-history";
 import type { Theme } from "@/styles/theme";
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { clickUpTabStyles } from "@/components/clickup-shell/list-styles";
 
 type Period = "day" | "month" | "year";
 const PERIODS: readonly Period[] = ["day", "month", "year"] as const;
@@ -95,6 +97,7 @@ export function UsageTimelineCard({ serverId }: { serverId: string }) {
   );
 
   const onLayout = useCallback((e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width), []);
+  const isClickUp = useIsClickUpTheme();
 
   let chartContent: ReactNode = null;
   if (buckets.length === 0) {
@@ -108,7 +111,7 @@ export function UsageTimelineCard({ serverId }: { serverId: string }) {
   }
 
   return (
-    <View style={styles.card}>
+    <View style={isClickUp ? styles.cardClickUp : styles.card}>
       <View style={styles.head}>
         <View>
           <Text style={styles.title}>Usage over time</Text>
@@ -116,9 +119,15 @@ export function UsageTimelineCard({ serverId }: { serverId: string }) {
             {formatTokenCount(totals.tokens)} tokens · {formatUsd(totals.cost)}
           </Text>
         </View>
-        <View style={styles.toggle}>
+        <View style={isClickUp ? clickUpTabStyles.row : styles.toggle}>
           {PERIODS.map((p) => (
-            <PeriodButton key={p} period={p} active={p === period} onSelect={setPeriod} />
+            <PeriodButton
+              key={p}
+              period={p}
+              active={p === period}
+              onSelect={setPeriod}
+              isClickUp={isClickUp}
+            />
           ))}
         </View>
       </View>
@@ -134,23 +143,34 @@ function PeriodButton({
   period,
   active,
   onSelect,
+  isClickUp,
 }: {
   period: Period;
   active: boolean;
   onSelect: (period: Period) => void;
+  isClickUp: boolean;
 }) {
   const handlePress = useCallback(() => onSelect(period), [onSelect, period]);
   return (
     <Pressable
       onPress={handlePress}
-      style={[styles.toggleItem, active ? styles.toggleItemActive : null]}
+      style={periodButtonStyle(isClickUp, active)}
       testID={`usage-period-${period}`}
     >
-      <Text style={[styles.toggleText, active ? styles.toggleTextActive : null]}>
-        {PERIOD_LABEL[period]}
-      </Text>
+      <Text style={periodButtonTextStyle(isClickUp, active)}>{PERIOD_LABEL[period]}</Text>
     </Pressable>
   );
+}
+
+// ClickUp swaps the boxed segmented toggle for its underlined text tabs.
+function periodButtonStyle(isClickUp: boolean, active: boolean) {
+  if (isClickUp) return active ? clickUpTabStyles.tabActive : clickUpTabStyles.tab;
+  return [styles.toggleItem, active ? styles.toggleItemActive : null];
+}
+
+function periodButtonTextStyle(isClickUp: boolean, active: boolean) {
+  if (isClickUp) return active ? clickUpTabStyles.textActive : clickUpTabStyles.text;
+  return [styles.toggleText, active ? styles.toggleTextActive : null];
 }
 
 function BarChart({
@@ -228,6 +248,14 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderColor: theme.colors.border,
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 12,
+    padding: 14,
+    gap: 12,
+  },
+  cardClickUp: {
+    backgroundColor: theme.chrome.cardBackground,
+    borderColor: theme.chrome.cardBorder,
+    borderWidth: 1,
+    borderRadius: theme.chrome.cardRadius,
     padding: 14,
     gap: 12,
   },

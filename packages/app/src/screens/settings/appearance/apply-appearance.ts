@@ -11,7 +11,7 @@ import { applyRootUiFont } from "./apply-root-font";
 // All six registered Unistyles keys — pinned literal (greppable, type-checked).
 // The `as const` element types are exactly `keyof UnistylesThemes`, so each key
 // is assignable to `UnistylesRuntime.updateTheme`'s first argument with no cast.
-const ALL_THEME_KEYS = [
+export const ALL_THEME_KEYS = [
   "light",
   "dark",
   "darkZinc",
@@ -19,6 +19,10 @@ const ALL_THEME_KEYS = [
   "darkClaude",
   "darkGhostty",
   "darkPureBlack",
+  "clickupLight",
+  "clickupDark",
+  "pluginLight",
+  "pluginDark",
 ] as const;
 
 // The UI font size at which the FONT_SIZE ramp is authored (1.0 scale factor).

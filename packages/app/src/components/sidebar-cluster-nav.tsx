@@ -14,6 +14,7 @@ import { usePanelStore } from "@/stores/panel-store";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { buildClustersRoute } from "@/utils/host-routes";
 import type { Theme } from "@/styles/theme";
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
 
 const ThemedChevronLeft = withUnistyles(ChevronLeft);
 const ThemedBoxes = withUnistyles(Boxes);
@@ -63,6 +64,17 @@ function groupByCategory(kinds: KindInfo[]): Array<{ category: string; kinds: Ki
   return out;
 }
 
+/** Nav row: ClickUp highlights the selected item with its gray selected-row fill. */
+function navRowStyle(isClickUp: boolean, active: boolean) {
+  if (!isClickUp) return [styles.row, active && styles.rowActive];
+  return [styles.row, active && styles.rowActiveClickUp];
+}
+
+function navLabelStyle(isClickUp: boolean, active: boolean) {
+  if (!isClickUp) return [styles.rowLabel, active && styles.rowLabelActive];
+  return [styles.rowLabel, active && styles.rowLabelActiveClickUp];
+}
+
 function KindRow({
   kind,
   active,
@@ -73,10 +85,11 @@ function KindRow({
   onSelect: (kind: string) => void;
 }) {
   const handlePress = useCallback(() => onSelect(kind), [kind, onSelect]);
+  const isClickUp = useIsClickUpTheme();
   return (
-    <Pressable style={[styles.row, active && styles.rowActive]} onPress={handlePress}>
+    <Pressable style={navRowStyle(isClickUp, active)} onPress={handlePress}>
       <KindIcon kind={kind} active={active} />
-      <Text style={[styles.rowLabel, active && styles.rowLabelActive]} numberOfLines={1}>
+      <Text style={navLabelStyle(isClickUp, active)} numberOfLines={1}>
         {kind}
       </Text>
     </Pressable>
@@ -106,6 +119,7 @@ export function SidebarClusterNav({
   const showList = useClusterViewStore((s) => s.setActive);
   const showMobileAgent = usePanelStore((s) => s.showMobileAgent);
   const isCompact = useIsCompactFormFactor();
+  const isClickUp = useIsClickUpTheme();
 
   useEffect(() => {
     ensureCluster(clusterId);
@@ -203,12 +217,9 @@ export function SidebarClusterNav({
       </View>
 
       <ScrollView style={styles.nav} contentContainerStyle={styles.navContent}>
-        <Pressable
-          style={[styles.row, showingOverview && styles.rowActive]}
-          onPress={handleSelectOverview}
-        >
+        <Pressable style={navRowStyle(isClickUp, showingOverview)} onPress={handleSelectOverview}>
           <ThemedGauge size={15} uniProps={mutedColor} />
-          <Text style={[styles.rowLabel, showingOverview && styles.rowLabelActive]}>Overview</Text>
+          <Text style={navLabelStyle(isClickUp, showingOverview)}>Overview</Text>
         </Pressable>
         {grouped.map((group) => (
           <NavGroup
@@ -219,10 +230,10 @@ export function SidebarClusterNav({
             onSelect={handleSelectKind}
           />
         ))}
-        <Text style={styles.categoryHeader}>Helm</Text>
-        <Pressable style={[styles.row, showingHelm && styles.rowActive]} onPress={handleSelectHelm}>
+        <Text style={[styles.categoryHeader, isClickUp && styles.categoryHeaderClickUp]}>Helm</Text>
+        <Pressable style={navRowStyle(isClickUp, showingHelm)} onPress={handleSelectHelm}>
           <ThemedBoxes size={15} uniProps={mutedColor} />
-          <Text style={[styles.rowLabel, showingHelm && styles.rowLabelActive]}>Releases</Text>
+          <Text style={navLabelStyle(isClickUp, showingHelm)}>Releases</Text>
         </Pressable>
       </ScrollView>
     </View>
@@ -246,11 +257,14 @@ function NavGroup({
 }) {
   const [expanded, setExpanded] = useState(false);
   const toggleExpanded = useCallback(() => setExpanded((v) => !v), []);
+  const isClickUp = useIsClickUpTheme();
   const overflow = group.kinds.length > GROUP_CAP;
   const visible = expanded || !overflow ? group.kinds : group.kinds.slice(0, GROUP_CAP);
   return (
     <View>
-      <Text style={styles.categoryHeader}>{group.category}</Text>
+      <Text style={[styles.categoryHeader, isClickUp && styles.categoryHeaderClickUp]}>
+        {group.category}
+      </Text>
       {visible.map((k) => (
         <KindRow
           key={k.kind}
@@ -337,6 +351,12 @@ const styles = StyleSheet.create((theme: Theme) => ({
     paddingTop: theme.spacing[3],
     paddingBottom: theme.spacing[1],
   },
+  categoryHeaderClickUp: {
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foregroundMuted,
+    textTransform: "none" as const,
+    letterSpacing: 0,
+  },
   showMore: {
     paddingHorizontal: theme.spacing[2],
     paddingVertical: theme.spacing[1],
@@ -357,6 +377,9 @@ const styles = StyleSheet.create((theme: Theme) => ({
   rowActive: {
     backgroundColor: theme.colors.surfaceSidebarHover,
   },
+  rowActiveClickUp: {
+    backgroundColor: theme.chrome.selectedRow,
+  },
   rowLabel: {
     flex: 1,
     minWidth: 0,
@@ -365,5 +388,9 @@ const styles = StyleSheet.create((theme: Theme) => ({
   },
   rowLabelActive: {
     color: theme.colors.foreground,
+  },
+  rowLabelActiveClickUp: {
+    color: theme.colors.foreground,
+    fontWeight: theme.fontWeight.medium,
   },
 }));

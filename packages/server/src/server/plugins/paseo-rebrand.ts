@@ -1,4 +1,4 @@
-import { readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 // A plugin authored for Paseo reaches the SDK under the @getpaseo/@paseo scope and
@@ -14,29 +14,14 @@ const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
 const SKIP_DIRECTORIES = new Set(["node_modules", ".git", "dist", "build", ".turbo", ".next"]);
 
 // The SDK specifier inside an import/require/export string: the quote, the scope, and an
-// optional subpath. Paseo splits its SDK across many subpaths (./client, ./client/react-native,
-// ./client/ui, ./server/provider, ./server/acp, …); the fork publishes only ., ./server, ./host
-// and ./react-native, so each upstream subpath is mapped onto the fork's real entry points.
+// optional subpath. The fork publishes the same SDK subpaths as Paseo (., ./client,
+// ./client/ui, ./client/react-native, ./client/host, ./server, ./server/provider,
+// ./server/acp), so only the scope changes; an unknown subpath keeps its name and fails
+// resolution loudly in the compiler rather than silently landing on another entry.
 const SDK_SPECIFIER = /(['"])@(?:getpaseo|paseo)\/plugin((?:\/[a-z0-9-]+)*)\1/g;
 
-// Explicit map from a Paseo subpath to the fork's. Anything under /client collapses toward the
-// package root (the fork re-exports the client API from `.`), /client/react-native and
-// /client/host land on the fork's own ./react-native and ./host, and every ./server/* leaf
-// folds onto ./server (the fork has no provider/acp split).
-const SUBPATH_MAP: Record<string, string> = {
-  "": "",
-  "/client": "",
-  "/client/ui": "",
-  "/client/react-native": "/react-native",
-  "/client/host": "/host",
-  "/react-native": "/react-native",
-  "/host": "/host",
-  "/server": "/server",
-};
-
 function mapSpecifierSubpath(subpath: string): string {
-  const mapped = SUBPATH_MAP[subpath] ?? (subpath.startsWith("/server") ? "/server" : "");
-  return `@jagentdesk/plugin${mapped}`;
+  return `@jagentdesk/plugin${subpath}`;
 }
 
 function rewriteSdkSpecifiers(source: string): string {
@@ -44,6 +29,27 @@ function rewriteSdkSpecifiers(source: string): string {
     return `${quote}${mapSpecifierSubpath(subpath)}${quote}`;
   });
 }
+
+// The SDK's runtime exports whose names carry the brand. Types are erased at compile time, so
+// only these values would fail at run time ("usePaseo is not a function") if left alone. Matched
+// as whole words so a plugin's own identifiers are not touched.
+const SDK_RUNTIME_RENAMES: ReadonlyArray<readonly [RegExp, string]> = [
+  [/\busePaseoContextValue\b/g, "useJAgentDeskContextValue"],
+  [/\busePaseo\b/g, "useJAgentDesk"],
+  [/\bPaseoApiProvider\b/g, "JAgentDeskApiProvider"],
+  [/\bgetPaseoClient\b/g, "getJAgentDeskClient"],
+];
+
+function rewriteSdkRuntimeNames(source: string): string {
+  if (!SDK_SPECIFIER_PRESENT.test(source)) return source;
+  let result = source;
+  for (const [pattern, replacement] of SDK_RUNTIME_RENAMES) {
+    result = result.replace(pattern, replacement);
+  }
+  return result;
+}
+// Only files that import the SDK are renamed (checked before the specifier rewrite).
+const SDK_SPECIFIER_PRESENT = /['"]@(?:getpaseo|paseo)\/plugin(?:\/[a-z0-9-]+)*['"]/;
 
 async function rewriteSourceTree(directory: string): Promise<void> {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -57,7 +63,7 @@ async function rewriteSourceTree(directory: string): Promise<void> {
       if (!entry.isFile() || !SOURCE_EXTENSIONS.has(path.extname(entry.name))) return;
       const filePath = path.join(directory, entry.name);
       const source = await readFile(filePath, "utf8");
-      const rewritten = rewriteSdkSpecifiers(source);
+      const rewritten = rewriteSdkSpecifiers(rewriteSdkRuntimeNames(source));
       if (rewritten !== source) await writeFile(filePath, rewritten);
     }),
   );
@@ -82,36 +88,11 @@ function rebrandManifest(raw: unknown): Record<string, unknown> {
   return result;
 }
 
-const FORK_ENTRY_FILENAMES = ["index.ts", "index.tsx"];
-// Paseo splits its entry into client/server files; the fork compiles a single index.ts
-// (client-only plugins default-export their contribute function). A client entry is
-// renamed to the fork's entry so themes and other client plugins load; a server-only
-// plugin still needs API parity and is out of scope here.
-const PASEO_CLIENT_ENTRIES = [
-  ["index.client.ts", "index.ts"],
-  ["index.client.tsx", "index.tsx"],
-  ["index.client.js", "index.ts"],
-  ["index.client.jsx", "index.tsx"],
-] as const;
-
 async function isFile(filePath: string): Promise<boolean> {
   return stat(filePath).then(
     (info) => info.isFile(),
     () => false,
   );
-}
-
-async function bridgeEntryPoint(directory: string): Promise<void> {
-  for (const filename of FORK_ENTRY_FILENAMES) {
-    if (await isFile(path.join(directory, filename))) return;
-  }
-  for (const [paseoEntry, forkEntry] of PASEO_CLIENT_ENTRIES) {
-    const source = path.join(directory, paseoEntry);
-    if (await isFile(source)) {
-      await rename(source, path.join(directory, forkEntry));
-      return;
-    }
-  }
 }
 
 /**
@@ -131,6 +112,5 @@ export async function rebrandPaseoPlugin(directory: string): Promise<boolean> {
   await writeFile(jagentdeskManifest, `${JSON.stringify(rebrandManifest(parsed), null, 2)}\n`);
   await rm(paseoManifest, { force: true });
   await rewriteSourceTree(directory);
-  await bridgeEntryPoint(directory);
   return true;
 }

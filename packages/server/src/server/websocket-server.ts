@@ -2343,6 +2343,7 @@ export class VoiceAssistantWebSocketServer {
               pluginManagement: true,
               pluginLogs: true,
               pluginThemes: true,
+              pluginSettings: true,
             }
           : {}),
       },

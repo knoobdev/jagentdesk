@@ -1,3 +1,5 @@
+import { clickUpTabStyles } from "@/components/clickup-shell/list-styles";
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Dimensions, Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import {
@@ -2127,14 +2129,26 @@ function TabButton({
   active: boolean;
   onPress: () => void;
 }) {
+  const isClickUp = useIsClickUpTheme();
   return (
-    <Pressable style={active ? styles.tabActive : styles.tab} onPress={onPress}>
-      <Text style={active ? styles.tabTextActive : styles.tabText}>{label}</Text>
+    <Pressable style={dockerTabStyle(isClickUp, active)} onPress={onPress}>
+      <Text style={dockerTabTextStyle(isClickUp, active)}>{label}</Text>
     </Pressable>
   );
 }
 
+function dockerTabStyle(isClickUp: boolean, active: boolean) {
+  if (isClickUp) return active ? clickUpTabStyles.tabActive : clickUpTabStyles.tab;
+  return active ? styles.tabActive : styles.tab;
+}
+
+function dockerTabTextStyle(isClickUp: boolean, active: boolean) {
+  if (isClickUp) return active ? clickUpTabStyles.textActive : clickUpTabStyles.text;
+  return active ? styles.tabTextActive : styles.tabText;
+}
+
 export function DockerScreen() {
+  const isClickUp = useIsClickUpTheme();
   const hosts = useHosts();
   const serverId = hosts[0]?.serverId ?? "";
   const client = useHostRuntimeClient(serverId);
@@ -2382,7 +2396,7 @@ export function DockerScreen() {
       ) : (
         <>
           <View style={styles.toolbar}>
-            <View style={styles.tabRow}>
+            <View style={isClickUp ? clickUpTabStyles.row : styles.tabRow}>
               <TabButton
                 label={`Containers · ${containers.length}`}
                 active={tab === "containers"}

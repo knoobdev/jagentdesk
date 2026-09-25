@@ -559,18 +559,33 @@ export interface SessionOptions {
   daemonRuntimeConfig?: DaemonRuntimeConfig;
   getWebSocketRuntimeMetrics?: () => DaemonWebSocketRuntimeDiagnosticSnapshot | null;
   pluginRuntime?: {
-    listPlugins(): import("@jagentdesk/protocol/messages").PluginListItem[];
+    before?: import("./plugins/lifecycle/index.js").PluginLifecycle["before"];
+    emit?: import("./plugins/lifecycle/index.js").PluginLifecycle["emit"];
+    listPlugins(): Promise<import("@jagentdesk/protocol/messages").PluginListItem[]>;
     getLogs(pluginId: string): import("@jagentdesk/protocol/messages").PluginLogEntry[];
     installDirectory(input: {
       path: string;
       id?: string;
     }): Promise<import("@jagentdesk/protocol/messages").PluginListItem>;
+    inspectDirectory(path: string): Promise<{ id: string }>;
     installSource(input: {
       source: string;
       id?: string;
       ref?: string;
     }): Promise<import("@jagentdesk/protocol/messages").PluginListItem>;
-    inspectDirectory(path: string): Promise<{ id: string }>;
+    statusSources(
+      pluginId?: string,
+    ): Promise<import("@jagentdesk/protocol/messages").PluginSourceStatusItem[]>;
+    previewUpdates(input: {
+      pluginId?: string;
+      target?: import("@jagentdesk/protocol/messages").PluginUpdateSelection;
+    }): Promise<import("@jagentdesk/protocol/messages").PluginUpdatePreview[]>;
+    applyUpdates(
+      proposals: import("@jagentdesk/protocol/messages").PluginUpdateProposal[],
+    ): Promise<import("@jagentdesk/protocol/messages").PluginUpdateResult[]>;
+    updateSources(
+      pluginId?: string,
+    ): Promise<import("@jagentdesk/protocol/messages").PluginSourceUpdateItem[]>;
     reloadPlugin(pluginId: string): Promise<import("@jagentdesk/protocol/messages").PluginListItem>;
     enablePlugin(pluginId: string): Promise<import("@jagentdesk/protocol/messages").PluginListItem>;
     disablePlugin(
@@ -578,6 +593,7 @@ export interface SessionOptions {
     ): Promise<import("@jagentdesk/protocol/messages").PluginListItem>;
     removePlugin(pluginId: string): Promise<void>;
     subscribe(listener: (pluginId: string) => void): () => void;
+    subscribeSettings?(listener: (pluginId: string, settingsId: string) => void): () => void;
     catalog(): Array<{ id: string; clientBundle: string }>;
     invokePluginRpc(pluginId: string, method: string, input: unknown): Promise<unknown>;
   };
@@ -2247,11 +2263,13 @@ export class Session {
 
   private dispatchPluginMessage(msg: SessionInboundMessage): Promise<void> | undefined {
     if (msg.type === "plugin.list.request") {
-      this.emit({
-        type: "plugin.list.response",
-        payload: { requestId: msg.requestId, plugins: this.pluginRuntime?.listPlugins() ?? [] },
+      return (this.pluginRuntime?.listPlugins() ?? Promise.resolve([])).then((plugins) => {
+        this.emit({
+          type: "plugin.list.response",
+          payload: { requestId: msg.requestId, plugins },
+        });
+        return undefined;
       });
-      return undefined;
     }
     if (msg.type === "plugin.logs.get.request") {
       if (!this.pluginRuntime) throw new Error("Plugin service is unavailable");
@@ -2328,6 +2346,65 @@ export class Session {
   }
 
   private dispatchPluginDirectoryMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    if (msg.type === "plugin.source.install.request") {
+      if (!this.pluginRuntime) throw new Error("Plugin service is unavailable");
+      return this.pluginRuntime
+        .installSource({
+          // COMPAT(plugin-source-path): accepted for v0.7 clients; remove after 2027-09-01.
+          source: formatPluginSourceReference(msg.source, msg.pluginPath),
+          ...(msg.id ? { id: msg.id } : {}),
+          ...(msg.ref ? { ref: msg.ref } : {}),
+        })
+        .then((plugin) => {
+          this.emit({
+            type: "plugin.source.install.response",
+            payload: { requestId: msg.requestId, plugin },
+          });
+          return undefined;
+        });
+    }
+    if (msg.type === "plugin.source.status.request") {
+      if (!this.pluginRuntime) throw new Error("Plugin service is unavailable");
+      return this.pluginRuntime.statusSources(msg.pluginId).then((plugins) => {
+        this.emit({
+          type: "plugin.source.status.response",
+          payload: { requestId: msg.requestId, plugins },
+        });
+        return undefined;
+      });
+    }
+    if (msg.type === "plugin.source.update.preview.request") {
+      if (!this.pluginRuntime) throw new Error("Plugin service is unavailable");
+      return this.pluginRuntime
+        .previewUpdates({ pluginId: msg.pluginId, target: msg.target })
+        .then((plugins) => {
+          this.emit({
+            type: "plugin.source.update.preview.response",
+            payload: { requestId: msg.requestId, plugins },
+          });
+          return undefined;
+        });
+    }
+    if (msg.type === "plugin.source.update.apply.request") {
+      if (!this.pluginRuntime) throw new Error("Plugin service is unavailable");
+      return this.pluginRuntime.applyUpdates(msg.proposals).then((plugins) => {
+        this.emit({
+          type: "plugin.source.update.apply.response",
+          payload: { requestId: msg.requestId, plugins },
+        });
+        return undefined;
+      });
+    }
+    if (msg.type === "plugin.source.update.request") {
+      if (!this.pluginRuntime) throw new Error("Plugin service is unavailable");
+      return this.pluginRuntime.updateSources(msg.pluginId).then((plugins) => {
+        this.emit({
+          type: "plugin.source.update.response",
+          payload: { requestId: msg.requestId, plugins },
+        });
+        return undefined;
+      });
+    }
     if (msg.type === "plugin.directory.install.request") {
       if (!this.pluginRuntime) throw new Error("Plugin service is unavailable");
       return this.pluginRuntime.installDirectory({ path: msg.path, id: msg.id }).then((plugin) => {
@@ -2337,23 +2414,6 @@ export class Session {
         });
         return undefined;
       });
-    }
-    if (msg.type === "plugin.source.install.request") {
-      if (!this.pluginRuntime) throw new Error("Plugin service is unavailable");
-      // A subdirectory plugin arrives with its path in the COMPAT `pluginPath` field;
-      // fold it back into the source reference the runtime parses.
-      const source = msg.pluginPath
-        ? formatPluginSourceReference(msg.source, msg.pluginPath)
-        : msg.source;
-      return this.pluginRuntime
-        .installSource({ source, id: msg.id, ref: msg.ref })
-        .then((plugin) => {
-          this.emit({
-            type: "plugin.source.install.response",
-            payload: { requestId: msg.requestId, plugin },
-          });
-          return undefined;
-        });
     }
     if (msg.type === "plugin.directory.inspect.request") {
       if (!this.pluginRuntime) throw new Error("Plugin service is unavailable");
@@ -2372,9 +2432,19 @@ export class Session {
     pluginRuntime: SessionOptions["pluginRuntime"],
   ): (() => void) | null {
     if (!pluginRuntime) return null;
-    return pluginRuntime.subscribe((pluginId) => {
+    const catalog = pluginRuntime.subscribe((pluginId) => {
       this.emit({ type: "status", payload: { status: "plugin_catalog_changed", pluginId } });
     });
+    const settings = pluginRuntime.subscribeSettings?.((pluginId, settingsId) => {
+      this.emit({
+        type: "status",
+        payload: { status: "plugin_settings_changed", pluginId, settingsId },
+      });
+    });
+    return () => {
+      catalog();
+      settings?.();
+    };
   }
 
   private dispatchVoiceAndControlMessage(msg: SessionInboundMessage): Promise<void> | undefined {

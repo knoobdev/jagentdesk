@@ -1,6 +1,7 @@
 import type { Agent } from "@/stores/session-store";
 import type { WorkspaceTabSnapshot } from "@/stores/workspace-layout-actions";
 import { isWorkspaceRootAgent } from "@/subagents/policies";
+import { isDockAgent } from "@/utils/dock-agents";
 import { normalizeWorkspaceOpaqueId } from "@/utils/workspace-identity";
 
 export interface WorkspaceAgentVisibility {
@@ -11,6 +12,30 @@ export interface WorkspaceAgentVisibility {
 
 function agentBelongsToWorkspace(agent: Agent, workspaceId: string): boolean {
   return normalizeWorkspaceOpaqueId(agent.workspaceId) === workspaceId;
+}
+
+function earliestRegularAgentCreatedAt(
+  agents: Map<string, Agent> | undefined,
+  workspaceId: string,
+): number | null {
+  let earliest: number | null = null;
+  for (const agent of agents?.values() ?? []) {
+    if (!agentBelongsToWorkspace(agent, workspaceId) || isDockAgent(agent)) continue;
+    const at = agent.createdAt.getTime();
+    if (earliest === null || at < earliest) earliest = at;
+  }
+  return earliest;
+}
+
+/**
+ * A screen dock's chat (SimFleet / database / cluster) now gets its own workspace and shows as a
+ * tab there. Older ones were filed by the daemon into another conversation's workspace (same
+ * project directory); those stay out of that workspace's tabs — and a tab auto-opened for one is
+ * pruned — while the chat remains reachable from its screen's dock and from History.
+ */
+function isMisfiledDockAgent(agent: Agent, earliestRegularAgentAt: number | null): boolean {
+  if (!isDockAgent(agent)) return false;
+  return earliestRegularAgentAt !== null && earliestRegularAgentAt < agent.createdAt.getTime();
 }
 
 export function deriveWorkspaceAgentVisibility(input: {
@@ -35,12 +60,13 @@ export function deriveWorkspaceAgentVisibility(input: {
     ...(agentDetails?.entries() ?? []),
     ...(sessionAgents?.entries() ?? []),
   ]);
+  const earliestRegularAgentAt = earliestRegularAgentCreatedAt(sessionAgents, workspaceId);
   for (const agent of sessionAgents?.values() ?? []) {
     if (!agentBelongsToWorkspace(agent, workspaceId)) {
       continue;
     }
     knownAgentIds.add(agent.id);
-    if (!agent.archivedAt) {
+    if (!agent.archivedAt && !isMisfiledDockAgent(agent, earliestRegularAgentAt)) {
       activeAgentIds.add(agent.id);
       const parentAgent = agent.parentAgentId ? agentsById.get(agent.parentAgentId) : undefined;
       if (isWorkspaceRootAgent(agent, parentAgent)) {

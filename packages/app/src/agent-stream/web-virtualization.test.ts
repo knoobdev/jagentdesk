@@ -174,7 +174,8 @@ describe("web virtualization test overrides", () => {
       __JAGENTDESK_E2E_WEB_PARTIAL_VIRTUALIZATION_THRESHOLD?: unknown;
       __JAGENTDESK_E2E_WEB_MOUNTED_RECENT_STREAM_ITEMS?: unknown;
     };
-    const previousThreshold = globalWithOverrides.__JAGENTDESK_E2E_WEB_PARTIAL_VIRTUALIZATION_THRESHOLD;
+    const previousThreshold =
+      globalWithOverrides.__JAGENTDESK_E2E_WEB_PARTIAL_VIRTUALIZATION_THRESHOLD;
     const previousMounted = globalWithOverrides.__JAGENTDESK_E2E_WEB_MOUNTED_RECENT_STREAM_ITEMS;
 
     try {
@@ -193,7 +194,8 @@ describe("web virtualization test overrides", () => {
       if (previousThreshold === undefined) {
         delete globalWithOverrides.__JAGENTDESK_E2E_WEB_PARTIAL_VIRTUALIZATION_THRESHOLD;
       } else {
-        globalWithOverrides.__JAGENTDESK_E2E_WEB_PARTIAL_VIRTUALIZATION_THRESHOLD = previousThreshold;
+        globalWithOverrides.__JAGENTDESK_E2E_WEB_PARTIAL_VIRTUALIZATION_THRESHOLD =
+          previousThreshold;
       }
       if (previousMounted === undefined) {
         delete globalWithOverrides.__JAGENTDESK_E2E_WEB_MOUNTED_RECENT_STREAM_ITEMS;

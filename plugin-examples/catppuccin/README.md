@@ -1,9 +1,10 @@
 # Catppuccin plugin example
 
-This example adds **Catppuccin Mocha** to Settings → Appearance. It contributes the palette as an
-app theme.
+This example adds **Catppuccin Mocha** to Settings → Appearance. JAgentDesk ships Catppuccin as a
+syntax-highlight theme; this contributes it as an app theme.
 
-A theme is data, so the whole plugin is one `addTheme` call in `index.ts` — no client file, no RPC.
+A theme is client data, so the whole plugin is one `addTheme` call in `index.client.ts` and has no
+server entry or subprocess.
 
 Register it in `$JAGENTDESK_HOME/config.json`:
 
@@ -19,7 +20,7 @@ Register it in `$JAGENTDESK_HOME/config.json`:
 }
 ```
 
-Then run `jagentdesk plugin reload` and pick **Catppuccin Mocha** in Settings → Appearance.
+Then run `jagentdesk reload` and pick **Catppuccin Mocha** in Settings → Appearance.
 
 The colors come straight from the [Catppuccin Mocha](https://catppuccin.com/palette/) palette:
 `base`, `text`, `surface0`, `surface1`, `mauve`, `subtext0`, and `overlay0`. JAgentDesk expands them

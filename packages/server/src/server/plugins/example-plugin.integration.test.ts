@@ -12,7 +12,7 @@ const LOCAL_PLUGIN_DIR = path.join(REPO_ROOT, "plugin-examples", "local-plugin")
 
 // End-to-end proof that the shipped example plugin actually compiles through the
 // daemon's real esbuild + @babel/parser pipeline, and that the runtime split
-// (*.client.tsx vs *.server.ts) strips opposite-runtime code as designed.
+// (index.client.tsx vs index.server.ts entries) keeps each runtime's code apart.
 describe("local-plugin example compiles through the daemon plugin pipeline", () => {
   it("reads the rebranded jagentdesk-plugin.json manifest", async () => {
     const manifest = await readPluginManifest(LOCAL_PLUGIN_DIR);
@@ -20,9 +20,11 @@ describe("local-plugin example compiles through the daemon plugin pipeline", () 
   });
 
   it("compiles to client + server bundles with the runtime split applied", async () => {
-    const { clientBundle, serverBundle } = await compilePlugin(
-      path.join(LOCAL_PLUGIN_DIR, "index.ts"),
-    );
+    const { clientBundle, serverBundle } = await compilePlugin({
+      client: path.join(LOCAL_PLUGIN_DIR, "index.client.tsx"),
+      server: path.join(LOCAL_PLUGIN_DIR, "index.server.ts"),
+    });
+    if (!clientBundle || !serverBundle) throw new Error("expected both runtime bundles");
 
     // Both bundles are produced and non-trivial.
     expect(clientBundle.length).toBeGreaterThan(0);

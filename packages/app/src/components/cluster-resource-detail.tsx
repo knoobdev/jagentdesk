@@ -16,6 +16,8 @@ import { createMessageSubmissionWriter } from "@/composer/submission/writer";
 import { resolveSkillInjectedText } from "@/skills/skill-injection";
 import { useClusterChatStore } from "@/stores/cluster-chat-store";
 import type { Theme } from "@/styles/theme";
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { clickUpChipStyles } from "@/components/clickup-shell/list-styles";
 
 const ThemedX = withUnistyles(X);
 const ThemedSparkles = withUnistyles(Sparkles);
@@ -1235,6 +1237,35 @@ function YamlViewButtons({
   );
 }
 
+/** Section caption ("YAML", "Logs"): uppercase in classic, sentence-case ink in ClickUp. */
+function sectionLabelStyle(isClickUp: boolean) {
+  return isClickUp
+    ? [styles.yamlSectionLabel, styles.sectionLabelClickUp]
+    : styles.yamlSectionLabel;
+}
+
+/** Log container picker: ClickUp's filter chips replace the accent-filled classic chips. */
+function containerChipStyle(isClickUp: boolean, active: boolean) {
+  if (!isClickUp) return [styles.containerChip, active && styles.containerChipActive];
+  return active ? clickUpChipStyles.chipActive : clickUpChipStyles.chip;
+}
+
+function containerChipTextStyle(isClickUp: boolean, active: boolean) {
+  if (!isClickUp) return [styles.containerChipText, active && styles.containerChipTextActive];
+  return active ? clickUpChipStyles.textActive : clickUpChipStyles.text;
+}
+
+/** Follow / Timestamps toggles read as chips in ClickUp (lavender when on). */
+function logToggleStyle(isClickUp: boolean, on: boolean) {
+  if (!isClickUp) return on ? styles.followButtonActive : styles.followButton;
+  return on ? clickUpChipStyles.chipActive : clickUpChipStyles.chip;
+}
+
+function logToggleTextStyle(isClickUp: boolean, on: boolean) {
+  if (!isClickUp) return on ? styles.followButtonTextActive : styles.followButtonText;
+  return on ? clickUpChipStyles.textActive : clickUpChipStyles.text;
+}
+
 function DetailMainView({
   visible,
   showYaml,
@@ -1248,11 +1279,12 @@ function DetailMainView({
   yamlBody: ReactNode;
   overviewBody: ReactNode;
 }) {
+  const isClickUp = useIsClickUpTheme();
   if (!visible) return null;
   if (showYaml) {
     return (
       <View style={styles.yamlContainer}>
-        <Text style={styles.yamlSectionLabel}>{editing ? "Edit YAML" : "YAML"}</Text>
+        <Text style={sectionLabelStyle(isClickUp)}>{editing ? "Edit YAML" : "YAML"}</Text>
         {yamlBody}
       </View>
     );
@@ -1318,6 +1350,7 @@ function ResourceDetailBody({
   handleStopPortForward,
 }: ResourceDetailBodyProps) {
   const handleCancelPfInput = useCallback(() => setPfShowInput(false), [setPfShowInput]);
+  const isClickUp = useIsClickUpTheme();
 
   return (
     <>
@@ -1391,26 +1424,18 @@ function ResourceDetailBody({
       {showLogs ? (
         <View style={styles.logsContainer}>
           <View style={styles.logsHeader}>
-            <Text style={styles.yamlSectionLabel}>Logs</Text>
+            <Text style={sectionLabelStyle(isClickUp)}>Logs</Text>
             <View style={styles.logsHeaderRight}>
               {containers.length > 1 ? (
                 <View style={styles.containerSelector}>
                   {containers.map((c) => (
                     <Pressable
                       key={c}
-                      style={[
-                        styles.containerChip,
-                        selectedContainer === c && styles.containerChipActive,
-                      ]}
+                      style={containerChipStyle(isClickUp, selectedContainer === c)}
                       // eslint-disable-next-line react-perf/jsx-no-new-function-as-prop
                       onPress={() => handleSelectContainer(c)}
                     >
-                      <Text
-                        style={[
-                          styles.containerChipText,
-                          selectedContainer === c && styles.containerChipTextActive,
-                        ]}
-                      >
+                      <Text style={containerChipTextStyle(isClickUp, selectedContainer === c)}>
                         {c}
                       </Text>
                     </Pressable>
@@ -1418,12 +1443,10 @@ function ResourceDetailBody({
                 </View>
               ) : null}
               <Pressable
-                style={[followEnabled ? styles.followButtonActive : styles.followButton]}
+                style={logToggleStyle(isClickUp, followEnabled)}
                 onPress={handleToggleFollow}
               >
-                <Text
-                  style={[followEnabled ? styles.followButtonTextActive : styles.followButtonText]}
-                >
+                <Text style={logToggleTextStyle(isClickUp, followEnabled)}>
                   {followEnabled ? "Follow" : "Follow"}
                 </Text>
               </Pressable>
@@ -1439,14 +1462,10 @@ function ResourceDetailBody({
                 </Pressable>
               ) : null}
               <Pressable
-                style={[logTimestamps ? styles.followButtonActive : styles.followButton]}
+                style={logToggleStyle(isClickUp, logTimestamps)}
                 onPress={handleToggleTimestamps}
               >
-                <Text
-                  style={[logTimestamps ? styles.followButtonTextActive : styles.followButtonText]}
-                >
-                  Timestamps
-                </Text>
+                <Text style={logToggleTextStyle(isClickUp, logTimestamps)}>Timestamps</Text>
               </Pressable>
               {canDownloadLogs ? (
                 <Pressable style={styles.refreshButton} onPress={handleDownloadLogs}>
@@ -1664,6 +1683,13 @@ const styles = StyleSheet.create((theme: Theme) => ({
     textTransform: "uppercase" as const,
     letterSpacing: 0.5,
     marginBottom: theme.spacing[2],
+  },
+  sectionLabelClickUp: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.chrome.sectionTitleColor,
+    textTransform: "none" as const,
+    letterSpacing: 0,
   },
   yamlScroll: {
     flex: 1,

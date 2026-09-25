@@ -1,10 +1,10 @@
 import type {
   PluginAgentPanelProps,
   PluginHostProps,
-  PluginTheme,
   PluginWorkspacePanelProps,
-} from "@jagentdesk/plugin";
-import { PluginClientStateProvider } from "@jagentdesk/plugin/host";
+} from "@jagentdesk/plugin/client";
+import type { PluginTheme } from "@jagentdesk/plugin";
+import { PluginClientStateProvider } from "@jagentdesk/plugin/client/host";
 import { CircleAlert } from "lucide-react-native";
 import { useMemo } from "react";
 import { Platform, Text, View } from "react-native";
@@ -18,13 +18,12 @@ import { useSessionStore } from "@/stores/session-store";
 import { useWorkspaceExists } from "@/stores/session-store-hooks";
 import type { Theme } from "@/styles/theme";
 import { normalizeWorkspaceOpaqueId } from "@/utils/workspace-identity";
-import type { WorkspaceTabTarget } from "@/workspace-tabs/model";
+import { usePluginHostNavigation } from "../host-navigation";
 import { createPluginClientStateSource } from "../client-state/source";
 import { toPluginTheme } from "../theme";
 import { resolvePluginIcon } from "../icons";
 import { useInstalledPlugin } from "../registry";
 import { PluginRuntimeBoundary } from "../runtime-boundary";
-import { createPluginSurfaceRuntime } from "../surface-runtime";
 import { SurfaceErrorBoundary } from "../surface-error-boundary";
 import { resolvePluginWorkspacePanel } from "./resolution";
 
@@ -54,21 +53,18 @@ function PluginPanelBody({ theme }: { theme: PluginTheme }) {
     );
   });
   const client = useHostRuntimeClient(serverId);
-  const runtime = useMemo(
-    () => createPluginSurfaceRuntime(client, target.pluginId),
-    [client, target.pluginId],
-  );
   const compact = useIsCompactFormFactor();
   const hosts = useHosts();
   const hostLabel = hosts.find((host) => host.serverId === serverId)?.label ?? serverId;
   const host = useMemo(() => ({ id: serverId, label: hostLabel }), [hostLabel, serverId]);
   const layout = useMemo(() => ({ compact, platform: resolvePlatform() }), [compact]);
   const stateSource = useMemo(() => createPluginClientStateSource(serverId), [serverId]);
+  const navigation = usePluginHostNavigation(serverId);
 
   if (!plugin || !contribution || !workspaceExists) {
     return <PluginPanelUnavailable />;
   }
-  if (!runtime) {
+  if (!client) {
     return <PluginPanelUnavailable message="Plugin host is offline." />;
   }
 
@@ -80,6 +76,7 @@ function PluginPanelBody({ theme }: { theme: PluginTheme }) {
       theme,
       host,
       layout,
+      navigation,
       workspaceId,
     };
     const Component = contribution.Component;
@@ -91,6 +88,7 @@ function PluginPanelBody({ theme }: { theme: PluginTheme }) {
       theme,
       host,
       layout,
+      navigation,
       workspaceId,
       agentId: target.agentId,
     };
@@ -107,7 +105,7 @@ function PluginPanelBody({ theme }: { theme: PluginTheme }) {
       Surface={Surface}
       key={`${serverId}/${target.pluginId}/${target.panelId}/${target.context}`}
     >
-      <PluginRuntimeBoundary plugin={plugin} runtime={runtime}>
+      <PluginRuntimeBoundary plugin={plugin} client={client}>
         <PluginClientStateProvider source={stateSource}>{panel}</PluginClientStateProvider>
       </PluginRuntimeBoundary>
     </SurfaceErrorBoundary>
@@ -133,7 +131,7 @@ function PluginPanelUnavailable({
 }
 
 function usePluginPanelDescriptor(
-  target: Extract<WorkspaceTabTarget, { kind: "plugin" }>,
+  target: Extract<import("@/workspace-tabs/model").WorkspaceTabTarget, { kind: "plugin" }>,
   context: { serverId: string },
 ): PanelDescriptor {
   const plugin = useInstalledPlugin(context.serverId, target.pluginId);

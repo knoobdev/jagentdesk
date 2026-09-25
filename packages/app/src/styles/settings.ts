@@ -12,9 +12,9 @@ export const settingsStyles = StyleSheet.create((theme) => ({
     marginLeft: theme.spacing[1],
   },
   sectionHeaderTitle: {
-    color: theme.colors.foregroundMuted,
+    color: theme.chrome.sectionTitleColor,
     fontSize: theme.fontSize.xs,
-    fontWeight: theme.fontWeight.normal,
+    fontWeight: theme.chrome.sectionTitleWeight,
   },
   sectionHeaderLink: {
     alignItems: "center",
@@ -26,10 +26,10 @@ export const settingsStyles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.xs,
   },
   card: {
-    backgroundColor: theme.colors.surface1,
-    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.chrome.cardBackground,
+    borderRadius: theme.chrome.cardRadius,
     borderWidth: 1,
-    borderColor: theme.colors.border,
+    borderColor: theme.chrome.cardBorder,
     overflow: "hidden",
   },
   row: {
@@ -50,6 +50,7 @@ export const settingsStyles = StyleSheet.create((theme) => ({
   rowTitle: {
     color: theme.colors.foreground,
     fontSize: theme.fontSize.base,
+    fontWeight: theme.chrome.rowTitleWeight,
   },
   rowHint: {
     color: theme.colors.foregroundMuted,

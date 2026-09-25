@@ -1,3 +1,6 @@
+import { ClickUpUserHeader } from "@/components/clickup-shell/chat-headers";
+import { CLICKUP_MESSAGE_INDENT } from "@/components/clickup-shell/chat-layout";
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
   View,
@@ -99,7 +102,7 @@ import {
   AttachmentLabel,
   AttachmentThumbnail,
 } from "@/components/attachment-pill";
-import { AttachmentLightbox } from "@/components/attachment-lightbox";
+import { AttachmentLightbox, type ImageLightboxSource } from "@/components/attachment-lightbox";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import { isWeb, isNative } from "@/constants/platform";
 import type { AgentCapabilityFlags } from "@jagentdesk/protocol/agent-types";
@@ -401,6 +404,23 @@ const userMessageStylesheet = StyleSheet.create((theme) => ({
     color: theme.colors.foregroundMuted,
     fontSize: STREAM_METADATA_FONT_SIZE,
   },
+  containerClickUp: {
+    justifyContent: "flex-start",
+  },
+  contentClickUp: {
+    flex: 1,
+    minWidth: 0,
+    cursor: "auto",
+  },
+  bodyClickUp: {
+    paddingLeft: CLICKUP_MESSAGE_INDENT,
+  },
+  actionsClickUp: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[1],
+    marginLeft: theme.spacing[1],
+  },
 }));
 
 interface UserMessageImagePillProps {
@@ -440,6 +460,10 @@ export const UserMessage = memo(function UserMessage({
   const [isHovered, setIsHovered] = useState(false);
   const [lightboxMetadata, setLightboxMetadata] = useState<UserMessageImageAttachment | null>(null);
   const handleLightboxClose = useCallback(() => setLightboxMetadata(null), []);
+  const lightboxSource = useMemo<ImageLightboxSource | null>(
+    () => (lightboxMetadata ? { type: "attachment", metadata: lightboxMetadata } : null),
+    [lightboxMetadata],
+  );
   const resolvedDisableOuterSpacing = useDisableOuterSpacing(disableOuterSpacing);
   const hasText = message.trim().length > 0;
   const hasImages = images.length > 0;
@@ -486,6 +510,20 @@ export const UserMessage = memo(function UserMessage({
     ],
     [hasText],
   );
+  const isClickUp = useIsClickUpTheme();
+  const clickUpContainerStyle = useMemo(
+    () => [containerStyle, userMessageStylesheet.containerClickUp],
+    [containerStyle],
+  );
+  const clickUpActionsStyle = useMemo(
+    () => [
+      userMessageStylesheet.actionsClickUp,
+      showTrailingRow
+        ? userMessageStylesheet.trailingRowVisible
+        : userMessageStylesheet.trailingRowHidden,
+    ],
+    [showTrailingRow],
+  );
   const trailingRowStyle = useMemo(
     () => [
       userMessageStylesheet.trailingRow,
@@ -496,6 +534,87 @@ export const UserMessage = memo(function UserMessage({
     [showTrailingRow],
   );
 
+  const bodyContent = (
+    <>
+      {hasImages ? (
+        <View style={imagePreviewContainerStyle}>
+          {images.map((image) => (
+            <UserMessageImagePill
+              key={image.id}
+              image={image}
+              onOpen={setLightboxMetadata}
+              accessibilityLabel={t("composer.attachments.openImage")}
+            />
+          ))}
+        </View>
+      ) : null}
+      {hasAttachments ? (
+        <View style={attachmentPreviewContainerStyle}>
+          {attachments.map((attachment, index) => {
+            const content = getAgentAttachmentPillContent(attachment, t);
+            return (
+              <AttachmentFrame
+                key={`${attachment.type}:${"number" in attachment ? attachment.number : index}`}
+              >
+                <AttachmentLabel
+                  icon={content.icon}
+                  title={content.title}
+                  subtitle={content.subtitle}
+                />
+              </AttachmentFrame>
+            );
+          })}
+        </View>
+      ) : null}
+      {hasText ? (
+        <Text selectable style={userMessageStylesheet.text} dataSet={MESSAGE_TEXT_DATASET}>
+          {message}
+        </Text>
+      ) : null}
+    </>
+  );
+  const actions =
+    capabilities && messageId ? (
+      <RewindMenu
+        capabilities={capabilities}
+        isPending={rewindMutation.isPending}
+        rewoundText={message}
+        onRewind={handleRewind}
+      />
+    ) : null;
+
+  if (isClickUp) {
+    // ClickUp chat: left-aligned message under an avatar + "You" + time header, no bubble.
+    return (
+      <View style={clickUpContainerStyle} testID="user-message" aria-busy={isPending}>
+        <View
+          style={userMessageStylesheet.contentClickUp}
+          onPointerEnter={handlePointerEnter}
+          onPointerLeave={handlePointerLeave}
+        >
+          <ClickUpUserHeader time={formattedTimestamp}>
+            {hasText ? (
+              <View
+                style={clickUpActionsStyle}
+                pointerEvents={showTrailingRow ? "auto" : "none"}
+                testID="user-message-trailing-row"
+              >
+                {actions}
+                <TurnCopyButton
+                  getContent={getMessageContent}
+                  containerStyle={userMessageStylesheet.copyButton}
+                  accessibilityLabel={t("message.actions.copyMessage")}
+                />
+              </View>
+            ) : null}
+          </ClickUpUserHeader>
+          <View style={userMessageStylesheet.bodyClickUp}>{bodyContent}</View>
+        </View>
+        <AttachmentLightbox source={lightboxSource} onClose={handleLightboxClose} />
+      </View>
+    );
+  }
+
   return (
     <View style={containerStyle} testID="user-message" aria-busy={isPending}>
       <View
@@ -503,43 +622,7 @@ export const UserMessage = memo(function UserMessage({
         onPointerEnter={handlePointerEnter}
         onPointerLeave={handlePointerLeave}
       >
-        <View style={userMessageStylesheet.bubble}>
-          {hasImages ? (
-            <View style={imagePreviewContainerStyle}>
-              {images.map((image) => (
-                <UserMessageImagePill
-                  key={image.id}
-                  image={image}
-                  onOpen={setLightboxMetadata}
-                  accessibilityLabel={t("composer.attachments.openImage")}
-                />
-              ))}
-            </View>
-          ) : null}
-          {hasAttachments ? (
-            <View style={attachmentPreviewContainerStyle}>
-              {attachments.map((attachment, index) => {
-                const content = getAgentAttachmentPillContent(attachment, t);
-                return (
-                  <AttachmentFrame
-                    key={`${attachment.type}:${"number" in attachment ? attachment.number : index}`}
-                  >
-                    <AttachmentLabel
-                      icon={content.icon}
-                      title={content.title}
-                      subtitle={content.subtitle}
-                    />
-                  </AttachmentFrame>
-                );
-              })}
-            </View>
-          ) : null}
-          {hasText ? (
-            <Text selectable style={userMessageStylesheet.text} dataSet={MESSAGE_TEXT_DATASET}>
-              {message}
-            </Text>
-          ) : null}
-        </View>
+        <View style={userMessageStylesheet.bubble}>{bodyContent}</View>
         {hasText ? (
           <View
             style={trailingRowStyle}
@@ -549,14 +632,7 @@ export const UserMessage = memo(function UserMessage({
             <Text style={userMessageStylesheet.timestampText} testID="user-message-timestamp">
               {formattedTimestamp}
             </Text>
-            {capabilities && messageId ? (
-              <RewindMenu
-                capabilities={capabilities}
-                isPending={rewindMutation.isPending}
-                rewoundText={message}
-                onRewind={handleRewind}
-              />
-            ) : null}
+            {actions}
             <TurnCopyButton
               getContent={getMessageContent}
               containerStyle={userMessageStylesheet.copyButton}
@@ -565,7 +641,7 @@ export const UserMessage = memo(function UserMessage({
           </View>
         ) : null}
       </View>
-      <AttachmentLightbox metadata={lightboxMetadata} onClose={handleLightboxClose} />
+      <AttachmentLightbox source={lightboxSource} onClose={handleLightboxClose} />
     </View>
   );
 });
@@ -819,6 +895,10 @@ function AssistantMarkdownImage({
   workspaceRoot?: string;
   serverId?: string;
 }) {
+  const { t } = useTranslation();
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const openViewer = useCallback(() => setViewerOpen(true), []);
+  const closeViewer = useCallback(() => setViewerOpen(false), []);
   const containerStyle = useMemo<StyleProp<ViewStyle>>(
     () => ({
       marginTop: hasLeadingContent ? 16 : 0,
@@ -851,6 +931,14 @@ function AssistantMarkdownImage({
     () => [assistantMessageStylesheet.imageSurface, imageSizeStyle],
     [imageSizeStyle],
   );
+  const lightboxSource = useMemo<ImageLightboxSource | null>(() => {
+    if (!viewerOpen || !imageUri) return null;
+    return {
+      type: "uri",
+      uri: imageUri,
+      contentSize: aspectRatio ? { width: aspectRatio, height: 1 } : undefined,
+    };
+  }, [aspectRatio, imageUri, viewerOpen]);
 
   const stateFrameStyle = useMemo<StyleProp<ViewStyle>>(
     () => [
@@ -880,21 +968,34 @@ function AssistantMarkdownImage({
 
   return (
     <View style={frameStyle}>
-      <View style={surfaceStyle} accessibilityRole="image" accessibilityLabel={alt}>
-        <Image
-          ref={binding.onRef}
-          source={imageSource}
+      <Pressable
+        accessibilityLabel={t("composer.attachments.openImage")}
+        accessibilityRole="button"
+        disabled={image.status !== "loaded"}
+        onPress={openViewer}
+        style={surfaceStyle}
+      >
+        <View
           style={assistantMessageStylesheet.image}
-          resizeMode="contain"
-          onLoad={binding.onLoad}
-          onError={binding.onError}
-        />
-        {image.status === "loading" ? (
-          <View pointerEvents="none" style={assistantMessageStylesheet.imageLoadingOverlay}>
-            <ThemedLoadingSpinner size="small" uniProps={foregroundMutedColorMapping} />
-          </View>
-        ) : null}
-      </View>
+          accessibilityRole="image"
+          accessibilityLabel={alt}
+        >
+          <Image
+            ref={binding.onRef}
+            source={imageSource}
+            style={assistantMessageStylesheet.image}
+            resizeMode="contain"
+            onLoad={binding.onLoad}
+            onError={binding.onError}
+          />
+          {image.status === "loading" ? (
+            <View pointerEvents="none" style={assistantMessageStylesheet.imageLoadingOverlay}>
+              <ThemedLoadingSpinner size="small" uniProps={foregroundMutedColorMapping} />
+            </View>
+          ) : null}
+        </View>
+      </Pressable>
+      <AttachmentLightbox source={lightboxSource} onClose={closeViewer} />
     </View>
   );
 }

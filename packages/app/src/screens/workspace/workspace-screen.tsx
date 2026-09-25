@@ -1,3 +1,4 @@
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
   memo,
@@ -1278,13 +1279,38 @@ function WorkspaceHeaderTitleBar({
   onViewScriptTerminal,
   onOpenUrlInBrowserTab,
 }: WorkspaceHeaderTitleBarProps) {
+  const isClickUp = useIsClickUpTheme();
   return (
     <View style={styles.headerTitleContainer}>
       {isLoading ? (
         <View style={styles.headerTitleTextGroup}>
           <View style={styles.headerTitleSkeleton} />
         </View>
-      ) : (
+      ) : null}
+      {!isLoading && isClickUp ? (
+        // ClickUp breadcrumb: [space icon] Project / Title.
+        <View style={styles.headerTitleTextGroup}>
+          {showSubtitle ? (
+            <>
+              <View style={styles.clickUpCrumbIcon}>
+                <Text style={styles.clickUpCrumbIconText}>
+                  {subtitle.trim().charAt(0).toUpperCase()}
+                </Text>
+              </View>
+              <Text
+                testID="workspace-header-subtitle"
+                style={styles.clickUpCrumbProject}
+                numberOfLines={1}
+              >
+                {subtitle}
+              </Text>
+              <Text style={styles.clickUpCrumbSeparator}>/</Text>
+            </>
+          ) : null}
+          <ScreenTitle testID="workspace-header-title">{title}</ScreenTitle>
+        </View>
+      ) : null}
+      {isLoading || isClickUp ? null : (
         <View style={styles.headerTitleTextGroup}>
           <ScreenTitle testID="workspace-header-title">{title}</ScreenTitle>
           {showSubtitle ? (
@@ -4151,6 +4177,29 @@ const styles = StyleSheet.create((theme) => ({
       xs: 0,
       md: theme.spacing[2],
     },
+  },
+  clickUpCrumbIcon: {
+    width: 18,
+    height: 18,
+    borderRadius: theme.borderRadius.base,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: theme.chrome.createBackground,
+  },
+  clickUpCrumbIconText: {
+    fontSize: 10,
+    fontWeight: theme.fontWeight.bold,
+    color: theme.chrome.createForeground,
+  },
+  clickUpCrumbProject: {
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foregroundMuted,
+    flexShrink: 1,
+    maxWidth: "40%",
+  },
+  clickUpCrumbSeparator: {
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foregroundExtraMuted,
   },
   headerProjectTitle: {
     color: theme.colors.foregroundMuted,

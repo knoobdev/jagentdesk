@@ -2,7 +2,16 @@ import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from "r
 import type { ReactNode, Ref } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { Modal, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import {
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+  type DimensionValue,
+} from "react-native";
 import type { StyleProp, TextInputProps, ViewStyle } from "react-native";
 import { StyleSheet, useUnistyles, withUnistyles } from "react-native-unistyles";
 import { useIsCompactFormFactor } from "@/constants/layout";
@@ -23,6 +32,7 @@ import Animated, { useAnimatedStyle } from "react-native-reanimated";
 import { ArrowLeft, Search, X } from "lucide-react-native";
 import {
   IsolatedBottomSheetModal,
+  type ContextBridge,
   useIsolatedBottomSheetVisibility,
 } from "@/components/ui/isolated-bottom-sheet-modal";
 import { getCompactSheetSafeAreaPadding } from "@/components/adaptive-modal-sheet-layout";
@@ -524,6 +534,12 @@ export interface AdaptiveModalSheetProps {
   contentStyle?: StyleProp<ViewStyle>;
   /** Size compact sheet content to the live snap height instead of its largest snap point. */
   sizeContentToCurrentSnapPoint?: boolean;
+  /** Fixed desktop card height; without it the card sizes to its content. */
+  desktopHeight?: DimensionValue;
+  /** Style for the body wrapper around the children (both form factors). */
+  bodyStyle?: StyleProp<ViewStyle>;
+  /** Re-provides context lost when the compact sheet renders in a portal. */
+  contextBridge?: ContextBridge | null;
 }
 
 export function AdaptiveModalSheet({
@@ -541,6 +557,9 @@ export function AdaptiveModalSheet({
   presentation,
   contentStyle,
   sizeContentToCurrentSnapPoint = false,
+  desktopHeight,
+  bodyStyle,
+  contextBridge = null,
 }: AdaptiveModalSheetProps) {
   const { theme } = useUnistyles();
   const { t } = useTranslation();
@@ -622,8 +641,12 @@ export function AdaptiveModalSheet({
   );
 
   const desktopCardStyle = useMemo(
-    () => [styles.desktopCard, desktopMaxWidth != null && { maxWidth: desktopMaxWidth }],
-    [desktopMaxWidth],
+    () => [
+      styles.desktopCard,
+      desktopMaxWidth != null && { maxWidth: desktopMaxWidth },
+      desktopHeight != null && { height: desktopHeight },
+    ],
+    [desktopMaxWidth, desktopHeight],
   );
   const desktopOverlayStyle = useMemo(
     () => [
@@ -697,7 +720,9 @@ export function AdaptiveModalSheet({
             <SheetContent style={compactContentStyle}>{children}</SheetContent>
           </BottomSheetScrollView>
         ) : (
-          <SheetContent style={compactStaticContentStyle}>{children}</SheetContent>
+          <View style={[styles.compactStaticContent, bodyStyle]}>
+            <SheetContent style={compactStaticContentStyle}>{children}</SheetContent>
+          </View>
         )}
         {footer ? <View style={footerStyle}>{footer}</View> : null}
       </>
@@ -719,6 +744,7 @@ export function AdaptiveModalSheet({
         keyboardBlurBehavior="restore"
         accessible={false}
         presentation={presentation}
+        contextBridge={contextBridge}
       >
         {sizeContentToCurrentSnapPoint ? (
           <BottomSheetVisibleContent>{sheetContent}</BottomSheetVisibleContent>
@@ -733,7 +759,7 @@ export function AdaptiveModalSheet({
     <OverlayLayerProvider layer={modalLayer}>
       <SheetHeaderView header={header} onClose={onClose} />
       {scrollable ? (
-        <View style={styles.desktopScrollContainer}>
+        <View style={[styles.desktopScrollContainer, bodyStyle]}>
           <ScrollView
             style={styles.desktopScroll}
             contentContainerStyle={styles.contentGrow}
@@ -744,7 +770,9 @@ export function AdaptiveModalSheet({
           </ScrollView>
         </View>
       ) : (
-        <SheetContent style={desktopStaticContentStyle}>{children}</SheetContent>
+        <View style={[styles.contentGrow, bodyStyle]}>
+          <SheetContent style={desktopStaticContentStyle}>{children}</SheetContent>
+        </View>
       )}
       {footer ? <View style={footerStyle}>{footer}</View> : null}
     </OverlayLayerProvider>

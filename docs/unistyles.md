@@ -318,6 +318,18 @@ function Sidebar() {
 
 This is one of the rare places `useUnistyles()` is the right tool: there is no `withUnistyles(Animated.View)` equivalent, the affected component is small, and the alternative is a crash.
 
+## Never Branch On Theme Values Inside `StyleSheet.create` (Web)
+
+On web, Unistyles evaluates a style function once and replaces every theme leaf with a CSS
+variable (`theme.chrome.topBar` becomes `var(--chrome-top-bar)`). A conditional on a theme value
+runs against those variable strings, so `theme.chrome.kind === "clickup" ? a : b` always takes
+the same branch and never updates when the theme changes. Read tokens directly and make every
+theme carry them (see `ShellChrome` in `styles/theme.ts`); for structural differences, choose
+the style in the component from React state (for example the theme setting) instead.
+
+Dependencies are also detected per style key: `theme` has to be referenced inside that key's
+value. Hoisting `const c = theme.x` above the returned object hides it from the plugin.
+
 ## Adaptive Themes And Persisted Settings
 
 Unistyles [`initialTheme`](https://www.unistyl.es/v3/guides/theming#select-theme) and [`adaptiveThemes`](https://www.unistyl.es/v3/guides/theming#adaptive-themes) are mutually exclusive. `initialTheme` can be a string or a synchronous function, but it cannot wait on async storage.

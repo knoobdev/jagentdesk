@@ -100,6 +100,9 @@ import {
 } from "@/screens/settings/host-page";
 import { HostOrchestrationPage } from "@/screens/settings/orchestration-page";
 import { HostPluginsPage } from "@/screens/settings/plugins-page";
+import { PluginSettingsContent } from "@/plugins/settings";
+import { useInstalledPlugins } from "@/plugins/registry";
+import { resolvePluginIcon } from "@/plugins/icons";
 import { useHostFeature } from "@/runtime/host-features";
 import ProjectsScreen from "@/screens/projects-screen";
 import ProjectSettingsScreen from "@/screens/project-settings-screen";
@@ -129,7 +132,8 @@ export type SettingsView =
   | { kind: "root" }
   | { kind: "section"; section: SettingsSectionSlug }
   | { kind: "host"; serverId: string; section: HostSectionSlug }
-  | { kind: "project"; serverId: string; projectId: string };
+  | { kind: "project"; serverId: string; projectId: string }
+  | { kind: "plugin"; serverId: string; pluginId: string; screenId: string };
 
 interface SidebarSectionItem {
   id: SettingsSectionSlug;
@@ -761,6 +765,7 @@ function SettingsSidebar({
   let selectedHostSection: HostSectionSlug | null = null;
   if (view.kind === "host") selectedHostSection = view.section;
   if (view.kind === "project") selectedHostSection = "projects";
+  if (view.kind === "plugin") selectedHostSection = "plugins";
 
   const sidebarBody = (
     <>
@@ -895,7 +900,9 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
   const sortedHosts = useSortedHosts(hosts, localServerIdForOrdering);
   const lastWorkspaceSelection = useLastWorkspaceSelection();
   const routedSettingsHostServerId =
-    view.kind === "host" || view.kind === "project" ? view.serverId : null;
+    view.kind === "host" || view.kind === "project" || view.kind === "plugin"
+      ? view.serverId
+      : null;
   const [selectedSettingsHostServerId, setSelectedSettingsHostServerId] = useState<string | null>(
     routedSettingsHostServerId ?? lastWorkspaceSelection?.serverId ?? null,
   );
@@ -910,7 +917,8 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
   // The host the four sections scope to: the host on the active view, otherwise
   // the picker choice, otherwise the connected local daemon, otherwise the first host.
   const activeHostServerId = useMemo(() => {
-    if (view.kind === "host" || view.kind === "project") return view.serverId;
+    if (view.kind === "host" || view.kind === "project" || view.kind === "plugin")
+      return view.serverId;
     return resolveActiveHostServerId({
       selectedServerId: selectedSettingsHostServerId,
       localServerId: localServerIdForOrdering,
@@ -1149,11 +1157,21 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
     router.replace(buildOpenProjectRoute());
   }, [router]);
 
+  const installedPlugins = useInstalledPlugins();
   const detailHeader = ((): {
     title: string;
     Icon: ComponentType<{ size: number; color: string }>;
     titleAccessory?: ReactNode;
   } | null => {
+    if (view.kind === "plugin") {
+      const screen = installedPlugins
+        .find((plugin) => plugin.serverId === view.serverId && plugin.id === view.pluginId)
+        ?.settingsScreens.find((candidate) => candidate.id === view.screenId);
+      return {
+        title: `${view.pluginId} · ${screen?.title ?? t("settings.title")}`,
+        Icon: screen ? resolvePluginIcon(screen.icon) : Puzzle,
+      };
+    }
     if (view.kind === "host") {
       const item = HOST_SECTION_ITEMS.find((s) => s.id === view.section);
       if (!item) return null;
@@ -1171,6 +1189,15 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
   })();
 
   const content = (() => {
+    if (view.kind === "plugin") {
+      return (
+        <PluginSettingsContent
+          serverId={view.serverId}
+          pluginId={view.pluginId}
+          screenId={view.screenId}
+        />
+      );
+    }
     if (view.kind === "host") {
       return renderHostSettingsContent(view, handleHostRemoved, handleAddHost);
     }
@@ -1358,6 +1385,7 @@ const styles = StyleSheet.create((theme) => ({
   },
   scrollView: {
     flex: 1,
+    backgroundColor: theme.chrome.pageCanvas,
   },
   content: {
     padding: theme.spacing[4],

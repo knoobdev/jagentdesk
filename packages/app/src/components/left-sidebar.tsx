@@ -47,6 +47,9 @@ import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 import { resolveDesktopSidebarWidth } from "@/components/desktop-sidebar-layout";
 import { HostPicker } from "@/components/hosts/host-picker";
 import { SidebarHeaderRow } from "@/components/sidebar/sidebar-header-row";
+import { useAppNavTargets, useNewWorkspaceNavigate } from "@/components/sidebar/use-app-nav";
+import { ClickUpSidebarHeader } from "@/components/clickup-shell/clickup-sidebar-header";
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
 import { PluginSidebarItems } from "@/plugins";
 import { SidebarDisplayPreferencesMenu } from "@/components/sidebar/sidebar-display-preferences-menu";
 import { SidebarHelpMenu } from "@/components/sidebar/sidebar-help-menu";
@@ -56,8 +59,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { HEADER_INNER_HEIGHT, useIsCompactFormFactor } from "@/constants/layout";
 import { useOpenAddProject } from "@/hooks/use-open-add-project";
 import { useShortcutKeys } from "@/hooks/use-shortcut-keys";
-import { canCreateWorktreeForProjectKind } from "@/projects/host-projects";
-import { useHostFeature } from "@/runtime/host-features";
 import {
   type SidebarProjectEntry,
   type SidebarWorkspaceEntry,
@@ -68,30 +69,14 @@ import { RetainedPanelActivity } from "@/components/retained-panel";
 import type { StatusGroup } from "@/hooks/sidebar-status-view-model";
 import { type SidebarGroupMode, useSidebarViewStore } from "@/stores/sidebar-view-store";
 import { useKeyboardShortcutsStore } from "@/stores/keyboard-shortcuts-store";
-import { useSessionStore } from "@/stores/session-store";
 import { useHosts } from "@/runtime/host-runtime";
-import { useActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
-import { useWorkspace } from "@/stores/session-store-hooks";
 import { usePanelStore } from "@/stores/panel-store";
 import { useOwnsWindowChromeCorner, WindowChromeSafeArea } from "@/utils/desktop-window";
 import { useCloseAgentListGesture } from "@/mobile-panels/gestures";
 import { MobilePanelOverlay } from "@/mobile-panels/presentation";
 import { useIsMobilePanelPresented } from "@/mobile-panels/provider";
-import { useClusterNavStore } from "@/stores/cluster-nav-store";
-import { useDatabaseNavStore } from "@/stores/database-nav-store";
 import {
-  buildClustersRoute,
-  buildDatabasesRoute,
-  buildDatabaseBrowseRoute,
-  buildSkillsRoute,
-  buildInsightsRoute,
-  buildForgeRoute,
-  buildMarketplaceRoute,
-  buildDockerRoute,
-  buildSimulatorRoute,
-  buildClusterWorkloadsRoute,
   buildOpenProjectRoute,
-  buildNewWorkspaceRoute,
   buildSchedulesRoute,
   buildSharedSessionsRoute,
   buildAgentForumRoute,
@@ -294,19 +279,36 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     router.push(buildOpenProjectRoute());
   }, []);
 
-  const hosts = useHosts();
-  const firstServerId = hosts[0]?.serverId ?? "";
-  const lastCluster = useClusterNavStore((s) => s.lastCluster);
+  const {
+    clustersRoute,
+    databasesRoute,
+    skillsRoute,
+    insightsRoute,
+    forgeRoute,
+    marketplaceRoute,
+    dockerRoute,
+    simulatorRoute,
+    supportsForgeHub,
+  } = useAppNavTargets();
 
-  // Jump straight back to the cluster the user last had open (its workloads),
-  // falling back to the cluster list when there is none.
-  const clustersRoute = useMemo(() => {
-    if (lastCluster) {
-      return buildClusterWorkloadsRoute(lastCluster.serverId, lastCluster.clusterId);
-    }
-    if (firstServerId) return buildClustersRoute(firstServerId);
-    return null;
-  }, [lastCluster, firstServerId]);
+  const handleSkillsDesktop = useCallback(() => {
+    if (skillsRoute) router.push(skillsRoute);
+  }, [skillsRoute]);
+  const handleInsightsDesktop = useCallback(() => {
+    if (insightsRoute) router.push(insightsRoute);
+  }, [insightsRoute]);
+  const handleForgeDesktop = useCallback(() => {
+    if (forgeRoute) router.push(forgeRoute);
+  }, [forgeRoute]);
+  const handleMarketplaceDesktop = useCallback(() => {
+    if (marketplaceRoute) router.push(marketplaceRoute);
+  }, [marketplaceRoute]);
+  const handleDockerDesktop = useCallback(() => {
+    if (dockerRoute) router.push(dockerRoute as Href);
+  }, [dockerRoute]);
+  const handleSimulatorDesktop = useCallback(() => {
+    if (simulatorRoute) router.push(simulatorRoute as Href);
+  }, [simulatorRoute]);
 
   const handleClustersDesktop = useCallback(() => {
     if (clustersRoute) router.push(clustersRoute);
@@ -319,17 +321,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     }
   }, [clustersRoute, showMobileAgent]);
 
-  const lastDatabase = useDatabaseNavStore((s) => s.lastDatabase);
-  // Jump straight back to the database the user last had open (its browse view),
-  // falling back to the connection list when there is none.
-  const databasesRoute = useMemo(() => {
-    if (lastDatabase) {
-      return buildDatabaseBrowseRoute(lastDatabase.serverId, lastDatabase.databaseId);
-    }
-    if (firstServerId) return buildDatabasesRoute(firstServerId);
-    return null;
-  }, [lastDatabase, firstServerId]);
-
   const handleDatabasesDesktop = useCallback(() => {
     if (databasesRoute) router.push(databasesRoute);
   }, [databasesRoute]);
@@ -341,13 +332,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     }
   }, [databasesRoute, showMobileAgent]);
 
-  const skillsRoute = useMemo(
-    () => (firstServerId ? buildSkillsRoute(firstServerId) : null),
-    [firstServerId],
-  );
-  const handleSkillsDesktop = useCallback(() => {
-    if (skillsRoute) router.push(skillsRoute);
-  }, [skillsRoute]);
   const handleSkillsMobile = useCallback(() => {
     if (skillsRoute) {
       showMobileAgent();
@@ -355,13 +339,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     }
   }, [skillsRoute, showMobileAgent]);
 
-  const insightsRoute = useMemo(
-    () => (firstServerId ? buildInsightsRoute(firstServerId) : null),
-    [firstServerId],
-  );
-  const handleInsightsDesktop = useCallback(() => {
-    if (insightsRoute) router.push(insightsRoute);
-  }, [insightsRoute]);
   const handleInsightsMobile = useCallback(() => {
     if (insightsRoute) {
       showMobileAgent();
@@ -369,18 +346,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     }
   }, [insightsRoute, showMobileAgent]);
 
-  // Forge Hub is a post-ADR-0003 surface gated per release milestone (spec 19.12):
-  // only advertise the rail entry when the first/active daemon reports forgeHub.
-  const supportsForgeHub = useSessionStore(
-    (state) => state.sessions[firstServerId]?.serverInfo?.features?.forgeHub === true,
-  );
-  const forgeRoute = useMemo(
-    () => (firstServerId ? buildForgeRoute(firstServerId) : null),
-    [firstServerId],
-  );
-  const handleForgeDesktop = useCallback(() => {
-    if (forgeRoute) router.push(forgeRoute);
-  }, [forgeRoute]);
   const handleForgeMobile = useCallback(() => {
     if (forgeRoute) {
       showMobileAgent();
@@ -388,13 +353,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     }
   }, [forgeRoute, showMobileAgent]);
 
-  const marketplaceRoute = useMemo(
-    () => (firstServerId ? buildMarketplaceRoute(firstServerId) : null),
-    [firstServerId],
-  );
-  const handleMarketplaceDesktop = useCallback(() => {
-    if (marketplaceRoute) router.push(marketplaceRoute);
-  }, [marketplaceRoute]);
   const handleMarketplaceMobile = useCallback(() => {
     if (marketplaceRoute) {
       showMobileAgent();
@@ -402,13 +360,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     }
   }, [marketplaceRoute, showMobileAgent]);
 
-  const dockerRoute = useMemo(
-    () => (firstServerId ? buildDockerRoute(firstServerId) : null),
-    [firstServerId],
-  );
-  const handleDockerDesktop = useCallback(() => {
-    if (dockerRoute) router.push(dockerRoute as Href);
-  }, [dockerRoute]);
   const handleDockerMobile = useCallback(() => {
     if (dockerRoute) {
       showMobileAgent();
@@ -416,13 +367,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     }
   }, [dockerRoute, showMobileAgent]);
 
-  const simulatorRoute = useMemo(
-    () => (firstServerId ? buildSimulatorRoute(firstServerId) : null),
-    [firstServerId],
-  );
-  const handleSimulatorDesktop = useCallback(() => {
-    if (simulatorRoute) router.push(simulatorRoute as Href);
-  }, [simulatorRoute]);
   const handleSimulatorMobile = useCallback(() => {
     if (simulatorRoute) {
       showMobileAgent();
@@ -754,35 +698,7 @@ const SidebarNewWorkspaceHeaderRow = memo(function SidebarNewWorkspaceHeaderRow(
   shortcutKeys: ShortcutKey[][] | null;
   onBeforeNavigate?: () => void;
 }) {
-  const activeWorkspaceSelection = useActiveWorkspaceSelection();
-  const activeWorkspaceServerId = activeWorkspaceSelection?.serverId ?? null;
-  const activeWorkspaceId = activeWorkspaceSelection?.workspaceId ?? null;
-  const activeWorkspace = useWorkspace(activeWorkspaceServerId, activeWorkspaceId);
-  const supportsWorkspaceMultiplicity = useHostFeature(
-    activeWorkspaceServerId,
-    "workspaceMultiplicity",
-  );
-  const canUseActiveWorkspaceContext = Boolean(
-    activeWorkspace &&
-    (supportsWorkspaceMultiplicity || canCreateWorktreeForProjectKind(activeWorkspace.projectKind)),
-  );
-
-  const handlePress = useCallback(() => {
-    onBeforeNavigate?.();
-    router.push(
-      activeWorkspaceServerId
-        ? buildNewWorkspaceRoute(
-            activeWorkspace && canUseActiveWorkspaceContext
-              ? {
-                  serverId: activeWorkspaceServerId,
-                  sourceDirectory: activeWorkspace.projectRootPath,
-                  projectId: activeWorkspace.projectId,
-                }
-              : { serverId: activeWorkspaceServerId },
-          )
-        : buildNewWorkspaceRoute(),
-    );
-  }, [activeWorkspace, activeWorkspaceServerId, canUseActiveWorkspaceContext, onBeforeNavigate]);
+  const handlePress = useNewWorkspaceNavigate(onBeforeNavigate);
 
   return (
     <SidebarHeaderRow
@@ -822,6 +738,7 @@ function SidebarFooter({
 }) {
   const newAgentKeys = useShortcutKeys("new-agent");
   const settingsKeys = useShortcutKeys("toggle-settings");
+  const isClickUp = useIsClickUpTheme();
   const localServerId = useLocalDaemonServerId();
   const openPairDeviceModal = usePairDeviceModalStore((state) => state.open);
   const handleOpenPairDevice = useCallback(() => {
@@ -838,7 +755,8 @@ function SidebarFooter({
         shortcutKeys={newAgentKeys}
         theme={theme}
       />
-      <View style={styles.footerIconRow}>
+      {/* The ClickUp shell moves hosts, help, pairing and settings to the top bar and rail. */}
+      <View style={isClickUp ? styles.footerIconRowHidden : styles.footerIconRow}>
         <SidebarHostPicker
           theme={theme}
           label={labels.hosts}
@@ -942,6 +860,7 @@ function MobileSidebar({
       }
     : null;
   const { gesture: closeGesture, gestureRef: closeGestureRef } = useCloseAgentListGesture();
+  const isClickUp = useIsClickUpTheme();
   const dragGestureHostPresented = useIsMobilePanelPresented("agent-list");
 
   const handleViewMore = useCallback(() => {
@@ -1008,15 +927,18 @@ function MobileSidebar({
     >
       <View style={styles.sidebarContent} pointerEvents="auto">
         <WindowChromeSafeArea placement="below" />
+        {isClickUp ? <ClickUpSidebarHeader onBeforeNavigate={closeSidebar} /> : null}
         {clusterRoute || databaseRoute ? null : (
           <View style={styles.sidebarHeaderGroup}>
-            <SidebarNewWorkspaceHeaderRow
-              label={labels.newWorkspace}
-              testID="sidebar-global-new-workspace"
-              variant="compact"
-              shortcutKeys={newWorkspaceKeys}
-              onBeforeNavigate={closeSidebar}
-            />
+            {isClickUp ? null : (
+              <SidebarNewWorkspaceHeaderRow
+                label={labels.newWorkspace}
+                testID="sidebar-global-new-workspace"
+                variant="compact"
+                shortcutKeys={newWorkspaceKeys}
+                onBeforeNavigate={closeSidebar}
+              />
+            )}
             <SidebarHeaderRow
               icon={History}
               label={labels.sessions}
@@ -1192,6 +1114,7 @@ function DesktopSidebar({
   handleViewAgentForum,
 }: DesktopSidebarProps) {
   const ownsTopLeft = useOwnsWindowChromeCorner("top-left");
+  const isClickUp = useIsClickUpTheme();
   const pathname = usePathname();
   const hasActiveHostFilter = useSidebarViewStore((state) => state.hostFilters.length > 0);
   const isSessionsActive = pathname.includes("/sessions");
@@ -1312,7 +1235,8 @@ function DesktopSidebar({
           ) : (
             <TitlebarDragRegion />
           )}
-          {clusterRoute || databaseRoute ? null : (
+          {isClickUp ? <ClickUpSidebarHeader /> : null}
+          {clusterRoute || databaseRoute || isClickUp ? null : (
             <View style={sidebarHeaderGroupStyle}>
               <SidebarNewWorkspaceHeaderRow
                 label={labels.newWorkspace}
@@ -1449,6 +1373,7 @@ function DesktopSidebar({
 
 function WorkspacesSectionHeader() {
   const { theme } = useUnistyles();
+  const isClickUp = useIsClickUpTheme();
   const setCommandCenterOpen = useKeyboardShortcutsStore((state) => state.setCommandCenterOpen);
   const commandCenterKeys = useShortcutKeys("toggle-command-center");
   const handleSearchPress = useCallback(() => setCommandCenterOpen(true), [setCommandCenterOpen]);
@@ -1462,7 +1387,7 @@ function WorkspacesSectionHeader() {
 
   return (
     <View style={styles.workspacesSectionHeader}>
-      <Text style={styles.workspacesSectionTitle}>Workspaces</Text>
+      <Text style={styles.workspacesSectionTitle}>{isClickUp ? "Projects" : "Workspaces"}</Text>
       <View style={styles.workspacesSectionActions}>
         <Tooltip delayDuration={300}>
           <TooltipTrigger asChild>
@@ -1614,6 +1539,9 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
     gap: theme.spacing[2],
     flexShrink: 0,
+  },
+  footerIconRowHidden: {
+    display: "none",
   },
   footerAddProjectButton: {
     minWidth: 0,

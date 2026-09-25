@@ -1,3 +1,4 @@
+import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
 import { useCallback, useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { View, type StyleProp, type ViewStyle } from "react-native";
@@ -139,14 +140,23 @@ export function WindowSidebarMenuToggle({ style, ...props }: SidebarMenuTogglePr
 }
 
 export function MenuHeader({ title, rightContent, borderless }: MenuHeaderProps) {
+  // ClickUp's iOS screens center the title between the menu button and the actions.
+  const isClickUp = useIsClickUpTheme();
+  const isMobile = useIsCompactFormFactor();
+  const centerTitle = isClickUp && isMobile && Boolean(title);
+  const centerNode = useMemo(
+    () => (centerTitle ? <ScreenTitle>{title}</ScreenTitle> : undefined),
+    [centerTitle, title],
+  );
   return (
     <ScreenHeader
       left={
         <>
           <SidebarMenuToggle />
-          {title && <ScreenTitle>{title}</ScreenTitle>}
+          {title && !centerTitle ? <ScreenTitle>{title}</ScreenTitle> : null}
         </>
       }
+      center={centerNode}
       right={rightContent}
       leftStyle={styles.left}
       borderless={borderless}
