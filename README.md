@@ -98,6 +98,33 @@ with a few deliberate boundaries:
 
 ## ✨ New in this release
 
+### SimFleet — agents drive a fleet of iOS simulators (v0.9.40)
+
+<p align="center">
+  <img src="docs/media/simfleet-agent-youtube.jpg" alt="SimFleet — the Simulator agent chat drove all 7 iOS simulators (iPhone SE, 13 mini, 15 Pro, iPad, iPad Air) to YouTube and searched “baby shark”" width="100%" />
+</p>
+
+- **One screen for every iOS simulator on the host.** Live device mockups built from Apple's
+  real dimensions (Touch‑ID phones and iPads with their home button, Face‑ID devices with
+  their true corner radius), headless boot, and a resizable detail panel with a live,
+  tappable **Screen** and a streaming **Logs** tab.
+- **Chat with an agent that drives them.** A **Simulator agent** dock sits right on the
+  screen: ask it in plain words and it boots, taps, types, opens apps and URLs across the
+  whole fleet through the `sim_*` tools. In the demo above one message had it boot the
+  stopped devices and search YouTube for “baby shark” on all seven.
+- **Add simulators from the app or from chat.** Pick any device type × installed iOS runtime,
+  choose a quantity, create and boot, or let the agent do it (`sim_create`).
+- **Works on phones too.** The detail view slides in from the right and “New simulator” is a
+  scrollable bottom sheet.
+- **Fixes:** the live view no longer drops the connection (`Transport closed (code 1006)`)
+  because frames stream as right‑sized JPEG instead of multi‑MB PNG. Quitting Simulator.app
+  no longer shuts down the simulators SimFleet runs. Plugins calling `addSettingsScreen` now
+  install.
+
+<p align="center">
+  <img src="docs/media/simfleet-agent-report.jpg" alt="The Simulator agent's report — every device on the “baby shark” results page" width="380" />
+</p>
+
 ### Docker for the team, DB registration & a live architecture diagram (v0.9.39)
 
 - **Docker, end to end.** Team agents stand up and manage their own containers with `docker_*`
@@ -116,58 +143,10 @@ with a few deliberate boundaries:
   hooks / CDP interception) for live‑monitoring tasks instead of re‑snapshotting on a loop.
 - **Fix:** plugins that call `defineSettings` now load and enable (the SDK exports it again).
 
-### A stronger browser agent + fixes (v0.9.38)
-
-- **Sees & clicks inside web components and iframes** — the page snapshot pierces open shadow
-  DOM and recurses into same-origin iframes, so custom-element internals and embedded frames
-  are visible and clickable (hit-test + click coordinates follow through both).
-- **Scrolls on its own** — snapshots report scroll position and tell the agent to scroll for
-  more content below the fold before giving up, so you don't have to prompt it to keep looking.
-- **Automated tabs stay full-speed off screen** (focus emulation + no background throttling).
-- **Fixes:** marketplace install of Paseo plugins that import `@getpaseo/plugin/client/*`;
-  switching agent tabs no longer re-sends a queued message; Team-mode forum post count is
-  accurate, peers (not just the lead) reply and banter again, and a follow-up in a finished
-  thread reopens and assigns a coder instead of leaving a task unassigned in review.
-
-### Plugin Marketplace + a Paseo 0.9.0/0.9.1 port (v0.9.37)
-
-- **Plugin & Theme Marketplace.** Browse **paseo.cafe** from the left sidebar — 106 community
-  plugins across 18 categories with search, filters, sort, an overview dashboard, a themes
-  gallery, and a detail sheet (screenshots, Markdown description, health, requirements). A
-  **Browse / Installed** tab pair shows what you already have; Browse loads more incrementally.
-- **Install any Paseo plugin, auto‑rebranded.** Installing clones the plugin's Git repo (monorepo
-  subdirectory URLs included) and rewrites the staging copy so it runs on JAgentDesk — manifest,
-  version gate, the `@getpaseo/@paseo/plugin` SDK scope, and the `index.client.*` entry are all
-  mapped automatically. Nothing touches the author's repo.
-- **Chat Find & Terminal Find.** Cmd/Ctrl+F searches the whole chat timeline (highlight +
-  next/previous with an "N of M" count, opens from the composer too) and the terminal scrollback.
-- **Pending attachments** show while uploading, with responsive chunked uploads.
-- **Claude Opus 5.5** (1M context, always‑on thinking) and **faster voice replies**.
-- **Codex "Import session"** now reaches every conversation instead of the newest 100.
-- **Team‑mode fixes** — no more duplicate agents/threads, a scrollable mobile task‑detail
-  slide‑in, human‑aware team chat with posting reviewers, Enter‑to‑send, and tidy code blocks.
-
-### Team mode comes alive (v0.9.36)
-
-- **Team chat — the "chém gió" rooms.** A new **CHAT** tab where the team hangs out while it
-  works: a Telegram‑style banter channel. Agents drop in organically (jokes, coffee runs,
-  roasting each other's variable names), reply/quote each other, react with emoji, send
-  stickers, and even open side rooms like `#random`. You can join too — type, react, sticker.
-- **A living virtual office.** The **OFFICE** tab is now a shaded, characterful room: seated
-  agents in office chairs with modelled faces, blinking eyes and a laptop glow, typing while
-  they work, sipping coffee and stretching when idle — each one's pose reflects what it's
-  really doing, on a smooth 30fps clock.
-- **App‑wide notifications.** Toasts surface team activity anywhere in the app — a new post
-  (who, in which thread), a shipped task, a wrapped‑up topic.
-- **A thread that follows along.** New posts auto‑advance the thread to the newest page with a
-  smooth slide, so you never miss the latest without scrolling.
-- **Branding fix.** The status favicon in the browser tab (and the shared‑session guest page)
-  is now the JAgentDesk mark instead of the upstream Paseo one.
-
 ### Older releases
 
 See **[CHANGELOG.md](CHANGELOG.md)** and the [releases page](https://github.com/knoobdev/jagentdesk/releases)
-for v0.9.35 and earlier.
+for v0.9.38 and earlier.
 
 ### Databases — a full database IDE (desktop **and** mobile)
 
