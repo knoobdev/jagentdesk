@@ -101,7 +101,7 @@ with a few deliberate boundaries:
 ### SimFleet — agents drive a fleet of iOS simulators (v0.9.40)
 
 <p align="center">
-  <img src="docs/media/simfleet-agent-youtube.jpg" alt="SimFleet — the Simulator agent chat drove all 7 iOS simulators (iPhone SE, 13 mini, 15 Pro, iPad, iPad Air) to YouTube and searched “baby shark”" width="100%" />
+  <img src="docs/media/simfleet-agent-youtube.jpg" alt="SimFleet — seven iOS simulators on YouTube “baby shark”, the iPhone 15 Pro open in the live detail panel, and the Simulator agent chat reporting the result for every device" width="100%" />
 </p>
 
 - **One screen for every iOS simulator on the host.** Live device mockups built from Apple's
@@ -120,10 +120,6 @@ with a few deliberate boundaries:
   because frames stream as right‑sized JPEG instead of multi‑MB PNG. Quitting Simulator.app
   no longer shuts down the simulators SimFleet runs. Plugins calling `addSettingsScreen` now
   install.
-
-<p align="center">
-  <img src="docs/media/simfleet-agent-report.jpg" alt="The Simulator agent's report — every device on the “baby shark” results page" width="380" />
-</p>
 
 ### Docker for the team, DB registration & a live architecture diagram (v0.9.39)
 
