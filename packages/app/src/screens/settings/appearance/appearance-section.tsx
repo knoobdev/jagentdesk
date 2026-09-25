@@ -805,7 +805,8 @@ const styles = StyleSheet.create((theme) => ({
   fontFamilyInput: {
     flexGrow: 1,
     flexShrink: 1,
-    maxWidth: 280,
+    // On phones the title and hint keep at least half the row.
+    maxWidth: { xs: "45%", md: 280 },
     minHeight: 36,
     paddingVertical: theme.spacing[2],
     paddingHorizontal: theme.spacing[3],

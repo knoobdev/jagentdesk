@@ -1279,7 +1279,8 @@ function WorkspaceHeaderTitleBar({
   onViewScriptTerminal,
   onOpenUrlInBrowserTab,
 }: WorkspaceHeaderTitleBarProps) {
-  const isClickUp = useIsClickUpTheme();
+  // The breadcrumb needs desktop width; phones keep the single-line title.
+  const isClickUp = useIsClickUpTheme() && !isMobile;
   return (
     <View style={styles.headerTitleContainer}>
       {isLoading ? (

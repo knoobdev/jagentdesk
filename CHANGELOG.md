@@ -1,9 +1,46 @@
 # Changelog
 
 All notable changes to JAgentDesk are documented here. JAgentDesk versions its
-own release line (now `0.9.41`); the many `v0.1.x`–`v1.0.x` tags in history are
+own release line (now `0.9.42`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
+
+## v0.9.42 — 2026-09-26
+
+The phone layout, cleaned up: nothing overlaps any more, every page has a back button, and
+every page opens with the same header.
+
+### Changed
+
+- **One page header everywhere.** History, Schedules, Shared sessions, Team forum, Skills,
+  Marketplace, Docker, Simulators, Databases, Clusters, Usage & Cost and Forge share the same
+  header: the section's icon and a bold title on one row, same-size buttons on the right, and a
+  one-line description of the page below. Titles sit at the same height on every page and are
+  left-aligned (no longer centered on phones).
+- **Primary actions live in the header.** “New schedule”, “Add connection” and “Create skill”
+  are the same violet button in the header; Docker's “Live” indicator and the Simulators device
+  count sit beside the title's actions.
+- The Marketplace no longer shows its title twice, and the Team forum's intro became the
+  page's description.
+
+### Fixed
+
+- **Back button on every page on phones.** Pages reached from the tab bar or the drawer
+  (History, Schedules, Shared sessions, Team forum, Skills, Marketplace, Simulators, Databases,
+  Clusters, Usage, Forge, Docker) lead with a back arrow; it goes back, or Home when the page
+  was opened directly.
+- **Overlapping UI on phones.**
+  - The drawer's “Workspaces” title and “+ New” button no longer sit under the drawer's close
+    button.
+  - A workspace on a phone shows the compact header instead of the desktop breadcrumb, which
+    ran into the header buttons.
+  - Docker's container detail keeps a real tab row (Logs / Stats / Inspect / Files / Exec) on
+    phones instead of labels drawn over each other; table column headers use sentence case in
+    the ClickUp theme.
+  - The Usage & Cost header wraps its buttons instead of pushing them off screen.
+  - The Orchestration panel drops its text label on phones, leaving the icon (with an
+    accessibility label).
+  - The font family field in Settings › Appearance fits the row on phones.
 
 ## v0.9.41 — 2026-09-25
 

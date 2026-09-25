@@ -1,3 +1,4 @@
+import { PageHeader } from "@/components/headers/page-header";
 import {
   useCallback,
   useEffect,
@@ -8245,12 +8246,15 @@ export function ForgeHubScreen() {
             stacked — stacking squeezes the content to zero height. */}
         {!isCompact || !compactDetail ? (
           <View style={[styles.sidebar, isCompact && styles.sidebarStacked]}>
-            {/* No big "Forge Hub" header — the titlebar already labels the screen.
-              The sidebar starts with the Jump-to-repo field. */}
+            {/* Desktop: no big "Forge Hub" header — the titlebar already labels the screen.
+              Phones have no titlebar, so they get the same back + title header as Docker. */}
+            {isCompact ? (
+              <PageHeader icon={GitPullRequest} title="Forge" description={FORGE_DESCRIPTION} />
+            ) : null}
             <View
               style={[
                 styles.sidebarField,
-                isCompact ? { marginTop: insets.top + 12 } : { marginTop: theme.spacing[3] },
+                isCompact ? { marginTop: 0 } : { marginTop: theme.spacing[3] },
               ]}
             >
               <Search size={14} color={theme.colors.foregroundMuted} />
@@ -8396,6 +8400,9 @@ function providerPillTextStyle(isClickUp: boolean, active: boolean) {
   if (isClickUp) return active ? clickUpChipStyles.textActive : clickUpChipStyles.text;
   return [styles.providerPillText, active && styles.providerPillActiveText];
 }
+
+const FORGE_DESCRIPTION =
+  "Pull requests, issues, pipelines and code across GitHub, GitLab and Bitbucket.";
 
 const styles = StyleSheet.create((theme) => ({
   container: {

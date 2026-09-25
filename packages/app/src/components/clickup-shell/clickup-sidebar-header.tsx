@@ -20,7 +20,14 @@ function createButtonStyle({
  * ClickUp's sidebar header ("Home" + violet "Create" in ClickUp): the section title and the
  * primary create action, here a new workspace. The nav list itself lives on the rail.
  */
-export function ClickUpSidebarHeader({ onBeforeNavigate }: { onBeforeNavigate?: () => void }) {
+export function ClickUpSidebarHeader({
+  onBeforeNavigate,
+  reserveCloseButton = false,
+}: {
+  onBeforeNavigate?: () => void;
+  /** The phone drawer pins its close button top-right; keep the New button clear of it. */
+  reserveCloseButton?: boolean;
+}) {
   const { t } = useTranslation();
   const handleNewWorkspace = useNewWorkspaceNavigate(onBeforeNavigate);
   const renderCreate = useCallback(
@@ -33,7 +40,7 @@ export function ClickUpSidebarHeader({ onBeforeNavigate }: { onBeforeNavigate?: 
     [t],
   );
   return (
-    <View style={styles.header}>
+    <View style={reserveCloseButton ? styles.headerBesideClose : styles.header}>
       <Text style={styles.title} numberOfLines={1}>
         {t("clickupShell.workspaces")}
       </Text>
@@ -58,6 +65,17 @@ const styles = StyleSheet.create((theme: Theme) => ({
     gap: theme.spacing[2],
     paddingLeft: theme.spacing[4],
     paddingRight: theme.spacing[3],
+    paddingTop: theme.spacing[3],
+    paddingBottom: theme.spacing[2],
+  },
+  headerBesideClose: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: theme.spacing[2],
+    paddingLeft: theme.spacing[4],
+    // Close button: 32px wide + 16px right margin, plus an 8px gap.
+    paddingRight: 56,
     paddingTop: theme.spacing[3],
     paddingBottom: theme.spacing[2],
   },

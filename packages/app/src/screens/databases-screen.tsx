@@ -1,16 +1,11 @@
+import type { ComponentProps } from "react";
+import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/headers/page-header";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
-import {
-  ArrowLeft,
-  Database as DatabaseIcon,
-  CircleAlert,
-  Plus,
-  Trash2,
-} from "lucide-react-native";
+import { Database as DatabaseIcon, CircleAlert, Plus, Trash2 } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { useIsCompactFormFactor } from "@/constants/layout";
 import { useHostRuntimeClient, useHosts } from "@/runtime/host-runtime";
 import { Skeleton, useSkeletonPulse } from "@/components/ui/skeleton";
 import { DatabaseStatusDot } from "@/components/database-dot";
@@ -216,18 +211,53 @@ function EngineChip({
   );
 }
 
+/** Host + port on one row (split out to keep the form's JSX depth within the lint limit). */
+function HostPortFields({
+  host,
+  port,
+  onChange,
+}: {
+  host: string;
+  port: string;
+  onChange: ComponentProps<typeof Field>["onChange"];
+}) {
+  return (
+    <View style={styles.fieldRow}>
+      <View style={styles.fieldGrow}>
+        <Field
+          label="Host"
+          fieldKey="host"
+          value={host}
+          onChange={onChange}
+          placeholder="127.0.0.1"
+        />
+      </View>
+      <View style={styles.fieldPort}>
+        <Field
+          label="Port"
+          fieldKey="port"
+          value={port}
+          onChange={onChange}
+          keyboardType="numeric"
+        />
+      </View>
+    </View>
+  );
+}
+
+const DATABASES_DESCRIPTION =
+  "Connect a database, then browse its schema, run SQL and chat with a schema-grounded agent. Credentials stay encrypted on the daemon.";
+
 export function DatabasesScreen() {
   const hosts = useHosts();
   const serverId = hosts[0]?.serverId ?? "";
   const client = useHostRuntimeClient(serverId);
   const clearLastDatabase = useDatabaseNavStore((s) => s.clearLastDatabase);
   const router = useRouter();
-  const insets = useSafeAreaInsets();
-  const isCompact = useIsCompactFormFactor();
 
   const contentContainerStyle = useMemo(
-    () => [styles.contentContainer, isCompact ? { paddingTop: insets.top } : null],
-    [isCompact, insets.top],
+    () => [styles.contentContainer, styles.contentBelowHeader],
+    [],
   );
 
   const [databases, setDatabases] = useState<DatabaseInfo[]>([]);
@@ -361,227 +391,194 @@ export function DatabasesScreen() {
     [client, refresh, clearLastDatabase],
   );
 
-  // This screen is reached via push (from the sidebar); a deep link can land here
-  // first with no back target, so only show the back affordance when one exists.
-  const showBack = isCompact && router.canGoBack();
-  const handleBack = useCallback(() => router.back(), [router]);
   const toggleAdding = useCallback(() => setAdding((v) => !v), []);
   const handleSaveConnect = useCallback(() => void handleSave(true), [handleSave]);
   const handleSaveOnly = useCallback(() => void handleSave(false), [handleSave]);
 
+  const headerActions = useMemo(
+    () => (
+      <Button
+        size="sm"
+        variant="default"
+        leftIcon={Plus}
+        onPress={toggleAdding}
+        testID="db-add-connection"
+      >
+        Add connection
+      </Button>
+    ),
+    [toggleAdding],
+  );
+
   if (loading) {
     return (
-      <ScrollView style={styles.container} contentContainerStyle={contentContainerStyle}>
-        <View style={styles.headerRow}>
-          <ThemedDatabase size={20} uniProps={foregroundColorMapping} />
-          <Text style={styles.header}>Databases</Text>
-        </View>
-        <DatabasesSkeleton />
-      </ScrollView>
+      <>
+        <PageHeader icon={DatabaseIcon} title="Databases" description={DATABASES_DESCRIPTION} />
+        <ScrollView style={styles.container} contentContainerStyle={contentContainerStyle}>
+          <DatabasesSkeleton />
+        </ScrollView>
+      </>
     );
   }
 
   const isSqlite = draft.engine === "sqlite";
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={contentContainerStyle}>
-      <View style={styles.headerRow}>
-        {showBack ? (
-          <Pressable
-            style={styles.backBtn}
-            onPress={handleBack}
-            accessibilityRole="button"
-            accessibilityLabel="Back"
-            testID="db-list-back"
-          >
-            <ThemedArrowLeft size={20} uniProps={mutedColorMapping} />
-          </Pressable>
+    <>
+      <PageHeader
+        icon={DatabaseIcon}
+        title="Databases"
+        description={DATABASES_DESCRIPTION}
+        actions={headerActions}
+      />
+      <ScrollView style={styles.container} contentContainerStyle={contentContainerStyle}>
+        {error ? (
+          <View style={styles.errorBanner}>
+            <ThemedCircleAlert size={16} uniProps={redColorMapping} />
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
         ) : null}
-        <ThemedDatabase size={20} uniProps={foregroundColorMapping} />
-        <Text style={styles.header}>Databases</Text>
-        <View style={styles.headerSpacer} />
-        <Pressable
-          style={[styles.btn, styles.btnPrimary]}
-          onPress={toggleAdding}
-          testID="db-add-connection"
-        >
-          <ThemedPlus size={14} uniProps={accentForegroundColorMapping} />
-          <Text style={styles.btnPrimaryText}>Add connection</Text>
-        </Pressable>
-      </View>
-      <Text style={styles.headerHint}>
-        Connect a database, then browse its schema, run SQL, and chat with a schema-grounded agent.
-        Credentials are encrypted on the daemon and never leave it.
-      </Text>
 
-      {error ? (
-        <View style={styles.errorBanner}>
-          <ThemedCircleAlert size={16} uniProps={redColorMapping} />
-          <Text style={styles.errorText}>{error}</Text>
-        </View>
-      ) : null}
+        {adding ? (
+          <View style={styles.formCard}>
+            <Text style={styles.formTitle}>New connection</Text>
+            <View style={styles.engineRow}>
+              {ENGINES.map((e) => (
+                <EngineChip
+                  key={e.key}
+                  engine={e.key}
+                  label={e.label}
+                  active={draft.engine === e.key}
+                  onSelect={setEngine}
+                />
+              ))}
+            </View>
 
-      {adding ? (
-        <View style={styles.formCard}>
-          <Text style={styles.formTitle}>New connection</Text>
-          <View style={styles.engineRow}>
-            {ENGINES.map((e) => (
-              <EngineChip
-                key={e.key}
-                engine={e.key}
-                label={e.label}
-                active={draft.engine === e.key}
-                onSelect={setEngine}
+            <Field
+              label="Display name (optional)"
+              fieldKey="displayName"
+              value={draft.displayName}
+              onChange={updateField}
+              placeholder="My database"
+            />
+
+            {isSqlite ? (
+              <Field
+                label="SQLite file path"
+                fieldKey="file"
+                value={draft.file}
+                onChange={updateField}
+                placeholder="/path/to/db.sqlite"
+              />
+            ) : (
+              <>
+                <View style={styles.toggleRow}>
+                  <Pressable
+                    style={[styles.toggleChip, !draft.useDsn && styles.toggleChipActive]}
+                    onPress={useFieldsMode}
+                  >
+                    <Text style={[styles.toggleText, !draft.useDsn && styles.toggleTextActive]}>
+                      Fields
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.toggleChip, draft.useDsn && styles.toggleChipActive]}
+                    onPress={useDsnMode}
+                  >
+                    <Text style={[styles.toggleText, draft.useDsn && styles.toggleTextActive]}>
+                      Connection string
+                    </Text>
+                  </Pressable>
+                </View>
+                {draft.useDsn ? (
+                  <Field
+                    label="Connection string (DSN)"
+                    fieldKey="dsn"
+                    value={draft.dsn}
+                    onChange={updateField}
+                    placeholder={
+                      draft.engine === "postgres"
+                        ? "postgres://user:pass@host:5432/db"
+                        : "mysql://user:pass@host:3306/db"
+                    }
+                  />
+                ) : (
+                  <>
+                    <HostPortFields host={draft.host} port={draft.port} onChange={updateField} />
+                    <Field
+                      label="Database"
+                      fieldKey="database"
+                      value={draft.database}
+                      onChange={updateField}
+                      placeholder="postgres"
+                    />
+                    <Field
+                      label="User"
+                      fieldKey="user"
+                      value={draft.user}
+                      onChange={updateField}
+                      placeholder="postgres"
+                    />
+                    <Field
+                      label="Password"
+                      fieldKey="password"
+                      value={draft.password}
+                      onChange={updateField}
+                      secureTextEntry
+                    />
+                  </>
+                )}
+              </>
+            )}
+
+            <View style={styles.formActions}>
+              <Pressable
+                style={[styles.btn, styles.btnPrimary, saving && styles.btnDisabled]}
+                onPress={handleSaveConnect}
+                disabled={saving}
+                testID="db-save-connect"
+              >
+                <Text style={styles.btnPrimaryText}>{saving ? "Saving…" : "Save & connect"}</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.btn, styles.btnGhost, saving && styles.btnDisabled]}
+                onPress={handleSaveOnly}
+                disabled={saving}
+              >
+                <Text style={styles.btnGhostText}>Save only</Text>
+              </Pressable>
+              <Pressable style={[styles.btn, styles.btnGhost]} onPress={toggleAdding}>
+                <Text style={styles.btnGhostText}>Cancel</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
+
+        {databases.length === 0 && !adding ? (
+          <Text style={styles.emptyText}>
+            No connections yet. Add one to start browsing schema and running SQL.
+          </Text>
+        ) : (
+          <View style={styles.sectionCard}>
+            {databases.map((db) => (
+              <ConnectionRow
+                key={db.id}
+                db={db}
+                busy={busyId === db.id}
+                onConnect={handleConnect}
+                onOpen={handleOpen}
+                onDisconnect={handleDisconnect}
+                onRemove={handleRemove}
               />
             ))}
           </View>
-
-          <Field
-            label="Display name (optional)"
-            fieldKey="displayName"
-            value={draft.displayName}
-            onChange={updateField}
-            placeholder="My database"
-          />
-
-          {isSqlite ? (
-            <Field
-              label="SQLite file path"
-              fieldKey="file"
-              value={draft.file}
-              onChange={updateField}
-              placeholder="/path/to/db.sqlite"
-            />
-          ) : (
-            <>
-              <View style={styles.toggleRow}>
-                <Pressable
-                  style={[styles.toggleChip, !draft.useDsn && styles.toggleChipActive]}
-                  onPress={useFieldsMode}
-                >
-                  <Text style={[styles.toggleText, !draft.useDsn && styles.toggleTextActive]}>
-                    Fields
-                  </Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.toggleChip, draft.useDsn && styles.toggleChipActive]}
-                  onPress={useDsnMode}
-                >
-                  <Text style={[styles.toggleText, draft.useDsn && styles.toggleTextActive]}>
-                    Connection string
-                  </Text>
-                </Pressable>
-              </View>
-              {draft.useDsn ? (
-                <Field
-                  label="Connection string (DSN)"
-                  fieldKey="dsn"
-                  value={draft.dsn}
-                  onChange={updateField}
-                  placeholder={
-                    draft.engine === "postgres"
-                      ? "postgres://user:pass@host:5432/db"
-                      : "mysql://user:pass@host:3306/db"
-                  }
-                />
-              ) : (
-                <>
-                  <View style={styles.fieldRow}>
-                    <View style={styles.fieldGrow}>
-                      <Field
-                        label="Host"
-                        fieldKey="host"
-                        value={draft.host}
-                        onChange={updateField}
-                        placeholder="127.0.0.1"
-                      />
-                    </View>
-                    <View style={styles.fieldPort}>
-                      <Field
-                        label="Port"
-                        fieldKey="port"
-                        value={draft.port}
-                        onChange={updateField}
-                        keyboardType="numeric"
-                      />
-                    </View>
-                  </View>
-                  <Field
-                    label="Database"
-                    fieldKey="database"
-                    value={draft.database}
-                    onChange={updateField}
-                    placeholder="postgres"
-                  />
-                  <Field
-                    label="User"
-                    fieldKey="user"
-                    value={draft.user}
-                    onChange={updateField}
-                    placeholder="postgres"
-                  />
-                  <Field
-                    label="Password"
-                    fieldKey="password"
-                    value={draft.password}
-                    onChange={updateField}
-                    secureTextEntry
-                  />
-                </>
-              )}
-            </>
-          )}
-
-          <View style={styles.formActions}>
-            <Pressable
-              style={[styles.btn, styles.btnPrimary, saving && styles.btnDisabled]}
-              onPress={handleSaveConnect}
-              disabled={saving}
-              testID="db-save-connect"
-            >
-              <Text style={styles.btnPrimaryText}>{saving ? "Saving…" : "Save & connect"}</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.btn, styles.btnGhost, saving && styles.btnDisabled]}
-              onPress={handleSaveOnly}
-              disabled={saving}
-            >
-              <Text style={styles.btnGhostText}>Save only</Text>
-            </Pressable>
-            <Pressable style={[styles.btn, styles.btnGhost]} onPress={toggleAdding}>
-              <Text style={styles.btnGhostText}>Cancel</Text>
-            </Pressable>
-          </View>
-        </View>
-      ) : null}
-
-      {databases.length === 0 && !adding ? (
-        <Text style={styles.emptyText}>
-          No connections yet. Add one to start browsing schema and running SQL.
-        </Text>
-      ) : (
-        <View style={styles.sectionCard}>
-          {databases.map((db) => (
-            <ConnectionRow
-              key={db.id}
-              db={db}
-              busy={busyId === db.id}
-              onConnect={handleConnect}
-              onOpen={handleOpen}
-              onDisconnect={handleDisconnect}
-              onRemove={handleRemove}
-            />
-          ))}
-        </View>
-      )}
-    </ScrollView>
+        )}
+      </ScrollView>
+    </>
   );
 }
 
-const ThemedArrowLeft = withUnistyles(ArrowLeft);
-const ThemedDatabase = withUnistyles(DatabaseIcon);
 const ThemedCircleAlert = withUnistyles(CircleAlert);
-const ThemedPlus = withUnistyles(Plus);
 const ThemedTrash = withUnistyles(Trash2);
 const ThemedTextInput = withUnistyles(TextInput);
 
@@ -608,9 +605,7 @@ function DatabasesSkeleton() {
   );
 }
 
-const foregroundColorMapping = (theme: Theme) => ({ color: theme.colors.foreground });
 const mutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
-const accentForegroundColorMapping = (theme: Theme) => ({ color: theme.colors.accentForeground });
 const redColorMapping = (theme: Theme) => ({ color: theme.colors.palette.red[500] });
 const placeholderColorMapping = (theme: Theme) => ({
   placeholderTextColor: theme.colors.foregroundExtraMuted,
@@ -627,6 +622,7 @@ const styles = StyleSheet.create((theme) => ({
     flexGrow: 1,
     gap: theme.spacing[3],
   },
+  contentBelowHeader: { paddingTop: 0 },
   centerContainer: {
     flex: 1,
     alignItems: "center",

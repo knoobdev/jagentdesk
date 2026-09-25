@@ -927,7 +927,9 @@ function MobileSidebar({
     >
       <View style={styles.sidebarContent} pointerEvents="auto">
         <WindowChromeSafeArea placement="below" />
-        {isClickUp ? <ClickUpSidebarHeader onBeforeNavigate={closeSidebar} /> : null}
+        {isClickUp ? (
+          <ClickUpSidebarHeader onBeforeNavigate={closeSidebar} reserveCloseButton />
+        ) : null}
         {clusterRoute || databaseRoute ? null : (
           <View style={styles.sidebarHeaderGroup}>
             {isClickUp ? null : (

@@ -11,12 +11,12 @@ import {
   type TextStyle,
   type ViewStyle,
 } from "react-native";
-import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StyleSheet } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
 import { useMutation } from "@tanstack/react-query";
-import { BackHeader } from "@/components/headers/back-header";
+import { PageHeader } from "@/components/headers/page-header";
+import { Store } from "lucide-react-native";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { useFetchQuery } from "@/data/query";
@@ -146,7 +146,6 @@ function buildInstalledLookup(
 export function MarketplaceScreen() {
   const isClickUp = useIsClickUpTheme();
   const { t } = useTranslation();
-  const router = useRouter();
   const insets = useSafeAreaInsets();
   const isCompact = useIsCompactFormFactor();
   const serverId = useHostRouteServerId() ?? "";
@@ -304,7 +303,6 @@ export function MarketplaceScreen() {
   );
   const handleOpenDetail = useCallback((plugin: MarketplacePlugin) => setDetailPlugin(plugin), []);
   const handleCloseDetail = useCallback(() => setDetailPlugin(null), []);
-  const handleBack = useCallback(() => router.back(), [router]);
   const handleToggleCategory = useCallback(
     (value: string) => setCategories((prev) => toggleValue(prev, value)),
     [],
@@ -380,10 +378,6 @@ export function MarketplaceScreen() {
   const listHeader = useMemo(
     () => (
       <View style={styles.header}>
-        <View style={styles.titleBlock}>
-          <Text style={styles.title}>{t("marketplace.title")}</Text>
-          <Text style={styles.subtitle}>{t("marketplace.subtitle")}</Text>
-        </View>
         <View style={isClickUp ? clickUpTabStyles.row : styles.tabRow}>
           <MarketplaceTabButton
             label={t("marketplace.tabs.browse")}
@@ -498,7 +492,11 @@ export function MarketplaceScreen() {
 
   return (
     <View style={styles.root}>
-      <BackHeader title={t("marketplace.title")} onBack={handleBack} />
+      <PageHeader
+        icon={Store}
+        title={t("marketplace.title")}
+        description={t("marketplace.subtitle")}
+      />
       <FlatList
         key={`marketplace-${isThemesTab ? "themes" : "plugins"}-${numColumns}`}
         data={listData}
@@ -528,11 +526,10 @@ export function MarketplaceScreen() {
 
 const styles = StyleSheet.create((theme: Theme) => ({
   root: { flex: 1, backgroundColor: theme.colors.surface0 },
-  listContent: { padding: theme.spacing[4], gap: theme.spacing[3] },
+  listContent: { padding: theme.spacing[4], paddingTop: 0, gap: theme.spacing[3] },
   columnWrap: { gap: theme.spacing[3] },
   cell: { flex: 1, marginBottom: theme.spacing[3] },
   header: { gap: theme.spacing[3], marginBottom: theme.spacing[1] },
-  titleBlock: { gap: theme.spacing[1] },
   tabRow: {
     flexDirection: "row",
     gap: theme.spacing[1],
@@ -565,12 +562,6 @@ const styles = StyleSheet.create((theme: Theme) => ({
     justifyContent: "center",
     paddingTop: theme.spacing[4],
   },
-  title: {
-    fontSize: theme.fontSize.xl,
-    fontWeight: theme.fontWeight.bold,
-    color: theme.colors.foreground,
-  },
-  subtitle: { fontSize: theme.fontSize.sm, color: theme.colors.foregroundMuted },
   sectionTitle: {
     fontSize: theme.fontSize.base,
     fontWeight: theme.fontWeight.semibold,

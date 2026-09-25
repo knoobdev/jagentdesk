@@ -98,6 +98,15 @@ with a few deliberate boundaries:
 
 ## ✨ New in this release
 
+### Mobile clean-up: one page header, back buttons, no overlaps (v0.9.42)
+
+- **Every page opens the same way.** Icon + bold title, same-size buttons on the right and a
+  one-line description, at the same height on every page — History, Schedules, Shared, Team,
+  Skills, Marketplace, Docker, Simulators, Databases, Clusters, Usage and Forge.
+- **Back button on every page on phones**, and titles are left-aligned instead of centered.
+- **Nothing overlaps on phones** — the drawer header, the workspace header, Docker's
+  container tabs, the Usage header and the Appearance settings all fit.
+
 ### ClickUp theme & shell, Paseo's split plugins, zoomable images (v0.9.41)
 
 <p align="center">

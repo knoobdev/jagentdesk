@@ -1,7 +1,18 @@
-import { clickUpTabStyles } from "@/components/clickup-shell/list-styles";
+import { PageHeader } from "@/components/headers/page-header";
+import { clickUpListStyles, clickUpTabStyles } from "@/components/clickup-shell/list-styles";
 import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Dimensions, Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import {
+  Dimensions,
+  Modal,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+  type StyleProp,
+  type TextStyle,
+} from "react-native";
 import {
   ArrowDownToLine,
   ArrowLeft,
@@ -35,7 +46,6 @@ import type { ComponentType } from "react";
 import * as Clipboard from "expo-clipboard";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
 import { useWorkspaceDirectory, useWorkspaceKeys } from "@/stores/session-store-hooks";
 import { getDesktopHost } from "@/desktop/host";
 import { useIsCompactFormFactor } from "@/constants/layout";
@@ -139,7 +149,6 @@ const ThemedArrowLeft = withUnistyles(ArrowLeft);
 const ThemedBoxes = withUnistyles(Boxes);
 const ThemedChevronDown = withUnistyles(ChevronDown);
 const ThemedChevronRight = withUnistyles(ChevronRight);
-const ThemedContainer = withUnistyles(ContainerIcon);
 const ThemedCircleAlert = withUnistyles(CircleAlert);
 const ThemedCopy = withUnistyles(Copy);
 const ThemedDownload = withUnistyles(Download);
@@ -284,10 +293,10 @@ function TableHead() {
   const compact = useIsCompactFormFactor();
   return (
     <View style={styles.thead}>
-      <Text style={[styles.th, styles.colNameHead]}>NAME</Text>
-      {compact ? null : <Text style={[styles.th, styles.colImage]}>IMAGE</Text>}
-      <Text style={[styles.th, styles.colStatus]}>STATUS</Text>
-      {compact ? null : <Text style={[styles.th, styles.colPorts]}>PORTS</Text>}
+      <ColumnHead style={[styles.th, styles.colNameHead]} label="Name" />
+      {compact ? null : <ColumnHead style={[styles.th, styles.colImage]} label="Image" />}
+      <ColumnHead style={[styles.th, styles.colStatus]} label="Status" />
+      {compact ? null : <ColumnHead style={[styles.th, styles.colPorts]} label="Ports" />}
       <View style={styles.colActions} />
     </View>
   );
@@ -560,9 +569,9 @@ function ImagesPanel({
       ) : (
         <View style={styles.sectionCard}>
           <View style={styles.thead}>
-            <Text style={[styles.th, styles.colNameWide]}>REPOSITORY:TAG</Text>
-            <Text style={[styles.th, styles.colStatus]}>SIZE</Text>
-            {compact ? null : <Text style={[styles.th, styles.colPorts]}>CREATED</Text>}
+            <ColumnHead style={[styles.th, styles.colNameWide]} label="Repository:tag" />
+            <ColumnHead style={[styles.th, styles.colStatus]} label="Size" />
+            {compact ? null : <ColumnHead style={[styles.th, styles.colPorts]} label="Created" />}
             <View style={styles.colActions} />
           </View>
           {images.map((img) => (
@@ -650,9 +659,9 @@ function VolumesPanel({
       ) : (
         <View style={styles.sectionCard}>
           <View style={styles.thead}>
-            <Text style={[styles.th, styles.colNameWide]}>NAME</Text>
-            <Text style={[styles.th, styles.colStatus]}>DRIVER</Text>
-            {compact ? null : <Text style={[styles.th, styles.colPorts]}>SCOPE</Text>}
+            <ColumnHead style={[styles.th, styles.colNameWide]} label="Name" />
+            <ColumnHead style={[styles.th, styles.colStatus]} label="Driver" />
+            {compact ? null : <ColumnHead style={[styles.th, styles.colPorts]} label="Scope" />}
             <View style={styles.colActions} />
           </View>
           {volumes.map((v) => (
@@ -2001,6 +2010,22 @@ function MetaChip({
   );
 }
 
+/** Table column label: ClickUp's sentence-case gray header, the classic shell's uppercase. */
+function ColumnHead({ label, style }: { label: string; style: StyleProp<TextStyle> }) {
+  const isClickUp = useIsClickUpTheme();
+  const resolvedStyle = useMemo(
+    () => (isClickUp ? [style, clickUpListStyles.columnHeader] : style),
+    [isClickUp, style],
+  );
+  return <Text style={resolvedStyle}>{isClickUp ? label : label.toUpperCase()}</Text>;
+}
+
+// ClickUp tabs are underlined text; the classic shell boxes them in a pill track.
+function detailTabRowStyle(isClickUp: boolean, isCompact: boolean) {
+  if (isClickUp) return clickUpTabStyles.row;
+  return isCompact ? styles.tabRowWrap : styles.tabRow;
+}
+
 function ContainerDetail({
   container,
   client,
@@ -2024,6 +2049,7 @@ function ContainerDetail({
   onAction: (id: string, action: DockerAction) => void;
   onBack: () => void;
 }) {
+  const isClickUp = useIsClickUpTheme();
   const [tab, setTab] = useState<DetailTab>("logs");
   const running = RUNNING_STATES.has(container.state);
   const paused = container.state === "paused";
@@ -2106,7 +2132,7 @@ function ContainerDetail({
       </ScrollView>
 
       <View style={styles.detailTabsWrap}>
-        <View style={isCompact ? styles.tabRowWrap : styles.tabRow}>
+        <View style={detailTabRowStyle(isClickUp, isCompact)}>
           <TabButton label="Logs" active={tab === "logs"} onPress={showLogs} />
           <TabButton label="Stats" active={tab === "stats"} onPress={showStats} />
           <TabButton label="Inspect" active={tab === "inspect"} onPress={showInspect} />
@@ -2147,12 +2173,23 @@ function dockerTabTextStyle(isClickUp: boolean, active: boolean) {
   return active ? styles.tabTextActive : styles.tabText;
 }
 
+function LivePill() {
+  return (
+    <View style={styles.livePill}>
+      <View style={styles.liveDot} />
+      <Text style={styles.liveText}>Live</Text>
+    </View>
+  );
+}
+
+const DOCKER_DESCRIPTION =
+  "Containers, images and volumes on this host, updated live as the team works.";
+
 export function DockerScreen() {
   const isClickUp = useIsClickUpTheme();
   const hosts = useHosts();
   const serverId = hosts[0]?.serverId ?? "";
   const client = useHostRuntimeClient(serverId);
-  const router = useRouter();
   const insets = useSafeAreaInsets();
   const isCompact = useIsCompactFormFactor();
   // A workspace on this host backs the Exec terminal (the daemon scopes terminals to a workspace).
@@ -2161,8 +2198,8 @@ export function DockerScreen() {
   const execCwd = useWorkspaceDirectory(serverId, execWorkspaceId) ?? "/";
 
   const contentContainerStyle = useMemo(
-    () => [styles.contentContainer, isCompact ? { paddingTop: insets.top } : null],
-    [isCompact, insets.top],
+    () => [styles.contentContainer, styles.contentBelowHeader],
+    [],
   );
 
   const [tab, setTab] = useState<DockerTab>("containers");
@@ -2301,8 +2338,6 @@ export function DockerScreen() {
     });
   }, []);
 
-  const showBack = isCompact && router.canGoBack();
-  const handleBack = useCallback(() => router.back(), [router]);
   const showContainers = useCallback(() => setTab("containers"), []);
   const showImages = useCallback(() => setTab("images"), []);
   const showVolumes = useCallback(() => setTab("volumes"), []);
@@ -2331,16 +2366,16 @@ export function DockerScreen() {
   }, [volumes, q]);
 
   const selected = selectedId ? containers.find((c) => c.id === selectedId) : undefined;
+  const livePill = useMemo(() => <LivePill />, []);
 
   if (loading) {
     return (
-      <ScrollView style={styles.container} contentContainerStyle={contentContainerStyle}>
-        <View style={styles.headerRow}>
-          <ThemedContainer size={20} uniProps={fg} />
-          <Text style={styles.header}>Docker</Text>
-        </View>
-        <DockerSkeleton />
-      </ScrollView>
+      <>
+        <PageHeader icon={ContainerIcon} title="Docker" description={DOCKER_DESCRIPTION} />
+        <ScrollView style={styles.container} contentContainerStyle={contentContainerStyle}>
+          <DockerSkeleton />
+        </ScrollView>
+      </>
     );
   }
 
@@ -2362,102 +2397,95 @@ export function DockerScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={contentContainerStyle}>
-      <View style={styles.headerRow}>
-        {showBack ? (
-          <Pressable style={styles.iconBtn} onPress={handleBack} accessibilityLabel="Back">
-            <ThemedArrowLeft size={20} uniProps={muted} />
-          </Pressable>
-        ) : null}
-        <ThemedContainer size={20} uniProps={fg} />
-        <Text style={styles.header}>Docker</Text>
-        <View style={styles.headerSpacer} />
-        <View style={styles.livePill}>
-          <View style={[styles.dot, styles.dotOn]} />
-          <Text style={styles.liveText}>Live</Text>
-        </View>
-      </View>
-
-      {error ? (
-        <View style={styles.errorBanner}>
-          <ThemedCircleAlert size={16} uniProps={red} />
-          <Text style={styles.errorText}>{error}</Text>
-        </View>
-      ) : null}
-
-      {!available ? (
-        <View style={styles.noticeCard}>
-          <Text style={styles.noticeTitle}>Docker not detected on this host</Text>
-          <Text style={styles.noticeBody}>
-            Install Docker and start the engine. Once it is running, the containers, images, and
-            volumes the team creates appear here and update live.
-          </Text>
-        </View>
-      ) : (
-        <>
-          <View style={styles.toolbar}>
-            <View style={isClickUp ? clickUpTabStyles.row : styles.tabRow}>
-              <TabButton
-                label={`Containers · ${containers.length}`}
-                active={tab === "containers"}
-                onPress={showContainers}
-              />
-              <TabButton
-                label={`Images · ${images.length}`}
-                active={tab === "images"}
-                onPress={showImages}
-              />
-              <TabButton
-                label={`Volumes · ${volumes.length}`}
-                active={tab === "volumes"}
-                onPress={showVolumes}
-              />
-            </View>
-            <View style={styles.searchBox}>
-              <ThemedSearch size={14} uniProps={muted} />
-              <ThemedTextInput
-                style={styles.searchInput}
-                value={query}
-                onChangeText={setQuery}
-                placeholder="Search"
-                autoCapitalize="none"
-                autoCorrect={false}
-                uniProps={placeholderColor}
-              />
-            </View>
+    <>
+      <PageHeader
+        icon={ContainerIcon}
+        title="Docker"
+        description={DOCKER_DESCRIPTION}
+        accessory={livePill}
+      />
+      <ScrollView style={styles.container} contentContainerStyle={contentContainerStyle}>
+        {error ? (
+          <View style={styles.errorBanner}>
+            <ThemedCircleAlert size={16} uniProps={red} />
+            <Text style={styles.errorText}>{error}</Text>
           </View>
+        ) : null}
 
-          {tab === "containers" ? (
-            <ContainersPanel
-              containers={filteredContainers}
-              collapsedProjects={collapsedProjects}
-              busyGroup={busyGroup}
-              onToggleProject={toggleProject}
-              onGroupAction={handleGroupAction}
-              rows={rows}
-            />
-          ) : null}
-          {tab === "images" ? (
-            <ImagesPanel
-              images={filteredImages}
-              busyImage={busyImage}
-              pullRef={pullRef}
-              onPullRefChange={setPullRef}
-              onPull={handlePull}
-              onAction={handleImageAction}
-            />
-          ) : null}
-          {tab === "volumes" ? (
-            <VolumesPanel
-              volumes={filteredVolumes}
-              busyVolume={busyVolume}
-              onPrune={handleVolumePrune}
-              onRemove={handleVolumeRemove}
-            />
-          ) : null}
-        </>
-      )}
-    </ScrollView>
+        {!available ? (
+          <View style={styles.noticeCard}>
+            <Text style={styles.noticeTitle}>Docker not detected on this host</Text>
+            <Text style={styles.noticeBody}>
+              Install Docker and start the engine. Once it is running, the containers, images, and
+              volumes the team creates appear here and update live.
+            </Text>
+          </View>
+        ) : (
+          <>
+            <View style={styles.toolbar}>
+              <View style={isClickUp ? clickUpTabStyles.row : styles.tabRow}>
+                <TabButton
+                  label={`Containers · ${containers.length}`}
+                  active={tab === "containers"}
+                  onPress={showContainers}
+                />
+                <TabButton
+                  label={`Images · ${images.length}`}
+                  active={tab === "images"}
+                  onPress={showImages}
+                />
+                <TabButton
+                  label={`Volumes · ${volumes.length}`}
+                  active={tab === "volumes"}
+                  onPress={showVolumes}
+                />
+              </View>
+              <View style={styles.searchBox}>
+                <ThemedSearch size={14} uniProps={muted} />
+                <ThemedTextInput
+                  style={styles.searchInput}
+                  value={query}
+                  onChangeText={setQuery}
+                  placeholder="Search"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  uniProps={placeholderColor}
+                />
+              </View>
+            </View>
+
+            {tab === "containers" ? (
+              <ContainersPanel
+                containers={filteredContainers}
+                collapsedProjects={collapsedProjects}
+                busyGroup={busyGroup}
+                onToggleProject={toggleProject}
+                onGroupAction={handleGroupAction}
+                rows={rows}
+              />
+            ) : null}
+            {tab === "images" ? (
+              <ImagesPanel
+                images={filteredImages}
+                busyImage={busyImage}
+                pullRef={pullRef}
+                onPullRefChange={setPullRef}
+                onPull={handlePull}
+                onAction={handleImageAction}
+              />
+            ) : null}
+            {tab === "volumes" ? (
+              <VolumesPanel
+                volumes={filteredVolumes}
+                busyVolume={busyVolume}
+                onPrune={handleVolumePrune}
+                onRemove={handleVolumeRemove}
+              />
+            ) : null}
+          </>
+        )}
+      </ScrollView>
+    </>
   );
 }
 
@@ -2492,6 +2520,7 @@ const styles = StyleSheet.create((theme) => ({
     flexGrow: 1,
     gap: theme.spacing[3],
   },
+  contentBelowHeader: { paddingTop: 0 },
   headerRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -2721,6 +2750,12 @@ const styles = StyleSheet.create((theme) => ({
   },
   dot: { width: 9, height: 9, borderRadius: 5 },
   dotOn: { backgroundColor: theme.colors.palette.green[500] },
+  liveDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    backgroundColor: theme.colors.palette.green[500],
+  },
   dotOff: { backgroundColor: theme.colors.foregroundExtraMuted },
   dotPaused: { backgroundColor: theme.colors.palette.amber[500] },
   iconBtn: {

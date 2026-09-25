@@ -1,10 +1,9 @@
+import { PageHeader } from "@/components/headers/page-header";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { Boxes, CircleAlert } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { useIsCompactFormFactor } from "@/constants/layout";
 import { useHostRuntimeClient, useHosts } from "@/runtime/host-runtime";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { ContextStatusDot, ClusterStatusDot } from "@/components/cluster-dot";
@@ -112,15 +111,13 @@ export function ClustersScreen() {
   const client = useHostRuntimeClient(serverId);
   const clearLastCluster = useClusterNavStore((s) => s.clearLastCluster);
   const router = useRouter();
-  const insets = useSafeAreaInsets();
-  const isCompact = useIsCompactFormFactor();
   const isClickUp = useIsClickUpTheme();
 
   // Phones render this screen with no native header, so pad past the status
   // bar / notch. 0 on desktop, real inset on iOS + Android.
   const contentContainerStyle = useMemo(
-    () => [styles.contentContainer, isCompact ? { paddingTop: insets.top } : null],
-    [isCompact, insets.top],
+    () => [styles.contentContainer, styles.contentBelowHeader],
+    [],
   );
 
   const [contexts, setContexts] = useState<KubeContextInfo[]>([]);
@@ -228,46 +225,45 @@ export function ClustersScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={contentContainerStyle}>
-      <View style={styles.headerRow}>
-        <ThemedBoxes size={20} uniProps={foregroundColorMapping} />
-        <Text style={styles.header}>Clusters</Text>
-      </View>
-      <Text style={styles.headerHint}>Connect a Kubernetes context, then open its workloads.</Text>
+    <View style={styles.page}>
+      <PageHeader
+        icon={Boxes}
+        title="Clusters"
+        description="Connect a Kubernetes context, then open its workloads."
+      />
+      <ScrollView style={styles.container} contentContainerStyle={contentContainerStyle}>
+        {error ? (
+          <View style={styles.errorBanner}>
+            <ThemedCircleAlert size={16} uniProps={redColorMapping} />
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        ) : null}
 
-      {error ? (
-        <View style={styles.errorBanner}>
-          <ThemedCircleAlert size={16} uniProps={redColorMapping} />
-          <Text style={styles.errorText}>{error}</Text>
-        </View>
-      ) : null}
-
-      {contexts.length === 0 ? (
-        <Text style={styles.emptyText}>No Kubernetes contexts detected in ~/.kube/config.</Text>
-      ) : (
-        <View style={isClickUp ? styles.sectionCardClickUp : styles.sectionCard}>
-          {contexts.map((ctx) => (
-            <ContextRow
-              key={ctx.name}
-              ctx={ctx}
-              cluster={clusterByContext.get(ctx.name) ?? null}
-              connecting={busyContext === ctx.name}
-              onConnect={handleConnect}
-              onOpen={handleOpenWorkloads}
-              onDisconnect={handleDisconnect}
-            />
-          ))}
-        </View>
-      )}
-    </ScrollView>
+        {contexts.length === 0 ? (
+          <Text style={styles.emptyText}>No Kubernetes contexts detected in ~/.kube/config.</Text>
+        ) : (
+          <View style={isClickUp ? styles.sectionCardClickUp : styles.sectionCard}>
+            {contexts.map((ctx) => (
+              <ContextRow
+                key={ctx.name}
+                ctx={ctx}
+                cluster={clusterByContext.get(ctx.name) ?? null}
+                connecting={busyContext === ctx.name}
+                onConnect={handleConnect}
+                onOpen={handleOpenWorkloads}
+                onDisconnect={handleDisconnect}
+              />
+            ))}
+          </View>
+        )}
+      </ScrollView>
+    </View>
   );
 }
 
-const ThemedBoxes = withUnistyles(Boxes);
 const ThemedCircleAlert = withUnistyles(CircleAlert);
 const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
 
-const foregroundColorMapping = (theme: Theme) => ({ color: theme.colors.foreground });
 const foregroundMutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 const redColorMapping = (theme: Theme) => ({ color: theme.colors.palette.red[500] });
 
@@ -278,11 +274,13 @@ const styles = StyleSheet.create((theme) => ({
     // pageCanvas is surface0 in classic themes, ClickUp's gray canvas behind white cards.
     backgroundColor: theme.chrome.pageCanvas,
   },
+  page: { flex: 1 },
   contentContainer: {
     padding: theme.spacing[4],
     flexGrow: 1,
     gap: theme.spacing[3],
   },
+  contentBelowHeader: { paddingTop: 0 },
   centerContainer: {
     flex: 1,
     alignItems: "center",

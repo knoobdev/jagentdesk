@@ -2,7 +2,8 @@ import { type ReactElement } from "react";
 import { ScrollView, Text, View } from "react-native";
 import { useIsFocused } from "@react-navigation/native";
 import { StyleSheet } from "react-native-unistyles";
-import { MenuHeader } from "@/components/headers/menu-header";
+import { PageHeader } from "@/components/headers/page-header";
+import { Share2 } from "lucide-react-native";
 import { SessionSharesCard } from "@/screens/settings/session-shares-card";
 import { useHosts } from "@/runtime/host-runtime";
 import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
@@ -22,7 +23,11 @@ export function SharedSessionsScreen(): ReactElement {
 
   return (
     <View style={styles.container}>
-      <MenuHeader title="Shared sessions" />
+      <PageHeader
+        icon={Share2}
+        title="Shared sessions"
+        description="Sessions you have shared with other people, per host. Revoke access at any time."
+      />
       <ScrollView contentContainerStyle={styles.body}>
         {hosts.length === 0 ? (
           <Text style={styles.empty}>Connect to a host to manage its shared sessions.</Text>

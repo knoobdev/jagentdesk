@@ -24,7 +24,8 @@ import Svg, { Circle, G, Rect, Text as SvgText } from "react-native-svg";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useIsFocused } from "@react-navigation/native";
 import { useIsCompactFormFactor } from "@/constants/layout";
-import { MenuHeader } from "@/components/headers/menu-header";
+import { PageHeader } from "@/components/headers/page-header";
+import { Users } from "lucide-react-native";
 import { OfficeScene } from "@/screens/agent-forum-office";
 import { ChatTab } from "@/screens/agent-forum-chat";
 import { useHosts, useHostRuntimeClient } from "@/runtime/host-runtime";
@@ -263,6 +264,9 @@ function reopenInfo(task: ForumTask): {
 }
 
 // ---- screen -----------------------------------------------------------------------------------
+const FORUM_DESCRIPTION =
+  "Turn on Team mode in a chat and send a coding request — the agents open a thread here to research, debate and plan it like a team, then create tasks, build, and review each other.";
+
 export function AgentForumScreen(): ReactElement {
   const isClickUp = useIsClickUpTheme();
   const styles = forumStyles(isClickUp);
@@ -285,10 +289,6 @@ export function AgentForumScreen(): ReactElement {
   } else {
     body = (
       <ScrollView contentContainerStyle={styles.boardBody}>
-        <Text style={styles.tagline}>
-          Turn on Team mode in a chat and send a coding request — the agents open a thread here to
-          research, debate and plan it like a team, then create tasks, build, and review each other.
-        </Text>
         {hosts.map((host) => (
           <HostTopics key={host.serverId} serverId={host.serverId} onOpen={setSelected} />
         ))}
@@ -298,7 +298,7 @@ export function AgentForumScreen(): ReactElement {
 
   return (
     <View style={styles.container}>
-      <MenuHeader title="Team forum" />
+      <PageHeader icon={Users} title="Team forum" description={FORUM_DESCRIPTION} />
       {body}
     </View>
   );
@@ -1911,7 +1911,6 @@ const classicStyles = StyleSheet.create((_theme) => ({
   skeletonFill: { flex: 1, backgroundColor: C.card },
   container: { flex: 1, backgroundColor: C.bg },
   boardBody: { padding: 20, gap: 20, maxWidth: 900, width: "100%", alignSelf: "center" },
-  tagline: { color: C.muted, fontSize: 13, lineHeight: 20, fontFamily: FONT_SANS },
   emptyWrap: { flex: 1, alignItems: "center", justifyContent: "center", padding: 48 },
   emptyText: { color: C.muted, fontSize: 13, fontFamily: FONT_SANS },
   board: { gap: 16 },
@@ -2560,7 +2559,6 @@ const clickUpStyles = StyleSheet.create((theme) => ({
   skeletonFill: { flex: 1, backgroundColor: theme.colors.surface2 },
   container: { flex: 1, backgroundColor: theme.colors.surface0 },
   boardBody: { padding: 20, gap: 20, maxWidth: 900, width: "100%", alignSelf: "center" },
-  tagline: { color: theme.colors.foregroundMuted, fontSize: 13, lineHeight: 20 },
   emptyWrap: { flex: 1, alignItems: "center", justifyContent: "center", padding: 48 },
   emptyText: { color: theme.colors.foregroundMuted, fontSize: 13 },
   board: { gap: 16 },

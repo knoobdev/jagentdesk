@@ -61,8 +61,14 @@ Structural differences choose a style from `useIsClickUpTheme()`:
   with a round avatar, a bold name and muted meta, as in ClickUp chat. The user's message drops
   the right-aligned bubble ("You" + time, violet avatar); each agent turn opens with the provider
   mark, provider name and model, and the turn's items are indented under the name.
-- Phones: `MenuHeader` centers the screen title between the menu button and the actions, as
-  ClickUp iOS does.
+- Page headers: every full-screen page (History, Schedules, Shared sessions, Team forum,
+  Skills, Marketplace, Docker, Simulators, Databases, Clusters, Usage, Forge) uses one
+  `PageHeader` (`components/headers/page-header.tsx`): the section's rail icon and a bold `2xl`
+  title on one row, same-size `size="sm"` buttons on the right (the primary action is the violet
+  `default` button), and a one-line muted description below. On phones it leads with a back
+  arrow (`CompactBackButton`: history back, or Home when the page was opened directly) and
+  clears the status bar, so every title sits at the same offset. Titles are left-aligned, not
+  centered.
 
 ## Marketplace › Themes
 

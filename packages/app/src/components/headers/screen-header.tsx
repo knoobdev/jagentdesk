@@ -15,8 +15,6 @@ import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 interface ScreenHeaderProps {
   left?: ReactNode;
   right?: ReactNode;
-  /** Centered over the row regardless of left/right widths (ClickUp iOS title). */
-  center?: ReactNode;
   leftStyle?: StyleProp<ViewStyle>;
   rightStyle?: StyleProp<ViewStyle>;
   borderless?: boolean;
@@ -30,7 +28,6 @@ interface ScreenHeaderProps {
 export function ScreenHeader({
   left,
   right,
-  center,
   leftStyle,
   rightStyle,
   borderless,
@@ -63,11 +60,6 @@ export function ScreenHeader({
           <TitlebarDragRegion />
           <View style={leftCombinedStyle}>{left}</View>
           <View style={rightCombinedStyle}>{right}</View>
-          {center ? (
-            <View style={styles.center} pointerEvents="box-none">
-              {center}
-            </View>
-          ) : null}
         </WindowChromeSafeArea>
       </View>
     </View>
@@ -107,14 +99,5 @@ const styles = StyleSheet.create((theme) => ({
   },
   borderless: {
     borderBottomColor: "transparent",
-  },
-  center: {
-    position: "absolute",
-    left: 56,
-    right: 56,
-    top: 0,
-    bottom: 0,
-    alignItems: "center",
-    justifyContent: "center",
   },
 }));

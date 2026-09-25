@@ -1,6 +1,6 @@
 {
   "name": "@jagentdesk/plugin",
-  "version": "0.9.41",
+  "version": "0.9.42",
   "description": "JAgentDesk plugin SDK package",
   "files": [
     "dist",
@@ -62,8 +62,8 @@
     "use-sync-external-store": "^1.6.0"
   },
   "devDependencies": {
-    "@jagentdesk/client": "0.9.41",
-    "@jagentdesk/protocol": "0.9.41",
+    "@jagentdesk/client": "0.9.42",
+    "@jagentdesk/protocol": "0.9.42",
     "@types/node": "^20.9.0",
     "@types/react": "~19.2.0",
     "react": "19.1.0",
@@ -73,8 +73,8 @@
     "zod": "^4.4.3"
   },
   "peerDependencies": {
-    "@jagentdesk/client": "0.9.41",
-    "@jagentdesk/protocol": "0.9.41",
+    "@jagentdesk/client": "0.9.42",
+    "@jagentdesk/protocol": "0.9.42",
     "react": "~19.1.0",
     "react-native": ">=0.81.5",
     "zod": "^4.4.3"

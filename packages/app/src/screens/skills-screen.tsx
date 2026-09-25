@@ -1,8 +1,9 @@
+import { PageHeader } from "@/components/headers/page-header";
+import { Button } from "@/components/ui/button";
 import { useCallback, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { Sparkles, Plus, Pencil, Trash2, X, Dumbbell } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useHosts } from "@/runtime/host-runtime";
 import { useSessionStore } from "@/stores/session-store";
 import { useIsCompactFormFactor } from "@/constants/layout";
@@ -15,7 +16,6 @@ import type { Theme } from "@/styles/theme";
 import { clickUpTabStyles } from "@/components/clickup-shell/list-styles";
 import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
 
-const ThemedSparkles = withUnistyles(Sparkles);
 const ThemedPlus = withUnistyles(Plus);
 const ThemedPencil = withUnistyles(Pencil);
 const ThemedTrash = withUnistyles(Trash2);
@@ -132,7 +132,6 @@ export function SkillsScreen() {
   const isClickUp = useIsClickUpTheme();
   const hosts = useHosts();
   const serverId = hosts[0]?.serverId ?? "";
-  const insets = useSafeAreaInsets();
   const isCompact = useIsCompactFormFactor();
 
   const skills = useSkillsStore((s) => s.skills);
@@ -161,10 +160,7 @@ export function SkillsScreen() {
   const handleTrain = useCallback((skill: Skill) => setTrainingId(skill.id), []);
   const handleCloseTraining = useCallback(() => setTrainingId(null), []);
 
-  const contentContainerStyle = useMemo(
-    () => [styles.content, isCompact ? { paddingTop: insets.top } : null],
-    [isCompact, insets.top],
-  );
+  const contentContainerStyle = useMemo(() => [styles.content, styles.contentBelowHeader], []);
 
   // The current agent to attach a skill to: the focused agent, else the most
   // recently active one. Skills attach to an existing agent now (redesign B3) —
@@ -243,22 +239,29 @@ export function SkillsScreen() {
   const setInstructions = useCallback((v: string) => setField("instructions", v), [setField]);
   const setTags = useCallback((v: string) => setField("tags", v), [setField]);
 
+  const headerActions = useMemo(
+    () => (
+      <Button
+        size="sm"
+        variant="default"
+        leftIcon={Plus}
+        onPress={handleNew}
+        testID="skills-create"
+      >
+        Create skill
+      </Button>
+    ),
+    [handleNew],
+  );
   return (
     <View style={styles.root}>
+      <PageHeader
+        icon={Sparkles}
+        title="Skills"
+        description="Reusable expertise your agents share: attach skills from the composer, and they level up as they learn."
+        actions={headerActions}
+      />
       <ScrollView style={styles.container} contentContainerStyle={contentContainerStyle}>
-        <View style={styles.headerRow}>
-          <ThemedSparkles size={20} uniProps={accentColor} />
-          <Text style={styles.header}>Skills</Text>
-          <Pressable style={styles.createBtn} onPress={handleNew}>
-            <ThemedPlus size={15} uniProps={accentFgColor} />
-            <Text style={styles.createBtnText}>Create skill</Text>
-          </Pressable>
-        </View>
-        <Text style={styles.hint}>
-          Build reusable expertise your agents share. Attach one or more skills to an agent from the
-          composer, watch them level up as they learn, and let auto-load pull in the right skill for
-          each question.
-        </Text>
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
         <View style={isClickUp ? clickUpTabStyles.row : styles.filterRow}>
@@ -417,6 +420,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
   root: { flex: 1, backgroundColor: theme.colors.background },
   container: { flex: 1 },
   content: { padding: theme.spacing[4], paddingBottom: theme.spacing[8] },
+  contentBelowHeader: { paddingTop: 0 },
   headerRow: { flexDirection: "row", alignItems: "center", gap: theme.spacing[2] },
   header: {
     fontSize: theme.fontSize.xl,

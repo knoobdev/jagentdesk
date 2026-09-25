@@ -1,4 +1,5 @@
 import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { CompactBackButton } from "./compact-back-button";
 import { useCallback, useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { View, type StyleProp, type ViewStyle } from "react-native";
@@ -140,26 +141,24 @@ export function WindowSidebarMenuToggle({ style, ...props }: SidebarMenuTogglePr
 }
 
 export function MenuHeader({ title, rightContent, borderless }: MenuHeaderProps) {
-  // ClickUp's iOS screens center the title between the menu button and the actions.
+  // Phones with the ClickUp shell reach the drawer from the bottom tab bar, so a page leads with
+  // a back arrow and a left-aligned title — the same header as the Docker screen.
   const isClickUp = useIsClickUpTheme();
   const isMobile = useIsCompactFormFactor();
-  const centerTitle = isClickUp && isMobile && Boolean(title);
-  const centerNode = useMemo(
-    () => (centerTitle ? <ScreenTitle>{title}</ScreenTitle> : undefined),
-    [centerTitle, title],
-  );
+  const showBack = isClickUp && isMobile;
   return (
     <ScreenHeader
       left={
         <>
-          <SidebarMenuToggle />
-          {title && !centerTitle ? <ScreenTitle>{title}</ScreenTitle> : null}
+          {showBack ? <CompactBackButton /> : <SidebarMenuToggle />}
+          {title ? (
+            <ScreenTitle style={showBack ? styles.pageTitle : undefined}>{title}</ScreenTitle>
+          ) : null}
         </>
       }
-      center={centerNode}
       right={rightContent}
       leftStyle={styles.left}
-      borderless={borderless}
+      borderless={borderless || showBack}
     />
   );
 }
@@ -173,6 +172,11 @@ const styles = StyleSheet.create((theme) => ({
   },
   left: {
     gap: theme.spacing[2],
+  },
+  // Same page title as the Docker / Skills / Usage screens on phones.
+  pageTitle: {
+    fontSize: theme.fontSize["2xl"],
+    fontWeight: theme.fontWeight.bold,
   },
   mobileMenuIcon: {
     width: MOBILE_MENU_LINE_WIDTH,

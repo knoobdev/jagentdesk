@@ -1,3 +1,5 @@
+import { PageHeader } from "@/components/headers/page-header";
+import { Button } from "@/components/ui/button";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BackHandler, Pressable, ScrollView, Text, View, useWindowDimensions } from "react-native";
 import Animated, {
@@ -9,7 +11,6 @@ import Animated, {
 import { Gesture } from "react-native-gesture-handler";
 import { CircleAlert, MessageSquare, Plus, Smartphone } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useHostRuntimeClient, useHosts } from "@/runtime/host-runtime";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
@@ -34,15 +35,11 @@ const DRIVE_MAX_W = 960;
 const DRIVE_DEFAULT_W = 420;
 const SLIDE_MS = 220;
 
-const muted = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
-const fg = (theme: Theme) => ({ color: theme.colors.foreground });
 const accent = (theme: Theme) => ({ color: theme.colors.accent });
 const red600 = (theme: Theme) => ({ color: theme.colors.palette.red[600] });
 
-const ThemedSmartphone = withUnistyles(Smartphone);
 const ThemedPlus = withUnistyles(Plus);
 const ThemedAlert = withUnistyles(CircleAlert);
-const ThemedMessageSquare = withUnistyles(MessageSquare);
 
 function randomId(prefix: string): string {
   return `${prefix}-${Math.random().toString(36).slice(2)}`;
@@ -278,29 +275,41 @@ function FleetHeader({
     [chatOpen, hideChat, showChat],
   );
   const booted = devices.filter((d) => d.isBooted).length;
-  return (
-    <View style={styles.header}>
-      <ThemedSmartphone size={18} uniProps={fg} />
-      <Text style={styles.headerTitle}>SimFleet</Text>
-      {loading ? (
-        <Skeleton width={120} height={12} style={styles.headerCountSkeleton} />
+  const accessory = useMemo(
+    () =>
+      loading ? (
+        <Skeleton width={120} height={12} />
       ) : (
         <Text style={styles.headerCount}>
           {devices.length} devices · {booted} booted
         </Text>
-      )}
-      {showAgentToggle ? (
-        <Pressable
+      ),
+    [booted, devices.length, loading],
+  );
+  const actions = useMemo(
+    () =>
+      showAgentToggle ? (
+        <Button
+          size="sm"
+          variant={chatOpen ? "secondary" : "outline"}
+          leftIcon={MessageSquare}
           onPress={toggleChat}
-          style={[styles.headerBtn, chatOpen ? styles.headerBtnActive : null]}
           accessibilityLabel={chatOpen ? "Hide agent" : "Show agent"}
           testID="sim-chat-toggle"
         >
-          <ThemedMessageSquare size={15} uniProps={chatOpen ? fg : muted} />
-          <Text style={styles.headerBtnText}>Agent</Text>
-        </Pressable>
-      ) : null}
-    </View>
+          Agent
+        </Button>
+      ) : null,
+    [chatOpen, showAgentToggle, toggleChat],
+  );
+  return (
+    <PageHeader
+      icon={Smartphone}
+      title="SimFleet"
+      description="iOS simulators on this host: boot, drive and hand them to your agents."
+      accessory={accessory}
+      actions={actions}
+    />
   );
 }
 
@@ -383,7 +392,6 @@ export function SimFleetScreen() {
   const hosts = useHosts();
   const serverId = hosts[0]?.serverId ?? "";
   const client = useHostRuntimeClient(serverId);
-  const insets = useSafeAreaInsets();
   const isCompact = useIsCompactFormFactor();
   const { width: screenWidth } = useWindowDimensions();
 
@@ -454,11 +462,6 @@ export function SimFleetScreen() {
   const { driveAnim, resizeGesture, driveInner } = useDriveRail(Boolean(selected));
   const slideAnim = useDriveSheet(Boolean(selected) && isCompact, screenWidth, onClose);
 
-  const containerStyle = useMemo(
-    () => [styles.screen, isCompact ? { paddingTop: insets.top } : null],
-    [isCompact, insets.top],
-  );
-
   const drivePanel = shownDevice ? (
     <SimDrivePanel
       device={shownDevice}
@@ -473,7 +476,7 @@ export function SimFleetScreen() {
   ) : null;
 
   return (
-    <View style={containerStyle}>
+    <View style={styles.screen}>
       <FleetHeader loading={loading} devices={devices} showAgentToggle={!isCompact} />
       <FleetBanners error={error} unavailable={!loading && !availability.simctl} />
 
@@ -523,32 +526,10 @@ export function SimFleetScreen() {
 
 const styles = StyleSheet.create((theme) => ({
   screen: { flex: 1, backgroundColor: theme.colors.surface0 },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing[2],
-    paddingHorizontal: theme.spacing[4],
-    paddingVertical: theme.spacing[3],
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border,
-  },
-  headerTitle: { fontSize: theme.fontSize.lg, fontWeight: "600", color: theme.colors.foreground },
   headerCount: {
-    marginLeft: "auto",
     fontSize: theme.fontSize.sm,
     color: theme.colors.foregroundMuted,
   },
-  headerCountSkeleton: { marginLeft: "auto" },
-  headerBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing[1],
-    paddingHorizontal: theme.spacing[2],
-    paddingVertical: theme.spacing[1],
-    borderRadius: theme.borderRadius.md,
-  },
-  headerBtnActive: { backgroundColor: theme.colors.surface2 },
-  headerBtnText: { fontSize: theme.fontSize.sm, color: theme.colors.foreground },
   errorBar: {
     flexDirection: "row",
     alignItems: "center",

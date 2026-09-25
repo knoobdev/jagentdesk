@@ -1,3 +1,4 @@
+import { useIsCompactFormFactor } from "@/constants/layout";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { GitBranch, X } from "lucide-react-native";
@@ -76,6 +77,7 @@ export function WorkspaceOrchestrationPanel({
 }: WorkspaceOrchestrationPanelProps) {
   const { theme } = useUnistyles();
   const router = useRouter();
+  const isCompact = useIsCompactFormFactor();
   const client = useHostRuntimeClient(serverId);
   const isConnected = useHostRuntimeIsConnected(serverId);
   const { config } = useOrchestration(serverId);
@@ -339,8 +341,10 @@ export function WorkspaceOrchestrationPanel({
         onPress={() => setVisible(true)}
         disabled={!isConnected}
         testID="workspace-orchestration-open"
+        accessibilityLabel="Orchestration"
       >
-        Orchestration
+        {/* Phones show the icon only so the workspace title keeps its room. */}
+        {isCompact ? null : "Orchestration"}
       </Button>
       <AdaptiveModalSheet
         visible={visible}

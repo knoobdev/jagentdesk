@@ -1,8 +1,8 @@
+import { PageHeader } from "@/components/headers/page-header";
 import { useCallback, useMemo, useState } from "react";
 import { ScrollView, Text, View } from "react-native";
 import { BarChart3, Coins, Cpu, RefreshCw, Trash2, Users } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   estimateCacheSavingsUsd,
@@ -27,11 +27,9 @@ import type { Theme } from "@/styles/theme";
 import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
 import { clickUpListStyles } from "@/components/clickup-shell/list-styles";
 
-const ThemedBarChart = withUnistyles(BarChart3);
 const ThemedCoins = withUnistyles(Coins);
 const ThemedCpu = withUnistyles(Cpu);
 const ThemedUsers = withUnistyles(Users);
-const accentColor = (theme: Theme) => ({ color: theme.colors.accent });
 const mutedColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 
 // Validated categorical palette (dataviz skill, dark-safe, CVD-checked). Assigned
@@ -250,7 +248,6 @@ export function InsightsScreen() {
   // registry order, so hosts[0] can be a different daemon than the viewed one and
   // sessions[hosts[0].serverId] is empty → the whole dashboard reads zeros.
   const serverId = useHostRouteServerId() ?? "";
-  const insets = useSafeAreaInsets();
   const isCompact = useIsCompactFormFactor();
   const isClickUp = useIsClickUpTheme();
   const insights = useUsageInsights(serverId);
@@ -311,10 +308,7 @@ export function InsightsScreen() {
     }
   }, [client, queryClient, serverId]);
 
-  const contentContainerStyle = useMemo(
-    () => [styles.content, isCompact ? { paddingTop: insets.top } : null],
-    [isCompact, insets.top],
-  );
+  const contentContainerStyle = useMemo(() => [styles.content, styles.contentBelowHeader], []);
   const halfCard = useMemo(() => (isCompact ? styles.cardFull : styles.cardHalf), [isCompact]);
 
   const maxModelTokens = lifetimeModels.reduce((m, r) => Math.max(m, r.totalTokens), 0);
@@ -343,44 +337,45 @@ export function InsightsScreen() {
     ? `${lifetimeModels.length} model${lifetimeModels.length === 1 ? "" : "s"} · ${formatUsd(lifetime.totalCostUsd)}`
     : `${lifetimeModels.length} model${lifetimeModels.length === 1 ? "" : "s"}`;
 
+  const headerActions = useMemo(
+    () => (
+      <>
+        <Button
+          variant="outline"
+          size="sm"
+          leftIcon={RefreshCw}
+          onPress={handleRefresh}
+          loading={isRefreshing}
+          disabled={!serverId || isResetting}
+          testID="insights-refresh"
+        >
+          Refresh
+        </Button>
+        <Button
+          variant="destructive"
+          size="sm"
+          leftIcon={Trash2}
+          onPress={handleReset}
+          loading={isResetting}
+          disabled={!serverId || !client || isRefreshing}
+          testID="insights-reset"
+        >
+          Reset
+        </Button>
+      </>
+    ),
+    [client, handleRefresh, handleReset, isRefreshing, isResetting, serverId],
+  );
+
   return (
     <View style={styles.root}>
+      <PageHeader
+        icon={BarChart3}
+        title="Usage & Cost"
+        description="Where your tokens go and which models drive cost, live from every agent session on this host."
+        actions={headerActions}
+      />
       <ScrollView style={styles.container} contentContainerStyle={contentContainerStyle}>
-        <View style={styles.headerRow}>
-          <View style={styles.headerTitleGroup}>
-            <ThemedBarChart size={22} uniProps={accentColor} />
-            <Text style={styles.header}>Usage &amp; Cost</Text>
-          </View>
-          <View style={styles.headerActions}>
-            <Button
-              variant="outline"
-              size="sm"
-              leftIcon={RefreshCw}
-              onPress={handleRefresh}
-              loading={isRefreshing}
-              disabled={!serverId || isResetting}
-              testID="insights-refresh"
-            >
-              Refresh
-            </Button>
-            <Button
-              variant="destructive"
-              size="sm"
-              leftIcon={Trash2}
-              onPress={handleReset}
-              loading={isResetting}
-              disabled={!serverId || !client || isRefreshing}
-              testID="insights-reset"
-            >
-              Reset
-            </Button>
-          </View>
-        </View>
-        <Text style={styles.hint}>
-          Aggregated live from every active agent session on this host — where your tokens go and
-          which models drive cost, so an always-on JAgentDesk is never a black box.
-        </Text>
-
         {!hasData ? (
           <Text style={styles.banner}>
             No agent has reported usage on this host yet — the figures below stay at zero until one
@@ -480,8 +475,11 @@ const styles = StyleSheet.create((theme: Theme) => ({
   root: { flex: 1, backgroundColor: theme.colors.background },
   container: { flex: 1 },
   content: { padding: theme.spacing[4], paddingBottom: theme.spacing[8], gap: theme.spacing[4] },
+  contentBelowHeader: { paddingTop: 0 },
   headerRow: {
     flexDirection: "row",
+    // Narrow screens wrap the actions under the title instead of drawing over it.
+    flexWrap: "wrap",
     alignItems: "center",
     justifyContent: "space-between",
     gap: theme.spacing[3],

@@ -10,7 +10,7 @@ import { ScrollView, Text, View } from "react-native";
 import { useIsFocused } from "@react-navigation/native";
 import { CalendarClock, Plus } from "lucide-react-native";
 import { StyleSheet } from "react-native-unistyles";
-import { MenuHeader } from "@/components/headers/menu-header";
+import { PageHeader } from "@/components/headers/page-header";
 import { HostFilter } from "@/components/hosts/host-filter";
 import { ALL_HOSTS_OPTION_ID } from "@/components/hosts/host-picker";
 import { ScheduleFormSheet } from "@/components/schedules/schedule-form-sheet";
@@ -160,11 +160,30 @@ function SchedulesScreenContent(): ReactElement {
   }, [resolvedRows, selectedHost, statusFilter, hosts.length]);
 
   const showLoadError = isError && loadState.status !== "loaded";
+  const headerActions = useMemo(
+    () => (
+      <Button
+        size="sm"
+        variant="default"
+        leftIcon={Plus}
+        onPress={openCreate}
+        testID="schedules-new"
+      >
+        New schedule
+      </Button>
+    ),
+    [openCreate],
+  );
   const showHostFilter = hosts.length > 1;
 
   return (
     <View style={styles.container}>
-      <MenuHeader title="Schedules" />
+      <PageHeader
+        icon={CalendarClock}
+        title="Schedules"
+        description="Prompts that run on their own, on a timer or a cron, on any of your hosts."
+        actions={headerActions}
+      />
       <SchedulesScreenBody
         rows={visibleRows}
         loadState={loadState}
@@ -283,15 +302,6 @@ function SchedulesScreenBody({
             testID="schedules-status-filter"
           />
         </View>
-        <Button
-          variant="outline"
-          leftIcon={Plus}
-          onPress={onCreate}
-          size="sm"
-          testID="schedules-new"
-        >
-          New schedule
-        </Button>
       </View>
       <ScrollView
         style={styles.scroll}

@@ -3,9 +3,9 @@ import { View, Text } from "react-native";
 import { useIsFocused } from "@react-navigation/native";
 import { router } from "expo-router";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { ChevronLeft } from "lucide-react-native";
+import { ChevronLeft, History } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
-import { MenuHeader } from "@/components/headers/menu-header";
+import { PageHeader } from "@/components/headers/page-header";
 import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { AgentList } from "@/components/agent-list";
@@ -79,7 +79,11 @@ function SessionsScreenContent() {
 
   return (
     <View style={styles.container}>
-      <MenuHeader title={t("sessions.title")} />
+      <PageHeader
+        icon={History}
+        title={t("sessions.title")}
+        description="Every agent session on your hosts, newest first. Open one to pick it back up."
+      />
       {showHostFilter ? (
         <View style={styles.filterContainer}>
           <HostFilter
