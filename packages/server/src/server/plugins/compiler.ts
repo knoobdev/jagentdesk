@@ -80,6 +80,7 @@ const REGISTRATIONS_REMOVED_BY_TARGET: Record<PluginBuildTarget, ReadonlySet<str
   client: new Set(["handle"]),
   server: new Set([
     "addSurface",
+    "addSettingsScreen",
     "addSidebarItem",
     "addWorkspacePanel",
     "addCommandCenterItem",
