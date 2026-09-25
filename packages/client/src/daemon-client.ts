@@ -28,6 +28,8 @@ import type {
   SimActionPayload,
   SimButton,
   SimButtonPayload,
+  SimCatalogPayload,
+  SimCreatePayload,
   SimDescribeUiPayload,
   SimInputTextPayload,
   SimInstallAppPayload,
@@ -7193,6 +7195,35 @@ export class DaemonClient {
     });
   }
 
+  async simulatorCatalog(requestId?: string): Promise<SimCatalogPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "simulator/catalog" },
+      responseType: "simulator/catalog/response",
+    });
+  }
+
+  async simulatorCreate(options: {
+    requestId?: string;
+    name: string;
+    deviceTypeId: string;
+    runtimeId: string;
+    boot?: boolean;
+  }): Promise<SimCreatePayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "simulator/create",
+        name: options.name,
+        deviceTypeId: options.deviceTypeId,
+        runtimeId: options.runtimeId,
+        boot: options.boot,
+      },
+      responseType: "simulator/create/response",
+      timeout: 240_000, // create + a first cold boot can exceed the default
+    });
+  }
+
   async simulatorTap(options: {
     requestId?: string;
     udid: string;
@@ -7268,10 +7299,17 @@ export class DaemonClient {
   async simulatorScreenshot(options: {
     requestId?: string;
     udid: string;
+    format?: "png" | "jpeg";
+    maxDim?: number;
   }): Promise<SimScreenshotPayload> {
     return this.sendCorrelatedSessionRequest({
       requestId: options.requestId,
-      message: { type: "simulator/screenshot", udid: options.udid },
+      message: {
+        type: "simulator/screenshot",
+        udid: options.udid,
+        format: options.format,
+        maxDim: options.maxDim,
+      },
       responseType: "simulator/screenshot/response",
     });
   }

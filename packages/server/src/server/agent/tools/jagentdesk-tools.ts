@@ -839,13 +839,90 @@ function registerSimulatorTools(params: {
           .filter((d) => !input.bootedOnly || d.isBooted)
           .map(
             (d) =>
-              `${d.isBooted ? "●" : "○"} ${d.name}  [${d.runtime}]  ${d.state}  slim=${d.slimState}  ${d.udid}`,
+              `${d.isBooted ? "●" : "○"} ${d.name}  (${d.deviceType})  [${d.runtime}]  ${d.state}  ${d.udid}`,
           );
         const hidNote =
           availability.idb || availability.maestro
             ? ""
             : "\n(no idb or Maestro — tap/swipe/type disabled; lifecycle + screenshot still work)";
         return textResult((rows.join("\n") || "(no simulators)") + hidNote);
+      } catch (err) {
+        return simErrorResult(err);
+      }
+    },
+  );
+
+  registerTool(
+    "sim_device_types",
+    {
+      title: "Simulator device types",
+      description:
+        "List the iOS runtimes installed on this Mac and, for each, the device types that can be created on it (name + identifier). Use before sim_create. family filters to iPhone | iPad | iPod.",
+      inputSchema: { family: z.enum(["iPhone", "iPad", "iPod"]).optional() },
+    },
+    async (input: { family?: "iPhone" | "iPad" | "iPod" }) => {
+      try {
+        const runtimes = await simulatorToolService.catalog();
+        if (runtimes.length === 0) return textResult("(no iOS simulator runtimes installed)");
+        const blocks = runtimes.map((r) => {
+          const types = r.deviceTypes
+            .filter((t) => !input.family || t.productFamily === input.family)
+            .map((t) => `  ${t.name}  ${t.identifier}`);
+          return `${r.name}  ${r.identifier}\n${types.join("\n")}`;
+        });
+        return textResult(blocks.join("\n\n"));
+      } catch (err) {
+        return simErrorResult(err);
+      }
+    },
+  );
+
+  registerTool(
+    "sim_create",
+    {
+      title: "Create simulator",
+      description:
+        "Create a new iOS simulator. deviceType and runtime accept a display name ('iPhone 15 Pro', 'iOS 17.4') or an identifier from sim_device_types; runtime defaults to the newest installed. boot=true boots it headless and waits until ready. Returns the new udid.",
+      inputSchema: {
+        deviceType: z.string().min(1),
+        runtime: z.string().optional(),
+        name: z.string().optional(),
+        boot: z.boolean().optional(),
+      },
+    },
+    async (input: { deviceType: string; runtime?: string; name?: string; boot?: boolean }) => {
+      try {
+        const runtimes = await simulatorToolService.catalog();
+        const want = input.runtime?.trim().toLowerCase();
+        const runtime = want
+          ? runtimes.find(
+              (r) => r.identifier.toLowerCase() === want || r.name.toLowerCase() === want,
+            )
+          : runtimes[0];
+        if (!runtime) {
+          return textResult(
+            `Unknown runtime "${input.runtime ?? ""}". Installed: ${runtimes.map((r) => r.name).join(", ") || "none"}`,
+          );
+        }
+        const wantType = input.deviceType.trim().toLowerCase();
+        const type = runtime.deviceTypes.find(
+          (t) => t.identifier.toLowerCase() === wantType || t.name.toLowerCase() === wantType,
+        );
+        if (!type) {
+          return textResult(
+            `"${input.deviceType}" is not available on ${runtime.name}. Call sim_device_types for the valid names.`,
+          );
+        }
+        const name = input.name?.trim() || type.name;
+        const udid = await simulatorToolService.create(
+          name,
+          type.identifier,
+          runtime.identifier,
+          input.boot ?? false,
+        );
+        return textResult(
+          `created ${name} (${type.name}, ${runtime.name}) ${udid}${input.boot ? " — booted" : ""}`,
+        );
       } catch (err) {
         return simErrorResult(err);
       }
@@ -993,15 +1070,20 @@ function registerSimulatorTools(params: {
     "sim_screenshot",
     {
       title: "Simulator screenshot",
-      description: "Capture the simulator screen as a PNG image. Auto-approved (read-only).",
+      description: "Capture the simulator screen as an image. Auto-approved (read-only).",
       inputSchema: { udid: z.string().min(1) },
     },
     async (input: { udid: string }) => {
       try {
-        const pngBase64 = await simulatorToolService.screenshot(input.udid);
+        // JPEG capped at 1568px on the long edge — the model downsamples anything larger, so a
+        // full-res PNG (up to ~5 MB) would only cost transfer, not add detail.
+        const shot = await simulatorToolService.screenshot(input.udid, {
+          format: "jpeg",
+          maxDim: 1568,
+        });
         return {
           content: [
-            { type: "image", data: pngBase64, mimeType: "image/png" },
+            { type: "image", data: shot.base64, mimeType: shot.mimeType },
             { type: "text", text: "screenshot captured" },
           ],
         };

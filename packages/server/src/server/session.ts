@@ -3398,9 +3398,11 @@ export class Session {
     return undefined;
   }
 
-  private dispatchSimulatorMessage(msg: SessionInboundMessage): Promise<void> | undefined {
-    const fail = (error: unknown): string =>
-      error instanceof Error ? error.message : String(error);
+  // The fleet itself: listing it, what the host can run, and adding devices to it.
+  private dispatchSimulatorFleet(
+    msg: SessionInboundMessage,
+    fail: (error: unknown) => string,
+  ): Promise<void> | undefined {
     if (msg.type === "simulator/list") {
       const { requestId } = msg;
       return this.simulatorService
@@ -3425,6 +3427,52 @@ export class Session {
           return undefined;
         });
     }
+    if (msg.type === "simulator/catalog") {
+      const { requestId } = msg;
+      return this.simulatorService
+        .catalog()
+        .then((runtimes) => {
+          this.emit({
+            type: "simulator/catalog/response",
+            payload: { requestId, error: null, runtimes },
+          });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({
+            type: "simulator/catalog/response",
+            payload: { requestId, error: fail(error), runtimes: [] },
+          });
+          return undefined;
+        });
+    }
+    if (msg.type === "simulator/create") {
+      const { requestId } = msg;
+      return this.simulatorService
+        .create(msg.name, msg.deviceTypeId, msg.runtimeId, msg.boot ?? false)
+        .then((udid) => {
+          this.emit({
+            type: "simulator/create/response",
+            payload: { requestId, error: null, udid },
+          });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({
+            type: "simulator/create/response",
+            payload: { requestId, error: fail(error), udid: "" },
+          });
+          return undefined;
+        });
+    }
+    return undefined;
+  }
+
+  private dispatchSimulatorMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    const fail = (error: unknown): string =>
+      error instanceof Error ? error.message : String(error);
+    const fleet = this.dispatchSimulatorFleet(msg, fail);
+    if (fleet) return fleet;
     if (msg.type === "simulator/action") {
       const { requestId, udid } = msg;
       return this.simulatorService
@@ -3527,11 +3575,19 @@ export class Session {
     if (msg.type === "simulator/screenshot") {
       const { requestId } = msg;
       return this.simulatorService
-        .screenshot(msg.udid)
-        .then((pngBase64) => {
+        .screenshot(msg.udid, { format: msg.format, maxDim: msg.maxDim })
+        .then((shot) => {
           this.emit({
             type: "simulator/screenshot/response",
-            payload: { requestId, error: null, pngBase64 },
+            payload: {
+              requestId,
+              error: null,
+              pngBase64: shot.mimeType === "image/png" ? shot.base64 : "",
+              imageBase64: shot.base64,
+              mimeType: shot.mimeType,
+              width: shot.width,
+              height: shot.height,
+            },
           });
           return undefined;
         })

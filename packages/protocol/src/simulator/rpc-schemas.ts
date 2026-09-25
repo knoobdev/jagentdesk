@@ -90,6 +90,41 @@ export const SimActionRequestSchema = req("simulator/action", {
 export const SimActionResponseSchema = resp("simulator/action/response", { udid: z.string() });
 export type SimActionPayload = z.infer<typeof SimActionResponseSchema>["payload"];
 
+// ── catalog: which device types can be created on which installed runtimes ──
+// From `simctl list runtimes -j` (each available iOS runtime lists its supportedDeviceTypes), so
+// a picker only ever offers valid (deviceType, runtime) pairs.
+export const SimDeviceTypeSchema = z.object({
+  identifier: z.string(), // "com.apple.CoreSimulator.SimDeviceType.iPhone-15-Pro"
+  name: z.string(), // "iPhone 15 Pro"
+  productFamily: z.string(), // "iPhone" | "iPad" | "iPod"
+});
+export type SimDeviceType = z.infer<typeof SimDeviceTypeSchema>;
+
+export const SimRuntimeSchema = z.object({
+  identifier: z.string(), // "com.apple.CoreSimulator.SimRuntime.iOS-17-4"
+  name: z.string(), // "iOS 17.4"
+  deviceTypes: z.array(SimDeviceTypeSchema),
+});
+export type SimRuntime = z.infer<typeof SimRuntimeSchema>;
+
+export const SimCatalogRequestSchema = req("simulator/catalog", {});
+export const SimCatalogResponseSchema = resp("simulator/catalog/response", {
+  runtimes: z.array(SimRuntimeSchema),
+});
+export type SimCatalogPayload = z.infer<typeof SimCatalogResponseSchema>["payload"];
+
+// ── create a new simulator (`simctl create`), optionally booting it headless ──
+export const SimCreateRequestSchema = req("simulator/create", {
+  name: z.string(),
+  deviceTypeId: z.string(),
+  runtimeId: z.string(),
+  boot: z.boolean().optional(),
+});
+export const SimCreateResponseSchema = resp("simulator/create/response", {
+  udid: z.string(),
+});
+export type SimCreatePayload = z.infer<typeof SimCreateResponseSchema>["payload"];
+
 // ── HID input (idb) ──
 export const SimTapRequestSchema = req("simulator/tap", {
   udid: z.string(),
@@ -131,10 +166,25 @@ export const SimDescribeUiResponseSchema = resp("simulator/describe-ui/response"
 });
 export type SimDescribeUiPayload = z.infer<typeof SimDescribeUiResponseSchema>["payload"];
 
-// ── screenshot (PNG, base64) ──
-export const SimScreenshotRequestSchema = req("simulator/screenshot", { udid: z.string() });
+// ── screenshot (base64) ──
+// A full-resolution PNG is 1–5 MB per frame (4.6 MB for an iPad); polling a fleet of them floods
+// the socket until the liveness ping fails. Live views ask for `format: "jpeg"` (~15× smaller) and a
+// `maxDim` long-edge cap sized to what they draw. Omitting both keeps the original full-res PNG, so
+// older clients are unaffected. `pngBase64` is filled only for PNG frames (older clients read it);
+// newer clients read `imageBase64` + `mimeType` + the frame's pixel `width`/`height`.
+export const SimScreenshotFormatSchema = z.enum(["png", "jpeg"]);
+export type SimScreenshotFormat = z.infer<typeof SimScreenshotFormatSchema>;
+export const SimScreenshotRequestSchema = req("simulator/screenshot", {
+  udid: z.string(),
+  format: SimScreenshotFormatSchema.optional(),
+  maxDim: z.number().int().positive().optional(),
+});
 export const SimScreenshotResponseSchema = resp("simulator/screenshot/response", {
   pngBase64: z.string(),
+  imageBase64: z.string().optional(),
+  mimeType: z.string().optional(),
+  width: z.number().optional(),
+  height: z.number().optional(),
 });
 export type SimScreenshotPayload = z.infer<typeof SimScreenshotResponseSchema>["payload"];
 
@@ -228,6 +278,8 @@ export type SimLogChunkPayload = z.infer<typeof SimLogChunkPushSchema>["payload"
 export const SimulatorRequestSchemas = [
   SimListRequestSchema,
   SimActionRequestSchema,
+  SimCatalogRequestSchema,
+  SimCreateRequestSchema,
   SimTapRequestSchema,
   SimSwipeRequestSchema,
   SimInputTextRequestSchema,
@@ -249,6 +301,8 @@ export const SimulatorRequestSchemas = [
 export const SimulatorResponseSchemas = [
   SimListResponseSchema,
   SimActionResponseSchema,
+  SimCatalogResponseSchema,
+  SimCreateResponseSchema,
   SimTapResponseSchema,
   SimSwipeResponseSchema,
   SimInputTextResponseSchema,

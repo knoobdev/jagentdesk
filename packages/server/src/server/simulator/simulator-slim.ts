@@ -94,15 +94,23 @@ export async function readSlimState(udid: string, isBooted: boolean): Promise<Si
 // Disable (and bootout so they stop this session) every managed daemon. Per-label failures are
 // tolerated — a label absent on this runtime is not an error. `reboot` restarts the sim so the
 // slimming is applied from a clean boot.
+// Run one launchctl verb across every managed label in parallel — sequential spawns would take
+// well over the 60s RPC timeout (~26 labels × ~1-2s each).
+async function applyToLabels(udid: string, verb: string): Promise<void> {
+  await Promise.all(
+    SLIMMABLE_LABELS.map((label) =>
+      spawnLaunchctl(udid, [verb, `system/${label}`]).catch(() => {}),
+    ),
+  );
+}
+
 export async function slim(
   udid: string,
   reboot: boolean,
   bootAndWait: (udid: string) => Promise<void>,
 ): Promise<SimSlimState> {
-  for (const label of SLIMMABLE_LABELS) {
-    await spawnLaunchctl(udid, ["disable", `system/${label}`]).catch(() => {});
-    await spawnLaunchctl(udid, ["bootout", `system/${label}`]).catch(() => {});
-  }
+  await applyToLabels(udid, "disable");
+  await applyToLabels(udid, "bootout"); // stop them in the current boot session too
   if (reboot) {
     await execCommand("xcrun", ["simctl", "shutdown", udid], { timeout: 60_000 }).catch(() => {});
     await bootAndWait(udid);
@@ -111,9 +119,7 @@ export async function slim(
 }
 
 export async function unslim(udid: string): Promise<SimSlimState> {
-  for (const label of SLIMMABLE_LABELS) {
-    await spawnLaunchctl(udid, ["enable", `system/${label}`]).catch(() => {});
-  }
+  await applyToLabels(udid, "enable");
   return readSlimState(udid, true);
 }
 
