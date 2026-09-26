@@ -1,18 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
-import { Pressable, Text, TextInput, View } from "react-native";
+import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
-import type { ProxyHeader, ProxyTransactionFull } from "@jagentdesk/protocol/proxy/rpc-schemas";
+import type { ProxyTransactionFull } from "@jagentdesk/protocol/proxy/rpc-schemas";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import type { Theme } from "@/styles/theme";
-import { WbButton } from "./wb-button";
 import { bytesToUtf8, decodeBase64, utf8ToBase64 } from "./base64";
+import { HeaderEditor, makeHeaderRows, rowsToHeaders, type HeaderRowValue } from "./header-editor";
 import { MessagePane } from "./message-editor";
+import { WbButton } from "./wb-button";
 import { WB_ORANGE } from "./workbench-constants";
 
-// Burp Repeater: edit a request and send it over and over, viewing each response. The request is
-// edited as raw text (request line + headers + blank line + body), with a target (scheme/host/port)
-// alongside. A history row can seed this via "Send to Repeater". P2 ships a single request tab;
-// multiple named tabs come later.
+// Burp Repeater with a structured request editor: method + path, editable key/value header rows,
+// and a body box with one-click JSON formatting. The response shows on the right (headers as a
+// key/value table, JSON pretty-printed). A history row can seed all fields via "Send to Repeater".
 
 export function RepeaterPanel({
   client,
@@ -24,38 +24,52 @@ export function RepeaterPanel({
   const [secure, setSecure] = useState(true);
   const [host, setHost] = useState("");
   const [port, setPort] = useState("443");
-  const [raw, setRaw] = useState("");
+  const [method, setMethod] = useState("GET");
+  const [path, setPath] = useState("/");
+  const [rows, setRows] = useState<HeaderRowValue[]>([]);
+  const [body, setBody] = useState("");
   const [response, setResponse] = useState<ProxyTransactionFull | null>(null);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Seed from a captured request when one is sent here.
   useEffect(() => {
     if (!seed) return;
     setSecure(seed.secure);
     setHost(seed.host);
     setPort(String(seed.port));
-    setRaw(rawFromTransaction(seed));
+    const parts = seed.requestLine.split(/\s+/);
+    setMethod(parts[0] || "GET");
+    setPath(parts[1] || seed.url || "/");
+    setRows(makeHeaderRows(seed.requestHeaders));
+    setBody(seed.requestBodyIsText ? bytesToUtf8(decodeBase64(seed.requestBodyB64)) : "");
     setResponse(null);
     setError(null);
   }, [seed]);
 
   const toggleSecure = useCallback(() => setSecure((s) => !s), []);
 
+  const formatJson = useCallback(() => {
+    try {
+      setBody(JSON.stringify(JSON.parse(body), null, 2));
+      setError(null);
+    } catch {
+      setError("Body is not valid JSON.");
+    }
+  }, [body]);
+
   const handleSend = useCallback(async () => {
     if (!client || !host) return;
     setSending(true);
     setError(null);
     try {
-      const parsed = parseRawRequest(raw);
       const res = await client.proxyRepeaterSend({
         secure,
         host,
         port: Number(port) || (secure ? 443 : 80),
-        method: parsed.method,
-        path: parsed.path,
-        headers: parsed.headers,
-        bodyB64: utf8ToBase64(parsed.body),
+        method: method.trim() || "GET",
+        path: path.trim() || "/",
+        headers: rowsToHeaders(rows),
+        bodyB64: utf8ToBase64(body),
       });
       if (res.error) setError(res.error);
       setResponse(res.transaction);
@@ -64,7 +78,7 @@ export function RepeaterPanel({
     } finally {
       setSending(false);
     }
-  }, [client, host, port, raw, secure]);
+  }, [body, client, host, method, path, port, rows, secure]);
 
   return (
     <View style={styles.container}>
@@ -93,19 +107,45 @@ export function RepeaterPanel({
       </View>
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <View style={styles.split}>
-        <View style={styles.pane}>
+        <ScrollView style={styles.pane} contentContainerStyle={styles.paneContent}>
           <Text style={styles.paneTitle}>REQUEST</Text>
+          <View style={styles.methodRow}>
+            <TextInput
+              style={styles.methodInput}
+              value={method}
+              onChangeText={setMethod}
+              placeholder="GET"
+              autoCapitalize="characters"
+              autoCorrect={false}
+            />
+            <TextInput
+              style={styles.pathInput}
+              value={path}
+              onChangeText={setPath}
+              placeholder="/path?query"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </View>
+          <Text style={styles.label}>Headers</Text>
+          <HeaderEditor rows={rows} onChange={setRows} />
+          <View style={styles.bodyHead}>
+            <Text style={styles.label}>Body</Text>
+            <Pressable onPress={formatJson} hitSlop={6}>
+              <Text style={styles.formatBtn}>Format JSON</Text>
+            </Pressable>
+          </View>
           <TextInput
-            style={styles.rawInput}
-            value={raw}
-            onChangeText={setRaw}
+            style={styles.bodyInput}
+            value={body}
+            onChangeText={setBody}
             multiline
             autoCapitalize="none"
             autoCorrect={false}
-            placeholder={"GET / HTTP/1.1\nHost: example"}
+            placeholder="{ }"
             placeholderTextColor="#9aa"
           />
-        </View>
+        </ScrollView>
         <View style={styles.pane}>
           {response ? (
             <MessagePane
@@ -124,38 +164,6 @@ export function RepeaterPanel({
       </View>
     </View>
   );
-}
-
-function rawFromTransaction(tx: ProxyTransactionFull): string {
-  const headerLines = tx.requestHeaders.map((h) => `${h.name}: ${h.value}`).join("\n");
-  const body = tx.requestBodyIsText ? bytesToUtf8(decodeBase64(tx.requestBodyB64)) : "";
-  return `${tx.requestLine}\n${headerLines}\n\n${body}`;
-}
-
-interface ParsedRequest {
-  method: string;
-  path: string;
-  headers: ProxyHeader[];
-  body: string;
-}
-
-function parseRawRequest(raw: string): ParsedRequest {
-  const normalized = raw.replace(/\r\n/g, "\n");
-  const sep = normalized.indexOf("\n\n");
-  const head = sep >= 0 ? normalized.slice(0, sep) : normalized;
-  const body = sep >= 0 ? normalized.slice(sep + 2) : "";
-  const lines = head.split("\n");
-  const requestLine = lines.shift() ?? "";
-  const parts = requestLine.split(/\s+/);
-  const method = parts[0] || "GET";
-  const path = parts[1] || "/";
-  const headers: ProxyHeader[] = [];
-  for (const line of lines) {
-    const idx = line.indexOf(":");
-    if (idx > 0)
-      headers.push({ name: line.slice(0, idx).trim(), value: line.slice(idx + 1).trim() });
-  }
-  return { method, path, headers, body };
 }
 
 const styles = StyleSheet.create((theme: Theme) => ({
@@ -194,30 +202,30 @@ const styles = StyleSheet.create((theme: Theme) => ({
     fontWeight: theme.fontWeight.bold,
   },
   hostInput: {
-    outlineWidth: 0,
     flex: 1,
     minWidth: 0,
     fontSize: theme.fontSize.sm,
     fontFamily: theme.fontFamily.mono,
     color: theme.colors.foreground,
-    paddingVertical: theme.spacing[1],
+    paddingVertical: 4,
     paddingHorizontal: theme.spacing[2],
     borderWidth: 1,
     borderColor: theme.colors.border,
     borderRadius: theme.borderRadius.sm,
+    outlineWidth: 0,
   },
   colon: { color: theme.colors.foregroundMuted },
   portInput: {
-    outlineWidth: 0,
     width: 64,
     fontSize: theme.fontSize.sm,
     fontFamily: theme.fontFamily.mono,
     color: theme.colors.foreground,
-    paddingVertical: theme.spacing[1],
+    paddingVertical: 4,
     paddingHorizontal: theme.spacing[2],
     borderWidth: 1,
     borderColor: theme.colors.border,
     borderRadius: theme.borderRadius.sm,
+    outlineWidth: 0,
   },
   error: {
     color: theme.colors.destructive,
@@ -233,25 +241,62 @@ const styles = StyleSheet.create((theme: Theme) => ({
     backgroundColor: theme.colors.border,
   },
   pane: { flex: 1, minWidth: 0, minHeight: 0, backgroundColor: theme.colors.surface0 },
+  paneContent: { padding: theme.spacing[2], gap: theme.spacing[2] },
   paneTitle: {
     fontSize: theme.fontSize.xs,
     fontWeight: theme.fontWeight.bold,
     color: theme.colors.foreground,
     textTransform: "uppercase",
-    paddingHorizontal: theme.spacing[2],
-    paddingVertical: theme.spacing[1],
-    backgroundColor: theme.colors.surface1,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border,
   },
-  rawInput: {
+  methodRow: { flexDirection: "row", gap: theme.spacing[1] },
+  methodInput: {
+    width: 84,
+    fontSize: theme.fontSize.xs,
+    fontFamily: theme.fontFamily.mono,
+    color: WB_ORANGE,
+    fontWeight: theme.fontWeight.bold,
+    paddingVertical: 4,
+    paddingHorizontal: theme.spacing[2],
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.sm,
     outlineWidth: 0,
+  },
+  pathInput: {
     flex: 1,
+    minWidth: 0,
+    fontSize: theme.fontSize.xs,
+    fontFamily: theme.fontFamily.mono,
+    color: theme.colors.foreground,
+    paddingVertical: 4,
+    paddingHorizontal: theme.spacing[2],
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.sm,
+    outlineWidth: 0,
+  },
+  label: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+    fontWeight: theme.fontWeight.semibold,
+  },
+  bodyHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  formatBtn: {
+    fontSize: theme.fontSize.xs,
+    color: WB_ORANGE,
+    fontWeight: theme.fontWeight.semibold,
+  },
+  bodyInput: {
+    minHeight: 120,
     fontSize: theme.fontSize.xs,
     fontFamily: theme.fontFamily.mono,
     color: theme.colors.foreground,
     padding: theme.spacing[2],
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.sm,
     textAlignVertical: "top",
+    outlineWidth: 0,
   },
   respEmpty: { flex: 1, alignItems: "center", justifyContent: "center" },
   respEmptyText: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm },
