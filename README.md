@@ -98,6 +98,24 @@ with a few deliberate boundaries:
 
 ## ✨ New in this release
 
+### Workbench — an intercepting-proxy security workbench for your simulators (v0.9.43)
+
+- **Capture a simulator's HTTP/HTTPS traffic.** A Burp Suite Community–style workbench built into
+  the app: Captures, Proxy (Intercept · HTTP history · WebSockets), Target (Site map · Scope),
+  Repeater, Intruder, Sequencer, Decoder and Comparer.
+- **Only the target simulator is recorded.** Because iOS simulators share the Mac's network, capture
+  runs through the host proxy — but the Workbench keeps only the chosen simulator's traffic; your own
+  browser's traffic passes through untouched and is never stored.
+- **HTTPS is decrypted** with a pure-JS CA that is trusted on the simulator, and response bodies are
+  decompressed (brotli/gzip/deflate) and pretty-printed. Frida mode auto-bypasses SSL pinning when
+  Frida is present and degrades gracefully when it isn't.
+- **Drive it from chat.** Agents can start/stop capture, query history, replay requests and trust the
+  CA through `proxy_*` tools, and there's a Workbench chat dock.
+- **Install any app onto many simulators** — batch-install a `.app`/`.ipa` across the fleet from the
+  UI or the SimFleet chat agent.
+- **Works on the phone too.** The Workbench is in the mobile navigation, with HTTP history as stacked
+  cards and request/response panels that stack vertically with draggable dividers.
+
 ### Mobile clean-up: one page header, back buttons, no overlaps (v0.9.42)
 
 - **Every page opens the same way.** Icon + bold title, same-size buttons on the right and a
@@ -338,6 +356,44 @@ Or just grab a prebuilt app from the **[latest release](https://github.com/knoob
 
 > **macOS:** on Apple Silicon, download the **macOS‑Apple‑Silicon** asset. Do not install the
 > Intel x64 asset on Apple Silicon — it runs under Rosetta and is intentionally rejected by the app.
+
+---
+
+## Installing the iOS app (IPA) with Sideloadly
+
+The iOS build ships as an unsigned `.ipa`, so it is installed by sideloading it onto a real iPhone
+or iPad signed with your own Apple ID. (App Store IPAs cannot run on the Simulator, and the
+Simulator only runs `.app` bundles — for simulators use SimFleet's batch install instead.)
+**Sideloadly** signs the IPA with your Apple ID and installs it over USB.
+
+1. **Install Sideloadly.** Download it from `sideloadly.io` (macOS and Windows). On macOS open the
+   `.dmg` and drag Sideloadly to Applications; it bundles the drivers it needs. On Windows install
+   **iTunes** and **iCloud** (the Apple.com versions, not the Microsoft Store ones) first so the
+   device is detected.
+2. **Connect your device** over USB, unlock it and tap **Trust** on the "Trust This Computer?"
+   prompt. Keep the device unlocked on the Home screen.
+3. **Load the IPA.** Open Sideloadly and drag the JAgentDesk `.ipa` onto the window (or click the
+   folder/IPA icon to pick it).
+4. **Enter your Apple ID** in the **Apple Account** field. A free Apple ID works — the app is then
+   valid for **7 days** and must be re-signed afterwards; a paid **Apple Developer** account signs
+   it for a year.
+5. **Start.** Click **Start**. If your Apple ID uses two-factor authentication, Sideloadly asks for
+   an **app-specific password** — create one at `appleid.apple.com` (Sign-In and Security →
+   App-Specific Passwords) and paste it. Sideloadly signs and installs the app; wait for **"Done"**
+   in the log.
+6. **Trust the developer on the device.** A sideloaded app will not open until you trust its
+   signing certificate — otherwise the first launch shows an **"Untrusted Developer"** alert. On the
+   iPhone/iPad:
+   1. Open **Settings → General → VPN & Device Management** (on older iOS: **Settings → General →
+      Profiles & Device Management**).
+   2. Under **Developer App**, tap the entry for the Apple ID you signed with.
+   3. Tap **Trust "&lt;your Apple ID&gt;"**, then tap **Trust** again in the confirmation dialog.
+   4. The entry now reads **Verified**. Return to the Home screen and launch JAgentDesk — it opens
+      normally.
+
+> The device must be online the first time you trust the certificate (iOS verifies it with Apple).
+> Free Apple IDs allow only a few sideloaded apps and expire after 7 days — re-run Sideloadly to
+> refresh the signature. Use a paid developer account for long-lived installs.
 
 ---
 

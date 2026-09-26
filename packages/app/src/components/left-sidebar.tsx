@@ -13,6 +13,7 @@ import {
   History,
   Home,
   Plus,
+  Radar,
   Search,
   Server,
   Settings,
@@ -145,6 +146,7 @@ interface SidebarSharedProps {
   handleMarketplace: () => void;
   handleDocker: () => void;
   handleSimulator: () => void;
+  handleWorkbench: () => void;
   supportsForgeHub: boolean;
   labels: SidebarLabels;
   newWorkspaceKeys: ShortcutKey[][] | null;
@@ -172,6 +174,7 @@ interface SidebarLabels {
   marketplace: string;
   docker: string;
   simulator: string;
+  workbench: string;
   closeSidebar: string;
 }
 
@@ -288,6 +291,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     marketplaceRoute,
     dockerRoute,
     simulatorRoute,
+    proxyRoute,
     supportsForgeHub,
   } = useAppNavTargets();
 
@@ -309,6 +313,9 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
   const handleSimulatorDesktop = useCallback(() => {
     if (simulatorRoute) router.push(simulatorRoute as Href);
   }, [simulatorRoute]);
+  const handleWorkbenchDesktop = useCallback(() => {
+    if (proxyRoute) router.push(proxyRoute as Href);
+  }, [proxyRoute]);
 
   const handleClustersDesktop = useCallback(() => {
     if (clustersRoute) router.push(clustersRoute);
@@ -374,6 +381,13 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     }
   }, [simulatorRoute, showMobileAgent]);
 
+  const handleWorkbenchMobile = useCallback(() => {
+    if (proxyRoute) {
+      showMobileAgent();
+      router.push(proxyRoute as Href);
+    }
+  }, [proxyRoute, showMobileAgent]);
+
   const handleViewMoreNavigate = useCallback(() => {
     router.push(buildSessionsRoute());
   }, []);
@@ -415,6 +429,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       marketplace: t("sidebar.actions.marketplace"),
       docker: "Docker",
       simulator: "Simulators",
+      workbench: "Workbench",
       closeSidebar: t("sidebar.actions.closeSidebar"),
     }),
     [t],
@@ -442,6 +457,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     handleMarketplace: handleMarketplaceDesktop,
     handleDocker: handleDockerDesktop,
     handleSimulator: handleSimulatorDesktop,
+    handleWorkbench: handleWorkbenchDesktop,
     supportsForgeHub,
     labels,
     newWorkspaceKeys,
@@ -460,6 +476,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
           handleMarketplace={handleMarketplaceMobile}
           handleDocker={handleDockerMobile}
           handleSimulator={handleSimulatorMobile}
+          handleWorkbench={handleWorkbenchMobile}
           insetsTop={insets.top}
           insetsBottom={insets.bottom}
           closeSidebar={showMobileAgent}
@@ -489,6 +506,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
         handleMarketplace={handleMarketplaceDesktop}
         handleDocker={handleDockerDesktop}
         handleSimulator={handleSimulatorDesktop}
+        handleWorkbench={handleWorkbenchDesktop}
         insetsTop={insets.top}
         active={active}
         handleOpenProject={handleOpenProjectDesktop}
@@ -819,6 +837,7 @@ function MobileSidebar({
   handleMarketplace,
   handleDocker,
   handleSimulator,
+  handleWorkbench,
   supportsForgeHub,
   labels,
   handleAddHost,
@@ -845,6 +864,7 @@ function MobileSidebar({
   const isMarketplaceActive = pathname.includes("/marketplace");
   const isDockerActive = pathname.includes("/docker");
   const isSimulatorActive = pathname.includes("/simulator");
+  const isWorkbenchActive = pathname.includes("/proxy");
   const clusterRouteMatch = pathname.match(/\/h\/([^/]+)\/cluster\/([^/]+)/);
   const clusterRoute = clusterRouteMatch
     ? {
@@ -1022,6 +1042,14 @@ function MobileSidebar({
               variant="compact"
             />
             <SidebarHeaderRow
+              icon={Radar}
+              label={labels.workbench}
+              onPress={handleWorkbench}
+              isActive={isWorkbenchActive}
+              testID="sidebar-workbench-nav"
+              variant="compact"
+            />
+            <SidebarHeaderRow
               icon={BarChart3}
               label={labels.insights}
               onPress={handleInsights}
@@ -1104,6 +1132,7 @@ function DesktopSidebar({
   handleMarketplace,
   handleDocker,
   handleSimulator,
+  handleWorkbench,
   supportsForgeHub,
   labels,
   handleAddHost,
@@ -1131,6 +1160,7 @@ function DesktopSidebar({
   const isMarketplaceActive = pathname.includes("/marketplace");
   const isDockerActive = pathname.includes("/docker");
   const isSimulatorActive = pathname.includes("/simulator");
+  const isWorkbenchActive = pathname.includes("/proxy");
   const clusterRouteMatch = pathname.match(/\/h\/([^/]+)\/cluster\/([^/]+)/);
   const clusterRoute = clusterRouteMatch
     ? {
@@ -1324,6 +1354,14 @@ function DesktopSidebar({
                 onPress={handleSimulator}
                 isActive={isSimulatorActive}
                 testID="sidebar-simulator-nav"
+                variant="compact"
+              />
+              <SidebarHeaderRow
+                icon={Radar}
+                label={labels.workbench}
+                onPress={handleWorkbench}
+                isActive={isWorkbenchActive}
+                testID="sidebar-workbench-nav"
                 variant="compact"
               />
               <SidebarHeaderRow

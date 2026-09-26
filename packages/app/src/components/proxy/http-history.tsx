@@ -3,6 +3,7 @@ import { ScrollView, Text, View } from "react-native";
 import { Copy, MessageSquarePlus, Send, TerminalSquare, Trash2 } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type { ProxyTransactionRow } from "@jagentdesk/protocol/proxy/rpc-schemas";
+import { useIsCompactFormFactor } from "@/constants/layout";
 import type { Theme } from "@/styles/theme";
 import {
   ContextMenu,
@@ -137,6 +138,31 @@ export function HttpHistory({
   onSelect: (id: string) => void;
   actions: HistoryRowActions;
 }) {
+  const isCompact = useIsCompactFormFactor();
+
+  // Phones can't show the eight-column grid — a horizontal scroll would hide the URL/status a tester
+  // needs. Render a stacked card per request instead (method + host + status, then URL, then meta).
+  if (isCompact) {
+    return (
+      <ScrollView style={styles.vScroll}>
+        {rows.length === 0 ? (
+          <Text style={styles.empty}>No requests captured yet.</Text>
+        ) : (
+          rows.map((r) => (
+            <HistoryRow
+              key={r.id}
+              row={r}
+              selected={r.id === selectedId}
+              onSelect={onSelect}
+              actions={actions}
+              compact
+            />
+          ))
+        )}
+      </ScrollView>
+    );
+  }
+
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator style={styles.hScroll}>
       <View style={TABLE_STYLE}>
@@ -175,16 +201,26 @@ export function HttpHistory({
   );
 }
 
+function statusColor(status: number | null): string {
+  if (status == null) return "#8b8b8b";
+  if (status >= 500) return "#e5484d";
+  if (status >= 400) return WB_ORANGE;
+  if (status >= 300) return "#f5a623";
+  return "#30a46c";
+}
+
 const HistoryRow = memo(function HistoryRow({
   row,
   selected,
   onSelect,
   actions,
+  compact = false,
 }: {
   row: ProxyTransactionRow;
   selected: boolean;
   onSelect: (id: string) => void;
   actions: HistoryRowActions;
+  compact?: boolean;
 }) {
   const handlePress = useCallback(() => onSelect(row.id), [onSelect, row.id]);
   const handleCopyUrl = useCallback(() => actions.onCopyUrl(row), [actions, row]);
@@ -197,23 +233,56 @@ const HistoryRow = memo(function HistoryRow({
     () => (row.highlight ? { backgroundColor: row.highlight } : null),
     [row.highlight],
   );
+  const statusStyle = useMemo(() => ({ color: statusColor(row.status) }), [row.status]);
+  const meta = useMemo(() => {
+    const len = row.responseLength == null ? "—" : `${row.responseLength} B`;
+    const time = new Date(row.ts_ms).toLocaleTimeString();
+    return `${len} · ${row.mimeType || "—"} · ${time}`;
+  }, [row.mimeType, row.responseLength, row.ts_ms]);
   return (
     <ContextMenu>
       <ContextMenuTrigger
         enabledOnMobile
         onPress={handlePress}
-        style={[styles.row, selected ? styles.rowSelected : null, highlightStyle]}
+        style={[
+          compact ? styles.card : styles.row,
+          selected ? styles.rowSelected : null,
+          highlightStyle,
+        ]}
         testID={`wb-row-${row.seq}`}
       >
-        {COLUMNS.map((c) => (
-          <Text
-            key={c.key}
-            style={[styles.cell, WIDTH_STYLES[c.key], c.align === "right" ? styles.right : null]}
-            numberOfLines={1}
-          >
-            {c.value(row)}
-          </Text>
-        ))}
+        {compact ? (
+          <>
+            <View style={styles.cardTop}>
+              <Text style={styles.cardMethod} numberOfLines={1}>
+                {row.method}
+              </Text>
+              <Text style={styles.cardHost} numberOfLines={1}>
+                {row.secure ? "https://" : "http://"}
+                {row.host}
+              </Text>
+              <Text style={[styles.cardStatus, statusStyle]} numberOfLines={1}>
+                {row.status == null ? "—" : row.status}
+              </Text>
+            </View>
+            <Text style={styles.cardUrl} numberOfLines={1}>
+              {row.url}
+            </Text>
+            <Text style={styles.cardMeta} numberOfLines={1}>
+              {meta}
+            </Text>
+          </>
+        ) : (
+          COLUMNS.map((c) => (
+            <Text
+              key={c.key}
+              style={[styles.cell, WIDTH_STYLES[c.key], c.align === "right" ? styles.right : null]}
+              numberOfLines={1}
+            >
+              {c.value(row)}
+            </Text>
+          ))
+        )}
       </ContextMenuTrigger>
       <ContextMenuContent align="start" width={230} testID={`wb-row-menu-${row.seq}`}>
         <ContextMenuLabel>{`${row.method} ${row.host}`}</ContextMenuLabel>
@@ -271,6 +340,34 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderBottomColor: theme.colors.border,
   },
   rowSelected: { backgroundColor: WB_ORANGE + "22" },
+  card: {
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    gap: 2,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border,
+  },
+  cardTop: { flexDirection: "row", alignItems: "center", gap: theme.spacing[2] },
+  cardMethod: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.bold,
+    fontFamily: theme.fontFamily.mono,
+    color: theme.colors.foreground,
+  },
+  cardHost: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: theme.fontSize.xs,
+    fontFamily: theme.fontFamily.mono,
+    color: theme.colors.foregroundMuted,
+  },
+  cardStatus: { fontSize: theme.fontSize.xs, fontWeight: theme.fontWeight.bold },
+  cardUrl: {
+    fontSize: theme.fontSize.sm,
+    fontFamily: theme.fontFamily.mono,
+    color: theme.colors.foreground,
+  },
+  cardMeta: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundExtraMuted },
   cell: {
     paddingHorizontal: theme.spacing[2],
     paddingVertical: theme.spacing[1],

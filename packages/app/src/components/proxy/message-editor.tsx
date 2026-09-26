@@ -2,9 +2,11 @@ import { useCallback, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import type { ProxyHeader, ProxyTransactionFull } from "@jagentdesk/protocol/proxy/rpc-schemas";
+import { useIsCompactFormFactor } from "@/constants/layout";
 import type { Theme } from "@/styles/theme";
 import { WB_ORANGE } from "./workbench-constants";
 import { bytesToUtf8, decodeBase64 } from "./base64";
+import { useSplitRatio, WbSplitBar } from "./wb-resize";
 
 // The Burp message editor: request on the left, response on the right (stacked on phones), each
 // with Pretty / Raw / Hex sub-tabs. Pretty pretty-prints JSON; Raw shows the exact bytes as text;
@@ -16,6 +18,15 @@ const MODES: ViewMode[] = ["pretty", "raw", "hex"];
 const MODE_LABELS: Record<ViewMode, string> = { pretty: "Pretty", raw: "Raw", hex: "Hex" };
 
 export function MessageEditor({ transaction }: { transaction: ProxyTransactionFull | null }) {
+  const isCompact = useIsCompactFormFactor();
+  const axis = isCompact ? "y" : "x";
+  const { ratio, onPointerDown } = useSplitRatio({ initial: 0.5, min: 0.2, max: 0.8, axis });
+  const splitStyle = useMemo(
+    () => [styles.split, isCompact ? styles.splitColumn : null],
+    [isCompact],
+  );
+  const requestStyle = useMemo(() => [styles.growPane, { flexGrow: ratio }], [ratio]);
+  const responseStyle = useMemo(() => [styles.growPane, { flexGrow: 1 - ratio }], [ratio]);
   if (!transaction) {
     return (
       <View style={styles.empty}>
@@ -24,21 +35,26 @@ export function MessageEditor({ transaction }: { transaction: ProxyTransactionFu
     );
   }
   return (
-    <View style={styles.split}>
-      <MessagePane
-        title="Request"
-        startLine={transaction.requestLine}
-        headers={transaction.requestHeaders}
-        bodyB64={transaction.requestBodyB64}
-        isText={transaction.requestBodyIsText}
-      />
-      <MessagePane
-        title="Response"
-        startLine={transaction.statusLine}
-        headers={transaction.responseHeaders}
-        bodyB64={transaction.responseBodyB64}
-        isText={transaction.responseBodyIsText}
-      />
+    <View style={splitStyle}>
+      <View style={requestStyle}>
+        <MessagePane
+          title="Request"
+          startLine={transaction.requestLine}
+          headers={transaction.requestHeaders}
+          bodyB64={transaction.requestBodyB64}
+          isText={transaction.requestBodyIsText}
+        />
+      </View>
+      <WbSplitBar axis={axis} onPointerDown={onPointerDown} />
+      <View style={responseStyle}>
+        <MessagePane
+          title="Response"
+          startLine={transaction.statusLine}
+          headers={transaction.responseHeaders}
+          bodyB64={transaction.responseBodyB64}
+          isText={transaction.responseBodyIsText}
+        />
+      </View>
     </View>
   );
 }
@@ -198,9 +214,10 @@ const styles = StyleSheet.create((theme: Theme) => ({
     flex: 1,
     minHeight: 0,
     flexDirection: "row",
-    gap: 1,
     backgroundColor: theme.colors.border,
   },
+  splitColumn: { flexDirection: "column" },
+  growPane: { flexBasis: 0, minWidth: 0, minHeight: 0 },
   pane: { flex: 1, minWidth: 0, minHeight: 0, backgroundColor: theme.colors.surface0 },
   paneTabs: {
     flexDirection: "row",

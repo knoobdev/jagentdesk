@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { ChevronDown, Plus, X } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type { ProxyTransactionFull } from "@jagentdesk/protocol/proxy/rpc-schemas";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
+import { useIsCompactFormFactor } from "@/constants/layout";
 import type { Theme } from "@/styles/theme";
 import {
   ContextMenu,
@@ -20,6 +21,7 @@ import {
 import { bytesToUtf8, decodeBase64, utf8ToBase64 } from "./base64";
 import { HeaderEditor, makeHeaderRows, rowsToHeaders, type HeaderRowValue } from "./header-editor";
 import { MessagePane } from "./message-editor";
+import { useSplitRatio, WbSplitBar } from "./wb-resize";
 import { WbButton } from "./wb-button";
 import { WB_ORANGE } from "./workbench-constants";
 
@@ -333,6 +335,15 @@ function RequestResponse({
   const setRows = useCallback((rows: HeaderRowValue[]) => onPatch({ rows }), [onPatch]);
   const setBody = useCallback((body: string) => onPatch({ body }), [onPatch]);
   const clearTarget = useCallback(() => onPatch({ host: "", path: "/" }), [onPatch]);
+  const isCompact = useIsCompactFormFactor();
+  const axis = isCompact ? "y" : "x";
+  const { ratio, onPointerDown } = useSplitRatio({ initial: 0.5, min: 0.2, max: 0.8, axis });
+  const splitStyle = useMemo(
+    () => [styles.split, isCompact ? styles.splitColumn : null],
+    [isCompact],
+  );
+  const reqPaneStyle = useMemo(() => [styles.reqPane, { flexGrow: ratio }], [ratio]);
+  const respPaneStyle = useMemo(() => [styles.pane, { flexGrow: 1 - ratio }], [ratio]);
   const formatJson = useCallback(() => {
     try {
       onPatch({ body: JSON.stringify(JSON.parse(tab.body), null, 2), error: null });
@@ -375,8 +386,8 @@ function RequestResponse({
         <WbButton label="Send" onPress={onSend} loading={tab.sending} testID="wb-repeater-send" />
       </View>
       {tab.error ? <Text style={styles.error}>{tab.error}</Text> : null}
-      <View style={styles.split}>
-        <View style={styles.reqPane}>
+      <View style={splitStyle}>
+        <View style={reqPaneStyle}>
           <View style={styles.reqHeadFixed}>
             <Text style={styles.paneTitle}>REQUEST</Text>
             <View style={styles.methodRow}>
@@ -415,7 +426,8 @@ function RequestResponse({
             placeholderTextColor="#9aa"
           />
         </View>
-        <View style={styles.pane}>
+        <WbSplitBar axis={axis} onPointerDown={onPointerDown} />
+        <View style={respPaneStyle}>
           {tab.response ? (
             <MessagePane
               title="Response"
@@ -580,12 +592,12 @@ const styles = StyleSheet.create((theme: Theme) => ({
     flex: 1,
     minHeight: 0,
     flexDirection: "row",
-    gap: 1,
     backgroundColor: theme.colors.border,
   },
-  pane: { flex: 1, minWidth: 0, minHeight: 0, backgroundColor: theme.colors.surface0 },
+  splitColumn: { flexDirection: "column" },
+  pane: { flexBasis: 0, minWidth: 0, minHeight: 0, backgroundColor: theme.colors.surface0 },
   reqPane: {
-    flex: 1,
+    flexBasis: 0,
     minWidth: 0,
     minHeight: 0,
     backgroundColor: theme.colors.surface0,

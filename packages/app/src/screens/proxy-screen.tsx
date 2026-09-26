@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { MessageSquare, Radar, X } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
@@ -30,6 +30,7 @@ import { TargetPanel } from "@/components/proxy/target-panel";
 import { IntruderPanel } from "@/components/proxy/intruder-panel";
 import { SequencerPanel } from "@/components/proxy/sequencer-panel";
 import { absoluteUrl, buildCurl } from "@/components/proxy/curl";
+import { useDragSize, WbSplitBar } from "@/components/proxy/wb-resize";
 import {
   WB_ORANGE,
   WORKBENCH_TABS,
@@ -363,35 +364,8 @@ function HistoryEditorPane({
   onClose: () => void;
   actions: HistoryRowActions;
 }) {
-  const [editorHeight, setEditorHeight] = useState(320);
-  const heightRef = useRef(320);
-  const handleRef = useRef<View | null>(null);
-  const editorStyle = useMemo(() => [styles.editorPane, { height: editorHeight }], [editorHeight]);
-
-  // Drag-to-resize via real DOM pointer events (Electron/Chromium). RN's responder system does not
-  // reliably deliver move events for a thin handle on web, so we listen on the document while dragging.
-  useEffect(() => {
-    const node = handleRef.current as unknown as HTMLElement | null;
-    if (!node || typeof window === "undefined") return undefined;
-    const onDown = (down: MouseEvent) => {
-      down.preventDefault();
-      const startY = down.clientY;
-      const startH = heightRef.current;
-      const onMove = (move: MouseEvent) => {
-        const next = Math.max(120, Math.min(900, startH + (startY - move.clientY)));
-        heightRef.current = next;
-        setEditorHeight(next);
-      };
-      const onUp = () => {
-        window.removeEventListener("mousemove", onMove);
-        window.removeEventListener("mouseup", onUp);
-      };
-      window.addEventListener("mousemove", onMove);
-      window.addEventListener("mouseup", onUp);
-    };
-    node.addEventListener("mousedown", onDown);
-    return () => node.removeEventListener("mousedown", onDown);
-  }, [selectedTx]);
+  const editor = useDragSize({ initial: 320, min: 120, max: 900, axis: "y", invert: true });
+  const editorStyle = useMemo(() => [styles.editorPane, { height: editor.size }], [editor.size]);
 
   return (
     <View style={styles.proxyPane}>
@@ -405,7 +379,7 @@ function HistoryEditorPane({
       </View>
       {selectedTx ? (
         <View style={editorStyle}>
-          <View ref={handleRef} style={styles.resizeBar} />
+          <WbSplitBar axis="y" onPointerDown={editor.onPointerDown} />
           <View style={styles.editorBar}>
             <Text style={styles.editorBarTitle} numberOfLines={1}>
               {selectedTx.method} {selectedTx.host}
@@ -583,12 +557,6 @@ const styles = StyleSheet.create((theme: Theme) => ({
   historyPane: { flex: 1, minHeight: 0 },
   editorPane: {
     minHeight: 120,
-    borderTopWidth: 1,
-    borderTopColor: theme.colors.border,
-  },
-  resizeBar: {
-    height: 8,
-    backgroundColor: theme.colors.surface2,
   },
   editorBar: {
     flexDirection: "row",

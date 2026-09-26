@@ -51,6 +51,10 @@ export interface MitmProxyOptions {
     payload: Buffer;
     host: string;
   }) => void;
+  // When set, a transaction is recorded only if this resolves true for the connection's source port.
+  // Used by system-proxy capture to keep only the target simulator's traffic (the host proxy is
+  // Mac-wide, so the user's own browser also flows through; it is forwarded but not stored).
+  shouldRecord?: (originPort: number) => Promise<boolean>;
 }
 
 interface SocketTarget {
@@ -155,6 +159,7 @@ export class MitmProxy {
       host: parsed.hostname,
       port,
       path: parsed.pathname + parsed.search,
+      originPort: req.socket.remotePort ?? 0,
     });
   }
 
@@ -170,7 +175,25 @@ export class MitmProxy {
       res.end("bad request");
       return;
     }
-    this.forward({ req, res, secure: true, host, port, path: req.url ?? "/" });
+    // The real client (simulator) ephemeral port lives on the socket beneath the TLS layer.
+    const originPort =
+      (underlying as unknown as { remotePort?: number } | undefined)?.remotePort ??
+      tlsSocket.remotePort ??
+      0;
+    this.forward({ req, res, secure: true, host, port, path: req.url ?? "/", originPort });
+  }
+
+  // Record a transaction only once the origin filter resolves true (the connection belongs to the
+  // target simulator). Kept in its own method so the record gate does not deepen the forward()
+  // callback nesting.
+  private recordWhenKept(recordP: Promise<boolean>, tx: StoredTransaction): void {
+    void recordP.then((keep) => {
+      if (keep) {
+        this.opts.store.add(tx);
+        this.opts.onTransaction(tx);
+      }
+      return undefined;
+    });
   }
 
   private forward(input: {
@@ -180,10 +203,16 @@ export class MitmProxy {
     host: string;
     port: number;
     path: string;
+    originPort: number;
   }): void {
-    const { req, res, secure, host, port, path } = input;
+    const { req, res, secure, host, port, path, originPort } = input;
     const startedAt = Date.now();
     const clientSocket = req.socket;
+    // Resolve while the connection is still open (source port maps to a live process now, not after
+    // the upstream round-trip). Absent a filter, everything is recorded.
+    const recordP: Promise<boolean> = this.opts.shouldRecord
+      ? this.opts.shouldRecord(originPort).catch(() => false)
+      : Promise.resolve(true);
     collectBody(req, (rawBody) => {
       const rawHeaders = toHeaderPairs(req.rawHeaders);
       void this.applyIntercept({
@@ -226,16 +255,17 @@ export class MitmProxy {
                 responseBody,
                 startedAt,
                 clientIp: clientSocket.remoteAddress ?? "",
-                clientPort: clientSocket.remotePort ?? 0,
+                clientPort: originPort || (clientSocket.remotePort ?? 0),
                 edited: decision.edited,
               });
-              this.opts.store.add(tx);
-              this.opts.onTransaction(tx);
+              // Always forward the response so the host's own traffic is never disrupted; only record
+              // it when the connection belongs to the target simulator.
               res.writeHead(
                 upstreamRes.statusCode ?? 502,
                 sanitizeResponseHeaders(upstreamRes.headers),
               );
               res.end(responseBody);
+              this.recordWhenKept(recordP, tx);
             });
           },
         );

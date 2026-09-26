@@ -7,9 +7,11 @@ import type {
   ProxyTransactionRow,
 } from "@jagentdesk/protocol/proxy/rpc-schemas";
 import type { Theme } from "@/styles/theme";
+import { useIsCompactFormFactor } from "@/constants/layout";
 import { HttpHistory, type HistoryRowActions } from "./http-history";
 import { MessageEditor } from "./message-editor";
 import { ScopeEditor } from "./scope-editor";
+import { useDragSize, WbSplitBar } from "./wb-resize";
 import { WB_ORANGE } from "./workbench-constants";
 
 // Burp Target: a Site map (hosts discovered from captured traffic, with their requests) and a Scope
@@ -63,6 +65,27 @@ function SiteMap({
 }) {
   const [selectedHost, setSelectedHost] = useState<string | null>(null);
   const [selectedTx, setSelectedTx] = useState<ProxyTransactionFull | null>(null);
+  const isCompact = useIsCompactFormFactor();
+  // Desktop: hosts sit in a resizable left column. Phones stack them as a short list above the table
+  // (a 240px-wide sidebar beside a table is unusable at 393px), draggable by height instead.
+  const tree = useDragSize(
+    isCompact
+      ? { initial: 150, min: 90, max: 320, axis: "y" }
+      : { initial: 240, min: 140, max: 520, axis: "x" },
+  );
+  const editor = useDragSize({ initial: 320, min: 120, max: 900, axis: "y", invert: true });
+  const mapSplitStyle = useMemo(
+    () => [styles.mapSplit, isCompact ? styles.mapSplitColumn : null],
+    [isCompact],
+  );
+  const treeStyle = useMemo(
+    () =>
+      isCompact
+        ? [styles.tree, styles.treeCompact, { height: tree.size }]
+        : [styles.tree, { width: tree.size }],
+    [isCompact, tree.size],
+  );
+  const editorStyle = useMemo(() => [styles.mapEditor, { height: editor.size }], [editor.size]);
 
   const hosts = useMemo<HostNode[]>(() => {
     const map = new Map<string, HostNode>();
@@ -91,8 +114,8 @@ function SiteMap({
   );
 
   return (
-    <View style={styles.mapSplit}>
-      <ScrollView style={styles.tree}>
+    <View style={mapSplitStyle}>
+      <ScrollView style={treeStyle}>
         <HostRow
           host={null}
           label="All hosts"
@@ -111,6 +134,7 @@ function SiteMap({
           />
         ))}
       </ScrollView>
+      <WbSplitBar axis={isCompact ? "y" : "x"} onPointerDown={tree.onPointerDown} />
       <View style={styles.mapMain}>
         <View style={styles.mapTable}>
           <HttpHistory
@@ -121,9 +145,12 @@ function SiteMap({
           />
         </View>
         {selectedTx ? (
-          <View style={styles.mapEditor}>
-            <MessageEditor transaction={selectedTx} />
-          </View>
+          <>
+            <WbSplitBar axis="y" onPointerDown={editor.onPointerDown} />
+            <View style={editorStyle}>
+              <MessageEditor transaction={selectedTx} />
+            </View>
+          </>
         ) : null}
       </View>
     </View>
@@ -181,12 +208,12 @@ const styles = StyleSheet.create((theme: Theme) => ({
     fontWeight: theme.fontWeight.semibold,
   },
   mapSplit: { flex: 1, minHeight: 0, flexDirection: "row" },
+  mapSplitColumn: { flexDirection: "column" },
   tree: {
     width: 240,
-    borderRightWidth: 1,
-    borderRightColor: theme.colors.border,
     backgroundColor: theme.colors.surfaceSidebar,
   },
+  treeCompact: { width: "100%", flexGrow: 0, flexShrink: 0 },
   hostRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -212,5 +239,5 @@ const styles = StyleSheet.create((theme: Theme) => ({
   hostCount: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
   mapMain: { flex: 1, minWidth: 0, minHeight: 0 },
   mapTable: { flex: 1, minHeight: 0 },
-  mapEditor: { flex: 1, minHeight: 0, borderTopWidth: 1, borderTopColor: theme.colors.border },
+  mapEditor: { minHeight: 0 },
 }));

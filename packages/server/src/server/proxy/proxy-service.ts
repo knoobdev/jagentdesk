@@ -14,6 +14,7 @@ import type {
 import { WorkbenchCA } from "./ca.js";
 import { CaptureStore, toFull, toRow, type HistoryQuery } from "./capture-store.js";
 import { MitmProxy, type InterceptInput, type InterceptOutcome } from "./mitm-proxy.js";
+import { makeSimOriginFilter } from "./sim-origin.js";
 import { executeRequest, type ExecuteRequestInput } from "./http-exec.js";
 import { fridaAvailability, launchAndUnpin, type UnpinHandle } from "./frida-control.js";
 import { execCommand } from "../../utils/spawn.js";
@@ -211,6 +212,10 @@ export class ProxyService {
       transactionCount: 0,
       error: null,
     };
+    // System capture is Mac-wide (simulators only honor the host proxy), so record only the target
+    // simulator's traffic — the host's own browser flows through the proxy but is never stored.
+    const shouldRecord =
+      input.mode === "system" && input.udid ? makeSimOriginFilter(input.udid) : undefined;
     const proxy = new MitmProxy({
       ca: this.ca,
       sessionId: id,
@@ -218,6 +223,7 @@ export class ProxyService {
       udid: meta.udid,
       bundleId: meta.bundleId,
       port: input.listenerPort ?? undefined,
+      shouldRecord,
       onTransaction: (tx) => {
         const entry = this.sessions.get(id);
         if (entry) entry.meta.transactionCount += 1;
