@@ -105,6 +105,7 @@ export const ProxyCaptureStartRequestSchema = req("proxy/capture/start", {
   label: z.string().optional(),
   udid: z.string().optional(),
   bundleId: z.string().optional(),
+  listenerPort: z.number().optional(),
 });
 export const ProxyCaptureStartResponseSchema = resp("proxy/capture/start/response", {
   session: ProxyCaptureSessionSchema.nullable(),

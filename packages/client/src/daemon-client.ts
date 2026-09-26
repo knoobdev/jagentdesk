@@ -7209,6 +7209,7 @@ export class DaemonClient {
     label?: string;
     udid?: string;
     bundleId?: string;
+    listenerPort?: number;
     requestId?: string;
   }): Promise<ProxyCaptureStartPayload> {
     return this.sendCorrelatedSessionRequest({
@@ -7219,6 +7220,7 @@ export class DaemonClient {
         label: options.label,
         udid: options.udid,
         bundleId: options.bundleId,
+        listenerPort: options.listenerPort,
       },
       responseType: "proxy/capture/start/response",
     });

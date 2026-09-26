@@ -41,6 +41,7 @@ export interface MitmProxyOptions {
   udid?: string | null;
   bundleId?: string | null;
   host?: string; // listener bind address, default 127.0.0.1
+  port?: number; // fixed listener port; 0/undefined = ephemeral
   // When set, each request is offered for interception before it is forwarded (Burp Intercept).
   intercept?: (input: InterceptInput) => Promise<InterceptOutcome>;
   // When set, WebSocket data frames passing through the tunnel are reported (Burp WebSockets history).
@@ -106,7 +107,7 @@ export class MitmProxy {
     await new Promise<void>((resolve, reject) => {
       const srv = this.server!;
       srv.once("error", reject);
-      srv.listen(0, this.listenerHost, () => {
+      srv.listen(this.opts.port ?? 0, this.listenerHost, () => {
         const addr = srv.address();
         this.listenerPort = typeof addr === "object" && addr ? addr.port : 0;
         srv.removeListener("error", reject);

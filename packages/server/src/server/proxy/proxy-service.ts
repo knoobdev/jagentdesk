@@ -63,6 +63,7 @@ export interface CaptureStartInput {
   label?: string;
   udid?: string | null;
   bundleId?: string | null;
+  listenerPort?: number | null;
 }
 
 export class ProxyService {
@@ -216,6 +217,7 @@ export class ProxyService {
       store: this.store,
       udid: meta.udid,
       bundleId: meta.bundleId,
+      port: input.listenerPort ?? undefined,
       onTransaction: (tx) => {
         const entry = this.sessions.get(id);
         if (entry) entry.meta.transactionCount += 1;

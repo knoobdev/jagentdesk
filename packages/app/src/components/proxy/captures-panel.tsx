@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { StyleSheet } from "react-native-unistyles";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import type { ProxyCaptureSession } from "@jagentdesk/protocol/proxy/rpc-schemas";
+import type { SimDevice } from "@jagentdesk/protocol/simulator/rpc-schemas";
 import type { Theme } from "@/styles/theme";
 import { Button } from "@/components/ui/button";
 import { WbButton } from "./wb-button";
@@ -59,13 +60,20 @@ export function CapturesPanel({
     }
   }, [client]);
 
+  const [configMode, setConfigMode] = useState<"manual" | "system" | null>(null);
   const start = useCallback(
-    async (mode: "manual" | "system") => {
+    async (opts: {
+      mode: "manual" | "system";
+      udid?: string;
+      label?: string;
+      listenerPort?: number;
+    }) => {
       if (!client) return;
+      setConfigMode(null);
       setBusy(true);
       setError(null);
       try {
-        const res = await client.proxyCaptureStart({ mode });
+        const res = await client.proxyCaptureStart(opts);
         if (res.error) setError(res.error);
         else if (res.session) onSelectSession(res.session.id);
       } catch (err) {
@@ -76,8 +84,9 @@ export function CapturesPanel({
     },
     [client, onSelectSession],
   );
-  const handleStart = useCallback(() => start("manual"), [start]);
-  const handleStartSystem = useCallback(() => start("system"), [start]);
+  const handleStart = useCallback(() => setConfigMode("manual"), []);
+  const handleStartSystem = useCallback(() => setConfigMode("system"), []);
+  const closeConfig = useCallback(() => setConfigMode(null), []);
 
   const handleStop = useCallback(
     async (id: string) => {
@@ -126,6 +135,8 @@ export function CapturesPanel({
         simulators so HTTPS is decrypted. Stopping restores your proxy settings.
       </Text>
       {error ? <Text style={styles.error}>{error}</Text> : null}
+
+      <CaptureConfigModal mode={configMode} client={client} onStart={start} onClose={closeConfig} />
 
       {frida ? (
         <FridaCard status={frida} installing={installingFrida} onInstall={handleInstallFrida} />
@@ -194,6 +205,136 @@ function FridaCard({
         />
       ) : null}
     </View>
+  );
+}
+
+// Choose what to capture before starting — for "system" a specific booted simulator (its CA is
+// trusted and the session is labelled with it, so you know which device you are aiming at); for
+// "manual" an optional fixed listener port. Nothing starts until you confirm.
+function CaptureConfigModal({
+  mode,
+  client,
+  onStart,
+  onClose,
+}: {
+  mode: "manual" | "system" | null;
+  client: DaemonClient | null;
+  onStart: (opts: {
+    mode: "manual" | "system";
+    udid?: string;
+    label?: string;
+    listenerPort?: number;
+  }) => void;
+  onClose: () => void;
+}) {
+  const [devices, setDevices] = useState<SimDevice[]>([]);
+  const [udid, setUdid] = useState<string | null>(null);
+  const [port, setPort] = useState("");
+
+  useEffect(() => {
+    if (mode !== "system" || !client) return;
+    void client.simulatorList().then((res) => {
+      const booted = res.devices.filter((d) => d.isBooted);
+      setDevices(booted);
+      setUdid(booted[0]?.udid ?? null);
+      return undefined;
+    });
+  }, [mode, client]);
+
+  const startSystem = useCallback(() => {
+    const dev = devices.find((d) => d.udid === udid);
+    onStart({
+      mode: "system",
+      udid: udid ?? undefined,
+      label: dev ? `${dev.name} (system)` : "System capture",
+    });
+  }, [devices, onStart, udid]);
+
+  const startManual = useCallback(() => {
+    const p = Number(port);
+    onStart({ mode: "manual", listenerPort: Number.isInteger(p) && p > 0 ? p : undefined });
+  }, [onStart, port]);
+
+  return (
+    <Modal visible={mode != null} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={styles.modalBackdrop} onPress={onClose}>
+        <Pressable style={styles.modalCard}>
+          {mode === "system" ? (
+            <>
+              <Text style={styles.modalTitle}>Capture a simulator</Text>
+              <Text style={styles.modalHint}>
+                Routes this Mac traffic through the proxy and trusts the CA on the chosen simulator.
+                All simulators share the Mac network, so pick which one to aim at (its HTTPS
+                decrypts).
+              </Text>
+              <ScrollView style={styles.deviceList}>
+                {devices.length === 0 ? (
+                  <Text style={styles.modalHint}>
+                    No booted simulators. Boot one on the Simulators screen.
+                  </Text>
+                ) : (
+                  devices.map((d) => (
+                    <DeviceChoice
+                      key={d.udid}
+                      device={d}
+                      selected={d.udid === udid}
+                      onSelect={setUdid}
+                    />
+                  ))
+                )}
+              </ScrollView>
+              <View style={styles.modalActions}>
+                <WbButton label="Cancel" variant="ghost" onPress={onClose} />
+                <WbButton
+                  label="Start capture"
+                  onPress={startSystem}
+                  disabled={devices.length === 0}
+                />
+              </View>
+            </>
+          ) : (
+            <>
+              <Text style={styles.modalTitle}>New manual listener</Text>
+              <Text style={styles.modalHint}>
+                Point a client at 127.0.0.1:&lt;port&gt;. Leave the port blank to auto-pick a free
+                one.
+              </Text>
+              <TextInput
+                style={styles.modalInput}
+                value={port}
+                onChangeText={setPort}
+                placeholder="Port (optional, e.g. 8080)"
+                keyboardType="number-pad"
+              />
+              <View style={styles.modalActions}>
+                <WbButton label="Cancel" variant="ghost" onPress={onClose} />
+                <WbButton label="Create listener" onPress={startManual} />
+              </View>
+            </>
+          )}
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+function DeviceChoice({
+  device,
+  selected,
+  onSelect,
+}: {
+  device: SimDevice;
+  selected: boolean;
+  onSelect: (udid: string) => void;
+}) {
+  const handle = useCallback(() => onSelect(device.udid), [device.udid, onSelect]);
+  return (
+    <Pressable onPress={handle} style={styles.deviceChoice}>
+      <View style={selected ? styles.radioOn : styles.radioOff} />
+      <Text style={styles.deviceChoiceText} numberOfLines={1}>
+        {device.name} · {device.runtime}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -359,4 +500,57 @@ const styles = StyleSheet.create((theme: Theme) => ({
   stateTag: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
   sessionRemove: { width: 26, height: 26, alignItems: "center", justifyContent: "center" },
   sessionRemoveText: { color: theme.colors.foregroundMuted, fontSize: 14 },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: theme.spacing[4],
+  },
+  modalCard: {
+    width: "100%",
+    maxWidth: 440,
+    backgroundColor: theme.colors.surface0,
+    borderRadius: theme.borderRadius.lg,
+    padding: theme.spacing[4],
+    gap: theme.spacing[3],
+  },
+  modalTitle: {
+    fontSize: theme.fontSize.base,
+    fontWeight: theme.fontWeight.bold,
+    color: theme.colors.foreground,
+  },
+  modalHint: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.md,
+    padding: theme.spacing[2],
+    fontSize: theme.fontSize.sm,
+    fontFamily: theme.fontFamily.mono,
+    color: theme.colors.foreground,
+    outlineWidth: 0,
+  },
+  modalActions: { flexDirection: "row", justifyContent: "flex-end", gap: theme.spacing[2] },
+  deviceList: { maxHeight: 220 },
+  deviceChoice: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    paddingVertical: theme.spacing[2],
+  },
+  radioOn: { width: 16, height: 16, borderRadius: 8, borderWidth: 5, borderColor: WB_ORANGE },
+  radioOff: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  deviceChoiceText: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foreground,
+  },
 }));

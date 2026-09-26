@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
-import type { GestureResponderEvent } from "react-native";
 import { Radar, X } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type {
@@ -320,20 +319,35 @@ function HistoryEditorPane({
   actions: HistoryRowActions;
 }) {
   const [editorHeight, setEditorHeight] = useState(320);
-  const dragRef = useRef({ startY: 0, startH: 320 });
+  const heightRef = useRef(320);
+  const handleRef = useRef<View | null>(null);
   const editorStyle = useMemo(() => [styles.editorPane, { height: editorHeight }], [editorHeight]);
-  const onGrant = useCallback(
-    (e: GestureResponderEvent) => {
-      dragRef.current = { startY: e.nativeEvent.pageY, startH: editorHeight };
-    },
-    [editorHeight],
-  );
-  const onMove = useCallback((e: GestureResponderEvent) => {
-    const delta = dragRef.current.startY - e.nativeEvent.pageY;
-    const next = Math.max(120, Math.min(900, dragRef.current.startH + delta));
-    setEditorHeight(next);
-  }, []);
-  const setResponder = useCallback(() => true, []);
+
+  // Drag-to-resize via real DOM pointer events (Electron/Chromium). RN's responder system does not
+  // reliably deliver move events for a thin handle on web, so we listen on the document while dragging.
+  useEffect(() => {
+    const node = handleRef.current as unknown as HTMLElement | null;
+    if (!node || typeof window === "undefined") return undefined;
+    const onDown = (down: MouseEvent) => {
+      down.preventDefault();
+      const startY = down.clientY;
+      const startH = heightRef.current;
+      const onMove = (move: MouseEvent) => {
+        const next = Math.max(120, Math.min(900, startH + (startY - move.clientY)));
+        heightRef.current = next;
+        setEditorHeight(next);
+      };
+      const onUp = () => {
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    };
+    node.addEventListener("mousedown", onDown);
+    return () => node.removeEventListener("mousedown", onDown);
+  }, [selectedTx]);
+
   return (
     <View style={styles.proxyPane}>
       <View style={styles.historyPane}>
@@ -346,13 +360,7 @@ function HistoryEditorPane({
       </View>
       {selectedTx ? (
         <View style={editorStyle}>
-          <View
-            style={styles.resizeBar}
-            onStartShouldSetResponder={setResponder}
-            onMoveShouldSetResponder={setResponder}
-            onResponderGrant={onGrant}
-            onResponderMove={onMove}
-          />
+          <View ref={handleRef} style={styles.resizeBar} />
           <View style={styles.editorBar}>
             <Text style={styles.editorBarTitle} numberOfLines={1}>
               {selectedTx.method} {selectedTx.host}
