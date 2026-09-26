@@ -7,11 +7,13 @@
  */
 
 export const SIM_AGENT_LABEL = "jagentdesk.simfleet.server";
+export const PROXY_AGENT_LABEL = "jagentdesk.workbench.server";
 export const DATABASE_AGENT_LABEL = "jagentdesk.database.id";
 export const CLUSTER_AGENT_LABEL = "jagentdesk.cluster.id";
 
 export type DockAgentOwner =
   | { kind: "simfleet"; serverId: string }
+  | { kind: "workbench"; serverId: string }
   | { kind: "database"; databaseId: string }
   | { kind: "cluster"; clusterId: string };
 
@@ -21,6 +23,8 @@ export function resolveDockAgentOwner(labels: AgentLabels): DockAgentOwner | nul
   if (!labels) return null;
   const sim = labels[SIM_AGENT_LABEL];
   if (sim) return { kind: "simfleet", serverId: sim };
+  const workbench = labels[PROXY_AGENT_LABEL];
+  if (workbench) return { kind: "workbench", serverId: workbench };
   const database = labels[DATABASE_AGENT_LABEL];
   if (database) return { kind: "database", databaseId: database };
   const cluster = labels[CLUSTER_AGENT_LABEL];

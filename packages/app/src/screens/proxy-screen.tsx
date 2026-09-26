@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
-import { Radar, X } from "lucide-react-native";
+import { MessageSquare, Radar, X } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
+import { Button } from "@/components/ui/button";
+import { useIsCompactFormFactor } from "@/constants/layout";
+import { ProxyChatDock } from "@/components/proxy-chat-dock";
+import { useProxyChatStore } from "@/stores/proxy-chat-store";
 import type {
   ProxyCaptureSession,
   ProxyHeldRequest,
@@ -61,6 +65,39 @@ export function ProxyScreen() {
   const hosts = useHosts();
   const serverId = hosts[0]?.serverId ?? "";
   const client = useHostRuntimeClient(serverId);
+  const isCompact = useIsCompactFormFactor();
+
+  const chatOpen = useProxyChatStore((s) => s.open);
+  const showChat = useProxyChatStore((s) => s.showChat);
+  const hideChat = useProxyChatStore((s) => s.hideChat);
+  const resetForServer = useProxyChatStore((s) => s.resetForServer);
+  const applyDefaultOpen = useProxyChatStore((s) => s.applyDefaultOpen);
+  useEffect(() => {
+    if (serverId) resetForServer(serverId);
+  }, [serverId, resetForServer]);
+  // The agent dock starts open beside the Workbench on desktop; on phones it would cover the tools,
+  // so it starts closed behind its floating button. After that the user's choice sticks.
+  useEffect(() => applyDefaultOpen(!isCompact), [applyDefaultOpen, isCompact]);
+  const toggleChat = useCallback(
+    () => (chatOpen ? hideChat() : showChat()),
+    [chatOpen, hideChat, showChat],
+  );
+  const headerActions = useMemo(
+    () =>
+      isCompact ? null : (
+        <Button
+          size="sm"
+          variant={chatOpen ? "secondary" : "outline"}
+          leftIcon={MessageSquare}
+          onPress={toggleChat}
+          accessibilityLabel={chatOpen ? "Hide agent" : "Show agent"}
+          testID="proxy-chat-toggle"
+        >
+          Agent
+        </Button>
+      ),
+    [isCompact, chatOpen, toggleChat],
+  );
 
   const [tab, setTab] = useState<WorkbenchTab>("captures");
   const [sessions, setSessions] = useState<ProxyCaptureSession[]>([]);
@@ -192,74 +229,82 @@ export function ProxyScreen() {
 
   return (
     <View style={styles.screen}>
-      <PageHeader icon={Radar} title="Workbench" description={DESCRIPTION} />
+      <PageHeader
+        icon={Radar}
+        title="Workbench"
+        description={DESCRIPTION}
+        actions={headerActions}
+      />
       <TabBar tab={tab} onSelect={setTab} />
-      <View style={styles.body}>
-        {tab === "captures" ? (
-          <CapturesPanel
-            client={client}
-            sessions={sessions}
-            selectedSessionId={selectedSessionId}
-            onSelectSession={setSelectedSessionId}
-          />
-        ) : null}
-        {tab === "proxy" ? (
-          <View style={styles.proxyPane}>
-            <View style={styles.subTabs}>
-              <ProxySubTab
-                label="Intercept"
-                active={proxySub === "intercept"}
-                value="intercept"
-                onSelect={setProxySub}
-                badge={held.length}
-              />
-              <ProxySubTab
-                label="HTTP history"
-                active={proxySub === "history"}
-                value="history"
-                onSelect={setProxySub}
-                badge={0}
-              />
-              <ProxySubTab
-                label="WebSockets"
-                active={proxySub === "ws"}
-                value="ws"
-                onSelect={setProxySub}
-                badge={0}
-              />
+      <View style={styles.main}>
+        <View style={styles.body}>
+          {tab === "captures" ? (
+            <CapturesPanel
+              client={client}
+              sessions={sessions}
+              selectedSessionId={selectedSessionId}
+              onSelectSession={setSelectedSessionId}
+            />
+          ) : null}
+          {tab === "proxy" ? (
+            <View style={styles.proxyPane}>
+              <View style={styles.subTabs}>
+                <ProxySubTab
+                  label="Intercept"
+                  active={proxySub === "intercept"}
+                  value="intercept"
+                  onSelect={setProxySub}
+                  badge={held.length}
+                />
+                <ProxySubTab
+                  label="HTTP history"
+                  active={proxySub === "history"}
+                  value="history"
+                  onSelect={setProxySub}
+                  badge={0}
+                />
+                <ProxySubTab
+                  label="WebSockets"
+                  active={proxySub === "ws"}
+                  value="ws"
+                  onSelect={setProxySub}
+                  badge={0}
+                />
+              </View>
+              {proxySub === "intercept" ? (
+                <InterceptPanel
+                  client={client}
+                  held={held}
+                  interceptOn={interceptOn}
+                  onToggle={setInterceptOn}
+                  onResolved={handleResolveHeld}
+                />
+              ) : null}
+              {proxySub === "ws" ? <WsHistory messages={wsMessages} /> : null}
+              {proxySub === "history" ? (
+                <HistoryEditorPane
+                  rows={rows}
+                  selectedTx={selectedTx}
+                  onSelect={handleSelectRow}
+                  onClose={handleCloseEditor}
+                  actions={rowActions}
+                />
+              ) : null}
             </View>
-            {proxySub === "intercept" ? (
-              <InterceptPanel
-                client={client}
-                held={held}
-                interceptOn={interceptOn}
-                onToggle={setInterceptOn}
-                onResolved={handleResolveHeld}
-              />
-            ) : null}
-            {proxySub === "ws" ? <WsHistory messages={wsMessages} /> : null}
-            {proxySub === "history" ? (
-              <HistoryEditorPane
-                rows={rows}
-                selectedTx={selectedTx}
-                onSelect={handleSelectRow}
-                onClose={handleCloseEditor}
-                actions={rowActions}
-              />
-            ) : null}
+          ) : null}
+          <View style={tab === "repeater" ? styles.fillPane : styles.hiddenPane}>
+            <RepeaterPanel client={client} seed={repeaterSeed} />
           </View>
-        ) : null}
-        <View style={tab === "repeater" ? styles.fillPane : styles.hiddenPane}>
-          <RepeaterPanel client={client} seed={repeaterSeed} />
+          {tab === "target" ? (
+            <TargetPanel client={client} rows={allRows} actions={rowActions} />
+          ) : null}
+          {tab === "decoder" ? <DecoderPanel /> : null}
+          {tab === "comparer" ? <ComparerPanel /> : null}
+          {tab === "intruder" ? <IntruderPanel client={client} seed={intruderSeed} /> : null}
+          {tab === "sequencer" ? <SequencerPanel /> : null}
+          {READY_INLINE.has(tab) ? null : <PhasePlaceholder tab={tab} />}
         </View>
-        {tab === "target" ? (
-          <TargetPanel client={client} rows={allRows} actions={rowActions} />
-        ) : null}
-        {tab === "decoder" ? <DecoderPanel /> : null}
-        {tab === "comparer" ? <ComparerPanel /> : null}
-        {tab === "intruder" ? <IntruderPanel client={client} seed={intruderSeed} /> : null}
-        {tab === "sequencer" ? <SequencerPanel /> : null}
-        {READY_INLINE.has(tab) ? null : <PhasePlaceholder tab={tab} />}
+        {serverId ? <ProxyChatDock serverId={serverId} /> : null}
       </View>
       <CommentModal target={commentTarget} onSubmit={submitComment} onCancel={cancelComment} />
     </View>
@@ -488,6 +533,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderRadius: 3,
     backgroundColor: theme.colors.foregroundExtraMuted,
   },
+  main: { flex: 1, flexDirection: "row", minHeight: 0 },
   body: { flex: 1, minHeight: 0 },
   subTabs: {
     flexDirection: "row",
