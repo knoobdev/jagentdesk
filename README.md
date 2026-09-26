@@ -100,6 +100,10 @@ with a few deliberate boundaries:
 
 ### Workbench — an intercepting-proxy security workbench for your simulators (v0.9.43)
 
+<p align="center">
+  <img src="docs/media/workbench-agent-capture.jpg" alt="Workbench driven from its chat agent: the agent runs proxy_capture_start and sim_open_url on a simulator, and the Proxy → HTTP history fills with the simulator's decrypted YouTube requests (m.youtube.com, ytimg, doubleclick), all status 200" width="100%" />
+</p>
+
 - **Capture a simulator's HTTP/HTTPS traffic.** A Burp Suite Community–style workbench built into
   the app: Captures, Proxy (Intercept · HTTP history · WebSockets), Target (Site map · Scope),
   Repeater, Intruder, Sequencer, Decoder and Comparer.
