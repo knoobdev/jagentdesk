@@ -59,20 +59,25 @@ export function CapturesPanel({
     }
   }, [client]);
 
-  const handleStart = useCallback(async () => {
-    if (!client) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const res = await client.proxyCaptureStart({ mode: "manual" });
-      if (res.error) setError(res.error);
-      else if (res.session) onSelectSession(res.session.id);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  }, [client, onSelectSession]);
+  const start = useCallback(
+    async (mode: "manual" | "system") => {
+      if (!client) return;
+      setBusy(true);
+      setError(null);
+      try {
+        const res = await client.proxyCaptureStart({ mode });
+        if (res.error) setError(res.error);
+        else if (res.session) onSelectSession(res.session.id);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [client, onSelectSession],
+  );
+  const handleStart = useCallback(() => start("manual"), [start]);
+  const handleStartSystem = useCallback(() => start("system"), [start]);
 
   const handleStop = useCallback(
     async (id: string) => {
@@ -96,15 +101,23 @@ export function CapturesPanel({
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.toolbar}>
         <WbButton
-          label="Start capture"
-          onPress={handleStart}
+          label="Capture simulators"
+          onPress={handleStartSystem}
           loading={busy}
-          testID="wb-capture-start"
+          testID="wb-capture-system"
         />
+        <Button size="sm" variant="outline" onPress={handleStart} testID="wb-capture-start">
+          Manual listener
+        </Button>
         <Button size="sm" variant="outline" onPress={handleExportCa} testID="wb-ca-export">
           CA certificate
         </Button>
       </View>
+      <Text style={styles.captureHint}>
+        “Capture simulators” routes this Mac HTTP and HTTPS through the proxy — the reliable way to
+        capture simulator apps, which ignore per-app proxy settings — and trusts the CA on booted
+        simulators so HTTPS is decrypted. Stopping restores your proxy settings.
+      </Text>
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       {frida ? (
@@ -244,7 +257,8 @@ function SessionRow({
 const styles = StyleSheet.create((theme: Theme) => ({
   container: { flex: 1, backgroundColor: theme.colors.surface0 },
   content: { padding: theme.spacing[3], gap: theme.spacing[2] },
-  toolbar: { flexDirection: "row", gap: theme.spacing[2] },
+  toolbar: { flexDirection: "row", gap: theme.spacing[2], flexWrap: "wrap" },
+  captureHint: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
   error: { color: theme.colors.destructive, fontSize: theme.fontSize.xs },
   sectionTitle: {
     marginTop: theme.spacing[2],

@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
+import { FolderOpen } from "lucide-react-native";
 import { StyleSheet } from "react-native-unistyles";
 import {
   AdaptiveModalSheet,
@@ -7,6 +8,7 @@ import {
   type SheetHeader,
 } from "@/components/adaptive-modal-sheet";
 import { Button } from "@/components/ui/button";
+import { getDesktopHost } from "@/desktop/host";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import type { SimDevice } from "@jagentdesk/protocol/simulator/rpc-schemas";
 import type { Theme } from "@/styles/theme";
@@ -21,6 +23,12 @@ interface InstallResult {
 }
 
 const SNAP_POINTS = ["70%"];
+
+function firstPath(sel: string | string[] | null): string | null {
+  if (typeof sel === "string") return sel;
+  if (Array.isArray(sel)) return sel[0] ?? null;
+  return null;
+}
 
 export function SimInstallSheet({
   visible,
@@ -39,6 +47,17 @@ export function SimInstallSheet({
   const [results, setResults] = useState<InstallResult[] | null>(null);
 
   const header = useMemo<SheetHeader>(() => ({ title: "Install app on simulators" }), []);
+
+  const browse = useCallback(async () => {
+    const open = getDesktopHost()?.dialog?.open;
+    if (typeof open !== "function") return;
+    const sel = await open({
+      multiple: false,
+      filters: [{ name: "iOS app or archive", extensions: ["app", "ipa"] }],
+    });
+    const picked = firstPath(sel);
+    if (picked) setFilePath(picked);
+  }, []);
 
   const toggle = useCallback((udid: string) => {
     setSelected((prev) => ({ ...prev, [udid]: !prev[udid] }));
@@ -85,17 +104,30 @@ export function SimInstallSheet({
     >
       <View style={styles.body}>
         <Text style={styles.label}>App file (.app or .ipa)</Text>
-        <AdaptiveTextInput
-          resetKey="install"
-          initialValue=""
-          onChangeText={setFilePath}
-          placeholder="/path/to/App.app or /path/to/App.ipa"
-          autoCapitalize="none"
-          autoCorrect={false}
-          editable={!busy}
-          style={styles.input}
-          testID="sim-install-path"
-        />
+        <View style={styles.fileRow}>
+          <View style={styles.fileInput}>
+            <AdaptiveTextInput
+              resetKey={filePath || "install"}
+              initialValue={filePath}
+              onChangeText={setFilePath}
+              placeholder="/path/to/App.app or /path/to/App.ipa"
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={!busy}
+              style={styles.input}
+              testID="sim-install-path"
+            />
+          </View>
+          <Button
+            size="sm"
+            variant="outline"
+            leftIcon={FolderOpen}
+            onPress={browse}
+            testID="sim-install-browse"
+          >
+            Browse…
+          </Button>
+        </View>
         <Text style={styles.hint}>
           Tip: iOS simulators run simulator builds only. App Store / device .ipa files (FB, TikTok…)
           cannot run on a simulator and will report an error.
@@ -184,6 +216,8 @@ const styles = StyleSheet.create((theme: Theme) => ({
     fontFamily: theme.fontFamily.mono,
     color: theme.colors.foreground,
   },
+  fileRow: { flexDirection: "row", alignItems: "center", gap: theme.spacing[2] },
+  fileInput: { flex: 1, minWidth: 0 },
   hint: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
   deviceHead: {
     flexDirection: "row",

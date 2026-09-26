@@ -17,6 +17,13 @@ import { MitmProxy, type InterceptInput, type InterceptOutcome } from "./mitm-pr
 import { executeRequest, type ExecuteRequestInput } from "./http-exec.js";
 import { fridaAvailability, launchAndUnpin, type UnpinHandle } from "./frida-control.js";
 import { execCommand } from "../../utils/spawn.js";
+import {
+  enableSystemProxy,
+  primaryNetworkService,
+  restoreSystemProxy,
+  snapshotSystemProxy,
+  type SystemProxyState,
+} from "./system-proxy.js";
 
 // The daemon-side control plane for the Workbench: owns the CA and the capture store, starts/stops
 // MITM listeners (one per capture session), and fans completed transactions + session-state changes
@@ -28,6 +35,7 @@ interface SessionEntry {
   meta: ProxyCaptureSession;
   proxy: MitmProxy;
   unpin?: UnpinHandle;
+  systemProxy?: SystemProxyState;
 }
 
 // Trust the Workbench CA on a booted simulator so its HTTPS is inspectable (Xcode 12.5+).
@@ -246,8 +254,34 @@ export class ProxyService {
     if (meta.state === "running" && input.mode === "frida" && input.udid && input.bundleId) {
       await this.setupFridaCapture(entry, input.udid, input.bundleId);
     }
+    // System mode: route the whole machine's HTTP+HTTPS through the listener (the reliable way to
+    // capture iOS Simulator traffic, since simulators honor the Mac system proxy — their per-app
+    // proxy config is ignored). HTTPS is decrypted for the simulator because its trust store has the
+    // CA (installed per udid); trust the CA on the given simulator too when one is targeted.
+    if (meta.state === "running" && input.mode === "system") {
+      await this.setupSystemCapture(entry, input.udid ?? null, meta.listenerPort);
+    }
     this.broadcastSession(meta);
     return meta;
+  }
+
+  private async setupSystemCapture(
+    entry: SessionEntry,
+    udid: string | null,
+    port: number,
+  ): Promise<void> {
+    if (udid) await installCaToSimulator(udid, this.ca.certFilePath()).catch(() => {});
+    const service = await primaryNetworkService();
+    if (!service) {
+      entry.meta.error = "could not find an active network service to set the system proxy on.";
+      return;
+    }
+    try {
+      entry.systemProxy = await snapshotSystemProxy(service);
+      await enableSystemProxy(service, "127.0.0.1", port, { https: true });
+    } catch (err) {
+      entry.meta.error = `could not set the system proxy: ${(err as Error).message}`;
+    }
   }
 
   // Trust the CA on the sim and open the app. If Frida is present we also inject the generic unpin;
@@ -286,6 +320,10 @@ export class ProxyService {
     const entry = this.sessions.get(sessionId);
     if (!entry) return;
     entry.unpin?.stop();
+    if (entry.systemProxy) {
+      await restoreSystemProxy(entry.systemProxy).catch(() => {});
+      entry.systemProxy = undefined;
+    }
     await entry.proxy.stop();
     entry.meta.state = "stopped";
     entry.meta.stoppedAt_ms = Date.now();
@@ -325,7 +363,10 @@ export class ProxyService {
 
   async disposeAll(): Promise<void> {
     this.subscribers.clear();
-    for (const e of this.sessions.values()) e.unpin?.stop();
+    for (const e of this.sessions.values()) {
+      e.unpin?.stop();
+      if (e.systemProxy) await restoreSystemProxy(e.systemProxy).catch(() => {});
+    }
     await Promise.all([...this.sessions.values()].map((e) => e.proxy.stop().catch(() => {})));
     this.sessions.clear();
   }

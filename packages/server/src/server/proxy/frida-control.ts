@@ -146,6 +146,58 @@ export async function launchAndUnpin(input: {
   };
 }
 
+// ── SIP-safe path: frida-gadget injected at launch via DYLD_INSERT ──
+// macOS 14 code-signing enforcement kills a frida agent injected into a running simulator process
+// (task_for_pid injection). The robust alternative is to have the app load the frida-gadget dylib
+// itself at launch (DYLD_INSERT_LIBRARIES) with a config that auto-runs the unpin script — no
+// task_for_pid, so it is not blocked. Requires a FridaGadget.dylib built for the iOS Simulator.
+
+export function gadgetPath(env: NodeJS.ProcessEnv = process.env): string | null {
+  const explicit = env.JAGENTDESK_FRIDA_GADGET;
+  if (explicit && fs.existsSync(explicit)) return explicit;
+  const home = env.JAGENTDESK_HOME
+    ? env.JAGENTDESK_HOME.replace(/^~/, os.homedir())
+    : path.join(os.homedir(), ".jagentdesk");
+  const cached = path.join(home, "workbench", "FridaGadget.dylib");
+  return fs.existsSync(cached) ? cached : null;
+}
+
+// Launch the app with the frida-gadget inserted, configured to run the generic unpin script on load.
+// Returns a handle whose stop() terminates the app. Throws if no gadget dylib is available.
+export async function launchWithGadget(input: {
+  udid: string;
+  bundleId: string;
+  gadget: string;
+  scriptPaths?: string[];
+}): Promise<UnpinHandle> {
+  const scripts = [genericUnpinScriptPath(), ...(input.scriptPaths ?? [])];
+  // The gadget reads a config file sitting next to it (same basename + .config).
+  const configPath = input.gadget.replace(/\.dylib$/, "") + ".config";
+  const config = {
+    interaction: {
+      type: "script",
+      path: scripts[0],
+      on_change: "reload",
+    },
+  };
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2), "utf8");
+  const out = await execCommand("xcrun", ["simctl", "launch", input.udid, input.bundleId], {
+    timeout: 60_000,
+    envOverlay: { SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: input.gadget },
+  });
+  const pid = Number(out.stdout.trim().split(/\s+/).pop());
+  const child = spawnProcess("true", []); // placeholder handle; the gadget lives inside the app
+  return {
+    pid: Number.isFinite(pid) ? pid : 0,
+    child,
+    stop: () => {
+      void execCommand("xcrun", ["simctl", "terminate", input.udid, input.bundleId], {
+        timeout: 15_000,
+      }).catch(() => {});
+    },
+  };
+}
+
 // Write a user-supplied Frida script (e.g. fetched from codeshare after review) to a temp file so it
 // can be passed to `frida -l`. The caller is responsible for having shown it to the user first.
 export function writeTempScript(contents: string): string {
