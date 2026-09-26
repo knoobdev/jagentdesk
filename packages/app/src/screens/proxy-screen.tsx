@@ -46,7 +46,6 @@ const READY_INLINE = new Set<WorkbenchTab>([
   "decoder",
   "comparer",
   "target",
-  "logger",
   "intruder",
   "sequencer",
 ]);
@@ -253,15 +252,6 @@ export function ProxyScreen() {
         {tab === "repeater" ? <RepeaterPanel client={client} seed={repeaterSeed} /> : null}
         {tab === "target" ? (
           <TargetPanel client={client} rows={allRows} actions={rowActions} />
-        ) : null}
-        {tab === "logger" ? (
-          <HistoryEditorPane
-            rows={allRows}
-            selectedTx={selectedTx}
-            onSelect={handleSelectRow}
-            onClose={handleCloseEditor}
-            actions={rowActions}
-          />
         ) : null}
         {tab === "decoder" ? <DecoderPanel /> : null}
         {tab === "comparer" ? <ComparerPanel /> : null}

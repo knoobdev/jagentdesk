@@ -15,8 +15,7 @@ export type WorkbenchTab =
   | "intruder"
   | "sequencer"
   | "decoder"
-  | "comparer"
-  | "logger";
+  | "comparer";
 
 export interface WorkbenchTabDef {
   key: WorkbenchTab;
@@ -33,5 +32,4 @@ export const WORKBENCH_TABS: WorkbenchTabDef[] = [
   { key: "sequencer", label: "Sequencer", ready: true },
   { key: "decoder", label: "Decoder", ready: true },
   { key: "comparer", label: "Comparer", ready: true },
-  { key: "logger", label: "Logger", ready: true },
 ];
