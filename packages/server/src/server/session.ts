@@ -180,6 +180,8 @@ import { DockerService } from "./docker/docker-service.js";
 import { DockerStreams } from "./docker/docker-streams.js";
 import { SimulatorService } from "./simulator/simulator-service.js";
 import { SimulatorStreams } from "./simulator/simulator-streams.js";
+import { getSharedProxyService } from "./proxy/proxy-service.js";
+import { fridaAvailability, installFrida } from "./proxy/frida-control.js";
 import { DatabaseRegistry } from "./database/database-registry.js";
 import { ProviderCatalogSession } from "./session/provider/provider-catalog-session.js";
 import { WorkspaceFilesSession } from "./session/files/workspace-files-session.js";
@@ -835,6 +837,8 @@ export class Session {
   private readonly dockerStreams = new DockerStreams(this.dockerService);
   private readonly simulatorService = new SimulatorService();
   private readonly simulatorStreams = new SimulatorStreams(this.simulatorService);
+  private readonly proxyService = getSharedProxyService();
+  private readonly proxySubscriptionIds = new Set<string>();
   private readonly providerCatalogSession: ProviderCatalogSession;
   private readonly workspaceFilesSession: WorkspaceFilesSession;
   private readonly agentConfigSession: AgentConfigSession;
@@ -2248,6 +2252,7 @@ export class Session {
       () => this.dispatchDatabaseMessage(msg),
       () => this.dispatchDockerMessage(msg),
       () => this.dispatchSimulatorMessage(msg),
+      () => this.dispatchProxyMessage(msg),
       () => this.dispatchMigrationMessage(msg),
       () => this.dispatchPluginMessage(msg),
       () => this.dispatchPluginDirectoryMessage(msg),
@@ -3538,6 +3543,319 @@ export class Session {
     return undefined;
   }
 
+  private dispatchProxyMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    const fail = (error: unknown): string =>
+      error instanceof Error ? error.message : String(error);
+    if (msg.type === "proxy/capture/start") {
+      const { requestId } = msg;
+      return this.proxyService
+        .captureStart({ mode: msg.mode, label: msg.label, udid: msg.udid, bundleId: msg.bundleId })
+        .then((session) => {
+          this.emit({
+            type: "proxy/capture/start/response",
+            payload: { requestId, error: null, session },
+          });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({
+            type: "proxy/capture/start/response",
+            payload: { requestId, error: fail(error), session: null },
+          });
+          return undefined;
+        });
+    }
+    if (msg.type === "proxy/capture/stop") {
+      const { requestId, sessionId } = msg;
+      return this.proxyService
+        .captureStop(sessionId)
+        .then(() => {
+          this.emit({
+            type: "proxy/capture/stop/response",
+            payload: { requestId, error: null, sessionId },
+          });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({
+            type: "proxy/capture/stop/response",
+            payload: { requestId, error: fail(error), sessionId },
+          });
+          return undefined;
+        });
+    }
+    if (msg.type === "proxy/session/remove") {
+      const { requestId, sessionId } = msg;
+      return this.proxyService
+        .removeSession(sessionId)
+        .then(() => {
+          this.emit({
+            type: "proxy/session/remove/response",
+            payload: { requestId, error: null, sessionId },
+          });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({
+            type: "proxy/session/remove/response",
+            payload: { requestId, error: fail(error), sessionId },
+          });
+          return undefined;
+        });
+    }
+    if (msg.type === "proxy/sessions/list") {
+      const { requestId } = msg;
+      this.emit({
+        type: "proxy/sessions/list/response",
+        payload: { requestId, error: null, sessions: this.proxyService.sessionsList() },
+      });
+      return undefined;
+    }
+    if (msg.type === "proxy/history/query") {
+      const { requestId } = msg;
+      const rows = this.proxyService.historyQuery({
+        sessionId: msg.sessionId,
+        host: msg.host,
+        method: msg.method,
+        status: msg.status,
+        contains: msg.contains,
+        limit: msg.limit,
+      });
+      this.emit({
+        type: "proxy/history/query/response",
+        payload: { requestId, error: null, rows },
+      });
+      return undefined;
+    }
+    if (msg.type === "proxy/transaction/get") {
+      const { requestId } = msg;
+      this.emit({
+        type: "proxy/transaction/get/response",
+        payload: { requestId, error: null, transaction: this.proxyService.transactionGet(msg.id) },
+      });
+      return undefined;
+    }
+    if (msg.type === "proxy/history/clear") {
+      const { requestId } = msg;
+      this.proxyService.clearHistory(msg.sessionId);
+      this.emit({ type: "proxy/history/clear/response", payload: { requestId, error: null } });
+      return undefined;
+    }
+    if (msg.type === "proxy/transaction/delete") {
+      const { requestId, id } = msg;
+      this.proxyService.deleteTransaction(id);
+      this.emit({
+        type: "proxy/transaction/delete/response",
+        payload: { requestId, error: null, id },
+      });
+      return undefined;
+    }
+    if (msg.type === "proxy/transaction/annotate") {
+      const { requestId } = msg;
+      const row = this.proxyService.annotate(msg.id, {
+        comment: msg.comment,
+        highlight: msg.highlight,
+      });
+      this.emit({
+        type: "proxy/transaction/annotate/response",
+        payload: { requestId, error: null, row },
+      });
+      return undefined;
+    }
+    if (msg.type === "proxy/ca/export") {
+      const { requestId } = msg;
+      try {
+        this.emit({
+          type: "proxy/ca/export/response",
+          payload: { requestId, error: null, pem: this.proxyService.caExportPem() },
+        });
+      } catch (error) {
+        this.emit({
+          type: "proxy/ca/export/response",
+          payload: { requestId, error: fail(error), pem: "" },
+        });
+      }
+      return undefined;
+    }
+    if (msg.type === "proxy/repeater/send") {
+      const { requestId } = msg;
+      return this.proxyService
+        .repeaterSend({
+          secure: msg.secure,
+          host: msg.host,
+          port: msg.port,
+          method: msg.method,
+          path: msg.path,
+          headers: msg.headers,
+          body: Buffer.from(msg.bodyB64, "base64"),
+        })
+        .then((transaction) => {
+          this.emit({
+            type: "proxy/repeater/send/response",
+            payload: { requestId, error: null, transaction },
+          });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({
+            type: "proxy/repeater/send/response",
+            payload: { requestId, error: fail(error), transaction: null },
+          });
+          return undefined;
+        });
+    }
+    if (msg.type === "proxy/intercept/set") {
+      const { requestId } = msg;
+      const enabled = this.proxyService.setIntercept(msg.enabled);
+      this.emit({
+        type: "proxy/intercept/set/response",
+        payload: { requestId, error: null, enabled },
+      });
+      return undefined;
+    }
+    if (msg.type === "proxy/intercept/decide") {
+      const { requestId, heldId } = msg;
+      this.proxyService.decideIntercept({
+        heldId,
+        action: msg.action,
+        method: msg.method,
+        path: msg.path,
+        headers: msg.headers,
+        bodyB64: msg.bodyB64,
+      });
+      this.emit({
+        type: "proxy/intercept/decide/response",
+        payload: { requestId, error: null, heldId },
+      });
+      return undefined;
+    }
+    if (msg.type === "proxy/intruder/run") {
+      const { requestId } = msg;
+      return this.proxyService
+        .intruderRun({
+          secure: msg.secure,
+          host: msg.host,
+          port: msg.port,
+          template: msg.template,
+          payloads: msg.payloads,
+        })
+        .then((out) => {
+          this.emit({
+            type: "proxy/intruder/run/response",
+            payload: { requestId, error: null, ...out },
+          });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({
+            type: "proxy/intruder/run/response",
+            payload: {
+              requestId,
+              error: fail(error),
+              results: [],
+              throttled: false,
+              truncated: false,
+            },
+          });
+          return undefined;
+        });
+    }
+    if (msg.type === "proxy/frida/status") {
+      const { requestId } = msg;
+      return fridaAvailability()
+        .then((a) => {
+          this.emit({
+            type: "proxy/frida/status/response",
+            payload: {
+              requestId,
+              error: null,
+              frida: a.frida,
+              version: a.version,
+              installer: a.installer,
+            },
+          });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({
+            type: "proxy/frida/status/response",
+            payload: {
+              requestId,
+              error: fail(error),
+              frida: false,
+              version: null,
+              installer: null,
+            },
+          });
+          return undefined;
+        });
+    }
+    if (msg.type === "proxy/frida/install") {
+      const { requestId } = msg;
+      return installFrida()
+        .then((r) => {
+          this.emit({
+            type: "proxy/frida/install/response",
+            payload: { requestId, error: null, ok: r.ok, log: r.log, frida: r.availability.frida },
+          });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({
+            type: "proxy/frida/install/response",
+            payload: { requestId, error: fail(error), ok: false, log: "", frida: false },
+          });
+          return undefined;
+        });
+    }
+    if (msg.type === "proxy/scope/get") {
+      const { requestId } = msg;
+      this.emit({
+        type: "proxy/scope/get/response",
+        payload: { requestId, error: null, rules: this.proxyService.getScope() },
+      });
+      return undefined;
+    }
+    if (msg.type === "proxy/scope/set") {
+      const { requestId } = msg;
+      this.emit({
+        type: "proxy/scope/set/response",
+        payload: { requestId, error: null, rules: this.proxyService.setScope(msg.rules) },
+      });
+      return undefined;
+    }
+    if (msg.type === "proxy/subscribe") {
+      const { requestId, subscriptionId } = msg;
+      this.proxySubscriptionIds.add(subscriptionId);
+      this.proxyService.subscribe(subscriptionId, {
+        onTransaction: (row) =>
+          this.emit({ type: "proxy/transaction", payload: { subscriptionId, row } }),
+        onSession: (session) =>
+          this.emit({ type: "proxy/session", payload: { subscriptionId, session } }),
+        onHeld: (held) =>
+          this.emit({ type: "proxy/intercept/held", payload: { subscriptionId, held } }),
+        onWsMessage: (message) =>
+          this.emit({ type: "proxy/ws-message", payload: { subscriptionId, message } }),
+      });
+      this.emit({
+        type: "proxy/subscribe/response",
+        payload: { requestId, error: null, subscriptionId },
+      });
+      return undefined;
+    }
+    if (msg.type === "proxy/unsubscribe") {
+      const { requestId, subscriptionId } = msg;
+      this.proxySubscriptionIds.delete(subscriptionId);
+      this.proxyService.unsubscribe(subscriptionId);
+      this.emit({
+        type: "proxy/unsubscribe/response",
+        payload: { requestId, error: null, subscriptionId },
+      });
+      return undefined;
+    }
+    return undefined;
+  }
+
   private dispatchSimulatorMessage(msg: SessionInboundMessage): Promise<void> | undefined {
     const fail = (error: unknown): string =>
       error instanceof Error ? error.message : String(error);
@@ -3684,6 +4002,25 @@ export class Session {
           this.emit({
             type: "simulator/install-app/response",
             payload: { requestId, error: fail(error) },
+          });
+          return undefined;
+        });
+    }
+    if (msg.type === "simulator/install-batch") {
+      const { requestId } = msg;
+      return this.simulatorService
+        .installOnMany(msg.udids, msg.filePath)
+        .then((results) => {
+          this.emit({
+            type: "simulator/install-batch/response",
+            payload: { requestId, error: null, results },
+          });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({
+            type: "simulator/install-batch/response",
+            payload: { requestId, error: fail(error), results: [] },
           });
           return undefined;
         });
@@ -8762,6 +9099,8 @@ export class Session {
 
     this.dockerStreams.disposeAll();
     this.simulatorStreams.disposeAll();
+    for (const id of this.proxySubscriptionIds) this.proxyService.unsubscribe(id);
+    this.proxySubscriptionIds.clear();
     this.terminalController.dispose();
 
     this.checkoutSession.cleanup();

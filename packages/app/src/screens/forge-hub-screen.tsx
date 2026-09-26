@@ -7806,7 +7806,7 @@ export function ForgeHubScreen() {
         Switch repo
       </Text>
       {quickRepos.length === 0 ? (
-        !reposLoaded && hasConnections ? (
+        connectionsLoading || (!reposLoaded && hasConnections) ? (
           <SidebarRepoSkeleton />
         ) : (
           <Text style={styles.navEmpty}>No other repositories</Text>
@@ -7826,7 +7826,7 @@ export function ForgeHubScreen() {
         Switch repo
       </Text>
       {quickRepos.length === 0 ? (
-        !reposLoaded && hasConnections ? (
+        connectionsLoading || (!reposLoaded && hasConnections) ? (
           <SidebarRepoSkeleton />
         ) : (
           <Text style={styles.navEmpty}>
@@ -8184,7 +8184,10 @@ export function ForgeHubScreen() {
         <View style={[styles.dragStrip, isWeb ? ({ WebkitAppRegion: "drag" } as object) : null]} />
       )}
       <View style={[styles.shell, isCompact && styles.shellStacked]}>
-        {isCompact ? null : (
+        {/* The ClickUp theme already exposes global navigation in its own shell rail, so Forge's
+            private icon rail duplicates it — drop it there and only render it in themes that hide
+            the app rail on Forge. */}
+        {isCompact || isClickUp ? null : (
           <View style={styles.railCol}>
             <ForgeRailButton
               icon={House}

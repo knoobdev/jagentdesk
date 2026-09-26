@@ -1,9 +1,73 @@
 # Changelog
 
 All notable changes to JAgentDesk are documented here. JAgentDesk versions its
-own release line (now `0.9.42`); the many `v0.1.x`–`v1.0.x` tags in history are
+own release line (now `0.9.43`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
+
+## v0.9.43 — 2026-09-27
+
+Workbench: a Burp Suite Community–style intercepting-proxy security workbench for the iOS
+simulators running on this host — capture, inspect and replay their traffic — now scoped so it
+records only the simulator you target and leaves your own browsing alone.
+
+### Added
+
+- **Workbench screen (WB).** A security workbench with the tools a tester expects: Captures, Proxy
+  (Intercept, HTTP history, WebSockets), Target (Site map, Scope), Repeater, Intruder, Sequencer,
+  Decoder and Comparer.
+- **Capture simulators (system-proxy mode).** Routes the Mac's HTTP and HTTPS through an in-process
+  MITM proxy built on Node core with a pure-JS certificate authority (no native modules), trusts the
+  CA on the chosen simulator and decrypts its HTTPS. iOS simulators ignore per-app proxy settings and
+  share the Mac's network, so the host proxy is the reliable path; the listener is restored to its
+  previous state when capture stops.
+- **Simulator-scoped recording.** Even though the host proxy is machine-wide, only the target
+  simulator's traffic is stored: each connection's source process is resolved and kept only when it
+  belongs to the target device (matched by the files it holds open under the device's data directory,
+  since the simulator's network process runs from the shared runtime and does not carry the device id
+  in its command line). The host's own traffic still flows through the proxy but is never recorded.
+- **Frida mode.** Launches the target app and auto-bypasses SSL pinning with a generic unpin script
+  (BoringSSL custom-verify, SecTrustEvaluate, TrustKit and AFNetworking). When Frida is not installed
+  the session still captures non-pinned TLS and offers a one-click guided install rather than failing.
+- **HTTP history.** One row per transaction with method, host, URL, status, length, MIME and time; a
+  right-click / long-press menu to copy the URL, copy as cURL, send to Repeater or Intruder, highlight,
+  comment, delete a row or clear the history. Response bodies are decompressed (brotli, gzip, deflate)
+  and JSON is pretty-printed.
+- **Repeater.** Multiple tabs that can be renamed, duplicated and closed; a method dropdown, header
+  suggestions, a structured request editor, JSON formatting and a response view.
+- **Message editor.** Request and response side by side, each with Pretty, Raw and Hex views.
+- **Manual listener and CA certificate export.**
+- **Agent control.** `proxy_*` tools let chat agents start and stop capture, list sessions, query and
+  clear history, fetch and replay a request, run Intruder, export and trust the CA, and check or
+  install Frida; a Workbench chat dock is available on the screen.
+- **Batch app install (SimFleet).** Install any `.app` or `.ipa` onto many simulators at once from the
+  UI (with a file browser) or from the SimFleet chat agent.
+- **Workbench on mobile.** The Workbench is now reachable from the phone navigation drawer.
+
+### Changed
+
+- **Resizable panels across the Workbench.** The HTTP history table and its request/response detail,
+  the request/response message editor, the Target site map (host tree, request table and editor) and
+  the Repeater request/response all have draggable dividers with a visible grip and the correct
+  resize cursor.
+- **Responsive Workbench on phones.** On a phone the HTTP history renders as stacked cards (method,
+  host, colour-coded status, then URL and metadata) instead of a wide grid, and every side-by-side
+  split (request/response, site-map tree/table, Repeater) stacks vertically.
+- **Forge under the ClickUp theme** no longer draws its own navigation rail — the shell rail already
+  provides those destinations, so the duplicate column is dropped.
+
+### Fixed
+
+- **Capture no longer records the host's browser.** Previously system-proxy capture stored every app's
+  traffic on the Mac, including your own browser; it is now limited to the target simulator.
+- **Drag-to-resize actually works.** The Workbench dividers now use pointer events with pointer
+  capture, so a divider tracks the drag instead of not responding.
+- **CA certificate is written with LF line endings** so `simctl` accepts it when trusting the root on a
+  simulator.
+- **Forge "Switch repo" on mobile** shows a loading placeholder while connections and repositories are
+  still loading, instead of prematurely showing "Connect an account" / "No repositories".
+- **Capture config dialog** no longer flashes the manual-listener dialog when the simulator picker is
+  cancelled.
 
 ## v0.9.42 — 2026-09-26
 

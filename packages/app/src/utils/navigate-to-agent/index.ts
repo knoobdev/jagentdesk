@@ -4,10 +4,12 @@ import { useSessionStore } from "@/stores/session-store";
 import { useClusterChatStore } from "@/stores/cluster-chat-store";
 import { useDatabaseChatStore } from "@/stores/database-chat-store";
 import { useSimChatStore } from "@/stores/sim-chat-store";
+import { useProxyChatStore } from "@/stores/proxy-chat-store";
 import { resolveDockAgentOwner } from "@/utils/dock-agents";
 import {
   buildClusterWorkloadsRoute,
   buildDatabaseBrowseRoute,
+  buildProxyRoute,
   buildSimulatorRoute,
 } from "@/utils/host-routes";
 import { resolveNavigateToAgent, type NavigateToAgentInput } from "./resolve";
@@ -31,6 +33,9 @@ export function navigateToAgent(input: NavigateToAgentInput): string {
       if (owner.kind === "simfleet") {
         useSimChatStore.getState().openChat({ serverId: owner.serverId, agentId, workspaceId });
         route = buildSimulatorRoute(owner.serverId);
+      } else if (owner.kind === "workbench") {
+        useProxyChatStore.getState().openChat({ serverId: owner.serverId, agentId, workspaceId });
+        route = buildProxyRoute(owner.serverId);
       } else if (owner.kind === "database") {
         useDatabaseChatStore
           .getState()

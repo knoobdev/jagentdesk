@@ -196,6 +196,22 @@ export const SimInstallAppRequestSchema = req("simulator/install-app", {
 export const SimInstallAppResponseSchema = resp("simulator/install-app/response", {});
 export type SimInstallAppPayload = z.infer<typeof SimInstallAppResponseSchema>["payload"];
 
+// Batch install a .app or .ipa onto many simulators at once. Per-simulator result so one failure
+// (e.g. a device .ipa that a simulator cannot run) does not hide the successes.
+export const SimInstallResultSchema = z.object({
+  udid: z.string(),
+  ok: z.boolean(),
+  error: z.string().nullable(),
+});
+export const SimInstallBatchRequestSchema = req("simulator/install-batch", {
+  udids: z.array(z.string()),
+  filePath: z.string(),
+});
+export const SimInstallBatchResponseSchema = resp("simulator/install-batch/response", {
+  results: z.array(SimInstallResultSchema),
+});
+export type SimInstallBatchPayload = z.infer<typeof SimInstallBatchResponseSchema>["payload"];
+
 export const SimLaunchAppRequestSchema = req("simulator/launch-app", {
   udid: z.string(),
   bundleId: z.string(),
@@ -287,6 +303,7 @@ export const SimulatorRequestSchemas = [
   SimDescribeUiRequestSchema,
   SimScreenshotRequestSchema,
   SimInstallAppRequestSchema,
+  SimInstallBatchRequestSchema,
   SimLaunchAppRequestSchema,
   SimTerminateAppRequestSchema,
   SimOpenUrlRequestSchema,
@@ -310,6 +327,7 @@ export const SimulatorResponseSchemas = [
   SimDescribeUiResponseSchema,
   SimScreenshotResponseSchema,
   SimInstallAppResponseSchema,
+  SimInstallBatchResponseSchema,
   SimLaunchAppResponseSchema,
   SimTerminateAppResponseSchema,
   SimOpenUrlResponseSchema,
