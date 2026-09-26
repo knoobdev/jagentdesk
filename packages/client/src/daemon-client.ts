@@ -7235,6 +7235,14 @@ export class DaemonClient {
     });
   }
 
+  proxySessionRemove(options: { sessionId: string; requestId?: string }): void {
+    this.sendSessionMessage({
+      type: "proxy/session/remove",
+      requestId: options.requestId ?? this.createRequestId(),
+      sessionId: options.sessionId,
+    });
+  }
+
   async proxySessionsList(requestId?: string): Promise<ProxySessionsListPayload> {
     return this.sendCorrelatedSessionRequest({
       requestId,

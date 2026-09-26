@@ -118,6 +118,14 @@ export const ProxyCaptureStopResponseSchema = resp("proxy/capture/stop/response"
   sessionId: z.string(),
 });
 
+// ── session remove (delete a capture session + its history) ──
+export const ProxySessionRemoveRequestSchema = req("proxy/session/remove", {
+  sessionId: z.string(),
+});
+export const ProxySessionRemoveResponseSchema = resp("proxy/session/remove/response", {
+  sessionId: z.string(),
+});
+
 // ── sessions list ──
 export const ProxySessionsListRequestSchema = req("proxy/sessions/list", {});
 export const ProxySessionsListResponseSchema = resp("proxy/sessions/list/response", {
@@ -356,6 +364,7 @@ export const ProxyRequestSchemas = [
   ProxyCaptureStartRequestSchema,
   ProxyCaptureStopRequestSchema,
   ProxySessionsListRequestSchema,
+  ProxySessionRemoveRequestSchema,
   ProxyHistoryQueryRequestSchema,
   ProxyTransactionGetRequestSchema,
   ProxyHistoryClearRequestSchema,
@@ -378,6 +387,7 @@ export const ProxyResponseSchemas = [
   ProxyCaptureStartResponseSchema,
   ProxyCaptureStopResponseSchema,
   ProxySessionsListResponseSchema,
+  ProxySessionRemoveResponseSchema,
   ProxyHistoryQueryResponseSchema,
   ProxyTransactionGetResponseSchema,
   ProxyHistoryClearResponseSchema,

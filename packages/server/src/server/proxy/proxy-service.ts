@@ -330,6 +330,23 @@ export class ProxyService {
     this.broadcastSession(entry.meta);
   }
 
+  // Remove a capture session entirely (stop it if running, restore any system proxy, drop its
+  // history). Broadcasts the removal so clients drop it from the list.
+  async removeSession(sessionId: string): Promise<void> {
+    const entry = this.sessions.get(sessionId);
+    if (!entry) return;
+    entry.unpin?.stop();
+    if (entry.systemProxy) {
+      await restoreSystemProxy(entry.systemProxy).catch(() => {});
+      entry.systemProxy = undefined;
+    }
+    await entry.proxy.stop().catch(() => {});
+    this.store.dropSession(sessionId);
+    this.sessions.delete(sessionId);
+    entry.meta.state = "stopped";
+    this.broadcastSession(entry.meta);
+  }
+
   sessionsList(): ProxyCaptureSession[] {
     return [...this.sessions.values()]
       .map((e) => ({ ...e.meta, transactionCount: this.store.countForSession(e.meta.id) }))

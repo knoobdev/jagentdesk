@@ -332,6 +332,7 @@ function RequestResponse({
   const setPath = useCallback((path: string) => onPatch({ path }), [onPatch]);
   const setRows = useCallback((rows: HeaderRowValue[]) => onPatch({ rows }), [onPatch]);
   const setBody = useCallback((body: string) => onPatch({ body }), [onPatch]);
+  const clearTarget = useCallback(() => onPatch({ host: "", path: "/" }), [onPatch]);
   const formatJson = useCallback(() => {
     try {
       onPatch({ body: JSON.stringify(JSON.parse(tab.body), null, 2), error: null });
@@ -363,25 +364,40 @@ function RequestResponse({
           onChangeText={setPort}
           keyboardType="number-pad"
         />
+        <Pressable
+          onPress={clearTarget}
+          hitSlop={6}
+          style={styles.clearTarget}
+          testID="wb-repeater-clear"
+        >
+          <ThemedX size={14} uniProps={mutedColor} />
+        </Pressable>
         <WbButton label="Send" onPress={onSend} loading={tab.sending} testID="wb-repeater-send" />
       </View>
       {tab.error ? <Text style={styles.error}>{tab.error}</Text> : null}
       <View style={styles.split}>
-        <ScrollView style={styles.pane} contentContainerStyle={styles.paneContent}>
-          <Text style={styles.paneTitle}>REQUEST</Text>
-          <View style={styles.methodRow}>
-            <MethodSelect method={tab.method} onChange={setMethod} />
-            <TextInput
-              style={styles.pathInput}
-              value={tab.path}
-              onChangeText={setPath}
-              placeholder="/path?query"
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
+        <View style={styles.reqPane}>
+          <View style={styles.reqHeadFixed}>
+            <Text style={styles.paneTitle}>REQUEST</Text>
+            <View style={styles.methodRow}>
+              <MethodSelect method={tab.method} onChange={setMethod} />
+              <TextInput
+                style={styles.pathInput}
+                value={tab.path}
+                onChangeText={setPath}
+                placeholder="/path?query"
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
+            <Text style={styles.label}>Headers</Text>
           </View>
-          <Text style={styles.label}>Headers</Text>
-          <HeaderEditor rows={tab.rows} onChange={setRows} />
+          <ScrollView
+            style={styles.headersScroll}
+            contentContainerStyle={styles.headersScrollContent}
+          >
+            <HeaderEditor rows={tab.rows} onChange={setRows} />
+          </ScrollView>
           <View style={styles.bodyHead}>
             <Text style={styles.label}>Body</Text>
             <Pressable onPress={formatJson} hitSlop={6}>
@@ -398,7 +414,7 @@ function RequestResponse({
             placeholder="{ }"
             placeholderTextColor="#9aa"
           />
-        </ScrollView>
+        </View>
         <View style={styles.pane}>
           {tab.response ? (
             <MessagePane
@@ -568,6 +584,18 @@ const styles = StyleSheet.create((theme: Theme) => ({
     backgroundColor: theme.colors.border,
   },
   pane: { flex: 1, minWidth: 0, minHeight: 0, backgroundColor: theme.colors.surface0 },
+  reqPane: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 0,
+    backgroundColor: theme.colors.surface0,
+    padding: theme.spacing[2],
+    gap: theme.spacing[2],
+  },
+  reqHeadFixed: { gap: theme.spacing[2] },
+  headersScroll: { maxHeight: 160 },
+  headersScrollContent: { paddingBottom: theme.spacing[1] },
+  clearTarget: { width: 26, height: 26, alignItems: "center", justifyContent: "center" },
   paneContent: {
     padding: theme.spacing[2],
     gap: theme.spacing[2],
@@ -623,7 +651,8 @@ const styles = StyleSheet.create((theme: Theme) => ({
     fontWeight: theme.fontWeight.semibold,
   },
   bodyInput: {
-    minHeight: 220,
+    flex: 1,
+    minHeight: 120,
     fontSize: theme.fontSize.xs,
     fontFamily: theme.fontFamily.mono,
     color: theme.colors.foreground,

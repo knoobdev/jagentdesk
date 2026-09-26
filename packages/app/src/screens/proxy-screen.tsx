@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import type { GestureResponderEvent } from "react-native";
 import { Radar, X } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type {
@@ -249,7 +250,9 @@ export function ProxyScreen() {
             ) : null}
           </View>
         ) : null}
-        {tab === "repeater" ? <RepeaterPanel client={client} seed={repeaterSeed} /> : null}
+        <View style={tab === "repeater" ? styles.fillPane : styles.hiddenPane}>
+          <RepeaterPanel client={client} seed={repeaterSeed} />
+        </View>
         {tab === "target" ? (
           <TargetPanel client={client} rows={allRows} actions={rowActions} />
         ) : null}
@@ -316,6 +319,21 @@ function HistoryEditorPane({
   onClose: () => void;
   actions: HistoryRowActions;
 }) {
+  const [editorHeight, setEditorHeight] = useState(320);
+  const dragRef = useRef({ startY: 0, startH: 320 });
+  const editorStyle = useMemo(() => [styles.editorPane, { height: editorHeight }], [editorHeight]);
+  const onGrant = useCallback(
+    (e: GestureResponderEvent) => {
+      dragRef.current = { startY: e.nativeEvent.pageY, startH: editorHeight };
+    },
+    [editorHeight],
+  );
+  const onMove = useCallback((e: GestureResponderEvent) => {
+    const delta = dragRef.current.startY - e.nativeEvent.pageY;
+    const next = Math.max(120, Math.min(900, dragRef.current.startH + delta));
+    setEditorHeight(next);
+  }, []);
+  const setResponder = useCallback(() => true, []);
   return (
     <View style={styles.proxyPane}>
       <View style={styles.historyPane}>
@@ -327,7 +345,14 @@ function HistoryEditorPane({
         />
       </View>
       {selectedTx ? (
-        <View style={styles.editorPane}>
+        <View style={editorStyle}>
+          <View
+            style={styles.resizeBar}
+            onStartShouldSetResponder={setResponder}
+            onMoveShouldSetResponder={setResponder}
+            onResponderGrant={onGrant}
+            onResponderMove={onMove}
+          />
           <View style={styles.editorBar}>
             <Text style={styles.editorBarTitle} numberOfLines={1}>
               {selectedTx.method} {selectedTx.host}
@@ -499,12 +524,17 @@ const styles = StyleSheet.create((theme: Theme) => ({
   },
   subBadgeText: { fontSize: 10, color: "#fff", fontWeight: "700" },
   proxyPane: { flex: 1 },
+  fillPane: { flex: 1, minHeight: 0 },
+  hiddenPane: { display: "none" },
   historyPane: { flex: 1, minHeight: 0 },
   editorPane: {
-    flex: 1,
-    minHeight: 0,
+    minHeight: 120,
     borderTopWidth: 1,
     borderTopColor: theme.colors.border,
+  },
+  resizeBar: {
+    height: 8,
+    backgroundColor: theme.colors.surface2,
   },
   editorBar: {
     flexDirection: "row",

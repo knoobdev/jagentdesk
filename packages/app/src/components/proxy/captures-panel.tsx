@@ -87,6 +87,13 @@ export function CapturesPanel({
     [client],
   );
 
+  const handleRemove = useCallback(
+    (id: string) => {
+      if (client) client.proxySessionRemove({ sessionId: id });
+    },
+    [client],
+  );
+
   const handleExportCa = useCallback(async () => {
     if (!client) return;
     const res = await client.proxyCaExport().catch(() => null);
@@ -139,6 +146,7 @@ export function CapturesPanel({
             selected={s.id === selectedSessionId}
             onSelect={onSelectSession}
             onStop={handleStop}
+            onRemove={handleRemove}
           />
         ))
       )}
@@ -215,15 +223,18 @@ function SessionRow({
   selected,
   onSelect,
   onStop,
+  onRemove,
 }: {
   session: ProxyCaptureSession;
   selected: boolean;
   onSelect: (id: string) => void;
   onStop: (id: string) => void;
+  onRemove: (id: string) => void;
 }) {
   const running = session.state === "running";
   const handleSelect = useCallback(() => onSelect(session.id), [onSelect, session.id]);
   const handleStop = useCallback(() => onStop(session.id), [onStop, session.id]);
+  const handleRemove = useCallback(() => onRemove(session.id), [onRemove, session.id]);
   return (
     <Pressable
       onPress={handleSelect}
@@ -247,9 +258,15 @@ function SessionRow({
         <Button size="sm" variant="destructive" onPress={handleStop} testID="wb-capture-stop">
           Stop
         </Button>
-      ) : (
-        <Text style={styles.stateTag}>{session.state}</Text>
-      )}
+      ) : null}
+      <Pressable
+        onPress={handleRemove}
+        hitSlop={6}
+        style={styles.sessionRemove}
+        testID="wb-session-remove"
+      >
+        <Text style={styles.sessionRemoveText}>✕</Text>
+      </Pressable>
     </Pressable>
   );
 }
@@ -340,4 +357,6 @@ const styles = StyleSheet.create((theme: Theme) => ({
     fontFamily: theme.fontFamily.mono,
   },
   stateTag: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
+  sessionRemove: { width: 26, height: 26, alignItems: "center", justifyContent: "center" },
+  sessionRemoveText: { color: theme.colors.foregroundMuted, fontSize: 14 },
 }));

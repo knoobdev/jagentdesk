@@ -3584,6 +3584,25 @@ export class Session {
           return undefined;
         });
     }
+    if (msg.type === "proxy/session/remove") {
+      const { requestId, sessionId } = msg;
+      return this.proxyService
+        .removeSession(sessionId)
+        .then(() => {
+          this.emit({
+            type: "proxy/session/remove/response",
+            payload: { requestId, error: null, sessionId },
+          });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({
+            type: "proxy/session/remove/response",
+            payload: { requestId, error: fail(error), sessionId },
+          });
+          return undefined;
+        });
+    }
     if (msg.type === "proxy/sessions/list") {
       const { requestId } = msg;
       this.emit({
