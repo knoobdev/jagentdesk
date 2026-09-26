@@ -37,7 +37,10 @@ describe("ProxyService", () => {
       expect(session.listenerPort).toBeGreaterThan(0);
       const list = svc.sessionsList();
       expect(list.some((s) => s.id === session.id)).toBe(true);
-      expect(svc.caExportPem()).toContain("BEGIN CERTIFICATE");
+      const pem = svc.caExportPem();
+      expect(pem).toContain("BEGIN CERTIFICATE");
+      // Regression: `simctl keychain add-root-cert` rejects CRLF PEMs — must be LF-only.
+      expect(pem).not.toContain("\r");
     } finally {
       await svc.disposeAll();
     }

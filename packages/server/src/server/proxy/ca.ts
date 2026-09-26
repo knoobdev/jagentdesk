@@ -65,19 +65,23 @@ export class WorkbenchCA {
     cert.sign(keys.privateKey, forge.md.sha256.create());
     this.caCert = cert;
     this.caKey = keys.privateKey;
-    fs.writeFileSync(this.certPath, forge.pki.certificateToPem(cert), { mode: 0o600 });
+    // node-forge emits CRLF line endings; `xcrun simctl keychain add-root-cert` rejects those
+    // ("not a supported CER or PEM certificate file"), so the CA PEM is written LF-only.
+    fs.writeFileSync(this.certPath, toLfPem(forge.pki.certificateToPem(cert)), { mode: 0o600 });
     fs.writeFileSync(this.keyPath, forge.pki.privateKeyToPem(keys.privateKey), { mode: 0o600 });
   }
 
-  /** The root CA certificate in PEM, for the user to trust in the simulator / client. */
+  /** The root CA certificate in PEM (LF line endings), for trusting in the simulator / client. */
   exportPem(): string {
     this.ensureCA();
-    return forge.pki.certificateToPem(this.caCert!);
+    return toLfPem(forge.pki.certificateToPem(this.caCert!));
   }
 
-  /** On-disk path to the CA PEM (for `xcrun simctl keychain <udid> add-root-cert <path>`). */
+  /** On-disk path to the CA PEM (LF-normalized) for `xcrun simctl keychain add-root-cert <path>`. */
   certFilePath(): string {
     this.ensureCA();
+    // Rewrite LF-only in case an earlier build wrote a CRLF PEM that simctl would reject.
+    fs.writeFileSync(this.certPath, this.exportPem(), { mode: 0o600 });
     return this.certPath;
   }
 
@@ -121,6 +125,11 @@ function altNamesFor(host: string): Array<{ type: number; value?: string; ip?: s
     return [{ type: 7, ip: host }];
   }
   return [{ type: 2, value: host }];
+}
+
+// Normalize a PEM to LF line endings (node-forge emits CRLF, which some consumers reject).
+function toLfPem(pem: string): string {
+  return pem.replace(/\r\n/g, "\n");
 }
 
 function randomSerial(): string {
