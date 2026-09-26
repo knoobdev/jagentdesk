@@ -45,6 +45,27 @@ import type {
   SimTerminateAppPayload,
   SimUnslimPayload,
 } from "@jagentdesk/protocol/simulator/rpc-schemas";
+import type {
+  ProxyCaExportPayload,
+  ProxyCaptureMode,
+  ProxyCaptureStartPayload,
+  ProxyCaptureStopPayload,
+  ProxyHeader,
+  ProxyHistoryQueryPayload,
+  ProxyIntruderRunPayload,
+  ProxyInterceptHeldPushPayload,
+  ProxyFridaInstallPayload,
+  ProxyFridaStatusPayload,
+  ProxyInterceptSetPayload,
+  ProxyWsMessagePushPayload,
+  ProxyRepeaterSendPayload,
+  ProxyScopeGetPayload,
+  ProxyScopeRule,
+  ProxySessionPushPayload,
+  ProxySessionsListPayload,
+  ProxyTransactionGetPayload,
+  ProxyTransactionPushPayload,
+} from "@jagentdesk/protocol/proxy/rpc-schemas";
 import type { AgentAttentionNotificationPayload } from "@jagentdesk/protocol/agent-attention-notification";
 import {
   AgentCreateFailedStatusPayloadSchema,
@@ -7181,6 +7202,256 @@ export class DaemonClient {
   }
 
   // ── SimFleet: iOS Simulator control ──
+  async proxyCaptureStart(options: {
+    mode: ProxyCaptureMode;
+    label?: string;
+    udid?: string;
+    bundleId?: string;
+    requestId?: string;
+  }): Promise<ProxyCaptureStartPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "proxy/capture/start",
+        mode: options.mode,
+        label: options.label,
+        udid: options.udid,
+        bundleId: options.bundleId,
+      },
+      responseType: "proxy/capture/start/response",
+    });
+  }
+
+  async proxyCaptureStop(options: {
+    sessionId: string;
+    requestId?: string;
+  }): Promise<ProxyCaptureStopPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "proxy/capture/stop", sessionId: options.sessionId },
+      responseType: "proxy/capture/stop/response",
+    });
+  }
+
+  async proxySessionsList(requestId?: string): Promise<ProxySessionsListPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "proxy/sessions/list" },
+      responseType: "proxy/sessions/list/response",
+    });
+  }
+
+  async proxyHistoryQuery(options: {
+    sessionId: string | null;
+    host?: string;
+    method?: string;
+    status?: number;
+    contains?: string;
+    inScopeOnly?: boolean;
+    limit?: number;
+    requestId?: string;
+  }): Promise<ProxyHistoryQueryPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "proxy/history/query",
+        sessionId: options.sessionId,
+        host: options.host,
+        method: options.method,
+        status: options.status,
+        contains: options.contains,
+        inScopeOnly: options.inScopeOnly,
+        limit: options.limit,
+      },
+      responseType: "proxy/history/query/response",
+    });
+  }
+
+  async proxyTransactionGet(options: {
+    id: string;
+    requestId?: string;
+  }): Promise<ProxyTransactionGetPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "proxy/transaction/get", id: options.id },
+      responseType: "proxy/transaction/get/response",
+    });
+  }
+
+  async proxyCaExport(requestId?: string): Promise<ProxyCaExportPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "proxy/ca/export" },
+      responseType: "proxy/ca/export/response",
+    });
+  }
+
+  async proxyRepeaterSend(options: {
+    secure: boolean;
+    host: string;
+    port: number;
+    method: string;
+    path: string;
+    headers: ProxyHeader[];
+    bodyB64: string;
+    requestId?: string;
+  }): Promise<ProxyRepeaterSendPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "proxy/repeater/send",
+        secure: options.secure,
+        host: options.host,
+        port: options.port,
+        method: options.method,
+        path: options.path,
+        headers: options.headers,
+        bodyB64: options.bodyB64,
+      },
+      responseType: "proxy/repeater/send/response",
+    });
+  }
+
+  async proxyIntruderRun(options: {
+    secure: boolean;
+    host: string;
+    port: number;
+    template: string;
+    payloads: string[];
+    requestId?: string;
+  }): Promise<ProxyIntruderRunPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "proxy/intruder/run",
+        secure: options.secure,
+        host: options.host,
+        port: options.port,
+        template: options.template,
+        payloads: options.payloads,
+      },
+      responseType: "proxy/intruder/run/response",
+    });
+  }
+
+  async proxyInterceptSet(options: {
+    enabled: boolean;
+    requestId?: string;
+  }): Promise<ProxyInterceptSetPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "proxy/intercept/set", enabled: options.enabled },
+      responseType: "proxy/intercept/set/response",
+    });
+  }
+
+  proxyInterceptDecide(options: {
+    heldId: string;
+    action: "forward" | "drop";
+    method?: string;
+    path?: string;
+    headers?: ProxyHeader[];
+    bodyB64?: string;
+  }): void {
+    this.sendSessionMessage({
+      type: "proxy/intercept/decide",
+      requestId: this.createRequestId(),
+      heldId: options.heldId,
+      action: options.action,
+      method: options.method,
+      path: options.path,
+      headers: options.headers,
+      bodyB64: options.bodyB64,
+    });
+  }
+
+  onProxyWsMessage(
+    subscriptionId: string,
+    handler: (payload: ProxyWsMessagePushPayload) => void,
+  ): () => void {
+    return this.on("proxy/ws-message", (message) => {
+      if (message.payload.subscriptionId === subscriptionId) handler(message.payload);
+    });
+  }
+
+  onProxyInterceptHeld(
+    subscriptionId: string,
+    handler: (payload: ProxyInterceptHeldPushPayload) => void,
+  ): () => void {
+    return this.on("proxy/intercept/held", (message) => {
+      if (message.payload.subscriptionId === subscriptionId) handler(message.payload);
+    });
+  }
+
+  async proxyFridaStatus(requestId?: string): Promise<ProxyFridaStatusPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "proxy/frida/status" },
+      responseType: "proxy/frida/status/response",
+    });
+  }
+
+  async proxyFridaInstall(requestId?: string): Promise<ProxyFridaInstallPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "proxy/frida/install" },
+      responseType: "proxy/frida/install/response",
+    });
+  }
+
+  async proxyScopeGet(requestId?: string): Promise<ProxyScopeGetPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "proxy/scope/get" },
+      responseType: "proxy/scope/get/response",
+    });
+  }
+
+  async proxyScopeSet(options: {
+    rules: ProxyScopeRule[];
+    requestId?: string;
+  }): Promise<ProxyScopeGetPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "proxy/scope/set", rules: options.rules },
+      responseType: "proxy/scope/set/response",
+    });
+  }
+
+  async proxySubscribe(options: { subscriptionId: string; requestId?: string }): Promise<void> {
+    await this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "proxy/subscribe", subscriptionId: options.subscriptionId },
+      responseType: "proxy/subscribe/response",
+    });
+  }
+
+  proxyUnsubscribe(options: { subscriptionId: string }): void {
+    this.sendSessionMessage({
+      type: "proxy/unsubscribe",
+      requestId: this.createRequestId(),
+      subscriptionId: options.subscriptionId,
+    });
+  }
+
+  onProxyTransaction(
+    subscriptionId: string,
+    handler: (payload: ProxyTransactionPushPayload) => void,
+  ): () => void {
+    return this.on("proxy/transaction", (message) => {
+      if (message.payload.subscriptionId === subscriptionId) handler(message.payload);
+    });
+  }
+
+  onProxySession(
+    subscriptionId: string,
+    handler: (payload: ProxySessionPushPayload) => void,
+  ): () => void {
+    return this.on("proxy/session", (message) => {
+      if (message.payload.subscriptionId === subscriptionId) handler(message.payload);
+    });
+  }
+
   async simulatorList(requestId?: string): Promise<SimListPayload> {
     return this.sendCorrelatedSessionRequest({
       requestId,

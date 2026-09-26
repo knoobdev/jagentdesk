@@ -1,7 +1,7 @@
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { readFile, unlink } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, unlink } from "node:fs/promises";
 import { execCommand } from "../../utils/spawn.js";
 import type {
   SimAction,
@@ -358,6 +358,47 @@ export class SimulatorService {
 
   async installApp(udid: string, appPath: string): Promise<void> {
     await execCommand("xcrun", ["simctl", "install", udid, appPath], { timeout: 120_000 });
+  }
+
+  // Install a .app or a .ipa. An .ipa is a zip whose Payload/<App>.app is installed; note that this
+  // only succeeds when that .app is a SIMULATOR build — App Store / device .ipa files are ARM device
+  // binaries (FairPlay-encrypted) and simctl rejects them. The caller surfaces that error verbatim.
+  async installAppSmart(udid: string, filePath: string): Promise<{ appPath: string }> {
+    if (filePath.toLowerCase().endsWith(".ipa")) {
+      const dir = await mkdtemp(join(tmpdir(), "wb-ipa-"));
+      try {
+        await execCommand("unzip", ["-o", "-q", filePath, "-d", dir], { timeout: 120_000 });
+        const payload = join(dir, "Payload");
+        const entries = await readdir(payload).catch(() => [] as string[]);
+        const app = entries.find((e) => e.endsWith(".app"));
+        if (!app) throw new Error("no .app found under Payload/ in the .ipa");
+        const appPath = join(payload, app);
+        await this.installApp(udid, appPath);
+        return { appPath };
+      } finally {
+        await rm(dir, { recursive: true, force: true }).catch(() => {});
+      }
+    }
+    await this.installApp(udid, filePath);
+    return { appPath: filePath };
+  }
+
+  // Install one file onto many simulators (batch). Each result is independent so one failure does not
+  // abort the rest — the caller reports per-simulator success/error.
+  async installOnMany(
+    udids: string[],
+    filePath: string,
+  ): Promise<{ udid: string; ok: boolean; error: string | null }[]> {
+    const results: { udid: string; ok: boolean; error: string | null }[] = [];
+    for (const udid of udids) {
+      try {
+        await this.installAppSmart(udid, filePath);
+        results.push({ udid, ok: true, error: null });
+      } catch (err) {
+        results.push({ udid, ok: false, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    return results;
   }
 
   async launchApp(udid: string, bundleId: string, terminateExisting?: boolean): Promise<void> {

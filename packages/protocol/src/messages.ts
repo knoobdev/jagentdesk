@@ -183,6 +183,11 @@ import {
   SimulatorPushSchemas,
 } from "./simulator/rpc-schemas.js";
 import {
+  ProxyRequestSchemas,
+  ProxyResponseSchemas,
+  ProxyPushSchemas,
+} from "./proxy/rpc-schemas.js";
+import {
   ExportHostDataRequestMessageSchema,
   ExportHostDataResponseMessageSchema,
   ImportHostDataRequestMessageSchema,
@@ -3978,6 +3983,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ...DatabaseRequestSchemas,
   ...DockerRequestSchemas,
   ...SimulatorRequestSchemas,
+  ...ProxyRequestSchemas,
   HubExecutionAgentCreateRequestSchema,
   HubExecutionControlRequestSchema,
   BrowserAutomationExecuteResponseSchema,
@@ -7729,6 +7735,8 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ...DockerPushSchemas,
   ...SimulatorResponseSchemas,
   ...SimulatorPushSchemas,
+  ...ProxyResponseSchemas,
+  ...ProxyPushSchemas,
   HubExecutionAgentCreateResponseSchema,
   HubExecutionControlResponseSchema,
   HubExecutionAgentUpdateSchema,

@@ -9,6 +9,7 @@ import {
   GitPullRequest,
   History,
   Home,
+  Radar,
   Share2,
   Smartphone,
   Sparkles,
@@ -41,6 +42,7 @@ import {
   buildSessionsRoute,
   buildSharedSessionsRoute,
   buildSimulatorRoute,
+  buildProxyRoute,
   buildSkillsRoute,
 } from "@/utils/host-routes";
 
@@ -54,6 +56,7 @@ export interface AppNavTargets {
   marketplaceRoute: Href | null;
   dockerRoute: Href | null;
   simulatorRoute: Href | null;
+  proxyRoute: Href | null;
   supportsForgeHub: boolean;
 }
 
@@ -95,6 +98,7 @@ export function useAppNavTargets(): AppNavTargets {
       marketplaceRoute: perHost(buildMarketplaceRoute),
       dockerRoute: perHost(buildDockerRoute),
       simulatorRoute: perHost(buildSimulatorRoute),
+      proxyRoute: perHost(buildProxyRoute),
       supportsForgeHub,
     };
   }, [firstServerId, lastCluster, lastDatabase, supportsForgeHub]);
@@ -183,6 +187,7 @@ export function useAppNavItems(): AppNavItem[] {
         pathname,
         "/simulator",
       ),
+      navItem("workbench", Radar, "Workbench", "WB", targets.proxyRoute, pathname, "/proxy"),
       navItem(
         "databases",
         Database,
