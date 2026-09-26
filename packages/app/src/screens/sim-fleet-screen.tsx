@@ -9,7 +9,7 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import { Gesture } from "react-native-gesture-handler";
-import { CircleAlert, MessageSquare, Plus, Smartphone } from "lucide-react-native";
+import { CircleAlert, Download, MessageSquare, Plus, Smartphone } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useHostRuntimeClient, useHosts } from "@/runtime/host-runtime";
@@ -21,6 +21,7 @@ import { SidebarResizeHandle } from "@/components/sidebar-resize-handle";
 import { SimChatDock } from "@/components/sim-chat-dock";
 import { useSimChatStore } from "@/stores/sim-chat-store";
 import { SimAddSheet } from "@/screens/sim-add-sheet";
+import { SimInstallSheet } from "@/screens/sim-install-sheet";
 import { SimDrivePanel } from "@/screens/sim-drive-panel";
 import { PhoneScreen, TILE_MAX_DIM, TILE_POLL_MS, useScreenshot } from "@/screens/sim-phone";
 import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
@@ -262,10 +263,12 @@ function FleetHeader({
   loading,
   devices,
   showAgentToggle,
+  onInstall,
 }: {
   loading: boolean;
   devices: readonly SimDevice[];
   showAgentToggle: boolean;
+  onInstall: () => void;
 }) {
   const chatOpen = useSimChatStore((s) => s.open);
   const showChat = useSimChatStore((s) => s.showChat);
@@ -287,20 +290,33 @@ function FleetHeader({
     [booted, devices.length, loading],
   );
   const actions = useMemo(
-    () =>
-      showAgentToggle ? (
+    () => (
+      <>
         <Button
           size="sm"
-          variant={chatOpen ? "secondary" : "outline"}
-          leftIcon={MessageSquare}
-          onPress={toggleChat}
-          accessibilityLabel={chatOpen ? "Hide agent" : "Show agent"}
-          testID="sim-chat-toggle"
+          variant="outline"
+          leftIcon={Download}
+          onPress={onInstall}
+          accessibilityLabel="Install app on simulators"
+          testID="sim-install-open"
         >
-          Agent
+          Install
         </Button>
-      ) : null,
-    [chatOpen, showAgentToggle, toggleChat],
+        {showAgentToggle ? (
+          <Button
+            size="sm"
+            variant={chatOpen ? "secondary" : "outline"}
+            leftIcon={MessageSquare}
+            onPress={toggleChat}
+            accessibilityLabel={chatOpen ? "Hide agent" : "Show agent"}
+            testID="sim-chat-toggle"
+          >
+            Agent
+          </Button>
+        ) : null}
+      </>
+    ),
+    [chatOpen, onInstall, showAgentToggle, toggleChat],
   );
   return (
     <PageHeader
@@ -399,6 +415,9 @@ export function SimFleetScreen() {
   const [selectedUdid, setSelectedUdid] = useState<string | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
   const [adding, setAdding] = useState(false);
+  const [installing, setInstalling] = useState(false);
+  const openInstall = useCallback(() => setInstalling(true), []);
+  const closeInstall = useCallback(() => setInstalling(false), []);
 
   const resetForServer = useSimChatStore((s) => s.resetForServer);
   const applyDefaultOpen = useSimChatStore((s) => s.applyDefaultOpen);
@@ -477,7 +496,12 @@ export function SimFleetScreen() {
 
   return (
     <View style={styles.screen}>
-      <FleetHeader loading={loading} devices={devices} showAgentToggle={!isCompact} />
+      <FleetHeader
+        loading={loading}
+        devices={devices}
+        showAgentToggle={!isCompact}
+        onInstall={openInstall}
+      />
       <FleetBanners error={error} unavailable={!loading && !availability.simctl} />
 
       <View style={styles.body}>
@@ -513,6 +537,12 @@ export function SimFleetScreen() {
         ) : null}
       </View>
 
+      <SimInstallSheet
+        visible={installing}
+        client={client}
+        devices={devices}
+        onClose={closeInstall}
+      />
       <SimAddSheet
         visible={adding}
         client={client}

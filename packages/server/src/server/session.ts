@@ -3960,6 +3960,25 @@ export class Session {
           return undefined;
         });
     }
+    if (msg.type === "simulator/install-batch") {
+      const { requestId } = msg;
+      return this.simulatorService
+        .installOnMany(msg.udids, msg.filePath)
+        .then((results) => {
+          this.emit({
+            type: "simulator/install-batch/response",
+            payload: { requestId, error: null, results },
+          });
+          return undefined;
+        })
+        .catch((error) => {
+          this.emit({
+            type: "simulator/install-batch/response",
+            payload: { requestId, error: fail(error), results: [] },
+          });
+          return undefined;
+        });
+    }
     if (msg.type === "simulator/launch-app") {
       const { requestId } = msg;
       return this.simulatorService

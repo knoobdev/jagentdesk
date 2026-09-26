@@ -33,6 +33,7 @@ import type {
   SimDescribeUiPayload,
   SimInputTextPayload,
   SimInstallAppPayload,
+  SimInstallBatchPayload,
   SimLaunchAppPayload,
   SimListPayload,
   SimLogChunkPayload,
@@ -7588,6 +7589,22 @@ export class DaemonClient {
         maxDim: options.maxDim,
       },
       responseType: "simulator/screenshot/response",
+    });
+  }
+
+  async simulatorInstallBatch(options: {
+    udids: string[];
+    filePath: string;
+    requestId?: string;
+  }): Promise<SimInstallBatchPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "simulator/install-batch",
+        udids: options.udids,
+        filePath: options.filePath,
+      },
+      responseType: "simulator/install-batch/response",
     });
   }
 
