@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { Radar, X } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type {
@@ -17,6 +17,7 @@ import { CapturesPanel } from "@/components/proxy/captures-panel";
 import { HttpHistory, type HistoryRowActions } from "@/components/proxy/http-history";
 import { MessageEditor } from "@/components/proxy/message-editor";
 import { RepeaterPanel } from "@/components/proxy/repeater-panel";
+import { WbButton } from "@/components/proxy/wb-button";
 import { InterceptPanel } from "@/components/proxy/intercept-panel";
 import { WsHistory } from "@/components/proxy/ws-history";
 import { DecoderPanel } from "@/components/proxy/decoder-panel";
@@ -73,6 +74,7 @@ export function ProxyScreen() {
   const [wsMessages, setWsMessages] = useState<ProxyWsMessage[]>([]);
   const [held, setHeld] = useState<ProxyHeldRequest[]>([]);
   const [interceptOn, setInterceptOn] = useState(false);
+  const [commentTarget, setCommentTarget] = useState<ProxyTransactionRow | null>(null);
 
   // Live subscription: every transaction streams into one list; the Proxy tab filters it by the
   // active session while Logger shows them all. Session-state changes refresh the session list;
@@ -153,11 +155,41 @@ export function ProxyScreen() {
           return undefined;
         });
       },
+      onHighlight: (row, color) => {
+        if (!client) return;
+        setAllRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, highlight: color } : r)));
+        void client.proxyTransactionAnnotate({ id: row.id, highlight: color });
+      },
+      onComment: (row) => setCommentTarget(row),
+      onDelete: (row) => {
+        if (!client) return;
+        setAllRows((prev) => prev.filter((r) => r.id !== row.id));
+        setSelectedTx((cur) => (cur?.id === row.id ? null : cur));
+        client.proxyTransactionDelete({ id: row.id });
+      },
+      onClearHistory: () => {
+        if (!client) return;
+        setAllRows([]);
+        setSelectedTx(null);
+        client.proxyHistoryClear({ sessionId: null });
+      },
     }),
     [client],
   );
 
   const handleCloseEditor = useCallback(() => setSelectedTx(null), []);
+
+  const submitComment = useCallback(
+    (text: string) => {
+      const target = commentTarget;
+      if (!target) return;
+      setCommentTarget(null);
+      setAllRows((prev) => prev.map((r) => (r.id === target.id ? { ...r, comment: text } : r)));
+      if (client) void client.proxyTransactionAnnotate({ id: target.id, comment: text });
+    },
+    [client, commentTarget],
+  );
+  const cancelComment = useCallback(() => setCommentTarget(null), []);
 
   return (
     <View style={styles.screen}>
@@ -237,7 +269,45 @@ export function ProxyScreen() {
         {tab === "sequencer" ? <SequencerPanel /> : null}
         {READY_INLINE.has(tab) ? null : <PhasePlaceholder tab={tab} />}
       </View>
+      <CommentModal target={commentTarget} onSubmit={submitComment} onCancel={cancelComment} />
     </View>
+  );
+}
+
+function CommentModal({
+  target,
+  onSubmit,
+  onCancel,
+}: {
+  target: ProxyTransactionRow | null;
+  onSubmit: (text: string) => void;
+  onCancel: () => void;
+}) {
+  const [text, setText] = useState("");
+  useEffect(() => {
+    setText(target?.comment ?? "");
+  }, [target]);
+  const save = useCallback(() => onSubmit(text), [onSubmit, text]);
+  return (
+    <Modal visible={target != null} transparent animationType="fade" onRequestClose={onCancel}>
+      <Pressable style={styles.modalBackdrop} onPress={onCancel}>
+        <Pressable style={styles.modalCard}>
+          <Text style={styles.modalTitle}>Add comment</Text>
+          <TextInput
+            style={styles.modalInput}
+            value={text}
+            onChangeText={setText}
+            placeholder="Comment for this request"
+            autoFocus
+            multiline
+          />
+          <View style={styles.modalActions}>
+            <WbButton label="Cancel" variant="ghost" onPress={onCancel} />
+            <WbButton label="Save" onPress={save} />
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }
 
@@ -483,6 +553,38 @@ const styles = StyleSheet.create((theme: Theme) => ({
     fontWeight: theme.fontWeight.bold,
     color: theme.colors.foreground,
   },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: theme.spacing[4],
+  },
+  modalCard: {
+    width: "100%",
+    maxWidth: 440,
+    backgroundColor: theme.colors.surface0,
+    borderRadius: theme.borderRadius.lg,
+    padding: theme.spacing[4],
+    gap: theme.spacing[3],
+  },
+  modalTitle: {
+    fontSize: theme.fontSize.base,
+    fontWeight: theme.fontWeight.bold,
+    color: theme.colors.foreground,
+  },
+  modalInput: {
+    outlineWidth: 0,
+    minHeight: 80,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.md,
+    padding: theme.spacing[2],
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foreground,
+    textAlignVertical: "top",
+  },
+  modalActions: { flexDirection: "row", justifyContent: "flex-end", gap: theme.spacing[2] },
   placeholderText: {
     fontSize: theme.fontSize.sm,
     color: theme.colors.foregroundMuted,

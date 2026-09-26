@@ -90,6 +90,38 @@ export class CaptureStore {
     this.bySession.delete(sessionId);
   }
 
+  // Clear history — all of it, or one session's (Burp's "Clear history").
+  clear(sessionId: string | null): void {
+    if (sessionId) {
+      const list = this.bySession.get(sessionId);
+      if (list) for (const tx of list) this.byId.delete(tx.id);
+      this.bySession.set(sessionId, []);
+      return;
+    }
+    this.byId.clear();
+    for (const key of this.bySession.keys()) this.bySession.set(key, []);
+  }
+
+  // Delete a single transaction (Burp's "Delete item").
+  delete(id: string): void {
+    const tx = this.byId.get(id);
+    if (!tx) return;
+    this.byId.delete(id);
+    const list = this.bySession.get(tx.sessionId);
+    if (list) {
+      const idx = list.indexOf(tx);
+      if (idx >= 0) list.splice(idx, 1);
+    }
+  }
+
+  // Annotate a transaction with a comment and/or highlight color (Burp's "Add comment" / "Highlight").
+  annotate(id: string, patch: { comment?: string; highlight?: string | null }): void {
+    const tx = this.byId.get(id);
+    if (!tx) return;
+    if (patch.comment !== undefined) tx.comment = patch.comment;
+    if (patch.highlight !== undefined) tx.highlight = patch.highlight;
+  }
+
   query(q: HistoryQuery): StoredTransaction[] {
     const pools = q.sessionId
       ? [this.bySession.get(q.sessionId) ?? []]

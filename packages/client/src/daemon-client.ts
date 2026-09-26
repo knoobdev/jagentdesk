@@ -62,6 +62,7 @@ import type {
   ProxyRepeaterSendPayload,
   ProxyScopeGetPayload,
   ProxyScopeRule,
+  ProxyTransactionAnnotatePayload,
   ProxySessionPushPayload,
   ProxySessionsListPayload,
   ProxyTransactionGetPayload,
@@ -7276,6 +7277,40 @@ export class DaemonClient {
       requestId: options.requestId,
       message: { type: "proxy/transaction/get", id: options.id },
       responseType: "proxy/transaction/get/response",
+    });
+  }
+
+  proxyHistoryClear(options: { sessionId: string | null; requestId?: string }): void {
+    this.sendSessionMessage({
+      type: "proxy/history/clear",
+      requestId: options.requestId ?? this.createRequestId(),
+      sessionId: options.sessionId,
+    });
+  }
+
+  proxyTransactionDelete(options: { id: string; requestId?: string }): void {
+    this.sendSessionMessage({
+      type: "proxy/transaction/delete",
+      requestId: options.requestId ?? this.createRequestId(),
+      id: options.id,
+    });
+  }
+
+  async proxyTransactionAnnotate(options: {
+    id: string;
+    comment?: string;
+    highlight?: string | null;
+    requestId?: string;
+  }): Promise<ProxyTransactionAnnotatePayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "proxy/transaction/annotate",
+        id: options.id,
+        comment: options.comment,
+        highlight: options.highlight,
+      },
+      responseType: "proxy/transaction/annotate/response",
     });
   }
 

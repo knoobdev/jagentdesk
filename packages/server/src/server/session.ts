@@ -3616,6 +3616,33 @@ export class Session {
       });
       return undefined;
     }
+    if (msg.type === "proxy/history/clear") {
+      const { requestId } = msg;
+      this.proxyService.clearHistory(msg.sessionId);
+      this.emit({ type: "proxy/history/clear/response", payload: { requestId, error: null } });
+      return undefined;
+    }
+    if (msg.type === "proxy/transaction/delete") {
+      const { requestId, id } = msg;
+      this.proxyService.deleteTransaction(id);
+      this.emit({
+        type: "proxy/transaction/delete/response",
+        payload: { requestId, error: null, id },
+      });
+      return undefined;
+    }
+    if (msg.type === "proxy/transaction/annotate") {
+      const { requestId } = msg;
+      const row = this.proxyService.annotate(msg.id, {
+        comment: msg.comment,
+        highlight: msg.highlight,
+      });
+      this.emit({
+        type: "proxy/transaction/annotate/response",
+        payload: { requestId, error: null, row },
+      });
+      return undefined;
+    }
     if (msg.type === "proxy/ca/export") {
       const { requestId } = msg;
       try {

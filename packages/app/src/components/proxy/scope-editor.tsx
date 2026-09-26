@@ -144,6 +144,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
   content: { padding: theme.spacing[3], gap: theme.spacing[2] },
   addRow: { flexDirection: "row", alignItems: "center", gap: theme.spacing[2] },
   hostInput: {
+    outlineWidth: 0,
     flex: 1,
     minWidth: 0,
     fontSize: theme.fontSize.sm,

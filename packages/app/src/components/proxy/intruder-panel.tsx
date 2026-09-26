@@ -216,6 +216,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     fontWeight: theme.fontWeight.bold,
   },
   hostInput: {
+    outlineWidth: 0,
     flex: 1,
     minWidth: 0,
     fontSize: theme.fontSize.sm,
@@ -229,6 +230,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
   },
   colon: { color: theme.colors.foregroundMuted },
   portInput: {
+    outlineWidth: 0,
     width: 64,
     fontSize: theme.fontSize.sm,
     fontFamily: theme.fontFamily.mono,
@@ -244,6 +246,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
   editorCol: { flex: 1, minWidth: 0, gap: theme.spacing[1] },
   label: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
   templateInput: {
+    outlineWidth: 0,
     minHeight: 140,
     fontSize: theme.fontSize.xs,
     fontFamily: theme.fontFamily.mono,

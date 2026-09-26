@@ -146,6 +146,31 @@ export const ProxyTransactionGetResponseSchema = resp("proxy/transaction/get/res
   transaction: ProxyTransactionFullSchema.nullable(),
 });
 
+// ── history management (Burp: Clear history / Delete item / Highlight + Add comment) ──
+export const ProxyHistoryClearRequestSchema = req("proxy/history/clear", {
+  sessionId: z.string().nullable(),
+});
+export const ProxyHistoryClearResponseSchema = resp("proxy/history/clear/response", {});
+
+export const ProxyTransactionDeleteRequestSchema = req("proxy/transaction/delete", {
+  id: z.string(),
+});
+export const ProxyTransactionDeleteResponseSchema = resp("proxy/transaction/delete/response", {
+  id: z.string(),
+});
+
+export const ProxyTransactionAnnotateRequestSchema = req("proxy/transaction/annotate", {
+  id: z.string(),
+  comment: z.string().optional(),
+  highlight: z.string().nullable().optional(),
+});
+export const ProxyTransactionAnnotateResponseSchema = resp("proxy/transaction/annotate/response", {
+  row: ProxyTransactionRowSchema.nullable(),
+});
+export type ProxyTransactionAnnotatePayload = z.infer<
+  typeof ProxyTransactionAnnotateResponseSchema
+>["payload"];
+
 // ── CA certificate export (to trust in a simulator / client) ──
 export const ProxyCaExportRequestSchema = req("proxy/ca/export", {});
 export const ProxyCaExportResponseSchema = resp("proxy/ca/export/response", {
@@ -333,6 +358,9 @@ export const ProxyRequestSchemas = [
   ProxySessionsListRequestSchema,
   ProxyHistoryQueryRequestSchema,
   ProxyTransactionGetRequestSchema,
+  ProxyHistoryClearRequestSchema,
+  ProxyTransactionDeleteRequestSchema,
+  ProxyTransactionAnnotateRequestSchema,
   ProxyCaExportRequestSchema,
   ProxySubscribeRequestSchema,
   ProxyUnsubscribeRequestSchema,
@@ -352,6 +380,9 @@ export const ProxyResponseSchemas = [
   ProxySessionsListResponseSchema,
   ProxyHistoryQueryResponseSchema,
   ProxyTransactionGetResponseSchema,
+  ProxyHistoryClearResponseSchema,
+  ProxyTransactionDeleteResponseSchema,
+  ProxyTransactionAnnotateResponseSchema,
   ProxyCaExportResponseSchema,
   ProxySubscribeResponseSchema,
   ProxyUnsubscribeResponseSchema,

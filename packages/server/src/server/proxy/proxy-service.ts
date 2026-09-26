@@ -345,6 +345,23 @@ export class ProxyService {
     return tx ? toFull(tx) : null;
   }
 
+  clearHistory(sessionId: string | null): void {
+    this.store.clear(sessionId);
+  }
+
+  deleteTransaction(id: string): void {
+    this.store.delete(id);
+  }
+
+  annotate(
+    id: string,
+    patch: { comment?: string; highlight?: string | null },
+  ): ProxyTransactionRow | null {
+    this.store.annotate(id, patch);
+    const tx = this.store.get(id);
+    return tx ? toRow(tx) : null;
+  }
+
   caExportPem(): string {
     return this.ca.exportPem();
   }

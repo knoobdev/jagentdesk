@@ -1,6 +1,6 @@
 import { memo, useCallback, useMemo } from "react";
 import { ScrollView, Text, View } from "react-native";
-import { Copy, Send, TerminalSquare } from "lucide-react-native";
+import { Copy, MessageSquarePlus, Send, TerminalSquare, Trash2 } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type { ProxyTransactionRow } from "@jagentdesk/protocol/proxy/rpc-schemas";
 import type { Theme } from "@/styles/theme";
@@ -22,13 +22,59 @@ const ThemedCurl = withUnistyles(TerminalSquare);
 const ThemedSend = withUnistyles(Send);
 const ICON_COPY = <ThemedCopy size={14} uniProps={mutedColor} />;
 const ICON_CURL = <ThemedCurl size={14} uniProps={mutedColor} />;
+const ThemedComment = withUnistyles(MessageSquarePlus);
+const ThemedTrash = withUnistyles(Trash2);
 const ICON_SEND = <ThemedSend size={14} uniProps={mutedColor} />;
+const ICON_COMMENT = <ThemedComment size={14} uniProps={mutedColor} />;
+const ICON_TRASH = <ThemedTrash size={14} uniProps={mutedColor} />;
 
 export interface HistoryRowActions {
   onCopyUrl: (row: ProxyTransactionRow) => void;
   onCopyCurl: (row: ProxyTransactionRow) => void;
   onSendToRepeater: (row: ProxyTransactionRow) => void;
   onSendToIntruder: (row: ProxyTransactionRow) => void;
+  onHighlight: (row: ProxyTransactionRow, color: string | null) => void;
+  onComment: (row: ProxyTransactionRow) => void;
+  onDelete: (row: ProxyTransactionRow) => void;
+  onClearHistory: () => void;
+}
+
+// Burp's highlight palette (a subset), applied as the row background.
+const HIGHLIGHTS: { name: string; color: string | null }[] = [
+  { name: "Red", color: "#ffd5d5" },
+  { name: "Orange", color: "#ffe6cc" },
+  { name: "Yellow", color: "#fff6c2" },
+  { name: "Green", color: "#d6f5d6" },
+  { name: "Blue", color: "#d6e4ff" },
+  { name: "None", color: null },
+];
+
+function HighlightItem({
+  entry,
+  row,
+  onHighlight,
+}: {
+  entry: { name: string; color: string | null };
+  row: ProxyTransactionRow;
+  onHighlight: (row: ProxyTransactionRow, color: string | null) => void;
+}) {
+  const handleSelect = useCallback(
+    () => onHighlight(row, entry.color),
+    [entry.color, onHighlight, row],
+  );
+  const dot = useMemo(
+    () => (
+      <View
+        style={[styles.hlDot, entry.color ? { backgroundColor: entry.color } : styles.hlDotNone]}
+      />
+    ),
+    [entry.color],
+  );
+  return (
+    <ContextMenuItem leading={dot} onSelect={handleSelect}>
+      {`Highlight: ${entry.name}`}
+    </ContextMenuItem>
+  );
 }
 
 // Burp's HTTP-history table: one row per intercepted transaction, newest first, with the columns a
@@ -145,6 +191,8 @@ const HistoryRow = memo(function HistoryRow({
   const handleCopyCurl = useCallback(() => actions.onCopyCurl(row), [actions, row]);
   const handleSendToRepeater = useCallback(() => actions.onSendToRepeater(row), [actions, row]);
   const handleSendToIntruder = useCallback(() => actions.onSendToIntruder(row), [actions, row]);
+  const handleComment = useCallback(() => actions.onComment(row), [actions, row]);
+  const handleDelete = useCallback(() => actions.onDelete(row), [actions, row]);
   const highlightStyle = useMemo(
     () => (row.highlight ? { backgroundColor: row.highlight } : null),
     [row.highlight],
@@ -182,7 +230,20 @@ const HistoryRow = memo(function HistoryRow({
         <ContextMenuItem leading={ICON_SEND} onSelect={handleSendToIntruder}>
           Send to Intruder
         </ContextMenuItem>
-        <ContextMenuItem disabled>Add to scope (soon)</ContextMenuItem>
+        <ContextMenuSeparator />
+        {HIGHLIGHTS.map((h) => (
+          <HighlightItem key={h.name} entry={h} row={row} onHighlight={actions.onHighlight} />
+        ))}
+        <ContextMenuSeparator />
+        <ContextMenuItem leading={ICON_COMMENT} onSelect={handleComment}>
+          Add comment…
+        </ContextMenuItem>
+        <ContextMenuItem destructive leading={ICON_TRASH} onSelect={handleDelete}>
+          Delete item
+        </ContextMenuItem>
+        <ContextMenuItem destructive leading={ICON_TRASH} onSelect={actions.onClearHistory}>
+          Clear history
+        </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
   );
@@ -218,6 +279,8 @@ const styles = StyleSheet.create((theme: Theme) => ({
     color: theme.colors.foreground,
   },
   right: { textAlign: "right" },
+  hlDot: { width: 12, height: 12, borderRadius: 3 },
+  hlDotNone: { borderWidth: 1, borderColor: theme.colors.border },
   empty: {
     padding: theme.spacing[4],
     color: theme.colors.foregroundMuted,

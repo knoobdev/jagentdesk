@@ -207,6 +207,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     color: theme.colors.foreground,
   },
   input: {
+    outlineWidth: 0,
     borderWidth: 1,
     borderColor: theme.colors.border,
     borderRadius: theme.borderRadius.md,

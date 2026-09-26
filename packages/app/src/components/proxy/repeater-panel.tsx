@@ -194,6 +194,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     fontWeight: theme.fontWeight.bold,
   },
   hostInput: {
+    outlineWidth: 0,
     flex: 1,
     minWidth: 0,
     fontSize: theme.fontSize.sm,
@@ -207,6 +208,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
   },
   colon: { color: theme.colors.foregroundMuted },
   portInput: {
+    outlineWidth: 0,
     width: 64,
     fontSize: theme.fontSize.sm,
     fontFamily: theme.fontFamily.mono,
@@ -243,6 +245,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderBottomColor: theme.colors.border,
   },
   rawInput: {
+    outlineWidth: 0,
     flex: 1,
     fontSize: theme.fontSize.xs,
     fontFamily: theme.fontFamily.mono,

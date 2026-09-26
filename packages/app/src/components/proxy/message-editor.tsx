@@ -43,6 +43,38 @@ export function MessageEditor({ transaction }: { transaction: ProxyTransactionFu
   );
 }
 
+// Headers rendered as a Burp-style key/value table in Pretty mode (name coloured), or the exact raw
+// text in Raw/Hex mode.
+function HeadersBlock({
+  headers,
+  pretty,
+  rawText,
+}: {
+  headers: ProxyHeader[];
+  pretty: boolean;
+  rawText: string;
+}) {
+  if (headers.length === 0) return null;
+  if (!pretty) {
+    return (
+      <Text style={styles.headers} selectable>
+        {rawText}
+      </Text>
+    );
+  }
+  return (
+    <View style={styles.headerTable}>
+      {headers.map((h) => (
+        <Text key={`${h.name}=${h.value}`} style={styles.headerRow} selectable>
+          <Text style={styles.headerName}>{h.name}</Text>
+          <Text style={styles.headerColon}>: </Text>
+          {h.value}
+        </Text>
+      ))}
+    </View>
+  );
+}
+
 function ModeButton({
   mode,
   active,
@@ -99,11 +131,7 @@ export function MessagePane({
         <Text style={styles.startLine} selectable>
           {startLine}
         </Text>
-        {headerText ? (
-          <Text style={styles.headers} selectable>
-            {headerText}
-          </Text>
-        ) : null}
+        <HeadersBlock headers={headers} pretty={mode === "pretty"} rawText={headerText} />
         {body ? (
           <Text style={styles.bodyText} selectable>
             {body}
@@ -221,6 +249,14 @@ const styles = StyleSheet.create((theme: Theme) => ({
     fontSize: theme.fontSize.xs,
     color: theme.colors.foregroundMuted,
   },
+  headerTable: { gap: 1 },
+  headerRow: {
+    fontFamily: theme.fontFamily.mono,
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foreground,
+  },
+  headerName: { color: WB_ORANGE },
+  headerColon: { color: theme.colors.foregroundMuted },
   bodyText: {
     fontFamily: theme.fontFamily.mono,
     fontSize: theme.fontSize.xs,
