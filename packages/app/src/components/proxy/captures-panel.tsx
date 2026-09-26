@@ -292,7 +292,8 @@ function CaptureConfigModal({
                 />
               </View>
             </>
-          ) : (
+          ) : null}
+          {mode === "manual" ? (
             <>
               <Text style={styles.modalTitle}>New manual listener</Text>
               <Text style={styles.modalHint}>
@@ -311,7 +312,7 @@ function CaptureConfigModal({
                 <WbButton label="Create listener" onPress={startManual} />
               </View>
             </>
-          )}
+          ) : null}
         </Pressable>
       </Pressable>
     </Modal>
