@@ -1,3 +1,4 @@
+import zlib from "node:zlib";
 import type {
   ProxyHeader,
   ProxyTransactionFull,
@@ -156,19 +157,42 @@ export function toRow(tx: StoredTransaction): ProxyTransactionRow {
 }
 
 export function toFull(tx: StoredTransaction): ProxyTransactionFull {
-  const reqText = isTextBody(tx.requestHeaders, tx.requestBody);
-  const resText = isTextBody(tx.responseHeaders, tx.responseBody);
+  // Display bodies are decompressed (gzip/deflate/br) the way Burp shows them — the stored/served
+  // bytes stay compressed, but a reader wants the plaintext. Headers are kept as-is.
+  const reqBody = decodeBody(tx.requestHeaders, tx.requestBody);
+  const resBody = decodeBody(tx.responseHeaders, tx.responseBody);
   return {
     ...toRow(tx),
     requestLine: tx.requestLine,
     requestHeaders: tx.requestHeaders,
-    requestBodyB64: tx.requestBody.toString("base64"),
-    requestBodyIsText: reqText,
+    requestBodyB64: reqBody.toString("base64"),
+    requestBodyIsText: isTextBody(tx.requestHeaders, reqBody),
     statusLine: tx.statusLine,
     responseHeaders: tx.responseHeaders,
-    responseBodyB64: tx.responseBody.toString("base64"),
-    responseBodyIsText: resText,
+    responseBodyB64: resBody.toString("base64"),
+    responseBodyIsText: isTextBody(tx.responseHeaders, resBody),
   };
+}
+
+// Decompress a body per its Content-Encoding (br / gzip / deflate). Falls back to the raw bytes if
+// the header is absent or decompression fails (e.g. a truncated capture).
+function decodeBody(headers: ProxyHeader[], body: Buffer): Buffer {
+  if (body.length === 0) return body;
+  const encoding = headerValue(headers, "content-encoding").toLowerCase().trim();
+  try {
+    if (encoding === "br") return zlib.brotliDecompressSync(body);
+    if (encoding === "gzip" || encoding === "x-gzip") return zlib.gunzipSync(body);
+    if (encoding === "deflate") {
+      try {
+        return zlib.inflateSync(body);
+      } catch {
+        return zlib.inflateRawSync(body);
+      }
+    }
+  } catch {
+    return body;
+  }
+  return body;
 }
 
 export function headerValue(headers: ProxyHeader[], name: string): string {
