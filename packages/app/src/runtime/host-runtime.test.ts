@@ -114,6 +114,27 @@ class FakeDaemonClient {
     return this.state;
   }
 
+  private daemonVersion: string | null = null;
+
+  getLastServerInfoMessage(): ReturnType<DaemonClient["getLastServerInfoMessage"]> {
+    if (this.daemonVersion === null) return null;
+    return {
+      status: "server_info",
+      serverId: "srv_test",
+      hostname: "test",
+      version: this.daemonVersion,
+    };
+  }
+
+  // Like the real client, the server info is cleared while disconnected and replaced by the
+  // restarted daemon's handshake before the client reports connected again.
+  daemonRestartsAs(version: string): void {
+    this.daemonVersion = null;
+    this.setConnectionState({ status: "disconnected", reason: "Connection lost" });
+    this.daemonVersion = version;
+    this.setConnectionState({ status: "connected" });
+  }
+
   subscribeConnectionStatus(listener: (status: ConnectionState) => void): () => void {
     this.listeners.add(listener);
     listener(this.state);
@@ -1839,6 +1860,37 @@ describe("HostRuntimeStore", () => {
 
     store.syncHosts([]);
     useSessionStore.getState().clearSession(host.serverId);
+  });
+
+  it("shows the restarted daemon's version after the same client reconnects", async () => {
+    const host = makeHost({
+      serverId: "srv_restarted",
+      connections: [{ id: "direct:lan:6767", type: "directTcp", endpoint: "lan:6767" }],
+    });
+    const fakeClient = new FakeDaemonClient();
+    fakeClient.daemonRestartsAs("0.8.0");
+    const store = new HostRuntimeStore({
+      deps: {
+        createClient: () => fakeClient as unknown as DaemonClient,
+        connectToDaemon: async ({ host: hostProfile }) => ({
+          client: fakeClient as unknown as DaemonClient,
+          serverId: hostProfile.serverId,
+          hostname: hostProfile.label ?? null,
+        }),
+        getClientId: async () => "cid_test_runtime",
+      },
+    });
+
+    store.syncHosts([host]);
+    await vi.waitFor(() => expect(store.getSnapshot(host.serverId)?.connectionStatus).toBe("online"));
+    expect(useSessionStore.getState().sessions[host.serverId]?.serverInfo?.version).toBe("0.8.0");
+
+    fakeClient.daemonRestartsAs("0.9.1");
+
+    expect(store.getSnapshot(host.serverId)?.client).toBe(fakeClient);
+    expect(useSessionStore.getState().sessions[host.serverId]?.serverInfo?.version).toBe("0.9.1");
+
+    store.syncHosts([]);
   });
 
   it("drains legacy snapshot and buffered running transitions exactly once", async () => {

@@ -102,7 +102,8 @@ export async function startIsolatedHostDaemon(
   if (!metroPort) throw new Error("E2E_METRO_PORT is required to start an isolated host daemon");
 
   const jagentdeskHome =
-    options.jagentdeskHome ?? (await mkdtemp(path.join(tmpdir(), "jagentdesk-e2e-secondary-host-")));
+    options.jagentdeskHome ??
+    (await mkdtemp(path.join(tmpdir(), "jagentdesk-e2e-secondary-host-")));
   let publishedPackageRoot: string | null = null;
   if (options.publishedVersion) {
     publishedPackageRoot = await mkdtemp(path.join(tmpdir(), "jagentdesk-e2e-published-server-"));
