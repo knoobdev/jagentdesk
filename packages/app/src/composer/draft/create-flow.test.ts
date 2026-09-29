@@ -3,14 +3,81 @@
  */
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { handoffCreatedAgentMessageSubmission } from "@/composer/submission/writer";
 import { useCreateFlowStore } from "@/stores/create-flow-store";
 import type { UserMessageImageAttachment } from "@/types/stream";
 import type { AgentAttachment } from "@jagentdesk/protocol/messages";
 import { useDraftAgentCreateFlow, type DraftCreateAttempt } from "./create-flow";
 
+vi.mock("@/composer/submission/writer", () => ({
+  handoffCreatedAgentMessageSubmission: vi.fn(),
+}));
+
 describe("useDraftAgentCreateFlow", () => {
   beforeEach(() => {
     useCreateFlowStore.setState({ pendingByDraftId: {} });
+    vi.mocked(handoffCreatedAgentMessageSubmission).mockClear();
+  });
+
+  // Team mode: the daemon never echoes the first message as the lead's own turn, so an optimistic
+  // copy would never reconcile and would jump to the tail on every resume/reconnect.
+  it("does not hand off the first message when the daemon will not deliver it", async () => {
+    const attempt: DraftCreateAttempt = {
+      clientMessageId: "msg-team",
+      text: "build the team",
+      timestamp: new Date("2026-09-29T00:00:00.000Z"),
+    };
+    const createRequest = vi.fn(async () => ({
+      agentId: "agent-lead",
+      result: { id: "agent-lead" },
+      promptDelivered: false,
+    }));
+
+    const { result } = renderHook(() =>
+      useDraftAgentCreateFlow({
+        draftId: "draft-team",
+        getPendingServerId: () => "server-1",
+        buildDraftAgent: (currentAttempt) => ({ currentAttempt }),
+        createRequest,
+        onCreateSuccess: vi.fn(),
+      }),
+    );
+
+    await act(async () => {
+      await result.current.continueCreateFromAttempt({ attempt, cwd: "/repo" });
+    });
+
+    expect(createRequest).toHaveBeenCalledTimes(1);
+    expect(handoffCreatedAgentMessageSubmission).not.toHaveBeenCalled();
+  });
+
+  it("hands off the first message for a normal create", async () => {
+    const attempt: DraftCreateAttempt = {
+      clientMessageId: "msg-solo",
+      text: "build this",
+      timestamp: new Date("2026-09-29T00:00:00.000Z"),
+    };
+    const createRequest = vi.fn(async () => ({
+      agentId: "agent-solo",
+      result: { id: "agent-solo" },
+    }));
+
+    const { result } = renderHook(() =>
+      useDraftAgentCreateFlow({
+        draftId: "draft-solo",
+        getPendingServerId: () => "server-1",
+        buildDraftAgent: (currentAttempt) => ({ currentAttempt }),
+        createRequest,
+        onCreateSuccess: vi.fn(),
+      }),
+    );
+
+    await act(async () => {
+      await result.current.continueCreateFromAttempt({ attempt, cwd: "/repo" });
+    });
+
+    expect(handoffCreatedAgentMessageSubmission).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(handoffCreatedAgentMessageSubmission).mock.calls[0]?.[1]).toBe("agent-solo");
   });
 
   it("renders a prepared new-workspace submission before continuing it", async () => {

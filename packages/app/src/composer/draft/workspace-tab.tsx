@@ -161,7 +161,7 @@ async function submitDraftCreateRequest(input: {
   hostDisconnectedMessage: string;
   selectModelMessage: string;
   teamMode?: boolean;
-}): Promise<{ agentId: string | null; result: AgentSnapshotPayload }> {
+}): Promise<{ agentId: string | null; result: AgentSnapshotPayload; promptDelivered: boolean }> {
   const {
     attempt,
     text,
@@ -215,6 +215,8 @@ async function submitDraftCreateRequest(input: {
   return {
     agentId: result.id,
     result,
+    // Team mode never sends the first message as this agent's own turn (see createDraftAgent).
+    promptDelivered: !teamMode,
   };
 }
 

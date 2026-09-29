@@ -44,7 +44,11 @@ import {
 import { SkillsControl } from "@/composer/agent-controls/skills-control";
 import { AutonomousControl } from "@/composer/agent-controls/autonomous-control";
 import { TeamModeControl } from "@/composer/agent-controls/team-mode-control";
-import { getTeamModeEnabled } from "@/composer/agent-controls/team-mode-store";
+import {
+  getTeamModeEnabled,
+  teamModeKey,
+  useTeamModeStore,
+} from "@/composer/agent-controls/team-mode-store";
 import { resolveSkillInjectedText } from "@/skills/skill-injection";
 import { ContextWindowMeter } from "@/components/context-window-meter";
 import { useImageAttachmentPicker } from "@/hooks/use-image-attachment-picker";
@@ -1451,6 +1455,10 @@ export function Composer({
           });
           clearDraft("sent");
           setUserInput("");
+          // One-shot, like the draft path: once the team is started, later messages to this agent
+          // are normal turns. Left armed, each follow-up would open another forum (and, inside the
+          // 30s dedupe window, be silently dropped).
+          useTeamModeStore.getState().set(teamModeKey(serverId, agentId), false);
         } catch (error) {
           console.error("[AgentInput] Team mode start failed:", error);
           setSendError(t("composer.errors.failedToSend"));
