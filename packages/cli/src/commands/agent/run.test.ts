@@ -6,13 +6,68 @@ import {
   type AgentRunOptions,
 } from "./run";
 
+// Answers fetchAgent the way a daemon does: an unknown id is an error.
+function daemonWithAgents(...agentIds: string[]) {
+  return {
+    async fetchAgent({ agentId }: { agentId: string }) {
+      if (!agentIds.includes(agentId)) {
+        throw new Error(`Agent not found: ${agentId}`);
+      }
+      return { agent: { id: agentId } };
+    },
+    getConnectionState: () => ({ status: "connected" }),
+  };
+}
+
 describe("managed agent caller context", () => {
-  it("propagates a trimmed JAGENTDESK_AGENT_ID", () => {
-    expect(resolveRunCallerAgentId({ JAGENTDESK_AGENT_ID: "  parent-agent  " })).toBe("parent-agent");
+  it("uses a trimmed JAGENTDESK_AGENT_ID when the target daemon runs that agent", async () => {
+    await expect(
+      resolveRunCallerAgentId(daemonWithAgents("parent-agent"), {
+        JAGENTDESK_AGENT_ID: "  parent-agent  ",
+      }),
+    ).resolves.toBe("parent-agent");
   });
 
-  it("omits blank caller ids", () => {
-    expect(resolveRunCallerAgentId({ JAGENTDESK_AGENT_ID: "   " })).toBeUndefined();
+  it("runs without a caller when JAGENTDESK_AGENT_ID belongs to another daemon", async () => {
+    await expect(
+      resolveRunCallerAgentId(daemonWithAgents("other-agent"), {
+        JAGENTDESK_AGENT_ID: "parent-agent",
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("fails instead of dropping the caller when the lookup loses its connection", async () => {
+    const lostConnection = new Error("Transport closed");
+    const disconnectedDaemon = {
+      async fetchAgent(): Promise<never> {
+        throw lostConnection;
+      },
+      getConnectionState: () => ({ status: "disconnected" }),
+    };
+
+    await expect(
+      resolveRunCallerAgentId(disconnectedDaemon, { JAGENTDESK_AGENT_ID: "parent-agent" }),
+    ).rejects.toBe(lostConnection);
+  });
+
+  it("fails instead of dropping the caller when the lookup times out", async () => {
+    const timedOut = new Error("Timeout waiting for message (30000ms)");
+    const slowDaemon = {
+      async fetchAgent(): Promise<never> {
+        throw timedOut;
+      },
+      getConnectionState: () => ({ status: "connected" }),
+    };
+
+    await expect(
+      resolveRunCallerAgentId(slowDaemon, { JAGENTDESK_AGENT_ID: "parent-agent" }),
+    ).rejects.toBe(timedOut);
+  });
+
+  it("omits blank caller ids", async () => {
+    await expect(
+      resolveRunCallerAgentId(daemonWithAgents(), { JAGENTDESK_AGENT_ID: "   " }),
+    ).resolves.toBeUndefined();
   });
 });
 

@@ -1,3 +1,7 @@
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import pino from "pino";
 import {
@@ -22,6 +26,7 @@ import {
   createNoGitWorkspaceRuntimeSnapshot,
   createNoopWorkspaceGitService,
 } from "../../test-utils/workspace-git-service-stub.js";
+import { createWorktree, deleteJAgentDeskWorktree } from "../../../utils/worktree.js";
 import { expandTilde } from "../../../utils/path.js";
 import type { GitMetadataGenerator } from "./git-metadata-generator.js";
 
@@ -100,6 +105,7 @@ interface RecordedGeneratorCalls {
 }
 
 function makeCheckoutSession(options?: {
+  jagentdeskHome?: string;
   git?: Partial<WorkspaceGitService>;
   diff?: CheckoutDiffSubscriber;
   github?: Partial<ForgeService>;
@@ -165,7 +171,7 @@ function makeCheckoutSession(options?: {
     checkoutDiffManager:
       options?.diff ?? createFakeDiffSubscriber({ cwd: "", files: [], error: null }).subscriber,
     gitMetadataGenerator,
-    jagentdeskHome: "/tmp/jagentdesk-home",
+    jagentdeskHome: options?.jagentdeskHome ?? "/tmp/jagentdesk-home",
     worktreesRoot: undefined,
     logger: pino({ level: "silent" }),
   });
@@ -1607,4 +1613,96 @@ describe("CheckoutSession", () => {
       ]);
     });
   });
+});
+
+it("creates a PR from a restored exact base using the host metadata and a forge branch name", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "jagentdesk-restored-pr-")));
+  const repo = join(root, "repo");
+  const remote = join(root, "remote.git");
+  const jagentdeskHome = join(root, "home");
+  const git = (cwd: string, ...args: string[]) =>
+    execFileSync("git", args, { cwd, encoding: "utf8", stdio: "pipe" }).trim();
+  try {
+    git(root, "init", "-b", "main", repo);
+    git(repo, "config", "user.name", "Test");
+    git(repo, "config", "user.email", "test@example.com");
+    git(repo, "commit", "--allow-empty", "-m", "base");
+    git(root, "init", "--bare", remote);
+    git(repo, "remote", "add", "origin", remote);
+    git(repo, "push", "-u", "origin", "main");
+    const baseRef = "refs/remotes/origin/main";
+    const created = await createWorktree({
+      cwd: repo,
+      jagentdeskHome,
+      worktreeSlug: "restored-pr",
+      source: { kind: "branch-off", baseBranch: baseRef, branchName: "restored-pr" },
+      runSetup: false,
+    });
+    writeFileSync(join(created.worktreePath, "feature.txt"), "feature\n");
+    git(created.worktreePath, "add", ".");
+    git(created.worktreePath, "commit", "-m", "feature");
+    await deleteJAgentDeskWorktree({
+      cwd: repo,
+      jagentdeskHome,
+      worktreePath: created.worktreePath,
+    });
+    const restored = await createWorktree({
+      cwd: repo,
+      jagentdeskHome,
+      worktreeSlug: "restored-pr",
+      source: { kind: "restore", branchName: created.branchName, baseRef },
+      runSetup: false,
+    });
+    const requests: Array<Parameters<ForgeService["createPullRequest"]>[0]> = [];
+    const service: ForgeService = {
+      ...createGitHubService(),
+      createPullRequest: async (input) => {
+        requests.push(input);
+        return { url: "https://example.com/pull/1", number: 1 };
+      },
+    };
+    const { checkout, emitted } = makeCheckoutSession({
+      jagentdeskHome,
+      git: { resolveForge: async () => ({ forge: "github", host: "github.com", service }) },
+    });
+    await checkout.handleCheckoutPrCreateRequest({
+      type: "checkout_pr_create_request",
+      cwd: restored.worktreePath,
+      baseRef: "refs/heads/main",
+      title: "Feature",
+      body: "Description",
+      requestId: "wrong-base",
+    });
+    expect(emitted.at(-1)).toMatchObject({
+      type: "checkout_pr_create_response",
+      payload: { error: { message: expect.stringContaining("Base ref mismatch") } },
+    });
+    expect(requests).toHaveLength(0);
+    await checkout.handleCheckoutPrCreateRequest({
+      type: "checkout_pr_create_request",
+      cwd: restored.worktreePath,
+      baseRef: "main",
+      title: "Feature",
+      body: "Description",
+      requestId: "right-base",
+    });
+    expect(emitted.at(-1)).toMatchObject({
+      type: "checkout_pr_create_response",
+      payload: { error: null, number: 1 },
+    });
+    expect(requests).toEqual([
+      {
+        cwd: restored.worktreePath,
+        base: "main",
+        head: created.branchName,
+        title: "Feature",
+        body: "Description",
+      },
+    ]);
+    expect(git(remote, "rev-parse", `refs/heads/${created.branchName}`)).toBe(
+      git(restored.worktreePath, "rev-parse", "HEAD"),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

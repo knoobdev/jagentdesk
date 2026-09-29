@@ -9,6 +9,8 @@ JAgentDesk is a daemon that supervises AI coding agents on your machine. Control
 
 **`create_workspace`** — create a workspace independently of any agent. Required: `isolation` (`local` or `worktree`). Worktree isolation supports `mode: "branch-off" | "checkout-branch" | "checkout-pr"`: use `branchName`/`baseBranch` for a new branch, `branch` for an existing branch, or `prNumber` plus optional `forge`/`projectPath` for a change request. `worktreeSlug` controls the managed path. Returns the workspace descriptor centered on `workspaceId`.
 
+Choose `baseBranch` explicitly: `origin/main` selects the remote-tracking branch; `refs/heads/main` selects local main. Bare `main` prefers local main when it exists, otherwise origin/main. JAgentDesk retains the resolved ref for workspace comparisons, even after rebasing the branch or changing its PR target.
+
 **`list_workspaces`** — list active workspaces.
 
 **`archive_workspace`** — `{ workspaceId }`. Archives the workspace, its agents, and its terminals. Local directories remain; JAgentDesk removes an owned worktree only after its final active workspace reference is archived.
@@ -116,11 +118,11 @@ Don't poll `list_agents` or `get_agent_status` to "check on" a running agent. Th
 The CLI and tools use the same ownership semantics even where their syntax differs:
 
 ```bash
-jagentdesk workspace create --isolation worktree --mode branch-off --new-branch fix-x --base main
+jagentdesk workspace create --isolation worktree --mode branch-off --new-branch fix-x --base origin/main
 jagentdesk workspace create --isolation worktree --mode checkout-branch --branch existing-work
 jagentdesk workspace create --isolation worktree --mode checkout-pr --pr-number 42
 jagentdesk run --provider codex/gpt-5.4 --mode full-access --workspace <workspace-id> "<prompt>"
-jagentdesk run --provider codex/gpt-5.4 --mode full-access --new-workspace worktree --worktree-mode branch-off --new-branch fix-x --base main "<prompt>"
+jagentdesk run --provider codex/gpt-5.4 --mode full-access --new-workspace worktree --worktree-mode branch-off --new-branch fix-x --base origin/main "<prompt>"
 jagentdesk send <agent-id> "<follow-up>"
 jagentdesk ls
 jagentdesk schedule create --cron "*/15 * * * *" "ping main build"
@@ -141,15 +143,15 @@ The desktop app's first-run hook (`installCli`) symlinks this to `~/.local/bin/j
 
 Daemon-client architecture: the daemon owns agent lifecycle, state, and the WebSocket API. Tools, CLI, mobile, and desktop apps are all clients.
 
-|                | Default                                                         |
-| -------------- | --------------------------------------------------------------- |
+|                | Default                                                              |
+| -------------- | -------------------------------------------------------------------- |
 | Listen address | `127.0.0.1:6767` (override `JAGENTDESK_LISTEN`)                      |
-| Home           | `~/.jagentdesk` (override `JAGENTDESK_HOME`)                              |
+| Home           | `~/.jagentdesk` (override `JAGENTDESK_HOME`)                         |
 | Daemon log     | `$JAGENTDESK_HOME/daemon.log`                                        |
 | Agent state    | `$JAGENTDESK_HOME/agents/<id>.json`                                  |
 | Worktrees      | `$JAGENTDESK_HOME/worktrees/` (or `worktrees.root` in `config.json`) |
-| PID file       | `$JAGENTDESK_HOME/jagentdesk.pid`                                         |
-| Health         | `GET http://127.0.0.1:6767/api/health`                          |
+| PID file       | `$JAGENTDESK_HOME/jagentdesk.pid`                                    |
+| Health         | `GET http://127.0.0.1:6767/api/health`                               |
 
 Debug order:
 

@@ -162,6 +162,10 @@ export function getJAgentDeskWorktreeMetadataPath(worktreeRoot: string): string 
   return join(gitDir, "jagentdesk", "worktree.json");
 }
 
+export function isQualifiedRef(ref: string): boolean {
+  return ref.trim().startsWith("refs/");
+}
+
 const REMOTE_TRACKING_PREFIX = "refs/remotes/";
 
 /**

@@ -3,12 +3,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { createServer } from "node:http";
 import pino from "pino";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import type { AgentManager } from "./agent/agent-manager.js";
 import type { AgentStorage } from "./agent/agent-storage.js";
 import type { FileBackedChatService } from "./chat/chat-service.js";
 import type { CheckoutDiffManager } from "./checkout-diff-manager.js";
+import type { DatabaseRegistry } from "./database/database-registry.js";
 import type { ClusterRegistry } from "./cluster/cluster-registry.js";
 import type { DaemonConfigStore } from "./daemon-config-store.js";
 import type { DownloadTokenStore } from "./file-download/token-store.js";
@@ -17,6 +18,7 @@ import type { ScheduleService } from "./schedule/service.js";
 import { createStub } from "./test-utils/class-mocks.js";
 import { createProviderSnapshotManagerStub } from "./test-utils/session-stubs.js";
 import { VoiceAssistantWebSocketServer, type WebSocketLike } from "./websocket-server.js";
+import { APPLICATION_SOCKET_LEASE_MS } from "./websocket/physical-socket.js";
 import type { WorkspaceAutoName } from "./workspace-auto-name.js";
 
 // A fully in-process WebSocketLike. The guard under test is purely message-driven,
@@ -155,6 +157,9 @@ function createHarness(): Harness {
     undefined, // hubRelationships
     undefined, // pairing
     undefined, // pluginRuntime
+    undefined, // skillsStorage
+    undefined, // usageHistory
+    createStub<DatabaseRegistry>({}),
   );
   const harness: Harness = { wsServer, home };
   harnesses.push(harness);
@@ -219,5 +224,38 @@ describe("reserved plugin clientId guard", () => {
 
     expect(ws.closedWithInvalidPluginClientId).toBe(false);
     expect(ws.receivedServerInfo).toBe(true);
+  });
+});
+
+describe("application socket lease", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  test("keeps a plugin socket whose heartbeat stalls past the application lease", async () => {
+    vi.useFakeTimers();
+    const { wsServer } = createHarness();
+    const ws = new FakeSocket();
+    await wsServer.attachPluginSocket("stalled", ws);
+    ws.receiveText(hello("plugin:stalled"));
+    ws.receiveText({ type: "ping" });
+
+    // Event loop starved past the lease: no further ping arrives.
+    await vi.advanceTimersByTimeAsync(APPLICATION_SOCKET_LEASE_MS * 2);
+
+    expect(ws.readyState).toBe(1);
+  });
+
+  test("still reaps an ordinary socket whose heartbeat stalls past the application lease", async () => {
+    vi.useFakeTimers();
+    const { wsServer } = createHarness();
+    const ws = new FakeSocket();
+    await wsServer.attachExternalSocket(ws);
+    ws.receiveText(hello("web-stalled"));
+    ws.receiveText({ type: "ping" });
+
+    await vi.advanceTimersByTimeAsync(APPLICATION_SOCKET_LEASE_MS * 2);
+
+    expect(ws.readyState).toBe(3);
   });
 });

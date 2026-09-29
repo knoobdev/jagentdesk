@@ -101,7 +101,8 @@ function createWorkflowForRequestTest(options: {
 }) {
   return async (input: Parameters<CreateJAgentDeskWorktreeFn>[0]) => {
     const createJAgentDeskWorktree =
-      options.createJAgentDeskWorktree ?? createJAgentDeskWorktreeForTest({ jagentdeskHome: options.jagentdeskHome });
+      options.createJAgentDeskWorktree ??
+      createJAgentDeskWorktreeForTest({ jagentdeskHome: options.jagentdeskHome });
     return createJAgentDeskWorktreeWorkflow(
       {
         jagentdeskHome: options.jagentdeskHome,
@@ -558,7 +559,10 @@ function createGitRepo(options?: { jagentdeskConfig?: Record<string, unknown> })
   execFileSync("git", ["config", "user.name", "Test"], { cwd: repoDir, stdio: "pipe" });
   writeFileSync(path.join(repoDir, "README.md"), "hello\n");
   if (options?.jagentdeskConfig) {
-    writeFileSync(path.join(repoDir, "jagentdesk.json"), JSON.stringify(options.jagentdeskConfig, null, 2));
+    writeFileSync(
+      path.join(repoDir, "jagentdesk.json"),
+      JSON.stringify(options.jagentdeskConfig, null, 2),
+    );
   }
   execFileSync("git", ["add", "."], { cwd: repoDir, stdio: "pipe" });
   execFileSync("git", ["-c", "commit.gpgsign=false", "commit", "-m", "initial"], {
@@ -1316,8 +1320,10 @@ describe("handleCreateJAgentDeskWorktreeRequest", () => {
     const response = emitted.find(
       (
         message,
-      ): message is Extract<SessionOutboundMessage, { type: "create_jagentdesk_worktree_response" }> =>
-        message.type === "create_jagentdesk_worktree_response",
+      ): message is Extract<
+        SessionOutboundMessage,
+        { type: "create_jagentdesk_worktree_response" }
+      > => message.type === "create_jagentdesk_worktree_response",
     );
 
     expect(response?.payload.error).toBeNull();
@@ -1637,8 +1643,10 @@ describe("handleCreateJAgentDeskWorktreeRequest", () => {
       const response = emitted.find(
         (
           message,
-        ): message is Extract<SessionOutboundMessage, { type: "create_jagentdesk_worktree_response" }> =>
-          message.type === "create_jagentdesk_worktree_response",
+        ): message is Extract<
+          SessionOutboundMessage,
+          { type: "create_jagentdesk_worktree_response" }
+        > => message.type === "create_jagentdesk_worktree_response",
       );
       expect(response?.payload.error).toBeNull();
     } finally {
@@ -1686,8 +1694,10 @@ describe("handleCreateJAgentDeskWorktreeRequest", () => {
       const response = emitted.find(
         (
           message,
-        ): message is Extract<SessionOutboundMessage, { type: "create_jagentdesk_worktree_response" }> =>
-          message.type === "create_jagentdesk_worktree_response",
+        ): message is Extract<
+          SessionOutboundMessage,
+          { type: "create_jagentdesk_worktree_response" }
+        > => message.type === "create_jagentdesk_worktree_response",
       );
       expect(response?.payload.error).toBeNull();
       expect(response?.payload.workspace?.id).toBeTruthy();
@@ -1718,6 +1728,7 @@ describe("handleCreateJAgentDeskWorktreeRequest", () => {
           requestCwd: repoDir,
           worktree: {
             branchName: "response-after-create",
+            comparisonBaseRef: "refs/heads/main",
             worktreePath: registeredWorktreePath,
           },
           shouldBootstrap: true,
@@ -1758,8 +1769,10 @@ describe("handleCreateJAgentDeskWorktreeRequest", () => {
       const response = emitted.find(
         (
           message,
-        ): message is Extract<SessionOutboundMessage, { type: "create_jagentdesk_worktree_response" }> =>
-          message.type === "create_jagentdesk_worktree_response",
+        ): message is Extract<
+          SessionOutboundMessage,
+          { type: "create_jagentdesk_worktree_response" }
+        > => message.type === "create_jagentdesk_worktree_response",
       );
       expect(response?.payload.workspace).toBeNull();
       expect(response?.payload.error).toBe('action "checkout" requires refName or checkoutSource');
@@ -1797,8 +1810,10 @@ describe("handleCreateJAgentDeskWorktreeRequest", () => {
       const response = emitted.find(
         (
           message,
-        ): message is Extract<SessionOutboundMessage, { type: "create_jagentdesk_worktree_response" }> =>
-          message.type === "create_jagentdesk_worktree_response",
+        ): message is Extract<
+          SessionOutboundMessage,
+          { type: "create_jagentdesk_worktree_response" }
+        > => message.type === "create_jagentdesk_worktree_response",
       );
       expect(response?.payload.workspace).toBeNull();
       expect(response?.payload.error).toBe("Unknown branch: missing-branch");

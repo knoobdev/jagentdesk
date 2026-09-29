@@ -269,7 +269,10 @@ export class CheckoutSession {
     const { cwd, requestId } = msg;
 
     try {
-      const { baseRef, commits } = await listCheckoutCommits({ cwd: expandTilde(cwd) });
+      const { baseRef, commits } = await listCheckoutCommits({
+        cwd: expandTilde(cwd),
+        context: { jagentdeskHome: this.jagentdeskHome, worktreesRoot: this.worktreesRoot },
+      });
       this.host.emit({
         type: "checkout.commits.list.response",
         payload: { cwd, baseRef, commits, error: null, requestId },
@@ -792,10 +795,14 @@ export class CheckoutSession {
         }
       }
 
-      await mergeFromBase(cwd, {
-        baseRef: msg.baseRef,
-        requireCleanTarget: msg.requireCleanTarget ?? true,
-      });
+      await mergeFromBase(
+        cwd,
+        {
+          baseRef: msg.baseRef,
+          requireCleanTarget: msg.requireCleanTarget ?? true,
+        },
+        { jagentdeskHome: this.jagentdeskHome, worktreesRoot: this.worktreesRoot },
+      );
       await this.gitMutation.notifyGitMutation(cwd, "merge-from-base", { invalidateForge: true });
       this.scheduleDiffRefresh(cwd);
 
@@ -907,6 +914,7 @@ export class CheckoutSession {
           base: msg.baseRef,
         },
         service,
+        { jagentdeskHome: this.jagentdeskHome, worktreesRoot: this.worktreesRoot },
       );
       await this.gitMutation.notifyGitMutation(cwd, "create-pr", { invalidateForge: true });
 

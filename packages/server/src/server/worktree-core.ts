@@ -6,7 +6,7 @@ import {
   resolveExistingWorktreeForSlug,
   slugify,
   validateBranchSlug,
-  type WorktreeConfig,
+  type CreatedWorktree,
 } from "../utils/worktree.js";
 import {
   resolveWorktreeCreationIntent,
@@ -16,6 +16,10 @@ import {
 } from "./resolve-worktree-creation-intent.js";
 import type { ChangeRequestCheckoutSource, FirstAgentContext } from "@jagentdesk/protocol/messages";
 import type { WorkspaceGitService } from "./workspace-git-service.js";
+import {
+  normalizeBaseRefName,
+  readJAgentDeskWorktreeMetadata,
+} from "../utils/worktree-metadata.js";
 
 export interface CreateWorktreeCoreInput {
   cwd: string;
@@ -41,7 +45,7 @@ export interface CreateWorktreeCoreDeps {
 }
 
 export interface CreateWorktreeCoreResult {
-  worktree: WorktreeConfig;
+  worktree: CreatedWorktree;
   intent: WorktreeCreationIntent;
   repoRoot: string;
   created: boolean;
@@ -117,7 +121,18 @@ export async function createWorktreeCore(
     worktreesRoot: input.worktreesRoot,
   });
   if (existingWorktree) {
-    return { worktree: existingWorktree, intent, repoRoot, created: false };
+    return {
+      worktree: {
+        ...existingWorktree,
+        comparisonBaseRef: resolveReusedWorktreeComparisonBase(
+          intent,
+          existingWorktree.worktreePath,
+        ),
+      },
+      intent,
+      repoRoot,
+      created: false,
+    };
   }
 
   return {
@@ -185,4 +200,18 @@ function validateWorktreeSlug(slug: string): string {
 
 function normalizeWorktreeSlug(value: string): string {
   return validateWorktreeSlug(slugify(value));
+}
+
+// A reused worktree keeps the comparison base recorded when it was created; a worktree
+// without JAgentDesk metadata falls back to the base the request named.
+function resolveReusedWorktreeComparisonBase(
+  intent: WorktreeCreationIntent,
+  worktreePath: string,
+): string | null {
+  if (intent.kind === "checkout-branch") return null;
+  const metadata = readJAgentDeskWorktreeMetadata(worktreePath);
+  if (metadata) return metadata.baseRef ?? metadata.baseRefName;
+  return normalizeBaseRefName(
+    intent.kind === "branch-off" ? intent.baseBranch : intent.baseRefName,
+  );
 }

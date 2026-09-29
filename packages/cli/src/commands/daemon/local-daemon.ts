@@ -1,6 +1,7 @@
 import { spawnSync, type ChildProcess } from "node:child_process";
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { createRequire } from "node:module";
+import { uptime } from "node:os";
 import path from "node:path";
 import { loadConfig, resolveJAgentDeskHome, spawnProcess } from "@jagentdesk/server";
 import treeKill from "tree-kill";
@@ -283,6 +284,24 @@ function isProcessRunning(pid: number): boolean {
   }
 }
 
+// Mirrors isPidLockOwnerRunning in @jagentdesk/server pid-lock: a process cannot predate
+// the boot it runs under, so a pid file stamped before this boot names a PID the operating
+// system may have handed to an unrelated process. `uptime()` has about a second of error on
+// some platforms; the tolerance covers that and nothing more.
+const BOOT_INSTANT_TOLERANCE_MS = 5_000;
+
+function pidFilePrecedesThisBoot(startedAt: string | undefined): boolean {
+  if (!startedAt) return false;
+  const stamped = Date.parse(startedAt);
+  if (Number.isNaN(stamped)) return false;
+  return stamped < Date.now() - uptime() * 1000 - BOOT_INSTANT_TOLERANCE_MS;
+}
+
+function isPidFileOwnerRunning(pidInfo: LocalDaemonPidInfo): boolean {
+  if (pidFilePrecedesThisBoot(pidInfo.startedAt)) return false;
+  return isProcessRunning(pidInfo.pid);
+}
+
 function signalProcess(pid: number, signal: NodeJS.Signals): boolean {
   try {
     process.kill(pid, signal);
@@ -530,7 +549,7 @@ export function resolveLocalDaemonState(options: { home?: string } = {}): LocalD
   const pidPath = pidFilePath(home);
   const logPath = path.join(home, DAEMON_LOG_FILENAME);
   const pidInfo = existsSync(pidPath) ? readPidFile(pidPath) : null;
-  const running = pidInfo ? isProcessRunning(pidInfo.pid) : false;
+  const running = pidInfo ? isPidFileOwnerRunning(pidInfo) : false;
   const listen = pidInfo?.listen ?? config.listen;
 
   return {

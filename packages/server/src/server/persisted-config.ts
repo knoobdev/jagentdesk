@@ -449,7 +449,7 @@ export function loadPersistedConfig(jagentdeskHome: string, logger?: LoggerLike)
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
+    parsed = parseConfigText(raw);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     throw new Error(`[Config] Invalid JSON in ${configPath}: ${message}`, {
@@ -468,6 +468,11 @@ export function loadPersistedConfig(jagentdeskHome: string, logger?: LoggerLike)
 
   log?.info(`Loaded from ${configPath}`);
   return result.data as PersistedConfig;
+}
+
+/** Editors such as Windows Notepad save UTF-8 with a byte order mark, which JSON.parse rejects. */
+function parseConfigText(raw: string): unknown {
+  return JSON.parse(raw.replace(/^\uFEFF/, ""));
 }
 
 export function savePersistedConfig(

@@ -1,6 +1,6 @@
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -56,6 +56,49 @@ describe("file uploads", () => {
     expect(readFileSync(path, "utf8")).toBe("hello world");
   });
 
+  it("keeps the original file name for non-ASCII and punctuated names", async () => {
+    const uploads = new FileUploadStore({ jagentdeskHome: makeJAgentDeskHome() });
+
+    for (const fileName of [
+      "2026年9月绩效计划表.xlsx",
+      "테스트 파일 (1).xlsx",
+      "résumé [final] & notes, v2.pdf",
+      "cafe\u0301 हिंदी.txt",
+    ]) {
+      const file = await uploadNamed(uploads, fileName);
+      expect(file?.fileName).toBe(fileName);
+      expect(basename(file!.path)).toBe(fileName);
+      expect(readFileSync(file!.path, "utf8")).toBe("hello world");
+    }
+  });
+
+  it("replaces path separators, control characters, and characters Windows rejects", async () => {
+    const uploads = new FileUploadStore({ jagentdeskHome: makeJAgentDeskHome() });
+
+    await expect(uploadNamed(uploads, "../../etc/passwd")).resolves.toMatchObject({
+      fileName: "passwd",
+    });
+    const backslashed = await uploadNamed(uploads, "dir\\name.txt");
+    expect(backslashed?.fileName).not.toContain("\\");
+    expect(backslashed?.fileName).toMatch(/name\.txt$/);
+    await expect(uploadNamed(uploads, 'a<b>:"c|?*.txt')).resolves.toMatchObject({
+      fileName: "a_b___c___.txt",
+    });
+    await expect(uploadNamed(uploads, "line\nbreak.txt")).resolves.toMatchObject({
+      fileName: "line_break.txt",
+    });
+  });
+
+  it("shortens a long non-ASCII name to the file system limit and keeps its extension", async () => {
+    const uploads = new FileUploadStore({ jagentdeskHome: makeJAgentDeskHome() });
+
+    const file = await uploadNamed(uploads, `${"绩".repeat(100)}.xlsx`);
+
+    expect(file?.fileName).toBe(`${"绩".repeat(83)}.xlsx`);
+    expect(Buffer.byteLength(file!.fileName)).toBeLessThanOrEqual(255);
+    expect(readFileSync(file!.path, "utf8")).toBe("hello world");
+  });
+
   it("rejects chunks beyond the declared size and removes the partial file", async () => {
     const jagentdeskHome = makeJAgentDeskHome();
     const uploads = new FileUploadStore({ jagentdeskHome });
@@ -106,9 +149,9 @@ describe("file uploads", () => {
 
     expect(results.slice(0, 3)).toEqual([null, null, null]);
     expect(results[3]?.payload.error).toBeNull();
-    expect(readFileSync(join(jagentdeskHome, "uploads", "upload_req-queued", "notes.txt"), "utf8")).toBe(
-      "hello world",
-    );
+    expect(
+      readFileSync(join(jagentdeskHome, "uploads", "upload_req-queued", "notes.txt"), "utf8"),
+    ).toBe("hello world");
   });
 
   it("replaces duplicate upload starts without letting the old stale timeout evict the replacement", async () => {
@@ -203,6 +246,25 @@ describe("file uploads", () => {
     expect(readFileSync(path, "utf8")).toBe("hello world");
   });
 });
+
+let uploadCount = 0;
+
+async function uploadNamed(uploads: FileUploadStore, fileName: string) {
+  const requestId = `req-named-${uploadCount++}`;
+  uploads.beginUpload({
+    type: "file.upload.request",
+    fileName,
+    mimeType: "text/plain",
+    size: 11,
+    modifiedAt: "2026-05-02T00:00:00.000Z",
+    requestId,
+  });
+  await uploads.receiveFrame(uploadBegins(requestId));
+  await uploads.receiveFrame(uploadChunk(requestId, "hello world"));
+  const response = await uploads.receiveFrame(uploadEnds(requestId));
+  expect(response?.payload.error).toBeNull();
+  return response?.payload.file;
+}
 
 function makeJAgentDeskHome(): string {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "file-upload-test-")));

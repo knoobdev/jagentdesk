@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -66,7 +66,10 @@ let workspaceArchiveInProgress = false;
 
 type TestScheduleServiceOptions = Omit<
   ScheduleServiceOptions,
-  "createAgent" | "createDirectoryWorkspace" | "createJAgentDeskWorktreeWorkspace" | "archiveWorkspace"
+  | "createAgent"
+  | "createDirectoryWorkspace"
+  | "createJAgentDeskWorktreeWorkspace"
+  | "archiveWorkspace"
 > & {
   agentManager: AgentManager;
   providerSnapshotManager: Pick<ProviderSnapshotManager, "resolveCreateConfig">;
@@ -758,7 +761,7 @@ describe("ScheduleService", () => {
     const runStarted = new Promise<void>((resolve) => {
       releaseRun = resolve;
     });
-    const store = new ScheduleStore(join(tempDir, "schedules"));
+    const store = new ScheduleStore(join(tempDir, "schedules"), createTestLogger());
     const legacy = await store.create({
       name: null,
       prompt: "finish/update race",
@@ -1861,6 +1864,51 @@ describe("ScheduleService", () => {
     await service2.stop();
   });
 
+  test("starts with the valid schedules when the schedules directory holds files that are not schedules", async () => {
+    const service1 = createScheduleService({
+      jagentdeskHome: tempDir,
+      logger: createTestLogger(),
+      agentManager: new AgentManager({ logger: createTestLogger() }),
+      agentStorage,
+      providerSnapshotManager: NO_UNATTENDED_SCHEDULE_POLICY,
+      now: () => now,
+      runner: async () => ({ agentId: null, output: "ok" }),
+    });
+    const created = await service1.create({
+      prompt: "Still scheduled",
+      cadence: { type: "every", everyMs: 60_000 },
+      target: {
+        type: "new-agent",
+        config: { provider: "claude", cwd: tempDir },
+      },
+      runOnCreate: false,
+    });
+    await service1.stop();
+
+    const schedulesDir = join(tempDir, "schedules");
+    await writeFile(join(schedulesDir, "notes.json"), JSON.stringify({ hello: "world" }));
+    const { lastRunAt: _omitted, ...withoutLastRunAt } = created;
+    await writeFile(
+      join(schedulesDir, "deadbeef.json"),
+      JSON.stringify({ ...withoutLastRunAt, id: "deadbeef" }),
+    );
+    await writeFile(join(schedulesDir, "broken.json"), "{ not json");
+
+    const service2 = createScheduleService({
+      jagentdeskHome: tempDir,
+      logger: createTestLogger(),
+      agentManager: new AgentManager({ logger: createTestLogger() }),
+      agentStorage,
+      providerSnapshotManager: NO_UNATTENDED_SCHEDULE_POLICY,
+      now: () => now,
+      runner: async () => ({ agentId: null, output: "ok" }),
+    });
+    await service2.start();
+
+    expect((await service2.list()).map((schedule) => schedule.id)).toEqual([created.id]);
+    await service2.stop();
+  });
+
   test("startup recovery archives an interrupted run workspace with an associated agent", async () => {
     const service1 = createScheduleService({
       jagentdeskHome: tempDir,
@@ -1885,7 +1933,7 @@ describe("ScheduleService", () => {
     const interruptedAt = now.toISOString();
     const associatedAgentId = "11111111-1111-4111-8111-111111111111";
     const workspaceId = "wks_interrupted_with_agent";
-    const store = new ScheduleStore(join(tempDir, "schedules"));
+    const store = new ScheduleStore(join(tempDir, "schedules"), createTestLogger());
     await store.update(created.id, (schedule) => ({
       ...schedule,
       runs: [
@@ -1953,7 +2001,7 @@ describe("ScheduleService", () => {
 
     const interruptedAt = now.toISOString();
     const workspaceId = "wks_interrupted_without_agent";
-    const store = new ScheduleStore(join(tempDir, "schedules"));
+    const store = new ScheduleStore(join(tempDir, "schedules"), createTestLogger());
     await store.update(created.id, (schedule) => ({
       ...schedule,
       runs: [

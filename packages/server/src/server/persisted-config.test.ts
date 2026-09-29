@@ -705,6 +705,51 @@ describe("loadPersistedConfig", () => {
   });
 });
 
+describe("config.json saved with a UTF-8 byte order mark", () => {
+  // Windows Notepad writes this shape: a BOM, then CRLF line endings.
+  const notepadConfig =
+    '\uFEFF{\r\n  "version": 1,\r\n  "daemon": { "listen": "127.0.0.1:6767" }\r\n}\r\n';
+
+  test("loadPersistedConfig reads it", () => {
+    const home = createTempHome();
+    try {
+      writeFileSync(path.join(home, "config.json"), notepadConfig);
+
+      expect(loadPersistedConfig(home).daemon?.listen).toBe("127.0.0.1:6767");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("loadPersistedConfig with an unreadable config.json", () => {
+  test("names the file when it is not valid JSON", () => {
+    const home = createTempHome();
+    const configPath = path.join(home, "config.json");
+    try {
+      writeFileSync(configPath, '{"version":1,');
+
+      expect(() => loadPersistedConfig(home)).toThrow(`[Config] Invalid JSON in ${configPath}: `);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  test("names the file and the field when it does not match the schema", () => {
+    const home = createTempHome();
+    const configPath = path.join(home, "config.json");
+    try {
+      writeFileSync(configPath, '{"daemon":{"listen":5}}');
+
+      expect(() => loadPersistedConfig(home)).toThrow(
+        `[Config] Invalid config in ${configPath}:\n  - daemon.listen: `,
+      );
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
 describe.skipIf(process.platform === "win32")("persisted config file permissions", () => {
   test("initializes config.json with private permissions", () => {
     const home = createTempHome();

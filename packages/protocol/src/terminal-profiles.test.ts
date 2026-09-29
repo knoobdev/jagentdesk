@@ -67,11 +67,13 @@ describe("guessTerminalProfileIcon", () => {
     ["/usr/local/bin/gemini", "gemini"],
     ["agy", "agy"],
     ["/usr/local/bin/agy", "agy"],
+    ["cursor-agent", "cursor"],
+    ["/usr/local/bin/cursor-agent", "cursor"],
   ])("guesses %s -> %s", (command, expected) => {
     expect(guessTerminalProfileIcon(command)).toBe(expected);
   });
 
-  it.each([["zsh"], ["bash"], ["fish"], [""], ["/usr/bin/foo"], ["cursor-agent"]])(
+  it.each([["zsh"], ["bash"], ["fish"], [""], ["/usr/bin/foo"], ["cursor-tool"]])(
     "returns undefined for unknown command %s",
     (command) => {
       expect(guessTerminalProfileIcon(command)).toBeUndefined();
@@ -87,6 +89,21 @@ describe("getTerminalProfileIcon", () => {
 
   it("guesses the icon when none is set", () => {
     const profile = { id: "1", name: "Foo", command: "claude" };
+    expect(getTerminalProfileIcon(profile)).toBe("claude");
+  });
+
+  it("shows the Cursor icon for a profile created in settings with the Cursor CLI", () => {
+    const profile = { id: "profile_1", name: "Cursor", command: "cursor-agent" };
+    expect(getTerminalProfileIcon(profile)).toBe("cursor");
+  });
+
+  it("keeps an explicit icon over the Cursor CLI guess", () => {
+    const profile = {
+      id: "profile_1",
+      name: "Cursor",
+      command: "cursor-agent",
+      icon: "claude",
+    };
     expect(getTerminalProfileIcon(profile)).toBe("claude");
   });
 

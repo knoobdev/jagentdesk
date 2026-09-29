@@ -2,7 +2,11 @@ import type { Command } from "commander";
 import type { AgentPermissionRequest } from "@jagentdesk/protocol/agent-types";
 import { connectToDaemon, getDaemonHost } from "../../utils/client.js";
 import type { CommandOptions, ListResult, CommandError } from "../../output/index.js";
-import { permitResponseSchema, type PermissionResponseItem } from "./allow.js";
+import {
+  permitResponseSchema,
+  toPermissionResponseItem,
+  type PermissionResponseItem,
+} from "./allow.js";
 
 export type PermitDenyResult = ListResult<PermissionResponseItem>;
 
@@ -26,7 +30,8 @@ export async function runDenyCommand(
     const error: CommandError = {
       code: "MISSING_ARGUMENT",
       message: "Request ID is required unless --all is specified",
-      details: "Usage: jagentdesk permit deny <agent> <req_id> or jagentdesk permit deny <agent> --all",
+      details:
+        "Usage: jagentdesk permit deny <agent> <req_id> or jagentdesk permit deny <agent> --all",
     };
     throw error;
   }
@@ -96,13 +101,7 @@ export async function runDenyCommand(
           ...(options.message ? { message: options.message } : {}),
           ...(options.interrupt ? { interrupt: true } : {}),
         });
-        return {
-          requestId: permission.id.slice(0, 8),
-          agentId: resolvedAgentId,
-          agentShortId: resolvedAgentId.slice(0, 7),
-          name: permission.name,
-          result: "denied",
-        };
+        return toPermissionResponseItem(resolvedAgentId, permission, "denied");
       }),
     );
 

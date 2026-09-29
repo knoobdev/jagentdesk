@@ -1,5 +1,5 @@
-import { mkdtemp, open, rm, utimes, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdtemp, open, readFile, rm, utimes, writeFile } from "node:fs/promises";
+import { tmpdir, uptime } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 
@@ -7,7 +7,9 @@ import {
   acquirePidLock,
   getPidLockInfo,
   isLocked,
+  isPidLockOwnerRunning,
   PidLockError,
+  type PidLockInfo,
   refreshPidLock,
   releasePidLock,
   updatePidLock,
@@ -69,7 +71,7 @@ describe("pid-lock ownership", () => {
         pidPath,
         JSON.stringify({
           pid: process.pid,
-          startedAt: "2026-01-01T00:00:00.000Z",
+          startedAt: new Date().toISOString(),
           hostname: "old-host",
           uid: process.getuid?.() ?? 0,
           listen: "127.0.0.1:6767",
@@ -93,7 +95,9 @@ describe("pid-lock ownership", () => {
   });
 
   test("reclaims a stale desktop heartbeat lock after desktop confirms the daemon is unreachable", async () => {
-    const jagentdeskHome = await mkdtemp(join(tmpdir(), "jagentdesk-pid-lock-stale-desktop-heartbeat-"));
+    const jagentdeskHome = await mkdtemp(
+      join(tmpdir(), "jagentdesk-pid-lock-stale-desktop-heartbeat-"),
+    );
     const replacementOwnerPid = process.pid + 10_000;
 
     try {
@@ -102,7 +106,7 @@ describe("pid-lock ownership", () => {
         pidPath,
         JSON.stringify({
           pid: process.pid,
-          startedAt: "2026-01-01T00:00:00.000Z",
+          startedAt: new Date().toISOString(),
           hostname: "old-host",
           uid: process.getuid?.() ?? 0,
           listen: "127.0.0.1:6767",
@@ -135,7 +139,7 @@ describe("pid-lock ownership", () => {
         pidPath,
         JSON.stringify({
           pid: process.pid,
-          startedAt: "2026-01-01T00:00:00.000Z",
+          startedAt: new Date().toISOString(),
           hostname: "old-host",
           uid: process.getuid?.() ?? 0,
           listen: "127.0.0.1:6767",
@@ -166,7 +170,7 @@ describe("pid-lock ownership", () => {
         pidPath,
         JSON.stringify({
           pid: process.pid,
-          startedAt: "2026-01-01T00:00:00.000Z",
+          startedAt: new Date().toISOString(),
           hostname: "old-host",
           uid: process.getuid?.() ?? 0,
           listen: "127.0.0.1:6767",
@@ -195,9 +199,9 @@ describe("pid-lock ownership", () => {
     try {
       await acquirePidLock(jagentdeskHome, null, { ownerPid: process.pid + 10_000 });
 
-      await expect(refreshPidLock(jagentdeskHome, { ownerPid: process.pid })).rejects.toBeInstanceOf(
-        PidLockError,
-      );
+      await expect(
+        refreshPidLock(jagentdeskHome, { ownerPid: process.pid }),
+      ).rejects.toBeInstanceOf(PidLockError);
     } finally {
       await rm(jagentdeskHome, { recursive: true, force: true });
     }
@@ -250,6 +254,102 @@ describe("pid-lock ownership", () => {
       const lock = await getPidLockInfo(jagentdeskHome);
       expect(lock?.pid).toBe(process.pid);
       expect(lock?.listen).toBe("127.0.0.1:6767");
+    } finally {
+      await rm(jagentdeskHome, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("pid-lock with a lock file that names no owner", () => {
+  test("starts over an empty lock file left by a supervisor killed before writing it", async () => {
+    const jagentdeskHome = await mkdtemp(join(tmpdir(), "jagentdesk-pid-lock-empty-"));
+    const ownerPid = process.pid + 10_000;
+
+    try {
+      await writeFile(join(jagentdeskHome, "jagentdesk.pid"), "");
+
+      await expect(getPidLockInfo(jagentdeskHome)).resolves.toBeNull();
+      await acquirePidLock(jagentdeskHome, null, { ownerPid });
+
+      const lock = await getPidLockInfo(jagentdeskHome);
+      expect(lock?.pid).toBe(ownerPid);
+    } finally {
+      await rm(jagentdeskHome, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps a lock file whose contents cannot be read as a lock", async () => {
+    const jagentdeskHome = await mkdtemp(join(tmpdir(), "jagentdesk-pid-lock-unparseable-"));
+    const pidPath = join(jagentdeskHome, "jagentdesk.pid");
+
+    try {
+      await writeFile(pidPath, JSON.stringify({ pid: "unknown" }));
+
+      await expect(
+        acquirePidLock(jagentdeskHome, null, { ownerPid: process.pid + 10_000 }),
+      ).rejects.toBeInstanceOf(PidLockError);
+
+      await expect(readFile(pidPath, "utf-8")).resolves.toBe(JSON.stringify({ pid: "unknown" }));
+    } finally {
+      await rm(jagentdeskHome, { recursive: true, force: true });
+    }
+  });
+});
+
+// A process cannot have started before the machine booted, so a lock stamped
+// before this boot names a PID that some unrelated process now holds.
+function bootedAt(): number {
+  return Date.now() - uptime() * 1000;
+}
+
+function lockFor(pid: number, startedAt: Date): PidLockInfo {
+  return {
+    pid,
+    startedAt: startedAt.toISOString(),
+    hostname: "old-host",
+    uid: process.getuid?.() ?? 0,
+    listen: "127.0.0.1:6767",
+    desktopManaged: true,
+    heartbeat: true,
+  };
+}
+
+describe("pid-lock identity across a reboot", () => {
+  test("a lock stamped before this boot has no running owner", async () => {
+    const jagentdeskHome = await mkdtemp(join(tmpdir(), "jagentdesk-pid-lock-reboot-"));
+    try {
+      const lock = lockFor(process.pid, new Date(bootedAt() - 60 * 60_000));
+      await writeFile(join(jagentdeskHome, "jagentdesk.pid"), JSON.stringify(lock));
+
+      expect(isPidLockOwnerRunning(lock)).toBe(false);
+      expect(await isLocked(jagentdeskHome)).toMatchObject({ locked: false });
+    } finally {
+      await rm(jagentdeskHome, { recursive: true, force: true });
+    }
+  });
+
+  test("a supervisor started during this boot still holds the lock", async () => {
+    const jagentdeskHome = await mkdtemp(join(tmpdir(), "jagentdesk-pid-lock-reboot-"));
+    try {
+      const lock = lockFor(process.pid, new Date());
+      await writeFile(join(jagentdeskHome, "jagentdesk.pid"), JSON.stringify(lock));
+
+      expect(isPidLockOwnerRunning(lock)).toBe(true);
+      expect(await isLocked(jagentdeskHome)).toMatchObject({ locked: true });
+    } finally {
+      await rm(jagentdeskHome, { recursive: true, force: true });
+    }
+  });
+
+  test("a new supervisor takes over a lock stamped before this boot", async () => {
+    const jagentdeskHome = await mkdtemp(join(tmpdir(), "jagentdesk-pid-lock-reboot-"));
+    try {
+      const lock = lockFor(process.pid, new Date(bootedAt() - 60 * 60_000));
+      await writeFile(join(jagentdeskHome, "jagentdesk.pid"), JSON.stringify(lock));
+
+      await acquirePidLock(jagentdeskHome, null, { ownerPid: process.pid + 10_000 });
+
+      expect(await getPidLockInfo(jagentdeskHome)).toMatchObject({ pid: process.pid + 10_000 });
     } finally {
       await rm(jagentdeskHome, { recursive: true, force: true });
     }

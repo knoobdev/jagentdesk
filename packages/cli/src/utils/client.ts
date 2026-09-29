@@ -34,9 +34,35 @@ export interface ConnectOptions {
 }
 
 export interface DaemonConnectionCommandError {
-  code: "DAEMON_NOT_RUNNING";
+  code: "DAEMON_NOT_RUNNING" | DaemonAuthFailureCode;
   message: string;
   details: string;
+}
+
+export type DaemonAuthFailureCode = "AUTH_REQUIRED" | "AUTH_FAILED";
+
+/**
+ * A daemon that rejects the CLI's password is running, so telling the user to start it
+ * sends them the wrong way. Map the daemon's auth close reasons to a JAGENTDESK_PASSWORD
+ * remedy instead.
+ */
+export function describeDaemonAuthFailure(
+  cause: unknown,
+): { code: DaemonAuthFailureCode; details: string } | null {
+  const message = cause instanceof Error ? cause.message : String(cause);
+  if (message.includes("Password required")) {
+    return {
+      code: "AUTH_REQUIRED",
+      details: "The daemon requires a password. Set JAGENTDESK_PASSWORD and retry.",
+    };
+  }
+  if (message.includes("Incorrect password")) {
+    return {
+      code: "AUTH_FAILED",
+      details: "The daemon rejected the password. Check JAGENTDESK_PASSWORD and retry.",
+    };
+  }
+  return null;
 }
 
 const DEFAULT_HOST = `localhost:${DEFAULT_JAGENTDESK_DAEMON_PORT}`;
@@ -92,10 +118,11 @@ export function buildDaemonConnectionCommandError(options: {
 }): DaemonConnectionCommandError {
   const host = getDaemonHost({ host: options.host });
   const message = options.error instanceof Error ? options.error.message : String(options.error);
+  const authFailure = describeDaemonAuthFailure(options.error);
   return {
-    code: "DAEMON_NOT_RUNNING",
+    code: authFailure?.code ?? "DAEMON_NOT_RUNNING",
     message: `Cannot connect to daemon at ${host}: ${message}`,
-    details: "Start the daemon with: jagentdesk daemon start",
+    details: authFailure?.details ?? "Start the daemon with: jagentdesk daemon start",
   };
 }
 

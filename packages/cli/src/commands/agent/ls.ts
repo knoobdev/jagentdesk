@@ -1,6 +1,6 @@
 import type { Command } from "commander";
 import type { AgentSnapshotPayload } from "@jagentdesk/protocol/messages";
-import { connectToDaemon, getDaemonHost } from "../../utils/client.js";
+import { connectToDaemon, describeDaemonAuthFailure, getDaemonHost } from "../../utils/client.js";
 import type { CommandOptions, ListResult, OutputSchema, CommandError } from "../../output/index.js";
 import { collectMultiple } from "../../utils/command-options.js";
 import { isSameOrDescendantPath } from "../../utils/paths.js";
@@ -106,6 +106,14 @@ export type AgentLsResult = ListResult<AgentListItem>;
 
 function daemonConnectionFailure(host: string, cause: unknown): CommandError {
   const reason = cause instanceof Error ? cause.message : String(cause);
+  const authFailure = describeDaemonAuthFailure(cause);
+  if (authFailure) {
+    return {
+      code: authFailure.code,
+      message: `Cannot reach the daemon at ${host}: ${reason}`,
+      details: authFailure.details,
+    };
+  }
   const isSsh = host.trim().startsWith("ssh://");
   return {
     code: "DAEMON_NOT_RUNNING",

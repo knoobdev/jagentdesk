@@ -1,5 +1,5 @@
 import { fileURLToPath } from "url";
-import { existsSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import {
   acquirePidLock,
@@ -9,6 +9,7 @@ import {
   updatePidLock,
 } from "../src/server/pid-lock.js";
 import { resolveJAgentDeskHome } from "../src/server/jagentdesk-home.js";
+import { PRIVATE_FILE_MODE } from "../src/server/private-files.js";
 import { loadPersistedConfig } from "../src/server/persisted-config.js";
 import { runSupervisor } from "./supervisor.js";
 import { resolveSupervisorLogFile } from "./supervisor-log-config.js";
@@ -120,9 +121,7 @@ async function main(): Promise<void> {
     });
   } catch (error) {
     if (error instanceof PidLockError) {
-      process.stderr.write(`${error.message}\n`);
-      process.exit(1);
-      return;
+      failStartup(error.message, error.message);
     }
     throw error;
   }
@@ -182,8 +181,32 @@ async function main(): Promise<void> {
   requestSupervisorShutdown = supervisor.requestShutdown;
 }
 
-void main().catch((error) => {
-  const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
-  process.stderr.write(`${message}\n`);
+// The supervisor opens its log only after config and the PID lock succeed. A background
+// launch discards stderr, so earlier failures also go to the default daemon.log, which is
+// the file the CLI tails when a background start exits early.
+function failStartup(detail: string, summary: string): never {
+  process.stderr.write(`${detail}\n`);
+  try {
+    const logPath = path.join(resolveJAgentDeskHome(process.env), "daemon.log");
+    mkdirSync(path.dirname(logPath), { recursive: true });
+    appendFileSync(
+      logPath,
+      `${JSON.stringify({
+        level: "fatal",
+        time: new Date().toISOString(),
+        pid: process.pid,
+        name: "DaemonRunner",
+        msg: summary,
+      })}\n`,
+      { mode: PRIVATE_FILE_MODE },
+    );
+  } catch {
+    // stderr already carries the failure.
+  }
   process.exit(1);
+}
+
+void main().catch((error) => {
+  if (error instanceof Error) failStartup(error.stack ?? error.message, error.message);
+  failStartup(String(error), String(error));
 });

@@ -89,6 +89,75 @@ async function createMcpClient(url: string, authToken?: string): Promise<McpClie
   return { callTool: boundCallTool, close: () => rawClient.close() };
 }
 
+interface OfflineMcpDaemon {
+  client: McpClient;
+  stop: () => Promise<void>;
+}
+
+async function startOfflineMcpDaemon(): Promise<OfflineMcpDaemon> {
+  const jagentdeskHome = await mkdtemp(path.join(os.tmpdir(), "jagentdesk-home-"));
+  const staticDir = await mkdtemp(path.join(os.tmpdir(), "jagentdesk-static-"));
+  const removeDirectories = async () => {
+    await rm(jagentdeskHome, { recursive: true, force: true });
+    await rm(staticDir, { recursive: true, force: true });
+  };
+  const port = await getAvailablePort();
+  const daemon = await createJAgentDeskDaemon(
+    {
+      listen: `127.0.0.1:${port}`,
+      jagentdeskHome,
+      corsAllowedOrigins: [],
+      hostnames: true,
+      mcpEnabled: true,
+      staticDir,
+      mcpDebug: false,
+      agentClients: createTestAgentClients(),
+      agentStoragePath: path.join(jagentdeskHome, "agents"),
+    },
+    pino({ level: "silent" }),
+  ).catch(async (error: unknown) => {
+    await removeDirectories();
+    throw error;
+  });
+  try {
+    await daemon.start();
+    const client = await createMcpClient(`http://127.0.0.1:${port}/mcp/agents`);
+    return {
+      client,
+      stop: async () => {
+        await client.close();
+        await daemon.stop();
+        await removeDirectories();
+      },
+    };
+  } catch (error) {
+    await daemon.stop();
+    await removeDirectories();
+    throw error;
+  }
+}
+
+type WorkspaceCreation = { workspaceId: unknown } | { error: unknown };
+
+async function createLocalWorkspace(client: McpClient, cwd: string): Promise<WorkspaceCreation> {
+  const result = await client.callTool({
+    name: "create_workspace",
+    args: { isolation: "local", path: cwd },
+  });
+  if (result.isError) {
+    const content = result.content?.[0];
+    return { error: content && "text" in content ? content.text : undefined };
+  }
+  return { workspaceId: getStructuredContent(result)?.workspaceId };
+}
+
+async function listWorkspaces(client: McpClient): Promise<WorkspaceCreation[]> {
+  const result = await client.callTool({ name: "list_workspaces", args: {} });
+  const workspaces = getStructuredContent(result)?.workspaces;
+  if (!Array.isArray(workspaces)) return [];
+  return workspaces.map((workspace: StructuredContent) => ({ workspaceId: workspace.workspaceId }));
+}
+
 interface LaunchRecorder {
   recordedLaunches: AgentSessionConfig[];
 }
@@ -235,6 +304,27 @@ describe("agent MCP end-to-end (offline)", () => {
     }
   }, 30_000);
 
+  test("create_workspace with local isolation adopts only an existing directory", async () => {
+    const daemon = await startOfflineMcpDaemon();
+    const root = await mkdtemp(path.join(os.tmpdir(), "jagentdesk-local-workspace-"));
+    const missingPath = path.join(root, "does-not-exist");
+    const filePath = path.join(root, "regular-file");
+    await writeFile(filePath, "not a directory\n", "utf8");
+    try {
+      expect(await createLocalWorkspace(daemon.client, missingPath)).toEqual({
+        error: expect.stringContaining(`Directory not found: ${missingPath}`),
+      });
+      expect(await createLocalWorkspace(daemon.client, filePath)).toEqual({
+        error: expect.stringContaining(`Directory not found: ${filePath}`),
+      });
+      const created = await createLocalWorkspace(daemon.client, root);
+      expect(await listWorkspaces(daemon.client)).toEqual([created]);
+    } finally {
+      await daemon.stop();
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   test("password-protected daemon authorizes the agent MCP via the capability token", async () => {
     const jagentdeskHome = await mkdtemp(path.join(os.tmpdir(), "jagentdesk-home-"));
     const staticDir = await mkdtemp(path.join(os.tmpdir(), "jagentdesk-static-"));
@@ -329,9 +419,13 @@ describe("agent MCP end-to-end (offline)", () => {
 
     const client = await createMcpClient(`http://127.0.0.1:${port}/mcp/agents`);
 
-    const disabledJAgentDeskHome = await mkdtemp(path.join(os.tmpdir(), "jagentdesk-home-disabled-"));
+    const disabledJAgentDeskHome = await mkdtemp(
+      path.join(os.tmpdir(), "jagentdesk-home-disabled-"),
+    );
     const disabledStaticDir = await mkdtemp(path.join(os.tmpdir(), "jagentdesk-static-disabled-"));
-    const disabledAgentCwd = await mkdtemp(path.join(os.tmpdir(), "jagentdesk-agent-cwd-disabled-"));
+    const disabledAgentCwd = await mkdtemp(
+      path.join(os.tmpdir(), "jagentdesk-agent-cwd-disabled-"),
+    );
     const disabledPort = await getAvailablePort();
     const disabledRecorder: LaunchRecorder = { recordedLaunches: [] };
     const disabledDaemonConfig: JAgentDeskDaemonConfig = {
@@ -346,7 +440,10 @@ describe("agent MCP end-to-end (offline)", () => {
       agentClients: createMcpRecordingAgentClients(disabledRecorder),
       agentStoragePath: path.join(disabledJAgentDeskHome, "agents"),
     };
-    const disabledDaemon = await createJAgentDeskDaemon(disabledDaemonConfig, pino({ level: "silent" }));
+    const disabledDaemon = await createJAgentDeskDaemon(
+      disabledDaemonConfig,
+      pino({ level: "silent" }),
+    );
     await disabledDaemon.start();
 
     const disabledClient = await createMcpClient(`http://127.0.0.1:${disabledPort}/mcp/agents`);

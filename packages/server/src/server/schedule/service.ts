@@ -252,8 +252,8 @@ export class ScheduleService {
   private tickTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(options: ScheduleServiceOptions) {
-    this.store = new ScheduleStore(join(options.jagentdeskHome, "schedules"));
     this.logger = options.logger.child({ module: "schedule-service" });
+    this.store = new ScheduleStore(join(options.jagentdeskHome, "schedules"), this.logger);
     this.agentManager = options.agentManager;
     this.agentStorage = options.agentStorage;
     this.createAgent = options.createAgent;
@@ -955,8 +955,9 @@ export class ScheduleService {
       case "local":
         return this.createDirectoryWorkspace({ cwd: config.cwd, firstAgentContext });
       case "worktree":
-        return (await this.createJAgentDeskWorktreeWorkspace({ cwd: config.cwd, firstAgentContext }))
-          .workspace;
+        return (
+          await this.createJAgentDeskWorktreeWorkspace({ cwd: config.cwd, firstAgentContext })
+        ).workspace;
     }
   }
 

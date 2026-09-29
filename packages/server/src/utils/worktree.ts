@@ -20,10 +20,14 @@ export {
   type JAgentDeskConfig,
   type JAgentDeskConfigRaw,
 } from "@jagentdesk/protocol/jagentdesk-config-schema";
-import { JAgentDeskConfigSchema, type JAgentDeskConfig } from "@jagentdesk/protocol/jagentdesk-config-schema";
+import {
+  JAgentDeskConfigSchema,
+  type JAgentDeskConfig,
+} from "@jagentdesk/protocol/jagentdesk-config-schema";
 import {
   createJAgentDeskWorktreeChangeRequestHint,
   normalizeBaseRefName,
+  isQualifiedRef,
   type JAgentDeskWorktreeChangeRequestHint,
   readJAgentDeskWorktreeMetadata,
   readJAgentDeskWorktreeRuntimePort,
@@ -48,6 +52,10 @@ const READ_ONLY_GIT_ENV = {
 export interface WorktreeConfig {
   branchName: string;
   worktreePath: string;
+}
+
+export interface CreatedWorktree extends WorktreeConfig {
+  comparisonBaseRef: string | null;
 }
 
 export interface WorktreeRuntimeEnv {
@@ -173,6 +181,7 @@ export interface WorktreeCheckoutRef {
 export type WorktreeSource =
   | { kind: "branch-off"; baseBranch: string; branchName: string }
   | { kind: "checkout-branch"; branchName: string }
+  | { kind: "restore"; branchName: string; baseRef: string | null }
   | {
       kind: "checkout-change-request";
       forge: string;
@@ -1106,7 +1115,11 @@ export async function deleteJAgentDeskWorktree({
   if (worktreesRoot) {
     resolvedWorktreesRoot = worktreesRoot;
   } else if (cwd) {
-    resolvedWorktreesRoot = await getJAgentDeskWorktreesRoot(cwd, jagentdeskHome, worktreesBaseRoot);
+    resolvedWorktreesRoot = await getJAgentDeskWorktreesRoot(
+      cwd,
+      jagentdeskHome,
+      worktreesBaseRoot,
+    );
   } else {
     throw new Error("cwd or worktreesRoot is required to delete a JAgentDesk worktree");
   }
@@ -1234,9 +1247,12 @@ export const createWorktree = async ({
   runSetup,
   jagentdeskHome,
   worktreesRoot,
-}: CreateWorktreeOptions): Promise<WorktreeConfig> => {
+}: CreateWorktreeOptions): Promise<CreatedWorktree> => {
   const sourcePlan = await resolveWorktreeSourcePlan({ cwd, source, desiredSlug: worktreeSlug });
-  let worktreePath = join(await getJAgentDeskWorktreesRoot(cwd, jagentdeskHome, worktreesRoot), worktreeSlug);
+  let worktreePath = join(
+    await getJAgentDeskWorktreesRoot(cwd, jagentdeskHome, worktreesRoot),
+    worktreeSlug,
+  );
   mkdirSync(dirname(worktreePath), { recursive: true });
 
   // Also handle worktree path collision
@@ -1271,6 +1287,7 @@ export const createWorktree = async ({
 
   writeJAgentDeskWorktreeMetadata(worktreePath, {
     baseRefName: sourcePlan.metadataBaseRefName,
+    ...(sourcePlan.metadataBaseRef ? { baseRef: sourcePlan.metadataBaseRef } : {}),
     ...(sourcePlan.changeRequestLookupTarget
       ? { changeRequestLookupTarget: sourcePlan.changeRequestLookupTarget }
       : {}),
@@ -1289,6 +1306,10 @@ export const createWorktree = async ({
   return {
     branchName: sourcePlan.branchName,
     worktreePath,
+    comparisonBaseRef:
+      source.kind === "checkout-branch"
+        ? null
+        : (sourcePlan.metadataBaseRef ?? sourcePlan.metadataBaseRefName),
   };
 };
 
@@ -1300,7 +1321,11 @@ interface ResolveWorktreeSourcePlanOptions {
 
 interface WorktreeSourcePlan {
   branchName: string;
+  // Display name and exact ref are two different facts. The name cannot round-trip to a
+  // commit — "main" resolves local-first even when the worktree was cut from a fork's
+  // upstream — so comparisons and actions read the ref and the UI reads the name.
   metadataBaseRefName: string;
+  metadataBaseRef?: string;
   changeRequestLookupTarget?: JAgentDeskWorktreeChangeRequestHint;
   addArguments: string[];
   pushRemote?: {
@@ -1312,6 +1337,37 @@ interface WorktreeSourcePlan {
   trackingRemote?: {
     name: string;
     headRef: string;
+  };
+}
+
+// Restores an archived worktree on its saved branch without moving the branch: the branch
+// HEAD keeps the committed work, and the recorded comparison base stays the base.
+async function resolveRestoredWorktreeSourcePlan(
+  cwd: string,
+  source: Extract<WorktreeSource, { kind: "restore" }>,
+): Promise<WorktreeSourcePlan> {
+  await validateExistingWorktreeBranchName(cwd, source.branchName);
+  await ensureLocalBranch(cwd, source.branchName);
+  if (await isBranchCheckedOut(cwd, source.branchName)) {
+    throw new BranchAlreadyCheckedOutError(source.branchName);
+  }
+  let exactBase: string | undefined;
+  if (source.baseRef && isQualifiedRef(source.baseRef)) {
+    try {
+      exactBase = await resolveBaseBranchForWorktree(cwd, source.baseRef);
+    } catch {
+      // Restore the saved branch even when its comparison ref no longer exists.
+    }
+  }
+  return {
+    branchName: source.branchName,
+    metadataBaseRefName: normalizeRequiredBaseBranch(source.baseRef ?? source.branchName),
+    ...(exactBase ? { metadataBaseRef: exactBase } : {}),
+    changeRequestLookupTarget: createJAgentDeskWorktreeChangeRequestHint({
+      headRef: source.branchName,
+      localBranchName: source.branchName,
+    }),
+    addArguments: [source.branchName],
   };
 }
 
@@ -1334,21 +1390,15 @@ async function resolveWorktreeSourcePlan({
       return {
         branchName: newBranchName,
         metadataBaseRefName: normalizedBaseBranch,
+        metadataBaseRef: resolvedBaseBranch,
         addArguments: ["-b", newBranchName, "--no-track", base],
       };
     }
+    case "restore":
+      return resolveRestoredWorktreeSourcePlan(cwd, source);
     case "checkout-branch": {
       await validateExistingWorktreeBranchName(cwd, source.branchName);
-      if (!(await localBranchExists(cwd, source.branchName))) {
-        try {
-          await runGitCommand(["fetch", "origin", `${source.branchName}:${source.branchName}`], {
-            cwd,
-            timeout: 120_000,
-          });
-        } catch {
-          throw new UnknownBranchError({ branchName: source.branchName, cwd });
-        }
-      }
+      await ensureLocalBranch(cwd, source.branchName);
       if (await isBranchCheckedOut(cwd, source.branchName)) {
         throw new BranchAlreadyCheckedOutError(source.branchName);
       }
@@ -1620,7 +1670,7 @@ async function resolveBaseBranchForWorktree(
   const requested = requestedBaseBranch.trim();
   const normalized = normalizeRequiredBaseBranch(requested);
   let exactRef: string | null = null;
-  if (requested.startsWith("refs/")) {
+  if (isQualifiedRef(requested)) {
     exactRef = requested;
   } else if (requested.startsWith("origin/")) {
     exactRef = `refs/remotes/${requested}`;
@@ -1631,7 +1681,7 @@ async function resolveBaseBranchForWorktree(
       await runGitCommand(["rev-parse", "--verify", exactRef], { cwd });
       return exactRef;
     } catch {
-      throw new Error(`Base branch not found: ${normalized}`);
+      throw new Error(`Base branch not found: ${exactRef}`);
     }
   }
 
@@ -1645,6 +1695,20 @@ async function resolveBaseBranchForWorktree(
     }
   }
   throw new Error(`Base branch not found: ${normalized}`);
+}
+
+async function ensureLocalBranch(cwd: string, branchName: string): Promise<void> {
+  if (await localBranchExists(cwd, branchName)) {
+    return;
+  }
+  try {
+    await runGitCommand(["fetch", "origin", `${branchName}:${branchName}`], {
+      cwd,
+      timeout: 120_000,
+    });
+  } catch {
+    throw new UnknownBranchError({ branchName, cwd });
+  }
 }
 
 async function localBranchExists(cwd: string, branchName: string): Promise<boolean> {

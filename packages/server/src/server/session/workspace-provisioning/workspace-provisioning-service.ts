@@ -1,4 +1,6 @@
+import { stat } from "node:fs/promises";
 import { basename, resolve } from "node:path";
+import type { ProjectCheckoutLitePayload } from "@jagentdesk/protocol/messages";
 import type { Logger } from "pino";
 import {
   generateWorkspaceId,
@@ -89,9 +91,27 @@ export function createWorkspaceProvisioningService(deps: {
   workspaceRegistry: WorkspaceRegistry;
   projectRegistry: ProjectRegistry;
   workspaceGitService: Pick<WorkspaceGitService, "getCheckout" | "getSnapshot" | "peekSnapshot">;
+  /** Whether a directory exists at the path. Defaults to the daemon's local file system. */
+  isDirectory?: (path: string) => Promise<boolean>;
   logger: Logger;
 }): WorkspaceProvisioningService {
   const { serverId, workspaceRegistry, projectRegistry, workspaceGitService, logger } = deps;
+  const isDirectory = deps.isDirectory ?? isLocalDirectory;
+
+  /**
+   * Placement facts at a workspace directory, or null when there is nothing
+   * there to read. A git read answers "not a checkout" for a plain directory
+   * and for a directory that is gone, and only the first is evidence that a
+   * worktree stopped being one. That answer therefore counts only while the
+   * directory is there on both sides of the read, so a worktree removed or
+   * unmounted while the read is in flight stays an absence.
+   */
+  async function observeWorkspaceCheckout(cwd: string): Promise<ProjectCheckoutLitePayload | null> {
+    if (!(await isDirectory(cwd))) return null;
+    const checkout = await workspaceGitService.getCheckout(cwd);
+    if (!checkout.isGit && !(await isDirectory(cwd))) return null;
+    return checkout;
+  }
 
   async function runInImportWorkspace<T>(
     input: ImportWorkspaceInput,
@@ -359,12 +379,12 @@ export function createWorkspaceProvisioningService(deps: {
     const timestamp = new Date().toISOString();
     const checkout =
       workspace.archivedAt || project.archivedAt
-        ? await workspaceGitService.getCheckout(workspace.cwd)
+        ? await observeWorkspaceCheckout(workspace.cwd)
         : null;
     const autoArchivedChangeRequestUrl =
       await resolveRestoredAutoArchiveChangeRequestUrl(workspace);
     let next: PersistedWorkspaceRecord | null = null;
-    if (workspace.archivedAt && checkout) {
+    if (workspace.archivedAt) {
       const placementUpdate = reconcileWorkspacePlacement({
         workspace,
         checkout,
@@ -377,10 +397,11 @@ export function createWorkspaceProvisioningService(deps: {
         updatedAt: timestamp,
       };
     }
-    if (checkout && (project.archivedAt || workspace.archivedAt)) {
-      const projectCheckout = areEquivalentPaths(project.rootPath, workspace.cwd)
-        ? checkout
-        : await workspaceGitService.getCheckout(project.rootPath);
+    if (project.archivedAt || workspace.archivedAt) {
+      const projectCheckout =
+        checkout && areEquivalentPaths(project.rootPath, workspace.cwd)
+          ? checkout
+          : await workspaceGitService.getCheckout(project.rootPath);
       const kind = projectCheckout.isGit ? "git" : "non_git";
       const projectKey = deriveProjectKey({
         rootPath: project.rootPath,
@@ -407,10 +428,10 @@ export function createWorkspaceProvisioningService(deps: {
   async function refreshWorkspaceRecord(
     workspace: PersistedWorkspaceRecord,
   ): Promise<PersistedWorkspaceRecord> {
-    const checkout = await workspaceGitService.getCheckout(workspace.cwd);
+    const checkout = await observeWorkspaceCheckout(workspace.cwd);
     const project = await projectRegistry.get(workspace.projectId);
     if (project && !project.archivedAt) {
-      await refreshProjectKind(project, workspace.cwd, checkout);
+      await refreshProjectKind(project, workspace.cwd, checkout ?? undefined);
     }
     const update = reconcileWorkspacePlacement({
       workspace,
@@ -459,4 +480,8 @@ export function createWorkspaceProvisioningService(deps: {
     findOrCreateProjectForDirectory,
     ensureWorkspaceRecordUnarchived,
   };
+}
+
+async function isLocalDirectory(target: string): Promise<boolean> {
+  return (await stat(target).catch(() => null))?.isDirectory() ?? false;
 }

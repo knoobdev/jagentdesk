@@ -590,7 +590,11 @@ describe("checkout git utilities", () => {
 
     const facts = await getCheckoutSnapshotFacts(repoDir, { jagentdeskHome });
     const status = await getCheckoutStatus(repoDir, { jagentdeskHome, facts });
-    const shortstat = await getCheckoutShortstat(repoDir, { jagentdeskHome, facts }, { force: true });
+    const shortstat = await getCheckoutShortstat(
+      repoDir,
+      { jagentdeskHome, facts },
+      { force: true },
+    );
     const prStatus = await getPullRequestStatus(
       repoDir,
       github,
@@ -1507,8 +1511,7 @@ const x = 1;
     expect(diff.diff).toContain(`-export const value = "old";`);
     expect(diff.diff).toContain(`+export const value = "new";`);
     expect(commands).toContain("diff --numstat HEAD");
-    expect(commands).toContain("diff HEAD -- generated.js");
-    expect(commands).toContain("diff HEAD -- small.ts");
+    expect(commands).toContain("diff HEAD -- :(literal)generated.js :(literal)small.ts");
     expect(metrics.maxConcurrent).toBeLessThanOrEqual(8);
   });
 
@@ -1635,7 +1638,11 @@ const x = 1;
     expect(status.isJAgentDeskOwnedWorktree).toBe(true);
     expect(realpathSync.native(status.mainRepoRoot ?? "")).toBe(realpathSync.native(repoDir));
 
-    const diff = await getCheckoutDiff(result.worktreePath, { mode: "uncommitted" }, { jagentdeskHome });
+    const diff = await getCheckoutDiff(
+      result.worktreePath,
+      { mode: "uncommitted" },
+      { jagentdeskHome },
+    );
     expect(diff.diff).toContain("-hello");
     expect(diff.diff).toContain("+worktree change");
 
@@ -2504,9 +2511,13 @@ const x = 1;
   });
 
   it("disables GitHub features when gh is unavailable", async () => {
-    execFileSync("git", ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"], {
-      cwd: repoDir,
-    });
+    execFileSync(
+      "git",
+      ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"],
+      {
+        cwd: repoDir,
+      },
+    );
 
     const github = createGitHubServiceForStatus(null);
     github.getCurrentPullRequestStatus = async () => {
@@ -2519,9 +2530,13 @@ const x = 1;
 
   it("returns merged PR status when no open PR exists for the current branch", async () => {
     execFileSync("git", ["checkout", "-b", "feature"], { cwd: repoDir });
-    execFileSync("git", ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"], {
-      cwd: repoDir,
-    });
+    execFileSync(
+      "git",
+      ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"],
+      {
+        cwd: repoDir,
+      },
+    );
 
     const status = await getPullRequestStatus(
       repoDir,
@@ -2543,9 +2558,13 @@ const x = 1;
 
   it("propagates S1 PR metadata and check display fields through checkout PR status", async () => {
     execFileSync("git", ["checkout", "-b", "feature"], { cwd: repoDir });
-    execFileSync("git", ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"], {
-      cwd: repoDir,
-    });
+    execFileSync(
+      "git",
+      ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"],
+      {
+        cwd: repoDir,
+      },
+    );
 
     const status = await getPullRequestStatus(
       repoDir,
@@ -2595,9 +2614,13 @@ const x = 1;
 
   it("uses an origin tracked head when the local branch name differs", async () => {
     execFileSync("git", ["checkout", "-b", "tender-parrot"], { cwd: repoDir });
-    execFileSync("git", ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"], {
-      cwd: repoDir,
-    });
+    execFileSync(
+      "git",
+      ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"],
+      {
+        cwd: repoDir,
+      },
+    );
     execFileSync("git", ["config", "branch.tender-parrot.remote", "origin"], { cwd: repoDir });
     execFileSync(
       "git",
@@ -2613,9 +2636,13 @@ const x = 1;
 
   it("keeps the local branch lookup when origin tracking uses the same head name", async () => {
     execFileSync("git", ["checkout", "-b", "feature"], { cwd: repoDir });
-    execFileSync("git", ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"], {
-      cwd: repoDir,
-    });
+    execFileSync(
+      "git",
+      ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"],
+      {
+        cwd: repoDir,
+      },
+    );
     execFileSync("git", ["config", "branch.feature.remote", "origin"], { cwd: repoDir });
     execFileSync("git", ["config", "branch.feature.merge", "refs/heads/feature"], {
       cwd: repoDir,
@@ -2974,12 +3001,20 @@ const x = 1;
   });
 
   it("keeps fork identity when the local and tracked branch names match", async () => {
-    execFileSync("git", ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"], {
-      cwd: repoDir,
-    });
-    execFileSync("git", ["remote", "add", "contributor", "git@github.com:contributor/jagentdesk.git"], {
-      cwd: repoDir,
-    });
+    execFileSync(
+      "git",
+      ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"],
+      {
+        cwd: repoDir,
+      },
+    );
+    execFileSync(
+      "git",
+      ["remote", "add", "contributor", "git@github.com:contributor/jagentdesk.git"],
+      {
+        cwd: repoDir,
+      },
+    );
     execFileSync("git", ["checkout", "-b", "topic"], { cwd: repoDir });
     execFileSync("git", ["config", "branch.topic.remote", "contributor"], { cwd: repoDir });
     execFileSync("git", ["config", "branch.topic.merge", "refs/heads/topic"], { cwd: repoDir });
@@ -2992,14 +3027,48 @@ const x = 1;
     });
   });
 
+  it.each([
+    "git@github.com:contributor/jagentdesk.git",
+    "https://github.com/contributor/jagentdesk.git",
+    "ssh://git@github.com/contributor/jagentdesk.git",
+  ])("preserves fork PR identity with branch.remote=%s", async (branchRemote) => {
+    execFileSync("git", ["remote", "add", "origin", "git@github.com:jagentdesk/jagentdesk.git"], {
+      cwd: repoDir,
+    });
+    execFileSync("git", ["checkout", "-b", "topic"], { cwd: repoDir });
+    execFileSync("git", ["config", "branch.topic.remote", branchRemote], {
+      cwd: repoDir,
+    });
+    execFileSync("git", ["config", "branch.topic.pushRemote", branchRemote], {
+      cwd: repoDir,
+    });
+    execFileSync("git", ["config", "branch.topic.merge", "refs/heads/topic"], {
+      cwd: repoDir,
+    });
+    const headSha = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: repoDir,
+      encoding: "utf8",
+    }).trim();
+
+    expect(await readPullRequestLookupTargetFromFacts(repoDir, jagentdeskHome)).toEqual({
+      headRef: "topic",
+      headRepositoryOwner: "contributor",
+      headSha,
+    });
+  });
+
   it("does not attach an owner when the tracked remote is the same GitHub repository", async () => {
     execFileSync("git", ["checkout", "-b", "local-feature"], { cwd: repoDir });
     execFileSync("git", ["remote", "add", "origin", "git@github.com:jagentdesk/jagentdesk.git"], {
       cwd: repoDir,
     });
-    execFileSync("git", ["remote", "add", "upstream", "https://github.com/jagentdesk/jagentdesk.git"], {
-      cwd: repoDir,
-    });
+    execFileSync(
+      "git",
+      ["remote", "add", "upstream", "https://github.com/jagentdesk/jagentdesk.git"],
+      {
+        cwd: repoDir,
+      },
+    );
     execFileSync("git", ["config", "branch.local-feature.remote", "upstream"], {
       cwd: repoDir,
     });
@@ -3018,9 +3087,13 @@ const x = 1;
   it("keeps the fork owner when same-repo comparison is indeterminate", async () => {
     execFileSync("git", ["checkout", "-b", "chethanuk/main"], { cwd: repoDir });
     execFileSync("git", ["remote", "add", "origin", "not-a-github-remote"], { cwd: repoDir });
-    execFileSync("git", ["remote", "add", "jagentdesk-pr-345", "git@github.com:chethanuk/jagentdesk.git"], {
-      cwd: repoDir,
-    });
+    execFileSync(
+      "git",
+      ["remote", "add", "jagentdesk-pr-345", "git@github.com:chethanuk/jagentdesk.git"],
+      {
+        cwd: repoDir,
+      },
+    );
     execFileSync("git", ["config", "branch.chethanuk/main.remote", "jagentdesk-pr-345"], {
       cwd: repoDir,
     });
@@ -3036,12 +3109,20 @@ const x = 1;
 
   it("uses the configured push remote for fork PR lookup when upstream is absent", async () => {
     execFileSync("git", ["checkout", "-b", "chethanuk/main"], { cwd: repoDir });
-    execFileSync("git", ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"], {
-      cwd: repoDir,
-    });
-    execFileSync("git", ["remote", "add", "jagentdesk-pr-345", "git@github.com:chethanuk/jagentdesk.git"], {
-      cwd: repoDir,
-    });
+    execFileSync(
+      "git",
+      ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"],
+      {
+        cwd: repoDir,
+      },
+    );
+    execFileSync(
+      "git",
+      ["remote", "add", "jagentdesk-pr-345", "git@github.com:chethanuk/jagentdesk.git"],
+      {
+        cwd: repoDir,
+      },
+    );
     execFileSync("git", ["config", "branch.chethanuk/main.pushRemote", "jagentdesk-pr-345"], {
       cwd: repoDir,
     });
@@ -3069,9 +3150,13 @@ const x = 1;
 
   it("keeps the local branch lookup when same-repo tracking points at the base branch", async () => {
     execFileSync("git", ["checkout", "-b", "tender-parrot"], { cwd: repoDir });
-    execFileSync("git", ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"], {
-      cwd: repoDir,
-    });
+    execFileSync(
+      "git",
+      ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"],
+      {
+        cwd: repoDir,
+      },
+    );
     execFileSync("git", ["config", "branch.tender-parrot.remote", "origin"], { cwd: repoDir });
     execFileSync("git", ["config", "branch.tender-parrot.merge", "refs/heads/main"], {
       cwd: repoDir,
@@ -3088,9 +3173,13 @@ const x = 1;
     execFileSync("git", ["remote", "add", "origin", "git@github.com:contributor/jagentdesk.git"], {
       cwd: repoDir,
     });
-    execFileSync("git", ["remote", "add", "upstream", "https://github.com/jagentdesk/jagentdesk.git"], {
-      cwd: repoDir,
-    });
+    execFileSync(
+      "git",
+      ["remote", "add", "upstream", "https://github.com/jagentdesk/jagentdesk.git"],
+      {
+        cwd: repoDir,
+      },
+    );
     execFileSync("git", ["config", "branch.local-feature.remote", "upstream"], {
       cwd: repoDir,
     });
@@ -3129,9 +3218,13 @@ const x = 1;
 
   it("derives the same origin tracked head for on-demand PR status reads", async () => {
     execFileSync("git", ["checkout", "-b", "tender-parrot"], { cwd: repoDir });
-    execFileSync("git", ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"], {
-      cwd: repoDir,
-    });
+    execFileSync(
+      "git",
+      ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"],
+      {
+        cwd: repoDir,
+      },
+    );
     execFileSync("git", ["config", "branch.tender-parrot.remote", "origin"], { cwd: repoDir });
     execFileSync(
       "git",
@@ -3154,12 +3247,20 @@ const x = 1;
 
   it("uses the tracked fork branch for PR worktree status lookup", async () => {
     execFileSync("git", ["checkout", "-b", "chethanuk/main"], { cwd: repoDir });
-    execFileSync("git", ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"], {
-      cwd: repoDir,
-    });
-    execFileSync("git", ["remote", "add", "jagentdesk-pr-345", "git@github.com:chethanuk/jagentdesk.git"], {
-      cwd: repoDir,
-    });
+    execFileSync(
+      "git",
+      ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"],
+      {
+        cwd: repoDir,
+      },
+    );
+    execFileSync(
+      "git",
+      ["remote", "add", "jagentdesk-pr-345", "git@github.com:chethanuk/jagentdesk.git"],
+      {
+        cwd: repoDir,
+      },
+    );
     execFileSync("git", ["config", "branch.chethanuk/main.remote", "jagentdesk-pr-345"], {
       cwd: repoDir,
     });
@@ -3187,9 +3288,13 @@ const x = 1;
 
   it("returns closed-unmerged PR status without marking it as merged", async () => {
     execFileSync("git", ["checkout", "-b", "feature"], { cwd: repoDir });
-    execFileSync("git", ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"], {
-      cwd: repoDir,
-    });
+    execFileSync(
+      "git",
+      ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"],
+      {
+        cwd: repoDir,
+      },
+    );
 
     const status = await getPullRequestStatus(
       repoDir,
@@ -3212,9 +3317,13 @@ const x = 1;
 
   it("caches PR status results for duplicate lookups", async () => {
     execFileSync("git", ["checkout", "-b", "feature"], { cwd: repoDir });
-    execFileSync("git", ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"], {
-      cwd: repoDir,
-    });
+    execFileSync(
+      "git",
+      ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"],
+      {
+        cwd: repoDir,
+      },
+    );
 
     let callCount = 0;
     const github = createGitHubServiceForStatus(createPullRequestStatus(), {
@@ -3231,9 +3340,13 @@ const x = 1;
 
   it("does not reuse a PR status cache entry after HEAD changes on the same branch", async () => {
     execFileSync("git", ["checkout", "-b", "feature"], { cwd: repoDir });
-    execFileSync("git", ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"], {
-      cwd: repoDir,
-    });
+    execFileSync(
+      "git",
+      ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"],
+      {
+        cwd: repoDir,
+      },
+    );
 
     const requestedShas: string[] = [];
     const github = createGitHubServiceForStatus(null);
@@ -3258,9 +3371,13 @@ const x = 1;
 
   it("passes forced PR status reads through to the GitHub service", async () => {
     execFileSync("git", ["checkout", "-b", "feature"], { cwd: repoDir });
-    execFileSync("git", ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"], {
-      cwd: repoDir,
-    });
+    execFileSync(
+      "git",
+      ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"],
+      {
+        cwd: repoDir,
+      },
+    );
 
     const requested: Array<{ force?: boolean; reason?: string }> = [];
     const github = createGitHubServiceForStatus(null);
@@ -3282,9 +3399,13 @@ const x = 1;
 
   it("expires cached PR status after the TTL", async () => {
     execFileSync("git", ["checkout", "-b", "feature"], { cwd: repoDir });
-    execFileSync("git", ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"], {
-      cwd: repoDir,
-    });
+    execFileSync(
+      "git",
+      ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"],
+      {
+        cwd: repoDir,
+      },
+    );
 
     __setPullRequestStatusCacheTtlForTests(50);
     try {
@@ -3313,9 +3434,13 @@ const x = 1;
 
   it("keeps stale PR status when a refresh hits a transient GitHub error", async () => {
     execFileSync("git", ["checkout", "-b", "feature"], { cwd: repoDir });
-    execFileSync("git", ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"], {
-      cwd: repoDir,
-    });
+    execFileSync(
+      "git",
+      ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"],
+      {
+        cwd: repoDir,
+      },
+    );
 
     __setPullRequestStatusCacheTtlForTests(50);
     try {
@@ -3386,9 +3511,13 @@ const x = 1;
 
   it("does not use stale PR status fallback for forced GitHub errors", async () => {
     execFileSync("git", ["checkout", "-b", "feature"], { cwd: repoDir });
-    execFileSync("git", ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"], {
-      cwd: repoDir,
-    });
+    execFileSync(
+      "git",
+      ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"],
+      {
+        cwd: repoDir,
+      },
+    );
 
     const github = createGitHubServiceForStatus(null);
     github.getCurrentPullRequestStatus = async () =>
@@ -3419,9 +3548,13 @@ const x = 1;
 
   it("clears stale PR status after a successful no-PR refresh", async () => {
     execFileSync("git", ["checkout", "-b", "feature"], { cwd: repoDir });
-    execFileSync("git", ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"], {
-      cwd: repoDir,
-    });
+    execFileSync(
+      "git",
+      ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"],
+      {
+        cwd: repoDir,
+      },
+    );
 
     __setPullRequestStatusCacheTtlForTests(50);
     try {
@@ -3491,9 +3624,13 @@ const x = 1;
 
   it("dedupes concurrent PR status lookups for the same cwd", async () => {
     execFileSync("git", ["checkout", "-b", "feature"], { cwd: repoDir });
-    execFileSync("git", ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"], {
-      cwd: repoDir,
-    });
+    execFileSync(
+      "git",
+      ["remote", "add", "origin", "https://github.com/jagentdesk/jagentdesk.git"],
+      {
+        cwd: repoDir,
+      },
+    );
 
     let callCount = 0;
     const github = createGitHubServiceForStatus(createPullRequestStatus(), {
@@ -3583,7 +3720,11 @@ const x = 1;
     expect(status.baseRef).toBe("develop");
     expect(status.aheadBehind?.ahead).toBe(1);
 
-    const baseDiff = await getCheckoutDiff(worktree.worktreePath, { mode: "base" }, { jagentdeskHome });
+    const baseDiff = await getCheckoutDiff(
+      worktree.worktreePath,
+      { mode: "base" },
+      { jagentdeskHome },
+    );
     expect(baseDiff.diff).toContain("feature.txt");
     expect(baseDiff.diff).not.toContain("file.txt");
   });
@@ -3598,7 +3739,11 @@ const x = 1;
     });
 
     await expect(
-      getCheckoutDiff(worktree.worktreePath, { mode: "base", baseRef: "other" }, { jagentdeskHome }),
+      getCheckoutDiff(
+        worktree.worktreePath,
+        { mode: "base", baseRef: "other" },
+        { jagentdeskHome },
+      ),
     ).rejects.toThrow("Base ref mismatch: stored refs/heads/main, requested other");
   });
 
@@ -3712,7 +3857,11 @@ const x = 1;
     const metadataPath = getJAgentDeskWorktreeMetadataPath(worktree.worktreePath);
     rmSync(metadataPath, { force: true });
 
-    const baseDiff = await getCheckoutDiff(worktree.worktreePath, { mode: "base" }, { jagentdeskHome });
+    const baseDiff = await getCheckoutDiff(
+      worktree.worktreePath,
+      { mode: "base" },
+      { jagentdeskHome },
+    );
     expect(baseDiff.diff).toContain("feature.txt");
 
     const shortstat = await getCheckoutShortstat(worktree.worktreePath, { jagentdeskHome });
@@ -3774,11 +3923,14 @@ const x = 1;
     });
 
     it("matches Windows .jagentdesk\\worktrees\\ paths", () => {
-      expect(isJAgentDeskWorktreePath("C:\\Users\\dev\\.jagentdesk\\worktrees\\feature")).toBe(true);
+      expect(isJAgentDeskWorktreePath("C:\\Users\\dev\\.jagentdesk\\worktrees\\feature")).toBe(
+        true,
+      );
     });
 
     it("matches worktrees under a custom JAGENTDESK_HOME", () => {
-      const customJAgentDeskHome = process.platform === "win32" ? "C:\\jagentdesk" : "/var/lib/jagentdesk";
+      const customJAgentDeskHome =
+        process.platform === "win32" ? "C:\\jagentdesk" : "/var/lib/jagentdesk";
       const worktreePath =
         process.platform === "win32"
           ? win32.join(customJAgentDeskHome, "worktrees", "project", "feature")
