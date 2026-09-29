@@ -10,10 +10,26 @@ import {
   Lightbulb,
   Check,
   X,
+  Copy,
 } from "lucide-react-native";
+import { useTranslation } from "react-i18next";
+import { levelProgress } from "@jagentdesk/protocol/skills";
+import type { SkillEntry } from "@jagentdesk/protocol/native-skills";
+import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { useSessionStore } from "@/stores/session-store";
-import { useSkillsStore, levelProgress, type Skill } from "@/stores/skills-store";
-import { useAgentSkillsStore, selectAttachedSkillIds } from "@/stores/agent-skills-store";
+import { useSkillCatalog } from "@/stores/skills-store";
+import {
+  useAgentSkillsStore,
+  selectAttachedSkillIds,
+  selectInjectedSkillIds,
+} from "@/stores/agent-skills-store";
+import {
+  buildLegacyIdMap,
+  conciseLessonFrom,
+  normalizeSkillIds,
+  skillErrorMessage,
+} from "@/skills/native-skill-logic";
+import { useSkillActions } from "@/skills/ui/use-skill-actions";
 import type { StreamItem } from "@/types/stream";
 import type { Theme } from "@/styles/theme";
 
@@ -25,6 +41,7 @@ const ThemedChevronUp = withUnistyles(ChevronUp);
 const ThemedLightbulb = withUnistyles(Lightbulb);
 const ThemedCheck = withUnistyles(Check);
 const ThemedX = withUnistyles(X);
+const ThemedCopy = withUnistyles(Copy);
 const accentColor = (theme: Theme) => ({ color: theme.colors.accent });
 const accentFgColor = (theme: Theme) => ({ color: theme.colors.accentForeground });
 const mutedColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
@@ -34,8 +51,7 @@ interface LatestReply {
   messageId: string;
 }
 
-/** The most recent assistant_message in an agent's timeline — its text is what a
- * 👍 captures as skill knowledge and what an agent-proposed lesson is derived from. */
+/** The most recent assistant_message in an agent's timeline — what 👍/👎 rates. */
 function latestReplyOf(items: StreamItem[] | undefined): LatestReply | undefined {
   if (!items) return undefined;
   for (let i = items.length - 1; i >= 0; i -= 1) {
@@ -47,130 +63,238 @@ function latestReplyOf(items: StreamItem[] | undefined): LatestReply | undefined
   return undefined;
 }
 
-/** Derive a short, one-line "lesson" the agent proposes from its last reply. A real
- * LLM-generated proposal can replace this later; the store wiring is identical. */
-function conciseLessonFrom(text: string): string {
-  const clean = text.replace(/\s+/g, " ").trim();
-  const firstSentence = clean.split(/(?<=[.!?])\s/)[0] ?? clean;
-  return firstSentence.length > 160 ? `${firstSentence.slice(0, 159)}…` : firstSentence;
-}
-
-/** One selectable skill in the train bar's picker (shown when the agent uses
- * more than one skill). Extracted so its onPress is a stable callback. */
+/** One selectable skill in the train bar (shown when the agent uses several). */
 function SkillChip({
   skill,
   active,
   onSelect,
 }: {
-  skill: Skill;
+  skill: SkillEntry;
   active: boolean;
   onSelect: (skillId: string) => void;
 }) {
-  const handlePress = useCallback(() => onSelect(skill.id), [onSelect, skill.id]);
+  const handlePress = useCallback(() => onSelect(skill.skillId), [onSelect, skill.skillId]);
   return (
     <Pressable
       style={active ? [styles.skillChip, styles.skillChipActive] : styles.skillChip}
       onPress={handlePress}
     >
       <Text style={active ? styles.skillChipTextActive : styles.skillChipText} numberOfLines={1}>
-        {skill.icon} {skill.name}
+        {skill.name}
       </Text>
     </Pressable>
   );
 }
 
-/**
- * A floating bar shown inside an agent conversation when that agent is using one
- * or more Skills. Since the B3 redesign a skill is ATTACHED to an existing agent
- * (composer skill picker → useAgentSkillsStore) or auto-loaded by message match —
- * it is no longer a label on a skill-spawned agent — so the trainable skills are
- * the union of the agent's attached + injected skill ids, resolved against the
- * daemon-owned skills store. Training happens from the REAL conversation — no
- * hand-typed instructions:
- *  - 👍 / 👎 on the agent's latest reply: 👍 captures that reply's text as approved
- *    knowledge (learnFromMessage, rating "up"); 👎 records a negative run.
- *  - "Suggested lesson": the agent proposes a concise lesson derived from its last
- *    reply; Approve keeps it (proposeLearning + resolveProposedLearning), Reject drops it.
- * When several skills are active the user picks which one this reply trains.
- */
-export function AgentSkillTrainBar({ serverId, agentId }: { serverId: string; agentId: string }) {
-  const streamItems = useSessionStore((state) =>
-    state.sessions[serverId]?.agentStreamTail?.get(agentId),
+/** Skills active on the agent (attached ∪ already invoked), resolved against the catalog. */
+function useActiveSkills(serverId: string, agentId: string): SkillEntry[] {
+  const agentCwd = useSessionStore(
+    (state) => state.sessions[serverId]?.agents?.get(agentId)?.cwd ?? null,
   );
-  const skills = useSkillsStore((s) => s.skills);
+  const catalog = useSkillCatalog(agentCwd);
   const attachedIds = useAgentSkillsStore(selectAttachedSkillIds(agentId));
-  const injectedIds = useAgentSkillsStore((s) => s.injected[agentId]);
-  const learnFromMessage = useSkillsStore((s) => s.learnFromMessage);
-  const proposeLearning = useSkillsStore((s) => s.proposeLearning);
-  const resolveProposedLearning = useSkillsStore((s) => s.resolveProposedLearning);
+  const injectedIds = useAgentSkillsStore(selectInjectedSkillIds(agentId));
+  return useMemo(() => {
+    const legacyMap = buildLegacyIdMap(catalog.skills);
+    const ids = normalizeSkillIds([...attachedIds, ...injectedIds], legacyMap);
+    const byId = new Map(catalog.skills.map((entry) => [entry.skillId, entry]));
+    return ids.map((id) => byId.get(id)).filter((entry): entry is SkillEntry => Boolean(entry));
+  }, [attachedIds, catalog.skills, injectedIds]);
+}
 
-  const [expanded, setExpanded] = useState(false);
+function useFlash() {
   const [flash, setFlash] = useState<string | null>(null);
-  // messageId of the reply whose proposed lesson the user already acted on/dismissed.
-  const [proposalDoneFor, setProposalDoneFor] = useState<string | null>(null);
-  // Which active skill the reply trains when the agent uses more than one.
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-
-  // Skills active on this agent: manually attached ∪ auto-loaded (injected),
-  // resolved against the daemon-owned list (drops any that no longer exist).
-  const activeSkills = useMemo<Skill[]>(() => {
-    const ids = Array.from(new Set<string>([...attachedIds, ...(injectedIds ?? [])]));
-    return ids.map((id) => skills.find((s) => s.id === id)).filter((s): s is Skill => Boolean(s));
-  }, [attachedIds, injectedIds, skills]);
-
-  const skill = useMemo<Skill | undefined>(() => {
-    if (activeSkills.length === 0) return undefined;
-    return activeSkills.find((s) => s.id === selectedId) ?? activeSkills[0];
-  }, [activeSkills, selectedId]);
-
-  const latest = useMemo(() => latestReplyOf(streamItems), [streamItems]);
-
-  const showFlash = useCallback((message: string) => {
+  const show = useCallback((message: string) => {
     setFlash(message);
     setTimeout(() => setFlash(null), 1800);
   }, []);
+  return { flash, show };
+}
 
-  const skillIdValue = skill?.id;
-  const rate = useCallback(
-    (rating: "up" | "down") => {
-      if (!skillIdValue || !latest) return;
-      learnFromMessage(skillIdValue, { content: latest.text, rating, messageId: latest.messageId });
-      showFlash(rating === "up" ? "+60 XP · learned this reply" : "+15 XP · noted");
-    },
-    [skillIdValue, latest, learnFromMessage, showFlash],
+interface RatingRowProps {
+  enabled: boolean;
+  onGood: () => void;
+  onNeedsWork: () => void;
+}
+
+function RatingRow({ enabled, onGood, onNeedsWork }: RatingRowProps) {
+  const { t } = useTranslation();
+  return (
+    <View style={styles.rateRow}>
+      <Pressable
+        style={enabled ? styles.reject : [styles.reject, styles.disabled]}
+        onPress={enabled ? onNeedsWork : undefined}
+        testID="skill-train-needs-work"
+      >
+        <ThemedThumbsDown size={14} uniProps={mutedColor} />
+        <Text style={styles.rejectText}>{t("skillsHub.train.needsWork")}</Text>
+      </Pressable>
+      <Pressable
+        style={enabled ? styles.approve : [styles.approve, styles.disabled]}
+        onPress={enabled ? onGood : undefined}
+        testID="skill-train-good"
+      >
+        <ThemedThumbsUp size={14} uniProps={accentFgColor} />
+        <Text style={styles.approveText}>{t("skillsHub.train.good")}</Text>
+      </Pressable>
+    </View>
   );
+}
 
-  const approveLesson = useCallback(() => {
-    if (!skillIdValue || !latest) return;
-    const entryId = proposeLearning(skillIdValue, conciseLessonFrom(latest.text), latest.messageId);
-    resolveProposedLearning(skillIdValue, entryId, true);
-    setProposalDoneFor(latest.messageId);
-    showFlash("Lesson saved to skill");
-  }, [skillIdValue, latest, proposeLearning, resolveProposedLearning, showFlash]);
+interface ProposalBoxProps {
+  lesson: string;
+  onApprove: () => void;
+  onSkip: () => void;
+}
 
-  const rejectLesson = useCallback(() => {
-    if (latest) setProposalDoneFor(latest.messageId);
+function ProposalBox({ lesson, onApprove, onSkip }: ProposalBoxProps) {
+  const { t } = useTranslation();
+  return (
+    <View style={styles.proposalBox} testID="skill-train-proposal">
+      <View style={styles.proposalHead}>
+        <ThemedLightbulb size={13} uniProps={accentColor} />
+        <Text style={styles.proposalTitle}>{t("skillsHub.train.proposalTitle")}</Text>
+      </View>
+      <Text style={styles.proposalText}>{lesson}</Text>
+      <View style={styles.rateRow}>
+        <Pressable style={styles.reject} onPress={onSkip} testID="skill-train-skip">
+          <ThemedX size={13} uniProps={mutedColor} />
+          <Text style={styles.rejectText}>{t("skillsHub.train.skip")}</Text>
+        </Pressable>
+        <Pressable style={styles.approve} onPress={onApprove} testID="skill-train-approve">
+          <ThemedCheck size={13} uniProps={accentFgColor} />
+          <Text style={styles.approveText}>{t("skillsHub.train.approve")}</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+function ForkPrompt({ skill, onFork }: { skill: SkillEntry; onFork: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <View style={styles.proposalBox} testID="skill-train-fork-prompt">
+      <Text style={styles.proposalTitle}>{t("skillsHub.train.forkPrompt")}</Text>
+      <Text style={styles.proposalText}>{t("skillsHub.train.forkHint", { name: skill.name })}</Text>
+      <Pressable style={styles.approve} onPress={onFork} testID="skill-train-fork">
+        <ThemedCopy size={13} uniProps={accentFgColor} />
+        <Text style={styles.approveText}>{t("skillsHub.train.fork")}</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+interface TrainingInput {
+  serverId: string;
+  agentId: string;
+  skill: SkillEntry | undefined;
+  latest: LatestReply | undefined;
+  showFlash: (message: string) => void;
+}
+
+/** 👍 → proposed lesson → approve → `skills.learn` (spec 22.9); 👎 records a negative run. */
+function useTraining({ serverId, agentId, skill, latest, showFlash }: TrainingInput) {
+  const { t } = useTranslation();
+  const client = useHostRuntimeClient(serverId);
+  const actions = useSkillActions(client);
+  const replaceAttached = useAgentSkillsStore((state) => state.replaceAttached);
+  const [proposalFor, setProposalFor] = useState<string | null>(null);
+  const [doneFor, setDoneFor] = useState<string | null>(null);
+
+  const learn = useCallback(
+    async (lesson: string, approved: boolean, flashKey: string) => {
+      if (!client || !skill || !latest) return;
+      setDoneFor(latest.messageId);
+      setProposalFor(null);
+      try {
+        await client.learnSkill({
+          skillId: skill.skillId,
+          lesson,
+          approved,
+          agentId,
+          ...(skill.projectRoot ? { cwd: skill.projectRoot } : {}),
+        });
+        showFlash(t(flashKey));
+      } catch (error) {
+        setDoneFor(null);
+        showFlash(skillErrorMessage(error));
+      }
+    },
+    [agentId, client, latest, showFlash, skill, t],
+  );
+  const lesson = latest ? conciseLessonFrom(latest.text) : "";
+  const onGood = useCallback(() => {
+    if (latest) setProposalFor(latest.messageId);
   }, [latest]);
+  const onNeedsWork = useCallback(
+    () => void learn(lesson, false, "skillsHub.train.noted"),
+    [learn, lesson],
+  );
+  const onApprove = useCallback(
+    () => void learn(lesson, true, "skillsHub.train.lessonSaved"),
+    [learn, lesson],
+  );
+  const onSkip = useCallback(() => void learn("", true, "skillsHub.train.recorded"), [learn]);
+  const onFork = useCallback(() => {
+    if (!skill) return;
+    void actions.fork(skill).then((forked) => {
+      if (forked) {
+        replaceAttached(agentId, skill.skillId, forked.skillId);
+        showFlash(t("skillsHub.train.forked", { name: forked.name }));
+      }
+      return undefined;
+    });
+  }, [actions, agentId, replaceAttached, showFlash, skill, t]);
 
-  const toggleExpanded = useCallback(() => setExpanded((v) => !v), []);
-  const rateUp = useCallback(() => rate("up"), [rate]);
-  const rateDown = useCallback(() => rate("down"), [rate]);
+  const handled = Boolean(latest && latest.messageId === doneFor);
+  const showProposal = Boolean(latest && latest.messageId === proposalFor && !handled);
+  return { lesson, handled, showProposal, onGood, onNeedsWork, onApprove, onSkip, onFork };
+}
+
+/**
+ * A floating bar inside an agent conversation when that agent uses skills
+ * (attached in the composer or auto-loaded). Training happens from the real
+ * conversation — no hand-typed instructions (spec 22.9):
+ *  - 👍 on the agent's latest reply proposes a one-line lesson (text heuristic,
+ *    no model call); Save lesson writes it into SKILL.md's lessons section and
+ *    awards XP, Skip lesson only records the approval.
+ *  - 👎 records a negative run.
+ *  - A skill JAgentDesk does not own is never edited: the bar offers to create
+ *    an owned copy first and switches the agent to it.
+ */
+export function AgentSkillTrainBar({ serverId, agentId }: { serverId: string; agentId: string }) {
+  const { t } = useTranslation();
+  const streamItems = useSessionStore((state) =>
+    state.sessions[serverId]?.agentStreamTail?.get(agentId),
+  );
+  const activeSkills = useActiveSkills(serverId, agentId);
+  const [expanded, setExpanded] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const { flash, show: showFlash } = useFlash();
+
+  const skill = useMemo<SkillEntry | undefined>(
+    () => activeSkills.find((entry) => entry.skillId === selectedId) ?? activeSkills[0],
+    [activeSkills, selectedId],
+  );
+  const latest = useMemo(() => latestReplyOf(streamItems), [streamItems]);
+  const training = useTraining({ serverId, agentId, skill, latest, showFlash });
+  const toggleExpanded = useCallback(() => setExpanded((value) => !value), []);
 
   if (!skill) return null;
-  const prog = levelProgress(skill.xp);
-  const proposal =
-    latest && latest.messageId !== proposalDoneFor ? conciseLessonFrom(latest.text) : null;
+  const level = levelProgress(skill.training?.xp ?? 0).level;
 
   return (
-    <View style={styles.wrap} pointerEvents="box-none">
+    <View style={styles.wrap} pointerEvents="box-none" testID="agent-skill-train-bar">
       <View style={styles.bar}>
         <Pressable style={styles.head} onPress={toggleExpanded}>
           <ThemedGraduationCap size={14} uniProps={accentColor} />
           <Text style={styles.title} numberOfLines={1}>
-            Train {skill.name}
+            {t("skillsHub.train.title", { name: skill.name })}
           </Text>
-          {proposal && !expanded ? <View style={styles.dot} /> : null}
-          <Text style={styles.level}>Lv {prog.level}</Text>
+          {training.showProposal && !expanded ? <View style={styles.dot} /> : null}
+          {skill.training ? (
+            <Text style={styles.level}>{t("skillsHub.train.level", { level })}</Text>
+          ) : null}
           {expanded ? (
             <ThemedChevronDown size={14} uniProps={mutedColor} />
           ) : (
@@ -179,66 +303,73 @@ export function AgentSkillTrainBar({ serverId, agentId }: { serverId: string; ag
         </Pressable>
         {flash ? <Text style={styles.flash}>{flash}</Text> : null}
         {expanded ? (
-          <View style={styles.body}>
-            {activeSkills.length > 1 ? (
-              <View style={styles.skillPicker}>
-                {activeSkills.map((s) => (
-                  <SkillChip
-                    key={s.id}
-                    skill={s}
-                    active={s.id === skill.id}
-                    onSelect={setSelectedId}
-                  />
-                ))}
-              </View>
-            ) : null}
-            <Text style={styles.caption}>Latest reply</Text>
-            {latest ? (
-              <Text style={styles.replyPreview} numberOfLines={3}>
-                {latest.text}
-              </Text>
-            ) : (
-              <Text style={styles.waiting}>Waiting for the agent to reply…</Text>
-            )}
-            <View style={styles.rateRow}>
-              <Pressable
-                style={latest ? styles.reject : [styles.reject, styles.disabled]}
-                onPress={latest ? rateDown : undefined}
-              >
-                <ThemedThumbsDown size={14} uniProps={mutedColor} />
-                <Text style={styles.rejectText}>Needs work</Text>
-              </Pressable>
-              <Pressable
-                style={latest ? styles.approve : [styles.approve, styles.disabled]}
-                onPress={latest ? rateUp : undefined}
-              >
-                <ThemedThumbsUp size={14} uniProps={accentFgColor} />
-                <Text style={styles.approveText}>Approve reply</Text>
-              </Pressable>
-            </View>
-
-            {proposal ? (
-              <View style={styles.proposalBox}>
-                <View style={styles.proposalHead}>
-                  <ThemedLightbulb size={13} uniProps={accentColor} />
-                  <Text style={styles.proposalTitle}>Agent proposes a lesson</Text>
-                </View>
-                <Text style={styles.proposalText}>{proposal}</Text>
-                <View style={styles.rateRow}>
-                  <Pressable style={styles.reject} onPress={rejectLesson}>
-                    <ThemedX size={13} uniProps={mutedColor} />
-                    <Text style={styles.rejectText}>Reject</Text>
-                  </Pressable>
-                  <Pressable style={styles.approve} onPress={approveLesson}>
-                    <ThemedCheck size={13} uniProps={accentFgColor} />
-                    <Text style={styles.approveText}>Approve</Text>
-                  </Pressable>
-                </View>
-              </View>
-            ) : null}
-          </View>
+          <TrainBody
+            activeSkills={activeSkills}
+            skill={skill}
+            latest={latest}
+            training={training}
+            onSelectSkill={setSelectedId}
+          />
         ) : null}
       </View>
+    </View>
+  );
+}
+
+function TrainBody({
+  activeSkills,
+  skill,
+  latest,
+  training,
+  onSelectSkill,
+}: {
+  activeSkills: SkillEntry[];
+  skill: SkillEntry;
+  latest: LatestReply | undefined;
+  training: ReturnType<typeof useTraining>;
+  onSelectSkill: (skillId: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <View style={styles.body}>
+      {activeSkills.length > 1 ? (
+        <View style={styles.skillPicker}>
+          {activeSkills.map((entry) => (
+            <SkillChip
+              key={entry.skillId}
+              skill={entry}
+              active={entry.skillId === skill.skillId}
+              onSelect={onSelectSkill}
+            />
+          ))}
+        </View>
+      ) : null}
+      {skill.owned ? (
+        <>
+          <Text style={styles.caption}>{t("skillsHub.train.latestReply")}</Text>
+          {latest ? (
+            <Text style={styles.replyPreview} numberOfLines={3}>
+              {latest.text}
+            </Text>
+          ) : (
+            <Text style={styles.waiting}>{t("skillsHub.train.waiting")}</Text>
+          )}
+          <RatingRow
+            enabled={Boolean(latest) && !training.handled}
+            onGood={training.onGood}
+            onNeedsWork={training.onNeedsWork}
+          />
+          {training.showProposal ? (
+            <ProposalBox
+              lesson={training.lesson}
+              onApprove={training.onApprove}
+              onSkip={training.onSkip}
+            />
+          ) : null}
+        </>
+      ) : (
+        <ForkPrompt skill={skill} onFork={training.onFork} />
+      )}
     </View>
   );
 }

@@ -13,7 +13,7 @@ import { highlightToKeyedLines } from "@/utils/highlight-cache";
 import { ClusterResourceOverview } from "@/components/cluster-resource-overview";
 import { dispatchComposerAgentMessage } from "@/composer/actions";
 import { createMessageSubmissionWriter } from "@/composer/submission/writer";
-import { resolveSkillInjectedText } from "@/skills/skill-injection";
+import { prepareTurnSkills } from "@/skills/turn-skills";
 import { useClusterChatStore } from "@/stores/cluster-chat-store";
 import type { Theme } from "@/styles/theme";
 import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
@@ -516,14 +516,17 @@ export function ClusterResourceDetail({
       // is accepted by the daemon but never renders in the panel (which draws the
       // user message from this submission store, not a daemon echo), so the chat
       // looked silent even though the message went through.
+      const turnSkills = prepareTurnSkills({ serverId, agentId: chatAgentId, text: askMessage });
       dispatchComposerAgentMessage({
         client,
         agentId: chatAgentId,
-        text: resolveSkillInjectedText(chatAgentId, askMessage),
+        text: askMessage,
         attachments: [],
         encodeImages: async () => undefined,
         submission: createMessageSubmissionWriter(serverId),
+        skillIds: turnSkills.skillIds,
       })
+        .then(turnSkills.commit)
         .catch((e: unknown) =>
           setMessage(e instanceof Error ? e.message : "Failed to reach the agent"),
         )

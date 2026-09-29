@@ -2,106 +2,170 @@ import { useCallback, useMemo, useRef, useState, type ReactElement } from "react
 import { Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { Sparkles } from "lucide-react-native";
+import { useTranslation } from "react-i18next";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { Combobox, ComboboxItem, type ComboboxOption } from "@/components/ui/combobox";
 import { AgentControlTrigger } from "@/composer/agent-controls/control";
-import { useSkillsStore, type Skill } from "@/stores/skills-store";
+import { useDaemonConfig } from "@/hooks/use-daemon-config";
+import { useHostRuntimeClient } from "@/runtime/host-runtime";
+import { useSessionStore } from "@/stores/session-store";
+import { useSkillCatalog } from "@/stores/skills-store";
 import { useAgentSkillsStore, selectAttachedSkillIds } from "@/stores/agent-skills-store";
+import { resolveSkillProvider, skillProviderLabel } from "@/skills/native-skill-logic";
+import { buildSkillPickerModel, INSTALL_OPTION_PREFIX } from "@/skills/skill-picker-model";
+import { useSkillActions } from "@/skills/ui/use-skill-actions";
 
 interface SkillOptionRowProps {
-  skill: Skill;
+  option: ComboboxOption;
   selected: boolean;
   active: boolean;
-  onToggle: (skillId: string) => void;
+  installLabel: string | null;
+  onPress: (optionId: string) => void;
 }
 
-function SkillOptionRow({ skill, selected, active, onToggle }: SkillOptionRowProps): ReactElement {
-  const handlePress = useCallback(() => onToggle(skill.id), [onToggle, skill.id]);
-  const leadingSlot = useMemo(
-    () => <Text style={styles.optionIcon}>{skill.icon}</Text>,
-    [skill.icon],
+function SkillOptionRow({
+  option,
+  selected,
+  active,
+  installLabel,
+  onPress,
+}: SkillOptionRowProps): ReactElement {
+  const handlePress = useCallback(() => onPress(option.id), [onPress, option.id]);
+  const trailingSlot = useMemo(
+    () => (installLabel ? <Text style={styles.installLabel}>{installLabel}</Text> : null),
+    [installLabel],
   );
   return (
     <ComboboxItem
-      label={skill.name}
-      description={skill.description || undefined}
+      label={option.label}
+      description={option.description}
       selected={selected}
       active={active}
       onPress={handlePress}
-      leadingSlot={leadingSlot}
-      testID={`composer-skill-option-${skill.id}`}
+      trailingSlot={trailingSlot}
+      testID={`composer-skill-option-${option.id}`}
     />
   );
 }
 
+function useAgentSkillContext(serverId: string, agentId: string) {
+  const agentProvider = useSessionStore(
+    (state) => state.sessions[serverId]?.agents?.get(agentId)?.provider ?? null,
+  );
+  const agentCwd = useSessionStore(
+    (state) => state.sessions[serverId]?.agents?.get(agentId)?.cwd ?? null,
+  );
+  const { config } = useDaemonConfig(serverId);
+  const provider = resolveSkillProvider(
+    agentProvider,
+    config?.providers as Record<string, unknown> | undefined,
+  );
+  return { provider, agentCwd };
+}
+
 export interface SkillsControlProps {
   agentId: string;
+  serverId: string;
 }
 
 /**
- * Composer multi-select skill picker (redesign B3). Mirrors the mode/model
- * pickers: an AgentControlTrigger pill that opens a Combobox. Selecting a skill
- * toggles it onto the CURRENT agent (persisted per agentId); the picker stays
- * open for multi-select. A footer row toggles auto-load (B5).
+ * Composer multi-select Skills picker (spec 22.7). Selecting a skill toggles it
+ * onto the CURRENT agent (persisted per agentId); the picker stays open for
+ * multi-select. On send the ids go with the message and the daemon adds the
+ * provider's native invocation. A footer row toggles keyword auto-load.
  */
-export function SkillsControl({ agentId }: SkillsControlProps): ReactElement {
+export function SkillsControl({ agentId, serverId }: SkillsControlProps): ReactElement {
+  const { t } = useTranslation();
   const isCompact = useIsCompactFormFactor();
-  const skills = useSkillsStore((state) => state.skills);
-  const attachedIds = useAgentSkillsStore(selectAttachedSkillIds(agentId));
+  const client = useHostRuntimeClient(serverId);
+  const actions = useSkillActions(client);
+  const { provider, agentCwd } = useAgentSkillContext(serverId, agentId);
+  const catalog = useSkillCatalog(agentCwd);
+  const rawAttachedIds = useAgentSkillsStore(selectAttachedSkillIds(agentId));
   const toggleAttached = useAgentSkillsStore((state) => state.toggleAttached);
+  const replaceAttached = useAgentSkillsStore((state) => state.replaceAttached);
   const autoLoad = useAgentSkillsStore((state) => state.autoLoad);
   const setAutoLoad = useAgentSkillsStore((state) => state.setAutoLoad);
 
   const anchorRef = useRef<View>(null);
   const [open, setOpen] = useState(false);
 
-  const attachedSet = useMemo(() => new Set(attachedIds), [attachedIds]);
-  const options = useMemo<ComboboxOption[]>(
-    () => skills.map((skill) => ({ id: skill.id, label: skill.name })),
-    [skills],
+  const model = useMemo(
+    () =>
+      buildSkillPickerModel({
+        skills: catalog.skills,
+        provider,
+        rawAttachedIds,
+        catalogReady: catalog.status === "ready",
+      }),
+    [catalog.skills, catalog.status, provider, rawAttachedIds],
   );
+  const attachedSet = useMemo(() => new Set(model.attachedIds), [model.attachedIds]);
 
-  const handleToggle = useCallback(
-    (skillId: string) => toggleAttached(agentId, skillId),
-    [agentId, toggleAttached],
+  const handleSelect = useCallback(
+    (optionId: string) => {
+      if (!optionId.startsWith(INSTALL_OPTION_PREFIX)) {
+        toggleAttached(agentId, optionId);
+        return;
+      }
+      const entry = model.entriesById.get(optionId.slice(INSTALL_OPTION_PREFIX.length));
+      if (!entry || !model.provider) return;
+      void actions.installFor(entry, model.provider).then((installed) => {
+        if (installed) replaceAttached(agentId, entry.skillId, installed.skillId);
+        return undefined;
+      });
+    },
+    [actions, agentId, model.entriesById, model.provider, replaceAttached, toggleAttached],
   );
   const handleToggleAutoLoad = useCallback(() => setAutoLoad(!autoLoad), [autoLoad, setAutoLoad]);
   const handlePress = useCallback(() => setOpen((prev) => !prev), []);
 
+  const installLabel = model.provider
+    ? t("skillsHub.picker.installFor", { provider: skillProviderLabel(model.provider) })
+    : null;
   const renderOption = useCallback(
     (args: { option: ComboboxOption; selected: boolean; active: boolean }): ReactElement => {
-      const skill = skills.find((candidate) => candidate.id === args.option.id);
-      if (!skill) return <View key={args.option.id} />;
+      const isInstall = args.option.id.startsWith(INSTALL_OPTION_PREFIX);
       return (
         <SkillOptionRow
-          skill={skill}
-          selected={attachedSet.has(skill.id)}
+          key={args.option.id}
+          option={args.option}
+          selected={!isInstall && attachedSet.has(args.option.id)}
           active={args.active}
-          onToggle={handleToggle}
+          installLabel={isInstall ? installLabel : null}
+          onPress={handleSelect}
         />
       );
     },
-    [attachedSet, handleToggle, skills],
+    [attachedSet, handleSelect, installLabel],
   );
 
   const footer = useMemo(
     () => (
       <View style={styles.footer}>
         <ComboboxItem
-          label="Auto-load skills by message"
-          description="Match relevant skills to what you ask"
+          label={t("skillsHub.picker.autoLoad")}
+          description={t("skillsHub.picker.autoLoadHint")}
           selected={autoLoad}
           onPress={handleToggleAutoLoad}
           testID="composer-skill-autoload-toggle"
         />
       </View>
     ),
-    [autoLoad, handleToggleAutoLoad],
+    [autoLoad, handleToggleAutoLoad, t],
   );
 
-  const count = attachedIds.length;
-  const value = count > 0 ? `Skills · ${count}` : "Skills";
-  const accessibilityLabel = count > 0 ? `Skills, ${count} attached` : "Attach skills";
+  const count = model.attachedCount;
+  const label = t("skillsHub.picker.label");
+  const value = count > 0 ? t("skillsHub.picker.value", { count }) : label;
+  const accessibilityLabel =
+    count > 0 ? t("skillsHub.picker.attachedA11y", { count }) : t("skillsHub.picker.attachA11y");
+  let emptyText = t("skillsHub.picker.empty");
+  if (catalog.status === "loading" || catalog.status === "idle") {
+    emptyText = t("skillsHub.picker.loading");
+  } else if (catalog.status === "error") {
+    emptyText = catalog.error ?? t("skillsHub.states.errorTitle");
+  }
 
   return (
     <>
@@ -109,7 +173,7 @@ export function SkillsControl({ agentId }: SkillsControlProps): ReactElement {
         ref={anchorRef}
         icon={Sparkles}
         surface="toolbar"
-        label="Skills"
+        label={label}
         value={value}
         showToolbarLabel={!isCompact}
         badgeCount={count}
@@ -120,17 +184,19 @@ export function SkillsControl({ agentId }: SkillsControlProps): ReactElement {
         testID="composer-skills-control"
       />
       <Combobox
-        options={options}
+        options={model.options}
         value=""
-        onSelect={handleToggle}
+        onSelect={handleSelect}
         keepOpenOnSelect
         open={open}
         onOpenChange={setOpen}
         anchorRef={anchorRef}
         desktopPlacement="top-start"
-        desktopMinWidth={280}
-        title="Skills"
-        emptyText="No skills yet. Create one on the Skills screen."
+        desktopMinWidth={300}
+        title={label}
+        searchable
+        searchPlaceholder={t("skillsHub.picker.search")}
+        emptyText={emptyText}
         renderOption={renderOption}
         footer={footer}
       />
@@ -139,9 +205,10 @@ export function SkillsControl({ agentId }: SkillsControlProps): ReactElement {
 }
 
 const styles = StyleSheet.create((theme) => ({
-  optionIcon: {
-    fontSize: 16,
-    textAlign: "center",
+  installLabel: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.accent,
   },
   footer: {
     borderTopWidth: theme.borderWidth[1],

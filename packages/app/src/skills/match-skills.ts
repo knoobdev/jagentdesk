@@ -1,13 +1,19 @@
-import type { Skill } from "@/stores/skills-store";
-
 /**
- * Auto-load matching (redesign B5, docs/plans/active/skills-redesign.md).
+ * Auto-load matching (redesign B5, spec 22.7 "Auto-load").
  *
  * `matchSkillsForQuery` picks the skills whose tags / name / description overlap
  * the user's message so the agent can pull in relevant knowledge WITHOUT the user
  * manually attaching them. It is deliberately simple and deterministic (keyword /
- * tag overlap, no embeddings) so the same message always resolves the same skills.
+ * tag overlap, no embeddings, no model call) so the same message always resolves
+ * the same skills. Native SKILL.md entries have no tags; name + description match.
  */
+
+/** The fields matching reads: a native `SkillEntry` or any skill-like record. */
+export interface MatchableSkill {
+  name: string;
+  description: string;
+  tags?: readonly string[];
+}
 
 // Very common words carry no signal for matching; drop them so a message like
 // "how do I review the diff" matches on "review"/"diff", not "how"/"the".
@@ -59,7 +65,7 @@ export function tokenizeSkillText(text: string): string[] {
     .filter((token) => token.length >= MIN_TOKEN_LENGTH && !STOPWORDS.has(token));
 }
 
-function toTokenSet(values: string[]): Set<string> {
+function toTokenSet(values: readonly string[]): Set<string> {
   const set = new Set<string>();
   for (const value of values) {
     for (const token of tokenizeSkillText(value)) {
@@ -74,9 +80,9 @@ function toTokenSet(values: string[]): Set<string> {
  * once, at its strongest source: a tag hit outweighs a name hit outweighs a
  * description hit. Zero means the skill is irrelevant to the message.
  */
-export function scoreSkillForTokens(skill: Skill, queryTokens: Set<string>): number {
+export function scoreSkillForTokens(skill: MatchableSkill, queryTokens: Set<string>): number {
   if (queryTokens.size === 0) return 0;
-  const tagTokens = toTokenSet(skill.tags);
+  const tagTokens = toTokenSet(skill.tags ?? []);
   const nameTokens = toTokenSet([skill.name]);
   const descriptionTokens = toTokenSet([skill.description]);
   let score = 0;
@@ -108,11 +114,11 @@ export interface MatchSkillsOptions {
  * The skills relevant to `text`, most relevant first. Deterministic: ties break
  * on skill name so the order is stable across calls.
  */
-export function matchSkillsForQuery(
-  skills: Skill[],
+export function matchSkillsForQuery<T extends MatchableSkill>(
+  skills: readonly T[],
   text: string,
   options: MatchSkillsOptions = {},
-): Skill[] {
+): T[] {
   const { minScore = 1, limit = Number.POSITIVE_INFINITY } = options;
   const queryTokens = new Set(tokenizeSkillText(text));
   if (queryTokens.size === 0) return [];
@@ -127,11 +133,14 @@ export function matchSkillsForQuery(
 /**
  * Auto-load's stricter view of {@link matchSkillsForQuery}: only skills with a
  * strong relevance signal (tag/name, or repeated description overlap), capped so a
- * single message can't prepend a pile of skill preambles the user never chose.
+ * single message can't invoke a pile of skills the user never chose.
  */
 export const AUTO_LOAD_MIN_SCORE = WEIGHT_NAME; // 2 — excludes lone description words
 export const AUTO_LOAD_MAX_MATCHES = 3;
-export function matchSkillsForAutoLoad(skills: Skill[], text: string): Skill[] {
+export function matchSkillsForAutoLoad<T extends MatchableSkill>(
+  skills: readonly T[],
+  text: string,
+): T[] {
   return matchSkillsForQuery(skills, text, {
     minScore: AUTO_LOAD_MIN_SCORE,
     limit: AUTO_LOAD_MAX_MATCHES,

@@ -22,7 +22,7 @@ import { askAgentAboutResource } from "@/components/cluster-ask-agent";
 import { ClusterDraftChat } from "@/components/cluster-draft-chat";
 import { dispatchComposerAgentMessage } from "@/composer/actions";
 import { createMessageSubmissionWriter } from "@/composer/submission/writer";
-import { resolveSkillInjectedText } from "@/skills/skill-injection";
+import { prepareTurnSkills } from "@/skills/turn-skills";
 import type { ClusterComposerResource } from "@/components/cluster-composer";
 import { SidebarResizeHandle } from "@/components/sidebar-resize-handle";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
@@ -82,14 +82,18 @@ function deliverPendingAsk(
   message: string,
 ): void {
   if (!client) return;
+  const turnSkills = prepareTurnSkills({ serverId, agentId, text: message });
   void dispatchComposerAgentMessage({
     client,
     agentId,
-    text: resolveSkillInjectedText(agentId, message),
+    text: message,
     attachments: [],
     encodeImages: async () => undefined,
     submission: createMessageSubmissionWriter(serverId),
-  }).catch(() => {});
+    skillIds: turnSkills.skillIds,
+  })
+    .then(turnSkills.commit)
+    .catch(() => {});
 }
 
 /** Create the cluster agent seeded with a queued "Ask AI" question (titles it). */

@@ -1,213 +1,171 @@
+import { useEffect } from "react";
 import { create } from "zustand";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
+import type { SkillEntry, SkillWrittenPaths } from "@jagentdesk/protocol/native-skills";
 import {
-  applySkillMutation,
-  type Skill,
-  type SkillDraft,
-  type SkillMutation,
-} from "@jagentdesk/protocol/skills";
+  buildLegacyIdMap,
+  dedupeSkillEntries,
+  skillErrorMessage,
+} from "@/skills/native-skill-logic";
+import { useAgentSkillsStore } from "@/stores/agent-skills-store";
 
 /**
- * Skills are daemon-owned and protocol-synced (see packages/protocol/src/skills.ts
- * and the server SkillsStorage). This store is a thin, reactive CACHE of the
- * active host's skills: it hydrates from `skills.get`, stays live via the
- * `status:skills_changed` broadcast, and every mutation is sent to the daemon
- * through `skills.mutate`. The daemon is authoritative, so a skill's XP/level is
- * identical on desktop and mobile (previously each device kept its own local
- * copy in AsyncStorage, which is exactly why progress diverged).
+ * Reactive cache of the active host's native skill catalog (spec 22.4,
+ * ADR-0022). The daemon is the source of truth: this store hydrates from
+ * `skills.catalog.list` and refetches whenever `status:skills_changed` arrives,
+ * so desktop and mobile show the same list. Every mutation goes through the
+ * daemon RPCs (install/uninstall/set_enabled/author/learn/fork) — nothing is
+ * applied optimistically.
  *
- * Optimistic updates use the SAME reducer the daemon runs (`applySkillMutation`),
- * so the pre-broadcast state can never drift from the authoritative result.
+ * The list depends on the project: `cwd` adds that project's `project`-scope
+ * skills to the global ones. Catalogs are cached per cwd key ("" = global only).
  */
 
-// Re-export the shared types + pure helpers so existing consumers keep importing
-// them from this module unchanged.
-export {
-  levelForXp,
-  tierName,
-  levelProgress,
-  approvalRate,
-  graduationStatus,
-  skillEffectivePrompt,
-  XP_PER_LEVEL,
-  MAX_LEVEL,
-} from "@jagentdesk/protocol/skills";
-export type {
-  Skill,
-  SkillDraft,
-  SkillExample,
-  SkillStatus,
-  LearnedEntry,
-  LevelProgress,
-  ChecklistItem,
-  GraduationStatus,
-} from "@jagentdesk/protocol/skills";
+export type SkillCatalogStatus = "idle" | "loading" | "ready" | "error";
 
-interface SkillsState {
-  skills: Skill[];
-  addSkill: (draft: SkillDraft) => Skill;
-  updateSkill: (id: string, patch: Partial<SkillDraft>) => void;
-  removeSkill: (id: string) => void;
-  /** @deprecated legacy hand-typed training; replaced by learnFromMessage/proposeLearning. */
-  recordTraining: (
-    id: string,
-    input: { task: string; rating: "up" | "down"; correction?: string },
-  ) => void;
-  /**
-   * The user rated a real assistant message. 👍 captures its content as approved
-   * knowledge and awards XP; 👎 records a negative run.
-   */
-  learnFromMessage: (
-    id: string,
-    input: { content: string; rating: "up" | "down"; messageId?: string },
-  ) => void;
-  /** The agent proposed a lesson after a turn; stored pending user approval. */
-  proposeLearning: (id: string, content: string, messageId?: string) => string;
-  /** Approve (keep) or reject (drop) an agent-proposed lesson. */
-  resolveProposedLearning: (id: string, entryId: string, approve: boolean) => void;
-  graduateSkill: (id: string) => void;
+export interface SkillCatalogState {
+  skills: SkillEntry[];
+  written: SkillWrittenPaths | null;
+  status: SkillCatalogStatus;
+  error: string | null;
 }
 
-function hashString(value: string): number {
-  let hash = 0;
-  for (let i = 0; i < value.length; i += 1) {
-    hash = (hash << 5) - hash + value.charCodeAt(i);
-    hash |= 0;
-  }
-  return hash;
+interface NativeSkillsState {
+  serverId: string | null;
+  catalogs: Record<string, SkillCatalogState>;
 }
 
-function makeId(prefix = "skl"): string {
-  return `${prefix}_${Math.abs(
-    hashString(
-      `${Date.now()}:${globalThis.performance?.now?.() ?? 0}:${Math.floor(Math.random() * 1e9)}`,
-    ),
-  ).toString(36)}`;
-}
+const EMPTY_CATALOG: SkillCatalogState = {
+  skills: [],
+  written: null,
+  status: "idle",
+  error: null,
+};
 
-function baseFields(): Pick<
-  Skill,
-  "status" | "xp" | "runs" | "approvals" | "consecutiveApprovals" | "examples" | "learned"
-> {
-  return {
-    status: "training",
-    xp: 0,
-    runs: 0,
-    approvals: 0,
-    consecutiveApprovals: 0,
-    examples: [],
-    learned: [],
-  };
+export const useSkillsStore = create<NativeSkillsState>()(() => ({
+  serverId: null,
+  catalogs: {},
+}));
+
+export function catalogKey(cwd?: string | null): string {
+  return cwd?.trim() ?? "";
 }
 
 // ── Daemon sync binding ──────────────────────────────────────────────────────
 let boundClient: DaemonClient | null = null;
-let boundServerId: string | null = null;
 let unsubscribeStatus: (() => void) | null = null;
+const inFlight = new Map<string, Promise<void>>();
+
+function setCatalog(key: string, patch: Partial<SkillCatalogState>): void {
+  useSkillsStore.setState((state) => ({
+    catalogs: {
+      ...state.catalogs,
+      [key]: { ...(state.catalogs[key] ?? EMPTY_CATALOG), ...patch },
+    },
+  }));
+}
+
+/** Rewrite per-agent attachments stored with legacy JSON ids to native skillIds. */
+function migrateLegacyAttachments(skills: readonly SkillEntry[]): void {
+  const legacyMap = buildLegacyIdMap(skills);
+  if (Object.keys(legacyMap).length > 0) {
+    useAgentSkillsStore.getState().migrateLegacyIds(legacyMap);
+  }
+}
+
+async function fetchCatalog(client: DaemonClient, key: string): Promise<void> {
+  const current = useSkillsStore.getState().catalogs[key];
+  setCatalog(key, { status: current?.status === "ready" ? "ready" : "loading" });
+  try {
+    const result = await client.listNativeSkills(key ? { cwd: key } : {});
+    if (boundClient !== client) return;
+    setCatalog(key, {
+      skills: result.skills,
+      written: result.written,
+      status: "ready",
+      error: null,
+    });
+    migrateLegacyAttachments(result.skills);
+  } catch (error) {
+    if (boundClient !== client) return;
+    setCatalog(key, { status: "error", error: skillErrorMessage(error) });
+  }
+}
 
 /**
- * Point the store at a host's daemon: hydrate the cache and keep it live via the
- * `status:skills_changed` broadcast. Idempotent per (client, serverId).
+ * Load (or reload with `force`) the catalog for a cwd. Concurrent calls for the
+ * same key share one request.
+ */
+export function loadSkillCatalog(cwd?: string | null, options: { force?: boolean } = {}): void {
+  const client = boundClient;
+  if (!client) return;
+  const key = catalogKey(cwd);
+  const existing = useSkillsStore.getState().catalogs[key];
+  if (!options.force && existing && existing.status !== "idle") return;
+  if (inFlight.has(key)) return;
+  const request = fetchCatalog(client, key).finally(() => inFlight.delete(key));
+  inFlight.set(key, request);
+}
+
+/** Refetch every catalog the app has loaded (after `status:skills_changed` or a mutation). */
+export function refreshSkillCatalogs(): void {
+  const keys = Object.keys(useSkillsStore.getState().catalogs);
+  for (const key of keys.length > 0 ? keys : [""]) {
+    loadSkillCatalog(key, { force: true });
+  }
+}
+
+/**
+ * Point the store at a host's daemon: load the global catalog and keep every
+ * loaded catalog live via `status:skills_changed`. Idempotent per client.
  */
 export function bindSkillsSync(client: DaemonClient, serverId: string): void {
-  if (boundClient === client && boundServerId === serverId) {
+  if (boundClient === client && useSkillsStore.getState().serverId === serverId) {
     return;
   }
   unbindSkillsSync();
   boundClient = client;
-  boundServerId = serverId;
+  useSkillsStore.setState({ serverId, catalogs: {} });
   unsubscribeStatus = client.on("status", (message) => {
-    const payload = message.payload as { status?: string; skills?: Skill[] };
-    if (payload.status === "skills_changed" && Array.isArray(payload.skills)) {
-      useSkillsStore.setState({ skills: payload.skills });
+    const payload = message.payload as { status?: string };
+    if (payload.status === "skills_changed") {
+      refreshSkillCatalogs();
     }
   });
-  void (async () => {
-    try {
-      const { skills } = await client.getSkills();
-      if (boundClient === client) {
-        useSkillsStore.setState({ skills });
-      }
-    } catch (error) {
-      console.error("[skills] failed to load skills from daemon", error);
-    }
-  })();
+  loadSkillCatalog("");
 }
 
 export function unbindSkillsSync(): void {
   unsubscribeStatus?.();
   unsubscribeStatus = null;
   boundClient = null;
-  boundServerId = null;
+  inFlight.clear();
+  useSkillsStore.setState({ serverId: null, catalogs: {} });
 }
 
-/** Apply optimistically (shared reducer) and send to the daemon (authoritative). */
-function sendMutation(mutation: SkillMutation): void {
-  useSkillsStore.setState((state) => ({ skills: applySkillMutation(state.skills, mutation) }));
-  const client = boundClient;
-  if (!client) {
-    return;
-  }
-  void (async () => {
-    try {
-      const { skills } = await client.mutateSkills(mutation);
-      useSkillsStore.setState({ skills });
-    } catch (error) {
-      console.error("[skills] mutate failed", error);
-    }
-  })();
+// ── Selectors / hooks ────────────────────────────────────────────────────────
+export function selectSkillCatalog(cwd?: string | null) {
+  const key = catalogKey(cwd);
+  return (state: NativeSkillsState): SkillCatalogState => state.catalogs[key] ?? EMPTY_CATALOG;
 }
 
-export const useSkillsStore = create<SkillsState>()((_set) => ({
-  skills: [],
-  addSkill: (draft) => {
-    const now = Date.now();
-    const skill: Skill = {
-      id: makeId(),
-      name: draft.name.trim() || "Untitled skill",
-      icon: draft.icon?.trim() || "✦",
-      description: draft.description?.trim() ?? "",
-      instructions: draft.instructions.trim(),
-      tags: draft.tags?.filter(Boolean) ?? [],
-      ...baseFields(),
-      createdAt: now,
-      updatedAt: now,
-    };
-    sendMutation({ op: "add", skill });
-    return skill;
-  },
-  updateSkill: (id, patch) => sendMutation({ op: "update", id, patch }),
-  removeSkill: (id) => sendMutation({ op: "remove", id }),
-  recordTraining: (id, input) =>
-    sendMutation({
-      op: "train",
-      id,
-      exampleId: makeId("ex"),
-      task: input.task,
-      rating: input.rating,
-      ...(input.correction !== undefined ? { correction: input.correction } : {}),
-    }),
-  learnFromMessage: (id, input) =>
-    sendMutation({
-      op: "learn",
-      id,
-      entryId: makeId("lrn"),
-      rating: input.rating,
-      content: input.content,
-      ...(input.messageId !== undefined ? { messageId: input.messageId } : {}),
-    }),
-  proposeLearning: (id, content, messageId) => {
-    const entryId = makeId("lrn");
-    sendMutation({
-      op: "propose",
-      id,
-      entryId,
-      content,
-      ...(messageId !== undefined ? { messageId } : {}),
-    });
-    return entryId;
-  },
-  resolveProposedLearning: (id, entryId, approve) =>
-    sendMutation({ op: "resolve", id, entryId, approve }),
-  graduateSkill: (id) => sendMutation({ op: "graduate", id }),
-}));
+/** The catalog for a cwd (global when omitted); loads it on first use. */
+export function useSkillCatalog(cwd?: string | null): SkillCatalogState {
+  const key = catalogKey(cwd);
+  const catalog = useSkillsStore(selectSkillCatalog(key));
+  const serverId = useSkillsStore((state) => state.serverId);
+  useEffect(() => {
+    if (serverId) loadSkillCatalog(key);
+  }, [key, serverId]);
+  return catalog;
+}
+
+/** Every skill across the loaded catalogs (global + projects), one entry per id. */
+export function allKnownSkills(state: NativeSkillsState = useSkillsStore.getState()): SkillEntry[] {
+  const keys = Object.keys(state.catalogs).sort();
+  return dedupeSkillEntries(keys.map((key) => state.catalogs[key]?.skills ?? []));
+}
+
+export function findKnownSkill(skillId: string): SkillEntry | undefined {
+  return allKnownSkills().find((entry) => entry.skillId === skillId);
+}

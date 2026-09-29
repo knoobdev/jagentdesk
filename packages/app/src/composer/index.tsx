@@ -49,7 +49,7 @@ import {
   teamModeKey,
   useTeamModeStore,
 } from "@/composer/agent-controls/team-mode-store";
-import { resolveSkillInjectedText } from "@/skills/skill-injection";
+import { prepareTurnSkills } from "@/skills/turn-skills";
 import { ContextWindowMeter } from "@/components/context-window-meter";
 import { useImageAttachmentPicker } from "@/hooks/use-image-attachment-picker";
 import { selectAgentTurnPresentation, useSessionStore } from "@/stores/session-store";
@@ -317,7 +317,7 @@ function renderLeftContent(args: RenderLeftContentArgs): ReactElement {
         onDropdownClose={focusInput}
         isCompactLayout={isCompactLayout}
       />
-      <SkillsControl agentId={agentId} />
+      <SkillsControl agentId={agentId} serverId={serverId} />
       <AutonomousControl agentId={agentId} serverId={serverId} />
       <TeamModeControl agentId={agentId} serverId={serverId} />
     </View>
@@ -1360,10 +1360,11 @@ export function Composer({
       if (!client) {
         throw new Error(t("workspace.terminal.hostDisconnected"));
       }
+      const turnSkills = prepareTurnSkills({ serverId, agentId: targetAgentId, text });
       await dispatchComposerAgentMessage({
         client,
         agentId: targetAgentId,
-        text: resolveSkillInjectedText(targetAgentId, text),
+        text,
         attachments: sendAttachments,
         attachmentSubmitFormat: resolveComposerAttachmentSubmitFormat({
           supportsForgeAttachments: supportsForgeSearch,
@@ -1371,7 +1372,9 @@ export function Composer({
         encodeImages,
         submission: createMessageSubmissionWriter(serverId),
         activeTurnBehavior,
+        skillIds: turnSkills.skillIds,
       });
+      turnSkills.commit();
       onAttentionPromptSend?.();
     };
   }, [client, onAttentionPromptSend, serverId, supportsForgeSearch, t]);

@@ -52,6 +52,8 @@ export interface ComposerSendClient {
       images: Array<{ data: string; mimeType: string }>;
       attachments: ReturnType<typeof splitComposerAttachmentsForSubmit>["attachments"];
       activeTurnBehavior?: ActiveTurnBehavior;
+      /** Native skills to invoke on this turn (spec 22.7); the daemon adds the invocation. */
+      skillIds?: string[];
     },
   ) => Promise<void>;
   uploadFile: (input: { fileName: string; mimeType: string; bytes: Uint8Array }) => Promise<{
@@ -195,6 +197,8 @@ export interface DispatchComposerAgentMessageInput {
   submission: MessageSubmissionWriter;
   /** How to treat the message when the agent is mid-turn (see ADR-0013). */
   activeTurnBehavior?: ActiveTurnBehavior;
+  /** Native skills to invoke on this turn (spec 22.7); see prepareTurnSkills. */
+  skillIds?: string[];
 }
 
 export async function dispatchComposerAgentMessage(
@@ -219,6 +223,7 @@ export async function dispatchComposerAgentMessage(
       images: imagesData ?? [],
       attachments: wirePayload.attachments,
       ...(input.activeTurnBehavior ? { activeTurnBehavior: input.activeTurnBehavior } : {}),
+      ...(input.skillIds?.length ? { skillIds: input.skillIds } : {}),
     });
     input.submission.accept(input.agentId, clientMessageId);
   } catch (error) {

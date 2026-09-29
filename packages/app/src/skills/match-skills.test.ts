@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { matchSkillsForAutoLoad, matchSkillsForQuery } from "./match-skills";
-import type { Skill } from "@/stores/skills-store";
+import type { Skill } from "@jagentdesk/protocol/skills";
 
 function mk(partial: Partial<Skill> & Pick<Skill, "id" | "name">): Skill {
   return {

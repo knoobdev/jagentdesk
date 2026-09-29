@@ -4,10 +4,6 @@ import { Alert } from "react-native";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import { navigateToAgent } from "@/utils/navigate-to-agent";
 import { clusterChatTitle } from "@/utils/cluster-chat-title";
-import { useSkillsStore } from "@/stores/skills-store";
-import { useAgentSkillsStore } from "@/stores/agent-skills-store";
-import { matchSkillsForAutoLoad } from "@/skills/match-skills";
-import { applySkillPreamble, buildSkillsPreamble } from "@/skills/skill-injection";
 
 export interface AskAgentAboutResourceInput {
   client: DaemonClient;
@@ -41,19 +37,6 @@ export interface AskAgentAboutResourceInput {
    * slide-in dock so the k8s resources stay on screen.
    */
   onCreated?: (agent: { id: string; workspaceId: string | null }) => void;
-}
-
-/**
- * Best-effort skill injection for a message sent as the first prompt of a
- * NOT-YET-CREATED agent. Only auto-load matching (keyed off the message text)
- * can apply pre-creation; attached-skill injection is tracked per agentId, which
- * doesn't exist yet. Reads store snapshots statically so it works outside React.
- */
-function resolveAutoLoadInjectedPrompt(text: string): string {
-  if (!useAgentSkillsStore.getState().autoLoad) return text;
-  const skills = useSkillsStore.getState().skills;
-  const matched = matchSkillsForAutoLoad(skills, text);
-  return applySkillPreamble(text, buildSkillsPreamble(matched));
 }
 
 /**
@@ -118,16 +101,16 @@ export async function askAgentAboutResource(input: AskAgentAboutResourceInput): 
   const context = buildClusterSystemPrompt({ clusterId, kind, namespace, name, yaml, logs });
 
   try {
-    const trimmed = message?.trim();
-    // Inject auto-load-matched skills into the first message so cluster "Ask AI"
-    // reaches parity with the composer send path. The agent id does not exist yet,
-    // so attached-skill injection (which is tracked per agentId) can't apply here —
-    // only the auto-load matching that keys off the message text.
-    const initialPrompt = trimmed ? resolveAutoLoadInjectedPrompt(trimmed) : trimmed;
+    // The first message goes out as `initialPrompt` of the new agent. Skills are
+    // not invoked on it: native skills (spec 22.7) ride on `send_agent_message`
+    // `skillIds`, which agent creation does not carry. Follow-up messages from the
+    // cluster chat dock pass attached/auto-loaded skills as usual.
+    const initialPrompt = message?.trim();
     // Title from the first message + cluster (like a normal chat agent's auto-title,
     // but distinguishable per cluster). An explicit `title` still wins.
     const resolvedTitle =
-      title ?? (trimmed && clusterName ? clusterChatTitle(clusterName, trimmed) : undefined);
+      title ??
+      (initialPrompt && clusterName ? clusterChatTitle(clusterName, initialPrompt) : undefined);
     // Its own workspace in the project, so the chat is listed under the project.
     const home = await createDockWorkspace({ client, serverId, cwd, title: resolvedTitle });
     const agent = await client.createAgent({

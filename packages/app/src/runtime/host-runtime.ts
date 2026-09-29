@@ -78,6 +78,7 @@ import { mountBrowserAutomationDaemonClientHandler } from "@/desktop/browser/aut
 import { mountFingerprintProfileSync } from "@/desktop/browser/fingerprint-profile-sync";
 import { schedulesQueryBaseKey } from "@/schedules/aggregated-schedules";
 import { dispatchComposerAgentMessage, sendQueuedComposerMessageNow } from "@/composer/actions";
+import { prepareTurnSkills } from "@/skills/turn-skills";
 import { createMessageSubmissionWriter } from "@/composer/submission/writer";
 import { resolveComposerAttachmentSubmitFormat } from "@/composer/attachments/submit";
 import { encodeImages } from "@/utils/encode-images";
@@ -2647,6 +2648,7 @@ export class HostRuntimeStore {
       submitMessage: async ({ text, attachments }) => {
         const supportsForgeAttachments =
           useSessionStore.getState().sessions[serverId]?.serverInfo?.features?.forgeSearch === true;
+        const turnSkills = prepareTurnSkills({ serverId, agentId, text });
         await dispatchComposerAgentMessage({
           client,
           agentId,
@@ -2657,7 +2659,9 @@ export class HostRuntimeStore {
           }),
           encodeImages,
           submission: createMessageSubmissionWriter(serverId),
+          skillIds: turnSkills.skillIds,
         });
+        turnSkills.commit();
       },
     })
       .then((result) => {
