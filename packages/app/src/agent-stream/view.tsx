@@ -101,6 +101,10 @@ import {
 } from "@/workspace/file-open";
 import { navigateToWorkspace } from "@/stores/navigation-active-workspace-store";
 import { useStableEvent } from "@/hooks/use-stable-event";
+import {
+  useWindowedHistoryPagination,
+  type RemoteHistoryPagination,
+} from "./use-stream-history-window";
 import { useForkAgent } from "@/hooks/use-fork-agent";
 import { isWeb } from "@/constants/platform";
 import type { Theme } from "@/styles/theme";
@@ -209,6 +213,21 @@ function renderListEmptyComponent(input: {
   );
 }
 
+// A history row renders again only when its stream item identity, its layout item identity, or
+// the renderer changes. Without this boundary every new timeline item re-rendered all mounted
+// rows. Item identity is the revision signal: useRevisedHistoryRows clones items whose tool-call
+// group or display state changed, and layout.ts keeps unchanged layout items' identity.
+const HistoryStreamRow = memo(function HistoryStreamRow({
+  layoutItem,
+  renderStreamItem,
+}: {
+  item: StreamItem;
+  layoutItem: StreamLayoutItem;
+  renderStreamItem: (layoutItem: StreamLayoutItem) => ReactNode;
+}) {
+  return <>{renderStreamItem(layoutItem)}</>;
+});
+
 function renderHistoryStreamItem(input: {
   item: StreamItem;
   layoutItemById: Map<string, StreamLayoutItem>;
@@ -218,7 +237,13 @@ function renderHistoryStreamItem(input: {
   if (!layoutItem) {
     return null;
   }
-  return input.renderStreamItem(layoutItem);
+  return (
+    <HistoryStreamRow
+      item={input.item}
+      layoutItem={layoutItem}
+      renderStreamItem={input.renderStreamItem}
+    />
+  );
 }
 
 function renderLiveHeadStreamItem(input: {
@@ -293,6 +318,21 @@ export interface AgentStreamViewProps {
     isLoadingOlder: boolean;
     progressKey: string | null;
     onLoadOlder: () => boolean | Promise<boolean>;
+  };
+}
+
+function resolveRemoteHistoryPagination(
+  historyPagination: AgentStreamViewProps["historyPagination"],
+  agentHistoryPagination: RemoteHistoryPagination,
+): RemoteHistoryPagination {
+  if (!historyPagination) {
+    return agentHistoryPagination;
+  }
+  return {
+    isLoadingOlder: historyPagination.isLoadingOlder,
+    hasOlder: historyPagination.hasOlder,
+    progressKey: historyPagination.progressKey,
+    loadOlder: historyPagination.onLoadOlder,
   };
 }
 
@@ -395,14 +435,10 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       agentId,
       toast,
     });
-    const { isLoadingOlder, hasOlder, progressKey, loadOlder } = historyPagination
-      ? {
-          isLoadingOlder: historyPagination.isLoadingOlder,
-          hasOlder: historyPagination.hasOlder,
-          progressKey: historyPagination.progressKey,
-          loadOlder: historyPagination.onLoadOlder,
-        }
-      : agentHistoryPagination;
+    const remoteHistoryPagination = resolveRemoteHistoryPagination(
+      historyPagination,
+      agentHistoryPagination,
+    );
     // Keep entry/exit animations off on Android due to RN dispatchDraw crashes
     // tracked in react-native-reanimated#8422.
     const shouldDisableEntryExitAnimations = Platform.OS === "android";
@@ -542,6 +578,21 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       ],
     );
 
+    // Mount only the recent turns; older loaded rows are revealed locally before asking the
+    // daemon for more, so a long chat opens and switches without mounting its whole history.
+    const {
+      historyStart: historyWindowStart,
+      revealLoadedHistory,
+      loadOlder,
+      isLoadingOlder,
+      hasOlder,
+      progressKey,
+    } = useWindowedHistoryPagination({
+      agentId,
+      items: projectedToolCalls.tail,
+      remote: remoteHistoryPagination,
+    });
+
     const baseRenderModel = useMemo(() => {
       return buildAgentStreamRenderModel({
         isTurnActive,
@@ -550,8 +601,10 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         head: projectedToolCalls.head,
         platform: isWeb ? "web" : "native",
         isMobileBreakpoint: isMobile,
+        historyStart: historyWindowStart,
       });
     }, [
+      historyWindowStart,
       isMobile,
       isTurnActive,
       projectedToolCalls.head,
@@ -578,6 +631,13 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     const handleTimelineHistoryLoadError = useCallback(() => {
       toast?.error(t("agentStream.historyLoadFailed"));
     }, [t, toast]);
+    const chatFindVisibleMessageIds = useMemo(
+      () =>
+        new Set(
+          [...baseRenderModel.history, ...baseRenderModel.segments.liveHead].map((item) => item.id),
+        ),
+      [baseRenderModel.history, baseRenderModel.segments.liveHead],
+    );
     const chatOutline = useChatOutline({
       agentId,
       serverId: resolvedServerId,
@@ -587,25 +647,15 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       enabled: supportsChatOutline && chatOutlineEnabled,
       viewportRef,
       onJumpError: handleTimelineHistoryLoadError,
+      visibleMessageIds: chatFindVisibleMessageIds,
+      revealLoadedMessage: revealLoadedHistory,
     });
 
-    // Chat find addresses a message by id; a message is one loaded row here, so a
-    // visible id set and a reveal that scrolls to a loaded row are all it needs.
+    // Chat find addresses a message by id; a message is one loaded row here. Loaded rows above
+    // the history window are revealed before the viewport scrolls to them.
     const chatFindItems = useMemo(
       () => [...effectiveStreamItems, ...(effectiveStreamHead ?? EMPTY_STREAM_HEAD)],
       [effectiveStreamItems, effectiveStreamHead],
-    );
-    const chatFindVisibleMessageIds = useMemo(
-      () => new Set(chatFindItems.map((item) => item.id)),
-      [chatFindItems],
-    );
-    const revealLoadedMessage = useCallback(
-      (messageId: string) => {
-        if (!chatFindVisibleMessageIds.has(messageId)) return false;
-        viewportRef.current?.scrollToMessage?.(messageId);
-        return true;
-      },
-      [chatFindVisibleMessageIds],
     );
 
     useImperativeHandle(
@@ -792,9 +842,14 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       [context.cwd, setInlineDetailsExpanded, handleToolCallOpenFile],
     );
 
+    // Read through a stable event so live group updates do not change the renderer identity on
+    // every tick; history hosts whose group changed are revised through historyRowRevision.
+    const getToolCallGroup = useStableEvent((hostId: string) =>
+      projectedToolCalls.groupsByHostId.get(hostId),
+    );
     const renderToolCallItem = useCallback(
       (layoutItem: StreamLayoutItem, item: Extract<StreamItem, { kind: "tool_call" }>) => {
-        const group = projectedToolCalls.groupsByHostId.get(item.id);
+        const group = getToolCallGroup(item.id);
         if (!group) {
           return renderSingleToolCallItem(item, layoutItem.isLastInToolSequence);
         }
@@ -821,8 +876,8 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         );
       },
       [
-        projectedToolCalls.groupsByHostId,
         expandedToolCallGroupIds,
+        getToolCallGroup,
         renderSingleToolCallItem,
         setToolCallGroupExpanded,
       ],
@@ -1056,7 +1111,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
               epoch={timelineEpoch}
               items={chatFindItems}
               viewportRef={viewportRef}
-              revealLoadedMessage={revealLoadedMessage}
+              revealLoadedMessage={revealLoadedHistory}
               visibleMessageIds={chatFindVisibleMessageIds}
             >
               {streamRenderStrategy.render({

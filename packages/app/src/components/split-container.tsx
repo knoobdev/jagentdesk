@@ -81,6 +81,11 @@ import { RenderProfile } from "@/utils/render-profiler";
 import { workspaceTabTargetsEqual } from "@/workspace-tabs/identity";
 import { isNative } from "@/constants/platform";
 
+// An evicted chat remounts from scratch: it renders from the top, scrolls to the bottom, and
+// loses the reader's place. Hidden web chats are frozen (RetainedChatContent) and cost no
+// render work, so desktop panes keep more tabs alive than the mobile pane does.
+const SPLIT_PANE_MOUNTED_TAB_CAP = 8;
+
 interface SplitContainerProps {
   layout: WorkspaceLayout;
   workspaceKey: string;
@@ -953,7 +958,7 @@ function SplitPaneView({
     activeTabId: activeTabDescriptor?.tabId ?? null,
     allTabIds: paneTabIds,
     retainedTabIds: modifiedPaneTabIds,
-    cap: 3,
+    cap: SPLIT_PANE_MOUNTED_TAB_CAP,
   });
   const mountedPaneTabIds = useMemo(
     () => paneTabIds.filter((tabId) => mountedTabIds.has(tabId)),

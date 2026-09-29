@@ -19,8 +19,8 @@ import {
   orderWorkspaceSelectionsForStableRender,
   pruneMountedWorkspaceSelections,
   resolveWorkspaceDeckEntries,
+  resolveWorkspaceDeckRetentionLimit,
   shouldKeepWorkspaceDeckEntryMounted,
-  WORKSPACE_DECK_MAX_MOUNTED_WORKSPACES,
 } from "@/screens/workspace/workspace-deck-retention";
 import {
   decodeWorkspaceIdFromPathSegment,
@@ -32,7 +32,7 @@ import {
   stripHostWorkspaceRouteEchoSearchFromBrowserUrlAfterCommit,
 } from "@/utils/host-route-browser";
 import { prepareWorkspaceTab } from "@/utils/workspace-navigation";
-import { isWeb } from "@/constants/platform";
+import { isNative, isWeb } from "@/constants/platform";
 
 function getParamValue(value: string | string[] | undefined): string {
   if (typeof value === "string") {
@@ -227,7 +227,7 @@ function WorkspaceDeck({
       pruneMountedWorkspaceSelections({
         currentSelections: mountedSelections,
         activeSelection,
-        maxMountedWorkspaces: WORKSPACE_DECK_MAX_MOUNTED_WORKSPACES,
+        maxMountedWorkspaces: resolveWorkspaceDeckRetentionLimit({ isNative }),
       }),
     [activeSelection, mountedSelections],
   );

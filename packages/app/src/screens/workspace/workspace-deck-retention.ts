@@ -2,6 +2,12 @@ import type { ActiveWorkspaceSelection } from "@/stores/navigation-active-worksp
 
 export const WORKSPACE_DECK_MAX_MOUNTED_WORKSPACES = 3;
 
+// Native keeps only the active workspace mounted: retained native trees keep rendering (no freeze
+// on native) and their Hermes/Fabric cost grew with every workspace visited.
+export function resolveWorkspaceDeckRetentionLimit(input: { isNative: boolean }): number {
+  return input.isNative ? 1 : WORKSPACE_DECK_MAX_MOUNTED_WORKSPACES;
+}
+
 interface PruneMountedWorkspaceSelectionsInput {
   currentSelections: ActiveWorkspaceSelection[];
   activeSelection: ActiveWorkspaceSelection | null;

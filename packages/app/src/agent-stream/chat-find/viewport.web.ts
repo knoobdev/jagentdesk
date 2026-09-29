@@ -2,6 +2,8 @@ import type { ChatFindOperations } from "./model";
 import type { ChatFindProps } from "./types";
 import { findMessageMatches, findMessageRows, findRenderedMatches } from "./ranges.web";
 
+const RESCROLL_INTERVAL_MS = 250;
+
 interface ViewportInput {
   getBindings(): Pick<ChatFindProps, "viewportRef" | "revealLoadedMessage" | "visibleMessageIds">;
   getRoot(): HTMLElement | null;
@@ -26,7 +28,7 @@ export function createFindViewport({
     reveal(messageId, query, occurrence, signal) {
       return new Promise((resolve, reject) => {
         let frame = 0;
-        let started = false;
+        let lastScrollAt: number | null = null;
         const deadline = performance.now() + 5000;
         const cleanup = () => {
           cancelAnimationFrame(frame);
@@ -52,9 +54,13 @@ export function createFindViewport({
             frame = requestAnimationFrame(poll);
             return;
           }
-          if (!started) {
+          // A virtualized row mounts only after the viewport reaches it, and a history reveal or
+          // prepend anchor restore in the same frames can move the viewport away again, so the
+          // scroll is re-issued until the row is on screen.
+          const now = performance.now();
+          if (lastScrollAt === null || now - lastScrollAt >= RESCROLL_INTERVAL_MS) {
             current.viewportRef.current?.scrollToMessage?.(messageId);
-            started = true;
+            lastScrollAt = now;
           }
           const rows = findMessageRows(getRoot(), messageId);
           if (!rows.some((row) => row.getBoundingClientRect().height)) {

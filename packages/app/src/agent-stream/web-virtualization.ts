@@ -1,13 +1,17 @@
 import type { StreamItem } from "@/types/stream";
 import { estimateAssistantMessageHeightFromCache } from "@/utils/assistant-message-height-estimate";
+import {
+  DEFAULT_MOUNTED_RECENT_STREAM_ITEMS,
+  findMountedWindowStart,
+  getMountedRecentStreamItems,
+} from "./history-window";
 
 export const DEFAULT_WEB_PARTIAL_VIRTUALIZATION_THRESHOLD = 100;
-export const DEFAULT_WEB_MOUNTED_RECENT_STREAM_ITEMS = 50;
+export const DEFAULT_WEB_MOUNTED_RECENT_STREAM_ITEMS = DEFAULT_MOUNTED_RECENT_STREAM_ITEMS;
 const COLLAPSED_TOOL_SEQUENCE_ROW_HEIGHT_ESTIMATE = 40;
 
 type BottomAnchorE2ETestGlobals = typeof globalThis & {
   __JAGENTDESK_E2E_WEB_PARTIAL_VIRTUALIZATION_THRESHOLD?: unknown;
-  __JAGENTDESK_E2E_WEB_MOUNTED_RECENT_STREAM_ITEMS?: unknown;
 };
 
 function readPositiveIntegerOverride(value: unknown): number | null {
@@ -27,10 +31,7 @@ export function getWebPartialVirtualizationThreshold(): number {
 }
 
 export function getWebMountedRecentStreamItems(): number {
-  const override = readPositiveIntegerOverride(
-    (globalThis as BottomAnchorE2ETestGlobals).__JAGENTDESK_E2E_WEB_MOUNTED_RECENT_STREAM_ITEMS,
-  );
-  return override ?? DEFAULT_WEB_MOUNTED_RECENT_STREAM_ITEMS;
+  return getMountedRecentStreamItems();
 }
 
 export interface IndexedStreamItem {
@@ -64,21 +65,7 @@ export function estimateStreamItemHeight(item: StreamItem): number {
   }
 }
 
-export function findMountedWindowStart(input: {
-  items: StreamItem[];
-  minMountedCount: number;
-}): number {
-  const { items, minMountedCount } = input;
-  if (items.length <= minMountedCount) {
-    return 0;
-  }
-
-  let startIndex = Math.max(items.length - minMountedCount, 0);
-  while (startIndex > 0 && items[startIndex]?.kind !== "user_message") {
-    startIndex -= 1;
-  }
-  return startIndex;
-}
+export { findMountedWindowStart };
 
 export function splitWebVirtualizedHistory(input: {
   entries: IndexedStreamItem[];

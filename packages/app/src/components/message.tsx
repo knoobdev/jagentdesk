@@ -77,7 +77,7 @@ import { HighlightedCodeBlock } from "@/components/highlighted-code-block";
 import { MarkdownFenceBlock } from "@/components/markdown/fence";
 import type { MarkdownPhase } from "@/components/markdown/fence/types";
 import { splitMarkdownBlocks } from "@/utils/split-markdown-blocks";
-import { createAssistantMarkdownParser } from "@/utils/assistant-markdown-parser";
+import { getSharedAssistantMarkdownParser } from "@/utils/assistant-markdown-parser";
 import { formatDuration, formatMessageTimestamp } from "@/utils/time";
 import { writeMarkdownToRichClipboard } from "@/utils/rich-clipboard";
 import { getDefaultMarkdownClipboardEnvironment } from "@/utils/rich-clipboard-default-environment";
@@ -117,6 +117,7 @@ import {
   markdownCopyTableCellDataSet,
   type MarkdownCopyInlineTag,
 } from "@/assistant-selection-copy/markup";
+import { capAssistantMessageForRender, getUtf8ByteLength } from "./assistant-message-render-limit";
 export type { InlinePathTarget } from "@/assistant-file-links";
 export type { AssistantForkTarget };
 
@@ -838,6 +839,13 @@ export const assistantMessageStylesheet = StyleSheet.create((theme) => ({
   },
   containerCompactBottom: {
     paddingBottom: 0,
+  },
+  cappedNotice: {
+    marginTop: theme.spacing[3],
+    fontFamily: theme.fontFamily.ui,
+    fontSize: theme.fontSize.base,
+    fontStyle: "italic",
+    color: theme.colors.foregroundMuted,
   },
   imageFrame: {
     width: "100%",
@@ -1564,13 +1572,18 @@ export const AssistantMessage = memo(function AssistantMessage({
   spacing = "default",
   phase,
 }: AssistantMessageProps) {
-  const markdownParser = useMemo(createAssistantMarkdownParser, []);
+  const { t } = useTranslation();
+  const markdownParser = getSharedAssistantMarkdownParser();
+  // One assistant message can expand into enough Markdown nodes to crash the renderer. Render a
+  // bounded prefix; the timeline keeps the full text.
+  const renderedMessage = useMemo(() => capAssistantMessageForRender(message), [message]);
+  const fullMessageByteLength = useMemo(
+    () => (renderedMessage.capped && phase === "complete" ? getUtf8ByteLength(message) : null),
+    [message, phase, renderedMessage.capped],
+  );
   // A second parser that treats unfinished formatting at the growing tail as provisional, so markdown
   // delimiters/link destinations don't flash while the last block is still streaming in.
-  const streamingMarkdownParser = useMemo(
-    () => createAssistantMarkdownParser({ streaming: true }),
-    [],
-  );
+  const streamingMarkdownParser = getSharedAssistantMarkdownParser({ streaming: true });
 
   const fileLinkActions = useAssistantFileLinkActions();
   const handleMarkdownLinkPress = useStableEvent((url: string) => {
@@ -2015,7 +2028,7 @@ export const AssistantMessage = memo(function AssistantMessage({
     };
   }, [client, fileLinkActions, markdownParser, occurrenceKey, phase, serverId, workspaceRoot]);
 
-  const blocks = useMemo(() => splitMarkdownBlocks(message), [message]);
+  const blocks = useMemo(() => splitMarkdownBlocks(renderedMessage.text), [renderedMessage.text]);
   const keyedBlocks = useMemo(
     () => blocks.map((block, index) => ({ key: `block:${index}`, block })),
     [blocks],
@@ -2052,6 +2065,14 @@ export const AssistantMessage = memo(function AssistantMessage({
           />
         </AssistantMessageBlockContainer>
       ))}
+      {fullMessageByteLength !== null ? (
+        <Text
+          testID="assistant-message-capped-notice"
+          style={assistantMessageStylesheet.cappedNotice}
+        >
+          {t("agentStream.messageCapped", { bytes: fullMessageByteLength })}
+        </Text>
+      ) : null}
     </View>
   );
 });

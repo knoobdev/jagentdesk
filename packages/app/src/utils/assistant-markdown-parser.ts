@@ -20,3 +20,19 @@ export function createAssistantMarkdownParser({ streaming = false } = {}): Markd
 
   return parser;
 }
+
+const sharedAssistantMarkdownParsers: { regular?: MarkdownIt; streaming?: MarkdownIt } = {};
+
+// Parsing keeps all per-document state in the parse call, so every assistant message can share one
+// instance per mode. Building MarkdownIt and LinkifyIt per mounted message cost ~10 ms each, which
+// made mounting a page of older history stall the frame.
+export function getSharedAssistantMarkdownParser({ streaming = false } = {}): MarkdownIt {
+  const key = streaming ? "streaming" : "regular";
+  const existing = sharedAssistantMarkdownParsers[key];
+  if (existing) {
+    return existing;
+  }
+  const parser = createAssistantMarkdownParser({ streaming });
+  sharedAssistantMarkdownParsers[key] = parser;
+  return parser;
+}

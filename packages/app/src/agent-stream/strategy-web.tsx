@@ -13,6 +13,7 @@ import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { useStableEvent } from "@/hooks/use-stable-event";
 import type { Theme } from "@/styles/theme";
 import { estimateStreamItemHeight } from "./web-virtualization";
+import { useRevisedHistoryRows } from "./history-row-revision";
 import type { StreamRenderInput, StreamStrategy, StreamViewportHandle } from "./strategy";
 import { createStreamStrategy } from "./strategy";
 import {
@@ -142,7 +143,8 @@ function isScrollContainerOverscrolledPastBottom(
 
 function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: boolean }) {
   const {
-    segments,
+    segments: inputSegments,
+    historyRowRevision,
     liveHeadRowRevision,
     boundary,
     renderers,
@@ -159,6 +161,24 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
     scrollEnabled,
     isMobileBreakpoint,
   } = props;
+  // History rows are memoized on item identity (HistoryStreamRow in view.tsx), so rows whose
+  // tool-call group or display state changed must arrive as fresh identities.
+  const revisedHistoryVirtualized = useRevisedHistoryRows(
+    inputSegments.historyVirtualized,
+    historyRowRevision,
+  );
+  const revisedHistoryMounted = useRevisedHistoryRows(
+    inputSegments.historyMounted,
+    historyRowRevision,
+  );
+  const segments = useMemo(
+    () => ({
+      ...inputSegments,
+      historyVirtualized: revisedHistoryVirtualized,
+      historyMounted: revisedHistoryMounted,
+    }),
+    [inputSegments, revisedHistoryMounted, revisedHistoryVirtualized],
+  );
   const scrollContainerRef = useRef<HTMLElement | null>(null);
   const contentRef = useRef<HTMLElement | null>(null);
   const handleScrollContainerRef = useCallback((node: HTMLElement | null) => {
@@ -202,15 +222,27 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
   const activationKey = routeBottomAnchorRequest?.requestKey ?? props.agentId;
   const isActivationReady = !hasRouteBottomAnchorRequest || isAuthoritativeHistoryReady;
 
-  const rowVirtualizer = useVirtualizer({
-    count: segments.historyVirtualized.length,
-    enabled: shouldUseVirtualizer,
-    getScrollElement: () => scrollContainerRef.current,
-    getItemKey: (index: number) => segments.historyVirtualized[index]?.id ?? index,
-    estimateSize: (index: number) => {
-      const row = segments.historyVirtualized[index];
+  // TanStack memoizes its measurement pass on getItemKey identity. Inline callbacks re-ran
+  // estimateSize over the whole virtualized history on every streamed token, so they stay stable
+  // until the history slice itself changes.
+  const historyVirtualized = segments.historyVirtualized;
+  const getVirtualItemKey = useCallback(
+    (index: number) => historyVirtualized[index]?.id ?? index,
+    [historyVirtualized],
+  );
+  const estimateVirtualItemSize = useCallback(
+    (index: number) => {
+      const row = historyVirtualized[index];
       return row ? estimateStreamItemHeight(row) : 120;
     },
+    [historyVirtualized],
+  );
+  const rowVirtualizer = useVirtualizer({
+    count: historyVirtualized.length,
+    enabled: shouldUseVirtualizer,
+    getScrollElement: () => scrollContainerRef.current,
+    getItemKey: getVirtualItemKey,
+    estimateSize: estimateVirtualItemSize,
     measureElement: measureVirtualElement,
     scrollMargin: VIRTUALIZER_SCROLL_MARGIN_PX,
     useAnimationFrameWithResizeObserver: true,

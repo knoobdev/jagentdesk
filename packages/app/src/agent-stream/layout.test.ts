@@ -449,4 +449,20 @@ describe("layoutStream", () => {
       expect(footerOwners(layout)).toEqual([]);
     },
   );
+  it("keeps layout item identity for rows whose layout did not change", () => {
+    const user = userMessage("u1", 1);
+    const first = toolCall("tool-1", 2);
+    const second = toolCall("tool-2", 3);
+    const before = layoutFor({ platform: "android", tail: [user, first, second] });
+
+    const third = toolCall("tool-3", 4);
+    const after = layoutFor({ platform: "android", tail: [user, first, second, third] });
+
+    // A newest-first list shifts every index, but only the rows next to the insertion change.
+    expect(findLayoutItem(after, user.id)).toBe(findLayoutItem(before, user.id));
+    expect(findLayoutItem(after, first.id)).toBe(findLayoutItem(before, first.id));
+    expect(findLayoutItem(after, second.id)).not.toBe(findLayoutItem(before, second.id));
+    expect(findLayoutItem(after, second.id).isLastInToolSequence).toBe(false);
+    expect(findLayoutItem(after, third.id).isLastInToolSequence).toBe(true);
+  });
 });

@@ -14,8 +14,6 @@ export interface TurnFooterHost {
 
 export interface StreamLayoutItem {
   item: StreamItem;
-  index: number;
-  items: StreamItem[];
   aboveItem: StreamItem | null;
   belowItem: StreamItem | null;
   gapBelow: number;
@@ -226,6 +224,51 @@ function getSegmentNeighbor(input: {
   return null;
 }
 
+// Last layout emitted for each stream item. A history row renders again only when its layout
+// item identity changes (HistoryStreamRow in view.tsx), so an item whose render-relevant layout is
+// unchanged keeps its previous object even when the surrounding array was rebuilt.
+const previousLayoutItemByStreamItem = new WeakMap<StreamItem, StreamLayoutItem>();
+
+function areTurnFooterHostsEqual(
+  left: TurnFooterHost | null,
+  right: TurnFooterHost | null,
+): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return (
+    left.itemId === right.itemId &&
+    left.timing === right.timing &&
+    left.startIndex === right.startIndex &&
+    left.items === right.items
+  );
+}
+
+function areLayoutItemsEquivalent(previous: StreamLayoutItem, next: StreamLayoutItem): boolean {
+  return (
+    previous.item === next.item &&
+    previous.aboveItem === next.aboveItem &&
+    previous.belowItem === next.belowItem &&
+    previous.gapBelow === next.gapBelow &&
+    previous.assistantSpacing === next.assistantSpacing &&
+    areTurnFooterHostsEqual(previous.completedFooter, next.completedFooter) &&
+    previous.toolSequence === next.toolSequence &&
+    previous.isFirstInUserGroup === next.isFirstInUserGroup &&
+    previous.isLastInUserGroup === next.isLastInUserGroup &&
+    previous.isLastInToolSequence === next.isLastInToolSequence &&
+    previous.frameOrder === next.frameOrder &&
+    previous.phase === next.phase
+  );
+}
+
+function shareLayoutItem(next: StreamLayoutItem): StreamLayoutItem {
+  const previous = previousLayoutItemByStreamItem.get(next.item);
+  if (previous && areLayoutItemsEquivalent(previous, next)) {
+    return previous;
+  }
+  previousLayoutItemByStreamItem.set(next.item, next);
+  return next;
+}
+
 function layoutSegment(input: LayoutSegmentInput): StreamLayoutItem[] {
   return input.items.map((item, index) => {
     const aboveItem = getSegmentNeighbor({
@@ -261,10 +304,8 @@ function layoutSegment(input: LayoutSegmentInput): StreamLayoutItem[] {
       boundaryAboveIndex: input.boundaryAboveIndex,
     });
 
-    return {
+    return shareLayoutItem({
       item,
-      index,
-      items: input.items,
       aboveItem,
       belowItem,
       gapBelow: completedFooter ? 0 : getGapBetweenStreamItems(item, belowItem),
@@ -276,7 +317,7 @@ function layoutSegment(input: LayoutSegmentInput): StreamLayoutItem[] {
       isLastInToolSequence: isToolSequenceItem(item) && !isToolSequenceItem(belowItem),
       frameOrder: input.frameOrder,
       phase: input.phase,
-    };
+    });
   });
 }
 

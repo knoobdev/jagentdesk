@@ -25,6 +25,7 @@ import { AgentStreamView, type AgentStreamViewHandle } from "@/agent-stream/view
 import { ArchivedAgentCallout } from "@/components/archived-agent-callout";
 import { FileDropZone } from "@/components/file-drop/file-drop-zone";
 import { useRetainedPanelActive } from "@/components/retained-panel";
+import { RetainedChatContent } from "./retained-chat-content";
 import { SidebarCallout } from "@/components/sidebar-callout";
 import { Composer } from "@/composer";
 import { AgentSkillTrainBar } from "@/components/agent-skill-train-bar";
@@ -360,16 +361,18 @@ function AgentPanel() {
   invariant(target.kind === "agent", "AgentPanel requires agent target");
 
   return (
-    <View style={animatedStaticStyles.panelContainer}>
-      <AgentPanelContent
-        serverId={serverId}
-        workspaceId={workspaceId}
-        agentId={target.agentId}
-        isPaneFocused={isInteractive}
-        onOpenWorkspaceFile={openFileInWorkspace}
-      />
-      <AgentSkillTrainBar serverId={serverId} agentId={target.agentId} />
-    </View>
+    <RetainedChatContent>
+      <View style={animatedStaticStyles.panelContainer}>
+        <AgentPanelContent
+          serverId={serverId}
+          workspaceId={workspaceId}
+          agentId={target.agentId}
+          isPaneFocused={isInteractive}
+          onOpenWorkspaceFile={openFileInWorkspace}
+        />
+        <AgentSkillTrainBar serverId={serverId} agentId={target.agentId} />
+      </View>
+    </RetainedChatContent>
   );
 }
 

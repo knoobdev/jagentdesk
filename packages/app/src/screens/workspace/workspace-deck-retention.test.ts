@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { ActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
 import {
+  resolveWorkspaceDeckRetentionLimit,
   orderWorkspaceSelectionsForStableRender,
   pruneMountedWorkspaceSelections,
   resolveWorkspaceDeckEntries,
   shouldKeepWorkspaceDeckEntryMounted,
+  WORKSPACE_DECK_MAX_MOUNTED_WORKSPACES,
 } from "@/screens/workspace/workspace-deck-retention";
 
 function workspace(workspaceId: string, serverId = "server"): ActiveWorkspaceSelection {
@@ -16,6 +18,22 @@ function mountedWorkspaceIds(selections: ActiveWorkspaceSelection[]): string[] {
 }
 
 describe("pruneMountedWorkspaceSelections", () => {
+  it("retains only the active workspace on native", () => {
+    const selections = pruneMountedWorkspaceSelections({
+      currentSelections: [workspace("A")],
+      activeSelection: workspace("B"),
+      maxMountedWorkspaces: resolveWorkspaceDeckRetentionLimit({ isNative: true }),
+    });
+
+    expect(mountedWorkspaceIds(selections)).toEqual(["B"]);
+  });
+
+  it("keeps the desktop deck limit on web", () => {
+    expect(resolveWorkspaceDeckRetentionLimit({ isNative: false })).toBe(
+      WORKSPACE_DECK_MAX_MOUNTED_WORKSPACES,
+    );
+  });
+
   it("retains the deck while an app-wide route temporarily clears the active workspace", () => {
     const mountedSelections = [workspace("A"), workspace("B")];
 
