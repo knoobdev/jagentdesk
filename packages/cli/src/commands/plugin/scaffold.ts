@@ -73,6 +73,8 @@ export async function scaffoldPluginDirectory(
     name: id,
     private: true,
     version: "0.0.0",
+    // Publishing an npm plugin package ships only what the host loads.
+    files: ["jagentdesk-plugin.json", "index.ts", "main.client.tsx"],
     scripts: { typecheck: "tsc --noEmit" },
     devDependencies: {
       "@jagentdesk/plugin": resolveCliVersion(),

@@ -75,9 +75,9 @@ describe("canonical CLI surface", () => {
     expect(plugin?.commands.map((command) => command.name())).toEqual([
       "init",
       "ls",
+      "status",
       "logs",
       "install",
-      "status",
       "update",
       "reload",
       "enable",

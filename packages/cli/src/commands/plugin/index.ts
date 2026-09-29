@@ -1,14 +1,31 @@
+import { createInterface } from "node:readline/promises";
 import { Command } from "commander";
 import type { PluginListItem, PluginLogEntry } from "@jagentdesk/protocol/messages";
+import {
+  formatPluginIdentity,
+  formatPluginSourceReference,
+} from "@jagentdesk/protocol/plugin-source-reference";
 import type { CommandOptions, ListResult, OutputSchema, SingleResult } from "../../output/index.js";
 import { withOutput } from "../../output/index.js";
 import { addJsonAndDaemonHostOptions, addJsonOption } from "../../utils/command-options.js";
 import { scaffoldPluginDirectory, type PluginScaffold } from "./scaffold.js";
-import { withPluginLogsClient, withPluginManagementClient } from "./shared.js";
+import {
+  withPluginLogsClient,
+  withPluginManagementClient,
+  withPluginSourceClient,
+  withPluginUpdateClient,
+} from "./shared.js";
+import { reviewPluginUpdates, type UpdateOutcome } from "./update.js";
 
 interface PluginOptions extends CommandOptions {
   host?: string;
   id?: string;
+  ref?: string;
+  path?: string;
+  all?: boolean;
+  version?: string;
+  check?: boolean;
+  yes?: boolean;
 }
 
 const pluginSchema: OutputSchema<PluginListItem> = {
@@ -17,6 +34,17 @@ const pluginSchema: OutputSchema<PluginListItem> = {
     { header: "PLUGIN", field: "id", width: 20 },
     { header: "STATUS", field: "status", width: 10 },
     { header: "ENABLED", field: (plugin) => (plugin.enabled ? "yes" : "no"), width: 8 },
+    {
+      header: "SOURCE",
+      field: (plugin) =>
+        plugin.installation ? formatPluginIdentity(plugin.installation.identity) : "-",
+      width: 40,
+    },
+    {
+      header: "REVISION",
+      field: (plugin) => plugin.installation?.currentRevision ?? "-",
+      width: 16,
+    },
     { header: "DIRECTORY", field: "path", width: 40 },
     { header: "ERROR", field: (plugin) => plugin.error ?? "", width: 40 },
   ],
@@ -39,6 +67,20 @@ const pluginLogsSchema: OutputSchema<PluginLogEntry> = {
   ],
 };
 
+const pluginUpdateSchema: OutputSchema<UpdateOutcome> = {
+  idField: "id",
+  columns: [
+    { header: "PLUGIN", field: "id", width: 24 },
+    { header: "RESULT", field: "outcome", width: 18 },
+    {
+      header: "DETAIL",
+      field: (item) =>
+        item.error ?? item.warning ?? item.plugin?.installation?.currentRevision ?? "",
+      width: 50,
+    },
+  ],
+};
+
 export async function runPluginInitCommand(
   directory: string,
   options: PluginOptions,
@@ -52,10 +94,13 @@ export async function runPluginInitCommand(
 }
 
 export async function runPluginListCommand(
+  pluginId: string | undefined,
   options: PluginOptions,
   _command: Command,
 ): Promise<ListResult<PluginListItem>> {
-  const data = await withPluginManagementClient(options.host, (client) => client.listPlugins());
+  const plugins = await withPluginManagementClient(options.host, (client) => client.listPlugins());
+  const data = pluginId ? plugins.filter((plugin) => plugin.id === pluginId) : plugins;
+  if (pluginId && data.length === 0) throw new Error(`Plugin is not configured: ${pluginId}`);
   return { type: "list", data, schema: pluginSchema };
 }
 
@@ -68,15 +113,62 @@ export async function runPluginLogsCommand(
   return { type: "list", data, schema: pluginLogsSchema };
 }
 
-async function install(
-  directory: string,
+export async function runPluginInstallCommand(
+  source: string,
   options: PluginOptions,
   _command: Command,
 ): Promise<SingleResult<PluginListItem>> {
-  const data = await withPluginManagementClient(options.host, (client) =>
-    client.installDirectoryPlugin(directory, options.id),
+  process.stderr.write(
+    "Trusting plugin code: server code and preparation commands run unsandboxed on the daemon host; client code runs inside JAgentDesk. Dependencies and future updates are part of the codebase you trust.\n",
+  );
+  const sourceReference = formatPluginSourceReference(source, options.path);
+  const data = await withPluginSourceClient(options.host, (client) =>
+    client.installSourcePlugin(sourceReference, {
+      ...(options.id ? { id: options.id } : {}),
+      ...(options.ref ? { ref: options.ref } : {}),
+    }),
   );
   return { type: "single", data, schema: pluginSchema };
+}
+
+function isStructuredOutput(options: PluginOptions, command: Command | undefined): boolean {
+  // withOutput hands the handler local options only; --format/--json may be global.
+  const merged: PluginOptions = {
+    ...(typeof command?.optsWithGlobals === "function" ? command.optsWithGlobals() : {}),
+    ...options,
+  };
+  const format = typeof merged.format === "string" ? merged.format.trim().toLowerCase() : "";
+  return merged.json === true || format === "json" || format === "yaml";
+}
+
+export async function runPluginUpdateCommand(
+  pluginId: string | undefined,
+  options: PluginOptions,
+  command: Command,
+): Promise<ListResult<UpdateOutcome>> {
+  const data = await withPluginUpdateClient(options.host, (client) =>
+    reviewPluginUpdates(
+      client,
+      { ...options, pluginId },
+      {
+        interactive: process.stdin.isTTY === true,
+        structured: isStructuredOutput(options, command),
+        write: (text) => process.stderr.write(text),
+        confirm: async (message) => {
+          const prompt = createInterface({ input: process.stdin, output: process.stderr });
+          try {
+            return /^(y|yes)$/i.test((await prompt.question(message)).trim());
+          } catch {
+            return false;
+          } finally {
+            prompt.close();
+          }
+        },
+      },
+    ),
+  );
+  if (data.some((item) => item.outcome === "error")) process.exitCode = 1;
+  return { type: "list", data, schema: pluginUpdateSchema };
 }
 
 async function act(
@@ -105,7 +197,7 @@ async function remove(
 }
 
 export function createPluginCommand(): Command {
-  const plugin = new Command("plugin").description("Manage trusted local plugins");
+  const plugin = new Command("plugin").description("Manage trusted, unsandboxed plugins");
   addJsonOption(
     plugin
       .command("init")
@@ -113,7 +205,10 @@ export function createPluginCommand(): Command {
       .argument("<directory>")
       .option("--id <id>", "Manifest plugin ID (defaults to the directory name)"),
   ).action(withOutput(runPluginInitCommand));
-  addJsonAndDaemonHostOptions(plugin.command("ls").description("List configured plugins")).action(
+  addJsonAndDaemonHostOptions(
+    plugin.command("ls").description("List configured plugins").argument("[id]"),
+  ).action(withOutput(runPluginListCommand));
+  addJsonAndDaemonHostOptions(plugin.command("status", { hidden: true }).argument("[id]")).action(
     withOutput(runPluginListCommand),
   );
   addJsonAndDaemonHostOptions(
@@ -122,13 +217,30 @@ export function createPluginCommand(): Command {
   addJsonAndDaemonHostOptions(
     plugin
       .command("install")
-      .description("Install a local plugin directory")
-      .argument("<directory>", "Host filesystem directory")
-      .option("--id <id>", "Runtime plugin ID (defaults to jagentdesk-plugin.json id)"),
-  ).action(withOutput(install));
+      .alias("add")
+      .description("Trust and install a plugin from a directory, Git repository, or npm package")
+      .argument(
+        "<source>",
+        "Host directory, Git or npm source, optionally followed by :plugin/path",
+      )
+      .option("--id <id>", "Runtime plugin ID (defaults to jagentdesk-plugin.json id)")
+      .option("--ref <ref>", "Git branch, tag, or commit")
+      .option("--path <path>", "Legacy form of the :plugin/path source suffix"),
+  ).action(withOutput(runPluginInstallCommand));
+  addJsonAndDaemonHostOptions(
+    plugin
+      .command("update")
+      .description("Review and update installed plugins")
+      .argument("[id]")
+      .option("--all", "Review all configured plugins")
+      .option("--check", "Show available updates without installing")
+      .option("--yes", "Apply displayed updates without asking")
+      .option("--ref <ref>", "Apply a Git branch, tag, or commit without asking")
+      .option("--version <version>", "Apply an npm version, tag, or range without asking"),
+  ).action(withOutput(runPluginUpdateCommand));
   for (const action of ["reload", "enable", "disable"] as const) {
     addJsonAndDaemonHostOptions(
-      plugin.command(action).description(`${action} a local plugin`).argument("<id>"),
+      plugin.command(action).description(`${action} a plugin`).argument("<id>"),
     ).action(
       withOutput((id: string, options: PluginOptions, _command: Command) =>
         act(action, id, options),

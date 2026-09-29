@@ -2,7 +2,11 @@ import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import type { CommandError } from "../../output/index.js";
 import { connectToDaemon } from "../../utils/client.js";
 
-type PluginFeature = "pluginManagement" | "pluginLogs";
+type PluginFeature =
+  | "pluginManagement"
+  | "pluginLogs"
+  | "pluginSourceUpdates"
+  | "pluginSourceInstallation";
 
 async function withPluginClient<T>(
   host: string | undefined,
@@ -44,4 +48,30 @@ export async function withPluginLogsClient<T>(
 ): Promise<T> {
   // COMPAT(pluginLogs): added in v0.4.0, remove gate after 2027-08-16.
   return withPluginClient(host, "pluginLogs", "Update the host to view plugin logs.", run);
+}
+
+export async function withPluginSourceClient<T>(
+  host: string | undefined,
+  run: (client: DaemonClient) => Promise<T>,
+): Promise<T> {
+  // COMPAT(pluginSourceInstallation): added in v0.8.0; remove gate after 2027-03-16 once daemon floor supports source identifiers.
+  return withPluginClient(
+    host,
+    "pluginSourceInstallation",
+    "Update the host to install plugin sources.",
+    run,
+  );
+}
+
+export async function withPluginUpdateClient<T>(
+  host: string | undefined,
+  run: (client: DaemonClient) => Promise<T>,
+): Promise<T> {
+  // COMPAT(pluginSourceUpdates): added in v0.8.0; remove after 2027-03-16 once daemon floor supports reviewed updates.
+  return withPluginClient(
+    host,
+    "pluginSourceUpdates",
+    "Update the host to review plugin updates.",
+    run,
+  );
 }
