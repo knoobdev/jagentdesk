@@ -929,7 +929,9 @@ describe("project command-center RPCs", () => {
   });
 
   test("creates a directory and returns its normalized Project descriptor", async () => {
-    const parentDirectory = realpathSync(mkdtempSync(join(tmpdir(), "jagentdesk-project-session-")));
+    const parentDirectory = realpathSync(
+      mkdtempSync(join(tmpdir(), "jagentdesk-project-session-")),
+    );
     const directoryPath = join(parentDirectory, "new-project");
     const messages: SessionOutboundMessage[] = [];
     const projectAllocation = vi.fn(async (input) =>
@@ -1007,7 +1009,9 @@ describe("project command-center RPCs", () => {
   });
 
   test("rolls back the directory when Project registration fails", async () => {
-    const parentDirectory = realpathSync(mkdtempSync(join(tmpdir(), "jagentdesk-project-session-")));
+    const parentDirectory = realpathSync(
+      mkdtempSync(join(tmpdir(), "jagentdesk-project-session-")),
+    );
     const directoryPath = join(parentDirectory, "unregistered");
     const messages: SessionOutboundMessage[] = [];
     const session = createSessionForTest({
@@ -1513,7 +1517,10 @@ describe("project config RPC authorization", () => {
 
   test("read_project_config_request accepts the same root with a trailing slash", async () => {
     const repoRoot = makeRoot();
-    writeFileSync(join(repoRoot, "jagentdesk.json"), JSON.stringify({ worktree: { setup: "npm ci" } }));
+    writeFileSync(
+      join(repoRoot, "jagentdesk.json"),
+      JSON.stringify({ worktree: { setup: "npm ci" } }),
+    );
     const messages: unknown[] = [];
     const session = createSessionForTest({
       messages,
@@ -1667,7 +1674,10 @@ describe("project config RPC authorization", () => {
 
   test("write_project_config_request emits stale and write-failed inline domain failures", async () => {
     const staleRoot = makeRoot();
-    writeFileSync(join(staleRoot, "jagentdesk.json"), JSON.stringify({ worktree: { setup: "old" } }));
+    writeFileSync(
+      join(staleRoot, "jagentdesk.json"),
+      JSON.stringify({ worktree: { setup: "old" } }),
+    );
     const writeFailedRoot = join(makeRoot(), "not-a-directory");
     writeFileSync(writeFailedRoot, "file");
     const messages: unknown[] = [];
@@ -2318,10 +2328,14 @@ describe("session checkout merge handling", () => {
       requestId: "request-merge-from-base-success",
     });
 
-    expect(checkoutGitMocks.mergeFromBase).toHaveBeenCalledWith("/tmp/request-worktree", {
-      baseRef: "main",
-      requireCleanTarget: true,
-    });
+    expect(checkoutGitMocks.mergeFromBase).toHaveBeenCalledWith(
+      "/tmp/request-worktree",
+      {
+        baseRef: "main",
+        requireCleanTarget: true,
+      },
+      { jagentdeskHome: "/tmp/jagentdesk-home", worktreesRoot: undefined },
+    );
     expect(workspaceGitService.getSnapshot).toHaveBeenCalledWith("/tmp/request-worktree", {
       force: true,
       reason: "merge-from-base",
@@ -2778,6 +2792,7 @@ diff --git a/file.txt b/file.txt
         base: "main",
       },
       expect.anything(),
+      { jagentdeskHome: "/tmp/jagentdesk-home", worktreesRoot: undefined },
     );
     expect(messages).toContainEqual({
       type: "checkout_pr_create_response",
@@ -2902,6 +2917,7 @@ diff --git a/file.txt b/file.txt
         base: "main",
       },
       expect.anything(),
+      { jagentdeskHome: "/tmp/jagentdesk-home", worktreesRoot: undefined },
     );
     expect(messages).toContainEqual({
       type: "checkout_pr_create_response",

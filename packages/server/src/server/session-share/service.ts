@@ -478,8 +478,14 @@ export class SessionShareService {
   }
 
   private currentMaxSeq(agentId: string): number {
-    const rows = this.fetchRows(agentId);
-    return rows.length > 0 ? (rows[rows.length - 1]?.seq ?? 0) : 0;
+    // Retained rows are projected items (ADR-0020): an earlier tool row can carry a later seq, so
+    // the newest source position is the window's maxSeq, not the last row's seq.
+    try {
+      return this.agentManager.fetchTimeline(agentId, { direction: "tail", limit: 1 }).window
+        .maxSeq;
+    } catch {
+      return 0;
+    }
   }
 
   private emit(share: SessionShare): void {

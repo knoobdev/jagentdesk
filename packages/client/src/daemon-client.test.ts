@@ -741,6 +741,7 @@ test("advertises client capabilities in hello", async () => {
       custom_mode_icons: true,
       project_updates: true,
       provider_subagents: true,
+      projected_subagent_timeline: true,
       reasoning_merge_enum: true,
       terminal_reflowable_snapshot: true,
       browser_host: {
@@ -1988,7 +1989,7 @@ test("file context action RPCs correlate success and error responses", async () 
   });
 });
 
-test("serializes plugin source suffixes through the legacy path field", async () => {
+test("sends plugin source identifiers unchanged for daemon-host resolution", async () => {
   const mock = createMockTransport();
   const client = new DaemonClient({
     url: "ws://test",
@@ -2003,15 +2004,12 @@ test("serializes plugin source suffixes through the legacy path field", async ()
   mock.triggerOpen();
   await connectPromise;
 
-  const installPromise = client.installPluginSource({
-    source: "owner/repository:plugins/review",
-  });
+  const installPromise = client.installSourcePlugin("owner/repository:plugins/review");
   const request = parseSentFrame(mock.sent.at(-1));
   expect(request).toEqual({
     type: "plugin.source.install.request",
     requestId: expect.any(String),
-    source: "owner/repository",
-    pluginPath: "plugins/review",
+    source: "owner/repository:plugins/review",
   });
   mock.triggerMessage(
     wrapSessionMessage({
@@ -6108,4 +6106,81 @@ test("uploadFile stops sending chunks when the connection closes between sends",
       .map(decodeFileTransferFrame)
       .some((frame) => frame.opcode === FileTransferOpcode.FileEnd),
   ).toBe(false);
+});
+
+test("reviewed plugin updates gate before requests and preserve exact proposal data", async () => {
+  for (const supported of [false, true]) {
+    const transport = createMockTransport();
+    const client = new DaemonClient({
+      url: "ws://test",
+      clientId: "reviewed-updates",
+      logger: createMockLogger(),
+      reconnect: { enabled: false },
+      transportFactory: () => transport.transport,
+    });
+    clients.push(client);
+    const connecting = client.connect();
+    transport.triggerOpen({
+      features: {
+        pluginManagement: true,
+        pluginSourceInstallation: true,
+        pluginSourceUpdates: supported,
+      },
+    });
+    await connecting;
+    const proposal = {
+      id: "example-plugin",
+      expected: {
+        identity: { kind: "npm" as const, packageName: "example-plugin", pluginPath: "." },
+        installationRoot: "/plugins/example-plugin/version-root",
+        revision: "1.0.0",
+      },
+      target: {
+        kind: "npm" as const,
+        version: "1.1.0",
+        resolved: "https://registry.npmjs.org/example-plugin/-/example-plugin-1.1.0.tgz",
+        integrity: "sha512-test",
+      },
+    };
+    if (!supported) {
+      const sent = transport.sent.length;
+      await expect(client.previewPluginUpdates()).rejects.toThrow("Update the host");
+      await expect(client.applyPluginUpdates([proposal])).rejects.toThrow("Update the host");
+      expect(transport.sent.length).toBe(sent);
+      continue;
+    }
+    const checking = client.previewPluginUpdates({ pluginId: "example-plugin" });
+    const check = parseSentFrame(transport.sent.at(-1));
+    expect(check).toMatchObject({
+      type: "plugin.source.update.preview.request",
+      pluginId: "example-plugin",
+    });
+    const preview = { id: "example-plugin", outcome: "update", links: [], proposal };
+    transport.triggerMessage(
+      wrapSessionMessage({
+        type: "plugin.source.update.preview.response",
+        payload: { requestId: check.requestId, plugins: [preview] },
+      }),
+    );
+    await expect(checking).resolves.toEqual([preview]);
+    const applying = client.applyPluginUpdates([proposal]);
+    const apply = parseSentFrame(transport.sent.at(-1));
+    expect(apply).toEqual({
+      type: "plugin.source.update.apply.request",
+      requestId: expect.any(String),
+      proposals: [proposal],
+    });
+    transport.triggerMessage(
+      wrapSessionMessage({
+        type: "plugin.source.update.apply.response",
+        payload: {
+          requestId: apply.requestId,
+          plugins: [{ id: "example-plugin", outcome: "error", error: "changed since review" }],
+        },
+      }),
+    );
+    await expect(applying).resolves.toEqual([
+      { id: "example-plugin", outcome: "error", error: "changed since review" },
+    ]);
+  }
 });

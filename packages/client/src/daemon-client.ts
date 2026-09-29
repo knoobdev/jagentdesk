@@ -224,6 +224,10 @@ import type {
   WorkspaceRecoveryState,
   PluginListItem,
   PluginLogEntry,
+  PluginUpdateSelection,
+  PluginUpdateProposal,
+  PluginUpdatePreview,
+  PluginUpdateResult,
   AutorunState,
   SessionShare,
   SessionShareCapabilities,
@@ -1313,6 +1317,20 @@ type CorrelatedResponsePayload<TType extends CorrelatedResponseType> = Extract<
   { type: TType }
 >["payload"];
 
+/**
+ * The request could not complete because the daemon connection was lost, not
+ * established, or timed out. Callers may retry once the connection recovers.
+ */
+export class DaemonConnectionError extends Error {
+  constructor(
+    message: string,
+    readonly code: "DAEMON_CONNECTION_LOST" | "DAEMON_REQUEST_TIMEOUT" = "DAEMON_CONNECTION_LOST",
+  ) {
+    super(message);
+    this.name = "DaemonConnectionError";
+  }
+}
+
 class DaemonRpcError extends Error {
   readonly requestId: string;
   readonly requestType?: string;
@@ -2082,7 +2100,12 @@ export class DaemonClient {
           if (idx !== -1) {
             this.pendingSendQueue.splice(idx, 1);
           }
-          reject(new Error(`Timed out waiting for connection to send message`));
+          reject(
+            new DaemonConnectionError(
+              "Timed out waiting for connection to send message",
+              "DAEMON_REQUEST_TIMEOUT",
+            ),
+          );
         }, DEFAULT_SEND_QUEUE_TIMEOUT_MS);
 
         this.pendingSendQueue.push({ message, resolve, reject, timeoutHandle });
@@ -2090,7 +2113,7 @@ export class DaemonClient {
     }
 
     // Not connected and not connecting - fail immediately
-    return Promise.reject(new Error(`Transport not connected (status: ${status})`));
+    return Promise.reject(new DaemonConnectionError(`Transport not connected (status: ${status})`));
   }
 
   /**
@@ -2108,7 +2131,7 @@ export class DaemonClient {
           this.transport.send(JSON.stringify({ type: "session", message: payload }));
           pending.resolve();
         } else {
-          pending.reject(new Error("Connection lost before message could be sent"));
+          pending.reject(new DaemonConnectionError("Connection lost before message could be sent"));
         }
       } catch (error) {
         pending.reject(error instanceof Error ? error : new Error(String(error)));
@@ -2255,7 +2278,7 @@ export class DaemonClient {
 
   private sendSessionMessageStrict(message: SessionInboundMessage): void {
     if (!this.transport || this.connectionState.status !== "connected") {
-      throw new Error("Transport not connected");
+      throw new DaemonConnectionError("Transport not connected");
     }
     const payload = SessionInboundMessageSchema.parse(message);
     try {
@@ -3364,6 +3387,10 @@ export class DaemonClient {
     subagentId: string,
     options: FetchProviderSubagentTimelineOptions = {},
   ): Promise<ProviderSubagentTimelinePayload> {
+    // COMPAT(projectedSubagentTimeline): added after v0.8.0, remove after 2027-03-14.
+    if (this.lastServerInfoMessage?.features?.projectedSubagentTimeline !== true) {
+      throw new Error("Update the host to view subagent conversations.");
+    }
     const requestId = this.createRequestId(options.requestId);
     const message = SessionInboundMessageSchema.parse({
       type: "agent.provider_subagents.timeline.get.request",
@@ -5788,8 +5815,42 @@ export class DaemonClient {
         ...(options.pluginPath ? { pluginPath: options.pluginPath } : {}),
       },
       responseType: "plugin.source.install.response",
+      // Git clones, npm installs and plugin builds run on the host before the reply.
+      timeout: 5 * 60 * 1000,
     });
     return payload.plugin;
+  }
+
+  private requirePluginUpdates(): void {
+    // COMPAT(pluginSourceUpdates): added in v0.8.0; remove after 2027-03-16 once daemon floor supports reviewed updates.
+    if (this.getLastServerInfoMessage()?.features?.pluginSourceUpdates !== true)
+      throw new Error("Update the host to review plugin updates.");
+  }
+
+  async previewPluginUpdates(
+    input: { pluginId?: string; target?: PluginUpdateSelection } = {},
+  ): Promise<PluginUpdatePreview[]> {
+    this.requirePluginUpdates();
+    const requestId = this.createRequestId();
+    const payload = await this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "plugin.source.update.preview.request", requestId, ...input },
+      responseType: "plugin.source.update.preview.response",
+      timeout: 300_000,
+    });
+    return payload.plugins;
+  }
+
+  async applyPluginUpdates(proposals: PluginUpdateProposal[]): Promise<PluginUpdateResult[]> {
+    this.requirePluginUpdates();
+    const requestId = this.createRequestId();
+    const payload = await this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "plugin.source.update.apply.request", requestId, proposals },
+      responseType: "plugin.source.update.apply.response",
+      timeout: 300_000,
+    });
+    return payload.plugins;
   }
 
   async inspectDirectoryPlugin(path: string): Promise<{ id: string }> {
@@ -8990,6 +9051,7 @@ export class DaemonClient {
             [CLIENT_CAPS.reasoningMergeEnum]: true,
             [CLIENT_CAPS.terminalReflowableSnapshot]: true,
             [CLIENT_CAPS.providerSubagents]: true,
+            [CLIENT_CAPS.projectedSubagentTimeline]: true,
             [CLIENT_CAPS.projectUpdates]: true,
             ...this.config.capabilities,
           },
@@ -9487,9 +9549,9 @@ export class DaemonClient {
 
     // Clear all pending waiters and queued sends since the connection was lost
     // and responses from the previous connection will never arrive.
-    this.clearWaiters(new Error(reason ?? "Connection lost"));
-    this.rejectPendingSendQueue(new Error(reason ?? "Connection lost"));
-    this.rejectPingProbe(new Error(reason ?? "Connection lost"));
+    this.clearWaiters(new DaemonConnectionError(reason ?? "Connection lost"));
+    this.rejectPendingSendQueue(new DaemonConnectionError(reason ?? "Connection lost"));
+    this.rejectPingProbe(new DaemonConnectionError(reason ?? "Connection lost"));
     this.terminalStreams.clearSlots();
     this.lastServerInfoMessage = null;
 
@@ -9776,7 +9838,10 @@ export class DaemonClient {
     options?: WaitOptions,
   ): WaitHandle<T> {
     // Capture stack trace at call site, not inside setTimeout
-    const timeoutError = new Error(`Timeout waiting for message (${timeout}ms)`);
+    const timeoutError = new DaemonConnectionError(
+      `Timeout waiting for message (${timeout}ms)`,
+      "DAEMON_REQUEST_TIMEOUT",
+    );
 
     let waiter: Waiter<T> | null = null;
     let settled = false;
