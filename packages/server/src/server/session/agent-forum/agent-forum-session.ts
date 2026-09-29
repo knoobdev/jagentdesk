@@ -1,6 +1,8 @@
 import type pino from "pino";
 import type { SessionInboundMessage, SessionOutboundMessage } from "../../messages.js";
+import type { StoredForumTopic } from "@jagentdesk/protocol/agent-forum/types";
 import type { AgentForumService } from "../../agent-forum/service.js";
+import { presentForumTopic } from "../../agent-forum/archify-compat.js";
 
 /**
  * Host-side Agent Forum / Team-mode RPC surface (docs/plans/active/agent-forum.md). Host↔daemon over
@@ -9,6 +11,9 @@ import type { AgentForumService } from "../../agent-forum/service.js";
  */
 export interface AgentForumSessionHost {
   emit(msg: SessionOutboundMessage): void;
+  // COMPAT(archifyDiagrams): added after v0.9.43, remove after 2027-03-29. False when the client
+  // did not advertise archify_diagrams; topics in responses then carry Mermaid placeholders.
+  supportsArchifyDiagrams?(): boolean;
 }
 
 export interface AgentForumSessionOptions {
@@ -47,7 +52,8 @@ type ForumRequest = Extract<
       | "forum/vote"
       | "forum/chat-post"
       | "forum/chat-react"
-      | "forum/chat-room";
+      | "forum/chat-room"
+      | "forum.diagram.html.request";
   }
 >;
 
@@ -64,6 +70,12 @@ export class AgentForumSession {
     this.logger = options.logger;
     this.bootstrapTopic = options.bootstrapTopic;
     this.notifyForumActivity = options.notifyForumActivity;
+  }
+
+  // COMPAT(archifyDiagrams): added after v0.9.43, remove after 2027-03-29.
+  private present(topic: StoredForumTopic | null): StoredForumTopic | null {
+    if (!topic) return topic;
+    return presentForumTopic(topic, this.host.supportsArchifyDiagrams?.() ?? true);
   }
 
   // Wake the lead + any @mentioned teammate after the human posts in a thread/chat. Best-effort and
@@ -135,7 +147,7 @@ export class AgentForumSession {
       }
       this.host.emit({
         type: "forum/create/response",
-        payload: { requestId: request.requestId, topic, error: null },
+        payload: { requestId: request.requestId, topic: this.present(topic), error: null },
       });
     } catch (error) {
       this.emitRpcError(request, error);
@@ -163,7 +175,7 @@ export class AgentForumSession {
       const topic = await this.service.getTopic(request.topicId);
       this.host.emit({
         type: "forum/get/response",
-        payload: { requestId: request.requestId, topic, error: null },
+        payload: { requestId: request.requestId, topic: this.present(topic), error: null },
       });
     } catch (error) {
       this.emitRpcError(request, error);
@@ -177,7 +189,7 @@ export class AgentForumSession {
       const topic = await this.service.archiveTopic(request.topicId);
       this.host.emit({
         type: "forum/archive/response",
-        payload: { requestId: request.requestId, topic, error: null },
+        payload: { requestId: request.requestId, topic: this.present(topic), error: null },
       });
     } catch (error) {
       this.emitRpcError(request, error);
@@ -209,7 +221,7 @@ export class AgentForumSession {
       this.wakeAgentsForHumanPost(topic, { kind: "thread", text: request.text });
       this.host.emit({
         type: "forum/post/response",
-        payload: { requestId: request.requestId, topic, error: null },
+        payload: { requestId: request.requestId, topic: this.present(topic), error: null },
       });
     } catch (error) {
       this.emitRpcError(request, error);
@@ -228,7 +240,7 @@ export class AgentForumSession {
       );
       this.host.emit({
         type: "forum/vote/response",
-        payload: { requestId: request.requestId, topic, error: null },
+        payload: { requestId: request.requestId, topic: this.present(topic), error: null },
       });
     } catch (error) {
       this.emitRpcError(request, error);
@@ -257,7 +269,7 @@ export class AgentForumSession {
       }
       this.host.emit({
         type: "forum/chat-post/response",
-        payload: { requestId: request.requestId, topic, error: null },
+        payload: { requestId: request.requestId, topic: this.present(topic), error: null },
       });
     } catch (error) {
       this.emitRpcError(request, error);
@@ -275,7 +287,28 @@ export class AgentForumSession {
       });
       this.host.emit({
         type: "forum/chat-react/response",
-        payload: { requestId: request.requestId, topic, error: null },
+        payload: { requestId: request.requestId, topic: this.present(topic), error: null },
+      });
+    } catch (error) {
+      this.emitRpcError(request, error);
+    }
+  }
+
+  // Rendered archify HTML for one diagram version (spec 23.3); "not_found" when it's gone.
+  async handleDiagramHtmlRequest(
+    request: Extract<SessionInboundMessage, { type: "forum.diagram.html.request" }>,
+  ): Promise<void> {
+    try {
+      const html = await this.service.getDiagramHtml(request.topicId, request.diagramId);
+      this.host.emit({
+        type: "forum.diagram.html.response",
+        payload: {
+          requestId: request.requestId,
+          topicId: request.topicId,
+          diagramId: request.diagramId,
+          html,
+          error: html === null ? "not_found" : null,
+        },
       });
     } catch (error) {
       this.emitRpcError(request, error);
@@ -297,7 +330,7 @@ export class AgentForumSession {
         type: "forum/chat-room/response",
         payload: {
           requestId: request.requestId,
-          topic: result?.topic ?? null,
+          topic: this.present(result?.topic ?? null),
           roomId: result?.roomId ?? null,
           error: null,
         },

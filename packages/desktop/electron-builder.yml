@@ -44,6 +44,9 @@ files:
 asarUnpack:
   - dist/daemon/node-entrypoint-runner.js
   - node_modules/@jagentdesk/server/dist/server/terminal/shell-integration/**/*
+  # Vendored archify renderers run as a child process (ELECTRON_RUN_AS_NODE), which cannot read
+  # inside app.asar; the daemon resolves the unpacked copy (spec 23, ADR-0021).
+  - node_modules/@jagentdesk/server/dist/server/vendor/archify/**/*
   # Native add-ons cannot be dlopen'd from inside the asar — unpack them.
   - "**/*.node"
   - node_modules/better-sqlite3/**

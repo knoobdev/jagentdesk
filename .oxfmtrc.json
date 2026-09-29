@@ -11,5 +11,11 @@
   "arrowParens": "always",
   "bracketSameLine": false,
   "bracketSpacing": true,
-  "ignorePatterns": ["*.lock", "**/*.gen.ts", "**/*.gen.tsx", "scratchpad/**"]
+  "ignorePatterns": [
+    "*.lock",
+    "**/*.gen.ts",
+    "**/*.gen.tsx",
+    "scratchpad/**",
+    "packages/server/vendor/**"
+  ]
 }

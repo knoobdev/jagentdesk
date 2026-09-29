@@ -6,6 +6,7 @@ import type {
   ForumEstimate,
   ForumMessage,
   ForumDiagram,
+  ForumDiagramType,
   ForumMessageKind,
   ForumParticipant,
   ForumReviewFinding,
@@ -17,7 +18,12 @@ import type {
   ForumTopicSummary,
   StoredForumTopic,
 } from "@jagentdesk/protocol/agent-forum/types";
-import { AgentForumStore, generateForumId } from "./store.js";
+import { AgentForumStore, generateForumId, isSafeForumId } from "./store.js";
+import {
+  renderArchifyDiagram,
+  type ArchifyDiagramError,
+  type ArchifyRenderer,
+} from "./archify-renderer.js";
 
 // Which review categories each role is the owner of (open-code-review dimension split). A medium
 // finding in your own dimension blocks; criticals/highs from anyone always block.
@@ -87,7 +93,25 @@ export interface AgentForumServiceOptions {
   logger: Logger;
   // Broadcast a topic to all connected clients whenever it changes (forum.stream).
   onUpdate?: (topic: StoredForumTopic) => void;
+  // Renders archify JSON to HTML (spec 23.2). Defaults to the vendored archify; tests inject a fake.
+  renderArchify?: ArchifyRenderer;
 }
+
+export interface SetDiagramInput {
+  title?: string;
+  format?: "mermaid" | "archify";
+  diagramType?: ForumDiagramType;
+  source: string;
+  note?: string;
+  byAgentId: string;
+  byLabel: string;
+  role: ForumRole;
+}
+
+export type SetDiagramResult =
+  | { ok: true; topic: StoredForumTopic; diagramId: string; version: number }
+  | { ok: false; error: "topic_not_found" }
+  | { ok: false; error: "invalid_diagram"; errors: ArchifyDiagramError[] };
 
 // The active task statuses (i.e. work still to do). Used to derive the topic-level status from the
 // facts of its tasks (open-code-review discipline: never store an ad-hoc rollup that can drift).
@@ -146,6 +170,7 @@ export class AgentForumService {
   private readonly store: AgentForumStore;
   private readonly logger: Logger;
   private readonly onUpdate?: (topic: StoredForumTopic) => void;
+  private readonly renderArchify: ArchifyRenderer;
   // Idempotency for team bootstrap: one origin/lead agent should own exactly one bootstrapped topic
   // per create burst. A double-fired forum/create (Enter + keyboard "send", a draft handoff replay, a
   // double-tap) would otherwise mint N topics and re-dispatch the team-lead prompt N times, spawning
@@ -159,6 +184,7 @@ export class AgentForumService {
     this.store = new AgentForumStore(options.dir);
     this.logger = options.logger.child({ module: "agent-forum" });
     this.onUpdate = options.onUpdate;
+    this.renderArchify = options.renderArchify ?? renderArchifyDiagram;
   }
 
   // Create a topic for a team bootstrap, deduping by the lead/origin agent so a repeated forum/create
@@ -358,20 +384,26 @@ export class AgentForumService {
     return updated ? { topic: updated, roomId } : null;
   }
 
-  // Publish a new version of the topic's architecture diagram (Mermaid). Each call appends a
-  // version so the human can step through how the design evolved (early ones can be wrong).
-  async setDiagram(
-    topicId: string,
-    input: {
-      title?: string;
-      source: string;
-      note?: string;
-      byAgentId: string;
-      byLabel: string;
-      role: ForumRole;
-    },
-  ): Promise<{ topic: StoredForumTopic; diagramId: string; version: number } | null> {
+  // Publish a new version of the topic's architecture diagram. Each call appends a version so the
+  // human can step through how the design evolved (early ones can be wrong). archify JSON is
+  // validated + rendered first (spec 23.2): a rejected document returns its errors and adds no
+  // version; the rendered HTML is stored beside the topic, not in it.
+  async setDiagram(topicId: string, input: SetDiagramInput): Promise<SetDiagramResult> {
     const diagramId = generateForumId("diagram");
+    const archify = input.format === "archify";
+    let diagramType: ForumDiagramType | undefined;
+    if (archify) {
+      if (!isSafeForumId(topicId) || !(await this.store.get(topicId))) {
+        return { ok: false, error: "topic_not_found" };
+      }
+      const rendered = await this.renderArchify({
+        source: input.source,
+        diagramType: input.diagramType,
+      });
+      if (!rendered.ok) return { ok: false, error: "invalid_diagram", errors: rendered.errors };
+      diagramType = rendered.diagramType;
+      await this.store.writeDiagramHtml(topicId, diagramId, rendered.html);
+    }
     let version = 1;
     const updated = await this.mutate(topicId, (topic) => {
       version = (topic.diagrams.at(-1)?.version ?? 0) + 1;
@@ -379,7 +411,8 @@ export class AgentForumService {
         id: diagramId,
         version,
         title: (input.title ?? "Architecture").trim().slice(0, 120) || "Architecture",
-        format: "mermaid",
+        format: archify ? "archify" : "mermaid",
+        ...(archify ? { diagramType, renderStatus: "ok" as const } : {}),
         source: input.source,
         authorAgentId: input.byAgentId,
         authorLabel: input.byLabel,
@@ -390,7 +423,21 @@ export class AgentForumService {
       ensureParticipant(topic, input.byAgentId, input.byLabel, input.role);
       return topic;
     });
-    return updated ? { topic: updated, diagramId, version } : null;
+    if (!updated) {
+      // The topic vanished while rendering; don't leave an orphaned HTML file behind.
+      if (archify) await this.store.deleteDiagramHtml(topicId, diagramId);
+      return { ok: false, error: "topic_not_found" };
+    }
+    return { ok: true, topic: updated, diagramId, version };
+  }
+
+  // Rendered HTML of one archify version (spec 23.3), or null when the topic, the version, or its
+  // file is gone. Mermaid versions have no HTML.
+  async getDiagramHtml(topicId: string, diagramId: string): Promise<string | null> {
+    const topic = await this.store.get(topicId);
+    const diagram = topic?.diagrams.find((d) => d.id === diagramId);
+    if (!diagram || diagram.format !== "archify") return null;
+    return this.store.readDiagramHtml(topicId, diagramId);
   }
 
   // Post a banter message (text or a built-in sticker) into a room. Falls back to the "general" room

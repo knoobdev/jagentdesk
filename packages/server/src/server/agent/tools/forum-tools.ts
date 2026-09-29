@@ -1,7 +1,12 @@
 import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
 import { z } from "zod";
-import type { ForumRole, StoredForumTopic } from "@jagentdesk/protocol/agent-forum/types";
+import {
+  ForumDiagramFormatSchema,
+  ForumDiagramTypeSchema,
+  type ForumRole,
+  type StoredForumTopic,
+} from "@jagentdesk/protocol/agent-forum/types";
 import { ensureValidJson } from "../../json-utils.js";
 import type { AgentForumService } from "../../agent-forum/service.js";
 
@@ -81,6 +86,24 @@ const CHAT_STICKERS = [
   "heart",
   "facepalm",
 ] as const;
+
+const MAX_DIAGRAM_SOURCE_CHARS = 200_000;
+
+// A rejected archify document: the agent gets every error (JSON path + message) to fix in its own
+// turn; no version was added.
+function invalidDiagramResult(errors: { path: string; message: string }[]): JAgentDeskToolResult {
+  const lines = errors.map((e) => `- ${e.path}: ${e.message}`);
+  return {
+    content: [
+      {
+        type: "text",
+        text: `Diagram rejected (no new version was added). Fix these errors and call forum.set_diagram again:\n${lines.join("\n")}`,
+      },
+    ],
+    structuredContent: ensureValidJson({ ok: false, error: "invalid_diagram", errors }),
+    isError: true,
+  };
+}
 
 // Compact acknowledgement so a chatty team loop doesn't blow the context with full topic dumps every
 // call. Agents call forum.get_topic when they need the whole board.
@@ -204,29 +227,39 @@ export function registerForumTools(params: {
     {
       title: "Publish the architecture diagram",
       description:
-        "Publish or update the topic's architecture diagram as a Mermaid graph so the human can see the " +
-        "system you're designing. Each call adds a NEW VERSION — revise it whenever the design changes; " +
-        "the human steps back through the versions (early designs can be wrong and get fixed). `source` is " +
-        "Mermaid syntax, e.g. 'graph TD; Client-->API; API-->DB'. Keep it clean, professional, and current " +
-        "with the real design the team agreed on.",
+        "Publish or update the topic's diagram so the human can see the system you're designing. Each " +
+        "successful call adds a NEW VERSION — revise it whenever the design changes; the human steps " +
+        'back through the versions. Prefer format "archify": `source` is archify JSON (typed IR with ' +
+        "explicit coordinates) that the daemon validates and renders into an interactive, animated " +
+        "diagram. `diagramType` is architecture | workflow | sequence | dataflow | lifecycle (defaults to " +
+        "the JSON's diagram_type). meta.output is filled in for you; `brand` fields and repository " +
+        "`sources` are not supported. If the JSON is invalid the result lists each error (JSON path + " +
+        'message) and NO version is added — fix them and call again. format "mermaid" (the default) ' +
+        "takes Mermaid text, e.g. 'graph TD; Client-->API; API-->DB'.",
       inputSchema: {
         topicId: z.string(),
-        source: z.string().trim().min(1),
+        format: ForumDiagramFormatSchema.optional(),
+        diagramType: ForumDiagramTypeSchema.optional(),
+        source: z.string().trim().min(1).max(MAX_DIAGRAM_SOURCE_CHARS),
         title: z.string().max(120).optional(),
         note: z.string().max(500).optional(),
       },
     },
-    async ({ topicId, source, title, note }) => {
+    async ({ topicId, format, diagramType, source, title, note }) => {
       const { label: callerLabel, role: callerRole } = await resolveIdentity(topicId);
       const result = await forum.setDiagram(topicId, {
         source,
+        format,
+        diagramType,
         title,
         note,
         byAgentId: callerAgentId,
         byLabel: callerLabel,
         role: callerRole,
       });
-      if (!result) return ack(null);
+      if (!result.ok) {
+        return result.error === "topic_not_found" ? ack(null) : invalidDiagramResult(result.errors);
+      }
       return {
         content: [],
         structuredContent: ensureValidJson({

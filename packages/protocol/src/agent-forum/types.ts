@@ -244,16 +244,38 @@ export const ForumChatRoomSchema = z.object({
 });
 export type ForumChatRoom = z.infer<typeof ForumChatRoomSchema>;
 
+// Diagram source formats (spec 23.1, ADR-0021). "archify" is a typed JSON IR rendered by the
+// daemon's vendored archify into a self-contained HTML file stored beside the topic.
+export const ForumDiagramFormatSchema = z.enum(["mermaid", "archify"]);
+export type ForumDiagramFormat = z.infer<typeof ForumDiagramFormatSchema>;
+
+export const ForumDiagramTypeSchema = z.enum([
+  "architecture",
+  "workflow",
+  "sequence",
+  "dataflow",
+  "lifecycle",
+]);
+export type ForumDiagramType = z.infer<typeof ForumDiagramTypeSchema>;
+
+export const ForumDiagramRenderStatusSchema = z.enum(["ok", "error"]);
+export type ForumDiagramRenderStatus = z.infer<typeof ForumDiagramRenderStatusSchema>;
+
 // A versioned architecture diagram the team publishes so the human can see the system being
-// designed. Each entry is one VERSION (Mermaid source); the team revises it as the design
-// changes — the human can step back through the history because early architectures can be wrong
-// and get fixed. The newest version is the current one.
+// designed. Each entry is one VERSION (Mermaid source or archify JSON); the team revises it as the
+// design changes — the human can step back through the history because early architectures can be
+// wrong and get fixed. The newest version is the current one.
 export const ForumDiagramSchema = z.object({
   id: z.string(),
   version: z.number().int(),
   title: z.string().default("Architecture"),
-  format: z.enum(["mermaid"]).default("mermaid"),
+  format: ForumDiagramFormatSchema.default("mermaid"),
+  // archify only: which archify renderer the JSON targets.
+  diagramType: ForumDiagramTypeSchema.optional(),
+  // Mermaid text, or the archify JSON as a string.
   source: z.string(),
+  // archify only: whether the daemon rendered the HTML (fetched via forum.diagram.html.request).
+  renderStatus: ForumDiagramRenderStatusSchema.optional(),
   authorAgentId: z.string(),
   authorLabel: z.string(),
   note: z.string().default(""),

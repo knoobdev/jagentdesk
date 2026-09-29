@@ -74,6 +74,12 @@ describe("desktop packaging", () => {
     );
   });
 
+  it("unpacks the vendored archify renderers for the child-process renderer", () => {
+    const config = readFileSync(join(packageRoot, "electron-builder.yml"), "utf8");
+
+    expect(config).toContain("node_modules/@jagentdesk/server/dist/server/vendor/archify/**/*");
+  });
+
   it("excludes package debug/source files from the packaged app", () => {
     const config = readFileSync(join(packageRoot, "electron-builder.yml"), "utf8");
 

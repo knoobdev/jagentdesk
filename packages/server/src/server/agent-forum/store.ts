@@ -5,10 +5,19 @@ import {
   StoredForumTopicSchema,
   type StoredForumTopic,
 } from "@jagentdesk/protocol/agent-forum/types";
-import { writeJsonFileAtomic } from "../atomic-file.js";
+import { writeFileAtomic, writeJsonFileAtomic } from "../atomic-file.js";
+
+// Ids that become path segments. Generated ids are `<prefix>_<hex>`; anything else (an agent-supplied
+// "../x") is refused rather than joined into a path.
+const SAFE_ID = /^[A-Za-z0-9_-]{1,80}$/;
+
+export function isSafeForumId(id: string): boolean {
+  return SAFE_ID.test(id);
+}
 
 // Flat JSON-per-topic store at ~/.jagentdesk/forums/{topicId}.json. `projectKey` lives on the record
-// (for filtering), so get-by-id needs no directory lookup. Mutations are serialized per topic so a
+// (for filtering), so get-by-id needs no directory lookup. Rendered archify diagrams live beside it
+// at forums/{topicId}/diagrams/{diagramId}.html (spec 23.1), never inside the topic JSON. Mutations are serialized per topic so a
 // concurrent message-append + task-move never clobber each other, and writes are atomic.
 export function generateForumId(prefix: string): string {
   return `${prefix}_${randomBytes(6).toString("hex")}`;
@@ -83,7 +92,35 @@ export class AgentForumStore {
     await this.serialize(id, async () => {
       await this.ensureDir();
       await rm(this.filePath(id), { force: true });
+      if (isSafeForumId(id)) await rm(join(this.dir, id), { recursive: true, force: true });
     });
+  }
+
+  private diagramHtmlPath(topicId: string, diagramId: string): string | null {
+    if (!isSafeForumId(topicId) || !isSafeForumId(diagramId)) return null;
+    return join(this.dir, topicId, "diagrams", `${diagramId}.html`);
+  }
+
+  async writeDiagramHtml(topicId: string, diagramId: string, html: string): Promise<void> {
+    const file = this.diagramHtmlPath(topicId, diagramId);
+    if (!file) throw new Error(`Invalid forum diagram id: ${topicId}/${diagramId}`);
+    await writeFileAtomic(file, html);
+  }
+
+  async readDiagramHtml(topicId: string, diagramId: string): Promise<string | null> {
+    const file = this.diagramHtmlPath(topicId, diagramId);
+    if (!file) return null;
+    try {
+      return await readFile(file, "utf-8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
+  }
+
+  async deleteDiagramHtml(topicId: string, diagramId: string): Promise<void> {
+    const file = this.diagramHtmlPath(topicId, diagramId);
+    if (file) await rm(file, { force: true });
   }
 
   private async write(topic: StoredForumTopic): Promise<void> {

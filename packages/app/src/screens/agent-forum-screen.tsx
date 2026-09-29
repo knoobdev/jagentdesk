@@ -23,6 +23,9 @@ import Markdown from "react-native-markdown-display";
 import Svg, { Circle, G, Rect, Text as SvgText } from "react-native-svg";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useIsFocused } from "@react-navigation/native";
+import { useTranslation } from "react-i18next";
+import { useReducedMotion } from "react-native-reanimated";
+import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { PageHeader } from "@/components/headers/page-header";
 import { Users } from "lucide-react-native";
@@ -30,6 +33,7 @@ import { OfficeScene } from "@/screens/agent-forum-office";
 import { ChatTab } from "@/screens/agent-forum-chat";
 import { useHosts, useHostRuntimeClient } from "@/runtime/host-runtime";
 import { MarkdownRenderer } from "@/components/markdown/renderer";
+import { ArchifyDiagramView } from "@/screens/agent-forum-archify/archify-diagram-view";
 import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
 import type { Theme } from "@/styles/theme";
 import type {
@@ -1062,7 +1066,7 @@ const TopicThread = memo(function TopicThread({
               ) : null}
               {tab === "arch" ? (
                 <FadeIn key="arch">
-                  <DiagramTab diagrams={topic.diagrams} />
+                  <DiagramTab diagrams={topic.diagrams} topicId={topic.id} client={client} />
                 </FadeIn>
               ) : null}
               {tab === "office" ? (
@@ -1407,16 +1411,48 @@ const DiagramVersionPill = memo(function DiagramVersionPill({
   );
 });
 
-// The ARCH tab: the team's architecture diagram (Mermaid), with a pill per version so the human
-// can step back through how the design evolved. Defaults to the newest version.
+// Replays the archify trace animation (spec 23.4). Disabled under the system reduced-motion setting,
+// where archify keeps the diagram still.
+const DiagramReplayButton = memo(function DiagramReplayButton({
+  onReplay,
+}: {
+  onReplay: () => void;
+}): ReactElement {
+  const { t } = useTranslation();
+  const isClickUp = useIsClickUpTheme();
+  const styles = forumStyles(isClickUp);
+  const reduceMotion = useReducedMotion();
+  return (
+    <Pressable
+      onPress={onReplay}
+      disabled={reduceMotion}
+      accessibilityRole="button"
+      accessibilityLabel={t("forumArch.replayHint")}
+      accessibilityHint={reduceMotion ? t("forumArch.reducedMotion") : undefined}
+      testID="forum-arch-replay"
+      style={[styles.versionPill, reduceMotion ? styles.diagramReplayOff : null]}
+    >
+      <Text style={styles.versionPillTxt}>{t("forumArch.replay")}</Text>
+    </Pressable>
+  );
+});
+
+// The ARCH tab: the team's architecture diagram (archify or Mermaid), with a pill per version so the
+// human can step back through how the design evolved. Defaults to the newest version.
 const DiagramTab = memo(function DiagramTab({
   diagrams,
+  topicId,
+  client,
 }: {
   diagrams: ForumDiagram[];
+  topicId: string;
+  client: DaemonClient | null;
 }): ReactElement {
   const isClickUp = useIsClickUpTheme();
   const styles = forumStyles(isClickUp);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [replayToken, setReplayToken] = useState(0);
+  const replay = useCallback(() => setReplayToken((n) => n + 1), []);
   const current = useMemo(() => {
     if (diagrams.length === 0) return null;
     return diagrams.find((d) => d.id === selectedId) ?? diagrams[diagrams.length - 1];
@@ -1431,7 +1467,7 @@ const DiagramTab = memo(function DiagramTab({
       </View>
     );
   }
-  const mermaid = `\`\`\`mermaid\n${current.source}\n\`\`\``;
+  const isArchify = current.format === "archify";
   return (
     <View style={styles.diagramWrap}>
       {diagrams.length > 1 ? (
@@ -1446,14 +1482,31 @@ const DiagramTab = memo(function DiagramTab({
           ))}
         </View>
       ) : null}
-      <Text style={styles.diagramTitle}>
-        {current.title} · v{current.version}
-      </Text>
-      <Text style={styles.diagramMeta}>
-        by {current.authorLabel}
-        {current.note ? ` — ${current.note}` : ""}
-      </Text>
-      <MarkdownRenderer text={mermaid} />
+      <View style={styles.diagramHeaderRow}>
+        <View style={styles.diagramHeaderText}>
+          <Text style={styles.diagramTitle}>
+            {current.title} · v{current.version}
+          </Text>
+          <Text style={styles.diagramMeta}>
+            by {current.authorLabel}
+            {current.note ? ` — ${current.note}` : ""}
+          </Text>
+        </View>
+        {isArchify ? <DiagramReplayButton onReplay={replay} /> : null}
+      </View>
+      {isArchify ? (
+        <ArchifyDiagramView
+          key={current.id}
+          client={client}
+          topicId={topicId}
+          diagramId={current.id}
+          replayToken={replayToken}
+          statusTextStyle={styles.diagramEmptyText}
+          retryTextStyle={styles.versionPillTxtOn}
+        />
+      ) : (
+        <MarkdownRenderer text={`\`\`\`mermaid\n${current.source}\n\`\`\``} />
+      )}
     </View>
   );
 });
@@ -2351,6 +2404,9 @@ const classicStyles = StyleSheet.create((_theme) => ({
   versionPillTxtOn: { color: C.amber },
   diagramTitle: { color: C.text, fontFamily: FONT_MONO, fontSize: 14 },
   diagramMeta: { color: C.muted, fontFamily: FONT_MONO, fontSize: 11 },
+  diagramHeaderRow: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
+  diagramHeaderText: { flex: 1, gap: 2 },
+  diagramReplayOff: { opacity: 0.5 },
   diagramEmpty: { padding: 16 },
   diagramEmptyText: { color: C.muted, fontFamily: FONT_MONO, fontSize: 12, lineHeight: 18 },
   // activity rows (status/review/system — not discussion posts)
@@ -3019,6 +3075,9 @@ const clickUpStyles = StyleSheet.create((theme) => ({
   versionPillTxtOn: { color: C.amber },
   diagramTitle: { color: theme.colors.foreground, fontSize: 14 },
   diagramMeta: { color: theme.colors.foregroundMuted, fontSize: 11 },
+  diagramHeaderRow: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
+  diagramHeaderText: { flex: 1, gap: 2 },
+  diagramReplayOff: { opacity: 0.5 },
   diagramEmpty: { padding: 16 },
   diagramEmptyText: { color: theme.colors.foregroundMuted, fontSize: 12, lineHeight: 18 },
   // activity rows (status/review/system — not discussion posts)

@@ -91,6 +91,15 @@ export const ForumDeleteRequestSchema = z.object({
   topicId: z.string(),
 });
 
+// Fetch the rendered HTML of one archify diagram version (spec 23.3). The HTML lives beside the
+// topic on the daemon, not in the topic JSON, so the app loads it on demand.
+export const ForumDiagramHtmlRequestSchema = z.object({
+  type: z.literal("forum.diagram.html.request"),
+  requestId: z.string(),
+  topicId: z.string(),
+  diagramId: z.string(),
+});
+
 export const ForumCreateResponseSchema = z.object({
   type: z.literal("forum/create/response"),
   payload: z.object({
@@ -177,6 +186,18 @@ export const ForumDeleteResponseSchema = z.object({
     requestId: z.string(),
     topicId: z.string(),
     deleted: z.boolean(),
+    error: z.string().nullable(),
+  }),
+});
+
+// `html` is null with error "not_found" when the topic, the version, or its rendered HTML is gone.
+export const ForumDiagramHtmlResponseSchema = z.object({
+  type: z.literal("forum.diagram.html.response"),
+  payload: z.object({
+    requestId: z.string(),
+    topicId: z.string(),
+    diagramId: z.string(),
+    html: z.string().nullable(),
     error: z.string().nullable(),
   }),
 });
