@@ -415,7 +415,9 @@ export const ru: TranslationResources = {
       recovery: {
         archivedTitle: "Рабочая область в архиве",
         restoreDescription:
-          "{{workspaceName}} была архивирована, а её worktree удалён. Восстановите ветку {{branch}}, чтобы открыть её снова.",
+          "Восстановите «{{workspaceName}}», чтобы вернуться к его агентам. Worktree будет использовать ветку {{branch}}.",
+        restoreWithoutBranchDescription:
+          "Восстановите «{{workspaceName}}», чтобы вернуться к его агентам. Новая ветка будет создана от сохранённой базовой или ветки репозитория по умолчанию.",
         unarchiveDescription:
           "{{workspaceName}} находится в архиве. Разархивируйте её, чтобы открыть снова.",
         restoreAction: "Восстановить",

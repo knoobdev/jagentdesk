@@ -185,6 +185,7 @@ export type WorktreeSource =
   | { kind: "branch-off"; baseBranch: string; branchName: string }
   | { kind: "checkout-branch"; branchName: string }
   | { kind: "restore"; branchName: string; baseRef: string | null }
+  | { kind: "restore-from-base"; baseRef: string; branchName: string }
   | {
       kind: "checkout-change-request";
       forge: string;
@@ -1395,6 +1396,21 @@ async function resolveRestoredWorktreeSourcePlan(
   };
 }
 
+async function resolveRestoredWorktreeFromBasePlan(
+  cwd: string,
+  source: Extract<WorktreeSource, { kind: "restore-from-base" }>,
+): Promise<WorktreeSourcePlan> {
+  await validateExistingWorktreeBranchName(cwd, source.branchName);
+  const baseRef = await resolveBaseBranchForWorktree(cwd, source.baseRef);
+  const branchName = await resolveUniqueLocalBranchName(cwd, source.branchName);
+  return {
+    branchName,
+    metadataBaseRefName: normalizeRequiredBaseBranch(source.baseRef),
+    metadataBaseRef: baseRef,
+    addArguments: ["-b", branchName, "--no-track", baseRef],
+  };
+}
+
 async function resolveWorktreeSourcePlan({
   cwd,
   source,
@@ -1421,6 +1437,8 @@ async function resolveWorktreeSourcePlan({
     }
     case "restore":
       return resolveRestoredWorktreeSourcePlan(cwd, source);
+    case "restore-from-base":
+      return resolveRestoredWorktreeFromBasePlan(cwd, source);
     case "checkout-branch": {
       await validateExistingWorktreeBranchName(cwd, source.branchName);
       await ensureLocalBranch(cwd, source.branchName);
