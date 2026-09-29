@@ -35,7 +35,6 @@ at their desk, in real time, doing exactly what they're actually doing.
 JAgentDesk is a rebranded, independently‑developed fork of [Paseo](https://github.com/getpaseo/paseo)
 with a few deliberate boundaries:
 
-- **No in‑app editor.** You can view files, diffs, and logs — but you edit through the agent, not a text editor.
 - **Tailscale is the only remote transport.** No JAgentDesk relay.
 - **Application‑level pairing** with an offer link / QR and a 6‑digit verification code.
 - **Multi‑agent orchestration** (Supervisor → Lead → Peer) and agent‑to‑agent messaging.
@@ -65,12 +64,15 @@ with a few deliberate boundaries:
 - **Forge assistant** _(new)_ — a chat agent inside Forge that operates the forges via `forge_*`
   tools (reads plus pairing‑gated writes: comment, create issue, rerun pipeline, merge/create
   PR); the tools are shared, so any agent can use them, and a mobile chat widget opens it anywhere.
-- **Skills** _(new)_ — reusable expertise agents **use** (attach many from the composer) and
-  **learn** from real conversations; auto‑loaded by message, no hand‑typed corrections.
+- **Skills** _(new)_ — one hub for the standard SKILL.md skills of **every provider** (Claude,
+  Codex, OpenCode, Cursor, Copilot, Pi, Oh My Pi, Kimi, Kiro): browse a marketplace built from your
+  own sources, install for the machine or one project, pick skills in the composer and the agent
+  loads them natively, and train them from real replies.
 - **Plugins & Marketplace** _(new)_ — extend the app with surfaces, sidebar items, workspace
   panels, command‑center items, attachment sources, and themes. Browse the community catalog at
   **paseo.cafe** from inside the app and install **any Paseo plugin** in one tap — it is
-  auto‑rebranded on install so it runs on JAgentDesk (off by default).
+  auto‑rebranded on install so it runs on JAgentDesk (off by default). Install from a folder, Git
+  or npm source too, and preview updates before applying them.
 - **Find in chat & terminal** _(new)_ — Cmd/Ctrl+F searches the whole chat timeline (highlight +
   next/previous with a whole‑chat match count) and the terminal scrollback.
 - **Active‑turn steering** _(new)_ — send a message into a running turn without cancelling it.
@@ -97,6 +99,32 @@ with a few deliberate boundaries:
 ---
 
 ## ✨ New in this release
+
+### Native skills hub, archify diagrams, smoother long chats & Paseo 0.10.1 (v0.9.44)
+
+- **Skills for every provider.** Skills are now standard SKILL.md folders read natively by Claude,
+  Codex, OpenCode, Cursor, Copilot, Pi, Oh My Pi, Kimi and Kiro. The **Skills** screen lists every
+  skill on the machine and in the project, shows which providers can see it, and groups copies of
+  the same skill into one family.
+- **A marketplace from your own sources.** The official Anthropic and OpenAI skill repositories by
+  default, plus any GitHub repository, npm package, JSON skill index or local folder you add.
+  Browsing reads only file lists and front matter (first browse 72 s → about 2.4 s), and installing
+  downloads only the skill you chose. Uninstall removes exactly what JAgentDesk wrote.
+- **Skills load natively.** Pick skills in the composer and the agent is asked to load them the
+  way its provider expects (`/name`, `$name`, `/skill:name`); approve lessons from replies to train
+  them.
+- **Interactive architecture diagrams in Team mode.** The ARCH tab renders archify diagrams —
+  themes, search, upstream/downstream tracing and an animated trace — sandboxed on desktop and
+  mobile.
+- **Long chats stay smooth.** On a 40‑turn chat that keeps streaming: renderer CPU 0.46 → 0.28 of a
+  core, p95 frame 25.5 → 15.5 ms. Switching tabs keeps your reading position, hidden chats stop
+  rendering, and the daemon keeps one row per timeline item instead of every progress update
+  (2,000 updates: about 192 MiB → 0.6 MiB).
+- **Plugins from any source.** Settings → Plugins installs from a folder, Git or npm and shows
+  status, source and revision; `plugin update` previews changes first.
+- **Ported from Paseo 0.8.0–0.10.1:** OpenCode v2, Codex approvals that stay with you, Sonnet 5.5,
+  more robust daemon start, faster first diffs, and many app and provider fixes.
+- **Fix:** Team mode no longer shows your first prompt again after a reconnect.
 
 ### Workbench — an intercepting-proxy security workbench for your simulators (v0.9.43)
 
@@ -178,28 +206,10 @@ with a few deliberate boundaries:
   no longer shuts down the simulators SimFleet runs. Plugins calling `addSettingsScreen` now
   install.
 
-### Docker for the team, DB registration & a live architecture diagram (v0.9.39)
-
-- **Docker, end to end.** Team agents stand up and manage their own containers with `docker_*`
-  tools (run / exec / build / logs / inspect / stop / rm, through the normal tool‑approval flow),
-  and you watch and control them from a **realtime cockpit** — live `docker events` (no polling),
-  Compose‑project grouping, and a container detail view with **Logs** (find/follow), **Stats**,
-  **Inspect**, a `docker cp` **Files** manager, and a **real interactive Exec terminal**.
-- **Agents register the databases they work on** — the new `sql_connect` tool opens a connection
-  (Postgres / MySQL / SQLite / … via fields, a DSN, or a file) so a database the team provisions
-  shows up in your **Databases** panel to watch live.
-- **A living architecture diagram** — the team publishes what it's designing to a new **ARCH** tab
-  (versioned Mermaid, one pill per revision) so you can step back through how the design evolved.
-- **In‑app code editing is back** — workspace files open in a CodeMirror 6 editor with autosave,
-  alongside the existing file/diff viewers.
-- **Realtime browsing, not polling** — the browser agent now engineers event‑driven capture (page
-  hooks / CDP interception) for live‑monitoring tasks instead of re‑snapshotting on a loop.
-- **Fix:** plugins that call `defineSettings` now load and enable (the SDK exports it again).
-
 ### Older releases
 
 See **[CHANGELOG.md](CHANGELOG.md)** and the [releases page](https://github.com/knoobdev/jagentdesk/releases)
-for v0.9.38 and earlier.
+for v0.9.39 and earlier.
 
 ### Databases — a full database IDE (desktop **and** mobile)
 
@@ -261,30 +271,37 @@ Open **Clusters** from the sidebar to manage Kubernetes from inside JAgentDesk:
 
 For a full walkthrough see **[docs/kubernetes.md](docs/kubernetes.md)**.
 
-### Skills — reusable expertise your agents use and learn
+### Skills — one hub for every provider's skills
 
-Open **Skills** from the sidebar to build reusable expertise that **agents use** (many at once)
-and **learn** from real conversations — not throwaway one‑off agents:
+Open **Skills** from the sidebar. Skills are standard **SKILL.md** folders, so the same skill works
+in Claude, Codex, OpenCode, Cursor, Copilot, Pi, Oh My Pi, Kimi and Kiro:
 
-- **Create / edit / delete** a skill with an icon, name, description, an instruction prompt, and
-  comma‑separated tags.
-- **Attach from the composer** — a **Skills** picker in the composer lets you attach **one or more**
-  skills to the current agent; their instructions are injected so the agent actually uses them.
-  **Auto‑load** (on by default) matches relevant skills to your message automatically.
-- **Learn from the conversation** — no hand‑typed corrections. 👍 a real assistant reply and the
-  skill captures that answer as knowledge (+XP); the agent can also **propose a lesson** after a
-  turn for you to approve or reject.
-- **Level up** — skills earn XP as they learn, running Novice → Expert with an XP bar and a
-  **graduation checklist**.
-- Available on **desktop and mobile**.
+- **Installed** — every skill on this machine and in the current project, which providers can see
+  it, and its source. Copies of the same skill in different provider folders are grouped into one
+  family (**Copies differ** when their contents differ).
+- **Browse** — a marketplace built from your sources: the official Anthropic and OpenAI
+  repositories plus any GitHub repository (branch and sub‑folder too), npm package, JSON skill
+  index or local folder you add, and the Claude/Codex plugin marketplaces already on the machine.
+  Listing reads only file lists and front matter; installing downloads only the chosen skill.
+- **Install safely** — for the whole machine or one project, with a trust warning and the file
+  list first. Uninstall removes exactly what JAgentDesk wrote, and a skill JAgentDesk did not
+  install is never overwritten.
+- **Use in chat** — pick one or more skills in the composer; the agent is asked to load them the
+  way its provider expects. Also from the CLI: `jagentdesk agent send --skill <id>`.
+- **Train** — approve a lesson from a reply and it is written into the skill; training a skill you
+  did not write first makes your own copy. Create and edit skills from the app or through the
+  agent tools.
+- Available on **desktop and mobile**. Details: **[docs/skills.md](docs/skills.md)**.
 
 ### Plugins — extend the app with local, trusted code
 
 Install local plugins that contribute surfaces, sidebar items, workspace panels, command‑center
 items, attachment sources, and themes:
 
-- **Marketplace or local** — browse and install community plugins and themes from
-  **Marketplace**, or `jagentdesk plugin install <dir|npm:…|github:…>`.
+- **Marketplace or any source** — browse and install community plugins and themes from
+  **Marketplace**, install from a folder, Git or npm source under **Settings → Plugins** (status,
+  source and revision per plugin), or `jagentdesk plugin install <dir|npm:…|github:…>`;
+  `jagentdesk plugin update` previews changes before applying them.
 - **Split client / server entries** — `index.client` runs in the app and `index.server` in its
   own subprocess on the daemon (Paseo's plugin API); older single‑entry plugins still load.
 - **Trusted, off by default** — plugins run unsandboxed with a full daemon session, so

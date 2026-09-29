@@ -547,9 +547,10 @@ function loadSkillsSentence(provider: string, names: readonly string[]): string 
  * - Leading-command providers (`/name`, `/skill:name`) only expand the FIRST
  *   leading command — a second `/other` becomes argument text. The first skill
  *   is invoked natively and the rest follow on a new line:
- *   `Also use the skills \`b\`, \`c\`.`
+ *   `Before you answer, load these skills: \`b\`, \`c\`.` (Claude adds
+ *   "with the Skill tool").
  * - Codex expands several `$name` on one line.
- * - Text providers get one sentence: `Use the skills \`a\`, \`b\`.`
+ * - Text providers get one sentence for every skill.
  */
 export function buildSkillInvocationLine(provider: string, names: readonly string[]): string {
   const unique = Array.from(new Set(names.filter((name) => name.length > 0)));

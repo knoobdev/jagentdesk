@@ -1,9 +1,109 @@
 # Changelog
 
 All notable changes to JAgentDesk are documented here. JAgentDesk versions its
-own release line (now `0.9.43`); the many `v0.1.x`–`v1.0.x` tags in history are
+own release line (now `0.9.44`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
+
+## v0.9.44 — 2026-09-29
+
+Long chats that stay smooth, native skills for every agent provider, interactive architecture
+diagrams in Team mode, and a selective port of Paseo 0.8.0–0.10.1.
+
+### Performance
+
+- **Long chats stay smooth while an agent streams.** Streaming no longer re-measures the whole
+  history on every token. Measured on a 40-turn chat that keeps streaming: renderer CPU 0.46 → 0.28 of
+  a core, p95 frame time 25.5 → 15.5 ms, frames over 50 ms 5.6 → 0.8 per 3 seconds.
+- **Chats open with only the recent turns mounted.** Older loaded turns are revealed as you scroll up
+  before more history is fetched; Find and the chat outline still reach messages outside that window.
+- **History rows re-render only when they change**, and the chat outline no longer re-renders on
+  every token.
+- **Hidden chats stop rendering.** Chats in other tabs or workspaces no longer render while their
+  agents stream.
+- **The sidebar "running" dot animates with CSS** instead of a per-frame JavaScript animation that
+  kept the renderer busy whenever any agent was running.
+- **Switching tabs keeps your place.** A desktop pane now keeps up to 8 tabs mounted (was 3), so
+  returning to a chat no longer reloads it from the top and scrolls down.
+- **Very long assistant messages** (over 32,000 characters) are capped when rendered, with a note
+  showing the full size; the timeline keeps the full text.
+- **Markdown parsers are shared** across messages instead of being rebuilt for each one.
+- **Daemon memory.** The timeline keeps one row per item instead of a full copy of every progress
+  update from a running tool: 2,000 cumulative updates went from about 192 MiB to 0.6 MiB of extra memory. Forking at a
+  checkpoint inside a tool call that changed afterwards is refused with a clear message.
+- **Mobile.** Chat lists mount fewer rows per batch, and only the active workspace stays mounted.
+
+### Skills
+
+- **One skill format for every provider.** Skills are standard SKILL.md folders read by Claude,
+  Codex, OpenCode, Cursor, Copilot, Pi, Oh My Pi, Kimi and Kiro. Existing JAgentDesk skills are
+  migrated automatically.
+- **See every skill in one place.** The Skills screen lists the skills on this machine and in the
+  current project, shows which providers can see each one, and groups copies of the same skill in
+  different provider folders into one family (with a "Copies differ" badge when their contents
+  differ).
+- **Install from anywhere.** Browse a marketplace built from your sources: the official Anthropic and
+  OpenAI skill repositories by default, plus any GitHub repository (optionally a sub-folder or
+  branch), npm package, JSON skill index or local folder you add. Claude and Codex plugin
+  marketplaces already added on the machine are listed too.
+- **Fast browsing, minimal downloads.** Listing reads only the file list and each skill's
+  front matter, and installing downloads only the chosen skill. First browse of both official
+  repositories dropped from 72 s to about 2.4 s; cached browsing is instant.
+- **Safe installs.** Install for the whole machine or a single project; uninstall removes exactly
+  what JAgentDesk wrote; a skill JAgentDesk did not install is never overwritten; disabling a skill
+  can be undone exactly; a trust warning and the file list are shown before every install.
+- **Use skills in chat.** Pick skills in the composer and the daemon invokes them natively for the
+  agent's provider (`/name`, `$name` or `/skill:name`, a plain request for OpenCode); with several skills, the first is invoked
+  directly and the agent is asked to load the rest. Also available from the CLI (`agent send --skill`)
+  and agent-to-agent prompts.
+- **Train skills.** Approve a lesson from a reply and it is written into the skill itself; training a
+  skill JAgentDesk does not own first creates your own copy.
+- **Create and edit skills** as SKILL.md from the app or through the agent tools.
+- **Removed keyword auto-load.** It attached unrelated skills; providers already pick skills from
+  their descriptions.
+
+### Team mode
+
+- **Interactive architecture diagrams.** The ARCH tab shows diagrams drawn with archify: light and
+  dark themes, search, upstream/downstream tracing and an animated trace with a Replay button. They
+  are rendered by the daemon and shown sandboxed (no network access) on desktop and mobile; older
+  apps see a note asking to update. Invalid diagrams are returned to the lead agent with each error so
+  it can fix them.
+- **Fixed:** Team mode no longer shows your first prompt again at the bottom of the lead's chat after a
+  reconnect, and the Team toggle switches off once a team has started so follow-up messages do not
+  open another team.
+
+### Plugins
+
+- Settings → Plugins installs plugins from a folder, Git or npm source and shows each plugin's
+  status, source and revision, with enable/disable and an actions menu. The CLI gains
+  `plugin update` with a preview before applying.
+
+### Ported from Paseo 0.8.0–0.10.1
+
+- **App:** workspace-relative file links on Windows, OSC 8 terminal links, scrollable theme list,
+  dates for last week's messages, Backspace in custom shortcuts, voice reply timing, Android back
+  button for sheets, Android clipboard image paste, multi-select questions keep the "Other" answer,
+  multi-step shortcuts with modifiers, keyboard listeners no longer re-register on every render,
+  skills in the `/` menu refresh when the branch changes, model picker rows without nested buttons,
+  Android tablet model picker, reload to the project picker after an app error, Find in the file
+  editor, and plugins can open external links.
+- **Providers:** Codex keeps approvals with you in every mode except Auto-review; OpenCode runs under
+  the permission rules it was given; Claude slash commands and rewind fixes; Sonnet 5.5 in the model
+  list; Cursor thinking options per model and models without a Fast variant; Pi and Oh My Pi fixes;
+  the daemon keeps running when an ACP agent fails to start; ACP terminals carry the agent's
+  identity; custom Codex providers in import, archive and rewind; OpenCode v2 with automatic version
+  selection (falls back to v1).
+- **Daemon and CLI:** the daemon starts with a stray file in the schedules folder, an empty pid file,
+  a config file saved with a byte-order mark, or an unwritable log; upload file names are kept; fork
+  pull requests are detected; archived worktrees restore with their commits; plugin sessions survive
+  an expired lease; file watching uses less CPU; faster first diffs; clearer CLI errors and full
+  permission ids.
+
+### Fixes
+
+- Find jumps reliably to matches in older, virtualized parts of a long chat.
+- Team mode live updates are delivered through each app connection.
 
 ## v0.9.43 — 2026-09-27
 

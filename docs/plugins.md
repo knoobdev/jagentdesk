@@ -39,6 +39,12 @@ manifest is read): the manifest file is renamed, `requirements.paseo` becomes
 (`usePaseo`, `usePaseoContextValue`, `PaseoApiProvider`, `getPaseoClient`) are renamed in
 files that import the SDK. Entry file names are kept.
 
+## Installing and updating
+
+Settings → Plugins installs from a directory, Git or npm source and shows each plugin's status,
+source and revision. `jagentdesk plugin update [plugin-id]` shows the available updates and asks before applying
+them (`--yes` skips the prompt, `--check` only shows them). The Marketplace entry (paseo.cafe catalog) is kept alongside the source installer.
+
 ## Persistence
 
 `pluginsEnabled` and `plugins` are written at the top level of `config.json`, so installed
