@@ -54,3 +54,14 @@ export async function chooseProviderFromSnapshot(url: string, cwd: string): Prom
     await client.close();
   }
 }
+
+export async function steerAgent(url: string, agentId: string, prompt: string): Promise<void> {
+  const client = createClient(url);
+
+  try {
+    await client.connect();
+    await client.agents.ref(agentId).send(prompt, { activeTurnBehavior: "steer" });
+  } finally {
+    await client.close();
+  }
+}
