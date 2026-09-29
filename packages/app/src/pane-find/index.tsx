@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
+  type ReactNode,
 } from "react";
 import {
   Pressable,
@@ -14,10 +15,12 @@ import {
   View,
   type NativeSyntheticEvent,
   type TextInputKeyPressEventData,
+  type TextInputProps,
 } from "react-native";
-import { ArrowDown, ArrowUp, X } from "lucide-react-native";
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, X } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
+import { Button } from "@/components/ui/button";
 import {
   createControlGeometry,
   resolveControlInteractionStyles,
@@ -26,10 +29,9 @@ import { isWeb } from "@/constants/platform";
 import { isImeComposingKeyboardEvent } from "@/utils/keyboard-ime";
 import { getShortcutOs } from "@/utils/shortcut-platform";
 
-export { isFindShortcut } from "@/terminal/runtime/terminal-find-shortcut";
-export interface FindShortcutPlatform {
-  isMac: boolean;
-}
+import { isFindShortcut, type FindShortcutPlatform } from "./find-shortcut";
+
+export { isFindShortcut, type FindShortcutPlatform } from "./find-shortcut";
 
 /** The platform every Find surface judges the shortcut against. */
 export function findShortcutPlatform(): FindShortcutPlatform {
@@ -45,6 +47,8 @@ const FieldTextInput = withUnistyles(TextInput, (theme) => ({
 const ArrowUpIcon = withUnistyles(ArrowUp, iconColorMapping);
 const ArrowDownIcon = withUnistyles(ArrowDown, iconColorMapping);
 const CloseIcon = withUnistyles(X, iconColorMapping);
+const ChevronDownIcon = withUnistyles(ChevronDown, iconColorMapping);
+const ChevronRightIcon = withUnistyles(ChevronRight, iconColorMapping);
 
 export interface PaneFindHandle {
   focus(): void;
@@ -68,21 +72,29 @@ export interface PaneFindProps {
 
 const GLYPH_SIZE = 16;
 
-/** Pane-local chrome. The content owner supplies search state and commands. */
-export const PaneFind = forwardRef<PaneFindHandle, PaneFindProps>(function PaneFind(
-  { query, status, canNavigate, onQueryChange, onNext, onPrevious, onClose },
+/**
+ * The bordered box around one Find input. It owns the field chrome so the query
+ * row and the replacement row land on the same rails, and so the match count can
+ * sit inside the query box instead of widening the widget.
+ */
+const FindField = forwardRef<
+  TextInput,
+  {
+    label: string;
+    value: string;
+    trailing?: ReactNode;
+    onChangeText(value: string): void;
+    onKeyPress(event: NativeSyntheticEvent<TextInputKeyPressEventData>): void;
+    autoFocus?: boolean;
+    returnKeyType?: TextInputProps["returnKeyType"];
+  }
+>(function FindField(
+  { label, value, trailing, onChangeText, onKeyPress, autoFocus, returnKeyType },
   ref,
 ) {
-  const { t } = useTranslation();
-  const input = useRef<TextInput>(null);
   const [focused, setFocused] = useState(false);
   const onFocus = useCallback(() => setFocused(true), []);
   const onBlur = useCallback(() => setFocused(false), []);
-  const focus = useCallback(() => {
-    input.current?.focus();
-  }, []);
-  useImperativeHandle(ref, () => ({ focus }), [focus]);
-
   const fieldStyle = useMemo(
     () => [
       styles.field,
@@ -97,14 +109,67 @@ export const PaneFind = forwardRef<PaneFindHandle, PaneFindProps>(function PaneF
     ],
     [focused],
   );
+  return (
+    <View style={fieldStyle}>
+      <FieldTextInput
+        ref={ref}
+        autoFocus={autoFocus}
+        selectTextOnFocus
+        value={value}
+        onChangeText={onChangeText}
+        onKeyPress={onKeyPress}
+        onFocus={onFocus}
+        onBlur={onBlur}
+        accessibilityLabel={label}
+        placeholder={label}
+        autoCapitalize="none"
+        autoCorrect={false}
+        blurOnSubmit={false}
+        returnKeyType={returnKeyType}
+        style={styles.input}
+      />
+      {trailing}
+    </View>
+  );
+});
+
+/** Pane-local chrome. The content owner supplies search state and commands. */
+export const PaneFind = forwardRef<PaneFindHandle, PaneFindProps>(function PaneFind(
+  { query, status, canNavigate, onQueryChange, onNext, onPrevious, onClose, replace },
+  ref,
+) {
+  const { t } = useTranslation();
+  const input = useRef<TextInput>(null);
+  const [replaceExpanded, setReplaceExpanded] = useState(false);
+  const focus = useCallback(() => {
+    input.current?.focus();
+  }, []);
+  useImperativeHandle(ref, () => ({ focus }), [focus]);
 
   const onKeyPress = useCallback(
     (event: NativeSyntheticEvent<TextInputKeyPressEventData>) => {
       const key = event.nativeEvent as TextInputKeyPressEventData & {
         shiftKey?: boolean;
+        ctrlKey?: boolean;
+        metaKey?: boolean;
+        altKey?: boolean;
         isComposing?: boolean;
       };
       if (isImeComposingKeyboardEvent(key)) return;
+      const shortcut = {
+        key: key.key,
+        metaKey: key.metaKey === true,
+        ctrlKey: key.ctrlKey === true,
+        shiftKey: key.shiftKey === true,
+        altKey: key.altKey === true,
+      };
+      if (isFindShortcut(shortcut, findShortcutPlatform())) {
+        // RN Web inputs stop keydown before the pane's document listener.
+        event.preventDefault();
+        event.stopPropagation();
+        focus();
+        return;
+      }
       if (key.key !== "Escape" && key.key !== "Enter") return;
       event.preventDefault();
       event.stopPropagation();
@@ -112,7 +177,7 @@ export const PaneFind = forwardRef<PaneFindHandle, PaneFindProps>(function PaneF
       else if (key.shiftKey) onPrevious();
       else onNext();
     },
-    [onClose, onNext, onPrevious],
+    [focus, onClose, onNext, onPrevious],
   );
 
   const onWidgetKeyDown = useCallback(
@@ -125,6 +190,21 @@ export const PaneFind = forwardRef<PaneFindHandle, PaneFindProps>(function PaneF
     },
     [onClose],
   );
+  const toggleReplace = useCallback(() => setReplaceExpanded((expanded) => !expanded), []);
+  const toggleState = useMemo(() => ({ expanded: replaceExpanded }), [replaceExpanded]);
+  const matchCount = useMemo(
+    () => (
+      <Text
+        style={styles.status}
+        role="status"
+        accessibilityLabel={t("paneFind.matches")}
+        accessibilityLiveRegion="polite"
+      >
+        {status}
+      </Text>
+    ),
+    [status, t],
+  );
 
   return (
     <View
@@ -132,52 +212,87 @@ export const PaneFind = forwardRef<PaneFindHandle, PaneFindProps>(function PaneF
       accessibilityLabel={t("paneFind.title")}
       {...(isWeb ? { onKeyDown: onWidgetKeyDown } : {})}
     >
-      <View style={fieldStyle}>
-        <FieldTextInput
-          ref={input}
-          autoFocus
-          selectTextOnFocus
-          value={query}
-          onChangeText={onQueryChange}
-          onKeyPress={onKeyPress}
-          onFocus={onFocus}
-          onBlur={onBlur}
-          accessibilityLabel={t("paneFind.placeholder")}
-          placeholder={t("paneFind.placeholder")}
-          autoCapitalize="none"
-          autoCorrect={false}
-          blurOnSubmit={false}
-          returnKeyType="search"
-          style={styles.input}
-        />
-        <Text
-          style={styles.status}
-          role="status"
-          accessibilityLabel={t("paneFind.matches")}
-          accessibilityLiveRegion="polite"
-        >
-          {status}
-        </Text>
+      {replace ? (
+        <View style={styles.gutter}>
+          <Pressable
+            accessibilityLabel={t("paneFind.toggleReplace")}
+            accessibilityState={toggleState}
+            onPress={toggleReplace}
+            style={styles.control}
+          >
+            {replaceExpanded ? (
+              <ChevronDownIcon size={GLYPH_SIZE} />
+            ) : (
+              <ChevronRightIcon size={GLYPH_SIZE} />
+            )}
+          </Pressable>
+        </View>
+      ) : null}
+      <View style={styles.rows}>
+        <View style={styles.row}>
+          <FindField
+            ref={input}
+            autoFocus
+            label={t("paneFind.placeholder")}
+            value={query}
+            returnKeyType="search"
+            trailing={matchCount}
+            onChangeText={onQueryChange}
+            onKeyPress={onKeyPress}
+          />
+          <Pressable
+            accessibilityLabel={t("paneFind.previous")}
+            disabled={!canNavigate}
+            onPress={onPrevious}
+            style={styles.control}
+          >
+            <ArrowUpIcon size={GLYPH_SIZE} />
+          </Pressable>
+          <Pressable
+            accessibilityLabel={t("paneFind.next")}
+            disabled={!canNavigate}
+            onPress={onNext}
+            style={styles.control}
+          >
+            <ArrowDownIcon size={GLYPH_SIZE} />
+          </Pressable>
+          <Pressable
+            accessibilityLabel={t("paneFind.close")}
+            onPress={onClose}
+            style={styles.control}
+          >
+            <CloseIcon size={GLYPH_SIZE} />
+          </Pressable>
+        </View>
+        {replace && replaceExpanded ? (
+          <View style={styles.row}>
+            <FindField
+              label={t("paneFind.replaceWith")}
+              value={replace.value}
+              onChangeText={replace.onChange}
+              onKeyPress={onKeyPress}
+            />
+            <Button
+              variant="ghost"
+              size="xs"
+              style={styles.replaceAction}
+              disabled={!canNavigate}
+              onPress={replace.onReplace}
+            >
+              {t("paneFind.replace")}
+            </Button>
+            <Button
+              variant="ghost"
+              size="xs"
+              style={styles.replaceAction}
+              disabled={!canNavigate}
+              onPress={replace.onReplaceAll}
+            >
+              {t("paneFind.replaceAll")}
+            </Button>
+          </View>
+        ) : null}
       </View>
-      <Pressable
-        accessibilityLabel={t("paneFind.previous")}
-        disabled={!canNavigate}
-        onPress={onPrevious}
-        style={styles.control}
-      >
-        <ArrowUpIcon size={GLYPH_SIZE} />
-      </Pressable>
-      <Pressable
-        accessibilityLabel={t("paneFind.next")}
-        disabled={!canNavigate}
-        onPress={onNext}
-        style={styles.control}
-      >
-        <ArrowDownIcon size={GLYPH_SIZE} />
-      </Pressable>
-      <Pressable accessibilityLabel={t("paneFind.close")} onPress={onClose} style={styles.control}>
-        <CloseIcon size={GLYPH_SIZE} />
-      </Pressable>
     </View>
   );
 });
@@ -193,7 +308,6 @@ const styles = StyleSheet.create((theme) => {
       width: FIND_WIDGET_WIDTH,
       maxWidth: "100%",
       flexDirection: "row",
-      alignItems: "center",
       padding: theme.spacing[1.5],
       gap: theme.spacing[1],
       backgroundColor: theme.colors.surface1,
@@ -202,6 +316,10 @@ const styles = StyleSheet.create((theme) => {
       borderRadius: theme.borderRadius.lg,
       ...theme.shadow.md,
     },
+    // The disclosure column spans both rows so the two fields share a leading rail.
+    gutter: { height: CONTROL_SIZE, alignItems: "center", justifyContent: "center", flexShrink: 0 },
+    rows: { flex: 1, minWidth: 0, gap: theme.spacing[1] },
+    row: { flexDirection: "row", alignItems: "center", gap: theme.spacing[1] },
     field: {
       flex: 1,
       minWidth: 0,
@@ -238,5 +356,7 @@ const styles = StyleSheet.create((theme) => {
       justifyContent: "center",
       borderRadius: theme.borderRadius.md,
     },
+    // Ghost actions sit on the field's rail, so they carry the field's padding.
+    replaceAction: { paddingHorizontal: theme.spacing[2] },
   };
 });

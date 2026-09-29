@@ -345,12 +345,18 @@ export function QuestionFormCard({ permission, onRespond, isResponding }: Questi
       }
 
       setSelections((prev) => ({ ...prev, [qIndex]: next }));
-      setOtherTexts((prev) => {
-        if (!prev[qIndex]) return prev;
-        const nextTexts = { ...prev };
-        delete nextTexts[qIndex];
-        return nextTexts;
-      });
+
+      // Single-select: an option and a custom answer replace each other, as in Claude Code.
+      // Multi-select keeps both. The Other field is controlled by `otherTexts`, so clearing
+      // state also clears the text on screen.
+      if (!multiSelect) {
+        setOtherTexts((prev) => {
+          if (!prev[qIndex]) return prev;
+          const nextTexts = { ...prev };
+          delete nextTexts[qIndex];
+          return nextTexts;
+        });
+      }
 
       if (!multiSelect && next.size > 0 && qIndex === activeQuestionIndex && questions) {
         setActiveQuestionIndex(Math.min(qIndex + 1, questions.length - 1));
@@ -359,15 +365,19 @@ export function QuestionFormCard({ permission, onRespond, isResponding }: Questi
     [activeQuestionIndex, questions, selections],
   );
 
-  const setOtherText = useCallback((qIndex: number, text: string) => {
-    setOtherTexts((prev) => ({ ...prev, [qIndex]: text }));
-    if (text.length > 0) {
-      setSelections((prev) => {
-        if (!prev[qIndex] || prev[qIndex].size === 0) return prev;
-        return { ...prev, [qIndex]: new Set<number>() };
-      });
-    }
-  }, []);
+  const setOtherText = useCallback(
+    (qIndex: number, text: string) => {
+      setOtherTexts((prev) => ({ ...prev, [qIndex]: text }));
+      const multiSelect = questions?.[qIndex]?.multiSelect ?? false;
+      if (!multiSelect && text.length > 0) {
+        setSelections((prev) => {
+          if (!prev[qIndex] || prev[qIndex].size === 0) return prev;
+          return { ...prev, [qIndex]: new Set<number>() };
+        });
+      }
+    },
+    [questions],
+  );
 
   const allAnswered = areQuestionsAnswered(questions, selections, otherTexts);
   const resolvedActiveQuestionIndex = questions

@@ -11,6 +11,7 @@ import {
   prPanePipelineQueryKey,
   prPaneTimelineQueryKey,
 } from "@/git/pull-request-panel/query-keys";
+import { draftAgentCommandsQueryKey } from "@/hooks/agent-commands-query";
 import { resetReviewDraftStore, useReviewDraftStore } from "@/review/store";
 import {
   applyCheckoutStatusUpdateFromEvent,
@@ -188,6 +189,51 @@ describe("applyCheckoutStatusUpdateFromEvent", () => {
     expect(
       queryClient.getQueryState(checkoutCommitsQueryKey(serverId, "/repo2"))?.isInvalidated,
     ).toBe(false);
+  });
+
+  it("drops the checkout's cached draft slash commands when its branch changes", () => {
+    const queryClient = createQueryClient();
+    queryClient.setQueryData(
+      checkoutStatusQueryKey(serverId, cwd),
+      checkoutStatus({ currentBranch: "chore/build-jagentdesk" }),
+    );
+    const thisCheckout = draftAgentCommandsQueryKey({
+      serverId,
+      draftConfig: { provider: "claude", cwd, model: "haiku" },
+    });
+    const otherCheckout = draftAgentCommandsQueryKey({
+      serverId,
+      draftConfig: { provider: "claude", cwd: "/repo2", model: "haiku" },
+    });
+    queryClient.setQueryData(thisCheckout, [{ name: "build-jagentdesk" }]);
+    queryClient.setQueryData(otherCheckout, [{ name: "build-jagentdesk" }]);
+
+    applyCheckoutStatusUpdateFromEvent({
+      queryClient,
+      serverId,
+      message: checkoutStatusUpdate(checkoutStatus({ currentBranch: "main" })),
+    });
+
+    expect(queryClient.getQueryData(thisCheckout)).toBeUndefined();
+    expect(queryClient.getQueryData(otherCheckout)).toEqual([{ name: "build-jagentdesk" }]);
+  });
+
+  it("keeps the checkout's draft slash commands when a push leaves its branch unchanged", () => {
+    const queryClient = createQueryClient();
+    queryClient.setQueryData(checkoutStatusQueryKey(serverId, cwd), checkoutStatus());
+    const thisCheckout = draftAgentCommandsQueryKey({
+      serverId,
+      draftConfig: { provider: "claude", cwd, model: "haiku" },
+    });
+    queryClient.setQueryData(thisCheckout, [{ name: "build-jagentdesk" }]);
+
+    applyCheckoutStatusUpdateFromEvent({
+      queryClient,
+      serverId,
+      message: checkoutStatusUpdate(checkoutStatus({ isDirty: true })),
+    });
+
+    expect(queryClient.getQueryData(thisCheckout)).toEqual([{ name: "build-jagentdesk" }]);
   });
 
   it("writes the PR status cache when prStatus is present, and skips it otherwise", () => {

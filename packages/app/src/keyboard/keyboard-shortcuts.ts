@@ -5,7 +5,7 @@ import type {
   KeyboardShortcutPayload,
   MessageInputKeyboardActionKind,
 } from "@/keyboard/actions";
-import { type KeyCombo, parseChordString } from "@/keyboard/shortcut-string";
+import { isModifierKeyCode, type KeyCombo, parseChordString } from "@/keyboard/shortcut-string";
 import { chordStringToShortcutKeys } from "@/keyboard/shortcut-string";
 
 export type { KeyCombo } from "@/keyboard/shortcut-string";
@@ -1092,8 +1092,27 @@ export function buildEffectiveBindings(overrides: Record<string, string>): Parse
     if (binding.repeat === false && lastCombo) {
       lastCombo.repeat = false;
     }
-    return { ...binding, combo: override, parsedChord };
+    const when = withoutDefaultComboGuard(binding.when);
+    return { ...binding, combo: override, parsedChord, when };
   });
+}
+
+/**
+ * `editable: false` is a statement about a binding's *default* combo, not
+ * about its action: the pane-focus defaults carry it so that Cmd+Shift+Arrow
+ * keeps selecting text in a field instead of moving pane focus. An override
+ * replaces that combo, so the guard no longer describes anything and has to
+ * go — otherwise the combo the user picked in Settings silently refuses to
+ * fire wherever they are typing.
+ *
+ * The other guards stay. Platform, command center, terminal and focus scope
+ * are properties of the action and of where it makes sense, and none of them
+ * change because the keys did.
+ */
+function withoutDefaultComboGuard(when: ShortcutWhen | undefined): ShortcutWhen | undefined {
+  if (when?.editable !== false) return when;
+  const { editable: _editable, ...rest } = when;
+  return rest;
 }
 
 // --- Matching engine ---
@@ -1369,6 +1388,13 @@ export function resolveKeyboardShortcut(input: {
   preventDefault: boolean;
 } {
   const { event, context, chordState, onChordReset, bindings = DEFAULT_BINDINGS } = input;
+  // Pressing a modifier emits its own keydown before the combo that holds it,
+  // so a chord waiting on `Ctrl+J` sees a bare `Control` first. That keydown
+  // matches no combo, and resolving it would drop the chord back to its first
+  // step. It decides nothing: leave the chord where it is.
+  if (isModifierKeyCode(event.code)) {
+    return { match: null, nextChordState: chordState, preventDefault: false };
+  }
   if (chordState.step === 0) {
     return resolveInitialChordStep({ event, context, chordState, onChordReset, bindings });
   }

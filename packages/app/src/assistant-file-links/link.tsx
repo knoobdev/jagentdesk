@@ -19,6 +19,7 @@ import { CODE_SURFACE_DATASET } from "@/styles/code-surface";
 import { markdownCopyDataSet } from "@/assistant-selection-copy/markup";
 import { useAssistantFileLinkResolverContext } from "./provider";
 import type { AssistantFileLinkSource } from "./resolver";
+import { formatFileLinkTooltipPath } from "./tooltip-path";
 import { useFileLink } from "./use-file-link";
 
 interface AssistantMarkdownLinkProps {
@@ -44,7 +45,7 @@ export function AssistantMarkdownLink({
   const { configRef } = useAssistantFileLinkResolverContext();
   const workspaceRoot = configRef.current.workspaceRoot;
   const tooltipPath = useMemo(
-    () => (target ? formatInlinePathTargetForTooltip(target, workspaceRoot) : null),
+    () => (target ? formatFileLinkTooltipPath({ target, workspaceRoot }) : null),
     [target, workspaceRoot],
   );
   const handleAnchorClickCapture = useStableEvent((event: MouseEvent<HTMLAnchorElement>) => {
@@ -157,38 +158,6 @@ export function AssistantMarkdownCodeLink({
       {children}
     </AssistantMarkdownLink>
   );
-}
-
-function formatInlinePathTargetForTooltip(
-  target: { path: string; lineStart?: number; lineEnd?: number },
-  workspaceRoot: string | undefined,
-): string {
-  let result = relativizePathToWorkspace(target.path, workspaceRoot);
-  if (target.lineStart) {
-    result += `:${target.lineStart}`;
-    if (target.lineEnd && target.lineEnd !== target.lineStart) {
-      result += `-${target.lineEnd}`;
-    }
-  }
-  return result;
-}
-
-function relativizePathToWorkspace(filePath: string, workspaceRoot: string | undefined): string {
-  if (!workspaceRoot) {
-    return filePath;
-  }
-  const root = workspaceRoot.replace(/\/+$/, "");
-  if (!root) {
-    return filePath;
-  }
-  if (filePath === root) {
-    return ".";
-  }
-  const prefix = `${root}/`;
-  if (filePath.startsWith(prefix)) {
-    return filePath.slice(prefix.length);
-  }
-  return filePath;
 }
 
 interface AssistantInlineCodePathLinkProps {

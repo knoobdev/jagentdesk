@@ -219,7 +219,7 @@ function ThemeRow({
           <Text style={styles.triggerText}>{selectedLabel}</Text>
           <ThemedChevronDown size={ICON_SIZE.sm} uniProps={mutedColorMapping} />
         </DropdownMenuTrigger>
-        <DropdownMenuContent side="bottom" align="end" width={220}>
+        <DropdownMenuContent side="bottom" align="end" width={220} scrollable>
           {PRIMARY_THEMES.map((themeValue) => (
             <ThemeMenuItem
               key={themeValue}

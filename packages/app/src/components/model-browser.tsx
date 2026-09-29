@@ -463,6 +463,7 @@ function ModelBrowserRow({
   description,
   leadingSlot,
   trailingSlot,
+  trailingAction,
   selected = false,
   selectionIndicator = false,
   tone = "default",
@@ -474,6 +475,8 @@ function ModelBrowserRow({
   description?: string;
   leadingSlot: React.ReactNode;
   trailingSlot?: React.ReactNode;
+  /** A pressable of its own; rendered beside the row rather than inside it. */
+  trailingAction?: React.ReactNode;
   selected?: boolean;
   selectionIndicator?: boolean;
   tone?: ModelBrowserRowTone;
@@ -484,20 +487,20 @@ function ModelBrowserRow({
   const pressableStyle = useCallback(
     ({ hovered, pressed }: PressableStateCallbackType & { hovered?: boolean }) => [
       styles.browserRow,
-      spacing === "model" && styles.browserModelRow,
+      spacing === "model" && !trailingAction && styles.browserModelRow,
       Boolean(hovered) &&
         (tone === "elevated" ? styles.browserRowHoveredElevated : styles.browserRowHovered),
       pressed && (tone === "default" ? styles.browserRowPressed : styles.browserRowPressedElevated),
     ],
-    [spacing, tone],
+    [spacing, tone, trailingAction],
   );
   const contentStyle = useMemo(
     () => [styles.browserRowText, description && styles.browserRowTextInline],
     [description],
   );
-  const hasTrailing = selected || trailingSlot;
+  const hasTrailing = selected || trailingSlot || trailingAction;
 
-  return (
+  const row = (
     <ModelBrowserPressable onPress={onPress} style={pressableStyle} testID={testID}>
       <View style={styles.browserRowContent}>
         <View style={styles.browserRowLeading}>{leadingSlot}</View>
@@ -521,10 +524,26 @@ function ModelBrowserRow({
               </View>
             ) : null}
             {trailingSlot}
+            {trailingAction ? <View style={styles.rowIconButton} /> : null}
           </View>
         ) : null}
       </View>
     </ModelBrowserPressable>
+  );
+
+  if (!trailingAction) {
+    return row;
+  }
+
+  return (
+    <View style={[styles.modelRowHoverBoundary, spacing === "model" && styles.browserModelRow]}>
+      {row}
+      {/* The row renders a <button> on web, so its action sits beside it, over the slot
+          reserved above, rather than inside it. */}
+      <View style={styles.rowTrailingActionSlot} pointerEvents="box-none">
+        {trailingAction}
+      </View>
+    </View>
   );
 }
 
@@ -552,7 +571,7 @@ function ModelRow({
     () => <ModelProviderGlyph provider={row.provider} size={ICON_SIZE.sm} />,
     [row.provider],
   );
-  const trailingSlot = useMemo(
+  const trailingAction = useMemo(
     () =>
       onToggleFavorite ? (
         <ModelBrowserPressable
@@ -579,7 +598,7 @@ function ModelRow({
       tone={elevated ? "elevated" : "default"}
       onPress={onPress}
       leadingSlot={leadingSlot}
-      trailingSlot={trailingSlot}
+      trailingAction={trailingAction}
     />
   );
 }
@@ -1059,6 +1078,16 @@ const styles = StyleSheet.create((theme) => ({
     flexDirection: "row",
     paddingVertical: theme.spacing[2],
     minHeight: 36,
+  },
+  modelRowHoverBoundary: {
+    position: "relative",
+  },
+  rowTrailingActionSlot: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    right: isWeb ? theme.spacing[3] : theme.spacing[6],
+    justifyContent: "center",
   },
   browserModelRow: isWeb ? {} : { marginBottom: theme.spacing[1] },
   browserRowHovered: {
