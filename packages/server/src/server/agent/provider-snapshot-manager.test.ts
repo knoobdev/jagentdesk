@@ -69,6 +69,34 @@ async function withEnv(key: string, value: string, run: () => Promise<void>): Pr
 }
 
 describe("ProviderSnapshotManager public surface", () => {
+  test("publishes one model per provider identity and retains the first definition", async () => {
+    const first = { provider: "codex", id: "shared", label: "First", isDefault: true };
+    const manager = new ProviderSnapshotManager({
+      logger: createTestLogger(),
+      extraClients: {
+        codex: createExtraClient("codex", {
+          isAvailable: async () => true,
+          fetchCatalog: async () => ({
+            models: [first, { ...first, label: "Duplicate" }],
+            modes: [],
+          }),
+        }),
+        claude: createExtraClient("claude", {
+          isAvailable: async () => true,
+          fetchCatalog: async () => ({ models: [{ ...first, provider: "claude" }], modes: [] }),
+        }),
+      },
+    });
+    try {
+      const codex = await manager.getProvider({ provider: "codex", wait: true });
+      const claude = await manager.getProvider({ provider: "claude", wait: true });
+      expect(codex.models).toEqual([first]);
+      expect(claude.models).toEqual([{ ...first, provider: "claude" }]);
+    } finally {
+      manager.destroy();
+    }
+  });
+
   test("listRegisteredProviderIds includes the built-in providers", () => {
     const manager = new ProviderSnapshotManager({ logger: createTestLogger() });
     try {

@@ -171,8 +171,16 @@ function createSession(
   return session;
 }
 
-function createProviderWithFakeAppServer(appServer: FakeCodexAppServer): CodexAppServerAgentClient {
-  const provider = new CodexAppServerAgentClient(createTestLogger());
+function createProviderWithFakeAppServer(
+  appServer: FakeCodexAppServer,
+  options?: {
+    runtimeSettings?: ConstructorParameters<typeof CodexAppServerAgentClient>[1];
+    customProvider?: { id: string; label: string; extends: string };
+  },
+): CodexAppServerAgentClient {
+  const provider = new CodexAppServerAgentClient(createTestLogger(), options?.runtimeSettings, {
+    customProvider: options?.customProvider,
+  });
   const internals = castInternals<{
     goalsEnabledPromise: Promise<boolean> | null;
     autoReviewEnabledPromise: Promise<boolean> | null;
@@ -612,6 +620,111 @@ process.stdin.on("data", (chunk) => {
   }
 }
 
+async function withCustomCodexProviderHome<T>(
+  run: (input: {
+    session: AgentSession;
+    readCaptured: () => CapturedFakeCodexRecord[];
+  }) => Promise<T>,
+): Promise<T> {
+  const tempDir = await mkdtemp(path.join(tmpdir(), "codex-provider-home-"));
+  const daemonCodexHome = path.join(tempDir, "daemon-codex-home");
+  const providerCodexHome = path.join(tempDir, "provider-codex-home");
+  const fakeAppServerPath = path.join(tempDir, "fake-codex-app-server.cjs");
+  const capturedRequestsPath = path.join(tempDir, "requests.jsonl");
+  mkdirSync(path.join(daemonCodexHome, "prompts"), { recursive: true });
+  mkdirSync(path.join(providerCodexHome, "prompts"), { recursive: true });
+  writeFileSync(
+    path.join(daemonCodexHome, "prompts", "probe-default.md"),
+    "---\ndescription: Daemon home prompt\n---\nfrom the daemon home\n",
+  );
+  writeFileSync(
+    path.join(providerCodexHome, "prompts", "probe-profile.md"),
+    "---\ndescription: Provider home prompt\n---\nfrom the provider home\n",
+  );
+  writeFileSync(
+    fakeAppServerPath,
+    `
+const fs = require("node:fs");
+
+const capturePath = process.env.JAGENTDESK_FAKE_CODEX_CAPTURE;
+let buffer = "";
+
+fs.appendFileSync(capturePath, JSON.stringify({ kind: "env", CODEX_HOME: process.env.CODEX_HOME }) + "\\n");
+
+function resultFor(method) {
+  if (method === "collaborationMode/list") return { data: [] };
+  if (method === "skills/list") return { data: [] };
+  if (method === "model/list") return { data: [{ id: "profile-model", isDefault: true }] };
+  if (method === "thread/start") return { thread: { id: "thread-1" } };
+  return {};
+}
+
+process.stdin.on("data", (chunk) => {
+  buffer += chunk.toString();
+  for (;;) {
+    const newlineIndex = buffer.indexOf("\\n");
+    if (newlineIndex === -1) break;
+    const line = buffer.slice(0, newlineIndex).trim();
+    buffer = buffer.slice(newlineIndex + 1);
+    if (!line) continue;
+    const message = JSON.parse(line);
+    fs.appendFileSync(capturePath, JSON.stringify({ kind: "request", method: message.method, params: message.params }) + "\\n");
+    process.stdout.write(JSON.stringify({ id: message.id, result: resultFor(message.method) }) + "\\n");
+  }
+});
+`,
+  );
+
+  vi.stubEnv("CODEX_HOME", daemonCodexHome);
+  const registry = buildProviderRegistry(createTestLogger(), {
+    providerOverrides: {
+      "profile-codex": {
+        extends: "codex",
+        label: "Profile Codex",
+        command: [process.execPath, fakeAppServerPath],
+        env: {
+          CODEX_HOME: providerCodexHome,
+          JAGENTDESK_FAKE_CODEX_CAPTURE: capturedRequestsPath,
+        },
+      },
+    },
+  });
+  const session = await registry["profile-codex"].createClient(createTestLogger()).createSession({
+    provider: "profile-codex",
+    cwd: tempDir,
+    modeId: "auto",
+  });
+
+  try {
+    return await run({
+      session,
+      readCaptured: () =>
+        readFileSync(capturedRequestsPath, "utf8")
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line) as CapturedFakeCodexRecord),
+    });
+  } finally {
+    await session.close();
+    vi.unstubAllEnvs();
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+async function listPromptCommandsFromCustomCodexHome(): Promise<string[]> {
+  return withCustomCodexProviderHome(async ({ session }) => {
+    const commands = await session.listCommands!();
+    return commands.map((command) => command.name).filter((name) => name.startsWith("prompts:"));
+  });
+}
+
+async function runPromptFromCustomCodexHome(prompt: string): Promise<CapturedFakeCodexRecord[]> {
+  return withCustomCodexProviderHome(async ({ session, readCaptured }) => {
+    await session.startTurn(prompt);
+    return readCaptured();
+  });
+}
+
 function capturedThreadStartConfig(records: CapturedFakeCodexRecord[]): unknown {
   const threadStart = records.find((record) => record.method === "thread/start");
   const params = threadStart?.params as Record<string, unknown> | undefined;
@@ -747,6 +860,94 @@ describe("Codex app-server provider", () => {
     });
   });
 
+  test("Default Permissions pins the user as approvals reviewer on thread/start", async () => {
+    const requests: Array<{ method: string; params: unknown }> = [];
+    const session = createSession(
+      { modeId: "auto", thinkingOptionId: "medium" },
+      { autoReviewEnabled: true },
+    );
+    session.currentThreadId = null;
+    session.activeForegroundTurnId = null;
+    session.client = {
+      request: vi.fn(async (method: string, params: unknown) => {
+        requests.push({ method, params });
+        if (method === "thread/start") {
+          return { thread: { id: "default-mode-thread" } };
+        }
+        if (method === "turn/start") {
+          return {};
+        }
+        throw new Error(`Unexpected request: ${method}`);
+      }),
+    };
+
+    await session.startTurn("trigger thread creation");
+
+    const startCall = requests.find((req) => req.method === "thread/start");
+    expect(startCall?.params).toMatchObject({
+      approvalPolicy: "on-request",
+      sandbox: "workspace-write",
+      approvalsReviewer: "user",
+    });
+  });
+
+  test("switching from auto-review back to Default returns approvals to the user", async () => {
+    const session = createSession({ modeId: "auto-review" }, { autoReviewEnabled: true });
+    const request = vi.fn(async (method: string) => {
+      if (method === "thread/loaded/list") {
+        return { data: ["test-thread"] };
+      }
+      if (method === "turn/start") {
+        return {};
+      }
+      throw new Error(`Unexpected request: ${method}`);
+    });
+    session.activeForegroundTurnId = null;
+    session.client = createStub<CodexClientLike>({ request });
+
+    await session.setMode("auto");
+    await session.startTurn("needs approval");
+
+    const turnStartCall = request.mock.calls.find(([method]) => method === "turn/start");
+    expect(turnStartCall?.[1]).toEqual(
+      expect.objectContaining({
+        approvalPolicy: "on-request",
+        approvalsReviewer: "user",
+      }),
+    );
+  });
+
+  test("Read-only pins the user as approvals reviewer on thread/start", async () => {
+    const requests: Array<{ method: string; params: unknown }> = [];
+    const session = createSession(
+      { modeId: "read-only", thinkingOptionId: "medium" },
+      { autoReviewEnabled: true },
+    );
+    session.currentThreadId = null;
+    session.activeForegroundTurnId = null;
+    session.client = {
+      request: vi.fn(async (method: string, params: unknown) => {
+        requests.push({ method, params });
+        if (method === "thread/start") {
+          return { thread: { id: "read-only-thread" } };
+        }
+        if (method === "turn/start") {
+          return {};
+        }
+        throw new Error(`Unexpected request: ${method}`);
+      }),
+    };
+
+    await session.startTurn("trigger thread creation");
+
+    const startCall = requests.find((req) => req.method === "thread/start");
+    expect(startCall?.params).toMatchObject({
+      approvalPolicy: "on-request",
+      sandbox: "read-only",
+      approvalsReviewer: "user",
+    });
+  });
+
   test("setMode and setThinkingOption return a next-turn notice while a turn is active", async () => {
     const session = createSession({ modeId: "auto", thinkingOptionId: "medium" });
 
@@ -837,6 +1038,7 @@ describe("Codex app-server provider", () => {
     const turnStart = request.mock.calls.find(([method]) => method === "turn/start")?.[1];
     expect(turnStart).not.toHaveProperty("approvalPolicy");
     expect(turnStart).not.toHaveProperty("sandboxPolicy");
+    expect(turnStart).not.toHaveProperty("approvalsReviewer");
   });
 
   test("carries the complete native workspace-write policy including writable roots", async () => {
@@ -1764,6 +1966,82 @@ describe("Codex app-server provider", () => {
     await session.close();
   });
 
+  test.each(["legacy", "paginated"] as const)(
+    "rewinds a %s thread onto a fork that keeps the custom provider and runtime MCP servers",
+    async (historyMode) => {
+      const appServer = createFakeCodexAppServer(
+        historyMode === "paginated"
+          ? {
+              "thread/read": () => ({
+                thread: { id: "thread-1", historyMode: "paginated", turns: [] },
+              }),
+            }
+          : undefined,
+      );
+      const customCodexConfig = {
+        model_provider: "codex-custom",
+        model_providers: {
+          "codex-custom": {
+            name: "Custom Codex",
+            base_url: "https://custom-relay.example.com/v1",
+            env_key: "OPENAI_API_KEY",
+            requires_openai_auth: false,
+            wire_api: "responses",
+          },
+        },
+      };
+      const session = new CodexAppServerAgentSession(
+        createConfig({
+          cwd: "/workspace/project",
+          mcpServers: {
+            jagentdesk: {
+              type: "http",
+              url: "http://127.0.0.1:6767/mcp/agents?callerAgentId=agent-1",
+            },
+          },
+        }),
+        null,
+        createTestLogger(),
+        async () => appServer.child,
+        { customCodexConfig },
+      );
+
+      await session.startTurn("remember first");
+      emitCodexUserMessage(appServer, {
+        id: "codex-first",
+        text: "remember first",
+        turnId: "turn-first",
+      });
+      appServer.completeTurn();
+      await session.startTurn("remember second");
+      emitCodexUserMessage(appServer, {
+        id: "codex-second",
+        text: "remember second",
+        turnId: "turn-second",
+      });
+      appServer.completeTurn();
+
+      await session.revertConversation({ messageId: "codex-first" });
+
+      const forkConfigs = appServer
+        .requests()
+        .filter((request) => request.method === "thread/fork")
+        .map((request) => (request.params as { config?: unknown }).config);
+      expect(forkConfigs).toEqual([
+        expect.objectContaining({
+          ...customCodexConfig,
+          mcp_servers: {
+            jagentdesk: expect.objectContaining({
+              url: "http://127.0.0.1:6767/mcp/agents?callerAgentId=agent-1",
+            }),
+          },
+        }),
+      ]);
+      appServer.assertNoErrors();
+      await session.close();
+    },
+  );
+
   test("correlates a Codex user message with the submitting client message", async () => {
     const appServer = createFakeCodexAppServer();
     const session = new CodexAppServerAgentSession(
@@ -1920,7 +2198,9 @@ describe("Codex app-server provider", () => {
     };
 
     try {
-      await expect(listCodexSkills(cwd, workspaceGitService)).resolves.toContainEqual({
+      await expect(
+        listCodexSkills(cwd, path.join(tempDir, "codex-home"), workspaceGitService),
+      ).resolves.toContainEqual({
         name: "shipper",
         description: "Ship changes carefully.",
         argumentHint: "",
@@ -2181,6 +2461,22 @@ describe("Codex app-server provider", () => {
       argumentHint: "",
       kind: "skill",
     });
+  });
+
+  test("lists custom prompts from the CODEX_HOME a custom provider runs Codex with", async () => {
+    await expect(listPromptCommandsFromCustomCodexHome()).resolves.toEqual([
+      "prompts:probe-profile",
+    ]);
+  });
+
+  test("runs a custom prompt from the CODEX_HOME a custom provider runs Codex with", async () => {
+    const records = await runPromptFromCustomCodexHome("/prompts:probe-profile");
+
+    expect(records.find((record) => record.kind === "env")?.CODEX_HOME).toMatch(
+      /provider-codex-home$/,
+    );
+    const turnStart = records.find((record) => record.method === "turn/start");
+    expect(JSON.stringify(turnStart?.params)).toContain("from the provider home");
   });
 
   test("deduplicates Codex skill slash commands returned from multiple skill roots", async () => {
@@ -5998,6 +6294,55 @@ describe("Codex importable sessions", () => {
     const sessions = await provider.listImportableSessions({ limit: 500, scanLimit: 500 });
 
     expect(sessions.map((session) => session.providerHandleId)).toEqual(["thread-1"]);
+    appServer.assertNoErrors();
+  });
+
+  // Codex filters thread/list by model provider: with no `modelProviders` it
+  // returns only threads of the provider its own config selects, an empty
+  // list returns every provider, and a list returns only those providers.
+  function providerFilteringThreadListHandler(threads: Array<Record<string, unknown>>) {
+    return (input: unknown) => {
+      const { modelProviders } = (input ?? {}) as { modelProviders?: string[] };
+      const included = (thread: Record<string, unknown>) => {
+        if (modelProviders === undefined) return thread.modelProvider === "openai";
+        if (modelProviders.length === 0) return true;
+        return modelProviders.includes(String(thread.modelProvider));
+      };
+      return { data: threads.filter(included), nextCursor: null };
+    };
+  }
+
+  const threadsByModelProvider = [
+    { id: "stock-thread", cwd: "/workspace/project-a", modelProvider: "openai", updatedAt: 2 },
+    { id: "custom-thread", cwd: "/workspace/project-a", modelProvider: "my-codex", updatedAt: 1 },
+  ];
+
+  test("a custom Codex provider lists the threads it created", async () => {
+    const appServer = createFakeCodexAppServer({
+      "thread/list": providerFilteringThreadListHandler(threadsByModelProvider),
+    });
+    const provider = createProviderWithFakeAppServer(appServer, {
+      runtimeSettings: {
+        env: { OPENAI_BASE_URL: "https://llm.example.test/v1", OPENAI_API_KEY: "test-key" },
+      },
+      customProvider: { id: "my-codex", label: "My Codex", extends: "codex" },
+    });
+
+    const sessions = await provider.listImportableSessions({ cwd: "/workspace/project-a" });
+
+    expect(sessions.map((session) => session.providerHandleId)).toEqual(["custom-thread"]);
+    appServer.assertNoErrors();
+  });
+
+  test("stock Codex keeps listing only its own threads", async () => {
+    const appServer = createFakeCodexAppServer({
+      "thread/list": providerFilteringThreadListHandler(threadsByModelProvider),
+    });
+    const provider = createProviderWithFakeAppServer(appServer);
+
+    const sessions = await provider.listImportableSessions({ cwd: "/workspace/project-a" });
+
+    expect(sessions.map((session) => session.providerHandleId)).toEqual(["stock-thread"]);
     appServer.assertNoErrors();
   });
 

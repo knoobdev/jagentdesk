@@ -622,10 +622,13 @@ export interface AgentCreateSessionOptions {
   persistSession?: boolean;
 }
 
+/** What a resumed session is for: driving the agent, or reading what it already did. */
+export type AgentResumePurpose = "interactive" | "history";
+
 /** Runtime-only intent for a persisted-session resume. Never persist this option. */
 export interface AgentResumeSessionOptions {
   /** Defaults to interactive. History loading may be read-only for archived native sessions. */
-  purpose?: "interactive" | "history";
+  purpose?: AgentResumePurpose;
 }
 
 /**
@@ -664,6 +667,9 @@ export interface AgentSession {
   readonly id: string | null;
   readonly capabilities: AgentCapabilityFlags;
   readonly features?: AgentFeature[];
+  /** New provider-owned rows to commit on registration. streamHistory must also
+   * replay them at their original timestamps; restored sessions omit old rows. */
+  readonly initialTimeline?: ImportedTimelineEntry[];
   run(prompt: AgentPromptInput, options?: AgentRunOptions): Promise<AgentRunResult>;
   startTurn(prompt: AgentPromptInput, options?: AgentRunOptions): Promise<{ turnId: string }>;
   subscribe(callback: (event: AgentStreamEvent) => void): () => void;

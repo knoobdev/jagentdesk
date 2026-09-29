@@ -262,6 +262,76 @@ describe("OpenCodeAgentClient adapter smoke tests", () => {
     model: TEST_MODEL,
   });
 
+  test.each([
+    { variants: { medium: {}, custom: {} }, selected: "medium", expected: "medium" },
+    { variants: { custom: {} }, selected: "custom", expected: "custom" },
+    { variants: { high: {} }, selected: "medium", expected: undefined },
+    { variants: {}, selected: "medium", expected: undefined },
+  ])(
+    "model switches resolve the retained variant: $selected / $variants",
+    async ({ variants, selected, expected }) => {
+      const cwd = tmpCwd();
+      const runtime = new TestOpenCodeHarness();
+      const upstream = new TestOpenCodeClient();
+      upstream.providerListResponse = {
+        data: {
+          connected: ["test"],
+          all: [
+            {
+              id: "test",
+              name: "Test",
+              source: "api",
+              models: { target: { name: "Target", variants } },
+            },
+          ],
+        },
+      };
+      runtime.enqueueClient(upstream);
+      const client = new OpenCodeAgentClient(logger, undefined, {
+        serverManager: runtime,
+        createClient: runtime.createClient,
+      });
+      const session = await client.createSession({
+        provider: "opencode",
+        cwd,
+        model: "test/source",
+        thinkingOptionId: selected,
+      });
+      const events: AgentStreamEvent[] = [];
+      session.subscribe((event) => events.push(event));
+      try {
+        await session.setModel!("test/target");
+        expect((await session.getRuntimeInfo()).thinkingOptionId).toBe(expected ?? null);
+        expect(events).toContainEqual({
+          type: "thinking_option_changed",
+          provider: "opencode",
+          thinkingOptionId: expected ?? null,
+        });
+        upstream.sessionPromptAsyncEvents = [
+          { type: "session.idle", properties: { sessionID: "session-1" } },
+        ];
+        await collectTurnEvents(streamSession(session, "Use the selected model"));
+        expect(upstream.calls.sessionPromptAsync).toEqual([
+          expect.objectContaining({
+            model: { providerID: "test", modelID: "target" },
+            ...(expected ? { variant: expected } : {}),
+          }),
+        ]);
+        if (!expected) expect(upstream.calls.sessionPromptAsync[0]).not.toHaveProperty("variant");
+        await session.setThinkingOption!("medium");
+        await expect(session.setModel!("test/missing")).rejects.toThrow(
+          "OpenCode model unavailable",
+        );
+        upstream.providerListResponse = { error: "Catalog unavailable" };
+        await expect(session.setModel!("test/source")).rejects.toThrow("Catalog unavailable");
+        expect((await session.getRuntimeInfo()).model).toBe("test/target");
+      } finally {
+        await session.close();
+        rmSync(cwd, { recursive: true, force: true });
+      }
+    },
+  );
+
   test("creates a session with valid id and provider", async () => {
     const cwd = tmpCwd();
     const runtime = new TestOpenCodeHarness();
@@ -465,6 +535,115 @@ describe("OpenCodeAgentClient adapter smoke tests", () => {
     await session.close();
     rmSync(cwd, { recursive: true, force: true });
   }, 120_000);
+
+  test.each([
+    { name: "absent", variants: {} },
+    { name: "empty", variants: { default: {} } },
+    { name: "configured", variants: { default: { reasoningEffort: "low" } } },
+  ])("catalog exposes one Default when upstream default is $name", async ({ variants }) => {
+    const runtime = new TestOpenCodeHarness();
+    const openCodeClient = new TestOpenCodeClient();
+    openCodeClient.providerListResponse = {
+      data: {
+        connected: ["catalog-provider"],
+        all: [
+          {
+            id: "catalog-provider",
+            name: "Catalog provider",
+            source: "api",
+            models: {
+              model: {
+                name: "Variant model",
+                variants: { ...variants, high: {}, "variant:default": {} },
+              },
+            },
+          },
+        ],
+      },
+    };
+    runtime.enqueueClient(openCodeClient);
+    const cwd = tmpCwd();
+    try {
+      const client = new OpenCodeAgentClient(logger, undefined, {
+        serverManager: runtime,
+        createClient: runtime.createClient,
+        resolveHomeDir: () => cwd,
+      });
+      const catalog = await client.fetchCatalog({ scope: "global", force: false });
+      const options = catalog.models[0].thinkingOptions ?? [];
+      expect(options).toEqual([
+        { id: "default", label: "Default", isDefault: true },
+        { id: "high", label: "high" },
+        { id: "variant:default", label: "variant:default" },
+      ]);
+      expect(catalog.models[0].defaultThinkingOptionId).toBe("default");
+      const execution = new TestOpenCodeClient();
+      execution.sessionCreateResponse = { data: { id: "ses_catalog_variants" } };
+      execution.sessionPromptAsyncEvents = [
+        { type: "session.idle", properties: { sessionID: "ses_catalog_variants" } },
+      ];
+      runtime.enqueueClient(execution);
+      const session = await client.createSession({
+        provider: "opencode",
+        cwd,
+        model: "catalog-provider/model",
+        thinkingOptionId: "default",
+      });
+      try {
+        await collectTurnEvents(streamSession(session, "Use OpenCode's default"));
+        await session.setThinkingOption!("high");
+        await collectTurnEvents(streamSession(session, "Use high"));
+        await session.setThinkingOption!("variant:default");
+        await collectTurnEvents(streamSession(session, "Use the literal variant name"));
+        await session.setThinkingOption!("default");
+        await collectTurnEvents(streamSession(session, "Return to OpenCode's default"));
+        expect(execution.calls.sessionPromptAsync).toEqual([
+          expect.not.objectContaining({ variant: expect.anything() }),
+          expect.objectContaining({ variant: "high" }),
+          expect.objectContaining({ variant: "variant:default" }),
+          expect.not.objectContaining({ variant: expect.anything() }),
+        ]);
+      } finally {
+        await session.close();
+      }
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  test.each([
+    { saved: "default", variant: undefined },
+    { saved: "high", variant: "high" },
+    { saved: "variant:default", variant: "variant:default" },
+  ])("resume preserves saved thinking choice $saved", async ({ saved, variant }) => {
+    const runtime = new TestOpenCodeHarness();
+    const execution = new TestOpenCodeClient();
+    execution.sessionPromptAsyncEvents = [
+      { type: "session.idle", properties: { sessionID: "ses_saved_variant" } },
+    ];
+    runtime.enqueueClient(execution);
+    const client = new OpenCodeAgentClient(logger, undefined, {
+      serverManager: runtime,
+      createClient: runtime.createClient,
+    });
+    const cwd = tmpCwd();
+    try {
+      const session = await client.resumeSession(
+        { provider: "opencode", sessionId: "ses_saved_variant", metadata: { cwd } },
+        { thinkingOptionId: saved },
+      );
+      try {
+        await collectTurnEvents(streamSession(session, "Keep my saved choice"));
+        expect(execution.calls.sessionPromptAsync.map((request) => request.variant)).toEqual([
+          variant,
+        ]);
+      } finally {
+        await session.close();
+      }
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
 
   test("fetchCatalog returns models with required fields", async () => {
     const runtime = new TestOpenCodeHarness();
@@ -1659,6 +1838,75 @@ describe("OpenCode adapter startTurn error handling", () => {
           text: "probe ok",
           messageId: "msg_assistant",
         },
+      },
+    ]);
+  });
+
+  test("streamHistory hides user text that OpenCode marks synthetic", async () => {
+    const fakeClient = {
+      session: {
+        get: vi.fn().mockResolvedValue({
+          data: { revert: undefined },
+          error: undefined,
+        }),
+        messages: vi.fn().mockResolvedValue({
+          data: [
+            {
+              info: { id: "msg_continue", sessionID: "ses_unit_test", role: "user" },
+              parts: [
+                {
+                  id: "prt_continue",
+                  sessionID: "ses_unit_test",
+                  messageID: "msg_continue",
+                  type: "text",
+                  text: "Summarize the task tool output above and continue with your task.",
+                  synthetic: true,
+                },
+              ],
+            },
+            {
+              info: { id: "msg_user", sessionID: "ses_unit_test", role: "user" },
+              parts: [
+                {
+                  id: "prt_user",
+                  sessionID: "ses_unit_test",
+                  messageID: "msg_user",
+                  type: "text",
+                  text: "Read the notes",
+                },
+                {
+                  id: "prt_resource",
+                  sessionID: "ses_unit_test",
+                  messageID: "msg_user",
+                  type: "text",
+                  text: "Reading MCP resource: notes.md",
+                  synthetic: true,
+                },
+              ],
+            },
+          ],
+          error: undefined,
+        }),
+      },
+    } as never;
+
+    const session = new __openCodeInternals.OpenCodeAgentSession(
+      { provider: "opencode", cwd: "/tmp/test" },
+      fakeClient,
+      "ses_unit_test",
+      createTestLogger(),
+    );
+
+    const history: AgentStreamEvent[] = [];
+    for await (const event of session.streamHistory()) {
+      history.push(event);
+    }
+
+    expect(history).toEqual([
+      {
+        type: "timeline",
+        provider: "opencode",
+        item: { type: "user_message", text: "Read the notes", messageId: "msg_user" },
       },
     ]);
   });
@@ -4697,5 +4945,126 @@ describe("OpenCode snapshot summary false-idle regression", () => {
 
     expect(events.some((event) => event.type === "turn_started")).toBe(false);
     await session.close();
+  });
+});
+
+describe("OpenCode session permission rules", () => {
+  const logger = createTestLogger();
+  function permissionConfig(cwd: string): AgentSessionConfig {
+    return {
+      provider: "opencode",
+      cwd,
+      providerOptions: { permission: { bash: "ask", external_directory: "allow" } },
+      toolPolicy: { preapproved: [{ kind: "mcp", server: "hub", tool: "finish_execution" }] },
+    };
+  }
+  // OpenCode stores permission rules on the session (POST /session, PATCH /session/{id}) and
+  // drops an unknown `permission` field on prompt_async, so rules sent with a prompt never
+  // reach the server.
+  const expectedRules = [
+    { permission: "hub_finish_execution", pattern: "*", action: "allow" },
+    { permission: "bash", pattern: "*", action: "ask" },
+    { permission: "external_directory", pattern: "*", action: "allow" },
+  ];
+
+  test("creates the session with the agent's permission rules", async () => {
+    const cwd = tmpCwd();
+    const runtime = new TestOpenCodeHarness();
+    const openCode = new TestOpenCodeClient();
+    runtime.enqueueClient(openCode);
+    const client = new OpenCodeAgentClient(logger, undefined, {
+      serverManager: runtime,
+      createClient: runtime.createClient,
+    });
+    try {
+      const session = await client.createSession(permissionConfig(cwd));
+      try {
+        expect(openCode.calls.sessionCreate[0]).toEqual(
+          expect.objectContaining({ permission: expectedRules }),
+        );
+      } finally {
+        await session.close();
+      }
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  test("applies the agent's permission rules to a resumed session", async () => {
+    const cwd = tmpCwd();
+    const runtime = new TestOpenCodeHarness();
+    const openCode = new TestOpenCodeClient();
+    runtime.enqueueClient(openCode);
+    const client = new OpenCodeAgentClient(logger, undefined, {
+      serverManager: runtime,
+      createClient: runtime.createClient,
+    });
+    try {
+      const session = await client.resumeSession(
+        { provider: "opencode", sessionId: "ses_resumed_rules", metadata: { cwd } },
+        permissionConfig(cwd),
+      );
+      try {
+        expect(openCode.calls.sessionUpdate[0]).toEqual(
+          expect.objectContaining({
+            sessionID: "ses_resumed_rules",
+            permission: expectedRules,
+          }),
+        );
+      } finally {
+        await session.close();
+      }
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  test("fails the resume when the rules cannot be applied", async () => {
+    const cwd = tmpCwd();
+    const runtime = new TestOpenCodeHarness();
+    const openCode = new TestOpenCodeClient();
+    openCode.sessionUpdateResponse = { error: { data: { message: "session is archived" } } };
+    runtime.enqueueClient(openCode);
+    const client = new OpenCodeAgentClient(logger, undefined, {
+      serverManager: runtime,
+      createClient: runtime.createClient,
+    });
+    try {
+      // Resuming without the rules would run the agent under a more permissive policy than
+      // the one it was configured with, which is the failure this guards.
+      await expect(
+        client.resumeSession(
+          { provider: "opencode", sessionId: "ses_archived", metadata: { cwd } },
+          permissionConfig(cwd),
+        ),
+      ).rejects.toThrow("Failed to apply OpenCode session permission rules");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  test("leaves a session without rules untouched", async () => {
+    const cwd = tmpCwd();
+    const runtime = new TestOpenCodeHarness();
+    const openCode = new TestOpenCodeClient();
+    runtime.enqueueClient(openCode);
+    const client = new OpenCodeAgentClient(logger, undefined, {
+      serverManager: runtime,
+      createClient: runtime.createClient,
+    });
+    try {
+      const session = await client.resumeSession({
+        provider: "opencode",
+        sessionId: "ses_resumed_no_rules",
+        metadata: { cwd },
+      });
+      try {
+        expect(openCode.calls.sessionUpdate).toEqual([]);
+      } finally {
+        await session.close();
+      }
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
   });
 });

@@ -97,6 +97,20 @@ async function createConnectedSession(
 }
 
 describe("Codex app-server provider features", () => {
+  test.each(["gpt-6-sol", "gpt-6-luna"])("exposes Fast for %s", async (model) => {
+    const { session } = await createConnectedSession({ model });
+    try {
+      expect(session.features).toContainEqual(
+        expect.objectContaining({
+          id: "fast_mode",
+          value: false,
+        }),
+      );
+    } finally {
+      await session.close();
+    }
+  });
+
   test("features returns fast and plan toggles when supported", async () => {
     const { session } = await createConnectedSession();
 

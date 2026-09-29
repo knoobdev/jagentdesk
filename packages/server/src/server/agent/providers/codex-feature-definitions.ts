@@ -1,6 +1,9 @@
 import type { AgentFeature, AgentFeatureToggle } from "../agent-sdk-types.js";
 
 const CODEX_FAST_MODE_SUPPORTED_MODEL_PREFIXES = ["gpt-5", "gpt-4.1", "o3", "o4-mini"] as const;
+// GPT-6 models do not share a Fast-capable prefix; list the supported ones exactly.
+// Keep aligned with https://developers.openai.com/codex/speed and https://developers.openai.com/codex/models.
+const CODEX_FAST_MODE_SUPPORTED_MODELS = new Set(["gpt-6-sol", "gpt-6-luna"]);
 
 export const CODEX_FAST_MODE_FEATURE: Omit<AgentFeatureToggle, "value"> = {
   type: "toggle",
@@ -29,6 +32,9 @@ export function codexModelSupportsFastMode(modelId: string | null | undefined): 
   const normalizedModelId = normalizeCodexModelId(modelId);
   if (!normalizedModelId) {
     return false;
+  }
+  if (CODEX_FAST_MODE_SUPPORTED_MODELS.has(normalizedModelId)) {
+    return true;
   }
   return CODEX_FAST_MODE_SUPPORTED_MODEL_PREFIXES.some(
     (prefix) => normalizedModelId === prefix || normalizedModelId.startsWith(prefix),

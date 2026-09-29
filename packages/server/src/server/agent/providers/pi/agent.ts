@@ -24,6 +24,7 @@ import {
   type AgentRunOptions,
   type AgentRunResult,
   type AgentRuntimeInfo,
+  type AgentSelectOption,
   type AgentSession,
   type AgentSessionConfig,
   type AgentSlashCommand,
@@ -38,7 +39,6 @@ import {
   type ListImportableSessionsOptions,
   type ProviderCatalog,
   type ProviderRefreshContext,
-  type ToolCallDetail,
 } from "../../agent-sdk-types.js";
 import { importSessionFromPersistence } from "../../provider-session-import.js";
 import { runProviderRefreshActivity } from "../../provider-refresh-deadline.js";
@@ -65,6 +65,7 @@ import {
 } from "./history-mapper.js";
 import { materializeProviderImage } from "../provider-image-output.js";
 import { PiCliRuntime } from "./cli-runtime.js";
+import { createPiExtensionHost, type PiExtensionEventOutput } from "./extensions/index.js";
 import { revertPiConversation } from "./rewind.js";
 import { listPiImportableSessions, readPiImportSessionConfig } from "./session-descriptor.js";
 import type { PiRuntime, PiRuntimeSession, PiStartSessionInput } from "./runtime.js";
@@ -83,7 +84,6 @@ import {
   mapToolDetail,
   parseToolArgs,
   parseToolResult,
-  resolveToolCallName,
   type PiToolResult,
   type PiTrackedToolCall,
 } from "./tool-call-mapper.js";
@@ -93,15 +93,13 @@ const DEFAULT_PI_THINKING_LEVEL: PiThinkingLevel = "medium";
 const PI_BINARY_COMMAND = process.env.PI_COMMAND ?? process.env.PI_ACP_PI_COMMAND ?? "pi";
 const JAGENTDESK_PI_TREE_EXTENSION_COMMAND = "jagentdesk_tree";
 const JAGENTDESK_PI_CAPTURE_EXTENSION_COMMAND = "jagentdesk_capture_entries";
+const JAGENTDESK_PI_REWIND_ENTRY_TYPE = "jagentdesk_rewind";
 const JAGENTDESK_PI_ENTRY_CAPTURE_MARKER = "JAGENTDESK_ENTRY_CAPTURE";
 const JAGENTDESK_PI_SUBMITTED_USER_ENTRY_MARKER = "JAGENTDESK_SUBMITTED_USER_ENTRY";
 const JAGENTDESK_PI_COMMAND_RESULT_MARKER = "JAGENTDESK_COMMAND_RESULT";
 const DEFAULT_PI_EXTENSION_RESULT_TIMEOUT_MS = 30_000;
 const DEFAULT_PI_RPC_TIMEOUT_MS = 60_000;
 const QUESTION_RESPONSE_HEADER = "Response";
-const QUESTION_COMMENT_HEADER = "Comment";
-const PI_ASK_USER_FREEFORM_SENTINEL = "✏️ Type custom response...";
-const COMBINED_ASK_USER_METADATA = "ask_user_select_optional_comment";
 
 export const PiProviderParamsSchema = z
   .object({
@@ -171,12 +169,11 @@ const PI_THINKING_OPTIONS: ReadonlyArray<{
   id: PiThinkingLevel;
   label: string;
   description: string;
-  isDefault?: boolean;
 }> = [
   { id: "off", label: "Off", description: "No extra reasoning" },
   { id: "minimal", label: "Minimal", description: "Light reasoning" },
   { id: "low", label: "Low", description: "Faster reasoning" },
-  { id: "medium", label: "Medium", description: "Balanced reasoning", isDefault: true },
+  { id: "medium", label: "Medium", description: "Balanced reasoning" },
   { id: "high", label: "High", description: "Deeper reasoning" },
   { id: "xhigh", label: "XHigh", description: "Very deep reasoning" },
   { id: "max", label: "Max", description: "Extreme reasoning" },
@@ -285,22 +282,9 @@ interface PendingExtensionResult {
   timer: NodeJS.Timeout;
 }
 
-interface ActiveAskUserDialog {
-  allowComment: boolean;
-  allowFreeform: boolean;
-  allowMultiple: boolean;
-}
-
-interface PendingCombinedAskUserResponse {
-  comment: string;
-  freeform: string | null;
-}
-
 interface ExtensionUiMappingOptions {
   provider?: AgentProvider;
   label?: string;
-  combineOptionalComment?: boolean;
-  allowFreeform?: boolean;
 }
 
 interface PiSlashCommandInvocation {
@@ -371,21 +355,6 @@ function parseAutoCompactMode(value: string | undefined): AutoCompactMode {
     return "toggle";
   }
   return "unknown";
-}
-
-function mapThinkingOption(option: (typeof PI_THINKING_OPTIONS)[number]) {
-  const mappedOption = {
-    id: option.id,
-    label: option.label,
-    description: option.description,
-  };
-  if (option.isDefault) {
-    return {
-      ...mappedOption,
-      isDefault: true,
-    };
-  }
-  return mappedOption;
 }
 
 function piModelSupportsImageInput(model: PiModel | null | undefined): boolean {
@@ -637,9 +606,8 @@ function createPiJAgentDeskExtensionFile(systemPrompt?: string): PiTempFile {
 	    .join("\\n\\n");
 	}
 
-	function getCapturedUserEntries(ctx) {
-	  return ctx.sessionManager
-	    .getEntries()
+	function toCapturedUserEntries(entries) {
+	  return entries
 	    .filter((entry) => entry.type === "message" && entry.message?.role === "user")
 	    .map(toCapturedUserEntry);
 	}
@@ -655,7 +623,14 @@ function createPiJAgentDeskExtensionFile(systemPrompt?: string): PiTempFile {
 	function emitEntryCapture(ctx, reason, requestId) {
 	  ctx.ui.notify(
 	    "${JAGENTDESK_PI_ENTRY_CAPTURE_MARKER} " +
-	      JSON.stringify({ reason, requestId, entries: getCapturedUserEntries(ctx) }),
+	      JSON.stringify({
+	        reason,
+	        requestId,
+	        // Rewind targets: rows can still show entries that a rewind or compaction left off the branch.
+	        treeEntries: toCapturedUserEntries(ctx.sessionManager.getEntries()),
+	        // The entries getMessages() replays, so the nth one is the nth replayed user message.
+	        contextEntries: toCapturedUserEntries(ctx.sessionManager.buildContextEntries()),
+	      }),
 	    "info",
 	  );
 	}
@@ -735,6 +710,8 @@ function createPiJAgentDeskExtensionFile(systemPrompt?: string): PiTempFile {
 	      const payload = decodePayload(args.trim());
 	      try {
 	        const result = await ctx.navigateTree(payload.targetId, { summarize: false });
+	        // Pi reopens a session at its last entry, so record the rewind on the new branch to keep it.
+	        pi.appendEntry("${JAGENTDESK_PI_REWIND_ENTRY_TYPE}", { targetId: payload.targetId });
 	        emitEntryCapture(ctx, "tree_navigation");
 	        emitCommandResult(ctx, payload.requestId, { ok: true, result });
 	      } catch (error) {
@@ -789,14 +766,6 @@ function isPiRequestAbortError(error: unknown): boolean {
   }
 
   return /\brequest was aborted\b|\babort(ed)?\b/i.test(toDiagnosticErrorMessage(error));
-}
-
-function resolveThinkingOptionId(
-  cachedThinkingOptionId: string | null,
-  sessionThinkingLevel: PiThinkingLevel,
-): PiThinkingLevel | null {
-  const currentThinking = cachedThinkingOptionId ?? sessionThinkingLevel;
-  return normalizePiThinkingOption(currentThinking);
 }
 
 function modelToId(model: PiModel | null | undefined): string | null {
@@ -895,21 +864,6 @@ function parseCapturedEntries(value: unknown): PiCapturedEntry[] {
   });
 }
 
-function optionalBoolean(value: unknown): boolean | undefined {
-  return typeof value === "boolean" ? value : undefined;
-}
-
-function readActiveAskUserDialog(toolName: string, args: unknown): ActiveAskUserDialog | null {
-  if (toolName !== "ask_user" || !isRecord(args)) {
-    return null;
-  }
-  return {
-    allowComment: optionalBoolean(args.allowComment) ?? false,
-    allowFreeform: optionalBoolean(args.allowFreeform) ?? true,
-    allowMultiple: optionalBoolean(args.allowMultiple) ?? false,
-  };
-}
-
 function isOptionalInputPlaceholder(placeholder: string | undefined): boolean {
   return /\boptional\b|\bskip\b/i.test(placeholder ?? "");
 }
@@ -930,10 +884,6 @@ function readStringArray(value: unknown): string[] {
     : [];
 }
 
-function isPiAskUserFreeformOption(option: string): boolean {
-  return option === PI_ASK_USER_FREEFORM_SENTINEL;
-}
-
 function mapExtensionUiRequestToPermission(
   event: Extract<PiRuntimeEvent, { type: "extension_ui_request" }>,
   options: ExtensionUiMappingOptions = {},
@@ -943,15 +893,6 @@ function mapExtensionUiRequestToPermission(
   switch (event.method) {
     case "select": {
       const selectOptions = readStringArray(event.options);
-      if (options.combineOptionalComment) {
-        return buildCombinedAskUserQuestionPermission(event, {
-          provider,
-          label,
-          question: optionalString(event.title) ?? "Select an option",
-          options: selectOptions,
-          allowFreeform: options.allowFreeform === true,
-        });
-      }
       return buildExtensionUiQuestionPermission(event, {
         provider,
         label,
@@ -1069,63 +1010,6 @@ function buildExtensionUiQuestionPermission(
   };
 }
 
-function buildCombinedAskUserQuestionPermission(
-  event: Extract<PiRuntimeEvent, { type: "extension_ui_request" }>,
-  input: {
-    provider: AgentProvider;
-    label: string;
-    question: string;
-    options: string[];
-    allowFreeform: boolean;
-  },
-): AgentPermissionRequest {
-  const visibleOptions = input.options.filter((option) => !isPiAskUserFreeformOption(option));
-  const allowOther = input.allowFreeform || visibleOptions.length !== input.options.length;
-  return {
-    id: event.id,
-    provider: input.provider,
-    name: `${input.label} ask_user`,
-    kind: "question",
-    title: input.question,
-    input: {
-      questions: [
-        {
-          question: input.question,
-          header: QUESTION_RESPONSE_HEADER,
-          options: visibleOptions.map((label) => ({ label })),
-          multiSelect: false,
-          ...(allowOther ? { allowOther: true } : {}),
-        },
-        {
-          question: "Optional comment",
-          header: QUESTION_COMMENT_HEADER,
-          options: [],
-          multiSelect: false,
-          placeholder: "Optional comment (press Enter to skip)...",
-          allowEmpty: true,
-        },
-      ],
-    },
-    metadata: {
-      extensionUiMethod: event.method,
-      answerHeader: QUESTION_RESPONSE_HEADER,
-      commentHeader: QUESTION_COMMENT_HEADER,
-      combinedAskUser: COMBINED_ASK_USER_METADATA,
-      selectOptions: visibleOptions,
-      ...(allowOther ? { freeformSentinel: PI_ASK_USER_FREEFORM_SENTINEL } : {}),
-    },
-  };
-}
-
-function permissionAnswer(input: AgentMetadata | undefined, header: string): string | null {
-  const answers = isRecord(input?.answers) ? input.answers : null;
-  if (!answers) {
-    return null;
-  }
-  const answer = answers[header];
-  return typeof answer === "string" ? answer : null;
-}
-
 function firstPermissionAnswer(input: AgentMetadata | undefined): string | null {
   const answers = isRecord(input?.answers) ? input.answers : null;
   if (!answers) {
@@ -1133,39 +1017,6 @@ function firstPermissionAnswer(input: AgentMetadata | undefined): string | null 
   }
   const first = Object.values(answers).find((value) => typeof value === "string");
   return typeof first === "string" ? first : null;
-}
-
-function isCombinedAskUserPermission(request: AgentPermissionRequest): boolean {
-  return request.metadata?.combinedAskUser === COMBINED_ASK_USER_METADATA;
-}
-
-function buildCombinedAskUserSelectionResponse(
-  request: AgentPermissionRequest,
-  response: AgentPermissionResponse,
-): {
-  uiResponse: { value?: string; cancelled?: boolean };
-  pendingResponse: PendingCombinedAskUserResponse | null;
-} {
-  if (response.behavior === "deny") {
-    return { uiResponse: { cancelled: true }, pendingResponse: null };
-  }
-
-  const answer = permissionAnswer(response.updatedInput, QUESTION_RESPONSE_HEADER);
-  if (answer === null) {
-    return { uiResponse: { cancelled: true }, pendingResponse: null };
-  }
-
-  const selectOptions = readStringArray(request.metadata?.selectOptions);
-  const freeformSentinel = optionalString(request.metadata?.freeformSentinel);
-  const isFreeform = Boolean(freeformSentinel) && !selectOptions.includes(answer);
-  const comment = permissionAnswer(response.updatedInput, QUESTION_COMMENT_HEADER) ?? "";
-  return {
-    uiResponse: { value: isFreeform ? freeformSentinel : answer },
-    pendingResponse: {
-      comment,
-      freeform: isFreeform ? answer : null,
-    },
-  };
 }
 
 function buildExtensionUiResponse(
@@ -1188,7 +1039,50 @@ function buildExtensionUiResponse(
   return { value: answer };
 }
 
+function resolvePiThinkingConfig(
+  model: PiModel,
+): Pick<AgentModelDefinition, "thinkingOptions" | "defaultThinkingOptionId"> {
+  if (!model.reasoning) {
+    return { thinkingOptions: undefined, defaultThinkingOptionId: undefined };
+  }
+
+  const supportedOptions = PI_THINKING_OPTIONS.filter((option) => {
+    const mapped = model.thinkingLevelMap?.[option.id];
+    if (mapped === null) {
+      return false;
+    }
+    if (option.id === "xhigh" || option.id === "max") {
+      return mapped !== undefined;
+    }
+    return true;
+  });
+  const defaultIndex = PI_THINKING_OPTIONS.findIndex(
+    (option) => option.id === DEFAULT_PI_THINKING_LEVEL,
+  );
+  // Pi clamps upward first, then falls back to the highest remaining lower level.
+  const higherDefault = supportedOptions.find(
+    (option) => PI_THINKING_OPTIONS.indexOf(option) >= defaultIndex,
+  );
+  const defaultOption = higherDefault ?? supportedOptions.at(-1);
+  const defaultThinkingOptionId = defaultOption?.id ?? "off";
+  return {
+    thinkingOptions: supportedOptions.map((option) => {
+      const mappedOption: AgentSelectOption = {
+        id: option.id,
+        label: option.label,
+        description: option.description,
+      };
+      if (option.id === defaultThinkingOptionId) {
+        mappedOption.isDefault = true;
+      }
+      return mappedOption;
+    }),
+    defaultThinkingOptionId,
+  };
+}
+
 function mapPiModel(model: PiModel, provider: AgentProvider): AgentModelDefinition {
+  const { thinkingOptions, defaultThinkingOptionId } = resolvePiThinkingConfig(model);
   return {
     provider,
     id: `${model.provider}/${model.id}`,
@@ -1198,8 +1092,8 @@ function mapPiModel(model: PiModel, provider: AgentProvider): AgentModelDefiniti
       provider: model.provider,
       modelId: model.id,
     },
-    thinkingOptions: model.reasoning ? PI_THINKING_OPTIONS.map(mapThinkingOption) : undefined,
-    defaultThinkingOptionId: model.reasoning ? DEFAULT_PI_THINKING_LEVEL : undefined,
+    thinkingOptions,
+    defaultThinkingOptionId,
   };
 }
 
@@ -1224,8 +1118,7 @@ export class PiRpcAgentSession implements AgentSession {
   private readonly subscribers = new Set<(event: AgentStreamEvent) => void>();
   private readonly activeToolCalls = new Map<string, PiTrackedToolCall>();
   private readonly pendingExtensionUiRequests = new Map<string, AgentPermissionRequest>();
-  private activeAskUserDialog: ActiveAskUserDialog | null = null;
-  private pendingCombinedAskUserResponse: PendingCombinedAskUserResponse | null = null;
+  private readonly extensionHost: ReturnType<typeof createPiExtensionHost>;
   private activeTurnId: string | null = null;
   private activeClientMessageId: string | null = null;
   private activeAssistantMessageId: string | null = null;
@@ -1237,10 +1130,9 @@ export class PiRpcAgentSession implements AgentSession {
   private activePromptRequestId: string | null = null;
   private readonly pendingPromptResults = new Map<string, boolean>();
   private readonly pendingSteerSubmissions: PiPendingSteerSubmission[] = [];
-  private lastKnownThinkingOptionId: string | null;
   currentLeafOverrideId: string | null | undefined;
-  private readonly capturedUserEntries: PiCapturedEntry[] = [];
-  private readonly capturedUserEntriesById = new Map<string, PiCapturedEntry>();
+  private readonly contextUserEntries: PiCapturedEntry[] = [];
+  private readonly treeUserEntriesById = new Map<string, PiCapturedEntry>();
   private readonly pendingExtensionResults = new Map<string, PendingExtensionResult>();
   private outOfBandCompactionEmit: ((event: AgentStreamEvent) => void) | null = null;
   private outOfBandCompactionStarted = false;
@@ -1251,6 +1143,8 @@ export class PiRpcAgentSession implements AgentSession {
   private readonly logger: Logger;
   private readonly usagePoller: PiUsagePoller;
   private closed = false;
+  private readonly closeController = new AbortController();
+  private readonly pendingExtensionHydrations = new Set<Promise<void>>();
   // Pi reports an aborted OpenAI Responses stream before the abort RPC resolves.
   // Keep the turn active until that RPC acknowledges the user-requested cancellation.
   private interruptingTurnId: string | null = null;
@@ -1261,16 +1155,14 @@ export class PiRpcAgentSession implements AgentSession {
     this.runtimeSession = options.runtimeSession;
     this.config = options.config;
     this.state = options.initialState;
+    this.config.thinkingOptionId = this.state.thinkingLevel;
     this.capabilities = options.capabilities;
     this.provider = PI_PROVIDER;
     this.currentModeId = options.currentModeId ?? null;
     this.cleanup = options.cleanup;
-    this.lastKnownThinkingOptionId =
-      normalizePiThinkingOption(options.config.thinkingOptionId) ??
-      this.state.thinkingLevel ??
-      null;
     this.extensionTimeoutMs = options.extensionTimeoutMs ?? DEFAULT_PI_EXTENSION_RESULT_TIMEOUT_MS;
     this.logger = options.logger;
+    this.extensionHost = createPiExtensionHost(this.logger);
     this.usagePoller = new PiUsagePoller({
       scheduler: options.usagePollScheduler,
       readStats: () => this.runtimeSession.getSessionStats(),
@@ -1455,7 +1347,11 @@ export class PiRpcAgentSession implements AgentSession {
     yield* streamPiHistory(
       this.provider,
       await this.runtimeSession.getMessages(),
-      this.capturedUserEntries,
+      this.contextUserEntries,
+      {},
+      // At most eight 2 MiB child files per replay; later cards retain their summaries.
+      createPiExtensionHost(this.logger, undefined, 16 * 1024 * 1024),
+      this.closeController.signal,
     );
   }
 
@@ -1465,10 +1361,7 @@ export class PiRpcAgentSession implements AgentSession {
       provider: this.provider,
       sessionId: this.state.sessionId,
       model: modelToId(this.state.model),
-      thinkingOptionId: resolveThinkingOptionId(
-        this.lastKnownThinkingOptionId,
-        this.state.thinkingLevel,
-      ),
+      thinkingOptionId: this.state.thinkingLevel,
       modeId: this.currentModeId,
     };
   }
@@ -1496,15 +1389,11 @@ export class PiRpcAgentSession implements AgentSession {
     }
     this.pendingExtensionUiRequests.delete(requestId);
 
-    if (isCombinedAskUserPermission(request)) {
-      const combined = buildCombinedAskUserSelectionResponse(request, response);
-      this.pendingCombinedAskUserResponse = combined.pendingResponse;
-      this.runtimeSession.respondToExtensionUiRequest(requestId, combined.uiResponse);
-    } else {
-      this.runtimeSession.respondToExtensionUiRequest(
-        requestId,
-        buildExtensionUiResponse(request, response),
-      );
+    const mapped = this.extensionHost.respondToPermission(request, response);
+    for (const reply of mapped?.responses ?? [
+      { id: requestId, response: buildExtensionUiResponse(request, response) },
+    ]) {
+      this.runtimeSession.respondToExtensionUiRequest(reply.id, reply.response);
     }
     this.emit({
       type: "permission_resolved",
@@ -1602,7 +1491,7 @@ export class PiRpcAgentSession implements AgentSession {
     }
     await this.refreshState().catch(() => undefined);
     await this.requestEntryCapture("rewind");
-    const targetEntry = this.capturedUserEntriesById.get(input.messageId);
+    const targetEntry = this.treeUserEntriesById.get(input.messageId);
     if (!targetEntry) {
       throw new Error(`Pi rewind target ${input.messageId} was not found in captured tree entries`);
     }
@@ -1629,10 +1518,12 @@ export class PiRpcAgentSession implements AgentSession {
       return;
     }
     this.closed = true;
+    this.closeController.abort();
     this.usagePoller.close();
     try {
       await this.runtimeSession.close();
     } finally {
+      await Promise.all(this.pendingExtensionHydrations);
       this.rejectAllExtensionResults(new Error("Pi session closed"));
       this.cleanup?.();
     }
@@ -1685,28 +1576,38 @@ export class PiRpcAgentSession implements AgentSession {
     }
 
     const model = await this.runtimeSession.setModel(parsedReference.provider, parsedReference.id);
-    this.state = {
-      ...this.state,
-      model,
-    };
+    await this.refreshState();
     this.config.model = `${model.provider}/${model.id}`;
   }
 
   async setThinkingOption(thinkingOptionId: string | null): Promise<void> {
     const thinkingLevel = normalizePiThinkingOption(thinkingOptionId) ?? DEFAULT_PI_THINKING_LEVEL;
     await this.runtimeSession.setThinkingLevel(thinkingLevel);
-    this.lastKnownThinkingOptionId = thinkingLevel;
-    this.config.thinkingOptionId = thinkingLevel;
-    this.state = {
-      ...this.state,
-      thinkingLevel,
-    };
+    await this.refreshState();
   }
 
   private emit(event: AgentStreamEvent): void {
     for (const subscriber of this.subscribers) {
       subscriber(event);
     }
+  }
+
+  private emitExtensionOutput(output: PiExtensionEventOutput | undefined, turnId?: string): void {
+    if (!output || this.closed) return;
+    for (const event of output.events) {
+      this.emit(event.type === "timeline" ? { ...event, turnId } : event);
+    }
+    const pending = output.hydration
+      .then((events) => {
+        if (this.closeController.signal.aborted) return;
+        for (const event of events) this.emit(event);
+        return undefined;
+      })
+      .catch((error) => {
+        this.logger.warn({ err: error }, "Pi extension hydration failed");
+      });
+    this.pendingExtensionHydrations.add(pending);
+    void pending.then(() => this.pendingExtensionHydrations.delete(pending));
   }
 
   private currentTurnIdForEvent(): string | undefined {
@@ -1956,11 +1857,14 @@ export class PiRpcAgentSession implements AgentSession {
     }
   }
 
-  private recordCapturedUserEntries(entries: PiCapturedEntry[]): void {
-    this.capturedUserEntries.splice(0, this.capturedUserEntries.length, ...entries);
-    this.capturedUserEntriesById.clear();
-    for (const entry of entries) {
-      this.capturedUserEntriesById.set(entry.id, entry);
+  private recordCapturedUserEntries(input: {
+    treeEntries: PiCapturedEntry[];
+    contextEntries: PiCapturedEntry[];
+  }): void {
+    this.contextUserEntries.splice(0, this.contextUserEntries.length, ...input.contextEntries);
+    this.treeUserEntriesById.clear();
+    for (const entry of input.treeEntries) {
+      this.treeUserEntriesById.set(entry.id, entry);
     }
   }
 
@@ -1996,10 +1900,12 @@ export class PiRpcAgentSession implements AgentSession {
     if (!payload) {
       return false;
     }
-    const entries = parseCapturedEntries(payload.entries);
-    this.recordCapturedUserEntries(entries);
+    this.recordCapturedUserEntries({
+      treeEntries: parseCapturedEntries(payload.treeEntries),
+      contextEntries: parseCapturedEntries(payload.contextEntries),
+    });
     if (typeof payload.requestId === "string") {
-      this.resolveExtensionResult(payload.requestId, entries);
+      this.resolveExtensionResult(payload.requestId, undefined);
     }
     return true;
   }
@@ -2036,20 +1942,16 @@ export class PiRpcAgentSession implements AgentSession {
       this.bufferNoTurnOutput(message);
     }
 
-    if (this.respondToCombinedAskUserFollowUp(event)) {
+    const mapped = this.extensionHost.mapDialog(event, this.provider);
+    if (mapped?.type === "response") {
+      this.runtimeSession.respondToExtensionUiRequest(event.id, mapped.response);
       return;
     }
-
-    const shouldCombineOptionalComment =
-      event.method === "select" &&
-      this.activeAskUserDialog?.allowComment === true &&
-      this.activeAskUserDialog.allowMultiple === false;
-    const request = mapExtensionUiRequestToPermission(event, {
-      provider: this.provider,
-      label: "Pi",
-      combineOptionalComment: shouldCombineOptionalComment,
-      allowFreeform: this.activeAskUserDialog?.allowFreeform,
-    });
+    if (mapped?.type === "deferred") return;
+    const request =
+      mapped?.type === "permission"
+        ? mapped.request
+        : mapExtensionUiRequestToPermission(event, { provider: this.provider, label: "Pi" });
     if (!request) {
       return;
     }
@@ -2061,33 +1963,6 @@ export class PiRpcAgentSession implements AgentSession {
       request,
       turnId: this.currentTurnIdForEvent(),
     });
-  }
-
-  private respondToCombinedAskUserFollowUp(
-    event: Extract<PiRuntimeEvent, { type: "extension_ui_request" }>,
-  ): boolean {
-    const pending = this.pendingCombinedAskUserResponse;
-    if (!pending || event.method !== "input") {
-      return false;
-    }
-
-    const placeholder = optionalString(event.placeholder);
-    if (pending.freeform !== null && !isOptionalInputPlaceholder(placeholder)) {
-      this.pendingCombinedAskUserResponse = {
-        ...pending,
-        freeform: null,
-      };
-      this.runtimeSession.respondToExtensionUiRequest(event.id, { value: pending.freeform });
-      return true;
-    }
-
-    if (isOptionalInputPlaceholder(placeholder)) {
-      this.pendingCombinedAskUserResponse = null;
-      this.runtimeSession.respondToExtensionUiRequest(event.id, { value: pending.comment });
-      return true;
-    }
-
-    return false;
   }
 
   private handleCommandOutput(textValue: unknown): void {
@@ -2212,7 +2087,25 @@ export class PiRpcAgentSession implements AgentSession {
       case "tool_execution_start": {
         const toolCall = parseToolArgs(event.toolName, event.args);
         this.activeToolCalls.set(event.toolCallId, toolCall);
-        this.activeAskUserDialog = readActiveAskUserDialog(event.toolName, event.args);
+        const request = this.extensionHost.onToolStart(
+          {
+            callId: event.toolCallId,
+            toolName: event.toolName,
+            args: toolCall.args,
+            status: "running",
+            result: null,
+          },
+          this.provider,
+        );
+        if (request) {
+          this.pendingExtensionUiRequests.set(request.id, request);
+          this.emit({
+            type: "permission_requested",
+            provider: this.provider,
+            request,
+            turnId: this.currentTurnIdForEvent(),
+          });
+        }
         this.emitToolCallEvent(event.toolCallId, toolCall, "running", null, null);
         return;
       }
@@ -2297,14 +2190,16 @@ export class PiRpcAgentSession implements AgentSession {
       this.activeToolCalls.get(event.toolCallId) ?? parseToolArgs(event.toolName, null);
     this.activeToolCalls.delete(event.toolCallId);
 
-    if (event.toolName === "ask_user") {
-      this.activeAskUserDialog = null;
-      this.pendingCombinedAskUserResponse = null;
-    }
-
     const result = parseToolResult(event.result);
     const error = event.isError ? event.result : null;
     const status = event.isError ? "failed" : "completed";
+    this.extensionHost.onToolEnd({
+      callId: event.toolCallId,
+      toolName: toolCall.toolName,
+      args: toolCall.args,
+      status,
+      result,
+    });
     this.emitToolCallEvent(event.toolCallId, toolCall, status, result, error);
   }
 
@@ -2389,6 +2284,8 @@ export class PiRpcAgentSession implements AgentSession {
       return;
     }
     if (event.message.role === "custom") {
+      const customMapping = this.extensionHost.mapCustomMessage(event.message);
+      this.emitExtensionOutput(customMapping, turnId);
       const text = getUserMessageText(event.message.content);
       if (text) {
         this.emit({
@@ -2411,14 +2308,21 @@ export class PiRpcAgentSession implements AgentSession {
     error: unknown,
   ): boolean {
     const turnId = this.currentTurnIdForEvent();
-    const detail = this.mapToolDetail(toolCallId, toolCall, result);
+    const mapping = this.extensionHost.mapToolCall({
+      callId: toolCallId,
+      toolName: toolCall.toolName,
+      args: toolCall.args,
+      status,
+      result,
+    });
+    const detail = mapping?.detail ?? mapToolDetail(toolCall, result);
     if (!detail) {
       return false;
     }
     const baseItem = {
       type: "tool_call" as const,
       callId: toolCallId,
-      name: resolveToolCallName(toolCall, result),
+      name: mapping?.name ?? toolCall.toolName,
       detail,
     };
     const item =
@@ -2429,15 +2333,8 @@ export class PiRpcAgentSession implements AgentSession {
       turnId,
       item,
     });
+    this.emitExtensionOutput(mapping, turnId);
     return true;
-  }
-
-  private mapToolDetail(
-    _toolCallId: string,
-    toolCall: PiTrackedToolCall,
-    result: PiToolResult,
-  ): ToolCallDetail | null {
-    return mapToolDetail(toolCall, result);
   }
 
   private completeTurn(turnId: string | undefined, messages: PiAgentMessage[]): void {
@@ -2485,6 +2382,7 @@ export class PiRpcAgentSession implements AgentSession {
 
   private async refreshState(): Promise<void> {
     this.state = await this.runtimeSession.getState();
+    this.config.thinkingOptionId = this.state.thinkingLevel;
   }
 
   private async refreshAfterTurn(finalUsage: Promise<void>): Promise<void> {
@@ -2531,8 +2429,7 @@ export class PiRpcAgentClient implements AgentClient {
       runtimeSession = await this.runtime.startSession({
         cwd: config.cwd,
         model: config.model,
-        thinkingOptionId:
-          normalizePiThinkingOption(config.thinkingOptionId) ?? DEFAULT_PI_THINKING_LEVEL,
+        thinkingOptionId: normalizePiThinkingOption(config.thinkingOptionId) ?? undefined,
         noSession: config.internal === true,
         env: launchContext?.env,
         mcpConfigPath: mcpConfig?.path,
@@ -2648,12 +2545,23 @@ export class PiRpcAgentClient implements AgentClient {
       });
       if (!runtimeSession) throw new Error("Pi catalog runtime did not start");
       const catalogSession = runtimeSession;
+      const piModels = await runProviderRefreshActivity(context, "get_available_models", () =>
+        catalogSession.getAvailableModels(null),
+      );
+      // A fresh Pi session starts on the model Pi resolves from its own settings.
+      const { model: configuredModel } = await runProviderRefreshActivity(
+        context,
+        "get_state",
+        () => catalogSession.getState(),
+      );
       const models = transformPiModels(
-        (
-          await runProviderRefreshActivity(context, "get_available_models", () =>
-            catalogSession.getAvailableModels(null),
-          )
-        ).map((model) => mapPiModel(model, PI_PROVIDER)),
+        piModels.map((model) => {
+          const mapped = mapPiModel(model, PI_PROVIDER);
+          const isConfigured =
+            model.provider === configuredModel?.provider && model.id === configuredModel?.id;
+          if (isConfigured) mapped.isDefault = true;
+          return mapped;
+        }),
       );
       return { models, modes: [] };
     } finally {
