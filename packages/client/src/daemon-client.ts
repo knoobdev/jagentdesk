@@ -249,6 +249,16 @@ import type {
   OrchestrationRouteCategory,
 } from "@jagentdesk/protocol/orchestration";
 import type { Skill, SkillMutation } from "@jagentdesk/protocol/skills";
+import type {
+  SkillCatalogItem,
+  SkillCatalogItemRef,
+  SkillEntry,
+  SkillFile,
+  SkillPluginInstallResult,
+  SkillScope,
+  SkillSourceRef,
+  SkillWrittenPaths,
+} from "@jagentdesk/protocol/native-skills";
 import type { LifetimeUsage, UsageDayRollup } from "@jagentdesk/protocol/usage-history";
 import type {
   MutableDaemonConfig,
@@ -512,6 +522,8 @@ export interface SendMessageOptions {
   attachments?: SendAgentMessageRequest["attachments"];
   /** How to treat this message when the agent is mid-turn (see ADR-0013). */
   activeTurnBehavior?: SendAgentMessageRequest["activeTurnBehavior"];
+  /** Native skills to invoke on this turn (spec 22.7); the daemon adds the invocation. */
+  skillIds?: string[];
 }
 
 export interface AgentAttentionRequiredNotification {
@@ -3503,6 +3515,7 @@ export class DaemonClient {
       ...(options?.images ? { images: options.images } : {}),
       ...(options?.attachments ? { attachments: options.attachments } : {}),
       ...(options?.activeTurnBehavior ? { activeTurnBehavior: options.activeTurnBehavior } : {}),
+      ...(options?.skillIds?.length ? { skillIds: options.skillIds } : {}),
     });
     const payload = await this.sendRequest({
       requestId,
@@ -6051,6 +6064,114 @@ export class DaemonClient {
     return this.sendNamespacedCorrelatedSessionRequest({
       requestId,
       message: { type: "skills.mutate.request", mutation },
+    });
+  }
+
+  // ── Native SKILL.md skills (spec 22.4). Errors reject with DaemonRpcError whose
+  // `code` is one of NATIVE_SKILLS_ERROR_CODES (e.g. "skill_name_conflict",
+  // "confirmation_required", "skill_not_owned").
+  async listNativeSkills(
+    options: { cwd?: string } = {},
+    requestId?: string,
+  ): Promise<{ requestId: string; skills: SkillEntry[]; written: SkillWrittenPaths }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "skills.catalog.list.request", ...options },
+    });
+  }
+
+  async getNativeSkill(
+    skillId: string,
+    options: { cwd?: string } = {},
+    requestId?: string,
+  ): Promise<{ requestId: string; skill: SkillEntry; files: SkillFile[]; body: string }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "skills.catalog.get.request", skillId, ...options },
+    });
+  }
+
+  async browseSkillSource(
+    source: SkillSourceRef,
+    options: { query?: string; refresh?: boolean } = {},
+    requestId?: string,
+  ): Promise<{ requestId: string; items: SkillCatalogItem[] }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "skills.sources.browse.request", source, ...options },
+      timeout: 120_000,
+    });
+  }
+
+  async installSkill(
+    input: { item: SkillCatalogItemRef; scope: SkillScope; cwd?: string; rename?: string },
+    requestId?: string,
+  ): Promise<{
+    requestId: string;
+    skill: SkillEntry | null;
+    plugin: SkillPluginInstallResult | null;
+  }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "skills.install.request", ...input },
+      timeout: 360_000,
+    });
+  }
+
+  async uninstallSkill(
+    input: { skillId: string; cwd?: string; confirm?: boolean },
+    requestId?: string,
+  ): Promise<{ requestId: string; removed: string[]; backupPath: string | null }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "skills.uninstall.request", ...input },
+    });
+  }
+
+  async setSkillEnabled(
+    input: { skillId: string; enabled: boolean; cwd?: string; confirm?: boolean },
+    requestId?: string,
+  ): Promise<{ requestId: string; skill: SkillEntry }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "skills.set_enabled.request", ...input },
+    });
+  }
+
+  async authorSkill(
+    input: {
+      skillId?: string;
+      name: string;
+      description: string;
+      body: string;
+      scope: SkillScope;
+      cwd?: string;
+    },
+    requestId?: string,
+  ): Promise<{ requestId: string; skill: SkillEntry }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "skills.author.request", ...input },
+    });
+  }
+
+  async learnSkill(
+    input: { skillId: string; lesson: string; approved: boolean; agentId?: string; cwd?: string },
+    requestId?: string,
+  ): Promise<{ requestId: string; skill: SkillEntry }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "skills.learn.request", ...input },
+    });
+  }
+
+  async forkSkill(
+    input: { skillId: string; name?: string; cwd?: string },
+    requestId?: string,
+  ): Promise<{ requestId: string; skill: SkillEntry }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "skills.fork.request", ...input },
     });
   }
 
@@ -8976,6 +9097,30 @@ export class DaemonClient {
     return { topic: payload.topic, roomId: payload.roomId };
   }
 
+  // Rendered HTML of one archify diagram version (spec 23.3); null when the daemon answers not_found.
+  async forumDiagramHtml(
+    input: { topicId: string; diagramId: string },
+    requestId?: string,
+  ): Promise<string | null> {
+    const resolved = this.createRequestId(requestId);
+    const message = SessionInboundMessageSchema.parse({
+      type: "forum.diagram.html.request",
+      requestId: resolved,
+      topicId: input.topicId,
+      diagramId: input.diagramId,
+    });
+    const payload = await this.sendRequest({
+      requestId: resolved,
+      message,
+      options: { skipQueue: true },
+      select: (msg) =>
+        msg.type === "forum.diagram.html.response" && msg.payload.requestId === resolved
+          ? msg.payload
+          : null,
+    });
+    return payload.html;
+  }
+
   subscribeForumStream(handler: (topic: StoredForumTopic) => void): () => void {
     return this.on("forum.stream", (message) => handler(message.payload.topic));
   }
@@ -9053,6 +9198,7 @@ export class DaemonClient {
             [CLIENT_CAPS.providerSubagents]: true,
             [CLIENT_CAPS.projectedSubagentTimeline]: true,
             [CLIENT_CAPS.projectUpdates]: true,
+            [CLIENT_CAPS.archifyDiagrams]: true,
             ...this.config.capabilities,
           },
           ...(this.config.appVersion ? { appVersion: this.config.appVersion } : {}),

@@ -30,6 +30,7 @@ export const agentSendSchema: OutputSchema<AgentSendResult> = {
 export interface AgentSendOptions extends CommandOptions {
   wait?: boolean;
   image?: string[];
+  skill?: string[];
   prompt?: string;
   promptFile?: string;
 }
@@ -42,6 +43,12 @@ export function addSendOptions(cmd: Command): Command {
     .option("--prompt <text>", "Provide the message inline as a flag")
     .option("--prompt-file <path>", "Read the message from a UTF-8 text file")
     .option("--image <path>", "Attach image(s) to the message", collectMultiple, [])
+    .option(
+      "--skill <id>",
+      "Invoke a skill on this turn (skill id from the Skills screen; repeatable)",
+      collectMultiple,
+      [],
+    )
     .option("--no-wait", "Return immediately without waiting for completion");
 }
 
@@ -203,7 +210,8 @@ export async function runSendCommand(
       options.image && options.image.length > 0 ? await readImageFiles(options.image) : undefined;
 
     // Send the message
-    await client.sendAgentMessage(agentIdArg, promptInput, { images });
+    const skillIds = options.skill && options.skill.length > 0 ? options.skill : undefined;
+    await client.sendAgentMessage(agentIdArg, promptInput, { images, skillIds });
 
     // If --no-wait, return immediately
     if (options.wait === false) {

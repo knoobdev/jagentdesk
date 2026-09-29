@@ -1146,6 +1146,11 @@ export class AgentManager {
     }
   }
 
+  /** Built-in provider a custom provider derives from (itself when not derived). */
+  getBaseProviderId(provider: AgentProvider): AgentProvider {
+    return this.providerDefinitions.get(provider)?.derivedFromProviderId ?? provider;
+  }
+
   getAgent(id: string): ManagedAgent | null {
     const agent = this.agents.get(id);
     return agent ? { ...agent } : null;

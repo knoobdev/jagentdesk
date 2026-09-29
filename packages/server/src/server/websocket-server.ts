@@ -13,7 +13,7 @@ import type { ProjectRegistry, WorkspaceRegistry } from "./workspace-registry.js
 import type { ProjectUpdate } from "./workspace-reconciliation-service.js";
 import type { FileBackedChatService } from "./chat/chat-service.js";
 import type { LoopService } from "./loop-service.js";
-import type { SkillsStorage } from "./skills/skills-storage.js";
+import type { NativeSkillsService } from "./skills-native/index.js";
 import type { Skill } from "@jagentdesk/protocol/skills";
 import type { UsageHistoryStorage } from "./usage/usage-history-storage.js";
 import type { LifetimeUsage, UsageDayRollup } from "@jagentdesk/protocol/usage-history";
@@ -101,6 +101,7 @@ import {
   normalizeClientRestartRpcReason,
 } from "./lifecycle-reasons.js";
 import { CLIENT_CAPS } from "@jagentdesk/protocol/client-capabilities";
+import type { StoredForumTopic } from "@jagentdesk/protocol/agent-forum/types";
 import type {
   BrowserAutomationExecuteResponse,
   BrowserScreenshotRequest,
@@ -617,7 +618,7 @@ export class VoiceAssistantWebSocketServer {
   private readonly workspaceRegistry: WorkspaceRegistry;
   private readonly chatService: FileBackedChatService;
   private readonly loopService: LoopService;
-  private skillsStorage: SkillsStorage | null = null;
+  private skillsStorage: NativeSkillsService | null = null;
   private usageHistory: UsageHistoryStorage | null = null;
   private readonly clusterRegistry: ClusterRegistry;
   private readonly databaseRegistry: DatabaseRegistry;
@@ -759,7 +760,7 @@ export class VoiceAssistantWebSocketServer {
     hubRelationships?: HubRelationshipManagement | null,
     pairing?: PairingServerDependencies | null,
     pluginRuntime?: PluginRuntimePort | null,
-    skillsStorage?: SkillsStorage | null,
+    skillsStorage?: NativeSkillsService | null,
     usageHistory?: UsageHistoryStorage | null,
     databaseRegistry?: DatabaseRegistry,
     autorunService?: AutorunService | null,
@@ -1241,6 +1242,12 @@ export class VoiceAssistantWebSocketServer {
 
   public publishProjectUpdate(update: ProjectUpdate): void {
     for (const session of this.listTrustedSessions()) session.emitProjectUpdate(update);
+  }
+
+  // forum.stream fan-out through each session so it can present archify diagrams per client
+  // capability (COMPAT(archifyDiagrams): added after v0.9.43, remove after 2027-03-29).
+  public publishForumTopic(topic: StoredForumTopic): void {
+    for (const session of this.listTrustedSessions()) session.emitForumStream(topic);
   }
 
   public publishSpeechReadiness(readiness: SpeechReadinessSnapshot | null): void {
@@ -2402,7 +2409,7 @@ export class VoiceAssistantWebSocketServer {
     this.broadcast(this.createDaemonConfigChangedMessage(config));
   }
 
-  private setupSkillsBroadcast(skillsStorage: SkillsStorage | null | undefined): void {
+  private setupSkillsBroadcast(skillsStorage: NativeSkillsService | null | undefined): void {
     this.skillsStorage = skillsStorage ?? null;
     this.unsubscribeSkillsChange =
       this.skillsStorage?.onChange((skills) => {
@@ -2422,7 +2429,8 @@ export class VoiceAssistantWebSocketServer {
     this.broadcast(
       wrapSessionMessage({
         type: "status",
-        payload: { status: "skills_changed", skills },
+        // Every change (legacy mutate or native op) also invalidates the native catalog.
+        payload: { status: "skills_changed", skills, catalogChanged: true },
       }),
     );
   }

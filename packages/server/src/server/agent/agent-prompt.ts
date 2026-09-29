@@ -181,6 +181,42 @@ export function isSystemInjectedEnvelope(text: string): boolean {
   return SYSTEM_ENVELOPE_PATTERN.test(text);
 }
 
+export interface SkillInvocationResolver {
+  buildInvocationPrefix(
+    skillIds: readonly string[],
+    provider: string,
+    cwd?: string | null,
+  ): Promise<string>;
+}
+
+/** Put the skill invocation line in front of the user's text. */
+export function prependInvocation(prompt: AgentPromptInput, line: string): AgentPromptInput {
+  if (!line) return prompt;
+  if (typeof prompt === "string") {
+    return prompt.trim() ? `${line}\n\n${prompt}` : line;
+  }
+  const firstText = prompt.findIndex((block) => block.type === "text");
+  if (firstText === -1) return [{ type: "text", text: line }, ...prompt];
+  return prompt.map((block, index) =>
+    index === firstText && block.type === "text"
+      ? { ...block, text: block.text.trim() ? `${line}\n\n${block.text}` : line }
+      : block,
+  );
+}
+
+async function withSkillInvocation(params: SendPromptToAgentParams): Promise<AgentPromptInput> {
+  if (!params.skillIds?.length || !params.skillInvocation) return params.prompt;
+  const agent = params.agentManager.getAgent(params.agentId);
+  if (!agent) return params.prompt;
+  const provider = params.agentManager.getBaseProviderId(agent.provider);
+  const line = await params.skillInvocation.buildInvocationPrefix(
+    params.skillIds,
+    provider,
+    agent.cwd,
+  );
+  return prependInvocation(params.prompt, line);
+}
+
 export interface SendPromptToAgentParams {
   agentManager: AgentManager;
   agentStorage: AgentStorage;
@@ -192,6 +228,13 @@ export interface SendPromptToAgentParams {
   runOptions?: AgentRunOptions;
   /** Optional mode to set on the agent before the run starts. */
   sessionMode?: string;
+  /**
+   * Native skills attached to this turn (spec 22.7). The daemon prefixes the
+   * provider's invocation (`/name`, `$name`, `/skill:name`, …) — so the app,
+   * the CLI and `send_agent_prompt` all get the same behavior.
+   */
+  skillIds?: readonly string[];
+  skillInvocation?: SkillInvocationResolver | null;
   /**
    * Default true. When false, archived agents are skipped instead of being
    * unarchived. Use false for system-injected prompts (chat mentions,
@@ -287,7 +330,9 @@ export async function sendPromptToAgent(
     ? { ...params.runOptions, clientMessageId: params.messageId }
     : params.runOptions;
 
-  return await startAgentRun(params.agentManager, params.agentId, params.prompt, params.logger, {
+  const prompt = await withSkillInvocation(params);
+
+  return await startAgentRun(params.agentManager, params.agentId, prompt, params.logger, {
     replaceRunning: true,
     activeTurnBehavior: params.activeTurnBehavior,
     clearPendingPermissions: params.clearPendingPermissions,

@@ -166,6 +166,8 @@ import type { AutorunService } from "./autorun/service.js";
 import { SessionShareSession } from "./session/session-share/session-share-session.js";
 import { AgentForumSession } from "./session/agent-forum/agent-forum-session.js";
 import type { AgentForumService } from "./agent-forum/service.js";
+import { presentForumTopic } from "./agent-forum/archify-compat.js";
+import type { StoredForumTopic } from "@jagentdesk/protocol/agent-forum/types";
 import type { SessionShareService } from "./session-share/service.js";
 import { ClusterSession } from "./session/cluster/cluster-session.js";
 import { ClusterRegistry } from "./cluster/cluster-registry.js";
@@ -226,7 +228,11 @@ import type { SpeechReadinessSnapshot } from "./speech/speech-runtime.js";
 import type pino from "pino";
 import { FileBackedChatService } from "./chat/chat-service.js";
 import { LoopService } from "./loop-service.js";
-import type { SkillsStorage } from "./skills/skills-storage.js";
+import type { NativeSkillsService } from "./skills-native/index.js";
+import {
+  handleNativeSkillsRequest,
+  isNativeSkillsRequest,
+} from "./skills-native/session-handler.js";
 import type { UsageHistoryStorage } from "./usage/usage-history-storage.js";
 import type { LifetimeUsage } from "@jagentdesk/protocol/usage-history";
 import { ScheduleService } from "./schedule/service.js";
@@ -501,7 +507,7 @@ export interface SessionOptions {
       }) => void | Promise<void>)
     | null;
   loopService: LoopService;
-  skillsStorage?: SkillsStorage | null;
+  skillsStorage?: NativeSkillsService | null;
   usageHistory?: UsageHistoryStorage | null;
   clusterRegistry?: ClusterRegistry;
   databaseRegistry?: DatabaseRegistry;
@@ -766,7 +772,7 @@ export class Session {
   private readonly workspaceProvisioning: WorkspaceProvisioningService;
   private readonly workspaceRecovery: WorkspaceRecoveryService;
   private readonly daemonConfigStore: DaemonConfigStore;
-  private readonly skillsStorage: SkillsStorage | null;
+  private readonly skillsStorage: NativeSkillsService | null;
   private readonly usageHistory: UsageHistoryStorage | null;
   private readonly pushTokenStore: PushTokenStore;
   private unsubscribeAgentEvents: (() => void) | null = null;
@@ -1038,7 +1044,10 @@ export class Session {
       : null;
     this.agentForumSession = agentForumService
       ? new AgentForumSession({
-          host: { emit: (msg) => this.emit(msg) },
+          host: {
+            emit: (msg) => this.emit(msg),
+            supportsArchifyDiagrams: () => this.supportsArchifyDiagramsOnEverySource(),
+          },
           agentForumService,
           logger: this.sessionLogger,
           bootstrapTopic: options.agentForumBootstrap,
@@ -1421,6 +1430,38 @@ export class Session {
       if (capabilities.has(CLIENT_CAPS.projectUpdates)) {
         this.onMessageToSource(source, message);
       }
+    }
+  }
+
+  // COMPAT(archifyDiagrams): added after v0.9.43, remove after 2027-03-29.
+  // RPC responses go to every socket of the session, so they downgrade unless all of them are capable.
+  private supportsArchifyDiagramsOnEverySource(): boolean {
+    if (this.clientCapabilitiesBySource.size === 0) {
+      return this.supports(CLIENT_CAPS.archifyDiagrams);
+    }
+    for (const capabilities of this.clientCapabilitiesBySource.values()) {
+      if (!capabilities.has(CLIENT_CAPS.archifyDiagrams)) return false;
+    }
+    return true;
+  }
+
+  // Push a changed forum topic (forum.stream). COMPAT(archifyDiagrams): added after v0.9.43, remove
+  // after 2027-03-29 — each socket that did not advertise archify_diagrams gets archify versions as
+  // a Mermaid placeholder its schema accepts.
+  emitForumStream(topic: StoredForumTopic): void {
+    const forSupport = (supported: boolean): SessionOutboundMessage => ({
+      type: "forum.stream",
+      payload: { topic: presentForumTopic(topic, supported) },
+    });
+    if (this.clientCapabilitiesBySource.size === 0 || !this.onMessageToSource) {
+      this.emit(forSupport(this.supports(CLIENT_CAPS.archifyDiagrams)));
+      return;
+    }
+    if (!isSessionRpcAllowed(this.scopes, "forum.stream")) return;
+    for (const [source, capabilities] of this.clientCapabilitiesBySource) {
+      const message = forSupport(capabilities.has(CLIENT_CAPS.archifyDiagrams));
+      if (this.guestAgentId !== null && this.guestMessageTouchesOtherAgent(message)) continue;
+      this.onMessageToSource(source, message);
     }
   }
 
@@ -2678,6 +2719,9 @@ export class Session {
   }
 
   private dispatchSkillsMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    if (isNativeSkillsRequest(msg)) {
+      return handleNativeSkillsRequest(this.skillsStorage, msg, (out) => this.emit(out));
+    }
     switch (msg.type) {
       case "skills.get.request":
         this.emit({
@@ -3107,6 +3151,8 @@ export class Session {
         return forum.handleChatReactRequest(msg);
       case "forum/chat-room":
         return forum.handleChatRoomRequest(msg);
+      case "forum.diagram.html.request":
+        return forum.handleDiagramHtmlRequest(msg);
       default:
         return undefined;
     }
@@ -8768,6 +8814,8 @@ export class Session {
           prompt,
           messageId: msg.messageId,
           activeTurnBehavior: msg.activeTurnBehavior,
+          skillIds: msg.skillIds,
+          skillInvocation: this.skillsStorage,
           logger: this.sessionLogger,
         });
       } catch (error) {

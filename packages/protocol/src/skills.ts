@@ -231,7 +231,10 @@ export type SkillsMutateRequest = z.infer<typeof SkillsMutateRequestSchema>;
 // ── pushEvent: status:skills_changed ─────────────────────────────────────────
 export const SkillsChangedStatusPayloadSchema = z.object({
   status: z.literal("skills_changed"),
+  /** COMPAT(nativeSkills): legacy view of the owned native skills. */
   skills: z.array(SkillSchema),
+  /** Native skill catalog changed (spec 22.4): refetch `skills.catalog.list`. */
+  catalogChanged: z.boolean().optional(),
 });
 
 /**

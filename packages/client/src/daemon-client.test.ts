@@ -737,6 +737,7 @@ test("advertises client capabilities in hello", async () => {
     clientType: "cli",
     protocolVersion: 1,
     capabilities: {
+      archify_diagrams: true,
       compact_provider_snapshots: true,
       custom_mode_icons: true,
       project_updates: true,

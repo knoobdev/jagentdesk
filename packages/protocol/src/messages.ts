@@ -33,6 +33,7 @@ import {
   SkillsMutateResponseSchema,
   SkillsChangedStatusPayloadSchema,
 } from "./skills.js";
+import { NativeSkillsRequestSchemas, NativeSkillsResponseSchemas } from "./native-skills.js";
 import {
   UsageHistoryGetRequestSchema,
   UsageHistoryGetResponseSchema,
@@ -88,6 +89,7 @@ import {
   ForumChatPostRequestSchema,
   ForumChatReactRequestSchema,
   ForumChatRoomRequestSchema,
+  ForumDiagramHtmlRequestSchema,
   ForumCreateResponseSchema,
   ForumListResponseSchema,
   ForumGetResponseSchema,
@@ -98,6 +100,7 @@ import {
   ForumChatPostResponseSchema,
   ForumChatReactResponseSchema,
   ForumChatRoomResponseSchema,
+  ForumDiagramHtmlResponseSchema,
   ForumStreamSchema,
 } from "./agent-forum/rpc-schemas.js";
 import {
@@ -1282,6 +1285,8 @@ export const SendAgentMessageSchema = z.object({
   images: z.array(ImageAttachmentSchema).optional(),
   attachments: AgentAttachmentsSchema,
   activeTurnBehavior: ActiveTurnBehaviorSchema.optional(),
+  /** Native skills attached to this turn (spec 22.7): the daemon prefixes the provider invocation. */
+  skillIds: z.array(z.string()).optional(),
 });
 
 // ============================================================================
@@ -1413,6 +1418,8 @@ export const SendAgentMessageRequestSchema = z.object({
   images: z.array(ImageAttachmentSchema).optional(),
   attachments: AgentAttachmentsSchema,
   activeTurnBehavior: ActiveTurnBehaviorSchema.optional(),
+  /** Native skills attached to this turn (spec 22.7): the daemon prefixes the provider invocation. */
+  skillIds: z.array(z.string()).optional(),
 });
 
 export const WaitForFinishRequestSchema = z.object({
@@ -4042,6 +4049,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   OrchestrationTaskPrepareRequestSchema,
   SkillsGetRequestSchema,
   SkillsMutateRequestSchema,
+  ...NativeSkillsRequestSchemas,
   UsageHistoryGetRequestSchema,
   UsageHistoryResetRequestSchema,
   DictationStreamStartMessageSchema,
@@ -4225,6 +4233,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ForumChatPostRequestSchema,
   ForumChatReactRequestSchema,
   ForumChatRoomRequestSchema,
+  ForumDiagramHtmlRequestSchema,
   LoopRunRequestSchema,
   LoopListRequestSchema,
   LoopInspectRequestSchema,
@@ -7766,6 +7775,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   OrchestrationTaskPrepareResponseSchema,
   SkillsGetResponseSchema,
   SkillsMutateResponseSchema,
+  ...NativeSkillsResponseSchemas,
   UsageHistoryGetResponseSchema,
   UsageHistoryResetResponseSchema,
   BrowserAutomationExecuteRequestSchema,
@@ -7955,6 +7965,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ForumChatPostResponseSchema,
   ForumChatReactResponseSchema,
   ForumChatRoomResponseSchema,
+  ForumDiagramHtmlResponseSchema,
   ForumStreamSchema,
   ForgeChangeRequestCreateResponseSchema,
   ForgeChangeRequestCloseResponseSchema,
@@ -8580,6 +8591,9 @@ export type {
   ForumChatMessage,
   ForumChatRoom,
   ForumDiagram,
+  ForumDiagramFormat,
+  ForumDiagramType,
+  ForumDiagramRenderStatus,
   StoredForumTopic,
   ForumEpicStat,
   ForumTopicSummary,
@@ -8595,6 +8609,8 @@ export type ForumChatPostRequest = z.infer<typeof ForumChatPostRequestSchema>;
 export type ForumChatReactRequest = z.infer<typeof ForumChatReactRequestSchema>;
 export type ForumChatRoomRequest = z.infer<typeof ForumChatRoomRequestSchema>;
 export type ForumStream = z.infer<typeof ForumStreamSchema>;
+export type ForumDiagramHtmlRequest = z.infer<typeof ForumDiagramHtmlRequestSchema>;
+export type ForumDiagramHtmlResponse = z.infer<typeof ForumDiagramHtmlResponseSchema>;
 // Forge Hub — Milestone D types
 export type ForgeChangeRequestCreateRequest = z.infer<typeof ForgeChangeRequestCreateRequestSchema>;
 export type ForgeChangeRequestCreateResponse = z.infer<
@@ -8753,6 +8769,7 @@ export const WSHelloMessageSchema = z.object({
       [CLIENT_CAPS.providerSubagents]: z.boolean().optional(),
       [CLIENT_CAPS.projectedSubagentTimeline]: z.boolean().optional(),
       [CLIENT_CAPS.projectUpdates]: z.boolean().optional(),
+      [CLIENT_CAPS.archifyDiagrams]: z.boolean().optional(),
       [CLIENT_CAPS.browserHost]: BrowserAutomationHostCapabilitySchema.optional(),
     })
     .passthrough()

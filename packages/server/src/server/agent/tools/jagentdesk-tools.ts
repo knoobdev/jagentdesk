@@ -127,8 +127,8 @@ import { getSharedProxyService, installCaToSimulator } from "../../proxy/proxy-s
 import { fridaAvailability, installFrida, launchAndUnpin } from "../../proxy/frida-control.js";
 import type { SimButton } from "@jagentdesk/protocol/simulator/rpc-schemas";
 import type { ForgeHubService } from "../../session/forge/forge-hub-session.js";
-import type { SkillsStorage } from "../../skills/skills-storage.js";
-import type { Skill } from "@jagentdesk/protocol/skills";
+import type { NativeSkillsService } from "../../skills-native/index.js";
+import { slugifySkillName } from "../../skills-native/frontmatter.js";
 import type { AgentPermissionResponse } from "../agent-sdk-types.js";
 
 export interface JAgentDeskToolHostDependencies {
@@ -189,10 +189,10 @@ export interface JAgentDeskToolHostDependencies {
   // clusterRegistry backs the kubectl_* tools. Single instance so all agents
   // share one token/connection store.
   forgeHub?: ForgeHubService;
-  // Daemon-owned skill store. Lets a normal chat agent author a brand-new named
-  // skill mid-conversation; the store's onChange broadcast (status:skills_changed)
-  // then surfaces it live in the Skills screen + composer picker on every device.
-  skillsStorage?: Pick<SkillsStorage, "get" | "mutate">;
+  // Native skills service (spec 22). Lets a chat agent author a SKILL.md skill
+  // mid-conversation; its change broadcast (status:skills_changed) surfaces it live
+  // in the Skills screen on every device. Also resolves skillIds on send_agent_prompt.
+  skillsStorage?: Pick<NativeSkillsService, "author" | "getSkill" | "buildInvocationPrefix">;
   // Daemon-config-backed store for the agentic browser's anti-detect fingerprint
   // profiles. Lets a chat agent create a coherent profile and switch the active one
   // mid-conversation; the config patch broadcasts status:daemon_config_changed, so
@@ -3045,46 +3045,70 @@ function registerSkillsTools(params: {
 }): void {
   const { registerTool, options } = params;
 
+  // Skills are standard Agent Skills directories (<name>/SKILL.md) installed natively
+  // for every provider (spec 22 / ADR-0022): one real copy in .agents/skills plus
+  // symlinks into .claude/skills and .kiro/skills, recorded in the skills lock.
+  const resolveCwd = (scope: "global" | "project", cwd: string | undefined) => {
+    if (scope === "global") return undefined;
+    if (cwd) return cwd;
+    return options.callerAgentId
+      ? (options.agentManager.getAgent(options.callerAgentId)?.cwd ?? undefined)
+      : undefined;
+  };
+  const skillError = (error: unknown): JAgentDeskToolResult => ({
+    content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }],
+    isError: true,
+  });
+
   registerTool(
     "create_skill",
     {
       title: "Create skill",
       description:
-        "Author a brand-new named JAgentDesk skill (a reusable, trainable assistant) from a name plus instructions. ALWAYS use THIS tool when the user asks you to create/make a skill — do NOT create a provider- or model-native skill (e.g. a Claude Code SKILL.md / slash-command file), which would be tied to one model and would NOT show up in JAgentDesk. This tool writes a daemon-owned skill that appears immediately in the Skills screen and the composer skill picker on every connected device, independent of the current model. Auto-approved.",
+        "Create a new skill as a standard Agent Skills directory (<name>/SKILL.md) that every coding agent provider loads natively (Claude, Codex, OpenCode, Cursor, Copilot, Pi, OMP, Kimi, Kiro). Use THIS tool when the user asks you to create/make a skill: it installs the real copy in ~/.agents/skills (or <project>/.agents/skills), symlinks it into .claude/skills and .kiro/skills, records it in the JAgentDesk skills lock and shows it in the Skills screen on every device. Never overwrites an existing skill directory. Auto-approved.",
       inputSchema: {
         name: z
           .string()
           .trim()
           .min(1, "name is required")
-          .max(60, "name must be 60 characters or fewer")
-          .describe("Short skill name shown in the Skills screen and composer picker."),
+          .max(64, "name must be 64 characters or fewer")
+          .describe(
+            "Skill name: lowercase letters, digits and hyphens (e.g. pr-reviewer). Other text is converted to that form.",
+          ),
         instructions: z
           .string()
           .trim()
           .min(1, "instructions are required")
-          .describe(
-            "The skill's system prompt: what it does and how it should behave when attached.",
-          ),
+          .describe("SKILL.md body (markdown): what the skill does and how to apply it."),
         description: z
           .string()
           .trim()
-          .max(280)
+          .max(1024)
           .optional()
-          .describe("One-line summary shown under the name."),
-        icon: z.string().trim().max(8).optional().describe("Optional emoji icon. Defaults to ✦."),
-        tags: z.array(z.string().trim().min(1)).optional().describe("Optional freeform tags."),
+          .describe(
+            "When the skill should be used (the provider shows this to the model). Defaults to the first line of the instructions.",
+          ),
+        scope: z
+          .enum(["global", "project"])
+          .optional()
+          .describe("global (default): the user's home. project: the current workspace."),
+        cwd: z
+          .string()
+          .optional()
+          .describe("Workspace directory for scope=project. Defaults to your working directory."),
       },
       outputSchema: {
         id: z.string(),
         name: z.string(),
+        path: z.string(),
       },
     },
     async (input: {
       name: string;
       instructions: string;
       description?: string;
-      icon?: string;
-      tags?: string[];
+      scope?: "global" | "project";
+      cwd?: string;
     }) => {
       if (!options.skillsStorage) {
         return {
@@ -3092,33 +3116,39 @@ function registerSkillsTools(params: {
           isError: true,
         };
       }
-      const now = Date.now();
-      // The daemon reducer (applySkillMutation "add") forces progress fields to
-      // baseline, so only presentation fields here are trusted. We still supply a
-      // full Skill to satisfy the schema; the id is generated daemon-side.
-      const skill: Skill = {
-        id: `skl_${randomUUID().replace(/-/g, "").slice(0, 12)}`,
-        name: input.name.trim(),
-        icon: input.icon?.trim() || "✦",
-        description: input.description?.trim() ?? "",
-        instructions: input.instructions.trim(),
-        tags: input.tags?.map((tag) => tag.trim()).filter(Boolean) ?? [],
-        status: "training",
-        xp: 0,
-        runs: 0,
-        approvals: 0,
-        consecutiveApprovals: 0,
-        examples: [],
-        learned: [],
-        createdAt: now,
-        updatedAt: now,
-      };
-      const skills = await options.skillsStorage.mutate({ op: "add", skill });
-      const created = skills.find((existing) => existing.id === skill.id) ?? skill;
-      return {
-        content: [{ type: "text", text: `Created skill "${created.name}" (${created.id})` }],
-        structuredContent: ensureValidJson({ id: created.id, name: created.name }),
-      };
+      const scope = input.scope ?? "global";
+      const name = slugifySkillName(input.name);
+      const description =
+        input.description?.trim() ||
+        input.instructions
+          .split("\n")
+          .map((line) => line.replace(/^#+\s*/, "").trim())
+          .find(Boolean) ||
+        name;
+      try {
+        const skill = await options.skillsStorage.author({
+          name,
+          description,
+          body: input.instructions,
+          scope,
+          cwd: resolveCwd(scope, input.cwd),
+        });
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Created skill "${skill.name}" (${skill.skillId}) at ${skill.realPath}`,
+            },
+          ],
+          structuredContent: ensureValidJson({
+            id: skill.skillId,
+            name: skill.name,
+            path: skill.realPath,
+          }),
+        };
+      } catch (error) {
+        return skillError(error);
+      }
     },
   );
 
@@ -3127,54 +3157,45 @@ function registerSkillsTools(params: {
     {
       title: "Update skill",
       description:
-        "Update an existing skill's name, description, instructions, icon, or tags by id (use the id returned by create_skill or shown in the Skills screen). Changes appear immediately in the Skills screen and composer on every device. Auto-approved.",
+        "Update the description and/or instructions (SKILL.md body) of a skill JAgentDesk owns, by id (the id returned by create_skill or shown in the Skills screen). Learned lessons are kept. Renaming is not supported. Auto-approved.",
       inputSchema: {
         id: z.string().min(1).describe("Skill id to update."),
-        name: z.string().trim().min(1).max(60).optional(),
         instructions: z.string().trim().min(1).optional(),
-        description: z.string().trim().max(280).optional(),
-        icon: z.string().trim().max(8).optional(),
-        tags: z.array(z.string().trim().min(1)).optional(),
+        description: z.string().trim().max(1024).optional(),
+        cwd: z
+          .string()
+          .optional()
+          .describe("Workspace directory, needed only for a project skill."),
       },
       outputSchema: {
         id: z.string(),
         name: z.string(),
       },
     },
-    async (input: {
-      id: string;
-      name?: string;
-      instructions?: string;
-      description?: string;
-      icon?: string;
-      tags?: string[];
-    }) => {
+    async (input: { id: string; instructions?: string; description?: string; cwd?: string }) => {
       if (!options.skillsStorage) {
         return {
           content: [{ type: "text", text: "Skills storage is not configured" }],
           isError: true,
         };
       }
-      const existing = options.skillsStorage.get().find((skill) => skill.id === input.id);
-      if (!existing) {
+      try {
+        const current = await options.skillsStorage.getSkill(input.id, input.cwd);
+        const skill = await options.skillsStorage.author({
+          skillId: current.skill.skillId,
+          name: current.skill.name,
+          description: input.description ?? current.skill.description,
+          body: input.instructions ?? current.body,
+          scope: current.skill.scope,
+          cwd: current.skill.projectRoot ?? undefined,
+        });
         return {
-          content: [{ type: "text", text: `Skill not found: ${input.id}` }],
-          isError: true,
+          content: [{ type: "text", text: `Updated skill "${skill.name}" (${skill.skillId})` }],
+          structuredContent: ensureValidJson({ id: skill.skillId, name: skill.name }),
         };
+      } catch (error) {
+        return skillError(error);
       }
-      const patch = {
-        ...(input.name !== undefined ? { name: input.name } : {}),
-        ...(input.icon !== undefined ? { icon: input.icon } : {}),
-        ...(input.description !== undefined ? { description: input.description } : {}),
-        ...(input.instructions !== undefined ? { instructions: input.instructions } : {}),
-        ...(input.tags !== undefined ? { tags: input.tags } : {}),
-      };
-      const skills = await options.skillsStorage.mutate({ op: "update", id: input.id, patch });
-      const updated = skills.find((skill) => skill.id === input.id) ?? existing;
-      return {
-        content: [{ type: "text", text: `Updated skill "${updated.name}" (${updated.id})` }],
-        structuredContent: ensureValidJson({ id: updated.id, name: updated.name }),
-      };
     },
   );
 }
@@ -3942,6 +3963,12 @@ export function createJAgentDeskToolCatalog(
     agentId: z.string(),
     prompt: z.string(),
     sessionMode: z.string().optional().describe("Optional mode to set before running the prompt."),
+    skillIds: z
+      .array(z.string())
+      .optional()
+      .describe(
+        "Skill ids (from the Skills screen / create_skill) to invoke for this turn; the daemon prefixes the provider's native skill invocation.",
+      ),
   };
   const agentToAgentSendAgentPromptInputSchema = {
     ...commonSendAgentPromptInputSchema,
@@ -4772,6 +4799,7 @@ export function createJAgentDeskToolCatalog(
       agentId,
       prompt,
       sessionMode,
+      skillIds,
       background = Boolean(callerAgentId),
       notifyOnFinish = Boolean(callerAgentId),
     }) => {
@@ -4796,6 +4824,8 @@ export function createJAgentDeskToolCatalog(
         agentId,
         prompt,
         sessionMode,
+        skillIds,
+        skillInvocation: options.skillsStorage ?? null,
         logger: childLogger,
       });
 

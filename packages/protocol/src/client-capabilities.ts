@@ -30,6 +30,10 @@ export const CLIENT_CAPS = {
   // reconstructed timeline replay after 2027-02-21 once the client floor supports invalidation.
   timelineReplacementInvalidation: "timeline_replacement_invalidation",
   browserHost: "browser_host",
+  // COMPAT(archifyDiagrams): added after v0.9.43, remove after 2027-03-29. Capable clients accept
+  // ForumDiagram.format "archify"; the daemon presents archify versions to older clients as a
+  // Mermaid placeholder because their schema pins format to "mermaid".
+  archifyDiagrams: "archify_diagrams",
 } as const;
 
 export type ClientCapability = (typeof CLIENT_CAPS)[keyof typeof CLIENT_CAPS];

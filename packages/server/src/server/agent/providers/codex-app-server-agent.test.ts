@@ -2199,7 +2199,12 @@ describe("Codex app-server provider", () => {
 
     try {
       await expect(
-        listCodexSkills(cwd, path.join(tempDir, "codex-home"), workspaceGitService),
+        listCodexSkills(
+          cwd,
+          path.join(tempDir, "codex-home"),
+          workspaceGitService,
+          path.join(tempDir, "home"),
+        ),
       ).resolves.toContainEqual({
         name: "shipper",
         description: "Ship changes carefully.",
@@ -2207,6 +2212,35 @@ describe("Codex app-server provider", () => {
         kind: "skill",
       });
       expect(workspaceGitService.resolveRepoRoot).toHaveBeenCalledWith(cwd);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("lists shared .agents/skills from the repo and the home directory", async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), "codex-agents-skills-"));
+    const cwd = path.join(tempDir, "repo");
+    const homeDir = path.join(tempDir, "home");
+    const repoSkill = path.join(cwd, ".agents", "skills", "repo-skill");
+    const homeSkill = path.join(homeDir, ".agents", "skills", "home-skill");
+    mkdirSync(repoSkill, { recursive: true });
+    mkdirSync(homeSkill, { recursive: true });
+    writeFileSync(
+      path.join(repoSkill, "SKILL.md"),
+      "---\nname: repo-skill\ndescription: From the repo.\n---\n",
+    );
+    writeFileSync(
+      path.join(homeSkill, "SKILL.md"),
+      "---\nname: home-skill\ndescription: From home.\n---\n",
+    );
+    try {
+      const skills = await listCodexSkills(
+        cwd,
+        path.join(tempDir, "codex-home"),
+        undefined,
+        homeDir,
+      );
+      expect(skills.map((skill) => skill.name)).toEqual(["home-skill", "repo-skill"]);
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }

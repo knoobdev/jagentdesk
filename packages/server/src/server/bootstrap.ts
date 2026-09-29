@@ -3,7 +3,7 @@ import { createServer as createHTTPServer, type IncomingMessage, type ServerResp
 import { constants, existsSync, unlinkSync } from "fs";
 import { open } from "fs/promises";
 import { randomUUID } from "node:crypto";
-import { hostname as getHostname } from "node:os";
+import { homedir, hostname as getHostname } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -148,7 +148,7 @@ import {
 import { FileBackedChatService } from "./chat/chat-service.js";
 import { CheckoutDiffManager } from "./checkout-diff-manager.js";
 import { LoopService } from "./loop-service.js";
-import { SkillsStorage } from "./skills/skills-storage.js";
+import { NativeSkillsService } from "./skills-native/index.js";
 import { buildLifetimeBaseline, UsageHistoryStorage } from "./usage/usage-history-storage.js";
 import { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { DatabaseRegistry } from "./database/database-registry.js";
@@ -1272,7 +1272,13 @@ export async function createJAgentDeskDaemon(
   });
   await loopService.initialize();
   logger.info({ elapsed: elapsed() }, "Loop service initialized");
-  const skillsStorage = new SkillsStorage(config.jagentdeskHome, logger);
+  // Native SKILL.md skills (spec 22 / ADR-0022). Also serves the legacy skills.get /
+  // skills.mutate API (COMPAT(nativeSkills)) and migrates skills.json once (22.10).
+  const skillsStorage = new NativeSkillsService({
+    jagentdeskHome: config.jagentdeskHome,
+    homeDir: homedir(),
+    logger,
+  });
   await skillsStorage.initialize();
   const clusterRegistry = new ClusterRegistry({
     jagentdeskHome: config.jagentdeskHome,
@@ -1414,7 +1420,7 @@ export async function createJAgentDeskDaemon(
   const agentForumService = new AgentForumService({
     dir: path.join(config.jagentdeskHome, "forums"),
     logger,
-    onUpdate: (topic) => emitExternalSessionMessage({ type: "forum.stream", payload: { topic } }),
+    onUpdate: (topic) => wsServer?.publishForumTopic(topic),
   });
   logger.info({ elapsed: elapsed() }, "Loading persisted agent registry");
   const persistedRecords = await agentStorage.list();

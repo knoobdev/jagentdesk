@@ -702,8 +702,12 @@ export async function listCodexSkills(
   cwd: string,
   codexHome: string,
   workspaceGitService?: Pick<WorkspaceGitService, "resolveRepoRoot">,
+  homeDir: string = os.homedir(),
 ): Promise<AgentSlashCommand[]> {
+  // Codex reads the shared Agent Skills directories (.agents/skills, spec 22.3)
+  // as well as its legacy .codex/skills ones.
   const candidates: string[] = [];
+  candidates.push(path.join(cwd, ".agents", "skills"));
   candidates.push(path.join(cwd, ".codex", "skills"));
 
   const repoRoot = workspaceGitService
@@ -711,9 +715,11 @@ export async function listCodexSkills(
     : null;
   if (repoRoot) {
     candidates.push(path.join(path.dirname(cwd), ".codex", "skills"));
+    candidates.push(path.join(repoRoot, ".agents", "skills"));
     candidates.push(path.join(repoRoot, ".codex", "skills"));
   }
 
+  candidates.push(path.join(homeDir, ".agents", "skills"));
   candidates.push(path.join(codexHome, "skills"));
 
   const candidateReads = await Promise.all(
