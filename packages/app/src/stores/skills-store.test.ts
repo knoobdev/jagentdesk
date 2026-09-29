@@ -2,7 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import type { SkillEntry } from "@jagentdesk/protocol/native-skills";
 import { makeSkillEntry } from "@/test/skill-entry";
-import { migrateAttachmentRecord, useAgentSkillsStore } from "./agent-skills-store";
+import {
+  migrateAgentSkillsPersisted,
+  migrateAttachmentRecord,
+  useAgentSkillsStore,
+} from "./agent-skills-store";
 import {
   allKnownSkills,
   bindSkillsSync,
@@ -39,7 +43,7 @@ async function flush(): Promise<void> {
 
 describe("skills-store (native catalog cache)", () => {
   beforeEach(() => {
-    useAgentSkillsStore.setState({ attached: {}, injected: {}, autoLoad: true });
+    useAgentSkillsStore.setState({ attached: {}, injected: {} });
   });
   afterEach(() => {
     unbindSkillsSync();
@@ -118,7 +122,7 @@ describe("skills-store (native catalog cache)", () => {
 
 describe("agent-skills-store", () => {
   beforeEach(() => {
-    useAgentSkillsStore.setState({ attached: {}, injected: {}, autoLoad: true });
+    useAgentSkillsStore.setState({ attached: {}, injected: {} });
   });
 
   it("returns the same record when no legacy id applies", () => {
@@ -154,5 +158,16 @@ describe("agent-skills-store", () => {
     const state = useAgentSkillsStore.getState();
     expect(state.attached.agent_1).toEqual(["global:agents:one"]);
     expect(state.injected.agent_1).toEqual(["global:agents:one"]);
+  });
+
+  it("drops the removed auto-load toggle from v1 persisted state and keeps attachments", () => {
+    expect(
+      migrateAgentSkillsPersisted(
+        { autoLoad: true, attached: { agent_1: ["global:agents:x", 3] } },
+        1,
+      ),
+    ).toEqual({ attached: { agent_1: ["global:agents:x"] } });
+    expect(migrateAgentSkillsPersisted(null, 1)).toEqual({ attached: {} });
+    expect("autoLoad" in useAgentSkillsStore.getState()).toBe(false);
   });
 });

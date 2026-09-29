@@ -6,16 +6,18 @@ import { NativeSkillsError } from "./errors.js";
 import { extractTarGz } from "./tar.js";
 
 /**
- * Remote skill sources of spec 22.5 (`official`, `url`): a GitHub repository
- * (optionally a sub-path) or an npm package, downloaded as a tarball into
- * `$JAGENTDESK_HOME/skills/cache/`. No model is ever called. The network is
- * reached through an injected `fetch` so tests never touch it.
+ * Remote skill sources of spec 22.5: a GitHub repository (optionally a
+ * sub-path) or an npm package. Parsing, cache keys and the npm package cache
+ * live here; listing is in `remote-listing.ts`. No model is ever called. The
+ * network is reached through an injected `fetch` so tests never touch it.
  */
 export interface FetchResponseLike {
   ok: boolean;
   status: number;
+  headers: { get(name: string): string | null };
   arrayBuffer(): Promise<ArrayBuffer>;
   json(): Promise<unknown>;
+  text(): Promise<string>;
 }
 export type FetchLike = (
   url: string,
@@ -91,7 +93,7 @@ export function remoteSourceLabel(source: RemoteSource): string {
   return source.subpath ? `${base}/${source.subpath}` : base;
 }
 
-function cacheKey(source: RemoteSource): string {
+export function cacheKey(source: RemoteSource): string {
   const raw =
     source.kind === "npm"
       ? `npm-${source.pkg}`
@@ -105,18 +107,20 @@ const CacheMetaSchema = z.object({
 });
 
 export interface MaterializedSource {
-  /** Root of the extracted tree (sub-path not applied). */
+  /** Root of the extracted package. */
   root: string;
   revision: string | null;
   fetchedAtMs: number;
 }
 
-const NpmLatestSchema = z.object({
-  version: z.string(),
-  dist: z.object({ tarball: z.string().url() }),
-});
+export type NpmSource = Extract<RemoteSource, { kind: "npm" }>;
 
-export class RemoteSourceCache {
+/**
+ * Extracted npm package tarballs, used only to install a skill from an npm
+ * source (npm has no per-file API). One version per package is kept; the
+ * version listed is the version installed.
+ */
+export class NpmPackageCache {
   private readonly inflight = new Map<string, Promise<MaterializedSource>>();
 
   constructor(
@@ -125,24 +129,18 @@ export class RemoteSourceCache {
     private readonly now: () => number = Date.now,
   ) {}
 
-  /**
-   * Extracted tree for a source. A cache younger than 10 minutes is reused;
-   * `allowStale` (install) reuses any cached revision so the user installs the
-   * exact revision they browsed.
-   */
   async materialize(
-    source: RemoteSource,
-    options: { refresh?: boolean; allowStale?: boolean } = {},
+    source: NpmSource,
+    pinned: { version: string; tarball: string },
   ): Promise<MaterializedSource> {
     const key = cacheKey(source);
-    const cached = options.refresh ? null : await this.readCache(key);
-    if (cached && (options.allowStale || this.now() - cached.fetchedAtMs < LIST_CACHE_TTL_MS)) {
-      return cached;
-    }
-    const pending = this.inflight.get(key);
+    const cached = await this.readCache(key);
+    if (cached && cached.revision === pinned.version) return cached;
+    const flightKey = `${key}@${pinned.version}`;
+    const pending = this.inflight.get(flightKey);
     if (pending) return pending;
-    const next = this.download(source, key).finally(() => this.inflight.delete(key));
-    this.inflight.set(key, next);
+    const next = this.download(key, pinned).finally(() => this.inflight.delete(flightKey));
+    this.inflight.set(flightKey, next);
     return next;
   }
 
@@ -162,57 +160,33 @@ export class RemoteSourceCache {
     }
   }
 
-  private async fetchBuffer(url: string): Promise<Buffer> {
-    const response = await this.fetchImpl(url, {
+  private async download(
+    key: string,
+    pinned: { version: string; tarball: string },
+  ): Promise<MaterializedSource> {
+    const response = await this.fetchImpl(pinned.tarball, {
       headers: { "User-Agent": "jagentdesk-daemon", Accept: "application/octet-stream" },
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (!response.ok) {
       throw new NativeSkillsError(
         "source_fetch_failed",
-        `Download failed (${response.status}): ${url}`,
+        `Download failed (${response.status}): ${pinned.tarball}`,
       );
     }
-    return Buffer.from(await response.arrayBuffer());
-  }
-
-  private async resolveTarball(
-    source: RemoteSource,
-  ): Promise<{ url: string; version: string | null }> {
-    if (source.kind === "github") {
-      const ref = encodeURIComponent(source.ref ?? "HEAD");
-      return {
-        url: `https://codeload.github.com/${source.owner}/${source.repo}/tar.gz/${ref}`,
-        version: null,
-      };
-    }
-    const response = await this.fetchImpl(
-      `https://registry.npmjs.org/${source.pkg.replace("/", "%2F")}/latest`,
-      { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) },
-    );
-    if (!response.ok) {
-      throw new NativeSkillsError("source_fetch_failed", `npm package not found: ${source.pkg}`);
-    }
-    const latest = NpmLatestSchema.parse(await response.json());
-    return { url: latest.dist.tarball, version: latest.version };
-  }
-
-  private async download(source: RemoteSource, key: string): Promise<MaterializedSource> {
-    const { url, version } = await this.resolveTarball(source);
-    const archive = await this.fetchBuffer(url);
+    const archive = Buffer.from(await response.arrayBuffer());
     const dir = path.join(this.cacheDir, key);
     const staging = path.join(this.cacheDir, `.${key}.${randomUUID()}`);
     try {
-      const extracted = await extractTarGz(archive, path.join(staging, "tree"));
+      await extractTarGz(archive, path.join(staging, "tree"));
       const fetchedAtMs = this.now();
-      const revision = version ?? extracted.revision;
       await fs.writeFile(
         path.join(staging, "meta.json"),
-        JSON.stringify({ revision, fetched_at_ms: fetchedAtMs }, null, 2),
+        JSON.stringify({ revision: pinned.version, fetched_at_ms: fetchedAtMs }, null, 2),
       );
       await fs.rm(dir, { recursive: true, force: true });
       await fs.rename(staging, dir);
-      return { root: path.join(dir, "tree"), revision, fetchedAtMs };
+      return { root: path.join(dir, "tree"), revision: pinned.version, fetchedAtMs };
     } catch (error) {
       await fs.rm(staging, { recursive: true, force: true });
       throw error;
@@ -220,8 +194,8 @@ export class RemoteSourceCache {
   }
 }
 
-const SKIP_DIRS = new Set([".git", "node_modules"]);
-const MAX_DEPTH = 6;
+export const SKILL_SEARCH_SKIP_DIRS = new Set([".git", "node_modules"]);
+export const SKILL_SEARCH_MAX_DEPTH = 6;
 
 /** Repo-relative (posix) directories containing a SKILL.md, below `subpath`. */
 export async function findSkillDirs(root: string, subpath: string | null): Promise<string[]> {
@@ -240,9 +214,9 @@ export async function findSkillDirs(root: string, subpath: string | null): Promi
       found.push(path.relative(root, dir).split(path.sep).join("/"));
       return;
     }
-    if (depth >= MAX_DEPTH) return;
+    if (depth >= SKILL_SEARCH_MAX_DEPTH) return;
     for (const entry of entries) {
-      if (entry.isDirectory() && !SKIP_DIRS.has(entry.name)) {
+      if (entry.isDirectory() && !SKILL_SEARCH_SKIP_DIRS.has(entry.name)) {
         await walk(path.join(dir, entry.name), depth + 1);
       }
     }

@@ -121,3 +121,71 @@ it("answers skills.catalog.list and reports install conflicts as rpc_error codes
   const legacy = messages.find((message) => message.type === "skills.get.response");
   expect(legacy?.payload).toMatchObject({ requestId: "r4", skills: [{ name: "fresh" }] });
 });
+
+it("routes the skill source RPCs (list, add, browse by sourceId, set_enabled, remove)", async () => {
+  const dir = path.join(roots.root, "local-skills");
+  await writeSkill(path.join(dir, "helper"), "name: helper\ndescription: Helps.");
+  const service = new NativeSkillsService({
+    jagentdeskHome: roots.jdHome,
+    homeDir: roots.home,
+    logger: createTestLogger(),
+    fetch: async () => {
+      throw new Error("no network in tests");
+    },
+  });
+  await service.initialize();
+  const messages: SessionOutboundMessage[] = [];
+  const session = createSession(service, messages);
+  const payloadOf = (type: string): unknown =>
+    (messages.find((message) => message.type === type) as { payload?: unknown } | undefined)
+      ?.payload;
+
+  await session.handleMessage({ type: "skills.sources.list.request", requestId: "s1" });
+  expect(payloadOf("skills.sources.list.response")).toMatchObject({
+    requestId: "s1",
+    sources: [{ builtin: true }, { builtin: true }],
+  });
+
+  await session.handleMessage({
+    type: "skills.sources.add.request",
+    requestId: "s2",
+    source: dir,
+    label: "Local",
+  });
+  const added = payloadOf("skills.sources.add.response") as {
+    source: { sourceId: string; label: string; itemCount: number };
+  };
+  expect(added.source).toMatchObject({ label: "Local", itemCount: 1 });
+
+  await session.handleMessage({
+    type: "skills.sources.browse.request",
+    requestId: "s3",
+    sourceId: added.source.sourceId,
+  });
+  expect(payloadOf("skills.sources.browse.response")).toMatchObject({
+    requestId: "s3",
+    items: [{ itemId: "helper", sourceId: added.source.sourceId }],
+  });
+
+  await session.handleMessage({
+    type: "skills.sources.set_enabled.request",
+    requestId: "s4",
+    sourceId: added.source.sourceId,
+    enabled: false,
+  });
+  expect(payloadOf("skills.sources.set_enabled.response")).toMatchObject({
+    source: { enabled: false },
+  });
+
+  await session.handleMessage({
+    type: "skills.sources.remove.request",
+    requestId: "s5",
+    sourceId: "src_unknown",
+  });
+  expect(messages).toContainEqual(
+    expect.objectContaining({
+      type: "rpc_error",
+      payload: expect.objectContaining({ requestId: "s5", code: "source_not_found" }),
+    }),
+  );
+});

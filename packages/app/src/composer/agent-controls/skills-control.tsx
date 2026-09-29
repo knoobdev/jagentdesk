@@ -12,6 +12,7 @@ import { useSessionStore } from "@/stores/session-store";
 import { useSkillCatalog } from "@/stores/skills-store";
 import { useAgentSkillsStore, selectAttachedSkillIds } from "@/stores/agent-skills-store";
 import { resolveSkillProvider, skillProviderLabel } from "@/skills/native-skill-logic";
+import { toggleFamilyAttachment } from "@/skills/skill-families";
 import { buildSkillPickerModel, INSTALL_OPTION_PREFIX } from "@/skills/skill-picker-model";
 import { useSkillActions } from "@/skills/ui/use-skill-actions";
 
@@ -69,10 +70,10 @@ export interface SkillsControlProps {
 }
 
 /**
- * Composer multi-select Skills picker (spec 22.7). Selecting a skill toggles it
- * onto the CURRENT agent (persisted per agentId); the picker stays open for
- * multi-select. On send the ids go with the message and the daemon adds the
- * provider's native invocation. A footer row toggles keyword auto-load.
+ * Composer multi-select Skills picker (spec 22.6.1 + 22.7): one option per skill
+ * family. Selecting a family toggles it onto the CURRENT agent (persisted per
+ * agentId); the picker stays open for multi-select. On send only these ids go
+ * with the message and the daemon adds the provider's native invocation.
  */
 export function SkillsControl({ agentId, serverId }: SkillsControlProps): ReactElement {
   const { t } = useTranslation();
@@ -82,10 +83,8 @@ export function SkillsControl({ agentId, serverId }: SkillsControlProps): ReactE
   const { provider, agentCwd } = useAgentSkillContext(serverId, agentId);
   const catalog = useSkillCatalog(agentCwd);
   const rawAttachedIds = useAgentSkillsStore(selectAttachedSkillIds(agentId));
-  const toggleAttached = useAgentSkillsStore((state) => state.toggleAttached);
+  const setAttached = useAgentSkillsStore((state) => state.setAttached);
   const replaceAttached = useAgentSkillsStore((state) => state.replaceAttached);
-  const autoLoad = useAgentSkillsStore((state) => state.autoLoad);
-  const setAutoLoad = useAgentSkillsStore((state) => state.setAutoLoad);
 
   const anchorRef = useRef<View>(null);
   const [open, setOpen] = useState(false);
@@ -100,12 +99,11 @@ export function SkillsControl({ agentId, serverId }: SkillsControlProps): ReactE
       }),
     [catalog.skills, catalog.status, provider, rawAttachedIds],
   );
-  const attachedSet = useMemo(() => new Set(model.attachedIds), [model.attachedIds]);
-
   const handleSelect = useCallback(
     (optionId: string) => {
       if (!optionId.startsWith(INSTALL_OPTION_PREFIX)) {
-        toggleAttached(agentId, optionId);
+        const familyIds = model.familyIdsByOptionId.get(optionId) ?? [];
+        setAttached(agentId, toggleFamilyAttachment(model.attachedIds, optionId, familyIds));
         return;
       }
       const entry = model.entriesById.get(optionId.slice(INSTALL_OPTION_PREFIX.length));
@@ -115,9 +113,8 @@ export function SkillsControl({ agentId, serverId }: SkillsControlProps): ReactE
         return undefined;
       });
     },
-    [actions, agentId, model.entriesById, model.provider, replaceAttached, toggleAttached],
+    [actions, agentId, model, replaceAttached, setAttached],
   );
-  const handleToggleAutoLoad = useCallback(() => setAutoLoad(!autoLoad), [autoLoad, setAutoLoad]);
   const handlePress = useCallback(() => setOpen((prev) => !prev), []);
 
   const installLabel = model.provider
@@ -130,29 +127,14 @@ export function SkillsControl({ agentId, serverId }: SkillsControlProps): ReactE
         <SkillOptionRow
           key={args.option.id}
           option={args.option}
-          selected={!isInstall && attachedSet.has(args.option.id)}
+          selected={!isInstall && model.selectedOptionIds.has(args.option.id)}
           active={args.active}
           installLabel={isInstall ? installLabel : null}
           onPress={handleSelect}
         />
       );
     },
-    [attachedSet, handleSelect, installLabel],
-  );
-
-  const footer = useMemo(
-    () => (
-      <View style={styles.footer}>
-        <ComboboxItem
-          label={t("skillsHub.picker.autoLoad")}
-          description={t("skillsHub.picker.autoLoadHint")}
-          selected={autoLoad}
-          onPress={handleToggleAutoLoad}
-          testID="composer-skill-autoload-toggle"
-        />
-      </View>
-    ),
-    [autoLoad, handleToggleAutoLoad, t],
+    [handleSelect, installLabel, model.selectedOptionIds],
   );
 
   const count = model.attachedCount;
@@ -198,7 +180,6 @@ export function SkillsControl({ agentId, serverId }: SkillsControlProps): ReactE
         searchPlaceholder={t("skillsHub.picker.search")}
         emptyText={emptyText}
         renderOption={renderOption}
-        footer={footer}
       />
     </>
   );
@@ -209,10 +190,5 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.xs,
     fontWeight: theme.fontWeight.semibold,
     color: theme.colors.accent,
-  },
-  footer: {
-    borderTopWidth: theme.borderWidth[1],
-    borderTopColor: theme.colors.border,
-    paddingTop: theme.spacing[1],
   },
 }));

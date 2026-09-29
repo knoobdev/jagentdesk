@@ -257,6 +257,8 @@ import type {
   SkillPluginInstallResult,
   SkillScope,
   SkillSourceRef,
+  SkillSourceSpec,
+  SkillSourceStatus,
   SkillWrittenPaths,
 } from "@jagentdesk/protocol/native-skills";
 import type { LifetimeUsage, UsageDayRollup } from "@jagentdesk/protocol/usage-history";
@@ -6100,6 +6102,64 @@ export class DaemonClient {
       requestId,
       message: { type: "skills.sources.browse.request", source, ...options },
       timeout: 120_000,
+    });
+  }
+
+  /**
+   * Browse the configured sources (`skills.sources.list`): one source when
+   * `sourceId` is given, else every enabled source merged and de-duplicated.
+   * Items carry `sourceId` / `sourceLabel`; install them with
+   * `{ source: { kind: "configured", sourceId }, itemId }`.
+   */
+  async browseSkillSources(
+    options: { sourceId?: string; query?: string; refresh?: boolean } = {},
+    requestId?: string,
+  ): Promise<{ requestId: string; items: SkillCatalogItem[] }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "skills.sources.browse.request", ...options },
+      timeout: 120_000,
+    });
+  }
+
+  async listSkillSources(
+    requestId?: string,
+  ): Promise<{ requestId: string; sources: SkillSourceStatus[] }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "skills.sources.list.request" },
+    });
+  }
+
+  /** Validates by listing the source once; rejects with `invalid_request` / `source_fetch_failed`. */
+  async addSkillSource(
+    input: { source: string | SkillSourceSpec; label?: string },
+    requestId?: string,
+  ): Promise<{ requestId: string; source: SkillSourceStatus }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "skills.sources.add.request", ...input },
+      timeout: 120_000,
+    });
+  }
+
+  async removeSkillSource(
+    sourceId: string,
+    requestId?: string,
+  ): Promise<{ requestId: string; sourceId: string }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "skills.sources.remove.request", sourceId },
+    });
+  }
+
+  async setSkillSourceEnabled(
+    input: { sourceId: string; enabled: boolean },
+    requestId?: string,
+  ): Promise<{ requestId: string; source: SkillSourceStatus }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "skills.sources.set_enabled.request", ...input },
     });
   }
 

@@ -14,14 +14,12 @@ import { normalizeSkillIds } from "@/skills/native-skill-logic";
  * - `injected`: skill ids already invoked on this agent's conversation, so the
  *   send path passes each skill only on its first turn (the daemon adds the
  *   provider invocation; the provider keeps the skill loaded afterwards).
- * - `autoLoad`: when true, each message also auto-matches relevant skills by
- *   keyword (no model call). Global toggle; cheap to flip from the picker.
+ *
+ * There is no keyword auto-load (spec 22.7): only attached skills are sent.
  */
 interface AgentSkillsState {
-  autoLoad: boolean;
   attached: Record<string, string[]>;
   injected: Record<string, string[]>;
-  setAutoLoad: (value: boolean) => void;
   toggleAttached: (agentId: string, skillId: string) => void;
   setAttached: (agentId: string, skillIds: string[]) => void;
   /** Swap one attached id for another (e.g. after forking a skill to train it). */
@@ -54,13 +52,31 @@ export function migrateAttachmentRecord(
   return changed ? next : record;
 }
 
+/**
+ * Persisted-state migration. v1 also stored the removed `autoLoad` toggle; it is
+ * dropped and the attachments are kept.
+ */
+export function migrateAgentSkillsPersisted(
+  persisted: unknown,
+  _version: number,
+): { attached: Record<string, string[]> } {
+  const attached =
+    persisted && typeof persisted === "object"
+      ? (persisted as { attached?: unknown }).attached
+      : undefined;
+  if (!attached || typeof attached !== "object") return { attached: {} };
+  const clean: Record<string, string[]> = {};
+  for (const [agentId, ids] of Object.entries(attached as Record<string, unknown>)) {
+    if (Array.isArray(ids)) clean[agentId] = ids.filter((id) => typeof id === "string");
+  }
+  return { attached: clean };
+}
+
 export const useAgentSkillsStore = create<AgentSkillsState>()(
   persist(
     (set) => ({
-      autoLoad: true,
       attached: {},
       injected: {},
-      setAutoLoad: (value) => set({ autoLoad: value }),
       toggleAttached: (agentId, skillId) =>
         set((state) => {
           const current = state.attached[agentId] ?? [];
@@ -101,10 +117,11 @@ export const useAgentSkillsStore = create<AgentSkillsState>()(
     {
       name: "@jagentdesk:agent-skills",
       storage: createJSONStorage(() => AsyncStorage),
-      version: 1,
+      version: 2,
+      migrate: migrateAgentSkillsPersisted,
       // `injected` tracks live conversation state — do not restore it across app
       // restarts, so a reopened agent gets its attached skills invoked again.
-      partialize: (state) => ({ autoLoad: state.autoLoad, attached: state.attached }),
+      partialize: (state) => ({ attached: state.attached }),
     },
   ),
 );

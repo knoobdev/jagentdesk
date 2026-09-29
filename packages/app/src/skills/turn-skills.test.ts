@@ -38,7 +38,7 @@ describe("prepareTurnSkills", () => {
   beforeEach(() => {
     seedCatalog();
     seedAgent("claude");
-    useAgentSkillsStore.setState({ attached: {}, injected: {}, autoLoad: false });
+    useAgentSkillsStore.setState({ attached: {}, injected: {} });
   });
 
   it("passes attached skills by native id (legacy ids mapped) and only on the first turn", () => {
@@ -56,14 +56,13 @@ describe("prepareTurnSkills", () => {
     expect(useAgentSkillsStore.getState().injected.agent_1).toBeUndefined();
   });
 
-  it("auto-loads keyword matches the provider can see, without a model call", () => {
-    useAgentSkillsStore.setState({ autoLoad: true });
+  it("never auto-loads skills from the message text (spec 22.7)", () => {
     const turn = prepareTurnSkills({
       serverId: "srv_1",
       agentId: "agent_1",
       text: "draft the release notes and the deploy checklist",
     });
-    expect(turn.skillIds).toEqual([release.skillId]);
+    expect(turn.skillIds).toBeUndefined();
   });
 
   it("sends nothing when no skill is attached or matched", () => {
@@ -86,6 +85,33 @@ describe("buildSkillPickerModel", () => {
       `${INSTALL_OPTION_PREFIX}${kiroOnly.skillId}`,
     ]);
     expect(model.attachedIds).toEqual([release.skillId, "global:agents:removed"]);
+    expect(model.attachedCount).toBe(1);
+  });
+
+  it("shows one option per family and marks it selected when any copy is attached", () => {
+    const agentsCopy = makeSkillEntry({
+      name: "pdf",
+      skillId: "global:agents:pdf",
+      visibleTo: ["codex"],
+    });
+    const claudeCopy = makeSkillEntry({
+      name: "pdf",
+      skillId: "global:claude:pdf",
+      dir: "claude",
+      visibleTo: ["claude"],
+    });
+    const model = buildSkillPickerModel({
+      skills: [agentsCopy, claudeCopy],
+      provider: "claude",
+      rawAttachedIds: [agentsCopy.skillId, claudeCopy.skillId],
+      catalogReady: true,
+    });
+    expect(model.options.map((option) => option.id)).toEqual([claudeCopy.skillId]);
+    expect(model.familyIdsByOptionId.get(claudeCopy.skillId)).toEqual([
+      agentsCopy.skillId,
+      claudeCopy.skillId,
+    ]);
+    expect(model.selectedOptionIds.has(claudeCopy.skillId)).toBe(true);
     expect(model.attachedCount).toBe(1);
   });
 

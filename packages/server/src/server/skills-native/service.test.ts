@@ -7,14 +7,13 @@ import { LESSONS_MARKER, parseSkillMarkdown } from "./frontmatter.js";
 import { NativeSkillsService } from "./service.js";
 import {
   fakeFetch,
-  makeTarGz,
+  githubRepoRoutes,
   makeTempRoots,
   snapshotTree,
   writeSkill,
 } from "./test-utils/fixtures.js";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
-const ANTHROPIC_TARBALL = "https://codeload.github.com/anthropics/skills/tar.gz/HEAD";
 
 let roots: ReturnType<typeof makeTempRoots>;
 
@@ -25,18 +24,17 @@ function makeService(
     jagentdeskHome: roots.jdHome,
     homeDir: roots.home,
     logger: createTestLogger(),
-    fetch: fakeFetch({
-      [ANTHROPIC_TARBALL]: makeTarGz(
-        {
-          "skills/frontend-design/SKILL.md":
-            "---\nname: frontend-design\ndescription: Build distinctive frontends.\n---\n\nUse bold type.\n",
-          "skills/frontend-design/scripts/check.sh": "#!/bin/sh\necho ok\n",
-          "skills/pdf/SKILL.md":
-            "---\nname: pdf\ndescription: Work with PDFs.\n---\n\nRead PDFs.\n",
+    fetch: fakeFetch(
+      githubRepoRoutes("anthropics/skills", COMMIT, {
+        "skills/frontend-design/SKILL.md":
+          "---\nname: frontend-design\ndescription: Build distinctive frontends.\n---\n\nUse bold type.\n",
+        "skills/frontend-design/scripts/check.sh": {
+          content: "#!/bin/sh\necho ok\n",
+          mode: "100755",
         },
-        { top: "skills-HEAD", commit: COMMIT },
-      ),
-    }),
+        "skills/pdf/SKILL.md": "---\nname: pdf\ndescription: Work with PDFs.\n---\n\nRead PDFs.\n",
+      }).routes,
+    ),
     runCommand: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
     ...overrides,
   });
@@ -134,7 +132,7 @@ describe("scanner (spec 22.3, 22.11 #1)", () => {
 });
 
 describe("install / uninstall (spec 22.11 #2, #3)", () => {
-  it("browses the official repo from a tarball, installs globally, and uninstalls to zero diff", async () => {
+  it("browses the official repo from the tree API, installs globally, and uninstalls to zero diff", async () => {
     const service = makeService();
     await service.initialize();
     const items = await service.browse({ kind: "official", repo: "anthropics/skills" });
@@ -295,13 +293,67 @@ describe("invocation (spec 22.7, 22.11 #6)", () => {
     expect(await service.buildInvocationPrefix(ids, "kiro")).toBe("/shipper");
     expect(await service.buildInvocationPrefix(ids, "pi")).toBe("/skill:shipper");
     expect(await service.buildInvocationPrefix(ids, "kimi")).toBe("/skill:shipper");
-    expect(await service.buildInvocationPrefix(ids, "opencode")).toBe("Use the skill `shipper`.");
-    expect(await service.buildInvocationPrefix(ids, "some-acp")).toBe("Use the skill `shipper`.");
+    expect(await service.buildInvocationPrefix(ids, "opencode")).toBe(
+      "Before you answer, load this skill: `shipper`.",
+    );
+    expect(await service.buildInvocationPrefix(ids, "some-acp")).toBe(
+      "Before you answer, load this skill: `shipper`.",
+    );
     // Not visible to Claude (only in ~/.codex/skills): skipped.
     expect(await service.buildInvocationPrefix(["global:codex:legacy-codex"], "claude")).toBe("");
     expect(
       await service.buildInvocationPrefix([skill.skillId, "global:codex:legacy-codex"], "codex"),
     ).toBe("$shipper $legacy-codex");
+    await writeSkill(
+      path.join(roots.home, ".claude", "skills", "reviewer"),
+      "name: reviewer\ndescription: Review it.",
+    );
+    const both = [skill.skillId, "global:claude:reviewer"];
+    expect(await service.buildInvocationPrefix(both, "claude")).toBe(
+      "/shipper\nBefore you answer, load this skill with the Skill tool: `reviewer`.",
+    );
+    expect(await service.buildInvocationPrefix(both, "kimi")).toBe(
+      "/skill:shipper\nBefore you answer, load this skill: `reviewer`.",
+    );
+    expect(await service.buildInvocationPrefix(both, "opencode")).toBe(
+      "Before you answer, load these skills: `shipper`, `reviewer`.",
+    );
+  });
+});
+
+describe("contentHash (spec 22.4, 22.6.1)", () => {
+  it("is equal for identical copies and changes with SKILL.md or the file list", async () => {
+    const service = makeService();
+    const frontmatter = "name: twin\ndescription: Same skill.";
+    await writeSkill(path.join(roots.home, ".agents", "skills", "twin"), frontmatter, "Body.\n", {
+      "references/a.md": "ref",
+    });
+    await writeSkill(path.join(roots.home, ".claude", "skills", "twin"), frontmatter, "Body.\n", {
+      "references/a.md": "ref",
+    });
+    const hashes = async () => {
+      const list = await service.listCatalog();
+      const byId = new Map(list.skills.map((entry) => [entry.skillId, entry.contentHash]));
+      return {
+        agents: byId.get("global:agents:twin"),
+        claude: byId.get("global:claude:twin"),
+      };
+    };
+    const first = await hashes();
+    expect(first.agents).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(first.claude).toBe(first.agents);
+
+    await fs.writeFile(
+      path.join(roots.home, ".claude", "skills", "twin", "SKILL.md"),
+      `---\n${frontmatter}\n---\n\nDifferent body.\n`,
+    );
+    const second = await hashes();
+    expect(second.agents).toBe(first.agents);
+    expect(second.claude).not.toBe(first.agents);
+
+    await fs.writeFile(path.join(roots.home, ".agents", "skills", "twin", "extra.md"), "x");
+    const third = await hashes();
+    expect(third.agents).not.toBe(first.agents);
   });
 });
 

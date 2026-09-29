@@ -4,7 +4,6 @@ import {
   type SkillEntry,
   type SkillScope,
   type SkillSourceInfo,
-  type SkillSourceRef,
   type SkillTraining,
 } from "@jagentdesk/protocol/native-skills";
 
@@ -188,22 +187,20 @@ export function normalizeSkillIds(
 
 // ── Turn skills (spec 22.7: the daemon adds the invocation) ─────────────────
 export interface TurnSkillInput {
+  /** Skills the user picked in the composer (the only ones sent — no auto-load). */
   attachedIds: readonly string[];
-  matchedIds: readonly string[];
   /** Skills already invoked on an earlier turn of this agent. */
   alreadySentIds: readonly string[];
 }
 
 /**
- * Skill ids to pass on this send: attached ∪ auto-matched, minus the ones the
- * agent already received. A skill is invoked once per agent conversation — the
- * provider keeps it loaded afterwards.
+ * Skill ids to pass on this send: the attached ones the agent has not received
+ * yet. A skill is invoked once per agent conversation — the provider keeps it
+ * loaded afterwards.
  */
 export function selectTurnSkillIds(input: TurnSkillInput): string[] {
   const sent = new Set(input.alreadySentIds);
-  return Array.from(new Set([...input.attachedIds, ...input.matchedIds])).filter(
-    (id) => !sent.has(id),
-  );
+  return Array.from(new Set(input.attachedIds)).filter((id) => !sent.has(id));
 }
 
 // ── Training (spec 22.9) ─────────────────────────────────────────────────────
@@ -257,31 +254,6 @@ export function trainingChecklist(training: SkillTraining): {
 }
 
 // ── Browse tab (spec 22.5) ───────────────────────────────────────────────────
-export type BrowseSourceKind = "official" | "provider-marketplace" | "url";
-
-/**
- * The `SourceRef` for the Browse picker. `option` narrows Official to one repo
- * and Provider marketplaces to one provider ("all" = every one). A Link source
- * needs a non-empty link; null means "nothing to browse yet".
- */
-export function buildBrowseSource(
-  kind: BrowseSourceKind,
-  option: string,
-  link: string,
-): SkillSourceRef | null {
-  if (kind === "url") {
-    const url = link.trim();
-    return url ? { kind: "url", url } : null;
-  }
-  if (kind === "official") {
-    return option === "all" ? { kind: "official" } : { kind: "official", repo: option };
-  }
-  if (option === "claude" || option === "codex") {
-    return { kind: "provider-marketplace", provider: option };
-  }
-  return { kind: "provider-marketplace" };
-}
-
 /** Client-side search over a browsed source (the daemon's `query` is the same substring match). */
 export function filterCatalogItems(
   items: readonly SkillCatalogItem[],

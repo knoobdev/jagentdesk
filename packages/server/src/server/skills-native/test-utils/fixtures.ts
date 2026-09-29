@@ -109,31 +109,125 @@ export function makeTarGz(
   return gzipSync(Buffer.concat(parts));
 }
 
-/** Serves fixed URLs; any other URL fails the test loudly. */
-export function fakeFetch(routes: Record<string, Buffer | object>): FetchLike & {
+const FAKE_ROUTE = Symbol("fakeRoute");
+
+export interface FakeRoute {
+  [FAKE_ROUTE]: true;
+  status: number;
+  headers: Record<string, string>;
+  body: Buffer | object | string | null;
+}
+
+/** A response with an explicit status / headers (plain values mean 200). */
+export function fakeRoute(options: {
+  status?: number;
+  headers?: Record<string, string>;
+  body?: Buffer | object | string | null;
+}): FakeRoute {
+  return {
+    [FAKE_ROUTE]: true,
+    status: options.status ?? 200,
+    headers: options.headers ?? {},
+    body: options.body ?? null,
+  };
+}
+
+type RouteValue = Buffer | object | FakeRoute;
+type RouteHandler = (init: { headers: Record<string, string> }) => RouteValue | undefined;
+
+function isFakeRoute(value: unknown): value is FakeRoute {
+  return typeof value === "object" && value !== null && FAKE_ROUTE in value;
+}
+
+function bodyBuffer(body: FakeRoute["body"]): Buffer {
+  if (body === null) return Buffer.alloc(0);
+  if (Buffer.isBuffer(body)) return body;
+  return Buffer.from(typeof body === "string" ? body : JSON.stringify(body));
+}
+
+function toResponse(value: RouteValue | undefined): FetchResponseLike {
+  let route: FakeRoute;
+  if (isFakeRoute(value)) route = value;
+  else if (value === undefined) route = fakeRoute({ status: 404 });
+  else route = fakeRoute({ body: value });
+  const headers = new Map(
+    Object.entries(route.headers).map(([key, headerValue]) => [key.toLowerCase(), headerValue]),
+  );
+  const buffer = bodyBuffer(route.body);
+  return {
+    ok: route.status >= 200 && route.status < 300,
+    status: route.status,
+    headers: { get: (name: string) => headers.get(name.toLowerCase()) ?? null },
+    arrayBuffer: async () => new Uint8Array(buffer).slice().buffer,
+    json: async () =>
+      route.body !== null && !Buffer.isBuffer(route.body) && typeof route.body === "object"
+        ? route.body
+        : JSON.parse(buffer.toString("utf8")),
+    text: async () => buffer.toString("utf8"),
+  };
+}
+
+/**
+ * Serves fixed URLs (a value, a {@link fakeRoute}, or a function of the request
+ * headers); any other URL answers 404. `routes` may be mutated between calls.
+ */
+export function fakeFetch(routes: Record<string, RouteValue | RouteHandler>): FetchLike & {
   calls: string[];
+  requests: Array<{ url: string; headers: Record<string, string> }>;
+  routes: Record<string, RouteValue | RouteHandler>;
 } {
   const calls: string[] = [];
-  const impl = async (url: string): Promise<FetchResponseLike> => {
+  const requests: Array<{ url: string; headers: Record<string, string> }> = [];
+  const impl: FetchLike = async (url, init) => {
+    const headers = init?.headers ?? {};
     calls.push(url);
-    const body = routes[url];
-    if (body === undefined) {
-      return {
-        ok: false,
-        status: 404,
-        arrayBuffer: async () => new ArrayBuffer(0),
-        json: async () => ({}),
-      };
-    }
-    return {
-      ok: true,
-      status: 200,
-      arrayBuffer: async () => {
-        const buffer = Buffer.isBuffer(body) ? body : Buffer.from(JSON.stringify(body));
-        return new Uint8Array(buffer).slice().buffer;
-      },
-      json: async () => body,
-    };
+    requests.push({ url, headers });
+    const route = routes[url];
+    return toResponse(typeof route === "function" ? route({ headers }) : route);
   };
-  return Object.assign(impl, { calls });
+  return Object.assign(impl, { calls, requests, routes });
+}
+
+export interface FakeRepoFile {
+  content: string;
+  mode?: string;
+}
+
+/**
+ * Routes of a GitHub repository at `commit`: the recursive tree API response
+ * (git-style blob shas) and every file on raw.githubusercontent.com.
+ */
+export function githubRepoRoutes(
+  repo: string,
+  commit: string,
+  files: Record<string, FakeRepoFile | string>,
+  options: { ref?: string; truncated?: boolean; etag?: string } = {},
+): { treeUrl: string; tree: object; routes: Record<string, RouteValue> } {
+  const tree: object[] = [];
+  const routes: Record<string, RouteValue> = {};
+  const dirs = new Set<string>();
+  for (const [filePath, value] of Object.entries(files)) {
+    const file = typeof value === "string" ? { content: value } : value;
+    const data = Buffer.from(file.content, "utf8");
+    tree.push({
+      path: filePath,
+      mode: file.mode ?? "100644",
+      type: "blob",
+      sha: createHash("sha1").update(`blob ${data.length}\0`).update(data).digest("hex"),
+      size: data.length,
+    });
+    routes[`https://raw.githubusercontent.com/${repo}/${commit}/${filePath}`] = data;
+    const parts = filePath.split("/");
+    for (let index = 1; index < parts.length; index += 1) dirs.add(parts.slice(0, index).join("/"));
+  }
+  for (const dir of dirs) {
+    tree.push({ path: dir, mode: "040000", type: "tree", sha: "d".repeat(40) });
+  }
+  const body = { sha: commit, truncated: options.truncated ?? false, tree };
+  const treeUrl = `https://api.github.com/repos/${repo}/git/trees/${options.ref ?? "HEAD"}?recursive=1`;
+  routes[treeUrl] = fakeRoute({
+    body,
+    headers: options.etag ? { ETag: options.etag } : {},
+  });
+  return { treeUrl, tree: body, routes };
 }

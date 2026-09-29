@@ -55,6 +55,7 @@ export const NATIVE_SKILLS_ERROR_CODES = [
   "path_not_allowed",
   "source_fetch_failed",
   "catalog_item_not_found",
+  "source_not_found",
 ] as const;
 export type NativeSkillsErrorCode = (typeof NATIVE_SKILLS_ERROR_CODES)[number];
 
@@ -111,6 +112,11 @@ export const SkillEntrySchema = z.object({
   invalidReason: z.string().nullable(),
   source: SkillSourceInfoSchema,
   hasScripts: z.boolean(),
+  /**
+   * `sha256:<hex>` over SKILL.md + the sorted relative file list with sizes;
+   * compares copies of a family (spec 22.6.1). Optional for older daemons.
+   */
+  contentHash: z.string().nullable().optional(),
   training: SkillTrainingSchema.nullable(),
   /** Id of the legacy JSON skill this was migrated from (COMPAT(nativeSkills)). */
   legacyId: z.string().nullable(),
@@ -126,9 +132,86 @@ export type SkillFile = z.infer<typeof SkillFileSchema>;
 
 export const OFFICIAL_SKILL_REPOS = ["anthropics/skills", "openai/skills"] as const;
 
+/**
+ * A user-managed skill source (`$JAGENTDESK_HOME/skills/sources.json`). Listing
+ * reads metadata only; installing downloads only the chosen skill's files
+ * (npm: the package tarball, npm has no per-file API).
+ *
+ * - `github`: a repository, optionally at `ref` and restricted to `subpath`.
+ *   Listed with one tree API call + the SKILL.md files from
+ *   raw.githubusercontent.com, pinned to the resolved commit.
+ * - `npm`: a package; listed from registry metadata + the jsDelivr file list.
+ * - `index`: an https URL to a JSON file matching {@link SkillsIndexFileSchema}.
+ * - `local`: an absolute directory on the daemon host holding skill folders.
+ */
+export const SkillSourceSpecSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("github"),
+    owner: z.string().min(1),
+    repo: z.string().min(1),
+    ref: z.string().nullable(),
+    subpath: z.string().nullable(),
+  }),
+  z.object({ kind: z.literal("npm"), pkg: z.string().min(1) }),
+  z.object({ kind: z.literal("index"), url: z.string().min(1) }),
+  z.object({ kind: z.literal("local"), path: z.string().min(1) }),
+]);
+export type SkillSourceSpec = z.infer<typeof SkillSourceSpecSchema>;
+
+/**
+ * Format of an `index` source: a JSON file served over https.
+ *
+ * ```json
+ * { "skills": [
+ *   { "name": "pdf", "description": "Work with PDFs.", "source": "anthropics/skills",
+ *     "path": "skills/pdf" },
+ *   { "name": "lint", "description": "Lint code.", "source": "npm:@scope/skill-pack",
+ *     "path": "skills/lint" } ] }
+ * ```
+ *
+ * `source` uses the same syntax as adding a source (`owner/repo`, a github.com
+ * URL incl. `/tree/<ref>/<path>`, `npm:<package>`, `@scope/package`); `path` is
+ * the skill directory inside it (default: the source root). Listing reads the
+ * index only; the skill's files are fetched from `source` when installing.
+ */
+export const SkillsIndexFileSchema = z.object({
+  skills: z.array(
+    z.object({
+      name: z.string().min(1),
+      description: z.string(),
+      source: z.string().min(1),
+      path: z.string().optional(),
+    }),
+  ),
+});
+export type SkillsIndexFile = z.infer<typeof SkillsIndexFileSchema>;
+
+/** A configured source with its listing status. */
+export const SkillSourceStatusSchema = z.object({
+  /** Stable id derived from the source (`src_<hex>`); re-adding a source keeps it. */
+  sourceId: z.string(),
+  spec: SkillSourceSpecSchema,
+  /** Custom label, or a label derived from the source. */
+  label: z.string(),
+  customLabel: z.string().nullable(),
+  /** One of the default sources (the official repositories). */
+  builtin: z.boolean(),
+  enabled: z.boolean(),
+  addedAtMs: z.number(),
+  /** Last successful listing, null when never listed. */
+  lastRefreshMs: z.number().nullable(),
+  itemCount: z.number().nullable(),
+  revision: z.string().nullable(),
+  /** Last listing failure (cleared by the next success). */
+  error: z.string().nullable(),
+});
+export type SkillSourceStatus = z.infer<typeof SkillSourceStatusSchema>;
+
 export const SkillSourceRefSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("official"), repo: z.string().optional() }),
   z.object({ kind: z.literal("url"), url: z.string().min(1) }),
+  /** A source from `skills.sources.list` (items of a merged browse carry it). */
+  z.object({ kind: z.literal("configured"), sourceId: z.string().min(1) }),
   z.object({
     kind: z.literal("provider-marketplace"),
     provider: z.enum(["claude", "codex"]).optional(),
@@ -159,6 +242,9 @@ export const SkillCatalogItemSchema = z.object({
   installed: z.boolean(),
   installedSkillId: z.string().nullable(),
   invalidReason: z.string().nullable(),
+  /** Configured source the item comes from (null for official/url/local/plugin browses). */
+  sourceId: z.string().nullable().optional(),
+  sourceLabel: z.string().nullable().optional(),
 });
 export type SkillCatalogItem = z.infer<typeof SkillCatalogItemSchema>;
 
@@ -204,10 +290,41 @@ export const SkillsCatalogGetRequestSchema = z.object({
 export const SkillsSourcesBrowseRequestSchema = z.object({
   type: z.literal("skills.sources.browse.request"),
   requestId: z.string(),
-  source: SkillSourceRefSchema,
+  /**
+   * What to browse. Omitted: the configured sources — `sourceId` alone, or
+   * every enabled one merged (deduplicated by source + skill path).
+   */
+  source: SkillSourceRefSchema.optional(),
+  sourceId: z.string().optional(),
   query: z.string().optional(),
   /** Bypass the 10-minute list cache. */
   refresh: z.boolean().optional(),
+});
+export const SkillsSourcesListRequestSchema = z.object({
+  type: z.literal("skills.sources.list.request"),
+  requestId: z.string(),
+});
+export const SkillsSourcesAddRequestSchema = z.object({
+  type: z.literal("skills.sources.add.request"),
+  requestId: z.string(),
+  /**
+   * `owner/repo[/path]`, a github.com URL (incl. `/tree/<ref>/<path>`),
+   * `npm:<package>` / `@scope/package` / an npmjs.com URL, an https URL to an
+   * index JSON, an absolute directory path — or an explicit spec.
+   */
+  source: z.union([z.string().min(1), SkillSourceSpecSchema]),
+  label: z.string().optional(),
+});
+export const SkillsSourcesRemoveRequestSchema = z.object({
+  type: z.literal("skills.sources.remove.request"),
+  requestId: z.string(),
+  sourceId: z.string(),
+});
+export const SkillsSourcesSetEnabledRequestSchema = z.object({
+  type: z.literal("skills.sources.set_enabled.request"),
+  requestId: z.string(),
+  sourceId: z.string(),
+  enabled: z.boolean(),
 });
 export const SkillsInstallRequestSchema = z.object({
   type: z.literal("skills.install.request"),
@@ -286,6 +403,22 @@ export const SkillsSourcesBrowseResponseSchema = z.object({
     items: z.array(SkillCatalogItemSchema),
   }),
 });
+export const SkillsSourcesListResponseSchema = z.object({
+  type: z.literal("skills.sources.list.response"),
+  payload: z.object({ requestId: z.string(), sources: z.array(SkillSourceStatusSchema) }),
+});
+export const SkillsSourcesAddResponseSchema = z.object({
+  type: z.literal("skills.sources.add.response"),
+  payload: z.object({ requestId: z.string(), source: SkillSourceStatusSchema }),
+});
+export const SkillsSourcesRemoveResponseSchema = z.object({
+  type: z.literal("skills.sources.remove.response"),
+  payload: z.object({ requestId: z.string(), sourceId: z.string() }),
+});
+export const SkillsSourcesSetEnabledResponseSchema = z.object({
+  type: z.literal("skills.sources.set_enabled.response"),
+  payload: z.object({ requestId: z.string(), source: SkillSourceStatusSchema }),
+});
 export const SkillsInstallResponseSchema = z.object({
   type: z.literal("skills.install.response"),
   payload: z.object({
@@ -318,6 +451,10 @@ export const SkillsForkResponseSchema = skillResponse("skills.fork.response");
 export type SkillsCatalogListRequest = z.infer<typeof SkillsCatalogListRequestSchema>;
 export type SkillsCatalogGetRequest = z.infer<typeof SkillsCatalogGetRequestSchema>;
 export type SkillsSourcesBrowseRequest = z.infer<typeof SkillsSourcesBrowseRequestSchema>;
+export type SkillsSourcesListRequest = z.infer<typeof SkillsSourcesListRequestSchema>;
+export type SkillsSourcesAddRequest = z.infer<typeof SkillsSourcesAddRequestSchema>;
+export type SkillsSourcesRemoveRequest = z.infer<typeof SkillsSourcesRemoveRequestSchema>;
+export type SkillsSourcesSetEnabledRequest = z.infer<typeof SkillsSourcesSetEnabledRequestSchema>;
 export type SkillsInstallRequest = z.infer<typeof SkillsInstallRequestSchema>;
 export type SkillsUninstallRequest = z.infer<typeof SkillsUninstallRequestSchema>;
 export type SkillsSetEnabledRequest = z.infer<typeof SkillsSetEnabledRequestSchema>;
@@ -329,6 +466,10 @@ export const NativeSkillsRequestSchemas = [
   SkillsCatalogListRequestSchema,
   SkillsCatalogGetRequestSchema,
   SkillsSourcesBrowseRequestSchema,
+  SkillsSourcesListRequestSchema,
+  SkillsSourcesAddRequestSchema,
+  SkillsSourcesRemoveRequestSchema,
+  SkillsSourcesSetEnabledRequestSchema,
   SkillsInstallRequestSchema,
   SkillsUninstallRequestSchema,
   SkillsSetEnabledRequestSchema,
@@ -341,6 +482,10 @@ export const NativeSkillsResponseSchemas = [
   SkillsCatalogListResponseSchema,
   SkillsCatalogGetResponseSchema,
   SkillsSourcesBrowseResponseSchema,
+  SkillsSourcesListResponseSchema,
+  SkillsSourcesAddResponseSchema,
+  SkillsSourcesRemoveResponseSchema,
+  SkillsSourcesSetEnabledResponseSchema,
   SkillsInstallResponseSchema,
   SkillsUninstallResponseSchema,
   SkillsSetEnabledResponseSchema,
@@ -382,14 +527,41 @@ export function formatSkillInvocation(provider: string, name: string): string {
   }
 }
 
+function skillList(names: readonly string[]): string {
+  return names.map((name) => `\`${name}\``).join(", ");
+}
+
+// Verified live (2026-09-29): a plain "Also use the skill" line did not make Claude load the skill
+// body, while "Before you answer, load … with the Skill tool" did. Providers without a named
+// skill tool get the same request without the tool name.
+function loadSkillsSentence(provider: string, names: readonly string[]): string {
+  const noun = names.length === 1 ? "this skill" : "these skills";
+  const tool = provider === "claude" ? " with the Skill tool" : "";
+  return `Before you answer, load ${noun}${tool}: ${skillList(names)}.`;
+}
+
 /**
- * The line the daemon prefixes to a turn for the attached skills, or "" when
- * none. Invocations are space-separated on one line so a slash-style provider
- * still sees the first invocation as the leading command.
+ * The text the daemon prefixes to a turn for the attached skills, or "" when
+ * none (spec 22.7).
+ *
+ * - Leading-command providers (`/name`, `/skill:name`) only expand the FIRST
+ *   leading command — a second `/other` becomes argument text. The first skill
+ *   is invoked natively and the rest follow on a new line:
+ *   `Also use the skills \`b\`, \`c\`.`
+ * - Codex expands several `$name` on one line.
+ * - Text providers get one sentence: `Use the skills \`a\`, \`b\`.`
  */
 export function buildSkillInvocationLine(provider: string, names: readonly string[]): string {
   const unique = Array.from(new Set(names.filter((name) => name.length > 0)));
-  return unique.map((name) => formatSkillInvocation(provider, name)).join(" ");
+  if (unique.length === 0) return "";
+  const style = skillInvocationStyle(provider);
+  if (style === "dollar") {
+    return unique.map((name) => formatSkillInvocation(provider, name)).join(" ");
+  }
+  if (style === "sentence") return loadSkillsSentence(provider, unique);
+  const [first, ...rest] = unique;
+  const command = formatSkillInvocation(provider, first!);
+  return rest.length === 0 ? command : `${command}\n${loadSkillsSentence(provider, rest)}`;
 }
 
 /** Agent Skills naming rule: lowercase letters, digits and single hyphens, ≤ 64 chars. */

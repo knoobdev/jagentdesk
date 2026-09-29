@@ -10,6 +10,10 @@ type NativeSkillsRequest = Extract<
       | "skills.catalog.list.request"
       | "skills.catalog.get.request"
       | "skills.sources.browse.request"
+      | "skills.sources.list.request"
+      | "skills.sources.add.request"
+      | "skills.sources.remove.request"
+      | "skills.sources.set_enabled.request"
       | "skills.install.request"
       | "skills.uninstall.request"
       | "skills.set_enabled.request"
@@ -23,6 +27,10 @@ const NATIVE_SKILLS_REQUEST_TYPES = new Set<string>([
   "skills.catalog.list.request",
   "skills.catalog.get.request",
   "skills.sources.browse.request",
+  "skills.sources.list.request",
+  "skills.sources.add.request",
+  "skills.sources.remove.request",
+  "skills.sources.set_enabled.request",
   "skills.install.request",
   "skills.uninstall.request",
   "skills.set_enabled.request",
@@ -56,8 +64,33 @@ async function respond(
         type: "skills.sources.browse.response",
         payload: {
           requestId,
-          items: await service.browse(msg.source, { query: msg.query, refresh: msg.refresh }),
+          items: await service.browse(msg.source, {
+            sourceId: msg.sourceId,
+            query: msg.query,
+            refresh: msg.refresh,
+          }),
         },
+      };
+    case "skills.sources.list.request":
+      return {
+        type: "skills.sources.list.response",
+        payload: { requestId, sources: await service.listSources() },
+      };
+    case "skills.sources.add.request":
+      return {
+        type: "skills.sources.add.response",
+        payload: { requestId, source: await service.addSource(msg.source, msg.label) },
+      };
+    case "skills.sources.remove.request":
+      await service.removeSource(msg.sourceId);
+      return {
+        type: "skills.sources.remove.response",
+        payload: { requestId, sourceId: msg.sourceId },
+      };
+    case "skills.sources.set_enabled.request":
+      return {
+        type: "skills.sources.set_enabled.response",
+        payload: { requestId, source: await service.setSourceEnabled(msg.sourceId, msg.enabled) },
       };
     case "skills.install.request":
       return {

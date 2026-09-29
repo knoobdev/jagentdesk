@@ -20,7 +20,7 @@ export interface ExtractLimits {
   maxFiles: number;
 }
 
-const DEFAULT_LIMITS: ExtractLimits = { maxBytes: 256 * 1024 * 1024, maxFiles: 20_000 };
+export const DEFAULT_LIMITS: ExtractLimits = { maxBytes: 256 * 1024 * 1024, maxFiles: 20_000 };
 const BLOCK = 512;
 
 function readString(buffer: Buffer, offset: number, length: number): string {
@@ -58,7 +58,7 @@ function stripTopLevel(entryPath: string): string | null {
   return rest.length > 0 ? rest : null;
 }
 
-function safeTarget(destination: string, relative: string): string | null {
+export function safeTarget(destination: string, relative: string): string | null {
   if (relative.split("/").some((segment) => segment === "..") || path.isAbsolute(relative)) {
     return null;
   }

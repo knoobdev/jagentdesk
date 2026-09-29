@@ -33,7 +33,7 @@ interface SkillRowProps {
   handlers: SkillRowHandlers;
 }
 
-function SkillRowBadges({ entry }: { entry: SkillEntry }) {
+export function SkillRowBadges({ entry }: { entry: SkillEntry }) {
   const { t } = useTranslation();
   return (
     <View style={styles.badges}>
@@ -48,7 +48,13 @@ function SkillRowBadges({ entry }: { entry: SkillEntry }) {
   );
 }
 
-function SkillRowMenu({ entry, handlers }: { entry: SkillEntry; handlers: SkillRowHandlers }) {
+export function SkillRowMenu({
+  entry,
+  handlers,
+}: {
+  entry: SkillEntry;
+  handlers: SkillRowHandlers;
+}) {
   const { t } = useTranslation();
   const handleCopy = useCallback(() => handlers.onCopyPath(entry), [entry, handlers]);
   const handleTrain = useCallback(() => handlers.onTrain(entry), [entry, handlers]);
@@ -92,7 +98,7 @@ function SkillRowMenu({ entry, handlers }: { entry: SkillEntry; handlers: SkillR
 const MAX_PROVIDER_BADGES = 5;
 
 /** Spec 22.6 "badge provider thấy được": one badge per provider that reads this skill. */
-function ProviderBadges({ providers }: { providers: string[] }) {
+export function ProviderBadges({ providers }: { providers: string[] }) {
   const { t } = useTranslation();
   const labels = useMemo(() => providers.map(skillProviderLabel), [providers]);
   if (labels.length === 0) {

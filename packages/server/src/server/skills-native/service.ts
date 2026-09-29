@@ -13,6 +13,8 @@ import {
   type SkillPluginInstallResult,
   type SkillScope,
   type SkillSourceRef,
+  type SkillSourceSpec,
+  type SkillSourceStatus,
   type SkillWrittenPaths,
 } from "@jagentdesk/protocol/native-skills";
 import {
@@ -113,10 +115,13 @@ export class NativeSkillsService {
     this.now = options.now ?? Date.now;
     this.browser = new SkillSourceBrowser({
       cacheDir: path.join(this.skillsHome, "cache"),
+      skillsHome: this.skillsHome,
       homeDir: this.homeDir,
       fetch: options.fetch,
       runCommand: options.runCommand,
       now: this.now,
+      onBackgroundError: (error, spec) =>
+        this.logger.warn({ err: error, spec }, "Background skill source refresh failed"),
     });
   }
 
@@ -168,13 +173,46 @@ export class NativeSkillsService {
     return { skill, files: await listSkillFiles(skill.realPath), body: info?.body ?? "" };
   }
 
+  /**
+   * Items of `source`; without it, of the configured sources (`sourceId`, or
+   * every enabled source merged).
+   */
   async browse(
-    source: SkillSourceRef,
-    options: { query?: string; refresh?: boolean } = {},
+    source: SkillSourceRef | undefined,
+    options: { sourceId?: string; query?: string; refresh?: boolean } = {},
   ): Promise<SkillCatalogItem[]> {
-    const projectRoot = source.kind === "local" ? await this.resolveProjectRoot(source.cwd) : null;
+    const projectRoot = source?.kind === "local" ? await this.resolveProjectRoot(source.cwd) : null;
     const installed = await this.scan(projectRoot);
     return this.browser.browse(source, installed, options);
+  }
+
+  // ── Configured sources (sources.json) ──────────────────────────────────────
+  listSources(): Promise<SkillSourceStatus[]> {
+    return this.browser.listSources();
+  }
+
+  async addSource(source: string | SkillSourceSpec, label?: string): Promise<SkillSourceStatus> {
+    // Listing (network) runs outside the mutation queue; only the store is serialized.
+    const spec = await this.browser.validateSource(source);
+    const added = await this.exclusive(() => this.browser.storeSource(spec, label));
+    await this.changed();
+    return added;
+  }
+
+  async removeSource(sourceId: string): Promise<void> {
+    await this.exclusive(() => this.browser.removeSource(sourceId));
+    await this.changed();
+  }
+
+  async setSourceEnabled(sourceId: string, enabled: boolean): Promise<SkillSourceStatus> {
+    const updated = await this.exclusive(() => this.browser.setSourceEnabled(sourceId, enabled));
+    await this.changed();
+    return updated;
+  }
+
+  /** Settles when background source refreshes are done (tests). */
+  idle(): Promise<void> {
+    return this.browser.idle();
   }
 
   async install(input: {
@@ -191,8 +229,9 @@ export class NativeSkillsService {
       await this.changed();
       return { skill: null, plugin };
     }
+    // Network download happens outside the mutation queue; only the write is serialized.
+    const resolved = await this.browser.resolveSkillItem(input.item);
     const record = await this.exclusive(async () => {
-      const resolved = await this.browser.resolveSkillItem(input.item);
       const name = input.rename?.trim() || resolved.name;
       const renamed = name !== resolved.frontmatterName;
       return this.installNew(name, input.scope, projectRoot, {

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type {
@@ -6,7 +7,7 @@ import type {
   SkillLink,
   SkillScope,
 } from "@jagentdesk/protocol/native-skills";
-import { hasScripts, lstatOrNull, realpathOrNull } from "./fs-utils.js";
+import { hasScripts, listSkillFiles, lstatOrNull, realpathOrNull } from "./fs-utils.js";
 import { parseSkillMarkdown, readSkillMetadata, splitLessons } from "./frontmatter.js";
 import type { MovedSkillRecord, OwnedSkillRecord, SkillsLock } from "./lock-store.js";
 import { buildSkillId, SKILL_DIR_SPECS, skillDirPath, visibleToFor } from "./paths.js";
@@ -43,6 +44,37 @@ export async function readSkillDir(dir: string): Promise<SkillDirInfo | null> {
   const parsed = parseSkillMarkdown(content);
   const meta = readSkillMetadata(parsed.frontmatter);
   return { ...meta, body: parsed.body, hasScripts: await hasScripts(dir) };
+}
+
+const contentHashCache = new Map<string, { key: string; hash: string }>();
+
+/**
+ * Spec 22.6.1: `sha256:<hex>` over SKILL.md + the sorted relative file list with
+ * sizes — cheap enough to compare the copies of a family. Cached per real path
+ * and keyed by the mtimes of the directory and its SKILL.md.
+ */
+export async function skillContentHash(dir: string): Promise<string | null> {
+  const [dirStats, skillStats] = await Promise.all([
+    lstatOrNull(dir),
+    lstatOrNull(path.join(dir, "SKILL.md")),
+  ]);
+  if (!dirStats || !skillStats) return null;
+  const key = `${dirStats.mtimeMs}:${skillStats.mtimeMs}:${skillStats.size}`;
+  const cached = contentHashCache.get(dir);
+  if (cached?.key === key) return cached.hash;
+  let content: Buffer;
+  try {
+    content = await fs.readFile(path.join(dir, "SKILL.md"));
+  } catch {
+    return null;
+  }
+  const hash = createHash("sha256");
+  hash.update(content);
+  hash.update("\0");
+  for (const file of await listSkillFiles(dir)) hash.update(`${file.path}\0${file.size}\n`);
+  const value = `sha256:${hash.digest("hex")}`;
+  contentHashCache.set(dir, { key, hash: value });
+  return value;
 }
 
 function scopesFor(roots: ScanRoots): Array<{ scope: SkillScope; root: string }> {
@@ -122,6 +154,7 @@ interface EntryInput {
   links: SkillLink[];
   labels: SkillDirLabel[];
   info: SkillDirInfo;
+  contentHash: string | null;
   owned: OwnedSkillRecord | null;
   enabled: boolean;
   projectRoot: string | null;
@@ -146,6 +179,7 @@ function toEntry(input: EntryInput): SkillEntry {
     invalidReason: info.invalidReason,
     source: owned?.source ?? { kind: "local", ref: null, revision: null },
     hasScripts: info.hasScripts,
+    contentHash: input.contentHash,
     training: owned ? trainingOf(owned, splitLessons(info.body).lessons.length) : null,
     legacyId: owned?.legacyId ?? null,
   };
@@ -185,6 +219,7 @@ async function disabledOwnedEntry(record: OwnedSkillRecord): Promise<SkillEntry 
     links: [],
     labels: [],
     info,
+    contentHash: await skillContentHash(record.disabledPath),
     owned: record,
     enabled: false,
     projectRoot: record.projectRoot,
@@ -212,6 +247,7 @@ async function disabledForeignEntry(record: MovedSkillRecord): Promise<SkillEntr
     links: [],
     labels: [],
     info,
+    contentHash: await skillContentHash(primary.backupPath),
     owned: null,
     enabled: false,
     projectRoot: record.projectRoot,
@@ -239,6 +275,7 @@ export async function scanSkills(roots: ScanRoots, lock: SkillsLock): Promise<Sk
         links,
         labels,
         info,
+        contentHash: await skillContentHash(realPath),
         owned,
         enabled: true,
         projectRoot: roots.projectRoot,

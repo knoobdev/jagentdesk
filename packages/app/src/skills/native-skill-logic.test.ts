@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SkillCatalogItem } from "@jagentdesk/protocol/native-skills";
 import {
-  buildBrowseSource,
   buildLegacyIdMap,
   conciseLessonFrom,
   DEFAULT_INSTALLED_FILTERS,
@@ -136,14 +135,13 @@ describe("legacy ids", () => {
 });
 
 describe("selectTurnSkillIds", () => {
-  it("unions attached and matched ids and drops the ones already invoked", () => {
+  it("sends only attached ids (no auto-load) and drops the ones already invoked", () => {
     expect(
       selectTurnSkillIds({
-        attachedIds: ["a", "b"],
-        matchedIds: ["b", "c"],
+        attachedIds: ["a", "b", "b"],
         alreadySentIds: ["a"],
       }),
-    ).toEqual(["b", "c"]);
+    ).toEqual(["b"]);
   });
 });
 
@@ -179,26 +177,6 @@ describe("training", () => {
 });
 
 describe("browse", () => {
-  it("builds the SourceRef for each picker choice", () => {
-    expect(buildBrowseSource("official", "all", "")).toEqual({ kind: "official" });
-    expect(buildBrowseSource("official", "openai/skills", "")).toEqual({
-      kind: "official",
-      repo: "openai/skills",
-    });
-    expect(buildBrowseSource("provider-marketplace", "codex", "")).toEqual({
-      kind: "provider-marketplace",
-      provider: "codex",
-    });
-    expect(buildBrowseSource("provider-marketplace", "all", "")).toEqual({
-      kind: "provider-marketplace",
-    });
-    expect(buildBrowseSource("url", "all", "  ")).toBeNull();
-    expect(buildBrowseSource("url", "all", " owner/repo ")).toEqual({
-      kind: "url",
-      url: "owner/repo",
-    });
-  });
-
   it("searches name, description and origin, sorted by name", () => {
     const items = [
       makeItem({ name: "pdf", description: "Read PDFs" }),

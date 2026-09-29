@@ -12,6 +12,7 @@ import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-
 import { useSessionStore, type WorkspaceDescriptor } from "@/stores/session-store";
 import { useSkillCatalog } from "@/stores/skills-store";
 import { projectOptionsFromWorkspaces } from "@/skills/native-skill-logic";
+import { groupSkillFamilies } from "@/skills/skill-families";
 import { BrowseTab } from "@/skills/ui/browse-tab";
 import { CatalogItemSheet } from "@/skills/ui/catalog-item-sheet";
 import { InstalledTab } from "@/skills/ui/installed-tab";
@@ -19,6 +20,7 @@ import { ProjectSelect } from "@/skills/ui/scope-picker";
 import { SkillsTabButton, SkillsTabRow } from "@/skills/ui/skill-chrome";
 import { SkillDetailSheet } from "@/skills/ui/skill-detail-sheet";
 import { SkillEditorSheet } from "@/skills/ui/skill-editor-sheet";
+import { SourcesSheet } from "@/skills/ui/sources-sheet";
 import type { SkillRowHandlers } from "@/skills/ui/skill-row";
 import { useSkillActions } from "@/skills/ui/use-skill-actions";
 import type { Theme } from "@/styles/theme";
@@ -30,6 +32,7 @@ type SkillsSheet =
   | { kind: "detail"; skillId: string; cwd: string | null }
   | { kind: "item"; item: SkillCatalogItem }
   | { kind: "editor"; entry: SkillEntry | null }
+  | { kind: "sources" }
   | null;
 
 const EMPTY_WORKSPACES = new Map<string, WorkspaceDescriptor>();
@@ -53,8 +56,9 @@ function useBusyIds() {
 
 /**
  * Skills (rail "Skills", spec 22.6): one list for every provider. Installed
- * lists the daemon catalog with filters; Browse lists official repos, provider
- * plugin marketplaces and any GitHub/npm link. Everything goes through the
+ * lists the daemon catalog grouped into families (22.6.1) with filters; Browse is
+ * the merged marketplace of the user's sources (22.5) plus provider plugin
+ * marketplaces. Everything goes through the
  * daemon RPCs, so desktop and mobile behave the same (spec 22.11 #8).
  */
 export function SkillsScreen() {
@@ -72,7 +76,11 @@ export function SkillsScreen() {
   const [projectPath, setProjectPath] = useState<string | null>(null);
   const [tab, setTab] = useState<SkillsTab>("installed");
   const [sheet, setSheet] = useState<SkillsSheet>(null);
-  const installedCount = useSkillCatalog(projectPath).skills.length;
+  const installedSkills = useSkillCatalog(projectPath).skills;
+  const installedCount = useMemo(
+    () => groupSkillFamilies(installedSkills).length,
+    [installedSkills],
+  );
 
   const openSkill = useCallback(
     (entry: SkillEntry) =>
@@ -89,6 +97,7 @@ export function SkillsScreen() {
     (item: SkillCatalogItem) => setSheet({ kind: "item", item }),
     [],
   );
+  const handleManageSources = useCallback(() => setSheet({ kind: "sources" }), []);
 
   const handlers = useMemo<SkillRowHandlers>(
     () => ({
@@ -194,6 +203,7 @@ export function SkillsScreen() {
           client={client}
           connected={connected}
           onOpenItem={handleOpenItem}
+          onManageSources={handleManageSources}
         />
       )}
       <SkillsSheets
@@ -239,6 +249,9 @@ function SkillsSheets({ sheet, ...props }: SkillsSheetsProps) {
         onOpenSkill={props.onOpenSkill}
       />
     );
+  }
+  if (sheet.kind === "sources") {
+    return <SourcesSheet serverId={props.serverId} client={props.client} onClose={props.onClose} />;
   }
   if (sheet.kind === "item") {
     return (

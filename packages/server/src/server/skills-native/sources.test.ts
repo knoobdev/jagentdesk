@@ -6,7 +6,8 @@ import { createTestLogger } from "../../test-utils/test-logger.js";
 import { prependInvocation } from "../agent/agent-prompt.js";
 import { parseSkillMarkdown, readSkillMetadata } from "./frontmatter.js";
 import { summarizeCodexConfig } from "./provider-marketplace.js";
-import { parseRemoteSource, RemoteSourceCache } from "./remote-sources.js";
+import { RemoteListingCache } from "./remote-listing.js";
+import { NpmPackageCache, parseRemoteSource } from "./remote-sources.js";
 import { NativeSkillsService } from "./service.js";
 import { extractTarGz } from "./tar.js";
 import { fakeFetch, makeTarGz, makeTempRoots } from "./test-utils/fixtures.js";
@@ -55,14 +56,25 @@ describe("parseRemoteSource", () => {
 });
 
 describe("remote sources", () => {
-  it("browses and installs an npm package source through the registry tarball", async () => {
+  it("lists an npm package from registry metadata + CDN files and installs from its tarball", async () => {
+    const skillMd = "---\nname: lint\ndescription: Lint code.\n---\n\nRun lint.\n";
+    const tarball = "https://registry.npmjs.org/@scope/skill-pack/-/skill-pack-1.2.3.tgz";
     const fetch = fakeFetch({
       "https://registry.npmjs.org/@scope%2Fskill-pack/latest": {
         version: "1.2.3",
-        dist: { tarball: "https://registry.npmjs.org/@scope/skill-pack/-/skill-pack-1.2.3.tgz" },
+        dist: { tarball },
       },
-      "https://registry.npmjs.org/@scope/skill-pack/-/skill-pack-1.2.3.tgz": makeTarGz(
-        { "skills/lint/SKILL.md": "---\nname: lint\ndescription: Lint code.\n---\n\nRun lint.\n" },
+      "https://data.jsdelivr.com/v1/packages/npm/@scope/skill-pack@1.2.3?structure=flat": {
+        files: [
+          { name: "/package.json", hash: "p", size: 10 },
+          { name: "/skills/lint/SKILL.md", hash: "h1", size: skillMd.length },
+          { name: "/skills/lint/scripts/run.sh", hash: "h2", size: 5 },
+        ],
+      },
+      "https://cdn.jsdelivr.net/npm/@scope/skill-pack@1.2.3/skills/lint/SKILL.md":
+        Buffer.from(skillMd),
+      [tarball]: makeTarGz(
+        { "skills/lint/SKILL.md": skillMd, "skills/lint/scripts/run.sh": "echo\n" },
         { top: "package" },
       ),
     });
@@ -75,31 +87,52 @@ describe("remote sources", () => {
     await service.initialize();
     const source = { kind: "url" as const, url: "npm:@scope/skill-pack" };
     const items = await service.browse(source);
-    expect(items).toMatchObject([{ itemId: "skills/lint", name: "lint", revision: "1.2.3" }]);
+    expect(items).toMatchObject([
+      { itemId: "skills/lint", name: "lint", revision: "1.2.3", hasScripts: true },
+    ]);
+    // Listing never downloads the tarball.
+    expect(fetch.calls).not.toContain(tarball);
     const { skill } = await service.install({
       item: { source, itemId: "skills/lint" },
       scope: "global",
     });
     expect(skill?.source).toEqual({ kind: "npm", ref: "@scope/skill-pack", revision: "1.2.3" });
-    // Browse + install reused one download (cache in $JAGENTDESK_HOME/skills/cache).
-    expect(fetch.calls).toHaveLength(2);
-    await fs.stat(path.join(roots.jdHome, "skills", "cache"));
+    expect(fetch.calls.filter((url) => url === tarball)).toHaveLength(1);
+    await fs.stat(path.join(roots.home, ".agents", "skills", "lint", "scripts", "run.sh"));
   });
 
-  it("reuses the extracted tree for 10 minutes, then downloads again", async () => {
-    let now = 1_000_000;
-    const url = "https://codeload.github.com/o/r/tar.gz/HEAD";
-    const fetch = fakeFetch({ [url]: makeTarGz({ "a/SKILL.md": "x" }, { commit: "c1" }) });
-    const cache = new RemoteSourceCache(path.join(roots.jdHome, "cache"), fetch, () => now);
-    const source = { kind: "github" as const, owner: "o", repo: "r", ref: null, subpath: null };
-    await cache.materialize(source);
-    now += 9 * 60 * 1000;
-    await cache.materialize(source);
-    expect(fetch.calls).toHaveLength(1);
-    now += 2 * 60 * 1000;
-    const again = await cache.materialize(source);
-    expect(fetch.calls).toHaveLength(2);
-    expect(again.revision).toBe("c1");
+  it("falls back to unpkg when jsDelivr cannot list the package", async () => {
+    const skillMd = "---\nname: one\ndescription: One.\n---\n";
+    const fetch = fakeFetch({
+      "https://registry.npmjs.org/pack/latest": {
+        version: "2.0.0",
+        dist: { tarball: "https://registry.npmjs.org/pack/-/pack-2.0.0.tgz" },
+      },
+      "https://unpkg.com/pack@2.0.0/?meta": {
+        files: [{ path: "/SKILL.md", size: skillMd.length, integrity: "sha256-x" }],
+      },
+      "https://unpkg.com/pack@2.0.0/SKILL.md": Buffer.from(skillMd),
+    });
+    const cache = new RemoteListingCache({ cacheDir: roots.root, fetch, now: () => 1 });
+    const listing = await cache.list({ kind: "npm", pkg: "pack" });
+    expect(listing.skills.map((skill) => [skill.itemId, skill.content])).toEqual([[".", skillMd]]);
+  });
+
+  it("reuses an extracted npm package for the same version only", async () => {
+    const v1 = "https://registry.npmjs.org/p/-/p-1.0.0.tgz";
+    const v2 = "https://registry.npmjs.org/p/-/p-2.0.0.tgz";
+    const fetch = fakeFetch({
+      [v1]: makeTarGz({ "a/SKILL.md": "x" }, { top: "package" }),
+      [v2]: makeTarGz({ "a/SKILL.md": "y" }, { top: "package" }),
+    });
+    const cache = new NpmPackageCache(path.join(roots.jdHome, "cache"), fetch, () => 1);
+    const source = { kind: "npm" as const, pkg: "p" };
+    await cache.materialize(source, { version: "1.0.0", tarball: v1 });
+    const again = await cache.materialize(source, { version: "1.0.0", tarball: v1 });
+    expect(fetch.calls).toEqual([v1]);
+    expect(again.revision).toBe("1.0.0");
+    const next = await cache.materialize(source, { version: "2.0.0", tarball: v2 });
+    expect(await fs.readFile(path.join(next.root, "a", "SKILL.md"), "utf8")).toBe("y");
   });
 
   it("rejects archive entries escaping the destination", async () => {
@@ -234,6 +267,51 @@ describe("frontmatter", () => {
   it("flags invalid names", () => {
     const meta = readSkillMetadata({ name: "My Skill", description: "x" });
     expect(meta.invalidReason).toMatch(/Invalid name/);
+  });
+});
+
+describe("multi-skill invocation (spec 22.7)", () => {
+  const cases: Array<{ provider: string; one: string; two: string; three: string }> = [
+    {
+      provider: "claude",
+      one: "/a",
+      two: "/a\nBefore you answer, load this skill with the Skill tool: `b`.",
+      three: "/a\nBefore you answer, load these skills with the Skill tool: `b`, `c`.",
+    },
+    ...["cursor", "copilot", "kiro"].map((provider) => ({
+      provider,
+      one: "/a",
+      two: "/a\nBefore you answer, load this skill: `b`.",
+      three: "/a\nBefore you answer, load these skills: `b`, `c`.",
+    })),
+    ...["pi", "omp", "kimi"].map((provider) => ({
+      provider,
+      one: "/skill:a",
+      two: "/skill:a\nBefore you answer, load this skill: `b`.",
+      three: "/skill:a\nBefore you answer, load these skills: `b`, `c`.",
+    })),
+    { provider: "codex", one: "$a", two: "$a $b", three: "$a $b $c" },
+    ...["opencode", "some-acp"].map((provider) => ({
+      provider,
+      one: "Before you answer, load this skill: `a`.",
+      two: "Before you answer, load these skills: `a`, `b`.",
+      three: "Before you answer, load these skills: `a`, `b`, `c`.",
+    })),
+  ];
+
+  it.each(cases)("$provider: 1, 2 and 3 skills", ({ provider, one, two, three }) => {
+    expect(buildSkillInvocationLine(provider, [])).toBe("");
+    expect(buildSkillInvocationLine(provider, ["a"])).toBe(one);
+    expect(buildSkillInvocationLine(provider, ["a", "b"])).toBe(two);
+    expect(buildSkillInvocationLine(provider, ["a", "b", "c"])).toBe(three);
+  });
+
+  it("emits only one leading command for slash providers", () => {
+    const line = buildSkillInvocationLine("claude", ["a", "b", "c", "b"]);
+    expect(line.match(/^\//gm)).toHaveLength(1);
+    expect(prependInvocation("Fix it", line)).toBe(
+      "/a\nBefore you answer, load these skills with the Skill tool: `b`, `c`.\n\nFix it",
+    );
   });
 });
 

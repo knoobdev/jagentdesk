@@ -12,6 +12,7 @@ import { makeSkillEntry } from "@/test/skill-entry";
 import { useSkillsStore } from "@/stores/skills-store";
 import { CatalogItemSheet } from "./catalog-item-sheet";
 import { InstalledTab } from "./installed-tab";
+import { SourcesSheet } from "./sources-sheet";
 import type { SkillRowHandlers } from "./skill-row";
 
 void testI18n;
@@ -133,6 +134,13 @@ const HANDLERS: SkillRowHandlers = {
   onFork: vi.fn(),
   onUninstall: vi.fn(),
 };
+
+function asSourcesClient(
+  listSkillSources: ReturnType<typeof vi.fn>,
+  addSkillSource: ReturnType<typeof vi.fn>,
+): DaemonClient {
+  return { listSkillSources, addSkillSource } as unknown as DaemonClient;
+}
 
 function renderWithQuery(element: ReactElement): void {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -286,5 +294,102 @@ describe("InstalledTab", () => {
     fireEvent.click(screen.getByTestId("skills-filter-provider-kiro"));
     await waitFor(() => expect(screen.queryByText("frontend-design")).toBeNull());
     expect(screen.getByText("kiro-steering")).toBeDefined();
+  });
+});
+
+describe("InstalledTab families (spec 22.6.1)", () => {
+  it("shows one row per skill name with copy count, differ badge and expandable copies", async () => {
+    useSkillsStore.setState({
+      serverId: "srv_1",
+      catalogs: {
+        "": {
+          skills: [
+            makeSkillEntry({
+              name: "pdf",
+              skillId: "global:claude:pdf",
+              dir: "claude",
+              realPath: "/home/u/.claude/skills/pdf",
+              visibleTo: ["claude"],
+              contentHash: "sha256:bb",
+            }),
+            makeSkillEntry({
+              name: "pdf",
+              skillId: "global:agents:pdf",
+              realPath: "/home/u/.agents/skills/pdf",
+              visibleTo: ["codex"],
+              contentHash: "sha256:aa",
+            }),
+          ],
+          written: null,
+          status: "ready",
+          error: null,
+        },
+      },
+    });
+    renderWithQuery(
+      <InstalledTab
+        cwd={null}
+        busyIds={NO_BUSY_IDS}
+        handlers={HANDLERS}
+        onCopyWrittenPath={noop}
+      />,
+    );
+    expect(screen.getAllByText("pdf")).toHaveLength(1);
+    expect(screen.getByText("2 copies")).toBeDefined();
+    expect(screen.getByText("Copies differ")).toBeDefined();
+    expect(screen.getByText("1 skills")).toBeDefined();
+    expect(screen.queryByTestId("skill-copy-global:agents:pdf")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("skill-family-expand-global::pdf"));
+    expect(await screen.findByTestId("skill-copy-global:agents:pdf")).toBeDefined();
+    expect(screen.getByTestId("skill-copy-global:claude:pdf")).toBeDefined();
+    expect(screen.getByText("/home/u/.claude/skills/pdf")).toBeDefined();
+    expect(screen.getByText("Primary")).toBeDefined();
+  });
+});
+
+describe("SourcesSheet (spec 22.5)", () => {
+  it("offers Restore defaults and shows the daemon's validation error on add", async () => {
+    const listSkillSources = vi.fn().mockResolvedValue({
+      requestId: "r",
+      sources: [
+        {
+          sourceId: "src_o",
+          spec: { kind: "github", owner: "openai", repo: "skills", ref: null, subpath: null },
+          label: "openai/skills",
+          customLabel: null,
+          builtin: true,
+          enabled: true,
+          addedAtMs: 0,
+          lastRefreshMs: null,
+          itemCount: null,
+          revision: null,
+          error: "GitHub rate limit reached",
+        },
+      ],
+    });
+    const addSkillSource = vi
+      .fn()
+      .mockRejectedValue(
+        Object.assign(
+          new Error("Not a URL: nope requestType=skills.sources.add.request code=invalid_request"),
+          { code: "invalid_request" },
+        ),
+      );
+    const client = asSourcesClient(listSkillSources, addSkillSource);
+    renderWithQuery(<SourcesSheet serverId="srv_1" client={client} onClose={noop} />);
+    expect(await screen.findByTestId("skills-source-src_o")).toBeDefined();
+    expect(screen.getByText("GitHub rate limit reached")).toBeDefined();
+    expect(screen.getByText("Not listed yet")).toBeDefined();
+    expect(screen.getByTestId("skills-sources-restore-defaults")).toBeDefined();
+
+    fireEvent.change(screen.getByTestId("skills-source-add-input"), {
+      target: { value: "nope" },
+    });
+    fireEvent.click(screen.getByTestId("skills-source-add-submit"));
+    expect(await screen.findByTestId("skills-source-add-error")).toBeDefined();
+    expect(addSkillSource).toHaveBeenCalledWith({ source: "nope" });
+    expect(screen.getByText("Not a source JAgentDesk understands")).toBeDefined();
+    expect(screen.getByText("Not a URL: nope")).toBeDefined();
   });
 });

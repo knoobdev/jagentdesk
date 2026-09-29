@@ -26,7 +26,7 @@ import {
   skillErrorMessage,
   type SkillProjectOption,
 } from "@/skills/native-skill-logic";
-import { skillsBrowseQueryKey } from "@/skills/ui/browse-tab";
+import { skillsBrowseQueryKey } from "@/skills/ui/use-skill-sources";
 import {
   ScopePicker,
   scopeIsComplete,

@@ -10,7 +10,6 @@ import { Button } from "@/components/ui/button";
 import { loadSkillCatalog, useSkillCatalog } from "@/stores/skills-store";
 import {
   DEFAULT_INSTALLED_FILTERS,
-  filterInstalledSkills,
   presentProviders,
   presentSourceKinds,
   skillProviderLabel,
@@ -18,8 +17,10 @@ import {
   type SkillOwnershipFilter,
   type SkillScopeFilter,
 } from "@/skills/native-skill-logic";
+import { filterSkillFamilies, groupSkillFamilies, type SkillFamily } from "@/skills/skill-families";
 import { ChipGroup, SectionTitle, type ChipOption } from "@/skills/ui/skill-chrome";
-import { SkillRow, type SkillRowHandlers } from "@/skills/ui/skill-row";
+import { SkillFamilyRow } from "@/skills/ui/skill-family-row";
+import type { SkillRowHandlers } from "@/skills/ui/skill-row";
 import type { Theme } from "@/styles/theme";
 
 type Translate = ReturnType<typeof useTranslation>["t"];
@@ -203,10 +204,8 @@ export function InstalledTab({ cwd, busyIds, handlers, onCopyWrittenPath }: Inst
     (patch: Partial<InstalledSkillFilters>) => setFilters((prev) => ({ ...prev, ...patch })),
     [],
   );
-  const visible = useMemo(
-    () => filterInstalledSkills(catalog.skills, filters),
-    [catalog.skills, filters],
-  );
+  const families = useMemo(() => groupSkillFamilies(catalog.skills), [catalog.skills]);
+  const visible = useMemo(() => filterSkillFamilies(families, filters), [families, filters]);
   const isFiltered =
     catalog.skills.length > 0 &&
     (filters.query.trim() !== "" ||
@@ -216,12 +215,12 @@ export function InstalledTab({ cwd, busyIds, handlers, onCopyWrittenPath }: Inst
       filters.ownership !== "all");
 
   const renderItem = useCallback(
-    ({ item }: ListRenderItemInfo<SkillEntry>) => (
-      <SkillRow entry={item} busy={busyIds.has(item.skillId)} handlers={handlers} />
+    ({ item }: ListRenderItemInfo<SkillFamily>) => (
+      <SkillFamilyRow family={item} busyIds={busyIds} handlers={handlers} />
     ),
     [busyIds, handlers],
   );
-  const keyExtractor = useCallback((item: SkillEntry) => item.skillId, []);
+  const keyExtractor = useCallback((item: SkillFamily) => item.key, []);
   const header = useMemo(
     () => (
       <InstalledFilters
