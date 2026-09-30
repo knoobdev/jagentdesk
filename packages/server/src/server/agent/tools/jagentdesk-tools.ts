@@ -3,6 +3,7 @@
 // style violations in the forge/kubectl tool builders; disabling the stylistic rule file-wide avoids
 // rewriting unrelated tooling. New code here should still prefer if/else.
 /* oxlint-disable no-nested-ternary */
+import { staticHostSupport, type StaticHostSupport } from "../../host-capabilities/service.js";
 import { randomUUID } from "node:crypto";
 import { mkdir, stat, writeFile } from "node:fs/promises";
 import nodePath from "node:path";
@@ -841,18 +842,24 @@ function registerProxyTools(params: {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- schema-validated at the boundary.
     handler: (input: any, context: JAgentDeskToolExecutionContext) => Promise<JAgentDeskToolResult>,
   ) => void;
+  support: StaticHostSupport;
 }): void {
-  const { registerTool } = params;
+  const { registerTool, support } = params;
   const svc = getSharedProxyService();
+  // Spec 24.5: only offer capture modes this host can run.
+  const captureModes = [
+    "manual",
+    ...(support.proxySystemCapture ? ["system"] : []),
+    ...(support.iosSimulators ? ["frida"] : []),
+  ] as [string, ...string[]];
 
   registerTool(
     "proxy_capture_start",
     {
       title: "Workbench: start capture",
-      description:
-        "Start an intercepting-proxy capture session and return its listener host:port. mode='manual' (point a client at the listener), 'system', or 'frida' (bind to a simulator udid+bundleId). Returns the session, whose udid tells which simulator it captures.",
+      description: `Start an intercepting-proxy capture session and return its listener host:port. Modes on this host: ${captureModes.join(", ")}. mode='manual' points a client at the listener${support.proxySystemCapture ? "; 'system' captures through the macOS system proxy" : ""}${support.iosSimulators ? "; 'frida' binds to a simulator udid+bundleId" : ""}. Returns the session, whose udid tells which simulator it captures.`,
       inputSchema: {
-        mode: z.enum(["manual", "system", "frida"]).optional(),
+        mode: z.enum(captureModes).optional(),
         udid: z.string().optional(),
         bundleId: z.string().optional(),
         label: z.string().optional(),
@@ -1038,84 +1045,88 @@ function registerProxyTools(params: {
     async () => textResult(svc.caExportPem()),
   );
 
-  registerTool(
-    "sim_install_batch",
-    {
-      title: "Simulator: install app on many",
-      description:
-        "Install a .app or .ipa onto one or more simulators at once. NOTE: a simulator only runs SIMULATOR builds — App Store / device .ipa files (ARM + FairPlay) are rejected. Returns per-simulator ok/error.",
-      inputSchema: {
-        udids: z.array(z.string()).min(1),
-        filePath: z.string(),
+  // Batch installs, Frida unpinning and simulator CA trust act on iOS simulators (macOS
+  // hosts only).
+  if (support.iosSimulators) {
+    registerTool(
+      "sim_install_batch",
+      {
+        title: "Simulator: install app on many",
+        description:
+          "Install a .app or .ipa onto one or more simulators at once. NOTE: a simulator only runs SIMULATOR builds — App Store / device .ipa files (ARM + FairPlay) are rejected. Returns per-simulator ok/error.",
+        inputSchema: {
+          udids: z.array(z.string()).min(1),
+          filePath: z.string(),
+        },
       },
-    },
-    async (input: { udids: string[]; filePath: string }) => {
-      try {
-        const results = await simulatorToolService.installOnMany(input.udids, input.filePath);
-        return textResult(JSON.stringify(results, null, 2));
-      } catch (err) {
-        return simErrorResult(err);
-      }
-    },
-  );
+      async (input: { udids: string[]; filePath: string }) => {
+        try {
+          const results = await simulatorToolService.installOnMany(input.udids, input.filePath);
+          return textResult(JSON.stringify(results, null, 2));
+        } catch (err) {
+          return simErrorResult(err);
+        }
+      },
+    );
 
-  registerTool(
-    "proxy_frida_available",
-    {
-      title: "Workbench: Frida availability",
-      description:
-        "Report whether the host `frida` CLI is installed (needed for TLS-pinning bypass). Auto-approved (read-only).",
-      inputSchema: {},
-    },
-    async () => textResult(JSON.stringify(await fridaAvailability(), null, 2)),
-  );
+    registerTool(
+      "proxy_frida_available",
+      {
+        title: "Workbench: Frida availability",
+        description:
+          "Report whether the host `frida` CLI is installed (needed for TLS-pinning bypass). Auto-approved (read-only).",
+        inputSchema: {},
+      },
+      async () => textResult(JSON.stringify(await fridaAvailability(), null, 2)),
+    );
 
-  registerTool(
-    "proxy_frida_install",
-    {
-      title: "Workbench: install Frida",
-      description:
-        "Install Frida (frida-tools) on this host via pipx/pip so TLS unpinning works. Use when proxy_frida_available reports frida=false.",
-      inputSchema: {},
-    },
-    async () => textResult(JSON.stringify(await installFrida(), null, 2)),
-  );
+    registerTool(
+      "proxy_frida_install",
+      {
+        title: "Workbench: install Frida",
+        description:
+          "Install Frida (frida-tools) on this host via pipx/pip so TLS unpinning works. Use when proxy_frida_available reports frida=false.",
+        inputSchema: {},
+      },
+      async () => textResult(JSON.stringify(await installFrida(), null, 2)),
+    );
 
-  registerTool(
-    "proxy_frida_unpin",
-    {
-      title: "Workbench: Frida TLS unpin",
-      description:
-        "Launch an app on a simulator and attach the generic (app-agnostic) TLS-pinning bypass via Frida. Works for whatever app runs on the simulator. Returns the injected PID.",
-      inputSchema: { udid: z.string(), bundleId: z.string() },
-    },
-    async (input: { udid: string; bundleId: string }) => {
-      try {
-        const handle = await launchAndUnpin({ udid: input.udid, bundleId: input.bundleId });
-        return textResult(`unpinned ${input.bundleId} on ${input.udid} (pid ${handle.pid})`);
-      } catch (err) {
-        return simErrorResult(err);
-      }
-    },
-  );
+    registerTool(
+      "proxy_frida_unpin",
+      {
+        title: "Workbench: Frida TLS unpin",
+        description:
+          "Launch an app on a simulator and attach the generic (app-agnostic) TLS-pinning bypass via Frida. Works for whatever app runs on the simulator. Returns the injected PID.",
+        inputSchema: { udid: z.string(), bundleId: z.string() },
+      },
+      async (input: { udid: string; bundleId: string }) => {
+        try {
+          const handle = await launchAndUnpin({ udid: input.udid, bundleId: input.bundleId });
+          return textResult(`unpinned ${input.bundleId} on ${input.udid} (pid ${handle.pid})`);
+        } catch (err) {
+          return simErrorResult(err);
+        }
+      },
+    );
 
-  registerTool(
-    "proxy_ca_install_sim",
-    {
-      title: "Workbench: trust CA on simulator",
-      description:
-        "Install the Workbench CA into a booted simulator's trust store so its HTTPS is inspectable (xcrun simctl keychain add-root-cert).",
-      inputSchema: { udid: z.string() },
-    },
-    async (input: { udid: string }) => {
-      try {
-        await installCaToSimulator(input.udid, svc.caCertFilePath());
-        return textResult(`CA installed on ${input.udid}`);
-      } catch (err) {
-        return simErrorResult(err);
-      }
-    },
-  );
+    registerTool(
+      "proxy_ca_install_sim",
+      {
+        title: "Workbench: trust CA on simulator",
+        description:
+          "Install the Workbench CA into a booted simulator's trust store so its HTTPS is inspectable (xcrun simctl keychain add-root-cert).",
+        inputSchema: { udid: z.string() },
+      },
+      async (input: { udid: string }) => {
+        try {
+          await installCaToSimulator(input.udid, svc.caCertFilePath());
+          return textResult(`CA installed on ${input.udid}`);
+        } catch (err) {
+          return simErrorResult(err);
+        }
+      },
+    );
+  }
 }
 
 function registerSimulatorTools(params: {
@@ -4041,8 +4052,11 @@ export function createJAgentDeskToolCatalog(
   registerKubectlTools({ registerTool, options, callerAgentId });
   registerSqlTools({ registerTool, options, callerAgentId });
   registerDockerTools({ registerTool });
-  registerSimulatorTools({ registerTool });
-  registerProxyTools({ registerTool });
+  // Spec 24.5: tools a host cannot run are not offered (unsupported_os depends only on
+  // the OS/arch, so this needs no probe).
+  const hostSupport = staticHostSupport(process.platform, process.arch);
+  if (hostSupport.iosSimulators) registerSimulatorTools({ registerTool });
+  registerProxyTools({ registerTool, support: hostSupport });
   // Forge Hub tools mirror the kubectl precedent: available to every agent and
   // registered before the voice-only early return so a voice session keeps them.
   registerForgeTools({ registerTool, options, callerAgentId });

@@ -103,6 +103,21 @@ export function androidEmulatorSupported(platform: NodeJS.Platform, arch: string
   return false;
 }
 
+export interface StaticHostSupport {
+  iosSimulators: boolean;
+  androidDevices: boolean;
+  proxySystemCapture: boolean;
+}
+
+/** Capabilities that depend only on the OS/arch (their `unsupported_os` state). */
+export function staticHostSupport(platform: NodeJS.Platform, arch: string): StaticHostSupport {
+  return {
+    iosSimulators: platform === "darwin",
+    androidDevices: androidEmulatorSupported(platform, arch),
+    proxySystemCapture: platform === "darwin",
+  };
+}
+
 export class HostCapabilityService {
   private snapshotValue: HostCapabilities = {};
   private readonly listeners = new Set<(capabilities: HostCapabilities) => void>();
