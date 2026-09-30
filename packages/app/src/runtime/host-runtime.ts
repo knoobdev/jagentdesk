@@ -818,8 +818,15 @@ export class HostRuntimeController {
         connectionId: options.initialConnection.connectionId,
         existingClient: options.initialConnection.existingClient,
       });
+      if (!this.started) {
+        return;
+      }
     }
     await this.runProbeCycleNow();
+    // stop() can run while startup is pending; a stopped controller never probes again.
+    if (!this.started) {
+      return;
+    }
     if (options?.autoProbe !== false) {
       this.probeIntervalHandle = setInterval(() => {
         void this.runProbeCycleNow();
