@@ -1,9 +1,87 @@
 # Changelog
 
 All notable changes to JAgentDesk are documented here. JAgentDesk versions its
-own release line (now `0.9.44`); the many `v0.1.x`–`v1.0.x` tags in history are
+own release line (now `0.9.45`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
+
+## v0.9.45 — 2026-09-30
+
+Agents decide browser dialogs themselves, the agentic browser's anti-detect identity now holds from
+the first request, hosts report what they can run and install missing tools for their own OS, and a
+selective port of Paseo 0.10.2.
+
+### Agentic browser
+
+- **The agent decides JavaScript dialogs.** `alert`, `confirm` and `prompt` in an agentic tab no
+  longer open a native box over the app. The dialog waits for an answer: the command that opened it
+  returns right away with the dialog's text, and the agent answers with the new `browser_dialog`
+  tool (accept = OK, dismiss = Cancel, text for a prompt). Other commands on that tab are refused
+  until it is answered; screenshots, logs and navigation still run.
+- **You can answer too.** A bar in the browser tab shows the dialog with OK / Cancel and a text
+  field for prompts. Whoever answers first wins, and the agent is told about your answer on its next
+  command.
+- **`prompt()` works.** Electron replaced the page's `prompt()` with a function that throws; agentic
+  tabs now get a working prompt that waits for the agent or you.
+- **"Leave site?" dialogs** leave the page and are reported to the agent. HTML modals (`<dialog>`,
+  `aria-modal`) appear in the agent's snapshot as `dialog [modal=true]`.
+- **Anti-detect profiles apply before the first request, everywhere.** Choosing a profile now
+  reaches the browser (it silently did not before), the first page load waits until the identity is
+  in place, and open tabs, popups, cross-site iframes and workers all get it. Profiles and the
+  active profile survive a daemon restart.
+- **No profile looks like plain Chrome.** Without a profile the browser no longer announces
+  "JAgentDesk" or "Electron" in its User-Agent; Client Hints match Chrome's, including on
+  navigation requests.
+- **Passes iphey and PixelScan on the host's own OS.** Chrome APIs Electron lacks are shimmed (iphey
+  used to crash on them and pop an alert over the app), `navigator.webdriver` is `false`, patched
+  functions no longer reveal their source, canvas and audio noise no longer alter solid fills or
+  silence, and a profile on the host's OS reports the real GPU. Measured on macOS arm64: no profile
+  and a macOS profile score 100 on iphey and "consistent, no masking" on PixelScan. A Windows
+  profile on a Mac scores 100 on iphey but PixelScan still detects the claimed GPU, and faking a
+  location needs a proxy.
+
+### Hosts on every platform
+
+- **Hosts report what they can run.** The daemon checks, in the background, for iOS simulators,
+  Android devices, Docker (missing or stopped), helm, the system proxy, Frida, cloudflared, Maestro,
+  Java 17+ and gh / glab / tea, with a reason for anything unavailable. Older apps ignore it.
+- **Tool installer for macOS, Linux and Windows, without root.** gh, glab, tea, helm, cloudflared
+  and maestro install through a user-level package manager (Homebrew, winget, Scoop) or the vendor's
+  release for the host's OS and CPU, checked against its SHA-256 before extraction. You see the plan
+  (method, version, source, size, checksum) before anything is installed. Forge Hub's CLI installer
+  now uses it and no longer runs `sudo`.
+- **Settings → host → Tools** lists each capability with its state and version, checks again on
+  demand, and installs a missing tool with live output.
+- **Agents only get tools the host can run.** Simulator, Frida and simulator-certificate tools are
+  offered only on macOS hosts, and proxy capture lists only the modes the host supports. The
+  Simulators entry opens on a host that can run simulators and is hidden when none can.
+
+### Skills
+
+- **SkillsMP as a source.** Adding `https://skillsmp.com` no longer fails: it becomes a searchable
+  directory. Search from the Skills screen, open a result to see its files before installing, and
+  install or uninstall it like any GitHub skill. An optional API key is stored on the daemon (file
+  mode 0600) and sent only to SkillsMP; rate limits and a rejected key show clear messages.
+
+### Plugins
+
+- **Paseo marketplace plugins install**, including shared-browser: 29 of the 35 plugins that failed
+  now install from Git, and commands, token-ledger and shared-browser from npm.
+- `requirements.paseo` is checked against the Paseo plugin API JAgentDesk implements (0.8.0 to
+  0.10.2), so plugins needing Paseo 0.10 are no longer rejected. Type-only imports of the host
+  packages pass validation, and helper packages elsewhere in a plugin's repository are rebranded
+  too.
+- Marketplace entries install from npm when they have a release and fall back to Git. Catalog
+  caveats are shown, and entries without a manifest say "Can't install".
+- The plugin detail view is wider on desktop, with larger screenshots, and its images open in the
+  zoomable viewer.
+
+### Ported from Paseo 0.10.2 (OpenCode v2)
+
+- Long OpenCode v2 turns stay alive until the run finishes.
+- Completed edits keep their text, and GPT models' `patch` edits show as diffs.
+- Question cards show the question and accept a typed answer.
+- The context meter fills during OpenCode v2 turns.
 
 ## v0.9.44 — 2026-09-29
 

@@ -100,6 +100,28 @@ with a few deliberate boundaries:
 
 ## ✨ New in this release
 
+### Agent-decided browser dialogs, host tools on every OS, anti-detect that holds & Paseo 0.10.2 (v0.9.45)
+
+- **The agent decides browser dialogs.** `alert`, `confirm` and `prompt` in an agentic tab no longer
+  pop a native box over the app. The agent sees the dialog's text in its tool result and answers it
+  with `browser_dialog` (OK, Cancel, or text for a prompt); you can answer the same dialog from a bar
+  in the tab, and the agent is told what you chose. `prompt()` now works in agentic tabs.
+- **Anti-detect that holds from the first request.** Profiles now actually reach the browser, apply
+  before the first page load and to popups, cross-site iframes and workers, and survive a daemon
+  restart. Without a profile the browser looks like plain Chrome. On macOS arm64, no profile and a
+  macOS profile score 100 on iphey and "consistent, no masking" on PixelScan.
+- **Hosts report what they can run, on macOS, Linux and Windows.** **Settings → host → Tools** lists
+  simulators, Android, Docker, helm, Frida, cloudflared, Maestro, Java and the forge CLIs with their
+  state, and installs gh, glab, tea, helm, cloudflared and maestro without root — from Homebrew,
+  winget or Scoop, or the vendor release for the host's OS and CPU checked by SHA-256, after showing
+  you the plan. Agents are only offered the device and proxy tools the host can run.
+- **SkillsMP as a skill source.** Add `https://skillsmp.com` to search it from the Skills screen and
+  install results like any GitHub skill.
+- **Paseo marketplace plugins install**, shared-browser included, and plugin screenshots open in the
+  zoomable viewer.
+- **Ported from Paseo 0.10.2:** OpenCode v2 fixes for long turns, edit and patch diffs, question
+  cards and the context meter.
+
 ### Native skills hub, archify diagrams, smoother long chats & Paseo 0.10.1 (v0.9.44)
 
 - **Skills for every provider.** Skills are now standard SKILL.md folders read natively by Claude,
@@ -183,33 +205,10 @@ with a few deliberate boundaries:
   workspace in the project (listed under it like any chat) instead of landing as a tab in
   another conversation.
 
-### SimFleet — agents drive a fleet of iOS simulators (v0.9.40)
-
-<p align="center">
-  <img src="docs/media/simfleet-agent-youtube.jpg" alt="SimFleet — seven iOS simulators on YouTube “baby shark”, the iPhone 15 Pro open in the live detail panel, and the Simulator agent chat reporting the result for every device" width="100%" />
-</p>
-
-- **One screen for every iOS simulator on the host.** Live device mockups built from Apple's
-  real dimensions (Touch‑ID phones and iPads with their home button, Face‑ID devices with
-  their true corner radius), headless boot, and a resizable detail panel with a live,
-  tappable **Screen** and a streaming **Logs** tab.
-- **Chat with an agent that drives them.** A **Simulator agent** dock sits right on the
-  screen: ask it in plain words and it boots, taps, types, opens apps and URLs across the
-  whole fleet through the `sim_*` tools. In the demo above one message had it boot the
-  stopped devices and search YouTube for “baby shark” on all seven.
-- **Add simulators from the app or from chat.** Pick any device type × installed iOS runtime,
-  choose a quantity, create and boot, or let the agent do it (`sim_create`).
-- **Works on phones too.** The detail view slides in from the right and “New simulator” is a
-  scrollable bottom sheet.
-- **Fixes:** the live view no longer drops the connection (`Transport closed (code 1006)`)
-  because frames stream as right‑sized JPEG instead of multi‑MB PNG. Quitting Simulator.app
-  no longer shuts down the simulators SimFleet runs. Plugins calling `addSettingsScreen` now
-  install.
-
 ### Older releases
 
 See **[CHANGELOG.md](CHANGELOG.md)** and the [releases page](https://github.com/knoobdev/jagentdesk/releases)
-for v0.9.39 and earlier.
+for v0.9.40 and earlier.
 
 ### Databases — a full database IDE (desktop **and** mobile)
 
@@ -283,6 +282,8 @@ in Claude, Codex, OpenCode, Cursor, Copilot, Pi, Oh My Pi, Kimi and Kiro:
   repositories plus any GitHub repository (branch and sub‑folder too), npm package, JSON skill
   index or local folder you add, and the Claude/Codex plugin marketplaces already on the machine.
   Listing reads only file lists and front matter; installing downloads only the chosen skill.
+  Directories such as `https://skillsmp.com` are searched instead of listed, with an optional API
+  key kept on the daemon.
 - **Install safely** — for the whole machine or one project, with a trust warning and the file
   list first. Uninstall removes exactly what JAgentDesk wrote, and a skill JAgentDesk did not
   install is never overwritten.
@@ -301,7 +302,8 @@ items, attachment sources, and themes:
 - **Marketplace or any source** — browse and install community plugins and themes from
   **Marketplace**, install from a folder, Git or npm source under **Settings → Plugins** (status,
   source and revision per plugin), or `jagentdesk plugin install <dir|npm:…|github:…>`;
-  `jagentdesk plugin update` previews changes before applying them.
+  `jagentdesk plugin update` previews changes before applying them. Plugins written for Paseo
+  (plugin API 0.8.0–0.10.2) are rebranded on install.
 - **Split client / server entries** — `index.client` runs in the app and `index.server` in its
   own subprocess on the daemon (Paseo's plugin API); older single‑entry plugins still load.
 - **Trusted, off by default** — plugins run unsandboxed with a full daemon session, so
@@ -329,6 +331,20 @@ The agent drives a real Chromium `<webview>` over CDP — no external Playwright
   the release notes above.
 - **Session vault** _(opt‑in)_ captures/restores a domain’s logged‑in cookies, encrypted at rest
   with the OS keychain (`safeStorage`).
+- **Identity from the first request** — the active profile (or the plain‑Chrome identity when none
+  is chosen) is applied before a tab's first load and to popups, cross‑site iframes and workers.
+- **Dialogs the agent decides** — `alert` / `confirm` / `prompt` wait in the tab instead of opening
+  a native box; the agent answers with `browser_dialog`, or you answer from the bar in the tab.
+  HTML modals show up in the agent's snapshot as `dialog [modal=true]`.
+- Details: **[docs/agentic-browser.md](docs/agentic-browser.md)**.
+
+### Host tools on every OS
+
+**Settings → host → Tools** shows what each host can run — iOS simulators, Android devices, Docker,
+helm, the system proxy, Frida, cloudflared, Maestro, Java and the forge CLIs — and installs gh,
+glab, tea, helm, cloudflared and maestro on macOS, Linux or Windows without root, after showing the
+plan (package manager, or the vendor release checked by SHA-256). Agents are only offered device
+and proxy tools the host supports. Details: **[docs/host-tools.md](docs/host-tools.md)**.
 
 ### Usage & cost insights
 

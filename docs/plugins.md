@@ -32,18 +32,30 @@ those are exactly the pre-split plugins it still loads (`packages/protocol/src/p
 
 ## Upstream plugins
 
-Plugins written for upstream are rebranded on install (`paseo-rebrand.ts`, run before the
-manifest is read): the manifest file is renamed, `requirements.paseo` becomes
-`requirements.jagentdesk`, the SDK scope `@getpaseo/plugin` / `@paseo/plugin` becomes
-`@jagentdesk/plugin` with every subpath kept, and the SDK's branded runtime exports
-(`usePaseo`, `usePaseoContextValue`, `PaseoApiProvider`, `getPaseoClient`) are renamed in
-files that import the SDK. Entry file names are kept.
+Plugins written for upstream are rebranded on install (`paseo-rebrand.ts`) in two steps:
+
+1. **Before the plugin's own build steps**, the manifest file is renamed.
+2. **After them**, across the whole checkout (including helper packages outside the plugin
+   folder), the SDK scope `@getpaseo/plugin` / `@paseo/plugin` becomes `@jagentdesk/plugin` with
+   every subpath kept, and the SDK's branded runtime exports (`usePaseo`,
+   `usePaseoContextValue`, `PaseoApiProvider`, `getPaseoClient`) are renamed in files that import
+   the SDK. Doing this after the build lets the build resolve `@getpaseo/plugin` from the
+   plugin's own dependencies.
+
+Entry file names are kept. `requirements.paseo` is a Paseo version range, so it is checked
+against the Paseo plugin API JAgentDesk implements (`SUPPORTED_PASEO_PLUGIN_API`,
+`>=0.8.0-0 <=0.10.2`), not against the JAgentDesk version. Type-only imports of the host packages
+(`@getpaseo/*`, `@jagentdesk/*`) pass validation because types are erased.
 
 ## Installing and updating
 
 Settings → Plugins installs from a directory, Git or npm source and shows each plugin's status,
 source and revision. `jagentdesk plugin update [plugin-id]` shows the available updates and asks before applying
 them (`--yes` skips the prompt, `--check` only shows them). The Marketplace entry (paseo.cafe catalog) is kept alongside the source installer.
+
+A Marketplace entry installs from its scanned npm release when it has one and falls back to its
+Git source; npm installs count as installed. Catalog caveats are shown, and entries without a
+manifest show "Can't install". Plugin screenshots and README images open in the zoomable viewer.
 
 ## Persistence
 
