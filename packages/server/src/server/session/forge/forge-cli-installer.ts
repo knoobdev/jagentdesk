@@ -1,95 +1,19 @@
 import { getForgeDefinition } from "@jagentdesk/protocol/forge-manifest";
 import { findExecutable } from "../../../executable-resolution/executable-resolution.js";
-import { execCommand, spawnProcess } from "../../../utils/spawn.js";
+import { execCommand } from "../../../utils/spawn.js";
+import type { HostToolInstaller } from "../../host-tools/installer.js";
+import { getToolDefinition, hostTarget } from "../../host-tools/registry.js";
 
 /**
- * Forge Hub — CLI detect + guided auto-install (spec §19.3.5 / §19.3.6 / ADR-0016).
- *
- * A host-level (NOT repo-scoped) helper: the app asks whether a forge's CLI is
- * present and, when a supported package manager exists, drives a guided install
- * streaming progress. All external commands run through {@link spawnProcess} /
- * {@link execCommand}, which augment PATH (e.g. /opt/homebrew/bin) so `brew`/`gh`
- * resolve the same way the rest of the daemon resolves external binaries.
- *
- * ADR-0016 §3: package names are NEVER interpolated from client input. The
- * (packageManager, binary) → package pairs live only in {@link PACKAGE_TABLE}
- * below; an entry that is absent is simply not auto-installable.
+ * Forge Hub — CLI detect + guided auto-install (spec §19.3.5 / §19.3.6, ADR-0016,
+ * ADR-0024). A host-level (NOT repo-scoped) helper: the app asks whether a forge's
+ * CLI is present and drives a guided install that streams progress. Installing goes
+ * through the platform-aware installer (`host-tools`): a user-scope package manager,
+ * else the vendor release for this OS/arch, SHA-256 verified. Package names and URLs
+ * live only in its static registry (ADR-0016 §3).
  */
 
 const VERSION_TIMEOUT_MS = 5_000;
-const PM_PROBE_TIMEOUT_MS = 2_000;
-const SUDO_PROBE_TIMEOUT_MS = 5_000;
-const INSTALL_TIMEOUT_MS = 5 * 60_000;
-
-/** Canonical package-manager names (never a binary name; apt-get → "apt"). */
-type PackageManager = "brew" | "apt" | "dnf" | "pacman" | "zypper" | "winget" | "scoop";
-
-/** Package managers whose install needs root. brew/scoop/winget are user-scope. */
-const SUDO_MANAGERS: ReadonlySet<PackageManager> = new Set<PackageManager>([
-  "apt",
-  "dnf",
-  "pacman",
-  "zypper",
-]);
-
-/**
- * STATIC (packageManager, binary) → package-name table (ADR-0016 §3). A missing
- * cell means "no known package for this pair" → not auto-installable there.
- */
-const PACKAGE_TABLE: Record<string, Partial<Record<PackageManager, string>>> = {
-  gh: {
-    brew: "gh",
-    apt: "gh",
-    dnf: "gh",
-    pacman: "github-cli",
-    zypper: "gh",
-    winget: "GitHub.cli",
-    scoop: "gh",
-  },
-  glab: {
-    brew: "glab",
-    apt: "glab",
-    dnf: "glab",
-    pacman: "glab",
-    zypper: "glab",
-    winget: "glab.glab",
-    scoop: "glab",
-  },
-  tea: {
-    brew: "tea",
-    scoop: "tea",
-  },
-};
-
-/** Per-platform manager probe order; `bin` is the executable, `name` its canonical id. */
-function packageManagerProbes(): { name: PackageManager; bin: string }[] {
-  switch (process.platform) {
-    case "darwin":
-      return [{ name: "brew", bin: "brew" }];
-    case "win32":
-      return [
-        { name: "winget", bin: "winget" },
-        { name: "scoop", bin: "scoop" },
-      ];
-    default:
-      // Linux and other POSIX: probe the common distro managers in order.
-      return [
-        { name: "apt", bin: "apt-get" },
-        { name: "dnf", bin: "dnf" },
-        { name: "pacman", bin: "pacman" },
-        { name: "zypper", bin: "zypper" },
-        { name: "brew", bin: "brew" }, // Linuxbrew, if present
-      ];
-  }
-}
-
-/** First usable package manager on this host, or null. */
-async function detectPackageManager(): Promise<PackageManager | null> {
-  for (const probe of packageManagerProbes()) {
-    if (await findExecutable(probe.bin, PM_PROBE_TIMEOUT_MS)) return probe.name;
-  }
-  return null;
-}
 
 /** CLI binary for a forge, or null when the forge has no JAgentDesk-driven CLI. */
 function forgeBinary(forge: string): string | null {
@@ -125,6 +49,17 @@ export interface CliStatus {
 }
 
 /**
+ * The platform-aware installer (spec 24.8, ADR-0024) that installs forge CLIs:
+ * a user-scope package manager, else the vendor release for this OS/arch. Set by
+ * bootstrap; without it nothing is auto-installable.
+ */
+let toolInstaller: HostToolInstaller | null = null;
+
+export function setForgeToolInstaller(installer: HostToolInstaller | null): void {
+  toolInstaller = installer;
+}
+
+/**
  * Detect whether a forge's CLI is installed and whether it can be auto-installed.
  * Token-only forges (signIn === null, e.g. Bitbucket) — and any forge id with no
  * known CLI — report `installed:true, binary:"", canAutoInstall:false` because
@@ -144,14 +79,21 @@ export async function detectCliStatus(forge: string): Promise<CliStatus> {
   }
   const path = await findExecutable(binary);
   const version = path ? await readVersion(path) : null;
-  const packageManager = await detectPackageManager();
-  const canAutoInstall = packageManager != null && PACKAGE_TABLE[binary]?.[packageManager] != null;
+  const tool = getToolDefinition(binary);
+  const target = hostTarget(process.platform, process.arch);
+  // A registry tool installs through a user-scope manager or its release; only a
+  // host with no release build (and no manager) cannot auto-install.
+  const canAutoInstall = Boolean(
+    toolInstaller &&
+    tool &&
+    (tool.release && target ? tool.release.assetFor(target, "0.0.0") : true),
+  );
   return {
     binary,
     installed: path != null,
     version,
     path,
-    packageManager,
+    packageManager: null,
     canAutoInstall,
   };
 }
@@ -188,80 +130,10 @@ function parsePercent(line: string): number | null {
   return Math.max(0, Math.min(100, value));
 }
 
-/** True when the current process already runs as root (no sudo needed). */
-function isRoot(): boolean {
-  return typeof process.getuid === "function" && process.getuid() === 0;
-}
-
 /**
- * Build the install command as an ARGS ARRAY (never a shell string). When a
- * sudo-scoped manager needs elevation, prefix `sudo -n` (non-interactive).
- */
-function buildInstallCommand(
-  pm: PackageManager,
-  pkg: string,
-  needsSudo: boolean,
-): { command: string; args: string[] } {
-  let command: string;
-  let args: string[];
-  switch (pm) {
-    case "brew":
-      command = "brew";
-      args = ["install", pkg];
-      break;
-    case "apt":
-      command = "apt-get";
-      args = ["install", "-y", pkg];
-      break;
-    case "dnf":
-      command = "dnf";
-      args = ["install", "-y", pkg];
-      break;
-    case "pacman":
-      command = "pacman";
-      args = ["-S", "--noconfirm", pkg];
-      break;
-    case "zypper":
-      command = "zypper";
-      args = ["--non-interactive", "install", pkg];
-      break;
-    case "scoop":
-      command = "scoop";
-      args = ["install", pkg];
-      break;
-    case "winget":
-      command = "winget";
-      args = [
-        "install",
-        "--silent",
-        "--accept-package-agreements",
-        "--accept-source-agreements",
-        "-e",
-        "--id",
-        pkg,
-      ];
-      break;
-  }
-  if (needsSudo) {
-    return { command: "sudo", args: ["-n", command, ...args] };
-  }
-  return { command, args };
-}
-
-/** Non-interactive sudo check; true when `sudo -n true` succeeds. */
-async function canSudoNonInteractive(): Promise<boolean> {
-  try {
-    await execCommand("sudo", ["-n", "true"], { timeout: SUDO_PROBE_TIMEOUT_MS });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Guided auto-install of a forge CLI. Emits many progress events, then the caller
- * turns the returned {@link InstallResult} into the terminal response. Idempotent:
- * an already-installed binary verifies and returns ok:true without installing.
+ * Guided auto-install of a forge CLI through the platform-aware installer. The
+ * Forge UI already asked the user, so the plan is carried out straight away. Never
+ * runs sudo (spec 24.9 #6). Idempotent: an installed binary returns ok:true.
  */
 export async function installCli(
   forge: string,
@@ -269,125 +141,37 @@ export async function installCli(
 ): Promise<InstallResult> {
   const status = await detectCliStatus(forge);
   const binary = status.binary;
-
-  // Already present (or token-only forge with no CLI) → verify + done, ok:true.
   if (status.installed) {
+    emitProgress({ phase: "verifying" });
+    emitProgress({ phase: "done" });
+    return { ok: true, binary, version: status.version, packageManager: null };
+  }
+  if (!toolInstaller || !status.canAutoInstall) {
+    emitProgress({ phase: "failed", line: "unsupported" });
+    return { ok: false, binary, packageManager: null, error: "unsupported" };
+  }
+  emitProgress({ phase: "resolving" });
+  try {
+    const plan = await toolInstaller.plan(binary);
+    if (plan.method === "manual") {
+      const line = plan.notes.join(" ") || "unsupported";
+      emitProgress({ phase: "failed", line });
+      return { ok: false, binary, packageManager: null, error: "unsupported" };
+    }
+    const result = await toolInstaller.install(plan.planId, (line) => {
+      emitProgress({ phase: classifyLine(line), percent: parsePercent(line), line });
+    });
     emitProgress({ phase: "verifying" });
     emitProgress({ phase: "done" });
     return {
       ok: true,
       binary,
-      version: status.version,
-      packageManager: status.packageManager,
+      version: result.version ?? (result.path ? await readVersion(result.path) : null),
+      packageManager: plan.manager,
     };
-  }
-
-  const pm = status.packageManager as PackageManager | null;
-  const pkg = pm ? PACKAGE_TABLE[binary]?.[pm] : undefined;
-  if (!status.canAutoInstall || !pm || !pkg) {
-    emitProgress({ phase: "failed", line: "unsupported" });
-    return { ok: false, binary, packageManager: pm, error: "unsupported" };
-  }
-
-  // Elevation: sudo-scoped managers need root. Try non-interactive sudo only;
-  // never prompt for a password.
-  const needsSudo = SUDO_MANAGERS.has(pm) && !isRoot();
-  if (needsSudo && !(await canSudoNonInteractive())) {
-    emitProgress({ phase: "failed", line: "needs-elevation" });
-    return { ok: false, binary, packageManager: pm, error: "needs-elevation" };
-  }
-
-  emitProgress({ phase: "resolving" });
-
-  const { command, args } = buildInstallCommand(pm, pkg, needsSudo);
-
-  const exit = await runStreamingInstall(command, args, emitProgress);
-  if (exit.timedOut) {
-    emitProgress({ phase: "failed", line: "timeout" });
-    return { ok: false, binary, packageManager: pm, error: "timeout" };
-  }
-  if (exit.code !== 0) {
-    const message =
-      exit.lastStderr || exit.spawnError || `install failed with code ${exit.code ?? "unknown"}`;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     emitProgress({ phase: "failed", line: message });
-    return { ok: false, binary, packageManager: pm, error: message };
+    return { ok: false, binary, packageManager: null, error: message };
   }
-
-  // Success: re-resolve and read the freshly installed version.
-  const path = await findExecutable(binary);
-  const version = path ? await readVersion(path) : null;
-  emitProgress({ phase: "verifying" });
-  emitProgress({ phase: "done" });
-  return { ok: true, binary, version, packageManager: pm };
-}
-
-interface StreamingExit {
-  code: number | null;
-  timedOut: boolean;
-  lastStderr: string | null;
-  spawnError: string | null;
-}
-
-/**
- * Spawn the install command, split stdout+stderr into lines, and emit a progress
- * event per line (phase heuristic + best-effort percent). Resolves on process
- * exit, spawn error, or the install timeout (which kills the child).
- */
-function runStreamingInstall(
-  command: string,
-  args: string[],
-  emitProgress: (progress: InstallProgress) => void,
-): Promise<StreamingExit> {
-  return new Promise<StreamingExit>((resolve) => {
-    let settled = false;
-    let lastStderr: string | null = null;
-    let spawnError: string | null = null;
-
-    const child = spawnProcess(command, args, { stdio: ["ignore", "pipe", "pipe"] });
-
-    const finish = (exit: StreamingExit): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve(exit);
-    };
-
-    const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-      finish({ code: null, timedOut: true, lastStderr, spawnError });
-    }, INSTALL_TIMEOUT_MS);
-
-    const makeLineHandler = (isStderr: boolean) => {
-      let buffer = "";
-      const handleLine = (raw: string): void => {
-        const line = raw.replace(/\r$/, "");
-        if (!line.trim()) return;
-        if (isStderr) lastStderr = line;
-        emitProgress({ phase: classifyLine(line), percent: parsePercent(line), line });
-      };
-      return (chunk: Buffer | string): void => {
-        buffer += chunk.toString();
-        // Split on BOTH \n and \r: download tools (e.g. brew) rewrite an
-        // in-place progress line terminated by \r, not \n, so a \n-only split
-        // would never surface their `NN.N%` updates until the download ended.
-        let idx: number;
-        while ((idx = buffer.search(/[\r\n]/)) >= 0) {
-          handleLine(buffer.slice(0, idx));
-          buffer = buffer.slice(idx + 1);
-        }
-      };
-    };
-
-    child.stdout?.on("data", makeLineHandler(false));
-    child.stderr?.on("data", makeLineHandler(true));
-
-    child.on("error", (err) => {
-      // Spawn failure (e.g. ENOENT for a missing manager) — no exit event follows.
-      spawnError = err.message;
-      finish({ code: null, timedOut: false, lastStderr, spawnError });
-    });
-    child.on("close", (code) => {
-      finish({ code: code ?? null, timedOut: false, lastStderr, spawnError });
-    });
-  });
 }

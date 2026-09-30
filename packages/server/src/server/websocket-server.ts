@@ -17,6 +17,7 @@ import type { NativeSkillsService } from "./skills-native/index.js";
 import type { Skill } from "@jagentdesk/protocol/skills";
 import type { UsageHistoryStorage } from "./usage/usage-history-storage.js";
 import type { HostCapabilityService } from "./host-capabilities/service.js";
+import type { HostToolInstaller } from "./host-tools/installer.js";
 import type { HostCapabilities } from "@jagentdesk/protocol/host-capabilities";
 import type { LifetimeUsage, UsageDayRollup } from "@jagentdesk/protocol/usage-history";
 import type { ClusterRegistry } from "./cluster/cluster-registry.js";
@@ -626,6 +627,7 @@ export class VoiceAssistantWebSocketServer {
   private skillsStorage: NativeSkillsService | null = null;
   private usageHistory: UsageHistoryStorage | null = null;
   private hostCapabilities: HostCapabilityService | null = null;
+  private hostToolInstaller: HostToolInstaller | null = null;
   private unsubscribeHostCapabilities: (() => void) | null = null;
   private readonly clusterRegistry: ClusterRegistry;
   private readonly databaseRegistry: DatabaseRegistry;
@@ -1264,9 +1266,13 @@ export class VoiceAssistantWebSocketServer {
   }
 
   /** Spec 24.2: report what this host can run; re-broadcast server_info when it changes. */
-  public setHostCapabilities(service: HostCapabilityService | null): void {
+  public setHostCapabilities(
+    service: HostCapabilityService | null,
+    installer: HostToolInstaller | null = null,
+  ): void {
     this.unsubscribeHostCapabilities?.();
     this.hostCapabilities = service;
+    this.hostToolInstaller = installer;
     this.unsubscribeHostCapabilities =
       service?.onChange((host) => {
         this.updateServerCapabilities(
@@ -1905,6 +1911,7 @@ export class VoiceAssistantWebSocketServer {
       skillsStorage: this.skillsStorage,
       usageHistory: this.usageHistory,
       hostCapabilities: this.hostCapabilities,
+      hostToolInstaller: this.hostToolInstaller,
       clusterRegistry: this.clusterRegistry,
       databaseRegistry: this.databaseRegistry,
       scheduleService: this.scheduleService,

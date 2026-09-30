@@ -1,4 +1,4 @@
-import type { HostCapabilities } from "@jagentdesk/protocol/host-capabilities";
+import type { HostCapabilities, ToolInstallPlan } from "@jagentdesk/protocol/host-capabilities";
 import type { z } from "zod";
 import { CLIENT_CAPS, type ClientCapability } from "@jagentdesk/protocol/client-capabilities";
 import type { DatabaseEngine, DbConnectionConfig } from "@jagentdesk/protocol/database/rpc-schemas";
@@ -6133,6 +6133,50 @@ export class DaemonClient {
       message: { type: "host.capabilities.refresh.request" },
       timeout: 60_000,
     });
+  }
+
+  /** What installing `tool` would do on the host (spec 24.3); nothing is installed. */
+  async planHostTool(
+    tool: string,
+    requestId?: string,
+  ): Promise<{
+    requestId: string;
+    plan: ToolInstallPlan | null;
+    error: { code: string; message: string } | null;
+  }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "host.tools.plan.request", tool },
+      timeout: 60_000,
+    });
+  }
+
+  /** Carry out a plan from planHostTool, streaming the installer's output lines. */
+  async installHostTool(
+    planId: string,
+    options: { onProgress?: (line: string) => void } = {},
+  ): Promise<{
+    requestId: string;
+    ok: boolean;
+    version: string | null;
+    path: string | null;
+    error: { code: string; message: string } | null;
+  }> {
+    const requestId = this.createRequestId();
+    const unsubscribe = options.onProgress
+      ? this.on("host.tools.install.progress", (message) => {
+          if (message.payload.requestId === requestId) options.onProgress?.(message.payload.line);
+        })
+      : null;
+    try {
+      return await this.sendNamespacedCorrelatedSessionRequest({
+        requestId,
+        message: { type: "host.tools.install.request", planId },
+        timeout: 15 * 60_000,
+      });
+    } finally {
+      unsubscribe?.();
+    }
   }
 
   async listSkillSources(

@@ -413,6 +413,8 @@ const INBOUND_PERMISSION = {
   // needs daemon.manage — same level as the other daemon mutation skills.mutate.
   "usage.history.reset.request": "daemon.manage",
   "host.capabilities.refresh.request": "daemon.read",
+  "host.tools.plan.request": "daemon.read",
+  "host.tools.install.request": "daemon.manage",
 } as const satisfies Record<InboundOperation, DaemonPermission | null>;
 
 const OUTBOUND_PERMISSION = {
@@ -848,6 +850,9 @@ const OUTBOUND_PERMISSION = {
   "usage.history.get.response": "daemon.read",
   "usage.history.reset.response": "daemon.manage",
   "host.capabilities.refresh.response": "daemon.read",
+  "host.tools.plan.response": "daemon.read",
+  "host.tools.install.response": "daemon.manage",
+  "host.tools.install.progress": "daemon.manage",
 } as const satisfies Record<OutboundOperation, DaemonPermission | null>;
 
 export function requiredPermissionForInbound(operation: InboundOperation): DaemonPermission | null {

@@ -235,6 +235,16 @@ import {
 } from "./skills-native/session-handler.js";
 import type { UsageHistoryStorage } from "./usage/usage-history-storage.js";
 import type { HostCapabilityService } from "./host-capabilities/service.js";
+import type { HostToolInstaller } from "./host-tools/installer.js";
+import { ToolInstallError } from "./host-tools/release.js";
+
+function toolInstallErrorPayload(error: unknown): { code: string; message: string } {
+  if (error instanceof ToolInstallError) return { code: error.code, message: error.message };
+  return {
+    code: "install_failed",
+    message: error instanceof Error ? error.message : String(error),
+  };
+}
 import type { LifetimeUsage } from "@jagentdesk/protocol/usage-history";
 import { ScheduleService } from "./schedule/service.js";
 
@@ -511,6 +521,7 @@ export interface SessionOptions {
   skillsStorage?: NativeSkillsService | null;
   usageHistory?: UsageHistoryStorage | null;
   hostCapabilities?: HostCapabilityService | null;
+  hostToolInstaller?: HostToolInstaller | null;
   clusterRegistry?: ClusterRegistry;
   databaseRegistry?: DatabaseRegistry;
   checkoutDiffManager: CheckoutDiffManager;
@@ -776,7 +787,8 @@ export class Session {
   private readonly daemonConfigStore: DaemonConfigStore;
   private readonly skillsStorage: NativeSkillsService | null;
   private readonly usageHistory: UsageHistoryStorage | null;
-  private readonly hostCapabilities: HostCapabilityService | null;
+  private readonly hostCapabilities: HostCapabilityService | null | undefined;
+  private readonly hostToolInstaller: HostToolInstaller | null | undefined;
   private readonly pushTokenStore: PushTokenStore;
   private unsubscribeAgentEvents: (() => void) | null = null;
   private unsubscribeProjectMutations: (() => void) | null = null;
@@ -1133,7 +1145,8 @@ export class Session {
     this.daemonConfigStore = daemonConfigStore;
     this.skillsStorage = options.skillsStorage ?? null;
     this.usageHistory = options.usageHistory ?? null;
-    this.hostCapabilities = options.hostCapabilities ?? null;
+    this.hostCapabilities = options.hostCapabilities;
+    this.hostToolInstaller = options.hostToolInstaller;
     this.terminalManager = terminalManager;
     this.terminalController = new TerminalSessionController({
       terminalManager,
@@ -2776,6 +2789,12 @@ export class Session {
     if (msg.type === "host.capabilities.refresh.request") {
       return this.handleHostCapabilitiesRefresh(msg.requestId);
     }
+    if (msg.type === "host.tools.plan.request") {
+      return this.handleHostToolsPlan(msg.requestId, msg.tool);
+    }
+    if (msg.type === "host.tools.install.request") {
+      return this.handleHostToolsInstall(msg.requestId, msg.planId);
+    }
     return undefined;
   }
 
@@ -2787,6 +2806,45 @@ export class Session {
       type: "host.capabilities.refresh.response",
       payload: { requestId, capabilities },
     });
+  }
+
+  // Spec 24.3: what installing a tool would do here (nothing is installed yet).
+  private async handleHostToolsPlan(requestId: string, tool: string): Promise<void> {
+    try {
+      if (!this.hostToolInstaller) throw new ToolInstallError("unknown_tool", "No installer");
+      const plan = await this.hostToolInstaller.plan(tool);
+      this.emit({ type: "host.tools.plan.response", payload: { requestId, plan, error: null } });
+    } catch (error) {
+      this.emit({
+        type: "host.tools.plan.response",
+        payload: { requestId, plan: null, error: toolInstallErrorPayload(error) },
+      });
+    }
+  }
+
+  // Spec 24.3: carry out a plan the user reviewed, streaming output lines.
+  private async handleHostToolsInstall(requestId: string, planId: string): Promise<void> {
+    try {
+      if (!this.hostToolInstaller) throw new ToolInstallError("plan_expired", "No installer");
+      const result = await this.hostToolInstaller.install(planId, (line) => {
+        this.emit({ type: "host.tools.install.progress", payload: { requestId, planId, line } });
+      });
+      this.emit({
+        type: "host.tools.install.response",
+        payload: { requestId, ok: true, version: result.version, path: result.path, error: null },
+      });
+    } catch (error) {
+      this.emit({
+        type: "host.tools.install.response",
+        payload: {
+          requestId,
+          ok: false,
+          version: null,
+          path: null,
+          error: toolInstallErrorPayload(error),
+        },
+      });
+    }
   }
 
   private dispatchOrchestrationMessage(msg: SessionInboundMessage): Promise<void> | undefined {

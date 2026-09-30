@@ -1,4 +1,7 @@
 import { HostCapabilityService } from "./host-capabilities/service.js";
+import { ensureToolDirsOnPath, HostToolInstaller } from "./host-tools/installer.js";
+import type { HttpFetch } from "./host-tools/release.js";
+import { setForgeToolInstaller } from "./session/forge/forge-cli-installer.js";
 import express from "express";
 import { createServer as createHTTPServer, type IncomingMessage, type ServerResponse } from "http";
 import { constants, existsSync, unlinkSync } from "fs";
@@ -1826,11 +1829,21 @@ export async function createJAgentDeskDaemon(
             // Agent Forum / Team mode: expose the service to sessions + the bootstrap hook that turns
             // the origin chat agent into the topic's lead (it then spawns/delegates peers).
             // Spec 24.2: what this host can run, probed in the background after start.
+            // Tools the platform-aware installer added live in $JAGENTDESK_HOME/tools/bin.
+            ensureToolDirsOnPath(config.jagentdeskHome);
             const hostCapabilities = new HostCapabilityService({
               jagentdeskHome: config.jagentdeskHome,
               logger,
             });
-            wsServer?.setHostCapabilities(hostCapabilities);
+            const hostToolInstaller = new HostToolInstaller({
+              jagentdeskHome: config.jagentdeskHome,
+              logger,
+              capabilities: hostCapabilities,
+              fetch: globalThis.fetch as unknown as HttpFetch,
+              githubToken: process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? null,
+            });
+            setForgeToolInstaller(hostToolInstaller);
+            wsServer?.setHostCapabilities(hostCapabilities, hostToolInstaller);
             void hostCapabilities.refresh().catch((error: unknown) => {
               logger.warn({ err: error }, "Host capability probe failed");
             });
