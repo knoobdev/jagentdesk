@@ -2369,6 +2369,7 @@ export const ptBR: TranslationResources = {
       installing: "Installing…",
       installed: "Installed",
       retryInstall: "Retry install",
+      notInstallable: "Can’t install",
       details: "Details",
       noDescription: "No description provided.",
     },
@@ -2392,6 +2393,7 @@ export const ptBR: TranslationResources = {
       health: "Health",
       description: "Description",
       caveats: "Caveats",
+      noManifest: "This entry has no plugin manifest, so it can’t be installed.",
       install: "Install plugin",
     },
     themes: {

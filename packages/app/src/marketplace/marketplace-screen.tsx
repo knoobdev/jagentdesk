@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StyleSheet } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
 import { useMutation } from "@tanstack/react-query";
+import type { PluginListItem } from "@jagentdesk/protocol/messages";
 import { PageHeader } from "@/components/headers/page-header";
 import { Store } from "lucide-react-native";
 import { Alert } from "@/components/ui/alert";
@@ -43,6 +44,7 @@ import { MarketplaceCard, type MarketplaceInstallStatus } from "@/marketplace/ma
 import { MarketplaceControls } from "@/marketplace/marketplace-controls";
 import { MarketplaceDetail } from "@/marketplace/marketplace-detail";
 import { MarketplaceOverview } from "@/marketplace/marketplace-overview";
+import { installMarketplacePlugin } from "@/marketplace/install";
 import { ThemeCard, ThemeControls } from "@/marketplace/theme-card";
 
 type LocalStatus = "pending" | "failed";
@@ -125,9 +127,11 @@ function MarketplaceEmpty({
   return <Text style={styles.empty}>{t("marketplace.states.empty")}</Text>;
 }
 
-function buildInstalledLookup(
-  installed: { id: string; remote?: string; pluginPath?: string }[] | undefined,
-): {
+function npmSourceKey(packageName: string | undefined): string {
+  return packageName ? `npm:${packageName}` : "";
+}
+
+function buildInstalledLookup(installed: PluginListItem[] | undefined): {
   sources: Set<string>;
   ids: Set<string>;
 } {
@@ -135,9 +139,14 @@ function buildInstalledLookup(
   const ids = new Set<string>();
   for (const plugin of installed ?? []) {
     ids.add(plugin.id);
-    const source = repoSourceKey(plugin.remote, plugin.pluginPath);
-    if (source) {
-      sources.add(source);
+    const identity = plugin.installation?.identity;
+    const keys = [
+      repoSourceKey(plugin.remote, undefined),
+      identity?.kind === "git" ? repoSourceKey(identity.remote, identity.pluginPath) : "",
+      identity?.kind === "npm" ? npmSourceKey(identity.packageName) : "",
+    ];
+    for (const key of keys) {
+      if (key) sources.add(key);
     }
   }
   return { sources, ids };
@@ -223,8 +232,7 @@ export function MarketplaceScreen() {
   const install = useMutation({
     mutationFn: async (plugin: MarketplacePlugin) => {
       if (!client) throw new Error("Plugin host is offline");
-      const { source, ref, pluginPath } = parseGithubSource(plugin.url);
-      await client.installSourcePlugin(source, { ref, pluginPath });
+      await installMarketplacePlugin(client, plugin);
       return plugin;
     },
     onMutate: (plugin) => {
@@ -253,7 +261,8 @@ export function MarketplaceScreen() {
       const parsed = parseGithubSource(plugin.url);
       const installed =
         installedLookup.ids.has(plugin.id) ||
-        installedLookup.sources.has(repoSourceKey(parsed.source, parsed.pluginPath));
+        installedLookup.sources.has(repoSourceKey(parsed.source, parsed.pluginPath)) ||
+        installedLookup.sources.has(npmSourceKey(plugin.npm?.package));
       if (installed) return "installed";
       if (local === "failed") return "failed";
       return "idle";

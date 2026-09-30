@@ -11,6 +11,8 @@ import {
 
 const nodeRequire = createRequire(import.meta.url);
 const ESBUILD_BINARY_PATH = "ESBUILD_BINARY_PATH";
+// The host's own packages, under either brand (type-only imports of these are erased).
+const HOST_TYPE_PACKAGE = /^@(?:getpaseo|paseo|jagentdesk)\//;
 
 // esbuild resolves its own platform binary via require.resolve() the first time its
 // module is evaluated. Inside the packaged desktop app that resolves to a path under
@@ -209,6 +211,9 @@ function createRuntimeBoundaryPlugin(target: PluginBuildTarget, pluginDirectory:
         if (declaration && (typeOnly || /\.d\.[cm]?ts$/.test(declaration)))
           dependencyFiles.add(declaration);
         if (typeOnly && !declaration) {
+          // Types from the host's own packages are erased at compile time; plugins written for
+          // Paseo import them without declaring them as dependencies.
+          if (HOST_TYPE_PACKAGE.test(specifier)) return dependencyFiles;
           throw new Error(`Could not resolve type dependency "${specifier}" imported by ${file}`);
         }
         if (!typeOnly && kind !== "type-reference") {

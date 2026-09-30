@@ -1,11 +1,14 @@
-import { useCallback, useMemo, type ReactNode } from "react";
-import { ScrollView, Text, View } from "react-native";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { Pressable, ScrollView, Text, View } from "react-native";
 import { Image as ExpoImage } from "expo-image";
 import { Check, Download, Package, Star, X } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
 import { AdaptiveModalSheet, type SheetHeader } from "@/components/adaptive-modal-sheet";
-import { MarkdownRenderer } from "@/components/markdown/renderer";
+import { AttachmentLightbox, type ImageLightboxSource } from "@/components/attachment-lightbox";
+import { MAX_CONTENT_WIDTH } from "@/constants/layout";
+import { createSharedMarkdownRules, MarkdownRenderer } from "@/components/markdown/renderer";
+import type { ASTNode, RenderRules } from "react-native-markdown-display";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import type { Theme } from "@/styles/theme";
@@ -167,7 +170,27 @@ export function MarketplaceDetail({
     [plugin.name, onClose],
   );
 
-  const installLabel = resolveInstallLabel(t, installStatus);
+  const installLabel =
+    !plugin.installable && installStatus !== "installed"
+      ? t("marketplace.card.notInstallable")
+      : resolveInstallLabel(t, installStatus);
+  const [lightboxSource, setLightboxSource] = useState<ImageLightboxSource | null>(null);
+  const closeLightbox = useCallback(() => setLightboxSource(null), []);
+  // README screenshots open in the same zoomable lightbox as the gallery.
+  const markdownRules = useMemo<RenderRules>(
+    () => ({
+      ...createSharedMarkdownRules(),
+      image: (node: ASTNode) => (
+        <ReadmeImage
+          key={node.key}
+          uri={String(node.attributes?.src ?? "")}
+          alt={String(node.attributes?.alt ?? "")}
+          onOpen={setLightboxSource}
+        />
+      ),
+    }),
+    [],
+  );
 
   return (
     <AdaptiveModalSheet
@@ -176,6 +199,7 @@ export function MarketplaceDetail({
       onClose={onClose}
       testID="marketplace-detail-sheet"
       contentStyle={styles.body}
+      desktopMaxWidth={MAX_CONTENT_WIDTH}
     >
       <View style={styles.hero}>
         <View style={styles.heroIcon}>
@@ -208,12 +232,18 @@ export function MarketplaceDetail({
           variant={installStatus === "installed" ? "outline" : "default"}
           onPress={handleInstall}
           loading={installStatus === "pending"}
-          disabled={installStatus === "pending" || installStatus === "installed"}
+          disabled={
+            installStatus === "pending" || installStatus === "installed" || !plugin.installable
+          }
           leftIcon={installStatus === "installed" ? Check : undefined}
         >
           {installLabel}
         </Button>
       </View>
+
+      {plugin.installable ? null : (
+        <Alert variant="warning" description={t("marketplace.detail.noManifest")} />
+      )}
 
       {plugin.images.length > 0 ? (
         <ScrollView
@@ -223,13 +253,7 @@ export function MarketplaceDetail({
           contentContainerStyle={styles.gallery}
         >
           {plugin.images.map((image) => (
-            <ExpoImage
-              key={image}
-              source={image}
-              contentFit="cover"
-              transition={IMAGE_TRANSITION_MS}
-              style={styles.screenshot}
-            />
+            <Screenshot key={image} uri={image} onOpen={setLightboxSource} />
           ))}
         </ScrollView>
       ) : null}
@@ -248,7 +272,7 @@ export function MarketplaceDetail({
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{t("marketplace.detail.description")}</Text>
           <View style={styles.divider} />
-          <MarkdownRenderer text={description} />
+          <MarkdownRenderer text={description} rules={markdownRules} />
         </View>
       ) : null}
 
@@ -263,7 +287,73 @@ export function MarketplaceDetail({
           description={plugin.caveats}
         />
       ) : null}
+      <AttachmentLightbox source={lightboxSource} onClose={closeLightbox} />
     </AdaptiveModalSheet>
+  );
+}
+
+const DEFAULT_README_IMAGE_ASPECT = 16 / 9;
+// A plain style object: expo-image's web wrapper ignores the unistyles-managed one.
+const SCREENSHOT_FILL = {
+  position: "absolute",
+  top: 0,
+  right: 0,
+  bottom: 0,
+  left: 0,
+} as const;
+
+function ReadmeImage({
+  uri,
+  alt,
+  onOpen,
+}: {
+  uri: string;
+  alt: string;
+  onOpen: (source: ImageLightboxSource) => void;
+}) {
+  const [aspectRatio, setAspectRatio] = useState(DEFAULT_README_IMAGE_ASPECT);
+  const handlePress = useCallback(() => onOpen({ type: "uri", uri }), [onOpen, uri]);
+  const handleLoad = useCallback((event: { source: { width: number; height: number } }) => {
+    const { width, height } = event.source;
+    if (width > 0 && height > 0) setAspectRatio(width / height);
+  }, []);
+  const imageStyle = useMemo(() => [styles.readmeImage, { aspectRatio }], [aspectRatio]);
+  if (!uri) return null;
+  return (
+    <Pressable
+      onPress={handlePress}
+      accessibilityRole="imagebutton"
+      accessibilityLabel={alt || uri}
+      style={styles.readmeImageButton}
+    >
+      <ExpoImage source={uri} contentFit="contain" onLoad={handleLoad} style={imageStyle} />
+    </Pressable>
+  );
+}
+
+// A screenshot opens full size in the zoomable lightbox (wheel/pinch zoom, pan, Escape).
+function Screenshot({
+  uri,
+  onOpen,
+}: {
+  uri: string;
+  onOpen: (source: ImageLightboxSource) => void;
+}) {
+  const handlePress = useCallback(() => onOpen({ type: "uri", uri }), [onOpen, uri]);
+  return (
+    <Pressable
+      onPress={handlePress}
+      accessibilityRole="imagebutton"
+      accessibilityLabel={uri}
+      style={[styles.screenshotButton, styles.screenshotFrame]}
+    >
+      <ExpoImage
+        source={uri}
+        contentFit="contain"
+        transition={IMAGE_TRANSITION_MS}
+        style={SCREENSHOT_FILL}
+      />
+    </Pressable>
   );
 }
 
@@ -306,12 +396,21 @@ const styles = StyleSheet.create((theme: Theme) => ({
   },
   versionPillText: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
   gallery: { gap: theme.spacing[2] },
-  screenshot: {
-    width: 280,
-    height: 168,
+  // Size lives on the pressable: expo-image does not resolve breakpoint styles.
+  screenshotButton: {
+    width: { xs: 280, md: 440 },
+    height: { xs: 168, md: 264 },
     borderRadius: theme.borderRadius.md,
-    backgroundColor: theme.colors.surface2,
+    overflow: "hidden",
   },
+  screenshotFrame: { backgroundColor: theme.colors.surface2 },
+  readmeImageButton: {
+    width: "100%",
+    marginVertical: theme.spacing[2],
+    borderRadius: theme.borderRadius.md,
+    overflow: "hidden",
+  },
+  readmeImage: { width: "100%", backgroundColor: theme.colors.surface2 },
   section: { gap: theme.spacing[2] },
   divider: { height: theme.borderWidth[1], backgroundColor: theme.colors.border },
   metaCard: {

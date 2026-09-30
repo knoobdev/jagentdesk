@@ -70,6 +70,8 @@ export interface MarketplacePlugin {
   images: string[];
   themes: unknown[];
   caveats?: string;
+  /** False when the catalog entry has no plugin manifest (nothing to install). */
+  installable: boolean;
   descriptionNodes?: unknown;
   caveatNodes?: unknown;
   readmeText?: string;
@@ -142,6 +144,19 @@ function normalizeNpm(value: unknown): MarketplaceNpm | undefined {
   };
 }
 
+// The catalog sends caveats as a list of sentences; older entries used one string.
+function normalizeCaveats(value: unknown): string | undefined {
+  if (Array.isArray(value)) {
+    const items = asStringArray(value);
+    return items.length > 0 ? items.map((item) => `• ${item}`).join("\n") : undefined;
+  }
+  return asOptionalString(value);
+}
+
+function isRecord(value: unknown): boolean {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export function normalizePlugin(value: unknown): MarketplacePlugin | null {
   if (!value || typeof value !== "object") {
     return null;
@@ -167,7 +182,8 @@ export function normalizePlugin(value: unknown): MarketplacePlugin | null {
     paseoVersionRequirement: asOptionalString(source.paseoVersionRequirement),
     images: asStringArray(source.images),
     themes: Array.isArray(source.themes) ? source.themes : [],
-    caveats: asOptionalString(source.caveats),
+    caveats: normalizeCaveats(source.caveats),
+    installable: isRecord(source.manifest),
     descriptionNodes: source.descriptionNodes,
     caveatNodes: source.caveatNodes,
     readmeText: asOptionalString(source.readmeText),

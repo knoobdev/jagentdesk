@@ -357,6 +357,7 @@ export const vi = {
       installing: "Đang cài…",
       installed: "Đã cài",
       retryInstall: "Cài lại",
+      notInstallable: "Không cài được",
       details: "Chi tiết",
       noDescription: "Chưa có mô tả.",
     },
@@ -380,6 +381,7 @@ export const vi = {
       health: "Tình trạng",
       description: "Mô tả",
       caveats: "Lưu ý",
+      noManifest: "Mục này không có manifest plugin nên không cài được.",
       install: "Cài plugin",
     },
     themes: {

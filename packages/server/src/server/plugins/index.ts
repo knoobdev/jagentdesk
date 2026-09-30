@@ -21,12 +21,23 @@ import { BUILTIN_PROVIDER_IDS } from "@jagentdesk/protocol/provider-manifest";
 import type { DaemonConfigStore } from "../daemon-config-store.js";
 import { type ManagedPluginCandidate, ManagedPluginSources } from "./managed-source.js";
 import { readPluginManifest } from "./manifest.js";
+import { rewritePaseoSdkImports } from "./paseo-rebrand.js";
 import { runPluginBuild } from "./preparation.js";
 import { PluginRuntime } from "./runtime.js";
 import type { PluginProviderMetadata } from "./plugin-process-protocol.js";
 import { readPluginProviderIcon } from "./provider-icon.js";
 
 const BUILTIN_PROVIDER_ID_SET: ReadonlySet<string> = new Set(BUILTIN_PROVIDER_IDS);
+
+// A Paseo plugin's build steps resolve @getpaseo/plugin from its own dependencies, so its SDK
+// imports (sources and build output) are pointed at JAgentDesk only after they have run.
+async function buildCandidate(
+  candidate: ManagedPluginCandidate,
+  logger: pino.Logger,
+): Promise<void> {
+  await runPluginBuild(candidate.directory, candidate.build, logger);
+  if (candidate.paseoSourceRoot) await rewritePaseoSdkImports(candidate.paseoSourceRoot);
+}
 
 interface PluginRuntimePort {
   emit?: PluginLifecycle["emit"];
@@ -263,7 +274,7 @@ export class PluginService {
             `Plugin ID "${pluginId}" is already configured; choose another ID with --id`,
           );
         }
-        await runPluginBuild(candidate.directory, candidate.build, this.logger);
+        await buildCandidate(candidate, this.logger);
         candidate = await managedSources.place(pluginId, candidate);
         await this.validateCandidate(candidate);
         await managedSources.verifyCandidate(pluginId, candidate);
@@ -594,7 +605,7 @@ export class PluginService {
     let candidate = await managedSources.prepareUpdate(proposal, source.path);
     try {
       await this.checkRequirements(candidate.directory);
-      await runPluginBuild(candidate.directory, candidate.build, this.logger);
+      await buildCandidate(candidate, this.logger);
       candidate = await managedSources.place(pluginId, candidate);
       await this.validateCandidate(candidate);
       await managedSources.verifyCandidate(pluginId, candidate, proposal.target);

@@ -17,7 +17,7 @@ import {
 import { runGitCommand } from "../../utils/run-git-command.js";
 import { ensurePrivateDirectory, writePrivateFileAtomicSync } from "../private-files.js";
 import { readPluginManifest, type PluginManifest } from "./manifest.js";
-import { rebrandPaseoPlugin } from "./paseo-rebrand.js";
+import { rebrandPaseoManifest } from "./paseo-rebrand.js";
 import { acquireNpm, isNpmSource, readNpmArtifact, resolveNpm } from "./managed-source/npm.js";
 
 const GIT_TIMEOUT_MS = 120_000;
@@ -34,6 +34,8 @@ export interface ManagedPluginCandidate {
   directory: string;
   record: ManagedPluginRecord;
   versionRoot: string;
+  /** Set for a Paseo plugin: rewrite SDK imports under this root after the build steps. */
+  paseoSourceRoot?: string;
 }
 interface InstallInput {
   source: string;
@@ -163,11 +165,19 @@ export class ManagedPluginSources {
       const directory = path.resolve(sourceRoot, pluginPath);
       assertPluginPath(sourceRoot, directory);
       await assertRealContainment(sourceRoot, directory);
-      // A plugin authored for Paseo ships paseo-plugin.json and imports @getpaseo/plugin; rewrite
-      // the staged copy (never the author's tree) so the manifest reader and compiler accept it.
-      await rebrandPaseoPlugin(directory);
+      // A plugin authored for Paseo ships paseo-plugin.json and imports @getpaseo/plugin. The
+      // staged copy (never the author's tree) gets its manifest renamed now; its SDK imports
+      // are rewritten after its own build steps, which resolve @getpaseo/plugin themselves.
+      const paseo = await rebrandPaseoManifest(directory);
       const { id: defaultId, build } = await readPluginManifest(directory);
-      return { build, defaultId, directory, record, versionRoot };
+      return {
+        build,
+        defaultId,
+        directory,
+        record,
+        versionRoot,
+        ...(paseo ? { paseoSourceRoot: sourceRoot } : {}),
+      };
     } catch (error) {
       await rm(versionRoot, { recursive: true, force: true });
       throw error;

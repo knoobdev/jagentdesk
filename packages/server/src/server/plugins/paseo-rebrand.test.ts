@@ -3,7 +3,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { readPluginManifest } from "./manifest.js";
-import { rebrandPaseoPlugin } from "./paseo-rebrand.js";
+import {
+  rebrandPaseoManifest,
+  rebrandPaseoPlugin,
+  rewritePaseoSdkImports,
+} from "./paseo-rebrand.js";
 
 describe("rebrandPaseoPlugin", () => {
   let directory: string;
@@ -15,7 +19,7 @@ describe("rebrandPaseoPlugin", () => {
     await rm(directory, { recursive: true, force: true });
   });
 
-  it("renames the manifest, maps the version requirement, and rewrites the SDK scope", async () => {
+  it("renames the manifest, checks the Paseo requirement, and rewrites the SDK scope", async () => {
     await writeFile(
       path.join(directory, "paseo-plugin.json"),
       JSON.stringify({ id: "catppuccin", requirements: { paseo: ">=0.8.0" } }),
@@ -41,7 +45,9 @@ describe("rebrandPaseoPlugin", () => {
     await expect(stat(path.join(directory, "paseo-plugin.json"))).rejects.toThrow();
     const manifest = await readPluginManifest(directory);
     expect(manifest.id).toBe("catppuccin");
-    expect(manifest.requirements).toEqual({ jagentdesk: ">=0.8.0" });
+    // requirements.paseo is a Paseo range: checked at rebrand time, never compared with the
+    // JAgentDesk version.
+    expect(manifest.requirements).toBeUndefined();
 
     // The split entry keeps its name (the runtime loads index.client.* / index.server.*);
     // only the SDK scope changes, every subpath is preserved.
@@ -134,5 +140,54 @@ describe("rebrandPaseoPlugin", () => {
 
     expect(await rebrandPaseoPlugin(directory)).toBe(false);
     expect(await readFile(path.join(directory, "index.ts"), "utf8")).toBe(source);
+  });
+
+  it("accepts Paseo ranges JAgentDesk implements and rejects newer ones", async () => {
+    for (const range of [">=0.10.1", "^0.9.0 || ^0.10.0-beta.1", "^0.9.0", ">=0.7.2-0"]) {
+      await writeFile(
+        path.join(directory, "paseo-plugin.json"),
+        JSON.stringify({ id: "compatible", requirements: { paseo: range } }),
+      );
+      await rm(path.join(directory, "jagentdesk-plugin.json"), { force: true });
+      expect(await rebrandPaseoManifest(directory)).toBe(true);
+    }
+    await rm(path.join(directory, "jagentdesk-plugin.json"), { force: true });
+    await writeFile(
+      path.join(directory, "paseo-plugin.json"),
+      JSON.stringify({ id: "future", requirements: { paseo: ">=0.11.0" } }),
+    );
+    await expect(rebrandPaseoManifest(directory)).rejects.toThrow(
+      'Plugin "future" requires Paseo >=0.11.0',
+    );
+  });
+
+  it("renames only the manifest first, then rewrites SDK imports across the checkout", async () => {
+    const pluginDirectory = path.join(directory, "plugins", "browser");
+    const helperDirectory = path.join(directory, "packages", "helper");
+    await mkdir(path.join(pluginDirectory, "dist"), { recursive: true });
+    await mkdir(helperDirectory, { recursive: true });
+    await writeFile(path.join(pluginDirectory, "paseo-plugin.json"), JSON.stringify({ id: "b" }));
+    const pluginImport = 'import { definePlugin } from "@getpaseo/plugin/server";\n';
+    await writeFile(path.join(pluginDirectory, "index.server.ts"), pluginImport);
+    await writeFile(path.join(pluginDirectory, "dist", "runtime.js"), pluginImport);
+    await writeFile(
+      path.join(helperDirectory, "index.ts"),
+      'export type { PluginClientContext } from "@getpaseo/plugin/client";\n',
+    );
+
+    expect(await rebrandPaseoManifest(pluginDirectory)).toBe(true);
+    // The plugin's own build still resolves the Paseo scope from its dependencies.
+    expect(await readFile(path.join(pluginDirectory, "index.server.ts"), "utf8")).toBe(
+      pluginImport,
+    );
+
+    await rewritePaseoSdkImports(directory);
+    for (const file of [
+      path.join(pluginDirectory, "index.server.ts"),
+      path.join(pluginDirectory, "dist", "runtime.js"),
+      path.join(helperDirectory, "index.ts"),
+    ]) {
+      expect(await readFile(file, "utf8")).toContain('"@jagentdesk/plugin/');
+    }
   });
 });

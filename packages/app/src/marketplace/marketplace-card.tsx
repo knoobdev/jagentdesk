@@ -67,6 +67,9 @@ export function MarketplaceCard({
   if (installStatus === "pending") installLabel = t("marketplace.card.installing");
   else if (installStatus === "installed") installLabel = t("marketplace.card.installed");
   else if (installStatus === "failed") installLabel = t("marketplace.card.retryInstall");
+  if (!plugin.installable && installStatus !== "installed") {
+    installLabel = t("marketplace.card.notInstallable");
+  }
   const installVariant = installStatus === "installed" ? "outline" : "default";
 
   return (
@@ -117,7 +120,9 @@ export function MarketplaceCard({
           size="sm"
           onPress={handleInstall}
           loading={installStatus === "pending"}
-          disabled={installStatus === "pending" || installStatus === "installed"}
+          disabled={
+            installStatus === "pending" || installStatus === "installed" || !plugin.installable
+          }
           leftIcon={installStatus === "installed" ? Check : undefined}
         >
           {installLabel}
