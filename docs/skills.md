@@ -57,6 +57,18 @@ refreshed in the background, and sources are fetched in parallel. Claude and Cod
 marketplaces already added on the host are listed through the provider CLI
 (`provider-marketplace.ts`).
 
+### Directories
+
+An `index` source whose host has an adapter is a searchable directory (ADR-0023); today that is
+`https://skillsmp.com` (`directory-hosts.ts`, `directory-sources.ts`). A directory is never listed:
+a merged browse skips it, and `skills.sources.browse { sourceId, query, page }` sends one
+`/api/v1/skills/search` request per page (20 results, cached 10 minutes). Results are
+`metadataOnly` items whose source is the skill's GitHub folder (`{ kind: "url" }`), so opening one
+lists that folder and installing it uses the GitHub path above. An optional API key
+(`skills.sources.set_api_key`) is stored in `$JAGENTDESK_HOME/skills/credentials.json` (mode 0600)
+and only sent to the directory; apps see `hasApiKey` and the daily quota from the
+`X-RateLimit-Daily-*` headers. An https URL that returns HTML without an adapter is rejected.
+
 ## Invocation
 
 A send that carries `skillIds` is rewritten for the agent's provider (`buildSkillInvocationLine`):

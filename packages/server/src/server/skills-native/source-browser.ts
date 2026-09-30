@@ -23,6 +23,13 @@ import {
   type CommandRunner,
   type MarketplacePlugin,
 } from "./provider-marketplace.js";
+import {
+  DirectoryCredentialsStore,
+  DirectorySearch,
+  directoryProviderFor,
+  type DirectoryProvider,
+  type DirectorySearchResult,
+} from "./directory-sources.js";
 import { RemoteListingCache, type ListedSkill, type RemoteListing } from "./remote-listing.js";
 import { LIST_CACHE_TTL_MS, parseRemoteSource, type FetchLike } from "./remote-sources.js";
 import { readSkillDir } from "./scanner.js";
@@ -130,6 +137,42 @@ function configuredTarget(source: ConfiguredSource): BrowseTarget {
   };
 }
 
+/** The directory adapter of a configured source (an `index` URL with a known host). */
+function sourceDirectory(spec: SkillSourceSpec): DirectoryProvider | null {
+  return spec.kind === "index" ? directoryProviderFor(spec.url) : null;
+}
+
+function repoLabel(githubUrl: string): string {
+  const match = /^https:\/\/github\.com\/([^/]+)\/([^/]+)/i.exec(githubUrl);
+  return match ? `${match[1]}/${match[2]}` : githubUrl;
+}
+
+/** A directory search result: installable through its GitHub folder (ADR-0023). */
+function directoryItem(source: ConfiguredSource, result: DirectorySearchResult): SkillCatalogItem {
+  return {
+    itemId: result.dir || ".",
+    kind: "skill",
+    name: result.name,
+    description: result.description,
+    source: { kind: "url", url: result.githubUrl },
+    origin: repoLabel(result.githubUrl),
+    revision: null,
+    files: [],
+    hasScripts: false,
+    body: null,
+    provider: null,
+    category: null,
+    installCommand: null,
+    installed: false,
+    installedSkillId: null,
+    invalidReason: null,
+    sourceId: source.sourceId,
+    sourceLabel: source.label ?? specLabel(source.spec),
+    metadataOnly: true,
+    stars: result.stars,
+  };
+}
+
 function matchesQuery(item: SkillCatalogItem, query: string | undefined): boolean {
   const needle = query?.trim().toLowerCase();
   if (!needle) return true;
@@ -156,9 +199,17 @@ export interface SourceBrowserOptions {
   onBackgroundError?: (error: unknown, spec: SkillSourceSpec) => void;
 }
 
+export interface BrowsePage {
+  items: SkillCatalogItem[];
+  /** A directory search has another page. */
+  hasMore: boolean;
+}
+
 export class SkillSourceBrowser {
   private readonly listings: RemoteListingCache;
   private readonly sources: SkillSourcesStore;
+  private readonly credentials: DirectoryCredentialsStore;
+  private readonly directories: DirectorySearch;
   private readonly runCommand: CommandRunner;
   private readonly homeDir: string;
   private readonly now: () => number;
@@ -175,6 +226,12 @@ export class SkillSourceBrowser {
       onBackgroundError: options.onBackgroundError,
     });
     this.sources = new SkillSourcesStore(options.skillsHome, options.now);
+    this.credentials = new DirectoryCredentialsStore(options.skillsHome);
+    this.directories = new DirectorySearch({
+      fetch: options.fetch ?? defaultFetch,
+      now: options.now,
+      credentials: this.credentials,
+    });
     this.runCommand = options.runCommand ?? defaultCommandRunner;
     this.homeDir = options.homeDir;
     this.now = options.now;
@@ -194,10 +251,55 @@ export class SkillSourceBrowser {
     installed: readonly SkillEntry[],
     options: { sourceId?: string; query?: string; refresh?: boolean },
   ): Promise<SkillCatalogItem[]> {
+    return (await this.browsePage(source, installed, options)).items;
+  }
+
+  /**
+   * Like `browse`, for one page. A directory source (ADR-0023) is searched with
+   * `query` (one request per page, nothing without a query); every other source
+   * is listed and filtered locally.
+   */
+  async browsePage(
+    source: SkillSourceRef | undefined,
+    installed: readonly SkillEntry[],
+    options: { sourceId?: string; query?: string; page?: number; refresh?: boolean },
+  ): Promise<BrowsePage> {
+    const directory = await this.directoryTarget(source, options.sourceId);
+    if (directory) {
+      const page = await this.directories.search({
+        sourceId: directory.sourceId,
+        provider: directory.provider,
+        query: options.query ?? "",
+        page: options.page ?? 1,
+        refresh: options.refresh,
+      });
+      return {
+        items: page.results
+          .map((result) => directoryItem(directory.source, result))
+          .map((item) => withInstalled(item, installed)),
+        hasMore: page.hasMore,
+      };
+    }
     const items = await this.listItems(source, installed, options);
-    return items
-      .map((item) => withInstalled(item, installed))
-      .filter((item) => matchesQuery(item, options.query));
+    return {
+      items: items
+        .map((item) => withInstalled(item, installed))
+        .filter((item) => matchesQuery(item, options.query)),
+      hasMore: false,
+    };
+  }
+
+  private async directoryTarget(
+    source: SkillSourceRef | undefined,
+    sourceId: string | undefined,
+  ): Promise<{ source: ConfiguredSource; sourceId: string; provider: DirectoryProvider } | null> {
+    let id: string | undefined;
+    if (source?.kind === "configured") id = source.sourceId;
+    else if (!source) id = sourceId;
+    if (!id) return null;
+    const configured = await this.sources.find(id);
+    const provider = sourceDirectory(configured.spec);
+    return provider ? { source: configured, sourceId: id, provider } : null;
   }
 
   private async listItems(
@@ -214,7 +316,10 @@ export class SkillSourceBrowser {
           false,
         );
       }
-      const enabled = (await this.sources.list()).filter((candidate) => candidate.enabled);
+      // Directories are searched, never listed: a merged browse skips them.
+      const enabled = (await this.sources.list()).filter(
+        (candidate) => candidate.enabled && !sourceDirectory(candidate.spec),
+      );
       return this.targetItems(enabled.map(configuredTarget), refresh, true);
     }
     if (source.kind === "local") return installed.map(localItem);
@@ -325,6 +430,8 @@ export class SkillSourceBrowser {
       typeof input === "string"
         ? parseSourceInput(input, this.homeDir)
         : normalizeSpec(input, this.homeDir);
+    // A directory has no listing to check, and each search costs the user's quota.
+    if (sourceDirectory(spec)) return spec;
     const listing = await this.listings.list(spec, { refresh: true });
     if (listing.skills.length === 0) {
       throw new NativeSkillsError("invalid_request", `No SKILL.md found in ${specLabel(spec)}`);
@@ -344,9 +451,27 @@ export class SkillSourceBrowser {
     return this.statusOf(await this.sources.setEnabled(sourceId, enabled));
   }
 
+  /** Store or clear a directory source's API key (ADR-0023 decision 4). */
+  async setSourceApiKey(sourceId: string, apiKey: string | null): Promise<SkillSourceStatus> {
+    const source = await this.sources.find(sourceId);
+    if (!sourceDirectory(source.spec)) {
+      throw new NativeSkillsError(
+        "invalid_request",
+        "Only a skill directory source takes an API key",
+      );
+    }
+    await this.credentials.set(sourceId, apiKey);
+    this.directories.forget(sourceId);
+    return this.statusOf(source);
+  }
+
   private async statusOf(source: ConfiguredSource): Promise<SkillSourceStatus> {
-    const status = await this.listings.status(source.spec);
+    const provider = sourceDirectory(source.spec);
+    const status = provider
+      ? { lastRefreshMs: null, itemCount: null, revision: null, error: null }
+      : await this.listings.status(source.spec);
     return {
+      directory: provider ? await this.directories.status(source.sourceId, provider) : null,
       sourceId: source.sourceId,
       spec: source.spec,
       label: source.label ?? specLabel(source.spec),

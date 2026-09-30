@@ -6111,10 +6111,11 @@ export class DaemonClient {
    * Items carry `sourceId` / `sourceLabel`; install them with
    * `{ source: { kind: "configured", sourceId }, itemId }`.
    */
+  /** A directory source (ADR-0023) is searched: pass `query` and `page`; `hasMore` pages on. */
   async browseSkillSources(
-    options: { sourceId?: string; query?: string; refresh?: boolean } = {},
+    options: { sourceId?: string; query?: string; page?: number; refresh?: boolean } = {},
     requestId?: string,
-  ): Promise<{ requestId: string; items: SkillCatalogItem[] }> {
+  ): Promise<{ requestId: string; items: SkillCatalogItem[]; hasMore?: boolean }> {
     return this.sendNamespacedCorrelatedSessionRequest({
       requestId,
       message: { type: "skills.sources.browse.request", ...options },
@@ -6150,6 +6151,17 @@ export class DaemonClient {
     return this.sendNamespacedCorrelatedSessionRequest({
       requestId,
       message: { type: "skills.sources.remove.request", sourceId },
+    });
+  }
+
+  /** Store (string) or clear (null) a directory source's API key; it never comes back. */
+  async setSkillSourceApiKey(
+    input: { sourceId: string; apiKey: string | null },
+    requestId?: string,
+  ): Promise<{ requestId: string; source: SkillSourceStatus }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "skills.sources.set_api_key.request", ...input },
     });
   }
 

@@ -186,6 +186,25 @@ export const SkillsIndexFileSchema = z.object({
 });
 export type SkillsIndexFile = z.infer<typeof SkillsIndexFileSchema>;
 
+/**
+ * A searchable directory behind an `index` source whose host has an adapter
+ * (ADR-0023). Directories have no full listing: they are searched page by page.
+ */
+export const SkillDirectoryStatusSchema = z.object({
+  provider: z.literal("skillsmp"),
+  /** An API key is stored on the daemon (the key itself is never sent to apps). */
+  hasApiKey: z.boolean(),
+  /** From the last search response's rate-limit headers; null before the first search. */
+  quota: z
+    .object({
+      limit: z.number().nullable(),
+      remaining: z.number().nullable(),
+      resetAtMs: z.number().nullable(),
+    })
+    .nullable(),
+});
+export type SkillDirectoryStatus = z.infer<typeof SkillDirectoryStatusSchema>;
+
 /** A configured source with its listing status. */
 export const SkillSourceStatusSchema = z.object({
   /** Stable id derived from the source (`src_<hex>`); re-adding a source keeps it. */
@@ -204,6 +223,8 @@ export const SkillSourceStatusSchema = z.object({
   revision: z.string().nullable(),
   /** Last listing failure (cleared by the next success). */
   error: z.string().nullable(),
+  /** Set when the source is a searchable directory (ADR-0023). */
+  directory: SkillDirectoryStatusSchema.nullable().optional(),
 });
 export type SkillSourceStatus = z.infer<typeof SkillSourceStatusSchema>;
 
@@ -245,6 +266,13 @@ export const SkillCatalogItemSchema = z.object({
   /** Configured source the item comes from (null for official/url/local/plugin browses). */
   sourceId: z.string().nullable().optional(),
   sourceLabel: z.string().nullable().optional(),
+  /**
+   * A directory search result (ADR-0023): `files`, `body` and `hasScripts` are not
+   * known yet; browse `source` (a `url` ref) to read them before installing.
+   */
+  metadataOnly: z.boolean().optional(),
+  /** Popularity reported by a directory (GitHub stars), when known. */
+  stars: z.number().nullable().optional(),
 });
 export type SkillCatalogItem = z.infer<typeof SkillCatalogItemSchema>;
 
@@ -297,6 +325,8 @@ export const SkillsSourcesBrowseRequestSchema = z.object({
   source: SkillSourceRefSchema.optional(),
   sourceId: z.string().optional(),
   query: z.string().optional(),
+  /** Result page of a directory search (from 1; ADR-0023). */
+  page: z.number().int().min(1).optional(),
   /** Bypass the 10-minute list cache. */
   refresh: z.boolean().optional(),
 });
@@ -325,6 +355,13 @@ export const SkillsSourcesSetEnabledRequestSchema = z.object({
   requestId: z.string(),
   sourceId: z.string(),
   enabled: z.boolean(),
+});
+/** Store (string) or clear (null) a directory source's API key (ADR-0023). */
+export const SkillsSourcesSetApiKeyRequestSchema = z.object({
+  type: z.literal("skills.sources.set_api_key.request"),
+  requestId: z.string(),
+  sourceId: z.string(),
+  apiKey: z.string().min(1).nullable(),
 });
 export const SkillsInstallRequestSchema = z.object({
   type: z.literal("skills.install.request"),
@@ -401,6 +438,8 @@ export const SkillsSourcesBrowseResponseSchema = z.object({
   payload: z.object({
     requestId: z.string(),
     items: z.array(SkillCatalogItemSchema),
+    /** A directory search has another page (ADR-0023). */
+    hasMore: z.boolean().optional(),
   }),
 });
 export const SkillsSourcesListResponseSchema = z.object({
@@ -414,6 +453,10 @@ export const SkillsSourcesAddResponseSchema = z.object({
 export const SkillsSourcesRemoveResponseSchema = z.object({
   type: z.literal("skills.sources.remove.response"),
   payload: z.object({ requestId: z.string(), sourceId: z.string() }),
+});
+export const SkillsSourcesSetApiKeyResponseSchema = z.object({
+  type: z.literal("skills.sources.set_api_key.response"),
+  payload: z.object({ requestId: z.string(), source: SkillSourceStatusSchema }),
 });
 export const SkillsSourcesSetEnabledResponseSchema = z.object({
   type: z.literal("skills.sources.set_enabled.response"),
@@ -455,6 +498,7 @@ export type SkillsSourcesListRequest = z.infer<typeof SkillsSourcesListRequestSc
 export type SkillsSourcesAddRequest = z.infer<typeof SkillsSourcesAddRequestSchema>;
 export type SkillsSourcesRemoveRequest = z.infer<typeof SkillsSourcesRemoveRequestSchema>;
 export type SkillsSourcesSetEnabledRequest = z.infer<typeof SkillsSourcesSetEnabledRequestSchema>;
+export type SkillsSourcesSetApiKeyRequest = z.infer<typeof SkillsSourcesSetApiKeyRequestSchema>;
 export type SkillsInstallRequest = z.infer<typeof SkillsInstallRequestSchema>;
 export type SkillsUninstallRequest = z.infer<typeof SkillsUninstallRequestSchema>;
 export type SkillsSetEnabledRequest = z.infer<typeof SkillsSetEnabledRequestSchema>;
@@ -470,6 +514,7 @@ export const NativeSkillsRequestSchemas = [
   SkillsSourcesAddRequestSchema,
   SkillsSourcesRemoveRequestSchema,
   SkillsSourcesSetEnabledRequestSchema,
+  SkillsSourcesSetApiKeyRequestSchema,
   SkillsInstallRequestSchema,
   SkillsUninstallRequestSchema,
   SkillsSetEnabledRequestSchema,
@@ -486,6 +531,7 @@ export const NativeSkillsResponseSchemas = [
   SkillsSourcesAddResponseSchema,
   SkillsSourcesRemoveResponseSchema,
   SkillsSourcesSetEnabledResponseSchema,
+  SkillsSourcesSetApiKeyResponseSchema,
   SkillsInstallResponseSchema,
   SkillsUninstallResponseSchema,
   SkillsSetEnabledResponseSchema,

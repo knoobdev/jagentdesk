@@ -30,6 +30,17 @@ import { formatTimeAgo } from "@/utils/time";
 type Translate = ReturnType<typeof useTranslation>["t"];
 
 function sourceStatusLine(source: SkillSourceStatus, t: Translate): string {
+  const directory = source.directory;
+  if (directory) {
+    const quota = directory.quota;
+    if (quota?.remaining != null && quota.limit != null) {
+      return t("skillsHub.sources.directoryQuota", {
+        remaining: quota.remaining,
+        limit: quota.limit,
+      });
+    }
+    return t("skillsHub.sources.directorySearchOnly");
+  }
   if (source.lastRefreshMs === null) return t("skillsHub.sources.neverRefreshed");
   const when = formatTimeAgo(new Date(source.lastRefreshMs));
   return t("skillsHub.sources.refreshed", { when, count: source.itemCount ?? 0 });
@@ -38,6 +49,71 @@ function sourceStatusLine(source: SkillSourceStatus, t: Translate): string {
 interface SourceRowProps {
   source: SkillSourceStatus;
   actions: SkillSourceActions;
+}
+
+/** API key of a directory source (ADR-0023): stored on the daemon, never shown again. */
+function DirectoryKeyPanel({ source, actions }: SourceRowProps) {
+  const { t } = useTranslation();
+  const [apiKey, setApiKey] = useState("");
+  const [resetKey, setResetKey] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const trimmed = apiKey.trim();
+  const save = useCallback(
+    async (value: string | null) => {
+      setSaving(true);
+      try {
+        if (await actions.setApiKey(source, value)) {
+          setApiKey("");
+          setResetKey((key) => key + 1);
+        }
+      } finally {
+        setSaving(false);
+      }
+    },
+    [actions, source],
+  );
+  const handleSave = useCallback(() => void save(trimmed || null), [save, trimmed]);
+  const handleRemove = useCallback(() => void save(null), [save]);
+  if (source.directory?.hasApiKey) {
+    return (
+      <View style={styles.rowActions}>
+        <Text style={styles.status}>{t("skillsHub.sources.apiKeySaved")}</Text>
+        <Button
+          size="sm"
+          variant="ghost"
+          onPress={handleRemove}
+          loading={saving}
+          testID={`skills-source-apikey-remove-${source.sourceId}`}
+        >
+          {t("skillsHub.sources.apiKeyRemove")}
+        </Button>
+      </View>
+    );
+  }
+  return (
+    <View style={styles.rowActions}>
+      <AdaptiveTextInput
+        key={resetKey}
+        style={styles.keyInput}
+        onChangeText={setApiKey}
+        placeholder={t("skillsHub.sources.apiKeyPlaceholder")}
+        secureTextEntry
+        autoCapitalize="none"
+        autoCorrect={false}
+        testID={`skills-source-apikey-${source.sourceId}`}
+      />
+      <Button
+        size="sm"
+        variant="outline"
+        onPress={handleSave}
+        loading={saving}
+        disabled={!trimmed}
+        testID={`skills-source-apikey-save-${source.sourceId}`}
+      >
+        {t("skillsHub.sources.apiKeySave")}
+      </Button>
+    </View>
+  );
 }
 
 function SourceRow({ source, actions }: SourceRowProps) {
@@ -73,7 +149,13 @@ function SourceRow({ source, actions }: SourceRowProps) {
           <Text style={styles.rowLabel} numberOfLines={1}>
             {source.label}
           </Text>
-          <SkillBadge label={t(`skillsHub.sources.kind.${source.spec.kind}`)} />
+          <SkillBadge
+            label={t(
+              source.directory
+                ? "skillsHub.sources.kind.directory"
+                : `skillsHub.sources.kind.${source.spec.kind}`,
+            )}
+          />
           {source.builtin ? <SkillBadge label={t("skillsHub.sources.builtin")} /> : null}
         </View>
         <Text style={styles.spec} numberOfLines={2} selectable>
@@ -85,17 +167,20 @@ function SourceRow({ source, actions }: SourceRowProps) {
             {source.error}
           </Text>
         ) : null}
+        {source.directory ? <DirectoryKeyPanel source={source} actions={actions} /> : null}
         <View style={styles.rowActions}>
-          <Button
-            size="sm"
-            variant="outline"
-            onPress={handleRefresh}
-            loading={busy === "refresh"}
-            disabled={busy !== null || !source.enabled}
-            testID={`skills-source-refresh-${source.sourceId}`}
-          >
-            {t("skillsHub.sources.refresh")}
-          </Button>
+          {source.directory ? null : (
+            <Button
+              size="sm"
+              variant="outline"
+              onPress={handleRefresh}
+              loading={busy === "refresh"}
+              disabled={busy !== null || !source.enabled}
+              testID={`skills-source-refresh-${source.sourceId}`}
+            >
+              {t("skillsHub.sources.refresh")}
+            </Button>
+          )}
           <Button
             size="sm"
             variant="ghost"
@@ -334,6 +419,18 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderRadius: theme.borderRadius.md,
     paddingHorizontal: theme.spacing[3],
     paddingVertical: theme.spacing[2],
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foreground,
+  },
+  keyInput: {
+    flex: 1,
+    minWidth: 160,
+    backgroundColor: theme.colors.surface1,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.md,
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[1],
     fontSize: theme.fontSize.sm,
     color: theme.colors.foreground,
   },

@@ -618,6 +618,12 @@ export class RemoteListingCache {
 /** Entries of an index file; the first entry wins for a repeated source + path. */
 function parseIndex(text: string, url: string): ListedSkill[] {
   let parsed: z.infer<typeof SkillsIndexFileSchema>;
+  if (text.trimStart().startsWith("<")) {
+    throw new NativeSkillsError(
+      "invalid_request",
+      `${url} is a web page, not a skills index. Paste a skill's GitHub link or a JSON index URL.`,
+    );
+  }
   try {
     parsed = SkillsIndexFileSchema.parse(JSON.parse(text));
   } catch (error) {

@@ -486,6 +486,11 @@ export const vi = {
       noMatches: "Không có skill nào khớp bộ lọc.",
     },
     browse: {
+      searchDirectory: "Tìm trên {{label}} rồi nhấn Enter",
+      directoryHint: "{{label}} chỉ tìm kiếm, không liệt kê: mỗi trang bạn xem là một lượt tìm.",
+      directoryPrompt: "Nhập từ khoá rồi nhấn Enter để tìm trên {{label}}.",
+      searchIn: "Tìm trên {{label}}",
+      loadMore: "Xem thêm",
       source: "Nguồn",
       allSources: "Mọi nguồn",
       sources: {
@@ -510,6 +515,12 @@ export const vi = {
       unknownDir: "Thư mục không rõ",
     },
     sources: {
+      directorySearchOnly: "Directory chỉ tìm kiếm",
+      directoryQuota: "Directory chỉ tìm kiếm · còn {{remaining}}/{{limit}} lượt tìm hôm nay",
+      apiKeyPlaceholder: "API key (không bắt buộc, tăng giới hạn tìm kiếm)",
+      apiKeySave: "Lưu key",
+      apiKeySaved: "Đã lưu API key trên máy chủ",
+      apiKeyRemove: "Xoá key",
       button: "Nguồn",
       title: "Nguồn",
       subtitle:
@@ -520,6 +531,7 @@ export const vi = {
       empty: "Chưa có nguồn nào. Thêm một nguồn bên dưới.",
       builtin: "Mặc định",
       kind: {
+        directory: "Directory",
         github: "GitHub",
         npm: "npm",
         index: "Index",
@@ -538,7 +550,7 @@ export const vi = {
       addTitle: "Thêm nguồn",
       addPlaceholder: "owner/repo, URL, gói npm hoặc đường dẫn thư mục",
       addHint:
-        "GitHub: owner/repo[/path] hoặc URL github.com (kể cả /tree/<ref>/<path>) · npm: npm:<gói> hoặc @scope/gói · Index: URL https tới file JSON index skill · Local: đường dẫn tuyệt đối tới thư mục trên host.",
+        "GitHub: owner/repo[/path] hoặc URL github.com (kể cả /tree/<ref>/<path>) · npm: npm:<gói> hoặc @scope/gói · Index: URL https tới file JSON index skill · Directory: https://skillsmp.com (chỉ tìm kiếm) · Local: đường dẫn tuyệt đối tới thư mục trên host.",
       labelPlaceholder: "Nhãn (tuỳ chọn)",
       add: "Thêm nguồn",
       addError: {
@@ -557,6 +569,7 @@ export const vi = {
       from: "từ {{origin}}",
     },
     item: {
+      loadingDetails: "Đang tải danh sách file từ GitHub…",
       trustTitle: "Xem kỹ trước khi cài",
       trust: "Skill là chỉ dẫn và mã chạy với quyền của agent. Chỉ cài những skill bạn tin tưởng.",
       files: "Tệp",

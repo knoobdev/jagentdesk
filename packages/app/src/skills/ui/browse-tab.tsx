@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { FlatList, Text, View, type ListRenderItemInfo } from "react-native";
-import { RefreshCw, SlidersHorizontal } from "lucide-react-native";
+import { RefreshCw, Search, SlidersHorizontal } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StyleSheet } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
@@ -11,7 +11,7 @@ import { AdaptiveTextInput } from "@/components/adaptive-modal-sheet";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { useIsCompactFormFactor } from "@/constants/layout";
-import { useFetchQuery } from "@/data/query";
+import { useFetchQueries, useFetchQuery } from "@/data/query";
 import { filterCatalogItems, skillErrorMessage } from "@/skills/native-skill-logic";
 import {
   BROWSE_ALL_SOURCES,
@@ -49,10 +49,15 @@ interface BrowseControlsProps {
   filter: string;
   onFilterChange: (filter: string) => void;
   onQueryChange: (query: string) => void;
+  onSubmitQuery: () => void;
   onRefresh: () => void;
   onManageSources: () => void;
   refreshing: boolean;
   resultCount: number;
+  /** The selected source is a directory: the query is searched on submit. */
+  directory: SkillSourceStatus | null;
+  /** "Search <directory>" offered from the merged view when there is a query. */
+  searchOffer: { label: string; onPress: () => void } | null;
 }
 
 function BrowseControls(props: BrowseControlsProps) {
@@ -72,7 +77,13 @@ function BrowseControls(props: BrowseControlsProps) {
         <AdaptiveTextInput
           style={styles.search}
           onChangeText={props.onQueryChange}
-          placeholder={t("skillsHub.browse.search")}
+          onSubmitEditing={props.onSubmitQuery}
+          returnKeyType="search"
+          placeholder={
+            props.directory
+              ? t("skillsHub.browse.searchDirectory", { label: props.directory.label })
+              : t("skillsHub.browse.search")
+          }
           autoCapitalize="none"
           autoCorrect={false}
           testID="skills-browse-search"
@@ -98,8 +109,23 @@ function BrowseControls(props: BrowseControlsProps) {
         </Button>
       </View>
       <Text style={styles.hint}>
-        {t("skillsHub.browse.resultCount", { count: props.resultCount })}
+        {props.directory
+          ? t("skillsHub.browse.directoryHint", { label: props.directory.label })
+          : t("skillsHub.browse.resultCount", { count: props.resultCount })}
       </Text>
+      {props.searchOffer ? (
+        <View style={styles.searchRow}>
+          <Button
+            size="sm"
+            variant="outline"
+            leftIcon={Search}
+            onPress={props.searchOffer.onPress}
+            testID="skills-browse-search-directory"
+          >
+            {t("skillsHub.browse.searchIn", { label: props.searchOffer.label })}
+          </Button>
+        </View>
+      ) : null}
       {failing > 0 ? (
         <Text style={styles.warning} testID="skills-browse-failing-sources">
           {t("skillsHub.browse.failingSources", { count: failing })}
@@ -114,9 +140,11 @@ interface BrowseEmptyProps {
   isLoading: boolean;
   error: unknown;
   onRetry: () => void;
+  /** Replaces the default "nothing found" text. */
+  emptyText?: string;
 }
 
-function BrowseEmpty({ noSources, isLoading, error, onRetry }: BrowseEmptyProps) {
+function BrowseEmpty({ noSources, isLoading, error, onRetry, emptyText }: BrowseEmptyProps) {
   const { t } = useTranslation();
   if (isLoading) return <Text style={styles.empty}>{t("skillsHub.browse.loading")}</Text>;
   if (error) {
@@ -133,7 +161,7 @@ function BrowseEmpty({ noSources, isLoading, error, onRetry }: BrowseEmptyProps)
     );
   }
   if (noSources) return <Text style={styles.empty}>{t("skillsHub.browse.noSources")}</Text>;
-  return <Text style={styles.empty}>{t("skillsHub.browse.empty")}</Text>;
+  return <Text style={styles.empty}>{emptyText ?? t("skillsHub.browse.empty")}</Text>;
 }
 
 async function fetchBrowseItems(
@@ -148,6 +176,70 @@ async function fetchBrowseItems(
   }
   const sourceId = request.sourceId ? { sourceId: request.sourceId } : {};
   return (await client.browseSkillSources({ ...sourceId, ...options })).items;
+}
+
+interface DirectoryPage {
+  items: SkillCatalogItem[];
+  hasMore: boolean;
+}
+
+/**
+ * Pages 1..pageCount of a directory search (ADR-0023): one request per page, only
+ * after submit; "Load more" adds a page.
+ */
+function useDirectorySearch(input: {
+  serverId: string;
+  client: DaemonClient | null;
+  connected: boolean;
+  directory: SkillSourceStatus | null;
+  query: string;
+}) {
+  const { serverId, client, connected, directory, query } = input;
+  const [pageCount, setPageCount] = useState(1);
+  const searchKey = `${directory?.sourceId ?? ""}:${query}`;
+  const [pagedKey, setPagedKey] = useState(searchKey);
+  if (pagedKey !== searchKey) {
+    setPagedKey(searchKey);
+    setPageCount(1);
+  }
+  const enabled = Boolean(client && connected && directory && query.trim());
+  const results = useFetchQueries<DirectoryPage>(
+    Array.from({ length: pageCount }, (_unused, index) => ({
+      queryKey: [
+        ...skillsBrowseQueryKey(serverId, directory?.sourceId ?? "none"),
+        "search",
+        query,
+        index + 1,
+      ],
+      queryFn: async (): Promise<DirectoryPage> => {
+        if (!client || !directory) return { items: [], hasMore: false };
+        const result = await client.browseSkillSources({
+          sourceId: directory.sourceId,
+          query,
+          page: index + 1,
+        });
+        return { items: result.items, hasMore: result.hasMore === true };
+      },
+      enabled,
+      dataShape: "value" as const,
+      staleTimeMs: 10 * 60_000,
+    })),
+  );
+  const last = results[results.length - 1];
+  const loadMore = useCallback(() => setPageCount((count) => count + 1), []);
+  const refetch = useCallback(() => {
+    for (const result of results) void result.refetch();
+  }, [results]);
+  return {
+    items: results.flatMap((result) => result.data?.items ?? []),
+    hasMore: last?.data?.hasMore === true,
+    isLoading: enabled && (results[0]?.isLoading ?? false),
+    isFetching: results.some((result) => result.isFetching),
+    isFetchingMore: pageCount > 1 && (last?.isFetching ?? false),
+    error: results.find((result) => result.error)?.error ?? null,
+    refetch,
+    loadMore,
+  };
 }
 
 export interface BrowseTabProps {
@@ -170,15 +262,49 @@ export function BrowseTab({
   onOpenItem,
   onManageSources,
 }: BrowseTabProps) {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const isCompact = useIsCompactFormFactor();
   const queryClient = useQueryClient();
   const [selectedFilter, setFilter] = useState(BROWSE_ALL_SOURCES);
   const [query, setQuery] = useState("");
+  const [submittedQuery, setSubmittedQuery] = useState("");
   const refreshNextRef = useRef(false);
   const sourcesQuery = useSkillSourcesQuery(serverId, client);
   const sources = useMemo(() => sourcesQuery.data ?? [], [sourcesQuery.data]);
   const filter = effectiveBrowseFilter(selectedFilter, sourcesQuery.data);
+  const directory = useMemo(
+    () => sources.find((source) => source.sourceId === filter && source.directory) ?? null,
+    [filter, sources],
+  );
+  const offeredDirectory = useMemo(
+    () =>
+      filter === BROWSE_ALL_SOURCES && query.trim()
+        ? (sources.find((source) => source.enabled && source.directory) ?? null)
+        : null,
+    [filter, query, sources],
+  );
+  const directorySearch = useDirectorySearch({
+    serverId,
+    client,
+    connected,
+    directory,
+    query: submittedQuery,
+  });
+  const handleSubmitQuery = useCallback(() => setSubmittedQuery(query.trim()), [query]);
+  const searchOffer = useMemo(
+    () =>
+      offeredDirectory
+        ? {
+            label: offeredDirectory.label,
+            onPress: () => {
+              setSubmittedQuery(query.trim());
+              setFilter(offeredDirectory.sourceId);
+            },
+          }
+        : null,
+    [offeredDirectory, query],
+  );
 
   const browse = useFetchQuery({
     queryKey: skillsBrowseQueryKey(serverId, filter),
@@ -193,11 +319,16 @@ export function BrowseTab({
         void queryClient.invalidateQueries({ queryKey: skillsSourcesQueryKey(serverId) });
       }
     },
-    enabled: Boolean(client && connected),
+    enabled: Boolean(client && connected && !directory),
     dataShape: "list",
     staleTimeMs: 60_000,
   });
-  const items = useMemo(() => filterCatalogItems(browse.data ?? [], query), [browse.data, query]);
+  const directoryItems = directorySearch.items;
+  const listedItems = useMemo(
+    () => filterCatalogItems(browse.data ?? [], query),
+    [browse.data, query],
+  );
+  const items = directory ? directoryItems : listedItems;
 
   const { refetch } = browse;
   const handleRefresh = useCallback(() => {
@@ -225,28 +356,91 @@ export function BrowseTab({
         filter={filter}
         onFilterChange={setFilter}
         onQueryChange={setQuery}
+        onSubmitQuery={handleSubmitQuery}
         onRefresh={handleRefresh}
         onManageSources={onManageSources}
-        refreshing={browse.isFetching}
+        refreshing={directory ? directorySearch.isFetching : browse.isFetching}
         resultCount={items.length}
+        directory={directory}
+        searchOffer={searchOffer}
       />
     ),
-    [browse.isFetching, filter, handleRefresh, items.length, onManageSources, sources],
+    [
+      browse.isFetching,
+      directory,
+      directorySearch.isFetching,
+      filter,
+      handleRefresh,
+      handleSubmitQuery,
+      items.length,
+      onManageSources,
+      searchOffer,
+      sources,
+    ],
   );
   const noSources =
     filter === BROWSE_ALL_SOURCES &&
     Boolean(sourcesQuery.data) &&
     !sources.some((source) => source.enabled);
+  const {
+    refetch: retryDirectory,
+    loadMore: handleLoadMore,
+    hasMore: hasNextPage,
+    isFetchingMore: isFetchingNextPage,
+  } = directorySearch;
   const renderEmpty = useCallback(
-    () => (
-      <BrowseEmpty
-        noSources={noSources}
-        isLoading={browse.isLoading}
-        error={browse.error}
-        onRetry={handleRefresh}
-      />
-    ),
-    [browse.error, browse.isLoading, handleRefresh, noSources],
+    () =>
+      directory ? (
+        <BrowseEmpty
+          noSources={false}
+          isLoading={directorySearch.isLoading}
+          error={directorySearch.error}
+          onRetry={retryDirectory}
+          emptyText={
+            submittedQuery
+              ? undefined
+              : t("skillsHub.browse.directoryPrompt", {
+                  label: directory.label,
+                })
+          }
+        />
+      ) : (
+        <BrowseEmpty
+          noSources={noSources}
+          isLoading={browse.isLoading}
+          error={browse.error}
+          onRetry={handleRefresh}
+        />
+      ),
+    [
+      browse.error,
+      browse.isLoading,
+      directory,
+      directorySearch.error,
+      directorySearch.isLoading,
+      handleRefresh,
+      noSources,
+      retryDirectory,
+      submittedQuery,
+      t,
+    ],
+  );
+  const footer = useMemo(
+    () =>
+      directory && hasNextPage ? (
+        <View style={styles.footer}>
+          <Button
+            variant="outline"
+            size="sm"
+            onPress={handleLoadMore}
+            loading={isFetchingNextPage}
+            testID="skills-browse-load-more"
+          >
+            {t("skillsHub.browse.loadMore")}
+          </Button>
+        </View>
+      ) : null,
+    [directory, handleLoadMore, hasNextPage, isFetchingNextPage, t],
   );
   const contentStyle = useMemo(
     () => [styles.listContent, { paddingBottom: insets.bottom + 24 }],
@@ -262,6 +456,7 @@ export function BrowseTab({
       columnWrapperStyle={numColumns > 1 ? styles.columnWrap : undefined}
       ListHeaderComponent={header}
       ListEmptyComponent={renderEmpty}
+      ListFooterComponent={footer}
       contentContainerStyle={contentStyle}
       showsVerticalScrollIndicator={false}
       initialNumToRender={8}
@@ -275,6 +470,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
   listContent: { padding: theme.spacing[4], paddingTop: theme.spacing[2], gap: theme.spacing[3] },
   columnWrap: { gap: theme.spacing[3] },
   cell: { flex: 1, marginBottom: theme.spacing[3] },
+  footer: { alignItems: "center", paddingVertical: theme.spacing[3] },
   controls: { gap: theme.spacing[2], marginBottom: theme.spacing[2] },
   searchRow: {
     flexDirection: "row",

@@ -64,7 +64,7 @@ import {
   type OpsContext,
 } from "./owned-ops.js";
 import { parseSkillId } from "./paths.js";
-import { SkillSourceBrowser } from "./source-browser.js";
+import { SkillSourceBrowser, type BrowsePage } from "./source-browser.js";
 import type { FetchLike } from "./remote-sources.js";
 import type { CommandRunner } from "./provider-marketplace.js";
 import { readSkillDir, scanSkills } from "./scanner.js";
@@ -186,6 +186,16 @@ export class NativeSkillsService {
     return this.browser.browse(source, installed, options);
   }
 
+  /** One page of `browse`; a directory source is searched (ADR-0023). */
+  async browsePage(
+    source: SkillSourceRef | undefined,
+    options: { sourceId?: string; query?: string; page?: number; refresh?: boolean } = {},
+  ): Promise<BrowsePage> {
+    const projectRoot = source?.kind === "local" ? await this.resolveProjectRoot(source.cwd) : null;
+    const installed = await this.scan(projectRoot);
+    return this.browser.browsePage(source, installed, options);
+  }
+
   // ── Configured sources (sources.json) ──────────────────────────────────────
   listSources(): Promise<SkillSourceStatus[]> {
     return this.browser.listSources();
@@ -202,6 +212,12 @@ export class NativeSkillsService {
   async removeSource(sourceId: string): Promise<void> {
     await this.exclusive(() => this.browser.removeSource(sourceId));
     await this.changed();
+  }
+
+  async setSourceApiKey(sourceId: string, apiKey: string | null): Promise<SkillSourceStatus> {
+    const updated = await this.exclusive(() => this.browser.setSourceApiKey(sourceId, apiKey));
+    await this.changed();
+    return updated;
   }
 
   async setSourceEnabled(sourceId: string, enabled: boolean): Promise<SkillSourceStatus> {

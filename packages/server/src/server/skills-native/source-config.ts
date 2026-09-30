@@ -8,6 +8,7 @@ import {
   type SkillSourceSpec,
 } from "@jagentdesk/protocol/native-skills";
 import { writeJsonFileAtomic } from "../atomic-file.js";
+import { canonicalDirectoryUrl, directoryLabelFor } from "./directory-hosts.js";
 import { NativeSkillsError } from "./errors.js";
 import { parseRemoteSource } from "./remote-sources.js";
 
@@ -71,7 +72,7 @@ export function specLabel(spec: SkillSourceSpec): string {
     case "npm":
       return spec.pkg;
     case "index":
-      return spec.url;
+      return directoryLabelFor(spec.url) ?? spec.url;
     case "local":
       return spec.path;
   }
@@ -101,7 +102,7 @@ function normalizeIndexUrl(value: string): string {
     throw invalid(`Not a URL: ${value}`);
   }
   if (url.protocol !== "https:") throw invalid("An index source must be an https URL");
-  return url.toString();
+  return canonicalDirectoryUrl(url.toString()) ?? url.toString();
 }
 
 /** Validate and normalize a spec; throws `invalid_request`. */

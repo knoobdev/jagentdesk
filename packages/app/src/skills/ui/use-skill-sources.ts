@@ -31,6 +31,8 @@ export function useSkillSourcesQuery(serverId: string, client: DaemonClient | nu
 }
 
 export interface SkillSourceActions {
+  /** Store (string) or clear (null) a directory's API key (ADR-0023). */
+  setApiKey: (source: SkillSourceStatus, apiKey: string | null) => Promise<boolean>;
   /** Validates by listing once; rejects with the daemon error (the form shows it). */
   add: (input: { source: string; label?: string }) => Promise<SkillSourceStatus>;
   setEnabled: (source: SkillSourceStatus, enabled: boolean) => Promise<void>;
@@ -126,6 +128,21 @@ export function useSkillSourceActions(
     [client, fail, invalidate],
   );
 
+  const setApiKey = useCallback(
+    async (source: SkillSourceStatus, apiKey: string | null) => {
+      if (!client) return false;
+      try {
+        await client.setSkillSourceApiKey({ sourceId: source.sourceId, apiKey });
+        await invalidate();
+        return true;
+      } catch (error) {
+        fail(error);
+        return false;
+      }
+    },
+    [client, fail, invalidate],
+  );
+
   const restoreDefaults = useCallback(
     async (repos: readonly string[]) => {
       if (!client) return;
@@ -140,7 +157,7 @@ export function useSkillSourceActions(
   );
 
   return useMemo(
-    () => ({ add, setEnabled, remove, refresh, restoreDefaults }),
-    [add, setEnabled, remove, refresh, restoreDefaults],
+    () => ({ add, setEnabled, remove, refresh, restoreDefaults, setApiKey }),
+    [add, setEnabled, remove, refresh, restoreDefaults, setApiKey],
   );
 }

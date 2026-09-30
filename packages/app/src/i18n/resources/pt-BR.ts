@@ -2499,6 +2499,11 @@ export const ptBR: TranslationResources = {
       noMatches: "No skills match these filters.",
     },
     browse: {
+      searchDirectory: "Search {{label}} and press Enter",
+      directoryHint: "{{label}} is searched, not listed: each page you view is one search.",
+      directoryPrompt: "Type a search and press Enter to search {{label}}.",
+      searchIn: "Search {{label}}",
+      loadMore: "Load more",
       source: "Source",
       allSources: "All sources",
       sources: {
@@ -2523,6 +2528,12 @@ export const ptBR: TranslationResources = {
       unknownDir: "Unknown folder",
     },
     sources: {
+      directorySearchOnly: "Search-only directory",
+      directoryQuota: "Search-only directory · {{remaining}} of {{limit}} searches left today",
+      apiKeyPlaceholder: "API key (optional, raises the search limit)",
+      apiKeySave: "Save key",
+      apiKeySaved: "API key saved on the host",
+      apiKeyRemove: "Remove key",
       button: "Sources",
       title: "Sources",
       subtitle:
@@ -2533,6 +2544,7 @@ export const ptBR: TranslationResources = {
       empty: "No sources. Add one below.",
       builtin: "Default",
       kind: {
+        directory: "Directory",
         github: "GitHub",
         npm: "npm",
         index: "Index",
@@ -2551,7 +2563,7 @@ export const ptBR: TranslationResources = {
       addTitle: "Add source",
       addPlaceholder: "owner/repo, URL, npm package or folder path",
       addHint:
-        "GitHub: owner/repo[/path] or a github.com URL (incl. /tree/<ref>/<path>) · npm: npm:<package> or @scope/package · Index: https URL of a skills index JSON · Local: absolute folder path on the host.",
+        "GitHub: owner/repo[/path] or a github.com URL (incl. /tree/<ref>/<path>) · npm: npm:<package> or @scope/package · Index: https URL of a skills index JSON · Directory: https://skillsmp.com (search only) · Local: absolute folder path on the host.",
       labelPlaceholder: "Label (optional)",
       add: "Add source",
       addError: {
@@ -2570,6 +2582,7 @@ export const ptBR: TranslationResources = {
       from: "from {{origin}}",
     },
     item: {
+      loadingDetails: "Loading files from GitHub…",
       trustTitle: "Review before installing",
       trust:
         "Skills are instructions and code that run with the agent's permissions. Install only skills you trust.",

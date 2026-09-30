@@ -18,6 +18,7 @@ import { MarkdownRenderer } from "@/components/markdown/renderer";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/contexts/toast-context";
+import { useFetchQuery } from "@/data/query";
 import { refreshSkillCatalogs } from "@/stores/skills-store";
 import {
   isScriptPath,
@@ -162,6 +163,8 @@ interface InstallSectionProps {
   installing: boolean;
   error: string | null;
   onInstall: () => void;
+  /** Files are not known yet (a directory result still loading its details). */
+  blocked: boolean;
 }
 
 function InstallSection(props: InstallSectionProps) {
@@ -192,7 +195,7 @@ function InstallSection(props: InstallSectionProps) {
           variant="default"
           onPress={props.onInstall}
           loading={props.installing}
-          disabled={!complete}
+          disabled={!complete || props.blocked}
           testID="skills-install-submit"
         >
           {t(item.kind === "plugin" ? "skillsHub.item.installPlugin" : "skillsHub.item.install")}
@@ -262,8 +265,60 @@ function useInstallFlow(props: CatalogItemSheetProps, scope: ScopeValue) {
   return { installing, error, conflict, setConflict, pluginResult, run };
 }
 
+/**
+ * A directory search result only has a name and description (ADR-0023). Its files and
+ * SKILL.md come from listing its GitHub folder, before the trust warning and Install.
+ */
+function useResolvedCatalogItem(client: DaemonClient | null, item: SkillCatalogItem) {
+  const details = useFetchQuery({
+    queryKey: ["skills-catalog-item", JSON.stringify(item.source), item.itemId],
+    queryFn: async () => {
+      if (!client) throw new Error("offline");
+      const { items } = await client.browseSkillSource(item.source, {});
+      const found = items.find((candidate) => candidate.itemId === item.itemId);
+      if (!found) throw new Error(`Skill not found in ${item.origin}: ${item.itemId}`);
+      return found;
+    },
+    enabled: Boolean(client && item.metadataOnly),
+    dataShape: "value",
+    staleTimeMs: 10 * 60_000,
+  });
+  const resolved = useMemo<SkillCatalogItem>(
+    () =>
+      details.data
+        ? {
+            ...details.data,
+            sourceId: item.sourceId,
+            sourceLabel: item.sourceLabel,
+            stars: item.stars,
+            metadataOnly: false,
+          }
+        : item,
+    [details.data, item],
+  );
+  return {
+    item: resolved,
+    loading: Boolean(item.metadataOnly) && details.isLoading,
+    error: item.metadataOnly && details.error ? skillErrorMessage(details.error) : null,
+  };
+}
+
 /** Browse detail + install flow (spec 22.6 detail, 22.8 trust, 22.11 #4 conflict). */
 export function CatalogItemSheet(props: CatalogItemSheetProps) {
+  const resolved = useResolvedCatalogItem(props.client, props.item);
+  return (
+    <CatalogItemSheetContent
+      {...props}
+      item={resolved.item}
+      detailsLoading={resolved.loading}
+      detailsError={resolved.error}
+    />
+  );
+}
+
+function CatalogItemSheetContent(
+  props: CatalogItemSheetProps & { detailsLoading: boolean; detailsError: string | null },
+) {
   const { t } = useTranslation();
   const { item, onClose, projects, defaultProjectPath } = props;
   const [scope, setScope] = useState<ScopeValue>({
@@ -312,6 +367,10 @@ export function CatalogItemSheet(props: CatalogItemSheetProps) {
         ) : null}
       </View>
       {item.description ? <Text style={styles.description}>{item.description}</Text> : null}
+      {props.detailsLoading ? (
+        <Text style={styles.hint}>{t("skillsHub.item.loadingDetails")}</Text>
+      ) : null}
+      {props.detailsError ? <Text style={styles.error}>{props.detailsError}</Text> : null}
       <SkillTrustWarning />
       <SkillFileList files={files} />
       {flow.conflict ? (
@@ -331,6 +390,7 @@ export function CatalogItemSheet(props: CatalogItemSheetProps) {
           installing={flow.installing}
           error={flow.error}
           onInstall={handleInstall}
+          blocked={props.detailsLoading || props.detailsError !== null}
         />
       )}
       {flow.pluginResult ? <PluginOutput result={flow.pluginResult} /> : null}

@@ -14,6 +14,7 @@ type NativeSkillsRequest = Extract<
       | "skills.sources.add.request"
       | "skills.sources.remove.request"
       | "skills.sources.set_enabled.request"
+      | "skills.sources.set_api_key.request"
       | "skills.install.request"
       | "skills.uninstall.request"
       | "skills.set_enabled.request"
@@ -31,6 +32,7 @@ const NATIVE_SKILLS_REQUEST_TYPES = new Set<string>([
   "skills.sources.add.request",
   "skills.sources.remove.request",
   "skills.sources.set_enabled.request",
+  "skills.sources.set_api_key.request",
   "skills.install.request",
   "skills.uninstall.request",
   "skills.set_enabled.request",
@@ -64,11 +66,12 @@ async function respond(
         type: "skills.sources.browse.response",
         payload: {
           requestId,
-          items: await service.browse(msg.source, {
+          ...(await service.browsePage(msg.source, {
             sourceId: msg.sourceId,
             query: msg.query,
+            page: msg.page,
             refresh: msg.refresh,
-          }),
+          })),
         },
       };
     case "skills.sources.list.request":
@@ -91,6 +94,11 @@ async function respond(
       return {
         type: "skills.sources.set_enabled.response",
         payload: { requestId, source: await service.setSourceEnabled(msg.sourceId, msg.enabled) },
+      };
+    case "skills.sources.set_api_key.request":
+      return {
+        type: "skills.sources.set_api_key.response",
+        payload: { requestId, source: await service.setSourceApiKey(msg.sourceId, msg.apiKey) },
       };
     case "skills.install.request":
       return {
