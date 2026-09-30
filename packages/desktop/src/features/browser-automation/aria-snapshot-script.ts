@@ -66,6 +66,7 @@ export const ARIA_SNAPSHOT_SCRIPT = String.raw`(() => {
     if (tag === 'th') return 'columnheader';
     if (tag === 'td') return 'cell';
     if (tag === 'iframe') return 'iframe';
+    if (tag === 'dialog') return 'dialog';
     if (tag === 'input') {
       const type = (element.getAttribute('type') || 'text').toLowerCase();
       if (type === 'checkbox') return 'checkbox';
@@ -195,6 +196,15 @@ export const ARIA_SNAPSHOT_SCRIPT = String.raw`(() => {
     if (element.getAttribute('aria-expanded')) attrs.push('expanded=' + element.getAttribute('aria-expanded'));
     if (element.getAttribute('aria-pressed')) attrs.push('pressed=' + element.getAttribute('aria-pressed'));
     if (element.getAttribute('aria-selected')) attrs.push('selected=' + element.getAttribute('aria-selected'));
+    if (role === 'dialog' || role === 'alertdialog') {
+      let modal = element.getAttribute('aria-modal') === 'true';
+      try {
+        modal = modal || element.matches(':modal');
+      } catch {
+        // :modal is unsupported on older engines.
+      }
+      if (modal) attrs.push('modal=true');
+    }
     return attrs;
   }
 

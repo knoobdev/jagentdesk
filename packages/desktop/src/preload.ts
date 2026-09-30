@@ -135,5 +135,9 @@ contextBridge.exposeInMainWorld("jagentdeskDesktop", {
       ipcRenderer.invoke("jagentdesk:browser:save-connected-login", browserId),
     deleteConnectedLogin: (domain: string) =>
       ipcRenderer.invoke("jagentdesk:browser:delete-connected-login", domain),
+    getDialog: (browserId: string) =>
+      ipcRenderer.invoke("jagentdesk:browser:get-dialog", browserId),
+    answerDialog: (browserId: string, answer: { action: "accept" | "dismiss"; text?: string }) =>
+      ipcRenderer.invoke("jagentdesk:browser:answer-dialog", browserId, answer),
   },
 });

@@ -47,6 +47,7 @@ import { registerOpenerHandlers } from "./features/opener.js";
 import { registerEditorTargetHandlers } from "./features/editor-targets/ipc.js";
 import { setupApplicationMenu } from "./features/menu.js";
 import {
+  BROWSER_DIALOG_EVENT,
   BROWSER_NEW_TAB_REQUEST_EVENT,
   decideBrowserWindowOpenRequest,
   getJAgentDeskBrowserIdForWebContents,
@@ -86,6 +87,13 @@ import {
 import { runDesktopStartup } from "./desktop-startup.js";
 import { autoUpdateInstalledSkills } from "./integrations/skills/index.js";
 import { registerBrowserAutomationIpc } from "./features/browser-automation/ipc.js";
+import {
+  answerDialog,
+  getPendingDialog,
+  installGuestDialogHandler,
+  onDialogsChanged,
+  openGuestPrompt,
+} from "./features/browser-automation/guest-dialogs.js";
 import {
   applySessionIdentity,
   applyStealthToWebContents,
@@ -583,6 +591,52 @@ ipcMain.handle("jagentdesk:browser:open-devtools", (event, browserId: unknown) =
   return result;
 });
 
+// Agentic-tab JavaScript dialogs (ADR-0025): the tab's dialog bar reads and answers them.
+ipcMain.handle("jagentdesk:browser:get-dialog", (event, browserId: unknown) => {
+  if (typeof browserId !== "string") return null;
+  const contents = getJAgentDeskBrowserWebContentsForHostWindow(browserId, event.sender.id);
+  return contents ? getPendingDialog(contents.id) : null;
+});
+
+ipcMain.handle(
+  "jagentdesk:browser:answer-dialog",
+  (event, browserId: unknown, answer: { action?: unknown; text?: unknown } | null) => {
+    if (typeof browserId !== "string") return null;
+    const contents = getJAgentDeskBrowserWebContentsForHostWindow(browserId, event.sender.id);
+    if (!contents) return null;
+    return answerDialog(contents.id, {
+      action: answer?.action === "accept" ? "accept" : "dismiss",
+      ...(typeof answer?.text === "string" ? { text: answer.text } : {}),
+      by: "user",
+    });
+  },
+);
+
+// prompt() from an agentic tab's main frame (features/browser-keyboard/guest-preload.ts). The
+// page stays blocked on this sync message until the dialog is answered.
+const GUEST_PROMPT_CHANNEL = "jagentdesk:browser-guest-prompt";
+ipcMain.on(GUEST_PROMPT_CHANNEL, (event, message: unknown, defaultValue: unknown) => {
+  const opened = openGuestPrompt(
+    event.sender,
+    {
+      message: typeof message === "string" ? message : "",
+      defaultValue: typeof defaultValue === "string" ? defaultValue : "",
+    },
+    (ok, text) => {
+      event.returnValue = ok ? text : null;
+    },
+  );
+  if (!opened) event.returnValue = null;
+});
+
+onDialogsChanged(({ contentsId, pendingDialog }) => {
+  const contents = webContents.fromId(contentsId);
+  const browserId = contents ? getJAgentDeskBrowserIdForWebContents(contents) : null;
+  const host = contents?.hostWebContents;
+  if (!browserId || !host || host.isDestroyed()) return;
+  host.send(BROWSER_DIALOG_EVENT, { browserId, pendingDialog });
+});
+
 ipcMain.handle("jagentdesk:browser:clear-profile", async (_event, rawLegacyBrowserIds: unknown) => {
   const profileSessions = getJAgentDeskBrowserProfileSessions(
     session,
@@ -971,6 +1025,8 @@ async function createWindow(
   });
   mainWindow.webContents.on("did-attach-webview", (_event, contents) => {
     prepareJAgentDeskBrowserWebContents(contents);
+    // alert/confirm/prompt wait for the agent or the tab's dialog bar, not a native box.
+    installGuestDialogHandler(contents);
     // Anti-detection: the guest's identity (UA, Client Hints, timezone, locale, init
     // scripts) is in place before its first request, then the held URL loads.
     const initialUrl = takeInitialGuestLoad(contents);

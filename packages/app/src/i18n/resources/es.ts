@@ -518,6 +518,14 @@ export const es: TranslationResources = {
         submit: "Adjuntar",
         cancel: "Cancelar",
       },
+      dialog: {
+        alertTitle: "La página muestra un mensaje",
+        confirmTitle: "La página pide confirmación",
+        promptTitle: "La página pide un dato",
+        accept: "Aceptar",
+        dismiss: "Cancelar",
+        hint: "La página está en pausa hasta que tú o el agente respondan.",
+      },
       devices: {
         label: "Tamaño del dispositivo",
         responsive: "Adaptable",

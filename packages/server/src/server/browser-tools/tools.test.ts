@@ -19,7 +19,10 @@ const WORKSPACE_CONTEXT_MESSAGE =
 
 interface RegisteredTool {
   config: JAgentDeskToolConfig;
-  handler: (args: unknown, context: JAgentDeskToolExecutionContext) => Promise<JAgentDeskToolResult>;
+  handler: (
+    args: unknown,
+    context: JAgentDeskToolExecutionContext,
+  ) => Promise<JAgentDeskToolResult>;
 }
 
 class FakeBrowserBroker {
@@ -560,6 +563,8 @@ describe("registerBrowserTools", () => {
       "browser_scroll",
       "browser_resize",
       "browser_close_tab",
+      "browser_dialog",
+      "browser_cdp",
     ]);
   });
 
@@ -852,7 +857,7 @@ describe("registerBrowserTools", () => {
     expect(response.content).toEqual([
       {
         type: "text",
-        text: 'Clicked browser element @e1.\nHandled browser dialog: dismissed confirm "Delete item?".',
+        text: 'Clicked browser element @e1.\nBrowser dialog since the last command: dismissed confirm "Delete item?".',
       },
     ]);
     expect(response.structuredContent).toEqual({
@@ -897,7 +902,7 @@ describe("registerBrowserTools", () => {
     expect(response.content).toEqual([
       {
         type: "text",
-        text: 'The browser did not respond before the timeout. Try again or check the browser host.\nHandled browser dialog: dismissed beforeunload "Leave site?".',
+        text: 'The browser did not respond before the timeout. Try again or check the browser host.\nBrowser dialog since the last command: dismissed beforeunload "Leave site?".',
       },
     ]);
     expect(response.structuredContent).toEqual({
@@ -911,6 +916,96 @@ describe("registerBrowserTools", () => {
         browserId: BROWSER_ID,
       },
     });
+  });
+
+  test("a command that opened a dialog tells the agent to decide with browser_dialog", async () => {
+    const harness = new BrowserToolHarness();
+    const pendingDialog = {
+      id: "dlg-1",
+      type: "confirm" as const,
+      message: "Delete item?",
+      url: "http://localhost:4000/items",
+      openedAtMs: 1_000,
+    };
+    harness.broker.setResponse({
+      requestId: "req-click",
+      ok: true,
+      result: { command: "dialog", browserId: BROWSER_ID, pendingDialog, handled: null },
+      pendingDialog,
+      dialogs: [],
+    });
+
+    const response = await harness.execute("browser_click", { browserId: BROWSER_ID, ref: "@e1" });
+
+    expect(response.content).toEqual([
+      {
+        type: "text",
+        text: [
+          "The page opened a dialog before the command finished.",
+          'The tab is waiting on a confirm dialog: "Delete item?".',
+          "Decide, then answer it with browser_dialog: action=accept (OK) or action=dismiss (Cancel).",
+        ].join("\n"),
+      },
+    ]);
+    expect(response.structuredContent).toMatchObject({ ok: true, pendingDialog });
+  });
+
+  test("browser_dialog sends the agent's answer and reports it", async () => {
+    const harness = new BrowserToolHarness();
+    harness.broker.setResponse({
+      requestId: "req-dialog",
+      ok: true,
+      result: {
+        command: "dialog",
+        browserId: BROWSER_ID,
+        pendingDialog: null,
+        handled: { type: "prompt", message: "Your name?", action: "accepted", promptText: "Ada" },
+      },
+    });
+
+    const response = await harness.execute("browser_dialog", {
+      browserId: BROWSER_ID,
+      action: "accept",
+      text: "Ada",
+    });
+
+    expect(harness.broker.calls.at(-1)).toMatchObject({
+      command: {
+        command: "dialog",
+        args: { browserId: BROWSER_ID, action: "accept", text: "Ada" },
+      },
+    });
+    expect(response.content).toEqual([
+      {
+        type: "text",
+        text: 'Browser dialog accepted: prompt "Your name?" with text "Ada".',
+      },
+    ]);
+  });
+
+  test("a blocked tab's error names the pending prompt and its default", async () => {
+    const harness = new BrowserToolHarness();
+    harness.broker.setResponse({
+      requestId: "req-snapshot",
+      ok: false,
+      error: { code: "browser_denied", message: "blocked", retryable: false },
+      pendingDialog: {
+        id: "dlg-2",
+        type: "prompt",
+        message: "Your name?",
+        defaultValue: "guest",
+        url: "http://localhost:4000/",
+        openedAtMs: 2_000,
+      },
+    });
+
+    const response = await harness.execute("browser_snapshot", { browserId: BROWSER_ID });
+    const text = (response.content[0] as { text: string }).text;
+
+    expect(text).toContain("The command did not run because the tab is paused by an open dialog.");
+    expect(text).toContain('The tab is waiting on a prompt dialog: "Your name?".');
+    expect(text).toContain('Default value: "guest".');
+    expect(text).toContain("with text for the prompt.");
   });
 
   test("wait rejects calls without a condition", () => {

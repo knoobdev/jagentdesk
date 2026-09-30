@@ -512,6 +512,14 @@ export const ar: TranslationResources = {
         submit: "إرفاق",
         cancel: "إلغاء",
       },
+      dialog: {
+        alertTitle: "تعرض الصفحة رسالة",
+        confirmTitle: "تطلب الصفحة التأكيد",
+        promptTitle: "تطلب الصفحة إدخالًا",
+        accept: "موافق",
+        dismiss: "إلغاء",
+        hint: "الصفحة متوقفة حتى تجيب أنت أو الوكيل.",
+      },
       devices: {
         label: "حجم الجهاز",
         responsive: "متجاوب",

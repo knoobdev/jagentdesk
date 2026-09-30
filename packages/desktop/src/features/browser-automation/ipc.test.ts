@@ -1,6 +1,8 @@
+import { EventEmitter } from "node:events";
 import type { Rectangle } from "electron";
 import { describe, expect, test, vi } from "vitest";
 import type { TabImage } from "./service.js";
+import { installGuestDialogHandler } from "./guest-dialogs.js";
 import { adaptWebContents, HostSnapshotEngineRegistry } from "./ipc.js";
 import type { IsolatedKeyboardInputEvent } from "./trusted-input.js";
 
@@ -264,13 +266,15 @@ describe("browser automation IPC adapter", () => {
     expect(result).toEqual({ ok: true });
     expect(contents.debugger.attachedProtocolVersions).toEqual(["1.3"]);
     expect(contents.debugger.commands).toEqual([
+      { command: "Emulation.setFocusEmulationEnabled", params: { enabled: true } },
       { command: "Page.captureScreenshot", params: { format: "png" } },
     ]);
   });
 
   test("serializes CDP commands per guest contents", async () => {
     const contents = new FakeWebContents(23);
-    contents.debugger.blockCommands = true;
+    contents.debugger.blockedCommandNames.add("Input.dispatchMouseEvent");
+    contents.debugger.blockedCommandNames.add("Page.captureScreenshot");
     const tab = adaptWebContents(contents);
 
     const first = tab.sendDebugCommand?.("Input.dispatchMouseEvent", { type: "mouseMoved" });
@@ -278,6 +282,7 @@ describe("browser automation IPC adapter", () => {
     await flushMicrotasks();
 
     expect(contents.debugger.commands).toEqual([
+      { command: "Emulation.setFocusEmulationEnabled", params: { enabled: true } },
       { command: "Input.dispatchMouseEvent", params: { type: "mouseMoved" } },
     ]);
 
@@ -285,6 +290,7 @@ describe("browser automation IPC adapter", () => {
     await flushMicrotasks();
 
     expect(contents.debugger.commands).toEqual([
+      { command: "Emulation.setFocusEmulationEnabled", params: { enabled: true } },
       { command: "Input.dispatchMouseEvent", params: { type: "mouseMoved" } },
       { command: "Page.captureScreenshot", params: { format: "png" } },
     ]);
@@ -294,284 +300,79 @@ describe("browser automation IPC adapter", () => {
     await expect(second).resolves.toEqual({ ok: true });
   });
 
-  test("handles JavaScript dialogs through the per-tab CDP queue", async () => {
+  test("returns as soon as the command opens a dialog, leaving the tab waiting", async () => {
     const contents = new FakeWebContents(24);
+    const guest = new FakeDialogGuest(24);
+    installGuestDialogHandler(guest);
     const tab = adaptWebContents(contents);
+    const click = deferred<string>();
 
-    const captured = tab.captureDialogs?.(async () => {
-      contents.debugger.blockCommands = true;
-      const input = tab.sendDebugCommand?.("Input.dispatchMouseEvent", { type: "mouseReleased" });
-      await flushMicrotasks();
+    const captured = tab.captureDialogs!(() => click.promise);
+    const respond = guest.openDialog({ dialogType: "confirm", messageText: "Delete item?" });
+    const outcome = await captured;
 
-      contents.debugger.emitMessage("Page.javascriptDialogOpening", {
-        type: "confirm",
-        message: "Delete item?",
-      });
-      await flushMicrotasks();
+    expect(outcome.result).toBeUndefined();
+    expect(outcome.pendingDialog).toMatchObject({ type: "confirm", message: "Delete item?" });
+    expect(tab.getPendingDialog?.()).toMatchObject({ type: "confirm" });
+    expect(respond).not.toHaveBeenCalled();
 
-      expect(contents.debugger.commands).toEqual([
-        { command: "Page.enable", params: {} },
-        {
-          command: "Runtime.evaluate",
-          params: { expression: expect.any(String), returnByValue: true },
-        },
-        { command: "Input.dispatchMouseEvent", params: { type: "mouseReleased" } },
-        { command: "Page.handleJavaScriptDialog", params: { accept: false } },
-      ]);
-
-      contents.debugger.blockCommands = false;
-      contents.debugger.finishNextCommand();
-      await input;
-      await flushMicrotasks();
-      return "done";
-    });
-
-    await expect(captured).resolves.toEqual({
-      result: "done",
-      dialogs: [
-        {
-          type: "confirm",
-          message: "Delete item?",
-          action: "dismissed",
-          timestamp: expect.any(Number),
-        },
-      ],
-    });
-    expect(contents.debugger.commands).toEqual([
-      { command: "Page.enable", params: {} },
-      {
-        command: "Runtime.evaluate",
-        params: { expression: expect.any(String), returnByValue: true },
-      },
-      { command: "Input.dispatchMouseEvent", params: { type: "mouseReleased" } },
-      { command: "Page.handleJavaScriptDialog", params: { accept: false } },
-      {
-        command: "Runtime.evaluate",
-        params: { expression: expect.any(String), returnByValue: true },
-      },
-      {
-        command: "Runtime.evaluate",
-        params: { expression: expect.any(String), returnByValue: true },
-      },
-    ]);
-  });
-
-  test("handles JavaScript dialogs while the triggering CDP input command is still in flight", async () => {
-    const contents = new FakeWebContents(25);
-    const tab = adaptWebContents(contents);
-
-    const captured = tab.captureDialogs?.(async () => {
-      contents.debugger.blockedCommandNames.add("Input.dispatchMouseEvent");
-      const input = tab.sendDebugCommand?.("Input.dispatchMouseEvent", { type: "mousePressed" });
-      await flushMicrotasks();
-
-      contents.debugger.emitMessage("Page.javascriptDialogOpening", {
-        type: "alert",
-        message: "Saved",
-      });
-      await flushMicrotasks();
-
-      expect(contents.debugger.commands).toEqual([
-        { command: "Page.enable", params: {} },
-        {
-          command: "Runtime.evaluate",
-          params: { expression: expect.any(String), returnByValue: true },
-        },
-        { command: "Input.dispatchMouseEvent", params: { type: "mousePressed" } },
-        { command: "Page.handleJavaScriptDialog", params: { accept: true } },
-      ]);
-
-      contents.debugger.blockedCommandNames.clear();
-      contents.debugger.finishNextCommand();
-      await input;
-      return "done";
-    });
-
-    await expect(captured).resolves.toEqual({
-      result: "done",
-      dialogs: [
-        {
-          type: "alert",
-          message: "Saved",
-          action: "accepted",
-          timestamp: expect.any(Number),
-        },
-      ],
-    });
-    expect(contents.debugger.commands.at(-1)).toEqual({
-      command: "Runtime.evaluate",
-      params: {
-        expression: expect.stringContaining("delete window[stateKey]"),
-        returnByValue: true,
-      },
-    });
-  });
-
-  test("keeps the prompt shim installed until overlapping captures finish", async () => {
-    const contents = new FakeWebContents(26);
-    const tab = adaptWebContents(contents);
-    const firstStarted = deferred<void>();
-    const secondStarted = deferred<void>();
-    const finishFirst = deferred<void>();
-    const finishSecond = deferred<void>();
-
-    const first = tab.captureDialogs?.(async () => {
-      firstStarted.resolve();
-      await finishFirst.promise;
-      return "first";
-    });
-    await firstStarted.promise;
-
-    const second = tab.captureDialogs?.(async () => {
-      secondStarted.resolve();
-      await finishSecond.promise;
-      return "second";
-    });
-    await secondStarted.promise;
-
-    contents.debugger.promptDialogs.push(
-      {
-        type: "prompt",
-        message: "First?",
-        defaultValue: "one",
-        action: "dismissed",
-        timestamp: 1,
-      },
-      {
-        type: "prompt",
-        message: "Second?",
-        defaultValue: "two",
-        action: "dismissed",
-        timestamp: 2,
-      },
-    );
-
-    finishFirst.resolve();
-    await expect(first).resolves.toEqual({
-      result: "first",
-      dialogs: [
-        {
-          type: "prompt",
-          message: "First?",
-          defaultValue: "one",
-          action: "dismissed",
-          timestamp: 1,
-        },
-        {
-          type: "prompt",
-          message: "Second?",
-          defaultValue: "two",
-          action: "dismissed",
-          timestamp: 2,
-        },
-      ],
-    });
-    expect(
-      contents.debugger.commands.some(
-        (entry) =>
-          entry.command === "Runtime.evaluate" &&
-          typeof entry.params.expression === "string" &&
-          entry.params.expression.includes("delete window[stateKey]"),
-      ),
-    ).toBe(false);
-
-    finishSecond.resolve();
-    await expect(second).resolves.toEqual({
-      result: "second",
-      dialogs: [
-        {
-          type: "prompt",
-          message: "First?",
-          defaultValue: "one",
-          action: "dismissed",
-          timestamp: 1,
-        },
-        {
-          type: "prompt",
-          message: "Second?",
-          defaultValue: "two",
-          action: "dismissed",
-          timestamp: 2,
-        },
-      ],
-    });
-    expect(contents.debugger.commands.at(-1)).toEqual({
-      command: "Runtime.evaluate",
-      params: {
-        expression: expect.stringContaining("delete window[stateKey]"),
-        returnByValue: true,
-      },
-    });
-  });
-
-  test("leaves JavaScript dialogs alone when no capture is active", async () => {
-    const contents = new FakeWebContents(28);
-    const tab = adaptWebContents(contents);
-
-    await expect(tab.captureDialogs?.(async () => "done")).resolves.toEqual({
-      result: "done",
-      dialogs: [],
-    });
-    contents.debugger.emitMessage("Page.javascriptDialogOpening", {
+    expect(tab.answerDialog?.({ action: "dismiss" })).toMatchObject({
       type: "confirm",
-      message: "Unsaved changes?",
+      action: "dismissed",
     });
-    await flushMicrotasks();
-
-    expect(contents.debugger.commands).not.toContainEqual({
-      command: "Page.handleJavaScriptDialog",
-      params: { accept: false },
-    });
+    expect(respond).toHaveBeenCalledWith(false, "");
+    expect(tab.getPendingDialog?.()).toBeNull();
+    click.resolve("clicked");
   });
 
-  test("treats prompt shim drain failures after navigation as no dialogs", async () => {
-    const contents = new FakeWebContents(29);
-    contents.debugger.failPromptDrain = true;
+  test("returns the command result when no dialog opens", async () => {
+    const contents = new FakeWebContents(25);
+    installGuestDialogHandler(new FakeDialogGuest(25));
     const tab = adaptWebContents(contents);
 
-    await expect(tab.captureDialogs?.(async () => "navigated")).resolves.toEqual({
-      result: "navigated",
-      dialogs: [],
-    });
-
-    expect(contents.debugger.commands).toEqual([
-      { command: "Page.enable", params: {} },
-      {
-        command: "Runtime.evaluate",
-        params: { expression: expect.any(String), returnByValue: true },
-      },
-      {
-        command: "Runtime.evaluate",
-        params: { expression: expect.any(String), returnByValue: true },
-      },
-      {
-        command: "Runtime.evaluate",
-        params: {
-          expression: expect.stringContaining("delete window[stateKey]"),
-          returnByValue: true,
-        },
-      },
-    ]);
-  });
-
-  test("runs the command without dialog capture when CDP setup fails", async () => {
-    const contents = new FakeWebContents(30);
-    contents.debugger.failedCommandNames.add("Page.enable");
-    const tab = adaptWebContents(contents);
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-    await expect(tab.captureDialogs?.(async () => "done")).resolves.toEqual({
+    await expect(tab.captureDialogs!(async () => "done")).resolves.toEqual({
       result: "done",
       dialogs: [],
     });
+  });
 
-    expect(warn).toHaveBeenCalledWith(
-      "[browser-automation] Dialog capture unavailable; running command without it",
-      { contentsId: 30, error: expect.any(Error) },
-    );
-    warn.mockRestore();
+  test("a dialog in another tab does not interrupt the command", async () => {
+    const contents = new FakeWebContents(26);
+    installGuestDialogHandler(new FakeDialogGuest(26));
+    const other = new FakeDialogGuest(27);
+    installGuestDialogHandler(other);
+    const tab = adaptWebContents(contents);
+    const task = deferred<string>();
+
+    const captured = tab.captureDialogs!(() => task.promise);
+    other.openDialog({ dialogType: "alert", messageText: "elsewhere" });
+    task.resolve("done");
+
+    await expect(captured).resolves.toMatchObject({ result: "done" });
+    expect(tab.getPendingDialog?.()).toBeNull();
   });
 });
+
+/** The guest side of Electron's `-run-dialog` event (see guest-dialogs.ts). */
+class FakeDialogGuest extends EventEmitter {
+  public constructor(public readonly id: number) {
+    super();
+  }
+
+  public getURL(): string {
+    return "http://localhost:4000/";
+  }
+
+  public isDestroyed(): boolean {
+    return false;
+  }
+
+  public openDialog(info: Record<string, unknown>) {
+    const respond = vi.fn();
+    this.emit("-run-dialog", info, respond);
+    return respond;
+  }
+}
 
 class FakeHostWebContents {
   private destroyedListener: (() => void) | null = null;

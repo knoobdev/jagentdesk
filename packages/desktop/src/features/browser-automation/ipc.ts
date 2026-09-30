@@ -1,21 +1,16 @@
 import type { Rectangle } from "electron";
 import { ipcMain } from "electron";
 import { BrowserAutomationExecuteRequestSchema } from "@jagentdesk/protocol/browser-automation/rpc-schemas";
-import type {
-  BrowserAutomationConsoleLogEntry,
-  BrowserAutomationDialogEvent,
-} from "@jagentdesk/protocol/browser-automation/rpc-schemas";
+import type { BrowserAutomationConsoleLogEntry } from "@jagentdesk/protocol/browser-automation/rpc-schemas";
 import type { TabContents, BrowserRegistry, TabImage } from "./service.js";
 import type { IsolatedKeyboardInputEvent } from "./trusted-input.js";
 import { CdpSessionQueue } from "./cdp-session-queue.js";
 import {
-  dialogAcceptValue,
-  handledDialogEvent,
-  MAX_DIALOGS_PER_COMMAND,
-  promptShimDrainScript,
-  promptShimInstallScript,
-  promptShimRestoreScript,
-} from "./dialog-handling.js";
+  answerDialog,
+  drainDialogEvents,
+  getPendingDialog,
+  waitForDialog,
+} from "./guest-dialogs.js";
 import { executeAutomationCommand } from "./service.js";
 import { BrowserSnapshotEngine } from "./snapshot-engine.js";
 import {
@@ -29,7 +24,6 @@ import {
 const MAX_CONSOLE_MESSAGES_PER_TAB = 200;
 const consoleMessagesByContentsId = new Map<number, BrowserAutomationConsoleLogEntry[]>();
 const cdpQueuesByContentsId = new Map<number, CdpSessionQueue>();
-const dialogMonitorsByContentsId = new Map<number, DialogMonitor>();
 const observedContentsIds = new Set<number>();
 
 interface IpcHandlerRegistry {
@@ -113,7 +107,6 @@ export function adaptWebContents(contents: BrowserAutomationWebContents): TabCon
   const contentsId = contents.id;
   observeConsoleMessages(contents, contentsId);
   const cdpQueue = getCdpQueue(contentsId);
-  const dialogMonitor = getDialogMonitor(contents, contentsId, cdpQueue);
   return {
     id: contentsId,
     getURL: () => contents.getURL(),
@@ -131,7 +124,10 @@ export function adaptWebContents(contents: BrowserAutomationWebContents): TabCon
     invalidate: () => contents.invalidate(),
     sendInputEvent: (event) => contents.sendInputEvent(event),
     getConsoleMessages: () => consoleMessagesByContentsId.get(contentsId) ?? [],
-    captureDialogs: (task) => dialogMonitor.capture(task),
+    captureDialogs: (task) => captureDialogs(contentsId, task),
+    getPendingDialog: () => getPendingDialog(contentsId),
+    answerDialog: (answer) => answerDialog(contentsId, { ...answer, by: "agent" }),
+    drainDialogEvents: () => drainDialogEvents(contentsId),
     sendDebugCommand: (command: string, params?: Record<string, unknown>) =>
       cdpQueue.run(async () => {
         if (!contents.debugger.isAttached()) {
@@ -178,194 +174,30 @@ function observeConsoleMessages(contents: BrowserAutomationWebContents, contents
     observedContentsIds.delete(contentsId);
     consoleMessagesByContentsId.delete(contentsId);
     cdpQueuesByContentsId.delete(contentsId);
-    dialogMonitorsByContentsId.delete(contentsId);
   });
 }
 
-function getDialogMonitor(
-  contents: BrowserAutomationWebContents,
-  contentsId: number,
-  cdpQueue: CdpSessionQueue,
-): DialogMonitor {
-  const existing = dialogMonitorsByContentsId.get(contentsId);
-  if (existing) {
-    return existing;
+/**
+ * Run a command and report dialogs (ADR-0025). A dialog the command opens blocks the page, and
+ * with it the CDP call that triggered it, so the command returns as soon as the dialog opens;
+ * the blocked call finishes in the background once the dialog is answered.
+ */
+async function captureDialogs<T>(contentsId: number, task: () => Promise<T>) {
+  const opened = waitForDialog(contentsId);
+  const running = task();
+  try {
+    const outcome = await Promise.race([
+      running.then((result) => ({ kind: "result" as const, result })),
+      opened.promise.then((pendingDialog) => ({ kind: "dialog" as const, pendingDialog })),
+    ]);
+    if (outcome.kind === "dialog") {
+      running.catch(() => undefined);
+      return { dialogs: drainDialogEvents(contentsId), pendingDialog: outcome.pendingDialog };
+    }
+    return { result: outcome.result, dialogs: drainDialogEvents(contentsId) };
+  } finally {
+    opened.cancel();
   }
-  const monitor = new DialogMonitor(contents, contentsId, cdpQueue);
-  dialogMonitorsByContentsId.set(contentsId, monitor);
-  return monitor;
-}
-
-class DialogMonitor {
-  private enabled = false;
-  private listenerRegistered = false;
-  private readonly activeCollectors: DialogCollector[] = [];
-
-  public constructor(
-    private readonly contents: BrowserAutomationWebContents,
-    private readonly contentsId: number,
-    private readonly cdpQueue: CdpSessionQueue,
-  ) {}
-
-  public async capture<T>(
-    task: () => Promise<T>,
-  ): Promise<{ result: T; dialogs: BrowserAutomationDialogEvent[] }> {
-    const collector: DialogCollector = { dialogs: [] };
-    try {
-      await this.enable();
-      await this.installPromptShim();
-    } catch (error) {
-      console.warn("[browser-automation] Dialog capture unavailable; running command without it", {
-        contentsId: this.contentsId,
-        error,
-      });
-      return { result: await task(), dialogs: [] };
-    }
-    this.activeCollectors.push(collector);
-    try {
-      const result = await task();
-      this.recordPromptShimDialogs(await this.drainPromptShim());
-      return { result, dialogs: collector.dialogs };
-    } finally {
-      const index = this.activeCollectors.indexOf(collector);
-      if (index >= 0) {
-        this.activeCollectors.splice(index, 1);
-      }
-      if (this.activeCollectors.length === 0) {
-        await this.restorePromptShim();
-      }
-    }
-  }
-
-  private async enable(): Promise<void> {
-    if (this.enabled) {
-      return;
-    }
-    if (!this.contents.debugger.on) {
-      return;
-    }
-    if (!this.listenerRegistered) {
-      this.listenerRegistered = true;
-      this.contents.debugger.on("message", (_event, method, params) => {
-        if (method !== "Page.javascriptDialogOpening") {
-          return;
-        }
-        if (this.activeCollectors.length === 0) {
-          return;
-        }
-        void this.handleOpening(params ?? {});
-      });
-    }
-    await this.sendDebugCommand("Page.enable");
-    this.enabled = true;
-  }
-
-  private async handleOpening(params: Record<string, unknown>): Promise<void> {
-    const event = handledDialogEvent(params);
-    for (const collector of this.activeCollectors) {
-      this.recordDialogs(collector, [event]);
-    }
-    await this.sendDialogResponseCommand("Page.handleJavaScriptDialog", {
-      accept: dialogAcceptValue(event.type),
-    });
-  }
-
-  private async installPromptShim(): Promise<void> {
-    await this.sendDebugCommand("Runtime.evaluate", {
-      expression: promptShimInstallScript(),
-      returnByValue: true,
-    });
-  }
-
-  private async drainPromptShim(): Promise<BrowserAutomationDialogEvent[]> {
-    try {
-      const result = (await this.sendDebugCommand("Runtime.evaluate", {
-        expression: promptShimDrainScript(),
-        returnByValue: true,
-      })) as { result?: { value?: unknown } };
-      return parsePromptShimDialogs(result.result?.value);
-    } catch {
-      return [];
-    }
-  }
-
-  private async restorePromptShim(): Promise<void> {
-    try {
-      await this.sendDebugCommand("Runtime.evaluate", {
-        expression: promptShimRestoreScript(),
-        returnByValue: true,
-      });
-    } catch {
-      // Navigation can destroy the execution context before cleanup runs; the next page has no shim.
-    }
-  }
-
-  private recordDialogs(collector: DialogCollector, dialogs: BrowserAutomationDialogEvent[]): void {
-    for (const dialog of dialogs) {
-      if (collector.dialogs.length >= MAX_DIALOGS_PER_COMMAND) {
-        return;
-      }
-      collector.dialogs.push(dialog);
-    }
-  }
-
-  private recordPromptShimDialogs(dialogs: BrowserAutomationDialogEvent[]): void {
-    for (const collector of this.activeCollectors) {
-      this.recordDialogs(collector, dialogs);
-    }
-  }
-
-  private async sendDebugCommand(
-    command: string,
-    params?: Record<string, unknown>,
-  ): Promise<unknown> {
-    return this.cdpQueue.run(async () => {
-      if (!this.contents.debugger.isAttached()) {
-        this.contents.debugger.attach("1.3");
-      }
-      return this.contents.debugger.sendCommand(command, params ?? {});
-    });
-  }
-
-  private async sendDialogResponseCommand(
-    command: string,
-    params?: Record<string, unknown>,
-  ): Promise<unknown> {
-    // Dialogs can block the CDP command that opened them, so the unblocker must not wait behind
-    // the per-tab command queue.
-    if (!this.contents.debugger.isAttached()) {
-      this.contents.debugger.attach("1.3");
-    }
-    return this.contents.debugger.sendCommand(command, params ?? {});
-  }
-}
-
-interface DialogCollector {
-  dialogs: BrowserAutomationDialogEvent[];
-}
-
-function parsePromptShimDialogs(value: unknown): BrowserAutomationDialogEvent[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value.flatMap((entry): BrowserAutomationDialogEvent[] => {
-    if (!entry || typeof entry !== "object") {
-      return [];
-    }
-    const record = entry as Record<string, unknown>;
-    if (record.type !== "prompt" || record.action !== "dismissed") {
-      return [];
-    }
-    return [
-      {
-        type: "prompt",
-        message: typeof record.message === "string" ? record.message : "",
-        ...(typeof record.defaultValue === "string" ? { defaultValue: record.defaultValue } : {}),
-        action: "dismissed",
-        timestamp: typeof record.timestamp === "number" ? record.timestamp : Date.now(),
-      },
-    ];
-  });
 }
 
 function normalizeConsoleMessage(input: {

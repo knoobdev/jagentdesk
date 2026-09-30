@@ -44,6 +44,7 @@ export const BROWSER_AUTOMATION_COMMAND_NAMES = [
   "resize",
   "close_tab",
   "cdp",
+  "dialog",
 ] as const;
 
 export const BrowserAutomationCommandNameSchema = z.enum(BROWSER_AUTOMATION_COMMAND_NAMES);
@@ -244,6 +245,17 @@ export const BrowserAutomationCdpCommandSchema = z.object({
   }),
 });
 
+// Answer (or read) the JavaScript dialog a tab is waiting on (ADR-0025): alert/confirm/prompt
+// no longer open native windows; the page stays blocked until the agent or the user decides.
+export const BrowserAutomationDialogCommandSchema = z.object({
+  command: z.literal("dialog"),
+  args: BrowserAutomationTabTargetSchema.extend({
+    action: z.enum(["accept", "dismiss", "status"]),
+    /** Text entered into a prompt() dialog when accepting it. */
+    text: z.string().optional(),
+  }),
+});
+
 export const BrowserAutomationCommandSchema = z.discriminatedUnion("command", [
   BrowserAutomationListTabsCommandSchema,
   BrowserAutomationNewTabCommandSchema,
@@ -268,6 +280,7 @@ export const BrowserAutomationCommandSchema = z.discriminatedUnion("command", [
   BrowserAutomationResizeCommandSchema,
   BrowserAutomationCloseTabCommandSchema,
   BrowserAutomationCdpCommandSchema,
+  BrowserAutomationDialogCommandSchema,
 ]);
 
 export const BrowserAutomationTabInfoSchema = z.object({
@@ -475,6 +488,32 @@ export const BrowserAutomationCloseTabResultSchema = z.object({
   browserId: BrowserAutomationBrowserIdSchema,
 });
 
+/** A JavaScript dialog a tab is waiting on (ADR-0025). */
+export const BrowserAutomationPendingDialogSchema = z.object({
+  id: z.string(),
+  type: z.enum(["alert", "confirm", "prompt"]),
+  message: z.string(),
+  defaultValue: z.string().optional(),
+  url: z.string(),
+  openedAtMs: z.number(),
+});
+
+export const BrowserAutomationDialogResultSchema = z.object({
+  command: z.literal("dialog"),
+  browserId: BrowserAutomationBrowserIdSchema,
+  /** The dialog still waiting (status), or null once answered / when none is open. */
+  pendingDialog: BrowserAutomationPendingDialogSchema.nullable(),
+  /** The dialog this call answered. */
+  handled: z
+    .object({
+      type: z.enum(["alert", "confirm", "prompt"]),
+      message: z.string(),
+      action: z.enum(["accepted", "dismissed"]),
+      promptText: z.string().optional(),
+    })
+    .nullable(),
+});
+
 export const BrowserAutomationResultSchema = z.discriminatedUnion("command", [
   BrowserAutomationListTabsResultSchema,
   BrowserAutomationNewTabResultSchema,
@@ -499,6 +538,7 @@ export const BrowserAutomationResultSchema = z.discriminatedUnion("command", [
   BrowserAutomationScrollResultSchema,
   BrowserAutomationResizeResultSchema,
   BrowserAutomationCloseTabResultSchema,
+  BrowserAutomationDialogResultSchema,
 ]);
 
 export const BrowserAutomationErrorSchema = z.object({
@@ -535,12 +575,15 @@ export const BrowserAutomationExecuteResponseSchema = z.object({
       ok: z.literal(true),
       result: BrowserAutomationResultSchema,
       dialogs: z.array(BrowserAutomationDialogEventSchema).optional(),
+      /** The tab is blocked on this dialog; answer it with the `dialog` command. */
+      pendingDialog: BrowserAutomationPendingDialogSchema.optional(),
     }),
     z.object({
       requestId: z.string().min(1),
       ok: z.literal(false),
       error: BrowserAutomationErrorSchema,
       dialogs: z.array(BrowserAutomationDialogEventSchema).optional(),
+      pendingDialog: BrowserAutomationPendingDialogSchema.optional(),
     }),
   ]),
 });
@@ -556,6 +599,7 @@ export type BrowserAutomationNetworkLogEntry = z.infer<
   typeof BrowserAutomationNetworkLogEntrySchema
 >;
 export type BrowserAutomationDialogEvent = z.infer<typeof BrowserAutomationDialogEventSchema>;
+export type BrowserAutomationPendingDialog = z.infer<typeof BrowserAutomationPendingDialogSchema>;
 export type BrowserAutomationExecuteRequest = z.infer<typeof BrowserAutomationExecuteRequestSchema>;
 export type BrowserAutomationExecuteResponse = z.infer<
   typeof BrowserAutomationExecuteResponseSchema

@@ -1,9 +1,11 @@
-import { ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer } from "electron";
 import type { BrowserKeyboardPolicy, BrowserShortcutPrefix } from "./policy.js";
 
 const POLICY_CHANNEL = "jagentdesk:browser-keyboard-policy";
 const POLICY_REQUEST_CHANNEL = "jagentdesk:browser-keyboard-policy-request";
 const SHORTCUT_INPUT_CHANNEL = "jagentdesk:browser-shortcut-input";
+// Kept in sync with GUEST_PROMPT_CHANNEL in main.ts (a sandboxed preload cannot import it).
+const GUEST_PROMPT_CHANNEL = "jagentdesk:browser-guest-prompt";
 
 let browserId: string | null = null;
 let policy: BrowserShortcutPrefix[] = [];
@@ -97,3 +99,27 @@ ipcRenderer.on(POLICY_CHANNEL, (_event, value: BrowserKeyboardPolicyPayload) => 
 });
 
 ipcRenderer.send(POLICY_REQUEST_CHANNEL);
+
+// Electron replaces this frame's prompt() with a stub that throws (lib/renderer/window-setup.ts).
+// Put back a prompt that blocks the page like the real one while the agent or the user answers
+// it (ADR-0025); main replies with the entered text, or null for Cancel.
+function relayPrompt(message: unknown, defaultValue: unknown): string | null {
+  const reply: unknown = ipcRenderer.sendSync(
+    GUEST_PROMPT_CHANNEL,
+    message === undefined ? "" : String(message),
+    defaultValue === undefined ? "" : String(defaultValue),
+  );
+  return typeof reply === "string" ? reply : null;
+}
+
+contextBridge.executeInMainWorld({
+  func: (prompt: typeof relayPrompt) => {
+    Object.defineProperty(window, "prompt", {
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: prompt,
+    });
+  },
+  args: [relayPrompt],
+});

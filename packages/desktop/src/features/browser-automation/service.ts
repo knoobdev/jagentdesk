@@ -4,6 +4,7 @@ import type {
   BrowserAutomationCommand,
   BrowserAutomationConsoleLogEntry,
   BrowserAutomationDialogEvent,
+  BrowserAutomationPendingDialog,
   BrowserAutomationErrorCode,
   BrowserAutomationExecuteResponse,
   BrowserAutomationExecuteRequest,
@@ -39,9 +40,21 @@ export interface TabContents {
   invalidate(): void;
   sendInputEvent(event: IsolatedKeyboardInputEvent): void;
   getConsoleMessages?(): BrowserAutomationConsoleLogEntry[];
-  captureDialogs?<T>(
-    task: () => Promise<T>,
-  ): Promise<{ result: T; dialogs: BrowserAutomationDialogEvent[] }>;
+  /**
+   * Run a command and collect dialog events (ADR-0025). When the command opens a dialog,
+   * `result` is absent and `pendingDialog` is set: the page is blocked on it.
+   */
+  captureDialogs?<T>(task: () => Promise<T>): Promise<{
+    result?: T;
+    dialogs: BrowserAutomationDialogEvent[];
+    pendingDialog?: BrowserAutomationPendingDialog;
+  }>;
+  getPendingDialog?(): BrowserAutomationPendingDialog | null;
+  answerDialog?(answer: {
+    action: "accept" | "dismiss";
+    text?: string;
+  }): BrowserAutomationDialogEvent | null;
+  drainDialogEvents?(): BrowserAutomationDialogEvent[];
   sendDebugCommand?(command: string, params?: Record<string, unknown>): Promise<unknown>;
 }
 
@@ -86,15 +99,95 @@ function fail(
   return { requestId, ok: false, error: { code, message, retryable } };
 }
 
+function describePendingDialog(dialog: BrowserAutomationPendingDialog): string {
+  const input = dialog.type === "prompt" ? " (it asks for text)" : "";
+  return `The page opened a ${dialog.type} dialog${input}: ${JSON.stringify(dialog.message)}. The tab is waiting; answer it with browser_dialog (accept or dismiss).`;
+}
+
+/**
+ * Run a tab command with dialog handling (ADR-0025). A tab already waiting on a dialog is
+ * blocked, so the command does not run; a command that opens one returns as soon as it does.
+ */
 async function withDialogCapture(
-  contents: TabContents,
+  target: ResolvedTabTarget,
+  requestId: string,
   task: () => Promise<AutomationCommandPayload>,
+  options: { whileDialogOpen?: "block" | "run" } = {},
 ): Promise<AutomationCommandPayload> {
+  const { contents, browserId } = target;
+  const blocking = contents.getPendingDialog?.() ?? null;
+  if (blocking && options.whileDialogOpen === "run") {
+    // Needs no page script (screenshot, logs) or replaces the page (navigation cancels it).
+    const payload = await task();
+    return { ...payload, pendingDialog: blocking };
+  }
+  if (blocking) {
+    return {
+      ...fail(requestId, "browser_denied", describePendingDialog(blocking)),
+      pendingDialog: blocking,
+    };
+  }
   if (!contents.captureDialogs) {
     return task();
   }
-  const { result, dialogs } = await contents.captureDialogs(task);
-  return dialogs.length > 0 ? { ...result, dialogs } : result;
+  const { result, dialogs, pendingDialog } = await contents.captureDialogs(task);
+  const withEvents = (payload: AutomationCommandPayload): AutomationCommandPayload =>
+    dialogs.length > 0 ? { ...payload, dialogs } : payload;
+  if (pendingDialog || !result) {
+    return withEvents({
+      requestId,
+      ok: true,
+      result: { command: "dialog", browserId, pendingDialog: pendingDialog ?? null, handled: null },
+      ...(pendingDialog ? { pendingDialog } : {}),
+    });
+  }
+  return withEvents(result);
+}
+
+const DIALOG_FOLLOW_UP_MS = 150;
+
+/** Read or answer the dialog a tab is waiting on (ADR-0025). */
+async function executeDialog(
+  requestId: string,
+  workspaceId: string | undefined,
+  browserId: string,
+  action: "accept" | "dismiss" | "status",
+  text: string | undefined,
+  registry: BrowserRegistry,
+): Promise<AutomationCommandPayload> {
+  const target = resolveTabTarget({ requestId, workspaceId, browserId, registry });
+  if ("ok" in target) return target;
+  const { contents } = target;
+  if (!contents.getPendingDialog || !contents.answerDialog) {
+    return fail(requestId, "browser_unsupported", "This app version cannot answer page dialogs.");
+  }
+  let handled: BrowserAutomationDialogEvent | null = null;
+  if (action !== "status") {
+    handled = contents.answerDialog({ action, ...(text !== undefined ? { text } : {}) });
+    // The page may open the next dialog right away (e.g. a confirm after an alert).
+    if (handled) await new Promise((resolve) => setTimeout(resolve, DIALOG_FOLLOW_UP_MS));
+  }
+  const pendingDialog = contents.getPendingDialog();
+  const dialogs = contents.drainDialogEvents?.() ?? [];
+  return {
+    requestId,
+    ok: true,
+    result: {
+      command: "dialog",
+      browserId,
+      pendingDialog,
+      handled: handled
+        ? {
+            type: handled.type === "beforeunload" ? "confirm" : handled.type,
+            message: handled.message,
+            action: handled.action,
+            ...(handled.promptText !== undefined ? { promptText: handled.promptText } : {}),
+          }
+        : null,
+    },
+    ...(pendingDialog ? { pendingDialog } : {}),
+    ...(dialogs.length > 0 ? { dialogs } : {}),
+  };
 }
 
 class ScreenshotNoFrameError extends Error {
@@ -468,6 +561,17 @@ const commandHandlers: Record<BrowserAutomationCommand["command"], CommandHandle
     fail(requestId, "browser_unsupported", "browser_resize is handled by the app runtime."),
   close_tab: ({ requestId }) =>
     fail(requestId, "browser_unsupported", "browser_close_tab is handled by the app runtime."),
+  dialog: ({ command, requestId, workspaceId, registry }) => {
+    const dialogCommand = command as Extract<BrowserAutomationCommand, { command: "dialog" }>;
+    return executeDialog(
+      requestId,
+      workspaceId,
+      dialogCommand.args.browserId,
+      dialogCommand.args.action,
+      dialogCommand.args.text,
+      registry,
+    );
+  },
   cdp: ({ command, requestId, workspaceId, registry }) => {
     const cdpCommand = command as Extract<BrowserAutomationCommand, { command: "cdp" }>;
     return executeCdp(
@@ -574,7 +678,7 @@ async function executeSnapshot(
     return target;
   }
 
-  return withDialogCapture(target.contents, async () => {
+  return withDialogCapture(target, requestId, async () => {
     const snapshot = await snapshotEngine.snapshot({
       browserId: target.browserId,
       page: target.contents,
@@ -610,7 +714,7 @@ async function executeClick(
   if ("ok" in target) {
     return target;
   }
-  return withDialogCapture(target.contents, async () => {
+  return withDialogCapture(target, requestId, async () => {
     if (!target.contents.sendDebugCommand) {
       return fail(requestId, "browser_unsupported", "browser_click requires trusted browser input");
     }
@@ -656,7 +760,7 @@ async function executeFill(
   if ("ok" in target) {
     return target;
   }
-  return withDialogCapture(target.contents, async () => {
+  return withDialogCapture(target, requestId, async () => {
     const result = await snapshotEngine.fill({
       browserId: target.browserId,
       page: target.contents,
@@ -683,7 +787,7 @@ async function executeSelect(
   if ("ok" in target) {
     return target;
   }
-  return withDialogCapture(target.contents, async () => {
+  return withDialogCapture(target, requestId, async () => {
     const result = await snapshotEngine.select({
       browserId: target.browserId,
       page: target.contents,
@@ -713,7 +817,7 @@ async function executeHover(
   if ("ok" in target) {
     return target;
   }
-  return withDialogCapture(target.contents, async () => {
+  return withDialogCapture(target, requestId, async () => {
     if (!target.contents.sendDebugCommand) {
       return fail(requestId, "browser_unsupported", "browser_hover requires trusted browser input");
     }
@@ -759,7 +863,7 @@ async function executeDrag(
   if ("ok" in target) {
     return target;
   }
-  return withDialogCapture(target.contents, async () => {
+  return withDialogCapture(target, requestId, async () => {
     if (!target.contents.sendDebugCommand) {
       return fail(requestId, "browser_unsupported", "browser_drag requires trusted browser input");
     }
@@ -821,22 +925,27 @@ async function executeLogs(
   if ("ok" in target) {
     return target;
   }
-  return withDialogCapture(target.contents, async () => {
-    const consoleMessages = target.contents.getConsoleMessages?.() ?? [];
-    const networkEntries = parseNetworkEntries(
-      await target.contents.executeJavaScript(NETWORK_PERFORMANCE_SCRIPT),
-    );
-    return {
-      requestId,
-      ok: true,
-      result: {
-        command: "logs",
-        browserId: target.browserId,
-        console: consoleMessages.slice(-maxEntries),
-        network: networkEntries.slice(-maxEntries),
-      },
-    };
-  });
+  return withDialogCapture(
+    target,
+    requestId,
+    async () => {
+      const consoleMessages = target.contents.getConsoleMessages?.() ?? [];
+      const networkEntries = parseNetworkEntries(
+        await target.contents.executeJavaScript(NETWORK_PERFORMANCE_SCRIPT),
+      );
+      return {
+        requestId,
+        ok: true,
+        result: {
+          command: "logs",
+          browserId: target.browserId,
+          console: consoleMessages.slice(-maxEntries),
+          network: networkEntries.slice(-maxEntries),
+        },
+      };
+    },
+    { whileDialogOpen: "run" },
+  );
 }
 
 async function executeEvaluate(
@@ -852,7 +961,7 @@ async function executeEvaluate(
   if ("ok" in target) {
     return target;
   }
-  return withDialogCapture(target.contents, async () => {
+  return withDialogCapture(target, requestId, async () => {
     let elementExpression: string | undefined;
     if (ref) {
       const expression = snapshotEngine.runtimeElementExpression({
@@ -910,7 +1019,7 @@ async function executeScroll(
   if ("ok" in target) {
     return target;
   }
-  return withDialogCapture(target.contents, async () => {
+  return withDialogCapture(target, requestId, async () => {
     if (!target.contents.sendDebugCommand) {
       return fail(
         requestId,
@@ -1010,7 +1119,7 @@ async function executeWait(
   if ("ok" in target) {
     return target;
   }
-  return withDialogCapture(target.contents, async () => {
+  return withDialogCapture(target, requestId, async () => {
     if (!condition.text && !condition.url) {
       return fail(requestId, "browser_unsupported", "browser_wait requires text or url");
     }
@@ -1071,7 +1180,7 @@ async function executeType(
   if ("ok" in target) {
     return target;
   }
-  return withDialogCapture(target.contents, async () => {
+  return withDialogCapture(target, requestId, async () => {
     if (!target.contents.sendDebugCommand) {
       return fail(requestId, "browser_unsupported", "browser_type requires trusted browser input");
     }
@@ -1121,7 +1230,7 @@ async function executeKeypress(
   if ("ok" in target) {
     return target;
   }
-  return withDialogCapture(target.contents, async () => {
+  return withDialogCapture(target, requestId, async () => {
     let actionable: ActionabilityResult | null = null;
     if (ref) {
       const elementExpression = snapshotEngine.runtimeElementExpression({
@@ -1180,22 +1289,27 @@ async function executeNavigate(
   if ("ok" in target) {
     return target;
   }
-  return withDialogCapture(target.contents, async () => {
-    if (!isAllowedPageUrl(url)) {
-      return fail(
+  return withDialogCapture(
+    target,
+    requestId,
+    async () => {
+      if (!isAllowedPageUrl(url)) {
+        return fail(
+          requestId,
+          "browser_denied",
+          "Browser navigation only supports http and https URLs.",
+        );
+      }
+      snapshotEngine.clearBrowser(browserId);
+      await target.contents.loadURL(url);
+      return {
         requestId,
-        "browser_denied",
-        "Browser navigation only supports http and https URLs.",
-      );
-    }
-    snapshotEngine.clearBrowser(browserId);
-    await target.contents.loadURL(url);
-    return {
-      requestId,
-      ok: true,
-      result: { command: "navigate", browserId: target.browserId, url },
-    };
-  });
+        ok: true,
+        result: { command: "navigate", browserId: target.browserId, url },
+      };
+    },
+    { whileDialogOpen: "run" },
+  );
 }
 
 async function executeNavigationAction(
@@ -1210,27 +1324,32 @@ async function executeNavigationAction(
   if ("ok" in target) {
     return target;
   }
-  return withDialogCapture(target.contents, async () => {
-    if (action === "back") {
-      if (!target.contents.canGoBack()) {
-        return fail(requestId, "browser_denied", "There is nothing to go back to.");
+  return withDialogCapture(
+    target,
+    requestId,
+    async () => {
+      if (action === "back") {
+        if (!target.contents.canGoBack()) {
+          return fail(requestId, "browser_denied", "There is nothing to go back to.");
+        }
+        snapshotEngine.clearBrowser(browserId);
+        target.contents.goBack();
+        return { requestId, ok: true, result: { command: "back", browserId: target.browserId } };
+      }
+      if (action === "forward") {
+        if (!target.contents.canGoForward()) {
+          return fail(requestId, "browser_denied", "There is nothing to go forward to.");
+        }
+        snapshotEngine.clearBrowser(browserId);
+        target.contents.goForward();
+        return { requestId, ok: true, result: { command: "forward", browserId: target.browserId } };
       }
       snapshotEngine.clearBrowser(browserId);
-      target.contents.goBack();
-      return { requestId, ok: true, result: { command: "back", browserId: target.browserId } };
-    }
-    if (action === "forward") {
-      if (!target.contents.canGoForward()) {
-        return fail(requestId, "browser_denied", "There is nothing to go forward to.");
-      }
-      snapshotEngine.clearBrowser(browserId);
-      target.contents.goForward();
-      return { requestId, ok: true, result: { command: "forward", browserId: target.browserId } };
-    }
-    snapshotEngine.clearBrowser(browserId);
-    target.contents.reload();
-    return { requestId, ok: true, result: { command: "reload", browserId: target.browserId } };
-  });
+      target.contents.reload();
+      return { requestId, ok: true, result: { command: "reload", browserId: target.browserId } };
+    },
+    { whileDialogOpen: "run" },
+  );
 }
 
 async function executeScreenshot(
@@ -1248,30 +1367,35 @@ async function executeScreenshot(
   if ("ok" in target) {
     return target;
   }
-  return withDialogCapture(target.contents, async () => {
-    let image: TabImage;
-    try {
-      image = await capturePaintedViewport(target.contents);
-    } catch (error) {
-      if (isScreenshotNoFrameError(error)) {
-        return screenshotNoFrameFailure(requestId, error);
+  return withDialogCapture(
+    target,
+    requestId,
+    async () => {
+      let image: TabImage;
+      try {
+        image = await capturePaintedViewport(target.contents);
+      } catch (error) {
+        if (isScreenshotNoFrameError(error)) {
+          return screenshotNoFrameFailure(requestId, error);
+        }
+        throw error;
       }
-      throw error;
-    }
-    const size = image.getSize();
-    return {
-      requestId,
-      ok: true,
-      result: {
-        command: "screenshot",
-        browserId: target.browserId,
-        mimeType: "image/png",
-        dataBase64: Buffer.from(image.toPNG()).toString("base64"),
-        width: size.width,
-        height: size.height,
-      },
-    };
-  });
+      const size = image.getSize();
+      return {
+        requestId,
+        ok: true,
+        result: {
+          command: "screenshot",
+          browserId: target.browserId,
+          mimeType: "image/png",
+          dataBase64: Buffer.from(image.toPNG()).toString("base64"),
+          width: size.width,
+          height: size.height,
+        },
+      };
+    },
+    { whileDialogOpen: "run" },
+  );
 }
 
 interface CdpLayoutMetrics {
@@ -1342,7 +1466,7 @@ async function executeFullPageScreenshot(
   if ("ok" in target) {
     return target;
   }
-  return withDialogCapture(target.contents, async () => {
+  return withDialogCapture(target, requestId, async () => {
     if (!target.contents.sendDebugCommand) {
       return fail(requestId, "browser_unsupported", "browser_screenshot fullPage requires CDP");
     }
@@ -1406,7 +1530,7 @@ async function executeUpload(
   if ("ok" in target) {
     return target;
   }
-  return withDialogCapture(target.contents, async () => {
+  return withDialogCapture(target, requestId, async () => {
     if (!target.contents.sendDebugCommand) {
       return fail(requestId, "browser_unsupported", "browser_upload requires CDP");
     }

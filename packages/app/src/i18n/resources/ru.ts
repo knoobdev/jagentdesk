@@ -517,6 +517,14 @@ export const ru: TranslationResources = {
         submit: "Прикрепить",
         cancel: "Отмена",
       },
+      dialog: {
+        alertTitle: "Страница показывает сообщение",
+        confirmTitle: "Страница просит подтверждения",
+        promptTitle: "Страница запрашивает ввод",
+        accept: "OK",
+        dismiss: "Отмена",
+        hint: "Страница приостановлена, пока вы или агент не ответите.",
+      },
       devices: {
         label: "Размер устройства",
         responsive: "Адаптивный",

@@ -6,6 +6,7 @@ import type {
   BrowserAutomationConsoleLogEntry,
   BrowserAutomationDialogEvent,
   BrowserAutomationExecuteRequest,
+  BrowserAutomationPendingDialog,
 } from "@jagentdesk/protocol/browser-automation/rpc-schemas";
 import { BrowserSnapshotEngine } from "./snapshot-engine.js";
 import type { BrowserRegistry, TabContents, TabImage } from "./service.js";
@@ -64,6 +65,9 @@ class FakeTab implements TabContents {
   public networkEntries: unknown[] = [];
   public consoleMessages: BrowserAutomationConsoleLogEntry[] = [];
   public dialogsToCapture: BrowserAutomationDialogEvent[] = [];
+  public dialogToOpen: BrowserAutomationPendingDialog | null = null;
+  public pendingDialog: BrowserAutomationPendingDialog | null = null;
+  public readonly answers: Array<{ action: "accept" | "dismiss"; text?: string }> = [];
   public captureNeverPaints = false;
   public captureThrows = false;
   public captureErrorMessage = "capture failed";
@@ -191,10 +195,46 @@ class FakeTab implements TabContents {
     return this.consoleMessages;
   }
 
-  public async captureDialogs<T>(
-    task: () => Promise<T>,
-  ): Promise<{ result: T; dialogs: BrowserAutomationDialogEvent[] }> {
+  public async captureDialogs<T>(task: () => Promise<T>): Promise<{
+    result?: T;
+    dialogs: BrowserAutomationDialogEvent[];
+    pendingDialog?: BrowserAutomationPendingDialog;
+  }> {
+    if (this.dialogToOpen) {
+      // The page opened a dialog mid-command; the command itself stays blocked.
+      void task();
+      this.pendingDialog = this.dialogToOpen;
+      this.dialogToOpen = null;
+      return { dialogs: this.dialogsToCapture, pendingDialog: this.pendingDialog };
+    }
     return { result: await task(), dialogs: this.dialogsToCapture };
+  }
+
+  public getPendingDialog(): BrowserAutomationPendingDialog | null {
+    return this.pendingDialog;
+  }
+
+  public answerDialog(answer: {
+    action: "accept" | "dismiss";
+    text?: string;
+  }): BrowserAutomationDialogEvent | null {
+    const dialog = this.pendingDialog;
+    if (!dialog) return null;
+    this.pendingDialog = null;
+    this.answers.push(answer);
+    return {
+      type: dialog.type,
+      message: dialog.message,
+      action: answer.action === "accept" ? "accepted" : "dismissed",
+      ...(dialog.type === "prompt" && answer.action === "accept"
+        ? { promptText: answer.text ?? "" }
+        : {}),
+      timestamp: 5,
+    };
+  }
+
+  public drainDialogEvents(): BrowserAutomationDialogEvent[] {
+    return [];
   }
 
   public async sendDebugCommand(
@@ -790,6 +830,77 @@ describe("executeAutomationCommand", () => {
       result,
     });
     expect(containsScript(browser.tab, ...scriptParts)).toBe(true);
+  });
+
+  test("a command that opens a dialog returns it; the agent then answers it", async () => {
+    const browser = new BrowserAutomationHarness();
+    browser.tab.snapshotNodes = formElements();
+    requireSnapshotRefs(await browser.snapshot());
+    const dialog: BrowserAutomationPendingDialog = {
+      id: "dlg-1",
+      type: "prompt",
+      message: "Your name?",
+      defaultValue: "guest",
+      url: "https://a.test/form",
+      openedAtMs: 1,
+    };
+    browser.tab.dialogToOpen = dialog;
+
+    const click = await browser.execute({
+      command: "click",
+      args: { browserId: BROWSER_A, ref: "@e1" },
+    });
+    expect(click).toEqual({
+      requestId: "req-click",
+      ok: true,
+      result: { command: "dialog", browserId: BROWSER_A, pendingDialog: dialog, handled: null },
+      pendingDialog: dialog,
+    });
+
+    const blocked = await browser.execute({
+      command: "snapshot",
+      args: { browserId: BROWSER_A },
+    });
+    expect(blocked).toMatchObject({
+      ok: false,
+      error: { code: "browser_denied" },
+      pendingDialog: dialog,
+    });
+
+    const screenshotWhileWaiting = await browser.execute({
+      command: "screenshot",
+      args: { browserId: BROWSER_A },
+    });
+    expect(screenshotWhileWaiting).toMatchObject({ ok: true, pendingDialog: dialog });
+
+    const answered = await browser.execute({
+      command: "dialog",
+      args: { browserId: BROWSER_A, action: "accept", text: "Ada" },
+    });
+    expect(browser.tab.answers).toEqual([{ action: "accept", text: "Ada" }]);
+    expect(answered).toMatchObject({
+      ok: true,
+      result: {
+        command: "dialog",
+        pendingDialog: null,
+        handled: { type: "prompt", action: "accepted", promptText: "Ada" },
+      },
+    });
+  });
+
+  test("dialog status reports no open dialog", async () => {
+    const browser = new BrowserAutomationHarness();
+
+    const status = await browser.execute({
+      command: "dialog",
+      args: { browserId: BROWSER_A, action: "status" },
+    });
+
+    expect(status).toEqual({
+      requestId: "req-dialog",
+      ok: true,
+      result: { command: "dialog", browserId: BROWSER_A, pendingDialog: null, handled: null },
+    });
   });
 
   test("hover moves the trusted browser pointer to the actionable point", async () => {

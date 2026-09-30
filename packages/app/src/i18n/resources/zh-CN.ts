@@ -510,6 +510,14 @@ export const zhCN: TranslationResources = {
         submit: "附加",
         cancel: "取消",
       },
+      dialog: {
+        alertTitle: "页面显示了一条消息",
+        confirmTitle: "页面请求确认",
+        promptTitle: "页面请求输入",
+        accept: "确定",
+        dismiss: "取消",
+        hint: "页面已暂停，等待你或智能体回应。",
+      },
       devices: {
         label: "设备尺寸",
         responsive: "自适应",

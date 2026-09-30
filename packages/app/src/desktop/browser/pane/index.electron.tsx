@@ -50,6 +50,7 @@ import {
   type DesktopBrowserShortcutEvent,
 } from "@/desktop/host";
 import { useBrowserStore, normalizeWorkspaceBrowserUrl } from "@/desktop/browser/store";
+import { BrowserDialogBar } from "@/desktop/browser/pane/dialog-bar";
 import {
   BrowserTaskPanel,
   CockpitControls,
@@ -1712,6 +1713,7 @@ export function BrowserPane({
                 <Text style={styles.drivingBadgeText}>agent driving</Text>
               </View>
             ) : null}
+            <BrowserDialogBar browserId={browserId} />
             {pendingSelection ? (
               <BrowserElementAnnotationCard
                 selection={pendingSelection}

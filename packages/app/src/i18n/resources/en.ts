@@ -512,6 +512,14 @@ export const en = {
         submit: "Attach",
         cancel: "Cancel",
       },
+      dialog: {
+        alertTitle: "The page shows a message",
+        confirmTitle: "The page asks you to confirm",
+        promptTitle: "The page asks for input",
+        accept: "OK",
+        dismiss: "Cancel",
+        hint: "The page is paused until you or the agent answer.",
+      },
       devices: {
         label: "Device size",
         responsive: "Responsive",

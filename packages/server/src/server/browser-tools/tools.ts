@@ -705,6 +705,38 @@ export function registerBrowserTools(options: RegisterBrowserToolsOptions): void
   );
 
   options.registerTool(
+    "browser_dialog",
+    {
+      title: "Answer a browser dialog",
+      description:
+        "Answer the JavaScript dialog (alert, confirm or prompt) that a JAgentDesk browser tab is waiting on. A tool result says when a page opened one; the tab is paused and other tools on it fail until the dialog is answered. Decide from the dialog message: action accept presses OK, dismiss presses Cancel, status only reports the open dialog. For a prompt, text is what you type (default: the prompt's default value). Use browserId from browser_new_tab or browser_list_tabs.",
+      inputSchema: {
+        browserId: BrowserAutomationBrowserIdSchema,
+        action: z.enum(["accept", "dismiss", "status"]),
+        text: z.string().optional().describe("Text to enter in a prompt() dialog when accepting."),
+      },
+    },
+    async ({ browserId, action, text }) => {
+      const context = resolveBrowserToolContext(options);
+      const payload = await options.broker.execute({
+        agentId: context.agentId,
+        cwd: context.cwd,
+        ...(context.workspaceId ? { workspaceId: context.workspaceId } : {}),
+
+        command: {
+          command: "dialog",
+          args: {
+            browserId,
+            action,
+            ...(text !== undefined ? { text } : {}),
+          },
+        },
+      });
+      return browserToolResult({ payload, context: { ...context, browserId } });
+    },
+  );
+
+  options.registerTool(
     "browser_cdp",
     {
       title: "Send a raw Chrome DevTools Protocol command",
@@ -815,6 +847,7 @@ function browserToolResult(params: {
         ok: true,
         result: browserToolStructuredResult(payload.result),
         ...(payload.dialogs ? { dialogs: payload.dialogs } : {}),
+        ...(payload.pendingDialog ? { pendingDialog: payload.pendingDialog } : {}),
         context,
       },
     };
@@ -824,13 +857,22 @@ function browserToolResult(params: {
     content: [
       {
         type: "text",
-        text: appendDialogSummary(summarizeBrowserError(payload.error), payload.dialogs),
+        text: appendPendingDialog(
+          appendDialogSummary(
+            payload.pendingDialog
+              ? "The command did not run because the tab is paused by an open dialog."
+              : summarizeBrowserError(payload.error),
+            payload.dialogs,
+          ),
+          payload.pendingDialog,
+        ),
       },
     ],
     structuredContent: {
       ok: false,
       error: payload.error,
       ...(payload.dialogs ? { dialogs: payload.dialogs } : {}),
+      ...(payload.pendingDialog ? { pendingDialog: payload.pendingDialog } : {}),
       context,
     },
   };
@@ -872,7 +914,23 @@ function browserToolImageContent(
 function summarizeBrowserSuccess(
   payload: Extract<BrowserToolsResponsePayload, { ok: true }>,
 ): string {
-  const withDialogs = (summary: string) => appendDialogSummary(summary, payload.dialogs);
+  const withDialogs = (summary: string) =>
+    appendPendingDialog(appendDialogSummary(summary, payload.dialogs), payload.pendingDialog);
+  if (payload.result.command === "dialog") {
+    const { handled } = payload.result;
+    if (handled) {
+      const withText =
+        handled.promptText !== undefined ? ` with text ${JSON.stringify(handled.promptText)}` : "";
+      return withDialogs(
+        `Browser dialog ${handled.action}: ${handled.type} ${JSON.stringify(handled.message)}${withText}.`,
+      );
+    }
+    return withDialogs(
+      payload.result.pendingDialog
+        ? "The page opened a dialog before the command finished."
+        : "No browser dialog is open on this tab.",
+    );
+  }
   const controlSummary = summarizeBrowserControlSuccess(payload.result);
   if (controlSummary) {
     return withDialogs(controlSummary);
@@ -952,9 +1010,31 @@ function appendDialogSummary(
   if (!dialogs || dialogs.length === 0) {
     return summary;
   }
-  return `${summary}\nHandled browser dialog${dialogs.length === 1 ? "" : "s"}: ${dialogs
+  return `${summary}\nBrowser dialog${dialogs.length === 1 ? "" : "s"} since the last command: ${dialogs
     .map((dialog) => `${dialog.action} ${dialog.type} ${JSON.stringify(dialog.message)}`)
     .join("; ")}.`;
+}
+
+function appendPendingDialog(
+  summary: string,
+  pendingDialog: BrowserToolsResponsePayload["pendingDialog"],
+): string {
+  if (!pendingDialog) {
+    return summary;
+  }
+  const lines = [
+    `${summary}\nThe tab is waiting on a ${pendingDialog.type} dialog: ${JSON.stringify(pendingDialog.message)}.`,
+  ];
+  if (pendingDialog.type === "prompt") {
+    lines.push(`Default value: ${JSON.stringify(pendingDialog.defaultValue ?? "")}.`);
+  }
+  lines.push(
+    pendingDialog.type === "alert"
+      ? "Answer it with browser_dialog action=accept before other tools on this tab."
+      : "Decide, then answer it with browser_dialog: action=accept (OK) or action=dismiss (Cancel)" +
+          (pendingDialog.type === "prompt" ? ", with text for the prompt." : "."),
+  );
+  return lines.join("\n");
 }
 
 function summarizeBrowserMediaSuccess(

@@ -516,6 +516,14 @@ export const ptBR: TranslationResources = {
         submit: "Anexar",
         cancel: "Cancelar",
       },
+      dialog: {
+        alertTitle: "A página mostra uma mensagem",
+        confirmTitle: "A página pede confirmação",
+        promptTitle: "A página pede uma entrada",
+        accept: "OK",
+        dismiss: "Cancelar",
+        hint: "A página fica pausada até você ou o agente responder.",
+      },
       devices: {
         label: "Tamanho do dispositivo",
         responsive: "Responsivo",

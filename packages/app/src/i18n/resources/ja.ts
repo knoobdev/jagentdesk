@@ -517,6 +517,14 @@ export const ja: TranslationResources = {
         submit: "添付",
         cancel: "キャンセル",
       },
+      dialog: {
+        alertTitle: "ページがメッセージを表示しています",
+        confirmTitle: "ページが確認を求めています",
+        promptTitle: "ページが入力を求めています",
+        accept: "OK",
+        dismiss: "キャンセル",
+        hint: "あなたかエージェントが応答するまでページは停止しています。",
+      },
       devices: {
         label: "デバイスサイズ",
         responsive: "レスポンシブ",

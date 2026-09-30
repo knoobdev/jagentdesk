@@ -1,6 +1,7 @@
 import { webContents as allWebContents, type WebContents } from "electron";
 import { JAGENTDESK_BROWSER_PROFILE_PARTITION } from "../browser-profile.js";
 import {
+  BROWSER_DIALOG_EVENT,
   BROWSER_NEW_TAB_REQUEST_EVENT,
   decideBrowserWindowOpenRequest,
   isAllowedBrowserWebviewUrl,
@@ -9,6 +10,7 @@ import {
 import { JAgentDeskBrowserWebviewRegistry } from "./registry.js";
 
 export {
+  BROWSER_DIALOG_EVENT,
   BROWSER_NEW_TAB_REQUEST_EVENT,
   decideBrowserWindowOpenRequest,
   PendingBrowserWindowOpenRequests,
@@ -40,9 +42,13 @@ interface RegisterAttachedBrowserInput extends AttachedBrowserRegistration {
   findWebContents(webContentsId: number): RegisteredBrowserWebContents | null;
 }
 
-export function isJAgentDeskBrowserWebviewAttach(input: { src?: string; partition?: string }): boolean {
+export function isJAgentDeskBrowserWebviewAttach(input: {
+  src?: string;
+  partition?: string;
+}): boolean {
   return (
-    isAllowedBrowserWebviewUrl(input.src) && input.partition === JAGENTDESK_BROWSER_PROFILE_PARTITION
+    isAllowedBrowserWebviewUrl(input.src) &&
+    input.partition === JAGENTDESK_BROWSER_PROFILE_PARTITION
   );
 }
 
@@ -98,7 +104,10 @@ export function unregisterJAgentDeskBrowser(browserId: string): void {
   browserRegistry.unregisterBrowser(browserId);
 }
 
-export function unregisterJAgentDeskBrowserFromHost(hostWebContentsId: number, browserId: string): void {
+export function unregisterJAgentDeskBrowserFromHost(
+  hostWebContentsId: number,
+  browserId: string,
+): void {
   browserRegistry.unregisterBrowserFromHost(hostWebContentsId, browserId);
 }
 

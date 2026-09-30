@@ -517,6 +517,14 @@ export const fr: TranslationResources = {
         submit: "Joindre",
         cancel: "Annuler",
       },
+      dialog: {
+        alertTitle: "La page affiche un message",
+        confirmTitle: "La page demande une confirmation",
+        promptTitle: "La page demande une saisie",
+        accept: "OK",
+        dismiss: "Annuler",
+        hint: "La page est en pause jusqu’à ce que vous ou l’agent répondiez.",
+      },
       devices: {
         label: "Taille de l'appareil",
         responsive: "Adaptatif",

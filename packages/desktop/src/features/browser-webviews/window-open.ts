@@ -1,4 +1,5 @@
 export const BROWSER_NEW_TAB_REQUEST_EVENT = "jagentdesk:event:browser-new-tab-request";
+export const BROWSER_DIALOG_EVENT = "jagentdesk:event:browser-dialog";
 
 export type BrowserWindowOpenDisposition =
   | "default"

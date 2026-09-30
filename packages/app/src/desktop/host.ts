@@ -3,6 +3,7 @@ import { getElectronHost } from "@/desktop/electron/host";
 import type { BrowserKeyboardPolicy } from "@/desktop/browser/shortcuts";
 import type { SessionInboundMessage, SessionOutboundMessage } from "@jagentdesk/protocol/messages";
 import type { BrowserFingerprintProfile } from "@jagentdesk/protocol/browser-automation/fingerprint-profile";
+import type { BrowserAutomationPendingDialog } from "@jagentdesk/protocol/browser-automation/rpc-schemas";
 
 type BrowserAutomationExecuteRequest = Extract<
   SessionOutboundMessage,
@@ -137,6 +138,11 @@ export interface DesktopBrowserNewTabRequestEvent {
   url: string;
 }
 
+export interface DesktopBrowserDialogEvent {
+  browserId: string;
+  pendingDialog: BrowserAutomationPendingDialog | null;
+}
+
 export interface DesktopAttachedBrowserRegistration {
   browserId: string;
   workspaceId: string;
@@ -148,6 +154,12 @@ export interface DesktopBrowserBridge {
   readonly profilePartition?: string;
   registerAttachedBrowser?: (input: DesktopAttachedBrowserRegistration) => Promise<void>;
   unregisterWorkspaceBrowser?: (browserId: string) => Promise<void>;
+  /** The tab's pending JavaScript dialog (ADR-0025); answered by the user or the agent. */
+  getDialog?: (browserId: string) => Promise<BrowserAutomationPendingDialog | null>;
+  answerDialog?: (
+    browserId: string,
+    answer: { action: "accept" | "dismiss"; text?: string },
+  ) => Promise<unknown>;
   setWorkspaceActiveBrowser?: (input: {
     workspaceId: string;
     browserId: string | null;
