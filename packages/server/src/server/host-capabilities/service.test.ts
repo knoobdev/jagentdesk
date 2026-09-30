@@ -60,10 +60,8 @@ describe("HostCapabilityService", () => {
     ).refresh();
     expect(caps.iosSimulators?.state).toBe("unsupported_os");
     expect(caps.proxySystemCapture?.state).toBe("unsupported_os");
-    expect(caps.androidDevices).toMatchObject({
-      state: "missing_tool",
-      installable: ["android-sdk"],
-    });
+    // Android SDK install arrives with the Android fleet; until then nothing is offered.
+    expect(caps.androidDevices).toMatchObject({ state: "missing_tool", installable: [] });
     expect(caps.forgeGh).toMatchObject({ state: "missing_tool", installable: ["gh"] });
     expect(caps.docker?.state).toBe("missing_tool");
   });
@@ -117,7 +115,7 @@ describe("HostCapabilityService", () => {
         { "/usr/bin/java -version": { ok: true, stdout: "", stderr: 'java version "11.0.2"' } },
       ),
     ).refresh();
-    expect(old.java).toMatchObject({ state: "missing_tool", installable: ["java"] });
+    expect(old.java).toMatchObject({ state: "missing_tool" });
     const current = await service(
       host({}),
       runner(

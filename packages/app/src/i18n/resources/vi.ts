@@ -260,6 +260,38 @@ export const vi = {
     },
   },
   settings: {
+    hostSections: {
+      tools: "Công cụ",
+    },
+    hostTools: {
+      title: "Công cụ của host",
+      intro:
+        "Những gì host này chạy được, và cài công cụ còn thiếu. Không bao giờ cần quyền quản trị: dùng package manager chạy dưới tài khoản của bạn, hoặc bản phát hành chính thức cho máy này, kiểm theo SHA-256 được công bố.",
+      refresh: "Kiểm tra lại",
+      offline: "Kết nối tới host này để xem công cụ.",
+      unknown: "Host này chưa báo công cụ. Hãy cập nhật host lên bản mới nhất.",
+      installTool: "Cài {{tool}}",
+      install: "Cài",
+      cancel: "Huỷ",
+      close: "Đóng",
+      planning: "Đang xem cách cài…",
+      planFailed: "Không chuẩn bị được việc cài.",
+      installFailed: "Cài không thành công.",
+      installed: "Đã cài {{version}}",
+      viaManager: "Chạy: {{command}}",
+      viaRelease: "Tải bản phát hành chính thức {{version}} cho máy này:",
+      size: "Dung lượng tải: {{size}}",
+      checksum: "File tải về được kiểm theo SHA-256 được công bố trước khi giải nén.",
+      destination: "Cài vào {{path}}",
+      present: "Đã cài sẵn.",
+      manual: "Công cụ này không tự cài được ở đây. Làm theo các bước bên dưới.",
+      state: {
+        available: "Có sẵn {{version}}",
+        missing_tool: "Chưa cài",
+        not_running: "Đã cài, chưa chạy",
+        unsupported_os: "Không có trên hệ điều hành này",
+      },
+    },
     plugins: pluginSettings.vi,
     general: {
       language: {

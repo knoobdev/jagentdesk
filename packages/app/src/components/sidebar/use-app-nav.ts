@@ -25,6 +25,11 @@ import { useClusterNavStore } from "@/stores/cluster-nav-store";
 import { useDatabaseNavStore } from "@/stores/database-nav-store";
 import { useActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
 import { useSessionStore } from "@/stores/session-store";
+import { hostSupportsCapability } from "@/utils/server-info-capabilities";
+import type { HostCapabilityId } from "@jagentdesk/protocol/host-capabilities";
+
+/** Capabilities behind the device fleet (Android joins when its backend ships). */
+const DEVICE_CAPABILITIES: readonly HostCapabilityId[] = ["iosSimulators"];
 import { useWorkspace } from "@/stores/session-store-hooks";
 import {
   buildAgentForumRoute,
@@ -70,6 +75,13 @@ export function useAppNavTargets(): AppNavTargets {
   const supportsForgeHub = useSessionStore(
     (state) => state.sessions[firstServerId]?.serverInfo?.features?.forgeHub === true,
   );
+  // Spec 24.4: devices open on the first host that can run simulators; none → no entry.
+  const deviceServerId = useSessionStore(
+    (state) =>
+      hosts.find((host) =>
+        hostSupportsCapability(state.sessions[host.serverId]?.serverInfo, DEVICE_CAPABILITIES),
+      )?.serverId ?? null,
+  );
   return useMemo(() => {
     const perHost = (build: (serverId: string) => string): Href | null =>
       firstServerId ? (build(firstServerId) as Href) : null;
@@ -97,11 +109,11 @@ export function useAppNavTargets(): AppNavTargets {
       forgeRoute: perHost(buildForgeRoute),
       marketplaceRoute: perHost(buildMarketplaceRoute),
       dockerRoute: perHost(buildDockerRoute),
-      simulatorRoute: perHost(buildSimulatorRoute),
+      simulatorRoute: deviceServerId ? (buildSimulatorRoute(deviceServerId) as Href) : null,
       proxyRoute: perHost(buildProxyRoute),
       supportsForgeHub,
     };
-  }, [firstServerId, lastCluster, lastDatabase, supportsForgeHub]);
+  }, [deviceServerId, firstServerId, lastCluster, lastDatabase, supportsForgeHub]);
 }
 
 export interface AppNavItem {

@@ -1,3 +1,4 @@
+import type { HostCapabilityId } from "@jagentdesk/protocol/host-capabilities";
 import type { ServerCapabilityState } from "@jagentdesk/protocol/messages";
 import type { DaemonServerInfo } from "@/stores/session-store";
 
@@ -47,4 +48,18 @@ export function resolveVoiceUnavailableMessage(params: {
     return message;
   }
   return null;
+}
+
+/**
+ * Whether a host can run a feature at all (spec 24.4): true unless every listed
+ * capability is `unsupported_os`. A daemon that reports no host capabilities (older
+ * versions) is assumed to support it.
+ */
+export function hostSupportsCapability(
+  serverInfo: DaemonServerInfo | null | undefined,
+  ids: readonly HostCapabilityId[],
+): boolean {
+  const host = serverInfo?.capabilities?.host;
+  if (!host) return true;
+  return ids.some((id) => host[id] !== undefined && host[id]!.state !== "unsupported_os");
 }

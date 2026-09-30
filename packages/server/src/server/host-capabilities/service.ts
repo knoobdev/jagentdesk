@@ -9,6 +9,7 @@ import type {
 } from "@jagentdesk/protocol/host-capabilities";
 import { findExecutable } from "../../executable-resolution/executable-resolution.js";
 import { execCommand } from "../../utils/spawn.js";
+import { getToolDefinition } from "../host-tools/registry.js";
 
 /**
  * Probes what this host can run (spec 24.2, ADR-0024). Every probe is a short
@@ -70,8 +71,14 @@ function available(version: string | null): HostCapability {
   return { state: "available", reason: "", version, installable: [] };
 }
 
+/** Only tools the installer's registry knows are offered (spec 24.8). */
 function missing(reason: string, installable: string[] = []): HostCapability {
-  return { state: "missing_tool", reason, version: null, installable };
+  return {
+    state: "missing_tool",
+    reason,
+    version: null,
+    installable: installable.filter((tool) => getToolDefinition(tool) !== null),
+  };
 }
 
 function unsupported(reason: string): HostCapability {

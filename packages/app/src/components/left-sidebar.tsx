@@ -148,6 +148,8 @@ interface SidebarSharedProps {
   handleSimulator: () => void;
   handleWorkbench: () => void;
   supportsForgeHub: boolean;
+  /** Some connected host can run simulators (spec 24.4). */
+  supportsDevices: boolean;
   labels: SidebarLabels;
   newWorkspaceKeys: ShortcutKey[][] | null;
   handleAddHost: () => void;
@@ -459,6 +461,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     handleSimulator: handleSimulatorDesktop,
     handleWorkbench: handleWorkbenchDesktop,
     supportsForgeHub,
+    supportsDevices: simulatorRoute !== null,
     labels,
     newWorkspaceKeys,
   };
@@ -839,6 +842,7 @@ function MobileSidebar({
   handleSimulator,
   handleWorkbench,
   supportsForgeHub,
+  supportsDevices,
   labels,
   handleAddHost,
   handleOpenHostSettings,
@@ -1033,14 +1037,16 @@ function MobileSidebar({
               testID="sidebar-docker-nav"
               variant="compact"
             />
-            <SidebarHeaderRow
-              icon={Smartphone}
-              label={labels.simulator}
-              onPress={handleSimulator}
-              isActive={isSimulatorActive}
-              testID="sidebar-simulator-nav"
-              variant="compact"
-            />
+            {supportsDevices ? (
+              <SidebarHeaderRow
+                icon={Smartphone}
+                label={labels.simulator}
+                onPress={handleSimulator}
+                isActive={isSimulatorActive}
+                testID="sidebar-simulator-nav"
+                variant="compact"
+              />
+            ) : null}
             <SidebarHeaderRow
               icon={Radar}
               label={labels.workbench}
@@ -1134,6 +1140,7 @@ function DesktopSidebar({
   handleSimulator,
   handleWorkbench,
   supportsForgeHub,
+  supportsDevices,
   labels,
   handleAddHost,
   handleOpenHostSettings,
@@ -1348,14 +1355,16 @@ function DesktopSidebar({
                 testID="sidebar-docker-nav"
                 variant="compact"
               />
-              <SidebarHeaderRow
-                icon={Smartphone}
-                label={labels.simulator}
-                onPress={handleSimulator}
-                isActive={isSimulatorActive}
-                testID="sidebar-simulator-nav"
-                variant="compact"
-              />
+              {supportsDevices ? (
+                <SidebarHeaderRow
+                  icon={Smartphone}
+                  label={labels.simulator}
+                  onPress={handleSimulator}
+                  isActive={isSimulatorActive}
+                  testID="sidebar-simulator-nav"
+                  variant="compact"
+                />
+              ) : null}
               <SidebarHeaderRow
                 icon={Radar}
                 label={labels.workbench}

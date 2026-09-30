@@ -35,6 +35,7 @@ import {
   Code2,
   Smartphone,
   GitBranch,
+  Wrench,
 } from "lucide-react-native";
 import { DropdownTrigger } from "@/components/ui/dropdown-trigger";
 import { ComboboxTrigger } from "@/components/ui/combobox-trigger";
@@ -44,6 +45,7 @@ import { HostPicker as SharedHostPicker } from "@/components/hosts/host-picker";
 import { HostStatusDot } from "@/components/host-status-dot";
 import { ScreenTitle } from "@/components/headers/screen-title";
 import { HeaderIconBadge } from "@/components/headers/header-icon-badge";
+import { HostToolsPage } from "@/screens/settings/host-tools-page";
 import { SettingsSection } from "@/screens/settings/settings-section";
 import { AppearanceSection } from "@/screens/settings/appearance/appearance-section";
 import {
@@ -180,6 +182,7 @@ const HOST_SECTION_ITEMS: HostSectionItem[] = [
   { id: "usage", labelKey: "settings.hostSections.usage", icon: Gauge },
   { id: "terminals", labelKey: "settings.hostSections.terminals", icon: SquareTerminal },
   { id: "plugins", labelKey: "settings.hostSections.plugins", icon: Puzzle },
+  { id: "tools", labelKey: "settings.hostSections.tools", icon: Wrench },
 ];
 
 function renderHostSettingsContent(
@@ -208,6 +211,8 @@ function renderHostSettingsContent(
       return <HostTerminalsPage serverId={view.serverId} />;
     case "plugins":
       return <HostPluginsPage serverId={view.serverId} />;
+    case "tools":
+      return <HostToolsPage serverId={view.serverId} />;
     case "host":
       return <HostSettingsPage serverId={view.serverId} onHostRemoved={onHostRemoved} />;
   }
