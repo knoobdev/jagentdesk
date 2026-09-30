@@ -1,3 +1,4 @@
+import { HostCapabilityService } from "./host-capabilities/service.js";
 import express from "express";
 import { createServer as createHTTPServer, type IncomingMessage, type ServerResponse } from "http";
 import { constants, existsSync, unlinkSync } from "fs";
@@ -1824,6 +1825,15 @@ export async function createJAgentDeskDaemon(
             );
             // Agent Forum / Team mode: expose the service to sessions + the bootstrap hook that turns
             // the origin chat agent into the topic's lead (it then spawns/delegates peers).
+            // Spec 24.2: what this host can run, probed in the background after start.
+            const hostCapabilities = new HostCapabilityService({
+              jagentdeskHome: config.jagentdeskHome,
+              logger,
+            });
+            wsServer?.setHostCapabilities(hostCapabilities);
+            void hostCapabilities.refresh().catch((error: unknown) => {
+              logger.warn({ err: error }, "Host capability probe failed");
+            });
             wsServer?.setAgentForum(
               agentForumService,
               createForumBootstrap({ agentManager, agentStorage, logger }),

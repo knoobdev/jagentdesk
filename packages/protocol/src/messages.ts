@@ -43,6 +43,11 @@ import {
 } from "./usage-history.js";
 import { BrowserFingerprintProfileSchema } from "./browser-automation/fingerprint-profile.js";
 import {
+  HostCapabilitiesRefreshRequestSchema,
+  HostCapabilitiesRefreshResponseSchema,
+  HostCapabilitiesSchema,
+} from "./host-capabilities.js";
+import {
   ChatCreateRequestSchema,
   ChatListRequestSchema,
   ChatInspectRequestSchema,
@@ -4052,6 +4057,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ...NativeSkillsRequestSchemas,
   UsageHistoryGetRequestSchema,
   UsageHistoryResetRequestSchema,
+  HostCapabilitiesRefreshRequestSchema,
   DictationStreamStartMessageSchema,
   DictationStreamChunkMessageSchema,
   DictationStreamFinishMessageSchema,
@@ -4416,6 +4422,8 @@ export const ServerVoiceCapabilitiesSchema = z.object({
 export const ServerCapabilitiesSchema = z
   .object({
     voice: ServerVoiceCapabilitiesSchema.optional(),
+    /** What this host can run (spec 24.2, ADR-0024). */
+    host: HostCapabilitiesSchema.optional(),
   })
   .passthrough();
 
@@ -7778,6 +7786,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ...NativeSkillsResponseSchemas,
   UsageHistoryGetResponseSchema,
   UsageHistoryResetResponseSchema,
+  HostCapabilitiesRefreshResponseSchema,
   BrowserAutomationExecuteRequestSchema,
   BrowserScreenshotResponseSchema,
   BrowserListResponseSchema,

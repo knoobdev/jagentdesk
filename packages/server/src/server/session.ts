@@ -234,6 +234,7 @@ import {
   isNativeSkillsRequest,
 } from "./skills-native/session-handler.js";
 import type { UsageHistoryStorage } from "./usage/usage-history-storage.js";
+import type { HostCapabilityService } from "./host-capabilities/service.js";
 import type { LifetimeUsage } from "@jagentdesk/protocol/usage-history";
 import { ScheduleService } from "./schedule/service.js";
 
@@ -509,6 +510,7 @@ export interface SessionOptions {
   loopService: LoopService;
   skillsStorage?: NativeSkillsService | null;
   usageHistory?: UsageHistoryStorage | null;
+  hostCapabilities?: HostCapabilityService | null;
   clusterRegistry?: ClusterRegistry;
   databaseRegistry?: DatabaseRegistry;
   checkoutDiffManager: CheckoutDiffManager;
@@ -774,6 +776,7 @@ export class Session {
   private readonly daemonConfigStore: DaemonConfigStore;
   private readonly skillsStorage: NativeSkillsService | null;
   private readonly usageHistory: UsageHistoryStorage | null;
+  private readonly hostCapabilities: HostCapabilityService | null;
   private readonly pushTokenStore: PushTokenStore;
   private unsubscribeAgentEvents: (() => void) | null = null;
   private unsubscribeProjectMutations: (() => void) | null = null;
@@ -1130,6 +1133,7 @@ export class Session {
     this.daemonConfigStore = daemonConfigStore;
     this.skillsStorage = options.skillsStorage ?? null;
     this.usageHistory = options.usageHistory ?? null;
+    this.hostCapabilities = options.hostCapabilities ?? null;
     this.terminalManager = terminalManager;
     this.terminalController = new TerminalSessionController({
       terminalManager,
@@ -2769,7 +2773,20 @@ export class Session {
       });
       return undefined;
     }
+    if (msg.type === "host.capabilities.refresh.request") {
+      return this.handleHostCapabilitiesRefresh(msg.requestId);
+    }
     return undefined;
+  }
+
+  // Spec 24.2: probe the host again (e.g. after installing Docker); the change is also
+  // broadcast to every client through server_info.
+  private async handleHostCapabilitiesRefresh(requestId: string): Promise<void> {
+    const capabilities = (await this.hostCapabilities?.refresh()) ?? {};
+    this.emit({
+      type: "host.capabilities.refresh.response",
+      payload: { requestId, capabilities },
+    });
   }
 
   private dispatchOrchestrationMessage(msg: SessionInboundMessage): Promise<void> | undefined {

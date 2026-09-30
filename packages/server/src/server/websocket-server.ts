@@ -16,6 +16,8 @@ import type { LoopService } from "./loop-service.js";
 import type { NativeSkillsService } from "./skills-native/index.js";
 import type { Skill } from "@jagentdesk/protocol/skills";
 import type { UsageHistoryStorage } from "./usage/usage-history-storage.js";
+import type { HostCapabilityService } from "./host-capabilities/service.js";
+import type { HostCapabilities } from "@jagentdesk/protocol/host-capabilities";
 import type { LifetimeUsage, UsageDayRollup } from "@jagentdesk/protocol/usage-history";
 import type { ClusterRegistry } from "./cluster/cluster-registry.js";
 import type { DatabaseRegistry } from "./database/database-registry.js";
@@ -420,12 +422,15 @@ function resolveCapabilityReason(params: {
 
 function buildServerCapabilities(params: {
   readiness: SpeechReadinessSnapshot | null;
+  host?: HostCapabilities | null;
 }): ServerCapabilities | undefined {
   const readiness = params.readiness;
+  const host = params.host && Object.keys(params.host).length > 0 ? { host: params.host } : {};
   if (!readiness) {
-    return undefined;
+    return Object.keys(host).length > 0 ? host : undefined;
   }
   return {
+    ...host,
     voice: {
       dictation: toServerCapabilityState({
         state: readiness.dictation,
@@ -620,6 +625,8 @@ export class VoiceAssistantWebSocketServer {
   private readonly loopService: LoopService;
   private skillsStorage: NativeSkillsService | null = null;
   private usageHistory: UsageHistoryStorage | null = null;
+  private hostCapabilities: HostCapabilityService | null = null;
+  private unsubscribeHostCapabilities: (() => void) | null = null;
   private readonly clusterRegistry: ClusterRegistry;
   private readonly databaseRegistry: DatabaseRegistry;
   private readonly scheduleService: ScheduleService;
@@ -1251,7 +1258,21 @@ export class VoiceAssistantWebSocketServer {
   }
 
   public publishSpeechReadiness(readiness: SpeechReadinessSnapshot | null): void {
-    this.updateServerCapabilities(buildServerCapabilities({ readiness }));
+    this.updateServerCapabilities(
+      buildServerCapabilities({ readiness, host: this.hostCapabilities?.snapshot() ?? null }),
+    );
+  }
+
+  /** Spec 24.2: report what this host can run; re-broadcast server_info when it changes. */
+  public setHostCapabilities(service: HostCapabilityService | null): void {
+    this.unsubscribeHostCapabilities?.();
+    this.hostCapabilities = service;
+    this.unsubscribeHostCapabilities =
+      service?.onChange((host) => {
+        this.updateServerCapabilities(
+          buildServerCapabilities({ readiness: this.speech?.getReadiness() ?? null, host }),
+        );
+      }) ?? null;
   }
 
   public updateServerCapabilities(capabilities: ServerCapabilities | null | undefined): void {
@@ -1883,6 +1904,7 @@ export class VoiceAssistantWebSocketServer {
       loopService: this.loopService,
       skillsStorage: this.skillsStorage,
       usageHistory: this.usageHistory,
+      hostCapabilities: this.hostCapabilities,
       clusterRegistry: this.clusterRegistry,
       databaseRegistry: this.databaseRegistry,
       scheduleService: this.scheduleService,

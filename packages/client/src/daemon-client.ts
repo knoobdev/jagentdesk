@@ -1,3 +1,4 @@
+import type { HostCapabilities } from "@jagentdesk/protocol/host-capabilities";
 import type { z } from "zod";
 import { CLIENT_CAPS, type ClientCapability } from "@jagentdesk/protocol/client-capabilities";
 import type { DatabaseEngine, DbConnectionConfig } from "@jagentdesk/protocol/database/rpc-schemas";
@@ -6120,6 +6121,17 @@ export class DaemonClient {
       requestId,
       message: { type: "skills.sources.browse.request", ...options },
       timeout: 120_000,
+    });
+  }
+
+  /** Probe the host again (spec 24.2); the result also arrives via server_info. */
+  async refreshHostCapabilities(
+    requestId?: string,
+  ): Promise<{ requestId: string; capabilities: HostCapabilities }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "host.capabilities.refresh.request" },
+      timeout: 60_000,
     });
   }
 

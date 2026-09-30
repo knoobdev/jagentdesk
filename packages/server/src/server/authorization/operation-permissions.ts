@@ -412,6 +412,7 @@ const INBOUND_PERMISSION = {
   // Destructive daemon-wide write (zeroes persisted usage/cost history), so it
   // needs daemon.manage — same level as the other daemon mutation skills.mutate.
   "usage.history.reset.request": "daemon.manage",
+  "host.capabilities.refresh.request": "daemon.read",
 } as const satisfies Record<InboundOperation, DaemonPermission | null>;
 
 const OUTBOUND_PERMISSION = {
@@ -846,6 +847,7 @@ const OUTBOUND_PERMISSION = {
   switch_agent_provider_response: "workspace.write",
   "usage.history.get.response": "daemon.read",
   "usage.history.reset.response": "daemon.manage",
+  "host.capabilities.refresh.response": "daemon.read",
 } as const satisfies Record<OutboundOperation, DaemonPermission | null>;
 
 export function requiredPermissionForInbound(operation: InboundOperation): DaemonPermission | null {
