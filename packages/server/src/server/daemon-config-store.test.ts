@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test } from "vitest";
 
 import { DaemonConfigStore, applyMutableProviderConfigToOverrides } from "./daemon-config-store.js";
 import { loadPersistedConfig } from "./persisted-config.js";
+import { generateFingerprintProfile } from "@jagentdesk/protocol/browser-automation/fingerprint-profile";
 
 describe("applyMutableProviderConfigToOverrides", () => {
   test("merges mutable provider fields onto provider overrides", () => {
@@ -411,6 +412,37 @@ describe("DaemonConfigStore", () => {
 
     const persisted = loadPersistedConfig(jagentdeskHome);
     expect(persisted.daemon?.browserTools).toEqual({ enabled: true });
+  });
+
+  test("patch persists fingerprint profiles and the active profile into config.json", () => {
+    const jagentdeskHome = mkdtempSync(path.join(tmpdir(), "jagentdesk-daemon-config-store-"));
+    tempDirs.push(jagentdeskHome);
+    const store = new DaemonConfigStore(
+      jagentdeskHome,
+      {
+        mcp: { injectIntoAgents: false },
+        browserTools: { enabled: true },
+        providers: {},
+        metadataGeneration: { providers: [] },
+        autoArchiveAfterMerge: false,
+        appendSystemPrompt: "",
+      },
+      undefined,
+    );
+    const profile = generateFingerprintProfile({
+      id: "bfp_a1b2c3",
+      name: "work",
+      os: "windows",
+      nowMs: 1_790_000_000_000,
+    });
+
+    store.patch({ browserTools: { profiles: [profile] } });
+    store.patch({ browserTools: { activeProfileId: profile.id } });
+
+    const persisted = loadPersistedConfig(jagentdeskHome);
+    expect(persisted.daemon?.browserTools?.profiles).toEqual([profile]);
+    expect(persisted.daemon?.browserTools?.activeProfileId).toBe(profile.id);
+    expect(persisted.daemon?.browserTools?.enabled).toBe(true);
   });
 
   test("patch persists provider additional models into config.json", () => {

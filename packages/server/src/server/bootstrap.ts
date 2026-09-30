@@ -417,6 +417,9 @@ export interface JAgentDeskDaemonConfig {
   mcpEnabled?: boolean;
   mcpInjectIntoAgents?: boolean;
   browserToolsEnabled?: boolean;
+  // Anti-detect fingerprint profiles and the active one (ADR-0011), persisted in config.json.
+  browserFingerprintProfiles?: NonNullable<MutableDaemonConfig["browserTools"]["profiles"]>;
+  browserActiveProfileId?: string | null;
   pluginsEnabled?: boolean;
   plugins?: MutableDaemonConfig["plugins"];
   // Autonomous run (spec §20). Default OFF; only exposes the autorun.* RPC surface +
@@ -561,7 +564,13 @@ function createInitialMutableDaemonConfig(config: JAgentDeskDaemonConfig): Mutab
 
   const initialConfig: MutableDaemonConfig = {
     mcp: { injectIntoAgents: config.mcpInjectIntoAgents ?? true },
-    browserTools: { enabled: config.browserToolsEnabled ?? true },
+    browserTools: {
+      enabled: config.browserToolsEnabled ?? true,
+      ...(config.browserFingerprintProfiles ? { profiles: config.browserFingerprintProfiles } : {}),
+      ...(config.browserActiveProfileId !== undefined
+        ? { activeProfileId: config.browserActiveProfileId }
+        : {}),
+    },
     autorun: { enabled: config.autorunEnabled ?? false },
     sessionSharing: { enabled: config.sessionSharingEnabled ?? false },
     providers,

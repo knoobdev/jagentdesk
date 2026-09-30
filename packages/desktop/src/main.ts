@@ -87,8 +87,11 @@ import { runDesktopStartup } from "./desktop-startup.js";
 import { autoUpdateInstalledSkills } from "./integrations/skills/index.js";
 import { registerBrowserAutomationIpc } from "./features/browser-automation/ipc.js";
 import {
+  applySessionIdentity,
   applyStealthToWebContents,
+  installNavigationClientHints,
   getActiveFingerprintProfile,
+  reapplyStealthToGuests,
   setActiveFingerprintProfile,
   setStealthEnabled,
 } from "./features/browser-stealth.js";
@@ -320,6 +323,8 @@ function installBrowserWindowOpenHandler(input: {
   contents.on("did-create-window", (popupWindow) => {
     const popupContents = popupWindow.webContents;
     registerBrowserWebviewNavigationGuards(popupContents);
+    // Popups share the agentic-browser session, so they get the same identity.
+    void applyStealthToWebContents(popupContents);
     popupContents.on("context-menu", (_event, params) => {
       showBrowserWebviewContextMenu(popupWindow, popupContents, params);
     });
@@ -669,10 +674,14 @@ ipcMain.handle("jagentdesk:browser:copy-element", (_event, payload: unknown): bo
   return false;
 });
 
-ipcMain.handle("jagentdesk:browser:set-stealth", (_event, enabled: unknown): boolean => {
+ipcMain.handle("jagentdesk:browser:set-stealth", async (_event, enabled: unknown) => {
   const on = enabled === true;
   setStealthEnabled(on);
   log.info("[browser-stealth] toggled", { enabled: on });
+  await reapplyStealthToGuests(
+    session.fromPartition(JAGENTDESK_BROWSER_PROFILE_PARTITION),
+    webContents.getAllWebContents(),
+  );
   return on;
 });
 
@@ -687,6 +696,8 @@ ipcMain.handle(
       setActiveFingerprintProfile(null);
       const browserSession = session.fromPartition(JAGENTDESK_BROWSER_PROFILE_PARTITION);
       await applyProfileProxyToSession(browserSession, null);
+      applySessionIdentity(browserSession);
+      await reapplyStealthToGuests(browserSession, webContents.getAllWebContents());
       log.info("[browser-stealth] active profile cleared");
       return { ok: true };
     }
@@ -701,6 +712,10 @@ ipcMain.handle(
     setActiveFingerprintProfile(profile);
     const browserSession = session.fromPartition(JAGENTDESK_BROWSER_PROFILE_PARTITION);
     await applyProfileProxyToSession(browserSession, profile);
+    // Session UA + Accept-Language first (covers every request), then each open guest's
+    // engine overrides and init scripts, so the change also reaches tabs already open.
+    applySessionIdentity(browserSession);
+    await reapplyStealthToGuests(browserSession, webContents.getAllWebContents());
     const extensions = await loadProfileExtensions(browserSession, profile);
     // Content scripts only inject on a navigation AFTER the extension is loaded, so
     // an already-open guest won't get them until it reloads. Reload the open browser
@@ -952,12 +967,25 @@ async function createWindow(
     delete (webPreferences as { preloadURL?: string }).preloadURL;
     delete (params as { preloadURL?: string }).preloadURL;
     webPreferences.preload = getBrowserKeyboardPreloadPath();
+    holdInitialGuestLoad(params);
   });
   mainWindow.webContents.on("did-attach-webview", (_event, contents) => {
     prepareJAgentDeskBrowserWebContents(contents);
-    // Anti-detection: inject fingerprint/webdriver patches before page scripts
-    // (no-op unless stealth is enabled). Runs on the next navigation.
-    void applyStealthToWebContents(contents);
+    // Anti-detection: the guest's identity (UA, Client Hints, timezone, locale, init
+    // scripts) is in place before its first request, then the held URL loads.
+    const initialUrl = takeInitialGuestLoad(contents);
+    void applyStealthToWebContents(contents).finally(() => {
+      if (initialUrl && !contents.isDestroyed()) {
+        contents.loadURL(initialUrl).catch((error: unknown) => {
+          // ERR_ABORTED: the page navigated again before the first load finished.
+          if (error instanceof Error && error.message.includes("ERR_ABORTED")) return;
+          log.warn("[browser-stealth] initial guest load failed", {
+            webContentsId: contents.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      }
+    });
     contents.once("destroyed", () => {
       pendingBrowserWindowOpenRequests.delete(contents.id);
     });
@@ -1117,12 +1145,45 @@ async function runCliPassthroughIfRequested(): Promise<boolean> {
   return true;
 }
 
+// Electron loads a <webview>'s `src` (guest-view-manager) just before it emits
+// did-attach-webview, which is too late for the agent's first request to carry the
+// fingerprint profile. will-attach-webview removes `src` and keeps it here by the view's
+// instance id; did-attach-webview loads it once the identity is applied. Electron sets
+// that instance id on the guest as `viewInstanceId`.
+const heldGuestLoads = new Map<string, string>();
+
+function holdInitialGuestLoad(params: Record<string, string>): void {
+  const src = params.src;
+  const instanceId = params.instanceId;
+  if (!src || src === "about:blank" || instanceId === undefined || instanceId === null) {
+    return;
+  }
+  heldGuestLoads.set(String(instanceId), src);
+  delete params.src;
+}
+
+function takeInitialGuestLoad(contents: Electron.WebContents): string | null {
+  const instanceId = (contents as { viewInstanceId?: unknown }).viewInstanceId;
+  if (instanceId === undefined || instanceId === null) {
+    return null;
+  }
+  const key = String(instanceId);
+  const src = heldGuestLoads.get(key) ?? null;
+  heldGuestLoads.delete(key);
+  return src;
+}
+
 async function bootstrap(): Promise<void> {
   if (!setupSingleInstanceLock()) {
     return;
   }
 
   await app.whenReady();
+  // A plain Chrome UA for the agentic browser until a fingerprint profile arrives, and the
+  // Client Hints Electron leaves off navigation requests.
+  const agenticBrowserSession = session.fromPartition(JAGENTDESK_BROWSER_PROFILE_PARTITION);
+  applySessionIdentity(agenticBrowserSession);
+  installNavigationClientHints(agenticBrowserSession);
 
   if (await refuseRosettaBuild()) {
     return;

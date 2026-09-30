@@ -379,6 +379,14 @@ function mergeMutableConfigIntoPersistedConfig(params: {
       browserTools: {
         ...persisted.daemon?.browserTools,
         enabled: browserToolsEnabled,
+        // Fingerprint profiles live in the daemon config; without these they were lost on
+        // every daemon restart.
+        ...(mutable.browserTools.profiles !== undefined
+          ? { profiles: mutable.browserTools.profiles }
+          : {}),
+        ...(mutable.browserTools.activeProfileId !== undefined
+          ? { activeProfileId: mutable.browserTools.activeProfileId }
+          : {}),
       },
       autorun: {
         ...persisted.daemon?.autorun,

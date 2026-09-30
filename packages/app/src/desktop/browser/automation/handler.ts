@@ -1,5 +1,6 @@
 import type { SessionInboundMessage, SessionOutboundMessage } from "@jagentdesk/protocol/messages";
 import { getDesktopHost, type DesktopHostBridge } from "@/desktop/host";
+import { syncFingerprintProfileNow } from "@/desktop/browser/fingerprint-profile-sync";
 import {
   ensureResidentBrowserWebview as ensureResidentBrowserWebviewDefault,
   removeResidentBrowserWebview,
@@ -42,6 +43,8 @@ export interface BrowserAutomationHandlerOptions {
   ensureResidentBrowserWebview?: typeof ensureResidentBrowserWebviewDefault;
   registrationWaitTimeoutMs?: number;
   registrationPollIntervalMs?: number;
+  /** Runs before a tab opens, e.g. to push the latest fingerprint profile to main. */
+  beforeOpenTab?: () => Promise<void>;
 }
 
 export function mountBrowserAutomationHandler(
@@ -85,6 +88,7 @@ export function mountBrowserAutomationHandler(
       serverId: options.serverId,
       ensureResidentBrowserWebview:
         options.ensureResidentBrowserWebview ?? ensureResidentBrowserWebviewDefault,
+      ...(options.beforeOpenTab ? { beforeOpenTab: options.beforeOpenTab } : {}),
       ...(options.registrationWaitTimeoutMs !== undefined
         ? { registrationWaitTimeoutMs: options.registrationWaitTimeoutMs }
         : {}),
@@ -105,6 +109,7 @@ export function mountBrowserAutomationDaemonClientHandler(
   return mountBrowserAutomationHandler({
     client: client as BrowserAutomationClient,
     ...(options?.serverId ? { serverId: options.serverId } : {}),
+    beforeOpenTab: () => syncFingerprintProfileNow(client as object),
   });
 }
 
@@ -116,6 +121,7 @@ async function handleBrowserAutomationRequest(params: {
   ensureResidentBrowserWebview: typeof ensureResidentBrowserWebviewDefault;
   registrationWaitTimeoutMs?: number;
   registrationPollIntervalMs?: number;
+  beforeOpenTab?: () => Promise<void>;
 }): Promise<void> {
   const {
     client,
@@ -131,6 +137,8 @@ async function handleBrowserAutomationRequest(params: {
 
   if (request.command.command === "new_tab") {
     try {
+      // A profile switched just before this tab (browser_profile_use) must reach main first.
+      await params.beforeOpenTab?.().catch(() => undefined);
       client.sendBrowserAutomationExecuteResponse({
         type: "browser.automation.execute.response",
         payload: await openBrowserTabForRequest({

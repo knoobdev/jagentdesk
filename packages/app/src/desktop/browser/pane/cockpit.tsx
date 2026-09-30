@@ -3,7 +3,10 @@ import { Pressable, ScrollView, Text, View } from "react-native";
 import { Check, ChevronRight, KeyRound, Loader, Shield, X } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useShallow } from "zustand/shallow";
-import { useBrowserActivityStore, type BrowserStep } from "@/desktop/browser/automation/activity-store";
+import {
+  useBrowserActivityStore,
+  type BrowserStep,
+} from "@/desktop/browser/automation/activity-store";
 import { useBrowserStealthStore } from "@/desktop/browser/stealth-store";
 import type { Theme } from "@/styles/theme";
 
@@ -122,7 +125,9 @@ export function CockpitControls({ connectedLogins }: { connectedLogins: number }
       <View style={styles.pill}>
         <ThemedKey size={13} uniProps={mutedColor} />
         <Text style={styles.pillText}>
-          {connectedLogins > 0 ? `${connectedLogins} login${connectedLogins === 1 ? "" : "s"}` : "No logins"}
+          {connectedLogins > 0
+            ? `${connectedLogins} login${connectedLogins === 1 ? "" : "s"}`
+            : "No logins"}
         </Text>
       </View>
     </View>
@@ -191,7 +196,12 @@ const styles = StyleSheet.create((theme: Theme) => ({
     marginTop: theme.spacing[1],
   },
   driveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: theme.colors.foregroundMuted },
-  driveDotOn: { width: 7, height: 7, borderRadius: 4, backgroundColor: theme.colors.palette.green[500] },
+  driveDotOn: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: theme.colors.palette.green[500],
+  },
   driveText: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
   driveTextOn: { fontSize: theme.fontSize.xs, color: theme.colors.palette.green[500] },
   stepScroll: { flex: 1 },
@@ -269,6 +279,15 @@ const styles = StyleSheet.create((theme: Theme) => ({
   stripValueOn: { color: theme.colors.palette.green[500], fontWeight: theme.fontWeight.medium },
   stripValueOff: { color: theme.colors.foregroundMuted, fontWeight: theme.fontWeight.medium },
   stripSep: { width: 1, height: 12, backgroundColor: theme.colors.border },
-  stripMeta: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted, fontVariant: ["tabular-nums"] },
-  stripCurrent: { flex: 1, minWidth: 0, fontSize: theme.fontSize.xs, color: theme.colors.foreground },
+  stripMeta: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+    fontVariant: ["tabular-nums"],
+  },
+  stripCurrent: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foreground,
+  },
 }));

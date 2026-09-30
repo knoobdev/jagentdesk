@@ -99,7 +99,9 @@ function detailFor(command: string, args: Record<string, unknown> | undefined): 
 
 function appendStep(list: BrowserStep[] | undefined, step: BrowserStep): BrowserStep[] {
   const next = [...(list ?? []), step];
-  return next.length > MAX_STEPS_PER_BROWSER ? next.slice(next.length - MAX_STEPS_PER_BROWSER) : next;
+  return next.length > MAX_STEPS_PER_BROWSER
+    ? next.slice(next.length - MAX_STEPS_PER_BROWSER)
+    : next;
 }
 
 export const useBrowserActivityStore = create<BrowserActivityState>()((set) => ({
