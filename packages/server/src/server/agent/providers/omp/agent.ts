@@ -63,10 +63,9 @@ import {
   mergeOmpRuntimeSettings,
   resolveOmpDiagnosticPaths,
   resolveOmpLaunchMode,
-  resolveOmpProviderParams,
+  resolveOmpProviderOptions,
   OMP_MODES,
-  type OmpModelRoleParams,
-  type OmpRuntimeProviderParams,
+  type OmpRuntimeOptions,
 } from "./provider-config.js";
 export { formatOmpVersionSupport, resolveOmpDiagnosticPaths } from "./provider-config.js";
 import { OmpSubagentCardTracker, type OmpSubagentCardScheduler } from "./subagent-card-tracker.js";
@@ -137,7 +136,6 @@ const OMP_CORE_CAPABILITIES: AgentCapabilityFlags = {
 export interface OmpAgentClientOptions {
   logger: Logger;
   runtimeSettings?: ProviderRuntimeSettings;
-  providerParams?: unknown;
   runtime?: OmpRuntime;
   subagentCardScheduler?: OmpSubagentCardScheduler;
   providerIdleScheduler?: OmpProviderIdleScheduler;
@@ -595,15 +593,15 @@ function isOmpAgentSessionEvent(event: OmpRuntimeEvent): event is OmpAgentSessio
 function createRuntime(
   logger: Logger,
   runtimeSettings: ProviderRuntimeSettings | undefined,
-  providerParams: OmpRuntimeProviderParams,
+  providerOptions: OmpRuntimeOptions,
 ): OmpRuntime {
   return new OmpCliRuntime({
     logger,
     runtimeSettings,
     command: ["omp"],
     commandsRpcName: "get_available_commands",
-    readyTimeoutMs: providerParams.readyTimeoutMs,
-    requestTimeoutMs: providerParams.rpcTimeoutMs,
+    readyTimeoutMs: providerOptions.readyTimeoutMs,
+    requestTimeoutMs: providerOptions.rpcTimeoutMs,
   });
 }
 
@@ -2213,19 +2211,14 @@ export class OmpAgentClient implements AgentClient {
 
   private readonly logger: Logger;
   private readonly runtimeSettings?: ProviderRuntimeSettings;
-  private readonly providerParams: OmpRuntimeProviderParams;
-  private readonly modelRoleParams: OmpModelRoleParams;
   private readonly subagentCardScheduler?: OmpSubagentCardScheduler;
   private readonly providerIdleScheduler?: OmpProviderIdleScheduler;
   private readonly noTurnScheduler?: OmpNoTurnScheduler;
   private readonly usagePollScheduler?: OmpUsagePollScheduler;
   private readonly providerIdleDeadlineMs?: number;
-  private readonly runtime: OmpRuntime;
+  private readonly runtime?: OmpRuntime;
 
   constructor(options: OmpAgentClientOptions) {
-    const { runtimeProviderParams, modelRoleParams } = resolveOmpProviderParams(
-      options.providerParams,
-    );
     const runtimeSettings = mergeOmpRuntimeSettings(
       {
         command: {
@@ -2237,15 +2230,12 @@ export class OmpAgentClient implements AgentClient {
     );
     this.logger = options.logger;
     this.runtimeSettings = runtimeSettings;
-    this.providerParams = runtimeProviderParams;
-    this.modelRoleParams = modelRoleParams;
     this.subagentCardScheduler = options.subagentCardScheduler;
     this.providerIdleScheduler = options.providerIdleScheduler;
     this.noTurnScheduler = options.noTurnScheduler;
     this.usagePollScheduler = options.usagePollScheduler;
     this.providerIdleDeadlineMs = options.providerIdleDeadlineMs;
-    this.runtime =
-      options.runtime ?? createRuntime(options.logger, runtimeSettings, this.providerParams);
+    this.runtime = options.runtime;
   }
 
   private async configureNativeJAgentDeskTools(
@@ -2288,7 +2278,7 @@ export class OmpAgentClient implements AgentClient {
     config: AgentSessionConfig,
     launchContext?: AgentLaunchContext,
   ): Promise<AgentSession> {
-    const launchMode = this.resolveLaunchMode(config.modeId);
+    const launchMode = this.resolveLaunchMode(config.modeId, config.providerOptions);
     const startInput: OmpStartSessionInput = {
       cwd: config.cwd,
       protocolMode: "rpc-ui",
@@ -2300,7 +2290,9 @@ export class OmpAgentClient implements AgentClient {
       systemPrompt: composeSystemPromptParts(config.systemPrompt, config.daemonAppendSystemPrompt),
       env: launchContext?.env,
     };
-    const runtimeSession = await this.runtime.startSession(startInput);
+    const runtimeSession = await this.resolveRuntime(config.providerOptions).startSession(
+      startInput,
+    );
     let hostTools: OmpHostToolRouter | undefined;
     try {
       hostTools = await this.configureNativeJAgentDeskTools(
@@ -2359,14 +2351,19 @@ export class OmpAgentClient implements AgentClient {
       );
     }
 
-    const launchMode = this.resolveLaunchMode(resumeConfig.modeId);
+    const launchMode = this.resolveLaunchMode(
+      resumeConfig.modeId,
+      resumeConfig.config.providerOptions,
+    );
     const startInput = buildResumeStartInput({
       resumeConfig,
       sessionFile,
       launchContext,
       launchMode,
     });
-    const runtimeSession = await this.runtime.startSession(startInput);
+    const runtimeSession = await this.resolveRuntime(
+      resumeConfig.config.providerOptions,
+    ).startSession(startInput);
     let hostTools: OmpHostToolRouter | undefined;
     try {
       hostTools = await this.configureNativeJAgentDeskTools(
@@ -2408,8 +2405,8 @@ export class OmpAgentClient implements AgentClient {
     launchContext?: AgentLaunchContext,
   ): OmpAgentSessionOptions["restartRuntime"] {
     return async (sessionFile, modeId) => {
-      const launchMode = this.resolveLaunchMode(modeId);
-      const next = await this.runtime.startSession({
+      const launchMode = this.resolveLaunchMode(modeId, config.providerOptions);
+      const next = await this.resolveRuntime(config.providerOptions).startSession({
         ...startInput,
         model: config.model,
         thinkingOptionId: normalizeOmpThinkingOption(config.thinkingOptionId) ?? undefined,
@@ -2440,7 +2437,7 @@ export class OmpAgentClient implements AgentClient {
     options: FetchCatalogOptions,
     context?: ProviderRefreshContext,
   ): Promise<ProviderCatalog> {
-    const launchMode = this.resolveLaunchMode(undefined);
+    const launchMode = this.resolveLaunchMode(undefined, options.providerOptions);
     let runtimeSession: OmpRuntimeSession | undefined;
     let closePromise: Promise<void> | undefined;
     const closeSession = () => {
@@ -2452,7 +2449,7 @@ export class OmpAgentClient implements AgentClient {
     context?.signal.addEventListener("abort", handleAbort, { once: true });
     try {
       await runProviderRefreshActivity(context, "runtime.start", async () => {
-        runtimeSession = await this.runtime.startSession({
+        runtimeSession = await this.resolveRuntime(options.providerOptions).startSession({
           cwd: options.scope === "global" ? homedir() : options.cwd,
           protocolMode: "rpc-ui",
           modeId: launchMode.modeId,
@@ -2486,14 +2483,15 @@ export class OmpAgentClient implements AgentClient {
   ): Promise<ImportableProviderSession[]> {
     return await listOmpImportableSessions({
       ...options,
-      sessionDir: this.providerParams.sessionDir,
+      sessionDir: resolveOmpProviderOptions(options?.providerOptions).runtimeOptions.sessionDir,
       runtimeSettings: this.runtimeSettings,
     });
   }
 
   async importSession(input: ImportProviderSessionInput, context: ImportProviderSessionContext) {
     const descriptorOptions = {
-      sessionDir: this.providerParams.sessionDir,
+      sessionDir: resolveOmpProviderOptions(context.config.providerOptions).runtimeOptions
+        .sessionDir,
       runtimeSettings: this.runtimeSettings,
     };
     const importConfig = await readOmpImportSessionConfig(
@@ -2568,11 +2566,19 @@ export class OmpAgentClient implements AgentClient {
     }
   }
 
-  private resolveLaunchMode(modeId: string | undefined): {
+  private resolveLaunchMode(
+    modeId: string | undefined,
+    providerOptions?: Record<string, unknown>,
+  ): {
     modeId: string;
     extraArgs: string[];
   } {
-    return resolveOmpLaunchMode(modeId, this.modelRoleParams);
+    return resolveOmpLaunchMode(modeId, resolveOmpProviderOptions(providerOptions).modelRoles);
+  }
+
+  private resolveRuntime(providerOptions: Record<string, unknown> | undefined): OmpRuntime {
+    const { runtimeOptions } = resolveOmpProviderOptions(providerOptions);
+    return this.runtime ?? createRuntime(this.logger, this.runtimeSettings, runtimeOptions);
   }
 
   private async resolveOmpLaunch(): Promise<ResolvedProviderLaunch> {

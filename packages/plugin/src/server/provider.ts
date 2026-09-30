@@ -87,7 +87,7 @@ export interface ProviderSessionConfig {
   mode?: string;
   thinkingOption?: string;
   settings: Readonly<Record<string, JsonValue>>;
-  providerOptions?: Readonly<Record<string, JsonValue>>;
+  providerOptions?: Readonly<Record<string, unknown>>;
   title?: string;
   persist: boolean;
 }
@@ -715,7 +715,7 @@ const sessionConfigSchema = z
     mode: z.string().optional(),
     thinkingOption: z.string().optional(),
     settings: jsonObjectSchema,
-    providerOptions: jsonObjectSchema.optional(),
+    providerOptions: z.record(z.string(), z.unknown()).optional(),
     title: z.string().optional(),
     persist: z.boolean(),
   })

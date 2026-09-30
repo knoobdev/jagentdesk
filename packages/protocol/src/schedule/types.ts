@@ -37,6 +37,7 @@ export const ScheduleTargetSchema = z.discriminatedUnion("type", [
       sandboxMode: z.string().trim().min(1).optional(),
       networkAccess: z.boolean().optional(),
       webSearch: z.boolean().optional(),
+      providerOptions: z.record(z.string(), z.unknown()).optional(),
       featureValues: z.record(z.string(), z.unknown()).optional(),
       extra: z
         .object({

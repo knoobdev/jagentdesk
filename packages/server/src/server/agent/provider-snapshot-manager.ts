@@ -170,10 +170,7 @@ export interface AgentManagerProviderState {
   providerDefinitions: Partial<
     Record<
       AgentProvider,
-      Pick<
-        ProviderDefinition,
-        "enabled" | "derivedFromProviderId" | "validateOptions" | "applyOptions" | "applyToolPolicy"
-      >
+      Pick<ProviderDefinition, "enabled" | "derivedFromProviderId" | "applyToolPolicy">
     >
   >;
   clients: Partial<Record<AgentProvider, AgentClient>>;
@@ -327,8 +324,6 @@ export class ProviderSnapshotManager {
       providerDefinitions[provider] = {
         enabled: definition.enabled,
         derivedFromProviderId: definition.derivedFromProviderId,
-        validateOptions: definition.validateOptions,
-        applyOptions: definition.applyOptions,
         applyToolPolicy: definition.applyToolPolicy,
       };
       if (definition.enabled) {
@@ -405,11 +400,9 @@ export class ProviderSnapshotManager {
       ];
     }
 
-    const definition = this.requireProvider(input.provider);
     return validateAgentConfigurationAgainstProvider({
       input,
       provider,
-      validateOptions: definition.validateOptions,
     });
   }
 

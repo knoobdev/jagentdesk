@@ -18,7 +18,7 @@ import { describe, expect, onTestFinished, test } from "vitest";
 
 import type { AgentSession, AgentSessionConfig, AgentStreamEvent } from "../../agent-sdk-types.js";
 import {
-  PiProviderParamsSchema,
+  PiProviderOptionsSchema,
   PiRpcAgentClient,
   PiRpcAgentSession,
   transformPiModels,
@@ -56,8 +56,8 @@ interface PiThinkingCatalogCase {
 }
 
 test("Pi RPC timeout defaults to 60 seconds and accepts an override", () => {
-  expect(PiProviderParamsSchema.parse({}).rpcTimeoutMs).toBe(60_000);
-  expect(PiProviderParamsSchema.parse({ rpcTimeoutMs: 90_000 }).rpcTimeoutMs).toBe(90_000);
+  expect(PiProviderOptionsSchema.parse({}).rpcTimeoutMs).toBe(60_000);
+  expect(PiProviderOptionsSchema.parse({ rpcTimeoutMs: 90_000 }).rpcTimeoutMs).toBe(90_000);
 });
 
 function createClient(
@@ -2273,10 +2273,11 @@ describe("PiRpcAgentClient", () => {
     const client = new PiRpcAgentClient({
       logger: pino({ level: "silent" }),
       runtime: new FakePi(),
-      providerParams: { sessionDir: sessionsDir },
     });
 
-    await expect(client.listImportableSessions({ cwd })).resolves.toEqual([
+    await expect(
+      client.listImportableSessions({ cwd, providerOptions: { sessionDir: sessionsDir } }),
+    ).resolves.toEqual([
       {
         providerHandleId: sessionFile,
         cwd,
@@ -2324,7 +2325,9 @@ describe("PiRpcAgentClient", () => {
       },
     });
 
-    await expect(client.listImportableSessions({ cwd })).resolves.toMatchObject([
+    await expect(
+      client.listImportableSessions({ cwd, providerOptions: { sessionDir: sessionsDir } }),
+    ).resolves.toMatchObject([
       {
         providerHandleId: sessionFile,
         cwd,
@@ -2380,7 +2383,6 @@ describe("PiRpcAgentClient", () => {
     const client = new PiRpcAgentClient({
       logger: pino({ level: "silent" }),
       runtime: pi,
-      providerParams: { sessionDir: sessionsDir },
     });
 
     const imported = await client.importSession(

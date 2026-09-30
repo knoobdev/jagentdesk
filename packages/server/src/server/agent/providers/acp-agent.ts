@@ -1,3 +1,4 @@
+import { ACPProviderOptionsSchema } from "./acp-options.js";
 import { type ChildProcess, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
@@ -911,6 +912,7 @@ export class ACPAgentClient implements AgentClient {
     options?: AgentCreateSessionOptions,
   ): Promise<AgentSession> {
     this.assertProvider(config);
+    const providerOptions = ACPProviderOptionsSchema.parse(config.providerOptions ?? {});
     const session = new ACPAgentSession(
       { ...config, provider: this.provider },
       {
@@ -924,14 +926,18 @@ export class ACPAgentClient implements AgentClient {
         sessionResponseTransformer: this.sessionResponseTransformer,
         configOptionsTransformer: this.configOptionsTransformer,
         configFeatureOptions: this.configFeatureOptions,
-        clientCapabilities: this.clientCapabilities,
+        clientCapabilities: providerOptions.clientCapabilities ?? this.clientCapabilities,
         clientCapabilityMeta: this.clientCapabilityMeta,
         modeIdTransformer: this.modeIdTransformer,
         toolSnapshotTransformer: this.toolSnapshotTransformer,
         providerModeWriter: this.providerModeWriter,
         beforeModeWriter: this.beforeModeWriter,
         thinkingOptionWriter: this.thinkingOptionWriter,
-        capabilities: this.capabilities,
+        capabilities: {
+          ...this.capabilities,
+          supportsMcpServers:
+            providerOptions.supportsMcpServers ?? this.capabilities.supportsMcpServers,
+        },
         configuredModelIds: options?.configuredModelIds,
         agentId: launchContext?.agentId,
         launchEnv: launchContext?.env,
@@ -966,6 +972,7 @@ export class ACPAgentClient implements AgentClient {
       provider: this.provider,
       cwd,
     };
+    const providerOptions = ACPProviderOptionsSchema.parse(mergedConfig.providerOptions ?? {});
     const session = new ACPAgentSession(mergedConfig, {
       provider: this.provider,
       usageProvider: this.usageProvider,
@@ -977,14 +984,18 @@ export class ACPAgentClient implements AgentClient {
       sessionResponseTransformer: this.sessionResponseTransformer,
       configOptionsTransformer: this.configOptionsTransformer,
       configFeatureOptions: this.configFeatureOptions,
-      clientCapabilities: this.clientCapabilities,
+      clientCapabilities: providerOptions.clientCapabilities ?? this.clientCapabilities,
       clientCapabilityMeta: this.clientCapabilityMeta,
       modeIdTransformer: this.modeIdTransformer,
       toolSnapshotTransformer: this.toolSnapshotTransformer,
       providerModeWriter: this.providerModeWriter,
       beforeModeWriter: this.beforeModeWriter,
       thinkingOptionWriter: this.thinkingOptionWriter,
-      capabilities: this.capabilities,
+      capabilities: {
+        ...this.capabilities,
+        supportsMcpServers:
+          providerOptions.supportsMcpServers ?? this.capabilities.supportsMcpServers,
+      },
       handle,
       resumePurpose: options?.purpose,
       configuredModelIds: options?.configuredModelIds,
@@ -1018,6 +1029,7 @@ export class ACPAgentClient implements AgentClient {
         raceProviderRefreshAbort(
           context?.signal,
           this.spawnProcess(PROBE_ENV, {
+            providerOptions: options.providerOptions,
             onSpawned: (spawned) => {
               probe = spawned;
               if (context?.signal.aborted) void closeProbe().catch(() => undefined);
@@ -1161,6 +1173,7 @@ export class ACPAgentClient implements AgentClient {
     launchEnv?: Record<string, string>,
     options?: {
       initializeTimeoutMs?: number;
+      providerOptions?: Record<string, unknown>;
       onSpawned?: (probe: UninitializedACPProcess) => void;
     },
   ): Promise<SpawnedACPProcess> {
@@ -1172,7 +1185,11 @@ export class ACPAgentClient implements AgentClient {
     };
     options?.onSpawned?.(probe);
     try {
-      const initialize = await this.initializeTransport(transport, options?.initializeTimeoutMs);
+      const initialize = await this.initializeTransport(
+        transport,
+        options?.initializeTimeoutMs,
+        options?.providerOptions,
+      );
       const initializedProbe: SpawnedACPProcess = {
         ...probe,
         initialize,
@@ -1228,7 +1245,9 @@ export class ACPAgentClient implements AgentClient {
   protected async initializeTransport(
     transport: ACPProcessTransport,
     initializeTimeoutMs?: number,
+    providerOptions?: Record<string, unknown>,
   ): Promise<InitializeResponse> {
+    const configuredOptions = ACPProviderOptionsSchema.parse(providerOptions ?? {});
     let timeout: ReturnType<typeof setTimeout> | null = null;
     const initializeTimeoutPromise = initializeTimeoutMs
       ? new Promise<never>((_, reject) => {
@@ -1245,7 +1264,7 @@ export class ACPAgentClient implements AgentClient {
             protocolVersion: PROTOCOL_VERSION,
             clientCapabilities: buildACPClientCapabilities(
               this.clientCapabilityMeta,
-              this.clientCapabilities,
+              configuredOptions.clientCapabilities ?? this.clientCapabilities,
             ),
             clientInfo: { name: "JAgentDesk", version: "dev" },
           }),
@@ -2278,12 +2297,13 @@ export class ACPAgentSession implements AgentSession, ACPClient {
     if (!this.sessionId) {
       return null;
     }
+    const { providerOptions: _providerOptions, ...persistedConfig } = this.config;
     return {
       provider: this.provider,
       sessionId: this.sessionId,
       nativeHandle: this.sessionId,
       metadata: {
-        ...this.config,
+        ...persistedConfig,
         title: this.currentTitle,
       },
     };
