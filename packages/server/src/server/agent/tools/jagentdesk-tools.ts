@@ -2641,7 +2641,7 @@ function registerBrowserProfileTools(params: {
     {
       title: "Create browser fingerprint profile",
       description:
-        "Create a coherent anti-detect fingerprint profile for the agentic browser (a consistent device identity: User-Agent, UA Client Hints, WebGL, timezone, screen, seeded canvas/audio noise). Optionally attach a proxy (the ONLY way to change the observed IP — no proxy means the real IP), Chromium extensions (absolute unpacked dirs you can author first), and custom init scripts (JS injected before page scripts). Set activate=true to make it the active profile immediately. Auto-approved.",
+        "Create a coherent anti-detect fingerprint profile for the agentic browser (a consistent device identity: User-Agent, UA Client Hints, WebGL, timezone, screen, seeded canvas/audio noise). Optionally attach a proxy (the ONLY way to change the observed IP — no proxy means the real IP), Chromium extensions (absolute unpacked dirs you can author first), and custom init scripts (JS injected before page scripts). Set activate=true to make it the active profile immediately. For identities strict checkers (PixelScan, iphey) accept: use the OS of the machine running the browser (macOS on a Mac) — its real GPU is then reported, while another OS must claim a GPU the hardware cannot back; and set the timezone of the proxy's location, or without a proxy the machine's own timezone. Auto-approved.",
       inputSchema: {
         name: z
           .string()

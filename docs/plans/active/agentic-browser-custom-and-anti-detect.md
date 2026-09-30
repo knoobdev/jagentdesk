@@ -26,14 +26,14 @@ người dùng chọn profile nào).
 Nguồn sự thật duy nhất cho một danh tính = một `BrowserFingerprintProfile`. Mọi surface
 (UA, UA-CH, WebGL, timezone, screen, canvas seed) dẫn xuất từ cùng template nên không mâu thuẫn.
 
-| Layer | Nơi | Nội dung |
-|---|---|---|
-| Model + generator | `packages/protocol/src/browser-automation/fingerprint-profile.ts` | Schema profile + generator thuật toán (KHÔNG gọi LLM) sinh profile nhất quán từ template thiết bị thật |
-| Persistence | `persisted-config.ts` `browserTools.{profiles, activeProfileId}` (đã `.passthrough()`) | Lưu profiles + profile đang active |
-| RPC | protocol messages + `daemon-client.ts` + `session.ts` | get / save / delete / select profile |
-| Agent tools | `browser-tools/tools.ts` (+ command mới) | `browser_profile_list`, `browser_profile_create`, `browser_profile_use`, `browser_cdp` (CDP thô), `browser_add_init_script` |
-| Apply (desktop) | `browser-stealth.ts` (tổng quát hoá) + `main.ts` will/did-attach | Build init-script từ profile; UA/timezone/locale/deviceMetrics qua CDP; proxy qua `session.setProxy`; extension qua `session.loadExtension`; WebRTC policy |
-| UI | `screens/settings/browser-*` + browser cockpit | List profile, tạo, chọn, xoá; picker "dùng profile nào" |
+| Layer             | Nơi                                                                                    | Nội dung                                                                                                                                                   |
+| ----------------- | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Model + generator | `packages/protocol/src/browser-automation/fingerprint-profile.ts`                      | Schema profile + generator thuật toán (KHÔNG gọi LLM) sinh profile nhất quán từ template thiết bị thật                                                     |
+| Persistence       | `persisted-config.ts` `browserTools.{profiles, activeProfileId}` (đã `.passthrough()`) | Lưu profiles + profile đang active                                                                                                                         |
+| RPC               | protocol messages + `daemon-client.ts` + `session.ts`                                  | get / save / delete / select profile                                                                                                                       |
+| Agent tools       | `browser-tools/tools.ts` (+ command mới)                                               | `browser_profile_list`, `browser_profile_create`, `browser_profile_use`, `browser_cdp` (CDP thô), `browser_add_init_script`                                |
+| Apply (desktop)   | `browser-stealth.ts` (tổng quát hoá) + `main.ts` will/did-attach                       | Build init-script từ profile; UA/timezone/locale/deviceMetrics qua CDP; proxy qua `session.setProxy`; extension qua `session.loadExtension`; WebRTC policy |
+| UI                | `screens/settings/browser-*` + browser cockpit                                         | List profile, tạo, chọn, xoá; picker "dùng profile nào"                                                                                                    |
 
 ## Các mặt fingerprint phải điều khiển (init-script sinh từ profile)
 
@@ -70,9 +70,10 @@ thay vì monkey-patch JS ở đâu có thể (ít bị phát hiện hơn).
 - Không đoán Paseo; đây là tính năng JAgentDesk mới, cần bổ sung ADR-0011 cho scope mở rộng.
 
 ## Trạng thái (2026-09-06)
+
 - [x] **P1 DONE** — `protocol/browser-automation/fingerprint-profile.ts` (schema + generator
       template Windows/macOS/Linux Chrome, coherent) + config keys `browserTools.{profiles,
-      activeProfileId}` ở protocol `messages.ts` và `persisted-config.ts`. 6 test xanh
+activeProfileId}` ở protocol `messages.ts` và `persisted-config.ts`. 6 test xanh
       (coherence UA/UA-CH/WebGL, seed deterministic, WebRTC force-proxy khi có proxy).
       Quản lý qua daemon-config get/patch có sẵn — KHÔNG cần RPC mới.
 - [x] **P3-core DONE** — `desktop/features/browser-fingerprint-script.ts`
@@ -92,7 +93,7 @@ thay vì monkey-patch JS ở đâu có thể (ít bị phát hiện hơn).
       `app.on('login')`. IPC `jagentdesk:browser:set-fingerprint-profile` (main) + preload +
       host type. Renderer đọc active profile từ daemon config (`fingerprint-profile-sync.ts`,
       mount cạnh browser-automation handler trong `host-runtime.ts`) → push tới main.
-      KHÔNG force device-metrics (tránh resize guest); screen.* spoof trong init-script.
+      KHÔNG force device-metrics (tránh resize guest); screen.\* spoof trong init-script.
 - [x] **P4 DONE** — `browser-fingerprint-profiles-card.tsx` trong Host settings (dưới Browser tools):
       list + active marker + "Real identity (null)" + tạo theo OS + Delete. Helper thuần
       `browser-fingerprint-config.ts` (+ test).
@@ -124,3 +125,32 @@ Tests: protocol 6 (generator coherence/seed/webrtc), desktop 4 (init-script comp
 
 Cùng đợt: Task 1 (row-select cross-page + click-outside clear) + Task 2 (formatTokenCount "1m"
 collapse) đã xong.
+
+## Kiểm tra với iphey.com và PixelScan (2026-09-30)
+
+Chạy trong app dev (macOS arm64, IP Việt Nam, không proxy), đọc kết quả qua CDP của tab.
+
+| Cấu hình                                | iphey MX score   | PixelScan                                         |
+| --------------------------------------- | ---------------- | ------------------------------------------------- |
+| Không profile (UA Chrome sạch)          | 100              | consistent, no masking                            |
+| macOS / Asia/Bangkok (trùng host)       | 100              | consistent, no masking                            |
+| Windows / Asia/Bangkok (khác host)      | 100              | masking detected (GPU NVIDIA giả trên chip Apple) |
+| Windows / America/New_York, không proxy | 90 (lệch vị trí) | —                                                 |
+
+Lỗi đã sửa nhờ các lần kiểm này:
+
+- `window.chrome.loadTimes/csi/app` không có trong Electron → script của iphey (check i24) ném lỗi và
+  hiện `alert` native đè lên app, test không chạy xong. Thêm shim cho mọi danh tính.
+- `navigator.webdriver` trả `undefined` (Chrome thật: `false`); `navigator.plugins` bị thay bằng
+  object thường dù engine đã có 5 plugin PDF thật.
+- Hàm bị patch lộ mã nguồn qua `Function.prototype.toString.call(fn)` và có `prototype`/`toString`
+  riêng → proxy `Function.prototype.toString`, hàm dạng method, giữ `length`/`enumerable`.
+- Nhiễu canvas làm sai pixel của vùng màu đặc (vẽ đỏ rồi đọc lại thấy 43 pixel lệch) → chỉ nhiễu
+  pixel cạnh; nhiễu audio cả ở mẫu im lặng → chỉ mẫu khác 0.
+- `screen` giả nhỏ hơn cửa sổ thật → dùng kích thước thật khi cửa sổ không vừa.
+- Chuỗi GPU giả bị PixelScan phát hiện (so extension/giới hạn/pixel render với tên GPU) ngay cả khi
+  profile macOS chạy trên Mac → profile cùng OS với host báo GPU thật.
+
+Giới hạn còn lại (không sửa được bằng JS): profile khác OS với máy chạy trình duyệt phải khai một
+GPU mà phần cứng không có, nên trang kiểm mạnh vẫn bắt được. Giả vị trí cần proxy ở vị trí đó.
+Hộp thoại JS (`alert/confirm`) của trang trong trình duyệt agentic vẫn hiện thành cửa sổ native.

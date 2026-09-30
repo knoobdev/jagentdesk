@@ -1,7 +1,7 @@
 import { app, type Session, type WebContents } from "electron";
 import log from "electron-log";
 import type { BrowserFingerprintProfile } from "@jagentdesk/protocol/browser-automation/fingerprint-profile";
-import { buildFingerprintInitScript } from "./browser-fingerprint-script.js";
+import { buildFingerprintInitScript, CHROME_SHIM_SOURCE } from "./browser-fingerprint-script.js";
 
 /**
  * Anti-detection ("stealth") for the agentic browser. Every new browser guest gets
@@ -46,12 +46,13 @@ export function getActiveFingerprintProfile(): BrowserFingerprintProfile | null 
 // Legacy fixed fingerprint, used only when no profile is active but the global
 // toggle is on. Runs in the guest's main world before page scripts.
 const STEALTH_SOURCE = `(() => {
-  try { Object.defineProperty(Navigator.prototype, 'webdriver', { get: () => undefined, configurable: true }); } catch (e) {}
-  try { if (!window.chrome) { window.chrome = { runtime: {} }; } } catch (e) {}
+  try { Object.defineProperty(Navigator.prototype, 'webdriver', { get: () => false, configurable: true }); } catch (e) {}
   try {
     Object.defineProperty(Navigator.prototype, 'languages', { get: () => ['en-US', 'en'], configurable: true });
-    const fakePlugins = [{ name: 'Chromium PDF Plugin' }, { name: 'Chrome PDF Viewer' }, { name: 'Native Client' }];
-    Object.defineProperty(Navigator.prototype, 'plugins', { get: () => fakePlugins, configurable: true });
+    if (!navigator.plugins || navigator.plugins.length === 0) {
+      const fakePlugins = [{ name: 'Chromium PDF Plugin' }, { name: 'Chrome PDF Viewer' }, { name: 'Native Client' }];
+      Object.defineProperty(Navigator.prototype, 'plugins', { get: () => fakePlugins, configurable: true });
+    }
   } catch (e) {}
   try {
     const originalQuery = window.navigator.permissions && window.navigator.permissions.query;
@@ -261,9 +262,29 @@ export function acceptLanguageList(acceptLanguage: string): string {
 }
 
 /** The profile in effect, aligned with the engine, or null when no profile stealth applies. */
+const HOST_OS: Partial<Record<NodeJS.Platform, BrowserFingerprintProfile["os"]>> = {
+  darwin: "macos",
+  win32: "windows",
+  linux: "linux",
+};
+
+/**
+ * WebGL exposes more than the vendor/renderer strings (extensions, limits, rendered pixels),
+ * and strict checkers compare them: claiming another GPU was flagged as masking by PixelScan
+ * even for a macOS profile on a Mac. When the profile's OS is the host's, the real GPU is
+ * reported (empty strings = no WebGL patch); a cross-OS profile has to claim a GPU of its OS.
+ */
+export function alignProfileWithHost(
+  profile: BrowserFingerprintProfile,
+  platform: NodeJS.Platform = process.platform,
+): BrowserFingerprintProfile {
+  if (HOST_OS[platform] !== profile.os) return profile;
+  return { ...profile, webglVendor: "", webglRenderer: "" };
+}
+
 function effectiveProfile(): BrowserFingerprintProfile | null {
   return activeProfile && activeProfile.stealthEnabled
-    ? alignProfileWithEngine(activeProfile)
+    ? alignProfileWithHost(alignProfileWithEngine(activeProfile))
     : null;
 }
 
@@ -375,10 +396,11 @@ function applyWebRtcPolicy(contents: WebContents, profile: BrowserFingerprintPro
 
 /** Page scripts that must run before any page script, for the given identity. */
 function initScriptSources(profile: BrowserFingerprintProfile | null, legacy: boolean): string[] {
+  // Chrome's window.chrome APIs for every identity: pages call them (and break without them).
   if (!profile) {
-    return legacy ? [STEALTH_SOURCE] : [];
+    return legacy ? [CHROME_SHIM_SOURCE, STEALTH_SOURCE] : [CHROME_SHIM_SOURCE];
   }
-  const sources = [buildFingerprintInitScript(profile)];
+  const sources = [CHROME_SHIM_SOURCE, buildFingerprintInitScript(profile)];
   for (const custom of profile.initScripts) {
     if (typeof custom === "string" && custom.trim().length > 0) {
       sources.push(custom);

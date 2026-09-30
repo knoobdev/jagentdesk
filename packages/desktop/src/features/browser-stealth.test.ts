@@ -66,3 +66,16 @@ describe("browser identity helpers", () => {
     });
   });
 });
+
+describe("alignProfileWithHost", () => {
+  it("reports the real GPU when the profile's OS is the host's", async () => {
+    const { alignProfileWithHost } = await import("./browser-stealth.js");
+    const mac = generateFingerprintProfile({ id: "bfp_mac", os: "macos", nowMs: 1 });
+    expect(alignProfileWithHost(mac, "darwin")).toMatchObject({
+      webglVendor: "",
+      webglRenderer: "",
+    });
+    const windows = generateFingerprintProfile({ id: "bfp_win", os: "windows", nowMs: 1 });
+    expect(alignProfileWithHost(windows, "darwin").webglRenderer).toBe(windows.webglRenderer);
+  });
+});
