@@ -133,15 +133,7 @@ export function BrowserFingerprintProfilesCard({ serverId }: { serverId: string 
             ...(draft?.password ? { password: draft.password } : {}),
           }
         : null;
-      // Turning a proxy on defaults WebRTC to force-proxy so the real IP can't leak
-      // over STUN; removing it relaxes the policy back to default.
-      const webrtcPolicy: WebRtcPolicy = proxy
-        ? profile.webrtcPolicy === "default"
-          ? "force-proxy"
-          : profile.webrtcPolicy
-        : profile.webrtcPolicy === "force-proxy"
-          ? "default"
-          : profile.webrtcPolicy;
+      const webrtcPolicy = webrtcPolicyForProxy(proxy !== null, profile.webrtcPolicy);
       saveProfile({ ...profile, proxy, webrtcPolicy });
     },
     [proxyDrafts, saveProfile],
@@ -156,12 +148,21 @@ export function BrowserFingerprintProfilesCard({ serverId }: { serverId: string 
     [saveProfile],
   );
 
+  const toggleGeoFromIp = useCallback(
+    (profile: BrowserFingerprintProfile, value: boolean) => {
+      saveProfile({ ...profile, geoFromIp: value });
+    },
+    [saveProfile],
+  );
+
   const toggleStealth = useCallback(
     (profile: BrowserFingerprintProfile, value: boolean) => {
       saveProfile({ ...profile, stealthEnabled: value });
     },
     [saveProfile],
   );
+
+  const selectRealIdentity = useCallback(() => selectProfile(null), [selectProfile]);
 
   if (!isConnected || config?.browserTools.enabled !== true) {
     return null;
@@ -178,7 +179,7 @@ export function BrowserFingerprintProfilesCard({ serverId }: { serverId: string 
       </View>
 
       <Pressable
-        onPress={() => selectProfile(null)}
+        onPress={selectRealIdentity}
         disabled={mutation.isPending}
         style={styles.selectRow}
         accessibilityRole="button"
@@ -192,153 +193,29 @@ export function BrowserFingerprintProfilesCard({ serverId }: { serverId: string 
         </Text>
       </Pressable>
 
-      {profiles.map((profile) => {
-        const expanded = expandedId === profile.id;
-        const draft = proxyDrafts[profile.id];
-        return (
-          <View key={profile.id} style={styles.profileBlock}>
-            <View style={styles.profileHeader}>
-              <Pressable
-                onPress={() => selectProfile(profile.id)}
-                disabled={mutation.isPending}
-                style={styles.rowMain}
-                accessibilityRole="button"
-              >
-                <Text style={styles.name}>
-                  {profile.id === activeId ? "● " : "○ "}
-                  {profile.name}
-                </Text>
-                <Text style={settingsStyles.rowHint} numberOfLines={1}>
-                  {OS_LABELS[profile.os]} · {profile.timezone}
-                  {profile.proxy ? " · proxy" : ""}
-                  {profile.stealthEnabled ? "" : " · no spoof"}
-                </Text>
-              </Pressable>
-              <Pressable
-                onPress={() => toggleExpand(profile)}
-                accessibilityRole="button"
-                accessibilityLabel={expanded ? "Hide details" : "Show details"}
-                style={styles.actionBtn}
-              >
-                <Text style={styles.actionText}>{expanded ? "Hide" : "Details"}</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => removeProfile(profile.id)}
-                disabled={mutation.isPending}
-                accessibilityRole="button"
-                accessibilityLabel={`Delete ${profile.name}`}
-                style={styles.actionBtn}
-              >
-                <Text style={styles.deleteText}>Delete</Text>
-              </Pressable>
-            </View>
-
-            {expanded ? (
-              <View style={styles.detail}>
-                <DetailRow label="User-Agent" value={profile.userAgent} />
-                <DetailRow label="Platform" value={`${OS_LABELS[profile.os]} (${profile.os})`} />
-                <DetailRow label="Languages" value={profile.languages.join(", ")} />
-                <DetailRow label="Timezone" value={profile.timezone} />
-                <DetailRow label="Locale" value={profile.locale} />
-                <DetailRow label="WebGL vendor" value={profile.webglVendor} />
-                <DetailRow label="WebGL renderer" value={profile.webglRenderer} />
-                <DetailRow
-                  label="Screen"
-                  value={`${profile.screen.width}×${profile.screen.height} @${profile.screen.devicePixelRatio}x`}
-                />
-                <DetailRow
-                  label="Hardware"
-                  value={`${profile.hardwareConcurrency} cores · ${profile.deviceMemory} GB`}
-                />
-                <DetailRow
-                  label="Canvas/Audio seed"
-                  value={`${profile.canvasNoiseSeed >>> 0} / ${profile.audioNoiseSeed >>> 0}`}
-                />
-
-                <Text style={styles.sectionLabel}>Proxy (the only real IP control)</Text>
-                <FormTextInput
-                  value={draft?.server ?? ""}
-                  onChangeText={(text) => setDraft(profile.id, { server: text })}
-                  placeholder="scheme://host:port (http / https / socks5)"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
-                <FormTextInput
-                  value={draft?.username ?? ""}
-                  onChangeText={(text) => setDraft(profile.id, { username: text })}
-                  placeholder="Proxy username (optional)"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
-                <FormTextInput
-                  value={draft?.password ?? ""}
-                  onChangeText={(text) => setDraft(profile.id, { password: text })}
-                  placeholder="Proxy password (optional)"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  secureTextEntry
-                />
-                <Pressable
-                  onPress={() => saveProxy(profile)}
-                  disabled={mutation.isPending}
-                  accessibilityRole="button"
-                  style={styles.saveBtn}
-                >
-                  <Text style={styles.saveText}>Save proxy</Text>
-                </Pressable>
-
-                <View style={styles.toggleRow}>
-                  <View style={styles.rowMain}>
-                    <Text style={styles.name}>Fingerprint spoofing</Text>
-                    <Text style={settingsStyles.rowHint}>
-                      Off = host's real identity, keep proxy/extensions only.
-                    </Text>
-                  </View>
-                  <Switch
-                    value={profile.stealthEnabled}
-                    onValueChange={(value) => toggleStealth(profile, value)}
-                    disabled={mutation.isPending}
-                    accessibilityLabel="Toggle fingerprint spoofing"
-                  />
-                </View>
-
-                <Pressable
-                  onPress={() => cycleWebrtc(profile)}
-                  disabled={mutation.isPending}
-                  accessibilityRole="button"
-                  style={styles.toggleRow}
-                >
-                  <View style={styles.rowMain}>
-                    <Text style={styles.name}>WebRTC policy</Text>
-                    <Text style={settingsStyles.rowHint}>
-                      force-proxy closes the STUN IP leak behind a proxy.
-                    </Text>
-                  </View>
-                  <Text style={styles.pill}>{WEBRTC_LABELS[profile.webrtcPolicy]}</Text>
-                </Pressable>
-
-                {profile.extensions.length > 0 ? (
-                  <DetailRow label="Extensions" value={`${profile.extensions.length} loaded`} />
-                ) : null}
-              </View>
-            ) : null}
-          </View>
-        );
-      })}
+      {profiles.map((profile) => (
+        <FingerprintProfileRow
+          key={profile.id}
+          profile={profile}
+          active={profile.id === activeId}
+          expanded={expandedId === profile.id}
+          draft={proxyDrafts[profile.id]}
+          pending={mutation.isPending}
+          onSelect={selectProfile}
+          onToggleExpand={toggleExpand}
+          onRemove={removeProfile}
+          onDraft={setDraft}
+          onSaveProxy={saveProxy}
+          onToggleStealth={toggleStealth}
+          onToggleGeoFromIp={toggleGeoFromIp}
+          onCycleWebrtc={cycleWebrtc}
+        />
+      ))}
 
       <View style={styles.createRow}>
         <Text style={settingsStyles.rowHint}>Add profile:</Text>
         {(Object.keys(OS_LABELS) as FingerprintOs[]).map((os) => (
-          <Pressable
-            key={os}
-            onPress={() => createForOs(os)}
-            disabled={mutation.isPending}
-            accessibilityRole="button"
-            accessibilityLabel={`Add ${OS_LABELS[os]} profile`}
-            style={styles.chip}
-          >
-            <Text style={styles.chipText}>+ {OS_LABELS[os]}</Text>
-          </Pressable>
+          <AddProfileChip key={os} os={os} disabled={mutation.isPending} onAdd={createForOs} />
         ))}
       </View>
 
@@ -348,6 +225,240 @@ export function BrowserFingerprintProfilesCard({ serverId }: { serverId: string 
         </Text>
       ) : null}
     </View>
+  );
+}
+
+// Turning a proxy on defaults WebRTC to force-proxy so the real IP can't leak over STUN;
+// removing it relaxes the policy back to default.
+function webrtcPolicyForProxy(hasProxy: boolean, current: WebRtcPolicy): WebRtcPolicy {
+  if (hasProxy) return current === "default" ? "force-proxy" : current;
+  return current === "force-proxy" ? "default" : current;
+}
+
+interface FingerprintProfileRowProps {
+  profile: BrowserFingerprintProfile;
+  active: boolean;
+  expanded: boolean;
+  draft: ProxyDraft | undefined;
+  pending: boolean;
+  onSelect: (id: string) => void;
+  onToggleExpand: (profile: BrowserFingerprintProfile) => void;
+  onRemove: (id: string) => void;
+  onDraft: (id: string, patch: Partial<ProxyDraft>) => void;
+  onSaveProxy: (profile: BrowserFingerprintProfile) => void;
+  onToggleStealth: (profile: BrowserFingerprintProfile, value: boolean) => void;
+  onToggleGeoFromIp: (profile: BrowserFingerprintProfile, value: boolean) => void;
+  onCycleWebrtc: (profile: BrowserFingerprintProfile) => void;
+}
+
+function FingerprintProfileRow({
+  profile,
+  active,
+  expanded,
+  draft,
+  pending,
+  onSelect,
+  onToggleExpand,
+  onRemove,
+  onDraft,
+  onSaveProxy,
+  onToggleStealth,
+  onToggleGeoFromIp,
+  onCycleWebrtc,
+}: FingerprintProfileRowProps) {
+  const id = profile.id;
+  const select = useCallback(() => onSelect(id), [onSelect, id]);
+  const toggleExpand = useCallback(() => onToggleExpand(profile), [onToggleExpand, profile]);
+  const remove = useCallback(() => onRemove(id), [onRemove, id]);
+  const setServer = useCallback((server: string) => onDraft(id, { server }), [onDraft, id]);
+  const setUsername = useCallback((username: string) => onDraft(id, { username }), [onDraft, id]);
+  const setPassword = useCallback((password: string) => onDraft(id, { password }), [onDraft, id]);
+  const saveProxy = useCallback(() => onSaveProxy(profile), [onSaveProxy, profile]);
+  const toggleStealth = useCallback(
+    (value: boolean) => onToggleStealth(profile, value),
+    [onToggleStealth, profile],
+  );
+  const toggleGeoFromIp = useCallback(
+    (value: boolean) => onToggleGeoFromIp(profile, value),
+    [onToggleGeoFromIp, profile],
+  );
+  const cycleWebrtc = useCallback(() => onCycleWebrtc(profile), [onCycleWebrtc, profile]);
+  const location = profile.geoFromIp === false ? profile.timezone : "IP location";
+
+  return (
+    <View style={styles.profileBlock}>
+      <View style={styles.profileHeader}>
+        <Pressable
+          onPress={select}
+          disabled={pending}
+          style={styles.rowMain}
+          accessibilityRole="button"
+        >
+          <Text style={styles.name}>
+            {active ? "● " : "○ "}
+            {profile.name}
+          </Text>
+          <Text style={settingsStyles.rowHint} numberOfLines={1}>
+            {OS_LABELS[profile.os]} · {location}
+            {profile.proxy ? " · proxy" : ""}
+            {profile.stealthEnabled ? "" : " · no spoof"}
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={toggleExpand}
+          accessibilityRole="button"
+          accessibilityLabel={expanded ? "Hide details" : "Show details"}
+          style={styles.actionBtn}
+        >
+          <Text style={styles.actionText}>{expanded ? "Hide" : "Details"}</Text>
+        </Pressable>
+        <Pressable
+          onPress={remove}
+          disabled={pending}
+          accessibilityRole="button"
+          accessibilityLabel={`Delete ${profile.name}`}
+          style={styles.actionBtn}
+        >
+          <Text style={styles.deleteText}>Delete</Text>
+        </Pressable>
+      </View>
+
+      {expanded ? (
+        <View style={styles.detail}>
+          <DetailRow label="User-Agent" value={profile.userAgent} />
+          <DetailRow label="Platform" value={`${OS_LABELS[profile.os]} (${profile.os})`} />
+          <DetailRow label="Languages" value={profile.languages.join(", ")} />
+          <DetailRow
+            label="Timezone"
+            value={
+              profile.geoFromIp === false
+                ? profile.timezone
+                : `From the exit IP (fallback ${profile.timezone})`
+            }
+          />
+          <DetailRow label="Locale" value={profile.locale} />
+          <DetailRow label="WebGL vendor" value={profile.webglVendor} />
+          <DetailRow label="WebGL renderer" value={profile.webglRenderer} />
+          <DetailRow
+            label="Screen"
+            value={`${profile.screen.width}×${profile.screen.height} @${profile.screen.devicePixelRatio}x`}
+          />
+          <DetailRow
+            label="Hardware"
+            value={`${profile.hardwareConcurrency} cores · ${profile.deviceMemory} GB`}
+          />
+          <DetailRow
+            label="Canvas/Audio seed"
+            value={`${profile.canvasNoiseSeed >>> 0} / ${profile.audioNoiseSeed >>> 0}`}
+          />
+
+          <Text style={styles.sectionLabel}>Proxy (the only real IP control)</Text>
+          <FormTextInput
+            value={draft?.server ?? ""}
+            onChangeText={setServer}
+            placeholder="scheme://host:port (http / https / socks5)"
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <FormTextInput
+            value={draft?.username ?? ""}
+            onChangeText={setUsername}
+            placeholder="Proxy username (optional)"
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <FormTextInput
+            value={draft?.password ?? ""}
+            onChangeText={setPassword}
+            placeholder="Proxy password (optional)"
+            autoCapitalize="none"
+            autoCorrect={false}
+            secureTextEntry
+          />
+          <Pressable
+            onPress={saveProxy}
+            disabled={pending}
+            accessibilityRole="button"
+            style={styles.saveBtn}
+          >
+            <Text style={styles.saveText}>Save proxy</Text>
+          </Pressable>
+
+          <View style={styles.toggleRow}>
+            <View style={styles.rowMain}>
+              <Text style={styles.name}>Fingerprint spoofing</Text>
+              <Text style={settingsStyles.rowHint}>
+                Off = the host&apos;s real identity, keep proxy/extensions only.
+              </Text>
+            </View>
+            <Switch
+              value={profile.stealthEnabled}
+              onValueChange={toggleStealth}
+              disabled={pending}
+              accessibilityLabel="Toggle fingerprint spoofing"
+            />
+          </View>
+
+          <View style={styles.toggleRow}>
+            <View style={styles.rowMain}>
+              <Text style={styles.name}>Match IP location</Text>
+              <Text style={settingsStyles.rowHint}>
+                Timezone, locale and languages follow the exit IP (through the proxy). Located on
+                this device with IP Geolocation by DB-IP.
+              </Text>
+            </View>
+            <Switch
+              value={profile.geoFromIp !== false}
+              onValueChange={toggleGeoFromIp}
+              disabled={pending}
+              accessibilityLabel="Toggle matching the IP location"
+            />
+          </View>
+
+          <Pressable
+            onPress={cycleWebrtc}
+            disabled={pending}
+            accessibilityRole="button"
+            style={styles.toggleRow}
+          >
+            <View style={styles.rowMain}>
+              <Text style={styles.name}>WebRTC policy</Text>
+              <Text style={settingsStyles.rowHint}>
+                force-proxy closes the STUN IP leak behind a proxy.
+              </Text>
+            </View>
+            <Text style={styles.pill}>{WEBRTC_LABELS[profile.webrtcPolicy]}</Text>
+          </Pressable>
+
+          {profile.extensions.length > 0 ? (
+            <DetailRow label="Extensions" value={`${profile.extensions.length} loaded`} />
+          ) : null}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function AddProfileChip({
+  os,
+  disabled,
+  onAdd,
+}: {
+  os: FingerprintOs;
+  disabled: boolean;
+  onAdd: (os: FingerprintOs) => void;
+}) {
+  const add = useCallback(() => onAdd(os), [onAdd, os]);
+  return (
+    <Pressable
+      onPress={add}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel={`Add ${OS_LABELS[os]} profile`}
+      style={styles.chip}
+    >
+      <Text style={styles.chipText}>+ {OS_LABELS[os]}</Text>
+    </Pressable>
   );
 }
 

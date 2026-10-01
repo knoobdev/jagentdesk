@@ -73,6 +73,23 @@ describe("native masking in a page", () => {
     return (expression: string) => vm.runInContext(expression, context) as unknown;
   }
 
+  it("shims window.chrome without patching Function.prototype.toString", () => {
+    const context = vm.createContext({});
+    vm.runInContext(
+      "window = globalThis; globalThis.performance = { timeOrigin: 0, getEntriesByType: () => [] };",
+      context,
+    );
+    const original = vm.runInContext("Function.prototype.toString", context);
+    vm.runInContext(CHROME_SHIM_SOURCE, context);
+    expect(vm.runInContext("Function.prototype.toString", context)).toBe(original);
+    expect(vm.runInContext("Function.prototype.toString.call(chrome.csi)", context)).toBe(
+      "function () { [native code] }",
+    );
+    expect(
+      vm.runInContext("'prototype' in chrome.loadTimes && chrome.loadTimes.length", context),
+    ).toBe(0);
+  });
+
   it("reports native code through Function.prototype.toString for every override", () => {
     const evaluate = runInPage("windows");
     const toString = (target: string) =>
@@ -83,7 +100,8 @@ describe("native masking in a page", () => {
     expect(toString("WebGLRenderingContext.prototype.getParameter")).toBe(
       "function getParameter() { [native code] }",
     );
-    expect(toString("chrome.loadTimes")).toBe("function loadTimes() { [native code] }");
+    expect(toString("chrome.loadTimes")).toBe("function () { [native code] }");
+    expect(evaluate("chrome.loadTimes.name")).toBe("");
     expect(toString("Function.prototype.toString")).toBe("function toString() { [native code] }");
     // Unpatched functions keep their real source.
     expect(toString("function mine() { return 1; }")).toContain("return 1");

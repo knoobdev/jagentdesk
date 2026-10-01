@@ -36,6 +36,16 @@ describe("browser identity helpers", () => {
     );
   });
 
+  it("drops the development package name from the UA too", () => {
+    expect(
+      browserUserAgentFromElectron(
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) @jagentdesk/desktop/0.9.45 Chrome/146.0.7680.179 Electron/41.2.0 Safari/537.36",
+      ),
+    ).toBe(
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+    );
+  });
+
   it("presents the engine's Chrome version in the UA and Client Hints", () => {
     const aligned = alignProfileWithEngine(profile, "146.0.7680.179");
     expect(aligned.userAgent).toContain("Chrome/146.0.0.0");

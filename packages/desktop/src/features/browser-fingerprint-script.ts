@@ -101,13 +101,15 @@ export function buildFingerprintInitScript(profile: BrowserFingerprintProfile): 
   };
   const configLiteral = JSON.stringify(config);
 
-  return `(() => {
+  return `${TO_STRING_PRELUDE}
+(() => {
   const CFG = ${configLiteral};
 
 ${NATIVE_HELPERS}
   // 1. navigator.webdriver — the #1 automation tell. A browser nobody automates reports
-  //    false (undefined/null is itself a tell).
-  define(Navigator.prototype, 'webdriver', () => false);
+  //    false (undefined/null is itself a tell). The engine already reports false in agentic
+  //    tabs; patching it anyway is a detectable lie, so only a wrong value is replaced.
+  if (navigator.webdriver !== false) define(Navigator.prototype, 'webdriver', () => false);
 
   // 2. window.chrome.loadTimes/csi/app: see CHROME_SHIM_SOURCE (injected for every identity).
 
@@ -266,13 +268,22 @@ function uaPlatformToNavigatorPlatform(os: BrowserFingerprintProfile["os"]): str
  * "window[x][y] is not a function" and aborted), so their absence is both a tell and a
  * breakage. Values come from the page's own navigation timing; functions report native code.
  */
-export const CHROME_SHIM_SOURCE = `${TO_STRING_PRELUDE}
+export const CHROME_SHIM_SOURCE = `
 (() => {
   try {
-    ${NATIVE_HELPERS}
+    // No Function.prototype.toString patch here: that proxy is itself detectable. Bound
+    // functions already print "function () { [native code] }", which is exactly what
+    // Chrome's chrome.loadTimes / chrome.csi print (anonymous, length 0, with a prototype).
+    const anonymousNative = (fn) => {
+      const bound = fn.bind(null);
+      Object.defineProperty(bound, 'name', { value: '', configurable: true });
+      Object.defineProperty(bound, 'prototype', { value: {}, writable: true });
+      return bound;
+    };
     const nativeFn = (fn, name) => {
-      const wrapped = method(name, 0, fn);
-      return wrapped;
+      const bound = fn.bind(null);
+      Object.defineProperty(bound, 'name', { value: name, configurable: true });
+      return bound;
     };
     const chrome = window.chrome || (window.chrome = {});
     const nav = () => (performance.getEntriesByType && performance.getEntriesByType('navigation')[0]) || null;
@@ -283,7 +294,7 @@ export const CHROME_SHIM_SOURCE = `${TO_STRING_PRELUDE}
       return entry ? at(entry.startTime) : 0;
     };
     if (typeof chrome.loadTimes !== 'function') {
-      chrome.loadTimes = nativeFn(function loadTimes() {
+      chrome.loadTimes = anonymousNative(function loadTimes() {
         const n = nav();
         const protocol = (n && n.nextHopProtocol) || 'http/1.1';
         return {
@@ -301,10 +312,10 @@ export const CHROME_SHIM_SOURCE = `${TO_STRING_PRELUDE}
           wasAlternateProtocolAvailable: false,
           connectionInfo: protocol,
         };
-      }, 'loadTimes');
+      });
     }
     if (typeof chrome.csi !== 'function') {
-      chrome.csi = nativeFn(function csi() {
+      chrome.csi = anonymousNative(function csi() {
         const n = nav();
         return {
           startE: Math.round(performance.timeOrigin),
@@ -312,7 +323,7 @@ export const CHROME_SHIM_SOURCE = `${TO_STRING_PRELUDE}
           pageT: performance.now(),
           tran: (n && n.type === 'reload') ? 1 : 15,
         };
-      }, 'csi');
+      });
     }
     if (!chrome.app) {
       const InstallState = { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' };

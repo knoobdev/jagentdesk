@@ -37,6 +37,31 @@ export function isStealthEnabled(): boolean {
 
 export function setActiveFingerprintProfile(profile: BrowserFingerprintProfile | null): void {
   activeProfile = profile;
+  markIdentityKnown();
+}
+
+/**
+ * The app sends the active profile (or `null`) once it reaches the daemon. Until then a
+ * guest restored at startup would load with no identity, and anything it starts — a shared
+ * worker in particular — keeps that identity. Guests wait for it, at most IDENTITY_WAIT_MS
+ * (the daemon may be unreachable).
+ */
+const IDENTITY_WAIT_MS = 5_000;
+let markIdentityKnown: () => void = () => undefined;
+const identityKnown = new Promise<void>((resolve) => {
+  markIdentityKnown = resolve;
+});
+let identityResolved = false;
+void identityKnown.then(() => {
+  identityResolved = true;
+  return undefined;
+});
+
+function waitForIdentity(): Promise<void> {
+  return Promise.race([
+    identityKnown,
+    new Promise<void>((resolve) => setTimeout(resolve, IDENTITY_WAIT_MS).unref?.()),
+  ]);
 }
 
 export function getActiveFingerprintProfile(): BrowserFingerprintProfile | null {
@@ -144,15 +169,26 @@ export function alignProfileWithEngine(
  * app and Electron tokens, with the reduced "Chrome/<major>.0.0.0" form.
  */
 export function browserUserAgentFromElectron(electronUserAgent: string): string {
-  return electronUserAgent
-    .replace(/\s+(?:JAgentDesk|jagentdesk|Electron)\/\S+/g, "")
-    .replace(/Chrome\/(\d+)(?:\.\d+){3}/, "Chrome/$1.0.0.0")
-    .replace(/\s{2,}/g, " ")
-    .trim();
+  return (
+    electronUserAgent
+      // App tokens sit between "(KHTML, like Gecko)" and "Chrome/": "JAgentDesk/x" in a
+      // packaged app, the package name ("@jagentdesk/desktop/x") in development.
+      .replace(/(\(KHTML, like Gecko\))\s+.*?\s*(Chrome\/)/, "$1 $2")
+      .replace(/\s+Electron\/\S+/g, "")
+      .replace(/Chrome\/(\d+)(?:\.\d+){3}/, "Chrome/$1.0.0.0")
+      .replace(/\s{2,}/g, " ")
+      .trim()
+  );
 }
 
+/**
+ * Electron's own User-Agent, read before {@link applySessionIdentity} changes the process
+ * default. The app window keeps it.
+ */
+export const ELECTRON_USER_AGENT = app.userAgentFallback;
+
 function defaultBrowserUserAgent(): string {
-  return browserUserAgentFromElectron(app.userAgentFallback);
+  return browserUserAgentFromElectron(ELECTRON_USER_AGENT);
 }
 
 type UaMetadata = ReturnType<typeof buildUserAgentMetadata>;
@@ -295,11 +331,48 @@ function effectiveProfile(): BrowserFingerprintProfile | null {
  */
 export function applySessionIdentity(browserSession: Session): void {
   const profile = effectiveProfile();
+  const userAgent = profile ? profile.userAgent : defaultBrowserUserAgent();
   if (profile) {
-    browserSession.setUserAgent(profile.userAgent, acceptLanguageList(profile.acceptLanguage));
+    browserSession.setUserAgent(userAgent, acceptLanguageList(profile.acceptLanguage));
   } else {
-    browserSession.setUserAgent(defaultBrowserUserAgent());
+    browserSession.setUserAgent(userAgent);
   }
+  // Shared workers are not CDP children of the page, and their navigator.userAgent comes
+  // from the process default, not the session ("JAgentDesk/… Electron/…"). The app window
+  // pins ELECTRON_USER_AGENT, so only agentic guests see this.
+  app.userAgentFallback = userAgent;
+}
+
+/**
+ * Permissions that reveal the machine behind the identity (device names, location, local
+ * fonts, real screens) or open hardware. Electron grants every permission by default; an
+ * agentic tab is refused them, like a browser where the user never clicked "Allow".
+ */
+const DENIED_GUEST_PERMISSIONS = new Set<string>([
+  "media",
+  "geolocation",
+  "display-capture",
+  "local-fonts",
+  "window-management",
+  "hid",
+  "serial",
+  "usb",
+  "midiSysex",
+  "idle-detection",
+  "speaker-selection",
+]);
+
+export function isGuestPermissionAllowed(permission: string): boolean {
+  return !DENIED_GUEST_PERMISSIONS.has(permission);
+}
+
+export function installGuestPermissionPolicy(browserSession: Session): void {
+  browserSession.setPermissionRequestHandler((_contents, permission, callback) => {
+    callback(isGuestPermissionAllowed(permission));
+  });
+  browserSession.setPermissionCheckHandler((_contents, permission) =>
+    isGuestPermissionAllowed(permission),
+  );
 }
 
 type SendCommand = (
@@ -451,6 +524,12 @@ export function applyStealthToWebContents(contents: WebContents): Promise<void> 
   if (contents.isDestroyed()) {
     return Promise.resolve();
   }
+  if (!identityResolved) {
+    return waitForIdentity().then(() => {
+      identityResolved = true;
+      return applyStealthToWebContents(contents);
+    });
+  }
   const key = identityKey();
   const previous = guestStates.get(contents);
   if (previous?.key === key) {
@@ -554,7 +633,7 @@ async function prepareChildTarget(
   // Without a profile the child still gets the plain Chrome UA (applyIdentityOverrides).
   const onError = (message: string, error: unknown) =>
     logWarn(`${message} (${type ?? "target"})`, contents, error);
-  const worker = type === "worker" || type === "shared_worker";
+  const worker = type === "worker" || type === "shared_worker" || type === "service_worker";
   try {
     // A dedicated worker inherits the page's locale override; setting it again fails.
     await applyIdentityOverrides(send, profile, onError, { locale: !worker });

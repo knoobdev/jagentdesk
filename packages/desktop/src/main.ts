@@ -2,7 +2,14 @@ process.emitWarning = (() => {}) as typeof process.emitWarning;
 
 import log from "electron-log/main";
 log.transports.console.level = "info";
-log.initialize({ spyRendererConsole: true });
+// The log preload goes only to the app's own session. By default electron-log adds it to every
+// future session too, which put a `__electronLog` global into every agentic-browser page.
+// electron-log's typings say `includeFutureSessions`, but its runtime reads `includeFutureSession`.
+log.initialize({
+  spyRendererConsole: true,
+  getSessions: () => [session.defaultSession],
+  ...({ includeFutureSession: false } as object),
+});
 
 import { inheritLoginShellEnvAsync } from "./login-shell-env.js";
 
@@ -87,6 +94,7 @@ import {
 import { runDesktopStartup } from "./desktop-startup.js";
 import { autoUpdateInstalledSkills } from "./integrations/skills/index.js";
 import { registerBrowserAutomationIpc } from "./features/browser-automation/ipc.js";
+import { applyIpGeo, IpGeoResolver, type IpGeo } from "./features/browser-geo/index.js";
 import {
   answerDialog,
   getPendingDialog,
@@ -96,6 +104,8 @@ import {
 } from "./features/browser-automation/guest-dialogs.js";
 import {
   applySessionIdentity,
+  ELECTRON_USER_AGENT,
+  installGuestPermissionPolicy,
   applyStealthToWebContents,
   installNavigationClientHints,
   getActiveFingerprintProfile,
@@ -108,7 +118,10 @@ import {
   loadProfileExtensions,
   proxyLogin,
 } from "./features/browser-network.js";
-import { BrowserFingerprintProfileSchema } from "@jagentdesk/protocol/browser-automation/fingerprint-profile";
+import {
+  BrowserFingerprintProfileSchema,
+  type BrowserFingerprintProfile,
+} from "@jagentdesk/protocol/browser-automation/fingerprint-profile";
 import {
   deleteConnectedLogin,
   listConnectedLogins,
@@ -591,6 +604,54 @@ ipcMain.handle("jagentdesk:browser:open-devtools", (event, browserId: unknown) =
   return result;
 });
 
+const IP_GEO_WAIT_MS = 4_000;
+let ipGeoResolver: IpGeoResolver | null = null;
+
+function getIpGeoResolver(): IpGeoResolver {
+  ipGeoResolver ??= new IpGeoResolver({
+    dataDir: path.join(app.getPath("userData"), "geoip"),
+    download: (url, init) => net.fetch(url, init),
+  });
+  return ipGeoResolver;
+}
+
+/**
+ * Timezone, locale and languages from the exit IP, unless the profile was set by
+ * hand. The first lookup may have to download the database: then the profile is applied with
+ * its own values and located once the lookup finishes.
+ */
+async function locateProfile(
+  browserSession: Electron.Session,
+  profile: BrowserFingerprintProfile,
+): Promise<BrowserFingerprintProfile> {
+  if (profile.geoFromIp === false) return profile;
+  const lookup = getIpGeoResolver().resolve((url, init) => browserSession.fetch(url, init));
+  const geo = await Promise.race([
+    lookup,
+    new Promise<undefined>((resolve) => setTimeout(resolve, IP_GEO_WAIT_MS)),
+  ]);
+  if (geo === undefined) {
+    void lookup.then((late) => applyLateIpGeo(browserSession, profile, late));
+    return profile;
+  }
+  if (!geo) return profile;
+  log.info("[browser-geo] profile located", { profileId: profile.id, ...geo });
+  return applyIpGeo(profile, geo);
+}
+
+/** A lookup that finished after the profile was applied with its own values. */
+async function applyLateIpGeo(
+  browserSession: Electron.Session,
+  profile: BrowserFingerprintProfile,
+  late: IpGeo | null,
+): Promise<void> {
+  if (!late || getActiveFingerprintProfile()?.id !== profile.id) return;
+  setActiveFingerprintProfile(applyIpGeo(profile, late));
+  applySessionIdentity(browserSession);
+  await reapplyStealthToGuests(browserSession, webContents.getAllWebContents());
+  log.info("[browser-geo] profile located", { profileId: profile.id, ...late });
+}
+
 // Agentic-tab JavaScript dialogs (ADR-0025): the tab's dialog bar reads and answers them.
 ipcMain.handle("jagentdesk:browser:get-dialog", (event, browserId: unknown) => {
   if (typeof browserId !== "string") return null;
@@ -762,10 +823,11 @@ ipcMain.handle(
       });
       return { ok: false };
     }
-    const profile = parsed.data;
-    setActiveFingerprintProfile(profile);
     const browserSession = session.fromPartition(JAGENTDESK_BROWSER_PROFILE_PARTITION);
-    await applyProfileProxyToSession(browserSession, profile);
+    // The proxy first: the exit IP that locates the profile is the proxy's.
+    await applyProfileProxyToSession(browserSession, parsed.data);
+    const profile = await locateProfile(browserSession, parsed.data);
+    setActiveFingerprintProfile(profile);
     // Session UA + Accept-Language first (covers every request), then each open guest's
     // engine overrides and init scripts, so the change also reaches tabs already open.
     applySessionIdentity(browserSession);
@@ -962,6 +1024,9 @@ async function createWindow(
       webviewTag: true,
     },
   });
+  // The process default User-Agent follows the agentic-browser identity (browser-stealth.ts);
+  // the app window keeps Electron's own.
+  mainWindow.webContents.setUserAgent(ELECTRON_USER_AGENT);
 
   let windowShown = false;
   const showWindow = () => {
@@ -1240,6 +1305,7 @@ async function bootstrap(): Promise<void> {
   const agenticBrowserSession = session.fromPartition(JAGENTDESK_BROWSER_PROFILE_PARTITION);
   applySessionIdentity(agenticBrowserSession);
   installNavigationClientHints(agenticBrowserSession);
+  installGuestPermissionPolicy(agenticBrowserSession);
 
   if (await refuseRosettaBuild()) {
     return;

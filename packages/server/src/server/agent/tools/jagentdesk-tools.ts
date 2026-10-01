@@ -2604,6 +2604,7 @@ function registerBrowserProfileTools(params: {
     userAgent: profile.userAgent,
     timezone: profile.timezone,
     locale: profile.locale,
+    matchIpLocation: profile.geoFromIp !== false,
     hasProxy: profile.proxy !== null,
     webrtcPolicy: profile.webrtcPolicy,
     extensions: profile.extensions.length,
@@ -2641,7 +2642,7 @@ function registerBrowserProfileTools(params: {
     {
       title: "Create browser fingerprint profile",
       description:
-        "Create a coherent anti-detect fingerprint profile for the agentic browser (a consistent device identity: User-Agent, UA Client Hints, WebGL, timezone, screen, seeded canvas/audio noise). Optionally attach a proxy (the ONLY way to change the observed IP — no proxy means the real IP), Chromium extensions (absolute unpacked dirs you can author first), and custom init scripts (JS injected before page scripts). Set activate=true to make it the active profile immediately. For identities strict checkers (PixelScan, iphey) accept: use the OS of the machine running the browser (macOS on a Mac) — its real GPU is then reported, while another OS must claim a GPU the hardware cannot back; and set the timezone of the proxy's location, or without a proxy the machine's own timezone. Auto-approved.",
+        "Create a coherent anti-detect fingerprint profile for the agentic browser (a consistent device identity: User-Agent, UA Client Hints, WebGL, timezone, screen, seeded canvas/audio noise). Optionally attach a proxy (the ONLY way to change the observed IP — no proxy means the real IP), Chromium extensions (absolute unpacked dirs you can author first), and custom init scripts (JS injected before page scripts). Set activate=true to make it the active profile immediately. For identities strict checkers (PixelScan, iphey) accept: use the OS of the machine running the browser (macOS on a Mac) — its real GPU is then reported, while another OS must claim a GPU the hardware cannot back; timezone, locale and languages follow the exit IP's location by default (matchIpLocation). Auto-approved.",
       inputSchema: {
         name: z
           .string()
@@ -2658,8 +2659,14 @@ function registerBrowserProfileTools(params: {
           .string()
           .trim()
           .optional()
-          .describe("IANA timezone, e.g. America/New_York. Should match the proxy's geo-IP."),
+          .describe("IANA timezone, e.g. America/New_York. Setting it turns off matchIpLocation."),
         locale: z.string().trim().optional().describe("BCP-47 locale, e.g. en-US."),
+        matchIpLocation: z
+          .boolean()
+          .optional()
+          .describe(
+            "Take timezone, locale and languages from the location of the exit IP (through the proxy) each time the profile is applied. Default true unless timezone is given.",
+          ),
         languages: z
           .array(z.string().trim().min(1))
           .optional()
@@ -2699,6 +2706,7 @@ function registerBrowserProfileTools(params: {
       name?: string;
       os?: FingerprintOs;
       timezone?: string;
+      matchIpLocation?: boolean;
       locale?: string;
       languages?: string[];
       proxyServer?: string;
@@ -2724,6 +2732,7 @@ function registerBrowserProfileTools(params: {
         ...(input.name ? { name: input.name } : {}),
         ...(input.os ? { os: input.os } : {}),
         ...(input.timezone ? { timezone: input.timezone } : {}),
+        ...(input.matchIpLocation !== undefined ? { geoFromIp: input.matchIpLocation } : {}),
         ...(input.locale ? { locale: input.locale } : {}),
         ...(input.languages ? { languages: input.languages } : {}),
         proxy,
@@ -2943,7 +2952,15 @@ function registerBrowserProfileTools(params: {
       inputSchema: {
         id: z.string().trim().min(1).describe("Profile id to update."),
         name: z.string().trim().min(1).max(60).optional(),
-        timezone: z.string().trim().optional().describe("IANA timezone; match the proxy geo-IP."),
+        timezone: z
+          .string()
+          .trim()
+          .optional()
+          .describe("IANA timezone. Setting it turns off matchIpLocation."),
+        matchIpLocation: z
+          .boolean()
+          .optional()
+          .describe("Take timezone, locale and languages from the exit IP's location."),
         locale: z.string().trim().optional(),
         languages: z.array(z.string().trim().min(1)).optional(),
         proxyServer: z
@@ -2972,6 +2989,7 @@ function registerBrowserProfileTools(params: {
       id: string;
       name?: string;
       timezone?: string;
+      matchIpLocation?: boolean;
       locale?: string;
       languages?: string[];
       proxyServer?: string | null;
@@ -3002,7 +3020,8 @@ function registerBrowserProfileTools(params: {
       const profile: BrowserFingerprintProfile = {
         ...current,
         ...(input.name ? { name: input.name } : {}),
-        ...(input.timezone ? { timezone: input.timezone } : {}),
+        ...(input.timezone ? { timezone: input.timezone, geoFromIp: false } : {}),
+        ...(input.matchIpLocation !== undefined ? { geoFromIp: input.matchIpLocation } : {}),
         ...(input.locale ? { locale: input.locale } : {}),
         ...(input.languages ? { languages: input.languages } : {}),
         proxy,

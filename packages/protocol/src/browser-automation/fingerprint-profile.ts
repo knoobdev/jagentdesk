@@ -73,6 +73,10 @@ export const BrowserFingerprintProfileSchema = z.object({
   acceptLanguage: z.string(),
   timezone: z.string(), // IANA, e.g. "America/New_York" — must match proxy geo
   locale: z.string(), // e.g. "en-US"
+  // Timezone, locale and languages follow the location of the exit IP (through the profile's
+  // proxy) when the browser applies the profile; timezone/locale/languages above are the
+  // fallback when the lookup fails. Absent = on. Setting a timezone by hand turns it off.
+  geoFromIp: z.boolean().optional(),
   screen: ScreenMetricsSchema,
   hardwareConcurrency: z.number().int().positive(),
   deviceMemory: z.number().positive(),
@@ -232,6 +236,8 @@ export interface GenerateFingerprintProfileInput {
   webrtcPolicy?: WebRtcPolicy;
   /** Stable seed for canvas/audio noise; defaults to `id` so a profile is reproducible. */
   seed?: string;
+  /** Follow the exit IP's location; defaults to on unless a timezone is given. */
+  geoFromIp?: boolean;
   nowMs: number;
 }
 
@@ -261,6 +267,7 @@ export function generateFingerprintProfile(
     acceptLanguage: buildAcceptLanguage(languages),
     timezone: input.timezone ?? "America/New_York",
     locale,
+    geoFromIp: input.geoFromIp ?? input.timezone === undefined,
     screen: template.screen,
     hardwareConcurrency: template.hardwareConcurrency,
     deviceMemory: template.deviceMemory,
@@ -276,9 +283,14 @@ export function generateFingerprintProfile(
   };
 }
 
+const OS_LABEL: Record<FingerprintOs, string> = {
+  macos: "macOS",
+  windows: "Windows",
+  linux: "Linux",
+};
+
 function defaultProfileName(os: FingerprintOs): string {
-  const label = os === "macos" ? "macOS" : os === "windows" ? "Windows" : "Linux";
-  return `${label} · Chrome ${CHROME_MAJOR}`;
+  return `${OS_LABEL[os]} · Chrome ${CHROME_MAJOR}`;
 }
 
 function buildAcceptLanguage(languages: string[]): string {
