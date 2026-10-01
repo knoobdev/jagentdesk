@@ -119,6 +119,8 @@ import {
   resolveNewWorkspaceInitialServerId,
 } from "./new-workspace-initial-context";
 import { useNewWorkspaceProjectPicker } from "./new-workspace/project-picker";
+import { ImportSessionButton } from "./new-workspace/import-session-button";
+import { useImportSession } from "@/hooks/use-import-session";
 
 const ThemedFolderPlus = withUnistyles(FolderPlus);
 const foregroundMutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
@@ -2275,10 +2277,12 @@ export function NewWorkspaceScreen({
   });
 
   const screenHeaderLeft = useMemo(() => <SidebarMenuToggle />, []);
+  const importSession = useImportSession({ serverId: selectedServerId });
 
   return (
     <FileDropZone style={styles.container}>
       <ScreenHeader left={screenHeaderLeft} borderless />
+      <ImportSessionButton compact={isCompact} placement="top" onPress={importSession.open} />
       <View style={contentStyle}>
         <TitlebarDragRegion />
         <ReanimatedAnimated.View style={centeredStyle}>
@@ -2313,9 +2317,15 @@ export function NewWorkspaceScreen({
             commandDraftConfig={composerState?.commandDraftConfig}
             agentControls={agentControlsWithDisabled}
           />
+          <ImportSessionButton
+            compact={isCompact}
+            placement="bottom"
+            onPress={importSession.open}
+          />
           {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
         </ReanimatedAnimated.View>
       </View>
+      {importSession.sheet}
     </FileDropZone>
   );
 }

@@ -82,6 +82,19 @@ test.describe("New workspace entry points", () => {
     }
   });
 
+  test("New workspace opens the Import session sheet", async ({ page }) => {
+    const seeded = await seedWorkspace({ repoPrefix: "entry-import-sheet-" });
+    try {
+      await gotoAppShell(page);
+      await waitForSidebarHydration(page);
+      await openGlobalNewWorkspaceComposer(page);
+      await page.getByTestId("new-workspace-import-session").filter({ visible: true }).click();
+      await expect(page.getByTestId("import-session-sheet")).toBeVisible({ timeout: 30_000 });
+    } finally {
+      await seeded.cleanup();
+    }
+  });
+
   test("the New Workspace screen hides the host selector when there is only one host", async ({
     page,
   }) => {
