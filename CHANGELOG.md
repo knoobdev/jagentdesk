@@ -1,9 +1,50 @@
 # Changelog
 
 All notable changes to JAgentDesk are documented here. JAgentDesk versions its
-own release line (now `0.9.45`); the many `v0.1.x`–`v1.0.x` tags in history are
+own release line (now `0.9.46`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
+
+## v0.9.46 — 2026-10-01
+
+The agentic browser stops leaking the app and the machine behind its identity, and fingerprint
+profiles take their timezone, locale and languages from the location of their exit IP.
+
+### Agentic browser
+
+- **Shared workers no longer announce the app.** They used Electron's default User-Agent
+  ("JAgentDesk/x … Electron/x") even with a profile active; they now present the same identity as
+  the page. The app's own window keeps Electron's User-Agent.
+- **No more development tokens.** In development builds the User-Agent no longer carries the package
+  name.
+- **Restored tabs wait for the profile.** Tabs reopened at startup used to load before the profile
+  arrived, and anything they started kept the missing identity; they now wait for it (at most 5 s).
+- **Camera, microphone, location and more are refused.** Electron granted every permission, so pages
+  could read the names of cameras and microphones and the real location. Agentic tabs now refuse
+  camera/microphone, geolocation, screen capture, local fonts, window management and USB/HID/serial
+  access; pages see one unnamed device per kind, like Chrome before the user allows access.
+- **No app globals in pages.** The logging library no longer adds a `__electronLog` global to every
+  page.
+- **Service workers** get the profile like other workers.
+- **Clean without a profile.** Chrome's `chrome.loadTimes` / `chrome.csi` are now provided the way
+  Chrome defines them, without patching `Function.prototype.toString`, and `navigator.webdriver` is
+  left alone when it is already `false`. Measured with CreepJS on macOS arm64: 0% headless, 0%
+  stealth, no lies (previously 33% headless, 20% stealth).
+- A profile claiming a different OS than the machine running the browser remains detectable (fonts,
+  GPU, shared worker values, JavaScript patches); use a profile on the host's own OS.
+
+### Fingerprint profiles follow the IP location
+
+- **Timezone, locale and languages match the exit IP.** When a profile is applied, its exit IP is
+  asked through the profile's proxy and located on this device with the DB-IP City Lite database
+  (downloaded once a month); the IP is not sent to any lookup service. The timezone comes from the
+  location and the languages from the country (for example Asia/Saigon, vi-VN, "vi-VN, vi, en-US,
+  en" from a Vietnamese IP).
+- **On by default.** Setting a timezone by hand turns it off for that profile. Settings → host →
+  Browser fingerprint profiles has a "Match IP location" switch, and the profile agent tools take
+  `matchIpLocation`.
+- If the first lookup has to download the database, the profile is applied with its own values and
+  located as soon as the lookup finishes.
 
 ## v0.9.45 — 2026-09-30
 

@@ -100,6 +100,19 @@ with a few deliberate boundaries:
 
 ## ✨ New in this release
 
+### Agentic browser leaks closed & profiles that follow the IP location (v0.9.46)
+
+- **Nothing points back to the app.** Shared workers present the profile's identity instead of
+  "JAgentDesk … Electron", restored tabs wait for the profile before loading, and pages no longer see
+  an app logging global.
+- **Camera, microphone and location stay private.** Agentic tabs refuse camera/microphone,
+  geolocation, screen capture, local fonts and device access, so pages can no longer read your
+  devices' names or your location.
+- **Clean without a profile:** CreepJS reports 0% headless, 0% stealth and no lies on macOS arm64.
+- **Profiles follow the IP location.** Timezone, locale and languages come from where the profile's
+  exit IP is, located on your device (DB-IP City Lite) without sending the IP to a lookup service.
+  On by default; "Match IP location" in each profile's settings.
+
 ### Agent-decided browser dialogs, host tools on every OS, anti-detect that holds & Paseo 0.10.2 (v0.9.45)
 
 - **The agent decides browser dialogs.** `alert`, `confirm` and `prompt` in an agentic tab no longer
@@ -179,36 +192,10 @@ with a few deliberate boundaries:
 - **Nothing overlaps on phones** — the drawer header, the workspace header, Docker's
   container tabs, the Usage header and the Appearance settings all fit.
 
-### ClickUp theme & shell, Paseo's split plugins, zoomable images (v0.9.41)
-
-<p align="center">
-  <img src="docs/media/clickup-theme.jpg" alt="The ClickUp theme — top bar with host switcher and Search, violet icon rail, Workspaces panel with a violet New button, and the Simulator agent chat with its result table" width="100%" />
-</p>
-
-- **ClickUp theme, now the default.** Not just ClickUp's palette but its shell: a top bar with
-  the host switcher and a **Search ⌘K** pill, a violet icon rail with every destination, the
-  sidebar and content in one rounded panel with a violet **+ New**, a ClickUp Brain composer
-  with a gradient border, ClickUp‑style chat (avatar, name, time), underlined tabs, list
-  groups with row dividers and lavender filter chips on every screen — and on phones a bottom
-  tab bar with a violet Create button. **ClickUp Dark** and every previous theme are still in
-  Settings › Appearance.
-- **Marketplace › Themes.** A preview card per theme (a mini window painted with its palette),
-  variant dots, search and an All / Dark / Light filter. Installed plugin themes show up in
-  Settings › Appearance.
-- **Plugins built for Paseo's split API load again** (`index.client` + `index.server`,
-  plugin settings screens, npm / GitHub sources) — this fixes
-  `Plugin failed to load: client.addSettingsScreen is not a function`. Installed plugins now
-  survive a daemon restart.
-- **Zoomable images.** Chat images open in a lightbox with wheel / pinch zoom, pan, reset and
-  a toolbar; image files zoom in the file pane; Mermaid diagrams go fullscreen.
-- **Screen chats live in the project.** Simulator, Database and Cluster chats get their own
-  workspace in the project (listed under it like any chat) instead of landing as a tab in
-  another conversation.
-
 ### Older releases
 
 See **[CHANGELOG.md](CHANGELOG.md)** and the [releases page](https://github.com/knoobdev/jagentdesk/releases)
-for v0.9.40 and earlier.
+for v0.9.41 and earlier.
 
 ### Databases — a full database IDE (desktop **and** mobile)
 
@@ -332,7 +319,8 @@ The agent drives a real Chromium `<webview>` over CDP — no external Playwright
 - **Session vault** _(opt‑in)_ captures/restores a domain’s logged‑in cookies, encrypted at rest
   with the OS keychain (`safeStorage`).
 - **Identity from the first request** — the active profile (or the plain‑Chrome identity when none
-  is chosen) is applied before a tab's first load and to popups, cross‑site iframes and workers.
+  is chosen) is applied before a tab's first load and to popups, cross‑site iframes and every kind
+  of worker; timezone, locale and languages follow the profile's exit IP.
 - **Dialogs the agent decides** — `alert` / `confirm` / `prompt` wait in the tab instead of opening
   a native box; the agent answers with `browser_dialog`, or you answer from the bar in the tab.
   HTML modals show up in the agent's snapshot as `dialog [modal=true]`.
