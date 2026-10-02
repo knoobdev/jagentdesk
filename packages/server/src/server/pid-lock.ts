@@ -2,7 +2,8 @@ import { open, readFile, stat, unlink, mkdir, utimes } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { hostname, uptime } from "node:os";
+import { uptime } from "node:os";
+import { getHostName } from "./host-name.js";
 import { z } from "zod";
 
 export const pidLockInfoSchema = z.object({
@@ -242,7 +243,7 @@ export async function acquirePidLock(
   const lockInfo: PidLockInfo = {
     pid: lockOwnerPid,
     startedAt: new Date().toISOString(),
-    hostname: hostname(),
+    hostname: getHostName(),
     uid: process.getuid?.() ?? 0,
     listen,
     heartbeat: true,
