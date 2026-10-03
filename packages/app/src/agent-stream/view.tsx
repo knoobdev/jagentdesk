@@ -1292,6 +1292,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
                   scrollEnabled: streamScrollEnabled,
                   contentMaxWidth,
                   outlineInset: outlineLayout.inset,
+                  imageContext: { serverId: resolvedServerId, workspaceRoot },
                   listStyle: stylesheet.list,
                   baseListContentContainerStyle: stylesheet.listContentContainer,
                   forwardListContentContainerStyle: stylesheet.forwardListContentContainer,

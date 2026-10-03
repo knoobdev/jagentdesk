@@ -43,6 +43,10 @@ import {
   type MarkdownInlineImagePart,
 } from "./html-ish";
 import { resolveInlineImageSize, type InlineImageDimensions } from "./inline-image-size";
+import {
+  getAssistantImageMetadata,
+  setAssistantImageMetadata,
+} from "@/utils/assistant-image-metadata";
 import { groupMarkdownParts, type MarkdownPartGroup } from "./part-groups";
 
 export type MarkdownStyles = Record<string, TextStyle & ViewStyle & { [key: string]: unknown }>;
@@ -245,11 +249,16 @@ function useNaturalImageDimensions(part: MarkdownInlineImagePart): {
   failed: boolean;
   setFailed: (failed: boolean) => void;
 } {
-  const [natural, setNatural] = useState<InlineImageDimensions | null>(null);
+  const cached = useMemo(() => getAssistantImageMetadata({ source: part.src }), [part.src]);
+  const [resolved, setResolved] = useState<{
+    source: string;
+    dimensions: InlineImageDimensions;
+  } | null>(null);
+  const natural = resolved?.source === part.src ? resolved.dimensions : cached;
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
-    if (part.width && part.height) {
+    if ((part.width && part.height) || cached) {
       return;
     }
 
@@ -257,8 +266,9 @@ function useNaturalImageDimensions(part: MarkdownInlineImagePart): {
     Image.getSize(
       part.src,
       (width, height) => {
+        setAssistantImageMetadata({ source: part.src }, { width, height });
         if (!cancelled) {
-          setNatural({ width, height });
+          setResolved({ source: part.src, dimensions: { width, height } });
         }
       },
       () => {
@@ -271,7 +281,7 @@ function useNaturalImageDimensions(part: MarkdownInlineImagePart): {
     return () => {
       cancelled = true;
     };
-  }, [part.height, part.src, part.width]);
+  }, [cached, part.height, part.src, part.width]);
 
   return { natural, failed, setFailed };
 }
