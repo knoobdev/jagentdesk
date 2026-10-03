@@ -44,6 +44,7 @@ import type { DaemonConfigStore, MutableDaemonConfig } from "./daemon-config-sto
 import {
   type ServerInfoStatusPayload,
   type SessionInboundMessage,
+  type ScriptStatusUpdateMessage,
   type SessionOutboundMessage,
   type WorkspaceSetupSnapshot,
   type WSHelloMessage,
@@ -1358,6 +1359,12 @@ export class VoiceAssistantWebSocketServer {
     for (const session of this.listTrustedSessions()) session.emitForumStream(topic);
   }
 
+  public publishScriptStatusUpdate(message: ScriptStatusUpdateMessage): void {
+    for (const session of this.listTrustedSessions()) {
+      session.emitServerMessage(message);
+    }
+  }
+
   public publishSpeechReadiness(readiness: SpeechReadinessSnapshot | null): void {
     this.updateServerCapabilities(
       buildServerCapabilities({ readiness, host: this.hostCapabilities?.snapshot() ?? null }),
@@ -2035,6 +2042,7 @@ export class VoiceAssistantWebSocketServer {
           ),
         );
       },
+      publishScriptStatusUpdate: (message) => this.publishScriptStatusUpdate(message),
       downloadTokenStore: this.downloadTokenStore,
       pushTokenStore: this.pushTokenStore,
       jagentdeskHome: this.jagentdeskHome,
