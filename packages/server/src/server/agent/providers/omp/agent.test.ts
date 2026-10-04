@@ -662,6 +662,46 @@ describe("OMP agent client and session", () => {
     expect(omp.completedTurnCount()).toBe(1);
   });
 
+  test("keeps custom context in separate tools while a turn continues", async () => {
+    const omp = new OmpHarness();
+    await omp.start();
+    await omp.requireStartTurn("Explain the project");
+    omp.runtime().beginTurn();
+    for (const display of [true, false, true]) {
+      omp.emit({
+        type: "message_end",
+        message: {
+          role: "custom",
+          customType: "project-context",
+          content: [{ type: "text", text: "Project instructions" }],
+          details: { project: "example" },
+          display,
+        },
+      });
+    }
+    const items = omp.timeline();
+    expect(items).toEqual(
+      [1, 2].map(() => ({
+        type: "tool_call",
+        callId: expect.stringMatching(/^omp-custom-/),
+        name: "project-context",
+        status: "completed",
+        detail: { type: "plain_text", text: "Project instructions" },
+        metadata: {
+          synthetic: true,
+          customType: "project-context",
+          details: { project: "example" },
+        },
+        error: null,
+      })),
+    );
+    expect(new Set(items.map((item) => item.type === "tool_call" && item.callId)).size).toBe(2);
+    expect(omp.completedTurnCount()).toBe(0);
+    omp.runtime().finishTurn();
+    await waitForImmediate();
+    expect(omp.completedTurnCount()).toBe(1);
+  });
+
   test("omits live custom messages when display is false", async () => {
     const omp = new OmpHarness();
     await omp.start();
@@ -698,14 +738,22 @@ describe("OMP agent client and session", () => {
       );
     omp.runtime().acceptCustomMessage("plain custom status text");
 
-    expect(omp.timeline().filter((item) => item.type === "tool_call")).toMatchObject([
-      { callId: "omp-notice:DocsSmokeTwo", name: "task_notification", status: "completed" },
-    ]);
-    // Non-notice custom messages still fall through as assistant messages.
+    expect(
+      omp.timeline().find((item) => item.type === "tool_call" && item.name === "task_notification"),
+    ).toMatchObject({
+      callId: "omp-notice:DocsSmokeTwo",
+      name: "task_notification",
+      status: "completed",
+    });
     expect(omp.timeline().filter((item) => item.type === "assistant_message")).toMatchObject([
       { text: "done" },
-      { text: "plain custom status text" },
     ]);
+    expect(
+      omp.timeline().find((item) => item.type === "tool_call" && item.name === "custom-message"),
+    ).toMatchObject({
+      name: "custom-message",
+      detail: { type: "plain_text", text: "plain custom status text" },
+    });
   });
 
   test("shows a concise error for a failed tool while keeping shell output", async () => {
