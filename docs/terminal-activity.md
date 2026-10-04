@@ -51,7 +51,7 @@ Claude hook mapping:
 
 - `UserPromptSubmit` → `running`
 - `Stop`, `StopFailure`, `SessionEnd` → `idle`
-- `Notification` with `reason` or `matcher` equal to `idle_prompt` → `needs-input`
+- `Notification` with `notification_type` equal to `idle_prompt` → `needs-input`
 
 Codex hook mapping:
 
