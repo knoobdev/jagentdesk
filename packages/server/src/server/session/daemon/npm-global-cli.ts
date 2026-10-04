@@ -50,8 +50,12 @@ export interface NpmGlobalJAgentDeskInstall {
 }
 
 export interface NpmGlobalJAgentDeskCli {
-  inspect(): Promise<NpmGlobalJAgentDeskInstall>;
-  installLatest(): Promise<CommandResult>;
+  inspect(options?: NpmGlobalOptions): Promise<NpmGlobalJAgentDeskInstall>;
+  installLatest(options?: NpmGlobalOptions): Promise<CommandResult>;
+}
+
+interface NpmGlobalOptions {
+  prefix?: string;
 }
 
 export type CommandRunner = (
@@ -115,10 +119,11 @@ function parseNpmGlobalJAgentDeskInstall(stdout: string): NpmGlobalJAgentDeskIns
 export class DefaultNpmGlobalJAgentDeskCli implements NpmGlobalJAgentDeskCli {
   constructor(private readonly runCommand: CommandRunner = runExternalCommand) {}
 
-  async inspect(): Promise<NpmGlobalJAgentDeskInstall> {
+  async inspect(options: NpmGlobalOptions = {}): Promise<NpmGlobalJAgentDeskInstall> {
+    const prefixArgs = options.prefix ? ["--prefix", options.prefix] : [];
     const result = await this.runCommand(
       "npm",
-      ["-g", "ls", JAGENTDESK_CLI_PACKAGE, "--json", "--depth=0", "--long"],
+      ["-g", "ls", JAGENTDESK_CLI_PACKAGE, "--json", "--depth=0", "--long", ...prefixArgs],
       {
         timeout: NPM_PROBE_TIMEOUT_MS,
         maxBuffer: NPM_MAX_BUFFER_BYTES,
@@ -136,11 +141,16 @@ export class DefaultNpmGlobalJAgentDeskCli implements NpmGlobalJAgentDeskCli {
     return install;
   }
 
-  installLatest(): Promise<CommandResult> {
-    return this.runCommand("npm", ["install", "-g", `${JAGENTDESK_CLI_PACKAGE}@latest`], {
-      timeout: NPM_INSTALL_TIMEOUT_MS,
-      maxBuffer: NPM_MAX_BUFFER_BYTES,
-    });
+  installLatest(options: NpmGlobalOptions = {}): Promise<CommandResult> {
+    const prefixArgs = options.prefix ? ["--prefix", options.prefix] : [];
+    return this.runCommand(
+      "npm",
+      ["install", "-g", `${JAGENTDESK_CLI_PACKAGE}@latest`, ...prefixArgs],
+      {
+        timeout: NPM_INSTALL_TIMEOUT_MS,
+        maxBuffer: NPM_MAX_BUFFER_BYTES,
+      },
+    );
   }
 }
 
