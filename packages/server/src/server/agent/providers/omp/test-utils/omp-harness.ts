@@ -346,6 +346,31 @@ export class OmpHarness {
     return { completed: () => isCompleted, completion };
   }
 
+  async runPromptRejectedBeforeAgentRuns(
+    input: string,
+    error: string,
+    order: "result after ack" | "result before ack",
+  ): Promise<unknown> {
+    const session = this.requireSession();
+    const runtime = this.omp.latestSession();
+    runtime.promptAck = { requestId: "prompt-rejected" };
+    const rejection = {
+      type: "prompt_result",
+      id: "prompt-rejected",
+      agentInvoked: false,
+      status: "error",
+      sessionSettled: true,
+      error: { message: error, retryable: false },
+    } as const;
+    const promptStarted = runtime.nextPrompt();
+    const run = session.run(input);
+    if (order === "result before ack") runtime.emit(rejection);
+    await promptStarted;
+    await waitForImmediate();
+    if (order === "result after ack") runtime.emit(rejection);
+    return await run;
+  }
+
   async runPromptAfterCorrelatedTrueResult(
     input: string,
     output: string,
