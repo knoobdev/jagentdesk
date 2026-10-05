@@ -1,3 +1,4 @@
+import { waitForStop } from "../../utils/wait-for-stop.js";
 import { Command } from "commander";
 import { connectToDaemon, getDaemonHost } from "../../utils/client.js";
 import type { CommandOptions } from "../../output/index.js";
@@ -173,6 +174,7 @@ async function runFollowMode(
   agentId: string,
   options: AgentLogsOptions,
 ): Promise<void> {
+  const stopped = waitForStop();
   const DEFAULT_FOLLOW_TAIL = 10;
   const tailCount = parseTailCount(options.tail) ?? DEFAULT_FOLLOW_TAIL;
 
@@ -223,16 +225,7 @@ async function runFollowMode(
     }
   });
 
-  // Wait for interrupt
-  await new Promise<void>((resolve) => {
-    const cleanup = () => {
-      unsubscribe();
-      resolve();
-    };
-
-    process.on("SIGINT", cleanup);
-    process.on("SIGTERM", cleanup);
-  });
-
+  await stopped;
+  unsubscribe();
   await client.close();
 }
