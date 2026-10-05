@@ -4292,6 +4292,19 @@ class ClaudeAgentSession implements AgentSession {
       return;
     }
     if (message.subtype === "status") {
+      // Claude Code reports a mode it switched to on its own, such as entering
+      // plan mode with the EnterPlanMode tool, through the status message.
+      if (
+        isPermissionMode(message.permissionMode) &&
+        this.observePermissionMode(message.permissionMode)
+      ) {
+        events.push({
+          type: "mode_changed",
+          provider: "claude",
+          currentModeId: this.currentMode,
+          availableModes: this.availableModes,
+        });
+      }
       const status = toObjectRecord(message)?.status;
       if (status === "compacting") {
         this.compacting = true;
@@ -4574,10 +4587,7 @@ class ClaudeAgentSession implements AgentSession {
       notice = this.createClaudeSessionChangedNotice(existingSessionId, newSessionId);
     }
     this.availableModes = DEFAULT_MODES;
-    this.currentMode = message.permissionMode;
-    if (this.currentMode !== "plan") {
-      this.planResumeMode = this.currentMode;
-    }
+    this.observePermissionMode(message.permissionMode);
     this.persistence = null;
     if (message.model) {
       const normalizedRuntimeModel = normalizeClaudeRuntimeModelId(message.model);
@@ -4594,6 +4604,16 @@ class ClaudeAgentSession implements AgentSession {
       this.cachedRuntimeInfo = null;
     }
     return { threadStartedSessionId, notice };
+  }
+
+  /** Records a mode Claude Code reports, returning whether it differs from the current one. */
+  private observePermissionMode(mode: PermissionMode): boolean {
+    const changed = this.currentMode !== mode;
+    this.currentMode = mode;
+    if (mode !== "plan") {
+      this.planResumeMode = mode;
+    }
+    return changed;
   }
 
   private readMissingResumedConversationError(message: SDKMessage): string | null {
