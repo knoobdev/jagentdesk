@@ -26,7 +26,7 @@ import {
   OmpModelsResultSchema,
   OmpPromptAckSchema,
   OmpRpcCommandSchema,
-  OmpRuntimeEventSchema,
+  parseOmpRuntimeEvent,
   OmpSessionStateSchema,
   OmpSessionStatsSchema,
   type OmpThinkingLevel,
@@ -118,9 +118,9 @@ class OmpCliRuntimeSession implements OmpRuntimeSession {
     private readonly commandsRpcName: "get_available_commands",
   ) {
     process.onMessage((message) => {
-      const event = OmpRuntimeEventSchema.safeParse(message);
-      if (event.success) {
-        this.emit(event.data);
+      const event = parseOmpRuntimeEvent(message);
+      if (event) {
+        this.emit(event);
       }
     });
     process.onExit(({ error }) => {

@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -11,6 +11,7 @@ import { afterEach, beforeAll, describe, expect, test } from "vitest";
 import type { AgentTimelineItem } from "../agent/agent-sdk-types.js";
 import {
   MIN_SUPPORTED_OMP_VERSION,
+  OmpAgentClient,
   formatOmpVersionSupport,
 } from "../agent/providers/omp/agent.js";
 import { DaemonClient } from "../test-utils/daemon-client.js";
@@ -52,14 +53,53 @@ async function preflight(): Promise<void> {
   }
 }
 
-async function createHarness(): Promise<Harness> {
+// OMP exits at startup when no model is usable at all, so the home offers one offline
+// model, and an agent on any other provider's model has no credentials.
+function createOfflineOmpHome(): string {
+  const home = mkdtempSync(path.join(tmpdir(), "jagentdesk-real-omp-offline-"));
+  roots.add(home);
+  const agentDir = path.join(home, ".omp", "agent");
+  mkdirSync(agentDir, { recursive: true });
+  writeFileSync(
+    path.join(agentDir, "models.yml"),
+    [
+      "providers:",
+      "  offline:",
+      "    baseUrl: http://127.0.0.1:9/v1",
+      "    api: openai-completions",
+      "    auth: none",
+      "    models:",
+      "      - id: offline-1",
+      "        name: Offline",
+      "        api: openai-completions",
+      "        reasoning: false",
+      "        input: [text]",
+      "        contextWindow: 128000",
+      "        maxTokens: 4096",
+      "        cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}",
+      "",
+    ].join("\n"),
+  );
+  return home;
+}
+
+async function createHarness(options: { ompHome?: string } = {}): Promise<Harness> {
   const cwd = mkdtempSync(path.join(tmpdir(), "jagentdesk-real-omp-"));
   const jagentdeskHomeRoot = mkdtempSync(path.join(tmpdir(), "jagentdesk-real-omp-home-"));
   const staticDir = mkdtempSync(path.join(tmpdir(), "jagentdesk-real-omp-static-"));
   for (const root of [cwd, jagentdeskHomeRoot, staticDir]) roots.add(root);
   const logger = pino({ level: process.env.OMP_E2E_LOG_LEVEL ?? "silent" });
   const daemon = await createTestJAgentDeskDaemon({
-    agentClients: createRealProviderClients(["omp"], logger),
+    agentClients: options.ompHome
+      ? {
+          omp: new OmpAgentClient({
+            logger,
+            runtimeSettings: {
+              env: { HOME: options.ompHome, ANTHROPIC_API_KEY: "", ANTHROPIC_OAUTH_TOKEN: "" },
+            },
+          }),
+        }
+      : createRealProviderClients(["omp"], logger),
     providerOverrides: { omp: { enabled: true } },
     logger,
     jagentdeskHomeRoot,
@@ -220,6 +260,29 @@ async function contextWindowUsedTokens(client: DaemonClient, agentId: string) {
 }
 
 describe("daemon E2E (real OMP)", () => {
+  test(
+    "a prompt OMP rejects before its agent runs fails the turn with OMP's error",
+    async () => {
+      const harness = await createHarness({ ompHome: createOfflineOmpHome() });
+      try {
+        const agent = await harness.client.createAgent({
+          cwd: harness.cwd,
+          title: "no-credentials",
+          provider: "omp",
+          model: "anthropic/claude-haiku-4-5",
+          modeId: "full",
+        });
+        await harness.client.sendMessage(agent.id, "Reply with ok.");
+        const finish = await harness.client.waitForFinish(agent.id, 60_000);
+        expect(finish.status).toBe("error");
+        expect(finish.error).toContain("No API key found for anthropic");
+      } finally {
+        await closeHarness(harness);
+      }
+    },
+    TIMEOUT_MS,
+  );
+
   test(
     "manual compact shows its progress and refreshes context usage",
     async () => {

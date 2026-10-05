@@ -429,6 +429,31 @@ describe("OMP CLI runtime", () => {
     await expect(session.prompt("hello")).resolves.toEqual({ requestId: "req_1" });
   });
 
+  test("reports OMP 18.3's late prompt rejection as a failed prompt result", async () => {
+    const child = createOmpChild();
+    onOmpCommand(child, (command) => {
+      if (command.type !== "prompt") return;
+      const response = { id: command.id, type: "response", command: "prompt" };
+      const rejection = { ...response, success: false, error: "No API key found for anthropic." };
+      child.stdout.write(
+        `${JSON.stringify({ ...response, success: true })}\n${JSON.stringify(rejection)}\n`,
+      );
+    });
+    const session = await createRuntime(child).startSession({ cwd: "/workspace/project" });
+    const events: unknown[] = [];
+    session.onEvent((event) => events.push(event));
+
+    await expect(session.prompt("hello")).resolves.toEqual({ requestId: "req_1" });
+
+    expect(events).toContainEqual({
+      type: "prompt_result",
+      id: "req_1",
+      agentInvoked: false,
+      status: "error",
+      error: { message: "No API key found for anthropic." },
+    });
+  });
+
   // A dead runtime owns no turn, so aborting it is already satisfied. Rejecting here
   // makes AgentManager treat the interrupt as unacknowledged and refuse the stop, which
   // pins the agent at `running` until the daemon restarts. See issue #3749.
