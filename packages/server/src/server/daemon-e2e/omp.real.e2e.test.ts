@@ -587,6 +587,56 @@ describe("daemon E2E (real OMP)", () => {
   );
 
   test(
+    "a compaction shows as a compaction row after a daemon restart",
+    async () => {
+      const harness = await createHarness();
+      let restarted: TestJAgentDeskDaemon | null = null;
+      let restartedClient: DaemonClient | null = null;
+      try {
+        const agent = await createAgent(harness, "compact-restart");
+        await promptAndFinish(
+          harness,
+          agent.id,
+          `${compactionFiller()}\n\nReply exactly OMP_COMPACT_FIRST`,
+        );
+        await promptAndFinish(harness, agent.id, "Reply exactly OMP_COMPACT_SECOND");
+        await harness.client.sendMessage(agent.id, "/compact");
+        await harness.client.waitForFinish(agent.id, TIMEOUT_MS);
+        await promptAndFinish(harness, agent.id, "Reply exactly OMP_COMPACT_THIRD");
+
+        await harness.client.close();
+        await harness.daemon.close();
+        restarted = await createTestJAgentDeskDaemon({
+          agentClients: createRealProviderClients(["omp"], pino({ level: "silent" })),
+          providerOverrides: { omp: { enabled: true } },
+          logger: pino({ level: "silent" }),
+          jagentdeskHomeRoot: harness.jagentdeskHomeRoot,
+          staticDir: harness.staticDir,
+          cleanup: false,
+        });
+        restartedClient = new DaemonClient({ url: `ws://127.0.0.1:${restarted.port}/ws` });
+        await restartedClient.connect();
+        await restartedClient.fetchAgents({ subscribe: {} });
+        const replayed = await timeline(restartedClient, agent.id);
+
+        expect(
+          latestTools(replayed)
+            .map(toolResult)
+            .filter((text) => text.includes("Unsupported history record")),
+        ).toEqual([]);
+        expect(replayed.filter((item) => item.type === "compaction")).toEqual([
+          expect.objectContaining({ type: "compaction", status: "completed" }),
+        ]);
+      } finally {
+        await restartedClient?.close().catch(() => undefined);
+        await restarted?.close().catch(() => undefined);
+        await closeHarness(harness);
+      }
+    },
+    TIMEOUT_MS,
+  );
+
+  test(
     "native branch rewinds conversation history and keeps the session usable",
     async () => {
       const harness = await createHarness();
