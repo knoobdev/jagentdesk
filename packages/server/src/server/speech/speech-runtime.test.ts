@@ -35,8 +35,7 @@ vi.mock("./providers/openai/runtime.js", () => ({
 
 vi.mock("./providers/local/models.js", () => ({
   ensureLocalSpeechModels: vi.fn(async () => {}),
-  getLocalSpeechModelDir: vi.fn(() => ""),
-  listLocalSpeechModels: vi.fn(() => []),
+  listMissingLocalSpeechModels: vi.fn(async ({ modelIds }: { modelIds: string[] }) => modelIds),
 }));
 
 function createStubStt(id: string): SpeechToTextProvider {
@@ -66,7 +65,9 @@ function createStubTurnDetection(id: string): TurnDetectionProvider {
   };
 }
 
-function createSpeechConfig(providers: JAgentDeskSpeechConfig["providers"]): JAgentDeskSpeechConfig {
+function createSpeechConfig(
+  providers: JAgentDeskSpeechConfig["providers"],
+): JAgentDeskSpeechConfig {
   return {
     providers,
     sttLanguages: {
