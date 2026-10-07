@@ -66,7 +66,7 @@ import { useToast } from "@/contexts/toast-context";
 import { toErrorMessage } from "@/utils/error-messages";
 import { showProviderNoticeToast } from "@/utils/provider-notice-toast";
 import { applyCheckoutStatusUpdateFromEvent } from "@/git/checkout-status-cache";
-import { useProviderSubagentStore } from "@/subagents/provider-store";
+import { resyncProviderSubagents, useProviderSubagentStore } from "@/subagents/provider-store";
 import { revalidateSessionAfterResume } from "@/contexts/session-resume-revalidation";
 
 // Re-export types from session-store and draft-store for backward compatibility
@@ -561,8 +561,15 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
   useEffect(
     () =>
       client.subscribeConnectionStatus((connection) => {
-        if (connection.status === "connected") return;
-        clearAgentTurnLiveness(serverId);
+        if (connection.status !== "connected") {
+          clearAgentTurnLiveness(serverId);
+          return;
+        }
+        // Subagent updates are not replayed across a reconnect, so catch every
+        // tracked parent up once the feed is live again. (Upstream wires this to
+        // a feed-snapshot callback; the fork has no feed manager, so the
+        // connection-status listener is the resubscribe hook.)
+        void resyncProviderSubagents(client, serverId);
       }),
     [clearAgentTurnLiveness, client, serverId],
   );
