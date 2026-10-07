@@ -140,6 +140,7 @@ import { createJAgentDeskWorktree as createRegisteredJAgentDeskWorktree } from "
 import { createWorkspaceProvisioningService } from "./session/workspace-provisioning/workspace-provisioning-service.js";
 import { createJAgentDeskWorktreeWorkflow } from "./worktree-session.js";
 import { DownloadTokenStore } from "./file-download/token-store.js";
+import { formatAttachmentContentDisposition } from "./file-download/content-disposition.js";
 import type { OpenAiSpeechProviderConfig } from "./speech/providers/openai/config.js";
 import type { LocalSpeechProviderConfig } from "./speech/providers/local/config.js";
 import type { RequestedSpeechProviders } from "./speech/speech-types.js";
@@ -929,8 +930,8 @@ export async function createJAgentDeskDaemon(
         return;
       }
 
-      res.attachment(entry.fileName);
       res.setHeader("Content-Type", entry.mimeType);
+      res.setHeader("Content-Disposition", formatAttachmentContentDisposition(entry.fileName));
       res.setHeader("Content-Length", fileStats.size.toString());
 
       const stream = fileHandle.createReadStream();
