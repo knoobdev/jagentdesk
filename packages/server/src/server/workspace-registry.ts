@@ -92,6 +92,7 @@ const PersistedWorkspaceRecordSchema = z.object({
     .nullable()
     .optional()
     .transform((value) => value ?? null),
+  background: z.boolean().optional().default(false),
 });
 
 export type PersistedProjectRecord = z.infer<typeof PersistedProjectRecordSchema>;
@@ -551,9 +552,12 @@ export function createPersistedWorkspaceRecord(input: {
   archivedAt?: string | null;
   autoArchivedChangeRequestUrl?: string | null;
   pinnedAt?: string | null;
+  background?: boolean;
 }): PersistedWorkspaceRecord {
+  const { background, ...rest } = input;
   return PersistedWorkspaceRecordSchema.parse({
-    ...input,
+    ...rest,
+    background: background ?? false,
     title: input.title ?? null,
     branch: input.branch ?? null,
     worktreeRoot: input.worktreeRoot ?? null,

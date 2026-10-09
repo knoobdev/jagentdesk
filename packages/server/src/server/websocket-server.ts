@@ -2598,6 +2598,7 @@ export class VoiceAssistantWebSocketServer {
         // carries `relay` and server_info carries the descriptor above.
         relay: this.daemonRuntimeConfig?.getRelayConfig?.()?.enabled === true,
         checkoutDiffAll: true,
+        backgroundWorkspaces: true,
       },
     };
   }

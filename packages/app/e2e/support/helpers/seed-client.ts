@@ -59,6 +59,7 @@ export interface SeedDaemonClient {
           worktreeSlug?: string;
         };
     title?: string;
+    background?: boolean;
   }): Promise<{
     workspace: SeedWorkspaceDescriptor | null;
     error: string | null;

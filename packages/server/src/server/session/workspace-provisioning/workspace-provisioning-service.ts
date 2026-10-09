@@ -46,6 +46,8 @@ export interface CreateWorktreeWorkspaceInput {
   baseBranch: string | null;
   title: string | null;
   expectsInitialAgent?: boolean;
+  background?: boolean;
+  callerWorkspaceId?: string;
 }
 
 export interface WorkspaceProvisioningService {
@@ -59,7 +61,7 @@ export interface WorkspaceProvisioningService {
     cwd: string,
     title?: string | null,
     projectId?: string,
-    context?: { expectsInitialAgent?: boolean },
+    context?: { expectsInitialAgent?: boolean; background?: boolean; callerWorkspaceId?: string },
   ): Promise<PersistedWorkspaceRecord>;
   createWorkspaceForWorktree(
     input: CreateWorktreeWorkspaceInput,
@@ -202,11 +204,22 @@ export function createWorkspaceProvisioningService(deps: {
     return project;
   }
 
+  async function resolveBackground(input?: {
+    background?: boolean;
+    callerWorkspaceId?: string;
+  }): Promise<boolean> {
+    if (input?.background !== undefined) return input.background;
+    if (!input?.callerWorkspaceId) return false;
+    const callerWorkspace = await workspaceRegistry.get(input.callerWorkspaceId);
+    if (!callerWorkspace) throw new Error(`Caller workspace ${input.callerWorkspaceId} not found`);
+    return callerWorkspace.background;
+  }
+
   async function createWorkspaceForDirectory(
     cwd: string,
     title?: string | null,
     projectId?: string,
-    context?: { expectsInitialAgent?: boolean },
+    context?: { expectsInitialAgent?: boolean; background?: boolean; callerWorkspaceId?: string },
   ): Promise<PersistedWorkspaceRecord> {
     const normalizedCwd = resolve(cwd);
     const checkout = await workspaceGitService.getCheckout(normalizedCwd);
@@ -222,6 +235,7 @@ export function createWorkspaceProvisioningService(deps: {
       title: title?.trim() || null,
       createdAt: timestamp,
       updatedAt: timestamp,
+      background: await resolveBackground(context),
     });
     await workspaceRegistry.upsert(workspace, context);
     return workspace;
@@ -254,6 +268,7 @@ export function createWorkspaceProvisioningService(deps: {
       title: input.title,
       createdAt: timestamp,
       updatedAt: timestamp,
+      background: await resolveBackground(input),
     });
     await workspaceRegistry.upsert(workspace, {
       expectsInitialAgent: input.expectsInitialAgent,

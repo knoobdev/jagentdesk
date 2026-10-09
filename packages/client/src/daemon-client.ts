@@ -3008,10 +3008,15 @@ export class DaemonClient {
   }
 
   async fetchWorkspaces(options?: FetchWorkspacesOptions): Promise<FetchWorkspacesPayload> {
+    if (options?.includeBackground || options?.filter?.includeBackground)
+      this.assertBackgroundWorkspacesSupported();
     const resolvedRequestId = this.createRequestId(options?.requestId);
     const message = SessionInboundMessageSchema.parse({
       type: "fetch_workspaces_request",
       requestId: resolvedRequestId,
+      ...(options?.includeBackground !== undefined
+        ? { includeBackground: options.includeBackground }
+        : {}),
       ...(options?.filter ? { filter: options.filter } : {}),
       ...(options?.sort ? { sort: options.sort } : {}),
       ...(options?.page ? { page: options.page } : {}),
@@ -5060,19 +5065,32 @@ export class DaemonClient {
     });
   }
 
+  private assertBackgroundWorkspacesSupported(): void {
+    // COMPAT(backgroundWorkspaces): added in v0.9.59, remove after 2027-05-23 once host floor supports it.
+    if (this.lastServerInfoMessage?.features?.backgroundWorkspaces !== true) {
+      throw new Error("Update the host to use background workspaces");
+    }
+  }
+
   async createWorkspace(
     input: {
       source: WorkspaceCreateRequest["source"];
       title?: string;
+      background?: boolean;
+      callerAgentId?: string;
       firstAgentContext?: WorkspaceCreateRequest["firstAgentContext"];
     },
     requestId?: string,
   ): Promise<WorkspaceCreatePayload> {
+    if (input.background !== undefined || input.callerAgentId)
+      this.assertBackgroundWorkspacesSupported();
     return this.sendCorrelatedSessionRequest({
       requestId,
       message: {
         type: "workspace.create.request",
         source: input.source,
+        ...(input.background !== undefined ? { background: input.background } : {}),
+        ...(input.callerAgentId ? { callerAgentId: input.callerAgentId } : {}),
         ...(input.title !== undefined ? { title: input.title } : {}),
         ...(input.firstAgentContext !== undefined
           ? { firstAgentContext: input.firstAgentContext }

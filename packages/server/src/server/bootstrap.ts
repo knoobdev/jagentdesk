@@ -1698,11 +1698,12 @@ export async function createJAgentDeskDaemon(
     emitWorkspaceUpdatesForWorkspaceIds: emitWorkspaceUpdatesExternal,
     workspaceRegistry,
     projectRegistry,
-    createDirectoryWorkspace: async (cwd, title, projectId) => {
+    createDirectoryWorkspace: async (cwd, title, projectId, context) => {
       const workspace = await workspaceProvisioning.createWorkspaceForDirectory(
         cwd,
         title,
         projectId,
+        context,
       );
       await emitWorkspaceUpdatesExternal([workspace.workspaceId]);
       return workspace;

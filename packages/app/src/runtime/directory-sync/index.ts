@@ -285,6 +285,9 @@ export class DirectorySync {
     let subscribe = initialSubscribe;
     while (true) {
       const payload = await client.fetchWorkspaces({
+        ...(client.getLastServerInfoMessage()?.features?.backgroundWorkspaces === true
+          ? { includeBackground: true }
+          : {}),
         sort: [{ key: "activity_at", direction: "desc" }],
         ...(subscribe ? { subscribe: {} } : {}),
         page: cursor ? { limit: PAGE_LIMIT, cursor } : { limit: PAGE_LIMIT },

@@ -35,6 +35,8 @@ interface DisplayPreferenceOption<Value extends string> {
 }
 
 export function SidebarDisplayPreferencesMenu() {
+  const showBackground = useSidebarViewStore((state) => state.showBackground);
+  const toggleBackground = useSidebarViewStore((state) => state.toggleBackground);
   const groupMode = useSidebarViewStore((state) => state.groupMode);
   const hostFilters = useSidebarViewStore((state) => state.hostFilters);
   const setGroupMode = useSidebarViewStore((state) => state.setGroupMode);
@@ -82,6 +84,15 @@ export function SidebarDisplayPreferencesMenu() {
         <ThemedSettings2 size={14} uniProps={filterColorMapping} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" width={220} testID="sidebar-display-preferences-content">
+        <DropdownMenuItem
+          testID="sidebar-show-background"
+          selected={showBackground}
+          closeOnSelect={false}
+          onSelect={toggleBackground}
+        >
+          Show background
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
         <View style={styles.menuHeader}>
           <Text style={styles.menuHeaderLabel}>Group by</Text>
         </View>

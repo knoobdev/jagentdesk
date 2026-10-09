@@ -7155,6 +7155,7 @@ export class Session {
       name: resolveWorkspaceDisplayName(workspace),
       title: workspace.title,
       pinnedAt: workspace.pinnedAt,
+      background: workspace.background,
       archivingAt: null,
       status: "done",
       statusEnteredAt: null,
@@ -7240,6 +7241,7 @@ export class Session {
       worktreeSlug: basename(result.worktree.worktreePath),
       projectKind: projectRecord?.kind ?? "git",
       workspaceKind: result.workspace.kind,
+      background: result.workspace.background,
       name: resolveWorkspaceName({
         title: result.workspace.title,
         derivedDisplayName: result.worktree.branchName || result.workspace.displayName,
@@ -7315,7 +7317,13 @@ export class Session {
     pageInfo: FetchWorkspacesResponsePageInfo;
   }> {
     try {
-      return await this.workspaceDirectory.listFetchEntries(request);
+      return await this.workspaceDirectory.listFetchEntries({
+        ...request,
+        filter: {
+          ...request.filter,
+          ...(request.includeBackground ? { includeBackground: true } : {}),
+        },
+      });
     } catch (error) {
       if (error instanceof CursorError) {
         throw new SessionRequestError("invalid_cursor", error.message);
@@ -7865,7 +7873,10 @@ export class Session {
         {
           requestId: request.requestId,
           subscribeRequested: Boolean(request.subscribe),
-          filter: request.filter ?? null,
+          filter: {
+            ...request.filter,
+            ...(request.includeBackground ? { includeBackground: true } : {}),
+          },
           sort: request.sort ?? null,
           page: request.page ?? null,
         },
@@ -7874,7 +7885,10 @@ export class Session {
       if (subscriptionId) {
         this.workspaceUpdatesSubscription = {
           subscriptionId,
-          filter: request.filter,
+          filter: {
+            ...request.filter,
+            ...(request.includeBackground ? { includeBackground: true } : {}),
+          },
           isBootstrapping: true,
           pendingUpdatesByWorkspaceId: new Map(),
           lastEmittedByWorkspaceId: new Map(),
@@ -8053,6 +8067,13 @@ export class Session {
     }
   }
 
+  private callerWorkspaceForBackground(callerAgentId?: string): string | undefined {
+    if (!callerAgentId) return undefined;
+    const caller = this.agentManager.getAgent(callerAgentId);
+    if (!caller) throw new Error(`Caller agent ${callerAgentId} not found`);
+    return caller.workspaceId;
+  }
+
   private async handleWorkspaceCreateLocal(
     request: Extract<SessionInboundMessage, { type: "workspace.create.request" }>,
   ): Promise<void> {
@@ -8082,7 +8103,11 @@ export class Session {
       cwd,
       explicitTitle ?? promptTitle,
       request.source.projectId,
-      { expectsInitialAgent: Boolean(request.firstAgentContext) },
+      {
+        expectsInitialAgent: Boolean(request.firstAgentContext),
+        background: request.background,
+        callerWorkspaceId: this.callerWorkspaceForBackground(request.callerAgentId),
+      },
     );
     await this.syncWorkspaceGitObserverForWorkspace(workspace);
     const descriptor = await this.describeWorkspaceRecord(workspace);
@@ -8157,6 +8182,8 @@ export class Session {
         githubPrNumber: source.githubPrNumber,
         firstAgentContext: request.firstAgentContext,
         title: request.title,
+        background: request.background,
+        callerWorkspaceId: this.callerWorkspaceForBackground(request.callerAgentId),
       },
       source.baseBranch
         ? { resolveDefaultBranch: async () => source.baseBranch as string }

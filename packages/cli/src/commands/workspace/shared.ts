@@ -6,6 +6,7 @@ export interface WorkspaceRow {
   project: string;
   name: string;
   isolation: "local" | "worktree";
+  background: boolean;
   cwd: string;
 }
 
@@ -27,5 +28,6 @@ export function toWorkspaceRow(workspace: WorkspaceDescriptorPayload): Workspace
     name: workspace.name,
     isolation: workspace.workspaceKind === "worktree" ? "worktree" : "local",
     cwd: workspace.workspaceDirectory,
+    background: workspace.background ?? false,
   };
 }

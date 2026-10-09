@@ -866,3 +866,27 @@ test("a directory that goes away while the git read is in flight keeps its place
     branch: "feature/vanishing",
   });
 });
+
+test("background workspace creation is durable and inherits only when no override is supplied", async () => {
+  const parent = await provisioning.createWorkspaceForDirectory(tmpDir, "Parent", undefined, {
+    background: true,
+  });
+  const child = await provisioning.createWorkspaceForDirectory(tmpDir, "Child", parent.projectId, {
+    callerWorkspaceId: parent.workspaceId,
+  });
+  const visible = await provisioning.createWorkspaceForDirectory(
+    tmpDir,
+    "Visible",
+    parent.projectId,
+    { callerWorkspaceId: parent.workspaceId, background: false },
+  );
+  expect(parent.background).toBe(true);
+  expect(child.background).toBe(true);
+  expect(visible.background).toBe(false);
+  const reloaded = new FileBackedWorkspaceRegistry(
+    path.join(tmpDir, "projects", "workspaces.json"),
+    logger,
+  );
+  await reloaded.initialize();
+  expect((await reloaded.get(child.workspaceId))?.background).toBe(true);
+});

@@ -173,6 +173,7 @@ export interface JAgentDeskToolHostDependencies {
     cwd: string,
     title?: string | null,
     projectId?: string,
+    context?: { background?: boolean; callerWorkspaceId?: string },
   ) => Promise<PersistedWorkspaceRecord>;
   workspaceScripts?: Pick<WorkspaceScriptsService, "list" | "launch" | "stop">;
   markWorkspaceArchiving?: ArchiveDependencies["markWorkspaceArchiving"];
@@ -291,6 +292,7 @@ const WorkspaceAutomationSummarySchema = z.object({
   isolation: z.enum(["local", "worktree"]),
   kind: z.enum(["directory", "local_checkout", "worktree"]),
   title: z.string().nullable(),
+  background: z.boolean().optional(),
 });
 
 function toWorkspaceAutomationSummary(workspace: PersistedWorkspaceRecord) {
@@ -301,6 +303,7 @@ function toWorkspaceAutomationSummary(workspace: PersistedWorkspaceRecord) {
     isolation: workspace.kind === "worktree" ? ("worktree" as const) : ("local" as const),
     kind: workspace.kind,
     title: workspace.title,
+    background: workspace.background,
   };
 }
 
@@ -4441,6 +4444,12 @@ function createToolCatalog(
           ),
         projectId: z.string().optional().describe("Existing project id to own the workspace."),
         title: z.string().trim().min(1).optional(),
+        background: z
+          .boolean()
+          .optional()
+          .describe(
+            "Hide this workspace from default discovery; omitted values inherit your current workspace.",
+          ),
         mode: z
           .enum(["branch-off", "checkout-branch", "checkout-pr"])
           .optional()
@@ -4479,6 +4488,7 @@ function createToolCatalog(
       path,
       projectId,
       title,
+      background,
       mode,
       worktreeSlug,
       branchName,
@@ -4508,7 +4518,10 @@ function createToolCatalog(
         if (!options.createDirectoryWorkspace) {
           throw new Error("Workspace provisioning is not configured");
         }
-        workspace = await options.createDirectoryWorkspace(cwd, title, projectId);
+        workspace = await options.createDirectoryWorkspace(cwd, title, projectId, {
+          background,
+          callerWorkspaceId: resolveCallerAgent()?.workspaceId,
+        });
       } else {
         let cwd =
           path !== undefined || !projectId ? resolveScopedCwd(path, { required: true }) : null;
@@ -4538,6 +4551,8 @@ function createToolCatalog(
             ...(projectId ? { projectId } : {}),
             ...(worktreeSlug ? { worktreeSlug } : {}),
             ...worktreeTarget,
+            background,
+            callerWorkspaceId: resolveCallerAgent()?.workspaceId,
             ...(title ? { title } : {}),
           },
         );
@@ -4559,15 +4574,17 @@ function createToolCatalog(
     {
       title: "List workspaces",
       description: "List active workspaces.",
-      inputSchema: {},
+      inputSchema: { includeBackground: z.boolean().optional().default(false) },
       outputSchema: { workspaces: z.array(WorkspaceAutomationSummarySchema) },
     },
-    async () => {
+    async ({ includeBackground = false }) => {
       if (!options.workspaceRegistry) {
         throw new Error("Workspace registry is not configured");
       }
       const workspaces = (await options.workspaceRegistry.list())
-        .filter((workspace) => !workspace.archivedAt)
+        .filter(
+          (workspace) => !workspace.archivedAt && (includeBackground || !workspace.background),
+        )
         .map(toWorkspaceAutomationSummary);
       return {
         content: [],

@@ -1434,11 +1434,13 @@ const WorkspaceStateBucketSchema = z.enum([
 ]);
 
 export const FetchWorkspacesRequestMessageSchema = z.object({
+  includeBackground: z.boolean().optional(),
   type: z.literal("fetch_workspaces_request"),
   requestId: z.string(),
   filter: z
     .object({
       query: z.string().optional(),
+      includeBackground: z.boolean().optional(),
       projectId: z.string().optional(),
       // Unused: accepted so older clients still parse, but the server does not filter on it.
       idPrefix: z.string().optional(),
@@ -3404,6 +3406,8 @@ export const ArchiveWorkspaceRequestSchema = z.object({
 export const WorkspaceCreateRequestSchema = z.object({
   type: z.literal("workspace.create.request"),
   requestId: z.string(),
+  background: z.boolean().optional(),
+  callerAgentId: z.string().optional(),
   // Optional user-set title applied to the created workspace.
   title: z.string().optional(),
   // Optional prompt context for workspace-level name/branch generation.
@@ -4773,6 +4777,7 @@ export const ServerInfoStatusPayloadSchema = z
         // server_info carries the relay descriptor, and the app shows the Relay badge.
         relay: z.boolean().optional(),
         checkoutDiffAll: z.boolean().optional(),
+        backgroundWorkspaces: z.boolean().optional(),
       })
       .optional(),
   })
@@ -5049,6 +5054,7 @@ export const WorkspaceGitHubRuntimePayloadSchema = z
 export const WorkspaceDescriptorPayloadSchema = z
   .object({
     id: z.string(),
+    background: z.boolean().optional(),
     projectId: z.string(),
     projectDisplayName: z.string(),
     // COMPAT(projectCustomName): added in v0.1.76, drop the optional gate when floor >= v0.1.76.
