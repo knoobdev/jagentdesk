@@ -2541,7 +2541,7 @@ describe("create_agent MCP tool", () => {
       });
       expect(await readJAgentDeskWorktreeMetadata(agentCwd)).toMatchObject({
         version: 1,
-        baseRefName: "existing-feature",
+        baseRefName: "main",
       });
       expect(generateCalls).toBe(1);
       expect(workspaceGitService.getSnapshot).not.toHaveBeenCalled();

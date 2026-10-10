@@ -33,6 +33,7 @@ import {
   writeJAgentDeskWorktreeRuntimeMetadata,
 } from "./worktree-metadata.js";
 import { runGitCommand } from "./run-git-command.js";
+import { getCurrentBranch, resolveRepositoryDefaultBranch } from "./checkout-git.js";
 import { spawnProcess } from "./spawn.js";
 import { resolveJAgentDeskHome } from "../server/jagentdesk-home.js";
 import { createExternalProcessEnv } from "../server/jagentdesk-env.js";
@@ -1331,10 +1332,7 @@ export const createWorktree = async ({
   return {
     branchName: sourcePlan.branchName,
     worktreePath,
-    comparisonBaseRef:
-      source.kind === "checkout-branch"
-        ? null
-        : (sourcePlan.metadataBaseRef ?? sourcePlan.metadataBaseRefName),
+    comparisonBaseRef: sourcePlan.metadataBaseRef ?? sourcePlan.metadataBaseRefName,
   };
 };
 
@@ -1442,13 +1440,18 @@ async function resolveWorktreeSourcePlan({
     case "checkout-branch": {
       await validateExistingWorktreeBranchName(cwd, source.branchName);
       await ensureLocalBranch(cwd, source.branchName);
+      const baseRef = await resolveCheckoutBranchBaseRef(cwd, source.branchName);
       if (await isBranchCheckedOut(cwd, source.branchName)) {
         throw new BranchAlreadyCheckedOutError(source.branchName);
       }
 
       return {
         branchName: source.branchName,
-        metadataBaseRefName: source.branchName,
+        metadataBaseRefName: baseRef,
+        changeRequestLookupTarget: createJAgentDeskWorktreeChangeRequestHint({
+          headRef: source.branchName,
+          localBranchName: source.branchName,
+        }),
         addArguments: [source.branchName],
       };
     }
@@ -1704,6 +1707,21 @@ function normalizeRequiredBaseBranch(baseBranch: string): string {
     throw new Error("Base branch cannot be HEAD when creating a JAgentDesk worktree");
   }
   return normalizedBaseBranch;
+}
+
+// The checked-out branch itself isn't a base to diff against — resolve the
+// repository's default branch so the diff panel has a real comparison target.
+// If the default branch can't be determined (no origin/HEAD, no local
+// main/master — e.g. a local-only repo based on "develop"), fall back to
+// whichever branch is currently checked out in the main repo, since that's
+// almost always the branch this one was intended to be compared against.
+async function resolveCheckoutBranchBaseRef(cwd: string, branchName: string): Promise<string> {
+  const defaultBranch = await resolveRepositoryDefaultBranch(cwd);
+  if (defaultBranch) {
+    return defaultBranch;
+  }
+  const currentBranch = await getCurrentBranch(cwd);
+  return currentBranch && currentBranch !== branchName ? currentBranch : branchName;
 }
 
 async function resolveBaseBranchForWorktree(

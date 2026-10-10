@@ -45,6 +45,7 @@ import {
 import { delimiter, dirname, join } from "path";
 import { tmpdir } from "os";
 import net from "node:net";
+import { getCheckoutStatus, getCheckoutDiff } from "./checkout-git.js";
 
 async function loadConfigForTest(repoRoot: string): Promise<JAgentDeskConfig | null> {
   const result = await readJAgentDeskConfig(repoRoot);
@@ -263,6 +264,42 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
       expect(metadata).toMatchObject({ version: 1, baseRefName: "main" });
     });
 
+    it.each([false])(
+      "shows committed changes for an existing branch (already checked out: %s)",
+      async (alreadyCheckedOut) => {
+        execFileSync("git", ["checkout", "-b", "feature/existing"], { cwd: repoDir });
+        writeFileSync(join(repoDir, "file.txt"), "feature change\n");
+        execFileSync("git", ["add", "file.txt"], { cwd: repoDir });
+        execFileSync("git", ["-c", "commit.gpgsign=false", "commit", "-m", "feature change"], {
+          cwd: repoDir,
+        });
+        if (!alreadyCheckedOut) {
+          execFileSync("git", ["checkout", "main"], { cwd: repoDir });
+        }
+
+        const result = await createWorktreePrimitive({
+          cwd: repoDir,
+          worktreeSlug: "existing-feature",
+          source: { kind: "checkout-branch", branchName: "feature/existing" },
+          runSetup: false,
+          jagentdeskHome,
+        });
+        const status = await getCheckoutStatus(result.worktreePath, { jagentdeskHome });
+        const diff = await getCheckoutDiff(
+          result.worktreePath,
+          { mode: "base" },
+          { jagentdeskHome },
+        );
+        expect(diff.diff).toContain("+feature change");
+        expect(status).toMatchObject({
+          isGit: true,
+          baseRef: "main",
+          aheadBehind: { ahead: 1, behind: 0 },
+        });
+        expect(result.comparisonBaseRef).toBe("main");
+      },
+    );
+
     it("checks out an existing local branch that is not checked out elsewhere", async () => {
       execFileSync("git", ["branch", "dev"], { cwd: repoDir });
 
@@ -282,9 +319,67 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
         .trim();
       expect(currentBranch).toBe("dev");
 
+      // baseRefName must be the repo's default branch, not the checked-out branch
+      // itself — otherwise the diff panel compares the branch against itself and
+      // always shows no changes.
       const metadataPath = await getJAgentDeskWorktreeMetadataPath(result.worktreePath);
       const metadata = JSON.parse(readFileSync(metadataPath, "utf8"));
-      expect(metadata).toMatchObject({ version: 1, baseRefName: "dev" });
+      expect(metadata).toMatchObject({
+        version: 1,
+        baseRefName: "main",
+        changeRequestLookupTarget: { headRef: "dev", localBranchName: "dev" },
+      });
+    });
+
+    it("shows committed changes when origin HEAD points to a deleted default branch", async () => {
+      execFileSync("git", ["branch", "-m", "main", "master"], { cwd: repoDir });
+      execFileSync(
+        "git",
+        ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"],
+        { cwd: repoDir },
+      );
+      execFileSync("git", ["checkout", "-b", "feature/stale-default"], { cwd: repoDir });
+      writeFileSync(join(repoDir, "file.txt"), "feature change\n");
+      execFileSync("git", ["add", "file.txt"], { cwd: repoDir });
+      execFileSync("git", ["-c", "commit.gpgsign=false", "commit", "-m", "feature change"], {
+        cwd: repoDir,
+      });
+      execFileSync("git", ["checkout", "master"], { cwd: repoDir });
+      const created = await createWorktreePrimitive({
+        cwd: repoDir,
+        worktreeSlug: "stale-default",
+        source: { kind: "checkout-branch", branchName: "feature/stale-default" },
+        runSetup: false,
+        jagentdeskHome,
+      });
+      const diff = await getCheckoutDiff(
+        created.worktreePath,
+        { mode: "base" },
+        { jagentdeskHome },
+      );
+      expect(diff.diff).toContain("+feature change");
+      expect(created.comparisonBaseRef).toBe("master");
+    });
+
+    it("falls back to the currently checked out branch when no default branch can be resolved", async () => {
+      // No origin remote and no local main/master — resolveRepositoryDefaultBranch
+      // can't find a default branch, so the fix must fall back to whatever is
+      // currently checked out in the main repo (here: "develop").
+      execFileSync("git", ["branch", "-m", "main", "develop"], { cwd: repoDir });
+      execFileSync("git", ["branch", "feature-x"], { cwd: repoDir });
+
+      const result = await createLegacyWorktreeForTest({
+        cwd: repoDir,
+        worktreeSlug: "feature-x-worktree",
+        source: { kind: "checkout-branch", branchName: "feature-x" },
+        runSetup: true,
+        jagentdeskHome,
+      });
+
+      expect(existsSync(result.worktreePath)).toBe(true);
+      const metadataPath = await getJAgentDeskWorktreeMetadataPath(result.worktreePath);
+      const metadata = JSON.parse(readFileSync(metadataPath, "utf8"));
+      expect(metadata).toMatchObject({ version: 1, baseRefName: "develop" });
     });
 
     it("checks out an existing local branch whose name contains uppercase letters and dots", async () => {
