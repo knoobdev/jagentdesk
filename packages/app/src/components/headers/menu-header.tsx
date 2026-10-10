@@ -1,3 +1,4 @@
+import { CompactHeader } from "./compact-header";
 import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { CompactBackButton } from "./compact-back-button";
 import { useCallback, useMemo, type ReactNode } from "react";
@@ -146,6 +147,8 @@ export function MenuHeader({ title, rightContent, borderless }: MenuHeaderProps)
   const isGumloop = useIsGumloopTheme();
   const isMobile = useIsCompactFormFactor();
   const showBack = isGumloop && isMobile;
+  if (isMobile && !isGumloop)
+    return <CompactHeader navigation="menu" title={title} actions={rightContent} />;
   return (
     <ScreenHeader
       left={

@@ -1,3 +1,5 @@
+import { FloatingHeaderLayout } from "@/components/floating-header";
+import { StreamTopOverlayProvider, supportsStreamTopOverlay } from "@/agent-stream/top-overlay";
 import { GumloopCompactHeader } from "@/components/gumloop-shell/compact-header";
 import { GumloopDrawer } from "@/components/gumloop-shell/drawer";
 import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
@@ -431,6 +433,7 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
   const isWorkspaceFocusModeEnabled = isWorkspaceRoute && isFocusModeEnabled;
   const chromeEnabled = chromeEnabledOverride ?? daemons.length > 0;
   const gumloopShell = useGumloopDesktopShell(chromeEnabled);
+  const gumloopTheme = useIsGumloopTheme();
   useGumloopSidebarShortcut(gumloopShell);
   const onForge = !gumloopShell && pathname.endsWith("/forge");
   const sidebarEnabled = chromeEnabled || gumloopShell;
@@ -550,10 +553,21 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
     </>
   );
 
+  const compactHeader = <GumloopCompactHeader enabled={sidebarEnabled} />;
+  const renderChrome = useCallback(
+    (inset: number) => (
+      <StreamTopOverlayProvider value={inset}>{workspaceChrome}</StreamTopOverlayProvider>
+    ),
+    [workspaceChrome],
+  );
   const surface = (
     <View style={layoutStyles.surfaceFill}>
-      <GumloopCompactHeader enabled={sidebarEnabled} />
-      {workspaceChrome}
+      <FloatingHeaderLayout
+        header={compactHeader}
+        floating={gumloopTheme && isCompactLayout && isWorkspaceRoute && supportsStreamTopOverlay}
+      >
+        {renderChrome}
+      </FloatingHeaderLayout>
       <WindowSidebarToggleSlot
         visible={
           !isCompactLayout &&
