@@ -6,6 +6,7 @@ import {
   permitResponseSchema,
   toPermissionResponseItem,
   type PermissionResponseItem,
+  type PermitClientConnector,
 } from "./allow.js";
 
 export type PermitDenyResult = ListResult<PermissionResponseItem>;
@@ -17,112 +18,127 @@ export interface PermitDenyOptions extends CommandOptions {
   host?: string;
 }
 
-export async function runDenyCommand(
-  agentIdOrPrefix: string,
-  reqId: string | undefined,
-  options: PermitDenyOptions,
-  _command: Command,
-): Promise<PermitDenyResult> {
-  const host = getDaemonHost({ host: options.host });
-
-  // Validate arguments
-  if (!options.all && !reqId) {
-    const error: CommandError = {
-      code: "MISSING_ARGUMENT",
-      message: "Request ID is required unless --all is specified",
-      details:
-        "Usage: jagentdesk permit deny <agent> <req_id> or jagentdesk permit deny <agent> --all",
-    };
-    throw error;
-  }
-
-  let client;
-  try {
-    client = await connectToDaemon({ host: options.host });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    const error: CommandError = {
-      code: "DAEMON_NOT_RUNNING",
-      message: `Cannot connect to daemon at ${host}: ${message}`,
-      details: "Start the daemon with: jagentdesk daemon start",
-    };
-    throw error;
-  }
-
-  try {
-    const fetchResult = await client.fetchAgent({ agentId: agentIdOrPrefix });
-    if (!fetchResult) {
-      await client.close();
+export function createDenyCommand(connect: PermitClientConnector = connectToDaemon) {
+  return async function runDenyCommand(
+    agentIdOrPrefix: string,
+    reqId: string | undefined,
+    options: PermitDenyOptions,
+    _command: Command,
+  ): Promise<PermitDenyResult> {
+    // Validate arguments
+    if (!options.all && !reqId) {
       const error: CommandError = {
-        code: "AGENT_NOT_FOUND",
-        message: `Agent not found: ${agentIdOrPrefix}`,
-        details: 'Use "jagentdesk ls" to list available agents',
-      };
-      throw error;
-    }
-    const agent = fetchResult.agent;
-    const resolvedAgentId = agent.id;
-
-    // Get pending permissions for this agent
-    const pendingPermissions = agent.pendingPermissions || [];
-    if (pendingPermissions.length === 0) {
-      await client.close();
-      const error: CommandError = {
-        code: "NO_PENDING_PERMISSIONS",
-        message: `No pending permissions for agent ${agent.id.slice(0, 7)}`,
+        code: "MISSING_ARGUMENT",
+        message: "Request ID is required unless --all is specified",
+        details:
+          "Usage: jagentdesk permit deny <agent> <req_id> or jagentdesk permit deny <agent> --all",
       };
       throw error;
     }
 
-    // Determine which permissions to deny
-    let permissionsToDeny: AgentPermissionRequest[];
-    if (options.all) {
-      permissionsToDeny = pendingPermissions;
-    } else {
-      // Find permission by ID prefix
-      const permission = pendingPermissions.find((p) => p.id === reqId || p.id.startsWith(reqId!));
-      if (!permission) {
+    const host = getDaemonHost({ host: options.host });
+    let client;
+    try {
+      client = await connect({ host: options.host });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const error: CommandError = {
+        code: "DAEMON_NOT_RUNNING",
+        message: `Cannot connect to daemon at ${host}: ${message}`,
+        details: "Start the daemon with: jagentdesk daemon start",
+      };
+      throw error;
+    }
+
+    try {
+      const fetchResult = await client.fetchAgent({ agentId: agentIdOrPrefix });
+      if (!fetchResult) {
         await client.close();
         const error: CommandError = {
-          code: "PERMISSION_NOT_FOUND",
-          message: `Permission request not found: ${reqId}`,
-          details: `Available requests: ${pendingPermissions.map((p) => p.id.slice(0, 8)).join(", ")}`,
+          code: "AGENT_NOT_FOUND",
+          message: `Agent not found: ${agentIdOrPrefix}`,
+          details: 'Use "jagentdesk ls" to list available agents',
         };
         throw error;
       }
-      permissionsToDeny = [permission];
+      const agent = fetchResult.agent;
+      const resolvedAgentId = agent.id;
+
+      // Get pending permissions for this agent
+      const pendingPermissions = agent.pendingPermissions || [];
+      if (pendingPermissions.length === 0) {
+        await client.close();
+        const error: CommandError = {
+          code: "NO_PENDING_PERMISSIONS",
+          message: `No pending permissions for agent ${agent.id.slice(0, 7)}`,
+        };
+        throw error;
+      }
+
+      // Determine which permissions to deny
+      let permissionsToDeny: AgentPermissionRequest[];
+      if (options.all) {
+        permissionsToDeny = pendingPermissions;
+      } else {
+        // Find permission by ID prefix
+        const permission = pendingPermissions.find(
+          (p) => p.id === reqId || p.id.startsWith(reqId!),
+        );
+        if (!permission) {
+          await client.close();
+          const error: CommandError = {
+            code: "PERMISSION_NOT_FOUND",
+            message: `Permission request not found: ${reqId}`,
+            details: `Available requests: ${pendingPermissions.map((p) => p.id.slice(0, 8)).join(", ")}`,
+          };
+          throw error;
+        }
+        permissionsToDeny = [permission];
+      }
+
+      // Deny permissions
+      const results: PermissionResponseItem[] = await Promise.all(
+        permissionsToDeny.map(async (permission) => {
+          try {
+            await client.respondToPermissionAndWait(resolvedAgentId, permission.id, {
+              behavior: "deny",
+              ...(options.message ? { message: options.message } : {}),
+              ...(options.interrupt ? { interrupt: true } : {}),
+            });
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            const error: CommandError = {
+              code: "PERMISSION_RESPONSE_UNCONFIRMED",
+              message: `Permission response unconfirmed for request ${permission.id}: ${message}`,
+              details: 'Use "jagentdesk permit ls" to check whether the request is still pending',
+            };
+            throw error;
+          }
+          return toPermissionResponseItem(resolvedAgentId, permission, "denied");
+        }),
+      );
+
+      await client.close();
+
+      return {
+        type: "list",
+        data: results,
+        schema: permitResponseSchema,
+      };
+    } catch (err) {
+      await client.close().catch(() => {});
+      // Re-throw CommandErrors
+      if (err && typeof err === "object" && "code" in err) {
+        throw err;
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      const error: CommandError = {
+        code: "DENY_PERMISSION_FAILED",
+        message: `Failed to deny permission: ${message}`,
+      };
+      throw error;
     }
-
-    // Deny permissions
-    const results: PermissionResponseItem[] = await Promise.all(
-      permissionsToDeny.map(async (permission) => {
-        await client.respondToPermission(resolvedAgentId, permission.id, {
-          behavior: "deny",
-          ...(options.message ? { message: options.message } : {}),
-          ...(options.interrupt ? { interrupt: true } : {}),
-        });
-        return toPermissionResponseItem(resolvedAgentId, permission, "denied");
-      }),
-    );
-
-    await client.close();
-
-    return {
-      type: "list",
-      data: results,
-      schema: permitResponseSchema,
-    };
-  } catch (err) {
-    await client.close().catch(() => {});
-    // Re-throw CommandErrors
-    if (err && typeof err === "object" && "code" in err) {
-      throw err;
-    }
-    const message = err instanceof Error ? err.message : String(err);
-    const error: CommandError = {
-      code: "DENY_PERMISSION_FAILED",
-      message: `Failed to deny permission: ${message}`,
-    };
-    throw error;
-  }
+  };
 }
+
+export const runDenyCommand = createDenyCommand();
