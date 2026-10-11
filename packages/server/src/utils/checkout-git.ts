@@ -721,12 +721,19 @@ async function getTrackedDiffTextForPath(input: {
   cwd: string;
   refsForDiff: CheckoutDiffRefs;
   path: string;
+  oldPath?: string;
   ignoreWhitespace: boolean;
 }): Promise<{ path: string; text: string; truncated: boolean }> {
+  const paths = input.oldPath ? [input.oldPath, input.path] : [input.path];
   const result = await runGitCommand(
     buildGitDiffArgs({
       ignoreWhitespace: input.ignoreWhitespace,
-      extra: [...getCheckoutDiffRefArgs(input.refsForDiff), "--", `:(literal)${input.path}`],
+      extra: [
+        ...(input.oldPath ? ["--diff-filter=RC"] : []),
+        ...getCheckoutDiffRefArgs(input.refsForDiff),
+        "--",
+        ...paths.map((path) => `:(literal)${path}`),
+      ],
     }),
     {
       cwd: input.cwd,
@@ -735,9 +742,22 @@ async function getTrackedDiffTextForPath(input: {
     },
   );
 
+  // A source path can participate in another rename/copy in the same request.
+  // Return only the requested destination; the filter keeps source edits out of its budget.
+  let text = result.stdout;
+  if (input.oldPath && !result.truncated) {
+    text = result.stdout
+      .split(/(?=^diff --git )/m)
+      .filter((section) => {
+        const hunkStart = section.indexOf("\n@@ ");
+        const header = hunkStart < 0 ? section : section.slice(0, hunkStart);
+        return parseDiff(header)[0]?.path === input.path;
+      })
+      .join("");
+  }
   return {
     path: input.path,
-    text: result.stdout,
+    text,
     truncated: result.truncated,
   };
 }
@@ -3340,26 +3360,29 @@ async function processTrackedChanges(
 
   let trackedDiffText = "";
   let trackedDiffBytes = 0;
-  const renamedPaths = new Set(
-    trackedChanges.filter((change) => change.oldPath).map((change) => change.path),
+  const oldPathByPath = new Map(
+    trackedChanges
+      .filter((change) => change.oldPath)
+      .map((change) => [change.path, change.oldPath]),
   );
   for (let start = 0; start < trackedDiffPaths.length; start += TRACKED_DIFF_BATCH_SIZE) {
     const paths = trackedDiffPaths.slice(start, start + TRACKED_DIFF_BATCH_SIZE);
-    // Keep rename/copy path filtering identical to the existing per-file command.
+    // Rename/copy detection needs both paths.
     const ordinary = await getTrackedDiffTexts({
       cwd,
       refsForDiff,
-      paths: paths.filter((path) => !renamedPaths.has(path)),
+      paths: paths.filter((path) => !oldPathByPath.has(path)),
       ignoreWhitespace,
     });
     const renamed = await Promise.all(
       paths
-        .filter((path) => renamedPaths.has(path))
+        .filter((path) => oldPathByPath.has(path))
         .map((path) =>
           getTrackedDiffTextForPath({
             cwd,
             refsForDiff,
             path,
+            oldPath: oldPathByPath.get(path),
             ignoreWhitespace,
           }),
         ),
