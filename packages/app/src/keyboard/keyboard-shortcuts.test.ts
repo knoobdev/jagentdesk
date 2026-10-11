@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { keyboardEventToComboString } from "./shortcut-string";
 import {
   buildKeyboardShortcutHelpSections,
   buildEffectiveBindings,
@@ -668,6 +669,24 @@ describe("keyboard-shortcuts", () => {
 
     expect(onChordReset).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
+  });
+
+  it("dispatches a captured Dvorak binding on the same logical key", () => {
+    const event = keyboardInput({ key: "b", code: "KeyN", metaKey: true });
+    const combo = keyboardEventToComboString(event as KeyboardEvent);
+    expect(combo).toBe("Cmd+B");
+    const bindings = buildEffectiveBindings({ "sidebar-toggle-left-mac-cmd-b": combo! });
+
+    expect(
+      resolveShortcut({ event, context: { isMac: true, isDesktop: true }, bindings }).match?.action,
+    ).toBe("sidebar.toggle.left");
+    expect(
+      resolveShortcut({
+        event: { key: "x", code: "KeyB", metaKey: true },
+        context: { isMac: true, isDesktop: true },
+        bindings,
+      }).match,
+    ).toBeNull();
   });
 });
 
