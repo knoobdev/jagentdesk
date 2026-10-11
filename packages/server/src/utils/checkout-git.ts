@@ -637,7 +637,7 @@ function normalizeNumstatPath(pathField: string): string {
 }
 
 // Parsed patches need a stable wire format regardless of terminal presentation settings.
-const GIT_PATCH_FORMAT_ARGS = ["--no-color", "--src-prefix=a/", "--dst-prefix=b/"];
+const GIT_PATCH_FORMAT_ARGS = ["--no-ext-diff", "--no-color", "--src-prefix=a/", "--dst-prefix=b/"];
 
 function buildGitDiffArgs(args: { ignoreWhitespace?: boolean; extra: string[] }): string[] {
   return [
