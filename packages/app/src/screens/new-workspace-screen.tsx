@@ -644,7 +644,7 @@ function computePickerOptionData(
   for (const pr of prItems) {
     if (!pr.headRefName) continue;
     const id = prOptionId(pr.number);
-    const option = { id, label: formatPrLabel(pr) };
+    const option = { id, label: formatPrLabel(pr), searchText: pr.body ?? undefined };
     idMap.set(id, { kind: "github-pr", item: pr });
     const updatedAtMs = pr.updatedAt ? Date.parse(pr.updatedAt) : 0;
     const timestamp = Number.isNaN(updatedAtMs) ? 0 : Math.floor(updatedAtMs / 1000);
