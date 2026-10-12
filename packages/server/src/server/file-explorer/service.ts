@@ -489,7 +489,7 @@ export async function writeExplorerFile({
 
   const temporaryPath = path.join(
     path.dirname(filePath.resolvedPath),
-    `.${path.basename(filePath.resolvedPath)}.jagentdesk-${randomUUID()}.tmp`,
+    `.jagentdesk-${randomUUID()}.tmp`,
   );
   let temporaryHandle: FileHandle | null = null;
   try {
