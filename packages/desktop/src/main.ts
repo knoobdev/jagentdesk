@@ -48,6 +48,7 @@ import {
   buildStandardContextMenuItems,
 } from "./window/window-manager.js";
 import { setupDarwinCompositorWatchdog } from "./window/compositor-watchdog/index.js";
+import { showWindowWhenReady } from "./window/show-when-ready.js";
 import { registerDialogHandlers } from "./features/dialogs.js";
 import { registerNotificationHandlers } from "./features/notifications.js";
 import { registerOpenerHandlers } from "./features/opener.js";
@@ -1121,8 +1122,9 @@ async function createWindow(
     registerBrowserWebviewNavigationGuards(contents);
   });
 
-  mainWindow.once("ready-to-show", showWindow);
-  mainWindow.webContents.once("did-finish-load", showWindow);
+  // showOnLoad stays true on every platform: the reveal is shared with the
+  // timeout fallback through the caller's onShow guard.
+  showWindowWhenReady(mainWindow, { showOnLoad: true, onShow: showWindow });
 
   if (!app.isPackaged) {
     const { loadReactDevTools } = await import("./features/react-devtools.js");
