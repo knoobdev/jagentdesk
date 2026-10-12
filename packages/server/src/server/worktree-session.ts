@@ -451,7 +451,10 @@ export async function handleJAgentDeskWorktreeArchiveRequest(
     "emitWorkspaceUpdatesForWorkspaceIds" | "workspaceGitService"
   > & {
     emit: EmitSessionMessage;
-    workspaceGitService: Pick<WorkspaceGitService, "getSnapshot" | "listWorktrees">;
+    workspaceGitService: Pick<
+      WorkspaceGitService,
+      "getSnapshot" | "listWorktrees" | "invalidateWorktrees"
+    >;
     emitWorkspaceUpdatesForWorkspaceIds: (workspaceIds: Iterable<string>) => Promise<void>;
   },
   msg: Extract<SessionInboundMessage, { type: "jagentdesk_worktree_archive_request" }>,

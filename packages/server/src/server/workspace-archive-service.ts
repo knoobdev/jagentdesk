@@ -30,7 +30,7 @@ export interface ArchiveDependencies {
   // Base directory that may hold worktrees across repositories.
   jagentdeskWorktreesBaseRoot?: string;
   github: ForgeService;
-  workspaceGitService: Pick<WorkspaceGitService, "getSnapshot">;
+  workspaceGitService: Pick<WorkspaceGitService, "getSnapshot" | "invalidateWorktrees">;
   agentManager: Pick<AgentManager, "listAgents" | "archiveAgent" | "archiveSnapshot">;
   agentStorage: Pick<AgentStorage, "list">;
   // Resolves the worktree at a path to its workspaceId for archive-by-path. The
@@ -368,6 +368,7 @@ async function maybeRemoveDirectory(
       jagentdeskHome: dependencies.jagentdeskHome,
       worktreesBaseRoot: dependencies.jagentdeskWorktreesBaseRoot,
     });
+    dependencies.workspaceGitService.invalidateWorktrees();
     dependencies.github.invalidate({ cwd: backing.path });
     return true;
   } catch (error) {

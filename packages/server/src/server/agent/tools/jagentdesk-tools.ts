@@ -159,7 +159,7 @@ export interface JAgentDeskToolHostDependencies {
   github?: ForgeService;
   workspaceGitService?: Pick<
     WorkspaceGitService,
-    "getSnapshot" | "listWorktrees" | "resolveRepoRoot"
+    "getSnapshot" | "listWorktrees" | "resolveRepoRoot" | "invalidateWorktrees"
   >;
   findWorkspaceIdForCwd?: ArchiveDependencies["findWorkspaceIdForCwd"];
   listActiveWorkspaces?: ArchiveDependencies["listActiveWorkspaces"];

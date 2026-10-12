@@ -1818,6 +1818,7 @@ describe("create_agent MCP tool", () => {
     const jagentdeskHome = join(tempDir, ".jagentdesk");
     const broadcasts: string[] = [];
     const workspaceGitService = {
+      invalidateWorktrees: () => {},
       getSnapshot: vi.fn(async () => {
         throw new Error("agent metadata branch rename should not run");
       }),
@@ -2285,6 +2286,7 @@ describe("create_agent MCP tool", () => {
     const workspaceRecords = new Map<string, PersistedWorkspaceRecord>();
     let generateCalls = 0;
     const workspaceGitService = {
+      invalidateWorktrees: () => {},
       getSnapshot: vi.fn(async () => {
         throw new Error("agent metadata branch rename should not run");
       }),
@@ -2430,6 +2432,7 @@ describe("create_agent MCP tool", () => {
       }),
     );
     const workspaceGitService = {
+      invalidateWorktrees: () => {},
       getSnapshot: vi.fn(async () => {
         throw new Error("agent metadata branch rename should not run");
       }),
@@ -2509,6 +2512,7 @@ describe("create_agent MCP tool", () => {
       execFileSync("git", ["commit", "-m", "init"], { cwd: repoDir, stdio: "pipe" });
       execFileSync("git", ["branch", "-M", "main"], { cwd: repoDir, stdio: "pipe" });
       const workspaceGitService = {
+        invalidateWorktrees: () => {},
         getSnapshot: vi.fn(async () => null),
         listWorktrees: vi.fn(async () => []),
         resolveRepoRoot: vi.fn(async () => repoDir),
@@ -2719,6 +2723,7 @@ describe("create_agent MCP tool", () => {
       execFileSync("git", ["branch", "-M", "main"], { cwd: repoDir, stdio: "pipe" });
 
       const workspaceGitService = {
+        invalidateWorktrees: () => {},
         getSnapshot: vi.fn(async () => null),
         listWorktrees: vi.fn(async () => []),
         resolveRepoRoot: vi.fn(async () => repoDir),
@@ -2829,6 +2834,7 @@ describe("create_agent MCP tool", () => {
       execFileSync("git", ["branch", "-M", "main"], { cwd: repoDir, stdio: "pipe" });
 
       const workspaceGitService = {
+        invalidateWorktrees: () => {},
         getSnapshot: vi.fn(async () => null),
         listWorktrees: vi.fn(async () => []),
         resolveRepoRoot: vi.fn(async () => repoDir),
@@ -2920,6 +2926,7 @@ describe("create_agent MCP tool", () => {
       execFileSync("git", ["branch", "-M", "main"], { cwd: repoDir, stdio: "pipe" });
 
       const workspaceGitService = {
+        invalidateWorktrees: () => {},
         getSnapshot: vi.fn(async () => null),
         listWorktrees: vi.fn(async () => []),
         resolveRepoRoot: vi.fn(async () => repoDir),
