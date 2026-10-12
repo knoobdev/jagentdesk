@@ -12,7 +12,7 @@ import type { DaemonClient, FileReadResult } from "@jagentdesk/client/internal/d
 import { ScrollView as RNScrollView, Text, View } from "react-native";
 import { StyleSheet, UnistylesRuntime, withUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
-import { MarkdownRenderer } from "@/components/markdown/renderer";
+import { FileMarkdownPreview } from "./markdown-preview";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { isWeb } from "@/constants/platform";
 import { useSessionStore, type ExplorerFile } from "@/stores/session-store";
@@ -65,6 +65,9 @@ interface FilePreviewBodyProps {
   location: WorkspaceFileLocation;
   navigationRevision: number;
   imagePreviewUri: string | null;
+  workspaceRoot: string;
+  client: DaemonClient | null;
+  serverId: string;
 }
 
 function trimNonEmpty(value: string | null | undefined): string | null {
@@ -215,6 +218,9 @@ function FilePreviewBody({
   location,
   navigationRevision,
   imagePreviewUri,
+  workspaceRoot,
+  client,
+  serverId,
 }: FilePreviewBodyProps) {
   const theme = UnistylesRuntime.getTheme();
   const { t } = useTranslation();
@@ -301,7 +307,13 @@ function FilePreviewBody({
             contentContainerStyle={styles.previewMarkdownScrollContent}
             showsVerticalScrollIndicator
           >
-            <MarkdownRenderer text={preview.content ?? ""} />
+            <FileMarkdownPreview
+              source={preview.content ?? ""}
+              filePath={filePath}
+              workspaceRoot={workspaceRoot}
+              client={client}
+              serverId={serverId}
+            />
           </RNScrollView>
         </View>
       );
@@ -471,6 +483,7 @@ export function FilePane({
   return (
     <FilePanePresentation
       serverId={serverId}
+      workspaceRoot={normalizedWorkspaceRoot}
       client={client}
       readTarget={readTarget}
       preview={preview}
@@ -499,6 +512,7 @@ function getFileErrorMessage(error: unknown, fallback: string): string | null {
 
 function FilePanePresentation({
   serverId,
+  workspaceRoot,
   client,
   readTarget,
   preview,
@@ -517,6 +531,7 @@ function FilePanePresentation({
   imagePreviewUri,
 }: {
   serverId: string;
+  workspaceRoot: string;
   client: DaemonClient | null;
   readTarget: { cwd: string; path: string } | null;
   preview: ExplorerFile | null;
@@ -585,6 +600,9 @@ function FilePanePresentation({
         location={location}
         navigationRevision={navigationRevision}
         imagePreviewUri={imagePreviewUri}
+        workspaceRoot={workspaceRoot}
+        client={client}
+        serverId={serverId}
       />
     </View>
   );
