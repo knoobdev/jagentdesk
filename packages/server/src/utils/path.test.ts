@@ -29,17 +29,22 @@ describe("path equivalence", () => {
   });
 
   test("checks POSIX root containment without prefix false positives", () => {
-    expect(isPathInsideRoot("/opt/jagentdesk", "/opt/jagentdesk/node_modules/@jagentdesk/server")).toBe(true);
+    expect(
+      isPathInsideRoot("/opt/jagentdesk", "/opt/jagentdesk/node_modules/@jagentdesk/server"),
+    ).toBe(true);
     expect(isPathInsideRoot("/opt/jagentdesk", "/opt/jagentdesk-other")).toBe(false);
   });
 
   test("checks Windows root containment case-insensitively", () => {
     expect(
-      isPathInsideRoot("C:\\JAgentDesk\\node_modules", "c:/jagentdesk/node_modules/@jagentdesk/server"),
+      isPathInsideRoot(
+        "C:\\JAgentDesk\\node_modules",
+        "c:/jagentdesk/node_modules/@jagentdesk/server",
+      ),
     ).toBe(true);
-    expect(isPathInsideRoot("C:\\JAgentDesk\\node_modules", "C:\\JAgentDesk\\node_modules-other")).toBe(
-      false,
-    );
+    expect(
+      isPathInsideRoot("C:\\JAgentDesk\\node_modules", "C:\\JAgentDesk\\node_modules-other"),
+    ).toBe(false);
   });
 
   test.skipIf(process.platform === "win32")(
@@ -60,4 +65,33 @@ describe("path equivalence", () => {
       }
     },
   );
+});
+
+test.each([
+  { root: "/repo", candidate: "/repo/..notes.txt", inside: true },
+  { root: "/repo", candidate: "/repo/..drafts/notes.md", inside: true },
+  { root: "/repo", candidate: "/repo/...drafts/notes.md", inside: true },
+  { root: "/repo", candidate: "/repo/docs/..notes.txt", inside: true },
+  { root: "/repo", candidate: "/repo", inside: true },
+  { root: "/repo", candidate: "/repo/../sibling/notes.md", inside: false },
+  { root: "/repo", candidate: "/repo/..drafts/../../outside.txt", inside: false },
+  { root: "/repo", candidate: "/repo-other/notes.md", inside: false },
+  { root: "C:\\Repo", candidate: "c:/repo/..notes.txt", inside: true },
+  { root: "C:\\Repo", candidate: "C:\\Repo\\..drafts\\notes.md", inside: true },
+  { root: "C:\\Repo", candidate: "C:\\Repo\\...drafts\\notes.md", inside: true },
+  { root: "C:\\Repo", candidate: "C:\\Repo\\..\\sibling\\notes.md", inside: false },
+  { root: "C:\\Repo", candidate: "C:\\Repo-other\\notes.md", inside: false },
+  { root: "C:\\Repo", candidate: "D:\\Repo\\..notes.txt", inside: false },
+  {
+    root: String.raw`\\server\share\repo`,
+    candidate: String.raw`\\server\share\repo\..drafts\notes.md`,
+    inside: true,
+  },
+  {
+    root: String.raw`\\?\C:\Repo`,
+    candidate: "C:\\Repo\\..notes.txt",
+    inside: true,
+  },
+])("checks named path containment for $candidate", ({ root, candidate, inside }) => {
+  expect(isPathInsideRoot(root, candidate)).toBe(inside);
 });

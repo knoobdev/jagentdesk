@@ -99,9 +99,12 @@ function getRelativePathInsideRoot(root: string, candidate: string): string | nu
   const normalizedCandidate = normalizePathForComparison(candidate, compareAsWindows);
   const relative = platformPath.relative(normalizedRoot, normalizedCandidate);
 
-  return relative === "" || (!relative.startsWith("..") && !platformPath.isAbsolute(relative))
-    ? relative
-    : null;
+  const isOutsideRoot =
+    relative === ".." ||
+    relative.startsWith(`..${platformPath.sep}`) ||
+    platformPath.isAbsolute(relative);
+  if (isOutsideRoot) return null;
+  return relative;
 }
 
 function collectPathVariants(value: string): string[] {
