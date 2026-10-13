@@ -1,3 +1,4 @@
+import type { PaneHost } from "@/panels/panel-manifest";
 import React, { useMemo, type ComponentType } from "react";
 import invariant from "tiny-invariant";
 import {
@@ -21,6 +22,7 @@ export interface WorkspacePaneContentModel {
 
 export interface BuildWorkspacePaneContentModelInput {
   tab: WorkspaceTabDescriptor;
+  host?: PaneHost;
   normalizedServerId: string;
   normalizedWorkspaceId: string;
   fileNavigationRevision?: number;
@@ -33,6 +35,7 @@ export interface BuildWorkspacePaneContentModelInput {
 
 export function buildWorkspacePaneContentModel({
   tab,
+  host = "main",
   normalizedServerId,
   normalizedWorkspaceId,
   fileNavigationRevision,
@@ -49,6 +52,7 @@ export function buildWorkspacePaneContentModel({
     key: `${normalizedServerId}:${normalizedWorkspaceId}:${tab.tabId}`,
     Component: registration.component,
     paneContextValue: {
+      host,
       serverId: normalizedServerId,
       workspaceId: normalizedWorkspaceId,
       tabId: tab.tabId,
@@ -84,6 +88,7 @@ export function WorkspacePaneContent({
   const openImportSheet = useStableEvent(paneContextValue.openImportSheet);
   const stablePaneContextValue = useMemo(
     () => ({
+      host: paneContextValue.host,
       serverId: paneContextValue.serverId,
       workspaceId: paneContextValue.workspaceId,
       tabId: paneContextValue.tabId,
@@ -100,6 +105,7 @@ export function WorkspacePaneContent({
       openFileInWorkspace,
       openImportSheet,
       openTab,
+      paneContextValue.host,
       paneContextValue.serverId,
       paneContextValue.fileNavigationRevision,
       paneContextValue.tabId,

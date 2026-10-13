@@ -1986,3 +1986,21 @@ export function reconcileWorkspaceTabs(
     layout: nextLayout,
   };
 }
+
+/** Keeps the original sheet tab identity and editor state when it becomes a main pane tab. */
+export function promoteExistingTabInLayout(
+  layout: WorkspaceLayout,
+  tab: WorkspaceTab,
+): WorkspaceLayout | null {
+  const pane = findPaneById(layout.root, layout.focusedPaneId) ?? collectAllPanes(layout.root)[0];
+  if (!pane) return null;
+  return {
+    ...layout,
+    focusedPaneId: pane.id,
+    root: insertTabIntoPane(asInternalLayout(layout).root, {
+      paneId: pane.id,
+      tab,
+      focusTabId: tab.tabId,
+    }),
+  };
+}

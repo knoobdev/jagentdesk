@@ -1,3 +1,4 @@
+import type { JsonValue } from "@jagentdesk/protocol/agent-types";
 import { type AgentProvider } from "@jagentdesk/protocol/agent-types";
 import { type WorkspaceFileTabTarget } from "@/workspace/file-open";
 
@@ -47,6 +48,7 @@ export type WorkspaceTabTarget =
   | { kind: "commit_diff"; sha: string };
 
 export interface WorkspaceTab {
+  state?: JsonValue;
   tabId: string;
   target: WorkspaceTabTarget;
   createdAt: number;

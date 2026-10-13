@@ -24,7 +24,6 @@ import {
 } from "lucide-react-native";
 import { HostBadge } from "@/components/sidebar/host-badge";
 import { ProjectStatusIndicator } from "@/components/sidebar/project-leading-visual";
-import { PulsingStatusDot } from "@/components/sidebar/pulsing-status-dot";
 import { WorkspaceHoverCard } from "@/components/workspace-hover-card";
 import type { HostBadgeModel } from "@/hosts/appearance";
 import type { SidebarWorkspaceEntry } from "@/hooks/use-sidebar-workspaces-list";
