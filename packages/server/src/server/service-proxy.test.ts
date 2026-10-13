@@ -34,15 +34,20 @@ function readServerSourceFiles(dir = path.resolve(import.meta.dirname)): string[
 }
 
 interface HttpGetOptions {
+  hostname?: string;
   path?: string;
   headers?: Record<string, string>;
 }
 
 function httpGet(port: number, host: string, options: HttpGetOptions = {}) {
-  const { path: requestPath = "/api/health", headers: extraHeaders = {} } = options;
+  const {
+    hostname = "127.0.0.1",
+    path: requestPath = "/api/health",
+    headers: extraHeaders = {},
+  } = options;
   return new Promise<{ status: number; body: string }>((resolve, reject) => {
     const req = http.get(
-      { hostname: "127.0.0.1", port, path: requestPath, headers: { host, ...extraHeaders } },
+      { hostname, port, path: requestPath, headers: { host, ...extraHeaders } },
       (res) => {
         let body = "";
         res.on("data", (chunk: Buffer) => {
@@ -52,6 +57,31 @@ function httpGet(port: number, host: string, options: HttpGetOptions = {}) {
       },
     );
     req.on("error", reject);
+  });
+}
+
+function httpPost(port: number, host: string, requestPath: string, payload: string) {
+  return new Promise<{ status: number; body: string }>((resolve, reject) => {
+    const request = http.request(
+      {
+        hostname: "127.0.0.1",
+        port,
+        method: "POST",
+        path: requestPath,
+        headers: { host, "content-type": "application/json" },
+      },
+      (res) => {
+        let body = "";
+        res.on("data", (chunk: Buffer) => {
+          body += chunk.toString();
+        });
+        res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+        res.on("error", reject);
+      },
+    );
+    request.on("error", reject);
+    request.write(payload.slice(0, 5));
+    request.end(payload.slice(5));
   });
 }
 
@@ -446,6 +476,59 @@ function upgradeThroughProxy(
     });
   });
 }
+
+describe("service proxy loopback services", () => {
+  it.each(["127.0.0.1", "::1"])("forwards HTTP to a service bound only to %s", async (host) => {
+    const fixture = await startForwardedHeadersFixture(host);
+    try {
+      const direct = await httpGet(fixture.upstreamPort, fixture.hostname, { hostname: host });
+      expect(direct.status).toBe(200);
+
+      const response = await httpGet(fixture.daemonPort, fixture.hostname);
+      expect(response.status).toBe(200);
+      expect(JSON.parse(response.body).host).toBe(fixture.hostname);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it.each(["127.0.0.1", "::1"])(
+    "streams POST bodies to a service bound only to %s",
+    async (host) => {
+      const fixture = await startForwardedHeadersFixture(host);
+      try {
+        const payload = JSON.stringify({ message: "hello" });
+        const response = await httpPost(
+          fixture.daemonPort,
+          fixture.hostname,
+          "/submit?q=one%20two",
+          payload,
+        );
+        expect(response.status).toBe(200);
+        expect(JSON.parse(response.body)).toMatchObject({
+          host: fixture.hostname,
+          "content-type": "application/json",
+          method: "POST",
+          url: "/submit?q=one%20two",
+          body: payload,
+        });
+      } finally {
+        await fixture.close();
+      }
+    },
+  );
+
+  it.each(["127.0.0.1", "::1"])("forwards upgrades to a service bound only to %s", async (host) => {
+    const fixture = await startForwardedHeadersFixture(host);
+    try {
+      const headers = await upgradeThroughProxy(fixture.daemonPort, fixture.hostname);
+      expect(headers.host).toBe(fixture.hostname);
+      expect(headers.upgrade).toBe("websocket");
+    } finally {
+      await fixture.close();
+    }
+  });
+});
 
 describe("service proxy forwarded headers", () => {
   it("forwards the client authority with its port so services build reachable URLs", async () => {
