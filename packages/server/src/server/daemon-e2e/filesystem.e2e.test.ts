@@ -1,8 +1,24 @@
 import { describe, test, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync, symlinkSync, readdirSync } from "fs";
+import {
+  mkdtempSync,
+  writeFileSync,
+  rmSync,
+  mkdirSync,
+  symlinkSync,
+  readdirSync,
+  readlinkSync,
+} from "fs";
 import { tmpdir } from "os";
 import path from "path";
 import { createDaemonTestContext, type DaemonTestContext } from "../test-utils/index.js";
+// This fork exposes entry mutations through the explorer service; read/write and
+// download assertions below still exercise the daemon transport.
+import {
+  createExplorerEntry,
+  renameExplorerEntry,
+  duplicateExplorerEntry,
+  deleteExplorerEntry,
+} from "../file-explorer/service.js";
 
 function tmpCwd(): string {
   return mkdtempSync(path.join(tmpdir(), "daemon-e2e-"));
@@ -113,13 +129,13 @@ describe("file explorer", () => {
   ])("saves text files with $description", async ({ fileName }) => {
     const cwd = tmpCwd();
     try {
-      const created = await ctx.client.createFileEntry({
-        cwd,
+      const created = await createExplorerEntry({
+        root: cwd,
         parentPath: ".",
         name: fileName,
         kind: "file",
       });
-      expect(created).toMatchObject({ path: fileName, success: true, error: null });
+      expect(created).toMatchObject({ path: fileName, status: "ok" });
       writeFileSync(path.join(cwd, fileName), "original payload\n");
       const initial = await ctx.client.readFile(cwd, fileName);
 
@@ -176,34 +192,33 @@ describe("file explorer", () => {
     const fileName = `${prefix}notes.txt`;
     const directoryName = `${prefix}drafts`;
     try {
-      const createdFile = await ctx.client.createFileEntry({
-        cwd,
+      const createdFile = await createExplorerEntry({
+        root: cwd,
         parentPath: ".",
         name: fileName,
         kind: "file",
       });
-      expect(createdFile).toMatchObject({ path: fileName, success: true, error: null });
+      expect(createdFile).toMatchObject({ path: fileName, status: "ok" });
       writeFileSync(path.join(cwd, fileName), "notes payload\n");
       writeFileSync(path.join(cwd, ".notes.txt"), "dotfile control\n");
       writeFileSync(path.join(cwd, "notes.txt"), "ordinary control\n");
 
-      const createdDirectory = await ctx.client.createFileEntry({
-        cwd,
+      const createdDirectory = await createExplorerEntry({
+        root: cwd,
         parentPath: ".",
         name: directoryName,
         kind: "directory",
       });
-      expect(createdDirectory).toMatchObject({ path: directoryName, success: true, error: null });
-      const createdChild = await ctx.client.createFileEntry({
-        cwd,
+      expect(createdDirectory).toMatchObject({ path: directoryName, status: "ok" });
+      const createdChild = await createExplorerEntry({
+        root: cwd,
         parentPath: directoryName,
         name: "inside.txt",
         kind: "file",
       });
       expect(createdChild).toMatchObject({
         path: `${directoryName}/inside.txt`,
-        success: true,
-        error: null,
+        status: "ok",
       });
       writeFileSync(path.join(cwd, directoryName, "inside.txt"), "nested payload\n");
 
@@ -240,29 +255,31 @@ describe("file explorer", () => {
       expect(await response.text()).toBe("notes payload\n");
 
       const renamedFileName = `${prefix}renamed.txt`;
-      const renamed = await ctx.client.renameFileEntry({
-        cwd,
-        path: fileName,
+      const renamed = await renameExplorerEntry({
+        root: cwd,
+        relativePath: fileName,
         name: renamedFileName,
       });
-      expect(renamed).toMatchObject({ renamedPath: renamedFileName, success: true, error: null });
+      expect(renamed).toMatchObject({ path: renamedFileName, status: "ok" });
       const renamedFile = await ctx.client.readFile(cwd, renamedFileName);
       expect(new TextDecoder().decode(renamedFile.bytes)).toBe("notes payload\n");
 
       const copiedDirectoryName = `${directoryName} copy`;
-      const duplicated = await ctx.client.duplicateFileEntry({ cwd, path: directoryName });
+      const duplicated = await duplicateExplorerEntry({ root: cwd, relativePath: directoryName });
       expect(duplicated).toMatchObject({
-        duplicatedPath: copiedDirectoryName,
-        success: true,
-        error: null,
+        path: copiedDirectoryName,
+        status: "ok",
       });
       const copiedFile = await ctx.client.readFile(cwd, `${copiedDirectoryName}/inside.txt`);
       expect(new TextDecoder().decode(copiedFile.bytes)).toBe("nested payload\n");
 
-      const deletedDirectory = await ctx.client.deleteFileEntry({ cwd, path: directoryName });
-      expect(deletedDirectory).toMatchObject({ success: true, error: null });
-      const deletedFile = await ctx.client.deleteFileEntry({ cwd, path: renamedFileName });
-      expect(deletedFile).toMatchObject({ success: true, error: null });
+      const deletedDirectory = await deleteExplorerEntry({
+        root: cwd,
+        relativePath: directoryName,
+      });
+      expect(deletedDirectory).toMatchObject({ status: "ok" });
+      const deletedFile = await deleteExplorerEntry({ root: cwd, relativePath: renamedFileName });
+      expect(deletedFile).toMatchObject({ status: "ok" });
       const remaining = await ctx.client.listDirectory(cwd, ".");
       expect(remaining.entries.map((entry) => entry.path).sort()).toEqual(
         [".notes.txt", "notes.txt", copiedDirectoryName].sort(),
@@ -297,9 +314,9 @@ describe("file explorer", () => {
           token: null,
           error: "Access outside of workspace is not allowed",
         });
-        const deleted = await ctx.client.deleteFileEntry({ cwd, path: requestedPath });
+        const deleted = await deleteExplorerEntry({ root: cwd, relativePath: requestedPath });
         expect(deleted).toMatchObject({
-          success: false,
+          status: "error",
           error: "Access outside of workspace is not allowed",
         });
       }
@@ -343,6 +360,82 @@ describe("file explorer", () => {
       rmSync(directory, { recursive: true, force: true });
     }
   });
+
+  test.skipIf(process.platform === "win32")(
+    "duplicating a folder keeps relative symlinks inside the copy",
+    async () => {
+      const cwd = tmpCwd();
+      try {
+        mkdirSync(path.join(cwd, "template"));
+        writeFileSync(path.join(cwd, "template", "data.txt"), "original payload\n");
+        symlinkSync("data.txt", path.join(cwd, "template", "alias.txt"));
+
+        const duplicated = await duplicateExplorerEntry({ root: cwd, relativePath: "template" });
+        expect(duplicated).toMatchObject({
+          path: "template copy",
+          status: "ok",
+        });
+        expect(readlinkSync(path.join(cwd, "template copy", "alias.txt"))).toBe("data.txt");
+
+        const copiedTarget = await ctx.client.readFile(cwd, "template copy/data.txt");
+        const targetWrite = await ctx.client.writeFile({
+          cwd,
+          path: "template copy/data.txt",
+          content: "copy payload\n",
+          expectedModifiedAt: copiedTarget.modifiedAt,
+          expectedRevision: copiedTarget.revision,
+        });
+        expect(targetWrite.status).toBe("written");
+        const copiedAlias = await ctx.client.readFile(cwd, "template copy/alias.txt");
+        expect(new TextDecoder().decode(copiedAlias.bytes)).toBe("copy payload\n");
+
+        const aliasWrite = await ctx.client.writeFile({
+          cwd,
+          path: "template copy/alias.txt",
+          content: "edited through copied alias\n",
+          expectedModifiedAt: copiedAlias.modifiedAt,
+          expectedRevision: copiedAlias.revision,
+        });
+        expect(aliasWrite.status).toBe("written");
+        const original = await ctx.client.readFile(cwd, "template/data.txt");
+        expect(new TextDecoder().decode(original.bytes)).toBe("original payload\n");
+        const editedCopy = await ctx.client.readFile(cwd, "template copy/data.txt");
+        expect(new TextDecoder().decode(editedCopy.bytes)).toBe("edited through copied alias\n");
+
+        const deleted = await deleteExplorerEntry({ root: cwd, relativePath: "template" });
+        expect(deleted).toMatchObject({ status: "ok" });
+        const survivingAlias = await ctx.client.readFile(cwd, "template copy/alias.txt");
+        expect(new TextDecoder().decode(survivingAlias.bytes)).toBe(
+          "edited through copied alias\n",
+        );
+      } finally {
+        rmSync(cwd, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test.skipIf(process.platform === "win32")(
+    "duplicating a file symlink preserves an explicit absolute target",
+    async () => {
+      const cwd = tmpCwd();
+      const targetPath = path.join(cwd, "data.txt");
+      try {
+        writeFileSync(targetPath, "absolute target payload\n");
+        symlinkSync(targetPath, path.join(cwd, "alias.txt"));
+
+        const duplicated = await duplicateExplorerEntry({ root: cwd, relativePath: "alias.txt" });
+        expect(duplicated).toMatchObject({
+          path: "alias copy.txt",
+          status: "ok",
+        });
+        expect(readlinkSync(path.join(cwd, "alias copy.txt"))).toBe(targetPath);
+        const copy = await ctx.client.readFile(cwd, "alias copy.txt");
+        expect(new TextDecoder().decode(copy.bytes)).toBe("absolute target payload\n");
+      } finally {
+        rmSync(cwd, { recursive: true, force: true });
+      }
+    },
+  );
 
   test("lists directory contents", async () => {
     const cwd = tmpCwd();
