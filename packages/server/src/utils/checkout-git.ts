@@ -2683,10 +2683,11 @@ export async function getCommitFileDiff({
   path: string;
   signal?: AbortSignal;
 }): Promise<ParsedDiffFile | null> {
+  const worktreeRoot = await requireGitWorktreeRoot(cwd);
   const { stdout } = await runGitCommand(
     ["show", sha, "--format=", "--diff-merges=first-parent", ...GIT_PATCH_FORMAT_ARGS, "--", path],
     {
-      cwd,
+      cwd: worktreeRoot,
       envOverlay: READ_ONLY_GIT_ENV,
     },
   );
@@ -2695,10 +2696,10 @@ export async function getCommitFileDiff({
     return null;
   }
 
-  const parsedFiles = await parseAndHighlightDiff(stdout, cwd, {
+  const parsedFiles = await parseAndHighlightDiff(stdout, worktreeRoot, {
     signal,
-    getOldFileContent: (file) => readGitFileContentAtRef(cwd, `${sha}^`, file.path),
-    getNewFileContent: (file) => readGitFileContentAtRef(cwd, sha, file.path),
+    getOldFileContent: (file) => readGitFileContentAtRef(worktreeRoot, `${sha}^`, file.path),
+    getNewFileContent: (file) => readGitFileContentAtRef(worktreeRoot, sha, file.path),
   });
 
   // `--` scopes the diff to a single pathspec, so there is at most one real
