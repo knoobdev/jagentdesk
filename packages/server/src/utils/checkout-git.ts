@@ -3580,13 +3580,13 @@ export async function commitAll(cwd: string, message: string): Promise<void> {
 }
 
 export async function discardChanges(cwd: string, pathspecs: string[]): Promise<void> {
-  await requireGitRepo(cwd);
+  const worktreeRoot = await requireGitWorktreeRoot(cwd);
   if (pathspecs.length === 0) {
     return;
   }
   try {
     await runGitCommand(["--literal-pathspecs", "reset", "-q", "HEAD", "--", ...pathspecs], {
-      cwd,
+      cwd: worktreeRoot,
       timeout: DISCARD_CHANGES_TIMEOUT_MS,
     });
   } catch {
@@ -3594,7 +3594,7 @@ export async function discardChanges(cwd: string, pathspecs: string[]): Promise<
     await runGitCommand(
       ["--literal-pathspecs", "rm", "--cached", "-r", "-q", "--ignore-unmatch", "--", ...pathspecs],
       {
-        cwd,
+        cwd: worktreeRoot,
         timeout: DISCARD_CHANGES_TIMEOUT_MS,
       },
     );
@@ -3606,7 +3606,7 @@ export async function discardChanges(cwd: string, pathspecs: string[]): Promise<
   const status = await runGitCommand(
     ["--literal-pathspecs", "status", "--porcelain=v1", "-z", "--", ...pathspecs],
     {
-      cwd,
+      cwd: worktreeRoot,
       timeout: DISCARD_CHANGES_TIMEOUT_MS,
     },
   );
@@ -3632,13 +3632,13 @@ export async function discardChanges(cwd: string, pathspecs: string[]): Promise<
   }
   if (tracked.length > 0) {
     await runGitCommand(["--literal-pathspecs", "checkout", "-q", "--", ...tracked], {
-      cwd,
+      cwd: worktreeRoot,
       timeout: DISCARD_CHANGES_TIMEOUT_MS,
     });
   }
   if (untracked.length > 0) {
     await runGitCommand(["--literal-pathspecs", "clean", "-fd", "-q", "--", ...untracked], {
-      cwd,
+      cwd: worktreeRoot,
       timeout: DISCARD_CHANGES_TIMEOUT_MS,
     });
   }
