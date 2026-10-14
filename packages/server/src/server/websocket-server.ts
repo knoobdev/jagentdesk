@@ -56,6 +56,7 @@ import {
 } from "./messages.js";
 import { asUint8Array, decodeBinaryFrame } from "@jagentdesk/protocol/binary-frames/index";
 import type { TerminalActivity } from "@jagentdesk/protocol/terminal-activity";
+import { MAX_WEBSOCKET_MESSAGE_BYTES } from "@jagentdesk/protocol/websocket-message-limit";
 import type { HostnamesConfig } from "./hostnames.js";
 import { isHostnameAllowed } from "./hostnames.js";
 import {
@@ -994,6 +995,7 @@ export class VoiceAssistantWebSocketServer {
     const { allowedOrigins, hostnames } = wsConfig;
     const password = auth?.password;
     const wss = new WebSocketServer({
+      maxPayload: MAX_WEBSOCKET_MESSAGE_BYTES,
       server,
       path: "/ws",
       handleProtocols: (protocols) => selectWebSocketProtocol(protocols, password),
