@@ -3,7 +3,10 @@ import { fork } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { assertAbsolutePath, isSameOrDescendantPath } from "../server/path-utils.js";
 import type { TerminalState } from "@jagentdesk/protocol/messages";
-import type { TerminalActivity, TerminalActivityState } from "@jagentdesk/protocol/terminal-activity";
+import type {
+  TerminalActivity,
+  TerminalActivityState,
+} from "@jagentdesk/protocol/terminal-activity";
 import { deriveTerminalActivityStatusBucket } from "@jagentdesk/protocol/terminal-activity";
 import type {
   ClientMessage,
@@ -156,6 +159,9 @@ export function createWorkerTerminalManager(
   const recordsById = new Map<string, WorkerTerminalRecord>();
   const terminalIdsByCwd = new Map<string, Set<string>>();
   const terminalActivityTokenById = new Map<string, string>();
+  // Creation owns a reference to the session independently of the live-terminal
+  // index. Only terminalCreated registers it; terminalExit removes it permanently.
+  const pendingCreationsById = new Map<string, { session: TerminalSession | null }>();
   const terminalsChangedListeners = new Set<TerminalsChangedListener>();
   const terminalActivityListeners = new Set<TerminalActivityListener>();
   const terminalWorkspaceContributionChangedListeners =
@@ -542,10 +548,14 @@ export function createWorkerTerminalManager(
   function handleWorkerEvent(message: TerminalWorkerToParentMessage): void {
     switch (message.type) {
       case "terminalCreated": {
-        registerRecord({
+        const session = registerRecord({
           info: asRequiredWorkerTerminalInfo(message.terminal),
           state: message.state,
         });
+        const pendingCreation = pendingCreationsById.get(message.terminal.id);
+        if (pendingCreation) {
+          pendingCreation.session = session;
+        }
         emitTerminalsChanged({
           cwd: message.terminal.cwd,
           terminals: listTerminalItemsForCwd(message.terminal.cwd),
@@ -686,12 +696,10 @@ export function createWorkerTerminalManager(
       const activityToken = createActivityToken();
       const terminalActivityUrl = managerOptions.getTerminalActivityUrl?.() ?? null;
       terminalActivityTokenById.set(terminalId, activityToken);
-      let result: {
-        terminal: RequiredWorkerTerminalInfo;
-        state: TerminalState;
-      };
+      const creation = { session: null as TerminalSession | null };
+      pendingCreationsById.set(terminalId, creation);
       try {
-        result = (await sendRequest({
+        await sendRequest({
           type: "createTerminal",
           options: {
             ...options,
@@ -699,16 +707,17 @@ export function createWorkerTerminalManager(
             activityToken,
             activityUrl: terminalActivityUrl,
           },
-        })) as {
-          terminal: RequiredWorkerTerminalInfo;
-          state: TerminalState;
-        };
+        });
+        if (!creation.session) {
+          throw new Error("Terminal worker completed creation without a terminalCreated event");
+        }
+        return creation.session;
       } catch (error) {
         terminalActivityTokenById.delete(terminalId);
         throw error;
+      } finally {
+        pendingCreationsById.delete(terminalId);
       }
-      const session = registerRecord({ info: result.terminal, state: result.state });
-      return session;
     },
 
     registerCwdEnv(options: { cwd: string; env: Record<string, string> }): void {
