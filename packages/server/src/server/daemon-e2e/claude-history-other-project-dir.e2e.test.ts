@@ -70,6 +70,7 @@ describe("daemon E2E - Claude history stored under another project folder", () =
             content: "reply from the original folder",
           },
         },
+        { type: "custom-title", customTitle: "Renamed moved session", sessionId: SESSION_ID },
       ]
         .map((entry) => `${JSON.stringify(entry)}\n`)
         .join(""),
@@ -117,6 +118,7 @@ describe("daemon E2E - Claude history stored under another project folder", () =
       sessionId: SESSION_ID,
       cwd: agentCwd,
     });
+    expect(agent.title).toBe("Renamed moved session");
     await stopDaemon();
 
     const restartedClient = await startDaemon();
