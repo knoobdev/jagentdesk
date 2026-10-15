@@ -8,6 +8,7 @@ import {
   readdirSync,
   readlinkSync,
 } from "fs";
+import { rm } from "node:fs/promises";
 import { tmpdir } from "os";
 import path from "path";
 import { execFileSync } from "node:child_process";
@@ -108,7 +109,9 @@ describe("checkout discard", () => {
         }
       } finally {
         // afterEach shuts down the daemon and its repository observers first.
-        onTestFinished(() => rmSync(cwd, { recursive: true, force: true }));
+        onTestFinished(() =>
+          rm(cwd, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }),
+        );
       }
     },
   );
