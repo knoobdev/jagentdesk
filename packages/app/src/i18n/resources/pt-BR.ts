@@ -605,6 +605,9 @@ export const ptBR: TranslationResources = {
       restoreRequiresUpdate: "Atualize o host para visualizar os terminais.",
       unableToSubscribe: "Não foi possível assinar o terminal",
     },
+    sheet: {
+      openAsTab: "Abrir como aba",
+    },
     tabs: {
       loading: "Carregando...",
       modified: "Alterações não salvas",

@@ -607,6 +607,9 @@ export const es: TranslationResources = {
       restoreRequiresUpdate: "Actualiza el host para ver las terminales.",
       unableToSubscribe: "No se puede suscribir al terminal",
     },
+    sheet: {
+      openAsTab: "Abrir como pestaña",
+    },
     tabs: {
       loading: "Cargando...",
       modified: "Cambios sin guardar",

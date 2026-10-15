@@ -1,3 +1,4 @@
+import { WorkspaceLayoutModePublisher } from "@/workspace-tabs/layout-mode-publisher";
 import { FloatingHeaderLayout } from "@/components/floating-header";
 import { StreamTopOverlayProvider, supportsStreamTopOverlay } from "@/agent-stream/top-overlay";
 import { GumloopCompactHeader } from "@/components/gumloop-shell/compact-header";
@@ -494,11 +495,15 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
       }),
   });
   const hasTopLeftWindowControls = useHasWindowChromeObstruction("top-left");
-  const appChromeLayout = resolveDesktopAppChromeLayout({
-    desktopSidebarRendered: desktopSidebarVisible,
-    hasTopLeftWindowControls,
-    sidebarControlsEnabled: chromeEnabled && !isWorkspaceFocusModeEnabled,
-  });
+  const appChromeLayout = useMemo(
+    () =>
+      resolveDesktopAppChromeLayout({
+        desktopSidebarRendered: desktopSidebarVisible,
+        hasTopLeftWindowControls,
+        sidebarControlsEnabled: chromeEnabled && !isWorkspaceFocusModeEnabled,
+      }),
+    [desktopSidebarVisible, hasTopLeftWindowControls, chromeEnabled, isWorkspaceFocusModeEnabled],
+  );
   const sidebarChrome = useMemo(
     () => (
       <SidebarChrome
@@ -515,16 +520,19 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
       keyboardShortcutsEnabled,
     ],
   );
-  const workspaceChrome = (
-    <AppWorkspaceChrome
-      isCompactLayout={isCompactLayout}
-      onForge={onForge}
-      sidebarChrome={sidebarChrome}
-      chromeEnabled={chromeEnabled}
-      layout={appChromeLayout}
-    >
-      {children}
-    </AppWorkspaceChrome>
+  const workspaceChrome = useMemo(
+    () => (
+      <AppWorkspaceChrome
+        isCompactLayout={isCompactLayout}
+        onForge={onForge}
+        sidebarChrome={sidebarChrome}
+        chromeEnabled={chromeEnabled}
+        layout={appChromeLayout}
+      >
+        {children}
+      </AppWorkspaceChrome>
+    ),
+    [isCompactLayout, onForge, sidebarChrome, chromeEnabled, appChromeLayout, children],
   );
 
   const overlays = (
@@ -553,7 +561,10 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
     </>
   );
 
-  const compactHeader = <GumloopCompactHeader enabled={sidebarEnabled} />;
+  const compactHeader = useMemo(
+    () => <GumloopCompactHeader enabled={sidebarEnabled} />,
+    [sidebarEnabled],
+  );
   const renderChrome = useCallback(
     (inset: number) => (
       <StreamTopOverlayProvider value={inset}>{workspaceChrome}</StreamTopOverlayProvider>
@@ -586,6 +597,7 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
 
   return (
     <CommandCenterProvider>
+      <WorkspaceLayoutModePublisher />
       <WorkspaceArchiveShortcutHandler />
       {content}
     </CommandCenterProvider>

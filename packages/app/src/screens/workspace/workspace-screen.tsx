@@ -1,3 +1,6 @@
+import { SheetTabs } from "./sheet-tabs";
+import { SheetPaneHostProvider, type SheetPaneHost } from "./sheet-pane";
+import type { PaneHost } from "@/panels/panel-manifest";
 import { usePendingWorkspaceOpen } from "@/stores/workspace-layout-store";
 import { SessionShareControl } from "@/composer/agent-controls/session-share-control";
 import { BuiltinPluginGate } from "@/plugins/builtin/gate";
@@ -272,6 +275,10 @@ function buildWorkspaceFileLocation(
     return null;
   }
   return { path: fields.path, lineStart: fields.lineStart, lineEnd: fields.lineEnd };
+}
+
+function canFocusPaneUnderSheet(routeFocused: boolean, sheetOpen: boolean): boolean {
+  return routeFocused && !sheetOpen;
 }
 
 const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
@@ -3179,6 +3186,16 @@ function WorkspaceScreenContent({
 
   const handleCloseTabById = useCallback(
     async (tabId: string) => {
+      if (
+        persistenceKey &&
+        useWorkspaceLayoutStore
+          .getState()
+          .sheetsByWorkspace[persistenceKey]?.some((sheet) => sheet.tab.tabId === tabId)
+      ) {
+        if (await confirmDiscardModifiedTab(tabId))
+          useWorkspaceLayoutStore.getState().closeSheet(persistenceKey, tabId);
+        return;
+      }
       const tab = allTabDescriptorsById.get(tabId);
       if (!tab) {
         return;
@@ -3197,6 +3214,7 @@ function WorkspaceScreenContent({
       handleClosePassiveTab({ tabId, target: tab.target });
     },
     [
+      persistenceKey,
       allTabDescriptorsById,
       confirmDiscardModifiedTab,
       handleCloseAgentTab,
@@ -3699,14 +3717,19 @@ function WorkspaceScreenContent({
     }
     document.title = "Workspace";
   }, [activeTabDescriptor, isRouteFocused]);
+  const sheetOpen = useWorkspaceLayoutStore((state) =>
+    persistenceKey ? (state.sheetsByWorkspace[persistenceKey]?.length ?? 0) > 0 : false,
+  );
   const buildPaneContentModel = useCallback(
     (input: {
       tab: WorkspaceTabDescriptor;
       paneId?: string | null;
       focusPaneBeforeOpen?: boolean;
+      host?: PaneHost;
     }) =>
       buildWorkspacePaneContentModel({
         tab: input.tab,
+        host: input.host,
         normalizedServerId,
         normalizedWorkspaceId,
         fileNavigationRevision: fileNavigationRevisionByTabId[input.tab.tabId] ?? 0,
@@ -3795,7 +3818,7 @@ function WorkspaceScreenContent({
     hasHydratedAgents,
     mountedFocusedPaneTabIds,
     focusedPaneTabDescriptorMap,
-    isRouteFocused,
+    isRouteFocused: canFocusPaneUnderSheet(isRouteFocused, sheetOpen),
     focusedPaneId,
     buildMobilePaneContentModel,
   });
@@ -4235,6 +4258,26 @@ function WorkspaceScreenContent({
   });
   const desktopContent = <DesktopPaneContent paneProps={desktopPaneProps} fallback={content} />;
 
+  const buildSheetContent = useCallback(
+    (tab: WorkspaceTabDescriptor, closeCurrentTab: () => void) => {
+      const model = buildPaneContentModel({ tab, paneId: null, host: "sheet" });
+      return { ...model, paneContextValue: { ...model.paneContextValue, closeCurrentTab } };
+    },
+    [buildPaneContentModel],
+  );
+  const sheetHost = useMemo<SheetPaneHost | null>(
+    () =>
+      persistenceKey
+        ? {
+            workspaceKey: persistenceKey,
+            serverId: normalizedServerId,
+            workspaceId: normalizedWorkspaceId,
+            isWorkspaceFocused: isRouteFocused,
+            buildContent: buildSheetContent,
+          }
+        : null,
+    [persistenceKey, normalizedServerId, normalizedWorkspaceId, isRouteFocused, buildSheetContent],
+  );
   const gumloopHeaderTitle = useMemo(
     () => (
       <GumloopChatTitle
@@ -4372,47 +4415,50 @@ function WorkspaceScreenContent({
 
   return (
     gatedWorkspaceScreen ?? (
-      <WorkspaceFocusProvider workspaceKey={persistenceKey}>
-        <RenderProfile id="WorkspaceScreenContent">
-          <View style={containerStyle}>
-            <WorkspaceDocumentTitleEffectSlot
-              tab={activeTabDescriptor}
-              serverId={normalizedServerId}
-              workspaceId={normalizedWorkspaceId}
-              isRouteFocused={isRouteFocused}
-            />
-            <DesktopWorkspaceChrome
-              paneProps={desktopPaneProps}
-              explorerPane={explorerPane}
-              portalHostName={workspaceFloatingPanelPortalHostName}
-              showExplorerSidebar={showExplorerSidebar}
-              explorerOpen={isExplorerOpen}
-              serverId={normalizedServerId}
-              workspaceId={normalizedWorkspaceId}
-              workspaceRoot={workspaceDirectory}
-              isGit={isGitCheckout}
-              onOpenFile={handleOpenFileFromExplorer}
-              leftDock={orchestrationLeftDock}
-            >
-              {workspaceCenterColumn}
-            </DesktopWorkspaceChrome>
-            <ImportSessionSheet
-              visible={importSheetVisible}
-              client={client}
-              serverId={normalizedServerId}
-              cwd={workspaceDirectory}
-              workspaceId={normalizedWorkspaceId}
-              onClose={closeImportSheet}
-              onImportedAgent={handleImportedAgent}
-            />
-            <WorkspaceTabRenameModal
-              renamingTab={renameModalTab}
-              onSubmit={handleRenameModalSubmit}
-              onClose={handleRenameModalClose}
-            />
-          </View>
-        </RenderProfile>
-      </WorkspaceFocusProvider>
+      <SheetPaneHostProvider value={sheetHost}>
+        <WorkspaceFocusProvider workspaceKey={persistenceKey}>
+          <RenderProfile id="WorkspaceScreenContent">
+            <View style={containerStyle}>
+              <WorkspaceDocumentTitleEffectSlot
+                tab={activeTabDescriptor}
+                serverId={normalizedServerId}
+                workspaceId={normalizedWorkspaceId}
+                isRouteFocused={isRouteFocused}
+              />
+              <DesktopWorkspaceChrome
+                paneProps={desktopPaneProps}
+                explorerPane={explorerPane}
+                portalHostName={workspaceFloatingPanelPortalHostName}
+                showExplorerSidebar={showExplorerSidebar}
+                explorerOpen={isExplorerOpen}
+                serverId={normalizedServerId}
+                workspaceId={normalizedWorkspaceId}
+                workspaceRoot={workspaceDirectory}
+                isGit={isGitCheckout}
+                onOpenFile={handleOpenFileFromExplorer}
+                leftDock={orchestrationLeftDock}
+              >
+                {workspaceCenterColumn}
+              </DesktopWorkspaceChrome>
+              <SheetTabs onCloseTab={handleCloseTabById} />
+              <ImportSessionSheet
+                visible={importSheetVisible}
+                client={client}
+                serverId={normalizedServerId}
+                cwd={workspaceDirectory}
+                workspaceId={normalizedWorkspaceId}
+                onClose={closeImportSheet}
+                onImportedAgent={handleImportedAgent}
+              />
+              <WorkspaceTabRenameModal
+                renamingTab={renameModalTab}
+                onSubmit={handleRenameModalSubmit}
+                onClose={handleRenameModalClose}
+              />
+            </View>
+          </RenderProfile>
+        </WorkspaceFocusProvider>
+      </SheetPaneHostProvider>
     )
   );
 }

@@ -596,6 +596,9 @@ export const en = {
       restoreRequiresUpdate: "Update the host to view terminals.",
       unableToSubscribe: "Unable to subscribe to terminal",
     },
+    sheet: {
+      openAsTab: "Open as tab",
+    },
     tabs: {
       loading: "Loading...",
       modified: "Unsaved changes",

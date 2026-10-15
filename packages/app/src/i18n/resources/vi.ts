@@ -970,6 +970,7 @@ export const vi = {
         thread: { resolved: "Resolved", outdated: "Outdated" },
       },
     },
+    sheet: { openAsTab: "Mở thành thẻ" },
     tabs: {
       actions: {
         newTab: "New tab",

@@ -600,6 +600,9 @@ export const zhCN: TranslationResources = {
       restoreRequiresUpdate: "更新主机以查看终端。",
       unableToSubscribe: "无法订阅 Terminal",
     },
+    sheet: {
+      openAsTab: "作为标签页打开",
+    },
     tabs: {
       loading: "正在加载...",
       modified: "未保存的更改",

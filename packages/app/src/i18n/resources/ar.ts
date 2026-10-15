@@ -617,6 +617,9 @@ export const ar: TranslationResources = {
       restoreRequiresUpdate: "حدّث المضيف لعرض الطرفيات.",
       unableToSubscribe: "غير قادر على الاشتراك في المحطة",
     },
+    sheet: {
+      openAsTab: "فتح كعلامة تبويب",
+    },
     tabs: {
       loading: "تحميل...",
       modified: "تغييرات غير محفوظة",

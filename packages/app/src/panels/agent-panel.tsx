@@ -1,3 +1,5 @@
+import { PaneSubtitle } from "./pane-subtitle";
+import { useAgentFactsLine } from "./agent-facts-line";
 import { useGumloopDesktopShell } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { ComposerDock } from "@/composer/dock";
 import { RewindCommandCenterRegistration } from "@/components/rewind/command-center-registration";
@@ -1171,6 +1173,7 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
 }) {
   const gumloopDesktop = useGumloopDesktopShell(true);
   const isSheet = usePaneHost() === "sheet";
+  const facts = useAgentFactsLine(serverId, agentId);
   const composerEditingSession = useMemo(() => new ComposerEditingSession(), []);
   const active = useRetainedPanelActive();
   const { t } = useTranslation();
@@ -1287,6 +1290,7 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
   const chatSurface = (
     <AgentChatSurface disabled={isArchivingCurrentAgent}>
       {sharingHeader}
+      {isSheet && facts ? <PaneSubtitle text={facts} testID="agent-pane-subtitle" /> : null}
       {dock}
     </AgentChatSurface>
   );

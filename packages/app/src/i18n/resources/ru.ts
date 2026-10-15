@@ -630,6 +630,9 @@ export const ru: TranslationResources = {
       unableToSubscribe: "Невозможно подписаться на терминал",
       restoreRequiresUpdate: "Обновите хост, чтобы просматривать терминалы.",
     },
+    sheet: {
+      openAsTab: "Открыть во вкладке",
+    },
     tabs: {
       loading: "Загрузка...",
       modified: "Несохранённые изменения",

@@ -106,3 +106,15 @@ const EMPTY_CONTEXT: AssistantFileLinkResolverContextValue = {
 export function useAssistantFileLinkEnvironment() {
   return useAssistantFileLinkResolverContext().configRef.current;
 }
+
+export function useAssistantFileLinkEnvironmentBridge() {
+  const value = useContext(AssistantFileLinkResolverContext);
+  return useCallback(
+    (children: ReactNode) => (
+      <AssistantFileLinkResolverContext.Provider value={value}>
+        {children}
+      </AssistantFileLinkResolverContext.Provider>
+    ),
+    [value],
+  );
+}

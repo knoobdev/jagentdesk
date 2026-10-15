@@ -1,3 +1,4 @@
+import { SheetBackdrop } from "./sheet-backdrop";
 import {
   BottomSheetScope,
   type AttachSheetContentDrag,
@@ -7,11 +8,13 @@ import { useState } from "react";
 import {
   BottomSheetModal as GorhomBottomSheetModal,
   type BottomSheetModalProps,
+  type BottomSheetBackdropProps,
 } from "@gorhom/bottom-sheet";
 import {
   forwardRef,
   useCallback,
   useEffect,
+  useImperativeHandle,
   useMemo,
   useRef,
   type ElementRef,
@@ -36,6 +39,8 @@ type IsolatedBottomSheetModalProps = Omit<
   BottomSheetModalProps,
   "enableDismissOnClose" | "stackBehavior" | "children"
 > & {
+  enableDismissOnClose?: boolean;
+  backdropOpacity?: number;
   children?: ReactNode;
   presentation?: "push" | "replace";
   contextBridge?: ContextBridge | null;
@@ -51,10 +56,27 @@ export const IsolatedBottomSheetModal = forwardRef<
     children,
     presentation = "push",
     contextBridge,
+    backdropOpacity,
+    enableDismissOnClose = true,
     waitFor,
     simultaneousHandlers,
     ...bottomSheetProps
   } = props;
+  const modalRef = useRef<GorhomBottomSheetModalMethods>(null);
+  useImperativeHandle(
+    ref,
+    () => ({
+      present: (...args) => modalRef.current?.present(...args),
+      dismiss: (...args) => modalRef.current?.dismiss(...args),
+      snapToIndex: (...args) => modalRef.current?.snapToIndex(...args),
+      snapToPosition: (...args) => modalRef.current?.snapToPosition(...args),
+      expand: (...args) => modalRef.current?.expand(...args),
+      collapse: (...args) => modalRef.current?.collapse(...args),
+      close: (...args) => modalRef.current?.close(...args),
+      forceClose: (...args) => modalRef.current?.forceClose(...args),
+    }),
+    [],
+  );
   const [contentDragGesture, setContentDragGesture] = useState<SheetContentDragGesture>();
   const attachContentDrag = useCallback<AttachSheetContentDrag>((gesture) => {
     setContentDragGesture(gesture);
@@ -74,11 +96,24 @@ export const IsolatedBottomSheetModal = forwardRef<
     };
   }, [contentDragGesture, waitFor, simultaneousHandlers]);
 
+  const renderBackdrop = useCallback(
+    (backdropProps: BottomSheetBackdropProps) => (
+      <SheetBackdrop
+        {...backdropProps}
+        opacity={backdropOpacity}
+        pressBehavior={enableDismissOnClose ? "dismiss" : "close"}
+      />
+    ),
+    [backdropOpacity, enableDismissOnClose],
+  );
   const modal = (
     <GorhomBottomSheetModal
       {...bottomSheetProps}
-      ref={ref}
-      enableDismissOnClose
+      ref={modalRef}
+      backdropComponent={
+        backdropOpacity === undefined ? bottomSheetProps.backdropComponent : renderBackdrop
+      }
+      enableDismissOnClose={enableDismissOnClose}
       stackBehavior={presentation}
       waitFor={contentDragHandlers.waitFor}
       simultaneousHandlers={contentDragHandlers.simultaneousHandlers}
@@ -138,3 +173,5 @@ export function useIsolatedBottomSheetVisibility({
     handleSheetDismiss,
   };
 }
+
+export { systemBackPress } from "./back-press";

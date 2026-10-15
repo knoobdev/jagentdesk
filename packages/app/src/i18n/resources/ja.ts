@@ -612,6 +612,9 @@ export const ja: TranslationResources = {
       restoreRequiresUpdate: "ターミナルを表示するにはホストを更新してください。",
       unableToSubscribe: "ターミナルに接続できません",
     },
+    sheet: {
+      openAsTab: "タブで開く",
+    },
     tabs: {
       loading: "読み込み中...",
       modified: "未保存の変更",
