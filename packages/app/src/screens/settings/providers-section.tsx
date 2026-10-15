@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useIsCompactFormFactor } from "@/constants/layout";
+import { useToast } from "@/contexts/toast-api-context";
 import { settingsStyles } from "@/styles/settings";
 import { useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import { useHostFeature } from "@/runtime/host-features";
@@ -324,6 +325,7 @@ export interface ProvidersSectionProps {
 
 export function ProvidersSection({ serverId }: ProvidersSectionProps) {
   const { t } = useTranslation();
+  const toast = useToast();
   const isConnected = useHostRuntimeIsConnected(serverId);
   const supportsProviderRemoval = useHostFeature(serverId, "providerRemoval");
   const { entries, isLoading, refresh } = useProvidersSnapshot(serverId);
@@ -407,15 +409,12 @@ export function ProvidersSection({ serverId }: ProvidersSectionProps) {
         await patchConfig(buildAcpProviderConfigPatch(entry));
         await refresh([entry.id]);
       } catch (error) {
-        Alert.alert(
-          t("settings.providers.addErrorTitle"),
-          error instanceof Error ? error.message : String(error),
-        );
+        toast.error(error instanceof Error ? error.message : String(error));
       } finally {
         setInstallingProviderId((current) => (current === entry.id ? null : current));
       }
     },
-    [installingProviderId, patchConfig, refresh, t],
+    [installingProviderId, patchConfig, refresh, toast],
   );
 
   return (

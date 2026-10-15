@@ -6,6 +6,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderSnapshotEntry } from "@jagentdesk/protocol/agent-types";
 import { createDefaultOrchestrationConfig } from "@jagentdesk/protocol/orchestration";
+import { ToastApiProvider } from "@/contexts/toast-api-context";
 import type { MutableDaemonConfig } from "@jagentdesk/protocol/messages";
 
 const { theme, snapshotState, configState, patchConfigMock, openProviderSettingsMock } = vi.hoisted(
@@ -384,7 +385,7 @@ describe("ProvidersSection", () => {
 
   function render(): void {
     act(() => {
-      root?.render(<ProvidersSection serverId="server-1" />);
+      root?.render(<ToastApiProvider api={{ show: vi.fn(), copied: vi.fn(), error: vi.fn() }}><ProvidersSection serverId="server-1" /></ToastApiProvider>);
     });
   }
 
