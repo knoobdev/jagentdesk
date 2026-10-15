@@ -190,25 +190,33 @@ async function resolvePrCheckoutIntent(
     headRef,
   }) ?? [{ remoteName: "origin", remoteRef: `refs/heads/${headRef}` }];
   const localBranchName = service.buildPrLocalBranchName?.({ headRef, checkoutTarget });
-  const headRepositoryOwner = checkoutTarget.isCrossRepository
-    ? checkoutTarget.headOwnerLogin?.trim() || undefined
-    : undefined;
-  const pushRemoteUrl = checkoutTarget.isCrossRepository
-    ? checkoutTarget.headRepositorySshUrl || checkoutTarget.headRepositoryUrl || undefined
-    : undefined;
-  const trackOriginHead = !checkoutTarget.isCrossRepository;
+  const crossRepository = resolveCrossRepositoryFields(checkoutTarget);
+  const trackOriginHead =
+    !checkoutTarget.isCrossRepository && checkoutTarget.headRefKind !== "pull-ref";
 
   return {
     kind: "checkout-change-request",
     forge: deps.forge,
     changeRequestNumber: params.changeRequestNumber,
     headRef,
-    ...(headRepositoryOwner ? { headRepositoryOwner } : {}),
+    ...crossRepository,
     baseRefName,
     checkoutRefs: checkoutTarget.checkoutRefs ?? defaultRefs,
     ...(localBranchName && localBranchName !== headRef ? { localBranchName } : {}),
-    ...(pushRemoteUrl ? { pushRemoteUrl } : {}),
     ...(trackOriginHead ? { trackOriginHead } : {}),
+  };
+}
+
+function resolveCrossRepositoryFields(target: PullRequestCheckoutTarget): {
+  headRepositoryOwner?: string;
+  pushRemoteUrl?: string;
+} {
+  if (!target.isCrossRepository) return {};
+  const headRepositoryOwner = target.headOwnerLogin?.trim() || undefined;
+  const pushRemoteUrl = target.headRepositorySshUrl || target.headRepositoryUrl || undefined;
+  return {
+    ...(headRepositoryOwner ? { headRepositoryOwner } : {}),
+    ...(pushRemoteUrl ? { pushRemoteUrl } : {}),
   };
 }
 
