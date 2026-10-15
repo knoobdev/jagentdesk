@@ -1425,15 +1425,20 @@ export const ru: TranslationResources = {
   },
   providerCatalog: {
     title: "Добавить провайдера",
-    search: "Поиск поставщиков",
-    noProviders: "Поставщики не найдены",
+    search: "Поиск провайдеров",
+    noProviders: "Провайдеры не найдены",
+    clearSearch: "Очистить поиск",
     actions: {
-      add: "Добавлять",
+      add: "Добавить",
+      addProvider: "Добавить {{provider}}",
       adding: "Добавление",
       installed: "Установлено",
       cancel: "Отмена",
       installInstructions: "Инструкции по установке",
       installInstructionsFor: "Инструкция по установке{{provider}}",
+    },
+    types: {
+      acp: "ACP",
     },
     errors: {
       unableToInstall: "Невозможно установить провайдера",

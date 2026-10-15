@@ -1436,13 +1436,18 @@ export const fr: TranslationResources = {
     title: "Ajouter un fournisseur",
     search: "Fournisseurs de recherche",
     noProviders: "Aucun fournisseur trouvé",
+    clearSearch: "Effacer la recherche",
     actions: {
       add: "Ajouter",
-      adding: "Ajout",
+      addProvider: "Ajouter {{provider}}",
+      adding: "Ajout…",
       installed: "Installé",
       cancel: "Annuler",
       installInstructions: "Instructions d'installation",
       installInstructionsFor: "Instructions d'installation{{provider}}",
+    },
+    types: {
+      acp: "ACP",
     },
     errors: {
       unableToInstall: "Impossible d'installer le fournisseur",
