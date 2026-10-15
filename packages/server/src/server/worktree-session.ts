@@ -15,6 +15,7 @@ import type { PersistedWorkspaceRecord } from "./workspace-registry.js";
 import type { WorkspaceGitService } from "./workspace-git-service.js";
 import {
   runAsyncWorktreeBootstrap,
+  runWorktreeAutoTerminals,
   applyWorktreeSetupProgressEvent,
   buildWorktreeSetupDetail,
   createWorktreeSetupProgressAccumulator,
@@ -728,18 +729,18 @@ export async function runWorktreeSetupInBackground(
       } else {
         const workspaceCwd = options.workspaceCwd ?? worktree.worktreePath;
         const setupCommands = await getWorktreeSetupCommands(workspaceCwd);
+        const runtimeEnv = await resolveWorktreeRuntimeEnv({
+          worktreePath: worktree.worktreePath,
+          branchName: worktree.branchName,
+          repoRootPath: options.repoRoot,
+        });
+        dependencies.terminalManager?.registerCwdEnv({
+          cwd: workspaceCwd,
+          env: runtimeEnv,
+        });
         if (setupCommands.length === 0) {
           emitSetupProgress("completed", null);
         } else {
-          const runtimeEnv = await resolveWorktreeRuntimeEnv({
-            worktreePath: worktree.worktreePath,
-            branchName: worktree.branchName,
-            repoRootPath: options.repoRoot,
-          });
-          dependencies.terminalManager?.registerCwdEnv({
-            cwd: workspaceCwd,
-            env: runtimeEnv,
-          });
           setupResults = await runWorktreeSetupCommands({
             worktreePath: workspaceCwd,
             branchName: worktree.branchName,
@@ -753,6 +754,14 @@ export async function runWorktreeSetupInBackground(
           });
           emitSetupProgress("completed", null);
         }
+        await runWorktreeAutoTerminals({
+          workspaceId,
+          worktree,
+          workspaceCwd,
+          runtimeEnv,
+          terminalManager: dependencies.terminalManager,
+          logger: dependencies.sessionLogger,
+        });
       }
     } catch (error) {
       if (error instanceof WorktreeSetupError) {
