@@ -202,24 +202,26 @@ function stripClaudeAskUserQuestionUiMetadata(input: AgentMetadata): AgentMetada
   };
 }
 
-export function normalizeClaudeAskUserQuestionUpdatedInput(
+/**
+ * The answers this response will actually deliver, keyed by full question text,
+ * or null when there is no question list and answers map to work from.
+ *
+ * Shared by the normalizer and by the check that rejects an undeliverable
+ * answer, so the two can never disagree about what "deliverable" means.
+ */
+function resolveClaudeAskUserQuestionAnswers(
   updatedInput: AgentMetadata | undefined,
   fallbackInput: AgentMetadata | undefined,
-): AgentMetadata {
+): Record<string, string> | null {
   const fallback = isMetadata(fallbackInput) ? fallbackInput : {};
   const base = isMetadata(updatedInput) ? updatedInput : {};
-  // JAgentDesk's shared question UI serializes answers by question header, but Claude's
-  // AskUserQuestion tool expects answer keys to match the full question text. Merge
-  // the original request payload back in so provider callbacks that only return
-  // `{ answers }` still satisfy Claude's full tool input schema.
-  const merged = stripClaudeAskUserQuestionUiMetadata({ ...fallback, ...base });
   const questions =
     (Array.isArray(base.questions) ? base.questions : null) ??
     (Array.isArray(fallback.questions) ? fallback.questions : null);
   const answers = isMetadata(base.answers) ? base.answers : null;
 
   if (!questions || !answers) {
-    return merged;
+    return null;
   }
 
   const normalizedAnswers: Record<string, string> = {};
@@ -243,7 +245,23 @@ export function normalizeClaudeAskUserQuestionUpdatedInput(
     }
   }
 
-  if (Object.keys(normalizedAnswers).length === 0) {
+  return normalizedAnswers;
+}
+
+export function normalizeClaudeAskUserQuestionUpdatedInput(
+  updatedInput: AgentMetadata | undefined,
+  fallbackInput: AgentMetadata | undefined,
+): AgentMetadata {
+  const fallback = isMetadata(fallbackInput) ? fallbackInput : {};
+  const base = isMetadata(updatedInput) ? updatedInput : {};
+  // JAgentDesk's shared question UI serializes answers by question header, but Claude's
+  // AskUserQuestion tool expects answer keys to match the full question text. Merge
+  // the original request payload back in so provider callbacks that only return
+  // `{ answers }` still satisfy Claude's full tool input schema.
+  const merged = stripClaudeAskUserQuestionUiMetadata({ ...fallback, ...base });
+  const normalizedAnswers = resolveClaudeAskUserQuestionAnswers(updatedInput, fallbackInput);
+
+  if (!normalizedAnswers || Object.keys(normalizedAnswers).length === 0) {
     return merged;
   }
 
@@ -251,6 +269,32 @@ export function normalizeClaudeAskUserQuestionUpdatedInput(
     ...merged,
     answers: normalizedAnswers,
   };
+}
+
+class ClaudeQuestionAnswerRequiredError extends Error {
+  readonly code = "question_answer_required" as const;
+
+  constructor(readonly requestId: string) {
+    super(
+      `Permission request '${requestId}' requires updatedInput.answers keyed by a ` +
+        `question's full text or header, with a non-empty string value. ` +
+        `The request is still pending; retry with that shape.`,
+    );
+    this.name = "ClaudeQuestionAnswerRequiredError";
+  }
+}
+
+function assertClaudeQuestionAnswerDeliverable(
+  request: AgentPermissionRequest,
+  response: AgentPermissionResponse,
+): void {
+  if (request.kind !== "question" || response.behavior !== "allow") {
+    return;
+  }
+  const answers = resolveClaudeAskUserQuestionAnswers(response.updatedInput, request.input);
+  if (!answers || Object.keys(answers).length === 0) {
+    throw new ClaudeQuestionAnswerRequiredError(request.id);
+  }
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
@@ -2698,6 +2742,12 @@ class ClaudeAgentSession implements AgentSession {
     if (!pending) {
       throw new Error(`No pending permission request with id '${requestId}'`);
     }
+
+    // Before the delete below, so a rejected answer leaves the request pending
+    // and answerable rather than consuming it for nothing. AgentManager only
+    // drops its own copy once this resolves, so both maps survive the throw.
+    assertClaudeQuestionAnswerDeliverable(pending.request, response);
+
     this.pendingPermissions.delete(requestId);
     pending.cleanup?.();
 
