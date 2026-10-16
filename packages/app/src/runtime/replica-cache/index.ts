@@ -195,6 +195,7 @@ function serializeWorkspace(workspace: WorkspaceDescriptor): WorkspaceDescriptor
     worktreeSlug: workspace.worktreeSlug,
     projectKind: workspace.projectKind,
     workspaceKind: workspace.workspaceKind,
+    background: workspace.background ?? false,
     name: workspace.name,
     title: workspace.title ?? null,
     pinnedAt: workspace.pinnedAt ?? null,
@@ -224,7 +225,11 @@ function serializeProject(project: ProjectDescriptor) {
 
 function deserializeHost(stored: StoredHost): SessionReplica {
   const agents = stored.agents.map((entry) => deserializeAgent(stored.serverId, entry));
-  const workspaces = stored.workspaces.map(normalizeWorkspaceDescriptor);
+  // Older rows lost visibility metadata. Keep agent/timeline cache data while
+  // the ordinary directory refresh fetches authoritative workspace descriptors.
+  const workspaces = stored.workspaces
+    .filter((workspace) => workspace.background !== undefined)
+    .map(normalizeWorkspaceDescriptor);
   const listedProjects = stored.projects.map(normalizeProjectDescriptor);
   const legacyProjects = [
     ...stored.emptyProjects.map(normalizeProjectDescriptor),

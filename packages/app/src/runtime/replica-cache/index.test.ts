@@ -160,6 +160,51 @@ afterEach(() => {
 });
 
 describe("ReplicaCache", () => {
+  it.each([true, false, undefined])(
+    "retains cached workspace background visibility (%s)",
+    async (background) => {
+      const storage = new MemoryStorage();
+      const writer = new ReplicaCache(storage);
+      writer.setHosts([SERVER_ID]);
+      seedSession();
+      useSessionStore
+        .getState()
+        .setWorkspaces(
+          SERVER_ID,
+          new Map([["workspace-1", normalizeWorkspaceDescriptor({ ...workspace(), background })]]),
+        );
+      await writer.flush();
+      useSessionStore.getState().clearSession(SERVER_ID);
+      const reader = new ReplicaCache(storage);
+      reader.setHosts([SERVER_ID]);
+      await reader.restore();
+      expect(
+        useSessionStore.getState().sessions[SERVER_ID]?.workspaces.get("workspace-1")?.background,
+      ).toBe(background ?? false);
+    },
+  );
+
+  it("refreshes workspaces cached without visibility metadata while preserving agents and timeline", async () => {
+    const storage = new MemoryStorage();
+    const writer = new ReplicaCache(storage);
+    writer.setHosts([SERVER_ID]);
+    seedSession();
+    await writer.flush();
+    const key = "@jagentdesk:replica-cache";
+    const raw = storage.values.get(key);
+    if (!raw) throw new Error("Expected persisted replica");
+    storage.values.set(key, raw.replace(/"background":false,/, ""));
+    useSessionStore.getState().clearSession(SERVER_ID);
+    const reader = new ReplicaCache(storage);
+    reader.setHosts([SERVER_ID]);
+    await reader.restore();
+    const session = useSessionStore.getState().sessions[SERVER_ID];
+    expect(session.workspaces.size).toBe(0);
+    expect(session.hasHydratedWorkspaces).toBe(false);
+    expect([...session.agents.keys()]).toEqual(["agent-1"]);
+    expect(session.agentStreamTail.get("agent-1")).toEqual([message("message-1", "Cached")]);
+  });
+
   it("restores a displayable stale replica without claiming remote hydration", async () => {
     const storage = new MemoryStorage();
     const writer = new ReplicaCache(storage);
