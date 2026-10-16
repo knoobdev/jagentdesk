@@ -258,11 +258,37 @@ function legacyProjectDescriptorFromWorkspace(workspace: WorkspaceDescriptor): P
   };
 }
 
+interface ReplicaRead {
+  serverId: string;
+  kinds: readonly ReplicaRowKind[];
+  ids?: readonly string[];
+  invalidated: boolean;
+}
+
+function matchesReplicaRead(read: ReplicaRead, row: ReplicaRowKey): boolean {
+  return (
+    read.serverId === row.serverId &&
+    read.kinds.includes(row.kind) &&
+    (!read.ids || read.ids.includes(row.id))
+  );
+}
+
 export class ReplicaCache {
   private readonly activeServerIds = new Set<string>();
+<<<<<<< HEAD
   private readonly storedHosts = new Map<string, StoredHost>();
   private readonly lastFocusedAgentIds = new Map<string, string>();
   private readonly capturedSessions = new Map<string, SessionState>();
+=======
+  private readonly activeReads = new Set<ReplicaRead>();
+  private readonly storedRows = new Map<string, Map<string, ReplicaRow>>();
+  private readonly hostBytes = new Map<string, number>();
+  private readonly hostWriteOrder = new Map<string, true>();
+  private pendingUpserts = new Map<string, StructuredReplicaUpsert>();
+  private pendingDeletes = new Map<string, ReplicaRowKey>();
+  private pendingBaselines = new Set<string>();
+  private readonly invalidatedHosts = new Set<string>();
+>>>>>>> Read cached chats while other agents stream (#7074)
   private readonly maxBytes: number;
   private needsPersist = false;
   private unsubscribe: (() => void) | null = null;
@@ -316,7 +342,34 @@ export class ReplicaCache {
     if (!raw) return;
     let parsed: unknown;
     try {
+<<<<<<< HEAD
       parsed = JSON.parse(raw);
+=======
+      await this.prepareStore();
+      while (this.activeServerIds.has(serverId)) {
+        // A read may only answer from rows the store already holds, so it waits for this host's
+        // accepted commits to land. A store that rejects them will keep rejecting them: fail closed
+        // rather than re-attempt the write on every pass. A write rejected for another host leaves
+        // this host's stored rows readable.
+        const read: ReplicaRead = { serverId, kinds, ids, invalidated: false };
+        this.activeReads.add(read);
+        try {
+          if (!(await this.syncPending()) && this.hasPendingHostChanges(serverId)) return [];
+          if (read.invalidated || this.hasPendingReadChanges(read)) continue;
+          const rows = await this.rowStore.read(serverId, kinds, ids);
+          if (
+            this.activeServerIds.has(serverId) &&
+            !read.invalidated &&
+            !this.hasPendingReadChanges(read)
+          ) {
+            return rows;
+          }
+        } finally {
+          this.activeReads.delete(read);
+        }
+      }
+      return [];
+>>>>>>> Read cached chats while other agents stream (#7074)
     } catch {
       return;
     }
@@ -339,6 +392,7 @@ export class ReplicaCache {
     }
   }
 
+<<<<<<< HEAD
   start(): void {
     if (this.unsubscribe) return;
     this.unsubscribe = useSessionStore.subscribe((state) => {
@@ -346,17 +400,55 @@ export class ReplicaCache {
       for (const serverId of this.activeServerIds) {
         const focusedAgentId = state.sessions[serverId]?.focusedAgentId;
         if (focusedAgentId) this.lastFocusedAgentIds.set(serverId, focusedAgentId);
+=======
+  commitDirectoryMutations(
+    serverId: string,
+    mutations: readonly DirectoryReplicaMutation[],
+    checkpoint?: DirectoryCheckpoint,
+  ): void {
+    if (!this.activeServerIds.has(serverId)) return;
+    if (this.invalidatedHosts.has(serverId)) return;
+    for (const mutation of mutations) {
+      if (mutation.type === "delete") {
+        this.queueEntityDelete(serverId, mutation.kind, mutation.id);
+      } else {
+        this.queueUpsert({
+          serverId,
+          kind: mutation.kind,
+          id: mutation.id,
+          value: mutation.value,
+        } as StructuredReplicaUpsert);
+>>>>>>> Read cached chats while other agents stream (#7074)
       }
       this.schedulePersist();
     });
     if (this.needsPersist) this.schedulePersist();
   }
 
+<<<<<<< HEAD
   reconcileServerId(oldServerId: string, newServerId: string): void {
     const stored = this.storedHosts.get(oldServerId);
     if (stored) {
       this.storedHosts.delete(oldServerId);
       this.storedHosts.set(newServerId, { ...stored, serverId: newServerId });
+=======
+  replaceDirectoryBaseline(serverId: string, directory: CachedDirectory): void {
+    if (!this.activeServerIds.has(serverId)) return;
+    this.invalidateHostReads(serverId, ["agent", "workspace", "project", "checkpoint"]);
+    // Replacing the directory must not discard independently accepted timeline changes.
+    for (const [key, row] of this.pendingUpserts) {
+      if (row.serverId === serverId && row.kind !== "timeline") this.pendingUpserts.delete(key);
+    }
+    for (const [key, row] of this.pendingDeletes) {
+      if (row.serverId === serverId && row.kind !== "timeline") this.pendingDeletes.delete(key);
+    }
+    this.pendingBaselines.add(serverId);
+    for (const [id, value] of directory.agents) {
+      this.queueUpsert({ serverId, kind: "agent", id, value });
+    }
+    for (const [id, value] of directory.workspaces) {
+      this.queueUpsert({ serverId, kind: "workspace", id, value });
+>>>>>>> Read cached chats while other agents stream (#7074)
     }
     const focusedAgentId = this.lastFocusedAgentIds.get(oldServerId);
     if (focusedAgentId) {
@@ -373,6 +465,7 @@ export class ReplicaCache {
     this.schedulePersist();
   }
 
+<<<<<<< HEAD
   /**
    * Rewrite the agent ids inside a host's cached snapshot after a migration
    * assigned new ids on the target daemon (idMap: oldAgentId -> newAgentId). Keeps
@@ -398,6 +491,47 @@ export class ReplicaCache {
     const focusedAgentId = this.lastFocusedAgentIds.get(serverId);
     if (focusedAgentId) {
       this.lastFocusedAgentIds.set(serverId, remap(focusedAgentId));
+=======
+  commitTimeline(serverId: string, agentId: string, timeline: CachedTimeline): void {
+    if (!this.activeServerIds.has(serverId)) return;
+    if (timeline.agentId !== agentId) throw new Error("Timeline cache key does not match payload");
+    this.queueUpsert({ serverId, kind: "timeline", id: agentId, value: timeline });
+    this.schedulePersist();
+  }
+
+  setHosts(serverIds: Iterable<string>): void {
+    const next = new Set(serverIds);
+    const removed = [...this.activeServerIds].filter((serverId) => !next.has(serverId));
+    const added = [...next].filter((serverId) => !this.activeServerIds.has(serverId));
+    for (const serverId of [...removed, ...added]) this.invalidateHostReads(serverId);
+    this.activeServerIds.clear();
+    for (const serverId of next) this.activeServerIds.add(serverId);
+    for (const serverId of removed) {
+      this.removeStoredHost(serverId);
+      this.dropPendingHostChanges(serverId);
+      this.invalidatedHosts.delete(serverId);
+      this.queueOperation(() => this.rowStore.deleteHost(serverId));
+    }
+  }
+
+  reconcileServerId(oldServerId: string, newServerId: string): void {
+    this.invalidateHostReads(oldServerId);
+    this.invalidateHostReads(newServerId);
+    const rows = this.storedRows.get(oldServerId);
+    if (rows) {
+      const newRows = this.storedRows.get(newServerId) ?? new Map<string, ReplicaRow>();
+      this.totalBytes -=
+        (this.hostBytes.get(oldServerId) ?? 0) + (this.hostBytes.get(newServerId) ?? 0);
+      this.storedRows.delete(oldServerId);
+      for (const [key, row] of rows) newRows.set(key, { ...row, serverId: newServerId });
+      this.storedRows.set(newServerId, newRows);
+      const bytes = [...newRows.values()].reduce((sum, row) => sum + rowBytes(row), 0);
+      this.hostBytes.delete(oldServerId);
+      this.hostBytes.set(newServerId, bytes);
+      this.totalBytes += bytes;
+      this.hostWriteOrder.delete(oldServerId);
+      this.touchHost(newServerId);
+>>>>>>> Read cached chats while other agents stream (#7074)
     }
     this.needsPersist = true;
     this.schedulePersist();
@@ -413,6 +547,7 @@ export class ReplicaCache {
     this.needsPersist = false;
     const write = this.writeQueue
       .catch(() => undefined)
+<<<<<<< HEAD
       .then(() => this.storage.setItem(STORAGE_KEY, payload));
     this.writeQueue = write;
     await write.catch(() => undefined);
@@ -427,6 +562,197 @@ export class ReplicaCache {
       this.capturedSessions.set(serverId, session);
       if (session.focusedAgentId) {
         this.lastFocusedAgentIds.set(serverId, session.focusedAgentId);
+=======
+      .then(async () => {
+        const pending = this.drainPendingChanges();
+        try {
+          await this.prepareStore();
+          await this.ensureStoredIndex();
+          const changes = this.materializePendingChanges(pending);
+          const { changes: boundedChanges, evicted } = await this.fitChangesToBudget(changes);
+          if (boundedChanges.upserts.length > 0 || boundedChanges.deletes.length > 0) {
+            await this.rowStore.apply(boundedChanges);
+            this.applyStoredChanges(boundedChanges);
+          }
+          for (const serverId of pending.baselines) {
+            if (!evicted.has(serverId)) this.invalidatedHosts.delete(serverId);
+          }
+        } catch {
+          this.restorePendingChanges(pending);
+          if (this.hasPendingChanges()) this.schedulePersist();
+          return false;
+        }
+        return true;
+      });
+    // The queue only sequences writes; every consumer decides for itself what a failure means.
+    this.writeQueue = write.then(
+      () => undefined,
+      () => undefined,
+    );
+    return write;
+  }
+
+  private queueEntityDelete(serverId: string, kind: ReplicaRowKind, id: string): void {
+    this.queueDelete({ serverId, kind, id });
+  }
+
+  private queueUpsert(row: StructuredReplicaUpsert): void {
+    this.invalidateRowReads(row);
+    const key = pendingRowKey(row);
+    this.pendingDeletes.delete(key);
+    this.pendingUpserts.set(key, row);
+  }
+
+  private queueDelete(key: ReplicaRowKey): void {
+    this.invalidateRowReads(key);
+    const pendingKey = pendingRowKey(key);
+    this.pendingUpserts.delete(pendingKey);
+    this.pendingDeletes.set(pendingKey, key);
+  }
+
+  private hasPendingChanges(): boolean {
+    return (
+      this.pendingUpserts.size > 0 || this.pendingDeletes.size > 0 || this.pendingBaselines.size > 0
+    );
+  }
+
+  private hasPendingReadChanges(read: ReplicaRead): boolean {
+    if (
+      this.pendingBaselines.has(read.serverId) &&
+      read.kinds.some((kind) => kind !== "timeline")
+    ) {
+      return true;
+    }
+    return (
+      [...this.pendingUpserts.values()].some((row) => matchesReplicaRead(read, row)) ||
+      [...this.pendingDeletes.values()].some((row) => matchesReplicaRead(read, row))
+    );
+  }
+
+  private invalidateRowReads(row: ReplicaRowKey): void {
+    for (const read of this.activeReads) {
+      if (matchesReplicaRead(read, row)) read.invalidated = true;
+    }
+  }
+
+  private invalidateHostReads(serverId: string, kinds?: readonly ReplicaRowKind[]): void {
+    for (const read of this.activeReads) {
+      if (
+        read.serverId === serverId &&
+        (!kinds || kinds.some((kind) => read.kinds.includes(kind)))
+      ) {
+        read.invalidated = true;
+      }
+    }
+  }
+
+  private hasPendingHostChanges(serverId: string): boolean {
+    if (this.pendingBaselines.has(serverId)) return true;
+    for (const row of this.pendingUpserts.values()) {
+      if (row.serverId === serverId) return true;
+    }
+    for (const row of this.pendingDeletes.values()) {
+      if (row.serverId === serverId) return true;
+    }
+    return false;
+  }
+
+  private drainPendingChanges(): PendingReplicaChanges {
+    const changes = {
+      upserts: [...this.pendingUpserts.values()],
+      deletes: [...this.pendingDeletes.values()],
+      baselines: this.pendingBaselines,
+    };
+    this.pendingUpserts = new Map();
+    this.pendingDeletes = new Map();
+    this.pendingBaselines = new Set();
+    return changes;
+  }
+
+  private materializePendingChanges(pending: PendingReplicaChanges): ReplicaRowChanges {
+    const deletes = new Map(pending.deletes.map((row) => [pendingRowKey(row), row]));
+    const upserts: ReplicaRow[] = [];
+    for (const upsert of pending.upserts) {
+      const row = this.materializeUpsert(upsert);
+      if (row) upserts.push(row);
+      else deletes.set(pendingRowKey(upsert), upsert);
+    }
+    for (const serverId of pending.baselines) {
+      const replacementKeys = new Set(
+        upserts.filter((row) => row.serverId === serverId && row.kind !== "timeline").map(rowKey),
+      );
+      for (const row of this.storedRows.get(serverId)?.values() ?? []) {
+        if (row.kind !== "timeline" && !replacementKeys.has(rowKey(row))) {
+          deletes.set(pendingRowKey(row), row);
+        }
+      }
+    }
+    return { upserts, deletes: [...deletes.values()] };
+  }
+
+  private materializeUpsert(upsert: StructuredReplicaUpsert): ReplicaRow | null {
+    let value: unknown;
+    switch (upsert.kind) {
+      case "agent":
+        value = serializeAgent(upsert.value);
+        break;
+      case "workspace":
+        value = serializeWorkspace(upsert.value);
+        break;
+      case "project":
+        value = serializeProject(upsert.value);
+        break;
+      case "timeline":
+        value = serializeTimeline(upsert.value);
+        if (!value) return null;
+        break;
+      case "checkpoint":
+        value = serializeDirectoryCheckpoint(upsert.value);
+        break;
+    }
+    return {
+      serverId: upsert.serverId,
+      kind: upsert.kind,
+      id: upsert.id,
+      payload: JSON.stringify(value),
+    };
+  }
+
+  private restorePendingChanges(changes: PendingReplicaChanges): void {
+    for (const serverId of changes.baselines) {
+      if (this.activeServerIds.has(serverId)) this.pendingBaselines.add(serverId);
+    }
+    for (const key of changes.deletes) {
+      const pendingKey = pendingRowKey(key);
+      if (
+        this.activeServerIds.has(key.serverId) &&
+        !this.pendingUpserts.has(pendingKey) &&
+        !this.pendingDeletes.has(pendingKey)
+      ) {
+        this.queueDelete(key);
+      }
+    }
+    for (const row of changes.upserts) {
+      const pendingKey = pendingRowKey(row);
+      if (
+        this.activeServerIds.has(row.serverId) &&
+        !this.pendingUpserts.has(pendingKey) &&
+        !this.pendingDeletes.has(pendingKey)
+      ) {
+        this.queueUpsert(row);
+      }
+    }
+  }
+
+  private applyStoredChanges(changes: ReplicaRowChanges): void {
+    const touchedServerIds = new Set<string>();
+    for (const key of changes.deletes) {
+      const rows = this.storedRows.get(key.serverId);
+      const previous = rows?.get(rowKey(key));
+      if (previous) {
+        rows?.delete(rowKey(key));
+        this.adjustHostBytes(key.serverId, -rowBytes(previous));
+>>>>>>> Read cached chats while other agents stream (#7074)
       }
       const focusedAgentId = this.lastFocusedAgentIds.get(serverId) ?? null;
       const focusedAgent = focusedAgentId ? session.agents.get(focusedAgentId) : undefined;
