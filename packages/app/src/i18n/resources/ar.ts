@@ -731,6 +731,7 @@ export const ar: TranslationResources = {
     },
     header: {
       actions: {
+        workspaceActionsUnhealthy: "إجراءات Workspace، توجد خدمة غير سليمة",
         workspaceActions: "إجراءات Workspace",
         newAgent: "وكيل جديد",
         newTerminal: "محطة جديدة",
@@ -776,6 +777,8 @@ export const ar: TranslationResources = {
         direct: "مباشر",
       },
       states: {
+        runningCount: "{{count}} قيد التشغيل",
+        running: "جري",
         exitCode: "الخروج من{{code}}",
         startFailed: "فشل بدء تشغيل{{scriptName}}",
         stopFailed: "فشل إيقاف{{scriptName}}",

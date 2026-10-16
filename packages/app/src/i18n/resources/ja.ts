@@ -723,6 +723,7 @@ export const ja: TranslationResources = {
     },
     header: {
       actions: {
+        workspaceActionsUnhealthy: "ワークスペースアクション、異常なサービスがあります",
         workspaceActions: "ワークスペースアクション",
         newAgent: "新しいエージェント",
         newTerminal: "新しいターミナル",
@@ -768,6 +769,7 @@ export const ja: TranslationResources = {
         direct: "直接接続",
       },
       states: {
+        runningCount: "{{count}} 件実行中",
         exitCode: "終了コード: {{code}}",
         startFailed: "{{scriptName}}の起動に失敗しました",
         stopFailed: "{{scriptName}}の停止に失敗しました",

@@ -52,6 +52,13 @@ const controlHeights = {
   field: FIELD_CONTROL_HEIGHT,
 };
 
+export const buttonControlHeight: Record<ButtonControlSize, number> = {
+  xs: TIGHT_CONTROL_HEIGHT,
+  sm: COMPACT_CONTROL_HEIGHT,
+  md: FIELD_CONTROL_HEIGHT,
+  lg: FIELD_CONTROL_HEIGHT,
+};
+
 export const buttonIconSize: Record<ButtonControlSize, number> = {
   xs: ICON_SIZE.xs,
   sm: ICON_SIZE.sm,

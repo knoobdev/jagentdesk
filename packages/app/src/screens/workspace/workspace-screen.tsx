@@ -1,3 +1,5 @@
+import { Button } from "@/components/ui/button";
+import { CompactWorkspaceActions } from "./compact-workspace-actions";
 import { ensurePanelsRegistered } from "@/panels/register-panels";
 import { revealWorkspaceTab } from "@/workspace-tabs/navigation";
 import { SheetTabs } from "./sheet-tabs";
@@ -467,6 +469,10 @@ function getFallbackTabOptionDescription(
 }
 
 interface MobileWorkspaceTabSwitcherProps {
+  onCreateDraftTab: () => void;
+  onCreateTerminal: () => void;
+  createTerminalDisabled: boolean;
+  trailingContent: ReactNode;
   tabs: WorkspaceTabDescriptor[];
   activeTabKey: string;
   activeTab: WorkspaceTabDescriptor | null;
@@ -777,6 +783,10 @@ function MobileWorkspaceTabOption({
 }
 
 const MobileWorkspaceTabSwitcher = memo(function MobileWorkspaceTabSwitcher({
+  onCreateDraftTab,
+  onCreateTerminal,
+  createTerminalDisabled,
+  trailingContent,
   tabs,
   activeTabKey,
   activeTab,
@@ -811,6 +821,43 @@ const MobileWorkspaceTabSwitcher = memo(function MobileWorkspaceTabSwitcher({
     Keyboard.dismiss();
     setIsOpen(true);
   }, []);
+
+  const handleNewAgent = useCallback(() => {
+    setIsOpen(false);
+    onCreateDraftTab();
+  }, [onCreateDraftTab]);
+
+  const handleNewTerminal = useCallback(() => {
+    setIsOpen(false);
+    onCreateTerminal();
+  }, [onCreateTerminal]);
+
+  const footer = useMemo(
+    () => (
+      <View style={styles.tabSwitcherFooter}>
+        <Button
+          testID="workspace-tab-switcher-new-agent"
+          style={styles.tabSwitcherFooterButton}
+          variant="secondary"
+          leftIcon={SquarePen}
+          onPress={handleNewAgent}
+        >
+          {t("workspace.header.actions.newAgent")}
+        </Button>
+        <Button
+          testID="workspace-tab-switcher-new-terminal"
+          style={styles.tabSwitcherFooterButton}
+          variant="secondary"
+          leftIcon={SquareTerminal}
+          disabled={createTerminalDisabled}
+          onPress={handleNewTerminal}
+        >
+          {t("workspace.header.actions.newTerminal")}
+        </Button>
+      </View>
+    ),
+    [createTerminalDisabled, handleNewAgent, handleNewTerminal, t],
+  );
 
   const renderTabOption = useCallback(
     ({
@@ -894,6 +941,7 @@ const MobileWorkspaceTabSwitcher = memo(function MobileWorkspaceTabSwitcher({
         <ThemedChevronDown size={14} uniProps={mutedColorMapping} />
       </Pressable>
 
+      {trailingContent}
       <Combobox
         options={tabSwitcherOptions}
         value={activeTabKey}
@@ -905,6 +953,7 @@ const MobileWorkspaceTabSwitcher = memo(function MobileWorkspaceTabSwitcher({
         onOpenChange={setIsOpen}
         anchorRef={anchorRef}
         renderOption={renderTabOption}
+        footer={footer}
       />
     </View>
   );
@@ -4280,6 +4329,36 @@ function WorkspaceScreenContent({
         : null,
     [persistenceKey, normalizedServerId, normalizedWorkspaceId, isRouteFocused, buildSheetContent],
   );
+  const compactWorkspaceActions = useMemo(
+    () => (
+      <CompactWorkspaceActions
+        serverId={normalizedServerId}
+        workspaceId={normalizedWorkspaceId}
+        scripts={workspaceScripts}
+        liveTerminalIds={liveTerminalIds}
+        onScriptTerminalStarted={handleScriptTerminalStarted}
+        onViewTerminal={handleViewScriptTerminal}
+        onOpenUrlInBrowserTab={handleOpenUrlInBrowserTab}
+        onImport={openImportSheet}
+        importDisabled={!canOpenImportSheet}
+        onCopyPath={handleCopyWorkspacePath}
+        copyPathDisabled={!workspaceDirectory}
+      />
+    ),
+    [
+      normalizedServerId,
+      normalizedWorkspaceId,
+      workspaceScripts,
+      liveTerminalIds,
+      handleScriptTerminalStarted,
+      handleViewScriptTerminal,
+      handleOpenUrlInBrowserTab,
+      openImportSheet,
+      canOpenImportSheet,
+      handleCopyWorkspacePath,
+      workspaceDirectory,
+    ],
+  );
   const gumloopHeaderTitle = useMemo(
     () => (
       <GumloopChatTitle
@@ -4349,6 +4428,10 @@ function WorkspaceScreenContent({
             />
           ) : null}
           <MobileWorkspaceTabSwitcher
+            onCreateDraftTab={handleCreateDraftTab}
+            onCreateTerminal={handleCreateTerminal}
+            createTerminalDisabled={createTerminalDisabled}
+            trailingContent={compactWorkspaceActions}
             tabs={tabs}
             activeTabKey={activeTabKey}
             activeTab={activeTabDescriptor}
@@ -4466,6 +4549,13 @@ function WorkspaceScreenContent({
 }
 
 const styles = StyleSheet.create((theme) => ({
+  tabSwitcherFooter: {
+    flexDirection: "row",
+    gap: theme.spacing[3],
+    paddingHorizontal: theme.spacing[6],
+    paddingVertical: theme.spacing[3],
+  },
+  tabSwitcherFooterButton: { flex: 1 },
   container: {
     flex: 1,
     backgroundColor: theme.colors.surface0,
@@ -4661,6 +4751,7 @@ const styles = StyleSheet.create((theme) => ({
   },
   explorerTooltipShortcut: {},
   mobileTabsRow: {
+    minHeight: 44,
     backgroundColor: theme.colors.surface0,
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,

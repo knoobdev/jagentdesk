@@ -707,6 +707,7 @@ export const en = {
     },
     header: {
       actions: {
+        workspaceActionsUnhealthy: "Workspace actions, a service is unhealthy",
         workspaceActions: "Workspace actions",
         newAgent: "New agent",
         newTerminal: "New terminal",
@@ -752,6 +753,8 @@ export const en = {
         direct: "Direct",
       },
       states: {
+        runningCount: "{{count}} running",
+        running: "Running",
         exitCode: "exit {{code}}",
         startFailed: "Failed to start {{scriptName}}",
         stopFailed: "Failed to stop {{scriptName}}",

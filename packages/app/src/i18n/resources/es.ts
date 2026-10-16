@@ -721,6 +721,7 @@ export const es: TranslationResources = {
     },
     header: {
       actions: {
+        workspaceActionsUnhealthy: "Acciones del workspace, hay un servicio con problemas",
         workspaceActions: "AccionesWorkspace",
         newAgent: "Nuevo agente",
         newTerminal: "Nueva terminal",
@@ -767,6 +768,8 @@ export const es: TranslationResources = {
         direct: "Directa",
       },
       states: {
+        runningCount: "{{count}} en ejecución",
+        running: "Correr",
         exitCode: "salir de{{code}}",
         startFailed: "No se pudo iniciar{{scriptName}}",
         stopFailed: "No se pudo detener{{scriptName}}",

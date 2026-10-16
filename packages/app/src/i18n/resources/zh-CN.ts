@@ -709,6 +709,7 @@ export const zhCN: TranslationResources = {
     },
     header: {
       actions: {
+        workspaceActionsUnhealthy: "Workspace 操作，有服务异常",
         workspaceActions: "Workspace 操作",
         newAgent: "新建 Agent",
         newTerminal: "新建 Terminal",
@@ -754,6 +755,8 @@ export const zhCN: TranslationResources = {
         direct: "直接地址",
       },
       states: {
+        runningCount: "{{count}} 个运行中",
+        running: "正在运行",
         exitCode: "exit {{code}}",
         startFailed: "启动 {{scriptName}} 失败",
         stopFailed: "停止 {{scriptName}} 失败",

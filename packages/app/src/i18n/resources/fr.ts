@@ -773,6 +773,8 @@ export const fr: TranslationResources = {
         direct: "Directe",
       },
       states: {
+        runningCount: "{{count}} en cours",
+        running: "En cours",
         exitCode: "sortie {{code}}",
         startFailed: "Impossible de d\u00E9marrer {{scriptName}}",
         stopFailed: "Impossible d\u2019arr\u00EAter {{scriptName}}",

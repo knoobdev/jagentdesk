@@ -745,6 +745,7 @@ export const ru: TranslationResources = {
     },
     header: {
       actions: {
+        workspaceActionsUnhealthy: "Действия с рабочим пространством, есть неисправный сервис",
         workspaceActions: "Действия Workspace",
         newAgent: "Новый агент",
         newTerminal: "Новый терминал",
@@ -790,6 +791,8 @@ export const ru: TranslationResources = {
         direct: "Прямой адрес",
       },
       states: {
+        runningCount: "Запущено: {{count}}",
+        running: "Выполняется",
         exitCode: "выйти из{{code}}",
         startFailed: "Не удалось запустить{{scriptName}}",
         stopFailed: "Не удалось остановить{{scriptName}}",

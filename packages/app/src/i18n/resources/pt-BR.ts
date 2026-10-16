@@ -717,6 +717,7 @@ export const ptBR: TranslationResources = {
     },
     header: {
       actions: {
+        workspaceActionsUnhealthy: "Ações do workspace, há um serviço com problema",
         workspaceActions: "Ações do workspace",
         newAgent: "Novo agente",
         newTerminal: "Novo terminal",
@@ -762,6 +763,8 @@ export const ptBR: TranslationResources = {
         direct: "Direta",
       },
       states: {
+        runningCount: "{{count}} em execução",
+        running: "Em execução",
         exitCode: "saída {{code}}",
         startFailed: "Falha ao iniciar {{scriptName}}",
         stopFailed: "Falha ao parar {{scriptName}}",

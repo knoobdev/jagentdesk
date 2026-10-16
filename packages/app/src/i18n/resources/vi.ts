@@ -920,6 +920,12 @@ export const vi = {
   },
   message: { turnFooter: { workedFor: "Worked for {{duration}}" } },
   workspace: {
+    header: {
+      actions: {
+        workspaceActionsUnhealthy: "Hành động không gian làm việc, một dịch vụ không ổn định",
+      },
+    },
+    scripts: { states: { running: "Đang chạy", runningCount: "{{count}} đang chạy" } },
     git: {
       pr: {
         checksOverview: {
