@@ -3,8 +3,10 @@ import { keyboardEventToComboString } from "./shortcut-string";
 import {
   buildKeyboardShortcutHelpSections,
   buildEffectiveBindings,
+  normalizeCapturedShortcutCombo,
   getBindingIdForAction,
   getWorkspaceIndexJumpModifierKey,
+  resolveShortcutKeysForAction,
   resolveKeyboardShortcut,
   type ChordState,
   type KeyboardShortcutContext,
@@ -867,5 +869,47 @@ describe("getWorkspaceIndexJumpModifierKey", () => {
 
   it("uses Ctrl on desktop non-Mac, not Meta or Alt", () => {
     expect(getWorkspaceIndexJumpModifierKey({ isMac: false, isDesktop: true })).toBe("Control");
+  });
+});
+
+describe("number-group shortcut capture", () => {
+  const tabBindingId = "workspace-tab-navigate-index-cmd-alt-digit-mac-desktop";
+  it.each([
+    { id: tabBindingId, action: "workspace.tab.navigate.index", row: "workspace-tab-jump-index" },
+    {
+      id: "workspace-navigate-index-cmd-digit-mac",
+      action: "workspace.navigate.index",
+      row: "workspace-jump-index",
+    },
+  ])("captures Ctrl+1 as the entire number group for $row", ({ id, action, row }) => {
+    const combo = normalizeCapturedShortcutCombo(id, "Ctrl+1");
+    expect(combo).toBe("Ctrl+Digit");
+    const overrides = { [id]: combo };
+    const bindings = buildEffectiveBindings(overrides);
+    for (let index = 1; index <= 9; index++) {
+      const result = resolveShortcut({
+        event: { key: String(index), code: `Digit${index}`, ctrlKey: true },
+        context: { isMac: true, isDesktop: true, focusScope: "message-input" },
+        bindings,
+      });
+      expect(result.match?.action).toBe(action);
+      expect(result.match?.payload).toEqual({ index });
+    }
+    expect(resolveShortcutKeysForAction(row, overrides, { isMac: true, isDesktop: true })).toEqual([
+      ["ctrl", "1-9"],
+    ]);
+    expect(
+      resolveShortcut({
+        event: { key: "0", code: "Digit0", ctrlKey: true },
+        context: { isMac: true, isDesktop: true },
+        bindings,
+      }).match,
+    ).toBeNull();
+  });
+  it("preserves literal numbers for non-index actions and existing nonnumeric combos", () => {
+    expect(normalizeCapturedShortcutCombo("show-shortcuts", "Ctrl+1")).toBe("Ctrl+1");
+    expect(normalizeCapturedShortcutCombo(tabBindingId, "Ctrl+K")).toBe("Ctrl+K");
+    expect(normalizeCapturedShortcutCombo(tabBindingId, "Ctrl+0")).toBe("Ctrl+0");
+    expect(normalizeCapturedShortcutCombo(tabBindingId, "Ctrl+9")).toBe("Ctrl+Digit");
   });
 });

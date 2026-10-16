@@ -11,6 +11,7 @@ import { useKeyboardShortcutOverrides } from "@/hooks/use-keyboard-shortcut-over
 import {
   buildKeyboardShortcutHelpSections,
   getBindingIdForAction,
+  normalizeCapturedShortcutCombo,
   type KeyboardShortcutHelpRow,
 } from "@/keyboard/keyboard-shortcuts";
 import {
@@ -228,7 +229,8 @@ export function KeyboardShortcutsSection() {
       }
 
       setHeldModifiers(null);
-      setCapturedCombos((current) => [...current, comboString]);
+      const capturedCombo = normalizeCapturedShortcutCombo(capturingBindingId!, comboString);
+      setCapturedCombos((current) => [...current, capturedCombo]);
     }
 
     window.addEventListener("keydown", handleKeyDown, true);

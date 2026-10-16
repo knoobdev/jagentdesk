@@ -177,6 +177,14 @@ const MODIFIER_CODES = new Set([
   "ShiftRight",
 ]);
 
+/**
+ * Combo strings spell the workspace-index wildcard as `Digit`; the settings UI
+ * shows it as the `1-9` token its default help rows already use.
+ */
+const DISPLAY_KEY_ALIASES: Record<string, string> = {
+  Digit: "1-9",
+};
+
 export function comboStringToShortcutKeys(comboString: string): ShortcutKey[] {
   const parts = comboString.split("+");
   const keys: ShortcutKey[] = [];
@@ -195,7 +203,7 @@ export function comboStringToShortcutKeys(comboString: string): ShortcutKey[] {
         keys.push("shift");
         break;
       default:
-        keys.push(part.toUpperCase());
+        keys.push((DISPLAY_KEY_ALIASES[part] ?? part).toUpperCase());
         break;
     }
   }
