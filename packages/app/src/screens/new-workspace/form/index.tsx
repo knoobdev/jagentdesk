@@ -344,6 +344,8 @@ export function useNewWorkspaceForm(props: NewWorkspaceFormProps): ReactElement 
         {/* Isolation and Base come and go with the project; their rows stay reserved so the
             stack keeps one height and nothing above the composer jumps. */}
 
+        {isolationField ? null : <View style={styles.reservedField} pointerEvents="none" />}
+        {baseField ? null : <View style={styles.reservedField} pointerEvents="none" />}
         {pickers}
       </View>
     );
@@ -364,10 +366,9 @@ export function useNewWorkspaceForm(props: NewWorkspaceFormProps): ReactElement 
 }
 
 const styles = StyleSheet.create((theme) => ({
-  compactCell: { width: "48%", flexGrow: 1 },
+  compactCell: { width: "100%" },
   compactStack: {
-    flexDirection: "row",
-    flexWrap: "wrap",
+    flexDirection: "column",
     marginBottom: theme.spacing[4],
     paddingHorizontal: theme.spacing[4],
     gap: theme.spacing[2],
