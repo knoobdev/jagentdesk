@@ -362,4 +362,4 @@ function hasUsableTableColumnContract(table: Element): boolean {
       (row) => row.children.length <= headerWidth,
     )
   );
-}
+}}

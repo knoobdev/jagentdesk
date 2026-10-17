@@ -159,6 +159,196 @@ describe("DirectorySync session readiness", () => {
     directory.dispose();
   });
 
+  it("merges project changes from the existing list RPC and advances its cursor", async () => {
+    const serverId = "project-list-sequence";
+    serverIds.add(serverId);
+    const client = new FakeDirectoryClient();
+    const writes: Array<{
+      mutations: readonly DirectoryReplicaMutation[];
+      checkpoint: unknown;
+    }> = [];
+    const cachedProjects = [
+      normalizeProjectDescriptor({
+        projectId: "project-1",
+        projectDisplayName: "Old name",
+        projectRootPath: "/repo/one",
+        projectKind: "git",
+      }),
+      normalizeProjectDescriptor({
+        projectId: "project-2",
+        projectDisplayName: "Removed",
+        projectRootPath: "/repo/two",
+        projectKind: "git",
+      }),
+      normalizeProjectDescriptor({
+        projectId: "untouched-project",
+        projectDisplayName: "Untouched",
+        projectRootPath: "/repo/untouched",
+        projectKind: "git",
+      }),
+    ];
+    const directory = new DirectorySync(
+      serverId,
+      {
+        onAgentStoppedRunning: () => undefined,
+        markAgentLoading: () => undefined,
+        markAgentReady: () => undefined,
+        markAgentError: () => undefined,
+      },
+      {
+        readAgent: async () => undefined,
+        readWorkspace: async () => undefined,
+        readDirectory: async () => ({
+          agents: new Map(),
+          workspaces: new Map(),
+          projects: new Map(cachedProjects.map((project) => [project.projectId, project])),
+          checkpoint: { projects: { generation: "generation", afterSeq: 4 } },
+        }),
+        commitDirectoryMutations: (_serverId, mutations, checkpoint) =>
+          writes.push({ mutations: [...mutations], checkpoint }),
+      },
+    );
+    directory.connectionChanged({
+      client: client as unknown as DaemonClient,
+      status: "online",
+      source: { clientGeneration: 1, connectionEpoch: 1 },
+    });
+    const store = useSessionStore.getState();
+    store.initializeSession(serverId, client as unknown as DaemonClient, 1);
+    store.updateSessionServerInfo(serverId, {
+      serverId,
+      hostname: null,
+      version: "test",
+      features: { workspaceMultiplicity: true, projectList: true, directorySync: true },
+    });
+    client.projectResult = {
+      requestId: "projects",
+      projects: [
+        {
+          projectId: "project-1",
+          projectDisplayName: "New name",
+          projectRootPath: "/repo/one",
+          projectKind: "git",
+          syncSeq: 5,
+        },
+      ],
+      sync: {
+        generation: "generation",
+        headSeq: 6,
+        mode: "changes",
+        removals: [{ id: "project-2", seq: 6 }],
+      },
+    };
+
+    await directory.refreshWorkspaces();
+
+    expect(client.lastProjectOptions).toEqual({
+      sync: { generation: "generation", afterSeq: 4 },
+    });
+    const projects = useSessionStore.getState().sessions[serverId]?.projects;
+    expect(Array.from(projects?.keys() ?? [])).toEqual(["project-1", "untouched-project"]);
+    expect(projects?.get("project-1")?.projectDisplayName).toBe("New name");
+    expect(writes.map(({ checkpoint }) => checkpoint)).toContainEqual({
+      projects: { generation: "generation", afterSeq: 6 },
+    });
+    const writtenProjectIds = writes
+      .flatMap(({ mutations }) => mutations)
+      .filter((mutation) => mutation.kind === "project")
+      .map((mutation) => mutation.id);
+    expect(writtenProjectIds).toEqual(["project-1", "project-2"]);
+    expect(writtenProjectIds).not.toContain("untouched-project");
+    directory.dispose();
+  });
+
+  it.each(["projects", "workspaces"] as const)(
+    "requests projects and workspaces together and commits once when %s responds first",
+    async (firstResponse) => {
+      const serverId = `parallel-directory-${firstResponse}`;
+      const { client, directory } = createDirectory(serverId);
+      const store = useSessionStore.getState();
+      store.initializeSession(serverId, client as unknown as DaemonClient, 1);
+      store.updateSessionServerInfo(serverId, {
+        serverId,
+        hostname: null,
+        version: "test",
+        features: { workspaceMultiplicity: true, projectList: true },
+      });
+      const releaseProjects = client.holdProjectFetch();
+      const releaseWorkspaces = client.holdWorkspaceFetch();
+      const project = {
+        projectId: "parallel-project",
+        projectDisplayName: "Project baseline",
+        projectRootPath: "/repo/parallel",
+        projectKind: "git" as const,
+      };
+      const projects: ProjectListResult = { requestId: "projects", projects: [project] };
+      const workspaces: WorkspaceFetchResult = {
+        requestId: "workspaces",
+        entries: [createWorkspaceEntry("parallel-workspace")],
+        emptyProjects: [{ ...project, projectDisplayName: "Newer workspace overlay" }],
+        pageInfo: { hasMore: false, nextCursor: null, prevCursor: null },
+      };
+      const refresh = directory.refreshWorkspaces();
+      try {
+        await expect.poll(() => client.listProjectsCalls).toBe(1);
+        await expect.poll(() => client.fetchWorkspacesCalls).toBe(1);
+        if (firstResponse === "projects") releaseProjects(projects);
+        else releaseWorkspaces(workspaces);
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        expect(useSessionStore.getState().sessions[serverId].workspaces.size).toBe(0);
+        expect(useSessionStore.getState().sessions[serverId].projects.size).toBe(0);
+        releaseProjects(projects);
+        releaseWorkspaces(workspaces);
+        await refresh;
+        const session = useSessionStore.getState().sessions[serverId];
+        expect(session.workspaces.has("parallel-workspace")).toBe(true);
+        expect(session.projects.get(project.projectId)?.projectDisplayName).toBe(
+          "Newer workspace overlay",
+        );
+      } finally {
+        releaseProjects(projects);
+        releaseWorkspaces(workspaces);
+        await refresh;
+        directory.dispose();
+      }
+    },
+  );
+
+  it("keeps the accepted baseline when an old connection finishes its workspace request", async () => {
+    const serverId = "superseded-workspace-baseline";
+    const { client, directory } = createDirectory(serverId);
+    const store = useSessionStore.getState();
+    store.initializeSession(serverId, client as unknown as DaemonClient, 1);
+    store.updateSessionServerInfo(serverId, {
+      serverId,
+      hostname: null,
+      version: "test",
+      features: { workspaceMultiplicity: true, directorySync: true },
+    });
+    directory.acceptWorkspaces([normalizeWorkspaceDescriptor(createWorkspaceEntry("retained"))]);
+    const release = client.holdWorkspaceFetch();
+    const refresh = directory.refreshWorkspaces();
+    const rejected = expect(refresh).rejects.toBeInstanceOf(DirectoryRefreshSupersededError);
+    await expect.poll(() => client.fetchWorkspacesCalls).toBe(1);
+    directory.connectionChanged({
+      client: client as unknown as DaemonClient,
+      status: "online",
+      source: { clientGeneration: 1, connectionEpoch: 2 },
+    });
+    release({
+      requestId: "old-empty-snapshot",
+      entries: [],
+      emptyProjects: [],
+      pageInfo: { hasMore: false, nextCursor: null, prevCursor: null },
+      sync: { generation: "g", headSeq: 7, mode: "snapshot", removals: [] },
+    });
+    await rejected;
+    expect([...useSessionStore.getState().sessions[serverId].workspaces.keys()]).toEqual([
+      "retained",
+    ]);
+    directory.dispose();
+  });
+
   it("rejects a session wait on disconnect so the reconnect can refresh", async () => {
     const serverId = "session-wait-reconnect";
     const { client, directory } = createDirectory(serverId);

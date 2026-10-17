@@ -244,6 +244,7 @@ export class DirectorySync {
     try {
       await this.waitForSessionMetadata(client, source);
       const serverInfo = useSessionStore.getState().sessions[this.serverId]?.serverInfo;
+<<<<<<< HEAD
       if (serverInfo?.features?.workspaceMultiplicity !== true) {
         const deltas = this.workspaceTransactions.fail(transaction);
         if (deltas) for (const delta of deltas) this.workspaces.applyDelta(delta);
@@ -266,6 +267,28 @@ export class DirectorySync {
       const completion = this.workspaceTransactions.complete(transaction);
       if (completion.kind === "stale") {
         throw new DirectoryRefreshSupersededError("workspace completion was superseded");
+=======
+      const supportsProjectList = serverInfo?.features?.projectList === true;
+      const supportsDirectorySync = serverInfo?.features?.directorySync === true;
+      const projectsReady = supportsProjectList
+        ? this.fetchProjectSnapshot(client, source, transaction, supportsDirectorySync)
+        : Promise.resolve();
+      await Promise.all([
+        projectsReady,
+        this.fetchWorkspaceSnapshot(
+          client,
+          source,
+          transaction,
+          input?.subscribe === true,
+          supportsDirectorySync,
+          projectsReady,
+        ),
+      ]);
+      if (!supportsProjectList) {
+        this.buildLegacyProjectSnapshot(transaction.snapshot);
+        (transaction.snapshot.syncModes ??= {}).projects =
+          transaction.snapshot.syncModes?.workspaces;
+>>>>>>> perf(app): fetch project and workspace directories concurrently (#7242)
       }
       this.workspaces.commitSnapshot(completion.snapshot, completion.deltas);
     } catch (error) {
@@ -280,6 +303,11 @@ export class DirectorySync {
     source: DirectorySourceToken,
     transaction: DirectoryTransaction<WorkspaceDirectorySnapshot, WorkspaceDirectoryDelta>,
     initialSubscribe: boolean,
+<<<<<<< HEAD
+=======
+    supportsDirectorySync: boolean,
+    projectsReady: Promise<void>,
+>>>>>>> perf(app): fetch project and workspace directories concurrently (#7242)
   ): Promise<void> {
     let cursor: string | null = null;
     let subscribe = initialSubscribe;
@@ -291,7 +319,31 @@ export class DirectorySync {
         sort: [{ key: "activity_at", direction: "desc" }],
         ...(subscribe ? { subscribe: {} } : {}),
         page: cursor ? { limit: PAGE_LIMIT, cursor } : { limit: PAGE_LIMIT },
+<<<<<<< HEAD
       });
+=======
+        ...(supportsDirectorySync
+          ? { sync: transaction.snapshot.requestCursors.workspaces ?? {} }
+          : {}),
+      };
+      let payload: FetchWorkspacesPayload;
+      if (subscribe) {
+        void this.workspaceSubscription?.release().catch(() => undefined);
+        const subscription = client.observeWorkspaces(query);
+        this.workspaceSubscription = subscription;
+        subscription.subscribe({
+          snapshot: () => {},
+          update: (message) => {
+            if (message.type === "workspace_update" && this.isCurrent(client, source))
+              this.receiveWorkspaceDelta(source, message.payload);
+          },
+        });
+        payload = await subscription.ready;
+      } else payload = await client.fetchWorkspaces(query);
+      // Fetch both directories together, but apply the project baseline before the
+      // workspace page's empty-project overlays, regardless of response order.
+      await projectsReady;
+>>>>>>> perf(app): fetch project and workspace directories concurrently (#7242)
       this.assertWorkspaceTransactionCurrent(client, source, transaction);
       for (const entry of payload.entries) {
         const workspace = normalizeWorkspaceDescriptor(entry);

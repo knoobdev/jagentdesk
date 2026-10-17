@@ -1033,4 +1033,4 @@ describe("createWebStreamStrategy", () => {
 
     expect(scrollTo).toHaveBeenCalled();
   });
-});
+});}
