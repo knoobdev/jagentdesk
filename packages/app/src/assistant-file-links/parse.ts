@@ -79,6 +79,8 @@ const INLINE_PAREN_LINE_SUFFIX = /^(.+?)\(([0-9]+)(?:,[0-9]+)?(?:-([0-9]+)(?:,[0
 const INLINE_WORD_LINE_SUFFIX = /^(.+?)\s+lines?\s+([0-9]+)(?:-([0-9]+))?$/i;
 export interface AssistantHrefParseOptions {
   workspaceRoot?: string;
+  /** Authored links identify a file; only inferred text needs filename heuristics. */
+  explicitLink?: boolean;
   /**
    * True only when `value` is a markdown href — the renderer percent-encodes
    * non-ASCII and space characters, so the path must be decoded. Raw path
@@ -86,8 +88,6 @@ export interface AssistantHrefParseOptions {
    * send a real file named `my%20file.md` to `my file.md`.
    */
   decodeHref?: boolean;
-  /** Explicit Markdown links can name nested folders without a filename extension. */
-  allowExtensionlessNestedPaths?: boolean;
 }
 
 export type AssistantFileLinkClassification =
@@ -292,7 +292,7 @@ export function classifyAssistantFileLink(
     return null;
   }
 
-  if (isAmbiguousWorkspaceCandidate(trimmed, target, options)) {
+  if (!options.explicitLink && isAmbiguousWorkspaceCandidate(trimmed, target, options)) {
     return {
       kind: "ambiguousFileCandidate",
       target,
@@ -336,7 +336,7 @@ export function parseAssistantFileLink(
   const relativeTarget = parseWorkspaceRelativeFileLink(trimmed, {
     workspaceRoot: options.workspaceRoot,
     decodeHref: options.decodeHref,
-    allowExtensionlessNestedPaths: options.allowExtensionlessNestedPaths,
+    explicitLink: options.explicitLink,
   });
   if (relativeTarget) {
     return relativeTarget;
@@ -470,7 +470,7 @@ function parseWorkspaceRelativeFileLink(
 
 function parseLocalPathParts(
   value: string,
-  options: Pick<AssistantHrefParseOptions, "decodeHref" | "allowExtensionlessNestedPaths"> = {},
+  options: Pick<AssistantHrefParseOptions, "decodeHref" | "explicitLink"> = {},
 ): {
   path: string;
   lines: Pick<InlinePathTarget, "lineStart" | "lineEnd">;
@@ -496,7 +496,7 @@ function parseLocalPathParts(
     if (options.decodeHref) {
       pathPart = safeDecodeURIComponent(pathPart);
     }
-    if (!isPlausibleAssistantLocalPath(pathPart, options)) {
+    if (!options.explicitLink && !isPlausibleAssistantLocalPath(pathPart)) {
       return null;
     }
     return {
@@ -517,7 +517,7 @@ function parseLocalPathParts(
     decodedBeforeHash = safeDecodeURIComponent(beforeHash);
   }
   const plausiblePath = parseInlinePathToken(decodedBeforeHash)?.path ?? decodedBeforeHash;
-  if (!isPlausibleAssistantLocalPath(plausiblePath, options)) {
+  if (!options.explicitLink && !isPlausibleAssistantLocalPath(plausiblePath)) {
     return null;
   }
 
@@ -642,10 +642,7 @@ function getHeuristicLocalPath(value: string): string | null {
   return beforeHash;
 }
 
-function isPlausibleAssistantLocalPath(
-  pathValue: string,
-  options: Pick<AssistantHrefParseOptions, "allowExtensionlessNestedPaths"> = {},
-): boolean {
+function isPlausibleAssistantLocalPath(pathValue: string): boolean {
   const normalized = normalizePathToken(pathValue);
   if (!normalized) {
     return false;
@@ -669,10 +666,7 @@ function isPlausibleAssistantLocalPath(
 
   if (segments.length > 1) {
     const lastSegment = segments[segments.length - 1];
-    return (
-      !isDomainLikePathSegment(firstSegment) &&
-      (options.allowExtensionlessNestedPaths === true || isPlausibleAssistantFileName(lastSegment))
-    );
+    return !isDomainLikePathSegment(firstSegment) && isPlausibleAssistantFileName(lastSegment);
   }
 
   return isPlausibleAssistantFileName(firstSegment);
