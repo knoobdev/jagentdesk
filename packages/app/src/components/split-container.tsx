@@ -79,6 +79,8 @@ import {
 import type { WorkspaceTab } from "@/workspace-tabs/model";
 import { RenderProfile } from "@/utils/render-profiler";
 import { workspaceTabTargetsEqual } from "@/workspace-tabs/identity";
+import { recordRenderProfileReasons, RenderProfile } from "@/utils/render-profiler";
+import { inlineUnistylesStyle } from "@/styles/unistyles-inline-style";
 import { isNative } from "@/constants/platform";
 
 // An evicted chat remounts from scratch: it renders from the top, scrolls to the bottom, and
@@ -427,6 +429,73 @@ export function SplitContainer({
         focusModeEnabled,
       }),
     [focusModeEnabled, layout.focusedPaneId, layout.root],
+    [focusModeEnabled, layout.focusedPaneId, mainRoot],
+  );
+  const storedExplorerSidebarWidth = useWorkspaceLayoutStore(
+    (state) => state.explorerSidebarWidthByWorkspace[workspaceKey],
+  );
+  const resizeExplorerSidebar = useWorkspaceLayoutStore((state) => state.resizeExplorerSidebar);
+  const [workspaceShellWidth, setWorkspaceShellWidth] = useState(0);
+  const [previewExplorerSidebarWidth, setPreviewExplorerSidebarWidth] = useState<number | null>(
+    null,
+  );
+  const requestedExplorerSidebarWidth = previewExplorerSidebarWidth ?? storedExplorerSidebarWidth;
+  const explorerSidebarWidth = resolveExplorerSidebarWidth({
+    requestedWidth: requestedExplorerSidebarWidth,
+    containerWidth: workspaceShellWidth,
+  });
+  const explorerSidebarDockSizes = useMemo(
+    () =>
+      resolveExplorerSidebarDockSizes({
+        requestedWidth: requestedExplorerSidebarWidth,
+        containerWidth: workspaceShellWidth,
+      }),
+    [requestedExplorerSidebarWidth, workspaceShellWidth],
+  );
+  const renderExplorerSidebarDock = Boolean(
+    !focusModeEnabled && explorerSidebarPane && explorerSidebarPane.hidden !== true,
+  );
+  const mainColumnWindowChromeCorners = renderExplorerSidebarDock
+    ? removeWindowChromeCorner(inheritedWindowChromeCorners, "top-right")
+    : inheritedWindowChromeCorners;
+  const mainColumnStyle = styles.mainColumn;
+  const explorerSidebarDockStyle = useMemo(
+    () => [styles.explorerSidebarDock, inlineUnistylesStyle({ width: explorerSidebarWidth })],
+    [explorerSidebarWidth],
+  );
+  const handleWorkspaceShellLayout = useCallback((event: LayoutChangeEvent) => {
+    const nextWidth = event.nativeEvent.layout.width;
+    setWorkspaceShellWidth((current) => (current === nextWidth ? current : nextWidth));
+  }, []);
+  const previewExplorerSidebarResize = useCallback(
+    (_groupId: string, sizes: number[]) => {
+      const nextRatio = sizes[1];
+      if (nextRatio !== undefined) {
+        setPreviewExplorerSidebarWidth(
+          resolveExplorerSidebarWidth({
+            requestedWidth: nextRatio * workspaceShellWidth,
+            containerWidth: workspaceShellWidth,
+          }),
+        );
+      }
+    },
+    [workspaceShellWidth],
+  );
+  const commitExplorerSidebarResize = useCallback(
+    (_groupId: string, sizes: number[]) => {
+      setPreviewExplorerSidebarWidth(null);
+      const nextRatio = sizes[1];
+      if (nextRatio !== undefined) {
+        resizeExplorerSidebar(
+          workspaceKey,
+          resolveExplorerSidebarWidth({
+            requestedWidth: nextRatio * workspaceShellWidth,
+            containerWidth: workspaceShellWidth,
+          }),
+        );
+      }
+    },
+    [resizeExplorerSidebar, workspaceKey, workspaceShellWidth],
   );
   const renderRoot = useMemo(() => wrapRootPaneForStableMount(splitRoot.root), [splitRoot.root]);
 
@@ -896,7 +965,7 @@ function SplitNodeView({
   );
 }
 
-function SplitPaneView({
+const SplitPaneView = memo(function SplitPaneView({
   pane,
   uiTabs,
   isFocused,
@@ -935,6 +1004,7 @@ function SplitPaneView({
   onExitFocusMode,
 }: SplitPaneViewProps) {
   const { theme: _theme } = useUnistyles();
+  recordRenderProfileReasons(`SplitPaneView:${pane.id}`, ["render"]);
   const paneRef = useRef<View | null>(null);
   const stableOnFocusPane = useStableEvent(onFocusPane);
   const paneState = useMemo(
@@ -1107,7 +1177,7 @@ function SplitPaneView({
       </View>
     </RenderProfile>
   );
-}
+});
 
 function collectPanesById(node: SplitNode): Map<string, SplitPane> {
   const next = new Map<string, SplitPane>();
