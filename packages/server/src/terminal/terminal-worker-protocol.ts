@@ -6,7 +6,10 @@ import type {
   TerminalStateSnapshotOptions,
 } from "./terminal.js";
 import type { TerminalState } from "@jagentdesk/protocol/messages";
-import type { TerminalActivity, TerminalActivityState } from "@jagentdesk/protocol/terminal-activity";
+import type {
+  TerminalActivity,
+  TerminalActivityState,
+} from "@jagentdesk/protocol/terminal-activity";
 import type { CaptureTerminalLinesResult } from "./terminal-capture.js";
 
 export interface WorkerTerminalInfo {
@@ -121,6 +124,7 @@ export type TerminalWorkerEvent =
       type: "terminalMessage";
       terminalId: string;
       message: ServerMessage;
+      replayPreamble: string;
     }
   | {
       type: "terminalExit";
