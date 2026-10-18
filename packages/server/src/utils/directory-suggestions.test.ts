@@ -851,3 +851,102 @@ describe("filesystem threads held by concurrent searches", () => {
     expect(peak).toBe(1);
   });
 });
+
+import { spawn, type ChildProcess } from "node:child_process";
+interface SearchProcessExit {
+  code: number | null;
+  signal: string | null;
+}
+interface SearchProcess {
+  child: ChildProcess;
+  exited: Promise<SearchProcessExit>;
+}
+describe("bounded overlapping directory searches", () => {
+  let scanRoot: string;
+  let searchProcess: SearchProcess | null = null;
+  beforeEach(() => {
+    scanRoot = realpathSync.native(mkdtempSync(path.join(tmpdir(), "directory-heap-")));
+  });
+  afterEach(async () => {
+    try {
+      if (searchProcess) {
+        searchProcess.child.kill();
+        await searchProcess.exited;
+      }
+    } finally {
+      searchProcess = null;
+      rmSync(scanRoot, { recursive: true, force: true });
+    }
+  });
+  it("finishes overlapping broad-tree searches within a bounded heap", async () => {
+    const broadRoot = path.join(scanRoot, "broad");
+    mkdirSync(broadRoot);
+    for (let branch = 0; branch < 30; branch += 1) {
+      const branchRoot = path.join(broadRoot, `branch-${branch}`);
+      mkdirSync(branchRoot);
+      for (let group = 0; group < 30; group += 1) {
+        const groupRoot = path.join(branchRoot, `group-${group}`);
+        mkdirSync(groupRoot);
+        for (let leaf = 0; leaf < 30; leaf += 1) {
+          mkdirSync(path.join(groupRoot, `leaf-${leaf}`));
+        }
+      }
+    }
+    // A smaller real tree and explicit heap budget keep the million-directory repro cheap in CI.
+    const moduleUrl = new URL("./directory-suggestions.ts", import.meta.url).href;
+    const source = `
+      const { searchDirectoryEntries } = await import(${JSON.stringify(moduleUrl)});
+      const results = await Promise.all(Array.from({ length: 14 }, (_, index) =>
+        searchDirectoryEntries({
+          root: ${JSON.stringify(broadRoot)},
+          query: "z".repeat(index + 1),
+          pathFormat: "absolute",
+          includeFiles: false,
+          includeDirectories: true,
+          pathQueryPolicy: "rooted",
+          rootAliases: ["~"],
+          blankQueryBehavior: "none",
+          confidentResultScanThreshold: 5000,
+          maxEntriesScanned: 2000,
+          limit: 30,
+        })
+      ));
+      process.stdout.write(JSON.stringify(results));
+    `;
+    const child = spawn(
+      process.execPath,
+      [
+        "--max-old-space-size=128",
+        "--conditions=source",
+        "--import",
+        "tsx",
+        "--input-type=module",
+        "--eval",
+        source,
+      ],
+      { stdio: ["ignore", "pipe", "pipe"], timeout: 20_000 },
+    );
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    const exited = new Promise<SearchProcessExit>((resolve, reject) => {
+      child.on("error", reject);
+      child.on("close", (code, signal) => resolve({ code, signal }));
+    });
+    searchProcess = { child, exited };
+    const exit = await exited;
+    expect({ ...exit, outOfMemory: stderr.includes("heap out of memory") }).toEqual({
+      code: 0,
+      signal: null,
+      outOfMemory: false,
+    });
+    expect(JSON.parse(stdout)).toEqual(Array.from({ length: 14 }, () => []));
+  });
+});
