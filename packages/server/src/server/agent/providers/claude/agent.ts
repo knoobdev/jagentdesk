@@ -2229,7 +2229,7 @@ class ClaudeAgentSession implements AgentSession {
   private readonly sidechainTracker = new ClaudeSidechainTracker({
     getToolInput: (toolUseId) =>
       this.toolUseCache.get(toolUseId)?.input ??
-      this.settledSubagentToolCallInCurrentTurn(toolUseId)?.input ??
+      this.settledSubagentToolCalls.get(toolUseId)?.input ??
       null,
     // Releases that predate the task protocol announce nothing, so the tracker keeps deriving
     // identity and status from frames for them. Detecting the capability beats comparing version
@@ -2237,13 +2237,11 @@ class ClaudeAgentSession implements AgentSession {
     isDescriptorOwnedElsewhere: () => this.taskProtocolSource.isActive,
     // A background child streams its frames after Claude has already answered the call, so its
     // card is rebuilt from the settled call: a running one would replace the settled, labeled card.
-    // A card belongs to the turn that answered the call, so frames from a later turn leave it be.
+    // Late card updates retain the turn that answered the call.
     needsSyntheticParentToolCard: (toolUseId) =>
-      (this.toolUseCache.has(toolUseId) ||
-        this.settledSubagentToolCallInCurrentTurn(toolUseId) !== undefined) &&
+      (this.toolUseCache.has(toolUseId) || this.settledSubagentToolCalls.has(toolUseId)) &&
       this.taskProtocolSource.needsSyntheticParentToolCard(toolUseId),
-    getSettledParentToolCall: (toolUseId) =>
-      this.settledSubagentToolCallInCurrentTurn(toolUseId)?.item,
+    getSettledParentToolCall: (toolUseId) => this.settledSubagentToolCalls.get(toolUseId)?.item,
   });
   private persistedHistory: PersistedTimelineEntry[] = [];
   private persistedProviderSubagentEvents: Extract<
@@ -4376,7 +4374,12 @@ class ClaudeAgentSession implements AgentSession {
       ),
     ).map((event): AgentStreamEvent => ({ type: "provider_subagent", provider: "claude", event }));
     const routedId = canonicalSubagentId ?? parentToolUseId;
-    return [...runtimeEvents, ...this.sidechainTracker.handleMessage(message, routedId)];
+    const settled = this.settledSubagentToolCalls.get(routedId);
+    const sidechainEvents = this.sidechainTracker.handleMessage(message, routedId).map((event) => {
+      if (event.type === "timeline" && settled?.turnId) event.turnId = settled.turnId;
+      return event;
+    });
+    return [...runtimeEvents, ...sidechainEvents];
   }
 
   /**
@@ -4999,7 +5002,8 @@ class ClaudeAgentSession implements AgentSession {
   }
 
   private notifySubscribers(event: AgentStreamEvent): void {
-    const turnId = this.activeForegroundTurnId ?? this.autonomousTurn?.id;
+    const turnId =
+      getAgentStreamEventTurnId(event) ?? this.activeForegroundTurnId ?? this.autonomousTurn?.id;
     const tagged = turnId ? { ...event, turnId } : event;
     this.logger.trace(
       {
@@ -5454,17 +5458,12 @@ class ClaudeAgentSession implements AgentSession {
     });
   }
 
-  private settledSubagentToolCallInCurrentTurn(subagentId: string) {
-    const settled = this.settledSubagentToolCalls.get(subagentId);
-    const currentTurnId = this.activeForegroundTurnId ?? this.autonomousTurn?.id ?? null;
-    return settled && settled.turnId === currentTurnId ? settled : undefined;
-  }
-
   /** A finished child streams no more frames, so its settled call has nothing left to update. */
   private releaseFinishedSubagentToolCalls(observations: SubagentObservation[]): void {
     for (const observation of observations) {
       if (observation.kind === "status" && observation.status !== "running") {
         this.settledSubagentToolCalls.delete(observation.id);
+        this.sidechainTracker.delete(observation.id);
       }
     }
   }
