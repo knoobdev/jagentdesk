@@ -26,6 +26,13 @@ interface ProjectionOptions {
   title?: string | null;
   createdAt?: string;
   internal?: boolean;
+  /**
+   * Archive timestamp, supplied by a caller holding the stored record. A live
+   * managed agent cannot know this: an archived agent is resumed back into
+   * memory to serve a history read, so being in the manager is not evidence
+   * that it is active. Storage stays the single owner.
+   */
+  archivedAt?: string | null;
 }
 
 interface RecentProviderSessionProjectionOptions {
@@ -80,6 +87,7 @@ export function toStoredAgentRecord(
     lastUserMessageAt: agent.lastUserMessageAt ? agent.lastUserMessageAt.toISOString() : null,
     title: options?.title ?? null,
     labels: agent.labels,
+    archivedAt: options?.archivedAt ?? null,
     lastStatus: agent.lifecycle,
     lastModeId: agent.currentModeId ?? config?.modeId ?? null,
     config: config ?? null,
@@ -136,6 +144,7 @@ export function toAgentPayload(
     persistence: projectPersistenceHandleForWire(agent.persistence),
     title: options?.title ?? null,
     labels: agent.labels,
+    archivedAt: options?.archivedAt ?? null,
   };
 
   const usage = sanitizeUsage(agent.lastUsage);

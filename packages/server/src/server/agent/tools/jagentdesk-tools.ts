@@ -5296,6 +5296,7 @@ function createToolCatalog(
         )
         .map((record) => buildStoredAgentPayload(record, registeredProviderIds));
       const agents = [...liveAgents, ...storedAgents]
+        .filter((agent) => includeArchived || !agent.archivedAt)
         .map(toAgentListItemPayload)
         .filter((agent) => !requestedCwd || isSameOrDescendantPath(requestedCwd, agent.cwd))
         .filter((agent) => !statusFilter || statusFilter.has(agent.status))
