@@ -1,3 +1,5 @@
+import { useRouter } from "expo-router";
+import { buildSettingsAddHostRoute } from "@/utils/host-routes";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { ReactElement, RefObject } from "react";
 import { useTranslation } from "react-i18next";
@@ -1420,7 +1422,8 @@ function useNewWorkspaceFormStack(input: NewWorkspaceFormStackInput): ReactEleme
 
   const selectedHostLabel =
     host.allHosts.find((h) => h.serverId === host.selectedServerId)?.label ?? "Host";
-  const showHostControl = host.allHosts.length > 1;
+  const router = useRouter();
+  const handleAddHost = useCallback(() => router.push(buildSettingsAddHostRoute()), [router]);
   const isolationTriggerLabel = isolationLabel(t, isolation.effectiveIsolation);
   const addProjectAction = useMemo(
     () => <AddProjectPickerAction onPress={project.onAddProject} />,
@@ -1475,7 +1478,7 @@ function useNewWorkspaceFormStack(input: NewWorkspaceFormStackInput): ReactEleme
     </View>
   );
 
-  const hostControl = showHostControl ? (
+  const hostControl = (
     <View style={desktopControlStyle}>
       <HostPicker
         hosts={host.allHosts}
@@ -1484,6 +1487,9 @@ function useNewWorkspaceFormStack(input: NewWorkspaceFormStackInput): ReactEleme
         open={host.openState}
         onOpenChange={host.onOpenChange}
         anchorRef={host.anchorRef}
+        includeAddHost
+        onAddHost={handleAddHost}
+        addHostTestID="new-workspace-host-picker-add-host"
         searchable={false}
         title="Host"
         desktopPlacement="bottom-start"
@@ -1507,7 +1513,7 @@ function useNewWorkspaceFormStack(input: NewWorkspaceFormStackInput): ReactEleme
         </Pressable>
       </HostPicker>
     </View>
-  ) : null;
+  );
 
   const isolationControl = isolation.canCreateWorktree ? (
     <View style={desktopControlStyle}>
