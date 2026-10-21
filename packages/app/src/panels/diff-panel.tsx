@@ -223,6 +223,7 @@ function WorkingDiffPanel() {
           testIDPrefix="working-diff"
           onSelectUncommitted={workingDiff.selectUncommitted}
           onSelectBase={workingDiff.selectBase}
+          onSelectAll={workingDiff.selectAll}
         />
         <View style={styles.toolbarActions} testID="working-diff-toolbar">
           {panelPreferences.canUseSplitLayout ? (

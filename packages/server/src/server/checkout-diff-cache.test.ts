@@ -133,3 +133,21 @@ test("superseding a diff cancels its highlighting while identical readers share 
   release.resolve({ diff: "old snapshot" });
   await first;
 });
+
+test.each(["base", "uncommitted"] as const)(
+  "%s invalidation refreshes All changes without merging base-ref cache entries",
+  async (mode) => {
+    const cache = new CheckoutDiffCache(() => 0);
+    const read = (baseRef: string, value: string) =>
+      cache.read({
+        cwd: "repo",
+        compare: { mode: "all", baseRef },
+        load: async () => ({ diff: value }),
+      });
+    expect(await read("main", "main-before")).toEqual({ diff: "main-before" });
+    expect(await read("next", "next-before")).toEqual({ diff: "next-before" });
+    cache.invalidate("repo", mode);
+    expect(await read("main", "main-after")).toEqual({ diff: "main-after" });
+    expect(await read("next", "next-after")).toEqual({ diff: "next-after" });
+  },
+);

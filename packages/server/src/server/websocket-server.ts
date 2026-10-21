@@ -2595,6 +2595,7 @@ export class VoiceAssistantWebSocketServer {
         // Relay second path (spec 35 / ADR-0048): with it the pairing offer
         // carries `relay` and server_info carries the descriptor above.
         relay: this.daemonRuntimeConfig?.getRelayConfig?.()?.enabled === true,
+        checkoutDiffAll: true,
       },
     };
   }

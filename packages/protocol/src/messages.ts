@@ -1320,7 +1320,7 @@ export const ReviewAttachmentSchema = z.object({
   type: z.literal("review"),
   mimeType: z.literal("application/jagentdesk-review"),
   cwd: z.string(),
-  mode: z.enum(["uncommitted", "base"]),
+  mode: z.enum(["uncommitted", "base", "all"]),
   baseRef: z.string().nullable().optional(),
   comments: z.array(ReviewAttachmentCommentSchema),
 });
@@ -2271,7 +2271,7 @@ const CheckoutErrorSchema = z.object({
 });
 
 const CheckoutDiffCompareSchema = z.object({
-  mode: z.enum(["uncommitted", "base"]),
+  mode: z.enum(["uncommitted", "base", "all"]),
   baseRef: z.string().optional(),
   ignoreWhitespace: z.boolean().optional(),
 });
@@ -4772,6 +4772,7 @@ export const ServerInfoStatusPayloadSchema = z
         // Relay second path (spec 35 / ADR-0048): pairing offers carry `relay`,
         // server_info carries the relay descriptor, and the app shows the Relay badge.
         relay: z.boolean().optional(),
+        checkoutDiffAll: z.boolean().optional(),
       })
       .optional(),
   })

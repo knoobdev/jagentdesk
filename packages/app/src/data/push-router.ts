@@ -34,7 +34,7 @@ type CheckoutDiffCachePayload = Omit<CheckoutDiffResponsePayload, "subscriptionI
 type ListTerminalsPayload = ListTerminalsResponse["payload"];
 
 interface CheckoutDiffCompare {
-  mode: "uncommitted" | "base";
+  mode: "uncommitted" | "base" | "all";
   baseRef?: string;
   ignoreWhitespace?: boolean;
 }
@@ -711,7 +711,7 @@ function readCheckoutDiffCompare(value: unknown): CheckoutDiffCompare | null {
   const mode = value.mode;
   const baseRef = value.baseRef;
   const ignoreWhitespace = value.ignoreWhitespace;
-  if (mode !== "uncommitted" && mode !== "base") {
+  if (mode !== "uncommitted" && mode !== "base" && mode !== "all") {
     return null;
   }
   if (baseRef !== undefined && typeof baseRef !== "string") {

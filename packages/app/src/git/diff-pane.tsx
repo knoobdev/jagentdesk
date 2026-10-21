@@ -1390,9 +1390,10 @@ interface ChangesTabToggleProps {
 }
 
 interface DiffModeMenuProps {
-  diffMode: "uncommitted" | "base";
+  diffMode: "uncommitted" | "base" | "all";
   committedDescription?: string;
   testIDPrefix?: string;
+  onSelectAll: () => void;
   onSelectUncommitted: () => void;
   onSelectBase: () => void;
 }
@@ -1401,6 +1402,7 @@ export function DiffModeMenu({
   diffMode,
   committedDescription,
   testIDPrefix = "changes-diff",
+  onSelectAll,
   onSelectUncommitted,
   onSelectBase,
 }: DiffModeMenuProps) {
@@ -1408,6 +1410,11 @@ export function DiffModeMenu({
   const triggerStyle = useMemo(() => buildDiffModeTriggerStyle(), []);
   const uncommittedLabel = t("workspace.git.diff.uncommitted");
   const committedLabel = t("workspace.git.diff.committed");
+  const labels = {
+    all: t("workspace.git.diff.all"),
+    uncommitted: uncommittedLabel,
+    base: committedLabel,
+  };
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -1417,11 +1424,19 @@ export function DiffModeMenu({
         accessibilityLabel={t("workspace.git.diff.diffMode")}
       >
         <Text style={styles.diffStatusText} numberOfLines={1}>
-          {diffMode === "uncommitted" ? uncommittedLabel : committedLabel}
+          {labels[diffMode]}
         </Text>
         <ThemedChevronDown size={12} uniProps={foregroundMutedIconColorMapping} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" width={260} testID={`${testIDPrefix}-status-menu`}>
+        <DropdownMenuItem
+          testID={`${testIDPrefix}-mode-all`}
+          selected={diffMode === "all"}
+          onSelect={onSelectAll}
+        >
+          {labels.all}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
         <DropdownMenuItem
           testID={`${testIDPrefix}-mode-uncommitted`}
           selected={diffMode === "uncommitted"}
@@ -1720,7 +1735,7 @@ function getSplitDiffLineCount(file: ParsedDiffFile): number {
 
 function computeEmptyMessage(
   hideWhitespace: boolean,
-  diffMode: "uncommitted" | "base",
+  diffMode: "uncommitted" | "base" | "all",
   baseRefLabel: string,
   labels: {
     hiddenWhitespace: string;
@@ -2684,6 +2699,7 @@ export function GitDiffPane({
     diffMode,
     selectUncommitted: handleSelectUncommitted,
     selectBase: handleSelectBase,
+    selectAll: handleSelectAll,
     files,
     diffPayloadError,
     diffTooLarge,
@@ -2875,6 +2891,7 @@ export function GitDiffPane({
               committedDescription={committedDiffDescription}
               onSelectUncommitted={handleSelectUncommitted}
               onSelectBase={handleSelectBase}
+              onSelectAll={handleSelectAll}
             />
             <View style={styles.diffStatusButtons}>
               <ChangesTabToggle
