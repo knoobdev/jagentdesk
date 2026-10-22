@@ -90,7 +90,7 @@ export function createWorkspaceProvisioningService(deps: {
   serverId?: string;
   workspaceRegistry: WorkspaceRegistry;
   projectRegistry: ProjectRegistry;
-  workspaceGitService: Pick<WorkspaceGitService, "getCheckout" | "getSnapshot" | "peekSnapshot">;
+  workspaceGitService: Pick<WorkspaceGitService, "getCheckout" | "getSnapshot">;
   /** Whether a directory exists at the path. Defaults to the daemon's local file system. */
   isDirectory?: (path: string) => Promise<boolean>;
   logger: Logger;

@@ -4,6 +4,7 @@ import { HostCapabilityService } from "./host-capabilities/service.js";
 import { ensureToolDirsOnPath, HostToolInstaller } from "./host-tools/installer.js";
 import type { HttpFetch } from "./host-tools/release.js";
 import { setForgeToolInstaller } from "./session/forge/forge-cli-installer.js";
+import { createWorkspaceRuntimeStore } from "./workspace-runtime-store/index.js";
 import express from "express";
 import { createServer as createHTTPServer, type IncomingMessage, type ServerResponse } from "http";
 import { constants, existsSync, unlinkSync } from "fs";
@@ -984,6 +985,18 @@ export async function createJAgentDeskDaemon(
       forgeOverrides: { github },
     },
   });
+  const workspaceRuntimeStore = createWorkspaceRuntimeStore();
+  workspaceGitService.onSnapshotUpdated((snapshot) => workspaceRuntimeStore.set(snapshot));
+  workspaceRegistry.subscribeToMutations(async (mutation) => {
+    if (mutation.kind === "remove" && mutation.workspace) {
+      const cwd = path.resolve(mutation.workspace.cwd);
+      const workspaces = await workspaceRegistry.list();
+      const hasActiveWorkspace = workspaces.some(
+        (workspace) => !workspace.archivedAt && path.resolve(workspace.cwd) === cwd,
+      );
+      if (!hasActiveWorkspace) workspaceRuntimeStore.remove(cwd);
+    }
+  });
   const workspaceProvisioning = createWorkspaceProvisioningService({
     serverId,
     projectRegistry,
@@ -1119,6 +1132,7 @@ export async function createJAgentDeskDaemon(
     logger,
     jagentdeskHome: config.jagentdeskHome,
     workspaceGitService,
+    workspaceRuntimeStore,
   });
   const archiveWorkspaceRecordExternal = async (
     workspaceId: string,
@@ -1699,7 +1713,7 @@ export async function createJAgentDeskDaemon(
       terminalManager,
       workspaceRegistry,
       projectRegistry,
-      workspaceGitService,
+      workspaceRuntimeStore,
       getDaemonTcpPort: () => (boundListenTarget?.type === "tcp" ? boundListenTarget.port : null),
       getDaemonTcpHost: () => (boundListenTarget?.type === "tcp" ? boundListenTarget.host : null),
       serviceProxyPublicBaseUrl,
@@ -2077,6 +2091,7 @@ export async function createJAgentDeskDaemon(
                 daemonStatusRpc: dependencies.serverFeatureOverrides?.daemonStatusRpc,
               },
               workspaceAutoName,
+              workspaceRuntimeStore,
               config.auth,
               speechService,
               terminalManager,
