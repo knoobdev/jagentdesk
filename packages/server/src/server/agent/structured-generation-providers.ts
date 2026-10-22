@@ -40,10 +40,22 @@ export interface ResolveStructuredGenerationProvidersOptions {
   };
 }
 
+/**
+ * A non-empty configured list means Manual: only those models are tried, in order.
+ * An empty list means Automatic: built-in defaults, then the current selection.
+ */
 export async function resolveStructuredGenerationProviders(
   options: ResolveStructuredGenerationProvidersOptions,
 ): Promise<StructuredGenerationProvider[]> {
   const configuredProviders = readConfiguredProviders(options.daemonConfig);
+  if (configuredProviders.length > 0) {
+    // Explicit custom-provider identities must not be rewritten through another
+    // provider's model catalog. Manual mode needs no automatic discovery.
+    const configured = configuredProviders
+      .map((candidate) => resolveConfiguredCandidate(candidate, [], new Map()))
+      .filter((candidate) => candidate !== null);
+    return dedupeProviders(configured);
+  }
   const providerEntries = await options.providerSnapshotManager.listProviders({
     cwd: options.cwd,
     wait: true,
@@ -52,18 +64,6 @@ export async function resolveStructuredGenerationProviders(
   const modelEntries = enabledEntries.filter((entry) => (entry.models?.length ?? 0) > 0);
   const entriesByProvider = new Map(enabledEntries.map((entry) => [entry.provider, entry]));
   const providers: StructuredGenerationProvider[] = [];
-
-  for (const configured of configuredProviders) {
-    const resolvedConfigured = resolveConfiguredCandidate(
-      configured,
-      modelEntries,
-      entriesByProvider,
-    );
-    if (!resolvedConfigured) {
-      continue;
-    }
-    providers.push(resolvedConfigured);
-  }
 
   for (const identifier of DEFAULT_STRUCTURED_GENERATION_PROVIDERS) {
     const resolved = resolveByModelSubstring(modelEntries, identifier);
