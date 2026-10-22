@@ -964,6 +964,15 @@ export function createWorkspaceLayoutStore(
         name: "workspace-layout-state",
         version: 1,
         storage: createJSONStorage(() => createWorkspaceLayoutStorage(storage)),
+        onRehydrateStorage: () => (state) => {
+          if (!state) return;
+          for (const [workspaceKey, layout] of Object.entries(state.layoutByWorkspace)) {
+            if (layout.focusedPaneId !== null) continue;
+            // Parked focus has an in-memory restoration record that cannot survive reload.
+            const ordinaryPane = collectAllPanes(layout.root)[0];
+            if (ordinaryPane) state.focusPane(workspaceKey, ordinaryPane.id);
+          }
+        },
         partialize: (state) => {
           const layoutByWorkspace: Record<string, WorkspaceLayout> = {};
           for (const key in state.layoutByWorkspace) {

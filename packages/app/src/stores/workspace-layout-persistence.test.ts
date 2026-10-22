@@ -29,3 +29,32 @@ it("keeps saved tabs when a layout changes before hydration settles", async () =
     saved.getState().layoutByWorkspace[workspaceKey],
   );
 });
+
+it("restores the agent pane after parked focus is rehydrated", async () => {
+  const values = new Map<string, string>();
+  const storage: StateStorage = {
+    getItem: (name) => values.get(name) ?? null,
+    setItem: (name, value) => {
+      values.set(name, value);
+    },
+    removeItem: (name) => {
+      values.delete(name);
+    },
+  };
+  const key = "host:workspace";
+  const source = createWorkspaceLayoutStore(undefined, storage);
+  await source.persist.rehydrate();
+  source.getState().openTabFocused(key, { kind: "agent", agentId: "agent-a" });
+  source.getState().unfocusPane(key);
+  expect(source.getState().layoutByWorkspace[key].focusedPaneId).toBeNull();
+  const restored = createWorkspaceLayoutStore(undefined, storage);
+  await restored.persist.rehydrate();
+  const layout = restored.getState().layoutByWorkspace[key];
+  expect(layout.focusedPaneId).toBe("main");
+  expect(
+    restored
+      .getState()
+      .getWorkspaceTabs(key)
+      .map((tab) => tab.target),
+  ).toEqual([{ kind: "agent", agentId: "agent-a" }]);
+});
