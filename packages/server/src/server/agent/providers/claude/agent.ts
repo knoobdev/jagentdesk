@@ -27,6 +27,7 @@ import {
   mapClaudeRunningToolCall,
 } from "./tool-call-mapper.js";
 import {
+  assignTaskNotificationReplayIds,
   mapTaskNotificationSystemRecordToToolCall,
   mapTaskNotificationUserContentToToolCall,
   readTaskNotificationToolUseIdFromHistoryRecord,
@@ -5143,8 +5144,25 @@ class ClaudeAgentSession implements AgentSession {
     }
 
     const timeline: PersistedTimelineEntry[] = [];
+    const records: Record<string, unknown>[] = [];
     for (const line of content.split(/\r?\n/)) {
-      this.ingestPersistedHistoryLine(line, timeline, replay);
+      const trimmed = line.trim();
+      if (!trimmed) {
+        continue;
+      }
+      try {
+        const record = toObjectRecord(JSON.parse(trimmed));
+        if (record && !record.isSidechain) {
+          records.push(record);
+        }
+      } catch {
+        // Malformed journal lines carry no history and are skipped, as before.
+      }
+    }
+    // One traversal assigns each notification occurrence an id shared by its queue bookkeeping
+    // and delivery records, so replay collapses them into a single card.
+    for (const entry of assignTaskNotificationReplayIds(records)) {
+      this.ingestPersistedHistoryEntry(entry, timeline, replay);
     }
 
     if (timeline.length > 0) {
@@ -5217,28 +5235,11 @@ class ClaudeAgentSession implements AgentSession {
     return replay;
   }
 
-  private ingestPersistedHistoryLine(
-    line: string,
+  private ingestPersistedHistoryEntry(
+    entry: Record<string, unknown>,
     timeline: PersistedTimelineEntry[],
     replay: ClaudeReplayOwnership,
   ): void {
-    const trimmed = line.trim();
-    if (!trimmed) {
-      return;
-    }
-
-    let entry: Record<string, unknown>;
-    try {
-      const parsed: unknown = JSON.parse(trimmed);
-      const record = toObjectRecord(parsed);
-      if (!record) {
-        return;
-      }
-      entry = record;
-    } catch {
-      return;
-    }
-
     if (entry.isSidechain) {
       return;
     }
@@ -6345,6 +6346,7 @@ export function convertClaudeHistoryEntry(
     const userTaskNotificationItem = mapTaskNotificationUserContentToToolCall({
       content,
       messageId: userMessageId,
+      notificationId: typeof entry.notificationId === "string" ? entry.notificationId : undefined,
     });
     if (userTaskNotificationItem) {
       return [userTaskNotificationItem];
