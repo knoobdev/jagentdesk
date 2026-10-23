@@ -1,3 +1,4 @@
+import { isWorkspaceArchivePending } from "@/contexts/session-workspace-upserts";
 import equal from "fast-deep-equal";
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
@@ -635,6 +636,7 @@ interface SessionStoreActions {
       | ((prev: Map<string, WorkspaceDescriptor>) => Map<string, WorkspaceDescriptor>),
   ) => void;
   mergeWorkspaces: (serverId: string, workspaces: Iterable<WorkspaceDescriptor>) => void;
+  seedWorkspaces: (serverId: string, workspaces: Iterable<WorkspaceDescriptor>) => void;
   removeWorkspace: (serverId: string, workspaceId: string) => void;
   setProjects: (serverId: string, projects: Iterable<ProjectDescriptor>) => void;
   upsertProject: (serverId: string, project: ProjectDescriptor) => void;
@@ -1892,6 +1894,17 @@ export const useSessionStore = create<SessionStore>()(
             },
           };
         });
+      },
+
+      seedWorkspaces: (serverId, workspaces) => {
+        const existing = get().sessions[serverId]?.workspaces;
+        // Creation responses seed missing rows; live directory updates own existing rows.
+        const missing = Array.from(workspaces).filter(
+          (workspace) =>
+            !existing?.has(workspace.id) &&
+            !isWorkspaceArchivePending({ serverId, workspaceId: workspace.id }),
+        );
+        get().mergeWorkspaces(serverId, missing);
       },
 
       mergeWorkspaces: (serverId, workspaces) => {

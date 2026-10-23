@@ -1609,7 +1609,7 @@ export function NewWorkspaceScreen({
   const insets = useSafeAreaInsets();
   const isCompact = useIsCompactFormFactor();
   const toast = useToast();
-  const mergeWorkspaces = useSessionStore((state) => state.mergeWorkspaces);
+  const mergeWorkspaces = useSessionStore((state) => state.seedWorkspaces);
   const {
     allHosts,
     selectedServerId,

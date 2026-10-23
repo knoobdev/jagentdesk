@@ -64,7 +64,7 @@ function restoreOptimisticallyHiddenWorkspace(input: {
     workspaceId: input.workspaceId,
   });
   if (input.snapshot.workspace) {
-    useSessionStore.getState().mergeWorkspaces(input.serverId, [input.snapshot.workspace]);
+    useSessionStore.getState().seedWorkspaces(input.serverId, [input.snapshot.workspace]);
   }
 }
 

@@ -1,3 +1,7 @@
+import {
+  markWorkspaceArchivePending,
+  clearWorkspaceArchivePending,
+} from "@/contexts/session-workspace-upserts";
 import { expect, it } from "vitest";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import type { WorkspaceDescriptorPayload } from "@jagentdesk/protocol/messages";
@@ -161,4 +165,57 @@ it("does not invent a null-key project from a workspace update", () => {
   expect(session?.workspaces.has("main")).toBe(true);
   expect(session?.projects.has("fresh-project")).toBe(false);
   store.clearSession(serverId);
+});
+
+it("keeps live title and pin updates when an older creation response arrives", () => {
+  const serverId = "workspace-create-after-pin";
+  const store = useSessionStore.getState();
+  store.initializeSession(serverId, null);
+  const replica = new WorkspaceDirectoryReplica(serverId);
+  const initial = normalizeWorkspaceDescriptor(workspace("new"));
+  const pinned = {
+    ...workspace(initial.id),
+    title: "Updated title",
+    pinnedAt: "2026-09-26T00:00:00.000Z",
+  };
+  try {
+    replica.applyDelta({ kind: "upsert", workspace: pinned });
+    store.seedWorkspaces(serverId, [initial]);
+    expect(useSessionStore.getState().sessions[serverId]?.workspaces.get(initial.id)).toEqual(
+      normalizeWorkspaceDescriptor(pinned),
+    );
+    const unpinned = { ...pinned, pinnedAt: null };
+    replica.applyDelta({ kind: "upsert", workspace: unpinned });
+    store.seedWorkspaces(serverId, [normalizeWorkspaceDescriptor(pinned)]);
+    expect(useSessionStore.getState().sessions[serverId]?.workspaces.get(initial.id)).toEqual(
+      normalizeWorkspaceDescriptor(unpinned),
+    );
+  } finally {
+    store.clearSession(serverId);
+  }
+});
+
+it("seeds missing rows and restores archive rollback without replacing live rows", () => {
+  const serverId = "workspace-archive-seed";
+  const store = useSessionStore.getState();
+  store.initializeSession(serverId, null);
+  const initial = normalizeWorkspaceDescriptor(workspace("new"));
+  try {
+    store.seedWorkspaces(serverId, [initial]);
+    expect(useSessionStore.getState().sessions[serverId]?.workspaces.get(initial.id)).toEqual(
+      initial,
+    );
+    markWorkspaceArchivePending({ serverId, workspaceId: initial.id });
+    store.removeWorkspace(serverId, initial.id);
+    store.seedWorkspaces(serverId, [initial]);
+    expect(useSessionStore.getState().sessions[serverId]?.workspaces.has(initial.id)).toBe(false);
+    clearWorkspaceArchivePending({ serverId, workspaceId: initial.id });
+    store.seedWorkspaces(serverId, [initial]);
+    expect(useSessionStore.getState().sessions[serverId]?.workspaces.get(initial.id)).toEqual(
+      initial,
+    );
+  } finally {
+    clearWorkspaceArchivePending({ serverId, workspaceId: initial.id });
+    store.clearSession(serverId);
+  }
 });
