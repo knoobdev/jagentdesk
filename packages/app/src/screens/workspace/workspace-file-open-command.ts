@@ -7,13 +7,11 @@ import type { WorkspaceTabTarget } from "@/workspace-tabs/model";
 interface OpenWorkspaceFileFromExplorerInput {
   filePath: string;
   persistenceKey: string | null;
-  showMobileAgent: () => void;
   openWorkspaceTabFocused: (workspaceKey: string, target: WorkspaceTabTarget) => string | null;
-  focusWorkspaceTab: (workspaceKey: string, tabId: string) => void;
+  revealWorkspaceTab: (workspaceKey: string, tabId: string) => void;
 }
 
 export function openWorkspaceFileFromExplorer(input: OpenWorkspaceFileFromExplorerInput): void {
-  input.showMobileAgent();
   if (!input.persistenceKey) {
     return;
   }
@@ -26,6 +24,6 @@ export function openWorkspaceFileFromExplorer(input: OpenWorkspaceFileFromExplor
     createWorkspaceFileTabTarget(location),
   );
   if (tabId) {
-    input.focusWorkspaceTab(input.persistenceKey, tabId);
+    input.revealWorkspaceTab(input.persistenceKey, tabId);
   }
 }

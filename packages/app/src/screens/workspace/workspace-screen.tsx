@@ -1,3 +1,4 @@
+import { revealWorkspaceTab } from "@/workspace-tabs/navigation";
 import { SheetTabs } from "./sheet-tabs";
 import { SheetPaneHostProvider, type SheetPaneHost } from "./sheet-pane";
 import type { PaneHost } from "@/panels/panel-manifest";
@@ -2431,7 +2432,6 @@ function WorkspaceScreenContent({
   const openWorkspaceTabInBackground = useWorkspaceLayoutStore(
     (state) => state.openTabInBackground,
   );
-  const focusWorkspaceTab = useWorkspaceLayoutStore((state) => state.focusTab);
   const closeWorkspaceTab = useWorkspaceLayoutStore((state) => state.closeTab);
   const unpinWorkspaceAgent = useWorkspaceLayoutStore((state) => state.unpinAgent);
   const hideWorkspaceAgent = useWorkspaceLayoutStore((state) => state.hideAgent);
@@ -2652,9 +2652,9 @@ function WorkspaceScreenContent({
       if (!tabId || !persistenceKey) {
         return;
       }
-      focusWorkspaceTab(persistenceKey, tabId);
+      revealWorkspaceTab(persistenceKey, tabId);
     },
-    [focusWorkspaceTab, persistenceKey],
+    [persistenceKey],
   );
   const handleImportedAgent = useCallback(
     (agentId: string) => {
