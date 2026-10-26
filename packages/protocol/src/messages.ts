@@ -109,6 +109,16 @@ import {
   ActivityGraphStatusMessageSchema,
 } from "./agent-activity-graph.js";
 import {
+  SpeechLocalModelsDeleteRequestSchema,
+  SpeechLocalModelsDeleteResponseSchema,
+  SpeechLocalModelsDownloadRequestSchema,
+  SpeechLocalModelsDownloadResponseSchema,
+  SpeechLocalModelsListRequestSchema,
+  SpeechLocalModelsListResponseSchema,
+  SpeechSettingsPatchSchema,
+  SpeechSettingsSchema,
+} from "./speech/rpc-schemas.js";
+import {
   LoopRunRequestSchema,
   LoopListRequestSchema,
   LoopInspectRequestSchema,
@@ -399,6 +409,9 @@ export const MutableDaemonConfigSchema = z
     builtinPlugins: BuiltinPluginConfigSchema.optional(),
     pluginsEnabled: z.boolean().optional(),
     plugins: z.record(PluginIdSchema, PluginSourceSchema).optional(),
+    // COMPAT(speechSettings): added in v0.12.0, optional because older daemons omit it.
+    features: SpeechSettingsSchema.optional(),
+    envOverrides: z.record(z.string(), z.string()).optional(),
   })
   .strip();
 
@@ -447,6 +460,7 @@ export const MutableDaemonConfigPatchSchema = z
     // Delete plugin entries by id (the `plugins` record is deep-merged, so a
     // key can't be removed by omission — mirror removeProviders). See ADR-0014.
     removePlugins: z.array(PluginIdSchema).optional(),
+    features: SpeechSettingsPatchSchema.optional(),
   })
   .partial()
   .strip();
@@ -4466,6 +4480,9 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ChatWaitRequestSchema,
   ScheduleCreateRequestSchema,
   ScheduleListRequestSchema,
+  SpeechLocalModelsListRequestSchema,
+  SpeechLocalModelsDownloadRequestSchema,
+  SpeechLocalModelsDeleteRequestSchema,
   ScheduleInspectRequestSchema,
   ScheduleLogsRequestSchema,
   SchedulePauseRequestSchema,
@@ -4737,6 +4754,7 @@ export const ServerInfoStatusPayloadSchema = z
         forgeSearch: z.boolean().optional(),
         // COMPAT(daemonStatusRpc): added in v0.1.76, remove gate after 2026-11-18.
         daemonStatusRpc: z.boolean().optional(),
+        speechSettings: z.boolean().optional(),
         // COMPAT(terminalRestoreModes): added in v0.1.81, remove gate after 2026-11-23.
         "terminal-restore-modes": z.boolean().optional(),
         // COMPAT(terminalInputModeReplay): added in v0.2.6, remove gate after 2027-02-02.
@@ -8444,6 +8462,9 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ChatWaitResponseSchema,
   ScheduleCreateResponseSchema,
   ScheduleListResponseSchema,
+  SpeechLocalModelsListResponseSchema,
+  SpeechLocalModelsDownloadResponseSchema,
+  SpeechLocalModelsDeleteResponseSchema,
   ScheduleInspectResponseSchema,
   ScheduleLogsResponseSchema,
   SchedulePauseResponseSchema,

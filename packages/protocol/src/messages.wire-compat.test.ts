@@ -1,6 +1,8 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import {
+  MutableDaemonConfigSchema,
+  MutableDaemonConfigPatchSchema,
   AgentSnapshotPayloadSchema,
   AgentTimelineItemPayloadSchema,
   ServerInfoStatusPayloadSchema,
@@ -290,4 +292,51 @@ describe("wire schema compatibility", () => {
     expect(parsed.capabilities.supportsRewindFiles).toBe(false);
     expect(parsed.capabilities.supportsRewindBoth).toBe(false);
   });
+});
+
+test("local STT language survives wire reads and patches", () => {
+  const patch = {
+    features: {
+      dictation: { stt: { provider: "local", language: "fr" } },
+      voiceMode: { stt: { provider: "local", language: null } },
+    },
+  };
+  expect(MutableDaemonConfigPatchSchema.parse(patch)).toEqual(patch);
+});
+
+test("speech config reads remain compatible with clients before features and future providers", () => {
+  const oldSchema = MutableDaemonConfigSchema.omit({ features: true, envOverrides: true });
+  const oldRead = oldSchema.parse({
+    providers: {},
+    relay: { enabled: false, endpoint: "relay.jagentdesk.local:443", useTls: true },
+    mcp: { enabled: true, injectIntoAgents: true },
+  });
+  const read = {
+    ...oldRead,
+    features: {
+      dictation: { enabled: true, stt: { provider: "local", language: "fr" } },
+      voiceMode: {
+        enabled: false,
+        stt: { provider: "future", model: "future-model", region: "eu" },
+        tts: { provider: "openai", hasApiKey: false },
+      },
+    },
+    envOverrides: { "features.voiceMode.stt.provider": "JAGENTDESK_VOICE_STT_PROVIDER" },
+  };
+  expect(oldSchema.parse(read)).toEqual(oldRead);
+  expect(MutableDaemonConfigSchema.parse(oldRead)).toEqual(oldRead);
+  expect(MutableDaemonConfigSchema.parse(read).features?.dictation.stt).toEqual(
+    read.features.dictation.stt,
+  );
+  expect(MutableDaemonConfigSchema.parse(read).features?.voiceMode.stt).toEqual(
+    read.features.voiceMode.stt,
+  );
+  const oldPatchSchema = MutableDaemonConfigPatchSchema.omit({ features: true });
+  const oldPatch = oldPatchSchema.parse({ relay: { enabled: true } });
+  expect(MutableDaemonConfigPatchSchema.parse(oldPatch)).toEqual(oldPatch);
+  expect(
+    MutableDaemonConfigPatchSchema.parse({
+      features: { voiceMode: { stt: { provider: "future", region: "eu" } } },
+    }).features?.voiceMode?.stt,
+  ).toEqual({ provider: "future", region: "eu" });
 });

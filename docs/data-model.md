@@ -208,15 +208,7 @@ Single file, validated with `PersistedConfigSchema`.
       portScript?: string    // executable that receives service/workspace context and prints one TCP port
     }
   },
-  providers: {
-    openai: {
-      apiKey?: string,
-      baseUrl?: string,
-      stt?: { apiKey?: string, baseUrl?: string },
-      tts?: { apiKey?: string, baseUrl?: string }
-    },
-    local: { modelsDir: string }
-  },
+  providers: { local: { modelsDir: string } },
   agents: {
     // ProviderOverrideSchema; legacy entries with `command: { mode, ... }` are migrated to the
     // current shape on load via `migrateProviderSettings`. Custom provider IDs must declare
@@ -276,36 +268,27 @@ For a desktop-managed daemon, fully quit and reopen JAgentDesk Desktop.
 
 `agents.metadataGeneration.providers` controls the preferred structured-generation fallback order for daemon-side metadata tasks such as commit messages, PR text, branch names, and generated agent titles. Entries are tried first in the configured order, then JAgentDesk falls through to dynamically discovered defaults and finally the current selection when available.
 
-Local speech model ids are intentionally narrow: STT uses `parakeet-tdt-0.6b-v2-int8`, TTS uses `kokoro-en-v0_19`, and turn detection uses the bundled Silero VAD model.
+### Speech settings
 
-Set these to select OpenAI instead of local speech:
+Configure Speech-to-text, Listening and Speaking independently under **Settings → host → Voice**.
+Local downloads show model sizes and languages before installation. Voice mode defaults to off;
+hosts that never saved a choice will find it disabled after upgrading.
 
-| Env var                             | Applies to                      |
-| ----------------------------------- | ------------------------------- |
-| `JAGENTDESK_VOICE_STT_PROVIDER`     | Voice mode STT provider         |
-| `JAGENTDESK_DICTATION_STT_PROVIDER` | Composer dictation STT provider |
-| `JAGENTDESK_VOICE_TTS_PROVIDER`     | Voice mode TTS provider         |
+Credentials belong to their use site: `features.dictation.stt`, `features.voiceMode.stt` or
+`features.voiceMode.tts`. Select `provider` (`local` or `openai`) at each site. OpenAI sites accept
+`apiKey`, `baseUrl` and `model`. STT accepts `language`; OpenAI STT also accepts
+`confidenceThreshold`. OpenAI TTS accepts `voice`; local TTS accepts `speakerId` and `speed`.
 
-OpenAI speech can be configured under `providers.openai`. STT and TTS resolve independently, so they can point at different endpoints:
+Legacy `providers.openai` credentials fold into sites that explicitly select OpenAI on load.
+Endpoint-specific values win over shared values. Unused legacy keys are discarded with a warning
+that contains only config paths. The next save writes the inline shape. Normalization preserves
+unrelated keys, including `builtinPlugins`, relay settings and `agents.providers` API blocks.
+Same-provider patches keep saved keys; changing provider replaces that site's fields. Reads redact keys.
 
-```json
-{
-  "providers": {
-    "openai": {
-      "stt": {
-        "apiKey": "sk-...",
-        "baseUrl": "https://stt.example.com/v1"
-      },
-      "tts": {
-        "apiKey": "sk-...",
-        "baseUrl": "https://api.openai.com/v1"
-      }
-    }
-  }
-}
-```
-
-`providers.openai.stt` is used for both composer dictation and voice mode speech-to-text; `providers.openai.tts` is used for voice mode text-to-speech. The equivalent env vars are `OPENAI_STT_API_KEY`/`OPENAI_STT_BASE_URL` and `OPENAI_TTS_API_KEY`/`OPENAI_TTS_BASE_URL`. Each feature falls back to `providers.openai.apiKey`/`providers.openai.baseUrl`, then `OPENAI_API_KEY`/`OPENAI_BASE_URL`, when its own fields are unset. These settings apply only to JAgentDesk OpenAI speech features, not to Codex or other OpenAI-backed tools.
+Provider environment overrides are `JAGENTDESK_DICTATION_STT_PROVIDER`,
+`JAGENTDESK_VOICE_STT_PROVIDER` and `JAGENTDESK_VOICE_TTS_PROVIDER`. The sheet marks overridden
+fields read-only. Saved API keys and base URLs win over `OPENAI_STT_*`, `OPENAI_TTS_*` and shared
+`OPENAI_*` fallbacks. These settings apply only to JAgentDesk speech.
 
 JAgentDesk uses these paths under the configured OpenAI base URL:
 

@@ -1,3 +1,7 @@
+import {
+  SpeechModelsSession,
+  type SpeechModelsSessionOptions,
+} from "./session/speech/speech-models-session.js";
 import { builtinPluginForRpc } from "./plugins/builtin/gates.js";
 import { BuiltinPluginError, type BuiltinPluginState } from "./plugins/builtin/state.js";
 import { SessionDelivery, type OwnedSubscription } from "./session/owned-subscriptions/index.js";
@@ -607,6 +611,7 @@ export interface SessionOptions {
   stt: Resolvable<SpeechToTextProvider | null>;
   sttLanguage?: string;
   tts: Resolvable<TextToSpeechProvider | null>;
+  speechModels?: SpeechModelsSessionOptions["runtime"];
   terminalManager: TerminalManager | null;
   providerSnapshotManager: ProviderSnapshotManager;
   providerUsageService: ProviderUsageService;
@@ -883,6 +888,7 @@ export class Session {
   private readonly onWorkspaceRecovered:
     | ((workspace: PersistedWorkspaceRecord) => Promise<void>)
     | null;
+  private readonly speechModelsSession: SpeechModelsSession;
   private readonly sessionLogger: pino.Logger;
   private readonly jagentdeskHome: string;
   private readonly worktreesRoot: string | undefined;
@@ -1025,6 +1031,7 @@ export class Session {
       stt,
       sttLanguage,
       tts,
+      speechModels,
       terminalManager,
       providerSnapshotManager,
       providerUsageService,
@@ -1065,6 +1072,10 @@ export class Session {
     this.jagentdeskHome = jagentdeskHome;
     this.worktreesRoot = worktreesRoot;
     this.serverId = serverId ?? "";
+    this.speechModelsSession = new SpeechModelsSession({
+      emit: (msg) => this.emit(msg),
+      runtime: speechModels,
+    });
     this.sessionLogger = logger.child({
       module: "session",
       clientId: this.clientId,
@@ -2579,6 +2590,7 @@ export class Session {
     // (possibly async) result and the rest are skipped — matching the previous
     // left-to-right `??` short-circuit chain exactly.
     const dispatchers: Array<() => Promise<void> | undefined> = [
+      () => this.speechModelsSession.dispatch(msg),
       () => this.dispatchVoiceAndControlMessage(msg),
       () => this.dispatchAgentRewindMessage(msg),
       () => this.dispatchAgentRelationshipMessage(msg),

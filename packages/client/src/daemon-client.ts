@@ -24,6 +24,7 @@ import type {
 } from "@jagentdesk/protocol/spec-mode";
 import type { z } from "zod";
 import { isRelayClientWebSocketUrl } from "@jagentdesk/protocol/daemon-endpoints";
+import type { LocalSpeechModel } from "@jagentdesk/protocol/speech/rpc-schemas";
 import { CLIENT_CAPS, type ClientCapability } from "@jagentdesk/protocol/client-capabilities";
 import type { DatabaseEngine, DbConnectionConfig } from "@jagentdesk/protocol/database/rpc-schemas";
 import type {
@@ -5905,6 +5906,34 @@ export class DaemonClient {
       responseType: "forge.member.add.response",
       timeout: 30000,
     });
+  }
+
+  async listLocalSpeechModels(requestId?: string): Promise<LocalSpeechModel[]> {
+    const payload = await this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "speech.local_models.list.request" },
+      responseType: "speech.local_models.list.response",
+    });
+    if (payload.error) throw new Error(payload.error);
+    return payload.models;
+  }
+
+  async downloadLocalSpeechModel(modelId: string, requestId?: string): Promise<void> {
+    const payload = await this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "speech.local_models.download.request", modelId },
+      responseType: "speech.local_models.download.response",
+    });
+    if (payload.error) throw new Error(payload.error);
+  }
+
+  async deleteLocalSpeechModel(modelId: string, requestId?: string): Promise<void> {
+    const payload = await this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "speech.local_models.delete.request", modelId },
+      responseType: "speech.local_models.delete.response",
+    });
+    if (payload.error) throw new Error(payload.error);
   }
 
   async forgeRemoveMember(

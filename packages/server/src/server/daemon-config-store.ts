@@ -1,3 +1,5 @@
+import type { SpeechSettingsPatch } from "@jagentdesk/protocol/speech/rpc-schemas";
+import { mergeSpeechSettingsPatch, type SpeechSettingsOwner } from "./speech/speech-settings.js";
 import { BUILTIN_PLUGIN_MANIFESTS } from "@jagentdesk/protocol/builtin-plugins";
 import {
   loadPersistedConfig,
@@ -207,13 +209,19 @@ export class DaemonConfigStore {
   private readonly changeListeners = new Set<ConfigListener>();
   private readonly fieldChangeHandlers = new Map<string, Set<FieldChangeHandler>>();
 
-  constructor(jagentdeskHome: string, initial: MutableDaemonConfig, logger?: LoggerLike) {
+  constructor(
+    jagentdeskHome: string,
+    initial: MutableDaemonConfig,
+    logger?: LoggerLike,
+    private readonly options: { speech?: SpeechSettingsOwner } = {},
+  ) {
     this.jagentdeskHome = jagentdeskHome;
     this.logger = getLogger(logger);
     const persisted = loadPersistedConfig(jagentdeskHome, this.logger);
     const builtinPlugins = initial.builtinPlugins ?? persisted.builtinPlugins;
     this.current = MutableDaemonConfigSchema.parse({
       ...initial,
+      ...options.speech?.read(persisted),
       ...(builtinPlugins ? { builtinPlugins } : {}),
     });
     if (!builtinPlugins) {
@@ -247,7 +255,12 @@ export class DaemonConfigStore {
 
   public patch(partial: MutableDaemonConfigPatch): MutableDaemonConfig {
     const parsedPatch = MutableDaemonConfigPatchSchema.parse(partial);
-    const { removeProviders = [], removePlugins = [], ...configPatch } = parsedPatch;
+    const {
+      removeProviders = [],
+      removePlugins = [],
+      features: speechPatch,
+      ...configPatch
+    } = parsedPatch;
     const removedProviders = Array.from(new Set(removeProviders));
     const removedPlugins = Array.from(new Set(removePlugins));
     let removedRoleIds: string[] = [];
@@ -259,6 +272,7 @@ export class DaemonConfigStore {
       configPatch.orchestration = orchestrationRest;
     }
     const merged = omitOrchestrationRoles(deepMerge(this.current, configPatch), removedRoleIds);
+    const speechPersisted = this.readPatchedSpeech(speechPatch, merged);
     const next = MutableDaemonConfigSchema.parse(
       omitPluginsFromConfig(
         omitMetadataGenerationProvidersFromConfig(
@@ -274,17 +288,26 @@ export class DaemonConfigStore {
     });
     const configChanged = !isEqualValue(this.current, next);
 
-    if (!configChanged && removedProviders.length === 0 && removedPlugins.length === 0) {
+    if (
+      !configChanged &&
+      removedProviders.length === 0 &&
+      removedPlugins.length === 0 &&
+      speechPatch === undefined
+    ) {
       return this.current;
     }
 
-    const persistedBeforePatch = this.persistConfig(next, removedProviders);
-    if (!configChanged) return this.current;
+    const persistedBeforePatch = this.persistConfig(next, removedProviders, speechPatch);
+    if (!configChanged) {
+      this.applySpeech(speechPersisted);
+      return this.current;
+    }
 
     const previous = this.current;
     const appliedFieldChanges: AppliedFieldChange[] = [];
     this.current = next;
     try {
+      this.applySpeech(speechPersisted);
       for (const path of changedFieldPaths) {
         const handlers = this.fieldChangeHandlers.get(path);
         if (!handlers) {
@@ -314,6 +337,25 @@ export class DaemonConfigStore {
     return next;
   }
 
+  private applySpeech(persisted: PersistedConfig | undefined): void {
+    if (persisted) this.options.speech?.apply(persisted);
+  }
+
+  private readPatchedSpeech(
+    patch: SpeechSettingsPatch | undefined,
+    merged: Record<string, unknown>,
+  ): PersistedConfig | undefined {
+    if (patch === undefined) return undefined;
+    if (!this.options.speech)
+      throw new Error("Speech settings are unavailable for this daemon instance");
+    const persisted = mergeSpeechSettingsPatch(
+      loadPersistedConfig(this.jagentdeskHome, this.logger),
+      patch,
+    );
+    Object.assign(merged, this.options.speech.read(persisted));
+    return persisted;
+  }
+
   public onFieldChange(path: string, handler: FieldChangeHandler): () => void {
     const handlers = this.fieldChangeHandlers.get(path) ?? new Set<FieldChangeHandler>();
     handlers.add(handler);
@@ -341,10 +383,11 @@ export class DaemonConfigStore {
   private persistConfig(
     config: MutableDaemonConfig,
     removeProviders: readonly string[],
+    speechPatch?: SpeechSettingsPatch,
   ): PersistedConfig {
     const persisted = loadPersistedConfig(this.jagentdeskHome, this.logger);
     const nextPersisted = mergeMutableConfigIntoPersistedConfig({
-      persisted,
+      persisted: speechPatch ? mergeSpeechSettingsPatch(persisted, speechPatch) : persisted,
       mutable: config,
       removeProviders,
     });
