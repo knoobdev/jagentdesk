@@ -5,6 +5,7 @@ import {
   deleteJAgentDeskWorktree,
   isJAgentDeskOwnedWorktreeCwd,
   mapWorkspaceCwdToWorktree,
+  runWorktreeTeardownCommands,
   slugify,
   type CreateWorktreeOptions,
   type WorktreeConfig,
@@ -95,9 +96,19 @@ describe("jagentdesk worktree manager", () => {
     expect(existsSync(created.worktreePath)).toBe(true);
 
     const ownership = await isJAgentDeskOwnedWorktreeCwd(created.worktreePath, { jagentdeskHome });
-    expect(ownership.allowed).toBe(true);
+    expect(ownership).toMatchObject({ allowed: true, worktreePath: created.worktreePath });
+    // Windows may report the same root through native 8.3 and JS long spellings.
+    const nativeWorktreePath = realpathSync.native(created.worktreePath);
     await expect(
-      isJAgentDeskOwnedWorktreeCwd(join(created.worktreePath, "packages", "app"), { jagentdeskHome }),
+      runWorktreeTeardownCommands({
+        worktreePath: created.worktreePath,
+        teardownCwd: nativeWorktreePath,
+      }),
+    ).resolves.toEqual([]);
+    await expect(
+      isJAgentDeskOwnedWorktreeCwd(join(created.worktreePath, "packages", "app"), {
+        jagentdeskHome,
+      }),
     ).resolves.toMatchObject({
       allowed: true,
       worktreePath: created.worktreePath,
@@ -185,10 +196,14 @@ describe("jagentdesk worktree manager", () => {
     const projectHashDir = join(worktreesRoot, projectHash);
     mkdirSync(projectHashDir, { recursive: true });
 
-    await expect(isJAgentDeskOwnedWorktreeCwd(worktreesRoot, { jagentdeskHome })).resolves.toMatchObject({
+    await expect(
+      isJAgentDeskOwnedWorktreeCwd(worktreesRoot, { jagentdeskHome }),
+    ).resolves.toMatchObject({
       allowed: false,
     });
-    await expect(isJAgentDeskOwnedWorktreeCwd(projectHashDir, { jagentdeskHome })).resolves.toMatchObject({
+    await expect(
+      isJAgentDeskOwnedWorktreeCwd(projectHashDir, { jagentdeskHome }),
+    ).resolves.toMatchObject({
       allowed: false,
     });
   });
@@ -235,7 +250,11 @@ describe("jagentdesk worktree manager", () => {
 
     // Second call — nothing left on disk and no admin entry — must not throw.
     await expect(
-      deleteJAgentDeskWorktree({ cwd: repoDir, worktreePath: created.worktreePath, jagentdeskHome }),
+      deleteJAgentDeskWorktree({
+        cwd: repoDir,
+        worktreePath: created.worktreePath,
+        jagentdeskHome,
+      }),
     ).resolves.toBeUndefined();
   });
 

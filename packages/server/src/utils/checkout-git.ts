@@ -1,7 +1,6 @@
 import { MAX_RELAY_WEBSOCKET_MESSAGE_BYTES } from "@jagentdesk/protocol/websocket-message-limit";
 import { resolve, dirname, basename } from "path";
-import { existsSync, realpathSync } from "fs";
-import { open as openFile, readFile, stat as statFile } from "fs/promises";
+import { open as openFile, readFile, stat as statFile, realpath, access } from "fs/promises";
 import { setImmediate } from "node:timers/promises";
 import { TTLCache } from "@isaacs/ttlcache";
 import type { CheckoutCommit, CheckoutCommitFile } from "@jagentdesk/protocol/messages";
@@ -1072,7 +1071,7 @@ async function getMainRepoRootFromCommonDir(
   if (!commonDir) {
     throw new Error("Not in a git repository");
   }
-  const normalized = realpathSync(commonDir);
+  const normalized = await realpath(commonDir);
 
   if (basename(normalized) === ".git") {
     return dirname(normalized);
@@ -1198,7 +1197,7 @@ export async function renameCurrentBranch(
 
   const currentBranch = await getCurrentBranch(cwd);
   if (currentBranch) {
-    rebindJAgentDeskWorktreeChangeRequestHint(worktreeRoot, previousBranch, currentBranch);
+    await rebindJAgentDeskWorktreeChangeRequestHint(worktreeRoot, previousBranch, currentBranch);
   }
   return { previousBranch, currentBranch };
 }
@@ -1243,8 +1242,8 @@ function storedBaseRefFromMetadata(metadata: JAgentDeskWorktreeMetadata | null):
   return metadata?.baseRef ?? metadata?.baseRefName ?? null;
 }
 
-function readJAgentDeskWorktreeBaseRef(worktreeRoot: string): string | null {
-  return storedBaseRefFromMetadata(readJAgentDeskWorktreeMetadata(worktreeRoot));
+async function readJAgentDeskWorktreeBaseRef(worktreeRoot: string): Promise<string | null> {
+  return storedBaseRefFromMetadata(await readJAgentDeskWorktreeMetadata(worktreeRoot));
 }
 
 async function getStoredBaseRefForCwd(
@@ -1518,7 +1517,12 @@ async function abortGitPullConflictState(cwd: string): Promise<void> {
   const rebaseMergePath = resolve(gitDir, "rebase-merge");
   const rebaseApplyPath = resolve(gitDir, "rebase-apply");
 
-  if (existsSync(mergeHeadPath)) {
+  if (
+    await access(mergeHeadPath).then(
+      () => true,
+      () => false,
+    )
+  ) {
     try {
       await runGitCommand(["merge", "--abort"], { cwd, timeout: 120_000 });
     } catch {
@@ -1526,7 +1530,16 @@ async function abortGitPullConflictState(cwd: string): Promise<void> {
     }
   }
 
-  if (existsSync(rebaseMergePath) || existsSync(rebaseApplyPath)) {
+  if (
+    (await access(rebaseMergePath).then(
+      () => true,
+      () => false,
+    )) ||
+    (await access(rebaseApplyPath).then(
+      () => true,
+      () => false,
+    ))
+  ) {
     try {
       await runGitCommand(["rebase", "--abort"], { cwd, timeout: 120_000 });
     } catch {
@@ -2043,7 +2056,7 @@ export async function getCheckoutSnapshotFacts(
   }
 
   const jagentdeskWorktreeMetadata = inspected.jagentdeskWorktree.isJAgentDeskOwnedWorktree
-    ? readJAgentDeskWorktreeMetadata(inspected.jagentdeskWorktree.worktreeRoot)
+    ? await readJAgentDeskWorktreeMetadata(inspected.jagentdeskWorktree.worktreeRoot)
     : null;
   const storedBaseRef = storedBaseRefFromMetadata(jagentdeskWorktreeMetadata);
   const resolvedBaseRef = storedBaseRef ?? (await resolveBaseRef(cwd, context));

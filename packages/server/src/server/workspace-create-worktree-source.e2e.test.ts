@@ -155,6 +155,7 @@ async function createRestorableWorkspace(baseRef: string) {
   commitFile(cwd, "feature.txt", "feature change\n");
   const head = runGit(cwd, "rev-parse", "HEAD");
   await client.checkoutRefresh(cwd);
+  expect(await client.getCheckoutStatus(cwd)).toMatchObject({ isJAgentDeskOwnedWorktree: true });
   const before = await client.getCheckoutDiff(cwd, { mode: "base", baseRef: "main" });
   expect(before.error).toBeNull();
   expect(before.files.map((file) => file.path)).toEqual(["feature.txt"]);

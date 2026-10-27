@@ -517,7 +517,7 @@ test("renames an eligible unnamed branch-off worktree once on first agent contex
   );
 
   expect(created.worktree.branchName).toBe("dazzling-yak");
-  expect(readJAgentDeskWorktreeMetadata(created.worktree.worktreePath)).toMatchObject({
+  expect(await readJAgentDeskWorktreeMetadata(created.worktree.worktreePath)).toMatchObject({
     version: 2,
     firstAgentBranchAutoName: {
       status: "pending",
@@ -544,7 +544,7 @@ test("renames an eligible unnamed branch-off worktree once on first agent contex
     branchName: "renamed-from-agent-context",
   });
   expect(branchAfterFirst).toBe("renamed-from-agent-context");
-  expect(readJAgentDeskWorktreeMetadata(created.worktree.worktreePath)).toMatchObject({
+  expect(await readJAgentDeskWorktreeMetadata(created.worktree.worktreePath)).toMatchObject({
     version: 2,
     firstAgentBranchAutoName: {
       status: "attempted",
@@ -731,7 +731,7 @@ test("leaves the branch alone when generated branch text is invalid", async () =
       .toString()
       .trim(),
   ).toBe("dazzling-yak");
-  expect(readJAgentDeskWorktreeMetadata(created.worktree.worktreePath)).toMatchObject({
+  expect(await readJAgentDeskWorktreeMetadata(created.worktree.worktreePath)).toMatchObject({
     version: 2,
     firstAgentBranchAutoName: {
       status: "attempted",
@@ -760,7 +760,7 @@ test("does not mark checkout branch worktrees as eligible for first-agent rename
     createDeps(),
   );
 
-  expect(readJAgentDeskWorktreeMetadata(created.worktree.worktreePath)).toMatchObject({
+  expect(await readJAgentDeskWorktreeMetadata(created.worktree.worktreePath)).toMatchObject({
     version: 1,
     baseRefName: "dev",
   });
@@ -799,7 +799,7 @@ test("does not mark GitHub PR checkout worktrees as eligible for first-agent ren
     createDeps(),
   );
 
-  expect(readJAgentDeskWorktreeMetadata(created.worktree.worktreePath)).toMatchObject({
+  expect(await readJAgentDeskWorktreeMetadata(created.worktree.worktreePath)).toMatchObject({
     version: 1,
     baseRefName: "main",
   });

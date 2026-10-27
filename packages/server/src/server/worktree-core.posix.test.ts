@@ -116,7 +116,11 @@ function createGitRepo(): { tempDir: string; repoDir: string; jagentdeskHome: st
   return { tempDir, repoDir, jagentdeskHome };
 }
 
-function createGitRepoWithDevBranch(): { tempDir: string; repoDir: string; jagentdeskHome: string } {
+function createGitRepoWithDevBranch(): {
+  tempDir: string;
+  repoDir: string;
+  jagentdeskHome: string;
+} {
   const { tempDir, repoDir, jagentdeskHome } = createGitRepo();
   execFileSync("git", ["checkout", "-b", "dev"], { cwd: repoDir, stdio: "pipe" });
   writeFileSync(path.join(repoDir, "README.md"), "dev branch\n");
@@ -129,7 +133,11 @@ function createGitRepoWithDevBranch(): { tempDir: string; repoDir: string; jagen
   return { tempDir, repoDir, jagentdeskHome };
 }
 
-function createGitRepoWithOriginMain(): { tempDir: string; repoDir: string; jagentdeskHome: string } {
+function createGitRepoWithOriginMain(): {
+  tempDir: string;
+  repoDir: string;
+  jagentdeskHome: string;
+} {
   const { tempDir, repoDir, jagentdeskHome } = createGitRepo();
   const remoteDir = path.join(tempDir, "origin.git");
   execFileSync("git", ["clone", "--bare", repoDir, remoteDir], { stdio: "pipe" });
@@ -869,8 +877,10 @@ describe.skipIf(isPlatform("win32"))("worktree-core POSIX-only", () => {
         second.worktree.worktreePath,
         "remote.jagentdesk-pr-14.url",
       );
-      const metadata = readJAgentDeskWorktreeMetadata(second.worktree.worktreePath);
-      const facts = await getCheckoutSnapshotFacts(second.worktree.worktreePath, { jagentdeskHome });
+      const metadata = await readJAgentDeskWorktreeMetadata(second.worktree.worktreePath);
+      const facts = await getCheckoutSnapshotFacts(second.worktree.worktreePath, {
+        jagentdeskHome,
+      });
 
       expect(second.worktree.branchName).toBe("feature/gitlab-mr-1");
       expect(pushRemote).toBeNull();
@@ -1134,12 +1144,14 @@ describe.skipIf(isPlatform("win32"))("worktree-core POSIX-only", () => {
         createCoreDeps({ github }),
       );
       writeFileSync(
-        getJAgentDeskWorktreeMetadataPath(second.worktree.worktreePath),
+        await getJAgentDeskWorktreeMetadataPath(second.worktree.worktreePath),
         `${JSON.stringify({ version: 1, baseRefName: "main" }, null, 2)}\n`,
         "utf8",
       );
 
-      const facts = await getCheckoutSnapshotFacts(second.worktree.worktreePath, { jagentdeskHome });
+      const facts = await getCheckoutSnapshotFacts(second.worktree.worktreePath, {
+        jagentdeskHome,
+      });
 
       expect(second.worktree.branchName).toBe("daemon-shutdown-diagnostics-1");
       expect(facts).toMatchObject({
