@@ -8927,8 +8927,6 @@ export class Session {
     // ADR-0020: the daemon retains only projected items, so every fetch (including a legacy
     // `canonical` request) is answered with projected items.
     const projection = "projected" as const;
-    const requestedLimit = msg.limit;
-    const pageLimit = requestedLimit ?? (direction === "after" ? 0 : 200);
     const cursor: AgentTimelineCursor | undefined = msg.cursor
       ? {
           epoch: msg.cursor.epoch,
@@ -8947,7 +8945,7 @@ export class Session {
       const fetchedControlTimeline = this.agentManager.fetchTimeline(msg.agentId, {
         direction,
         cursor,
-        limit: pageLimit,
+        limit: msg.limit,
       });
       const selectedTimeline = {
         timeline: fetchedControlTimeline,
