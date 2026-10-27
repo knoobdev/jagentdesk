@@ -1,4 +1,7 @@
 import { describe, it, expect } from "vitest";
+import { measureMainThreadWork } from "../../../server/src/test-utils/main-thread-work.js";
+import { setImmediate } from "node:timers/promises";
+import { highlightCodeWithBudget, HIGHLIGHT_MAX_SOURCE_BYTES } from "../budgeted-highlighter.js";
 import { highlightCode, highlightLine } from "../highlighter.js";
 
 describe("highlightCode", () => {
@@ -354,5 +357,43 @@ describe("highlightLine", () => {
     const tokens = highlightLine("hello", "test.xyz");
 
     expect(tokens).toEqual([{ text: "hello", style: null }]);
+  });
+});
+
+describe("highlightCodeWithBudget", () => {
+  it("yields to IO while producing byte-identical output below the source budget", async () => {
+    const code = "const value = Math.max(42, 7);\n".repeat(3_000);
+    const expected = JSON.stringify(highlightCode(code, "file.ts"));
+    const measured = await measureMainThreadWork("budgeted highlight", () =>
+      highlightCodeWithBudget(code, "file.ts", { yieldToEventLoop: setImmediate }),
+    );
+    expect(measured.yields).toBeGreaterThan(1);
+    expect(measured.blockingMs).toBeLessThan(50);
+    expect(JSON.stringify(measured.result)).toBe(expected);
+  });
+
+  it("budgets UTF-8 bytes before parsing, including multibyte text", async () => {
+    expect(
+      await highlightCodeWithBudget("é".repeat(HIGHLIGHT_MAX_SOURCE_BYTES / 2 + 1), "file.ts", {
+        yieldToEventLoop: setImmediate,
+      }),
+    ).toBeNull();
+    expect(
+      await highlightCodeWithBudget("a".repeat(HIGHLIGHT_MAX_SOURCE_BYTES + 1), "file.ts", {
+        yieldToEventLoop: setImmediate,
+      }),
+    ).toBeNull();
+  });
+
+  it("stops a parser that is cancelled between real event-loop turns", async () => {
+    const controller = new AbortController();
+    const pending = highlightCodeWithBudget(
+      "const value = Math.max(42, 7);\n".repeat(3_000),
+      "file.ts",
+      { yieldToEventLoop: setImmediate, signal: controller.signal },
+    );
+    await setImmediate();
+    controller.abort();
+    expect(await pending).toBeNull();
   });
 });
