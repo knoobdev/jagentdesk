@@ -1,3 +1,6 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 // Upstream e2e coverage kept for the next selective port. Skipped: needs timeline.append, DaemonClient.observeEvents and the upstream subscription API, which the fork does not have.
 import { EventEmitter, once } from "node:events";
 import { resolveDaemonVersion } from "../daemon-version.js";
@@ -411,3 +414,24 @@ export default function contribute(server: PluginServerContext) {
     await daemon.close();
   }
 }, 60_000);
+
+test("keeps reload and enable responsive while compiling a real plugin", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "jagentdesk-responsive-plugin-"));
+  roots.push(directory);
+  const { stdout, stderr } = await promisify(execFile)(
+    process.execPath,
+    [
+      "--import",
+      "tsx",
+      fileURLToPath(new URL("./test-fixtures/compile-responsiveness.e2e.ts", import.meta.url)),
+      directory,
+    ],
+    { timeout: 20_000 },
+  );
+  process.stderr.write(stderr);
+  const results = z
+    .array(z.object({ blockingMs: z.number() }))
+    .length(2)
+    .parse(JSON.parse(stdout));
+  for (const result of results) expect(result.blockingMs).toBeLessThan(20);
+});

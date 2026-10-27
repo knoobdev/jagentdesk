@@ -1,7 +1,6 @@
 import type { PluginBeforeRequests, PluginLifecycleEvents } from "@jagentdesk/plugin/server";
 import { validateBeforeRequest, validateBeforeResult } from "./lifecycle/index.js";
 import { fork } from "node:child_process";
-import { stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
@@ -16,10 +15,8 @@ import {
   type ProviderInput,
 } from "@jagentdesk/plugin/server/provider";
 import type { PluginLogEntry } from "@jagentdesk/protocol/messages";
-import { compilePlugin } from "./compiler.js";
-import { readPluginManifest } from "./manifest.js";
+import { compileDirectoryPlugin } from "./compiler.js";
 import type { PluginRequirements } from "@jagentdesk/protocol/messages";
-import { assertPluginCompatibility } from "@jagentdesk/protocol/plugin-requirements";
 import type {
   PluginProcessMessage,
   PluginProcessRequest,
@@ -28,9 +25,6 @@ import type {
 import { PluginProcessMessageSchema } from "./plugin-process-protocol.js";
 import { PluginSessionSocket } from "./session-socket.js";
 
-const CLIENT_ENTRY_FILENAMES = ["index.client.ts", "index.client.tsx"] as const;
-const SERVER_ENTRY_FILENAMES = ["index.server.ts", "index.server.tsx"] as const;
-const LEGACY_ENTRY_FILENAMES = ["index.ts", "index.tsx"] as const;
 const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_LOG_ENTRIES = 500;
 const MAX_LOG_BYTES = 256 * 1024;
@@ -256,42 +250,6 @@ function send(child: PluginChild, message: PluginProcessRequest): Promise<void> 
   });
 }
 
-async function findEntry(directory: string, filenames: readonly string[]): Promise<string | null> {
-  for (const filename of filenames) {
-    const filePath = path.join(directory, filename);
-    const info = await stat(filePath).catch(() => null);
-    if (info?.isFile()) return filePath;
-  }
-  return null;
-}
-
-async function resolveEntryPaths(directory: string): Promise<{
-  client: string | null;
-  server: string | null;
-}> {
-  const [client, server] = await Promise.all([
-    findEntry(directory, CLIENT_ENTRY_FILENAMES),
-    findEntry(directory, SERVER_ENTRY_FILENAMES),
-  ]);
-  // JAgentDesk ≤ v0.9.40 installed Paseo plugins by renaming index.client.* to index.ts(x);
-  // such an install still has index.server.* next to it. Treat that renamed file as the
-  // client entry so those plugins keep their UI without a reinstall.
-  if (server && !client) {
-    const renamedClient = await findEntry(directory, LEGACY_ENTRY_FILENAMES);
-    if (renamedClient) return { client: renamedClient, server };
-  }
-  if (client || server) return { client, server };
-  // Single-entry plugins from before the client/server split (e.g. a theme that only calls
-  // addTheme) still run as a client entry. Upstream rejects them; JAgentDesk users already
-  // have some installed, so the fork keeps loading them. One that needs server APIs fails
-  // with the client context's own missing-method error.
-  const legacyEntry = await findEntry(directory, LEGACY_ENTRY_FILENAMES);
-  if (legacyEntry) return { client: legacyEntry, server: null };
-  throw new Error(
-    `Plugin entry points are missing: expected ${CLIENT_ENTRY_FILENAMES.join(" or ")} and/or ${SERVER_ENTRY_FILENAMES.join(" or ")} in ${directory}`,
-  );
-}
-
 export class PluginRuntime {
   private readonly plugins = new Map<string, LoadedPlugin>();
   private readonly logTails = new Map<string, PluginLogTail>();
@@ -328,14 +286,16 @@ export class PluginRuntime {
   ): Promise<void> {
     if (this.plugins.has(pluginId)) throw new Error(`Plugin is already running: ${pluginId}`);
     this.appendLog(pluginId, "stdout", "[jagentdesk] Loading plugin");
-    const loaded = await this.loadDirectoryPlugin(pluginId, configuredPath).catch((error) => {
-      this.appendLog(
-        pluginId,
-        "stderr",
-        `[jagentdesk] Plugin failed to load: ${describeError(error)}`,
-      );
-      throw error;
-    });
+    const loaded = await this.loadDirectoryPlugin(pluginId, configuredPath, canPublish).catch(
+      (error) => {
+        this.appendLog(
+          pluginId,
+          "stderr",
+          `[jagentdesk] Plugin failed to load: ${describeError(error)}`,
+        );
+        throw error;
+      },
+    );
     if (!canPublish()) {
       await this.stopPlugin(loaded);
       throw new Error(`Plugin start cancelled: ${pluginId}`);
@@ -345,11 +305,7 @@ export class PluginRuntime {
   }
 
   async validatePlugin(configuredPath: string): Promise<void> {
-    const directory = path.resolve(configuredPath);
-    const manifest = await readPluginManifest(directory);
-    assertPluginCompatibility({ ...manifest, version: this.daemonVersion, runtime: "daemon" });
-    const entryPaths = await resolveEntryPaths(directory);
-    await compilePlugin(entryPaths);
+    await compileDirectoryPlugin(path.resolve(configuredPath), this.daemonVersion);
   }
 
   async stopPluginById(pluginId: string): Promise<boolean> {
@@ -563,12 +519,12 @@ export class PluginRuntime {
   private async loadDirectoryPlugin(
     pluginId: string,
     configuredPath: string,
+    canPublish: () => boolean,
   ): Promise<LoadedPlugin> {
     const directory = path.resolve(configuredPath);
-    const manifest = await readPluginManifest(directory);
-    assertPluginCompatibility({ ...manifest, version: this.daemonVersion, runtime: "daemon" });
-    const entryPaths = await resolveEntryPaths(directory);
-    const bundles = await compilePlugin(entryPaths);
+    const bundles = await compileDirectoryPlugin(directory, this.daemonVersion);
+    const { manifest } = bundles;
+    if (!canPublish()) throw new Error(`Plugin start cancelled: ${pluginId}`);
     const serverBundle = bundles.serverBundle;
     if (!serverBundle) {
       return {
