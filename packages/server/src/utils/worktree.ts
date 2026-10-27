@@ -11,7 +11,7 @@ import {
   buildStringCommandShellInvocation,
   createStringCommandShellEnv,
 } from "./string-command-shell.js";
-import { readJAgentDeskConfigJson, resolveJAgentDeskConfigPath } from "./jagentdesk-config-file.js";
+import { readJAgentDeskConfig } from "./jagentdesk-config-file.js";
 export {
   JAgentDeskConfigRawSchema,
   JAgentDeskLifecycleCommandRawSchema,
@@ -21,10 +21,7 @@ export {
   type JAgentDeskConfig,
   type JAgentDeskConfigRaw,
 } from "@jagentdesk/protocol/jagentdesk-config-schema";
-import {
-  JAgentDeskConfigSchema,
-  type JAgentDeskConfig,
-} from "@jagentdesk/protocol/jagentdesk-config-schema";
+import type { JAgentDeskConfig } from "@jagentdesk/protocol/jagentdesk-config-schema";
 import {
   createJAgentDeskWorktreeChangeRequestHint,
   normalizeBaseRefName,
@@ -260,21 +257,7 @@ export class InvalidGitBranchNameError extends Error {
   }
 }
 
-export type ReadJAgentDeskConfigResult =
-  | { ok: true; config: JAgentDeskConfig | null }
-  | { ok: false; configPath: string; error: unknown };
-
-export function readJAgentDeskConfig(repoRoot: string): ReadJAgentDeskConfigResult {
-  try {
-    const json = readJAgentDeskConfigJson(repoRoot);
-    if (json === null) {
-      return { ok: true, config: null };
-    }
-    return { ok: true, config: JAgentDeskConfigSchema.parse(json) };
-  } catch (error) {
-    return { ok: false, configPath: resolveJAgentDeskConfigPath(repoRoot), error };
-  }
-}
+export { readJAgentDeskConfig, type ReadJAgentDeskConfigResult } from "./jagentdesk-config-file.js";
 
 export function jagentdeskConfigParseError(failure: { configPath: string; error: unknown }): Error {
   const detail = failure.error instanceof Error ? failure.error.message : String(failure.error);
@@ -283,24 +266,26 @@ export function jagentdeskConfigParseError(failure: { configPath: string; error:
   });
 }
 
-function readJAgentDeskConfigOrThrow(repoRoot: string): JAgentDeskConfig | null {
-  const result = readJAgentDeskConfig(repoRoot);
+async function readJAgentDeskConfigOrThrow(repoRoot: string): Promise<JAgentDeskConfig | null> {
+  const result = await readJAgentDeskConfig(repoRoot);
   if (!result.ok) {
     throw jagentdeskConfigParseError(result);
   }
   return result.config;
 }
 
-export function getWorktreeSetupCommands(repoRoot: string): string[] {
-  return readJAgentDeskConfigOrThrow(repoRoot)?.worktree?.setup ?? [];
+export async function getWorktreeSetupCommands(repoRoot: string): Promise<string[]> {
+  return (await readJAgentDeskConfigOrThrow(repoRoot))?.worktree?.setup ?? [];
 }
 
-export function getWorktreeTeardownCommands(repoRoot: string): string[] {
-  return readJAgentDeskConfigOrThrow(repoRoot)?.worktree?.teardown ?? [];
+export async function getWorktreeTeardownCommands(repoRoot: string): Promise<string[]> {
+  return (await readJAgentDeskConfigOrThrow(repoRoot))?.worktree?.teardown ?? [];
 }
 
-export function getWorktreeTerminalSpecs(repoRoot: string): WorktreeTerminalConfig[] {
-  const terminals = readJAgentDeskConfigOrThrow(repoRoot)?.worktree?.terminals;
+export async function getWorktreeTerminalSpecs(
+  repoRoot: string,
+): Promise<WorktreeTerminalConfig[]> {
+  const terminals = (await readJAgentDeskConfigOrThrow(repoRoot))?.worktree?.terminals;
   if (!Array.isArray(terminals) || terminals.length === 0) {
     return [];
   }
@@ -639,7 +624,7 @@ export async function runWorktreeSetupCommands(options: {
   onEvent?: (event: WorktreeSetupCommandProgressEvent) => void;
 }): Promise<WorktreeSetupCommandResult[]> {
   // Read jagentdesk.json from the worktree (it will have the same content as the source repo)
-  const setupCommands = getWorktreeSetupCommands(options.worktreePath);
+  const setupCommands = await getWorktreeSetupCommands(options.worktreePath);
   if (setupCommands.length === 0) {
     return [];
   }
@@ -752,7 +737,7 @@ export async function runWorktreeTeardownCommands(options: {
   if ((await getOwnershipRelativePath(options.worktreePath, teardownCwd)) === null) {
     throw new Error(`Worktree teardown cwd is outside the worktree: ${teardownCwd}`);
   }
-  const teardownCommands = getWorktreeTeardownCommands(teardownCwd);
+  const teardownCommands = await getWorktreeTeardownCommands(teardownCwd);
   if (teardownCommands.length === 0) {
     return [];
   }

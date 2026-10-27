@@ -33,11 +33,11 @@ interface BuildWorkspaceScriptPayloadsOptions {
   resolveHealth?: (hostname: string) => ScriptHealthState | null;
 }
 
-export function readJAgentDeskConfigForProjection(
+export async function readJAgentDeskConfigForProjection(
   workspaceDirectory: string,
   logger: Logger,
-): JAgentDeskConfig | null {
-  const result = readJAgentDeskConfig(workspaceDirectory);
+): Promise<JAgentDeskConfig | null> {
+  const result = await readJAgentDeskConfig(workspaceDirectory);
   if (result.ok) {
     return result.config;
   }
@@ -288,9 +288,9 @@ export function createScriptStatusEmitter({
   serviceProxyPublicBaseUrl?: string | null;
   resolveWorkspaceDirectory: (workspaceId: string) => string | null | Promise<string | null>;
   logger: Logger;
-}): (workspaceId: string, scripts: ScriptHealthEntry[]) => void {
-  return (workspaceId, scripts) => {
-    void (async () => {
+}): (workspaceId: string, scripts: ScriptHealthEntry[]) => Promise<void> {
+  return async (workspaceId, scripts) => {
+    try {
       const workspaceDirectory = await resolveWorkspaceDirectory(workspaceId);
       if (!workspaceDirectory) {
         return;
@@ -304,7 +304,7 @@ export function createScriptStatusEmitter({
       const projected = buildWorkspaceScriptPayloads({
         workspaceId,
         workspaceDirectory,
-        jagentdeskConfig: readJAgentDeskConfigForProjection(workspaceDirectory, logger),
+        jagentdeskConfig: await readJAgentDeskConfigForProjection(workspaceDirectory, logger),
         serviceProxy,
         runtimeStore,
         daemonPort: resolvedDaemonPort,
@@ -320,6 +320,8 @@ export function createScriptStatusEmitter({
       for (const session of sessions()) {
         session.emit(message);
       }
-    })();
+    } catch (error) {
+      logger.warn({ err: error, workspaceId }, "Failed to project workspace script status");
+    }
   };
 }

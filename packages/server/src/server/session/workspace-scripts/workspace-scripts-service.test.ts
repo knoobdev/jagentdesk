@@ -146,14 +146,20 @@ describe("buildSnapshot", () => {
   test("returns no scripts when the service proxy is unavailable", async () => {
     const { service } = buildService({ serviceProxy: null });
     expect(
-      service.buildSnapshot({ workspaceId: "ws-1", cwd: "/tmp/repo" } as PersistedWorkspaceRecord),
+      await service.buildSnapshot({
+        workspaceId: "ws-1",
+        cwd: "/tmp/repo",
+      } as PersistedWorkspaceRecord),
     ).toEqual([]);
   });
 
   test("returns no scripts when the runtime store is unavailable", async () => {
     const { service } = buildService({ scriptRuntimeStore: null });
     expect(
-      service.buildSnapshot({ workspaceId: "ws-1", cwd: "/tmp/repo" } as PersistedWorkspaceRecord),
+      await service.buildSnapshot({
+        workspaceId: "ws-1",
+        cwd: "/tmp/repo",
+      } as PersistedWorkspaceRecord),
     ).toEqual([]);
   });
 
@@ -162,7 +168,7 @@ describe("buildSnapshot", () => {
     tempDirs.push(dir);
     const { service } = buildService();
     expect(
-      service.buildSnapshot({ workspaceId: "ws-1", cwd: dir } as PersistedWorkspaceRecord),
+      await service.buildSnapshot({ workspaceId: "ws-1", cwd: dir } as PersistedWorkspaceRecord),
     ).toEqual([]);
   });
 
@@ -197,7 +203,7 @@ describe("buildSnapshot", () => {
       gitService: { peekSnapshot: () => undefined },
     });
 
-    expect(service.buildSnapshot(workspace, project)[0]?.hostname).toBe(
+    expect((await service.buildSnapshot(workspace, project))[0]?.hostname).toBe(
       serviceProxy.projectWorkspaceService({
         projectSlug: deriveProjectServiceSlug(project),
         branchName: workspace.branch,
@@ -416,7 +422,7 @@ describe("start", () => {
     const serviceProxy = createServiceProxySubsystem({ logger });
     const { service, spawnCalls } = buildService({ workspace, project, serviceProxy });
 
-    const snapshot = service.buildSnapshot(workspace, project);
+    const snapshot = await service.buildSnapshot(workspace, project);
     await service.start({ ...request, workspaceId: workspace.workspaceId });
 
     const started = spawnCalls[0]!;

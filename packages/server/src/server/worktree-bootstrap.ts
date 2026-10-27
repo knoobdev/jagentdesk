@@ -507,7 +507,7 @@ async function runWorktreeTerminalBootstrap(
   runtimeEnv: WorktreeRuntimeEnv,
 ): Promise<void> {
   const workspaceCwd = options.workspaceCwd ?? options.worktree.worktreePath;
-  const terminalSpecs = getWorktreeTerminalSpecs(workspaceCwd);
+  const terminalSpecs = await getWorktreeTerminalSpecs(workspaceCwd);
   if (terminalSpecs.length === 0) {
     return;
   }
@@ -878,7 +878,7 @@ export async function spawnWorkspaceScript(
     logger,
     onLifecycleChanged,
   } = options;
-  const configResult = readJAgentDeskConfig(repoRoot);
+  const configResult = await readJAgentDeskConfig(repoRoot);
   if (!configResult.ok) {
     throw jagentdeskConfigParseError(configResult);
   }

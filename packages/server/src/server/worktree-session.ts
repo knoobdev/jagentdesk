@@ -726,7 +726,7 @@ export async function runWorktreeSetupInBackground(
         emitSetupProgress("completed", null);
       } else {
         const workspaceCwd = options.workspaceCwd ?? worktree.worktreePath;
-        const setupCommands = getWorktreeSetupCommands(workspaceCwd);
+        const setupCommands = await getWorktreeSetupCommands(workspaceCwd);
         if (setupCommands.length === 0) {
           setupStarted = true;
           emitSetupProgress("completed", null);

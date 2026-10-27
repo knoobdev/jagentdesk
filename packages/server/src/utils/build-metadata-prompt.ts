@@ -1,8 +1,5 @@
-import { readJAgentDeskConfigJson } from "./jagentdesk-config-file.js";
-import {
-  JAgentDeskConfigSchema,
-  type JAgentDeskMetadataGeneration,
-} from "@jagentdesk/protocol/jagentdesk-config-schema";
+import { readJAgentDeskConfig } from "./jagentdesk-config-file.js";
+import { type JAgentDeskMetadataGeneration } from "@jagentdesk/protocol/jagentdesk-config-schema";
 
 export type MetadataConfigKey = "title" | "branchName" | "commitMessage" | "pullRequest";
 
@@ -52,8 +49,8 @@ async function readProjectMetadataOverrides(
   }
   try {
     const repoRoot = await options.workspaceGitService.resolveRepoRoot(options.cwd);
-    const json = readJAgentDeskConfigJson(repoRoot);
-    return JAgentDeskConfigSchema.parse(json).metadataGeneration;
+    const result = await readJAgentDeskConfig(repoRoot);
+    return result.ok ? result.config?.metadataGeneration : undefined;
   } catch {
     return undefined;
   }
