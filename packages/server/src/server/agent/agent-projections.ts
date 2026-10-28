@@ -91,6 +91,7 @@ export function toStoredAgentRecord(
     lastStatus: agent.lifecycle,
     lastModeId: agent.currentModeId ?? config?.modeId ?? null,
     config: config ?? null,
+    launchEnv: agent.launchEnv ? { ...agent.launchEnv } : undefined,
     runtimeInfo,
     features: normalizeFeatures(agent.features),
     persistence,

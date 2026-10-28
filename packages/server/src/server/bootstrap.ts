@@ -1,3 +1,4 @@
+import { createRestartRecovery } from "./agent/restart-recovery/index.js";
 import { getSharedProxyService } from "./proxy/proxy-service.js";
 import { resolveJAgentDeskToolPolicy } from "./agent/jagentdesk-tool-policy.js";
 import { BuiltinPluginLoader } from "./plugins/builtin/index.js";
@@ -452,6 +453,8 @@ export interface JAgentDeskDaemonConfig {
   listen: string;
   jagentdeskHome: string;
   daemonVersion?: string;
+  resumeOnStartup?: boolean;
+  resumePrompt?: string;
   desktopManaged?: boolean;
   worktreesRoot?: string;
   corsAllowedOrigins: string[];
@@ -1076,6 +1079,8 @@ export async function createJAgentDeskDaemon(
     providerDefinitions: initialAgentManagerState.providerDefinitions,
     registry: agentStorage,
     appendSystemPrompt: config.appendSystemPrompt,
+    resumeOnStartup: config.resumeOnStartup === true,
+    resumePrompt: config.resumePrompt ?? "Resume working.",
     operatorContext: config.operatorContext,
     onWorkspaceStateMayHaveChanged: ({ cwd }) => {
       workspaceGitService.onWorkspaceStateMayHaveChanged(cwd);
@@ -1108,6 +1113,20 @@ export async function createJAgentDeskDaemon(
     agentStorage,
   );
   await agentStorage.initialize();
+
+  const restartRecovery = createRestartRecovery({
+    storage: agentStorage,
+    settings: () => ({
+      enabled: daemonConfigStore.get().resumeOnStartup === true,
+      prompt: daemonConfigStore.get().resumePrompt ?? "Resume working.",
+    }),
+    eligible: async (record) =>
+      !record.workspaceId || !(await workspaceRegistry?.get(record.workspaceId))?.archivedAt,
+    dispatch: (agentId, prompt) =>
+      sendPromptToAgent({ agentId, prompt, agentManager, agentStorage, logger, unarchive: false }),
+    report: (agentId, err) => logger.error({ agentId, err }, "Agent restart recovery failed"),
+  });
+  await restartRecovery.prepareStartup();
 
   // Spec 34.6 hot reload: after a custom provider save/delete, re-read the
   // persisted config, rebuild the provider registry (base overrides replaced,
@@ -2291,6 +2310,7 @@ export async function createJAgentDeskDaemon(
             pluginRuntime.bindJAgentDeskSessionHost(wsServer);
             await pluginRuntime.start();
             providerSnapshotManager.settlePluginProviders();
+            restartRecovery.resumePending();
             tsnetListener = createTsnetListener({
               logger,
               port: boundListenTarget.type === "tcp" ? boundListenTarget.port : 0,
@@ -2393,6 +2413,7 @@ export async function createJAgentDeskDaemon(
     // Freeze both ingress and registration before taking the agent closure snapshot.
     wsServer?.prepareForShutdown();
     agentManager.prepareForShutdown();
+    await restartRecovery.captureRunningAgents();
     await closeAllAgents(logger, agentManager);
     await withTimeout({
       promise: pluginRuntime.drainEvents(),

@@ -360,7 +360,7 @@ describe("terminal-session-controller with terminals held by a newer JAgentDesk"
     "answers $type ($requestId) with a terminal_worker_incompatible rpc_error",
     async (request) => {
       const outboundMessages: SessionOutboundMessage[] = [];
-      const controller = createController({
+      const controller = new TerminalSessionController({
         terminalManager: incompatibleManager(),
         emit: (message) => outboundMessages.push(message),
         emitBinary: vi.fn(),

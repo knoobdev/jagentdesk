@@ -361,6 +361,8 @@ export const PersistedConfigSchema = z
     worktrees: WorktreesConfigSchema.optional(),
     agents: z
       .object({
+        resumeOnStartup: z.boolean().optional(),
+        resumePrompt: z.string().optional(),
         providers: z.preprocess(normalizeAgentProviders, ProviderOverridesSchema).optional(),
         metadataGeneration: AgentMetadataGenerationSchema.optional(),
       })

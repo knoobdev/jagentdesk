@@ -2209,6 +2209,14 @@ export const en = {
         },
       },
       agents: {
+        resumeOnStartup: {
+          title: "Resume agents after restart",
+          info: "Reopen agents that were working when the host stopped and send the resume prompt. Applies after graceful restarts and crashes.",
+          hint: "Continue interrupted work automatically.",
+          prompt: "Resume prompt",
+          edit: "Edit",
+          editAccessibilityLabel: "Edit prompt",
+        },
         unavailable: "Connect to this host to manage agents",
       },
       workspaces: {

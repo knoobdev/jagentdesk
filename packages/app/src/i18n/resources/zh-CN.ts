@@ -2118,6 +2118,14 @@ export const zhCN: TranslationResources = {
         },
       },
       agents: {
+        resumeOnStartup: {
+          title: "重启后恢复智能体",
+          info: "重新打开主机停止时正在工作的智能体，并发送恢复提示。适用于正常重启和崩溃后的恢复。",
+          hint: "自动继续被中断的工作。",
+          prompt: "恢复提示",
+          edit: "编辑",
+          editAccessibilityLabel: "编辑提示",
+        },
         unavailable: "连接到这个 Host 以管理 Agent",
       },
       workspaces: {

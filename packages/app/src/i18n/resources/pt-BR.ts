@@ -2175,6 +2175,14 @@ export const ptBR: TranslationResources = {
         },
       },
       agents: {
+        resumeOnStartup: {
+          title: "Retomar agentes após reiniciar",
+          info: "Reabre os agentes que estavam trabalhando quando o host parou e envia a mensagem de retomada. Aplica-se após reinicializações normais e falhas.",
+          hint: "Continuar automaticamente o trabalho interrompido.",
+          prompt: "Mensagem de retomada",
+          edit: "Editar",
+          editAccessibilityLabel: "Editar mensagem",
+        },
         unavailable: "Conecte-se a este host para gerenciar agentes",
       },
       workspaces: {
