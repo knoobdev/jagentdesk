@@ -1832,6 +1832,7 @@ export const fr: TranslationResources = {
     backdrop: "Arri\u00E8re-plan du menu",
   },
   subagents: {
+    title: "Sous-agents",
     parent: {
       openParent: "Open parent",
 

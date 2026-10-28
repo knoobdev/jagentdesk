@@ -1795,6 +1795,7 @@ export const ja: TranslationResources = {
     backdrop: "メニューの背景",
   },
   subagents: {
+    title: "サブエージェント",
     parent: {
       openParent: "Open parent",
 

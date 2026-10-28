@@ -1263,7 +1263,7 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
           />
         ) : null}
       </View>
-      {isSheet ? null : composerSection}
+      {composerSection}
       <>
         {showHistorySyncOverlay ? (
           <View style={styles.historySyncOverlay} testID="agent-history-overlay">
@@ -1562,6 +1562,7 @@ function ActiveAgentComposer({
   onComposerHeightChange: (height: number) => void;
   onMessageSent: () => void;
 }) {
+  const hideComposer = usePaneHost() === "sheet";
   const parentAgentId = useParentAgentId(serverId, agentId);
 
   const isCompactFormFactor = useIsCompactFormFactor();
@@ -1738,6 +1739,41 @@ function ActiveAgentComposer({
 
   const inputAreaStyle = useMemo(() => [animatedStaticStyles.inputAreaWrapper], []);
 
+  const composerContent = composerViewOnly ? (
+    <View style={styles.composerViewOnly} testID="orchestration-composer-view-only">
+      <Text style={styles.composerViewOnlyText}>
+        {guestReadOnly
+          ? "View-only session — you can follow the conversation but not send messages."
+          : "View-only while the run is active. Steer it by chatting with the Supervisor; this thread unlocks when the run is idle."}
+      </Text>
+    </View>
+  ) : (
+    <Composer
+      agentId={agentId}
+      serverId={serverId}
+      workspaceId={workspaceId}
+      isPaneFocused={isPaneFocused}
+      textSource={agentInputDraft.textSource}
+      textReplacement={agentInputDraft.textReplacement}
+      onChangeText={agentInputDraft.editText}
+      attachments={agentInputDraft.attachments}
+      attachmentScopeKeys={attachmentScopeKeys}
+      onOpenWorkspaceAttachment={handleOpenWorkspaceAttachment}
+      onChangeAttachments={agentInputDraft.setAttachments}
+      cwd={cwd}
+      clearDraft={agentInputDraft.clear}
+      autoFocus={isPaneFocused}
+      autoFocusKey={String(agentInputDraft.attachmentFocusRequestId)}
+      isSubmitLoading={isSubmitLoading}
+      onAttentionInputFocus={onAttentionInputFocus}
+      onAttentionPromptSend={onAttentionPromptSend}
+      onComposerHeightChange={onComposerHeightChange}
+      onMessageSent={onMessageSent}
+      onClientSlashCommand={handleClientSlashCommand}
+      isCompactLayout={isCompactComposerLayout}
+      topContent={specModeDock}
+    />
+  );
   return (
     <View style={inputAreaStyle} onLayout={onInputAreaLayout}>
       {isSupervisorThread ? (
@@ -1754,41 +1790,7 @@ function ActiveAgentComposer({
         onArchiveFinished={handleHideFinishedProviderSubagents}
         onDetachSubagent={canDetachSubagents ? handleDetachSubagent : undefined}
       />
-      {composerViewOnly ? (
-        <View style={styles.composerViewOnly} testID="orchestration-composer-view-only">
-          <Text style={styles.composerViewOnlyText}>
-            {guestReadOnly
-              ? "View-only session — you can follow the conversation but not send messages."
-              : "View-only while the run is active. Steer it by chatting with the Supervisor; this thread unlocks when the run is idle."}
-          </Text>
-        </View>
-      ) : (
-        <Composer
-          agentId={agentId}
-          serverId={serverId}
-          workspaceId={workspaceId}
-          isPaneFocused={isPaneFocused}
-          textSource={agentInputDraft.textSource}
-          textReplacement={agentInputDraft.textReplacement}
-          onChangeText={agentInputDraft.editText}
-          attachments={agentInputDraft.attachments}
-          attachmentScopeKeys={attachmentScopeKeys}
-          onOpenWorkspaceAttachment={handleOpenWorkspaceAttachment}
-          onChangeAttachments={agentInputDraft.setAttachments}
-          cwd={cwd}
-          clearDraft={agentInputDraft.clear}
-          autoFocus={isPaneFocused}
-          autoFocusKey={String(agentInputDraft.attachmentFocusRequestId)}
-          isSubmitLoading={isSubmitLoading}
-          onAttentionInputFocus={onAttentionInputFocus}
-          onAttentionPromptSend={onAttentionPromptSend}
-          onComposerHeightChange={onComposerHeightChange}
-          onMessageSent={onMessageSent}
-          onClientSlashCommand={handleClientSlashCommand}
-          isCompactLayout={isCompactComposerLayout}
-          topContent={specModeDock}
-        />
-      )}
+      {hideComposer ? null : composerContent}
     </View>
   );
 }

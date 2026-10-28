@@ -1,3 +1,4 @@
+import { useLeaveSheet } from "@/screens/workspace/sheet-pane";
 import { useCallback } from "react";
 import { useAgentDescriptor } from "@/agent-presentation";
 import type { PanelDescriptor } from "@/panels/panel-registry";
@@ -25,10 +26,12 @@ export function useParentAgentId(serverId: string, agentId: string): string | nu
 /** The parent as its own tab presents it, and the way back to it. */
 export function useParentAgent(serverId: string, parentAgentId: string): ParentAgent {
   const descriptor = useAgentDescriptor({ kind: "agent", agentId: parentAgentId }, { serverId });
+  const leaveSheet = useLeaveSheet();
   // The parent may live in another workspace; navigateToAgent opens it wherever it is.
   const open = useCallback(() => {
+    if (leaveSheet({ kind: "agent", agentId: parentAgentId })) return;
     navigateToAgent({ serverId, agentId: parentAgentId });
-  }, [parentAgentId, serverId]);
+  }, [leaveSheet, parentAgentId, serverId]);
   return {
     label: descriptor.label || null,
     icon: descriptor.icon,

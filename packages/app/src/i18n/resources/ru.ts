@@ -1847,6 +1847,7 @@ export const ru: TranslationResources = {
     backdrop: "Фон меню",
   },
   subagents: {
+    title: "Субагенты",
     parent: {
       openParent: "Open parent",
 

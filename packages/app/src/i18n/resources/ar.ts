@@ -1808,6 +1808,7 @@ export const ar: TranslationResources = {
     backdrop: "خلفية القائمة",
   },
   subagents: {
+    title: "الوكلاء الفرعيون",
     parent: {
       openParent: "Open parent",
 

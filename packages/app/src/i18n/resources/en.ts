@@ -1825,6 +1825,7 @@ export const en = {
     backdrop: "Menu backdrop",
   },
   subagents: {
+    title: "Subagents",
     parent: {
       openParent: "Open parent",
 

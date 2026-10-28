@@ -1806,6 +1806,7 @@ export const es: TranslationResources = {
     backdrop: "Fondo del menú",
   },
   subagents: {
+    title: "Subagentes",
     parent: {
       openParent: "Open parent",
 

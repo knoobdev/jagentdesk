@@ -1742,6 +1742,7 @@ export const zhCN: TranslationResources = {
     backdrop: "菜单背景",
   },
   subagents: {
+    title: "Subagent",
     parent: {
       openParent: "Open parent",
 

@@ -1790,6 +1790,7 @@ export const ptBR: TranslationResources = {
     backdrop: "Fundo do menu",
   },
   subagents: {
+    title: "Subagentes",
     parent: {
       openParent: "Open parent",
 

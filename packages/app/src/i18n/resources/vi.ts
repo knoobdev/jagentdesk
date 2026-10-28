@@ -8,6 +8,7 @@ import { sshModuleStrings } from "./ssh-modules";
 export const vi = {
   bots: botsStrings,
   subagents: {
+    title: "Các tác tử con",
     parent: {
       openParent: "Open parent",
 

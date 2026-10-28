@@ -1,3 +1,4 @@
+import { ensurePanelsRegistered } from "@/panels/register-panels";
 import { revealWorkspaceTab } from "@/workspace-tabs/navigation";
 import { SheetTabs } from "./sheet-tabs";
 import { SheetPaneHostProvider, type SheetPaneHost } from "./sheet-pane";
@@ -2471,6 +2472,7 @@ function WorkspaceScreenContent({
       tabId: string;
       target?: WorkspaceTabTarget | null;
     }) {
+      ensurePanelsRegistered();
       const normalizedTabId = trimNonEmpty(input.tabId);
       if (!normalizedTabId || !persistenceKey) {
         return;
