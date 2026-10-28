@@ -51,6 +51,7 @@ import {
   parseClaudeCodeVersion,
   resolveClaudeDisabledThinkingForModel,
 } from "./model-manifest.js";
+import { expandTilde } from "../../../../utils/path.js";
 import { parsePartialJsonObject } from "./partial-json.js";
 import { withClaudeReplayHistory, type ClaudeReplayHistory } from "./transcript-history.js";
 import { ClaudeSidechainTracker } from "./sidechain-tracker.js";
@@ -655,6 +656,40 @@ function readClaudeFastModeSetting(settings: ClaudeOptions["settings"]): boolean
     return null;
   }
   return typeof settings.fastMode === "boolean" ? settings.fastMode : null;
+}
+
+type ClaudeSettingsObject = NonNullable<Exclude<ClaudeOptions["settings"], string>>;
+
+// Mirrors `claude --settings`: the value is inline JSON or a path to a JSON file,
+// resolved against the session cwd like the Claude process would.
+async function readClaudeCliSettings(value: string, cwd: string): Promise<ClaudeSettingsObject> {
+  const trimmed = value.trim();
+  const isInlineJson = trimmed.startsWith("{");
+  const source = isInlineJson ? "--settings JSON" : path.resolve(cwd, expandTilde(trimmed));
+  let raw = trimmed;
+  if (!isInlineJson) {
+    try {
+      raw = await fsPromises.readFile(source, "utf8");
+    } catch (error) {
+      throw new Error(
+        `Failed to read Claude settings file ${source}: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      );
+    }
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(
+      `Claude ${source} is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`Claude ${source} must contain a JSON object`);
+  }
+  return parsed as ClaudeSettingsObject;
 }
 
 function mergeClaudeSettings(
@@ -3599,7 +3634,7 @@ class ClaudeAgentSession implements AgentSession {
       this.config.providerOptions,
       this.config.toolPolicy,
     );
-    const settingsOptions = this.buildSettingsOptions(providerOptions, { ultracode });
+    const settingsOptions = await this.buildSettingsOptions(providerOptions, { ultracode });
     // Spec 34.3: when a custom api provider overlay applies, the user's own Anthropic
     // credentials are deleted from the final env (never sent to the provider's endpoint).
     const sdkEnv = applyClaudeSpawnEnvOverlay(
@@ -3689,10 +3724,10 @@ class ClaudeAgentSession implements AgentSession {
     return base;
   }
 
-  private buildSettingsOptions(
+  private async buildSettingsOptions(
     providerOptions: ClaudeProviderOptions,
     input: { ultracode: boolean },
-  ): Pick<ClaudeOptions, "settings"> | Record<string, never> {
+  ): Promise<Pick<ClaudeOptions, "settings" | "extraArgs"> | Record<string, never>> {
     const fastMode = this.resolveFastModeSetting();
     // Internal agents do daemon work such as naming a branch, so the user's and
     // project's hooks must not run for them.
@@ -3700,12 +3735,21 @@ class ClaudeAgentSession implements AgentSession {
     if (fastMode === null && !input.ultracode && !disableAllHooks) {
       return {};
     }
+    const updates = {
+      ...(fastMode === null ? {} : { fastMode }),
+      ...(input.ultracode ? { ultracode: true } : {}),
+      ...(disableAllHooks ? { disableAllHooks: true } : {}),
+    };
+    // The SDK replaces extraArgs.settings with Options.settings, so a user's
+    // `--settings` would be dropped whenever JAgentDesk sets flag settings. Fold it in.
+    const { settings: extraArgsSettings, ...extraArgs } = providerOptions.extraArgs ?? {};
+    if (typeof extraArgsSettings !== "string") {
+      return { settings: mergeClaudeSettings(providerOptions.settings, updates) };
+    }
+    const cliSettings = await readClaudeCliSettings(extraArgsSettings, this.config.cwd);
     return {
-      settings: mergeClaudeSettings(providerOptions.settings, {
-        ...(fastMode === null ? {} : { fastMode }),
-        ...(input.ultracode ? { ultracode: true } : {}),
-        ...(disableAllHooks ? { disableAllHooks: true } : {}),
-      }),
+      extraArgs,
+      settings: { ...cliSettings, ...providerOptions.settings, ...updates },
     };
   }
 
