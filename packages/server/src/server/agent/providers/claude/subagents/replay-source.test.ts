@@ -30,7 +30,7 @@ function parentWithTaskCall(failed = false): ClaudeReplayParentFacts {
       ],
     ]),
     linksByAgentId: new Map(),
-    outcomesByToolCallId: new Map([[TOOL_USE_ID, { failed }]]),
+    outcomesByToolCallId: new Map([[TOOL_USE_ID, { status: failed ? "failed" : "completed" }]]),
   };
 }
 
@@ -111,7 +111,7 @@ describe("observeReplaySubagents", () => {
                 [nestedToolUseId, { title: "Explore", description: "Nested audit" }],
               ]),
               linksByAgentId: new Map(),
-              outcomesByToolCallId: new Map([[nestedToolUseId, { failed: false }]]),
+              outcomesByToolCallId: new Map([[nestedToolUseId, { status: "completed" }]]),
             },
           },
           {
@@ -167,8 +167,8 @@ describe("observeReplaySubagents", () => {
   it("falls back to the scraped link when there is no meta file", async () => {
     const parent: ClaudeReplayParentFacts = {
       toolCalls: new Map([[TOOL_USE_ID, { title: "Explore" }]]),
-      linksByAgentId: new Map([[AGENT_ID, { toolCallId: TOOL_USE_ID, failed: false }]]),
-      outcomesByToolCallId: new Map(),
+      linksByAgentId: new Map([[AGENT_ID, { toolCallId: TOOL_USE_ID }]]),
+      outcomesByToolCallId: new Map([[TOOL_USE_ID, { status: "completed" }]]),
     };
 
     const [declared, ...rest] = (
@@ -257,8 +257,8 @@ describe("observeReplaySubagents", () => {
           subagents: [{ agentId: AGENT_ID, meta: null, entries: [] }],
           parent: {
             toolCalls: new Map([[TOOL_USE_ID, { title: "Explore" }]]),
-            linksByAgentId: new Map([[AGENT_ID, { toolCallId: TOOL_USE_ID, failed: true }]]),
-            outcomesByToolCallId: new Map(),
+            linksByAgentId: new Map([[AGENT_ID, { toolCallId: TOOL_USE_ID }]]),
+            outcomesByToolCallId: new Map([[TOOL_USE_ID, { status: "failed" }]]),
           },
           convertEntry: () => [],
         })
