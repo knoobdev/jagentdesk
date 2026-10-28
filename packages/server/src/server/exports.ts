@@ -110,3 +110,5 @@ export type {
 
 export { loadExistingRelayIdentity } from "./daemon-keypair.js";
 export { parseRelayChallenge } from "@jagentdesk/relay/ownership";
+
+export { reapTerminalWorkers } from "../terminal/terminal-worker-reaper.js";

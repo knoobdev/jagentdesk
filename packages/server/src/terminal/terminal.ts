@@ -15,6 +15,11 @@ import { basename, delimiter, dirname, extname, join, resolve as resolvePath } f
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { createExternalProcessEnv } from "../server/jagentdesk-env.js";
+import {
+  resolveExternalProcessPath,
+  resolveJAgentDeskCliBinDir,
+  resolveJAgentDeskCliExecutablePath,
+} from "./jagentdesk-cli-path.js";
 import { writePrivateFileAtomicSync } from "../server/private-files.js";
 import {
   findExecutable,
@@ -30,7 +35,6 @@ import type {
 
 const { Terminal } = xterm;
 const require = createRequire(import.meta.url);
-const JAGENTDESK_CLI_BIN_ENTRY = "@jagentdesk/cli/bin/jagentdesk";
 let nodePtySpawnHelperChecked = false;
 export const TERMINAL_TITLE_DEBOUNCE_MS = 150;
 export const TERMINAL_EXIT_OUTPUT_LINE_LIMIT = 12;
@@ -126,6 +130,11 @@ export interface TerminalSession {
   killAndWait(options?: { gracefulTimeoutMs?: number; forceTimeoutMs?: number }): Promise<void>;
 }
 
+/** A session that owns its PTY in this process, so it knows the program's pid. */
+export interface LocalTerminalSession extends TerminalSession {
+  readonly pid: number;
+}
+
 function parseCommandFinishedOsc(data: string): TerminalCommandFinishedInfo | null {
   // OSC 633 is terminal control traffic, but a foreground command can still
   // print arbitrary control bytes. Keep this boundary to the exact VS Code
@@ -156,6 +165,11 @@ export interface CreateTerminalOptions {
   title?: string;
   command?: string;
   args?: string[];
+  // Environment the terminal starts from instead of this process's own. A detached terminal
+  // worker outlives the daemon that launched it, so each create carries the controlling
+  // daemon's environment and its resolved JAgentDesk CLI path.
+  baseEnv?: Record<string, string>;
+  jagentdeskCliPath?: string | null;
 }
 
 export function toTerminalActivity(snapshot: {
@@ -180,6 +194,7 @@ export function resolveInitialTitleMode(presetTitle: string | undefined): "auto"
 interface BuildTerminalEnvironmentInput {
   shell: string;
   env: Record<string, string>;
+  baseEnv?: Record<string, string>;
   zshShellIntegrationDir?: string;
   jagentdeskCliBinDir?: string | null;
   jagentdeskHookCliPath?: string | null;
@@ -327,84 +342,10 @@ export async function resolveTerminalSpawnCommand(
   return { command: resolved, args };
 }
 
+export { resolveJAgentDeskCliBinDir, resolveJAgentDeskCliExecutablePath };
+
 export function resolveZshShellIntegrationDir(): string {
   return fileURLToPath(new URL("./shell-integration/zsh", import.meta.url));
-}
-
-function resolveExternalProcessPath(filePath: string): string {
-  return filePath.replace(/\.asar(?=[/\\]|$)/, ".asar.unpacked");
-}
-
-export function resolveJAgentDeskCliBinDir(): string | null {
-  const cliExecutable = resolveJAgentDeskCliExecutablePath();
-  return cliExecutable ? dirname(cliExecutable) : null;
-}
-
-export function resolveJAgentDeskCliExecutablePath(): string | null {
-  const configuredCli = process.env.JAGENTDESK_CLI?.trim();
-  if (configuredCli) {
-    return resolvePath(configuredCli);
-  }
-
-  const cliEntrypoint = resolveJAgentDeskCliBinEntrypoint();
-  if (!cliEntrypoint) {
-    return null;
-  }
-
-  const externalCliEntrypoint = resolveExternalProcessPath(cliEntrypoint);
-  const npmBinDir = findNpmBinDir(dirname(externalCliEntrypoint));
-  if (npmBinDir) {
-    const shim = resolveJAgentDeskCliShim(npmBinDir);
-    if (shim) {
-      return shim;
-    }
-  }
-
-  return externalCliEntrypoint;
-}
-
-function resolveJAgentDeskCliBinEntrypoint(): string | null {
-  try {
-    return require.resolve(JAGENTDESK_CLI_BIN_ENTRY);
-  } catch {
-    return null;
-  }
-}
-
-function findNpmBinDir(startPath: string): string | null {
-  let current = startPath;
-  while (true) {
-    const candidate = join(current, "node_modules", ".bin");
-    if (hasJAgentDeskCliShim(candidate)) {
-      return candidate;
-    }
-
-    const parent = dirname(current);
-    if (parent === current) {
-      return null;
-    }
-    current = parent;
-  }
-}
-
-function hasJAgentDeskCliShim(binDir: string): boolean {
-  return resolveJAgentDeskCliShim(binDir) !== null;
-}
-
-function resolveJAgentDeskCliShim(binDir: string): string | null {
-  for (const name of jagentdeskCliShimNames()) {
-    const candidate = join(binDir, name);
-    if (existsSync(candidate)) {
-      return candidate;
-    }
-  }
-  return null;
-}
-
-function jagentdeskCliShimNames(): string[] {
-  return process.platform === "win32"
-    ? ["jagentdesk.cmd", "jagentdesk.exe", "jagentdesk"]
-    : ["jagentdesk"];
 }
 
 function resolveZshShellIntegrationRuntimeDir(): string {
@@ -436,10 +377,14 @@ function prepareZshShellIntegrationRuntimeDir(sourceDir = resolveZshShellIntegra
 export function buildTerminalEnvironment(
   input: BuildTerminalEnvironmentInput,
 ): Record<string, string> {
-  const baseEnv: Record<string, string> = createExternalProcessEnv(process.env, input.env, {
-    TERM: "xterm-256color",
-    TERM_PROGRAM: "kitty",
-  });
+  const baseEnv: Record<string, string> = createExternalProcessEnv(
+    input.baseEnv ?? process.env,
+    input.env,
+    {
+      TERM: "xterm-256color",
+      TERM_PROGRAM: "kitty",
+    },
+  );
   const envWithAgentHooks = prependJAgentDeskCliToPath(
     baseEnv,
     input.jagentdeskCliBinDir === undefined
@@ -477,6 +422,26 @@ function injectJAgentDeskHookCli(
     ...env,
     JAGENTDESK_HOOK_CLI: resolvePath(resolveExternalProcessPath(cliPath)),
   };
+}
+
+// The environment and CLI path a terminal starts from: the caller's when it sends them (the
+// daemon controlling a detached worker does), this process's otherwise.
+function resolveTerminalEnvironmentSource(
+  input: Pick<CreateTerminalOptions, "baseEnv" | "jagentdeskCliPath">,
+): Pick<
+  BuildTerminalEnvironmentInput,
+  "baseEnv" | "jagentdeskCliBinDir" | "jagentdeskHookCliPath"
+> {
+  const source: Pick<
+    BuildTerminalEnvironmentInput,
+    "baseEnv" | "jagentdeskCliBinDir" | "jagentdeskHookCliPath"
+  > = {};
+  if (input.baseEnv) source.baseEnv = input.baseEnv;
+  if (input.jagentdeskCliPath !== undefined) {
+    source.jagentdeskCliBinDir = input.jagentdeskCliPath ? dirname(input.jagentdeskCliPath) : null;
+    source.jagentdeskHookCliPath = input.jagentdeskCliPath;
+  }
+  return source;
 }
 
 function prependJAgentDeskCliToPath(
@@ -886,7 +851,9 @@ export async function assertTerminalCommandCanStart(
   }
 }
 
-export async function createTerminal(options: CreateTerminalOptions): Promise<TerminalSession> {
+export async function createTerminal(
+  options: CreateTerminalOptions,
+): Promise<LocalTerminalSession> {
   const {
     cwd,
     workspaceId,
@@ -899,8 +866,10 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
     title: presetTitle,
     command,
     args = [],
+    baseEnv,
+    jagentdeskCliPath,
   } = options;
-  const resolvedShell = shell ?? resolveDefaultTerminalShell();
+  const resolvedShell = shell ?? resolveDefaultTerminalShell({ env: baseEnv });
 
   const id = options.id ?? randomUUID();
   const listeners = new Set<(msg: ServerMessage) => void>();
@@ -952,6 +921,7 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
       ...activityEnv,
       JAGENTDESK_WORKSPACE_ID: workspaceId,
     },
+    ...resolveTerminalEnvironmentSource({ baseEnv, jagentdeskCliPath }),
   });
 
   await assertTerminalCommandCanStart({ command, cwd, env: terminalEnv });
@@ -1540,6 +1510,7 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
 
   return {
     id,
+    pid: ptyProcess.pid,
     name,
     cwd,
     workspaceId,

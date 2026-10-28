@@ -62,7 +62,7 @@ import type { GeneratedWorkspaceName } from "../worktree-branch-name-generator.j
 import type { ForgeService } from "../../services/forge-service.js";
 import { areEquivalentPaths } from "../../utils/path.js";
 import { createTerminalManager, type TerminalManager } from "../../terminal/terminal-manager.js";
-import { createWorkerTerminalManager } from "../../terminal/worker-terminal-manager.js";
+import { startWorkerTerminalManager } from "../../terminal/worker-terminal-manager.js";
 import { PARENT_AGENT_ID_LABEL } from "@jagentdesk/protocol/agent-labels";
 import type { BrowserToolsBroker, BrowserToolsExecuteInput } from "../browser-tools/broker.js";
 import type { BrowserToolsResponsePayload } from "../browser-tools/errors.js";
@@ -1179,13 +1179,24 @@ describe("terminal MCP tools", () => {
   );
 
   it.each([
-    ["in-process", createTerminalManager],
-    ["worker", createWorkerTerminalManager],
+    ["in-process", async () => ({ manager: createTerminalManager(), home: null })],
+    [
+      "worker",
+      async () => {
+        const home = await mkdtemp(join(tmpdir(), "mcp-terminal-keys-home-"));
+        const manager = await startWorkerTerminalManager({
+          jagentdeskHome: home,
+          jagentdeskVersion: "0.0.0-test",
+          logger,
+        });
+        return { manager, home };
+      },
+    ],
   ] as const)(
     "delivers MCP key tokens through %s after terminal input modes change",
     async (_name, createManager) => {
       const { agentManager, agentStorage } = createTestDeps();
-      const terminalManager = createManager();
+      const { manager: terminalManager, home } = await createManager();
       const terminal = await terminalManager.createTerminal({
         cwd: process.cwd(),
         workspaceId: "ws-terminal-keys",
@@ -1215,6 +1226,8 @@ describe("terminal MCP tools", () => {
         logger,
       });
 
+      // Every step is a round trip through a real PTY. A loaded Windows runner (ConPTY) has
+      // taken over 3 s to reach READY, so each step gets the same window rather than 1 s.
       let output = "";
       const unsubscribe = terminal.subscribe((message) => {
         if (message.type === "output") {
@@ -1260,6 +1273,7 @@ describe("terminal MCP tools", () => {
         await server.close();
         await terminalManager.killTerminalAndWait(terminal.id);
         terminalManager.killAll();
+        if (home) await rm(home, { recursive: true, force: true });
       }
     },
   );

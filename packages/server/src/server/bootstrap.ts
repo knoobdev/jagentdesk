@@ -199,7 +199,7 @@ import {
 import { setupAutoArchiveOnMerge } from "./auto-archive-on-merge/index.js";
 import { wrapSessionMessage, type SessionOutboundMessage } from "./messages.js";
 import type { TerminalManager } from "../terminal/terminal-manager.js";
-import { createConfiguredTerminalManager } from "../terminal/terminal-manager-factory.js";
+import { startWorkerTerminalManager } from "../terminal/worker-terminal-manager.js";
 import { createSshTerminalManager } from "../terminal/ssh-terminal-manager.js";
 import { SshService } from "./ssh/ssh-service.js";
 import { SideloadService, type SideloadSigner } from "./sideload/sideload-service.js";
@@ -438,12 +438,14 @@ export type DaemonLifecycleIntent =
       clientId: string;
       requestId: string;
       reason: string;
+      keepTerminals: boolean;
     }
   | {
       type: "restart";
       clientId: string;
       requestId: string;
       reason: string;
+      keepTerminals: boolean;
     };
 
 export interface JAgentDeskDaemonConfig {
@@ -539,7 +541,8 @@ export interface JAgentDeskDaemon {
   /** Sideload accounts other features sign with (spec 27 signs WebDriverAgent). */
   sideload: SideloadSigner;
   start(): Promise<void>;
-  stop(): Promise<void>;
+  /** Stops the daemon. Terminals keep running for the next daemon only with keepTerminals. */
+  stop(options?: { keepTerminals?: boolean }): Promise<void>;
   getListenTarget(): ListenTarget | null;
 }
 
@@ -767,12 +770,13 @@ export async function createJAgentDeskDaemon(
     // and re-read on every connect attempt).
     tailnetSocks: () => tsnetListener?.getTailnetSocks() ?? null,
   });
-  const terminalManager = createSshTerminalManager(
-    createConfiguredTerminalManager({
-      getTerminalActivityUrl: () => createTerminalActivityUrl(boundListenTarget),
-    }),
-    () => sshService,
-  );
+  const localTerminalManager = await startWorkerTerminalManager({
+    jagentdeskHome: config.jagentdeskHome,
+    jagentdeskVersion: daemonVersion,
+    logger,
+    getTerminalActivityUrl: () => createTerminalActivityUrl(boundListenTarget),
+  });
+  const terminalManager = createSshTerminalManager(localTerminalManager, () => sshService);
   applyTerminalAgentHookSetting({ store: daemonConfigStore, logger });
 
   const serviceProxyPublicBaseUrl = config.serviceProxy?.publicBaseUrl
@@ -2378,7 +2382,9 @@ export async function createJAgentDeskDaemon(
     }
   };
 
-  const stop = async () => {
+  const stop = async (options?: { keepTerminals?: boolean }) => {
+    const keepTerminals = options?.keepTerminals === true;
+    let terminalShutdownError: unknown = null;
     unsubscribePluginProviders();
     unsubscribePluginSessionChanges();
     await hubRelationships.stop();
@@ -2400,7 +2406,19 @@ export async function createJAgentDeskDaemon(
     customProviderService.closeAll();
     await pluginRuntime.stopAllPlugins().catch(() => undefined);
     await providerSnapshotManager.shutdown();
-    terminalManager.killAll();
+    try {
+      if (keepTerminals) {
+        await localTerminalManager.detach();
+        logger.info("Terminals left running for the next daemon");
+      } else {
+        await localTerminalManager.closeTerminals();
+      }
+    } catch (error) {
+      // Finish the rest of the shutdown, then report it: the supervisor and `daemon stop`
+      // retry the cleanup from the record the reaper kept.
+      terminalShutdownError = error;
+      logger.error({ err: error }, "Terminal shutdown failed");
+    }
     unsubscribeBuiltinAgentSnapshots();
     stopDeviceGrantWatch();
     physicalDevices.dispose();
@@ -2441,6 +2459,9 @@ export async function createJAgentDeskDaemon(
     // Clean up socket files
     if (listenTarget.type === "socket" && existsSync(listenTarget.path)) {
       unlinkSync(listenTarget.path);
+    }
+    if (terminalShutdownError) {
+      throw terminalShutdownError;
     }
   };
 

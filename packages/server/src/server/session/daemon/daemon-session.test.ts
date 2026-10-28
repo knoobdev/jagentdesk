@@ -162,6 +162,7 @@ describe("DaemonSession", () => {
             { provider: "claude", available: true, error: null },
             { provider: "codex", available: false, error: "boom" },
           ],
+          terminalCleanupUnconfirmed: [],
         },
       },
     ]);
@@ -192,6 +193,7 @@ describe("DaemonSession", () => {
           listen: null,
           tailnet: null,
           providers: [],
+          terminalCleanupUnconfirmed: [],
         },
       },
     ]);

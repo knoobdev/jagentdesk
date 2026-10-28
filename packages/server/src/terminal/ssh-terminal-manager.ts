@@ -31,6 +31,7 @@ export function createSshTerminalManager(
   }
 
   return {
+    getUnavailableError: () => base.getUnavailableError?.() ?? null,
     getTerminals(cwd, options) {
       return base.getTerminals(cwd, options);
     },

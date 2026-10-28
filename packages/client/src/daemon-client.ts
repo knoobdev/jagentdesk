@@ -1357,6 +1357,9 @@ type ShutdownRequestedStatusPayload = z.infer<typeof ShutdownRequestedStatusPayl
 export interface ShutdownServerOptions {
   requestId?: string;
   timeout?: number;
+  // Leave terminals running for the next daemon. Only daemons advertising
+  // `features.terminalsSurviveRestart` honor it; check before sending.
+  keepTerminals?: boolean;
 }
 export interface DaemonStatusOptions {
   requestId?: string;
@@ -1884,6 +1887,36 @@ function assertTransportFrameFits(frame: string | Uint8Array | ArrayBuffer): voi
   const size = new TextEncoder().encode(frame).byteLength;
   if (size > MAX_WEBSOCKET_MESSAGE_BYTES)
     throw messageTooLargeError(size, MAX_WEBSOCKET_MESSAGE_BYTES);
+}
+
+export class TerminalKeepUnsupportedError extends Error {
+  readonly code = "TERMINALS_KEEP_UNSUPPORTED";
+  // Own fields reach the CLI's JSON error output, which desktop reads.
+  readonly version: string | null;
+
+  constructor(target: string, version: string | null) {
+    super(
+      `The daemon at ${target}${version ? ` (v${version})` : ""} closes terminals when it stops. Update it first, or run \`jagentdesk daemon stop\` to stop it and close them.`,
+    );
+    this.name = "TerminalKeepUnsupportedError";
+    this.version = version;
+  }
+}
+
+/**
+ * Gate for an explicit "keep terminals" stop. Older daemons drop `keepTerminals` and close the
+ * terminals anyway, so read the capability on the connection that will carry the shutdown and
+ * refuse before sending it.
+ */
+// COMPAT(terminalsSurviveRestart): added in v0.12.0, remove gate after 2027-04-21.
+export function requireTerminalKeepCapability(
+  client: Pick<DaemonClient, "getLastServerInfoMessage">,
+  target: string,
+): void {
+  const serverInfo = client.getLastServerInfoMessage();
+  if (serverInfo?.features?.terminalsSurviveRestart !== true) {
+    throw new TerminalKeepUnsupportedError(target, serverInfo?.version ?? null);
+  }
 }
 
 export class DaemonClient {
@@ -4309,12 +4342,17 @@ export class DaemonClient {
     return payload.notice ?? null;
   }
 
-  async restartServer(reason?: string, requestId?: string): Promise<RestartRequestedStatusPayload> {
+  async restartServer(
+    reason?: string,
+    requestId?: string,
+    options?: { timeout?: number; killTerminals?: boolean },
+  ): Promise<RestartRequestedStatusPayload> {
     const resolvedRequestId = this.createRequestId(requestId);
     const message = SessionInboundMessageSchema.parse({
       type: "restart_server_request",
       ...(reason && reason.trim().length > 0 ? { reason } : {}),
       requestId: resolvedRequestId,
+      ...(options?.killTerminals ? { killTerminals: true } : {}),
     });
     return this.sendRequest({
       requestId: resolvedRequestId,
@@ -4341,6 +4379,7 @@ export class DaemonClient {
     const message = SessionInboundMessageSchema.parse({
       type: "shutdown_server_request",
       requestId: resolvedRequestId,
+      ...(options?.keepTerminals ? { keepTerminals: true } : {}),
     });
     return this.sendRequest({
       requestId: resolvedRequestId,

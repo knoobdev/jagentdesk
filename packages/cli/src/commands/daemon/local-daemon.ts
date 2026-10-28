@@ -3,8 +3,14 @@ import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { createRequire } from "node:module";
 import { uptime } from "node:os";
 import path from "node:path";
-import { loadConfig, resolveJAgentDeskHome, spawnProcess } from "@jagentdesk/server";
+import {
+  loadConfig,
+  resolveJAgentDeskHome,
+  spawnProcess,
+  reapTerminalWorkers,
+} from "@jagentdesk/server";
 import treeKill from "tree-kill";
+import { requireTerminalKeepCapability } from "@jagentdesk/client/internal/daemon-client";
 import { tryConnectToDaemon } from "../../utils/client.js";
 
 export interface DaemonStartOptions {
@@ -44,6 +50,7 @@ export interface DetachedStartResult {
 }
 
 export interface StopLocalDaemonOptions {
+  keepTerminals?: boolean;
   home?: string;
   timeoutMs?: number;
   killTimeoutMs?: number;
@@ -667,6 +674,7 @@ export function startLocalDaemonForeground(
 async function requestLifecycleShutdown(
   state: LocalDaemonState,
   timeoutMs: number,
+  keepTerminals: boolean,
 ): Promise<LifecycleShutdownAttempt> {
   const host = resolveTcpHostFromListen(state.listen);
   if (!host) {
@@ -687,9 +695,11 @@ async function requestLifecycleShutdown(
   }
 
   try {
-    await client.shutdownServer({ timeout: Math.min(remainingTimeoutMs(), 5000) });
+    if (keepTerminals) requireTerminalKeepCapability(client, host);
+    await client.shutdownServer({ timeout: Math.min(remainingTimeoutMs(), 5000), keepTerminals });
     return { requested: true };
   } catch (error) {
+    if (keepTerminals) throw error;
     return {
       requested: false,
       reason: `daemon lifecycle shutdown request failed (${getErrorMessage(
@@ -704,18 +714,24 @@ async function requestLifecycleShutdown(
 export async function stopLocalDaemon(
   options: StopLocalDaemonOptions = {},
 ): Promise<StopLocalDaemonResult> {
+  const keepTerminals = resolveKeepTerminals(options);
   const timeoutMs = options.timeoutMs ?? DEFAULT_STOP_TIMEOUT_MS;
   const killTimeoutMs = options.killTimeoutMs ?? DEFAULT_KILL_TIMEOUT_MS;
   const state = resolveLocalDaemonState({ home: options.home });
   const deadline = Date.now() + timeoutMs;
   const remainingTimeoutMs = () => Math.max(1, deadline - Date.now());
 
-  const shutdownAttempt = await requestLifecycleShutdown(state, remainingTimeoutMs());
+  const shutdownAttempt = await requestLifecycleShutdown(
+    state,
+    remainingTimeoutMs(),
+    keepTerminals,
+  );
   const lifecycleRequested = shutdownAttempt.requested;
 
   if (!state.pidInfo || (!state.running && !lifecycleRequested)) {
     const staleSuffix =
       state.stalePidFile && state.pidInfo ? ` (stale PID file for ${state.pidInfo.pid})` : "";
+    await closeTerminalsAfterStop(state.home, keepTerminals);
     return createNotRunningStopResult(
       state,
       state.pidInfo?.pid ?? null,
@@ -726,6 +742,8 @@ export async function stopLocalDaemon(
   const pid = state.pidInfo?.pid ?? null;
   const fallbackMessage = shutdownAttempt.requested ? null : shutdownAttempt.reason;
   if (!lifecycleRequested) {
+    if (keepTerminals)
+      throw new Error("Cannot keep terminals without a reachable daemon lifecycle channel");
     const notRunningResult = await signalDaemonOwnerForStop(state, pid);
     if (notRunningResult) return notRunningResult;
   }
@@ -745,6 +763,7 @@ export async function stopLocalDaemon(
     removeStalePidFile(state);
   }
 
+  await closeTerminalsAfterStop(state.home, keepTerminals);
   return {
     action: "stopped",
     home: state.home,
@@ -754,4 +773,15 @@ export async function stopLocalDaemon(
     reason: resolveStopReason(forced, lifecycleRequested),
     message: resolveStopMessage(forced, lifecycleRequested, fallbackMessage),
   };
+}
+
+function resolveKeepTerminals(options: StopLocalDaemonOptions): boolean {
+  const keepTerminals = options.keepTerminals === true;
+  if (keepTerminals && options.force)
+    throw new Error("--force cannot be combined with --keep-terminals");
+  return keepTerminals;
+}
+
+async function closeTerminalsAfterStop(home: string, keepTerminals: boolean): Promise<void> {
+  if (!keepTerminals) await reapTerminalWorkers({ jagentdeskHome: home });
 }
