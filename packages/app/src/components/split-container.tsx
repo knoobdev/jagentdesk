@@ -772,6 +772,8 @@ function SplitNodeView({
   focusModeEnabled,
   onExitFocusMode,
 }: SplitNodeViewProps) {
+  const [containerSize, setContainerSize] = useState(0);
+  const [previewSizes, setPreviewSizes] = useState<number[] | null>(null);
   const groupId = node.kind === "group" ? node.group.id : null;
   const groupDirection = node.kind === "group" ? node.group.direction : null;
 
@@ -785,6 +787,25 @@ function SplitNodeView({
       groupDirection === "horizontal" ? styles.groupHorizontal : styles.groupVertical,
     ],
     [groupDirection],
+  );
+
+  const measureContainer = useCallback(
+    (event: import("react-native").LayoutChangeEvent) => {
+      setContainerSize(
+        groupDirection === "horizontal"
+          ? event.nativeEvent.layout.width
+          : event.nativeEvent.layout.height,
+      );
+    },
+    [groupDirection],
+  );
+  const previewResize = useCallback((_id: string, sizes: number[]) => setPreviewSizes(sizes), []);
+  const commitResize = useCallback(
+    (id: string, sizes: number[]) => {
+      setPreviewSizes(null);
+      onResizeSplit(id, sizes);
+    },
+    [onResizeSplit],
   );
 
   if (node.kind === "pane") {
@@ -832,10 +853,10 @@ function SplitNodeView({
     );
   }
 
-  const groupSizes = storedGroupSizes ?? node.group.sizes;
+  const groupSizes = previewSizes ?? storedGroupSizes ?? node.group.sizes;
 
   return (
-    <View style={groupStyle}>
+    <View style={groupStyle} onLayout={measureContainer}>
       {node.group.children.map((child, index) => (
         <Fragment key={getNodeKey(child)}>
           <SplitGroupChild flex={groupSizes[index] ?? 1}>
@@ -883,11 +904,14 @@ function SplitNodeView({
           </SplitGroupChild>
           {index < node.group.children.length - 1 ? (
             <ResizeHandle
+              testID="workspace-split-resize-handle"
               direction={node.group.direction}
               groupId={node.group.id}
               index={index}
               sizes={groupSizes}
-              onResizeSplit={onResizeSplit}
+              containerSize={containerSize}
+              onPreviewResizeSplit={previewResize}
+              onResizeSplit={commitResize}
             />
           ) : null}
         </Fragment>
