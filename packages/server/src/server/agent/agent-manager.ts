@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { projectTimelineRows } from "./timeline-projection.js";
 import { isDefaultAgentCreateConfigUnattended } from "./create-agent-mode.js";
+import { isStaleProviderSessionError } from "./stale-provider-session-error.js";
 import { resolve } from "node:path";
 import { stat } from "node:fs/promises";
 import {
@@ -2389,16 +2390,33 @@ export class AgentManager {
       if (pendingRun.settled) {
         throw error;
       }
+      if (isStaleProviderSessionError(error)) {
+        this.runs.settleForegroundStart(pendingRun, { status: "failed", error: error.message });
+        agent.pendingReplacement = false;
+        if (!agent.activeForegroundTurnId) agent.lifecycle = "idle";
+        this.runs.settleForegroundRun(agentId, pendingRun.token);
+        throw error;
+      }
       agent.pendingReplacement = false;
       const errorMsg = error instanceof Error ? error.message : "Failed to start turn";
-      pendingRun.start = { status: "failed", error: errorMsg };
-      await this.handleStreamEvent(agent, {
-        type: "turn_failed",
-        provider: agent.provider,
-        error: errorMsg,
-      });
-      this.finalizeForegroundTurn(agent);
-      this.runs.settleForegroundRun(agentId, pendingRun.token);
+      this.runs.settleForegroundStart(pendingRun, { status: "failed", error: errorMsg });
+      try {
+        // A terminal rejection belongs after the submitted prompt even though no provider turn exists.
+        if (options?.clientMessageId) {
+          this.recordSubmittedPrompt(agent, prompt, options.clientMessageId, {
+            messageId: options.clientMessageId,
+          });
+        }
+        await this.handleStreamEvent(agent, {
+          type: "turn_failed",
+          provider: agent.provider,
+          error: errorMsg,
+        });
+        this.finalizeForegroundTurn(agent);
+      } finally {
+        // A steer waiting on this start is released only once the run is cleared.
+        this.runs.settleForegroundRun(agentId, pendingRun.token);
+      }
       throw error;
     }
   }
@@ -2459,7 +2477,7 @@ export class AgentManager {
         agent.pendingReplacement = false;
       }
       const turnStartedAt = new Date();
-      pendingRun.start = { status: "started", turnId };
+      this.runs.settleForegroundStart(pendingRun, { status: "started", turnId });
       agent.activeForegroundTurnId = turnId;
       this.openActiveTurn(agent, turnId, turnStartedAt);
       agent.lifecycle = "running";
@@ -2665,6 +2683,9 @@ export class AgentManager {
     prompt: AgentPromptInput,
     options?: AgentSteerOptions,
   ): Promise<ActiveTurnSteerDispatchResult> {
+    // A turn that is still starting has no id to steer yet. Replacing it would drop its
+    // prompt, so wait until it is accepted (or fails) and steer the turn it became.
+    await this.runs.waitForForegroundStart(agentId);
     const agent = this.requireSessionAgent(agentId);
     const expectedTurnId = agent.activeForegroundTurnId ?? agent.activeTurnId;
     if (!expectedTurnId) {
