@@ -1,5 +1,6 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
+import { initializeEnvironmentProxy } from "./network/index.js";
 import { createJAgentDeskDaemon } from "./bootstrap.js";
 import { loadConfig } from "./config.js";
 import { resolveJAgentDeskHome } from "./jagentdesk-home.js";
@@ -96,6 +97,11 @@ function applyCliFlagOverrides(config: ReturnType<typeof loadConfig>): void {
 
 async function main() {
   const { jagentdeskHome, logger, config } = bootstrapFromEnvironment();
+  for (const variable of initializeEnvironmentProxy()) {
+    writeWorkerLifecycleLog(jagentdeskHome, "Ignoring invalid or unsupported HTTP proxy variable", {
+      variable,
+    });
+  }
   let daemon: Awaited<ReturnType<typeof createJAgentDeskDaemon>> | null = null;
   let shutdownPromise: Promise<number> | null = null;
   let exitHookInstalled = false;
