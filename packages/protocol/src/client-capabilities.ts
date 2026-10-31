@@ -1,4 +1,5 @@
 export const CLIENT_CAPS = {
+  binaryChunkingV1: "binary_chunking_v1",
   // COMPAT(selectiveAgentTimeline): added in v0.1.106. Capable clients receive
   // agent streams only for their explicit viewed set. Remove after 2027-01-12
   // once the supported client floor is >= v0.1.106.

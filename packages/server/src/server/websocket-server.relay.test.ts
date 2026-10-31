@@ -1,3 +1,5 @@
+import { DaemonClient } from "@jagentdesk/client";
+import { createWebSocketTransportFactory } from "@jagentdesk/client/internal/daemon-client-transport";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -63,7 +65,12 @@ function createWorkspaceAutoNameStub(): WorkspaceAutoName {
  * listener is absent — this is the tailnet-down scenario from spec 35.4.
  */
 function createRelayServerHarness(
-  options: { relayEnabled?: boolean; enablePairingCode?: boolean; stallClose?: boolean } = {},
+  options: {
+    relayEnabled?: boolean;
+    enablePairingCode?: boolean;
+    stallClose?: boolean;
+    frameBytes?: number;
+  } = {},
 ): {
   harness: RelayDaemonHarness;
   devices: ReturnType<typeof createPairedDeviceStore>;
@@ -156,6 +163,8 @@ function createRelayServerHarness(
   let relayConnections = 0;
   ingressWss.on("connection", (ws) => {
     if (options.stallClose) ws.close = () => {};
+    if (options.frameBytes)
+      Object.defineProperty(ws, "maxFrameBytes", { value: options.frameBytes });
     relayConnections += 1;
     void wsServer.attachExternalSocket(ws, {
       transport: "relay",
@@ -326,6 +335,57 @@ async function pairOverRelay(harness: RelayDaemonHarness, deviceName: string) {
 }
 
 describe("relay external sockets (spec 35)", () => {
+  test("chunks requests and responses without changing signed relay admission", async () => {
+    const { harness, devices } = createRelayServerHarness({ frameBytes: 128 });
+    harnesses.push(harness);
+    const key = generateDeviceKeyPair();
+    const devicePublicKeyB64 = exportDevicePublicKey(key.publicKey);
+    const deviceName = "Signed device ".repeat(40) + "日本語";
+    devices.register({ devicePublicKeyB64, deviceName });
+    const port = await waitForPort(harness);
+    let outboundBinary = 0;
+    let inboundBinary = 0;
+    const recordInbound = (_data: RawData, binary: boolean) => {
+      if (binary) inboundBinary++;
+    };
+    const factory = createWebSocketTransportFactory((url) => {
+      const socket = new WebSocket(url);
+      socket.on("message", recordInbound);
+      return socket;
+    });
+    const client = new DaemonClient({
+      url: `ws://127.0.0.1:${port}/ws`,
+      clientId: "chunked-relay-device",
+      expectChallenge: true,
+      reconnect: { enabled: false },
+      deviceSigning: { devicePublicKeyB64, signNonce: async (nonce) => signNonce(key, nonce) },
+      transportFactory: (options) => {
+        const base = factory(options);
+        return {
+          ...base,
+          maxFrameBytes: 128,
+          send: (frame) => {
+            if (typeof frame !== "string") outboundBinary++;
+            return base.send(frame);
+          },
+        };
+      },
+      logger: { debug() {}, info() {}, warn() {}, error() {} },
+    });
+    try {
+      await client.connect();
+      const requestId = "chunked-" + "request".repeat(80);
+      const response = await client.pairingDeviceList(requestId);
+      expect(response.requestId).toBe(requestId);
+      expect(response.devices.map((device) => device.deviceName)).toEqual([deviceName]);
+      expect(outboundBinary).toBeGreaterThan(1);
+      expect(inboundBinary).toBeGreaterThan(1);
+      expect(client.isConnected).toBe(true);
+    } finally {
+      client.close();
+    }
+  });
+
   test("pairs over relay with the tailnet down, and server_info advertises the relay", async () => {
     const { harness, devices } = createRelayServerHarness();
     harnesses.push(harness);

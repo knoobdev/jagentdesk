@@ -1,3 +1,8 @@
+import {
+  nativeWebSocketFactory,
+  defaultWebSocketFactory,
+} from "@jagentdesk/client/internal/daemon-client-transport";
+import { isNative } from "@/constants/platform";
 import { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import type { DaemonClientConfig } from "@jagentdesk/client/internal/daemon-client";
 import type {
@@ -218,6 +223,7 @@ export async function buildClientConfig(
   const localTransportFactory = deps.createLocalTransportFactory();
   const base = {
     clientId,
+    webSocketFactory: isNative ? nativeWebSocketFactory : defaultWebSocketFactory,
     clientType: "mobile" as const,
     appVersion: deps.resolveAppVersion() ?? undefined,
     suppressSendErrors: true,

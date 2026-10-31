@@ -1,3 +1,4 @@
+import { maxSecuredPlaintextByteLength } from "@jagentdesk/relay";
 import { MAX_RELAY_WEBSOCKET_MESSAGE_BYTES } from "@jagentdesk/protocol/websocket-message-limit";
 import {
   openClientSecureChannel,
@@ -159,18 +160,15 @@ export function createEncryptedTransport(
   const relayTransport: RelayTransport = {
     send: (data) => {
       if (typeof data === "string") {
-        base.send(data);
-        return;
+        return base.send(data);
       }
       if (ArrayBuffer.isView(data)) {
-        base.send(normalizeTransportPayload(data));
-        return;
+        return base.send(normalizeTransportPayload(data));
       }
       if (data instanceof ArrayBuffer) {
-        base.send(data);
-        return;
+        return base.send(data);
       }
-      base.send(String(data));
+      return base.send(String(data));
     },
     // The channel decides the close code. Report it now: a socket close event
     // arrives asynchronously, and the consumer must not act on an earlier
@@ -230,6 +228,8 @@ export function createEncryptedTransport(
   });
 
   return {
+    supportsDrain: base.supportsDrain,
+    maxFrameBytes: maxSecuredPlaintextByteLength(MAX_RELAY_WEBSOCKET_MESSAGE_BYTES),
     send: (data) => {
       if (!channel) {
         throw new Error("Encrypted channel not ready");
@@ -240,8 +240,9 @@ export function createEncryptedTransport(
       if (wireBytes > MAX_RELAY_WEBSOCKET_MESSAGE_BYTES) {
         throw messageTooLargeError(wireBytes, MAX_RELAY_WEBSOCKET_MESSAGE_BYTES);
       }
-      void channel.send(payload).catch((error: unknown) => {
+      return channel.send(payload).catch((error: unknown) => {
         emitError(error);
+        throw error;
       });
     },
     close: (code?: number, reason?: string) => {

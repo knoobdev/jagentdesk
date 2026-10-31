@@ -38,6 +38,17 @@ The app checks for the capability and either runs the feature or tells the user 
 
 Existing functionality keeps working across versions because of the protocol contract. Gating a new feature never substitutes for that.
 
+## Large transport messages
+
+Chunked transport is negotiated per physical connection: the client advertises
+`binary_chunking_v1` in hello, and the daemon advertises optional
+`features.binaryChunkingV1` in the ordinary server-info response. Both sides must
+advertise support before sending chunks. Older peers keep ordinary frames and
+their existing size limits. Framing sits outside serialization and inside relay
+encryption, so each encrypted relay frame fits the Worker's 32 MiB limit while
+the logical message remains bounded at 100 MiB. React Native sockets cannot report
+write drain; their outbound messages retain the physical frame limit.
+
 ## Every shim is tagged and dated
 
 A shim that exists for old-app or old-daemon support carries a comment naming it, the version it arrived in, and when it can go:

@@ -1,3 +1,7 @@
+import {
+  nativeWebSocketFactory,
+  defaultWebSocketFactory,
+} from "@jagentdesk/client/internal/daemon-client-transport";
 import { HostConfirmations, type HostConfirmationRequest } from "./host-confirmation";
 import { useSyncExternalStore, useMemo } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -49,7 +53,7 @@ import { getRelayDeviceSigning, prepareRelayDeviceSigning } from "@/utils/relay-
 import { resolveAppVersion } from "@/utils/app-version";
 import { ConnectionOfferSchema, type ConnectionOffer } from "@jagentdesk/protocol/connection-offer";
 import { shouldUseDesktopDaemon } from "@/desktop/daemon/desktop-daemon";
-import { isWeb } from "@/constants/platform";
+import { isWeb, isNative } from "@/constants/platform";
 import { connectToDaemon } from "@/utils/test-daemon-connection";
 import { getOrCreateClientId } from "@/utils/client-id";
 import {
@@ -575,6 +579,7 @@ function createDefaultDeps(): HostRuntimeControllerDeps {
       const localTransportFactory = createDesktopLocalDaemonTransportFactory();
       const base = {
         suppressSendErrors: true,
+        webSocketFactory: isNative ? nativeWebSocketFactory : defaultWebSocketFactory,
         clientId,
         clientType: "mobile" as const,
         appVersion: resolveAppVersion() ?? undefined,

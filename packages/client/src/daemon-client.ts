@@ -1,3 +1,7 @@
+import {
+  ChunkedTransport,
+  ChunkedTransportProtocolError,
+} from "@jagentdesk/protocol/chunked-transport";
 import { messageTooLargeError } from "./daemon-client-transport-utils.js";
 import { MAX_WEBSOCKET_MESSAGE_BYTES } from "@jagentdesk/protocol/websocket-message-limit";
 import type {
@@ -1825,7 +1829,7 @@ function toReasonCode(reason: string | null | undefined): string | null {
 }
 
 interface PendingSend {
-  send: () => void;
+  send: () => void | Promise<void>;
   resolve: () => void;
   reject: (error: Error) => void;
   timeoutHandle: ReturnType<typeof setTimeout>;
@@ -1874,6 +1878,7 @@ function assertTransportFrameFits(frame: string | Uint8Array | ArrayBuffer): voi
 
 export class DaemonClient {
   private transport: DaemonTransport | null = null;
+  private chunkedTransport: ChunkedTransport | null = null;
   private transportCleanup: Array<() => void> = [];
   private rawMessageListeners: Set<(message: SessionOutboundMessage) => void> = new Set();
   private messageHandlers: Map<
@@ -2087,6 +2092,17 @@ export class DaemonClient {
         ...(protocols ? { protocols } : {}),
       });
       this.transport = transport;
+      this.chunkedTransport = new ChunkedTransport({
+        get supportsDrain() {
+          return transport.supportsDrain;
+        },
+        get frameBytes() {
+          return transport.maxFrameBytes ?? 32 * 1024 * 1024;
+        },
+        send: (frame) => transport.send(frame),
+        onFailure: () => transport.close(4003, "Transport send failed"),
+        deliver: (frame) => this.handleTransportMessage(frame),
+      });
       this.lastServerInfoMessage = null;
       this.registeredThisConnection = false;
 
@@ -2180,7 +2196,18 @@ export class DaemonClient {
             reasonCode: "transport_error",
           });
         }),
-        transport.onMessage((data) => this.handleTransportMessage(data)),
+        transport.onMessage((data) => {
+          if (this.transport !== transport) return;
+          const bytes = asUint8Array(data);
+          try {
+            if (typeof data === "string" || bytes)
+              this.chunkedTransport!.receive(typeof data === "string" ? data : bytes!);
+            else this.handleTransportMessage(data);
+          } catch (error) {
+            if (!(error instanceof ChunkedTransportProtocolError)) throw error;
+            transport.close(4003, "Invalid chunked transport");
+          }
+        }),
       ];
     } catch (error) {
       this.resetConnectTimeout();
@@ -2464,24 +2491,29 @@ export class DaemonClient {
     }
   }
 
-  private sendTransportFrame(frame: string | Uint8Array | ArrayBuffer): void {
+  private sendTransportFrame(frame: string | Uint8Array | ArrayBuffer): Promise<void> {
     if (!this.transport) throw new DaemonConnectionError("Transport not connected");
     assertTransportFrameFits(frame);
-    this.transport.send(frame);
+    const completion = this.chunkedTransport!.send(
+      typeof frame === "string" ? frame : asUint8Array(frame)!,
+    );
+    // Fire-and-forget control messages still report asynchronous write failures.
+    void completion.catch((error) => this.logger.warn({ err: error }, "transport_send_failed"));
+    return completion;
   }
 
-  private sendBinaryFrame(frame: Uint8Array): void {
+  private sendBinaryFrame(frame: Uint8Array): Promise<void> {
     if (!this.transport || this.connectionState.status !== "connected") {
       if (this.config.suppressSendErrors) {
-        return;
+        return Promise.resolve();
       }
       throw new Error(`Transport not connected (status: ${this.connectionState.status})`);
     }
     try {
-      this.sendTransportFrame(frame);
+      return this.sendTransportFrame(frame);
     } catch (error) {
       if (this.config.suppressSendErrors) {
-        return;
+        return Promise.resolve();
       }
       throw error instanceof Error ? error : new Error(String(error));
     }
@@ -2496,7 +2528,7 @@ export class DaemonClient {
   private sendSessionMessageOrThrow(message: SessionInboundMessage): Promise<void> {
     return this.sendWhenConnected(() => {
       const payload = SessionInboundMessageSchema.parse(message);
-      this.sendTransportFrame(JSON.stringify({ type: "session", message: payload }));
+      return this.sendTransportFrame(JSON.stringify({ type: "session", message: payload }));
     });
   }
 
@@ -2504,13 +2536,12 @@ export class DaemonClient {
     return this.sendWhenConnected(() => undefined);
   }
 
-  private sendWhenConnected(send: () => void): Promise<void> {
+  private sendWhenConnected(send: () => void | Promise<void>): Promise<void> {
     const status = this.connectionState.status;
 
     // If connected, send immediately
     if (this.transport && status === "connected") {
-      send();
-      return Promise.resolve();
+      return Promise.resolve(send());
     }
 
     // If connecting, queue the message to be sent once connected
@@ -2549,8 +2580,7 @@ export class DaemonClient {
       clearTimeout(pending.timeoutHandle);
       try {
         if (this.transport && this.connectionState.status === "connected") {
-          pending.send();
-          pending.resolve();
+          void Promise.resolve(pending.send()).then(pending.resolve, pending.reject);
         } else {
           pending.reject(new DaemonConnectionError("Connection lost before message could be sent"));
         }
@@ -2604,20 +2634,18 @@ export class DaemonClient {
       { ...params.options, requestId: params.requestId },
     );
 
+    void promise.catch(() => undefined);
     try {
-      await this.sendSessionMessageOrThrow(params.message);
+      const sent = this.sendSessionMessageOrThrow(params.message);
+      const result = await Promise.race([promise, sent.then(() => promise)]);
+      if (result.kind === "error") throw result.error;
+      return result.value;
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       cancel(err);
       void promise.catch(() => undefined);
       throw err;
     }
-
-    const result = await promise;
-    if (result.kind === "error") {
-      throw result.error;
-    }
-    return result.value;
   }
 
   private async sendCorrelatedRequest<
@@ -2697,13 +2725,13 @@ export class DaemonClient {
     });
   }
 
-  private sendSessionMessageStrict(message: SessionInboundMessage): void {
+  private sendSessionMessageStrict(message: SessionInboundMessage): Promise<void> {
     if (!this.transport || this.connectionState.status !== "connected") {
       throw new DaemonConnectionError("Transport not connected");
     }
     const payload = SessionInboundMessageSchema.parse(message);
     try {
-      this.sendTransportFrame(JSON.stringify({ type: "session", message: payload }));
+      return this.sendTransportFrame(JSON.stringify({ type: "session", message: payload }));
     } catch (error) {
       throw error instanceof Error ? error : new Error(String(error));
     }
@@ -2877,15 +2905,16 @@ export class DaemonClient {
     };
     this.pingProbe = probe;
 
-    try {
-      this.sendTransportFrame(JSON.stringify({ type: "ping" }));
-    } catch (error) {
-      this.clearPingProbe();
+    const rejectSend = (error: unknown) => {
+      if (this.pingProbe !== probe) return;
       const sendError = error instanceof Error ? error : new Error(String(error));
-      if (probe.drivesLivenessFailure) {
-        this.recordLivenessFailure(sendError);
-      }
-      return Promise.reject(sendError);
+      this.rejectPingProbe(sendError);
+      if (probe.drivesLivenessFailure) this.recordLivenessFailure(sendError);
+    };
+    try {
+      void this.sendTransportFrame(JSON.stringify({ type: "ping" })).catch(rejectSend);
+    } catch (error) {
+      rejectSend(error);
     }
 
     return promise;
@@ -4274,7 +4303,7 @@ export class DaemonClient {
   }
 
   async sendVoiceAudioChunk(audio: string, format: string, isLast = false): Promise<void> {
-    this.sendSessionMessage({ type: "voice_audio_chunk", audio, format, isLast });
+    return this.sendSessionMessageStrict({ type: "voice_audio_chunk", audio, format, isLast });
   }
 
   async startDictationStream(dictationId: string, format: string): Promise<void> {
@@ -4315,8 +4344,13 @@ export class DaemonClient {
 
     const cleanupError = new Error("Cancelled dictation start waiter");
     try {
-      this.sendSessionMessageStrict({ type: "dictation_stream_start", dictationId, format });
-      await Promise.race([ackPromise, errorPromise]);
+      const sent = this.sendSessionMessageStrict({
+        type: "dictation_stream_start",
+        dictationId,
+        format,
+      });
+      const response = Promise.race([ackPromise, errorPromise]);
+      await Promise.race([response, sent.then(() => response)]);
     } finally {
       ack.cancel(cleanupError);
       streamError.cancel(cleanupError);
@@ -4451,12 +4485,17 @@ export class DaemonClient {
 
     const cleanupError = new Error("Cancelled dictation finish waiter");
     try {
-      this.sendSessionMessageStrict({ type: "dictation_stream_finish", dictationId, finalSeq });
-      const firstOutcome = await Promise.race([
+      const sent = this.sendSessionMessageStrict({
+        type: "dictation_stream_finish",
+        dictationId,
+        finalSeq,
+      });
+      const response = Promise.race([
         finalOutcomePromise,
         errorOutcomePromise,
         finishAcceptedOutcomePromise,
       ]);
+      const firstOutcome = await Promise.race([response, sent.then(() => response)]);
 
       if (firstOutcome.kind === "final") {
         return firstOutcome.payload;
@@ -6008,8 +6047,10 @@ export class DaemonClient {
         return undefined;
       },
     );
+    const sendFrame = (frame: Uint8Array) =>
+      Promise.race([this.sendBinaryFrame(frame), responsePromise]);
     try {
-      this.sendBinaryFrame(
+      await sendFrame(
         encodeFileTransferFrame({
           opcode: FileTransferOpcode.FileBegin,
           requestId: resolvedRequestId,
@@ -6023,6 +6064,7 @@ export class DaemonClient {
         }),
       );
 
+      if (settled) return await responsePromise;
       const chunkSize = input.chunkSize ?? 128 * 1024;
       for (let offset = 0; offset < bytes.byteLength; offset += chunkSize) {
         // Native WebSocket.send encodes binary synchronously. Let rendering and
@@ -6032,7 +6074,7 @@ export class DaemonClient {
         if (this.transport !== uploadTransport || this.connectionState.status !== "connected") {
           throw new Error("Connection changed during file upload");
         }
-        this.sendBinaryFrame(
+        await sendFrame(
           encodeFileTransferFrame({
             opcode: FileTransferOpcode.FileChunk,
             requestId: resolvedRequestId,
@@ -6041,7 +6083,7 @@ export class DaemonClient {
         );
       }
 
-      this.sendBinaryFrame(
+      await sendFrame(
         encodeFileTransferFrame({
           opcode: FileTransferOpcode.FileEnd,
           requestId: resolvedRequestId,
@@ -10839,6 +10881,7 @@ export class DaemonClient {
           clientType: this.config.clientType ?? "cli",
           protocolVersion: 1,
           capabilities: {
+            [CLIENT_CAPS.binaryChunkingV1]: true,
             [CLIENT_CAPS.customModeIcons]: true,
             [CLIENT_CAPS.reasoningMergeEnum]: true,
             [CLIENT_CAPS.terminalReflowableSnapshot]: true,
@@ -11076,6 +11119,8 @@ export class DaemonClient {
   }
 
   private disposeTransport(code = 1001, reason = "Reconnecting"): void {
+    this.chunkedTransport?.close();
+    this.chunkedTransport = null;
     this.stopLivenessHeartbeat();
     this.cleanupTransport();
     if (this.transport) {
@@ -11441,15 +11486,6 @@ export class DaemonClient {
     probe.resolve(perfNow() - probe.startedAt);
   }
 
-  private clearPingProbe(): void {
-    const probe = this.pingProbe;
-    if (!probe) {
-      return;
-    }
-    this.pingProbe = null;
-    clearTimeout(probe.timeoutHandle);
-  }
-
   private rejectPingProbe(error: Error): void {
     const probe = this.pingProbe;
     if (!probe) {
@@ -11510,6 +11546,10 @@ export class DaemonClient {
     if (consumerMessage.type === "status") {
       const serverInfo = parseServerInfoStatusPayload(consumerMessage.payload);
       if (serverInfo) {
+        if (this.chunkedTransport)
+          this.chunkedTransport.enabled =
+            serverInfo.features?.binaryChunkingV1 === true &&
+            this.config.capabilities?.[CLIENT_CAPS.binaryChunkingV1] !== false;
         this.lastServerInfoMessage = serverInfo;
         if (this.connectionState.status === "connecting") {
           this.resetConnectTimeout();

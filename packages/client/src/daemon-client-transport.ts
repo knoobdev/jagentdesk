@@ -18,6 +18,7 @@ export {
   bindWsHandler,
   createWebSocketTransportFactory,
   defaultWebSocketFactory,
+  nativeWebSocketFactory,
 } from "./daemon-client-websocket-transport.js";
 export {
   createEncryptedTransport,
