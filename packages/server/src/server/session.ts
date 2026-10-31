@@ -5869,7 +5869,10 @@ export class Session {
       );
       createdAgentId = snapshot.id;
       this.recordCreatedAgent(clientMessageId, snapshot.id);
-      await this.agentUpdates.forwardLiveAgent(snapshot);
+      // `snapshot` predates the initial prompt; subscribers keep the last state they receive.
+      await this.agentUpdates.forwardLiveAgent(
+        this.agentManager.getAgent(snapshot.id) ?? liveSnapshot,
+      );
       if (resolvedIntent.createdDirectoryWorkspace && trimmedPrompt) {
         this.workspaceAutoName.scheduleForDirectory(
           {
