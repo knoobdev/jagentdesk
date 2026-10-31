@@ -702,6 +702,7 @@ export interface AgentSession {
     requestId: string,
     response: AgentPermissionResponse,
   ): Promise<AgentPermissionResult | void>;
+  /** Null until a new provider process could resume this session; see docs/providers.md. */
   describePersistence(): AgentPersistenceHandle | null;
   interrupt(): Promise<void>;
   /** Release live runtime resources without archiving or deleting the durable native session. */
