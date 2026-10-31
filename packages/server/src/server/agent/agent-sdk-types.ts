@@ -667,7 +667,11 @@ export interface SteerActiveTurnOptions extends AgentSteerOptions {
  *   already ended, or `expectedTurnId` no longer matches). The caller then
  *   safely falls back to interrupt-and-replace.
  */
-export type SteerResult = { status: "accepted" } | { status: "unavailable" };
+// providerMessageId names the steered message in the provider's own history, when the provider
+// mints one. Rewinding to the message needs it.
+export type SteerResult =
+  | { status: "accepted"; providerMessageId?: string }
+  | { status: "unavailable" };
 
 export interface AgentUsageSession {
   provider: string;
