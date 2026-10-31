@@ -30,6 +30,7 @@ class OpenCodeBridgeClientError extends Error {
 interface OpenCodeBridgeOptions {
   jagentdeskHome: string;
   logger: Logger;
+  port?: number;
 }
 
 interface OpenCodeSessionBinding {
@@ -54,6 +55,7 @@ interface OpenCodeConfig {
 export class OpenCodeBridge {
   private readonly jagentdeskHome: string;
   private readonly logger: Logger;
+  private readonly port: number;
   private readonly token = randomBytes(32).toString("hex");
   private readonly sessions = new Map<string, OpenCodeSessionBinding>();
   private server: Server | null = null;
@@ -65,6 +67,7 @@ export class OpenCodeBridge {
   constructor(options: OpenCodeBridgeOptions) {
     this.jagentdeskHome = options.jagentdeskHome;
     this.logger = options.logger.child({ module: "agent", component: "opencode-bridge" });
+    this.port = options.port ?? 0;
   }
 
   async start(): Promise<void> {
@@ -75,7 +78,7 @@ export class OpenCodeBridge {
     });
     await new Promise<void>((resolve, reject) => {
       server.once("error", reject);
-      server.listen(0, "127.0.0.1", () => {
+      server.listen(this.port, "127.0.0.1", () => {
         server.off("error", reject);
         resolve();
       });
@@ -94,6 +97,8 @@ export class OpenCodeBridge {
   }
 
   bindSession(input: BindOpenCodeSessionInput): () => void {
+    if (this.sessions.has(input.sessionId))
+      throw new Error(`OpenCode session ${input.sessionId} is already bound to a JAgentDesk agent`);
     const binding: OpenCodeSessionBinding = {
       env: { ...input.env },
       ...(input.tools ? { tools: input.tools } : {}),
@@ -127,12 +132,13 @@ export class OpenCodeBridge {
     };
   }
 
-  async decorateV2ServerEnv(env: Record<string, string>): Promise<Record<string, string>> {
+  async materializeV2Plugin(): Promise<string> {
     this.v2PluginUrl ??= await this.materializePlugin(2);
-    return decorateOpenCodeV2Env(env, this.v2PluginUrl, {
-      baseUrl: this.requireBaseUrl(),
-      token: this.token,
-    });
+    return this.v2PluginUrl;
+  }
+
+  sharedV2Connection(baseUrl = this.requireBaseUrl()): OpenCodePluginOptions {
+    return { baseUrl, token: this.token };
   }
 
   async close(): Promise<void> {
@@ -289,6 +295,8 @@ export async function materializeOpenCodeV2Plugin(jagentdeskHome: string): Promi
   // V2 ignores configured file paths; it loads a package directory's server entry point.
   const directory = path.join(jagentdeskHome, "runtime", "opencode", `jagentdesk-v2-${digest}`);
   await writeFileAtomic(path.join(directory, "server.js"), artifact);
+  const state = await readFile(new URL("./v2/state.mjs", import.meta.url));
+  await writeFileAtomic(path.join(directory, "state.mjs"), state);
   await writeFileAtomic(
     path.join(directory, "package.json"),
     JSON.stringify({
