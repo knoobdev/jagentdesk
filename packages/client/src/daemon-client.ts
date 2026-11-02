@@ -48,6 +48,17 @@ import type {
   SimUnslimPayload,
 } from "@jagentdesk/protocol/simulator/rpc-schemas";
 import type {
+  SshAuthPrompt,
+  SshConnectionStateEvent,
+  SshGroup,
+  SshHostkeyPrompt,
+  SshIdentity,
+  SshKeyType,
+  SshPromptResolved,
+  SshServer,
+  SshTerminalSize,
+} from "@jagentdesk/protocol/ssh/rpc-schemas";
+import type {
   ProxyCaExportPayload,
   ProxyCaptureMode,
   ProxyCaptureStartPayload,
@@ -659,6 +670,126 @@ type WorkspaceCreatePayload = Extract<
 >["payload"];
 type FileExplorerPayload = FileExplorerResponse["payload"];
 export type FileExplorerDirectoryPayload = NonNullable<FileExplorerPayload["directory"]>;
+
+// SSH servers (spec 25 / story S-20). Payload types mirror the protocol's correlated
+// responses (packages/protocol/src/ssh/rpc-schemas.ts); DTOs are re-exported so app
+// screens never import the protocol ssh module directly for types.
+export type SshServersListPayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.servers.list.response" }
+>["payload"];
+export type SshServersGetPayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.servers.get.response" }
+>["payload"];
+export type SshServersSavePayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.servers.save.response" }
+>["payload"];
+export type SshServersDeletePayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.servers.delete.response" }
+>["payload"];
+export type SshGroupsListPayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.groups.list.response" }
+>["payload"];
+export type SshGroupsGetPayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.groups.get.response" }
+>["payload"];
+export type SshGroupsSavePayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.groups.save.response" }
+>["payload"];
+export type SshGroupsDeletePayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.groups.delete.response" }
+>["payload"];
+export type SshIdentitiesListPayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.identities.list.response" }
+>["payload"];
+export type SshIdentitiesGetPayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.identities.get.response" }
+>["payload"];
+export type SshIdentitiesSavePayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.identities.save.response" }
+>["payload"];
+export type SshIdentitiesDeletePayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.identities.delete.response" }
+>["payload"];
+export type SshKeysListPayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.keys.list.response" }
+>["payload"];
+export type SshKeysGeneratePayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.keys.generate.response" }
+>["payload"];
+export type SshKeysImportPayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.keys.import.response" }
+>["payload"];
+export type SshKeysDeletePayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.keys.delete.response" }
+>["payload"];
+export type SshKeysExportPublicPayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.keys.export_public.response" }
+>["payload"];
+export type SshKnownhostsListPayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.knownhosts.list.response" }
+>["payload"];
+export type SshKnownhostsDeletePayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.knownhosts.delete.response" }
+>["payload"];
+export type SshKnownhostsReplacePayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.knownhosts.replace.response" }
+>["payload"];
+export type SshHostkeyRespondPayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.hostkey.respond.response" }
+>["payload"];
+export type SshAuthRespondPayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.auth.respond.response" }
+>["payload"];
+export type SshSessionCreatePayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.session.create.response" }
+>["payload"];
+export type SshSessionReconnectPayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.session.reconnect.response" }
+>["payload"];
+export type {
+  SshAuthMethod,
+  SshAuthPrompt,
+  SshAuthPromptItem,
+  SshConnectionStateEvent,
+  SshGroup,
+  SshHostkeyPrompt,
+  SshIdentity,
+  SshKey,
+  SshKeyType,
+  SshKnownHost,
+  SshPromptResolved,
+  SshProtocol,
+  SshProxy,
+  SshServer,
+  SshServerInfo,
+  SshServerState,
+  SshSessionInfo,
+  SshTerminalSize,
+} from "@jagentdesk/protocol/ssh/rpc-schemas";
 type LegacyFileExplorerFilePayload = NonNullable<FileExplorerPayload["file"]>;
 export interface FileReadResult {
   bytes: Uint8Array;
@@ -7510,6 +7641,327 @@ export class DaemonClient {
   onDockerStats(subscriptionId: string, handler: (stats: DockerStatsPayload) => void): () => void {
     return this.on("docker/stats-data", (message) => {
       if (message.payload.subscriptionId === subscriptionId) handler(message.payload);
+    });
+  }
+
+  // ── SSH servers (spec 25 / story S-20, milestone S1) ──
+  // Requests/responses follow docs/rpc-namespacing.md; secrets never come back on any
+  // response. `password`/`passphrase` on save/import/generate: undefined keeps the
+  // stored secret, "" deletes it, non-empty replaces it. The daemon assigns ids for
+  // new records — create/duplicate sends an empty `id` on the DTO.
+
+  async sshServersList(requestId?: string): Promise<SshServersListPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.servers.list.response">({
+      requestId,
+      message: { type: "ssh.servers.list.request" },
+    });
+  }
+
+  async sshServersGet(options: { id: string; requestId?: string }): Promise<SshServersGetPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.servers.get.response">({
+      requestId: options.requestId,
+      message: { type: "ssh.servers.get.request", id: options.id },
+    });
+  }
+
+  async sshServersSave(options: {
+    server: SshServer;
+    password?: string;
+    proxyPassword?: string;
+    requestId?: string;
+  }): Promise<SshServersSavePayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.servers.save.response">({
+      requestId: options.requestId,
+      message: {
+        type: "ssh.servers.save.request",
+        server: options.server,
+        ...(options.password !== undefined ? { password: options.password } : {}),
+        ...(options.proxyPassword !== undefined ? { proxyPassword: options.proxyPassword } : {}),
+      },
+    });
+  }
+
+  async sshServersDelete(options: {
+    id: string;
+    requestId?: string;
+  }): Promise<SshServersDeletePayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.servers.delete.response">({
+      requestId: options.requestId,
+      message: { type: "ssh.servers.delete.request", id: options.id },
+    });
+  }
+
+  async sshGroupsList(requestId?: string): Promise<SshGroupsListPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.groups.list.response">({
+      requestId,
+      message: { type: "ssh.groups.list.request" },
+    });
+  }
+
+  async sshGroupsGet(options: { id: string; requestId?: string }): Promise<SshGroupsGetPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.groups.get.response">({
+      requestId: options.requestId,
+      message: { type: "ssh.groups.get.request", id: options.id },
+    });
+  }
+
+  async sshGroupsSave(options: {
+    group: SshGroup;
+    proxyPassword?: string;
+    requestId?: string;
+  }): Promise<SshGroupsSavePayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.groups.save.response">({
+      requestId: options.requestId,
+      message: {
+        type: "ssh.groups.save.request",
+        group: options.group,
+        ...(options.proxyPassword !== undefined ? { proxyPassword: options.proxyPassword } : {}),
+      },
+    });
+  }
+
+  async sshGroupsDelete(options: {
+    id: string;
+    requestId?: string;
+  }): Promise<SshGroupsDeletePayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.groups.delete.response">({
+      requestId: options.requestId,
+      message: { type: "ssh.groups.delete.request", id: options.id },
+    });
+  }
+
+  async sshIdentitiesList(requestId?: string): Promise<SshIdentitiesListPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.identities.list.response">({
+      requestId,
+      message: { type: "ssh.identities.list.request" },
+    });
+  }
+
+  async sshIdentitiesGet(options: {
+    id: string;
+    requestId?: string;
+  }): Promise<SshIdentitiesGetPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.identities.get.response">({
+      requestId: options.requestId,
+      message: { type: "ssh.identities.get.request", id: options.id },
+    });
+  }
+
+  async sshIdentitiesSave(options: {
+    identity: SshIdentity;
+    password?: string;
+    requestId?: string;
+  }): Promise<SshIdentitiesSavePayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.identities.save.response">({
+      requestId: options.requestId,
+      message: {
+        type: "ssh.identities.save.request",
+        identity: options.identity,
+        ...(options.password !== undefined ? { password: options.password } : {}),
+      },
+    });
+  }
+
+  async sshIdentitiesDelete(options: {
+    id: string;
+    requestId?: string;
+  }): Promise<SshIdentitiesDeletePayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.identities.delete.response">({
+      requestId: options.requestId,
+      message: { type: "ssh.identities.delete.request", id: options.id },
+    });
+  }
+
+  async sshKeysList(requestId?: string): Promise<SshKeysListPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.keys.list.response">({
+      requestId,
+      message: { type: "ssh.keys.list.request" },
+    });
+  }
+
+  async sshKeysGenerate(options: {
+    label: string;
+    type: SshKeyType;
+    passphrase?: string;
+    requestId?: string;
+  }): Promise<SshKeysGeneratePayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.keys.generate.response">({
+      requestId: options.requestId,
+      message: {
+        type: "ssh.keys.generate.request",
+        label: options.label,
+        keyType: options.type,
+        ...(options.passphrase !== undefined ? { passphrase: options.passphrase } : {}),
+      },
+    });
+  }
+
+  async sshKeysImport(options: {
+    label: string;
+    privateKey: string;
+    passphrase?: string;
+    certificate?: string;
+    requestId?: string;
+  }): Promise<SshKeysImportPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.keys.import.response">({
+      requestId: options.requestId,
+      message: {
+        type: "ssh.keys.import.request",
+        label: options.label,
+        privateKey: options.privateKey,
+        ...(options.passphrase !== undefined ? { passphrase: options.passphrase } : {}),
+        ...(options.certificate !== undefined ? { certificate: options.certificate } : {}),
+      },
+    });
+  }
+
+  async sshKeysDelete(options: { id: string; requestId?: string }): Promise<SshKeysDeletePayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.keys.delete.response">({
+      requestId: options.requestId,
+      message: { type: "ssh.keys.delete.request", id: options.id },
+    });
+  }
+
+  async sshKeysExportPublic(options: {
+    id: string;
+    format?: "openssh" | "pem";
+    requestId?: string;
+  }): Promise<SshKeysExportPublicPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.keys.export_public.response">({
+      requestId: options.requestId,
+      message: {
+        type: "ssh.keys.export_public.request",
+        id: options.id,
+        ...(options.format !== undefined ? { format: options.format } : {}),
+      },
+    });
+  }
+
+  async sshKnownhostsList(requestId?: string): Promise<SshKnownhostsListPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.knownhosts.list.response">({
+      requestId,
+      message: { type: "ssh.knownhosts.list.request" },
+    });
+  }
+
+  async sshKnownhostsDelete(options: {
+    host: string;
+    port: number;
+    keyType?: string;
+    requestId?: string;
+  }): Promise<SshKnownhostsDeletePayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.knownhosts.delete.response">({
+      requestId: options.requestId,
+      message: {
+        type: "ssh.knownhosts.delete.request",
+        host: options.host,
+        port: options.port,
+        ...(options.keyType !== undefined ? { keyType: options.keyType } : {}),
+      },
+    });
+  }
+
+  async sshKnownhostsReplace(options: {
+    host: string;
+    port: number;
+    keyType: string;
+    publicKey: string;
+    requestId?: string;
+  }): Promise<SshKnownhostsReplacePayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.knownhosts.replace.response">({
+      requestId: options.requestId,
+      message: {
+        type: "ssh.knownhosts.replace.request",
+        host: options.host,
+        port: options.port,
+        keyType: options.keyType,
+        publicKey: options.publicKey,
+      },
+    });
+  }
+
+  async sshHostkeyRespond(options: {
+    promptId: string;
+    decision: "accept" | "reject";
+    requestId?: string;
+  }): Promise<SshHostkeyRespondPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.hostkey.respond.response">({
+      requestId: options.requestId,
+      message: {
+        type: "ssh.hostkey.respond.request",
+        promptId: options.promptId,
+        decision: options.decision,
+      },
+    });
+  }
+
+  async sshAuthRespond(options: {
+    promptId: string;
+    /** null cancels the prompt. */
+    answers: string[] | null;
+    requestId?: string;
+  }): Promise<SshAuthRespondPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.auth.respond.response">({
+      requestId: options.requestId,
+      message: {
+        type: "ssh.auth.respond.request",
+        promptId: options.promptId,
+        answers: options.answers,
+      },
+    });
+  }
+
+  async sshSessionCreate(options: {
+    serverId: string;
+    size: SshTerminalSize;
+    requestId?: string;
+  }): Promise<SshSessionCreatePayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.session.create.response">({
+      requestId: options.requestId,
+      message: {
+        type: "ssh.session.create.request",
+        serverId: options.serverId,
+        size: options.size,
+      },
+    });
+  }
+
+  /** Manual retry of an errored/disconnected SSH tab, same terminal (screen kept). */
+  async sshSessionReconnect(options: {
+    terminalId: string;
+    requestId?: string;
+  }): Promise<SshSessionReconnectPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.session.reconnect.response">({
+      requestId: options.requestId,
+      message: { type: "ssh.session.reconnect.request", terminalId: options.terminalId },
+    });
+  }
+
+  /** A prompt was answered elsewhere, expired, or was abandoned: drop its bar. */
+  onSshPromptResolved(handler: (event: SshPromptResolved) => void): () => void {
+    return this.on("ssh.prompt.resolved", (message) => {
+      handler(message);
+    });
+  }
+
+  /** First-unknown-host-key prompt (spec 25.3 step 3). Filter by serverId at the call site. */
+  onSshHostkeyPrompt(handler: (prompt: SshHostkeyPrompt) => void): () => void {
+    return this.on("ssh.hostkey.prompt", (message) => {
+      handler(message);
+    });
+  }
+
+  /** Password / keyboard-interactive / passphrase prompt (spec 25.3 step 4). */
+  onSshAuthPrompt(handler: (prompt: SshAuthPrompt) => void): () => void {
+    return this.on("ssh.auth.prompt", (message) => {
+      handler(message);
+    });
+  }
+
+  /** Live connect state for a saved server. Filter by serverId/terminalId at the call site. */
+  onSshConnectionState(handler: (event: SshConnectionStateEvent) => void): () => void {
+    return this.on("ssh.connection.state", (message) => {
+      handler(message);
     });
   }
 
