@@ -157,8 +157,6 @@ function fence(text) {
 
 const results = [];
 const findings = [
-  "Snippet run raced a just-closed SSH tab: in one run, `ssh.snippet.run` started immediately after `kill_terminal` on the same server and that target failed with `connection_lost` (The connection closed before the exit) although its output had arrived. The acquired lease likely pointed at a connection that was closing. The script now waits 2 s after the kill; the race itself is not fixed.",
-  "`DaemonClient.dockerList()` (and the other docker* helpers without a serverId option) cannot target an SSH server although the wire schema accepts `serverId`; criterion 11 sent `docker/list` with `serverId` through the client's correlated-request path.",
   'Criterion 9\'s "workspace with 3 panes" is app UI (`planSnippetWorkspace` + split view) and was not rendered here; the daemon side (one exec result per server) is what was verified.',
 ];
 function criterion(id, title) {
@@ -1119,6 +1117,7 @@ async function main() {
       const first = await desktop.open(ids.docker);
       if (first.terminalId)
         await desktop.daemon.killTerminal(first.terminalId).catch(() => undefined);
+      c.step("the run starts immediately after kill_terminal on the docker server (no wait)");
       c.step(
         "ssh.snippets.save {label 'Kernel', script 'uname -a'}; ssh.snippet.run on [target, docker, nodocker]",
       );
@@ -1163,10 +1162,6 @@ async function main() {
     },
   );
 
-  // Docker-cockpit RPCs take `serverId` on the wire; DaemonClient.dockerList has no such
-  // parameter, so the run sends docker/list through the client's correlated-request path.
-  const dockerRpc = (message, responseType) =>
-    desktop.daemon.sendCorrelatedSessionRequest({ message, responseType });
   const containerNames = (text) => text.split("\n").filter(Boolean).sort();
 
   await run(
@@ -1233,10 +1228,7 @@ async function main() {
       let list;
       let truth;
       for (let attempt = 0; attempt < 3; attempt += 1) {
-        list = await dockerRpc(
-          { type: "docker/list", serverId: ids.docker },
-          "docker/list/response",
-        );
+        list = await desktop.daemon.dockerList({ serverId: ids.docker });
         // The server's Docker is the socket mounted into it (this machine's engine).
         truth = containerNames(
           sh(`docker exec ${C.docker} sh -c true; docker ps -a --format '{{.Names}}'`),
@@ -1268,15 +1260,11 @@ async function main() {
       c.step(
         `docker/exec {serverId docker, container ${C.restartme}}; then a shell over the forwarded socket (the cockpit exec terminal runs \`docker -H <dockerHost> exec -it …\`)`,
       );
-      const exec = await dockerRpc(
-        {
-          type: "docker/exec",
-          serverId: ids.docker,
-          container: C.restartme,
-          command: "echo IN-CONTAINER $(cat /etc/hostname) pid1=$(cat /proc/1/comm)",
-        },
-        "docker/exec/response",
-      );
+      const exec = await desktop.daemon.dockerExec({
+        serverId: ids.docker,
+        container: C.restartme,
+        command: "echo IN-CONTAINER $(cat /etc/hostname) pid1=$(cat /proc/1/comm)",
+      });
       const containerId = sh(`docker inspect -f '{{.Config.Hostname}}' ${C.restartme}`);
       c.see("docker/exec output", exec.output ?? exec.error);
       const shell = shQuiet(
