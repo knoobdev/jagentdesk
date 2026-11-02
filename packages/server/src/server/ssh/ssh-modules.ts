@@ -11,6 +11,9 @@ import { handleSnippetsMessage } from "./snippets/rpc.js";
 import { SshSnippetsService } from "./snippets/service.js";
 import type { SshService, SshTerminalCreatedEvent } from "./ssh-service.js";
 import { createTelnetTerminalSession } from "./telnet/terminal-session.js";
+import { connectThroughProxy as connectThroughProxyModule } from "./proxy/connect.js";
+import { ProxyError as ModuleProxyError } from "./proxy/proxy-error.js";
+import { SshConnectionError } from "./ssh-connection.js";
 
 // A hidden-input prompt on screen: what the user types next is a secret, never history.
 const SECRET_PROMPT = /(password|passphrase|passcode|pin|otp|verification code)[^\n]*[:?]\s*$/i;
@@ -47,8 +50,20 @@ export class SshModules {
     this.sftp = new SftpService({ acquire, sshDir });
     this.forwarding = new ForwardingService({ acquire, sshDir });
     this.snippets = new SshSnippetsService({ acquire, sshHome: sshDir });
-    // Spec 25.3 step 5: the startup snippet comes from the S5 library.
+    // Spec 25.3 step 2 uses the proxy module; step 5's startup snippet comes from S5.
     this.ssh.configurePipeline({
+      connectSteps: {
+        openProxySocket: async (proxy, host, port) => {
+          try {
+            return await connectThroughProxyModule(proxy, { host, port });
+          } catch (error) {
+            if (error instanceof ModuleProxyError) {
+              throw new SshConnectionError({ code: error.code, message: error.message });
+            }
+            throw error;
+          }
+        },
+      },
       resolveStartupScript: async (snippetId) => {
         const library = await this.snippets.listLibrary();
         return library.snippets.find((snippet) => snippet.id === snippetId)?.script ?? null;
