@@ -503,13 +503,22 @@ export class TelnetTerminalSession implements TerminalSession {
       return Promise.resolve();
     }
     return new Promise((resolve) => {
-      const finish = (): void => {
+      let pendingResolve: (() => void) | null = resolve;
+      const settle = (): void => {
+        if (!pendingResolve) {
+          return;
+        }
+        const fn = pendingResolve;
+        pendingResolve = null;
         clearTimeout(timer);
-        this.socketCloseWaiters.delete(finish);
-        resolve();
+        this.socketCloseWaiters.delete(waiter);
+        fn();
       };
-      const timer = setTimeout(finish, timeoutMs);
-      this.socketCloseWaiters.add(finish);
+      const waiter = (): void => {
+        settle();
+      };
+      const timer = setTimeout(waiter, timeoutMs);
+      this.socketCloseWaiters.add(waiter);
     });
   }
 
