@@ -140,6 +140,7 @@ interface SidebarSharedProps {
   handleSettings: () => void;
   handleClusters: () => void;
   handleDatabases: () => void;
+  handleServers: () => void;
   handleSkills: () => void;
   handleInsights: () => void;
   handleForge: () => void;
@@ -148,6 +149,8 @@ interface SidebarSharedProps {
   handleSimulator: () => void;
   handleWorkbench: () => void;
   supportsForgeHub: boolean;
+  /** Spec 25: SSH Servers entry only when the daemon advertises sshServers. */
+  supportsSshServers: boolean;
   /** Some connected host can run simulators (spec 24.4). */
   supportsDevices: boolean;
   labels: SidebarLabels;
@@ -170,6 +173,7 @@ interface SidebarLabels {
   agentForum: string;
   clusters: string;
   databases: string;
+  servers: string;
   skills: string;
   insights: string;
   forge: string;
@@ -287,6 +291,8 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
   const {
     clustersRoute,
     databasesRoute,
+    serversRoute,
+    supportsSshServers,
     skillsRoute,
     insightsRoute,
     forgeRoute,
@@ -340,6 +346,17 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       router.push(databasesRoute);
     }
   }, [databasesRoute, showMobileAgent]);
+
+  const handleServersDesktop = useCallback(() => {
+    if (serversRoute) router.push(serversRoute as Href);
+  }, [serversRoute]);
+
+  const handleServersMobile = useCallback(() => {
+    if (serversRoute) {
+      showMobileAgent();
+      router.push(serversRoute as Href);
+    }
+  }, [serversRoute, showMobileAgent]);
 
   const handleSkillsMobile = useCallback(() => {
     if (skillsRoute) {
@@ -425,6 +442,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       agentForum: "Team",
       clusters: "Clusters",
       databases: "Databases",
+      servers: "Servers",
       skills: "Skills",
       insights: "Usage & Cost",
       forge: "Forge",
@@ -453,6 +471,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     handleRefresh,
     handleClusters: handleClustersDesktop,
     handleDatabases: handleDatabasesDesktop,
+    handleServers: handleServersDesktop,
     handleSkills: handleSkillsDesktop,
     handleInsights: handleInsightsDesktop,
     handleForge: handleForgeDesktop,
@@ -461,6 +480,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     handleSimulator: handleSimulatorDesktop,
     handleWorkbench: handleWorkbenchDesktop,
     supportsForgeHub,
+    supportsSshServers,
     supportsDevices: simulatorRoute !== null,
     labels,
     newWorkspaceKeys,
@@ -473,6 +493,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
           {...sharedProps}
           handleClusters={handleClustersMobile}
           handleDatabases={handleDatabasesMobile}
+          handleServers={handleServersMobile}
           handleSkills={handleSkillsMobile}
           handleInsights={handleInsightsMobile}
           handleForge={handleForgeMobile}
@@ -503,6 +524,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
         {...sharedProps}
         handleClusters={handleClustersDesktop}
         handleDatabases={handleDatabasesDesktop}
+        handleServers={handleServersDesktop}
         handleSkills={handleSkillsDesktop}
         handleInsights={handleInsightsDesktop}
         handleForge={handleForgeDesktop}
@@ -834,6 +856,7 @@ function MobileSidebar({
   handleSettings,
   handleClusters,
   handleDatabases,
+  handleServers,
   handleSkills,
   handleInsights,
   handleForge,
@@ -842,6 +865,7 @@ function MobileSidebar({
   handleSimulator,
   handleWorkbench,
   supportsForgeHub,
+  supportsSshServers,
   supportsDevices,
   labels,
   handleAddHost,
@@ -862,6 +886,7 @@ function MobileSidebar({
   const isAgentForumActive = pathname.includes("/agent-forum");
   const isClustersActive = pathname.includes("/clusters");
   const isDatabasesActive = pathname.includes("/database");
+  const isServersActive = pathname.includes("/servers");
   const isSkillsActive = pathname.includes("/skills");
   const isInsightsActive = pathname.includes("/insights");
   const isForgeActive = pathname.includes("/forge");
@@ -1013,6 +1038,16 @@ function MobileSidebar({
               testID="sidebar-databases-nav"
               variant="compact"
             />
+            {supportsSshServers ? (
+              <SidebarHeaderRow
+                icon={Server}
+                label={labels.servers}
+                onPress={handleServers}
+                isActive={isServersActive}
+                testID="sidebar-servers-nav"
+                variant="compact"
+              />
+            ) : null}
             <SidebarHeaderRow
               icon={Sparkles}
               label={labels.skills}
@@ -1132,6 +1167,7 @@ function DesktopSidebar({
   handleSettings,
   handleClusters,
   handleDatabases,
+  handleServers,
   handleSkills,
   handleInsights,
   handleForge,
@@ -1140,6 +1176,7 @@ function DesktopSidebar({
   handleSimulator,
   handleWorkbench,
   supportsForgeHub,
+  supportsSshServers,
   supportsDevices,
   labels,
   handleAddHost,
@@ -1161,6 +1198,7 @@ function DesktopSidebar({
   const isAgentForumActive = pathname.includes("/agent-forum");
   const isClustersActive = pathname.includes("/clusters");
   const isDatabasesActive = pathname.includes("/database");
+  const isServersActive = pathname.includes("/servers");
   const isSkillsActive = pathname.includes("/skills");
   const isInsightsActive = pathname.includes("/insights");
   const isForgeActive = pathname.includes("/forge");
@@ -1331,6 +1369,16 @@ function DesktopSidebar({
                 testID="sidebar-databases-nav"
                 variant="compact"
               />
+              {supportsSshServers ? (
+                <SidebarHeaderRow
+                  icon={Server}
+                  label={labels.servers}
+                  onPress={handleServers}
+                  isActive={isServersActive}
+                  testID="sidebar-servers-nav"
+                  variant="compact"
+                />
+              ) : null}
               <SidebarHeaderRow
                 icon={Sparkles}
                 label={labels.skills}

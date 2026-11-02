@@ -1,0 +1,173 @@
+import { useCallback, type ReactNode } from "react";
+import { Text, View } from "react-native";
+import { Alert } from "@/components/ui/alert";
+import { TerminalPane } from "@/components/terminal-pane";
+import type {
+  SshConnectionStateEvent,
+  SshGroup,
+  SshServerInfo,
+  SshServerState,
+} from "@jagentdesk/client/internal/daemon-client";
+import { formatServerTarget } from "@/ssh/group-tree";
+import {
+  sshLiveStatusLabel,
+  sshStateTone,
+  type SshServerLiveState,
+} from "@/ssh/use-ssh-connect-events";
+import { AuthPromptBar, HostkeyPromptBar, MismatchBanner } from "./prompt-bars";
+import {
+  fgTint,
+  IconBtn,
+  redTint,
+  StateDot,
+  ThemedArrowLeft,
+  ThemedPlay,
+  ThemedSquare,
+} from "./primitives";
+import { sshStyles as styles } from "./styles";
+
+// An SSH terminal tab (spec 25.4): the daemon-side session rendered by the shared
+// TerminalPane, with the connect prompt bars above it (25.13). The terminal has no
+// workspace; `cwd` is only a cache key for the pane.
+
+const SSH_STATE_LABELS: Record<SshServerState, string> = {
+  disconnected: "Disconnected",
+  connecting: "Connecting…",
+  awaiting_hostkey: "Waiting for host key approval",
+  awaiting_auth: "Waiting for credentials",
+  connected: "Connected",
+  reconnecting: "Connection lost — reconnecting…",
+  error: "Connection failed",
+};
+
+const noop = () => {};
+
+export type SshConnectionErrorDetails = NonNullable<SshConnectionStateEvent["error"]>;
+
+function statusLine(
+  live: SshServerLiveState | undefined,
+  terminalState: SshConnectionStateEvent | undefined,
+): string {
+  const state = terminalState?.state ?? "connecting";
+  return sshLiveStatusLabel(live) ?? terminalState?.error?.message ?? SSH_STATE_LABELS[state];
+}
+
+function FailureNotice({
+  error,
+  onReplaceHostKey,
+}: {
+  error: SshConnectionErrorDetails;
+  onReplaceHostKey: (error: SshConnectionErrorDetails) => void;
+}) {
+  const handleReplace = useCallback(() => onReplaceHostKey(error), [error, onReplaceHostKey]);
+  if (error.code === "host_key_mismatch" && error.storedFingerprint && error.receivedFingerprint) {
+    return (
+      <MismatchBanner
+        storedFingerprint={error.storedFingerprint}
+        receivedFingerprint={error.receivedFingerprint}
+        onReplace={handleReplace}
+      />
+    );
+  }
+  return (
+    <Alert variant="error" title="Connection failed" testID="ssh-connect-error">
+      <Text style={styles.promptHint}>{error.message ?? error.code}</Text>
+    </Alert>
+  );
+}
+
+export function SshTerminalView({
+  hostServerId,
+  server,
+  groups,
+  terminalId,
+  live,
+  terminalState,
+  insetsTop,
+  detailTabs,
+  onBack,
+  onEndSession,
+  onHostkeyDecision,
+  onAuthSubmit,
+  onReplaceHostKey,
+  onReconnect,
+}: {
+  hostServerId: string;
+  server: SshServerInfo;
+  groups: SshGroup[];
+  terminalId: string;
+  live: SshServerLiveState | undefined;
+  terminalState: SshConnectionStateEvent | undefined;
+  insetsTop: number;
+  /** Server detail tabs (SFTP, forwarding, …) mounted by milestone modules. */
+  detailTabs?: ReactNode;
+  onBack: () => void;
+  onEndSession: () => void;
+  onHostkeyDecision: (serverId: string, decision: "accept" | "reject") => void;
+  onAuthSubmit: (serverId: string, answers: string[] | null) => void;
+  onReplaceHostKey: (error: SshConnectionErrorDetails) => void;
+  onReconnect: () => void;
+}) {
+  const state = terminalState?.state ?? "connecting";
+  const failure = state === "error" ? terminalState?.error : undefined;
+  const canReconnect = state === "error" || state === "disconnected";
+  return (
+    <View style={styles.terminalScreen} testID="ssh-terminal-view">
+      <View style={[styles.terminalHeader, { paddingTop: insetsTop + 8 }]}>
+        <IconBtn
+          icon={ThemedArrowLeft}
+          tint={fgTint}
+          label="Back to servers"
+          onPress={onBack}
+          testID="ssh-terminal-back"
+        />
+        <View style={styles.terminalTitle}>
+          <View style={styles.headerRow}>
+            <StateDot tone={sshStateTone(state)} />
+            <Text style={styles.cellStrong} numberOfLines={1}>
+              {server.label}
+            </Text>
+          </View>
+          <Text style={styles.cellSub} numberOfLines={1} testID="ssh-terminal-status">
+            {formatServerTarget(server, groups)} · {statusLine(live, terminalState)}
+          </Text>
+        </View>
+        {canReconnect ? (
+          <IconBtn
+            icon={ThemedPlay}
+            tint={fgTint}
+            label="Reconnect"
+            onPress={onReconnect}
+            testID="ssh-terminal-reconnect"
+          />
+        ) : null}
+        <IconBtn
+          icon={ThemedSquare}
+          tint={redTint}
+          label="Close session"
+          onPress={onEndSession}
+          testID="ssh-terminal-end"
+        />
+      </View>
+      {detailTabs ?? null}
+      <View style={styles.promptStack}>
+        {live ? (
+          <HostkeyPromptBar serverId={server.id} live={live} onDecision={onHostkeyDecision} />
+        ) : null}
+        {live ? <AuthPromptBar serverId={server.id} live={live} onSubmit={onAuthSubmit} /> : null}
+        {failure ? <FailureNotice error={failure} onReplaceHostKey={onReplaceHostKey} /> : null}
+      </View>
+      <View style={styles.terminalBody}>
+        <TerminalPane
+          serverId={hostServerId}
+          cwd={`ssh:${terminalId}`}
+          terminalId={terminalId}
+          isWorkspaceFocused
+          isPaneFocused
+          onOpenFileExplorer={noop}
+          onOpenWorkspaceFile={noop}
+        />
+      </View>
+    </View>
+  );
+}
