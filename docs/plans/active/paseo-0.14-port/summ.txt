@@ -1,0 +1,661 @@
+c7e7e52b0|fix: update lockfile signatures and Nix hash [skip ci]|1f, 1+, 1-||
+c54f20e53|feat(website): show Hub's Free and Pro plans, and drop trial wording (#5138)|13f, 300+, 57-||
+827178df9|Keep a custom Codex provider and Paseo tools after rewinding|3f, 89+, 14-|R2|srv:agent/providers/codex-app-server-agent.ts, srv:agent/providers/codex/rewind.ts
+792715e76|feat(usage): usage sources as built-in plugins, following the session's account (#5465)|189f, 9576+, 4669-|F21 M1 X12 d6|knip.json, package.json, app:app/_layout.tsx, app:app/usage.tsx +134
+a43c8d888|Show the Cursor icon for terminal profiles that run cursor-agent (#5379)|3f, 77+, 2-|X1|proto:terminal-profiles.ts
+dffde6ae8|fix(codex): read custom prompts from the provider's own CODEX_HOME (#5450)|2f, 140+, 13-|X1|srv:agent/providers/codex-app-server-agent.ts
+8de52a3c9|Report a background send_agent_prompt's started turn as running (#5386)|2f, 142+, 4-|R1|srv:agent/tools/paseo-tools.ts
+dd5df9ec6|fix: update lockfile signatures and Nix hash [skip ci]|1f, 1+, 1-||
+7bb7d4ed0|Open a subagent in the split pane it was opened from (#5451)|2f, 154+|M1|app:workspace-tabs/open-beside.ts
+b85b44aea|Show a host's new version after its daemon restarts (#5351)|10f, 468+, 47-|F1 M1 X3|app:contexts/session-context.tsx, app:runtime/host-runtime.ts, app:stores/session-store.ts, srv:test-utils/paseo-daemon.ts +1
+cf4509631|Show Windows file links relative to their workspace (#1987)|6f, 160+, 35-|R2 X1|app:assistant-file-links/link.tsx, app:assistant-file-links/tooltip-path.ts, app:workspace/file-open/index.ts
+d0a30ed4d|feat(website): Hub plan cards in USD with one Get started button (#5555)|4f, 49+, 44-||
+05874e289|Keep relative timestamps current in agent, schedule, and import-session rows (#5340)|17f, 410+, 142-|F1 M3 X7|app:components/agent-list.tsx, app:components/import-session-sheet.tsx, app:components/provider-diagnostic-sheet.tsx, app:components/schedules/schedule-row.tsx +7
+8b5201fed|Remove the no-card line from the Hub access FAQ (#5575)|1f, 2+, 2-||
+9d010211a|Archive a custom Codex provider's session when its agent is archived (#5572)|3f, 169+|X1|srv:agent/provider-registry.ts
+f4ba16a0b|fix(app): keep line breaks in streamed replies when a chunk ends in indentation (#5577)|2f, 15+, 2-|M1|app:agent-stream/presentation.ts
+849a876bc|Keep completed plugin-provider sessions error-free across a plugin reload (#5579)|3f, 116+, 2-|M1|srv:agent/plugin-provider.ts
+434060709|feat(claude): add Sonnet 5.5 with its model capabilities (#5583)|4f, 95+, 5-|R1|srv:agent/providers/claude/model-manifest.ts
+940dbfd24|fix(opencode): clear unsupported thinking when changing models (#5587)|7f, 343+, 14-|R2 X1|srv:agent/agent-manager.ts, srv:agent/providers/opencode-agent.ts, srv:agent/providers/opencode/v2/session.ts
+4965af219|docs(changelog): add 0.10.1 release notes|1f, 18+||
+560e478ef|Wait for the connection before starting a file upload (#5585)|2f, 82+, 6-|X1|client:daemon-client.ts
+68938b668|fix(skills): make the paseo-plugin composer pill example match the plugin SDK (#5591)|2f, 89+, 13-||
+690f5298c|fix(app): keep draft composers off the agent command list before a project and model are chosen (#5594)|20f, 175+, 91-|F2 X7|app:components/workspace-setup-dialog.tsx, app:composer/draft/input-draft.ts, app:composer/draft/workspace-tab.tsx, app:composer/index.tsx +5
+3b4118360|fix(app): start the context meter ring at twelve o'clock on web (#5598)|2f, 73+, 5-|X1|app:components/context-window-meter.tsx
+68e722ec2|fix(app): request a chat outline only for a timeline the daemon has served (#5602)|7f, 76+, 7-|F1 X1|app:agent-stream/chat-outline/model.ts, app:agent-stream/chat-outline/use-chat-outline.ts
+f232d23e9|fix(client): let SDK callers choose what a send does to an active turn (#5605)|4f, 24+, 8-|F1 X2|packages/client/examples/agents-and-providers.ts, client:daemon-client.ts, client:index.ts
+d91171954|fix(opencode): keep v2 edit text in completed edit details (#5609)|2f, 71+, 6-|R1|srv:agent/providers/opencode/tool-call-detail-parser.ts
+b9ac1d498|fix(app): add a Back to plugins link to plugin settings screens on desktop (#5620)|6f, 53+, 3-|F1 X2|app:i18n/resources/en.ts, app:plugins/settings/index.tsx, app:screens/settings-screen.tsx
+87818812a|Stop the desktop app from launching a process every second when no local daemon runs (#5636)|2f, 37+, 1-|X1|desk:daemon/daemon-manager.ts
+be2fb1cab|fix(opencode): keep long v2 turns alive until execution completes (#5674)|7f, 570+, 118-|R3 X1|srv:agent/providers/opencode/test-utils/v2-harness.ts, srv:agent/providers/opencode/v2/api.ts, srv:agent/providers/opencode/v2/session.ts, srv:agent/providers/opencode/v2/turns.ts
+d59686189|feat(sidebar): make empty project actions clear and quiet (#5675)|7f, 53+, 25-|M1|app:components/sidebar/empty-states.tsx
+aff476b01|fix(codex): insert custom prompt arguments literally (#5669)|2f, 53+, 20-|F1|srv:agent/providers/codex-app-server-agent.ts
+cc744cc66|feat(app): let users set the chat and Markdown content width (#5680)|39f, 516+, 64-|F6 M6 X11|app:agent-stream/strategy-web.tsx, app:agent-stream/strategy.ts, app:agent-stream/turn-footer.tsx, app:agent-stream/view.tsx +19
+264f6e1cc|feat(omp): make OMP a first-class provider (#5550)|31f, 3760+, 649-|F18 X1|srv:agent/providers/omp/agent.ts, srv:agent/providers/omp/cli-runtime.ts, srv:agent/providers/omp/custom-message.ts, srv:agent/providers/omp/history.ts +15
+2838922ad|fix(opencode): show the question text and typed answer in v2 question cards (#5679)|2f, 68+, 2-|R1|srv:agent/providers/opencode/v2/permissions.ts
+23c4404b9|fix(codex): keep output schema fields named like schema keywords (#5684)|2f, 117+, 4-|F1|srv:agent/providers/codex-app-server-agent.ts
+a8f5d969b|fix(codex): keep the default effort after a daemon restart (#5686)|2f, 41+, 3-|X1|srv:agent/providers/codex-app-server-agent.ts
+4b45bc9fc|fix: restore archived workspaces without recorded branches (#5694)|15f, 246+, 37-|F4 X1|app:i18n/resources/en.ts, app:screens/workspace/workspace-route-state-views.tsx, srv:resolve-worktree-creation-intent.ts, srv:session/workspace-recovery/workspace-recovery-service.ts +1
+5764863f6|fix(opencode): show v2 patch edits as edit diffs (#5696)|2f, 32+|R1|srv:agent/providers/opencode/tool-call-detail-parser.ts
+5de45e208|fix(desktop): capture the annotated element when the app is zoomed (#5703)|2f, 28+, 6-|X1|desk:features/browser-capture.ts
+60aff2346|Support catalog-driven Codex Fast and Ultrafast speeds (#5708)|11f, 576+, 157-|F3 X3|app:composer/agent-controls/index.tsx, proto:agent-types.ts, proto:messages.ts, srv:agent/agent-sdk-types.ts +2
+d3c902e9f|fix(opencode): fill the context meter during v2 turns (#5710)|3f, 175+|R2|srv:agent/providers/opencode/v2/session.ts, srv:agent/providers/opencode/v2/usage.ts
+767b0e970|Rewind legacy Codex threads on Codex versions without thread/rollback (#5711)|4f, 90+, 4-|F1 X1|srv:agent/providers/codex-app-server-agent.ts, srv:agent/providers/codex/rewind.ts
+53ee9cd99|fix(codex): settle declined commands and file edits as failed (#5717)|2f, 24+|F1|srv:agent/providers/tool-call-mapper-utils.ts
+3fea12838|docs(changelog): add 0.10.2 release notes|1f, 10+||
+4e9a4582b|fix(app): stop connecting to a host removed during its first probe (#5722)|2f, 39+|F1|app:runtime/host-runtime.ts
+5599f9e56|fix(cli): fail agent open for an agent the daemon does not have (#5727)|2f, 82+, 6-|X1|cli:commands/agent/open.ts
+b1a3b0772|fix(claude): skip user and project hooks for internal agents (#5750)|3f, 70+, 2-|F1|srv:agent/providers/claude/agent.ts
+3a9304607|feat: sidebar header and footer plugin items, Usage in the sidebar footer (#5685)|169f, 5731+, 3341-|F26 M3 X8 d3|app:components/hosts/host-switcher.tsx, app:components/left-sidebar.tsx, app:components/page-layout/index.tsx, app:components/sidebar/sidebar-header-row.tsx +99
+8cccc1f6f|fix(codex): answer each approval callback that shares one item (#5758)|3f, 79+, 5-|F2|srv:agent/providers/codex-app-server-agent.ts, srv:agent/providers/codex/test-utils/fake-app-server.ts
+b0c9de0c9|feat(plugins): first-class plugin providers — status, launch resolution, config overrides (#5707)|21f, 1033+, 139-|F7 M1 X6|plugin:server/acp-internal/connection.ts, plugin:server/acp.ts, plugin:server/provider.ts, proto:provider-config.ts +10
+ad56659a8|fix(app): resolve plugin provider icons after the snapshot arrives (#5720)|23f, 165+, 140-|F1 M1 X15|app:command-center/agent-control-registration.tsx, app:components/agent-list.tsx, app:components/import-session-sheet.tsx, app:components/model-browser.tsx +13
+2553ab4d8|fix(app): expose terminal controls on native tablets (#5712)|7f, 248+, 11-|F1 X1|app:components/terminal-pane.tsx, app:terminal/runtime/terminal-virtual-keyboard.ts
+e9e479c6b|fix(pi): stream running subagent transcripts (#5755)|14f, 691+, 73-|F9|srv:agent/providers/pi/agent.ts, srv:agent/providers/pi/extensions/child-session.ts, srv:agent/providers/pi/extensions/contract.ts, srv:agent/providers/pi/extensions/gotgenes-pi-subagents/index.ts +5
+9952c5598|fix(app): restore native tablet touch actions (#5713)|17f, 298+, 10-|F3 X1|app:components/context-window-meter.tsx, app:components/ui/external-link.tsx, app:components/ui/tooltip.tsx, app:screens/workspace/workspace-desktop-tabs-row.tsx
+5715b5ba6|fix(app): reflow iPad chat text after pane resize (#5716)|5f, 175+|F1 X1|patches/react-native-uitextview+2.2.0.patch, scripts/postinstall-patches.mjs
+7b7685678|feat(antigravity): add Antigravity provider plugin (#5714)|248f, 3555+, 3-|F11 M1 X1|packages/server/package.json, srv:plugins/builtin/index.ts, plugins/antigravity-provider/icon.svg, plugins/antigravity-provider/index.server.ts +9
+8332f4d1f|feat(muse): add Muse Code as a built-in provider plugin (#5719)|83f, 8116+, 142-|F21 M2|srv:plugins/builtin/index.ts, plugins/muse-provider/client/settings.tsx, plugins/muse-provider/icon.svg, plugins/muse-provider/index.client.tsx +19
+4417d7c47|fix(pi): give Pi's built-in MCP the agent's MCP servers (#5762)|3f, 214+, 43-|X1|srv:agent/providers/pi/agent.ts
+d070db15b|fix(acp): report the agent's error when session setup is rejected (#5765)|2f, 177+, 32-|F1|srv:agent/providers/acp-agent.ts
+364e6456e|Add confirmation for new hosts (#5753)|22f, 1223+, 278-|F3 X7|app:app/_layout.tsx, app:app/pair-scan.tsx, app:components/add-host-modal.tsx, app:components/pair-link-modal.tsx +6
+318a84a57|Keep native dialogs and sheets usable when stacked (#5772)|4f, 184+, 38-|X1|app:components/adaptive-modal-sheet.tsx
+29c198f95|fix(providers): apply configured options to every agent provider (#5780)|45f, 691+, 426-|F15 M1 X10|plugin:server/provider.ts, proto:agent-types.ts, proto:messages.ts, proto:provider-config.ts +22
+9d9d9af99|Remove the unreleased Antigravity provider plugin (#5781)|266f, 127+, 3729-|D11 M1|srv:plugins/builtin/index.ts, plugins/antigravity-provider/icon.svg, plugins/antigravity-provider/index.server.ts, plugins/antigravity-provider/paseo-plugin.json +8
+7a64eef49|Show the command on Codex terminal rows (#5774)|4f, 82+, 12-|F3|srv:agent/providers/codex-app-server-agent.ts, srv:agent/providers/codex/test-utils/fake-app-server.ts, srv:agent/providers/codex/tool-call-mapper.ts
+695ecb281|fix(muse): make package installs and project rules work by default (#5775)|11f, 156+, 229-|D4 F1 M2|plugins/muse-provider/client/settings.tsx, plugins/muse-provider/index.client.tsx, plugins/muse-provider/index.server.ts, plugins/muse-provider/server/options.ts +3
+1f5f5d384|Sidebar usage shows default percents with logos, and remembers the picked host (#5786)|31f, 717+, 365-|D1 F3 M9 X4|app:components/hosts/host-filter.tsx, app:components/hosts/host-picker.tsx, app:components/hosts/host-switcher.tsx, app:components/left-sidebar.tsx +13
+a7c9c05be|Start new workspaces off origin/main at the remote tip (#5788)|2f, 149+|X1|srvsrc:utils/worktree.ts
+20a887f4c|Show an agent's own model in the composer when the catalog lacks it (#5796)|2f, 29+, 3-|F1|app:composer/agent-controls/utils.ts
+7b0cace99|Restore Antigravity with Full access and session warnings (#5795)|268f, 3854+, 127-|F11 M2|srv:agent/plugin-provider.ts, srv:plugins/builtin/index.ts, plugins/antigravity-provider/icon.svg, plugins/antigravity-provider/index.server.ts +9
+e0a0cf990|Ask OpenCode before running a Paseo tool (#5801)|3f, 102+, 1-|F1|srv:agent/providers/opencode/bridge-plugin.mjs
+4893629ff|Show the thinking level an agent runs on in its composer (#5804)|3f, 78+, 2-|F1 X1|app:composer/agent-controls/index.tsx, app:composer/agent-controls/utils.ts
+b701cb2dc|Show failed Codex image generations in the chat (#5810)|2f, 110+|F1|srv:agent/providers/codex-app-server-agent.ts
+15f143141|Let bundlers resolve the published @getpaseo/relay package (#5815)|4f, 53+, 21-|F1 M1 R1|packages/app/metro.config.cjs, packages/client/package.json, packages/relay/package.json
+e939dd4c7|Streamline sidebar usage and stacked sheet interactions (#5805)|65f, 1292+, 527-|D1 F8 M18 X8|app:command-center/command-center.tsx, app:components/adaptive-modal-sheet.tsx, app:components/left-sidebar.tsx, app:components/sidebar/sidebar-header-row.tsx +31
+d30e99c85|Log why a resumed Claude agent has no history (#5818)|2f, 104+, 3-|X1|srv:agent/providers/claude/agent.ts
+06213e49b|Complete every Tintinweb subagent in a grouped completion (#5826)|3f, 458+, 17-|X1|srv:agent/providers/pi/extensions/tintinweb-pi-subagents/index.ts
+bdb8e1322|docs(changelog): add 0.11.0-beta.1 release notes|1f, 72+||
+4aa2f2817|chore(release): cut 0.11.0-beta.1|14f, 55+, 55-|M2 X10|package.json, packages/app/package.json, packages/cli/package.json, packages/client/package.json +8
+37b66897a|fix: update lockfile signatures and Nix hash [skip ci]|1f, 1+, 1-||
+95774ba71|Show each Paseo skill once in Codex (#5827)|7f, 199+, 39-|M2|srv:orchestration-skills/internal/operations.ts, srv:orchestration-skills/internal/sync.ts
+e10f6d2e2|Let plugin client code import packages that declare only main (#5838)|2f, 31+|F1|srv:plugins/compiler.ts
+70df09dae|Restore desktop usage and subscription discovery across harnesses (#5844)|33f, 1578+, 221-|F2 M11 X2|app:components/left-sidebar.tsx, app:usage/index.ts, app:usage/queries.ts, app:usage/sidebar-item.tsx +11
+a52bdb106|docs(changelog): add 0.11.0-beta.2 release notes|1f, 19+||
+8498c7416|chore(release): cut 0.11.0-beta.2|14f, 55+, 55-|M2 X10|package.json, packages/app/package.json, packages/cli/package.json, packages/client/package.json +8
+b5b43edd6|fix: update lockfile signatures and Nix hash [skip ci]|1f, 1+, 1-||
+05e94ab52|Keep usage logins visible and explain unavailable quota (#5876)|70f, 1919+, 1110-|M34 X6|app:usage/card.tsx, app:usage/copy.ts, app:usage/pinned.ts, app:usage/types.ts +39
+31cd18e74|docs(changelog): add 0.11.0-beta.3 release notes|1f, 16+||
+6166a7aca|chore(release): cut 0.11.0-beta.3|14f, 55+, 55-|M2 X10|package.json, packages/app/package.json, packages/cli/package.json, packages/client/package.json +8
+bd3986d96|fix: update lockfile signatures and Nix hash [skip ci]|1f, 1+, 1-||
+6c985769b|test(app): tolerate footer icon subpixel rounding (#5898)|1f, 7+, 2-||
+73d25317a|fix(usage): derive window names and unify pin selection (#5903)|27f, 815+, 172-|M13|app:usage/display.ts, app:usage/host-usage-section.tsx, app:usage/pinned.ts, app:usage/preferences.ts +9
+1d0df5c0b|docs(changelog): add 0.10.3 release notes|1f, 6+||
+6a794b657|Show a thanks page with community and sponsor links after downloading (#5914)|8f, 250+, 14-||
+ee0b0ef7c|Feature OMP on the homepage, give /agents icons, and use Inter on the website (#5918)|39f, 745+, 111-||
+3b5bbb139|fix: update lockfile signatures and Nix hash [skip ci]|1f, 1+, 1-||
+087cc71c0|fix(server): use macOS ComputerName for host identity (#5922)|6f, 53+, 13-|F1 X3|srv:bootstrap.ts, srv:host-name.ts, srv:pid-lock.ts, srv:websocket-server.ts
+ac83aa078|feat(website): use Geist and put FAQ toggles on the content rail (#5919)|5f, 32+, 13-||
+860852549|fix: update lockfile signatures and Nix hash [skip ci]|1f, 1+, 1-||
+d831c7bf3|Make Usage settings discoverable above reports (#5921)|16f, 341+, 167-|D1 F4 M6|app:components/settings/collapsible-row.tsx, app:components/settings/index.tsx, app:usage/controls.tsx, app:usage/copy.ts +7
+d3c76be9c|Unify Explorer tabs and refine launch controls (#5942)|34f, 605+, 672-|D1 F3 M6 X6|packages/app/package.json, app:app/_layout.tsx, app:components/add-project-flow.tsx, app:components/split-container.tsx +12
+5293ddac3|fix: update lockfile signatures and Nix hash [skip ci]|1f, 1+, 1-||
+8aec0787d|fix(app): keep chat reading position stable while scrolling (#5945)|9f, 771+, 222-|F1 R1 X2|app:agent-stream/reading-anchor.ts, app:agent-stream/strategy-web.tsx, app:agent-stream/web-virtualization.ts, srv:agent/providers/mock-load-test-agent.ts
+5375f43a0|feat(plugins): expose agent closed lifecycle event (#5971)|10f, 97+, 10-|F7|plugin:server/lifecycle.ts, srv:agent/agent-manager.ts, srv:bootstrap.ts, srv:plugins/index.ts +3
+7dc2a3568|fix(terminal): translate mac cmd/option editing shortcuts|5f, 252+, 13-|F2 X1|app:terminal/runtime/terminal-emulator-runtime.ts, app:terminal/webview/terminal-emulator-webview-html.ts, app:utils/terminal-keys.ts
+a983ae044|refactor(terminal): inject mac platform flag at mount|3f, 24+, 60-|X2|app:terminal/runtime/terminal-emulator-runtime.ts, app:terminal/webview/terminal-emulator-webview-html.ts
+70210f107|refactor(app): name the terminal key-event input shapes|2f, 24+, 16-|X1|app:utils/terminal-keys.ts
+e18f9e8f4|refactor(terminal): share platform policy across keyboard shortcuts|6f, 112+, 33-|R1 X2|app:terminal/runtime/terminal-emulator-runtime.ts, app:terminal/webview/terminal-emulator-webview-html.ts, app:utils/terminal-keys.ts
+5c1be59b6|test(terminal): isolate Linux keyboard policy from the host platform|1f, 13+||
+42e221746|fix(app): render linked pictures in PR markdown (#5968)|4f, 225+, 25-|F1|app:components/markdown/html-ish.ts
+5f28b3cf8|fix(app): smooth chat history pagination and reserve image space (#5970)|19f, 487+, 244-|F2 M1 X8|app:agent-stream/reading-anchor.ts, app:agent-stream/strategy-web.tsx, app:agent-stream/strategy.ts, app:agent-stream/view.tsx +7
+b5e9747e2|Add the reviewed plugin registry and the unlinked plugin directory pages (#5986)|48f, 1998+, 78-|F4 M1 X5|cli:commands/plugin/index.ts, proto:messages.ts, proto:plugin-registry.ts, proto:plugin-source-reference.ts +6
+526ad1366|fix: update lockfile signatures and Nix hash [skip ci]|1f, 1+, 1-||
+15d8ba16a|fix(cli): handle negated schedule limit flags (#5973)|2f, 102+, 9-|X1|cli:commands/schedule/update.ts
+42806cdbf|Let plugins play audio on every client (#5976)|30f, 1043+, 581-|F13 X6 d1|app:audio/audio-engine-types.ts, app:audio/audio-engine.d.ts, app:audio/audio-engine.native.ts, app:audio/audio-engine.web.ts +16
+0d05584d0|fix(omp): open agent history that contains a failed browser tool call (#5985)|2f, 90+, 3-|X1|srv:agent/providers/omp/tool-call-detail.ts
+749fe3e5a|fix(server): keep the local speech library path out of agent environments (#5987)|2f, 85+, 3-|F1|packages/server/scripts/supervisor-entrypoint.ts
+c7759713e|fix(server): publish workspace script status to every client (#6007)|6f, 88+, 14-|X4|srv:bootstrap.ts, srv:session.ts, srv:session/workspace-scripts/workspace-scripts-service.ts, srv:websocket-server.ts
+5eb4c8afa|feat(usage): show each agent's own plan usage in its context window details (#5975)|94f, 2359+, 402-|F16 M12 X12|app:components/context-window-details.tsx, app:components/context-window-meter.tsx, app:components/context-window-sheet.tsx, app:components/ui/tooltip.tsx +56
+ed87679c6|fix(nix): ship the OpenCode v2 bridge plugin in the daemon closure (#5988)|2f, 49+, 2-|F1|scripts/trace-daemon.mjs
+4869214bc|fix(cli): confirm daemon restart when provider probes are slow (#6009)|2f, 33+, 1-|X1|cli:commands/daemon/restart.ts
+79a394239|fix(server): mark Claude terminals as needing input when Claude goes idle (#6022)|3f, 15+, 6-|F1|srvsrc:terminal/agent-hooks/claude/claude.ts
+8216e86ec|fix(cli): delete archived agents with agent delete --all and --cwd (#6027)|2f, 86+, 14-|X1|cli:commands/agent/delete.ts
+cc8fe41e2|Send display: summarized so Claude thinking renders (#4355)|2f, 12+, 4-|F1|srv:agent/providers/claude/agent.ts
+ed48655a7|fix(server): stop directory search from taking every filesystem thread (#6029)|2f, 76+, 2-|X1|srvsrc:utils/directory-suggestions.ts
+485221b73|fix(app): enlarge compact sidebar footer tap targets (#6044)|4f, 56+, 16-|X3|app:components/left-sidebar.tsx, app:components/sidebar/sidebar-help-menu.tsx, app:styles/theme.ts
+409b8f931|fix(server): keep a new worktree open when its paseo.json cannot be parsed (#6036)|6f, 38+, 36-|F2 X1|srv:bootstrap.ts, srv:session.ts, srv:worktree-session.ts
+5285b7e50|fix(server): keep a stuck directory search from blocking every other search (#6041)|2f, 25+, 4-|X1|srvsrc:utils/directory-suggestions.ts
+05b074764|fix(cli): report an unknown agent ID as AGENT_NOT_FOUND (#6053)|5f, 63+, 14-|F1|srv:session.ts
+30fb66c8c|fix(app): preserve mobile sidebar scroll position when reopening (#6058)|6f, 92+, 8-|F1 X1|packages/app/maestro/sidebar-scroll-retention.yaml, app:mobile-panels/presentation.tsx
+5c2c85ebc|fix(server): resume with last live mode, not creation-time mode (#5140)|4f, 66+, 7-|F1 X1|srv:agent/agent-manager.ts, srv:persistence-hooks.ts
+97083dd73|fix(pi,omp): open sessions whose model was removed (#6061)|6f, 246+, 22-|X4|srv:agent/providers/omp/agent.ts, srv:agent/providers/omp/test-utils/fake-omp.ts, srv:agent/providers/pi/agent.ts, srv:agent/providers/pi/test-utils/fake-pi.ts
+48329facc|fix(acp): surface context-window usage from the ACP usage_update notification (#4848)|2f, 62+, 1-|F1|srv:agent/providers/acp-agent.ts
+5aee41952|feat(website): browse plugins by nine community categories (#6068)|6f, 720+, 39-||
+642d69b14|fix(app): cache file links with their line locations (#5653)|2f, 34+, 9-|F1|app:assistant-file-links/use-file-link.ts
+febe9611b|fix(app): stop composer autofocus on touch screens (#5477)|3f, 58+, 2-|X1|app:composer/index.tsx
+c06228042|Ship the plugin directory redesign and keep registry installs behind a daemon flag (#6080)|33f, 1330+, 676-|M2 X5|cli:commands/plugin/index.ts, srv:bootstrap.ts, srv:config-environment.ts, srv:config.ts +3
+b3ed7363c|fix(claude): keep a background subagent's card labeled after its child streams (#6067)|2f, 125+|F1|srv:agent/providers/claude/agent.ts
+8a4ce5a48|fix(website): replace the native search clear control with a muted X button (#6082)|2f, 48+, 9-||
+71b236d38|fix(server): update the running npm installation prefix (#5649)|4f, 81+, 10-|F3|srv:session/daemon/daemon-self-updater.ts, srv:session/daemon/install-origin.ts, srv:session/daemon/npm-global-cli.ts
+154a088d6|feat(app): default sidebar workspace slots to last activity (#6087)|3f, 4+, 6-|X1|app:hooks/use-settings/storage.ts
+218712464|Answer an ACP agent's open permission request when its turn fails (#6045)|2f, 179+, 8-|F1|srv:agent/providers/acp-agent.ts
+1f8a4559a|fix(providers): show custom context in expandable tool rows (#6090)|13f, 393+, 65-|F4 X3|srv:agent/agent-timeline-content.ts, srv:agent/providers/custom-message.ts, srv:agent/providers/omp/agent.ts, srv:agent/providers/omp/message-history.ts +3
+a8e6c57f1|fix(app): match compact sidebar footer glyphs to the composer toolbar size|4f, 5+, 3-|X3|app:components/left-sidebar.tsx, app:components/sidebar/sidebar-help-menu.tsx, app:styles/theme.ts
+d517b3314|fix(opencode): wait for the server to listen before opening the event stream (#5873)|5f, 231+, 83-|F2 X1|srv:agent/providers/opencode-agent.ts, srv:agent/providers/opencode/event-consumer.ts, srv:agent/providers/opencode/server-manager.ts
+fa0f04058|Keep account usage accessible before the first turn and restore compact sheets|46f, 1355+, 700-|F9 M8 X5|app:components/context-window-details.tsx, app:components/context-window-meter.tsx, app:components/left-sidebar.tsx, app:components/ui/anchor.ts +18
+36e6ccd6c|fix(claude): show plan mode when Claude enters it on its own (#6074)|2f, 62+, 4-|F1|srv:agent/providers/claude/agent.ts
+fbd1bc47e|chore: normalize package-lock.json workspace dependency order|1f, 2+, 2-||
+3ee4c49e3|docs(release): fold each beta into one changelog entry for the series|1f, 15+, 17-||
+981bb4c40|docs(changelog): fold the 0.11.0 betas into the 0.11.0-beta.4 entry|1f, 63+, 57-||
+6b00310f7|chore(release): cut 0.11.0-beta.4|14f, 55+, 55-|M2 X10|package.json, packages/app/package.json, packages/cli/package.json, packages/client/package.json +8
+2f9a78606|fix: update lockfile signatures and Nix hash [skip ci]|1f, 1+, 1-||
+7b43f2194|fix(app): let Remote SSH connections authenticate to a password-protected daemon (#6081)|13f, 254+, 15-|M1 X2|app:components/add-remote-ssh-host-modal.tsx, app:i18n/resources/en.ts, app:runtime/host-runtime.ts
+a50e14b69|fix(app): keep the centered new workspace form above the keyboard on tablets (#6093)|6f, 149+, 22-|M5|app:composer/dock/index.native.tsx, app:composer/dock/internal/capacity.ts, app:keyboard/shift/internal/translate.android.tsx, app:keyboard/shift/internal/translate.ios.tsx +1
+cf2b3f4bb|Name a linked global install as the reason daemon self-update is refused (#6095)|3f, 71+, 23-|F1|srv:session/daemon/npm-global-cli.ts
+f24bb523e|Exit CLI commands quietly when their output is no longer read (#6097)|7f, 143+, 36-|F3 X2|cli:commands/agent/attach.ts, cli:commands/agent/logs.ts, cli:run.ts, cli:utils/wait-for-stop.ts +1
+da9fae172|fix(claude): keep a subagent's card labeled after a daemon restart (#6100)|2f, 111+, 12-|X1|srv:agent/providers/claude/agent.ts
+8ced059b4|fix(omp): fail the turn when OMP rejects a prompt before its agent runs (#6110)|4f, 77+, 5-|F2 X1|srv:agent/providers/omp/agent.ts, srv:agent/providers/omp/rpc-types.ts, srv:agent/providers/omp/test-utils/omp-harness.ts
+dfb8a1a2b|fix(omp): an OMP run with a message Paseo does not render now finishes instead of staying running (#6112)|2f, 113+|F1|srv:agent/providers/omp/rpc-types.ts
+9da676d70|Keep the daemon running when nobody reads its output (#6117)|2f, 52+, 1-|F1|packages/server/scripts/supervisor.ts
+62f79e88b|fix(omp): a prompt OMP 18.3 rejects after acknowledging it now fails with OMP's error (#6115)|9f, 190+, 18-|F3 X2|srv:agent/providers/jsonl-rpc-process.ts, srv:agent/providers/omp/agent.ts, srv:agent/providers/omp/cli-runtime.ts, srv:agent/providers/omp/rpc-types.ts +1
+d826d8109|fix(muse): load models whose effort tiers carry descriptions (#6021)|7f, 265+, 30-|M5|plugins/muse-provider/server/catalog.ts, plugins/muse-provider/server/connection.ts, plugins/muse-provider/server/session.ts, plugins/muse-provider/server/sessions.ts +1
+976029265|fix(providers): launch plugin CLIs on Windows and tolerate Muse startup (#6151)|23f, 589+, 215-|F4 M5 X3|.oxlintrc.json, plugin:server/acp-internal/connection.ts, plugin:server/index.ts, plugin:server/process-internal/windows-command.ts +8
+27a95a5de|feat(website): give the plugin directory a closing section for building and submitting plugins (#6160)|5f, 49+, 14-||
+bc6ddbfa9|fix(muse): restore earlier messages after daemon restart (#6159)|4f, 86+, 24-|M2|plugins/muse-provider/server/session.ts, plugins/muse-provider/server/wire.ts
+18412604d|fix(app): copy only the code when a selection touches the block beside it (#6138)|3f, 159+, 7-|X1|app:assistant-selection-copy/content.web.ts
+3e2d77723|fix(usage): scope Muse and agent logins, show every failed host login (#6156)|22f, 592+, 87-|M8 X1|app:usage/agent-usage.tsx, app:usage/card.tsx, app:usage/queries.ts, plugin:server/usage.ts +5
+db303be3c|fix(nix): ship resolved daemon dependencies and working terminals (#5523)|7f, 156+, 39-|F2 X1|desk:integrations/cli-install/path.ts, desk:integrations/cli-install/paths.ts, scripts/trace-daemon.mjs
+4ed13fadb|fix(app): keep list numbers when a copy crosses a code block nested in an item (#6158)|2f, 42+, 3-|F1|app:assistant-selection-copy/content.web.ts
+2f0cb2f54|Show the Codex speed bolt in yellow while Fast or Ultrafast is selected (#6152)|5f, 70+, 9-|F2 X1|app:agent-controls/policy.ts, app:composer/agent-controls/index.tsx, app:composer/agent-controls/utils.ts
+f02cc16bb|fix(app): close hover cards when the pointer leaves a clicked row (#6167)|3f, 86+, 2-|M1|app:components/ui/hover-card.tsx
+84054f8d7|fix(desktop): restore titlebar dragging after scrolling chat (#5233)|7f, 491+, 4-|F4 X1|packages/app/public/index.html, app:agent-stream/strategy-web.tsx, packages/desktop/capture-harness/main.js, packages/desktop/capture-harness/titlebar-drag-mouse.m +1
+5fd407289|docs: changelog for 0.11.0-beta.5|1f, 17+, 4-||
+15d774d4a|chore(release): cut 0.11.0-beta.5|14f, 55+, 55-|M2 X10|package.json, packages/app/package.json, packages/cli/package.json, packages/client/package.json +8
+3ad878b47|fix: update lockfile signatures and Nix hash [skip ci]|1f, 1+, 1-||
+7a3030550|fix(opencode): agent goes idle after a v2 question is dismissed (#6177)|4f, 75+, 2-|F3|srv:agent/providers/opencode/v2/permissions.ts, srv:agent/providers/opencode/v2/session.ts, srv:agent/providers/opencode/v2/turns.ts
+950e1f8f4|Keep an image's alt text and source when copying a selection from an assistant reply (#6181)|5f, 106+, 7-|F1 X2|app:assistant-selection-copy/content.web.ts, app:assistant-selection-copy/markup.ts, app:components/message.tsx
+b6e8ca897|fix(app): correct the French translation (#6004)|3f, 1162+, 1148-||
+fe10c40b9|fix(app): keep a hover card open when a pressed button disables itself (#6185)|3f, 21+, 4-|M1|app:components/ui/hover-card.tsx
+e3db7c339|fix(opencode): agent goes idle after a v2 tool permission is denied (#6188)|4f, 126+, 12-|X3|srv:agent/providers/opencode/v2/permissions.ts, srv:agent/providers/opencode/v2/session.ts, srv:agent/providers/opencode/v2/turns.ts
+0255738ee|Copy only the highlighted text when a selection starts below an image (#6195)|3f, 110+, 1-|X1|app:assistant-selection-copy/content.web.ts
+81a5e5bc6|Show the PR checks summary, sidebar status, and "Worked for" line in the app language (#6196)|26f, 607+, 76-|F1 M2 X8|app:components/assistant-turn-footer-label.ts, app:components/message.tsx, app:components/sidebar/project-leading-visual.tsx, app:components/sidebar/sidebar-model.tsx +7
+2dbfd1e0f|fix(omp): reopened chats no longer show extra "Custom message" rows (#6198)|2f, 106+, 2-|X1|srv:agent/providers/omp/history.ts
+a7f7405c0|fix(highlight): highlight Vue (.vue) files (#6205)|4f, 316+|F1 X1|packages/highlight/src/parsers.ts, packages/highlight/src/vue/parser.ts
+2974d7c96|fix(desktop): keep browser_type text out of the focused Paseo composer (#6207)|7f, 102+, 19-|F2 X2|packages/desktop/capture-harness/main.js, desk:features/browser-automation/ipc.ts, desk:features/browser-automation/service.ts, desk:features/browser-automation/trusted-input.ts
+b7c8be408|Show the PR panel's Activity and Add to chat labels in the app language (#6208)|13f, 136+, 12-|F1 M1 X2|app:components/sidebar/sidebar-status-list.tsx, app:git/pull-request-panel/checks-section.tsx, app:git/pull-request-panel/pane.tsx, app:i18n/resources/en.ts
+543e3712e|fix(app): preserve chat rows across virtual layout changes (#6172)|2f, 186+, 39-|X1|app:agent-stream/strategy-web.tsx
+4ede81e84|Open Usage as a modal over the current screen (#6216)|20f, 308+, 314-|D2 F1 M6 X2|app:app/_layout.tsx, app:app/usage.tsx, app:components/sidebar/sidebar-popover.tsx, app:usage/controls.tsx +7
+c301d6e8a|Reinstall local speech models whose extraction was interrupted (#6210)|6f, 235+, 87-|F2 X1|srv:speech/providers/local/models.ts, srv:speech/providers/local/sherpa/model-downloader.ts, srv:speech/speech-runtime.ts
+a700d7875|Stop the provider when archiving an ACP agent that never answers close (#6213)|2f, 165+, 3-|X1|srv:agent/providers/acp-agent.ts
+f5c55dfc5|fix(omp): reopened chats show a compaction row instead of "Unsupported history record" (#6215)|3f, 144+, 5-|X1|srv:agent/providers/omp/history.ts
+396a2bc0b|fix(website): count a plugin install once per IP per hour (#6230)|4f, 156+, 6-||
+06bde1e57|Scaffold author overviews for plugin listings (#6226)|4f, 158+, 1-|X1|cli:commands/plugin/scaffold.ts
+56d568074|fix(highlight): keep Astro expressions colored through nested template strings (#6219)|4f, 116+, 176-|F2 M1|packages/highlight/src/astro/parser.ts, packages/highlight/src/js-scanner.ts, packages/highlight/src/vue/parser.ts
+7fd469ae1|Enable plugin registry installs by default (#6224)|24f, 385+, 118-|M2 X8|app:i18n/resources/en.ts, cli:commands/plugin/index.ts, proto:plugin-source-reference.ts, srv:bootstrap.ts +6
+48059aeae|Show the PR panel's state, activity verbs, and thread badges in the app language (#6225)|14f, 98+, 56-|F1 X2|app:git/pull-request-panel/data.ts, app:git/pull-request-panel/pane.tsx, app:i18n/resources/en.ts
+64c9f263e|Thumbnail plugin card screenshots through Cloudflare image transformations (#6240)|5f, 407+, 2-||
+a292b402c|Resolve local plugin directories in the CLI's working directory (#6239)|4f, 101+, 6-|X1|cli:commands/plugin/index.ts
+a9fef4879|Show an archived ACP agent's history after its worktree is removed (#6228)|2f, 184+, 1-|X1|srv:agent/providers/acp-agent.ts
+fc3b2c4eb|Sanitize plugin overview rendering: no raw HTML, https links only, no relative links (#6244)|16f, 1673+, 43-|F1|proto:plugin-overview.ts
+13d21f60f|fix: update lockfile signatures and Nix hash [skip ci]|1f, 1+, 1-||
+05637a7f0|Show a Claude subagent's auto-mode report as markdown instead of a raw SubagentHandback card (#6248)|6f, 243+, 3-|F3|srv:agent/providers/claude/agent.ts, srv:agent/providers/claude/sidechain-tracker.ts, srv:agent/providers/claude/subagent-handback.ts
+3c478e596|website: plugins page spacing, featured section, media with video, and viewer (#6254)|23f, 608+, 220-|M2 X1|proto:plugin-registry.ts, srv:persisted-config.ts, srv:plugins/managed-source/registry.ts
+4515061f8|website: submit-based plugin search on the home page, back button works on browse (#6256)|3f, 106+, 24-||
+2ecf3ba78|Keep an archived agent archived when a send to it fails (#6255)|2f, 41+, 6-|F1|srv:agent/agent-prompt.ts
+cb2b569bb|Featured subtitle: hand-picked plugins that show what is possible|1f, 1+, 1-||
+66b2567be|Featured: subtitle and a See all plugins link|1f, 10+, 4-||
+72c180aaf|website: plugins section spacing with margins, not flex gaps|3f, 66+, 41-||
+c5deaa051|Revert "website: plugins section spacing with margins, not flex gaps"|3f, 41+, 66-||
+aaeefdc00|website: 80px between the site header and the page content|1f, 1+, 1-||
+50cf244e8|website e2e: expect the current Featured subtitle|1f, 1+, 1-||
+3f1a04304|website: plugin gallery peeks a third tile, viewer steps with arrows (#6261)|3f, 173+, 29-||
+bdc58fb07|feat(website): plugins hero, author and description on cards, install counts with an icon|11f, 157+, 96-||
+aedba5ec2|fix(website): plugin page content spans the same width as the header and footer|1f, 32+, 34-||
+f715221de|feat(website): plugins page copy describes browsing community plugins|1f, 1+, 2-||
+d4ea77b91|fix(website): plugin install command block fits the command|1f, 1+, 1-||
+1463396eb|fix(website): plugin search ranks name matches first|3f, 65+, 14-||
+2d85fe4e0|feat(plugins): declare display metadata in plugin manifests (#6263)|14f, 224+, 38-|F3 X1|cli:commands/plugin/scaffold.ts, proto:messages.ts, srv:plugins/index.ts, srv:plugins/manifest.ts
+93bfb34e2|feat(website): copy states what Paseo does, plugins section and comparison tables (#6270)|16f, 369+, 265-||
+dc785bb29|Keep both subagent cards labeled when Claude launches two background agents together (#6268)|3f, 62+, 2-|F2|srv:agent/agent-stream-coalescer.ts, srv:agent/timeline-projection.ts
+4dd0e50e7|fix(server): time out stalled encrypted relay handshakes (#5648)|2f, 39+, 1-|M1|srv:relay-transport.ts
+8f1091da6|Let a Claude agent leave Auto mode when Claude Code uses Bedrock or Vertex (#6272)|2f, 67+, 9-|X1|srv:agent/providers/claude/agent.ts
+a162e1075|fix(acp): apply configured models the agent does not advertise (#6273)|4f, 194+, 24-|F1 X2|srv:agent/agent-sdk-types.ts, srv:agent/provider-registry.ts, srv:agent/providers/acp-agent.ts
+1e00f452e|Download files whose names have non-ASCII characters (#6278)|2f, 68+, 38-|F1|srv:bootstrap.ts
+2323ee684|Keep reporting a Linux daemon as running after its VM resumes from a host sleep (#6279)|3f, 72+, 5-|X1|srv:pid-lock.ts
+f13bb2136|fix(server): keep accented names on downloaded files (#6281)|4f, 80+, 1-|F1 X1|srv:bootstrap.ts, srv:file-download/content-disposition.ts
+28f752858|docs: fix the Tailscale Serve command and log rotation defaults (#6284)|2f, 3+, 3-||
+56f4fca9e|docs(workspaces): guide parallel development and review (#6294)|6f, 62+, 1-||
+c90587e5b|Keep a plugin search term typed while the website page is still loading (#6293)|2f, 49+||
+8ddeb79c8|Claude agents stay idle while background helpers work, and send or Stop no longer kills them (#6295)|13f, 1504+, 79-|X3|app:runtime/host-runtime.ts, srv:agent/providers/claude/agent.ts, srv:agent/providers/claude/subagents/live-source.ts
+2a5264c18|docs: changelog for 0.11.0|1f, 28+, 7-||
+22488d450|chore(release): cut 0.11.0|18f, 83+, 55-|F4 M2 X10|fastlane/metadata/android/en-US/changelogs/110001.txt, fastlane/metadata/android/en-US/changelogs/110002.txt, fastlane/metadata/android/en-US/changelogs/110003.txt, fastlane/metadata/android/en-US/changelogs/110004.txt +12
+1fae8e89f|fix(website): mute footer column titles by shade instead of weight|1f, 5+, 5-||
+1b88f1612|feat(website): link the public plugin registry|1f, 1+, 2-||
+b6454d7ea|fix(website): show paseo plugin add as the registry install command|3f, 5+, 5-||
+0555c877d|fix: update lockfile signatures and Nix hash [skip ci]|1f, 1+, 1-||
+ee6deda07|Show a Claude agent's history when its transcript is under another project folder (#6301)|4f, 203+, 23-|F1 X1|srv:agent/providers/claude/agent.ts, srv:agent/providers/claude/project-dir.ts
+a59132040|docs(changelog): announce the plugin registry in 0.11.0|1f, 11+, 4-||
+d46164ce0|fix(claude): keep long-running tool calls out of the subagents track (#6308)|2f, 76+|F1|srv:agent/providers/claude/agent.ts
+1ae979d3d|Subagents that finish while the app is disconnected no longer stay "working" (#6316)|4f, 144+, 10-|X2|app:contexts/session-context.tsx, app:subagents/provider-store.ts
+b352dad2e|fix(website): put Plugins first in the header|1f, 8+, 8-||
+9fcae41c9|feat(claude): add Haiku 5.5 with its model capabilities (#6332)|4f, 86+, 6-|F1|srv:agent/providers/claude/model-manifest.ts
+2a151a449|docs: changelog for 0.11.1|1f, 12+||
+ab10a6694|chore(release): cut 0.11.1|18f, 87+, 55-|F4 M2 X10|fastlane/metadata/android/en-US/changelogs/110011.txt, fastlane/metadata/android/en-US/changelogs/110012.txt, fastlane/metadata/android/en-US/changelogs/110013.txt, fastlane/metadata/android/en-US/changelogs/110014.txt +12
+2d5587049|docs(website): present Paseo as an agentic development environment (#6336)|11f, 47+, 44-||
+0fc6bf0c9|fix(schedule): keep firing after a run that could not be recorded (#6334)|2f, 74+, 34-|F1|srv:schedule/service.ts
+33eb36c02|fix: update lockfile signatures and Nix hash [skip ci]|1f, 1+, 1-||
+99fc204c5|fix(opencode): browser screenshots reach OpenCode v2 agents (#6330)|4f, 168+, 7-|F2|srv:agent/providers/opencode/v2/bridge-plugin.mjs, srv:agent/providers/opencode/v2/timeline.ts
+23d7a089e|fix(website): keep plugin carousels from widening the mobile page (#6367)|2f, 36+, 1-||
+f943e790b|fix(usage): tint the OpenCode usage icon through currentColor (#6362)|1f, 4+, 4-|M1|plugins/opencode-go-usage-source/icon.svg
+06fe97c90|fix(server): keep home directory search out of ~/Library on macOS (#5789)|3f, 188+, 13-|X2|srv:session.ts, srvsrc:utils/directory-suggestions.ts
+d0bc188a5|Show agent messages and completion notifications with sender identity (#6373)|29f, 877+, 94-|F7 X13|app:agent-stream/view.tsx, app:components/message.tsx, app:runtime/replica-cache/index.ts, app:tool-calls/presentation.ts +16
+8c096b5e3|docs: remove Linux setup detour from getting started (#6415)|3f, 25+, 23-||
+29db2b798|Keep created agents after first-prompt failures and bound fork history (#6379)|16f, 404+, 50-|F2 M1 X4|packages/server/package.json, srv:agent/activity-curator.ts, srv:agent/agent-manager.ts, srv:agent/create-agent/create.ts +3
+0009a7e71|feat(workspaces): add background visibility (#5039)|92f, 2794+, 774-|F14 M3 X23|app:components/sidebar-workspace-list.tsx, app:components/sidebar/display-preferences/menu.tsx, app:components/sidebar/display-preferences/model.ts, app:components/sidebar/sidebar-model.tsx +39
+718ed932b|Clarify maintainer and community roles in sponsor copy|2f, 12+, 7-||
+73390346c|fix(ios): address clipped chat and Markdown text (#6445)|24f, 77+, 230-|D1 F4 M2 X11|fastlane/metadata/android/en-US/changelogs/110021.txt, fastlane/metadata/android/en-US/changelogs/110022.txt, fastlane/metadata/android/en-US/changelogs/110023.txt, fastlane/metadata/android/en-US/changelogs/110024.txt +14
+a1da1b8f2|fix: update lockfile signatures and Nix hash [skip ci]|1f, 1+, 1-||
+aec01ea60|feat(claude): offer Mythos 5.1 when Claude Code advertises it (#6403)|9f, 434+, 13-|F4|srv:agent/providers/claude/agent.ts, srv:agent/providers/claude/model-discovery.ts, srv:agent/providers/claude/model-manifest.ts, srv:agent/providers/claude/models.ts
+b26b9234c|Improve diff review with mobile comment sheets and direct feedback (#6455)|35f, 2366+, 194-|F10 M3 X4|app:components/ui/button.tsx, app:components/ui/floating-action-button.tsx, app:components/ui/floating-action-layout.ts, app:components/ui/isolated-bottom-sheet-modal/visibility-tracker.ts +13
+6ec663342|feat(cli): expose account usage reports (#6474)|6f, 706+|F2 X1|cli:cli.ts, cli:commands/usage/index.ts, cli:commands/usage/presentation.ts
+b63a325be|Let Android devices without a camera install Paseo from Google Play (#6339)|4f, 92+, 1-|F1 X1|packages/app/app.config.js, packages/app/plugins/with-android-optional-camera.js
+e81d5d02b|Keep terminal CJK text unchanged after returning to a workspace (#6452)|4f, 86+, 2-|F2|proto:terminal-snapshot.ts, srvsrc:terminal/terminal.ts
+bd78e5efa|Show committed changes for existing-branch worktrees (#6462)|6f, 156+, 13-|F1 X1|srvsrc:utils/checkout-git.ts, srvsrc:utils/worktree.ts
+0147edaaa|Restore repository selection for CLI worktree commands (#6467)|5f, 95+, 5-|F2 X2|cli:commands/worktree/archive.ts, cli:commands/worktree/index.ts, cli:commands/worktree/ls.ts, cli:commands/worktree/repository-directory.ts
+7868f5caf|Keep email addresses intact when sending with Enter (#6471)|3f, 129+, 1-|F1|app:utils/file-mention-autocomplete.ts
+0ba4d2526|Honor timestamps when reading and following agent logs (#6514)|4f, 342+, 11-|F1 X2|cli:commands/agent/logs.ts, cli:utils/timeline.ts, srv:test-utils/fake-agent-client.ts
+d0728cd1e|fix(opencode): preserve tool validation errors in v2 (#6519)|2f, 84+, 2-|F1|srv:agent/providers/opencode/v2/bridge-plugin.mjs
+01f9bc829|Modernize compact headers and sidebar affordances (#6431)|57f, 2031+, 1402-|F15 M3 X22|.oxlintrc.json, app:agent-stream/strategy-native.tsx, app:agent-stream/top-overlay.ts, app:app/_layout.tsx +41
+563c014dc|Open assistant links to non-ASCII filenames (#6520)|6f, 444+, 48-|F2 X1|app:assistant-file-links/parse.ts, app:assistant-file-links/resolver.ts, app:assistant-file-links/use-file-link.ts
+1228c01a1|Find GitLab merge requests and issues by number (#6525)|2f, 199+, 32-|F1|srvsrc:services/gitlab-service.ts
+d5513472e|Keep words intact in followed agent logs (#6528)|5f, 386+, 13-|X2|cli:commands/agent/logs.ts, packages/server/package.json
+ee0d901ef|Run each scheduled slot once without skipping the next occurrence (#6532)|2f, 364+, 18-|X1|srv:schedule/service.ts
+e61009d5f|fix(server): display diffs with custom Git presentation settings (#6536)|3f, 137+, 4-|F1|srvsrc:utils/checkout-git.ts
+446749102|test(server): make commit signing checks independent of global format (#6540)|1f, 2+||
+7e66657bf|fix(agent): preserve reasoning order in activity transcripts (#6546)|3f, 59+, 34-|F1|srv:agent/activity-curator.ts
+7f9b65d46|test(server): keep commit fixture authors independent of Git config (#6552)|1f, 28+, 1-||
+cfb18f16d|fix(app): find starting refs by change request descriptions (#6558)|4f, 79+, 7-|F1 X1|app:components/ui/combobox-options.ts, app:screens/new-workspace-picker-item.ts
+dd0350bc2|Show actual edits when a file is renamed in Changes (#6559)|2f, 150+, 8-|F1|srvsrc:utils/checkout-git.ts
+a5dba3c99|Show checkout patch lines with external Git diff commands configured (#6562)|3f, 97+, 5-|X1|srvsrc:utils/checkout-git.ts
+46b128417|Release files when HTTP downloads are canceled (#6567)|3f, 84+, 2-|F1 X1|packages/server/package.json, srv:bootstrap.ts
+a3f75aa9e|Show removed SQL comments in Git diffs (#6569)|3f, 115+, 12-|F1|srv:utils/diff-highlighter.ts
+b412374f0|Run React tests when the shell uses NODE_ENV=production (#6572)|4f, 45+, 1-||
+e2fd5a9c5|fix(app): keep markdown text that only looks like HTML verbatim (#6370)|2f, 112+, 6-|X1|app:components/markdown/html-ish.ts
+804335bc0|fix(files): rename untracked bracket paths without matching siblings (#6573)|2f, 130+, 3-|F1|srv:file-explorer/service.ts
+114389383|Keep files starting with two dots usable (#6604)|4f, 192+, 5-|F1 X1|packages/server/package.json, srv:file-explorer/service.ts
+8d9e7d3ad|Confirm remote permission approvals before reporting success (#6607)|3f, 397+, 170-|X2|cli:commands/permit/allow.ts, cli:commands/permit/deny.ts
+1939ee79e|Accept daemon settings in the published editor schema (#6621)|5f, 749+, 388-|F1|srv:persisted-config.ts
+4bd31e1a2|test(cli): accept Codex catalogs without branded model IDs (#6633)|1f, 4-||
+045898882|Connect the self-hosted web app through standard-port proxies (#6638)|2f, 63+, 1-|F1|srv:web-ui.ts
+b3693b79d|Find hidden agent plan files in workspace suggestions (#6641)|2f, 44+|F1|srvsrc:utils/directory-suggestions.ts
+b852ae920|fix(desktop): show the Paseo window icon on Linux (#6645)|2f, 7+|F1|packages/desktop/electron-builder.yml
+166aabd57|Keep subprocess regression tests independent of terminal colors (#6648)|2f, 49+, 25-||
+40f039306|Record shortcuts using the keyboard layout character (#6652)|3f, 69+, 1-|F1|app:keyboard/shortcut-string.ts
+dc7bc8db1|fix(app): keep typechecking after Expo generates environment types (#6656)|2f, 31+, 1-||
+c364b16d4|Report canceled child tasks and wait for replacement tasks to finish (#6660)|4f, 199+, 5-|X1|srv:agent/agent-prompt.ts
+a310444c6|fix: save workspace files with long valid names (#6658)|2f, 66+, 1-|F1|srv:file-explorer/service.ts
+9b92b2e25|Preserve base worktree paths when merging (#6668)|3f, 92+, 8-|F1 X1|packages/server/package.json, srvsrc:utils/checkout-git.ts
+06f052225|fix(server): invalidate worktree listings after archive (#6545)|11f, 196+, 24-|F6 X1|srv:agent/tools/paseo-tools.ts, srv:test-utils/workspace-git-service-stub.ts, srv:websocket-server.ts, srv:workspace-archive-service.ts +3
+9246813fd|Preserve spaces in project folder names for Changes and worktrees (#6686)|6f, 172+, 15-|F2|app:utils/workspace-identity.ts, srvsrc:utils/git-rev-parse-path.ts
+750cb82fb|Keep long mobile drafts readable with fullscreen editing (#6531)|40f, 1842+, 251-|F8 M5 X9|app:app/_layout.tsx, app:components/ui/text-input/text-input.native.tsx, app:components/ui/text-input/text-input.web.tsx, app:components/ui/text-input/types.ts +18
+99e4b53aa|fix(app): restore outline jumps to prompts rendered by plugins (#6690)|6f, 205+, 32-|M2 X1|app:agent-stream/presentation.ts, app:plugins/timeline/projection.ts, app:types/stream.ts
+a2b040869|fix(claude): count input reported late in the context meter (#6703)|3f, 319+, 34-|F1|srv:agent/providers/claude/agent.ts
+acb3a8f20|Add Vercel Sandbox to related projects (#6708)|1f, 5+, 4-||
+8d03ccfbf|Sort What's new plugins by submission time (#6713)|2f, 29+, 24-||
+283a985fb|fix(app): keep Android status icons readable as themes change (#6707)|4f, 81+, 1-|F2 M1|app:appearance/provider.tsx, app:appearance/system-bars.android.tsx, app:appearance/system-bars.tsx
+7321d8a48|List new plugins by first listing, add Recently updated, show authors on grid cards (#6718)|11f, 248+, 125-||
+e1b01df90|Keep gallery cards inside their grid column on phones (#6722)|3f, 14+, 3-||
+8bc5f47b1|Add a Report a bug button to plugin detail pages (#6721)|4f, 49+, 2-||
+6f62125ee|fix: return dot-prefixed paths in workspace suggestions (#6720)|3f, 117+, 4-|X1|srvsrc:utils/path.ts
+9551b2cc1|Open loaded Linux desktop windows when hidden rendering stalls (#6726)|6f, 151+, 3-|F1 X2|packages/desktop/package.json, desk:main.ts, desk:window/show-when-ready.ts
+bfe38d92f|fix(pi): mark turn-limited tintinweb subagents as completed (#6594)|2f, 152+, 1-|X1|srv:agent/providers/pi/extensions/tintinweb-pi-subagents/index.ts
+e86777393|Restore native app startup (#6734)|4f, 71+, 9-|F2 X1|packages/app/index.ts, app:app/_layout.tsx, app:polyfills/install-early.ts
+196dc3acd|fix(pi): update thinking levels when extensions change them (#6741)|3f, 54+|F2|srv:agent/providers/pi/agent.ts, srv:agent/providers/pi/rpc-types.ts
+be0acb293|fix(app): keep Diff updates alive after the first edit (#6745)|3f, 196+, 1-|F1|app:data/push-router.ts
+9eaf7ad0c|Render local images in Markdown file previews (#6750)|6f, 588+, 4-|F2 M1 X1|app:file-pane/markdown-preview/image-source.ts, app:file-pane/markdown-preview/index.tsx, app:file-pane/markdown-preview/preview-image.tsx, app:file-pane/pane.tsx
+e8108d909|fix(app): only offer Remove for providers defined in config.json (#6568)|3f, 70+, 3-|F1 X1|.gitignore, app:screens/settings/providers-section.tsx
+b0f054de9|Reach IPv6-only workspace services through their proxy URLs (#6753)|6f, 176+, 15-|F3|srv:local-service-connection.ts, srv:script-health-monitor.ts, srv:service-proxy.ts
+b5e51cf83|Run letter shortcuts with non-Latin keyboard layouts (#6755)|2f, 71+|F1|app:keyboard/keyboard-shortcuts.ts
+ec6393f31|Keep pairing QR codes fully visible on mobile (#6758)|4f, 85+, 6-|F1|app:desktop/components/pair-device-section.tsx
+1839de5b1|Restore provider readiness for mobile plugins (#6760)|2f, 58+, 1-|X1|client:index.ts
+eb051ea81|Render Astro diffs containing empty expressions (#6763)|3f, 56+, 4-|F1|packages/highlight/src/astro/parser.ts
+058375dac|fix(server): release ACP provider process after history resume (#6766)|3f, 96+, 8-|F1|srv:agent/providers/acp-agent.ts
+b923cde6c|fix(claude): show custom model context limits during the first turn (#6767)|6f, 182+, 15-|F1 X1|srv:agent/providers/claude/agent.ts, srv:agent/providers/claude/models.ts
+337e81a9c|fix(files): preserve relative symlinks when duplicating entries (#6771)|2f, 88+, 1-|F1|srv:file-explorer/service.ts
+4400445ed|Allow worktree creation after Git initialization (#6785)|4f, 124+, 10-|F1|srv:workspace-git-service.ts
+5805b776c|fix(git): open commit diffs from subdirectory workspaces (#6801)|2f, 67+, 5-|X1|srvsrc:utils/checkout-git.ts
+17562fcb6|fix(app): stop New workspace sending a mode the provider doesn't offer (#5847)|6f, 98+, 47-|F3 X2|app:components/workspace-setup-dialog.tsx, app:composer/draft/input-draft.ts, app:composer/draft/workspace-tab.tsx, app:provider-selection/provider-selection.ts +1
+335a11eb8|Reopen Codex chats containing U+2028 or U+2029 on Node 24 (#5999)|2f, 76+, 6-|X1|srv:agent/providers/codex/app-server-transport.ts
+e135e9c10|Open files and subagents in a closable sheet on phones (#6827)|36f, 1958+, 118-|F6 M4 X6|app:app/_layout.tsx, app:file-pane/editor/view.web.tsx, app:i18n/resources/en.ts, app:panels/agent-panel.tsx +12
+0614e96ee|fix(claude): rewind works when the provider sets CLAUDE_CONFIG_DIR (#6325)|4f, 202+, 7-|F3|srv:agent/providers/claude/agent.ts, srv:agent/providers/claude/rewind.ts, srv:agent/providers/claude/test-rewind-claude-sdk.ts
+12aaded6c|fix(app): show the configured label for the xhigh thinking option (#6005)|2f, 12+, 2-|F1|app:agent-controls/labels.ts
+b1a638482|Cover child completion before create_agent returns (#6008)|1f, 59+, 1-||
+bd9af256b|Keep a symlinked config.json linked when Paseo saves it (#6023)|2f, 61+, 6-|F1|srv:private-files.ts
+a4b15455b|fix(cli): list every agent in paseo agent ls, past the first 200 (#6033)|2f, 97+, 4-|X1|cli:commands/agent/ls.ts
+a4f1df3ae|Let voice mode TTS use the model and voice an OpenAI-compatible server serves (#6060)|8f, 65+, 19-|F4|packages/server/.env.example, srv:persisted-config.ts, srv:speech/providers/openai/config.ts, srv:speech/providers/openai/tts.ts
+4a3ff87ee|fix(omp): show manual /compact progress and refresh the context meter (#6106)|7f, 198+, 77-|F2 X2|srv:agent/providers/omp/agent.ts, srv:agent/providers/omp/test-utils/fake-omp.ts, srv:agent/providers/omp/test-utils/omp-harness.ts, srv:agent/providers/omp/usage-poller.ts
+019e5279e|Show Claude option previews in the question card, readable on Android (#6171)|8f, 95+, 1-|F2 X1|app:components/question-form-card-core.ts, app:components/question-form-card.tsx, srv:agent/providers/mock-load-test-agent.ts
+fc8f085b9|Reject oversized messages without disconnecting the host (#6285)|10f, 215+, 11-|F3 M1 X3|client:daemon-client-relay-e2ee-transport.ts, client:daemon-client-transport-utils.ts, client:daemon-client.ts, proto:websocket-message-limit.ts +3
+ada7ba43f|Keep long custom models removable in provider settings (#6507)|5f, 97+, 4-|X1|app:components/provider-diagnostic-sheet.tsx
+d57096a45|Start newly configured workspace services without restarting (#6542)|4f, 364+, 56-|F1|srv:workspace-service-port-registry.ts
+938c4e263|Show Git diffs for filenames with quotes and control characters (#6583)|8f, 424+, 39-|F1 X3|packages/server/package.json, srv:utils/diff-highlighter.ts, srvsrc:utils/checkout-git.ts, srvsrc:utils/git-quoted-path.ts
+cafa04d3f|fix(app): traverse workspaces beyond nine (#6586)|3f, 123+, 9-|F1|app:utils/sidebar-shortcuts.ts
+14e638451|fix(desktop): keep running when launcher console pipes close (#6639)|3f, 102+|F2|desk:diagnostics/console-streams.ts, desk:main.ts
+56448842f|Download files over the connected host (#6595)|9f, 621+, 22-|F2 X2|app:hooks/use-file-download.ts, app:hooks/use-file-explorer-actions.ts, app:stores/download-store.ts, client:daemon-client.ts
+1bf3a57a1|fix(nix): raise Node heap for the desktop build (#6537)|1f, 6+||
+b58af43a0|fix(app): render mixed HTML headings without literal tags (#6650)|2f, 110+, 5-|F1|app:components/markdown/html-ish.ts
+e1a5664d9|fix(app): keep malformed font settings from breaking the UI (#6695)|4f, 108+, 5-|F1 X1|app:hooks/use-settings/storage.ts, app:screens/settings/appearance/appearance-section.tsx
+6d43a8c5b|Restore selected changes from subdirectory workspaces (#6777)|2f, 81+, 6-|F1|srvsrc:utils/checkout-git.ts
+404d08d24|Report failed terminal launches and remove early exits (#6792)|6f, 485+, 23-|F2 X1|srvsrc:executable-resolution/executable-resolution.ts, srvsrc:terminal/terminal.ts, srvsrc:terminal/worker-terminal-manager.ts
+f3ddf99fe|fix(app): restore fullscreen composer keyboard motion and clearing (#6902)|34f, 1370+, 559-|D2 F6 M5 X12|app:app/_layout.tsx, app:app/new.tsx, app:components/ui/text-input/text-input.native.tsx, app:components/ui/text-input/text-input.web.tsx +21
+6ad124758|Stack workspace sheets and tighten sidebar density (#6885)|22f, 778+, 454-|F1 M2 X11 d1|app:components/adaptive-modal-sheet.tsx, app:components/left-sidebar.tsx, app:components/sidebar-workspace-list.tsx, app:components/sidebar/pinned-section-header.tsx +11
+73221ce5b|fix(app): render local Markdown images with encoded paths (#6877)|6f, 120+, 4-|F2|app:attachments/utils.ts, app:components/message.tsx
+6db47b3c3|fix(app): keep the keyboard closed after mobile sidebar dismissal (#6945)|8f, 181+, 26-|F1 X2|app:composer/index.tsx, app:composer/input/input.tsx, app:composer/keyboard-scope.tsx
+8ff2424da|Return checkout diff hunks from subdirectory workspaces (#6882)|4f, 80+, 4-|F1 X1|packages/server/package.json, srvsrc:utils/checkout-git.ts
+9ab99a6e1|feat(website): show sponsors on paseo.sh and at the top of the README (#6956)|15f, 271+, 93-||
+5c108f345|Preserve renames in committed file diffs (#6895)|3f, 303+, 4-|X1|srvsrc:utils/checkout-git.ts
+e5124b039|Put sheets on one stack and show an agent's facts in its sheet (#6958)|41f, 1282+, 505-|D1 F8 M3 X9|app:components/adaptive-modal-sheet.tsx, app:components/ui/isolated-bottom-sheet-modal/host-scope.tsx, app:components/ui/isolated-bottom-sheet-modal/index.tsx, app:components/ui/isolated-bottom-sheet-modal/sheet-backdrop.tsx +17
+8b1ba3ca5|Lighter landing sections, FAQ last, followed sponsor links (#6970)|2f, 127+, 125-||
+b2ca7dcf0|Check generated IDs in the daemon upload test (#6810)|1f, 6+, 2-||
+4d8bed9dd|Keep Claude's context meter on the active model (#6814)|3f, 172+, 29-|X1|srv:agent/providers/claude/agent.ts
+12066431a|feat(website): head the sponsors band with a heart and one Sponsors title (#6988)|2f, 15+, 8-||
+74282dac1|fix(app): return to chat after fullscreen submission (#6987)|3f, 70+, 12-|X1|app:composer/input/input.tsx
+a96c89230|fix(website): start the sponsors band heart at the column edge (#6993)|1f, 1+, 3-||
+0ed57187a|Keep fork owners in Gitea and Forgejo checkout names (#6829)|13f, 633+, 43-|F5 X2|srv:resolve-worktree-creation-intent.ts, srvsrc:services/forge-service.ts, srvsrc:services/gitea-service.ts, srvsrc:services/github-service.ts +3
+d3efddb0b|test(server): await provider discovery before readiness assertion (#6994)|1f, 6+, 9-||
+4d5c3c13d|fix(acp): preserve slash command argument hints (#6920)|2f, 17+, 6-|F1|srv:agent/providers/acp-agent.ts
+0708b8295|Preserve explicit Claude session names on import (#6930)|4f, 313+|X1|srv:agent/providers/claude/agent.ts
+71f575e16|Keep malformed Claude question answers retryable (#6936)|2f, 223+, 9-|F1|srv:agent/providers/claude/agent.ts
+80badb3b8|fix(opencode): answer multi-select v2 questions from the question card (#6149)|5f, 169+, 19-|F2 M1|srv:agent/providers/omp/question-ui.ts, srv:agent/providers/opencode/v2/permissions.ts, srv:agent/providers/question-card-answer.ts
+e08389065|fix(plugins): allow protocol type imports without local dependencies (#7023)|2f, 49+|F1|srv:plugins/compiler.ts
+16bb179e6|feat(providers): add opt-in Hoplite and searchable provider grid (#6953)|51f, 1125+, 195-|F14 M2 X11|app:assets/acp-provider-icons.ts, app:assets/acp-provider-icons/hoplite.svg, app:components/provider-catalog-list.tsx, app:components/provider-catalog-search.ts +23
+d6d4084a0|docs(plugins): make registry publishing requirements actionable (#6996)|4f, 211+, 177-||
+2d86b94b2|Refine provider catalog buttons and show Add errors as toasts (#7030)|6f, 69+, 96-|X3|app:components/provider-catalog-list.tsx, app:data/acp-provider-catalog.ts, app:screens/settings/providers-section.tsx
+d172d060a|server: keep streamed OpenCode v2 chunks from holding their whole message (#6262)|3f, 94+, 2-|F2|srv:agent/providers/opencode/test-utils/v2-streamed-text-memory.ts, srv:agent/providers/opencode/v2/timeline.ts
+ce0f21e2f|docs(changelog): 0.11.3|1f, 15+||
+fd1e7a34c|docs(changelog): welcome Hoplite as first sponsor in 0.11.3|1f, 2+||
+7aa3fac06|fix(providers): scope project-dependent model discovery to workspaces|7f, 172+, 6-|F2 M2|plugin:server/acp-internal/connection.ts, plugin:server/acp.ts, srv:daemon-e2e/hoplite-fixture.cjs, plugins/hoplite-provider/server/provider.ts
+b30302b63|docs(changelog): 0.11.4|1f, 7+, 1-||
+ec7446add|docs(readme): enlarge sponsor logos|1f, 1+, 1-||
+208e32303|Keep usage providers in place after refresh (#6947)|5f, 92+, 10-|M1|app:usage/model.ts
+f56c01392|Open configured terminals after worktree setup (#6999)|4f, 155+, 35-|X3|packages/server/package.json, srv:worktree-bootstrap.ts, srv:worktree-session.ts
+d9b874f9d|Scroll chat with Page Up and Page Down after clicking messages (#7033)|4f, 99+, 3-|X1|app:agent-stream/strategy-web.tsx
+8d424e039|Reduce rendering cost in long chats (#7052)|15f, 630+, 146-|F5 X4|app:agent-stream/chat-find/types.ts, app:agent-stream/chat-outline/use-chat-outline.ts, app:agent-stream/model.ts, app:agent-stream/stream-tick.bench.ts +5
+e0de0fdf6|Read cached chats while other agents stream (#7074)|3f, 215+, 21-|X1|app:runtime/replica-cache/index.ts
+5c2a1552d|fix(app): preserve number groups when rebinding navigation shortcuts (#7065)|5f, 104+, 3-|X3|app:keyboard/keyboard-shortcuts.ts, app:keyboard/shortcut-string.ts, app:screens/settings/keyboard-shortcuts-section.tsx
+8388f1618|Keep Add Project keyboard selection visible (#7081)|8f, 372+, 101-|F3 X1|app:components/add-project-flow.tsx, app:components/ui/autocomplete-utils.ts, app:components/ui/autocomplete.tsx, app:components/ui/scroll-reveal.ts
+4117dce2d|Fix local WAV transcription startup (#7103)|2f, 41+|F1|packages/server/scripts/transcribe-local-wav.ts
+5acfbb377|Let Escape close plugin previews before stopping agents (#7110)|6f, 162+, 5-|F1 X1|app:hooks/use-keyboard-shortcuts.ts, app:lib/overlay-root.ts
+48b310c8a|Keep Android chat still when selecting text (#7131)|3f, 38+, 5-|M2|packages/app/modules/paseo-scroll/android/src/androidTest/java/sh/paseo/scroll/ScrollSelectionTest.kt, packages/app/modules/paseo-scroll/android/src/main/java/sh/paseo/scroll/PaseoScrollPackage.kt
+62ab2deb2|Run and watch workspace scripts from the phone header menu (#7122)|26f, 1345+, 309-|F5 M2 X4|app:i18n/resources/en.ts, app:runtime/directory-sync/index.ts, app:runtime/host-runtime.ts, app:screens/workspace/scripts/index.ts +7
+6017706cc|fix(app): avoid restoring composer focus on touch navigation (#7130)|4f, 78+, 21-|X2|app:composer/input/input.tsx, app:composer/keyboard-scope.tsx
+8d9a7123b|feat(app): polish compact header, composer, and settings menu (#7129)|6f, 167+, 92-|F1 M2 X2|app:components/floating-header/index.tsx, app:components/headers/compact-header.tsx, app:components/ui/edge-fade.tsx, app:composer/input/input.tsx +1
+c1558d29e|fix(app): keep background workspaces hidden after reload (#7141)|2f, 89+|X1|app:runtime/replica-cache/index.ts
+d7b3ff654|Show press feedback on sidebar rows, footer buttons, and settings items (#7150)|5f, 85+, 19-|F1 X4|app:components/left-sidebar.tsx, app:components/sidebar/sidebar-footer-icon-highlight.tsx, app:components/sidebar/sidebar-header-row.tsx, app:components/sidebar/sidebar-help-menu.tsx +1
+eb1a8a2ec|fix(markdown): one renderer on react-native-enriched-markdown for iOS, Android and web (#6973)|129f, 6046+, 8291-|F14 M1 X11 d14|packages/app/package.json, packages/app/scripts/generate-markdown-image-placeholder.mjs, app:agent-stream/chat-find/ranges.web.ts, app:agent-stream/chat-find/viewport.web.ts +78
+0d7a234e6|perf(app): preserve unchanged sidebar workspace projections (#7157)|2f, 66+, 6-|F1|app:hooks/sidebar-workspaces-view-model.ts
+64693f21c|fix(cursor): show plan usage in Cursor agents' context details (#6353)|8f, 209+, 4-|M2 X3|srv:agent/providers/acp-agent.ts, srv:agent/providers/cursor-acp-agent.ts, srv:agent/providers/generic-acp-agent.ts, plugins/cursor-usage-source/index.server.ts +1
+6b1ec3738|fix: update lockfile signatures and Nix hash [skip ci]|1f, 1+, 1-||
+d29814186|fix(app): dismiss review feedback confirmation with a toast|5f, 29+, 26-|M3|app:review/feedback/index.ts, app:review/feedback/surface.tsx, app:review/feedback/use-feedback.ts
+a8deb5108|fix(server): keep provider images separate from adjacent prose|5f, 66+, 14-|F1|srv:agent/providers/provider-image-output.ts
+78c7a9ce3|Merge remote-tracking branch 'origin/main'|1f, 1+, 1-||
+98559bf72|fix(app): release iOS sidebar rows after an interrupted drag (#7159)|2f, 45+, 14-|X1|patches/react-native-draggable-flatlist+4.0.3.patch
+ae0b2588b|fix(app): move Show background to the end of workspace display menu|3f, 27+, 7-|M1|app:components/sidebar/display-preferences/menu.tsx
+df82edd21|Split the inbound WebSocket validator per message type (#6847)|10f, 252+, 54-|F4 d2|.gitignore, packages/protocol/codegen/ws-outbound.compile.ts, packages/protocol/scripts/generate-validation-aot.mjs, proto:validation/ws-outbound-envelope.ts +2
+a1c6e8dfa|fix(app): keep iOS fullscreen composer above the keyboard (#7170)|2f, 36+, 4-|M1|app:keyboard/shift/internal/translate.ios.tsx
+90fcf51d7|Render the Antigravity icon for terminal profiles (#6938)|2f, 81+, 1-|X1|app:components/provider-icons.ts
+b1256a448|docs(changelog): 0.12.0-beta.1|1f, 134+||
+e2f4948f9|chore(release): cut 0.12.0-beta.1|14f, 55+, 55-|M2 X10|package.json, packages/app/package.json, packages/cli/package.json, packages/client/package.json +8
+05b3745dc|fix: update lockfile signatures and Nix hash [skip ci]|1f, 1+, 1-||
+d152f1529|fix(app): recover failed question responses (#7098)|16f, 314+, 7-|F3 X1|app:agent-stream/view.tsx, app:components/question-form-card.tsx, app:i18n/resources/en.ts, srv:test-utils/question-response-daemon.ts
+30122b1ae|Show a background Claude subagent's action log on its card (#6242)|3f, 232+, 26-|F1 X1|srv:agent/providers/claude/agent.ts, srv:agent/providers/claude/sidechain-tracker.ts
+cd77ecd83|Start idle OMP agents when they receive follow-ups (#7169)|11f, 403+, 51-|F1 X5|srv:agent/agent-manager.ts, srv:agent/providers/omp/agent.ts, srv:agent/providers/omp/cli-runtime.ts, srv:agent/providers/omp/rpc-types.ts +2
+88a7aec1b|fix(claude): keep active turns running through settings changes (#7179)|3f, 222+, 3-|X1|srv:agent/providers/claude/agent.ts
+8555e8abd|fix(release): distribute stable iOS builds to TestFlight testers (#7189)|4f, 52+, 18-|F1|packages/app/.eas/workflows/release-mobile.yml
+ec9817ed2|fix(app): make home actions reachable on short screens (#7167)|2f, 102+, 53-|X1|app:screens/open-project-screen.tsx
+f472c9d1f|Correct workspace source parameters in the Paseo skill (#7188)|2f, 45+, 2-||
+6e1ec21c6|Keep Android dictation running through audio interruptions (#7200)|26f, 479+, 111-|F14 M3|app:audio/audio-engine-types.ts, app:audio/audio-engine.native.ts, app:audio/audio-engine.web.ts, app:components/dictation-controls.tsx +13
+30799fda1|Return actionable errors to OpenCode agents for invalid tool calls (#7183)|9f, 637+, 125-|F3 X4|srv:agent/agent-loading.ts, srv:agent/providers/opencode/bridge-plugin.mjs, srv:agent/providers/opencode/bridge.ts, srv:agent/providers/opencode/v2/bridge-plugin.mjs +3
+fa70b215a|Open chat folder links in Files with their contents visible (#7205)|7f, 319+, 63-|F2 X3|app:agent-stream/view.tsx, app:assistant-file-links/index.ts, app:assistant-file-links/path-open.ts, app:file-explorer/tree.ts +1
+74c8172f8|Wait for a plugin reload to finish instead of failing at the request deadline (#6306)|6f, 655+, 33-|F1|client:daemon-client.ts
+1b450e487|fix(claude): don't treat a wrapper command's --version output as Claude Code's version (#7209)|3f, 64+, 1-|F1|srv:agent/providers/claude/agent.ts
+4a32f9584|fix(app): soften the compact composer shadow in light mode (#7214)|2f, 2+, 2-|F1 X1|app:composer/input/input.tsx, app:styles/theme.ts
+06cdc5a0b|fix(app): open nested Markdown folder links without dot prefixes (#7210)|4f, 67+, 7-|X2|app:assistant-file-links/parse.ts, app:assistant-file-links/resolver.ts
+5384abdba|fix(app): open Markdown preview folder links in Files (#7229)|2f, 100+, 4-|X1|app:screens/workspace/workspace-screen.tsx
+a0aeca967|fix(app): open explicit file links regardless of extension (#7233)|4f, 57+, 17-|X2|app:assistant-file-links/parse.ts, app:assistant-file-links/resolver.ts
+f22775a8e|Default agent-to-agent messages to steering in CLI and MCP (#5164)|8f, 438+, 25-|X3|cli:commands/agent/send.ts, srv:agent/agent-prompt.ts, srv:agent/tools/paseo-tools.ts
+6e5a4682e|fix(markdown): render own-line images as blocks (#7237)|3f, 95+, 2-|M1|app:components/markdown/source.ts
+86ab49153|Let Copilot implement plans after selecting Allow All (#7234)|3f, 98+, 2-|F1|srv:agent/providers/copilot-acp-agent.ts
+86817a24f|perf(app): fetch project and workspace directories concurrently (#7242)|2f, 72+, 10-|X1|app:runtime/directory-sync/index.ts
+ecd42015b|Redesign the compact New workspace form as full-width field triggers (#7239)|16f, 911+, 1051-|F5 M2 X1|app:i18n/resources/en.ts, app:screens/new-workspace-screen.tsx, app:screens/new-workspace/form/field-trigger.tsx, app:screens/new-workspace/form/icons.tsx +4
+6ff071a48|Keep the compact sidebar close button beside the first nav item (#7244)|3f, 103+, 61-|M1 X1|app:components/left-sidebar.tsx, app:components/sidebar/sidebar-nav-rows.tsx
+a4eb0adcf|test(app): consolidate overlapping Playwright journeys (#7245)|7f, 94+, 245-||
+3c48ac3ad|Restore inline-code file path links (#7251)|3f, 217+, 15-|M1|app:components/markdown/source.ts
+6388c466b|docs(changelog): 0.12.0-beta.2|1f, 16+, 1-||
+c517d07d6|chore(release): cut 0.12.0-beta.2|15f, 431+, 55-|M2 X10|package.json, packages/app/package.json, packages/cli/package.json, packages/client/package.json +8
+142cdac8d|fix: update lockfile signatures and Nix hash [skip ci]|1f, 1+, 1-||
+e2ad26d23|Find source-message text in plugin timeline rows (#7253)|5f, 127+, 12-|F1 X1|app:agent-stream/chat-find/ranges.web.ts, app:agent-stream/strategy-web.tsx
+9bd58f66b|Copy Korean terminal text without extra spaces (#7254)|2f, 49+, 1-|F1|app:terminal/native-renderer/terminal-selection.ts
+90c6de058|fix(app): keep streaming replies complete after reloading (#7256)|2f, 98+, 2-|X1|app:timeline/session-stream-reducers.ts
+e5d9307cf|fix(terminal): copy wide characters selected from either half (#7260)|2f, 48+, 2-|X1|app:terminal/native-renderer/terminal-selection.ts
+b2da58b5b|fix(app): keep chat keyboard scrolling after closing Find (#7263)|4f, 49+, 2-|F2 X1|app:agent-stream/chat-find/index.web.tsx, app:agent-stream/strategy-web.tsx, app:agent-stream/strategy.ts
+a7a21d91c|Keep overlapping directory searches from exhausting the heap (#7265)|2f, 138+, 50-|X1|srvsrc:utils/directory-suggestions.ts
+1a6a9fa8d|fix(claude): keep background child action logs after the parent finishes (#7266)|5f, 286+, 125-|F1 X1|srv:agent/providers/claude/agent.ts, srv:agent/providers/claude/sidechain-tracker.ts
+efd6d95f9|fix(plugins): return unavailable when steering provider without prompt.steer capability (#7270)|2f, 69+|M1|srv:agent/plugin-provider.ts
+cf62b0091|Keep last successful usage visible when refresh fails (#7246)|16f, 645+, 93-|M7 X1|app:usage/balance-bar.tsx, app:usage/card.tsx, app:usage/format.ts, app:usage/model.ts +4
+df7f1f0b7|Restore Markdown link hover underline and spacing after code blocks on web (#7276)|5f, 111+, 19-|M2|app:components/markdown/renderers.web.tsx, patches/react-native-enriched-markdown+1.2.0-nightly-20261014-766fc0e67.patch
+bd5061e7b|fix(app): stop blank rows while scrolling tall Android chats (#7278)|3f, 57+, 5-|F1 X1|app:agent-stream/native-scroll-animation.ts, app:agent-stream/strategy-native.tsx
+9521ee995|feat(app): label Paseo tool calls verb-first with their context (#7283)|24f, 837+, 227-|D1 F8 M1 X6|app:agent-stream/view.tsx, app:components/message.tsx, app:components/tool-call-details.tsx, app:tool-calls/presentation.ts +12
+a5c566f80|Make full CI finish sooner: eight browser shards, split Windows server job, cancel superseded runs (#7275)|5f, 359+, 109-|X1|packages/server/package.json
+fc12843ce|feat(app): show each subagent's model and effort under its title (#7290)|4f, 83+, 34-|M1 X2|app:panels/agent-facts-line.ts, app:panels/agent-panel.tsx, app:subagents/track.tsx
+a65478d0b|Rank Command Center results by match then recency, with highlights, timestamps, and project icons (#7277)|14f, 494+, 219-|F1 M2 X4|app:command-center/command-center.tsx, app:command-center/list-metrics.ts, app:command-center/results.ts, app:command-center/workspace-search.ts +3
+095dd0316|fix(app): avoid pane rerenders while resizing Explorer (#7284)|2f, 125+, 4-|X1|app:components/split-container.tsx
+3882b957a|ci: rebalance Playwright shard weights from measured step minutes (#7297)|1f, 3+, 1-||
+233997ed5|Give Markdown blocks one consistent gap, roomier on desktop, and a zoom-in cursor on images (#7298)|15f, 245+, 136-|D1 F4 M3 X1|app:components/markdown/block-stack.tsx, app:components/markdown/fence/mermaid/host.web.tsx, app:components/markdown/fence/mermaid/presentation.ts, app:components/markdown/frame.tsx +5
+60fa12c4d|Report disconnected hosts in new agent drafts (#7303)|7f, 88+, 18-|F2 X2|app:composer/draft/workspace-tab-core.ts, app:composer/draft/workspace-tab.tsx, app:hooks/use-agent-form-state.ts, app:provider-selection/provider-selection.ts
+38a8e6078|docs(changelog): 0.12.0-beta.3|1f, 14+, 3-||
+cc748dfe1|chore(release): cut 0.12.0-beta.3|14f, 55+, 55-|M2 X10|package.json, packages/app/package.json, packages/cli/package.json, packages/client/package.json +8
+9ed4f1069|fix(app): create project workspaces on the active host (#7308)|5f, 107+, 5-|F1 X1|app:components/sidebar-workspace-list.tsx, app:utils/sidebar-project-row-model.ts
+2a9e86b54|fix: update lockfile signatures and Nix hash [skip ci]|1f, 1+, 1-||
+f7a0e2cbe|test(server): wait up to ten seconds for the OMP relaunch to register MCP tools (#7304)|1f, 9+, 4-||
+fcda2f1cf|fix(hub): reconnect after silent connection loss (#7315)|2f, 196+, 7-|F1|srv:hub/relationship-remote.ts
+303cebec0|Keep sidebar setup actions inside the empty-state card (#7312)|2f, 115+, 3-|M1|app:components/sidebar/empty-states.tsx
+7c7b6555f|Show provider artwork in the catalog and provider rows (#7330)|18f, 170+, 8-|F10 X2|app:assets/acp-provider-icons.ts, app:assets/acp-provider-icons/devin.svg, app:assets/acp-provider-icons/grok.svg, app:assets/acp-provider-icons/hermes.svg +8
+aef7cc36a|fix(server): connect to relays over high-latency networks (#7336)|3f, 143+, 1-|F1 M1|srv:relay-transport.ts, srv:test-utils/relay-latency-fixture.ts
+08853039f|fix(server): keep resumed goal turns visible and stoppable (#7339)|3f, 107+|F1 X1|srv:agent/agent-manager.ts, srv:agent/providers/codex-app-server-agent.ts
+dc7bed417|Keep late composer pills clear of completed turn actions (#7341)|4f, 169+|F1|app:agent-stream/view.tsx
+559c0200e|Reuse workspace and subagent lists while replies stream (#7342)|6f, 403+, 22-|F1 X2|app:screens/workspace/workspace-screen.tsx, app:subagents/select.ts, app:workspace-tabs/agent-visibility.ts
+f0acc2c72|Send MCP terminal keys in the running program’s input mode (#7343)|5f, 211+, 39-|F3 X1|srv:agent/tools/paseo-tools.ts, srvsrc:terminal/terminal-worker-process.ts, srvsrc:terminal/terminal-worker-protocol.ts, srvsrc:terminal/worker-terminal-manager.ts
+be0378ce6|fix(usage): keep distinct Cursor accounts in separate cards (#7344)|3f, 148+, 9-|M1|plugins/cursor-usage-source/server/usage.ts
+a0790e752|fix(server): collect large file observer benchmark batches (#7349)|2f, 61+, 2-|M1|packages/server/scripts/measure-file-observer.ts
+727d5eed5|fix(protocol): preserve the published tool detail import (#7357)|2f, 83+|E1|proto:paseo-tool-call-detail.ts
+b50acc934|fix(app): restore assistant text selection in iPhone Safari (#7360)|3f, 12+, 3-|M1 X1|app:components/markdown/renderer.tsx, app:components/markdown/styles.ts
+66348a5e5|fix(app): exclude sentence punctuation from bare Markdown links (#7361)|2f, 285+, 45-|M1|patches/react-native-enriched-markdown+1.2.0-nightly-20261014-766fc0e67.patch
+23e388b05|test(app): stabilize desktop overview tool-call expansion (#7359)|1f, 10+, 2-||
+644d66ba4|Select complete Korean terminal words on long press (#7353)|4f, 89+, 9-|F2|app:components/terminal-emulator-native-grid.native.tsx, app:terminal/native-renderer/terminal-selection.ts
+d61dcaf1d|fix(app): give subagent rows room on compact and standard press feedback (#7364)|8f, 278+, 78-|F1 M1 X2|.oxlintrc.json, app:composer/tracks.tsx, app:subagents/track.tsx, scripts/oxlint/paseo-plugin.mjs
+b8bcd204a|Dismiss touch composer focus when switching tabs (#7352)|3f, 78+, 15-|X1|app:composer/input/input.tsx
+8dd3e2e34|docs(changelog): prepare 0.12.0 stable|1f, 16+, 4-||
+cafe4b01c|chore(release): cut 0.12.0|18f, 87+, 55-|F4 M2 X10|fastlane/metadata/android/en-US/changelogs/120001.txt, fastlane/metadata/android/en-US/changelogs/120002.txt, fastlane/metadata/android/en-US/changelogs/120003.txt, fastlane/metadata/android/en-US/changelogs/120004.txt +12
+9be154774|fix(app): show a promoted git action once in the compact menu (#7355)|5f, 188+, 14-|F1 X2|app:command-center/workspace-contributions.ts, app:git/actions-split-button.tsx, app:git/policy.ts
+9a0b95aa1|fix: update lockfile signatures and Nix hash [skip ci]|1f, 1+, 1-||
+c575464e8|Skip saving unchanged workspace layouts (#7358)|4f, 198+, 29-|M1 X1|app:storage/validated-persist-storage.ts, app:stores/workspace-layout-store.ts
+1e0e56c72|refactor(app): unify built-in file panel selection (#7366)|20f, 425+, 100-|F9 M2 X2 d1|app:components/file-pane-render-mode.ts, app:file-pane/editor/view.web.tsx, app:file-pane/pane.tsx, app:file-panels/builtin.tsx +10
+b6dde61a7|feat(plugins): accept inline SVG and component icons (#7368)|41f, 826+, 237-|F13 M4 X11|app:plugins/attachments/model.ts, app:plugins/attachments/picker.tsx, app:plugins/attachments/pill.tsx, app:plugins/buttons/store.ts +24
+e760764b3|fix(app): require a number when recording index shortcuts (#7365)|13f, 81+, 2-|X3|app:i18n/resources/en.ts, app:keyboard/keyboard-shortcuts.ts, app:screens/settings/keyboard-shortcuts-section.tsx
+19749baee|Keep Android settings inputs visible above the keyboard (#7362)|2f, 158+, 3-|M1|app:components/page-layout/index.tsx
+1c8c68f93|Keep workspace setup logs scoped to the visible setup panel (#7407)|35f, 1011+, 514-|F2 M1 X14|app:command-center/workspace-registration.tsx, app:contexts/session-context.tsx, app:i18n/resources/en.ts, app:panels/setup-panel.tsx +13
+dd244c076|fix(pi): remove running rows for refused subagent resumes (#7369)|3f, 95+, 1-|X1|srv:agent/providers/pi/extensions/gotgenes-pi-subagents/index.ts
+05920a236|test(codex): observe permission events in auto-review scenarios (#7382)|1f, 6+||
+91154ba4e|fix(opencode): advertise agent-scoped bridge tool schemas (#7383)|7f, 229+, 11-|F2 X2|srv:agent/provider-runtime.ts, srv:agent/providers/opencode/bridge.ts, srv:agent/tools/paseo-tools.ts, srv:bootstrap.ts
+eda3e4318|Clarify and localize provider usage (#7376)|38f, 1375+, 192-|F1 M15 X3|app:components/context-window-meter.tsx, app:components/context-window-meter.utils.ts, app:i18n/resources/en.ts, app:usage/agent-usage.tsx +15
+71e7cf6ff|Build native Android modules with the project NDK (#7403)|3f, 35+|F1 M2|packages/app/modules/paseo-diff-prototype/android/build.gradle, packages/app/scripts/verify-android-ndk.gradle, patches/react-native-unistyles+3.2.4.patch
+fc775b6db|Load translations when their language is selected (#7410)|4f, 177+, 32-|X1|app:i18n/i18next.ts
+90f3cab58|fix(nix): report the project license in package metadata (#7415)|3f, 17+, 2-||
+69ef741a7|fix(app): pause native status rings in hidden panels (#7423)|4f, 208+, 7-|M1|app:components/status-ring/clock.ts
+0eee4fd9b|docs(schedules): explain archive-on-finish behavior (#7426)|5f, 30+||
+0d61cca50|fix(app): identify Android certificate failures as TLS errors (#7429)|3f, 173+, 90-|F1 X1|app:components/add-host-modal.tsx, app:components/connection-failure-copy.ts
+ab6cdb7c8|fix(claude): return to Auto when approving a plan (#7453)|2f, 97+, 5-|F1|srv:agent/providers/claude/agent.ts
+adf27de7d|Keep Explorer consistent across phone, tablet and desktop layouts (#7424)|147f, 20932+, 17528-|D1 F17 M7 X13 d2|package.json, packages/app/app.config.js, packages/app/package.json, packages/app/plugins/with-paste-input.js +97
+3081b99b0|fix: update lockfile signatures and Nix hash [skip ci]|1f, 1+, 1-||
+068f272a0|perf(plugins): keep turn-ended payloads independent of history (#7477)|7f, 140+, 25-|F3 X1|plugin:server/lifecycle.ts, srv:agent/agent-manager.ts, srv:plugins/lifecycle/index.ts, plugin-examples/lifecycle-actions/index.server.ts
+1c6274808|Notify callers when detached agents finish (#7528)|2f, 120+, 1-|X1|srv:agent/create-agent/create.ts
+23b05bbcc|Keep archived agents out of discovery after history reads (#7532)|5f, 129+, 10-|F2 M1 X1|srv:agent/agent-projections.ts, srv:agent/directory.ts, srv:agent/mcp-shared.ts, srv:messages.ts
+461ea2ee9|test(e2e): hide the developer error toast instead of clicking it away (#7480)|3f, 16+, 11-||
+b36ff056e|fix(android): restore development builds after Expo upgrade (#7476)|4f, 40+, 11-|M3|packages/app/modules/paseo-diff-prototype/cpp/jni.cpp, packages/app/modules/paseo-diff-prototype/cpp/layout.cpp, patches/react-native-gesture-handler+2.32.0.patch
+e464fd3bd|feat(plugins): file panels (#7411)|149f, 7343+, 3746-|D3 F24 M5 X3 d5|app:contexts/session-context.tsx, app:file-explorer/read-result.ts, app:file-pane/bar.tsx, app:file-pane/editor/model.ts +89
+18eabeeda|Archive agents beyond the first directory page (#7535)|4f, 206+, 15-|F1 X2|cli:commands/agent/archive.ts, cli:commands/agent/ls.ts, cli:utils/agent-directory.ts
+9bce7dbd2|refactor(plugin): unify the client UI entrypoint (#7474)|26f, 283+, 181-|F8 X5 d1|app:plugins/evaluate.ts, app:plugins/icons.ts, app:plugins/react-native/modal.tsx, app:plugins/react-native/runtime.ts +10
+c70a6cfb9|fix(app): resolve Markdown preview links from their document (#7538)|7f, 164+, 15-|F2 M1 X2|app:assistant-file-links/parse.ts, app:assistant-file-links/provider.tsx, app:assistant-file-links/resolver.ts, app:assistant-file-links/use-file-link.ts +1
+bd15e40e9|Serve paseo.sh in Simplified Chinese (#7373)|266f, 22496+, 3864-|M1 X1|cli:commands/plugin/scaffold.ts, proto:plugin-registry.ts
+77453388e|fix: update lockfile signatures and Nix hash [skip ci]|1f, 1+, 1-||
+98d34a3dc|ci: run pull-request checks for every base branch (#7545)|4f, 18+, 6-||
+30464cf23|Translate plugin content and labels in each app language (#7478)|69f, 1717+, 209-|F13 M5 X22|app:composer/index.tsx, app:file-panels/choice/presentation.ts, app:file-panels/panels.ts, app:plugins/attachments/picker.tsx +42
+2545250b2|fix(app): keep saved workspace tabs when a store changes before hydration (#7547)|2f, 65+, 15-|M1|app:storage/validated-persist-storage.ts
+006fd053a|Record Android freezes in opt-in diagnostic builds (#7456)|26f, 929+, 140-|F10 M3 X6|package.json, packages/app/app.config.js, packages/app/index.ts, packages/app/metro.config.cjs +15
+a891155b8|fix: update lockfile signatures and Nix hash [skip ci]|1f, 1+, 1-||
+fbd90cb88|Keep setup execution and output owned by the workspace (#7473)|52f, 868+, 3458-|F5 X10 d1|app:components/tool-call-details.tsx, app:panels/setup-panel.tsx, app:utils/tool-call-detail-state.ts, client:daemon-client.ts +12
+5d70bf064|fix(android): restore image picker after Activity recreation (#7546)|3f, 166+|F1 X1|patches/expo-modules-core+57.0.23.patch, scripts/postinstall-patches.mjs
+91dca5702|Connect saved hosts and delegate agents across daemons (#7370)|86f, 6968+, 583-|F16 M7 X17|app:desktop/daemon/local-credential.ts, app:hooks/use-archive-agent.ts, app:panels/agent-tracks.tsx, app:runtime/host-runtime.ts +48
+5878680f7|fix: update lockfile signatures and Nix hash [skip ci]|1f, 1+, 1-||
+d0568f9f1|Batch agent reports and completion notifications (#7561)|34f, 1721+, 556-|F3 M3 X12|app:composer/actions.ts, cli:commands/agent/send.ts, client:daemon-client.ts, proto:agent-message.ts +14
+c63e1204b|Review all branch changes by default without automatic scope switching (#7576)|34f, 545+, 236-|F6 M2 X9|app:data/push-router.ts, app:git/checkout-status-cache.ts, app:git/diff-pane.tsx, app:git/query-keys.ts +13
+23c4df481|Fix agents showing running after daemon restart (#7573)|4f, 256+, 9-|F1 X1|srv:agent/providers/claude/agent.ts, srv:bootstrap.ts
+1d383519d|feat(app): always show the host picker with Add host on New workspace (#7580)|2f, 14+, 8-|M1|app:screens/new-workspace/form/index.tsx
+995ad2f87|feat(plugin): render Markdown content with host UI (#7579)|10f, 76+, 4-|F1 X3|app:plugins/react-native/markdown.tsx, app:plugins/react-native/ui.ts, plugin:client/ui.ts, plugin-examples/local-plugin/client/main.tsx
+1e0a9d5af|fix(plugins): allow notification timeline transformers (#7582)|2f, 4+, 3-|F1|app:plugins/evaluate.ts
+e522e6ea8|fix(app): make the compact Explorer tab rail usable on phones (#7589)|15f, 289+, 103-|F4 M2 X6|app:components/headers/sidebar-close-button.tsx, app:components/left-sidebar.tsx, app:components/sidebar/use-long-press-drag-interaction.ts, app:components/ui/context-menu.tsx +8
+ce67efa9e|Keep Claude request context out of restored chats (#7590)|2f, 145+|F1|srv:agent/providers/claude/agent.ts
+1198cddf6|Document cross-host agent workflows in the Paseo skill (#7593)|1f, 26+, 9-||
+5d2a42486|docs(changelog): prepare 0.13.0-beta.1|1f, 65+||
+3fa625701|chore(release): cut 0.13.0-beta.1|14f, 55+, 55-|M2 X10|package.json, packages/app/package.json, packages/cli/package.json, packages/client/package.json +8
+68fa464cd|fix: update lockfile signatures and Nix hash [skip ci]|1f, 1+, 1-||
+bad132884|Translate the 0.13.0-beta.1 changelog and render changelog code blocks (#7606)|3f, 72+, 5-||
+bdae614e9|fix(app): restore chats after reopening unread workspaces (#7608)|3f, 114+, 2-|X1|app:stores/workspace-layout-actions.ts
+76b32544c|Give Markdown and HTML file tabs back their Preview and Source views (#7614)|42f, 565+, 641-|D3 F1 M10 X2 d1|app:file-pane/bar.tsx, app:file-pane/pane.tsx, app:file-panels/builtin.tsx, app:file-panels/catalog.ts +13
+4673ab190|fix(app): fall back to relay when the direct connection drops (#7616)|2f, 52+|F1|app:runtime/host-runtime.ts
+457414231|fix(server): use only the configured models for manual metadata generation (#7611)|21f, 300+, 77-|F4 M1 X1|app:i18n/resources/en.ts, app:screens/settings/metadata-generation-page.tsx, srv:agent/agent-response-loop.ts, srv:agent/structured-generation-providers.ts +2
+12e7a448f|fix(app): open notification agents once in their current workspace (#7612)|34f, 782+, 444-|F11 X7 d1|app:app/_layout.tsx, app:app/h/[serverId]/agent/[agentId].tsx, app:app/h/[serverId]/workspace/[workspaceId]/index.tsx, app:fdroid/expo-notifications.ts +15
+c3c6a936a|List plugin header buttons in the workspace menu on phones and narrow windows (#7630)|11f, 372+, 92-|F1 M1 X2|app:plugins/buttons/view.tsx, app:plugins/index.ts, app:screens/workspace/workspace-header-menu.tsx, app:screens/workspace/workspace-screen.tsx
+4ef4a95a4|Keep Claude session listing from loading whole histories into memory (#7626)|6f, 890+, 25-|F1 X1|srv:agent/providers/claude/agent.ts, srv:agent/providers/claude/import-descriptor-scheduler.ts
+9d908d678|feat(terminal): support image paste into agent TUIs, local and remote (#3795)|42f, 1357+, 349-|F15 X6|packages/app/package.json, packages/app/scripts/build-terminal-webview-html.mjs, app:attachments/upload-limit.ts, app:components/file-drop/file-drop-backdrop.tsx +17
+6376f2bf4|Remove the WebView terminal renderer: xterm on web, native grid on mobile (#7639)|30f, 26+, 1838-|F3 M1 X3 d6|packages/app/package.json, packages/app/scripts/build-terminal-webview-html.mjs, app:components/terminal-emulator-webview.native.tsx, app:components/terminal-emulator.native.tsx +9
+91d749f82|fix(server): preserve workspace PR status across reconnects (#7638)|32f, 552+, 135-|F2 X8|srv:bootstrap.ts, srv:checkout-diff-manager.ts, srv:session.ts, srv:session/workspace-provisioning/workspace-provisioning-service.ts +6
+793b16c0d|fix(relay): protect sessions against replayed commands (#7610)|55f, 4887+, 619-|F6 M8 X19|app:runtime/host-runtime.ts, app:types/host-connection.ts, app:utils/test-daemon-connection.ts, cli:commands/daemon/pair.ts +29
+55a759095|Sort sidebar workspaces and keep active overflow visible (#7635)|66f, 1225+, 362-|F6 M3 X15|app:components/sidebar-workspace-list.tsx, app:components/sidebar/display-preferences/menu.tsx, app:components/sidebar/display-preferences/model.ts, app:components/sidebar/sidebar-group-visibility.ts +20
+d972f67c3|fix: update lockfile signatures and Nix hash [skip ci]|1f, 1+, 1-||
+3c3c27292|fix(server): publish workspace snapshots without UI subscribers (#7681)|4f, 302+, 46-|X1|srv:workspace-git-service.ts
+99a1d9a7a|fix(app): keep the iPhone skill picker above the composer and keyboard (#7679)|19f, 985+, 339-|F3 M5 X1|app:components/ui/autocomplete-popover.tsx, app:keyboard/shift/index.ts, app:keyboard/shift/internal/anchor.ts, app:keyboard/shift/internal/context.ts +5
+89727f43b|fix(server): require the daemon password on relay connections (#7668)|10f, 65+, 29-|M1 X2|packages/server/package.json, srv:session-admission-auth.ts, srv:websocket-server.ts
+21e7ccb03|Restore agent finish notifications after daemon restart (#7683)|25f, 2615+, 1230-|F8 M1 X5|srv:agent/agent-manager.ts, srv:agent/agent-prompt.ts, srv:agent/create-agent/create.ts, srv:agent/finish-subscriptions/index.ts +10
+4fe006df8|feat(plugins): unify panel props and persist tab state (#7685)|30f, 618+, 242-|F2 M7 X11|app:file-pane/pane.tsx, app:file-panels/builtin.tsx, app:file-panels/panels.ts, app:file-panels/plugin-host.tsx +16
+4b9b2fe13|fix(app): preserve manual Command Center scrolling during live updates (#7688)|8f, 515+, 71-|F1 X1|app:command-center/command-center.tsx, app:command-center/interaction.ts
+6405edd8d|feat(app): show consistent agent and workspace status in search (#7690)|15f, 679+, 277-|F3 X5|app:agent-presentation/index.ts, app:command-center/command-center.tsx, app:command-center/results.ts, app:components/status-icon.tsx +4
+582beeb10|fix(app): preserve compact sidebar context under sheets (#7693)|35f, 562+, 98-|F5 M7 X9|app:app/_layout.tsx, app:assistant-file-links/index.ts, app:assistant-file-links/provider.tsx, app:command-center/workspace-file-search.ts +17
+f3b0199c1|Open large Claude histories without whole-transcript duplication (#7431)|9f, 949+, 363-|F3 X3|srv:agent/agent-timeline-content.ts, srv:agent/providers/claude/agent.ts, srv:agent/providers/claude/replay-memory.fixture.ts, srv:agent/providers/claude/subagents/replay-source.ts +2
+59b01b33f|fix(app): build iOS releases with the foldable-capable SDK (#7705)|1f, 3+|F1|packages/app/eas.json
+d91d61c6e|docs: update changelog for 0.13.0-beta.2|2f, 48+, 16-||
+30d8cb044|chore(release): cut 0.13.0-beta.2|14f, 55+, 55-|M2 X10|package.json, packages/app/package.json, packages/cli/package.json, packages/client/package.json +8
+74dc764f0|fix: update lockfile signatures and Nix hash [skip ci]|1f, 1+, 1-||
+fed19f3d2|fix(app): identify Android DNS connection failures (#7701)|2f, 21+, 1-|M1|app:components/connection-failure-copy.ts
+d6fa23189|fix(plugin): restore ACP history replayed during session load (#7717)|2f, 244+, 14-|F1|plugin:server/acp-internal/connection.ts
+ca894d49a|fix(voice): keep prefetched sentences available for playback (#7756)|3f, 94+, 1-|F2|srv:speech/providers/openai/test-utils/prefetched-playback.ts, srv:speech/providers/openai/tts.ts
+48d2c9ec3|Keep restored Claude background notifications from appearing twice (#7737)|6f, 192+, 20-|F2 M1|srv:agent/providers/claude/agent.ts, srv:agent/providers/claude/task-notification-tool-call.ts, srv:agent/providers/claude/transcript-history.ts
+632a7f885|fix(app): keep live workspace rows when a late creation snapshot arrives (#7758)|3f, 218+, 1-|X1|app:runtime/directory-sync/workspace-replica.ts
+48623801a|fix(app): keep tablet sidebar controls above system navigation (#7768)|2f, 45+, 2-|F1|app:components/left-sidebar.tsx
+686588c44|feat(app): restore manual workspace sorting (#7771)|24f, 435+, 36-|M1 X9|app:components/sidebar-workspace-list.tsx, app:components/sidebar/display-preferences/menu.tsx, app:hooks/sidebar-workspaces-view-model.ts, app:hooks/use-sidebar-workspaces-list.ts +6
+f3d74b857|fix(plugins): restore deprecated useRevealedText compatibility (#7780)|5f, 51+, 9-|X2|app:plugins/evaluate.ts, plugin:client/react-native.ts
+c1b257b8f|fix(usage): show Cursor quota percentages without counting bonus spend as overage (#7778)|2f, 119+, 1-|M1|plugins/cursor-usage-source/server/usage.ts
+a54cc6dd1|chore(acp): refresh pinned provider packages (#7781)|3f, 47+, 32-|F1|app:data/acp-provider-catalog.ts
+6d655ac1f|docs: update changelog for 0.13.0|2f, 22+, 8-||
+d34d17a90|chore(release): cut 0.13.0|18f, 115+, 55-|F4 M2 X10|fastlane/metadata/android/en-US/changelogs/130001.txt, fastlane/metadata/android/en-US/changelogs/130002.txt, fastlane/metadata/android/en-US/changelogs/130003.txt, fastlane/metadata/android/en-US/changelogs/130004.txt +12
+e01a38d94|fix: update lockfile signatures and Nix hash [skip ci]|1f, 1+, 1-||
+b8bb335c5|fix(app): close comboboxes when their retained panel becomes inactive (#7783)|2f, 138+, 23-|X1|app:components/ui/combobox.tsx
+566218d68|fix(claude): avoid probing file targets during history replay (#7789)|2f, 230+, 13-|X1|srv:agent/providers/claude/agent.ts
+72e3316f4|fix(opencode): show model details on v2 subagent rows (#7799)|2f, 93+|X1|srv:agent/providers/opencode/v2/children.ts
+4845e1da5|fix(app): link bare URLs with ports, colons and user info as one link (#7859)|3f, 164+, 14-|M2|app:components/markdown/source.ts, patches/react-native-enriched-markdown+1.2.0-nightly-20261014-766fc0e67.patch
+5dc350034|Keep large Import Session lists responsive on Web (#7872)|6f, 555+, 94-|F3 X1|app:components/import-session-list.tsx, app:components/import-session-list.types.ts, app:components/import-session-list.web.tsx, app:components/import-session-sheet.tsx
+d0fd2e532|fix(client): close failed SSH tunnels without crashing callers (#7876)|2f, 59+, 2-|M1|client:node/ssh-tunnel.ts
+8c9499dac|fix(app): dismiss file link tooltips when leaving their panel (#7842)|2f, 82+, 1-|X1|app:components/ui/tooltip.tsx
+4bbacfed4|feat(app): fold finished agent turns behind a summary line (#7785)|40f, 874+, 170-|F9 M2 X9|app:agent-stream/presentation.ts, app:agent-stream/strategy-native.tsx, app:agent-stream/strategy-web.tsx, app:agent-stream/strategy.ts +16
+2a890208c|feat(app): show a subagent's parent and a way back to it (#7784)|21f, 392+, 27-|F4 M2 X3|app:composer/tracks.tsx, app:i18n/resources/en.ts, app:panels/agent-panel.tsx, app:panels/agent-tracks.tsx +5
+16fe07560|fix(app): make question cards link-aware and selectable without accidental answers|9f, 348+, 43-|F1 M1 X2|app:components/markdown/renderer.tsx, app:components/markdown/styles.ts, app:components/question-form-card.tsx, srv:agent/providers/mock-load-test-agent.ts
+6f07b0de4|feat(app): recall sent messages with Up and Down in an empty composer (#7710)|7f, 331+, 9-|F2 X2|app:composer/index.tsx, app:composer/input/input.tsx, app:composer/recall.ts, app:stores/session-store.ts
+652173994|fix(markdown): preserve inline code formatting and heading sizes (#7889)|6f, 557+, 47-|M2 X1|packages/app/package.json, app:components/markdown/styles.ts, patches/react-native-enriched-markdown+1.2.0-nightly-20261014-766fc0e67.patch
+631ed0408|fix(app): preserve host selection across settings navigation (#7893)|7f, 227+, 17-|F3 X1|app:app/_layout.tsx, app:navigation/settings-selection/index.ts, app:navigation/settings-selection/model.ts, app:screens/settings-screen.tsx
+6bc4b73c4|fix(app): keep the sidebar alive when a workspace entry has not hydrated (#7896)|3f, 29+, 5-|M1 X1|app:components/sidebar-workspace-list.tsx, app:components/sidebar/sidebar-group-visibility.ts
+8e5f53676|Release idle agent runtimes with work guards and live host controls (#7782)|64f, 2540+, 36-|F15 M3 X13|app:i18n/resources/en.ts, app:screens/settings/host-page.tsx, app:screens/settings/idle-runtime-cleanup-card.tsx, plugin:server/provider.ts +27
+27d6b3b7c|feat(desktop): remember project editors and support Xcode (#7898)|19f, 790+, 57-|F9 M2 X3|app:components/file-explorer-pane.tsx, app:desktop/host.ts, app:hooks/use-preferred-editor.ts, app:screens/workspace/workspace-screen.tsx +10
+97ed96bdf|release: prepare 0.13.1 sidebar startup hotfix from stable (#7902)|20f, 83+, 55-|F4 M2 X10|fastlane/metadata/android/en-US/changelogs/130011.txt, fastlane/metadata/android/en-US/changelogs/130012.txt, fastlane/metadata/android/en-US/changelogs/130013.txt, fastlane/metadata/android/en-US/changelogs/130014.txt +12
+443f1501e|fix: update lockfile signatures and Nix hash [skip ci]|1f, 1+, 1-||
+78a3083fe|perf(app): avoid stream updates in hidden chats (#7901)|3f, 84+, 3-|F1 X1|app:agent-stream/use-agent-stream-tail.ts, app:panels/agent-panel.tsx
+ff31b6e5b|fix(android): skip Reanimated sync prop updates for unmounted views (#7907)|2f, 43+|F1 X1|patches/react-native-reanimated+4.5.1.patch, scripts/postinstall-patches.mjs
+5e53bb78c|fix(app): keep your place in the Settings sidebar (#7899)|10f, 411+, 47-|D1 F1 M1 X2|app:app/_layout.tsx, app:navigation/settings-presentation/index.ts, app:navigation/settings-presentation/model.ts, app:navigation/settings-selection/index.ts +1
+95c8491e2|test(server): await finish cleanup and expose completion persistence errors (#7909)|2f, 58+, 7-||
+88bd1cf05|feat(app): long-press Send to queue or send now on touch screens (#7897)|16f, 216+, 17-|F1 X3|app:composer/input/input.tsx, app:composer/input/labels.ts, app:composer/input/state.ts, app:i18n/resources/en.ts
+74a7e5803|Choose voice providers and local speech models from a Voice settings page (#7295)|83f, 6059+, 1085-|F21 M1 X18|app:components/settings/collapsible-row.tsx, app:components/settings/detail-row.tsx, app:components/settings/headings/settings-info-tip.tsx, app:components/settings/index.tsx +42
+033b2cdfc|fix(app): keep command suggestions visible as the composer grows (#7910)|6f, 207+, 68-|X3|app:components/ui/autocomplete-popover.tsx, app:components/ui/autocomplete.tsx, app:composer/index.tsx
+e958540b0|fix(app): remove SVG prop and nested button warnings on web (#7915)|9f, 293+, 9-|M3 X2|app:components/context-window-meter.tsx, app:composer/tracks.tsx, app:git/pull-request-panel/checks-ring.tsx, patches/react-native-unistyles+3.2.4.patch +1
+e277656cb|fix(app): clean up native animation and layout lifecycles (#7914)|8f, 226+, 51-|M3 X3|package.json, packages/app/package.json, patches/@gorhom+bottom-sheet+5.2.14.patch, patches/react-native-enriched-markdown+1.2.0-nightly-20261014-766fc0e67.patch +2
+428ef707a|fix(app): demand the host directory from the workspace route (#7918)|4f, 63+, 5-|F1 X2|app:app/h/[serverId]/agent/[agentId].tsx, app:app/h/[serverId]/workspace/[workspaceId]/index.tsx, app:hooks/use-directory-demand.ts
+902b0c7a1|fix: update lockfile signatures and Nix hash [skip ci]|1f, 1+, 1-||
+287ca5474|fix(app): enlarge sidebar kebab tap targets on compact layouts (#7928)|2f, 24+, 15-|X2|app:components/sidebar-workspace-list.tsx, app:components/sidebar/sidebar-workspace-menu.tsx
+678fe308d|chore(release): reconcile 0.13.2 metadata with main (#7931)|21f, 102+, 56-|F4 M2 X10|fastlane/metadata/android/en-US/changelogs/130021.txt, fastlane/metadata/android/en-US/changelogs/130022.txt, fastlane/metadata/android/en-US/changelogs/130023.txt, fastlane/metadata/android/en-US/changelogs/130024.txt +12
+42d74c254|fix(ci): retry transient Apple staple connection failures (#7933)|2f, 140+, 1-||
+e3bbed3c7|fix(pi): queue prompts until manual compaction finishes (#7848)|4f, 106+, 8-|F1 X1|srv:agent/providers/pi/agent.ts, srv:agent/providers/pi/test-utils/fake-pi.ts
+28834a91a|fix(server): tolerate brief Windows atomic replace failures (#7955)|2f, 201+, 3-|F1|srv:atomic-file.ts
+1f3266e2b|test(server): remove connected-host delivery timing assumptions (#7961)|1f, 19+, 11-||
+4f9d9d6de|Keep ACP terminal output from stalling daemon requests (#7953)|2f, 49+, 3-|F1|srv:agent/providers/acp-agent.ts
+65ce4b590|fix(app): remove restored agent tabs from foreign workspaces (#7956)|7f, 292+, 15-|X2|app:stores/workspace-layout-actions.ts, app:workspace-tabs/agent-visibility.ts
+10bc10c99|Let plugins give specific agents tools (#7938)|31f, 1937+, 58-|F6 X13|client:index.ts, plugin:server/agent-tools.ts, plugin:server/index.ts, plugin:server/lifecycle.ts +15
+64b0afe01|fix(claude): identify SDK processes with the Paseo entrypoint (#7976)|2f, 48+, 8-|F1|srv:agent/providers/claude/query.ts
+fc0cbbb32|fix(server): keep workspace reconciliation responsive on slow paths (#7941)|6f, 683+, 114-|F1 X2|srv:websocket-server.ts, srv:workspace-reconciliation-service.ts, srv:workspace-registry.ts
+8d971876b|fix(omp): keep transcript replay responsive (#7948)|6f, 301+, 25-|X2|packages/server/package.json, srv:agent/providers/omp/history.ts
+9c7d4ace6|fix(server): reject oversized provider stdout before parsing (#7960)|7f, 263+, 56-|F2 X1|srv:agent/providers/codex/app-server-transport.ts, srv:agent/providers/jsonl-frame-decoder.ts, srv:agent/providers/jsonl-rpc-process.ts
+6077bc621|Keep daemon diff highlighting responsive and bounded (#7945)|13f, 569+, 67-|F5 X3|packages/highlight/src/budgeted-highlighter.ts, packages/highlight/src/index.ts, srv:checkout-diff-cache.ts, srv:session.ts +4
+a25f4f506|perf(server): serve timeline pages from retained projection (#7958)|7f, 638+, 173-|F3 X1|srv:agent/agent-timeline-store.ts, srv:agent/test-utils/timeline-page-reference.ts, srv:agent/timeline-projection.ts, srv:session.ts
+f14a4cc11|fix(server): keep password-protected config reload responsive (#7959)|24f, 708+, 316-|M1 X9|srv:bootstrap.ts, srv:config.ts, srv:daemon-config-store.ts, srv:orchestration-skills/internal/selection-store.ts +6
+67a245925|fix(server): keep project config work off the daemon hot path (#7944)|14f, 608+, 239-|F3 X6|srv:script-status-projection.ts, srv:session.ts, srv:session/project-config/project-config-session.ts, srv:session/workspace-scripts/workspace-scripts-service.ts +5
+9bc998fa3|fix(server): keep Git observation and worktree IO off the event loop (#7943)|23f, 893+, 298-|F4 X5|srv:git-observation-paths.ts, srv:paseo-worktree-service.ts, srv:workspace-git-service.ts, srv:workspace-registry-bootstrap.ts +5
+7f6a805e0|feat(app): choose the composer send shortcut (#5503)|18f, 586+, 6-|M1 X6|app:composer/index.tsx, app:composer/input/input.tsx, app:composer/input/state.ts, app:hooks/use-settings/index.ts +3
+173fca3c0|Keep the daemon responsive during Claude history replay (#7940)|10f, 916+, 453-|M1 X6|srv:agent/providers/claude/agent.ts, srv:agent/providers/claude/project-dir.ts, srv:agent/providers/claude/rewind.ts, srv:agent/providers/claude/subagents/replay-source.ts +3
+9e4aab16c|fix(server): keep the daemon responsive during plugin builds (#7967)|12f, 1151+, 543-|F6 X2|srv:plugins/compiler-build.ts, srv:plugins/compiler-esbuild.ts, srv:plugins/compiler-worker.ts, srv:plugins/compiler.ts +4
+63ed15e93|test(server): make the reconciliation responsiveness probe independent of idle waits (#7988)|1f, 81+, 6-||
+2ce6681d6|Keep image attachments responsive during prompts and replay (#7954)|24f, 1133+, 458-|F5 M1 X6|srv:agent/providers/claude/agent.ts, srv:agent/providers/claude/subagents/replay-source.ts, srv:agent/providers/claude/subagents/workflow-replay-source.ts, srv:agent/providers/codex-app-server-agent.ts +8
+3a1b14669|Guard daemon modules against synchronous Node IO (#7991)|3f, 372+, 8-|M1 X1|.oxlintrc.json, scripts/oxlint/paseo-plugin.mjs
+b12eefb28|Keep conversation turns distinct and history stable (#7990)|72f, 1690+, 409-|F12 M12 X13|app:agent-stream/history-window.ts, app:agent-stream/layout.ts, app:agent-stream/presentation.ts, app:agent-stream/stream-tick.bench.ts +33
+26ee20b37|fix(ci): hoist expo-module-scripts so root overrides reach its Expo peers (#7998)|5f, 2370+, 4078-|F2 X1|package.json, packages/expo-two-way-audio/package.json, packages/expo-two-way-audio/tsconfig.json
+07007a485|fix: update lockfile signatures and Nix hash [skip ci]|1f, 1+, 1-||
+6b7d49f0d|test(server): keep responsiveness gates independent of runner scheduling (#8002)|12f, 270+, 432-|F1 M1|srv:plugins/test-fixtures/compile-responsiveness.e2e.ts, srvsrc:test-utils/main-thread-work.ts
+8a542048b|Let plugins contribute MCP servers on every agent session open (#7983)|19f, 664+, 132-|F3 M1 R1 X4|plugin:server/lifecycle.ts, srv:agent/agent-manager.ts, srv:agent/agent-sdk-types.ts, srv:agent/plugin-provider.ts +5
+ef58ace42|Fix history compatibility and turn presentation regressions (#8010)|16f, 492+, 117-|F1 M3 X3|app:agent-stream/presentation.ts, app:agent-stream/turn-collapse/model.ts, app:agent-stream/view.tsx, app:components/user-message/index.tsx +3
+50623965b|Make line wrapping responsive in large diffs (#8006)|11f, 872+, 29-|F2 M5|app:git/diff-document/benchmark-corpus.ts, app:git/diff-document/model.bench.ts, app:git/diff-document/model.ts, app:git/diff-document/surface.native.tsx +3
+b9f624f72|fix(app): update xterm to prevent shared-atlas glyph corruption (#8013)|4f, 218+, 12-|X1|packages/app/package.json
+36892d5be|fix: update lockfile signatures and Nix hash [skip ci]|1f, 1+, 1-||
+dc07efe93|Keep plugin ACP reasoning separate from assistant replies (#7272)|2f, 80+, 5-|F1|plugin:server/acp-internal/connection.ts
+a8032a150|fix(app): open outside folder links without breaking Files (#7726)|18f, 138+, 5-|F3 M1 X4|app:agent-stream/view.tsx, app:assistant-file-links/path-open.ts, app:i18n/resources/en.ts, app:screens/workspace/workspace-screen.tsx +4
+694696e82|fix(server): keep background Git fetches from opening login prompts (#8019)|3f, 146+, 5-|F1|srv:workspace-git-fetch.ts
+1b8dbc38a|fix(app): preserve chat reading position across older pages (#8026)|16f, 642+, 70-|M5 X3|app:agent-stream/presentation.ts, app:agent-stream/reading-anchor.ts, app:agent-stream/strategy-web.tsx, app:agent-stream/strategy.ts +4
+484c5ba22|docs(release): prepare 0.14.0-beta.1 notes|2f, 120+||
+4495bda14|chore(release): cut 0.14.0-beta.1|14f, 55+, 55-|M2 X10|package.json, packages/app/package.json, packages/cli/package.json, packages/client/package.json +8
+5f014498c|fix: update lockfile signatures and Nix hash [skip ci]|1f, 1+, 1-||
+8419c2122|docs(changelog): explain Claude subscription-limit workaround|2f, 2+, 2-||
+aae97b2bd|fix(app): regenerate iOS Markdown inline code props|2f, 89+|M1|patches/react-native-enriched-markdown+1.2.0-nightly-20261014-766fc0e67.patch
+f59ebd4fd|fix(ci): pin Playwright jobs to supported Ubuntu image|1f, 11+, 10-||
+f098f77f4|chore(ci): remove Android module tests from ordinary CI (#8102)|3f, 9+, 9-||
+b4e837a9f|fix(app): keep grouped reasoning closed when Expand thinking is off (#8042)|4f, 49+, 10-|M1 X1|app:agent-stream/presentation.ts, app:agent-stream/view.tsx
+025e7ef1d|Keep model-discovery errors away from picker edges (#8039)|3f, 67+, 1-|X1|app:components/model-browser.tsx
+dd914c147|Keep docked navigation sizes consistent in narrow windows (#8052)|7f, 96+, 16-|X5|app:composer/draft/workspace-tab.tsx, app:constants/layout.ts, app:panels/agent-panel.tsx, app:screens/settings-screen.tsx +1
+4f46e094a|fix(app): restore expansion of long native user messages (#8089)|4f, 53+, 6-|M1|app:components/user-message/index.tsx
+dfa997704|fix(app): truncate agent sender attribution to one line (#8092)|3f, 66+, 2-|F1 M1|app:components/ui/button.tsx, app:components/user-message/index.tsx
+58ca9a9b3|fix(app): remove blank space above Android turn footers (#8088)|5f, 187+, 33-|M1|patches/react-native-enriched-markdown+1.2.0-nightly-20261014-766fc0e67.patch
+20b2dad61|Open a subagent in place of the subagents list on mobile (#8093)|61f, 1359+, 709-|D2 F11 M7 X12|app:components/adaptive-modal-sheet.tsx, app:components/attachment-lightbox.tsx, app:components/ui/combobox.tsx, app:components/ui/isolated-bottom-sheet-modal/index.tsx +28
+d6d04b0c5|Show a lone tool call as itself and group from the second call (#8109)|12f, 716+, 250-|F3 M1 X2|app:agent-stream/view.tsx, app:components/message.tsx, app:tool-calls/detail-level/grouping.ts, app:tool-calls/detail-level/overview/sheet.tsx +2
+28bb7e29b|docs(changelog): fold 0.14.0-beta.2 UI fixes into the 0.14.0 entry|2f, 12+, 6-||
+1a05491be|chore(release): cut 0.14.0-beta.2|14f, 55+, 55-|M2 X10|package.json, packages/app/package.json, packages/cli/package.json, packages/client/package.json +8
+869eb5a72|Make Claude session entrypoint relabeling optional (#8164)|4f, 86+, 10-|X1|srv:agent/providers/claude/query.ts
+03aedcdd4|docs(changelog): promote the 0.14.0 entry to stable|2f, 6+, 6-||
+55c77021d|chore(store): add phone and tablet store screenshots (#8099)|45f, 1709+|F40|assets/store-screenshots/.gitignore, assets/store-screenshots/demo/change/apply.mjs, assets/store-screenshots/demo/change/reconnect-delay.ts, assets/store-screenshots/demo/preview-deploys/index.client.tsx +38
+2d97d0480|Publish store screenshots from the repo on each stable release (#8186)|16f, 112+, 9-|F10 M1 X2|assets/store-screenshots/render.mjs, fastlane/metadata/android/en-US/images/phoneScreenshots/1.png, fastlane/metadata/android/en-US/images/phoneScreenshots/2.png, fastlane/metadata/android/en-US/images/phoneScreenshots/3.png +9
+8c6de842a|chore(release): cut 0.14.0|18f, 95+, 55-|F4 M2 X10|fastlane/metadata/android/en-US/changelogs/140001.txt, fastlane/metadata/android/en-US/changelogs/140002.txt, fastlane/metadata/android/en-US/changelogs/140003.txt, fastlane/metadata/android/en-US/changelogs/140004.txt +12

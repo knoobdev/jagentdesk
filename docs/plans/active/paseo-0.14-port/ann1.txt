@@ -1,0 +1,93 @@
+827178df9|CDX|H|Duplicate of 0.10.1 `0c1814496`; files reverse-apply (R2).
+792715e76|USG|D|Usage re-architected as built-in plugins (root `plugins/*-usage-source`, 189 files). JD keeps `provider-usage/` + `services/quota-fetcher`; JD has no built-in plugin loader. Whole 0.11 Usage chain depends on it.
+a43c8d888|TERM|H|Duplicate of 0.10.1 `c938e1cf4`; JD `protocol/src/terminal-profiles.ts:12` already aliases `cursor-agent`.
+dffde6ae8|CDX|H|Duplicate of 0.10.1 `b013e0d42`; JD codex-app-server-agent.ts:263/551 already reads CODEX_HOME.
+8de52a3c9|SUBA|H|Duplicate of 0.10.1 `09f87df1b`; reverse-applies on jagentdesk-tools.ts.
+7bb7d4ed0|CHAT|D|Duplicate of 0.10.1 `b44e7b0b9`; needs `workspace-tabs/open-beside.ts` (Explorer pane-host chain, absent).
+b85b44aea|HOST|A|Host page shows new version after restart. Touches host-runtime/session-store (JD Tailscale runtime). Small, valuable; hand-merge.
+cf4509631|CHAT|H|Duplicate of 0.10.1 `437aef1a7`; ported in v0.9.44.
+05874e289|CHAT|A|Live relative timestamps; 17 files, 3 missing (schedule rows/import sheet diverged). Port the `useNow`-style hook + agent-list only.
+9d010211a|CDX|H|Duplicate of 0.10.1 `006bae289`; v0.9.44 "custom Codex providers in import, archive and rewind".
+f4ba16a0b|CHAT|D|Duplicate of 0.10.1 `2c6d4e528`; needs `agent-stream/presentation.ts` (absent).
+849a876bc|PLG|S|Plugin-provider sessions: JD has no `agent/plugin-provider.ts` (plugin providers not ported).
+434060709|CLA|H|Duplicate of 0.10.1 `12cd5345d` (Sonnet 5.5); reverse-applies.
+940dbfd24|OC|H|Duplicate of 0.10.1 `9f387873b`; v2 parts reverse-apply; v1 part already adapted in v0.9.44.
+560e478ef|PROTO|P|Client waits for connection before upload; small hunk in daemon-client.ts (X1, context drift).
+690f5298c|CMP|A|Draft composer must not query agent commands before project/model chosen. 9 files; JD composer has skills/team toggles. JD working tree currently has uncommitted edits in the same files (workspace-setup-dialog, workspace-tab, composer/index) - coordinate.
+3b4118360|CHAT|P|Context ring starts at 12 o'clock on web; 1 file.
+68e722ec2|CHAT|P|Request chat outline only for served timelines; JD has chat-outline (ported).
+f232d23e9|PROTO|A|SDK `send()/run()` accept `activeTurnBehavior`; public SDK in JD is rebranded `client/src/index.ts`.
+d91171954|OC|H|Duplicate of 0.10.2 `#5609`; JD `b7aa601d4`.
+b9ac1d498|PLG|A|Back-to-plugins link in plugin settings; JD settings screen restructured (ClickUp).
+87818812a|DESK|P|Desktop stops spawning `daemon status` every second when no local daemon (perf). X1 small.
+be2fb1cab|OC|H|0.10.2 `#5674`; JD `b28934146`.
+d59686189|SBR|S|Sidebar empty-state copy; JD sidebar is ClickUp shell (`sidebar/empty-states.tsx` missing).
+aff476b01|CDX|P|Codex custom prompt `$` args inserted literally; applies clean.
+cc744cc66|CHAT|A|Content-width setting for chat/Markdown (39 files, 6 missing). Useful on wide desktop; re-implement on JD settings + strategy-web.
+264f6e1cc|OMP|A|OMP first-class provider (MCP bridge, question UI, history). 18/19 files apply; JD omp/agent.ts conflicts. Prerequisite for ~20 later OMP fixes.
+2838922ad|OC|H|0.10.2 `#5679`; JD `e5e8863a4`.
+23c4404b9|CDX|P|Codex output schema fields named like schema keywords; applies clean.
+a8f5d969b|CDX|P|Codex keeps default effort after restart; X1 small.
+4b45bc9fc|WS|P|Restore archived workspaces without recorded branch; 4/5 apply.
+5764863f6|OC|H|0.10.2 `#5696`; JD `9c23891d0`.
+5de45e208|BRW|A|Annotation capture when app zoomed (`desktop/features/browser-capture.ts`); JD browser heavily modified (stealth).
+60aff2346|CDX|A|Codex Speed menu (Normal/Fast/Ultrafast) - PROTOCOL: new `speed` feature in agent-types/messages. JD has Fast toggle (`codex-feature-definitions.ts` drift). Needs back-compat for older clients.
+d3c902e9f|OC|H|0.10.2 `#5710`; JD `dbc5bee5d`.
+767b0e970|CDX|P|Rewind legacy Codex threads without thread/rollback (Codex >=0.156).
+53ee9cd99|CDX|P|Declined Codex commands/edits settle as failed; applies.
+4e9a4582b|HOST|P|Stop connecting to host removed during first probe (host-runtime.ts, applies).
+5599f9e56|CLI|P|`agent open` fails for unknown agent; X1 small.
+b1a3b0772|CLA|P|Internal Claude agents (branch names/commit msgs) run with hooks disabled; applies. JD metadata generation uses these.
+3a9304607|PLG|D|Plugin sidebar header/footer items + Usage in footer (169 files). Conflicts with ClickUp shell sidebar; part of Usage chain.
+8cccc1f6f|CDX|P|Answer each approval callback sharing one item (two permissions). Security-relevant (approvals). Applies.
+b0c9de0c9|PLG|S|First-class plugin providers; JD has no plugin-provider runtime. Revisit only if plugin providers are adopted.
+ad56659a8|PRV|S|Plugin provider icons after snapshot; depends on plugin providers (15 X).
+2553ab4d8|TERM|A|Terminal key bar + Paste on native tablets; JD terminal-pane drift.
+e9e479c6b|PI|P|Pi streams running subagent transcripts; 9/9 apply.
+9952c5598|MOB|A|Native tablet touch actions (context ring tap, tab long-press); 3/4 apply.
+5715b5ba6|MOB|S|iPad reflow patch; reverted upstream in 0.11.2 (`76804cba6`) and superseded by `73390346c`.
+7b7685678|PRV|S|Antigravity plugin provider - removed next commit (`9d9d9af99`), restored in `7b0cace99`; needs built-in plugin providers.
+8332f4d1f|PRV|S|Muse Code built-in provider plugin; needs plugin-provider runtime + built-in loader (absent).
+4417d7c47|PI|A|Pi built-in MCP gets the agent's MCP servers (JD skills/ORC MCP matter). X1 on pi/agent.ts.
+d070db15b|ACP|P|ACP reports agent error when session setup rejected; applies.
+364e6456e|HOST|A|SECURITY: confirm before a pairing link adds/changes a host (fingerprint shown). JD has `#offer=` + tailnet pairing code; re-implement in JD host-runtime + pair-link/pair-scan. Needs ADR (pairing UX, ADR-0002 follow-up).
+318a84a57|MOB|A|Stacked native dialogs/sheets usable (adaptive-modal-sheet); X1.
+29c198f95|PRV|A|`agents.providers.<id>.options` defaults for every provider - PROTOCOL/config (`provider-config.ts`, `schedule/types.ts`). 15 F, 10 X, plugin-provider part skip.
+9d9d9af99|PRV|S|Removes Antigravity plugin (no-op for JD).
+7a64eef49|CDX|P|Codex terminal rows show the command; applies.
+695ecb281|PRV|S|Muse plugin.
+1f5f5d384|USG|D|Usage sidebar logos/host memory; Usage chain.
+a7c9c05be|GIT|A|New workspaces off origin/main fetch remote tip first; X1 in `utils/worktree.ts`.
+20a887f4c|CMP|P|Composer shows agent's own model when catalog lacks it.
+7b0cace99|PRV|S|Antigravity provider restored as built-in plugin; needs plugin providers. JD already has an Antigravity *editor target* only.
+e0a0cf990|OC|P|SECURITY: OpenCode asks before running a Paseo tool (bridge-plugin `ask` rules). Applies; rebrand `paseo_*` tool prefix.
+4893629ff|CMP|P|Composer shows thinking level the agent runs on.
+b701cb2dc|CDX|P|Failed Codex image generations shown; applies.
+15f143141|NATIVE|S|Relay package bundling; JD has no relay.
+e939dd4c7|USG|D|Sidebar usage + stacked sheets (18 missing).
+d30e99c85|CLA|P|Log why resumed Claude agent has no history; X1 small.
+06213e49b|PI|P|Tintinweb grouped completion; X1.
+95774ba71|SKILL|S|Paseo orchestration-skill dedupe in Codex; JD replaced orchestration-skills with the native skills hub (families/dedupe).
+e10f6d2e2|PLG|P|Plugin client imports packages with only `main`/`module`; compiler.ts applies.
+70df09dae|USG|D|Usage discovery across harnesses (11 missing).
+05e94ab52|USG|D|Usage logins (34 missing).
+73d25317a|USG|D|Usage window names (13 missing).
+087cc71c0|DMN|P|macOS ComputerName for host identity (fixes UNKNOWN host); new `host-name.ts`. Check JD Tailscale hostname labeling.
+d831c7bf3|USG|D|Usage settings.
+d3c76be9c|FILES|D|Explorer tabs unify (+ menu, DnD); Explorer chain, JD side panel differs.
+8aec0787d|CHAT|A|Chat reading position stable while scrolling (reading-anchor.ts new; web-virtualization already R). JD v0.9.44 did its own reading-position work - compare.
+5375f43a0|PLG|P|`agent.closed` plugin lifecycle event; 7/7 apply. Plugin API parity.
+7dc2a3568|TERM|P|macOS Option/Cmd editing shortcuts in terminal; take with `a983ae044`,`70210f107`,`e18f9e8f4`.
+a983ae044|TERM|P|Refactor (same chain as `7dc2a3568`).
+70210f107|TERM|P|Refactor (same chain).
+e18f9e8f4|TERM|P|Refactor (same chain); terminal-keys.ts reverse-applies partially.
+42e221746|GIT|P|Linked pictures in PR markdown (`markdown/html-ish.ts`); applies.
+5f28b3cf8|CHAT|A|Smooth history pagination + reserve image space; 8 X, overlaps JD v0.9.44 perf work.
+b5e9747e2|PLG|A|Reviewed plugin registry (protocol `plugin-registry.ts`, `plugin-source-reference.ts`). JD has its own marketplace/sources; decide whether to consume paseo.sh registry. `owner/slug` semantic change.
+15d8ba16a|CLI|P|`schedule update --no-max-runs/--no-expires-in`; X1.
+42806cdbf|PLG|A|`client.playAudio()` for plugins; audio engine refactor (13 F, 6 X). Plugin API parity.
+0d05584d0|OMP|P|OMP history with failed browser tool call; X1.
+749fe3e5a|DMN|P|Keep speech library path out of agent env (fixes Git Bash PATH on Windows); applies.
+c7759713e|WS|A|Workspace script status published to every client; session.ts/websocket-server drift (X4).
+5eb4c8afa|USG|D|Per-agent plan usage in context window details (94 files).
+ed87679c6|NATIVE|S|Nix packaging.
