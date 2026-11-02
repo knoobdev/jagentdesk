@@ -73,7 +73,8 @@ sha="$1"
 if [ -f "$GITDIR/port-pending" ]; then
   echo "port: $(cat "$GITDIR/port-pending") is still pending; resolve it and run --finish first" >&2; exit 2
 fi
-if ! git diff --quiet || ! git diff --cached --quiet; then
+IGNORE=(':(exclude)scripts/port-upstream-commit.sh' ':(exclude).serena/project.yml' ':(exclude)opencode.json')
+if ! git diff --quiet -- . "${IGNORE[@]}" || ! git diff --cached --quiet -- . "${IGNORE[@]}"; then
   echo "port: working tree has uncommitted changes; commit or stash them first" >&2; exit 2
 fi
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
