@@ -1,5 +1,17 @@
 import type { z } from "zod";
 
+export class JAgentDeskToolInputError extends Error {
+  readonly status = 400;
+
+  constructor(
+    message: string,
+    readonly issues?: z.ZodError["issues"],
+  ) {
+    super(message);
+    this.name = "JAgentDeskToolInputError";
+  }
+}
+
 export interface JAgentDeskToolExecutionContext {
   signal?: AbortSignal;
   sendUpdate?: (update: JAgentDeskToolResult) => void;
@@ -21,7 +33,10 @@ export interface JAgentDeskToolConfig {
 export interface JAgentDeskToolDefinition extends JAgentDeskToolConfig {
   name: string;
   description: string;
-  handler: (input: unknown, context: JAgentDeskToolExecutionContext) => Promise<JAgentDeskToolResult>;
+  handler: (
+    input: unknown,
+    context: JAgentDeskToolExecutionContext,
+  ) => Promise<JAgentDeskToolResult>;
 }
 
 export interface JAgentDeskToolCatalog {

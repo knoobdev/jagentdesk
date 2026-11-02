@@ -9,7 +9,7 @@ import type { JAgentDeskToolCatalog } from "./tools/types.js";
 
 export interface AgentProviderRuntime {
   snapshotManager: ProviderSnapshotManager;
-  setJAgentDeskToolCatalog(catalog: JAgentDeskToolCatalog | null): void;
+  setJAgentDeskToolCatalog(catalog: Pick<JAgentDeskToolCatalog, "tools"> | null): void;
   shutdown(): Promise<void>;
 }
 
@@ -22,7 +22,10 @@ interface CreateAgentProviderRuntimeOptions {
 export async function createAgentProviderRuntime(
   options: CreateAgentProviderRuntimeOptions,
 ): Promise<AgentProviderRuntime> {
-  const bridge = new OpenCodeBridge({ jagentdeskHome: options.jagentdeskHome, logger: options.logger });
+  const bridge = new OpenCodeBridge({
+    jagentdeskHome: options.jagentdeskHome,
+    logger: options.logger,
+  });
   try {
     await bridge.start();
     const snapshotManager = new ProviderSnapshotManager({
