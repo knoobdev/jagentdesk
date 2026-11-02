@@ -101,7 +101,6 @@ interface CompactExplorerSidebarHostProps {
 export function CompactExplorerSidebarHost({ children, enabled }: CompactExplorerSidebarHostProps) {
   const model = useActiveCompactExplorerSidebarModel(enabled);
   const openFileExplorerForCheckout = usePanelStore((state) => state.openFileExplorerForCheckout);
-  const showMobileAgent = usePanelStore((state) => state.showMobileAgent);
   const openWorkspaceTabFocused = useWorkspaceLayoutStore((state) => state.openTabFocused);
 
   const handleOpenExplorer = useCallback(() => {

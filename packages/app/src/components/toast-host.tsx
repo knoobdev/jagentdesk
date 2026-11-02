@@ -1,3 +1,7 @@
+import {
+  FloatingHeaderOverlay,
+  useFloatingHeaderOverlayClearance,
+} from "@/components/floating-header";
 import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { showNativeToast } from "./native-toast";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -243,13 +247,10 @@ export function ToastViewport({
     };
   }, [clearTimer, opacity, scheduleDismiss, toast, translateY]);
 
-  const topOffset = resolveToastTopOffset(
-    placement,
-    isMobile,
-    insets.top,
-    theme.spacing[2],
-    theme.spacing[3],
-  );
+  const panelClearance = useFloatingHeaderOverlayClearance();
+  const topOffset =
+    (placement === "panel" ? panelClearance : 0) +
+    resolveToastTopOffset(placement, isMobile, insets.top, theme.spacing[2], theme.spacing[3]);
 
   const toastVariant = toast?.variant;
   const toastAnimatedStyle = useMemo(
@@ -326,7 +327,7 @@ export function ToastViewport({
     return createPortal(content, getOverlayRoot());
   }
 
-  return content;
+  return placement === "panel" ? <FloatingHeaderOverlay>{content}</FloatingHeaderOverlay> : content;
 }
 
 const styles = StyleSheet.create((theme) => ({
