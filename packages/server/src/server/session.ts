@@ -172,8 +172,17 @@ import type { SessionShareService } from "./session-share/service.js";
 import { ClusterSession } from "./session/cluster/cluster-session.js";
 import { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { DatabaseSession } from "./session/database/database-session.js";
+import { SshSession } from "./session/ssh/ssh-session.js";
+import { SshService } from "./ssh/ssh-service.js";
 import { DockerService } from "./docker/docker-service.js";
 import { DockerStreams } from "./docker/docker-streams.js";
+import { RemoteDockerError, type RemoteDockerHosts } from "./ssh/remote-docker/hosts.js";
+import { localPortOfTarget } from "./ssh/remote-db/service.js";
+import {
+  disposeRemoteDocker,
+  routeDockerMessage,
+  type RoutedDocker,
+} from "./ssh/remote-docker/route.js";
 import { SimulatorService } from "./simulator/simulator-service.js";
 import { SimulatorStreams } from "./simulator/simulator-streams.js";
 import { getSharedProxyService } from "./proxy/proxy-service.js";
@@ -524,6 +533,7 @@ export interface SessionOptions {
   hostToolInstaller?: HostToolInstaller | null;
   clusterRegistry?: ClusterRegistry;
   databaseRegistry?: DatabaseRegistry;
+  sshService?: SshService;
   checkoutDiffManager: CheckoutDiffManager;
   github?: ForgeService;
   createAgentMcpTransport?: AgentMcpTransportFactory;
@@ -839,8 +849,13 @@ export class Session {
   private readonly agentForumSession: AgentForumSession | null;
   private clusterSession!: ClusterSession;
   private databaseSession!: DatabaseSession;
+  private sshSession!: SshSession;
+  private sshService!: SshService;
+  private clusterRegistry!: ClusterRegistry;
+  private databaseRegistry!: DatabaseRegistry;
   private readonly dockerService = new DockerService();
   private readonly dockerStreams = new DockerStreams(this.dockerService);
+  private readonly remoteDockerSubscriptions = new Map<string, RoutedDocker>();
   private readonly simulatorService = new SimulatorService();
   private readonly simulatorStreams = new SimulatorStreams(this.simulatorService);
   private readonly proxyService = getSharedProxyService();
@@ -1071,6 +1086,7 @@ export class Session {
       : null;
     this.initClusterSession(options);
     this.initDatabaseSession(options);
+    this.initSshSession(options);
     this.providerCatalogSession = new ProviderCatalogSession({
       host: {
         emit: (msg) => this.emit(msg),
@@ -1297,21 +1313,34 @@ export class Session {
   }
 
   private initClusterSession(options: SessionOptions): void {
+    this.clusterRegistry = options.clusterRegistry ?? new ClusterRegistry();
     this.clusterSession = new ClusterSession({
       host: {
         emit: (msg) => this.emit(msg),
       },
-      clusterRegistry: options.clusterRegistry ?? new ClusterRegistry(),
+      clusterRegistry: this.clusterRegistry,
       logger: this.sessionLogger,
     });
   }
 
   private initDatabaseSession(options: SessionOptions): void {
+    this.databaseRegistry = options.databaseRegistry ?? new DatabaseRegistry();
     this.databaseSession = new DatabaseSession({
       host: {
         emit: (msg) => this.emit(msg),
       },
-      databaseRegistry: options.databaseRegistry ?? new DatabaseRegistry(),
+      databaseRegistry: this.databaseRegistry,
+      logger: this.sessionLogger,
+    });
+  }
+
+  private initSshSession(options: SessionOptions): void {
+    this.sshService = options.sshService ?? new SshService();
+    this.sshSession = new SshSession({
+      host: {
+        emit: (msg) => this.emit(msg),
+      },
+      sshService: this.sshService,
       logger: this.sessionLogger,
     });
   }
@@ -2299,6 +2328,7 @@ export class Session {
       () => this.dispatchAgentForumMessage(msg),
       () => this.dispatchClusterMessage(msg),
       () => this.dispatchDatabaseMessage(msg),
+      () => this.dispatchSshMessage(msg),
       () => this.dispatchDockerMessage(msg),
       () => this.dispatchSimulatorMessage(msg),
       () => this.dispatchProxyMessage(msg),
@@ -3243,7 +3273,9 @@ export class Session {
       case "cluster/list":
         return this.clusterSession.handleListRequest(msg);
       case "cluster/connect":
-        return this.clusterSession.handleConnectRequest(msg);
+        return this.activateRemoteCluster(msg.id).then(() =>
+          this.clusterSession.handleConnectRequest(msg),
+        );
       case "cluster/disconnect":
         return this.clusterSession.handleDisconnectRequest(msg);
       case "cluster/resources":
@@ -3309,12 +3341,96 @@ export class Session {
     }
   }
 
+  // docker/* with `serverId` drive the same cockpit against that SSH server's forwarded socket
+  // (spec 25.10, ssh/remote-docker/route.ts). One-shot requests give the socket back when done;
+  // a subscription holds it until its unsubscribe, which is routed by subscription id.
   private dispatchDockerMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    if (!msg.type.startsWith("docker/")) return undefined;
+    const local = { service: this.dockerService, streams: this.dockerStreams };
+    const subscriptionId = "subscriptionId" in msg ? msg.subscriptionId : undefined;
+    if (subscriptionId && msg.type.endsWith("/unsubscribe")) {
+      const held = this.remoteDockerSubscriptions.get(subscriptionId);
+      if (held) {
+        this.remoteDockerSubscriptions.delete(subscriptionId);
+        const done = this.dispatchDockerMessageWith(msg, held.service, held.streams);
+        held.release();
+        return done;
+      }
+    }
+    const serverId = "serverId" in msg ? msg.serverId : undefined;
+    const hosts = this.sshService.modules?.docker;
+    if (!serverId || !hosts)
+      return this.dispatchDockerMessageWith(msg, local.service, local.streams);
+    return this.dispatchRemoteDockerMessage(msg, serverId, local, hosts, subscriptionId);
+  }
+
+  private async dispatchRemoteDockerMessage(
+    msg: SessionInboundMessage,
+    serverId: string,
+    local: { service: DockerService; streams: DockerStreams },
+    hosts: RemoteDockerHosts,
+    subscriptionId: string | undefined,
+  ): Promise<void> {
+    let routed: RoutedDocker;
+    try {
+      routed = await routeDockerMessage({ serverId }, local, hosts);
+    } catch (error) {
+      this.emit({
+        type: "rpc_error",
+        payload: {
+          requestId: "requestId" in msg && msg.requestId ? msg.requestId : "",
+          requestType: msg.type,
+          error: error instanceof Error ? error.message : String(error),
+          code: error instanceof RemoteDockerError ? error.code : "ssh_docker_unavailable",
+        },
+      });
+      return;
+    }
+    if (subscriptionId && msg.type.endsWith("/subscribe")) {
+      this.remoteDockerSubscriptions.set(subscriptionId, routed);
+      await this.dispatchDockerMessageWith(msg, routed.service, routed.streams);
+      return;
+    }
+    try {
+      await this.dispatchDockerMessageWith(msg, routed.service, routed.streams);
+    } finally {
+      routed.release();
+    }
+  }
+
+  // A cluster imported through an SSH server needs its forward + kubeconfig before KubeClient
+  // connects (ssh/remote-k8s); failures surface through the normal connect response.
+  private async activateRemoteCluster(clusterId: string): Promise<void> {
+    const k8s = this.sshService.modules?.remoteK8s;
+    const cluster = this.clusterRegistry.list().find((candidate) => candidate.id === clusterId);
+    if (!k8s || !cluster || !k8s.isRemoteContext(cluster.contextName)) return;
+    await k8s.activate(cluster.contextName).catch((error: unknown) => {
+      this.sessionLogger.warn({ err: error, clusterId }, "remote cluster activation failed");
+    });
+  }
+
+  // A database reached through an SSH server listens on its fixed 127.0.0.1 port again before
+  // the registry connects (ssh/remote-db).
+  private async reopenRemoteDatabase(databaseId: string): Promise<void> {
+    const tunnels = this.sshService.modules?.remoteDb;
+    const info = this.databaseRegistry.list().find((candidate) => candidate.id === databaseId);
+    const port = info ? localPortOfTarget(info.target) : null;
+    if (!tunnels || port === null || !tunnels.isRemotePort(port)) return;
+    await tunnels.reopenForLocalPort(port).catch((error: unknown) => {
+      this.sessionLogger.warn({ err: error, databaseId }, "remote database tunnel failed");
+    });
+  }
+
+  private dispatchDockerMessageWith(
+    msg: SessionInboundMessage,
+    dockerService: DockerService,
+    dockerStreams: DockerStreams,
+  ): Promise<void> | undefined {
     const fail = (error: unknown): string =>
       error instanceof Error ? error.message : String(error);
     if (msg.type === "docker/list") {
       const { requestId } = msg;
-      return this.dockerService
+      return dockerService
         .list()
         .then((result) => {
           this.emit({
@@ -3339,7 +3455,7 @@ export class Session {
     }
     if (msg.type === "docker/logs") {
       const { requestId } = msg;
-      return this.dockerService
+      return dockerService
         .logs(msg.container, msg.tail)
         .then((logs) => {
           this.emit({ type: "docker/logs/response", payload: { requestId, error: null, logs } });
@@ -3355,7 +3471,7 @@ export class Session {
     }
     if (msg.type === "docker/inspect") {
       const { requestId } = msg;
-      return this.dockerService
+      return dockerService
         .inspect(msg.container)
         .then((inspect) => {
           this.emit({
@@ -3374,7 +3490,7 @@ export class Session {
     }
     if (msg.type === "docker/action") {
       const { requestId } = msg;
-      return this.dockerService
+      return dockerService
         .action(msg.container, msg.action)
         .then(() => {
           this.emit({ type: "docker/action/response", payload: { requestId, error: null } });
@@ -3390,7 +3506,7 @@ export class Session {
     }
     if (msg.type === "docker/exec") {
       const { requestId } = msg;
-      return this.dockerService
+      return dockerService
         .exec(msg.container, msg.command)
         .then((output) => {
           this.emit({ type: "docker/exec/response", payload: { requestId, error: null, output } });
@@ -3406,7 +3522,7 @@ export class Session {
     }
     if (msg.type === "docker/image/action") {
       const { requestId } = msg;
-      return this.dockerService
+      return dockerService
         .imageAction(msg.image, msg.action)
         .then(() => {
           this.emit({ type: "docker/image/action/response", payload: { requestId, error: null } });
@@ -3422,7 +3538,7 @@ export class Session {
     }
     if (msg.type === "docker/volume/action") {
       const { requestId } = msg;
-      return this.dockerService
+      return dockerService
         .volumeAction(msg.name, msg.action)
         .then(() => {
           this.emit({ type: "docker/volume/action/response", payload: { requestId, error: null } });
@@ -3438,7 +3554,7 @@ export class Session {
     }
     if (msg.type === "docker/fs/list") {
       const { requestId } = msg;
-      return this.dockerService
+      return dockerService
         .fsList(msg.container, msg.path)
         .then((entries) => {
           this.emit({
@@ -3457,7 +3573,7 @@ export class Session {
     }
     if (msg.type === "docker/cp") {
       const { requestId } = msg;
-      return this.dockerService
+      return dockerService
         .cp(msg.container, msg.direction, msg.containerPath, msg.hostPath)
         .then(() => {
           this.emit({ type: "docker/cp/response", payload: { requestId, error: null } });
@@ -3473,7 +3589,7 @@ export class Session {
     }
     if (msg.type === "docker/fs/read") {
       const { requestId } = msg;
-      return this.dockerService
+      return dockerService
         .fsRead(msg.container, msg.path)
         .then(({ content, truncated }) => {
           this.emit({
@@ -3492,7 +3608,7 @@ export class Session {
     }
     if (msg.type === "docker/fs/write") {
       const { requestId } = msg;
-      return this.dockerService
+      return dockerService
         .fsWrite(msg.container, msg.path, msg.content)
         .then(() => {
           this.emit({ type: "docker/fs/write/response", payload: { requestId, error: null } });
@@ -3508,7 +3624,7 @@ export class Session {
     }
     if (msg.type === "docker/fs/op") {
       const { requestId } = msg;
-      return this.dockerService
+      return dockerService
         .fsOp(msg.container, msg.op, msg.path, msg.newPath)
         .then(() => {
           this.emit({ type: "docker/fs/op/response", payload: { requestId, error: null } });
@@ -3528,14 +3644,14 @@ export class Session {
         type: "docker/subscribe/response",
         payload: { requestId, error: null, subscriptionId },
       });
-      void this.dockerStreams.subscribeSnapshot(subscriptionId, (snapshot) => {
+      void dockerStreams.subscribeSnapshot(subscriptionId, (snapshot) => {
         this.emit({ type: "docker/snapshot", payload: { subscriptionId, ...snapshot } });
       });
       return undefined;
     }
     if (msg.type === "docker/unsubscribe") {
       const { requestId, subscriptionId } = msg;
-      this.dockerStreams.unsubscribeSnapshot(subscriptionId);
+      dockerStreams.unsubscribeSnapshot(subscriptionId);
       this.emit({
         type: "docker/unsubscribe/response",
         payload: { requestId, error: null, subscriptionId },
@@ -3548,14 +3664,14 @@ export class Session {
         type: "docker/logs/subscribe/response",
         payload: { requestId, error: null, subscriptionId },
       });
-      this.dockerStreams.subscribeLogs(subscriptionId, msg.container, msg.tail ?? 500, (chunk) => {
+      dockerStreams.subscribeLogs(subscriptionId, msg.container, msg.tail ?? 500, (chunk) => {
         this.emit({ type: "docker/log-chunk", payload: { subscriptionId, chunk } });
       });
       return undefined;
     }
     if (msg.type === "docker/logs/unsubscribe") {
       const { requestId, subscriptionId } = msg;
-      this.dockerStreams.unsubscribeLogs(subscriptionId);
+      dockerStreams.unsubscribeLogs(subscriptionId);
       this.emit({
         type: "docker/logs/unsubscribe/response",
         payload: { requestId, error: null, subscriptionId },
@@ -3568,14 +3684,14 @@ export class Session {
         type: "docker/stats/subscribe/response",
         payload: { requestId, error: null, subscriptionId },
       });
-      this.dockerStreams.subscribeStats(subscriptionId, msg.container, (stats) => {
+      dockerStreams.subscribeStats(subscriptionId, msg.container, (stats) => {
         this.emit({ type: "docker/stats-data", payload: { subscriptionId, stats } });
       });
       return undefined;
     }
     if (msg.type === "docker/stats/unsubscribe") {
       const { requestId, subscriptionId } = msg;
-      this.dockerStreams.unsubscribeStats(subscriptionId);
+      dockerStreams.unsubscribeStats(subscriptionId);
       this.emit({
         type: "docker/stats/unsubscribe/response",
         payload: { requestId, error: null, subscriptionId },
@@ -4281,6 +4397,13 @@ export class Session {
     return undefined;
   }
 
+  private dispatchSshMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    if (!msg.type.startsWith("ssh.")) {
+      return undefined;
+    }
+    return this.sshSession.handleMessage(msg);
+  }
+
   private dispatchDatabaseMessage(msg: SessionInboundMessage): Promise<void> | undefined {
     switch (msg.type) {
       case "database/list":
@@ -4288,7 +4411,9 @@ export class Session {
       case "database/add":
         return this.databaseSession.handleAdd(msg);
       case "database/connect":
-        return this.databaseSession.handleConnect(msg);
+        return this.reopenRemoteDatabase(msg.id).then(() =>
+          this.databaseSession.handleConnect(msg),
+        );
       case "database/disconnect":
         return this.databaseSession.handleDisconnect(msg);
       case "database/remove":
@@ -9163,6 +9288,9 @@ export class Session {
     await this.voiceSession.cleanup();
 
     this.dockerStreams.disposeAll();
+    disposeRemoteDocker({ service: this.dockerService, streams: this.dockerStreams });
+    for (const routed of this.remoteDockerSubscriptions.values()) routed.release();
+    this.remoteDockerSubscriptions.clear();
     this.simulatorStreams.disposeAll();
     for (const id of this.proxySubscriptionIds) this.proxyService.unsubscribe(id);
     this.proxySubscriptionIds.clear();

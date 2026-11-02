@@ -1,0 +1,181 @@
+74c8172f8|PLG|P|`plugin reload` waits for completion instead of 60s deadline (client); applies.
+1b450e487|CLA|P|Wrapper `--version` output not treated as Claude Code version; applies.
+4a32f9584|CMP|S|Compact composer shadow; ClickUp theme owns composer styling.
+06cdc5a0b|CHAT|A|Nested Markdown folder links; X2 (assistant-file-links chain).
+5384abdba|FILES|A|Markdown preview folder links open Files; X1.
+a0aeca967|CHAT|A|Explicit file links regardless of extension; X2.
+f22775a8e|SUBA|A|Agent-to-agent messages default to steering (CLI/MCP). Behavior change; JD Team mode lead/worker messaging must be reviewed (jagentdesk-tools.ts heavily diverged).
+6e5a4682e|MD|D|Own-line images as blocks; needs enriched-markdown `markdown/source.ts`.
+86ab49153|ACP|P|Copilot implements plans after Allow All; applies.
+86817a24f|PERF|A|Fetch project/workspace directories concurrently (directory-sync X1); reconnect speed on mobile.
+ecd42015b|MOB|S|Compact New workspace form redesign.
+6ff071a48|SBR|S|Compact sidebar close button; ClickUp shell.
+3c48ac3ad|MD|D|Inline-code file path links (enriched-markdown source.ts).
+e2ad26d23|PLG|A|Find in plugin timeline rows; 1/2 apply.
+9bd58f66b|TERM|P|Korean terminal copy without extra spaces (native renderer); applies.
+90c6de058|CHAT|A|Streaming replies complete after reload (session-stream-reducers X1).
+e5d9307cf|TERM|P|Wide character selection from either half; X1 (after `9bd58f66b`).
+b2da58b5b|CHAT|P|Keyboard scrolling after closing Find; 2/3 apply.
+a7a21d91c|DMN|P|Overlapping directory searches don't exhaust heap (OOM); X1. Directory-search batch.
+1a6a9fa8d|CLA|P|Background child action logs kept after parent finishes; 1/2 apply (after `30122b1ae`).
+efd6d95f9|PLG|S|Plugin provider steer capability (plugin-provider absent).
+cf62b0091|USG|D|Usage last values.
+df7f1f0b7|MD|D|enriched-markdown web hover/spacing.
+bd5061e7b|CHAT|A|Android tall chats blank rows while scrolling; 1/2 apply.
+9521ee995|CHAT|A|JAgentDesk tool calls labeled verb-first (`tool-calls/presentation.ts`, protocol tool presentation). JD has many extra tools (ORC, browser, db, k8s) needing labels.
+fc12843ce|SUBA|A|Subagent model/effort under title (`panels/agent-facts-line.ts` absent).
+a65478d0b|CC|A|Command Center ranking by match then recency with highlights; JD command-center diverged (0.8.0 chain RISKY).
+095dd0316|PERF|A|No pane rerenders while resizing Explorer (split-container X1).
+233997ed5|MD|D|Markdown block gap (enriched-markdown block-stack).
+60fa12c4d|CMP|A|"Host is not connected" in new agent drafts; 2/4 apply.
+9ed4f1069|SBR|A|Project New workspace uses active host; sidebar-workspace-list X1 (ClickUp) - logic in `sidebar-project-row-model.ts` applies.
+fcda2f1cf|HOST|S|Paseo Hub reconnect; JD does not use Paseo Hub cloud.
+303cebec0|SBR|S|Empty-state card; ClickUp.
+7c7b6555f|PRV|P|Provider artwork (Devin/Grok/Hermes/Kiro SVGs) in catalog; 10 F, 2 X.
+aef7cc36a|HOST|S|Relay high-latency.
+08853039f|CDX|P|Resumed Codex goal turns visible/stoppable; 1/2 apply.
+dc7bed417|CHAT|P|Late composer pills clear of turn actions (view.tsx); applies.
+559c0200e|PERF|A|Reuse workspace/subagent lists while streaming; 1 F, 2 X.
+f0acc2c72|TERM|A|MCP terminal keys honor program input mode (arrow keys); jagentdesk-tools X1, terminal worker applies. Agents driving TUIs benefit.
+be0378ce6|USG|S|Cursor usage plugin.
+a0790e752|DMN|S|Benchmark script only.
+727d5eed5|PROTO|A|Keep published `tool-call-detail` import path (JD file exists, differs).
+b50acc934|MD|D|iPhone Safari selection in new renderer.
+66348a5e5|MD|D|enriched-markdown patch.
+644d66ba4|TERM|P|Long-press selects whole Korean word; applies.
+d61dcaf1d|SUBA|A|Subagent rows compact + press feedback; tracks.tsx drift.
+b8bcd204a|CMP|A|Dismiss touch composer focus on tab switch; X1.
+9be154774|GIT|P|Promoted git action shown once in compact menu; 1/3 apply.
+c575464e8|PERF|A|Skip saving unchanged workspace layouts (validated-persist-storage absent; store X1).
+1e0e56c72|FILES|D|Unify built-in file panel selection (prereq of plugin file panels); touches restored editor `file-pane/editor/view.web.tsx`.
+b6dde61a7|PLG|A|Inline SVG/component plugin icons (41 files; `plugin/src/icons.ts` new). Plugin API parity; app side X11.
+e760764b3|KBD|P|Require number when recording index shortcuts; X3 small.
+19749baee|MOB|A|Android settings inputs above keyboard (`page-layout` absent in JD; re-implement in JD settings).
+1c8c68f93|WS|A|Setup logs only to clients showing Setup panel (bandwidth over tailnet); 2 F, 14 X. Pair with `fbd90cb88`.
+dd244c076|PI|P|Refused subagent resumes remove running rows; X1.
+91154ba4e|OC|A|Agent-scoped bridge tool schemas (only tools the agent may call) - JD host-capability tool gating (spec 24.5) must feed this; 2 F, 2 X.
+eda3e4318|USG|D|Usage localization.
+71e7cf6ff|NATIVE|S|Upstream NDK module build (paseo-diff-prototype absent).
+fc775b6db|I18N|A|Load only selected language translations (startup); JD i18n bigger - good win, i18next.ts X1.
+69ef741a7|PERF|S|Native status-ring clock (`status-ring/clock.ts` absent; JD uses CSS dot).
+0d61cca50|HOST|A|Android TLS failure copy (connection-failure-copy); JD Tailscale messaging differs.
+ab6cdb7c8|CLA|P|Return to Auto when approving a plan ("Implement with Auto"); applies.
+adf27de7d|FILES|D|Explorer across phone/tablet/desktop (147 files, +20.9k/-17.5k).
+068f272a0|PLG|A|Turn-ended payload with empty `timeline` (plugin API break: use `timeline.refetch`); 3 F, 1 X.
+1c6274808|SUBA|A|Detached agents with notifyOnFinish notify creator; create.ts X1.
+23b05bbcc|SUBA|A|Archived agents out of `list_agents` after history read; new `agent/directory.ts`.
+b36ff056e|NATIVE|S|Upstream Android dev build patches for their Expo version.
+e464fd3bd|PLG|D|Plugin file panels (149 files) - needs `1e0e56c72`; conflicts with restored CodeMirror editor wiring in `file-pane/pane.tsx`.
+18eabeeda|CLI|P|Archive agents beyond first page (`cli/utils/agent-directory.ts`); 1/3 apply.
+9bce7dbd2|PLG|A|Unified `@jagentdesk/plugin/client/ui` entry (old entry deprecated). Needed for plugins built on SDK >=0.13.
+c70a6cfb9|FILES|A|Markdown preview links resolve from document folder; 2 F, 2 X.
+30464cf23|PLG|A|Plugin translations (runtime + manifest `translations`); 13 F, 22 X. Plugin API parity.
+2545250b2|WS|A|Saved workspace tabs survive pre-hydration store change; validated-persist-storage absent - re-implement in JD layout store.
+006fd053a|NATIVE|S|Android freeze watchdog diagnostics (opt-in builds).
+fbd90cb88|WS|A|Setup execution/output owned by workspace (-3458 lines); 5 F, 10 X; pair with `1c8c68f93`.
+5d70bf064|NATIVE|A|Android image picker after Activity recreation (expo-modules-core patch); check JD Expo version.
+91dca5702|HOST|S|Connected hosts / cross-daemon delegation (86 files, routed binary frames, CLI `host add`). Overlaps JD multi-host + Team mode; transport assumes relay/SSH/direct, not Tailscale. Needs product decision + ADR; skip for this cycle.
+d0568f9f1|SUBA|A|Batch agent report + finish notification into one message - PROTOCOL (`agent-message.ts`). Depends on `d0bc188a5`. ORC impact.
+c63e1204b|GIT|A|"All changes" default scope in Changes (34 files); 6 F, 9 X, 2 M.
+23c4df481|DMN|P|Agents no longer shown running after daemon restart; 1/2 apply.
+1d383519d|WS|S|New workspace host picker always visible (`new-workspace/form` absent).
+995ad2f87|PLG|A|`Markdown` in plugin client UI (uses host renderer); JD renderer differs but API is renderer-agnostic.
+1e0a9d5af|PLG|P|Notification timeline transformers allowed (evaluate.ts); applies.
+e522e6ea8|FILES|D|Compact Explorer tab rail (Explorer chain).
+ce67efa9e|CLA|P|Claude request context out of restored chats; applies.
+bdae614e9|WS|A|Restore chats after reopening unread workspaces (layout actions X1).
+76b32544c|FILES|D|Markdown/HTML Preview/Source views via file panels (needs `e464fd3bd`); JD already has preview+editor - skip unless file panels ported.
+4673ab190|HOST|S|Fallback to relay on direct drop; no relay.
+457414231|DMN|A|Manual metadata generation uses only configured models (no fallback); JD "no hidden model calls" policy aligns - port. 4 F, 1 X, 1 M.
+12e7a448f|NOTIF|A|Notification taps open the agent once in its current workspace (34 files); JD push notifications path differs (`notification-open/` absent).
+c3c6a936a|PLG|A|Plugin header buttons in workspace ··· menu on narrow layouts; JD header menu differs.
+4ef4a95a4|CLA|P|Claude session listing doesn't load whole histories (Import crash/OOM); 1/2 apply.
+9d908d678|TERM|A|Paste images/drop files into terminals (agent TUIs), incl. remote via upload. 15 F, 6 X; works over JD tailnet upload path.
+6376f2bf4|TERM|A|Remove WebView terminal renderer (native grid on mobile). JD still ships `terminal-emulator-webview.native.tsx`; do after verifying native grid parity on JD iOS/Android.
+91d749f82|GIT|A|Workspace PR status survives reconnect; 2 F, 8 X (session.ts).
+793b16c0d|HOST|S|SECURITY (relay only): Noise NK secure channel vs replayed relay commands. JD has no relay; its tailnet path uses signed-hello + nonce challenge (`server/pairing/*`). Note for threat-model review: replay protection on the tailnet WebSocket is provided by WireGuard; record in ADR.
+55a759095|SBR|S|Sidebar sort by Created/Last prompt/Manual + overflow; ClickUp sidebar.
+3c3c27292|GIT|A|Workspace snapshots published without UI subscribers (diff stats/auto-archive); X1 on workspace-git-service.
+99a1d9a7a|MOB|S|iPhone skill picker above keyboard via `keyboard/shift` (absent). JD skills picker is its own; check bug exists.
+89727f43b|HOST|S|SECURITY (relay): require daemon password on relay. N/A to JD (no relay, no password-on-hello).
+21e7ccb03|SUBA|A|Finish notifications survive daemon restart (`finish-subscriptions/` persistent store). High value for Team mode/autorun; 8 F, 5 X.
+4fe006df8|PLG|D|Unified panel props + `useTabState` (needs file panels).
+4b9b2fe13|CC|A|Manual Command Center scroll preserved; 1/2 apply.
+6405edd8d|CC|A|Consistent agent/workspace status in search (`agent-presentation/` new); 3 F, 5 X.
+582beeb10|MOB|S|Compact sidebar context under sheets (35 files).
+f3b0199c1|CLA|A|PERF: open large Claude histories without whole-transcript duplication (daemon crash fix); 3 F, 3 X.
+59b01b33f|NATIVE|A|iOS foldable SDK in eas.json; JD EAS profile names differ.
+fed19f3d2|HOST|S|Android DNS failure copy (connection-failure-copy absent).
+d6fa23189|PLG|P|Plugin ACP history replay during session load (plugin SDK connection.ts); applies.
+ca894d49a|VOICE|P|Prefetched TTS sentences kept for playback; applies.
+48d2c9ec3|CLA|P|Restored Claude background notifications not duplicated; 2 F, 1 M (new helper file).
+632a7f885|WS|A|Live workspace rows kept when late creation snapshot arrives (workspace-replica X1).
+48623801a|SBR|A|Tablet sidebar controls above system navigation; applies to left-sidebar.tsx but JD ClickUp - verify visually.
+686588c44|SBR|S|Manual workspace sorting; ClickUp sidebar.
+f3d74b857|PLG|A|`useRevealedText` compatibility (after `9bce7dbd2`).
+c1b257b8f|USG|S|Cursor usage plugin.
+a54cc6dd1|PRV|P|Refresh pinned ACP provider packages (catalog versions); applies.
+b8bb335c5|UI|A|Close comboboxes when retained panel inactive; X1.
+566218d68|CLA|A|No file probing during Claude history replay (perf); X1.
+72e3316f4|OC|P|OpenCode v2 subagent rows show model/tokens; X1.
+4845e1da5|MD|D|Bare URLs with ports (enriched-markdown).
+5dc350034|PERF|A|Large Import Session lists responsive on web (virtualized list); 3 F, 1 X.
+d0fd2e532|CLI|S|SSH tunnel EPIPE (`client/node/ssh-tunnel.ts` absent; comes with connected hosts).
+8c9499dac|UI|A|File-link tooltips dismissed when leaving panel; X1.
+4bbacfed4|CHAT|D|Fold finished turns behind summary (Chat display settings). Needs `agent-stream/presentation.ts` + `turn-membership.ts` (absent). Flagship 0.14 feature; requires timeline presentation chain A from the 0.10.1 inventory.
+2a890208c|SUBA|A|Subagent pane links back to parent; 4 F, 3 X, 2 M.
+16fe07560|CHAT|A|Question cards link-aware/selectable; markdown renderer part differs.
+6f07b0de4|CMP|A|Up/Down sent-message recall in empty composer (`composer/recall.ts` new); 2 F, 2 X.
+652173994|MD|D|enriched-markdown inline code.
+631ed0408|SET|A|Host selection kept across settings navigation (`navigation/settings-selection` new); JD settings structure differs.
+6bc4b73c4|SBR|A|Sidebar survives unhydrated workspace entry (startup crash, 0.13.1 hotfix) - check JD sidebar for same `undefined` access.
+8e5f53676|DMN|A|Release idle agent runtimes after 1h (resume on next prompt) - CONFIG change, `idle-runtime-cleanup/`. Must exempt Team mode leads/autorun/browser-driving agents; plugin-provider part skip.
+27d6b3b7c|DESK|A|Per-project editor choice + Xcode target; 9 F, 3 X. JD editor-targets registry has 22 targets.
+78a3083fe|PERF|P|Hidden chats skip stream updates (use-agent-stream-tail); 1/2 apply. JD has react-freeze hidden chats already - complementary.
+ff31b6e5b|NATIVE|A|Android Reanimated unmounted views patch (0.13.2); check JD reanimated version.
+5e53bb78c|SET|A|Settings sidebar scroll position kept; JD settings.
+88bd1cf05|CMP|A|Long-press Send to queue/send now on touch; 1 F, 3 X.
+74a7e5803|VOICE|D|Voice settings page + local model downloads (83 files) - CONFIG migration (`providers.openai` -> voice settings; voice mode default off). Large; separate project.
+033b2cdfc|CMP|A|Command suggestions visible as composer grows; X3.
+e958540b0|UI|A|Remove SVG/nested-button web warnings; 2 X, 3 M.
+e277656cb|NATIVE|A|Native animation/layout lifecycle cleanup (bottom-sheet patch); check JD patches.
+428ef707a|WS|A|Workspace route demands host directory (`use-directory-demand.ts`); 1 F, 2 X.
+287ca5474|SBR|S|Kebab tap targets; ClickUp.
+e3bbed3c7|PI|P|Pi prompts queue until manual compaction finishes; 1/2 apply.
+28834a91a|DMN|P|Windows atomic replace retries (atomic-file.ts); applies.
+4f9d9d6de|ACP|P|ACP terminal output doesn't stall daemon; applies.
+65ce4b590|WS|A|Restored agent tabs removed from foreign workspaces; X2.
+10bc10c99|PLG|A|Plugins give specific agents tools (`plugin/src/server/agent-tools.ts`, `tools/plugin-tools.ts`); jagentdesk-tools/agent-manager X. Plugin API parity (0.14).
+64b0afe01|CLA|A|Clear inherited `CLAUDE_CODE_ENTRYPOINT`; take net effect with `869eb5a72` (label opt-in via plugin).
+fc0cbbb32|PERF|A|Workspace reconciliation responsive on slow paths (NFS/unmounted); 1 F, 2 X.
+8d971876b|OMP|A|OMP transcript replay responsive; X2.
+9c7d4ace6|DMN|P|Reject oversized provider stdout before parsing (new `jsonl-frame-decoder.ts`); 2/3 apply. Daemon OOM guard.
+6077bc621|PERF|A|Budgeted diff highlighting (`highlight/src/budgeted-highlighter.ts`); 5 F, 3 X.
+a25f4f506|PERF|P|Timeline pages served from retained projection; builds on JD `615ebe4c2` (#4838 port). 3 F, session.ts X1.
+f14a4cc11|PERF|A|Password-protected config reload off the hot path (bcrypt async) - JD has bcrypt password auth; 9 X, 1 M (orchestration-skills).
+67a245925|PERF|A|Project config work off hot path; 3 F, 6 X.
+9bc998fa3|PERF|A|Git observation + worktree IO off event loop; 4 F, 5 X.
+7f6a805e0|CMP|A|Choose Enter vs Cmd/Ctrl+Enter to send; 1 M, 6 X - re-implement in JD settings/composer.
+173fca3c0|PERF|A|Daemon responsive during Claude history replay; X6, M1.
+9e4aab16c|PERF|A|Plugin builds in a worker (compiler-worker.ts); 6 F, 2 X.
+2ce6681d6|PERF|A|Image attachments processed off main thread; 5 F, 6 X.
+3a1b14669|DMN|A|Lint rule banning sync Node IO in daemon (oxlint plugin); JD lint config differs.
+b12eefb28|CHAT|D|Turn-distinct history (protocol `timeline-turn.ts`); part of the turn-collapse chain.
+8a542048b|PLG|A|Plugins contribute MCP servers on session open; `runtime-mcp-config.ts` already present (R). Plugin API parity (0.14).
+ef58ace42|CHAT|D|Turn presentation regressions (follow-up of `4bbacfed4`).
+50623965b|GIT|S|Diff line wrapping in `git/diff-document/*` (absent in JD).
+b9f624f72|TERM|P|xterm upgrade fixes shared-atlas glyph corruption (package.json bump); check JD xterm version.
+dc07efe93|PLG|P|Plugin ACP reasoning separate from replies (SDK connection.ts); applies.
+a8032a150|FILES|A|Outside-folder links don't break Files; 3 F, 4 X.
+694696e82|GIT|P|SECURITY/UX: background `git fetch` never opens credential prompts (`workspace-git-fetch.ts`, GIT_TERMINAL_PROMPT=0); applies.
+1b8dbc38a|CHAT|D|Reading position across older pages (presentation chain).
+aae97b2bd|MD|D|enriched-markdown iOS patch.
+b4e837a9f|CHAT|D|Grouped reasoning (presentation chain).
+025e7ef1d|UI|A|Model discovery errors away from picker edges; model-browser X1.
+dd914c147|UI|A|Docked navigation sizes in 600-719px windows; X5.
+4f46e094a|CHAT|D|`user-message/` (turn chain).
+dfa997704|SUBA|A|Sender attribution one line; with `d0bc188a5`.
+58ca9a9b3|MD|D|enriched-markdown Android footer.
+20b2dad61|MOB|S|Subagent in place of list on mobile (61 files).
+d6d04b0c5|CHAT|A|Lone tool call shown as itself; group from second (grouping.ts F). Part of chat display; works without presentation.ts? 3 F, 2 X, 1 M.
+869eb5a72|CLA|A|Entrypoint relabeling opt-in (with `64b0afe01`; opt-in needs `8a542048b`).

@@ -54,6 +54,7 @@ import { usePanelStore } from "@/stores/panel-store";
 import { useBlockMobilePanelOpenGestures } from "@/mobile-panels/provider";
 import { useSessionStore } from "@/stores/session-store";
 import { toXtermTheme } from "@/utils/to-xterm-theme";
+import type { Theme } from "@/styles/theme";
 import TerminalEmulator, { type TerminalEmulatorHandle } from "./terminal-emulator";
 import { TerminalFloatingCopyAction, TerminalPasteAction } from "./terminal-copy-paste-actions";
 import {
@@ -89,6 +90,28 @@ interface TerminalPaneProps {
   isPaneFocused: boolean;
   onOpenFileExplorer: () => void;
   onOpenWorkspaceFile: (request: WorkspaceFileOpenRequest) => void;
+  /** Per-terminal override (SSH theme/font size per server or group, spec 25.4). */
+  appearance?: TerminalPaneAppearance;
+  /**
+   * Extra keys on the mobile accessory keyboard (e.g. the SSH "Password" key, spec 25.4).
+   * Absent for ordinary terminals, which keep the standard keyboard.
+   */
+  extraKeys?: readonly TerminalPaneExtraKey[];
+}
+
+export interface TerminalPaneExtraKey {
+  id: string;
+  label: string;
+  onPress: () => void;
+}
+
+export interface TerminalPaneAppearance {
+  /** null → the app theme's terminal colors. */
+  palette: Theme["colors"]["terminal"] | null;
+  /** null → the app's code font size. */
+  fontSize: number | null;
+  /** Inner padding around the terminal surface, filled with the palette background. */
+  contentPadding?: number;
 }
 
 const TERMINAL_REFIT_DELAYS_MS = [0, 48, 144, 320];
@@ -168,6 +191,27 @@ function VirtualKeyButton({ id, label, keyValue, onSend }: VirtualKeyButtonProps
   );
 }
 
+function ExtraKeyButton({ extraKey }: { extraKey: TerminalPaneExtraKey }) {
+  const pressableStyle = useCallback(
+    ({ hovered, pressed }: PressableStateCallbackType & { hovered?: boolean }) => [
+      styles.keyButton,
+      (Boolean(hovered) || pressed) && styles.keyButtonHovered,
+    ],
+    [],
+  );
+  return (
+    <Pressable
+      testID={`terminal-key-${extraKey.id}`}
+      onPress={extraKey.onPress}
+      style={pressableStyle}
+      accessibilityRole="button"
+      accessibilityLabel={extraKey.label}
+    >
+      <Text style={styles.keyButtonText}>{extraKey.label}</Text>
+    </Pressable>
+  );
+}
+
 interface KeyboardToggleButtonProps {
   isKeyboardVisible: boolean;
   iconColor: string;
@@ -210,13 +254,24 @@ export function TerminalPane({
   isPaneFocused,
   onOpenFileExplorer,
   onOpenWorkspaceFile,
+  appearance,
+  extraKeys,
 }: TerminalPaneProps) {
   const { t } = useTranslation();
   const retainedPanelActive = useRetainedPanelActive();
   const isAppActivelyVisible = useAppActivelyVisible();
   const { theme } = useUnistyles();
   const { settings } = useAppSettings();
-  const xtermTheme = useMemo(() => toXtermTheme(theme.colors.terminal), [theme]);
+  const palette = appearance?.palette ?? theme.colors.terminal;
+  const xtermTheme = useMemo(() => toXtermTheme(palette), [palette]);
+  const contentPadding = appearance?.contentPadding;
+  const outputContainerStyle = useMemo(
+    () =>
+      contentPadding
+        ? [styles.outputContainer, { padding: contentPadding, backgroundColor: palette.background }]
+        : styles.outputContainer,
+    [contentPadding, palette.background],
+  );
   const terminalFontFamily = useMemo(() => {
     const trimmed = settings.monoFontFamily.trim();
     return trimmed.length > 0 ? trimmed : undefined;
@@ -1049,7 +1104,7 @@ export function TerminalPane({
 
   return (
     <Animated.View style={containerStyle}>
-      <View style={styles.outputContainer}>
+      <View style={outputContainerStyle}>
         <View style={styles.terminalGestureContainer}>
           <TerminalEmulator
             ref={emulatorRef}
@@ -1060,7 +1115,7 @@ export function TerminalPane({
             xtermTheme={xtermTheme}
             scrollbackLines={settings.terminalScrollbackLines}
             fontFamily={terminalFontFamily}
-            fontSize={settings.codeFontSize}
+            fontSize={appearance?.fontSize ?? settings.codeFontSize}
             keyboardInset={keyboardInset}
             swipeGesturesEnabled={swipeGesturesEnabled}
             initialSnapshot={initialSnapshot}
@@ -1124,6 +1179,13 @@ export function TerminalPane({
                 {row.map(renderVirtualKeyboardControl)}
               </View>
             ))}
+            {extraKeys && extraKeys.length > 0 ? (
+              <View style={styles.keyboardRow} testID="terminal-extra-keys">
+                {extraKeys.map((extraKey) => (
+                  <ExtraKeyButton key={extraKey.id} extraKey={extraKey} />
+                ))}
+              </View>
+            ) : null}
           </View>
         </View>
       ) : null}

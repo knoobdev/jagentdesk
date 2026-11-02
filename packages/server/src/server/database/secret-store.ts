@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import path from "node:path";
+import { writePrivateFileAtomicSync } from "../private-files.js";
 
 /**
  * Daemon-side credential vault: connection secrets (password / DSN) encrypted at
@@ -40,6 +41,9 @@ export class FileSecretStore implements SecretStore {
   private readonly keyPath: string;
   private readonly dataPath: string;
   private keyPromise: Promise<Buffer> | null = null;
+  // set/delete are read-modify-write over one file: serialize them so concurrent
+  // writers cannot drop each other's entries.
+  private writeQueue: Promise<void> = Promise.resolve();
 
   constructor(dir: string) {
     this.keyPath = path.join(dir, "secret.key");
@@ -77,8 +81,14 @@ export class FileSecretStore implements SecretStore {
   }
 
   private async writeAll(all: Record<string, SealedSecret>): Promise<void> {
-    await fs.mkdir(path.dirname(this.dataPath), { recursive: true });
-    await fs.writeFile(this.dataPath, JSON.stringify(all), { mode: 0o600 });
+    // Atomic (temp + rename) and 0600, so a crash mid-write never truncates the vault.
+    writePrivateFileAtomicSync(this.dataPath, JSON.stringify(all));
+  }
+
+  private serialize(task: () => Promise<void>): Promise<void> {
+    const run = this.writeQueue.then(task, task);
+    this.writeQueue = run.catch(() => undefined);
+    return run;
   }
 
   async get(id: string): Promise<string | null> {
@@ -94,6 +104,10 @@ export class FileSecretStore implements SecretStore {
   }
 
   async set(id: string, secret: string): Promise<void> {
+    return this.serialize(() => this.setNow(id, secret));
+  }
+
+  private async setNow(id: string, secret: string): Promise<void> {
     const key = await this.key();
     const iv = randomBytes(12);
     const cipher = createCipheriv("aes-256-gcm", key, iv);
@@ -108,6 +122,10 @@ export class FileSecretStore implements SecretStore {
   }
 
   async delete(id: string): Promise<void> {
+    return this.serialize(() => this.deleteNow(id));
+  }
+
+  private async deleteNow(id: string): Promise<void> {
     const all = await this.readAll();
     if (all[id]) {
       delete all[id];

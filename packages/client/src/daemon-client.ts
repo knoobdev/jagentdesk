@@ -48,6 +48,18 @@ import type {
   SimUnslimPayload,
 } from "@jagentdesk/protocol/simulator/rpc-schemas";
 import type {
+  SshAuthPrompt,
+  SshConnectionStateEvent,
+  SshGroup,
+  SshHostkeyPrompt,
+  SshIdentity,
+  SshKeyType,
+  SshPromptResolved,
+  SshServer,
+  SshSessionActivity,
+  SshTerminalSize,
+} from "@jagentdesk/protocol/ssh/rpc-schemas";
+import type {
   ProxyCaExportPayload,
   ProxyCaptureMode,
   ProxyCaptureStartPayload,
@@ -659,6 +671,135 @@ type WorkspaceCreatePayload = Extract<
 >["payload"];
 type FileExplorerPayload = FileExplorerResponse["payload"];
 export type FileExplorerDirectoryPayload = NonNullable<FileExplorerPayload["directory"]>;
+
+// SSH servers (spec 25 / story S-20). Payload types mirror the protocol's correlated
+// responses (packages/protocol/src/ssh/rpc-schemas.ts); DTOs are re-exported so app
+// screens never import the protocol ssh module directly for types.
+export type SshServersListPayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.servers.list.response" }
+>["payload"];
+export type SshServersGetPayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.servers.get.response" }
+>["payload"];
+export type SshServersSavePayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.servers.save.response" }
+>["payload"];
+export type SshServersDeletePayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.servers.delete.response" }
+>["payload"];
+export type SshGroupsListPayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.groups.list.response" }
+>["payload"];
+export type SshGroupsGetPayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.groups.get.response" }
+>["payload"];
+export type SshGroupsSavePayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.groups.save.response" }
+>["payload"];
+export type SshGroupsDeletePayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.groups.delete.response" }
+>["payload"];
+export type SshIdentitiesListPayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.identities.list.response" }
+>["payload"];
+export type SshIdentitiesGetPayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.identities.get.response" }
+>["payload"];
+export type SshIdentitiesSavePayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.identities.save.response" }
+>["payload"];
+export type SshIdentitiesDeletePayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.identities.delete.response" }
+>["payload"];
+export type SshKeysListPayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.keys.list.response" }
+>["payload"];
+export type SshKeysGeneratePayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.keys.generate.response" }
+>["payload"];
+export type SshKeysImportPayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.keys.import.response" }
+>["payload"];
+export type SshKeysDeletePayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.keys.delete.response" }
+>["payload"];
+export type SshKeysExportPublicPayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.keys.export_public.response" }
+>["payload"];
+export type SshKnownhostsListPayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.knownhosts.list.response" }
+>["payload"];
+export type SshKnownhostsDeletePayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.knownhosts.delete.response" }
+>["payload"];
+export type SshKnownhostsReplacePayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.knownhosts.replace.response" }
+>["payload"];
+export type SshHostkeyRespondPayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.hostkey.respond.response" }
+>["payload"];
+export type SshAuthRespondPayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.auth.respond.response" }
+>["payload"];
+export type SshSessionCreatePayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.session.create.response" }
+>["payload"];
+export type SshSessionReconnectPayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.session.reconnect.response" }
+>["payload"];
+export type SshSessionBroadcastPayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.session.broadcast.response" }
+>["payload"];
+export type SshSessionTypePasswordPayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.session.type_password.response" }
+>["payload"];
+export type {
+  SshAuthMethod,
+  SshAuthPrompt,
+  SshAuthPromptItem,
+  SshConnectionStateEvent,
+  SshGroup,
+  SshHostkeyPrompt,
+  SshIdentity,
+  SshKey,
+  SshKeyType,
+  SshKnownHost,
+  SshPromptResolved,
+  SshProtocol,
+  SshProxy,
+  SshServer,
+  SshServerInfo,
+  SshServerState,
+  SshSessionActivity,
+  SshSessionInfo,
+  SshTerminalSize,
+} from "@jagentdesk/protocol/ssh/rpc-schemas";
 type LegacyFileExplorerFilePayload = NonNullable<FileExplorerPayload["file"]>;
 export interface FileReadResult {
   bytes: Uint8Array;
@@ -1327,6 +1468,10 @@ type CorrelatedResponseMessage =
   | GetDaemonConfigResponse
   | SetDaemonConfigResponse;
 type CorrelatedResponseType = CorrelatedResponseMessage["type"];
+type SshModuleParams<T extends SessionInboundMessage["type"]> = Omit<
+  Extract<SessionInboundMessage, { type: T }>,
+  "type" | "requestId"
+>;
 type CorrelatedResponsePayload<TType extends CorrelatedResponseType> = Extract<
   CorrelatedResponseMessage,
   { type: TType }
@@ -1520,6 +1665,11 @@ interface PingProbe {
   // heartbeat sets this; a latency measurement never drives teardown, even when a
   // heartbeat tick shares (dedupes onto) an in-flight measurement ping.
   drivesLivenessFailure: boolean;
+}
+
+/** SSH server whose forwarded Docker socket a cockpit request targets (spec 25.10). */
+function dockerTarget(options: { serverId?: string }): { serverId?: string } {
+  return options.serverId ? { serverId: options.serverId } : {};
 }
 
 export class DaemonClient {
@@ -7257,15 +7407,18 @@ export class DaemonClient {
     });
   }
 
-  async dockerList(requestId?: string): Promise<DockerListPayload> {
+  async dockerList(
+    options: { serverId?: string; requestId?: string } = {},
+  ): Promise<DockerListPayload> {
     return this.sendCorrelatedSessionRequest({
-      requestId,
-      message: { type: "docker/list" },
+      requestId: options.requestId,
+      message: { type: "docker/list", ...dockerTarget(options) },
       responseType: "docker/list/response",
     });
   }
 
   async dockerLogs(options: {
+    serverId?: string;
     requestId?: string;
     container: string;
     tail?: number;
@@ -7274,6 +7427,7 @@ export class DaemonClient {
       requestId: options.requestId,
       message: {
         type: "docker/logs",
+        ...dockerTarget(options),
         container: options.container,
         ...(options.tail !== undefined ? { tail: options.tail } : {}),
       },
@@ -7282,77 +7436,109 @@ export class DaemonClient {
   }
 
   async dockerInspect(options: {
+    serverId?: string;
     requestId?: string;
     container: string;
   }): Promise<DockerInspectPayload> {
     return this.sendCorrelatedSessionRequest({
       requestId: options.requestId,
-      message: { type: "docker/inspect", container: options.container },
+      message: { type: "docker/inspect", ...dockerTarget(options), container: options.container },
       responseType: "docker/inspect/response",
     });
   }
 
   async dockerAction(options: {
+    serverId?: string;
     requestId?: string;
     container: string;
     action: DockerAction;
   }): Promise<DockerActionPayload> {
     return this.sendCorrelatedSessionRequest({
       requestId: options.requestId,
-      message: { type: "docker/action", container: options.container, action: options.action },
+      message: {
+        type: "docker/action",
+        ...dockerTarget(options),
+        container: options.container,
+        action: options.action,
+      },
       responseType: "docker/action/response",
     });
   }
 
   async dockerExec(options: {
+    serverId?: string;
     requestId?: string;
     container: string;
     command: string;
   }): Promise<DockerExecPayload> {
     return this.sendCorrelatedSessionRequest({
       requestId: options.requestId,
-      message: { type: "docker/exec", container: options.container, command: options.command },
+      message: {
+        type: "docker/exec",
+        ...dockerTarget(options),
+        container: options.container,
+        command: options.command,
+      },
       responseType: "docker/exec/response",
     });
   }
 
   async dockerImageAction(options: {
+    serverId?: string;
     requestId?: string;
     image: string;
     action: DockerImageAction;
   }): Promise<DockerImageActionPayload> {
     return this.sendCorrelatedSessionRequest({
       requestId: options.requestId,
-      message: { type: "docker/image/action", image: options.image, action: options.action },
+      message: {
+        type: "docker/image/action",
+        ...dockerTarget(options),
+        image: options.image,
+        action: options.action,
+      },
       responseType: "docker/image/action/response",
     });
   }
 
   async dockerVolumeAction(options: {
+    serverId?: string;
     requestId?: string;
     name: string;
     action: DockerVolumeAction;
   }): Promise<DockerVolumeActionPayload> {
     return this.sendCorrelatedSessionRequest({
       requestId: options.requestId,
-      message: { type: "docker/volume/action", name: options.name, action: options.action },
+      message: {
+        type: "docker/volume/action",
+        ...dockerTarget(options),
+        name: options.name,
+        action: options.action,
+      },
       responseType: "docker/volume/action/response",
     });
   }
 
   async dockerFsList(options: {
+    serverId?: string;
     requestId?: string;
     container: string;
     path: string;
   }): Promise<DockerFsListPayload> {
     return this.sendCorrelatedSessionRequest({
       requestId: options.requestId,
-      message: { type: "docker/fs/list", container: options.container, path: options.path },
+      message: {
+        type: "docker/fs/list",
+        ...dockerTarget(options),
+        container: options.container,
+        path: options.path,
+      },
       responseType: "docker/fs/list/response",
     });
   }
 
   async dockerCp(options: {
+    serverId?: string;
     requestId?: string;
     container: string;
     direction: DockerCpDirection;
@@ -7363,6 +7549,7 @@ export class DaemonClient {
       requestId: options.requestId,
       message: {
         type: "docker/cp",
+        ...dockerTarget(options),
         container: options.container,
         direction: options.direction,
         containerPath: options.containerPath,
@@ -7373,18 +7560,25 @@ export class DaemonClient {
   }
 
   async dockerFsRead(options: {
+    serverId?: string;
     requestId?: string;
     container: string;
     path: string;
   }): Promise<DockerFsReadPayload> {
     return this.sendCorrelatedSessionRequest({
       requestId: options.requestId,
-      message: { type: "docker/fs/read", container: options.container, path: options.path },
+      message: {
+        type: "docker/fs/read",
+        ...dockerTarget(options),
+        container: options.container,
+        path: options.path,
+      },
       responseType: "docker/fs/read/response",
     });
   }
 
   async dockerFsWrite(options: {
+    serverId?: string;
     requestId?: string;
     container: string;
     path: string;
@@ -7394,6 +7588,7 @@ export class DaemonClient {
       requestId: options.requestId,
       message: {
         type: "docker/fs/write",
+        ...dockerTarget(options),
         container: options.container,
         path: options.path,
         content: options.content,
@@ -7403,6 +7598,7 @@ export class DaemonClient {
   }
 
   async dockerFsOp(options: {
+    serverId?: string;
     requestId?: string;
     container: string;
     op: DockerFsOp;
@@ -7413,6 +7609,7 @@ export class DaemonClient {
       requestId: options.requestId,
       message: {
         type: "docker/fs/op",
+        ...dockerTarget(options),
         container: options.container,
         op: options.op,
         path: options.path,
@@ -7423,10 +7620,18 @@ export class DaemonClient {
   }
 
   // ── realtime streams (no polling): subscribe, then listen for pushed snapshots/chunks ──
-  async dockerSubscribe(options: { subscriptionId: string; requestId?: string }): Promise<void> {
+  async dockerSubscribe(options: {
+    subscriptionId: string;
+    requestId?: string;
+    serverId?: string;
+  }): Promise<void> {
     await this.sendCorrelatedSessionRequest({
       requestId: options.requestId,
-      message: { type: "docker/subscribe", subscriptionId: options.subscriptionId },
+      message: {
+        type: "docker/subscribe",
+        ...dockerTarget(options),
+        subscriptionId: options.subscriptionId,
+      },
       responseType: "docker/subscribe/response",
     });
   }
@@ -7449,6 +7654,7 @@ export class DaemonClient {
   }
 
   async dockerLogsSubscribe(options: {
+    serverId?: string;
     subscriptionId: string;
     container: string;
     tail?: number;
@@ -7458,6 +7664,7 @@ export class DaemonClient {
       requestId: options.requestId,
       message: {
         type: "docker/logs/subscribe",
+        ...dockerTarget(options),
         subscriptionId: options.subscriptionId,
         container: options.container,
         ...(options.tail !== undefined ? { tail: options.tail } : {}),
@@ -7484,6 +7691,7 @@ export class DaemonClient {
   }
 
   async dockerStatsSubscribe(options: {
+    serverId?: string;
     subscriptionId: string;
     container: string;
     requestId?: string;
@@ -7492,6 +7700,7 @@ export class DaemonClient {
       requestId: options.requestId,
       message: {
         type: "docker/stats/subscribe",
+        ...dockerTarget(options),
         subscriptionId: options.subscriptionId,
         container: options.container,
       },
@@ -7510,6 +7719,506 @@ export class DaemonClient {
   onDockerStats(subscriptionId: string, handler: (stats: DockerStatsPayload) => void): () => void {
     return this.on("docker/stats-data", (message) => {
       if (message.payload.subscriptionId === subscriptionId) handler(message.payload);
+    });
+  }
+
+  // ── SSH servers (spec 25 / story S-20, milestone S1) ──
+  // Requests/responses follow docs/rpc-namespacing.md; secrets never come back on any
+  // response. `password`/`passphrase` on save/import/generate: undefined keeps the
+  // stored secret, "" deletes it, non-empty replaces it. The daemon assigns ids for
+  // new records — create/duplicate sends an empty `id` on the DTO.
+
+  async sshServersList(requestId?: string): Promise<SshServersListPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.servers.list.response">({
+      requestId,
+      message: { type: "ssh.servers.list.request" },
+    });
+  }
+
+  async sshServersGet(options: { id: string; requestId?: string }): Promise<SshServersGetPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.servers.get.response">({
+      requestId: options.requestId,
+      message: { type: "ssh.servers.get.request", id: options.id },
+    });
+  }
+
+  async sshServersSave(options: {
+    server: SshServer;
+    password?: string;
+    proxyPassword?: string;
+    requestId?: string;
+  }): Promise<SshServersSavePayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.servers.save.response">({
+      requestId: options.requestId,
+      message: {
+        type: "ssh.servers.save.request",
+        server: options.server,
+        ...(options.password !== undefined ? { password: options.password } : {}),
+        ...(options.proxyPassword !== undefined ? { proxyPassword: options.proxyPassword } : {}),
+      },
+    });
+  }
+
+  async sshServersDelete(options: {
+    id: string;
+    requestId?: string;
+  }): Promise<SshServersDeletePayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.servers.delete.response">({
+      requestId: options.requestId,
+      message: { type: "ssh.servers.delete.request", id: options.id },
+    });
+  }
+
+  async sshGroupsList(requestId?: string): Promise<SshGroupsListPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.groups.list.response">({
+      requestId,
+      message: { type: "ssh.groups.list.request" },
+    });
+  }
+
+  async sshGroupsGet(options: { id: string; requestId?: string }): Promise<SshGroupsGetPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.groups.get.response">({
+      requestId: options.requestId,
+      message: { type: "ssh.groups.get.request", id: options.id },
+    });
+  }
+
+  async sshGroupsSave(options: {
+    group: SshGroup;
+    proxyPassword?: string;
+    requestId?: string;
+  }): Promise<SshGroupsSavePayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.groups.save.response">({
+      requestId: options.requestId,
+      message: {
+        type: "ssh.groups.save.request",
+        group: options.group,
+        ...(options.proxyPassword !== undefined ? { proxyPassword: options.proxyPassword } : {}),
+      },
+    });
+  }
+
+  async sshGroupsDelete(options: {
+    id: string;
+    requestId?: string;
+  }): Promise<SshGroupsDeletePayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.groups.delete.response">({
+      requestId: options.requestId,
+      message: { type: "ssh.groups.delete.request", id: options.id },
+    });
+  }
+
+  async sshIdentitiesList(requestId?: string): Promise<SshIdentitiesListPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.identities.list.response">({
+      requestId,
+      message: { type: "ssh.identities.list.request" },
+    });
+  }
+
+  async sshIdentitiesGet(options: {
+    id: string;
+    requestId?: string;
+  }): Promise<SshIdentitiesGetPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.identities.get.response">({
+      requestId: options.requestId,
+      message: { type: "ssh.identities.get.request", id: options.id },
+    });
+  }
+
+  async sshIdentitiesSave(options: {
+    identity: SshIdentity;
+    password?: string;
+    requestId?: string;
+  }): Promise<SshIdentitiesSavePayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.identities.save.response">({
+      requestId: options.requestId,
+      message: {
+        type: "ssh.identities.save.request",
+        identity: options.identity,
+        ...(options.password !== undefined ? { password: options.password } : {}),
+      },
+    });
+  }
+
+  async sshIdentitiesDelete(options: {
+    id: string;
+    requestId?: string;
+  }): Promise<SshIdentitiesDeletePayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.identities.delete.response">({
+      requestId: options.requestId,
+      message: { type: "ssh.identities.delete.request", id: options.id },
+    });
+  }
+
+  async sshKeysList(requestId?: string): Promise<SshKeysListPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.keys.list.response">({
+      requestId,
+      message: { type: "ssh.keys.list.request" },
+    });
+  }
+
+  async sshKeysGenerate(options: {
+    label: string;
+    type: SshKeyType;
+    passphrase?: string;
+    requestId?: string;
+  }): Promise<SshKeysGeneratePayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.keys.generate.response">({
+      requestId: options.requestId,
+      message: {
+        type: "ssh.keys.generate.request",
+        label: options.label,
+        keyType: options.type,
+        ...(options.passphrase !== undefined ? { passphrase: options.passphrase } : {}),
+      },
+    });
+  }
+
+  async sshKeysImport(options: {
+    label: string;
+    privateKey: string;
+    passphrase?: string;
+    certificate?: string;
+    requestId?: string;
+  }): Promise<SshKeysImportPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.keys.import.response">({
+      requestId: options.requestId,
+      message: {
+        type: "ssh.keys.import.request",
+        label: options.label,
+        privateKey: options.privateKey,
+        ...(options.passphrase !== undefined ? { passphrase: options.passphrase } : {}),
+        ...(options.certificate !== undefined ? { certificate: options.certificate } : {}),
+      },
+    });
+  }
+
+  async sshKeysDelete(options: { id: string; requestId?: string }): Promise<SshKeysDeletePayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.keys.delete.response">({
+      requestId: options.requestId,
+      message: { type: "ssh.keys.delete.request", id: options.id },
+    });
+  }
+
+  async sshKeysExportPublic(options: {
+    id: string;
+    format?: "openssh" | "pem";
+    requestId?: string;
+  }): Promise<SshKeysExportPublicPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.keys.export_public.response">({
+      requestId: options.requestId,
+      message: {
+        type: "ssh.keys.export_public.request",
+        id: options.id,
+        ...(options.format !== undefined ? { format: options.format } : {}),
+      },
+    });
+  }
+
+  async sshKnownhostsList(requestId?: string): Promise<SshKnownhostsListPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.knownhosts.list.response">({
+      requestId,
+      message: { type: "ssh.knownhosts.list.request" },
+    });
+  }
+
+  async sshKnownhostsDelete(options: {
+    host: string;
+    port: number;
+    keyType?: string;
+    requestId?: string;
+  }): Promise<SshKnownhostsDeletePayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.knownhosts.delete.response">({
+      requestId: options.requestId,
+      message: {
+        type: "ssh.knownhosts.delete.request",
+        host: options.host,
+        port: options.port,
+        ...(options.keyType !== undefined ? { keyType: options.keyType } : {}),
+      },
+    });
+  }
+
+  async sshKnownhostsReplace(options: {
+    host: string;
+    port: number;
+    keyType: string;
+    publicKey: string;
+    requestId?: string;
+  }): Promise<SshKnownhostsReplacePayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.knownhosts.replace.response">({
+      requestId: options.requestId,
+      message: {
+        type: "ssh.knownhosts.replace.request",
+        host: options.host,
+        port: options.port,
+        keyType: options.keyType,
+        publicKey: options.publicKey,
+      },
+    });
+  }
+
+  async sshHostkeyRespond(options: {
+    promptId: string;
+    decision: "accept" | "reject";
+    requestId?: string;
+  }): Promise<SshHostkeyRespondPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.hostkey.respond.response">({
+      requestId: options.requestId,
+      message: {
+        type: "ssh.hostkey.respond.request",
+        promptId: options.promptId,
+        decision: options.decision,
+      },
+    });
+  }
+
+  async sshAuthRespond(options: {
+    promptId: string;
+    /** null cancels the prompt. */
+    answers: string[] | null;
+    requestId?: string;
+  }): Promise<SshAuthRespondPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.auth.respond.response">({
+      requestId: options.requestId,
+      message: {
+        type: "ssh.auth.respond.request",
+        promptId: options.promptId,
+        answers: options.answers,
+      },
+    });
+  }
+
+  async sshSessionCreate(options: {
+    serverId: string;
+    size: SshTerminalSize;
+    requestId?: string;
+  }): Promise<SshSessionCreatePayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.session.create.response">({
+      requestId: options.requestId,
+      message: {
+        type: "ssh.session.create.request",
+        serverId: options.serverId,
+        size: options.size,
+      },
+    });
+  }
+
+  /** Manual retry of an errored/disconnected SSH tab, same terminal (screen kept). */
+  async sshSessionReconnect(options: {
+    terminalId: string;
+    requestId?: string;
+  }): Promise<SshSessionReconnectPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.session.reconnect.response">({
+      requestId: options.requestId,
+      message: { type: "ssh.session.reconnect.request", terminalId: options.terminalId },
+    });
+  }
+  // ── SSH modules S6–S8 (logs, import, install key, environment, Docker on the server) ──
+
+  async sshLogsList(
+    params: SshModuleParams<"ssh.logs.list.request"> = {},
+  ): Promise<CorrelatedResponsePayload<"ssh.logs.list.response">> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.logs.list.response">({
+      message: { type: "ssh.logs.list.request", ...params },
+    });
+  }
+
+  async sshLogsSetEnabled(
+    params: SshModuleParams<"ssh.logs.set_enabled.request">,
+  ): Promise<CorrelatedResponsePayload<"ssh.logs.set_enabled.response">> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.logs.set_enabled.response">({
+      message: { type: "ssh.logs.set_enabled.request", ...params },
+    });
+  }
+
+  async sshLogsRead(
+    params: SshModuleParams<"ssh.logs.read.request">,
+  ): Promise<CorrelatedResponsePayload<"ssh.logs.read.response">> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.logs.read.response">({
+      message: { type: "ssh.logs.read.request", ...params },
+    });
+  }
+
+  async sshLogsSearch(
+    params: SshModuleParams<"ssh.logs.search.request">,
+  ): Promise<CorrelatedResponsePayload<"ssh.logs.search.response">> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.logs.search.response">({
+      message: { type: "ssh.logs.search.request", ...params },
+    });
+  }
+
+  async sshLogsBookmark(
+    params: SshModuleParams<"ssh.logs.bookmark.request">,
+  ): Promise<CorrelatedResponsePayload<"ssh.logs.bookmark.response">> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.logs.bookmark.response">({
+      message: { type: "ssh.logs.bookmark.request", ...params },
+    });
+  }
+
+  async sshLogsUpdateBookmark(
+    params: SshModuleParams<"ssh.logs.update_bookmark.request">,
+  ): Promise<CorrelatedResponsePayload<"ssh.logs.update_bookmark.response">> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.logs.update_bookmark.response">({
+      message: { type: "ssh.logs.update_bookmark.request", ...params },
+    });
+  }
+
+  async sshImportPreview(
+    params: SshModuleParams<"ssh.import.preview.request">,
+  ): Promise<CorrelatedResponsePayload<"ssh.import.preview.response">> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.import.preview.response">({
+      message: { type: "ssh.import.preview.request", ...params },
+    });
+  }
+
+  async sshImportApply(
+    params: SshModuleParams<"ssh.import.apply.request">,
+  ): Promise<CorrelatedResponsePayload<"ssh.import.apply.response">> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.import.apply.response">({
+      message: { type: "ssh.import.apply.request", ...params },
+    });
+  }
+
+  async sshKeysInstallToServer(
+    params: SshModuleParams<"ssh.keys.install_to_server.request">,
+  ): Promise<CorrelatedResponsePayload<"ssh.keys.install_to_server.response">> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.keys.install_to_server.response">({
+      message: { type: "ssh.keys.install_to_server.request", ...params },
+    });
+  }
+
+  async sshEnvironmentDetect(
+    params: SshModuleParams<"ssh.environment.detect.request">,
+  ): Promise<CorrelatedResponsePayload<"ssh.environment.detect.response">> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.environment.detect.response">({
+      message: { type: "ssh.environment.detect.request", ...params },
+    });
+  }
+
+  async sshDockerAttach(
+    params: SshModuleParams<"ssh.docker.attach.request">,
+  ): Promise<CorrelatedResponsePayload<"ssh.docker.attach.response">> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.docker.attach.response">({
+      message: { type: "ssh.docker.attach.request", ...params },
+    });
+  }
+
+  async sshRemoteDbPrepare(
+    params: SshModuleParams<"ssh.remote_db.prepare.request">,
+  ): Promise<CorrelatedResponsePayload<"ssh.remote_db.prepare.response">> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.remote_db.prepare.response">({
+      message: { type: "ssh.remote_db.prepare.request", ...params },
+    });
+  }
+
+  async sshRemoteK8sImport(
+    params: SshModuleParams<"ssh.remote_k8s.import.request">,
+  ): Promise<CorrelatedResponsePayload<"ssh.remote_k8s.import.response">> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.remote_k8s.import.response">({
+      message: { type: "ssh.remote_k8s.import.request", ...params },
+    });
+  }
+
+  async sshDockerDetach(
+    params: SshModuleParams<"ssh.docker.detach.request">,
+  ): Promise<CorrelatedResponsePayload<"ssh.docker.detach.response">> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.docker.detach.response">({
+      message: { type: "ssh.docker.detach.request", ...params },
+    });
+  }
+
+  /**
+   * SSH milestone modules (SFTP, forwarding, …; app `SshModuleTransport`): send one of
+   * their `ssh.*.request` messages and resolve with the whole matching `….response`
+   * message, which the module validates with its own schema.
+   */
+  async sshModuleRequest(
+    message: { type: `ssh.${string}.request` } & Record<string, unknown>,
+  ): Promise<{ type: string; payload: unknown }> {
+    const responseType = message.type.replace(/\.request$/, ".response");
+    const payload = await this.sendCorrelatedSessionRequest<CorrelatedResponseType, unknown>({
+      message: message as { type: SessionInboundMessage["type"] } & Record<string, unknown>,
+      responseType: responseType as CorrelatedResponseType,
+    });
+    return { type: responseType, payload };
+  }
+
+  /**
+   * SSH S5/S6 modules (`SshRpcIo`): send one of their `ssh.*` messages as-is; replies
+   * arrive through subscribeRawMessages and the module correlates them by requestId.
+   */
+  sendSshModuleMessage(message: { type: `ssh.${string}` } & Record<string, unknown>): void {
+    this.sendSessionMessage(SessionInboundMessageSchema.parse(message));
+  }
+
+  /** Raw pushes for SSH modules (`ssh.transfer.progress`, `ssh.forward.state`, …). */
+  onSshModulePush(type: string, handler: (message: unknown) => void): () => void {
+    // Raw session messages: `on(handler)` only sees mapped daemon events, not module pushes.
+    return this.subscribeRawMessages((message) => {
+      if (message.type === type) handler(message);
+    });
+  }
+
+  /** Broadcast input across these terminals (spec 25.4), or stop it for them. */
+  async sshSessionBroadcast(options: {
+    terminalIds: string[];
+    enabled: boolean;
+    requestId?: string;
+  }): Promise<SshSessionBroadcastPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.session.broadcast.response">({
+      requestId: options.requestId,
+      message: {
+        type: "ssh.session.broadcast.request",
+        terminalIds: options.terminalIds,
+        enabled: options.enabled,
+      },
+    });
+  }
+
+  /** Mobile Password key (25.4): the daemon types the saved password into the tab. */
+  async sshSessionTypePassword(options: {
+    terminalId: string;
+    requestId?: string;
+  }): Promise<SshSessionTypePasswordPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.session.type_password.response">({
+      requestId: options.requestId,
+      message: { type: "ssh.session.type_password.request", terminalId: options.terminalId },
+    });
+  }
+
+  /** Output arrived on an SSH/Telnet tab (≤1/s per tab): the unseen-output dot. */
+  onSshSessionActivity(handler: (event: SshSessionActivity) => void): () => void {
+    return this.on("ssh.session.activity", (message) => {
+      handler(message);
+    });
+  }
+
+  /** A prompt was answered elsewhere, expired, or was abandoned: drop its bar. */
+  onSshPromptResolved(handler: (event: SshPromptResolved) => void): () => void {
+    return this.on("ssh.prompt.resolved", (message) => {
+      handler(message);
+    });
+  }
+
+  /** First-unknown-host-key prompt (spec 25.3 step 3). Filter by serverId at the call site. */
+  onSshHostkeyPrompt(handler: (prompt: SshHostkeyPrompt) => void): () => void {
+    return this.on("ssh.hostkey.prompt", (message) => {
+      handler(message);
+    });
+  }
+
+  /** Password / keyboard-interactive / passphrase prompt (spec 25.3 step 4). */
+  onSshAuthPrompt(handler: (prompt: SshAuthPrompt) => void): () => void {
+    return this.on("ssh.auth.prompt", (message) => {
+      handler(message);
+    });
+  }
+
+  /** Live connect state for a saved server. Filter by serverId/terminalId at the call site. */
+  onSshConnectionState(handler: (event: SshConnectionStateEvent) => void): () => void {
+    return this.on("ssh.connection.state", (message) => {
+      handler(message);
     });
   }
 

@@ -13,7 +13,9 @@ export default async function jagentdeskPlugin(input, options) {
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
-      const error = new Error(payload.error ?? `JAgentDesk OpenCode bridge failed: ${response.status}`);
+      const error = new Error(
+        payload.error ?? `JAgentDesk OpenCode bridge failed: ${response.status}`,
+      );
       error.status = response.status;
       throw error;
     }
@@ -33,6 +35,13 @@ export default async function jagentdeskPlugin(input, options) {
       description: definition.description,
       args: jsonSchemaObjectToZodShape(definition.inputSchema),
       execute: async (args, context) => {
+        // OpenCode leaves permission checks to plugin tools, so ask it the way it asks for MCP tools.
+        await context.ask({
+          permission: `jagentdesk_${definition.name}`,
+          patterns: ["*"],
+          always: ["*"],
+          metadata: {},
+        });
         let result;
         try {
           result = await request(

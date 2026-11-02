@@ -22,6 +22,7 @@ import type { HostCapabilities } from "@jagentdesk/protocol/host-capabilities";
 import type { LifetimeUsage, UsageDayRollup } from "@jagentdesk/protocol/usage-history";
 import type { ClusterRegistry } from "./cluster/cluster-registry.js";
 import type { DatabaseRegistry } from "./database/database-registry.js";
+import { SshService } from "./ssh/ssh-service.js";
 import type { ScheduleService } from "./schedule/service.js";
 import type { AutorunService } from "./autorun/service.js";
 import type { SessionShareService } from "./session-share/service.js";
@@ -608,6 +609,11 @@ function requireWebSocketServices(params: {
 /**
  * WebSocket server that only accepts sockets + parses/forwards messages to the session layer.
  */
+// Tests construct the server without a daemon SSH service: fall back to an in-memory one.
+function sshServiceOrInMemory(service: SshService | null | undefined): SshService {
+  return service ?? new SshService();
+}
+
 export class VoiceAssistantWebSocketServer {
   private readonly logger: pino.Logger;
   private readonly wss: WebSocketServer;
@@ -631,6 +637,7 @@ export class VoiceAssistantWebSocketServer {
   private unsubscribeHostCapabilities: (() => void) | null = null;
   private readonly clusterRegistry: ClusterRegistry;
   private readonly databaseRegistry: DatabaseRegistry;
+  private readonly sshService: SshService;
   private readonly scheduleService: ScheduleService;
   private autorunService!: AutorunService | null;
   private sessionShareService!: SessionShareService | null;
@@ -774,6 +781,7 @@ export class VoiceAssistantWebSocketServer {
     databaseRegistry?: DatabaseRegistry,
     autorunService?: AutorunService | null,
     sessionShareService?: SessionShareService | null,
+    sshService?: SshService | null,
   ) {
     this.logger = logger.child({ module: "websocket-server" });
     this.advertiseDaemonStatusRpc = wsConfig.daemonStatusRpc !== false;
@@ -803,6 +811,7 @@ export class VoiceAssistantWebSocketServer {
       clusterRegistry ?? new (require("./cluster/cluster-registry.js").ClusterRegistry)();
     this.databaseRegistry =
       databaseRegistry ?? new (require("./database/database-registry.js").DatabaseRegistry)();
+    this.sshService = sshServiceOrInMemory(sshService);
     this.scheduleService = requiredServices.scheduleService;
     this.checkoutDiffManager = requiredServices.checkoutDiffManager;
     this.github = github ?? createGitHubService();
@@ -1914,6 +1923,7 @@ export class VoiceAssistantWebSocketServer {
       hostToolInstaller: this.hostToolInstaller,
       clusterRegistry: this.clusterRegistry,
       databaseRegistry: this.databaseRegistry,
+      sshService: this.sshService,
       scheduleService: this.scheduleService,
       autorunService: this.autorunService,
       sessionShareService: this.sessionShareService,
@@ -2367,6 +2377,10 @@ export class VoiceAssistantWebSocketServer {
         forgeHubCliInstall: true,
         // App-driven device-flow sign-in (gh/glab OAuth device flow in a pty).
         forgeHubLogin: true,
+        // SSH servers (spec 25 / milestone S1): daemon-side SSH client, storage,
+        // connect engine, and SSH terminal sessions.
+        // COMPAT(sshServers): added after v0.8.0, remove gate after 2027-03-01; retain advertisement.
+        sshServers: true,
         // Autonomous run (spec §20 / ADR-0017). Default OFF: advertised only when the
         // daemon opted in (autorunService wired). Gates the whole autorun.* surface;
         // autorunApproval gates the per-action-approval mode toggle (§20.7.3).

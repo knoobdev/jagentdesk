@@ -37,8 +37,9 @@ function flattenStrings(value: unknown, prefix = ""): Record<string, string> {
 function countMatchingEnglishStrings(resource: unknown): number {
   const englishStrings = flattenStrings(en);
   const localeStrings = flattenStrings(resource);
-  return Object.entries(englishStrings).filter(([key, value]) => localeStrings[key] === value)
-    .length;
+  return Object.entries(englishStrings).filter(
+    ([key, value]) => !isOptionalEnglishFallbackKey(key) && localeStrings[key] === value,
+  ).length;
 }
 
 // These subtrees intentionally fall back to English (i18next fallbackLng) until each locale ships a
@@ -47,6 +48,8 @@ const OPTIONAL_ENGLISH_FALLBACK_PREFIXES = [
   "tailscaleLogin.",
   "forumNotifications.",
   "operatorContext.",
+  // SSH feature modules (resources/ssh-modules.ts) ship English in every locale for now.
+  "ssh.",
 ];
 function isOptionalEnglishFallbackKey(key: string): boolean {
   return OPTIONAL_ENGLISH_FALLBACK_PREFIXES.some((prefix) => key.startsWith(prefix));

@@ -1,0 +1,221 @@
+4869214bc|CLI|P|`daemon restart` confirms when provider probes are slow; X1.
+79a394239|TERM|P|Claude terminals marked needing input when idle (terminal agent hooks); applies.
+8216e86ec|CLI|P|`agent delete --all/--cwd` deletes archived agents; X1.
+cc8fe41e2|CLA|P|Send `display: "summarized"` so Claude thinking renders on Opus 4.7+; 1-line, applies.
+ed48655a7|DMN|P|Directory search no longer takes every fs thread; X1 (JD has a1167c72f scan-cost port). Take with `5285b7e50`,`a7a21d91c`,`06fe97c90`,`b3693b79d`,`6f62125ee`.
+485221b73|SBR|S|Compact sidebar footer tap targets; ClickUp shell.
+409b8f931|WS|P|Keep new worktree when `jagentdesk.json` unparsable; 2/3 apply.
+5285b7e50|DMN|P|Stuck directory search no longer blocks others; X1.
+05b074764|CLI|P|Unknown agent id -> AGENT_NOT_FOUND (session.ts small hunk applies).
+30fb66c8c|MOB|A|Mobile sidebar scroll retention; JD mobile panels.
+5c2c85ebc|DMN|P|Resume with last live mode, not creation-time mode; agent-manager/persistence-hooks.
+97083dd73|OMP|A|Pi/OMP open sessions whose model was removed; X4.
+48329facc|ACP|P|ACP context usage from `usage_update`; applies.
+642d69b14|CHAT|P|Cache file links with line locations; applies.
+febe9611b|CMP|A|No composer autofocus on touch screens; X1 composer/index.tsx (JD dirty file).
+c06228042|PLG|A|Plugin registry installs behind daemon flag (config-environment); with `b5e9747e2`/`7fd469ae1`.
+b3ed7363c|CLA|P|Background subagent card stays labeled; applies.
+71b236d38|DMN|A|Self-update npm prefix; JD self-update path (release channel differs, JAgentDesk desktop bundles daemon). Verify relevance.
+154a088d6|SBR|S|Default sidebar slot "last activity"; ClickUp sidebar.
+218712464|ACP|P|ACP answers open permission request when turn fails; applies.
+1f8a4559a|OMP|A|Custom context in expandable tool rows (Pi/OMP); new `providers/custom-message.ts`.
+a8e6c57f1|SBR|S|Sidebar glyph sizes; ClickUp shell.
+d517b3314|OC|P|OpenCode waits for server listen before event stream; 2/3 apply.
+fa0f04058|USG|D|Account usage before first turn (Usage chain).
+36e6ccd6c|CLA|P|Show plan mode when Claude enters it on its own; applies.
+7b43f2194|HOST|S|Remote SSH password field; JD has no Remote SSH host type (`add-remote-ssh-host-modal` absent).
+a50e14b69|MOB|S|Tablet keyboard for centered new-workspace form; needs `composer/dock` + `keyboard/shift` (absent).
+cf2b3f4bb|DMN|A|Self-update refusal reason for linked global install; see `71b236d38`.
+f24bb523e|CLI|P|CLI exits quietly on EPIPE; 3/5 apply.
+da9fae172|CLA|P|Subagent card labeled after daemon restart; X1.
+8ced059b4|OMP|P|OMP rejected prompt fails the turn; 2/3 apply.
+dfb8a1a2b|OMP|P|OMP run with unrendered message finishes; applies.
+9da676d70|DMN|P|Daemon keeps running when nobody reads output (supervisor.ts); applies.
+62f79e88b|OMP|P|OMP 18.3 rejection error; 3/5 apply.
+d826d8109|PRV|S|Muse plugin.
+976029265|PLG|A|Plugin SDK `spawnProcess/execCommand/terminateProcess` + Windows `.cmd` launch (`plugin/src/server/process.ts`, `windows-command.ts`); SDK-only parts portable; Muse parts skip. Plugin API parity.
+bc6ddbfa9|PRV|S|Muse plugin.
+18412604d|CHAT|P|Copy only code when selection touches adjacent block; X1 small (assistant-selection-copy).
+3e2d77723|USG|D|Usage scope (plugin `server/usage.ts` SDK part portable with Usage chain).
+db303be3c|NATIVE|S|Nix.
+4ed13fadb|CHAT|P|Keep list numbers when copy crosses nested code block; applies.
+2f0cb2f54|CDX|A|Speed bolt yellow; follows `60aff2346`.
+f02cc16bb|UI|S|Hover card fix; JD has no `ui/hover-card.tsx` (comes with Usage/context hover card).
+84054f8d7|DESK|A|Titlebar drag after scrolling chat (desktop); 4/5 apply; JD ClickUp header differs - verify drag regions.
+7a3030550|OC|P|OpenCode v2 idle after dismissed question; applies.
+950e1f8f4|CHAT|P|Copy keeps image alt/src; 1/3 apply, small X in message.tsx.
+fe10c40b9|UI|S|Hover card (absent).
+e3db7c339|OC|A|OpenCode v2 idle after denied permission; X3 (needs `7a3030550` first).
+0255738ee|CHAT|P|Copy only highlighted text below an image; X1 small.
+81a5e5bc6|I18N|A|Localize PR checks/sidebar status/"Worked for"; sidebar parts conflict with ClickUp; take PR-panel + turn-footer label parts.
+2dbfd1e0f|OMP|P|OMP extra "Custom message" rows; X1.
+a7f7405c0|HL|P|Vue syntax highlighting (new parser); parsers.ts small X.
+2974d7c96|BRW|A|`browser_type` text no longer leaks into the focused app composer (trusted-input). Real bug for agentic browser; JD browser-automation diverged (stealth/dialogs) - re-implement focus guard.
+b7c8be408|I18N|P|PR panel Activity/Add to chat labels localized.
+543e3712e|CHAT|A|Preserve chat rows across virtual layout changes (strategy-web.tsx, X1); overlaps JD v0.9.44 virtualization.
+4ede81e84|USG|D|Usage modal.
+c301d6e8a|VOICE|P|Reinstall interrupted local speech model extraction; 2/3 apply.
+a700d7875|ACP|P|Stop ACP provider that never answers close on archive; X1.
+f5c55dfc5|OMP|P|OMP compaction row in history; X1.
+06bde1e57|CLI|A|`plugin init` OVERVIEW.md template; with registry batch.
+56d568074|HL|P|Astro expressions through nested templates; js-scanner new; take after `a7f7405c0` (touches vue parser).
+7fd469ae1|PLG|A|Registry installs default-on; `owner/slug` now means registry, `github:owner/repo` for GitHub. Behavior change for JD CLI users - decide.
+48059aeae|I18N|P|PR panel state/verbs localized.
+a292b402c|CLI|P|`plugin add .` resolves in CLI cwd; X1.
+a9fef4879|ACP|P|Archived ACP agent history after worktree removed; X1.
+fc3b2c4eb|PLG|A|SECURITY: sanitize plugin overview Markdown (no raw HTML, https links only). JD marketplace renders plugin overviews - port `plugin-overview.ts` sanitizer and use it in JD marketplace detail.
+05637a7f0|CLA|P|SubagentHandback shown as markdown; 3/3 apply.
+2ecf3ba78|DMN|P|Archived agent stays archived when send fails; applies.
+2d85fe4e0|PLG|A|Manifest display name/icon/screenshots/videos (protocol messages + manifest.ts). JD marketplace already shows screenshots - align schema.
+dc785bb29|CLA|P|Two background agents launched together both labeled; applies.
+4dd0e50e7|HOST|S|Relay handshake timeout; no relay in JD.
+8f1091da6|CLA|P|Leave Auto mode on Bedrock/Vertex; X1.
+a162e1075|ACP|P|ACP applies configured models agent doesn't advertise; 1/3 apply.
+1e00f452e|FILES|P|Download non-ASCII filenames; applies.
+2323ee684|DMN|P|Linux VM daemon status after host sleep (pid-lock); X1.
+f13bb2136|FILES|P|Accented names on downloads (content-disposition); with `1e00f452e`.
+8ddeb79c8|CLA|A|Claude idle while background helpers work; Stop/send no longer kills them (1504+ lines, live-source). X3; high value for Team mode leads using background agents.
+ee6deda07|CLA|P|Claude history under another project folder (WSL/moved daemon); 1/2 apply.
+d46164ce0|CLA|P|Long-running tool calls not shown as subagents; applies.
+1ae979d3d|SUBA|A|Subagents finished while disconnected no longer "working"; session-context drift.
+9fcae41c9|CLA|P|Haiku 5.5 model manifest; applies.
+0fc6bf0c9|SCHED|P|Schedule keeps firing after a run that couldn't be recorded; applies.
+99fc204c5|OC|P|Browser screenshots reach OpenCode v2 agents (JD agentic browser screenshots); applies.
+f943e790b|USG|S|Usage plugin icon.
+06fe97c90|DMN|A|Home directory search skips ~/Library on macOS; X2 (session.ts).
+d0bc188a5|SUBA|A|Agent-to-agent messages/notifications carry sender identity - PROTOCOL (`agent-message.ts`, `agent-message-display.ts`). Strong overlap with JD Team mode/forum; design merge needed.
+29db2b798|DMN|A|Keep created agents after first-prompt failure; bound fork history; 2 F, 4 X, 1 M.
+0009a7e71|WS|D|Background workspaces (92 files, protocol + CLI `caller-agent`). JD ORC/Team creates many workspaces - valuable later but large.
+73390346c|MOB|A|iOS clipped chat/Markdown text (reverts uitextview patch); depends on markdown renderer state; verify on JD iOS.
+aec01ea60|CLA|P|Mythos 5.1 when Claude Code advertises it (model-discovery); 4/4 apply.
+b26b9234c|GIT|A|Diff review: Send feedback button + mobile comment sheets; 10 F, 4 X, 3 M (floating-action-button etc.).
+6ec663342|CLI|D|`usage` CLI command; needs Usage RPCs.
+b63a325be|NATIVE|A|Android optional camera (Play listing); JD Android release via CI - port config plugin.
+e81d5d02b|TERM|P|CJK text unchanged after returning to workspace (terminal snapshot) - PROTOCOL additive field in `terminal-snapshot.ts`; applies.
+bd78e5efa|GIT|P|Committed changes for existing-branch worktrees; 1/2 apply.
+0147edaaa|CLI|P|CLI worktree repository selection; 2/4 apply.
+7868f5caf|CMP|P|Email addresses survive Enter (file mention autocomplete); applies.
+0ba4d2526|CLI|P|`logs --since/--follow` honor timestamps; 1/3 apply.
+d0728cd1e|OC|P|OpenCode v2 tool validation errors preserved; applies.
+01f9bc829|MOB|S|Compact headers/sidebar modernization (57 files); conflicts with ClickUp mobile shell.
+563c014dc|CHAT|P|Assistant links to non-ASCII filenames; 2/3 apply.
+1228c01a1|GIT|P|GitLab MR/issue by number in starting-ref picker (`services/gitlab-service.ts`) - check Forge Hub doesn't wrap this file.
+d5513472e|CLI|P|Followed logs keep words intact; X2.
+ee0d901ef|SCHED|P|Each scheduled slot once without skipping next; X1.
+e61009d5f|GIT|P|Diffs with custom Git presentation config (`color.diff=always`); checkout-git.ts applies.
+7e66657bf|DMN|P|Reasoning order in activity transcripts; applies.
+cfb18f16d|GIT|P|Starting-ref picker matches CR descriptions; 1/2 apply.
+dd0350bc2|GIT|P|Renamed+edited files show real edits; applies.
+a5dba3c99|GIT|P|External diff command configured; X1.
+46b128417|FILES|P|Release files on canceled HTTP download; applies.
+a3f75aa9e|GIT|P|Removed `--` lines (SQL comments) in diffs; applies.
+e2fd5a9c5|MD|P|Text that only looks like HTML stays verbatim (html-ish.ts); X1.
+804335bc0|FILES|P|Rename untracked bracket paths; applies.
+114389383|FILES|P|`..name` files usable; applies.
+8d9e7d3ad|CLI|A|SECURITY-ish: `permit allow/deny` confirm before reporting success, exit non-zero after 15s. Behavior change (breaking for scripts); X2.
+1939ee79e|DMN|A|Published config JSON schema accepts daemon settings; JD schema has extra keys (tailscale, team, skills) - regenerate.
+045898882|DMN|P|Self-hosted web app through standard-port proxies (web-ui.ts); applies.
+b3693b79d|DMN|P|Hidden agent plan files (`.cursor/plans`) in @-suggestions; applies.
+b852ae920|DESK|P|Linux window icon (electron-builder.yml); rebrand.
+40f039306|KBD|P|Record shortcuts using layout character (Dvorak); applies.
+c364b16d4|SUBA|A|Canceled child tasks reported; replacement tasks awaited (agent-prompt.ts X1) - ORC impact.
+a310444c6|FILES|P|Long valid filenames save (ENAMETOOLONG); applies.
+9b92b2e25|GIT|P|Merge with base worktree path containing newline/space; 1/2 apply.
+06f052225|GIT|A|Invalidate worktree listings after archive; 6/7 apply, jagentdesk-tools touched.
+9246813fd|GIT|P|Folder names ending in space for Changes/worktrees; applies.
+750cb82fb|MOB|S|Fullscreen composer on phones (40 files, text-input refactor); JD mobile composer differs.
+99e4b53aa|PLG|D|Outline jumps for plugin-rendered prompts; needs presentation.ts.
+a2b040869|CLA|P|Context meter counts input reported late; applies.
+283a985fb|MOB|A|Android status bar icons readable across themes; JD has ClickUp/pure-black themes.
+6f62125ee|DMN|P|Dot-prefixed paths in suggestions; X1.
+9551b2cc1|DESK|P|Linux window shows when hidden rendering stalls (`window/show-when-ready.ts`); 1/3 apply.
+bfe38d92f|PI|P|Turn-limited tintinweb subagents completed; X1.
+e86777393|NATIVE|A|Native startup polyfills (`install-early.ts`); verify needed for JD's Expo version.
+196dc3acd|PI|P|Pi thinking level updates from extensions; applies.
+be0acb293|GIT|P|Diff updates alive after first edit (push-router.ts); applies.
+9eaf7ad0c|FILES|A|Local images in Markdown file previews; 2 F, 1 X, 1 M.
+e8108d909|SET|P|Only offer Remove for config.json providers; providers-section.tsx.
+b0f054de9|WS|P|IPv6-only workspace services via proxy; applies.
+b5e51cf83|KBD|P|Letter shortcuts on non-Latin layouts; applies.
+ec6393f31|HOST|A|Pairing QR not clipped on mobile (`pair-device-section.tsx`) - JD pairing QR differs; check.
+1839de5b1|PLG|P|`providers.waitForReady` on mobile plugins (client index.ts X1).
+eb051ea81|HL|P|Astro diffs with empty `{}`; applies.
+058375dac|ACP|P|Release ACP provider process after history resume (archived agents spawning processes); applies.
+b923cde6c|CLA|P|Custom model context limits during first turn; 1/2 apply.
+337e81a9c|FILES|P|Duplicate keeps relative symlinks; applies.
+4400445ed|GIT|P|Worktree creation after `git init`; applies.
+5805b776c|GIT|P|Commit diffs from subdirectory workspaces; X1.
+17562fcb6|CMP|A|New workspace must not send a mode the provider doesn't offer; JD composer dirty files.
+335a11eb8|CDX|P|Codex chats with U+2028/2029 on Node 24 (transport); X1.
+e135e9c10|MOB|S|Phones open files/subagents in closable sheet; JD mobile shell.
+0614e96ee|CLA|P|Rewind with CLAUDE_CONFIG_DIR; applies.
+12aaded6c|CMP|P|xhigh thinking label; applies.
+bd9af256b|DMN|P|Symlinked config.json stays linked (private-files.ts); applies.
+a4b15455b|CLI|P|`agent ls` past 200; X1. Take with `18eabeeda`.
+a4f1df3ae|VOICE|P|OpenAI-compatible TTS model/voice names; applies.
+4a3ff87ee|OMP|P|OMP manual /compact progress; 2/4 apply.
+019e5279e|CHAT|P|Claude question option previews; 2/3 apply.
+fc8f085b9|PROTO|A|Oversized messages rejected without disconnect - PROTOCOL: new `websocket-message-limit.ts`; relay-transport part skip. Prevents reconnect loops on big attachments (mobile over tailnet).
+ada7ba43f|SET|P|Long custom model names removable; X1.
+d57096a45|WS|P|Newly configured services start without restart; applies.
+938c4e263|GIT|P|Diffs for filenames with quotes/control chars (`git-quoted-path.ts`); 1/4 apply + small X.
+cafa04d3f|KBD|P|Workspace traversal beyond nine (sidebar-shortcuts.ts); applies.
+14e638451|DESK|P|Desktop survives closed launcher console pipes (EPIPE dialog); applies.
+56448842f|FILES|A|Download over connected host instead of direct URL (fixes relay/SSH/socket) - for JD tailnet downloads; 2 F, 2 X.
+b58af43a0|MD|P|Mixed HTML headings; applies.
+e1a5664d9|SET|P|Malformed font setting doesn't break UI; 1/2 apply.
+6d43a8c5b|GIT|P|Restore selected changes in subdirectory workspaces; applies.
+404d08d24|TERM|P|Report failed terminal launches; no unclosable terminals; 2/3 apply.
+f3ddf99fe|MOB|S|Fullscreen composer follow-up.
+6ad124758|SBR|S|Stack workspace sheets + sidebar density; ClickUp shell.
+73221ce5b|MD|P|Local Markdown images with encoded paths; applies.
+6db47b3c3|MOB|A|Keyboard stays closed after mobile sidebar dismissal; 1/3 apply.
+8ff2424da|GIT|P|Checkout diff hunks from subdirectory workspaces; 1/2 apply.
+5c108f345|GIT|P|Renames preserved in committed file diffs; X1.
+e5124b039|MOB|S|One sheet stack + agent facts sheet (41 files).
+4d8bed9dd|CLA|P|Context meter stays on active model; X1.
+74282dac1|MOB|S|Return to chat after fullscreen submission (fullscreen composer chain).
+0ed57187a|GIT|A|Gitea/Forgejo fork owner in checkout branch names; touches `services/forge-service.ts`/`gitea-service.ts`, which JD Forge Hub also uses - merge carefully.
+4d5c3c13d|ACP|P|ACP slash command argument hints; applies.
+0708b8295|CLA|P|Claude `/rename` title on import; X1.
+71f575e16|CLA|P|Malformed Claude question answers stay retryable; applies.
+80badb3b8|OC|A|Multi-select v2 questions (new `question-card-answer.ts`); omp/question-ui.ts needs `264f6e1cc`.
+e08389065|PLG|P|Plugins may import protocol types without local deps (compiler.ts); applies.
+16bb179e6|PRV|A|Hoplite in ACP catalog + searchable provider grid; catalog entry + search portable, hoplite plugin provider skip.
+2d86b94b2|PRV|A|Provider catalog buttons, Add errors as toasts; X3.
+d172d060a|OC|P|OpenCode v2 streamed chunks don't hold whole message (OOM); applies.
+7aa3fac06|PRV|S|Hoplite plugin model discovery scope.
+208e32303|USG|D|Usage provider order.
+f56c01392|WS|A|Open configured terminals after worktree setup; X3.
+d9b874f9d|CHAT|A|Page Up/Down after clicking messages; strategy-web X1.
+8d424e039|CHAT|A|Reduce rendering cost in long chats (stream tick, outline); 5 F, 4 X; compare with JD v0.9.44 perf.
+e0de0fdf6|CHAT|S|Replica-cache reads while streaming; JD replica cache is the old 495-line version (no row store).
+5c2a1552d|KBD|P|Rebinding navigation shortcuts keeps 1-9 group; X3 small.
+8388f1618|UI|P|Add Project keyboard selection visible (scroll-reveal); 3/4 apply.
+4117dce2d|VOICE|P|Local WAV transcription script; applies.
+5acfbb377|PLG|P|Escape closes plugin previews before stopping agent; 1/2 apply.
+48b310c8a|MOB|S|Android chat selection; `paseo-scroll` native module absent in JD.
+62ab2deb2|MOB|S|Phone header scripts menu; JD mobile shell.
+6017706cc|CMP|A|Avoid restoring composer focus on touch navigation; X2.
+8d9a7123b|MOB|S|Compact header polish.
+c1558d29e|WS|D|Background workspaces follow-up.
+d7b3ff654|SBR|S|Press feedback on sidebar rows; ClickUp shell.
+eb1a8a2ec|MD|D|Single Markdown renderer on react-native-enriched-markdown (129 files, patched nightly dep). JD uses react-native-markdown-display + own perf work; huge chain (15+ follow-ups).
+0d7a234e6|SBR|A|Perf: preserve unchanged sidebar workspace projections (`sidebar-workspaces-view-model.ts` applies) - check JD ClickUp sidebar still uses this hook.
+64693f21c|ACP|A|Cursor plan usage in context details; usage plugin part skip.
+d29814186|GIT|A|Review feedback confirmation toast; follows `b26b9234c`.
+a8deb5108|DMN|P|Provider images separate from adjacent prose; applies.
+98559bf72|MOB|A|iOS sidebar rows after interrupted drag (draggable-flatlist patch); check JD patch set.
+ae0b2588b|WS|D|Background workspaces menu.
+df82edd21|PROTO|P|Inbound WS validator split per message type (AOT codegen); applies. Daemon CPU on large payloads.
+a1c6e8dfa|MOB|S|Fullscreen composer iOS keyboard.
+90fcf51d7|TERM|P|Antigravity icon for terminal profiles; X1.
+d152f1529|CHAT|P|Failed question responses recoverable; 3/4 apply.
+30122b1ae|CLA|P|Background Claude subagent action log on card; 1/2 apply.
+cd77ecd83|OMP|A|Idle OMP agents start on follow-ups; X5 (needs `264f6e1cc`).
+88a7aec1b|CLA|P|Active turns survive settings changes (thinking then mode); X1.
+8555e8abd|NATIVE|S|Upstream TestFlight workflow.
+ec9817ed2|MOB|A|Home actions on short screens (open-project-screen); X1.
+6e1ec21c6|VOICE|A|Android dictation through audio interruptions (14 F, 3 M); JD dictation module present.
+30799fda1|OC|A|Actionable errors for invalid OpenCode tool calls (bridge); 3 F, 4 X.
+fa70b215a|FILES|A|Folder links open Files with contents visible; 2 F, 3 X.

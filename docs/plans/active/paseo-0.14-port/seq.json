@@ -1,0 +1,1786 @@
+{
+  "B01": [
+    ["8cccc1f6f", 3, []],
+    ["e0a0cf990", 3, []],
+    ["b1a3b0772", 3, []],
+    ["694696e82", 1, ["runtime.posix.test.ts (test)", "workspace-git-fetch.test.ts (test)"]],
+    ["9c7d4ace6", 5, ["app-server-transport.ts", "workspace-registry.test.ts (test)"]],
+    ["749fe3e5a", 2, []]
+  ],
+  "B02": [
+    ["d30e99c85", 1, ["agent.ts"]],
+    ["cc8fe41e2", 2, []],
+    ["b3ed7363c", 1, ["agent.background-subagent.test.ts (test)"]],
+    ["36e6ccd6c", 1, ["agent.test.ts (test)"]],
+    ["da9fae172", 1, ["agent.ts"]],
+    ["05637a7f0", 6, []],
+    ["dc785bb29", 3, []],
+    ["8f1091da6", 1, ["agent.ts"]],
+    ["ee6deda07", 3, ["agent.ts"]],
+    ["d46164ce0", 2, []],
+    ["9fcae41c9", 3, ["15-provider.test.ts (test)"]],
+    ["aec01ea60", 7, ["stores.test.ts (test)"]],
+    ["a2b040869", 3, []],
+    ["b923cde6c", 6, []],
+    ["0614e96ee", 4, []],
+    ["4d8bed9dd", 3, []],
+    ["0708b8295", 2, ["agent.ts", "claude-provider-config-dir-history.e2e.test.ts (test)"]],
+    ["71f575e16", 2, []],
+    ["30122b1ae", 2, ["agent.background-subagent.test.ts (test)"]],
+    ["88a7aec1b", 2, ["agent.ts"]],
+    ["1b450e487", 3, []],
+    ["1a6a9fa8d", 4, ["agent.background-subagent.test.ts (test)"]],
+    ["ab6cdb7c8", 2, []],
+    ["ce67efa9e", 2, []],
+    [
+      "4ef4a95a4",
+      2,
+      [
+        "agent-message-rewind.spec.ts (test)",
+        "command-center-agent-controls.ts (test)",
+        "agent.test.ts (test)",
+        "agent.ts"
+      ]
+    ],
+    ["48d2c9ec3", 4, ["agent.sub-agent-replay.test.ts (test)", "transcript-history.ts"]]
+  ],
+  "B03": [
+    [
+      "8ddeb79c8",
+      4,
+      [
+        "host-runtime.ts",
+        "agent.env.test.ts (test)",
+        "agent.interrupt-restart-regression.test.ts (test)",
+        "agent.test.ts (test)",
+        "agent.ts",
+        "live-source.ts",
+        "send-during-tool-call-claude.real.e2e.test.ts (test)"
+      ]
+    ],
+    [
+      "f3b0199c1",
+      4,
+      [
+        "agent-timeline-content.test.ts (test)",
+        "agent-timeline-content.ts",
+        "agent.sub-agent-replay.test.ts (test)",
+        "agent.ts",
+        "replay-source.ts"
+      ]
+    ],
+    ["566218d68", 1, ["agent.ts"]],
+    [
+      "173fca3c0",
+      5,
+      [
+        "agent.ts",
+        "replay-source.test.ts (test)",
+        "replay-source.ts",
+        "workflow-replay-source.test.ts (test)",
+        "transcript-history.ts"
+      ]
+    ],
+    ["64b0afe01", 1, ["agent.env.test.ts (test)"]],
+    [
+      "869eb5a72",
+      1,
+      [
+        "agent.env.test.ts (test)",
+        "execution-session.websocket.test.ts (test)",
+        "agent-configuration.e2e.test.ts (test)"
+      ]
+    ]
+  ],
+  "B04": [
+    ["aff476b01", 2, []],
+    ["23c4404b9", 2, []],
+    ["a8f5d969b", 1, ["codex-app-server-agent.ts"]],
+    ["767b0e970", 3, ["codex-app-server-agent.ts"]],
+    ["53ee9cd99", 2, []],
+    ["7a64eef49", 4, []],
+    ["b701cb2dc", 2, []],
+    ["335a11eb8", 0, ["app-server-transport.test.ts (test)", "app-server-transport.ts"]],
+    ["08853039f", 2, ["codex-app-server-agent.ts"]]
+  ],
+  "B05": [
+    [
+      "60aff2346",
+      7,
+      [
+        "agent-sdk-types.ts",
+        "codex-app-server-agent.features.test.ts (test)",
+        "codex-app-server-agent.ts",
+        "codex-feature-definitions.ts"
+      ]
+    ],
+    ["2f0cb2f54", 4, ["index.tsx"]]
+  ],
+  "B06": [
+    ["d517b3314", 3, ["event-consumer.test.ts (test)", "server-manager.ts"]],
+    ["7a3030550", 4, []],
+    ["e3db7c339", 4, []],
+    ["99fc204c5", 4, []],
+    ["d0728cd1e", 1, ["bridge.test.ts (test)"]],
+    ["d172d060a", 3, []],
+    ["72e3316f4", 1, ["children.ts"]],
+    ["30799fda1", 5, ["bridge.test.ts (test)", "paseo-tools.ts", "types.ts", "service.ts"]],
+    ["91154ba4e", 3, ["bridge.test.ts (test)", "paseo-tools.ts", "bootstrap.ts"]]
+  ],
+  "B07": [
+    ["264f6e1cc", 28, ["agent.test.ts (test)", "agent.ts"]],
+    ["0d05584d0", 2, []],
+    [
+      "97083dd73",
+      1,
+      ["agent.test.ts (test)", "agent.ts", "fake-omp.ts (test)", "agent.ts", "fake-pi.ts (test)"]
+    ],
+    ["1f8a4559a", 9, ["agent.test.ts (test)", "agent.ts", "agent.test.ts (test)", "agent.ts"]],
+    ["8ced059b4", 2, ["agent.test.ts (test)", "agent.ts"]],
+    ["dfb8a1a2b", 2, []],
+    [
+      "62f79e88b",
+      4,
+      [
+        "agent.test.ts (test)",
+        "agent.ts",
+        "cli-runtime.test.ts (test)",
+        "cli-runtime.ts",
+        "omp.real.e2e.test.ts (test)"
+      ]
+    ],
+    ["2dbfd1e0f", 2, []],
+    ["f5c55dfc5", 3, []],
+    ["4a3ff87ee", 5, ["agent.ts", "omp.real.e2e.test.ts (test)"]],
+    ["80badb3b8", 5, []],
+    [
+      "cd77ecd83",
+      3,
+      [
+        "agent-manager.ts",
+        "mcp-server.test.ts (test)",
+        "agent.test.ts (test)",
+        "agent.ts",
+        "cli-runtime.test.ts (test)",
+        "runtime.ts",
+        "fake-omp.ts (test)",
+        "omp.real.e2e.test.ts (test)"
+      ]
+    ],
+    ["8d971876b", 3, ["package.json", "agent.test.ts (test)", "ci-workflow.test.mjs (test)"]]
+  ],
+  "B08": [
+    ["e9e479c6b", 14, []],
+    ["4417d7c47", 2, []],
+    ["06213e49b", 3, []],
+    ["bfe38d92f", 2, []],
+    ["196dc3acd", 3, []],
+    ["dd244c076", 3, []],
+    ["e3bbed3c7", 3, ["fake-pi.ts (test)"]]
+  ],
+  "B09": [
+    ["d070db15b", 2, []],
+    ["48329facc", 2, []],
+    ["218712464", 2, []],
+    ["a700d7875", 1, ["acp-agent.ts"]],
+    ["a9fef4879", 1, ["acp-agent.ts"]],
+    ["a162e1075", 1, ["provider-registry.ts", "acp-agent.test.ts (test)", "acp-agent.ts"]],
+    ["058375dac", 2, []],
+    ["4d5c3c13d", 1, ["generic-acp-agent.commands.test.ts (test)"]],
+    ["4f9d9d6de", 2, []],
+    ["86ab49153", 3, []],
+    [
+      "64693f21c",
+      1,
+      [
+        "acp-agent.ts",
+        "cursor-acp-agent.ts",
+        "generic-acp-agent.ts",
+        "index.server.ts",
+        "usage.test.ts (test)",
+        "usage.ts"
+      ]
+    ]
+  ],
+  "B10": [
+    [
+      "a54cc6dd1",
+      1,
+      ["settings-toggle-tab-regression.spec.ts (test)", "use-acp-provider-catalog.test.ts (test)"]
+    ],
+    [
+      "7c7b6555f",
+      12,
+      [
+        "provider-icon-name.test.ts (test)",
+        "provider-icons.test.ts (test)",
+        "provider-icons.ts",
+        "provider-icon-names.ts"
+      ]
+    ],
+    [
+      "16bb179e6",
+      20,
+      [
+        "agent-timeline-scroll-smoothness.spec.ts (test)",
+        "timeline-scroll-smoothness.ts (test)",
+        "provider-catalog-list.tsx",
+        "use-acp-provider-catalog.test.ts (test)",
+        "providers-section.tsx",
+        "provider.ts",
+        "messages.ts",
+        "plugin-provider.test.ts (test)",
+        "plugin-provider.ts",
+        "provider-registry.ts",
+        "provider-snapshot-manager.ts",
+        "models.e2e.test.ts (test)",
+        "index.ts",
+        "index.ts",
+        "plugin-process-protocol.ts",
+        "plugin-process.ts",
+        "session-stubs.ts (test)",
+        "websocket-server.relay-reconnect.test.ts (test)",
+        "websocket-server.ts",
+        "vitest.config.ts"
+      ]
+    ],
+    [
+      "2d86b94b2",
+      2,
+      [
+        "provider-catalog-list.tsx",
+        "use-acp-provider-catalog.test.ts (test)",
+        "providers-section.test.tsx (test)",
+        "providers-section.tsx"
+      ]
+    ],
+    ["e8108d909", 2, [".gitignore"]],
+    ["ada7ba43f", 3, ["creation-old-daemon.spec.ts (test)", "provider-diagnostic-sheet.tsx"]],
+    ["90fcf51d7", 1, ["provider-icons.ts"]]
+  ],
+  "B11": [
+    [
+      "29c198f95",
+      21,
+      [
+        "agent-message-submission.spec.ts (test)",
+        "messages.ts",
+        "types.ts",
+        "agent-manager.ts",
+        "agent-sdk-types.ts",
+        "plugin-provider.test.ts (test)",
+        "plugin-provider.ts",
+        "provider-options.test.ts (test)",
+        "provider-registry.test.ts (test)",
+        "provider-registry.ts",
+        "provider-snapshot-manager.test.ts (test)",
+        "acp-agent.ts",
+        "codex-app-server-agent.ts",
+        "generic-acp-agent.diagnostic.test.ts (test)",
+        "agent.test.ts (test)",
+        "agent.ts",
+        "daemon-executions.test.ts (test)",
+        "service.test.ts (test)"
+      ]
+    ]
+  ],
+  "B12": [
+    ["4b45bc9fc", 5, ["worktree-restore.spec.ts (test)", "worktree.ts"]],
+    ["a7c9c05be", 1, ["worktree.ts"]],
+    ["bd78e5efa", 4, ["worktree.posix.test.ts (test)", "worktree.ts"]],
+    ["e61009d5f", 3, []],
+    ["dd0350bc2", 2, []],
+    ["a5dba3c99", 3, []],
+    ["a3f75aa9e", 3, []],
+    ["938c4e263", 6, ["package.json", "diff-highlighter.ts"]],
+    ["9b92b2e25", 2, ["package.json"]],
+    ["9246813fd", 6, []],
+    ["4400445ed", 3, ["project-becomes-git.e2e.test.ts (test)"]],
+    ["5805b776c", 1, ["filesystem.e2e.test.ts (test)"]],
+    ["6d43a8c5b", 1, ["filesystem.e2e.test.ts (test)"]],
+    ["8ff2424da", 2, ["package.json", "filesystem.e2e.test.ts (test)"]],
+    ["5c108f345", 3, []],
+    [
+      "06f052225",
+      8,
+      [
+        "workspace-archive-record-scoped.e2e.test.ts (test)",
+        "workspace-archive-service.test.ts (test)",
+        "workspace-archive-service.ts"
+      ]
+    ],
+    ["1228c01a1", 2, []],
+    ["cfb18f16d", 2, ["new-workspace-picker-item.test.ts (test)", "new-workspace-picker-item.ts"]],
+    [
+      "0ed57187a",
+      10,
+      ["resolve-worktree-creation-intent.ts", "github-service.ts", "worktree.test.ts (test)"]
+    ],
+    ["be0acb293", 2, ["push-router.test.ts (test)"]],
+    [
+      "42e221746",
+      2,
+      ["agent-timeline-scroll-smoothness.spec.ts (test)", "timeline-scroll-smoothness.ts (test)"]
+    ],
+    ["9be154774", 3, ["workspace-contributions.ts", "actions-split-button.tsx"]],
+    [
+      "3c3c27292",
+      0,
+      [
+        "behavior.test.ts (test)",
+        "workspace-git-service.test.ts (test)",
+        "workspace-git-service.ts",
+        "index.test.ts (test)"
+      ]
+    ],
+    [
+      "91d749f82",
+      13,
+      [
+        "bootstrap.ts",
+        "checkout-diff-manager.ts",
+        "session.test.ts (test)",
+        "session.ts",
+        "session.workspace-git-watch.test.ts (test)",
+        "session.workspace-resolution-invariants.test.ts (test)",
+        "session.workspaces.test.ts (test)",
+        "workspace-provisioning-service.ts",
+        "workspace-scripts-service.test.ts (test)",
+        "workspace-scripts-service.ts",
+        "snapshot-mutation-ownership.test.ts (test)",
+        "websocket-server.notifications.test.ts (test)",
+        "websocket-server.relay-reconnect.test.ts (test)",
+        "websocket-server.terminal-notifications.test.ts (test)",
+        "websocket-server.ts",
+        "wire-compat.test.ts (test)",
+        "workspace-git-service.observation.test.ts (test)",
+        "workspace-registry.ts"
+      ]
+    ]
+  ],
+  "B13": [
+    ["1e00f452e", 2, []],
+    ["f13bb2136", 4, []],
+    ["46b128417", 2, ["package.json"]],
+    ["804335bc0", 2, []],
+    ["114389383", 2, ["package.json", "provider.test.ts (test)"]],
+    ["a310444c6", 1, ["filesystem.e2e.test.ts (test)"]],
+    ["337e81a9c", 2, []],
+    [
+      "56448842f",
+      4,
+      [
+        "file-explorer-context-actions.spec.ts (test)",
+        "file-explorer.ts (test)",
+        "use-file-explorer-actions.ts",
+        "daemon-client.ts",
+        "relay-transport.e2e.test.ts (test)"
+      ]
+    ]
+  ],
+  "B14": [
+    [
+      "087cc71c0",
+      2,
+      [
+        "bootstrap.ts",
+        "relationship-controller.test.ts (test)",
+        "pid-lock.ts",
+        "websocket-server.ts"
+      ]
+    ],
+    ["9da676d70", 2, []],
+    ["2323ee684", 0, ["agent.test.ts (test)", "daemon-instance.test.ts (test)", "pid-lock.ts"]],
+    ["2ecf3ba78", 2, []],
+    ["5c2c85ebc", 2, ["persistence-hooks.test.ts (test)", "persistence-hooks.ts"]],
+    [
+      "23c4df481",
+      1,
+      ["workspace-model-restart.spec.ts (test)", "bootstrap.smoke.test.ts (test)", "bootstrap.ts"]
+    ],
+    [
+      "29db2b798",
+      3,
+      [
+        "agent-message-submission.spec.ts (test)",
+        "creation-idempotency.spec.ts (test)",
+        "creation-fixtures.ts (test)",
+        "creation.ts (test)",
+        "package.json",
+        "agent-manager.test.ts (test)",
+        "agent-manager.ts",
+        "creation.e2e.test.ts (test)",
+        "index.test.ts (test)",
+        "index.ts",
+        "session.ts",
+        "fake-agent-client.ts (test)"
+      ]
+    ],
+    ["bd9af256b", 2, []],
+    ["28834a91a", 2, []],
+    ["a8deb5108", 5, []],
+    ["7e66657bf", 2, ["logs.test.ts (test)"]],
+    [
+      "409b8f931",
+      3,
+      ["workspace-setup-streaming.spec.ts (test)", "session.ts", "worktree-session.test.ts (test)"]
+    ],
+    ["045898882", 2, []],
+    ["d57096a45", 3, ["relationship-controller.test.ts (test)"]],
+    ["b0f054de9", 5, []],
+    ["0fc6bf0c9", 2, []],
+    ["ee0d901ef", 2, []],
+    ["ed48655a7", 0, ["directory-suggestions.test.ts (test)", "directory-suggestions.ts"]],
+    ["5285b7e50", 0, ["directory-suggestions.test.ts (test)", "directory-suggestions.ts"]],
+    ["a7a21d91c", 0, ["directory-suggestions.test.ts (test)", "directory-suggestions.ts"]],
+    ["06fe97c90", 1, ["session.ts", "directory-suggestions.ts"]],
+    ["b3693b79d", 2, []],
+    ["6f62125ee", 0, ["filesystem.e2e.test.ts (test)", "path.test.ts (test)", "path.ts"]]
+  ],
+  "B15": [
+    ["a25f4f506", 5, ["cli-logs-follow.e2e.test.ts (test)", "session.ts"]],
+    ["df82edd21", 6, ["ws-outbound.test.ts (test)"]],
+    [
+      "6077bc621",
+      7,
+      [
+        "highlighter.test.ts (test)",
+        "checkout-diff-cache.test.ts (test)",
+        "checkout-diff-cache.ts",
+        "checkout-diff-content.e2e.test.ts (test)",
+        "diff-highlighter.ts",
+        "checkout-git.ts"
+      ]
+    ],
+    [
+      "9bc998fa3",
+      14,
+      [
+        "workspace-git-service.observation.test.ts (test)",
+        "workspace-registry-bootstrap.ts",
+        "worktree-branch-name-generator.test.ts (test)",
+        "checkout-git.test.ts (test)",
+        "checkout-git.ts",
+        "path.ts",
+        "worktree-metadata.ts",
+        "worktree.posix.test.ts (test)",
+        "worktree.ts"
+      ]
+    ],
+    [
+      "67a245925",
+      5,
+      [
+        "session.ts",
+        "project-config-session.test.ts (test)",
+        "workspace-scripts-service.test.ts (test)",
+        "workspace-scripts-service.ts",
+        "worktree-bootstrap.ts",
+        "worktree-session.ts",
+        "paseo-config-file.ts",
+        "worktree.posix.test.ts (test)",
+        "worktree.ts"
+      ]
+    ],
+    [
+      "fc0cbbb32",
+      3,
+      [
+        "workspace-reconciliation-service.test.ts (test)",
+        "workspace-reconciliation-service.ts",
+        "workspace-registry.ts"
+      ]
+    ],
+    [
+      "f14a4cc11",
+      4,
+      [
+        "mutable-provider-config-owner.test.ts (test)",
+        "plugin-provider.test.ts (test)",
+        "bootstrap.test.ts (test)",
+        "bootstrap.ts",
+        "config.test.ts (test)",
+        "config.ts",
+        "daemon-config-store.test.ts (test)",
+        "daemon-config-store.ts",
+        "selection-store.test.ts (test)",
+        "selection-store.ts",
+        "persisted-config.test.ts (test)",
+        "persisted-config.ts",
+        "index.posix.test.ts (test)",
+        "index.ts",
+        "plugin-paseo-api.e2e.test.ts (test)",
+        "session.ts",
+        "daemon-session.test.ts (test)",
+        "daemon-session.ts",
+        "workspace-scripts-service.test.ts (test)",
+        "workspace-scripts-service.ts"
+      ]
+    ],
+    [
+      "9e4aab16c",
+      8,
+      [
+        "compiler.ts",
+        "plugin-paseo-api.e2e.test.ts (test)",
+        "runtime.posix.test.ts (test)",
+        "runtime.ts"
+      ]
+    ],
+    [
+      "2ce6681d6",
+      16,
+      [
+        "agent.ts",
+        "replay-source.ts",
+        "workflow-replay-source.test.ts (test)",
+        "codex-app-server-agent.test.ts (test)",
+        "codex-app-server-agent.ts",
+        "agent.test.ts (test)",
+        "agent.ts",
+        "agent.test.ts (test)"
+      ]
+    ]
+  ],
+  "B16": [
+    ["5599f9e56", 1, ["open.ts"]],
+    ["4869214bc", 0, ["lifecycle.e2e.test.ts (test)", "restart.ts"]],
+    ["8216e86ec", 0, ["delete.test.ts (test)", "delete.ts"]],
+    [
+      "05b074764",
+      2,
+      [
+        "lifecycle.e2e.test.ts (test)",
+        "07-agent-stop.test.ts (test)",
+        "27-agent-delete.test.ts (test)"
+      ]
+    ],
+    ["f24bb523e", 4, ["attach.ts", "logs.ts", "run.test.ts (test)"]],
+    ["15d8ba16a", 0, ["update.ts", "31-schedule.test.ts (test)"]],
+    ["0147edaaa", 2, ["archive.ts", "ls.ts", "14-worktree.test.ts (test)"]],
+    ["0ba4d2526", 2, ["logs.ts", "fake-agent-client.ts (test)"]],
+    ["d5513472e", 3, ["logs.ts", "package.json"]],
+    ["a4b15455b", 1, ["ls.ts"]],
+    ["18eabeeda", 1, ["archive.ts", "ls.ts", "11-agent-archive.test.ts (test)"]],
+    ["a292b402c", 0, ["index.ts", "plugin-lifecycle.test.ts (test)"]],
+    ["8d9e7d3ad", 1, ["allow.ts", "deny.ts"]]
+  ],
+  "B17": [
+    ["7dc2a3568", 4, ["terminal-emulator-webview-html.ts"]],
+    ["a983ae044", 2, ["terminal-emulator-webview-html.ts"]],
+    ["70210f107", 2, []],
+    [
+      "e18f9e8f4",
+      3,
+      [
+        "terminal-find.spec.ts (test)",
+        "terminal-emulator-runtime.test.ts (test)",
+        "terminal-emulator-webview-html.ts"
+      ]
+    ],
+    ["79a394239", 2, []],
+    ["e81d5d02b", 3, ["terminal.test.ts (test)"]],
+    [
+      "404d08d24",
+      3,
+      [
+        "executable-resolution.ts",
+        "terminal-workspace-sdk.e2e.test.ts (test)",
+        "terminal.test.ts (test)"
+      ]
+    ],
+    ["9bd58f66b", 2, []],
+    ["e5d9307cf", 2, []],
+    ["644d66ba4", 4, []],
+    ["f0acc2c72", 3, ["mcp-server.test.ts (test)", "paseo-tools.ts"]],
+    ["b9f624f72", 2, ["package.json"]],
+    ["2553ab4d8", 5, ["terminal-pane.tsx"]]
+  ],
+  "B18": [
+    ["560e478ef", 0, ["daemon-client.test.ts (test)", "daemon-client.ts"]],
+    [
+      "fc8f085b9",
+      4,
+      [
+        "daemon-client-relay-e2ee-transport.ts (test)",
+        "daemon-client.test.ts (test)",
+        "daemon-client.ts",
+        "package.json",
+        "relay-transport.e2e.test.ts (test)",
+        "websocket-server.ts"
+      ]
+    ],
+    ["f232d23e9", 2, ["agents-and-providers.ts", "daemon-client.ts"]],
+    ["4e9a4582b", 1, ["host-runtime.test.ts (test)"]],
+    [
+      "b85b44aea",
+      4,
+      [
+        "isolated-host-daemon.ts (test)",
+        "session-context.tsx",
+        "host-runtime.test.ts (test)",
+        "host-runtime.ts",
+        "paseo-daemon.ts (test)",
+        "versioned-daemon.ts (test)"
+      ]
+    ]
+  ],
+  "B19": [
+    ["5375f43a0", 8, ["lifecycle-archive.e2e.test.ts (test)"]],
+    ["e10f6d2e2", 2, []],
+    ["e08389065", 2, []],
+    ["74c8172f8", 2, ["plugin-management.spec.ts (test)", "plugin-lifecycle.test.ts (test)"]],
+    ["d6fa23189", 2, []],
+    ["dc07efe93", 2, []],
+    ["1e0a9d5af", 2, []],
+    ["1839de5b1", 0, ["index.ts", "plugin-paseo-api.e2e.test.ts (test)"]],
+    [
+      "976029265",
+      9,
+      [
+        "connection.ts",
+        "executable-resolution.ts",
+        "bundle-evaluator.ts",
+        "spawn.ts",
+        "process.ts",
+        "signals.ts",
+        "provider.test.ts (test)",
+        "connection.ts",
+        "provider.ts",
+        "fake-muse.mjs",
+        "provider.test.ts (test)"
+      ]
+    ],
+    ["068f272a0", 4, ["agent-manager.test.ts (test)", "agent-manager.ts"]],
+    [
+      "10bc10c99",
+      13,
+      [
+        "index.test.ts (test)",
+        "index.ts",
+        "boundaries.test.ts (test)",
+        "agent-manager.ts",
+        "agent-prompt.ts",
+        "mcp-server.test.ts (test)",
+        "paseo-tools.ts",
+        "bootstrap.ts",
+        "index.ts",
+        "plugin-process-protocol.ts",
+        "plugin-process.ts",
+        "runtime.ts",
+        "service.ts",
+        "fake-agent-client.ts (test)"
+      ]
+    ],
+    [
+      "8a542048b",
+      7,
+      [
+        "boundaries.test.ts (test)",
+        "agent-manager.ts",
+        "plugin-provider.test.ts (test)",
+        "plugin-provider.ts",
+        "R:runtime-mcp-config.ts",
+        "agent-configuration.e2e.test.ts (test)",
+        "runtime.ts"
+      ]
+    ]
+  ],
+  "B20": [
+    [
+      "9bce7dbd2",
+      11,
+      [
+        "plugin-host-ui.spec.ts (test)",
+        "plugin-timeline.spec.ts (test)",
+        "plugin-workspace-panels.spec.ts (test)",
+        "plugin-timeline.ts (test)",
+        "evaluate.test.ts (test)",
+        "evaluate.ts",
+        "icons.ts",
+        "ui.ts",
+        "scaffold.test.ts (test)",
+        "react-native.ts",
+        "ui.ts"
+      ]
+    ],
+    ["f3d74b857", 2, ["evaluate.ts", "react-native.ts"]],
+    [
+      "995ad2f87",
+      2,
+      [
+        "plugin-host-ui.spec.ts (test)",
+        "evaluate.test.ts (test)",
+        "ui.ts",
+        "react-native-unistyles.ts",
+        "ui.ts",
+        "main.tsx"
+      ]
+    ],
+    [
+      "b6dde61a7",
+      22,
+      [
+        "validation.ts",
+        "view.tsx",
+        "contributions.ts",
+        "evaluate.ts",
+        "sidebar-groups.ts",
+        "kit.tsx",
+        "legacy.tsx",
+        "surface-screen.tsx",
+        "view.test.tsx (test)",
+        "panel.tsx",
+        "sidebar-nav-section.tsx",
+        "index.tsx",
+        "contracts.ts",
+        "index.ts",
+        "ui.ts"
+      ]
+    ],
+    [
+      "30464cf23",
+      28,
+      [
+        "plugin-buttons.spec.ts (test)",
+        "plugin-host-ui.spec.ts (test)",
+        "presentation.test.ts (test)",
+        "index.tsx",
+        "presentation.ts",
+        "panels.ts",
+        "validation.ts",
+        "view.tsx",
+        "client-runtime.ts",
+        "index.ts",
+        "contributions.test.ts (test)",
+        "contributions.ts",
+        "evaluate.ts",
+        "installation-provider.test.tsx (test)",
+        "installation-provider.tsx",
+        "registry-lifecycle.test.ts (test)",
+        "registry-requirements.test.ts (test)",
+        "registry.ts",
+        "sidebar-groups.test.ts (test)",
+        "sidebar-groups.ts",
+        "index.tsx",
+        "surface-contribution.test.ts (test)",
+        "surface-contribution.ts",
+        "surface-screen.tsx",
+        "theme.test.ts (test)",
+        "model.test.ts (test)",
+        "types.ts",
+        "locations.ts",
+        "panel.tsx",
+        "resolution.test.ts (test)",
+        "settings-screen.tsx",
+        "index.tsx",
+        "contracts.ts",
+        "index.ts",
+        "skill-examples.test.ts (test)"
+      ]
+    ],
+    [
+      "42806cdbf",
+      16,
+      [
+        "plugin-host-ui.spec.ts (test)",
+        "session-context.tsx",
+        "catalog-sync.tsx",
+        "client-runtime.ts",
+        "registry-lifecycle.test.ts (test)",
+        "registry-requirements.test.ts (test)",
+        "registry.test.ts (test)",
+        "registry.ts",
+        "view.test.tsx (test)",
+        "locations.test.ts (test)",
+        "audio-engine.native.ts",
+        "voice-runtime.ts",
+        "contracts.ts"
+      ]
+    ],
+    [
+      "5acfbb377",
+      2,
+      [
+        "bottom-sheet-reopen.spec.ts (test)",
+        "plugin-timeline.ts (test)",
+        "use-keyboard-shortcuts.ts",
+        "overlay-root.browser.test.tsx (test)"
+      ]
+    ],
+    [
+      "e2ad26d23",
+      1,
+      ["chat-find.spec.ts (test)", "ranges.browser.test.ts (test)", "strategy-web.tsx"]
+    ]
+  ],
+  "B21": [
+    ["fc3b2c4eb", 3, ["plugin-management.spec.ts (test)"]],
+    ["2d85fe4e0", 6, ["scaffold.test.ts (test)", "scaffold.ts", "messages.plugins.test.ts (test)"]],
+    [
+      "b5e9747e2",
+      7,
+      [
+        "messages.ts",
+        "bootstrap.ts",
+        "config-environment.ts",
+        "config.ts",
+        "persisted-config.ts",
+        "managed-source.ts"
+      ]
+    ],
+    [
+      "c06228042",
+      4,
+      [
+        "bootstrap.ts",
+        "config-environment.ts",
+        "config.ts",
+        "persisted-config.ts",
+        "managed-source.ts"
+      ]
+    ],
+    [
+      "7fd469ae1",
+      6,
+      [
+        "plugin-management.spec.ts (test)",
+        "sidebar-nav-settings.ts (test)",
+        "en.ts",
+        "lifecycle.e2e.test.ts (test)",
+        "index.test.ts (test)",
+        "bootstrap.ts",
+        "config-environment.ts",
+        "config.ts",
+        "persisted-config.ts",
+        "index.posix.test.ts (test)",
+        "index.ts",
+        "managed-source.ts"
+      ]
+    ],
+    ["06bde1e57", 0, ["scaffold.test.ts (test)", "scaffold.ts"]]
+  ],
+  "B22": [
+    [
+      "364e6456e",
+      6,
+      [
+        "_layout.tsx",
+        "pair-scan.tsx",
+        "add-host-modal.tsx",
+        "pair-link-modal.tsx",
+        "en.ts",
+        "host-runtime.test.ts (test)",
+        "host-runtime.ts",
+        "host-connection.ts"
+      ]
+    ]
+  ],
+  "B23": [
+    [
+      "d0bc188a5",
+      10,
+      [
+        "message.tsx",
+        "index.test.ts (test)",
+        "index.ts",
+        "presentation.ts",
+        "stream.test.ts (test)",
+        "stream.ts",
+        "send.ts",
+        "daemon-client.test.ts (test)",
+        "daemon-client.ts",
+        "messages.ts",
+        "agent-manager.test.ts (test)",
+        "agent-manager.ts",
+        "agent-prompt.test.ts (test)",
+        "agent-prompt.ts",
+        "paseo-tools.ts",
+        "service.ts",
+        "session.ts",
+        "websocket-server.ts"
+      ]
+    ],
+    ["dfa997704", 1, ["turn-collapse.spec.ts (test)", "index.tsx"]],
+    [
+      "d0568f9f1",
+      7,
+      [
+        "actions.ts",
+        "send.ts",
+        "daemon-client.ts",
+        "messages.ts",
+        "activity-curator.test.ts (test)",
+        "agent-manager.test.ts (test)",
+        "agent-manager.ts",
+        "agent-prompt.test.ts (test)",
+        "agent-prompt.ts",
+        "create.ts",
+        "index.ts",
+        "mcp-server.test.ts (test)",
+        "bridge.test.ts (test)",
+        "paseo-tools.ts",
+        "bootstrap.ts",
+        "hosts.e2e.test.ts (test)",
+        "session.test.ts (test)",
+        "session.ts",
+        "session.workspace-git-watch.test.ts (test)",
+        "session.workspace-resolution-invariants.test.ts (test)",
+        "session.workspaces.test.ts (test)",
+        "snapshot-mutation-ownership.test.ts (test)",
+        "session-stubs.ts (test)",
+        "websocket-server.ts",
+        "wire-compat.test.ts (test)"
+      ]
+    ],
+    [
+      "f22775a8e",
+      0,
+      [
+        "cli-surface.test.ts (test)",
+        "send.ts",
+        "agent-prompt.ts",
+        "mcp-server.test.ts (test)",
+        "paseo-tools.ts"
+      ]
+    ],
+    [
+      "21e7ccb03",
+      13,
+      [
+        "agent-manager.test.ts (test)",
+        "agent-prompt.test.ts (test)",
+        "agent-prompt.ts",
+        "create.ts",
+        "index.ts",
+        "mcp-server.test.ts (test)",
+        "paseo-tools.ts",
+        "bootstrap.ts",
+        "hosts.e2e.test.ts (test)",
+        "session.ts"
+      ]
+    ],
+    ["1c6274808", 0, ["create.ts", "mcp-parity.e2e.test.ts (test)"]],
+    ["23b05bbcc", 3, ["agent-projections.ts", "directory.ts"]],
+    ["c364b16d4", 3, ["agent-prompt.ts"]],
+    ["1ae979d3d", 1, ["session-context.tsx", "provider-store.ts"]],
+    [
+      "2a890208c",
+      5,
+      [
+        "compact-workspace-sheet.spec.ts (test)",
+        "subagent-origin-pane.spec.ts (test)",
+        "tracks.tsx",
+        "en.ts",
+        "agent-panel.tsx",
+        "agent-tracks.tsx",
+        "provider-subagent-panel.tsx"
+      ]
+    ]
+  ],
+  "B24": [
+    ["3b4118360", 1, ["context-window-meter.tsx"]],
+    [
+      "68e722ec2",
+      2,
+      [
+        "chat-outline.spec.ts (test)",
+        "chat-outline.ts (test)",
+        "creation.ts (test)",
+        "use-chat-outline.test.tsx (test)",
+        "use-chat-outline.ts"
+      ]
+    ],
+    ["642d69b14", 1, ["file-editing.spec.ts (test)"]],
+    [
+      "18412604d",
+      0,
+      [
+        "assistant-selection-copy.spec.ts (test)",
+        "content.browser.test.ts (test)",
+        "content.web.ts"
+      ]
+    ],
+    ["4ed13fadb", 1, ["content.browser.test.ts (test)"]],
+    [
+      "950e1f8f4",
+      1,
+      [
+        "assistant-selection-copy.spec.ts (test)",
+        "content.browser.test.ts (test)",
+        "content.web.ts",
+        "message.tsx"
+      ]
+    ],
+    [
+      "0255738ee",
+      0,
+      [
+        "assistant-selection-copy.spec.ts (test)",
+        "content.browser.test.ts (test)",
+        "content.web.ts"
+      ]
+    ],
+    ["563c014dc", 5, ["file-editing.spec.ts (test)"]],
+    ["dc7bed417", 3, []],
+    ["b2da58b5b", 2, ["chat-find.spec.ts (test)", "strategy.ts"]],
+    ["d152f1529", 5, ["question-form-card.tsx"]],
+    ["019e5279e", 6, ["question-form-card.tsx"]],
+    ["78a3083fe", 1, ["agent-panel.tsx", "retained-chat-content.browser.test.tsx (test)"]],
+    ["e2fd5a9c5", 2, []],
+    ["b58af43a0", 2, []],
+    ["73221ce5b", 5, ["agent-tab-image-stability.spec.ts (test)"]],
+    ["20a887f4c", 2, []],
+    ["4893629ff", 2, ["utils.test.ts (test)"]],
+    ["12aaded6c", 2, []],
+    ["7868f5caf", 3, []],
+    [
+      "b7c8be408",
+      1,
+      ["sidebar-status-list.tsx", "checks-section.tsx", "resources.test.ts (test)", "en.ts"]
+    ],
+    [
+      "48059aeae",
+      1,
+      [
+        "pr-pane.ts (test)",
+        "data.test.ts (test)",
+        "data.ts",
+        "pane.tsx",
+        "resources.test.ts (test)"
+      ]
+    ]
+  ],
+  "B25": [
+    ["a7f7405c0", 3, ["parsers.ts"]],
+    ["56d568074", 4, []],
+    ["eb051ea81", 3, []],
+    ["40f039306", 2, ["keyboard-shortcuts.test.ts (test)"]],
+    ["b5e51cf83", 1, ["keyboard-shortcuts.test.ts (test)"]],
+    ["cafa04d3f", 3, []],
+    [
+      "5c2a1552d",
+      0,
+      [
+        "keyboard-shortcuts.test.ts (test)",
+        "keyboard-shortcuts.ts",
+        "shortcut-string.ts",
+        "keyboard-shortcuts-section.tsx",
+        "keyboard-shortcut-unassign.spec.ts (test)"
+      ]
+    ],
+    [
+      "e760764b3",
+      0,
+      [
+        "en.ts",
+        "keyboard-shortcuts.test.ts (test)",
+        "keyboard-shortcuts.ts",
+        "keyboard-shortcuts-section.tsx",
+        "keyboard-shortcut-unassign.spec.ts (test)"
+      ]
+    ],
+    ["8388f1618", 6, ["add-project-flow.spec.ts (test)", "add-project-flow.tsx"]],
+    ["e1a5664d9", 2, ["storage.test.ts (test)", "appearance-section.tsx"]]
+  ],
+  "B26": [
+    ["87818812a", 0, ["daemon-manager.test.ts (test)", "daemon-manager.ts"]],
+    ["b852ae920", 1, ["packaged-app-smoke.js (test)"]],
+    ["9551b2cc1", 3, ["package.json", "main.ts"]],
+    ["14e638451", 3, []],
+    ["84054f8d7", 5, ["strategy-web.tsx"]],
+    [
+      "27d6b3b7c",
+      14,
+      [
+        "file-explorer-pane.tsx",
+        "use-preferred-editor.ts",
+        "desktop-open-targets.ts",
+        "button.tsx",
+        "directory.ts"
+      ]
+    ]
+  ],
+  "B27": [
+    [
+      "2974d7c96",
+      3,
+      ["browser-tabs.e2e.mjs (test)", "ipc.ts", "service.test.ts (test)", "service.ts"]
+    ],
+    ["5de45e208", 1, ["browser-capture.ts"]]
+  ],
+  "B28": [
+    ["c301d6e8a", 4, ["model-downloader.ts", "speech-runtime.test.ts (test)"]],
+    ["a4f1df3ae", 7, []],
+    ["4117dce2d", 2, []],
+    ["ca894d49a", 3, []],
+    ["6e1ec21c6", 17, []]
+  ],
+  "B29": [
+    [
+      "690f5298c",
+      2,
+      [
+        "composer-autocomplete.spec.ts (test)",
+        "workspace-setup-dialog.tsx",
+        "input-draft.live.test.tsx (test)",
+        "input-draft.test.ts (test)",
+        "input-draft.ts",
+        "workspace-tab.tsx",
+        "index.tsx",
+        "use-agent-autocomplete.ts",
+        "provider-selection.ts",
+        "new-workspace-screen.tsx"
+      ]
+    ],
+    ["17562fcb6", 4, ["input-draft.ts", "new-workspace-screen.tsx"]],
+    ["febe9611b", 0, ["composer-focus.spec.ts (test)", "composer.ts (test)", "index.tsx"]],
+    ["6017706cc", 0, ["composer-focus.spec.ts (test)", "input.tsx", "keyboard-scope.tsx"]],
+    ["b8bcd204a", 0, ["composer-focus.spec.ts (test)", "composer.ts (test)", "input.tsx"]],
+    ["60fa12c4d", 5, ["workspace-tab.tsx", "use-agent-form-state.ts"]],
+    [
+      "033b2cdfc",
+      0,
+      [
+        "autocomplete-placement.mjs (test)",
+        "ios.mjs (test)",
+        "autocomplete-popover.tsx",
+        "autocomplete.tsx",
+        "index.tsx"
+      ]
+    ],
+    ["6f07b0de4", 5, ["index.tsx", "input.tsx"]],
+    [
+      "7f6a805e0",
+      0,
+      [
+        "settings-toggle-tab-regression.spec.ts (test)",
+        "index.tsx",
+        "input.tsx",
+        "state.test.ts (test)",
+        "state.ts",
+        "index.ts",
+        "storage.test.ts (test)",
+        "storage.ts",
+        "en.ts",
+        "sending-section.tsx"
+      ]
+    ],
+    [
+      "88bd1cf05",
+      2,
+      [
+        "agent-message-submission.spec.ts (test)",
+        "input.tsx",
+        "labels.test.ts (test)",
+        "labels.ts",
+        "state.test.ts (test)",
+        "en.ts"
+      ]
+    ]
+  ],
+  "B30": [
+    [
+      "c7759713e",
+      1,
+      [
+        "bootstrap.ts",
+        "terminal-workspace-sdk.e2e.test.ts (test)",
+        "session.ts",
+        "workspace-scripts-service.ts",
+        "websocket-server.ts"
+      ]
+    ],
+    [
+      "1c8c68f93",
+      4,
+      [
+        "workspace-setup-streaming.spec.ts (test)",
+        "workspace-setup.ts (test)",
+        "workspace-registration.tsx",
+        "session-context.tsx",
+        "setup-panel.tsx",
+        "workspace-replica.test.ts (test)",
+        "workspace-replica.ts",
+        "workspace-screen.tsx",
+        "session-store.ts",
+        "workspace-setup-store.test.ts (test)",
+        "workspace-setup-store.ts",
+        "index.ts",
+        "daemon-client.test.ts (test)",
+        "daemon-client.ts",
+        "client-capabilities.ts",
+        "messages.ts",
+        "operation-permissions.ts",
+        "session.ts",
+        "session.workspaces.test.ts (test)",
+        "websocket-server.ts",
+        "wire-compat.test.ts (test)",
+        "worktree-session.ts"
+      ]
+    ],
+    [
+      "fbd90cb88",
+      24,
+      [
+        "sidebar-nav-settings.spec.ts (test)",
+        "workspace-setup-streaming.spec.ts (test)",
+        "workspace-setup.ts (test)",
+        "setup-panel.tsx",
+        "daemon-client.test.ts (test)",
+        "daemon-client.ts",
+        "messages.wire-compat.test.ts (test)",
+        "agent-mcp.e2e.test.ts (test)",
+        "create-agent-lifecycle-dispatch.ts",
+        "create.test.ts (test)",
+        "create.ts",
+        "mcp-server.test.ts (test)",
+        "paseo-tools.ts",
+        "behavior.test.ts (test)",
+        "creation.e2e.test.ts (test)",
+        "auto-archive-unrelated-github-merge.real.e2e.test.ts (test)",
+        "paseo-worktree-service.test.ts (test)",
+        "session.create-agent-worktree-autoarchive.e2e.test.ts (test)",
+        "session.ts",
+        "workspace-archive-record-scoped.e2e.test.ts (test)",
+        "workspace-create-worktree-source.e2e.test.ts (test)",
+        "worktree-bootstrap.ts",
+        "worktree-session.test.ts (test)",
+        "worktree-session.ts",
+        "worktree.posix.test.ts (test)",
+        "worktree.test.ts (test)",
+        "worktree.ts"
+      ]
+    ],
+    [
+      "f56c01392",
+      0,
+      [
+        "package.json",
+        "workspace-create-worktree-source.e2e.test.ts (test)",
+        "worktree-bootstrap.ts",
+        "worktree-session.ts"
+      ]
+    ],
+    [
+      "bdae614e9",
+      0,
+      [
+        "sidebar-workspace-mark-unread.spec.ts (test)",
+        "workspace-layout-actions.ts",
+        "workspace-layout-persistence.test.ts (test)"
+      ]
+    ],
+    ["632a7f885", 1, ["workspace-replica.test.ts (test)", "workspace-replica.ts"]],
+    [
+      "65ce4b590",
+      0,
+      [
+        "workspace-navigation-regression.spec.ts (test)",
+        "workspace-layout.ts (test)",
+        "workspace-layout-actions.ts",
+        "agent-visibility.test.ts (test)",
+        "agent-visibility.ts"
+      ]
+    ],
+    ["428ef707a", 2, ["[agentId].tsx", "index.tsx"]],
+    [
+      "2545250b2",
+      0,
+      ["validated-persist-storage.ts", "workspace-layout-persistence.test.ts (test)"]
+    ],
+    ["86817a24f", 0, ["index.test.ts (test)", "index.ts"]]
+  ],
+  "B31": [
+    [
+      "8e5f53676",
+      28,
+      [
+        "settings-host-page.spec.ts (test)",
+        "host-page.tsx",
+        "messages.ts",
+        "agent-manager.test.ts (test)",
+        "agent-manager.ts",
+        "agent-prompt.ts",
+        "agent-sdk-types.ts",
+        "plugin-provider.test.ts (test)",
+        "plugin-provider.ts",
+        "acp-agent.test.ts (test)",
+        "agent.background-subagent.test.ts (test)",
+        "agent.ts",
+        "app-server-transport.ts",
+        "agent.test.ts (test)",
+        "bootstrap.ts",
+        "config.test.ts (test)",
+        "config.ts",
+        "daemon-config-store.test.ts (test)",
+        "daemon-config-store.ts",
+        "persisted-config.ts",
+        "websocket-server.ts"
+      ]
+    ]
+  ],
+  "B32": [
+    [
+      "8aec0787d",
+      5,
+      [
+        "strategy-web.tsx",
+        "R:web-virtualization.test.ts (test)",
+        "R:web-virtualization.ts",
+        "mock-load-test-agent.ts"
+      ]
+    ],
+    [
+      "5f28b3cf8",
+      7,
+      [
+        "strategy-web.test.tsx (test)",
+        "strategy-web.tsx",
+        "strategy.ts",
+        "view.tsx",
+        "web-virtualization.test.ts (test)",
+        "web-virtualization.ts",
+        "renderer.tsx",
+        "message.tsx",
+        "assistant-image-metadata.test.ts (test)",
+        "assistant-image-metadata.ts",
+        "assistant-message-height-estimate.test.ts (test)",
+        "assistant-message-height-estimate.ts"
+      ]
+    ],
+    ["543e3712e", 0, ["strategy-web.test.tsx (test)", "strategy-web.tsx"]],
+    [
+      "8d424e039",
+      7,
+      [
+        "agent-stream-smoothness.spec.ts (test)",
+        "use-chat-outline.test.tsx (test)",
+        "use-chat-outline.ts",
+        "view.tsx",
+        "session-store.ts",
+        "turn-time.test.ts (test)",
+        "turn-time.ts"
+      ]
+    ],
+    ["559c0200e", 4, ["workspace-screen.tsx", "agent-visibility.ts"]],
+    ["90c6de058", 0, ["replica.test.ts (test)", "session-stream-reducers.ts"]],
+    ["d9b874f9d", 2, ["composer-focus.spec.ts (test)", "strategy-web.tsx"]],
+    ["bd5061e7b", 2, ["strategy-native.tsx"]],
+    ["095dd0316", 1, ["split-container.tsx"]],
+    [
+      "c575464e8",
+      1,
+      [
+        "validated-persist-storage.test.ts (test)",
+        "validated-persist-storage.ts",
+        "workspace-layout-store.ts"
+      ]
+    ],
+    [
+      "5dc350034",
+      3,
+      ["import-session-flow.spec.ts (test)", "import-session.ts (test)", "import-session-sheet.tsx"]
+    ]
+  ],
+  "B33": [
+    [
+      "9d908d678",
+      25,
+      [
+        "package.json",
+        "terminal-pane.tsx",
+        "toast-host.tsx",
+        "actions.ts",
+        "en.ts",
+        "activity.integration.test.tsx (test)",
+        "terminal-emulator-webview-html.ts",
+        "terminal-find.browser.test.ts (test)"
+      ]
+    ]
+  ],
+  "B34": [
+    [
+      "b26b9234c",
+      14,
+      [
+        "composer-diff-stat.spec.ts (test)",
+        "agent-message-gate.ts (test)",
+        "floating-action-button.tsx",
+        "hit-testing.test.ts (test)",
+        "model.test.ts (test)",
+        "diff-pane.tsx",
+        "index.tsx",
+        "use-working-diff.ts",
+        "geometry.ts",
+        "index.ts",
+        "store.test.ts (test)",
+        "surface.test.tsx (test)",
+        "surface.tsx"
+      ]
+    ],
+    ["d29814186", 4, ["composer-diff-stat.spec.ts (test)"]],
+    [
+      "c63e1204b",
+      12,
+      [
+        "changes-pane.spec.ts (test)",
+        "push-router.test.ts (test)",
+        "checkout-status-cache.test.ts (test)",
+        "checkout-status-cache.ts",
+        "diff-pane.tsx",
+        "use-diff-query.ts",
+        "use-working-diff.ts",
+        "index.ts",
+        "state.test.ts (test)",
+        "state.ts",
+        "state.ts",
+        "daemon-client.ts",
+        "messages.ts",
+        "websocket-server.ts"
+      ]
+    ]
+  ],
+  "B35": [
+    ["06cdc5a0b", 3, ["folder-links.spec.ts (test)"]],
+    ["a0aeca967", 2, ["file-editing.spec.ts (test)", "parse.ts"]],
+    ["fa70b215a", 4, ["view.tsx", "index.ts", "use-file-explorer-actions.ts"]],
+    ["5384abdba", 1, ["workspace-screen.tsx"]],
+    ["c70a6cfb9", 5, ["parse.ts", "index.tsx"]],
+    ["a8032a150", 8, ["view.tsx", "workspace-screen.tsx"]],
+    ["9eaf7ad0c", 3, ["file-editing.spec.ts (test)", "index.tsx", "pane.tsx"]],
+    ["8c9499dac", 1, ["tooltip.tsx"]]
+  ],
+  "B36": [
+    [
+      "457414231",
+      6,
+      [
+        "en.ts",
+        "metadata-generation-page.tsx",
+        "structured-generation-providers.test.ts (test)",
+        "worktree-branch-name-generator.test.ts (test)"
+      ]
+    ],
+    ["1939ee79e", 2, ["stores.test.ts (test)", "stores.test.ts (test)"]],
+    ["71b236d38", 4, []],
+    ["cf2b3f4bb", 3, []],
+    ["3a1b14669", 1, ["paseo-plugin.mjs", "paseo-plugin.test.mjs (test)"]]
+  ],
+  "B37": [
+    ["727d5eed5", 0, ["paseo-tool-call-detail.ts", "detail-sections.test.ts (test)"]],
+    [
+      "9521ee995",
+      17,
+      [
+        "paseo-tool-call-details.codex.real.spec.ts (test)",
+        "view.tsx",
+        "message.tsx",
+        "tool-call-details.tsx",
+        "presentation.ts",
+        "mcp-server.test.ts (test)"
+      ]
+    ],
+    [
+      "fc12843ce",
+      0,
+      [
+        "compact-workspace-sheet.spec.ts (test)",
+        "agent-facts-line.ts",
+        "agent-panel.tsx",
+        "track.tsx"
+      ]
+    ],
+    ["d61dcaf1d", 2, [".oxlintrc.json", "tracks.tsx", "track.tsx", "ci-workflow.test.mjs (test)"]],
+    [
+      "d6d04b0c5",
+      6,
+      [
+        "tool-call-overview-sheet.spec.ts (test)",
+        "tool-call-shimmer.spec.ts (test)",
+        "view.tsx",
+        "message.tsx",
+        "sheet.tsx",
+        "projection.test.ts (test)"
+      ]
+    ]
+  ],
+  "B38": [
+    [
+      "a65478d0b",
+      2,
+      [
+        "agent-relative-time.spec.ts (test)",
+        "command-center-file-search.ts (test)",
+        "command-center.tsx",
+        "results.test.ts (test)",
+        "results.ts",
+        "workspace-search.test.ts (test)",
+        "workspace-search.ts",
+        "agent-list.tsx",
+        "highlighted-text-segments.test.ts (test)",
+        "highlighted-text-segments.ts",
+        "projects-screen.test.tsx (test)",
+        "projects.ts"
+      ]
+    ],
+    [
+      "4b9b2fe13",
+      4,
+      [
+        "command-center-file-search.spec.ts (test)",
+        "command-center-file-search.ts (test)",
+        "seed-client.ts (test)",
+        "command-center.tsx"
+      ]
+    ],
+    [
+      "6405edd8d",
+      8,
+      [
+        "command-center.tsx",
+        "results.test.ts (test)",
+        "results.ts",
+        "workspace-search.test.ts (test)",
+        "sidebar-workspaces-view-model.ts",
+        "agent-panel.tsx",
+        "workspace-tab-presentation.tsx"
+      ]
+    ]
+  ],
+  "B39": [
+    [
+      "05874e289",
+      5,
+      [
+        "commit-diff-panel.spec.ts (test)",
+        "import-session-flow.spec.ts (test)",
+        "agent-list.tsx",
+        "import-session-sheet.tsx",
+        "provider-diagnostic-sheet.tsx",
+        "schedule-row.tsx",
+        "index.tsx",
+        "commits-section.tsx",
+        "workspace-desktop-tabs-row.tsx",
+        "card.tsx",
+        "time.test.ts (test)",
+        "time.ts"
+      ]
+    ],
+    [
+      "cc744cc66",
+      11,
+      [
+        "strategy-web.test.tsx (test)",
+        "strategy-web.tsx",
+        "turn-footer.tsx",
+        "view.tsx",
+        "apply.test.ts (test)",
+        "apply.ts",
+        "provider.tsx",
+        "archived-agent-callout.tsx",
+        "index.native.tsx",
+        "index.tsx",
+        "workspace-tab.tsx",
+        "index.tsx",
+        "tracks.tsx",
+        "index.tsx",
+        "index.ts",
+        "storage.test.ts (test)",
+        "storage.ts",
+        "en.ts",
+        "agent-panel.tsx",
+        "appearance-section.tsx"
+      ]
+    ],
+    [
+      "b9ac1d498",
+      1,
+      [
+        "plugin-settings.spec.ts (test)",
+        "plugin-settings.ts (test)",
+        "en.ts",
+        "settings-screen.tsx"
+      ]
+    ],
+    [
+      "81a5e5bc6",
+      4,
+      [
+        "sidebar-help.spec.ts (test)",
+        "message.tsx",
+        "project-leading-visual.tsx",
+        "sidebar-model.tsx",
+        "sidebar-projection.test.ts (test)",
+        "sidebar-projection.ts",
+        "sidebar-workspace-menu.tsx",
+        "sidebar-workspace-title.test.ts (test)",
+        "sidebar-workspace-title.ts",
+        "checks-section.tsx",
+        "checks-summary.test.ts (test)",
+        "checks-summary.ts",
+        "sidebar-status-view-model.ts",
+        "en.ts"
+      ]
+    ],
+    ["fc775b6db", 1, ["data.test.ts (test)", "i18next.ts", "vitest.config.ts"]],
+    ["16fe07560", 5, ["renderer.tsx", "styles.ts", "question-form-card.tsx", "vitest.config.ts"]],
+    [
+      "631ed0408",
+      4,
+      [
+        "settings-host-selection.spec.ts (test)",
+        "settings-navigation.spec.ts (test)",
+        "settings-screen.tsx"
+      ]
+    ],
+    [
+      "5e53bb78c",
+      7,
+      ["settings-navigation.spec.ts (test)", "settings-screen.tsx", "browser-tabs.e2e.mjs (test)"]
+    ],
+    ["b8bb335c5", 0, ["settings-navigation.spec.ts (test)", "combobox.tsx"]],
+    ["025e7ef1d", 1, ["fake-pi-rpc.mjs (test)", "model-browser.tsx"]],
+    [
+      "dd914c147",
+      1,
+      ["workspace-tab.tsx", "layout.ts", "agent-panel.tsx", "settings-screen.tsx", "unistyles.ts"]
+    ],
+    [
+      "e958540b0",
+      1,
+      [
+        "context-window-meter.spec.ts (test)",
+        "subagents.ts (test)",
+        "context-window-meter.tsx",
+        "tracks-panel.browser.test.tsx (test)",
+        "tracks.tsx",
+        "checks-ring.tsx",
+        "react-native-unistyles+3.2.4.patch",
+        "postinstall-patches.mjs"
+      ]
+    ]
+  ],
+  "B40": [
+    ["9952c5598", 15, ["workspace-desktop-tabs-row.tsx"]],
+    ["318a84a57", 2, ["adaptive-modal-sheet.tsx"]],
+    ["30fb66c8c", 2, ["presentation.tsx"]],
+    ["283a985fb", 3, ["provider.tsx"]],
+    [
+      "6db47b3c3",
+      2,
+      [
+        "composer-focus.spec.ts (test)",
+        "composer-whitespace.spec.ts (test)",
+        "composer.ts (test)",
+        "index.tsx",
+        "input.tsx"
+      ]
+    ],
+    ["0d7a234e6", 1, ["sidebar-workspaces-view-model.test.ts (test)"]],
+    ["98559bf72", 1, ["react-native-draggable-flatlist+4.0.3.patch"]],
+    ["ec9817ed2", 1, ["open-project-screen.tsx"]],
+    ["ec6393f31", 2, ["pair-device-relay.spec.ts (test)", "pair-device.ts (test)"]],
+    ["9ed4f1069", 4, ["sidebar-workspace-list.tsx"]],
+    ["19749baee", 1, ["index.tsx"]],
+    ["0d61cca50", 2, ["add-host-modal.tsx"]],
+    [
+      "12e7a448f",
+      17,
+      [
+        "workspace-navigation-regression.spec.ts (test)",
+        "workspace-layout.ts (test)",
+        "_layout.tsx",
+        "index.tsx",
+        "workspace-screen.tsx",
+        "index.ts",
+        "navigation.test.ts (test)",
+        "navigation.ts",
+        "workspace-layout-store.test.ts (test)",
+        "workspace-layout-store.ts",
+        "resolve.test.ts (test)",
+        "resolve.ts",
+        "ci-workflow.test.mjs (test)"
+      ]
+    ],
+    [
+      "c3c6a936a",
+      1,
+      [
+        "command-center-agent-controls.spec.ts (test)",
+        "plugin-buttons.spec.ts (test)",
+        "command-center-agent-controls.ts (test)",
+        "plugin-buttons.ts (test)",
+        "view.tsx",
+        "workspace-header-menu.tsx",
+        "workspace-screen.tsx"
+      ]
+    ],
+    ["48623801a", 2, []],
+    [
+      "6bc4b73c4",
+      0,
+      [
+        "sidebar-workspace-list.test.tsx (test)",
+        "sidebar-workspace-list.tsx",
+        "sidebar-group-visibility.ts"
+      ]
+    ],
+    [
+      "73390346c",
+      0,
+      [
+        "package.json",
+        "R:ios.py (test)",
+        "R:ios.sh (test)",
+        "package.json",
+        "package.json",
+        "package.json",
+        "package.json",
+        "package.json",
+        "package.json",
+        "package.json",
+        "package.json",
+        "package.json",
+        "package.json",
+        "R:react-native-uitextview+2.2.0.patch",
+        "package.json",
+        "postinstall-patches.mjs"
+      ]
+    ]
+  ],
+  "B41": [
+    ["b63a325be", 3, ["app.config.js"]],
+    ["e86777393", 3, ["_layout.tsx"]],
+    ["59b01b33f", 1, []],
+    ["5d70bf064", 1, ["postinstall-patches.mjs"]],
+    ["ff31b6e5b", 1, ["postinstall-patches.mjs"]],
+    [
+      "e277656cb",
+      1,
+      [
+        "package.json",
+        "package.json",
+        "index.test.tsx (test)",
+        "@gorhom+bottom-sheet+5.2.14.patch",
+        "react-native-enriched-markdown+1.2.0-nightly-20261014-766fc0e67.patch",
+        "postinstall-patches.mjs"
+      ]
+    ]
+  ],
+  "B42": [
+    [
+      "6376f2bf4",
+      14,
+      [
+        "package.json",
+        "storage.test.ts (test)",
+        "storage.ts",
+        "resources.test.ts (test)",
+        "settings-screen.tsx",
+        "terminal-emulator-webview-html.ts",
+        "R:terminal-find.browser.test.ts (test)"
+      ]
+    ]
+  ]
+}

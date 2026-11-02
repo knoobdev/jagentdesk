@@ -490,6 +490,17 @@ export function buildDockerRoute(serverId: string) {
   return `/h/${encodeSegment(normalized)}/docker` as const;
 }
 
+/** Servers screen; `terminalId` deep-links back into a live SSH terminal (spec 25.13). */
+export function buildServersRoute(serverId: string, options?: { terminalId?: string }) {
+  const normalized = trimNonEmpty(serverId);
+  if (!normalized) {
+    return "/" as const;
+  }
+  const route = `/h/${encodeSegment(normalized)}/servers` as const;
+  const terminal = trimNonEmpty(options?.terminalId);
+  return terminal ? (`${route}?sshTerminal=${encodeSegment(terminal)}` as const) : route;
+}
+
 export function buildSimulatorRoute(serverId: string) {
   const normalized = trimNonEmpty(serverId);
   if (!normalized) {

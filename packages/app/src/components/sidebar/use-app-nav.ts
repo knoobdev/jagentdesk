@@ -10,6 +10,7 @@ import {
   History,
   Home,
   Radar,
+  Server,
   Share2,
   Smartphone,
   Sparkles,
@@ -44,6 +45,7 @@ import {
   buildNewWorkspaceRoute,
   buildOpenProjectRoute,
   buildSchedulesRoute,
+  buildServersRoute,
   buildSessionsRoute,
   buildSharedSessionsRoute,
   buildSimulatorRoute,
@@ -55,6 +57,7 @@ import {
 export interface AppNavTargets {
   clustersRoute: Href | null;
   databasesRoute: Href | null;
+  serversRoute: Href | null;
   skillsRoute: Href | null;
   insightsRoute: Href | null;
   forgeRoute: Href | null;
@@ -63,6 +66,8 @@ export interface AppNavTargets {
   simulatorRoute: Href | null;
   proxyRoute: Href | null;
   supportsForgeHub: boolean;
+  /** Spec 25: daemon build ships the SSH servers surface (S1+). */
+  supportsSshServers: boolean;
 }
 
 export function useAppNavTargets(): AppNavTargets {
@@ -74,6 +79,9 @@ export function useAppNavTargets(): AppNavTargets {
   // only advertise the entry when the first/active daemon reports forgeHub.
   const supportsForgeHub = useSessionStore(
     (state) => state.sessions[firstServerId]?.serverInfo?.features?.forgeHub === true,
+  );
+  const supportsSshServers = useSessionStore(
+    (state) => state.sessions[firstServerId]?.serverInfo?.features?.sshServers === true,
   );
   // Spec 24.4: devices open on the first host that can run simulators; none → no entry.
   const deviceServerId = useSessionStore(
@@ -104,6 +112,8 @@ export function useAppNavTargets(): AppNavTargets {
     return {
       clustersRoute,
       databasesRoute,
+      // Gated at the route: the entry disappears with the daemon feature flag.
+      serversRoute: supportsSshServers ? perHost(buildServersRoute) : null,
       skillsRoute: perHost(buildSkillsRoute),
       insightsRoute: perHost(buildInsightsRoute),
       forgeRoute: perHost(buildForgeRoute),
@@ -112,8 +122,16 @@ export function useAppNavTargets(): AppNavTargets {
       simulatorRoute: deviceServerId ? (buildSimulatorRoute(deviceServerId) as Href) : null,
       proxyRoute: perHost(buildProxyRoute),
       supportsForgeHub,
+      supportsSshServers,
     };
-  }, [deviceServerId, firstServerId, lastCluster, lastDatabase, supportsForgeHub]);
+  }, [
+    deviceServerId,
+    firstServerId,
+    lastCluster,
+    lastDatabase,
+    supportsForgeHub,
+    supportsSshServers,
+  ]);
 }
 
 export interface AppNavItem {
@@ -209,6 +227,7 @@ export function useAppNavItems(): AppNavItem[] {
         pathname,
         "/database",
       ),
+      navItem("servers", Server, "Servers", "Servers", targets.serversRoute, pathname, "/servers"),
       navItem(
         "clusters",
         Boxes,
