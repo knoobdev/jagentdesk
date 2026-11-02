@@ -129,6 +129,16 @@ export type SshModuleRpcHandler = (
   emit: (message: SessionOutboundMessage) => void,
 ) => Promise<boolean>;
 
+/** Builds a complete terminal session for a non-SSH protocol (the Telnet module). */
+export type SshExternalSessionFactory = (input: {
+  terminalId: string;
+  serverId: string;
+  label: string;
+  host: string;
+  port: number;
+  size: { cols: number; rows: number };
+}) => Promise<TerminalSession>;
+
 /** Opens a terminal stream for a non-SSH protocol (Telnet module). */
 export type SshShellOpener = (input: {
   serverId: string;
@@ -174,6 +184,11 @@ export class SshService {
   private readonly terminalCreatedListeners = new Set<(event: SshTerminalCreatedEvent) => void>();
   private readonly shellOpeners = new Map<string, SshShellOpener>();
   private moduleHandlerList: readonly SshModuleRpcHandler[] = [];
+  private readonly sessionFactories = new Map<string, SshExternalSessionFactory>();
+  private readonly externalSessions = new Map<
+    string,
+    { serverId: string; session: TerminalSession; createdAtMs: number }
+  >();
   private disposed = false;
 
   /** Bound for modules (CONTRACT.md): `new SftpService(sshService.acquireClient)`. */
@@ -315,12 +330,60 @@ export class SshService {
   }
 
   listSessions(): SshSessionInfo[] {
-    return Array.from(this.terminals.values(), (record) => ({
+    const sessions: SshSessionInfo[] = Array.from(this.terminals.values(), (record) => ({
       terminalId: record.terminalId,
       serverId: record.serverId,
       state: record.state,
       createdAtMs: record.createdAtMs,
     }));
+    for (const [terminalId, entry] of this.externalSessions) {
+      sessions.push({
+        terminalId,
+        serverId: entry.serverId,
+        state: "connected",
+        createdAtMs: entry.createdAtMs,
+      });
+    }
+    return sessions;
+  }
+
+  /** `protocol: "telnet"` (or another plugged protocol) sessions come from its module. */
+  registerSessionFactory(
+    protocol: Exclude<SshProtocol, "ssh">,
+    factory: SshExternalSessionFactory,
+  ): void {
+    this.sessionFactories.set(protocol, factory);
+  }
+
+  /**
+   * RPC entry for ssh.session.create: SSH sessions return at once and connect in the
+   * background; other protocols connect first and fail the request when unreachable.
+   */
+  async openSession(serverId: string, size: { cols: number; rows: number }): Promise<string> {
+    const config = this.resolveConfig(serverId);
+    if (!config) throw new Error(`SSH server not found: ${serverId}`);
+    if (config.protocol === "ssh") return this.createSession(serverId, size);
+    const factory = this.sessionFactories.get(config.protocol);
+    if (!factory)
+      throw new Error(`${config.protocol} connections are not available on this daemon.`);
+    const terminalId = createSshTerminalId();
+    const session = await factory({
+      terminalId,
+      serverId,
+      label: this.storage.getServer(serverId)?.label ?? config.host,
+      host: config.host,
+      port: config.port,
+      size,
+    });
+    this.externalSessions.set(terminalId, { serverId, session, createdAtMs: Date.now() });
+    this.setServerState(serverId, "connected");
+    this.broadcast({ type: "ssh.connection.state", serverId, terminalId, state: "connected" });
+    session.onExit(() => {
+      if (!this.externalSessions.delete(terminalId)) return;
+      this.broadcast({ type: "ssh.connection.state", serverId, terminalId, state: "disconnected" });
+      this.refreshServerState(serverId);
+    });
+    return terminalId;
   }
 
   /** Resolved (inherited) config for a server — no secrets. */
@@ -1141,7 +1204,9 @@ export class SshService {
   // ── composite-manager registry surface ─────────────────────────────────
 
   getSshTerminal(terminalId: string): TerminalSession | undefined {
-    return this.terminals.get(terminalId)?.session;
+    return (
+      this.terminals.get(terminalId)?.session ?? this.externalSessions.get(terminalId)?.session
+    );
   }
 
   getSshTerminalSession(terminalId: string): SshTerminalSession | undefined {
@@ -1157,6 +1222,7 @@ export class SshService {
 
   killAllTerminals(): void {
     for (const record of Array.from(this.terminals.values())) this.killRecord(record);
+    for (const entry of Array.from(this.externalSessions.values())) entry.session.kill();
   }
 }
 

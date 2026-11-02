@@ -311,7 +311,7 @@ export class SshSession {
         return this.respond(
           msg,
           "ssh.session.create.response",
-          async () => ({ terminalId: s.createSession(msg.serverId, msg.size) }),
+          async () => ({ terminalId: await s.openSession(msg.serverId, msg.size) }),
           { terminalId: null },
         );
       case "ssh.session.reconnect.request":

@@ -7953,6 +7953,14 @@ export class DaemonClient {
     return { type: responseType, payload };
   }
 
+  /**
+   * SSH S5/S6 modules (`SshRpcIo`): send one of their `ssh.*` messages as-is; replies
+   * arrive through subscribeRawMessages and the module correlates them by requestId.
+   */
+  sendSshModuleMessage(message: { type: `ssh.${string}` } & Record<string, unknown>): void {
+    this.sendSessionMessage(SessionInboundMessageSchema.parse(message));
+  }
+
   /** Raw pushes for SSH modules (`ssh.transfer.progress`, `ssh.forward.state`, …). */
   onSshModulePush(type: string, handler: (message: unknown) => void): () => void {
     return this.on((message) => {

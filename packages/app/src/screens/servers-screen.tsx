@@ -43,17 +43,26 @@ import {
   useSshModuleApis,
   type SshModuleApis,
 } from "@/ssh/ui/server-modules";
+import {
+  ServerSnippetsSection,
+  SnippetsTab,
+  SshWorkspaceScreen,
+  useSnippetsApi,
+} from "@/ssh/ui/snippets-mount";
+import type { SnippetsApi } from "@/ssh/snippets/api";
+import type { SnippetWorkspacePlan } from "@/ssh/snippets/snippet-input";
 
 // Servers screen (spec 25.13, milestone S1): the saved SSH servers of the daemon this
 // route points at, Keychain, Known hosts, and SSH terminal tabs. Same layout on desktop
 // and mobile (full-width list; a terminal takes the whole screen).
 
-type ServersTabId = "servers" | "keychain" | "hosts" | "forwarding";
+type ServersTabId = "servers" | "keychain" | "hosts" | "forwarding" | "snippets";
 
 // Sections next to a server's terminal (spec 25.13), provided by the milestone modules.
 const SERVER_SECTIONS = [
   { id: "sftp", label: "SFTP" },
   { id: "forwarding", label: "Port forwarding" },
+  { id: "snippets", label: "Snippets" },
 ] as const;
 
 interface ActiveTerminal {
@@ -372,6 +381,9 @@ export function ServersScreen() {
   const { liveByServerId, stateByTerminalId, respondHostkey, respondAuth } =
     useSshConnectEvents(client);
   const moduleApis = useSshModuleApis(client);
+  const snippetsApi = useSnippetsApi(client, hostServerId);
+  const [workspacePlan, setWorkspacePlan] = useState<SnippetWorkspacePlan | null>(null);
+  const closeWorkspace = useCallback(() => setWorkspacePlan(null), []);
 
   // The open terminal lives in the URL (`?sshTerminal=`), so a reopened app returns to it
   // while the daemon still has the session (spec 25.16 #4).
@@ -386,6 +398,19 @@ export function ServersScreen() {
     router.setParams({ sshTerminal: undefined });
   }, []);
 
+  if (workspacePlan) {
+    return (
+      <SshWorkspaceScreen
+        client={client}
+        hostServerId={hostServerId}
+        plan={workspacePlan}
+        servers={data.servers}
+        stateByTerminalId={stateByTerminalId}
+        insetsTop={insets.top}
+        onClose={closeWorkspace}
+      />
+    );
+  }
   if (activeSession && terminalServer) {
     return (
       <SshTerminalScreen
@@ -395,6 +420,8 @@ export function ServersScreen() {
         servers={data.servers}
         groups={data.groups}
         moduleApis={moduleApis}
+        snippetsApi={snippetsApi}
+        onOpenWorkspace={setWorkspacePlan}
         terminalId={activeSession.terminalId}
         live={liveByServerId[terminalServer.id]}
         terminalState={stateByTerminalId[activeSession.terminalId]}
@@ -416,6 +443,8 @@ export function ServersScreen() {
       setError={setError}
       addSession={addSession}
       moduleApis={moduleApis}
+      snippetsApi={snippetsApi}
+      onOpenWorkspace={setWorkspacePlan}
       liveByServerId={liveByServerId}
       onHostkeyDecision={respondHostkey}
       onAuthSubmit={respondAuth}
@@ -430,6 +459,8 @@ function ServersHome({
   setError,
   addSession,
   moduleApis,
+  snippetsApi,
+  onOpenWorkspace,
   liveByServerId,
   onHostkeyDecision,
   onAuthSubmit,
@@ -440,6 +471,8 @@ function ServersHome({
   setError: (error: string | null) => void;
   addSession: ReturnType<typeof useServersData>["addSession"];
   moduleApis: SshModuleApis | null;
+  snippetsApi: SnippetsApi | null;
+  onOpenWorkspace: (plan: SnippetWorkspacePlan) => void;
   liveByServerId: Readonly<Record<string, SshServerLiveState>>;
   onHostkeyDecision: (serverId: string, decision: "accept" | "reject") => void;
   onAuthSubmit: (serverId: string, answers: string[] | null) => void;
@@ -561,6 +594,15 @@ function ServersHome({
                 onSelect={setTab}
                 testID="servers-tab-hosts"
               />
+              {snippetsApi ? (
+                <TabButton
+                  label="Snippets"
+                  value="snippets"
+                  active={tab === "snippets"}
+                  onSelect={setTab}
+                  testID="servers-tab-snippets"
+                />
+              ) : null}
               {moduleApis ? (
                 <TabButton
                   label="Port forwarding"
@@ -596,6 +638,13 @@ function ServersHome({
             ) : null}
             {tab === "hosts" ? (
               <KnownHostsTab knownHosts={data.knownHosts} onDelete={handleDeleteKnownHost} />
+            ) : null}
+            {tab === "snippets" && snippetsApi ? (
+              <SnippetsTab
+                api={snippetsApi}
+                servers={data.servers}
+                onOpenWorkspace={onOpenWorkspace}
+              />
             ) : null}
             {tab === "forwarding" && moduleApis ? (
               <ForwardingSection apis={moduleApis} client={client} servers={data.servers} />
@@ -672,6 +721,8 @@ function SshTerminalScreen({
   servers,
   groups,
   moduleApis,
+  snippetsApi,
+  onOpenWorkspace,
   terminalId,
   live,
   terminalState,
@@ -689,6 +740,8 @@ function SshTerminalScreen({
   servers: SshServerInfo[];
   groups: SshGroup[];
   moduleApis: SshModuleApis | null;
+  snippetsApi: SnippetsApi | null;
+  onOpenWorkspace: (plan: SnippetWorkspacePlan) => void;
   terminalId: string;
   live: SshServerLiveState | undefined;
   terminalState: Parameters<typeof SshTerminalView>[0]["terminalState"];
@@ -756,6 +809,17 @@ function SshTerminalScreen({
         hostServerId={hostServerId}
         server={server}
         servers={servers}
+      />
+    );
+  } else if (snippetsApi && section === "snippets") {
+    sectionContent = (
+      <ServerSnippetsSection
+        api={snippetsApi}
+        client={client}
+        server={server}
+        servers={servers}
+        terminalId={terminalId}
+        onOpenWorkspace={onOpenWorkspace}
       />
     );
   } else if (moduleApis && section === "forwarding") {

@@ -203,6 +203,7 @@ import {
 import { SshRequestSchemas, SshResponseSchemas, SshPushSchemas } from "./ssh/rpc-schemas.js";
 import { SftpInboundSchemas, SftpOutboundSchemas } from "./ssh/sftp-schemas.js";
 import { ForwardingInboundSchemas, ForwardingOutboundSchemas } from "./ssh/forwarding-schemas.js";
+import { SnippetsInboundSchemas, SnippetsOutboundSchemas } from "./ssh/snippets-schemas.js";
 import {
   ExportHostDataRequestMessageSchema,
   ExportHostDataResponseMessageSchema,
@@ -4004,6 +4005,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ...SshRequestSchemas,
   ...SftpInboundSchemas,
   ...ForwardingInboundSchemas,
+  ...SnippetsInboundSchemas,
   ...DockerRequestSchemas,
   ...SimulatorRequestSchemas,
   ...ProxyRequestSchemas,
@@ -7788,6 +7790,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ...SshPushSchemas,
   ...SftpOutboundSchemas,
   ...ForwardingOutboundSchemas,
+  ...SnippetsOutboundSchemas,
   ...DockerResponseSchemas,
   ...DockerPushSchemas,
   ...SimulatorResponseSchemas,

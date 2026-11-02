@@ -60,9 +60,14 @@ export type StoredServer = z.infer<typeof StoredServerSchema>;
 
 const SERVER_KNOWN_KEYS = new Set(Object.keys(SshServerSchema.shape));
 
-const SnippetFileSchema = z.array(
-  z.object({ id: z.string(), label: z.string().optional(), script: z.string() }).loose(),
-);
+const SnippetEntrySchema = z
+  .object({ id: z.string(), label: z.string().optional(), script: z.string() })
+  .loose();
+// S5 writes `{ packages, snippets }`; a bare array is accepted too.
+const SnippetFileSchema = z.union([
+  z.object({ snippets: z.array(SnippetEntrySchema) }).loose(),
+  z.array(SnippetEntrySchema),
+]);
 
 export interface SshStorageOptions {
   jagentdeskHome?: string;
@@ -462,7 +467,8 @@ export class SshStorage {
       const raw = await fs.readFile(path.join(this.dir, "snippets.json"), "utf8");
       const parsed = SnippetFileSchema.safeParse(JSON.parse(raw));
       if (!parsed.success) return null;
-      return parsed.data.find((snippet) => snippet.id === id)?.script ?? null;
+      const snippets = Array.isArray(parsed.data) ? parsed.data : parsed.data.snippets;
+      return snippets.find((snippet) => snippet.id === id)?.script ?? null;
     } catch {
       return null;
     }
