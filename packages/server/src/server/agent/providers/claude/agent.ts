@@ -2317,6 +2317,7 @@ class ClaudeAgentSession implements AgentSession {
     { type: "provider_subagent" }
   >[] = [];
   private historyPending = false;
+  private replayingHistory = false;
   private turnState: TurnState = "idle";
   private nextTurnOrdinal = 1;
   private cancelCurrentTurn: (() => void) | null = null;
@@ -5200,6 +5201,7 @@ class ClaudeAgentSession implements AgentSession {
 
   private loadPersistedHistory(sessionId: string): void {
     let historyPath: string | null = null;
+    this.replayingHistory = true;
     try {
       this.taskState.reset();
       historyPath = this.resolveHistoryPath(sessionId);
@@ -5219,6 +5221,8 @@ class ClaudeAgentSession implements AgentSession {
         { err: error, sessionId, historyPath },
         "Failed to load Claude history from transcript",
       );
+    } finally {
+      this.replayingHistory = false;
     }
   }
 
@@ -5986,6 +5990,11 @@ class ClaudeAgentSession implements AgentSession {
   }
 
   private detectFileKind(filePath: string): string {
+    // A historical target may be on an unreachable mount; its current state says nothing
+    // about whether the past operation created or updated it.
+    if (this.replayingHistory) {
+      return "update";
+    }
     try {
       return fs.existsSync(filePath) ? "update" : "add";
     } catch {
