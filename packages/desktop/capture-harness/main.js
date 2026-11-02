@@ -1569,9 +1569,8 @@ async function automationDrag(guest, sourceRef, targetRef) {
 }
 
 async function automationType(guest, refEntry, text) {
-  const send = await attachAutomationDebugger(guest);
   await automationClick(guest, refEntry);
-  await send("Input.insertText", { text });
+  await guest.insertText(text);
 }
 
 function sendContainedEnter(guest) {
