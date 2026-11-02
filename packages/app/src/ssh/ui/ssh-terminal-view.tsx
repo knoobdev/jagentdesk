@@ -1,7 +1,8 @@
 import { useCallback, useMemo, type ReactNode } from "react";
 import { Text, View } from "react-native";
 import { Alert } from "@/components/ui/alert";
-import { TerminalPane } from "@/components/terminal-pane";
+import { TerminalPane, type TerminalPaneExtraKey } from "@/components/terminal-pane";
+import { useIsCompactFormFactor } from "@/constants/layout";
 import { terminalAppearanceOverride } from "@/ssh/snippets/appearance";
 import type {
   SshConnectionStateEvent,
@@ -109,6 +110,8 @@ function TerminalHeader({
   onTypePassword?: () => void;
 }) {
   const canReconnect = state === "error" || state === "disconnected";
+  // On phones the Password key lives on the terminal's accessory keyboard instead.
+  const compact = useIsCompactFormFactor();
   return (
     <View style={[styles.terminalHeader, { paddingTop: insetsTop + 8 }]}>
       <IconBtn
@@ -138,7 +141,7 @@ function TerminalHeader({
           testID="ssh-terminal-reconnect"
         />
       ) : null}
-      {onTypePassword && state === "connected" ? (
+      {onTypePassword && state === "connected" && !compact ? (
         <IconBtn
           icon={ThemedKeyRound}
           tint={fgTint}
@@ -242,6 +245,16 @@ export function SshTerminalView({
   overview?: ReactNode;
 }) {
   const appearance = useMemo(() => terminalAppearanceOverride(server, groups), [server, groups]);
+  // Spec 25.4: the mobile accessory keyboard gets a Password key; the daemon types the saved
+  // password, which never reaches the app.
+  const connected = terminalState?.state === "connected";
+  const extraKeys = useMemo<TerminalPaneExtraKey[] | undefined>(
+    () =>
+      onTypePassword && connected
+        ? [{ id: "ssh-password", label: "Password", onPress: onTypePassword }]
+        : undefined,
+    [connected, onTypePassword],
+  );
   const state = terminalState?.state ?? "connecting";
   const failure = state === "error" ? terminalState?.error : undefined;
   return (
@@ -283,6 +296,7 @@ export function SshTerminalView({
           onOpenFileExplorer={noop}
           onOpenWorkspaceFile={noop}
           appearance={appearance}
+          extraKeys={extraKeys}
         />
       </View>
     </View>

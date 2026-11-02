@@ -92,6 +92,17 @@ interface TerminalPaneProps {
   onOpenWorkspaceFile: (request: WorkspaceFileOpenRequest) => void;
   /** Per-terminal override (SSH theme/font size per server or group, spec 25.4). */
   appearance?: TerminalPaneAppearance;
+  /**
+   * Extra keys on the mobile accessory keyboard (e.g. the SSH "Password" key, spec 25.4).
+   * Absent for ordinary terminals, which keep the standard keyboard.
+   */
+  extraKeys?: readonly TerminalPaneExtraKey[];
+}
+
+export interface TerminalPaneExtraKey {
+  id: string;
+  label: string;
+  onPress: () => void;
 }
 
 export interface TerminalPaneAppearance {
@@ -178,6 +189,27 @@ function VirtualKeyButton({ id, label, keyValue, onSend }: VirtualKeyButtonProps
   );
 }
 
+function ExtraKeyButton({ extraKey }: { extraKey: TerminalPaneExtraKey }) {
+  const pressableStyle = useCallback(
+    ({ hovered, pressed }: PressableStateCallbackType & { hovered?: boolean }) => [
+      styles.keyButton,
+      (Boolean(hovered) || pressed) && styles.keyButtonHovered,
+    ],
+    [],
+  );
+  return (
+    <Pressable
+      testID={`terminal-key-${extraKey.id}`}
+      onPress={extraKey.onPress}
+      style={pressableStyle}
+      accessibilityRole="button"
+      accessibilityLabel={extraKey.label}
+    >
+      <Text style={styles.keyButtonText}>{extraKey.label}</Text>
+    </Pressable>
+  );
+}
+
 interface KeyboardToggleButtonProps {
   isKeyboardVisible: boolean;
   iconColor: string;
@@ -221,6 +253,7 @@ export function TerminalPane({
   onOpenFileExplorer,
   onOpenWorkspaceFile,
   appearance,
+  extraKeys,
 }: TerminalPaneProps) {
   const { t } = useTranslation();
   const retainedPanelActive = useRetainedPanelActive();
@@ -1136,6 +1169,13 @@ export function TerminalPane({
                 {row.map(renderVirtualKeyboardControl)}
               </View>
             ))}
+            {extraKeys && extraKeys.length > 0 ? (
+              <View style={styles.keyboardRow} testID="terminal-extra-keys">
+                {extraKeys.map((extraKey) => (
+                  <ExtraKeyButton key={extraKey.id} extraKey={extraKey} />
+                ))}
+              </View>
+            ) : null}
           </View>
         </View>
       ) : null}
