@@ -3488,9 +3488,23 @@ function registerOrchestrationTools(params: {
   }
 }
 
-// oxlint-disable-next-line complexity -- pre-existing large tool registrar (one branch per tool group)
 export function createJAgentDeskToolCatalog(
   options: JAgentDeskToolHostDependencies,
+): JAgentDeskToolCatalog {
+  return createToolCatalog(options, options.callerAgentId ? "agent" : "top-level");
+}
+
+export function createJAgentDeskAgentToolManifest(
+  options: JAgentDeskToolHostDependencies,
+): Pick<JAgentDeskToolCatalog, "tools"> {
+  // Plugins register before a caller exists, but every execution uses an agent-bound catalog.
+  return { tools: createToolCatalog(options, "agent").tools };
+}
+
+// oxlint-disable-next-line complexity -- pre-existing large tool registrar (one branch per tool group)
+function createToolCatalog(
+  options: JAgentDeskToolHostDependencies,
+  scope: "agent" | "top-level",
 ): JAgentDeskToolCatalog {
   const {
     agentManager,
@@ -4076,7 +4090,7 @@ export function createJAgentDeskToolCatalog(
       .describe("Legacy GitHub PR number. Prefer workspace.source.target.githubPrNumber."),
   };
   const createAgentInputSchema = z
-    .object(callerAgentId ? agentToAgentInputSchema : canonicalTopLevelInputSchema)
+    .object(scope === "agent" ? agentToAgentInputSchema : canonicalTopLevelInputSchema)
     .passthrough();
   const agentToAgentCreateAgentArgsSchema = z.object(agentToAgentInputSchema).strict();
   const legacyAgentToAgentCreateAgentArgsSchema = z.object(legacyAgentToAgentInputSchema).strict();
@@ -4129,9 +4143,8 @@ export function createJAgentDeskToolCatalog(
         "Agent-scoped only: get notified when the prompted agent finishes, errors, or needs permission.",
       ),
   };
-  const sendAgentPromptInputSchema = callerAgentId
-    ? agentToAgentSendAgentPromptInputSchema
-    : topLevelSendAgentPromptInputSchema;
+  const sendAgentPromptInputSchema =
+    scope === "agent" ? agentToAgentSendAgentPromptInputSchema : topLevelSendAgentPromptInputSchema;
   const inspectProviderInputSchema = {
     provider: ProviderOrProviderModelInputSchema.describe(
       "Provider ID, optionally with a model ID (for example codex or codex/gpt-5.4).",
@@ -5603,7 +5616,7 @@ export function createJAgentDeskToolCatalog(
             .optional()
             .describe("IANA time zone for the cron cadence. For example: America/New_York."),
           name: z.string().optional(),
-          provider: (callerAgentId ? AgentProviderEnum.optional() : AgentProviderEnum).describe(
+          provider: (scope === "agent" ? AgentProviderEnum.optional() : AgentProviderEnum).describe(
             "Provider, or provider/model (for example: codex or codex/gpt-5.4). Defaults to the caller's provider in an agent-scoped session.",
           ),
           cwd: z.string().optional(),

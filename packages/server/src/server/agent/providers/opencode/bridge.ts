@@ -60,7 +60,7 @@ export class OpenCodeBridge {
   private baseUrl: string | null = null;
   private pluginUrl: string | null = null;
   private v2PluginUrl: string | null = null;
-  private manifestCatalog: JAgentDeskToolCatalog | null = null;
+  private manifestCatalog: Pick<JAgentDeskToolCatalog, "tools"> | null = null;
 
   constructor(options: OpenCodeBridgeOptions) {
     this.jagentdeskHome = options.jagentdeskHome;
@@ -89,7 +89,7 @@ export class OpenCodeBridge {
     this.baseUrl = `http://127.0.0.1:${address.port}`;
   }
 
-  setManifestCatalog(catalog: JAgentDeskToolCatalog | null): void {
+  setManifestCatalog(catalog: Pick<JAgentDeskToolCatalog, "tools"> | null): void {
     this.manifestCatalog = catalog;
   }
 
