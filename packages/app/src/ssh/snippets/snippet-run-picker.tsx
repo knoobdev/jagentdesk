@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import type { SnippetsApi } from "./api";
 import { useSaveSnippet, useStartRun } from "./queries";
 import type { SnippetServerOption } from "./snippet-editor";
+import { serverIdsInGroup, toggleGroupSelection, type PickerGroup } from "./library-model";
 import { planSnippetWorkspace, type SnippetWorkspacePlan } from "./snippet-input";
 import { SshChip, SshSearchInput, sshStyles } from "./ui";
 
@@ -15,6 +16,7 @@ export interface SnippetRunPickerProps {
   api: SnippetsApi;
   snippet: SshSnippet;
   servers: readonly SnippetServerOption[];
+  groups: readonly PickerGroup[];
   /** Termius flow: a new workspace, one terminal pane per server, typing the snippet. */
   onRunInWorkspace: (plan: SnippetWorkspacePlan) => void;
   /** Collect output and exit codes over `exec` instead of terminals. */
@@ -33,6 +35,7 @@ export function SnippetRunPicker({
   api,
   snippet,
   servers,
+  groups,
   onRunInWorkspace,
   onRunStarted,
   onCancel,
@@ -63,6 +66,22 @@ export function SnippetRunPicker({
     [visible],
   );
   const clearSelection = useCallback(() => setSelected([]), []);
+  // Only groups that hold at least one server (directly or through sub-groups) are offered.
+  const groupOptions = useMemo(
+    () =>
+      groups
+        .map((group) => ({ group, serverIds: serverIdsInGroup(group.id, servers, groups) }))
+        .filter((option) => option.serverIds.length > 0),
+    [groups, servers],
+  );
+  const toggleGroup = useCallback(
+    (groupId: string) => {
+      const option = groupOptions.find((candidate) => candidate.group.id === groupId);
+      if (!option) return;
+      setSelected((current) => toggleGroupSelection(current, option.serverIds));
+    },
+    [groupOptions],
+  );
 
   const runInWorkspace = useCallback(() => {
     onRunInWorkspace(
@@ -116,6 +135,25 @@ export function SnippetRunPicker({
           {t("ssh.snippets.run.clearSelection")}
         </Button>
       </View>
+      {groupOptions.length > 0 ? (
+        <View style={sshStyles.stack}>
+          <Text style={sshStyles.rowMeta}>
+            {`${t("ssh.snippets.run.groups")} · ${t("ssh.snippets.run.groupsHint")}`}
+          </Text>
+          <View style={sshStyles.chips}>
+            {groupOptions.map(({ group, serverIds }) => (
+              <SshChip
+                key={group.id}
+                label={`${group.label} (${serverIds.length})`}
+                value={group.id}
+                active={serverIds.every((id) => selected.includes(id))}
+                onSelect={toggleGroup}
+                testID={`ssh-snippet-target-group-${group.id}`}
+              />
+            ))}
+          </View>
+        </View>
+      ) : null}
       <View style={sshStyles.chips}>
         {visible.map((server) => (
           <SshChip

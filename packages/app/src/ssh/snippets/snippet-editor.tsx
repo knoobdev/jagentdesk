@@ -16,6 +16,7 @@ export interface SnippetServerOption {
   id: string;
   label: string;
   address?: string;
+  groupId?: string;
 }
 
 export interface SnippetEditorProps {

@@ -4,6 +4,7 @@ import { TerminalPane } from "@/components/terminal-pane";
 import type {
   DaemonClient,
   SshConnectionStateEvent,
+  SshGroup,
   SshServerInfo,
 } from "@jagentdesk/client/internal/daemon-client";
 import type {
@@ -11,6 +12,7 @@ import type {
   SshWorkspaceTemplate,
 } from "@jagentdesk/protocol/ssh/snippets-schemas";
 import { createSnippetsApi, type SnippetsApi } from "@/ssh/snippets/api";
+import { terminalAppearanceOverride } from "@/ssh/snippets/appearance";
 import { CommandHistoryList } from "@/ssh/snippets/command-history-list";
 import type { SshRpcIo } from "@/ssh/snippets/rpc-io";
 import { SnippetLibrary } from "@/ssh/snippets/snippet-library";
@@ -50,7 +52,12 @@ export function useSnippetsApi(
 function useServerOptions(servers: SshServerInfo[]) {
   const options = useMemo(
     () =>
-      servers.map((server) => ({ id: server.id, label: server.label, address: server.address })),
+      servers.map((server) => ({
+        id: server.id,
+        label: server.label,
+        address: server.address,
+        ...(server.groupId ? { groupId: server.groupId } : {}),
+      })),
     [servers],
   );
   const labels = useMemo(
@@ -64,10 +71,12 @@ function useServerOptions(servers: SshServerInfo[]) {
 export function SnippetsTab({
   api,
   servers,
+  groups,
   onOpenWorkspace,
 }: {
   api: SnippetsApi;
   servers: SshServerInfo[];
+  groups: SshGroup[];
   onOpenWorkspace: (plan: SnippetWorkspacePlan) => void;
 }) {
   const { options, labels } = useServerOptions(servers);
@@ -86,6 +95,7 @@ export function SnippetsTab({
       <SnippetLibrary
         api={api}
         servers={options}
+        groups={groups}
         onRunInWorkspace={onOpenWorkspace}
         onRunStarted={setRun}
       />
@@ -100,6 +110,7 @@ export function ServerSnippetsSection({
   client,
   server,
   servers,
+  groups,
   terminalId,
   onOpenWorkspace,
 }: {
@@ -107,6 +118,7 @@ export function ServerSnippetsSection({
   client: DaemonClient | null;
   server: SshServerInfo;
   servers: SshServerInfo[];
+  groups: SshGroup[];
   terminalId: string;
   onOpenWorkspace: (plan: SnippetWorkspacePlan) => void;
 }) {
@@ -125,6 +137,7 @@ export function ServerSnippetsSection({
       <SnippetLibrary
         api={api}
         servers={options}
+        groups={groups}
         onInsert={insert}
         onRunInWorkspace={onOpenWorkspace}
         onRunStarted={setRun}
@@ -148,6 +161,7 @@ export function SshWorkspaceScreen({
   hostServerId,
   plan,
   servers,
+  groups,
   stateByTerminalId,
   insetsTop,
   onClose,
@@ -156,6 +170,7 @@ export function SshWorkspaceScreen({
   hostServerId: string;
   plan: SnippetWorkspacePlan;
   servers: SshServerInfo[];
+  groups: SshGroup[];
   stateByTerminalId: Readonly<Record<string, SshConnectionStateEvent>>;
   insetsTop: number;
   onClose: () => void;
@@ -166,6 +181,11 @@ export function SshWorkspaceScreen({
   const labels = useMemo(
     () => new Map(servers.map((server) => [server.id, server.label])),
     [servers],
+  );
+  // Theme and font size per server/group (25.4), resolved once per server.
+  const appearanceByServerId = useMemo(
+    () => new Map(servers.map((server) => [server.id, terminalAppearanceOverride(server, groups)])),
+    [servers, groups],
   );
 
   useEffect(() => {
@@ -232,10 +252,15 @@ export function SshWorkspaceScreen({
           isPaneFocused={workspace.focusedPaneId === pane.id}
           onOpenFileExplorer={noop}
           onOpenWorkspaceFile={noop}
+          appearance={
+            pane.target.kind === "server"
+              ? appearanceByServerId.get(pane.target.serverId)
+              : undefined
+          }
         />
       );
     },
-    [hostServerId, sessions, workspace.focusedPaneId],
+    [appearanceByServerId, hostServerId, sessions, workspace.focusedPaneId],
   );
   return (
     <View style={styles.terminalScreen} testID="ssh-workspace-screen">

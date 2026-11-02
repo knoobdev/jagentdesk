@@ -1,7 +1,8 @@
-import { useCallback, type ReactNode } from "react";
+import { useCallback, useMemo, type ReactNode } from "react";
 import { Text, View } from "react-native";
 import { Alert } from "@/components/ui/alert";
 import { TerminalPane } from "@/components/terminal-pane";
+import { terminalAppearanceOverride } from "@/ssh/snippets/appearance";
 import type {
   SshConnectionStateEvent,
   SshGroup,
@@ -121,6 +122,7 @@ export function SshTerminalView({
   onReplaceHostKey: (error: SshConnectionErrorDetails) => void;
   onReconnect: () => void;
 }) {
+  const appearance = useMemo(() => terminalAppearanceOverride(server, groups), [server, groups]);
   const state = terminalState?.state ?? "connecting";
   const failure = state === "error" ? terminalState?.error : undefined;
   const canReconnect = state === "error" || state === "disconnected";
@@ -200,6 +202,7 @@ export function SshTerminalView({
           isPaneFocused
           onOpenFileExplorer={noop}
           onOpenWorkspaceFile={noop}
+          appearance={appearance}
         />
       </View>
     </View>

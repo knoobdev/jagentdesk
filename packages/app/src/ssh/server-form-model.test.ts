@@ -194,3 +194,19 @@ describe("buildGroupOptions", () => {
     expect(options.find((option) => option.value === "g2")?.selected).toBe(false);
   });
 });
+
+describe("terminal appearance in the server form", () => {
+  it("keeps the stored theme and font size and saves the edited ones", () => {
+    const model = openSshServerFormModel({
+      server: { ...stored, theme: "light", fontSize: 14 },
+      defaultGroupId: null,
+    });
+    expect(model.getState().appearance).toEqual({ theme: "light", fontSize: 14 });
+
+    model.setAppearance({ theme: undefined, fontSize: 16 });
+
+    const { server } = model.buildSavePayload();
+    expect(server.theme).toBeUndefined();
+    expect(server.fontSize).toBe(16);
+  });
+});

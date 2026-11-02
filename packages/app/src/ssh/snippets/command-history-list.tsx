@@ -1,15 +1,16 @@
 import { useCallback, useMemo, useState } from "react";
 import { ScrollView, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
-import { BookmarkPlus, ClipboardPaste, Play } from "lucide-react-native";
-import type { SshCommandHistoryEntry } from "@jagentdesk/protocol/ssh/snippets-schemas";
+import { BookmarkPlus, ClipboardPaste, Play, RefreshCw } from "lucide-react-native";
+import type { SshCommandHistoryEntry, SshSnippet } from "@jagentdesk/protocol/ssh/snippets-schemas";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import type { SnippetsApi } from "./api";
 import { useClearHistory, useCommandHistory, useSnippetLibrary } from "./queries";
 import { SnippetEditor, type SnippetServerOption } from "./snippet-editor";
 import { snippetTerminalInput } from "./snippet-input";
-import { SshEmpty, SshRow, SshSection, sshStyles } from "./ui";
+import { filterHistory } from "./library-model";
+import { SshEmpty, SshRow, SshSearchInput, SshSection, sshStyles } from "./ui";
 
 export interface CommandHistoryListProps {
   api: SnippetsApi;
@@ -24,11 +25,36 @@ export function CommandHistoryList({ api, serverId, servers, onInsert }: Command
   const { t } = useTranslation();
   const history = useCommandHistory(api, serverId);
   const [saving, setSaving] = useState<string | null>(null);
+  const [savedLabel, setSavedLabel] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
   const stopSaving = useCallback(() => setSaving(null), []);
+  const saved = useCallback((label: string) => {
+    setSaving(null);
+    setSavedLabel(label);
+  }, []);
+  const startSaving = useCallback((command: string) => {
+    setSavedLabel(null);
+    setSaving(command);
+  }, []);
+  const { refetch } = history;
+  const refresh = useCallback(() => void refetch(), [refetch]);
   const hasEntries = (history.data ?? []).length > 0;
   const actions = useMemo(
-    () => (hasEntries ? <ClearHistoryButton api={api} serverId={serverId} /> : null),
-    [hasEntries, api, serverId],
+    () => (
+      <View style={sshStyles.inlineRow}>
+        <Button
+          size="xs"
+          variant="ghost"
+          leftIcon={RefreshCw}
+          loading={history.isFetching}
+          onPress={refresh}
+          accessibilityLabel={t("common.actions.reload")}
+          testID="ssh-command-history-refresh"
+        />
+        {hasEntries ? <ClearHistoryButton api={api} serverId={serverId} /> : null}
+      </View>
+    ),
+    [hasEntries, api, serverId, history.isFetching, refresh, t],
   );
 
   if (saving !== null) {
@@ -38,12 +64,14 @@ export function CommandHistoryList({ api, serverId, servers, onInsert }: Command
         command={saving}
         serverId={serverId}
         servers={servers}
-        onDone={stopSaving}
+        onSaved={saved}
+        onCancel={stopSaving}
       />
     );
   }
 
-  const entries = history.data ?? [];
+  const allEntries = history.data ?? [];
+  const entries = filterHistory(allEntries, query);
   return (
     <ScrollView contentContainerStyle={sshStyles.padded} testID="ssh-command-history">
       <SshSection title={t("ssh.snippets.history.title")} actions={actions}>
@@ -55,15 +83,31 @@ export function CommandHistoryList({ api, serverId, servers, onInsert }: Command
           />
         ) : null}
         {history.isPending ? <SshEmpty text={t("common.loading")} /> : null}
-        {history.isSuccess && entries.length === 0 ? (
+        {savedLabel !== null ? (
+          <Text style={sshStyles.successText} testID="ssh-command-history-saved">
+            {`${t("ssh.snippets.history.savedAsSnippet")}: ${savedLabel}`}
+          </Text>
+        ) : null}
+        {allEntries.length > 0 ? (
+          <SshSearchInput
+            value={query}
+            onChangeText={setQuery}
+            placeholder={t("ssh.snippets.history.search")}
+            testID="ssh-command-history-search"
+          />
+        ) : null}
+        {history.isSuccess && allEntries.length === 0 ? (
           <SshEmpty text={t("ssh.snippets.history.empty")} />
+        ) : null}
+        {allEntries.length > 0 && entries.length === 0 ? (
+          <SshEmpty text={t("ssh.snippets.history.noMatches")} />
         ) : null}
         {entries.map((entry) => (
           <HistoryRow
             key={`${entry.atMs}-${entry.command}`}
             entry={entry}
             onInsert={onInsert}
-            onSave={setSaving}
+            onSave={startSaving}
           />
         ))}
       </SshSection>
@@ -76,15 +120,18 @@ function SaveAsSnippet({
   command,
   serverId,
   servers,
-  onDone,
+  onSaved,
+  onCancel,
 }: {
   api: SnippetsApi;
   command: string;
   serverId: string;
   servers: readonly SnippetServerOption[];
-  onDone: () => void;
+  onSaved: (label: string) => void;
+  onCancel: () => void;
 }) {
   const library = useSnippetLibrary(api);
+  const saveSnippet = useCallback((snippet: SshSnippet) => onSaved(snippet.label), [onSaved]);
   const initial = useMemo(
     () => ({ label: command.split("\n")[0] ?? "", script: command, defaultTargets: [serverId] }),
     [command, serverId],
@@ -96,8 +143,8 @@ function SaveAsSnippet({
         packages={library.data?.packages ?? []}
         servers={servers}
         initial={initial}
-        onSaved={onDone}
-        onCancel={onDone}
+        onSaved={saveSnippet}
+        onCancel={onCancel}
       />
     </ScrollView>
   );
@@ -106,16 +153,36 @@ function SaveAsSnippet({
 function ClearHistoryButton({ api, serverId }: { api: SnippetsApi; serverId: string }) {
   const { t } = useTranslation();
   const clear = useClearHistory(api, serverId);
+  const [isConfirming, setConfirming] = useState(false);
   const { mutate } = clear;
-  const run = useCallback(() => mutate(), [mutate]);
+  const askClear = useCallback(() => setConfirming(true), []);
+  const cancel = useCallback(() => setConfirming(false), []);
+  const run = useCallback(() => mutate(undefined, { onSuccess: cancel }), [mutate, cancel]);
   return (
     <View style={sshStyles.inlineRow}>
       {clear.error ? (
         <Text style={sshStyles.dangerText}>{t("ssh.snippets.history.clearFailed")}</Text>
       ) : null}
-      <Button size="xs" variant="ghost" loading={clear.isPending} onPress={run}>
-        {t("ssh.snippets.history.clear")}
-      </Button>
+      {isConfirming ? (
+        <>
+          <Button
+            size="xs"
+            variant="destructive"
+            loading={clear.isPending}
+            onPress={run}
+            testID="ssh-command-history-confirm-clear"
+          >
+            {t("ssh.snippets.history.confirmClear")}
+          </Button>
+          <Button size="xs" variant="ghost" onPress={cancel}>
+            {t("common.actions.cancel")}
+          </Button>
+        </>
+      ) : (
+        <Button size="xs" variant="ghost" onPress={askClear} testID="ssh-command-history-clear">
+          {t("ssh.snippets.history.clear")}
+        </Button>
+      )}
     </View>
   );
 }

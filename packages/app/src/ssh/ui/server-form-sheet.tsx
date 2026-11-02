@@ -2,6 +2,9 @@ import { memo, useCallback, useMemo, useState } from "react";
 import { Text, View } from "react-native";
 import { AdaptiveModalSheet } from "@/components/adaptive-modal-sheet";
 import { Alert } from "@/components/ui/alert";
+import { useAppSettings } from "@/hooks/use-settings";
+import { resolveTerminalAppearance } from "@/ssh/snippets/appearance";
+import { TerminalAppearancePicker } from "@/ssh/snippets/terminal-appearance-picker";
 import { Button } from "@/components/ui/button";
 import { Field, FormTextInput } from "@/components/ui/form-field";
 import { SelectField, type SelectFieldOption } from "@/components/ui/select-field";
@@ -487,6 +490,16 @@ export function ServerFormSheet({
     () => model.setDisclosure(state.disclosure === "advanced" ? "basic" : "advanced"),
     [model, state.disclosure],
   );
+  const toggleAppearance = useCallback(
+    () => model.setDisclosure(state.disclosure === "appearance" ? "basic" : "appearance"),
+    [model, state.disclosure],
+  );
+  const { settings } = useAppSettings();
+  // What the server gets from its group chain when it sets nothing itself.
+  const inheritedAppearance = useMemo(
+    () => resolveTerminalAppearance({ groupId: state.groupId || undefined }, groups),
+    [groups, state.groupId],
+  );
 
   return (
     <AdaptiveModalSheet
@@ -587,6 +600,20 @@ export function ServerFormSheet({
         />
         {state.disclosure === "advanced" ? (
           <AdvancedSection form={form} jumpCandidates={jumpCandidates} />
+        ) : null}
+        <Disclosure
+          title="Terminal theme & font size"
+          open={state.disclosure === "appearance"}
+          onToggle={toggleAppearance}
+          testID="ssh-server-appearance-section"
+        />
+        {state.disclosure === "appearance" ? (
+          <TerminalAppearancePicker
+            value={state.appearance}
+            inherited={inheritedAppearance}
+            defaultFontSize={settings.codeFontSize}
+            onChange={model.setAppearance}
+          />
         ) : null}
       </View>
     </AdaptiveModalSheet>

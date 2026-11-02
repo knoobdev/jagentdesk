@@ -110,3 +110,20 @@ export function resolveTerminalAppearance(
     fontSizeSource: fontEntry?.source ?? { kind: "default" },
   };
 }
+
+export interface TerminalAppearanceOverride {
+  palette: TerminalPalette | null;
+  fontSize: number | null;
+}
+
+/** What an SSH tab renders with (TerminalPane `appearance`): null fields follow the app. */
+export function terminalAppearanceOverride(
+  server: AppearanceServer,
+  groups: readonly AppearanceGroup[],
+): TerminalAppearanceOverride {
+  const resolved = resolveTerminalAppearance(server, groups);
+  return {
+    palette: resolved.theme === null ? null : terminalPaletteFor(resolved.theme),
+    fontSize: resolved.fontSize,
+  };
+}
