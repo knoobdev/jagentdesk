@@ -6,6 +6,7 @@ import type {
   ServerSystemd,
   ServerTool,
 } from "@jagentdesk/protocol/ssh/environment-schemas";
+import { EnvironmentReportError, type EnvironmentReportInput } from "./types.js";
 
 export const RUNNING_SERVICES_CAP = 200;
 
@@ -67,13 +68,6 @@ if [ -d /run/systemd/system ] && has systemctl; then
 fi
 p end 1
 `;
-
-export class EnvironmentReportError extends Error {
-  constructor(readonly reason: "missing_end_marker" | "missing_uname") {
-    super(`environment report is incomplete: ${reason}`);
-    this.name = "EnvironmentReportError";
-  }
-}
 
 interface ReportLines {
   single: Map<string, string>;
@@ -199,11 +193,8 @@ function uptimeSeconds(lines: ReportLines): number | null {
   return seconds === null ? null : Math.floor(seconds);
 }
 
-export function parseEnvironmentReport(input: {
-  serverId: string;
-  output: string;
-  detectedAtMs: number;
-}): ServerEnvironment {
+/** Local EnvironmentReportParser; `ssh/environment-parse/` supplies the production one through the same type. */
+export function parseEnvironmentReport(input: EnvironmentReportInput): ServerEnvironment {
   const lines = splitReport(input.output);
   if (lines.single.get("end") !== "1") throw new EnvironmentReportError("missing_end_marker");
   const kernelName = nonEmpty(lines.single.get("uname.s"));

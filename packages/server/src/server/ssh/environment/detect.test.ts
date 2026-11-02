@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  EnvironmentReportError,
-  RUNNING_SERVICES_CAP,
-  parseDfLine,
-  parseEnvironmentReport,
-} from "./detect.js";
+import { RUNNING_SERVICES_CAP, parseDfLine, parseEnvironmentReport } from "./detect.js";
+import { EnvironmentReportError } from "./types.js";
 
 // Report lines as ENVIRONMENT_DETECT_SCRIPT prints them on a systemd Ubuntu host with Docker.
 const UBUNTU_REPORT = [

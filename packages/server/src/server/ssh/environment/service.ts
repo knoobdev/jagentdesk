@@ -3,11 +3,8 @@ import type {
   SshEnvironmentErrorCode,
 } from "@jagentdesk/protocol/ssh/environment-schemas";
 import type { AcquireSshClient } from "../ssh-client-lease.js";
-import {
-  ENVIRONMENT_DETECT_SCRIPT,
-  EnvironmentReportError,
-  parseEnvironmentReport,
-} from "./detect.js";
+import { ENVIRONMENT_DETECT_SCRIPT, parseEnvironmentReport } from "./detect.js";
+import { EnvironmentReportError, type EnvironmentReportParser } from "./types.js";
 import type { EnvironmentStore } from "./store.js";
 import { RemoteExecChannelError, runRemoteCommand } from "./remote-exec.js";
 
@@ -30,6 +27,8 @@ export interface SshEnvironmentServiceOptions {
   store: EnvironmentStore;
   /** Per-server switch for detection on connect (off for MaxSessions=1 servers, network gear). */
   isAutoDetectEnabled: (serverId: string) => boolean;
+  /** Parser of the script's report (types.ts); defaults to the local one in detect.ts. */
+  parseReport?: EnvironmentReportParser;
   now?: () => number;
 }
 
@@ -45,9 +44,11 @@ export interface DetectOptions {
 export class SshEnvironmentService {
   private readonly inFlight = new Map<string, Promise<ServerEnvironment>>();
   private readonly now: () => number;
+  private readonly parseReport: EnvironmentReportParser;
 
   constructor(private readonly options: SshEnvironmentServiceOptions) {
     this.now = options.now ?? Date.now;
+    this.parseReport = options.parseReport ?? parseEnvironmentReport;
   }
 
   get(serverId: string): ServerEnvironment | null {
@@ -89,7 +90,7 @@ export class SshEnvironmentService {
       if (result.timedOut) {
         throw new EnvironmentDetectError("timed_out", "environment detection timed out");
       }
-      const environment = parseEnvironmentReport({
+      const environment = this.parseReport({
         serverId,
         output: result.stdout,
         detectedAtMs: this.now(),
