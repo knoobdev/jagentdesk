@@ -37,6 +37,7 @@ import { ServerFormSheet, type ServerFormTarget } from "@/ssh/ui/server-form-she
 import { ServersListTab, type ServerListActions } from "@/ssh/ui/servers-list";
 import { SshTerminalView, type SshConnectionErrorDetails } from "@/ssh/ui/ssh-terminal-view";
 import { sshStyles as styles } from "@/ssh/ui/styles";
+import { ImportServersSheet, ServerModulesBar } from "@/ssh/ui/server-modules";
 
 // Servers screen (spec 25.13, milestone S1): the saved SSH servers of the daemon this
 // route points at, Keychain, Known hosts, and SSH terminal tabs. Same layout on desktop
@@ -381,6 +382,7 @@ export function ServersScreen() {
         server={terminalServer}
         groups={data.groups}
         terminalId={activeSession.terminalId}
+        keys={data.keys}
         live={liveByServerId[terminalServer.id]}
         terminalState={stateByTerminalId[activeSession.terminalId]}
         insetsTop={insets.top}
@@ -481,7 +483,9 @@ function ServersHome({
     (tag: string) => setSelectedTags((prev) => toggleTagIn(prev, tag)),
     [],
   );
+  const [importOpen, setImportOpen] = useState(false);
   const closeSheets = useCallback(() => {
+    setImportOpen(false);
     setServerForm(null);
     setGroupForm(null);
     setIdentityForm(null);
@@ -493,9 +497,16 @@ function ServersHome({
   }, [closeSheets, refresh]);
   const handleAddGroup = useCallback(() => setGroupForm({ mode: "create", group: null }), []);
   const handleAddServer = useCallback(() => setServerForm({ mode: "create", server: null }), []);
+  const handleImport = useCallback(() => setImportOpen(true), []);
   const headerActions = useMemo(
-    () => <ServersHeaderActions onAddGroup={handleAddGroup} onAddServer={handleAddServer} />,
-    [handleAddGroup, handleAddServer],
+    () => (
+      <ServersHeaderActions
+        onAddGroup={handleAddGroup}
+        onAddServer={handleAddServer}
+        onImport={handleImport}
+      />
+    ),
+    [handleAddGroup, handleAddServer, handleImport],
   );
 
   return (
@@ -603,6 +614,9 @@ function ServersHome({
           onSaved={handleSaved}
         />
       ) : null}
+      {importOpen ? (
+        <ImportServersSheet client={client} onClose={closeSheets} onImported={refresh} />
+      ) : null}
       {keySheet ? (
         <KeyFormSheet client={client} mode={keySheet} onClose={closeSheets} onSaved={handleSaved} />
       ) : null}
@@ -613,12 +627,17 @@ function ServersHome({
 function ServersHeaderActions({
   onAddGroup,
   onAddServer,
+  onImport,
 }: {
   onAddGroup: () => void;
   onAddServer: () => void;
+  onImport: () => void;
 }) {
   return (
     <>
+      <Button size="sm" variant="outline" onPress={onImport} testID="servers-import">
+        Import
+      </Button>
       <Button
         size="sm"
         variant="outline"
@@ -641,6 +660,7 @@ function SshTerminalScreen({
   server,
   groups,
   terminalId,
+  keys,
   live,
   terminalState,
   insetsTop,
@@ -656,6 +676,7 @@ function SshTerminalScreen({
   server: SshServerInfo;
   groups: SshGroup[];
   terminalId: string;
+  keys: SshKey[];
   live: SshServerLiveState | undefined;
   terminalState: Parameters<typeof SshTerminalView>[0]["terminalState"];
   insetsTop: number;
@@ -713,20 +734,31 @@ function SshTerminalScreen({
     [client, refresh, setError, terminalId],
   );
   return (
-    <SshTerminalView
-      hostServerId={hostServerId}
-      server={server}
-      groups={groups}
-      terminalId={terminalId}
-      live={live}
-      terminalState={terminalState}
-      insetsTop={insetsTop}
-      onBack={onBack}
-      onEndSession={handleEnd}
-      onHostkeyDecision={onHostkeyDecision}
-      onAuthSubmit={onAuthSubmit}
-      onReplaceHostKey={handleReplaceHostKey}
-      onReconnect={handleReconnect}
-    />
+    <View style={styles.terminalScreen}>
+      <ServerModulesBar
+        client={client}
+        hostServerId={hostServerId}
+        server={server}
+        keys={keys}
+        connected={live?.connection?.state === "connected"}
+      />
+      <View style={styles.terminalBody}>
+        <SshTerminalView
+          hostServerId={hostServerId}
+          server={server}
+          groups={groups}
+          terminalId={terminalId}
+          live={live}
+          terminalState={terminalState}
+          insetsTop={insetsTop}
+          onBack={onBack}
+          onEndSession={handleEnd}
+          onHostkeyDecision={onHostkeyDecision}
+          onAuthSubmit={onAuthSubmit}
+          onReplaceHostKey={handleReplaceHostKey}
+          onReconnect={handleReconnect}
+        />
+      </View>
+    </View>
   );
 }
