@@ -172,6 +172,8 @@ import type { SessionShareService } from "./session-share/service.js";
 import { ClusterSession } from "./session/cluster/cluster-session.js";
 import { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { DatabaseSession } from "./session/database/database-session.js";
+import { SshSession } from "./session/ssh/ssh-session.js";
+import { SshService } from "./ssh/ssh-service.js";
 import { DockerService } from "./docker/docker-service.js";
 import { DockerStreams } from "./docker/docker-streams.js";
 import { SimulatorService } from "./simulator/simulator-service.js";
@@ -524,6 +526,7 @@ export interface SessionOptions {
   hostToolInstaller?: HostToolInstaller | null;
   clusterRegistry?: ClusterRegistry;
   databaseRegistry?: DatabaseRegistry;
+  sshService?: SshService;
   checkoutDiffManager: CheckoutDiffManager;
   github?: ForgeService;
   createAgentMcpTransport?: AgentMcpTransportFactory;
@@ -839,6 +842,7 @@ export class Session {
   private readonly agentForumSession: AgentForumSession | null;
   private clusterSession!: ClusterSession;
   private databaseSession!: DatabaseSession;
+  private sshSession!: SshSession;
   private readonly dockerService = new DockerService();
   private readonly dockerStreams = new DockerStreams(this.dockerService);
   private readonly simulatorService = new SimulatorService();
@@ -1071,6 +1075,7 @@ export class Session {
       : null;
     this.initClusterSession(options);
     this.initDatabaseSession(options);
+    this.initSshSession(options);
     this.providerCatalogSession = new ProviderCatalogSession({
       host: {
         emit: (msg) => this.emit(msg),
@@ -1312,6 +1317,16 @@ export class Session {
         emit: (msg) => this.emit(msg),
       },
       databaseRegistry: options.databaseRegistry ?? new DatabaseRegistry(),
+      logger: this.sessionLogger,
+    });
+  }
+
+  private initSshSession(options: SessionOptions): void {
+    this.sshSession = new SshSession({
+      host: {
+        emit: (msg) => this.emit(msg),
+      },
+      sshService: options.sshService ?? new SshService(),
       logger: this.sessionLogger,
     });
   }
@@ -2299,6 +2314,7 @@ export class Session {
       () => this.dispatchAgentForumMessage(msg),
       () => this.dispatchClusterMessage(msg),
       () => this.dispatchDatabaseMessage(msg),
+      () => this.dispatchSshMessage(msg),
       () => this.dispatchDockerMessage(msg),
       () => this.dispatchSimulatorMessage(msg),
       () => this.dispatchProxyMessage(msg),
@@ -4279,6 +4295,13 @@ export class Session {
       return undefined;
     }
     return undefined;
+  }
+
+  private dispatchSshMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    if (!msg.type.startsWith("ssh.")) {
+      return undefined;
+    }
+    return this.sshSession.handleMessage(msg);
   }
 
   private dispatchDatabaseMessage(msg: SessionInboundMessage): Promise<void> | undefined {

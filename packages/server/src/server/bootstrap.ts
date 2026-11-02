@@ -181,6 +181,8 @@ import { setupAutoArchiveOnMerge } from "./auto-archive-on-merge/index.js";
 import { wrapSessionMessage, type SessionOutboundMessage } from "./messages.js";
 import type { TerminalManager } from "../terminal/terminal-manager.js";
 import { createConfiguredTerminalManager } from "../terminal/terminal-manager-factory.js";
+import { createSshTerminalManager } from "../terminal/ssh-terminal-manager.js";
+import { SshService } from "./ssh/ssh-service.js";
 import { applyTerminalAgentHookSetting } from "../terminal/agent-hooks/terminal-agent-hook-setting.js";
 import { loadOrCreateDaemonKeyPair } from "./daemon-keypair.js";
 import { createTsnetListener, type TsnetListener } from "./tsnet-listener.js";
@@ -693,9 +695,23 @@ export async function createJAgentDeskDaemon(
   app.set("trust proxy", resolveExpressTrustProxySetting(config));
   let boundListenTarget: ListenTarget | null = null;
   let workspaceRegistry: FileBackedWorkspaceRegistry | null = null;
-  const terminalManager = createConfiguredTerminalManager({
-    getTerminalActivityUrl: () => createTerminalActivityUrl(boundListenTarget),
+  // SSH servers (spec 25 / ADR-0027): storage under <home>/ssh, secrets in its encrypted
+  // store, prompts + connection state fan out to every connected client (wsServer is
+  // late-bound). SSH terminals live in this process, outside the terminal worker: the
+  // composite manager resolves SSH ids against the service first and delegates
+  // everything else to the worker manager, so every existing terminal RPC (subscribe,
+  // input, resize, capture, kill, rename) drives SSH sessions unchanged.
+  const sshService = new SshService({
+    jagentdeskHome: config.jagentdeskHome,
+    logger,
+    broadcast: (message) => wsServer?.broadcast(wrapSessionMessage(message)),
   });
+  const terminalManager = createSshTerminalManager(
+    createConfiguredTerminalManager({
+      getTerminalActivityUrl: () => createTerminalActivityUrl(boundListenTarget),
+    }),
+    () => sshService,
+  );
   applyTerminalAgentHookSetting({ store: daemonConfigStore, logger });
 
   const serviceProxyPublicBaseUrl = config.serviceProxy?.publicBaseUrl
@@ -1305,6 +1321,8 @@ export async function createJAgentDeskDaemon(
   });
   await databaseRegistry.initialize();
   logger.info("Database registry created");
+  await sshService.initialize();
+  logger.info("SSH service initialized");
   // Daemon-wide Forge Hub service (spec 19 / ADR-0015). One instance shared across
   // all agents' tool catalogs, mirroring how session.ts builds it per-session. Token
   // secrets + the connection index live under <home>/forge.
@@ -1816,6 +1834,7 @@ export async function createJAgentDeskDaemon(
               databaseRegistry,
               autorunService,
               sessionShareService,
+              sshService,
             );
             // Session-share guests (ADR-0019): let the scoped ShareServer /ws hand validated guest
             // sockets to the daemon as agent-confined real sessions.
@@ -1922,6 +1941,7 @@ export async function createJAgentDeskDaemon(
     await agentStorage.flush().catch(() => undefined);
     await providerSnapshotManager.shutdown();
     terminalManager.killAll();
+    sshService.dispose();
     speechService.stop();
     await scheduleService.stop().catch(() => undefined);
     await autorunService?.stop().catch(() => undefined);

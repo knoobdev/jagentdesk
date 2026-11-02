@@ -12,16 +12,19 @@ import { findExecutable } from "../executable-resolution/executable-resolution.j
 import type { TerminalCell, TerminalState } from "@jagentdesk/protocol/messages";
 import { TerminalInputModeTracker } from "@jagentdesk/protocol/terminal-input-mode";
 import { TerminalActivityTracker } from "./activity/terminal-activity-tracker.js";
-import type { TerminalActivity, TerminalActivityState } from "@jagentdesk/protocol/terminal-activity";
+import type {
+  TerminalActivity,
+  TerminalActivityState,
+} from "@jagentdesk/protocol/terminal-activity";
 
 const { Terminal } = xterm;
 const require = createRequire(import.meta.url);
 const JAGENTDESK_CLI_BIN_ENTRY = "@jagentdesk/cli/bin/jagentdesk";
 let nodePtySpawnHelperChecked = false;
-const TERMINAL_TITLE_DEBOUNCE_MS = 150;
-const TERMINAL_EXIT_OUTPUT_LINE_LIMIT = 12;
-const TERMINAL_EXIT_OUTPUT_CHAR_LIMIT = 16000;
-const TERMINAL_OSC_COLOR_QUERY_RESPONSES = new Map<number, string>([
+export const TERMINAL_TITLE_DEBOUNCE_MS = 150;
+export const TERMINAL_EXIT_OUTPUT_LINE_LIMIT = 12;
+export const TERMINAL_EXIT_OUTPUT_CHAR_LIMIT = 16000;
+export const TERMINAL_OSC_COLOR_QUERY_RESPONSES = new Map<number, string>([
   [10, "rgb:e6e6/e6e6/e6e6"],
   [11, "rgb:0b0b/0b0b/0b0b"],
   [12, "rgb:e6e6/e6e6/e6e6"],
@@ -130,7 +133,7 @@ export interface CreateTerminalOptions {
   args?: string[];
 }
 
-function toTerminalActivity(snapshot: {
+export function toTerminalActivity(snapshot: {
   state: TerminalActivityState | null;
   attentionReason?: TerminalActivity["attentionReason"];
   changedAt: number;
@@ -145,7 +148,7 @@ function toTerminalActivity(snapshot: {
   };
 }
 
-function resolveInitialTitleMode(presetTitle: string | undefined): "auto" | "manual" {
+export function resolveInitialTitleMode(presetTitle: string | undefined): "auto" | "manual" {
   return presetTitle?.trim() ? "manual" : "auto";
 }
 
@@ -374,7 +377,9 @@ function resolveJAgentDeskCliShim(binDir: string): string | null {
 }
 
 function jagentdeskCliShimNames(): string[] {
-  return process.platform === "win32" ? ["jagentdesk.cmd", "jagentdesk.exe", "jagentdesk"] : ["jagentdesk"];
+  return process.platform === "win32"
+    ? ["jagentdesk.cmd", "jagentdesk.exe", "jagentdesk"]
+    : ["jagentdesk"];
 }
 
 function resolveZshShellIntegrationRuntimeDir(): string {
@@ -412,11 +417,15 @@ export function buildTerminalEnvironment(
   });
   const envWithAgentHooks = prependJAgentDeskCliToPath(
     baseEnv,
-    input.jagentdeskCliBinDir === undefined ? resolveJAgentDeskCliBinDir() : input.jagentdeskCliBinDir,
+    input.jagentdeskCliBinDir === undefined
+      ? resolveJAgentDeskCliBinDir()
+      : input.jagentdeskCliBinDir,
   );
   const envWithHookCli = injectJAgentDeskHookCli(
     envWithAgentHooks,
-    input.jagentdeskHookCliPath === undefined ? resolveJAgentDeskCliExecutablePath() : input.jagentdeskHookCliPath,
+    input.jagentdeskHookCliPath === undefined
+      ? resolveJAgentDeskCliExecutablePath()
+      : input.jagentdeskHookCliPath,
   );
 
   if (basename(input.shell) !== "zsh") {
@@ -508,7 +517,7 @@ function extractCell(terminal: TerminalType, row: number, col: number): Terminal
   };
 }
 
-function extractGrid(terminal: TerminalType): TerminalCell[][] {
+export function extractGrid(terminal: TerminalType): TerminalCell[][] {
   const grid: TerminalCell[][] = [];
   const buffer = terminal.buffer.active;
   // Visible viewport starts at baseY
@@ -525,7 +534,7 @@ function extractGrid(terminal: TerminalType): TerminalCell[][] {
   return grid;
 }
 
-function extractScrollback(
+export function extractScrollback(
   terminal: TerminalType,
   options?: { scrollbackLines?: number },
 ): TerminalCell[][] {
@@ -586,7 +595,7 @@ function lineContinuesToNext(terminal: TerminalType, absoluteRow: number): boole
   return terminal.buffer.active.getLine(absoluteRow + 1)?.isWrapped === true;
 }
 
-function extractGridWrapped(terminal: TerminalType): boolean[] {
+export function extractGridWrapped(terminal: TerminalType): boolean[] {
   const baseY = terminal.buffer.active.baseY;
   const wrapped: boolean[] = [];
   for (let row = 0; row < terminal.rows; row++) {
@@ -595,7 +604,7 @@ function extractGridWrapped(terminal: TerminalType): boolean[] {
   return wrapped;
 }
 
-function extractScrollbackWrapped(
+export function extractScrollbackWrapped(
   terminal: TerminalType,
   options?: { scrollbackLines?: number },
 ): boolean[] {
@@ -611,7 +620,7 @@ function extractScrollbackWrapped(
   return wrapped;
 }
 
-function extractCursorState(terminal: TerminalType): TerminalState["cursor"] {
+export function extractCursorState(terminal: TerminalType): TerminalState["cursor"] {
   const coreService = (terminal as unknown as { _core?: { coreService?: Record<string, unknown> } })
     ._core?.coreService as
     | {
@@ -744,7 +753,7 @@ export function humanizeProcessTitle(processTitle: string): string | undefined {
   return normalized;
 }
 
-function extractLastOutputLines(terminal: TerminalType, limit: number): string[] {
+export function extractLastOutputLines(terminal: TerminalType, limit: number): string[] {
   const buffer = terminal.buffer.active;
   const mergedLines: string[] = [];
 
@@ -784,7 +793,7 @@ function stripAnsiSequences(input: string): string {
   return input.replace(ANSI_SEQUENCE_PATTERN, "");
 }
 
-function extractLastOutputLinesFromText(text: string, limit: number): string[] {
+export function extractLastOutputLinesFromText(text: string, limit: number): string[] {
   const normalized = stripAnsiSequences(text).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   const lines = normalized.split("\n").map((line) => line.trimEnd());
   while (lines[0]?.trim().length === 0) {
