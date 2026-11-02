@@ -13,6 +13,7 @@ import { AgentStorage } from "../../agent-storage.js";
 import { ProviderSnapshotManager } from "../../provider-snapshot-manager.js";
 import { createJAgentDeskToolCatalog } from "../../tools/jagentdesk-tools.js";
 import type { JAgentDeskToolCatalog } from "../../tools/types.js";
+import { JAgentDeskToolInputError } from "../../tools/types.js";
 import {
   OpenCodeBridge,
   loadOpenCodeBridgePluginArtifact,
@@ -36,8 +37,13 @@ function createCatalog(): JAgentDeskToolCatalog {
     description: "Returns the supplied value.",
     inputSchema: { value: z.string() },
     async handler(input: unknown) {
-      const parsed = z.object({ value: z.string() }).parse(input);
-      return { content: [{ type: "text", text: parsed.value }] };
+      const parsed = z
+        .object({ value: z.string().min(2, "value must be at least 2 characters") })
+        .strict()
+        .safeParse(input);
+      if (!parsed.success)
+        throw new JAgentDeskToolInputError(parsed.error.message, parsed.error.issues);
+      return { content: [{ type: "text", text: parsed.data.value }] };
     },
   };
   const tools = new Map([[tool.name, tool]]);
@@ -193,6 +199,13 @@ describe("OpenCodeBridge", () => {
       expect(asked).toEqual([
         { permission: "jagentdesk_echo_context", patterns: ["*"], always: ["*"], metadata: {} },
       ]);
+      asked.length = 0;
+      await expect(
+        hooks.tool.jagentdesk_echo_context.execute(
+          { value: "x" },
+          { sessionID: "ses_one", ask: async () => undefined },
+        ),
+      ).rejects.toThrow("value: value must be at least 2 characters");
 
       executedInputs.length = 0;
       await expect(
@@ -361,12 +374,17 @@ describe("OpenCodeBridge", () => {
             body: JSON.stringify(input),
           },
         );
-        expect(response.status).toBe(500);
+        expect(response.status).toBe(400);
         const payload = await response.json();
-        expect(payload.error).toContain("provider must be provider/model");
+        expect(payload).toMatchObject({ error: "Invalid tool input", issues: expect.any(Array) });
         await expect(
           tools.get("jagentdesk_create_agent")!.execute(input, { sessionID: "caller" }),
-        ).rejects.toMatchObject({ message: payload.error, status: 500 });
+        ).rejects.toMatchObject({
+          status: 400,
+          message: expect.stringContaining(
+            "Invalid tool input: provider: provider must be provider/model, for example codex/gpt-5.4",
+          ),
+        });
       } finally {
         await dispose();
       }
@@ -549,6 +567,104 @@ describe("OpenCodeBridge", () => {
       expect(entry).toContain('id: "jagentdesk"');
       const manifest = JSON.parse(await readFile(path.join(directory, "package.json"), "utf8"));
       expect(manifest).toMatchObject({ type: "module", exports: { "./server": "./server.js" } });
+    } finally {
+      await bridge.close();
+    }
+  });
+
+  test("returns actionable 4xx responses for invalid bridge requests", async () => {
+    const jagentdeskHome = await mkdtemp(path.join(tmpdir(), "jagentdesk-opencode-bridge-errors-"));
+    temporaryDirectories.push(jagentdeskHome);
+    const bridge = new OpenCodeBridge({ jagentdeskHome, logger: createTestLogger() });
+    await bridge.start();
+    const catalog = createCatalog();
+    bridge.bindSession({ sessionId: "ses_errors", env: {}, tools: catalog });
+    const expectedErrorCatalog: JAgentDeskToolCatalog = {
+      tools: new Map([
+        [
+          "expected_error",
+          {
+            name: "expected_error",
+            description: "Throws an expected tool error.",
+            inputSchema: {},
+            async handler() {
+              throw new JAgentDeskToolInputError("Agent not found: missing-agent");
+            },
+          },
+        ],
+        [
+          "internal_error",
+          {
+            name: "internal_error",
+            description: "Throws an internal error.",
+            inputSchema: {},
+            async handler() {
+              throw new Error("Provider unavailable");
+            },
+          },
+        ],
+      ]),
+      getTool(name) {
+        return this.tools.get(name);
+      },
+      async executeTool(name, input, context) {
+        const tool = this.tools.get(name);
+        if (!tool) throw new Error(`Unknown tool: ${name}`);
+        return tool.handler(input, context ?? {});
+      },
+    };
+    bridge.bindSession({ sessionId: "ses_expected_error", env: {}, tools: expectedErrorCatalog });
+
+    try {
+      const plugin = readPluginOptions(bridge.decorateServerEnv({}));
+      const headers = {
+        Authorization: `Bearer ${plugin.token}`,
+        "Content-Type": "application/json",
+      };
+      const invalidInput = await fetch(
+        `${plugin.baseUrl}/_internal/opencode/sessions/ses_errors/tools/echo_context`,
+        { method: "POST", headers, body: JSON.stringify({ value: "ok", extra: true }) },
+      );
+      expect(invalidInput.status).toBe(400);
+      expect(await invalidInput.json()).toEqual({
+        error: "Invalid tool input",
+        issues: [
+          {
+            code: "unrecognized_keys",
+            keys: ["extra"],
+            path: [],
+            message: 'Unrecognized key: "extra"',
+          },
+        ],
+      });
+
+      const unknownTool = await fetch(
+        `${plugin.baseUrl}/_internal/opencode/sessions/ses_errors/tools/missing`,
+        { method: "POST", headers, body: "{}" },
+      );
+      expect(unknownTool.status).toBe(404);
+      expect(await unknownTool.json()).toEqual({ error: "JAgentDesk tool not found: missing" });
+
+      const malformedBody = await fetch(
+        `${plugin.baseUrl}/_internal/opencode/sessions/ses_errors/tools/echo_context`,
+        { method: "POST", headers, body: "{" },
+      );
+      expect(malformedBody.status).toBe(400);
+      expect(await malformedBody.json()).toEqual({ error: "Malformed JSON request body" });
+
+      const expectedError = await fetch(
+        `${plugin.baseUrl}/_internal/opencode/sessions/ses_expected_error/tools/expected_error`,
+        { method: "POST", headers, body: "{}" },
+      );
+      expect(expectedError.status).toBe(400);
+      expect(await expectedError.json()).toEqual({ error: "Agent not found: missing-agent" });
+
+      const internalError = await fetch(
+        `${plugin.baseUrl}/_internal/opencode/sessions/ses_expected_error/tools/internal_error`,
+        { method: "POST", headers, body: "{}" },
+      );
+      expect(internalError.status).toBe(500);
+      expect(await internalError.json()).toEqual({ error: "Provider unavailable" });
     } finally {
       await bridge.close();
     }
