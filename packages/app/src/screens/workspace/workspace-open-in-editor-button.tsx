@@ -31,6 +31,7 @@ import { getForgePresentation } from "@/git/forge";
 interface WorkspaceOpenInEditorButtonProps {
   serverId: string;
   cwd: string;
+  projectId: string | null;
   activeFile?: WorkspaceFileLocation | null;
   hideLabels?: boolean;
 }
@@ -81,6 +82,7 @@ function OpenTargetMenuItem({ target, isPreferred, onOpen }: OpenTargetMenuItemP
 export function WorkspaceOpenInEditorButton({
   serverId,
   cwd,
+  projectId,
   activeFile,
   hideLabels,
 }: WorkspaceOpenInEditorButtonProps) {
@@ -88,10 +90,11 @@ export function WorkspaceOpenInEditorButton({
   const toast = useToast();
   const isConnected = useHostRuntimeIsConnected(serverId);
   const isLocalDaemon = useIsLocalDaemon(serverId);
-  const { preferredEditorId, updatePreferredEditor } = usePreferredEditor();
+  const { preferredEditorId, updatePreferredEditor } = usePreferredEditor({ serverId, projectId });
   const { targets: desktopOpenTargets, isAvailable: isDesktopOpenAvailable } =
     useDesktopOpenTargets({
       isLocalExecution: isLocalDaemon,
+      workspacePath: cwd,
     });
 
   const resolvedFile = useMemo(
@@ -176,10 +179,12 @@ export function WorkspaceOpenInEditorButton({
 
   const handleOpenTarget = useCallback(
     (target: OpenTarget) => {
-      void updatePreferredEditor(target.id).catch(() => undefined);
+      void updatePreferredEditor(target.id).catch((error: unknown) => {
+        toast.error(error instanceof Error ? error.message : t("common.errors.unableToSave"));
+      });
       openMutation.mutate(target);
     },
-    [openMutation, updatePreferredEditor],
+    [openMutation, updatePreferredEditor, toast, t],
   );
 
   const primaryPressableStyle = useCallback(
