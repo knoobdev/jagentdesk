@@ -498,7 +498,40 @@ export const SshSessionReconnectResponseSchema = z.object({
   type: z.literal("ssh.session.reconnect.response"),
   payload: z.object({ requestId: z.string(), error: z.string().nullable() }),
 });
+// Broadcast input (spec 25.4): keystrokes sent to any terminal of the group are typed
+// into every other one. An empty list turns broadcast off for the terminals that had it.
+export const SshSessionBroadcastRequestSchema = z.object({
+  type: z.literal("ssh.session.broadcast.request"),
+  requestId: z.string(),
+  terminalIds: z.array(z.string()),
+});
+export const SshSessionBroadcastResponseSchema = z.object({
+  type: z.literal("ssh.session.broadcast.response"),
+  payload: z.object({ requestId: z.string(), error: z.string().nullable() }),
+});
+// Mobile "Password" key (spec 25.4): the daemon types the server's saved password into
+// the session; the password never reaches the app.
+export const SshSessionTypePasswordRequestSchema = z.object({
+  type: z.literal("ssh.session.type_password.request"),
+  requestId: z.string(),
+  terminalId: z.string(),
+});
+export const SshSessionTypePasswordResponseSchema = z.object({
+  type: z.literal("ssh.session.type_password.response"),
+  payload: z.object({ requestId: z.string(), error: z.string().nullable() }),
+});
+
 // ── server→client pushes ──
+
+// Output arrived on an SSH/Telnet tab (at most once per second per tab): drives the
+// green "unseen output" tab dot (spec 25.4). Carries no output content.
+export const SshSessionActivitySchema = z.object({
+  type: z.literal("ssh.session.activity"),
+  terminalId: z.string(),
+  serverId: z.string(),
+  lastOutputAtMs: z.number(),
+});
+export type SshSessionActivity = z.infer<typeof SshSessionActivitySchema>;
 
 // First unknown host key (spec 25.3 step 3): sent to every connected client; the
 // connect waits up to 120 s for ssh.hostkey.respond. `hopIndex`/`hopCount` identify
@@ -576,6 +609,8 @@ export const SshRequestSchemas = [
   SshAuthRespondRequestSchema,
   SshSessionCreateRequestSchema,
   SshSessionReconnectRequestSchema,
+  SshSessionBroadcastRequestSchema,
+  SshSessionTypePasswordRequestSchema,
 ] as const;
 
 export const SshResponseSchemas = [
@@ -603,6 +638,8 @@ export const SshResponseSchemas = [
   SshAuthRespondResponseSchema,
   SshSessionCreateResponseSchema,
   SshSessionReconnectResponseSchema,
+  SshSessionBroadcastResponseSchema,
+  SshSessionTypePasswordResponseSchema,
 ] as const;
 
 export const SshPushSchemas = [
@@ -610,4 +647,5 @@ export const SshPushSchemas = [
   SshAuthPromptSchema,
   SshPromptResolvedSchema,
   SshConnectionStateSchema,
+  SshSessionActivitySchema,
 ] as const;

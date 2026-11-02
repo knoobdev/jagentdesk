@@ -109,6 +109,8 @@ export class SshTerminalSession implements TerminalSession {
   private titleChangeSubscription: { dispose(): void } | null = null;
   /** Set by the SSH service: a client kill must tear the connection down too. */
   onKill: (() => void) | null = null;
+  /** Set by the SSH service: keystrokes from a client (broadcast input mirrors them). */
+  onClientInput: ((data: string) => void) | null = null;
 
   constructor(options: SshTerminalSessionOptions) {
     this.id = options.id;
@@ -184,9 +186,15 @@ export class SshTerminalSession implements TerminalSession {
     this.pushOutput(text);
   }
 
-  /** Type into the remote shell as if the user had (snippets, password key). */
+  /** Type into the remote shell as if the user had (snippets, password key, broadcast). */
   typeInput(data: string): void {
-    this.send({ type: "input", data });
+    if (this.killed) return;
+    this.queueInput(data);
+  }
+
+  private queueInput(data: string): void {
+    this.pendingInput += data;
+    this.scheduleInputFlush();
   }
 
   /** Observe remote output (session logs, S6). Returns an unsubscribe. */
@@ -221,8 +229,8 @@ export class SshTerminalSession implements TerminalSession {
     if (this.killed) return;
     switch (msg.type) {
       case "input":
-        this.pendingInput += msg.data;
-        this.scheduleInputFlush();
+        this.queueInput(msg.data);
+        this.onClientInput?.(msg.data);
         break;
       case "resize":
         this.flushPendingInput();

@@ -314,6 +314,26 @@ export class SshSession {
           async () => ({ terminalId: await s.openSession(msg.serverId, msg.size) }),
           { terminalId: null },
         );
+      case "ssh.session.broadcast.request":
+        return this.respond(
+          msg,
+          "ssh.session.broadcast.response",
+          async () => {
+            s.setBroadcast(msg.terminalIds);
+            return {};
+          },
+          {},
+        );
+      case "ssh.session.type_password.request":
+        return this.respond(
+          msg,
+          "ssh.session.type_password.response",
+          async () => {
+            await s.typePassword(msg.terminalId);
+            return {};
+          },
+          {},
+        );
       case "ssh.session.reconnect.request":
         return this.respond(
           msg,

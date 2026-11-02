@@ -50,6 +50,7 @@ import {
   SshTerminalSession,
   type RemoteShell,
 } from "./ssh-terminal-session.js";
+import { wrapRemoteSession, type RemoteSessionHandle } from "./tapped-session.js";
 
 // Daemon-side SSH service (spec 25, ADR-0027). Owns storage, the prompt broker, the
 // connection pool, and the SSH terminal sessions (other protocols, e.g. Telnet, plug in
@@ -120,8 +121,12 @@ export interface SshConnectionEvent {
 export interface SshTerminalCreatedEvent {
   terminalId: string;
   serverId: string;
-  session: SshTerminalSession;
+  /** SSH or Telnet tab: observe output/input, type on the user's behalf. */
+  session: RemoteSessionHandle;
 }
+
+/** Output pushes (tab dot) are coalesced to one per tab per second. */
+export const SSH_ACTIVITY_PUSH_INTERVAL_MS = 1000;
 
 /** A module's RPC handler: returns false when the message is not its own (CONTRACT.md). */
 export type SshModuleRpcHandler = (
@@ -187,8 +192,10 @@ export class SshService {
   private readonly sessionFactories = new Map<string, SshExternalSessionFactory>();
   private readonly externalSessions = new Map<
     string,
-    { serverId: string; session: TerminalSession; createdAtMs: number }
+    { serverId: string; session: TerminalSession & RemoteSessionHandle; createdAtMs: number }
   >();
+  /** Broadcast input groups (25.4): terminalId → every terminal of its group. */
+  private readonly broadcastGroups = new Map<string, ReadonlySet<string>>();
   private disposed = false;
 
   /** Bound for modules (CONTRACT.md): `new SftpService(sshService.acquireClient)`. */
@@ -367,7 +374,7 @@ export class SshService {
     if (!factory)
       throw new Error(`${config.protocol} connections are not available on this daemon.`);
     const terminalId = createSshTerminalId();
-    const session = await factory({
+    const inner = await factory({
       terminalId,
       serverId,
       label: this.storage.getServer(serverId)?.label ?? config.host,
@@ -375,10 +382,23 @@ export class SshService {
       port: config.port,
       size,
     });
+    const session = wrapRemoteSession(inner);
     this.externalSessions.set(terminalId, { serverId, session, createdAtMs: Date.now() });
+    this.attachSessionHooks(terminalId, serverId, session);
+    session.onActivityChange((transition) => {
+      this.emitActivityTransition({
+        terminalId,
+        name: session.name,
+        cwd: session.cwd,
+        workspaceId: session.workspaceId,
+        activity: transition.activity,
+        previous: transition.previous,
+      });
+    });
     this.setServerState(serverId, "connected");
     this.broadcast({ type: "ssh.connection.state", serverId, terminalId, state: "connected" });
     session.onExit(() => {
+      this.leaveBroadcast(terminalId);
       if (!this.externalSessions.delete(terminalId)) return;
       this.broadcast({ type: "ssh.connection.state", serverId, terminalId, state: "disconnected" });
       this.refreshServerState(serverId);
@@ -893,13 +913,7 @@ export class SshService {
         `\x1b[33mTelnet to ${config.host}:${config.port} is not encrypted.\x1b[0m\r\n`,
       );
     }
-    for (const listener of Array.from(this.terminalCreatedListeners)) {
-      try {
-        listener({ terminalId, serverId, session });
-      } catch {
-        // no-op
-      }
-    }
+    this.attachSessionHooks(terminalId, serverId, session);
     void this.connectTerminal(record);
     return terminalId;
   }
@@ -1141,6 +1155,7 @@ export class SshService {
 
   private finishRecord(record: TerminalRecord, exitCode: number | null): void {
     if (!this.terminals.has(record.terminalId)) return;
+    this.leaveBroadcast(record.terminalId);
     this.terminals.delete(record.terminalId);
     if (record.reconnectTimer) clearTimeout(record.reconnectTimer);
     record.state = "disconnected";
@@ -1156,6 +1171,7 @@ export class SshService {
   private killRecord(record: TerminalRecord): void {
     if (record.killed) return;
     record.killed = true;
+    this.leaveBroadcast(record.terminalId);
     record.connectGeneration += 1;
     if (record.reconnectTimer) clearTimeout(record.reconnectTimer);
     record.reconnectTimer = null;
@@ -1169,6 +1185,102 @@ export class SshService {
         terminalId: record.terminalId,
         state: "disconnected",
       });
+    }
+  }
+
+  /** Activity pushes, broadcast mirroring and module taps for a new SSH/Telnet tab. */
+  private attachSessionHooks(
+    terminalId: string,
+    serverId: string,
+    session: RemoteSessionHandle,
+  ): void {
+    let lastPushMs = 0;
+    let pending: ReturnType<typeof setTimeout> | null = null;
+    const push = (): void => {
+      pending = null;
+      lastPushMs = Date.now();
+      this.broadcast({
+        type: "ssh.session.activity",
+        terminalId,
+        serverId,
+        lastOutputAtMs: lastPushMs,
+      });
+    };
+    session.tapOutput(() => {
+      if (pending) return;
+      const wait = SSH_ACTIVITY_PUSH_INTERVAL_MS - (Date.now() - lastPushMs);
+      if (wait <= 0) push();
+      else pending = setTimeout(push, wait);
+    });
+    session.onClientInput = (data) => this.mirrorInput(terminalId, data);
+    for (const listener of Array.from(this.terminalCreatedListeners)) {
+      try {
+        listener({ terminalId, serverId, session });
+      } catch {
+        // no-op
+      }
+    }
+  }
+
+  private remoteHandle(
+    terminalId: string,
+  ): { serverId: string; handle: RemoteSessionHandle } | null {
+    const record = this.terminals.get(terminalId);
+    if (record) return { serverId: record.serverId, handle: record.session };
+    const external = this.externalSessions.get(terminalId);
+    return external ? { serverId: external.serverId, handle: external.session } : null;
+  }
+
+  /** Spec 25.4 broadcast input: ≥2 terminals form a group; [] (or one) turns it off for them. */
+  setBroadcast(terminalIds: readonly string[]): void {
+    for (const terminalId of terminalIds) {
+      if (!this.remoteHandle(terminalId)) throw new Error(`SSH terminal not found: ${terminalId}`);
+    }
+    for (const terminalId of terminalIds) this.leaveBroadcast(terminalId);
+    if (terminalIds.length < 2) return;
+    const group: ReadonlySet<string> = new Set(terminalIds);
+    for (const terminalId of group) this.broadcastGroups.set(terminalId, group);
+  }
+
+  private leaveBroadcast(terminalId: string): void {
+    const group = this.broadcastGroups.get(terminalId);
+    if (!group) return;
+    for (const member of group) this.broadcastGroups.delete(member);
+    const rest = Array.from(group).filter((member) => member !== terminalId);
+    if (rest.length >= 2) {
+      const next: ReadonlySet<string> = new Set(rest);
+      for (const member of next) this.broadcastGroups.set(member, next);
+    }
+  }
+
+  private mirrorInput(fromTerminalId: string, data: string): void {
+    const group = this.broadcastGroups.get(fromTerminalId);
+    if (!group) return;
+    for (const member of group) {
+      if (member === fromTerminalId) continue;
+      this.remoteHandle(member)?.handle.typeInput(data);
+    }
+  }
+
+  /** Mobile "Password" key (25.4): type the saved password; it never reaches the app. */
+  async typePassword(terminalId: string): Promise<void> {
+    const target = this.remoteHandle(terminalId);
+    if (!target) throw new Error("SSH terminal not found.");
+    const config = this.resolveConfig(target.serverId);
+    if (!config) throw new Error("SSH server not found.");
+    const credentials = await this.resolveCredentials(config);
+    if (!credentials.password)
+      throw new Error("No password is saved for this server or its identity.");
+    target.handle.typeInput(credentials.password);
+  }
+
+  private emitActivityTransition(event: TerminalActivityTransitionEvent): void {
+    for (const listener of Array.from(this.activityListeners)) {
+      try {
+        listener(event);
+      } catch {
+        // no-op
+      }
     }
   }
 

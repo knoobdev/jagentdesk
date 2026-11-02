@@ -440,6 +440,8 @@ const INBOUND_PERMISSION = {
   "ssh.auth.respond.request": "daemon.manage",
   "ssh.session.create.request": "daemon.manage",
   "ssh.session.reconnect.request": "daemon.manage",
+  "ssh.session.broadcast.request": "daemon.manage",
+  "ssh.session.type_password.request": "daemon.manage",
   // S5 snippets, runs, history, workspace templates.
   "ssh.history.clear.request": "daemon.manage",
   "ssh.history.list.request": "daemon.manage",
@@ -944,6 +946,9 @@ const OUTBOUND_PERMISSION = {
   "ssh.auth.prompt": "daemon.manage",
   "ssh.prompt.resolved": "daemon.manage",
   "ssh.connection.state": "daemon.manage",
+  "ssh.session.broadcast.response": "daemon.manage",
+  "ssh.session.type_password.response": "daemon.manage",
+  "ssh.session.activity": "daemon.manage",
   "ssh.history.clear.response": "daemon.manage",
   "ssh.history.list.response": "daemon.manage",
   "ssh.snippet.cancel.response": "daemon.manage",
