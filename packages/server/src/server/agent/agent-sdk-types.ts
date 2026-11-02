@@ -669,7 +669,15 @@ export interface SteerActiveTurnOptions extends AgentSteerOptions {
  */
 export type SteerResult = { status: "accepted" } | { status: "unavailable" };
 
+export interface AgentUsageSession {
+  provider: string;
+  model?: string;
+  env: Record<string, string>;
+  sessionKey: string;
+}
+
 export interface AgentSession {
+  usageSession?(): AgentUsageSession | null;
   readonly provider: AgentProvider;
   readonly id: string | null;
   readonly capabilities: AgentCapabilityFlags;
