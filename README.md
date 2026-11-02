@@ -52,6 +52,10 @@ with a few deliberate boundaries:
 - **Kubernetes cluster management** — a full Kubernetes cockpit built into the app.
 - **Per‑cluster AI chat** — ask an agent about any resource or its logs; the agent uses
   real `kubectl` tools scoped to the exact cluster you connected.
+- **SSH servers** _(new)_ — a Termius-class SSH client in the daemon: servers, groups and a keychain,
+  terminals that survive closing the app, SFTP, port forwarding, jump hosts and proxies, snippets on
+  many servers, session logs and import — plus a chat agent per server that works with its Docker,
+  databases and Kubernetes. Secrets never leave the daemon.
 - **Databases** _(new)_ — a full database IDE built into the app: seven engines (PostgreSQL,
   MySQL, SQLite, SQL Server, Oracle, MongoDB, ClickHouse), multiple databases per connection, an
   object explorer with counts, a data grid with inline editing, a SQL console with autocomplete and
@@ -99,6 +103,32 @@ with a few deliberate boundaries:
 ---
 
 ## ✨ New in this release
+
+### SSH servers — a Termius-class client with a chat agent per server (v0.9.47)
+
+![SSH session in JAgentDesk](docs/media/ssh-terminal.png)
+
+- **Servers, groups, tags and a keychain.** Generate or import keys, install a public key on a server,
+  identities, OpenSSH-style host-key checks (SHA-256 fingerprint on first connect, block on change).
+  Passwords, keys and passphrases stay in the daemon's secret store; the **Password** key types a
+  saved password without sending it to the app.
+- **Terminals that keep running.** Sessions live in the daemon: close the app during `top`, reopen it,
+  and the tab and screen are still there. Jump chains, SOCKS5/HTTP proxies, env vars, startup
+  snippets, keepalive, auto-reconnect, agent forwarding, Telnet.
+- **SFTP and port forwarding.** Two-pane SFTP (also server ↔ server) with a pause/resume transfer
+  queue and remote editing; local, remote and dynamic (SOCKS5) forwards.
+- **Snippets everywhere.** A snippet library, run on many servers at once (one pane per server),
+  history, split view up to 16 panes with broadcast input, workspace templates, theme per server.
+- **Session logs and import** from `~/.ssh` (ProxyJump → jump chain), ssh_config or CSV.
+- **A chat agent that knows the server.** The daemon detects the OS, resources and installed tools;
+  the server's chat gets `ssh_*` tools and Docker tools for that server — reads run directly, changes
+  ask for permission. Docker, databases and Kubernetes on the server open through forwards, right
+  inside JAgentDesk's Docker, Databases and Clusters screens.
+- **Verified end to end:** all 14 acceptance criteria of the SSH spec pass against a real daemon and
+  real OpenSSH servers. Details: [docs/ssh.md](docs/ssh.md).
+- **Security fixes from Paseo 0.14:** Git fetches never open login prompts, oversized provider output
+  is rejected, internal Claude agents skip user hooks, OpenCode asks before JAgentDesk tools, Codex
+  answers every approval callback.
 
 ### Agentic browser leaks closed & profiles that follow the IP location (v0.9.46)
 

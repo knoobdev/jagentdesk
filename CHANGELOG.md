@@ -1,9 +1,106 @@
 # Changelog
 
 All notable changes to JAgentDesk are documented here. JAgentDesk versions its
-own release line (now `0.9.46`); the many `v0.1.x`–`v1.0.x` tags in history are
+own release line (now `0.9.47`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
+
+## v0.9.47 — 2026-11-03
+
+SSH servers come to JAgentDesk as a Termius-class client built into the daemon: saved servers and a
+keychain, SSH terminals that survive closing the app, SFTP, port forwarding, jump hosts and proxies,
+snippets on many servers, session logs and import — plus a per-server chat agent that understands
+what runs on the server and can work with its Docker, databases and Kubernetes. Also the first
+security fixes from Paseo 0.14.
+
+![SSH session: dark terminal, one-row header with environment chips, server list on the left](docs/media/ssh-terminal.png)
+
+### SSH servers (new "Servers" section, desktop and mobile)
+
+- **Servers, groups and tags.** Save servers with address, port, user, tags and a group; groups pass
+  their settings down (nearest group wins, field by field). Search by name, address or tag, filter
+  by tags, duplicate a server, "connect all" for a group.
+- **Keychain.** Generate Ed25519/RSA/ECDSA keys (with a passphrase), import keys, export the public
+  key, and keep identities (user + key or password). **Install public key** appends it to the
+  server's `~/.ssh/authorized_keys` with the right permissions and does nothing if it is already
+  there.
+- **Secrets stay in the daemon.** Passwords, private keys and passphrases live only in the daemon's
+  secret store; they are never written to the JSON files, never sent to the app and never logged.
+  The **Password** key (tab header on desktop, accessory keyboard on mobile) asks the daemon to type
+  the saved password into the session.
+- **Host keys like OpenSSH.** The first connection shows the SHA-256 fingerprint (the same as
+  `ssh-keygen -lf`) and waits up to 120 s for Trust or Reject; a changed key blocks the connection
+  with both fingerprints and a "trust new key" action.
+- **Authentication** by password, key or keyboard-interactive, in the order you choose; prompts are
+  relayed to the app. The server banner shows in the terminal.
+- **SSH terminals without a workspace.** Sessions run in the daemon: close the app while `top` is
+  running, reopen it, and the tab and screen are still there. Tab dot: green for unseen output,
+  amber while waiting for input, red on error or lost connection.
+- **Connection features.** Jump chains (each hop asks for its own host key), SOCKS5 and HTTP CONNECT
+  proxies, environment variables, a startup snippet, keepalive, automatic reconnect (1, 2, 4, 8, 16,
+  30 s, up to 10 minutes, keeping the tab and its screen), agent forwarding through the daemon's own
+  agent (never your system `SSH_AUTH_SOCK`), and Telnet (marked as unencrypted).
+- **SFTP.** Two-pane browser (local ↔ server and server ↔ server), upload from the device, a transfer
+  queue with pause, resume, cancel and conflict choices, and editing remote files in the code editor
+  with a conflict check on save. A 100 MB download paused and resumed ends with the same SHA-256 as
+  the source.
+- **Port forwarding.** Local, remote and dynamic (SOCKS5) rules per server, started on demand or when
+  the server connects; a busy port is reported as `port_in_use`.
+- **Snippets.** A snippet library with packages, run (type + Enter) or paste into the current tab,
+  **run on many servers** (a new workspace with one pane per server), per-server command history with
+  "save as snippet", split view up to 16 panes with **broadcast input** (Cmd+B on macOS,
+  Ctrl+Alt+B elsewhere), workspace templates, and terminal theme and font size per server or group.
+- **Session logs** (off by default, per server): terminal output without escape codes and without
+  anything typed while echo is off, search, and bookmarks with comments.
+- **Import** from the daemon's `~/.ssh` (config, known hosts, keys), a pasted ssh_config, or CSV;
+  `ProxyJump` becomes a jump chain and `ProxyCommand` is reported as skipped.
+
+### Inside the server
+
+- **Server environment.** On connect (switchable per server) the daemon detects the OS, kernel,
+  architecture, CPU, memory, disk, shell, Docker/Podman, kubectl, PostgreSQL/MySQL/Redis clients and
+  running services over one channel, and shows them on the server screen.
+- **Per-server chat agent.** Chats about a server get `ssh_run`, `ssh_read_file`, `ssh_write_file`,
+  `ssh_list_dir`, `ssh_terminal_send`, `ssh_terminal_capture` and `ssh_forward_start/stop`, plus the
+  Docker tools with a `serverId`. Reading tools run directly; anything that changes the server
+  (commands, writes, terminal input, forwards, container restarts) asks for permission first. No
+  tool returns secrets.
+- **Docker on the server.** When the server has Docker, the server screen shows the Docker cockpit
+  for that server through a forwarded Docker socket (opened on demand, closed when idle): the
+  container list matches `docker ps -a` on the server and exec opens a shell in the container.
+  Without Docker the section is hidden.
+- **Databases and Kubernetes through the server.** "Add database via this server" opens a forward to
+  a database only the server can reach and adds it to Databases; "Import Kubernetes cluster via this
+  server" reads the kubeconfig on the server and connects through a forward while TLS still checks
+  the real API server name.
+
+### Security fixes from Paseo 0.14
+
+- Background Git fetches no longer open login prompts.
+- Oversized provider output is rejected before it is parsed.
+- The local speech library path is kept out of agent environments.
+- Claude skips user and project hooks for internal agents.
+- OpenCode asks before running a JAgentDesk tool.
+- Codex answers every approval callback that shares one item.
+
+### Verified
+
+All 14 acceptance criteria of the SSH spec pass against a real daemon and real OpenSSH servers
+(fingerprints, reject and key change, key install, reopen during `top`, 100 MB SFTP pause/resume,
+forwarding to PostgreSQL and `port_in_use`, two-hop jump chain, 20 s network drop and reconnect,
+snippet on three servers, chat agent with Docker and the permission card, Docker list and exec, a
+server without Docker, `~/.ssh/config` import, no secrets in the daemon log).
+
+### Known limits
+
+- Mosh, serial, X11, cloud sync, SSO and PuTTY/MobaXterm/SecureCRT import are out of scope.
+- Kubeconfigs whose users authenticate with `exec` or auth-provider plugins run those plugins on the
+  daemon machine and may fail there.
+- The forwarded Docker socket path must fit the macOS 104-byte limit; keep `$JAGENTDESK_HOME` short.
+- The SFTP transfer queue lives in memory: transfers still in progress are lost when the daemon
+  restarts.
+- Remote files can be edited on web and desktop; on phones the SFTP editor shows the same "edit on
+  web and desktop" notice as other files.
 
 ## v0.9.46 — 2026-10-01
 
