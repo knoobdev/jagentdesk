@@ -120,6 +120,7 @@ import type {
 import type { AgentForumService } from "../../agent-forum/service.js";
 import { registerForumTools } from "./forum-tools.js";
 import type { ClusterRegistry } from "../../cluster/cluster-registry.js";
+import { registerSshAgentTools, type SshAgentTool } from "../../ssh/environment/agent-tools.js";
 import type { DatabaseRegistry } from "../../database/database-registry.js";
 import type { DatabaseEngine } from "../../database/database-dto.js";
 import { execCommand } from "../../../utils/spawn.js";
@@ -185,6 +186,9 @@ export interface JAgentDeskToolHostDependencies {
   agentForumService?: AgentForumService | null;
   clusterRegistry?: ClusterRegistry;
   databaseRegistry?: DatabaseRegistry;
+  // SSH servers (spec 25.11): ssh_* tools and the server-aware docker_* tools that replace the
+  // host-only ones (same names, same behaviour without serverId). Bound per caller agent.
+  sshAgentTools?: (callerAgentId: string | null) => SshAgentTool[];
   // Daemon-wide Forge Hub service (spec 19 / ADR-0015). Lets ANY agent read and
   // operate GitHub/GitLab/Bitbucket via the forge_* tools, mirroring how
   // clusterRegistry backs the kubectl_* tools. Single instance so all agents
@@ -4071,6 +4075,9 @@ export function createJAgentDeskToolCatalog(
   registerKubectlTools({ registerTool, options, callerAgentId });
   registerSqlTools({ registerTool, options, callerAgentId });
   registerDockerTools({ registerTool });
+  if (options.sshAgentTools) {
+    registerSshAgentTools(registerTool, options.sshAgentTools(callerAgentId ?? null));
+  }
   // Spec 24.5: tools a host cannot run are not offered (unsupported_os depends only on
   // the OS/arch, so this needs no probe).
   const hostSupport = staticHostSupport(process.platform, process.arch);

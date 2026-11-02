@@ -201,6 +201,20 @@ import {
   ProxyPushSchemas,
 } from "./proxy/rpc-schemas.js";
 import { SshRequestSchemas, SshResponseSchemas, SshPushSchemas } from "./ssh/rpc-schemas.js";
+import { LogsImportInboundSchemas, LogsImportOutboundSchemas } from "./ssh/logs-import-schemas.js";
+import {
+  SshEnvironmentInboundSchemas,
+  SshEnvironmentOutboundSchemas,
+} from "./ssh/environment-schemas.js";
+import {
+  SshRemoteDockerInboundSchemas,
+  SshRemoteDockerOutboundSchemas,
+} from "./ssh/remote-docker-schemas.js";
+import { SshRemoteDbInboundSchemas, SshRemoteDbOutboundSchemas } from "./ssh/remote-db-schemas.js";
+import {
+  SshRemoteK8sInboundSchemas,
+  SshRemoteK8sOutboundSchemas,
+} from "./ssh/remote-k8s-schemas.js";
 import {
   ExportHostDataRequestMessageSchema,
   ExportHostDataResponseMessageSchema,
@@ -4000,6 +4014,11 @@ export const AgentConfigApplyRequestMessageSchema = z.object({
 export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ...DatabaseRequestSchemas,
   ...SshRequestSchemas,
+  ...LogsImportInboundSchemas,
+  ...SshEnvironmentInboundSchemas,
+  ...SshRemoteDockerInboundSchemas,
+  ...SshRemoteDbInboundSchemas,
+  ...SshRemoteK8sInboundSchemas,
   ...DockerRequestSchemas,
   ...SimulatorRequestSchemas,
   ...ProxyRequestSchemas,
@@ -7782,6 +7801,11 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ...DatabaseResponseSchemas,
   ...SshResponseSchemas,
   ...SshPushSchemas,
+  ...LogsImportOutboundSchemas,
+  ...SshEnvironmentOutboundSchemas,
+  ...SshRemoteDockerOutboundSchemas,
+  ...SshRemoteDbOutboundSchemas,
+  ...SshRemoteK8sOutboundSchemas,
   ...DockerResponseSchemas,
   ...DockerPushSchemas,
   ...SimulatorResponseSchemas,

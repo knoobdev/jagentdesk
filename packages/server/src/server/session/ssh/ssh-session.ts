@@ -49,13 +49,17 @@ export class SshSession {
   handleMessage(msg: SessionInboundMessage): Promise<void> | undefined {
     const handled = this.handleCore(msg);
     if (handled) return handled;
-    if (this.moduleHandlers.length === 0) return undefined;
-    return this.handleModules(msg);
+    const handlers = [...this.moduleHandlers, ...(this.service.modules?.handlers ?? [])];
+    if (handlers.length === 0) return undefined;
+    return this.handleModules(msg, handlers);
   }
 
-  private async handleModules(msg: SessionInboundMessage): Promise<void> {
+  private async handleModules(
+    msg: SessionInboundMessage,
+    handlers: readonly SshModuleHandler[],
+  ): Promise<void> {
     const emit = (out: SessionOutboundMessage): void => this.host.emit(out);
-    for (const handler of this.moduleHandlers) {
+    for (const handler of handlers) {
       try {
         if (await handler(msg, emit)) return;
       } catch (error) {

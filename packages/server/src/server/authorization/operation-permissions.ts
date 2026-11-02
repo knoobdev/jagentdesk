@@ -440,6 +440,21 @@ const INBOUND_PERMISSION = {
   "ssh.auth.respond.request": "daemon.manage",
   "ssh.session.create.request": "daemon.manage",
   "ssh.session.reconnect.request": "daemon.manage",
+  // S6–S8 modules (ssh/modules.ts): logs, import, install key, environment, Docker.
+  "ssh.logs.list.request": "daemon.manage",
+  "ssh.logs.set_enabled.request": "daemon.manage",
+  "ssh.logs.read.request": "daemon.manage",
+  "ssh.logs.search.request": "daemon.manage",
+  "ssh.logs.bookmark.request": "daemon.manage",
+  "ssh.logs.update_bookmark.request": "daemon.manage",
+  "ssh.import.preview.request": "daemon.manage",
+  "ssh.import.apply.request": "daemon.manage",
+  "ssh.keys.install_to_server.request": "daemon.manage",
+  "ssh.environment.detect.request": "daemon.manage",
+  "ssh.docker.attach.request": "daemon.manage",
+  "ssh.docker.detach.request": "daemon.manage",
+  "ssh.remote_db.prepare.request": "daemon.manage",
+  "ssh.remote_k8s.import.request": "daemon.manage",
 } as const satisfies Record<InboundOperation, DaemonPermission | null>;
 
 const OUTBOUND_PERMISSION = {
@@ -907,6 +922,20 @@ const OUTBOUND_PERMISSION = {
   "ssh.auth.prompt": "daemon.manage",
   "ssh.prompt.resolved": "daemon.manage",
   "ssh.connection.state": "daemon.manage",
+  "ssh.logs.list.response": "daemon.manage",
+  "ssh.logs.set_enabled.response": "daemon.manage",
+  "ssh.logs.read.response": "daemon.manage",
+  "ssh.logs.search.response": "daemon.manage",
+  "ssh.logs.bookmark.response": "daemon.manage",
+  "ssh.logs.update_bookmark.response": "daemon.manage",
+  "ssh.import.preview.response": "daemon.manage",
+  "ssh.import.apply.response": "daemon.manage",
+  "ssh.keys.install_to_server.response": "daemon.manage",
+  "ssh.environment.detect.response": "daemon.manage",
+  "ssh.docker.attach.response": "daemon.manage",
+  "ssh.docker.detach.response": "daemon.manage",
+  "ssh.remote_db.prepare.response": "daemon.manage",
+  "ssh.remote_k8s.import.response": "daemon.manage",
 } as const satisfies Record<OutboundOperation, DaemonPermission | null>;
 
 export function requiredPermissionForInbound(operation: InboundOperation): DaemonPermission | null {
