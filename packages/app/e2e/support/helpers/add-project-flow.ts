@@ -53,6 +53,10 @@ export async function openAddProjectFlow(
   await expect(addProjectFlowInput(page)).toBeFocused();
 }
 
+export async function openAddProjectHostSelection(page: Page): Promise<void> {
+  await openAddProjectFlow(page, "host");
+}
+
 export async function chooseAddProjectMethod(page: Page, method: AddProjectMethod): Promise<void> {
   const option = addProjectFlowMethod(page, method);
   await expect(option).toBeVisible();
@@ -81,4 +85,27 @@ export async function expectNewWorkspaceForAddedProject(
     input.projectName,
     { timeout: 30_000 },
   );
+}
+
+export async function navigateAddProjectResults(
+  page: Page,
+  key: "ArrowDown" | "ArrowUp",
+  count: number,
+): Promise<void> {
+  for (let index = 0; index < count; index += 1) await page.keyboard.press(key);
+}
+
+export async function expectAddProjectResultVisible(page: Page, text: string): Promise<void> {
+  const results = page.getByTestId("add-project-flow-results");
+  const row = results.getByRole("button").filter({ has: page.getByText(text, { exact: true }) });
+  await expect
+    .poll(async () => {
+      const viewport = await results.boundingBox();
+      const bounds = await row.boundingBox();
+      if (!viewport || !bounds) return false;
+      return (
+        bounds.y >= viewport.y - 1 && bounds.y + bounds.height <= viewport.y + viewport.height + 1
+      );
+    })
+    .toBe(true);
 }

@@ -177,6 +177,14 @@ const MODIFIER_CODES = new Set([
   "ShiftRight",
 ]);
 
+/**
+ * Combo strings spell the workspace-index wildcard as `Digit`; the settings UI
+ * shows it as the `1-9` token its default help rows already use.
+ */
+const DISPLAY_KEY_ALIASES: Record<string, string> = {
+  Digit: "1-9",
+};
+
 export function comboStringToShortcutKeys(comboString: string): ShortcutKey[] {
   const parts = comboString.split("+");
   const keys: ShortcutKey[] = [];
@@ -195,7 +203,7 @@ export function comboStringToShortcutKeys(comboString: string): ShortcutKey[] {
         keys.push("shift");
         break;
       default:
-        keys.push(part.toUpperCase());
+        keys.push((DISPLAY_KEY_ALIASES[part] ?? part).toUpperCase());
         break;
     }
   }
@@ -236,7 +244,16 @@ export function keyboardEventToComboString(event: KeyboardEvent): string | null 
   if (event.shiftKey) parts.push("Shift");
   if (event.metaKey) parts.push("Cmd");
 
-  const humanKey = CODE_TO_KEY[event.code];
+  // Capture the same logical character that dispatch matches. Keep the code
+  // fallback for named keys and Option combinations whose key is rewritten.
+  const eventKey = event.key.toLowerCase();
+  const logicalKey = Object.entries(KEY_MAP).find(
+    ([, mapping]) =>
+      mapping.key?.length === 1 &&
+      (mapping.key.toLowerCase() === eventKey ||
+        (event.shiftKey && mapping.shiftedKey === event.key)),
+  )?.[0];
+  const humanKey = logicalKey ?? CODE_TO_KEY[event.code];
   if (humanKey) {
     parts.push(humanKey);
   } else {

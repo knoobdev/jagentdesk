@@ -18,6 +18,8 @@ import { csharpLanguage } from "@replit/codemirror-lang-csharp";
 import { nixLanguage } from "./nix/language.js";
 import { parser as elixirParser } from "lezer-elixir";
 import type { Parser } from "@lezer/common";
+import { astroParser } from "./astro/parser.js";
+import { vueParser } from "./vue/parser.js";
 
 function language(parser: Parser): Language {
   return new Language(defineLanguageFacet(), parser);
@@ -49,6 +51,10 @@ const languagesByExtension: Record<string, Language> = {
   // HTML
   html: language(htmlParser),
   htm: language(htmlParser),
+  // Astro
+  astro: language(astroParser),
+  // Vue
+  vue: language(vueParser),
   // XML
   xml: language(xmlParser),
   // Java

@@ -1919,6 +1919,8 @@ export const ru: TranslationResources = {
       searchPlaceholder: "Поиск сочетаний клавиш",
       unavailableOnMobile: "Сочетания клавиш доступны только на рабочем столе.",
       capturePrompt: "Нажмите ярлык...",
+      captureIndexPrompt: "Завершите цифрой от 1 до 9.",
+      unassigned: "Не задано",
       actions: {
         done: "Сделанный",
         cancel: "Отмена",

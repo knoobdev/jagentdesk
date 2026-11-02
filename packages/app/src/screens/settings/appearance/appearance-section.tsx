@@ -380,7 +380,7 @@ interface FontFamilyRowProps {
   draft: string;
   withBorder: boolean;
   onChangeDraft: (value: string) => void;
-  onCommit: (value: string) => void;
+  onCommit: (value: string) => string;
 }
 
 function FontFamilyRow({
@@ -395,8 +395,10 @@ function FontFamilyRow({
   onCommit,
 }: FontFamilyRowProps) {
   const handleCommit = useCallback(() => {
-    onCommit(draft);
-  }, [draft, onCommit]);
+    // JAgentDesk's field is controlled, so writing the committed value back to
+    // the draft is what drops a rejected family from the input.
+    onChangeDraft(onCommit(draft));
+  }, [draft, onCommit, onChangeDraft]);
 
   // Resync from the committed value when it changes elsewhere.
   useEffect(() => {
@@ -609,12 +611,13 @@ export function AppearanceSection() {
       const sanitized = sanitizeFontFamily(value);
       if (sanitized === null) {
         setUiFontDraft(settings.uiFontFamily);
-        return;
+        return settings.uiFontFamily;
       }
       setUiFontDraft(sanitized);
       if (sanitized !== settings.uiFontFamily) {
         void updateSettings({ uiFontFamily: sanitized });
       }
+      return sanitized;
     },
     [settings.uiFontFamily, updateSettings],
   );
@@ -624,12 +627,13 @@ export function AppearanceSection() {
       const sanitized = sanitizeFontFamily(value);
       if (sanitized === null) {
         setMonoFontDraft(settings.monoFontFamily);
-        return;
+        return settings.monoFontFamily;
       }
       setMonoFontDraft(sanitized);
       if (sanitized !== settings.monoFontFamily) {
         void updateSettings({ monoFontFamily: sanitized });
       }
+      return sanitized;
     },
     [settings.monoFontFamily, updateSettings],
   );

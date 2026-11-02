@@ -11,6 +11,8 @@ import { useKeyboardShortcutOverrides } from "@/hooks/use-keyboard-shortcut-over
 import {
   buildKeyboardShortcutHelpSections,
   getBindingIdForAction,
+  normalizeCapturedShortcutCombo,
+  isShortcutCaptureComplete,
   type KeyboardShortcutHelpRow,
 } from "@/keyboard/keyboard-shortcuts";
 import {
@@ -128,6 +130,9 @@ function ShortcutRow({
     [overrideCombo, row.keys],
   );
   const rowStyle = useMemo(() => [styles.row, isCapturing && styles.rowCapturing], [isCapturing]);
+  const showDone = isCapturing && capturedCombos.length > 0;
+  const captureComplete =
+    bindingId !== null && isShortcutCaptureComplete(bindingId, capturedCombos);
 
   return (
     <View style={rowStyle}>
@@ -138,10 +143,13 @@ function ShortcutRow({
         ) : (
           <Shortcut chord={displayChord} />
         )}
+        {showDone && !captureComplete ? (
+          <Text style={styles.capturingText}>{t("settings.shortcuts.captureIndexPrompt")}</Text>
+        ) : null}
         {bindingId !== null && (
           <>
-            {isCapturing && capturedCombos.length > 0 ? (
-              <Button variant="ghost" size="sm" onPress={onDone}>
+            {showDone ? (
+              <Button variant="ghost" size="sm" disabled={!captureComplete} onPress={onDone}>
                 {t("settings.shortcuts.actions.done")}
               </Button>
             ) : null}
@@ -195,7 +203,10 @@ export function KeyboardShortcutsSection() {
   );
 
   const saveCapture = useCallback(() => {
-    if (capturingBindingId === null || capturedCombos.length === 0) {
+    if (
+      capturingBindingId === null ||
+      !isShortcutCaptureComplete(capturingBindingId, capturedCombos)
+    ) {
       return;
     }
     void setOverride(capturingBindingId, capturedCombos.join(" "));
@@ -228,7 +239,8 @@ export function KeyboardShortcutsSection() {
       }
 
       setHeldModifiers(null);
-      setCapturedCombos((current) => [...current, comboString]);
+      const capturedCombo = normalizeCapturedShortcutCombo(capturingBindingId!, comboString);
+      setCapturedCombos((current) => [...current, capturedCombo]);
     }
 
     window.addEventListener("keydown", handleKeyDown, true);
