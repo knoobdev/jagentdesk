@@ -30,16 +30,20 @@ function createQueryMock(events: unknown[]): Query {
 }
 
 describe("Claude SDK env", () => {
-  test.each(["node", "bun", process.execPath])(
-    "identifies the spawned %s process as jagentdesk after clearing parent session env",
-    async (command) => {
+  test.each(
+    ["node", "bun", process.execPath].flatMap((command) =>
+      [undefined, "jagentdesk", "custom-client"].map((entrypoint) => ({ command, entrypoint })),
+    ),
+  )(
+    "preserves explicit launch identity $entrypoint in $command while clearing inherited session env",
+    async ({ command, entrypoint }) => {
       let output = "";
       let exited = Promise.resolve<unknown[]>([]);
       const query = claudeQuery(
         { prompt: "", options: {} },
         {
           runtimeSettings: { env: { CLAUDE_CODE_ENTRYPOINT: "sdk-ts" } },
-          launchEnv: { CLAUDE_CODE_ENTRYPOINT: "sdk-cli" },
+          launchEnv: entrypoint === undefined ? {} : { CLAUDE_CODE_ENTRYPOINT: entrypoint },
           queryFactory: ({ options }) => {
             if (!options.spawnClaudeCodeProcess) {
               throw new Error("Missing Claude process launcher");
@@ -65,7 +69,10 @@ describe("Claude SDK env", () => {
 
       try {
         expect(await exited).toEqual([0, null]);
-        expect(JSON.parse(output)).toEqual({ entrypoint: "jagentdesk", parentSession: null });
+        expect(JSON.parse(output)).toEqual({
+          ...(entrypoint === undefined ? {} : { entrypoint }),
+          parentSession: null,
+        });
       } finally {
         query.close();
       }
