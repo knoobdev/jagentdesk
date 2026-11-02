@@ -200,6 +200,7 @@ import {
   ProxyResponseSchemas,
   ProxyPushSchemas,
 } from "./proxy/rpc-schemas.js";
+import { SshRequestSchemas, SshResponseSchemas, SshPushSchemas } from "./ssh/rpc-schemas.js";
 import {
   ExportHostDataRequestMessageSchema,
   ExportHostDataResponseMessageSchema,
@@ -3998,6 +3999,7 @@ export const AgentConfigApplyRequestMessageSchema = z.object({
 
 export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ...DatabaseRequestSchemas,
+  ...SshRequestSchemas,
   ...DockerRequestSchemas,
   ...SimulatorRequestSchemas,
   ...ProxyRequestSchemas,
@@ -4600,6 +4602,9 @@ export const ServerInfoStatusPayloadSchema = z
         autorunApproval: z.boolean().optional(), // Per-action approval mode for autorun (§20.7.3)
         sessionSharing: z.boolean().optional(), // Session sharing via Cloudflare tunnel (spec §21 / ADR-0018); default OFF
         agentForum: z.boolean().optional(), // Agent Forum / Team mode (docs/plans/active/agent-forum.md)
+        // SSH servers (spec 25 / ADR-0027, story S-20 S1). The client gates the
+        // Servers surface on it so an old daemon never receives ssh.* RPCs.
+        sshServers: z.boolean().optional(),
       })
       .optional(),
   })
@@ -7775,6 +7780,8 @@ export type DaemonUpdateProgressMessage = z.infer<typeof DaemonUpdateProgressMes
 
 export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ...DatabaseResponseSchemas,
+  ...SshResponseSchemas,
+  ...SshPushSchemas,
   ...DockerResponseSchemas,
   ...DockerPushSchemas,
   ...SimulatorResponseSchemas,
