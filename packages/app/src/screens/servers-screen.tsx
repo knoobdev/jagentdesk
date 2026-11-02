@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ScrollView, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import { router, useLocalSearchParams } from "expo-router";
@@ -36,24 +36,14 @@ import { ErrorBanner, TabButton } from "@/ssh/ui/primitives";
 import { AuthPromptBar, HostkeyPromptBar } from "@/ssh/ui/prompt-bars";
 import { ServerFormSheet, type ServerFormTarget } from "@/ssh/ui/server-form-sheet";
 import { ServersListTab, type ServerListActions } from "@/ssh/ui/servers-list";
-import { SshTerminalView, type SshConnectionErrorDetails } from "@/ssh/ui/ssh-terminal-view";
+import { SshSessionScreen } from "@/ssh/ui/session-screen";
 import { sshStyles as styles } from "@/ssh/ui/styles";
-import { ImportServersSheet, ServerModulesBar } from "@/ssh/ui/server-surfaces";
-import {
-  ForwardingSection,
-  ServerSftpSection,
-  useSshModuleApis,
-  type SshModuleApis,
-} from "@/ssh/ui/server-modules";
-import {
-  ServerSnippetsSection,
-  SnippetsTab,
-  SshWorkspaceScreen,
-  useSnippetsApi,
-} from "@/ssh/ui/snippets-mount";
+import { ImportServersSheet } from "@/ssh/ui/server-surfaces";
+import { ForwardingSection, useSshModuleApis, type SshModuleApis } from "@/ssh/ui/server-modules";
+import { SnippetsTab, SshWorkspaceScreen, useSnippetsApi } from "@/ssh/ui/snippets-mount";
 import type { SnippetsApi } from "@/ssh/snippets/api";
 import type { SshTabStatusState } from "@/ssh/tab-status/tab-status-state";
-import { sshTabDotTone, useSshTabStatuses } from "@/ssh/tab-status/use-ssh-tab-status";
+import { useSshTabStatuses } from "@/ssh/tab-status/use-ssh-tab-status";
 import { OpenSessionsBar } from "@/ssh/ui/open-sessions";
 import type { SnippetWorkspacePlan } from "@/ssh/snippets/snippet-input";
 
@@ -64,11 +54,6 @@ import type { SnippetWorkspacePlan } from "@/ssh/snippets/snippet-input";
 type ServersTabId = "servers" | "keychain" | "hosts" | "forwarding" | "snippets";
 
 // Sections next to a server's terminal (spec 25.13), provided by the milestone modules.
-const SERVER_SECTIONS = [
-  { id: "sftp", label: "SFTP" },
-  { id: "forwarding", label: "Port forwarding" },
-  { id: "snippets", label: "Snippets" },
-] as const;
 
 interface ActiveTerminal {
   sshServerId: string;
@@ -373,11 +358,62 @@ function useServerRows(input: {
   return { tags, rows };
 }
 
+/**
+ * `?connect=<serverId>` (the left-column server list, 25.13.1): open that server's session,
+ * reusing an open one, then show it.
+ */
+function useConnectParam(input: {
+  client: DaemonClient | null;
+  data: ServersData;
+  addSession: ReturnType<typeof useServersData>["addSession"];
+  setError: (error: string | null) => void;
+  connect: string | undefined;
+}) {
+  const { client, data, addSession, setError, connect } = input;
+  const handled = useRef<string | null>(null);
+  useEffect(() => {
+    if (!connect || !client || data.loading || handled.current === connect) return;
+    handled.current = connect;
+    const open = data.sessions.find((session) => session.serverId === connect);
+    if (open) {
+      router.setParams({ sshTerminal: open.terminalId, connect: undefined });
+      handled.current = null;
+      return;
+    }
+    void (async () => {
+      try {
+        const res = await client.sshSessionCreate({
+          serverId: connect,
+          size: { cols: 80, rows: 24 },
+        });
+        if (res.error || !res.terminalId) {
+          setError(res.error ?? "Failed to open the SSH session");
+          router.setParams({ connect: undefined });
+          return;
+        }
+        addSession({
+          terminalId: res.terminalId,
+          serverId: connect,
+          state: "connecting",
+          createdAtMs: Date.now(),
+        });
+        router.setParams({ sshTerminal: res.terminalId, connect: undefined });
+      } catch (error) {
+        setError(errorText(error, "Failed to open the SSH session"));
+        router.setParams({ connect: undefined });
+      } finally {
+        handled.current = null;
+      }
+    })();
+  }, [addSession, client, connect, data.loading, data.sessions, setError]);
+}
+
 export function ServersScreen() {
   const hosts = useHosts();
   const params = useLocalSearchParams<{
     serverId?: string | string[];
     sshTerminal?: string | string[];
+    connect?: string | string[];
   }>();
   const hostServerId = firstParam(params.serverId) ?? hosts[0]?.serverId ?? "";
   const client = useHostRuntimeClient(hostServerId);
@@ -402,6 +438,7 @@ export function ServersScreen() {
   const closeTerminal = useCallback(() => {
     router.setParams({ sshTerminal: undefined });
   }, []);
+  useConnectParam({ client, data, addSession, setError, connect: firstParam(params.connect) });
   const tabStatuses = useSshTabStatuses({
     client,
     sessions: data.sessions,
@@ -424,20 +461,20 @@ export function ServersScreen() {
   }
   if (activeSession && terminalServer) {
     return (
-      <SshTerminalScreen
+      <SshSessionScreen
         client={client}
         hostServerId={hostServerId}
         server={terminalServer}
         servers={data.servers}
         groups={data.groups}
+        identities={data.identities}
+        keys={data.keys}
         moduleApis={moduleApis}
         snippetsApi={snippetsApi}
         onOpenWorkspace={setWorkspacePlan}
         terminalId={activeSession.terminalId}
-        keys={data.keys}
         live={liveByServerId[terminalServer.id]}
         terminalState={stateByTerminalId[activeSession.terminalId]}
-        tabStatus={tabStatuses[activeSession.terminalId]}
         insetsTop={insets.top}
         onBack={closeTerminal}
         onClosed={removeSession}
@@ -754,181 +791,5 @@ function ServersHeaderActions({
         Add server
       </Button>
     </>
-  );
-}
-
-function SshTerminalScreen({
-  client,
-  hostServerId,
-  server,
-  servers,
-  groups,
-  moduleApis,
-  snippetsApi,
-  onOpenWorkspace,
-  terminalId,
-  keys,
-  live,
-  terminalState,
-  tabStatus,
-  insetsTop,
-  onBack,
-  onClosed,
-  onHostkeyDecision,
-  onAuthSubmit,
-  refresh,
-}: {
-  client: DaemonClient | null;
-  hostServerId: string;
-  server: SshServerInfo;
-  servers: SshServerInfo[];
-  groups: SshGroup[];
-  moduleApis: SshModuleApis | null;
-  snippetsApi: SnippetsApi | null;
-  onOpenWorkspace: (plan: SnippetWorkspacePlan) => void;
-  terminalId: string;
-  keys: SshKey[];
-  live: SshServerLiveState | undefined;
-  terminalState: Parameters<typeof SshTerminalView>[0]["terminalState"];
-  tabStatus: SshTabStatusState | undefined;
-  insetsTop: number;
-  onBack: () => void;
-  onClosed: (terminalId: string) => void;
-  onHostkeyDecision: (serverId: string, decision: "accept" | "reject") => void;
-  onAuthSubmit: (serverId: string, answers: string[] | null) => void;
-  refresh: () => Promise<void>;
-}) {
-  // Errors of actions taken in the tab stay visible in the tab (docs/testing.md).
-  const [actionError, setActionError] = useState<string | null>(null);
-  const handleEnd = useCallback(() => {
-    if (!client) return;
-    void (async () => {
-      await client.killTerminal(terminalId).catch(() => undefined);
-      onClosed(terminalId);
-      onBack();
-    })();
-  }, [client, onBack, onClosed, terminalId]);
-  const handleReconnect = useCallback(() => {
-    if (!client) return;
-    void (async () => {
-      try {
-        const res = await client.sshSessionReconnect({ terminalId });
-        setActionError(res.error);
-      } catch (error) {
-        setActionError(errorText(error, "Reconnect failed"));
-      }
-    })();
-  }, [client, terminalId]);
-  // After a host_key_mismatch block the user may trust the presented key (25.3): replace
-  // the stored key with it (ssh.knownhosts.replace), then reconnect the same tab.
-  const handleReplaceHostKey = useCallback(
-    (error: SshConnectionErrorDetails) => {
-      const { host, port, receivedKeyType, receivedPublicKey } = error;
-      if (!client || !host || !port || !receivedKeyType || !receivedPublicKey) return;
-      void (async () => {
-        try {
-          const res = await client.sshKnownhostsReplace({
-            host,
-            port,
-            keyType: receivedKeyType,
-            publicKey: receivedPublicKey,
-          });
-          if (res.error) {
-            setActionError(res.error);
-            return;
-          }
-          await client.sshSessionReconnect({ terminalId });
-          await refresh();
-        } catch (caught) {
-          setActionError(errorText(caught, "Could not replace the host key"));
-        }
-      })();
-    },
-    [client, refresh, terminalId],
-  );
-  const [section, setSection] = useState("terminal");
-  const handleServerSaved = useCallback(() => void refresh(), [refresh]);
-  let sectionContent = null;
-  if (moduleApis && section === "sftp") {
-    sectionContent = (
-      <ServerSftpSection
-        apis={moduleApis}
-        client={client}
-        hostServerId={hostServerId}
-        server={server}
-        servers={servers}
-      />
-    );
-  } else if (snippetsApi && section === "snippets") {
-    sectionContent = (
-      <ServerSnippetsSection
-        api={snippetsApi}
-        client={client}
-        server={server}
-        servers={servers}
-        groups={groups}
-        terminalId={terminalId}
-        onOpenWorkspace={onOpenWorkspace}
-      />
-    );
-  } else if (moduleApis && section === "forwarding") {
-    sectionContent = (
-      <ForwardingSection
-        apis={moduleApis}
-        client={client}
-        servers={servers}
-        server={server}
-        onServerSaved={handleServerSaved}
-      />
-    );
-  }
-  // Mobile Password key (25.4): the daemon types the saved password; it never comes here.
-  const handleTypePassword = useCallback(() => {
-    if (!client) return;
-    void (async () => {
-      try {
-        const res = await client.sshSessionTypePassword({ terminalId });
-        setActionError(res.error);
-      } catch (error) {
-        setActionError(errorText(error, "Could not type the password"));
-      }
-    })();
-  }, [client, terminalId]);
-  const overview = useMemo(
-    () => (
-      <ServerModulesBar
-        client={client}
-        hostServerId={hostServerId}
-        server={server}
-        keys={keys}
-        connected={terminalState?.state === "connected"}
-      />
-    ),
-    [client, hostServerId, keys, server, terminalState?.state],
-  );
-  return (
-    <SshTerminalView
-      overview={overview}
-      actionError={actionError}
-      dotTone={sshTabDotTone(tabStatus)}
-      onTypePassword={handleTypePassword}
-      sections={moduleApis ? SERVER_SECTIONS : undefined}
-      section={section}
-      onSectionChange={setSection}
-      sectionContent={sectionContent}
-      hostServerId={hostServerId}
-      server={server}
-      groups={groups}
-      terminalId={terminalId}
-      live={live}
-      terminalState={terminalState}
-      insetsTop={insetsTop}
-      onBack={onBack}
-      onEndSession={handleEnd}
-      onHostkeyDecision={onHostkeyDecision}
-      onAuthSubmit={onAuthSubmit}
-      onReplaceHostKey={handleReplaceHostKey}
-      onReconnect={handleReconnect}
-    />
   );
 }

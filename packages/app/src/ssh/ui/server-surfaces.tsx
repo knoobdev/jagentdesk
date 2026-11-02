@@ -57,7 +57,11 @@ export function environmentSummary(environment: ServerEnvironment, t: Translate)
   return parts.filter((part): part is string => Boolean(part)).join(" · ");
 }
 
-function useServerEnvironment(client: DaemonClient | null, serverId: string, connected: boolean) {
+export function useServerEnvironment(
+  client: DaemonClient | null,
+  serverId: string,
+  connected: boolean,
+) {
   const [environment, setEnvironment] = useState<ServerEnvironment | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -386,7 +390,7 @@ function LabeledInput({
   );
 }
 
-type RemoteDbEngine = "postgres" | "mysql";
+export type RemoteDbEngine = "postgres" | "mysql";
 
 const DEFAULT_DB_PORTS: Record<RemoteDbEngine, string> = { postgres: "5432", mysql: "3306" };
 
@@ -602,9 +606,9 @@ function RemoteClusterPanel({ client, server }: { client: DaemonClient; server: 
   );
 }
 
-type ServerPanel = "none" | "docker" | "logs" | "key" | "database" | "kubernetes";
+export type ServerPanel = "none" | "docker" | "logs" | "key" | "database" | "kubernetes";
 
-function remoteDbEngines(environment: ServerEnvironment | null): RemoteDbEngine[] {
+export function remoteDbEngines(environment: ServerEnvironment | null): RemoteDbEngine[] {
   if (!environment) return [];
   const engines: RemoteDbEngine[] = [];
   if (environment.psql) engines.push("postgres");
@@ -612,7 +616,7 @@ function remoteDbEngines(environment: ServerEnvironment | null): RemoteDbEngine[
   return engines;
 }
 
-function ServerPanelBody({
+export function ServerPanelBody({
   panel,
   client,
   hostServerId,

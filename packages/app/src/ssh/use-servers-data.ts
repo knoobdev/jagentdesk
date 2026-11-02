@@ -51,11 +51,33 @@ export function applyConnectionState(
   event: SshConnectionStateEvent,
 ): ServersData {
   if (event.terminalId) {
-    if (event.state !== "disconnected") return current;
+    if (event.state !== "disconnected") {
+      // A tab opened elsewhere (another screen or device) shows up without a refetch.
+      if (current.sessions.some((s) => s.terminalId === event.terminalId)) return current;
+      const session = {
+        terminalId: event.terminalId,
+        serverId: event.serverId,
+        state: event.state,
+        createdAtMs: Date.now(),
+      };
+      return { ...current, sessions: [...current.sessions, session] };
+    }
     const sessions = current.sessions.filter((s) => s.terminalId !== event.terminalId);
     return sessions.length === current.sessions.length ? current : { ...current, sessions };
   }
   return { ...current, servers: current.servers.map((server) => withServerState(server, event)) };
+}
+
+async function refreshKnownHosts(
+  client: DaemonClient,
+  setData: (update: (current: ServersData) => ServersData) => void,
+): Promise<void> {
+  try {
+    const res = await client.sshKnownhostsList();
+    if (!res.error) setData((current) => ({ ...current, knownHosts: res.knownHosts }));
+  } catch {
+    // The next full refresh shows it; nothing to surface for a background re-read.
+  }
 }
 
 export function useServersData(client: DaemonClient | null) {
@@ -102,6 +124,8 @@ export function useServersData(client: DaemonClient | null) {
     if (!client) return undefined;
     return client.onSshConnectionState((event) => {
       setData((current) => applyConnectionState(current, event));
+      // A host key trusted during this connect is now in known_hosts.json: show it.
+      if (event.state === "connected" && !event.terminalId) void refreshKnownHosts(client, setData);
     });
   }, [client]);
 

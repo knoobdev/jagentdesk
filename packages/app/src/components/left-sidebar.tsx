@@ -90,6 +90,7 @@ import type { ShortcutKey } from "@/utils/format-shortcut";
 import { SidebarAgentListSkeleton } from "./sidebar-agent-list-skeleton";
 import { SidebarCalloutSlot } from "./sidebar-callout-slot";
 import { SidebarWorkspaceList } from "./sidebar-workspace-list";
+import { SidebarServersNav } from "@/ssh/ui/sidebar-servers-nav";
 import { SidebarClusterNav } from "./sidebar-cluster-nav";
 import { SidebarDatabaseNav } from "./sidebar-database-nav";
 
@@ -103,7 +104,10 @@ function resolveSidebarNavBody(
   clusterRoute: { serverId: string; clusterId: string } | null,
   databaseRoute: { serverId: string; databaseId: string } | null,
   fallback: ReactNode,
+  serversRouteServerId: string | null = null,
 ): ReactNode {
+  // Spec 25.13.1: the Servers section owns the left column (server tree, open sessions).
+  if (serversRouteServerId) return <SidebarServersNav serverId={serversRouteServerId} />;
   if (clusterRoute) {
     return (
       <SidebarClusterNav serverId={clusterRoute.serverId} clusterId={clusterRoute.clusterId} />
@@ -1220,6 +1224,8 @@ function DesktopSidebar({
         databaseId: decodeURIComponent(databaseRouteMatch[2]),
       }
     : null;
+  const serversRouteMatch = pathname.match(/\/h\/([^/]+)\/servers/);
+  const serversRouteServerId = serversRouteMatch ? decodeURIComponent(serversRouteMatch[1]) : null;
   const sidebarWidth = usePanelStore((state) => state.sidebarWidth);
   const setSidebarWidth = usePanelStore((state) => state.setSidebarWidth);
   const { width: viewportWidth } = useWindowDimensions();
@@ -1312,8 +1318,8 @@ function DesktopSidebar({
           ) : (
             <TitlebarDragRegion />
           )}
-          {isClickUp ? <ClickUpSidebarHeader /> : null}
-          {clusterRoute || databaseRoute || isClickUp ? null : (
+          {isClickUp && !serversRouteServerId ? <ClickUpSidebarHeader /> : null}
+          {clusterRoute || databaseRoute || serversRouteServerId || isClickUp ? null : (
             <View style={sidebarHeaderGroupStyle}>
               <SidebarNewWorkspaceHeaderRow
                 label={labels.newWorkspace}
@@ -1444,7 +1450,12 @@ function DesktopSidebar({
           )}
         </View>
 
-        {resolveSidebarNavBody(clusterRoute, databaseRoute, workspaceListElement)}
+        {resolveSidebarNavBody(
+          clusterRoute,
+          databaseRoute,
+          workspaceListElement,
+          serversRouteServerId,
+        )}
 
         <SidebarCalloutSlot />
 

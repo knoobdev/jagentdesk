@@ -22,7 +22,9 @@ const DOT_TONES: Record<SshTabDotStatus, SshDotTone> = {
 };
 
 export function sshTabDotTone(state: SshTabStatusState | undefined): SshDotTone {
-  return DOT_TONES[deriveSshTabDotStatus(state ?? initialSshTabStatusState)];
+  const tone = DOT_TONES[deriveSshTabDotStatus(state ?? initialSshTabStatusState)];
+  // A connected tab with nothing unseen still reads as live (25.13.1 dot colors).
+  return tone === "muted" && state?.connection === "connected" ? "green" : tone;
 }
 
 type Statuses = Readonly<Record<string, SshTabStatusState>>;

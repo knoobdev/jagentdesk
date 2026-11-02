@@ -110,6 +110,8 @@ export interface TerminalPaneAppearance {
   palette: Theme["colors"]["terminal"] | null;
   /** null → the app's code font size. */
   fontSize: number | null;
+  /** Inner padding around the terminal surface, filled with the palette background. */
+  contentPadding?: number;
 }
 
 const TERMINAL_REFIT_DELAYS_MS = [0, 48, 144, 320];
@@ -262,6 +264,14 @@ export function TerminalPane({
   const { settings } = useAppSettings();
   const palette = appearance?.palette ?? theme.colors.terminal;
   const xtermTheme = useMemo(() => toXtermTheme(palette), [palette]);
+  const contentPadding = appearance?.contentPadding;
+  const outputContainerStyle = useMemo(
+    () =>
+      contentPadding
+        ? [styles.outputContainer, { padding: contentPadding, backgroundColor: palette.background }]
+        : styles.outputContainer,
+    [contentPadding, palette.background],
+  );
   const terminalFontFamily = useMemo(() => {
     const trimmed = settings.monoFontFamily.trim();
     return trimmed.length > 0 ? trimmed : undefined;
@@ -1094,7 +1104,7 @@ export function TerminalPane({
 
   return (
     <Animated.View style={containerStyle}>
-      <View style={styles.outputContainer}>
+      <View style={outputContainerStyle}>
         <View style={styles.terminalGestureContainer}>
           <TerminalEmulator
             ref={emulatorRef}
