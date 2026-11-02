@@ -17,7 +17,11 @@ export const TEST_SSHD = {
 export function connectTestClient(): Promise<Client> {
   return new Promise((resolve, reject) => {
     const client = new Client();
-    client.once("ready", () => resolve(client));
+    client.once("ready", () => {
+      // sshd reloads in the e2e tests drop live connections; a dead pooled client is expected.
+      client.on("error", () => {});
+      resolve(client);
+    });
     client.once("error", reject);
     // Host-key verification belongs to S1; the test container's key is throwaway.
     client.connect({ ...TEST_SSHD, readyTimeout: 20_000, hostVerifier: () => true });
