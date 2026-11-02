@@ -17,12 +17,17 @@ import { SnippetLibrary } from "@/ssh/snippets/snippet-library";
 import { SnippetRunResults } from "@/ssh/snippets/snippet-run-results";
 import type { SnippetWorkspacePlan } from "@/ssh/snippets/snippet-input";
 import {
+  focusNeighbor,
   focusPane,
   paneIds,
   getPane,
+  toggleBroadcast,
   type PaneNode,
   type SplitWorkspace,
 } from "@/ssh/snippets/split-layout";
+import { splitShortcutFor } from "@/ssh/snippets/split-shortcuts";
+import { Button } from "@/components/ui/button";
+import { getIsElectronMac, isWeb } from "@/constants/platform";
 import { SplitWorkspaceView } from "@/ssh/snippets/split-workspace-view";
 import { WorkspaceTemplatesList } from "@/ssh/snippets/workspace-templates-list";
 import { fgTint, IconBtn, ThemedArrowLeft } from "./primitives";
@@ -207,6 +212,31 @@ export function SshWorkspaceScreen({
     }
   }, [client, plan.inputByPaneId, sessions, stateByTerminalId]);
 
+  const [broadcastError, setBroadcastError] = useState<string | null>(null);
+  const terminalIds = useMemo(
+    () =>
+      Object.values(sessions)
+        .map((session) => session.terminalId)
+        .filter((id): id is string => id !== null),
+    [sessions],
+  );
+  // Broadcast input (25.4): the daemon mirrors keystrokes typed into any pane to the others.
+  const toggle = useCallback(() => {
+    if (!client) return;
+    setWorkspace((current) => {
+      const next = toggleBroadcast(current);
+      void client
+        .sshSessionBroadcast({ terminalIds: [...terminalIds], enabled: next.broadcast })
+        .then((res) => setBroadcastError(res.error))
+        .catch((error: unknown) =>
+          setBroadcastError(error instanceof Error ? error.message : "Broadcast failed"),
+        );
+      return next;
+    });
+  }, [client, terminalIds]);
+  useBroadcastOff(client, terminalIds);
+  useSplitShortcuts(toggle, setWorkspace);
+
   const handleFocus = useCallback(
     (paneId: string) => setWorkspace((current) => focusPane(current, paneId)),
     [],
@@ -248,7 +278,17 @@ export function SshWorkspaceScreen({
           testID="ssh-workspace-back"
         />
         <Text style={styles.cellStrong}>{`Workspace · ${paneIds(workspace).length} panes`}</Text>
+        <View style={styles.headerSpacer} />
+        <Button
+          size="sm"
+          variant={workspace.broadcast ? "default" : "outline"}
+          onPress={toggle}
+          testID="ssh-workspace-broadcast"
+        >
+          {workspace.broadcast ? "Broadcast on" : "Broadcast"}
+        </Button>
       </View>
+      {broadcastError ? <Text style={styles.errorText}>{broadcastError}</Text> : null}
       <SplitWorkspaceView
         workspace={workspace}
         renderPane={renderPane}
@@ -260,3 +300,39 @@ export function SshWorkspaceScreen({
 }
 
 const noop = () => {};
+
+/** Leaving the workspace turns broadcast off for its sessions. */
+function useBroadcastOff(client: DaemonClient | null, terminalIds: readonly string[]) {
+  const latest = useRef(terminalIds);
+  latest.current = terminalIds;
+  useEffect(
+    () => () => {
+      if (client && latest.current.length > 0) {
+        void client
+          .sshSessionBroadcast({ terminalIds: [...latest.current], enabled: false })
+          .catch(() => undefined);
+      }
+    },
+    [client],
+  );
+}
+
+/** Cmd+B / Ctrl+Alt+B toggles broadcast; Cmd+Opt / Ctrl+Alt + arrows move between panes. */
+function useSplitShortcuts(
+  toggle: () => void,
+  setWorkspace: (update: (current: SplitWorkspace) => SplitWorkspace) => void,
+) {
+  useEffect(() => {
+    if (!isWeb || typeof window === "undefined") return undefined;
+    const isMac = getIsElectronMac() || /Mac/i.test(globalThis.navigator?.platform ?? "");
+    const onKeyDown = (event: KeyboardEvent) => {
+      const action = splitShortcutFor(event, { isMac });
+      if (!action) return;
+      event.preventDefault();
+      if (action.kind === "toggle-broadcast") toggle();
+      else setWorkspace((current) => focusNeighbor(current, action.direction));
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [setWorkspace, toggle]);
+}

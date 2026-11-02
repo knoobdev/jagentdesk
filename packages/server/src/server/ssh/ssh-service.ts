@@ -1231,13 +1231,16 @@ export class SshService {
     return external ? { serverId: external.serverId, handle: external.session } : null;
   }
 
-  /** Spec 25.4 broadcast input: ≥2 terminals form a group; [] (or one) turns it off for them. */
-  setBroadcast(terminalIds: readonly string[]): void {
-    for (const terminalId of terminalIds) {
-      if (!this.remoteHandle(terminalId)) throw new Error(`SSH terminal not found: ${terminalId}`);
+  /** Spec 25.4 broadcast input: enabled groups ≥2 terminals; disabled removes them. */
+  setBroadcast(terminalIds: readonly string[], enabled = true): void {
+    if (enabled) {
+      for (const terminalId of terminalIds) {
+        if (!this.remoteHandle(terminalId))
+          throw new Error(`SSH terminal not found: ${terminalId}`);
+      }
     }
     for (const terminalId of terminalIds) this.leaveBroadcast(terminalId);
-    if (terminalIds.length < 2) return;
+    if (!enabled || terminalIds.length < 2) return;
     const group: ReadonlySet<string> = new Set(terminalIds);
     for (const terminalId of group) this.broadcastGroups.set(terminalId, group);
   }

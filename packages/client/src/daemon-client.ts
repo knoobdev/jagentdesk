@@ -56,6 +56,7 @@ import type {
   SshKeyType,
   SshPromptResolved,
   SshServer,
+  SshSessionActivity,
   SshTerminalSize,
 } from "@jagentdesk/protocol/ssh/rpc-schemas";
 import type {
@@ -770,6 +771,14 @@ export type SshSessionReconnectPayload = Extract<
   SessionOutboundMessage,
   { type: "ssh.session.reconnect.response" }
 >["payload"];
+export type SshSessionBroadcastPayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.session.broadcast.response" }
+>["payload"];
+export type SshSessionTypePasswordPayload = Extract<
+  SessionOutboundMessage,
+  { type: "ssh.session.type_password.response" }
+>["payload"];
 export type {
   SshAuthMethod,
   SshAuthPrompt,
@@ -787,6 +796,7 @@ export type {
   SshServer,
   SshServerInfo,
   SshServerState,
+  SshSessionActivity,
   SshSessionInfo,
   SshTerminalSize,
 } from "@jagentdesk/protocol/ssh/rpc-schemas";
@@ -7965,6 +7975,40 @@ export class DaemonClient {
   onSshModulePush(type: string, handler: (message: unknown) => void): () => void {
     return this.on((message) => {
       if (message.type === type) handler(message);
+    });
+  }
+
+  /** Broadcast input across these terminals (spec 25.4), or stop it for them. */
+  async sshSessionBroadcast(options: {
+    terminalIds: string[];
+    enabled: boolean;
+    requestId?: string;
+  }): Promise<SshSessionBroadcastPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.session.broadcast.response">({
+      requestId: options.requestId,
+      message: {
+        type: "ssh.session.broadcast.request",
+        terminalIds: options.terminalIds,
+        enabled: options.enabled,
+      },
+    });
+  }
+
+  /** Mobile Password key (25.4): the daemon types the saved password into the tab. */
+  async sshSessionTypePassword(options: {
+    terminalId: string;
+    requestId?: string;
+  }): Promise<SshSessionTypePasswordPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.session.type_password.response">({
+      requestId: options.requestId,
+      message: { type: "ssh.session.type_password.request", terminalId: options.terminalId },
+    });
+  }
+
+  /** Output arrived on an SSH/Telnet tab (≤1/s per tab): the unseen-output dot. */
+  onSshSessionActivity(handler: (event: SshSessionActivity) => void): () => void {
+    return this.on("ssh.session.activity", (message) => {
+      handler(message);
     });
   }
 

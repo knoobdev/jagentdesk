@@ -319,7 +319,7 @@ export class SshSession {
           msg,
           "ssh.session.broadcast.response",
           async () => {
-            s.setBroadcast(msg.terminalIds);
+            s.setBroadcast(msg.terminalIds, msg.enabled);
             return {};
           },
           {},

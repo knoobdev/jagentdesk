@@ -3,6 +3,7 @@ import { View } from "react-native";
 import type { DaemonClient, SshServerInfo } from "@jagentdesk/client/internal/daemon-client";
 import type { SftpEndpoint, SftpEntry } from "@jagentdesk/protocol/ssh/sftp-schemas";
 import { useFileDownload } from "@/hooks/use-file-download";
+import { useFilePicker } from "@/hooks/use-file-picker";
 import type { SshModuleTransport } from "@/ssh/module-rpc";
 import { createForwardingApi, type ForwardingApi } from "@/ssh/forwarding/api";
 import { PortForwardingList } from "@/ssh/forwarding/forwarding-list";
@@ -68,13 +69,47 @@ function endpointLabelFor(endpoint: SftpEndpoint | undefined, servers: SshServer
   return servers.find((candidate) => candidate.id === endpoint.serverId)?.label ?? "Server";
 }
 
+/** Largest device file sent through the daemon upload before SFTP copies it on. */
+const DEVICE_UPLOAD_MAX_BYTES = 200 * 1024 * 1024;
+
+/**
+ * SFTP "upload from device" (25.5): pick files, send them with the existing file upload
+ * (daemon temp path), and hand the daemon paths to the SFTP browser, which copies them
+ * into the pane's folder through the transfer queue.
+ */
+function useDeviceUpload(client: DaemonClient | null) {
+  const { pickFiles } = useFilePicker();
+  return useCallback(async (): Promise<string[]> => {
+    if (!client) return [];
+    const files = (await pickFiles()) ?? [];
+    const paths: string[] = [];
+    for (const file of files) {
+      const bytes = await file.readBytes();
+      if (bytes.byteLength > DEVICE_UPLOAD_MAX_BYTES) {
+        throw new Error(`${file.fileName} is larger than 200 MB.`);
+      }
+      const res = await client.uploadFile({
+        fileName: file.fileName,
+        mimeType: file.mimeType,
+        bytes,
+      });
+      if (res.error || !res.file)
+        throw new Error(res.error ?? `Uploading ${file.fileName} failed.`);
+      paths.push(res.file.path);
+    }
+    return paths;
+  }, [client, pickFiles]);
+}
+
 export function ServerSftpSection({
   apis,
+  client,
   hostServerId,
   server,
   servers,
 }: {
   apis: SshModuleApis;
+  client: DaemonClient | null;
   hostServerId: string;
   server: SshServerInfo;
   servers: SshServerInfo[];
@@ -93,6 +128,7 @@ export function ServerSftpSection({
   );
   const closeEditor = useCallback(() => setOpenFile(null), []);
   const clearDownload = useCallback(() => setDownload(null), []);
+  const uploadFromDevice = useDeviceUpload(client);
   const endpointLabel = endpointLabelFor(openFile?.endpoint, servers);
   return (
     <View style={styles.terminalBody} testID="ssh-server-sftp">
@@ -115,6 +151,7 @@ export function ServerSftpSection({
           initialRight={initialRight}
           onOpenFile={handleOpenFile}
           onDeviceDownloadReady={setDownload}
+          onUploadFromDevice={uploadFromDevice}
         />
       )}
       {download ? (

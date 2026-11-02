@@ -12,6 +12,7 @@ import { formatServerTarget } from "@/ssh/group-tree";
 import {
   sshLiveStatusLabel,
   sshStateTone,
+  type SshDotTone,
   type SshServerLiveState,
 } from "@/ssh/use-ssh-connect-events";
 import { AuthPromptBar, HostkeyPromptBar, MismatchBanner } from "./prompt-bars";
@@ -22,6 +23,7 @@ import {
   StateDot,
   TabButton,
   ThemedArrowLeft,
+  ThemedKeyRound,
   ThemedPlay,
   ThemedSquare,
 } from "./primitives";
@@ -100,6 +102,9 @@ export function SshTerminalView({
   onAuthSubmit,
   onReplaceHostKey,
   onReconnect,
+  dotTone,
+  onTypePassword,
+  actionError,
 }: {
   hostServerId: string;
   server: SshServerInfo;
@@ -120,6 +125,12 @@ export function SshTerminalView({
   onAuthSubmit: (serverId: string, answers: string[] | null) => void;
   onReplaceHostKey: (error: SshConnectionErrorDetails) => void;
   onReconnect: () => void;
+  /** Tab dot from the tab-status machine (25.4); falls back to the connection state. */
+  dotTone?: SshDotTone;
+  /** Types the saved password into the tab (25.4 Password key). */
+  onTypePassword?: () => void;
+  /** Failure of an action taken in this tab (reconnect, password key, replace key). */
+  actionError?: string | null;
 }) {
   const state = terminalState?.state ?? "connecting";
   const failure = state === "error" ? terminalState?.error : undefined;
@@ -136,7 +147,7 @@ export function SshTerminalView({
         />
         <View style={styles.terminalTitle}>
           <View style={styles.headerRow}>
-            <StateDot tone={sshStateTone(state)} />
+            <StateDot tone={dotTone ?? sshStateTone(state)} />
             <Text style={styles.cellStrong} numberOfLines={1}>
               {server.label}
             </Text>
@@ -152,6 +163,15 @@ export function SshTerminalView({
             label="Reconnect"
             onPress={onReconnect}
             testID="ssh-terminal-reconnect"
+          />
+        ) : null}
+        {onTypePassword && state === "connected" ? (
+          <IconBtn
+            icon={ThemedKeyRound}
+            tint={fgTint}
+            label="Type saved password"
+            onPress={onTypePassword}
+            testID="ssh-terminal-password-key"
           />
         ) : null}
         <IconBtn
@@ -189,6 +209,9 @@ export function SshTerminalView({
         ) : null}
         {live ? <AuthPromptBar serverId={server.id} live={live} onSubmit={onAuthSubmit} /> : null}
         {failure ? <FailureNotice error={failure} onReplaceHostKey={onReplaceHostKey} /> : null}
+        {actionError ? (
+          <Alert variant="error" title={actionError} testID="ssh-terminal-action-error" />
+        ) : null}
       </View>
       {section === "terminal" ? null : sectionContent}
       <View style={section === "terminal" ? styles.terminalBody : styles.hidden}>

@@ -50,6 +50,9 @@ import {
   useSnippetsApi,
 } from "@/ssh/ui/snippets-mount";
 import type { SnippetsApi } from "@/ssh/snippets/api";
+import type { SshTabStatusState } from "@/ssh/tab-status/tab-status-state";
+import { sshTabDotTone, useSshTabStatuses } from "@/ssh/tab-status/use-ssh-tab-status";
+import { OpenSessionsBar } from "@/ssh/ui/open-sessions";
 import type { SnippetWorkspacePlan } from "@/ssh/snippets/snippet-input";
 
 // Servers screen (spec 25.13, milestone S1): the saved SSH servers of the daemon this
@@ -397,6 +400,11 @@ export function ServersScreen() {
   const closeTerminal = useCallback(() => {
     router.setParams({ sshTerminal: undefined });
   }, []);
+  const tabStatuses = useSshTabStatuses({
+    client,
+    sessions: data.sessions,
+    focusedTerminalId: activeSession?.terminalId ?? null,
+  });
 
   if (workspacePlan) {
     return (
@@ -425,12 +433,12 @@ export function ServersScreen() {
         terminalId={activeSession.terminalId}
         live={liveByServerId[terminalServer.id]}
         terminalState={stateByTerminalId[activeSession.terminalId]}
+        tabStatus={tabStatuses[activeSession.terminalId]}
         insetsTop={insets.top}
         onBack={closeTerminal}
         onClosed={removeSession}
         onHostkeyDecision={respondHostkey}
         onAuthSubmit={respondAuth}
-        setError={setError}
         refresh={refresh}
       />
     );
@@ -445,6 +453,7 @@ export function ServersScreen() {
       moduleApis={moduleApis}
       snippetsApi={snippetsApi}
       onOpenWorkspace={setWorkspacePlan}
+      tabStatuses={tabStatuses}
       liveByServerId={liveByServerId}
       onHostkeyDecision={respondHostkey}
       onAuthSubmit={respondAuth}
@@ -461,6 +470,7 @@ function ServersHome({
   moduleApis,
   snippetsApi,
   onOpenWorkspace,
+  tabStatuses,
   liveByServerId,
   onHostkeyDecision,
   onAuthSubmit,
@@ -473,6 +483,7 @@ function ServersHome({
   moduleApis: SshModuleApis | null;
   snippetsApi: SnippetsApi | null;
   onOpenWorkspace: (plan: SnippetWorkspacePlan) => void;
+  tabStatuses: Readonly<Record<string, SshTabStatusState>>;
   liveByServerId: Readonly<Record<string, SshServerLiveState>>;
   onHostkeyDecision: (serverId: string, decision: "accept" | "reject") => void;
   onAuthSubmit: (serverId: string, answers: string[] | null) => void;
@@ -489,6 +500,9 @@ function ServersHome({
 
   const openTerminal = useCallback((next: ActiveTerminal) => {
     router.setParams({ sshTerminal: next.terminalId });
+  }, []);
+  const openTerminalById = useCallback((terminalId: string) => {
+    router.setParams({ sshTerminal: terminalId });
   }, []);
   const confirmAndRun = useConfirmAndRun({ client, refresh, setError });
   const keychainActions = useKeychainActions({
@@ -566,6 +580,12 @@ function ServersHome({
         {!data.loading && data.error ? <ErrorBanner message={data.error} /> : null}
         {data.loading ? null : (
           <>
+            <OpenSessionsBar
+              sessions={data.sessions}
+              servers={data.servers}
+              statuses={tabStatuses}
+              onOpen={openTerminalById}
+            />
             <PendingPrompts
               servers={data.servers}
               liveByServerId={liveByServerId}
@@ -726,12 +746,12 @@ function SshTerminalScreen({
   terminalId,
   live,
   terminalState,
+  tabStatus,
   insetsTop,
   onBack,
   onClosed,
   onHostkeyDecision,
   onAuthSubmit,
-  setError,
   refresh,
 }: {
   client: DaemonClient | null;
@@ -745,14 +765,16 @@ function SshTerminalScreen({
   terminalId: string;
   live: SshServerLiveState | undefined;
   terminalState: Parameters<typeof SshTerminalView>[0]["terminalState"];
+  tabStatus: SshTabStatusState | undefined;
   insetsTop: number;
   onBack: () => void;
   onClosed: (terminalId: string) => void;
   onHostkeyDecision: (serverId: string, decision: "accept" | "reject") => void;
   onAuthSubmit: (serverId: string, answers: string[] | null) => void;
-  setError: (error: string | null) => void;
   refresh: () => Promise<void>;
 }) {
+  // Errors of actions taken in the tab stay visible in the tab (docs/testing.md).
+  const [actionError, setActionError] = useState<string | null>(null);
   const handleEnd = useCallback(() => {
     if (!client) return;
     void (async () => {
@@ -766,12 +788,12 @@ function SshTerminalScreen({
     void (async () => {
       try {
         const res = await client.sshSessionReconnect({ terminalId });
-        setError(res.error);
+        setActionError(res.error);
       } catch (error) {
-        setError(errorText(error, "Reconnect failed"));
+        setActionError(errorText(error, "Reconnect failed"));
       }
     })();
-  }, [client, setError, terminalId]);
+  }, [client, terminalId]);
   // After a host_key_mismatch block the user may trust the presented key (25.3): replace
   // the stored key with it (ssh.knownhosts.replace), then reconnect the same tab.
   const handleReplaceHostKey = useCallback(
@@ -787,17 +809,17 @@ function SshTerminalScreen({
             publicKey: receivedPublicKey,
           });
           if (res.error) {
-            setError(res.error);
+            setActionError(res.error);
             return;
           }
           await client.sshSessionReconnect({ terminalId });
           await refresh();
         } catch (caught) {
-          setError(errorText(caught, "Could not replace the host key"));
+          setActionError(errorText(caught, "Could not replace the host key"));
         }
       })();
     },
-    [client, refresh, setError, terminalId],
+    [client, refresh, terminalId],
   );
   const [section, setSection] = useState("terminal");
   const handleServerSaved = useCallback(() => void refresh(), [refresh]);
@@ -806,6 +828,7 @@ function SshTerminalScreen({
     sectionContent = (
       <ServerSftpSection
         apis={moduleApis}
+        client={client}
         hostServerId={hostServerId}
         server={server}
         servers={servers}
@@ -833,8 +856,23 @@ function SshTerminalScreen({
       />
     );
   }
+  // Mobile Password key (25.4): the daemon types the saved password; it never comes here.
+  const handleTypePassword = useCallback(() => {
+    if (!client) return;
+    void (async () => {
+      try {
+        const res = await client.sshSessionTypePassword({ terminalId });
+        setActionError(res.error);
+      } catch (error) {
+        setActionError(errorText(error, "Could not type the password"));
+      }
+    })();
+  }, [client, terminalId]);
   return (
     <SshTerminalView
+      actionError={actionError}
+      dotTone={sshTabDotTone(tabStatus)}
+      onTypePassword={handleTypePassword}
       sections={moduleApis ? SERVER_SECTIONS : undefined}
       section={section}
       onSectionChange={setSection}

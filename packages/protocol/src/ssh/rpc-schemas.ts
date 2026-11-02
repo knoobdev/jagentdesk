@@ -498,12 +498,13 @@ export const SshSessionReconnectResponseSchema = z.object({
   type: z.literal("ssh.session.reconnect.response"),
   payload: z.object({ requestId: z.string(), error: z.string().nullable() }),
 });
-// Broadcast input (spec 25.4): keystrokes sent to any terminal of the group are typed
-// into every other one. An empty list turns broadcast off for the terminals that had it.
+// Broadcast input (spec 25.4): with `enabled`, keystrokes sent to any of `terminalIds`
+// are typed into all the others; without it, those terminals leave their group.
 export const SshSessionBroadcastRequestSchema = z.object({
   type: z.literal("ssh.session.broadcast.request"),
   requestId: z.string(),
   terminalIds: z.array(z.string()),
+  enabled: z.boolean(),
 });
 export const SshSessionBroadcastResponseSchema = z.object({
   type: z.literal("ssh.session.broadcast.response"),

@@ -163,8 +163,8 @@ describe("SSH tab features against in-process servers", () => {
       logOfUser("tab-b").received,
       logOfUser("tab-c").received,
     ]).toEqual(["uptime\r", "uptime\r", "uptime\r"]);
-    // A one-terminal list turns broadcast off for it; b and c no longer get a's keystrokes.
-    service.setBroadcast([a]);
+    // Turning broadcast off for a: b and c no longer get a's keystrokes.
+    service.setBroadcast([a], false);
     service.getSshTerminal(a)!.send({ type: "input", data: "ls\r" });
     await until(() => logOfUser("tab-a").received.endsWith("ls\r"), "local input");
     await new Promise((resolve) => setTimeout(resolve, 100));
