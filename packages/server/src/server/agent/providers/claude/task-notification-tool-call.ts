@@ -183,8 +183,9 @@ function parseTaskNotificationFromSystemRecord(record: unknown): TaskNotificatio
   const systemRecord: TaskNotificationHistoryRecord = parsedRecord.data;
   const isSystemTaskNotification =
     systemRecord.type === "system" && systemRecord.subtype === "task_notification";
-  const isQueueOperation = systemRecord.type === "queue-operation";
-  if (!isSystemTaskNotification && !isQueueOperation) {
+  const isQueuedTaskNotification =
+    systemRecord.type === "queue-operation" && isTaskNotificationUserContent(systemRecord.content);
+  if (!isSystemTaskNotification && !isQueuedTaskNotification) {
     return null;
   }
   const rawText = toNonEmptyString(systemRecord.content);
@@ -220,9 +221,11 @@ function parseTaskNotificationFromSystemRecord(record: unknown): TaskNotificatio
 /** Normalize notification identity for one transcript traversal. Queue bookkeeping and delivery
  * are separate records of the same occurrence; each source counts repeated identical bodies
  * independently so the second event is not merged with the first. */
-export function* assignTaskNotificationReplayIds<T>(entries: Iterable<T>): Generator<T> {
+export async function* assignTaskNotificationReplayIds<T>(
+  entries: AsyncIterable<T>,
+): AsyncGenerator<T> {
   const occurrences = new Map<string, Map<string, number>>();
-  for (const entry of entries) {
+  for await (const entry of entries) {
     const record = TaskNotificationHistoryRecordSchema.safeParse(entry);
     if (!record.success) {
       yield entry;
@@ -335,6 +338,7 @@ function toTaskNotificationToolCall(
     synthetic: true,
     source: "claude_task_notification",
     ...(envelope.taskId ? { taskId: envelope.taskId } : {}),
+    ...(envelope.toolUseId ? { toolUseId: envelope.toolUseId } : {}),
     ...(envelope.status ? { status: envelope.status } : {}),
     ...(envelope.outputFile ? { outputFile: envelope.outputFile } : {}),
   };

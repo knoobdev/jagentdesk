@@ -1,6 +1,9 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { generateReplayCorpus, generateWorkflowReplayCorpus } from "./replay-memory.fixture.js";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { createTestLogger } from "../../../../test-utils/test-logger.js";
@@ -17,6 +20,8 @@ import { claudeProjectDirSync } from "./project-dir.js";
 
 const TOOL_USE_ID = "toolu_01DgLoPMW9";
 const AGENT_ID = "a1730a6215e1f5cf6";
+const WORKFLOW_TOOL_USE_ID = "toolu_01XskpjeASyuFyXC5qsLHYps";
+const WORKFLOW_RUN_ID = "wf_4a0af4f7-f56";
 
 function parentEntry(content: unknown): string {
   return JSON.stringify({
@@ -57,14 +62,18 @@ function taskToolResult(options: { isError?: boolean; mentionAgentId?: boolean }
   });
 }
 
-function sidechainEntry(): string {
+function sidechainEntry(options: { agentId?: string; stopReason?: string | null } = {}): string {
   return JSON.stringify({
     type: "assistant",
     isSidechain: true,
-    agentId: AGENT_ID,
+    agentId: options.agentId ?? AGENT_ID,
     sessionId: "replay-session",
     timestamp: "2026-07-26T06:27:50.000Z",
-    message: { role: "assistant", content: [{ type: "text", text: "summary of the docs" }] },
+    message: {
+      role: "assistant",
+      content: [{ type: "text", text: "summary of the docs" }],
+      stop_reason: options.stopReason ?? null,
+    },
   });
 }
 
@@ -77,44 +86,139 @@ describe("ClaudeAgentSession persisted subagent replay", () => {
   let cwd: string;
   let configDir: string;
 
+  function writeParentSession(parentLines: string[]): string {
+    const historyDir = claudeProjectDirSync(cwd, { configDir });
+    mkdirSync(historyDir, { recursive: true });
+    writeFileSync(path.join(historyDir, "replay-session.jsonl"), parentLines.join("\n"));
+    return path.join(historyDir, "replay-session", "subagents");
+  }
+
+  function writeSubagent(options: {
+    subagentDir: string;
+    agentId?: string;
+    meta?: string | null;
+    sidechainLines?: string[];
+  }): void {
+    const agentId = options.agentId ?? AGENT_ID;
+    mkdirSync(options.subagentDir, { recursive: true });
+    writeFileSync(
+      path.join(options.subagentDir, `agent-${agentId}.jsonl`),
+      (options.sidechainLines ?? [sidechainEntry({ agentId })]).join("\n"),
+    );
+    if (options.meta !== null && options.meta !== undefined) {
+      writeFileSync(path.join(options.subagentDir, `agent-${agentId}.meta.json`), options.meta);
+    }
+  }
+
   function writeSession(options: {
     parentLines: string[];
     meta?: string | null;
     sidechainLines?: string[];
   }): void {
-    const historyDir = claudeProjectDirSync(cwd, { configDir });
-    mkdirSync(historyDir, { recursive: true });
-    writeFileSync(path.join(historyDir, "replay-session.jsonl"), options.parentLines.join("\n"));
+    writeSubagent({
+      subagentDir: writeParentSession(options.parentLines),
+      meta: options.meta,
+      sidechainLines: options.sidechainLines,
+    });
+  }
 
-    const subagentDir = path.join(historyDir, "replay-session", "subagents");
-    mkdirSync(subagentDir, { recursive: true });
+  function writeWorkflowSession(
+    status: string,
+    options: {
+      children?: { agentId: string; output: string; timestamp: string }[];
+    } = {},
+  ): void {
+    const subagentDirectory = writeParentSession([
+      parentEntry([
+        {
+          type: "tool_use",
+          id: WORKFLOW_TOOL_USE_ID,
+          name: "Workflow",
+          input: { scriptPath: "/tmp/one-child.js", args: "{}" },
+        },
+      ]),
+      JSON.stringify({
+        type: "user",
+        message: {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: WORKFLOW_TOOL_USE_ID,
+              content: `Workflow launched in background.\nRun ID: ${WORKFLOW_RUN_ID}`,
+            },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: "system",
+        subtype: "task_notification",
+        task_id: WORKFLOW_RUN_ID,
+        tool_use_id: WORKFLOW_TOOL_USE_ID,
+        status: "completed",
+        summary: "Workflow completed",
+        output_file: "/tmp/workflow.output",
+      }),
+    ]);
+    const workflowDirectory = path.join(path.dirname(subagentDirectory), "workflows");
+    mkdirSync(workflowDirectory, { recursive: true });
     writeFileSync(
-      path.join(subagentDir, `agent-${AGENT_ID}.jsonl`),
-      (options.sidechainLines ?? [sidechainEntry()]).join("\n"),
+      path.join(workflowDirectory, `${WORKFLOW_RUN_ID}.json`),
+      JSON.stringify({
+        runId: WORKFLOW_RUN_ID,
+        summary: "Verify the workflow row lifecycle",
+        status,
+        startTime: 1786003484150,
+        timestamp: "2026-08-06T08:04:46.347Z",
+        defaultModel: "claude-sonnet-5",
+        totalTokens: 20_417,
+      }),
     );
-    if (options.meta !== null && options.meta !== undefined) {
-      writeFileSync(path.join(subagentDir, `agent-${AGENT_ID}.meta.json`), options.meta);
+    for (const child of options.children ?? []) {
+      const workflowChildDirectory = path.join(subagentDirectory, "workflows", WORKFLOW_RUN_ID);
+      writeSubagent({
+        subagentDir: workflowChildDirectory,
+        agentId: child.agentId,
+        meta: JSON.stringify({ agentType: "workflow-subagent", spawnDepth: 1 }),
+        sidechainLines: [
+          JSON.stringify({
+            type: "user",
+            isSidechain: true,
+            agentId: child.agentId,
+            sessionId: "replay-session",
+            timestamp: child.timestamp,
+            message: {
+              role: "user",
+              content: `Internal workflow prompt for ${child.agentId}`,
+            },
+          }),
+          JSON.stringify({
+            type: "assistant",
+            isSidechain: true,
+            agentId: child.agentId,
+            sessionId: "replay-session",
+            timestamp: child.timestamp,
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: child.output }],
+              stop_reason: "end_turn",
+            },
+          }),
+        ],
+      });
     }
   }
 
-  async function replayDescriptors(): Promise<
-    Extract<AgentStreamEvent, { type: "provider_subagent" }>[]
-  > {
-    const client = new ClaudeAgentClient({
-      logger,
-      queryFactory,
-      resolveVersion: async () => "2.1.220",
-    });
-    const session = await client.resumeSession(
-      { provider: "claude", sessionId: "replay-session" },
-      { cwd },
-    );
-    const events: Extract<AgentStreamEvent, { type: "provider_subagent" }>[] = [];
-    for await (const event of session.streamHistory()) {
-      if (event.type === "provider_subagent") events.push(event);
-    }
-    await session.close();
-    return events;
+  function workflowNotificationContent(): string {
+    return [
+      "<task-notification>",
+      `<task-id>workflow-task</task-id>`,
+      `<tool-use-id>${WORKFLOW_TOOL_USE_ID}</tool-use-id>`,
+      "<output-file>/tmp/workflow.output</output-file>",
+      "<status>completed</status>",
+      "<summary>Workflow completed</summary>",
+      "</task-notification>",
+    ].join("\n");
   }
 
   async function replayEvents(): Promise<AgentStreamEvent[]> {
@@ -135,6 +239,12 @@ describe("ClaudeAgentSession persisted subagent replay", () => {
     return events;
   }
 
+  async function replayDescriptors(): Promise<
+    Extract<AgentStreamEvent, { type: "provider_subagent" }>[]
+  > {
+    return (await replayEvents()).filter((event) => event.type === "provider_subagent");
+  }
+
   function upserts(events: Extract<AgentStreamEvent, { type: "provider_subagent" }>[]) {
     return events.map((e) => e.event).filter((e) => e.type === "upsert");
   }
@@ -151,6 +261,89 @@ describe("ClaudeAgentSession persisted subagent replay", () => {
     vi.unstubAllEnvs();
     rmSync(tempRoot, { recursive: true, force: true });
   });
+
+  test.each(["system", "user", "queue-operation"] as const)(
+    "restores nested background notification ownership from %s history",
+    async (form) => {
+      const nestedId = "toolu_nested";
+      const bashId = "toolu_nested_bash";
+      const timestamp = "2026-07-26T06:28:01.000Z";
+      function notification(toolUseId: string) {
+        const content = `<task-notification><task-id>${toolUseId}-task</task-id><tool-use-id>${toolUseId}</tool-use-id><status>completed</status><summary>Background command completed</summary></task-notification>`;
+        const records = {
+          system: {
+            subtype: "task_notification",
+            task_id: `${toolUseId}-task`,
+            tool_use_id: toolUseId,
+            status: "completed",
+            summary: "Background command completed",
+          },
+          user: { uuid: `${toolUseId}-notification`, message: { role: "user", content } },
+          "queue-operation": { operation: "enqueue", content },
+        };
+        return JSON.stringify({ type: form, timestamp, ...records[form] });
+      }
+      const subagentDir = writeParentSession([
+        taskToolUse(),
+        taskToolResult(),
+        notification(bashId),
+        notification("toolu_root_bash"),
+        notification("toolu_orphan_bash"),
+      ]);
+      function toolEntry(agentId: string, id: string, name: string) {
+        return JSON.stringify({
+          type: "assistant",
+          isSidechain: true,
+          agentId,
+          message: { role: "assistant", content: [{ type: "tool_use", id, name, input: {} }] },
+        });
+      }
+      writeSubagent({
+        subagentDir,
+        meta: JSON.stringify({ toolUseId: TOOL_USE_ID }),
+        sidechainLines: [toolEntry(AGENT_ID, nestedId, "Agent")],
+      });
+      writeSubagent({
+        subagentDir,
+        agentId: "nested-agent",
+        meta: JSON.stringify({ toolUseId: nestedId }),
+        sidechainLines: [toolEntry("nested-agent", bashId, "Bash")],
+      });
+      writeSubagent({
+        subagentDir,
+        agentId: "orphan-agent",
+        meta: JSON.stringify({ toolUseId: "missing-parent-tool" }),
+        sidechainLines: [toolEntry("orphan-agent", "toolu_orphan_bash", "Bash")],
+      });
+
+      const replayed = await replayEvents();
+      const rootNotifications = replayed.flatMap((event) =>
+        event.type === "timeline" &&
+        event.item.type === "tool_call" &&
+        event.item.name === "task_notification"
+          ? [event.item.metadata?.toolUseId]
+          : [],
+      );
+      expect(rootNotifications).toEqual(["toolu_root_bash", "toolu_orphan_bash"]);
+      const childNotifications = replayed.flatMap((event) =>
+        event.type === "provider_subagent" &&
+        event.event.type === "timeline" &&
+        event.event.item.type === "tool_call" &&
+        event.event.item.name === "task_notification"
+          ? [event.event]
+          : [],
+      );
+      expect(childNotifications).toEqual([
+        expect.objectContaining({
+          id: nestedId,
+          timestamp,
+          item: expect.objectContaining({
+            metadata: expect.objectContaining({ toolUseId: bashId }),
+          }),
+        }),
+      ]);
+    },
+  );
 
   test("links a subagent to its Task call through the meta sidecar", async () => {
     writeSession({
@@ -214,6 +407,482 @@ describe("ClaudeAgentSession persisted subagent replay", () => {
     expect(statuses).not.toContain("completed");
     expect(statuses).not.toContain("failed");
     expect(statuses).toContain("running");
+  });
+
+  test("finishes a Task subagent from its own end_turn when the parent outcome is missing", async () => {
+    writeSession({
+      parentLines: [taskToolUse()],
+      meta: JSON.stringify({ toolUseId: TOOL_USE_ID }),
+      sidechainLines: [sidechainEntry({ stopReason: "end_turn" })],
+    });
+
+    expect(upserts(await replayDescriptors()).at(-1)).toMatchObject({
+      id: TOOL_USE_ID,
+      status: "completed",
+    });
+  });
+
+  test("does not replay a skill-spawned subagent the parent never named", async () => {
+    // The reported bug. A /code-review subagent has no Task tool_use, so its sidecar carries only
+    // agentType and its id appears nowhere in the parent — it used to replay as running forever,
+    // and every reopen resurrected it.
+    writeSession({
+      parentLines: [parentEntry([{ type: "text", text: "running /code-review" }])],
+      meta: JSON.stringify({ agentType: "general-purpose" }),
+      sidechainLines: [sidechainEntry({ stopReason: "end_turn" })],
+    });
+
+    expect(upserts(await replayDescriptors())).toEqual([]);
+  });
+
+  test("replays several legacy children interleaved in the parent transcript", async () => {
+    const lines: string[] = [];
+    for (let index = 0; index < 8; index++) {
+      const agentId = `legacy-${index}`;
+      const toolUseId = `task-${index}`;
+      lines.push(parentEntry([{ type: "tool_use", id: toolUseId, name: "Task", input: {} }]));
+      lines.push(
+        JSON.stringify({
+          type: "user",
+          message: {
+            content: [
+              { type: "tool_result", tool_use_id: toolUseId, content: `agentId: ${agentId}\ndone` },
+            ],
+          },
+        }),
+      );
+      lines.push(sidechainEntry({ agentId, stopReason: "end_turn" }));
+    }
+    writeParentSession(lines);
+    const events = await replayDescriptors();
+    const histories = events
+      .map((event) => event.event)
+      .filter((event) => event.type === "timeline");
+    expect(histories.map((event) => event.id).sort()).toEqual(
+      Array.from({ length: 8 }, (_, index) => `task-${index}`),
+    );
+    expect(histories.map((event) => event.item)).toEqual(
+      Array.from({ length: 8 }, () => ({ type: "assistant_message", text: "summary of the docs" })),
+    );
+  });
+
+  test("replays more child events than V8 permits in one spread call", async () => {
+    const childCount = 16;
+    const entriesPerChild = 10_000;
+    const children = Array.from({ length: childCount }, (_, index) => ({
+      agentId: `large-child-${index}`,
+      toolUseId: `large-task-${index}`,
+    }));
+    const parentLines = children.flatMap(({ agentId, toolUseId }) => [
+      parentEntry([{ type: "tool_use", id: toolUseId, name: "Task", input: {} }]),
+      JSON.stringify({
+        type: "user",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: toolUseId,
+              content: `agentId: ${agentId}\ndone`,
+            },
+          ],
+        },
+      }),
+    ]);
+    const subagentDir = writeParentSession(parentLines);
+    for (const { agentId, toolUseId } of children) {
+      writeSubagent({
+        subagentDir,
+        agentId,
+        meta: JSON.stringify({ toolUseId }),
+        sidechainLines: Array.from({ length: entriesPerChild }, () => sidechainEntry({ agentId })),
+      });
+    }
+
+    const events = await replayDescriptors();
+    const timelineCount = events.filter((event) => event.event.type === "timeline").length;
+    expect(timelineCount).toBe(childCount * entriesPerChild);
+    expect(upserts(events).filter((event) => event.status === "completed")).toHaveLength(
+      childCount,
+    );
+  }, 120_000);
+
+  test("limits retained child shell output to the timeline's existing content limit", async () => {
+    const output = "x".repeat(128 * 1024);
+    writeSession({
+      parentLines: [taskToolUse(), taskToolResult()],
+      meta: JSON.stringify({ toolUseId: TOOL_USE_ID }),
+      sidechainLines: [
+        JSON.stringify({
+          type: "assistant",
+          isSidechain: true,
+          agentId: AGENT_ID,
+          message: {
+            content: [
+              {
+                type: "tool_use",
+                id: "bash-large",
+                name: "Bash",
+                input: { command: "echo large" },
+              },
+            ],
+          },
+        }),
+        JSON.stringify({
+          type: "user",
+          isSidechain: true,
+          agentId: AGENT_ID,
+          message: {
+            content: [{ type: "tool_result", tool_use_id: "bash-large", content: output }],
+          },
+        }),
+      ],
+    });
+    const events = await replayDescriptors();
+    const completed = events
+      .map((event) => event.event)
+      .filter(
+        (event) =>
+          event.type === "timeline" &&
+          event.item.type === "tool_call" &&
+          event.item.status === "completed",
+      );
+    expect(completed).toEqual([
+      expect.objectContaining({
+        type: "timeline",
+        id: TOOL_USE_ID,
+        item: expect.objectContaining({
+          detail: expect.objectContaining({ type: "shell", output: output.slice(0, 64 * 1024) }),
+        }),
+      }),
+    ]);
+  });
+
+  test.each([
+    {
+      label: "a parent transcript without sidechains",
+      mode: "children",
+      // Cross V8's whole-string limit only in the opt-in reproduction, keeping routine CI small.
+      generate: (root: string) =>
+        generateReplayCorpus(root, {
+          parentMiB: process.env.JAGENTDESK_TEST_LARGE_CLAUDE_REPLAY === "1" ? 550 : 2,
+          childrenMiB: 0,
+          children: 0,
+        }),
+      expected: { parentItems: 1, completed: 0, histories: 0 },
+    },
+    {
+      label: "4 MiB parent and 20 sidechains",
+      mode: "children",
+      generate: (root: string) =>
+        generateReplayCorpus(root, { parentMiB: 4, childrenMiB: 4, children: 20 }),
+      expected: { parentItems: 41, completed: 20, histories: 20 },
+    },
+    {
+      label: "five 2 MiB workflow sidechains",
+      mode: "workflow",
+      generate: (root: string) => generateWorkflowReplayCorpus(root, 2),
+      expected: { parentItems: 3, completed: 1, histories: 5 },
+    },
+  ])(
+    "opens $label with all history under a 256 MB heap",
+    ({ mode, generate, expected }) => {
+      const root = mkdtempSync(path.join(os.tmpdir(), "claude-replay-"));
+      try {
+        generate(root);
+        const worker = spawnSync(
+          process.execPath,
+          [
+            "--max-old-space-size=256",
+            "--import",
+            "tsx",
+            fileURLToPath(new URL("./replay-memory.fixture.ts", import.meta.url)),
+            root,
+            mode,
+          ],
+          { encoding: "utf8", env: { ...process.env, NODE_NO_WARNINGS: "1" }, timeout: 120_000 },
+        );
+        expect({ status: worker.status, signal: worker.signal, stderr: worker.stderr }).toEqual({
+          status: 0,
+          signal: null,
+          stderr: "",
+        });
+        const result = JSON.parse(worker.stdout);
+        expect(result).toMatchObject(expected);
+        console.log("Claude replay memory:", result);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+    150_000,
+  );
+
+  test("replays UTF-8 across read chunks, corrupt rows, CRLF and an unterminated final row", async () => {
+    const text = "é🙂".repeat(30_000);
+    const historyDir = claudeProjectDirSync(cwd, { configDir });
+    mkdirSync(historyDir, { recursive: true });
+    writeFileSync(
+      path.join(historyDir, "replay-session.jsonl"),
+      parentEntry([{ type: "text", text }]) +
+        "\r\nnot json\r\n" +
+        parentEntry([{ type: "text", text: "final row" }]),
+    );
+    const events = await replayEvents();
+    expect(events.filter((event) => event.type === "timeline").map((event) => event.item)).toEqual([
+      { type: "assistant_message", text },
+      { type: "assistant_message", text: "final row" },
+    ]);
+  });
+
+  test("converts workflow tools in timestamp order before correlating their results", async () => {
+    writeWorkflowSession("completed");
+    const directory = path.join(
+      claudeProjectDirSync(cwd, { configDir }),
+      "replay-session",
+      "subagents",
+      "workflows",
+      WORKFLOW_RUN_ID,
+    );
+    writeSubagent({
+      subagentDir: directory,
+      agentId: "a-result",
+      sidechainLines: [
+        JSON.stringify({
+          type: "user",
+          timestamp: "2026-07-26T06:28:01.000Z",
+          message: {
+            content: [{ type: "tool_result", tool_use_id: "workflow-bash", content: "finished" }],
+          },
+        }),
+      ],
+    });
+    writeSubagent({
+      subagentDir: directory,
+      agentId: "z-call",
+      sidechainLines: [
+        JSON.stringify({
+          type: "assistant",
+          timestamp: "2026-07-26T06:28:00.000Z",
+          message: {
+            content: [
+              {
+                type: "tool_use",
+                id: "workflow-bash",
+                name: "Bash",
+                input: { command: "echo finished" },
+              },
+            ],
+          },
+        }),
+      ],
+    });
+    const events = await replayDescriptors();
+    const calls = events
+      .map((event) => event.event)
+      .filter((event) => event.type === "timeline" && event.item.type === "tool_call");
+    expect(calls).toEqual([
+      expect.objectContaining({
+        id: WORKFLOW_TOOL_USE_ID,
+        item: expect.objectContaining({ callId: "workflow-bash", name: "Bash", status: "running" }),
+      }),
+      expect.objectContaining({
+        id: WORKFLOW_TOOL_USE_ID,
+        item: expect.objectContaining({
+          callId: "workflow-bash",
+          name: "Bash",
+          status: "completed",
+          detail: expect.objectContaining({ type: "shell", output: "finished" }),
+        }),
+      }),
+    ]);
+  });
+
+  test("does not accumulate internal workflow agents as replay-only running rows", async () => {
+    const subagentRoot = writeParentSession([
+      parentEntry([
+        {
+          type: "tool_use",
+          id: "toolu_workflow",
+          name: "Workflow",
+          input: { script: "await Promise.all([agent('one'), agent('two'), agent('three')])" },
+        },
+      ]),
+    ]);
+    const workflowDir = path.join(subagentRoot, "workflows", "wf_c240e728-6ea");
+
+    for (const agentId of ["a17a341a0902f5799", "ae2d01ba2dfa46032", "abc9f20546c326c53"]) {
+      writeSubagent({
+        subagentDir: workflowDir,
+        agentId,
+        meta: JSON.stringify({ agentType: "workflow-subagent", spawnDepth: 1 }),
+        sidechainLines: [sidechainEntry({ agentId, stopReason: "end_turn" })],
+      });
+    }
+
+    expect(upserts(await replayDescriptors())).toEqual([]);
+  });
+
+  test("replays a completed workflow as one generic provider-subagent row", async () => {
+    writeWorkflowSession("completed", {
+      children: [
+        {
+          agentId: "a-later-child",
+          output: "later workflow child result",
+          timestamp: "2026-08-06T08:04:45.500Z",
+        },
+        {
+          agentId: "z-earlier-child",
+          output: "earlier workflow child result",
+          timestamp: "2026-08-06T08:04:45.000Z",
+        },
+      ],
+    });
+
+    const replayed = await replayEvents();
+    const descriptors = replayed.filter((event) => event.type === "provider_subagent");
+    const events = upserts(descriptors);
+    expect(events[0]).toMatchObject({
+      id: WORKFLOW_TOOL_USE_ID,
+      toolCallId: WORKFLOW_TOOL_USE_ID,
+      title: "Workflow",
+      description: "Verify the workflow row lifecycle",
+      status: "running",
+    });
+    expect(events).toContainEqual(
+      expect.objectContaining({ subtitle: "Workflow · Sonnet 5 · 20.4k tokens" }),
+    );
+    expect(events.at(-1)).toMatchObject({
+      id: WORKFLOW_TOOL_USE_ID,
+      status: "completed",
+    });
+    expect(descriptors).toContainEqual({
+      type: "provider_subagent",
+      provider: "claude",
+      event: {
+        type: "timeline",
+        id: WORKFLOW_TOOL_USE_ID,
+        item: expect.objectContaining({
+          type: "assistant_message",
+          text: "earlier workflow child result",
+        }),
+        timestamp: "2026-08-06T08:04:45.000Z",
+      },
+    });
+    expect(new Set(events.map((event) => event.id))).toEqual(new Set([WORKFLOW_TOOL_USE_ID]));
+    const workflowOutputs = descriptors
+      .map((event) => event.event)
+      .filter((event) => event.type === "timeline" && event.item.type === "assistant_message")
+      .map((event) => (event.item.type === "assistant_message" ? event.item.text : ""));
+    expect(workflowOutputs).toEqual([
+      "earlier workflow child result",
+      "later workflow child result",
+    ]);
+    expect(
+      descriptors
+        .map((event) => event.event)
+        .filter((event) => event.type === "timeline" && event.item.type === "user_message")
+        .map((event) => (event.item.type === "user_message" ? event.item.text : "")),
+    ).toEqual(["Verify the workflow row lifecycle"]);
+    expect(
+      replayed
+        .filter((event) => event.type === "timeline")
+        .map((event) => event.item)
+        .filter((item) => item.type === "tool_call" && item.name === "task_notification"),
+    ).toEqual([]);
+  });
+
+  test("keeps the terminal notification when the workflow summary cannot be restored", async () => {
+    writeParentSession([
+      parentEntry([
+        {
+          type: "tool_use",
+          id: WORKFLOW_TOOL_USE_ID,
+          name: "Workflow",
+          input: { scriptPath: "/tmp/one-child.js", args: "{}" },
+        },
+      ]),
+      JSON.stringify({
+        type: "user",
+        message: {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: WORKFLOW_TOOL_USE_ID,
+              content: `Workflow launched in background.\nRun ID: ${WORKFLOW_RUN_ID}`,
+            },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: "system",
+        subtype: "task_notification",
+        uuid: "workflow-notification",
+        task_id: WORKFLOW_RUN_ID,
+        tool_use_id: WORKFLOW_TOOL_USE_ID,
+        status: "completed",
+        summary: "Workflow completed",
+        output_file: "/tmp/workflow.output",
+      }),
+    ]);
+
+    const replayed = await replayEvents();
+    expect(replayed.filter((event) => event.type === "provider_subagent")).toEqual([]);
+    expect(
+      replayed
+        .filter((event) => event.type === "timeline")
+        .map((event) => event.item)
+        .filter((item) => item.type === "tool_call" && item.name === "task_notification"),
+    ).toEqual([
+      expect.objectContaining({
+        callId: expect.stringMatching(/^task_notification_[a-f0-9]+_1$/),
+        status: "completed",
+      }),
+    ]);
+  });
+
+  test("suppresses restored workflow notifications from Claude's persisted queue forms", async () => {
+    writeWorkflowSession("completed");
+    const sessionPath = path.join(claudeProjectDirSync(cwd, { configDir }), "replay-session.jsonl");
+    const parentContent = readFileSync(sessionPath, "utf8");
+    writeFileSync(
+      sessionPath,
+      [
+        parentContent,
+        JSON.stringify({
+          type: "queue-operation",
+          operation: "enqueue",
+          content: workflowNotificationContent(),
+        }),
+        JSON.stringify({
+          type: "user",
+          uuid: "workflow-notification-user",
+          message: { role: "user", content: workflowNotificationContent() },
+        }),
+      ].join("\n"),
+    );
+
+    const replayed = await replayEvents();
+    expect(
+      upserts(replayed.filter((event) => event.type === "provider_subagent")).at(-1),
+    ).toMatchObject({ id: WORKFLOW_TOOL_USE_ID, status: "completed" });
+    expect(
+      replayed
+        .filter((event) => event.type === "timeline")
+        .map((event) => event.item)
+        .filter((item) => item.type === "tool_call" && item.name === "task_notification"),
+    ).toEqual([]);
+  });
+
+  test("does not replay a subagent whose toolUseId names no Task call in this transcript", async () => {
+    // A grandchild recorded before spawnDepth existed: the Task call it names was made inside a
+    // sibling's session, so no tool_result for it can ever reach this parent.
+    writeSession({
+      parentLines: [parentEntry([{ type: "text", text: "no task calls here" }])],
+      meta: JSON.stringify({ toolUseId: TOOL_USE_ID, agentType: "Explore" }),
+      sidechainLines: [sidechainEntry({ stopReason: "end_turn" })],
+    });
+
+    expect(upserts(await replayDescriptors())).toEqual([]);
   });
 
   test.each([
