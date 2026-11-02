@@ -70,14 +70,40 @@ function toRunError(error: unknown, fallback: string): SshSnippetRunError {
   };
 }
 
-function openExec(lease: SshClientLease, script: string): Promise<ClientChannel> {
+interface ExitStatus {
+  code: number | null;
+  signal: string | null;
+}
+
+interface ExecChannel {
+  channel: ClientChannel;
+  exit: ExitStatus;
+}
+
+interface StreamParams extends ExecChannel {
+  lease: SshClientLease;
+  timeoutMs: number | undefined;
+}
+
+/**
+ * Opens the exec channel and records its exit status from inside the exec callback. ssh2 emits
+ * `exit` as a plain event while it parses the socket buffer: for a quick command the confirmation,
+ * output, exit-status and close can arrive in one read, so a listener added after `await` misses
+ * the exit (output is safe, streams buffer it) and the run looked like a lost connection.
+ */
+function openExec(lease: SshClientLease, script: string): Promise<ExecChannel> {
   return new Promise((resolve, reject) => {
     lease.client.exec(script, (error, stream) => {
       if (error) {
         reject(error);
         return;
       }
-      resolve(stream);
+      const exit: ExitStatus = { code: null, signal: null };
+      stream.on("exit", (code: number | null, signalName?: string) => {
+        exit.code = typeof code === "number" ? code : null;
+        exit.signal = signalName ?? null;
+      });
+      resolve({ channel: stream, exit });
     });
   });
 }
@@ -225,9 +251,9 @@ export class SnippetRunner {
       this.finish(run, target, { state: "cancelled" });
       return;
     }
-    let channel: ClientChannel;
+    let exec: ExecChannel;
     try {
-      channel = await openExec(lease, run.script);
+      exec = await openExec(lease, run.script);
     } catch (error) {
       this.finish(run, target, { state: "failed", error: toRunError(error, "exec_failed") });
       return;
@@ -235,17 +261,15 @@ export class SnippetRunner {
     target.status = { ...target.status, state: "running" };
     this.emitState(run, target);
 
-    await this.stream(run, target, { lease, channel, timeoutMs });
+    await this.stream(run, target, { lease, ...exec, timeoutMs });
   }
 
   private async stream(
     run: RunExecution,
     target: TargetExecution,
-    params: { lease: SshClientLease; channel: ClientChannel; timeoutMs: number | undefined },
+    params: StreamParams,
   ): Promise<void> {
-    const { lease, channel, timeoutMs } = params;
-    let exitCode: number | null = null;
-    let signal: string | null = null;
+    const { lease, channel, exit, timeoutMs } = params;
     let settled = false;
     let markDone: () => void = () => undefined;
     const done = new Promise<void>((resolve) => {
@@ -281,10 +305,6 @@ export class SnippetRunner {
     channel.stderr.on("data", (data: Buffer) =>
       this.append(run, target, "stderr", stderr.write(data)),
     );
-    channel.on("exit", (code: number | null, signalName?: string) => {
-      exitCode = typeof code === "number" ? code : null;
-      signal = signalName ?? null;
-    });
     channel.on("close", settle);
     lease.client.once("close", settle);
     if (target.cancelRequested) stop();
@@ -299,13 +319,13 @@ export class SnippetRunner {
       });
     } else if (target.cancelRequested) {
       this.finish(run, target, { state: "cancelled" });
-    } else if (exitCode === null && signal === null) {
+    } else if (exit.code === null && exit.signal === null) {
       this.finish(run, target, {
         state: "failed",
         error: { code: "connection_lost", message: "The connection closed before the exit" },
       });
     } else {
-      this.finish(run, target, { state: "exited", exitCode, signal });
+      this.finish(run, target, { state: "exited", exitCode: exit.code, signal: exit.signal });
     }
   }
 

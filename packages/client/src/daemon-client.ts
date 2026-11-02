@@ -7407,10 +7407,12 @@ export class DaemonClient {
     });
   }
 
-  async dockerList(requestId?: string): Promise<DockerListPayload> {
+  async dockerList(
+    options: { serverId?: string; requestId?: string } = {},
+  ): Promise<DockerListPayload> {
     return this.sendCorrelatedSessionRequest({
-      requestId,
-      message: { type: "docker/list" },
+      requestId: options.requestId,
+      message: { type: "docker/list", ...dockerTarget(options) },
       responseType: "docker/list/response",
     });
   }
