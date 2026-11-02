@@ -61,8 +61,15 @@ export type DockerImageAction = z.infer<typeof DockerImageActionSchema>;
 export const DockerVolumeActionSchema = z.enum(["remove", "prune"]);
 export type DockerVolumeAction = z.infer<typeof DockerVolumeActionSchema>;
 
+// `serverId` targets Docker on a saved SSH server (spec 25.10) through its forwarded socket;
+// absent = the Docker of the daemon's own machine, as before.
 function req<T extends string, S extends z.ZodRawShape>(type: T, extra: S) {
-  return z.object({ type: z.literal(type), requestId: z.string(), ...extra });
+  return z.object({
+    type: z.literal(type),
+    requestId: z.string(),
+    serverId: z.string().optional(),
+    ...extra,
+  });
 }
 function resp<T extends string, S extends z.ZodRawShape>(type: T, extra: S) {
   return z.object({
