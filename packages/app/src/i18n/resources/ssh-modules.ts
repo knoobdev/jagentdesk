@@ -1,6 +1,6 @@
-// Strings for the SSH feature modules (spec 25: SFTP, port forwarding, snippets), under
-// `ssh.sftp.*`, `ssh.forwarding.*` and `ssh.snippets.*`. Every locale spreads this English tree into its `ssh` key until it ships
-// native translations.
+// Strings for the SSH feature modules (spec 25: SFTP, port forwarding, snippets, Telnet),
+// under `ssh.sftp.*`, `ssh.forwarding.*`, `ssh.snippets.*` and `ssh.telnet.*`. Every locale
+// spreads this English tree into its `ssh` key until it ships native translations.
 export const sshModuleStrings = {
   sftp: {
     location: "Location",
@@ -249,5 +249,9 @@ export const sshModuleStrings = {
       larger: "Larger font",
       useInherited: "Use inherited size",
     },
+  },
+  telnet: {
+    unencrypted: "Connection is not encrypted",
+    endpoint: "telnet://{{address}}:{{port}}",
   },
 } as const;

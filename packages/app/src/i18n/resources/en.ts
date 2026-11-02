@@ -2802,12 +2802,6 @@ export const en = {
       forked: "Training {{name}}",
     },
   },
-  ssh: {
-    telnet: {
-      unencrypted: "Connection is not encrypted",
-      endpoint: "telnet://{{address}}:{{port}}",
-    },
-  },
 } as const;
 
 type WidenStringLeaves<T> = {

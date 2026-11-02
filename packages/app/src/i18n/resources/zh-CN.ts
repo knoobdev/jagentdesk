@@ -2698,10 +2698,4 @@ export const zhCN: TranslationResources = {
       forked: "Training {{name}}",
     },
   },
-  ssh: {
-    telnet: {
-      unencrypted: "Connection is not encrypted",
-      endpoint: "telnet://{{address}}:{{port}}",
-    },
-  },
 };
