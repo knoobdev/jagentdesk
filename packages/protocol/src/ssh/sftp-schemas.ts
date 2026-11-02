@@ -164,6 +164,7 @@ export const SshSftpCopyRequestSchema = req("ssh.sftp.copy.request", {
   source: SftpEndpointSchema,
   sourcePaths: z.array(z.string()).min(1),
   target: SftpEndpointSchema,
+  /** Empty string means the target endpoint's home directory. */
   targetDir: z.string(),
   conflict: SftpConflictPolicySchema.optional(),
 });

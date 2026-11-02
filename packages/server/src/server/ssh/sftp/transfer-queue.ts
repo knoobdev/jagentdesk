@@ -155,10 +155,8 @@ export class TransferQueue {
       kind = stats.kind;
       const target = await this.options.openEndpoint(input.target);
       try {
-        targetPath = target.fs.paths.join(
-          input.targetDir,
-          source.fs.paths.basename(input.sourcePath),
-        );
+        const targetDir = input.targetDir === "" ? await target.fs.home() : input.targetDir;
+        targetPath = target.fs.paths.join(targetDir, source.fs.paths.basename(input.sourcePath));
         if (sameEndpoint(input.source, input.target) && kind === "directory") {
           const inside = targetPath.startsWith(`${input.sourcePath}${source.fs.paths.sep}`);
           if (inside) {

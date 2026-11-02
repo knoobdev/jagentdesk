@@ -1,8 +1,10 @@
 // Vietnamese (Tiếng Việt). Partial translation of the app shell; any missing key
 // falls back to English (i18next fallbackLng: "en"). Extend incrementally.
 import { pluginSettings } from "./plugin-settings";
+import { sshModuleStrings } from "./ssh-modules";
 
 export const vi = {
+  ssh: sshModuleStrings,
   paneFind: {
     connectionFailure: "Không tìm được trong đoạn chat này. Kiểm tra kết nối tới host rồi thử lại.",
     historyChangedFailure: "Đoạn chat đã thay đổi trong lúc tìm. Hãy tìm lại.",

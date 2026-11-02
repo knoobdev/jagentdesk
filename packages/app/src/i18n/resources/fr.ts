@@ -1,7 +1,9 @@
 import type { TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
+import { sshModuleStrings } from "./ssh-modules";
 
 export const fr: TranslationResources = {
+  ssh: sshModuleStrings,
   paneFind: {
     connectionFailure: "Could not search this chat. Check the host connection and retry.",
     historyChangedFailure: "The chat changed while searching. Search again.",
