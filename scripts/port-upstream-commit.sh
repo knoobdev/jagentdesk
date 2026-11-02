@@ -22,9 +22,11 @@ fi
 
 sha="$1"
 # Rebrand. Placeholders keep names that must stay upstream's: the paseo.cafe catalog, the
-# getpaseo GitHub org, and the Paseo plugin-API range JAgentDesk implements.
+# getpaseo GitHub org, and the Paseo plugin-API range JAgentDesk implements. The From: line
+# (commit author) is left untouched so the upstream author is kept.
 git -C "$UP" format-patch -1 --stdout "$sha" \
-  | sed -e 's/paseo\.cafe/__KEEP_CAFE__/g' \
+  | sed -e '/^From: /b' \
+        -e 's/paseo\.cafe/__KEEP_CAFE__/g' \
         -e 's#github\.com/getpaseo#__KEEP_GHORG__#g' \
         -e 's/requirements\.paseo/__KEEP_REQ__/g' \
         -e 's/SUPPORTED_PASEO_PLUGIN_API/__KEEP_API__/g' \
