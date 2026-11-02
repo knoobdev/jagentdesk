@@ -1162,12 +1162,19 @@ function toErrorInfo(error: unknown): SshConnectionErrorInfo {
 }
 
 function toErrorDto(info: SshConnectionErrorInfo): SshConnectionErrorDto {
-  return {
-    code: info.code,
-    ...(info.message ? { message: info.message } : {}),
-    ...(info.storedFingerprint ? { storedFingerprint: info.storedFingerprint } : {}),
-    ...(info.receivedFingerprint ? { receivedFingerprint: info.receivedFingerprint } : {}),
-  };
+  const dto: SshConnectionErrorDto = { code: info.code };
+  for (const key of [
+    "message",
+    "storedFingerprint",
+    "receivedFingerprint",
+    "host",
+    "port",
+    "receivedKeyType",
+    "receivedPublicKey",
+  ] as const) {
+    if (info[key] !== undefined) (dto as Record<string, unknown>)[key] = info[key];
+  }
+  return dto;
 }
 
 function deriveKeyType(parsed: ParsedKey): SshKeyType {

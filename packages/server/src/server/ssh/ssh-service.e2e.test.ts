@@ -516,7 +516,19 @@ describe.skipIf(!E2E)("SshService against a real sshd", () => {
     expect(screen(terminalId)).toContain(newFingerprint);
 
     const pub = docker("exec", "jad-sshd", "cat", `/config/ssh_host_keys/${file}.pub`).split(/\s+/);
-    service.replaceKnownHost({ host: HOST, port: PORT, keyType: pub[0], publicKey: pub[1] });
+    // The blocked state carries the presented key so the user can replace it.
+    expect(blocked.error).toMatchObject({
+      host: HOST,
+      port: PORT,
+      receivedKeyType: pub[0],
+      receivedPublicKey: pub[1],
+    });
+    service.replaceKnownHost({
+      host: HOST,
+      port: PORT,
+      keyType: blocked.error!.receivedKeyType!,
+      publicKey: blocked.error!.receivedPublicKey!,
+    });
     service.reconnectSession(terminalId);
     await nextPush(
       "ssh.connection.state",

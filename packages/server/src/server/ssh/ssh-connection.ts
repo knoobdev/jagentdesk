@@ -40,6 +40,10 @@ export interface SshConnectionErrorInfo {
   message?: string;
   storedFingerprint?: string;
   receivedFingerprint?: string;
+  host?: string;
+  port?: number;
+  receivedKeyType?: string;
+  receivedPublicKey?: string;
 }
 
 export class SshConnectionError extends Error {
@@ -236,6 +240,10 @@ function connectHop(ctx: HopContext): Promise<Client> {
             message: `The host key for ${config.host}:${config.port} has changed. Stored ${evaluation.storedFingerprint}, received ${evaluation.receivedFingerprint}.`,
             storedFingerprint: evaluation.storedFingerprint,
             receivedFingerprint: evaluation.receivedFingerprint,
+            host: config.host,
+            port: config.port,
+            receivedKeyType: keyType,
+            receivedPublicKey: presented.publicKey,
           });
           return;
         }

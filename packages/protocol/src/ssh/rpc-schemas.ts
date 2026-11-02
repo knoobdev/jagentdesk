@@ -165,6 +165,12 @@ export const SshConnectionErrorSchema = z.object({
   message: z.string().optional(),
   storedFingerprint: z.string().optional(),
   receivedFingerprint: z.string().optional(),
+  // host_key_mismatch: the key the server presented (public material), so the user can
+  // replace the stored key with it via ssh.knownhosts.replace after verifying it.
+  host: z.string().optional(),
+  port: z.number().int().optional(),
+  receivedKeyType: z.string().optional(),
+  receivedPublicKey: z.string().optional(),
 });
 export type SshConnectionError = z.infer<typeof SshConnectionErrorSchema>;
 
