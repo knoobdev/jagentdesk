@@ -183,6 +183,7 @@ import type { TerminalManager } from "../terminal/terminal-manager.js";
 import { createConfiguredTerminalManager } from "../terminal/terminal-manager-factory.js";
 import { createSshTerminalManager } from "../terminal/ssh-terminal-manager.js";
 import { SshService } from "./ssh/ssh-service.js";
+import { SshModules } from "./ssh/ssh-modules.js";
 import { applyTerminalAgentHookSetting } from "../terminal/agent-hooks/terminal-agent-hook-setting.js";
 import { loadOrCreateDaemonKeyPair } from "./daemon-keypair.js";
 import { createTsnetListener, type TsnetListener } from "./tsnet-listener.js";
@@ -1322,6 +1323,14 @@ export async function createJAgentDeskDaemon(
   await databaseRegistry.initialize();
   logger.info("Database registry created");
   await sshService.initialize();
+  // Milestone modules (S2 SFTP, S3 forwarding, …) ride on acquireClient (CONTRACT.md).
+  const sshModules = new SshModules({
+    ssh: sshService,
+    jagentdeskHome: config.jagentdeskHome,
+    logger,
+  });
+  await sshModules.initialize();
+  sshService.registerModuleHandlers(sshModules.handlers());
   logger.info("SSH service initialized");
   // Daemon-wide Forge Hub service (spec 19 / ADR-0015). One instance shared across
   // all agents' tool catalogs, mirroring how session.ts builds it per-session. Token
@@ -1941,6 +1950,7 @@ export async function createJAgentDeskDaemon(
     await agentStorage.flush().catch(() => undefined);
     await providerSnapshotManager.shutdown();
     terminalManager.killAll();
+    await sshModules.dispose().catch(() => undefined);
     sshService.dispose();
     speechService.stop();
     await scheduleService.stop().catch(() => undefined);

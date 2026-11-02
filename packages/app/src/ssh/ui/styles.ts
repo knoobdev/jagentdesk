@@ -187,6 +187,16 @@ export const sshStyles = StyleSheet.create((theme: Theme) => ({
   },
   terminalTitle: { flex: 1, minWidth: 0, gap: 1 },
   terminalBody: { flex: 1, minHeight: 0 },
+  hidden: { display: "none" },
+  forwardingSection: { flex: 1, minHeight: 0, gap: theme.spacing[2], padding: theme.spacing[3] },
+  sectionTabs: {
+    flexDirection: "row",
+    gap: theme.spacing[1],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[1.5],
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+  },
   promptStack: { gap: theme.spacing[2], padding: theme.spacing[3] },
   promptBody: { fontSize: theme.fontSize.sm, color: theme.colors.foreground },
   promptFingerprint: {

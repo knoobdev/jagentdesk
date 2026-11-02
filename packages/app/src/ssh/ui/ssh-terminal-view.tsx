@@ -20,6 +20,7 @@ import {
   IconBtn,
   redTint,
   StateDot,
+  TabButton,
   ThemedArrowLeft,
   ThemedPlay,
   ThemedSquare,
@@ -41,6 +42,11 @@ const SSH_STATE_LABELS: Record<SshServerState, string> = {
 };
 
 const noop = () => {};
+
+export interface ServerSection {
+  id: string;
+  label: string;
+}
 
 export type SshConnectionErrorDetails = NonNullable<SshConnectionStateEvent["error"]>;
 
@@ -84,7 +90,10 @@ export function SshTerminalView({
   live,
   terminalState,
   insetsTop,
-  detailTabs,
+  sections,
+  section = "terminal",
+  onSectionChange,
+  sectionContent,
   onBack,
   onEndSession,
   onHostkeyDecision,
@@ -99,8 +108,12 @@ export function SshTerminalView({
   live: SshServerLiveState | undefined;
   terminalState: SshConnectionStateEvent | undefined;
   insetsTop: number;
-  /** Server detail tabs (SFTP, forwarding, …) mounted by milestone modules. */
-  detailTabs?: ReactNode;
+  /** Server sections next to the terminal (SFTP, forwarding, … from milestone modules). */
+  sections?: readonly ServerSection[];
+  section?: string;
+  onSectionChange?: (section: string) => void;
+  /** Content of the selected non-terminal section. */
+  sectionContent?: ReactNode;
   onBack: () => void;
   onEndSession: () => void;
   onHostkeyDecision: (serverId: string, decision: "accept" | "reject") => void;
@@ -149,7 +162,27 @@ export function SshTerminalView({
           testID="ssh-terminal-end"
         />
       </View>
-      {detailTabs ?? null}
+      {sections && sections.length > 0 && onSectionChange ? (
+        <View style={styles.sectionTabs}>
+          <TabButton
+            label="Terminal"
+            value="terminal"
+            active={section === "terminal"}
+            onSelect={onSectionChange}
+            testID="ssh-section-terminal"
+          />
+          {sections.map((entry) => (
+            <TabButton
+              key={entry.id}
+              label={entry.label}
+              value={entry.id}
+              active={section === entry.id}
+              onSelect={onSectionChange}
+              testID={`ssh-section-${entry.id}`}
+            />
+          ))}
+        </View>
+      ) : null}
       <View style={styles.promptStack}>
         {live ? (
           <HostkeyPromptBar serverId={server.id} live={live} onDecision={onHostkeyDecision} />
@@ -157,7 +190,8 @@ export function SshTerminalView({
         {live ? <AuthPromptBar serverId={server.id} live={live} onSubmit={onAuthSubmit} /> : null}
         {failure ? <FailureNotice error={failure} onReplaceHostKey={onReplaceHostKey} /> : null}
       </View>
-      <View style={styles.terminalBody}>
+      {section === "terminal" ? null : sectionContent}
+      <View style={section === "terminal" ? styles.terminalBody : styles.hidden}>
         <TerminalPane
           serverId={hostServerId}
           cwd={`ssh:${terminalId}`}

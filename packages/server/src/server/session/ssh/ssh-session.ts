@@ -1,22 +1,19 @@
 import type pino from "pino";
 import type { SessionInboundMessage, SessionOutboundMessage } from "../../messages.js";
-import type { SshService } from "../../ssh/ssh-service.js";
+import type { SshModuleRpcHandler, SshService } from "../../ssh/ssh-service.js";
 
 export interface SshSessionHost {
   emit(msg: SessionOutboundMessage): void;
 }
 
 /** A milestone module's RPC handler (CONTRACT.md): returns false when the message is not its own. */
-export type SshModuleHandler = (
-  message: SessionInboundMessage,
-  emit: (msg: SessionOutboundMessage) => void,
-) => Promise<boolean>;
+export type SshModuleHandler = SshModuleRpcHandler;
 
 export interface SshSessionOptions {
   host: SshSessionHost;
   sshService: SshService;
   logger: pino.Logger;
-  /** Handlers of the S2–S8 modules, tried in order for ssh.* messages S1 does not own. */
+  /** Extra module handlers (tests); the service's registered module handlers always apply. */
   moduleHandlers?: readonly SshModuleHandler[];
 }
 
@@ -37,25 +34,29 @@ export class SshSession {
   private readonly host: SshSessionHost;
   private readonly service: SshService;
   private readonly logger: pino.Logger;
-  private readonly moduleHandlers: readonly SshModuleHandler[];
+  private readonly extraModuleHandlers: readonly SshModuleHandler[];
 
   constructor(options: SshSessionOptions) {
     this.host = options.host;
     this.service = options.sshService;
     this.logger = options.logger;
-    this.moduleHandlers = options.moduleHandlers ?? [];
+    this.extraModuleHandlers = options.moduleHandlers ?? [];
   }
 
   handleMessage(msg: SessionInboundMessage): Promise<void> | undefined {
     const handled = this.handleCore(msg);
     if (handled) return handled;
-    if (this.moduleHandlers.length === 0) return undefined;
-    return this.handleModules(msg);
+    const handlers = [...this.service.moduleHandlers(), ...this.extraModuleHandlers];
+    if (handlers.length === 0) return undefined;
+    return this.handleModules(msg, handlers);
   }
 
-  private async handleModules(msg: SessionInboundMessage): Promise<void> {
+  private async handleModules(
+    msg: SessionInboundMessage,
+    handlers: readonly SshModuleHandler[],
+  ): Promise<void> {
     const emit = (out: SessionOutboundMessage): void => this.host.emit(out);
-    for (const handler of this.moduleHandlers) {
+    for (const handler of handlers) {
       try {
         if (await handler(msg, emit)) return;
       } catch (error) {

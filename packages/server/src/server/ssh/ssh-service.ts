@@ -123,6 +123,12 @@ export interface SshTerminalCreatedEvent {
   session: SshTerminalSession;
 }
 
+/** A module's RPC handler: returns false when the message is not its own (CONTRACT.md). */
+export type SshModuleRpcHandler = (
+  message: { type: string },
+  emit: (message: SessionOutboundMessage) => void,
+) => Promise<boolean>;
+
 /** Opens a terminal stream for a non-SSH protocol (Telnet module). */
 export type SshShellOpener = (input: {
   serverId: string;
@@ -167,6 +173,7 @@ export class SshService {
   private readonly connectionListeners = new Set<(event: SshConnectionEvent) => void>();
   private readonly terminalCreatedListeners = new Set<(event: SshTerminalCreatedEvent) => void>();
   private readonly shellOpeners = new Map<string, SshShellOpener>();
+  private moduleHandlerList: readonly SshModuleRpcHandler[] = [];
   private disposed = false;
 
   /** Bound for modules (CONTRACT.md): `new SftpService(sshService.acquireClient)`. */
@@ -1001,6 +1008,15 @@ export class SshService {
     if (input.connectSteps) this.connectSteps = { ...this.connectSteps, ...input.connectSteps };
     if (input.reconnectDelayMs) this.reconnectDelay = input.reconnectDelayMs;
     if (input.resolveStartupScript) this.resolveStartupScript = input.resolveStartupScript;
+  }
+
+  /** Milestone modules' RPC handlers (ssh-modules.ts); every session dispatches to them. */
+  registerModuleHandlers(handlers: readonly SshModuleRpcHandler[]): void {
+    this.moduleHandlerList = [...this.moduleHandlerList, ...handlers];
+  }
+
+  moduleHandlers(): readonly SshModuleRpcHandler[] {
+    return this.moduleHandlerList;
   }
 
   registerShellOpener(protocol: Exclude<SshProtocol, "ssh">, opener: SshShellOpener): void {

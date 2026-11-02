@@ -201,6 +201,8 @@ import {
   ProxyPushSchemas,
 } from "./proxy/rpc-schemas.js";
 import { SshRequestSchemas, SshResponseSchemas, SshPushSchemas } from "./ssh/rpc-schemas.js";
+import { SftpInboundSchemas, SftpOutboundSchemas } from "./ssh/sftp-schemas.js";
+import { ForwardingInboundSchemas, ForwardingOutboundSchemas } from "./ssh/forwarding-schemas.js";
 import {
   ExportHostDataRequestMessageSchema,
   ExportHostDataResponseMessageSchema,
@@ -4000,6 +4002,8 @@ export const AgentConfigApplyRequestMessageSchema = z.object({
 export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ...DatabaseRequestSchemas,
   ...SshRequestSchemas,
+  ...SftpInboundSchemas,
+  ...ForwardingInboundSchemas,
   ...DockerRequestSchemas,
   ...SimulatorRequestSchemas,
   ...ProxyRequestSchemas,
@@ -7782,6 +7786,8 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ...DatabaseResponseSchemas,
   ...SshResponseSchemas,
   ...SshPushSchemas,
+  ...SftpOutboundSchemas,
+  ...ForwardingOutboundSchemas,
   ...DockerResponseSchemas,
   ...DockerPushSchemas,
   ...SimulatorResponseSchemas,

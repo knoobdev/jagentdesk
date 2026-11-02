@@ -7937,6 +7937,29 @@ export class DaemonClient {
     });
   }
 
+  /**
+   * SSH milestone modules (SFTP, forwarding, …; app `SshModuleTransport`): send one of
+   * their `ssh.*.request` messages and resolve with the whole matching `….response`
+   * message, which the module validates with its own schema.
+   */
+  async sshModuleRequest(
+    message: { type: `ssh.${string}.request` } & Record<string, unknown>,
+  ): Promise<{ type: string; payload: unknown }> {
+    const responseType = message.type.replace(/\.request$/, ".response");
+    const payload = await this.sendCorrelatedSessionRequest<CorrelatedResponseType, unknown>({
+      message: message as { type: SessionInboundMessage["type"] } & Record<string, unknown>,
+      responseType: responseType as CorrelatedResponseType,
+    });
+    return { type: responseType, payload };
+  }
+
+  /** Raw pushes for SSH modules (`ssh.transfer.progress`, `ssh.forward.state`, …). */
+  onSshModulePush(type: string, handler: (message: unknown) => void): () => void {
+    return this.on((message) => {
+      if (message.type === type) handler(message);
+    });
+  }
+
   /** A prompt was answered elsewhere, expired, or was abandoned: drop its bar. */
   onSshPromptResolved(handler: (event: SshPromptResolved) => void): () => void {
     return this.on("ssh.prompt.resolved", (message) => {
