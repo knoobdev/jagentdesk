@@ -39,6 +39,13 @@ interface FakeTerminalInput {
   processId: string;
   text: string;
 }
+interface FakeFileChange {
+  threadId: string;
+  turnId: string;
+  callId: string;
+  path: string;
+  diff: string;
+}
 interface FakeLegacyPatch {
   threadId: string;
   callId: string;
@@ -84,6 +91,7 @@ export interface FakeCodexAppServer {
   completesSubAgentActivity(params: FakeSubAgentActivity): void;
   completesCompaction(params: { threadId: string; itemId: string }): void;
   runsLegacyCommand(params: FakeLegacyCommand): void;
+  startsFileChange(params: FakeFileChange): void;
   appliesLegacyPatch(params: FakeLegacyPatch): void;
   completesCommand(params: FakeLegacyCommand): void;
   completesSilentCommand(params: FakeSilentCommand): void;
@@ -441,6 +449,20 @@ export function createFakeCodexAppServer(
         command: params.command,
         exit_code: 0,
         success: true,
+      });
+    },
+    startsFileChange(params) {
+      writeNotification("item/started", {
+        threadId: params.threadId,
+        turnId: params.turnId,
+        item: {
+          type: "fileChange",
+          id: params.callId,
+          status: "inProgress",
+          changes: [
+            { path: params.path, kind: { type: "update", move_path: null }, diff: params.diff },
+          ],
+        },
       });
     },
     appliesLegacyPatch(params) {
