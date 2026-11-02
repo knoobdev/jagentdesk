@@ -7,6 +7,7 @@ import { createTestLogger } from "../../test-utils/test-logger.js";
 import { execCommand } from "../../utils/spawn.js";
 import { SshModules } from "./modules.js";
 import { SshService } from "./ssh-service.js";
+import net from "node:net";
 
 // S1's real SshService with the S6–S8 modules wired as bootstrap does, against a real sshd whose
 // /var/run/docker.sock is the host's Docker socket (read-only use here: `docker ps`):
@@ -22,6 +23,7 @@ describe("SSH modules wired into SshService (real sshd)", () => {
   let modules: SshModules;
   let serverId: string;
   const pushes: SessionOutboundMessage[] = [];
+  const permissionRequests: string[] = [];
 
   beforeAll(async () => {
     // Short base dir: the forwarded Docker socket path must fit sun_path (104 bytes on macOS).
@@ -43,7 +45,10 @@ describe("SSH modules wired into SshService (real sshd)", () => {
       logger: createTestLogger(),
       agentLabels: (agentId) =>
         agentId === "agent_server_chat" ? { [SSH_SERVER_AGENT_LABEL]: serverId } : null,
-      requestPermission: async () => ({ behavior: "allow" }),
+      requestPermission: async (_agentId, request) => {
+        permissionRequests.push(request.name);
+        return { behavior: "allow" };
+      },
     });
     service.modules = modules;
     const saved = await service.saveServer(
@@ -148,5 +153,56 @@ describe("SSH modules wired into SshService (real sshd)", () => {
       { timeout: 10_000, interval: 200 },
     );
     session.end();
+  });
+
+  it("ssh_forward_start opens a local forward through the server after the permission card", async () => {
+    const tools = modules.createAgentTools("agent_server_chat");
+    const start = tools.find((tool) => tool.name === "ssh_forward_start");
+    const stop = tools.find((tool) => tool.name === "ssh_forward_stop");
+    if (!start || !stop) throw new Error("forward tools missing");
+    expect([start.requiresPermission, stop.requiresPermission]).toEqual([true, true]);
+
+    const free = net.createServer();
+    await new Promise<void>((resolve) => free.listen(0, "127.0.0.1", resolve));
+    const freePort = (free.address() as net.AddressInfo).port;
+    await new Promise<void>((resolve) => free.close(() => resolve()));
+    const started = await start.handler(
+      { kind: "local", bindPort: freePort, destHost: "127.0.0.1", destPort: 2222 },
+      {},
+    );
+    const { forwardId, description } = JSON.parse(started.content[0]?.text ?? "{}");
+    expect(permissionRequests).toContain("ssh_forward_start");
+    expect(description).toBe(`local 127.0.0.1:${freePort} → 127.0.0.1:2222`);
+    const port = freePort;
+
+    const banner = await new Promise<string>((resolve, reject) => {
+      const socket = net.connect(port, "127.0.0.1");
+      socket.once("data", (chunk) => {
+        socket.destroy();
+        resolve(chunk.toString("utf8"));
+      });
+      socket.once("error", reject);
+    });
+    expect(banner).toMatch(/^SSH-2\.0-OpenSSH/);
+
+    await stop.handler({ forwardId }, {});
+    expect(modules.forwarding.list().rules.map((rule) => rule.id)).not.toContain(forwardId);
+  });
+
+  it("skips detection on connect for a server with detectEnvironment off", async () => {
+    const quiet = await service.saveServer(
+      {
+        id: "",
+        label: "no detect",
+        address: "127.0.0.1",
+        port: PORT,
+        username: "jad",
+        authMethods: ["password"],
+        detectEnvironment: false,
+      },
+      { password: "jadtest" },
+    );
+    expect(await modules.environment.onConnected(quiet.id)).toBeNull();
+    expect(service.storage.getServer(quiet.id)?.detectEnvironment).toBe(false);
   });
 });

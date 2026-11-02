@@ -1332,6 +1332,7 @@ export async function createJAgentDeskDaemon(
     requestPermission: (agentId, request) =>
       agentManager.requestHostToolPermission(agentId, request),
   });
+  await sshModules.initialize();
   sshService.modules = sshModules;
   logger.info("SSH service initialized");
   // Daemon-wide Forge Hub service (spec 19 / ADR-0015). One instance shared across

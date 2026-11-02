@@ -56,6 +56,8 @@ export interface SshServerFormState {
   agentForwarding: "inherit" | "on" | "off";
   autoReconnect: "inherit" | "on" | "off";
   keepaliveS: string;
+  /** spec 25.10: detect the server environment after each connect (server-only, default on). */
+  detectEnvironment: boolean;
   formError: string | null;
   canSubmit: boolean;
 }
@@ -104,6 +106,7 @@ export type SshServerAdvancedFields = Pick<
   | "agentForwarding"
   | "autoReconnect"
   | "keepaliveS"
+  | "detectEnvironment"
 >;
 
 /** `KEY=VALUE` per line → record; returns the first invalid line as an error. */
@@ -240,6 +243,7 @@ function initialAdvancedFields(server: SshServer | null): AdvancedInitialFields 
     agentForwarding: triState(server?.agentForwarding),
     autoReconnect: triState(server?.autoReconnect),
     keepaliveS: server?.keepaliveIntervalS === undefined ? "" : String(server.keepaliveIntervalS),
+    detectEnvironment: server?.detectEnvironment !== false,
   };
 }
 
@@ -276,6 +280,7 @@ function buildServerDto(server: SshServer | null, state: SshServerFormState): Ss
     agentForwarding: fromTriState(state.agentForwarding),
     autoReconnect: fromTriState(state.autoReconnect),
     keepaliveIntervalS: optionalInt(state.keepaliveS),
+    detectEnvironment: state.detectEnvironment ? undefined : false,
   };
 }
 

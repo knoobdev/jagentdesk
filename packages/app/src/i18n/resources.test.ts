@@ -51,6 +51,8 @@ const OPTIONAL_ENGLISH_FALLBACK_PREFIXES = [
   // SSH feature modules (resources/ssh-modules.ts) ship English in every locale for now.
   "ssh.sftp.",
   "ssh.forwarding.",
+  "ssh.server.",
+  "ssh.import.",
 ];
 function isOptionalEnglishFallbackKey(key: string): boolean {
   return OPTIONAL_ENGLISH_FALLBACK_PREFIXES.some((prefix) => key.startsWith(prefix));

@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { ScrollView, Text, View } from "react-native";
+import { useTranslation } from "react-i18next";
 import { router, useLocalSearchParams } from "expo-router";
 import * as Clipboard from "expo-clipboard";
 import { FolderPlus, Plus, Server as ServerIcon } from "lucide-react-native";
@@ -633,10 +634,11 @@ function ServersHeaderActions({
   onAddServer: () => void;
   onImport: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       <Button size="sm" variant="outline" onPress={onImport} testID="servers-import">
-        Import
+        {t("ssh.import.action")}
       </Button>
       <Button
         size="sm"
