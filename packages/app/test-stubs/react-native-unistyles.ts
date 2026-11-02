@@ -5,6 +5,9 @@ const testTheme = {
   // Shell tokens the shared components read directly (see ShellChrome in styles/theme.ts).
   chrome: lightTheme.chrome,
   colors: {
+    // Every other token keeps its light-theme value so components that read the full palette
+    // (comboboxes, switches) render; the pinned values below are what tests assert against.
+    ...lightTheme.colors,
     foreground: "#111111",
     foregroundMuted: "#666666",
     statusSuccess: "#15803d",
@@ -26,6 +29,7 @@ const testTheme = {
     border: "#e4e4e7",
     borderAccent: "#a1a1aa",
     palette: {
+      ...lightTheme.colors.palette,
       amber: { 500: "#f59e0b" },
       blue: { 300: "#93c5fd" },
       green: { 500: "#22c55e" },
@@ -45,6 +49,7 @@ const testTheme = {
     mono: "monospace",
   },
   fontWeight: {
+    ...lightTheme.fontWeight,
     normal: "400",
     medium: "500",
   },
