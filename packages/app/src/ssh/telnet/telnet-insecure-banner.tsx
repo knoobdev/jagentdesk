@@ -1,6 +1,6 @@
 import { Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
-import { i18n } from "@/i18n/i18next";
+import { useTranslation } from "react-i18next";
 
 /** Telnet has no TLS layer; the protocol default port is 23. */
 export const TELNET_DEFAULT_PORT = 23;
@@ -20,13 +20,14 @@ export function TelnetInsecureBanner({
   address,
   port = TELNET_DEFAULT_PORT,
 }: TelnetInsecureBannerProps) {
+  const { t } = useTranslation();
   return (
     <View style={styles.row} testID="telnet-insecure-banner">
       <Text style={styles.label} numberOfLines={1}>
-        {i18n.t("ssh.telnet.unencrypted")}
+        {t("ssh.telnet.unencrypted")}
       </Text>
       <Text style={styles.hint} numberOfLines={1}>
-        {i18n.t("ssh.telnet.endpoint", { address, port })}
+        {t("ssh.telnet.endpoint", { address, port })}
       </Text>
     </View>
   );
