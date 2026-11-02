@@ -2765,4 +2765,10 @@ export const ru: TranslationResources = {
       forked: "Training {{name}}",
     },
   },
+  ssh: {
+    telnet: {
+      unencrypted: "Connection is not encrypted",
+      endpoint: "telnet://{{address}}:{{port}}",
+    },
+  },
 };
