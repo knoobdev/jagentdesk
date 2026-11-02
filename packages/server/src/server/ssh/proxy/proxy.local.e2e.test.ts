@@ -267,7 +267,8 @@ async function runUnameThroughProxy(proxy: SshProxyConfig): Promise<string> {
   return output;
 }
 
-describe("connectThroughProxy against real proxies", () => {
+// Opt-in: needs the test sshd container (see test-support/start-test-sshd.sh) and JAD_SSH_E2E=1.
+describe.runIf(process.env.JAD_SSH_E2E === "1")("connectThroughProxy against real proxies", () => {
   it("tunnels an ssh2 password-auth connection through a no-auth SOCKS5 proxy", async () => {
     expect(await runUnameThroughProxy(socks5Open)).toBe("Linux");
   });

@@ -61,7 +61,8 @@ function waitForOutput(stream: ClientChannel, marker: string): Promise<void> {
   });
 }
 
-describe("S6 against a real sshd", () => {
+// Opt-in: needs the test sshd container (see test-support/start-test-sshd.sh) and JAD_SSH_E2E=1.
+describe.runIf(process.env.JAD_SSH_E2E === "1")("S6 against a real sshd", () => {
   let pool: TestSshPool;
   let shell: Client;
   let original: string;

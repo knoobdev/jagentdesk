@@ -86,7 +86,8 @@ function socksBanner(proxyPort: number): Promise<string> {
   });
 }
 
-describe("ForwardingService against a real sshd", () => {
+// Opt-in: needs the test sshd container (see test-support/start-test-sshd.sh) and JAD_SSH_E2E=1.
+describe.runIf(process.env.JAD_SSH_E2E === "1")("ForwardingService against a real sshd", () => {
   let pool: TestSshPool;
   let shell: Client;
   let sshDir: string;
