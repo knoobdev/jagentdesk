@@ -31,6 +31,7 @@ function createQueryMock(events: unknown[]): Query {
 describe("Claude SDK env", () => {
   test("forwards launch-context env through Claude process env", async () => {
     let capturedEnv: Record<string, string | undefined> | undefined;
+    let capturedPerTaskStopAffordance: boolean | undefined;
     const launchContext: AgentLaunchContext = {
       env: {
         JAGENTDESK_AGENT_ID: "00000000-0000-4000-8000-000000000201",
@@ -39,6 +40,7 @@ describe("Claude SDK env", () => {
     };
     const queryFactory = vi.fn(({ options }: ClaudeQueryInput) => {
       capturedEnv = options.env;
+      capturedPerTaskStopAffordance = options.perTaskStopAffordance;
       return createQueryMock([
         {
           type: "system",
@@ -82,6 +84,10 @@ describe("Claude SDK env", () => {
       expect(result.sessionId).toBe("managed-agent-env-session");
       expect(capturedEnv?.JAGENTDESK_AGENT_ID).toBe(launchContext.env?.JAGENTDESK_AGENT_ID);
       expect(capturedEnv?.JAGENTDESK_TEST_FLAG).toBe(launchContext.env?.JAGENTDESK_TEST_FLAG);
+      // JAgentDesk reads session_state_changed to know when an autonomous turn is over.
+      expect(capturedEnv?.CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS).toBe("1");
+      // Without it, Stop and replace kill every background subagent along with the turn.
+      expect(capturedPerTaskStopAffordance).toBe(true);
     } finally {
       await session.close();
     }
