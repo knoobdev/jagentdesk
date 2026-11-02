@@ -1,5 +1,6 @@
 import type {
   ClientMessage,
+  TerminalExitInfo,
   ServerMessage,
   TerminalSession,
   TerminalSubscribeOptions,
@@ -13,6 +14,7 @@ export interface RemoteSessionHandle {
   tapInput(listener: (data: string) => void): () => void;
   typeInput(data: string): void;
   onClientInput: ((data: string) => void) | null;
+  onExit(listener: (info: TerminalExitInfo) => void): () => void;
 }
 
 /**

@@ -53,6 +53,7 @@ import { useHostRuntimeClient, useHosts } from "@/runtime/host-runtime";
 import { Skeleton, useSkeletonPulse } from "@/components/ui/skeleton";
 import { TerminalPane } from "@/components/terminal-pane";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
+import { withSshDocker, type SshDockerTarget } from "@/ssh/ui/ssh-docker-client";
 import type { Theme } from "@/styles/theme";
 import type {
   DockerAction,
@@ -2185,11 +2186,22 @@ function LivePill() {
 const DOCKER_DESCRIPTION =
   "Containers, images and volumes on this host, updated live as the team works.";
 
-export function DockerScreen() {
+/**
+ * `sshDocker` points the cockpit at a saved SSH server's Docker (spec 25.10) instead of the
+ * daemon machine's; `hostServerId` picks the daemon host when the caller already knows it.
+ */
+export function DockerScreen({
+  sshDocker,
+  hostServerId,
+}: { sshDocker?: SshDockerTarget; hostServerId?: string } = {}) {
   const isClickUp = useIsClickUpTheme();
   const hosts = useHosts();
-  const serverId = hosts[0]?.serverId ?? "";
-  const client = useHostRuntimeClient(serverId);
+  const serverId = hostServerId ?? hosts[0]?.serverId ?? "";
+  const hostClient = useHostRuntimeClient(serverId);
+  const client = useMemo(
+    () => (hostClient && sshDocker ? withSshDocker(hostClient, sshDocker) : hostClient),
+    [hostClient, sshDocker],
+  );
   const insets = useSafeAreaInsets();
   const isCompact = useIsCompactFormFactor();
   // A workspace on this host backs the Exec terminal (the daemon scopes terminals to a workspace).

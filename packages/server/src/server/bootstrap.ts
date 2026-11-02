@@ -184,6 +184,7 @@ import { createConfiguredTerminalManager } from "../terminal/terminal-manager-fa
 import { createSshTerminalManager } from "../terminal/ssh-terminal-manager.js";
 import { SshService } from "./ssh/ssh-service.js";
 import { SshModules } from "./ssh/ssh-modules.js";
+import { SshModules as SshServerModules } from "./ssh/modules.js";
 import { applyTerminalAgentHookSetting } from "../terminal/agent-hooks/terminal-agent-hook-setting.js";
 import { loadOrCreateDaemonKeyPair } from "./daemon-keypair.js";
 import { createTsnetListener, type TsnetListener } from "./tsnet-listener.js";
@@ -1331,6 +1332,16 @@ export async function createJAgentDeskDaemon(
   });
   await sshModules.initialize();
   sshService.registerModuleHandlers(sshModules.handlers());
+  // S6–S8 (logs, import, install key, environment, Docker on the server) ride on S1's pool.
+  const sshServerModules = new SshServerModules({
+    sshService,
+    jagentdeskHome: config.jagentdeskHome,
+    logger,
+    agentLabels: (agentId) => agentManager.getAgent(agentId)?.labels ?? null,
+    requestPermission: (agentId, request) =>
+      agentManager.requestHostToolPermission(agentId, request),
+  });
+  sshService.modules = sshServerModules;
   logger.info("SSH service initialized");
   // Daemon-wide Forge Hub service (spec 19 / ADR-0015). One instance shared across
   // all agents' tool catalogs, mirroring how session.ts builds it per-session. Token
@@ -1543,6 +1554,7 @@ export async function createJAgentDeskDaemon(
     agentForumService,
     clusterRegistry,
     databaseRegistry,
+    sshAgentTools: (callerAgentId) => sshServerModules.createAgentTools(callerAgentId),
     skillsStorage,
     forgeHub: forgeHubService,
     browserFingerprintProfiles: {
@@ -1951,6 +1963,7 @@ export async function createJAgentDeskDaemon(
     await providerSnapshotManager.shutdown();
     terminalManager.killAll();
     await sshModules.dispose().catch(() => undefined);
+    await sshServerModules.dispose().catch(() => undefined);
     sshService.dispose();
     speechService.stop();
     await scheduleService.stop().catch(() => undefined);

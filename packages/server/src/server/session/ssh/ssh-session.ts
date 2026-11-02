@@ -46,7 +46,11 @@ export class SshSession {
   handleMessage(msg: SessionInboundMessage): Promise<void> | undefined {
     const handled = this.handleCore(msg);
     if (handled) return handled;
-    const handlers = [...this.service.moduleHandlers(), ...this.extraModuleHandlers];
+    const handlers = [
+      ...this.service.moduleHandlers(),
+      ...(this.service.modules?.handlers ?? []),
+      ...this.extraModuleHandlers,
+    ];
     if (handlers.length === 0) return undefined;
     return this.handleModules(msg, handlers);
   }

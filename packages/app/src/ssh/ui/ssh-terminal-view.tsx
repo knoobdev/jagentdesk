@@ -84,6 +84,111 @@ function FailureNotice({
   );
 }
 
+function TerminalHeader({
+  server,
+  groups,
+  state,
+  status,
+  dotTone,
+  insetsTop,
+  onBack,
+  onEndSession,
+  onReconnect,
+  onTypePassword,
+}: {
+  server: SshServerInfo;
+  groups: SshGroup[];
+  state: SshServerState;
+  status: string;
+  dotTone: SshDotTone;
+  insetsTop: number;
+  onBack: () => void;
+  onEndSession: () => void;
+  onReconnect: () => void;
+  onTypePassword?: () => void;
+}) {
+  const canReconnect = state === "error" || state === "disconnected";
+  return (
+    <View style={[styles.terminalHeader, { paddingTop: insetsTop + 8 }]}>
+      <IconBtn
+        icon={ThemedArrowLeft}
+        tint={fgTint}
+        label="Back to servers"
+        onPress={onBack}
+        testID="ssh-terminal-back"
+      />
+      <View style={styles.terminalTitle}>
+        <View style={styles.headerRow}>
+          <StateDot tone={dotTone} />
+          <Text style={styles.cellStrong} numberOfLines={1}>
+            {server.label}
+          </Text>
+        </View>
+        <Text style={styles.cellSub} numberOfLines={1} testID="ssh-terminal-status">
+          {formatServerTarget(server, groups)} · {status}
+        </Text>
+      </View>
+      {canReconnect ? (
+        <IconBtn
+          icon={ThemedPlay}
+          tint={fgTint}
+          label="Reconnect"
+          onPress={onReconnect}
+          testID="ssh-terminal-reconnect"
+        />
+      ) : null}
+      {onTypePassword && state === "connected" ? (
+        <IconBtn
+          icon={ThemedKeyRound}
+          tint={fgTint}
+          label="Type saved password"
+          onPress={onTypePassword}
+          testID="ssh-terminal-password-key"
+        />
+      ) : null}
+      <IconBtn
+        icon={ThemedSquare}
+        tint={redTint}
+        label="Close session"
+        onPress={onEndSession}
+        testID="ssh-terminal-end"
+      />
+    </View>
+  );
+}
+
+function SectionTabs({
+  sections,
+  section,
+  onSectionChange,
+}: {
+  sections: readonly ServerSection[];
+  section: string;
+  onSectionChange: (section: string) => void;
+}) {
+  return (
+    <View style={styles.sectionTabs}>
+      <TabButton
+        label="Terminal"
+        value="terminal"
+        active={section === "terminal"}
+        onSelect={onSectionChange}
+        testID="ssh-section-terminal"
+      />
+      {sections.map((entry) => (
+        <TabButton
+          key={entry.id}
+          label={entry.label}
+          value={entry.id}
+          active={section === entry.id}
+          onSelect={onSectionChange}
+          testID={`ssh-section-${entry.id}`}
+        />
+      ))}
+    </View>
+  );
+}
+
 export function SshTerminalView({
   hostServerId,
   server,
@@ -105,6 +210,7 @@ export function SshTerminalView({
   dotTone,
   onTypePassword,
   actionError,
+  overview,
 }: {
   hostServerId: string;
   server: SshServerInfo;
@@ -131,77 +237,28 @@ export function SshTerminalView({
   onTypePassword?: () => void;
   /** Failure of an action taken in this tab (reconnect, password key, replace key). */
   actionError?: string | null;
+  /** Server overview under the header (environment, Docker, logs, key install; 25.13). */
+  overview?: ReactNode;
 }) {
   const state = terminalState?.state ?? "connecting";
   const failure = state === "error" ? terminalState?.error : undefined;
-  const canReconnect = state === "error" || state === "disconnected";
   return (
     <View style={styles.terminalScreen} testID="ssh-terminal-view">
-      <View style={[styles.terminalHeader, { paddingTop: insetsTop + 8 }]}>
-        <IconBtn
-          icon={ThemedArrowLeft}
-          tint={fgTint}
-          label="Back to servers"
-          onPress={onBack}
-          testID="ssh-terminal-back"
-        />
-        <View style={styles.terminalTitle}>
-          <View style={styles.headerRow}>
-            <StateDot tone={dotTone ?? sshStateTone(state)} />
-            <Text style={styles.cellStrong} numberOfLines={1}>
-              {server.label}
-            </Text>
-          </View>
-          <Text style={styles.cellSub} numberOfLines={1} testID="ssh-terminal-status">
-            {formatServerTarget(server, groups)} · {statusLine(live, terminalState)}
-          </Text>
-        </View>
-        {canReconnect ? (
-          <IconBtn
-            icon={ThemedPlay}
-            tint={fgTint}
-            label="Reconnect"
-            onPress={onReconnect}
-            testID="ssh-terminal-reconnect"
-          />
-        ) : null}
-        {onTypePassword && state === "connected" ? (
-          <IconBtn
-            icon={ThemedKeyRound}
-            tint={fgTint}
-            label="Type saved password"
-            onPress={onTypePassword}
-            testID="ssh-terminal-password-key"
-          />
-        ) : null}
-        <IconBtn
-          icon={ThemedSquare}
-          tint={redTint}
-          label="Close session"
-          onPress={onEndSession}
-          testID="ssh-terminal-end"
-        />
-      </View>
+      <TerminalHeader
+        server={server}
+        groups={groups}
+        state={state}
+        status={statusLine(live, terminalState)}
+        dotTone={dotTone ?? sshStateTone(state)}
+        insetsTop={insetsTop}
+        onBack={onBack}
+        onEndSession={onEndSession}
+        onReconnect={onReconnect}
+        onTypePassword={onTypePassword}
+      />
+      {overview ?? null}
       {sections && sections.length > 0 && onSectionChange ? (
-        <View style={styles.sectionTabs}>
-          <TabButton
-            label="Terminal"
-            value="terminal"
-            active={section === "terminal"}
-            onSelect={onSectionChange}
-            testID="ssh-section-terminal"
-          />
-          {sections.map((entry) => (
-            <TabButton
-              key={entry.id}
-              label={entry.label}
-              value={entry.id}
-              active={section === entry.id}
-              onSelect={onSectionChange}
-              testID={`ssh-section-${entry.id}`}
-            />
-          ))}
-        </View>
+        <SectionTabs sections={sections} section={section} onSectionChange={onSectionChange} />
       ) : null}
       <View style={styles.promptStack}>
         {live ? (

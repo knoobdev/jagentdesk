@@ -1,4 +1,5 @@
 import { utils } from "ssh2";
+import type { SshModules } from "./modules.js";
 import type { Client, ClientChannel, ParsedKey } from "ssh2";
 import type { Logger } from "pino";
 import type {
@@ -197,6 +198,9 @@ export class SshService {
   /** Broadcast input groups (25.4): terminalId → every terminal of its group. */
   private readonly broadcastGroups = new Map<string, ReadonlySet<string>>();
   private disposed = false;
+
+  /** S6–S8 modules (ssh/modules.ts), set by bootstrap; null for in-memory services and tests. */
+  modules: SshModules | null = null;
 
   /** Bound for modules (CONTRACT.md): `new SftpService(sshService.acquireClient)`. */
   readonly acquireClient: AcquireSshClient = (serverId) => this.acquire(serverId);

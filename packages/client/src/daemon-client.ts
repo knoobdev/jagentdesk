@@ -1468,6 +1468,10 @@ type CorrelatedResponseMessage =
   | GetDaemonConfigResponse
   | SetDaemonConfigResponse;
 type CorrelatedResponseType = CorrelatedResponseMessage["type"];
+type SshModuleParams<T extends SessionInboundMessage["type"]> = Omit<
+  Extract<SessionInboundMessage, { type: T }>,
+  "type" | "requestId"
+>;
 type CorrelatedResponsePayload<TType extends CorrelatedResponseType> = Extract<
   CorrelatedResponseMessage,
   { type: TType }
@@ -1661,6 +1665,11 @@ interface PingProbe {
   // heartbeat sets this; a latency measurement never drives teardown, even when a
   // heartbeat tick shares (dedupes onto) an in-flight measurement ping.
   drivesLivenessFailure: boolean;
+}
+
+/** SSH server whose forwarded Docker socket a cockpit request targets (spec 25.10). */
+function dockerTarget(options: { serverId?: string }): { serverId?: string } {
+  return options.serverId ? { serverId: options.serverId } : {};
 }
 
 export class DaemonClient {
@@ -7407,6 +7416,7 @@ export class DaemonClient {
   }
 
   async dockerLogs(options: {
+    serverId?: string;
     requestId?: string;
     container: string;
     tail?: number;
@@ -7415,6 +7425,7 @@ export class DaemonClient {
       requestId: options.requestId,
       message: {
         type: "docker/logs",
+        ...dockerTarget(options),
         container: options.container,
         ...(options.tail !== undefined ? { tail: options.tail } : {}),
       },
@@ -7423,77 +7434,109 @@ export class DaemonClient {
   }
 
   async dockerInspect(options: {
+    serverId?: string;
     requestId?: string;
     container: string;
   }): Promise<DockerInspectPayload> {
     return this.sendCorrelatedSessionRequest({
       requestId: options.requestId,
-      message: { type: "docker/inspect", container: options.container },
+      message: { type: "docker/inspect", ...dockerTarget(options), container: options.container },
       responseType: "docker/inspect/response",
     });
   }
 
   async dockerAction(options: {
+    serverId?: string;
     requestId?: string;
     container: string;
     action: DockerAction;
   }): Promise<DockerActionPayload> {
     return this.sendCorrelatedSessionRequest({
       requestId: options.requestId,
-      message: { type: "docker/action", container: options.container, action: options.action },
+      message: {
+        type: "docker/action",
+        ...dockerTarget(options),
+        container: options.container,
+        action: options.action,
+      },
       responseType: "docker/action/response",
     });
   }
 
   async dockerExec(options: {
+    serverId?: string;
     requestId?: string;
     container: string;
     command: string;
   }): Promise<DockerExecPayload> {
     return this.sendCorrelatedSessionRequest({
       requestId: options.requestId,
-      message: { type: "docker/exec", container: options.container, command: options.command },
+      message: {
+        type: "docker/exec",
+        ...dockerTarget(options),
+        container: options.container,
+        command: options.command,
+      },
       responseType: "docker/exec/response",
     });
   }
 
   async dockerImageAction(options: {
+    serverId?: string;
     requestId?: string;
     image: string;
     action: DockerImageAction;
   }): Promise<DockerImageActionPayload> {
     return this.sendCorrelatedSessionRequest({
       requestId: options.requestId,
-      message: { type: "docker/image/action", image: options.image, action: options.action },
+      message: {
+        type: "docker/image/action",
+        ...dockerTarget(options),
+        image: options.image,
+        action: options.action,
+      },
       responseType: "docker/image/action/response",
     });
   }
 
   async dockerVolumeAction(options: {
+    serverId?: string;
     requestId?: string;
     name: string;
     action: DockerVolumeAction;
   }): Promise<DockerVolumeActionPayload> {
     return this.sendCorrelatedSessionRequest({
       requestId: options.requestId,
-      message: { type: "docker/volume/action", name: options.name, action: options.action },
+      message: {
+        type: "docker/volume/action",
+        ...dockerTarget(options),
+        name: options.name,
+        action: options.action,
+      },
       responseType: "docker/volume/action/response",
     });
   }
 
   async dockerFsList(options: {
+    serverId?: string;
     requestId?: string;
     container: string;
     path: string;
   }): Promise<DockerFsListPayload> {
     return this.sendCorrelatedSessionRequest({
       requestId: options.requestId,
-      message: { type: "docker/fs/list", container: options.container, path: options.path },
+      message: {
+        type: "docker/fs/list",
+        ...dockerTarget(options),
+        container: options.container,
+        path: options.path,
+      },
       responseType: "docker/fs/list/response",
     });
   }
 
   async dockerCp(options: {
+    serverId?: string;
     requestId?: string;
     container: string;
     direction: DockerCpDirection;
@@ -7504,6 +7547,7 @@ export class DaemonClient {
       requestId: options.requestId,
       message: {
         type: "docker/cp",
+        ...dockerTarget(options),
         container: options.container,
         direction: options.direction,
         containerPath: options.containerPath,
@@ -7514,18 +7558,25 @@ export class DaemonClient {
   }
 
   async dockerFsRead(options: {
+    serverId?: string;
     requestId?: string;
     container: string;
     path: string;
   }): Promise<DockerFsReadPayload> {
     return this.sendCorrelatedSessionRequest({
       requestId: options.requestId,
-      message: { type: "docker/fs/read", container: options.container, path: options.path },
+      message: {
+        type: "docker/fs/read",
+        ...dockerTarget(options),
+        container: options.container,
+        path: options.path,
+      },
       responseType: "docker/fs/read/response",
     });
   }
 
   async dockerFsWrite(options: {
+    serverId?: string;
     requestId?: string;
     container: string;
     path: string;
@@ -7535,6 +7586,7 @@ export class DaemonClient {
       requestId: options.requestId,
       message: {
         type: "docker/fs/write",
+        ...dockerTarget(options),
         container: options.container,
         path: options.path,
         content: options.content,
@@ -7544,6 +7596,7 @@ export class DaemonClient {
   }
 
   async dockerFsOp(options: {
+    serverId?: string;
     requestId?: string;
     container: string;
     op: DockerFsOp;
@@ -7554,6 +7607,7 @@ export class DaemonClient {
       requestId: options.requestId,
       message: {
         type: "docker/fs/op",
+        ...dockerTarget(options),
         container: options.container,
         op: options.op,
         path: options.path,
@@ -7564,10 +7618,18 @@ export class DaemonClient {
   }
 
   // ── realtime streams (no polling): subscribe, then listen for pushed snapshots/chunks ──
-  async dockerSubscribe(options: { subscriptionId: string; requestId?: string }): Promise<void> {
+  async dockerSubscribe(options: {
+    subscriptionId: string;
+    requestId?: string;
+    serverId?: string;
+  }): Promise<void> {
     await this.sendCorrelatedSessionRequest({
       requestId: options.requestId,
-      message: { type: "docker/subscribe", subscriptionId: options.subscriptionId },
+      message: {
+        type: "docker/subscribe",
+        ...dockerTarget(options),
+        subscriptionId: options.subscriptionId,
+      },
       responseType: "docker/subscribe/response",
     });
   }
@@ -7590,6 +7652,7 @@ export class DaemonClient {
   }
 
   async dockerLogsSubscribe(options: {
+    serverId?: string;
     subscriptionId: string;
     container: string;
     tail?: number;
@@ -7599,6 +7662,7 @@ export class DaemonClient {
       requestId: options.requestId,
       message: {
         type: "docker/logs/subscribe",
+        ...dockerTarget(options),
         subscriptionId: options.subscriptionId,
         container: options.container,
         ...(options.tail !== undefined ? { tail: options.tail } : {}),
@@ -7625,6 +7689,7 @@ export class DaemonClient {
   }
 
   async dockerStatsSubscribe(options: {
+    serverId?: string;
     subscriptionId: string;
     container: string;
     requestId?: string;
@@ -7633,6 +7698,7 @@ export class DaemonClient {
       requestId: options.requestId,
       message: {
         type: "docker/stats/subscribe",
+        ...dockerTarget(options),
         subscriptionId: options.subscriptionId,
         container: options.container,
       },
@@ -7944,6 +8010,119 @@ export class DaemonClient {
     return this.sendNamespacedCorrelatedSessionRequest<"ssh.session.reconnect.response">({
       requestId: options.requestId,
       message: { type: "ssh.session.reconnect.request", terminalId: options.terminalId },
+    });
+  }
+  // ── SSH modules S6–S8 (logs, import, install key, environment, Docker on the server) ──
+
+  async sshLogsList(
+    params: SshModuleParams<"ssh.logs.list.request"> = {},
+  ): Promise<CorrelatedResponsePayload<"ssh.logs.list.response">> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.logs.list.response">({
+      message: { type: "ssh.logs.list.request", ...params },
+    });
+  }
+
+  async sshLogsSetEnabled(
+    params: SshModuleParams<"ssh.logs.set_enabled.request">,
+  ): Promise<CorrelatedResponsePayload<"ssh.logs.set_enabled.response">> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.logs.set_enabled.response">({
+      message: { type: "ssh.logs.set_enabled.request", ...params },
+    });
+  }
+
+  async sshLogsRead(
+    params: SshModuleParams<"ssh.logs.read.request">,
+  ): Promise<CorrelatedResponsePayload<"ssh.logs.read.response">> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.logs.read.response">({
+      message: { type: "ssh.logs.read.request", ...params },
+    });
+  }
+
+  async sshLogsSearch(
+    params: SshModuleParams<"ssh.logs.search.request">,
+  ): Promise<CorrelatedResponsePayload<"ssh.logs.search.response">> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.logs.search.response">({
+      message: { type: "ssh.logs.search.request", ...params },
+    });
+  }
+
+  async sshLogsBookmark(
+    params: SshModuleParams<"ssh.logs.bookmark.request">,
+  ): Promise<CorrelatedResponsePayload<"ssh.logs.bookmark.response">> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.logs.bookmark.response">({
+      message: { type: "ssh.logs.bookmark.request", ...params },
+    });
+  }
+
+  async sshLogsUpdateBookmark(
+    params: SshModuleParams<"ssh.logs.update_bookmark.request">,
+  ): Promise<CorrelatedResponsePayload<"ssh.logs.update_bookmark.response">> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.logs.update_bookmark.response">({
+      message: { type: "ssh.logs.update_bookmark.request", ...params },
+    });
+  }
+
+  async sshImportPreview(
+    params: SshModuleParams<"ssh.import.preview.request">,
+  ): Promise<CorrelatedResponsePayload<"ssh.import.preview.response">> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.import.preview.response">({
+      message: { type: "ssh.import.preview.request", ...params },
+    });
+  }
+
+  async sshImportApply(
+    params: SshModuleParams<"ssh.import.apply.request">,
+  ): Promise<CorrelatedResponsePayload<"ssh.import.apply.response">> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.import.apply.response">({
+      message: { type: "ssh.import.apply.request", ...params },
+    });
+  }
+
+  async sshKeysInstallToServer(
+    params: SshModuleParams<"ssh.keys.install_to_server.request">,
+  ): Promise<CorrelatedResponsePayload<"ssh.keys.install_to_server.response">> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.keys.install_to_server.response">({
+      message: { type: "ssh.keys.install_to_server.request", ...params },
+    });
+  }
+
+  async sshEnvironmentDetect(
+    params: SshModuleParams<"ssh.environment.detect.request">,
+  ): Promise<CorrelatedResponsePayload<"ssh.environment.detect.response">> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.environment.detect.response">({
+      message: { type: "ssh.environment.detect.request", ...params },
+    });
+  }
+
+  async sshDockerAttach(
+    params: SshModuleParams<"ssh.docker.attach.request">,
+  ): Promise<CorrelatedResponsePayload<"ssh.docker.attach.response">> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.docker.attach.response">({
+      message: { type: "ssh.docker.attach.request", ...params },
+    });
+  }
+
+  async sshRemoteDbPrepare(
+    params: SshModuleParams<"ssh.remote_db.prepare.request">,
+  ): Promise<CorrelatedResponsePayload<"ssh.remote_db.prepare.response">> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.remote_db.prepare.response">({
+      message: { type: "ssh.remote_db.prepare.request", ...params },
+    });
+  }
+
+  async sshRemoteK8sImport(
+    params: SshModuleParams<"ssh.remote_k8s.import.request">,
+  ): Promise<CorrelatedResponsePayload<"ssh.remote_k8s.import.response">> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.remote_k8s.import.response">({
+      message: { type: "ssh.remote_k8s.import.request", ...params },
+    });
+  }
+
+  async sshDockerDetach(
+    params: SshModuleParams<"ssh.docker.detach.request">,
+  ): Promise<CorrelatedResponsePayload<"ssh.docker.detach.response">> {
+    return this.sendNamespacedCorrelatedSessionRequest<"ssh.docker.detach.response">({
+      message: { type: "ssh.docker.detach.request", ...params },
     });
   }
 

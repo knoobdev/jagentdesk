@@ -204,6 +204,20 @@ import { SshRequestSchemas, SshResponseSchemas, SshPushSchemas } from "./ssh/rpc
 import { SftpInboundSchemas, SftpOutboundSchemas } from "./ssh/sftp-schemas.js";
 import { ForwardingInboundSchemas, ForwardingOutboundSchemas } from "./ssh/forwarding-schemas.js";
 import { SnippetsInboundSchemas, SnippetsOutboundSchemas } from "./ssh/snippets-schemas.js";
+import { LogsImportInboundSchemas, LogsImportOutboundSchemas } from "./ssh/logs-import-schemas.js";
+import {
+  SshEnvironmentInboundSchemas,
+  SshEnvironmentOutboundSchemas,
+} from "./ssh/environment-schemas.js";
+import {
+  SshRemoteDockerInboundSchemas,
+  SshRemoteDockerOutboundSchemas,
+} from "./ssh/remote-docker-schemas.js";
+import { SshRemoteDbInboundSchemas, SshRemoteDbOutboundSchemas } from "./ssh/remote-db-schemas.js";
+import {
+  SshRemoteK8sInboundSchemas,
+  SshRemoteK8sOutboundSchemas,
+} from "./ssh/remote-k8s-schemas.js";
 import {
   ExportHostDataRequestMessageSchema,
   ExportHostDataResponseMessageSchema,
@@ -4006,6 +4020,11 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ...SftpInboundSchemas,
   ...ForwardingInboundSchemas,
   ...SnippetsInboundSchemas,
+  ...LogsImportInboundSchemas,
+  ...SshEnvironmentInboundSchemas,
+  ...SshRemoteDockerInboundSchemas,
+  ...SshRemoteDbInboundSchemas,
+  ...SshRemoteK8sInboundSchemas,
   ...DockerRequestSchemas,
   ...SimulatorRequestSchemas,
   ...ProxyRequestSchemas,
@@ -7791,6 +7810,11 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ...SftpOutboundSchemas,
   ...ForwardingOutboundSchemas,
   ...SnippetsOutboundSchemas,
+  ...LogsImportOutboundSchemas,
+  ...SshEnvironmentOutboundSchemas,
+  ...SshRemoteDockerOutboundSchemas,
+  ...SshRemoteDbOutboundSchemas,
+  ...SshRemoteK8sOutboundSchemas,
   ...DockerResponseSchemas,
   ...DockerPushSchemas,
   ...SimulatorResponseSchemas,

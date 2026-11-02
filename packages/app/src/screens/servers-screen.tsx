@@ -37,6 +37,7 @@ import { ServerFormSheet, type ServerFormTarget } from "@/ssh/ui/server-form-she
 import { ServersListTab, type ServerListActions } from "@/ssh/ui/servers-list";
 import { SshTerminalView, type SshConnectionErrorDetails } from "@/ssh/ui/ssh-terminal-view";
 import { sshStyles as styles } from "@/ssh/ui/styles";
+import { ImportServersSheet, ServerModulesBar } from "@/ssh/ui/server-surfaces";
 import {
   ForwardingSection,
   ServerSftpSection,
@@ -431,6 +432,7 @@ export function ServersScreen() {
         snippetsApi={snippetsApi}
         onOpenWorkspace={setWorkspacePlan}
         terminalId={activeSession.terminalId}
+        keys={data.keys}
         live={liveByServerId[terminalServer.id]}
         terminalState={stateByTerminalId[activeSession.terminalId]}
         tabStatus={tabStatuses[activeSession.terminalId]}
@@ -546,7 +548,9 @@ function ServersHome({
     (tag: string) => setSelectedTags((prev) => toggleTagIn(prev, tag)),
     [],
   );
+  const [importOpen, setImportOpen] = useState(false);
   const closeSheets = useCallback(() => {
+    setImportOpen(false);
     setServerForm(null);
     setGroupForm(null);
     setIdentityForm(null);
@@ -558,9 +562,16 @@ function ServersHome({
   }, [closeSheets, refresh]);
   const handleAddGroup = useCallback(() => setGroupForm({ mode: "create", group: null }), []);
   const handleAddServer = useCallback(() => setServerForm({ mode: "create", server: null }), []);
+  const handleImport = useCallback(() => setImportOpen(true), []);
   const headerActions = useMemo(
-    () => <ServersHeaderActions onAddGroup={handleAddGroup} onAddServer={handleAddServer} />,
-    [handleAddGroup, handleAddServer],
+    () => (
+      <ServersHeaderActions
+        onAddGroup={handleAddGroup}
+        onAddServer={handleAddServer}
+        onImport={handleImport}
+      />
+    ),
+    [handleAddGroup, handleAddServer, handleImport],
   );
 
   return (
@@ -702,6 +713,9 @@ function ServersHome({
           onSaved={handleSaved}
         />
       ) : null}
+      {importOpen ? (
+        <ImportServersSheet client={client} onClose={closeSheets} onImported={refresh} />
+      ) : null}
       {keySheet ? (
         <KeyFormSheet client={client} mode={keySheet} onClose={closeSheets} onSaved={handleSaved} />
       ) : null}
@@ -712,12 +726,17 @@ function ServersHome({
 function ServersHeaderActions({
   onAddGroup,
   onAddServer,
+  onImport,
 }: {
   onAddGroup: () => void;
   onAddServer: () => void;
+  onImport: () => void;
 }) {
   return (
     <>
+      <Button size="sm" variant="outline" onPress={onImport} testID="servers-import">
+        Import
+      </Button>
       <Button
         size="sm"
         variant="outline"
@@ -744,6 +763,7 @@ function SshTerminalScreen({
   snippetsApi,
   onOpenWorkspace,
   terminalId,
+  keys,
   live,
   terminalState,
   tabStatus,
@@ -763,6 +783,7 @@ function SshTerminalScreen({
   snippetsApi: SnippetsApi | null;
   onOpenWorkspace: (plan: SnippetWorkspacePlan) => void;
   terminalId: string;
+  keys: SshKey[];
   live: SshServerLiveState | undefined;
   terminalState: Parameters<typeof SshTerminalView>[0]["terminalState"];
   tabStatus: SshTabStatusState | undefined;
@@ -868,8 +889,21 @@ function SshTerminalScreen({
       }
     })();
   }, [client, terminalId]);
+  const overview = useMemo(
+    () => (
+      <ServerModulesBar
+        client={client}
+        hostServerId={hostServerId}
+        server={server}
+        keys={keys}
+        connected={terminalState?.state === "connected"}
+      />
+    ),
+    [client, hostServerId, keys, server, terminalState?.state],
+  );
   return (
     <SshTerminalView
+      overview={overview}
       actionError={actionError}
       dotTone={sshTabDotTone(tabStatus)}
       onTypePassword={handleTypePassword}
