@@ -317,6 +317,7 @@ interface ExplorerRequestState {
 }
 
 export interface AgentFileExplorerState {
+  listingGeneration: number;
   directories: Map<string, ExplorerDirectory>;
   files: Map<string, ExplorerFile>;
   isLoading: boolean;
