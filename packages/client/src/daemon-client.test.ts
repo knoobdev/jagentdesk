@@ -294,6 +294,45 @@ test("advertises consumer-provided browser automation capabilities", async () =>
   });
 });
 
+test("dockerList targets an SSH server's Docker when given serverId", async () => {
+  const mock = createMockTransport();
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "docker_list_server_unit_test",
+    transportFactory: () => mock.transport,
+    reconnect: { enabled: false },
+  });
+  clients.push(client);
+  const connectPromise = client.connect();
+  mock.triggerOpen();
+  await connectPromise;
+
+  const remote = client.dockerList({ serverId: "srv_docker", requestId: "req_remote" });
+  const local = client.dockerList({ requestId: "req_local" });
+  const sent = mock.sent.map((frame) => JSON.parse(assertStr(frame)).message);
+  expect(sent).toEqual([
+    { type: "docker/list", serverId: "srv_docker", requestId: "req_remote" },
+    { type: "docker/list", requestId: "req_local" },
+  ]);
+
+  for (const requestId of ["req_remote", "req_local"]) {
+    mock.triggerMessage(
+      wrapSessionMessage({
+        type: "docker/list/response",
+        payload: { requestId, error: null, available: true, containers: [], images: [] },
+      }),
+    );
+  }
+  await expect(remote).resolves.toEqual({
+    requestId: "req_remote",
+    error: null,
+    available: true,
+    containers: [],
+    images: [],
+  });
+  await expect(local).resolves.toMatchObject({ requestId: "req_local", available: true });
+});
+
 test("Hub management requires daemon support before dispatching requests", async () => {
   const mock = createMockTransport();
   const client = new DaemonClient({
