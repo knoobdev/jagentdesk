@@ -3,7 +3,7 @@ import { connectTestClient } from "../environment/test-sshd.js";
 
 // Administration of the test sshd container (see environment/test-sshd.ts), done from outside
 // the SSH session: reloading sshd drops every live session, including the one asking for it.
-const CONTAINER = "jad-sshd-envdocker";
+const CONTAINER = process.env.JAD_ENVDOCKER_SSHD_NAME ?? "jad-sshd-envdocker";
 const SSHD_CONFIG = "/config/sshd/sshd_config";
 
 export async function asRoot(command: string): Promise<string> {

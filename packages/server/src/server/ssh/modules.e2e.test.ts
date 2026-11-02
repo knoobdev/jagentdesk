@@ -10,11 +10,10 @@ import { SshService } from "./ssh-service.js";
 import net from "node:net";
 
 // S1's real SshService with the S6–S8 modules wired as bootstrap does, against a real sshd whose
-// /var/run/docker.sock is the host's Docker socket (read-only use here: `docker ps`):
-//   docker run -d --name jad-sshd-wire -p 2237:2222 -v /var/run/docker.sock:/var/run/docker.sock \
-//     -e PASSWORD_ACCESS=true -e USER_NAME=jad -e USER_PASSWORD=jadtest \
-//     lscr.io/linuxserver/openssh-server
-//   docker exec jad-sshd-wire sh -c "addgroup jad root; s6-svc -r /run/service/svc-openssh-server"
+// /var/run/docker.sock is the host's Docker socket (read-only use here: `docker ps`), with `jad`
+// in the socket's group, the docker CLI installed and TCP forwarding on. Start it with
+//   bash src/server/ssh/test-support/start-docker-test-sshd.sh   (jad-sshd-wire, 127.0.0.1:2237)
+// then run with JAD_SSH_DOCKER_E2E=1 (JAD_WIRE_SSHD_PORT for another port).
 const PORT = Number(process.env.JAD_WIRE_SSHD_PORT ?? 2237);
 
 // Opt-in: needs the Docker-enabled test sshd (jad-sshd-wire) and JAD_SSH_DOCKER_E2E=1.

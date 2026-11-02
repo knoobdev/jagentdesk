@@ -181,9 +181,11 @@ describe.runIf(process.env.JAD_SSH_E2E === "1")("ForwardingService against a rea
     expect(await socksBanner(port)).toMatch(/^SSH-2\.0-OpenSSH/);
 
     const httpPort = 30000 + (process.pid % 20000);
+    // BusyBox nc (alpine images) listens with `-l -p PORT`; netcat-openbsd takes `-l HOST PORT`.
+    const listen = `if nc -h 2>&1 | grep -q -- '-l -p PORT'; then nc -l -p ${httpPort}; else nc -l 127.0.0.1 ${httpPort}; fi`;
     await exec(
       shell,
-      `nohup sh -c "printf 'HTTP/1.0 200 OK\\r\\nContent-Length: 13\\r\\n\\r\\nfrom the box\\n' | nc -l 127.0.0.1 ${httpPort}" >/dev/null 2>&1 &`,
+      `nohup sh -c "printf 'HTTP/1.0 200 OK\\r\\nContent-Length: 13\\r\\n\\r\\nfrom the box\\n' | { ${listen}; }" >/dev/null 2>&1 &`,
     );
     await new Promise((resolve) => setTimeout(resolve, 300));
     const { stdout } = await execFileAsync("curl", [

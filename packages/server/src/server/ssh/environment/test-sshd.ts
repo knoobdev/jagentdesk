@@ -13,7 +13,7 @@ const { Client: Ssh2Client } = ssh2;
 //     lscr.io/linuxserver/openssh-server
 export const TEST_SSHD = {
   host: "127.0.0.1",
-  port: 2236,
+  port: Number(process.env.JAD_ENVDOCKER_SSHD_PORT ?? 2236),
   username: "jad",
   password: "jadtest",
 } as const;
