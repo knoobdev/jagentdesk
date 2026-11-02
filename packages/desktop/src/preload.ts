@@ -85,7 +85,8 @@ contextBridge.exposeInMainWorld("jagentdeskDesktop", {
     openUrl: (url: string) => ipcRenderer.invoke("jagentdesk:opener:openUrl", url),
   },
   editor: {
-    listTargets: () => ipcRenderer.invoke("jagentdesk:editor:listTargets"),
+    listTargets: (input?: { workspacePath?: string }) =>
+      ipcRenderer.invoke("jagentdesk:editor:listTargets", input),
     openTarget: (input: {
       editorId: string;
       workspacePath: string;
