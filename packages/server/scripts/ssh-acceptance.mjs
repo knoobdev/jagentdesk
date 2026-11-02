@@ -33,6 +33,8 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { WebSocket } from "ws";
 import { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
+import { Client as McpClient } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
 const execFileAsync = promisify(execFile);
 const args = process.argv.slice(2);
@@ -40,7 +42,10 @@ const KEEP = args.includes("--keep");
 const DAEMON_PORT = Number(args[args.indexOf("--port") + 1] || 47911);
 const SERVER_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const HOME = "/tmp/jad-ssh-verify-home";
-const SHIM_DIR = "/tmp/jad-ssh-verify-shim";
+// The daemon's HOME: its ~/.ssh holds the ssh_config imported in criterion 13, so the real
+// user's ~/.ssh is never read by the importer.
+const FAKE_HOME = "/tmp/jad-ssh-verify-fakehome";
+const AGENT_CWD = "/tmp/jad-ssh-verify-agent";
 const REPORT = "/tmp/jad-ssh-acceptance-report.md";
 const TRANSFER_DIR = "/tmp/jad-ssh-verify-transfer";
 const DAEMON_LOG = "/tmp/jad-ssh-verify-daemon.log";
@@ -48,7 +53,32 @@ const PASSWORD = "jadtest";
 const PG_PASSWORD = "jadverify";
 const KEY_PASSPHRASE = `verify-pass-${randomBytes(4).toString("hex")}`;
 const FORWARD_PORT = 15432;
+// Criterion 13: a ProxyJump chain (one hop is another imported Host, one is inline), a
+// ProxyCommand host and a wildcard block. Addresses point at the jad-verify containers.
+const IMPORT_SSH_CONFIG = `# jad-verify import test (spec 25.16 #13)
+Host verify-import-hop1
+  HostName 127.0.0.1
+  Port 2301
+  User jad
+
+Host verify-import-inner
+  HostName jad-verify-inner
+  Port 2222
+  User jad
+  ProxyJump verify-import-hop1,jad@jad-verify-hop2:2222
+
+Host verify-import-proxycmd
+  HostName 127.0.0.1
+  Port 2303
+  User jad
+  ProxyCommand nc %h %p
+
+Host *
+  ServerAliveInterval 30
+`;
 const IMAGE = "lscr.io/linuxserver/openssh-server";
+const SSH_SERVER_AGENT_LABEL = "jagentdesk.ssh.server.id";
+const SECRET_NEEDLES = () => [PASSWORD, KEY_PASSPHRASE, "PRIVATE KEY", PG_PASSWORD];
 
 const C = {
   target: "jad-verify-target",
@@ -58,6 +88,7 @@ const C = {
   inner: "jad-verify-inner",
   docker: "jad-verify-docker",
   nodocker: "jad-verify-nodocker",
+  restartme: "jad-verify-restartme",
 };
 const NET = { a: "jad-verify-net-a", jump1: "jad-verify-jump1", jump2: "jad-verify-jump2" };
 
@@ -125,6 +156,11 @@ function fence(text) {
 // ── report ──
 
 const results = [];
+const findings = [
+  "Snippet run raced a just-closed SSH tab: in one run, `ssh.snippet.run` started immediately after `kill_terminal` on the same server and that target failed with `connection_lost` (The connection closed before the exit) although its output had arrived. The acquired lease likely pointed at a connection that was closing. The script now waits 2 s after the kill; the race itself is not fixed.",
+  "`DaemonClient.dockerList()` (and the other docker* helpers without a serverId option) cannot target an SSH server although the wire schema accepts `serverId`; criterion 11 sent `docker/list` with `serverId` through the client's correlated-request path.",
+  'Criterion 9\'s "workspace with 3 panes" is app UI (`planSnippetWorkspace` + split view) and was not rendered here; the daemon side (one exec result per server) is what was verified.',
+];
 function criterion(id, title) {
   const entry = { id, title, status: "FAIL", steps: [], observed: [] };
   results.push(entry);
@@ -200,9 +236,23 @@ async function startTopology() {
   sshd(C.inner, `--network ${NET.jump2}`);
   sshd(C.docker, "-p 2302:2222 -v /var/run/docker.sock:/var/run/docker.sock");
   sshd(C.nodocker, "-p 2303:2222");
+  sh(`docker run -d --name ${C.restartme} alpine:3.20 sleep 86400 >/dev/null`);
   for (const name of [C.target, C.hop1, C.hop2, C.inner, C.docker, C.nodocker])
     await waitForSshd(name);
-  for (const name of [C.target, C.hop1, C.hop2]) enableForwarding(name);
+  // The mounted Docker socket is root:root 0660; group root gives `jad` the access a user in
+  // group docker has on a real server.
+  // sshd runs as jad (s6-setuidgid) and passes its own groups to sessions; enableForwarding
+  // below restarts it (the image also ships AllowTcpForwarding no, which blocks the
+  // streamlocal channel to the Docker socket).
+  dexec(C.docker, "addgroup jad root");
+  for (const name of [C.target, C.hop1, C.hop2, C.docker]) enableForwarding(name);
+  await sleep(3000);
+  await waitFor(
+    "docker sshd banner",
+    () => shQuiet("nc -w 2 127.0.0.1 2302 < /dev/null | head -c 4") === "SSH-",
+    60_000,
+    1000,
+  );
   await waitFor(
     "postgres ready",
     () => !shQuiet(`docker exec ${C.db} pg_isready -U postgres`).startsWith("ERR"),
@@ -214,25 +264,6 @@ async function startTopology() {
 
 // ── daemon ──
 
-// The daemon as built crash-loops: `import { Client, utils } from "ssh2"` fails under Node's ESM
-// loader because ssh2 is CommonJS (see report, criterion 0). This loader hook serves a re-export
-// wrapper for `ssh2` so the rest of the run can still produce evidence. No repository file changes.
-function writeShim() {
-  mkdirSync(SHIM_DIR, { recursive: true });
-  writeFileSync(
-    path.join(SHIM_DIR, "register.mjs"),
-    `import { register } from "node:module";\nregister("./hooks.mjs", import.meta.url);\n`,
-  );
-  writeFileSync(
-    path.join(SHIM_DIR, "hooks.mjs"),
-    `const wrapper = new URL("./ssh2-wrapper.mjs", import.meta.url).href;\nexport async function resolve(specifier, context, next) {\n  if (specifier === "ssh2" && context.parentURL !== wrapper) return { url: wrapper, shortCircuit: true };\n  return next(specifier, context);\n}\n`,
-  );
-  writeFileSync(
-    path.join(SHIM_DIR, "ssh2-wrapper.mjs"),
-    `import { createRequire } from "node:module";\nconst ssh2 = createRequire(${JSON.stringify(path.join(SERVER_DIR, "package.json"))})("ssh2");\nexport const { Client, Server, utils, AgentProtocol, BaseAgent, createAgent, CygwinAgent, OpenSSHAgent, PageantAgent, HTTPAgent, HTTPSAgent } = ssh2;\nexport default ssh2;\n`,
-  );
-}
-
 function portListening(port) {
   return (
     !shQuiet(`lsof -iTCP:${port} -sTCP:LISTEN -t`).startsWith("ERR") &&
@@ -240,7 +271,7 @@ function portListening(port) {
   );
 }
 
-async function startDaemon({ withShim }) {
+async function startDaemon() {
   if (DAEMON_PORT === 6767) throw new Error("refusing to use port 6767");
   if (portListening(DAEMON_PORT)) throw new Error(`port ${DAEMON_PORT} is busy`);
   const env = {
@@ -248,7 +279,7 @@ async function startDaemon({ withShim }) {
     JAGENTDESK_HOME: HOME,
     JAGENTDESK_LISTEN: `127.0.0.1:${DAEMON_PORT}`,
     JAGENTDESK_TAILSCALE_ENABLED: "0",
-    ...(withShim ? { NODE_OPTIONS: `--import ${path.join(SHIM_DIR, "register.mjs")}` } : {}),
+    HOME: FAKE_HOME,
   };
   const child = spawn(
     process.execPath,
@@ -418,7 +449,13 @@ async function main() {
   const startedAt = new Date();
   const head = sh(`git -C ${SERVER_DIR} rev-parse --short HEAD`);
   const branchInfo = shQuiet(`git -C ${SERVER_DIR} log -1 --format='%h %s'`);
+  rmSync(FAKE_HOME, { recursive: true, force: true });
+  mkdirSync(path.join(FAKE_HOME, ".ssh"), { recursive: true, mode: 0o700 });
+  writeFileSync(path.join(FAKE_HOME, ".ssh/config"), IMPORT_SSH_CONFIG, { mode: 0o600 });
+  rmSync(AGENT_CWD, { recursive: true, force: true });
+  mkdirSync(AGENT_CWD, { recursive: true });
   const sshDirBefore = snapshotDir(path.join(os.homedir(), ".ssh"));
+  const fakeSshDirBefore = snapshotDir(path.join(FAKE_HOME, ".ssh"));
   rmSync(HOME, { recursive: true, force: true });
   mkdirSync(HOME, { recursive: true });
   rmSync(TRANSFER_DIR, { recursive: true, force: true });
@@ -430,44 +467,113 @@ async function main() {
     `docker ps --filter name=jad-verify- --format '{{.Names}}\t{{.Ports}}\t{{.Networks}}'`,
   );
 
-  // Criterion 0: the daemon as built must start.
+  // Criterion 0: the daemon as built must start, with no loader hooks or other workarounds.
   let daemon;
   await run("0", "Daemon built from this checkout starts (precondition)", async (c) => {
     c.step(
-      `node dist/scripts/supervisor-entrypoint.js with JAGENTDESK_HOME=${HOME}, JAGENTDESK_LISTEN=127.0.0.1:${DAEMON_PORT}, JAGENTDESK_TAILSCALE_ENABLED=0, no shim`,
+      `node dist/scripts/supervisor-entrypoint.js with JAGENTDESK_HOME=${HOME}, JAGENTDESK_LISTEN=127.0.0.1:${DAEMON_PORT}, JAGENTDESK_TAILSCALE_ENABLED=0, HOME=${FAKE_HOME}; no NODE_OPTIONS`,
     );
-    const plain = await startDaemon({ withShim: false }).catch((error) => ({ error }));
+    daemon = await startDaemon();
     await sleep(4000);
-    const log = plain.log ? plain.log() : String(plain.error);
+    const log = daemon.log();
     const crash = log
       .split("\n")
-      .filter((line) => /SyntaxError|Named export/.test(line))
-      .slice(0, 2)
+      .filter((line) => /SyntaxError|Named export|Worker crashed/.test(line))
+      .slice(0, 3)
       .join("\n");
-    const stillUp = plain.child
-      ? plain.child.exitCode === null && portListening(DAEMON_PORT)
-      : false;
-    c.see("daemon process after 4 s", stillUp ? "listening" : "not listening / crashed");
-    if (crash) c.see("worker crash", crash);
+    const stillUp = daemon.child.exitCode === null && portListening(DAEMON_PORT);
     c.see(
-      "files importing named `utils` from ssh2 (dist)",
-      shQuiet(`grep -rln 'import {[^}]*utils[^}]*} from "ssh2"' ${SERVER_DIR}/dist/server`),
+      "daemon process after 4 s",
+      stillUp ? `listening on 127.0.0.1:${DAEMON_PORT}` : "not listening / crashed",
     );
-    if (plain.child) await stopDaemon(plain);
-    rmSync(HOME, { recursive: true, force: true });
-    mkdirSync(HOME, { recursive: true });
-    c.set(stillUp && !crash ? "PASS" : "FAIL");
-    c.step(
-      "Evidence below was collected with a Node loader hook (NODE_OPTIONS=--import) that serves a CommonJS re-export wrapper for `ssh2`; no repository file was changed.",
-    );
+    c.see("crash lines in the daemon output", crash || "none");
+    c.see("NODE_OPTIONS passed to the daemon", process.env.NODE_OPTIONS ?? "(unset)");
+    if (!stillUp || crash) throw new Error("daemon did not start");
+    c.set("PASS");
   });
-  writeShim();
-  daemon = await startDaemon({ withShim: true });
   writeFileSync(DAEMON_LOG, "");
 
   const desktop = await new Client("desktop", "browser").connect();
   const phone = await new Client("phone", "mobile").connect();
   const ids = {};
+
+  await run(
+    "13",
+    "Import ~/.ssh/config with ProxyJump and ProxyCommand: jump chain set, ProxyCommand reported skipped",
+    async (c) => {
+      c.step(`the daemon's HOME is ${FAKE_HOME}; its ~/.ssh/config:`);
+      c.see("~/.ssh/config", IMPORT_SSH_CONFIG);
+      c.step("ssh.import.preview {source ssh_directory}");
+      const { preview } = await desktop.module("ssh.import.preview.request", {
+        source: { kind: "ssh_directory" },
+      });
+      c.see(
+        "preview: servers",
+        preview.servers.map((d) => ({
+          alias: d.alias,
+          address: d.address,
+          port: d.port,
+          username: d.username,
+          jumpChain: d.jumpChain,
+          status: d.status,
+        })),
+      );
+      c.see("preview: issues", preview.issues);
+      c.step("ssh.import.apply {source ssh_directory, importKnownHosts false, keyPaths []}");
+      const { result } = await desktop.module("ssh.import.apply.request", {
+        source: { kind: "ssh_directory" },
+        importKnownHosts: false,
+        keyPaths: [],
+      });
+      c.see("apply result", {
+        servers: result.servers,
+        issues: result.issues.map(
+          (i) => `${i.location.file}:${i.location.line} ${i.severity} ${i.code}: ${i.message}`,
+        ),
+      });
+      const { servers } = await desktop.daemon.sshServersList();
+      const byId = new Map(servers.map((s) => [s.id, s]));
+      const inner = servers.find((s) => s.label === "verify-import-inner");
+      const chain = (inner?.jumpChain ?? []).map((id) => {
+        const hop = byId.get(id);
+        return hop ? `${hop.label} (${hop.username ?? ""}@${hop.address}:${hop.port ?? 22})` : id;
+      });
+      c.see("imported verify-import-inner", {
+        address: inner?.address,
+        port: inner?.port,
+        username: inner?.username,
+        jumpChain: chain,
+      });
+      const proxyCmd = servers.find((s) => s.label === "verify-import-proxycmd");
+      c.see("imported verify-import-proxycmd (no proxy field)", {
+        address: proxyCmd?.address,
+        port: proxyCmd?.port,
+        proxy: proxyCmd?.proxy ?? null,
+      });
+      const proxySkipped = result.issues.some(
+        (i) => i.code === "proxy_command" && i.severity === "skipped",
+      );
+      const hop1 = servers.find((s) => s.label === "verify-import-hop1");
+      c.step("apply the same config again → everything is a duplicate");
+      const { result: again } = await desktop.module("ssh.import.apply.request", {
+        source: { kind: "ssh_directory" },
+        importKnownHosts: false,
+        keyPaths: [],
+      });
+      c.see("second apply: servers", again.servers);
+      c.set(
+        inner &&
+          inner.jumpChain?.length === 2 &&
+          inner.jumpChain[0] === hop1?.id &&
+          byId.get(inner.jumpChain[1])?.address === C.hop2 &&
+          proxySkipped &&
+          proxyCmd &&
+          !proxyCmd.proxy
+          ? "PASS"
+          : "FAIL",
+      );
+    },
+  );
 
   await run(
     "1",
@@ -510,12 +616,15 @@ async function main() {
       c.see("ssh.servers.get keys", keys.join(", "));
       const serversJson = readFileSync(path.join(HOME, "ssh/servers.json"), "utf8");
       c.see("servers.json contains the password string", String(serversJson.includes(PASSWORD)));
+      // The daemon runs with HOME=FAKE_HOME; check that ~/.ssh and the real user's ~/.ssh.
       const sshDirAfter = snapshotDir(path.join(os.homedir(), ".ssh"));
+      const fakeSshDirAfter = snapshotDir(path.join(FAKE_HOME, ".ssh"));
       c.see(
-        "daemon ~/.ssh listing unchanged (name size mtime sha256[0:16])",
-        sshDirAfter === sshDirBefore
-          ? "identical before/after"
-          : `CHANGED\nbefore:\n${sshDirBefore}\nafter:\n${sshDirAfter}`,
+        "~/.ssh listings (name size mtime sha256[0:16]) before/after",
+        [
+          `daemon HOME ${FAKE_HOME}/.ssh: ${fakeSshDirAfter === fakeSshDirBefore ? "identical" : `CHANGED\n${fakeSshDirBefore}\n→\n${fakeSshDirAfter}`}`,
+          `real ${path.join(os.homedir(), ".ssh")}: ${sshDirAfter === sshDirBefore ? "identical" : "CHANGED"}`,
+        ].join("\n"),
       );
       const noPassword =
         !keys.some((k) => /password/i.test(k) && k !== "hasPassword") &&
@@ -524,7 +633,8 @@ async function main() {
         /jad\s*$/m.test(screen) &&
           noPassword &&
           !serversJson.includes(PASSWORD) &&
-          sshDirAfter === sshDirBefore
+          sshDirAfter === sshDirBefore &&
+          fakeSshDirAfter === fakeSshDirBefore
           ? "PASS"
           : "FAIL",
       );
@@ -579,7 +689,7 @@ async function main() {
 
   await run(
     "3",
-    "Generate Ed25519 with passphrase, install on server, connect with the key; keys.json has no private key",
+    "Generate Ed25519 with passphrase, install_to_server, connect with the key; keys.json has no private key",
     async (c) => {
       c.step("ssh.keys.generate {keyType ed25519, passphrase}");
       const gen = await desktop.daemon.sshKeysGenerate({
@@ -590,83 +700,59 @@ async function main() {
       if (gen.error) throw new Error(gen.error);
       c.see("generated key (wire)", gen.key);
       const keysJson = readFileSync(path.join(HOME, "ssh/keys.json"), "utf8");
-      c.see(
-        "keys.json contains 'PRIVATE KEY' / passphrase",
-        `${keysJson.includes("PRIVATE KEY")} / ${keysJson.includes(KEY_PASSPHRASE)}`,
-      );
       const secrets = readFileSync(path.join(HOME, "ssh/secrets.json"), "utf8");
       c.see(
-        "ssh/secrets.json (encrypted store) contains plaintext 'PRIVATE KEY'",
-        String(secrets.includes("PRIVATE KEY")),
+        "keys.json contains 'PRIVATE KEY' / the passphrase; secrets.json contains plaintext 'PRIVATE KEY'",
+        `${keysJson.includes("PRIVATE KEY")} / ${keysJson.includes(KEY_PASSPHRASE)}; ${secrets.includes("PRIVATE KEY")}`,
       );
-      c.step("ssh.keys.install_to_server.request (spec 25.12)");
-      let installWired = false;
-      try {
-        await desktop.daemon.sshModuleRequest({
-          type: "ssh.keys.install_to_server.request",
-          keyId: gen.key.id,
-          serverId: ids.target,
-        });
-        installWired = true;
-      } catch (error) {
-        c.see(
-          "ssh.keys.install_to_server",
-          `not available: ${error.message.split("\n")[0].slice(0, 200)}`,
-        );
-      }
-      c.step(
-        "fallback through the daemon: append the public key to ~/.ssh/authorized_keys over ssh.sftp.read/write on `target`",
-      );
-      const endpoint = { kind: "server", serverId: ids.target };
-      await desktop
-        .module("ssh.sftp.mkdir.request", { endpoint, path: "/config/.ssh" })
-        .catch(() => undefined);
-      let existing = "";
-      try {
-        existing =
-          (
-            await desktop.module("ssh.sftp.read.request", {
-              endpoint,
-              path: "/config/.ssh/authorized_keys",
-            })
-          ).file?.content ?? "";
-      } catch {
-        existing = "";
-      }
-      const content = `${existing}${existing && !existing.endsWith("\n") ? "\n" : ""}${gen.key.publicKey.trim()}\n`;
-      const write = await desktop.module("ssh.sftp.write.request", {
-        endpoint,
-        path: "/config/.ssh/authorized_keys",
-        content,
+      c.step("ssh.keys.install_to_server {keyId, serverId target} twice (idempotent)");
+      const first = await desktop.module("ssh.keys.install_to_server.request", {
+        keyId: gen.key.id,
+        serverId: ids.target,
       });
-      c.see("ssh.sftp.write result", write.result ?? write);
-      await desktop.module("ssh.sftp.chmod.request", {
-        endpoint,
-        path: "/config/.ssh/authorized_keys",
-        mode: "600",
+      const second = await desktop.module("ssh.keys.install_to_server.request", {
+        keyId: gen.key.id,
+        serverId: ids.target,
       });
+      c.see("install_to_server outcomes", {
+        first: first.outcome,
+        second: second.outcome,
+        path: first.path,
+      });
+      const blob = gen.key.publicKey.trim().split(/\s+/)[1];
       c.see(
-        "authorized_keys on target",
+        "on target: stat ~/.ssh ~/.ssh/authorized_keys; lines with the key",
         dexec(
           C.target,
-          "ls -la /config/.ssh/authorized_keys && grep -c verify-ed25519 /config/.ssh/authorized_keys || grep -c ssh-ed25519 /config/.ssh/authorized_keys",
+          `stat -c '%a %U %n' /config/.ssh /config/.ssh/authorized_keys; grep -c '${blob}' /config/.ssh/authorized_keys`,
         ),
       );
-      c.step(
-        "identity {keyId} + server {identityId, authMethods [key]} without a password; connect",
+      const perms = dexec(C.target, "stat -c '%a' /config/.ssh /config/.ssh/authorized_keys").split(
+        /\s+/,
       );
-      const identity = await desktop.daemon.sshIdentitiesSave({
-        identity: { id: "", label: "verify-key-identity", username: "jad", keyId: gen.key.id },
+      const keyLines = Number(dexec(C.target, `grep -c '${blob}' /config/.ssh/authorized_keys`));
+      const target = (await desktop.daemon.sshServersGet({ id: ids.target })).server;
+      c.see("target after install (identityId, authMethods)", {
+        identityId: target.identityId,
+        authMethods: target.authMethods,
       });
-      if (identity.error) throw new Error(identity.error);
+      c.step(
+        "fresh connection with the key only: server `target-key` {identityId from the install, authMethods [key]}, no password",
+      );
       const keyServer = await desktop.saveServer({
         label: "target-key",
         address: "127.0.0.1",
         port: 2300,
         username: "jad",
-        identityId: identity.identity.id,
+        identityId: target.identityId,
         authMethods: ["key"],
       });
+      const loginsBefore =
+        Number(
+          shQuiet(
+            `docker exec ${C.target} sh -c "grep -c 'Accepted publickey' /config/logs/openssh/current"`,
+          ),
+        ) || 0;
       const tab = await desktop.open(keyServer.id);
       if (tab.error) throw new Error(`key connect failed: ${JSON.stringify(tab.error)}`);
       await desktop.attach(tab.terminalId);
@@ -679,25 +765,36 @@ async function main() {
           .filter((l) => l.includes("KEYAUTH"))
           .join("\n"),
       );
+      // This image's sshd logs to /config/logs/openssh/current (s6-log), not to docker logs.
+      const loginLines = shQuiet(
+        `docker exec ${C.target} sh -c "grep 'Accepted publickey' /config/logs/openssh/current | tail -1"`,
+      );
+      const loginsAfter =
+        Number(
+          shQuiet(
+            `docker exec ${C.target} sh -c "grep -c 'Accepted publickey' /config/logs/openssh/current"`,
+          ),
+        ) || 0;
       c.see(
-        "sshd log line for this login",
-        shQuiet(`docker logs ${C.target} 2>&1 | grep -i 'Accepted publickey' | tail -1`),
+        `sshd: 'Accepted publickey' lines ${loginsBefore} → ${loginsAfter}; latest`,
+        loginLines,
       );
       await desktop.daemon.killTerminal(tab.terminalId).catch(() => undefined);
-      const keyOk =
+      c.set(
         !keysJson.includes("PRIVATE KEY") &&
-        !keysJson.includes(KEY_PASSPHRASE) &&
-        gen.key.hasPassphrase;
-      if (!installWired) c.set(keyOk ? "PARTIAL" : "FAIL");
-      else c.set(keyOk ? "PASS" : "FAIL");
-      c.step(
-        installWired
-          ? "install_to_server used"
-          : "Generate + key auth through the daemon PASS; ssh.keys.install_to_server is NOT-YET-WIRED (logs-import module not in the ssh.* dispatch).",
+          !keysJson.includes(KEY_PASSPHRASE) &&
+          gen.key.hasPassphrase &&
+          first.outcome === "installed" &&
+          second.outcome === "already_present" &&
+          perms[0] === "700" &&
+          perms[1] === "600" &&
+          keyLines === 1 &&
+          loginsAfter > loginsBefore
+          ? "PASS"
+          : "FAIL",
       );
     },
   );
-
   await run(
     "4",
     "Close the app while `top` runs, reopen: tab still listed, screen restored, session alive",
@@ -971,16 +1068,14 @@ async function main() {
       for (const s of [hop1, hop2, inner]) desktop.decisions.set(s.id, "accept");
       const before = desktop.prompts.length;
       const tab = await desktop.open(inner.id);
-      const prompts = desktop.prompts
-        .slice(before)
-        .map((p) => ({
-          serverId: p.serverId,
-          address: p.address,
-          port: p.port,
-          hopIndex: p.hopIndex,
-          hopCount: p.hopCount,
-          fingerprintSha256: p.fingerprintSha256,
-        }));
+      const prompts = desktop.prompts.slice(before).map((p) => ({
+        serverId: p.serverId,
+        address: p.address,
+        port: p.port,
+        hopIndex: p.hopIndex,
+        hopCount: p.hopCount,
+        fingerprintSha256: p.fingerprintSha256,
+      }));
       c.see("host-key prompts during the connect", prompts);
       if (tab.error) throw new Error(`connect failed: ${JSON.stringify(tab.error)}`);
       await desktop.attach(tab.terminalId);
@@ -1062,6 +1157,281 @@ async function main() {
       );
       c.set(
         rows.length === 3 && rows.every((r) => r.state === "exited" && r.exitCode === 0 && r.equal)
+          ? "PASS"
+          : "FAIL",
+      );
+    },
+  );
+
+  // Docker-cockpit RPCs take `serverId` on the wire; DaemonClient.dockerList has no such
+  // parameter, so the run sends docker/list through the client's correlated-request path.
+  const dockerRpc = (message, responseType) =>
+    desktop.daemon.sendCorrelatedSessionRequest({ message, responseType });
+  const containerNames = (text) => text.split("\n").filter(Boolean).sort();
+
+  await run(
+    "12",
+    "Server without Docker: environment has no docker; no Docker section",
+    async (c) => {
+      c.step("ssh.environment.detect {serverId nodocker, force true}");
+      const { payload } = await desktop.daemon.sshModuleRequest({
+        type: "ssh.environment.detect.request",
+        serverId: ids.nodocker,
+        force: true,
+      });
+      const env = payload.environment;
+      c.see("environment (os, docker)", {
+        error: payload.error,
+        os: env?.os,
+        docker: env?.docker ?? null,
+      });
+      c.see(
+        "`command -v docker; ls -l /var/run/docker.sock` on nodocker",
+        shQuiet(
+          `docker exec ${C.nodocker} sh -c 'command -v docker || echo no-docker-cli; ls -l /var/run/docker.sock 2>&1'`,
+        ),
+      );
+      c.step("ssh.docker.attach on nodocker (what the Docker section would open)");
+      const { payload: attach } = await desktop.daemon.sshModuleRequest({
+        type: "ssh.docker.attach.request",
+        serverId: ids.nodocker,
+      });
+      c.see("ssh.docker.attach", {
+        dockerHost: attach.dockerHost,
+        errorCode: attach.errorCode,
+        error: attach.error,
+      });
+      c.set(
+        env && env.docker === null && attach.errorCode === "docker_not_found" ? "PASS" : "FAIL",
+      );
+    },
+  );
+
+  await run(
+    "11",
+    "Server with Docker: Docker section lists `docker ps -a` of the server; exec into a container gives its shell",
+    async (c) => {
+      c.step(
+        "ssh.environment.detect {serverId docker, force true} → the server screen shows Docker",
+      );
+      const { payload: det } = await desktop.daemon.sshModuleRequest({
+        type: "ssh.environment.detect.request",
+        serverId: ids.docker,
+        force: true,
+      });
+      c.see("environment.docker", det.environment?.docker ?? null);
+      c.step("ssh.docker.attach {serverId docker}; docker/list {serverId docker}");
+      const { payload: attach } = await desktop.daemon.sshModuleRequest({
+        type: "ssh.docker.attach.request",
+        serverId: ids.docker,
+      });
+      c.see("ssh.docker.attach", {
+        dockerHost: attach.dockerHost,
+        remoteSocketPath: attach.remoteSocketPath,
+        error: attach.error,
+      });
+      let list;
+      let truth;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        list = await dockerRpc(
+          { type: "docker/list", serverId: ids.docker },
+          "docker/list/response",
+        );
+        // The server's Docker is the socket mounted into it (this machine's engine).
+        truth = containerNames(
+          sh(`docker exec ${C.docker} sh -c true; docker ps -a --format '{{.Names}}'`),
+        );
+        if (JSON.stringify(list.containers.map((x) => x.name).sort()) === JSON.stringify(truth))
+          break;
+        await sleep(1000);
+      }
+      const listed = list.containers.map((x) => x.name).sort();
+      c.see(
+        "docker/list (serverId) container count / `docker ps -a` count",
+        `${listed.length} / ${truth.length}`,
+      );
+      c.see("names only in one of the two", {
+        onlyInList: listed.filter((n) => !truth.includes(n)),
+        onlyInDockerPs: truth.filter((n) => !listed.includes(n)),
+      });
+      c.see(
+        "jad-verify-* rows in docker/list",
+        list.containers
+          .filter((x) => x.name.startsWith("jad-verify-"))
+          .map((x) => `${x.name}  ${x.image}  ${x.state}`)
+          .join("\n"),
+      );
+      const viaSocket = containerNames(
+        shQuiet(`docker -H ${attach.dockerHost} ps -a --format '{{.Names}}'`),
+      );
+      c.see("`docker -H <forwarded socket> ps -a` count", String(viaSocket.length));
+      c.step(
+        `docker/exec {serverId docker, container ${C.restartme}}; then a shell over the forwarded socket (the cockpit exec terminal runs \`docker -H <dockerHost> exec -it …\`)`,
+      );
+      const exec = await dockerRpc(
+        {
+          type: "docker/exec",
+          serverId: ids.docker,
+          container: C.restartme,
+          command: "echo IN-CONTAINER $(cat /etc/hostname) pid1=$(cat /proc/1/comm)",
+        },
+        "docker/exec/response",
+      );
+      const containerId = sh(`docker inspect -f '{{.Config.Hostname}}' ${C.restartme}`);
+      c.see("docker/exec output", exec.output ?? exec.error);
+      const shell = shQuiet(
+        `printf 'echo SHELL-IN-$(hostname); exit\\n' | docker -H ${attach.dockerHost} exec -i ${C.restartme} sh`,
+      );
+      c.see("interactive sh over the forwarded socket", shell);
+      c.see(`hostname of ${C.restartme} (docker inspect)`, containerId);
+      await desktop.daemon.sshModuleRequest({
+        type: "ssh.docker.detach.request",
+        serverId: ids.docker,
+      });
+      c.set(
+        det.environment?.docker?.socketAccessible === true &&
+          JSON.stringify(listed) === JSON.stringify(truth) &&
+          String(exec.output ?? "").includes(`IN-CONTAINER ${containerId}`) &&
+          shell.includes(`SHELL-IN-${containerId}`)
+          ? "PASS"
+          : "FAIL",
+      );
+    },
+  );
+
+  await run(
+    "10",
+    "Server chat with Docker: docker_* with serverId lists `docker ps` without approval; restart → permission card → approved → restarted; no secrets in tool output",
+    async (c) => {
+      c.step(
+        `server chat agent: createAgent {provider claude|codex|opencode (first that creates), labels {${SSH_SERVER_AGENT_LABEL}: docker}} with no prompt — no model is called (the daemon's HOME is ${FAKE_HOME}, which holds no provider credentials)`,
+      );
+      let agent = null;
+      const attempts = [];
+      for (const provider of ["claude", "codex", "opencode"]) {
+        try {
+          agent = await desktop.daemon.createAgent({
+            provider,
+            cwd: AGENT_CWD,
+            title: "Server chat · docker (acceptance)",
+            labels: { [SSH_SERVER_AGENT_LABEL]: ids.docker },
+          });
+          attempts.push(`${provider}: created ${agent.id}`);
+          break;
+        } catch (error) {
+          attempts.push(`${provider}: ${error.message.split("\n")[0]}`);
+        }
+      }
+      c.see("createAgent attempts", attempts.join("\n"));
+      if (!agent) throw new Error("no provider could create the server-chat agent");
+      c.see("agent", { id: agent.id, provider: agent.provider, labels: agent.labels });
+      c.step(
+        `tools through the daemon's agent MCP endpoint: POST http://127.0.0.1:${DAEMON_PORT}/mcp/agents?callerAgentId=<agent>`,
+      );
+      const mcp = new McpClient({ name: "jad-ssh-acceptance", version: "1.0.0" });
+      await mcp.connect(
+        new StreamableHTTPClientTransport(
+          new URL(`http://127.0.0.1:${DAEMON_PORT}/mcp/agents?callerAgentId=${agent.id}`),
+        ),
+      );
+      const { tools } = await mcp.listTools();
+      c.see(
+        "ssh_*/docker_* tools in the catalog",
+        tools
+          .map((t) => t.name)
+          .filter((n) => /^(ssh_|docker_)/.test(n))
+          .join(", "),
+      );
+      const outputs = [];
+      const call = async (name, args) => {
+        const result = await mcp.callTool({ name, arguments: args }, undefined, {
+          timeout: 180_000,
+        });
+        const text = (result.content ?? []).map((part) => part.text ?? "").join("\n");
+        outputs.push({ name, text });
+        return { isError: result.isError ?? false, text };
+      };
+      const pending = async () =>
+        (await desktop.daemon.fetchAgent(agent.id))?.agent?.pendingPermissions ?? [];
+
+      c.step("docker_ps {allContainers: true} (no serverId → the chat's server)");
+      const ps = await call("docker_ps", { allContainers: true });
+      const pendingAfterPs = (await pending()).length;
+      const truthIds = sh(`docker ps -a --format '{{.ID}}'`).split("\n").filter(Boolean);
+      const missing = truthIds.filter((id) => !ps.text.includes(id));
+      c.see(
+        "docker_ps result (jad-verify-* lines)",
+        ps.text
+          .split("\n")
+          .filter((l) => l.includes("jad-verify-"))
+          .join("\n"),
+      );
+      c.see("container ids from `docker ps -a` missing from docker_ps", {
+        total: truthIds.length,
+        missing,
+      });
+      c.see("pending permissions after docker_ps", String(pendingAfterPs));
+      c.step("docker_ps {serverId: docker} (explicit serverId)");
+      const psExplicit = await call("docker_ps", { serverId: ids.docker });
+      c.see(
+        "explicit serverId lists the restart target",
+        String(psExplicit.text.includes(C.restartme)),
+      );
+
+      c.step(`docker_restart {container: ${C.restartme}} → wait for the permission card → approve`);
+      const startedBefore = sh(`docker inspect -f '{{.State.StartedAt}}' ${C.restartme}`);
+      const restartCall = call("docker_restart", { container: C.restartme });
+      const permission = await waitFor(
+        "permission card",
+        async () => (await pending()).find((p) => p.name === "docker_restart"),
+        60_000,
+        300,
+      );
+      c.see("permission request on the agent (before approval)", permission);
+      const startedWhilePending = sh(`docker inspect -f '{{.State.StartedAt}}' ${C.restartme}`);
+      await desktop.daemon.respondToPermission(agent.id, permission.id, { behavior: "allow" });
+      const restart = await restartCall;
+      const startedAfter = sh(`docker inspect -f '{{.State.StartedAt}}' ${C.restartme}`);
+      c.see("docker_restart result", restart);
+      c.see(
+        "container StartedAt: before / while the card was pending / after approval",
+        `${startedBefore}\n${startedWhilePending}\n${startedAfter}`,
+      );
+
+      c.step(
+        "ssh_list_servers and ssh_run {command: 'id -un'} (approved) — output scanned for secrets",
+      );
+      await call("ssh_list_servers", {});
+      const runCall = call("ssh_run", { command: "id -un" });
+      const runPermission = await waitFor(
+        "ssh_run card",
+        async () => (await pending()).find((p) => p.name === "ssh_run"),
+        60_000,
+        300,
+      );
+      await desktop.daemon.respondToPermission(agent.id, runPermission.id, { behavior: "allow" });
+      const run10 = await runCall;
+      c.see("ssh_run output", run10.text.slice(0, 400));
+      const leaks = outputs.flatMap((o) =>
+        SECRET_NEEDLES()
+          .filter((n) => o.text.includes(n))
+          .map(() => o.name),
+      );
+      c.see(
+        "tool outputs scanned / outputs containing a password, passphrase or private key",
+        `${outputs.length} / ${leaks.length ? leaks.join(", ") : "none"}`,
+      );
+      await mcp.close();
+      c.set(
+        !ps.isError &&
+          missing.length === 0 &&
+          pendingAfterPs === 0 &&
+          psExplicit.text.includes(C.restartme) &&
+          permission &&
+          startedWhilePending === startedBefore &&
+          !restart.isError &&
+          startedAfter !== startedBefore &&
+          leaks.length === 0
           ? "PASS"
           : "FAIL",
       );
@@ -1183,46 +1553,6 @@ async function main() {
     c.set(back && dropped && screen.includes("BEFORE-DROP-42") ? "PASS" : "FAIL");
   });
 
-  const notWired = async (id, title, probeType, note) =>
-    run(id, title, async (c) => {
-      c.step(`probe ${probeType} through the daemon client`);
-      try {
-        const res = await Promise.race([
-          desktop.daemon.sshModuleRequest({ type: probeType }),
-          sleep(8000).then(() => "no response in 8 s"),
-        ]);
-        c.see("response", res);
-      } catch (error) {
-        c.see("result", error.message.split("\n")[0].slice(0, 300));
-      }
-      c.step(note);
-      c.set("NOT-YET-WIRED");
-    });
-  await notWired(
-    "10",
-    "Server chat with Docker: docker_* with serverId (no approval for reads, approval card for restart)",
-    "ssh.environment.detect.request",
-    "Environment/agent tools (S7) and remote Docker (S8) modules exist on feat/ssh-wire-b but are not in this daemon's ssh.* dispatch or protocol unions.",
-  );
-  await notWired(
-    "11",
-    "Server with Docker: Docker section lists `docker ps -a`; exec into a container",
-    "ssh.docker.attach.request",
-    "Remote Docker (S8) is not wired into this daemon.",
-  );
-  await notWired(
-    "12",
-    "Server without Docker: no Docker section; ServerEnvironment.docker absent",
-    "ssh.environment.detect.request",
-    "Environment detection (S7) is not wired into this daemon.",
-  );
-  await notWired(
-    "13",
-    "Import ~/.ssh/config with ProxyJump and ProxyCommand: jump chain created, ProxyCommand reported as skipped",
-    "ssh.import.preview.request",
-    "Import (S6 logs-import) is not wired into this daemon.",
-  );
-
   await run("14", "Daemon logs contain no password, passphrase or private key", async (c) => {
     writeFileSync(DAEMON_LOG, daemon.log());
     const files = [
@@ -1284,26 +1614,17 @@ function writeReport(meta) {
     `- Code: \`${meta.branchInfo}\` (detached feat/ssh-servers), daemon built with \`npm run build:server\``,
   );
   lines.push(
-    `- Daemon: real process \`node packages/server/dist/scripts/supervisor-entrypoint.js\`, JAGENTDESK_HOME=${HOME}, 127.0.0.1:${DAEMON_PORT}, JAGENTDESK_TAILSCALE_ENABLED=0; driven over WebSocket RPC by two \`DaemonClient\`s ("desktop" browser client, "phone" mobile client). No UI was clicked.`,
+    `- Daemon: real process \`node packages/server/dist/scripts/supervisor-entrypoint.js\`, JAGENTDESK_HOME=${HOME}, 127.0.0.1:${DAEMON_PORT}, JAGENTDESK_TAILSCALE_ENABLED=0, HOME=${FAKE_HOME}, no NODE_OPTIONS; driven over WebSocket RPC by two \`DaemonClient\`s ("desktop" browser client, "phone" mobile client). No UI was clicked.`,
   );
   lines.push(`- Script: \`packages/server/scripts/ssh-acceptance.mjs\``);
   lines.push("- Topology:" + fence(meta.topology));
   lines.push("");
-  lines.push("## Findings for the S1 owner");
-  lines.push("");
-  lines.push(
-    '1. **Daemon does not start as built (criterion 0).** `import { Client, utils } from "ssh2"` (ssh-connection.ts) and `import { utils } from "ssh2"` (ssh-service.ts, logs-import/key-files.ts) fail under Node\'s ESM loader: ssh2 is CommonJS and only `AgentProtocol, BaseAgent, Client, createAgent` are detectable named exports. vitest/tsx hide this. Fix: `import ssh2 from "ssh2"; const { utils } = ssh2;`. All other criteria ran with a loader hook that re-exports ssh2 (no repository file changed).',
-  );
-  lines.push(
-    "2. **`DaemonClient.onSshModulePush` never fires.** It subscribes through `on(handler)`, which receives mapped `toEvent()` events, not raw messages; module pushes (`ssh.transfer.progress`, `ssh.forward.state`, `ssh.snippet.*`) are dropped there. `subscribeRawMessages` receives them (count in criterion 5). The app's SFTP/forwarding/snippet UIs that rely on this helper will not update live.",
-  );
-  lines.push(
-    "3. **Not wired into the daemon's ssh.* dispatch:** `ssh.keys.install_to_server`, `ssh.import.*`, `ssh.logs.*` (S6), `ssh.environment.*` + server chat tools (S7), remote Docker/DB/Kubernetes (S8). Criteria 3 (install step), 10–13 depend on them.",
-  );
-  lines.push(
-    '4. Criterion 9\'s "workspace with 3 panes" is app UI (`planSnippetWorkspace` + split view) and was not rendered here; the daemon side (one exec result per server) is what was verified.',
-  );
-  lines.push("");
+  if (findings.length) {
+    lines.push("## Findings");
+    lines.push("");
+    findings.forEach((f, i) => lines.push(`${i + 1}. ${f}`));
+    lines.push("");
+  }
   lines.push("| # | Criterion | Result |");
   lines.push("|---|---|---|");
   for (const r of sorted)
@@ -1340,6 +1661,8 @@ try {
   writeReport(meta);
   if (!KEEP) cleanupContainers();
   rmSync(TRANSFER_DIR, { recursive: true, force: true });
+  rmSync(AGENT_CWD, { recursive: true, force: true });
+  if (!KEEP) rmSync(FAKE_HOME, { recursive: true, force: true });
   console.log(`report: ${REPORT}`);
   process.exit(0);
 }
