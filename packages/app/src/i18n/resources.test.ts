@@ -49,8 +49,7 @@ const OPTIONAL_ENGLISH_FALLBACK_PREFIXES = [
   "forumNotifications.",
   "operatorContext.",
   // SSH feature modules (resources/ssh-modules.ts) ship English in every locale for now.
-  "ssh.sftp.",
-  "ssh.forwarding.",
+  "ssh.",
 ];
 function isOptionalEnglishFallbackKey(key: string): boolean {
   return OPTIONAL_ENGLISH_FALLBACK_PREFIXES.some((prefix) => key.startsWith(prefix));
