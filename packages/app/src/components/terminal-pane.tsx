@@ -54,6 +54,7 @@ import { usePanelStore } from "@/stores/panel-store";
 import { useBlockMobilePanelOpenGestures } from "@/mobile-panels/provider";
 import { useSessionStore } from "@/stores/session-store";
 import { toXtermTheme } from "@/utils/to-xterm-theme";
+import type { Theme } from "@/styles/theme";
 import TerminalEmulator, { type TerminalEmulatorHandle } from "./terminal-emulator";
 import { TerminalFloatingCopyAction, TerminalPasteAction } from "./terminal-copy-paste-actions";
 import {
@@ -89,6 +90,15 @@ interface TerminalPaneProps {
   isPaneFocused: boolean;
   onOpenFileExplorer: () => void;
   onOpenWorkspaceFile: (request: WorkspaceFileOpenRequest) => void;
+  /** Per-terminal override (SSH theme/font size per server or group, spec 25.4). */
+  appearance?: TerminalPaneAppearance;
+}
+
+export interface TerminalPaneAppearance {
+  /** null → the app theme's terminal colors. */
+  palette: Theme["colors"]["terminal"] | null;
+  /** null → the app's code font size. */
+  fontSize: number | null;
 }
 
 const TERMINAL_REFIT_DELAYS_MS = [0, 48, 144, 320];
@@ -210,13 +220,15 @@ export function TerminalPane({
   isPaneFocused,
   onOpenFileExplorer,
   onOpenWorkspaceFile,
+  appearance,
 }: TerminalPaneProps) {
   const { t } = useTranslation();
   const retainedPanelActive = useRetainedPanelActive();
   const isAppActivelyVisible = useAppActivelyVisible();
   const { theme } = useUnistyles();
   const { settings } = useAppSettings();
-  const xtermTheme = useMemo(() => toXtermTheme(theme.colors.terminal), [theme]);
+  const palette = appearance?.palette ?? theme.colors.terminal;
+  const xtermTheme = useMemo(() => toXtermTheme(palette), [palette]);
   const terminalFontFamily = useMemo(() => {
     const trimmed = settings.monoFontFamily.trim();
     return trimmed.length > 0 ? trimmed : undefined;
@@ -1060,7 +1072,7 @@ export function TerminalPane({
             xtermTheme={xtermTheme}
             scrollbackLines={settings.terminalScrollbackLines}
             fontFamily={terminalFontFamily}
-            fontSize={settings.codeFontSize}
+            fontSize={appearance?.fontSize ?? settings.codeFontSize}
             keyboardInset={keyboardInset}
             swipeGesturesEnabled={swipeGesturesEnabled}
             initialSnapshot={initialSnapshot}

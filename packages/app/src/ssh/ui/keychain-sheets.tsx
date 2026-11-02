@@ -13,7 +13,11 @@ import type {
   SshKey,
   SshKeyType,
 } from "@jagentdesk/client/internal/daemon-client";
+import type { SshTerminalAppearance } from "@jagentdesk/protocol/ssh/snippets-schemas";
+import { useAppSettings } from "@/hooks/use-settings";
 import { buildGroupOptions } from "@/ssh/server-form-model";
+import { resolveTerminalAppearance } from "@/ssh/snippets/appearance";
+import { TerminalAppearancePicker } from "@/ssh/snippets/terminal-appearance-picker";
 import { buildSshKeyOptions, type SshIdentityFormSnapshot } from "@/ssh/identity-form-model";
 import { useSshIdentityFormModel } from "@/ssh/use-ssh-connect-events";
 import { useSheetFooter } from "./sheet-footer";
@@ -73,6 +77,16 @@ export function GroupFormSheet({
   const [username, setUsername] = useState(group?.username ?? "");
   const [port, setPort] = useState(group?.port !== undefined ? String(group.port) : "");
   const [identityId, setIdentityId] = useState(group?.identityId ?? "");
+  const [appearance, setAppearance] = useState<SshTerminalAppearance>(() => ({
+    theme: group?.theme,
+    fontSize: group?.fontSize,
+  }));
+  const { settings } = useAppSettings();
+  // What this group inherits from its parent chain for the fields it leaves unset.
+  const inheritedAppearance = useMemo(
+    () => resolveTerminalAppearance({ groupId: parentId || undefined }, groups),
+    [groups, parentId],
+  );
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const parentOptions = useMemo<SelectFieldOption<string>[]>(() => {
@@ -129,6 +143,8 @@ export function GroupFormSheet({
           username: username.trim() || undefined,
           port: Number.isFinite(portNumber) ? portNumber : undefined,
           identityId: identityId || undefined,
+          theme: appearance.theme,
+          fontSize: appearance.fontSize,
         },
       });
       if (res.error) setFormError(res.error);
@@ -138,7 +154,18 @@ export function GroupFormSheet({
     } finally {
       setSaving(false);
     }
-  }, [canSubmit, client, group, identityId, label, onSaved, parentId, portNumber, username]);
+  }, [
+    appearance,
+    canSubmit,
+    client,
+    group,
+    identityId,
+    label,
+    onSaved,
+    parentId,
+    portNumber,
+    username,
+  ]);
   const handleSave = useCallback(() => void save(), [save]);
   const footer = useSheetFooter({ onClose, onSave: handleSave, saving, canSubmit });
   const header = useMemo(
@@ -204,6 +231,17 @@ export function GroupFormSheet({
           emptyText="No identities yet"
           testID="ssh-group-identity"
         />
+        <Field
+          label="Terminal theme & font size"
+          hint="Servers and sub-groups without their own values use these."
+        >
+          <TerminalAppearancePicker
+            value={appearance}
+            inherited={inheritedAppearance}
+            defaultFontSize={settings.codeFontSize}
+            onChange={setAppearance}
+          />
+        </Field>
       </View>
     </AdaptiveModalSheet>
   );

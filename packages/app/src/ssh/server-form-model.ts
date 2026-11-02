@@ -4,6 +4,7 @@ import type {
   SshProxy,
   SshServer,
 } from "@jagentdesk/client/internal/daemon-client";
+import type { SshTerminalAppearance } from "@jagentdesk/protocol/ssh/snippets-schemas";
 
 export const SSH_AUTH_METHODS: readonly SshAuthMethod[] = [
   "password",
@@ -33,7 +34,7 @@ export interface SshServerFormState {
     proxy: string | null;
     keepalive: string | null;
   };
-  disclosure: "basic" | "auth" | "advanced";
+  disclosure: "basic" | "auth" | "advanced" | "appearance";
   groupId: string;
   identityId: string;
   username: string;
@@ -58,6 +59,8 @@ export interface SshServerFormState {
   keepaliveS: string;
   /** spec 25.10: detect the server environment after each connect (server-only, default on). */
   detectEnvironment: boolean;
+  // Terminal theme + font size set on this server; unset fields inherit from its groups (25.4).
+  appearance: SshTerminalAppearance;
   formError: string | null;
   canSubmit: boolean;
 }
@@ -80,6 +83,7 @@ export interface SshServerFormModel {
   setPort: (value: string) => void;
   setDisclosure: (disclosure: SshServerFormState["disclosure"]) => void;
   setAdvanced: (patch: Partial<SshServerAdvancedFields>) => void;
+  setAppearance: (appearance: SshTerminalAppearance) => void;
   toggleJumpHost: (serverId: string) => void;
   setGroup: (groupId: string) => void;
   setIdentity: (identityId: string) => void;
@@ -227,7 +231,7 @@ function initialBasicFields(server: SshServer | null, defaultGroupId: string | n
 }
 
 type AdvancedInitialFields = Omit<SshServerAdvancedFields, "proxyPasswordDraft"> &
-  Pick<SshServerFormState, "jumpChain" | "hasStoredProxyPassword">;
+  Pick<SshServerFormState, "jumpChain" | "hasStoredProxyPassword" | "appearance">;
 
 function initialAdvancedFields(server: SshServer | null): AdvancedInitialFields {
   const proxy = server?.proxy;
@@ -244,7 +248,12 @@ function initialAdvancedFields(server: SshServer | null): AdvancedInitialFields 
     autoReconnect: triState(server?.autoReconnect),
     keepaliveS: server?.keepaliveIntervalS === undefined ? "" : String(server.keepaliveIntervalS),
     detectEnvironment: server?.detectEnvironment !== false,
+    appearance: initialAppearance(server),
   };
+}
+
+function initialAppearance(server: SshServer | null): SshTerminalAppearance {
+  return { theme: server?.theme, fontSize: server?.fontSize };
 }
 
 function buildProxy(state: SshServerFormState): SshProxy | undefined {
@@ -258,7 +267,7 @@ function buildProxy(state: SshServerFormState): SshProxy | undefined {
   };
 }
 
-/** The DTO to save. Fields the form does not edit (forwarding rules, theme…) survive. */
+/** The DTO to save. Fields the form does not edit (forwarding rules, …) survive. */
 function buildServerDto(server: SshServer | null, state: SshServerFormState): SshServer {
   const env = parseEnvText(state.envText).env;
   const { hasPassword: _wireOnly, ...kept } = server ?? { id: "", label: "", address: "" };
@@ -281,6 +290,8 @@ function buildServerDto(server: SshServer | null, state: SshServerFormState): Ss
     autoReconnect: fromTriState(state.autoReconnect),
     keepaliveIntervalS: optionalInt(state.keepaliveS),
     detectEnvironment: state.detectEnvironment ? undefined : false,
+    theme: state.appearance.theme,
+    fontSize: state.appearance.fontSize,
   };
 }
 
@@ -346,6 +357,7 @@ export function openSshServerFormModel(snapshot: SshServerFormSnapshot): SshServ
     setPort: (value) => set({ port: value }),
     setDisclosure: (disclosure) => set({ disclosure }),
     setAdvanced: (patch) => set(patch),
+    setAppearance: (appearance) => set({ appearance }),
     toggleJumpHost(serverId) {
       const chain = state.jumpChain.includes(serverId)
         ? state.jumpChain.filter((id) => id !== serverId)

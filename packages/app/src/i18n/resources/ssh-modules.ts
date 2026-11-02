@@ -169,6 +169,14 @@ export const sshModuleStrings = {
       delete: "Delete",
       confirmDelete: "Confirm delete",
       deleteFailed: "Could not delete the snippet",
+      renamePackage: "Rename",
+      savePackageName: "Save name",
+      confirmDeletePackage: "Delete package",
+      deletePackageHint: "Its snippets move to No package.",
+      packageCount: "{{count}} snippets",
+      collapse: "Collapse {{name}}",
+      expand: "Expand {{name}}",
+      noMatches: 'No snippets match "{{query}}"',
     },
     editor: {
       label: "Name",
@@ -194,6 +202,8 @@ export const sshModuleStrings = {
       targetsSaved: "Targets saved",
       startFailed: "Could not start the run",
       saveTargetsFailed: "Could not save the targets",
+      groups: "Groups",
+      groupsHint: "Selects every server in the group and its sub-groups.",
     },
     results: {
       tally:
@@ -217,6 +227,10 @@ export const sshModuleStrings = {
       fromInput: "Typed · {{time}}",
       fromSnippet: "Snippet · {{time}}",
       saveAsSnippet: "Save as snippet",
+      search: "Search history",
+      noMatches: "No commands match",
+      confirmClear: "Clear all",
+      savedAsSnippet: "Saved as a snippet",
     },
     split: {
       paneCount: "{{count}} of {{max}} panes",

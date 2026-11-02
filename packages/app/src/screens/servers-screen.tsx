@@ -415,6 +415,7 @@ export function ServersScreen() {
         hostServerId={hostServerId}
         plan={workspacePlan}
         servers={data.servers}
+        groups={data.groups}
         stateByTerminalId={stateByTerminalId}
         insetsTop={insets.top}
         onClose={closeWorkspace}
@@ -675,6 +676,7 @@ function ServersHome({
               <SnippetsTab
                 api={snippetsApi}
                 servers={data.servers}
+                groups={data.groups}
                 onOpenWorkspace={onOpenWorkspace}
               />
             ) : null}
@@ -864,6 +866,7 @@ function SshTerminalScreen({
         client={client}
         server={server}
         servers={servers}
+        groups={groups}
         terminalId={terminalId}
         onOpenWorkspace={onOpenWorkspace}
       />
