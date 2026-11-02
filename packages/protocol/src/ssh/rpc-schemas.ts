@@ -70,6 +70,9 @@ export const SshServerSchema = z.object({
   tags: z.array(z.string()).optional(),
   hasPassword: z.boolean().optional(), // true when ssh.password.<id> exists in the store
   forwardingRuleIds: z.array(z.string()).optional(),
+  // Run the environment detection script after each connect (spec 25.10); default true. Off for
+  // servers that allow one session only and for network gear.
+  detectEnvironment: z.boolean().optional(),
   protocol: SshProtocolSchema.optional(), // default "ssh"
   createdAtMs: z.number().optional(),
   updatedAtMs: z.number().optional(),

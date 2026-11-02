@@ -3,7 +3,7 @@ import type { Logger } from "pino";
 import type { SessionOutboundMessage } from "../messages.js";
 import type { SshModuleHandler } from "../session/ssh/ssh-session.js";
 import { handleForwardingMessage } from "./forwarding/rpc.js";
-import { ForwardingService } from "./forwarding/service.js";
+import type { ForwardingService } from "./forwarding/service.js";
 import { handleSftpMessage } from "./sftp/rpc.js";
 import { SftpService } from "./sftp/service.js";
 import { CommandLineTracker } from "./snippets/command-line.js";
@@ -32,6 +32,8 @@ export interface SshModulesOptions {
   ssh: SshService;
   jagentdeskHome: string;
   logger?: Logger;
+  /** The daemon's one ForwardingService (owned and initialized by ssh/modules.ts). */
+  forwarding: ForwardingService;
 }
 
 export class SshModules {
@@ -48,7 +50,7 @@ export class SshModules {
     const sshDir = path.join(options.jagentdeskHome, "ssh");
     const acquire = options.ssh.acquireClient;
     this.sftp = new SftpService({ acquire, sshDir });
-    this.forwarding = new ForwardingService({ acquire, sshDir });
+    this.forwarding = options.forwarding;
     this.snippets = new SshSnippetsService({ acquire, sshHome: sshDir });
     // Spec 25.3 step 2 uses the proxy module; step 5's startup snippet comes from S5.
     this.ssh.configurePipeline({
@@ -83,7 +85,6 @@ export class SshModules {
   }
 
   async initialize(): Promise<void> {
-    await this.forwarding.initialize();
     const broadcast = (message: SessionOutboundMessage): void => this.ssh.broadcast(message);
     this.unsubscribers.push(
       this.sftp.subscribe((event) => broadcast(event)),
@@ -140,7 +141,6 @@ export class SshModules {
   async dispose(): Promise<void> {
     for (const unsubscribe of this.unsubscribers.splice(0)) unsubscribe();
     this.sftp.dispose();
-    await this.forwarding.dispose();
     await this.snippets.dispose();
   }
 }

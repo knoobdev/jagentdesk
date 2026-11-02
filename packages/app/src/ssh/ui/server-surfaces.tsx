@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ScrollView, Text, TextInput, View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
+import { useTranslation } from "react-i18next";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import type { ServerEnvironment } from "@jagentdesk/protocol/ssh/environment-schemas";
 import type {
+  SshImportIssue,
   SshImportPreview,
+  SshImportServerDraft,
   SshImportResult,
   SshImportSource,
   SshLogBookmark,
@@ -35,12 +38,16 @@ function gib(bytes: number | null): string | null {
   return bytes === null ? null : `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 }
 
-export function environmentSummary(environment: ServerEnvironment): string {
+type Translate = (key: string, options?: Record<string, unknown>) => string;
+
+export function environmentSummary(environment: ServerEnvironment, t: Translate): string {
   const os = environment.os;
   const parts = [
     os.prettyName ?? os.distroName ?? os.kernelName,
     `${os.kernelName} ${os.kernelRelease} ${os.arch}`,
-    environment.cpuCores === null ? null : `${environment.cpuCores} cores`,
+    environment.cpuCores === null
+      ? null
+      : t("ssh.server.environment.cores", { count: environment.cpuCores }),
     gib(environment.memoryTotalBytes),
     environment.docker ? `Docker ${environment.docker.version ?? ""}`.trim() : null,
     environment.kubectl ? "kubectl" : null,
@@ -86,6 +93,7 @@ function RemoteDocker({
   hostServerId: string;
   serverId: string;
 }) {
+  const { t } = useTranslation();
   const [target, setTarget] = useState<SshDockerTarget | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -95,7 +103,7 @@ function RemoteDocker({
         const res = await client.sshDockerAttach({ serverId });
         if (cancelled) return;
         if (res.dockerHost) setTarget({ serverId, dockerHost: res.dockerHost });
-        else setError(res.error ?? "Docker is not reachable on this server");
+        else setError(res.error ?? t("ssh.server.docker.unreachable"));
       } catch (caught) {
         if (!cancelled) setError(errorText(caught));
       }
@@ -105,13 +113,14 @@ function RemoteDocker({
       cancelled = true;
       void client.sshDockerDetach({ serverId }).catch(() => undefined);
     };
-  }, [client, serverId]);
+  }, [client, serverId, t]);
   if (error) return <ErrorBanner message={error} />;
-  if (!target) return <Text style={styles.muted}>Connecting to Docker on the server…</Text>;
+  if (!target) return <Text style={styles.muted}>{t("ssh.server.docker.connecting")}</Text>;
   return <DockerScreen sshDocker={target} hostServerId={hostServerId} />;
 }
 
 function LogsPanel({ client, serverId }: { client: DaemonClient; serverId: string }) {
+  const { t } = useTranslation();
   const [enabled, setEnabled] = useState(false);
   const [bookmarks, setBookmarks] = useState<SshLogBookmark[]>([]);
   const [hasRecent, setHasRecent] = useState(false);
@@ -195,13 +204,17 @@ function LogsPanel({ client, serverId }: { client: DaemonClient; serverId: strin
   return (
     <View style={styles.panelBody}>
       <View style={styles.row}>
-        <Switch value={enabled} onValueChange={onToggle} accessibilityLabel="Record session logs" />
-        <Text style={styles.text}>Record session logs for this server</Text>
+        <Switch
+          value={enabled}
+          onValueChange={onToggle}
+          accessibilityLabel={t("ssh.server.logs.record")}
+        />
+        <Text style={styles.text}>{t("ssh.server.logs.record")}</Text>
       </View>
       {error ? <ErrorBanner message={error} /> : null}
       <View style={styles.row}>
         <TabButton
-          label="Recent session"
+          label={t("ssh.server.logs.recent")}
           value="recent"
           active={source.kind === "recent"}
           onSelect={showRecent}
@@ -222,12 +235,12 @@ function LogsPanel({ client, serverId }: { client: DaemonClient; serverId: strin
           value={query}
           onChangeText={setQuery}
           onSubmitEditing={onSearch}
-          placeholder="Search this log"
+          placeholder={t("ssh.server.logs.searchPlaceholder")}
           uniProps={placeholder}
           autoCapitalize="none"
         />
         <Button size="sm" variant="outline" onPress={onSearch}>
-          Search
+          {t("ssh.server.logs.search")}
         </Button>
       </View>
       {source.kind === "recent" && hasRecent ? (
@@ -236,11 +249,11 @@ function LogsPanel({ client, serverId }: { client: DaemonClient; serverId: strin
             style={styles.input}
             value={comment}
             onChangeText={setComment}
-            placeholder="Bookmark comment"
+            placeholder={t("ssh.server.logs.commentPlaceholder")}
             uniProps={placeholder}
           />
           <Button size="sm" variant="outline" onPress={onBookmark}>
-            Bookmark
+            {t("ssh.server.logs.bookmark")}
           </Button>
         </View>
       ) : null}
@@ -252,9 +265,7 @@ function LogsPanel({ client, serverId }: { client: DaemonClient; serverId: strin
               </Text>
             ))
           : null}
-        {matches ? null : (
-          <Text style={styles.mono}>{text || "No log recorded for this server yet."}</Text>
-        )}
+        {matches ? null : <Text style={styles.mono}>{text || t("ssh.server.logs.empty")}</Text>}
       </ScrollView>
     </View>
   );
@@ -269,6 +280,7 @@ function InstallKeyRow({
   busyKey: string | null;
   onInstall: (keyId: string) => void;
 }) {
+  const { t } = useTranslation();
   const handlePress = useCallback(() => onInstall(sshKey.id), [onInstall, sshKey.id]);
   return (
     <View style={styles.row}>
@@ -284,7 +296,7 @@ function InstallKeyRow({
         onPress={handlePress}
         testID={`ssh-install-key-${sshKey.id}`}
       >
-        Install on server
+        {t("ssh.server.installKey.install")}
       </Button>
     </View>
   );
@@ -299,6 +311,7 @@ function InstallKeyPanel({
   serverId: string;
   keys: SshKey[];
 }) {
+  const { t } = useTranslation();
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -313,8 +326,8 @@ function InstallKeyPanel({
         else
           setResult(
             res.outcome === "already_present"
-              ? `Already in ${res.path}; the server now signs in with this key.`
-              : `Added to ${res.path}; the server now signs in with this key.`,
+              ? t("ssh.server.installKey.alreadyPresent", { path: res.path })
+              : t("ssh.server.installKey.added", { path: res.path }),
           );
       } catch (caught) {
         setError(errorText(caught));
@@ -322,11 +335,11 @@ function InstallKeyPanel({
         setBusyKey(null);
       }
     },
-    [client, serverId],
+    [client, serverId, t],
   );
   const onInstall = useCallback((keyId: string) => void install(keyId), [install]);
   if (keys.length === 0) {
-    return <Text style={styles.muted}>Generate or import a key in Keychain first.</Text>;
+    return <Text style={styles.muted}>{t("ssh.server.installKey.noKeys")}</Text>;
   }
   return (
     <View style={styles.panelBody}>
@@ -339,9 +352,300 @@ function InstallKeyPanel({
   );
 }
 
-type ServerPanel = "none" | "docker" | "logs" | "key";
+function LabeledInput({
+  label,
+  value,
+  onChange,
+  secure = false,
+  numeric = false,
+  testID,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  secure?: boolean;
+  numeric?: boolean;
+  testID?: string;
+}) {
+  return (
+    <View style={styles.field}>
+      <Text style={styles.muted}>{label}</Text>
+      <ThemedTextInput
+        style={styles.input}
+        value={value}
+        onChangeText={onChange}
+        secureTextEntry={secure}
+        keyboardType={numeric ? "number-pad" : "default"}
+        autoCapitalize="none"
+        autoCorrect={false}
+        accessibilityLabel={label}
+        uniProps={placeholder}
+        testID={testID}
+      />
+    </View>
+  );
+}
 
-/** Environment header plus Docker / Logs / Install key panels for one server (25.10, 25.13). */
+type RemoteDbEngine = "postgres" | "mysql";
+
+const DEFAULT_DB_PORTS: Record<RemoteDbEngine, string> = { postgres: "5432", mysql: "3306" };
+
+function parsePort(value: string): number | null {
+  const port = Number(value.trim());
+  return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : null;
+}
+
+/** spec 25.10: a database the server can reach, added to Databases through a tunnel. */
+function RemoteDatabasePanel({
+  client,
+  server,
+  engines,
+}: {
+  client: DaemonClient;
+  server: SshServerInfo;
+  engines: RemoteDbEngine[];
+}) {
+  const { t } = useTranslation();
+  const [engine, setEngine] = useState<RemoteDbEngine>(engines[0] ?? "postgres");
+  const [remoteHost, setRemoteHost] = useState("127.0.0.1");
+  const [remotePort, setRemotePort] = useState(DEFAULT_DB_PORTS[engines[0] ?? "postgres"]);
+  const [database, setDatabase] = useState("");
+  const [user, setUser] = useState("");
+  const [password, setPassword] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [added, setAdded] = useState<string | null>(null);
+  const chooseEngine = useCallback((next: RemoteDbEngine) => {
+    setEngine(next);
+    setRemotePort(DEFAULT_DB_PORTS[next]);
+  }, []);
+
+  const submit = useCallback(async () => {
+    const port = parsePort(remotePort);
+    if (port === null) {
+      setError(t("ssh.server.database.invalidPort"));
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setAdded(null);
+    try {
+      const tunnel = await client.sshRemoteDbPrepare({
+        serverId: server.id,
+        kind: engine,
+        remoteHost: remoteHost.trim(),
+        remotePort: port,
+      });
+      if (!tunnel.connection) {
+        setError(tunnel.error ?? t("ssh.server.docker.unreachable"));
+        return;
+      }
+      const name = displayName.trim() || `${server.label} · ${database.trim() || engine}`;
+      const res = await client.databaseAdd({
+        engine: tunnel.connection.engine,
+        displayName: name,
+        config: {
+          ...tunnel.connection.config,
+          ...(database.trim() ? { database: database.trim() } : {}),
+          ...(user.trim() ? { user: user.trim() } : {}),
+          ...(password ? { password } : {}),
+        },
+      });
+      if (res.error) setError(res.error);
+      else {
+        setAdded(name);
+        setPassword("");
+      }
+    } catch (caught) {
+      setError(errorText(caught));
+    } finally {
+      setBusy(false);
+    }
+  }, [client, database, displayName, engine, password, remoteHost, remotePort, server, t, user]);
+  const onSubmit = useCallback(() => void submit(), [submit]);
+
+  return (
+    <ScrollView contentContainerStyle={styles.panelBody}>
+      <Text style={styles.muted}>{t("ssh.server.database.hint")}</Text>
+      <View style={styles.row}>
+        <Text style={styles.muted}>{t("ssh.server.database.engine")}</Text>
+        {engines.map((candidate) => (
+          <TabButton
+            key={candidate}
+            label={candidate === "postgres" ? "PostgreSQL" : "MySQL"}
+            value={candidate}
+            active={engine === candidate}
+            onSelect={chooseEngine}
+          />
+        ))}
+      </View>
+      <View style={styles.row}>
+        <LabeledInput
+          label={t("ssh.server.database.remoteHost")}
+          value={remoteHost}
+          onChange={setRemoteHost}
+        />
+        <LabeledInput
+          label={t("ssh.server.database.remotePort")}
+          value={remotePort}
+          onChange={setRemotePort}
+          numeric
+        />
+      </View>
+      <View style={styles.row}>
+        <LabeledInput
+          label={t("ssh.server.database.database")}
+          value={database}
+          onChange={setDatabase}
+        />
+        <LabeledInput label={t("ssh.server.database.user")} value={user} onChange={setUser} />
+        <LabeledInput
+          label={t("ssh.server.database.password")}
+          value={password}
+          onChange={setPassword}
+          secure
+        />
+      </View>
+      <LabeledInput
+        label={t("ssh.server.database.displayName")}
+        value={displayName}
+        onChange={setDisplayName}
+      />
+      <View style={styles.row}>
+        <Button size="sm" onPress={onSubmit} loading={busy} testID="ssh-remote-db-add">
+          {t("ssh.server.database.submit")}
+        </Button>
+      </View>
+      {added ? (
+        <Text style={styles.text}>{t("ssh.server.database.added", { name: added })}</Text>
+      ) : null}
+      {error ? <ErrorBanner message={error} /> : null}
+    </ScrollView>
+  );
+}
+
+/** spec 25.10: a cluster from the kubeconfig on the server, reached through the server. */
+function RemoteClusterPanel({ client, server }: { client: DaemonClient; server: SshServerInfo }) {
+  const { t } = useTranslation();
+  const [kubeconfigPath, setKubeconfigPath] = useState(".kube/config");
+  const [context, setContext] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [imported, setImported] = useState<string | null>(null);
+
+  const submit = useCallback(async () => {
+    if (!context.trim()) {
+      setError(t("ssh.server.kubernetes.contextRequired"));
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setImported(null);
+    try {
+      const prepared = await client.sshRemoteK8sImport({
+        serverId: server.id,
+        kubeconfigPath: kubeconfigPath.trim(),
+        context: context.trim(),
+      });
+      if (!prepared.clusterInput) {
+        setError(prepared.error ?? t("ssh.server.kubernetes.contextRequired"));
+        return;
+      }
+      const name = displayName.trim() || prepared.clusterInput.displayName;
+      const res = await client.clusterImport({
+        contextName: prepared.clusterInput.contextName,
+        displayName: name,
+      });
+      if (res.error) setError(res.error);
+      else setImported(name);
+    } catch (caught) {
+      setError(errorText(caught));
+    } finally {
+      setBusy(false);
+    }
+  }, [client, context, displayName, kubeconfigPath, server.id, t]);
+  const onSubmit = useCallback(() => void submit(), [submit]);
+
+  return (
+    <ScrollView contentContainerStyle={styles.panelBody}>
+      <Text style={styles.muted}>{t("ssh.server.kubernetes.hint")}</Text>
+      <View style={styles.row}>
+        <LabeledInput
+          label={t("ssh.server.kubernetes.kubeconfigPath")}
+          value={kubeconfigPath}
+          onChange={setKubeconfigPath}
+        />
+        <LabeledInput
+          label={t("ssh.server.kubernetes.context")}
+          value={context}
+          onChange={setContext}
+          testID="ssh-remote-k8s-context"
+        />
+      </View>
+      <LabeledInput
+        label={t("ssh.server.kubernetes.displayName")}
+        value={displayName}
+        onChange={setDisplayName}
+      />
+      <View style={styles.row}>
+        <Button size="sm" onPress={onSubmit} loading={busy} testID="ssh-remote-k8s-import">
+          {t("ssh.server.kubernetes.submit")}
+        </Button>
+      </View>
+      {imported ? (
+        <Text style={styles.text}>{t("ssh.server.kubernetes.imported", { name: imported })}</Text>
+      ) : null}
+      {error ? <ErrorBanner message={error} /> : null}
+    </ScrollView>
+  );
+}
+
+type ServerPanel = "none" | "docker" | "logs" | "key" | "database" | "kubernetes";
+
+function remoteDbEngines(environment: ServerEnvironment | null): RemoteDbEngine[] {
+  if (!environment) return [];
+  const engines: RemoteDbEngine[] = [];
+  if (environment.psql) engines.push("postgres");
+  if (environment.mysql) engines.push("mysql");
+  return engines;
+}
+
+function ServerPanelBody({
+  panel,
+  client,
+  hostServerId,
+  server,
+  keys,
+  dbEngines,
+}: {
+  panel: Exclude<ServerPanel, "none">;
+  client: DaemonClient;
+  hostServerId: string;
+  server: SshServerInfo;
+  keys: SshKey[];
+  dbEngines: RemoteDbEngine[];
+}) {
+  switch (panel) {
+    case "docker":
+      return <RemoteDocker client={client} hostServerId={hostServerId} serverId={server.id} />;
+    case "logs":
+      return <LogsPanel client={client} serverId={server.id} />;
+    case "key":
+      return <InstallKeyPanel client={client} serverId={server.id} keys={keys} />;
+    case "database":
+      return <RemoteDatabasePanel client={client} server={server} engines={dbEngines} />;
+    case "kubernetes":
+      return <RemoteClusterPanel client={client} server={server} />;
+  }
+}
+
+/**
+ * Environment header plus Docker / Logs / Install key / database / Kubernetes panels for one
+ * server (spec 25.10, 25.13). Docker, database and Kubernetes appear only when the detected
+ * environment has them (Redis is not a Databases engine, so it has no entry).
+ */
 export function ServerModulesBar({
   client,
   hostServerId,
@@ -355,6 +659,7 @@ export function ServerModulesBar({
   keys: SshKey[];
   connected: boolean;
 }) {
+  const { t } = useTranslation();
   const { environment, error, pending, redetect } = useServerEnvironment(
     client,
     server.id,
@@ -365,9 +670,10 @@ export function ServerModulesBar({
     (next: ServerPanel) => setPanel((current) => (current === next ? "none" : next)),
     [],
   );
-  let summary = "Environment not detected yet";
-  if (environment) summary = environmentSummary(environment);
-  if (pending) summary = "Detecting the server environment…";
+  const dbEngines = useMemo(() => remoteDbEngines(environment), [environment]);
+  let summary = t("ssh.server.environment.notDetected");
+  if (environment) summary = environmentSummary(environment, t);
+  if (pending) summary = t("ssh.server.environment.detecting");
   return (
     <View style={styles.bar} testID="ssh-server-modules">
       <View style={styles.row}>
@@ -375,31 +681,60 @@ export function ServerModulesBar({
           {summary}
         </Text>
         <Button size="xs" variant="ghost" onPress={redetect} disabled={pending || !client}>
-          Re-detect
+          {t("ssh.server.environment.redetect")}
         </Button>
       </View>
       {error ? <ErrorBanner message={error} /> : null}
       <View style={styles.row}>
         {environment?.docker ? (
-          <TabButton label="Docker" value="docker" active={panel === "docker"} onSelect={choose} />
+          <TabButton
+            label={t("ssh.server.tabs.docker")}
+            value="docker"
+            active={panel === "docker"}
+            onSelect={choose}
+          />
         ) : null}
-        <TabButton label="Logs" value="logs" active={panel === "logs"} onSelect={choose} />
         <TabButton
-          label="Install public key"
+          label={t("ssh.server.tabs.logs")}
+          value="logs"
+          active={panel === "logs"}
+          onSelect={choose}
+        />
+        <TabButton
+          label={t("ssh.server.tabs.installKey")}
           value="key"
           active={panel === "key"}
           onSelect={choose}
         />
+        {dbEngines.length > 0 ? (
+          <TabButton
+            label={t("ssh.server.tabs.database")}
+            value="database"
+            active={panel === "database"}
+            onSelect={choose}
+            testID="ssh-server-tab-database"
+          />
+        ) : null}
+        {environment?.kubectl ? (
+          <TabButton
+            label={t("ssh.server.tabs.kubernetes")}
+            value="kubernetes"
+            active={panel === "kubernetes"}
+            onSelect={choose}
+            testID="ssh-server-tab-kubernetes"
+          />
+        ) : null}
       </View>
       {client && panel !== "none" ? (
         <View style={panel === "docker" ? styles.dockerPanel : styles.panel}>
-          {panel === "docker" ? (
-            <RemoteDocker client={client} hostServerId={hostServerId} serverId={server.id} />
-          ) : null}
-          {panel === "logs" ? <LogsPanel client={client} serverId={server.id} /> : null}
-          {panel === "key" ? (
-            <InstallKeyPanel client={client} serverId={server.id} keys={keys} />
-          ) : null}
+          <ServerPanelBody
+            panel={panel}
+            client={client}
+            hostServerId={hostServerId}
+            server={server}
+            keys={keys}
+            dbEngines={dbEngines}
+          />
         </View>
       ) : null}
     </View>
@@ -407,6 +742,20 @@ export function ServerModulesBar({
 }
 
 type ImportKind = SshImportSource["kind"];
+
+function draftLine(draft: SshImportServerDraft, t: Translate): string {
+  const user = draft.username ? `${draft.username}@` : "";
+  const port = draft.port ? `:${draft.port}` : "";
+  const hops = draft.jumpChain.map((hop) => hop.alias ?? hop.address).join(" → ");
+  const via = hops ? `  ${t("ssh.import.via", { hops })}` : "";
+  const marker = draft.status === "new" ? "+" : "=";
+  return `${marker} ${draft.label}  ${user}${draft.address}${port}${via}`;
+}
+
+function issueLine(issue: SshImportIssue, t: Translate): string {
+  const severity = issue.severity === "skipped" ? t("ssh.import.skipped") : t("ssh.import.error");
+  return `${issue.location.file}:${issue.location.line} ${severity}: ${issue.message}`;
+}
 
 /** Import servers from the daemon's ~/.ssh, pasted ssh_config or CSV (spec 25.9). */
 export function ImportServersSheet({
@@ -418,6 +767,7 @@ export function ImportServersSheet({
   onClose: () => void;
   onImported: () => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [kind, setKind] = useState<ImportKind>("ssh_directory");
   const [text, setText] = useState("");
   const [preview, setPreview] = useState<SshImportPreview | null>(null);
@@ -428,7 +778,7 @@ export function ImportServersSheet({
     () => (kind === "ssh_directory" ? { kind } : { kind, text }),
     [kind, text],
   );
-  const header = useMemo<SheetHeader>(() => ({ title: "Import servers" }), []);
+  const header = useMemo<SheetHeader>(() => ({ title: t("ssh.import.title") }), [t]);
   const selectKind = useCallback((next: ImportKind) => {
     setKind(next);
     setPreview(null);
@@ -471,18 +821,23 @@ export function ImportServersSheet({
       <View style={styles.panelBody}>
         <View style={styles.row}>
           <TabButton
-            label="~/.ssh on the daemon"
+            label={t("ssh.import.sources.sshDirectory")}
             value="ssh_directory"
             active={kind === "ssh_directory"}
             onSelect={selectKind}
           />
           <TabButton
-            label="ssh_config"
+            label={t("ssh.import.sources.sshConfig")}
             value="ssh_config"
             active={kind === "ssh_config"}
             onSelect={selectKind}
           />
-          <TabButton label="CSV" value="csv" active={kind === "csv"} onSelect={selectKind} />
+          <TabButton
+            label={t("ssh.import.sources.csv")}
+            value="csv"
+            active={kind === "csv"}
+            onSelect={selectKind}
+          />
         </View>
         {kind === "ssh_directory" ? null : (
           <ThemedTextInput
@@ -500,10 +855,10 @@ export function ImportServersSheet({
         )}
         <View style={styles.row}>
           <Button size="sm" variant="outline" onPress={onPreview} loading={busy}>
-            Preview
+            {t("ssh.import.preview")}
           </Button>
           <Button size="sm" onPress={onApply} disabled={busy || !preview}>
-            Import new servers
+            {t("ssh.import.apply")}
           </Button>
         </View>
         {error ? <ErrorBanner message={error} /> : null}
@@ -511,7 +866,7 @@ export function ImportServersSheet({
           <ScrollView style={styles.logBox}>
             {preview.servers.map((draft) => (
               <Text key={draft.draftId} style={styles.mono}>
-                {`${draft.status === "new" ? "+" : "="} ${draft.label}  ${draft.username ? `${draft.username}@` : ""}${draft.address}${draft.port ? `:${draft.port}` : ""}${draft.jumpChain.length > 0 ? `  via ${draft.jumpChain.map((hop) => hop.alias ?? hop.address).join(" → ")}` : ""}`}
+                {draftLine(draft, t)}
               </Text>
             ))}
             {preview.issues.map((issue) => (
@@ -519,14 +874,18 @@ export function ImportServersSheet({
                 key={`${issue.location.file}:${issue.location.line}:${issue.code}`}
                 style={styles.muted}
               >
-                {`${issue.location.file}:${issue.location.line} ${issue.severity === "skipped" ? "skipped" : "error"}: ${issue.message}`}
+                {issueLine(issue, t)}
               </Text>
             ))}
           </ScrollView>
         ) : null}
         {result ? (
           <Text style={styles.text}>
-            {`Added ${result.servers.added} · already saved ${result.servers.duplicates} · failed ${result.servers.failed.length}`}
+            {t("ssh.import.result", {
+              added: result.servers.added,
+              duplicates: result.servers.duplicates,
+              failed: result.servers.failed.length,
+            })}
           </Text>
         ) : null}
       </View>
@@ -560,6 +919,7 @@ const styles = StyleSheet.create((theme) => ({
   panel: { maxHeight: 360 },
   dockerPanel: { height: 480 },
   panelBody: { gap: theme.spacing[2] },
+  field: { flex: 1, minWidth: 140, gap: theme.spacing[1] },
   input: {
     flex: 1,
     minWidth: 160,

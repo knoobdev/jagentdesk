@@ -13,6 +13,7 @@ import {
   createSshAgentTools,
   type RequestToolPermission,
   type SshAgentTool,
+  type SshForwardAccess,
   type SshServerDirectory,
   type SshTerminalAccess,
 } from "./environment/agent-tools.js";
@@ -25,6 +26,7 @@ import { handleLogsImportMessage } from "./logs-import/rpc.js";
 import { SessionLogService } from "./logs-import/session-log.js";
 import { createRemoteDockerTools } from "./remote-docker/agent-tools.js";
 import { RemoteDockerHosts } from "./remote-docker/hosts.js";
+import { ForwardingService } from "./forwarding/service.js";
 import { handleSshRemoteDbMessage } from "./remote-db/rpc.js";
 import { RemoteDbTunnels } from "./remote-db/service.js";
 import { handleSshRemoteK8sMessage } from "./remote-k8s/rpc.js";
@@ -200,6 +202,39 @@ function serverDirectory(service: SshService): SshServerDirectory {
   };
 }
 
+/**
+ * ssh_forward_* (spec 25.11) over S3: an agent's forward is a saved rule labelled for the agent,
+ * started at once; stopping it removes the rule again.
+ */
+function forwardAccess(forwarding: ForwardingService): SshForwardAccess {
+  return {
+    async start(input) {
+      const destination =
+        input.kind === "dynamic" ? "SOCKS5" : `${input.destHost ?? ""}:${input.destPort ?? 0}`;
+      const describe = (port: number) =>
+        `${input.kind} ${input.bindAddress}:${port} → ${destination}`;
+      const rule = await forwarding.save({
+        label: `Agent: ${describe(input.bindPort)}`,
+        kind: input.kind,
+        serverId: input.serverId,
+        bindAddress: input.bindAddress,
+        bindPort: input.bindPort,
+        ...(input.destHost ? { destHost: input.destHost } : {}),
+        ...(input.destPort ? { destPort: input.destPort } : {}),
+      });
+      const state = await forwarding.start(rule.id);
+      if (state.status === "error") {
+        await forwarding.delete(rule.id);
+        throw new Error(state.error?.message ?? "The forward could not start");
+      }
+      return { forwardId: rule.id, description: describe(state.boundPort ?? input.bindPort) };
+    },
+    async stop(forwardId) {
+      await forwarding.delete(forwardId);
+    },
+  };
+}
+
 export interface SshModulesOptions {
   sshService: SshService;
   jagentdeskHome: string;
@@ -217,6 +252,8 @@ export class SshModules {
   readonly docker: RemoteDockerHosts;
   readonly remoteDb: RemoteDbTunnels;
   readonly remoteK8s: RemoteK8sClusters;
+  /** S3 port forwarding; its ssh.forward.* RPCs are wired by the S1 owner on this instance. */
+  readonly forwarding: ForwardingService;
   readonly handlers: readonly SshModuleHandler[];
   private readonly unsubscribe: Array<() => void> = [];
 
@@ -241,6 +278,7 @@ export class SshModules {
       acquire: service.acquireClient,
       runDirectory: path.join(sshHome, "run"),
     });
+    this.forwarding = new ForwardingService({ acquire: service.acquireClient, sshDir: sshHome });
     this.remoteDb = new RemoteDbTunnels({ acquire: service.acquireClient, jagentdeskHome });
     this.remoteK8s = new RemoteK8sClusters({
       acquire: service.acquireClient,
@@ -305,7 +343,7 @@ export class SshModules {
         defaultServerId,
         requestPermission,
         terminals: terminalAccess(service),
-        forwards: null,
+        forwards: forwardAccess(this.forwarding),
         servers: serverDirectory(service),
       }),
       ...createRemoteDockerTools({
@@ -317,9 +355,15 @@ export class SshModules {
     ];
   }
 
+  /** Loads persisted state (forwarding rules); call once before serving. */
+  async initialize(): Promise<void> {
+    await this.forwarding.initialize();
+  }
+
   async dispose(): Promise<void> {
     for (const stop of this.unsubscribe.splice(0)) stop();
     await this.docker.stopAll();
     await this.remoteDb.closeAll();
+    await this.forwarding.dispose();
   }
 }

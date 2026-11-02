@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Field, FormTextInput } from "@/components/ui/form-field";
 import { SelectField, type SelectFieldOption } from "@/components/ui/select-field";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { Switch } from "@/components/ui/switch";
+import { useTranslation } from "react-i18next";
 import type {
   DaemonClient,
   SshAuthMethod,
@@ -275,6 +277,7 @@ function AdvancedSection({
   form: FormHandle;
   jumpCandidates: SshServerInfo[];
 }) {
+  const { t } = useTranslation();
   const { model, state } = form;
   const setProxyType = useCallback(
     (value: ProxyChoice) =>
@@ -295,6 +298,10 @@ function AdvancedSection({
   );
   const setReconnect = useCallback(
     (value: TriState) => model.setAdvanced({ autoReconnect: value }),
+    [model],
+  );
+  const setDetectEnvironment = useCallback(
+    (value: boolean) => model.setAdvanced({ detectEnvironment: value }),
     [model],
   );
   const setKeepalive = useCallback(
@@ -399,6 +406,17 @@ function AdvancedSection({
           />
         </View>
       </View>
+      <Field
+        label={t("ssh.server.detectOnConnect.label")}
+        hint={t("ssh.server.detectOnConnect.hint")}
+      >
+        <Switch
+          value={state.detectEnvironment}
+          onValueChange={setDetectEnvironment}
+          accessibilityLabel={t("ssh.server.detectOnConnect.label")}
+          testID="ssh-server-detect-environment"
+        />
+      </Field>
       <Field
         label="Keepalive (seconds)"
         hint="Blank inherits (default 30). 0 turns keepalive off."

@@ -1324,15 +1324,9 @@ export async function createJAgentDeskDaemon(
   await databaseRegistry.initialize();
   logger.info("Database registry created");
   await sshService.initialize();
-  // Milestone modules (S2 SFTP, S3 forwarding, …) ride on acquireClient (CONTRACT.md).
-  const sshModules = new SshModules({
-    ssh: sshService,
-    jagentdeskHome: config.jagentdeskHome,
-    logger,
-  });
-  await sshModules.initialize();
-  sshService.registerModuleHandlers(sshModules.handlers());
-  // S6–S8 (logs, import, install key, environment, Docker on the server) ride on S1's pool.
+  // S3 forwarding, S6–S8 (logs, import, install key, environment, Docker / DB / k8s on the
+  // server) and the server-chat agent tools ride on S1's pool. This owns the daemon's one
+  // ForwardingService (forwarding.json + local listeners).
   const sshServerModules = new SshServerModules({
     sshService,
     jagentdeskHome: config.jagentdeskHome,
@@ -1341,7 +1335,17 @@ export async function createJAgentDeskDaemon(
     requestPermission: (agentId, request) =>
       agentManager.requestHostToolPermission(agentId, request),
   });
+  await sshServerModules.initialize();
   sshService.modules = sshServerModules;
+  // S2 SFTP, S3 forwarding RPCs (on the one ForwardingService above), S5 snippets, Telnet.
+  const sshModules = new SshModules({
+    ssh: sshService,
+    jagentdeskHome: config.jagentdeskHome,
+    logger,
+    forwarding: sshServerModules.forwarding,
+  });
+  await sshModules.initialize();
+  sshService.registerModuleHandlers(sshModules.handlers());
   logger.info("SSH service initialized");
   // Daemon-wide Forge Hub service (spec 19 / ADR-0015). One instance shared across
   // all agents' tool catalogs, mirroring how session.ts builds it per-session. Token
