@@ -1,7 +1,10 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { utils } from "ssh2";
+import ssh2 from "ssh2";
 import { fingerprintSha256 } from "./known-hosts.js";
+
+// ssh2 is CommonJS: Node ESM cannot bind its named exports, so read them off the default.
+const { utils } = ssh2;
 
 // Private key files in ~/.ssh (spec 25.9 "file khoá trong ~/.ssh/"). The daemon reads
 // them itself; only public metadata goes to the app. Encrypted keys need a passphrase

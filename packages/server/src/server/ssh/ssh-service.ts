@@ -1,4 +1,4 @@
-import { utils } from "ssh2";
+import ssh2 from "ssh2";
 import type { SshModules } from "./modules.js";
 import type { Client, ClientChannel, ParsedKey } from "ssh2";
 import type { Logger } from "pino";
@@ -52,6 +52,9 @@ import {
   type RemoteShell,
 } from "./ssh-terminal-session.js";
 import { wrapRemoteSession, type RemoteSessionHandle } from "./tapped-session.js";
+
+// ssh2 is CommonJS: Node ESM cannot bind its named exports, so read them off the default.
+const { utils } = ssh2;
 
 // Daemon-side SSH service (spec 25, ADR-0027). Owns storage, the prompt broker, the
 // connection pool, and the SSH terminal sessions (other protocols, e.g. Telnet, plug in

@@ -6185,3 +6185,57 @@ test("reviewed plugin updates gate before requests and preserve exact proposal d
     ]);
   }
 });
+
+test("raw ssh.* module pushes reach onSshModulePush and typed SSH listeners", async () => {
+  const mock = createMockTransport();
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "ssh_module_push_test",
+    transportFactory: () => mock.transport,
+    reconnect: { enabled: false },
+  });
+  clients.push(client);
+  const connectPromise = client.connect();
+  mock.triggerOpen();
+  await connectPromise;
+
+  const forwardStates: unknown[] = [];
+  const activity: unknown[] = [];
+  const offForward = client.onSshModulePush("ssh.forward.state", (message) =>
+    forwardStates.push(message),
+  );
+  const offActivity = client.onSshSessionActivity((event) => activity.push(event));
+  const forwardState = {
+    type: "ssh.forward.state",
+    state: {
+      ruleId: "fwd_a1b2c3",
+      status: "active",
+      boundPort: 15432,
+      activeConnections: 0,
+      changedAtMs: 1_000,
+    },
+  };
+  mock.triggerMessage(wrapSessionMessage(forwardState));
+  mock.triggerMessage(
+    wrapSessionMessage({
+      type: "ssh.session.activity",
+      terminalId: "ssh_a1b2c3",
+      serverId: "srv_a1b2c3",
+      lastOutputAtMs: 1_000,
+    }),
+  );
+  // A push of another type is not delivered to this subscription.
+  mock.triggerMessage(wrapSessionMessage({ type: "ssh.prompt.resolved", promptId: "hk_a1b2c3" }));
+
+  expect(forwardStates).toEqual([forwardState]);
+  expect(activity).toEqual([
+    {
+      type: "ssh.session.activity",
+      terminalId: "ssh_a1b2c3",
+      serverId: "srv_a1b2c3",
+      lastOutputAtMs: 1_000,
+    },
+  ]);
+  offForward();
+  offActivity();
+});

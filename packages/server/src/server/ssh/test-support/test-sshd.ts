@@ -1,5 +1,9 @@
-import { Client } from "ssh2";
+import ssh2 from "ssh2";
+import type { Client } from "ssh2";
 import type { AcquireSshClient, SshClientLease } from "../ssh-client-lease.js";
+
+// ssh2 is CommonJS: Node ESM cannot bind its named exports, so read them off the default.
+const { Client: Ssh2Client } = ssh2;
 
 // The real sshd started by start-test-sshd.sh. Integration tests talk to it directly with ssh2,
 // standing in for S1's connection layer behind the AcquireSshClient contract.
@@ -19,7 +23,7 @@ export interface TestSshPool {
 
 function connectClient(): Promise<Client> {
   return new Promise((resolve, reject) => {
-    const client = new Client();
+    const client = new Ssh2Client();
     client.once("ready", () => resolve(client));
     client.once("error", reject);
     client.connect({

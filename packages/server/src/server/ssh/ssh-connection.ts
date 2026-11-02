@@ -1,4 +1,5 @@
-import { Client, utils } from "ssh2";
+import ssh2 from "ssh2";
+import type { Client } from "ssh2";
 import type {
   BaseAgent,
   AnyAuthMethod,
@@ -15,6 +16,9 @@ import { DaemonSshAgent } from "./daemon-agent.js";
 import { evaluateHostKey, publicKeyAlgo } from "./known-hosts.js";
 import { connectThroughProxy, ProxyError, type ProxyTarget } from "./proxy-socket.js";
 import type { SshPromptBroker } from "./ssh-prompts.js";
+
+// ssh2 is CommonJS: Node ESM cannot bind its named exports, so read them off the default.
+const { Client: Ssh2Client, utils } = ssh2;
 
 // Spec 25.3 connect sequence, per hop of the jump chain (jump hosts first, the target
 // last; each later hop rides a `direct-tcpip` channel of the previous one, the first
@@ -178,7 +182,7 @@ function connectHop(ctx: HopContext): Promise<Client> {
   const { hop, input, index, count } = ctx;
   const { config, credentials } = hop;
   const isTarget = index === count - 1;
-  const client = new Client();
+  const client = new Ssh2Client();
   const username = config.username ?? "";
   const promptBase = {
     serverId: input.serverId,

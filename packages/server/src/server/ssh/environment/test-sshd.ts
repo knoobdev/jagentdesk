@@ -1,5 +1,9 @@
-import { Client } from "ssh2";
+import ssh2 from "ssh2";
+import type { Client } from "ssh2";
 import type { AcquireSshClient } from "../ssh-client-lease.js";
+
+// ssh2 is CommonJS: Node ESM cannot bind its named exports, so read them off the default.
+const { Client: Ssh2Client } = ssh2;
 
 // The real sshd the S7/S8 e2e tests run against (lscr.io/linuxserver/openssh-server published on
 // host port 2236, with the host Docker socket bind-mounted at /var/run/docker.sock):
@@ -16,7 +20,7 @@ export const TEST_SSHD = {
 
 export function connectTestClient(): Promise<Client> {
   return new Promise((resolve, reject) => {
-    const client = new Client();
+    const client = new Ssh2Client();
     client.once("ready", () => {
       // sshd reloads in the e2e tests drop live connections; a dead pooled client is expected.
       client.on("error", () => {});

@@ -8152,7 +8152,8 @@ export class DaemonClient {
 
   /** Raw pushes for SSH modules (`ssh.transfer.progress`, `ssh.forward.state`, …). */
   onSshModulePush(type: string, handler: (message: unknown) => void): () => void {
-    return this.on((message) => {
+    // Raw session messages: `on(handler)` only sees mapped daemon events, not module pushes.
+    return this.subscribeRawMessages((message) => {
       if (message.type === type) handler(message);
     });
   }

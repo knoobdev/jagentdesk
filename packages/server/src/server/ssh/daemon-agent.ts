@@ -1,6 +1,9 @@
-import { AgentProtocol, BaseAgent } from "ssh2";
+import ssh2 from "ssh2";
 import type { ParsedKey } from "ssh2";
 import type { Duplex } from "node:stream";
+
+// ssh2 is CommonJS: Node ESM cannot bind its named exports, so read them off the default.
+const { AgentProtocol, BaseAgent } = ssh2;
 
 // Spec 25.3 step 7: agent forwarding uses the daemon's own in-memory agent holding
 // only the key of the identity in use — never the system SSH_AUTH_SOCK. The same

@@ -1,5 +1,9 @@
-import { Client, type ConnectConfig } from "ssh2";
+import ssh2 from "ssh2";
+import type { Client, ConnectConfig } from "ssh2";
 import type { AcquireSshClient, SshClientLease } from "../ssh-client-lease.js";
+
+// ssh2 is CommonJS: Node ESM cannot bind its named exports, so read them off the default.
+const { Client: Ssh2Client } = ssh2;
 
 // Real-sshd fixture for the SSH S5/S6 integration tests. Start the server with
 //   docker run -d --name jad-sshd-snippets -p 2237:2222 -e PASSWORD_ACCESS=true \
@@ -18,7 +22,7 @@ export const SSHD_PASSWORD_CONFIG: ConnectConfig = {
 
 export function connectSshClient(config: ConnectConfig): Promise<Client> {
   return new Promise((resolve, reject) => {
-    const client = new Client();
+    const client = new Ssh2Client();
     client.once("ready", () => resolve(client));
     client.once("error", reject);
     client.connect(config);
@@ -34,7 +38,7 @@ export interface TestSshClients {
 
 /**
  * Test-only `AcquireSshClient`: one ssh2 connection per server id, opened with
- * `new Client().connect(...)`, standing in for S1's connection manager.
+ * `new Ssh2Client().connect(...)`, standing in for S1's connection manager.
  */
 export function createTestSshClients(servers: Record<string, ConnectConfig>): TestSshClients {
   const clients = new Map<string, Promise<Client>>();
