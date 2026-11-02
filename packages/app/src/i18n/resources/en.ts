@@ -2800,6 +2800,111 @@ export const en = {
       forked: "Training {{name}}",
     },
   },
+  ssh: {
+    snippets: {
+      library: {
+        search: "Search snippets",
+        newSnippet: "New snippet",
+        newPackage: "New package",
+        packageName: "Package name",
+        createPackage: "Create package",
+        packageSaveFailed: "Could not save the package",
+        deletePackage: "Delete package",
+        packageDeleteFailed: "Could not delete the package",
+        noPackage: "No package",
+        empty: "No snippets yet. Create one to run it on your servers.",
+        emptyPackage: "No snippets in this package",
+        loadFailed: "Could not load snippets",
+        run: "Run",
+        paste: "Paste",
+        runInAllTabs: "Run in all tabs",
+        runOnServers: "Run on servers",
+        edit: "Edit",
+        delete: "Delete",
+        confirmDelete: "Confirm delete",
+        deleteFailed: "Could not delete the snippet",
+      },
+      editor: {
+        label: "Name",
+        labelPlaceholder: "Show kernel version",
+        script: "Script",
+        scriptPlaceholder: "uname -a",
+        package: "Package",
+        noPackage: "None",
+        defaultTargets: "Default targets",
+        save: "Save snippet",
+        saveFailed: "Could not save the snippet",
+      },
+      run: {
+        searchServers: "Search servers",
+        selectedCount: "{{count}} selected",
+        selectAll: "Select all",
+        clearSelection: "Clear",
+        tooManyForWorkspace:
+          "A workspace holds at most {{max}} panes. Collect output instead, or pick fewer servers.",
+        runInWorkspace: "Run in new workspace",
+        collectOutput: "Run and collect output",
+        saveTargets: "Save targets",
+        targetsSaved: "Targets saved",
+        startFailed: "Could not start the run",
+        saveTargetsFailed: "Could not save the targets",
+      },
+      results: {
+        tally:
+          "{{success}} succeeded · {{failure}} failed · {{pending}} running · {{cancelled}} cancelled",
+        cancelAll: "Cancel all",
+        cancelFailed: "Could not cancel the run",
+        connecting: "Connecting…",
+        running: "Running…",
+        cancelled: "Cancelled",
+        failed: "Failed",
+        exitCode: "Exit code {{code}}",
+        signal: "Killed by {{signal}}",
+        truncated: "Output was cut at 1 MiB for this server.",
+      },
+      history: {
+        title: "Command history",
+        clear: "Clear history",
+        clearFailed: "Could not clear the history",
+        empty: "No commands sent to this server yet",
+        loadFailed: "Could not load the history",
+        fromInput: "Typed · {{time}}",
+        fromSnippet: "Snippet · {{time}}",
+        saveAsSnippet: "Save as snippet",
+      },
+      split: {
+        paneCount: "{{count}} of {{max}} panes",
+        splitRight: "Split right",
+        splitDown: "Split down",
+        broadcast: "Broadcast",
+        broadcastOn: "Broadcast input is on: keystrokes go to every pane",
+        saveTemplate: "Save as template",
+        closePane: "Close pane",
+      },
+      templates: {
+        title: "Workspace templates",
+        name: "Template name",
+        saveCurrent: "Save current workspace",
+        saved: "Template saved",
+        saveFailed: "Could not save the template",
+        loadFailed: "Could not load templates",
+        empty: "No saved workspaces",
+        open: "Open",
+        deleteFailed: "Could not delete the template",
+        panes: "{{count}} panes: {{summary}}",
+        localTerminal: "Local terminal",
+      },
+      appearance: {
+        theme: "Terminal theme",
+        appTheme: "app theme",
+        inherit: "Inherit ({{value}})",
+        fontSize: "Font size",
+        smaller: "Smaller font",
+        larger: "Larger font",
+        useInherited: "Use inherited size",
+      },
+    },
+  },
 } as const;
 
 type WidenStringLeaves<T> = {
@@ -2810,10 +2915,12 @@ type WidenStringLeaves<T> = {
 // ship translations for the gate screen they fall back to English via
 // i18next's fallbackLng.
 export type TranslationResources = WidenStringLeaves<
-  Omit<typeof en, "tailscaleLogin" | "forumNotifications" | "operatorContext">
+  Omit<typeof en, "tailscaleLogin" | "forumNotifications" | "operatorContext" | "ssh">
 > & {
   tailscaleLogin?: WidenStringLeaves<typeof en>["tailscaleLogin"];
   // Newer sections default to English until each locale is translated (i18next fallbackLng: "en").
   forumNotifications?: WidenStringLeaves<typeof en>["forumNotifications"];
   operatorContext?: WidenStringLeaves<typeof en>["operatorContext"];
+  // SSH servers (spec 25): English until each locale is translated.
+  ssh?: WidenStringLeaves<typeof en>["ssh"];
 };
