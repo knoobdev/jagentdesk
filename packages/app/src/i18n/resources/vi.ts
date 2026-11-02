@@ -742,4 +742,10 @@ export const vi = {
       forked: "Đang train {{name}}",
     },
   },
+  ssh: {
+    telnet: {
+      unencrypted: "Connection is not encrypted",
+      endpoint: "telnet://{{address}}:{{port}}",
+    },
+  },
 } as const;
