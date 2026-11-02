@@ -10,6 +10,9 @@ import type { HostToolPermissionRequest } from "../environment/agent-tools.js";
 import { createRemoteDockerTools } from "./agent-tools.js";
 import { RemoteDockerError, RemoteDockerHosts } from "./hosts.js";
 import { handleSshRemoteDockerMessage, type SshRemoteDockerOutboundMessage } from "./rpc.js";
+import { DockerService } from "../../docker/docker-service.js";
+import { DockerStreams } from "../../docker/docker-streams.js";
+import { disposeRemoteDocker, routeDockerMessage } from "./route.js";
 import { setDockerSocketAccess, setSshdOption } from "./test-remote-docker.js";
 
 // The test sshd has the host Docker socket mounted at /var/run/docker.sock (root:root 0660), so
@@ -298,6 +301,32 @@ describe.runIf(process.env.JAD_SSH_DOCKER_E2E === "1")(
       expect(afterDenied).toBe(before);
       expect(allowed).toEqual({ content: [{ type: "text", text: PROBE }] });
       expect(afterAllowed).not.toBe(before);
+    });
+
+    it("routes a docker/* request with serverId to the server and releases it after", async () => {
+      const hosts = new RemoteDockerHosts({
+        acquire: pool.acquire,
+        runDirectory: path.join(home, "run"),
+        idleTimeoutMs: 100,
+      });
+      const localService = new DockerService();
+      const local = { service: localService, streams: new DockerStreams(localService) };
+
+      const routed = await routeDockerMessage({ serverId: "srv_e2e" }, local, hosts);
+      const again = await routeDockerMessage({ serverId: "srv_e2e" }, local, hosts);
+      const snapshot = await routed.service.list();
+      routed.release();
+      routed.release();
+      const heldByOther = hosts.isAttached("srv_e2e");
+      again.release();
+      await waitFor(() => !hosts.isAttached("srv_e2e"), 2_000);
+      disposeRemoteDocker(local);
+
+      expect(routed.serverId).toBe("srv_e2e");
+      expect(routed.service).not.toBe(localService);
+      expect(again.service).toBe(routed.service);
+      expect(snapshot.containers.some((container) => container.name === PROBE)).toBe(true);
+      expect(heldByOther).toBe(true);
     });
   },
 );

@@ -19,6 +19,18 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function writeTwoLinesThenDestroy(socket: Socket): void {
+  socket.write(new TextEncoder().encode("first\r\nsecond\r\n"));
+  setTimeout(() => socket.destroy(), 100);
+}
+
+function rowText(row: Array<{ char: string }>): string {
+  return row
+    .map((cell) => cell.char)
+    .join("")
+    .trimEnd();
+}
+
 async function waitFor(condition: () => boolean, what: string, timeoutMs = 8_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!condition()) {
@@ -233,10 +245,7 @@ describe("TelnetTerminalSession against a fake server", () => {
   });
 
   it("emits exit with last output lines when the socket closes", async () => {
-    const server = await startFakeTelnetServer((socket) => {
-      socket.write(new TextEncoder().encode("first\r\nsecond\r\n"));
-      setTimeout(() => socket.destroy(), 100);
-    });
+    const server = await startFakeTelnetServer(writeTwoLinesThenDestroy);
     try {
       const session = await createTelnetTerminalSession({
         address: "127.0.0.1",
@@ -304,12 +313,7 @@ describe.skipIf(!telnetdReachable)("TelnetTerminalSession against jad-sshd-telne
       const state = session.getState();
       expect(state.rows).toBe(24);
       expect(state.cols).toBe(80);
-      const gridLines = state.grid.map((row) =>
-        row
-          .map((cell) => cell.char)
-          .join("")
-          .trimEnd(),
-      );
+      const gridLines = state.grid.map((row) => rowText(row));
       expect(gridLines.some((line) => line.includes("hi"))).toBe(true);
 
       session.send({ type: "resize", rows: 30, cols: 90 });
