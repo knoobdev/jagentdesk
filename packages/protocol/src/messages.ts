@@ -201,6 +201,11 @@ import {
   ProxyPushSchemas,
 } from "./proxy/rpc-schemas.js";
 import { SshRequestSchemas, SshResponseSchemas, SshPushSchemas } from "./ssh/rpc-schemas.js";
+import {
+  SideloadRequestSchemas,
+  SideloadResponseSchemas,
+  SideloadPushSchemas,
+} from "./sideload/rpc-schemas.js";
 import { SftpInboundSchemas, SftpOutboundSchemas } from "./ssh/sftp-schemas.js";
 import { ForwardingInboundSchemas, ForwardingOutboundSchemas } from "./ssh/forwarding-schemas.js";
 import { SnippetsInboundSchemas, SnippetsOutboundSchemas } from "./ssh/snippets-schemas.js";
@@ -4017,6 +4022,7 @@ export const AgentConfigApplyRequestMessageSchema = z.object({
 export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ...DatabaseRequestSchemas,
   ...SshRequestSchemas,
+  ...SideloadRequestSchemas,
   ...SftpInboundSchemas,
   ...ForwardingInboundSchemas,
   ...SnippetsInboundSchemas,
@@ -4630,6 +4636,8 @@ export const ServerInfoStatusPayloadSchema = z
         // SSH servers (spec 25 / ADR-0027, story S-20 S1). The client gates the
         // Servers surface on it so an old daemon never receives ssh.* RPCs.
         sshServers: z.boolean().optional(),
+        // Sideload (spec 26 / ADR-0032): the Sims "Sideload" tab and sideload.* / android.* RPCs.
+        sideload: z.boolean().optional(),
       })
       .optional(),
   })
@@ -7807,6 +7815,8 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ...DatabaseResponseSchemas,
   ...SshResponseSchemas,
   ...SshPushSchemas,
+  ...SideloadResponseSchemas,
+  ...SideloadPushSchemas,
   ...SftpOutboundSchemas,
   ...ForwardingOutboundSchemas,
   ...SnippetsOutboundSchemas,
