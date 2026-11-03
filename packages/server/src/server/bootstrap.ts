@@ -171,6 +171,10 @@ import { WorkspaceGitServiceImpl } from "./workspace-git-service.js";
 import { resolveWorkspaceIdForPath } from "./resolve-workspace-id-for-path.js";
 import { ForgeHubService } from "./session/forge/forge-hub-session.js";
 import { FileSecretStore } from "./database/secret-store.js";
+import { ArgoCdService } from "./argocd/service.js";
+import { createArgoCdClusterAccess } from "./argocd/cluster-access.js";
+import { createArgoCdAgentTools } from "./argocd/agent-tools.js";
+import { ARGOCD_INSTANCE_AGENT_LABEL } from "@jagentdesk/protocol/argocd/chat-prompt";
 import {
   archiveByScope,
   archivePersistedWorkspaceRecord,
@@ -1353,6 +1357,15 @@ export async function createJAgentDeskDaemon(
   const forgeSecretDir = path.resolve(config.jagentdeskHome, "forge");
   const forgeHubService = new ForgeHubService(new FileSecretStore(forgeSecretDir), forgeSecretDir);
   logger.info("Forge Hub service created");
+  // Argo CD (spec 30 / ADR-0034): registry + secrets under <home>/argocd, one SSE stream per
+  // instance while viewed, and the argocd_* agent tools.
+  const argocdService = new ArgoCdService({
+    jagentdeskHome: config.jagentdeskHome,
+    logger: logger.child({ module: "argocd" }),
+    clusters: createArgoCdClusterAccess(clusterRegistry),
+  });
+  await argocdService.initialize();
+  logger.info("Argo CD service initialized");
   const createScheduleLocalWorkspaceExternal = async (input: {
     cwd: string;
     firstAgentContext: FirstAgentContext;
@@ -1559,6 +1572,16 @@ export async function createJAgentDeskDaemon(
     clusterRegistry,
     databaseRegistry,
     sshAgentTools: (callerAgentId) => sshServerModules.createAgentTools(callerAgentId),
+    argocdAgentTools: (callerAgentId) =>
+      createArgoCdAgentTools({
+        service: argocdService,
+        callerAgentId,
+        defaultInstanceId: callerAgentId
+          ? (agentManager.getAgent(callerAgentId)?.labels?.[ARGOCD_INSTANCE_AGENT_LABEL] ?? null)
+          : null,
+        requestPermission: (agentId, request) =>
+          agentManager.requestHostToolPermission(agentId, request),
+      }),
     skillsStorage,
     forgeHub: forgeHubService,
     browserFingerprintProfiles: {
@@ -1860,6 +1883,7 @@ export async function createJAgentDeskDaemon(
               autorunService,
               sessionShareService,
               sshService,
+              argocdService,
             );
             // Session-share guests (ADR-0019): let the scoped ShareServer /ws hand validated guest
             // sockets to the daemon as agent-confined real sessions.
@@ -1969,6 +1993,7 @@ export async function createJAgentDeskDaemon(
     await sshModules.dispose().catch(() => undefined);
     await sshServerModules.dispose().catch(() => undefined);
     sshService.dispose();
+    argocdService.dispose();
     speechService.stop();
     await scheduleService.stop().catch(() => undefined);
     await autorunService?.stop().catch(() => undefined);

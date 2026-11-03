@@ -121,6 +121,7 @@ import type { AgentForumService } from "../../agent-forum/service.js";
 import { registerForumTools } from "./forum-tools.js";
 import type { ClusterRegistry } from "../../cluster/cluster-registry.js";
 import { registerSshAgentTools, type SshAgentTool } from "../../ssh/environment/agent-tools.js";
+import type { ArgoCdAgentTool } from "../../argocd/agent-tools.js";
 import type { DatabaseRegistry } from "../../database/database-registry.js";
 import type { DatabaseEngine } from "../../database/database-dto.js";
 import { execCommand } from "../../../utils/spawn.js";
@@ -189,6 +190,8 @@ export interface JAgentDeskToolHostDependencies {
   // SSH servers (spec 25.11): ssh_* tools and the server-aware docker_* tools that replace the
   // host-only ones (same names, same behaviour without serverId). Bound per caller agent.
   sshAgentTools?: (callerAgentId: string | null) => SshAgentTool[];
+  // Argo CD (spec 30.4): argocd_* tools bound per caller agent (default instance from its label).
+  argocdAgentTools?: (callerAgentId: string | null) => ArgoCdAgentTool[];
   // Daemon-wide Forge Hub service (spec 19 / ADR-0015). Lets ANY agent read and
   // operate GitHub/GitLab/Bitbucket via the forge_* tools, mirroring how
   // clusterRegistry backs the kubectl_* tools. Single instance so all agents
@@ -4086,6 +4089,15 @@ export function createJAgentDeskToolCatalog(
   // Forge Hub tools mirror the kubectl precedent: available to every agent and
   // registered before the voice-only early return so a voice session keeps them.
   registerForgeTools({ registerTool, options, callerAgentId });
+  if (options.argocdAgentTools) {
+    for (const tool of options.argocdAgentTools(callerAgentId ?? null)) {
+      registerTool(
+        tool.name,
+        { title: tool.title, description: tool.description, inputSchema: tool.inputSchema },
+        tool.handler,
+      );
+    }
+  }
   // Agent Forum / Team mode: any agent can post to a topic and manage its task board.
   if (options.agentForumService && callerAgentId) {
     const callerManagedTitle = (agentManager.getAgent(callerAgentId) as { title?: unknown } | null)

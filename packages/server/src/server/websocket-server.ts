@@ -21,6 +21,7 @@ import type { HostToolInstaller } from "./host-tools/installer.js";
 import type { HostCapabilities } from "@jagentdesk/protocol/host-capabilities";
 import type { LifetimeUsage, UsageDayRollup } from "@jagentdesk/protocol/usage-history";
 import type { ClusterRegistry } from "./cluster/cluster-registry.js";
+import type { ArgoCdService } from "./argocd/service.js";
 import type { DatabaseRegistry } from "./database/database-registry.js";
 import { SshService } from "./ssh/ssh-service.js";
 import type { ScheduleService } from "./schedule/service.js";
@@ -610,6 +611,10 @@ function requireWebSocketServices(params: {
  * WebSocket server that only accepts sockets + parses/forwards messages to the session layer.
  */
 // Tests construct the server without a daemon SSH service: fall back to an in-memory one.
+function argocdServiceOrNull(service: ArgoCdService | null | undefined): ArgoCdService | null {
+  return service ?? null;
+}
+
 function sshServiceOrInMemory(service: SshService | null | undefined): SshService {
   return service ?? new SshService();
 }
@@ -638,6 +643,7 @@ export class VoiceAssistantWebSocketServer {
   private readonly clusterRegistry: ClusterRegistry;
   private readonly databaseRegistry: DatabaseRegistry;
   private readonly sshService: SshService;
+  private readonly argocdService: ArgoCdService | null;
   private readonly scheduleService: ScheduleService;
   private autorunService!: AutorunService | null;
   private sessionShareService!: SessionShareService | null;
@@ -782,8 +788,10 @@ export class VoiceAssistantWebSocketServer {
     autorunService?: AutorunService | null,
     sessionShareService?: SessionShareService | null,
     sshService?: SshService | null,
+    argocdService?: ArgoCdService | null,
   ) {
     this.logger = logger.child({ module: "websocket-server" });
+    this.argocdService = argocdServiceOrNull(argocdService);
     this.advertiseDaemonStatusRpc = wsConfig.daemonStatusRpc !== false;
     this.serverId = serverId;
     if (typeof daemonVersion !== "string" || daemonVersion.trim().length === 0) {
@@ -1924,6 +1932,7 @@ export class VoiceAssistantWebSocketServer {
       clusterRegistry: this.clusterRegistry,
       databaseRegistry: this.databaseRegistry,
       sshService: this.sshService,
+      argocdService: this.argocdService,
       scheduleService: this.scheduleService,
       autorunService: this.autorunService,
       sessionShareService: this.sessionShareService,
@@ -2388,6 +2397,8 @@ export class VoiceAssistantWebSocketServer {
         // Session sharing (spec §21 / ADR-0018); advertised only when the daemon opted in.
         ...(this.sessionShareService ? { sessionSharing: true } : {}),
         ...(this.agentForumService ? { agentForum: true } : {}),
+        // Argo CD (spec 30 / ADR-0034): advertised only when the daemon runs the service.
+        ...(this.argocdService ? { argocd: true } : {}),
         // Advertise the plugin management surface only when a PluginService is
         // wired; without it the plugin.* RPCs return empty/disabled results.
         ...(this.pluginRuntime

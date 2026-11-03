@@ -173,6 +173,9 @@ import { ClusterSession } from "./session/cluster/cluster-session.js";
 import { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { DatabaseSession } from "./session/database/database-session.js";
 import { SshSession } from "./session/ssh/ssh-session.js";
+import { ArgoCdSession } from "./session/argocd/argocd-session.js";
+import type { ArgoCdService } from "./argocd/service.js";
+import { randomUUID } from "node:crypto";
 import { SshService } from "./ssh/ssh-service.js";
 import { DockerService } from "./docker/docker-service.js";
 import { DockerStreams } from "./docker/docker-streams.js";
@@ -534,6 +537,8 @@ export interface SessionOptions {
   clusterRegistry?: ClusterRegistry;
   databaseRegistry?: DatabaseRegistry;
   sshService?: SshService;
+  // Argo CD (spec 30): daemon-wide service; null when the host runs without it.
+  argocdService?: ArgoCdService | null;
   checkoutDiffManager: CheckoutDiffManager;
   github?: ForgeService;
   createAgentMcpTransport?: AgentMcpTransportFactory;
@@ -850,6 +855,7 @@ export class Session {
   private clusterSession!: ClusterSession;
   private databaseSession!: DatabaseSession;
   private sshSession!: SshSession;
+  private argocdSession!: ArgoCdSession;
   private sshService!: SshService;
   private clusterRegistry!: ClusterRegistry;
   private databaseRegistry!: DatabaseRegistry;
@@ -1087,6 +1093,13 @@ export class Session {
     this.initClusterSession(options);
     this.initDatabaseSession(options);
     this.initSshSession(options);
+    this.argocdSession = new ArgoCdSession({
+      host: { emit: (msg) => this.emit(msg) },
+      service: options.argocdService ?? null,
+      logger: this.sessionLogger,
+      sessionKey: randomUUID(),
+      canRunSsoLoopback: () => this.supports(CLIENT_CAPS.argocdSsoLoopback),
+    });
     this.providerCatalogSession = new ProviderCatalogSession({
       host: {
         emit: (msg) => this.emit(msg),
@@ -1353,6 +1366,7 @@ export class Session {
 
   updateClientCapabilities(capabilities: Record<string, unknown> | null, source?: object): void {
     this.clientCapabilities = parseClientCapabilities(capabilities);
+    this.argocdSession?.syncDelegateRegistration();
     if (source) {
       this.clientCapabilitiesBySource.set(source, this.clientCapabilities);
     }
@@ -2329,6 +2343,7 @@ export class Session {
       () => this.dispatchClusterMessage(msg),
       () => this.dispatchDatabaseMessage(msg),
       () => this.dispatchSshMessage(msg),
+      () => this.dispatchArgoCdMessage(msg),
       () => this.dispatchDockerMessage(msg),
       () => this.dispatchSimulatorMessage(msg),
       () => this.dispatchProxyMessage(msg),
@@ -4395,6 +4410,53 @@ export class Session {
       return undefined;
     }
     return undefined;
+  }
+
+  // Argo CD allowlist (spec 30.5): every argocd.* request is listed here AND handled in
+  // ArgoCdSession.handle(); a type missing from either is never answered.
+  // oxlint-disable-next-line complexity
+  private dispatchArgoCdMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    switch (msg.type) {
+      case "argocd.instances.list.request":
+      case "argocd.instances.save.request":
+      case "argocd.instances.delete.request":
+      case "argocd.instances.login.request":
+      case "argocd.instances.logout.request":
+      case "argocd.sso.begin.request":
+      case "argocd.sso.complete.request":
+      case "argocd.sso.delegate.request":
+      case "argocd.apps.list.request":
+      case "argocd.apps.subscribe.request":
+      case "argocd.apps.unsubscribe.request":
+      case "argocd.app.get.request":
+      case "argocd.app.tree.subscribe.request":
+      case "argocd.app.tree.unsubscribe.request":
+      case "argocd.app.diff.request":
+      case "argocd.app.manifests.request":
+      case "argocd.app.events.request":
+      case "argocd.app.logs.subscribe.request":
+      case "argocd.app.logs.unsubscribe.request":
+      case "argocd.app.sync.request":
+      case "argocd.app.refresh.request":
+      case "argocd.app.rollback.request":
+      case "argocd.app.terminate.request":
+      case "argocd.app.delete.request":
+      case "argocd.app.set_auto_sync.request":
+      case "argocd.app.confirm_pruning.request":
+      case "argocd.app.resource_actions.list.request":
+      case "argocd.app.resource_action.request":
+      case "argocd.can_i.request":
+      case "argocd.appsets.list.request":
+      case "argocd.projects.list.request":
+      case "argocd.repos.list.request":
+      case "argocd.clusters.list.request":
+      case "argocd.cluster_links.list.request":
+      case "argocd.cluster_links.set.request":
+      case "argocd.cluster_links.resolve.request":
+        return this.argocdSession.handle(msg);
+      default:
+        return undefined;
+    }
   }
 
   private dispatchSshMessage(msg: SessionInboundMessage): Promise<void> | undefined {
@@ -9301,6 +9363,7 @@ export class Session {
     this.workspaceGitObserver.dispose();
     this.workspaceFilesSession.dispose();
     this.clusterSession.dispose();
+    this.argocdSession.dispose();
   }
 }
 
