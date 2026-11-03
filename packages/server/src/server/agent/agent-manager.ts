@@ -1611,8 +1611,6 @@ export class AgentManager {
       "agent.manager.close.start",
     );
     await this.drainSessionEvents(agentId);
-    this.cancelRunningProviderSubagents(agentId);
-    const closedAgent = this.prepareAgentForClosure(agent, "agent closed");
     let closeError: unknown;
     try {
       await agent.session.close();
@@ -1620,6 +1618,9 @@ export class AgentManager {
       closeError = error;
     }
 
+    await this.drainSessionEvents(agentId);
+    this.cancelRunningProviderSubagents(agentId);
+    const closedAgent = this.prepareAgentForClosure(agent, "agent closed");
     let persistError: unknown;
     try {
       await this.persistSnapshot(closedAgent);
