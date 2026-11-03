@@ -466,6 +466,7 @@ export class SpecModeService {
       (other) =>
         other.state.agentId !== record.state.agentId &&
         other.state.enabled &&
+        this.agentManager.getAgent(other.state.agentId) !== null &&
         path.resolve(other.cwd) === path.resolve(record.cwd),
     );
     if (others.length === 0) return record;

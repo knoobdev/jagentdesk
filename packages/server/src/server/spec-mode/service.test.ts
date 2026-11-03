@@ -391,6 +391,17 @@ describe("Spec mode phases (spec 28.4)", () => {
 });
 
 describe("Two agents in one checkout (criterion 8)", () => {
+  it("ignores Spec mode state left by an agent that is no longer loaded", async () => {
+    await write(".specify/memory/constitution.md", FILLED_CONSTITUTION);
+    harness.agents.agents.set("agent_gone", { cwd: workspace, provider: "claude" });
+    await enableWithSetup("agent_gone");
+    harness.agents.agents.delete("agent_gone");
+    await enableWithSetup("agent_a");
+    const message = await harness.service.prepareUserMessage("agent_a", "a todo CLI");
+    expect(message?.text).toBe("/speckit-specify a todo CLI");
+    expect(harness.service.launchEnv("agent_a")).toBeNull();
+  });
+
   it("gives each agent its own feature directory and never writes feature.json", async () => {
     await write(".specify/memory/constitution.md", FILLED_CONSTITUTION);
     harness.agents.agents.set("agent_b", { cwd: workspace, provider: "claude" });
