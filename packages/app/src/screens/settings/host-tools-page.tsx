@@ -28,6 +28,7 @@ const CAPABILITY_ROWS: { id: HostCapabilityId; label: string }[] = [
   { id: "forgeGh", label: "GitHub CLI (gh)" },
   { id: "forgeGlab", label: "GitLab CLI (glab)" },
   { id: "forgeTea", label: "Gitea CLI (tea)" },
+  { id: "specKit", label: "Spec mode scripts (jq or python3)" },
 ];
 
 const MAX_PROGRESS_LINES = 8;

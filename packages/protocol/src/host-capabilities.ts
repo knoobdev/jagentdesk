@@ -18,6 +18,8 @@ export const HOST_CAPABILITY_IDS = [
   "forgeGh",
   "forgeGlab",
   "forgeTea",
+  // Spec mode helper scripts (spec 28.3 step 1): bash + (jq | python3), or PowerShell 5.1+.
+  "specKit",
 ] as const;
 export type HostCapabilityId = (typeof HOST_CAPABILITY_IDS)[number];
 
