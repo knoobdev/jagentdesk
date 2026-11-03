@@ -1,0 +1,122 @@
+{
+  "specify": "specify init --here --force --ignore-agent-tools --integration claude --script ps --integration-options=--no-model-invocation",
+  "specifyVersion": "1.3.0",
+  "files": {
+    ".claude/skills/speckit-analyze/SKILL.md": {
+      "sha256": "3bb211c5d1e52fbf3da2f7b6dc7a691f5c8facc0c09fde88dd861f225d3d5d0a",
+      "mode": "644"
+    },
+    ".claude/skills/speckit-checklist/SKILL.md": {
+      "sha256": "fc4b688cfaf4e3055a96ae3425be18d29fee4b9ade5a9262e7772a43097c40c2",
+      "mode": "644"
+    },
+    ".claude/skills/speckit-clarify/SKILL.md": {
+      "sha256": "0108fe11806a1dc3c477dc5bb129839f24f842da477c4d69ace49e6e0f842e88",
+      "mode": "644"
+    },
+    ".claude/skills/speckit-constitution/SKILL.md": {
+      "sha256": "29d751d72fec2950dcb4310d86adaaaacccecf7a6a54e57c6a4853b6a2cab27f",
+      "mode": "644"
+    },
+    ".claude/skills/speckit-converge/SKILL.md": {
+      "sha256": "bf743aded2b23a759d9f5b0cef8d84f4309f4960428609a221795e617517559f",
+      "mode": "644"
+    },
+    ".claude/skills/speckit-implement/SKILL.md": {
+      "sha256": "195f6a01452edff73c1a2b432b5b10ebeffcacb673e6ef123cb355fa0d326234",
+      "mode": "644"
+    },
+    ".claude/skills/speckit-plan/SKILL.md": {
+      "sha256": "1f5cc325ef690797d343a61c6aee0f8a600ef57b79de7c6fe3ab4802cf8a551d",
+      "mode": "644"
+    },
+    ".claude/skills/speckit-specify/SKILL.md": {
+      "sha256": "ea494d1d3aab18a11aa1a85b362a9d9e5be464b1e5b8486d86177b5de6eb61fc",
+      "mode": "644"
+    },
+    ".claude/skills/speckit-tasks/SKILL.md": {
+      "sha256": "2fe8b2928225ccaf8caa4f802da9aa7c214af3c05ee36481b7035c03fdcaee62",
+      "mode": "644"
+    },
+    ".specify/.gitignore": {
+      "sha256": "0a61c5378b0bb2e0f85babff99c8b166f2170a2c12378cd17d929aa19296ec88",
+      "mode": "644"
+    },
+    ".specify/init-options.json": {
+      "sha256": "f89a1390ac24454e7ad8e54e8314008cf2aacba1bdcd6bd94bb76e25dd307dd0",
+      "mode": "644"
+    },
+    ".specify/integration.json": {
+      "sha256": "38757f540c9d8af80a5631319d06a579a21b80d0e55e99140564260654aa56b7",
+      "mode": "644"
+    },
+    ".specify/integrations/claude.manifest.json": {
+      "sha256": "6461ae6a4edfd564fd0dd99dff84ad06b2988e0c0759fabd9bdff300749bc479",
+      "mode": "644"
+    },
+    ".specify/integrations/speckit.manifest.json": {
+      "sha256": "38904daa385f8a193c459a8cfc7d64cbc08fbdb8c32dd5114676b908471ceb98",
+      "mode": "644"
+    },
+    ".specify/memory/.constitution-template.json": {
+      "sha256": "8fc4b39294bae0c10d59547ad7d415b6f0e890d656cbf7171dd567f4e9054711",
+      "mode": "644"
+    },
+    ".specify/memory/constitution.md": {
+      "sha256": "ce7549540fa45543cca797a150201d868e64495fdff39dc38246fb17bd4024b3",
+      "mode": "644"
+    },
+    ".specify/scripts/powershell/check-prerequisites.ps1": {
+      "sha256": "b5b522bd3ee99a490903cc0acb2ded41c662c5f18b9b587f44755a883aeb90d2",
+      "mode": "644"
+    },
+    ".specify/scripts/powershell/common.ps1": {
+      "sha256": "c4816519ffb0b930427559b3ec729ef04a56162f4ef334958c8c50a3f92def9d",
+      "mode": "644"
+    },
+    ".specify/scripts/powershell/create-new-feature.ps1": {
+      "sha256": "481c7368541a816b1679e5ed65fa9e5aea84b09f8be3a02ff8a340e3b48dd58a",
+      "mode": "644"
+    },
+    ".specify/scripts/powershell/resolve-template.ps1": {
+      "sha256": "e49c565a09902e4ebd4b5a51c4e014d5067fdee5b1592f15cb44ef31f430d745",
+      "mode": "644"
+    },
+    ".specify/scripts/powershell/setup-plan.ps1": {
+      "sha256": "5939ef98418e8dc8cc722ef53ba359fc814f3d2a9fd7620f04e8d145a7041f1a",
+      "mode": "644"
+    },
+    ".specify/scripts/powershell/setup-tasks.ps1": {
+      "sha256": "d286da96d5b7e0075daa56e834fc1e1eb5beaddbc7e06d3ba898d0e9c071c50a",
+      "mode": "644"
+    },
+    ".specify/templates/checklist-template.md": {
+      "sha256": "856532b3cb66171c662cc16f16b31a5856e4655a8666aad1e545bbfc7f603ca1",
+      "mode": "644"
+    },
+    ".specify/templates/constitution-template.md": {
+      "sha256": "ce7549540fa45543cca797a150201d868e64495fdff39dc38246fb17bd4024b3",
+      "mode": "644"
+    },
+    ".specify/templates/plan-template.md": {
+      "sha256": "7e637502d41eccf0ca672496636365691fdca62ef37b27ec07fcb412dbfa90d4",
+      "mode": "644"
+    },
+    ".specify/templates/spec-template.md": {
+      "sha256": "3945437fc35cd30a5b2bf7beea680337c3516826d3efa5a6b92c4a7eca1ba28e",
+      "mode": "644"
+    },
+    ".specify/templates/tasks-template.md": {
+      "sha256": "fc29a233f6f5a27ca31f1aa46b596af6500c627441c6e62b2bc4a1d721525842",
+      "mode": "644"
+    },
+    ".specify/workflows/speckit/workflow.yml": {
+      "sha256": "177761c5e7df28126beea043b5cb45aeaf7958090c022dc11ac71399422fcfbc",
+      "mode": "644"
+    },
+    ".specify/workflows/workflow-registry.json": {
+      "sha256": "e318477b99a7062442979f23de380b3a4d25fb28b1badb50bcceed91effc8e21",
+      "mode": "600"
+    }
+  }
+}
