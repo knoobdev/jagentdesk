@@ -442,7 +442,7 @@ export class HostToolInstaller {
         `${release.asset.binaryName} not found in the archive`,
       );
     }
-    const destination = path.join(binDir, release.asset.binaryName);
+    const destination = path.join(binDir, release.asset.installAs ?? release.asset.binaryName);
     await fs.rm(destination, { force: true });
     await fs.copyFile(binary, destination);
     if (!windows) await fs.chmod(destination, 0o755);

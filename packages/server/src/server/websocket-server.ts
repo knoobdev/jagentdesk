@@ -17,6 +17,7 @@ import type { NativeSkillsService } from "./skills-native/index.js";
 import type { Skill } from "@jagentdesk/protocol/skills";
 import type { UsageHistoryStorage } from "./usage/usage-history-storage.js";
 import type { HostCapabilityService } from "./host-capabilities/service.js";
+import type { PhysicalDeviceHub } from "./devices/hub.js";
 import type { HostToolInstaller } from "./host-tools/installer.js";
 import type { HostCapabilities } from "@jagentdesk/protocol/host-capabilities";
 import type { LifetimeUsage, UsageDayRollup } from "@jagentdesk/protocol/usage-history";
@@ -633,6 +634,7 @@ export class VoiceAssistantWebSocketServer {
   private skillsStorage: NativeSkillsService | null = null;
   private usageHistory: UsageHistoryStorage | null = null;
   private hostCapabilities: HostCapabilityService | null = null;
+  private physicalDevices: PhysicalDeviceHub | null = null;
   private hostToolInstaller: HostToolInstaller | null = null;
   private unsubscribeHostCapabilities: (() => void) | null = null;
   private readonly clusterRegistry: ClusterRegistry;
@@ -1275,6 +1277,11 @@ export class VoiceAssistantWebSocketServer {
   }
 
   /** Spec 24.2: report what this host can run; re-broadcast server_info when it changes. */
+  // Spec 27: the daemon-wide physical device hub sessions route android:serial:*/ios:* udids to.
+  public setPhysicalDevices(hub: PhysicalDeviceHub | null): void {
+    this.physicalDevices = hub;
+  }
+
   public setHostCapabilities(
     service: HostCapabilityService | null,
     installer: HostToolInstaller | null = null,
@@ -1921,6 +1928,7 @@ export class VoiceAssistantWebSocketServer {
       usageHistory: this.usageHistory,
       hostCapabilities: this.hostCapabilities,
       hostToolInstaller: this.hostToolInstaller,
+      physicalDevices: this.physicalDevices,
       clusterRegistry: this.clusterRegistry,
       databaseRegistry: this.databaseRegistry,
       sshService: this.sshService,

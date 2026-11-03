@@ -46,6 +46,8 @@ export interface ReleaseAssetSpec {
   kind: ArchiveKind;
   /** File name of the binary inside the archive (searched anywhere in it). */
   binaryName: string;
+  /** Installed file name when it differs from binaryName (go-ios ships `ios-<arch>` on Linux). */
+  installAs?: string;
 }
 
 export type ChecksumSource =
@@ -226,6 +228,47 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
       launcher: { unix: "maestro/bin/maestro", windows: "maestro/bin/maestro.bat" },
     },
     notes: ["Maestro needs Java 17 or newer."],
+  },
+  // go-ios (spec 27.1): iPhones and iPads on any host OS. The desktop app bundles it; a daemon
+  // installed without the app gets it here. Windows builds exist for amd64 only.
+  "go-ios": {
+    id: "go-ios",
+    binary: "ios",
+    capability: "iosPhysical",
+    managers: {},
+    release: {
+      source: { kind: "github", repo: "danielpaulus/go-ios" },
+      checksum: { kind: "github-digest" },
+      assetFor: (target) => {
+        if (target.os === "darwin")
+          return { asset: "go-ios-mac.zip", kind: "zip", binaryName: "ios" };
+        if (target.os === "windows") {
+          return target.arch === "amd64"
+            ? { asset: "go-ios-win.zip", kind: "zip", binaryName: "ios.exe" }
+            : null;
+        }
+        return {
+          asset: "go-ios-linux.zip",
+          kind: "zip",
+          binaryName: `ios-${target.arch}`,
+          installAs: "ios",
+        };
+      },
+    },
+    notes: [
+      "iPhones and iPads also need the Apple device service: built in on macOS, iTunes or Apple Mobile Device Support on Windows, usbmuxd on Linux.",
+    ],
+    manualHints: ["sudo apt install usbmuxd", "sudo dnf install usbmuxd"],
+  },
+
+  // ffmpeg turns an Android phone's H.264 screen into JPEG frames (spec 27.1); without it the screen
+  // falls back to screenshots. Package managers only: vendors publish no single release asset.
+  ffmpeg: {
+    id: "ffmpeg",
+    binary: "ffmpeg",
+    capability: "androidPhysical",
+    managers: { brew: "ffmpeg", winget: { id: "Gyan.FFmpeg" }, scoop: "ffmpeg" },
+    manualHints: ["sudo apt install ffmpeg", "sudo dnf install ffmpeg", "sudo pacman -S ffmpeg"],
   },
 };
 

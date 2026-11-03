@@ -1,3 +1,4 @@
+import { PhysicalDeviceHub } from "./devices/hub.js";
 import { HostCapabilityService } from "./host-capabilities/service.js";
 import { ensureToolDirsOnPath, HostToolInstaller } from "./host-tools/installer.js";
 import type { HttpFetch } from "./host-tools/release.js";
@@ -1317,6 +1318,14 @@ export async function createJAgentDeskDaemon(
   });
   await clusterRegistry.initialize();
   logger.info("Cluster registry created");
+  // Spec 27 / ADR-0033: one owner for physical phones and tablets, shared by every client
+  // session and every agent's sim_* tools. Apple-account signing (spec 26) plugs in through
+  // DeviceSigner once the Sideload service is part of this daemon.
+  const physicalDevices = new PhysicalDeviceHub({
+    jagentdeskHome: config.jagentdeskHome,
+    logger,
+    signer: null,
+  });
   const databaseRegistry = new DatabaseRegistry({
     jagentdeskHome: config.jagentdeskHome,
     logger,
@@ -1585,6 +1594,7 @@ export async function createJAgentDeskDaemon(
     },
     requestHostToolPermission: (agentId, req) =>
       agentManager.requestHostToolPermission(agentId, req),
+    physicalDevices,
     logger,
   });
   const createAgentToolCatalog = (runtime: JAgentDeskToolRuntimeContext) =>
@@ -1888,6 +1898,7 @@ export async function createJAgentDeskDaemon(
             });
             setForgeToolInstaller(hostToolInstaller);
             wsServer?.setHostCapabilities(hostCapabilities, hostToolInstaller);
+            wsServer?.setPhysicalDevices(physicalDevices);
             void hostCapabilities.refresh().catch((error: unknown) => {
               logger.warn({ err: error }, "Host capability probe failed");
             });
@@ -1966,6 +1977,7 @@ export async function createJAgentDeskDaemon(
     await agentStorage.flush().catch(() => undefined);
     await providerSnapshotManager.shutdown();
     terminalManager.killAll();
+    physicalDevices.dispose();
     await sshModules.dispose().catch(() => undefined);
     await sshServerModules.dispose().catch(() => undefined);
     sshService.dispose();
