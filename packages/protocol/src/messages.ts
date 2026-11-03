@@ -1511,6 +1511,15 @@ export const ProjectListRequestMessageSchema = z.object({
   sync: DirectorySyncRequestSchema.optional(),
 });
 
+export const ProjectSuggestionsRequestSchema = z.object({
+  type: z.literal("project.suggestions.request"),
+  requestId: z.string(),
+  providers: z.array(z.string()).optional(),
+  // ISO timestamp. Sessions older than this are ignored. Defaults to 30 days ago.
+  since: z.string().optional(),
+  limit: z.number().int().positive().max(100).optional(),
+});
+
 export const FetchAgentHistoryRequestMessageSchema = z.object({
   type: z.literal("fetch_agent_history_request"),
   requestId: z.string(),
@@ -4258,6 +4267,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   FetchRecentProviderSessionsRequestMessageSchema,
   FetchWorkspacesRequestMessageSchema,
   ProjectListRequestMessageSchema,
+  ProjectSuggestionsRequestSchema,
   FetchAgentRequestMessageSchema,
   DeleteAgentRequestMessageSchema,
   ArchiveAgentRequestMessageSchema,
@@ -4811,6 +4821,8 @@ export const ServerInfoStatusPayloadSchema = z
         projectCreateDirectory: z.boolean().optional(),
         // COMPAT(projectList): added in v0.2.4, drop the gate when floor >= v0.2.4.
         projectList: z.boolean().optional(),
+        // COMPAT(projectSuggestions): added in v0.14.1, remove gate after 2027-05-01.
+        projectSuggestions: z.boolean().optional(),
         // COMPAT(commitsList): added in v0.1.110, remove gate after 2027-01-16.
         commitsList: z.boolean().optional(),
         // COMPAT(commitBaseClassification): added in v0.2.0, remove gate after 2027-01-23.
@@ -5434,6 +5446,24 @@ export const ProjectListResponseMessageSchema = z.object({
   payload: z.object({
     requestId: z.string(),
     projects: z.array(WorkspaceProjectDescriptorPayloadSchema),
+  }),
+});
+
+export const ProjectSuggestionSchema = z.object({
+  // The main repository root for git checkouts and their worktrees; the session cwd otherwise.
+  rootPath: z.string(),
+  displayName: z.string(),
+  sessionCount: z.number().int().nonnegative(),
+  providerIds: z.array(z.string()),
+  lastActivityAt: z.string(),
+});
+
+export const ProjectSuggestionsResponseSchema = z.object({
+  type: z.literal("project.suggestions.response"),
+  payload: z.object({
+    requestId: z.string(),
+    suggestions: z.array(ProjectSuggestionSchema),
+    providerErrors: z.array(z.object({ provider: z.string(), message: z.string() })),
   }),
 });
 
@@ -8239,6 +8269,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   WorkspaceUpdateMessageSchema,
   ProjectUpdateMessageSchema,
   ProjectListResponseMessageSchema,
+  ProjectSuggestionsResponseSchema,
   ScriptStatusUpdateMessageSchema,
   WorkspaceSetupProgressMessageSchema,
   WorkspaceSetupStatusResponseMessageSchema,
@@ -8733,6 +8764,9 @@ export type FetchRecentProviderSessionsRequestMessage = z.infer<
 >;
 export type FetchWorkspacesRequestMessage = z.infer<typeof FetchWorkspacesRequestMessageSchema>;
 export type ProjectListRequestMessage = z.infer<typeof ProjectListRequestMessageSchema>;
+export type ProjectSuggestionsRequest = z.infer<typeof ProjectSuggestionsRequestSchema>;
+export type ProjectSuggestion = z.infer<typeof ProjectSuggestionSchema>;
+export type ProjectSuggestionsResponse = z.infer<typeof ProjectSuggestionsResponseSchema>;
 export type FetchAgentRequestMessage = z.infer<typeof FetchAgentRequestMessageSchema>;
 export type AgentForkContextRequestMessage = z.infer<typeof AgentForkContextRequestMessageSchema>;
 export type SendAgentMessageRequest = z.infer<typeof SendAgentMessageRequestSchema>;

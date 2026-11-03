@@ -157,6 +157,7 @@ import {
 } from "./agent/import-sessions.js";
 import { exportHostData } from "./migration/export-host-data.js";
 import { importHostData } from "./migration/import-host-data.js";
+import { listProjectSuggestions, ProjectSuggestionsRequestError } from "./project-suggestions.js";
 import {
   checkoutLiteFromGitSnapshot,
   checkoutFromPersistedWorkspacePlacement,
@@ -3497,6 +3498,8 @@ export class Session {
         return this.handleFetchWorkspacesRequest(msg);
       case "project.list.request":
         return this.handleProjectListRequest(msg.requestId);
+      case "project.suggestions.request":
+        return this.handleProjectSuggestionsRequest(msg);
       case "jagentdesk_worktree_list_request":
         return this.handleJAgentDeskWorktreeListRequest(msg);
       case "jagentdesk_worktree_archive_request":
@@ -8284,6 +8287,37 @@ export class Session {
           requestType: "project.list.request",
           error: error instanceof Error ? error.message : "Failed to list projects",
           code: "project_list_failed",
+        },
+      });
+    }
+  }
+
+  private async handleProjectSuggestionsRequest(
+    request: Extract<SessionInboundMessage, { type: "project.suggestions.request" }>,
+  ): Promise<void> {
+    try {
+      const result = await listProjectSuggestions({
+        request,
+        agentManager: this.agentManager,
+        projectRegistry: this.projectRegistry,
+        workspaceGitService: this.workspaceGitService,
+      });
+      this.emit({
+        type: "project.suggestions.response",
+        payload: { requestId: request.requestId, ...result },
+      });
+    } catch (error) {
+      this.sessionLogger.error({ err: error }, "Failed to handle project.suggestions.request");
+      this.emit({
+        type: "rpc_error",
+        payload: {
+          requestId: request.requestId,
+          requestType: request.type,
+          error: error instanceof Error ? error.message : "Failed to list project suggestions",
+          code:
+            error instanceof ProjectSuggestionsRequestError
+              ? error.code
+              : "project_suggestions_failed",
         },
       });
     }

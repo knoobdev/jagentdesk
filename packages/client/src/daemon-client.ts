@@ -1418,6 +1418,14 @@ export type FetchWorkspacesOptions = Omit<FetchWorkspacesRequest, "type" | "requ
 };
 export type FetchWorkspacesEntry = FetchWorkspacesPayload["entries"][number];
 export type FetchWorkspacesPageInfo = FetchWorkspacesPayload["pageInfo"];
+export type ProjectSuggestionsPayload = Extract<
+  SessionOutboundMessage,
+  { type: "project.suggestions.response" }
+>["payload"];
+export type ProjectSuggestionsOptions = Omit<
+  Extract<SessionInboundMessage, { type: "project.suggestions.request" }>,
+  "type" | "requestId"
+> & { requestId?: string };
 export type ProjectListPayload = Extract<
   SessionOutboundMessage,
   { type: "project.list.response" }
@@ -3163,6 +3171,19 @@ export class DaemonClient {
         if (msg.type !== "project.list.response") return null;
         if (msg.payload.requestId !== resolvedRequestId) return null;
         return msg.payload;
+      },
+    });
+  }
+
+  /** Repositories the user ran agent sessions in recently, grouped by main checkout. */
+  listProjectSuggestions(options?: ProjectSuggestionsOptions): Promise<ProjectSuggestionsPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"project.suggestions.response">({
+      requestId: options?.requestId,
+      message: {
+        type: "project.suggestions.request",
+        ...(options?.providers ? { providers: options.providers } : {}),
+        ...(options?.since ? { since: options.since } : {}),
+        ...(options?.limit ? { limit: options.limit } : {}),
       },
     });
   }
