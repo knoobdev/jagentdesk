@@ -50,6 +50,8 @@ const OPTIONAL_ENGLISH_FALLBACK_PREFIXES = [
   "operatorContext.",
   // SSH feature modules (resources/ssh-modules.ts) ship English in every locale for now.
   "ssh.",
+  // Agent activity graph (spec 31): English and Vietnamese ship first; other locales fall back.
+  "activityGraph.",
 ];
 function isOptionalEnglishFallbackKey(key: string): boolean {
   return OPTIONAL_ENGLISH_FALLBACK_PREFIXES.some((prefix) => key.startsWith(prefix));
