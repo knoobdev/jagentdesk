@@ -166,6 +166,8 @@ import type { AutorunService } from "./autorun/service.js";
 import { SessionShareSession } from "./session/session-share/session-share-session.js";
 import { AgentForumSession } from "./session/agent-forum/agent-forum-session.js";
 import type { AgentForumService } from "./agent-forum/service.js";
+import type { ActivityGraphService } from "./agent/activity-graph/service.js";
+import { ActivityGraphSession } from "./session/activity-graph/activity-graph-session.js";
 import { presentForumTopic } from "./agent-forum/archify-compat.js";
 import type { StoredForumTopic } from "@jagentdesk/protocol/agent-forum/types";
 import type { SessionShareService } from "./session-share/service.js";
@@ -511,6 +513,8 @@ export interface SessionOptions {
   autorunService?: AutorunService | null;
   sessionShareService?: SessionShareService | null;
   agentForumService?: AgentForumService | null;
+  // Agent activity graph (spec 31, ADR-0031); shared daemon-wide service.
+  activityGraphService?: ActivityGraphService | null;
   // Bootstraps the orchestration lead for a freshly created forum topic (wired in bootstrap.ts).
   agentForumBootstrap?:
     | ((input: { topicId: string; prompt: string; originAgentId?: string }) => void | Promise<void>)
@@ -847,6 +851,7 @@ export class Session {
   private readonly autorunSession: AutorunSession | null;
   private readonly sessionShareSession: SessionShareSession | null;
   private readonly agentForumSession: AgentForumSession | null;
+  private readonly activityGraphSession: ActivityGraphSession | null;
   private clusterSession!: ClusterSession;
   private databaseSession!: DatabaseSession;
   private sshSession!: SshSession;
@@ -897,6 +902,7 @@ export class Session {
       autorunService,
       sessionShareService,
       agentForumService,
+      activityGraphService,
       loopService,
       checkoutDiffManager,
       github,
@@ -1082,6 +1088,23 @@ export class Session {
           logger: this.sessionLogger,
           bootstrapTopic: options.agentForumBootstrap,
           notifyForumActivity: options.agentForumNotify,
+        })
+      : null;
+    this.activityGraphSession = activityGraphService
+      ? new ActivityGraphSession({
+          host: {
+            emit: (msg) => this.emit(msg),
+            supportsActivityGraph: () => this.supports(CLIENT_CAPS.activityGraph),
+            ensureAgentLoaded: async (agentId) => {
+              await ensureUnarchivedAgentLoaded(agentId, {
+                agentManager: this.agentManager,
+                agentStorage: this.agentStorage,
+                logger: this.sessionLogger,
+              });
+            },
+          },
+          service: activityGraphService,
+          logger: this.sessionLogger,
         })
       : null;
     this.initClusterSession(options);
@@ -2326,6 +2349,7 @@ export class Session {
       () => this.dispatchAutorunMessage(msg),
       () => this.dispatchSessionShareMessage(msg),
       () => this.dispatchAgentForumMessage(msg),
+      () => this.activityGraphSession?.dispatch(msg),
       () => this.dispatchClusterMessage(msg),
       () => this.dispatchDatabaseMessage(msg),
       () => this.dispatchSshMessage(msg),
@@ -9278,6 +9302,7 @@ export class Session {
     this.unsubscribePluginChanges?.();
     this.unsubscribePluginChanges = null;
     this.agentUpdates.dispose();
+    this.activityGraphSession?.dispose();
     await this.hubExecutionController?.cleanup();
     if (this.unsubscribeTerminalWorkspaceContributionEvents) {
       this.unsubscribeTerminalWorkspaceContributionEvents();
