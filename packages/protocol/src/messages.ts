@@ -8829,6 +8829,7 @@ export const WSHelloMessageSchema = z.object({
       [CLIENT_CAPS.projectedSubagentTimeline]: z.boolean().optional(),
       [CLIENT_CAPS.projectUpdates]: z.boolean().optional(),
       [CLIENT_CAPS.archifyDiagrams]: z.boolean().optional(),
+      [CLIENT_CAPS.binaryScreenFrames]: z.boolean().optional(),
       [CLIENT_CAPS.browserHost]: BrowserAutomationHostCapabilitySchema.optional(),
     })
     .passthrough()

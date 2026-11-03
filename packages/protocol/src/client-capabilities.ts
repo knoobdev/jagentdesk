@@ -34,6 +34,9 @@ export const CLIENT_CAPS = {
   // ForumDiagram.format "archify"; the daemon presents archify versions to older clients as a
   // Mermaid placeholder because their schema pins format to "mermaid".
   archifyDiagrams: "archify_diagrams",
+  // Spec 27.7 / ADR-0033: the client decodes live device screens pushed as binary JPEG frames
+  // (opcode 0x20). Clients without it keep polling simulator/screenshot.
+  binaryScreenFrames: "binary_screen_frames",
 } as const;
 
 export type ClientCapability = (typeof CLIENT_CAPS)[keyof typeof CLIENT_CAPS];
