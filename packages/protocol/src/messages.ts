@@ -114,6 +114,16 @@ import {
   ForumStreamSchema,
 } from "./agent-forum/rpc-schemas.js";
 import {
+  ActivityGraphGetRequestSchema,
+  ActivityGraphGetResponseSchema,
+  ActivityGraphSubscribeRequestSchema,
+  ActivityGraphSubscribeResponseSchema,
+  ActivityGraphUnsubscribeRequestSchema,
+  ActivityGraphUnsubscribeResponseSchema,
+  ActivityGraphChangedMessageSchema,
+  ActivityGraphStatusMessageSchema,
+} from "./agent-activity-graph.js";
+import {
   LoopRunRequestSchema,
   LoopListRequestSchema,
   LoopInspectRequestSchema,
@@ -852,6 +862,11 @@ export const AgentTimelineItemPayloadSchema: z.ZodType<AgentTimelineItem, unknow
       z.object({
         text: z.string(),
         completed: z.boolean(),
+        // Added after v0.9.47 (spec 31.5, ADR-0031). Optional: older daemons and providers
+        // without these facts (generic ACP) omit them; old clients strip them.
+        id: z.string().optional(),
+        status: z.enum(["pending", "in_progress", "completed"]).optional(),
+        activeForm: z.string().optional(),
       }),
     ),
   }),
@@ -902,6 +917,9 @@ export const AgentStreamEventPayloadSchema = z.discriminatedUnion("type", [
     type: z.literal("timeline"),
     provider: AgentProviderSchema,
     item: AgentTimelineItemPayloadSchema,
+    // Added after v0.9.47 (spec 31.5, ADR-0031). Optional: providers that do not identify
+    // turns omit it; old clients strip it.
+    turnId: z.string().optional(),
   }),
   z.object({
     type: z.literal("permission_requested"),
@@ -4274,6 +4292,9 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ForumChatReactRequestSchema,
   ForumChatRoomRequestSchema,
   ForumDiagramHtmlRequestSchema,
+  ActivityGraphGetRequestSchema,
+  ActivityGraphSubscribeRequestSchema,
+  ActivityGraphUnsubscribeRequestSchema,
   LoopRunRequestSchema,
   LoopListRequestSchema,
   LoopInspectRequestSchema,
@@ -4627,6 +4648,9 @@ export const ServerInfoStatusPayloadSchema = z
         autorunApproval: z.boolean().optional(), // Per-action approval mode for autorun (§20.7.3)
         sessionSharing: z.boolean().optional(), // Session sharing via Cloudflare tunnel (spec §21 / ADR-0018); default OFF
         agentForum: z.boolean().optional(), // Agent Forum / Team mode (docs/plans/active/agent-forum.md)
+        // Agent activity graph (spec 31 / ADR-0031): agent.activity_graph.* RPCs and pushes.
+        // COMPAT(activityGraph): added after v0.9.47; the app hides the toggle without it.
+        activityGraph: z.boolean().optional(),
         // SSH servers (spec 25 / ADR-0027, story S-20 S1). The client gates the
         // Servers surface on it so an old daemon never receives ssh.* RPCs.
         sshServers: z.boolean().optional(),
@@ -8026,6 +8050,11 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ForumChatRoomResponseSchema,
   ForumDiagramHtmlResponseSchema,
   ForumStreamSchema,
+  ActivityGraphGetResponseSchema,
+  ActivityGraphSubscribeResponseSchema,
+  ActivityGraphUnsubscribeResponseSchema,
+  ActivityGraphChangedMessageSchema,
+  ActivityGraphStatusMessageSchema,
   ForgeChangeRequestCreateResponseSchema,
   ForgeChangeRequestCloseResponseSchema,
   ForgeReleaseCreateResponseSchema,
