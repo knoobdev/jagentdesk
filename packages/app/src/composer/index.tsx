@@ -43,6 +43,7 @@ import {
 } from "@/composer/agent-controls";
 import { SkillsControl } from "@/composer/agent-controls/skills-control";
 import { AutonomousControl } from "@/composer/agent-controls/autonomous-control";
+import { SpecModeControl } from "@/composer/agent-controls/spec-mode-control";
 import { TeamModeControl } from "@/composer/agent-controls/team-mode-control";
 import {
   getTeamModeEnabled,
@@ -318,6 +319,7 @@ function renderLeftContent(args: RenderLeftContentArgs): ReactElement {
         isCompactLayout={isCompactLayout}
       />
       <SkillsControl agentId={agentId} serverId={serverId} />
+      <SpecModeControl agentId={agentId} serverId={serverId} />
       <AutonomousControl agentId={agentId} serverId={serverId} />
       <TeamModeControl agentId={agentId} serverId={serverId} />
     </View>

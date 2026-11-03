@@ -29,6 +29,8 @@ import { RetainedChatContent } from "./retained-chat-content";
 import { SidebarCallout } from "@/components/sidebar-callout";
 import { Composer } from "@/composer";
 import { AgentSkillTrainBar } from "@/components/agent-skill-train-bar";
+import { PhaseReviewBar } from "@/spec-mode/phase-review-bar";
+import { SpecModePhaseStrip } from "@/spec-mode/phase-strip";
 import { getActiveMessageSubmissions } from "@/composer/submission/model";
 import { RewindComposerRestoreProvider } from "@/components/rewind/composer-restore";
 import { getProviderIcon } from "@/components/provider-icons";
@@ -1528,6 +1530,11 @@ function ActiveAgentComposer({
   );
   const openFileExplorerForCheckout = usePanelStore((state) => state.openFileExplorerForCheckout);
   const setExplorerTabForCheckout = usePanelStore((state) => state.setExplorerTabForCheckout);
+  const { openFileInWorkspace } = paneContext;
+  const handleOpenSpecFile = useCallback(
+    (path: string) => openFileInWorkspace({ location: { path }, disposition: "main" }),
+    [openFileInWorkspace],
+  );
   const handleOpenWorkspaceAttachment = useCallback(
     (attachment: WorkspaceComposerAttachment) => {
       if (attachment.kind !== "review") {
@@ -1629,6 +1636,7 @@ function ActiveAgentComposer({
         onArchiveFinished={handleHideFinishedProviderSubagents}
         onDetachSubagent={canDetachSubagents ? handleDetachSubagent : undefined}
       />
+      {composerViewOnly ? null : <SpecModePhaseStrip serverId={serverId} agentId={agentId} />}
       {composerViewOnly ? (
         <View style={styles.composerViewOnly} testID="orchestration-composer-view-only">
           <Text style={styles.composerViewOnlyText}>
@@ -1661,6 +1669,14 @@ function ActiveAgentComposer({
           onMessageSent={onMessageSent}
           onClientSlashCommand={handleClientSlashCommand}
           isCompactLayout={isCompactComposerLayout}
+        />
+      )}
+      {composerViewOnly ? null : (
+        <PhaseReviewBar
+          serverId={serverId}
+          agentId={agentId}
+          cwd={cwd}
+          onOpenFile={handleOpenSpecFile}
         />
       )}
     </ReanimatedAnimated.View>
