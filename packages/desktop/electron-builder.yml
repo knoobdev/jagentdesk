@@ -47,6 +47,8 @@ asarUnpack:
   # Vendored archify renderers run as a child process (ELECTRON_RUN_AS_NODE), which cannot read
   # inside app.asar; the daemon resolves the unpacked copy (spec 23, ADR-0021).
   - node_modules/@jagentdesk/server/dist/server/vendor/archify/**/*
+  # scrcpy-server is pushed to Android devices by adb, a separate process (spec 27.1).
+  - node_modules/@jagentdesk/server/dist/server/vendor/scrcpy/**/*
   # Native add-ons cannot be dlopen'd from inside the asar — unpack them.
   - "**/*.node"
   - node_modules/better-sqlite3/**
@@ -60,6 +62,9 @@ extraResources:
     to: app-dist
   - from: ../server/dist/server/go/tsnet-bridge/tailnet-bridge
     to: bin/tailnet-bridge
+  # go-ios for iPhones and iPads (spec 27.1), fetched per OS by scripts/fetch-go-ios.mjs.
+  - from: .cache/go-ios
+    to: bin/go-ios
   - from: ../../skills
     to: skills
   - from: assets/editor-targets

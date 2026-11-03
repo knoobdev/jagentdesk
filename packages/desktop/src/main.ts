@@ -200,6 +200,23 @@ if (!process.env.JAGENTDESK_TSNET_BRIDGE_BIN && existsSync(packagedTsnetBridge))
   process.env.JAGENTDESK_TSNET_BRIDGE_BIN = packagedTsnetBridge;
 }
 
+// go-ios for iPhones and iPads (spec 27.1), bundled per OS by scripts/fetch-go-ios.mjs; Linux ships
+// one binary per architecture.
+const packagedGoIos = path.join(
+  process.resourcesPath,
+  "bin",
+  "go-ios",
+  process.platform === "win32" ? "ios.exe" : goIosUnixName(),
+);
+if (!process.env.JAGENTDESK_GO_IOS_BIN && existsSync(packagedGoIos)) {
+  process.env.JAGENTDESK_GO_IOS_BIN = packagedGoIos;
+}
+
+function goIosUnixName(): string {
+  if (process.platform !== "linux") return "ios";
+  return process.arch === "arm64" ? "ios-arm64" : "ios-amd64";
+}
+
 interface AttachedBrowserInput {
   browserId: string;
   workspaceId: string;
