@@ -173,6 +173,8 @@ import { ClusterSession } from "./session/cluster/cluster-session.js";
 import { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { DatabaseSession } from "./session/database/database-session.js";
 import { SshSession } from "./session/ssh/ssh-session.js";
+import { JiraSession } from "./session/jira/jira-session.js";
+import type { JiraService } from "./jira/service.js";
 import { SshService } from "./ssh/ssh-service.js";
 import { DockerService } from "./docker/docker-service.js";
 import { DockerStreams } from "./docker/docker-streams.js";
@@ -534,6 +536,8 @@ export interface SessionOptions {
   clusterRegistry?: ClusterRegistry;
   databaseRegistry?: DatabaseRegistry;
   sshService?: SshService;
+  // Daemon-wide Jira service (spec 29); absent in tests that do not exercise Jira.
+  jiraService?: JiraService | null;
   checkoutDiffManager: CheckoutDiffManager;
   github?: ForgeService;
   createAgentMcpTransport?: AgentMcpTransportFactory;
@@ -850,6 +854,7 @@ export class Session {
   private clusterSession!: ClusterSession;
   private databaseSession!: DatabaseSession;
   private sshSession!: SshSession;
+  private jiraSession: JiraSession | null = null;
   private sshService!: SshService;
   private clusterRegistry!: ClusterRegistry;
   private databaseRegistry!: DatabaseRegistry;
@@ -1087,6 +1092,13 @@ export class Session {
     this.initClusterSession(options);
     this.initDatabaseSession(options);
     this.initSshSession(options);
+    if (options.jiraService) {
+      this.jiraSession = new JiraSession({
+        service: options.jiraService,
+        emit: (msg) => this.emit(msg),
+        logger: this.sessionLogger,
+      });
+    }
     this.providerCatalogSession = new ProviderCatalogSession({
       host: {
         emit: (msg) => this.emit(msg),
@@ -2329,6 +2341,7 @@ export class Session {
       () => this.dispatchClusterMessage(msg),
       () => this.dispatchDatabaseMessage(msg),
       () => this.dispatchSshMessage(msg),
+      () => this.dispatchJiraMessage(msg),
       () => this.dispatchDockerMessage(msg),
       () => this.dispatchSimulatorMessage(msg),
       () => this.dispatchProxyMessage(msg),
@@ -4395,6 +4408,66 @@ export class Session {
       return undefined;
     }
     return undefined;
+  }
+
+  // Jira (spec 29.5). Every jira.* request is listed here AND handled in JiraSession.handle: a
+  // request missing from this list never reaches the handler and times out without a response.
+  // oxlint-disable-next-line complexity
+  private dispatchJiraMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    if (!this.jiraSession) return undefined;
+    switch (msg.type) {
+      case "jira.connections.list.request":
+      case "jira.connections.add.request":
+      case "jira.connections.remove.request":
+      case "jira.connections.test.request":
+      case "jira.oauth.begin.request":
+      case "jira.oauth.complete.request":
+      case "jira.oauth.delegate.request":
+      case "jira.projects.list.request":
+      case "jira.boards.list.request":
+      case "jira.boards.get.request":
+      case "jira.boards.configuration.request":
+      case "jira.board.issues.request":
+      case "jira.board.watch.request":
+      case "jira.board.unwatch.request":
+      case "jira.backlog.get.request":
+      case "jira.sprints.list.request":
+      case "jira.sprints.create.request":
+      case "jira.sprints.start.request":
+      case "jira.sprints.complete.request":
+      case "jira.sprints.move_issues.request":
+      case "jira.issue.get.request":
+      case "jira.issue.create.request":
+      case "jira.issue.create_meta.request":
+      case "jira.issue.update.request":
+      case "jira.issue.transitions.request":
+      case "jira.issue.transition.request":
+      case "jira.issue.assign.request":
+      case "jira.issue.rank.request":
+      case "jira.issue.watch.request":
+      case "jira.issue.unwatch.request":
+      case "jira.issue.watchers.set.request":
+      case "jira.issue.changelog.list.request":
+      case "jira.issue.comments.list.request":
+      case "jira.issue.comments.add.request":
+      case "jira.issue.comments.update.request":
+      case "jira.issue.worklog.list.request":
+      case "jira.issue.worklog.add.request":
+      case "jira.issue.attachments.upload.request":
+      case "jira.issue.attachments.download.request":
+      case "jira.issue.attachments.delete.request":
+      case "jira.issue.links.add.request":
+      case "jira.search.request":
+      case "jira.jql.suggest.request":
+      case "jira.filters.list.request":
+      case "jira.filters.save.request":
+      case "jira.users.find.request":
+      case "jira.swimlanes.get.request":
+      case "jira.swimlanes.set.request":
+        return this.jiraSession.handle(msg);
+      default:
+        return undefined;
+    }
   }
 
   private dispatchSshMessage(msg: SessionInboundMessage): Promise<void> | undefined {
@@ -9287,6 +9360,7 @@ export class Session {
 
     await this.voiceSession.cleanup();
 
+    this.jiraSession?.dispose();
     this.dockerStreams.disposeAll();
     disposeRemoteDocker({ service: this.dockerService, streams: this.dockerStreams });
     for (const routed of this.remoteDockerSubscriptions.values()) routed.release();

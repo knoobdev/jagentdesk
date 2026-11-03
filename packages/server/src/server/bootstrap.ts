@@ -183,6 +183,8 @@ import type { TerminalManager } from "../terminal/terminal-manager.js";
 import { createConfiguredTerminalManager } from "../terminal/terminal-manager-factory.js";
 import { createSshTerminalManager } from "../terminal/ssh-terminal-manager.js";
 import { SshService } from "./ssh/ssh-service.js";
+import { JiraService } from "./jira/service.js";
+import { atlassianEndpointsFromEnv } from "./jira/credentials.js";
 import { SshModules } from "./ssh/ssh-modules.js";
 import { SshModules as SshServerModules } from "./ssh/modules.js";
 import { applyTerminalAgentHookSetting } from "../terminal/agent-hooks/terminal-agent-hook-setting.js";
@@ -1353,6 +1355,15 @@ export async function createJAgentDeskDaemon(
   const forgeSecretDir = path.resolve(config.jagentdeskHome, "forge");
   const forgeHubService = new ForgeHubService(new FileSecretStore(forgeSecretDir), forgeSecretDir);
   logger.info("Forge Hub service created");
+  // Daemon-wide Jira service (spec 29 / ADR-0034 §4): the one credential manager for every
+  // session, view watch and agent tool. Secrets live under <home>/jira.
+  const jiraService = new JiraService({
+    jagentdeskHome: config.jagentdeskHome,
+    endpoints: atlassianEndpointsFromEnv(process.env),
+    logger,
+  });
+  await jiraService.initialize();
+  logger.info("Jira service initialized");
   const createScheduleLocalWorkspaceExternal = async (input: {
     cwd: string;
     firstAgentContext: FirstAgentContext;
@@ -1891,6 +1902,7 @@ export async function createJAgentDeskDaemon(
             void hostCapabilities.refresh().catch((error: unknown) => {
               logger.warn({ err: error }, "Host capability probe failed");
             });
+            wsServer?.setJiraService(jiraService);
             wsServer?.setAgentForum(
               agentForumService,
               createForumBootstrap({ agentManager, agentStorage, logger }),
@@ -1969,6 +1981,7 @@ export async function createJAgentDeskDaemon(
     await sshModules.dispose().catch(() => undefined);
     await sshServerModules.dispose().catch(() => undefined);
     sshService.dispose();
+    jiraService.dispose();
     speechService.stop();
     await scheduleService.stop().catch(() => undefined);
     await autorunService?.stop().catch(() => undefined);

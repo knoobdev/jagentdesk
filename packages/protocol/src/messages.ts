@@ -201,6 +201,7 @@ import {
   ProxyPushSchemas,
 } from "./proxy/rpc-schemas.js";
 import { SshRequestSchemas, SshResponseSchemas, SshPushSchemas } from "./ssh/rpc-schemas.js";
+import { JiraRequestSchemas, JiraResponseSchemas, JiraPushSchemas } from "./jira/rpc-schemas.js";
 import { SftpInboundSchemas, SftpOutboundSchemas } from "./ssh/sftp-schemas.js";
 import { ForwardingInboundSchemas, ForwardingOutboundSchemas } from "./ssh/forwarding-schemas.js";
 import { SnippetsInboundSchemas, SnippetsOutboundSchemas } from "./ssh/snippets-schemas.js";
@@ -1194,6 +1195,18 @@ export const ForgeIssueAttachmentSchema = z.object({
   projectPath: z.string().optional(),
 });
 
+// A Jira issue attached to a prompt (spec 29.4). `body` is the issue rendered as Markdown by the
+// daemon (description, acceptance criteria, text attachments), so the agent never sees raw ADF.
+export const JiraIssueAttachmentSchema = z.object({
+  type: z.literal("jira_issue"),
+  mimeType: z.literal("application/jagentdesk-jira-issue"),
+  connectionId: z.string(),
+  key: z.string(),
+  summary: z.string(),
+  url: z.string(),
+  body: z.string().nullable().optional(),
+});
+
 // Where a plugin-sourced text attachment came from (e.g. an issue in a tracker), so the UI can
 // show and link the original resource.
 export const ExternalResourceAttachmentMetadataSchema = z.object({
@@ -1260,6 +1273,7 @@ export const UploadedFileAttachmentSchema = z.object({
 export const AgentAttachmentSchema = z.discriminatedUnion("type", [
   ForgeChangeRequestAttachmentSchema,
   ForgeIssueAttachmentSchema,
+  JiraIssueAttachmentSchema,
   GitHubPrAttachmentSchema,
   GitHubIssueAttachmentSchema,
   TextAttachmentSchema,
@@ -4016,6 +4030,7 @@ export const AgentConfigApplyRequestMessageSchema = z.object({
 
 export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ...DatabaseRequestSchemas,
+  ...JiraRequestSchemas,
   ...SshRequestSchemas,
   ...SftpInboundSchemas,
   ...ForwardingInboundSchemas,
@@ -4630,6 +4645,9 @@ export const ServerInfoStatusPayloadSchema = z
         // SSH servers (spec 25 / ADR-0027, story S-20 S1). The client gates the
         // Servers surface on it so an old daemon never receives ssh.* RPCs.
         sshServers: z.boolean().optional(),
+        // Jira (spec 29 / ADR-0034): the client capability `jira`; gates the Jira surface,
+        // the jira.* RPCs and the `jira_issue` attachment.
+        jira: z.boolean().optional(),
       })
       .optional(),
   })
@@ -7805,6 +7823,8 @@ export type DaemonUpdateProgressMessage = z.infer<typeof DaemonUpdateProgressMes
 
 export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ...DatabaseResponseSchemas,
+  ...JiraResponseSchemas,
+  ...JiraPushSchemas,
   ...SshResponseSchemas,
   ...SshPushSchemas,
   ...SftpOutboundSchemas,

@@ -23,6 +23,7 @@ import type { LifetimeUsage, UsageDayRollup } from "@jagentdesk/protocol/usage-h
 import type { ClusterRegistry } from "./cluster/cluster-registry.js";
 import type { DatabaseRegistry } from "./database/database-registry.js";
 import { SshService } from "./ssh/ssh-service.js";
+import type { JiraService } from "./jira/service.js";
 import type { ScheduleService } from "./schedule/service.js";
 import type { AutorunService } from "./autorun/service.js";
 import type { SessionShareService } from "./session-share/service.js";
@@ -644,6 +645,8 @@ export class VoiceAssistantWebSocketServer {
   // Agent Forum / Team mode (docs/plans/active/agent-forum.md). Injected post-construction via
   // setAgentForum() so the giant positional constructor need not grow.
   private agentForumService: AgentForumService | null = null;
+  // Jira (spec 29), injected post-construction like the Agent Forum.
+  private jiraService: JiraService | null = null;
   private agentForumBootstrap:
     | ((input: { topicId: string; prompt: string; originAgentId?: string }) => void | Promise<void>)
     | null = null;
@@ -1858,6 +1861,10 @@ export class VoiceAssistantWebSocketServer {
     return updated;
   }
 
+  public setJiraService(service: JiraService | null): void {
+    this.jiraService = service;
+  }
+
   // Inject the Agent Forum service + its orchestration-bootstrap hook after construction (Team mode).
   public setAgentForum(
     service: AgentForumService | null,
@@ -1924,6 +1931,7 @@ export class VoiceAssistantWebSocketServer {
       clusterRegistry: this.clusterRegistry,
       databaseRegistry: this.databaseRegistry,
       sshService: this.sshService,
+      jiraService: this.jiraService,
       scheduleService: this.scheduleService,
       autorunService: this.autorunService,
       sessionShareService: this.sessionShareService,
@@ -2388,6 +2396,8 @@ export class VoiceAssistantWebSocketServer {
         // Session sharing (spec §21 / ADR-0018); advertised only when the daemon opted in.
         ...(this.sessionShareService ? { sessionSharing: true } : {}),
         ...(this.agentForumService ? { agentForum: true } : {}),
+        // Jira (spec 29 / ADR-0034): capability `jira`, advertised when the service is wired.
+        ...(this.jiraService ? { jira: true } : {}),
         // Advertise the plugin management surface only when a PluginService is
         // wired; without it the plugin.* RPCs return empty/disabled results.
         ...(this.pluginRuntime
