@@ -201,6 +201,7 @@ import {
   ProxyPushSchemas,
 } from "./proxy/rpc-schemas.js";
 import { SshRequestSchemas, SshResponseSchemas, SshPushSchemas } from "./ssh/rpc-schemas.js";
+import { SpecModeRequestSchemas, SpecModeResponseSchemas } from "./spec-mode.js";
 import { SftpInboundSchemas, SftpOutboundSchemas } from "./ssh/sftp-schemas.js";
 import { ForwardingInboundSchemas, ForwardingOutboundSchemas } from "./ssh/forwarding-schemas.js";
 import { SnippetsInboundSchemas, SnippetsOutboundSchemas } from "./ssh/snippets-schemas.js";
@@ -4015,6 +4016,7 @@ export const AgentConfigApplyRequestMessageSchema = z.object({
 });
 
 export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
+  ...SpecModeRequestSchemas,
   ...DatabaseRequestSchemas,
   ...SshRequestSchemas,
   ...SftpInboundSchemas,
@@ -4630,6 +4632,8 @@ export const ServerInfoStatusPayloadSchema = z
         // SSH servers (spec 25 / ADR-0027, story S-20 S1). The client gates the
         // Servers surface on it so an old daemon never receives ssh.* RPCs.
         sshServers: z.boolean().optional(),
+        // Spec mode (spec 28 / ADR-0030): agent.spec_mode.* RPCs and push.
+        specMode: z.boolean().optional(),
       })
       .optional(),
   })
@@ -7804,6 +7808,7 @@ export function parseHubExecutionOutboundMessage(value: unknown): HubExecutionOu
 export type DaemonUpdateProgressMessage = z.infer<typeof DaemonUpdateProgressMessageSchema>;
 
 export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
+  ...SpecModeResponseSchemas,
   ...DatabaseResponseSchemas,
   ...SshResponseSchemas,
   ...SshPushSchemas,
@@ -8829,6 +8834,7 @@ export const WSHelloMessageSchema = z.object({
       [CLIENT_CAPS.projectedSubagentTimeline]: z.boolean().optional(),
       [CLIENT_CAPS.projectUpdates]: z.boolean().optional(),
       [CLIENT_CAPS.archifyDiagrams]: z.boolean().optional(),
+      [CLIENT_CAPS.specMode]: z.boolean().optional(),
       [CLIENT_CAPS.browserHost]: BrowserAutomationHostCapabilitySchema.optional(),
     })
     .passthrough()

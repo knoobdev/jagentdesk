@@ -34,6 +34,8 @@ export const CLIENT_CAPS = {
   // ForumDiagram.format "archify"; the daemon presents archify versions to older clients as a
   // Mermaid placeholder because their schema pins format to "mermaid".
   archifyDiagrams: "archify_diagrams",
+  // Spec mode (spec 28.6): only clients that render the Phase review bar may turn it on.
+  specMode: "spec_mode",
 } as const;
 
 export type ClientCapability = (typeof CLIENT_CAPS)[keyof typeof CLIENT_CAPS];

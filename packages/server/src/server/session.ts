@@ -162,6 +162,8 @@ import {
 } from "./session/checkout/git-metadata-generator.js";
 import { ChatScheduleLoopSession } from "./session/chat/chat-schedule-loop-session.js";
 import { AutorunSession } from "./session/autorun/autorun-session.js";
+import { SpecModeSession } from "./session/spec-mode/spec-mode-session.js";
+import type { SpecModeService } from "./spec-mode/service.js";
 import type { AutorunService } from "./autorun/service.js";
 import { SessionShareSession } from "./session/session-share/session-share-session.js";
 import { AgentForumSession } from "./session/agent-forum/agent-forum-session.js";
@@ -509,6 +511,7 @@ export interface SessionOptions {
   chatService: FileBackedChatService;
   scheduleService: ScheduleService;
   autorunService?: AutorunService | null;
+  specModeService?: SpecModeService | null;
   sessionShareService?: SessionShareService | null;
   agentForumService?: AgentForumService | null;
   // Bootstraps the orchestration lead for a freshly created forum topic (wired in bootstrap.ts).
@@ -647,6 +650,26 @@ export type SessionLifecycleIntent =
       requestId: string;
       reason: string;
     };
+
+interface SpecModeWiring {
+  service: SpecModeService;
+  session: SpecModeSession;
+}
+
+function createSpecModeWiring(
+  service: SpecModeService | null | undefined,
+  host: { emit: (msg: SessionOutboundMessage) => void; logger: pino.Logger },
+): SpecModeWiring | null {
+  if (!service) return null;
+  return {
+    service,
+    session: new SpecModeSession({
+      emit: host.emit,
+      specModeService: service,
+      logger: host.logger,
+    }),
+  };
+}
 
 function parseClientCapabilities(
   capabilities: Record<string, unknown> | null | undefined,
@@ -845,6 +868,7 @@ export class Session {
   private readonly forgeHubSession: ForgeHubSession;
   private readonly chatScheduleLoopSession: ChatScheduleLoopSession;
   private readonly autorunSession: AutorunSession | null;
+  private readonly specMode: SpecModeWiring | null;
   private readonly sessionShareSession: SessionShareSession | null;
   private readonly agentForumSession: AgentForumSession | null;
   private clusterSession!: ClusterSession;
@@ -895,6 +919,7 @@ export class Session {
       chatService,
       scheduleService,
       autorunService,
+      specModeService,
       sessionShareService,
       agentForumService,
       loopService,
@@ -1056,6 +1081,10 @@ export class Session {
       scheduleService,
       loopService,
       clientId: this.clientId,
+      logger: this.sessionLogger,
+    });
+    this.specMode = createSpecModeWiring(specModeService, {
+      emit: (msg) => this.emit(msg),
       logger: this.sessionLogger,
     });
     this.autorunSession = autorunService
@@ -2324,6 +2353,7 @@ export class Session {
       () => this.dispatchTerminalMessage(msg),
       () => this.dispatchChatScheduleLoopMessage(msg),
       () => this.dispatchAutorunMessage(msg),
+      () => this.dispatchSpecModeMessage(msg, source),
       () => this.dispatchSessionShareMessage(msg),
       () => this.dispatchAgentForumMessage(msg),
       () => this.dispatchClusterMessage(msg),
@@ -3206,6 +3236,27 @@ export class Session {
         return autorun.handleGetRequest(msg);
       case "autorun.list.request":
         return autorun.handleListRequest(msg);
+      default:
+        return undefined;
+    }
+  }
+
+  private dispatchSpecModeMessage(
+    msg: SessionInboundMessage,
+    source?: object,
+  ): Promise<void> | undefined {
+    const specMode = this.specMode?.session;
+    if (!specMode) return undefined;
+    switch (msg.type) {
+      case "agent.spec_mode.get.request":
+      case "agent.spec_mode.setup.preview.request":
+      case "agent.spec_mode.set.request":
+      case "agent.spec_mode.review.request": {
+        const supported = source
+          ? this.supportsForSource(CLIENT_CAPS.specMode, source)
+          : this.supports(CLIENT_CAPS.specMode);
+        return specMode.handle(msg, supported);
+      }
       default:
         return undefined;
     }
@@ -8996,7 +9047,10 @@ export class Session {
     try {
       const agentId = resolved.agentId;
 
-      const prompt = buildAgentPrompt(msg.text, msg.images, msg.attachments);
+      // Spec mode (spec 28.4 step 2): the message becomes the pending phase's spec-kit command.
+      // The command must lead the turn, so attached skills are not prefixed to it.
+      const specPhase = await this.specMode?.service.prepareUserMessage(agentId, msg.text);
+      const prompt = buildAgentPrompt(specPhase?.text ?? msg.text, msg.images, msg.attachments);
       this.sessionLogger.trace(
         {
           agentId,
@@ -9014,11 +9068,12 @@ export class Session {
           prompt,
           messageId: msg.messageId,
           activeTurnBehavior: msg.activeTurnBehavior,
-          skillIds: msg.skillIds,
+          skillIds: specPhase ? undefined : msg.skillIds,
           skillInvocation: this.skillsStorage,
           logger: this.sessionLogger,
         });
       } catch (error) {
+        if (specPhase) await this.specMode?.service.revertPhaseStart(agentId, specPhase.phase);
         const message = error instanceof Error ? error.message : String(error);
         this.handleAgentRunError(agentId, error, "Failed to send agent message");
         this.emit({
