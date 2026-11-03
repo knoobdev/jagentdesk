@@ -7,6 +7,30 @@ import {
 } from "./prompt-attachments.js";
 
 describe("prompt attachments", () => {
+  it("renders a Jira issue with its connection so the agent can use the jira_* tools", () => {
+    expect(
+      renderPromptAttachmentAsText({
+        type: "jira_issue",
+        mimeType: "application/jagentdesk-jira-issue",
+        connectionId: "jir_a1b2c3",
+        key: "ABC-12",
+        summary: "Card form validates expiry",
+        url: "https://<site>.atlassian.net/browse/ABC-12",
+        body: "## Description\n\nReject past months.",
+      }),
+    ).toBe(
+      [
+        "Jira issue ABC-12: Card form validates expiry",
+        "URL: https://<site>.atlassian.net/browse/ABC-12",
+        "Jira connection: jir_a1b2c3 (use the jira_* tools with this connectionId)",
+        "",
+        "## Description",
+        "",
+        "Reject past months.",
+      ].join("\n"),
+    );
+  });
+
   it("places fork history before the new user prompt", () => {
     const chatHistory = {
       type: "text" as const,

@@ -185,6 +185,7 @@ import { createSshTerminalManager } from "../terminal/ssh-terminal-manager.js";
 import { SshService } from "./ssh/ssh-service.js";
 import { JiraService } from "./jira/service.js";
 import { atlassianEndpointsFromEnv } from "./jira/credentials.js";
+import { createJiraAgentTools } from "./jira/agent-tools.js";
 import { SshModules } from "./ssh/ssh-modules.js";
 import { SshModules as SshServerModules } from "./ssh/modules.js";
 import { applyTerminalAgentHookSetting } from "../terminal/agent-hooks/terminal-agent-hook-setting.js";
@@ -1570,6 +1571,13 @@ export async function createJAgentDeskDaemon(
     clusterRegistry,
     databaseRegistry,
     sshAgentTools: (callerAgentId) => sshServerModules.createAgentTools(callerAgentId),
+    jiraAgentTools: (callerAgentId) =>
+      createJiraAgentTools({
+        service: jiraService,
+        callerAgentId,
+        requestPermission: (agentId, request) =>
+          agentManager.requestHostToolPermission(agentId, request),
+      }),
     skillsStorage,
     forgeHub: forgeHubService,
     browserFingerprintProfiles: {
