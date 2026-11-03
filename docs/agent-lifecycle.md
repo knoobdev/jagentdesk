@@ -12,6 +12,17 @@ initializing → idle → running → idle (or error → closed)
 
 Each live agent in `AgentManager` carries a `lastStatus` of `initializing`, `idle`, `running`, or `error`. `closed` is the persisted, resumable state for an agent record that has no live provider runtime. State transitions persist to disk and stream to subscribed clients via WebSocket.
 
+## Restart recovery
+
+Recovery is opt-in under Host settings (`agents.resumeOnStartup`). After restart it sends
+`agents.resumePrompt` (default `Resume working.`) only to agents interrupted during a running
+turn. Idle agents stay dormant. Archived, internal, daemon-owned and archived-workspace agents
+are excluded. A slow or unavailable provider holds back only its own agent.
+
+Recovery is best-effort: a crash between clearing intent and dispatch can lose continuation.
+Child completion notifications retained over restart still wait for the parent's next turn
+(ADR-0029); recovery must not turn them into automatic parent wakeups.
+
 ## Runtime residency
 
 An unarchived agent may be `closed` without being deleted or archived. Closing releases its provider
