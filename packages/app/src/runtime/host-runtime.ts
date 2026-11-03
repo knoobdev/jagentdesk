@@ -568,9 +568,15 @@ function createDefaultDeps(): HostRuntimeControllerDeps {
         },
       }
     : undefined;
+  // Spec 30.2.2: only a desktop that can open the 8085 loopback takes delegated Argo CD SSO.
+  const argocdSsoCapabilities =
+    typeof getDesktopHost()?.argocd?.ssoLoopback === "function"
+      ? { [CLIENT_CAPS.argocdSsoLoopback]: true }
+      : undefined;
   const appCapabilities = {
     [CLIENT_CAPS.selectiveAgentTimeline]: true,
     ...browserAutomationCapabilities,
+    ...argocdSsoCapabilities,
   };
 
   return {

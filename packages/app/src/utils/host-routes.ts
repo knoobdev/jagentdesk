@@ -703,3 +703,33 @@ export function normalizeProjectSettingsRouteId(value: string | string[] | undef
   const id = Array.isArray(value) ? value[0] : value;
   return typeof id === "string" ? id : "";
 }
+
+// Argo CD (spec 30.3): instances → applications of one instance → one application.
+export function buildArgoCdRoute(serverId: string) {
+  const normalized = trimNonEmpty(serverId);
+  if (!normalized) {
+    return "/" as const;
+  }
+  return `/h/${encodeSegment(normalized)}/argocd` as const;
+}
+
+export function buildArgoCdInstanceRoute(serverId: string, instanceId: string) {
+  const normalizedServer = trimNonEmpty(serverId);
+  const normalizedInstance = trimNonEmpty(instanceId);
+  if (!normalizedServer || !normalizedInstance) {
+    return buildArgoCdRoute(serverId);
+  }
+  return `/h/${encodeSegment(normalizedServer)}/argocd/${encodeSegment(normalizedInstance)}` as const;
+}
+
+export function buildArgoCdAppRoute(
+  serverId: string,
+  instanceId: string,
+  app: { name: string; appNamespace: string | null },
+) {
+  const base = buildArgoCdInstanceRoute(serverId, instanceId);
+  if (base === "/" || !app.name) return base;
+  const query = new URLSearchParams({ name: app.name });
+  if (app.appNamespace) query.set("ns", app.appNamespace);
+  return `${base}/app?${query.toString()}`;
+}

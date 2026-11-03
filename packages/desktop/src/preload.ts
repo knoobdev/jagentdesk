@@ -68,6 +68,11 @@ contextBridge.exposeInMainWorld("jagentdeskDesktop", {
         ipcRenderer.invoke("jagentdesk:window:setBadgeCount", count),
     }),
   },
+  // Argo CD SSO (spec 30.2.1): loopback 127.0.0.1:8085 + system browser.
+  argocd: {
+    ssoLoopback: (input: { authUrl: string; state: string; timeoutMs: number }) =>
+      ipcRenderer.invoke("jagentdesk:argocd:sso-loopback", input),
+  },
   dialog: {
     ask: (message: string, options?: Record<string, unknown>) =>
       ipcRenderer.invoke("jagentdesk:dialog:ask", message, options),

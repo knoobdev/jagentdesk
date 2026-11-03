@@ -208,8 +208,28 @@ export interface DesktopInvokeBridge {
   invoke?: (command: string, args?: Record<string, unknown>) => Promise<unknown>;
 }
 
+export type DesktopArgoCdSsoResult =
+  | { ok: true; code: string; state: string }
+  | {
+      ok: false;
+      errorCode: "sso_port_in_use" | "sso_timeout" | "sso_idp_error" | "sso_state_mismatch";
+      message: string;
+      error?: string;
+      errorDescription?: string;
+    };
+
+/** Argo CD SSO loopback (spec 30.2.1): Electron only. */
+export interface DesktopArgoCdBridge {
+  ssoLoopback: (input: {
+    authUrl: string;
+    state: string;
+    timeoutMs: number;
+  }) => Promise<DesktopArgoCdSsoResult>;
+}
+
 export interface DesktopHostBridge {
   platform?: string;
+  argocd?: DesktopArgoCdBridge;
   invoke?: DesktopInvokeBridge["invoke"];
   getPendingOpenProject?: () => Promise<string | null>;
   agentNavigation?: DesktopAgentNavigationBridge;
