@@ -34,6 +34,9 @@ export const CLIENT_CAPS = {
   // ForumDiagram.format "archify"; the daemon presents archify versions to older clients as a
   // Mermaid placeholder because their schema pins format to "mermaid".
   archifyDiagrams: "archify_diagrams",
+  // Argo CD SSO (spec 30.2.2): only the Electron desktop advertises it — it can open the
+  // 127.0.0.1:8085 loopback listener, so the daemon routes mobile SSO delegation to it.
+  argocdSsoLoopback: "argocd_sso_loopback",
 } as const;
 
 export type ClientCapability = (typeof CLIENT_CAPS)[keyof typeof CLIENT_CAPS];

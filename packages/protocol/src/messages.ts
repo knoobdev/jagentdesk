@@ -201,6 +201,11 @@ import {
   ProxyPushSchemas,
 } from "./proxy/rpc-schemas.js";
 import { SshRequestSchemas, SshResponseSchemas, SshPushSchemas } from "./ssh/rpc-schemas.js";
+import {
+  ArgoCdRequestSchemas,
+  ArgoCdResponseSchemas,
+  ArgoCdPushSchemas,
+} from "./argocd/rpc-schemas.js";
 import { SftpInboundSchemas, SftpOutboundSchemas } from "./ssh/sftp-schemas.js";
 import { ForwardingInboundSchemas, ForwardingOutboundSchemas } from "./ssh/forwarding-schemas.js";
 import { SnippetsInboundSchemas, SnippetsOutboundSchemas } from "./ssh/snippets-schemas.js";
@@ -4016,6 +4021,7 @@ export const AgentConfigApplyRequestMessageSchema = z.object({
 
 export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ...DatabaseRequestSchemas,
+  ...ArgoCdRequestSchemas,
   ...SshRequestSchemas,
   ...SftpInboundSchemas,
   ...ForwardingInboundSchemas,
@@ -4630,6 +4636,8 @@ export const ServerInfoStatusPayloadSchema = z
         // SSH servers (spec 25 / ADR-0027, story S-20 S1). The client gates the
         // Servers surface on it so an old daemon never receives ssh.* RPCs.
         sshServers: z.boolean().optional(),
+        // Argo CD (spec 30 / ADR-0034). The client gates the Argo CD surface on it.
+        argocd: z.boolean().optional(),
       })
       .optional(),
   })
@@ -7805,6 +7813,8 @@ export type DaemonUpdateProgressMessage = z.infer<typeof DaemonUpdateProgressMes
 
 export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ...DatabaseResponseSchemas,
+  ...ArgoCdResponseSchemas,
+  ...ArgoCdPushSchemas,
   ...SshResponseSchemas,
   ...SshPushSchemas,
   ...SftpOutboundSchemas,
