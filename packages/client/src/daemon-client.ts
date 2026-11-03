@@ -1,3 +1,9 @@
+import type {
+  ActivityGraphChangedMessage,
+  ActivityGraphGetResponsePayload,
+  ActivityGraphStatusMessage,
+  ActivityGraphView,
+} from "@jagentdesk/protocol/agent-activity-graph";
 import type { HostCapabilities, ToolInstallPlan } from "@jagentdesk/protocol/host-capabilities";
 import type { z } from "zod";
 import { CLIENT_CAPS, type ClientCapability } from "@jagentdesk/protocol/client-capabilities";
@@ -9958,6 +9964,80 @@ export class DaemonClient {
     return payload.html;
   }
 
+  // Agent activity graph (spec 31.5, ADR-0031).
+  async activityGraphGet(
+    input: { agentId: string; view: ActivityGraphView; turnIndex?: number },
+    requestId?: string,
+  ): Promise<ActivityGraphGetResponsePayload> {
+    const resolved = this.createRequestId(requestId);
+    const message = SessionInboundMessageSchema.parse({
+      type: "agent.activity_graph.get.request",
+      requestId: resolved,
+      agentId: input.agentId,
+      view: input.view,
+      ...(input.turnIndex !== undefined ? { turnIndex: input.turnIndex } : {}),
+    });
+    return this.sendRequest({
+      requestId: resolved,
+      message,
+      options: { skipQueue: true },
+      select: (msg) =>
+        msg.type === "agent.activity_graph.get.response" && msg.payload.requestId === resolved
+          ? msg.payload
+          : null,
+    });
+  }
+
+  async activityGraphSubscribe(
+    input: { agentId: string; view: ActivityGraphView },
+    requestId?: string,
+  ): Promise<string | null> {
+    const resolved = this.createRequestId(requestId);
+    const message = SessionInboundMessageSchema.parse({
+      type: "agent.activity_graph.subscribe.request",
+      requestId: resolved,
+      agentId: input.agentId,
+      view: input.view,
+    });
+    const payload = await this.sendRequest({
+      requestId: resolved,
+      message,
+      options: { skipQueue: true },
+      select: (msg) =>
+        msg.type === "agent.activity_graph.subscribe.response" && msg.payload.requestId === resolved
+          ? msg.payload
+          : null,
+    });
+    return payload.subscriptionId;
+  }
+
+  async activityGraphUnsubscribe(subscriptionId: string, requestId?: string): Promise<void> {
+    const resolved = this.createRequestId(requestId);
+    const message = SessionInboundMessageSchema.parse({
+      type: "agent.activity_graph.unsubscribe.request",
+      requestId: resolved,
+      subscriptionId,
+    });
+    await this.sendRequest({
+      requestId: resolved,
+      message,
+      options: { skipQueue: true },
+      select: (msg) =>
+        msg.type === "agent.activity_graph.unsubscribe.response" &&
+        msg.payload.requestId === resolved
+          ? msg.payload
+          : null,
+    });
+  }
+
+  onActivityGraphChanged(handler: (payload: ActivityGraphChangedMessage["payload"]) => void) {
+    return this.on("agent.activity_graph.changed", (message) => handler(message.payload));
+  }
+
+  onActivityGraphStatus(handler: (payload: ActivityGraphStatusMessage["payload"]) => void) {
+    return this.on("agent.activity_graph.status", (message) => handler(message.payload));
+  }
+
   subscribeForumStream(handler: (topic: StoredForumTopic) => void): () => void {
     return this.on("forum.stream", (message) => handler(message.payload.topic));
   }
@@ -10036,6 +10116,7 @@ export class DaemonClient {
             [CLIENT_CAPS.projectedSubagentTimeline]: true,
             [CLIENT_CAPS.projectUpdates]: true,
             [CLIENT_CAPS.archifyDiagrams]: true,
+            [CLIENT_CAPS.activityGraph]: true,
             ...this.config.capabilities,
           },
           ...(this.config.appVersion ? { appVersion: this.config.appVersion } : {}),
