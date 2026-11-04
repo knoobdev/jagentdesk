@@ -161,6 +161,7 @@ import { DatabaseRegistry } from "./database/database-registry.js";
 import { ScheduleService } from "./schedule/service.js";
 import { AutorunService } from "./autorun/service.js";
 import { SpecModeService } from "./spec-mode/service.js";
+import type { SpecModeState } from "@jagentdesk/protocol/spec-mode";
 import { sendPromptToAgent } from "./agent/agent-prompt.js";
 import { SessionShareService } from "./session-share/service.js";
 import { AgentForumService } from "./agent-forum/service.js";
@@ -193,6 +194,7 @@ import { createSshTerminalManager } from "../terminal/ssh-terminal-manager.js";
 import { SshService } from "./ssh/ssh-service.js";
 import { SideloadService, type SideloadSigner } from "./sideload/sideload-service.js";
 import { createSideloadAgentTools } from "./sideload/agent-tools.js";
+import { createSideloadDeviceSigner } from "./devices/sideload-signer.js";
 import { JiraService } from "./jira/service.js";
 import { atlassianEndpointsFromEnv } from "./jira/credentials.js";
 import { createJiraAgentTools } from "./jira/agent-tools.js";
@@ -1333,12 +1335,13 @@ export async function createJAgentDeskDaemon(
   await clusterRegistry.initialize();
   logger.info("Cluster registry created");
   // Spec 27 / ADR-0033: one owner for physical phones and tablets, shared by every client
-  // session and every agent's sim_* tools. Apple-account signing (spec 26) plugs in through
-  // DeviceSigner once the Sideload service is part of this daemon.
+  // session and every agent's sim_* tools. Prepare device signs WebDriverAgent with a Sideload
+  // Apple account (spec 26); sideloadService is created further down, hence the late lookup.
+  let deviceSignerSource: SideloadService | null = null;
   const physicalDevices = new PhysicalDeviceHub({
     jagentdeskHome: config.jagentdeskHome,
     logger,
-    signer: null,
+    signer: createSideloadDeviceSigner(() => deviceSignerSource),
   });
   const stopDeviceGrantWatch = clearGrantsWhenSessionsEnd(
     (callback) => agentManager.subscribe(callback, { replayState: false }),
@@ -1388,6 +1391,7 @@ export async function createJAgentDeskDaemon(
   });
   sideloadService.initialize();
   logger.info("Sideload service initialized");
+  deviceSignerSource = sideloadService;
   // Daemon-wide Forge Hub service (spec 19 / ADR-0015). One instance shared across
   // all agents' tool catalogs, mirroring how session.ts builds it per-session. Token
   // secrets + the connection index live under <home>/forge.
@@ -1836,6 +1840,49 @@ export async function createJAgentDeskDaemon(
         const onListening = () => {
           httpServer.off("error", onError);
           mainStarted = true;
+          // Host capabilities, physical devices, Spec mode, Jira and Team mode attach to the
+          // WebSocket server right after it exists (kept out of logAndResolve for its size).
+          const attachHostServices = async (server: VoiceAssistantWebSocketServer) => {
+            // Agent Forum / Team mode: expose the service to sessions + the bootstrap hook that turns
+            // the origin chat agent into the topic's lead (it then spawns/delegates peers).
+            // Spec 24.2: what this host can run, probed in the background after start.
+            // Tools the platform-aware installer added live in $JAGENTDESK_HOME/tools/bin.
+            ensureToolDirsOnPath(config.jagentdeskHome);
+            const hostCapabilities = new HostCapabilityService({
+              jagentdeskHome: config.jagentdeskHome,
+              logger,
+            });
+            const hostToolInstaller = new HostToolInstaller({
+              jagentdeskHome: config.jagentdeskHome,
+              logger,
+              capabilities: hostCapabilities,
+              fetch: globalThis.fetch as unknown as HttpFetch,
+              githubToken: process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? null,
+            });
+            setForgeToolInstaller(hostToolInstaller);
+            server.setHostCapabilities(hostCapabilities, hostToolInstaller);
+            server.setPhysicalDevices(physicalDevices);
+            void hostCapabilities.refresh().catch((error: unknown) => {
+              logger.warn({ err: error }, "Host capability probe failed");
+            });
+            specModeService = await startSpecModeService({
+              jagentdeskHome: config.jagentdeskHome,
+              logger,
+              agentManager,
+              agentStorage,
+              hostCapabilities,
+              autorunService,
+              emit: emitExternalSessionMessage,
+              onState: (state) => server.notifySpecModeState(state),
+            });
+            server.setSpecModeService(specModeService);
+            server.setJiraService(jiraService);
+            server.setAgentForum(
+              agentForumService,
+              createForumBootstrap({ agentManager, agentStorage, logger }),
+              createForumNotify({ agentManager, agentStorage, logger }),
+            );
+          };
           const logAndResolve = async () => {
             boundListenTarget = resolveBoundListenTarget(listenTarget, httpServer);
             const mcpBaseUrl = mcpEnabled ? createAgentMcpBaseUrl(boundListenTarget) : null;
@@ -1959,44 +2006,7 @@ export async function createJAgentDeskDaemon(
             sessionShareService?.setGuestScopeUpdater((agentId, scopes) =>
               wsServer?.updateGuestScopesForAgent(agentId, scopes),
             );
-            // Agent Forum / Team mode: expose the service to sessions + the bootstrap hook that turns
-            // the origin chat agent into the topic's lead (it then spawns/delegates peers).
-            // Spec 24.2: what this host can run, probed in the background after start.
-            // Tools the platform-aware installer added live in $JAGENTDESK_HOME/tools/bin.
-            ensureToolDirsOnPath(config.jagentdeskHome);
-            const hostCapabilities = new HostCapabilityService({
-              jagentdeskHome: config.jagentdeskHome,
-              logger,
-            });
-            const hostToolInstaller = new HostToolInstaller({
-              jagentdeskHome: config.jagentdeskHome,
-              logger,
-              capabilities: hostCapabilities,
-              fetch: globalThis.fetch as unknown as HttpFetch,
-              githubToken: process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? null,
-            });
-            setForgeToolInstaller(hostToolInstaller);
-            wsServer?.setHostCapabilities(hostCapabilities, hostToolInstaller);
-            wsServer?.setPhysicalDevices(physicalDevices);
-            void hostCapabilities.refresh().catch((error: unknown) => {
-              logger.warn({ err: error }, "Host capability probe failed");
-            });
-            specModeService = await startSpecModeService({
-              jagentdeskHome: config.jagentdeskHome,
-              logger,
-              agentManager,
-              agentStorage,
-              hostCapabilities,
-              autorunService,
-              emit: emitExternalSessionMessage,
-            });
-            wsServer?.setSpecModeService(specModeService);
-            wsServer?.setJiraService(jiraService);
-            wsServer?.setAgentForum(
-              agentForumService,
-              createForumBootstrap({ agentManager, agentStorage, logger }),
-              createForumNotify({ agentManager, agentStorage, logger }),
-            );
+            await attachHostServices(wsServer);
             // Bind the plugin session host and start configured plugins before any
             // external ingress attaches, mirroring upstream's pre-accept ordering.
             pluginRuntime.bindJAgentDeskSessionHost(wsServer);
@@ -2173,6 +2183,7 @@ async function startSpecModeService(params: {
   hostCapabilities: HostCapabilityService;
   autorunService: AutorunService | null;
   emit: (message: SessionOutboundMessage) => void;
+  onState?: (state: SpecModeState) => void;
 }): Promise<SpecModeService> {
   const { agentManager, agentStorage, autorunService, logger } = params;
   const service = new SpecModeService({
@@ -2185,8 +2196,10 @@ async function startSpecModeService(params: {
     sendPrompt: async (agentId, text) => {
       await sendPromptToAgent({ agentManager, agentStorage, agentId, prompt: text, logger });
     },
-    onState: (state) =>
-      params.emit({ type: "agent.spec_mode.state", payload: { agentId: state.agentId, state } }),
+    onState: (state) => {
+      params.emit({ type: "agent.spec_mode.state", payload: { agentId: state.agentId, state } });
+      params.onState?.(state);
+    },
   });
   await service.initialize();
   agentManager.setLaunchEnvProvider((agentId) => service.launchEnv(agentId));

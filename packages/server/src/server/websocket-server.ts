@@ -30,6 +30,8 @@ import type { JiraService } from "./jira/service.js";
 import type { ScheduleService } from "./schedule/service.js";
 import type { AutorunService } from "./autorun/service.js";
 import type { SpecModeService } from "./spec-mode/service.js";
+import { SpecModePlanSource } from "./spec-mode/plan-source.js";
+import type { SpecModeState } from "@jagentdesk/protocol/spec-mode";
 import type { SessionShareService } from "./session-share/service.js";
 import type { AgentForumService } from "./agent-forum/service.js";
 import { ActivityGraphService } from "./agent/activity-graph/service.js";
@@ -660,6 +662,7 @@ export class VoiceAssistantWebSocketServer {
   private specModeService: SpecModeService | null = null;
   // Agent activity graph (spec 31, ADR-0031): one daemon-wide service shared by every session.
   private readonly activityGraphService: ActivityGraphService;
+  private readonly specPlanSource: SpecModePlanSource;
   // Jira (spec 29), injected post-construction like the Agent Forum.
   private jiraService: JiraService | null = null;
   private agentForumBootstrap:
@@ -818,9 +821,18 @@ export class VoiceAssistantWebSocketServer {
     this.pairing = pairing ?? null;
     this.pluginRuntime = pluginRuntime ?? null;
     this.agentManager = agentManager;
+    // Plan view with Spec mode on (spec 31.1): phases/tasks from the agent's tasks.md. The Spec
+    // mode service is injected later (setSpecModeService), so the source looks it up per call.
+    this.specPlanSource = new SpecModePlanSource({
+      getState: async (agentId) =>
+        this.specModeService ? this.specModeService.get(agentId) : null,
+      agentCwd: (agentId) => agentManager.getAgent(agentId)?.cwd ?? null,
+      logger: this.logger,
+    });
     this.activityGraphService = new ActivityGraphService({
       agents: agentManager,
       logger: this.logger,
+      specPlanSource: this.specPlanSource,
     });
     this.agentStorage = agentStorage;
     this.projectRegistry = projectRegistry ?? createNoopProjectRegistry();
@@ -1422,6 +1434,7 @@ export class VoiceAssistantWebSocketServer {
   public async close(): Promise<void> {
     this.prepareForShutdown();
     this.activityGraphService.dispose();
+    this.specPlanSource.dispose();
     this.unsubscribeSpeechReadiness?.();
     this.unsubscribeSpeechReadiness = null;
     this.unsubscribeDaemonConfigChange?.();
@@ -1923,6 +1936,11 @@ export class VoiceAssistantWebSocketServer {
 
   setSpecModeService(service: SpecModeService): void {
     this.specModeService = service;
+  }
+
+  /** Spec mode state changed for an agent: refresh its Plan view (spec 31.1). */
+  notifySpecModeState(state: SpecModeState): void {
+    this.specPlanSource.notifyState(state);
   }
 
   private createSocketSession(options: SocketSessionOptions): Session {
