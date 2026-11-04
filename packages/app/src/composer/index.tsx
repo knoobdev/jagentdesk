@@ -934,6 +934,11 @@ interface ComposerProps {
   externalKeyboardShift?: boolean;
   /** Optional panel/container layout breakpoint. Defaults to the screen breakpoint. */
   isCompactLayout?: boolean;
+  /**
+   * Chrome attached to the top of the message input, as wide as the input box (e.g. the Spec
+   * mode phase strip and review bar). It may run under the box's rounded top edge.
+   */
+  topContent?: ReactNode;
 }
 
 const EMPTY_ARRAY: readonly QueuedMessage[] = [];
@@ -1117,6 +1122,7 @@ export function Composer({
   inputWrapperStyle,
   externalKeyboardShift,
   isCompactLayout: isCompactLayoutOverride,
+  topContent,
 }: ComposerProps) {
   const { t } = useTranslation();
   const buttonIconSize = resolveComposerButtonIconSize();
@@ -2254,83 +2260,86 @@ export function Composer({
             {queueList}
             {sendErrorNode}
 
-            <View ref={messageInputContainerRef} style={styles.messageInputContainer}>
-              <AutocompletePopover
-                visible={autocompleteVisible}
-                anchorRef={messageInputContainerRef}
-                options={autocomplete.options}
-                selectedIndex={autocomplete.selectedIndex}
-                onSelect={autocomplete.onSelectOption}
-                isLoading={autocomplete.isLoading}
-                errorMessage={autocomplete.errorMessage}
-                loadingText={autocomplete.loadingText}
-                emptyText={autocomplete.emptyText}
-              />
+            <View style={styles.messageInputStack}>
+              {topContent}
+              <View ref={messageInputContainerRef} style={styles.messageInputContainer}>
+                <AutocompletePopover
+                  visible={autocompleteVisible}
+                  anchorRef={messageInputContainerRef}
+                  options={autocomplete.options}
+                  selectedIndex={autocomplete.selectedIndex}
+                  onSelect={autocomplete.onSelectOption}
+                  isLoading={autocomplete.isLoading}
+                  errorMessage={autocomplete.errorMessage}
+                  loadingText={autocomplete.loadingText}
+                  emptyText={autocomplete.emptyText}
+                />
 
-              {/* MessageInput handles everything: text, dictation, attachments, all buttons */}
-              <StableMessageInput
-                ref={messageInputRef}
-                value={userInput}
-                onChangeText={setUserInput}
-                onSubmit={handleSubmit}
-                hasExternalContent={hasExternalContent}
-                allowEmptySubmit={allowEmptySubmit}
-                submitButtonAccessibilityLabel={submitButtonAccessibilityLabel}
-                submitButtonTestID={submitButtonTestID}
-                submitIcon={submitIcon}
-                isSubmitDisabled={isSubmitDisabled}
-                isSubmitLoading={isSubmitLoadingVisible}
-                preserveHeightOnSubmit={submitBehavior === "preserve-and-lock"}
-                attachments={selectedAttachments}
-                cwd={cwd}
-                attachmentMenuItems={attachmentMenuItems}
-                onAttachButtonRef={handleAttachButtonRef}
-                onAddImages={addImages}
-                client={client}
-                isReadyForDictation={isDictationReady}
-                placeholder={messagePlaceholder}
-                autoFocus={messageInputAutoFocus}
-                autoFocusKey={`${serverId}:${agentId}:${autoFocusKey ?? ""}`}
-                disabled={isSubmitLoading}
-                isPaneFocused={isPaneFocused}
-                leftContent={leftContent}
-                beforeVoiceContent={beforeVoiceContent}
-                rightContent={rightContent}
-                activeActionContent={activeActionContent}
-                voiceServerId={serverId}
-                voiceAgentId={agentId}
-                isAgentRunning={isAgentRunning}
-                defaultSendBehavior={appSettings.sendBehavior}
-                onQueue={handleQueue}
-                onSubmitLoadingPress={submitLoadingPressHandler}
-                onKeyPress={handleCommandKeyPress}
-                onSelectionChange={handleSelectionChange}
-                onFocusChange={handleFocusChange}
-                onHeightChange={onComposerHeightChange}
-                inputWrapperStyle={inputWrapperStyle}
-                attachmentSlot={attachmentSlot}
-              />
-              <Combobox
-                options={githubSearchOptions}
-                value=""
-                onSelect={noop}
-                keepOpenOnSelect
-                searchable
-                searchPlaceholder={t("composer.github.searchPlaceholder", {
-                  context: forgePresentation.changeRequestContext,
-                })}
-                title={t("composer.github.title", {
-                  context: forgePresentation.changeRequestContext,
-                })}
-                open={isGithubPickerOpen}
-                onOpenChange={handleGithubPickerOpenChange}
-                onSearchQueryChange={setGithubSearchQuery}
-                desktopPlacement="top-start"
-                anchorRef={attachButtonRef}
-                emptyText={githubEmptyText}
-                renderOption={renderGithubPickerOption}
-              />
-              {pluginAttachmentPicker.picker}
+                {/* MessageInput handles everything: text, dictation, attachments, all buttons */}
+                <StableMessageInput
+                  ref={messageInputRef}
+                  value={userInput}
+                  onChangeText={setUserInput}
+                  onSubmit={handleSubmit}
+                  hasExternalContent={hasExternalContent}
+                  allowEmptySubmit={allowEmptySubmit}
+                  submitButtonAccessibilityLabel={submitButtonAccessibilityLabel}
+                  submitButtonTestID={submitButtonTestID}
+                  submitIcon={submitIcon}
+                  isSubmitDisabled={isSubmitDisabled}
+                  isSubmitLoading={isSubmitLoadingVisible}
+                  preserveHeightOnSubmit={submitBehavior === "preserve-and-lock"}
+                  attachments={selectedAttachments}
+                  cwd={cwd}
+                  attachmentMenuItems={attachmentMenuItems}
+                  onAttachButtonRef={handleAttachButtonRef}
+                  onAddImages={addImages}
+                  client={client}
+                  isReadyForDictation={isDictationReady}
+                  placeholder={messagePlaceholder}
+                  autoFocus={messageInputAutoFocus}
+                  autoFocusKey={`${serverId}:${agentId}:${autoFocusKey ?? ""}`}
+                  disabled={isSubmitLoading}
+                  isPaneFocused={isPaneFocused}
+                  leftContent={leftContent}
+                  beforeVoiceContent={beforeVoiceContent}
+                  rightContent={rightContent}
+                  activeActionContent={activeActionContent}
+                  voiceServerId={serverId}
+                  voiceAgentId={agentId}
+                  isAgentRunning={isAgentRunning}
+                  defaultSendBehavior={appSettings.sendBehavior}
+                  onQueue={handleQueue}
+                  onSubmitLoadingPress={submitLoadingPressHandler}
+                  onKeyPress={handleCommandKeyPress}
+                  onSelectionChange={handleSelectionChange}
+                  onFocusChange={handleFocusChange}
+                  onHeightChange={onComposerHeightChange}
+                  inputWrapperStyle={inputWrapperStyle}
+                  attachmentSlot={attachmentSlot}
+                />
+                <Combobox
+                  options={githubSearchOptions}
+                  value=""
+                  onSelect={noop}
+                  keepOpenOnSelect
+                  searchable
+                  searchPlaceholder={t("composer.github.searchPlaceholder", {
+                    context: forgePresentation.changeRequestContext,
+                  })}
+                  title={t("composer.github.title", {
+                    context: forgePresentation.changeRequestContext,
+                  })}
+                  open={isGithubPickerOpen}
+                  onOpenChange={handleGithubPickerOpenChange}
+                  onSearchQueryChange={setGithubSearchQuery}
+                  desktopPlacement="top-start"
+                  anchorRef={attachButtonRef}
+                  emptyText={githubEmptyText}
+                  renderOption={renderGithubPickerOption}
+                />
+                {pluginAttachmentPicker.picker}
+              </View>
             </View>
           </View>
         </View>
@@ -2375,6 +2384,9 @@ const styles = StyleSheet.create((theme: Theme) => ({
     width: "100%",
     maxWidth: MAX_CONTENT_WIDTH,
     gap: theme.spacing[3],
+  },
+  messageInputStack: {
+    width: "100%",
   },
   messageInputContainer: {
     position: "relative",

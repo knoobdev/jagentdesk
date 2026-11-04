@@ -98,3 +98,20 @@ describe("buildPlanGraph", () => {
     ).toMatchObject({ collapsed: true });
   });
 });
+
+describe("Spec mode prompts in graph labels (spec 28.4 step 2)", () => {
+  const rootLabel = (text: string) =>
+    buildPlanGraph({ rows: [{ seq: 1, item: { type: "user_message", text } }], running: true })!
+      .model.nodes[0]?.label;
+
+  it("labels the root with the phase and what the user wrote, not the command", () => {
+    expect(rootLabel("/speckit-specify Fix the refresh race\nKeep the API")).toBe(
+      "Specify · Fix the refresh race",
+    );
+    expect(
+      rootLabel(
+        "Spec Kit command speckit.implement\n\n## User Input\n\n```text\n\n```\n\nYou **MUST** consider the user input before proceeding (if not empty).\n",
+      ),
+    ).toBe("Spec mode · Implement");
+  });
+});

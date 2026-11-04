@@ -3,6 +3,7 @@ import type { Logger } from "pino";
 import {
   SPEC_MODE_PHASES,
   SpecModePhaseStatusMapSchema,
+  specModeSharedCheckoutNote,
   type SpecModeErrorCode,
   type SpecModeOptionalPhase,
   type SpecModePhase,
@@ -507,7 +508,7 @@ export class SpecModeService {
     const plan = await this.planSetup(agentId);
     const sharedNote =
       record.state.sharedCheckout && record.state.featureDirectory
-        ? `Spec mode: another agent works in this checkout. Use the feature directory \`${record.state.featureDirectory}\` (SPECIFY_FEATURE_DIRECTORY is set for you) and do not write .specify/feature.json.`
+        ? specModeSharedCheckoutNote(record.state.featureDirectory)
         : null;
     const argument = [args.trim(), sharedNote]
       .filter((part): part is string => Boolean(part))

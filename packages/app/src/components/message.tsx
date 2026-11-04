@@ -2,7 +2,8 @@ import { ClickUpUserHeader } from "@/components/clickup-shell/chat-headers";
 import { CLICKUP_MESSAGE_INDENT } from "@/components/clickup-shell/chat-layout";
 import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
-import { SpecModeMessageLabel } from "@/spec-mode/message-label";
+import { SpecModeMessageBody, specModeBubbleText } from "@/spec-mode/message-body";
+import { parseSpecModeMessage, type SpecModeMessage } from "@jagentdesk/protocol/spec-mode";
 import {
   View,
   Text,
@@ -442,6 +443,49 @@ function UserMessageImagePill({ image, onOpen, accessibilityLabel }: UserMessage
   );
 }
 
+/**
+ * Spec mode phase commands show only what the user wrote (spec 28.4 step 2); copy and rewind use
+ * that text too, never the rendered spec-kit template.
+ */
+function userMessageTexts(message: string): {
+  specModeMessage: SpecModeMessage | null;
+  visibleText: string;
+  rewoundText: string;
+} {
+  const specModeMessage = parseSpecModeMessage(message);
+  if (!specModeMessage) return { specModeMessage, visibleText: message, rewoundText: message };
+  return {
+    specModeMessage,
+    visibleText: specModeBubbleText(specModeMessage),
+    rewoundText: specModeMessage.userText ?? "",
+  };
+}
+
+function UserMessageText({
+  message,
+  specModeMessage,
+}: {
+  message: string;
+  specModeMessage: SpecModeMessage | null;
+}) {
+  if (specModeMessage) {
+    return (
+      <SpecModeMessageBody
+        message={message}
+        parsed={specModeMessage}
+        textStyle={userMessageStylesheet.text}
+        textDataSet={MESSAGE_TEXT_DATASET}
+      />
+    );
+  }
+  if (message.trim().length === 0) return null;
+  return (
+    <Text selectable style={userMessageStylesheet.text} dataSet={MESSAGE_TEXT_DATASET}>
+      {message}
+    </Text>
+  );
+}
+
 export const UserMessage = memo(function UserMessage({
   serverId,
   agentId,
@@ -477,9 +521,14 @@ export const UserMessage = memo(function UserMessage({
   );
   const rewindMutation = useRewindAgentMutation({ serverId, agentId, client, messageId });
 
+  const { specModeMessage, visibleText, rewoundText } = useMemo(
+    () => userMessageTexts(message),
+    [message],
+  );
+
   const handlePointerEnter = useCallback(() => setIsHovered(true), []);
   const handlePointerLeave = useCallback(() => setIsHovered(false), []);
-  const getMessageContent = useCallback(() => message, [message]);
+  const getMessageContent = useCallback(() => visibleText, [visibleText]);
   const handleRewind = useCallback(
     (input: { mode: RewindMode; rewoundText: string }) => {
       return rewindMutation.rewindAgent(input);
@@ -568,12 +617,7 @@ export const UserMessage = memo(function UserMessage({
           })}
         </View>
       ) : null}
-      <SpecModeMessageLabel message={message} />
-      {hasText ? (
-        <Text selectable style={userMessageStylesheet.text} dataSet={MESSAGE_TEXT_DATASET}>
-          {message}
-        </Text>
-      ) : null}
+      <UserMessageText message={message} specModeMessage={specModeMessage} />
     </>
   );
   const actions =
@@ -581,7 +625,7 @@ export const UserMessage = memo(function UserMessage({
       <RewindMenu
         capabilities={capabilities}
         isPending={rewindMutation.isPending}
-        rewoundText={message}
+        rewoundText={rewoundText}
         onRewind={handleRewind}
       />
     ) : null;

@@ -200,3 +200,78 @@ export function specModePhaseOfMessage(text: string): SpecModePhase | null {
   const parsed = SpecModePhaseSchema.safeParse(match?.[1]);
   return parsed.success ? parsed.data : null;
 }
+
+/**
+ * Prefix of the note the daemon appends to a phase argument when another Spec mode agent works
+ * in the same checkout (spec 28.3 step 5). Not something the user wrote, so the chat hides it.
+ */
+export const SPEC_MODE_SHARED_CHECKOUT_NOTE_PREFIX =
+  "Spec mode: another agent works in this checkout.";
+
+export function specModeSharedCheckoutNote(featureDirectory: string): string {
+  return `${SPEC_MODE_SHARED_CHECKOUT_NOTE_PREFIX} Use the feature directory \`${featureDirectory}\` (SPECIFY_FEATURE_DIRECTORY is set for you) and do not write .specify/feature.json.`;
+}
+
+/** The "## User Input" block every spec-kit command template carries around `$ARGUMENTS`. */
+const PROMPT_INPUT_OPEN = "## User Input\n\n```text\n";
+const PROMPT_INPUT_CLOSE = "\n```\n\nYou **MUST** consider the user input";
+
+export interface SpecModeMessage {
+  phase: SpecModePhase;
+  /**
+   * Exactly what the user wrote: the request, or the note on Revise. Empty when the daemon sent
+   * the phase without an argument (Approve & continue). Null when the command has an unexpected
+   * shape and the user's part cannot be told apart from the template.
+   */
+  userText: string | null;
+}
+
+function withoutSharedCheckoutNote(argument: string): string {
+  const index = argument.lastIndexOf(SPEC_MODE_SHARED_CHECKOUT_NOTE_PREFIX);
+  if (index === 0) return "";
+  if (index > 0 && argument.slice(index - 2, index) === "\n\n") return argument.slice(0, index - 2);
+  return argument;
+}
+
+function promptCommandArgument(body: string): string | null {
+  const open = body.indexOf(PROMPT_INPUT_OPEN);
+  if (open < 0) return null;
+  const start = open + PROMPT_INPUT_OPEN.length;
+  const close = body.indexOf(PROMPT_INPUT_CLOSE, start);
+  return close < 0 ? null : body.slice(start, close);
+}
+
+/**
+ * Splits a user message that carries a Spec mode phase command into the phase and the part the
+ * user wrote, for the compact chat bubble (spec 28.4 step 2). Two shapes come from the daemon:
+ * `/speckit-plan <argument>` (also `$speckit-plan`, `/speckit.plan`) for providers with a
+ * command directory, and the whole rendered template under a `Spec Kit command speckit.plan`
+ * header for prompt providers, where the argument sits in the "## User Input" text block.
+ */
+export function parseSpecModeMessage(text: string): SpecModeMessage | null {
+  const trimmed = text.trimStart();
+  const invocation = /^[/$]speckit[-.]([a-z]+)(?=\s|$)/.exec(trimmed);
+  if (invocation) {
+    const parsed = SpecModePhaseSchema.safeParse(invocation[1]);
+    if (!parsed.success) return null;
+    const argument = trimmed.slice(invocation[0].length).trim();
+    return { phase: parsed.data, userText: withoutSharedCheckoutNote(argument).trim() };
+  }
+  const header = /^Spec Kit command speckit\.([a-z]+)\r?\n/.exec(trimmed);
+  if (!header) return null;
+  const parsed = SpecModePhaseSchema.safeParse(header[1]);
+  if (!parsed.success) return null;
+  const argument = promptCommandArgument(trimmed.slice(header[0].length).replaceAll("\r\n", "\n"));
+  return {
+    phase: parsed.data,
+    userText: argument === null ? null : withoutSharedCheckoutNote(argument).trim(),
+  };
+}
+
+/**
+ * The bubble line for a phase the daemon sent from Approve & continue (no argument): the message
+ * already carries the next phase, so this reads "Approved — continue to Plan".
+ */
+export function specModeApprovalLine(phase: SpecModePhase): string {
+  return `Approved — continue to ${specModePhaseLabel(phase)}`;
+}

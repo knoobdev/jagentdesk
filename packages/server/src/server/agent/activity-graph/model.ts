@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { parseSpecModeMessage, specModePhaseLabel } from "@jagentdesk/protocol/spec-mode";
 import type {
   ActivityGraphNodeKind,
   ActivityGraphNodeRef,
@@ -109,6 +110,19 @@ export function truncateText(text: string, maxUnits: number): string {
 }
 
 // First non-empty line, at most `max` characters (spec 31.2: the start node label, ≤ 60).
+/**
+ * The prompt text a graph label is cut from. A Spec mode phase command (`/speckit-…` or a whole
+ * rendered spec-kit template) reads as "Specify · <what the user wrote>", or "Spec mode · Plan"
+ * after Approve, never as the command itself (spec 28.4 step 2).
+ */
+export function promptLabelSource(text: string): string {
+  const spec = parseSpecModeMessage(text);
+  if (!spec) return text;
+  const phase = specModePhaseLabel(spec.phase);
+  const request = spec.userText ? firstLine(spec.userText, Number.MAX_SAFE_INTEGER) : "";
+  return request ? `${phase} · ${request}` : `Spec mode · ${phase}`;
+}
+
 export function firstLine(text: string, max = PROMPT_LABEL_MAX): string {
   const line =
     text

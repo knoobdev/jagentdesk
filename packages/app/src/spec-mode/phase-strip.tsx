@@ -6,8 +6,8 @@ import {
   specModePhaseLabel,
   type SpecModePhase,
   type SpecModePhaseStatus,
+  type SpecModeState,
 } from "@jagentdesk/protocol/spec-mode";
-import { useSpecModeState } from "@/spec-mode/use-spec-mode";
 
 const STATUS_LABEL: Record<SpecModePhaseStatus, string> = {
   pending: "pending",
@@ -18,18 +18,10 @@ const STATUS_LABEL: Record<SpecModePhaseStatus, string> = {
 };
 
 /**
- * The enabled phases above the composer with their status (spec 28.5): pending, running,
- * awaiting review or done. Hidden while Spec mode is off.
+ * The enabled phases with their status (spec 28.5): pending, running, awaiting review or done.
+ * Rendered by the Spec mode dock on top of the composer.
  */
-export function SpecModePhaseStrip({
-  serverId,
-  agentId,
-}: {
-  serverId: string;
-  agentId: string;
-}): ReactElement | null {
-  const { state } = useSpecModeState(serverId, agentId);
-  if (!state?.enabled) return null;
+export function SpecModePhaseStrip({ state }: { state: SpecModeState }): ReactElement {
   const phases = SPEC_MODE_PHASES.filter((phase) => state.phaseStatus[phase] !== "skipped");
   return (
     <View style={styles.strip} testID="spec-mode-phase-strip">
@@ -87,8 +79,6 @@ const styles = StyleSheet.create((theme) => ({
     flexWrap: "wrap",
     alignItems: "center",
     gap: theme.spacing[1],
-    paddingHorizontal: theme.spacing[2],
-    paddingBottom: theme.spacing[2],
   },
   chip: {
     flexDirection: "row",
@@ -97,7 +87,7 @@ const styles = StyleSheet.create((theme) => ({
     paddingHorizontal: theme.spacing[2],
     paddingVertical: theme.spacing[1],
     borderRadius: theme.borderRadius.full,
-    backgroundColor: theme.colors.surface2,
+    backgroundColor: theme.colors.surface0,
   },
   dot: {
     width: 8,

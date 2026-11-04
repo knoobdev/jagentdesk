@@ -1,10 +1,16 @@
 import { useCallback, useReducer, type ReactElement } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
-import { specModePhaseLabel, type SpecModePhase } from "@jagentdesk/protocol/spec-mode";
+import {
+  specModePhaseLabel,
+  type SpecModePhase,
+  type SpecModeState,
+} from "@jagentdesk/protocol/spec-mode";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { useSpecModeState } from "@/spec-mode/use-spec-mode";
+import type { useSpecModeState } from "@/spec-mode/use-spec-mode";
+
+type SpecModeClient = ReturnType<typeof useSpecModeState>["client"];
 
 /** The bar's own interaction state (Approve/Revise are fallible, testing.md). */
 type BarState =
@@ -45,27 +51,30 @@ function reviewTitle(phase: SpecModePhase): string {
 }
 
 /**
- * Shown under the composer when a phase finished (spec 28.4 step 3): the phase, the files it
- * created or changed (open in the file viewer) and Approve & continue / Revise. The daemon
- * sends the next phase only from these buttons.
+ * Shown in the Spec mode dock on top of the composer when a phase finished (spec 28.4 step 3):
+ * the phase, the files it created or changed (open in the file viewer) and Approve & continue /
+ * Revise. The daemon sends the next phase only from these buttons.
  */
 export function PhaseReviewBar({
-  serverId,
   agentId,
+  state,
+  client,
+  isConnected,
   cwd,
   onOpenFile,
 }: {
-  serverId: string;
   agentId: string;
+  state: SpecModeState;
+  client: SpecModeClient;
+  isConnected: boolean;
   cwd: string;
   onOpenFile: (absolutePath: string) => void;
 }): ReactElement | null {
-  const { state, client, isConnected } = useSpecModeState(serverId, agentId);
   const [bar, dispatch] = useReducer(barReducer, { kind: "idle" });
 
-  const phase = state?.phase ?? null;
+  const phase = state.phase;
   const awaiting = Boolean(
-    state?.enabled && phase && state.phaseStatus[phase] === "awaiting_review",
+    state.enabled && phase && state.phaseStatus[phase] === "awaiting_review",
   );
 
   const send = useCallback(
@@ -91,7 +100,7 @@ export function PhaseReviewBar({
   );
   const handleCancel = useCallback(() => dispatch({ type: "reset" }), []);
 
-  if (!awaiting || !phase || !state) return null;
+  if (!awaiting || !phase) return null;
 
   const sending = bar.kind === "sending";
   const disabled = !isConnected || sending;
@@ -102,14 +111,16 @@ export function PhaseReviewBar({
 
   return (
     <View style={styles.bar} testID="spec-mode-review-bar">
-      <Text style={styles.title}>{reviewTitle(phase)}</Text>
-      {state.reviewFiles.length > 0 ? (
-        <View style={styles.files}>
-          {state.reviewFiles.map((file) => (
-            <ReviewFile key={file} file={file} cwd={cwd} onOpenFile={onOpenFile} />
-          ))}
-        </View>
-      ) : null}
+      <View style={styles.summary}>
+        <Text style={styles.title}>{reviewTitle(phase)}</Text>
+        {state.reviewFiles.length > 0 ? (
+          <View style={styles.files}>
+            {state.reviewFiles.map((file) => (
+              <ReviewFile key={file} file={file} cwd={cwd} onOpenFile={onOpenFile} />
+            ))}
+          </View>
+        ) : null}
+      </View>
       {showNote ? (
         <TextInput
           value={noteOf(bar)}
@@ -123,7 +134,9 @@ export function PhaseReviewBar({
         />
       ) : null}
       {bar.kind === "error" ? (
-        <Alert variant="error" title="Could not continue" description={bar.message} />
+        <View style={styles.fullRow}>
+          <Alert variant="error" title="Could not continue" description={bar.message} />
+        </View>
       ) : null}
       <View style={styles.actions}>
         {showNote ? (
@@ -198,14 +211,20 @@ function ReviewFile({
 
 const styles = StyleSheet.create((theme) => ({
   bar: {
-    marginHorizontal: theme.spacing[2],
-    marginTop: theme.spacing[2],
-    padding: theme.spacing[3],
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "space-between",
     gap: theme.spacing[2],
-    borderRadius: theme.borderRadius.lg,
-    borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface1,
+    paddingTop: theme.spacing[2],
+    borderTopWidth: theme.borderWidth[1],
+    borderTopColor: theme.colors.borderAccent,
+  },
+  summary: {
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 0,
+    gap: theme.spacing[1],
   },
   title: {
     color: theme.colors.foreground,
@@ -221,6 +240,7 @@ const styles = StyleSheet.create((theme) => ({
     fontFamily: theme.fontFamily.mono,
   },
   note: {
+    width: "100%",
     minHeight: 64,
     padding: theme.spacing[2],
     borderRadius: theme.borderRadius.md,
@@ -233,9 +253,13 @@ const styles = StyleSheet.create((theme) => ({
   placeholder: {
     color: theme.colors.foregroundMuted,
   },
+  fullRow: {
+    width: "100%",
+  },
   actions: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: theme.spacing[2],
+    marginLeft: "auto",
   },
 }));

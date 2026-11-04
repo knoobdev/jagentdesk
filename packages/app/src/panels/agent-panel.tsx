@@ -36,8 +36,7 @@ import { RetainedChatContent } from "./retained-chat-content";
 import { SidebarCallout } from "@/components/sidebar-callout";
 import { Composer } from "@/composer";
 import { AgentSkillTrainBar } from "@/components/agent-skill-train-bar";
-import { PhaseReviewBar } from "@/spec-mode/phase-review-bar";
-import { SpecModePhaseStrip } from "@/spec-mode/phase-strip";
+import { SpecModeComposerDock } from "@/spec-mode/composer-dock";
 import { getActiveMessageSubmissions } from "@/composer/submission/model";
 import { RewindComposerRestoreProvider } from "@/components/rewind/composer-restore";
 import { getProviderIcon } from "@/components/provider-icons";
@@ -1674,6 +1673,18 @@ function ActiveAgentComposer({
     ],
   );
 
+  const specModeDock = useMemo(
+    () => (
+      <SpecModeComposerDock
+        serverId={serverId}
+        agentId={agentId}
+        cwd={cwd}
+        onOpenFile={handleOpenSpecFile}
+      />
+    ),
+    [agentId, cwd, handleOpenSpecFile, serverId],
+  );
+
   const { style: composerKeyboardStyle } = useKeyboardShiftStyle({
     mode: "translate",
   });
@@ -1700,7 +1711,6 @@ function ActiveAgentComposer({
         onArchiveFinished={handleHideFinishedProviderSubagents}
         onDetachSubagent={canDetachSubagents ? handleDetachSubagent : undefined}
       />
-      {composerViewOnly ? null : <SpecModePhaseStrip serverId={serverId} agentId={agentId} />}
       {composerViewOnly ? (
         <View style={styles.composerViewOnly} testID="orchestration-composer-view-only">
           <Text style={styles.composerViewOnlyText}>
@@ -1733,14 +1743,7 @@ function ActiveAgentComposer({
           onMessageSent={onMessageSent}
           onClientSlashCommand={handleClientSlashCommand}
           isCompactLayout={isCompactComposerLayout}
-        />
-      )}
-      {composerViewOnly ? null : (
-        <PhaseReviewBar
-          serverId={serverId}
-          agentId={agentId}
-          cwd={cwd}
-          onOpenFile={handleOpenSpecFile}
+          topContent={specModeDock}
         />
       )}
     </ReanimatedAnimated.View>

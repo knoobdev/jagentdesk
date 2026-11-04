@@ -12,6 +12,7 @@ import {
   SUBLABEL_UNITS,
   TURN_PICKER_LIMIT,
   firstLine,
+  promptLabelSource,
   hashNodeId,
   stableNodeId,
   truncateText,
@@ -95,7 +96,7 @@ export function summarizeTurns(turns: readonly TurnSlice[]): ActivityGraphTurns[
 }
 
 function userText(row: ActivityRow): string {
-  return row.item.type === "user_message" ? row.item.text : "";
+  return row.item.type === "user_message" ? promptLabelSource(row.item.text) : "";
 }
 
 export function resolveTurn(

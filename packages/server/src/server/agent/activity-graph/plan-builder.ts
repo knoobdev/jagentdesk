@@ -10,7 +10,14 @@ import {
   todoStatus,
   type ActivityInput,
 } from "./flow-builder.js";
-import { firstLine, stableNodeId, truncateText, type GraphModel, type GraphNode } from "./model.js";
+import {
+  firstLine,
+  promptLabelSource,
+  stableNodeId,
+  truncateText,
+  type GraphModel,
+  type GraphNode,
+} from "./model.js";
 import type { SpecPlan } from "./spec-plan-source.js";
 import type { FlowResult } from "./flow-builder.js";
 
@@ -93,7 +100,8 @@ export function buildPlanGraph(
   if (!turn) return null;
   const isLatest = turn.index === turns.length - 1;
   const live = isLatest && input.running;
-  const prompt = turn.userRow.item.type === "user_message" ? turn.userRow.item.text : "";
+  const prompt =
+    turn.userRow.item.type === "user_message" ? promptLabelSource(turn.userRow.item.text) : "";
 
   const root: GraphNode = {
     id: "root",
