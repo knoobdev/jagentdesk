@@ -26,9 +26,20 @@ async function openSideload(page: Page): Promise<void> {
   await expect(page.getByTestId("sideload-pane")).toBeVisible();
 }
 
+// Browse host… (26.9): start at the daemon's home folder, jump to the filesystem root with the
+// breadcrumb, then open each folder down to the fixture and pick it.
+async function pickOnHost(page: Page, file: string): Promise<void> {
+  await page.getByTestId("sideload-browse-host").click();
+  const sheet = page.getByTestId("sideload-host-browse");
+  await sheet.getByTestId("sideload-host-browse-crumbs").getByText("/", { exact: true }).click();
+  for (const folder of path.dirname(file).split(path.sep).filter(Boolean)) {
+    await sheet.getByTestId(`sideload-host-entry-${folder}`).click();
+  }
+  await sheet.getByTestId(`sideload-host-entry-${path.basename(file)}`).click();
+}
+
 async function inspectProbe(page: Page): Promise<void> {
-  await page.getByTestId("sideload-host-path").fill(PROBE_IPA);
-  await page.getByRole("button", { name: "Use path" }).click();
+  await pickOnHost(page, PROBE_IPA);
   const card = page.getByTestId("sideload-ipa-card");
   await expect(card).toContainText("JAD Probe");
   await expect(card).toContainText("dev.jagentdesk.probe.app");

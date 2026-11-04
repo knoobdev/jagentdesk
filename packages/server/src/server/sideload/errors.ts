@@ -4,6 +4,7 @@ import { GsaError } from "./apple/gsa.js";
 import { AppleHttpError } from "./apple/http.js";
 import { TeamApiError } from "./apple/team-api.js";
 import { BundleEditError } from "./bundle.js";
+import { HostBrowseError } from "./host-browse.js";
 import { IosDeviceError } from "./ios-devices.js";
 import { IpaError } from "./ipa.js";
 import { MachoError } from "./macho.js";
@@ -39,6 +40,7 @@ export function toSideloadError(error: unknown): SideloadError {
   if (error instanceof BundleEditError) return new SideloadError(error.code, error.message);
   if (error instanceof IosDeviceError) return new SideloadError(error.code, error.message);
   if (error instanceof AndroidError) return new SideloadError(error.code, error.message);
+  if (error instanceof HostBrowseError) return new SideloadError(error.code, error.message);
   if (error instanceof SignError) return new SideloadError("sign_failed", error.message);
   if (error instanceof AppleHttpError) {
     return new SideloadError("network_error", `Could not reach ${error.host}: ${error.message}`);

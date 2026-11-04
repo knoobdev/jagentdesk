@@ -102,6 +102,18 @@ export class SideloadSession {
           type: "sideload.ipa.inspect.response",
           payload: { requestId: msg.requestId, ipa: await s.inspect(msg.path), error: null },
         };
+      case "sideload.host.browse.request":
+        return {
+          type: "sideload.host.browse.response",
+          payload: {
+            requestId: msg.requestId,
+            ...(await s.browseHost({
+              kind: msg.kind,
+              ...(msg.path === undefined ? {} : { path: msg.path }),
+            })),
+            error: null,
+          },
+        };
       case "sideload.install.start.request":
         return {
           type: "sideload.install.start.response",
@@ -197,19 +209,6 @@ export class SideloadSession {
             error: null,
           },
         };
-      case "android.pair.start.request":
-        return {
-          type: "android.pair.start.response",
-          payload: {
-            requestId: msg.requestId,
-            output: await s.androidPair({
-              pairAddress: msg.pairAddress,
-              code: msg.code,
-              ...(msg.connectAddress ? { connectAddress: msg.connectAddress } : {}),
-            }),
-            error: null,
-          },
-        };
       default:
         throw new Error(`Unhandled sideload message ${msg.type}`);
     }
@@ -255,6 +254,11 @@ export class SideloadSession {
         return { type: "sideload.ipa.upload.response", payload: { ...base, ipa: null } };
       case "sideload.ipa.inspect.request":
         return { type: "sideload.ipa.inspect.response", payload: { ...base, ipa: null } };
+      case "sideload.host.browse.request":
+        return {
+          type: "sideload.host.browse.response",
+          payload: { ...base, path: msg.path ?? "", parent: null, entries: [] },
+        };
       case "sideload.install.start.request":
         return { type: "sideload.install.start.response", payload: { ...base, jobId: null } };
       case "sideload.install.cancel.request":
@@ -279,8 +283,6 @@ export class SideloadSession {
         return { type: "sideload.app_ids.list.response", payload: { ...base, appIds: [] } };
       case "android.install.start.request":
         return { type: "android.install.start.response", payload: { ...base, output: "" } };
-      case "android.pair.start.request":
-        return { type: "android.pair.start.response", payload: { ...base, output: "" } };
       default:
         return null;
     }

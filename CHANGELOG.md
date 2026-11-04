@@ -108,22 +108,25 @@ the release assets.
   hours before expiry and asks you to sign in again when needed. Refresh now / Refresh all.
 - **Anisette** from macOS (`native`) or a self-hosted anisette v3 server you enter (`remote`); errors
   are shown verbatim with a hint to switch.
-- **Android:** install `.apk` (`adb install -r`) and split `.apks` (`install-multiple`), pair wireless
-  debugging with a code.
+- **Android:** install `.apk` (`adb install -r`) and split `.apks` (`install-multiple`) on a phone
+  plugged in with its USB cable.
+- **Picking the file:** **Choose file…** or drag and drop uploads it from the device you use the app
+  on; **Browse host…** opens the daemon machine's home folder and lists only sub-folders and `.ipa`
+  (or `.apk` / `.apks`) files with their size, with a breadcrumb to go up. There is no path field.
 - **Agent tools:** `sideload_list_apps` and `sideload_list_accounts` run directly; `sideload_install`
   and `android_install` ask for permission. No tool sees passwords, tokens, certificates or 2FA codes.
 - **Not in this release:** native anisette on Windows, bundling ElleKit for `.deb` tweaks, app groups,
   downloading an exported IPA to the device. macOS native anisette returned HTTP 503 from Apple in our
   tests with a test account — switch to a `remote` anisette server if you see it.
 
-### Real devices in Sims — iPhone, iPad and Android over cable or Wi-Fi
+### Real devices in Sims — iPhone, iPad and Android over cable
 
-![Sims in JAgentDesk: Pair Android, Install and Agent actions, simulators next to physical devices, and the "Pair Android over Wi-Fi" sheet](docs/media/devices.png)
-
-- **Physical devices next to simulators.** Android through `adb` (USB, or Android 11+ wireless
-  debugging paired with a code — `adb tcpip` is never used); iPhone and iPad through go-ios over USB or
-  Wi-Fi sync (iOS 17+ through go-ios' userspace tunnel, no root). Readiness guides you through Trust
-  This Computer, Developer Mode, unlocking, USB debugging and the RSA prompt.
+- **Physical devices next to simulators.** Plug the phone in with its cable: Android through `adb`
+  over USB, iPhone and iPad through go-ios over USB (iOS 17+ through go-ios' userspace tunnel, no
+  root). Cable only — there is no wireless pairing, and the daemon never runs `adb pair`,
+  `adb connect` or `adb tcpip`; an iPhone seen only over Wi-Fi sync is not offered for control.
+  Readiness guides you through Trust This Computer, Developer Mode, unlocking, USB debugging and the
+  RSA prompt.
 - **Control is off until you turn it on.** A new physical device shows only its name, model, OS,
   connection and readiness; **Enable control** (with a clear warning) unlocks the screen, logs, UI tree,
   input and app install. Simulators and emulators keep their current behaviour.
@@ -197,7 +200,8 @@ the release assets.
 
 - New capabilities and flags are optional and backwards compatible: client capabilities
   `specMode`, `activityGraph`, `binaryScreenFrames`, `argocdSsoLoopback`, `jira`, `sideload`; server
-  features `specMode`, `activityGraph`, `argocd`, `sideload`, `jira`; host capabilities `specKit`,
+  features `specMode`, `activityGraph`, `argocd`, `sideload`, `sideloadHostBrowse`, `jira`; host
+  capabilities `specKit`,
   `iosSideload`, `androidPhysical`, `iosPhysical`; host tools `zsign`, `go-ios` (pinned SHA-256) and
   `ffmpeg`.
 - Every new RPC is registered both in the session allowlist and in its handler.

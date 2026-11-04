@@ -25,6 +25,7 @@ import {
 import type { TwoFactorAnswer } from "./apple/gsa.js";
 import { createAnisetteServerHttp, createAppleHttp, type AppleHttp } from "./apple/http.js";
 import { SideloadError, toSideloadError } from "./errors.js";
+import { browseHost, type HostBrowseKind, type HostBrowseResult } from "./host-browse.js";
 import { GoIos } from "./ios-devices.js";
 import { inspectIpa, storeIpa } from "./ipa.js";
 import { SideloadPipeline, stripRecord, type JobRequest } from "./pipeline.js";
@@ -474,12 +475,10 @@ export class SideloadService implements SideloadSigner {
     });
   }
 
-  async androidPair(input: {
-    pairAddress: string;
-    code: string;
-    connectAddress?: string;
-  }): Promise<string> {
-    return this.adb.pair(input).catch((error: unknown) => {
+  // ── Browse host… (26.9, ADR-0032 §9) ──
+
+  async browseHost(input: { path?: string; kind: HostBrowseKind }): Promise<HostBrowseResult> {
+    return browseHost(input).catch((error: unknown) => {
       throw toSideloadError(error);
     });
   }

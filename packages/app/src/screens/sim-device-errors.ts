@@ -29,12 +29,11 @@ export const READINESS_COPY: Record<Exclude<SimReadiness, "ready">, string> = {
   needs_wda:
     "Prepare the device: WebDriverAgent is signed with your Apple account and installed on it. A free account uses one of its 3 app slots and the signature lasts 7 days (renewed automatically).",
   wda_expired: "WebDriverAgent expired. Prepare the device again to re-sign it.",
-  offline: "The device is offline. Reconnect the cable or Wi-Fi.",
+  offline: "The device is offline. Reconnect the cable.",
 };
 
 export function connectionLabel(device: SimDevice): string {
   if (device.kind === "emulator") return "Emulator";
-  if (device.connection === "wifi") return "Wi-Fi";
   if (device.connection === "usb") return "USB";
   return "";
 }

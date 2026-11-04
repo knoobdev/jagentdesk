@@ -60,7 +60,6 @@ import type {
   SimCoords,
   SimPhysicalEnablePayload,
   SimPhysicalDisablePayload,
-  SimPhysicalPairWirelessPayload,
   SimPhysicalPreparePayload,
   SimPhysicalPrepareProgressPayload,
   SimScreenSubscribePayload,
@@ -728,6 +727,8 @@ export type {
   SideloadAuthPrompt,
   SideloadCert,
   SideloadDevice,
+  SideloadHostBrowseKind,
+  SideloadHostEntry,
   SideloadInstallProgress,
   SideloadIpaInfo,
   SideloadNotice,
@@ -9033,27 +9034,6 @@ export class DaemonClient {
   ): () => void {
     return this.on("simulator/physical/prepare/progress", (message) => {
       if (message.payload.requestId === requestId) handler(message.payload);
-    });
-  }
-
-  async simulatorPhysicalPairWireless(options: {
-    host: string;
-    pairingPort: number;
-    pairingCode: string;
-    connectPort: number;
-    requestId?: string;
-  }): Promise<SimPhysicalPairWirelessPayload> {
-    return this.sendCorrelatedSessionRequest({
-      requestId: options.requestId,
-      message: {
-        type: "simulator/physical/pair_wireless",
-        host: options.host,
-        pairingPort: options.pairingPort,
-        pairingCode: options.pairingCode,
-        connectPort: options.connectPort,
-      },
-      responseType: "simulator/physical/pair_wireless/response",
-      timeout: 60_000,
     });
   }
 

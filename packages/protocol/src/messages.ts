@@ -4689,6 +4689,9 @@ export const ServerInfoStatusPayloadSchema = z
         argocd: z.boolean().optional(),
         // Sideload (spec 26 / ADR-0032): the Sims "Sideload" tab and sideload.* / android.* RPCs.
         sideload: z.boolean().optional(),
+        // Sideload "Browse host…" (26.9 / ADR-0032 §9): sideload.host.browse. The app shows the
+        // button only with it; v0.9.48 daemons do not answer that RPC.
+        sideloadHostBrowse: z.boolean().optional(),
         // Jira (spec 29 / ADR-0034): the client capability `jira`; gates the Jira surface,
         // the jira.* RPCs and the `jira_issue` attachment.
         jira: z.boolean().optional(),

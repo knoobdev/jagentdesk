@@ -2447,6 +2447,7 @@ export class VoiceAssistantWebSocketServer {
         // COMPAT(sshServers): added after v0.8.0, remove gate after 2027-03-01; retain advertisement.
         sshServers: true,
         sideload: this.sideloadService !== null,
+        sideloadHostBrowse: this.sideloadService !== null,
         // Autonomous run (spec §20 / ADR-0017). Default OFF: advertised only when the
         // daemon opted in (autorunService wired). Gates the whole autorun.* surface;
         // autorunApproval gates the per-action-approval mode toggle (§20.7.3).

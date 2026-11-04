@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lastJson, parseGoIosAppList, parseGoIosList } from "./go-ios.js";
+import { cabledIosDevices, lastJson, parseGoIosAppList, parseGoIosList } from "./go-ios.js";
 import {
   classifyIosFailure,
   iosMajorVersion,
@@ -44,6 +44,20 @@ describe("go-ios output", () => {
         connectionType: "USB",
       },
     ]);
+  });
+
+  it("keeps only cabled devices for control (spec 27.1)", () => {
+    const usb = {
+      udid: "00008110-001A2B3C4D5E6F70",
+      productName: "iPhone OS",
+      productType: "iPhone14,2",
+      productVersion: "17.4.1",
+      connectionType: "USB",
+    };
+    const wifiOnly = { ...usb, udid: "00008030-000A1B2C3D4E5F60", connectionType: "Network" };
+    const sameOnWifi = { ...usb, connectionType: "Network" };
+    expect(cabledIosDevices([wifiOnly, sameOnWifi, usb])).toEqual([usb]);
+    expect(cabledIosDevices([wifiOnly])).toEqual([]);
   });
 
   it("returns an empty list when no device is attached", () => {

@@ -64,8 +64,6 @@ export class PhysicalDeviceSession {
         return this.toggle(msg);
       case "simulator/physical/prepare":
         return this.prepare(msg);
-      case "simulator/physical/pair_wireless":
-        return this.pairWireless(msg);
       case "simulator/screen/subscribe":
         return this.subscribeScreen(msg);
       case "simulator/screen/unsubscribe":
@@ -268,21 +266,6 @@ export class PhysicalDeviceSession {
           bundleId: null,
           expiresAt_ms: null,
         },
-      });
-    }
-  }
-
-  private async pairWireless(msg: Inbound<"simulator/physical/pair_wireless">): Promise<void> {
-    try {
-      const udid = await this.hub.pairWireless(msg);
-      this.host.emit({
-        type: "simulator/physical/pair_wireless/response",
-        payload: { requestId: msg.requestId, error: null, udid },
-      });
-    } catch (error) {
-      this.host.emit({
-        type: "simulator/physical/pair_wireless/response",
-        payload: { requestId: msg.requestId, error: deviceErrorText(error), udid: "" },
       });
     }
   }

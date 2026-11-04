@@ -100,7 +100,7 @@ export type SideloadIpaInfo = z.infer<typeof SideloadIpaInfoSchema>;
 export const SideloadDevicePlatformSchema = z.enum(["ios", "android"]);
 export const SideloadDeviceSchema = z.object({
   platform: SideloadDevicePlatformSchema,
-  id: z.string(), // iOS UDID or Android serial (host:port for wireless)
+  id: z.string(), // iOS UDID or Android serial (USB cable only, 26.8)
   name: z.string(),
   model: z.string(),
   osVersion: z.string(),
@@ -272,6 +272,28 @@ export const SideloadIpaInspectResponseSchema = resp("sideload.ipa.inspect.respo
   ipa: SideloadIpaInfoSchema.nullable(),
 });
 
+// ── Browse host… (26.9, ADR-0032 §9) ──
+// Lists one folder on the daemon host for the Install picker: non-hidden sub-folders, and only
+// `.ipa` files (kind "ios") or `.apk` / `.apks` files (kind "android") with their size in bytes.
+// No `path` opens the daemon's home folder. `parent` is null at a filesystem root.
+export const SideloadHostBrowseKindSchema = z.enum(["ios", "android"]);
+export type SideloadHostBrowseKind = z.infer<typeof SideloadHostBrowseKindSchema>;
+export const SideloadHostEntrySchema = z.object({
+  name: z.string(),
+  kind: z.enum(["directory", "file"]),
+  size: z.number().optional(),
+});
+export type SideloadHostEntry = z.infer<typeof SideloadHostEntrySchema>;
+export const SideloadHostBrowseRequestSchema = req("sideload.host.browse.request", {
+  path: z.string().optional(),
+  kind: SideloadHostBrowseKindSchema,
+});
+export const SideloadHostBrowseResponseSchema = resp("sideload.host.browse.response", {
+  path: z.string(),
+  parent: z.string().nullable(),
+  entries: z.array(SideloadHostEntrySchema),
+});
+
 // ── install ──
 export const SideloadInstallStartRequestSchema = req("sideload.install.start.request", {
   path: z.string(),
@@ -369,15 +391,6 @@ export const AndroidInstallStartRequestSchema = req("android.install.start.reque
 export const AndroidInstallStartResponseSchema = resp("android.install.start.response", {
   output: z.string(),
 });
-// Wireless debugging pairing (Android 11+): `adb pair host:port code`, then `adb connect`.
-export const AndroidPairStartRequestSchema = req("android.pair.start.request", {
-  pairAddress: z.string(), // host:port from "Pair device with pairing code"
-  code: z.string(),
-  connectAddress: z.string().optional(), // host:port shown under "Wireless debugging"
-});
-export const AndroidPairStartResponseSchema = resp("android.pair.start.response", {
-  output: z.string(),
-});
 
 export const SideloadRequestSchemas = [
   SideloadAccountsListRequestSchema,
@@ -389,6 +402,7 @@ export const SideloadRequestSchemas = [
   SideloadDevicesListRequestSchema,
   SideloadIpaUploadRequestSchema,
   SideloadIpaInspectRequestSchema,
+  SideloadHostBrowseRequestSchema,
   SideloadInstallStartRequestSchema,
   SideloadInstallCancelRequestSchema,
   SideloadAppsListRequestSchema,
@@ -401,7 +415,6 @@ export const SideloadRequestSchemas = [
   SideloadCertsRevokeRequestSchema,
   SideloadAppIdsListRequestSchema,
   AndroidInstallStartRequestSchema,
-  AndroidPairStartRequestSchema,
 ] as const;
 
 export const SideloadResponseSchemas = [
@@ -414,6 +427,7 @@ export const SideloadResponseSchemas = [
   SideloadDevicesListResponseSchema,
   SideloadIpaUploadResponseSchema,
   SideloadIpaInspectResponseSchema,
+  SideloadHostBrowseResponseSchema,
   SideloadInstallStartResponseSchema,
   SideloadInstallCancelResponseSchema,
   SideloadAppsListResponseSchema,
@@ -426,7 +440,6 @@ export const SideloadResponseSchemas = [
   SideloadCertsRevokeResponseSchema,
   SideloadAppIdsListResponseSchema,
   AndroidInstallStartResponseSchema,
-  AndroidPairStartResponseSchema,
 ] as const;
 
 export const SideloadPushSchemas = [

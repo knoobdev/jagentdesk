@@ -36,6 +36,9 @@ export type SimPlatform = z.infer<typeof SimPlatformSchema>;
 export const SimDeviceKindSchema = z.enum(["simulator", "emulator", "physical"]);
 export type SimDeviceKind = z.infer<typeof SimDeviceKindSchema>;
 
+// Spec 27.1: physical devices are controlled over a cable only, so daemons send "usb" (or null
+// for simulators and emulators). "wifi" stays accepted because the protocol never narrows:
+// v0.9.48 daemons listed network-connected devices with it.
 export const SimConnectionSchema = z.enum(["usb", "wifi"]);
 export type SimConnection = z.infer<typeof SimConnectionSchema>;
 
@@ -402,22 +405,6 @@ export type SimPhysicalPrepareProgressPayload = z.infer<
   typeof SimPhysicalPrepareProgressPushSchema
 >["payload"];
 
-// Android 11+ wireless debugging: `adb pair host:pairingPort code`, then `adb connect
-// host:connectPort` (TLS). `adb tcpip` is never used (spec 27.1, ADR-0033).
-export const SimPhysicalPairWirelessRequestSchema = req("simulator/physical/pair_wireless", {
-  host: z.string(),
-  pairingPort: z.number().int().positive(),
-  pairingCode: z.string(),
-  connectPort: z.number().int().positive(),
-});
-export const SimPhysicalPairWirelessResponseSchema = resp(
-  "simulator/physical/pair_wireless/response",
-  { udid: z.string() },
-);
-export type SimPhysicalPairWirelessPayload = z.infer<
-  typeof SimPhysicalPairWirelessResponseSchema
->["payload"];
-
 // ── live screen (spec 27.5, ADR-0033) ──
 // JPEG frames arrive as binary WebSocket frames (binary-frames/screen.ts) tagged with this
 // subscriptionId. Only clients that advertise the `binary_screen_frames` capability subscribe;
@@ -467,7 +454,6 @@ export const SimulatorRequestSchemas = [
   SimPhysicalEnableRequestSchema,
   SimPhysicalDisableRequestSchema,
   SimPhysicalPrepareRequestSchema,
-  SimPhysicalPairWirelessRequestSchema,
   SimScreenSubscribeRequestSchema,
   SimScreenUnsubscribeRequestSchema,
 ] as const;
@@ -497,7 +483,6 @@ export const SimulatorResponseSchemas = [
   SimPhysicalEnableResponseSchema,
   SimPhysicalDisableResponseSchema,
   SimPhysicalPrepareResponseSchema,
-  SimPhysicalPairWirelessResponseSchema,
   SimScreenSubscribeResponseSchema,
   SimScreenUnsubscribeResponseSchema,
 ] as const;

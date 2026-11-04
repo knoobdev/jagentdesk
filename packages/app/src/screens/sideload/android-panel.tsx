@@ -1,53 +1,71 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { Text, View } from "react-native";
 import { useMutation } from "@tanstack/react-query";
 import type { DaemonClient, SideloadDevice } from "@jagentdesk/client/internal/daemon-client";
-import { AdaptiveTextInput } from "@/components/adaptive-modal-sheet";
 import { Alert } from "@/components/ui/alert";
 import { useFilePicker } from "@/hooks/use-file-picker";
 import { MutationButton, ValueButton } from "./buttons";
+import { HostBrowseSheet } from "./host-browse-sheet";
 import { unwrap } from "./queries";
 import { sideloadStyles as styles } from "./styles";
 
-// 26.8 Android: install an .apk, split APKs or an .apks bundle with adb; pair wireless
-// debugging with the code the phone shows (Android 11+). No re-signing.
+// 26.8 Android: install an .apk, split APKs or an .apks bundle with adb on a phone plugged in
+// with its USB cable. No re-signing. The file is uploaded from this device (Choose file…) or
+// picked on the host (Browse host…); there is no free-text path field (26.9).
 
 function errorText(error: unknown): string | null {
   if (!error) return null;
   return error instanceof Error ? error.message : String(error);
 }
 
+function fileName(path: string): string {
+  return path.split(/[\\/]/).pop() ?? path;
+}
+
 export function AndroidInstallCard({
   client,
+  serverId,
   device,
+  hostBrowse,
 }: {
   client: DaemonClient;
+  serverId: string;
   device: SideloadDevice;
+  hostBrowse: boolean;
 }) {
   const { pickFiles } = useFilePicker();
-  const install = useMutation({
+  // Daemon paths of the chosen files: upload results or one file picked on the host.
+  const [paths, setPaths] = useState<string[]>([]);
+  const [browsing, setBrowsing] = useState(false);
+  const closeBrowse = useCallback(() => setBrowsing(false), []);
+  const onHostPick = useCallback((path: string) => setPaths([path]), []);
+  const choose = useMutation({
     mutationFn: async () => {
       const files = (await pickFiles()) ?? [];
-      if (files.length === 0) return null;
-      const paths: string[] = [];
+      if (files.length === 0) return;
+      const uploaded: string[] = [];
       for (const file of files) {
-        const uploaded = await client.uploadFile({
+        const result = await client.uploadFile({
           fileName: file.fileName,
           mimeType: file.mimeType,
           bytes: await file.readBytes(),
         });
-        if (uploaded.error || !uploaded.file)
-          throw new Error(uploaded.error ?? `Uploading ${file.fileName} failed`);
-        paths.push(uploaded.file.path);
+        if (result.error || !result.file)
+          throw new Error(result.error ?? `Uploading ${file.fileName} failed`);
+        uploaded.push(result.file.path);
       }
-      return unwrap(
+      setPaths(uploaded);
+    },
+  });
+  const install = useMutation({
+    mutationFn: async (files: string[]) =>
+      unwrap(
         await client.sideloadCall(
           "android.install.start.request",
-          { serial: device.id, paths },
+          { serial: device.id, paths: files },
           { timeout: 20 * 60_000 },
         ),
-      ).output;
-    },
+      ).output,
   });
   return (
     <View style={styles.card} testID="sideload-android-install">
@@ -55,102 +73,59 @@ export function AndroidInstallCard({
       <Text style={styles.muted}>
         Choose one .apk, several split .apk files of one app, or one .apks / .xapk bundle.
       </Text>
-      <MutationButton mutation={install} variables={undefined} disabled={!device.ready}>
-        Choose APK and install…
-      </MutationButton>
+      <View style={styles.wrapRow}>
+        <MutationButton
+          size="sm"
+          variant="outline"
+          mutation={choose}
+          variables={undefined}
+          testID="sideload-android-choose"
+        >
+          Choose file…
+        </MutationButton>
+        {hostBrowse ? (
+          <ValueButton
+            size="sm"
+            variant="outline"
+            value={true}
+            onValue={setBrowsing}
+            testID="sideload-android-browse-host"
+          >
+            Browse host…
+          </ValueButton>
+        ) : null}
+      </View>
+      {paths.length > 0 ? (
+        <Text style={styles.mono} numberOfLines={2}>
+          {paths.map(fileName).join(", ")}
+        </Text>
+      ) : null}
+      {choose.error ? <Text style={styles.errorText}>{errorText(choose.error)}</Text> : null}
+      <View style={styles.start}>
+        <MutationButton
+          mutation={install}
+          variables={paths}
+          disabled={!device.ready || paths.length === 0 || choose.isPending}
+          testID="sideload-android-install-run"
+        >
+          Install
+        </MutationButton>
+      </View>
       {install.data ? (
         <Text style={styles.successText}>Installed: {install.data.split("\n").at(-1)}</Text>
       ) : null}
       {install.error ? (
         <Alert variant="error" title="adb install failed" description={errorText(install.error)} />
       ) : null}
-    </View>
-  );
-}
-
-export function AndroidPairingCard({
-  client,
-  onPaired,
-}: {
-  client: DaemonClient;
-  onPaired: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [pairAddress, setPairAddress] = useState("");
-  const [code, setCode] = useState("");
-  const [connectAddress, setConnectAddress] = useState("");
-  const pair = useMutation({
-    mutationFn: async () =>
-      unwrap(
-        await client.sideloadCall("android.pair.start.request", {
-          pairAddress: pairAddress.trim(),
-          code: code.trim(),
-          ...(connectAddress.trim() ? { connectAddress: connectAddress.trim() } : {}),
-        }),
-      ).output,
-    onSuccess: onPaired,
-  });
-  if (!open) {
-    return (
-      <ValueButton
-        variant="ghost"
-        size="sm"
-        value={true}
-        onValue={setOpen}
-        testID="sideload-android-pair-open"
-      >
-        Pair an Android device over Wi-Fi…
-      </ValueButton>
-    );
-  }
-  return (
-    <View style={styles.card} testID="sideload-android-pair">
-      <Text style={styles.label}>Pair wireless debugging</Text>
-      <Text style={styles.muted}>
-        On the phone: Developer options → Wireless debugging → Pair device with pairing code. Enter
-        the address and code it shows, and the address listed under Wireless debugging to connect.
-      </Text>
-      <AdaptiveTextInput
-        initialValue=""
-        onChangeText={setPairAddress}
-        placeholder="Pairing address, e.g. <ip>:37251"
-        autoCapitalize="none"
-        autoCorrect={false}
-        style={styles.inputMono}
-      />
-      <AdaptiveTextInput
-        initialValue=""
-        onChangeText={setCode}
-        placeholder="6-digit pairing code"
-        keyboardType="number-pad"
-        autoCapitalize="none"
-        autoCorrect={false}
-        style={styles.inputMono}
-      />
-      <AdaptiveTextInput
-        initialValue=""
-        onChangeText={setConnectAddress}
-        placeholder="Connect address, e.g. <ip>:41027"
-        autoCapitalize="none"
-        autoCorrect={false}
-        style={styles.inputMono}
-      />
-      <View style={styles.wrapRow}>
-        <MutationButton
-          size="sm"
-          mutation={pair}
-          variables={undefined}
-          disabled={!pairAddress.trim() || code.trim().length !== 6}
-        >
-          Pair
-        </MutationButton>
-        <ValueButton size="sm" variant="ghost" value={false} onValue={setOpen}>
-          Close
-        </ValueButton>
-      </View>
-      {pair.data ? <Text style={styles.successText}>{pair.data}</Text> : null}
-      {pair.error ? (
-        <Alert variant="error" title="Pairing failed" description={errorText(pair.error)} />
+      {hostBrowse ? (
+        <HostBrowseSheet
+          visible={browsing}
+          client={client}
+          serverId={serverId}
+          kind="android"
+          onClose={closeBrowse}
+          onPick={onHostPick}
+        />
       ) : null}
     </View>
   );

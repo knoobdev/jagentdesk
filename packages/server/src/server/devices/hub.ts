@@ -15,7 +15,7 @@ import type { SimScreenshot } from "../simulator/simulator-service.js";
 import { Adb, isWifiSerial, resolveAdbPath, type AdbDeviceEntry } from "./adb.js";
 import { ANDROID_KEYCODES, AndroidDevice } from "./android.js";
 import { DeviceError } from "./errors.js";
-import { GoIos, resolveGoIos, type GoIosDevice } from "./go-ios.js";
+import { cabledIosDevices, GoIos, resolveGoIos, type GoIosDevice } from "./go-ios.js";
 import { SCREEN_MAX_DIM, encodeJpeg, jpegFrame, type JpegFrame } from "./image.js";
 import { IosDevice, IosTunnelAgent, iosMajorVersion } from "./ios.js";
 import { MotionAction, ScrcpySession, resolveScrcpyServer } from "./scrcpy.js";
@@ -119,7 +119,7 @@ const NOT_READY_MESSAGE: Record<Exclude<SimReadiness, "ready">, string> = {
   needs_wda: "Prepare the device to install WebDriverAgent.",
   wda_expired: "WebDriverAgent expired. Prepare the device again to re-sign it.",
   needs_usb_debugging: "Unlock the phone and accept the USB debugging prompt.",
-  offline: "The device is offline. Reconnect the cable or Wi-Fi.",
+  offline: "The device is offline. Reconnect the cable.",
 };
 
 function reuseTool<T extends { binary: string }>(
@@ -250,8 +250,8 @@ export class PhysicalDeviceHub {
       this.logger.warn({ err: error }, "adb devices failed");
       return [];
     });
-    return Promise.all(
-      entries.map(async (entry) => {
+    const described = await Promise.all(
+      entries.map(async (entry): Promise<SimDevice | null> => {
         const udid = ANDROID_UDID_PREFIX + entry.serial;
         let device = this.androids.get(entry.serial);
         if (!device) {
@@ -262,8 +262,9 @@ export class PhysicalDeviceHub {
         const isEmulator = info?.isEmulator ?? entry.serial.startsWith("emulator-");
         const readiness = androidReadiness(entry);
         const model = info?.model ?? entry.model ?? "";
-        let connection: SimDevice["connection"] = null;
-        if (!isEmulator) connection = isWifiSerial(entry.serial) ? "wifi" : "usb";
+        // Spec 27.1: physical Android devices over a USB cable only. A phone someone connected
+        // over the network by hand outside JAgentDesk is not listed.
+        if (!isEmulator && isWifiSerial(entry.serial)) return null;
         return {
           udid,
           name: info?.name ?? entry.model ?? entry.serial,
@@ -274,7 +275,7 @@ export class PhysicalDeviceHub {
           slimState: "unknown",
           platform: "android",
           kind: isEmulator ? "emulator" : "physical",
-          connection,
+          connection: isEmulator ? null : "usb",
           // Spec 27.3: the switch is for physical devices; emulators stay controllable.
           controlEnabled: isEmulator || this.store.isControlEnabled(udid),
           readiness,
@@ -283,6 +284,7 @@ export class PhysicalDeviceHub {
         } satisfies SimDevice;
       }),
     );
+    return described.filter((device): device is SimDevice => device !== null);
   }
 
   private async discoverIos(goIos: GoIos, tunnel: IosTunnelAgent): Promise<SimDevice[]> {
@@ -290,7 +292,9 @@ export class PhysicalDeviceHub {
       this.logger.warn({ err: error }, "go-ios list failed");
       return [] as GoIosDevice[];
     });
-    return Promise.all(listed.map((entry) => this.describeIos(goIos, tunnel, entry)));
+    return Promise.all(
+      cabledIosDevices(listed).map((entry) => this.describeIos(goIos, tunnel, entry)),
+    );
   }
 
   private async describeIos(
@@ -327,7 +331,7 @@ export class PhysicalDeviceHub {
       slimState: "unknown",
       platform: "ios",
       kind: "physical",
-      connection: entry.connectionType === "Network" ? "wifi" : "usb",
+      connection: "usb",
       controlEnabled: this.store.isControlEnabled(udid),
       readiness: probe.readiness,
       osVersion: entry.productVersion,
@@ -900,34 +904,6 @@ export class PhysicalDeviceHub {
     await delay(3_000);
     child.kill();
     return output.split(/\r?\n/).filter(Boolean).slice(-lines).join("\n");
-  }
-
-  // ── Android wireless debugging (spec 27.1) ──
-
-  async pairWireless(input: {
-    host: string;
-    pairingPort: number;
-    pairingCode: string;
-    connectPort: number;
-  }): Promise<string> {
-    const { adb } = await this.hostTools();
-    if (!adb) throw new DeviceError("tool_missing", "adb is not installed on this host");
-    if (!/^[A-Za-z0-9.:\-[\]]+$/.test(input.host)) {
-      throw new Error("Enter the IP address shown under Wireless debugging");
-    }
-    if (!/^\d{6}$/.test(input.pairingCode.trim())) {
-      throw new Error("The pairing code is the 6 digits shown on the phone");
-    }
-    const pairOut = await adb.run(
-      ["pair", `${input.host}:${input.pairingPort}`, input.pairingCode.trim()],
-      30_000,
-    );
-    if (!/Successfully paired/i.test(pairOut)) throw new Error(pairOut.trim() || "Pairing failed");
-    const target = `${input.host}:${input.connectPort}`;
-    const connectOut = await adb.run(["connect", target], 30_000);
-    if (!/connected to/i.test(connectOut)) throw new Error(connectOut.trim() || "Connect failed");
-    this.listedAt = 0;
-    return ANDROID_UDID_PREFIX + target;
   }
 
   // ── iOS Prepare device (spec 27.4) ──

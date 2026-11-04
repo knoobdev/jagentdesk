@@ -61,12 +61,13 @@ describe("go-ios output", () => {
 });
 
 describe("adb devices -l", () => {
-  it("parses USB, wireless and unauthorized devices", () => {
+  it("lists cabled devices only and drops network ones (26.8: cable only)", () => {
     const stdout = [
       "List of devices attached",
       "R5CT1234ABC            device usb:1-1 product:panther model:Pixel_7 device:panther transport_id:1",
       "adb-R5CT-AbCd._adb-tls-connect._tcp device product:panther model:Pixel_7 transport_id:2",
       "192.168.1.20:37099     unauthorized transport_id:3",
+      "0A1B2C3D4E             unauthorized usb:1-2 transport_id:4",
       "",
     ].join("\n");
     expect(parseAdbDevices(stdout)).toEqual([
@@ -78,18 +79,11 @@ describe("adb devices -l", () => {
         connection: "usb",
       },
       {
-        serial: "adb-R5CT-AbCd._adb-tls-connect._tcp",
-        state: "device",
-        model: "Pixel 7",
-        osVersion: "",
-        connection: "wifi",
-      },
-      {
-        serial: "192.168.1.20:37099",
+        serial: "0A1B2C3D4E",
         state: "unauthorized",
         model: "",
         osVersion: "",
-        connection: "wifi",
+        connection: "usb",
       },
     ]);
   });

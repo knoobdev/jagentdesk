@@ -85,6 +85,20 @@ export function parseGoIosList(stdout: string): GoIosDevice[] {
   return devices;
 }
 
+// Spec 27.1 / ADR-0033 decision 4: only devices on a cable are controllable. usbmuxd also reports
+// devices it sees over Wi-Fi sync (`ConnectionType: "Network"`); those are left out, and a device
+// on both cable and Wi-Fi keeps only its USB entry.
+export function cabledIosDevices(devices: readonly GoIosDevice[]): GoIosDevice[] {
+  const seen = new Set<string>();
+  const cabled: GoIosDevice[] = [];
+  for (const device of devices) {
+    if (device.connectionType === "Network" || seen.has(device.udid)) continue;
+    seen.add(device.udid);
+    cabled.push(device);
+  }
+  return cabled;
+}
+
 // `ios apps --list`: "<bundle id> <name> <version>" per line.
 export function parseGoIosAppList(stdout: string): string[] {
   return stdout

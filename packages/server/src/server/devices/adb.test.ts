@@ -9,14 +9,23 @@ import {
 } from "./adb.js";
 
 describe("adb", () => {
-  it("refuses adb tcpip wherever it appears after global options", () => {
+  it("refuses adb tcpip, pair and connect wherever they appear after global options", () => {
     expect(() => assertAllowedAdbArgs(["tcpip", "5555"])).toThrow(AdbForbiddenCommandError);
     expect(() => assertAllowedAdbArgs(["-s", "R58M123ABC", "tcpip", "5555"])).toThrow(
       AdbForbiddenCommandError,
     );
     expect(() => assertAllowedAdbArgs(["-s", "tcpip", "shell", "ls"])).not.toThrow();
-    expect(() => assertAllowedAdbArgs(["pair", "192.168.1.20:37011", "123456"])).not.toThrow();
-    expect(() => assertAllowedAdbArgs(["connect", "192.168.1.20:41235"])).not.toThrow();
+    // Cable only (ADR-0033 decision 4): no wireless debugging pairing or network connect.
+    expect(() => assertAllowedAdbArgs(["pair", "192.168.1.20:37011", "123456"])).toThrow(
+      AdbForbiddenCommandError,
+    );
+    expect(() => assertAllowedAdbArgs(["connect", "192.168.1.20:41235"])).toThrow(
+      AdbForbiddenCommandError,
+    );
+    expect(() => assertAllowedAdbArgs(["-H", "127.0.0.1", "connect", "10.0.0.2:5555"])).toThrow(
+      AdbForbiddenCommandError,
+    );
+    expect(() => assertAllowedAdbArgs(["-s", "R58M123ABC", "shell", "pair"])).not.toThrow();
   });
 
   it("parses adb devices -l, including unauthorized and Wi-Fi entries", () => {
@@ -45,7 +54,7 @@ describe("adb", () => {
     expect(props.get("ro.kernel.qemu")).toBe("");
   });
 
-  it("tells wireless-debugging serials from cabled ones", () => {
+  it("tells network serials from cabled ones", () => {
     expect(isWifiSerial("192.168.1.20:41235")).toBe(true);
     expect(isWifiSerial("adb-R58M123ABC-x1y2z3._adb-tls-connect._tcp")).toBe(true);
     expect(isWifiSerial("R58M123ABC")).toBe(false);

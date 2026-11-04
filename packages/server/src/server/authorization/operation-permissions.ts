@@ -422,7 +422,6 @@ const INBOUND_PERMISSION = {
   "simulator/physical/enable": "daemon.manage",
   "simulator/physical/disable": "daemon.manage",
   "simulator/physical/prepare": "daemon.manage",
-  "simulator/physical/pair_wireless": "daemon.manage",
   "simulator/screen/subscribe": "daemon.read",
   "simulator/screen/unsubscribe": "daemon.read",
   "database/objects": "daemon.read",
@@ -605,6 +604,7 @@ const INBOUND_PERMISSION = {
   "sideload.devices.list.request": "daemon.manage",
   "sideload.ipa.upload.request": "daemon.manage",
   "sideload.ipa.inspect.request": "daemon.manage",
+  "sideload.host.browse.request": "daemon.manage",
   "sideload.install.start.request": "daemon.manage",
   "sideload.install.cancel.request": "daemon.manage",
   "sideload.apps.list.request": "daemon.manage",
@@ -617,7 +617,6 @@ const INBOUND_PERMISSION = {
   "sideload.certs.revoke.request": "daemon.manage",
   "sideload.app_ids.list.request": "daemon.manage",
   "android.install.start.request": "daemon.manage",
-  "android.pair.start.request": "daemon.manage",
 } as const satisfies Record<InboundOperation, DaemonPermission | null>;
 
 const OUTBOUND_PERMISSION = {
@@ -1047,7 +1046,6 @@ const OUTBOUND_PERMISSION = {
   "simulator/physical/disable/response": "daemon.manage",
   "simulator/physical/prepare/response": "daemon.manage",
   "simulator/physical/prepare/progress": "daemon.manage",
-  "simulator/physical/pair_wireless/response": "daemon.manage",
   "simulator/screen/subscribe/response": "daemon.read",
   "simulator/screen/unsubscribe/response": "daemon.read",
   "proxy/capture/start/response": "daemon.manage",
@@ -1264,6 +1262,7 @@ const OUTBOUND_PERMISSION = {
   "sideload.devices.list.response": "daemon.manage",
   "sideload.ipa.upload.response": "daemon.manage",
   "sideload.ipa.inspect.response": "daemon.manage",
+  "sideload.host.browse.response": "daemon.manage",
   "sideload.install.start.response": "daemon.manage",
   "sideload.install.cancel.response": "daemon.manage",
   "sideload.apps.list.response": "daemon.manage",
@@ -1276,7 +1275,6 @@ const OUTBOUND_PERMISSION = {
   "sideload.certs.revoke.response": "daemon.manage",
   "sideload.app_ids.list.response": "daemon.manage",
   "android.install.start.response": "daemon.manage",
-  "android.pair.start.response": "daemon.manage",
   "sideload.auth.prompt": "daemon.manage",
   "sideload.auth.resolved": "daemon.manage",
   "sideload.install.progress": "daemon.manage",

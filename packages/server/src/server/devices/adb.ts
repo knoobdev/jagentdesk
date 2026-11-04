@@ -12,14 +12,17 @@ import { androidSdkCandidates } from "../host-capabilities/service.js";
 
 export class AdbForbiddenCommandError extends Error {
   constructor(readonly subcommand: string) {
-    super(`adb ${subcommand} is not allowed: it opens an unencrypted adb port on the network`);
+    super(
+      `adb ${subcommand} is not allowed: physical devices are controlled over a USB cable only`,
+    );
     this.name = "AdbForbiddenCommandError";
   }
 }
 
-// ADR-0033 decision 4: Wi-Fi only through wireless debugging (TLS, pairing code). `adb tcpip`
-// (unencrypted adb over the network) is refused at the one place every adb call goes through.
-const FORBIDDEN_SUBCOMMANDS = new Set(["tcpip"]);
+// ADR-0033 decision 4: physical devices over a USB cable only. The daemon never opens adb over
+// the network: `adb tcpip`, `adb pair` and `adb connect` are refused at the one place every adb
+// call goes through.
+const FORBIDDEN_SUBCOMMANDS = new Set(["tcpip", "pair", "connect"]);
 
 function adbSubcommand(args: readonly string[]): string | null {
   for (let index = 0; index < args.length; index += 1) {
@@ -91,8 +94,9 @@ export function parseGetprop(stdout: string): Map<string, string> {
   return props;
 }
 
-// Wireless-debugging devices show up as `<ip>:<port>` or as the mDNS service name
-// `adb-<guid>._adb-tls-connect._tcp`; everything else is cabled.
+// Devices adb reaches over the network show up as `<ip>:<port>` or as the mDNS service name
+// `adb-<guid>._adb-tls-connect._tcp`; everything else is cabled. Network devices (connected by
+// hand outside JAgentDesk) are never listed as physical devices (spec 27.1: cable only).
 export function isWifiSerial(serial: string): boolean {
   return (
     /^[\d.]+:\d+$/.test(serial) ||

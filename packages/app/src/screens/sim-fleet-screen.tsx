@@ -9,7 +9,7 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import { Gesture } from "react-native-gesture-handler";
-import { CircleAlert, Download, MessageSquare, Plus, Smartphone, Wifi } from "lucide-react-native";
+import { CircleAlert, Download, MessageSquare, Plus, Smartphone } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useHostRuntimeClient, useHosts } from "@/runtime/host-runtime";
@@ -28,7 +28,6 @@ import { SimAddSheet } from "@/screens/sim-add-sheet";
 import { SimInstallSheet } from "@/screens/sim-install-sheet";
 import { SimDrivePanel } from "@/screens/sim-drive-panel";
 import { SimDevicePanel } from "@/screens/sim-device-panel";
-import { SimPairSheet } from "@/screens/sim-pair-sheet";
 import { connectionLabel } from "@/screens/sim-device-errors";
 import {
   PhoneScreen,
@@ -312,13 +311,11 @@ function FleetHeader({
   devices,
   showAgentToggle,
   onInstall,
-  onPair,
 }: {
   loading: boolean;
   devices: readonly SimDevice[];
   showAgentToggle: boolean;
   onInstall: () => void;
-  onPair: (() => void) | null;
 }) {
   const chatOpen = useSimChatStore((s) => s.open);
   const showChat = useSimChatStore((s) => s.showChat);
@@ -342,18 +339,6 @@ function FleetHeader({
   const actions = useMemo(
     () => (
       <>
-        {onPair ? (
-          <Button
-            size="sm"
-            variant="outline"
-            leftIcon={Wifi}
-            onPress={onPair}
-            accessibilityLabel="Pair an Android phone over Wi-Fi"
-            testID="sim-pair-open"
-          >
-            Pair Android
-          </Button>
-        ) : null}
         <Button
           size="sm"
           variant="outline"
@@ -378,7 +363,7 @@ function FleetHeader({
         ) : null}
       </>
     ),
-    [chatOpen, onInstall, onPair, showAgentToggle, toggleChat],
+    [chatOpen, onInstall, showAgentToggle, toggleChat],
   );
   return (
     <PageHeader
@@ -452,7 +437,8 @@ function FleetGrid({
       {available ? <AddTile onPress={onAdd} /> : null}
       {(available || hasDeviceTools) && devices.length === 0 ? (
         <Text style={styles.empty}>
-          No simulators or devices yet. Create a simulator or connect a phone with a cable.
+          No simulators or devices yet. Create a simulator, or plug a phone in with its cable and
+          unlock it: on an iPhone or iPad tap Trust, on Android allow USB debugging.
         </Text>
       ) : null}
       {devices.map((device) => (
@@ -575,9 +561,6 @@ function SimulatorFleet({
   const [pending, setPending] = useState<Pending | null>(null);
   const [adding, setAdding] = useState(false);
   const [installing, setInstalling] = useState(false);
-  const [pairing, setPairing] = useState(false);
-  const openPair = useCallback(() => setPairing(true), []);
-  const closePair = useCallback(() => setPairing(false), []);
   const openInstall = useCallback(() => setInstalling(true), []);
   const closeInstall = useCallback(() => setInstalling(false), []);
 
@@ -598,13 +581,6 @@ function SimulatorFleet({
   const existingNames = useMemo(() => devices.map((d) => d.name), [devices]);
   const simulators = useMemo(() => devices.filter((d) => !isHubDevice(d)), [devices]);
   const hasDeviceTools = Boolean(availability.physical?.adb || availability.physical?.goIos);
-  const onPaired = useCallback(
-    (udid: string) => {
-      void refresh();
-      setSelectedUdid(udid);
-    },
-    [refresh],
-  );
   const onDeviceChanged = useCallback(() => void refresh(), [refresh]);
 
   const runAction = useCallback(
@@ -673,7 +649,6 @@ function SimulatorFleet({
         devices={devices}
         showAgentToggle={!isCompact}
         onInstall={openInstall}
-        onPair={availability.physical?.adb ? openPair : null}
       />
       {showTabs ? <FleetTabs value={tab} onChange={onTab} /> : null}
       <FleetBanners
@@ -721,7 +696,6 @@ function SimulatorFleet({
         devices={simulators}
         onClose={closeInstall}
       />
-      <SimPairSheet visible={pairing} client={client} onClose={closePair} onPaired={onPaired} />
       <SimAddSheet
         visible={adding}
         client={client}

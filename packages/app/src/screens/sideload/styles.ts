@@ -84,12 +84,6 @@ export const sideloadStyles = StyleSheet.create((theme) => ({
   },
   field: { gap: theme.spacing[1] },
   grow: { flex: 1, minWidth: 0 },
-  pathRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing[2],
-    alignSelf: "stretch",
-  },
   divider: { height: 1, backgroundColor: theme.colors.border },
   choice: {
     flexDirection: "row",

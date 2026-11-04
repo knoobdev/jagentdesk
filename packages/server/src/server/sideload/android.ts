@@ -6,8 +6,9 @@ import { extractZip, listZip } from "./zip.js";
 
 /**
  * Android install (26.8): `adb install -r` for an APK, `adb install-multiple -r` for split
- * APKs and `.apks`/`.xapk` bundles, wireless debugging pairing by code (`adb pair`, then
- * `adb connect`). No re-signing, no package rename. `adb tcpip` is never used (27.1).
+ * APKs and `.apks`/`.xapk` bundles, on phones plugged in with a USB cable. No re-signing, no
+ * package rename. The daemon never runs `adb pair`, `adb connect` or `adb tcpip` (27.1,
+ * ADR-0033 §4); a device someone connected over the network by hand is not listed.
  */
 
 export interface AndroidDevice {
@@ -15,12 +16,12 @@ export interface AndroidDevice {
   state: string;
   model: string;
   osVersion: string;
-  connection: "usb" | "wifi";
+  connection: "usb";
 }
 
 export class AndroidError extends Error {
   constructor(
-    readonly code: "adb_missing" | "install_failed" | "pair_failed" | "invalid_input",
+    readonly code: "adb_missing" | "install_failed" | "invalid_input",
     message: string,
   ) {
     super(message);
@@ -40,13 +41,14 @@ export function parseAdbDevices(stdout: string): AndroidDevice[] {
         return index > 0 ? [[field.slice(0, index), field.slice(index + 1)]] : [];
       }),
     );
-    const wifi = serial.includes(":") || serial.includes("._adb-tls-connect.");
+    // `<host>:<port>` and `adb-<guid>._adb-tls-connect._tcp` are network connections: cable only.
+    if (serial.includes(":") || serial.includes("._adb-tls-connect.")) continue;
     devices.push({
       serial,
       state,
       model: (props.model ?? "").replace(/_/g, " "),
       osVersion: "",
-      connection: wifi ? "wifi" : "usb",
+      connection: "usb",
     });
   }
   return devices;
@@ -139,33 +141,5 @@ export class Adb {
       throw new AndroidError("install_failed", output.slice(-1200) || "adb install failed");
     }
     return output;
-  }
-
-  async pair(input: {
-    pairAddress: string;
-    code: string;
-    connectAddress?: string;
-  }): Promise<string> {
-    const adb = this.path();
-    if (!/^[\w.:[\]-]+:\d+$/.test(input.pairAddress) || !/^\d{6}$/.test(input.code)) {
-      throw new AndroidError(
-        "invalid_input",
-        "Enter the host:port and 6-digit code shown on the phone.",
-      );
-    }
-    const paired = await this.run(adb, ["pair", input.pairAddress, input.code], {
-      timeoutMs: 30_000,
-    });
-    const pairOutput = outputOf(paired);
-    if (paired.code !== 0 || !/Successfully paired/i.test(pairOutput)) {
-      throw new AndroidError("pair_failed", pairOutput || "adb pair failed");
-    }
-    if (!input.connectAddress) return pairOutput;
-    const connected = await this.run(adb, ["connect", input.connectAddress], { timeoutMs: 30_000 });
-    const connectOutput = outputOf(connected);
-    if (connected.code !== 0 || !/connected to/i.test(connectOutput)) {
-      throw new AndroidError("pair_failed", connectOutput || "adb connect failed");
-    }
-    return `${pairOutput}\n${connectOutput}`;
   }
 }

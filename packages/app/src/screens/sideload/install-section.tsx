@@ -17,13 +17,16 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Switch } from "@/components/ui/switch";
 import { isWeb } from "@/constants/platform";
 import { useFilePicker } from "@/hooks/use-file-picker";
-import { AndroidInstallCard, AndroidPairingCard } from "./android-panel";
+import { useSessionStore } from "@/stores/session-store";
+import { AndroidInstallCard } from "./android-panel";
 import { KeyedSwitch, MutationButton, ValueButton } from "./buttons";
+import { HostBrowseSheet } from "./host-browse-sheet";
 import { unwrap, useSideloadAccounts, useSideloadDevices, type JobEvent } from "./queries";
 import { sideloadStyles as styles } from "./styles";
 
-// 26.5 / 26.9 Install: choose an IPA (drop it on desktop), a device and an account, set the
-// advanced options, then follow each step the daemon reports.
+// 26.5 / 26.9 Install: choose an IPA (upload it from this device — Choose file… or drop it on
+// desktop — or pick one on the host with Browse host…), a device and an account, set the
+// advanced options, then follow each step the daemon reports. There is no free-text path field.
 
 type Mode = "sign_install" | "install_as_is" | "export";
 const MODE_OPTIONS = [
@@ -56,6 +59,7 @@ export function maskSensitive(text: string): string {
     .replace(/\b[A-Z0-9]{10}\b/g, "••••••••••");
 }
 
+// `path`: a file picked on the daemon host with Browse host….
 type UploadInput = { bytes: Uint8Array; fileName: string } | { path: string };
 
 async function uploadToDaemon(client: DaemonClient, input: UploadInput): Promise<SideloadIpaInfo> {
@@ -123,6 +127,10 @@ export function InstallSection({
   const device = list.find((candidate) => candidate.id === deviceId) ?? null;
   const { refetch } = devices;
   const refresh = useCallback(() => void refetch(), [refetch]);
+  // COMPAT(sideloadHostBrowse): v0.9.48 daemons do not answer sideload.host.browse.
+  const hostBrowse = useSessionStore(
+    (state) => state.sessions[serverId]?.serverInfo?.features?.sideloadHostBrowse === true,
+  );
 
   return (
     <ScrollView contentContainerStyle={styles.section} testID="sideload-install">
@@ -144,9 +152,9 @@ export function InstallSection({
         {devices.error ? <Text style={styles.errorText}>{errorText(devices.error)}</Text> : null}
         {!devices.isPending && list.length === 0 ? (
           <Text style={styles.muted}>
-            No device found. Connect an iPhone or iPad by USB (or one set to sync over Wi-Fi),
-            unlock it and tap Trust. Android: turn on USB debugging, or pair wireless debugging
-            below.
+            No device found. Plug the phone in with its cable and unlock it. iPhone or iPad: tap
+            Trust on the Trust This Computer prompt. Android: allow USB debugging when the phone
+            asks (turn it on in Developer options first).
           </Text>
         ) : null}
         {list.map((candidate) => (
@@ -165,11 +173,22 @@ export function InstallSection({
         ) : null}
       </View>
       {device?.platform === "android" ? (
-        <AndroidInstallCard client={client} device={device} />
+        <AndroidInstallCard
+          client={client}
+          serverId={serverId}
+          device={device}
+          hostBrowse={hostBrowse}
+        />
       ) : (
-        <IosInstall client={client} device={device} accounts={accounts.data ?? []} jobs={jobs} />
+        <IosInstall
+          client={client}
+          serverId={serverId}
+          hostBrowse={hostBrowse}
+          device={device}
+          accounts={accounts.data ?? []}
+          jobs={jobs}
+        />
       )}
-      <AndroidPairingCard client={client} onPaired={refresh} />
     </ScrollView>
   );
 }
@@ -217,13 +236,18 @@ function DeviceRow({
 
 function IpaPicker({
   client,
+  serverId,
+  hostBrowse,
   onIpa,
 }: {
   client: DaemonClient;
+  serverId: string;
+  hostBrowse: boolean;
   onIpa: (ipa: SideloadIpaInfo) => void;
 }) {
   const { pickFiles } = useFilePicker();
-  const [hostPath, setHostPath] = useState("");
+  const [browsing, setBrowsing] = useState(false);
+  const closeBrowse = useCallback(() => setBrowsing(false), []);
   const upload = useMutation({
     mutationFn: (input: UploadInput) => uploadToDaemon(client, input),
     onSuccess: onIpa,
@@ -244,8 +268,8 @@ function IpaPicker({
     },
     [mutate],
   );
+  const onHostPick = useCallback((path: string) => mutate({ path }), [mutate]);
   const drop = useDropZone(onDrop);
-  const byPath = useMemo(() => ({ path: hostPath.trim() }), [hostPath]);
   return (
     <View
       ref={drop.ref}
@@ -256,40 +280,42 @@ function IpaPicker({
       <Text style={styles.title}>
         {isWeb ? "Drop an .ipa here or choose a file" : "Choose an .ipa"}
       </Text>
-      <MutationButton
-        size="sm"
-        mutation={choose}
-        variables={undefined}
-        disabled={upload.isPending}
-        testID="sideload-choose-ipa"
-      >
-        Choose IPA…
-      </MutationButton>
-      <View style={styles.pathRow}>
-        <View style={styles.grow}>
-          <AdaptiveTextInput
-            initialValue=""
-            onChangeText={setHostPath}
-            placeholder="or a path on the host, e.g. /Users/<you>/Build/App.ipa"
-            autoCapitalize="none"
-            autoCorrect={false}
-            style={styles.inputMono}
-            testID="sideload-host-path"
-          />
-        </View>
+      <View style={styles.wrapRow}>
         <MutationButton
           size="sm"
-          variant="outline"
-          mutation={upload}
-          variables={byPath}
-          disabled={!hostPath.trim()}
+          mutation={choose}
+          variables={undefined}
+          disabled={upload.isPending}
+          testID="sideload-choose-ipa"
         >
-          Use path
+          Choose file…
         </MutationButton>
+        {hostBrowse ? (
+          <ValueButton
+            size="sm"
+            variant="outline"
+            value={true}
+            onValue={setBrowsing}
+            disabled={upload.isPending}
+            testID="sideload-browse-host"
+          >
+            Browse host…
+          </ValueButton>
+        ) : null}
       </View>
       {upload.isPending ? <Text style={styles.muted}>Uploading and checking the IPA…</Text> : null}
       {upload.error ? <Text style={styles.errorText}>{errorText(upload.error)}</Text> : null}
       {choose.error ? <Text style={styles.errorText}>{errorText(choose.error)}</Text> : null}
+      {hostBrowse ? (
+        <HostBrowseSheet
+          visible={browsing}
+          client={client}
+          serverId={serverId}
+          kind="ios"
+          onClose={closeBrowse}
+          onPick={onHostPick}
+        />
+      ) : null}
     </View>
   );
 }
@@ -339,11 +365,15 @@ async function startJob(input: {
 
 function IosInstall({
   client,
+  serverId,
+  hostBrowse,
   device,
   accounts,
   jobs,
 }: {
   client: DaemonClient;
+  serverId: string;
+  hostBrowse: boolean;
   device: SideloadDevice | null;
   accounts: SideloadAccountSummary[];
   jobs: Record<string, JobEvent[]>;
@@ -372,7 +402,7 @@ function IosInstall({
 
   return (
     <>
-      <IpaPicker client={client} onIpa={setIpa} />
+      <IpaPicker client={client} serverId={serverId} hostBrowse={hostBrowse} onIpa={setIpa} />
       {ipa ? <IpaCard ipa={ipa} /> : null}
       <View style={styles.card}>
         <Text style={styles.label}>Mode</Text>

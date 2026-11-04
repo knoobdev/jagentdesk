@@ -99,7 +99,10 @@ Gotchas that cost time:
 - **`ios forward` and `ios ui run` bind `0.0.0.0`.** WebDriverAgent is reached through the
   daemon's own usbmux forward on `127.0.0.1` (`usbmux.ts`); the go-ios tunnel agent binds
   `127.0.0.1` already.
-- **Never `adb tcpip`.** `adb.ts` refuses it at the one place every adb call goes through; Wi-Fi is
-  wireless debugging (`adb pair` + `adb connect`).
+- **Cable only (ADR-0033 §4).** `adb.ts` refuses `adb tcpip`, `adb pair` and `adb connect` at the
+  one place every adb call goes through; there is no wireless debugging. Android serials that are
+  network addresses (`<ip>:<port>`, `adb-…._adb-tls-connect._tcp`) and iOS devices go-ios reports
+  with `ConnectionType: "Network"` (Wi-Fi sync) are left out of the physical-device list, so
+  `connection` is always `"usb"`. (Sideload still installs on iOS devices over Wi-Fi sync, spec 26.7.)
 - Screen frames are binary opcode `0x20` only for clients advertising `binary_screen_frames`;
   older clients keep polling `simulator/screenshot`, which works for physical devices too.

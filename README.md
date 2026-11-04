@@ -65,8 +65,9 @@ with a few deliberate boundaries:
 - **iOS sideload** _(new)_ — Sideloadly-class: your Apple ID (2FA in the app) or an App Store Connect
   key, signing and install by the daemon over USB or Wi-Fi, app options, automatic refresh before
   expiry; plus Android APK install.
-- **Real devices in Sims** _(new)_ — iPhones, iPads and Android phones over cable or Wi-Fi with a live
-  screen and real input, off until you enable control per device; agents use the same `sim_*` tools.
+- **Real devices in Sims** _(new)_ — iPhones, iPads and Android phones plugged in by cable, with a
+  live screen and real input, off until you enable control per device; agents use the same `sim_*`
+  tools.
 - **Spec mode** _(new)_ — a composer toggle that runs GitHub Spec Kit's spec-driven workflow phase by
   phase, with your approval between phases.
 - **Activity graph** _(new)_ — an archify canvas beside the chat showing what the agent did, is doing
@@ -152,13 +153,14 @@ with a few deliberate boundaries:
   signs and installs IPAs over USB or Wi-Fi, with name, icon, bundle ID, minimum iOS, extensions and
   injection options, and **refreshes apps before they expire**.
 - Free-account limits are checked before Apple is called; secrets never leave the daemon.
-- Android `.apk` / `.apks` install and wireless-debugging pairing.
+- Android `.apk` / `.apks` install on a phone plugged in by USB cable.
+- Pick the file with **Choose file…** (or drag and drop) from your device, or **Browse host…** to
+  pick an `.ipa` / `.apk` on the daemon machine — no path to type.
 
 #### Real iPhones, iPads and Android phones in Sims
 
-![Sims in JAgentDesk: Pair Android, Install and Agent actions, simulators next to physical devices, and the "Pair Android over Wi-Fi" sheet](docs/media/devices.png)
-
-- Devices over cable or Wi-Fi appear next to simulators; **control stays off until you enable it**.
+- Phones plugged in with their cable appear next to simulators (unlock, then tap Trust on an iPhone or
+  allow USB debugging on Android); **control stays off until you enable it**.
 - Live screen (binary JPEG frames, up to 15 fps), taps, swipes, text and hardware keys, apps, logs and
   screenshots; iOS via WebDriverAgent signed with your Sideload account.
 - Agents use the same `sim_*` tools after you allow them per device.
