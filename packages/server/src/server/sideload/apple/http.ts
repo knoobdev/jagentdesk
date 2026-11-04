@@ -1,4 +1,5 @@
 import { request } from "node:https";
+import { brotliDecompressSync, gunzipSync, inflateSync } from "node:zlib";
 import { rootCertificates } from "node:tls";
 import type pino from "pino";
 import { APPLE_ROOT_CA_PEM } from "./apple-root-ca.js";
@@ -46,6 +47,30 @@ function toBuffer(body: Buffer | string | undefined): Buffer | undefined {
 const TRUST_ANCHORS = [...rootCertificates, APPLE_ROOT_CA_PEM];
 const DEFAULT_TIMEOUT_MS = 60_000;
 
+/**
+ * node:https does not undo Content-Encoding (unlike NSURLSession / fetch, which Sideloadly and
+ * AltSign rely on). Decode gzip / deflate / br; a body that fails to decode is returned as is.
+ */
+export function decodeBody(body: Buffer, encoding: string | undefined): Buffer {
+  const kind = (encoding ?? "").trim().toLowerCase();
+  try {
+    if (kind === "gzip" || kind === "x-gzip") return gunzipSync(body);
+    if (kind === "deflate") return inflateSync(body);
+    if (kind === "br") return brotliDecompressSync(body);
+  } catch {
+    return body;
+  }
+  // Some servers compress without saying so: gzip magic bytes.
+  if (body.length > 2 && body[0] === 0x1f && body[1] === 0x8b) {
+    try {
+      return gunzipSync(body);
+    } catch {
+      return body;
+    }
+  }
+  return body;
+}
+
 export function createAppleHttp(logger: pino.Logger): AppleHttp {
   return (input) =>
     new Promise<AppleHttpResponse>((resolve, reject) => {
@@ -76,7 +101,7 @@ export function createAppleHttp(logger: pino.Logger): AppleHttp {
             resolve({
               status: res.statusCode ?? 0,
               headers: responseHeaders,
-              body: Buffer.concat(chunks),
+              body: decodeBody(Buffer.concat(chunks), responseHeaders["content-encoding"]),
             });
           });
           res.on("error", (error) => reject(new AppleHttpError(url.host, error.message)));
