@@ -91,6 +91,7 @@ import { SidebarAgentListSkeleton } from "./sidebar-agent-list-skeleton";
 import { SidebarCalloutSlot } from "./sidebar-callout-slot";
 import { SidebarWorkspaceList } from "./sidebar-workspace-list";
 import { SidebarServersNav } from "@/ssh/ui/sidebar-servers-nav";
+import { JiraSidebarEntry } from "@/jira/sidebar-entry";
 import { SidebarClusterNav } from "./sidebar-cluster-nav";
 import { SidebarDatabaseNav } from "./sidebar-database-nav";
 
@@ -1052,6 +1053,7 @@ function MobileSidebar({
                 variant="compact"
               />
             ) : null}
+            <JiraSidebarEntry closesDrawer />
             <SidebarHeaderRow
               icon={Sparkles}
               label={labels.skills}
@@ -1385,6 +1387,7 @@ function DesktopSidebar({
                   variant="compact"
                 />
               ) : null}
+              <JiraSidebarEntry closesDrawer={false} />
               <SidebarHeaderRow
                 icon={Sparkles}
                 label={labels.skills}
