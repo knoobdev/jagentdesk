@@ -89,7 +89,7 @@ the release assets.
 
 ### Sideload — sign and install iOS apps with your Apple ID, install Android APKs (Sims → Sideload)
 
-![Sims → Sideload → Install: device guidance, IPA drop zone, Sign & install / Install as-is / Export signed IPA](docs/media/sideload.png)
+![Sims → Sideload → Install with the Browse host dialog: folders and only .ipa files on the daemon machine, with sizes](docs/media/sideload.png)
 
 - **Your Apple ID inside JAgentDesk**, free or paid: email + password in the app, two-factor code (or
   "Send SMS instead") typed in the app and passed to the daemon, never stored. Paid accounts can use an
@@ -121,6 +121,8 @@ the release assets.
 
 ### Real devices in Sims — iPhone, iPad and Android over cable
 
+![Sims → Sideload with no phone attached: "Plug the phone in with its cable and unlock it. iPhone or iPad: tap Trust… Android: allow USB debugging…"](docs/media/devices.png)
+
 - **Physical devices next to simulators.** Plug the phone in with its cable: Android through `adb`
   over USB, iPhone and iPad through go-ios over USB (iOS 17+ through go-ios' userspace tunnel, no
   root). Cable only — there is no wireless pairing, and the daemon never runs `adb pair`,
@@ -147,7 +149,7 @@ the release assets.
 
 ### Spec mode — GitHub Spec Kit in the agent chat
 
-![Spec mode in JAgentDesk: Spec mode on in the composer and the activity graph's Plan view showing tasks.md phases and tasks](docs/media/spec-mode-plan.png)
+![Activity graph Plan view with Spec mode on: Spec mode · Implement, tasks.md phases and tasks, done tasks green, planned ones dashed, [P] parallel marks](docs/media/spec-mode-plan.png)
 
 ![Spec mode phase review: "Tasks is ready for review" with the tasks.md link, Approve & continue and Revise](docs/media/spec-mode-review.png)
 
@@ -159,6 +161,9 @@ the release assets.
   the viewer or diff) with **Approve & continue** and **Revise** (your note goes back with the same
   phase). The daemon only sends the next phase command when you approve — it never starts turns on
   its own.
+- **A clean chat.** Phase messages show only "Spec mode · <phase>" and what you wrote (your request,
+  your Revise note, or "Approved — continue to <phase>"); the spec-kit command itself stays behind a
+  collapsed **Show command**. The phase strip and the review bar sit together on top of the composer.
 - **Set up with your consent.** The first time, the app lists the files it will write (the pinned
   spec-kit 1.3.0 templates and scripts, and the provider's command folder) and writes nothing until
   you press **Set up**; an existing `.specify/` is used as-is. Works with Claude Code, Codex, OpenCode,

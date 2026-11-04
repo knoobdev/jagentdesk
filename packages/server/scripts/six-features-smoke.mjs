@@ -9,7 +9,7 @@ const client = new DaemonClient({
   url: `ws://127.0.0.1:${port}/ws`,
   clientId: `clid_six_smoke_${randomBytes(3).toString("hex")}`,
   clientType: "cli",
-  appVersion: "0.9.47",
+  appVersion: "0.9.48",
   webSocketFactory: (url, options) =>
     new WebSocket(url, options?.protocols, { headers: options?.headers }),
 });

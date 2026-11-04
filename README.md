@@ -147,7 +147,7 @@ with a few deliberate boundaries:
 
 #### Sideload — your Apple ID, signed and installed by the daemon
 
-![Sims → Sideload → Install: device guidance, IPA drop zone, Sign & install / Install as-is / Export signed IPA](docs/media/sideload.png)
+![Sims → Sideload → Install with the Browse host dialog: folders and only .ipa files on the daemon machine, with sizes](docs/media/sideload.png)
 
 - Sign in with a free or paid Apple ID (2FA in the app) or an App Store Connect API key; the daemon
   signs and installs IPAs over USB or Wi-Fi, with name, icon, bundle ID, minimum iOS, extensions and
@@ -159,6 +159,8 @@ with a few deliberate boundaries:
 
 #### Real iPhones, iPads and Android phones in Sims
 
+![Sims → Sideload with no phone attached: "Plug the phone in with its cable and unlock it. iPhone or iPad: tap Trust… Android: allow USB debugging…"](docs/media/devices.png)
+
 - Phones plugged in with their cable appear next to simulators (unlock, then tap Trust on an iPhone or
   allow USB debugging on Android); **control stays off until you enable it**.
 - Live screen (binary JPEG frames, up to 15 fps), taps, swipes, text and hardware keys, apps, logs and
@@ -167,12 +169,14 @@ with a few deliberate boundaries:
 
 #### Spec mode — GitHub Spec Kit in the chat
 
-![Spec mode with the activity graph Plan view](docs/media/spec-mode-plan.png)
+![Activity graph Plan view with Spec mode on: Spec mode · Implement, tasks.md phases and tasks, done tasks green, planned ones dashed, [P] parallel marks](docs/media/spec-mode-plan.png)
 
 ![Spec mode phase review: "Tasks is ready for review" with the tasks.md link, Approve & continue and Revise](docs/media/spec-mode-review.png)
 
 - A **Spec mode** toggle in the composer runs Constitution → Specify → Plan → Tasks → Implement →
   Converge (Clarify, Checklist and Analyze optional), and **you approve each phase**.
+- The chat shows only the phase and what you wrote — the spec-kit command stays behind **Show
+  command** — and the review bar sits right on top of the composer.
 - Phases are judged from the files on disk, never by a hidden model call; the setup lists every file
   before writing it.
 
