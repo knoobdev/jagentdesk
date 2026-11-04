@@ -9,13 +9,17 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import { Gesture } from "react-native-gesture-handler";
-import { CircleAlert, Download, MessageSquare, Plus, Smartphone } from "lucide-react-native";
+import { CircleAlert, Download, MessageSquare, Plus, Smartphone, Wifi } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useHostRuntimeClient, useHosts } from "@/runtime/host-runtime";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import type { Theme } from "@/styles/theme";
-import type { SimAction, SimDevice } from "@jagentdesk/protocol/simulator/rpc-schemas";
+import type {
+  SimAction,
+  SimAvailability,
+  SimDevice,
+} from "@jagentdesk/protocol/simulator/rpc-schemas";
 import { Skeleton, useSkeletonPulse } from "@/components/ui/skeleton";
 import { SidebarResizeHandle } from "@/components/sidebar-resize-handle";
 import { SimChatDock } from "@/components/sim-chat-dock";
@@ -23,7 +27,18 @@ import { useSimChatStore } from "@/stores/sim-chat-store";
 import { SimAddSheet } from "@/screens/sim-add-sheet";
 import { SimInstallSheet } from "@/screens/sim-install-sheet";
 import { SimDrivePanel } from "@/screens/sim-drive-panel";
-import { PhoneScreen, TILE_MAX_DIM, TILE_POLL_MS, useScreenshot } from "@/screens/sim-phone";
+import { SimDevicePanel } from "@/screens/sim-device-panel";
+import { SimPairSheet } from "@/screens/sim-pair-sheet";
+import { connectionLabel } from "@/screens/sim-device-errors";
+import {
+  PhoneScreen,
+  TILE_LIVE_FPS,
+  TILE_MAX_DIM,
+  TILE_POLL_MS,
+  isDeviceLive,
+  isGatedDevice,
+  useDeviceScreen,
+} from "@/screens/sim-phone";
 import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
 
 // Tiles share one size so rows stay aligned; the device (real aspect) is centered inside.
@@ -66,7 +81,13 @@ function DeviceTile({
   onSelect: (udid: string) => void;
   onBoot: (udid: string) => void;
 }) {
-  const shot = useScreenshot(client, device.udid, device.isBooted, TILE_POLL_MS, TILE_MAX_DIM);
+  const screen = useDeviceScreen(client, device, {
+    maxFps: TILE_LIVE_FPS,
+    pollMs: TILE_POLL_MS,
+    maxDim: TILE_MAX_DIM,
+  });
+  const shot = screen.shot;
+  const gated = isGatedDevice(device);
   const select = useCallback(() => onSelect(device.udid), [device.udid, onSelect]);
   const boot = useCallback(() => onBoot(device.udid), [device.udid, onBoot]);
   const isClickUp = useIsClickUpTheme();
@@ -76,7 +97,7 @@ function DeviceTile({
       onPress={select}
       style={[styles.card, selected ? selectedCardStyle(isClickUp) : null]}
       accessibilityRole="button"
-      accessibilityLabel={`Simulator ${device.name}`}
+      accessibilityLabel={`${gated ? "Device" : "Simulator"} ${device.name}`}
       testID={`sim-tile-${device.udid}`}
     >
       <View style={styles.cardHead}>
@@ -89,19 +110,40 @@ function DeviceTile({
         <PhoneScreen
           name={device.name}
           typeName={device.deviceType || device.name}
-          booted={device.isBooted}
+          booted={gated ? isDeviceLive(device) : device.isBooted}
           booting={booting}
           source={shot?.source ?? null}
           shotAspect={shot?.aspect ?? null}
           maxW={CARD_W - 28}
           maxH={FRAME_H}
-          onBoot={boot}
+          onBoot={gated ? undefined : boot}
         />
       </View>
       <Text style={styles.cardMeta} numberOfLines={1}>
         {device.runtime}
       </Text>
+      {gated ? <DeviceBadges device={device} /> : null}
     </Pressable>
+  );
+}
+
+// Physical devices and adb emulators: connection plus the control switch / readiness at a glance.
+function DeviceBadges({ device }: { device: SimDevice }) {
+  const connection = connectionLabel(device);
+  let status = "Control off";
+  if (device.controlEnabled) {
+    status = device.readiness === "ready" ? "Control on" : "Needs attention";
+  }
+  return (
+    <View style={styles.badges}>
+      {connection ? <Text style={styles.badge}>{connection}</Text> : null}
+      <Text
+        style={device.controlEnabled ? styles.badge : styles.badgeOff}
+        testID={`device-badge-${device.udid}`}
+      >
+        {status}
+      </Text>
+    </View>
   );
 }
 
@@ -161,7 +203,7 @@ function useLingering<T>(value: T | null, ms: number): T | null {
 }
 
 function useSimFleet(client: DaemonClient | null) {
-  const [availability, setAvailability] = useState({
+  const [availability, setAvailability] = useState<SimAvailability>({
     simctl: true,
     idb: false,
     maestro: false,
@@ -264,11 +306,13 @@ function FleetHeader({
   devices,
   showAgentToggle,
   onInstall,
+  onPair,
 }: {
   loading: boolean;
   devices: readonly SimDevice[];
   showAgentToggle: boolean;
   onInstall: () => void;
+  onPair: (() => void) | null;
 }) {
   const chatOpen = useSimChatStore((s) => s.open);
   const showChat = useSimChatStore((s) => s.showChat);
@@ -284,7 +328,7 @@ function FleetHeader({
         <Skeleton width={120} height={12} />
       ) : (
         <Text style={styles.headerCount}>
-          {devices.length} devices · {booted} booted
+          {devices.length} devices · {booted} running
         </Text>
       ),
     [booted, devices.length, loading],
@@ -292,6 +336,18 @@ function FleetHeader({
   const actions = useMemo(
     () => (
       <>
+        {onPair ? (
+          <Button
+            size="sm"
+            variant="outline"
+            leftIcon={Wifi}
+            onPress={onPair}
+            accessibilityLabel="Pair an Android phone over Wi-Fi"
+            testID="sim-pair-open"
+          >
+            Pair Android
+          </Button>
+        ) : null}
         <Button
           size="sm"
           variant="outline"
@@ -316,13 +372,13 @@ function FleetHeader({
         ) : null}
       </>
     ),
-    [chatOpen, onInstall, showAgentToggle, toggleChat],
+    [chatOpen, onInstall, onPair, showAgentToggle, toggleChat],
   );
   return (
     <PageHeader
       icon={Smartphone}
       title="SimFleet"
-      description="iOS simulators on this host: boot, drive and hand them to your agents."
+      description="Simulators and connected phones on this host: drive them and hand them to your agents."
       accessory={accessory}
       actions={actions}
     />
@@ -341,8 +397,8 @@ function FleetBanners({ error, unavailable }: { error: string | null; unavailabl
       {unavailable ? (
         <View style={styles.notice}>
           <Text style={styles.noticeText}>
-            iOS simulators are unavailable on this host. SimFleet needs macOS with Xcode (and idb or
-            Maestro for tap/type control).
+            No simulators or device tools on this host. iOS simulators need macOS with Xcode;
+            Android phones need adb (Android SDK Platform-Tools); iPhones and iPads need go-ios.
           </Text>
         </View>
       ) : null}
@@ -358,6 +414,7 @@ function isBooting(device: SimDevice, pending: Pending | null): boolean {
 function FleetGrid({
   loading,
   available,
+  hasDeviceTools,
   devices,
   selectedUdid,
   pending,
@@ -368,6 +425,7 @@ function FleetGrid({
 }: {
   loading: boolean;
   available: boolean;
+  hasDeviceTools: boolean;
   devices: readonly SimDevice[];
   selectedUdid: string | null;
   pending: Pending | null;
@@ -386,8 +444,10 @@ function FleetGrid({
   return (
     <ScrollView style={styles.gridScroll} contentContainerStyle={styles.grid}>
       {available ? <AddTile onPress={onAdd} /> : null}
-      {available && devices.length === 0 ? (
-        <Text style={styles.empty}>No simulators yet — create one to get started.</Text>
+      {(available || hasDeviceTools) && devices.length === 0 ? (
+        <Text style={styles.empty}>
+          No simulators or devices yet. Create a simulator or connect a phone with a cable.
+        </Text>
       ) : null}
       {devices.map((device) => (
         <DeviceTile
@@ -404,6 +464,45 @@ function FleetGrid({
   );
 }
 
+// Simulators get the boot/erase panel; phones, tablets and adb emulators the control-gated one.
+function DeviceDetail({
+  device,
+  availability,
+  pending,
+  client,
+  onClose,
+  onAction,
+  onButton,
+  onChanged,
+}: {
+  device: SimDevice;
+  availability: SimAvailability;
+  pending: Pending | null;
+  client: DaemonClient | null;
+  onClose: () => void;
+  onAction: (udid: string, action: SimAction) => void;
+  onButton: (button: "home" | "lock") => void;
+  onChanged: () => void;
+}) {
+  if (isGatedDevice(device)) {
+    return (
+      <SimDevicePanel device={device} client={client} onClose={onClose} onChanged={onChanged} />
+    );
+  }
+  return (
+    <SimDrivePanel
+      device={device}
+      hidAvailable={availability.idb || availability.maestro}
+      idbAvailable={availability.idb}
+      pendingAction={pending?.udid === device.udid ? pending.action : null}
+      client={client}
+      onClose={onClose}
+      onAction={onAction}
+      onButton={onButton}
+    />
+  );
+}
+
 export function SimFleetScreen() {
   const hosts = useHosts();
   const serverId = hosts[0]?.serverId ?? "";
@@ -416,6 +515,9 @@ export function SimFleetScreen() {
   const [pending, setPending] = useState<Pending | null>(null);
   const [adding, setAdding] = useState(false);
   const [installing, setInstalling] = useState(false);
+  const [pairing, setPairing] = useState(false);
+  const openPair = useCallback(() => setPairing(true), []);
+  const closePair = useCallback(() => setPairing(false), []);
   const openInstall = useCallback(() => setInstalling(true), []);
   const closeInstall = useCallback(() => setInstalling(false), []);
 
@@ -434,6 +536,16 @@ export function SimFleetScreen() {
   );
   const shownDevice = useLingering(selected, SLIDE_MS);
   const existingNames = useMemo(() => devices.map((d) => d.name), [devices]);
+  const simulators = useMemo(() => devices.filter((d) => !isGatedDevice(d)), [devices]);
+  const hasDeviceTools = Boolean(availability.physical?.adb || availability.physical?.goIos);
+  const onPaired = useCallback(
+    (udid: string) => {
+      void refresh();
+      setSelectedUdid(udid);
+    },
+    [refresh],
+  );
+  const onDeviceChanged = useCallback(() => void refresh(), [refresh]);
 
   const runAction = useCallback(
     async (udid: string, action: SimAction) => {
@@ -482,15 +594,15 @@ export function SimFleetScreen() {
   const slideAnim = useDriveSheet(Boolean(selected) && isCompact, screenWidth, onClose);
 
   const drivePanel = shownDevice ? (
-    <SimDrivePanel
+    <DeviceDetail
       device={shownDevice}
-      hidAvailable={availability.idb || availability.maestro}
-      idbAvailable={availability.idb}
-      pendingAction={pending?.udid === shownDevice.udid ? pending.action : null}
+      availability={availability}
+      pending={pending}
       client={client}
       onClose={onClose}
       onAction={runAction}
       onButton={pressButton}
+      onChanged={onDeviceChanged}
     />
   ) : null;
 
@@ -501,13 +613,18 @@ export function SimFleetScreen() {
         devices={devices}
         showAgentToggle={!isCompact}
         onInstall={openInstall}
+        onPair={availability.physical?.adb ? openPair : null}
       />
-      <FleetBanners error={error} unavailable={!loading && !availability.simctl} />
+      <FleetBanners
+        error={error}
+        unavailable={!loading && !availability.simctl && !hasDeviceTools}
+      />
 
       <View style={styles.body}>
         <FleetGrid
           loading={loading}
           available={availability.simctl}
+          hasDeviceTools={hasDeviceTools}
           devices={devices}
           selectedUdid={selectedUdid}
           pending={pending}
@@ -540,9 +657,10 @@ export function SimFleetScreen() {
       <SimInstallSheet
         visible={installing}
         client={client}
-        devices={devices}
+        devices={simulators}
         onClose={closeInstall}
       />
+      <SimPairSheet visible={pairing} client={client} onClose={closePair} onPaired={onPaired} />
       <SimAddSheet
         visible={adding}
         client={client}
@@ -640,6 +758,22 @@ const styles = StyleSheet.create((theme) => ({
     textAlign: "center",
   },
   dot: { width: 7, height: 7, borderRadius: 4 },
+  badges: { flexDirection: "row", flexWrap: "wrap", gap: theme.spacing[1] },
+  badge: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+    backgroundColor: theme.colors.surface2,
+    borderRadius: theme.borderRadius.sm,
+    paddingHorizontal: theme.spacing[1],
+  },
+  badgeOff: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.statusWarning,
+    borderWidth: 1,
+    borderColor: theme.colors.statusWarning,
+    borderRadius: theme.borderRadius.sm,
+    paddingHorizontal: theme.spacing[1],
+  },
   dotOn: { backgroundColor: theme.colors.palette.green[500] },
   dotOff: { backgroundColor: theme.colors.foregroundExtraMuted },
   driveRail: {

@@ -29,8 +29,13 @@ import { useSessionStore } from "@/stores/session-store";
 import { hostSupportsCapability } from "@/utils/server-info-capabilities";
 import type { HostCapabilityId } from "@jagentdesk/protocol/host-capabilities";
 
-/** Capabilities behind the device fleet (Android joins when its backend ships). */
-const DEVICE_CAPABILITIES: readonly HostCapabilityId[] = ["iosSimulators"];
+/** Capabilities behind the device fleet: simulators or physical phones (spec 27.2). */
+const DEVICE_CAPABILITIES: readonly HostCapabilityId[] = [
+  "iosSimulators",
+  "androidDevices",
+  "androidPhysical",
+  "iosPhysical",
+];
 import { useWorkspace } from "@/stores/session-store-hooks";
 import {
   buildAgentForumRoute,

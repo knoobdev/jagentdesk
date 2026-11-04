@@ -35,7 +35,20 @@ export function decodeBase64(b64: string): Uint8Array {
 }
 
 export function utf8ToBase64(text: string): string {
-  const bytes = utf8ToBytes(text);
+  return bytesToBase64(utf8ToBytes(text));
+}
+
+// Uses the platform btoa when present (web, recent Hermes); live device screens encode ~15 JPEG
+// frames a second through this.
+export function bytesToBase64(bytes: Uint8Array): string {
+  const g = globalThis as { btoa?: (s: string) => string };
+  if (g.btoa) {
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + 0x8000)));
+    }
+    return g.btoa(binary);
+  }
   let out = "";
   for (let i = 0; i < bytes.length; i += 3) {
     const b0 = bytes[i]!;
