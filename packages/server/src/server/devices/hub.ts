@@ -440,6 +440,9 @@ export class PhysicalDeviceHub {
     const owned = screen;
     try {
       const source = owned.source ?? (await this.startSource(owned));
+      // scrcpy only encodes when the screen changes: a late subscriber starts from the last frame.
+      const latest = owned.latest;
+      if (latest) queueMicrotask(() => listener.onFrame(latest));
       return {
         source: source.kind,
         unsubscribe: () => this.removeListener(owned, listener),

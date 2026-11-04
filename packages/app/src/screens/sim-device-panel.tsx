@@ -442,7 +442,7 @@ export function SimDevicePanel({
   const subtitle = [device.model || device.deviceType, device.runtime, connectionLabel(device)]
     .filter(Boolean)
     .join(" · ");
-  let screenStatus = "Waiting for the first frame…";
+  let screenStatus = "Waiting for the first frame";
   if (screen.mode === "live") screenStatus = `Live · ${screen.fps ?? 0} fps`;
   if (screen.mode === "poll") screenStatus = "Screenshots (live stream unavailable)";
 
