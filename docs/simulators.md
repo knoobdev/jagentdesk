@@ -83,10 +83,11 @@ the user's screen.
 
 Spec 27 / ADR-0033 in the spec repo. `packages/server/src/server/devices/` owns them through one
 daemon-wide `PhysicalDeviceHub` (session and agent tools share it); udids are
-`android:serial:<serial>` and `ios:<udid>`. Every adb or usbmux device starts with control off
-(`$JAGENTDESK_HOME/devices/physical.json`); while off, every capture, log, UI-tree, input and
-install call answers `control_disabled`. Agents additionally need the once-per-session card
-(`agent/tools/sim-device-target.ts`).
+`android:serial:<serial>` and `ios:<udid>`. Physical devices (`kind: "physical"`) start with
+control off (`$JAGENTDESK_HOME/devices/physical.json`); while off, every capture, log, UI-tree,
+input and install call answers `control_disabled`, and agents also need the card that lasts until
+the agent's session ends (`agent/tools/sim-device-target.ts`, `devices/agent-grants.ts`). Emulators
+that adb finds keep simulator behaviour: no switch, no card.
 
 Gotchas that cost time:
 
