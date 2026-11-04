@@ -167,7 +167,6 @@ export const OMP_MODES: AgentProviderModeDefinition[] = [
   },
 ];
 
-
 export const AGENT_PROVIDER_DEFINITIONS: AgentProviderDefinition[] = [
   {
     id: "claude",
@@ -231,7 +230,53 @@ export const AGENT_PROVIDER_DEFINITIONS: AgentProviderDefinition[] = [
   },
 ];
 
-export const DEV_AGENT_PROVIDER_DEFINITIONS: AgentProviderDefinition[] = [];
+// Development-only providers (listed only when the daemon runs with JAGENTDESK_NODE_ENV=development,
+// provider-registry.ts). They emit scripted traffic with no model behind them, for e2e and load
+// tests; the client factories live in packages/server/src/server/agent/providers/mock-*.ts.
+const MOCK_LOAD_TEST_MODES: AgentProviderModeDefinition[] = [
+  {
+    id: "load-test",
+    label: "Load Test",
+    description: "Streams repeated markdown, reasoning, and tool calls for app stress testing",
+    icon: "ShieldOff",
+    colorTier: "dangerous",
+  },
+  {
+    id: "approval-test",
+    label: "Approval Test",
+    description: "Alternate development-only permission mode for preference tests",
+    icon: "ShieldCheck",
+    colorTier: "safe",
+  },
+];
+
+const MOCK_SLOW_MODES: AgentProviderModeDefinition[] = [
+  {
+    id: "default",
+    label: "Default",
+    description: "Dev-only mode for the mock slow provider",
+    icon: "ShieldOff",
+    colorTier: "dangerous",
+  },
+];
+
+export const DEV_AGENT_PROVIDER_DEFINITIONS: AgentProviderDefinition[] = [
+  {
+    id: "mock",
+    label: "Mock Load Test",
+    description:
+      "Development-only provider that emits synthetic agent traffic for performance tests",
+    defaultModeId: "load-test",
+    modes: MOCK_LOAD_TEST_MODES,
+  },
+  {
+    id: "mock-slow",
+    label: "Mock Slow Provider",
+    description: "Dev-only: hangs during model discovery to test loading and timeout UI",
+    defaultModeId: "default",
+    modes: MOCK_SLOW_MODES,
+  },
+];
 
 export function getAgentProviderDefinition(
   provider: string,

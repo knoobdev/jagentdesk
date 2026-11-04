@@ -134,14 +134,22 @@ const BOM = "﻿";
 // shims, then archify's document verbatim, then the replay hook. The rendered file's own doctype
 // becomes a stray token the parser ignores (see file-pane/html-preview-csp.ts for why the prologue
 // is supplied rather than located).
-export function buildArchifyDocument(html: string, colorScheme: ArchifyColorScheme): string {
+// `extras` lets another host of the same sandbox (the agent activity graph, spec 31) add its own
+// style and script after archify's document; the CSP and shims above stay first and unchanged.
+export function buildArchifyDocument(
+  html: string,
+  colorScheme: ArchifyColorScheme,
+  extras?: { css?: string; script?: string },
+): string {
   const body = html.startsWith(BOM) ? html.slice(BOM.length) : html;
   return [
     "<!doctype html>",
     `<meta http-equiv="Content-Security-Policy" content="${ARCHIFY_CSP}">`,
     `<script>${prologueScript(colorScheme)}</script>`,
     `<style id="jad-archify-embed">${EMBED_CSS}</style>`,
+    extras?.css ? `<style id="jad-archify-extra">${extras.css}</style>` : "",
     body,
     `<script>${EPILOGUE_SCRIPT}</script>`,
+    extras?.script ? `<script>${extras.script}</script>` : "",
   ].join("");
 }

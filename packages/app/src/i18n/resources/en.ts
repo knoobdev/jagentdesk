@@ -1,4 +1,5 @@
 import { pluginSettings } from "./plugin-settings";
+import { activityGraphStrings } from "./activity-graph";
 import { sshModuleStrings } from "./ssh-modules";
 
 export const en = {
@@ -966,6 +967,7 @@ export const en = {
     taskDone: "✅ Task “{{task}}” shipped in “{{topic}}”",
     topicDone: "🎉 The team wrapped up “{{topic}}”",
   },
+  activityGraph: activityGraphStrings,
   forumArch: {
     title: "Architecture diagram",
     loading: "Loading diagram…",

@@ -36,6 +36,9 @@ export const CLIENT_CAPS = {
   archifyDiagrams: "archify_diagrams",
   // Spec mode (spec 28.6): only clients that render the Phase review bar may turn it on.
   specMode: "spec_mode",
+  // COMPAT(activityGraph): added after v0.9.47 (spec 31.5, ADR-0031). The daemon builds and renders
+  // agent activity graphs only for clients that advertise this; others never see the RPCs used.
+  activityGraph: "activity_graph",
 } as const;
 
 export type ClientCapability = (typeof CLIENT_CAPS)[keyof typeof CLIENT_CAPS];

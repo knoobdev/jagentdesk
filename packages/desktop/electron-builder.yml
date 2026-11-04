@@ -47,6 +47,8 @@ asarUnpack:
   # Vendored archify renderers run as a child process (ELECTRON_RUN_AS_NODE), which cannot read
   # inside app.asar; the daemon resolves the unpacked copy (spec 23, ADR-0021).
   - node_modules/@jagentdesk/server/dist/server/vendor/archify/**/*
+  # archify 3.2.0 for the agent activity graph (spec 31, ADR-0031), same reason.
+  - node_modules/@jagentdesk/server/dist/server/vendor/archify-3.2.0/**/*
   # Native add-ons cannot be dlopen'd from inside the asar — unpack them.
   - "**/*.node"
   - node_modules/better-sqlite3/**

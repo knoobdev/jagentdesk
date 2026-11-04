@@ -83,6 +83,23 @@ describe("node-entrypoint-launcher", () => {
       });
     });
 
+    // The dev-only mock providers are listed only for JAGENTDESK_NODE_ENV=development, so a
+    // packaged build must never pass an inherited "development" through to its daemon.
+    it("forces packaged launches to production even when JAGENTDESK_NODE_ENV is inherited as development", () => {
+      expect(
+        createNodeEntrypointInvocation({
+          execPath: "/Applications/JAgentDesk.app/Contents/MacOS/JAgentDesk",
+          isPackaged: true,
+          packagedRunnerPath:
+            "/Applications/JAgentDesk.app/Contents/Resources/app.asar/dist/daemon/node-entrypoint-runner.js",
+          entrypoint: CLI_ENTRYPOINT,
+          argvMode: "node-script",
+          args: [],
+          baseEnv: { PATH: "/usr/bin", JAGENTDESK_NODE_ENV: "development" },
+        }).env,
+      ).toMatchObject({ JAGENTDESK_NODE_ENV: "production" });
+    });
+
     it("keeps node-style argv for packaged script entrypoints", () => {
       expect(
         createNodeEntrypointInvocation({

@@ -1,0 +1,243 @@
+[
+  {
+    "provider": "mock",
+    "item": {
+      "type": "user_message",
+      "text": "emit synthetic activity graph hold=5000 pace=900",
+      "clientMessageId": "1b8b3688-fe0a-4da4-8305-3ceb06638899",
+      "messageId": "1b8b3688-fe0a-4da4-8305-3ceb06638899"
+    },
+    "timestamp": "2026-11-03T20:29:50.626Z",
+    "seqStart": 1,
+    "seqEnd": 1,
+    "sourceSeqRanges": [
+      {
+        "startSeq": 1,
+        "endSeq": 1
+      }
+    ],
+    "collapsed": []
+  },
+  {
+    "provider": "mock",
+    "item": {
+      "type": "todo",
+      "items": [
+        {
+          "id": "1",
+          "text": "Inspect the session module",
+          "status": "in_progress",
+          "completed": false
+        },
+        {
+          "id": "2",
+          "text": "Find the refresh race",
+          "status": "pending",
+          "completed": false
+        },
+        {
+          "id": "3",
+          "text": "Patch expiry handling",
+          "status": "pending",
+          "completed": false
+        },
+        {
+          "id": "4",
+          "text": "Add a regression test",
+          "status": "pending",
+          "completed": false
+        }
+      ]
+    },
+    "timestamp": "2026-11-03T20:29:50.629Z",
+    "seqStart": 2,
+    "seqEnd": 2,
+    "sourceSeqRanges": [
+      {
+        "startSeq": 2,
+        "endSeq": 2
+      }
+    ],
+    "collapsed": []
+  },
+  {
+    "provider": "mock",
+    "item": {
+      "type": "tool_call",
+      "callId": "f03d7440-5465-494e-901c-5cad7f9c5bcf:read",
+      "name": "Read",
+      "status": "completed",
+      "error": null,
+      "detail": {
+        "type": "read",
+        "filePath": "src/auth/session.ts"
+      }
+    },
+    "timestamp": "2026-11-03T20:29:52.464Z",
+    "seqStart": 3,
+    "seqEnd": 4,
+    "sourceSeqRanges": [
+      {
+        "startSeq": 3,
+        "endSeq": 4
+      }
+    ],
+    "collapsed": ["tool_lifecycle"]
+  },
+  {
+    "provider": "mock",
+    "item": {
+      "type": "tool_call",
+      "callId": "f03d7440-5465-494e-901c-5cad7f9c5bcf:grep",
+      "name": "Grep",
+      "status": "completed",
+      "error": null,
+      "detail": {
+        "type": "search",
+        "query": "refreshToken",
+        "toolName": "grep"
+      }
+    },
+    "timestamp": "2026-11-03T20:29:54.267Z",
+    "seqStart": 5,
+    "seqEnd": 6,
+    "sourceSeqRanges": [
+      {
+        "startSeq": 5,
+        "endSeq": 6
+      }
+    ],
+    "collapsed": ["tool_lifecycle"]
+  },
+  {
+    "provider": "mock",
+    "item": {
+      "type": "reasoning",
+      "text": "Tracing the callers."
+    },
+    "timestamp": "2026-11-03T20:29:55.170Z",
+    "seqStart": 7,
+    "seqEnd": 7,
+    "sourceSeqRanges": [
+      {
+        "startSeq": 7,
+        "endSeq": 7
+      }
+    ],
+    "collapsed": []
+  },
+  {
+    "provider": "mock",
+    "item": {
+      "type": "tool_call",
+      "callId": "f03d7440-5465-494e-901c-5cad7f9c5bcf:task",
+      "name": "Task",
+      "status": "completed",
+      "error": null,
+      "detail": {
+        "type": "sub_agent",
+        "subAgentType": "Explore",
+        "description": "Map session refresh callers",
+        "log": ""
+      }
+    },
+    "timestamp": "2026-11-03T20:30:02.872Z",
+    "seqStart": 8,
+    "seqEnd": 11,
+    "sourceSeqRanges": [
+      {
+        "startSeq": 8,
+        "endSeq": 8
+      },
+      {
+        "startSeq": 11,
+        "endSeq": 11
+      }
+    ],
+    "collapsed": ["tool_lifecycle"]
+  },
+  {
+    "provider": "mock",
+    "item": {
+      "type": "tool_call",
+      "callId": "f03d7440-5465-494e-901c-5cad7f9c5bcf:edit",
+      "name": "Edit",
+      "status": "completed",
+      "error": null,
+      "detail": {
+        "type": "edit",
+        "filePath": "src/auth/session.ts"
+      }
+    },
+    "timestamp": "2026-11-03T20:30:01.972Z",
+    "seqStart": 9,
+    "seqEnd": 10,
+    "sourceSeqRanges": [
+      {
+        "startSeq": 9,
+        "endSeq": 10
+      }
+    ],
+    "collapsed": ["tool_lifecycle"]
+  },
+  {
+    "provider": "mock",
+    "item": {
+      "type": "todo",
+      "items": [
+        {
+          "id": "1",
+          "text": "Inspect the session module",
+          "status": "completed",
+          "completed": true
+        },
+        {
+          "id": "2",
+          "text": "Find the refresh race",
+          "status": "completed",
+          "completed": true
+        },
+        {
+          "id": "3",
+          "text": "Patch expiry handling",
+          "status": "completed",
+          "completed": true
+        },
+        {
+          "id": "4",
+          "text": "Add a regression test",
+          "status": "completed",
+          "completed": true
+        }
+      ]
+    },
+    "timestamp": "2026-11-03T20:30:03.774Z",
+    "seqStart": 12,
+    "seqEnd": 12,
+    "sourceSeqRanges": [
+      {
+        "startSeq": 12,
+        "endSeq": 12
+      }
+    ],
+    "collapsed": []
+  },
+  {
+    "provider": "mock",
+    "item": {
+      "type": "assistant_message",
+      "text": "Fixed the refresh race in src/auth/session.ts and added a regression test.",
+      "messageId": "c568ce18-5d03-4b6a-907b-99ed6f08deb6"
+    },
+    "timestamp": "2026-11-03T20:30:04.675Z",
+    "seqStart": 13,
+    "seqEnd": 13,
+    "sourceSeqRanges": [
+      {
+        "startSeq": 13,
+        "endSeq": 13
+      }
+    ],
+    "collapsed": []
+  }
+]

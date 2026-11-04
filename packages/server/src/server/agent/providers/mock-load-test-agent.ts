@@ -342,6 +342,36 @@ function parseLargeAgentStreamPayloadPrompt(
   };
 }
 
+// Scripted turns for the agent activity graph (spec 31.7): a fixed, observable sequence of todos,
+// tool calls, a provider subagent and a final answer, so the graph can be checked end to end without
+// a real model. "graph": the 31.7 #1 scenario, holding mid-turn for `hold` ms. "burst": `steps`
+// separate tool steps, one every `pace` ms (31.7 #3 and #9).
+interface ActivityGraphScriptRequest {
+  kind: "graph" | "burst";
+  steps: number;
+  paceMs: number;
+  holdMs: number;
+}
+
+function parseActivityGraphScriptPrompt(
+  prompt: AgentPromptInput,
+): ActivityGraphScriptRequest | null {
+  const text = promptToText(prompt);
+  const match = /emit\s+synthetic\s+activity\s+(graph|burst)\b([^\n]*)/i.exec(text);
+  if (!match) return null;
+  const option = (name: string, fallback: number, max: number) => {
+    const value = new RegExp(`\\b${name}=(\\d+)`, "i").exec(match[2] ?? "")?.[1];
+    const parsed = value === undefined ? fallback : Number(value);
+    return Number.isFinite(parsed) ? Math.min(Math.max(parsed, 0), max) : fallback;
+  };
+  return {
+    kind: match[1]!.toLowerCase() === "burst" ? "burst" : "graph",
+    steps: option("steps", 10, 200),
+    paceMs: option("pace", 1_200, 10_000),
+    holdMs: option("hold", 4_000, 120_000),
+  };
+}
+
 function parseAgentStreamStressPrompt(prompt: AgentPromptInput): AgentStreamStressRequest | null {
   const text = promptToText(prompt);
   const match = /emit\s+(\d+)\s+(coalesced\s+)?agent stream updates/i.exec(text);
@@ -748,8 +778,11 @@ export class MockLoadTestAgentSession implements AgentSession {
     const questionPrompt = parseMockQuestionPrompt(prompt);
     const structuredBranchName = parseStructuredBranchNamePrompt(prompt);
     const settledAssistantImageMarkdown = parseSettledAssistantImageMarkdown(prompt);
+    const activityScript = parseActivityGraphScriptPrompt(prompt);
     const scheduleTurn = () => {
-      if (shouldEmitTurnFailure(prompt)) {
+      if (activityScript) {
+        this.scheduleActivityGraphTurn(turn, activityScript);
+      } else if (shouldEmitTurnFailure(prompt)) {
         this.scheduleFailedTurn(turn);
       } else if (this.assistantResponse !== null) {
         this.scheduleSettledAssistantTurn(turn, this.assistantResponse);
@@ -1036,6 +1069,125 @@ export class MockLoadTestAgentSession implements AgentSession {
         canceled: false,
       });
     }, 0);
+    turn.timer.unref?.();
+  }
+
+  private scheduleActivityGraphTurn(turn: ActiveTurn, script: ActivityGraphScriptRequest): void {
+    const id = turn.turnId;
+    const steps: Array<{ delayMs: number; run: () => void }> = [];
+    const at = (delayMs: number, run: () => void) => steps.push({ delayMs, run });
+    const tool = (
+      callId: string,
+      name: string,
+      detail: ToolCallDetail,
+      status: "running" | "completed",
+    ) => this.emitTimeline(id, createToolCall({ callId, name, status, detail }));
+    const todos = (statuses: Array<"pending" | "in_progress" | "completed">) =>
+      this.emitTimeline(id, {
+        type: "todo",
+        items: [
+          "Inspect the session module",
+          "Find the refresh race",
+          "Patch expiry handling",
+          "Add a regression test",
+        ].map((text, index) => ({
+          id: String(index + 1),
+          text,
+          status: statuses[index]!,
+          completed: statuses[index] === "completed",
+        })),
+      });
+    const pace = script.paceMs;
+    if (script.kind === "graph") {
+      const read: ToolCallDetail = { type: "read", filePath: "src/auth/session.ts" };
+      const search: ToolCallDetail = { type: "search", query: "refreshToken", toolName: "grep" };
+      const edit: ToolCallDetail = { type: "edit", filePath: "src/auth/session.ts" };
+      const task: ToolCallDetail = {
+        type: "sub_agent",
+        subAgentType: "Explore",
+        description: "Map session refresh callers",
+        log: "",
+      };
+      const subagent = (status: "running" | "completed") =>
+        this.emit({
+          type: "provider_subagent",
+          provider: this.provider,
+          event: {
+            type: "upsert",
+            id: `${id}:explore`,
+            title: "Explore",
+            description: "Map session refresh callers",
+            status,
+            toolCallId: `${id}:task`,
+          },
+        });
+      at(0, () => todos(["in_progress", "pending", "pending", "pending"]));
+      at(pace, () => tool(`${id}:read`, "Read", read, "running"));
+      at(pace, () => tool(`${id}:read`, "Read", read, "completed"));
+      at(pace, () => tool(`${id}:grep`, "Grep", search, "running"));
+      at(pace, () => tool(`${id}:grep`, "Grep", search, "completed"));
+      at(pace, () => this.emitTimeline(id, { type: "reasoning", text: "Tracing the callers." }));
+      at(pace, () => {
+        tool(`${id}:task`, "Task", task, "running");
+        subagent("running");
+      });
+      at(pace, () => tool(`${id}:edit`, "Edit", edit, "running"));
+      at(script.holdMs, () => tool(`${id}:edit`, "Edit", edit, "completed"));
+      at(pace, () => {
+        subagent("completed");
+        tool(`${id}:task`, "Task", task, "completed");
+      });
+      at(pace, () => todos(["completed", "completed", "completed", "completed"]));
+      at(pace, () =>
+        this.emitTimeline(id, {
+          type: "assistant_message",
+          text: "Fixed the refresh race in src/auth/session.ts and added a regression test.",
+          messageId: turn.assistantMessageId,
+        }),
+      );
+    } else {
+      for (let index = 0; index < script.steps; index += 1) {
+        const shell: ToolCallDetail = { type: "shell", command: `echo step ${index + 1}` };
+        const callId = `${id}:step-${index + 1}`;
+        at(index === 0 ? 0 : pace, () => {
+          this.emitTimeline(id, { type: "reasoning", text: `Step ${index + 1}.` });
+          tool(callId, "Bash", shell, "running");
+        });
+        at(Math.min(pace, 50), () => tool(callId, "Bash", shell, "completed"));
+      }
+      at(pace, () =>
+        this.emitTimeline(id, {
+          type: "assistant_message",
+          text: `Ran ${script.steps} steps.`,
+          messageId: turn.assistantMessageId,
+        }),
+      );
+    }
+    let index = 0;
+    const next = () => {
+      if (this.activeTurn !== turn) return;
+      const step = steps[index];
+      if (!step) {
+        this.activeTurn = null;
+        const usage = { inputTokens: 1, outputTokens: 1 };
+        this.emit({ type: "turn_completed", provider: this.provider, turnId: id, usage });
+        turn.resolve({
+          sessionId: this.id,
+          finalText: "Synthetic activity graph turn complete",
+          usage,
+          timeline: [],
+          canceled: false,
+        });
+        return;
+      }
+      index += 1;
+      step.run();
+      const following = steps[index];
+      turn.timer = setTimeout(next, following ? following.delayMs : 0);
+      turn.timer.unref?.();
+    };
+    this.emitTurnStarted(turn);
+    turn.timer = setTimeout(next, steps[0]?.delayMs ?? 0);
     turn.timer.unref?.();
   }
 

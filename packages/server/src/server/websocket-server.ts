@@ -28,6 +28,7 @@ import type { AutorunService } from "./autorun/service.js";
 import type { SpecModeService } from "./spec-mode/service.js";
 import type { SessionShareService } from "./session-share/service.js";
 import type { AgentForumService } from "./agent-forum/service.js";
+import { ActivityGraphService } from "./agent/activity-graph/service.js";
 import type { AutorunState } from "@jagentdesk/protocol/messages";
 import type { CheckoutDiffManager, CheckoutDiffMetrics } from "./checkout-diff-manager.js";
 import type { DaemonConfigStore, MutableDaemonConfig } from "./daemon-config-store.js";
@@ -646,6 +647,8 @@ export class VoiceAssistantWebSocketServer {
   // setAgentForum() so the giant positional constructor need not grow.
   private agentForumService: AgentForumService | null = null;
   private specModeService: SpecModeService | null = null;
+  // Agent activity graph (spec 31, ADR-0031): one daemon-wide service shared by every session.
+  private readonly activityGraphService: ActivityGraphService;
   private agentForumBootstrap:
     | ((input: { topicId: string; prompt: string; originAgentId?: string }) => void | Promise<void>)
     | null = null;
@@ -798,6 +801,10 @@ export class VoiceAssistantWebSocketServer {
     this.pairing = pairing ?? null;
     this.pluginRuntime = pluginRuntime ?? null;
     this.agentManager = agentManager;
+    this.activityGraphService = new ActivityGraphService({
+      agents: agentManager,
+      logger: this.logger,
+    });
     this.agentStorage = agentStorage;
     this.projectRegistry = projectRegistry ?? createNoopProjectRegistry();
     this.workspaceRegistry = workspaceRegistry ?? createNoopWorkspaceRegistry();
@@ -1391,6 +1398,7 @@ export class VoiceAssistantWebSocketServer {
 
   public async close(): Promise<void> {
     this.prepareForShutdown();
+    this.activityGraphService.dispose();
     this.unsubscribeSpeechReadiness?.();
     this.unsubscribeSpeechReadiness = null;
     this.unsubscribeDaemonConfigChange?.();
@@ -1935,6 +1943,7 @@ export class VoiceAssistantWebSocketServer {
       specModeService: this.specModeService,
       sessionShareService: this.sessionShareService,
       agentForumService: this.agentForumService,
+      activityGraphService: this.activityGraphService,
       agentForumBootstrap: this.agentForumBootstrap,
       agentForumNotify: this.agentForumNotify,
       checkoutDiffManager: this.checkoutDiffManager,
@@ -2397,6 +2406,8 @@ export class VoiceAssistantWebSocketServer {
         ...(this.agentForumService ? { agentForum: true } : {}),
         // Spec mode (spec 28 / ADR-0030): agent.spec_mode.* surface.
         ...(this.specModeService ? { specMode: true } : {}),
+        // Agent activity graph (spec 31 / ADR-0031). COMPAT(activityGraph): added after v0.9.47.
+        activityGraph: true,
         // Advertise the plugin management surface only when a PluginService is
         // wired; without it the plugin.* RPCs return empty/disabled results.
         ...(this.pluginRuntime

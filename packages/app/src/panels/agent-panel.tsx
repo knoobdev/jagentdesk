@@ -1,5 +1,12 @@
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { SessionShareControl } from "@/composer/agent-controls/session-share-control";
+import {
+  ActivityGraphSheet,
+  ActivityGraphSidePanel,
+  ActivityGraphToggle,
+  useActivityGraphOpen,
+} from "@/activity-graph/activity-graph-host";
+import type { ActivityGraphNodeRef } from "@jagentdesk/protocol/agent-activity-graph";
 import { isGuestReadOnlyShare, isGuestShareMode } from "@/screens/share/guest-share-mode";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import type { TFunction } from "i18next";
@@ -1257,10 +1264,11 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
 
   return (
     <RewindComposerRestoreProvider text={agentInputDraft.text} setText={agentInputDraft.setText}>
-      <View style={styles.root}>
+      <ActivityGraphLayout serverId={serverId} agentId={agentId} streamViewRef={streamViewRef}>
         <FileDropZone style={styles.container} disabled={isArchivingCurrentAgent}>
           {isGuestShareMode() ? null : (
             <View style={styles.shareHeader}>
+              <ActivityGraphToggle agentId={agentId} serverId={serverId} />
               <SessionShareControl agentId={agentId} serverId={serverId} />
             </View>
           )}
@@ -1292,10 +1300,66 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
             <Text style={styles.archivingSubtitle}>{t("agentPanel.states.archivingSubtitle")}</Text>
           </View>
         ) : null}
-      </View>
+      </ActivityGraphLayout>
     </RewindComposerRestoreProvider>
   );
 });
+
+// Chat + agent activity graph (spec 31.4): on desktop the graph is a resizable panel to the right
+// of the chat; on phones it is a full-screen sheet. A node opens what it stands for: a provider
+// subagent's panel, or the timeline row (scrolled to and flashed).
+function ActivityGraphLayout({
+  serverId,
+  agentId,
+  streamViewRef,
+  children,
+}: {
+  serverId: string;
+  agentId: string;
+  streamViewRef: React.RefObject<AgentStreamViewHandle | null>;
+  children: React.ReactNode;
+}) {
+  const isCompact = useIsCompactFormFactor();
+  const { open } = useActivityGraphOpen(serverId, agentId);
+  const { openTab } = usePaneContext();
+  const [width, setWidth] = useState(0);
+  const handleLayout = useCallback(
+    (event: { nativeEvent: { layout: { width: number } } }) =>
+      setWidth(event.nativeEvent.layout.width),
+    [],
+  );
+  const handleSelectNode = useCallback(
+    (_nodeId: string, ref: ActivityGraphNodeRef) => {
+      const action = streamViewRef.current?.revealActivityNode(ref);
+      if (action?.kind === "subagent") {
+        openTab({
+          kind: "provider_subagent",
+          parentAgentId: agentId,
+          subagentId: action.subagentId,
+        });
+      }
+    },
+    [agentId, openTab, streamViewRef],
+  );
+  return (
+    <View style={styles.root} onLayout={handleLayout}>
+      <View style={styles.chatRow}>
+        <View style={styles.chatColumn}>{children}</View>
+        {open && !isCompact && width > 0 ? (
+          <ActivityGraphSidePanel
+            serverId={serverId}
+            agentId={agentId}
+            containerWidth={width}
+            onSelectNode={handleSelectNode}
+          />
+        ) : null}
+      </View>
+      {isCompact ? (
+        <ActivityGraphSheet serverId={serverId} agentId={agentId} onSelectNode={handleSelectNode} />
+      ) : null}
+    </View>
+  );
+}
 
 const AgentStreamSection = memo(function AgentStreamSection({
   streamViewRef,
@@ -1775,9 +1839,19 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
     backgroundColor: theme.colors.surface0,
   },
+  chatRow: {
+    flex: 1,
+    minHeight: 0,
+    flexDirection: "row",
+  },
+  chatColumn: {
+    flex: 1,
+    minWidth: 0,
+  },
   shareHeader: {
     flexDirection: "row",
     justifyContent: "flex-end",
+    gap: theme.spacing[1],
     alignItems: "center",
     paddingHorizontal: theme.spacing[2],
     paddingVertical: theme.spacing[1],
