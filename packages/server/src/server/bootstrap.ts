@@ -1,4 +1,5 @@
 import { PhysicalDeviceHub } from "./devices/hub.js";
+import { clearGrantsWhenSessionsEnd } from "./devices/agent-grants.js";
 import { HostCapabilityService } from "./host-capabilities/service.js";
 import { ensureToolDirsOnPath, HostToolInstaller } from "./host-tools/installer.js";
 import type { HttpFetch } from "./host-tools/release.js";
@@ -1326,6 +1327,10 @@ export async function createJAgentDeskDaemon(
     logger,
     signer: null,
   });
+  const stopDeviceGrantWatch = clearGrantsWhenSessionsEnd(
+    (callback) => agentManager.subscribe(callback, { replayState: false }),
+    physicalDevices,
+  );
   const databaseRegistry = new DatabaseRegistry({
     jagentdeskHome: config.jagentdeskHome,
     logger,
@@ -1977,6 +1982,7 @@ export async function createJAgentDeskDaemon(
     await agentStorage.flush().catch(() => undefined);
     await providerSnapshotManager.shutdown();
     terminalManager.killAll();
+    stopDeviceGrantWatch();
     physicalDevices.dispose();
     await sshModules.dispose().catch(() => undefined);
     await sshServerModules.dispose().catch(() => undefined);

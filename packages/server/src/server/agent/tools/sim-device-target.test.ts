@@ -27,13 +27,21 @@ const DEVICE: SimDevice = {
   model: "iPhone14,2",
 };
 
+const EMULATOR: SimDevice = {
+  ...DEVICE,
+  udid: "android:serial:emulator-5554",
+  platform: "android",
+  kind: "emulator",
+  connection: null,
+};
+
 // The three hub calls authorization uses, backed by plain state (no devices involved).
-function gateHub(controlEnabled: boolean): DeviceAccessGate {
+function gateHub(controlEnabled: boolean, device: SimDevice = DEVICE): DeviceAccessGate {
   const decisions = new Map<string, AgentDecision>();
   return {
     requireControl: async (udid: string) => {
       if (!controlEnabled) throw new DeviceError("control_disabled", `control of ${udid} is off`);
-      return DEVICE;
+      return device;
     },
     agentDecision: (agentId: string, udid: string) => decisions.get(`${agentId}/${udid}`) ?? null,
     recordAgentDecision: (agentId: string, udid: string, decision: AgentDecision) => {
@@ -120,5 +128,19 @@ describe("physical device authorization for agents (spec 27.6)", () => {
       requestPermission: undefined,
     };
     expect(await codeOf(authorizePhysicalDevice(gate, access, UDID, "sim_tap"))).toBe("denied");
+  });
+
+  it("never shows a card for an emulator (simulator behaviour)", async () => {
+    const permission = recordingPermission({ behavior: "deny" });
+    const gate = gateHub(true, EMULATOR);
+    const access = {
+      callerAgentId: "agent-a1b2c3",
+      agentTitle: () => "Sims agent",
+      requestPermission: permission.request,
+    };
+    expect(await codeOf(authorizePhysicalDevice(gate, access, EMULATOR.udid, "sim_tap"))).toBe(
+      "ok",
+    );
+    expect(permission.requests).toHaveLength(0);
   });
 });

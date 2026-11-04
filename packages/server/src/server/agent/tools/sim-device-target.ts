@@ -103,6 +103,8 @@ export async function authorizePhysicalDevice(
 ): Promise<void> {
   const { callerAgentId, requestPermission } = access;
   const device = await gate.requireControl(udid);
+  // Emulators keep simulator behaviour: no card (spec 27.6 is about physical devices).
+  if (device.kind !== "physical") return;
   if (!callerAgentId || !requestPermission) throw denied(device.name);
   const existing = gate.agentDecision(callerAgentId, udid);
   if (existing === "allow") return;

@@ -39,6 +39,16 @@ export function isPhysicalUdid(udid: string): boolean {
   return udid.startsWith(ANDROID_UDID_PREFIX) || udid.startsWith(IOS_UDID_PREFIX);
 }
 
+// Spec 27.3 / ADR-0033: only physical devices start with control off. Emulators found by adb keep
+// simulator behaviour (controllable without enabling).
+export function controlRefusal(device: SimDevice, controlEnabled: boolean): DeviceError | null {
+  if (device.kind !== "physical" || controlEnabled) return null;
+  return new DeviceError(
+    "control_disabled",
+    `Control of ${device.name} is off. Turn on Enable control for it in Sims first.`,
+  );
+}
+
 export interface PhysicalAvailability {
   adb: boolean;
   goIos: boolean;
@@ -265,7 +275,8 @@ export class PhysicalDeviceHub {
           platform: "android",
           kind: isEmulator ? "emulator" : "physical",
           connection,
-          controlEnabled: this.store.isControlEnabled(udid),
+          // Spec 27.3: the switch is for physical devices; emulators stay controllable.
+          controlEnabled: isEmulator || this.store.isControlEnabled(udid),
           readiness,
           osVersion: info?.osVersion ?? "",
           model,
@@ -339,10 +350,24 @@ export class PhysicalDeviceHub {
   async requireControl(udid: string): Promise<SimDevice> {
     await this.hostTools();
     const device = await this.find(udid);
-    if (!this.store.isControlEnabled(udid)) {
+    const refusal = controlRefusal(device, this.store.isControlEnabled(udid));
+    if (refusal) throw refusal;
+    return device;
+  }
+
+  // Whether the hub may drive the device right now (screen restarts check this).
+  private isControllable(udid: string): boolean {
+    const device = this.devices.find((candidate) => candidate.udid === udid);
+    if (!device) return false;
+    return controlRefusal(device, this.store.isControlEnabled(udid)) === null;
+  }
+
+  private async requirePhysical(udid: string): Promise<SimDevice> {
+    const device = await this.find(udid);
+    if (device.kind !== "physical") {
       throw new DeviceError(
-        "control_disabled",
-        `Control of ${device.name} is off. Turn on Enable control for it in Sims first.`,
+        "unsupported_on_platform",
+        "Emulators are always controllable; only phones and tablets have a control switch",
       );
     }
     return device;
@@ -362,12 +387,14 @@ export class PhysicalDeviceHub {
   }
 
   isControlEnabled(udid: string): boolean {
+    const device = this.devices.find((candidate) => candidate.udid === udid);
+    if (device && device.kind !== "physical") return true;
     return this.store.isControlEnabled(udid);
   }
 
   async enable(udid: string): Promise<void> {
     await this.hostTools();
-    await this.find(udid);
+    await this.requirePhysical(udid);
     await this.store.setControlEnabled(udid, true, this.now());
     this.logger.info({ udid }, "physical device control enabled");
     this.patchDevice(udid, { controlEnabled: true });
@@ -375,6 +402,7 @@ export class PhysicalDeviceHub {
 
   async disable(udid: string): Promise<void> {
     await this.hostTools();
+    await this.requirePhysical(udid);
     await this.store.setControlEnabled(udid, false, this.now());
     this.logger.info({ udid }, "physical device control disabled");
     this.patchDevice(udid, { controlEnabled: false });
@@ -503,7 +531,7 @@ export class PhysicalDeviceHub {
     screen.restartTimer = setTimeout(() => {
       screen.restartTimer = null;
       if (screen.listeners.size === 0 || screen.source) return;
-      if (!this.store.isControlEnabled(screen.udid)) return;
+      if (!this.isControllable(screen.udid)) return;
       void this.startSource(screen).catch((error: unknown) => {
         this.logger.debug({ err: error, udid: screen.udid }, "screen restart failed");
         this.scheduleRestart(screen);
