@@ -119,7 +119,10 @@ if(!list||!list.length)return;
 for(var i=0;i<list.length;i++){var e=list[i];
 if(!e||typeof e.id!=="string"||!VALID[e.status])continue;
 var el=nodeEl(e.id);if(el)el.setAttribute("data-jad-status",e.status);}}
-function percent(){var p=document.querySelector("[data-view-percent]");if(p)p.textContent=Math.round(scale*100)+"%";}
+function percent(){var p=document.querySelector("[data-view-percent]");var text=Math.round(scale*100)+"%";if(p&&p.textContent!==text)p.textContent=text;}
+// archify re-renders its own zoom label from its (unused) camera; keep showing this camera's scale.
+var percentEl=document.querySelector("[data-view-percent]");
+if(percentEl&&typeof MutationObserver==="function")new MutationObserver(percent).observe(percentEl,{childList:true,characterData:true,subtree:true});
 function size(next){
 scale=Math.max(MIN,Math.min(MAX,next));
 svg.style.setProperty("width",(vbW*scale)+"px","important");
@@ -158,16 +161,18 @@ var el=nodeEl(id);if(el)el.setAttribute("data-jad-selected","true");
 var message={type:SELECT,nodeId:String(id)};
 if(window.ReactNativeWebView){window.ReactNativeWebView.postMessage(JSON.stringify(message));return;}
 if(window.parent&&window.parent!==window)window.parent.postMessage(message,"*");}
-// Node clicks select; archify's own focus mode is not used inside the panel.
+// Node clicks select; archify's own focus mode (dimming, camera moves) is not used inside the
+// panel, so its pointer/focus handlers never see the event.
+function nodeOf(event){return event.target&&event.target.closest?event.target.closest("[data-node-id]"):null;}
+function swallow(event){if(!nodeOf(event))return;event.preventDefault();event.stopPropagation();event.stopImmediatePropagation();}
+["pointerdown","mousedown","pointerup","mouseup","dblclick","focusin"].forEach(function(type){svg.addEventListener(type,swallow,true);});
 svg.addEventListener("click",function(event){
-var node=event.target&&event.target.closest?event.target.closest("[data-node-id]"):null;
-if(!node)return;
-event.preventDefault();event.stopPropagation();
+var node=nodeOf(event);if(!node)return;
+swallow(event);
 select(node.getAttribute("data-node-id"));},true);
 svg.addEventListener("keydown",function(event){
 if(event.key!=="Enter"&&event.key!==" ")return;
-var node=event.target&&event.target.closest?event.target.closest("[data-node-id]"):null;
-if(!node)return;event.preventDefault();event.stopPropagation();select(node.getAttribute("data-node-id"));},true);
+var node=nodeOf(event);if(!node)return;swallow(event);select(node.getAttribute("data-node-id"));},true);
 // archify's zoom buttons drive this camera instead of archify's transform.
 var nav=document.querySelector(".diagram-nav");
 if(nav)nav.addEventListener("click",function(event){
@@ -199,7 +204,7 @@ applyStatuses(initial.statuses);
 function start(){
 var f=fitScale();
 if(initial.fit||(typeof initial.scale!=="number"&&f>=0.75)){fit();setTimeout(percent,250);return;}
-size(typeof initial.scale==="number"&&initial.scale>0?initial.scale:0.9);
+size(typeof initial.scale==="number"&&initial.scale>0?initial.scale:0.8);
 if(!center(initial.focus)){container.scrollLeft=0;container.scrollTop=0;}
 setTimeout(percent,250);}
 // After archify's own load-time camera work (it settles on the next frames).
