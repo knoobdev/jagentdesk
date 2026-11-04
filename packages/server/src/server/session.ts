@@ -181,6 +181,8 @@ import { ArgoCdSession } from "./session/argocd/argocd-session.js";
 import type { ArgoCdService } from "./argocd/service.js";
 import { randomUUID } from "node:crypto";
 import { SshService } from "./ssh/ssh-service.js";
+import { SideloadSession } from "./session/sideload/sideload-session.js";
+import type { SideloadService } from "./sideload/sideload-service.js";
 import { DockerService } from "./docker/docker-service.js";
 import { DockerStreams } from "./docker/docker-streams.js";
 import { RemoteDockerError, type RemoteDockerHosts } from "./ssh/remote-docker/hosts.js";
@@ -546,6 +548,8 @@ export interface SessionOptions {
   sshService?: SshService;
   // Argo CD (spec 30): daemon-wide service; null when the host runs without it.
   argocdService?: ArgoCdService | null;
+  /** Sideload (spec 26); null in tests and hosts that do not run it. */
+  sideloadService?: SideloadService | null;
   checkoutDiffManager: CheckoutDiffManager;
   github?: ForgeService;
   createAgentMcpTransport?: AgentMcpTransportFactory;
@@ -886,6 +890,7 @@ export class Session {
   private sshSession!: SshSession;
   private argocdSession!: ArgoCdSession;
   private sshService!: SshService;
+  private sideloadSession: SideloadSession | null = null;
   private clusterRegistry!: ClusterRegistry;
   private databaseRegistry!: DatabaseRegistry;
   private readonly dockerService = new DockerService();
@@ -1152,6 +1157,13 @@ export class Session {
       sessionKey: randomUUID(),
       canRunSsoLoopback: () => this.supports(CLIENT_CAPS.argocdSsoLoopback),
     });
+    this.sideloadSession = options.sideloadService
+      ? new SideloadSession({
+          emit: (msg) => this.emit(msg),
+          service: options.sideloadService,
+          logger: this.sessionLogger,
+        })
+      : null;
     this.providerCatalogSession = new ProviderCatalogSession({
       host: {
         emit: (msg) => this.emit(msg),
@@ -2398,6 +2410,7 @@ export class Session {
       () => this.dispatchDatabaseMessage(msg),
       () => this.dispatchSshMessage(msg),
       () => this.dispatchArgoCdMessage(msg),
+      () => this.dispatchSideloadMessage(msg),
       () => this.dispatchDockerMessage(msg),
       () => this.dispatchSimulatorMessage(msg),
       () => this.dispatchProxyMessage(msg),
@@ -4532,6 +4545,11 @@ export class Session {
       default:
         return undefined;
     }
+  }
+
+  private dispatchSideloadMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    if (!this.sideloadSession?.handles(msg.type)) return undefined;
+    return this.sideloadSession.handle(msg);
   }
 
   private dispatchSshMessage(msg: SessionInboundMessage): Promise<void> | undefined {

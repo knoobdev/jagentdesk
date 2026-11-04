@@ -31,7 +31,8 @@ import { hostSupportsCapability } from "@/utils/server-info-capabilities";
 import type { HostCapabilityId } from "@jagentdesk/protocol/host-capabilities";
 
 /** Capabilities behind the device fleet (Android joins when its backend ships). */
-const DEVICE_CAPABILITIES: readonly HostCapabilityId[] = ["iosSimulators"];
+// iosSideload: hosts without simulators still sideload to real devices (spec 26.9).
+const DEVICE_CAPABILITIES: readonly HostCapabilityId[] = ["iosSimulators", "iosSideload"];
 import { useWorkspace } from "@/stores/session-store-hooks";
 import {
   buildAgentForumRoute,

@@ -217,6 +217,11 @@ import {
   ArgoCdResponseSchemas,
   ArgoCdPushSchemas,
 } from "./argocd/rpc-schemas.js";
+import {
+  SideloadRequestSchemas,
+  SideloadResponseSchemas,
+  SideloadPushSchemas,
+} from "./sideload/rpc-schemas.js";
 import { SftpInboundSchemas, SftpOutboundSchemas } from "./ssh/sftp-schemas.js";
 import { ForwardingInboundSchemas, ForwardingOutboundSchemas } from "./ssh/forwarding-schemas.js";
 import { SnippetsInboundSchemas, SnippetsOutboundSchemas } from "./ssh/snippets-schemas.js";
@@ -4043,6 +4048,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ...DatabaseRequestSchemas,
   ...ArgoCdRequestSchemas,
   ...SshRequestSchemas,
+  ...SideloadRequestSchemas,
   ...SftpInboundSchemas,
   ...ForwardingInboundSchemas,
   ...SnippetsInboundSchemas,
@@ -4666,6 +4672,8 @@ export const ServerInfoStatusPayloadSchema = z
         specMode: z.boolean().optional(),
         // Argo CD (spec 30 / ADR-0034). The client gates the Argo CD surface on it.
         argocd: z.boolean().optional(),
+        // Sideload (spec 26 / ADR-0032): the Sims "Sideload" tab and sideload.* / android.* RPCs.
+        sideload: z.boolean().optional(),
       })
       .optional(),
   })
@@ -7846,6 +7854,8 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ...ArgoCdPushSchemas,
   ...SshResponseSchemas,
   ...SshPushSchemas,
+  ...SideloadResponseSchemas,
+  ...SideloadPushSchemas,
   ...SftpOutboundSchemas,
   ...ForwardingOutboundSchemas,
   ...SnippetsOutboundSchemas,

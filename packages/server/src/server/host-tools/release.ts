@@ -168,6 +168,8 @@ async function latestRelease(
       const version = stripV(await getText(fetch, source.versionUrl));
       return { version, assets: [] };
     }
+    case "github-pinned":
+      return { version: stripV(source.tag), assets: [] };
   }
 }
 
@@ -209,6 +211,12 @@ async function expectedSha256(
       }
       return digest;
     }
+    case "pinned": {
+      const digest = checksum.sha256[asset.name];
+      if (!digest)
+        throw new ToolInstallError("download_failed", `No pinned SHA-256 for ${asset.name}`);
+      return digest;
+    }
     case "sha256-sidecar": {
       const text = await getText(fetch, `${asset.url}${checksum.suffix}`);
       const digest = /[a-f0-9]{64}/i.exec(text)?.[0]?.toLowerCase();
@@ -246,6 +254,14 @@ export async function resolveRelease(input: {
     asset = {
       name: assetSpec.asset,
       url: `${spec.source.baseUrl}/${assetSpec.asset}`,
+      size: null,
+      digest: null,
+    };
+  }
+  if (!asset && spec.source.kind === "github-pinned") {
+    asset = {
+      name: assetSpec.asset,
+      url: `https://github.com/${spec.source.repo}/releases/download/${spec.source.tag}/${assetSpec.asset}`,
       size: null,
       digest: null,
     };

@@ -25,6 +25,9 @@ import { SimInstallSheet } from "@/screens/sim-install-sheet";
 import { SimDrivePanel } from "@/screens/sim-drive-panel";
 import { PhoneScreen, TILE_MAX_DIM, TILE_POLL_MS, useScreenshot } from "@/screens/sim-phone";
 import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { SegmentedControl } from "@/components/ui/segmented-control";
+import { useSessionStore } from "@/stores/session-store";
+import { SideloadPane } from "@/screens/sideload/sideload-pane";
 
 // Tiles share one size so rows stay aligned; the device (real aspect) is centered inside.
 const FRAME_H = 190;
@@ -404,10 +407,65 @@ function FleetGrid({
   );
 }
 
+type FleetTab = "simulators" | "sideload";
+const FLEET_TABS = [
+  { value: "simulators" as const, label: "Simulators", testID: "sims-tab-simulators" },
+  { value: "sideload" as const, label: "Sideload", testID: "sims-tab-sideload" },
+];
+
 export function SimFleetScreen() {
   const hosts = useHosts();
   const serverId = hosts[0]?.serverId ?? "";
   const client = useHostRuntimeClient(serverId);
+  const supportsSideload = useSessionStore(
+    (state) => state.sessions[serverId]?.serverInfo?.features?.sideload === true,
+  );
+  const [tab, setTab] = useState<FleetTab>("simulators");
+  if (supportsSideload && tab === "sideload") {
+    return (
+      <View style={styles.screen}>
+        <PageHeader
+          icon={Smartphone}
+          title="Sideload"
+          description="Sign apps with your Apple ID and install them on real iPhones, iPads and Android devices."
+        />
+        <FleetTabs value={tab} onChange={setTab} />
+        <SideloadPane client={client} serverId={serverId} />
+      </View>
+    );
+  }
+  return (
+    <SimulatorFleet
+      serverId={serverId}
+      client={client}
+      showTabs={supportsSideload}
+      tab={tab}
+      onTab={setTab}
+    />
+  );
+}
+
+function FleetTabs({ value, onChange }: { value: FleetTab; onChange: (tab: FleetTab) => void }) {
+  return (
+    <View style={styles.tabs}>
+      <SegmentedControl options={FLEET_TABS} value={value} onValueChange={onChange} size="sm" />
+    </View>
+  );
+}
+
+function SimulatorFleet({
+  serverId,
+  client,
+  showTabs,
+  tab,
+  onTab,
+}: {
+  serverId: string;
+  client: DaemonClient | null;
+  showTabs: boolean;
+  tab: FleetTab;
+  onTab: (tab: FleetTab) => void;
+}) {
   const isCompact = useIsCompactFormFactor();
   const { width: screenWidth } = useWindowDimensions();
 
@@ -502,6 +560,7 @@ export function SimFleetScreen() {
         showAgentToggle={!isCompact}
         onInstall={openInstall}
       />
+      {showTabs ? <FleetTabs value={tab} onChange={onTab} /> : null}
       <FleetBanners error={error} unavailable={!loading && !availability.simctl} />
 
       <View style={styles.body}>
@@ -556,6 +615,11 @@ export function SimFleetScreen() {
 
 const styles = StyleSheet.create((theme) => ({
   screen: { flex: 1, backgroundColor: theme.colors.surface0 },
+  tabs: {
+    paddingHorizontal: theme.spacing[4],
+    paddingTop: theme.spacing[2],
+    alignItems: "flex-start",
+  },
   headerCount: {
     fontSize: theme.fontSize.sm,
     color: theme.colors.foregroundMuted,

@@ -46,6 +46,8 @@ export interface ReleaseAssetSpec {
   kind: ArchiveKind;
   /** File name of the binary inside the archive (searched anywhere in it). */
   binaryName: string;
+  /** Name in `tools/bin` when it differs from `binaryName` (go-ios ships `ios-amd64`). */
+  installAs?: string;
 }
 
 export type ChecksumSource =
@@ -54,14 +56,18 @@ export type ChecksumSource =
   /** `<asset URL><suffix>` holds the hex digest (optionally followed by the file name). */
   | { kind: "sha256-sidecar"; suffix: string }
   /** The `digest` field GitHub's releases API reports for each asset. */
-  | { kind: "github-digest" };
+  | { kind: "github-digest" }
+  /** Digests reviewed and pinned in this registry, per asset name. */
+  | { kind: "pinned"; sha256: Record<string, string> };
 
 export type ReleaseSource =
   | { kind: "github"; repo: string }
   | { kind: "gitlab"; project: string }
   | { kind: "gitea"; host: string; repo: string }
   /** helm: version from `versionUrl`, assets under `baseUrl`. */
-  | { kind: "direct"; versionUrl: string; baseUrl: string };
+  | { kind: "direct"; versionUrl: string; baseUrl: string }
+  /** One reviewed GitHub release, never "latest" (sideload helpers, spec 26 / ADR-0032). */
+  | { kind: "github-pinned"; repo: string; tag: string };
 
 export interface ReleaseSpec {
   source: ReleaseSource;
@@ -234,6 +240,89 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
     },
     notes: ["Maestro needs Java 17 or newer."],
   },
+};
+
+// Sideload helpers (spec 26.5, ADR-0032 §6): both MIT, run as separate processes, pinned to
+// reviewed releases with their published SHA-256 (checked 2026-11-04).
+const ZSIGN_SHA256: Record<string, string> = {
+  "zsign-macos-arm64.tar.gz": "2790ec58a55db5f4282843d0cdbb0b587d19b972331b5285aee2de67f4ab705e",
+  "zsign-linux-musl-static.tar.gz":
+    "323533d2deb04c84149820f6123fa037adb3c2849d3c213833f9a212da219cad",
+  "zsign-linux-aarch64.tar.gz": "cc6f82b351c2f2e136cb08119a50546d8fff797e7d9dda9c0c307ba059dff7e8",
+  "zsign-windows-x64.zip": "6fb5e12a5b7179cfe7e729aa471b35ccf86474eba33d8203df119bf62bad77f7",
+};
+const GO_IOS_SHA256: Record<string, string> = {
+  "go-ios-mac.zip": "100f225bfdd039081bcbdaf45029df3e67032673f3e0ca1fa3c050898c230c57",
+  "go-ios-linux.zip": "a55fdb4c507391c0548252e01d1deb6ae3c7fd99cfbce842c6f80569cc125604",
+  "go-ios-win.zip": "939c6bcaafed183a92afb9f79cc11b1f935fa6389bfc94d3902e3f52c4dff3fe",
+};
+
+function zsignAsset(target: HostTarget): ReleaseAssetSpec | null {
+  if (target.os === "windows") {
+    return target.arch === "amd64"
+      ? { asset: "zsign-windows-x64.zip", kind: "zip", binaryName: "zsign.exe" }
+      : null;
+  }
+  if (target.os === "linux") {
+    // The amd64 build is static (no libssl on the host needed); arm64 links the system OpenSSL 3.
+    if (target.arch === "amd64") {
+      return {
+        asset: "zsign-linux-musl-static.tar.gz",
+        kind: "tar.gz",
+        binaryName: "zsign-musl",
+        installAs: "zsign",
+      };
+    }
+    return { asset: "zsign-linux-aarch64.tar.gz", kind: "tar.gz", binaryName: "zsign" };
+  }
+  // The macOS build is arm64 only and links Homebrew's openssl@3; brew installs it with that.
+  return target.arch === "arm64"
+    ? { asset: "zsign-macos-arm64.tar.gz", kind: "tar.gz", binaryName: "zsign" }
+    : null;
+}
+
+function goIosAsset(target: HostTarget): ReleaseAssetSpec {
+  if (target.os === "windows")
+    return { asset: "go-ios-win.zip", kind: "zip", binaryName: "ios.exe" };
+  if (target.os === "linux") {
+    return {
+      asset: "go-ios-linux.zip",
+      kind: "zip",
+      binaryName: `ios-${target.arch}`,
+      installAs: "ios",
+    };
+  }
+  return { asset: "go-ios-mac.zip", kind: "zip", binaryName: "ios" };
+}
+
+TOOL_REGISTRY.zsign = {
+  id: "zsign",
+  binary: "zsign",
+  capability: "iosSideload",
+  managers: { brew: "zsign" },
+  release: {
+    source: { kind: "github-pinned", repo: "zhlynn/zsign", tag: "v1.1.3" },
+    checksum: { kind: "pinned", sha256: ZSIGN_SHA256 },
+    assetFor: zsignAsset,
+  },
+  notes: ["zsign signs sideloaded IPAs (MIT, runs as a separate process)."],
+};
+
+TOOL_REGISTRY["go-ios"] = {
+  id: "go-ios",
+  binary: "ios",
+  capability: "iosSideload",
+  managers: {},
+  release: {
+    source: { kind: "github-pinned", repo: "danielpaulus/go-ios", tag: "v1.3.2" },
+    checksum: { kind: "pinned", sha256: GO_IOS_SHA256 },
+    assetFor: goIosAsset,
+  },
+  notes: [
+    "go-ios lists and installs apps on iPhones and iPads over USB or Wi-Fi (MIT).",
+    "Windows needs Apple Mobile Device Support (iTunes from apple.com); Linux needs usbmuxd.",
+  ],
+  manualHints: ["sudo apt install usbmuxd", "sudo dnf install usbmuxd"],
 };
 
 export function getToolDefinition(tool: string): ToolDefinition | null {
