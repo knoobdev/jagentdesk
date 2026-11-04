@@ -92,6 +92,7 @@ import { SidebarCalloutSlot } from "./sidebar-callout-slot";
 import { SidebarWorkspaceList } from "./sidebar-workspace-list";
 import { SidebarServersNav } from "@/ssh/ui/sidebar-servers-nav";
 import { JiraSidebarEntry } from "@/jira/sidebar-entry";
+import { SidebarJiraNav } from "@/jira/sidebar-jira-nav";
 import { SidebarClusterNav } from "./sidebar-cluster-nav";
 import { SidebarDatabaseNav } from "./sidebar-database-nav";
 
@@ -101,14 +102,29 @@ import { SidebarDatabaseNav } from "./sidebar-database-nav";
  * rendered directly (not passed as a prop) so the two sidebar variants avoid a
  * nested ternary without tripping the prop-identity perf rules.
  */
+/** Sections whose route owns the desktop left column instead of the workspace list. */
+interface SectionRoute {
+  section: "servers" | "jira";
+  serverId: string;
+}
+
+function resolveSectionRoute(pathname: string): SectionRoute | null {
+  const match = pathname.match(/\/h\/([^/]+)\/(servers|jira)(?:$|[/?])/);
+  const section = match?.[2];
+  if (!match?.[1] || (section !== "servers" && section !== "jira")) return null;
+  return { section, serverId: decodeURIComponent(match[1]) };
+}
+
 function resolveSidebarNavBody(
   clusterRoute: { serverId: string; clusterId: string } | null,
   databaseRoute: { serverId: string; databaseId: string } | null,
   fallback: ReactNode,
-  serversRouteServerId: string | null = null,
+  sectionRoute: SectionRoute | null = null,
 ): ReactNode {
-  // Spec 25.13.1: the Servers section owns the left column (server tree, open sessions).
-  if (serversRouteServerId) return <SidebarServersNav serverId={serversRouteServerId} />;
+  // A section that owns the left column (spec 25.13.1 Servers, spec 29.3 Jira).
+  if (sectionRoute?.section === "servers")
+    return <SidebarServersNav serverId={sectionRoute.serverId} />;
+  if (sectionRoute?.section === "jira") return <SidebarJiraNav serverId={sectionRoute.serverId} />;
   if (clusterRoute) {
     return (
       <SidebarClusterNav serverId={clusterRoute.serverId} clusterId={clusterRoute.clusterId} />
@@ -1226,8 +1242,7 @@ function DesktopSidebar({
         databaseId: decodeURIComponent(databaseRouteMatch[2]),
       }
     : null;
-  const serversRouteMatch = pathname.match(/\/h\/([^/]+)\/servers/);
-  const serversRouteServerId = serversRouteMatch ? decodeURIComponent(serversRouteMatch[1]) : null;
+  const sectionRoute = resolveSectionRoute(pathname);
   const sidebarWidth = usePanelStore((state) => state.sidebarWidth);
   const setSidebarWidth = usePanelStore((state) => state.setSidebarWidth);
   const { width: viewportWidth } = useWindowDimensions();
@@ -1320,8 +1335,8 @@ function DesktopSidebar({
           ) : (
             <TitlebarDragRegion />
           )}
-          {isClickUp && !serversRouteServerId ? <ClickUpSidebarHeader /> : null}
-          {clusterRoute || databaseRoute || serversRouteServerId || isClickUp ? null : (
+          {isClickUp && !sectionRoute ? <ClickUpSidebarHeader /> : null}
+          {clusterRoute || databaseRoute || sectionRoute || isClickUp ? null : (
             <View style={sidebarHeaderGroupStyle}>
               <SidebarNewWorkspaceHeaderRow
                 label={labels.newWorkspace}
@@ -1453,12 +1468,7 @@ function DesktopSidebar({
           )}
         </View>
 
-        {resolveSidebarNavBody(
-          clusterRoute,
-          databaseRoute,
-          workspaceListElement,
-          serversRouteServerId,
-        )}
+        {resolveSidebarNavBody(clusterRoute, databaseRoute, workspaceListElement, sectionRoute)}
 
         <SidebarCalloutSlot />
 

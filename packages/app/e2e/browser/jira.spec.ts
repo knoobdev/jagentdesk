@@ -69,8 +69,15 @@ test.describe("Jira", () => {
     await expect(page.getByTestId("jira-project-ABC")).toBeVisible({ timeout: 30_000 });
     await shot(page, "desktop-projects");
 
-    await page.getByTestId("jira-board-1").first().click();
+    // The Jira section owns the left column: connections, projects → boards, Your work/Search/Filters.
+    const column = page.getByTestId("sidebar-jira-nav-panel");
+    await expect(column).toBeVisible();
+    await expect(page.getByText("No projects yet")).toHaveCount(0);
+    await expect(column.getByTestId(`jira-nav-connection-${connectionId}`)).toBeVisible();
+    await expect(column.getByTestId("jira-nav-work")).toBeVisible();
+    await column.getByTestId("jira-nav-board-1").click();
     await expect(page.getByTestId("jira-card-ABC-3")).toBeVisible({ timeout: 30_000 });
+    await expect(column.getByTestId("jira-nav-board-1")).toHaveAttribute("data-active", "true");
     await shot(page, "desktop-board");
 
     // Criterion 4 through the menu path: To Do → In Progress.
@@ -108,8 +115,9 @@ test.describe("Jira", () => {
     await expect(page.getByTestId("jira-backlog-row-ABC-9")).toBeVisible({ timeout: 30_000 });
     await shot(page, "desktop-backlog");
 
-    await page.goto(jiraUrl({ view: "work" }));
+    await column.getByTestId("jira-nav-work").click();
     await expect(page.getByTestId("jira-row-ABC-6").first()).toBeVisible({ timeout: 30_000 });
+    await expect(column.getByTestId("jira-nav-work")).toHaveAttribute("data-active", "true");
     await shot(page, "desktop-your-work");
   });
 
@@ -132,6 +140,7 @@ test.describe("Jira", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(jiraUrl({ view: "board", board: "1" }));
     await expect(page.getByTestId("jira-card-ABC-6")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("sidebar-jira-nav-panel")).toHaveCount(0);
     await shot(page, "phone-board");
     await page.getByTestId("jira-card-move-ABC-6").click();
     await shot(page, "phone-move-to");

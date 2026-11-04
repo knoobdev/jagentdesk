@@ -1,5 +1,5 @@
 import { useCallback, useMemo } from "react";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useGlobalSearchParams, useLocalSearchParams } from "expo-router";
 
 // Where the Jira surface is, kept in the route's search params so a board, backlog or issue can
 // be linked and restored: /h/<serverId>/jira?c=<connectionId>&view=board&board=1&issue=ABC-2
@@ -72,8 +72,12 @@ function toParams(location: JiraLocation): Record<string, string | undefined> {
   };
 }
 
-export function useJiraNav(): { location: JiraLocation; go: (patch: JiraLocationPatch) => void } {
-  const params = useLocalSearchParams<Record<string, string | string[]>>();
+export interface JiraNav {
+  location: JiraLocation;
+  go: (patch: JiraLocationPatch) => void;
+}
+
+function useNavFrom(params: Record<string, string | string[] | undefined>): JiraNav {
   const location = useMemo(() => parseJiraLocation(params), [params]);
   const go = useCallback(
     (patch: JiraLocationPatch) => {
@@ -83,4 +87,14 @@ export function useJiraNav(): { location: JiraLocation; go: (patch: JiraLocation
     [location],
   );
   return { location, go };
+}
+
+/** For the Jira screen itself. */
+export function useJiraNav(): JiraNav {
+  return useNavFrom(useLocalSearchParams<Record<string, string | string[]>>());
+}
+
+/** For surfaces outside the Jira route's own tree (the sidebar column), same params. */
+export function useJiraGlobalNav(): JiraNav {
+  return useNavFrom(useGlobalSearchParams<Record<string, string | string[]>>());
 }
