@@ -42,6 +42,9 @@ export interface ActivityGraphDocumentOptions {
   // Scale the reader last chose with Fit/zoom; null = readable default.
   scale: number | null;
   fit: boolean;
+  // Flow is a top-down chain: collapsing a step would hide the rest of the turn, so archify's
+  // branch toggles are not shown there (the Plan tree keeps them).
+  hideBranchToggles?: boolean;
 }
 
 // docs/reference/paseo-design-system.md §1.4 (status dots: amber/red/blue/green 500).
@@ -52,6 +55,10 @@ export const ACTIVITY_STATUS_COLORS = {
   done: "#22c55e",
 } as const;
 
+function toggleCss(hide: boolean): string {
+  return hide ? "[data-tree-toggle],[data-tree-expand-all]{display:none !important}" : "";
+}
+
 function statusCss(palette: ActivityGraphPalette): string {
   const card = (status: string, stroke: string, fill: string) =>
     `[data-node-id][data-jad-status="${status}"]>rect:not(.c-mask){stroke:${stroke} !important;fill:${fill} !important;stroke-width:1.75px !important}` +
@@ -61,7 +68,7 @@ function statusCss(palette: ActivityGraphPalette): string {
     `:root,[data-theme="dark"],[data-theme="light"]{--bg:${palette.surface0} !important;--mask:${palette.surface1} !important;--panel-border:${palette.border} !important;--text:${palette.foreground} !important;--text-muted:${palette.foregroundMuted} !important;--text-dim:${palette.foregroundExtraMuted} !important;--arrow:${palette.foregroundExtraMuted} !important;--canvas-dot:color-mix(in srgb, ${palette.foregroundExtraMuted} 22%, transparent) !important;--toolbar-bg:${palette.surface1} !important;--toolbar-border:${palette.border} !important;--toolbar-text:${palette.foreground} !important}`,
     `html,body{height:100% !important;overflow:hidden !important;background:${palette.surface0} !important}`,
     'html[data-jad-embed="true"] .container{max-width:none !important;margin:0 !important;padding:0 !important}',
-    'html[data-jad-embed="true"] .diagram-container{position:relative !important;display:block !important;height:100vh !important;max-height:none !important;overflow:auto !important;padding:24px !important;box-sizing:border-box !important;scroll-behavior:auto !important;background-color:var(--bg) !important;touch-action:pan-x pan-y !important;-webkit-overflow-scrolling:touch}',
+    'html[data-jad-embed="true"] .diagram-container{position:relative !important;display:block !important;height:100vh !important;max-height:none !important;overflow:auto !important;padding:20px 20px 72px !important;box-sizing:border-box !important;scroll-behavior:auto !important;background-color:var(--bg) !important;touch-action:pan-x pan-y !important;-webkit-overflow-scrolling:touch}',
     'html[data-jad-embed="true"] .diagram-container>svg{display:block !important;flex:none !important;max-width:none !important;min-width:0 !important;min-height:0 !important;margin:0 auto !important;transform:none !important;transition:none !important}',
     'html[data-jad-embed="true"] .reader-rail{display:none !important}',
     // The graph re-renders as the agent works; archify's trace pass would replay on every render.
@@ -115,7 +122,7 @@ if(!container||!svg)return;
 var vb=svg.viewBox&&svg.viewBox.baseVal;
 var vbW=vb&&vb.width?vb.width:svg.getBoundingClientRect().width||1;
 var vbH=vb&&vb.height?vb.height:svg.getBoundingClientRect().height||1;
-var MIN=0.1,MAX=2.5,MAX_READABLE=1.6,PAD=20;
+var MIN=0.1,MAX=2.5,MAX_READABLE=1.6,FIT_CAP=1.1,PAD=20,PAD_BOTTOM=72;
 var scale=1;
 function nodeEl(id){return svg.querySelector('[data-node-id="'+String(id).replace(/["\\\\]/g,"")+'"]');}
 function applyStatuses(list){
@@ -132,11 +139,11 @@ scale=Math.max(MIN,Math.min(MAX,next));
 svg.style.setProperty("width",(vbW*scale)+"px","important");
 svg.style.setProperty("height",(vbH*scale)+"px","important");
 // A graph shorter than the canvas sits in its vertical middle.
-var spare=container.clientHeight-PAD*2-vbH*scale;
+var spare=container.clientHeight-PAD-PAD_BOTTOM-vbH*scale;
 svg.style.setProperty("margin-top",(spare>0?spare/2:0)+"px","important");
 percent();}
 function fitScale(){
-var w=Math.max(1,container.clientWidth-PAD*2),h=Math.max(1,container.clientHeight-PAD*2);
+var w=Math.max(1,container.clientWidth-PAD*2),h=Math.max(1,container.clientHeight-PAD-PAD_BOTTOM);
 return Math.max(MIN,Math.min(1.25,Math.min(w/vbW,h/vbH)));}
 // Zoom keeping the content point under (cx, cy) (default: the canvas center) in place.
 function zoomAt(next,cx,cy){
@@ -228,7 +235,10 @@ function start(){
 if(initial.fit){fit();setTimeout(percent,250);return;}
 var readable=readableScale(),wide=widthScale();
 if(wide>=readable){
-size(Math.min(wide,MAX_READABLE));container.scrollLeft=0;
+size(Math.min(wide,Math.max(readable,FIT_CAP)));
+// A vertical scrollbar that appears after sizing narrows the canvas: refit once to its new width.
+if(container.scrollWidth>container.clientWidth+1){var refit=widthScale();if(refit<scale)size(Math.max(readable,refit));}
+container.scrollLeft=0;
 if(!(svg.getBoundingClientRect().height>container.clientHeight&&center(initial.focus)))container.scrollTop=0;}
 else{size(readable);if(!center(initial.focus)){container.scrollLeft=0;container.scrollTop=0;}}
 edges();setTimeout(percent,250);}
@@ -240,7 +250,7 @@ if(document.readyState==="complete")boot();else window.addEventListener("load",b
 
 export function buildActivityGraphDocument(options: ActivityGraphDocumentOptions): string {
   return buildArchifyDocument(options.html, options.colorScheme, {
-    css: statusCss(options.palette),
+    css: statusCss(options.palette) + toggleCss(options.hideBranchToggles === true),
     script: activityScript(options),
   });
 }

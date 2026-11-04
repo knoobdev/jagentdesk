@@ -276,6 +276,7 @@ function ActivityGraphPanelImpl({
       scale: null,
       // Spec 31.3 / review: every new render starts from the width-fit/readable camera.
       fit: false,
+      hideBranchToggles: graph.view === "flow",
     });
   }, [graph, colorScheme, palette]);
 
