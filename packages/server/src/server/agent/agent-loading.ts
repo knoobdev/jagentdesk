@@ -40,6 +40,7 @@ export interface EnsureAgentLoadedDeps {
   agentStorage: AgentStorage;
   validProviders?: Iterable<AgentProvider>;
   broadcastTimeline?: boolean;
+  purpose?: "history" | "interactive";
   logger: Logger;
 }
 
@@ -117,7 +118,7 @@ export async function ensureAgentLoaded(
         buildConfigOverrides(record),
         agentId,
         extractTimestamps(record),
-        record.archivedAt ? { purpose: "history" } : undefined,
+        deps.purpose ? { purpose: deps.purpose } : undefined,
       );
       deps.logger.info({ agentId, provider: record.provider }, "Agent resumed from persistence");
     } else {
