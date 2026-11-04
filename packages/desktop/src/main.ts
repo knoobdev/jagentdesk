@@ -49,6 +49,7 @@ import {
 } from "./window/window-manager.js";
 import { setupDarwinCompositorWatchdog } from "./window/compositor-watchdog/index.js";
 import { registerDialogHandlers } from "./features/dialogs.js";
+import { registerArgoCdSsoHandlers } from "./features/argocd-sso.js";
 import { registerNotificationHandlers } from "./features/notifications.js";
 import { registerOpenerHandlers } from "./features/opener.js";
 import { registerEditorTargetHandlers } from "./features/editor-targets/ipc.js";
@@ -1356,6 +1357,7 @@ async function bootstrap(): Promise<void> {
   registerDaemonManager();
   registerWindowManager();
   registerDialogHandlers();
+  registerArgoCdSsoHandlers();
   registerNotificationHandlers();
   registerOpenerHandlers();
   registerEditorTargetHandlers();

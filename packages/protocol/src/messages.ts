@@ -212,6 +212,11 @@ import {
 } from "./proxy/rpc-schemas.js";
 import { SshRequestSchemas, SshResponseSchemas, SshPushSchemas } from "./ssh/rpc-schemas.js";
 import { SpecModeRequestSchemas, SpecModeResponseSchemas } from "./spec-mode.js";
+import {
+  ArgoCdRequestSchemas,
+  ArgoCdResponseSchemas,
+  ArgoCdPushSchemas,
+} from "./argocd/rpc-schemas.js";
 import { SftpInboundSchemas, SftpOutboundSchemas } from "./ssh/sftp-schemas.js";
 import { ForwardingInboundSchemas, ForwardingOutboundSchemas } from "./ssh/forwarding-schemas.js";
 import { SnippetsInboundSchemas, SnippetsOutboundSchemas } from "./ssh/snippets-schemas.js";
@@ -4036,6 +4041,7 @@ export const AgentConfigApplyRequestMessageSchema = z.object({
 export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ...SpecModeRequestSchemas,
   ...DatabaseRequestSchemas,
+  ...ArgoCdRequestSchemas,
   ...SshRequestSchemas,
   ...SftpInboundSchemas,
   ...ForwardingInboundSchemas,
@@ -4658,6 +4664,8 @@ export const ServerInfoStatusPayloadSchema = z
         sshServers: z.boolean().optional(),
         // Spec mode (spec 28 / ADR-0030): agent.spec_mode.* RPCs and push.
         specMode: z.boolean().optional(),
+        // Argo CD (spec 30 / ADR-0034). The client gates the Argo CD surface on it.
+        argocd: z.boolean().optional(),
       })
       .optional(),
   })
@@ -7834,6 +7842,8 @@ export type DaemonUpdateProgressMessage = z.infer<typeof DaemonUpdateProgressMes
 export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ...SpecModeResponseSchemas,
   ...DatabaseResponseSchemas,
+  ...ArgoCdResponseSchemas,
+  ...ArgoCdPushSchemas,
   ...SshResponseSchemas,
   ...SshPushSchemas,
   ...SftpOutboundSchemas,

@@ -1488,6 +1488,20 @@ type CorrelatedResponsePayload<TType extends CorrelatedResponseType> = Extract<
   { type: TType }
 >["payload"];
 
+// Argo CD (spec 30.5): one typed entry point for every `argocd.*.request`; the response type is
+// the request type with `.response`, its payload carries `error` + `errorCode`.
+export type ArgoCdRequestType = Extract<SessionInboundMessage["type"], `argocd.${string}.request`>;
+export type ArgoCdRequestParams<T extends ArgoCdRequestType> = Omit<
+  Extract<SessionInboundMessage, { type: T }>,
+  "type" | "requestId"
+>;
+type ArgoCdResponseTypeOf<T extends ArgoCdRequestType> = T extends `${infer Prefix}.request`
+  ? Extract<CorrelatedResponseType, `${Prefix}.response`>
+  : never;
+export type ArgoCdResponsePayload<T extends ArgoCdRequestType> = CorrelatedResponsePayload<
+  ArgoCdResponseTypeOf<T>
+>;
+
 /**
  * The request could not complete because the daemon connection was lost, not
  * established, or timed out. Callers may retry once the connection recovers.
@@ -8155,6 +8169,23 @@ export class DaemonClient {
    * their `ssh.*.request` messages and resolve with the whole matching `….response`
    * message, which the module validates with its own schema.
    */
+  // ── Argo CD (spec 30 / ADR-0034) ──
+  // Tokens, passwords and the PKCE verifier never come back; failures arrive as
+  // `{ error, errorCode }` on the response payload, not as a thrown error.
+  async argocd<T extends ArgoCdRequestType>(
+    type: T,
+    params: ArgoCdRequestParams<T>,
+    options?: { timeout?: number },
+  ): Promise<ArgoCdResponsePayload<T>> {
+    return this.sendNamespacedCorrelatedSessionRequest<
+      ArgoCdResponseTypeOf<T>,
+      ArgoCdResponsePayload<T>
+    >({
+      message: { ...params, type },
+      timeout: options?.timeout,
+    });
+  }
+
   async sshModuleRequest(
     message: { type: `ssh.${string}.request` } & Record<string, unknown>,
   ): Promise<{ type: string; payload: unknown }> {
