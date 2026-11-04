@@ -1,124 +1,84 @@
-import type { ActivityGraphNodeStatus } from "@jagentdesk/protocol/agent-activity-graph";
 import type { GraphModel, GraphNode } from "./model.js";
 
-// GraphModel → archify 3.2.0 JSON: Flow as `lifecycle` schema 3 (automatic main-path layout),
-// Plan as `tree` growing right (spec 31.1). Status colors are not archify's job: the app paints
-// them with the overlay (spec 31.3), so the archify type only picks a neutral card and the
-// default corner sigils are switched off where a status change would make them stale.
+// GraphModel → archify 3.2.0 `tree` JSON (spec 31.1).
+//   - Flow grows down: each main-path step is the child of the step before it, so a whole turn
+//     reads top to bottom in a tall, narrow panel; subagents and approval waits are child
+//     branches beside the step that spawned them; unfinished todos follow as planned nodes.
+//   - Plan grows right: request → todos, or Spec mode phases → tasks.
+// Status colors are not archify's job: the app paints them with the overlay (spec 31.3).
 
 export const ARCHIFY_OUTPUT_NAME = "diagram.html";
 
-type LifecycleType =
-  | "start"
-  | "active"
-  | "waiting"
-  | "decision"
-  | "success"
-  | "failure"
-  | "neutral"
-  | "external";
-
-function lifecycleType(node: GraphNode): LifecycleType {
-  switch (node.kind) {
-    case "start":
-      return "start";
-    case "subagent":
-      return "external";
-    case "permission":
-      return "waiting";
-    case "error":
-      return "failure";
-    case "end":
-      return node.status === "failed" ? "failure" : "success";
-    case "todo":
-    case "earlier":
-    case "compaction":
-      return "neutral";
-    default:
-      return "active";
-  }
+interface TreeNode {
+  id: string;
+  label: string;
+  sublabel?: string;
+  parent?: string;
+  collapsed?: boolean;
 }
 
-function statusIcon(status: ActivityGraphNodeStatus): string {
-  // Matches the overlay (data-jad-status) at render time; the overlay restyles the card when the
-  // status later changes without a re-render.
-  switch (status) {
-    case "failed":
-      return "failure";
-    case "waiting":
-      return "waiting";
-    default:
-      return "none";
-  }
-}
-
-export function toLifecycleJson(model: GraphModel): Record<string, unknown> {
-  const main = model.nodes.filter((node) => node.placement === "main");
-  const branches = model.nodes.filter((node) => node.placement === "branch");
-  // Label (12 px) and sublabel (9 px) only: archify's 8 px tag and step rails are too small to read
-  // in the panel and repeat what the card and the arrows already say.
-  const states = model.nodes.map((node) => {
-    const state: Record<string, unknown> = {
-      id: node.id,
-      type: lifecycleType(node),
-      label: node.label,
-    };
-    if (node.sublabel) state.sublabel = node.sublabel;
-    if (node.kind !== "start") state.icon = statusIcon(node.status);
-    return state;
-  });
-  const transitions: Record<string, unknown>[] = [];
-  for (let index = 1; index < main.length; index += 1) {
-    const from = main[index - 1]!;
-    const to = main[index]!;
-    transitions.push({
-      id: `t-${from.id}-${to.id}`.slice(0, 120),
-      from: from.id,
-      to: to.id,
-      ...(to.plannedEdge ? { variant: "dashed" } : {}),
-    });
-  }
-  for (const branch of branches) {
-    if (!branch.parentId) continue;
-    transitions.push({
-      from: branch.parentId,
-      to: branch.id,
-      ...(branch.errorEdge ? { variant: "security" } : {}),
-    });
-    if (branch.returns)
-      transitions.push({ from: branch.id, to: branch.parentId, variant: "dashed" });
-  }
+function treeNode(node: GraphNode, parent: string | undefined): TreeNode {
   return {
-    schema_version: 3,
-    diagram_type: "lifecycle",
-    meta: {
-      title: model.title,
-      output: ARCHIFY_OUTPUT_NAME,
-      animation: "none",
-      legend: { mode: "hidden" },
-    },
-    mainPath: main.map((node) => node.id),
-    states,
-    transitions,
+    id: node.id,
+    label: node.label,
+    ...(node.sublabel ? { sublabel: node.sublabel } : {}),
+    ...(parent ? { parent } : {}),
   };
 }
 
-export function toTreeJson(model: GraphModel): Record<string, unknown> {
+// Down-growing layout tuned for the ~560 px side panel at 1:1: cards 140–176 px (archify wraps
+// longer text onto more lines) so a step with two branches still fits three across; the
+// generation gap is tighter than archify's default because the Flow canvas hides the collapse
+// toggles that gap makes room for.
+export const FLOW_TREE_LAYOUT = {
+  direction: "down",
+  gapX: 20,
+  gapY: 36,
+  nodeW: 140,
+  nodeMaxW: 176,
+};
+
+export function toFlowTreeJson(model: GraphModel): Record<string, unknown> {
+  const main = model.nodes.filter((node) => node.placement === "main");
+  const branchesOf = new Map<string, GraphNode[]>();
+  for (const node of model.nodes) {
+    if (node.placement !== "branch" || !node.parentId) continue;
+    const list = branchesOf.get(node.parentId) ?? [];
+    list.push(node);
+    branchesOf.set(node.parentId, list);
+  }
+  // Children are read in declaration order and a parent is centred over its first and last child
+  // (exactly over a middle one). Declaring the next step between the step's branches keeps the
+  // chain a straight vertical line: half the branches to its left, the rest to its right.
+  const ordered: TreeNode[] = [];
+  main.forEach((step, index) => {
+    if (index === 0) ordered.push(treeNode(step, undefined));
+    const branches = branchesOf.get(step.id) ?? [];
+    const left = branches.slice(0, Math.floor(branches.length / 2));
+    const right = branches.slice(left.length);
+    for (const branch of left) ordered.push(treeNode(branch, step.id));
+    const next = main[index + 1];
+    if (next) ordered.push(treeNode(next, step.id));
+    for (const branch of right) ordered.push(treeNode(branch, step.id));
+  });
+  return {
+    schema_version: 1,
+    diagram_type: "tree",
+    meta: { title: model.title, output: ARCHIFY_OUTPUT_NAME, animation: "none" },
+    layout: FLOW_TREE_LAYOUT,
+    nodes: ordered,
+  };
+}
+
+export function toPlanTreeJson(model: GraphModel): Record<string, unknown> {
   const hasChildren = new Set(model.nodes.map((node) => node.parentId).filter(Boolean));
   return {
     schema_version: 1,
     diagram_type: "tree",
-    meta: {
-      title: model.title,
-      output: ARCHIFY_OUTPUT_NAME,
-      animation: "none",
-    },
+    meta: { title: model.title, output: ARCHIFY_OUTPUT_NAME, animation: "none" },
     layout: { direction: "right" },
     nodes: model.nodes.map((node) => ({
-      id: node.id,
-      label: node.label,
-      ...(node.sublabel ? { sublabel: node.sublabel } : {}),
-      ...(node.parentId ? { parent: node.parentId } : {}),
+      ...treeNode(node, node.parentId),
       // A finished phase starts folded so the open work stays in view (spec 31.1).
       ...(node.kind === "phase" && node.status === "done" && hasChildren.has(node.id)
         ? { collapsed: true }
@@ -128,10 +88,11 @@ export function toTreeJson(model: GraphModel): Record<string, unknown> {
 }
 
 export function toArchifyJson(model: GraphModel): {
-  diagramType: "lifecycle" | "tree";
+  diagramType: "tree";
   document: Record<string, unknown>;
 } {
-  return model.view === "plan"
-    ? { diagramType: "tree", document: toTreeJson(model) }
-    : { diagramType: "lifecycle", document: toLifecycleJson(model) };
+  return {
+    diagramType: "tree",
+    document: model.view === "plan" ? toPlanTreeJson(model) : toFlowTreeJson(model),
+  };
 }

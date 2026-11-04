@@ -12,7 +12,6 @@ import {
   SUBLABEL_UNITS,
   TURN_PICKER_LIMIT,
   firstLine,
-  splitPromptLabel,
   hashNodeId,
   stableNodeId,
   truncateText,
@@ -316,6 +315,9 @@ function capNodes(build: FlowBuild): void {
   });
 }
 
+// Tree cards wrap their label, so a todo keeps most of its text (about three lines).
+const TODO_LABEL_CHARS = 72;
+
 export interface FlowResult {
   model: GraphModel;
   turns: ActivityGraphTurns;
@@ -340,7 +342,8 @@ class FlowAssembler {
         {
           id: "start",
           kind: "start",
-          ...splitPromptLabel(firstLine(userText(turn.userRow)) || "Prompt"),
+          // The tree wraps labels, so the whole first line (≤ 60 characters, spec 31.2) fits.
+          label: firstLine(userText(turn.userRow)) || "Prompt",
           status: "done",
           ref: { kind: "start", seq: turn.userRow.seq },
           placement: "main",
@@ -487,7 +490,7 @@ class FlowAssembler {
       this.build.main.push({
         id: todoNodeId(todo),
         kind: "todo",
-        ...splitPromptLabel(todo.text.replace(/\s+/g, " ").trim()),
+        label: truncateText(todo.text, TODO_LABEL_CHARS),
         tag: "todo",
         status: status === "in_progress" ? "running" : "pending",
         ref: { kind: "todo", ...(todo.id ? { todoId: todo.id } : {}) },

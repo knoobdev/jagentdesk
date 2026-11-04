@@ -51,7 +51,7 @@ function nodeIdsIn(html: string): Set<string> {
 }
 
 describe("renderActivityGraph (archify 3.2.0)", () => {
-  it("renders a Flow lifecycle with every node addressable", async () => {
+  it("renders the Flow as a top-down tree with every node addressable", async () => {
     const model = buildFlowGraph({
       rows: turnRows(3),
       running: true,
@@ -67,10 +67,10 @@ describe("renderActivityGraph (archify 3.2.0)", () => {
     if (!result.ok) throw new Error(JSON.stringify(result.errors));
     const ids = nodeIdsIn(result.html);
     for (const node of model.nodes) expect(ids.has(node.id)).toBe(true);
-    expect(result.html).toContain('data-lifecycle-layout="main-path-v3"');
+    expect(result.html).toContain('data-tree-direction="down"');
   });
 
-  it("renders a long turn (40 nodes, wider than a desktop page) thanks to vendor patch 3", async () => {
+  it("renders a capped 40-node turn", async () => {
     const model = buildFlowGraph({ rows: turnRows(60), running: true })!.model;
     expect(model.nodes.length).toBe(40);
     const result = await renderActivityGraph(model);

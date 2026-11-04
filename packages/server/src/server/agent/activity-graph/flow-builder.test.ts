@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { AgentTimelineItem, ToolCallDetail } from "../agent-sdk-types.js";
-import { toLifecycleJson } from "./archify-json.js";
+import { toFlowTreeJson } from "./archify-json.js";
 import { buildFlowGraph, type ActivityInput, type ActivityRow } from "./flow-builder.js";
 import { MAX_FLOW_NODES } from "./model.js";
 
-// Spec 31.2 mapping: stream rows → Flow graph → archify lifecycle JSON, with stable node ids.
+// Spec 31.2 mapping: stream rows → Flow graph → archify tree JSON (top-down), with stable node ids.
 
 function rowsBuilder() {
   let seq = 0;
@@ -84,79 +84,30 @@ describe("buildFlowGraph", () => {
     const { rows } = criterionOneTurn();
     const result = buildFlowGraph(input(rows));
     expect(result).not.toBeNull();
-    const json = toLifecycleJson(result!.model);
+    const json = toFlowTreeJson(result!.model);
 
-    expect(json.mainPath).toEqual([
-      "start",
-      "tools-call_read",
-      "tools-call_task",
-      "todo-1",
-      "todo-2",
-      "todo-3",
-      "todo-4",
-    ]);
-    expect(json.states).toEqual([
-      {
-        id: "start",
-        type: "start",
-        label: "Fix the refresh race in the",
-        sublabel: "session module",
-      },
-      {
-        id: "tools-call_read",
-        type: "active",
-        label: "2 tool calls",
-        sublabel: "Read · Search",
-        icon: "none",
-      },
+    // A top-down chain: each step is the child of the step before it; the subagent hangs beside
+    // the step that spawned it; unfinished todos follow the running step.
+    expect(json.layout).toMatchObject({ direction: "down" });
+    expect(json.nodes).toEqual([
+      { id: "start", label: "Fix the refresh race in the session module" },
+      { id: "tools-call_read", label: "2 tool calls", sublabel: "Read · Search", parent: "start" },
       {
         id: "tools-call_task",
-        type: "active",
         label: "2 tool calls",
         sublabel: "Explore · Edit",
-        icon: "none",
+        parent: "tools-call_read",
       },
-      {
-        id: "todo-1",
-        type: "neutral",
-        label: "Inspect the session module",
-        icon: "none",
-      },
-      {
-        id: "todo-2",
-        type: "neutral",
-        label: "Find the refresh race",
-        icon: "none",
-      },
-      {
-        id: "todo-3",
-        type: "neutral",
-        label: "Patch expiry handling",
-        icon: "none",
-      },
-      {
-        id: "todo-4",
-        type: "neutral",
-        label: "Add a regression test",
-        icon: "none",
-      },
+      { id: "todo-1", label: "Inspect the session module", parent: "tools-call_task" },
       {
         id: "sa-call_task",
-        type: "external",
         label: "Explore",
         sublabel: "Map session refresh callers",
-        icon: "none",
+        parent: "tools-call_task",
       },
-    ]);
-    expect(json.transitions).toEqual([
-      { id: "t-start-tools-call_read", from: "start", to: "tools-call_read" },
-      { id: "t-tools-call_read-tools-call_task", from: "tools-call_read", to: "tools-call_task" },
-      { id: "t-tools-call_task-todo-1", from: "tools-call_task", to: "todo-1", variant: "dashed" },
-      { id: "t-todo-1-todo-2", from: "todo-1", to: "todo-2", variant: "dashed" },
-      { id: "t-todo-2-todo-3", from: "todo-2", to: "todo-3", variant: "dashed" },
-      { id: "t-todo-3-todo-4", from: "todo-3", to: "todo-4", variant: "dashed" },
-      { from: "tools-call_task", to: "sa-call_task" },
-      { from: "sa-call_task", to: "tools-call_task", variant: "dashed" },
+      { id: "todo-2", label: "Find the refresh race", parent: "todo-1" },
+      { id: "todo-3", label: "Patch expiry handling", parent: "todo-2" },
+      { id: "todo-4", label: "Add a regression test", parent: "todo-3" },
     ]);
 
     const statuses = Object.fromEntries(result!.model.nodes.map((node) => [node.id, node.status]));
@@ -262,11 +213,12 @@ describe("buildFlowGraph", () => {
         ],
       }),
     )!.model;
-    const transitions = toLifecycleJson(denied).transitions as Array<Record<string, unknown>>;
-    expect(transitions).toContainEqual({
-      from: "tools-call_task",
-      to: "perm-perm_1",
-      variant: "security",
+    const tree = toFlowTreeJson(denied).nodes as Array<Record<string, unknown>>;
+    expect(tree).toContainEqual({
+      id: "perm-perm_1",
+      label: "Denied",
+      sublabel: "Run npm test",
+      parent: "tools-call_task",
     });
     expect(denied.nodes.find((node) => node.id === "perm-perm_1")?.status).toBe("failed");
   });

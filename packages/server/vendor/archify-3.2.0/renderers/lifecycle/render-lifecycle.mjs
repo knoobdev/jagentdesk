@@ -922,9 +922,7 @@ function validateLayout() {
     return label === note ? 'label+note' : label > note ? 'label' : 'note';
   };
   const preserveConditions = 'preserve every condition; shorten wording only, or move complete detail to a card explicitly associated with the same transition; shorter wording may not resolve other layout constraints';
-  // JAgentDesk vendor patch 3 (see ../../README.md): the activity graph is read in a pan/zoom
-  // frame, not fitted to a desktop page, so the daemon may lift the desktop-width readability gate.
-  if (viewBox[0] > readableWidthBudget && process.env.JAD_ARCHIFY_ALLOW_WIDE_LIFECYCLE !== '1') {
+  if (viewBox[0] > readableWidthBudget) {
     // A labelled main-path step widens its gap past the default spacing.
     const wideStepLabels = mainPath.slice(0, -1).flatMap((id, index) => {
       const edge = spineEdges.get(index);

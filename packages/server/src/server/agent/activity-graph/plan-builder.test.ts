@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { toTreeJson } from "./archify-json.js";
+import { toPlanTreeJson } from "./archify-json.js";
 import type { ActivityRow } from "./flow-builder.js";
 import { buildPlanGraph } from "./plan-builder.js";
 import { parseSpecKitTasks } from "./spec-plan-source.js";
@@ -60,7 +60,7 @@ describe("parseSpecKitTasks", () => {
 describe("buildPlanGraph", () => {
   it("draws todos under the request with their statuses (generic ACP status derived)", () => {
     const result = buildPlanGraph({ rows, running: true })!;
-    const json = toTreeJson(result.model);
+    const json = toPlanTreeJson(result.model);
     expect(json.layout).toEqual({ direction: "right" });
     expect(json.nodes).toEqual([
       { id: "root", label: "Fix the refresh race" },
@@ -91,7 +91,7 @@ describe("buildPlanGraph", () => {
     ]);
     expect(tasks).toHaveLength(6);
     expect(tasks.filter((node) => node.sublabel?.startsWith("[P] parallel"))).toHaveLength(2);
-    const json = toTreeJson(result.model);
+    const json = toPlanTreeJson(result.model);
     // A finished phase starts folded.
     expect(
       (json.nodes as Array<Record<string, unknown>>).find((node) => node.id === "phase-1"),

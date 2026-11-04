@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { AgentTimelineItem } from "../agent-sdk-types.js";
-import { toLifecycleJson } from "./archify-json.js";
+import { toFlowTreeJson } from "./archify-json.js";
 import { buildFlowGraph, type ActivityRow } from "./flow-builder.js";
 
 // Projected timeline recorded from the built daemon (fetch_agent_timeline, projection "projected")
@@ -19,7 +19,7 @@ const rows: ActivityRow[] = recorded.map((entry) => ({
 }));
 const TURN = "f03d7440-5465-494e-901c-5cad7f9c5bcf";
 
-describe("recorded mock turn → Flow lifecycle JSON", () => {
+describe("recorded mock turn → Flow tree JSON", () => {
   it("draws start, the two tool runs, the returning subagent branch and the answer", () => {
     const result = buildFlowGraph({
       rows,
@@ -35,46 +35,21 @@ describe("recorded mock turn → Flow lifecycle JSON", () => {
         },
       ],
     })!;
-    const json = toLifecycleJson(result.model);
+    const json = toFlowTreeJson(result.model);
     const read = `tools-${TURN}_read-30ed0423`;
     const task = `tools-${TURN}_task-5424bd5f`;
     const sub = `sa-${TURN}_task-5424bd5f`;
-    expect(json.mainPath).toEqual(["start", read, task, "end"]);
-    expect(json.states).toEqual([
-      {
-        id: "start",
-        type: "start",
-        label: "emit synthetic activity",
-        sublabel: "graph hold=5000 pace=900",
-      },
-      {
-        id: read,
-        type: "active",
-        label: "2 tool calls",
-        sublabel: "Read · Search",
-        icon: "none",
-      },
-      {
-        id: task,
-        type: "active",
-        label: "2 tool calls",
-        sublabel: "Explore · Edit",
-        icon: "none",
-      },
+    expect(json.nodes).toEqual([
+      { id: "start", label: "emit synthetic activity graph hold=5000 pace=900" },
+      { id: read, label: "2 tool calls", sublabel: "Read · Search", parent: "start" },
+      { id: task, label: "2 tool calls", sublabel: "Explore · Edit", parent: read },
       {
         id: "end",
-        type: "success",
         label: "Answer",
         sublabel: "Fixed the refresh race in src/auth/se…",
-        icon: "none",
+        parent: task,
       },
-      {
-        id: sub,
-        type: "external",
-        label: "Explore",
-        sublabel: "Map session refresh callers",
-        icon: "none",
-      },
+      { id: sub, label: "Explore", sublabel: "Map session refresh callers", parent: task },
     ]);
     expect(Object.fromEntries(result.model.nodes.map((node) => [node.id, node.status]))).toEqual({
       start: "done",

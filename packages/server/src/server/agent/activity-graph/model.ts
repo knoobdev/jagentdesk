@@ -75,8 +75,7 @@ export function hashNodeId(prefix: string, text: string): string {
 const FULLWIDTH =
   /[\u1100-\u115F\u231A-\u231B\u2329-\u232A\u23E9-\u23EC\u23F0\u23F3\u25FD-\u25FE\u2614-\u2615\u2630-\u2637\u2648-\u2653\u267F\u268A-\u268F\u2693\u26A1\u26AA-\u26AB\u26BD-\u26BE\u26C4-\u26C5\u26CE\u26D4\u26EA\u26F2-\u26F3\u26F5\u26FA\u26FD\u2705\u270A-\u270B\u2728\u274C\u274E\u2753-\u2755\u2757\u2795-\u2797\u27B0\u27BF\u2B1B-\u2B1C\u2B50\u2B55\u2E80-\uA4CF\uA960-\uA97C\uAC00-\uD7A3\uF900-\uFAFF\uFE10-\uFE19\uFE30-\uFE6F\uFF01-\uFF60\uFFE0-\uFFE6\u{16FE0}-\u{18DFF}\u{1AFF0}-\u{1AFFF}\u{1B000}-\u{1B2FF}\u{1F000}-\u{1FAFF}\u{20000}-\u{3FFFD}]/u;
 
-// Lengths that fit archify's widest state card (220 px, 8 px padding) at the preferred 12 px label
-// and 9 px sublabel, so archify never shrinks text and the panel's readable zoom stays constant.
+// Tool labels and sublabels stay short so most cards keep to one or two lines in the tree.
 export const LABEL_UNITS = 29;
 export const SUBLABEL_UNITS = 38;
 
@@ -122,23 +121,6 @@ export function firstLine(text: string, max = PROMPT_LABEL_MAX): string {
     .slice(0, max - 1)
     .join("")
     .trimEnd()}…`;
-}
-
-// Split a prompt line (≤ 60 characters) over the start node's label and sublabel so the whole line
-// stays readable inside one archify state.
-export function splitPromptLabel(line: string): { label: string; sublabel?: string } {
-  if (textUnits(line) <= LABEL_UNITS) return { label: line };
-  const words = line.split(" ");
-  let label = "";
-  let index = 0;
-  for (; index < words.length; index += 1) {
-    const next = label ? `${label} ${words[index]}` : words[index]!;
-    if (textUnits(next) > LABEL_UNITS - 1) break;
-    label = next;
-  }
-  if (!label) return { label: truncateText(line, LABEL_UNITS), sublabel: undefined };
-  const rest = words.slice(index).join(" ");
-  return { label, sublabel: truncateText(rest, SUBLABEL_UNITS) };
 }
 
 // What decides whether the HTML must be rendered again: anything archify draws except the status
