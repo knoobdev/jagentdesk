@@ -1,9 +1,31 @@
 # Changelog
 
 All notable changes to JAgentDesk are documented here. JAgentDesk versions its
-own release line (now `0.9.49`); the many `v0.1.x`–`v1.0.x` tags in history are
+own release line (now `0.9.50`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
+
+## v0.9.50 — 2026-11-04
+
+Sideload: adding an Apple ID that works in Sideloadly failed after sign-in with "Developer Services
+listTeams returned 200 without a plist".
+
+### Sideload
+
+- **Signing service request updated.** Sign-in itself (anisette, password, two-factor code, the
+  signing token) already succeeded; the next call, which lists the account's teams, got an answer
+  that was not a property list. JAgentDesk introduced itself to Apple's signing service as a 2019
+  client version (`X-Xcode-Version: 11.2 (11B41)`). Like Sideloadly and other current tools, it now
+  sends the current version (`16.4 (16F6)`, as the maintained open-source implementations do). This
+  is only the name every free-account sideloader uses with Apple's signing service; nothing needs
+  to be installed.
+- **Compressed and JSON answers.** Responses from Apple's signing service are now decompressed
+  (gzip, deflate, brotli — including gzip sent without a header), and JSON error answers are read and
+  shown with Apple's own message.
+- **Errors that say what happened.** If Apple still answers with something that is not a property
+  list, the error now states the HTTP status, the kind of content (empty, JSON, XML, or an HTML page
+  with its title), its type and size — never its content — so the next step is clear.
+- Tests cover gzip with and without the header and the description of non-plist answers.
 
 ## v0.9.49 — 2026-11-04
 
