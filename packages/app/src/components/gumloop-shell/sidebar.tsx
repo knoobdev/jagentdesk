@@ -1,3 +1,5 @@
+import { useWindowDimensions } from "react-native";
+import { useWindowLayout, resolveDesktopDivisionLayout } from "@/window-layout";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AccountButton } from "./account-button";
@@ -528,8 +530,17 @@ export function GumloopSidebar({ active }: { active: boolean }) {
   if (!drill) middle = <SidebarViewSlot dismiss={dismissPluginView}>{middle}</SidebarViewSlot>;
   const compact = useIsCompactFormFactor();
   const insets = useSafeAreaInsets();
+  const { width, height } = useWindowDimensions();
+  const division = resolveDesktopDivisionLayout({
+    geometry: useWindowLayout(),
+    windowWidth: width,
+    windowHeight: height,
+    leftInset: insets.left,
+    rightInset: insets.right,
+  });
   const sidebarStyle = [
     styles.sidebar,
+    division && !compact && { width: division.sidebarWidth },
     compact && styles.compactSidebar,
     compact && { paddingTop: insets.top, paddingBottom: insets.bottom },
   ];

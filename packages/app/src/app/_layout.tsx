@@ -1,3 +1,11 @@
+import {
+  WindowLayoutProvider,
+  WindowLayoutActionsHost,
+  WindowLayoutSurface,
+  WindowLayoutDivisionGap,
+  useWindowLayout,
+  resolveDesktopDivisionLayout,
+} from "@/window-layout";
 import { WorkspaceLayoutModePublisher } from "@/workspace-tabs/layout-mode-publisher";
 import { FloatingHeaderLayout } from "@/components/floating-header";
 import { StreamTopOverlayProvider, supportsStreamTopOverlay } from "@/agent-stream/top-overlay";
@@ -538,6 +546,7 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
   const overlays = (
     <>
       <FloatingPanelPortalHost />
+      <WindowLayoutActionsHost />
       {isCompactLayout ? sidebarChrome : null}
       <DownloadToast />
       <RosettaCalloutSource />
@@ -620,11 +629,25 @@ function AppWorkspaceChrome({
   layout,
   children,
 }: AppWorkspaceChromeProps) {
+  const insets = useSafeAreaInsets();
+  const { width, height } = useWindowDimensions();
+  const divisionLayout = resolveDesktopDivisionLayout({
+    geometry: useWindowLayout(),
+    windowWidth: width,
+    windowHeight: height,
+    leftInset: insets.left,
+    rightInset: insets.right,
+  });
   return (
-    <View style={rowStyle}>
+    <WindowLayoutSurface compact={isCompactLayout} style={rowStyle}>
       {!isCompactLayout && !onForge ? (
         <WindowChromeRegion corners={layout.sidebarCorners}>{sidebarChrome}</WindowChromeRegion>
       ) : null}
+      <WindowLayoutDivisionGap
+        layout={divisionLayout}
+        sidebarVisible={layout.sidebarToggleOwner !== "window"}
+        compact={isCompactLayout}
+      />
       {isCompactLayout ? (
         <CompactExplorerSidebarHost enabled={chromeEnabled}>
           <WindowChromeRegion corners={chromeEnabled ? "both" : layout.contentCorners}>
@@ -638,7 +661,7 @@ function AppWorkspaceChrome({
           <View style={flexStyle}>{children}</View>
         </WindowChromeRegion>
       )}
-    </View>
+    </WindowLayoutSurface>
   );
 }
 
@@ -1203,15 +1226,17 @@ function TailscaleHealthMonitor() {
 // context and need one shared provider for sibling sheets to stack.
 function RootProviders({ children }: { children: ReactNode }) {
   return (
-    <WindowChromeProvider>
-      <KeyboardProvider>
-        <KeyboardShiftProvider>
-          <PortalProvider>
-            <BottomSheetModalProvider>{children}</BottomSheetModalProvider>
-          </PortalProvider>
-        </KeyboardShiftProvider>
-      </KeyboardProvider>
-    </WindowChromeProvider>
+    <WindowLayoutProvider>
+      <WindowChromeProvider>
+        <KeyboardProvider>
+          <KeyboardShiftProvider>
+            <PortalProvider>
+              <BottomSheetModalProvider>{children}</BottomSheetModalProvider>
+            </PortalProvider>
+          </KeyboardShiftProvider>
+        </KeyboardProvider>
+      </WindowChromeProvider>
+    </WindowLayoutProvider>
   );
 }
 
