@@ -474,6 +474,17 @@ export function buildForgeRoute(serverId: string) {
   return `/h/${encodeSegment(normalized)}/forge` as const;
 }
 
+/** Jira surface (spec 29); `params` deep-link to a board, backlog or issue. */
+export function buildJiraRoute(serverId: string, params?: Record<string, string>) {
+  const normalized = trimNonEmpty(serverId);
+  if (!normalized) {
+    return "/" as const;
+  }
+  const route = `/h/${encodeSegment(normalized)}/jira` as const;
+  const query = new URLSearchParams(params ?? {}).toString();
+  return query ? (`${route}?${query}` as const) : route;
+}
+
 export function buildMarketplaceRoute(serverId: string) {
   const normalized = trimNonEmpty(serverId);
   if (!normalized) {
@@ -702,4 +713,34 @@ export function buildProjectSettingsRoute(serverId: string, projectId: string) {
 export function normalizeProjectSettingsRouteId(value: string | string[] | undefined): string {
   const id = Array.isArray(value) ? value[0] : value;
   return typeof id === "string" ? id : "";
+}
+
+// Argo CD (spec 30.3): instances → applications of one instance → one application.
+export function buildArgoCdRoute(serverId: string) {
+  const normalized = trimNonEmpty(serverId);
+  if (!normalized) {
+    return "/" as const;
+  }
+  return `/h/${encodeSegment(normalized)}/argocd` as const;
+}
+
+export function buildArgoCdInstanceRoute(serverId: string, instanceId: string) {
+  const normalizedServer = trimNonEmpty(serverId);
+  const normalizedInstance = trimNonEmpty(instanceId);
+  if (!normalizedServer || !normalizedInstance) {
+    return buildArgoCdRoute(serverId);
+  }
+  return `/h/${encodeSegment(normalizedServer)}/argocd/${encodeSegment(normalizedInstance)}` as const;
+}
+
+export function buildArgoCdAppRoute(
+  serverId: string,
+  instanceId: string,
+  app: { name: string; appNamespace: string | null },
+) {
+  const base = buildArgoCdInstanceRoute(serverId, instanceId);
+  if (base === "/" || base === buildArgoCdRoute(serverId) || !app.name) return base;
+  const query = new URLSearchParams({ name: app.name });
+  if (app.appNamespace) query.set("ns", app.appNamespace);
+  return `${base}/app?${query.toString()}` as const;
 }

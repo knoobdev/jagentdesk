@@ -109,6 +109,8 @@ export type UserComposerAttachment =
   | WorkspaceFileComposerAttachment
   | { kind: "forge_issue"; item: ForgeSearchItem }
   | { kind: "forge_change_request"; item: ForgeSearchItem }
+  // A Jira issue (spec 29.4); carries the wire attachment built when it was attached.
+  | { kind: "jira_issue"; attachment: Extract<AgentAttachment, { type: "jira_issue" }> }
   // COMPAT(githubAttachmentKinds): added in v0.1.106, remove after 2026-12-28 once daemon floor >= v0.1.106
   | { kind: "github_issue"; item: ForgeSearchItem }
   | {

@@ -1,4 +1,15 @@
+import type {
+  ActivityGraphChangedMessage,
+  ActivityGraphGetResponsePayload,
+  ActivityGraphStatusMessage,
+  ActivityGraphView,
+} from "@jagentdesk/protocol/agent-activity-graph";
 import type { HostCapabilities, ToolInstallPlan } from "@jagentdesk/protocol/host-capabilities";
+import type {
+  SpecModeError,
+  SpecModeOptionalPhase,
+  SpecModeState,
+} from "@jagentdesk/protocol/spec-mode";
 import type { z } from "zod";
 import { CLIENT_CAPS, type ClientCapability } from "@jagentdesk/protocol/client-capabilities";
 import type { DatabaseEngine, DbConnectionConfig } from "@jagentdesk/protocol/database/rpc-schemas";
@@ -46,6 +57,12 @@ import type {
   SimTapPayload,
   SimTerminateAppPayload,
   SimUnslimPayload,
+  SimCoords,
+  SimPhysicalEnablePayload,
+  SimPhysicalDisablePayload,
+  SimPhysicalPreparePayload,
+  SimPhysicalPrepareProgressPayload,
+  SimScreenSubscribePayload,
 } from "@jagentdesk/protocol/simulator/rpc-schemas";
 import type {
   SshAuthPrompt,
@@ -59,6 +76,11 @@ import type {
   SshSessionActivity,
   SshTerminalSize,
 } from "@jagentdesk/protocol/ssh/rpc-schemas";
+import type {
+  SideloadAuthPrompt,
+  SideloadInstallProgress,
+  SideloadNotice,
+} from "@jagentdesk/protocol/sideload/rpc-schemas";
 import type {
   ProxyCaExportPayload,
   ProxyCaptureMode,
@@ -82,6 +104,13 @@ import type {
   ProxyTransactionPushPayload,
 } from "@jagentdesk/protocol/proxy/rpc-schemas";
 import type { AgentAttentionNotificationPayload } from "@jagentdesk/protocol/agent-attention-notification";
+import type {
+  JiraPush,
+  JiraRequestParams,
+  JiraRequestType,
+  JiraResponseFor,
+  JiraResponseTypeFor,
+} from "@jagentdesk/protocol/jira/rpc-schemas";
 import {
   AgentCreateFailedStatusPayloadSchema,
   AgentCreatedStatusPayloadSchema,
@@ -286,6 +315,9 @@ import {
   decodeFileTransferFrame,
   encodeFileTransferFrame,
   decodeTerminalStreamFrame,
+  decodeScreenFrame,
+  type ScreenFrame,
+  ScreenFrameOpcode,
   FileTransferOpcode,
   TerminalStreamOpcode,
   type FileTransferFrame,
@@ -671,6 +703,37 @@ type WorkspaceCreatePayload = Extract<
 >["payload"];
 type FileExplorerPayload = FileExplorerResponse["payload"];
 export type FileExplorerDirectoryPayload = NonNullable<FileExplorerPayload["directory"]>;
+
+// Sideload (spec 26). Payloads mirror packages/protocol/src/sideload/rpc-schemas.ts.
+type SideloadRequestType = Extract<
+  SessionInboundMessage["type"],
+  `sideload.${string}.request` | `android.${string}.request`
+>;
+type SideloadRequestBody<T extends SideloadRequestType> = Omit<
+  Extract<SessionInboundMessage, { type: T }>,
+  "type" | "requestId"
+>;
+type SideloadResponseType<T extends string> = T extends `${infer Prefix}.request`
+  ? `${Prefix}.response`
+  : never;
+export type SideloadResponsePayload<T extends SideloadRequestType> =
+  Extract<SessionOutboundMessage, { type: SideloadResponseType<T> }> extends { payload: infer P }
+    ? P
+    : never;
+export type {
+  SideloadAccountSummary,
+  SideloadApp,
+  SideloadAppId,
+  SideloadAuthPrompt,
+  SideloadCert,
+  SideloadDevice,
+  SideloadHostBrowseKind,
+  SideloadHostEntry,
+  SideloadInstallProgress,
+  SideloadIpaInfo,
+  SideloadNotice,
+  SideloadOptions,
+} from "@jagentdesk/protocol/sideload/rpc-schemas";
 
 // SSH servers (spec 25 / story S-20). Payload types mirror the protocol's correlated
 // responses (packages/protocol/src/ssh/rpc-schemas.ts); DTOs are re-exported so app
@@ -1477,6 +1540,20 @@ type CorrelatedResponsePayload<TType extends CorrelatedResponseType> = Extract<
   { type: TType }
 >["payload"];
 
+// Argo CD (spec 30.5): one typed entry point for every `argocd.*.request`; the response type is
+// the request type with `.response`, its payload carries `error` + `errorCode`.
+export type ArgoCdRequestType = Extract<SessionInboundMessage["type"], `argocd.${string}.request`>;
+export type ArgoCdRequestParams<T extends ArgoCdRequestType> = Omit<
+  Extract<SessionInboundMessage, { type: T }>,
+  "type" | "requestId"
+>;
+type ArgoCdResponseTypeOf<T extends ArgoCdRequestType> = T extends `${infer Prefix}.request`
+  ? Extract<CorrelatedResponseType, `${Prefix}.response`>
+  : never;
+export type ArgoCdResponsePayload<T extends ArgoCdRequestType> = CorrelatedResponsePayload<
+  ArgoCdResponseTypeOf<T>
+>;
+
 /**
  * The request could not complete because the daemon connection was lost, not
  * established, or timed out. Callers may retry once the connection recovers.
@@ -1672,6 +1749,17 @@ function dockerTarget(options: { serverId?: string }): { serverId?: string } {
   return options.serverId ? { serverId: options.serverId } : {};
 }
 
+export interface SpecModeResult {
+  state: SpecModeState | null;
+  error: SpecModeError | null;
+}
+
+export interface SpecModeSetupPreviewResult {
+  files: string[];
+  missingTools: string[];
+  error: SpecModeError | null;
+}
+
 export class DaemonClient {
   private transport: DaemonTransport | null = null;
   private transportCleanup: Array<() => void> = [];
@@ -1721,6 +1809,8 @@ export class DaemonClient {
   private execCallbacks = new Map<string, (data: string) => void>();
   private pfCallbacks = new Map<string, (data: string) => void>();
   private readonly terminalStreams = new TerminalStreamRouter();
+  // Spec 27.5: live device screens arrive as binary frames keyed by subscriptionId.
+  private readonly screenFrameHandlers = new Map<string, (frame: ScreenFrame) => void>();
   private pendingBinaryFileReads = new Map<string, PendingBinaryFileRead>();
   private activeBinaryFileTransfers = new Map<string, BinaryFileTransferState>();
   private completedBinaryFileReads = new Map<string, FileReadResult>();
@@ -8133,6 +8223,23 @@ export class DaemonClient {
    * their `ssh.*.request` messages and resolve with the whole matching `….response`
    * message, which the module validates with its own schema.
    */
+  // ── Argo CD (spec 30 / ADR-0034) ──
+  // Tokens, passwords and the PKCE verifier never come back; failures arrive as
+  // `{ error, errorCode }` on the response payload, not as a thrown error.
+  async argocd<T extends ArgoCdRequestType>(
+    type: T,
+    params: ArgoCdRequestParams<T>,
+    options?: { timeout?: number },
+  ): Promise<ArgoCdResponsePayload<T>> {
+    return this.sendNamespacedCorrelatedSessionRequest<
+      ArgoCdResponseTypeOf<T>,
+      ArgoCdResponsePayload<T>
+    >({
+      message: { ...params, type },
+      timeout: options?.timeout,
+    });
+  }
+
   async sshModuleRequest(
     message: { type: `ssh.${string}.request` } & Record<string, unknown>,
   ): Promise<{ type: string; payload: unknown }> {
@@ -8150,6 +8257,36 @@ export class DaemonClient {
    */
   sendSshModuleMessage(message: { type: `ssh.${string}` } & Record<string, unknown>): void {
     this.sendSessionMessage(SessionInboundMessageSchema.parse(message));
+  }
+
+  // ── Jira (spec 29) ──
+  // One typed entry point for the jira.* RPCs: `jiraRequest("jira.issue.get.request", {...})`
+  // resolves with the response payload; a Jira-side failure is `payload.error` ({ code, message,
+  // fieldErrors? }), not a throw. Timeouts and disconnects throw like every other RPC.
+
+  async jiraRequest<T extends JiraRequestType>(
+    type: T,
+    params: JiraRequestParams<T>,
+    options: { timeoutMs?: number } = {},
+  ): Promise<JiraResponseFor<T>["payload"]> {
+    const responseType = type.replace(/\.request$/, ".response") as JiraResponseTypeFor<T>;
+    return this.sendCorrelatedSessionRequest<JiraResponseTypeFor<T>, JiraResponseFor<T>["payload"]>(
+      {
+        message: { type, ...params },
+        responseType,
+        timeout: options.timeoutMs,
+      },
+    );
+  }
+
+  /** jira.board.changed / jira.issue.changed / jira.oauth.delegation / jira.oauth.progress. */
+  onJiraPush<T extends JiraPush["type"]>(
+    type: T,
+    handler: (message: Extract<JiraPush, { type: T }>) => void,
+  ): () => void {
+    return this.subscribeRawMessages((message) => {
+      if (message.type === type) handler(message as Extract<JiraPush, { type: T }>);
+    });
   }
 
   /** Raw pushes for SSH modules (`ssh.transfer.progress`, `ssh.forward.state`, …). */
@@ -8220,6 +8357,38 @@ export class DaemonClient {
     return this.on("ssh.connection.state", (message) => {
       handler(message);
     });
+  }
+
+  // ── Sideload (spec 26) ──
+  // One correlated call per RPC; adding an Apple ID waits on 2FA, installs report progress
+  // through sideload.install.progress pushes.
+
+  sideloadCall<T extends SideloadRequestType>(
+    type: T,
+    body: SideloadRequestBody<T>,
+    options?: { timeout?: number; requestId?: string },
+  ): Promise<SideloadResponsePayload<T>> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId: options?.requestId,
+      timeout: options?.timeout,
+      message: { type, ...body } as { type: T } & Record<string, unknown>,
+    }) as Promise<SideloadResponsePayload<T>>;
+  }
+
+  onSideloadAuthPrompt(handler: (prompt: SideloadAuthPrompt) => void): () => void {
+    return this.on("sideload.auth.prompt", (message) => handler(message));
+  }
+
+  onSideloadAuthResolved(handler: (promptId: string) => void): () => void {
+    return this.on("sideload.auth.resolved", (message) => handler(message.promptId));
+  }
+
+  onSideloadInstallProgress(handler: (progress: SideloadInstallProgress) => void): () => void {
+    return this.on("sideload.install.progress", (message) => handler(message));
+  }
+
+  onSideloadNotice(handler: (notice: SideloadNotice) => void): () => void {
+    return this.on("sideload.notice", (message) => handler(message));
   }
 
   // ── SimFleet: iOS Simulator control ──
@@ -8571,10 +8740,17 @@ export class DaemonClient {
     udid: string;
     x: number;
     y: number;
+    coords?: SimCoords;
   }): Promise<SimTapPayload> {
     return this.sendCorrelatedSessionRequest({
       requestId: options.requestId,
-      message: { type: "simulator/tap", udid: options.udid, x: options.x, y: options.y },
+      message: {
+        type: "simulator/tap",
+        udid: options.udid,
+        x: options.x,
+        y: options.y,
+        ...(options.coords ? { coords: options.coords } : {}),
+      },
       responseType: "simulator/tap/response",
     });
   }
@@ -8587,6 +8763,7 @@ export class DaemonClient {
     x2: number;
     y2: number;
     durationMs?: number;
+    coords?: SimCoords;
   }): Promise<SimSwipePayload> {
     return this.sendCorrelatedSessionRequest({
       requestId: options.requestId,
@@ -8598,6 +8775,7 @@ export class DaemonClient {
         x2: options.x2,
         y2: options.y2,
         ...(options.durationMs !== undefined ? { durationMs: options.durationMs } : {}),
+        ...(options.coords ? { coords: options.coords } : {}),
       },
       responseType: "simulator/swipe/response",
     });
@@ -8807,6 +8985,96 @@ export class DaemonClient {
   ): () => void {
     return this.on("simulator/log-chunk", (message) => {
       if (message.payload.subscriptionId === subscriptionId) handler(message.payload);
+    });
+  }
+
+  async simulatorPhysicalEnable(options: {
+    udid: string;
+    requestId?: string;
+  }): Promise<SimPhysicalEnablePayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "simulator/physical/enable", udid: options.udid },
+      responseType: "simulator/physical/enable/response",
+    });
+  }
+
+  async simulatorPhysicalDisable(options: {
+    udid: string;
+    requestId?: string;
+  }): Promise<SimPhysicalDisablePayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "simulator/physical/disable", udid: options.udid },
+      responseType: "simulator/physical/disable/response",
+    });
+  }
+
+  // iOS Prepare device: signing + installing WebDriverAgent takes minutes on a first run.
+  async simulatorPhysicalPrepare(options: {
+    udid: string;
+    accountId?: string;
+    requestId?: string;
+  }): Promise<SimPhysicalPreparePayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "simulator/physical/prepare",
+        udid: options.udid,
+        ...(options.accountId ? { accountId: options.accountId } : {}),
+      },
+      responseType: "simulator/physical/prepare/response",
+      timeout: 15 * 60_000,
+    });
+  }
+
+  onSimulatorPrepareProgress(
+    requestId: string,
+    handler: (progress: SimPhysicalPrepareProgressPayload) => void,
+  ): () => void {
+    return this.on("simulator/physical/prepare/progress", (message) => {
+      if (message.payload.requestId === requestId) handler(message.payload);
+    });
+  }
+
+  // Register the frame handler before subscribing: the first frame can beat the response.
+  onSimulatorScreenFrame(
+    subscriptionId: string,
+    handler: (frame: ScreenFrame) => void,
+  ): () => void {
+    this.screenFrameHandlers.set(subscriptionId, handler);
+    return () => {
+      if (this.screenFrameHandlers.get(subscriptionId) === handler) {
+        this.screenFrameHandlers.delete(subscriptionId);
+      }
+    };
+  }
+
+  async simulatorScreenSubscribe(options: {
+    subscriptionId: string;
+    udid: string;
+    maxFps?: number;
+    requestId?: string;
+  }): Promise<SimScreenSubscribePayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "simulator/screen/subscribe",
+        subscriptionId: options.subscriptionId,
+        udid: options.udid,
+        ...(options.maxFps ? { maxFps: options.maxFps } : {}),
+      },
+      responseType: "simulator/screen/subscribe/response",
+      timeout: 60_000,
+    });
+  }
+
+  simulatorScreenUnsubscribe(options: { subscriptionId: string }): void {
+    this.screenFrameHandlers.delete(options.subscriptionId);
+    this.sendSessionMessage({
+      type: "simulator/screen/unsubscribe",
+      requestId: this.createRequestId(),
+      subscriptionId: options.subscriptionId,
     });
   }
 
@@ -9584,6 +9852,96 @@ export class DaemonClient {
   }
 
   // ============================================================================
+  // Spec mode (spec 28 / ADR-0030). Gated by features.specMode. Refusals the user can act
+  // on (missing tools, setup needed, autorun on, nothing to review) come back as `error`.
+  // ============================================================================
+
+  async specModeGet(agentId: string): Promise<SpecModeResult> {
+    const requestId = this.createRequestId();
+    return this.sendRequest({
+      requestId,
+      message: SessionInboundMessageSchema.parse({
+        type: "agent.spec_mode.get.request",
+        agentId,
+        requestId,
+      }),
+      options: { skipQueue: true },
+      select: (msg) =>
+        msg.type === "agent.spec_mode.get.response" && msg.payload.requestId === requestId
+          ? { state: msg.payload.state, error: msg.payload.error }
+          : null,
+    });
+  }
+
+  async specModeSetupPreview(agentId: string): Promise<SpecModeSetupPreviewResult> {
+    const requestId = this.createRequestId();
+    return this.sendRequest({
+      requestId,
+      message: SessionInboundMessageSchema.parse({
+        type: "agent.spec_mode.setup.preview.request",
+        agentId,
+        requestId,
+      }),
+      options: { skipQueue: true },
+      select: (msg) =>
+        msg.type === "agent.spec_mode.setup.preview.response" && msg.payload.requestId === requestId
+          ? {
+              files: msg.payload.files,
+              missingTools: msg.payload.missingTools,
+              error: msg.payload.error,
+            }
+          : null,
+    });
+  }
+
+  async specModeSet(params: {
+    agentId: string;
+    enabled: boolean;
+    optionalPhases?: SpecModeOptionalPhase[];
+    confirmSetup?: boolean;
+  }): Promise<SpecModeResult> {
+    const requestId = this.createRequestId();
+    return this.sendRequest({
+      requestId,
+      message: SessionInboundMessageSchema.parse({
+        type: "agent.spec_mode.set.request",
+        ...params,
+        requestId,
+      }),
+      options: { skipQueue: true },
+      select: (msg) =>
+        msg.type === "agent.spec_mode.set.response" && msg.payload.requestId === requestId
+          ? { state: msg.payload.state, error: msg.payload.error }
+          : null,
+    });
+  }
+
+  async specModeReview(params: {
+    agentId: string;
+    decision: "approve" | "revise";
+    note?: string;
+  }): Promise<SpecModeResult> {
+    const requestId = this.createRequestId();
+    return this.sendRequest({
+      requestId,
+      message: SessionInboundMessageSchema.parse({
+        type: "agent.spec_mode.review.request",
+        ...params,
+        requestId,
+      }),
+      options: { skipQueue: true },
+      select: (msg) =>
+        msg.type === "agent.spec_mode.review.response" && msg.payload.requestId === requestId
+          ? { state: msg.payload.state, error: msg.payload.error }
+          : null,
+    });
+  }
+
+  subscribeSpecModeState(handler: (state: SpecModeState) => void): () => void {
+    return this.on("agent.spec_mode.state", (message) => handler(message.payload.state));
+  }
+
+  // ============================================================================
   // Session sharing (spec §21 / ADR-0018). Host-side. Gated by features.sessionSharing.
   // ============================================================================
 
@@ -9958,6 +10316,80 @@ export class DaemonClient {
     return payload.html;
   }
 
+  // Agent activity graph (spec 31.5, ADR-0031).
+  async activityGraphGet(
+    input: { agentId: string; view: ActivityGraphView; turnIndex?: number },
+    requestId?: string,
+  ): Promise<ActivityGraphGetResponsePayload> {
+    const resolved = this.createRequestId(requestId);
+    const message = SessionInboundMessageSchema.parse({
+      type: "agent.activity_graph.get.request",
+      requestId: resolved,
+      agentId: input.agentId,
+      view: input.view,
+      ...(input.turnIndex !== undefined ? { turnIndex: input.turnIndex } : {}),
+    });
+    return this.sendRequest({
+      requestId: resolved,
+      message,
+      options: { skipQueue: true },
+      select: (msg) =>
+        msg.type === "agent.activity_graph.get.response" && msg.payload.requestId === resolved
+          ? msg.payload
+          : null,
+    });
+  }
+
+  async activityGraphSubscribe(
+    input: { agentId: string; view: ActivityGraphView },
+    requestId?: string,
+  ): Promise<string | null> {
+    const resolved = this.createRequestId(requestId);
+    const message = SessionInboundMessageSchema.parse({
+      type: "agent.activity_graph.subscribe.request",
+      requestId: resolved,
+      agentId: input.agentId,
+      view: input.view,
+    });
+    const payload = await this.sendRequest({
+      requestId: resolved,
+      message,
+      options: { skipQueue: true },
+      select: (msg) =>
+        msg.type === "agent.activity_graph.subscribe.response" && msg.payload.requestId === resolved
+          ? msg.payload
+          : null,
+    });
+    return payload.subscriptionId;
+  }
+
+  async activityGraphUnsubscribe(subscriptionId: string, requestId?: string): Promise<void> {
+    const resolved = this.createRequestId(requestId);
+    const message = SessionInboundMessageSchema.parse({
+      type: "agent.activity_graph.unsubscribe.request",
+      requestId: resolved,
+      subscriptionId,
+    });
+    await this.sendRequest({
+      requestId: resolved,
+      message,
+      options: { skipQueue: true },
+      select: (msg) =>
+        msg.type === "agent.activity_graph.unsubscribe.response" &&
+        msg.payload.requestId === resolved
+          ? msg.payload
+          : null,
+    });
+  }
+
+  onActivityGraphChanged(handler: (payload: ActivityGraphChangedMessage["payload"]) => void) {
+    return this.on("agent.activity_graph.changed", (message) => handler(message.payload));
+  }
+
+  onActivityGraphStatus(handler: (payload: ActivityGraphStatusMessage["payload"]) => void) {
+    return this.on("agent.activity_graph.status", (message) => handler(message.payload));
+  }
+
   subscribeForumStream(handler: (topic: StoredForumTopic) => void): () => void {
     return this.on("forum.stream", (message) => handler(message.payload.topic));
   }
@@ -10036,6 +10468,8 @@ export class DaemonClient {
             [CLIENT_CAPS.projectedSubagentTimeline]: true,
             [CLIENT_CAPS.projectUpdates]: true,
             [CLIENT_CAPS.archifyDiagrams]: true,
+            [CLIENT_CAPS.activityGraph]: true,
+            [CLIENT_CAPS.binaryScreenFrames]: true,
             ...this.config.capabilities,
           },
           ...(this.config.appVersion ? { appVersion: this.config.appVersion } : {}),
@@ -10393,6 +10827,14 @@ export class DaemonClient {
   }
 
   private tryHandleBinaryFrame(rawBytes: Uint8Array): boolean {
+    if (rawBytes[0] === ScreenFrameOpcode) {
+      const screenFrame = decodeScreenFrame(rawBytes);
+      if (!screenFrame) return false;
+      this.consecutiveLivenessFailures = 0;
+      this.screenFrameHandlers.get(screenFrame.subscriptionId)?.(screenFrame);
+      this.runtimeMetrics?.recordBinaryFrame("other", rawBytes.byteLength, 0);
+      return true;
+    }
     const fileFrame = decodeFileTransferFrame(rawBytes);
     if (fileFrame) {
       this.consecutiveLivenessFailures = 0;

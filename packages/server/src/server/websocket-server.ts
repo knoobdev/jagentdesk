@@ -17,16 +17,24 @@ import type { NativeSkillsService } from "./skills-native/index.js";
 import type { Skill } from "@jagentdesk/protocol/skills";
 import type { UsageHistoryStorage } from "./usage/usage-history-storage.js";
 import type { HostCapabilityService } from "./host-capabilities/service.js";
+import type { PhysicalDeviceHub } from "./devices/hub.js";
 import type { HostToolInstaller } from "./host-tools/installer.js";
 import type { HostCapabilities } from "@jagentdesk/protocol/host-capabilities";
 import type { LifetimeUsage, UsageDayRollup } from "@jagentdesk/protocol/usage-history";
 import type { ClusterRegistry } from "./cluster/cluster-registry.js";
+import type { ArgoCdService } from "./argocd/service.js";
 import type { DatabaseRegistry } from "./database/database-registry.js";
 import { SshService } from "./ssh/ssh-service.js";
+import type { SideloadService } from "./sideload/sideload-service.js";
+import type { JiraService } from "./jira/service.js";
 import type { ScheduleService } from "./schedule/service.js";
 import type { AutorunService } from "./autorun/service.js";
+import type { SpecModeService } from "./spec-mode/service.js";
+import { SpecModePlanSource } from "./spec-mode/plan-source.js";
+import type { SpecModeState } from "@jagentdesk/protocol/spec-mode";
 import type { SessionShareService } from "./session-share/service.js";
 import type { AgentForumService } from "./agent-forum/service.js";
+import { ActivityGraphService } from "./agent/activity-graph/service.js";
 import type { AutorunState } from "@jagentdesk/protocol/messages";
 import type { CheckoutDiffManager, CheckoutDiffMetrics } from "./checkout-diff-manager.js";
 import type { DaemonConfigStore, MutableDaemonConfig } from "./daemon-config-store.js";
@@ -610,6 +618,10 @@ function requireWebSocketServices(params: {
  * WebSocket server that only accepts sockets + parses/forwards messages to the session layer.
  */
 // Tests construct the server without a daemon SSH service: fall back to an in-memory one.
+function argocdServiceOrNull(service: ArgoCdService | null | undefined): ArgoCdService | null {
+  return service ?? null;
+}
+
 function sshServiceOrInMemory(service: SshService | null | undefined): SshService {
   return service ?? new SshService();
 }
@@ -633,17 +645,26 @@ export class VoiceAssistantWebSocketServer {
   private skillsStorage: NativeSkillsService | null = null;
   private usageHistory: UsageHistoryStorage | null = null;
   private hostCapabilities: HostCapabilityService | null = null;
+  private physicalDevices: PhysicalDeviceHub | null = null;
   private hostToolInstaller: HostToolInstaller | null = null;
   private unsubscribeHostCapabilities: (() => void) | null = null;
   private readonly clusterRegistry: ClusterRegistry;
   private readonly databaseRegistry: DatabaseRegistry;
   private readonly sshService: SshService;
+  private readonly argocdService: ArgoCdService | null;
+  private readonly sideloadService: SideloadService | null;
   private readonly scheduleService: ScheduleService;
   private autorunService!: AutorunService | null;
   private sessionShareService!: SessionShareService | null;
   // Agent Forum / Team mode (docs/plans/active/agent-forum.md). Injected post-construction via
   // setAgentForum() so the giant positional constructor need not grow.
   private agentForumService: AgentForumService | null = null;
+  private specModeService: SpecModeService | null = null;
+  // Agent activity graph (spec 31, ADR-0031): one daemon-wide service shared by every session.
+  private readonly activityGraphService: ActivityGraphService;
+  private readonly specPlanSource: SpecModePlanSource;
+  // Jira (spec 29), injected post-construction like the Agent Forum.
+  private jiraService: JiraService | null = null;
   private agentForumBootstrap:
     | ((input: { topicId: string; prompt: string; originAgentId?: string }) => void | Promise<void>)
     | null = null;
@@ -729,6 +750,7 @@ export class VoiceAssistantWebSocketServer {
   private acceptingConnections = true;
   private readonly advertiseDaemonStatusRpc: boolean;
 
+  // oxlint-disable-next-line complexity
   constructor(
     server: HTTPServer,
     logger: pino.Logger,
@@ -782,8 +804,11 @@ export class VoiceAssistantWebSocketServer {
     autorunService?: AutorunService | null,
     sessionShareService?: SessionShareService | null,
     sshService?: SshService | null,
+    argocdService?: ArgoCdService | null,
+    sideloadService?: SideloadService | null,
   ) {
     this.logger = logger.child({ module: "websocket-server" });
+    this.argocdService = argocdServiceOrNull(argocdService);
     this.advertiseDaemonStatusRpc = wsConfig.daemonStatusRpc !== false;
     this.serverId = serverId;
     if (typeof daemonVersion !== "string" || daemonVersion.trim().length === 0) {
@@ -796,6 +821,19 @@ export class VoiceAssistantWebSocketServer {
     this.pairing = pairing ?? null;
     this.pluginRuntime = pluginRuntime ?? null;
     this.agentManager = agentManager;
+    // Plan view with Spec mode on (spec 31.1): phases/tasks from the agent's tasks.md. The Spec
+    // mode service is injected later (setSpecModeService), so the source looks it up per call.
+    this.specPlanSource = new SpecModePlanSource({
+      getState: async (agentId) =>
+        this.specModeService ? this.specModeService.get(agentId) : null,
+      agentCwd: (agentId) => agentManager.getAgent(agentId)?.cwd ?? null,
+      logger: this.logger,
+    });
+    this.activityGraphService = new ActivityGraphService({
+      agents: agentManager,
+      logger: this.logger,
+      specPlanSource: this.specPlanSource,
+    });
     this.agentStorage = agentStorage;
     this.projectRegistry = projectRegistry ?? createNoopProjectRegistry();
     this.workspaceRegistry = workspaceRegistry ?? createNoopWorkspaceRegistry();
@@ -812,6 +850,7 @@ export class VoiceAssistantWebSocketServer {
     this.databaseRegistry =
       databaseRegistry ?? new (require("./database/database-registry.js").DatabaseRegistry)();
     this.sshService = sshServiceOrInMemory(sshService);
+    this.sideloadService = sideloadService ?? null;
     this.scheduleService = requiredServices.scheduleService;
     this.checkoutDiffManager = requiredServices.checkoutDiffManager;
     this.github = github ?? createGitHubService();
@@ -1275,6 +1314,11 @@ export class VoiceAssistantWebSocketServer {
   }
 
   /** Spec 24.2: report what this host can run; re-broadcast server_info when it changes. */
+  // Spec 27: the daemon-wide physical device hub sessions route android:serial:*/ios:* udids to.
+  public setPhysicalDevices(hub: PhysicalDeviceHub | null): void {
+    this.physicalDevices = hub;
+  }
+
   public setHostCapabilities(
     service: HostCapabilityService | null,
     installer: HostToolInstaller | null = null,
@@ -1389,6 +1433,8 @@ export class VoiceAssistantWebSocketServer {
 
   public async close(): Promise<void> {
     this.prepareForShutdown();
+    this.activityGraphService.dispose();
+    this.specPlanSource.dispose();
     this.unsubscribeSpeechReadiness?.();
     this.unsubscribeSpeechReadiness = null;
     this.unsubscribeDaemonConfigChange?.();
@@ -1858,6 +1904,10 @@ export class VoiceAssistantWebSocketServer {
     return updated;
   }
 
+  public setJiraService(service: JiraService | null): void {
+    this.jiraService = service;
+  }
+
   // Inject the Agent Forum service + its orchestration-bootstrap hook after construction (Team mode).
   public setAgentForum(
     service: AgentForumService | null,
@@ -1882,6 +1932,15 @@ export class VoiceAssistantWebSocketServer {
     this.agentForumService = service;
     this.agentForumBootstrap = bootstrap;
     this.agentForumNotify = notify;
+  }
+
+  setSpecModeService(service: SpecModeService): void {
+    this.specModeService = service;
+  }
+
+  /** Spec mode state changed for an agent: refresh its Plan view (spec 31.1). */
+  notifySpecModeState(state: SpecModeState): void {
+    this.specPlanSource.notifyState(state);
   }
 
   private createSocketSession(options: SocketSessionOptions): Session {
@@ -1921,13 +1980,19 @@ export class VoiceAssistantWebSocketServer {
       usageHistory: this.usageHistory,
       hostCapabilities: this.hostCapabilities,
       hostToolInstaller: this.hostToolInstaller,
+      physicalDevices: this.physicalDevices,
       clusterRegistry: this.clusterRegistry,
       databaseRegistry: this.databaseRegistry,
       sshService: this.sshService,
+      argocdService: this.argocdService,
+      sideloadService: this.sideloadService,
+      jiraService: this.jiraService,
       scheduleService: this.scheduleService,
       autorunService: this.autorunService,
+      specModeService: this.specModeService,
       sessionShareService: this.sessionShareService,
       agentForumService: this.agentForumService,
+      activityGraphService: this.activityGraphService,
       agentForumBootstrap: this.agentForumBootstrap,
       agentForumNotify: this.agentForumNotify,
       checkoutDiffManager: this.checkoutDiffManager,
@@ -2381,6 +2446,8 @@ export class VoiceAssistantWebSocketServer {
         // connect engine, and SSH terminal sessions.
         // COMPAT(sshServers): added after v0.8.0, remove gate after 2027-03-01; retain advertisement.
         sshServers: true,
+        sideload: this.sideloadService !== null,
+        sideloadHostBrowse: this.sideloadService !== null,
         // Autonomous run (spec §20 / ADR-0017). Default OFF: advertised only when the
         // daemon opted in (autorunService wired). Gates the whole autorun.* surface;
         // autorunApproval gates the per-action-approval mode toggle (§20.7.3).
@@ -2388,6 +2455,14 @@ export class VoiceAssistantWebSocketServer {
         // Session sharing (spec §21 / ADR-0018); advertised only when the daemon opted in.
         ...(this.sessionShareService ? { sessionSharing: true } : {}),
         ...(this.agentForumService ? { agentForum: true } : {}),
+        // Spec mode (spec 28 / ADR-0030): agent.spec_mode.* surface.
+        ...(this.specModeService ? { specMode: true } : {}),
+        // Agent activity graph (spec 31 / ADR-0031). COMPAT(activityGraph): added after v0.9.47.
+        activityGraph: true,
+        // Argo CD (spec 30 / ADR-0034): advertised only when the daemon runs the service.
+        ...(this.argocdService ? { argocd: true } : {}),
+        // Jira (spec 29 / ADR-0034): capability `jira`, advertised when the service is wired.
+        ...(this.jiraService ? { jira: true } : {}),
         // Advertise the plugin management surface only when a PluginService is
         // wired; without it the plugin.* RPCs return empty/disabled results.
         ...(this.pluginRuntime
@@ -2428,6 +2503,15 @@ export class VoiceAssistantWebSocketServer {
   // Push notification when an autonomous run reaches a terminal state (spec §14). The
   // live `autorun.stream` already updates open clients; this reaches a phone that isn't
   // watching. Wired from AutorunService.onStopped in bootstrap.
+  /** Sideload notices (26.6) reach a phone that is not connected. */
+  public sendSideloadPush(notice: { title: string; body: string }): void {
+    void this.pushNotificationSender
+      .send({ title: notice.title, body: notice.body, data: { serverId: this.serverId } })
+      .catch((err) => {
+        this.logger.warn({ err }, "Failed to send sideload push notification");
+      });
+  }
+
   public notifyAutorunStopped(state: AutorunState): void {
     const reason = state.stopReason ?? "stopped";
     void this.pushNotificationSender

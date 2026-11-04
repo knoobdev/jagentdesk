@@ -8,6 +8,9 @@ import { z } from "zod";
 export const HOST_CAPABILITY_IDS = [
   "iosSimulators",
   "androidDevices",
+  // Spec 27.2: physical devices, split from the emulator/simulator capabilities.
+  "androidPhysical",
+  "iosPhysical",
   "docker",
   "helm",
   "proxySystemCapture",
@@ -18,6 +21,10 @@ export const HOST_CAPABILITY_IDS = [
   "forgeGh",
   "forgeGlab",
   "forgeTea",
+  // Spec mode helper scripts (spec 28.3 step 1): bash + (jq | python3), or PowerShell 5.1+.
+  "specKit",
+  // Sideload (spec 26): go-ios to reach iPhones/iPads plus a signer (zsign, or codesign on macOS).
+  "iosSideload",
 ] as const;
 export type HostCapabilityId = (typeof HOST_CAPABILITY_IDS)[number];
 

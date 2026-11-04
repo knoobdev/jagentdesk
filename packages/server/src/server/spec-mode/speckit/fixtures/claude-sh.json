@@ -1,0 +1,122 @@
+{
+  "specify": "specify init --here --force --ignore-agent-tools --integration claude --script sh --integration-options=--no-model-invocation",
+  "specifyVersion": "1.3.0",
+  "files": {
+    ".claude/skills/speckit-analyze/SKILL.md": {
+      "sha256": "b504aae5effc0154c904752e02fe397e7fd19d06dc9c62b93391fa60a4b506ee",
+      "mode": "644"
+    },
+    ".claude/skills/speckit-checklist/SKILL.md": {
+      "sha256": "9af8c06a6b24e545e1cbb94c7cccbc49e58871cdea758ba200226e769c313423",
+      "mode": "644"
+    },
+    ".claude/skills/speckit-clarify/SKILL.md": {
+      "sha256": "5394c7e52f448105e3284e089a2f589c182b4a61aedbed47b101363826a4e4d5",
+      "mode": "644"
+    },
+    ".claude/skills/speckit-constitution/SKILL.md": {
+      "sha256": "d6132cee98e20f3dd7f71c48822896151a8043be6dd8a8a69135b96e65098142",
+      "mode": "644"
+    },
+    ".claude/skills/speckit-converge/SKILL.md": {
+      "sha256": "e49dc670485e5b8dba1d90112961e6aaad87751b19220d73f7c7fa38f9862df6",
+      "mode": "644"
+    },
+    ".claude/skills/speckit-implement/SKILL.md": {
+      "sha256": "035dab1d3c9035f4c7f9fcf7d2b38c1d3eb5a2b26378fe5928de85d6d880dd20",
+      "mode": "644"
+    },
+    ".claude/skills/speckit-plan/SKILL.md": {
+      "sha256": "daf45b7455fcbe132df6a60ce25d7555d3964ff3b343cbf20b504a1ea875087e",
+      "mode": "644"
+    },
+    ".claude/skills/speckit-specify/SKILL.md": {
+      "sha256": "9ffd6c590e2627414dd1fcd7fd9339ede8914d27b6bd0569f6dcdb6779468276",
+      "mode": "644"
+    },
+    ".claude/skills/speckit-tasks/SKILL.md": {
+      "sha256": "d5f59b5c3de66deb1396784a114e260b674dcf5ab3e4dff02bf22e68ffd99cc7",
+      "mode": "644"
+    },
+    ".specify/.gitignore": {
+      "sha256": "0a61c5378b0bb2e0f85babff99c8b166f2170a2c12378cd17d929aa19296ec88",
+      "mode": "644"
+    },
+    ".specify/init-options.json": {
+      "sha256": "73a17404326c1465fdc5b548f5cb4e2c0a88ea641e3fe5b886fd4d359aca68d0",
+      "mode": "644"
+    },
+    ".specify/integration.json": {
+      "sha256": "58077556a2b9f218312843543a81bc88fd70771456aff79527db4e4ad7f1a3b1",
+      "mode": "644"
+    },
+    ".specify/integrations/claude.manifest.json": {
+      "sha256": "c65bd413969605c0872bef8489b33a009722f211a1d3010cb2b08eb22882a0f1",
+      "mode": "644"
+    },
+    ".specify/integrations/speckit.manifest.json": {
+      "sha256": "5fb58e6c5a8c42a8bdca677bb9f4169b659f932be56df33e88d271fcac9fff68",
+      "mode": "644"
+    },
+    ".specify/memory/.constitution-template.json": {
+      "sha256": "8fc4b39294bae0c10d59547ad7d415b6f0e890d656cbf7171dd567f4e9054711",
+      "mode": "644"
+    },
+    ".specify/memory/constitution.md": {
+      "sha256": "ce7549540fa45543cca797a150201d868e64495fdff39dc38246fb17bd4024b3",
+      "mode": "644"
+    },
+    ".specify/scripts/bash/check-prerequisites.sh": {
+      "sha256": "e127735bbc5ac42181e2a3c773a2d639979f865f18e74a1a977cdf53392a0a7d",
+      "mode": "755"
+    },
+    ".specify/scripts/bash/common.sh": {
+      "sha256": "53cb1c23e349db4586c272436ce35c6e2f36a9c0b5351a85e0b216d9887a26b7",
+      "mode": "755"
+    },
+    ".specify/scripts/bash/create-new-feature.sh": {
+      "sha256": "972f03ed8ca5ee17b7baad6d56d821d46269d77abc337496beafb0fe85a725f2",
+      "mode": "755"
+    },
+    ".specify/scripts/bash/resolve-template.sh": {
+      "sha256": "829e227096abc8bf0889889ec9f792f503ca5d395b7836a8a7eb739ee75214e7",
+      "mode": "755"
+    },
+    ".specify/scripts/bash/setup-plan.sh": {
+      "sha256": "d378ec66ba20d2da01c71dad8935062c1c27f0bba890be9a6d3dda52ea056a4e",
+      "mode": "755"
+    },
+    ".specify/scripts/bash/setup-tasks.sh": {
+      "sha256": "4a33dd1e6c32ddc7d570f4b538572c54069192573eed0ec654d9fb826e31a4fe",
+      "mode": "755"
+    },
+    ".specify/templates/checklist-template.md": {
+      "sha256": "856532b3cb66171c662cc16f16b31a5856e4655a8666aad1e545bbfc7f603ca1",
+      "mode": "644"
+    },
+    ".specify/templates/constitution-template.md": {
+      "sha256": "ce7549540fa45543cca797a150201d868e64495fdff39dc38246fb17bd4024b3",
+      "mode": "644"
+    },
+    ".specify/templates/plan-template.md": {
+      "sha256": "7e637502d41eccf0ca672496636365691fdca62ef37b27ec07fcb412dbfa90d4",
+      "mode": "644"
+    },
+    ".specify/templates/spec-template.md": {
+      "sha256": "3945437fc35cd30a5b2bf7beea680337c3516826d3efa5a6b92c4a7eca1ba28e",
+      "mode": "644"
+    },
+    ".specify/templates/tasks-template.md": {
+      "sha256": "fc29a233f6f5a27ca31f1aa46b596af6500c627441c6e62b2bc4a1d721525842",
+      "mode": "644"
+    },
+    ".specify/workflows/speckit/workflow.yml": {
+      "sha256": "177761c5e7df28126beea043b5cb45aeaf7958090c022dc11ac71399422fcfbc",
+      "mode": "644"
+    },
+    ".specify/workflows/workflow-registry.json": {
+      "sha256": "e318477b99a7062442979f23de380b3a4d25fb28b1badb50bcceed91effc8e21",
+      "mode": "600"
+    }
+  }
+}

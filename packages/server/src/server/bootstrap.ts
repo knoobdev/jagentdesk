@@ -1,3 +1,5 @@
+import { PhysicalDeviceHub } from "./devices/hub.js";
+import { clearGrantsWhenSessionsEnd } from "./devices/agent-grants.js";
 import { HostCapabilityService } from "./host-capabilities/service.js";
 import { ensureToolDirsOnPath, HostToolInstaller } from "./host-tools/installer.js";
 import type { HttpFetch } from "./host-tools/release.js";
@@ -158,6 +160,9 @@ import { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { DatabaseRegistry } from "./database/database-registry.js";
 import { ScheduleService } from "./schedule/service.js";
 import { AutorunService } from "./autorun/service.js";
+import { SpecModeService } from "./spec-mode/service.js";
+import type { SpecModeState } from "@jagentdesk/protocol/spec-mode";
+import { sendPromptToAgent } from "./agent/agent-prompt.js";
 import { SessionShareService } from "./session-share/service.js";
 import { AgentForumService } from "./agent-forum/service.js";
 import { createForumBootstrap, createForumNotify } from "./agent-forum/bootstrap.js";
@@ -171,6 +176,10 @@ import { WorkspaceGitServiceImpl } from "./workspace-git-service.js";
 import { resolveWorkspaceIdForPath } from "./resolve-workspace-id-for-path.js";
 import { ForgeHubService } from "./session/forge/forge-hub-session.js";
 import { FileSecretStore } from "./database/secret-store.js";
+import { ArgoCdService } from "./argocd/service.js";
+import { createArgoCdClusterAccess } from "./argocd/cluster-access.js";
+import { createArgoCdAgentTools } from "./argocd/agent-tools.js";
+import { ARGOCD_INSTANCE_AGENT_LABEL } from "@jagentdesk/protocol/argocd/chat-prompt";
 import {
   archiveByScope,
   archivePersistedWorkspaceRecord,
@@ -183,6 +192,12 @@ import type { TerminalManager } from "../terminal/terminal-manager.js";
 import { createConfiguredTerminalManager } from "../terminal/terminal-manager-factory.js";
 import { createSshTerminalManager } from "../terminal/ssh-terminal-manager.js";
 import { SshService } from "./ssh/ssh-service.js";
+import { SideloadService, type SideloadSigner } from "./sideload/sideload-service.js";
+import { createSideloadAgentTools } from "./sideload/agent-tools.js";
+import { createSideloadDeviceSigner } from "./devices/sideload-signer.js";
+import { JiraService } from "./jira/service.js";
+import { atlassianEndpointsFromEnv } from "./jira/credentials.js";
+import { createJiraAgentTools } from "./jira/agent-tools.js";
 import { SshModules } from "./ssh/ssh-modules.js";
 import { SshModules as SshServerModules } from "./ssh/modules.js";
 import { applyTerminalAgentHookSetting } from "../terminal/agent-hooks/terminal-agent-hook-setting.js";
@@ -496,6 +511,8 @@ export interface JAgentDeskDaemon {
   serviceProxy: ServiceProxySubsystem;
   scriptRuntimeStore: WorkspaceScriptRuntimeStore;
   browserToolsBroker: BrowserToolsBroker;
+  /** Sideload accounts other features sign with (spec 27 signs WebDriverAgent). */
+  sideload: SideloadSigner;
   start(): Promise<void>;
   stop(): Promise<void>;
   getListenTarget(): ListenTarget | null;
@@ -1317,6 +1334,19 @@ export async function createJAgentDeskDaemon(
   });
   await clusterRegistry.initialize();
   logger.info("Cluster registry created");
+  // Spec 27 / ADR-0033: one owner for physical phones and tablets, shared by every client
+  // session and every agent's sim_* tools. Prepare device signs WebDriverAgent with a Sideload
+  // Apple account (spec 26); sideloadService is created further down, hence the late lookup.
+  let deviceSignerSource: SideloadService | null = null;
+  const physicalDevices = new PhysicalDeviceHub({
+    jagentdeskHome: config.jagentdeskHome,
+    logger,
+    signer: createSideloadDeviceSigner(() => deviceSignerSource),
+  });
+  const stopDeviceGrantWatch = clearGrantsWhenSessionsEnd(
+    (callback) => agentManager.subscribe(callback, { replayState: false }),
+    physicalDevices,
+  );
   const databaseRegistry = new DatabaseRegistry({
     jagentdeskHome: config.jagentdeskHome,
     logger,
@@ -1347,12 +1377,45 @@ export async function createJAgentDeskDaemon(
   await sshModules.initialize();
   sshService.registerModuleHandlers(sshModules.handlers());
   logger.info("SSH service initialized");
+  // Sideload (spec 26 / ADR-0032): accounts, signing, installs and the hourly refresh job.
+  // Secrets stay in <home>/sideload's own secret store; prompts, progress and notices fan out
+  // to every client (wsServer is late-bound). The two env knobs shorten the refresh cycle for
+  // the 26.12.4 acceptance run; they are not user settings.
+  const sideloadService = new SideloadService({
+    jagentdeskHome: config.jagentdeskHome,
+    logger,
+    broadcast: (message) => wsServer?.broadcast(wrapSessionMessage(message)),
+    pushNotification: (notice) => wsServer?.sendSideloadPush(notice),
+    refreshIntervalMs: positiveEnvNumber("JAGENTDESK_SIDELOAD_REFRESH_INTERVAL_MS"),
+    clockOffsetMs: envNumber("JAGENTDESK_SIDELOAD_CLOCK_OFFSET_MS"),
+  });
+  sideloadService.initialize();
+  logger.info("Sideload service initialized");
+  deviceSignerSource = sideloadService;
   // Daemon-wide Forge Hub service (spec 19 / ADR-0015). One instance shared across
   // all agents' tool catalogs, mirroring how session.ts builds it per-session. Token
   // secrets + the connection index live under <home>/forge.
   const forgeSecretDir = path.resolve(config.jagentdeskHome, "forge");
   const forgeHubService = new ForgeHubService(new FileSecretStore(forgeSecretDir), forgeSecretDir);
   logger.info("Forge Hub service created");
+  // Argo CD (spec 30 / ADR-0034): registry + secrets under <home>/argocd, one SSE stream per
+  // instance while viewed, and the argocd_* agent tools.
+  const argocdService = new ArgoCdService({
+    jagentdeskHome: config.jagentdeskHome,
+    logger: logger.child({ module: "argocd" }),
+    clusters: createArgoCdClusterAccess(clusterRegistry),
+  });
+  await argocdService.initialize();
+  logger.info("Argo CD service initialized");
+  // Daemon-wide Jira service (spec 29 / ADR-0034 §4): the one credential manager for every
+  // session, view watch and agent tool. Secrets live under <home>/jira.
+  const jiraService = new JiraService({
+    jagentdeskHome: config.jagentdeskHome,
+    endpoints: atlassianEndpointsFromEnv(process.env),
+    logger,
+  });
+  await jiraService.initialize();
+  logger.info("Jira service initialized");
   const createScheduleLocalWorkspaceExternal = async (input: {
     cwd: string;
     firstAgentContext: FirstAgentContext;
@@ -1445,6 +1508,9 @@ export async function createJAgentDeskDaemon(
       })
     : null;
   await autorunService?.initialize();
+  // Spec mode (spec 28 / ADR-0030) needs the host capability probe, created with the WebSocket
+  // server below; it is assigned there.
+  let specModeService: SpecModeService | null = null;
   logger.info(
     { elapsed: elapsed(), enabled: config.autorunEnabled === true },
     "Autorun service initialized",
@@ -1559,6 +1625,30 @@ export async function createJAgentDeskDaemon(
     clusterRegistry,
     databaseRegistry,
     sshAgentTools: (callerAgentId) => sshServerModules.createAgentTools(callerAgentId),
+    argocdAgentTools: (callerAgentId) =>
+      createArgoCdAgentTools({
+        service: argocdService,
+        callerAgentId,
+        defaultInstanceId: callerAgentId
+          ? (agentManager.getAgent(callerAgentId)?.labels?.[ARGOCD_INSTANCE_AGENT_LABEL] ?? null)
+          : null,
+        requestPermission: (agentId, request) =>
+          agentManager.requestHostToolPermission(agentId, request),
+      }),
+    sideloadAgentTools: (callerAgentId) =>
+      createSideloadAgentTools({
+        service: sideloadService,
+        callerAgentId,
+        requestPermission: (agentId, request) =>
+          agentManager.requestHostToolPermission(agentId, request),
+      }),
+    jiraAgentTools: (callerAgentId) =>
+      createJiraAgentTools({
+        service: jiraService,
+        callerAgentId,
+        requestPermission: (agentId, request) =>
+          agentManager.requestHostToolPermission(agentId, request),
+      }),
     skillsStorage,
     forgeHub: forgeHubService,
     browserFingerprintProfiles: {
@@ -1585,6 +1675,7 @@ export async function createJAgentDeskDaemon(
     },
     requestHostToolPermission: (agentId, req) =>
       agentManager.requestHostToolPermission(agentId, req),
+    physicalDevices,
     logger,
   });
   const createAgentToolCatalog = (runtime: JAgentDeskToolRuntimeContext) =>
@@ -1749,6 +1840,49 @@ export async function createJAgentDeskDaemon(
         const onListening = () => {
           httpServer.off("error", onError);
           mainStarted = true;
+          // Host capabilities, physical devices, Spec mode, Jira and Team mode attach to the
+          // WebSocket server right after it exists (kept out of logAndResolve for its size).
+          const attachHostServices = async (server: VoiceAssistantWebSocketServer) => {
+            // Agent Forum / Team mode: expose the service to sessions + the bootstrap hook that turns
+            // the origin chat agent into the topic's lead (it then spawns/delegates peers).
+            // Spec 24.2: what this host can run, probed in the background after start.
+            // Tools the platform-aware installer added live in $JAGENTDESK_HOME/tools/bin.
+            ensureToolDirsOnPath(config.jagentdeskHome);
+            const hostCapabilities = new HostCapabilityService({
+              jagentdeskHome: config.jagentdeskHome,
+              logger,
+            });
+            const hostToolInstaller = new HostToolInstaller({
+              jagentdeskHome: config.jagentdeskHome,
+              logger,
+              capabilities: hostCapabilities,
+              fetch: globalThis.fetch as unknown as HttpFetch,
+              githubToken: process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? null,
+            });
+            setForgeToolInstaller(hostToolInstaller);
+            server.setHostCapabilities(hostCapabilities, hostToolInstaller);
+            server.setPhysicalDevices(physicalDevices);
+            void hostCapabilities.refresh().catch((error: unknown) => {
+              logger.warn({ err: error }, "Host capability probe failed");
+            });
+            specModeService = await startSpecModeService({
+              jagentdeskHome: config.jagentdeskHome,
+              logger,
+              agentManager,
+              agentStorage,
+              hostCapabilities,
+              autorunService,
+              emit: emitExternalSessionMessage,
+              onState: (state) => server.notifySpecModeState(state),
+            });
+            server.setSpecModeService(specModeService);
+            server.setJiraService(jiraService);
+            server.setAgentForum(
+              agentForumService,
+              createForumBootstrap({ agentManager, agentStorage, logger }),
+              createForumNotify({ agentManager, agentStorage, logger }),
+            );
+          };
           const logAndResolve = async () => {
             boundListenTarget = resolveBoundListenTarget(listenTarget, httpServer);
             const mcpBaseUrl = mcpEnabled ? createAgentMcpBaseUrl(boundListenTarget) : null;
@@ -1860,6 +1994,8 @@ export async function createJAgentDeskDaemon(
               autorunService,
               sessionShareService,
               sshService,
+              argocdService,
+              sideloadService,
             );
             // Session-share guests (ADR-0019): let the scoped ShareServer /ws hand validated guest
             // sockets to the daemon as agent-confined real sessions.
@@ -1870,32 +2006,7 @@ export async function createJAgentDeskDaemon(
             sessionShareService?.setGuestScopeUpdater((agentId, scopes) =>
               wsServer?.updateGuestScopesForAgent(agentId, scopes),
             );
-            // Agent Forum / Team mode: expose the service to sessions + the bootstrap hook that turns
-            // the origin chat agent into the topic's lead (it then spawns/delegates peers).
-            // Spec 24.2: what this host can run, probed in the background after start.
-            // Tools the platform-aware installer added live in $JAGENTDESK_HOME/tools/bin.
-            ensureToolDirsOnPath(config.jagentdeskHome);
-            const hostCapabilities = new HostCapabilityService({
-              jagentdeskHome: config.jagentdeskHome,
-              logger,
-            });
-            const hostToolInstaller = new HostToolInstaller({
-              jagentdeskHome: config.jagentdeskHome,
-              logger,
-              capabilities: hostCapabilities,
-              fetch: globalThis.fetch as unknown as HttpFetch,
-              githubToken: process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? null,
-            });
-            setForgeToolInstaller(hostToolInstaller);
-            wsServer?.setHostCapabilities(hostCapabilities, hostToolInstaller);
-            void hostCapabilities.refresh().catch((error: unknown) => {
-              logger.warn({ err: error }, "Host capability probe failed");
-            });
-            wsServer?.setAgentForum(
-              agentForumService,
-              createForumBootstrap({ agentManager, agentStorage, logger }),
-              createForumNotify({ agentManager, agentStorage, logger }),
-            );
+            await attachHostServices(wsServer);
             // Bind the plugin session host and start configured plugins before any
             // external ingress attaches, mirroring upstream's pre-accept ordering.
             pluginRuntime.bindJAgentDeskSessionHost(wsServer);
@@ -1966,12 +2077,18 @@ export async function createJAgentDeskDaemon(
     await agentStorage.flush().catch(() => undefined);
     await providerSnapshotManager.shutdown();
     terminalManager.killAll();
+    stopDeviceGrantWatch();
+    physicalDevices.dispose();
     await sshModules.dispose().catch(() => undefined);
     await sshServerModules.dispose().catch(() => undefined);
     sshService.dispose();
+    argocdService.dispose();
+    sideloadService.dispose();
+    jiraService.dispose();
     speechService.stop();
     await scheduleService.stop().catch(() => undefined);
     await autorunService?.stop().catch(() => undefined);
+    specModeService?.stop();
     await sessionShareService?.stop().catch(() => undefined);
     await tsnetListener?.stop().catch(() => undefined);
     if (wsServer) {
@@ -2003,10 +2120,23 @@ export async function createJAgentDeskDaemon(
     serviceProxy,
     scriptRuntimeStore,
     browserToolsBroker,
+    sideload: sideloadService,
     start,
     stop,
     getListenTarget: () => boundListenTarget,
   };
+}
+
+function envNumber(name: string): number | undefined {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === "") return undefined;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : undefined;
+}
+
+function positiveEnvNumber(name: string): number | undefined {
+  const value = envNumber(name);
+  return value !== undefined && value > 0 ? value : undefined;
 }
 
 // The app web build bundled next to the server dist (dist/server/share-app-dist), copied there by
@@ -2038,4 +2168,43 @@ async function closeAllAgents(logger: Logger, agentManager: AgentManager): Promi
       }
     }),
   );
+}
+
+/**
+ * Spec mode (spec 28 / ADR-0030): phase commands sent on Approve/Revise go through the same
+ * send path as a user's message; per-agent spec-kit env reaches provider launches; Spec mode
+ * and autonomous mode refuse to start while the other is on.
+ */
+async function startSpecModeService(params: {
+  jagentdeskHome: string;
+  logger: Logger;
+  agentManager: AgentManager;
+  agentStorage: AgentStorage;
+  hostCapabilities: HostCapabilityService;
+  autorunService: AutorunService | null;
+  emit: (message: SessionOutboundMessage) => void;
+  onState?: (state: SpecModeState) => void;
+}): Promise<SpecModeService> {
+  const { agentManager, agentStorage, autorunService, logger } = params;
+  const service = new SpecModeService({
+    jagentdeskHome: params.jagentdeskHome,
+    logger,
+    agentManager,
+    hostCapabilities: params.hostCapabilities,
+    isAutorunActive: async (agentId) =>
+      autorunService !== null && (await autorunService.get(agentId))?.status === "running",
+    sendPrompt: async (agentId, text) => {
+      await sendPromptToAgent({ agentManager, agentStorage, agentId, prompt: text, logger });
+    },
+    onState: (state) => {
+      params.emit({ type: "agent.spec_mode.state", payload: { agentId: state.agentId, state } });
+      params.onState?.(state);
+    },
+  });
+  await service.initialize();
+  agentManager.setLaunchEnvProvider((agentId) => service.launchEnv(agentId));
+  autorunService?.setStartGuard(async (agentId) =>
+    (await service.isEnabled(agentId)) ? "Turn off Spec mode to use autonomous mode" : null,
+  );
+  return service;
 }

@@ -8,6 +8,7 @@ import {
   ForgeSearchItemSchema,
   GitHubSearchItemSchema,
   UploadedFileAttachmentSchema,
+  JiraIssueAttachmentSchema,
 } from "@jagentdesk/protocol/messages";
 
 export const DRAFT_STORE_VERSION = 5;
@@ -93,6 +94,9 @@ export function isUserComposerAttachment(value: unknown): value is UserComposerA
   }
   if (record.kind === "file") {
     return UploadedFileAttachmentSchema.safeParse(record.attachment).success;
+  }
+  if (record.kind === "jira_issue") {
+    return JiraIssueAttachmentSchema.safeParse(record.attachment).success;
   }
   if (
     record.kind !== "forge_issue" &&

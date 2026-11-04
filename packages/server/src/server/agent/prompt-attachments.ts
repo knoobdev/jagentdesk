@@ -74,6 +74,14 @@ export function renderPromptAttachmentAsText(attachment: AgentAttachment): strin
         projectPath: attachment.projectPath,
       });
     }
+    case "jira_issue": {
+      return [
+        `Jira issue ${attachment.key}: ${attachment.summary}`,
+        `URL: ${attachment.url}`,
+        `Jira connection: ${attachment.connectionId} (use the jira_* tools with this connectionId)`,
+        ...(attachment.body ? ["", attachment.body] : []),
+      ].join("\n");
+    }
     // COMPAT(githubAttachmentKinds): render legacy wire attachments until
     // 2027-01-17, when supported client and daemon floors are >= v0.2.0.
     case "github_issue": {

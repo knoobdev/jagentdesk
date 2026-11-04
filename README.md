@@ -56,6 +56,22 @@ with a few deliberate boundaries:
   terminals that survive closing the app, SFTP, port forwarding, jump hosts and proxies, snippets on
   many servers, session logs and import — plus a chat agent per server that works with its Docker,
   databases and Kubernetes. Secrets never leave the daemon.
+- **Jira** _(new)_ — sign in inside the app (API token, your own OAuth app, or a Data Center PAT),
+  Kanban and Scrum boards with drag-to-transition, backlog and sprints, full issue detail, and a chat
+  agent that reads an issue, does the work and comments back — tokens never leave the daemon.
+- **Argo CD** _(new)_ — instances (password, token or SSO), applications with the resource graph,
+  diff, events, logs, sync, rollback and resource actions, a link into the Kubernetes cockpit, and an
+  Argo CD chat agent whose changes ask for permission.
+- **iOS sideload** _(new)_ — Sideloadly-class: your Apple ID (2FA in the app) or an App Store Connect
+  key, signing and install by the daemon over USB or Wi-Fi, app options, automatic refresh before
+  expiry; plus Android APK install.
+- **Real devices in Sims** _(new)_ — iPhones, iPads and Android phones plugged in by cable, with a
+  live screen and real input, off until you enable control per device; agents use the same `sim_*`
+  tools.
+- **Spec mode** _(new)_ — a composer toggle that runs GitHub Spec Kit's spec-driven workflow phase by
+  phase, with your approval between phases.
+- **Activity graph** _(new)_ — an archify canvas beside the chat showing what the agent did, is doing
+  and still has to do, live.
 - **Databases** _(new)_ — a full database IDE built into the app: seven engines (PostgreSQL,
   MySQL, SQLite, SQL Server, Oracle, MongoDB, ClickHouse), multiple databases per connection, an
   object explorer with counts, a data grid with inline editing, a SQL console with autocomplete and
@@ -103,6 +119,80 @@ with a few deliberate boundaries:
 ---
 
 ## ✨ New in this release
+
+### Jira, Argo CD, iOS sideload, real devices, Spec mode and the activity graph (v0.9.48)
+
+#### Jira — boards, backlog and issues inside JAgentDesk
+
+![Jira board in JAgentDesk](docs/media/jira-board.png)
+
+- Sign in with a Jira Cloud API token, OAuth 2.0 with your own Atlassian app, or a Data Center PAT;
+  tokens stay in the daemon.
+- Kanban and Scrum boards with WIP limits and swimlanes; **drag a card to transition it** (required
+  fields open in a dialog), drag to rank, "Move to…" on mobile.
+- Backlog and sprints (create, start, complete), issue detail with Markdown editing, attachments,
+  fields, comments with mentions, history and work log; Your work, JQL search and filters.
+- **Ask AI** and **Work on this issue**: an agent reads the issue, codes, opens the PR through Forge
+  Hub and comments back; Jira writes always ask for permission.
+
+#### Argo CD — GitOps apps, sync and rollback
+
+![Argo CD application in JAgentDesk](docs/media/argocd-app.png)
+
+- Sign in with password, API token or SSO; instances and apps in the left column with health and sync.
+- Applications list/tiles with filters and bulk sync; app detail with the resource graph, List and
+  Pods views, Diff, Events, Logs, History and rollback, the full sync dialog and resource actions.
+- Jump from a resource to the Kubernetes cockpit (**Open in Clusters**) and ask the Argo CD agent;
+  syncs, rollbacks and actions ask for permission.
+
+#### Sideload — your Apple ID, signed and installed by the daemon
+
+![Sims → Sideload → Install with the Browse host dialog: folders and only .ipa files on the daemon machine, with sizes](docs/media/sideload.png)
+
+- Sign in with a free or paid Apple ID (2FA in the app) or an App Store Connect API key; the daemon
+  signs and installs IPAs over USB or Wi-Fi, with name, icon, bundle ID, minimum iOS, extensions and
+  injection options, and **refreshes apps before they expire**.
+- Free-account limits are checked before Apple is called; secrets never leave the daemon.
+- Android `.apk` / `.apks` install on a phone plugged in by USB cable.
+- Pick the file with **Choose file…** (or drag and drop) from your device, or **Browse host…** to
+  pick an `.ipa` / `.apk` on the daemon machine — no path to type.
+
+#### Real iPhones, iPads and Android phones in Sims
+
+![Sims → Sideload with no phone attached: "Plug the phone in with its cable and unlock it. iPhone or iPad: tap Trust… Android: allow USB debugging…"](docs/media/devices.png)
+
+- Phones plugged in with their cable appear next to simulators (unlock, then tap Trust on an iPhone or
+  allow USB debugging on Android); **control stays off until you enable it**.
+- Live screen (binary JPEG frames, up to 15 fps), taps, swipes, text and hardware keys, apps, logs and
+  screenshots; iOS via WebDriverAgent signed with your Sideload account.
+- Agents use the same `sim_*` tools after you allow them per device.
+
+#### Spec mode — GitHub Spec Kit in the chat
+
+![Activity graph Plan view with Spec mode on: Spec mode · Implement, tasks.md phases and tasks, done tasks green, planned ones dashed, [P] parallel marks](docs/media/spec-mode-plan.png)
+
+![Spec mode phase review: "Tasks is ready for review" with the tasks.md link, Approve & continue and Revise](docs/media/spec-mode-review.png)
+
+- A **Spec mode** toggle in the composer runs Constitution → Specify → Plan → Tasks → Implement →
+  Converge (Clarify, Checklist and Analyze optional), and **you approve each phase**.
+- The chat shows only the phase and what you wrote — the spec-kit command stays behind **Show
+  command** — and the review bar sits right on top of the composer.
+- Phases are judged from the files on disk, never by a hidden model call; the setup lists every file
+  before writing it.
+
+#### Activity graph — see what the agent is doing
+
+<img src="docs/media/activity-graph-flow.png" alt="Activity graph, Flow view: the prompt, grouped tool calls, a running subagent branch and the agent's upcoming todos as dashed nodes, live" width="420" />
+
+- Show or hide an **archify** canvas next to the chat: **Flow** (the current turn, top to bottom, with
+  upcoming todos dashed) and **Plan** (todos, or Spec mode phases and tasks).
+- Live status colours without reloading; click a node to jump to that step in the chat.
+
+#### Release pipeline
+
+- The Android APK builds again: Android bundles skip the 6 MB generated message validator that Hermes
+  could not compile within the CI runner's memory.
+  from running out of memory.
 
 ### SSH servers — a Termius-class client with a chat agent per server (v0.9.47)
 
@@ -494,6 +584,9 @@ then attaches them to the matching GitHub Release. To cut a release:
 git tag v0.0.1
 git push origin main --tags
 ```
+
+If only the Android APK of an existing release failed, re-cut just that asset: run the **Release**
+workflow manually with `tag` set to the release tag and `only` set to `android`.
 
 ---
 

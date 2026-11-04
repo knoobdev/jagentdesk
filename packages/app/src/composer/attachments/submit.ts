@@ -56,6 +56,11 @@ export function splitComposerAttachmentsForSubmit(
       continue;
     }
 
+    if (attachment.kind === "jira_issue") {
+      agentAttachments.push(attachment.attachment);
+      continue;
+    }
+
     if (attachment.kind === "plugin_resource") {
       agentAttachments.push(pluginResourceAttachmentToAgentAttachment(attachment));
       continue;

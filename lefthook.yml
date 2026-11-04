@@ -6,6 +6,8 @@ pre-commit:
       exclude:
         - "package-lock.json"
         - "**/package-lock.json"
+        # Vendored upstream files are byte-for-byte copies (.oxfmtrc.json ignores them).
+        - "packages/server/vendor/**"
       run: npm run format:check:files -- {staged_files}
     - name: lint
       glob: "*.{js,jsx,ts,tsx}"

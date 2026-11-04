@@ -49,6 +49,7 @@ import {
 } from "./window/window-manager.js";
 import { setupDarwinCompositorWatchdog } from "./window/compositor-watchdog/index.js";
 import { registerDialogHandlers } from "./features/dialogs.js";
+import { registerArgoCdSsoHandlers } from "./features/argocd-sso.js";
 import { registerNotificationHandlers } from "./features/notifications.js";
 import { registerOpenerHandlers } from "./features/opener.js";
 import { registerEditorTargetHandlers } from "./features/editor-targets/ipc.js";
@@ -198,6 +199,23 @@ if (!process.env.JAGENTDESK_LISTEN) {
 const packagedTsnetBridge = path.join(process.resourcesPath, "bin", "tailnet-bridge");
 if (!process.env.JAGENTDESK_TSNET_BRIDGE_BIN && existsSync(packagedTsnetBridge)) {
   process.env.JAGENTDESK_TSNET_BRIDGE_BIN = packagedTsnetBridge;
+}
+
+// go-ios for iPhones and iPads (spec 27.1), bundled per OS by scripts/fetch-go-ios.mjs; Linux ships
+// one binary per architecture.
+const packagedGoIos = path.join(
+  process.resourcesPath,
+  "bin",
+  "go-ios",
+  process.platform === "win32" ? "ios.exe" : goIosUnixName(),
+);
+if (!process.env.JAGENTDESK_GO_IOS_BIN && existsSync(packagedGoIos)) {
+  process.env.JAGENTDESK_GO_IOS_BIN = packagedGoIos;
+}
+
+function goIosUnixName(): string {
+  if (process.platform !== "linux") return "ios";
+  return process.arch === "arm64" ? "ios-arm64" : "ios-amd64";
 }
 
 interface AttachedBrowserInput {
@@ -1356,6 +1374,7 @@ async function bootstrap(): Promise<void> {
   registerDaemonManager();
   registerWindowManager();
   registerDialogHandlers();
+  registerArgoCdSsoHandlers();
   registerNotificationHandlers();
   registerOpenerHandlers();
   registerEditorTargetHandlers();

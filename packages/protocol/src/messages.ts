@@ -114,6 +114,16 @@ import {
   ForumStreamSchema,
 } from "./agent-forum/rpc-schemas.js";
 import {
+  ActivityGraphGetRequestSchema,
+  ActivityGraphGetResponseSchema,
+  ActivityGraphSubscribeRequestSchema,
+  ActivityGraphSubscribeResponseSchema,
+  ActivityGraphUnsubscribeRequestSchema,
+  ActivityGraphUnsubscribeResponseSchema,
+  ActivityGraphChangedMessageSchema,
+  ActivityGraphStatusMessageSchema,
+} from "./agent-activity-graph.js";
+import {
   LoopRunRequestSchema,
   LoopListRequestSchema,
   LoopInspectRequestSchema,
@@ -201,6 +211,18 @@ import {
   ProxyPushSchemas,
 } from "./proxy/rpc-schemas.js";
 import { SshRequestSchemas, SshResponseSchemas, SshPushSchemas } from "./ssh/rpc-schemas.js";
+import { SpecModeRequestSchemas, SpecModeResponseSchemas } from "./spec-mode.js";
+import {
+  ArgoCdRequestSchemas,
+  ArgoCdResponseSchemas,
+  ArgoCdPushSchemas,
+} from "./argocd/rpc-schemas.js";
+import {
+  SideloadRequestSchemas,
+  SideloadResponseSchemas,
+  SideloadPushSchemas,
+} from "./sideload/rpc-schemas.js";
+import { JiraRequestSchemas, JiraResponseSchemas, JiraPushSchemas } from "./jira/rpc-schemas.js";
 import { SftpInboundSchemas, SftpOutboundSchemas } from "./ssh/sftp-schemas.js";
 import { ForwardingInboundSchemas, ForwardingOutboundSchemas } from "./ssh/forwarding-schemas.js";
 import { SnippetsInboundSchemas, SnippetsOutboundSchemas } from "./ssh/snippets-schemas.js";
@@ -852,6 +874,11 @@ export const AgentTimelineItemPayloadSchema: z.ZodType<AgentTimelineItem, unknow
       z.object({
         text: z.string(),
         completed: z.boolean(),
+        // Added after v0.9.47 (spec 31.5, ADR-0031). Optional: older daemons and providers
+        // without these facts (generic ACP) omit them; old clients strip them.
+        id: z.string().optional(),
+        status: z.enum(["pending", "in_progress", "completed"]).optional(),
+        activeForm: z.string().optional(),
       }),
     ),
   }),
@@ -902,6 +929,9 @@ export const AgentStreamEventPayloadSchema = z.discriminatedUnion("type", [
     type: z.literal("timeline"),
     provider: AgentProviderSchema,
     item: AgentTimelineItemPayloadSchema,
+    // Added after v0.9.47 (spec 31.5, ADR-0031). Optional: providers that do not identify
+    // turns omit it; old clients strip it.
+    turnId: z.string().optional(),
   }),
   z.object({
     type: z.literal("permission_requested"),
@@ -1194,6 +1224,18 @@ export const ForgeIssueAttachmentSchema = z.object({
   projectPath: z.string().optional(),
 });
 
+// A Jira issue attached to a prompt (spec 29.4). `body` is the issue rendered as Markdown by the
+// daemon (description, acceptance criteria, text attachments), so the agent never sees raw ADF.
+export const JiraIssueAttachmentSchema = z.object({
+  type: z.literal("jira_issue"),
+  mimeType: z.literal("application/jagentdesk-jira-issue"),
+  connectionId: z.string(),
+  key: z.string(),
+  summary: z.string(),
+  url: z.string(),
+  body: z.string().nullable().optional(),
+});
+
 // Where a plugin-sourced text attachment came from (e.g. an issue in a tracker), so the UI can
 // show and link the original resource.
 export const ExternalResourceAttachmentMetadataSchema = z.object({
@@ -1260,6 +1302,7 @@ export const UploadedFileAttachmentSchema = z.object({
 export const AgentAttachmentSchema = z.discriminatedUnion("type", [
   ForgeChangeRequestAttachmentSchema,
   ForgeIssueAttachmentSchema,
+  JiraIssueAttachmentSchema,
   GitHubPrAttachmentSchema,
   GitHubIssueAttachmentSchema,
   TextAttachmentSchema,
@@ -4015,8 +4058,12 @@ export const AgentConfigApplyRequestMessageSchema = z.object({
 });
 
 export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
+  ...SpecModeRequestSchemas,
   ...DatabaseRequestSchemas,
+  ...ArgoCdRequestSchemas,
+  ...JiraRequestSchemas,
   ...SshRequestSchemas,
+  ...SideloadRequestSchemas,
   ...SftpInboundSchemas,
   ...ForwardingInboundSchemas,
   ...SnippetsInboundSchemas,
@@ -4274,6 +4321,9 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ForumChatReactRequestSchema,
   ForumChatRoomRequestSchema,
   ForumDiagramHtmlRequestSchema,
+  ActivityGraphGetRequestSchema,
+  ActivityGraphSubscribeRequestSchema,
+  ActivityGraphUnsubscribeRequestSchema,
   LoopRunRequestSchema,
   LoopListRequestSchema,
   LoopInspectRequestSchema,
@@ -4627,9 +4677,24 @@ export const ServerInfoStatusPayloadSchema = z
         autorunApproval: z.boolean().optional(), // Per-action approval mode for autorun (§20.7.3)
         sessionSharing: z.boolean().optional(), // Session sharing via Cloudflare tunnel (spec §21 / ADR-0018); default OFF
         agentForum: z.boolean().optional(), // Agent Forum / Team mode (docs/plans/active/agent-forum.md)
+        // Agent activity graph (spec 31 / ADR-0031): agent.activity_graph.* RPCs and pushes.
+        // COMPAT(activityGraph): added after v0.9.47; the app hides the toggle without it.
+        activityGraph: z.boolean().optional(),
         // SSH servers (spec 25 / ADR-0027, story S-20 S1). The client gates the
         // Servers surface on it so an old daemon never receives ssh.* RPCs.
         sshServers: z.boolean().optional(),
+        // Spec mode (spec 28 / ADR-0030): agent.spec_mode.* RPCs and push.
+        specMode: z.boolean().optional(),
+        // Argo CD (spec 30 / ADR-0034). The client gates the Argo CD surface on it.
+        argocd: z.boolean().optional(),
+        // Sideload (spec 26 / ADR-0032): the Sims "Sideload" tab and sideload.* / android.* RPCs.
+        sideload: z.boolean().optional(),
+        // Sideload "Browse host…" (26.9 / ADR-0032 §9): sideload.host.browse. The app shows the
+        // button only with it; v0.9.48 daemons do not answer that RPC.
+        sideloadHostBrowse: z.boolean().optional(),
+        // Jira (spec 29 / ADR-0034): the client capability `jira`; gates the Jira surface,
+        // the jira.* RPCs and the `jira_issue` attachment.
+        jira: z.boolean().optional(),
       })
       .optional(),
   })
@@ -7804,9 +7869,16 @@ export function parseHubExecutionOutboundMessage(value: unknown): HubExecutionOu
 export type DaemonUpdateProgressMessage = z.infer<typeof DaemonUpdateProgressMessageSchema>;
 
 export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
+  ...SpecModeResponseSchemas,
   ...DatabaseResponseSchemas,
+  ...ArgoCdResponseSchemas,
+  ...ArgoCdPushSchemas,
+  ...JiraResponseSchemas,
+  ...JiraPushSchemas,
   ...SshResponseSchemas,
   ...SshPushSchemas,
+  ...SideloadResponseSchemas,
+  ...SideloadPushSchemas,
   ...SftpOutboundSchemas,
   ...ForwardingOutboundSchemas,
   ...SnippetsOutboundSchemas,
@@ -8026,6 +8098,11 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ForumChatRoomResponseSchema,
   ForumDiagramHtmlResponseSchema,
   ForumStreamSchema,
+  ActivityGraphGetResponseSchema,
+  ActivityGraphSubscribeResponseSchema,
+  ActivityGraphUnsubscribeResponseSchema,
+  ActivityGraphChangedMessageSchema,
+  ActivityGraphStatusMessageSchema,
   ForgeChangeRequestCreateResponseSchema,
   ForgeChangeRequestCloseResponseSchema,
   ForgeReleaseCreateResponseSchema,
@@ -8829,6 +8906,8 @@ export const WSHelloMessageSchema = z.object({
       [CLIENT_CAPS.projectedSubagentTimeline]: z.boolean().optional(),
       [CLIENT_CAPS.projectUpdates]: z.boolean().optional(),
       [CLIENT_CAPS.archifyDiagrams]: z.boolean().optional(),
+      [CLIENT_CAPS.specMode]: z.boolean().optional(),
+      [CLIENT_CAPS.binaryScreenFrames]: z.boolean().optional(),
       [CLIENT_CAPS.browserHost]: BrowserAutomationHostCapabilitySchema.optional(),
     })
     .passthrough()

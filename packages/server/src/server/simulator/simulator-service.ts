@@ -15,6 +15,7 @@ import type {
 } from "@jagentdesk/protocol/simulator/rpc-schemas";
 import { slim, unslim } from "./simulator-slim.js";
 import { MaestroBackend, probeMaestro } from "./simulator-maestro.js";
+import { DeviceError } from "../devices/errors.js";
 
 export interface SimScreenshot {
   base64: string;
@@ -59,8 +60,9 @@ function stderrMessage(error: unknown): string {
   return String(error);
 }
 
-// Map our neutral button ids to idb's HID button names.
-const IDB_BUTTON: Record<SimButton, string> = {
+// Map our neutral button ids to idb's HID button names; the rest belong to Android or to
+// physical devices (spec 27.5).
+const IDB_BUTTON: Partial<Record<SimButton, string>> = {
   home: "HOME",
   lock: "LOCK",
   "side-button": "SIDE_BUTTON",
@@ -299,9 +301,13 @@ export class SimulatorService {
 
   async button(udid: string, button: SimButton): Promise<void> {
     // Hardware buttons need idb; Maestro has no reliable iOS hardware-button command.
+    const idbButton = IDB_BUTTON[button];
+    if (!idbButton) {
+      throw new DeviceError("unsupported_on_platform", `iOS simulators have no ${button} button`);
+    }
     const a = await this.availability();
     if (!a.idb) throw new Error("Hardware buttons require idb (idb_companion)");
-    await this.idb(["ui", "button", "--udid", udid, IDB_BUTTON[button]]);
+    await this.idb(["ui", "button", "--udid", udid, idbButton]);
   }
 
   async describeUi(udid: string): Promise<SimUiElement[]> {
@@ -414,6 +420,16 @@ export class SimulatorService {
 
   async openUrl(udid: string, url: string): Promise<void> {
     await execCommand("xcrun", ["simctl", "openurl", udid, url], { timeout: 30_000 });
+  }
+
+  // The last `lines` lines of the unified log (sim_logs).
+  async recentLogs(udid: string, lines: number): Promise<string> {
+    const result = await execCommand(
+      "xcrun",
+      ["simctl", "spawn", udid, "log", "show", "--last", "2m", "--style", "compact"],
+      { timeout: 60_000, maxBuffer: 64 * 1024 * 1024 },
+    );
+    return (result.stdout ?? "").split("\n").filter(Boolean).slice(-lines).join("\n");
   }
 
   async slim(udid: string, reboot: boolean) {

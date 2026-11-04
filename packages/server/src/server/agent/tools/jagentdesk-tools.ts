@@ -121,13 +121,20 @@ import type { AgentForumService } from "../../agent-forum/service.js";
 import { registerForumTools } from "./forum-tools.js";
 import type { ClusterRegistry } from "../../cluster/cluster-registry.js";
 import { registerSshAgentTools, type SshAgentTool } from "../../ssh/environment/agent-tools.js";
+import type { ArgoCdAgentTool } from "../../argocd/agent-tools.js";
+import type { SideloadAgentTool } from "../../sideload/agent-tools.js";
+import type { JiraAgentTool } from "../../jira/agent-tools.js";
 import type { DatabaseRegistry } from "../../database/database-registry.js";
 import type { DatabaseEngine } from "../../database/database-dto.js";
 import { execCommand } from "../../../utils/spawn.js";
 import { SimulatorService } from "../../simulator/simulator-service.js";
+import { fleetSnapshot } from "../../simulator/simulator-streams.js";
+import { DeviceError } from "../../devices/errors.js";
+import { isPhysicalUdid, type PhysicalDeviceHub } from "../../devices/hub.js";
+import { resolveDeviceTarget, type PhysicalDeviceAccess } from "./sim-device-target.js";
 import { getSharedProxyService, installCaToSimulator } from "../../proxy/proxy-service.js";
 import { fridaAvailability, installFrida, launchAndUnpin } from "../../proxy/frida-control.js";
-import type { SimButton } from "@jagentdesk/protocol/simulator/rpc-schemas";
+import { SimButtonSchema, type SimButton } from "@jagentdesk/protocol/simulator/rpc-schemas";
 import type { ForgeHubService } from "../../session/forge/forge-hub-session.js";
 import type { NativeSkillsService } from "../../skills-native/index.js";
 import { slugifySkillName } from "../../skills-native/frontmatter.js";
@@ -189,6 +196,12 @@ export interface JAgentDeskToolHostDependencies {
   // SSH servers (spec 25.11): ssh_* tools and the server-aware docker_* tools that replace the
   // host-only ones (same names, same behaviour without serverId). Bound per caller agent.
   sshAgentTools?: (callerAgentId: string | null) => SshAgentTool[];
+  // Argo CD (spec 30.4): argocd_* tools bound per caller agent (default instance from its label).
+  argocdAgentTools?: (callerAgentId: string | null) => ArgoCdAgentTool[];
+  /** Sideload tools (spec 26.10); installs raise a permission card. */
+  sideloadAgentTools?: (callerAgentId: string | null) => SideloadAgentTool[];
+  // Jira (spec 29.4): jira_* tools; reads auto-run, writes raise the permission card.
+  jiraAgentTools?: (callerAgentId: string | null) => JiraAgentTool[];
   // Daemon-wide Forge Hub service (spec 19 / ADR-0015). Lets ANY agent read and
   // operate GitHub/GitLab/Bitbucket via the forge_* tools, mirroring how
   // clusterRegistry backs the kubectl_* tools. Single instance so all agents
@@ -209,6 +222,8 @@ export interface JAgentDeskToolHostDependencies {
     select(id: string | null): void;
     remove(id: string): void;
   };
+  // Spec 27: physical phones/tablets for the sim_* tools (same hub the Sims screen uses).
+  physicalDevices?: PhysicalDeviceHub | null;
   requestHostToolPermission?: (
     agentId: string,
     request: {
@@ -827,6 +842,9 @@ function textResult(text: string): JAgentDeskToolResult {
   return { content: [{ type: "text", text: text || "(ok)" }] };
 }
 function simErrorResult(err: unknown): JAgentDeskToolResult {
+  if (err instanceof DeviceError) {
+    return { content: [{ type: "text", text: `${err.code}: ${err.message}` }], isError: true };
+  }
   const e = err as { stderr?: string; message?: string };
   return {
     content: [
@@ -1140,41 +1158,60 @@ function registerSimulatorTools(params: {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Tool handlers are schema-validated at registration boundaries.
     handler: (input: any, context: JAgentDeskToolExecutionContext) => Promise<JAgentDeskToolResult>,
   ) => void;
+  access: PhysicalDeviceAccess;
+  iosSimulators: boolean;
 }): void {
-  const { registerTool } = params;
+  const { registerTool, access } = params;
+  const target = (udid: string, toolName: string) =>
+    resolveDeviceTarget({ udid, toolName, simulators: simulatorToolService, access });
+  // Catalog, lifecycle and density tools exist only for iOS simulators (spec 27.5); hosts without
+  // Xcode do not get them.
+  const registerSimulatorOnly: typeof registerTool = (name, config, handler) => {
+    if (params.iosSimulators) registerTool(name, config, handler);
+  };
+  const refusePhysical = (udid: string, what: string) => {
+    if (isPhysicalUdid(udid)) {
+      throw new DeviceError(
+        "unsupported_on_platform",
+        `${what} is not available on physical devices`,
+      );
+    }
+  };
 
   registerTool(
     "sim_list",
     {
-      title: "Simulator list",
+      title: "Device list",
       description:
-        "List iOS simulators (udid, name, runtime, boot state, slim state). bootedOnly=true limits to running ones. Auto-approved (read-only).",
+        "List iOS simulators and physical iPhones/iPads/Android devices on this host (udid, name, kind, runtime, state). Physical devices show connection, control (on/off) and readiness; a device with control off answers control_disabled until the user enables it in Sims. bootedOnly=true limits to running/connected ones. Auto-approved (read-only).",
       inputSchema: { bootedOnly: z.boolean().optional() },
     },
     async (input: { bootedOnly?: boolean }) => {
       try {
-        const { availability, devices } = await simulatorToolService.list();
-        if (!availability.simctl) {
-          return textResult("iOS simulators unavailable: this daemon host has no Xcode/simctl.");
-        }
+        const { availability, devices } = await fleetSnapshot(simulatorToolService, access.hub);
         const rows = devices
           .filter((d) => !input.bootedOnly || d.isBooted)
-          .map(
-            (d) =>
-              `${d.isBooted ? "●" : "○"} ${d.name}  (${d.deviceType})  [${d.runtime}]  ${d.state}  ${d.udid}`,
-          );
-        const hidNote =
-          availability.idb || availability.maestro
-            ? ""
-            : "\n(no idb or Maestro — tap/swipe/type disabled; lifecycle + screenshot still work)";
-        return textResult((rows.join("\n") || "(no simulators)") + hidNote);
+          .map((d) => {
+            const kind = d.kind ?? "simulator";
+            const physical =
+              kind === "simulator"
+                ? ""
+                : `  ${d.connection ?? "local"}  control ${d.controlEnabled ? "on" : "off"}  ${d.readiness ?? "ready"}`;
+            return `${d.isBooted ? "●" : "○"} ${d.name}  (${d.deviceType})  [${d.runtime}]  ${kind}  ${d.state}${physical}  ${d.udid}`;
+          });
+        const notes: string[] = [];
+        if (!availability.simctl) notes.push("(no Xcode/simctl on this host — no iOS simulators)");
+        else if (!availability.idb && !availability.maestro) {
+          notes.push("(no idb or Maestro — simulator tap/swipe/type disabled)");
+        }
+        return textResult([rows.join("\n") || "(no devices)", ...notes].join("\n"));
       } catch (err) {
         return simErrorResult(err);
       }
     },
   );
 
-  registerTool(
+  registerSimulatorOnly(
     "sim_device_types",
     {
       title: "Simulator device types",
@@ -1199,7 +1236,7 @@ function registerSimulatorTools(params: {
     },
   );
 
-  registerTool(
+  registerSimulatorOnly(
     "sim_create",
     {
       title: "Create simulator",
@@ -1256,11 +1293,12 @@ function registerSimulatorTools(params: {
     action: "boot" | "shutdown" | "erase" | "delete",
     description: string,
   ) =>
-    registerTool(
+    registerSimulatorOnly(
       name,
       { title: name, description, inputSchema: { udid: z.string().min(1) } },
       async (input: { udid: string }) => {
         try {
+          refusePhysical(input.udid, action);
           await simulatorToolService.action(input.udid, action);
           return textResult(`${action} ${input.udid} ok`);
         } catch (err) {
@@ -1282,7 +1320,7 @@ function registerSimulatorTools(params: {
     },
     async (input: { udid: string; x: number; y: number }) => {
       try {
-        await simulatorToolService.tap(input.udid, input.x, input.y);
+        await (await target(input.udid, "sim_tap")).tap(input.x, input.y);
         return textResult(`tapped ${input.x},${input.y}`);
       } catch (err) {
         return simErrorResult(err);
@@ -1314,14 +1352,9 @@ function registerSimulatorTools(params: {
       durationMs?: number;
     }) => {
       try {
-        await simulatorToolService.swipe(
-          input.udid,
-          input.x1,
-          input.y1,
-          input.x2,
-          input.y2,
-          input.durationMs,
-        );
+        await (
+          await target(input.udid, "sim_swipe")
+        ).swipe(input.x1, input.y1, input.x2, input.y2, input.durationMs);
         return textResult("swiped");
       } catch (err) {
         return simErrorResult(err);
@@ -1338,7 +1371,7 @@ function registerSimulatorTools(params: {
     },
     async (input: { udid: string; text: string }) => {
       try {
-        await simulatorToolService.inputText(input.udid, input.text);
+        await (await target(input.udid, "sim_type")).inputText(input.text);
         return textResult("typed");
       } catch (err) {
         return simErrorResult(err);
@@ -1358,7 +1391,7 @@ function registerSimulatorTools(params: {
     },
     async (input: { udid: string; button: SimButton }) => {
       try {
-        await simulatorToolService.button(input.udid, input.button);
+        await (await target(input.udid, "sim_button")).button(input.button);
         return textResult(`pressed ${input.button}`);
       } catch (err) {
         return simErrorResult(err);
@@ -1376,7 +1409,7 @@ function registerSimulatorTools(params: {
     },
     async (input: { udid: string }) => {
       try {
-        const elements = await simulatorToolService.describeUi(input.udid);
+        const elements = await (await target(input.udid, "sim_describe_ui")).describeUi();
         const lines = elements.map(
           (e) =>
             `${e.role}${e.label ? ` "${e.label}"` : ""}${e.identifier ? ` #${e.identifier}` : ""} @ ${Math.round(e.x + e.width / 2)},${Math.round(e.y + e.height / 2)} [${Math.round(e.x)},${Math.round(e.y)},${Math.round(e.width)}x${Math.round(e.height)}]${e.enabled ? "" : " (disabled)"}`,
@@ -1397,12 +1430,7 @@ function registerSimulatorTools(params: {
     },
     async (input: { udid: string }) => {
       try {
-        // JPEG capped at 1568px on the long edge — the model downsamples anything larger, so a
-        // full-res PNG (up to ~5 MB) would only cost transfer, not add detail.
-        const shot = await simulatorToolService.screenshot(input.udid, {
-          format: "jpeg",
-          maxDim: 1568,
-        });
+        const shot = await (await target(input.udid, "sim_screenshot")).screenshot();
         return {
           content: [
             { type: "image", data: shot.base64, mimeType: shot.mimeType },
@@ -1424,7 +1452,7 @@ function registerSimulatorTools(params: {
     },
     async (input: { udid: string; appPath: string }) => {
       try {
-        await simulatorToolService.installApp(input.udid, input.appPath);
+        await (await target(input.udid, "sim_install_app")).installApp(input.appPath);
         return textResult("installed");
       } catch (err) {
         return simErrorResult(err);
@@ -1445,7 +1473,9 @@ function registerSimulatorTools(params: {
     },
     async (input: { udid: string; bundleId: string; terminateExisting?: boolean }) => {
       try {
-        await simulatorToolService.launchApp(input.udid, input.bundleId, input.terminateExisting);
+        await (
+          await target(input.udid, "sim_launch_app")
+        ).launchApp(input.bundleId, input.terminateExisting ?? false);
         return textResult(`launched ${input.bundleId}`);
       } catch (err) {
         return simErrorResult(err);
@@ -1462,7 +1492,7 @@ function registerSimulatorTools(params: {
     },
     async (input: { udid: string; bundleId: string }) => {
       try {
-        await simulatorToolService.terminateApp(input.udid, input.bundleId);
+        await (await target(input.udid, "sim_terminate_app")).terminateApp(input.bundleId);
         return textResult(`terminated ${input.bundleId}`);
       } catch (err) {
         return simErrorResult(err);
@@ -1479,7 +1509,7 @@ function registerSimulatorTools(params: {
     },
     async (input: { udid: string; url: string }) => {
       try {
-        await simulatorToolService.openUrl(input.udid, input.url);
+        await (await target(input.udid, "sim_open_url")).openUrl(input.url);
         return textResult(`opened ${input.url}`);
       } catch (err) {
         return simErrorResult(err);
@@ -1487,7 +1517,7 @@ function registerSimulatorTools(params: {
     },
   );
 
-  registerTool(
+  registerSimulatorOnly(
     "sim_slim",
     {
       title: "Simulator slim",
@@ -1497,6 +1527,7 @@ function registerSimulatorTools(params: {
     },
     async (input: { udid: string; reboot?: boolean }) => {
       try {
+        refusePhysical(input.udid, "Slim");
         const slimState = await simulatorToolService.slim(input.udid, input.reboot ?? false);
         return textResult(`slimmed → ${slimState}`);
       } catch (err) {
@@ -1505,7 +1536,7 @@ function registerSimulatorTools(params: {
     },
   );
 
-  registerTool(
+  registerSimulatorOnly(
     "sim_unslim",
     {
       title: "Simulator unslim",
@@ -1514,8 +1545,48 @@ function registerSimulatorTools(params: {
     },
     async (input: { udid: string }) => {
       try {
+        refusePhysical(input.udid, "Unslim");
         const slimState = await simulatorToolService.unslim(input.udid);
         return textResult(`unslimmed → ${slimState}`);
+      } catch (err) {
+        return simErrorResult(err);
+      }
+    },
+  );
+
+  registerTool(
+    "sim_press_button",
+    {
+      title: "Device hardware button",
+      description:
+        "Press a hardware button on a simulator or physical device. iOS: home, lock, volume-up, volume-down (simulators also side-button, siri, apple-pay). Android: home, back, app-switch, volume-up, volume-down, power, lock, rotate. A button the device lacks returns unsupported_on_platform.",
+      inputSchema: { udid: z.string().min(1), button: SimButtonSchema },
+    },
+    async (input: { udid: string; button: SimButton }) => {
+      try {
+        await (await target(input.udid, "sim_press_button")).button(input.button);
+        return textResult(`pressed ${input.button}`);
+      } catch (err) {
+        return simErrorResult(err);
+      }
+    },
+  );
+
+  registerTool(
+    "sim_logs",
+    {
+      title: "Device logs",
+      description:
+        "Read the most recent log lines of a simulator (unified log), Android device (logcat) or iPhone/iPad (syslog). lines defaults to 200 (max 2000).",
+      inputSchema: {
+        udid: z.string().min(1),
+        lines: z.number().int().positive().max(2000).optional(),
+      },
+    },
+    async (input: { udid: string; lines?: number }) => {
+      try {
+        const logs = await (await target(input.udid, "sim_logs")).recentLogs(input.lines ?? 200);
+        return textResult(logs || "(no log lines)");
       } catch (err) {
         return simErrorResult(err);
       }
@@ -4078,14 +4149,52 @@ export function createJAgentDeskToolCatalog(
   if (options.sshAgentTools) {
     registerSshAgentTools(registerTool, options.sshAgentTools(callerAgentId ?? null));
   }
+  if (options.sideloadAgentTools) {
+    registerSshAgentTools(registerTool, options.sideloadAgentTools(callerAgentId ?? null));
+  }
+  if (options.jiraAgentTools) {
+    for (const tool of options.jiraAgentTools(callerAgentId ?? null)) {
+      registerTool(
+        tool.name,
+        { title: tool.title, description: tool.description, inputSchema: tool.inputSchema },
+        tool.handler,
+      );
+    }
+  }
   // Spec 24.5: tools a host cannot run are not offered (unsupported_os depends only on
   // the OS/arch, so this needs no probe).
   const hostSupport = staticHostSupport(process.platform, process.arch);
-  if (hostSupport.iosSimulators) registerSimulatorTools({ registerTool });
+  // Spec 27.6: physical devices (adb/go-ios run on every host OS) keep sim_* registered off macOS.
+  if (hostSupport.iosSimulators || options.physicalDevices) {
+    registerSimulatorTools({
+      registerTool,
+      iosSimulators: hostSupport.iosSimulators,
+      access: {
+        hub: options.physicalDevices ?? null,
+        callerAgentId,
+        agentTitle: () => {
+          const title = callerAgentId
+            ? (agentManager.getAgent(callerAgentId) as { title?: unknown } | null)?.title
+            : null;
+          return typeof title === "string" && title.trim() ? title : "this agent";
+        },
+        requestPermission: options.requestHostToolPermission,
+      },
+    });
+  }
   registerProxyTools({ registerTool, support: hostSupport });
   // Forge Hub tools mirror the kubectl precedent: available to every agent and
   // registered before the voice-only early return so a voice session keeps them.
   registerForgeTools({ registerTool, options, callerAgentId });
+  if (options.argocdAgentTools) {
+    for (const tool of options.argocdAgentTools(callerAgentId ?? null)) {
+      registerTool(
+        tool.name,
+        { title: tool.title, description: tool.description, inputSchema: tool.inputSchema },
+        tool.handler,
+      );
+    }
+  }
   // Agent Forum / Team mode: any agent can post to a topic and manage its task board.
   if (options.agentForumService && callerAgentId) {
     const callerManagedTitle = (agentManager.getAgent(callerAgentId) as { title?: unknown } | null)

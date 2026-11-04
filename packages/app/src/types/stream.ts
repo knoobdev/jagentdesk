@@ -763,9 +763,21 @@ export interface CompactionItem {
   preTokens?: number;
 }
 
+export type TodoEntryStatus = "pending" | "in_progress" | "completed";
+
 export interface TodoEntry {
   text: string;
   completed: boolean;
+  // Spec 31.5: kept when the provider reports it (generic ACP does not; see todoEntryStatus).
+  status?: TodoEntryStatus;
+  id?: string;
+  activeForm?: string;
+}
+
+// The provider's status when known; otherwise derived from `completed`.
+export function todoEntryStatus(entry: TodoEntry): TodoEntryStatus {
+  if (entry.status) return entry.status;
+  return entry.completed ? "completed" : "pending";
 }
 
 export interface TodoListItem {
@@ -1168,6 +1180,18 @@ function appendActivityLog(state: StreamItem[], entry: ActivityLogItem): StreamI
   return [...state, entry];
 }
 
+// Keeps the provider's id/status/activeForm (spec 31.5); status falls back to `completed`.
+function normalizeTodoEntry(item: TodoEntry): TodoEntry {
+  const entry: TodoEntry = {
+    text: item.text,
+    completed: item.completed,
+    status: todoEntryStatus(item),
+  };
+  if (item.id) entry.id = item.id;
+  if (item.activeForm) entry.activeForm = item.activeForm;
+  return entry;
+}
+
 function appendTodoList(
   state: StreamItem[],
   provider: AgentProvider,
@@ -1175,10 +1199,7 @@ function appendTodoList(
   timestamp: Date,
   timelineCursor?: TimelinePosition,
 ): StreamItem[] {
-  const normalizedItems = items.map((item) => ({
-    text: item.text,
-    completed: item.completed,
-  }));
+  const normalizedItems = items.map(normalizeTodoEntry);
 
   const lastItem = state[state.length - 1];
   if (lastItem && lastItem.kind === "todo_list" && lastItem.provider === provider) {
@@ -1237,7 +1258,11 @@ function reduceTimelineToolCall(
     return appendTodoList(
       state,
       event.provider,
-      tasks.map((entry) => ({ text: entry.text, completed: entry.completed })),
+      tasks.map((entry) => ({
+        text: entry.text,
+        completed: entry.completed,
+        status: entry.status,
+      })),
       timestamp,
       timelineCursor,
     );
@@ -1248,7 +1273,11 @@ function reduceTimelineToolCall(
     return appendTodoList(
       state,
       event.provider,
-      tasks.map((entry) => ({ text: entry.text, completed: entry.completed })),
+      tasks.map((entry) => ({
+        text: entry.text,
+        completed: entry.completed,
+        status: entry.status,
+      })),
       timestamp,
       timelineCursor,
     );
@@ -1352,10 +1381,7 @@ function reduceTimelineEvent(
       if (event.provider === "claude") {
         return finalizeActiveThoughts(state);
       }
-      const items: TodoEntry[] = (item.items ?? []).map((todo) => ({
-        text: todo.text,
-        completed: todo.completed,
-      }));
+      const items: TodoEntry[] = (item.items ?? []).map(normalizeTodoEntry);
       return finalizeActiveThoughts(
         appendTodoList(state, event.provider, items, timestamp, timelineCursor),
       );

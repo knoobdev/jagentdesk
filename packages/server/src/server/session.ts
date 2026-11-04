@@ -162,10 +162,14 @@ import {
 } from "./session/checkout/git-metadata-generator.js";
 import { ChatScheduleLoopSession } from "./session/chat/chat-schedule-loop-session.js";
 import { AutorunSession } from "./session/autorun/autorun-session.js";
+import { SpecModeSession } from "./session/spec-mode/spec-mode-session.js";
+import type { SpecModeService } from "./spec-mode/service.js";
 import type { AutorunService } from "./autorun/service.js";
 import { SessionShareSession } from "./session/session-share/session-share-session.js";
 import { AgentForumSession } from "./session/agent-forum/agent-forum-session.js";
 import type { AgentForumService } from "./agent-forum/service.js";
+import type { ActivityGraphService } from "./agent/activity-graph/service.js";
+import { ActivityGraphSession } from "./session/activity-graph/activity-graph-session.js";
 import { presentForumTopic } from "./agent-forum/archify-compat.js";
 import type { StoredForumTopic } from "@jagentdesk/protocol/agent-forum/types";
 import type { SessionShareService } from "./session-share/service.js";
@@ -173,7 +177,14 @@ import { ClusterSession } from "./session/cluster/cluster-session.js";
 import { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { DatabaseSession } from "./session/database/database-session.js";
 import { SshSession } from "./session/ssh/ssh-session.js";
+import { ArgoCdSession } from "./session/argocd/argocd-session.js";
+import type { ArgoCdService } from "./argocd/service.js";
+import { randomUUID } from "node:crypto";
+import { JiraSession } from "./session/jira/jira-session.js";
+import type { JiraService } from "./jira/service.js";
 import { SshService } from "./ssh/ssh-service.js";
+import { SideloadSession } from "./session/sideload/sideload-session.js";
+import type { SideloadService } from "./sideload/sideload-service.js";
 import { DockerService } from "./docker/docker-service.js";
 import { DockerStreams } from "./docker/docker-streams.js";
 import { RemoteDockerError, type RemoteDockerHosts } from "./ssh/remote-docker/hosts.js";
@@ -184,7 +195,12 @@ import {
   type RoutedDocker,
 } from "./ssh/remote-docker/route.js";
 import { SimulatorService } from "./simulator/simulator-service.js";
-import { SimulatorStreams } from "./simulator/simulator-streams.js";
+import { SimulatorStreams, fleetSnapshot } from "./simulator/simulator-streams.js";
+import type { PhysicalDeviceHub } from "./devices/hub.js";
+import {
+  PhysicalDeviceSession,
+  deviceErrorText,
+} from "./session/devices/physical-device-session.js";
 import { getSharedProxyService } from "./proxy/proxy-service.js";
 import { fridaAvailability, installFrida } from "./proxy/frida-control.js";
 import { DatabaseRegistry } from "./database/database-registry.js";
@@ -509,8 +525,11 @@ export interface SessionOptions {
   chatService: FileBackedChatService;
   scheduleService: ScheduleService;
   autorunService?: AutorunService | null;
+  specModeService?: SpecModeService | null;
   sessionShareService?: SessionShareService | null;
   agentForumService?: AgentForumService | null;
+  // Agent activity graph (spec 31, ADR-0031); shared daemon-wide service.
+  activityGraphService?: ActivityGraphService | null;
   // Bootstraps the orchestration lead for a freshly created forum topic (wired in bootstrap.ts).
   agentForumBootstrap?:
     | ((input: { topicId: string; prompt: string; originAgentId?: string }) => void | Promise<void>)
@@ -531,9 +550,17 @@ export interface SessionOptions {
   usageHistory?: UsageHistoryStorage | null;
   hostCapabilities?: HostCapabilityService | null;
   hostToolInstaller?: HostToolInstaller | null;
+  // Spec 27: the daemon-wide physical device hub (null in tests and hosts without it).
+  physicalDevices?: PhysicalDeviceHub | null;
   clusterRegistry?: ClusterRegistry;
   databaseRegistry?: DatabaseRegistry;
   sshService?: SshService;
+  // Argo CD (spec 30): daemon-wide service; null when the host runs without it.
+  argocdService?: ArgoCdService | null;
+  /** Sideload (spec 26); null in tests and hosts that do not run it. */
+  sideloadService?: SideloadService | null;
+  // Daemon-wide Jira service (spec 29); absent in tests that do not exercise Jira.
+  jiraService?: JiraService | null;
   checkoutDiffManager: CheckoutDiffManager;
   github?: ForgeService;
   createAgentMcpTransport?: AgentMcpTransportFactory;
@@ -647,6 +674,26 @@ export type SessionLifecycleIntent =
       requestId: string;
       reason: string;
     };
+
+interface SpecModeWiring {
+  service: SpecModeService;
+  session: SpecModeSession;
+}
+
+function createSpecModeWiring(
+  service: SpecModeService | null | undefined,
+  host: { emit: (msg: SessionOutboundMessage) => void; logger: pino.Logger },
+): SpecModeWiring | null {
+  if (!service) return null;
+  return {
+    service,
+    session: new SpecModeSession({
+      emit: host.emit,
+      specModeService: service,
+      logger: host.logger,
+    }),
+  };
+}
 
 function parseClientCapabilities(
   capabilities: Record<string, unknown> | null | undefined,
@@ -845,19 +892,26 @@ export class Session {
   private readonly forgeHubSession: ForgeHubSession;
   private readonly chatScheduleLoopSession: ChatScheduleLoopSession;
   private readonly autorunSession: AutorunSession | null;
+  private readonly specMode: SpecModeWiring | null;
   private readonly sessionShareSession: SessionShareSession | null;
   private readonly agentForumSession: AgentForumSession | null;
+  private readonly activityGraphSession: ActivityGraphSession | null;
   private clusterSession!: ClusterSession;
   private databaseSession!: DatabaseSession;
   private sshSession!: SshSession;
+  private argocdSession!: ArgoCdSession;
+  private jiraSession: JiraSession | null = null;
   private sshService!: SshService;
+  private sideloadSession: SideloadSession | null = null;
   private clusterRegistry!: ClusterRegistry;
   private databaseRegistry!: DatabaseRegistry;
   private readonly dockerService = new DockerService();
   private readonly dockerStreams = new DockerStreams(this.dockerService);
   private readonly remoteDockerSubscriptions = new Map<string, RoutedDocker>();
   private readonly simulatorService = new SimulatorService();
-  private readonly simulatorStreams = new SimulatorStreams(this.simulatorService);
+  private readonly physicalDevices: PhysicalDeviceHub | null;
+  private readonly simulatorStreams: SimulatorStreams;
+  private readonly physicalDeviceSession: PhysicalDeviceSession | null;
   private readonly proxyService = getSharedProxyService();
   private readonly proxySubscriptionIds = new Set<string>();
   private readonly providerCatalogSession: ProviderCatalogSession;
@@ -895,8 +949,10 @@ export class Session {
       chatService,
       scheduleService,
       autorunService,
+      specModeService,
       sessionShareService,
       agentForumService,
+      activityGraphService,
       loopService,
       checkoutDiffManager,
       github,
@@ -1058,6 +1114,10 @@ export class Session {
       clientId: this.clientId,
       logger: this.sessionLogger,
     });
+    this.specMode = createSpecModeWiring(specModeService, {
+      emit: (msg) => this.emit(msg),
+      logger: this.sessionLogger,
+    });
     this.autorunSession = autorunService
       ? new AutorunSession({
           host: { emit: (msg) => this.emit(msg) },
@@ -1084,9 +1144,47 @@ export class Session {
           notifyForumActivity: options.agentForumNotify,
         })
       : null;
+    this.activityGraphSession = activityGraphService
+      ? new ActivityGraphSession({
+          host: {
+            emit: (msg) => this.emit(msg),
+            supportsActivityGraph: () => this.supports(CLIENT_CAPS.activityGraph),
+            ensureAgentLoaded: async (agentId) => {
+              await ensureUnarchivedAgentLoaded(agentId, {
+                agentManager: this.agentManager,
+                agentStorage: this.agentStorage,
+                logger: this.sessionLogger,
+              });
+            },
+          },
+          service: activityGraphService,
+          logger: this.sessionLogger,
+        })
+      : null;
     this.initClusterSession(options);
     this.initDatabaseSession(options);
     this.initSshSession(options);
+    this.argocdSession = new ArgoCdSession({
+      host: { emit: (msg) => this.emit(msg) },
+      service: options.argocdService ?? null,
+      logger: this.sessionLogger,
+      sessionKey: randomUUID(),
+      canRunSsoLoopback: () => this.supports(CLIENT_CAPS.argocdSsoLoopback),
+    });
+    this.sideloadSession = options.sideloadService
+      ? new SideloadSession({
+          emit: (msg) => this.emit(msg),
+          service: options.sideloadService,
+          logger: this.sessionLogger,
+        })
+      : null;
+    if (options.jiraService) {
+      this.jiraSession = new JiraSession({
+        service: options.jiraService,
+        emit: (msg) => this.emit(msg),
+        logger: this.sessionLogger,
+      });
+    }
     this.providerCatalogSession = new ProviderCatalogSession({
       host: {
         emit: (msg) => this.emit(msg),
@@ -1163,6 +1261,9 @@ export class Session {
     this.usageHistory = options.usageHistory ?? null;
     this.hostCapabilities = options.hostCapabilities;
     this.hostToolInstaller = options.hostToolInstaller;
+    this.physicalDevices = options.physicalDevices ?? null;
+    this.simulatorStreams = new SimulatorStreams(this.simulatorService, this.physicalDevices);
+    this.physicalDeviceSession = this.createPhysicalDeviceSession();
     this.terminalManager = terminalManager;
     this.terminalController = new TerminalSessionController({
       terminalManager,
@@ -1353,6 +1454,7 @@ export class Session {
 
   updateClientCapabilities(capabilities: Record<string, unknown> | null, source?: object): void {
     this.clientCapabilities = parseClientCapabilities(capabilities);
+    this.argocdSession?.syncDelegateRegistration();
     if (source) {
       this.clientCapabilitiesBySource.set(source, this.clientCapabilities);
     }
@@ -2324,11 +2426,16 @@ export class Session {
       () => this.dispatchTerminalMessage(msg),
       () => this.dispatchChatScheduleLoopMessage(msg),
       () => this.dispatchAutorunMessage(msg),
+      () => this.dispatchSpecModeMessage(msg, source),
       () => this.dispatchSessionShareMessage(msg),
       () => this.dispatchAgentForumMessage(msg),
+      () => this.activityGraphSession?.dispatch(msg),
       () => this.dispatchClusterMessage(msg),
       () => this.dispatchDatabaseMessage(msg),
       () => this.dispatchSshMessage(msg),
+      () => this.dispatchArgoCdMessage(msg),
+      () => this.dispatchSideloadMessage(msg),
+      () => this.dispatchJiraMessage(msg),
       () => this.dispatchDockerMessage(msg),
       () => this.dispatchSimulatorMessage(msg),
       () => this.dispatchProxyMessage(msg),
@@ -3211,6 +3318,27 @@ export class Session {
     }
   }
 
+  private dispatchSpecModeMessage(
+    msg: SessionInboundMessage,
+    source?: object,
+  ): Promise<void> | undefined {
+    const specMode = this.specMode?.session;
+    if (!specMode) return undefined;
+    switch (msg.type) {
+      case "agent.spec_mode.get.request":
+      case "agent.spec_mode.setup.preview.request":
+      case "agent.spec_mode.set.request":
+      case "agent.spec_mode.review.request": {
+        const supported = source
+          ? this.supportsForSource(CLIENT_CAPS.specMode, source)
+          : this.supports(CLIENT_CAPS.specMode);
+        return specMode.handle(msg, supported);
+      }
+      default:
+        return undefined;
+    }
+  }
+
   private dispatchSessionShareMessage(msg: SessionInboundMessage): Promise<void> | undefined {
     const share = this.sessionShareSession;
     if (!share) return undefined;
@@ -3708,8 +3836,7 @@ export class Session {
   ): Promise<void> | undefined {
     if (msg.type === "simulator/list") {
       const { requestId } = msg;
-      return this.simulatorService
-        .list()
+      return fleetSnapshot(this.simulatorService, this.physicalDevices)
         .then((result) => {
           this.emit({
             type: "simulator/list/response",
@@ -4090,9 +4217,25 @@ export class Session {
     return undefined;
   }
 
+  private createPhysicalDeviceSession(): PhysicalDeviceSession | null {
+    if (!this.physicalDevices) return null;
+    return new PhysicalDeviceSession(
+      this.physicalDevices,
+      {
+        emit: (msg) => this.emit(msg),
+        emitBinary: (frame) => this.emitBinary(frame),
+        supportsBinaryScreenFrames: () => this.supports(CLIENT_CAPS.binaryScreenFrames),
+        transportBufferedAmount: () => this.getTransportBufferedAmount(),
+      },
+      this.sessionLogger,
+    );
+  }
+
   private dispatchSimulatorMessage(msg: SessionInboundMessage): Promise<void> | undefined {
     const fail = (error: unknown): string =>
       error instanceof Error ? error.message : String(error);
+    const physical = this.physicalDeviceSession?.handle(msg);
+    if (physical) return physical;
     const fleet = this.dispatchSimulatorFleet(msg, fail);
     if (fleet) return fleet;
     if (msg.type === "simulator/action") {
@@ -4376,14 +4519,24 @@ export class Session {
     }
     if (msg.type === "simulator/logs/subscribe") {
       const { requestId, subscriptionId } = msg;
-      this.emit({
-        type: "simulator/logs/subscribe/response",
-        payload: { requestId, error: null, subscriptionId },
-      });
-      this.simulatorStreams.subscribeLogs(subscriptionId, msg.udid, (chunk) => {
-        this.emit({ type: "simulator/log-chunk", payload: { subscriptionId, chunk } });
-      });
-      return undefined;
+      return this.simulatorStreams
+        .subscribeLogs(subscriptionId, msg.udid, (chunk) => {
+          this.emit({ type: "simulator/log-chunk", payload: { subscriptionId, chunk } });
+        })
+        .then(() => {
+          this.emit({
+            type: "simulator/logs/subscribe/response",
+            payload: { requestId, error: null, subscriptionId },
+          });
+          return undefined;
+        })
+        .catch((error: unknown) => {
+          this.emit({
+            type: "simulator/logs/subscribe/response",
+            payload: { requestId, error: deviceErrorText(error), subscriptionId },
+          });
+          return undefined;
+        });
     }
     if (msg.type === "simulator/logs/unsubscribe") {
       const { requestId, subscriptionId } = msg;
@@ -4395,6 +4548,118 @@ export class Session {
       return undefined;
     }
     return undefined;
+  }
+
+  // Argo CD allowlist (spec 30.5): every argocd.* request is listed here AND handled in
+  // ArgoCdSession.handle(); a type missing from either is never answered.
+  // oxlint-disable-next-line complexity
+  private dispatchArgoCdMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    switch (msg.type) {
+      case "argocd.instances.list.request":
+      case "argocd.instances.save.request":
+      case "argocd.instances.delete.request":
+      case "argocd.instances.login.request":
+      case "argocd.instances.logout.request":
+      case "argocd.sso.begin.request":
+      case "argocd.sso.complete.request":
+      case "argocd.sso.delegate.request":
+      case "argocd.apps.list.request":
+      case "argocd.apps.subscribe.request":
+      case "argocd.apps.unsubscribe.request":
+      case "argocd.app.get.request":
+      case "argocd.app.tree.subscribe.request":
+      case "argocd.app.tree.unsubscribe.request":
+      case "argocd.app.diff.request":
+      case "argocd.app.manifests.request":
+      case "argocd.app.events.request":
+      case "argocd.app.logs.subscribe.request":
+      case "argocd.app.logs.unsubscribe.request":
+      case "argocd.app.sync.request":
+      case "argocd.app.refresh.request":
+      case "argocd.app.rollback.request":
+      case "argocd.app.terminate.request":
+      case "argocd.app.delete.request":
+      case "argocd.app.set_auto_sync.request":
+      case "argocd.app.confirm_pruning.request":
+      case "argocd.app.resource_actions.list.request":
+      case "argocd.app.resource_action.request":
+      case "argocd.can_i.request":
+      case "argocd.appsets.list.request":
+      case "argocd.projects.list.request":
+      case "argocd.repos.list.request":
+      case "argocd.clusters.list.request":
+      case "argocd.cluster_links.list.request":
+      case "argocd.cluster_links.set.request":
+      case "argocd.cluster_links.resolve.request":
+        return this.argocdSession.handle(msg);
+      default:
+        return undefined;
+    }
+  }
+
+  // Jira (spec 29.5). Every jira.* request is listed here AND handled in JiraSession.handle: a
+  // request missing from this list never reaches the handler and times out without a response.
+  // oxlint-disable-next-line complexity
+  private dispatchJiraMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    if (!this.jiraSession) return undefined;
+    switch (msg.type) {
+      case "jira.connections.list.request":
+      case "jira.connections.add.request":
+      case "jira.connections.remove.request":
+      case "jira.connections.test.request":
+      case "jira.oauth.begin.request":
+      case "jira.oauth.complete.request":
+      case "jira.oauth.delegate.request":
+      case "jira.projects.list.request":
+      case "jira.boards.list.request":
+      case "jira.boards.get.request":
+      case "jira.boards.configuration.request":
+      case "jira.board.issues.request":
+      case "jira.board.watch.request":
+      case "jira.board.unwatch.request":
+      case "jira.backlog.get.request":
+      case "jira.sprints.list.request":
+      case "jira.sprints.create.request":
+      case "jira.sprints.start.request":
+      case "jira.sprints.complete.request":
+      case "jira.sprints.move_issues.request":
+      case "jira.issue.get.request":
+      case "jira.issue.create.request":
+      case "jira.issue.create_meta.request":
+      case "jira.issue.update.request":
+      case "jira.issue.transitions.request":
+      case "jira.issue.transition.request":
+      case "jira.issue.assign.request":
+      case "jira.issue.rank.request":
+      case "jira.issue.watch.request":
+      case "jira.issue.unwatch.request":
+      case "jira.issue.watchers.set.request":
+      case "jira.issue.changelog.list.request":
+      case "jira.issue.comments.list.request":
+      case "jira.issue.comments.add.request":
+      case "jira.issue.comments.update.request":
+      case "jira.issue.worklog.list.request":
+      case "jira.issue.worklog.add.request":
+      case "jira.issue.attachments.upload.request":
+      case "jira.issue.attachments.download.request":
+      case "jira.issue.attachments.delete.request":
+      case "jira.issue.links.add.request":
+      case "jira.search.request":
+      case "jira.jql.suggest.request":
+      case "jira.filters.list.request":
+      case "jira.filters.save.request":
+      case "jira.users.find.request":
+      case "jira.swimlanes.get.request":
+      case "jira.swimlanes.set.request":
+        return this.jiraSession.handle(msg);
+      default:
+        return undefined;
+    }
+  }
+
+  private dispatchSideloadMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    if (!this.sideloadSession?.handles(msg.type)) return undefined;
+    return this.sideloadSession.handle(msg);
   }
 
   private dispatchSshMessage(msg: SessionInboundMessage): Promise<void> | undefined {
@@ -4549,6 +4814,8 @@ export class Session {
       await this.workspaceFilesSession.handleFileTransferFrame(binaryFrame.frame);
       return;
     }
+    // Screen frames only flow daemon → client.
+    if (binaryFrame.kind === "screen") return;
     this.terminalController.handleBinaryFrame(binaryFrame.frame);
   }
 
@@ -8996,7 +9263,10 @@ export class Session {
     try {
       const agentId = resolved.agentId;
 
-      const prompt = buildAgentPrompt(msg.text, msg.images, msg.attachments);
+      // Spec mode (spec 28.4 step 2): the message becomes the pending phase's spec-kit command.
+      // The command must lead the turn, so attached skills are not prefixed to it.
+      const specPhase = await this.specMode?.service.prepareUserMessage(agentId, msg.text);
+      const prompt = buildAgentPrompt(specPhase?.text ?? msg.text, msg.images, msg.attachments);
       this.sessionLogger.trace(
         {
           agentId,
@@ -9014,11 +9284,12 @@ export class Session {
           prompt,
           messageId: msg.messageId,
           activeTurnBehavior: msg.activeTurnBehavior,
-          skillIds: msg.skillIds,
+          skillIds: specPhase ? undefined : msg.skillIds,
           skillInvocation: this.skillsStorage,
           logger: this.sessionLogger,
         });
       } catch (error) {
+        if (specPhase) await this.specMode?.service.revertPhaseStart(agentId, specPhase.phase);
         const message = error instanceof Error ? error.message : String(error);
         this.handleAgentRunError(agentId, error, "Failed to send agent message");
         this.emit({
@@ -9278,6 +9549,7 @@ export class Session {
     this.unsubscribePluginChanges?.();
     this.unsubscribePluginChanges = null;
     this.agentUpdates.dispose();
+    this.activityGraphSession?.dispose();
     await this.hubExecutionController?.cleanup();
     if (this.unsubscribeTerminalWorkspaceContributionEvents) {
       this.unsubscribeTerminalWorkspaceContributionEvents();
@@ -9287,11 +9559,13 @@ export class Session {
 
     await this.voiceSession.cleanup();
 
+    this.jiraSession?.dispose();
     this.dockerStreams.disposeAll();
     disposeRemoteDocker({ service: this.dockerService, streams: this.dockerStreams });
     for (const routed of this.remoteDockerSubscriptions.values()) routed.release();
     this.remoteDockerSubscriptions.clear();
     this.simulatorStreams.disposeAll();
+    this.physicalDeviceSession?.dispose();
     for (const id of this.proxySubscriptionIds) this.proxyService.unsubscribe(id);
     this.proxySubscriptionIds.clear();
     this.terminalController.dispose();
@@ -9301,6 +9575,7 @@ export class Session {
     this.workspaceGitObserver.dispose();
     this.workspaceFilesSession.dispose();
     this.clusterSession.dispose();
+    this.argocdSession.dispose();
   }
 }
 

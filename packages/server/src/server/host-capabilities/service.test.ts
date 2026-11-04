@@ -126,6 +126,48 @@ describe("HostCapabilityService", () => {
     expect(current.java).toMatchObject({ state: "available", version: "17.0.12" });
   });
 
+  it("requires jq or python3 for Spec mode on macOS and offers jq", async () => {
+    const neither = await service(host({}), runner({ bash: "/bin/bash" }, {})).refresh();
+    expect(neither.specKit).toEqual({
+      state: "missing_tool",
+      reason: "Requires jq or python3",
+      version: null,
+      installable: ["jq"],
+    });
+    const withPython = await service(
+      host({}),
+      runner(
+        { bash: "/bin/bash", python3: "/usr/bin/python3" },
+        { "/usr/bin/python3 --version": { ok: true, stdout: "Python 3.11.14", stderr: "" } },
+      ),
+    ).refresh();
+    expect(withPython.specKit?.state).toBe("available");
+    // macOS ships a python3 stub that only offers to install the command line tools.
+    const stubPython = await service(
+      host({}),
+      runner({ bash: "/bin/bash", python3: "/usr/bin/python3" }, {}),
+    ).refresh();
+    expect(stubPython.specKit?.reason).toBe("Requires jq or python3");
+  });
+
+  it("requires PowerShell 5.1 for Spec mode on Windows", async () => {
+    const powershell = "C:\\Windows\\powershell.exe";
+    const caps = await service(
+      host({ platform: "win32", arch: "x64", homeDir: "C:\\Users\\user" }),
+      runner(
+        { powershell },
+        {
+          [`${powershell} -NoProfile -Command $PSVersionTable.PSVersion.ToString()`]: {
+            ok: true,
+            stdout: "5.1.19041.4648",
+            stderr: "",
+          },
+        },
+      ),
+    ).refresh();
+    expect(caps.specKit).toMatchObject({ state: "available", version: "5.1.19041" });
+  });
+
   it("notifies listeners only when capabilities change", async () => {
     const commands = runner({}, {});
     const probe = service(host({}), commands);

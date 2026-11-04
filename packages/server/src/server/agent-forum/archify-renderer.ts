@@ -37,11 +37,15 @@ const MAX_ERRORS = 25;
 const MAX_MESSAGE_CHARS = 2_000;
 // meta.output is required by archify's schema but meaningless here: the daemon chooses where the HTML
 // is stored. The wrapper always sets it so agents need not, and so an authored path is never used.
-const RENDER_OUTPUT_NAME = "diagram.html";
+export const ARCHIFY_RENDER_OUTPUT_NAME = "diagram.html";
+const RENDER_OUTPUT_NAME = ARCHIFY_RENDER_OUTPUT_NAME;
 
-// Source layout: src/server/agent-forum → ../../../vendor/archify (packages/server/vendor/archify).
-// Build layout:  dist/server/server/agent-forum → ../../vendor/archify (dist/server/vendor/archify).
-const VENDOR_CANDIDATES = ["../../../vendor/archify", "../../vendor/archify"];
+// Source layout: src/server/agent-forum → ../../../vendor/<dir> (packages/server/vendor/<dir>).
+// Build layout:  dist/server/server/agent-forum → ../../vendor/<dir> (dist/server/vendor/<dir>).
+// "archify" is 3.0.1 for Team mode (spec 23); "archify-3.2.0" serves the agent activity graph
+// (spec 31, ADR-0031).
+export type ArchifyVendorName = "archify" | "archify-3.2.0";
+const VENDOR_PREFIXES = ["../../../vendor/", "../../vendor/"];
 
 // A child process cannot read inside app.asar, so a packaged daemon uses the unpacked copy
 // (electron-builder asarUnpack lists the vendor directory).
@@ -50,13 +54,13 @@ function toExternalPath(filePath: string): string {
   return unpacked !== filePath && existsSync(unpacked) ? unpacked : filePath;
 }
 
-export function resolveArchifyVendorDir(): string {
+export function resolveArchifyVendorDir(name: ArchifyVendorName = "archify"): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
-  for (const candidate of VENDOR_CANDIDATES) {
-    const dir = path.resolve(here, candidate);
+  for (const prefix of VENDOR_PREFIXES) {
+    const dir = path.resolve(here, `${prefix}${name}`);
     if (existsSync(path.join(dir, "assets", "template.html"))) return toExternalPath(dir);
   }
-  throw new Error("archify renderer is not bundled with this daemon (vendor/archify missing)");
+  throw new Error(`archify renderer is not bundled with this daemon (vendor/${name} missing)`);
 }
 
 function fail(message: string, pointer = "/"): ArchifyRenderResult {
@@ -157,8 +161,15 @@ interface ChildOutcome {
   timedOut: boolean;
 }
 
-function runRenderer(scriptPath: string, inputPath: string, outputPath: string, cwd: string) {
+function runRenderer(
+  scriptPath: string,
+  inputPath: string,
+  outputPath: string,
+  cwd: string,
+  extraEnv: Record<string, string> = {},
+) {
   const { command, args, env } = buildSelfNodeCommand([scriptPath, inputPath, outputPath], {
+    ...extraEnv,
     ARCHIFY_DIAGNOSTIC_FORMAT: "json",
     ARCHIFY_UPDATE_CHECK_DISABLED: "1",
     // Repository evidence would shell out to git against a host path; never enable it here.
@@ -188,31 +199,56 @@ function runRenderer(scriptPath: string, inputPath: string, outputPath: string, 
   });
 }
 
-export async function renderArchifyDiagram(
-  input: ArchifyRenderInput,
-): Promise<ArchifyRenderResult> {
-  const prepared = prepareArchifyDocument(input);
-  if (!prepared.ok) return prepared.result;
-  const vendorDir = resolveArchifyVendorDir();
+export type ArchifyRunResult =
+  | { ok: true; html: string }
+  | { ok: false; errors: ArchifyDiagramError[] };
+
+// Runs one vendored renderer on an already prepared document (meta.output pinned by the caller).
+export async function runArchifyRenderer(input: {
+  vendor: ArchifyVendorName;
+  diagramType: string;
+  json: string;
+  env?: Record<string, string>;
+}): Promise<ArchifyRunResult> {
+  const vendorDir = resolveArchifyVendorDir(input.vendor);
   const scriptPath = path.join(
     vendorDir,
     "renderers",
-    prepared.diagramType,
-    `render-${prepared.diagramType}.mjs`,
+    input.diagramType,
+    `render-${input.diagramType}.mjs`,
   );
   const workDir = await mkdtemp(path.join(tmpdir(), "jad-archify-"));
   try {
     const inputPath = path.join(workDir, "diagram.json");
     const outputPath = path.join(workDir, RENDER_OUTPUT_NAME);
-    await writeFile(inputPath, prepared.json, "utf8");
-    const outcome = await runRenderer(scriptPath, inputPath, outputPath, workDir);
+    await writeFile(inputPath, input.json, "utf8");
+    const outcome = await runRenderer(scriptPath, inputPath, outputPath, workDir, input.env);
     if (outcome.timedOut) {
-      return fail(`archify render timed out after ${RENDER_TIMEOUT_MS / 1000}s`);
+      return {
+        ok: false,
+        errors: [
+          { path: "/", message: `archify render timed out after ${RENDER_TIMEOUT_MS / 1000}s` },
+        ],
+      };
     }
     if (outcome.code !== 0) return { ok: false, errors: parseRendererFailure(outcome.stderr) };
     const html = await readFile(outputPath, "utf8");
-    return { ok: true, diagramType: prepared.diagramType, html };
+    return { ok: true, html };
   } finally {
     await rm(workDir, { recursive: true, force: true });
   }
+}
+
+export async function renderArchifyDiagram(
+  input: ArchifyRenderInput,
+): Promise<ArchifyRenderResult> {
+  const prepared = prepareArchifyDocument(input);
+  if (!prepared.ok) return prepared.result;
+  const result = await runArchifyRenderer({
+    vendor: "archify",
+    diagramType: prepared.diagramType,
+    json: prepared.json,
+  });
+  if (!result.ok) return result;
+  return { ok: true, diagramType: prepared.diagramType, html: result.html };
 }

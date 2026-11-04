@@ -72,6 +72,9 @@ import { resolveStreamRenderStrategy } from "./strategy-resolver";
 import { type StreamSegmentRenderers, type StreamViewportHandle } from "./strategy";
 import { ChatOutlineRail } from "@/agent-stream/chat-outline/rail";
 import { useChatOutline } from "@/agent-stream/chat-outline/use-chat-outline";
+import { flashTimelineRow } from "@/agent-stream/flash-row";
+import { resolveNodeAction, type ActivityNodeAction } from "@/activity-graph/activity-graph-target";
+import type { ActivityGraphNodeRef } from "@jagentdesk/protocol/agent-activity-graph";
 import { ChatFind } from "@/agent-stream/chat-find";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import { planTimelineTailFetch } from "@/timeline/timeline-sync-plan";
@@ -261,6 +264,9 @@ function renderLiveHeadStreamItem(input: {
 export interface AgentStreamViewHandle {
   scrollToBottom(reason?: BottomAnchorLocalRequest["reason"]): void;
   prepareForViewportChange(): void;
+  // Agent activity graph (spec 31.4): scroll to and flash the row a node points at. Returns what
+  // the node leads to, so the caller can open a subagent panel instead.
+  revealActivityNode(ref: ActivityGraphNodeRef): ActivityNodeAction;
 }
 
 /**
@@ -658,6 +664,9 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       [effectiveStreamItems, effectiveStreamHead],
     );
 
+    const activityRevealRef = useRef({ items: chatFindItems, revealLoadedHistory });
+    activityRevealRef.current = { items: chatFindItems, revealLoadedHistory };
+
     useImperativeHandle(
       ref,
       () => ({
@@ -666,6 +675,20 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         },
         prepareForViewportChange() {
           viewportRef.current?.prepareForViewportChange();
+        },
+        revealActivityNode(nodeRef) {
+          const { items, revealLoadedHistory: reveal } = activityRevealRef.current;
+          const action = resolveNodeAction(nodeRef, items);
+          if (action.kind === "bottom") viewportRef.current?.scrollToBottom("jump-to-bottom");
+          if (action.kind !== "timeline") return action;
+          // A row above the mounted history window mounts first, then the viewport scrolls to it.
+          reveal?.(action.itemId);
+          const scroll = () => {
+            viewportRef.current?.scrollToMessage?.(action.itemId);
+            flashTimelineRow(action.itemId);
+          };
+          requestAnimationFrame(() => requestAnimationFrame(scroll));
+          return action;
         },
       }),
       [],

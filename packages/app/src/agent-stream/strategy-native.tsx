@@ -368,6 +368,9 @@ function NativeStreamViewport(props: StreamRenderInput & { strategy: StreamStrat
     bottomAnchorController.prepareForStickyContentChange();
   }, [bottomAnchorController, historyRows, segments.liveHead]);
 
+  const historyRowIdsRef = useRef<readonly { id: string }[]>([]);
+  historyRowIdsRef.current = historyItems;
+
   useEffect(() => {
     const handle: StreamViewportHandle = {
       scrollToBottom: (reason = "jump-to-bottom") => {
@@ -379,6 +382,17 @@ function NativeStreamViewport(props: StreamRenderInput & { strategy: StreamStrat
       prepareForViewportChange: () => {
         bottomAnchorController.prepareForStickyViewportChange();
         markNativeViewportSettling();
+      },
+      // Activity graph node → transcript row (spec 31.4). scrollToIndex takes the data index
+      // (the list renders `historyRows`, same order as historyItems); viewPosition 0.5 centers it.
+      scrollToMessage: (itemId) => {
+        const index = historyRowIdsRef.current.findIndex((row) => row.id === itemId);
+        if (index === -1) return;
+        try {
+          flatListRef.current?.scrollToIndex({ index, viewPosition: 0.5, animated: true });
+        } catch {
+          // Unmeasured row: onScrollToIndexFailed retries after an approximate scroll.
+        }
       },
     };
     viewportRef.current = handle;
@@ -593,6 +607,27 @@ function NativeStreamViewport(props: StreamRenderInput & { strategy: StreamStrat
     );
   }, [historyStartPaginationState]);
 
+  const handleScrollToIndexFailed = useCallback(
+    (info: { index: number; averageItemLength: number }) => {
+      flatListRef.current?.scrollToOffset({
+        offset: info.averageItemLength * info.index,
+        animated: false,
+      });
+      setTimeout(() => {
+        try {
+          flatListRef.current?.scrollToIndex({
+            index: info.index,
+            viewPosition: 0.5,
+            animated: true,
+          });
+        } catch {
+          // Still unmeasured: leave the approximate position.
+        }
+      }, 80);
+    },
+    [],
+  );
+
   // RN's FlatList strictMode keeps its internal renderItem wrapper stable when
   // data or the live header changes, preserving the row identities above.
   return (
@@ -622,6 +657,7 @@ function NativeStreamViewport(props: StreamRenderInput & { strategy: StreamStrat
       removeClippedSubviews={false}
       scrollEnabled={scrollEnabled}
       showsVerticalScrollIndicator
+      onScrollToIndexFailed={handleScrollToIndexFailed}
       inverted
     />
   );

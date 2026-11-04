@@ -167,6 +167,8 @@ export class HostCapabilityService {
     const probes: Record<HostCapabilityId, () => Promise<HostCapability>> = {
       iosSimulators: () => this.probeIosSimulators(),
       androidDevices: () => this.probeAndroid(),
+      androidPhysical: () => this.probeAndroidPhysical(),
+      iosPhysical: () => this.probeIosPhysical(),
       docker: () => this.probeDocker(),
       helm: () => this.probeVersioned("helm", ["version", "--short"], ["helm"]),
       proxySystemCapture: () => this.probeSystemProxy(),
@@ -177,6 +179,8 @@ export class HostCapabilityService {
       forgeGh: () => this.probeVersioned("gh", ["--version"], ["gh"]),
       forgeGlab: () => this.probeVersioned("glab", ["--version"], ["glab"]),
       forgeTea: () => this.probeVersioned("tea", ["--version"], ["tea"]),
+      specKit: () => this.probeSpecKit(),
+      iosSideload: () => this.probeIosSideload(),
     };
     const entries = await Promise.all(
       Object.entries(probes).map(async ([id, probe]) => {
@@ -205,6 +209,19 @@ export class HostCapabilityService {
     const result = await this.runner.run(resolved, args);
     if (!result.ok) return missing(`${binary} is installed but does not run`, installable);
     return available(parseVersion(`${result.stdout}\n${result.stderr}`));
+  }
+
+  /** go-ios to reach devices, zsign to sign (macOS falls back to codesign). */
+  private async probeIosSideload(): Promise<HostCapability> {
+    const goIos = await this.runner.find("ios");
+    const goIosRuns = goIos ? (await this.runner.run(goIos, ["version"])).ok : false;
+    const zsign = await this.runner.find("zsign");
+    const zsignResult = zsign ? await this.runner.run(zsign, ["-v"]) : null;
+    const signer = zsignResult?.ok === true || this.host.platform === "darwin";
+    const installable = [...(goIosRuns ? [] : ["go-ios"]), ...(signer ? [] : ["zsign"])];
+    if (!goIosRuns) return missing("go-ios is needed to reach iPhones and iPads", installable);
+    if (!signer) return missing("zsign is needed to sign apps on this host", installable);
+    return available(zsignResult?.ok ? parseVersion(zsignResult.stdout) : null);
   }
 
   private async probeIosSimulators(): Promise<HostCapability> {
@@ -253,6 +270,49 @@ export class HostCapabilityService {
     return available(parseVersion(result.stdout));
   }
 
+  // Spec 27.2: a phone needs only the host's adb (never bundled: the SDK license forbids it), which
+  // runs everywhere the emulator does not.
+  private async probeAndroidPhysical(): Promise<HostCapability> {
+    const exe = this.host.platform === "win32" ? "adb.exe" : "adb";
+    const sdkAdb = androidSdkCandidates(this.host)
+      .map((root) => path.join(root, "platform-tools", exe))
+      .find((candidate) => this.host.exists(candidate));
+    const adb = sdkAdb ?? (await this.runner.find("adb"));
+    if (!adb) {
+      return missing("Install Android SDK Platform-Tools (adb) to use Android phones", [
+        "android-sdk",
+      ]);
+    }
+    const result = await this.runner.run(adb, ["version"]);
+    if (!result.ok) return missing("adb is installed but does not run", ["android-sdk"]);
+    return available(parseVersion(result.stdout));
+  }
+
+  // Spec 27.2: go-ios (bundled with the desktop app, or installed) plus the OS's usbmuxd.
+  private async probeIosPhysical(): Promise<HostCapability> {
+    const exe = this.host.platform === "win32" ? "ios.exe" : "ios";
+    const installed = path.join(this.host.jagentdeskHome, "tools", "bin", exe);
+    const goIos = (await this.bundledGoIos()) ?? (this.host.exists(installed) ? installed : null);
+    const resolved = goIos ?? (await this.runner.find("ios"));
+    if (!resolved) return missing("go-ios is not installed on this host", ["go-ios"]);
+    const result = await this.runner.run(resolved, ["version"]);
+    if (!result.ok || !/"version"/.test(result.stdout)) {
+      return missing("go-ios is installed but does not run", ["go-ios"]);
+    }
+    if (this.host.platform === "linux" && !this.host.exists("/var/run/usbmuxd")) {
+      return missing(
+        "Install and start usbmuxd to use iPhones and iPads (sudo apt install usbmuxd)",
+      );
+    }
+    return available(parseVersion(result.stdout));
+  }
+
+  // The desktop app points the daemon at the go-ios it bundles (packages/desktop/src/main.ts).
+  private async bundledGoIos(): Promise<string | null> {
+    const bundled = this.host.env.JAGENTDESK_GO_IOS_BIN;
+    return bundled && this.host.exists(bundled) ? bundled : null;
+  }
+
   private async probeDocker(): Promise<HostCapability> {
     const docker = await this.runner.find("docker");
     if (!docker) {
@@ -280,6 +340,34 @@ export class HostCapabilityService {
     }
     const networksetup = await this.runner.find("networksetup");
     return networksetup ? available(null) : missing("networksetup is not available on this host");
+  }
+
+  /**
+   * Spec mode runs spec-kit's helper scripts in the workspace (spec 28.3 step 1): the bash
+   * variant reads JSON with jq or python3, the Windows variant needs PowerShell 5.1+.
+   */
+  private async probeSpecKit(): Promise<HostCapability> {
+    if (this.host.platform === "win32") {
+      for (const shell of ["pwsh", "powershell"]) {
+        const resolved = await this.runner.find(shell);
+        if (!resolved) continue;
+        const result = await this.runner.run(resolved, [
+          "-NoProfile",
+          "-Command",
+          "$PSVersionTable.PSVersion.ToString()",
+        ]);
+        const version = result.ok ? parseVersion(result.stdout) : null;
+        const [major = 0, minor = 0] = (version ?? "0.0").split(".").map(Number);
+        if (major > 5 || (major === 5 && minor >= 1)) return available(version);
+      }
+      return missing("Requires PowerShell 5.1 or newer");
+    }
+    if (!(await this.runner.find("bash"))) return missing("Requires bash");
+    const jq = await this.runner.find("jq");
+    if (jq && (await this.runner.run(jq, ["--version"])).ok) return available(null);
+    const python = await this.runner.find("python3");
+    if (python && (await this.runner.run(python, ["--version"])).ok) return available(null);
+    return missing("Requires jq or python3", ["jq"]);
   }
 
   private async probeJava(): Promise<HostCapability> {

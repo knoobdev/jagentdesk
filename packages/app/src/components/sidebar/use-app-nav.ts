@@ -9,9 +9,11 @@ import {
   GitPullRequest,
   History,
   Home,
+  KanbanSquare,
   Radar,
   Server,
   Share2,
+  Ship,
   Smartphone,
   Sparkles,
   Store,
@@ -29,11 +31,18 @@ import { useSessionStore } from "@/stores/session-store";
 import { hostSupportsCapability } from "@/utils/server-info-capabilities";
 import type { HostCapabilityId } from "@jagentdesk/protocol/host-capabilities";
 
-/** Capabilities behind the device fleet (Android joins when its backend ships). */
-const DEVICE_CAPABILITIES: readonly HostCapabilityId[] = ["iosSimulators"];
+/** Capabilities behind the device fleet: simulators, physical phones (spec 27.2), or sideload (26.9). */
+const DEVICE_CAPABILITIES: readonly HostCapabilityId[] = [
+  "iosSimulators",
+  "androidDevices",
+  "androidPhysical",
+  "iosPhysical",
+  "iosSideload",
+];
 import { useWorkspace } from "@/stores/session-store-hooks";
 import {
   buildAgentForumRoute,
+  buildArgoCdRoute,
   buildClusterWorkloadsRoute,
   buildClustersRoute,
   buildDatabaseBrowseRoute,
@@ -41,6 +50,7 @@ import {
   buildDockerRoute,
   buildForgeRoute,
   buildInsightsRoute,
+  buildJiraRoute,
   buildMarketplaceRoute,
   buildNewWorkspaceRoute,
   buildOpenProjectRoute,
@@ -65,7 +75,11 @@ export interface AppNavTargets {
   dockerRoute: Href | null;
   simulatorRoute: Href | null;
   proxyRoute: Href | null;
+  /** Spec 30.3: the daemon ships Argo CD; null hides the entry. */
+  argoCdRoute: Href | null;
   supportsForgeHub: boolean;
+  /** Spec 29: Jira surface, when the daemon advertises `jira`. */
+  jiraRoute: Href | null;
   /** Spec 25: daemon build ships the SSH servers surface (S1+). */
   supportsSshServers: boolean;
 }
@@ -80,8 +94,14 @@ export function useAppNavTargets(): AppNavTargets {
   const supportsForgeHub = useSessionStore(
     (state) => state.sessions[firstServerId]?.serverInfo?.features?.forgeHub === true,
   );
+  const supportsJira = useSessionStore(
+    (state) => state.sessions[firstServerId]?.serverInfo?.features?.jira === true,
+  );
   const supportsSshServers = useSessionStore(
     (state) => state.sessions[firstServerId]?.serverInfo?.features?.sshServers === true,
+  );
+  const supportsArgoCd = useSessionStore(
+    (state) => state.sessions[firstServerId]?.serverInfo?.features?.argocd === true,
   );
   // Spec 24.4: devices open on the first host that can run simulators; none → no entry.
   const deviceServerId = useSessionStore(
@@ -121,14 +141,18 @@ export function useAppNavTargets(): AppNavTargets {
       dockerRoute: perHost(buildDockerRoute),
       simulatorRoute: deviceServerId ? (buildSimulatorRoute(deviceServerId) as Href) : null,
       proxyRoute: perHost(buildProxyRoute),
+      argoCdRoute: supportsArgoCd ? perHost(buildArgoCdRoute) : null,
       supportsForgeHub,
       supportsSshServers,
+      jiraRoute: supportsJira ? perHost(buildJiraRoute) : null,
     };
   }, [
+    supportsJira,
     deviceServerId,
     firstServerId,
     lastCluster,
     lastDatabase,
+    supportsArgoCd,
     supportsForgeHub,
     supportsSshServers,
   ]);
@@ -237,6 +261,7 @@ export function useAppNavItems(): AppNavItem[] {
         pathname,
         "/cluster",
       ),
+      navItem("argocd", Ship, "Argo CD", "Argo CD", targets.argoCdRoute, pathname, "/argocd"),
       navItem(
         "usage",
         BarChart3,
@@ -246,6 +271,7 @@ export function useAppNavItems(): AppNavItem[] {
         pathname,
         "/insights",
       ),
+      navItem("jira", KanbanSquare, "Jira", "Jira", targets.jiraRoute, pathname, "/jira"),
       targets.supportsForgeHub
         ? navItem("forge", GitPullRequest, "Forge", "Forge", targets.forgeRoute, pathname, "/forge")
         : null,

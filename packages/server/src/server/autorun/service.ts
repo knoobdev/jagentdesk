@@ -54,6 +54,9 @@ type AutorunAgentManager = Pick<
   "cancelAgentRun" | "getAgent" | "hasInFlightRun" | "runAgent"
 >;
 
+/** Returns why autonomous mode may not start for the agent, or null. */
+export type AutorunStartGuard = (agentId: string) => Promise<string | null>;
+
 export interface AutorunServiceOptions {
   jagentdeskHome: string;
   logger: Logger;
@@ -79,6 +82,7 @@ export class AutorunService {
   private readonly idleBackoffMaxMs: number;
   private readonly driving = new Set<string>();
   private readonly interrupts = new Set<string>();
+  private startGuard: AutorunStartGuard | null = null;
 
   constructor(options: AutorunServiceOptions) {
     this.store = new AutorunStore(join(options.jagentdeskHome, "autoruns"));
@@ -117,6 +121,11 @@ export class AutorunService {
     );
   }
 
+  /** Spec mode and autonomous mode exclude each other (spec 28.4 step 6). */
+  setStartGuard(guard: AutorunStartGuard | null): void {
+    this.startGuard = guard;
+  }
+
   async list(): Promise<AutorunState[]> {
     return this.store.list();
   }
@@ -132,6 +141,8 @@ export class AutorunService {
     if (!this.agentManager.getAgent(agentId)) {
       throw new Error(`Agent ${agentId} is not active`);
     }
+    const blocked = await this.startGuard?.(agentId);
+    if (blocked) throw new Error(blocked);
     const now = this.now();
     const existing = await this.store.get(agentId);
     const next: AutorunState = existing
