@@ -78,12 +78,12 @@ function useTouchMapping(
   return { state, point };
 }
 
-function useDeviceLogs(client: DaemonClient | null, device: SimDevice): string {
+// Streams a device's log while `active`; also used by the physical device panel.
+export function useDeviceLogs(client: DaemonClient | null, udid: string, active: boolean): string {
   const [logs, setLogs] = useState("");
   useEffect(() => {
     setLogs("");
-    if (!client || !device.isBooted) return;
-    const udid = device.udid;
+    if (!client || !active) return;
     let cancelled = false;
     const subId = randomId("sim-log");
     const off = client.onSimulatorLogChunk(subId, (chunk) => {
@@ -95,7 +95,7 @@ function useDeviceLogs(client: DaemonClient | null, device: SimDevice): string {
       off();
       client.simulatorLogsUnsubscribe({ subscriptionId: subId });
     };
-  }, [client, device.udid, device.isBooted]);
+  }, [client, udid, active]);
   return logs;
 }
 
@@ -130,7 +130,7 @@ export function SimDrivePanel({
   const [tab, setTab] = useState<DriveTab>("screen");
   const shot = useScreenshot(client, device.udid, device.isBooted, DRIVE_POLL_MS, DRIVE_MAX_DIM);
   const touch = useTouchMapping(client, device, hidAvailable);
-  const logs = useDeviceLogs(client, device);
+  const logs = useDeviceLogs(client, device.udid, device.isBooted);
   const [stage, setStage] = useState({ w: 0, h: 0 });
   const imgLayout = useRef({ w: 0, h: 0 });
   const busy = pendingAction !== null;
@@ -291,20 +291,32 @@ export function SimDrivePanel({
           {hint ? <Text style={styles.hint}>{hint}</Text> : null}
         </>
       ) : (
-        <LogsTab logs={logs} booted={device.isBooted} />
+        <LogsTab
+          logs={logs}
+          active={device.isBooted}
+          idleText="Boot the simulator to stream its logs."
+        />
       )}
     </View>
   );
 }
 
-function LogsTab({ logs, booted }: { logs: string; booted: boolean }) {
+export function LogsTab({
+  logs,
+  active,
+  idleText,
+}: {
+  logs: string;
+  active: boolean;
+  idleText: string;
+}) {
   const scrollRef = useRef<ScrollView>(null);
   // Follow the tail like `log stream` does.
   const onContentSizeChange = useCallback(() => {
     scrollRef.current?.scrollToEnd({ animated: false });
   }, []);
-  if (!booted) {
-    return <Text style={styles.hint}>Boot the simulator to stream its logs.</Text>;
+  if (!active) {
+    return <Text style={styles.hint}>{idleText}</Text>;
   }
   if (!logs) {
     return (

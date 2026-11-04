@@ -78,3 +78,28 @@ app keeps hidden copies of screens mounted, so filter to elements with a non-zer
 box or measurements hit the hidden copy. Erase / Delete confirm through a **native** macOS
 dialog (`desktopApi.dialog.ask`). Clicking them from an automated test pops a real dialog on
 the user's screen.
+
+## Physical devices (phones, tablets, adb emulators)
+
+Spec 27 / ADR-0033 in the spec repo. `packages/server/src/server/devices/` owns them through one
+daemon-wide `PhysicalDeviceHub` (session and agent tools share it); udids are
+`android:serial:<serial>` and `ios:<udid>`. Physical devices (`kind: "physical"`) start with
+control off (`$JAGENTDESK_HOME/devices/physical.json`); while off, every capture, log, UI-tree,
+input and install call answers `control_disabled`, and agents also need the card that lasts until
+the agent's session ends (`agent/tools/sim-device-target.ts`, `devices/agent-grants.ts`). Emulators
+that adb finds keep simulator behaviour: no switch, no card.
+
+Gotchas that cost time:
+
+- **scrcpy-server `cleanup=true` deletes its jar on exit.** Push it on every session start.
+- **No `-fflags nobuffer` on the ffmpeg decoder.** With the raw `h264` demuxer it discards every
+  frame and ffmpeg exits 0 with no output.
+- **scrcpy only encodes when the screen changes.** A static screen yields no frames, so a late
+  subscriber is handed the last frame; measure fps while something moves.
+- **`ios forward` and `ios ui run` bind `0.0.0.0`.** WebDriverAgent is reached through the
+  daemon's own usbmux forward on `127.0.0.1` (`usbmux.ts`); the go-ios tunnel agent binds
+  `127.0.0.1` already.
+- **Never `adb tcpip`.** `adb.ts` refuses it at the one place every adb call goes through; Wi-Fi is
+  wireless debugging (`adb pair` + `adb connect`).
+- Screen frames are binary opcode `0x20` only for clients advertising `binary_screen_frames`;
+  older clients keep polling `simulator/screenshot`, which works for physical devices too.

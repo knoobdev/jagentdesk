@@ -57,6 +57,13 @@ import type {
   SimTapPayload,
   SimTerminateAppPayload,
   SimUnslimPayload,
+  SimCoords,
+  SimPhysicalEnablePayload,
+  SimPhysicalDisablePayload,
+  SimPhysicalPairWirelessPayload,
+  SimPhysicalPreparePayload,
+  SimPhysicalPrepareProgressPayload,
+  SimScreenSubscribePayload,
 } from "@jagentdesk/protocol/simulator/rpc-schemas";
 import type {
   SshAuthPrompt,
@@ -302,6 +309,9 @@ import {
   decodeFileTransferFrame,
   encodeFileTransferFrame,
   decodeTerminalStreamFrame,
+  decodeScreenFrame,
+  type ScreenFrame,
+  ScreenFrameOpcode,
   FileTransferOpcode,
   TerminalStreamOpcode,
   type FileTransferFrame,
@@ -1791,6 +1801,8 @@ export class DaemonClient {
   private execCallbacks = new Map<string, (data: string) => void>();
   private pfCallbacks = new Map<string, (data: string) => void>();
   private readonly terminalStreams = new TerminalStreamRouter();
+  // Spec 27.5: live device screens arrive as binary frames keyed by subscriptionId.
+  private readonly screenFrameHandlers = new Map<string, (frame: ScreenFrame) => void>();
   private pendingBinaryFileReads = new Map<string, PendingBinaryFileRead>();
   private activeBinaryFileTransfers = new Map<string, BinaryFileTransferState>();
   private completedBinaryFileReads = new Map<string, FileReadResult>();
@@ -8690,10 +8702,17 @@ export class DaemonClient {
     udid: string;
     x: number;
     y: number;
+    coords?: SimCoords;
   }): Promise<SimTapPayload> {
     return this.sendCorrelatedSessionRequest({
       requestId: options.requestId,
-      message: { type: "simulator/tap", udid: options.udid, x: options.x, y: options.y },
+      message: {
+        type: "simulator/tap",
+        udid: options.udid,
+        x: options.x,
+        y: options.y,
+        ...(options.coords ? { coords: options.coords } : {}),
+      },
       responseType: "simulator/tap/response",
     });
   }
@@ -8706,6 +8725,7 @@ export class DaemonClient {
     x2: number;
     y2: number;
     durationMs?: number;
+    coords?: SimCoords;
   }): Promise<SimSwipePayload> {
     return this.sendCorrelatedSessionRequest({
       requestId: options.requestId,
@@ -8717,6 +8737,7 @@ export class DaemonClient {
         x2: options.x2,
         y2: options.y2,
         ...(options.durationMs !== undefined ? { durationMs: options.durationMs } : {}),
+        ...(options.coords ? { coords: options.coords } : {}),
       },
       responseType: "simulator/swipe/response",
     });
@@ -8926,6 +8947,117 @@ export class DaemonClient {
   ): () => void {
     return this.on("simulator/log-chunk", (message) => {
       if (message.payload.subscriptionId === subscriptionId) handler(message.payload);
+    });
+  }
+
+  async simulatorPhysicalEnable(options: {
+    udid: string;
+    requestId?: string;
+  }): Promise<SimPhysicalEnablePayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "simulator/physical/enable", udid: options.udid },
+      responseType: "simulator/physical/enable/response",
+    });
+  }
+
+  async simulatorPhysicalDisable(options: {
+    udid: string;
+    requestId?: string;
+  }): Promise<SimPhysicalDisablePayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "simulator/physical/disable", udid: options.udid },
+      responseType: "simulator/physical/disable/response",
+    });
+  }
+
+  // iOS Prepare device: signing + installing WebDriverAgent takes minutes on a first run.
+  async simulatorPhysicalPrepare(options: {
+    udid: string;
+    accountId?: string;
+    requestId?: string;
+  }): Promise<SimPhysicalPreparePayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "simulator/physical/prepare",
+        udid: options.udid,
+        ...(options.accountId ? { accountId: options.accountId } : {}),
+      },
+      responseType: "simulator/physical/prepare/response",
+      timeout: 15 * 60_000,
+    });
+  }
+
+  onSimulatorPrepareProgress(
+    requestId: string,
+    handler: (progress: SimPhysicalPrepareProgressPayload) => void,
+  ): () => void {
+    return this.on("simulator/physical/prepare/progress", (message) => {
+      if (message.payload.requestId === requestId) handler(message.payload);
+    });
+  }
+
+  async simulatorPhysicalPairWireless(options: {
+    host: string;
+    pairingPort: number;
+    pairingCode: string;
+    connectPort: number;
+    requestId?: string;
+  }): Promise<SimPhysicalPairWirelessPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "simulator/physical/pair_wireless",
+        host: options.host,
+        pairingPort: options.pairingPort,
+        pairingCode: options.pairingCode,
+        connectPort: options.connectPort,
+      },
+      responseType: "simulator/physical/pair_wireless/response",
+      timeout: 60_000,
+    });
+  }
+
+  // Register the frame handler before subscribing: the first frame can beat the response.
+  onSimulatorScreenFrame(
+    subscriptionId: string,
+    handler: (frame: ScreenFrame) => void,
+  ): () => void {
+    this.screenFrameHandlers.set(subscriptionId, handler);
+    return () => {
+      if (this.screenFrameHandlers.get(subscriptionId) === handler) {
+        this.screenFrameHandlers.delete(subscriptionId);
+      }
+    };
+  }
+
+  async simulatorScreenSubscribe(options: {
+    subscriptionId: string;
+    udid: string;
+    maxFps?: number;
+    requestId?: string;
+  }): Promise<SimScreenSubscribePayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "simulator/screen/subscribe",
+        subscriptionId: options.subscriptionId,
+        udid: options.udid,
+        ...(options.maxFps ? { maxFps: options.maxFps } : {}),
+      },
+      responseType: "simulator/screen/subscribe/response",
+      timeout: 60_000,
+    });
+  }
+
+  simulatorScreenUnsubscribe(options: { subscriptionId: string }): void {
+    this.screenFrameHandlers.delete(options.subscriptionId);
+    this.sendSessionMessage({
+      type: "simulator/screen/unsubscribe",
+      requestId: this.createRequestId(),
+      subscriptionId: options.subscriptionId,
     });
   }
 
@@ -10320,6 +10452,7 @@ export class DaemonClient {
             [CLIENT_CAPS.projectUpdates]: true,
             [CLIENT_CAPS.archifyDiagrams]: true,
             [CLIENT_CAPS.activityGraph]: true,
+            [CLIENT_CAPS.binaryScreenFrames]: true,
             ...this.config.capabilities,
           },
           ...(this.config.appVersion ? { appVersion: this.config.appVersion } : {}),
@@ -10677,6 +10810,14 @@ export class DaemonClient {
   }
 
   private tryHandleBinaryFrame(rawBytes: Uint8Array): boolean {
+    if (rawBytes[0] === ScreenFrameOpcode) {
+      const screenFrame = decodeScreenFrame(rawBytes);
+      if (!screenFrame) return false;
+      this.consecutiveLivenessFailures = 0;
+      this.screenFrameHandlers.get(screenFrame.subscriptionId)?.(screenFrame);
+      this.runtimeMetrics?.recordBinaryFrame("other", rawBytes.byteLength, 0);
+      return true;
+    }
     const fileFrame = decodeFileTransferFrame(rawBytes);
     if (fileFrame) {
       this.consecutiveLivenessFailures = 0;

@@ -46,7 +46,7 @@ export interface ReleaseAssetSpec {
   kind: ArchiveKind;
   /** File name of the binary inside the archive (searched anywhere in it). */
   binaryName: string;
-  /** Name in `tools/bin` when it differs from `binaryName` (go-ios ships `ios-amd64`). */
+  /** Installed file name when it differs from binaryName (go-ios ships `ios-<arch>` on Linux). */
   installAs?: string;
 }
 
@@ -240,6 +240,15 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
     },
     notes: ["Maestro needs Java 17 or newer."],
   },
+  // ffmpeg turns an Android phone's H.264 screen into JPEG frames (spec 27.1); without it the screen
+  // falls back to screenshots. Package managers only: vendors publish no single release asset.
+  ffmpeg: {
+    id: "ffmpeg",
+    binary: "ffmpeg",
+    capability: "androidPhysical",
+    managers: { brew: "ffmpeg", winget: { id: "Gyan.FFmpeg" }, scoop: "ffmpeg" },
+    manualHints: ["sudo apt install ffmpeg", "sudo dnf install ffmpeg", "sudo pacman -S ffmpeg"],
+  },
 };
 
 // Sideload helpers (spec 26.5, ADR-0032 §6): both MIT, run as separate processes, pinned to
@@ -308,10 +317,12 @@ TOOL_REGISTRY.zsign = {
   notes: ["zsign signs sideloaded IPAs (MIT, runs as a separate process)."],
 };
 
+// go-ios serves both real-device control (spec 27.1) and sideload (26.5); the desktop app bundles
+// it, a daemon installed without the app gets it here.
 TOOL_REGISTRY["go-ios"] = {
   id: "go-ios",
   binary: "ios",
-  capability: "iosSideload",
+  capability: "iosPhysical",
   managers: {},
   release: {
     source: { kind: "github-pinned", repo: "danielpaulus/go-ios", tag: "v1.3.2" },

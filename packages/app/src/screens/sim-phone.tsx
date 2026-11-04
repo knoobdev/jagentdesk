@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Image,
   type GestureResponderEvent,
+  type GestureResponderHandlers,
   type LayoutChangeEvent,
   Pressable,
   Text,
@@ -11,10 +12,15 @@ import {
 import { Play, Smartphone, Tablet } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
+import type { SimDevice } from "@jagentdesk/protocol/simulator/rpc-schemas";
+import { bytesToBase64 } from "@/components/proxy/base64";
 import { Skeleton } from "@/components/ui/skeleton";
 import { deviceAspect, deviceSpec, isTablet, pngAspect } from "@/screens/sim-device-spec";
 
 export const TILE_POLL_MS = 2000;
+// Spec 27.5: live device screens push up to 15 fps to the open panel, 2 fps per grid tile.
+export const DRIVE_LIVE_FPS = 15;
+export const TILE_LIVE_FPS = 2;
 export const DRIVE_POLL_MS = 900;
 // Long-edge caps: ~2× the drawn size, so frames stay crisp on retina without shipping full-res.
 export const TILE_MAX_DIM = 480;
@@ -75,6 +81,110 @@ export function useScreenshot(
   return shot;
 }
 
+// adb and usbmux devices (phones, tablets, adb emulators): served by the daemon's device hub,
+// live screen pushed as binary frames.
+export function isHubDevice(device: SimDevice): boolean {
+  return device.kind === "physical" || device.kind === "emulator";
+}
+
+// Spec 27.3: only physical devices have the control switch; emulators stay controllable.
+export function needsControlSwitch(device: SimDevice): boolean {
+  return device.kind === "physical";
+}
+
+export function isDeviceLive(device: SimDevice): boolean {
+  const controllable = !needsControlSwitch(device) || device.controlEnabled === true;
+  return isHubDevice(device) && controllable && device.readiness === "ready";
+}
+
+export interface LiveScreen {
+  shot: Screenshot | null;
+  // Frames received in the last second (binary push only).
+  fps: number | null;
+  mode: "live" | "poll" | "off";
+}
+
+const LIVE_OFF: LiveScreen = { shot: null, fps: null, mode: "off" };
+
+function randomScreenId(): string {
+  return `screen-${Math.random().toString(36).slice(2)}`;
+}
+
+// A gated device's screen: binary JPEG frames pushed by the daemon (ADR-0033); if the daemon
+// refuses the subscription the panel falls back to polling simulator/screenshot. Simulators keep
+// the polling path of useScreenshot.
+export function useDeviceScreen(
+  client: DaemonClient | null,
+  device: SimDevice,
+  options: { maxFps: number; pollMs: number; maxDim: number },
+): LiveScreen {
+  const gated = isHubDevice(device);
+  const polled = useScreenshot(
+    client,
+    gated ? null : device.udid,
+    device.isBooted,
+    options.pollMs,
+    options.maxDim,
+  );
+  const live = isDeviceLive(device);
+  const [screen, setScreen] = useState<LiveScreen>(LIVE_OFF);
+  const { maxFps, pollMs, maxDim } = options;
+  const udid = device.udid;
+  useEffect(() => {
+    setScreen(LIVE_OFF);
+    if (!client || !live) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const subscriptionId = randomScreenId();
+    const stamps: number[] = [];
+    const off = client.onSimulatorScreenFrame(subscriptionId, (frame) => {
+      if (cancelled) return;
+      const now = Date.now();
+      stamps.push(now);
+      while (stamps.length > 0 && now - stamps[0]! > 1000) stamps.shift();
+      setScreen({
+        shot: {
+          source: { uri: `data:image/jpeg;base64,${bytesToBase64(frame.jpeg)}` },
+          aspect: frame.width / frame.height,
+        },
+        fps: stamps.length,
+        mode: "live",
+      });
+    });
+    const poll = async () => {
+      try {
+        const res = await client.simulatorScreenshot({ udid, format: "jpeg", maxDim });
+        const data = res.imageBase64 || res.pngBase64;
+        if (!cancelled && data) {
+          const aspect = res.width && res.height ? res.width / res.height : null;
+          const uri = `data:${res.mimeType ?? "image/jpeg"};base64,${data}`;
+          setScreen({ shot: { source: { uri }, aspect }, fps: null, mode: "poll" });
+        }
+      } catch {
+        /* transient — next tick retries */
+      }
+      if (!cancelled) timer = setTimeout(() => void poll(), pollMs);
+    };
+    void client
+      .simulatorScreenSubscribe({ subscriptionId, udid, maxFps })
+      .then((res) => {
+        if (res.error && !cancelled) void poll();
+        return undefined;
+      })
+      .catch(() => {
+        if (!cancelled) void poll();
+      });
+    return () => {
+      cancelled = true;
+      off();
+      if (timer) clearTimeout(timer);
+      client.simulatorScreenUnsubscribe({ subscriptionId });
+    };
+  }, [client, udid, live, maxFps, pollMs, maxDim]);
+  if (!gated) return { shot: polled, fps: null, mode: polled ? "poll" : "off" };
+  return screen;
+}
+
 // Waiting state inside the device screen: a breathing skeleton behind a spinner + label, so a
 // cold boot or the first frame reads as "working", never as a dead black rectangle.
 function ScreenWaiting({ label }: { label: string }) {
@@ -104,6 +214,8 @@ export function PhoneScreen({
   onBoot,
   onLayout,
   onTap,
+  gestures,
+  waitingLabel,
 }: {
   name: string;
   typeName: string; // Apple device type, e.g. "iPhone SE (3rd generation)" — drives the geometry
@@ -116,6 +228,9 @@ export function PhoneScreen({
   onBoot?: () => void;
   onLayout?: (e: LayoutChangeEvent) => void;
   onTap?: (e: GestureResponderEvent) => void;
+  // Physical devices: raw touch handlers (tap, long press, swipe) instead of a single tap.
+  gestures?: GestureResponderHandlers;
+  waitingLabel?: string;
 }) {
   const tablet = isTablet(typeName);
   const spec = deviceSpec(typeName);
@@ -169,7 +284,15 @@ export function PhoneScreen({
   }, [spec, aspect, maxW, maxH, tablet]);
 
   let inner;
-  if (booted && source) {
+  if (booted && source && gestures) {
+    inner = (
+      <View style={styles.phoneFill} onLayout={onLayout} {...gestures}>
+        <View style={styles.phoneFill} pointerEvents="none">
+          <Image source={source} style={styles.phoneFill} resizeMode="cover" />
+        </View>
+      </View>
+    );
+  } else if (booted && source) {
     inner = (
       <Pressable style={styles.phoneFill} onPress={onTap} onLayout={onLayout} disabled={!onTap}>
         <Image source={source} style={styles.phoneFill} resizeMode="cover" />
@@ -178,7 +301,7 @@ export function PhoneScreen({
   } else if (booting) {
     inner = <ScreenWaiting label="Booting…" />;
   } else if (booted) {
-    inner = <ScreenWaiting label="Connecting…" />;
+    inner = <ScreenWaiting label={waitingLabel ?? "Connecting…"} />;
   } else if (onBoot) {
     inner = (
       <Pressable style={styles.phoneCenter} onPress={onBoot} accessibilityLabel={`Boot ${name}`}>

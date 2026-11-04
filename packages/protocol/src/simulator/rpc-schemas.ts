@@ -19,6 +19,9 @@ export const SimAvailabilitySchema = z.object({
   idb: z.boolean(),
   maestro: z.boolean(),
   xcode: z.boolean(),
+  // Spec 27: host tools behind physical devices. adb (Android, the host's own — never bundled),
+  // go-ios (iOS), ffmpeg (Android H.264 → JPEG; without it the screen falls back to screencap).
+  physical: z.object({ adb: z.boolean(), goIos: z.boolean(), ffmpeg: z.boolean() }).optional(),
 });
 export type SimAvailability = z.infer<typeof SimAvailabilitySchema>;
 
@@ -26,6 +29,28 @@ export type SimAvailability = z.infer<typeof SimAvailabilitySchema>;
 // stock = untouched; slim = fully slimmed; partial = some disabled; unknown = not yet read.
 export const SimSlimStateSchema = z.enum(["stock", "partial", "slim", "unknown"]);
 export type SimSlimState = z.infer<typeof SimSlimStateSchema>;
+
+export const SimPlatformSchema = z.enum(["ios", "android"]);
+export type SimPlatform = z.infer<typeof SimPlatformSchema>;
+
+export const SimDeviceKindSchema = z.enum(["simulator", "emulator", "physical"]);
+export type SimDeviceKind = z.infer<typeof SimDeviceKindSchema>;
+
+export const SimConnectionSchema = z.enum(["usb", "wifi"]);
+export type SimConnection = z.infer<typeof SimConnectionSchema>;
+
+// Spec 27.2: what still stands between a physical device and control, one step at a time.
+export const SimReadinessSchema = z.enum([
+  "ready",
+  "needs_trust",
+  "needs_unlock",
+  "needs_developer_mode",
+  "needs_wda",
+  "wda_expired",
+  "needs_usb_debugging",
+  "offline",
+]);
+export type SimReadiness = z.infer<typeof SimReadinessSchema>;
 
 export const SimDeviceSchema = z.object({
   udid: z.string(),
@@ -35,6 +60,16 @@ export const SimDeviceSchema = z.object({
   runtime: z.string(), // "iOS 18.5"
   deviceType: z.string(), // "iPhone 15 Pro"
   slimState: SimSlimStateSchema,
+  // Spec 24.6 / 27.2. Absent = an iOS simulator (older daemons). Physical udids are
+  // `ios:<udid>` and `android:serial:<serial>`.
+  platform: SimPlatformSchema.optional(),
+  kind: SimDeviceKindSchema.optional(),
+  connection: SimConnectionSchema.nullable().optional(),
+  // Spec 27.3: off by default for every adb/usbmux device; while off nothing is captured or driven.
+  controlEnabled: z.boolean().optional(),
+  readiness: SimReadinessSchema.optional(),
+  osVersion: z.string().optional(),
+  model: z.string().optional(),
 });
 export type SimDevice = z.infer<typeof SimDeviceSchema>;
 
@@ -55,7 +90,22 @@ export type SimUiElement = z.infer<typeof SimUiElementSchema>;
 export const SimActionSchema = z.enum(["boot", "shutdown", "erase", "delete"]);
 export type SimAction = z.infer<typeof SimActionSchema>;
 
-export const SimButtonSchema = z.enum(["home", "lock", "side-button", "siri", "apple-pay"]);
+// home/lock/side-button/siri/apple-pay: iOS. back/app-switch/rotate: Android only. volume-up,
+// volume-down and power reach physical devices (spec 27.5); a button a device lacks answers
+// `unsupported_on_platform`.
+export const SimButtonSchema = z.enum([
+  "home",
+  "lock",
+  "side-button",
+  "siri",
+  "apple-pay",
+  "back",
+  "app-switch",
+  "volume-up",
+  "volume-down",
+  "power",
+  "rotate",
+]);
 export type SimButton = z.infer<typeof SimButtonSchema>;
 
 function req<T extends string, S extends z.ZodRawShape>(type: T, extra: S) {
@@ -126,10 +176,15 @@ export const SimCreateResponseSchema = resp("simulator/create/response", {
 export type SimCreatePayload = z.infer<typeof SimCreateResponseSchema>["payload"];
 
 // ── HID input (idb) ──
+// `coords` "device" (default): points on iOS, pixels on Android — the unit describe-ui reports.
+// "ratio": 0..1 of the frame being viewed (spec 27.5); physical devices only.
+export const SimCoordsSchema = z.enum(["device", "ratio"]);
+export type SimCoords = z.infer<typeof SimCoordsSchema>;
 export const SimTapRequestSchema = req("simulator/tap", {
   udid: z.string(),
   x: z.number(),
   y: z.number(),
+  coords: SimCoordsSchema.optional(),
 });
 export const SimTapResponseSchema = resp("simulator/tap/response", {});
 export type SimTapPayload = z.infer<typeof SimTapResponseSchema>["payload"];
@@ -141,6 +196,7 @@ export const SimSwipeRequestSchema = req("simulator/swipe", {
   x2: z.number(),
   y2: z.number(),
   durationMs: z.number().int().nonnegative().optional(),
+  coords: SimCoordsSchema.optional(),
 });
 export const SimSwipeResponseSchema = resp("simulator/swipe/response", {});
 export type SimSwipePayload = z.infer<typeof SimSwipeResponseSchema>["payload"];
@@ -291,6 +347,101 @@ export const SimLogChunkPushSchema = push("simulator/log-chunk", {
 });
 export type SimLogChunkPayload = z.infer<typeof SimLogChunkPushSchema>["payload"];
 
+// ── physical devices (spec 27.3, 27.4, 27.7) ──
+// Enable/disable control of one physical device. Off is the default; while off the daemon refuses
+// every capture, log, UI-tree, input and install call with `control_disabled`.
+export const SimPhysicalEnableRequestSchema = req("simulator/physical/enable", {
+  udid: z.string(),
+});
+export const SimPhysicalEnableResponseSchema = resp("simulator/physical/enable/response", {
+  udid: z.string(),
+  controlEnabled: z.boolean(),
+});
+export type SimPhysicalEnablePayload = z.infer<typeof SimPhysicalEnableResponseSchema>["payload"];
+export const SimPhysicalDisableRequestSchema = req("simulator/physical/disable", {
+  udid: z.string(),
+});
+export const SimPhysicalDisableResponseSchema = resp("simulator/physical/disable/response", {
+  udid: z.string(),
+  controlEnabled: z.boolean(),
+});
+export type SimPhysicalDisablePayload = z.infer<typeof SimPhysicalDisableResponseSchema>["payload"];
+
+// iOS "Prepare device": sign + install WebDriverAgent with an Apple account of spec 26. Without
+// accountId and with more than one account the daemon answers `account_required` + `accounts`.
+export const SimSignerAccountSchema = z.object({ id: z.string(), label: z.string() });
+export type SimSignerAccount = z.infer<typeof SimSignerAccountSchema>;
+export const SimPhysicalPrepareRequestSchema = req("simulator/physical/prepare", {
+  udid: z.string(),
+  accountId: z.string().optional(),
+});
+export const SimPhysicalPrepareResponseSchema = resp("simulator/physical/prepare/response", {
+  udid: z.string(),
+  accounts: z.array(SimSignerAccountSchema),
+  bundleId: z.string().nullable(),
+  expiresAt_ms: z.number().nullable(),
+});
+export type SimPhysicalPreparePayload = z.infer<typeof SimPhysicalPrepareResponseSchema>["payload"];
+export const SimPhysicalPrepareStepSchema = z.enum([
+  "download",
+  "sign",
+  "install",
+  "launch",
+  "done",
+]);
+export const SimPhysicalPrepareProgressPushSchema = z.object({
+  type: z.literal("simulator/physical/prepare/progress"),
+  payload: z.object({
+    requestId: z.string(),
+    udid: z.string(),
+    step: SimPhysicalPrepareStepSchema,
+    message: z.string(),
+  }),
+});
+export type SimPhysicalPrepareProgressPayload = z.infer<
+  typeof SimPhysicalPrepareProgressPushSchema
+>["payload"];
+
+// Android 11+ wireless debugging: `adb pair host:pairingPort code`, then `adb connect
+// host:connectPort` (TLS). `adb tcpip` is never used (spec 27.1, ADR-0033).
+export const SimPhysicalPairWirelessRequestSchema = req("simulator/physical/pair_wireless", {
+  host: z.string(),
+  pairingPort: z.number().int().positive(),
+  pairingCode: z.string(),
+  connectPort: z.number().int().positive(),
+});
+export const SimPhysicalPairWirelessResponseSchema = resp(
+  "simulator/physical/pair_wireless/response",
+  { udid: z.string() },
+);
+export type SimPhysicalPairWirelessPayload = z.infer<
+  typeof SimPhysicalPairWirelessResponseSchema
+>["payload"];
+
+// ── live screen (spec 27.5, ADR-0033) ──
+// JPEG frames arrive as binary WebSocket frames (binary-frames/screen.ts) tagged with this
+// subscriptionId. Only clients that advertise the `binary_screen_frames` capability subscribe;
+// others keep polling simulator/screenshot. maxFps ≤ 15, maxDim ≤ 1280 (the daemon clamps).
+export const SimScreenSourceSchema = z.enum(["scrcpy", "screencap", "wda-mjpeg"]);
+export type SimScreenSource = z.infer<typeof SimScreenSourceSchema>;
+export const SimScreenSubscribeRequestSchema = req("simulator/screen/subscribe", {
+  subscriptionId: z.string(),
+  udid: z.string(),
+  maxFps: z.number().int().positive().optional(),
+  maxDim: z.number().int().positive().optional(),
+});
+export const SimScreenSubscribeResponseSchema = resp("simulator/screen/subscribe/response", {
+  subscriptionId: z.string(),
+  source: SimScreenSourceSchema.nullable(),
+});
+export type SimScreenSubscribePayload = z.infer<typeof SimScreenSubscribeResponseSchema>["payload"];
+export const SimScreenUnsubscribeRequestSchema = req("simulator/screen/unsubscribe", {
+  subscriptionId: z.string(),
+});
+export const SimScreenUnsubscribeResponseSchema = resp("simulator/screen/unsubscribe/response", {
+  subscriptionId: z.string(),
+});
+
 export const SimulatorRequestSchemas = [
   SimListRequestSchema,
   SimActionRequestSchema,
@@ -313,6 +464,12 @@ export const SimulatorRequestSchemas = [
   SimUnsubscribeRequestSchema,
   SimLogsSubscribeRequestSchema,
   SimLogsUnsubscribeRequestSchema,
+  SimPhysicalEnableRequestSchema,
+  SimPhysicalDisableRequestSchema,
+  SimPhysicalPrepareRequestSchema,
+  SimPhysicalPairWirelessRequestSchema,
+  SimScreenSubscribeRequestSchema,
+  SimScreenUnsubscribeRequestSchema,
 ] as const;
 
 export const SimulatorResponseSchemas = [
@@ -337,6 +494,16 @@ export const SimulatorResponseSchemas = [
   SimUnsubscribeResponseSchema,
   SimLogsSubscribeResponseSchema,
   SimLogsUnsubscribeResponseSchema,
+  SimPhysicalEnableResponseSchema,
+  SimPhysicalDisableResponseSchema,
+  SimPhysicalPrepareResponseSchema,
+  SimPhysicalPairWirelessResponseSchema,
+  SimScreenSubscribeResponseSchema,
+  SimScreenUnsubscribeResponseSchema,
 ] as const;
 
-export const SimulatorPushSchemas = [SimSnapshotPushSchema, SimLogChunkPushSchema] as const;
+export const SimulatorPushSchemas = [
+  SimSnapshotPushSchema,
+  SimLogChunkPushSchema,
+  SimPhysicalPrepareProgressPushSchema,
+] as const;

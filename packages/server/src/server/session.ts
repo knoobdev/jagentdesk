@@ -193,7 +193,12 @@ import {
   type RoutedDocker,
 } from "./ssh/remote-docker/route.js";
 import { SimulatorService } from "./simulator/simulator-service.js";
-import { SimulatorStreams } from "./simulator/simulator-streams.js";
+import { SimulatorStreams, fleetSnapshot } from "./simulator/simulator-streams.js";
+import type { PhysicalDeviceHub } from "./devices/hub.js";
+import {
+  PhysicalDeviceSession,
+  deviceErrorText,
+} from "./session/devices/physical-device-session.js";
 import { getSharedProxyService } from "./proxy/proxy-service.js";
 import { fridaAvailability, installFrida } from "./proxy/frida-control.js";
 import { DatabaseRegistry } from "./database/database-registry.js";
@@ -543,6 +548,8 @@ export interface SessionOptions {
   usageHistory?: UsageHistoryStorage | null;
   hostCapabilities?: HostCapabilityService | null;
   hostToolInstaller?: HostToolInstaller | null;
+  // Spec 27: the daemon-wide physical device hub (null in tests and hosts without it).
+  physicalDevices?: PhysicalDeviceHub | null;
   clusterRegistry?: ClusterRegistry;
   databaseRegistry?: DatabaseRegistry;
   sshService?: SshService;
@@ -897,7 +904,9 @@ export class Session {
   private readonly dockerStreams = new DockerStreams(this.dockerService);
   private readonly remoteDockerSubscriptions = new Map<string, RoutedDocker>();
   private readonly simulatorService = new SimulatorService();
-  private readonly simulatorStreams = new SimulatorStreams(this.simulatorService);
+  private readonly physicalDevices: PhysicalDeviceHub | null;
+  private readonly simulatorStreams: SimulatorStreams;
+  private readonly physicalDeviceSession: PhysicalDeviceSession | null;
   private readonly proxyService = getSharedProxyService();
   private readonly proxySubscriptionIds = new Set<string>();
   private readonly providerCatalogSession: ProviderCatalogSession;
@@ -1240,6 +1249,9 @@ export class Session {
     this.usageHistory = options.usageHistory ?? null;
     this.hostCapabilities = options.hostCapabilities;
     this.hostToolInstaller = options.hostToolInstaller;
+    this.physicalDevices = options.physicalDevices ?? null;
+    this.simulatorStreams = new SimulatorStreams(this.simulatorService, this.physicalDevices);
+    this.physicalDeviceSession = this.createPhysicalDeviceSession();
     this.terminalManager = terminalManager;
     this.terminalController = new TerminalSessionController({
       terminalManager,
@@ -3811,8 +3823,7 @@ export class Session {
   ): Promise<void> | undefined {
     if (msg.type === "simulator/list") {
       const { requestId } = msg;
-      return this.simulatorService
-        .list()
+      return fleetSnapshot(this.simulatorService, this.physicalDevices)
         .then((result) => {
           this.emit({
             type: "simulator/list/response",
@@ -4193,9 +4204,25 @@ export class Session {
     return undefined;
   }
 
+  private createPhysicalDeviceSession(): PhysicalDeviceSession | null {
+    if (!this.physicalDevices) return null;
+    return new PhysicalDeviceSession(
+      this.physicalDevices,
+      {
+        emit: (msg) => this.emit(msg),
+        emitBinary: (frame) => this.emitBinary(frame),
+        supportsBinaryScreenFrames: () => this.supports(CLIENT_CAPS.binaryScreenFrames),
+        transportBufferedAmount: () => this.getTransportBufferedAmount(),
+      },
+      this.sessionLogger,
+    );
+  }
+
   private dispatchSimulatorMessage(msg: SessionInboundMessage): Promise<void> | undefined {
     const fail = (error: unknown): string =>
       error instanceof Error ? error.message : String(error);
+    const physical = this.physicalDeviceSession?.handle(msg);
+    if (physical) return physical;
     const fleet = this.dispatchSimulatorFleet(msg, fail);
     if (fleet) return fleet;
     if (msg.type === "simulator/action") {
@@ -4479,14 +4506,24 @@ export class Session {
     }
     if (msg.type === "simulator/logs/subscribe") {
       const { requestId, subscriptionId } = msg;
-      this.emit({
-        type: "simulator/logs/subscribe/response",
-        payload: { requestId, error: null, subscriptionId },
-      });
-      this.simulatorStreams.subscribeLogs(subscriptionId, msg.udid, (chunk) => {
-        this.emit({ type: "simulator/log-chunk", payload: { subscriptionId, chunk } });
-      });
-      return undefined;
+      return this.simulatorStreams
+        .subscribeLogs(subscriptionId, msg.udid, (chunk) => {
+          this.emit({ type: "simulator/log-chunk", payload: { subscriptionId, chunk } });
+        })
+        .then(() => {
+          this.emit({
+            type: "simulator/logs/subscribe/response",
+            payload: { requestId, error: null, subscriptionId },
+          });
+          return undefined;
+        })
+        .catch((error: unknown) => {
+          this.emit({
+            type: "simulator/logs/subscribe/response",
+            payload: { requestId, error: deviceErrorText(error), subscriptionId },
+          });
+          return undefined;
+        });
     }
     if (msg.type === "simulator/logs/unsubscribe") {
       const { requestId, subscriptionId } = msg;
@@ -4704,6 +4741,8 @@ export class Session {
       await this.workspaceFilesSession.handleFileTransferFrame(binaryFrame.frame);
       return;
     }
+    // Screen frames only flow daemon → client.
+    if (binaryFrame.kind === "screen") return;
     this.terminalController.handleBinaryFrame(binaryFrame.frame);
   }
 
@@ -9452,6 +9491,7 @@ export class Session {
     for (const routed of this.remoteDockerSubscriptions.values()) routed.release();
     this.remoteDockerSubscriptions.clear();
     this.simulatorStreams.disposeAll();
+    this.physicalDeviceSession?.dispose();
     for (const id of this.proxySubscriptionIds) this.proxyService.unsubscribe(id);
     this.proxySubscriptionIds.clear();
     this.terminalController.dispose();

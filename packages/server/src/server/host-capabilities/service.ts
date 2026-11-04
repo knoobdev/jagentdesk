@@ -167,6 +167,8 @@ export class HostCapabilityService {
     const probes: Record<HostCapabilityId, () => Promise<HostCapability>> = {
       iosSimulators: () => this.probeIosSimulators(),
       androidDevices: () => this.probeAndroid(),
+      androidPhysical: () => this.probeAndroidPhysical(),
+      iosPhysical: () => this.probeIosPhysical(),
       docker: () => this.probeDocker(),
       helm: () => this.probeVersioned("helm", ["version", "--short"], ["helm"]),
       proxySystemCapture: () => this.probeSystemProxy(),
@@ -266,6 +268,49 @@ export class HostCapabilityService {
     const result = await this.runner.run(adb, ["version"]);
     if (!result.ok) return missing("adb is installed but does not run", ["android-sdk"]);
     return available(parseVersion(result.stdout));
+  }
+
+  // Spec 27.2: a phone needs only the host's adb (never bundled: the SDK license forbids it), which
+  // runs everywhere the emulator does not.
+  private async probeAndroidPhysical(): Promise<HostCapability> {
+    const exe = this.host.platform === "win32" ? "adb.exe" : "adb";
+    const sdkAdb = androidSdkCandidates(this.host)
+      .map((root) => path.join(root, "platform-tools", exe))
+      .find((candidate) => this.host.exists(candidate));
+    const adb = sdkAdb ?? (await this.runner.find("adb"));
+    if (!adb) {
+      return missing("Install Android SDK Platform-Tools (adb) to use Android phones", [
+        "android-sdk",
+      ]);
+    }
+    const result = await this.runner.run(adb, ["version"]);
+    if (!result.ok) return missing("adb is installed but does not run", ["android-sdk"]);
+    return available(parseVersion(result.stdout));
+  }
+
+  // Spec 27.2: go-ios (bundled with the desktop app, or installed) plus the OS's usbmuxd.
+  private async probeIosPhysical(): Promise<HostCapability> {
+    const exe = this.host.platform === "win32" ? "ios.exe" : "ios";
+    const installed = path.join(this.host.jagentdeskHome, "tools", "bin", exe);
+    const goIos = (await this.bundledGoIos()) ?? (this.host.exists(installed) ? installed : null);
+    const resolved = goIos ?? (await this.runner.find("ios"));
+    if (!resolved) return missing("go-ios is not installed on this host", ["go-ios"]);
+    const result = await this.runner.run(resolved, ["version"]);
+    if (!result.ok || !/"version"/.test(result.stdout)) {
+      return missing("go-ios is installed but does not run", ["go-ios"]);
+    }
+    if (this.host.platform === "linux" && !this.host.exists("/var/run/usbmuxd")) {
+      return missing(
+        "Install and start usbmuxd to use iPhones and iPads (sudo apt install usbmuxd)",
+      );
+    }
+    return available(parseVersion(result.stdout));
+  }
+
+  // The desktop app points the daemon at the go-ios it bundles (packages/desktop/src/main.ts).
+  private async bundledGoIos(): Promise<string | null> {
+    const bundled = this.host.env.JAGENTDESK_GO_IOS_BIN;
+    return bundled && this.host.exists(bundled) ? bundled : null;
   }
 
   private async probeDocker(): Promise<HostCapability> {

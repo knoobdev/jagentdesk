@@ -8,6 +8,9 @@ import { z } from "zod";
 export const HOST_CAPABILITY_IDS = [
   "iosSimulators",
   "androidDevices",
+  // Spec 27.2: physical devices, split from the emulator/simulator capabilities.
+  "androidPhysical",
+  "iosPhysical",
   "docker",
   "helm",
   "proxySystemCapture",
