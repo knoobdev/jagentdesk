@@ -1,9 +1,37 @@
 # Changelog
 
 All notable changes to JAgentDesk are documented here. JAgentDesk versions its
-own release line (now `0.9.51`); the many `v0.1.x`–`v1.0.x` tags in history are
+own release line (now `0.9.52`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
+
+## v0.9.52 — 2026-11-04
+
+A cabled iPhone stayed on "Connecting…" / "Starting the screen…" after Enable control. Fixed and
+checked on a real iPhone (iPhone14,5, iOS 18.5, USB).
+
+### iPhone screen over the cable
+
+- **Cause.** On iOS 17 and later the screen goes through go-ios' userspace tunnel. go-ios writes its
+  RemotePairing identity (`selfIdentity.plist`) into the current working directory, and the packaged
+  daemon runs with `/` as its working directory, which is read-only. The tunnel therefore exited with
+  code 1 at once, the daemon started it again on every screen request, and no frame ever arrived.
+- **Fix.** go-ios now runs in its own writable directory, `$JAGENTDESK_HOME/devices/go-ios` (0700),
+  and the tunnel keeps its pair records there (`--pair-record-path`). A tunnel that fails is logged
+  with go-ios' own messages (never pairing material) and is retried after 10 seconds instead of on
+  every request.
+- **Measured on the real iPhone** with a built daemon: first frame after 2.9 s, then about 1.5 frames
+  per second at 592 × 1280 while only viewing (no WebDriverAgent); the faster WebDriverAgent stream
+  takes over once touch is on. `packages/server/scripts/iphone-screen-check.mjs <port>` repeats this
+  check (it counts frames and sizes, it never stores a frame).
+- Tests cover the working directory and the pair-record path given to every go-ios command.
+
+### Apple ID sign-in
+
+- "Apple is limiting sign-in attempts from this host (HTTP 429)" is Apple pausing sign-ins from one
+  machine and network after many attempts in a short time (today's attempts plus test probes made from
+  the same machine). Nothing is wrong with the account; it clears after a while. JAgentDesk never
+  retries a sign-in by itself.
 
 ## v0.9.51 — 2026-11-04
 
