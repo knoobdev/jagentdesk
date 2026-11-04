@@ -728,8 +728,8 @@ export function buildArgoCdAppRoute(
   app: { name: string; appNamespace: string | null },
 ) {
   const base = buildArgoCdInstanceRoute(serverId, instanceId);
-  if (base === "/" || !app.name) return base;
+  if (base === "/" || base === buildArgoCdRoute(serverId) || !app.name) return base;
   const query = new URLSearchParams({ name: app.name });
   if (app.appNamespace) query.set("ns", app.appNamespace);
-  return `${base}/app?${query.toString()}`;
+  return `${base}/app?${query.toString()}` as const;
 }

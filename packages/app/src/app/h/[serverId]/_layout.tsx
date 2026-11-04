@@ -1,4 +1,5 @@
 import { Redirect, Stack, useLocalSearchParams } from "expo-router";
+import { ArgoCdSsoDelegatePrompt } from "@/argocd/sso-delegate-prompt";
 import { useHostRuntimeBootstrapState } from "@/app/_layout";
 import { HostRouteProvider } from "@/navigation/host-route-context";
 import { resolveStartupRoute } from "@/navigation/host-runtime-bootstrap";
@@ -54,6 +55,7 @@ function KnownHostRoute() {
   return (
     <HostRouteProvider serverId={routeServerId}>
       <SkillsSyncBinder serverId={routeServerId} />
+      <ArgoCdSsoDelegatePrompt serverId={routeServerId} />
       {stack}
     </HostRouteProvider>
   );

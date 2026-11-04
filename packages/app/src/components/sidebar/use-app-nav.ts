@@ -12,6 +12,7 @@ import {
   Radar,
   Server,
   Share2,
+  Ship,
   Smartphone,
   Sparkles,
   Store,
@@ -34,6 +35,7 @@ const DEVICE_CAPABILITIES: readonly HostCapabilityId[] = ["iosSimulators"];
 import { useWorkspace } from "@/stores/session-store-hooks";
 import {
   buildAgentForumRoute,
+  buildArgoCdRoute,
   buildClusterWorkloadsRoute,
   buildClustersRoute,
   buildDatabaseBrowseRoute,
@@ -65,6 +67,8 @@ export interface AppNavTargets {
   dockerRoute: Href | null;
   simulatorRoute: Href | null;
   proxyRoute: Href | null;
+  /** Spec 30.3: the daemon ships Argo CD; null hides the entry. */
+  argoCdRoute: Href | null;
   supportsForgeHub: boolean;
   /** Spec 25: daemon build ships the SSH servers surface (S1+). */
   supportsSshServers: boolean;
@@ -82,6 +86,9 @@ export function useAppNavTargets(): AppNavTargets {
   );
   const supportsSshServers = useSessionStore(
     (state) => state.sessions[firstServerId]?.serverInfo?.features?.sshServers === true,
+  );
+  const supportsArgoCd = useSessionStore(
+    (state) => state.sessions[firstServerId]?.serverInfo?.features?.argocd === true,
   );
   // Spec 24.4: devices open on the first host that can run simulators; none → no entry.
   const deviceServerId = useSessionStore(
@@ -121,6 +128,7 @@ export function useAppNavTargets(): AppNavTargets {
       dockerRoute: perHost(buildDockerRoute),
       simulatorRoute: deviceServerId ? (buildSimulatorRoute(deviceServerId) as Href) : null,
       proxyRoute: perHost(buildProxyRoute),
+      argoCdRoute: supportsArgoCd ? perHost(buildArgoCdRoute) : null,
       supportsForgeHub,
       supportsSshServers,
     };
@@ -129,6 +137,7 @@ export function useAppNavTargets(): AppNavTargets {
     firstServerId,
     lastCluster,
     lastDatabase,
+    supportsArgoCd,
     supportsForgeHub,
     supportsSshServers,
   ]);
@@ -237,6 +246,7 @@ export function useAppNavItems(): AppNavItem[] {
         pathname,
         "/cluster",
       ),
+      navItem("argocd", Ship, "Argo CD", "Argo CD", targets.argoCdRoute, pathname, "/argocd"),
       navItem(
         "usage",
         BarChart3,
