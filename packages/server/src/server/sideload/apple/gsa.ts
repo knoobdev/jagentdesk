@@ -163,6 +163,12 @@ function responseDict(response: AppleHttpResponse): PlistDict {
   try {
     root = parsePlistDict(response.body);
   } catch {
+    if (response.status === 503) {
+      throw new GsaError(
+        "apple_error",
+        "Apple's sign-in service refused the request (HTTP 503). This usually means it did not accept this machine's anisette data: switch the account to a remote anisette server, then try again.",
+      );
+    }
     throw new GsaError("protocol_error", `GrandSlam returned ${response.status} without a plist`);
   }
   const inner = asDict(root.Response);

@@ -212,11 +212,23 @@ export type OpenWebSocket = (
 export const openNodeWebSocket: OpenWebSocket = (url, headers) =>
   new Promise((resolve, reject) => {
     const socket = new WebSocket(url, { headers });
+    // The server speaks first (GiveIdentifier), possibly before the caller subscribes:
+    // queue frames until a handler is attached.
+    const queued: string[] = [];
+    let onText: ((text: string) => void) | null = null;
+    socket.on("message", (data) => {
+      const text = data.toString();
+      if (onText) onText(text);
+      else queued.push(text);
+    });
     socket.once("open", () => {
       resolve({
         send: (data) => socket.send(data),
         close: () => socket.close(),
-        onMessage: (handler) => socket.on("message", (data) => handler(data.toString())),
+        onMessage: (handler) => {
+          onText = handler;
+          for (const text of queued.splice(0)) handler(text);
+        },
         onClose: (handler) => socket.on("close", (_code, reason) => handler(reason.toString())),
       });
     });
