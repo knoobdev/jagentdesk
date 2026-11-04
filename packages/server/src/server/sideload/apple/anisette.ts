@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { WebSocket } from "ws";
-import type { AppleHttp } from "./http.js";
+import { AppleHttpError, type AppleHttp } from "./http.js";
 import { asDict, asString, buildXmlPlist, parsePlistDict } from "../plist.js";
 
 /**
@@ -297,7 +297,17 @@ export class RemoteAnisette implements AnisetteSourceAdapter {
   }
 
   private async clientInfo(base: string): Promise<V3ClientInfo | null> {
-    const response = await this.http({ method: "GET", url: `${base}/v3/client_info`, headers: {} });
+    const response = await this.http({
+      method: "GET",
+      url: `${base}/v3/client_info`,
+      headers: {},
+    }).catch((error: unknown) => {
+      if (!(error instanceof AppleHttpError)) throw error;
+      throw new AnisetteError(
+        "remote_failed",
+        `Could not reach the anisette server at ${base} (${error.message}). Check that it is running.`,
+      );
+    });
     if (response.status === 404) return null;
     if (response.status !== 200) {
       throw new AnisetteError(

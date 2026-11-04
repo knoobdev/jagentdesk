@@ -102,12 +102,19 @@ export function createAnisetteServerHttp(logger: pino.Logger): AppleHttp {
     const url = new URL(input.url);
     if (url.protocol === "https:") return https(input);
     logger.info({ method: input.method, host: url.host, path: url.pathname }, "sideload http");
-    const response = await fetch(url, {
-      method: input.method,
-      headers: input.headers,
-      body: typeof input.body === "string" ? input.body : input.body && new Uint8Array(input.body),
-      signal: AbortSignal.timeout(input.timeoutMs ?? DEFAULT_TIMEOUT_MS),
-    });
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: input.method,
+        headers: input.headers,
+        body:
+          typeof input.body === "string" ? input.body : input.body && new Uint8Array(input.body),
+        signal: AbortSignal.timeout(input.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+      });
+    } catch (error) {
+      const cause = error instanceof Error && error.cause instanceof Error ? error.cause : error;
+      throw new AppleHttpError(url.host, cause instanceof Error ? cause.message : String(cause));
+    }
     const responseHeaders: Record<string, string> = {};
     response.headers.forEach((value, key) => {
       responseHeaders[key.toLowerCase()] = value;

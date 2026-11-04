@@ -49,8 +49,14 @@ const AndroidInput = z.object({
   path: z.string().min(1).describe("Absolute path of the .apk / .apks on the daemon host"),
 });
 
+/** The slice of SideloadService the tools use. */
+export type SideloadToolService = Pick<
+  SideloadService,
+  "listAccounts" | "listApps" | "signAndInstall" | "androidInstall"
+>;
+
 export function createSideloadAgentTools(input: {
-  service: SideloadService;
+  service: SideloadToolService;
   callerAgentId: string | null;
   requestPermission: RequestSideloadPermission;
 }): SideloadAgentTool[] {
