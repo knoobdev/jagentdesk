@@ -1,9 +1,78 @@
 # Changelog
 
 All notable changes to JAgentDesk are documented here. JAgentDesk versions its
-own release line (now `0.9.48`); the many `v0.1.x`–`v1.0.x` tags in history are
+own release line (now `0.9.49`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
+
+## v0.9.49 — 2026-11-04
+
+Fixes for the first real-world use of v0.9.48: signing in with an Apple ID on macOS works with the
+Mac's own anisette, the Add Apple ID dialog is as short as Sideloadly's, and Jira boards load every
+issue, scroll, show links correctly and display attachments.
+
+### Sideload — Apple ID sign-in on macOS
+
+- **HTTP 503 from Apple fixed.** With the default `native` anisette, Apple's sign-in service refused
+  every request ("refused the request (HTTP 503) … anisette data"). Tested one variable at a time
+  against Apple: the request described itself as Xcode (`X-MMe-Client-Info` ending in
+  `com.apple.dt.Xcode/…`) next to this Mac's own AuthKit one-time password, and Apple rejects that
+  pair. The native source now sends the Mac's real identity from AuthKit's `AKDevice`: its own client
+  description (`serverFriendlyDescription`), device id (`uniqueDeviceIdentifier`), local user id and
+  serial number, the matching `akd` user agent for this Mac's CFNetwork and Darwin versions, the
+  device locale and time zone, and AltServer's routing info. With these headers Apple answers the
+  first sign-in step normally (checked with a made-up Apple ID: HTTP 200 and "account information
+  entered incorrectly" instead of 503). The random identity is now used only for a `remote` anisette
+  server.
+- **Clearer errors.** A 503 says which anisette source Apple refused and how to switch to a remote
+  server under Advanced; HTTP 429 says Apple is rate-limiting sign-ins from this network.
+- **Add Apple ID like Sideloadly.** The dialog now shows only Apple ID, Password and "Keep me signed
+  in for automatic refresh". A line under the password explains that Apple requires the Apple ID
+  password to sign apps (Sideloadly asks for it too) and that it goes only to this host and to Apple.
+  The anisette source moved into a collapsed **Advanced** section; on Linux, where a remote server is
+  required, the dialog opens Advanced with Remote selected after the first attempt. Two-factor codes
+  are still typed in the app.
+- **"Sign in again" keeps the account's anisette source** instead of resetting a remote account to
+  native.
+- Still to confirm with a real Apple ID: the steps after the first one (password check, two-factor
+  code, the developer token). An opt-in probe for the first step ships as a local test
+  (`JAD_GSA_PROBE=1`, macOS only, never in CI).
+
+### Jira
+
+- **Whole boards.** Boards were cut at 500 issues with a red "only the first 500 are shown" banner.
+  Boards, backlogs and sprint completion now page through every issue (Jira Cloud page by page, Data
+  Center four pages at a time once the total is known) with the board's Kanban sub-filter on every
+  page, so the columns match the web board. A safety ceiling of 5,000 issues remains; above it a
+  neutral note suggests a quick filter. Projects and quick filters also load past 500. Agent tools
+  keep their 500 default so an agent's context is not flooded.
+- **Scrolling.** The board could not scroll on web and desktop because its columns had no height.
+  Each column is now its own virtualized list that scrolls vertically (only the visible cards are
+  drawn, so an 800-card Done column stays smooth), and the board scrolls horizontally. With
+  swimlanes on, lanes scroll together and each cell shows 50 cards with "Show more".
+- **Links.** Smart links in descriptions and comments showed as `<https: host path …>` because they
+  were converted to `<url>` and read as an HTML tag. Smart links (`inlineCard`, `blockCard`,
+  `embedCard`), Data Center `[url]` / `[text|url]` and bare URLs now render as clickable, coloured
+  links that open in the system browser.
+- **Attachments you can see.** Images and files embedded in descriptions and comments showed only as
+  `[attachment: name]`. They are now matched by file name to the issue's attachments (newest wins if
+  names repeat) and shown in place: images inline with a full-screen viewer on tap, other files as a
+  download chip; Data Center `!image.png!`, `!x|thumbnail!`, `[^file]` and `[label|^file]` work the
+  same way. Bytes still come only through the daemon (`jira.issue.attachments.download`); the app
+  never receives a Jira URL.
+- **Attachment downloads fixed.** Every download asked Jira for JSON, which Jira's file endpoints
+  refuse, so no attachment could be previewed. Downloads now accept any content type, and images over
+  10 MB preview through Jira's thumbnail.
+
+### Verification
+
+- Root typecheck clean; Jira and Sideload suites pass (server 102, app 58), including new tests for
+  native anisette headers, board paging with the sub-filter, the ADF / wiki converters and media
+  mapping.
+- Built daemon starts without errors; `six-features-smoke.mjs` passes 7/7; the Jira daemon check
+  passes 12/12 against the fake Jira site (a 1,200-issue Kanban board loads fully in 12 pages); the
+  browser end-to-end test passes 6/6, asserting both scroll directions, the clickable link and the
+  inline image on desktop and phone sizes.
 
 ## v0.9.48 — 2026-11-04
 
