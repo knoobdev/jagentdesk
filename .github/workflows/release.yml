@@ -306,19 +306,9 @@ jobs:
           cd packages/app
           npx expo prebuild --platform android --clean --non-interactive
           cd android
-          # v0.9.47: after Metro wrote the bundle, `hermesc -output-source-map` plus RN's
-          # compose-source-maps.js (a second Node heap over the 5.5k-module map) pushed the VM
-          # past RAM + swap and the runner was shut down mid-task, twice. The APK does not ship
-          # source maps, so compile Hermes without them; the compose step is then skipped
-          # (BundleHermesCTask only composes when -output-source-map is present).
-          cat >> app/build.gradle <<'GRADLE'
-
-          // CI release override (release.yml): Hermes bytecode without a source map.
-          react {
-              hermesFlags = ["-O"]
-          }
-          GRADLE
-          # Memory/disk trace every 60 s so a future runner loss shows where the peak was.
+          # Memory/disk trace every 60 s so a future runner loss shows where the peak was. (v0.9.47
+          # lost the runner while hermesc compiled zod-aot's ~6 MB single-function validator, which
+          # needs 10+ GB; Android now bundles a zod-parser shim instead — packages/app/metro.config.cjs.)
           ( while true; do echo "[mem] $(date -u +%H:%M:%S) $(free -m | awk '/Mem:/{print "used="$3"M avail="$7"M"} /Swap:/{print "swap="$3"M"}' | tr '\n' ' ') disk=$(df -h / | awk 'NR==2{print $4}')"; sleep 60; done ) &
           mem_trace=$!
           trap 'kill $mem_trace 2>/dev/null || true' EXIT

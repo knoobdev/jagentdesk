@@ -190,11 +190,13 @@ the release assets.
 
 ### Release pipeline
 
-- **Android APK fixed.** The v0.9.47 APK job lost its runner twice right after the JavaScript bundle
-  was written: compiling Hermes bytecode with a source map, then composing the source maps, pushed the
-  build past memory and swap. The APK is now compiled without a Hermes source map (it never shipped
-  one), the build logs memory and disk every minute, and a release can re-cut only its Android APK
-  (`workflow_dispatch` with `only: android`).
+- **Android APK fixed.** The v0.9.47 APK job lost its runner right after the JavaScript bundle was
+  written. The cause: the protocol's generated (zod-aot) message validator is a single ~6 MB function,
+  and Hermes needed more than 10 GB of memory to compile it. Android bundles now validate daemon
+  messages with zod's own parser for the same schema (`packages/app/metro.config.cjs`); Hermes then
+  compiles the whole app in about 1.6 GB, and the Android bundle shrinks from 26.7 MB to 20.9 MB.
+  Web, desktop and iOS keep the generated validator. The build logs memory and disk every minute, and
+  a release can re-cut only its Android APK (`workflow_dispatch` with `only: android`).
 
 ### Under the hood
 

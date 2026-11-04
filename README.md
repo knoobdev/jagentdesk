@@ -186,7 +186,8 @@ with a few deliberate boundaries:
 
 #### Release pipeline
 
-- The Android APK builds again: Hermes now compiles without a source map, which kept the CI runner
+- The Android APK builds again: Android bundles skip the 6 MB generated message validator that Hermes
+  could not compile within the CI runner's memory.
   from running out of memory.
 
 ### SSH servers — a Termius-class client with a chat agent per server (v0.9.47)
