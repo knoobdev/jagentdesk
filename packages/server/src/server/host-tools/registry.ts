@@ -156,6 +156,13 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
       }),
     },
   },
+  jq: {
+    id: "jq",
+    binary: "jq",
+    capability: "specKit",
+    managers: { brew: "jq", winget: { id: "jqlang.jq" }, scoop: "jq" },
+    manualHints: ["sudo apt install jq", "sudo dnf install jq", "sudo pacman -S jq"],
+  },
   helm: {
     id: "helm",
     binary: "helm",

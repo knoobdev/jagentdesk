@@ -1,4 +1,9 @@
 import type { HostCapabilities, ToolInstallPlan } from "@jagentdesk/protocol/host-capabilities";
+import type {
+  SpecModeError,
+  SpecModeOptionalPhase,
+  SpecModeState,
+} from "@jagentdesk/protocol/spec-mode";
 import type { z } from "zod";
 import { CLIENT_CAPS, type ClientCapability } from "@jagentdesk/protocol/client-capabilities";
 import type { DatabaseEngine, DbConnectionConfig } from "@jagentdesk/protocol/database/rpc-schemas";
@@ -1670,6 +1675,17 @@ interface PingProbe {
 /** SSH server whose forwarded Docker socket a cockpit request targets (spec 25.10). */
 function dockerTarget(options: { serverId?: string }): { serverId?: string } {
   return options.serverId ? { serverId: options.serverId } : {};
+}
+
+export interface SpecModeResult {
+  state: SpecModeState | null;
+  error: SpecModeError | null;
+}
+
+export interface SpecModeSetupPreviewResult {
+  files: string[];
+  missingTools: string[];
+  error: SpecModeError | null;
 }
 
 export class DaemonClient {
@@ -9581,6 +9597,96 @@ export class DaemonClient {
     if (payload.error) throw new Error(payload.error);
     if (!payload.state) throw new Error("Autorun response missing state");
     return payload.state;
+  }
+
+  // ============================================================================
+  // Spec mode (spec 28 / ADR-0030). Gated by features.specMode. Refusals the user can act
+  // on (missing tools, setup needed, autorun on, nothing to review) come back as `error`.
+  // ============================================================================
+
+  async specModeGet(agentId: string): Promise<SpecModeResult> {
+    const requestId = this.createRequestId();
+    return this.sendRequest({
+      requestId,
+      message: SessionInboundMessageSchema.parse({
+        type: "agent.spec_mode.get.request",
+        agentId,
+        requestId,
+      }),
+      options: { skipQueue: true },
+      select: (msg) =>
+        msg.type === "agent.spec_mode.get.response" && msg.payload.requestId === requestId
+          ? { state: msg.payload.state, error: msg.payload.error }
+          : null,
+    });
+  }
+
+  async specModeSetupPreview(agentId: string): Promise<SpecModeSetupPreviewResult> {
+    const requestId = this.createRequestId();
+    return this.sendRequest({
+      requestId,
+      message: SessionInboundMessageSchema.parse({
+        type: "agent.spec_mode.setup.preview.request",
+        agentId,
+        requestId,
+      }),
+      options: { skipQueue: true },
+      select: (msg) =>
+        msg.type === "agent.spec_mode.setup.preview.response" && msg.payload.requestId === requestId
+          ? {
+              files: msg.payload.files,
+              missingTools: msg.payload.missingTools,
+              error: msg.payload.error,
+            }
+          : null,
+    });
+  }
+
+  async specModeSet(params: {
+    agentId: string;
+    enabled: boolean;
+    optionalPhases?: SpecModeOptionalPhase[];
+    confirmSetup?: boolean;
+  }): Promise<SpecModeResult> {
+    const requestId = this.createRequestId();
+    return this.sendRequest({
+      requestId,
+      message: SessionInboundMessageSchema.parse({
+        type: "agent.spec_mode.set.request",
+        ...params,
+        requestId,
+      }),
+      options: { skipQueue: true },
+      select: (msg) =>
+        msg.type === "agent.spec_mode.set.response" && msg.payload.requestId === requestId
+          ? { state: msg.payload.state, error: msg.payload.error }
+          : null,
+    });
+  }
+
+  async specModeReview(params: {
+    agentId: string;
+    decision: "approve" | "revise";
+    note?: string;
+  }): Promise<SpecModeResult> {
+    const requestId = this.createRequestId();
+    return this.sendRequest({
+      requestId,
+      message: SessionInboundMessageSchema.parse({
+        type: "agent.spec_mode.review.request",
+        ...params,
+        requestId,
+      }),
+      options: { skipQueue: true },
+      select: (msg) =>
+        msg.type === "agent.spec_mode.review.response" && msg.payload.requestId === requestId
+          ? { state: msg.payload.state, error: msg.payload.error }
+          : null,
+    });
+  }
+
+  subscribeSpecModeState(handler: (state: SpecModeState) => void): () => void {
+    return this.on("agent.spec_mode.state", (message) => handler(message.payload.state));
   }
 
   // ============================================================================

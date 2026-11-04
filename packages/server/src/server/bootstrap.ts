@@ -158,6 +158,8 @@ import { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { DatabaseRegistry } from "./database/database-registry.js";
 import { ScheduleService } from "./schedule/service.js";
 import { AutorunService } from "./autorun/service.js";
+import { SpecModeService } from "./spec-mode/service.js";
+import { sendPromptToAgent } from "./agent/agent-prompt.js";
 import { SessionShareService } from "./session-share/service.js";
 import { AgentForumService } from "./agent-forum/service.js";
 import { createForumBootstrap, createForumNotify } from "./agent-forum/bootstrap.js";
@@ -1445,6 +1447,9 @@ export async function createJAgentDeskDaemon(
       })
     : null;
   await autorunService?.initialize();
+  // Spec mode (spec 28 / ADR-0030) needs the host capability probe, created with the WebSocket
+  // server below; it is assigned there.
+  let specModeService: SpecModeService | null = null;
   logger.info(
     { elapsed: elapsed(), enabled: config.autorunEnabled === true },
     "Autorun service initialized",
@@ -1891,6 +1896,16 @@ export async function createJAgentDeskDaemon(
             void hostCapabilities.refresh().catch((error: unknown) => {
               logger.warn({ err: error }, "Host capability probe failed");
             });
+            specModeService = await startSpecModeService({
+              jagentdeskHome: config.jagentdeskHome,
+              logger,
+              agentManager,
+              agentStorage,
+              hostCapabilities,
+              autorunService,
+              emit: emitExternalSessionMessage,
+            });
+            wsServer?.setSpecModeService(specModeService);
             wsServer?.setAgentForum(
               agentForumService,
               createForumBootstrap({ agentManager, agentStorage, logger }),
@@ -1972,6 +1987,7 @@ export async function createJAgentDeskDaemon(
     speechService.stop();
     await scheduleService.stop().catch(() => undefined);
     await autorunService?.stop().catch(() => undefined);
+    specModeService?.stop();
     await sessionShareService?.stop().catch(() => undefined);
     await tsnetListener?.stop().catch(() => undefined);
     if (wsServer) {
@@ -2038,4 +2054,40 @@ async function closeAllAgents(logger: Logger, agentManager: AgentManager): Promi
       }
     }),
   );
+}
+
+/**
+ * Spec mode (spec 28 / ADR-0030): phase commands sent on Approve/Revise go through the same
+ * send path as a user's message; per-agent spec-kit env reaches provider launches; Spec mode
+ * and autonomous mode refuse to start while the other is on.
+ */
+async function startSpecModeService(params: {
+  jagentdeskHome: string;
+  logger: Logger;
+  agentManager: AgentManager;
+  agentStorage: AgentStorage;
+  hostCapabilities: HostCapabilityService;
+  autorunService: AutorunService | null;
+  emit: (message: SessionOutboundMessage) => void;
+}): Promise<SpecModeService> {
+  const { agentManager, agentStorage, autorunService, logger } = params;
+  const service = new SpecModeService({
+    jagentdeskHome: params.jagentdeskHome,
+    logger,
+    agentManager,
+    hostCapabilities: params.hostCapabilities,
+    isAutorunActive: async (agentId) =>
+      autorunService !== null && (await autorunService.get(agentId))?.status === "running",
+    sendPrompt: async (agentId, text) => {
+      await sendPromptToAgent({ agentManager, agentStorage, agentId, prompt: text, logger });
+    },
+    onState: (state) =>
+      params.emit({ type: "agent.spec_mode.state", payload: { agentId: state.agentId, state } }),
+  });
+  await service.initialize();
+  agentManager.setLaunchEnvProvider((agentId) => service.launchEnv(agentId));
+  autorunService?.setStartGuard(async (agentId) =>
+    (await service.isEnabled(agentId)) ? "Turn off Spec mode to use autonomous mode" : null,
+  );
+  return service;
 }

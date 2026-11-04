@@ -2,6 +2,7 @@ import { ClickUpUserHeader } from "@/components/clickup-shell/chat-headers";
 import { CLICKUP_MESSAGE_INDENT } from "@/components/clickup-shell/chat-layout";
 import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { SpecModeMessageLabel } from "@/spec-mode/message-label";
 import {
   View,
   Text,
@@ -567,6 +568,7 @@ export const UserMessage = memo(function UserMessage({
           })}
         </View>
       ) : null}
+      <SpecModeMessageLabel message={message} />
       {hasText ? (
         <Text selectable style={userMessageStylesheet.text} dataSet={MESSAGE_TEXT_DATASET}>
           {message}

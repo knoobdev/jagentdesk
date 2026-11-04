@@ -570,6 +570,8 @@ function createDefaultDeps(): HostRuntimeControllerDeps {
     : undefined;
   const appCapabilities = {
     [CLIENT_CAPS.selectiveAgentTimeline]: true,
+    // The app renders the Spec mode Phase review bar (spec 28.6).
+    [CLIENT_CAPS.specMode]: true,
     ...browserAutomationCapabilities,
   };
 

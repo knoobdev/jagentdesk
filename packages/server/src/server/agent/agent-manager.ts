@@ -234,6 +234,8 @@ export type AgentManagerEvent =
 
 export type AgentSubscriber = (event: AgentManagerEvent) => void;
 
+export type AgentLaunchEnvProvider = (agentId: string) => Record<string, string> | null;
+
 export interface SubscribeOptions {
   agentId?: string;
   replayState?: boolean;
@@ -750,6 +752,7 @@ export class AgentManager {
   private jagentdeskToolCatalogFactory: JAgentDeskToolCatalogFactory | null = null;
   private appendSystemPrompt: string;
   private operatorContext = "";
+  private launchEnvProvider: AgentLaunchEnvProvider | null = null;
   private onAgentAttention?: AgentAttentionCallback;
   private onAgentArchived?: AgentArchivedCallback;
   private onWorkspaceStateMayHaveChanged?: (params: { cwd: string }) => void;
@@ -881,6 +884,14 @@ export class AgentManager {
 
   setOperatorContext(context: string | null | undefined): void {
     this.operatorContext = context ?? "";
+  }
+
+  /**
+   * Extra environment for an agent's provider process, read at every launch, resume and
+   * reload. Spec mode uses it for per-agent spec-kit variables (spec 28.3 step 5).
+   */
+  setLaunchEnvProvider(provider: AgentLaunchEnvProvider | null): void {
+    this.launchEnvProvider = provider;
   }
 
   public getMetricsSnapshot(): AgentMetricsSnapshot {
@@ -5207,6 +5218,7 @@ export class AgentManager {
       agentId,
       env: {
         ...env,
+        ...this.launchEnvProvider?.(agentId),
         JAGENTDESK_AGENT_ID: agentId,
         JAGENTDESK_AGENT_CWD: cwd,
       },

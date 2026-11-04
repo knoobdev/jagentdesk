@@ -1,12 +1,10 @@
-import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
+import { useCallback, useRef, useState, type ReactElement } from "react";
 import { Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { Infinity as InfinityIcon } from "lucide-react-native";
 import { AgentControlTrigger } from "@/composer/agent-controls/control";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useHostFeature } from "@/runtime/host-features";
-import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
-import type { AutorunState } from "@jagentdesk/protocol/messages";
+import { useAutorunState, useSpecModeState } from "@/spec-mode/use-spec-mode";
 
 /**
  * Autonomous-mode toggle for the CURRENT agent (spec §20). A switch in the composer
@@ -23,34 +21,14 @@ export function AutonomousControl({
   agentId: string;
   serverId: string;
 }): ReactElement | null {
-  const supported = useHostFeature(serverId, "autorun");
-  const client = useHostRuntimeClient(serverId);
-  const isConnected = useHostRuntimeIsConnected(serverId);
+  const { supported, state, client, isConnected, setState } = useAutorunState(serverId, agentId);
+  const specMode = useSpecModeState(serverId, agentId);
   const anchorRef = useRef<View>(null);
-  const [state, setState] = useState<AutorunState | null>(null);
   const [pending, setPending] = useState(false);
 
-  useEffect(() => {
-    if (!client || !supported) return;
-    let alive = true;
-    void (async () => {
-      try {
-        const initial = await client.autorunGet(agentId);
-        if (alive) setState(initial);
-      } catch {
-        // No prior state / transient error — the toggle just shows "off".
-      }
-    })();
-    const unsubscribe = client.subscribeAutorunStream((s) => {
-      if (s.agentId === agentId) setState(s);
-    });
-    return () => {
-      alive = false;
-      unsubscribe();
-    };
-  }, [client, supported, agentId]);
-
   const running = state?.status === "running";
+  // Spec mode and autonomous mode exclude each other (spec 28.4 step 6).
+  const blockedBySpecMode = !running && specMode.state?.enabled === true;
 
   const handlePress = useCallback(async () => {
     if (!client || pending) return;
@@ -63,7 +41,7 @@ export function AutonomousControl({
     } finally {
       setPending(false);
     }
-  }, [client, pending, running, agentId]);
+  }, [client, pending, running, agentId, setState]);
 
   const onPress = useCallback(() => {
     void handlePress();
@@ -71,9 +49,13 @@ export function AutonomousControl({
 
   if (!supported) return null;
 
-  const hint = running
-    ? "Autonomous mode is ON — tap to stop. The agent keeps working on its own toward your last request."
-    : "Let this agent keep working on its own toward your last request, until it's done.";
+  let hint = "Let this agent keep working on its own toward your last request, until it's done.";
+  if (running) {
+    hint =
+      "Autonomous mode is ON — tap to stop. The agent keeps working on its own toward your last request.";
+  } else if (blockedBySpecMode) {
+    hint = "Turn off Spec mode to use autonomous mode.";
+  }
 
   return (
     <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
@@ -85,7 +67,7 @@ export function AutonomousControl({
           surface="toolbar"
           label="Autonomous"
           showToolbarLabel={false}
-          disabled={!isConnected || pending}
+          disabled={!isConnected || pending || blockedBySpecMode}
           onPress={onPress}
           accessibilityLabel={running ? "Turn off autonomous mode" : "Turn on autonomous mode"}
           testID={`composer-autonomous-toggle-${agentId}`}

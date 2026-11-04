@@ -25,6 +25,7 @@ import type { DatabaseRegistry } from "./database/database-registry.js";
 import { SshService } from "./ssh/ssh-service.js";
 import type { ScheduleService } from "./schedule/service.js";
 import type { AutorunService } from "./autorun/service.js";
+import type { SpecModeService } from "./spec-mode/service.js";
 import type { SessionShareService } from "./session-share/service.js";
 import type { AgentForumService } from "./agent-forum/service.js";
 import type { AutorunState } from "@jagentdesk/protocol/messages";
@@ -644,6 +645,7 @@ export class VoiceAssistantWebSocketServer {
   // Agent Forum / Team mode (docs/plans/active/agent-forum.md). Injected post-construction via
   // setAgentForum() so the giant positional constructor need not grow.
   private agentForumService: AgentForumService | null = null;
+  private specModeService: SpecModeService | null = null;
   private agentForumBootstrap:
     | ((input: { topicId: string; prompt: string; originAgentId?: string }) => void | Promise<void>)
     | null = null;
@@ -1884,6 +1886,10 @@ export class VoiceAssistantWebSocketServer {
     this.agentForumNotify = notify;
   }
 
+  setSpecModeService(service: SpecModeService): void {
+    this.specModeService = service;
+  }
+
   private createSocketSession(options: SocketSessionOptions): Session {
     return new Session({
       clientId: options.clientId,
@@ -1926,6 +1932,7 @@ export class VoiceAssistantWebSocketServer {
       sshService: this.sshService,
       scheduleService: this.scheduleService,
       autorunService: this.autorunService,
+      specModeService: this.specModeService,
       sessionShareService: this.sessionShareService,
       agentForumService: this.agentForumService,
       agentForumBootstrap: this.agentForumBootstrap,
@@ -2388,6 +2395,8 @@ export class VoiceAssistantWebSocketServer {
         // Session sharing (spec §21 / ADR-0018); advertised only when the daemon opted in.
         ...(this.sessionShareService ? { sessionSharing: true } : {}),
         ...(this.agentForumService ? { agentForum: true } : {}),
+        // Spec mode (spec 28 / ADR-0030): agent.spec_mode.* surface.
+        ...(this.specModeService ? { specMode: true } : {}),
         // Advertise the plugin management surface only when a PluginService is
         // wired; without it the plugin.* RPCs return empty/disabled results.
         ...(this.pluginRuntime

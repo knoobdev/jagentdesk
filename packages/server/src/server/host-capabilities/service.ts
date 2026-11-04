@@ -177,6 +177,7 @@ export class HostCapabilityService {
       forgeGh: () => this.probeVersioned("gh", ["--version"], ["gh"]),
       forgeGlab: () => this.probeVersioned("glab", ["--version"], ["glab"]),
       forgeTea: () => this.probeVersioned("tea", ["--version"], ["tea"]),
+      specKit: () => this.probeSpecKit(),
     };
     const entries = await Promise.all(
       Object.entries(probes).map(async ([id, probe]) => {
@@ -280,6 +281,34 @@ export class HostCapabilityService {
     }
     const networksetup = await this.runner.find("networksetup");
     return networksetup ? available(null) : missing("networksetup is not available on this host");
+  }
+
+  /**
+   * Spec mode runs spec-kit's helper scripts in the workspace (spec 28.3 step 1): the bash
+   * variant reads JSON with jq or python3, the Windows variant needs PowerShell 5.1+.
+   */
+  private async probeSpecKit(): Promise<HostCapability> {
+    if (this.host.platform === "win32") {
+      for (const shell of ["pwsh", "powershell"]) {
+        const resolved = await this.runner.find(shell);
+        if (!resolved) continue;
+        const result = await this.runner.run(resolved, [
+          "-NoProfile",
+          "-Command",
+          "$PSVersionTable.PSVersion.ToString()",
+        ]);
+        const version = result.ok ? parseVersion(result.stdout) : null;
+        const [major = 0, minor = 0] = (version ?? "0.0").split(".").map(Number);
+        if (major > 5 || (major === 5 && minor >= 1)) return available(version);
+      }
+      return missing("Requires PowerShell 5.1 or newer");
+    }
+    if (!(await this.runner.find("bash"))) return missing("Requires bash");
+    const jq = await this.runner.find("jq");
+    if (jq && (await this.runner.run(jq, ["--version"])).ok) return available(null);
+    const python = await this.runner.find("python3");
+    if (python && (await this.runner.run(python, ["--version"])).ok) return available(null);
+    return missing("Requires jq or python3", ["jq"]);
   }
 
   private async probeJava(): Promise<HostCapability> {
