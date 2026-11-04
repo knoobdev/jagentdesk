@@ -71,6 +71,10 @@ export const SimDeviceSchema = z.object({
   // Spec 27.3: off by default for every adb/usbmux device; while off nothing is captured or driven.
   controlEnabled: z.boolean().optional(),
   readiness: SimReadinessSchema.optional(),
+  // Spec 27.5: the live screen can be viewed once control is on. An iPhone without WebDriverAgent
+  // (needs_wda / wda_expired) shows its screen through the screenshot service; only touch waits.
+  // Absent from older daemons: viewable only when readiness is "ready".
+  screenAvailable: z.boolean().optional(),
   osVersion: z.string().optional(),
   model: z.string().optional(),
 });
@@ -370,8 +374,10 @@ export const SimPhysicalDisableResponseSchema = resp("simulator/physical/disable
 });
 export type SimPhysicalDisablePayload = z.infer<typeof SimPhysicalDisableResponseSchema>["payload"];
 
-// iOS "Prepare device": sign + install WebDriverAgent with an Apple account of spec 26. Without
-// accountId and with more than one account the daemon answers `account_required` + `accounts`.
+// iOS touch setup ("Enable touch", spec 27.4): sign + install WebDriverAgent with an Apple account
+// of spec 26. Without accountId: one saved account is used; several answer `account_required` +
+// `accounts`; none answers `no_apple_account` (the app shows Add Apple ID in the same dialog).
+// Touch RPCs on an iPhone without WDA answer `wda_required`; the app then runs this in place.
 export const SimSignerAccountSchema = z.object({ id: z.string(), label: z.string() });
 export type SimSignerAccount = z.infer<typeof SimSignerAccountSchema>;
 export const SimPhysicalPrepareRequestSchema = req("simulator/physical/prepare", {
@@ -409,6 +415,8 @@ export type SimPhysicalPrepareProgressPayload = z.infer<
 // JPEG frames arrive as binary WebSocket frames (binary-frames/screen.ts) tagged with this
 // subscriptionId. Only clients that advertise the `binary_screen_frames` capability subscribe;
 // others keep polling simulator/screenshot. maxFps ≤ 15, maxDim ≤ 1280 (the daemon clamps).
+// "screencap" is any polled capture: Android screencap, and an iPhone without WebDriverAgent
+// (the device's screenshot service over the cable, spec 27.5).
 export const SimScreenSourceSchema = z.enum(["scrcpy", "screencap", "wda-mjpeg"]);
 export type SimScreenSource = z.infer<typeof SimScreenSourceSchema>;
 export const SimScreenSubscribeRequestSchema = req("simulator/screen/subscribe", {

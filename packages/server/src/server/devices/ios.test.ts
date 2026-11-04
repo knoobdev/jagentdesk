@@ -91,6 +91,11 @@ describe("iOS readiness (spec 27.4)", () => {
     expect(iosReadiness(input({ wdaInstalled: false }))).toBe("needs_wda");
     expect(iosReadiness(input({ wda: { ...WDA, expiresAt_ms: NOW } }))).toBe("wda_expired");
     expect(iosReadiness(input({ lastWdaFailure: "expired" }))).toBe("wda_expired");
+    // The screen without WDA (27.5) also stops at Developer Mode; a lock is reported per attempt.
+    expect(iosReadiness(input({ wda: null, lastScreenFailure: "developer_mode" }))).toBe(
+      "needs_developer_mode",
+    );
+    expect(iosReadiness(input({ wda: null, lastScreenFailure: "locked" }))).toBe("needs_wda");
     expect(iosReadiness(input({}))).toBe("ready");
   });
 

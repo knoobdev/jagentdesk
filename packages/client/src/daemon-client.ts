@@ -9010,7 +9010,7 @@ export class DaemonClient {
     });
   }
 
-  // iOS Prepare device: signing + installing WebDriverAgent takes minutes on a first run.
+  // iOS touch setup (Enable touch): signing + installing WebDriverAgent takes minutes on a first run.
   async simulatorPhysicalPrepare(options: {
     udid: string;
     accountId?: string;

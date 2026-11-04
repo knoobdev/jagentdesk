@@ -35,6 +35,7 @@ import {
   TILE_MAX_DIM,
   TILE_POLL_MS,
   isDeviceLive,
+  needsTouchSetup,
   isHubDevice,
   needsControlSwitch,
   useDeviceScreen,
@@ -136,6 +137,7 @@ function DeviceBadges({ device }: { device: SimDevice }) {
   let status = "Control off";
   if (device.controlEnabled) {
     status = device.readiness === "ready" ? "Control on" : "Needs attention";
+    if (needsTouchSetup(device) && isDeviceLive(device)) status = "View only";
   }
   return (
     <View style={styles.badges}>
@@ -463,6 +465,7 @@ const FLEET_TABS = [
 ];
 // Simulators get the boot/erase panel; phones, tablets and adb emulators the control-gated one.
 function DeviceDetail({
+  serverId,
   device,
   availability,
   pending,
@@ -472,6 +475,7 @@ function DeviceDetail({
   onButton,
   onChanged,
 }: {
+  serverId: string;
   device: SimDevice;
   availability: SimAvailability;
   pending: Pending | null;
@@ -483,7 +487,13 @@ function DeviceDetail({
 }) {
   if (isHubDevice(device)) {
     return (
-      <SimDevicePanel device={device} client={client} onClose={onClose} onChanged={onChanged} />
+      <SimDevicePanel
+        serverId={serverId}
+        device={device}
+        client={client}
+        onClose={onClose}
+        onChanged={onChanged}
+      />
     );
   }
   return (
@@ -631,6 +641,7 @@ function SimulatorFleet({
 
   const drivePanel = shownDevice ? (
     <DeviceDetail
+      serverId={serverId}
       device={shownDevice}
       availability={availability}
       pending={pending}

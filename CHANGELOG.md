@@ -1,16 +1,43 @@
 # Changelog
 
 All notable changes to JAgentDesk are documented here. JAgentDesk versions its
-own release line (now `0.9.50`); the many `v0.1.x`–`v1.0.x` tags in history are
+own release line (now `0.9.51`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
 
-## v0.9.50 — 2026-11-04
+## v0.9.51 — 2026-11-04
 
-Sideload: adding an Apple ID that works in Sideloadly failed after sign-in with "Developer Services
-listTeams returned 200 without a plist".
+An iPhone plugged in with its cable now shows its screen as soon as you enable control — no Apple ID,
+no setup step — and the first touch sets up the rest in place. Adding an Apple ID that works in
+Sideloadly no longer stops at "Developer Services listTeams returned 200 without a plist". (v0.9.50
+was withdrawn before its files were built; its changes are part of this release.)
 
-### Sideload
+### iPhone and iPad over the cable — view first, touch when you want
+
+- **The screen shows right away.** After **Enable control**, a cabled iPhone or iPad streams its screen
+  through the device's own screenshot service over the cable (go-ios; the Developer Disk Image is
+  mounted automatically, the personalized one on iOS 17+). No Apple ID and no helper app are needed to
+  watch it. The view is marked "View only" until touch is on. If Developer Mode is off, the device says
+  so (`needs_developer_mode`).
+- **Touch turns on where you are.** Apple only lets a computer tap and type on an iPhone through a
+  small XCTest app signed with an Apple ID — WebDriverAgent, the open-source app Appium and Maestro use.
+  The first tap, swipe, text or button press (or the **Enable touch** button) opens one dialog in
+  place: with one Apple account saved in Sideload it is used directly; with several you pick one; with
+  none the Add Apple ID form (with two-factor code) is right there — no separate "Prepare device" step
+  and no trip to the Sideload tab. The dialog shows each step (download, sign, install, launch) and
+  then performs the touch you made. The account is saved for Sideload too.
+- **After that it just works.** When WebDriverAgent runs, the screen switches to its faster MJPEG stream
+  without dropping viewers. A free account uses one of its 3 app slots for it and the signature lasts 7
+  days; Sideload's auto refresh renews it, and if it ever expires the next touch repeats the dialog.
+- **Chat agents.** `sim_screenshot`, logs and app tools work on an iPhone without WebDriverAgent. A
+  touch tool sets it up with the saved Apple account (after the per-device permission card); with no
+  account saved it returns `apple_account_required` and tells you to add one; with several it reuses the
+  account that signed this device, otherwise asks you to pick one in Sims.
+- Protocol: one optional field (`SimDevice.screenAvailable`) and new error codes; older daemons keep
+  their previous behaviour.
+- Checked with tests and a built daemon driving a stand-in for go-ios; not yet on a real iPhone.
+
+### Sideload — Apple ID sign-in reaches your teams
 
 - **Signing service request updated.** Sign-in itself (anisette, password, two-factor code, the
   signing token) already succeeded; the next call, which lists the account's teams, got an answer

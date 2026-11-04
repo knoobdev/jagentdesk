@@ -120,6 +120,15 @@ with a few deliberate boundaries:
 
 ## ✨ New in this release
 
+### iPhone view-first over the cable and Apple ID sign-in that reaches your teams (v0.9.51)
+
+- **Plug in, enable control, see the screen** — no Apple ID, no setup step. The first touch signs and
+  installs WebDriverAgent with the Apple account you already saved (or lets you add one right there)
+  and then does the touch. Chat agents can watch an iPhone right away and touch it the same way.
+- **Apple ID sign-in no longer stops at listTeams** — the signing service now gets the current client
+  version, compressed and JSON answers are read, and any remaining failure says exactly what Apple
+  returned.
+
 ### Fixes from the first real use (v0.9.49)
 
 - **Apple ID sign-in on macOS works with the Mac's own anisette** — no more "HTTP 503 … anisette

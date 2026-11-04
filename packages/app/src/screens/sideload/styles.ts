@@ -10,6 +10,7 @@ export const sideloadStyles = StyleSheet.create((theme) => ({
     width: "100%",
     maxWidth: 960,
   },
+  embeddedSection: { gap: theme.spacing[3], width: "100%" },
   start: { flexDirection: "row" },
   sectionHead: {
     flexDirection: "row",

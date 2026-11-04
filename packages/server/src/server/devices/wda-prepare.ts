@@ -6,7 +6,7 @@ import { unzipSync, zipSync, type Zippable } from "fflate";
 import type { SimSignerAccount } from "@jagentdesk/protocol/simulator/rpc-schemas";
 import { WDA_VERSION } from "./wda.js";
 
-// "Prepare device" (spec 27.4): the unsigned real-device WebDriverAgent runner from Appium's pinned
+// Touch setup (spec 27.4): the unsigned real-device WebDriverAgent runner from Appium's pinned
 // release, re-packed as an .ipa and handed to the Apple-account signer of spec 26.
 
 // The seam owned by the Sideload feature (packages/server/src/server/sideload/sideload-service.ts).
@@ -20,6 +20,8 @@ export interface DeviceSigner {
     options?: Record<string, unknown>;
     autoRefresh?: boolean;
   }): Promise<{ appId: string; bundleId: string; expiresAt_ms: number }>;
+  // When Sideload's auto refresh (26.6) re-signed the app: its current expiry, else null.
+  installedExpiry?(deviceUdid: string, bundleId: string): Promise<number | null>;
 }
 
 const WDA_ASSET_URL = `https://github.com/appium/WebDriverAgent/releases/download/v${WDA_VERSION}/WebDriverAgentRunner-Runner.zip`;

@@ -1183,7 +1183,7 @@ function registerSimulatorTools(params: {
     {
       title: "Device list",
       description:
-        "List iOS simulators and physical iPhones/iPads/Android devices on this host (udid, name, kind, runtime, state). Physical devices show connection, control (on/off) and readiness; a device with control off answers control_disabled until the user enables it in Sims. bootedOnly=true limits to running/connected ones. Auto-approved (read-only).",
+        "List iOS simulators and physical iPhones/iPads/Android devices on this host (udid, name, kind, runtime, state). Physical devices show connection, control (on/off) and readiness; a device with control off answers control_disabled until the user enables it in Sims. An iPhone with readiness needs_wda/wda_expired already gives screenshots; its first touch tool sets up WebDriverAgent with the Apple account saved in Sideload (apple_account_required when none is saved: ask the user to add one). bootedOnly=true limits to running/connected ones. Auto-approved (read-only).",
       inputSchema: { bootedOnly: z.boolean().optional() },
     },
     async (input: { bootedOnly?: boolean }) => {

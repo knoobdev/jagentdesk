@@ -1,4 +1,5 @@
 import type { ChildProcess } from "node:child_process";
+import path from "node:path";
 import type pino from "pino";
 import type {
   SimButton,
@@ -18,9 +19,11 @@ import { DeviceError } from "./errors.js";
 import { cabledIosDevices, GoIos, resolveGoIos, type GoIosDevice } from "./go-ios.js";
 import { SCREEN_MAX_DIM, encodeJpeg, jpegFrame, type JpegFrame } from "./image.js";
 import { IosDevice, IosTunnelAgent, iosMajorVersion } from "./ios.js";
+import { PolledScreen, iosScreenPlan, screenAvailable } from "./ios-screen.js";
 import { MotionAction, ScrcpySession, resolveScrcpyServer } from "./scrcpy.js";
 import { PhysicalDeviceStore } from "./store.js";
-import { WDA_BUTTONS, openMjpegStream } from "./wda.js";
+import { WDA_BUTTONS, openMjpegStream, type WdaClient } from "./wda.js";
+import { chooseSignerAccount, iosTouchPlan, type TouchCaller } from "./wda-auto-prepare.js";
 import {
   defaultFetchBytes,
   ensureWdaIpa,
@@ -116,8 +119,8 @@ const NOT_READY_MESSAGE: Record<Exclude<SimReadiness, "ready">, string> = {
   needs_trust: "Unlock the device and tap Trust on the Trust This Computer prompt.",
   needs_unlock: "Unlock the device.",
   needs_developer_mode: "Turn on Developer Mode in Settings > Privacy & Security, then restart.",
-  needs_wda: "Prepare the device to install WebDriverAgent.",
-  wda_expired: "WebDriverAgent expired. Prepare the device again to re-sign it.",
+  needs_wda: "Touch is not enabled yet. Tap the screen or Enable touch in Sims to set it up.",
+  wda_expired: "Touch expired. Tap the screen or Enable touch in Sims to renew it.",
   needs_usb_debugging: "Unlock the phone and accept the USB debugging prompt.",
   offline: "The device is offline. Reconnect the cable.",
 };
@@ -134,6 +137,14 @@ function reuseTool<T extends { binary: string }>(
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export type PrepareStep = "download" | "sign" | "install" | "launch" | "done";
+export type PrepareProgress = (step: PrepareStep, message: string) => void;
+
+interface PrepareResult {
+  bundleId: string;
+  expiresAt_ms: number;
 }
 
 export interface PhysicalDeviceHubOptions {
@@ -164,6 +175,8 @@ export class PhysicalDeviceHub {
   private readonly screens = new Map<string, DeviceScreen>();
   private readonly logChildren = new Map<string, Set<ChildProcess>>();
   private readonly agentDecisions = new Map<string, Map<string, AgentDecision>>();
+  // One WebDriverAgent prepare per device at a time; a second touch or agent waits for it.
+  private readonly preparing = new Map<string, Promise<PrepareResult>>();
 
   constructor(private readonly options: PhysicalDeviceHubOptions) {
     this.store = new PhysicalDeviceStore(options.jagentdeskHome);
@@ -279,6 +292,7 @@ export class PhysicalDeviceHub {
           // Spec 27.3: the switch is for physical devices; emulators stay controllable.
           controlEnabled: isEmulator || this.store.isControlEnabled(udid),
           readiness,
+          screenAvailable: screenAvailable("android", readiness),
           osVersion: info?.osVersion ?? "",
           model,
         } satisfies SimDevice;
@@ -311,11 +325,13 @@ export class PhysicalDeviceHub {
         tunnel,
         store: this.store,
         logger: this.logger,
+        developerImageDir: path.join(this.options.jagentdeskHome, "devices", "ddi"),
       });
       this.ioses.set(entry.udid, device);
     }
     let probe = this.iosProbes.get(udid);
     if (!probe || this.now() - probe.at > IOS_PROBE_CACHE_MS) {
+      await this.syncWdaExpiry(udid);
       const result = await device.probe(this.now());
       probe = { at: this.now(), readiness: result.readiness, name: result.deviceName };
       this.iosProbes.set(udid, probe);
@@ -324,7 +340,8 @@ export class PhysicalDeviceHub {
     return {
       udid,
       name: probe.name || entry.productType || "iOS device",
-      state: probe.readiness === "ready" ? "Connected" : "Needs attention",
+      // Touch not set up yet still shows the screen (spec 27.5): the device is connected.
+      state: screenAvailable("ios", probe.readiness) ? "Connected" : "Needs attention",
       isBooted: probe.readiness !== "offline",
       runtime: entry.productVersion ? `${os} ${entry.productVersion}` : os,
       deviceType: entry.productType,
@@ -334,9 +351,22 @@ export class PhysicalDeviceHub {
       connection: "usb",
       controlEnabled: this.store.isControlEnabled(udid),
       readiness: probe.readiness,
+      screenAvailable: screenAvailable("ios", probe.readiness),
       osVersion: entry.productVersion,
       model: entry.productType,
     };
+  }
+
+  // Sideload's auto refresh (26.6) re-signs WDA with a new expiry; the readiness here follows it.
+  private async syncWdaExpiry(udid: string): Promise<void> {
+    const install = this.store.wda(udid);
+    const signer = this.options.signer;
+    if (!install || !signer?.installedExpiry) return;
+    const expiresAt_ms = await signer
+      .installedExpiry(udid.slice(IOS_UDID_PREFIX.length), install.bundleId)
+      .catch(() => null);
+    if (expiresAt_ms === null || expiresAt_ms <= install.expiresAt_ms) return;
+    await this.store.setWda(udid, { ...install, expiresAt_ms }, this.now());
   }
 
   private async find(udid: string): Promise<SimDevice> {
@@ -384,7 +414,14 @@ export class PhysicalDeviceHub {
     if (device.platform === "android" && readiness !== "ready") {
       throw new DeviceError("device_not_ready", NOT_READY_MESSAGE[readiness]);
     }
-    if (device.platform === "ios" && (readiness === "needs_trust" || readiness === "offline")) {
+    // iOS: the screen (screenshot service) and WDA both need trust and Developer Mode; a missing
+    // or expired WDA only matters to touch (iosDriver).
+    if (
+      device.platform === "ios" &&
+      (readiness === "needs_trust" ||
+        readiness === "offline" ||
+        readiness === "needs_developer_mode")
+    ) {
       throw new DeviceError("device_not_ready", NOT_READY_MESSAGE[readiness]);
     }
     return device;
@@ -512,8 +549,88 @@ export class PhysicalDeviceHub {
 
   private async openSource(screen: DeviceScreen): Promise<ScreenSourceHandle> {
     const device = await this.find(screen.udid);
-    if (device.platform === "ios") return this.openWdaSource(screen, device);
+    if (device.platform === "ios") return this.openIosSource(screen, device);
     return this.openAndroidSource(screen, device);
+  }
+
+  // Spec 27.5: WDA MJPEG when WDA runs, else the screenshot service right away (no Apple account);
+  // an installed WDA is started alongside and takes over once it is up.
+  private async openIosSource(
+    screen: DeviceScreen,
+    device: SimDevice,
+  ): Promise<ScreenSourceHandle> {
+    const backend = this.ios(device);
+    const plan = iosScreenPlan({
+      wdaRunning: backend.wdaRunning,
+      readiness: device.readiness ?? "ready",
+    });
+    if (plan.source === "wda-mjpeg") {
+      try {
+        return await this.openWdaSource(screen, device);
+      } catch (error) {
+        this.logger.warn({ err: error, udid: device.udid }, "WDA MJPEG failed; using screenshots");
+      }
+    }
+    const handle = await this.openIosScreenshotSource(screen, backend);
+    if (plan.startWdaInBackground) {
+      void backend
+        .wda()
+        .then(() => this.upgradeToWda(device.udid))
+        .catch((error: unknown) => {
+          this.logger.debug(
+            { err: error, udid: device.udid },
+            "WDA did not start; screenshots stay",
+          );
+        });
+    }
+    return handle;
+  }
+
+  private async openIosScreenshotSource(
+    screen: DeviceScreen,
+    backend: IosDevice,
+  ): Promise<ScreenSourceHandle> {
+    const tools = await this.hostTools();
+    // The first frame decides whether the source works at all (Developer Disk Image, Developer
+    // Mode, lock): its error goes back to the subscriber instead of a silent blank screen.
+    const first = await encodeJpeg(await backend.screenshotImage(), SCREEN_MAX_DIM, tools);
+    let handle: ScreenSourceHandle | null = null;
+    const poller = new PolledScreen({
+      capture: () => backend.screenshotImage(),
+      encode: (image) => encodeJpeg(image, SCREEN_MAX_DIM, tools),
+      onFrame: (frame) => this.emit(screen, frame),
+      onEnd: (reason) => {
+        if (handle) this.onSourceExit(screen, handle, reason);
+      },
+    });
+    handle = { kind: "screencap", scrcpy: null, stop: () => poller.stop() };
+    this.emit(screen, first);
+    poller.start();
+    return handle;
+  }
+
+  // WDA came up (background start, a touch, Enable touch): a screen still on screenshots
+  // switches to the MJPEG stream without dropping its subscribers.
+  private async upgradeToWda(udid: string): Promise<void> {
+    const screen = this.screens.get(udid);
+    if (!screen || screen.starting || screen.source?.kind !== "screencap") return;
+    const previous = screen.source;
+    const device = await this.find(udid).catch(() => null);
+    if (!device || device.platform !== "ios") return;
+    let next: ScreenSourceHandle;
+    try {
+      next = await this.openWdaSource(screen, device);
+    } catch (error) {
+      this.logger.debug({ err: error, udid }, "switch to WDA MJPEG failed; screenshots stay");
+      return;
+    }
+    if (screen.listeners.size === 0 || screen.source !== previous) {
+      next.stop();
+      return;
+    }
+    screen.source = next;
+    previous.stop();
+    this.logger.info({ udid }, "screen switched to WDA MJPEG");
   }
 
   private emit(screen: DeviceScreen, frame: JpegFrame): void {
@@ -546,7 +663,8 @@ export class PhysicalDeviceHub {
   private resumeScreen(device: SimDevice): void {
     const screen = this.screens.get(device.udid);
     if (!screen || screen.source || screen.starting) return;
-    if (device.readiness === "ready") this.scheduleRestart(screen);
+    const platform = device.platform === "android" ? "android" : "ios";
+    if (screenAvailable(platform, device.readiness ?? "ready")) this.scheduleRestart(screen);
   }
 
   private async openAndroidSource(
@@ -656,7 +774,7 @@ export class PhysicalDeviceHub {
     }
     const png =
       device.platform === "ios"
-        ? await (await this.ios(device).wda()).screenshotPng()
+        ? await this.iosScreenshot(device)
         : await this.android(device).screencapPng();
     if (opts.format === "png") {
       const frame = { base64: png.toString("base64"), mimeType: "image/png" as const };
@@ -671,6 +789,55 @@ export class PhysicalDeviceHub {
       width: frame.width,
       height: frame.height,
     };
+  }
+
+  // WDA's screenshot when it runs, else the screenshot service: no WDA start, no Apple account.
+  private async iosScreenshot(device: SimDevice): Promise<Buffer> {
+    const backend = this.ios(device);
+    if (backend.wdaRunning) {
+      const client = await backend.wda();
+      const png = await client.screenshotPng().catch(() => null);
+      if (png) return png;
+    }
+    return backend.screenshotImage();
+  }
+
+  // Spec 27.4: the WDA client for a touch. WDA installed and in date → start it if needed;
+  // otherwise the app gets wda_required (its "Enable touch" dialog prepares in place) and an
+  // agent prepares now with the saved Apple account.
+  private async iosDriver(device: SimDevice, caller: TouchCaller): Promise<WdaClient> {
+    const backend = this.ios(device);
+    const plan = iosTouchPlan({
+      caller,
+      wdaRunning: backend.wdaRunning,
+      install: this.store.wda(device.udid),
+      wdaInstalled: backend.wdaInstalled,
+      lastWdaFailure: backend.lastWdaFailure,
+      now_ms: this.now(),
+    });
+    if (plan === "ask_app") {
+      throw new DeviceError("wda_required", `Touch is not enabled on ${device.name} yet.`);
+    }
+    if (plan === "prepare") await this.agentPrepare(device);
+    let client: WdaClient;
+    try {
+      client = await backend.wda();
+    } catch (error) {
+      // The signature ran out between probes: the next touch sets WDA up again.
+      if (backend.lastWdaFailure === "expired") {
+        this.patchDevice(device.udid, { readiness: "wda_expired" });
+        if (caller === "agent") {
+          await this.agentPrepare(device);
+          client = await backend.wda();
+          void this.upgradeToWda(device.udid);
+          return client;
+        }
+        throw new DeviceError("wda_required", `Touch on ${device.name} expired.`);
+      }
+      throw error;
+    }
+    void this.upgradeToWda(device.udid);
+    return client;
   }
 
   // Ratio coordinates (0..1 of the viewed frame) → device pixels on Android.
@@ -696,10 +863,16 @@ export class PhysicalDeviceHub {
     return session?.size ? session : null;
   }
 
-  async tap(udid: string, x: number, y: number, coords: SimCoords = "device"): Promise<void> {
+  async tap(
+    udid: string,
+    x: number,
+    y: number,
+    coords: SimCoords = "device",
+    caller: TouchCaller = "app",
+  ): Promise<void> {
     const device = await this.requireReady(udid);
     if (device.platform === "ios") {
-      const client = await this.ios(device).wda();
+      const client = await this.iosDriver(device, caller);
       const point = coords === "ratio" ? await this.iosPoints(client, x, y) : { x, y };
       await client.tap(point.x, point.y);
       return;
@@ -717,7 +890,7 @@ export class PhysicalDeviceHub {
   }
 
   private async iosPoints(
-    client: Awaited<ReturnType<IosDevice["wda"]>>,
+    client: WdaClient,
     x: number,
     y: number,
   ): Promise<{ x: number; y: number }> {
@@ -731,10 +904,11 @@ export class PhysicalDeviceHub {
     to: { x: number; y: number },
     durationMs = 300,
     coords: SimCoords = "device",
+    caller: TouchCaller = "app",
   ): Promise<void> {
     const device = await this.requireReady(udid);
     if (device.platform === "ios") {
-      const client = await this.ios(device).wda();
+      const client = await this.iosDriver(device, caller);
       const a = coords === "ratio" ? await this.iosPoints(client, from.x, from.y) : from;
       const b = coords === "ratio" ? await this.iosPoints(client, to.x, to.y) : to;
       await client.drag(a.x, a.y, b.x, b.y, durationMs);
@@ -771,10 +945,10 @@ export class PhysicalDeviceHub {
     scrcpy.touch(MotionAction.Up, to.x * size.width, to.y * size.height);
   }
 
-  async inputText(udid: string, text: string): Promise<void> {
+  async inputText(udid: string, text: string, caller: TouchCaller = "app"): Promise<void> {
     const device = await this.requireReady(udid);
     if (device.platform === "ios") {
-      await (await this.ios(device).wda()).type(text);
+      await (await this.iosDriver(device, caller)).type(text);
       return;
     }
     const scrcpy = this.liveScrcpy(udid);
@@ -782,10 +956,10 @@ export class PhysicalDeviceHub {
     else await this.android(device).text(text);
   }
 
-  async button(udid: string, button: SimButton): Promise<void> {
+  async button(udid: string, button: SimButton, caller: TouchCaller = "app"): Promise<void> {
     const device = await this.requireReady(udid);
     if (device.platform === "ios") {
-      await this.iosButton(device, button);
+      await this.iosButton(device, button, caller);
       return;
     }
     const scrcpy = this.liveScrcpy(udid);
@@ -802,8 +976,18 @@ export class PhysicalDeviceHub {
     else await this.android(device).key(keycode);
   }
 
-  private async iosButton(device: SimDevice, button: SimButton): Promise<void> {
-    const client = await this.ios(device).wda();
+  private async iosButton(
+    device: SimDevice,
+    button: SimButton,
+    caller: TouchCaller,
+  ): Promise<void> {
+    if (!["lock", "power", "home", "volume-up", "volume-down"].includes(button)) {
+      throw new DeviceError(
+        "unsupported_on_platform",
+        `${button} is not available on a physical iPhone or iPad; use home, lock or volume`,
+      );
+    }
+    const client = await this.iosDriver(device, caller);
     if (button === "lock" || button === "power") {
       await client.lock();
       return;
@@ -822,9 +1006,9 @@ export class PhysicalDeviceHub {
     );
   }
 
-  async describeUi(udid: string): Promise<SimUiElement[]> {
+  async describeUi(udid: string, caller: TouchCaller = "app"): Promise<SimUiElement[]> {
     const device = await this.requireReady(udid);
-    if (device.platform === "ios") return (await this.ios(device).wda()).source();
+    if (device.platform === "ios") return (await this.iosDriver(device, caller)).source();
     return this.android(device).describeUi();
   }
 
@@ -861,10 +1045,10 @@ export class PhysicalDeviceHub {
     await this.android(device).terminateApp(bundleId);
   }
 
-  async openUrl(udid: string, url: string): Promise<void> {
+  async openUrl(udid: string, url: string, caller: TouchCaller = "app"): Promise<void> {
     const device = await this.requireReady(udid);
     if (device.platform === "ios") {
-      await (await this.ios(device).wda()).openUrl(url);
+      await (await this.iosDriver(device, caller)).openUrl(url);
       return;
     }
     await this.android(device).openUrl(url);
@@ -906,24 +1090,45 @@ export class PhysicalDeviceHub {
     return output.split(/\r?\n/).filter(Boolean).slice(-lines).join("\n");
   }
 
-  // ── iOS Prepare device (spec 27.4) ──
+  // ── iOS touch setup (spec 27.4): WebDriverAgent signed with the Apple account of Sideload ──
 
   async signerAccounts(): Promise<SimSignerAccount[]> {
     if (!this.options.signer) return [];
     return this.options.signer.listAccounts();
   }
 
+  // The app's "Enable touch" (a first touch or the button): without accountId, one saved
+  // account is used; several answer account_required (the dialog lists them); none answers
+  // no_apple_account (the dialog shows Add Apple ID inline).
   async prepare(
     udid: string,
     accountId: string | undefined,
-    onProgress: (
-      step: "download" | "sign" | "install" | "launch" | "done",
-      message: string,
-    ) => void,
-  ): Promise<{ bundleId: string; expiresAt_ms: number }> {
+    onProgress: PrepareProgress,
+  ): Promise<PrepareResult> {
     const device = await this.requireControl(udid);
+    return this.prepareWith(device, { requestedId: accountId, caller: "app" }, onProgress);
+  }
+
+  // An agent touch on an iPhone without WDA (after the 27.6 card): prepare with the saved account,
+  // or tell the agent what the user has to do.
+  private async agentPrepare(device: SimDevice): Promise<void> {
+    await this.prepareWith(device, { caller: "agent" }, (step, message) => {
+      this.logger.info({ udid: device.udid, step }, message);
+    });
+  }
+
+  private async prepareWith(
+    device: SimDevice,
+    input: { requestedId?: string; caller: TouchCaller },
+    onProgress: PrepareProgress,
+  ): Promise<PrepareResult> {
     if (device.platform !== "ios") {
-      throw new DeviceError("unsupported_on_platform", "Prepare device is for iPhone and iPad");
+      throw new DeviceError("unsupported_on_platform", "Touch setup is for iPhone and iPad");
+    }
+    const running = this.preparing.get(device.udid);
+    if (running) {
+      onProgress("sign", "Touch is already being set up on this device");
+      return running;
     }
     const signer = this.options.signer;
     if (!signer) {
@@ -932,23 +1137,49 @@ export class PhysicalDeviceHub {
         "Signing with an Apple account is not available on this host yet",
       );
     }
-    const accounts = await signer.listAccounts();
-    if (accounts.length === 0) {
-      throw new DeviceError("no_apple_account", "Add an Apple account in Sideload first");
+    const choice = chooseSignerAccount(await signer.listAccounts(), {
+      requestedId: input.requestedId,
+      previousId: this.store.wda(device.udid)?.accountId,
+      caller: input.caller,
+    });
+    if (choice.kind === "none") {
+      if (input.caller === "agent") {
+        throw new DeviceError(
+          "apple_account_required",
+          `Touch on ${device.name} needs an Apple account to sign WebDriverAgent, and none is saved on this host. Ask the user to open ${device.name} in Sims, tap its screen and add an Apple ID in the dialog that opens, then try again.`,
+        );
+      }
+      throw new DeviceError("no_apple_account", "No Apple account is saved on this host yet");
     }
-    const onlyAccount = accounts.length === 1 ? accounts[0] : undefined;
-    const account = accountId
-      ? accounts.find((candidate) => candidate.id === accountId)
-      : onlyAccount;
-    if (!account)
+    if (choice.kind === "choose") {
+      if (input.caller === "agent") {
+        throw new DeviceError(
+          "account_required",
+          `Several Apple accounts are saved on this host. Ask the user to open ${device.name} in Sims, tap its screen and choose the account for WebDriverAgent, then try again.`,
+        );
+      }
       throw new DeviceError("account_required", "Choose the Apple account to sign with");
+    }
+    const job = this.signWda(device, choice.account, signer, onProgress).finally(() => {
+      this.preparing.delete(device.udid);
+    });
+    this.preparing.set(device.udid, job);
+    return job;
+  }
+
+  private async signWda(
+    device: SimDevice,
+    account: SimSignerAccount,
+    signer: DeviceSigner,
+    onProgress: PrepareProgress,
+  ): Promise<PrepareResult> {
+    const udid = device.udid;
     onProgress("download", "Downloading WebDriverAgent");
     const ipaPath = await ensureWdaIpa(this.options.jagentdeskHome, this.fetchBytes);
     onProgress("sign", `Signing WebDriverAgent with ${account.label}`);
-    const deviceUdid = udid.slice(IOS_UDID_PREFIX.length);
     const signed = await signer.signAndInstall({
       accountId: account.id,
-      deviceUdid,
+      deviceUdid: udid.slice(IOS_UDID_PREFIX.length),
       ipaPath,
       autoRefresh: true,
     });
@@ -965,10 +1196,13 @@ export class PhysicalDeviceHub {
     );
     const backend = this.ios(device);
     backend.lastWdaFailure = null;
+    backend.wdaInstalled = true;
     this.iosProbes.delete(udid);
     onProgress("launch", "Starting WebDriverAgent");
     await backend.wda();
-    onProgress("done", "Device ready");
+    this.patchDevice(udid, { readiness: "ready", state: "Connected", screenAvailable: true });
+    void this.upgradeToWda(udid);
+    onProgress("done", "Touch is on");
     return { bundleId: signed.bundleId, expiresAt_ms: signed.expiresAt_ms };
   }
 
