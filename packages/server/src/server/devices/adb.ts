@@ -18,7 +18,7 @@ export class AdbForbiddenCommandError extends Error {
 }
 
 // ADR-0033 decision 4: Wi-Fi only through wireless debugging (TLS, pairing code). `adb tcpip`
-// and `adb usb` (its undo) are refused at the one place every adb call goes through.
+// (unencrypted adb over the network) is refused at the one place every adb call goes through.
 const FORBIDDEN_SUBCOMMANDS = new Set(["tcpip"]);
 
 function adbSubcommand(args: readonly string[]): string | null {
