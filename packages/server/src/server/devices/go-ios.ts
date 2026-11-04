@@ -1,3 +1,4 @@
+import { mkdirSync } from "node:fs";
 import type { ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
@@ -124,10 +125,22 @@ export class GoIosCommandError extends Error {
 }
 
 export class GoIos {
+  /**
+   * `workDir`: a writable directory go-ios runs in. Its iOS 17+ tunnel writes the RemotePairing
+   * identity (`selfIdentity.plist`) to the working directory by default; the packaged daemon runs
+   * with cwd `/`, so without this the tunnel exited with code 1 and the screen never started.
+   */
   constructor(
     readonly binary: string,
     private readonly logger: pino.Logger,
+    readonly workDir: string | null = null,
   ) {}
+
+  private cwdOption(): { cwd?: string } {
+    if (!this.workDir) return {};
+    mkdirSync(this.workDir, { recursive: true, mode: 0o700 });
+    return { cwd: this.workDir };
+  }
 
   async run(args: string[], timeoutMs = 30_000): Promise<string> {
     const fullArgs = [...args, ...LOOPBACK_ARGS];
@@ -136,6 +149,7 @@ export class GoIos {
       const result = await execCommand(this.binary, fullArgs, {
         timeout: timeoutMs,
         maxBuffer: 32 * 1024 * 1024,
+        ...this.cwdOption(),
       });
       return result.stdout;
     } catch (error) {
@@ -156,6 +170,7 @@ export class GoIos {
       const result = await execCommand(this.binary, fullArgs, {
         timeout: timeoutMs,
         maxBuffer: 8 * 1024 * 1024,
+        ...this.cwdOption(),
       });
       return `${result.stderr}\n${result.stdout}`;
     } catch (error) {
@@ -170,7 +185,10 @@ export class GoIos {
   spawn(args: string[]): ChildProcess {
     const fullArgs = [...args, ...LOOPBACK_ARGS];
     this.logger.debug({ args: fullArgs }, "go-ios.spawn");
-    return spawnProcess(this.binary, fullArgs, { stdio: ["ignore", "pipe", "pipe"] });
+    return spawnProcess(this.binary, fullArgs, {
+      stdio: ["ignore", "pipe", "pipe"],
+      ...this.cwdOption(),
+    });
   }
 
   async list(): Promise<GoIosDevice[]> {
@@ -238,7 +256,8 @@ export class GoIos {
 
   // iOS 17+: a userspace tunnel (no root); the agent's info API listens on 127.0.0.1 only.
   tunnel(): ChildProcess {
-    return this.spawn(["tunnel", "start", "--userspace"]);
+    const pairRecords = this.workDir ? [`--pair-record-path=${this.workDir}`] : [];
+    return this.spawn(["tunnel", "start", "--userspace", ...pairRecords]);
   }
 
   // Launches the signed WebDriverAgent runner via testmanagerd; WDA then listens on the device's

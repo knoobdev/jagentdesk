@@ -212,7 +212,8 @@ export class PhysicalDeviceHub {
     const goIos = reuseTool(
       previous?.goIos ?? null,
       goIosPath,
-      (bin) => new GoIos(bin, this.logger),
+      (bin) =>
+        new GoIos(bin, this.logger, path.join(this.options.jagentdeskHome, "devices", "go-ios")),
     );
     let tunnel = previous?.tunnel ?? null;
     if (goIos !== (previous?.goIos ?? null)) {

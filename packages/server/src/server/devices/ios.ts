@@ -76,6 +76,8 @@ export function iosMajorVersion(productVersion: string): number {
   return Number.isFinite(major) ? major : 0;
 }
 
+const TUNNEL_RETRY_MS = 10_000;
+
 // One `ios tunnel start --userspace` for every iOS 17+ device (go-ios agent mode; its info API
 // listens on 127.0.0.1). Started on first use, kept for the daemon's lifetime.
 export class IosTunnelAgent {
@@ -86,14 +88,33 @@ export class IosTunnelAgent {
     private readonly logger: pino.Logger,
   ) {}
 
+  private failedAt = 0;
+
   async ensure(): Promise<void> {
     if (this.child && this.child.exitCode === null) return;
+    // A tunnel that just failed is not restarted on every screen request.
+    if (Date.now() - this.failedAt < TUNNEL_RETRY_MS) return;
     const child = this.goIos.tunnel();
+    let tail = "";
     child.stderr?.on("data", (chunk: Buffer) => {
-      this.logger.debug({ out: chunk.toString("utf8").trim() }, "go-ios tunnel");
+      const text = chunk.toString("utf8");
+      tail = (tail + text).slice(-2_000);
+      this.logger.debug({ out: text.trim() }, "go-ios tunnel");
     });
     child.on("exit", (code) => {
-      this.logger.info({ code }, "go-ios tunnel exited");
+      if (code !== 0 && code !== null) {
+        this.failedAt = Date.now();
+        // go-ios prints JSON slog lines; keep only their messages, never pairing material.
+        const reasons = tail
+          .split("\n")
+          .map((line) => /"msg":"([^"]*)"(?:.*"err":"([^"]*)")?/.exec(line))
+          .filter((match): match is RegExpExecArray => match !== null)
+          .map((match) => (match[2] ? `${match[1]}: ${match[2]}` : match[1]))
+          .slice(-3);
+        this.logger.warn({ code, reasons }, "go-ios tunnel failed");
+      } else {
+        this.logger.info({ code }, "go-ios tunnel exited");
+      }
       if (this.child === child) this.child = null;
     });
     this.child = child;
