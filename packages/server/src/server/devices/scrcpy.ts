@@ -256,8 +256,6 @@ export interface ScrcpySessionOptions {
   onExit: (reason: string) => void;
 }
 
-const pushedJars = new Set<string>();
-
 // One scrcpy-server on a device: H.264 over an adb forward (bound by the adb server to
 // 127.0.0.1), decoded by the host's ffmpeg into JPEG frames, plus the control socket for input.
 export class ScrcpySession {
@@ -278,10 +276,8 @@ export class ScrcpySession {
     const { adb, serial, logger } = options;
     const jar = resolveScrcpyServer();
     if (!jar) throw new Error("scrcpy-server is not bundled with this daemon");
-    if (!pushedJars.has(serial)) {
-      await adb.run(["-s", serial, "push", jar, REMOTE_JAR], 60_000);
-      pushedJars.add(serial);
-    }
+    // cleanup=true deletes the jar when the server exits, so every session pushes it again.
+    await adb.run(["-s", serial, "push", jar, REMOTE_JAR], 60_000);
     const scid = randomInt(0, 0x7fffffff).toString(16).padStart(8, "0");
     const port = Number.parseInt(
       (await adb.run(["-s", serial, "forward", "tcp:0", `localabstract:scrcpy_${scid}`])).trim(),

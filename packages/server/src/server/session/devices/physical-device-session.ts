@@ -28,7 +28,8 @@ const MAX_BUFFERED_BYTES = 384 * 1024;
 interface ScreenSubscription {
   udid: string;
   seq: number;
-  lastSentAt: number;
+  // Earliest time the next frame may go out; advances by intervalMs per frame sent.
+  nextAllowedAt: number;
   intervalMs: number;
   unsubscribe: () => void;
 }
@@ -302,7 +303,7 @@ export class PhysicalDeviceSession {
     const subscription: ScreenSubscription = {
       udid,
       seq: 0,
-      lastSentAt: 0,
+      nextAllowedAt: 0,
       intervalMs: 1000 / maxFps,
       unsubscribe: () => {},
     };
@@ -333,13 +334,16 @@ export class PhysicalDeviceSession {
     subscription: ScreenSubscription,
     frame: ScreenFrameEvent,
   ): void {
-    // Small tolerance so a 15 fps source is not halved by timer jitter.
-    if (frame.timestamp_ms - subscription.lastSentAt < subscription.intervalMs - 5) return;
+    // Credit-based cap: the average stays ≤ maxFps, but decode jitter (two frames 50 ms apart from
+    // a 15 fps source) does not cost a frame; a credit older than one interval is not kept.
+    const now = frame.timestamp_ms;
+    if (now < subscription.nextAllowedAt) return;
     const buffered = this.host.transportBufferedAmount();
     if (buffered !== null && buffered > MAX_BUFFERED_BYTES) return;
     if (Math.max(frame.width, frame.height) > SCREEN_MAX_DIM) return;
     subscription.seq += 1;
-    subscription.lastSentAt = frame.timestamp_ms;
+    subscription.nextAllowedAt =
+      Math.max(subscription.nextAllowedAt, now - subscription.intervalMs) + subscription.intervalMs;
     this.host.emitBinary(
       encodeScreenFrame({
         subscriptionId,
