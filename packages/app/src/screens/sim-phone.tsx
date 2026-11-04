@@ -81,14 +81,20 @@ export function useScreenshot(
   return shot;
 }
 
-// adb and usbmux devices (phones, tablets, emulators found by adb) sit behind the per-device
-// control switch of spec 27.3; iOS simulators do not.
-export function isGatedDevice(device: SimDevice): boolean {
+// adb and usbmux devices (phones, tablets, adb emulators): served by the daemon's device hub,
+// live screen pushed as binary frames.
+export function isHubDevice(device: SimDevice): boolean {
   return device.kind === "physical" || device.kind === "emulator";
 }
 
+// Spec 27.3: only physical devices have the control switch; emulators stay controllable.
+export function needsControlSwitch(device: SimDevice): boolean {
+  return device.kind === "physical";
+}
+
 export function isDeviceLive(device: SimDevice): boolean {
-  return isGatedDevice(device) && device.controlEnabled === true && device.readiness === "ready";
+  const controllable = !needsControlSwitch(device) || device.controlEnabled === true;
+  return isHubDevice(device) && controllable && device.readiness === "ready";
 }
 
 export interface LiveScreen {
@@ -112,7 +118,7 @@ export function useDeviceScreen(
   device: SimDevice,
   options: { maxFps: number; pollMs: number; maxDim: number },
 ): LiveScreen {
-  const gated = isGatedDevice(device);
+  const gated = isHubDevice(device);
   const polled = useScreenshot(
     client,
     gated ? null : device.udid,

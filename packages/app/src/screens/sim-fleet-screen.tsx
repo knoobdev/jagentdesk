@@ -36,7 +36,8 @@ import {
   TILE_MAX_DIM,
   TILE_POLL_MS,
   isDeviceLive,
-  isGatedDevice,
+  isHubDevice,
+  needsControlSwitch,
   useDeviceScreen,
 } from "@/screens/sim-phone";
 import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
@@ -87,7 +88,7 @@ function DeviceTile({
     maxDim: TILE_MAX_DIM,
   });
   const shot = screen.shot;
-  const gated = isGatedDevice(device);
+  const gated = isHubDevice(device);
   const select = useCallback(() => onSelect(device.udid), [device.udid, onSelect]);
   const boot = useCallback(() => onBoot(device.udid), [device.udid, onBoot]);
   const isClickUp = useIsClickUpTheme();
@@ -127,7 +128,7 @@ function DeviceTile({
   );
 }
 
-// Physical devices and adb emulators: connection plus the control switch / readiness at a glance.
+// Physical devices and adb emulators: connection, plus the control switch for physical ones.
 function DeviceBadges({ device }: { device: SimDevice }) {
   const connection = connectionLabel(device);
   let status = "Control off";
@@ -137,12 +138,14 @@ function DeviceBadges({ device }: { device: SimDevice }) {
   return (
     <View style={styles.badges}>
       {connection ? <Text style={styles.badge}>{connection}</Text> : null}
-      <Text
-        style={device.controlEnabled ? styles.badge : styles.badgeOff}
-        testID={`device-badge-${device.udid}`}
-      >
-        {status}
-      </Text>
+      {needsControlSwitch(device) ? (
+        <Text
+          style={device.controlEnabled ? styles.badge : styles.badgeOff}
+          testID={`device-badge-${device.udid}`}
+        >
+          {status}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -484,7 +487,7 @@ function DeviceDetail({
   onButton: (button: "home" | "lock") => void;
   onChanged: () => void;
 }) {
-  if (isGatedDevice(device)) {
+  if (isHubDevice(device)) {
     return (
       <SimDevicePanel device={device} client={client} onClose={onClose} onChanged={onChanged} />
     );
@@ -536,7 +539,7 @@ export function SimFleetScreen() {
   );
   const shownDevice = useLingering(selected, SLIDE_MS);
   const existingNames = useMemo(() => devices.map((d) => d.name), [devices]);
-  const simulators = useMemo(() => devices.filter((d) => !isGatedDevice(d)), [devices]);
+  const simulators = useMemo(() => devices.filter((d) => !isHubDevice(d)), [devices]);
   const hasDeviceTools = Boolean(availability.physical?.adb || availability.physical?.goIos);
   const onPaired = useCallback(
     (udid: string) => {

@@ -42,6 +42,7 @@ import {
   DRIVE_POLL_MS,
   PhoneScreen,
   isDeviceLive,
+  needsControlSwitch,
   useDeviceScreen,
 } from "@/screens/sim-phone";
 import { READINESS_COPY, connectionLabel, deviceErrorCopy } from "@/screens/sim-device-errors";
@@ -385,7 +386,8 @@ export function SimDevicePanel({
   const logs = useDeviceLogs(client, device.udid, live);
   const reportError = useCallback((message: string) => setError(message), []);
   const { gestures, onLayout } = useScreenGestures(client, device.udid, reportError);
-  const enabled = device.controlEnabled === true;
+  const switchable = needsControlSwitch(device);
+  const enabled = !switchable || device.controlEnabled === true;
 
   const run = useCallback(
     async (key: Pending, action: () => Promise<{ error: string | null }>) => {
@@ -463,7 +465,7 @@ export function SimDevicePanel({
       </View>
 
       {enabled ? null : <ControlOffCard device={device} pending={pending} onEnable={enable} />}
-      {enabled ? (
+      {switchable && enabled ? (
         <View style={styles.row}>
           <Button
             size="sm"
