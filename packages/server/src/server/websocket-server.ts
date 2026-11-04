@@ -23,6 +23,7 @@ import type { LifetimeUsage, UsageDayRollup } from "@jagentdesk/protocol/usage-h
 import type { ClusterRegistry } from "./cluster/cluster-registry.js";
 import type { DatabaseRegistry } from "./database/database-registry.js";
 import { SshService } from "./ssh/ssh-service.js";
+import type { SideloadService } from "./sideload/sideload-service.js";
 import type { ScheduleService } from "./schedule/service.js";
 import type { AutorunService } from "./autorun/service.js";
 import type { SessionShareService } from "./session-share/service.js";
@@ -638,6 +639,7 @@ export class VoiceAssistantWebSocketServer {
   private readonly clusterRegistry: ClusterRegistry;
   private readonly databaseRegistry: DatabaseRegistry;
   private readonly sshService: SshService;
+  private readonly sideloadService: SideloadService | null;
   private readonly scheduleService: ScheduleService;
   private autorunService!: AutorunService | null;
   private sessionShareService!: SessionShareService | null;
@@ -729,6 +731,7 @@ export class VoiceAssistantWebSocketServer {
   private acceptingConnections = true;
   private readonly advertiseDaemonStatusRpc: boolean;
 
+  // oxlint-disable-next-line complexity
   constructor(
     server: HTTPServer,
     logger: pino.Logger,
@@ -782,6 +785,7 @@ export class VoiceAssistantWebSocketServer {
     autorunService?: AutorunService | null,
     sessionShareService?: SessionShareService | null,
     sshService?: SshService | null,
+    sideloadService?: SideloadService | null,
   ) {
     this.logger = logger.child({ module: "websocket-server" });
     this.advertiseDaemonStatusRpc = wsConfig.daemonStatusRpc !== false;
@@ -812,6 +816,7 @@ export class VoiceAssistantWebSocketServer {
     this.databaseRegistry =
       databaseRegistry ?? new (require("./database/database-registry.js").DatabaseRegistry)();
     this.sshService = sshServiceOrInMemory(sshService);
+    this.sideloadService = sideloadService ?? null;
     this.scheduleService = requiredServices.scheduleService;
     this.checkoutDiffManager = requiredServices.checkoutDiffManager;
     this.github = github ?? createGitHubService();
@@ -1924,6 +1929,7 @@ export class VoiceAssistantWebSocketServer {
       clusterRegistry: this.clusterRegistry,
       databaseRegistry: this.databaseRegistry,
       sshService: this.sshService,
+      sideloadService: this.sideloadService,
       scheduleService: this.scheduleService,
       autorunService: this.autorunService,
       sessionShareService: this.sessionShareService,
@@ -2381,6 +2387,7 @@ export class VoiceAssistantWebSocketServer {
         // connect engine, and SSH terminal sessions.
         // COMPAT(sshServers): added after v0.8.0, remove gate after 2027-03-01; retain advertisement.
         sshServers: true,
+        sideload: this.sideloadService !== null,
         // Autonomous run (spec §20 / ADR-0017). Default OFF: advertised only when the
         // daemon opted in (autorunService wired). Gates the whole autorun.* surface;
         // autorunApproval gates the per-action-approval mode toggle (§20.7.3).
@@ -2428,6 +2435,15 @@ export class VoiceAssistantWebSocketServer {
   // Push notification when an autonomous run reaches a terminal state (spec §14). The
   // live `autorun.stream` already updates open clients; this reaches a phone that isn't
   // watching. Wired from AutorunService.onStopped in bootstrap.
+  /** Sideload notices (26.6) reach a phone that is not connected. */
+  public sendSideloadPush(notice: { title: string; body: string }): void {
+    void this.pushNotificationSender
+      .send({ title: notice.title, body: notice.body, data: { serverId: this.serverId } })
+      .catch((err) => {
+        this.logger.warn({ err }, "Failed to send sideload push notification");
+      });
+  }
+
   public notifyAutorunStopped(state: AutorunState): void {
     const reason = state.stopReason ?? "stopped";
     void this.pushNotificationSender

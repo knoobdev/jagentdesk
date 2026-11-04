@@ -60,6 +60,11 @@ import type {
   SshTerminalSize,
 } from "@jagentdesk/protocol/ssh/rpc-schemas";
 import type {
+  SideloadAuthPrompt,
+  SideloadInstallProgress,
+  SideloadNotice,
+} from "@jagentdesk/protocol/sideload/rpc-schemas";
+import type {
   ProxyCaExportPayload,
   ProxyCaptureMode,
   ProxyCaptureStartPayload,
@@ -671,6 +676,35 @@ type WorkspaceCreatePayload = Extract<
 >["payload"];
 type FileExplorerPayload = FileExplorerResponse["payload"];
 export type FileExplorerDirectoryPayload = NonNullable<FileExplorerPayload["directory"]>;
+
+// Sideload (spec 26). Payloads mirror packages/protocol/src/sideload/rpc-schemas.ts.
+type SideloadRequestType = Extract<
+  SessionInboundMessage["type"],
+  `sideload.${string}.request` | `android.${string}.request`
+>;
+type SideloadRequestBody<T extends SideloadRequestType> = Omit<
+  Extract<SessionInboundMessage, { type: T }>,
+  "type" | "requestId"
+>;
+type SideloadResponseType<T extends string> = T extends `${infer Prefix}.request`
+  ? `${Prefix}.response`
+  : never;
+export type SideloadResponsePayload<T extends SideloadRequestType> =
+  Extract<SessionOutboundMessage, { type: SideloadResponseType<T> }> extends { payload: infer P }
+    ? P
+    : never;
+export type {
+  SideloadAccountSummary,
+  SideloadApp,
+  SideloadAppId,
+  SideloadAuthPrompt,
+  SideloadCert,
+  SideloadDevice,
+  SideloadInstallProgress,
+  SideloadIpaInfo,
+  SideloadNotice,
+  SideloadOptions,
+} from "@jagentdesk/protocol/sideload/rpc-schemas";
 
 // SSH servers (spec 25 / story S-20). Payload types mirror the protocol's correlated
 // responses (packages/protocol/src/ssh/rpc-schemas.ts); DTOs are re-exported so app
@@ -8220,6 +8254,38 @@ export class DaemonClient {
     return this.on("ssh.connection.state", (message) => {
       handler(message);
     });
+  }
+
+  // ── Sideload (spec 26) ──
+  // One correlated call per RPC; adding an Apple ID waits on 2FA, installs report progress
+  // through sideload.install.progress pushes.
+
+  sideloadCall<T extends SideloadRequestType>(
+    type: T,
+    body: SideloadRequestBody<T>,
+    options?: { timeout?: number; requestId?: string },
+  ): Promise<SideloadResponsePayload<T>> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId: options?.requestId,
+      timeout: options?.timeout,
+      message: { type, ...body } as { type: T } & Record<string, unknown>,
+    }) as Promise<SideloadResponsePayload<T>>;
+  }
+
+  onSideloadAuthPrompt(handler: (prompt: SideloadAuthPrompt) => void): () => void {
+    return this.on("sideload.auth.prompt", (message) => handler(message));
+  }
+
+  onSideloadAuthResolved(handler: (promptId: string) => void): () => void {
+    return this.on("sideload.auth.resolved", (message) => handler(message.promptId));
+  }
+
+  onSideloadInstallProgress(handler: (progress: SideloadInstallProgress) => void): () => void {
+    return this.on("sideload.install.progress", (message) => handler(message));
+  }
+
+  onSideloadNotice(handler: (notice: SideloadNotice) => void): () => void {
+    return this.on("sideload.notice", (message) => handler(message));
   }
 
   // ── SimFleet: iOS Simulator control ──

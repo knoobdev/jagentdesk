@@ -88,7 +88,9 @@ export class ZsignSigner implements Signer {
       }
       args.push("-f", "-z", "6", "-t", secrets, "-o", input.outputIpa, input.appDir);
       try {
+        // zsign keeps a signing cache in its working directory: keep it in the private dir.
         await execFileAsync(this.zsignPath, args, {
+          cwd: secrets,
           maxBuffer: 16 * 1024 * 1024,
           timeout: 15 * 60_000,
         });

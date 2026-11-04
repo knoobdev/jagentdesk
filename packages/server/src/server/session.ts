@@ -174,6 +174,8 @@ import { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { DatabaseSession } from "./session/database/database-session.js";
 import { SshSession } from "./session/ssh/ssh-session.js";
 import { SshService } from "./ssh/ssh-service.js";
+import { SideloadSession } from "./session/sideload/sideload-session.js";
+import type { SideloadService } from "./sideload/sideload-service.js";
 import { DockerService } from "./docker/docker-service.js";
 import { DockerStreams } from "./docker/docker-streams.js";
 import { RemoteDockerError, type RemoteDockerHosts } from "./ssh/remote-docker/hosts.js";
@@ -534,6 +536,8 @@ export interface SessionOptions {
   clusterRegistry?: ClusterRegistry;
   databaseRegistry?: DatabaseRegistry;
   sshService?: SshService;
+  /** Sideload (spec 26); null in tests and hosts that do not run it. */
+  sideloadService?: SideloadService | null;
   checkoutDiffManager: CheckoutDiffManager;
   github?: ForgeService;
   createAgentMcpTransport?: AgentMcpTransportFactory;
@@ -851,6 +855,7 @@ export class Session {
   private databaseSession!: DatabaseSession;
   private sshSession!: SshSession;
   private sshService!: SshService;
+  private sideloadSession: SideloadSession | null = null;
   private clusterRegistry!: ClusterRegistry;
   private databaseRegistry!: DatabaseRegistry;
   private readonly dockerService = new DockerService();
@@ -1087,6 +1092,13 @@ export class Session {
     this.initClusterSession(options);
     this.initDatabaseSession(options);
     this.initSshSession(options);
+    this.sideloadSession = options.sideloadService
+      ? new SideloadSession({
+          emit: (msg) => this.emit(msg),
+          service: options.sideloadService,
+          logger: this.sessionLogger,
+        })
+      : null;
     this.providerCatalogSession = new ProviderCatalogSession({
       host: {
         emit: (msg) => this.emit(msg),
@@ -2329,6 +2341,7 @@ export class Session {
       () => this.dispatchClusterMessage(msg),
       () => this.dispatchDatabaseMessage(msg),
       () => this.dispatchSshMessage(msg),
+      () => this.dispatchSideloadMessage(msg),
       () => this.dispatchDockerMessage(msg),
       () => this.dispatchSimulatorMessage(msg),
       () => this.dispatchProxyMessage(msg),
@@ -4395,6 +4408,11 @@ export class Session {
       return undefined;
     }
     return undefined;
+  }
+
+  private dispatchSideloadMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    if (!this.sideloadSession?.handles(msg.type)) return undefined;
+    return this.sideloadSession.handle(msg);
   }
 
   private dispatchSshMessage(msg: SessionInboundMessage): Promise<void> | undefined {

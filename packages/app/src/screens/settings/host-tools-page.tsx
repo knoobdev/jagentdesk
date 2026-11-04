@@ -28,6 +28,7 @@ const CAPABILITY_ROWS: { id: HostCapabilityId; label: string }[] = [
   { id: "forgeGh", label: "GitHub CLI (gh)" },
   { id: "forgeGlab", label: "GitLab CLI (glab)" },
   { id: "forgeTea", label: "Gitea CLI (tea)" },
+  { id: "iosSideload", label: "iOS sideload (go-ios, zsign)" },
 ];
 
 const MAX_PROGRESS_LINES = 8;

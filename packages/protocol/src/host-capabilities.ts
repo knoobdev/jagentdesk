@@ -18,6 +18,8 @@ export const HOST_CAPABILITY_IDS = [
   "forgeGh",
   "forgeGlab",
   "forgeTea",
+  // Sideload (spec 26): go-ios to reach iPhones/iPads plus a signer (zsign, or codesign on macOS).
+  "iosSideload",
 ] as const;
 export type HostCapabilityId = (typeof HOST_CAPABILITY_IDS)[number];
 

@@ -125,3 +125,48 @@ export function createDevelopmentProfile(input: {
   p7.sign();
   return Buffer.from(forge.asn1.toDer(p7.toAsn1()).getBytes(), "binary");
 }
+
+export interface TestCa {
+  keyPem: string;
+  certPem: string;
+}
+
+export function createTestCa(): TestCa {
+  const keys = newKeyPair();
+  const ca = forge.pki.createCertificate();
+  ca.publicKey = keys.publicKey;
+  ca.serialNumber = "02";
+  validFor(ca, 30);
+  const name = [{ shortName: "CN", value: "JAgentDesk Fake WWDR" }];
+  ca.setSubject(name);
+  ca.setIssuer(name);
+  ca.setExtensions([{ name: "basicConstraints", cA: true }]);
+  ca.sign(keys.privateKey, forge.md.sha256.create());
+  return {
+    keyPem: forge.pki.privateKeyToPem(keys.privateKey),
+    certPem: forge.pki.certificateToPem(ca),
+  };
+}
+
+/** Issues an "Apple Development" certificate for a CSR, the way Developer Services does. */
+export function issueFromCsr(input: {
+  ca: TestCa;
+  csrPem: string;
+  teamId: string;
+  serial: string;
+}): Buffer {
+  const csr = forge.pki.certificationRequestFromPem(input.csrPem);
+  if (!csr.verify()) throw new Error("CSR signature does not verify");
+  const caCert = forge.pki.certificateFromPem(input.ca.certPem);
+  const cert = forge.pki.createCertificate();
+  cert.publicKey = csr.publicKey as forge.pki.rsa.PublicKey;
+  cert.serialNumber = input.serial;
+  validFor(cert, 365);
+  cert.setSubject([
+    { shortName: "CN", value: `Apple Development: Fake (${input.teamId})` },
+    { shortName: "OU", value: input.teamId },
+  ]);
+  cert.setIssuer(caCert.subject.attributes);
+  cert.sign(forge.pki.privateKeyFromPem(input.ca.keyPem), forge.md.sha256.create());
+  return Buffer.from(forge.asn1.toDer(forge.pki.certificateToAsn1(cert)).getBytes(), "binary");
+}

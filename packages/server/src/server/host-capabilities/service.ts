@@ -177,6 +177,7 @@ export class HostCapabilityService {
       forgeGh: () => this.probeVersioned("gh", ["--version"], ["gh"]),
       forgeGlab: () => this.probeVersioned("glab", ["--version"], ["glab"]),
       forgeTea: () => this.probeVersioned("tea", ["--version"], ["tea"]),
+      iosSideload: () => this.probeIosSideload(),
     };
     const entries = await Promise.all(
       Object.entries(probes).map(async ([id, probe]) => {
@@ -205,6 +206,19 @@ export class HostCapabilityService {
     const result = await this.runner.run(resolved, args);
     if (!result.ok) return missing(`${binary} is installed but does not run`, installable);
     return available(parseVersion(`${result.stdout}\n${result.stderr}`));
+  }
+
+  /** go-ios to reach devices, zsign to sign (macOS falls back to codesign). */
+  private async probeIosSideload(): Promise<HostCapability> {
+    const goIos = await this.runner.find("ios");
+    const goIosRuns = goIos ? (await this.runner.run(goIos, ["version"])).ok : false;
+    const zsign = await this.runner.find("zsign");
+    const zsignResult = zsign ? await this.runner.run(zsign, ["-v"]) : null;
+    const signer = zsignResult?.ok === true || this.host.platform === "darwin";
+    const installable = [...(goIosRuns ? [] : ["go-ios"]), ...(signer ? [] : ["zsign"])];
+    if (!goIosRuns) return missing("go-ios is needed to reach iPhones and iPads", installable);
+    if (!signer) return missing("zsign is needed to sign apps on this host", installable);
+    return available(zsignResult?.ok ? parseVersion(zsignResult.stdout) : null);
   }
 
   private async probeIosSimulators(): Promise<HostCapability> {

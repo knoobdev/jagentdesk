@@ -183,6 +183,8 @@ import type { TerminalManager } from "../terminal/terminal-manager.js";
 import { createConfiguredTerminalManager } from "../terminal/terminal-manager-factory.js";
 import { createSshTerminalManager } from "../terminal/ssh-terminal-manager.js";
 import { SshService } from "./ssh/ssh-service.js";
+import { SideloadService, type SideloadSigner } from "./sideload/sideload-service.js";
+import { createSideloadAgentTools } from "./sideload/agent-tools.js";
 import { SshModules } from "./ssh/ssh-modules.js";
 import { SshModules as SshServerModules } from "./ssh/modules.js";
 import { applyTerminalAgentHookSetting } from "../terminal/agent-hooks/terminal-agent-hook-setting.js";
@@ -496,6 +498,8 @@ export interface JAgentDeskDaemon {
   serviceProxy: ServiceProxySubsystem;
   scriptRuntimeStore: WorkspaceScriptRuntimeStore;
   browserToolsBroker: BrowserToolsBroker;
+  /** Sideload accounts other features sign with (spec 27 signs WebDriverAgent). */
+  sideload: SideloadSigner;
   start(): Promise<void>;
   stop(): Promise<void>;
   getListenTarget(): ListenTarget | null;
@@ -1347,6 +1351,20 @@ export async function createJAgentDeskDaemon(
   await sshModules.initialize();
   sshService.registerModuleHandlers(sshModules.handlers());
   logger.info("SSH service initialized");
+  // Sideload (spec 26 / ADR-0032): accounts, signing, installs and the hourly refresh job.
+  // Secrets stay in <home>/sideload's own secret store; prompts, progress and notices fan out
+  // to every client (wsServer is late-bound). The two env knobs shorten the refresh cycle for
+  // the 26.12.4 acceptance run; they are not user settings.
+  const sideloadService = new SideloadService({
+    jagentdeskHome: config.jagentdeskHome,
+    logger,
+    broadcast: (message) => wsServer?.broadcast(wrapSessionMessage(message)),
+    pushNotification: (notice) => wsServer?.sendSideloadPush(notice),
+    refreshIntervalMs: positiveEnvNumber("JAGENTDESK_SIDELOAD_REFRESH_INTERVAL_MS"),
+    clockOffsetMs: envNumber("JAGENTDESK_SIDELOAD_CLOCK_OFFSET_MS"),
+  });
+  sideloadService.initialize();
+  logger.info("Sideload service initialized");
   // Daemon-wide Forge Hub service (spec 19 / ADR-0015). One instance shared across
   // all agents' tool catalogs, mirroring how session.ts builds it per-session. Token
   // secrets + the connection index live under <home>/forge.
@@ -1559,6 +1577,13 @@ export async function createJAgentDeskDaemon(
     clusterRegistry,
     databaseRegistry,
     sshAgentTools: (callerAgentId) => sshServerModules.createAgentTools(callerAgentId),
+    sideloadAgentTools: (callerAgentId) =>
+      createSideloadAgentTools({
+        service: sideloadService,
+        callerAgentId,
+        requestPermission: (agentId, request) =>
+          agentManager.requestHostToolPermission(agentId, request),
+      }),
     skillsStorage,
     forgeHub: forgeHubService,
     browserFingerprintProfiles: {
@@ -1860,6 +1885,7 @@ export async function createJAgentDeskDaemon(
               autorunService,
               sessionShareService,
               sshService,
+              sideloadService,
             );
             // Session-share guests (ADR-0019): let the scoped ShareServer /ws hand validated guest
             // sockets to the daemon as agent-confined real sessions.
@@ -1969,6 +1995,7 @@ export async function createJAgentDeskDaemon(
     await sshModules.dispose().catch(() => undefined);
     await sshServerModules.dispose().catch(() => undefined);
     sshService.dispose();
+    sideloadService.dispose();
     speechService.stop();
     await scheduleService.stop().catch(() => undefined);
     await autorunService?.stop().catch(() => undefined);
@@ -2003,10 +2030,23 @@ export async function createJAgentDeskDaemon(
     serviceProxy,
     scriptRuntimeStore,
     browserToolsBroker,
+    sideload: sideloadService,
     start,
     stop,
     getListenTarget: () => boundListenTarget,
   };
+}
+
+function envNumber(name: string): number | undefined {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === "") return undefined;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : undefined;
+}
+
+function positiveEnvNumber(name: string): number | undefined {
+  const value = envNumber(name);
+  return value !== undefined && value > 0 ? value : undefined;
 }
 
 // The app web build bundled next to the server dist (dist/server/share-app-dist), copied there by
