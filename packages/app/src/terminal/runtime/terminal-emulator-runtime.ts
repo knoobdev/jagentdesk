@@ -119,7 +119,6 @@ interface TerminalEmulatorRuntimeDisposables {
   removeVisualViewportResize: () => void;
   clearFitTimeouts: () => void;
   removeFontListeners: () => void;
-  removeTouchListeners: () => void;
   restoreDocumentStyles: () => void;
   restoreViewportStyles: () => void;
   disposeFitAddon: () => void;
@@ -150,7 +149,6 @@ const isAppleHandheld =
     maxTouchPoints: navigator.maxTouchPoints,
   });
 
-const DEFAULT_TOUCH_SCROLL_LINE_HEIGHT_PX = 18;
 const FIT_TIMEOUT_DELAYS_MS = [0, 16, 48, 120, 250, 500, 1_000, 2_000];
 const OUTPUT_OPERATION_TIMEOUT_MS = 5_000;
 const EMPTY_TERMINAL_OUTPUT = new Uint8Array(0);
@@ -637,11 +635,6 @@ export class TerminalEmulatorRuntime {
 
     this.attachKeyEventHandler(terminal);
 
-    const removeTouchListeners = this.setupTouchScrollHandlers({
-      root: input.root,
-      host: input.host,
-      terminal,
-    });
     const resizeObserver = new ResizeObserver(() => {
       fitAndEmitResize({ shouldClaim: false });
     });
@@ -725,7 +718,6 @@ export class TerminalEmulatorRuntime {
       removeFontListeners: () => {
         fontSet?.removeEventListener?.("loadingdone", fontReadyHandler);
       },
-      removeTouchListeners,
       restoreDocumentStyles,
       restoreViewportStyles,
       disposeFitAddon: () => {
@@ -754,7 +746,6 @@ export class TerminalEmulatorRuntime {
       disposables.removeVisualViewportResize();
       disposables.clearFitTimeouts();
       disposables.removeFontListeners();
-      disposables.removeTouchListeners();
       disposables.disposeFitAddon();
       disposables.disposeWebglAddon();
       disposables.disposeTerminal();
@@ -1243,122 +1234,6 @@ export class TerminalEmulatorRuntime {
           previousViewportWebkitOverflowScrolling,
         );
       }
-    };
-  }
-
-  private setupTouchScrollHandlers(input: {
-    root: HTMLDivElement;
-    host: HTMLDivElement;
-    terminal: Terminal;
-  }): () => void {
-    let touchScrollRemainderPx = 0;
-    const measuredLineHeight =
-      input.host.querySelector<HTMLElement>(".xterm-rows > div")?.getBoundingClientRect().height ??
-      0;
-    const touchScrollLineHeightPx =
-      measuredLineHeight > 0 ? measuredLineHeight : DEFAULT_TOUCH_SCROLL_LINE_HEIGHT_PX;
-
-    const activeTouch = {
-      identifier: -1,
-      startX: 0,
-      startY: 0,
-      lastX: 0,
-      lastY: 0,
-      mode: null as "vertical" | "horizontal" | null,
-    };
-
-    const touchStartHandler = (event: TouchEvent) => {
-      if (event.touches.length !== 1) {
-        touchScrollRemainderPx = 0;
-        activeTouch.identifier = -1;
-        activeTouch.mode = null;
-        return;
-      }
-
-      const touch = event.touches[0];
-      if (!touch) {
-        touchScrollRemainderPx = 0;
-        activeTouch.identifier = -1;
-        activeTouch.mode = null;
-        return;
-      }
-
-      activeTouch.identifier = touch.identifier;
-      activeTouch.startX = touch.clientX;
-      activeTouch.startY = touch.clientY;
-      activeTouch.lastX = touch.clientX;
-      activeTouch.lastY = touch.clientY;
-      activeTouch.mode = null;
-      touchScrollRemainderPx = 0;
-    };
-
-    const touchMoveHandler = (event: TouchEvent) => {
-      if (event.touches.length !== 1) {
-        return;
-      }
-
-      const touch = Array.from(event.touches).find(
-        (candidate) => candidate.identifier === activeTouch.identifier,
-      );
-      if (!touch) {
-        return;
-      }
-
-      const totalDeltaX = touch.clientX - activeTouch.startX;
-      const totalDeltaY = touch.clientY - activeTouch.startY;
-      if (activeTouch.mode === null) {
-        const absX = Math.abs(totalDeltaX);
-        const absY = Math.abs(totalDeltaY);
-        if (absX > 8 || absY > 8) {
-          activeTouch.mode = absY >= absX ? "vertical" : "horizontal";
-        }
-      }
-
-      const deltaY = touch.clientY - activeTouch.lastY;
-      activeTouch.lastX = touch.clientX;
-      activeTouch.lastY = touch.clientY;
-
-      if (activeTouch.mode !== "vertical") {
-        return;
-      }
-
-      touchScrollRemainderPx += deltaY;
-      const lineDelta = Math.trunc(touchScrollRemainderPx / touchScrollLineHeightPx);
-      if (lineDelta !== 0) {
-        input.terminal.scrollLines(-lineDelta);
-        touchScrollRemainderPx -= lineDelta * touchScrollLineHeightPx;
-      }
-
-      event.preventDefault();
-    };
-
-    const touchEndHandler = (event: TouchEvent) => {
-      const activeTouchEnded = Array.from(event.changedTouches).some(
-        (touch) => touch.identifier === activeTouch.identifier,
-      );
-      if (activeTouchEnded || event.touches.length === 0) {
-        touchScrollRemainderPx = 0;
-        activeTouch.identifier = -1;
-        activeTouch.mode = null;
-      }
-    };
-
-    const touchCancelHandler = () => {
-      touchScrollRemainderPx = 0;
-      activeTouch.identifier = -1;
-      activeTouch.mode = null;
-    };
-
-    input.root.addEventListener("touchstart", touchStartHandler, { passive: true });
-    input.root.addEventListener("touchmove", touchMoveHandler, { passive: false });
-    input.root.addEventListener("touchend", touchEndHandler, { passive: true });
-    input.root.addEventListener("touchcancel", touchCancelHandler, { passive: true });
-
-    return () => {
-      input.root.removeEventListener("touchstart", touchStartHandler);
-      input.root.removeEventListener("touchmove", touchMoveHandler);
-      input.root.removeEventListener("touchend", touchEndHandler);
-      input.root.removeEventListener("touchcancel", touchCancelHandler);
     };
   }
 }
