@@ -107,6 +107,12 @@ export function parseGoIosAppList(stdout: string): string[] {
     .filter((bundleId) => bundleId.includes("."));
 }
 
+// `ios image auto` exits 0 when the download failed; only its "success mounting image" line
+// (printed also when an image was already mounted) tells that the image is there.
+export function developerImageMounted(output: string): boolean {
+  return /success mounting image/i.test(output);
+}
+
 export class GoIosCommandError extends Error {
   constructor(
     readonly args: readonly string[],
@@ -132,6 +138,26 @@ export class GoIos {
         maxBuffer: 32 * 1024 * 1024,
       });
       return result.stdout;
+    } catch (error) {
+      const failure = error as { stderr?: unknown; stdout?: unknown; message?: unknown };
+      const output = [failure.stderr, failure.stdout, failure.message]
+        .filter((part): part is string => typeof part === "string" && part.trim() !== "")
+        .join("\n");
+      throw new GoIosCommandError(fullArgs, output.trim());
+    }
+  }
+
+  // Like run(), but also returns stderr: go-ios reports outcomes of some commands (image auto)
+  // only as slog lines there, with exit code 0 even when they failed.
+  async runWithLog(args: string[], timeoutMs: number): Promise<string> {
+    const fullArgs = [...args, ...LOOPBACK_ARGS];
+    this.logger.debug({ args: fullArgs }, "go-ios.exec");
+    try {
+      const result = await execCommand(this.binary, fullArgs, {
+        timeout: timeoutMs,
+        maxBuffer: 8 * 1024 * 1024,
+      });
+      return `${result.stderr}\n${result.stdout}`;
     } catch (error) {
       const failure = error as { stderr?: unknown; stdout?: unknown; message?: unknown };
       const output = [failure.stderr, failure.stdout, failure.message]
@@ -189,6 +215,21 @@ export class GoIos {
 
   async kill(udid: string, bundleId: string): Promise<void> {
     await this.run(["kill", bundleId, `--udid=${udid}`], 30_000);
+  }
+
+  // Spec 27.5: one frame from the device's instruments screenshot service (needs the Developer
+  // Disk Image, iOS 17+ through the tunnel agent). No WebDriverAgent, no Apple account. The
+  // `--stream` variant is not used: its MJPEG server binds 0.0.0.0 (ADR-0033 decision 3).
+  async screenshot(udid: string, outputPath: string): Promise<void> {
+    await this.run(["screenshot", `--output=${outputPath}`, `--udid=${udid}`], 20_000);
+  }
+
+  // `ios image auto`: downloads the Developer Disk Image matching the device (the personalized
+  // image on iOS 17+) into baseDir once, then mounts it; an image already mounted is kept.
+  async mountDeveloperImage(udid: string, baseDir: string): Promise<void> {
+    const args = ["image", "auto", `--basedir=${baseDir}`, `--udid=${udid}`];
+    const output = await this.runWithLog(args, 600_000);
+    if (!developerImageMounted(output)) throw new GoIosCommandError(args, output.trim());
   }
 
   syslog(udid: string): ChildProcess {

@@ -9,6 +9,10 @@ export type DeviceErrorCode =
   | "sideload_unavailable"
   | "account_required"
   | "no_apple_account"
+  // Spec 27.4: touch on an iPhone without WebDriverAgent. The app answers with its in-place
+  // "Enable touch" dialog; an agent gets apple_account_required when no account is saved.
+  | "wda_required"
+  | "apple_account_required"
   | "tool_missing";
 
 export class DeviceError extends Error {

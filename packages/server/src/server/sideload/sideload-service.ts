@@ -46,6 +46,8 @@ export interface SideloadSigner {
     options?: SideloadOptions;
     autoRefresh?: boolean;
   }): Promise<{ appId: string; bundleId: string; expiresAt_ms: number }>;
+  /** Installed apps; physical devices read WebDriverAgent's expiry after an auto refresh. */
+  listApps?(): Array<{ deviceUdid: string; bundleId: string; expiresAt_ms: number }>;
 }
 
 export interface SideloadServiceOptions {

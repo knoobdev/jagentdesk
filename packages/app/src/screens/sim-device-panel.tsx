@@ -13,6 +13,7 @@ import {
   House,
   LayoutGrid,
   Lock,
+  Pointer,
   Power,
   RotateCw,
   Send,
@@ -20,16 +21,11 @@ import {
   ShieldOff,
   Volume1,
   Volume2,
-  Wrench,
   X,
 } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
-import type {
-  SimButton,
-  SimDevice,
-  SimSignerAccount,
-} from "@jagentdesk/protocol/simulator/rpc-schemas";
+import type { SimButton, SimDevice } from "@jagentdesk/protocol/simulator/rpc-schemas";
 import { Button } from "@/components/ui/button";
 import { SegmentedControl, type SegmentedControlOption } from "@/components/ui/segmented-control";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -43,12 +39,16 @@ import {
   PhoneScreen,
   isDeviceLive,
   needsControlSwitch,
+  needsTouchSetup,
   useDeviceScreen,
 } from "@/screens/sim-phone";
 import { READINESS_COPY, connectionLabel, deviceErrorCopy } from "@/screens/sim-device-errors";
+import { opensTouchSetup } from "@/screens/sim-touch-setup";
+import { TouchSetupDialog, type TouchAction } from "@/screens/sim-touch-setup-dialog";
 
 // Detail rail / sheet for a physical device or adb emulator (spec 27): the control switch, the
-// readiness steps, iOS Prepare device, and a live screen driven by tap, long press and swipe.
+// readiness steps, and a live screen driven by tap, long press and swipe. An iPhone shows its
+// screen before touch is set up; the first touch opens the in-place Enable touch dialog (27.4).
 
 const muted = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 const ThemedX = withUnistyles(X);
@@ -85,7 +85,10 @@ const IOS_BUTTONS: ButtonSpec[] = [
   { button: "volume-up", label: "Vol +", icon: Volume2 },
 ];
 
-type Pending = "enable" | "disable" | "prepare" | "type" | SimButton | null;
+type Pending = "enable" | "disable" | "type" | SimButton | null;
+
+// Sends a touch; one the daemon answers wda_required with goes through Enable touch first.
+type DriveTouch = (action: TouchAction) => Promise<string | null>;
 
 function clampRatio(value: number): number {
   return Math.min(1, Math.max(0, value));
@@ -96,6 +99,7 @@ function clampRatio(value: number): number {
 function useScreenGestures(
   client: DaemonClient | null,
   udid: string,
+  drive: DriveTouch,
   onError: (message: string) => void,
 ): { gestures: GestureResponderHandlers; onLayout: (e: LayoutChangeEvent) => void } {
   const layout = useRef({ w: 0, h: 0 });
@@ -120,19 +124,20 @@ function useScreenGestures(
         const moved = Math.hypot(to.x - from.x, to.y - from.y) > TAP_SLOP_PX;
         const a = { x: clampRatio(from.x / w), y: clampRatio(from.y / h) };
         const b = { x: clampRatio(to.x / w), y: clampRatio(to.y / h) };
-        const fail = (err: unknown) => onError(err instanceof Error ? err.message : String(err));
-        const report = (res: { error: string | null }) => {
-          if (res.error) onError(deviceErrorCopy(res.error));
+        const report = (message: string | null) => {
+          if (message) onError(message);
           return undefined;
         };
         if (!moved && elapsed < LONG_PRESS_MS) {
-          void client.simulatorTap({ udid, x: a.x, y: a.y, coords: "ratio" }).then(report, fail);
+          void drive(() => client.simulatorTap({ udid, x: a.x, y: a.y, coords: "ratio" })).then(
+            report,
+          );
           return;
         }
         const durationMs = Math.min(2000, Math.max(80, elapsed));
         const end = moved ? b : a;
-        void client
-          .simulatorSwipe({
+        void drive(() =>
+          client.simulatorSwipe({
             udid,
             x1: a.x,
             y1: a.y,
@@ -140,14 +145,14 @@ function useScreenGestures(
             y2: end.y,
             durationMs,
             coords: "ratio",
-          })
-          .then(report, fail);
+          }),
+        ).then(report);
       },
       onResponderTerminate: () => {
         start.current = null;
       },
     }),
-    [client, udid, onError],
+    [client, udid, drive, onError],
   );
   return { gestures, onLayout };
 }
@@ -184,104 +189,35 @@ function ControlOffCard({
   );
 }
 
-function PrepareSection({
-  client,
-  device,
-  onError,
-}: {
-  client: DaemonClient | null;
-  device: SimDevice;
-  onError: (message: string | null) => void;
-}) {
-  const [running, setRunning] = useState(false);
-  const [progress, setProgress] = useState<string | null>(null);
-  const [accounts, setAccounts] = useState<SimSignerAccount[]>([]);
-  const prepare = useCallback(
-    async (accountId?: string) => {
-      if (!client) return;
-      setRunning(true);
-      setAccounts([]);
-      onError(null);
-      const requestId = `prepare-${Math.random().toString(36).slice(2)}`;
-      const off = client.onSimulatorPrepareProgress(requestId, (p) => setProgress(p.message));
-      try {
-        const res = await client.simulatorPhysicalPrepare({
-          udid: device.udid,
-          accountId,
-          requestId,
-        });
-        if (res.error === "account_required") setAccounts(res.accounts);
-        if (res.error) onError(deviceErrorCopy(res.error));
-      } catch (err) {
-        onError(err instanceof Error ? err.message : "Prepare failed");
-      } finally {
-        off();
-        setRunning(false);
-        setProgress(null);
-      }
-    },
-    [client, device.udid, onError],
-  );
-  const start = useCallback(() => void prepare(), [prepare]);
-  return (
-    <View style={styles.prepare}>
-      <View style={styles.row}>
-        <Button
-          size="sm"
-          leftIcon={Wrench}
-          onPress={start}
-          loading={running}
-          disabled={running}
-          testID="device-prepare"
-        >
-          Prepare device
-        </Button>
-        {progress ? <Text style={styles.hint}>{progress}</Text> : null}
-      </View>
-      {accounts.length > 0 ? (
-        <View style={styles.row}>
-          {accounts.map((account) => (
-            <AccountChoice key={account.id} account={account} onChoose={prepare} />
-          ))}
-        </View>
-      ) : null}
-    </View>
-  );
-}
-
-function AccountChoice({
-  account,
-  onChoose,
-}: {
-  account: SimSignerAccount;
-  onChoose: (accountId: string) => Promise<void>;
-}) {
-  const choose = useCallback(() => void onChoose(account.id), [account.id, onChoose]);
-  return (
-    <Button size="sm" variant="outline" onPress={choose}>
-      {account.label}
-    </Button>
-  );
-}
-
 function ReadinessCard({
-  client,
   device,
-  onError,
+  onEnableTouch,
 }: {
-  client: DaemonClient | null;
   device: SimDevice;
-  onError: (message: string | null) => void;
+  onEnableTouch: () => void;
 }) {
   const readiness = device.readiness ?? "ready";
   if (readiness === "ready") return null;
-  const canPrepare =
-    device.platform === "ios" && (readiness === "needs_wda" || readiness === "wda_expired");
+  // Spec 27.4: touch not set up is not a blocker; the screen already shows.
+  if (needsTouchSetup(device)) {
+    return (
+      <View style={styles.card} testID={`device-readiness-${readiness}`}>
+        <Text style={styles.cardTitle}>
+          {readiness === "wda_expired" ? "Touch expired" : "Touch is not on yet"}
+        </Text>
+        <Text style={styles.cardText}>{READINESS_COPY[readiness]}</Text>
+        <View style={styles.row}>
+          <Button size="sm" leftIcon={Pointer} onPress={onEnableTouch} testID="device-enable-touch">
+            Enable touch
+          </Button>
+        </View>
+      </View>
+    );
+  }
   return (
     <View style={styles.card} testID={`device-readiness-${readiness}`}>
       <Text style={styles.cardTitle}>Device needs attention</Text>
       <Text style={styles.cardText}>{READINESS_COPY[readiness]}</Text>
-      {canPrepare ? <PrepareSection client={client} device={device} onError={onError} /> : null}
     </View>
   );
 }
@@ -362,12 +298,71 @@ function TypeBar({ onSend, pending }: { onSend: (text: string) => void; pending:
   );
 }
 
+function screenStatusText(
+  screen: { mode: "live" | "poll" | "off"; fps: number | null },
+  touchNeeded: boolean,
+): string {
+  let status = "Waiting for the first frame";
+  if (screen.mode === "live") status = `Live · ${screen.fps ?? 0} fps`;
+  if (screen.mode === "poll") status = "Screenshots (live stream unavailable)";
+  const hint = touchNeeded
+    ? "Tap the screen to turn on touch."
+    : "Tap, hold or drag on the screen.";
+  return `${status}. ${hint}`;
+}
+
+// Spec 27.4: a touch on an iPhone without WebDriverAgent opens the in-place Enable touch dialog
+// and is performed once touch is on; the Enable touch button opens it with no touch.
+function useTouchSetup(
+  device: SimDevice,
+  setError: (message: string | null) => void,
+  onChanged: () => void,
+) {
+  const [setup, setSetup] = useState<{ action: TouchAction | null } | null>(null);
+  const needed = needsTouchSetup(device);
+  const drive = useCallback<DriveTouch>(
+    async (action) => {
+      if (needed) {
+        setSetup({ action });
+        return null;
+      }
+      try {
+        const res = await action();
+        if (opensTouchSetup(res.error)) {
+          setSetup({ action });
+          return null;
+        }
+        return res.error ? deviceErrorCopy(res.error) : null;
+      } catch (err) {
+        return err instanceof Error ? err.message : String(err);
+      }
+    },
+    [needed],
+  );
+  const open = useCallback(() => setSetup({ action: null }), []);
+  const close = useCallback(() => {
+    setSetup(null);
+    onChanged();
+  }, [onChanged]);
+  const finished = useCallback(
+    (message: string | null) => {
+      setSetup(null);
+      setError(message);
+      onChanged();
+    },
+    [onChanged, setError],
+  );
+  return { setup, needed, drive, open, close, finished };
+}
+
 export function SimDevicePanel({
+  serverId,
   device,
   client,
   onClose,
   onChanged,
 }: {
+  serverId: string;
   device: SimDevice;
   client: DaemonClient | null;
   onClose: () => void;
@@ -385,7 +380,9 @@ export function SimDevicePanel({
   });
   const logs = useDeviceLogs(client, device.udid, live);
   const reportError = useCallback((message: string) => setError(message), []);
-  const { gestures, onLayout } = useScreenGestures(client, device.udid, reportError);
+  const touch = useTouchSetup(device, setError, onChanged);
+  const { drive } = touch;
+  const { gestures, onLayout } = useScreenGestures(client, device.udid, drive, reportError);
   const switchable = needsControlSwitch(device);
   const enabled = !switchable || device.controlEnabled === true;
 
@@ -404,6 +401,19 @@ export function SimDevicePanel({
       }
     },
     [onChanged],
+  );
+  const runTouch = useCallback(
+    async (key: Pending, action: TouchAction) => {
+      setPending(key);
+      setError(null);
+      try {
+        const message = await drive(action);
+        if (message) setError(message);
+      } finally {
+        setPending(null);
+      }
+    },
+    [drive],
   );
 
   const enable = useCallback(() => {
@@ -425,16 +435,16 @@ export function SimDevicePanel({
   const press = useCallback(
     (button: SimButton) => {
       if (!client) return;
-      void run(button, () => client.simulatorButton({ udid: device.udid, button }));
+      void runTouch(button, () => client.simulatorButton({ udid: device.udid, button }));
     },
-    [client, device.udid, run],
+    [client, device.udid, runTouch],
   );
   const type = useCallback(
     (text: string) => {
       if (!client) return;
-      void run("type", () => client.simulatorInputText({ udid: device.udid, text }));
+      void runTouch("type", () => client.simulatorInputText({ udid: device.udid, text }));
     },
-    [client, device.udid, run],
+    [client, device.udid, runTouch],
   );
   const onStageLayout = useCallback((e: LayoutChangeEvent) => {
     const { width, height } = e.nativeEvent.layout;
@@ -444,9 +454,6 @@ export function SimDevicePanel({
   const subtitle = [device.model || device.deviceType, device.runtime, connectionLabel(device)]
     .filter(Boolean)
     .join(" · ");
-  let screenStatus = "Waiting for the first frame";
-  if (screen.mode === "live") screenStatus = `Live · ${screen.fps ?? 0} fps`;
-  if (screen.mode === "poll") screenStatus = "Screenshots (live stream unavailable)";
 
   return (
     <View style={styles.panel} testID="device-panel">
@@ -480,7 +487,7 @@ export function SimDevicePanel({
           </Button>
         </View>
       ) : null}
-      {enabled ? <ReadinessCard client={client} device={device} onError={setError} /> : null}
+      {enabled ? <ReadinessCard device={device} onEnableTouch={touch.open} /> : null}
       {error ? (
         <Text style={styles.error} testID="device-error">
           {error}
@@ -512,7 +519,7 @@ export function SimDevicePanel({
                 )}
               </View>
               <Text style={styles.hint} testID="device-screen-status">
-                {screenStatus}. Tap, hold or drag on the screen.
+                {screenStatusText(screen, touch.needed)}
               </Text>
               <TypeBar onSend={type} pending={pending} />
             </>
@@ -520,6 +527,16 @@ export function SimDevicePanel({
             <LogsTab logs={logs} active={live} idleText="Enable control to stream logs." />
           )}
         </>
+      ) : null}
+      {touch.setup && client ? (
+        <TouchSetupDialog
+          client={client}
+          serverId={serverId}
+          device={device}
+          action={touch.setup.action}
+          onClose={touch.close}
+          onFinished={touch.finished}
+        />
       ) : null}
     </View>
   );
@@ -546,7 +563,6 @@ const styles = StyleSheet.create((theme) => ({
   },
   cardTitle: { fontSize: theme.fontSize.sm, fontWeight: "600", color: theme.colors.foreground },
   cardText: { fontSize: theme.fontSize.sm, color: theme.colors.foregroundMuted },
-  prepare: { gap: theme.spacing[2] },
   row: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: theme.spacing[2] },
   stage: { flex: 1, minHeight: 260, alignItems: "center", justifyContent: "center" },
   hint: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.xs },

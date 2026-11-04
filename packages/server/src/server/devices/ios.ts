@@ -1,4 +1,8 @@
 import type { ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { readFile, unlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import type pino from "pino";
 import type { SimReadiness } from "@jagentdesk/protocol/simulator/rpc-schemas";
 import { DeviceError } from "./errors.js";
@@ -43,17 +47,23 @@ export interface IosReadinessInput {
   wda: WdaInstall | null;
   wdaInstalled: boolean | null;
   lastWdaFailure: IosFailure | null;
+  // What the last screenshot-service attempt ran into (spec 27.5: the screen without WDA). Only
+  // Developer Mode counts: a lock is reported on the attempt and clears when a capture works.
+  lastScreenFailure?: IosFailure | null;
   wdaLocked: boolean | null;
   now_ms: number;
 }
 
 // Spec 27.4: Trust → unlock → Developer Mode (iOS 16+) → WebDriverAgent installed and in date.
+// needs_wda / wda_expired only hold back touch: the screen shows without WDA (27.5).
 export function iosReadiness(input: IosReadinessInput): SimReadiness {
   if (input.pairing === "untrusted") return "needs_trust";
   if (input.pairing === "locked" || input.wdaLocked === true) return "needs_unlock";
   if (input.lastWdaFailure === "locked") return "needs_unlock";
   if (input.majorVersion >= 16 && input.developerMode === false) return "needs_developer_mode";
-  if (input.lastWdaFailure === "developer_mode") return "needs_developer_mode";
+  if (input.lastWdaFailure === "developer_mode" || input.lastScreenFailure === "developer_mode") {
+    return "needs_developer_mode";
+  }
   if (!input.wda || input.wdaInstalled === false) return "needs_wda";
   if (input.wda.expiresAt_ms <= input.now_ms || input.lastWdaFailure === "expired") {
     return "wda_expired";
@@ -110,12 +120,19 @@ interface RunningWda {
 }
 
 const WDA_START_TIMEOUT_MS = 45_000;
+const IMAGE_MOUNT_RETRY_MS = 60_000;
 const OUTPUT_TAIL_CHARS = 4_000;
 
 export class IosDevice {
   private running: RunningWda | null = null;
   private starting: Promise<RunningWda> | null = null;
+  private mountingImage: Promise<void> | null = null;
+  private imageMounted = false;
+  private imageMountFailedAt = 0;
   lastWdaFailure: IosFailure | null = null;
+  lastScreenFailure: IosFailure | null = null;
+  // Whether the last probe found the WDA app on the device (null: unknown or no install).
+  wdaInstalled: boolean | null = null;
 
   constructor(
     readonly udid: string,
@@ -125,6 +142,8 @@ export class IosDevice {
       tunnel: IosTunnelAgent;
       store: PhysicalDeviceStore;
       logger: pino.Logger;
+      // Where `ios image auto` keeps Developer Disk Images ($JAGENTDESK_HOME/devices/ddi).
+      developerImageDir: string;
     },
   ) {}
 
@@ -153,7 +172,12 @@ export class IosDevice {
         .then((apps) => apps.includes(wda.bundleId))
         .catch(() => null);
     }
+    this.wdaInstalled = wdaInstalled;
     const wdaLocked = this.running ? await this.running.client.locked().catch(() => null) : null;
+    // Developer Mode turned on since the screen last failed for it.
+    if (this.lastScreenFailure === "developer_mode" && developerMode === true) {
+      this.lastScreenFailure = null;
+    }
     const readiness = iosReadiness({
       majorVersion: this.majorVersion,
       pairing,
@@ -161,6 +185,7 @@ export class IosDevice {
       wda,
       wdaInstalled,
       lastWdaFailure: this.lastWdaFailure,
+      lastScreenFailure: this.lastScreenFailure,
       wdaLocked,
       now_ms,
     });
@@ -169,6 +194,97 @@ export class IosDevice {
 
   get mjpegPort(): number | null {
     return this.running?.mjpeg.port ?? null;
+  }
+
+  get wdaRunning(): boolean {
+    return this.running !== null && this.running.process.exitCode === null;
+  }
+
+  // Spec 27.5: one PNG from the instruments screenshot service, without WDA or an Apple account.
+  // The first failure that is not trust/lock/Developer Mode mounts the Developer Disk Image the
+  // way go-ios does (`ios image auto`) and tries again.
+  async screenshotImage(): Promise<Buffer> {
+    try {
+      const image = await this.captureOnce();
+      this.lastScreenFailure = null;
+      return image;
+    } catch (error) {
+      const failure = this.screenFailure(error);
+      const mountRecentlyFailed = Date.now() - this.imageMountFailedAt < IMAGE_MOUNT_RETRY_MS;
+      if (failure !== "other" || this.imageMounted || mountRecentlyFailed) {
+        // A device restarted since the mount lost its image: mount again on the next failure.
+        if (failure === "other") this.imageMounted = false;
+        throw this.screenError(failure, error);
+      }
+      await this.ensureDeveloperImage();
+      try {
+        const image = await this.captureOnce();
+        this.lastScreenFailure = null;
+        return image;
+      } catch (retryError) {
+        throw this.screenError(this.screenFailure(retryError), retryError);
+      }
+    }
+  }
+
+  private async captureOnce(): Promise<Buffer> {
+    const { goIos, tunnel } = this.deps;
+    if (this.majorVersion >= 17) await tunnel.ensure();
+    const file = path.join(tmpdir(), `jad-ios-screen-${randomUUID()}.png`);
+    try {
+      await goIos.screenshot(this.udid, file);
+      return await readFile(file);
+    } finally {
+      await unlink(file).catch(() => {});
+    }
+  }
+
+  private ensureDeveloperImage(): Promise<void> {
+    const { goIos, logger, developerImageDir } = this.deps;
+    this.mountingImage ??= (async () => {
+      if (this.majorVersion >= 17) await this.deps.tunnel.ensure();
+      logger.info({ udid: this.udid }, "mounting the Developer Disk Image");
+      try {
+        await goIos.mountDeveloperImage(this.udid, developerImageDir);
+        this.imageMounted = true;
+      } catch (error) {
+        // Not retried on every frame; a download that failed is tried again a minute later.
+        this.imageMountFailedAt = Date.now();
+        throw error;
+      }
+    })().finally(() => {
+      this.mountingImage = null;
+    });
+    return this.mountingImage.catch((error: unknown) => {
+      const failure = this.screenFailure(error);
+      throw this.screenError(failure, error);
+    });
+  }
+
+  private screenFailure(error: unknown): IosFailure {
+    if (error instanceof DeviceError) return "other";
+    return error instanceof GoIosCommandError ? classifyIosFailure(error.output) : "other";
+  }
+
+  private screenError(failure: IosFailure, error: unknown): Error {
+    if (error instanceof DeviceError) return error;
+    if (failure === "developer_mode") this.lastScreenFailure = failure;
+    if (failure === "locked") return new DeviceError("device_not_ready", "Unlock the device.");
+    if (failure === "developer_mode") {
+      return new DeviceError(
+        "device_not_ready",
+        "Turn on Developer Mode in Settings > Privacy & Security, then restart the device.",
+      );
+    }
+    if (failure === "untrusted") {
+      return new DeviceError(
+        "device_not_ready",
+        "Unlock the device and tap Trust on the Trust This Computer prompt.",
+      );
+    }
+    const output = error instanceof GoIosCommandError ? error.output : String(error);
+    const last = output.trim().split("\n").pop() ?? "no output";
+    return new Error(`The screen of this device could not be captured: ${last}`);
   }
 
   async wda(): Promise<WdaClient> {
@@ -183,10 +299,7 @@ export class IosDevice {
     const { goIos, tunnel, store, logger } = this.deps;
     const install = store.wda(this.udid);
     if (!install) {
-      throw new DeviceError(
-        "device_not_ready",
-        "WebDriverAgent is not installed on this device. Use Prepare device first.",
-      );
+      throw new DeviceError("wda_required", "Touch is not enabled on this device yet.");
     }
     if (this.majorVersion >= 17) await tunnel.ensure();
     const child = goIos.runWda(this.udid, install.bundleId);

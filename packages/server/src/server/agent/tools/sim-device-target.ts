@@ -42,19 +42,22 @@ function simulatorTarget(service: SimulatorService, udid: string): DeviceTarget 
   };
 }
 
+// Spec 27.4: touch tools on an iPhone without WebDriverAgent prepare it with the Apple account
+// saved in Sideload ("agent" caller); with none saved they answer apple_account_required.
+// Screenshots, logs and apps never need WDA.
 function physicalTarget(hub: PhysicalDeviceHub, udid: string): DeviceTarget {
   return {
-    tap: (x, y) => hub.tap(udid, x, y),
+    tap: (x, y) => hub.tap(udid, x, y, "device", "agent"),
     swipe: (x1, y1, x2, y2, durationMs) =>
-      hub.swipe(udid, { x: x1, y: y1 }, { x: x2, y: y2 }, durationMs),
-    inputText: (text) => hub.inputText(udid, text),
-    button: (button) => hub.button(udid, button),
-    describeUi: () => hub.describeUi(udid),
+      hub.swipe(udid, { x: x1, y: y1 }, { x: x2, y: y2 }, durationMs, "device", "agent"),
+    inputText: (text) => hub.inputText(udid, text, "agent"),
+    button: (button) => hub.button(udid, button, "agent"),
+    describeUi: () => hub.describeUi(udid, "agent"),
     screenshot: () => hub.screenshot(udid, { format: "jpeg", maxDim: AGENT_SCREENSHOT_MAX_DIM }),
     installApp: (path) => hub.installApp(udid, path),
     launchApp: (bundleId, terminateExisting) => hub.launchApp(udid, bundleId, terminateExisting),
     terminateApp: (bundleId) => hub.terminateApp(udid, bundleId),
-    openUrl: (url) => hub.openUrl(udid, url),
+    openUrl: (url) => hub.openUrl(udid, url, "agent"),
     recentLogs: (lines) => hub.recentLogs(udid, lines),
   };
 }

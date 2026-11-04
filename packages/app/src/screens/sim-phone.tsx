@@ -92,9 +92,22 @@ export function needsControlSwitch(device: SimDevice): boolean {
   return device.kind === "physical";
 }
 
+// Spec 27.5: the screen shows once control is on and the daemon can capture it. An iPhone
+// without WebDriverAgent qualifies (screenshot service); only touch waits for "Enable touch".
+// COMPAT(screenAvailable): older daemons do not send it; their screen needs readiness "ready".
 export function isDeviceLive(device: SimDevice): boolean {
   const controllable = !needsControlSwitch(device) || device.controlEnabled === true;
-  return isHubDevice(device) && controllable && device.readiness === "ready";
+  const viewable = device.screenAvailable ?? device.readiness === "ready";
+  return isHubDevice(device) && controllable && viewable;
+}
+
+// Spec 27.4: an iPhone or iPad whose touch is not set up yet (WebDriverAgent missing or expired).
+export function needsTouchSetup(device: SimDevice): boolean {
+  return (
+    device.kind === "physical" &&
+    device.platform === "ios" &&
+    (device.readiness === "needs_wda" || device.readiness === "wda_expired")
+  );
 }
 
 export interface LiveScreen {
@@ -286,7 +299,7 @@ export function PhoneScreen({
   let inner;
   if (booted && source && gestures) {
     inner = (
-      <View style={styles.phoneFill} onLayout={onLayout} {...gestures}>
+      <View style={styles.phoneFill} onLayout={onLayout} testID="device-live-screen" {...gestures}>
         <View style={styles.phoneFill} pointerEvents="none">
           <Image source={source} style={styles.phoneFill} resizeMode="cover" />
         </View>
