@@ -134,6 +134,62 @@ function teamKind(team: PlistDict): "free" | "paid" {
   return "free";
 }
 
+/**
+ * What came back when it was not a plist, without any of its content: type, size, and for an
+ * HTML page only its <title> (Apple's error pages carry no account data there).
+ */
+export function describeNonPlistBody(response: {
+  status: number;
+  headers: Record<string, string>;
+  body: Buffer;
+}): string {
+  const type = response.headers["content-type"] ?? "no content type";
+  const bytes = response.body.length;
+  if (bytes === 0) return `HTTP ${response.status}, empty body`;
+  const text = response.body.toString("utf8", 0, Math.min(bytes, 4096)).trimStart();
+  let kind = "unknown data";
+  if (/^<!doctype html|^<html/i.test(text)) {
+    const title = /<title[^>]*>([^<]{0,120})<\/title>/i.exec(text)?.[1]?.trim();
+    kind = title ? `an HTML page titled "${title}"` : "an HTML page";
+  } else if (text.startsWith("{") || text.startsWith("[")) kind = "JSON";
+  else if (text.startsWith("<")) kind = "XML that is not a plist";
+  return `HTTP ${response.status}, ${kind} (${type}, ${bytes} bytes)`;
+}
+
+function parseDeveloperServicesBody(
+  action: string,
+  response: { status: number; headers: Record<string, string>; body: Buffer },
+): PlistDict {
+  try {
+    return parsePlistDict(response.body);
+  } catch {
+    // Fall through: some Developer Services errors come back as JSON.
+  }
+  const text = response.body.toString("utf8").trim();
+  if (text.startsWith("{")) {
+    try {
+      const json = JSON.parse(text) as Record<string, unknown>;
+      const resultCode = typeof json.resultCode === "number" ? json.resultCode : null;
+      const message =
+        (typeof json.userString === "string" && json.userString) ||
+        (typeof json.resultString === "string" && json.resultString) ||
+        (typeof json.message === "string" && json.message) ||
+        null;
+      if (resultCode !== null && resultCode !== 0) {
+        const code = resultCode === 1100 ? "session_expired" : "apple_error";
+        throw new TeamApiError(code, `${message ?? "Request failed"} (${resultCode})`);
+      }
+      if (message) throw new TeamApiError("apple_error", message);
+    } catch (error) {
+      if (error instanceof TeamApiError) throw error;
+    }
+  }
+  throw new TeamApiError(
+    "protocol_error",
+    `Developer Services ${action} did not return a plist: ${describeNonPlistBody(response)}`,
+  );
+}
+
 export class DeveloperServicesClient implements AppleTeamApi {
   constructor(private readonly deps: DeveloperServicesDependencies) {}
 
@@ -149,15 +205,7 @@ export class DeveloperServicesClient implements AppleTeamApi {
     if (response.status === 401 || response.status === 403) {
       throw new TeamApiError("session_expired", "The Apple developer session expired.");
     }
-    let root: PlistDict;
-    try {
-      root = parsePlistDict(response.body);
-    } catch {
-      throw new TeamApiError(
-        "protocol_error",
-        `Developer Services ${action} returned ${response.status} without a plist`,
-      );
-    }
+    const root = parseDeveloperServicesBody(action, response);
     const resultCode = asNumber(root.resultCode) ?? 0;
     if (resultCode !== 0) {
       const text = asString(root.userString) ?? asString(root.resultString) ?? "Request failed";

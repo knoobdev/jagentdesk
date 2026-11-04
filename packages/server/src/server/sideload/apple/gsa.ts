@@ -32,7 +32,9 @@ const AUTH_URL = "https://gsa.apple.com/auth";
 const PHONE_URL = "https://gsa.apple.com/auth/verify/phone/";
 const PHONE_CODE_URL = "https://gsa.apple.com/auth/verify/phone/securitycode";
 export const XCODE_APP = "com.apple.gs.xcode.auth";
-export const XCODE_VERSION = "11.2 (11B41)";
+// Xcode 16.4, as current open implementations send (dadoum apple-crates `xcode` crate); Apple
+// answered Xcode 11.2 with something other than a plist for real accounts.
+export const XCODE_VERSION = "16.4 (16F6)";
 
 export type GsaErrorCode =
   | "invalid_credentials"
