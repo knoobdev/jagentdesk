@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { ScrollView, Text, View } from "react-native";
-import { KeyRound, Plus } from "lucide-react-native";
+import { ChevronDown, ChevronRight, KeyRound, Plus } from "lucide-react-native";
 import { AccountIcon } from "./icons";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type {
@@ -21,6 +21,14 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { Switch } from "@/components/ui/switch";
 import { useFetchQuery } from "@/data/query";
 import { useFilePicker } from "@/hooks/use-file-picker";
+import {
+  PASSWORD_HELP,
+  advancedAfterFailure,
+  advancedOpenInitially,
+  anisetteRequestFields,
+  canSubmitAppleId,
+  type AnisetteChoice,
+} from "./add-apple-id";
 import { MutationButton, ValueButton } from "./buttons";
 import { sideloadKey, unwrap, useSideloadAccounts } from "./queries";
 import { sideloadStyles as styles } from "./styles";
@@ -31,7 +39,6 @@ import { TwoFactorCard } from "./two-factor-card";
 
 const SIGN_IN_TIMEOUT_MS = 15 * 60_000;
 const SNAP = ["85%"];
-type AnisetteChoice = "native" | "remote";
 const ANISETTE_OPTIONS = [
   { value: "native" as const, label: "Native" },
   { value: "remote" as const, label: "Remote server" },
@@ -63,13 +70,31 @@ export function AccountsSection({
 }) {
   const accounts = useSideloadAccounts(client, serverId);
   const [sheet, setSheet] = useState<
-    { kind: "apple_id"; appleId: string } | { kind: "asc" } | null
+    | { kind: "apple_id"; appleId: string; source: AnisetteChoice; url: string }
+    | { kind: "asc" }
+    | null
   >(null);
   const hasAppleId = (accounts.data ?? []).some((account) => account.auth === "apple_id");
-  const openAppleId = useCallback(() => setSheet({ kind: "apple_id", appleId: "" }), []);
+  const openAppleId = useCallback(
+    () => setSheet({ kind: "apple_id", appleId: "", source: "native", url: "" }),
+    [],
+  );
   const openAsc = useCallback(() => setSheet({ kind: "asc" }), []);
   const close = useCallback(() => setSheet(null), []);
-  const signIn = useCallback((appleId: string) => setSheet({ kind: "apple_id", appleId }), []);
+  const accountList = accounts.data;
+  const signIn = useCallback(
+    (appleId: string) => {
+      const account = (accountList ?? []).find((entry) => entry.appleId === appleId);
+      const remote = account?.anisetteSource === "remote";
+      setSheet({
+        kind: "apple_id",
+        appleId,
+        source: remote ? "remote" : "native",
+        url: remote ? (account?.anisetteUrl ?? "") : "",
+      });
+    },
+    [accountList],
+  );
 
   return (
     <ScrollView contentContainerStyle={styles.section} testID="sideload-accounts">
@@ -124,6 +149,8 @@ export function AccountsSection({
           client={client}
           serverId={serverId}
           initialAppleId={sheet.appleId}
+          initialSource={sheet.source}
+          initialUrl={sheet.url}
           needsTerms={!hasAppleId}
           prompt={prompt}
           onClose={close}
@@ -452,6 +479,8 @@ function AddAppleIdSheet({
   client,
   serverId,
   initialAppleId,
+  initialSource,
+  initialUrl,
   needsTerms,
   prompt,
   onClose,
@@ -459,6 +488,8 @@ function AddAppleIdSheet({
   client: DaemonClient;
   serverId: string;
   initialAppleId: string;
+  initialSource: AnisetteChoice;
+  initialUrl: string;
   needsTerms: boolean;
   prompt: SideloadAuthPrompt | null;
   onClose: () => void;
@@ -468,8 +499,19 @@ function AddAppleIdSheet({
   const [appleId, setAppleId] = useState(initialAppleId);
   const [password, setPassword] = useState("");
   const [keepSignedIn, setKeepSignedIn] = useState(false);
-  const [source, setSource] = useState<AnisetteChoice>("native");
-  const [url, setUrl] = useState("");
+  const [source, setSource] = useState<AnisetteChoice>(initialSource);
+  const [url, setUrl] = useState(initialUrl);
+  const [touched, setTouched] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(advancedOpenInitially(initialSource));
+  const anisette = useMemo(() => ({ source, url, touched }), [source, url, touched]);
+  const chooseSource = useCallback((value: AnisetteChoice) => {
+    setSource(value);
+    setTouched(true);
+  }, []);
+  const changeUrl = useCallback((value: string) => {
+    setUrl(value);
+    setTouched(true);
+  }, []);
   const header = useMemo<SheetHeader>(
     () => ({ title: initialAppleId ? "Sign in again" : "Add Apple ID" }),
     [initialAppleId],
@@ -483,12 +525,16 @@ function AddAppleIdSheet({
           appleId: appleId.trim(),
           password,
           keepSignedIn,
-          anisetteSource: source,
-          ...(source === "remote" ? { anisetteUrl: url.trim() } : {}),
+          ...anisetteRequestFields(anisette),
           acceptedTerms: accepted,
         },
         { timeout: SIGN_IN_TIMEOUT_MS },
       );
+      const next = advancedAfterFailure(payload.error ? payload.code : null);
+      if (next) {
+        setShowAdvanced(true);
+        if (next.source) chooseSource(next.source);
+      }
       return unwrap(payload).account;
     },
     onSuccess: () => {
@@ -535,10 +581,7 @@ function AddAppleIdSheet({
               style={styles.input}
               testID="sideload-apple-id-password"
             />
-            <Text style={styles.muted}>
-              Sent once to this host to sign in with Apple. Kept only if you turn on “Keep me signed
-              in”.
-            </Text>
+            <Text style={styles.muted}>{PASSWORD_HELP}</Text>
           </View>
           <View style={styles.rowBetween}>
             <View style={styles.grow}>
@@ -554,29 +597,45 @@ function AddAppleIdSheet({
               accessibilityLabel="Keep me signed in"
             />
           </View>
-          <View style={styles.field}>
-            <Text style={styles.label}>Anisette</Text>
-            <SegmentedControl
-              options={ANISETTE_OPTIONS}
-              value={source}
-              onValueChange={setSource}
+          <View style={styles.start}>
+            <ValueButton
               size="sm"
-            />
-            <Text style={styles.muted}>
-              Native uses this host’s own Apple framework (macOS, Windows). Linux needs a remote
-              anisette server you run yourself.
-            </Text>
-            {source === "remote" ? (
-              <AdaptiveTextInput
-                initialValue=""
-                onChangeText={setUrl}
-                placeholder="http://<host>:6969"
-                autoCapitalize="none"
-                autoCorrect={false}
-                style={styles.inputMono}
-              />
-            ) : null}
+              variant="ghost"
+              leftIcon={showAdvanced ? ChevronDown : ChevronRight}
+              value={!showAdvanced}
+              onValue={setShowAdvanced}
+              accessibilityLabel={showAdvanced ? "Hide advanced options" : "Show advanced options"}
+              testID="sideload-apple-id-advanced"
+            >
+              Advanced
+            </ValueButton>
           </View>
+          {showAdvanced ? (
+            <View style={styles.field} testID="sideload-apple-id-anisette">
+              <Text style={styles.label}>Anisette</Text>
+              <SegmentedControl
+                options={ANISETTE_OPTIONS}
+                value={source}
+                onValueChange={chooseSource}
+                size="sm"
+              />
+              <Text style={styles.muted}>
+                Native uses this host’s own Apple framework (macOS, Windows). Linux needs a remote
+                anisette server you run yourself.
+              </Text>
+              {source === "remote" ? (
+                <AdaptiveTextInput
+                  initialValue={url}
+                  onChangeText={changeUrl}
+                  placeholder="http://<host>:6969"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  style={styles.inputMono}
+                  testID="sideload-apple-id-anisette-url"
+                />
+              ) : null}
+            </View>
+          ) : null}
           {prompt ? <TwoFactorCard client={client} prompt={prompt} /> : null}
           {add.isPending && !prompt ? (
             <Text style={styles.muted}>Signing in with Apple…</Text>
@@ -587,9 +646,7 @@ function AddAppleIdSheet({
           <MutationButton
             mutation={add}
             variables={undefined}
-            disabled={
-              !appleId.trim() || password.length === 0 || (source === "remote" && !url.trim())
-            }
+            disabled={!canSubmitAppleId({ appleId, password, anisette })}
             testID="sideload-apple-id-submit"
           >
             Sign in

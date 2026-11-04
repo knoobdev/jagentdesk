@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { release } from "node:os";
 import { WebSocket } from "ws";
 import { AppleHttpError, type AppleHttp } from "./http.js";
 import { asDict, asString, buildXmlPlist, parsePlistDict } from "../plist.js";
@@ -40,6 +41,8 @@ export interface AnisetteResult {
   userAgent: string;
   /** The identity, updated when a v3 server provisioned this machine. */
   identity: AnisetteIdentity;
+  /** Which source produced the headers (error copy). */
+  source?: "native" | "remote";
 }
 
 export interface AnisetteSourceAdapter {
@@ -89,31 +92,123 @@ export type RunCommand = (
   args: string[],
 ) => Promise<{ code: number; stdout: string; stderr: string }>;
 
-// Loads the AOSKit private framework into osascript and asks it for this machine's OTP
-// headers (dsid -2). Prints JSON on stdout; the daemon never logs it.
-const AOSKIT_JXA = `
+/**
+ * Loads AOSKit and AuthKit into osascript: AOSKit gives this machine's one-time password
+ * (dsid -2 = production), AuthKit's `AKDevice.currentDevice` gives the identity that OTP
+ * belongs to. Same sources as AltServer's AOSKit path and omnisette's AOSKit provider.
+ * Prints JSON on stdout; the daemon never logs it.
+ */
+export const AOSKIT_JXA = `
 ObjC.import('Foundation');
 $.NSBundle.bundleWithPath('/System/Library/PrivateFrameworks/AOSKit.framework').loadAndReturnError(null);
-var cls = $.NSClassFromString('AOSUtilities');
-if (!cls) { throw new Error('AOSUtilities is not available'); }
-var headers = cls.retrieveOTPHeadersForDSID($('-2'));
+$.NSBundle.bundleWithPath('/System/Library/PrivateFrameworks/AuthKit.framework').loadAndReturnError(null);
+var aos = $.NSClassFromString('AOSUtilities');
+if (!aos) { throw new Error('AOSUtilities is not available'); }
+var akd = $.NSClassFromString('AKDevice');
+if (!akd) { throw new Error('AKDevice is not available'); }
+var headers = aos.retrieveOTPHeadersForDSID($('-2'));
 var md = ObjC.unwrap(headers.objectForKey('X-Apple-MD'));
 var mid = ObjC.unwrap(headers.objectForKey('X-Apple-MD-M'));
 if (!md || !mid) { throw new Error('AOSKit returned no anisette headers'); }
-JSON.stringify({ md: md, mid: mid });
+var device = akd.currentDevice;
+function str(v) { var s = ObjC.unwrap(v); return typeof s === 'string' && s.length > 0 ? s : null; }
+JSON.stringify({
+  md: md,
+  mid: mid,
+  deviceId: str(device.uniqueDeviceIdentifier) || str(aos.machineUDID),
+  localUserUUID: str(device.localUserUUID),
+  serial: str(device.serialNumber) || str(aos.machineSerialNumber),
+  description: str(device.serverFriendlyDescription),
+  locale: str($.NSLocale.currentLocale.localeIdentifier),
+  timeZone: str($.NSTimeZone.localTimeZone.abbreviation),
+  cfnetwork: str($.NSBundle.bundleWithIdentifier('com.apple.CFNetwork').objectForInfoDictionaryKey('CFBundleVersion'))
+});
 `;
 
-export interface MacMachineInfo {
-  model: string;
-  osVersion: string;
-  osBuild: string;
+/** What AOSKIT_JXA prints. */
+export interface MacDeviceAnisette {
+  md: string;
+  mid: string;
+  deviceId: string;
+  localUserUUID: string | null;
+  serial: string | null;
+  description: string;
+  locale: string | null;
+  timeZone: string | null;
+  cfnetwork: string | null;
+}
+
+// AltServer's AOSKit path: AOSKit has no routing info, Apple accepts this one
+// (other known values 17106176, 50660608).
+export const NATIVE_RINFO = "84215040";
+
+function parseMacDevice(stdout: string): MacDeviceAnisette {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout.trim());
+  } catch {
+    throw new AnisetteError("native_unavailable", "macOS returned malformed anisette data");
+  }
+  const record =
+    typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
+  const text = (key: string): string | null => {
+    const value = record[key];
+    return typeof value === "string" && value.length > 0 ? value : null;
+  };
+  const md = text("md");
+  const mid = text("mid");
+  const deviceId = text("deviceId");
+  const description = text("description");
+  if (!md || !mid || !deviceId || !description) {
+    throw new AnisetteError("native_unavailable", "macOS returned malformed anisette data");
+  }
+  return {
+    md,
+    mid,
+    deviceId,
+    localUserUUID: text("localUserUUID"),
+    serial: text("serial"),
+    description,
+    locale: text("locale"),
+    timeZone: text("timeZone"),
+    cfnetwork: text("cfnetwork"),
+  };
+}
+
+/**
+ * The headers GrandSlam gets from this Mac, all bound to the machine that made the OTP:
+ * device id and serial from AKDevice, local user id = base64 of the device id (AltServer's
+ * AOSKit path), and AuthKit's own description of this client as X-MMe-Client-Info.
+ * Apple answers HTTP 503 when a native OTP is sent with a client info that claims to be
+ * Xcode (`com.apple.dt.Xcode/…`), so the description is sent as AuthKit reports it.
+ */
+export function nativeMacHeaders(
+  device: MacDeviceAnisette,
+  input: { now: Date; darwinRelease: string },
+): { data: AnisetteData; userAgent: string } {
+  const cfnetwork = device.cfnetwork ?? "1485";
+  return {
+    userAgent: `akd/1.0 CFNetwork/${cfnetwork} Darwin/${input.darwinRelease}`,
+    data: {
+      "X-Apple-I-MD": device.md,
+      "X-Apple-I-MD-M": device.mid,
+      "X-Apple-I-MD-RINFO": NATIVE_RINFO,
+      "X-Apple-I-MD-LU": Buffer.from(device.deviceId, "utf8").toString("base64"),
+      "X-Mme-Device-Id": device.deviceId,
+      "X-Apple-I-SRL-NO": device.serial ?? "0",
+      "X-Mme-Client-Info": device.description,
+      "X-Apple-I-Client-Time": clientTime(input.now),
+      "X-Apple-Locale": device.locale ?? "en_US",
+      "X-Apple-I-TimeZone": device.timeZone ?? timeZone(),
+    },
+  };
 }
 
 export class NativeMacAnisette implements AnisetteSourceAdapter {
   constructor(
     private readonly run: RunCommand,
-    private readonly machine: () => Promise<MacMachineInfo>,
     private readonly now: () => Date = () => new Date(),
+    private readonly darwinRelease: () => string = release,
   ) {}
 
   async fetch(identity: AnisetteIdentity): Promise<AnisetteResult> {
@@ -124,34 +219,13 @@ export class NativeMacAnisette implements AnisetteSourceAdapter {
         `macOS did not return anisette data (${result.stderr.trim() || `exit ${result.code}`}). Switch the account to a remote anisette server.`,
       );
     }
-    const parsed: unknown = JSON.parse(result.stdout.trim());
-    if (
-      typeof parsed !== "object" ||
-      parsed === null ||
-      typeof (parsed as { md?: unknown }).md !== "string" ||
-      typeof (parsed as { mid?: unknown }).mid !== "string"
-    ) {
-      throw new AnisetteError("native_unavailable", "macOS returned malformed anisette data");
-    }
-    const { md, mid } = parsed as { md: string; mid: string };
-    const machine = await this.machine();
-    const clientInfo = `<${machine.model}> <Mac OS X;${machine.osVersion};${machine.osBuild}> ${XCODE_AUTHKIT}`;
-    return {
-      identity,
-      userAgent: "akd/1.0 CFNetwork/978.0.7 Darwin/18.7.0",
-      data: {
-        "X-Apple-I-MD": md,
-        "X-Apple-I-MD-M": mid,
-        "X-Apple-I-MD-RINFO": DEFAULT_RINFO,
-        "X-Apple-I-MD-LU": localUserHeader(identity),
-        "X-Mme-Device-Id": identity.deviceId,
-        "X-Apple-I-SRL-NO": "0",
-        "X-Mme-Client-Info": clientInfo,
-        "X-Apple-I-Client-Time": clientTime(this.now()),
-        "X-Apple-Locale": "en_US",
-        "X-Apple-I-TimeZone": timeZone(),
-      },
-    };
+    const device = parseMacDevice(result.stdout);
+    const { data, userAgent } = nativeMacHeaders(device, {
+      now: this.now(),
+      darwinRelease: this.darwinRelease(),
+    });
+    // The stored identity is for remote servers only: native headers are this Mac's own.
+    return { identity, userAgent, data, source: "native" };
   }
 }
 
@@ -280,6 +354,7 @@ export class RemoteAnisette implements AnisetteSourceAdapter {
     if (!md || !mid) throw new AnisetteError("remote_failed", "Anisette server sent no headers");
     return {
       identity: current,
+      source: "remote",
       userAgent: info.userAgent,
       data: this.compose(current, info.clientInfo, {
         md,
@@ -366,7 +441,12 @@ export class RemoteAnisette implements AnisetteSourceAdapter {
     );
     const lu = stringField(record, "X-Apple-I-MD-LU");
     if (lu) data["X-Apple-I-MD-LU"] = lu;
-    return { identity, userAgent: "akd/1.0 CFNetwork/978.0.7 Darwin/18.7.0", data };
+    return {
+      identity,
+      source: "remote",
+      userAgent: "akd/1.0 CFNetwork/978.0.7 Darwin/18.7.0",
+      data,
+    };
   }
 
   private appleHeaders(identity: AnisetteIdentity, info: V3ClientInfo): Record<string, string> {
