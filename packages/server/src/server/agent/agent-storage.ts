@@ -85,6 +85,7 @@ const STORED_AGENT_SCHEMA = z.object({
   attentionReason: z.enum(["finished", "error", "permission"]).nullable().optional(),
   attentionTimestamp: z.string().nullable().optional(),
   internal: z.boolean().optional(),
+  background: z.boolean().optional(),
   archivedAt: z.string().nullable().optional(),
   owner: AgentOwnerSchema.optional(),
 });
@@ -272,6 +273,8 @@ export class AgentStorage {
       if (existing && existing.archivedAt !== undefined) {
         record.archivedAt = existing.archivedAt;
       }
+      // Background is fixed at creation; a runtime opened without it cannot clear it.
+      if (existing?.background) record.background = true;
       record.resumeOnStartup =
         existing?.resumeOnStartup && agent.lifecycle !== "idle" && agent.lifecycle !== "error";
       return record;

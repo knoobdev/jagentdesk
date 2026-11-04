@@ -1060,6 +1060,7 @@ export const AgentSnapshotPayloadSchema = z.object({
   attentionTimestamp: z.string().nullable().optional(),
   archivedAt: z.string().nullable().optional(),
   providerUnavailable: z.boolean().optional(),
+  background: z.boolean().optional(),
 });
 
 export type AgentSnapshotPayload = z.infer<typeof AgentSnapshotPayloadSchema>;
@@ -1917,6 +1918,7 @@ export const CreateAgentRequestMessageSchema = z.object({
   git: GitSetupOptionsSchema.optional(),
   worktree: CreateAgentWorktreeTargetSchema.optional(),
   autoArchive: z.boolean().optional(),
+  background: z.boolean().optional(),
   labels: z.record(z.string(), z.string()).default({}),
   requestId: z.string(),
 });
@@ -4744,6 +4746,7 @@ export const ServerInfoStatusPayloadSchema = z
     features: z
       .object({
         binaryChunkingV1: z.boolean().optional(),
+        backgroundAgents: z.boolean().optional(),
         providersSnapshot: z.boolean().optional(),
         // COMPAT(providersSnapshotCwd): added in v0.3.2, remove gate after 2027-02-10.
         providersSnapshotCwd: z.boolean().optional(),
@@ -9262,6 +9265,7 @@ export const WSHelloMessageSchema = z.object({
       [CLIENT_CAPS.projectUpdates]: z.boolean().optional(),
       [CLIENT_CAPS.specMode]: z.boolean().optional(),
       [CLIENT_CAPS.binaryScreenFrames]: z.boolean().optional(),
+      [CLIENT_CAPS.backgroundAgents]: z.boolean().optional(),
       [CLIENT_CAPS.browserHost]: BrowserAutomationHostCapabilitySchema.optional(),
     })
     .passthrough()

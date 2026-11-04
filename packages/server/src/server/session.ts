@@ -1,3 +1,5 @@
+import { AgentDirectory, type BackgroundVisibility } from "./agent/directory.js";
+import { inheritAgentBackground, inheritWorkspaceBackground } from "./agent/create-agent/intent.js";
 import { builtinPluginForRpc } from "./plugins/builtin/gates.js";
 import { BuiltinPluginError, type BuiltinPluginState } from "./plugins/builtin/state.js";
 import { SessionDelivery, type OwnedSubscription } from "./session/owned-subscriptions/index.js";
@@ -853,6 +855,7 @@ function workspacePluginLifecycle(runtime: SessionOptions["pluginRuntime"]) {
 }
 
 export class Session {
+  private readonly agentDirectory: AgentDirectory;
   private readonly eventSubscriptions = new Map<
     string,
     { owner: OwnedSubscription; events: Set<SessionEventSubscription> }
@@ -1323,8 +1326,22 @@ export class Session {
         this.clientCapabilities.has(CLIENT_CAPS.terminalReflowableSnapshot),
       getClientBufferedAmount: () => this.getTransportBufferedAmount(),
     });
+    this.agentDirectory = new AgentDirectory({
+      manager: this.agentManager,
+      storage: this.agentStorage,
+      workspaces: this.workspaceRegistry,
+      projectLive: (agent) => this.buildAgentPayload(agent),
+      projectStored: (record) => this.buildStoredAgentPayload(record),
+      isProviderVisible: (provider) => this.isProviderVisibleToClient(provider),
+      isStoredProviderAvailable: (record) =>
+        isStoredAgentProviderAvailable(
+          record,
+          new Set(this.providerSnapshotManager.listRegisteredProviderIds()),
+        ),
+    });
     this.agentUpdates = createAgentUpdatesService({
       emit: (message) => this.emit(message),
+      includesWorkspace: (agent, visibility) => this.agentDirectory.includes(agent, visibility),
       enrichAgentPayload: (payload) => this.enrichAgentPayload(payload),
       buildStoredAgentPayload: (record) => this.buildStoredAgentPayload(record),
       isProviderVisibleToClient: (provider) => this.isProviderVisibleToClient(provider),
@@ -6137,6 +6154,10 @@ export class Session {
     return this.agentUpdates.forwardLiveAgent(this.agentManager.getAgent(agent.id) ?? agent);
   }
 
+  private resolveCallerAgentForBackground(callerAgentId?: string): ManagedAgent | null {
+    return callerAgentId ? (this.agentManager.getAgent(callerAgentId) ?? null) : null;
+  }
+
   private async handleCreateAgentRequest(msg: CreateAgentRequestMessage): Promise<void> {
     const {
       config,
@@ -6183,6 +6204,8 @@ export class Session {
         ...(trimmedPrompt ? { prompt: trimmedPrompt } : {}),
         ...(attachments && attachments.length > 0 ? { attachments } : {}),
       };
+      const callerAgent = this.resolveCallerAgentForBackground(msg.callerAgentId);
+      const background = inheritAgentBackground(msg.background, callerAgent);
       const workspacePromptTitle = resolveFirstAgentPromptTitle(firstAgentContext);
       const createdWorktree = await this.createAgentLifecycleDispatch.createWorktreeForRequest({
         cwd: config.cwd,
@@ -6215,6 +6238,7 @@ export class Session {
           config: resolvedIntent.config,
           workspaceId: resolvedIntent.intent.workspaceId,
           worktreeName,
+          background,
           initialPrompt,
           clientMessageId,
           outputSchema,
@@ -6333,6 +6357,8 @@ export class Session {
           createdWorktree: null,
           cwd: config.cwd,
           initialTitle: input.workspacePromptTitle,
+          background: inheritWorkspaceBackground(request.background, callerAgent),
+          callerWorkspaceId: callerAgent?.workspaceId,
         }),
         cwd: config.cwd,
       }),
@@ -7118,49 +7144,17 @@ export class Session {
   private async listAgentPayloads(filter?: {
     labels?: Record<string, string>;
     includeArchived?: boolean;
+    includeBackground?: BackgroundVisibility;
     includeUnavailablePersisted?: boolean;
   }): Promise<AgentSnapshotPayload[]> {
-    const includeArchived = filter?.includeArchived === true;
-    const labelEntries = filter?.labels ? Object.entries(filter.labels) : [];
+    return this.agentDirectory.list(filter);
+  }
 
-    // Get live agents with session modes
-    const agentSnapshots = this.agentManager.listAgents();
-    const liveAgents = await Promise.all(
-      agentSnapshots.map((agent) => this.buildAgentPayload(agent)),
-    );
-
-    // Add persisted agents that have not been lazily initialized yet
-    // (excluding internal agents which are for ephemeral system tasks)
-    const registryRecords = await this.agentStorage.list();
-    const liveIds = new Set(agentSnapshots.map((a) => a.id));
-    const registeredProviderIds = new Set(this.providerSnapshotManager.listRegisteredProviderIds());
-    const persistedAgents = registryRecords
-      .filter((record) => !liveIds.has(record.id) && !record.internal)
-      // Keep raw-record filters ahead of projection; seeded homes can carry thousands of archived agents.
-      .filter((record) => includeArchived || !record.archivedAt)
-      .filter((record) => labelEntries.every(([key, value]) => record.labels?.[key] === value))
-      .filter(
-        (record) =>
-          filter?.includeUnavailablePersisted === true ||
-          isStoredAgentProviderAvailable(record, registeredProviderIds),
-      )
-      .map((record) => this.buildStoredAgentPayload(record, registeredProviderIds));
-
-    let agents = [...liveAgents, ...persistedAgents];
-
-    agents = agents.filter((agent) => this.isProviderVisibleToClient(agent.provider));
-    if (!includeArchived) {
-      agents = agents.filter((agent) => !agent.archivedAt);
-    }
-
-    // Filter by labels if filter provided
-    if (labelEntries.length > 0) {
-      agents = agents.filter((agent) =>
-        labelEntries.every(([key, value]) => agent.labels[key] === value),
-      );
-    }
-
-    return agents;
+  private resolveBackgroundVisibility(
+    includeBackground: boolean | undefined,
+  ): BackgroundVisibility {
+    if (!includeBackground) return false;
+    return this.supports(CLIENT_CAPS.backgroundAgents) ? true : "workspaces";
   }
 
   private async resolveAgentIdentifier(
@@ -7356,6 +7350,9 @@ export class Session {
     let agents = await this.listAgentPayloads({
       labels: filter?.labels,
       includeArchived: filter?.includeArchived,
+      includeBackground: this.resolveBackgroundVisibility(
+        request.includeBackground || filter?.includeBackground,
+      ),
       includeUnavailablePersisted: request.type === "fetch_agent_history_request",
     });
     const activePlacementsByWorkspaceId =
@@ -8096,6 +8093,9 @@ export class Session {
         this.agentUpdates.beginSubscription({
           subscriptionId,
           filter: request.filter,
+          backgroundVisibility: this.resolveBackgroundVisibility(
+            request.includeBackground || request.filter?.includeBackground,
+          ),
         });
       }
 

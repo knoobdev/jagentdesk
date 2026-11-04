@@ -79,6 +79,7 @@ export function selectSubagentsForParent(
   for (const agent of agents.values()) {
     if (
       agent.archivedAt ||
+      agent.background ||
       pendingArchiveIds.has(agent.id) ||
       agent.parentAgentId !== params.parentAgentId
     ) {

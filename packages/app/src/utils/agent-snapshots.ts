@@ -77,6 +77,7 @@ export function normalizeAgentSnapshot(snapshot: AgentSnapshotPayload, serverId:
     attentionReason: snapshot.attentionReason ?? null,
     attentionTimestamp,
     archivedAt,
+    background: snapshot.background === true,
     parentAgentId,
     labels: snapshot.labels,
   };

@@ -1,3 +1,4 @@
+import { admitsAgent } from "../directory.js";
 import type { ProviderJAgentDeskToolsPolicy } from "@jagentdesk/protocol/provider-config";
 import { isJAgentDeskToolEnabled } from "../jagentdesk-tool-policy.js";
 import { registerPluginTools } from "./plugin-tools.js";
@@ -44,6 +45,7 @@ import {
   type ArchiveDependencies,
 } from "../../workspace-archive-service.js";
 import { createAgentCommand, type CreateAgentFromMcpInput } from "../create-agent/create.js";
+import { inheritWorkspaceBackground } from "../create-agent/intent.js";
 import type { VoiceCallerContext, VoiceSpeakHandler } from "../../voice-types.js";
 import type { FirstAgentContext } from "../../messages.js";
 import { everyMsToFiveFieldCron } from "@jagentdesk/protocol/schedule/cadence";
@@ -188,6 +190,7 @@ export interface JAgentDeskToolHostDependencies {
   ensureWorkspaceForCreate?: (
     cwd: string,
     firstAgentContext?: FirstAgentContext,
+    context?: { background?: boolean; callerWorkspaceId?: string },
   ) => Promise<string>;
   browserToolsEnabled?: boolean;
   browserToolsBroker?: BrowserToolsBroker | null;
@@ -3716,6 +3719,14 @@ function createToolCatalog(
     return parentAgent;
   };
 
+  const workspaceBackgroundIntent = (background: boolean | undefined) => {
+    const caller = resolveCallerAgent();
+    return {
+      background: inheritWorkspaceBackground(background, caller),
+      callerWorkspaceId: caller?.workspaceId,
+    };
+  };
+
   const resolveScopedCwd = (requestedCwd?: string, opts?: { required?: boolean }): string => {
     const callerAgent = resolveCallerAgent();
     if (callerAgent) {
@@ -4095,6 +4106,12 @@ function createToolCatalog(
       .trim()
       .min(1, "initialPrompt is required")
       .describe("Required first task to run immediately after creation."),
+    background: z
+      .boolean()
+      .optional()
+      .describe(
+        "True creates a background agent: hidden from tabs, default lists, your subagent track and notifications. You still get its finish notification and can address it by id. Omit to inherit your own value (false without a caller); use it for helpers the user does not need to watch.",
+      ),
   };
   const legacyCreateAgentPlacementFields = {
     relationship: AgentRelationshipInputSchema.describe(
@@ -4443,7 +4460,7 @@ function createToolCatalog(
           .boolean()
           .optional()
           .describe(
-            "Hide this workspace from default discovery; omitted values inherit your current workspace.",
+            "True hides the workspace from default lists and the sidebar while its contents remain durable and accessible; omit background to inherit your own visibility (true when you or your current workspace are background, false without a caller), and override it only when the user explicitly asks.",
           ),
         mode: z
           .enum(["branch-off", "checkout-branch", "checkout-pr"])
@@ -4513,10 +4530,12 @@ function createToolCatalog(
         if (!options.createDirectoryWorkspace) {
           throw new Error("Workspace provisioning is not configured");
         }
-        workspace = await options.createDirectoryWorkspace(cwd, title, projectId, {
-          background,
-          callerWorkspaceId: resolveCallerAgent()?.workspaceId,
-        });
+        workspace = await options.createDirectoryWorkspace(
+          cwd,
+          title,
+          projectId,
+          workspaceBackgroundIntent(background),
+        );
       } else {
         let cwd =
           path !== undefined || !projectId ? resolveScopedCwd(path, { required: true }) : null;
@@ -4546,9 +4565,8 @@ function createToolCatalog(
             ...(projectId ? { projectId } : {}),
             ...(worktreeSlug ? { worktreeSlug } : {}),
             ...worktreeTarget,
-            background,
-            callerWorkspaceId: resolveCallerAgent()?.workspaceId,
             ...(title ? { title } : {}),
+            ...workspaceBackgroundIntent(background),
           },
         );
         if (!result.ok) {
@@ -4699,6 +4717,7 @@ function createToolCatalog(
           mode: parsedArgs.settings?.modeId,
           background: requestedBackground,
           notifyOnFinish,
+          agentBackground: parsedArgs.background,
           detached: resolvedArgs.detached,
           callerAgentId,
           callerContext,
@@ -4890,7 +4909,11 @@ function createToolCatalog(
       const cwd = process.cwd();
       return {
         cwd,
-        workspaceId: await options.ensureWorkspaceForCreate(cwd, firstAgentContext),
+        workspaceId: await options.ensureWorkspaceForCreate(
+          cwd,
+          firstAgentContext,
+          workspaceBackgroundIntent(undefined),
+        ),
       };
     }
     const caller = resolveCallerAgent();
@@ -5064,7 +5087,11 @@ function createToolCatalog(
       }
       return {
         cwd,
-        workspaceId: await options.ensureWorkspaceForCreate(cwd, firstAgentContext),
+        workspaceId: await options.ensureWorkspaceForCreate(
+          cwd,
+          firstAgentContext,
+          workspaceBackgroundIntent(undefined),
+        ),
         worktree: undefined,
       };
     }
@@ -5269,6 +5296,7 @@ function createToolCatalog(
       title: "List agents",
       description: "List recent agents as compact metadata.",
       inputSchema: {
+        includeBackground: z.boolean().optional().default(false),
         includeArchived: z.boolean().optional().default(false),
         cwd: z.string().optional(),
         sinceHours: z
@@ -5285,7 +5313,14 @@ function createToolCatalog(
         agents: z.array(AgentListItemPayloadSchema),
       },
     },
-    async ({ includeArchived = false, cwd, sinceHours = 48, statuses, limit = 50 }) => {
+    async ({
+      includeArchived = false,
+      includeBackground = false,
+      cwd,
+      sinceHours = 48,
+      statuses,
+      limit = 50,
+    }) => {
       const callerCwd = callerAgentId ? resolveCallerAgent()?.cwd : undefined;
       const requestedCwd = cwd?.trim() ? expandUserPath(cwd) : callerCwd;
       const statusFilter = statuses && statuses.length > 0 ? new Set(statuses) : null;
@@ -5307,7 +5342,19 @@ function createToolCatalog(
             includeArchived || isStoredAgentProviderAvailable(record, registeredProviderIds),
         )
         .map((record) => buildStoredAgentPayload(record, registeredProviderIds));
+      const backgroundWorkspaceIds = new Set(
+        ((await options.workspaceRegistry?.list()) ?? [])
+          .filter((workspace) => workspace.background)
+          .map((workspace) => workspace.workspaceId),
+      );
       const agents = [...liveAgents, ...storedAgents]
+        .filter((agent) =>
+          admitsAgent(
+            agent,
+            backgroundWorkspaceIds.has(agent.workspaceId ?? ""),
+            includeBackground,
+          ),
+        )
         .filter((agent) => includeArchived || !agent.archivedAt)
         .map(toAgentListItemPayload)
         .filter((agent) => !requestedCwd || isSameOrDescendantPath(requestedCwd, agent.cwd))

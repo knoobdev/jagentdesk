@@ -1,3 +1,4 @@
+import type { BackgroundVisibility } from "../../agent/directory.js";
 import type pino from "pino";
 import type {
   AgentSnapshotPayload,
@@ -17,6 +18,7 @@ type AgentUpdatesFilter = NonNullable<
 interface AgentUpdatesSubscriptionState {
   subscriptionId: string;
   filter?: AgentUpdatesFilter;
+  backgroundVisibility?: BackgroundVisibility;
   isBootstrapping: boolean;
   pendingUpdatesByAgentId: Map<string, AgentUpdatePayload>;
 }
@@ -37,7 +39,11 @@ interface AgentUpdatesSubscriptionState {
  * stay consistent.
  */
 export interface AgentUpdatesService {
-  beginSubscription(input: { subscriptionId: string; filter?: AgentUpdatesFilter }): void;
+  beginSubscription(input: {
+    subscriptionId: string;
+    filter?: AgentUpdatesFilter;
+    backgroundVisibility?: BackgroundVisibility;
+  }): void;
   flushBootstrapped(
     subscriptionId: string,
     options?: { snapshotUpdatedAtByAgentId?: Map<string, number> },
@@ -52,6 +58,10 @@ export interface AgentUpdatesService {
 }
 
 export interface AgentUpdatesServiceDeps {
+  includesWorkspace?(
+    agent: AgentSnapshotPayload,
+    visibility: BackgroundVisibility,
+  ): Promise<boolean>;
   emit(message: SessionOutboundMessage): void;
   enrichAgentPayload(payload: AgentSnapshotPayload): Promise<AgentSnapshotPayload>;
   buildStoredAgentPayload(record: StoredAgentRecord): AgentSnapshotPayload;
@@ -117,6 +127,7 @@ export function matchesAgentUpdatesFilter(input: {
   agent: AgentSnapshotPayload;
   project: ProjectPlacementPayload;
   filter?: AgentUpdatesFilter;
+  backgroundVisibility?: BackgroundVisibility;
 }): boolean {
   const { agent, project, filter } = input;
 
@@ -168,10 +179,15 @@ export function createAgentUpdatesService(deps: AgentUpdatesServiceDeps): AgentU
     });
   }
 
-  function beginSubscription(input: { subscriptionId: string; filter?: AgentUpdatesFilter }): void {
+  function beginSubscription(input: {
+    subscriptionId: string;
+    filter?: AgentUpdatesFilter;
+    backgroundVisibility?: BackgroundVisibility;
+  }): void {
     subscription = {
       subscriptionId: input.subscriptionId,
       filter: input.filter,
+      backgroundVisibility: input.backgroundVisibility,
       isBootstrapping: true,
       pendingUpdatesByAgentId: new Map(),
     };
@@ -234,6 +250,11 @@ export function createAgentUpdatesService(deps: AgentUpdatesServiceDeps): AgentU
     return (
       subscription === activeSubscription &&
       project !== null &&
+      ((await deps.includesWorkspace?.(
+        payload,
+        activeSubscription.backgroundVisibility ?? false,
+      )) ??
+        true) &&
       matchesAgentUpdatesFilter({
         agent: payload,
         project,
@@ -252,7 +273,10 @@ export function createAgentUpdatesService(deps: AgentUpdatesServiceDeps): AgentU
     const project = payload.workspaceId
       ? await deps.buildProjectPlacementForWorkspaceId(payload.workspaceId)
       : null;
-    if (!project) {
+    if (
+      !project ||
+      !((await deps.includesWorkspace?.(payload, sub.backgroundVisibility ?? false)) ?? true)
+    ) {
       bufferOrEmit(sub, {
         kind: "remove",
         agentId: payload.id,
@@ -289,7 +313,10 @@ export function createAgentUpdatesService(deps: AgentUpdatesServiceDeps): AgentU
         const project = payload.workspaceId
           ? await deps.buildProjectPlacementForWorkspaceId(payload.workspaceId)
           : null;
-        if (!project) {
+        if (
+          !project ||
+          !((await deps.includesWorkspace?.(payload, sub.backgroundVisibility ?? false)) ?? true)
+        ) {
           bufferOrEmit(sub, {
             kind: "remove",
             agentId: payload.id,

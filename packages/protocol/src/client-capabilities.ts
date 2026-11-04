@@ -36,6 +36,8 @@ export const CLIENT_CAPS = {
   // COMPAT(timelineReplacementInvalidation): added in v0.5.0, remove legacy
   // reconstructed timeline replay after 2027-02-21 once the client floor supports invalidation.
   timelineReplacementInvalidation: "timeline_replacement_invalidation",
+  // COMPAT(backgroundAgents): added in v0.9.59, remove after 2027-05-24.
+  backgroundAgents: "background_agents",
   browserHost: "browser_host",
   // Spec mode (spec 28.6): only clients that render the Phase review bar may turn it on.
   specMode: "spec_mode",

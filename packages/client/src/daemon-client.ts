@@ -641,6 +641,7 @@ export interface CreateAgentRequestOptions extends AgentConfigOverrides {
   git?: GitSetupOptions;
   worktree?: CreateAgentRequestMessage["worktree"];
   autoArchive?: CreateAgentRequestMessage["autoArchive"];
+  background?: CreateAgentRequestMessage["background"];
   // COMPAT(createAgentWorktree): low-level old callers may still send the
   // create-agent worktree field. Added in v0.2.0; remove after 2027-01-17.
   worktreeName?: string;
@@ -3466,7 +3467,16 @@ export class DaemonClient {
   // Agent Lifecycle
   // ============================================================================
 
+  private requireBackgroundAgentCreation(options: CreateAgentRequestOptions): void {
+    if (
+      options.background !== undefined &&
+      this.lastServerInfoMessage?.features?.backgroundAgents !== true
+    )
+      throw new Error("Update the host to use background agents.");
+  }
+
   async createAgent(options: CreateAgentRequestOptions): Promise<AgentSnapshotPayload> {
+    this.requireBackgroundAgentCreation(options);
     const requestId = this.createRequestId(options.requestId);
     const config = resolveAgentConfig(options);
 
@@ -3476,6 +3486,7 @@ export class DaemonClient {
       config,
       ...(options.env ? { env: options.env } : {}),
       ...(options.workspaceId !== undefined ? { workspaceId: options.workspaceId } : {}),
+      background: options.background,
       ...(options.callerAgentId !== undefined ? { callerAgentId: options.callerAgentId } : {}),
       ...(options.initialPrompt ? { initialPrompt: options.initialPrompt } : {}),
       ...(options.clientMessageId ? { clientMessageId: options.clientMessageId } : {}),

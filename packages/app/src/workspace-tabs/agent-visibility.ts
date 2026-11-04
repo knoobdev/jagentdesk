@@ -69,7 +69,7 @@ export function deriveWorkspaceAgentVisibility(input: {
     if (!agent.archivedAt && !isMisfiledDockAgent(agent, earliestRegularAgentAt)) {
       activeAgentIds.add(agent.id);
       const parentAgent = agent.parentAgentId ? agentsById.get(agent.parentAgentId) : undefined;
-      if (isWorkspaceRootAgent(agent, parentAgent)) {
+      if (shouldAutoOpenBackgroundAgent(agent, parentAgent)) {
         autoOpenAgentIds.add(agent.id);
       }
     }
@@ -141,4 +141,8 @@ export function shouldPruneWorkspaceAgentTab(input: {
     return false;
   }
   return !input.activeAgentIds.has(input.agentId);
+}
+
+function shouldAutoOpenBackgroundAgent(agent: Agent, parentAgent: Agent | undefined): boolean {
+  return !agent.background && isWorkspaceRootAgent(agent, parentAgent);
 }
