@@ -71,13 +71,14 @@ export function hashNodeId(prefix: string, text: string): string {
 }
 
 // archify's width estimate (renderers/shared/utils.mjs textUnits): wide East Asian characters and
-// emoji take two units, everything else one. A state is at most 220px wide and text may shrink to
-// 10px (label) / 8px (sublabel) at 0.6em per unit, so labels and sublabels are cut in units.
+// emoji take two units, everything else one; labels and sublabels are cut in units.
 const FULLWIDTH =
   /[\u1100-\u115F\u231A-\u231B\u2329-\u232A\u23E9-\u23EC\u23F0\u23F3\u25FD-\u25FE\u2614-\u2615\u2630-\u2637\u2648-\u2653\u267F\u268A-\u268F\u2693\u26A1\u26AA-\u26AB\u26BD-\u26BE\u26C4-\u26C5\u26CE\u26D4\u26EA\u26F2-\u26F3\u26F5\u26FA\u26FD\u2705\u270A-\u270B\u2728\u274C\u274E\u2753-\u2755\u2757\u2795-\u2797\u27B0\u27BF\u2B1B-\u2B1C\u2B50\u2B55\u2E80-\uA4CF\uA960-\uA97C\uAC00-\uD7A3\uF900-\uFAFF\uFE10-\uFE19\uFE30-\uFE6F\uFF01-\uFF60\uFFE0-\uFFE6\u{16FE0}-\u{18DFF}\u{1AFF0}-\u{1AFFF}\u{1B000}-\u{1B2FF}\u{1F000}-\u{1FAFF}\u{20000}-\u{3FFFD}]/u;
 
-export const LABEL_UNITS = 32;
-export const SUBLABEL_UNITS = 42;
+// Lengths that fit archify's widest state card (220 px, 8 px padding) at the preferred 12 px label
+// and 9 px sublabel, so archify never shrinks text and the panel's readable zoom stays constant.
+export const LABEL_UNITS = 29;
+export const SUBLABEL_UNITS = 38;
 
 function charUnits(char: string): number {
   return FULLWIDTH.test(char) ? 2 : 1;

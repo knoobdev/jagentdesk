@@ -44,16 +44,14 @@ describe("recorded mock turn → Flow lifecycle JSON", () => {
       {
         id: "start",
         type: "start",
-        label: "emit synthetic activity graph",
-        sublabel: "hold=5000 pace=900",
+        label: "emit synthetic activity",
+        sublabel: "graph hold=5000 pace=900",
       },
       {
         id: read,
         type: "active",
         label: "2 tool calls",
         sublabel: "Read · Search",
-        tag: "tools",
-        step: "01",
         icon: "none",
       },
       {
@@ -61,17 +59,13 @@ describe("recorded mock turn → Flow lifecycle JSON", () => {
         type: "active",
         label: "2 tool calls",
         sublabel: "Explore · Edit",
-        tag: "tools",
-        step: "02",
         icon: "none",
       },
       {
         id: "end",
         type: "success",
         label: "Answer",
-        sublabel: "Fixed the refresh race in src/auth/sessio…",
-        tag: "end",
-        step: "03",
+        sublabel: "Fixed the refresh race in src/auth/se…",
         icon: "none",
       },
       {
@@ -79,7 +73,6 @@ describe("recorded mock turn → Flow lifecycle JSON", () => {
         type: "external",
         label: "Explore",
         sublabel: "Map session refresh callers",
-        tag: "subagent",
         icon: "none",
       },
     ]);

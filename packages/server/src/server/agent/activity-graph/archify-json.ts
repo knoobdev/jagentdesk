@@ -52,14 +52,11 @@ function statusIcon(status: ActivityGraphNodeStatus): string {
   }
 }
 
-function pad(step: number): string {
-  return String(step).padStart(2, "0");
-}
-
 export function toLifecycleJson(model: GraphModel): Record<string, unknown> {
   const main = model.nodes.filter((node) => node.placement === "main");
   const branches = model.nodes.filter((node) => node.placement === "branch");
-  let step = 0;
+  // Label (12 px) and sublabel (9 px) only: archify's 8 px tag and step rails are too small to read
+  // in the panel and repeat what the card and the arrows already say.
   const states = model.nodes.map((node) => {
     const state: Record<string, unknown> = {
       id: node.id,
@@ -67,11 +64,6 @@ export function toLifecycleJson(model: GraphModel): Record<string, unknown> {
       label: node.label,
     };
     if (node.sublabel) state.sublabel = node.sublabel;
-    if (node.tag) state.tag = node.tag;
-    if (node.placement === "main" && node.kind !== "start") {
-      step += 1;
-      state.step = pad(step);
-    }
     if (node.kind !== "start") state.icon = statusIcon(node.status);
     return state;
   });
