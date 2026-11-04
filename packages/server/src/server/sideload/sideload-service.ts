@@ -1,6 +1,5 @@
 import { execFile } from "node:child_process";
 import { stat } from "node:fs/promises";
-import { release } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import type pino from "pino";
@@ -69,31 +68,13 @@ export interface SideloadServiceOptions {
   refreshIntervalMs?: number;
 }
 
-function macMachine(
-  run: RunProcess,
-): () => Promise<{ model: string; osVersion: string; osBuild: string }> {
-  return async () => {
-    const [model, version, build] = await Promise.all([
-      run("sysctl", ["-n", "hw.model"], { timeoutMs: 5000 }),
-      run("sw_vers", ["-productVersion"], { timeoutMs: 5000 }),
-      run("sw_vers", ["-buildVersion"], { timeoutMs: 5000 }),
-    ]);
-    return {
-      model: model.stdout.trim() || "Mac",
-      osVersion: version.stdout.trim() || release(),
-      osBuild: build.stdout.trim() || "",
-    };
-  };
-}
-
 function defaultNativeAnisette(
   platform: NodeJS.Platform,
   run: RunProcess,
 ): () => AnisetteSourceAdapter {
   if (platform === "darwin") {
-    const adapter = new NativeMacAnisette(
-      (command, args) => run(command, args, { timeoutMs: 20_000 }),
-      macMachine(run),
+    const adapter = new NativeMacAnisette((command, args) =>
+      run(command, args, { timeoutMs: 20_000 }),
     );
     return () => adapter;
   }

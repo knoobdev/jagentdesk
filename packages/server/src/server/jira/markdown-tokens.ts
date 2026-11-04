@@ -1,3 +1,4 @@
+import { JIRA_ATTACHMENT_SCHEME } from "@jagentdesk/protocol/jira/rpc-schemas";
 import MarkdownIt from "markdown-it";
 
 // Markdown → a small block/inline tree that both target formats (ADF for Cloud, wiki markup for
@@ -249,6 +250,54 @@ function pushText(nodes: InlineNode[], text: string, marks: InlineMark[]): void 
 // Characters that would start Markdown syntax when they appear in plain text.
 export function escapeMarkdownText(text: string): string {
   return text.replace(/([\\`*_[\]~<>|])/g, "\\$1");
+}
+
+/** A Markdown link whose text is the URL itself (smart links, bare wiki links). */
+export function urlLink(url: string): string {
+  return `[${escapeMarkdownText(url)}](${linkDestination(url)})`;
+}
+
+/** A URL as a Markdown link destination: characters that would end it are percent-encoded. */
+export function linkDestination(url: string): string {
+  return url.trim().replace(/[\s()<>]/g, (char) => {
+    const code = char.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0");
+    return `%${code}`;
+  });
+}
+
+/** An issue attachment that rich text may reference by file name (ADF media, wiki `!x!`). */
+export interface RichTextAttachment {
+  id: string;
+  filename: string;
+  mimeType: string;
+  created_ms: number;
+}
+
+/**
+ * Markdown for a file referenced from rich text: `![name](jira-attachment:<id>)` for an image of
+ * the issue's attachments, `[name](jira-attachment:<id>)` for another file, matched by file name
+ * (Cloud ADF media carry a Media Services id, not the REST attachment id; the `alt` is the file
+ * name). The newest attachment wins when several share a name. Null when none matches.
+ */
+export function attachmentMarkdown(
+  name: string,
+  attachments: readonly RichTextAttachment[],
+): string | null {
+  const wanted = name.trim();
+  if (!wanted) return null;
+  const exact = attachments.filter((a) => a.filename === wanted);
+  const matches =
+    exact.length > 0
+      ? exact
+      : attachments.filter((a) => a.filename.toLowerCase() === wanted.toLowerCase());
+  const match = matches.reduce<RichTextAttachment | null>(
+    (best, a) => (best === null || a.created_ms >= best.created_ms ? a : best),
+    null,
+  );
+  if (!match) return null;
+  const label = escapeMarkdownText(match.filename);
+  const target = `${JIRA_ATTACHMENT_SCHEME}${encodeURIComponent(match.id)}`;
+  return match.mimeType.startsWith("image/") ? `![${label}](${target})` : `[${label}](${target})`;
 }
 
 export function escapeLineStart(line: string): string {

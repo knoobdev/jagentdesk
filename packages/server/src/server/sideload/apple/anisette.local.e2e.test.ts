@@ -19,17 +19,21 @@ describe("anisette sources", () => {
     async () => {
       const run = (command: string, args: string[]) =>
         runProcess(command, args, { timeoutMs: 20_000 });
-      const native = new NativeMacAnisette(run, async () => ({
-        model: (await run("sysctl", ["-n", "hw.model"])).stdout.trim(),
-        osVersion: (await run("sw_vers", ["-productVersion"])).stdout.trim(),
-        osBuild: (await run("sw_vers", ["-buildVersion"])).stdout.trim(),
-      }));
-      const result = await native.fetch(newAnisetteIdentity());
+      const native = new NativeMacAnisette(run);
+      const identity = newAnisetteIdentity();
+      const result = await native.fetch(identity);
       expect(result.data["X-Apple-I-MD"]).toMatch(/^[A-Za-z0-9+/=]{20,}$/);
       expect(result.data["X-Apple-I-MD-M"]).toMatch(/^[A-Za-z0-9+/=]{40,}$/);
       expect(result.data["X-Mme-Client-Info"]).toMatch(
-        /^<.+> <Mac OS X;[\d.]+;\w+> <com\.apple\.AuthKit/,
+        /^<.+> <(macOS|Mac OS X);[\d.]+;\w+> <com\.apple\.AuthKit\/1 \(com\.apple\.osascript\//,
       );
+      // This Mac's own identity, not the stored random one.
+      expect(result.data["X-Mme-Device-Id"]).toMatch(/^[0-9A-F-]{36}$/i);
+      expect(result.data["X-Mme-Device-Id"]).not.toBe(identity.deviceId);
+      expect(result.data["X-Apple-I-MD-LU"]).toBe(
+        Buffer.from(result.data["X-Mme-Device-Id"]).toString("base64"),
+      );
+      expect(result.userAgent).toMatch(/^akd\/1\.0 CFNetwork\/[\d.]+ Darwin\/[\d.]+$/);
     },
   );
 

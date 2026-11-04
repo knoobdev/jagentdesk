@@ -1,11 +1,12 @@
 import { useCallback, useMemo } from "react";
-import { View } from "react-native";
+import { Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
-import type {
-  JiraBoardColumn,
-  JiraIssueCard,
-  JiraSprint,
-  JiraSwimlaneConfig,
+import {
+  JIRA_BOARD_MAX_ISSUES,
+  type JiraBoardColumn,
+  type JiraIssueCard,
+  type JiraSprint,
+  type JiraSwimlaneConfig,
 } from "@jagentdesk/protocol/jira/rpc-schemas";
 import { Button } from "@/components/ui/button";
 import type { Theme } from "@/styles/theme";
@@ -52,7 +53,12 @@ export function BoardBanners({
       ) : null}
       {rankError ? <ErrorBanner message={rankError} /> : null}
       {truncated ? (
-        <ErrorBanner message="This board has more than 500 issues; only the first 500 are shown." />
+        // Informational, not an error: the board is past the safety ceiling.
+        <View style={styles.notice} testID="jira-board-truncated">
+          <Text style={styles.noticeText}>
+            {`Showing the first ${JIRA_BOARD_MAX_ISSUES.toLocaleString("en-US")} issues of this board. Use a quick filter to narrow it.`}
+          </Text>
+        </View>
       ) : null}
     </View>
   );
@@ -127,4 +133,11 @@ export function BoardOverlays({
 
 const styles = StyleSheet.create((theme: Theme) => ({
   banners: { paddingHorizontal: theme.spacing[4], gap: theme.spacing[2] },
+  notice: {
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.surface2,
+  },
+  noticeText: { fontSize: theme.fontSize.sm, color: theme.colors.foregroundMuted },
 }));

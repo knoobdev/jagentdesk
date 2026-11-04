@@ -120,6 +120,14 @@ with a few deliberate boundaries:
 
 ## ✨ New in this release
 
+### Fixes from the first real use (v0.9.49)
+
+- **Apple ID sign-in on macOS works with the Mac's own anisette** — no more "HTTP 503 … anisette
+  data"; the Add Apple ID dialog is now as short as Sideloadly's (Apple ID, password, keep signed in;
+  anisette under Advanced).
+- **Jira boards load every issue** (no 500 cap), columns scroll, smart links are clickable, and
+  images and files in descriptions and comments show in place.
+
 ### Jira, Argo CD, iOS sideload, real devices, Spec mode and the activity graph (v0.9.48)
 
 #### Jira — boards, backlog and issues inside JAgentDesk

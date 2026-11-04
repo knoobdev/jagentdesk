@@ -10,6 +10,9 @@ import type { StoredJiraConnection } from "./storage.js";
 
 const CATALOG_TTL_MS = 10 * 60_000;
 const PAGE_SIZE = 100;
+// Offset pages (Data Center) after the first are fetched this many at a time.
+const PARALLEL_PAGES = 4;
+/** Default cap of a list (agent tools, sprint lists); views pass their own `limit`. */
 export const MAX_LIST_ISSUES = 500;
 
 interface CachedCatalog {
@@ -143,43 +146,111 @@ export class JiraSite {
 
   /**
    * Pages through an issue list endpoint — Cloud `/search/jql` and `/rest/software/1.0` (token
-   * pages) or DC `/search` and `/rest/agile/1.0` (offset pages) — up to `limit` issues.
+   * pages, sequential) or DC `/search` and `/rest/agile/1.0` (offset pages; once the first page
+   * reports `total`, the rest are fetched a few at a time) — up to `limit` issues.
    */
-  async issues(input: {
-    path: string;
-    jql?: string;
-    context: CardContext;
-    limit?: number;
-    extraFields?: string[];
-  }): Promise<IssuePage> {
+  async issues(input: IssueListInput): Promise<IssuePage> {
     const limit = input.limit ?? MAX_LIST_ISSUES;
     const fields = [...cardFields(input.context), ...(input.extraFields ?? [])].join(",");
     const reconcile = this.flavor.deployment === "cloud" ? this.reconcileIds() : [];
     const cards: JiraIssueCard[] = [];
-    let token: string | null = null;
-    let startAt = 0;
-    for (;;) {
-      const page: Json = await this.get(input.path, {
-        jql: input.jql,
-        fields,
-        maxResults: Math.min(PAGE_SIZE, limit - cards.length),
-        ...(this.flavor.deployment === "cloud"
-          ? {
-              nextPageToken: token ?? undefined,
-              reconcileIssues: reconcile.length > 0 ? reconcile : undefined,
-            }
-          : { startAt }),
-      });
-      const issues = objs(page.issues);
-      cards.push(...issues.map((issue) => mapCard(issue, input.context)));
-      token = str(page.nextPageToken);
-      const total = num(page.total);
-      startAt += issues.length;
-      const more =
-        token !== null || (total !== null && startAt < total && issues.length > 0 && !page.isLast);
-      if (!more || cards.length >= limit) {
-        return { issues: cards, truncated: more && cards.length >= limit };
-      }
+    const list: IssueLister = {
+      limit,
+      cards,
+      fetch: (cursor, size) =>
+        this.get<Json>(input.path, {
+          jql: input.jql,
+          fields,
+          maxResults: size,
+          ...("token" in cursor
+            ? {
+                nextPageToken: cursor.token ?? undefined,
+                reconcileIssues: reconcile.length > 0 ? reconcile : undefined,
+              }
+            : { startAt: cursor.startAt }),
+        }),
+      take: (page) => {
+        const issues = objs(page.issues);
+        cards.push(...issues.map((issue) => mapCard(issue, input.context)));
+        return issues.length;
+      },
+    };
+    const truncated =
+      this.flavor.deployment === "cloud" ? await tokenPages(list) : await offsetPages(list);
+    return { issues: cards.slice(0, limit), truncated };
+  }
+}
+
+interface IssueListInput {
+  path: string;
+  jql?: string;
+  context: CardContext;
+  limit?: number;
+  extraFields?: string[];
+}
+
+interface IssueLister {
+  limit: number;
+  cards: JiraIssueCard[];
+  fetch(cursor: { token: string | null } | { startAt: number }, size: number): Promise<Json>;
+  /** Adds a page's issues; returns how many it had. */
+  take(page: Json): number;
+}
+
+/** Cloud token pages, one after another. Returns whether issues were left at the limit. */
+async function tokenPages(list: IssueLister): Promise<boolean> {
+  let token: string | null = null;
+  for (;;) {
+    const page = await list.fetch({ token }, Math.min(PAGE_SIZE, list.limit - list.cards.length));
+    const count = list.take(page);
+    token = str(page.nextPageToken);
+    if (token === null || count === 0) return false;
+    if (list.cards.length >= list.limit) return true;
+  }
+}
+
+/** Data Center offset pages. Returns whether issues were left at the limit. */
+async function offsetPages(list: IssueLister): Promise<boolean> {
+  const first = await list.fetch({ startAt: 0 }, Math.min(PAGE_SIZE, list.limit));
+  const startAt = list.take(first);
+  const total = num(first.total);
+  if (total !== null && startAt > 0 && !first.isLast) {
+    await parallelOffsetPages(list, startAt, Math.min(total, list.limit));
+    return total > list.limit;
+  }
+  // No total (older endpoints): sequential pages until an empty or last page.
+  let at = startAt;
+  let last = first;
+  while (at > 0 && !last.isLast && list.cards.length < list.limit) {
+    last = await list.fetch({ startAt: at }, Math.min(PAGE_SIZE, list.limit - list.cards.length));
+    const count = list.take(last);
+    if (count === 0) break;
+    at += count;
+  }
+  return at > 0 && last.isLast === false && list.cards.length >= list.limit;
+}
+
+// Jira may serve fewer issues per page than asked (maxResults is an upper bound), so the page size
+// is what the first page held. Pages are kept in order up to the first short one; the ones after
+// it are fetched again from there, so nothing is skipped or doubled.
+async function parallelOffsetPages(list: IssueLister, from: number, end: number): Promise<void> {
+  const pageSize = Math.max(1, from);
+  let startAt = from;
+  while (startAt < end) {
+    const offsets: number[] = [];
+    for (let at = startAt; at < end && offsets.length < PARALLEL_PAGES; at += pageSize) {
+      offsets.push(at);
     }
+    const sizes = offsets.map((at) => Math.min(pageSize, end - at));
+    const pages = await Promise.all(
+      offsets.map((at, index) => list.fetch({ startAt: at }, sizes[index] ?? pageSize)),
+    );
+    const before = startAt;
+    for (const [index, page] of pages.entries()) {
+      const count = list.take(page);
+      startAt = (offsets[index] ?? startAt) + count;
+      if (count < (sizes[index] ?? 0)) break;
+    }
+    if (startAt === before) break;
   }
 }

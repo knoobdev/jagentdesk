@@ -1,5 +1,13 @@
-import { useCallback, useMemo, type ReactNode } from "react";
-import { ScrollView, Text, View } from "react-native";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
+import {
+  FlatList,
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+  type LayoutChangeEvent,
+  type ListRenderItemInfo,
+} from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import type {
   JiraBoardColumn,
@@ -8,12 +16,13 @@ import type {
   JiraLane,
 } from "@jagentdesk/protocol/jira/rpc-schemas";
 import { useIsCompactFormFactor } from "@/constants/layout";
+import { isWeb } from "@/constants/platform";
 import type { Theme } from "@/styles/theme";
 import { Draggable, DropZone } from "./dnd";
 import { IssueCard } from "./issue-card";
 
 // The board grid (spec 29.3): columns from the board configuration with count and WIP limits,
-// lanes as rows across them. It scrolls horizontally by column (snapping per column on phones).
+// lanes as rows across them.
 
 export const COLUMN_WIDTH = 272;
 const COLUMN_GAP = 12;
@@ -85,6 +94,80 @@ interface CellProps {
   renderColumnFooter: (columnIndex: number) => ReactNode;
 }
 
+function useColumnCards(cards: JiraIssueCard[], column: JiraBoardColumn): JiraIssueCard[] {
+  return useMemo(
+    () => cards.filter((card) => column.statusIds.includes(card.status.id)),
+    [cards, column.statusIds],
+  );
+}
+
+const keyOfCard = (card: JiraIssueCard) => card.key;
+
+/**
+ * One column of a board without lanes: a windowed vertical list with its own scroll, as tall as
+ * the board, so a column of hundreds of cards renders only what is on screen (spec 29.3).
+ */
+function ColumnList({
+  column,
+  columnIndex,
+  laneId,
+  cards,
+  height,
+  busyKey,
+  onOpenIssue,
+  onMoveIssue,
+  renderColumnFooter,
+}: Omit<CellProps, "laneIndex"> & { height: number }) {
+  const inColumn = useColumnCards(cards, column);
+  const renderItem = useCallback(
+    ({ item }: ListRenderItemInfo<JiraIssueCard>) => (
+      <Draggable id={item.key}>
+        <IssueCard
+          issue={item}
+          busy={busyKey === item.key}
+          onOpen={onOpenIssue}
+          onMove={onMoveIssue}
+        />
+      </Draggable>
+    ),
+    [busyKey, onMoveIssue, onOpenIssue],
+  );
+  const footer = useMemo(
+    () => <>{renderColumnFooter(columnIndex)}</>,
+    [columnIndex, renderColumnFooter],
+  );
+  const sized = useMemo(() => ({ height }), [height]);
+  const renderZone = useCallback(
+    (isOver: boolean) => (
+      <View
+        style={[isOver ? styles.listCellOver : styles.listCell, sized]}
+        testID={`jira-column-${columnIndex}`}
+      >
+        <FlatList
+          data={inColumn}
+          keyExtractor={keyOfCard}
+          renderItem={renderItem}
+          extraData={busyKey}
+          style={styles.list}
+          contentContainerStyle={styles.listContent}
+          ListFooterComponent={footer}
+          initialNumToRender={12}
+          maxToRenderPerBatch={16}
+          windowSize={5}
+          nestedScrollEnabled
+          removeClippedSubviews={!isWeb}
+          testID={`jira-column-list-${columnIndex}`}
+        />
+      </View>
+    ),
+    [busyKey, columnIndex, footer, inColumn, renderItem, sized],
+  );
+  return <DropZone id={columnDropId(columnIndex, laneId)}>{renderZone}</DropZone>;
+}
+
+// Lanes stack vertically in one scroll; each cell shows this many cards more per "Show more".
+const LANE_CELL_PAGE = 50;
+
 function ColumnCell({
   column,
   columnIndex,
@@ -96,17 +179,17 @@ function ColumnCell({
   onMoveIssue,
   renderColumnFooter,
 }: CellProps) {
-  const inColumn = useMemo(
-    () => cards.filter((card) => column.statusIds.includes(card.status.id)),
-    [cards, column.statusIds],
-  );
+  const inColumn = useColumnCards(cards, column);
+  const [shown, setShown] = useState(LANE_CELL_PAGE);
+  const showMore = useCallback(() => setShown((count) => count + LANE_CELL_PAGE), []);
+  const hidden = inColumn.length - shown;
   const renderZone = useCallback(
     (isOver: boolean) => (
       <View
         style={isOver ? styles.cellOver : styles.cell}
         testID={laneIndex === 0 ? `jira-column-${columnIndex}` : undefined}
       >
-        {inColumn.map((card) => (
+        {inColumn.slice(0, shown).map((card) => (
           <Draggable key={card.key} id={card.key}>
             <IssueCard
               issue={card}
@@ -116,10 +199,34 @@ function ColumnCell({
             />
           </Draggable>
         ))}
+        {hidden > 0 ? (
+          <Pressable
+            style={styles.more}
+            onPress={showMore}
+            accessibilityRole="button"
+            testID={`jira-cell-more-${laneId}-${columnIndex}`}
+          >
+            <Text
+              style={styles.moreText}
+            >{`Show ${Math.min(hidden, LANE_CELL_PAGE)} more of ${hidden}`}</Text>
+          </Pressable>
+        ) : null}
         {laneIndex === 0 ? renderColumnFooter(columnIndex) : null}
       </View>
     ),
-    [busyKey, columnIndex, inColumn, laneIndex, onMoveIssue, onOpenIssue, renderColumnFooter],
+    [
+      busyKey,
+      columnIndex,
+      hidden,
+      inColumn,
+      laneId,
+      laneIndex,
+      onMoveIssue,
+      onOpenIssue,
+      renderColumnFooter,
+      showMore,
+      shown,
+    ],
   );
   return <DropZone id={columnDropId(columnIndex, laneId)}>{renderZone}</DropZone>;
 }
@@ -177,6 +284,33 @@ export interface BoardGridProps {
   renderColumnFooter: (columnIndex: number) => ReactNode;
 }
 
+const HEADER_HEIGHT = 44;
+const GRID_GAP = 12;
+const BOTTOM_PAD = 16;
+const MIN_COLUMN_HEIGHT = 160;
+
+function useBoardLanes(lanes: JiraLane[], issues: JiraIssueCard[]) {
+  const byId = useMemo(() => new Map(issues.map((issue) => [issue.id, issue])), [issues]);
+  return useMemo(() => {
+    const withIssues = lanes
+      .map((lane) => ({
+        lane,
+        cards: lane.issueIds.map((id) => byId.get(id)).filter((c): c is JiraIssueCard => !!c),
+      }))
+      .filter((entry) => entry.cards.length > 0);
+    const first = lanes[0];
+    if (withIssues.length === 0 && first) return [{ lane: first, cards: [] }];
+    return withIssues;
+  }, [byId, lanes]);
+}
+
+/**
+ * The board: column headers fixed on top; the board scrolls horizontally when its columns are
+ * wider than the view (snapping per column on phones). Without lanes every column scrolls
+ * vertically on its own, like Jira; with lanes the lanes scroll together. Heights are measured on
+ * the outer frame and passed down explicitly: a view inside a horizontal ScrollView gets no height
+ * from flex on react-native-web, so nothing inside could scroll vertically.
+ */
 export function BoardGrid({
   configuration,
   issues,
@@ -188,7 +322,11 @@ export function BoardGrid({
 }: BoardGridProps) {
   const isCompact = useIsCompactFormFactor();
   const { columns } = configuration;
-  const byId = useMemo(() => new Map(issues.map((issue) => [issue.id, issue])), [issues]);
+  const [height, setHeight] = useState(0);
+  const onLayout = useCallback(
+    (event: LayoutChangeEvent) => setHeight(Math.floor(event.nativeEvent.layout.height)),
+    [],
+  );
   const counts = useMemo(() => {
     const excludeSubtasks = configuration.constraintType === "issueCountExclSubs";
     return columns.map(
@@ -199,55 +337,79 @@ export function BoardGrid({
         ).length,
     );
   }, [columns, configuration.constraintType, issues]);
-  const visibleLanes = useMemo(() => {
-    const withIssues = lanes
-      .map((lane) => ({
-        lane,
-        cards: lane.issueIds.map((id) => byId.get(id)).filter((c): c is JiraIssueCard => !!c),
-      }))
-      .filter((entry) => entry.cards.length > 0);
-    const first = lanes[0];
-    if (withIssues.length === 0 && first) return [{ lane: first, cards: [] }];
-    return withIssues;
-  }, [byId, lanes]);
+  const visibleLanes = useBoardLanes(lanes, issues);
   const showLaneHeaders = visibleLanes.length > 1;
+  const bodyHeight = Math.max(MIN_COLUMN_HEIGHT, height - HEADER_HEIGHT - GRID_GAP - BOTTOM_PAD);
+  const scrollSize = useMemo(() => ({ height }), [height]);
+  const bodySize = useMemo(() => ({ height: bodyHeight }), [bodyHeight]);
+  const single = visibleLanes.length === 1 ? visibleLanes[0] : undefined;
 
   return (
-    <ScrollView
-      horizontal
-      style={styles.scroll}
-      contentContainerStyle={styles.content}
-      snapToInterval={isCompact ? COLUMN_WIDTH + COLUMN_GAP : undefined}
-      decelerationRate={isCompact ? "fast" : "normal"}
-      testID="jira-board"
-    >
-      <View style={styles.grid}>
-        <View style={styles.row}>
-          {columns.map((column, index) => (
-            <ColumnHeader
-              key={column.name}
-              column={column}
-              count={counts[index] ?? 0}
-              index={index}
-            />
-          ))}
-        </View>
-        {visibleLanes.map(({ lane, cards }, laneIndex) => (
-          <LaneRow
-            key={lane.id}
-            lane={lane}
-            cards={cards}
-            columns={columns}
-            laneIndex={laneIndex}
-            showHeader={showLaneHeaders}
-            busyKey={busyKey}
-            onOpenIssue={onOpenIssue}
-            onMoveIssue={onMoveIssue}
-            renderColumnFooter={renderColumnFooter}
-          />
-        ))}
-      </View>
-    </ScrollView>
+    <View style={styles.frame} onLayout={onLayout}>
+      {height > 0 ? (
+        <ScrollView
+          horizontal
+          style={[styles.scroll, scrollSize]}
+          contentContainerStyle={styles.content}
+          snapToInterval={isCompact ? COLUMN_WIDTH + COLUMN_GAP : undefined}
+          decelerationRate={isCompact ? "fast" : "normal"}
+          testID="jira-board"
+        >
+          <View style={styles.grid}>
+            <View style={styles.row}>
+              {columns.map((column, index) => (
+                <ColumnHeader
+                  key={column.name}
+                  column={column}
+                  count={counts[index] ?? 0}
+                  index={index}
+                />
+              ))}
+            </View>
+            {single && !showLaneHeaders ? (
+              <View style={styles.row}>
+                {columns.map((column, columnIndex) => (
+                  <ColumnList
+                    key={column.name}
+                    column={column}
+                    columnIndex={columnIndex}
+                    laneId={single.lane.id}
+                    cards={single.cards}
+                    height={bodyHeight}
+                    busyKey={busyKey}
+                    onOpenIssue={onOpenIssue}
+                    onMoveIssue={onMoveIssue}
+                    renderColumnFooter={renderColumnFooter}
+                  />
+                ))}
+              </View>
+            ) : (
+              <ScrollView
+                style={bodySize}
+                contentContainerStyle={styles.lanes}
+                nestedScrollEnabled
+                testID="jira-board-lanes"
+              >
+                {visibleLanes.map(({ lane, cards }, laneIndex) => (
+                  <LaneRow
+                    key={lane.id}
+                    lane={lane}
+                    cards={cards}
+                    columns={columns}
+                    laneIndex={laneIndex}
+                    showHeader={showLaneHeaders}
+                    busyKey={busyKey}
+                    onOpenIssue={onOpenIssue}
+                    onMoveIssue={onMoveIssue}
+                    renderColumnFooter={renderColumnFooter}
+                  />
+                ))}
+              </ScrollView>
+            )}
+          </View>
+        </ScrollView>
+      ) : null}
+    </View>
   );
 }
 
@@ -266,6 +428,8 @@ const cell = (theme: Theme) =>
 const header = (theme: Theme) =>
   ({
     width: COLUMN_WIDTH,
+    height: HEADER_HEIGHT,
+    justifyContent: "center",
     gap: 2,
     paddingHorizontal: theme.spacing[2],
     paddingVertical: theme.spacing[1.5],
@@ -281,10 +445,33 @@ const headerText = (theme: Theme) =>
     color: theme.colors.foregroundMuted,
   }) as const;
 
+const listCell = (theme: Theme) =>
+  ({
+    width: COLUMN_WIDTH,
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.surface1,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.surface1,
+    overflow: "hidden",
+  }) as const;
+
 const styles = StyleSheet.create((theme: Theme) => ({
-  scroll: { flex: 1, minHeight: 0 },
-  content: { paddingHorizontal: theme.spacing[4], paddingBottom: theme.spacing[4] },
-  grid: { gap: theme.spacing[3] },
+  frame: { flex: 1, minHeight: 0, minWidth: 0 },
+  scroll: { flexGrow: 0 },
+  content: { paddingHorizontal: theme.spacing[4], paddingBottom: BOTTOM_PAD },
+  grid: { gap: GRID_GAP },
+  lanes: { gap: theme.spacing[3] },
+  listCell: listCell(theme),
+  listCellOver: { ...listCell(theme), borderColor: theme.colors.accent },
+  list: { flex: 1 },
+  listContent: { gap: theme.spacing[2], padding: theme.spacing[2] },
+  more: {
+    alignItems: "center",
+    paddingVertical: theme.spacing[1.5],
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.surface2,
+  },
+  moreText: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
   row: { flexDirection: "row", gap: COLUMN_GAP, alignItems: "flex-start" },
   lane: { gap: theme.spacing[2] },
   laneTitle: {

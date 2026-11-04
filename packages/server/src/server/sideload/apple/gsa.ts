@@ -90,15 +90,18 @@ export interface GsaDependencies {
   anisette: () => Promise<AnisetteResult>;
 }
 
-function cpd(anisette: AnisetteData): PlistDict {
+/** Client data as AltSign sends it: the anisette values except X-MMe-Client-Info, which
+ * travels as an HTTP header only. */
+export function cpd(anisette: AnisetteData): PlistDict {
+  const { "X-Mme-Client-Info": _clientInfo, ...values } = anisette;
   return {
     bootstrap: true,
     icscrec: true,
     pbe: false,
     prkgen: true,
     svct: "iCloud",
-    loc: "en_US",
-    ...anisette,
+    loc: anisette["X-Apple-Locale"],
+    ...values,
   };
 }
 
@@ -158,17 +161,25 @@ function checkStatus(response: PlistDict): void {
   throw new GsaError("apple_error", `${em || "Apple sign-in failed"} (${ec})`);
 }
 
-function responseDict(response: AppleHttpResponse): PlistDict {
+/** Copy for an answer that is not a GrandSlam plist (503 refusal, 429 rate limit). */
+export function refusalMessage(status: number, source: AnisetteResult["source"]): string | null {
+  if (status === 429) {
+    return "Apple is limiting sign-in attempts from this host (HTTP 429). Wait a few minutes, then try again.";
+  }
+  if (status !== 503) return null;
+  if (source === "remote") {
+    return "Apple's sign-in service refused the request (HTTP 503): it did not accept the anisette data from your remote server. Check that the server is up to date, or switch the account to Native anisette on macOS or Windows.";
+  }
+  return "Apple's sign-in service refused the request (HTTP 503): it did not accept this host's native anisette data. Try again in a few minutes. If it keeps happening, open Advanced and switch Anisette to a remote server you run.";
+}
+
+function responseDict(response: AppleHttpResponse, source: AnisetteResult["source"]): PlistDict {
   let root: PlistDict;
   try {
     root = parsePlistDict(response.body);
   } catch {
-    if (response.status === 503) {
-      throw new GsaError(
-        "apple_error",
-        "Apple's sign-in service refused the request (HTTP 503). This usually means it did not accept this machine's anisette data: switch the account to a remote anisette server, then try again.",
-      );
-    }
+    const refusal = refusalMessage(response.status, source);
+    if (refusal) throw new GsaError("apple_error", refusal);
     throw new GsaError("protocol_error", `GrandSlam returned ${response.status} without a plist`);
   }
   const inner = asDict(root.Response);
@@ -256,7 +267,7 @@ export class GsaClient {
       headers: gsaHeaders(anisette),
       body: buildGsaRequest(request),
     });
-    return responseDict(response);
+    return responseDict(response, anisette.source);
   }
 
   private async srpLogin(

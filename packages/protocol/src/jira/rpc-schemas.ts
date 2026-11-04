@@ -582,6 +582,7 @@ export const JiraBoardIssuesResponseSchema = res("jira.board.issues.response", {
   swimlanes: JiraSwimlaneConfigSchema,
   // Scrum: the active sprint the board shows; null on Kanban or when no sprint is active.
   sprint: JiraSprintSchema.nullable(),
+  // The board has more than JIRA_BOARD_MAX_ISSUES issues; only that many came back.
   truncated: z.boolean(),
 });
 
@@ -877,6 +878,16 @@ export const JiraIssueWorklogAddResponseSchema = res("jira.issue.worklog.add.res
 });
 
 export const JIRA_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
+
+// Safety ceiling of the board view (spec 29.3): the daemon pages through every issue of a board up
+// to this many, far above real boards; past it the response says `truncated` and the app says so.
+export const JIRA_BOARD_MAX_ISSUES = 5000;
+
+// Attachments referenced from rich text (description, comments): the daemon maps ADF media nodes
+// and wiki `!file!` / `[^file]` to `![name](jira-attachment:<attachmentId>)` (images) or
+// `[name](jira-attachment:<attachmentId>)`; the app loads the bytes through
+// jira.issue.attachments.download, never through a Jira URL.
+export const JIRA_ATTACHMENT_SCHEME = "jira-attachment:";
 
 export const JiraIssueAttachmentsUploadRequestSchema = req(
   "jira.issue.attachments.upload.request",

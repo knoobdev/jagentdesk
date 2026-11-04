@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type pino from "pino";
 import {
+  JIRA_BOARD_MAX_ISSUES,
   JiraResponseSchemas,
   type JiraError,
   type JiraRequest,
@@ -221,12 +222,16 @@ export class JiraSession {
           {},
         );
       case "jira.backlog.get.request":
-        return this.respond(msg, async () => board.backlog(site(msg.connectionId), msg.boardId), {
-          sprints: [],
-          backlog: [],
-          epics: [],
-          versions: [],
-        });
+        return this.respond(
+          msg,
+          async () => board.backlog(site(msg.connectionId), msg.boardId, JIRA_BOARD_MAX_ISSUES),
+          {
+            sprints: [],
+            backlog: [],
+            epics: [],
+            versions: [],
+          },
+        );
       case "jira.sprints.list.request":
         return this.respond(
           msg,

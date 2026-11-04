@@ -1,13 +1,14 @@
 import { FakeJiraServer, type FakeDeployment } from "./fake-jira-server.js";
 
 // Runs a fake Jira site as its own process for manual and built-daemon checks:
-//   npx tsx src/server/jira/test-support/run-fake-jira.ts cloud
+//   npx tsx src/server/jira/test-support/run-fake-jira.ts cloud [--large-board]
 // Prints one JSON line with its URL and credentials, then serves until killed.
 
 const deployment: FakeDeployment = process.argv[2] === "datacenter" ? "datacenter" : "cloud";
 const fake = new FakeJiraServer({
   deployment,
   accessTokenTtlS: Number(process.env.FAKE_JIRA_TOKEN_TTL_S ?? 3600),
+  largeBoard: process.argv.includes("--large-board"),
 });
 await fake.start();
 process.stdout.write(

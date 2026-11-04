@@ -79,7 +79,9 @@ export class JiraHttp {
     request: JiraRequest,
     maxBytes: number,
   ): Promise<JiraBytes> {
-    const response = await this.send(connection, request);
+    // Binary endpoints answer `Accept: application/json` with an error (Cloud attachment content
+    // and thumbnail refuse it); ask for any type.
+    const response = await this.send(connection, request, "*/*");
     const declared = Number(response.headers.get("content-length"));
     if (Number.isFinite(declared) && declared > maxBytes) {
       await response.body?.cancel();
@@ -101,7 +103,11 @@ export class JiraHttp {
     };
   }
 
-  private async send(connection: StoredJiraConnection, request: JiraRequest): Promise<Response> {
+  private async send(
+    connection: StoredJiraConnection,
+    request: JiraRequest,
+    accept = "application/json",
+  ): Promise<Response> {
     let auth = await this.credentials.auth(connection);
     const method = request.method ?? "GET";
     const url = buildUrl(auth.baseUrl, request.path, request.query);
@@ -111,7 +117,7 @@ export class JiraHttp {
     }
     let refreshed = false;
     for (let attempt = 0; ; attempt += 1) {
-      const response = await this.fetchOnce(url, method, auth.authorization, request);
+      const response = await this.fetchOnce(url, method, auth.authorization, request, accept);
       if (response.ok) return response;
       if (response.status === 401 && !refreshed) {
         refreshed = true;
@@ -144,11 +150,9 @@ export class JiraHttp {
     method: string,
     authorization: string,
     request: JiraRequest,
+    accept: string,
   ): Promise<Response> {
-    const headers: Record<string, string> = {
-      Authorization: authorization,
-      Accept: "application/json",
-    };
+    const headers: Record<string, string> = { Authorization: authorization, Accept: accept };
     let body: BodyInit | undefined;
     if (request.form) {
       headers["X-Atlassian-Token"] = "no-check";

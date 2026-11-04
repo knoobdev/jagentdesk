@@ -9,7 +9,8 @@ import { JiraSession } from "../session/jira/jira-session.js";
 import * as boardOps from "./board-ops.js";
 import * as issueOps from "./issue-ops.js";
 import { JiraService } from "./service.js";
-import { FakeJiraServer } from "./test-support/fake-jira-server.js";
+import { MAX_LIST_ISSUES } from "./site.js";
+import { FakeJiraServer, LARGE_BOARD, RICH_COMMENT } from "./test-support/fake-jira-server.js";
 
 // The daemon's Jira layer (service + session RPC handler + credential manager + FileSecretStore)
 // end to end against a fake Jira site speaking the documented Cloud v3 / Software / DC v2 / OAuth
@@ -25,8 +26,11 @@ interface Harness {
   session: JiraSession;
 }
 
-async function harness(deployment: "cloud" | "datacenter"): Promise<Harness> {
-  const fake = new FakeJiraServer({ deployment });
+async function harness(
+  deployment: "cloud" | "datacenter",
+  options: { largeBoard?: boolean } = {},
+): Promise<Harness> {
+  const fake = new FakeJiraServer({ deployment, ...options });
   await fake.start();
   const home = mkdtempSync(path.join(tmpdir(), "jad-jira-e2e-"));
   const logs: string[] = [];
@@ -989,3 +993,129 @@ describe("Jira Data Center with a personal access token", () => {
     expect(backlog.backlog.map((i) => i.key)).toEqual(["ABC-9", "ABC-10"]);
   });
 });
+
+// Owner report v0.9.48: a 1 200-issue Kanban board stopped at 500 with a red banner; comment smart
+// links showed as `<https: …>`; media showed as `[attachment: …]` and attachments did not load.
+describe.each(["cloud", "datacenter"] as const)(
+  "Jira %s: large boards and rich text",
+  (deployment) => {
+    let h: Harness;
+    let connectionId: string;
+    beforeEach(async () => {
+      h = await harness(deployment, { largeBoard: true });
+      const added = await rpc<{ connection: { id: string } | null; error: unknown }>(h, {
+        type: "jira.connections.add.request",
+        deployment,
+        siteUrl: h.fake.baseUrl,
+        ...(deployment === "cloud"
+          ? { method: "api_token", email: "admin@jira.test", token: h.fake.apiToken }
+          : { method: "pat", token: h.fake.pat }),
+      });
+      expect(added.error).toBeNull();
+      connectionId = added.connection?.id ?? "";
+    });
+    afterEach(async () => {
+      h.session.dispose();
+      h.service.dispose();
+      await h.fake.stop();
+      rmSync(h.home, { recursive: true, force: true });
+    });
+
+    it("loads every issue of a 1 200-issue Kanban board through its sub-filter", async () => {
+      const startedAt = Date.now();
+      const board = await rpc<{
+        error: unknown;
+        truncated: boolean;
+        issues: Array<{ key: string; status: { id: string } }>;
+      }>(h, { type: "jira.board.issues.request", connectionId, boardId: LARGE_BOARD.id });
+      expect(board.error).toBeNull();
+      expect(board.truncated).toBe(false);
+      expect(board.issues).toHaveLength(LARGE_BOARD.visible);
+      expect(new Set(board.issues.map((i) => i.key)).size).toBe(LARGE_BOARD.visible);
+      const perStatus: Record<string, number> = {};
+      for (const issue of board.issues)
+        perStatus[issue.status.id] = (perStatus[issue.status.id] ?? 0) + 1;
+      expect(perStatus).toEqual(LARGE_BOARD.columns);
+      // Every page asked with the board's Kanban sub-filter; old Done issues stay off the board.
+      const pages = h.fake
+        .requestsSince(startedAt, `/board/${LARGE_BOARD.id}/issue`)
+        .filter((r) => r.method === "GET");
+      expect(pages.length).toBeGreaterThanOrEqual(12);
+      for (const page of pages) expect(page.query.get("jql")).toContain(LARGE_BOARD.subQuery);
+    });
+
+    it("caps a list at its limit and reports it truncated", async () => {
+      const site = h.service.site(connectionId);
+      const page = await site.issues({
+        path: `${site.flavor.boardIssues}/board/${LARGE_BOARD.id}/issue`,
+        context: await site.cardContext(null),
+        limit: 250,
+      });
+      expect(page.issues).toHaveLength(250);
+      expect(page.truncated).toBe(true);
+      const all = await site.issues({
+        path: `${site.flavor.boardIssues}/board/${LARGE_BOARD.id}/issue`,
+        context: await site.cardContext(null),
+      });
+      expect(all.issues).toHaveLength(MAX_LIST_ISSUES);
+      expect(all.truncated).toBe(true);
+    });
+
+    it("renders a comment's smart link as a Markdown link and its media as attachment references", async () => {
+      const comments = await rpc<{
+        error: unknown;
+        comments: Array<{ id: string; body: { markdown: string; editable: boolean } }>;
+      }>(h, { type: "jira.issue.comments.list.request", connectionId, issueKey: "ABC-4" });
+      expect(comments.error).toBeNull();
+      const rich = comments.comments.find((c) => c.id === RICH_COMMENT.id);
+      const { smartLink, bareUrl, image, file } = RICH_COMMENT;
+      expect(rich?.body.markdown).toBe(
+        [
+          `Link: [${smartLink}](${smartLink})${deployment === "cloud" ? "\n\n" : "\\\n"}Logs at ${bareUrl}`,
+          `![${image.filename}](jira-attachment:${image.id})`,
+          `Notes: [${file.filename}](jira-attachment:${file.id})`,
+        ].join("\n\n"),
+      );
+      expect(rich?.body.editable).toBe(false);
+      expect(JSON.stringify(comments)).not.toMatch(/\/rest\/|\/secure\/|\/media\//);
+    });
+
+    it("serves attachment content and thumbnails as bytes (binary endpoints refuse JSON-only Accept)", async () => {
+      for (const variant of ["content", "thumbnail"] as const) {
+        const image = await rpc<{
+          error: { message: string } | null;
+          fileName: string;
+          mimeType: string;
+          size: number;
+          dataBase64: string;
+        }>(h, {
+          type: "jira.issue.attachments.download.request",
+          connectionId,
+          attachmentId: RICH_COMMENT.image.id,
+          variant,
+        });
+        expect(image.error).toBeNull();
+        expect(image).toMatchObject({
+          fileName: RICH_COMMENT.image.filename,
+          mimeType: "image/png",
+        });
+        const bytes = Buffer.from(image.dataBase64, "base64");
+        expect(bytes.subarray(1, 4).toString()).toBe("PNG");
+        expect(bytes.readUInt32BE(16)).toBe(RICH_COMMENT.image.width);
+      }
+      const text = await rpc<{ error: unknown; mimeType: string; dataBase64: string }>(h, {
+        type: "jira.issue.attachments.download.request",
+        connectionId,
+        attachmentId: RICH_COMMENT.file.id,
+        variant: "content",
+      });
+      expect(text.error).toBeNull();
+      expect(text.mimeType).toBe("text/plain");
+      expect(Buffer.from(text.dataBase64, "base64").toString()).toContain("Release notes");
+      const attachmentGets = h.fake.requests.filter((r) =>
+        /attachment\/(content|thumbnail)|\/secure\//.test(r.path),
+      );
+      expect(attachmentGets.length).toBeGreaterThan(0);
+    });
+  },
+);

@@ -14,6 +14,7 @@ import { IssueAttachments } from "./attachments";
 import { IssueDescription } from "./description";
 import { IssueFieldsPanel } from "./fields-panel";
 import { IssueHeader } from "./header";
+import { JiraRichTextProvider } from "./jira-markdown";
 import { IssueRelations } from "./relations";
 
 // Issue detail (spec 29.3): header, summary, description, subtasks, links, web links,
@@ -101,30 +102,36 @@ export function IssueView(props: IssueViewProps) {
   );
 
   return (
-    <View style={styles.root} onLayout={onLayout} testID="jira-issue-view">
-      <ScrollView style={jiraStyles.scroll} contentContainerStyle={styles.content}>
-        <IssueHeader
-          serverId={serverId}
-          connectionId={connectionId}
-          issue={detail}
-          isCompact={props.isCompact}
-          onClose={props.onClose}
-          onOpenIssue={props.onOpenIssue}
-          onAskAi={props.onAskAi}
-          onWorkOn={props.onWorkOn}
-        />
-        {wide ? (
-          <View style={styles.columns}>
-            {main}
-            <View style={styles.sideColumn}>
-              <IssueFieldsPanel serverId={serverId} connectionId={connectionId} issue={detail} />
+    <JiraRichTextProvider
+      serverId={serverId}
+      connectionId={connectionId}
+      attachments={detail.attachments}
+    >
+      <View style={styles.root} onLayout={onLayout} testID="jira-issue-view">
+        <ScrollView style={jiraStyles.scroll} contentContainerStyle={styles.content}>
+          <IssueHeader
+            serverId={serverId}
+            connectionId={connectionId}
+            issue={detail}
+            isCompact={props.isCompact}
+            onClose={props.onClose}
+            onOpenIssue={props.onOpenIssue}
+            onAskAi={props.onAskAi}
+            onWorkOn={props.onWorkOn}
+          />
+          {wide ? (
+            <View style={styles.columns}>
+              {main}
+              <View style={styles.sideColumn}>
+                <IssueFieldsPanel serverId={serverId} connectionId={connectionId} issue={detail} />
+              </View>
             </View>
-          </View>
-        ) : (
-          main
-        )}
-      </ScrollView>
-    </View>
+          ) : (
+            main
+          )}
+        </ScrollView>
+      </View>
+    </JiraRichTextProvider>
   );
 }
 

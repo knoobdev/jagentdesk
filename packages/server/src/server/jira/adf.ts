@@ -1,12 +1,16 @@
 import type { JiraRichText } from "@jagentdesk/protocol/jira/rpc-schemas";
 import {
+  attachmentMarkdown,
   escapeLineStart,
   escapeMarkdownText,
+  linkDestination,
   MENTION_SCHEME,
   parseMarkdown,
+  urlLink,
   type BlockNode,
   type InlineMark,
   type InlineNode,
+  type RichTextAttachment,
 } from "./markdown-tokens.js";
 
 // Atlassian Document Format (Jira Cloud v3) ↔ Markdown. Node names follow
@@ -30,6 +34,8 @@ export interface AdfDoc {
 
 class AdfReader {
   readonly unsupported = new Set<string>();
+
+  constructor(private readonly attachments: readonly RichTextAttachment[]) {}
 
   blocks(nodes: AdfNode[] | undefined, indent = ""): string {
     return (nodes ?? [])
@@ -83,7 +89,14 @@ class AdfReader {
       case "mediaSingle":
       case "mediaGroup":
         this.unsupported.add("media");
-        return (node.content ?? []).map((child) => indent + this.mediaLabel(child)).join("\n");
+        return (node.content ?? [])
+          .map((child) => {
+            if (child.type !== "caption") return indent + this.mediaLabel(child);
+            const caption = this.inline(child.content);
+            return caption ? `${indent}*${caption}*` : "";
+          })
+          .filter((line) => line.length > 0)
+          .join("\n\n");
       case "media":
         this.unsupported.add("media");
         return indent + this.mediaLabel(node);
@@ -110,7 +123,7 @@ class AdfReader {
       case "blockCard":
       case "embedCard":
         this.unsupported.add("card");
-        return `${indent}<${String(node.attrs?.url ?? "")}>`;
+        return indent + cardLink(node);
       default:
         this.unsupported.add(node.type);
         return node.content ? this.blocks(node.content, indent) : "";
@@ -163,9 +176,17 @@ class AdfReader {
     return lines.map((line) => indent + line).join("\n");
   }
 
+  // Media nodes point at the issue's attachments by file name (`alt`); external media by URL.
   private mediaLabel(node: AdfNode): string {
-    const name = node.attrs?.alt ?? node.attrs?.id ?? "file";
-    return `[attachment: ${String(name)}]`;
+    const url = typeof node.attrs?.url === "string" ? node.attrs.url : "";
+    const alt = typeof node.attrs?.alt === "string" ? node.attrs.alt : "";
+    if (node.attrs?.type === "external" && /^https?:\/\//i.test(url)) {
+      return `![${escapeMarkdownText(alt)}](${linkDestination(url)})`;
+    }
+    const mapped = alt ? attachmentMarkdown(alt, this.attachments) : null;
+    if (mapped) return mapped;
+    const name = alt || String(node.attrs?.id ?? "file");
+    return `[attachment: ${escapeMarkdownText(name)}]`;
   }
 
   // oxlint-disable-next-line complexity
@@ -200,7 +221,7 @@ class AdfReader {
           break;
         case "inlineCard":
           this.unsupported.add("card");
-          out += `<${String(node.attrs?.url ?? "")}>`;
+          out += cardLink(node);
           break;
         case "mediaInline":
           this.unsupported.add("media");
@@ -243,6 +264,15 @@ class AdfReader {
   }
 }
 
+// Smart links (inline/block/embed cards): the URL as a link. A card may carry resolved `data`
+// (JSON-LD) instead of a URL.
+function cardLink(node: AdfNode): string {
+  const data = node.attrs?.data as { url?: unknown } | undefined;
+  const raw = node.attrs?.url ?? data?.url;
+  const url = typeof raw === "string" ? raw.trim() : "";
+  return url ? urlLink(url) : "";
+}
+
 function codeSpan(text: string): string {
   const fence = text.includes("`") ? "``" : "`";
   return `${fence}${text}${fence}`;
@@ -259,8 +289,14 @@ function isAdfDoc(value: unknown): value is AdfDoc {
   return typeof value === "object" && value !== null && (value as AdfNode).type === "doc";
 }
 
-/** ADF (or a plain string, which some v3 fields still return) → Markdown for the wire. */
-export function adfToRichText(value: unknown): JiraRichText {
+/**
+ * ADF (or a plain string, which some v3 fields still return) → Markdown for the wire. Media
+ * nodes become `jira-attachment:` references to `attachments` (the issue's attachment list).
+ */
+export function adfToRichText(
+  value: unknown,
+  attachments: readonly RichTextAttachment[] = [],
+): JiraRichText {
   if (value === null || value === undefined) {
     return { markdown: "", editable: true, unsupported: [] };
   }
@@ -270,7 +306,7 @@ export function adfToRichText(value: unknown): JiraRichText {
   if (!isAdfDoc(value)) {
     return { markdown: "", editable: false, unsupported: ["unknown format"] };
   }
-  const reader = new AdfReader();
+  const reader = new AdfReader(attachments);
   const markdown = reader.blocks(value.content);
   const unsupported = [...reader.unsupported].sort();
   return { markdown, editable: unsupported.length === 0, unsupported };

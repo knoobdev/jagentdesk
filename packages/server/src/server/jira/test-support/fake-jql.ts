@@ -291,6 +291,14 @@ class Parser {
   }
 
   private parseTime(text: string): number {
+    // Relative dates: "-14d", "-2w", "-4h", "-30m".
+    const relative = /^-(\d+)([mhdw])$/.exec(text.trim());
+    if (relative) {
+      const unit = { m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000 }[
+        relative[2] as "m" | "h" | "d" | "w"
+      ];
+      return Date.now() - Number(relative[1]) * unit;
+    }
     const match = /^(\d{4})[/-](\d{2})[/-](\d{2})(?: (\d{2}):(\d{2}))?$/.exec(text);
     if (!match) throw new JqlError(`Date value '${text}' for field 'updated' is invalid.`);
     const [, y, mo, d, h = "00", mi = "00"] = match;
