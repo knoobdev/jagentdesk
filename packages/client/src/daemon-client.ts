@@ -105,6 +105,13 @@ import type {
   ProxyTransactionPushPayload,
 } from "@jagentdesk/protocol/proxy/rpc-schemas";
 import type { AgentAttentionNotificationPayload } from "@jagentdesk/protocol/agent-attention-notification";
+import type {
+  JiraPush,
+  JiraRequestParams,
+  JiraRequestType,
+  JiraResponseFor,
+  JiraResponseTypeFor,
+} from "@jagentdesk/protocol/jira/rpc-schemas";
 import {
   AgentCreateFailedStatusPayloadSchema,
   AgentCreatedStatusPayloadSchema,
@@ -8249,6 +8256,36 @@ export class DaemonClient {
    */
   sendSshModuleMessage(message: { type: `ssh.${string}` } & Record<string, unknown>): void {
     this.sendSessionMessage(SessionInboundMessageSchema.parse(message));
+  }
+
+  // ── Jira (spec 29) ──
+  // One typed entry point for the jira.* RPCs: `jiraRequest("jira.issue.get.request", {...})`
+  // resolves with the response payload; a Jira-side failure is `payload.error` ({ code, message,
+  // fieldErrors? }), not a throw. Timeouts and disconnects throw like every other RPC.
+
+  async jiraRequest<T extends JiraRequestType>(
+    type: T,
+    params: JiraRequestParams<T>,
+    options: { timeoutMs?: number } = {},
+  ): Promise<JiraResponseFor<T>["payload"]> {
+    const responseType = type.replace(/\.request$/, ".response") as JiraResponseTypeFor<T>;
+    return this.sendCorrelatedSessionRequest<JiraResponseTypeFor<T>, JiraResponseFor<T>["payload"]>(
+      {
+        message: { type, ...params },
+        responseType,
+        timeout: options.timeoutMs,
+      },
+    );
+  }
+
+  /** jira.board.changed / jira.issue.changed / jira.oauth.delegation / jira.oauth.progress. */
+  onJiraPush<T extends JiraPush["type"]>(
+    type: T,
+    handler: (message: Extract<JiraPush, { type: T }>) => void,
+  ): () => void {
+    return this.subscribeRawMessages((message) => {
+      if (message.type === type) handler(message as Extract<JiraPush, { type: T }>);
+    });
   }
 
   /** Raw pushes for SSH modules (`ssh.transfer.progress`, `ssh.forward.state`, …). */

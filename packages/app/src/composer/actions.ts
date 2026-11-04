@@ -356,6 +356,10 @@ export function openComposerAttachment(input: OpenComposerAttachmentInput): void
     input.openWorkspaceAttachment({ attachment: input.attachment });
     return;
   }
+  if (input.attachment.kind === "jira_issue") {
+    input.openExternalUrl(input.attachment.attachment.url);
+    return;
+  }
   input.openExternalUrl(input.attachment.item.url);
 }
 

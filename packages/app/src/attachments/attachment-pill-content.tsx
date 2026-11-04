@@ -78,6 +78,12 @@ export function getAgentAttachmentPillContent(
         title: attachment.title,
         subtitle: `PR #${attachment.number}`,
       };
+    case "jira_issue":
+      return {
+        icon: attachmentGithubIssueIcon,
+        title: attachment.summary,
+        subtitle: `Jira ${attachment.key}`,
+      };
     case "forge_issue":
     case "github_issue":
       return {

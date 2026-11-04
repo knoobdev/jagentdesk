@@ -26,6 +26,7 @@ import type { ArgoCdService } from "./argocd/service.js";
 import type { DatabaseRegistry } from "./database/database-registry.js";
 import { SshService } from "./ssh/ssh-service.js";
 import type { SideloadService } from "./sideload/sideload-service.js";
+import type { JiraService } from "./jira/service.js";
 import type { ScheduleService } from "./schedule/service.js";
 import type { AutorunService } from "./autorun/service.js";
 import type { SpecModeService } from "./spec-mode/service.js";
@@ -659,6 +660,8 @@ export class VoiceAssistantWebSocketServer {
   private specModeService: SpecModeService | null = null;
   // Agent activity graph (spec 31, ADR-0031): one daemon-wide service shared by every session.
   private readonly activityGraphService: ActivityGraphService;
+  // Jira (spec 29), injected post-construction like the Agent Forum.
+  private jiraService: JiraService | null = null;
   private agentForumBootstrap:
     | ((input: { topicId: string; prompt: string; originAgentId?: string }) => void | Promise<void>)
     | null = null;
@@ -1888,6 +1891,10 @@ export class VoiceAssistantWebSocketServer {
     return updated;
   }
 
+  public setJiraService(service: JiraService | null): void {
+    this.jiraService = service;
+  }
+
   // Inject the Agent Forum service + its orchestration-bootstrap hook after construction (Team mode).
   public setAgentForum(
     service: AgentForumService | null,
@@ -1961,6 +1968,7 @@ export class VoiceAssistantWebSocketServer {
       sshService: this.sshService,
       argocdService: this.argocdService,
       sideloadService: this.sideloadService,
+      jiraService: this.jiraService,
       scheduleService: this.scheduleService,
       autorunService: this.autorunService,
       specModeService: this.specModeService,
@@ -2434,6 +2442,8 @@ export class VoiceAssistantWebSocketServer {
         activityGraph: true,
         // Argo CD (spec 30 / ADR-0034): advertised only when the daemon runs the service.
         ...(this.argocdService ? { argocd: true } : {}),
+        // Jira (spec 29 / ADR-0034): capability `jira`, advertised when the service is wired.
+        ...(this.jiraService ? { jira: true } : {}),
         // Advertise the plugin management surface only when a PluginService is
         // wired; without it the plugin.* RPCs return empty/disabled results.
         ...(this.pluginRuntime

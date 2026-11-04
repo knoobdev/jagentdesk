@@ -121,6 +121,7 @@ import { resolveComposerAttachmentSubmitFormat } from "@/composer/attachments/su
 import { composerWorkspaceAttachment } from "@/composer/attachments/workspace";
 import { usePluginAttachmentPicker } from "@/plugins/attachments/picker";
 import { PluginResourceAttachmentPill } from "@/plugins/attachments/pill";
+import { JiraIssuePill, JiraIssueSuggestion } from "@/jira/composer/jira-issue-attachment";
 import { useWorkspaceAttachmentsForScopes } from "@/attachments/workspace-attachments-store";
 import { droppedItemsToSelectedFiles } from "@/composer/attachments/drop";
 import { getFileTypeLabel } from "@/attachments/file-types";
@@ -471,6 +472,18 @@ function renderComposerAttachmentPill(args: RenderComposerAttachmentPillArgs): R
       onOpen,
       onRemove,
     });
+  }
+  if (attachment.kind === "jira_issue") {
+    return (
+      <JiraIssuePill
+        key={`jira:${attachment.attachment.connectionId}/${attachment.attachment.key}`}
+        attachment={attachment}
+        index={index}
+        disabled={disabled}
+        onOpen={onOpen}
+        onRemove={onRemove}
+      />
+    );
   }
   if (attachment.kind === "plugin_resource") {
     return (
@@ -2140,6 +2153,13 @@ export function Composer({
     [isComposerLocked],
   );
 
+  const handleAttachJiraIssue = useCallback(
+    (attachment: Extract<UserComposerAttachment, { kind: "jira_issue" }>["attachment"]) => {
+      setSelectedAttachments((previous) => [...previous, { kind: "jira_issue", attachment }]);
+    },
+    [setSelectedAttachments],
+  );
+
   const attachmentTray = useMemo(
     () =>
       renderAttachmentTray({
@@ -2166,6 +2186,21 @@ export function Composer({
       pendingFiles,
       t,
     ],
+  );
+
+  const attachmentSlot = useMemo(
+    () => (
+      <>
+        <JiraIssueSuggestion
+          serverId={serverId}
+          text={value}
+          attachments={selectedAttachments}
+          onAttach={handleAttachJiraIssue}
+        />
+        {attachmentTray}
+      </>
+    ),
+    [attachmentTray, handleAttachJiraIssue, selectedAttachments, serverId, value],
   );
 
   const queueList = useMemo(
@@ -2273,7 +2308,7 @@ export function Composer({
                 onFocusChange={handleFocusChange}
                 onHeightChange={onComposerHeightChange}
                 inputWrapperStyle={inputWrapperStyle}
-                attachmentSlot={attachmentTray}
+                attachmentSlot={attachmentSlot}
               />
               <Combobox
                 options={githubSearchOptions}

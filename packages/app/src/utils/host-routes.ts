@@ -474,6 +474,17 @@ export function buildForgeRoute(serverId: string) {
   return `/h/${encodeSegment(normalized)}/forge` as const;
 }
 
+/** Jira surface (spec 29); `params` deep-link to a board, backlog or issue. */
+export function buildJiraRoute(serverId: string, params?: Record<string, string>) {
+  const normalized = trimNonEmpty(serverId);
+  if (!normalized) {
+    return "/" as const;
+  }
+  const route = `/h/${encodeSegment(normalized)}/jira` as const;
+  const query = new URLSearchParams(params ?? {}).toString();
+  return query ? (`${route}?${query}` as const) : route;
+}
+
 export function buildMarketplaceRoute(serverId: string) {
   const normalized = trimNonEmpty(serverId);
   if (!normalized) {

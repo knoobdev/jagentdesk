@@ -9,6 +9,7 @@ import {
   GitPullRequest,
   History,
   Home,
+  KanbanSquare,
   Radar,
   Server,
   Share2,
@@ -49,6 +50,7 @@ import {
   buildDockerRoute,
   buildForgeRoute,
   buildInsightsRoute,
+  buildJiraRoute,
   buildMarketplaceRoute,
   buildNewWorkspaceRoute,
   buildOpenProjectRoute,
@@ -76,6 +78,8 @@ export interface AppNavTargets {
   /** Spec 30.3: the daemon ships Argo CD; null hides the entry. */
   argoCdRoute: Href | null;
   supportsForgeHub: boolean;
+  /** Spec 29: Jira surface, when the daemon advertises `jira`. */
+  jiraRoute: Href | null;
   /** Spec 25: daemon build ships the SSH servers surface (S1+). */
   supportsSshServers: boolean;
 }
@@ -89,6 +93,9 @@ export function useAppNavTargets(): AppNavTargets {
   // only advertise the entry when the first/active daemon reports forgeHub.
   const supportsForgeHub = useSessionStore(
     (state) => state.sessions[firstServerId]?.serverInfo?.features?.forgeHub === true,
+  );
+  const supportsJira = useSessionStore(
+    (state) => state.sessions[firstServerId]?.serverInfo?.features?.jira === true,
   );
   const supportsSshServers = useSessionStore(
     (state) => state.sessions[firstServerId]?.serverInfo?.features?.sshServers === true,
@@ -137,8 +144,10 @@ export function useAppNavTargets(): AppNavTargets {
       argoCdRoute: supportsArgoCd ? perHost(buildArgoCdRoute) : null,
       supportsForgeHub,
       supportsSshServers,
+      jiraRoute: supportsJira ? perHost(buildJiraRoute) : null,
     };
   }, [
+    supportsJira,
     deviceServerId,
     firstServerId,
     lastCluster,
@@ -262,6 +271,7 @@ export function useAppNavItems(): AppNavItem[] {
         pathname,
         "/insights",
       ),
+      navItem("jira", KanbanSquare, "Jira", "Jira", targets.jiraRoute, pathname, "/jira"),
       targets.supportsForgeHub
         ? navItem("forge", GitPullRequest, "Forge", "Forge", targets.forgeRoute, pathname, "/forge")
         : null,

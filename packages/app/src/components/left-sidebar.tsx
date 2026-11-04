@@ -92,14 +92,11 @@ import { SidebarAgentListSkeleton } from "./sidebar-agent-list-skeleton";
 import { SidebarCalloutSlot } from "./sidebar-callout-slot";
 import { SidebarWorkspaceList } from "./sidebar-workspace-list";
 import { SidebarServersNav } from "@/ssh/ui/sidebar-servers-nav";
+import { JiraSidebarEntry } from "@/jira/sidebar-entry";
+import { SidebarJiraNav } from "@/jira/sidebar-jira-nav";
 import { SidebarClusterNav } from "./sidebar-cluster-nav";
 import { SidebarDatabaseNav } from "./sidebar-database-nav";
 import { SidebarArgoCdNav } from "@/argocd/sidebar-argocd-nav";
-
-function parseServersRouteServerId(pathname: string): string | null {
-  const match = pathname.match(/\/h\/([^/]+)\/servers/);
-  return match ? decodeURIComponent(match[1]) : null;
-}
 
 /** `/h/<serverId>/argocd[/<instanceId>[/app]]` → the host and the open instance. */
 function parseArgoCdRoute(
@@ -109,6 +106,20 @@ function parseArgoCdRoute(
   if (!match) return null;
   const instanceId = match[2] ? decodeURIComponent(match[2]) : null;
   return { serverId: decodeURIComponent(match[1]), instanceId };
+}
+
+/** Sections whose route owns the desktop left column instead of the workspace list. */
+type SectionRoute =
+  | { section: "servers" | "jira"; serverId: string }
+  | { section: "argocd"; serverId: string; instanceId: string | null };
+
+function resolveSectionRoute(pathname: string): SectionRoute | null {
+  const argoCd = parseArgoCdRoute(pathname);
+  if (argoCd) return { section: "argocd", ...argoCd };
+  const match = pathname.match(/\/h\/([^/]+)\/(servers|jira)(?:$|[/?])/);
+  const section = match?.[2];
+  if (!match?.[1] || (section !== "servers" && section !== "jira")) return null;
+  return { section, serverId: decodeURIComponent(match[1]) };
 }
 
 /**
@@ -121,14 +132,16 @@ function resolveSidebarNavBody(
   clusterRoute: { serverId: string; clusterId: string } | null,
   databaseRoute: { serverId: string; databaseId: string } | null,
   fallback: ReactNode,
-  serversRouteServerId: string | null = null,
-  argoCdRoute: { serverId: string; instanceId: string | null } | null = null,
+  sectionRoute: SectionRoute | null = null,
 ): ReactNode {
-  // Spec 25.13.1: the Servers section owns the left column (server tree, open sessions).
-  if (serversRouteServerId) return <SidebarServersNav serverId={serversRouteServerId} />;
-  // Spec 30.3: so does Argo CD (instances, the open instance's applications).
-  if (argoCdRoute) {
-    return <SidebarArgoCdNav serverId={argoCdRoute.serverId} instanceId={argoCdRoute.instanceId} />;
+  // A section that owns the left column (spec 25.13.1 Servers, 29.3 Jira, 30.3 Argo CD).
+  if (sectionRoute?.section === "servers")
+    return <SidebarServersNav serverId={sectionRoute.serverId} />;
+  if (sectionRoute?.section === "jira") return <SidebarJiraNav serverId={sectionRoute.serverId} />;
+  if (sectionRoute?.section === "argocd") {
+    return (
+      <SidebarArgoCdNav serverId={sectionRoute.serverId} instanceId={sectionRoute.instanceId} />
+    );
   }
   if (clusterRoute) {
     return (
@@ -1108,6 +1121,7 @@ function MobileSidebar({
                 variant="compact"
               />
             ) : null}
+            <JiraSidebarEntry closesDrawer />
             <SidebarHeaderRow
               icon={Sparkles}
               label={labels.skills}
@@ -1283,10 +1297,7 @@ function DesktopSidebar({
         databaseId: decodeURIComponent(databaseRouteMatch[2]),
       }
     : null;
-  const serversRouteServerId = parseServersRouteServerId(pathname);
-  const argoCdRoute = parseArgoCdRoute(pathname);
-  // Servers and Argo CD own the whole column: no workspace header or list.
-  const ownsColumn = serversRouteServerId !== null || argoCdRoute !== null;
+  const sectionRoute = resolveSectionRoute(pathname);
   const sidebarWidth = usePanelStore((state) => state.sidebarWidth);
   const setSidebarWidth = usePanelStore((state) => state.setSidebarWidth);
   const { width: viewportWidth } = useWindowDimensions();
@@ -1379,8 +1390,8 @@ function DesktopSidebar({
           ) : (
             <TitlebarDragRegion />
           )}
-          {isClickUp && !ownsColumn ? <ClickUpSidebarHeader /> : null}
-          {clusterRoute || databaseRoute || ownsColumn || isClickUp ? null : (
+          {isClickUp && !sectionRoute ? <ClickUpSidebarHeader /> : null}
+          {clusterRoute || databaseRoute || sectionRoute || isClickUp ? null : (
             <View style={sidebarHeaderGroupStyle}>
               <SidebarNewWorkspaceHeaderRow
                 label={labels.newWorkspace}
@@ -1456,6 +1467,7 @@ function DesktopSidebar({
                   variant="compact"
                 />
               ) : null}
+              <JiraSidebarEntry closesDrawer={false} />
               <SidebarHeaderRow
                 icon={Sparkles}
                 label={labels.skills}
@@ -1521,13 +1533,7 @@ function DesktopSidebar({
           )}
         </View>
 
-        {resolveSidebarNavBody(
-          clusterRoute,
-          databaseRoute,
-          workspaceListElement,
-          serversRouteServerId,
-          argoCdRoute,
-        )}
+        {resolveSidebarNavBody(clusterRoute, databaseRoute, workspaceListElement, sectionRoute)}
 
         <SidebarCalloutSlot />
 
