@@ -466,6 +466,7 @@ import {
   buildProviderRegistry,
   createAllClients,
 } from "./provider-registry.js";
+import { DEV_AGENT_PROVIDER_DEFINITIONS } from "@jagentdesk/protocol/provider-manifest";
 import { FakeOmp } from "./providers/omp/test-utils/fake-omp.js";
 
 const logger = createTestLogger();
@@ -491,6 +492,23 @@ test("includes mock provider only for development builds", () => {
     label: "Mock Load Test",
     defaultModeId: "load-test",
   });
+});
+
+test("a production registry can never create a dev-only provider", () => {
+  for (const options of [undefined, { isDev: false }]) {
+    const registry = buildProviderRegistry(logger, options);
+    for (const definition of DEV_AGENT_PROVIDER_DEFINITIONS) {
+      expect(registry[definition.id]).toBeUndefined();
+    }
+    expect(Object.keys(registry).sort()).toEqual(
+      AGENT_PROVIDER_DEFINITIONS.map((definition) => definition.id).sort(),
+    );
+  }
+  // The dev list is not empty, so the assertions above check something.
+  expect(DEV_AGENT_PROVIDER_DEFINITIONS.map((definition) => definition.id)).toEqual([
+    "mock",
+    "mock-slow",
+  ]);
 });
 
 test("built-in override applies command", () => {

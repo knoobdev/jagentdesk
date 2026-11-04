@@ -14,7 +14,9 @@ describe("server config", () => {
   });
 
   test("records when the daemon is managed by JAgentDesk Desktop", async () => {
-    const jagentdeskHome = await mkdtemp(path.join(os.tmpdir(), "jagentdesk-config-desktop-managed-"));
+    const jagentdeskHome = await mkdtemp(
+      path.join(os.tmpdir(), "jagentdesk-config-desktop-managed-"),
+    );
     roots.push(jagentdeskHome);
 
     const desktopConfig = loadConfig(jagentdeskHome, {
@@ -24,6 +26,21 @@ describe("server config", () => {
 
     expect(desktopConfig.desktopManaged).toBe(true);
     expect(standaloneConfig.desktopManaged).toBe(false);
+  });
+
+  // Dev-only providers (mock, mock-slow) are listed only when isDev is true; production daemons,
+  // including the packaged desktop (JAGENTDESK_NODE_ENV=production), must never enable them.
+  test("enables development-only providers for JAGENTDESK_NODE_ENV=development only", async () => {
+    const jagentdeskHome = await mkdtemp(path.join(os.tmpdir(), "jagentdesk-config-dev-gate-"));
+    roots.push(jagentdeskHome);
+    const isDev = (env: NodeJS.ProcessEnv) => loadConfig(jagentdeskHome, { env }).isDev;
+
+    expect(isDev({})).toBe(false);
+    expect(isDev({ JAGENTDESK_NODE_ENV: "production" })).toBe(false);
+    expect(isDev({ JAGENTDESK_NODE_ENV: "test" })).toBe(false);
+    expect(isDev({ NODE_ENV: "development" })).toBe(false);
+    expect(isDev({ JAGENTDESK_NODE_ENV: "production", NODE_ENV: "development" })).toBe(false);
+    expect(isDev({ JAGENTDESK_NODE_ENV: "development" })).toBe(true);
   });
 
   test("resolves bundled web UI path from source-tree modules", () => {
