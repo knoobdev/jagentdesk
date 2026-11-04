@@ -81,6 +81,10 @@ function statusCss(palette: ActivityGraphPalette): string {
     `[data-node-id][data-jad-status="pending"]>rect:not(.c-mask){stroke:${palette.foregroundMuted} !important;stroke-dasharray:5 4 !important;fill:var(--mask) !important;stroke-width:1.25px !important}`,
     `[data-node-id][data-jad-status="pending"] text{opacity:0.82}`,
     `[data-node-id][data-jad-status="pending"] text[data-detail="fine"]{fill:${palette.foregroundMuted} !important}`,
+    // Soft edge fades only on the sides with more graph to pan to.
+    'html[data-jad-more-left="true"] .diagram-container{-webkit-mask-image:linear-gradient(to right,transparent 0,#000 40px,#000 100%);mask-image:linear-gradient(to right,transparent 0,#000 40px,#000 100%)}',
+    'html[data-jad-more-right="true"] .diagram-container{-webkit-mask-image:linear-gradient(to left,transparent 0,#000 40px,#000 100%);mask-image:linear-gradient(to left,transparent 0,#000 40px,#000 100%)}',
+    'html[data-jad-more-left="true"][data-jad-more-right="true"] .diagram-container{-webkit-mask-image:linear-gradient(to right,transparent 0,#000 40px,#000 calc(100% - 40px),transparent 100%);mask-image:linear-gradient(to right,transparent 0,#000 40px,#000 calc(100% - 40px),transparent 100%)}',
     "@keyframes jad-running-pulse{0%,100%{stroke-opacity:1;stroke-width:1.75px}50%{stroke-opacity:.35;stroke-width:3px}}",
     '[data-node-id][data-jad-status="running"]>rect:not(.c-mask){animation:jad-running-pulse 1.6s ease-in-out infinite !important}',
     '@media (prefers-reduced-motion: reduce){[data-node-id][data-jad-status="running"]>rect:not(.c-mask){animation:none !important}}',
@@ -111,7 +115,7 @@ if(!container||!svg)return;
 var vb=svg.viewBox&&svg.viewBox.baseVal;
 var vbW=vb&&vb.width?vb.width:svg.getBoundingClientRect().width||1;
 var vbH=vb&&vb.height?vb.height:svg.getBoundingClientRect().height||1;
-var MIN=0.1,MAX=2.5,PAD=24;
+var MIN=0.1,MAX=2.5,MAX_READABLE=1.6,PAD=20;
 var scale=1;
 function nodeEl(id){return svg.querySelector('[data-node-id="'+String(id).replace(/["\\\\]/g,"")+'"]');}
 function applyStatuses(list){
@@ -149,7 +153,12 @@ var r=el.getBoundingClientRect(),c=container.getBoundingClientRect();
 if(!r.width&&!r.height)return false;
 container.scrollLeft+=r.left+r.width/2-(c.left+c.width/2);
 container.scrollTop+=r.top+r.height/2-(c.top+c.height/2);return true;}
-function fit(){size(fitScale());container.scrollLeft=0;container.scrollTop=0;}
+function fit(){size(fitScale());container.scrollLeft=0;container.scrollTop=0;edges();}
+function edges(){
+var root=document.documentElement,max=container.scrollWidth-container.clientWidth;
+root.setAttribute("data-jad-more-left",container.scrollLeft>2?"true":"false");
+root.setAttribute("data-jad-more-right",container.scrollLeft<max-2?"true":"false");}
+container.addEventListener("scroll",edges,{passive:true});
 function view(action,nodeId){
 if(action==="fit")fit();
 else if(action==="zoom-in")zoomAt(Math.round((scale+0.25)*4)/4);
@@ -201,12 +210,28 @@ var data=event.data;if(!data||typeof data!=="object")return;
 if(data.type===STATUS&&Array.isArray(data.nodes))applyStatuses(data.nodes);
 else if(data.type===VIEW&&typeof data.action==="string")view(data.action,typeof data.nodeId==="string"?data.nodeId:null);});
 applyStatuses(initial.statuses);
+// Smallest scale at which every node label renders at >= 12 px and every sublabel at >= 11 px
+// (archify draws lifecycle labels at 12 px / sublabels at 9 px, tree labels at 13 px / 11 px, and
+// shrinks long ones to fit their card).
+function minFont(selector,fallback){
+var list=svg.querySelectorAll(selector),min=Infinity;
+for(var i=0;i<list.length;i++){var v=parseFloat(list[i].getAttribute("font-size"));if(v>0&&v<min)min=v;}
+return min===Infinity?fallback:min;}
+function readableScale(){
+var label=minFont("[data-node-id] text[data-node-label]",12),sub=minFont('[data-node-id] text[data-detail="context"]',11);
+return Math.min(MAX_READABLE,Math.ceil(Math.max(1,12/label,11/sub)*100)/100);}
+function widthScale(){return Math.max(MIN,(container.clientWidth-PAD*2)/vbW);}
+// First render and every structural re-render: the whole graph across the panel width when it is
+// readable there; otherwise readable size with the focused (running) node centered, the start of
+// the turn one pan away.
 function start(){
-var f=fitScale();
-if(initial.fit||(typeof initial.scale!=="number"&&f>=0.75)){fit();setTimeout(percent,250);return;}
-size(typeof initial.scale==="number"&&initial.scale>0?initial.scale:0.8);
-if(!center(initial.focus)){container.scrollLeft=0;container.scrollTop=0;}
-setTimeout(percent,250);}
+if(initial.fit){fit();setTimeout(percent,250);return;}
+var readable=readableScale(),wide=widthScale();
+if(wide>=readable){
+size(Math.min(wide,MAX_READABLE));container.scrollLeft=0;
+if(!(svg.getBoundingClientRect().height>container.clientHeight&&center(initial.focus)))container.scrollTop=0;}
+else{size(readable);if(!center(initial.focus)){container.scrollLeft=0;container.scrollTop=0;}}
+edges();setTimeout(percent,250);}
 // After archify's own load-time camera work (it settles on the next frames).
 function boot(){requestAnimationFrame(function(){requestAnimationFrame(start);});}
 if(document.readyState==="complete")boot();else window.addEventListener("load",boot);

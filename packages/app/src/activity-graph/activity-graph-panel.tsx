@@ -248,7 +248,6 @@ function ActivityGraphPanelImpl({
   const frameRef = useRef<ActivityGraphFrameHandle | null>(null);
   const statusesRef = useRef(new Map<string, ActivityGraphNodeStatus>());
   const selectedRef = useRef<string | null>(null);
-  const fitRef = useRef(false);
 
   const onStatus = useCallback((nodes: ActivityGraphNodeStatusEntry[]) => {
     for (const entry of nodes) statusesRef.current.set(entry.id, entry.status);
@@ -275,7 +274,8 @@ function ActivityGraphPanelImpl({
       statuses: graph.nodes,
       focusNodeId: focusNode(graph, statusesRef.current, selectedRef.current),
       scale: null,
-      fit: fitRef.current,
+      // Spec 31.3 / review: every new render starts from the width-fit/readable camera.
+      fit: false,
     });
   }, [graph, colorScheme, palette]);
 
@@ -288,10 +288,7 @@ function ActivityGraphPanelImpl({
     },
     [graph, onSelectNode],
   );
-  const handleFit = useCallback(() => {
-    fitRef.current = true;
-    frameRef.current?.view("fit");
-  }, []);
+  const handleFit = useCallback(() => frameRef.current?.view("fit"), []);
   const handleView = useCallback(
     (next: ActivityGraphView) => {
       selectedRef.current = null;
