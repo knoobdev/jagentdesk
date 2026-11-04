@@ -1,17 +1,18 @@
-import type {
-  JiraBacklogSprintSchema,
-  JiraBoard,
-  JiraBoardConfiguration,
-  JiraBoardFilter,
-  JiraEpic,
-  JiraIssueCard,
-  JiraLane,
-  JiraProject,
-  JiraSprint,
-  JiraSprintDestination,
-  JiraSprintState,
-  JiraSwimlaneConfig,
-  JiraVersion,
+import {
+  JIRA_BOARD_MAX_ISSUES,
+  type JiraBacklogSprintSchema,
+  type JiraBoard,
+  type JiraBoardConfiguration,
+  type JiraBoardFilter,
+  type JiraEpic,
+  type JiraIssueCard,
+  type JiraLane,
+  type JiraProject,
+  type JiraSprint,
+  type JiraSprintDestination,
+  type JiraSprintState,
+  type JiraSwimlaneConfig,
+  type JiraVersion,
 } from "@jagentdesk/protocol/jira/rpc-schemas";
 import type { z } from "zod";
 import { andJql, applyBoardFilter, computeLanes, onBoard } from "./board-view.js";
@@ -25,12 +26,14 @@ import type { JiraSite } from "./site.js";
 
 const AGILE = "/rest/agile/1.0";
 const MAX_BATCH = 50;
+// Projects, boards, quick filters, sprints, epics and versions: far above real sites.
+const MAX_VALUES = 5000;
 
 async function pageValues(
   site: JiraSite,
   path: string,
   query: Json = {},
-  max = 500,
+  max = MAX_VALUES,
 ): Promise<Json[]> {
   const values: Json[] = [];
   for (let startAt = 0; values.length < max; ) {
@@ -201,12 +204,16 @@ export async function boardIssues(
       path: `${site.flavor.boardIssues}/board/${input.boardId}/sprint/${sprint.id}/issue`,
       jql: andJql(quick) ?? undefined,
       context,
+      limit: JIRA_BOARD_MAX_ISSUES,
     });
   } else {
     page = await site.issues({
       path: `${site.flavor.boardIssues}/board/${input.boardId}/issue`,
+      // Kanban sub-filter (e.g. "fixVersion in unreleasedVersions() OR fixVersion is EMPTY"):
+      // which issues the web board shows, Done columns included.
       jql: andJql([setup.subQuery, ...quick]) ?? undefined,
       context,
+      limit: JIRA_BOARD_MAX_ISSUES,
     });
   }
   const backlogStatuses = new Set(setup.backlogStatusIds);
@@ -256,7 +263,8 @@ export interface Backlog {
   versions: JiraVersion[];
 }
 
-export async function backlog(site: JiraSite, boardId: number): Promise<Backlog> {
+/** `limit` caps each list: the backlog view passes JIRA_BOARD_MAX_ISSUES, agent tools the default. */
+export async function backlog(site: JiraSite, boardId: number, limit?: number): Promise<Backlog> {
   const setup = await boardSetup(site, boardId);
   const context = await site.cardContext(setup.configuration.estimation?.fieldId ?? null);
   const sprints = setup.configuration.sprintsEnabled ? await listSprints(site, boardId) : [];
@@ -267,6 +275,7 @@ export async function backlog(site: JiraSite, boardId: number): Promise<Backlog>
         await site.issues({
           path: `${site.flavor.boardIssues}/board/${boardId}/sprint/${sprint.id}/issue`,
           context,
+          limit,
         })
       ).issues,
     })),
@@ -274,6 +283,7 @@ export async function backlog(site: JiraSite, boardId: number): Promise<Backlog>
   const backlogIssues = await site.issues({
     path: `${site.flavor.boardIssues}/board/${boardId}/backlog`,
     context,
+    limit,
   });
   const epics = await optionalValues(site, `${AGILE}/board/${boardId}/epic`);
   const versions = await optionalValues(site, `${AGILE}/board/${boardId}/version`);
@@ -381,6 +391,7 @@ export async function completeSprint(
     path: `${site.flavor.boardIssues}/board/${input.boardId}/sprint/${input.sprintId}/issue`,
     jql: "statusCategory != Done",
     context,
+    limit: JIRA_BOARD_MAX_ISSUES,
   });
   const keys = open.issues.map((issue) => issue.key);
   if (keys.length > 0) {

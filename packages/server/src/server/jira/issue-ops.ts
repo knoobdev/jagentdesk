@@ -138,6 +138,7 @@ export async function getIssue(site: JiraSite, issueKey: string): Promise<JiraIs
   const watches = obj(fields.watches) ?? {};
   const timetracking = obj(fields.timetracking);
   const context = await site.cardContext(null);
+  const attachments = objs(fields.attachment).map((a) => mapAttachment(a, site.flavor));
   return {
     id: str(issue.id) ?? "",
     key: str(issue.key) ?? issueKey,
@@ -155,7 +156,7 @@ export async function getIssue(site: JiraSite, issueKey: string): Promise<JiraIs
     labels: arr(fields.labels).filter((label): label is string => typeof label === "string"),
     created_ms: jiraTime(fields.created) ?? 0,
     updated_ms: jiraTime(fields.updated) ?? 0,
-    description: site.flavor.readText(fields.description),
+    description: site.flavor.readText(fields.description, attachments),
     subtasks: objs(fields.subtasks).map((subtask) => mapCard(subtask, context)),
     links: objs(fields.issuelinks)
       .map(mapIssueLink)
@@ -165,7 +166,7 @@ export async function getIssue(site: JiraSite, issueKey: string): Promise<JiraIs
       title: str(obj(link.object)?.title) ?? str(obj(link.object)?.url) ?? "",
       url: str(obj(link.object)?.url) ?? "",
     })),
-    attachments: objs(fields.attachment).map((a) => mapAttachment(a, site.flavor)),
+    attachments,
     watching: bool(watches.isWatching),
     watchCount: num(watches.watchCount) ?? 0,
     timeTracking: timetracking
@@ -472,17 +473,30 @@ export async function changelog(
   return { entries, total: histories.length, startAt };
 }
 
+/** The issue's attachments, which comment media and `!file!` references resolve against. */
+async function issueAttachments(site: JiraSite, issueKey: string): Promise<JiraAttachment[]> {
+  const issue: Json = await site.get(site.api(`/issue/${encodeURIComponent(issueKey)}`), {
+    fields: "attachment",
+  });
+  return objs(obj(issue.fields)?.attachment).map((a) => mapAttachment(a, site.flavor));
+}
+
 export async function listComments(
   site: JiraSite,
   issueKey: string,
   startAt = 0,
 ): Promise<{ comments: JiraComment[]; total: number; startAt: number }> {
-  const page: Json = await site.get(site.api(`/issue/${encodeURIComponent(issueKey)}/comment`), {
-    startAt,
-    maxResults: 50,
-    orderBy: "-created",
-  });
-  const comments = objs(page.comments).map((c) => mapComment(c, site.flavor, site.myRef));
+  const [page, attachments] = await Promise.all([
+    site.get<Json>(site.api(`/issue/${encodeURIComponent(issueKey)}/comment`), {
+      startAt,
+      maxResults: 50,
+      orderBy: "-created",
+    }),
+    issueAttachments(site, issueKey),
+  ]);
+  const comments = objs(page.comments).map((c) =>
+    mapComment(c, site.flavor, site.myRef, attachments),
+  );
   return { comments, total: num(page.total) ?? comments.length, startAt };
 }
 
@@ -497,7 +511,7 @@ export async function addComment(
       body: site.flavor.writeText(markdown),
     },
   );
-  return mapComment(created, site.flavor, site.myRef);
+  return mapComment(created, site.flavor, site.myRef, await issueAttachments(site, issueKey));
 }
 
 export async function updateComment(
@@ -510,7 +524,7 @@ export async function updateComment(
     site.api(`/issue/${encodeURIComponent(issueKey)}/comment/${encodeURIComponent(commentId)}`),
     { body: site.flavor.writeText(markdown) },
   );
-  return mapComment(updated, site.flavor, site.myRef);
+  return mapComment(updated, site.flavor, site.myRef, await issueAttachments(site, issueKey));
 }
 
 export async function listWorklogs(

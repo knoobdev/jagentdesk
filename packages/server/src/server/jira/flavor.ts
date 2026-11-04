@@ -1,6 +1,7 @@
 import type { JiraDeployment, JiraRichText } from "@jagentdesk/protocol/jira/rpc-schemas";
 import { adfToRichText, markdownToAdf } from "./adf.js";
 import { str, type Json } from "./json.js";
+import type { RichTextAttachment } from "./markdown-tokens.js";
 import { markdownToWiki, wikiToRichText } from "./wiki.js";
 
 // The four places where Jira Cloud and Data Center differ for the same operation (reference §3):
@@ -17,7 +18,8 @@ export interface JiraFlavor {
   search: "/rest/api/3/search/jql" | "/rest/api/2/search";
   /** Data Center has no quick filter endpoint (DC-AGILE 9.12). */
   hasQuickFilters: boolean;
-  readText(value: unknown): JiraRichText;
+  /** Rich text → Markdown; `attachments` (the issue's) resolve media / `!file!` references. */
+  readText(value: unknown, attachments?: readonly RichTextAttachment[]): JiraRichText;
   writeText(markdown: string): unknown;
   userRef(user: Json): string | null;
   /** Body identifying a user: `{ accountId }` on Cloud, `{ name }` on DC. */

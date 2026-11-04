@@ -1,13 +1,13 @@
 import { useCallback, useState } from "react";
 import { Text, View } from "react-native";
 import type { JiraIssueDetail } from "@jagentdesk/protocol/jira/rpc-schemas";
-import { MarkdownRenderer } from "@/components/markdown/renderer";
 import { Button } from "@/components/ui/button";
 import { useJiraCall } from "../api";
 import { useJiraInvalidate } from "../queries";
 import { ErrorBanner, Input } from "../ui/primitives";
 import { jiraStyles } from "../ui/styles";
-import { handleMarkdownLink, openExternal, useAsyncAction } from "./shared";
+import { JiraMarkdown } from "./jira-markdown";
+import { openExternal, useAsyncAction } from "./shared";
 
 // Description (spec 29.3): written in Markdown, stored as ADF (Cloud) or wiki markup (DC) by the
 // daemon. Content Markdown cannot round-trip (panels, macros, complex tables, media) is shown
@@ -92,7 +92,7 @@ export function IssueDescription({
       ) : (
         <View>
           {description.markdown.trim() ? (
-            <MarkdownRenderer text={description.markdown} onLinkPress={handleMarkdownLink} />
+            <JiraMarkdown text={description.markdown} />
           ) : (
             <Text style={jiraStyles.textMuted}>No description.</Text>
           )}

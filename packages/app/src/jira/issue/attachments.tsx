@@ -75,7 +75,7 @@ type LoadState =
   | { kind: "failed"; message: string };
 
 /** Loads one attachment variant through the daemon. */
-function useAttachmentFile(
+export function useAttachmentFile(
   serverId: string,
   connectionId: string,
   attachmentId: string,
@@ -192,9 +192,22 @@ function AttachmentTile({
   );
 }
 
+/** Images larger than the download limit preview through Jira's thumbnail instead. */
+function previewVariant(attachment: JiraAttachment): "content" | "thumbnail" {
+  const tooLarge = attachment.size > JIRA_ATTACHMENT_MAX_BYTES;
+  return tooLarge && attachment.hasThumbnail && isImageAttachment(attachment)
+    ? "thumbnail"
+    : "content";
+}
+
+export function isImageAttachment(attachment: Pick<JiraAttachment, "mimeType">): boolean {
+  return attachment.mimeType.startsWith("image/");
+}
+
 function ViewerBody({ serverId, connectionId, attachment }: AttachmentProps) {
-  const state = useAttachmentFile(serverId, connectionId, attachment.id, "content");
-  const isImage = attachment.mimeType.startsWith("image/");
+  const variant = previewVariant(attachment);
+  const state = useAttachmentFile(serverId, connectionId, attachment.id, variant);
+  const isImage = isImageAttachment(attachment);
   const file = state.kind === "loaded" ? state.file : null;
   const download = useCallback(() => {
     if (file) downloadOnWeb(file);
@@ -204,12 +217,17 @@ function ViewerBody({ serverId, connectionId, attachment }: AttachmentProps) {
       {state.kind === "failed" ? <ErrorBanner message={state.message} /> : null}
       {state.kind === "loading" ? <Spinner /> : null}
       {file && isImage ? <DataImage uri={file.uri} full label={attachment.filename} /> : null}
+      {file && variant === "thumbnail" ? (
+        <Text style={jiraStyles.textSmall}>
+          {`Preview only: the file is ${formatBytes(attachment.size)}, above the 10 MB download limit.`}
+        </Text>
+      ) : null}
       {file && !isImage ? (
         <Text
           style={jiraStyles.textMuted}
         >{`${file.mimeType}, ${formatBytes(attachment.size)}`}</Text>
       ) : null}
-      {file && isWeb ? (
+      {file && isWeb && variant === "content" ? (
         <View style={jiraStyles.sheetFooter}>
           <Button size="sm" variant="outline" onPress={download} testID="jira-attachment-download">
             Download
@@ -220,7 +238,7 @@ function ViewerBody({ serverId, connectionId, attachment }: AttachmentProps) {
   );
 }
 
-function Viewer({
+export function AttachmentViewer({
   serverId,
   connectionId,
   attachment,
@@ -302,7 +320,7 @@ export function IssueAttachments({ serverId, connectionId, issue }: Props) {
           />
         ))}
       </View>
-      <Viewer
+      <AttachmentViewer
         serverId={serverId}
         connectionId={connectionId}
         attachment={open}

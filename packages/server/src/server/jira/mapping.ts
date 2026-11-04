@@ -220,12 +220,17 @@ export function mapIssueLink(value: Json): JiraIssueLink | null {
   };
 }
 
-export function mapComment(value: Json, flavor: JiraFlavor, myRef: string): JiraComment {
+export function mapComment(
+  value: Json,
+  flavor: JiraFlavor,
+  myRef: string,
+  attachments: readonly JiraAttachment[] = [],
+): JiraComment {
   const author = mapUser(value.author, flavor);
   return {
     id: str(value.id) ?? "",
     author,
-    body: flavor.readText(value.body),
+    body: flavor.readText(value.body, attachments),
     created_ms: jiraTime(value.created) ?? 0,
     updated_ms: jiraTime(value.updated) ?? 0,
     editable: author?.ref === myRef,

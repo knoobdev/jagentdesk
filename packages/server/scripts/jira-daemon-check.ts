@@ -12,7 +12,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocket } from "ws";
 import { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
-import { FakeJiraServer } from "../src/server/jira/test-support/fake-jira-server.js";
+import {
+  FakeJiraServer,
+  LARGE_BOARD,
+  RICH_COMMENT,
+} from "../src/server/jira/test-support/fake-jira-server.js";
 
 const args = process.argv.slice(2);
 const PORT = Number(args[args.indexOf("--port") + 1] || 47931);
@@ -26,6 +30,7 @@ interface Ctx {
   client: DaemonClient;
   cloud: FakeJiraServer;
   dc: FakeJiraServer;
+  big: FakeJiraServer;
   logChunks: string[];
 }
 
@@ -275,6 +280,75 @@ async function checkDataCenter({ client, dc }: Ctx): Promise<void> {
   );
 }
 
+// v0.9.49: a large Kanban board loads whole (no 500 cap), through its sub-filter.
+async function checkLargeBoard({ client, big }: Ctx): Promise<void> {
+  const added = await client.jiraRequest("jira.connections.add.request", {
+    deployment: "cloud",
+    siteUrl: big.baseUrl,
+    method: "api_token",
+    email: big.me.email,
+    token: big.apiToken,
+  });
+  const connectionId = added.connection?.id ?? "";
+  const startedAt = Date.now();
+  const board = await client.jiraRequest("jira.board.issues.request", {
+    connectionId,
+    boardId: LARGE_BOARD.id,
+  });
+  const ms = Date.now() - startedAt;
+  const pages = big.requestsSince(startedAt, `/board/${LARGE_BOARD.id}/issue`);
+  const subFiltered = pages.every((r) => (r.query.get("jql") ?? "").includes(LARGE_BOARD.subQuery));
+  const done = board.issues.filter((i) => i.status.id === "5").length;
+  record(
+    "large Kanban board: every issue, sub-filter applied, not truncated",
+    board.error === null &&
+      board.issues.length === LARGE_BOARD.visible &&
+      !board.truncated &&
+      subFiltered &&
+      done === LARGE_BOARD.columns["5"],
+    `issues=${board.issues.length} truncated=${board.truncated} done=${done} pages=${pages.length} subQuery on every page=${subFiltered} in ${ms} ms`,
+  );
+}
+
+// v0.9.49: smart links as Markdown links, media as jira-attachment references, bytes via daemon.
+async function checkRichText({ client }: Ctx, connectionId: string, label: string): Promise<void> {
+  const { comments } = await client.jiraRequest("jira.issue.comments.list.request", {
+    connectionId,
+    issueKey: "ABC-4",
+  });
+  const markdown = comments.find((c) => c.id === RICH_COMMENT.id)?.body.markdown ?? "";
+  const { smartLink, image, file } = RICH_COMMENT;
+  const linkOk = markdown.includes(`[${smartLink}](${smartLink})`) && !markdown.includes("<https");
+  const mediaOk =
+    markdown.includes(`![${image.filename}](jira-attachment:${image.id})`) &&
+    markdown.includes(`[${file.filename}](jira-attachment:${file.id})`);
+  const thumb = await client.jiraRequest("jira.issue.attachments.download.request", {
+    connectionId,
+    attachmentId: image.id,
+    variant: "thumbnail",
+  });
+  const content = await client.jiraRequest("jira.issue.attachments.download.request", {
+    connectionId,
+    attachmentId: image.id,
+    variant: "content",
+  });
+  const bytesOk =
+    thumb.error === null &&
+    content.error === null &&
+    content.mimeType === "image/png" &&
+    Buffer.from(content.dataBase64, "base64").subarray(1, 4).toString() === "PNG";
+  record(
+    `${label}: comment link + inline image + attachment bytes`,
+    linkOk && mediaOk && bytesOk,
+    `link=${linkOk} media=${mediaOk} thumbnail=${thumb.error?.message ?? thumb.mimeType} content=${content.error?.message ?? `${content.mimeType} ${content.size} B`}`,
+  );
+}
+
+async function dcConnectionId({ client, dc }: Ctx): Promise<string> {
+  const { connections } = await client.jiraRequest("jira.connections.list.request", {});
+  return connections.find((c) => c.siteUrl.startsWith(dc.baseUrl))?.id ?? "";
+}
+
 function checkSecrets({ cloud, dc, logChunks }: Ctx): void {
   const log = logChunks.join("");
   writeFileSync(LOG, log);
@@ -306,16 +380,21 @@ async function runChecks(ctx: Ctx): Promise<void> {
   await checkTransition(ctx, connectionId);
   await checkPolling(ctx, connectionId);
   await checkAttachment(ctx, connectionId);
+  await checkRichText(ctx, connectionId, "Cloud");
+  await checkLargeBoard(ctx);
   await checkOAuth(ctx);
   await checkDataCenter(ctx);
+  await checkRichText(ctx, await dcConnectionId(ctx), "Data Center");
   checkSecrets(ctx);
 }
 
 async function main(): Promise<void> {
   const cloud = new FakeJiraServer({ deployment: "cloud" });
   const dc = new FakeJiraServer({ deployment: "datacenter" });
+  const big = new FakeJiraServer({ deployment: "cloud", largeBoard: true });
   await cloud.start();
   await dc.start();
+  await big.start();
   const logChunks: string[] = [];
   const daemon = startDaemon(cloud, logChunks);
   const client = new DaemonClient({
@@ -327,12 +406,13 @@ async function main(): Promise<void> {
       new WebSocket(url, options?.protocols, { headers: options?.headers }),
   });
   try {
-    await runChecks({ client, cloud, dc, logChunks });
+    await runChecks({ client, cloud, dc, big, logChunks });
   } finally {
     await client.close().catch(() => undefined);
     daemon.kill("SIGTERM");
     await cloud.stop();
     await dc.stop();
+    await big.stop();
   }
   writeReport();
   if (results.some((r) => !r.ok)) process.exitCode = 1;

@@ -3,16 +3,16 @@ import { Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { useQueryClient } from "@tanstack/react-query";
 import type { JiraComment } from "@jagentdesk/protocol/jira/rpc-schemas";
-import { MarkdownRenderer } from "@/components/markdown/renderer";
 import { Button } from "@/components/ui/button";
 import type { Theme } from "@/styles/theme";
 import { errorMessage, useJiraCall } from "../api";
 import { jiraKeys, useJiraChangelog, useJiraComments, useJiraWorklogs } from "../queries";
 import { EmptyState, ErrorBanner, Tabs, UserAvatar } from "../ui/primitives";
 import { jiraStyles } from "../ui/styles";
+import { JiraMarkdown } from "./jira-markdown";
 import { Spinner } from "./controls";
 import { CommentComposer } from "./comment-composer";
-import { formatDateTime, handleMarkdownLink } from "./shared";
+import { formatDateTime } from "./shared";
 import { WorklogForm } from "./worklog-form";
 
 // Activity (spec 29.3): Comments (mentions, edit your own), History and Work log.
@@ -90,7 +90,7 @@ function CommentItem({ comment, ...props }: Props & { comment: JiraComment }) {
         />
       ) : (
         <View style={styles.body}>
-          <MarkdownRenderer text={comment.body.markdown} onLinkPress={handleMarkdownLink} />
+          <JiraMarkdown text={comment.body.markdown} />
         </View>
       )}
     </View>
@@ -189,7 +189,7 @@ function WorkLog(props: Props) {
           </View>
           {worklog.comment ? (
             <View style={styles.body}>
-              <MarkdownRenderer text={worklog.comment} onLinkPress={handleMarkdownLink} />
+              <JiraMarkdown text={worklog.comment} />
             </View>
           ) : null}
         </View>

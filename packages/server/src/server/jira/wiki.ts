@@ -1,10 +1,14 @@
 import type { JiraRichText } from "@jagentdesk/protocol/jira/rpc-schemas";
 import {
+  attachmentMarkdown,
   escapeMarkdownText,
+  linkDestination,
   MENTION_SCHEME,
   parseMarkdown,
+  urlLink,
   type BlockNode,
   type InlineNode,
+  type RichTextAttachment,
 } from "./markdown-tokens.js";
 
 // Jira Data Center wiki markup ↔ Markdown (description, comment and worklog text on REST v2).
@@ -16,6 +20,8 @@ const BLOCK_MACRO = /^\{(code|noformat|quote|panel|color)(?::[^}]*)?\}(.*)$/;
 
 class WikiReader {
   readonly unsupported = new Set<string>();
+
+  constructor(private readonly attachments: readonly RichTextAttachment[]) {}
 
   // oxlint-disable-next-line complexity
   read(source: string): string {
@@ -115,7 +121,7 @@ class WikiReader {
       return ["```" + language, ...body, "```"].join("\n");
     }
     if (name === "panel" || name === "color") this.unsupported.add(name);
-    const inner = new WikiReader();
+    const inner = new WikiReader(this.attachments);
     const text = inner.read(body.join("\n"));
     for (const item of inner.unsupported) this.unsupported.add(item);
     if (name === "color") return text;
@@ -155,6 +161,25 @@ class WikiReader {
     ].join("\n");
   }
 
+  // `!name.png!`, `!name.png|thumbnail!`, `!https://host/x.png!`.
+  private image(spec: string): string {
+    this.unsupported.add("media");
+    const name = (spec.split("|")[0] ?? "").trim();
+    if (/^https?:\/\//i.test(name)) return `![](${linkDestination(name)})`;
+    return (
+      attachmentMarkdown(name, this.attachments) ?? `[attachment: ${escapeMarkdownText(name)}]`
+    );
+  }
+
+  // `[^file.pdf]` and `[label|^file.pdf]`.
+  private fileLink(name: string, label: string | null): string {
+    this.unsupported.add("media");
+    const mapped = attachmentMarkdown(name.trim(), this.attachments);
+    if (!mapped) return `[attachment: ${escapeMarkdownText(name.trim())}]`;
+    if (label === null) return mapped;
+    return mapped.replace(/^!?\[[^\]]*\]/, () => `[${escapeMarkdownText(label)}]`);
+  }
+
   inline(text: string): string {
     const placeholders: string[] = [];
     const hold = (value: string) => {
@@ -166,14 +191,16 @@ class WikiReader {
       .replace(/\[~([^\]]+)\]/g, (_m, user: string) =>
         hold(`[@${escapeMarkdownText(user)}](${MENTION_SCHEME}${encodeURIComponent(user)})`),
       )
+      .replace(/\[\^([^\]]+)\]/g, (_m, name: string) => hold(this.fileLink(name, null)))
       .replace(/\[([^|\]]+)\|([^\]]+)\]/g, (_m, label: string, url: string) =>
-        hold(`[${escapeMarkdownText(label)}](${url})`),
+        hold(
+          url.startsWith("^")
+            ? this.fileLink(url.slice(1), label)
+            : `[${escapeMarkdownText(label)}](${linkDestination(url)})`,
+        ),
       )
-      .replace(/\[((?:https?|mailto):[^\]]+)\]/g, (_m, url: string) => hold(`<${url}>`))
-      .replace(/!([^!\s][^!]*)!/g, (_m, name: string) => {
-        this.unsupported.add("media");
-        return hold(`[attachment: ${name.split("|")[0]}]`);
-      });
+      .replace(/\[((?:https?|mailto):[^\]]+)\]/g, (_m, url: string) => hold(urlLink(url)))
+      .replace(/!([^!\s][^!]*)!/g, (_m, spec: string) => hold(this.image(spec)));
     out = escapeMarkdownText(out)
       .replace(/(^|[\s(])\\\*(\S(?:.*?\S)?)\\\*(?=$|[\s).,;:!?])/g, "$1**$2**")
       .replace(/(^|[\s(])\\_(\S(?:.*?\S)?)\\_(?=$|[\s).,;:!?])/g, "$1*$2*")
@@ -194,11 +221,15 @@ class WikiReader {
   }
 }
 
-export function wikiToRichText(value: unknown): JiraRichText {
+/** Wiki markup → Markdown; `!file!` and `[^file]` map to `attachments` (the issue's list). */
+export function wikiToRichText(
+  value: unknown,
+  attachments: readonly RichTextAttachment[] = [],
+): JiraRichText {
   if (typeof value !== "string" || value.length === 0) {
     return { markdown: "", editable: true, unsupported: [] };
   }
-  const reader = new WikiReader();
+  const reader = new WikiReader(attachments);
   const markdown = reader.read(value);
   const unsupported = [...reader.unsupported].sort();
   return { markdown, editable: unsupported.length === 0, unsupported };

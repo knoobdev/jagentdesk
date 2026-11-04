@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
+import { deflateSync } from "node:zlib";
 import { compileJql, JqlError, type JqlIssueView } from "./fake-jql.js";
 
 // A fake Jira site for tests only. Request and response shapes follow the official Atlassian
@@ -100,6 +101,10 @@ interface FakeBoard {
   type: "scrum" | "kanban";
   project: string;
   filterId: string;
+  /** Kanban sub-filter; the default Jira one when absent. */
+  subQuery?: string;
+  /** No WIP limits (large boards). */
+  noWip?: boolean;
 }
 
 interface FakeLink {
@@ -167,6 +172,70 @@ function adfText(text: string): unknown {
   };
 }
 
+// A real PNG (8-bit RGB, no filter) for image fixtures: a horizontal gradient with a dark band.
+function crc32(bytes: Buffer): number {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function pngChunk(type: string, data: Buffer): Buffer {
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(data.length);
+  const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(body));
+  return Buffer.concat([length, body, crc]);
+}
+
+export function gradientPng(width: number, height: number): Buffer {
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header.writeUInt8(8, 8); // bit depth
+  header.writeUInt8(2, 9); // RGB
+  const rows: Buffer[] = [];
+  for (let y = 0; y < height; y += 1) {
+    const row = Buffer.alloc(1 + width * 3);
+    const band = y > height * 0.4 && y < height * 0.6;
+    for (let x = 0; x < width; x += 1) {
+      const t = x / Math.max(1, width - 1);
+      row[1 + x * 3] = band ? 32 : Math.round(40 + 180 * t);
+      row[2 + x * 3] = band ? 32 : 110;
+      row[3 + x * 3] = band ? 32 : Math.round(220 - 160 * t);
+    }
+    rows.push(row);
+  }
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk("IHDR", header),
+    pngChunk("IDAT", deflateSync(Buffer.concat(rows))),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+/** Fixture of the rich-text comment (ABC-4): a smart link, a bare URL, an image and a file. */
+export const RICH_COMMENT = {
+  id: "20002",
+  smartLink: "https://stg.app.test/chat/2078b414-5c1d-4f7e-9a10-3b2c4d5e6f70",
+  bareUrl: "https://logs.app.test/run/42",
+  image: { id: "30002", filename: "image-20260812-044924.png", width: 320, height: 180 },
+  file: { id: "30003", filename: "release-notes.txt" },
+};
+
+/** The large Kanban board (option `largeBoard`): visible issues per column, plus hidden old Done. */
+export const LARGE_BOARD = {
+  id: 3,
+  project: "BIG",
+  subQuery: "statusCategory != Done OR updated >= -14d",
+  columns: { "1": 150, "3": 100, "4": 150, "5": 800 } as Record<string, number>,
+  hiddenDone: 300,
+  visible: 1200,
+};
+
 function plainOf(body: unknown): string {
   if (typeof body === "string") return body;
   return JSON.stringify(body ?? "");
@@ -189,6 +258,8 @@ export interface FakeJiraOptions {
   deployment: FakeDeployment;
   /** Access token lifetime the fake OAuth server grants, seconds. */
   accessTokenTtlS?: number;
+  /** Adds project BIG with a 1 200-issue Kanban board (LARGE_BOARD) and a sub-filter. */
+  largeBoard?: boolean;
 }
 
 export class FakeJiraServer {
@@ -248,6 +319,8 @@ export class FakeJiraServer {
     this.deployment = options.deployment;
     this.accessTtlS = options.accessTokenTtlS ?? 3600;
     this.seed();
+    this.seedRichText();
+    if (options.largeBoard) this.seedLargeBoard();
   }
 
   get baseUrl(): string {
@@ -523,6 +596,155 @@ export class FakeJiraServer {
       title: "Validate expiry",
     });
     this.links.push({ id: "50001", type: "Blocks", inward: "ABC-2", outward: "ABC-3" });
+  }
+
+  // ADF smart link + media (Cloud) or wiki links + `!image!` / `[^file]` (DC) on ABC-4.
+  private seedRichText(): void {
+    const now = Date.now();
+    const issue = this.mustIssue("ABC-4");
+    const author = this.refOf(this.users[1] as FakeUser);
+    const { image, file, smartLink, bareUrl } = RICH_COMMENT;
+    issue.attachments.push(
+      {
+        id: image.id,
+        filename: image.filename,
+        mimeType: "image/png",
+        bytes: gradientPng(image.width, image.height),
+        author,
+        created_ms: now - 3_600_000,
+      },
+      {
+        id: file.id,
+        filename: file.filename,
+        mimeType: "text/plain",
+        bytes: Buffer.from("Release notes\n- rounding fixed\n"),
+        author,
+        created_ms: now - 3_600_000,
+      },
+    );
+    const body =
+      this.deployment === "cloud"
+        ? {
+            version: 1,
+            type: "doc",
+            content: [
+              {
+                type: "paragraph",
+                content: [
+                  { type: "text", text: "Link: " },
+                  { type: "inlineCard", attrs: { url: smartLink } },
+                ],
+              },
+              { type: "paragraph", content: [{ type: "text", text: `Logs at ${bareUrl}` }] },
+              {
+                type: "mediaSingle",
+                attrs: { layout: "center" },
+                content: [
+                  {
+                    type: "media",
+                    attrs: {
+                      // Media Services id: not the REST attachment id.
+                      id: "6a1f0c2e-8d3b-4e59-9b7a-1c2d3e4f5a6b",
+                      type: "file",
+                      collection: "",
+                      alt: image.filename,
+                      width: image.width,
+                      height: image.height,
+                    },
+                  },
+                ],
+              },
+              {
+                type: "paragraph",
+                content: [
+                  { type: "text", text: "Notes: " },
+                  {
+                    type: "mediaInline",
+                    attrs: {
+                      id: "0b9e8d7c-6f5a-4b3c-8d2e-1f0a9b8c7d6e",
+                      type: "file",
+                      collection: "",
+                      alt: file.filename,
+                    },
+                  },
+                ],
+              },
+            ],
+          }
+        : `Link: [${smartLink}]\nLogs at ${bareUrl}\n\n!${image.filename}|thumbnail!\n\nNotes: [^${file.filename}]`;
+    issue.comments.push({
+      id: RICH_COMMENT.id,
+      author,
+      body,
+      created_ms: now - 3_600_000,
+      updated_ms: now - 3_600_000,
+    });
+  }
+
+  private seedLargeBoard(): void {
+    const now = Date.now();
+    const day = 86_400_000;
+    const big = LARGE_BOARD;
+    this.projectKeys.push(big.project);
+    this.boards.push({
+      id: big.id,
+      name: "BIG board",
+      type: "kanban",
+      project: big.project,
+      filterId: "10003",
+      subQuery: big.subQuery,
+      noWip: true,
+    });
+    this.filters.push({
+      id: "10003",
+      name: "Filter for BIG board",
+      jql: `project = ${big.project} ORDER BY Rank ASC`,
+      owner: this.refOf(this.me),
+      favourite: false,
+    });
+    const statuses: Array<[string, number, number]> = [
+      ...Object.entries(big.columns).map(([statusId, count]): [string, number, number] => [
+        statusId,
+        count,
+        now - day,
+      ]),
+      ["5", big.hiddenDone, now - 60 * day],
+    ];
+    let n = 0;
+    for (const [statusId, count, updated] of statuses) {
+      for (let index = 0; index < count; index += 1) {
+        n += 1;
+        const id = this.nextId++;
+        const assignee = this.users[n % this.users.length] as FakeUser;
+        this.issues.set(`${big.project}-${n}`, {
+          id,
+          key: `${big.project}-${n}`,
+          project: big.project,
+          summary: `Support ticket ${n}`,
+          typeId: n % 5 === 0 ? "10002" : "10003",
+          statusId,
+          priorityId: String((n % 4) + 1),
+          assignee: n % 3 === 0 ? null : this.refOf(assignee),
+          reporter: this.refOf(this.me),
+          labels: [],
+          parentKey: null,
+          description: null,
+          created_ms: updated - day,
+          updated_ms: updated,
+          sprintId: null,
+          storyPoints: null,
+          flagged: false,
+          rank: id,
+          resolutionId: statusId === "5" ? "10000" : null,
+          comments: [],
+          worklogs: [],
+          attachments: [],
+          watchers: new Set<string>(),
+          remoteLinks: [],
+          history: [],
+        });
+      }
+    }
   }
 
   // ── plumbing ──
@@ -1019,6 +1241,7 @@ export class FakeJiraServer {
     if (path === "/oauth/token/accessible-resources") return this.accessibleResources(req);
     const media = /^\/media\/(\d+)$/.exec(path);
     if (media) {
+      this.refuseJsonOnly(req);
       // Cloud attachment content redirects here with a signed, credential-free URL.
       const id = media[1] ?? "";
       if (this.mediaTokens.get(id) !== url.searchParams.get("token"))
@@ -1128,6 +1351,15 @@ export class FakeJiraServer {
         avatarUrl: `${this.baseUrl}/avatar.png`,
       },
     ];
+  }
+
+  // Binary endpoints cannot produce JSON: `Accept: application/json` alone fails, as on Jira
+  // Cloud's attachment content/thumbnail.
+  private refuseJsonOnly(req: http.IncomingMessage): void {
+    const accept = String(req.headers.accept ?? "*/*");
+    const types = accept.split(",").map((t) => t.split(";")[0]?.trim() ?? "");
+    if (types.every((t) => t === "application/json"))
+      throw new HttpError(406, errorBody(["Not Acceptable"]));
   }
 
   private findAttachment(id: string): FakeAttachment {
@@ -1250,12 +1482,16 @@ export class FakeJiraServer {
         filter: { id: b.filterId, self: `${this.baseUrl}/filter/${b.filterId}` },
         subQuery:
           b.type === "kanban"
-            ? { query: "fixVersion in unreleasedVersions() OR fixVersion is EMPTY" }
+            ? { query: b.subQuery ?? "fixVersion in unreleasedVersions() OR fixVersion is EMPTY" }
             : undefined,
         columnConfig: {
           columns: [
             { name: "To Do", statuses: [{ id: "1", self: "" }] },
-            { name: "In Progress", statuses: [{ id: "3", self: "" }], max: 2 },
+            {
+              name: "In Progress",
+              statuses: [{ id: "3", self: "" }],
+              ...(b.noWip ? {} : { max: 2 }),
+            },
             { name: "In Review", statuses: [{ id: "4", self: "" }] },
             { name: "Done", statuses: [{ id: "5", self: "" }] },
           ],
@@ -1469,6 +1705,7 @@ export class FakeJiraServer {
     const me = this.refOf(ctx.user);
     let m: RegExpExecArray | null;
     if ((m = /^\/secure\/(attachment|thumbnail)\/(\d+)\//.exec(ctx.path))) {
+      this.refuseJsonOnly(ctx.req);
       const attachment = this.findAttachment(m[2] ?? "");
       return new Binary(attachment.bytes, attachment.mimeType);
     }
@@ -1647,6 +1884,7 @@ export class FakeJiraServer {
       return this.attachmentJson(attachment);
     }
     if ((m = /^\/attachment\/(content|thumbnail)\/(\d+)$/.exec(p)) && this.deployment === "cloud") {
+      this.refuseJsonOnly(ctx.req);
       const id = m[2] ?? "";
       this.findAttachment(id);
       const token = randomBytes(6).toString("hex");
