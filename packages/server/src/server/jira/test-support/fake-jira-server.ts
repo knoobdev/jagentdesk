@@ -2043,16 +2043,13 @@ export class FakeJiraServer {
     if (sub === "attachments" && method === "POST") {
       if (ctx.req.headers["x-atlassian-token"] !== "no-check")
         throw new HttpError(403, errorBody(["XSRF check failed"]));
-      const form = await new Response(new Uint8Array(ctx.raw), {
-        headers: { "content-type": String(ctx.req.headers["content-type"]) },
-      }).formData();
-      const file = form.get("file");
-      if (!(file instanceof Blob)) throw new HttpError(400, errorBody(["No file"]));
+      const file = parseMultipartFile(ctx.raw, String(ctx.req.headers["content-type"] ?? ""));
+      if (!file) throw new HttpError(400, errorBody(["No file"]));
       const attachment: FakeAttachment = {
         id: String(this.nextId++),
-        filename: (file as File).name,
-        mimeType: file.type || "application/octet-stream",
-        bytes: Buffer.from(await file.arrayBuffer()),
+        filename: file.filename,
+        mimeType: file.mimeType,
+        bytes: file.bytes,
         author: me,
         created_ms: Date.now(),
       };
@@ -2096,6 +2093,28 @@ export class FakeJiraServer {
       comment: w.comment ?? undefined,
     };
   }
+}
+
+/** The `file` part of a multipart/form-data body. */
+function parseMultipartFile(
+  raw: Buffer,
+  contentType: string,
+): { filename: string; mimeType: string; bytes: Buffer } | null {
+  const boundary = /boundary=(?:"([^"]+)"|([^;]+))/.exec(contentType);
+  const marker = `--${boundary?.[1] ?? boundary?.[2] ?? ""}`;
+  const text = raw.toString("latin1");
+  for (const part of text.split(marker)) {
+    const headerEnd = part.indexOf("\r\n\r\n");
+    if (headerEnd < 0) continue;
+    const headers = part.slice(0, headerEnd);
+    if (!/name="file"/.test(headers)) continue;
+    const filename = /filename="([^"]*)"/.exec(headers)?.[1] ?? "file";
+    const mimeType =
+      /content-type:\s*([^\r\n]+)/i.exec(headers)?.[1]?.trim() ?? "application/octet-stream";
+    const body = part.slice(headerEnd + 4).replace(/\r\n$/, "");
+    return { filename, mimeType, bytes: Buffer.from(body, "latin1") };
+  }
+  return null;
 }
 
 function parseDuration(text: string): number | null {
