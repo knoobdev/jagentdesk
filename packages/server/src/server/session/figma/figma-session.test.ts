@@ -40,10 +40,11 @@ describe("FigmaSession", () => {
       emitted.length = 0;
       // Minimal bodies are fine: placeholders throw before reading them.
       await session.handle({ type, requestId: "r1" } as never);
-      expect(emitted).toHaveLength(1);
+      // Exactly one response; pushes a handler emits (e.g. figma.pending.changed) may accompany it.
       const responseType = type.replace(/\.request$/, ".response");
-      expect(emitted[0]!.type).toBe(responseType);
-      expect(() => schemas.get(responseType)!.parse(emitted[0])).not.toThrow();
+      const responses = emitted.filter((msg) => msg.type === responseType);
+      expect(responses).toHaveLength(1);
+      expect(() => schemas.get(responseType)!.parse(responses[0])).not.toThrow();
     }
     session.dispose();
   });
