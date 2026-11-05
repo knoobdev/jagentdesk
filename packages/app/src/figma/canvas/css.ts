@@ -61,6 +61,7 @@ const GRADIENT_TYPES = [
   "GRADIENT_DIAMOND",
 ] as const;
 type GradientType = (typeof GRADIENT_TYPES)[number];
+export type { GradientType };
 
 function isGradientType(type: unknown): type is GradientType {
   return (GRADIENT_TYPES as readonly unknown[]).includes(type);
@@ -117,14 +118,24 @@ function gradientGeometry(paint: Dict): { angle?: number; center?: { x: number; 
 }
 
 function gradientStops(paint: Dict): string {
-  const stops = asArray(paint.gradientStops)
+  return stopSpec(paint).join(", ");
+}
+
+function stopSpec(paint: Dict): string[] {
+  return asArray(paint.gradientStops)
     .map((entry) => asDict(entry))
     .filter((stop): stop is Dict => stop !== null)
     .map(
       (stop) =>
         `${colorToCss(stop.color, stop.opacity)} ${round((asNumber(stop.position) ?? 0) * 100)}%`,
     );
-  return stops.join(", ");
+}
+
+function stopColors(paint: Dict): string[] {
+  return asArray(paint.gradientStops)
+    .map((entry) => asDict(entry))
+    .filter((stop): stop is Dict => stop !== null)
+    .map((stop) => colorToCss(stop.color, stop.opacity));
 }
 
 /** The CSS gradient function for one REST/Link paint, or null when it is not a gradient. */
@@ -147,10 +158,15 @@ export function gradientCss(paint: unknown): string | null {
 
 export interface GradientFillInfo {
   type: GradientType;
-  /** The CSS function, also used to paint the inspect swatch. */
+  /** The CSS gradient function, also used to paint the inspect swatch. */
   css: string;
   /** The stop list, e.g. `rgba(255, 255, 255, 1) 0%, rgba(0, 0, 0, 1) 100%`. */
   stops: string;
+  /** Stop colors in position order, for the native fallback swatch. */
+  colors: string[];
+  /** The gradient axis in normalized node space (REST handles; defaults to left→right). */
+  start: { x: number; y: number };
+  end: { x: number; y: number };
 }
 
 /** Visible gradient fills of a node, topmost paint list order as Figma returns them. */
@@ -161,7 +177,14 @@ export function gradientFills(node: FigmaNode): GradientFillInfo[] {
     if (!isGradientType(type)) continue;
     const css = gradientCss(paint);
     if (!css) continue;
-    infos.push({ type, css, stops: gradientStops(paint) });
+    infos.push({
+      type,
+      css,
+      stops: gradientStops(paint),
+      colors: stopColors(paint),
+      start: handlePosition(paint.gradientHandlePositions, 0) ?? { x: 0, y: 0.5 },
+      end: handlePosition(paint.gradientHandlePositions, 1) ?? { x: 1, y: 0.5 },
+    });
   }
   return infos;
 }

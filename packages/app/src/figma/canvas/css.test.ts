@@ -247,6 +247,9 @@ describe("generateNodeCss", () => {
     expect(fills[0].type).toBe("GRADIENT_LINEAR");
     expect(fills[0].css).toContain("linear-gradient(90deg");
     expect(fills[0].stops).toBe("rgba(126, 211, 33, 1) 0%, rgba(0, 143, 56, 1) 100%");
+    expect(fills[0].colors).toEqual(["rgba(126, 211, 33, 1)", "rgba(0, 143, 56, 1)"]);
+    expect(fills[0].start).toEqual({ x: 0, y: 0.5 });
+    expect(fills[0].end).toEqual({ x: 1, y: 0.5 });
   });
 
   it("maps corner radii, uniform and per-corner", () => {

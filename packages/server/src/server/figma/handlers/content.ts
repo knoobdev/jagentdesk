@@ -84,7 +84,7 @@ interface RestFile {
 interface RestNodesResponse {
   version?: unknown;
   nodes?: Record<string, RestNode | null>;
-  components?: Record<string, { key?: unknown; name?: unknown }>;
+  components?: Record<string, { key?: unknown; name?: unknown; remote?: unknown }>;
   styles?: Record<string, { key?: unknown; name?: unknown; styleType?: unknown }>;
 }
 
@@ -110,6 +110,8 @@ interface RestMeta {
 interface ComponentMeta {
   key: string;
   name: string;
+  // False/absent for a component defined in this file, true when it comes from a team library.
+  remote?: boolean;
 }
 
 interface StyleMeta {
@@ -915,7 +917,11 @@ export class FigmaContent {
         await ctx.cache.putJson(`node/${file.fileKey}/${id}@${version}`, wrap(node));
       }
       for (const [id, component] of Object.entries(response?.components ?? {}))
-        libs.components[id] = { key: asString(component.key), name: asString(component.name) };
+        libs.components[id] = {
+          key: asString(component.key),
+          name: asString(component.name),
+          ...(typeof component.remote === "boolean" ? { remote: component.remote } : {}),
+        };
       for (const [id, style] of Object.entries(response?.styles ?? {}))
         libs.styles[id] = {
           key: asString(style.key),

@@ -1,15 +1,31 @@
 import { describe, expect, it, vi } from "vitest";
-import type { FigmaNode } from "@jagentdesk/protocol/figma/rpc-schemas";
-import { FrameStore, getFrameStore, dropFrameStores, type FetchNodeSubtrees } from "./frame-store";
+import type { FigmaComponentMeta, FigmaNode } from "@jagentdesk/protocol/figma/rpc-schemas";
+import {
+  FrameStore,
+  getFrameStore,
+  dropFrameStores,
+  type FetchNodeSubtrees,
+  type NodeBatch,
+} from "./frame-store";
 import { makeNode } from "./__fixtures__/figma";
 
 function recordingFetcher() {
   const calls: string[][] = [];
   const fetchNodes: FetchNodeSubtrees = vi.fn(async (ids) => {
     calls.push([...ids]);
-    const out: Record<string, FigmaNode | null> = {};
-    for (const id of ids) out[id] = id === "missing" ? null : makeNode({ id });
-    return out;
+    const nodes: Record<string, FigmaNode | null> = {};
+    const components: Record<string, FigmaComponentMeta> = {};
+    for (const id of ids) {
+      nodes[id] = id === "missing" ? null : makeNode({ id });
+      if (!nodes[id]) continue;
+      components[id] = {
+        key: `k-${id}`,
+        name: `Component ${id}`,
+        // "1:2" keeps the field absent, the rest report local components.
+        ...(id === "1:2" ? {} : { remote: false }),
+      };
+    }
+    return { nodes, components };
   });
   return { calls, fetchNodes };
 }
@@ -46,10 +62,10 @@ describe("FrameStore lazy batching", () => {
   });
 
   it("deduplicates concurrent loads of the same id", async () => {
-    let resolveFirst: (nodes: Record<string, FigmaNode | null>) => void = () => {};
+    let resolveFirst: (batch: NodeBatch) => void = () => {};
     const fetchNodes = vi.fn(
       () =>
-        new Promise<Record<string, FigmaNode | null>>((resolve) => {
+        new Promise<NodeBatch>((resolve) => {
           resolveFirst = resolve;
         }),
     );
@@ -58,7 +74,10 @@ describe("FrameStore lazy batching", () => {
     expect(store.isPending("1:1")).toBe(true);
     void store.load(["1:1", "1:2"]);
     await vi.waitFor(() => expect(fetchNodes).toHaveBeenCalledTimes(1));
-    resolveFirst({ "1:1": makeNode({ id: "1:1" }), "1:2": makeNode({ id: "1:2" }) });
+    resolveFirst({
+      nodes: { "1:1": makeNode({ id: "1:1" }), "1:2": makeNode({ id: "1:2" }) },
+      components: {},
+    });
     await vi.waitFor(() => expect(store.isPending("1:1")).toBe(false));
     expect(fetchNodes).toHaveBeenCalledTimes(1);
   });
@@ -68,9 +87,9 @@ describe("FrameStore lazy batching", () => {
     const fetchNodes = vi.fn(async (ids: readonly string[]) => {
       attempt += 1;
       if (attempt === 1) throw new Error("rate limited");
-      const out: Record<string, FigmaNode | null> = {};
-      for (const id of ids) out[id] = makeNode({ id });
-      return out;
+      const nodes: Record<string, FigmaNode | null> = {};
+      for (const id of ids) nodes[id] = makeNode({ id });
+      return { nodes, components: {} };
     });
     const store = new FrameStore(fetchNodes);
     await store.load(["1:1"]);
@@ -102,6 +121,21 @@ describe("FrameStore lazy batching", () => {
     expect(store.loadedIds()).toEqual([]);
     await store.load(["1:1"]);
     expect(calls).toEqual([["1:1"], ["1:1"]]);
+  });
+
+  it("captures component metadata from loaded batches, absent remote included", async () => {
+    const { fetchNodes } = recordingFetcher();
+    const store = new FrameStore(fetchNodes);
+    expect(store.componentMeta("1:1")).toBeUndefined();
+    await store.load(["1:1", "1:2"]);
+    expect(store.componentMeta("1:1")).toEqual({
+      key: "k-1:1",
+      name: "Component 1:1",
+      remote: false,
+    });
+    expect(store.componentMeta("1:2")).toEqual({ key: "k-1:2", name: "Component 1:2" });
+    store.invalidate();
+    expect(store.componentMeta("1:1")).toBeUndefined();
   });
 });
 

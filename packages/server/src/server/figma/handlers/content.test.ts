@@ -7,7 +7,11 @@ import type { FigmaNode } from "@jagentdesk/protocol/figma/rpc-schemas";
 import { FigmaContent, type ContentDeps, readFontNames } from "./content.js";
 import type { FigmaHandlerMap, FigmaRequestOf } from "./types.js";
 import type { ContentRequestType } from "./content.js";
-import { makeFile, makeFigmaApi, type FakeFigmaApi } from "../test-support/fake-figma-content-api.js";
+import {
+  makeFile,
+  makeFigmaApi,
+  type FakeFigmaApi,
+} from "../test-support/fake-figma-content-api.js";
 
 // Unit tests for the content handlers (spec 32.5, 32.8) against a fake Figma API: outline
 // mapping, batched nodes, bytes-not-URLs renders/exports, image fills, versions, fonts, and
@@ -290,7 +294,11 @@ describe("nodes", () => {
         nodes: Object.fromEntries(
           batch.map((id) => [id, id === "1:12" ? null : { id, name: `Node ${id}`, type: "TEXT" }]),
         ),
-        components: { "1:1": { key: "ck1", name: "Button" } },
+        components: {
+          "1:1": { key: "ck1", name: "Button", remote: false },
+          "1:13": { key: "ck2", name: "Team Button", remote: true },
+          "1:14": { key: "ck3", name: "Legacy" },
+        },
         styles: { "1:1": { key: "sk1", name: "H1", styleType: "TEXT" } },
       };
     });
@@ -319,7 +327,9 @@ describe("nodes", () => {
     expect(out.source).toBe("rest");
     expect(out.nodes["1:1"]).toMatchObject({ name: "Node 1:1" });
     expect(out.nodes["1:12"]).toBeNull();
-    expect(out.components["1:1"]).toEqual({ key: "ck1", name: "Button" });
+    expect(out.components["1:1"]).toEqual({ key: "ck1", name: "Button", remote: false });
+    expect(out.components["1:13"]).toEqual({ key: "ck2", name: "Team Button", remote: true });
+    expect(out.components["1:14"]).toEqual({ key: "ck3", name: "Legacy" });
     expect(out.styles["1:1"]).toEqual({ key: "sk1", name: "H1", styleType: "TEXT" });
   });
 

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { useQueryClient } from "@tanstack/react-query";
 import type {
   FigmaBytes,
+  FigmaComponentMeta,
   FigmaEditOp,
   FigmaFile,
   FigmaNode,
@@ -66,7 +67,10 @@ export function useFigmaFrameStore(
           ...(version ? { version } : {}),
         });
         if (data.error) throw new Error(data.error.message);
-        return data.nodes as Record<string, FigmaNode | null>;
+        return {
+          nodes: data.nodes as Record<string, FigmaNode | null>,
+          components: (data.components ?? {}) as Record<string, FigmaComponentMeta>,
+        };
       },
     );
   }, [client, serverId, fileKey, version, reloadToken]);
