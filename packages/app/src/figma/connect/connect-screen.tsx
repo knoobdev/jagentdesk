@@ -168,8 +168,14 @@ export function FigmaConnectScreen({
   }, [client]);
 
   useEffect(() => {
-    if (state.signedInLabel && onConnected) onConnected();
-  }, [state.signedInLabel, onConnected]);
+    // Consume the completion before navigating. The route may render this guide again while
+    // its connection query catches up, and each navigation creates a new callback. Read the
+    // current store so StrictMode cannot replay a completion from an older snapshot either.
+    if (onConnected && getFigmaConnectState(serverId).signedInLabel) {
+      resetFigmaConnect(serverId);
+      onConnected();
+    }
+  }, [serverId, state.signedInLabel, onConnected]);
 
   const busy = state.phase.kind === "starting" || state.phase.kind === "finishing";
   const errorMessageText = state.phase.kind === "error" ? state.phase.message : null;

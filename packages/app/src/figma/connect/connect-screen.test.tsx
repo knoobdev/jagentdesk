@@ -43,7 +43,12 @@ const { theme, connectState, storeFns } = vi.hoisted(() => ({
     fontFamily: { mono: "monospace" },
   },
   connectState: {
-    state: { clientId: "", clientSecret: "", phase: { kind: "idle" } as Record<string, unknown> },
+    state: {
+      clientId: "",
+      clientSecret: "",
+      signedInLabel: null as string | null,
+      phase: { kind: "idle" } as Record<string, unknown>,
+    },
   },
   storeFns: {
     configureFigmaConnect: vi.fn(),
@@ -56,9 +61,9 @@ const { theme, connectState, storeFns } = vi.hoisted(() => ({
   },
 }));
 
-// useSyncExternalStore needs a stable snapshot reference — mutate, never replace.
+// Match the real store: snapshots stay stable between updates and are replaced on change.
 function setState(patch: Partial<typeof connectState.state>) {
-  Object.assign(connectState.state, patch);
+  connectState.state = { ...connectState.state, ...patch };
 }
 
 vi.mock("./store", () => ({
@@ -204,9 +209,11 @@ describe("FigmaConnectScreen", () => {
     setState({
       clientId: "",
       clientSecret: "",
+      signedInLabel: null,
       phase: { kind: "idle" },
     });
     for (const fn of Object.values(storeFns)) fn.mockClear?.();
+    storeFns.resetFigmaConnect.mockImplementation(() => setState({ signedInLabel: null }));
   });
 
   afterEach(() => {
@@ -282,5 +289,52 @@ describe("FigmaConnectScreen", () => {
     const paste = view.querySelector('[data-testid="figma-signin-paste"]') as HTMLButtonElement;
     expect(browser.disabled).toBe(true);
     expect(paste.disabled).toBe(true);
+  });
+
+  it("navigates once after sign-in while the connection query is still catching up", () => {
+    setState({ signedInLabel: "<client-id>" });
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    const mounted = createRoot(container);
+    root = mounted;
+    function WaitingForConnectionQuery() {
+      const [navigationUpdates, setNavigationUpdates] = React.useState(0);
+      const onConnected = React.useCallback(() => {
+        // Bound a regression so a navigation loop fails instead of hanging the worker.
+        if (navigationUpdates >= 3) throw new Error("Repeated sign-in navigation");
+        setNavigationUpdates(navigationUpdates + 1);
+      }, [navigationUpdates]);
+      return (
+        <>
+          <span data-testid="navigation-updates">{navigationUpdates}</span>
+          <FigmaConnectScreen serverId="s1" connections={[]} onConnected={onConnected} />
+        </>
+      );
+    }
+    act(() => mounted.render(<WaitingForConnectionQuery />));
+    expect(container.querySelector('[data-testid="navigation-updates"]')?.textContent).toBe("1");
+    // Visiting Connections again must leave the guide open rather than replay the old login.
+    const reopened = vi.fn();
+    act(() =>
+      mounted.render(<FigmaConnectScreen serverId="s1" connections={[]} onConnected={reopened} />),
+    );
+    expect(reopened).not.toHaveBeenCalled();
+  });
+
+  it("does not replay the sign-in navigation when StrictMode re-runs the effect", () => {
+    setState({ signedInLabel: "<client-id>" });
+    const onConnected = vi.fn();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    const mounted = createRoot(container);
+    root = mounted;
+    act(() =>
+      mounted.render(
+        <React.StrictMode>
+          <FigmaConnectScreen serverId="s1" connections={[]} onConnected={onConnected} />
+        </React.StrictMode>,
+      ),
+    );
+    expect(onConnected).toHaveBeenCalledTimes(1);
   });
 });

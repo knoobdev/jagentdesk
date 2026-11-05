@@ -10,6 +10,7 @@ import { DeviceError } from "./errors.js";
 import { PhysicalDeviceHub, type ScreenFrameEvent } from "./hub.js";
 import { WDA_VERSION } from "./wda.js";
 import type { DeviceSigner } from "./wda-prepare.js";
+import { PhysicalDeviceStore } from "./store.js";
 import { FAKE_IOS_UDID, writeFakeGoIos, type FakeGoIos } from "./test-utils/fake-go-ios.js";
 
 // Spec 27.4 / 27.5 / ADR-0033 decision 8 through the real hub against a test go-ios: the screen
@@ -173,4 +174,39 @@ describe("iPhone: view first, touch later", () => {
     expect(store.devices[UDID]?.wda?.accountId).toBe(ACCOUNT.id);
     expect(existsSync(fake.callsLog)).toBe(true);
   }, 60_000);
+
+  it.each([
+    {
+      previousAccountId: ACCOUNT.id,
+      expectedOptions: { bundleId: "dev.jagentdesk.wda.a1b2c3.xctrunner" },
+    },
+    { previousAccountId: "apl_d4e5f6", expectedOptions: undefined },
+  ])(
+    "reuses an installed WDA identifier only for its signing account: $previousAccountId",
+    async ({ previousAccountId, expectedOptions }) => {
+      const wdaDir = path.join(home, "devices", "wda", WDA_VERSION);
+      await mkdir(wdaDir, { recursive: true });
+      await writeFile(path.join(wdaDir, "WebDriverAgentRunner.ipa"), "ipa");
+      const store = new PhysicalDeviceStore(home);
+      await store.setWda(
+        UDID,
+        {
+          accountId: previousAccountId,
+          bundleId: "dev.jagentdesk.wda.a1b2c3.xctrunner",
+          installedAt_ms: 0,
+          expiresAt_ms: 1,
+        },
+        1,
+      );
+      const deviceSigner = signer([ACCOUNT]);
+      const devices = createHub(deviceSigner);
+      await devices.list();
+      await devices.enable(UDID);
+      // Signing is observed even though the emulated go-ios cannot launch XCTest.
+      await devices.prepare(UDID, ACCOUNT.id, () => {}).catch(() => {});
+      expect(deviceSigner.signAndInstall).toHaveBeenCalledTimes(1);
+      expect(deviceSigner.signAndInstall.mock.calls[0][0].options).toEqual(expectedOptions);
+    },
+    60_000,
+  );
 });
