@@ -422,7 +422,7 @@ describe("nodes", () => {
       componentId: "1:1",
     });
     // Entry-level library maps merge into the response's components/styles.
-    expect(out.components["1:1"]).toEqual({ key: "ck1", name: "Button" });
+    expect(out.components["1:1"]).toEqual({ key: "ck1", name: "Button", remote: false });
     expect(out.styles["1:1"]).toEqual({ key: "sk1", name: "H1", styleType: "TEXT" });
   });
 

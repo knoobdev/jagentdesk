@@ -69,6 +69,8 @@ describe("toFrameLocalNodes", () => {
   it("renders the localized subtree at local coordinates through the player's renderer", () => {
     const local = toFrameLocalNodes(home, origin);
     const ctx = new RecordingContext();
+    // The player installs its camera (scale · dpr) before drawing, like frame-content.web.tsx.
+    ctx.setTransform(2, 0, 0, 2, 0, 0);
     createFigmaRenderer().draw(ctx as unknown as CanvasRenderingContext2D, local, {
       scale: 2,
       viewport: { x: 0, y: 0, width: 375, height: 600 },
