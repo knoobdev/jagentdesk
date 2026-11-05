@@ -223,6 +223,11 @@ import {
   SideloadPushSchemas,
 } from "./sideload/rpc-schemas.js";
 import { JiraRequestSchemas, JiraResponseSchemas, JiraPushSchemas } from "./jira/rpc-schemas.js";
+import {
+  FigmaRequestSchemas,
+  FigmaResponseSchemas,
+  FigmaPushSchemas,
+} from "./figma/rpc-schemas.js";
 import { SftpInboundSchemas, SftpOutboundSchemas } from "./ssh/sftp-schemas.js";
 import { ForwardingInboundSchemas, ForwardingOutboundSchemas } from "./ssh/forwarding-schemas.js";
 import { SnippetsInboundSchemas, SnippetsOutboundSchemas } from "./ssh/snippets-schemas.js";
@@ -4062,6 +4067,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ...DatabaseRequestSchemas,
   ...ArgoCdRequestSchemas,
   ...JiraRequestSchemas,
+  ...FigmaRequestSchemas,
   ...SshRequestSchemas,
   ...SideloadRequestSchemas,
   ...SftpInboundSchemas,
@@ -4695,6 +4701,8 @@ export const ServerInfoStatusPayloadSchema = z
         // Jira (spec 29 / ADR-0034): the client capability `jira`; gates the Jira surface,
         // the jira.* RPCs and the `jira_issue` attachment.
         jira: z.boolean().optional(),
+        // Figma (spec 32 / ADR-0035): figma.* RPCs and the Figma section.
+        figma: z.boolean().optional(),
       })
       .optional(),
   })
@@ -7875,6 +7883,8 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ...ArgoCdPushSchemas,
   ...JiraResponseSchemas,
   ...JiraPushSchemas,
+  ...FigmaResponseSchemas,
+  ...FigmaPushSchemas,
   ...SshResponseSchemas,
   ...SshPushSchemas,
   ...SideloadResponseSchemas,

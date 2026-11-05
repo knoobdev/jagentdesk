@@ -181,6 +181,8 @@ import { ArgoCdSession } from "./session/argocd/argocd-session.js";
 import type { ArgoCdService } from "./argocd/service.js";
 import { randomUUID } from "node:crypto";
 import { JiraSession } from "./session/jira/jira-session.js";
+import { FigmaSession, isFigmaRequest } from "./session/figma/figma-session.js";
+import type { FigmaService } from "./figma/service.js";
 import type { JiraService } from "./jira/service.js";
 import { SshService } from "./ssh/ssh-service.js";
 import { SideloadSession } from "./session/sideload/sideload-session.js";
@@ -561,6 +563,8 @@ export interface SessionOptions {
   sideloadService?: SideloadService | null;
   // Daemon-wide Jira service (spec 29); absent in tests that do not exercise Jira.
   jiraService?: JiraService | null;
+  // Daemon-wide Figma service (spec 32); absent in tests that do not exercise Figma.
+  figmaService?: FigmaService | null;
   checkoutDiffManager: CheckoutDiffManager;
   github?: ForgeService;
   createAgentMcpTransport?: AgentMcpTransportFactory;
@@ -901,6 +905,7 @@ export class Session {
   private sshSession!: SshSession;
   private argocdSession!: ArgoCdSession;
   private jiraSession: JiraSession | null = null;
+  private figmaSession: FigmaSession | null = null;
   private sshService!: SshService;
   private sideloadSession: SideloadSession | null = null;
   private clusterRegistry!: ClusterRegistry;
@@ -1185,6 +1190,7 @@ export class Session {
         logger: this.sessionLogger,
       });
     }
+    this.figmaSession = this.createFigmaSession(options.figmaService);
     this.providerCatalogSession = new ProviderCatalogSession({
       host: {
         emit: (msg) => this.emit(msg),
@@ -2436,6 +2442,7 @@ export class Session {
       () => this.dispatchArgoCdMessage(msg),
       () => this.dispatchSideloadMessage(msg),
       () => this.dispatchJiraMessage(msg),
+      () => this.dispatchFigmaMessage(msg),
       () => this.dispatchDockerMessage(msg),
       () => this.dispatchSimulatorMessage(msg),
       () => this.dispatchProxyMessage(msg),
@@ -4655,6 +4662,23 @@ export class Session {
       default:
         return undefined;
     }
+  }
+
+  private createFigmaSession(service: FigmaService | null | undefined): FigmaSession | null {
+    if (!service) return null;
+    return new FigmaSession({
+      service,
+      emit: (msg) => this.emit(msg),
+      logger: this.sessionLogger,
+      canRunLoopback: () => this.supports(CLIENT_CAPS.figmaOauthLoopback),
+    });
+  }
+
+  // Figma (spec 32.9): the allowlist is FIGMA_REQUEST_TYPES, the same list FigmaService's handler
+  // map is type-checked against, so every listed type has a handler.
+  private dispatchFigmaMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    if (!this.figmaSession || !isFigmaRequest(msg)) return undefined;
+    return this.figmaSession.handle(msg);
   }
 
   private dispatchSideloadMessage(msg: SessionInboundMessage): Promise<void> | undefined {
@@ -9560,6 +9584,7 @@ export class Session {
     await this.voiceSession.cleanup();
 
     this.jiraSession?.dispose();
+    this.figmaSession?.dispose();
     this.dockerStreams.disposeAll();
     disposeRemoteDocker({ service: this.dockerService, streams: this.dockerStreams });
     for (const routed of this.remoteDockerSubscriptions.values()) routed.release();
