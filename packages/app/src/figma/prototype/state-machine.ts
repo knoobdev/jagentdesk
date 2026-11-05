@@ -182,7 +182,9 @@ function applyAction(state: PlayerState, action: ParsedAction, ctx: PlayerContex
         startedAt_ms: ctx.now_ms(),
       }
     : null;
-  return { state: commit({ ...state, stack, transition }, ctx), effects: [] };
+  // G5 r2: navigation replaces the whole stage, Figma-style — a NAVIGATE fired from inside an
+  // open overlay (the sheet's "View cart") must dismiss the overlays along with it.
+  return { state: commit({ ...state, stack, overlays: [], transition }, ctx), effects: [] };
 }
 
 function goBack(state: PlayerState): PlayerState {

@@ -63,11 +63,13 @@ vi.mock("./frame-stage", () => ({
   },
 }));
 
-import { node } from "./test-support/frames";
+import { indexInteractions, type InteractionMap } from "./interactions";
+import type { StageSpace } from "./frame-stage";
+import { interaction, node } from "./test-support/frames";
 import type { OverlayEntry } from "./state-machine";
 import type { FrameLookup } from "./use-frames";
 import { OverlayStack } from "./prototype-player";
-import type { Rect } from "./node-geometry";
+import { nodeBounds, type Rect } from "./node-geometry";
 
 // G5 bugs 1–2: the overlay sheet must render at the BASE frame's scale/origin (not fitted to
 // the whole stage, which drew it at 1.0 over a ~0.67 frame), must be positioned per the overlay
@@ -102,11 +104,17 @@ function entry(overrides: Partial<OverlayEntry["settings"]> = {}, frameId = "9:1
 
 function renderStack(
   overlays: OverlayEntry[],
-  overrides: { base?: Rect | null; nodes?: FigmaNode[] } = {},
+  overrides: {
+    base?: Rect | null;
+    nodes?: FigmaNode[];
+    interactions?: InteractionMap;
+    showHotspots?: boolean;
+  } = {},
 ) {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
+  const onTrigger = vi.fn();
   actRender(() =>
     root.render(
       <OverlayStack
@@ -115,11 +123,14 @@ function renderStack(
         overlays={overlays}
         stage={stage}
         base={"base" in overrides ? (overrides.base ?? null) : base}
+        interactions={overrides.interactions ?? new Map()}
+        showHotspots={overrides.showHotspots ?? true}
+        onTrigger={onTrigger}
         onDismiss={vi.fn()}
       />,
     ),
   );
-  return container;
+  return { container, onTrigger };
 }
 
 function actRender(fn: () => void) {
@@ -150,7 +161,7 @@ describe("OverlayStack placement (G5 bugs 1–2)", () => {
   });
 
   it("positions the sheet inside the base rect per the overlay position", () => {
-    const container = renderStack([entry()]);
+    const { container } = renderStack([entry()]);
     const sheet = container.querySelector('[data-testid="figma-overlay-sheet-9:1"]') as HTMLElement;
     expect(sheet).not.toBeNull();
     const scale = Math.min(600 / 900, 900 / 1600);
@@ -162,7 +173,7 @@ describe("OverlayStack placement (G5 bugs 1–2)", () => {
   });
 
   it("keeps the base frame's own stage visible: the sheet covers its rect, not the stage", () => {
-    const container = renderStack([entry()]);
+    const { container } = renderStack([entry()]);
     const sheet = container.querySelector('[data-testid="figma-overlay-sheet-9:1"]') as HTMLElement;
     expect(sheet).not.toBeNull();
     const scale = Math.min(600 / 900, 900 / 1600);
@@ -173,21 +184,21 @@ describe("OverlayStack placement (G5 bugs 1–2)", () => {
   });
 
   it("dims the backdrop with the overlay settings' dim color", () => {
-    const container = renderStack([entry()]);
+    const { container } = renderStack([entry()]);
     const host = container.querySelector('[data-testid="figma-overlay-host-9:1"]') as HTMLElement;
     expect(host).not.toBeNull();
     expect(host.style.backgroundColor.replace(/\s+/g, " ")).toContain("rgba(0, 0, 0, 0.5)");
   });
 
   it("paints no dim when the overlay settings say the backdrop is clear", () => {
-    const container = renderStack([entry({ dimColor: "" })]);
+    const { container } = renderStack([entry({ dimColor: "" })]);
     const host = container.querySelector('[data-testid="figma-overlay-host-9:1"]') as HTMLElement;
     expect(host.style.backgroundColor).toBe("");
   });
 
   it("stacks overlays in order — the newest sheet paints above the earlier ones", () => {
     const sheet2 = node({ id: "9:2", name: "Confirm", width: 300, height: 200 });
-    const container = renderStack([entry(), entry({}, "9:2")], {
+    const { container } = renderStack([entry(), entry({}, "9:2")], {
       nodes: [baseNode, sheetNode, sheet2],
     });
     const sheets = [...container.querySelectorAll('[data-testid^="figma-overlay-sheet-"]')];
@@ -200,8 +211,105 @@ describe("OverlayStack placement (G5 bugs 1–2)", () => {
   });
 
   it("renders no sheet until the base frame is on stage (it must sit on the base, not the stage)", () => {
-    const container = renderStack([entry()], { base: null });
+    const { container } = renderStack([entry()], { base: null });
     expect(container.querySelector('[data-testid^="figma-overlay-sheet-"]')).toBeNull();
     expect(frameStageCalls).toHaveLength(0);
+  });
+});
+
+// G5 r2: hotspots inside an open overlay ride the same HotspotsLayer the base frame uses,
+// handed to the sheet's FrameStage so the hit targets share its space (placement scale +
+// offset) and a press on the sheet runs the interaction's action.
+describe("OverlayStack hotspots inside overlays (G5 r2)", () => {
+  beforeEach(() => {
+    vi.stubGlobal("React", React);
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    frameStageCalls.length = 0;
+  });
+
+  const cartBtn = node({
+    id: "9:2",
+    name: "View cart",
+    x: 1216,
+    y: 1040,
+    width: 343,
+    height: 44,
+  });
+  const keepBtn = node({
+    id: "9:3",
+    name: "Keep shopping",
+    x: 1216,
+    y: 1100,
+    width: 343,
+    height: 44,
+  });
+  const sheetWithHotspots = node({
+    id: "9:1",
+    name: "Added to cart",
+    x: 1200,
+    y: 900,
+    width: 375,
+    height: 260,
+    children: [cartBtn, keepBtn],
+  });
+  const cartInteractions = indexInteractions([
+    interaction(
+      "9:2",
+      { type: "ON_CLICK" },
+      { type: "NODE", navigation: "NAVIGATE", destinationId: "2:1" },
+    ),
+    interaction("9:3", { type: "ON_CLICK" }, { type: "CLOSE" }),
+  ]);
+
+  // Sheet-local space like the sheet's FrameStage hands its renderOverlay: scale about the
+  // sheet origin. Scale 1 here — the pure overlayHitRect test pins the mapping numbers.
+  function sheetSpace(): StageSpace {
+    return {
+      scale: 1,
+      boxOf: (n: FigmaNode) => nodeBounds(n),
+    };
+  }
+
+  it("hands the sheet's FrameStage a hotspot renderer that maps and fires overlay hotspots", () => {
+    const { onTrigger } = renderStack([entry()], {
+      nodes: [baseNode, sheetWithHotspots],
+      interactions: cartInteractions,
+    });
+    const sheetCall = frameStageCalls.at(-1) as Record<string, unknown>;
+    const renderOverlay = sheetCall.renderOverlay as
+      | ((space: StageSpace) => React.ReactNode)
+      | undefined;
+    expect(typeof renderOverlay).toBe("function");
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    actRender(() => root.render(<>{renderOverlay!(sheetSpace())}</>));
+    const buttons = [...container.querySelectorAll<HTMLElement>("[role='button']")];
+    expect(buttons.map((b) => b.getAttribute("aria-label"))).toEqual(
+      expect.arrayContaining(["View cart", "Keep shopping"]),
+    );
+
+    const viewCart = buttons.find((b) => b.getAttribute("aria-label") === "View cart")!;
+    actRender(() => {
+      viewCart.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(onTrigger).toHaveBeenCalledWith(
+      expect.objectContaining({
+        nodeId: "9:2",
+        trigger: "ON_CLICK",
+        action: expect.objectContaining({ kind: "navigate" }),
+      }),
+    );
+  });
+
+  it("renders no hotspot renderer when hotspots are off", () => {
+    renderStack([entry()], {
+      nodes: [baseNode, sheetWithHotspots],
+      interactions: cartInteractions,
+      showHotspots: false,
+    });
+    const sheetCall = frameStageCalls.at(-1) as Record<string, unknown>;
+    expect(sheetCall.renderOverlay).toBeUndefined();
   });
 });

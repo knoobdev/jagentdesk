@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { placeOverlay } from "./overlay-placement";
+import { overlayHitRect, placeOverlay } from "./overlay-placement";
 import type { OverlayPosition } from "./state-machine";
 
 // G5 bug 1: the overlay sheet rendered at its own fit (the whole stage box → scale ~1.0) while
@@ -139,5 +139,48 @@ describe("placeOverlay", () => {
         position: "CENTER",
       }),
     ).toBeNull();
+  });
+
+  // G5 r2: hotspots inside the sheet map through the overlay placement — same scale, same
+  // origin, so a hit target lands on the pixel its visual is painted at.
+  describe("overlayHitRect", () => {
+    const basePlaced = placeOverlay({
+      stageWidth: 600,
+      stageHeight: 900,
+      baseWidth: 375,
+      baseHeight: 812,
+      overlayWidth: 375,
+      overlayHeight: 260,
+      position: "BOTTOM_CENTER",
+      baseScale: 0.67,
+    })!;
+
+    it("maps a node through the placement: base scale + sheet origin", () => {
+      // Sheet lives off-canvas at (1200, 900); "View cart" button 16/140 into it, 343x44.
+      const hit = overlayHitRect(
+        { x: 1216, y: 1040, width: 343, height: 44 },
+        { x: 1200, y: 900 },
+        basePlaced,
+      );
+      expect(hit.scale).toBe(basePlaced.scale);
+      expect(hit.scale).toBeCloseTo(0.67, 6);
+      // Offset within the sheet is frame-local (absolute origin subtracted), then scaled.
+      expect(hit.x - basePlaced.x).toBeCloseTo(16 * 0.67, 6);
+      expect(hit.y - basePlaced.y).toBeCloseTo(140 * 0.67, 6);
+      expect(hit.width).toBeCloseTo(343 * 0.67, 6);
+      expect(hit.height).toBeCloseTo(44 * 0.67, 6);
+    });
+
+    it("reproduces the placement exactly for the sheet root itself", () => {
+      const hit = overlayHitRect(
+        { x: 1200, y: 900, width: 375, height: 260 },
+        { x: 1200, y: 900 },
+        basePlaced,
+      );
+      expect(hit.x).toBeCloseTo(basePlaced.x, 6);
+      expect(hit.y).toBeCloseTo(basePlaced.y, 6);
+      expect(hit.width).toBeCloseTo(basePlaced.width, 6);
+      expect(hit.height).toBeCloseTo(basePlaced.height, 6);
+    });
   });
 });

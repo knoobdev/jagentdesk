@@ -224,16 +224,20 @@ export function PrototypePlayer({ file, outline, startNodeId, onClose }: Prototy
   const baseFrameId = baseFrameIdFor(player);
   const root = baseFrameId ? frames.nodeFor(baseFrameId) : null;
   const baseBounds = root ? nodeBounds(root) : null;
-  const renderHotspots = useCallback(
-    (space: StageSpace) => (
+  const renderHotspotsFor = useCallback(
+    (frameRoot: FigmaNode | null, space: StageSpace) => (
       <HotspotsLayer
         interactions={interactions}
-        root={root}
+        root={frameRoot}
         space={space}
         onTrigger={triggerInteraction}
       />
     ),
-    [interactions, root, triggerInteraction],
+    [interactions, triggerInteraction],
+  );
+  const renderHotspots = useCallback(
+    (space: StageSpace) => renderHotspotsFor(root, space),
+    [renderHotspotsFor, root],
   );
 
   const overlayNote =
@@ -300,6 +304,9 @@ export function PrototypePlayer({ file, outline, startNodeId, onClose }: Prototy
             overlays={player.overlays}
             stage={stage}
             base={baseBounds}
+            interactions={interactions}
+            showHotspots={showHotspots}
+            onTrigger={triggerInteraction}
             onDismiss={dismissTopOverlay}
           />
         ) : null}
@@ -684,13 +691,18 @@ function Hotspot({
 // ── Overlays ───────────────────────────────────────────────────────────────
 
 // Exported for tests. Layers paint in stack order (last = topmost): each layer's dim backdrop
-// covers the stage, then its sheet sits at the base frame's scale per `placeOverlay`.
+// covers the stage, then its sheet sits at the base frame's scale per `placeOverlay`. The sheet
+// draws its own hotspots through the same HotspotsLayer the base frame uses, mapped through the
+// overlay placement (same scale + offset) — G5 r2.
 export function OverlayStack({
   file,
   frames,
   overlays,
   stage,
   base,
+  interactions,
+  showHotspots,
+  onTrigger,
   onDismiss,
 }: {
   file: PrototypePlayerProps["file"];
@@ -699,6 +711,9 @@ export function OverlayStack({
   stage: { width: number; height: number };
   /** Bounds of the frame the overlays sit on top of (G5 bug 2: it stays on stage). */
   base: Rect | null;
+  interactions: InteractionMap;
+  showHotspots: boolean;
+  onTrigger: (interaction: ParsedInteraction) => void;
   onDismiss: () => void;
 }) {
   return (
@@ -711,6 +726,9 @@ export function OverlayStack({
           frames={frames}
           stage={stage}
           base={base}
+          interactions={interactions}
+          showHotspots={showHotspots}
+          onTrigger={onTrigger}
           onDismiss={onDismiss}
         />
       ))}
@@ -724,6 +742,9 @@ function OverlayLayer({
   frames,
   stage,
   base,
+  interactions,
+  showHotspots,
+  onTrigger,
   onDismiss,
 }: {
   file: PrototypePlayerProps["file"];
@@ -731,11 +752,20 @@ function OverlayLayer({
   frames: FrameLookup;
   stage: { width: number; height: number };
   base: Rect | null;
+  interactions: InteractionMap;
+  showHotspots: boolean;
+  onTrigger: (interaction: ParsedInteraction) => void;
   onDismiss: () => void;
 }) {
   const root = frames.nodeFor(entry.frameId);
   const close = entry.settings.closeOnClickOutside ? onDismiss : undefined;
   const keepOpen = useCallback(() => !entry.settings.closeOnClickOutside, [entry]);
+  const renderOverlay = useCallback(
+    (space: StageSpace) => (
+      <HotspotsLayer interactions={interactions} root={root} space={space} onTrigger={onTrigger} />
+    ),
+    [interactions, root, onTrigger],
+  );
   if (!root || !base) return null;
   const overlay = nodeBounds(root);
   if (!overlay) return null;
@@ -779,6 +809,7 @@ function OverlayLayer({
           width={placement.width}
           height={placement.height}
           scroll={false}
+          renderOverlay={showHotspots ? renderOverlay : undefined}
         />
       </View>
     </Pressable>

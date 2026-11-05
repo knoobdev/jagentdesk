@@ -263,4 +263,37 @@ describe("player state machine", () => {
     state = step(state, { type: "overlay_dismiss" }, ctx()).state;
     expect(baseFrameIdFor(state)).toBe(currentFrameId(state));
   });
+
+  it("a hotspot click inside an open overlay runs its action (G5 r2)", () => {
+    // "View cart" → NAVIGATE: navigation replaces the whole stage, Figma-style, so the sheet
+    // must be gone and the destination current — not stacked under a lingering overlay.
+    let state = startedState();
+    state = step(
+      state,
+      { type: "interaction", action: { kind: "overlay", destinationId: "Sheet" } },
+      ctx(),
+    ).state;
+    state = step(
+      state,
+      {
+        type: "interaction",
+        action: { kind: "navigate", destinationId: "Cart", transition: null },
+      },
+      ctx(),
+    ).state;
+    expect(currentFrameId(state)).toBe("Cart");
+    expect(state.stack).toEqual(["A", "Cart"]);
+    expect(state.overlays).toEqual([]);
+
+    // "Keep shopping" → CLOSE: pops only the sheet, back to the frame under it.
+    let withSheet = startedState();
+    withSheet = step(
+      withSheet,
+      { type: "interaction", action: { kind: "overlay", destinationId: "Sheet" } },
+      ctx(),
+    ).state;
+    withSheet = step(withSheet, { type: "interaction", action: { kind: "close" } }, ctx()).state;
+    expect(currentFrameId(withSheet)).toBe("A");
+    expect(withSheet.overlays).toHaveLength(0);
+  });
 });

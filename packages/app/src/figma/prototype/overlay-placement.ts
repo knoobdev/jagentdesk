@@ -103,3 +103,25 @@ export function placeOverlay(input: OverlayPlacementInput): PlacedOverlay | null
       return { x: centerX, y: centerY, width, height, scale };
   }
 }
+
+/**
+ * Hit mapping for hotspots INSIDE an overlay sheet (G5 r2): a node's absolute Figma rect maps
+ * through the overlay placement to a rect in stage coordinates — the base frame's scale
+ * (`placement.scale`) and the sheet's origin (`placement.x/y`), i.e. exactly the pixel the node
+ * is painted at. `node` and `overlayRoot` are absolute; the origin subtraction keeps the mapping
+ * frame-local, matching what FrameStage's stage space produces for the sheet, so hit targets
+ * track the visuals at any placement.
+ */
+export function overlayHitRect(
+  node: { x: number; y: number; width: number; height: number },
+  overlayRoot: { x: number; y: number },
+  placement: PlacedOverlay,
+): PlacedOverlay {
+  return {
+    x: placement.x + (node.x - overlayRoot.x) * placement.scale,
+    y: placement.y + (node.y - overlayRoot.y) * placement.scale,
+    width: node.width * placement.scale,
+    height: node.height * placement.scale,
+    scale: placement.scale,
+  };
+}
