@@ -340,6 +340,7 @@ describe("nodes", () => {
                         file_key: FILE,
                         name: "Button",
                         description: "",
+                        remote: false,
                       },
                     },
                     componentSets: {},
@@ -356,6 +357,12 @@ describe("nodes", () => {
                 ],
           ),
         ),
+        components: {
+          "1:1": { key: "ck1", name: "Button", remote: false },
+          "1:13": { key: "ck2", name: "Team Button", remote: true },
+          "1:14": { key: "ck3", name: "Legacy" },
+        },
+        styles: { "1:1": { key: "sk1", name: "H1", styleType: "TEXT" } },
       };
     });
   }
@@ -383,7 +390,9 @@ describe("nodes", () => {
     expect(out.source).toBe("rest");
     expect(out.nodes["1:1"]).toMatchObject({ name: "Node 1:1" });
     expect(out.nodes["1:12"]).toBeNull();
-    expect(out.components["1:1"]).toEqual({ key: "ck1", name: "Button" });
+    expect(out.components["1:1"]).toEqual({ key: "ck1", name: "Button", remote: false });
+    expect(out.components["1:13"]).toEqual({ key: "ck2", name: "Team Button", remote: true });
+    expect(out.components["1:14"]).toEqual({ key: "ck3", name: "Legacy" });
     expect(out.styles["1:1"]).toEqual({ key: "sk1", name: "H1", styleType: "TEXT" });
   });
 

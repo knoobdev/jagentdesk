@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { PanelRightClose, PanelRightOpen, Sparkles } from "lucide-react-native";
-import type { FigmaNode } from "@jagentdesk/protocol/figma/rpc-schemas";
+import type { FigmaNode, FigmaComponentMeta } from "@jagentdesk/protocol/figma/rpc-schemas";
 import { useQueryClient } from "@tanstack/react-query";
 import { router, useLocalSearchParams } from "expo-router";
 import { useHostFeature } from "@/runtime/host-features";
@@ -166,6 +166,11 @@ export function FigmaFileScreen({ serverId, fileKey, version }: FigmaFileRef) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store, selectedNodeId, storeTick]);
 
+  const componentMeta = useCallback(
+    (componentId: string) => store?.componentMeta(componentId),
+    [store],
+  );
+
   const focusNode = useCallback(
     async (nodeId: string) => {
       setFocusError(null);
@@ -318,6 +323,7 @@ export function FigmaFileScreen({ serverId, fileKey, version }: FigmaFileRef) {
       selection={selection}
       onFocusNode={focusNode}
       onFocusPoint={focusPoint}
+      componentMeta={componentMeta}
     />
   );
 
@@ -478,6 +484,7 @@ function PanelColumn({
   selection,
   onFocusNode,
   onFocusPoint,
+  componentMeta,
 }: {
   serverId: string;
   fileKey: string;
@@ -491,6 +498,7 @@ function PanelColumn({
   selection: FigmaSelection | null;
   onFocusNode: (nodeId: string) => void;
   onFocusPoint: (point: { x: number; y: number }) => void;
+  componentMeta?: (componentId: string) => FigmaComponentMeta | undefined;
 }) {
   return (
     <View style={styles.side}>
@@ -507,6 +515,7 @@ function PanelColumn({
           node={selectedNode}
           linked={linked}
           applyEdits={applyEdits}
+          componentMeta={componentMeta}
         />
       ) : null}
       {panel === "comments" && selection ? (

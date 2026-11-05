@@ -1,4 +1,4 @@
-import type { FigmaNode } from "@jagentdesk/protocol/figma/rpc-schemas";
+import type { FigmaComponentMeta, FigmaNode } from "@jagentdesk/protocol/figma/rpc-schemas";
 import { chunkIds, LruCache, MAX_IDS_PER_REQUEST } from "./batching";
 
 // Lazy viewport loading (spec 32.5.1): frames entering the viewport are requested through
@@ -6,12 +6,17 @@ import { chunkIds, LruCache, MAX_IDS_PER_REQUEST } from "./batching";
 // costs nothing and memory stays flat on thousand-frame files. The fetcher is injected so the
 // tests run without a client, and the canvas can swap in the Figma Link path.
 
-export type FetchNodeSubtrees = (
-  ids: readonly string[],
-) => Promise<Record<string, FigmaNode | null>>;
+export interface NodeBatch {
+  nodes: Record<string, FigmaNode | null>;
+  /** Component metadata referenced by the batch (REST `components`); empty for Link paths. */
+  components: Record<string, FigmaComponentMeta>;
+}
+
+export type FetchNodeSubtrees = (ids: readonly string[]) => Promise<NodeBatch>;
 
 export class FrameStore {
   private readonly cache: LruCache<FigmaNode | null>;
+  private readonly components = new Map<string, FigmaComponentMeta>();
   private readonly pending = new Set<string>();
   private readonly inflight = new Set<string>();
   private readonly listeners = new Set<() => void>();
@@ -54,6 +59,11 @@ export class FrameStore {
     return this.cache.get(id);
   }
 
+  /** Component metadata seen while loading subtrees; undefined until its batch arrives. */
+  componentMeta(id: string): FigmaComponentMeta | undefined {
+    return this.components.get(id);
+  }
+
   isPending(id: string): boolean {
     return this.pending.has(id) || this.inflight.has(id);
   }
@@ -75,6 +85,7 @@ export class FrameStore {
   /** Drop everything (version change, figma.file.changed): the next load re-fetches. */
   invalidate(): void {
     this.cache.clear();
+    this.components.clear();
     this.pending.clear();
     this.inflight.clear();
     this.notify();
@@ -87,17 +98,19 @@ export class FrameStore {
     for (const id of ids) this.inflight.add(id);
     try {
       for (const batch of chunkIds(ids, this.batchMax)) {
-        let nodes: Record<string, FigmaNode | null>;
+        let result: NodeBatch;
         try {
-          nodes = await this.fetchNodes(batch);
+          result = await this.fetchNodes(batch);
         } catch {
           // Failed ids fall out of `inflight` and stay out of `cache`, so a later viewport
           // pass retries them; the canvas shows a frame outline meanwhile.
           for (const id of batch) this.inflight.delete(id);
           continue;
         }
+        for (const [id, meta] of Object.entries(result.components ?? {}))
+          this.components.set(id, meta);
         for (const id of batch) {
-          this.cache.set(id, nodes[id] ?? null);
+          this.cache.set(id, result.nodes[id] ?? null);
           this.inflight.delete(id);
         }
         this.notify();

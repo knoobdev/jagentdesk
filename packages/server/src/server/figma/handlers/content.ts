@@ -85,7 +85,7 @@ interface RestFile {
 /** One entry of the documented `GET /v1/files/:key/nodes` `nodes` map. */
 interface RestNodeEntry {
   document?: RestNode;
-  components?: Record<string, { key?: unknown; name?: unknown }>;
+  components?: Record<string, { key?: unknown; name?: unknown; remote?: unknown }>;
   styles?: Record<string, { key?: unknown; name?: unknown; styleType?: unknown }>;
   schemaVersion?: unknown;
   // A flat node (no `document` envelope) is tolerated; it is identified by its own id.
@@ -97,7 +97,7 @@ interface RestNodesResponse {
   version?: unknown;
   nodes?: Record<string, RestNodeEntry | null>;
   // Some payloads (and every pre-doc fake) put the library maps at the response root.
-  components?: Record<string, { key?: unknown; name?: unknown }>;
+  components?: Record<string, { key?: unknown; name?: unknown; remote?: unknown }>;
   styles?: Record<string, { key?: unknown; name?: unknown; styleType?: unknown }>;
 }
 
@@ -124,6 +124,8 @@ interface RestMeta {
 interface ComponentMeta {
   key: string;
   name: string;
+  // False/absent for a component defined in this file, true when it comes from a team library.
+  remote?: boolean;
 }
 
 interface StyleMeta {
@@ -793,12 +795,16 @@ function restEntryNode(entry: RestNodeEntry | null): RestNode | null {
 /** Merges every `components`/`styles` map seen in a batch into the cached library metadata. */
 function mergeLibraryMaps(
   libs: LibraryMeta,
-  componentMaps: Array<Record<string, { key?: unknown; name?: unknown }>>,
+  componentMaps: Array<Record<string, { key?: unknown; name?: unknown; remote?: unknown }>>,
   styleMaps: Array<Record<string, { key?: unknown; name?: unknown; styleType?: unknown }>>,
 ): void {
   for (const map of componentMaps)
     for (const [id, component] of Object.entries(map))
-      libs.components[id] = { key: asString(component.key), name: asString(component.name) };
+      libs.components[id] = {
+        key: asString(component.key),
+        name: asString(component.name),
+        ...(typeof component.remote === "boolean" ? { remote: component.remote } : {}),
+      };
   for (const map of styleMaps)
     for (const [id, style] of Object.entries(map))
       libs.styles[id] = {

@@ -7,11 +7,16 @@ import type { Theme } from "@/styles/theme";
 import { Input, ErrorBanner } from "@/jira/ui/primitives";
 import { Button } from "@/components/ui/button";
 import { jiraStyles } from "@/jira/ui/styles";
-import type { FigmaNode, FigmaBytes } from "@jagentdesk/protocol/figma/rpc-schemas";
+import type {
+  FigmaNode,
+  FigmaBytes,
+  FigmaComponentMeta,
+} from "@jagentdesk/protocol/figma/rpc-schemas";
 import type { FigmaColor } from "./protocol-types";
 import type { ApplyFigmaEdits } from "../contracts";
 import { buildEditOps, type InspectEditPatch } from "./ops";
-import { generateNodeCss, colorToCss } from "./css";
+import { generateNodeCss, gradientFills, colorToCss, type GradientFillInfo } from "./css";
+import { isWeb } from "@/constants/platform";
 import { PanelSection, PanelRow, MonoText } from "./panel-ui";
 import { fetchFigmaExport } from "./use-figma-file";
 import { saveExportedBytes } from "./save-bytes";
@@ -72,6 +77,21 @@ const styles = StyleSheet.create((theme: Theme) => ({
   },
   cssText: {
     lineHeight: 18,
+  },
+  swatch: {
+    width: 36,
+    height: 20,
+    borderRadius: 4,
+    overflow: "hidden",
+  },
+  gradientRow: {
+    alignSelf: "stretch",
+    gap: 4,
+  },
+  stopsWrap: {
+    alignSelf: "stretch",
+    gap: 2,
+    paddingLeft: 44,
   },
 }));
 
@@ -314,6 +334,43 @@ function GeometrySection({
   );
 }
 
+const PADDING_KEYS = {
+  top: "paddingTop",
+  right: "paddingRight",
+  bottom: "paddingBottom",
+  left: "paddingLeft",
+} as const;
+
+function PaddingField({
+  side,
+  label,
+  value,
+  node,
+  disabled,
+  apply,
+}: {
+  side: keyof typeof PADDING_KEYS;
+  label: string;
+  value: number | undefined;
+  node: FigmaNode;
+  disabled?: boolean;
+  apply: (patch: InspectEditPatch) => void;
+}) {
+  const onCommit = useCallback(
+    (next: number) =>
+      apply({
+        padding: {
+          top: side === "top" ? next : (num(node[PADDING_KEYS.top]) ?? 0),
+          right: side === "right" ? next : (num(node[PADDING_KEYS.right]) ?? 0),
+          bottom: side === "bottom" ? next : (num(node[PADDING_KEYS.bottom]) ?? 0),
+          left: side === "left" ? next : (num(node[PADDING_KEYS.left]) ?? 0),
+        },
+      }),
+    [apply, side, node],
+  );
+  return <NumField label={label} value={value} disabled={disabled} onCommit={onCommit} />;
+}
+
 function AutoLayoutSection({
   node,
   disabled,
@@ -328,18 +385,6 @@ function AutoLayoutSection({
   const setColumn = useCallback(() => apply({ layoutMode: "VERTICAL" }), [apply]);
   const clear = useCallback(() => apply({ layoutMode: "NONE" }), [apply]);
   const onGap = useCallback((itemSpacing: number) => apply({ itemSpacing }), [apply]);
-  const onPadding = useCallback(
-    (padding: number) =>
-      apply({
-        padding: {
-          top: num(node.paddingTop) ?? padding,
-          right: num(node.paddingRight) ?? padding,
-          bottom: num(node.paddingBottom) ?? padding,
-          left: padding,
-        },
-      }),
-    [apply, node.paddingTop, node.paddingRight, node.paddingBottom],
-  );
   const showSpacing = layoutMode === "HORIZONTAL" || layoutMode === "VERTICAL";
   return (
     <PanelSection title="Auto layout">
@@ -377,15 +422,69 @@ function AutoLayoutSection({
             disabled={disabled}
             onCommit={onGap}
           />
-          <NumField
-            label="Padding"
-            value={num(node.paddingLeft)}
-            disabled={disabled}
-            onCommit={onPadding}
-          />
+          <Text style={jiraStyles.formLabel}>Padding</Text>
+          <View style={jiraStyles.row}>
+            <PaddingField
+              side="top"
+              label="Top"
+              value={num(node.paddingTop)}
+              disabled={disabled}
+              apply={apply}
+            />
+            <PaddingField
+              side="right"
+              label="Right"
+              value={num(node.paddingRight)}
+              disabled={disabled}
+              apply={apply}
+            />
+            <PaddingField
+              side="bottom"
+              label="Bottom"
+              value={num(node.paddingBottom)}
+              disabled={disabled}
+              apply={apply}
+            />
+            <PaddingField
+              side="left"
+              label="Left"
+              value={num(node.paddingLeft)}
+              disabled={disabled}
+              apply={apply}
+            />
+          </View>
         </>
       ) : null}
     </PanelSection>
+  );
+}
+
+const GRADIENT_LABELS: Record<string, string> = {
+  GRADIENT_LINEAR: "Linear gradient",
+  GRADIENT_RADIAL: "Radial gradient",
+  GRADIENT_ANGULAR: "Angular gradient",
+  GRADIENT_DIAMOND: "Diamond gradient",
+};
+
+function GradientFillRow({ fill }: { fill: GradientFillInfo }) {
+  const swatchStyle = isWeb
+    ? [{ background: fill.css }, styles.swatch]
+    : [{ backgroundColor: fill.colors[0] ?? "transparent" }, styles.swatch];
+  return (
+    <View style={styles.gradientRow} testID="figma-inspect-gradient-fill">
+      <View style={jiraStyles.row}>
+        <View style={swatchStyle} />
+        <Text style={jiraStyles.textSmall}>{GRADIENT_LABELS[fill.type] ?? "Gradient"}</Text>
+      </View>
+      <View style={styles.stopsWrap}>
+        {fill.stops
+          .split(", ")
+          .filter(Boolean)
+          .map((stop) => (
+            <MonoText key={stop}>{stop}</MonoText>
+          ))}
+      </View>
+    </View>
   );
 }
 
@@ -399,16 +498,22 @@ function FillSection({
   apply: (patch: InspectEditPatch) => void;
 }) {
   const solidFill = firstSolidColor(node);
+  const gradients = gradientFills(node);
   const fills = Array.isArray(node.fills) ? node.fills : [];
   const onCommit = useApplyHex(apply);
   return (
     <PanelSection title="Fill">
-      <CommitText
-        value={solidFill ? colorToCss(solidFill) : ""}
-        onCommit={onCommit}
-        placeholder="#RRGGBB"
-        disabled={disabled}
-      />
+      {gradients.map((fill) => (
+        <GradientFillRow key={fill.css} fill={fill} />
+      ))}
+      {solidFill || gradients.length === 0 ? (
+        <CommitText
+          value={solidFill ? colorToCss(solidFill) : ""}
+          onCommit={onCommit}
+          placeholder="#RRGGBB"
+          disabled={disabled}
+        />
+      ) : null}
       <MonoText>{fills.length > 0 ? `${fills.length} paint(s)` : "No fills"}</MonoText>
     </PanelSection>
   );
@@ -508,14 +613,24 @@ function TextSection({
   );
 }
 
-function ComponentSection({ node }: { node: FigmaNode }) {
+function ComponentSection({
+  node,
+  componentMeta,
+}: {
+  node: FigmaNode;
+  componentMeta?: (componentId: string) => FigmaComponentMeta | undefined;
+}) {
+  const componentId = String(node.componentId ?? "");
+  const meta = componentMeta?.(componentId);
+  const name = meta?.name || componentId;
+  const main = meta?.remote === true ? "Team library" : "Local component";
   return (
     <PanelSection title="Component">
       <PanelRow label="Component">
-        <MonoText>{String(node.componentId)}</MonoText>
+        <MonoText>{name}</MonoText>
       </PanelRow>
       <PanelRow label="Main">
-        <MonoText>{node.isExternalOnly === true ? "External" : "Team library"}</MonoText>
+        <MonoText>{main}</MonoText>
       </PanelRow>
     </PanelSection>
   );
@@ -684,6 +799,8 @@ export interface InspectPanelProps {
   linked: boolean;
   applyEdits: ApplyFigmaEdits;
   disabled?: boolean;
+  /** Component metadata from the loaded subtrees (spec 32.5.2): names + library vs local origin. */
+  componentMeta?: (componentId: string) => FigmaComponentMeta | undefined;
 }
 
 export function InspectPanel({
@@ -693,6 +810,7 @@ export function InspectPanel({
   linked,
   applyEdits,
   disabled,
+  componentMeta,
 }: InspectPanelProps) {
   const apply = useCallback(
     (patch: InspectEditPatch) => {
@@ -741,7 +859,7 @@ export function InspectPanel({
       <StrokeSection node={node} />
       <AppearanceSection node={node} disabled={disabled} apply={apply} />
       {isText ? <TextSection node={node} disabled={disabled} apply={apply} /> : null}
-      {node.componentId ? <ComponentSection node={node} /> : null}
+      {node.componentId ? <ComponentSection node={node} componentMeta={componentMeta} /> : null}
 
       {transitions.length > 0 ? (
         <PanelSection title="Interaction">

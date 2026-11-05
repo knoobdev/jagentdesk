@@ -478,12 +478,20 @@ export const FigmaFileNodesRequestSchema = req("figma.file.nodes.request", {
   ids: z.array(z.string()).min(1).max(50),
   version: z.string().optional(),
 });
+export const FigmaComponentMetaSchema = z.object({
+  key: z.string(),
+  name: z.string(),
+  // False/absent for a component defined in this file, true when it comes from a team library.
+  remote: z.boolean().optional(),
+});
+export type FigmaComponentMeta = z.infer<typeof FigmaComponentMetaSchema>;
+
 export const FigmaFileNodesResponseSchema = res("figma.file.nodes.response", {
   version: z.string(),
   source: FigmaSourceSchema,
   nodes: z.record(z.string(), FigmaNodeSchema.nullable()),
   // Component/style metadata referenced by the nodes (REST `components`/`styles`).
-  components: z.record(z.string(), z.object({ key: z.string(), name: z.string() })),
+  components: z.record(z.string(), FigmaComponentMetaSchema),
   styles: z.record(
     z.string(),
     z.object({ key: z.string(), name: z.string(), styleType: z.string() }),
