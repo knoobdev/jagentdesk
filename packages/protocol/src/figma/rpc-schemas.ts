@@ -82,16 +82,19 @@ export type FigmaProjectFile = z.infer<typeof FigmaProjectFileSchema>;
 // A Figma document node exactly as Figma's REST API returns it (`GET /v1/files/:key/nodes` with
 // `geometry=paths`), or the same shape serialized by the Figma Link plugin. The renderer consumes
 // this format directly; unknown properties pass through untouched.
-export const FigmaNodeSchema: z.ZodType<FigmaNode> = z.lazy(() =>
-  z
-    .object({
-      id: z.string(),
-      name: z.string(),
-      type: z.string(),
-      children: z.array(FigmaNodeSchema).optional(),
-    })
-    .passthrough(),
-);
+//
+// NOT recursive: a `z.lazy` self-reference here was miscompiled by zod-aot 0.20.4 into
+// `safeParse_WSOutboundMessageSchema(children[i])`, so every child was re-parsed against the
+// whole WebSocket message union and every subtree was rejected. Children carry their own
+// `id`/`name`/`type` and pass through opaque; the TS interface below stays the deep shape.
+export const FigmaNodeSchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    type: z.string(),
+    children: z.array(z.unknown()).optional(),
+  })
+  .passthrough() as unknown as z.ZodType<FigmaNode>;
 export interface FigmaNode {
   id: string;
   name: string;
