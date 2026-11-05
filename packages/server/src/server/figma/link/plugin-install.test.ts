@@ -33,7 +33,7 @@ describe("installFigmaLinkPlugin", () => {
     const first = await installFigmaLinkPlugin({
       logger,
       vendorPluginDir: vendor,
-      installRoot: root,
+      installDir: path.join(root, "@hdc/jagentdesk-plugin-figma-link"),
     });
     expect(first.ok).toBe(true);
     if (!first.ok) return;
@@ -48,7 +48,7 @@ describe("installFigmaLinkPlugin", () => {
     const second = await installFigmaLinkPlugin({
       logger,
       vendorPluginDir: vendor,
-      installRoot: root,
+      installDir: path.join(root, "@hdc/jagentdesk-plugin-figma-link"),
     });
     expect(second.ok).toBe(true);
     if (!second.ok) return;
@@ -61,7 +61,7 @@ describe("installFigmaLinkPlugin", () => {
     const first = await installFigmaLinkPlugin({
       logger,
       vendorPluginDir: vendor,
-      installRoot: root,
+      installDir: path.join(root, "@hdc/jagentdesk-plugin-figma-link"),
     });
     expect(first.ok).toBe(true);
 
@@ -69,7 +69,7 @@ describe("installFigmaLinkPlugin", () => {
     const second = await installFigmaLinkPlugin({
       logger,
       vendorPluginDir: vendor,
-      installRoot: root,
+      installDir: path.join(root, "@hdc/jagentdesk-plugin-figma-link"),
     });
     expect(second.ok).toBe(true);
     if (!second.ok) return;
@@ -91,7 +91,7 @@ describe("installFigmaLinkPlugin", () => {
     const result = await installFigmaLinkPlugin({
       logger,
       vendorPluginDir: vendor,
-      installRoot: root,
+      installDir: path.join(root, "@hdc/jagentdesk-plugin-figma-link"),
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -104,7 +104,7 @@ describe("installFigmaLinkPlugin", () => {
     const result = await installFigmaLinkPlugin({
       logger,
       vendorPluginDir: path.join(root, "nope"),
-      installRoot: root,
+      installDir: path.join(root, "@hdc/jagentdesk-plugin-figma-link"),
     });
     expect(result).toEqual({ ok: false, error: "vendor_missing" });
   });
@@ -115,12 +115,30 @@ describe("installFigmaLinkPlugin", () => {
     const result = await installFigmaLinkPlugin({
       logger,
       vendorPluginDir: vendor,
-      installRoot: root,
+      installDir: path.join(root, "@hdc/jagentdesk-plugin-figma-link"),
       backoffMs: 300_000,
       lastFailureAt: Date.now(),
       now: () => Date.now(),
     });
     expect(result).toEqual({ ok: false, error: "backoff" });
     expect(await computePluginChecksum(vendor)).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+describe("Figma Link plugin location", () => {
+  it("installs under the daemon home, never in the user's home (spec 32.4.1)", async () => {
+    const home = mkdtempSync(path.join(tmpdir(), "jad-figma-home-"));
+    const { FigmaLinkServer } = await import("./bridge.js");
+    const server = new FigmaLinkServer({
+      secrets: { get: async () => null, set: async () => undefined, delete: async () => undefined },
+      dataDir: home,
+      logger,
+      port: 0,
+    } as never);
+    const installDir = (server as unknown as { options: { installDir?: string; dataDir: string } })
+      .options;
+    expect(installDir.installDir ?? path.join(installDir.dataDir, "figma", "plugin")).toBe(
+      path.join(home, "figma", "plugin"),
+    );
   });
 });

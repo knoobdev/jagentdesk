@@ -17,10 +17,17 @@ export async function createFigmaLinkBridge(options: {
     secrets: options.secrets,
     dataDir: options.jagentdeskHome,
     logger: options.logger,
+    // Test runs only (e.g. beside a running figma-mcp-forge on 1995); the plugin manifest keeps 1995.
+    ...linkPortOption(process.env),
   });
   const started = await link.start();
   if (!started.ok) {
     options.logger.warn({ port: started.error }, "figma link could not bind the loopback port");
   }
   return link;
+}
+
+function linkPortOption(env: NodeJS.ProcessEnv): { port?: number } {
+  const port = Number.parseInt(env.JAGENTDESK_FIGMA_LINK_PORT ?? "", 10);
+  return Number.isInteger(port) && port > 0 && port < 65536 ? { port } : {};
 }

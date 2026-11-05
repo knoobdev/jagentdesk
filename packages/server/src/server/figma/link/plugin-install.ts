@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { promises as fs } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type pino from "pino";
@@ -10,15 +9,17 @@ export type PluginInstallResult =
   | { ok: true; dir: string; installed: boolean }
   | { ok: false; error: string };
 
-const INSTALL_DIR_NAME = "@hdc/jagentdesk-plugin-figma-link";
 const MANAGED_MARKER = ".jagentdesk-managed.json";
 
 export interface PluginInstallOptions {
   logger: pino.Logger;
   /** Vendored plugin directory (default: this package's `vendor/figma-link-plugin`). */
   vendorPluginDir?: string;
-  /** Install root; defaults to `~/lib/node_modules`. Tests point it at a temp dir. */
-  installRoot?: string;
+  /**
+   * Directory the plugin is installed into: `$JAGENTDESK_HOME/figma/plugin` (spec 32.4.1). Never a
+   * path outside the daemon home.
+   */
+  installDir: string;
   /** Minimum interval between failed install attempts. */
   backoffMs?: number;
   /** Timestamp of the last failure; a fresh attempt must be later than this + backoff. */
@@ -55,8 +56,7 @@ export async function computePluginChecksum(dir: string): Promise<string> {
 }
 
 /**
- * Copy the vendored plugin into `~/lib/node_modules/@hdc/...` (spec 32 §Plugin
- * install) when the directory is missing, malformed, or built from a different
+ * Copy the vendored plugin into `$JAGENTDESK_HOME/figma/plugin` (spec 32.4.1) when the directory is missing, malformed, or built from a different
  * vendored payload. A directory the user placed there themselves (no managed
  * marker) is never clobbered.
  */
@@ -80,8 +80,7 @@ export async function installFigmaLinkPlugin(
     return { ok: false, error: `vendor_manifest_invalid: ${String(error)}` };
   }
 
-  const installRoot = options.installRoot ?? path.join(os.homedir(), "lib", "node_modules");
-  const target = path.join(installRoot, INSTALL_DIR_NAME);
+  const target = options.installDir;
 
   const markerPath = path.join(target, MANAGED_MARKER);
   if (existsSync(markerPath)) {

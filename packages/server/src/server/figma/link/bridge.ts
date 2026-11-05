@@ -48,7 +48,8 @@ export interface FigmaLinkServerOptions {
   /** Override the vendored plugin dir (tests). */
   vendorPluginDir?: string;
   /** Override the plugin install root (tests). */
-  installRoot?: string;
+  /** Plugin install directory; defaults to `<dataDir>/figma/plugin` (spec 32.4.1). */
+  installDir?: string;
   /** Skip the copy-the-vendor step entirely (tests). */
   autoInstall?: boolean;
 }
@@ -179,6 +180,15 @@ export class FigmaLinkServer implements FigmaLinkBridge {
         const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
         if (url.pathname !== "/ws") {
           socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
+          socket.destroy();
+          return;
+        }
+        // ADR-0035 §3: refuse before any WebSocket exists — a browser page (any Origin other than
+        // the plugin iframe's literal "null") or a non-loopback peer never gets a socket.
+        const origin = req.headers.origin;
+        const remote = (req.socket.remoteAddress ?? "").replace(/^::ffff:/, "");
+        if ((origin !== undefined && origin !== "null") || !isLoopback(remote)) {
+          socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
           socket.destroy();
           return;
         }
@@ -704,7 +714,7 @@ export class FigmaLinkServer implements FigmaLinkBridge {
     const result = await installFigmaLinkPlugin({
       logger: this.options.logger,
       vendorPluginDir: this.options.vendorPluginDir,
-      installRoot: this.options.installRoot,
+      installDir: this.options.installDir ?? path.join(this.options.dataDir, "figma", "plugin"),
       backoffMs: INSTALL_BACKOFF_MS,
       lastFailureAt: this.lastInstallFailureAt,
       now: this.now,

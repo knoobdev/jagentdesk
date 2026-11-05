@@ -97,16 +97,23 @@ describe("FigmaLinkServer", () => {
     await bridge.close();
   });
 
-  it("rejects a browser tab presenting an https Origin", async () => {
+  it("refuses a browser tab presenting an https Origin before any socket opens", async () => {
     const { bridge, start } = makeBridge();
     const port = await start();
-    const plugin = new FakePlugin({ url: `ws://127.0.0.1:${port}/ws`, origin: "https://evil" });
-    await plugin.connect();
-
-    const rejected = await plugin.nextFrame("link_rejected");
-    expect(rejected.reason).toBe("bad-origin");
-    expect(await plugin.closed()).toBe(1008);
-
+    const { WebSocket } = await import("ws");
+    const outcome = await new Promise<string>((resolve) => {
+      const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, {
+        headers: { Origin: "https://evil" },
+      });
+      ws.on("open", () => {
+        ws.close();
+        resolve("opened");
+      });
+      ws.on("unexpected-response", (_req, res) => resolve(`http ${res.statusCode}`));
+      ws.on("error", () => resolve("error"));
+    });
+    expect(outcome).toBe("http 403");
+    expect(bridge.status().files).toHaveLength(0);
     await bridge.close();
   });
 
