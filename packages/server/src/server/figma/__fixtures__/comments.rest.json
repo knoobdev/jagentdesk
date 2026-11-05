@@ -3,6 +3,7 @@
     {
       "id": "101",
       "client_id": 901,
+      "parent_id": "",
       "message": "Update the CTA copy to \"Start free trial\".",
       "user": {
         "id": "450:111",
@@ -53,6 +54,7 @@
     {
       "id": "103",
       "client_id": 903,
+      "parent_id": "",
       "message": "This banner sits 8px too low.",
       "user": { "id": "450:900", "handle": "me", "img_url": null },
       "created_at": "2026-04-03T08:00:00Z",

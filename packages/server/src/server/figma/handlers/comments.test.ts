@@ -88,6 +88,7 @@ describe("comments.list", () => {
     // and reacted on by the connection account itself, and resolved.
     expect(canvasPin).toMatchObject({
       id: "103",
+      parentId: null,
       nodeId: null,
       offset: { x: 1440, y: 96 },
       mine: true,

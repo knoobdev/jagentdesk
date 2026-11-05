@@ -122,9 +122,12 @@ function mapComment(raw: Json, figmaUserId: string): FigmaComment {
   const user = obj(raw.user);
   const authorId = str(user?.id) ?? "";
   const meta = obj(raw.client_meta);
+  const parentId = str(raw.parent_id);
   return {
     id: str(raw.id) ?? "",
-    parentId: str(raw.parent_id),
+    // Figma sends `parent_id: ""` on root comments; the wire type is null, and a non-null parent
+    // id would hang the comment under a parent that does not exist.
+    parentId: parentId === null || parentId === "" ? null : parentId,
     message: str(raw.message) ?? "",
     user: { handle: str(user?.handle) ?? "", figmaUserId: authorId },
     createdAt_ms: isoMs(raw.created_at, "created_at"),
