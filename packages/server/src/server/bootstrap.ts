@@ -199,6 +199,7 @@ import { JiraService } from "./jira/service.js";
 import { createFigmaService } from "./figma/create.js";
 import { atlassianEndpointsFromEnv } from "./jira/credentials.js";
 import { createJiraAgentTools } from "./jira/agent-tools.js";
+import { createFigmaAgentTools } from "./figma/agent-tools.js";
 import { SshModules } from "./ssh/ssh-modules.js";
 import { SshModules as SshServerModules } from "./ssh/modules.js";
 import { applyTerminalAgentHookSetting } from "../terminal/agent-hooks/terminal-agent-hook-setting.js";
@@ -1649,6 +1650,13 @@ export async function createJAgentDeskDaemon(
     jiraAgentTools: (callerAgentId) =>
       createJiraAgentTools({
         service: jiraService,
+        callerAgentId,
+        requestPermission: (agentId, request) =>
+          agentManager.requestHostToolPermission(agentId, request),
+      }),
+    figmaAgentTools: (callerAgentId) =>
+      createFigmaAgentTools({
+        service: figmaService,
         callerAgentId,
         requestPermission: (agentId, request) =>
           agentManager.requestHostToolPermission(agentId, request),
