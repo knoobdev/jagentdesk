@@ -1,0 +1,21 @@
+{
+  "id": "16:1",
+  "name": "FarAway",
+  "type": "RECTANGLE",
+  "visible": true,
+  "opacity": 1,
+  "blendMode": "NORMAL",
+  "absoluteBoundingBox": { "x": 5000, "y": 5000, "width": 40, "height": 40 },
+  "absoluteTransform": [
+    [1, 0, 5000],
+    [0, 1, 5000]
+  ],
+  "relativeTransform": [
+    [1, 0, 5000],
+    [0, 1, 5000]
+  ],
+  "width": 40,
+  "height": 40,
+  "fills": [{ "type": "SOLID", "color": { "r": 0, "g": 0, "b": 0, "a": 1 } }],
+  "strokes": []
+}

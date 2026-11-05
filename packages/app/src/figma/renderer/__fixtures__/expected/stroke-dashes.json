@@ -1,0 +1,30 @@
+[
+  ["save"],
+  ["setTransform", 1, 0, 0, 1, 0, 0],
+  ["save"],
+  ["setTransform", 1, 0, 0, 1, 0, 0],
+  ["set:globalAlpha", 1],
+  ["save"],
+  ["set:lineWidth", 1],
+  ["set:lineCap", "square"],
+  ["set:lineJoin", "round"],
+  ["setLineDash", [4, 4]],
+  ["set:strokeStyle", "rgba(0, 0, 255, 1)"],
+  ["set:globalAlpha", 1],
+  [
+    "stroke",
+    {
+      "commands": [
+        ["moveTo", 0, 0],
+        ["lineTo", 40, 0],
+        ["lineTo", 40, 40],
+        ["lineTo", 0, 40],
+        ["lineTo", 0, 0],
+        ["closePath"]
+      ]
+    }
+  ],
+  ["restore"],
+  ["restore"],
+  ["restore"]
+]

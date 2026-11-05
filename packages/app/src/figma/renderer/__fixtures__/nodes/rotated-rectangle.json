@@ -1,0 +1,37 @@
+{
+  "id": "11:1",
+  "name": "Rot",
+  "type": "RECTANGLE",
+  "visible": true,
+  "opacity": 1,
+  "blendMode": "NORMAL",
+  "absoluteBoundingBox": {
+    "x": -14.64,
+    "y": -14.64,
+    "width": 56.57,
+    "height": 56.57
+  },
+  "absoluteTransform": [
+    [0.7071, -0.7071, 13.64],
+    [0.7071, 0.7071, -14.64]
+  ],
+  "relativeTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "width": 40,
+  "height": 40,
+  "rotation": 45,
+  "fills": [
+    {
+      "type": "SOLID",
+      "color": {
+        "r": 0,
+        "g": 0.6,
+        "b": 0.2,
+        "a": 1
+      }
+    }
+  ],
+  "strokes": []
+}

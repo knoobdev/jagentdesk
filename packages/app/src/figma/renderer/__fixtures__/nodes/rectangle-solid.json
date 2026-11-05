@@ -1,0 +1,30 @@
+{
+  "id": "1:1",
+  "name": "Rect",
+  "type": "RECTANGLE",
+  "visible": true,
+  "opacity": 1,
+  "blendMode": "NORMAL",
+  "absoluteBoundingBox": { "x": 10, "y": 20, "width": 100, "height": 50 },
+  "absoluteTransform": [
+    [1, 0, 10],
+    [0, 1, 20]
+  ],
+  "relativeTransform": [
+    [1, 0, 10],
+    [0, 1, 20]
+  ],
+  "width": 100,
+  "height": 50,
+  "fills": [
+    {
+      "type": "SOLID",
+      "visible": true,
+      "opacity": 1,
+      "color": { "r": 0.2, "g": 0.4, "b": 0.9, "a": 1 }
+    }
+  ],
+  "strokes": [],
+  "strokeWeight": 0,
+  "strokeAlign": "INSIDE"
+}

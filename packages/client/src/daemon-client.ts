@@ -111,6 +111,13 @@ import type {
   JiraResponseFor,
   JiraResponseTypeFor,
 } from "@jagentdesk/protocol/jira/rpc-schemas";
+import type {
+  FigmaPush,
+  FigmaRequestParams,
+  FigmaRequestType,
+  FigmaResponseFor,
+  FigmaResponseTypeFor,
+} from "@jagentdesk/protocol/figma/rpc-schemas";
 import {
   AgentCreateFailedStatusPayloadSchema,
   AgentCreatedStatusPayloadSchema,
@@ -8286,6 +8293,36 @@ export class DaemonClient {
   ): () => void {
     return this.subscribeRawMessages((message) => {
       if (message.type === type) handler(message as Extract<JiraPush, { type: T }>);
+    });
+  }
+
+  // ── Figma (spec 32) ──
+  // One typed entry point for the figma.* RPCs: `figmaRequest("figma.file.outline.request", {...})`
+  // resolves with the response payload; a Figma-side failure is `payload.error`, not a throw.
+
+  async figmaRequest<T extends FigmaRequestType>(
+    type: T,
+    params: FigmaRequestParams<T>,
+    options: { timeoutMs?: number } = {},
+  ): Promise<FigmaResponseFor<T>["payload"]> {
+    const responseType = type.replace(/\.request$/, ".response") as FigmaResponseTypeFor<T>;
+    return this.sendCorrelatedSessionRequest<
+      FigmaResponseTypeFor<T>,
+      FigmaResponseFor<T>["payload"]
+    >({
+      message: { type, ...params },
+      responseType,
+      timeout: options.timeoutMs,
+    });
+  }
+
+  /** figma.file.changed / figma.link.changed / figma.pending.changed / figma.oauth.delegation. */
+  onFigmaPush<T extends FigmaPush["type"]>(
+    type: T,
+    handler: (message: Extract<FigmaPush, { type: T }>) => void,
+  ): () => void {
+    return this.subscribeRawMessages((message) => {
+      if (message.type === type) handler(message as Extract<FigmaPush, { type: T }>);
     });
   }
 

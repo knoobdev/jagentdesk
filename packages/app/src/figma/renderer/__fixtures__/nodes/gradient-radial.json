@@ -1,0 +1,35 @@
+{
+  "id": "3:2",
+  "name": "Glow",
+  "type": "ELLIPSE",
+  "visible": true,
+  "opacity": 1,
+  "blendMode": "NORMAL",
+  "absoluteBoundingBox": { "x": 0, "y": 0, "width": 100, "height": 100 },
+  "absoluteTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "relativeTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "width": 100,
+  "height": 100,
+  "strokes": [],
+  "fills": [
+    {
+      "type": "GRADIENT_RADIAL",
+      "visible": true,
+      "opacity": 1,
+      "gradientHandlePositions": [
+        { "x": 0.5, "y": 0.5 },
+        { "x": 0.5, "y": 1 }
+      ],
+      "gradientStops": [
+        { "position": 0, "color": { "r": 1, "g": 1, "b": 1, "a": 1 } },
+        { "position": 1, "color": { "r": 0, "g": 0, "b": 0, "a": 0 } }
+      ]
+    }
+  ]
+}

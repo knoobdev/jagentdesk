@@ -6,6 +6,7 @@ import {
   CalendarClock,
   Container,
   Database,
+  Figma,
   GitPullRequest,
   History,
   Home,
@@ -48,6 +49,7 @@ import {
   buildDatabaseBrowseRoute,
   buildDatabasesRoute,
   buildDockerRoute,
+  buildFigmaRoute,
   buildForgeRoute,
   buildInsightsRoute,
   buildJiraRoute,
@@ -80,6 +82,8 @@ export interface AppNavTargets {
   supportsForgeHub: boolean;
   /** Spec 29: Jira surface, when the daemon advertises `jira`. */
   jiraRoute: Href | null;
+  /** Spec 32: Figma section, when the daemon advertises `figma`. */
+  figmaRoute: Href | null;
   /** Spec 25: daemon build ships the SSH servers surface (S1+). */
   supportsSshServers: boolean;
 }
@@ -96,6 +100,9 @@ export function useAppNavTargets(): AppNavTargets {
   );
   const supportsJira = useSessionStore(
     (state) => state.sessions[firstServerId]?.serverInfo?.features?.jira === true,
+  );
+  const supportsFigma = useSessionStore(
+    (state) => state.sessions[firstServerId]?.serverInfo?.features?.figma === true,
   );
   const supportsSshServers = useSessionStore(
     (state) => state.sessions[firstServerId]?.serverInfo?.features?.sshServers === true,
@@ -145,9 +152,11 @@ export function useAppNavTargets(): AppNavTargets {
       supportsForgeHub,
       supportsSshServers,
       jiraRoute: supportsJira ? perHost(buildJiraRoute) : null,
+      figmaRoute: supportsFigma ? perHost(buildFigmaRoute) : null,
     };
   }, [
     supportsJira,
+    supportsFigma,
     deviceServerId,
     firstServerId,
     lastCluster,
@@ -272,6 +281,7 @@ export function useAppNavItems(): AppNavItem[] {
         "/insights",
       ),
       navItem("jira", KanbanSquare, "Jira", "Jira", targets.jiraRoute, pathname, "/jira"),
+      navItem("figma", Figma, "Figma", "Figma", targets.figmaRoute, pathname, "/figma"),
       targets.supportsForgeHub
         ? navItem("forge", GitPullRequest, "Forge", "Forge", targets.forgeRoute, pathname, "/forge")
         : null,

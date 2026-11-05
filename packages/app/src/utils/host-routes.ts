@@ -485,6 +485,17 @@ export function buildJiraRoute(serverId: string, params?: Record<string, string>
   return query ? (`${route}?${query}` as const) : route;
 }
 
+/** Figma section (spec 32.5); `params` deep-link to a file, page, node or version. */
+export function buildFigmaRoute(serverId: string, params?: Record<string, string>) {
+  const normalized = trimNonEmpty(serverId);
+  if (!normalized) {
+    return "/" as const;
+  }
+  const route = `/h/${encodeSegment(normalized)}/figma` as const;
+  const query = new URLSearchParams(params ?? {}).toString();
+  return query ? (`${route}?${query}` as const) : route;
+}
+
 export function buildMarketplaceRoute(serverId: string) {
   const normalized = trimNonEmpty(serverId);
   if (!normalized) {

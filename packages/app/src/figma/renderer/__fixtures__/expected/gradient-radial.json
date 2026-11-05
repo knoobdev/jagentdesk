@@ -1,0 +1,33 @@
+[
+  ["save"],
+  ["setTransform", 1, 0, 0, 1, 0, 0],
+  ["save"],
+  ["setTransform", 1, 0, 0, 1, 0, 0],
+  ["set:globalAlpha", 1],
+  ["createRadialGradient", 50, 50, 0, 50, 50, 50],
+  ["save"],
+  ["set:globalAlpha", 1],
+  [
+    "set:fillStyle",
+    {
+      "gradient": {
+        "kind": "radial",
+        "args": [50, 50, 0, 50, 50, 50],
+        "stops": [
+          [0, "rgba(255, 255, 255, 1)"],
+          [1, "rgba(0, 0, 0, 0)"]
+        ]
+      }
+    }
+  ],
+  [
+    "fill",
+    {
+      "commands": [["ellipse", 50, 50, 50, 50, 0, 0, 6.283185307179586, 0]]
+    },
+    "nonzero"
+  ],
+  ["restore"],
+  ["restore"],
+  ["restore"]
+]

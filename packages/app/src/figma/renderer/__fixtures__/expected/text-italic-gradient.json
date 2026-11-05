@@ -1,0 +1,32 @@
+[
+  ["save"],
+  ["setTransform", 1, 0, 0, 1, 0, 0],
+  ["save"],
+  ["setTransform", 1, 0, 0, 1, 0, 0],
+  ["set:globalAlpha", 1],
+  ["set:font", "italic 700 24px \"Inter\""],
+  ["measureText", "shine"],
+  ["set:textAlign", "left"],
+  ["set:textBaseline", "alphabetic"],
+  ["set:font", "italic 700 24px \"Inter\""],
+  ["measureText", "shine"],
+  ["set:font", "italic 700 24px \"Inter\""],
+  ["createLinearGradient", 0, 12, 120, 12],
+  [
+    "set:fillStyle",
+    {
+      "gradient": {
+        "kind": "linear",
+        "args": [0, 12, 120, 12],
+        "stops": [
+          [0, "rgba(255, 0, 255, 1)"],
+          [1, "rgba(0, 255, 255, 1)"]
+        ]
+      }
+    }
+  ],
+  ["set:globalAlpha", 1],
+  ["fillText", "shine", 0, 19.200000000000003],
+  ["restore"],
+  ["restore"]
+]

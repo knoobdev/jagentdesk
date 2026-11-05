@@ -1,0 +1,35 @@
+{
+  "id": "13:5",
+  "name": "Centered",
+  "type": "TEXT",
+  "visible": true,
+  "opacity": 1,
+  "blendMode": "NORMAL",
+  "absoluteBoundingBox": { "x": 0, "y": 0, "width": 200, "height": 40 },
+  "absoluteTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "relativeTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "width": 200,
+  "height": 40,
+  "characters": "mid",
+  "textAutoResize": "NONE",
+  "style": {
+    "fontFamily": "Inter",
+    "fontStyle": "Regular",
+    "fontSize": 20,
+    "textAlignHorizontal": "CENTER",
+    "textAlignVertical": "CENTER",
+    "letterSpacing": 0,
+    "lineHeightUnit": "PIXELS",
+    "lineHeightPx": 30
+  },
+  "characterStyleOverrides": [],
+  "styleOverrideTable": {},
+  "fills": [{ "type": "SOLID", "color": { "r": 0, "g": 0, "b": 0, "a": 1 } }],
+  "strokes": []
+}

@@ -228,6 +228,52 @@ const SourceSchema = z.object({
     expect(result.success).toBe(true);
   });
 
+  it("accepts a figma.file.nodes.response with three levels of children", () => {
+    // FigmaNodeSchema must not recurse: zod-aot 0.20.4 miscompiled z.lazy so every child was
+    // re-parsed against the whole WS message schema, rejecting any nodes response with children.
+    const result = GeneratedWSOutboundMessageSchema.safeParse({
+      type: "session",
+      message: {
+        type: "figma.file.nodes.response",
+        payload: {
+          requestId: "figma-nodes",
+          error: null,
+          version: "1566622199797801477",
+          source: "rest",
+          nodes: {
+            "1:2": {
+              id: "1:2",
+              name: "Hero",
+              type: "FRAME",
+              absoluteBoundingBox: { x: 20, y: 40, width: 375, height: 812 },
+              children: [
+                {
+                  id: "1:3",
+                  name: "Header",
+                  type: "GROUP",
+                  children: [
+                    {
+                      id: "1:4",
+                      name: "Logo",
+                      type: "RECTANGLE",
+                      children: [
+                        { id: "1:5", name: "Path", type: "VECTOR", fillPaints: [], strokes: [] },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+            "1:9": null,
+          },
+          components: { "1:1": { key: "ck1", name: "Button" } },
+          styles: {},
+        },
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
   it("accepts a legacy github_search_response envelope", () => {
     const result = GeneratedWSOutboundMessageSchema.safeParse({
       type: "session",

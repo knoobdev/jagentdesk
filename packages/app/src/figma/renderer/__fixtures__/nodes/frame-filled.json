@@ -1,0 +1,22 @@
+{
+  "id": "6:1",
+  "name": "Screen",
+  "type": "FRAME",
+  "visible": true,
+  "opacity": 1,
+  "blendMode": "NORMAL",
+  "absoluteBoundingBox": { "x": 0, "y": 0, "width": 360, "height": 640 },
+  "absoluteTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "relativeTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "width": 360,
+  "height": 640,
+  "clipsContent": true,
+  "fills": [{ "type": "SOLID", "color": { "r": 0.97, "g": 0.97, "b": 0.97, "a": 1 } }],
+  "strokes": []
+}

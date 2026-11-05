@@ -42,6 +42,8 @@ export const CLIENT_CAPS = {
   // Argo CD SSO (spec 30.2.2): only the Electron desktop advertises it — it can open the
   // 127.0.0.1:8085 loopback listener, so the daemon routes mobile SSO delegation to it.
   argocdSsoLoopback: "argocd_sso_loopback",
+  // Figma OAuth (spec 32.2): only the Electron desktop runs the 127.0.0.1:8766 callback.
+  figmaOauthLoopback: "figma_oauth_loopback",
   // Spec 27.7 / ADR-0033: the client decodes live device screens pushed as binary JPEG frames
   // (opcode 0x20). Clients without it keep polling simulator/screenshot.
   binaryScreenFrames: "binary_screen_frames",

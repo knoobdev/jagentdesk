@@ -1,0 +1,9 @@
+{
+  "name": "jagentdesk-figma-link-plugin",
+  "version": "1.0.0",
+  "private": true,
+  "description": "JAgentDesk Figma Link plugin — the Figma side of the daemon's loopback bridge. Built with the repo's esbuild; the result is committed to dist/.",
+  "scripts": {
+    "build": "node build.mjs"
+  }
+}

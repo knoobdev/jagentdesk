@@ -1,0 +1,35 @@
+{
+  "id": "3:3",
+  "name": "Pie",
+  "type": "ELLIPSE",
+  "visible": true,
+  "opacity": 1,
+  "blendMode": "NORMAL",
+  "absoluteBoundingBox": { "x": 0, "y": 0, "width": 80, "height": 80 },
+  "absoluteTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "relativeTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "width": 80,
+  "height": 80,
+  "strokes": [],
+  "fills": [
+    {
+      "type": "GRADIENT_ANGULAR",
+      "visible": true,
+      "opacity": 1,
+      "gradientHandlePositions": [
+        { "x": 0.5, "y": 0.5 },
+        { "x": 0.5, "y": 0 }
+      ],
+      "gradientStops": [
+        { "position": 0, "color": { "r": 1, "g": 0, "b": 0, "a": 1 } },
+        { "position": 1, "color": { "r": 1, "g": 0, "b": 0, "a": 1 } }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "id": "1:8",
+  "name": "Icon",
+  "type": "VECTOR",
+  "visible": true,
+  "opacity": 1,
+  "blendMode": "NORMAL",
+  "absoluteBoundingBox": { "x": 50, "y": 50, "width": 16, "height": 16 },
+  "absoluteTransform": [
+    [1, 0, 50],
+    [0, 1, 50]
+  ],
+  "relativeTransform": [
+    [1, 0, 50],
+    [0, 1, 50]
+  ],
+  "width": 16,
+  "height": 16,
+  "fills": [{ "type": "SOLID", "color": { "r": 0.1, "g": 0.1, "b": 0.1, "a": 1 } }],
+  "strokes": [],
+  "fillGeometry": [{ "path": "M 8 0 L 16 16 L 0 16 Z", "windingRule": "NONZERO" }]
+}

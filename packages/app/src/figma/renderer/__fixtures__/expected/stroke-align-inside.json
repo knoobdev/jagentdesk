@@ -1,0 +1,76 @@
+[
+  ["save"],
+  ["setTransform", 1, 0, 0, 1, 0, 0],
+  ["save"],
+  ["setTransform", 1, 0, 0, 1, 0, 0],
+  ["set:globalAlpha", 1],
+  ["save"],
+  ["set:globalAlpha", 1],
+  ["set:fillStyle", "rgba(255, 255, 255, 1)"],
+  [
+    "fill",
+    {
+      "commands": [
+        ["moveTo", 4, 0],
+        ["lineTo", 56, 0],
+        ["arcTo", 60, 0, 60, 4, 4],
+        ["lineTo", 60, 20],
+        ["arcTo", 60, 24, 56, 24, 4],
+        ["lineTo", 4, 24],
+        ["arcTo", 0, 24, 0, 20, 4],
+        ["lineTo", 0, 4],
+        ["arcTo", 0, 0, 4, 0, 4],
+        ["closePath"]
+      ]
+    },
+    "nonzero"
+  ],
+  ["restore"],
+  ["save"],
+  ["set:lineWidth", 2],
+  ["set:lineCap", "butt"],
+  ["set:lineJoin", "miter"],
+  ["set:strokeStyle", "rgba(0, 0, 0, 1)"],
+  ["set:globalAlpha", 1],
+  ["save"],
+  [
+    "clip",
+    {
+      "commands": [
+        ["moveTo", 4, 0],
+        ["lineTo", 56, 0],
+        ["arcTo", 60, 0, 60, 4, 4],
+        ["lineTo", 60, 20],
+        ["arcTo", 60, 24, 56, 24, 4],
+        ["lineTo", 4, 24],
+        ["arcTo", 0, 24, 0, 20, 4],
+        ["lineTo", 0, 4],
+        ["arcTo", 0, 0, 4, 0, 4],
+        ["closePath"]
+      ]
+    },
+    "nonzero"
+  ],
+  ["set:lineWidth", 4],
+  [
+    "stroke",
+    {
+      "commands": [
+        ["moveTo", 4, 0],
+        ["lineTo", 56, 0],
+        ["arcTo", 60, 0, 60, 4, 4],
+        ["lineTo", 60, 20],
+        ["arcTo", 60, 24, 56, 24, 4],
+        ["lineTo", 4, 24],
+        ["arcTo", 0, 24, 0, 20, 4],
+        ["lineTo", 0, 4],
+        ["arcTo", 0, 0, 4, 0, 4],
+        ["closePath"]
+      ]
+    }
+  ],
+  ["restore"],
+  ["restore"],
+  ["restore"],
+  ["restore"]
+]

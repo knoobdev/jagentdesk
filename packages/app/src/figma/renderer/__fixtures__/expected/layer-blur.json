@@ -1,0 +1,29 @@
+[
+  ["save"],
+  ["setTransform", 1, 0, 0, 1, 0, 0],
+  ["save"],
+  ["setTransform", 1, 0, 0, 1, 0, 0],
+  ["set:globalAlpha", 1],
+  ["set:filter", "blur(8px)"],
+  ["save"],
+  ["set:globalAlpha", 1],
+  ["set:fillStyle", "rgba(77, 153, 230, 1)"],
+  [
+    "fill",
+    {
+      "commands": [
+        ["moveTo", 0, 0],
+        ["lineTo", 60, 0],
+        ["lineTo", 60, 60],
+        ["lineTo", 0, 60],
+        ["lineTo", 0, 0],
+        ["closePath"]
+      ]
+    },
+    "nonzero"
+  ],
+  ["restore"],
+  ["set:filter", "none"],
+  ["restore"],
+  ["restore"]
+]

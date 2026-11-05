@@ -1,0 +1,27 @@
+{
+  "id": "1:9",
+  "name": "Ring",
+  "type": "VECTOR",
+  "visible": true,
+  "opacity": 1,
+  "blendMode": "NORMAL",
+  "absoluteBoundingBox": { "x": 0, "y": 0, "width": 20, "height": 20 },
+  "absoluteTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "relativeTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "width": 20,
+  "height": 20,
+  "fills": [{ "type": "SOLID", "color": { "r": 0.5, "g": 0, "b": 0.5, "a": 1 } }],
+  "strokes": [],
+  "fillGeometry": [
+    {
+      "path": "M 10 0 A 10 10 0 1 0 10 20 A 10 10 0 1 0 10 0 Z M 10 5 A 5 5 0 1 0 10 15 A 5 5 0 1 0 10 5 Z",
+      "windingRule": "EVENODD"
+    }
+  ]
+}

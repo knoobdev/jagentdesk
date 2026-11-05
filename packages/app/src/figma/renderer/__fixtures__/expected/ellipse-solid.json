@@ -1,0 +1,20 @@
+[
+  ["save"],
+  ["setTransform", 1, 0, 0, 1, 0, 0],
+  ["save"],
+  ["setTransform", 1, 0, 0, 1, 200, 10],
+  ["set:globalAlpha", 1],
+  ["save"],
+  ["set:globalAlpha", 1],
+  ["set:fillStyle", "rgba(255, 102, 51, 1)"],
+  [
+    "fill",
+    {
+      "commands": [["ellipse", 32, 32, 32, 32, 0, 0, 6.283185307179586, 0]]
+    },
+    "nonzero"
+  ],
+  ["restore"],
+  ["restore"],
+  ["restore"]
+]

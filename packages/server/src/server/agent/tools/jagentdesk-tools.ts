@@ -124,6 +124,7 @@ import { registerSshAgentTools, type SshAgentTool } from "../../ssh/environment/
 import type { ArgoCdAgentTool } from "../../argocd/agent-tools.js";
 import type { SideloadAgentTool } from "../../sideload/agent-tools.js";
 import type { JiraAgentTool } from "../../jira/agent-tools.js";
+import type { FigmaAgentTool } from "../../figma/agent-tools.js";
 import type { DatabaseRegistry } from "../../database/database-registry.js";
 import type { DatabaseEngine } from "../../database/database-dto.js";
 import { execCommand } from "../../../utils/spawn.js";
@@ -202,6 +203,8 @@ export interface JAgentDeskToolHostDependencies {
   sideloadAgentTools?: (callerAgentId: string | null) => SideloadAgentTool[];
   // Jira (spec 29.4): jira_* tools; reads auto-run, writes raise the permission card.
   jiraAgentTools?: (callerAgentId: string | null) => JiraAgentTool[];
+  // Figma (spec 32.7): figma_* tools; reads auto-run, writes raise the permission card.
+  figmaAgentTools?: (callerAgentId: string | null) => FigmaAgentTool[];
   // Daemon-wide Forge Hub service (spec 19 / ADR-0015). Lets ANY agent read and
   // operate GitHub/GitLab/Bitbucket via the forge_* tools, mirroring how
   // clusterRegistry backs the kubectl_* tools. Single instance so all agents
@@ -4154,6 +4157,15 @@ export function createJAgentDeskToolCatalog(
   }
   if (options.jiraAgentTools) {
     for (const tool of options.jiraAgentTools(callerAgentId ?? null)) {
+      registerTool(
+        tool.name,
+        { title: tool.title, description: tool.description, inputSchema: tool.inputSchema },
+        tool.handler,
+      );
+    }
+  }
+  if (options.figmaAgentTools) {
+    for (const tool of options.figmaAgentTools(callerAgentId ?? null)) {
       registerTool(
         tool.name,
         { title: tool.title, description: tool.description, inputSchema: tool.inputSchema },

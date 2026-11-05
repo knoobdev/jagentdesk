@@ -1,0 +1,25 @@
+[
+  ["save"],
+  ["setTransform", 1, 0, 0, 1, 0, 0],
+  ["save"],
+  ["setTransform", 1, 0, 0, 1, 30, 30],
+  ["set:globalAlpha", 1],
+  ["save"],
+  ["set:globalAlpha", 1],
+  ["set:fillStyle", "rgba(0, 0, 0, 1)"],
+  [
+    "fill",
+    {
+      "commands": [
+        ["moveTo", 12, 0],
+        ["lineTo", 22.392304845413264, 18],
+        ["lineTo", 1.6076951545867377, 18.000000000000004],
+        ["closePath"]
+      ]
+    },
+    "nonzero"
+  ],
+  ["restore"],
+  ["restore"],
+  ["restore"]
+]

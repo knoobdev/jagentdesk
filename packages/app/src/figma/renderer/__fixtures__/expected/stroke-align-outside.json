@@ -1,0 +1,32 @@
+[
+  ["save"],
+  ["setTransform", 1, 0, 0, 1, 0, 0],
+  ["save"],
+  ["setTransform", 1, 0, 0, 1, 0, 0],
+  ["set:globalAlpha", 1],
+  ["save"],
+  ["set:lineWidth", 4],
+  ["set:lineCap", "butt"],
+  ["set:lineJoin", "miter"],
+  ["set:strokeStyle", "rgba(230, 26, 26, 1)"],
+  ["set:globalAlpha", 1],
+  ["save"],
+  [
+    "clip",
+    {
+      "commands": [["ellipse", 16, 16, 16, 16, 0, 0, 6.283185307179586, 0]]
+    },
+    "nonzero"
+  ],
+  ["set:lineWidth", 8],
+  [
+    "stroke",
+    {
+      "commands": [["ellipse", 16, 16, 16, 16, 0, 0, 6.283185307179586, 0]]
+    }
+  ],
+  ["restore"],
+  ["restore"],
+  ["restore"],
+  ["restore"]
+]

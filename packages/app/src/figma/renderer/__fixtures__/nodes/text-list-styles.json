@@ -1,0 +1,34 @@
+{
+  "id": "14:7",
+  "name": "Bullets",
+  "type": "TEXT",
+  "visible": true,
+  "opacity": 1,
+  "blendMode": "NORMAL",
+  "absoluteBoundingBox": { "x": 0, "y": 0, "width": 200, "height": 60 },
+  "absoluteTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "relativeTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "width": 200,
+  "height": 60,
+  "characters": "one\ntwo",
+  "textAutoResize": "HEIGHT",
+  "style": {
+    "fontFamily": "Inter",
+    "fontStyle": "Regular",
+    "fontSize": 14,
+    "textAlignHorizontal": "LEFT",
+    "textAlignVertical": "TOP",
+    "lineHeightUnit": "AUTO"
+  },
+  "characterStyleOverrides": [],
+  "styleOverrideTable": {},
+  "styles": { "listStyles": { "type": "BULLETED", "level": 0 } },
+  "fills": [{ "type": "SOLID", "color": { "r": 0, "g": 0, "b": 0, "a": 1 } }],
+  "strokes": []
+}

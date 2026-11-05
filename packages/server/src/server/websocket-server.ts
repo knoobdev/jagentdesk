@@ -27,6 +27,7 @@ import type { DatabaseRegistry } from "./database/database-registry.js";
 import { SshService } from "./ssh/ssh-service.js";
 import type { SideloadService } from "./sideload/sideload-service.js";
 import type { JiraService } from "./jira/service.js";
+import type { FigmaService } from "./figma/service.js";
 import type { ScheduleService } from "./schedule/service.js";
 import type { AutorunService } from "./autorun/service.js";
 import type { SpecModeService } from "./spec-mode/service.js";
@@ -665,6 +666,7 @@ export class VoiceAssistantWebSocketServer {
   private readonly specPlanSource: SpecModePlanSource;
   // Jira (spec 29), injected post-construction like the Agent Forum.
   private jiraService: JiraService | null = null;
+  private figmaService: FigmaService | null = null;
   private agentForumBootstrap:
     | ((input: { topicId: string; prompt: string; originAgentId?: string }) => void | Promise<void>)
     | null = null;
@@ -1908,6 +1910,10 @@ export class VoiceAssistantWebSocketServer {
     this.jiraService = service;
   }
 
+  public setFigmaService(service: FigmaService | null): void {
+    this.figmaService = service;
+  }
+
   // Inject the Agent Forum service + its orchestration-bootstrap hook after construction (Team mode).
   public setAgentForum(
     service: AgentForumService | null,
@@ -1987,6 +1993,7 @@ export class VoiceAssistantWebSocketServer {
       argocdService: this.argocdService,
       sideloadService: this.sideloadService,
       jiraService: this.jiraService,
+      figmaService: this.figmaService,
       scheduleService: this.scheduleService,
       autorunService: this.autorunService,
       specModeService: this.specModeService,
@@ -2463,6 +2470,8 @@ export class VoiceAssistantWebSocketServer {
         ...(this.argocdService ? { argocd: true } : {}),
         // Jira (spec 29 / ADR-0034): capability `jira`, advertised when the service is wired.
         ...(this.jiraService ? { jira: true } : {}),
+        // Figma (spec 32 / ADR-0035).
+        ...(this.figmaService ? { figma: true } : {}),
         // Advertise the plugin management surface only when a PluginService is
         // wired; without it the plugin.* RPCs return empty/disabled results.
         ...(this.pluginRuntime

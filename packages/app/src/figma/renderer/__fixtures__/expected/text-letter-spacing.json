@@ -1,0 +1,20 @@
+[
+  ["save"],
+  ["setTransform", 1, 0, 0, 1, 0, 0],
+  ["save"],
+  ["setTransform", 1, 0, 0, 1, 0, 0],
+  ["set:globalAlpha", 1],
+  ["set:font", "500 12px \"Inter\""],
+  ["measureText", "abc"],
+  ["set:textAlign", "left"],
+  ["set:textBaseline", "alphabetic"],
+  ["set:font", "500 12px \"Inter\""],
+  ["measureText", "abc"],
+  ["set:font", "500 12px \"Inter\""],
+  ["set:letterSpacing", "2px"],
+  ["set:fillStyle", "rgba(0, 0, 0, 1)"],
+  ["set:globalAlpha", 1],
+  ["fillText", "abc", 0, 9.600000000000001],
+  ["restore"],
+  ["restore"]
+]

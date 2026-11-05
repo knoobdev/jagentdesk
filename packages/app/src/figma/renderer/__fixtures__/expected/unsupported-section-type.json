@@ -1,0 +1,10 @@
+[
+  ["save"],
+  ["setTransform", 1, 0, 0, 1, 0, 0],
+  ["save"],
+  ["setTransform", 1, 0, 0, 1, 0, 0],
+  ["set:globalAlpha", 1],
+  ["drawImage", "raster:14:1", 0, 0, 400, 300],
+  ["restore"],
+  ["restore"]
+]

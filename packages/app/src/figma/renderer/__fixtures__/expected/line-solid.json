@@ -1,0 +1,9 @@
+[
+  ["save"],
+  ["setTransform", 1, 0, 0, 1, 0, 0],
+  ["save"],
+  ["setTransform", 1, 0, 0, 1, 0, 300],
+  ["set:globalAlpha", 1],
+  ["restore"],
+  ["restore"]
+]

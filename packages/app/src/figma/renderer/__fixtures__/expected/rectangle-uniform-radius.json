@@ -1,0 +1,31 @@
+[
+  ["save"],
+  ["setTransform", 1, 0, 0, 1, 0, 0],
+  ["save"],
+  ["setTransform", 1, 0, 0, 1, 5, 5],
+  ["set:globalAlpha", 1],
+  ["save"],
+  ["set:globalAlpha", 1],
+  ["set:fillStyle", "rgba(0, 128, 128, 1)"],
+  [
+    "fill",
+    {
+      "commands": [
+        ["moveTo", 10, 0],
+        ["lineTo", 50, 0],
+        ["arcTo", 60, 0, 60, 10, 10],
+        ["lineTo", 60, 10],
+        ["arcTo", 60, 20, 50, 20, 10],
+        ["lineTo", 10, 20],
+        ["arcTo", 0, 20, 0, 10, 10],
+        ["lineTo", 0, 10],
+        ["arcTo", 0, 0, 10, 0, 10],
+        ["closePath"]
+      ]
+    },
+    "nonzero"
+  ],
+  ["restore"],
+  ["restore"],
+  ["restore"]
+]

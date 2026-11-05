@@ -1,0 +1,28 @@
+{
+  "id": "7:1",
+  "name": "Minus",
+  "type": "BOOLEAN_OPERATION",
+  "visible": true,
+  "opacity": 1,
+  "blendMode": "NORMAL",
+  "booleanOperation": "EXCLUDE",
+  "absoluteBoundingBox": { "x": 0, "y": 0, "width": 40, "height": 40 },
+  "absoluteTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "relativeTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "width": 40,
+  "height": 40,
+  "strokes": [],
+  "fills": [{ "type": "SOLID", "color": { "r": 0.2, "g": 0.2, "b": 0.2, "a": 1 } }],
+  "fillGeometry": [
+    {
+      "path": "M 0 0 L 40 0 L 40 40 L 0 40 Z M 10 10 L 30 10 L 30 30 L 10 30 Z",
+      "windingRule": "EVENODD"
+    }
+  ]
+}

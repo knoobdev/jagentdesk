@@ -196,8 +196,10 @@ import { SideloadService, type SideloadSigner } from "./sideload/sideload-servic
 import { createSideloadAgentTools } from "./sideload/agent-tools.js";
 import { createSideloadDeviceSigner } from "./devices/sideload-signer.js";
 import { JiraService } from "./jira/service.js";
+import { createFigmaService } from "./figma/create.js";
 import { atlassianEndpointsFromEnv } from "./jira/credentials.js";
 import { createJiraAgentTools } from "./jira/agent-tools.js";
+import { createFigmaAgentTools } from "./figma/agent-tools.js";
 import { SshModules } from "./ssh/ssh-modules.js";
 import { SshModules as SshServerModules } from "./ssh/modules.js";
 import { applyTerminalAgentHookSetting } from "../terminal/agent-hooks/terminal-agent-hook-setting.js";
@@ -1416,6 +1418,9 @@ export async function createJAgentDeskDaemon(
   });
   await jiraService.initialize();
   logger.info("Jira service initialized");
+  // Daemon-wide Figma service (spec 32 / ADR-0035): OAuth, REST budget, Figma Link bridge.
+  const figmaService = await createFigmaService({ jagentdeskHome: config.jagentdeskHome, logger });
+  logger.info("Figma service initialized");
   const createScheduleLocalWorkspaceExternal = async (input: {
     cwd: string;
     firstAgentContext: FirstAgentContext;
@@ -1649,6 +1654,13 @@ export async function createJAgentDeskDaemon(
         requestPermission: (agentId, request) =>
           agentManager.requestHostToolPermission(agentId, request),
       }),
+    figmaAgentTools: (callerAgentId) =>
+      createFigmaAgentTools({
+        service: figmaService,
+        callerAgentId,
+        requestPermission: (agentId, request) =>
+          agentManager.requestHostToolPermission(agentId, request),
+      }),
     skillsStorage,
     forgeHub: forgeHubService,
     browserFingerprintProfiles: {
@@ -1877,6 +1889,7 @@ export async function createJAgentDeskDaemon(
             });
             server.setSpecModeService(specModeService);
             server.setJiraService(jiraService);
+            server.setFigmaService(figmaService);
             server.setAgentForum(
               agentForumService,
               createForumBootstrap({ agentManager, agentStorage, logger }),
@@ -2085,6 +2098,7 @@ export async function createJAgentDeskDaemon(
     argocdService.dispose();
     sideloadService.dispose();
     jiraService.dispose();
+    void figmaService.dispose();
     speechService.stop();
     await scheduleService.stop().catch(() => undefined);
     await autorunService?.stop().catch(() => undefined);

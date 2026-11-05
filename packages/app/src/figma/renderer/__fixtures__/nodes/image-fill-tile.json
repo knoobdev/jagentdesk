@@ -1,0 +1,29 @@
+{
+  "id": "4:2",
+  "name": "Pattern",
+  "type": "RECTANGLE",
+  "visible": true,
+  "opacity": 1,
+  "blendMode": "NORMAL",
+  "absoluteBoundingBox": { "x": 0, "y": 0, "width": 64, "height": 64 },
+  "absoluteTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "relativeTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "width": 64,
+  "height": 64,
+  "fills": [
+    {
+      "type": "IMAGE",
+      "visible": true,
+      "opacity": 1,
+      "imageRef": "tile-ref-0001",
+      "scaleMode": "TILE"
+    }
+  ],
+  "strokes": []
+}

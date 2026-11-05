@@ -1,0 +1,65 @@
+[
+  ["save"],
+  ["setTransform", 1, 0, 0, 1, 0, 0],
+  ["save"],
+  ["setTransform", 1, 0, 0, 1, 0, 0],
+  ["set:globalAlpha", 1],
+  [
+    "clip",
+    {
+      "commands": [
+        ["moveTo", 6, 0],
+        ["lineTo", 114, 0],
+        ["arcTo", 120, 0, 120, 6, 6],
+        ["lineTo", 120, 34],
+        ["arcTo", 120, 40, 114, 40, 6],
+        ["lineTo", 6, 40],
+        ["arcTo", 0, 40, 0, 34, 6],
+        ["lineTo", 0, 6],
+        ["arcTo", 0, 0, 6, 0, 6],
+        ["closePath"]
+      ]
+    },
+    null
+  ],
+  ["save"],
+  ["set:globalAlpha", 1],
+  ["set:fillStyle", "rgba(26, 77, 204, 1)"],
+  [
+    "fill",
+    {
+      "commands": [
+        ["moveTo", 6, 0],
+        ["lineTo", 114, 0],
+        ["arcTo", 120, 0, 120, 6, 6],
+        ["lineTo", 120, 34],
+        ["arcTo", 120, 40, 114, 40, 6],
+        ["lineTo", 6, 40],
+        ["arcTo", 0, 40, 0, 34, 6],
+        ["lineTo", 0, 6],
+        ["arcTo", 0, 0, 6, 0, 6],
+        ["closePath"]
+      ]
+    },
+    "nonzero"
+  ],
+  ["restore"],
+  ["save"],
+  ["save"],
+  ["setTransform", 1, 0, 0, 1, 34, 10],
+  ["set:globalAlpha", 1],
+  ["set:font", "400 16px \"Inter\""],
+  ["measureText", "Click"],
+  ["set:textAlign", "left"],
+  ["set:textBaseline", "alphabetic"],
+  ["set:font", "400 16px \"Inter\""],
+  ["measureText", "Click"],
+  ["set:font", "400 16px \"Inter\""],
+  ["set:fillStyle", "rgba(255, 255, 255, 1)"],
+  ["set:globalAlpha", 1],
+  ["fillText", "Click", 0, 12.8],
+  ["restore"],
+  ["restore"],
+  ["restore"],
+  ["restore"]
+]
