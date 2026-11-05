@@ -18,8 +18,8 @@ import { isNative as platformIsNative } from "@/constants/platform";
 import { inlineUnistylesStyle } from "@/styles/unistyles-inline-style";
 import type { Theme } from "@/styles/theme";
 
-/** Menu tiles per row. Four columns keep the whole grid inside a third of the drawer. */
-const GRID_COLUMNS = 4;
+/** Menu tiles per row. Five columns fit every item (17–20) in four rows, about a third of the drawer. */
+const GRID_COLUMNS = 5;
 const TILE_MIN_HEIGHT = 52;
 const TILE_ICON_SIZE = 20;
 const MENU_TOGGLE_ROW_HEIGHT = 36;
