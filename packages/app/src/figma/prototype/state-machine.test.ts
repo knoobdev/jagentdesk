@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  baseFrameIdFor,
   currentFrameId,
   DEFAULT_OVERLAY_SETTINGS,
   emptyPlayerState,
@@ -236,5 +237,30 @@ describe("player state machine", () => {
     expect(parseOverlayPosition("BOTTOM_RIGHT")).toBe("BOTTOM_RIGHT");
     expect(parseOverlayPosition("MANUAL")).toBe("CENTER");
     expect(parseOverlayPosition(undefined)).toBe("CENTER");
+  });
+
+  it("keeps the frame UNDER the overlays as the stage's base (G5 bug 2)", () => {
+    let state = startedState();
+    expect(baseFrameIdFor(state)).toBe("A");
+    state = step(
+      state,
+      { type: "interaction", action: { kind: "overlay", destinationId: "Sheet" } },
+      ctx(),
+    ).state;
+    // The top overlay is what the machine considers active — and what the old PlayerStage drew
+    // as the base canvas, hiding the frame behind the sheet entirely.
+    expect(currentFrameId(state)).toBe("Sheet");
+    expect(baseFrameIdFor(state)).toBe("A");
+    // Stacking a second overlay still keeps the top-level frame as the base.
+    state = step(
+      state,
+      { type: "interaction", action: { kind: "overlay", destinationId: "Sheet2" } },
+      ctx(),
+    ).state;
+    expect(baseFrameIdFor(state)).toBe("A");
+    // Closing everything leaves base and current frame identical.
+    state = step(state, { type: "overlay_dismiss" }, ctx()).state;
+    state = step(state, { type: "overlay_dismiss" }, ctx()).state;
+    expect(baseFrameIdFor(state)).toBe(currentFrameId(state));
   });
 });

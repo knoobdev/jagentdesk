@@ -110,6 +110,16 @@ export function currentFrameId(state: PlayerState): string | null {
   return state.stack.length > 0 ? state.stack[state.stack.length - 1] : null;
 }
 
+/**
+ * The frame UNDER the overlay stack — what the stage must keep drawing while an overlay is
+ * open (G5 bug 2). Using `currentFrameId` instead made the base canvas follow the top overlay,
+ * so opening a sheet replaced the frame behind it: a flat dim backdrop with nothing under it.
+ */
+export function baseFrameIdFor(state: PlayerState): string | null {
+  const top = state.stack[state.stack.length - 1];
+  return top ?? null;
+}
+
 function timeoutFor(state: PlayerState, ctx: PlayerContext): PendingTimeout | null {
   const frameId = currentFrameId(state);
   if (!frameId) return null;

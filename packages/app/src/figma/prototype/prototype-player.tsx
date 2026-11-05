@@ -31,11 +31,13 @@ import {
   type InteractionMap,
   type ParsedInteraction,
 } from "./interactions";
-import { findNodeById } from "./node-geometry";
+import { findNodeById, nodeBounds, type Rect } from "./node-geometry";
+import { placeOverlay } from "./overlay-placement";
 import { smartAnimateOverrides } from "./smart-animate";
 import { pickStartPosition } from "./start-selection";
 import { advanceTimeline, transitionVisuals } from "./transition-timeline";
 import {
+  baseFrameIdFor,
   currentFrameId,
   DEFAULT_OVERLAY_SETTINGS,
   emptyPlayerState,
@@ -217,7 +219,11 @@ export function PrototypePlayer({ file, outline, startNodeId, onClose }: Prototy
     void prototypeRequest.refetch();
   }, [prototypeRequest]);
 
-  const root = activeFrameId ? frames.nodeFor(activeFrameId) : null;
+  // G5 bug 2: the base canvas follows the frame STACK, never the top overlay. Making it follow
+  // currentFrameId replaced the frame behind an open sheet, so the backdrop was flat grey.
+  const baseFrameId = baseFrameIdFor(player);
+  const root = baseFrameId ? frames.nodeFor(baseFrameId) : null;
+  const baseBounds = root ? nodeBounds(root) : null;
   const renderHotspots = useCallback(
     (space: StageSpace) => (
       <HotspotsLayer
@@ -293,6 +299,7 @@ export function PrototypePlayer({ file, outline, startNodeId, onClose }: Prototy
             frames={frames}
             overlays={player.overlays}
             stage={stage}
+            base={baseBounds}
             onDismiss={dismissTopOverlay}
           />
         ) : null}
@@ -676,17 +683,22 @@ function Hotspot({
 
 // ── Overlays ───────────────────────────────────────────────────────────────
 
-function OverlayStack({
+// Exported for tests. Layers paint in stack order (last = topmost): each layer's dim backdrop
+// covers the stage, then its sheet sits at the base frame's scale per `placeOverlay`.
+export function OverlayStack({
   file,
   frames,
   overlays,
   stage,
+  base,
   onDismiss,
 }: {
   file: PrototypePlayerProps["file"];
   frames: FrameLookup;
   overlays: OverlayEntry[];
   stage: { width: number; height: number };
+  /** Bounds of the frame the overlays sit on top of (G5 bug 2: it stays on stage). */
+  base: Rect | null;
   onDismiss: () => void;
 }) {
   return (
@@ -698,6 +710,7 @@ function OverlayStack({
           entry={entry}
           frames={frames}
           stage={stage}
+          base={base}
           onDismiss={onDismiss}
         />
       ))}
@@ -710,57 +723,66 @@ function OverlayLayer({
   entry,
   frames,
   stage,
+  base,
   onDismiss,
 }: {
   file: PrototypePlayerProps["file"];
   entry: OverlayEntry;
   frames: FrameLookup;
   stage: { width: number; height: number };
+  base: Rect | null;
   onDismiss: () => void;
 }) {
   const root = frames.nodeFor(entry.frameId);
-  const hostStyle = entry.settings.dimColor
-    ? [
-        styles.overlayHost,
-        overlayAlignment(entry.settings.position),
-        { backgroundColor: entry.settings.dimColor },
-      ]
-    : [styles.overlayHost, overlayAlignment(entry.settings.position)];
   const close = entry.settings.closeOnClickOutside ? onDismiss : undefined;
   const keepOpen = useCallback(() => !entry.settings.closeOnClickOutside, [entry]);
-  if (!root) return null;
+  if (!root || !base) return null;
+  const overlay = nodeBounds(root);
+  if (!overlay) return null;
+  // G5 bug 1: the sheet fits the BASE frame's box, not the stage — same scale, same origin.
+  const placement = placeOverlay({
+    stageWidth: stage.width,
+    stageHeight: stage.height,
+    baseWidth: base.width,
+    baseHeight: base.height,
+    overlayWidth: overlay.width,
+    overlayHeight: overlay.height,
+    position: entry.settings.position,
+  });
+  if (!placement) return null;
+  const hostStyle = entry.settings.dimColor
+    ? [styles.overlayHost, { backgroundColor: entry.settings.dimColor }]
+    : styles.overlayHost;
   return (
-    <Pressable style={hostStyle} onPress={close} accessibilityRole="button">
-      <View onStartShouldSetResponder={keepOpen}>
+    <Pressable
+      style={hostStyle}
+      onPress={close}
+      accessibilityRole="button"
+      testID={`figma-overlay-host-${entry.frameId}`}
+    >
+      <View
+        onStartShouldSetResponder={keepOpen}
+        testID={`figma-overlay-sheet-${entry.frameId}`}
+        style={[
+          styles.overlaySheet,
+          {
+            left: placement.x,
+            top: placement.y,
+            width: placement.width,
+            height: placement.height,
+          },
+        ]}
+      >
         <FrameStage
           file={file}
           root={root}
-          width={stage.width}
-          height={stage.height}
+          width={placement.width}
+          height={placement.height}
           scroll={false}
         />
       </View>
     </Pressable>
   );
-}
-
-function overlayAlignment(position: OverlaySettings["position"]) {
-  switch (position) {
-    case "TOP_LEFT":
-      return { alignItems: "flex-start" as const, justifyContent: "flex-start" as const };
-    case "TOP_CENTER":
-      return { alignItems: "center" as const, justifyContent: "flex-start" as const };
-    case "TOP_RIGHT":
-      return { alignItems: "flex-end" as const, justifyContent: "flex-start" as const };
-    case "BOTTOM_LEFT":
-      return { alignItems: "flex-start" as const, justifyContent: "flex-end" as const };
-    case "BOTTOM_CENTER":
-      return { alignItems: "center" as const, justifyContent: "flex-end" as const };
-    case "BOTTOM_RIGHT":
-      return { alignItems: "flex-end" as const, justifyContent: "flex-end" as const };
-    default:
-      return { alignItems: "center" as const, justifyContent: "center" as const };
-  }
 }
 
 const styles = StyleSheet.create((theme: Theme) => ({
@@ -830,4 +852,6 @@ const styles = StyleSheet.create((theme: Theme) => ({
   },
   overlayStack: { position: "absolute", left: 0, right: 0, top: 0, bottom: 0 },
   overlayHost: { position: "absolute", left: 0, right: 0, top: 0, bottom: 0 },
+  // Positioned by `placeOverlay` — the sheet never covers the whole stage.
+  overlaySheet: { position: "absolute", overflow: "hidden" },
 }));

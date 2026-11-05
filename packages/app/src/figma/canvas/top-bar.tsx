@@ -39,7 +39,8 @@ export interface FigmaTopBarProps {
   selectedNodeId: string | null;
   camera: Camera;
   size: { width: number; height: number };
-  /** Phone layout (<600px): the bar wraps, the title truncates, the badge moves under it. */
+  /** Phone layout (<600px): zoom + "•••" stay one cluster on the bar's row; the title shrinks
+   *  and the data-source badge is forced onto its own line below. */
   compact: boolean;
   onCamera: (next: Camera) => void;
   onSelectPage: (pageId: string) => void;
@@ -71,6 +72,11 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   badgeLine: { maxWidth: "100%" },
+  // G5 bug 3: the zoom cluster and the "•••" overflow must never wrap apart on a phone — they
+  // are one fixed-width unit and the title/page picker shrink around them. The data-source
+  // badge is the only thing allowed on a second line (below the title, phone layout).
+  controlCluster: { flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 0 },
+  badgeRow: { width: "100%" },
 });
 
 // Theme-reactive chevron so the page trigger inherits the muted foreground on every theme
@@ -158,6 +164,37 @@ export function FigmaTopBar({
   }, [fileKey, selectedNodeId]);
   const dismissPages = useCallback(() => setPagesOpen(false), []);
 
+  const badge = (
+    /* Compact: shrink in place (the pill's text wraps) so the badge never runs off the edge. */
+    <View style={styles.badgeLine}>
+      <SourceBadge version={version} outline={outline} />
+    </View>
+  );
+  const moreMenu = (
+    /* Secondary leave-the-canvas actions live in one overflow menu so the title and the
+       page picker keep their natural width at desktop sizes. */
+    <DropdownMenu open={moreOpen} onOpenChange={setMoreOpen}>
+      <DropdownMenuTrigger
+        accessibilityLabel="More actions"
+        style={styles.moreTrigger}
+        testID="figma-top-bar-more"
+      >
+        <ThemedMoreHorizontal size={16} />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent>
+        <DropdownMenuItem onSelect={openFigma} testID="figma-open-in-figma">
+          Open in Figma
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={onOpenPrototype} testID="figma-prototype">
+          Prototype
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={onAskAi} testID="figma-ask-ai">
+          Ask AI
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+
   return (
     <View style={[jiraStyles.row, styles.bar, compact && styles.barWrap]} testID="figma-top-bar">
       <Text style={[jiraStyles.textStrong, styles.title]} numberOfLines={1}>
@@ -186,64 +223,45 @@ export function FigmaTopBar({
 
       <View style={jiraStyles.spacer} />
 
-      <View style={jiraStyles.row}>
-        <Button
-          size="xs"
-          variant="ghost"
-          leftIcon={ZoomOut}
-          onPress={zoomOut}
-          accessibilityLabel="Zoom out"
-        />
-        {/* One zoom control: the readout doubles as the reset-to-100% button (the old bar
-            showed "100%" twice — a readout Text and a separate 100% Button). */}
-        <Button
-          size="xs"
-          variant="ghost"
-          onPress={reset100}
-          accessibilityLabel="Reset zoom to 100%"
-          testID="figma-zoom-reset"
-        >
-          {formatZoomReadout(camera.zoom)}
-        </Button>
-        <Button
-          size="xs"
-          variant="ghost"
-          leftIcon={ZoomIn}
-          onPress={zoomIn}
-          accessibilityLabel="Zoom in"
-        />
-        <Button size="xs" variant="ghost" onPress={fit} testID="figma-fit">
-          Fit
-        </Button>
+      {/* G5 bug 3: zoom controls and the "•••" overflow share one non-shrinking cluster, so the
+          phone bar keeps them on the same row — the title/picker shrink first and only the badge
+          drops to a second line. (Before: the "•••" button was a loose bar child and wrapped to
+          its own row under the zoom controls.) */}
+      <View style={styles.controlCluster} testID="figma-top-bar-controls">
+        <View style={jiraStyles.row}>
+          <Button
+            size="xs"
+            variant="ghost"
+            leftIcon={ZoomOut}
+            onPress={zoomOut}
+            accessibilityLabel="Zoom out"
+          />
+          {/* One zoom control: the readout doubles as the reset-to-100% button (the old bar
+              showed "100%" twice — a readout Text and a separate 100% Button). */}
+          <Button
+            size="xs"
+            variant="ghost"
+            onPress={reset100}
+            accessibilityLabel="Reset zoom to 100%"
+            testID="figma-zoom-reset"
+          >
+            {formatZoomReadout(camera.zoom)}
+          </Button>
+          <Button
+            size="xs"
+            variant="ghost"
+            leftIcon={ZoomIn}
+            onPress={zoomIn}
+            accessibilityLabel="Zoom in"
+          />
+          <Button size="xs" variant="ghost" onPress={fit} testID="figma-fit">
+            Fit
+          </Button>
+        </View>
+        {compact ? null : badge}
+        {moreMenu}
       </View>
-
-      {/* Compact: shrink in place (the pill's text wraps) so the badge never runs off the edge. */}
-      <View style={styles.badgeLine}>
-        <SourceBadge version={version} outline={outline} />
-      </View>
-
-      {/* Secondary leave-the-canvas actions live in one overflow menu so the title and the
-          page picker keep their natural width at desktop sizes. */}
-      <DropdownMenu open={moreOpen} onOpenChange={setMoreOpen}>
-        <DropdownMenuTrigger
-          accessibilityLabel="More actions"
-          style={styles.moreTrigger}
-          testID="figma-top-bar-more"
-        >
-          <ThemedMoreHorizontal size={16} />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent>
-          <DropdownMenuItem onSelect={openFigma} testID="figma-open-in-figma">
-            Open in Figma
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={onOpenPrototype} testID="figma-prototype">
-            Prototype
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={onAskAi} testID="figma-ask-ai">
-            Ask AI
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      {compact ? <View style={styles.badgeRow}>{badge}</View> : null}
     </View>
   );
 }
