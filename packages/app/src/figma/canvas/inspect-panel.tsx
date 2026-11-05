@@ -49,7 +49,7 @@ function firstSolidColor(node: FigmaNode): FigmaColor | null {
 const styles = StyleSheet.create((theme: Theme) => ({
   panel: {
     flex: 1,
-    backgroundColor: theme.colors.surface,
+    backgroundColor: theme.colors.surface0,
   },
   emptyWrap: {
     padding: 16,
