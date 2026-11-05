@@ -64,10 +64,15 @@ export function parseFigmaTeamUrl(input: string): string | null {
   return BARE_KEY.test(segments[2]) ? segments[2] : null;
 }
 
-interface FileMetaResponse {
+interface FileMetaBody {
   name?: unknown;
   version?: unknown;
   last_touched_at?: unknown;
+}
+
+/** `GET /v1/files/:key/meta` documents `{ file: { name, version, last_touched_at, … } }`. */
+interface FileMetaResponse extends FileMetaBody {
+  file?: FileMetaBody;
 }
 
 interface TeamProjectsResponse {
@@ -88,6 +93,12 @@ function isoToMs(value: unknown): number | undefined {
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+/** The documented `{ file: {...} }` envelope, tolerating the flat shape as well. */
+function fileMetaFields(meta: FileMetaResponse | null | undefined): FileMetaBody {
+  const nested = meta?.file;
+  return nested && typeof nested === "object" ? nested : (meta ?? {});
 }
 
 async function requireConnection(ctx: FigmaContext, connectionId: string): Promise<void> {
@@ -141,7 +152,8 @@ export const filesHandlers: FigmaHandlerMap<FilesRequestType> = {
       path: `/v1/files/${encodeURIComponent(fileKey)}/meta`,
       tier: "3",
     });
-    const name = optionalString(meta?.name);
+    const fields = fileMetaFields(meta);
+    const name = optionalString(fields.name);
     if (!name) {
       throw new FigmaServiceError("figma_error", `Figma returned no file name for ${fileKey}.`);
     }
@@ -150,8 +162,8 @@ export const filesHandlers: FigmaHandlerMap<FilesRequestType> = {
       connectionId: request.connectionId,
       name,
       pinned: existing?.pinned ?? false,
-      lastVersion: optionalString(meta.version),
-      lastModified_ms: isoToMs(meta.last_touched_at),
+      lastVersion: optionalString(fields.version),
+      lastModified_ms: isoToMs(fields.last_touched_at),
       lastOpenedAt_ms: existing?.lastOpenedAt_ms,
       linked: ctx.link.isLinked(fileKey),
     };

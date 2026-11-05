@@ -164,6 +164,33 @@ describe("figma.files.add", () => {
     expect(await ctx.store.getFile("KEY1")).toEqual(response.file);
   });
 
+  it("still accepts a flat top-level meta body", async () => {
+    // The documented shape nests under `file`; some deployments (and the daemon's own cache
+    // history) put the fields at the top level, so the reader tolerates both.
+    api.fileMeta.set("KEY1", { name: "Checkout redesign", version: "881" });
+    api.enqueue({
+      status: 200,
+      body: {
+        name: "Checkout redesign",
+        version: "881",
+        last_touched_at: "2026-11-01T08:00:00.000Z",
+        thumbnail_url: "https://figma-alpha-api.s3.us-west-2.amazonaws.com/images/thumb-KEY1.png",
+        editorType: "figma",
+      },
+    });
+    const response = await filesHandlers["figma.files.add.request"](
+      addRequest("https://www.figma.com/design/KEY1/Checkout"),
+      ctx,
+      session,
+    );
+    expect(response.file).toMatchObject({
+      fileKey: "KEY1",
+      name: "Checkout redesign",
+      lastVersion: "881",
+      lastModified_ms: Date.parse("2026-11-01T08:00:00.000Z"),
+    });
+  });
+
   it("marks the file linked when Figma Link has it open and keeps the pin on re-add", async () => {
     api.fileMeta.set(LINKED_KEY, { name: "Linked file" });
     const first = await filesHandlers["figma.files.add.request"](

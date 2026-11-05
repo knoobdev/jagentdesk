@@ -3,7 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { FigmaTokenProvider } from "./context.js";
 import { FigmaServiceError } from "./context.js";
 import { HttpFigmaRestClient, FIGMA_API_BASE_URL } from "./rest.js";
-import { FakeFigmaApi } from "./test-support/fake-figma-api.js";
+import { documentedFileMeta, FakeFigmaApi } from "./test-support/fake-figma-api.js";
 
 // Deterministic clock; the client's budget window and Retry-After math are relative to now().
 const T0 = 1_762_300_000_000;
@@ -65,13 +65,13 @@ describe("HttpFigmaRestClient", () => {
     api.fileMeta.set("KEY1", { name: "Landing" });
     const tokens = new FakeTokens(["fake-figma-access-token-0001"]);
     const rest = client(tokens);
-    const result = await rest.getJson<{ name: string }>({
+    const result = await rest.getJson<{ file: { name: string } }>({
       connectionId: "fgc_1",
       path: "/v1/files/KEY1/meta",
       query: { ids: "1:2", depth: 2, geometry: "paths", branch_data: true, skip: undefined },
       tier: "3",
     });
-    expect(result.name).toBe("Landing");
+    expect(result.file.name).toBe("Landing");
     const request = api.lastRequest();
     expect(request?.authorization).toBe("Bearer fake-figma-access-token-0001");
     expect(request?.query).toEqual({
@@ -88,8 +88,11 @@ describe("HttpFigmaRestClient", () => {
     api.fileMeta.set("KEY1", { name: "Landing" });
     const tokens = new FakeTokens(["stale-token", "fresh-token"]);
     const rest = client(tokens);
-    const result = await rest.getJson<{ name: string }>({ ...metaRoute, connectionId: "fgc_1" });
-    expect(result).toEqual({ name: "Landing" });
+    const result = await rest.getJson<{ file: { name: string } }>({
+      ...metaRoute,
+      connectionId: "fgc_1",
+    });
+    expect(result).toEqual({ file: documentedFileMeta("KEY1", { name: "Landing" }) });
     expect(tokens.invalidations).toBe(1);
     expect(api.requestCount).toBe(2);
     expect(api.requests[1]?.authorization).toBe("Bearer fresh-token");
@@ -182,8 +185,11 @@ describe("HttpFigmaRestClient", () => {
     expect(api.requestCount).toBe(2);
 
     clock.now = T0 + 7_001;
-    const result = await rest.getJson<{ name: string }>({ ...metaRoute, connectionId: "fgc_1" });
-    expect(result.name).toBe("Landing");
+    const result = await rest.getJson<{ file: { name: string } }>({
+      ...metaRoute,
+      connectionId: "fgc_1",
+    });
+    expect(result.file.name).toBe("Landing");
     expect(api.requestCount).toBe(3);
     expect(
       rest.budget("fgc_1").tiers.find((tier) => tier.tier === "3")?.blockedUntil_ms,

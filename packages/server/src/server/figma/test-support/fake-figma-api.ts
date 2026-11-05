@@ -3,7 +3,7 @@ import type { AddressInfo } from "node:net";
 
 // A fake api.figma.com for tests only (no real network calls to Figma). Routing and response
 // shapes follow the official endpoints cited in the research doc (figma-integration.md §3, §4):
-//   GET /v1/files/:key/meta        Tier 3  → { name, version, last_touched_at, … }
+//   GET /v1/files/:key/meta         Tier 3  → { file: { name, version, last_touched_at, thumbnail_url, editorType } }
 //   GET /v1/teams/:team_id/projects Tier 2 → { name, projects: [{ key, name }] }
 //   GET /v1/projects/:id/files      Tier 2 → { name, files: [{ key, name, last_modified }] }
 //   GET /images/<name>              S3-style bytes, never authenticated
@@ -30,6 +30,24 @@ export interface FakeFileMeta {
   name?: string;
   version?: string;
   last_touched_at?: string;
+  thumbnail_url?: string;
+  editorType?: string;
+}
+
+/**
+ * The body `GET /v1/files/:key/meta` documents: every field nested under `file`
+ * (developers.figma.com file-endpoints — Get file metadata).
+ */
+export function documentedFileMeta(fileKey: string, meta: FakeFileMeta): FakeFileMeta {
+  return {
+    name: meta.name ?? `File ${fileKey}`,
+    version: meta.version ?? "1",
+    last_touched_at: meta.last_touched_at ?? "2026-03-01T00:00:00.000Z",
+    thumbnail_url:
+      meta.thumbnail_url ??
+      `https://figma-alpha-api.s3.us-west-2.amazonaws.com/images/thumb-${fileKey}.png`,
+    editorType: meta.editorType ?? "figma",
+  };
 }
 
 export interface FakeTeam {
@@ -145,9 +163,10 @@ export class FakeFigmaApi {
 
     const fileMeta = /^\/v1\/files\/([^/]+)\/meta$/.exec(url.pathname);
     if (fileMeta) {
-      const meta = this.fileMeta.get(decodeURIComponent(fileMeta[1]));
+      const key = decodeURIComponent(fileMeta[1]);
+      const meta = this.fileMeta.get(key);
       return meta
-        ? this.send(response, { status: 200, body: meta })
+        ? this.send(response, { status: 200, body: { file: documentedFileMeta(key, meta) } })
         : this.send(response, { status: 404, body: { err: "Not found" } });
     }
 
