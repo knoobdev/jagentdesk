@@ -19,7 +19,7 @@ import { EditToolbar } from "./edit-toolbar";
 import { FigmaAssistantPanel } from "./assistant-panel";
 import { InspectPanel } from "./inspect-panel";
 import { FigmaTopBar } from "./top-bar";
-import { figmaNodeIdFromParam, figmaNodeParam } from "./node-url";
+import { figmaNodeIdFromParam, figmaNodeParam, nodeParamToFocusId } from "./node-url";
 import { errorMessage, useFigmaCall } from "./api";
 import { absoluteBoundingBoxOf, type Camera, centerCameraOn, nodeFocusBounds } from "./viewport";
 import {
@@ -149,8 +149,10 @@ export function FigmaFileScreen({ serverId, fileKey, version }: FigmaFileRef) {
 
   const selectNode = useCallback((nodeId: string | null) => {
     setSelectedNodeId(nodeId);
-    // A canvas-originated selection must not re-center the camera when the URL param echoes it.
-    skipUrlFocus.current = figmaNodeParam(nodeId) ?? null;
+    // A canvas-originated selection must not re-center the camera when the URL param echoes
+    // it. The skip is stored in the DECODED form — the same form the focus effect compares —
+    // so the echo actually matches.
+    skipUrlFocus.current = nodeId;
     void router.setParams({ node: figmaNodeParam(nodeId) ?? "" });
   }, []);
 
@@ -222,14 +224,15 @@ export function FigmaFileScreen({ serverId, fileKey, version }: FigmaFileRef) {
 
   // The URL's `node` param drives focus: a deep link or a comment-panel URL write selects and
   // zooms to the layer, nested layers included (F5 owns the comment side of this contract).
+  // Canvas clicks write the same param; `nodeParamToFocusId` keeps that echo from moving the
+  // camera (skip/auto-focus guards are both held in the decoded node-id form).
   const nodeParam = Array.isArray(params.node) ? params.node[0] : params.node;
   useEffect(() => {
-    const nodeId = figmaNodeIdFromParam(nodeParam);
+    const nodeId = nodeParamToFocusId(nodeParam, skipUrlFocus.current, autoFocusedFor.current);
     if (!nodeId) {
-      autoFocusedFor.current = null;
+      if (!figmaNodeIdFromParam(nodeParam ?? null)) autoFocusedFor.current = null;
       return;
     }
-    if (nodeId === skipUrlFocus.current || autoFocusedFor.current === nodeId) return;
     if (!page || size.width === 0) return;
     autoFocusedFor.current = nodeId;
     void focusNode(nodeId);

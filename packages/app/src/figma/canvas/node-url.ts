@@ -12,6 +12,26 @@ export function figmaNodeIdFromParam(param: string | null | undefined): string |
   return param.replace(/-/g, ":");
 }
 
+/**
+ * Which node the URL's `node` param should drive focus to right now — the pure half of the
+ * file screen's URL-focus effect. Both guard refs are held in the DECODED form (plain node
+ * ids, "1:39"); comparing the decoded param against them keeps one form end to end. The old
+ * mismatch (skipping the URL form "1-39", comparing the decoded "1:39") made every canvas
+ * click re-centre the camera because the echoed param never matched the skip entry.
+ * Returns null for no param, junk, a canvas-echoed selection, or an already-focused node.
+ */
+export function nodeParamToFocusId(
+  nodeParam: string | string[] | null | undefined,
+  skipUrlFocus: string | null,
+  autoFocusedFor: string | null,
+): string | null {
+  const raw = Array.isArray(nodeParam) ? nodeParam[0] : nodeParam;
+  const nodeId = figmaNodeIdFromParam(raw ?? null);
+  if (!nodeId) return null;
+  if (nodeId === skipUrlFocus || nodeId === autoFocusedFor) return null;
+  return nodeId;
+}
+
 const FIGMA_WEB_BASE = "https://www.figma.com/design";
 const FIGMA_DEEP_BASE = "figma://design";
 

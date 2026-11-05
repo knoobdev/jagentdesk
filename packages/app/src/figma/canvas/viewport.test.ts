@@ -5,6 +5,7 @@ import {
   clampZoom,
   cameraAt100,
   cameraToFit,
+  formatZoomReadout,
   type Camera,
   figmaToScreen,
   framesBoundingRect,
@@ -235,5 +236,20 @@ describe("node focus resolution (deep links / comment focus)", () => {
     const center = figmaToScreen(camera, { x: 320 + 90, y: 240 + 30 });
     expect(center.x).toBeCloseTo(200, 6);
     expect(center.y).toBeCloseTo(400, 6);
+  });
+});
+
+describe("formatZoomReadout (unified readout/reset control)", () => {
+  it("renders the rounded percentage the readout button shows", () => {
+    expect(formatZoomReadout(1)).toBe("100%");
+    expect(formatZoomReadout(0.15)).toBe("15%");
+    expect(formatZoomReadout(0.7249)).toBe("72%");
+    expect(formatZoomReadout(0.7251)).toBe("73%");
+  });
+
+  it("clamps like the camera does at both extremes", () => {
+    expect(formatZoomReadout(0.0001)).toBe(`${MIN_ZOOM * 100}%`);
+    expect(formatZoomReadout(999)).toBe(`${MAX_ZOOM * 100}%`);
+    expect(formatZoomReadout(NaN)).toBe(`${MIN_ZOOM * 100}%`);
   });
 });

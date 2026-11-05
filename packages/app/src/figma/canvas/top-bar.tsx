@@ -2,14 +2,7 @@ import { useCallback, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { withUnistyles } from "react-native-unistyles";
 import * as Linking from "expo-linking";
-import {
-  ChevronDown,
-  ExternalLink,
-  MessageSquare,
-  Play,
-  ZoomIn,
-  ZoomOut,
-} from "lucide-react-native";
+import { ChevronDown, MoreHorizontal, ZoomIn, ZoomOut } from "lucide-react-native";
 import type { FigmaOutline, FigmaPage } from "@jagentdesk/protocol/figma/rpc-schemas";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -27,15 +20,16 @@ import { figmaDeepLink, figmaDesignUrl } from "./node-url";
 import {
   cameraAt100,
   cameraToFit,
-  clampZoom,
+  formatZoomReadout,
   pageBoundingRect,
   type Camera,
   zoomAroundPoint,
 } from "./viewport";
 
-// File-screen top bar (spec 32.5): page picker, zoom controls, data-source badge, and the
-// buttons that leave the canvas — Open in Figma (deep link first, web URL fallback), Ask AI
-// and the prototype player.
+// File-screen top bar (spec 32.5): page picker, one zoom control cluster (readout doubles as
+// reset-to-100%), the data-source badge, and an overflow menu holding the actions that leave
+// the canvas — Open in Figma (deep link first, web URL fallback), the prototype player, and
+// Ask AI. Overflowing keeps the title and page picker at natural width at desktop sizes.
 
 export interface FigmaTopBarProps {
   fileKey: string;
@@ -56,7 +50,6 @@ export interface FigmaTopBarProps {
 const styles = StyleSheet.create({
   bar: { paddingHorizontal: 8, paddingVertical: 6 },
   barWrap: { flexWrap: "wrap", rowGap: 4 },
-  zoomLabel: { minWidth: 44, textAlign: "center" },
   title: { flexShrink: 1, minWidth: 0 },
   pageTrigger: {
     flexDirection: "row",
@@ -70,12 +63,22 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   pageLabel: { flexShrink: 1, minWidth: 0 },
+  moreTrigger: {
+    flexDirection: "row",
+    alignItems: "center",
+    minHeight: 28,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+  },
   badgeLine: { maxWidth: "100%" },
 });
 
 // Theme-reactive chevron so the page trigger inherits the muted foreground on every theme
 // (the second `withUnistyles` argument keeps the color off the DOM svg — no `uniProps` leak).
 const ThemedChevronDown = withUnistyles(ChevronDown, (theme: Theme) => ({
+  color: theme.colors.foregroundMuted,
+}));
+const ThemedMoreHorizontal = withUnistyles(MoreHorizontal, (theme: Theme) => ({
   color: theme.colors.foregroundMuted,
 }));
 
@@ -134,6 +137,7 @@ export function FigmaTopBar({
   onAskAi,
 }: FigmaTopBarProps) {
   const [pagesOpen, setPagesOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   // Fit / 100% are scoped to the CURRENT page's top-level frames (never other pages, which
   // pulled the fit out to 31% and left this page's frames off-screen).
   const content = pageBoundingRect(outline.pages, page?.id ?? null);
@@ -190,9 +194,17 @@ export function FigmaTopBar({
           onPress={zoomOut}
           accessibilityLabel="Zoom out"
         />
-        <Text style={[jiraStyles.textSmall, styles.zoomLabel]}>
-          {`${Math.round(clampZoom(camera.zoom) * 100)}%`}
-        </Text>
+        {/* One zoom control: the readout doubles as the reset-to-100% button (the old bar
+            showed "100%" twice — a readout Text and a separate 100% Button). */}
+        <Button
+          size="xs"
+          variant="ghost"
+          onPress={reset100}
+          accessibilityLabel="Reset zoom to 100%"
+          testID="figma-zoom-reset"
+        >
+          {formatZoomReadout(camera.zoom)}
+        </Button>
         <Button
           size="xs"
           variant="ghost"
@@ -200,11 +212,8 @@ export function FigmaTopBar({
           onPress={zoomIn}
           accessibilityLabel="Zoom in"
         />
-        <Button size="xs" variant="ghost" onPress={fit}>
+        <Button size="xs" variant="ghost" onPress={fit} testID="figma-fit">
           Fit
-        </Button>
-        <Button size="xs" variant="ghost" onPress={reset100}>
-          100%
         </Button>
       </View>
 
@@ -213,33 +222,28 @@ export function FigmaTopBar({
         <SourceBadge version={version} outline={outline} />
       </View>
 
-      <Button
-        size="sm"
-        variant="ghost"
-        leftIcon={ExternalLink}
-        onPress={openFigma}
-        testID="figma-open-in-figma"
-      >
-        Open in Figma
-      </Button>
-      <Button
-        size="sm"
-        variant="ghost"
-        leftIcon={Play}
-        onPress={onOpenPrototype}
-        testID="figma-prototype"
-      >
-        Prototype
-      </Button>
-      <Button
-        size="sm"
-        variant="outline"
-        leftIcon={MessageSquare}
-        onPress={onAskAi}
-        testID="figma-ask-ai"
-      >
-        Ask AI
-      </Button>
+      {/* Secondary leave-the-canvas actions live in one overflow menu so the title and the
+          page picker keep their natural width at desktop sizes. */}
+      <DropdownMenu open={moreOpen} onOpenChange={setMoreOpen}>
+        <DropdownMenuTrigger
+          accessibilityLabel="More actions"
+          style={styles.moreTrigger}
+          testID="figma-top-bar-more"
+        >
+          <ThemedMoreHorizontal size={16} />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent>
+          <DropdownMenuItem onSelect={openFigma} testID="figma-open-in-figma">
+            Open in Figma
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={onOpenPrototype} testID="figma-prototype">
+            Prototype
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={onAskAi} testID="figma-ask-ai">
+            Ask AI
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </View>
   );
 }

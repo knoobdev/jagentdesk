@@ -90,7 +90,7 @@ import {
 } from "@/utils/host-routes";
 import type { ShortcutKey } from "@/utils/format-shortcut";
 import { SidebarAgentListSkeleton } from "./sidebar-agent-list-skeleton";
-import { shouldShowAddProject } from "./sidebar-add-project-visibility";
+import { shouldShowAddProject, shouldShowSidebarFooter } from "./sidebar-add-project-visibility";
 import { SidebarCalloutSlot } from "./sidebar-callout-slot";
 import { SidebarWorkspaceList } from "./sidebar-workspace-list";
 import { SidebarServersNav } from "@/ssh/ui/sidebar-servers-nav";
@@ -131,7 +131,7 @@ function resolveSectionRoute(pathname: string): SectionRoute | null {
  * Whether the sidebar footer may render "Add project" — re-exported from
  * sidebar-add-project-visibility so the rule stays pure and unit-testable.
  */
-export { shouldShowAddProject } from "./sidebar-add-project-visibility";
+export { shouldShowAddProject, shouldShowSidebarFooter } from "./sidebar-add-project-visibility";
 
 /**
  * Pick the sidebar body for a route: a resource nav when the route points at a
@@ -1365,16 +1365,18 @@ function DesktopSidebar({
 
         <SidebarCalloutSlot />
 
-        <SidebarFooter
-          theme={theme}
-          handleOpenProject={handleOpenProject}
-          handleHome={handleHome}
-          handleSettings={handleSettings}
-          labels={labels}
-          handleAddHost={handleAddHost}
-          handleOpenHostSettings={handleOpenHostSettings}
-          showAddProject={shouldShowAddProject(pathname)}
-        />
+        {shouldShowSidebarFooter(pathname) ? (
+          <SidebarFooter
+            theme={theme}
+            handleOpenProject={handleOpenProject}
+            handleHome={handleHome}
+            handleSettings={handleSettings}
+            labels={labels}
+            handleAddHost={handleAddHost}
+            handleOpenHostSettings={handleOpenHostSettings}
+            showAddProject={shouldShowAddProject(pathname)}
+          />
+        ) : null}
 
         <SidebarResizeHandle
           edge="right"

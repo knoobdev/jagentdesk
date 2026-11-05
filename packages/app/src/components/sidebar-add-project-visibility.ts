@@ -18,3 +18,15 @@ export function shouldShowAddProject(sectionRoute: string | null): boolean {
   if (!sectionRoute) return true;
   return !isFigmaSectionRoute(sectionRoute);
 }
+
+/**
+ * Whether the left sidebar footer container may render at all.
+ *
+ * The Figma section owns the whole left column (spec 32.5): with "Add project" hidden the
+ * footer would leave nothing but its own divider and an empty strip, so the container goes
+ * too. Other routes keep the footer exactly as it is.
+ */
+export function shouldShowSidebarFooter(sectionRoute: string | null): boolean {
+  if (!sectionRoute) return true;
+  return !isFigmaSectionRoute(sectionRoute);
+}

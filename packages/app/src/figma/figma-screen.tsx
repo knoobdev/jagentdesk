@@ -11,6 +11,7 @@ import type { FigmaFile } from "@jagentdesk/protocol/figma/rpc-schemas";
 import { FigmaConnectScreen } from "@/figma/connect/connect-screen";
 import { FigmaLinkPanel } from "@/figma/link/link-panel";
 import { useFigmaNav } from "@/figma/nav";
+import { fileSubtitle } from "@/figma/file-subtitle";
 import { useFigmaConnections, useFigmaFiles } from "@/figma/queries";
 import { EmptyState, ErrorBanner } from "@/figma/ui/primitives";
 import { figmaStyles } from "@/figma/ui/styles";
@@ -31,6 +32,7 @@ function firstParam(value: string | string[] | undefined): string | undefined {
 
 function FileCard({ file, onOpen }: { file: FigmaFile; onOpen: (fileKey: string) => void }) {
   const open = useCallback(() => onOpen(file.fileKey), [file.fileKey, onOpen]);
+  const subtitle = fileSubtitle(file);
   return (
     <Pressable
       style={figmaStyles.card}
@@ -44,17 +46,11 @@ function FileCard({ file, onOpen }: { file: FigmaFile; onOpen: (fileKey: string)
         </Text>
         {file.linked ? <ThemedLink2 size={14} /> : null}
       </View>
-      <Text style={figmaStyles.rowSubtle} numberOfLines={1}>
-        {[
-          file.projectName,
-          file.pinned ? "pinned" : null,
-          file.lastOpenedAt_ms
-            ? `opened ${new Date(file.lastOpenedAt_ms).toLocaleDateString()}`
-            : null,
-        ]
-          .filter(Boolean)
-          .join(" · ") || file.fileKey}
-      </Text>
+      {subtitle ? (
+        <Text style={figmaStyles.rowSubtle} numberOfLines={1}>
+          {subtitle}
+        </Text>
+      ) : null}
     </Pressable>
   );
 }

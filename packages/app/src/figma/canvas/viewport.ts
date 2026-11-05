@@ -32,6 +32,15 @@ export function clampZoom(zoom: number): number {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
 }
 
+/**
+ * The zoom readout doubles as the reset-to-100% control (one control, not two): it shows the
+ * clamped percentage and pressing it calls cameraAt100. Pure so the rounding/clamping is tested
+ * without rendering the bar.
+ */
+export function formatZoomReadout(zoom: number): string {
+  return `${Math.round(clampZoom(zoom) * 100)}%`;
+}
+
 export function screenToFigma(camera: Camera, point: Point): Point {
   return {
     x: (point.x - camera.offsetX) / camera.zoom,
