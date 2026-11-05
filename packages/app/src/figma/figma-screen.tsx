@@ -12,8 +12,9 @@ import { FigmaConnectScreen } from "@/figma/connect/connect-screen";
 import { FigmaLinkPanel } from "@/figma/link/link-panel";
 import { useFigmaNav } from "@/figma/nav";
 import { useFigmaConnections, useFigmaFiles } from "@/figma/queries";
-import { EmptyState, ErrorBanner, tint, type ThemedIcon } from "@/figma/ui/primitives";
+import { EmptyState, ErrorBanner } from "@/figma/ui/primitives";
 import { figmaStyles } from "@/figma/ui/styles";
+import type { Theme } from "@/styles/theme";
 import { errorMessage } from "@/figma/api";
 import { FigmaFileScreen } from "@/figma/canvas/file-screen";
 
@@ -21,7 +22,8 @@ import { FigmaFileScreen } from "@/figma/canvas/file-screen";
 // the home — connections/files, the connect guide, or the Figma Link panel per the `view` param;
 // with a fileKey it mounts the W10 file screen. The left column lives in sidebar-figma-nav.
 
-const ThemedLink2 = withUnistyles(Link2) as ThemedIcon;
+// The color lives in the mappings so no `uniProps` prop reaches the DOM node on web.
+const ThemedLink2 = withUnistyles(Link2, (theme: Theme) => ({ color: theme.colors.statusSuccess }));
 
 function firstParam(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -40,7 +42,7 @@ function FileCard({ file, onOpen }: { file: FigmaFile; onOpen: (fileKey: string)
         <Text style={figmaStyles.rowTitle} numberOfLines={1}>
           {file.name || file.fileKey}
         </Text>
-        {file.linked ? <ThemedLink2 size={14} uniProps={tint.green} /> : null}
+        {file.linked ? <ThemedLink2 size={14} /> : null}
       </View>
       <Text style={figmaStyles.rowSubtle} numberOfLines={1}>
         {[

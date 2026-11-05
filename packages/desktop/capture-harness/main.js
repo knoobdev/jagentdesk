@@ -1451,8 +1451,17 @@ async function automationRefPoint(guest, ref, fingerprint) {
           await sleep(25);
           continue;
         }
-        element.scrollIntoView?.({ block: 'center', inline: 'center' });
-        await nextFrame();
+        // Only reposition when the element is not already fully visible — an unconditional
+        // center scroll moved the whole sidebar rail for every rail click.
+        const fullyVisible =
+          rect.top >= 0 &&
+          rect.left >= 0 &&
+          rect.bottom <= window.innerHeight &&
+          rect.right <= window.innerWidth;
+        if (!fullyVisible) {
+          element.scrollIntoView?.({ block: 'center', inline: 'center' });
+          await nextFrame();
+        }
         const first = element.getBoundingClientRect();
         await nextFrame();
         const second = element.getBoundingClientRect();

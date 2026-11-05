@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { FigmaNode, FigmaPage } from "@jagentdesk/protocol/figma/rpc-schemas";
 import {
   centerCameraOn,
   clampZoom,
@@ -9,6 +10,8 @@ import {
   framesBoundingRect,
   framesInViewport,
   lodMode,
+  nodeFocusBounds,
+  pageBoundingRect,
   panBy,
   screenToFigma,
   THUMBNAIL_ZOOM,
@@ -17,7 +20,7 @@ import {
   MAX_ZOOM,
   MIN_ZOOM,
 } from "./viewport";
-import { makeFrameSummary } from "./__fixtures__/figma";
+import { makeFrameSummary, makeNode } from "./__fixtures__/figma";
 
 const BASE: Camera = { zoom: 1, offsetX: 100, offsetY: 50 };
 
@@ -151,5 +154,86 @@ describe("LOD switch", () => {
     expect(clampZoom(Number.NaN)).toBe(MIN_ZOOM);
     expect(clampZoom(-5)).toBe(MIN_ZOOM);
     expect(clampZoom(1000)).toBe(MAX_ZOOM);
+  });
+});
+
+function makePage(id: string, frames: ReturnType<typeof makeFrameSummary>[]): FigmaPage {
+  return { id, name: `Page ${id}`, frames, flowStartingPoints: [] };
+}
+
+describe("page-scoped fit (Fit / 100% buttons)", () => {
+  const onPage = makePage("0:1", [makeFrameSummary("1:1", 0, 0, 300, 200)]);
+  const otherPage = makePage("0:2", [makeFrameSummary("2:1", 5000, 4000, 400, 300)]);
+
+  it("unions only the selected page's top-level frames", () => {
+    // Regression: Fit used every page's frames, so a page of tiny frames on a far-away page
+    // zoomed the current page out to 31% and left frames off-screen.
+    expect(pageBoundingRect([onPage, otherPage], "0:1")).toEqual({
+      x: 0,
+      y: 0,
+      width: 300,
+      height: 200,
+    });
+  });
+
+  it("is null for an unknown page", () => {
+    expect(pageBoundingRect([onPage, otherPage], "nope")).toBeNull();
+    expect(pageBoundingRect([onPage, otherPage], null)).toBeNull();
+  });
+
+  it("fits every top-level frame centred with a margin", () => {
+    const fitted = cameraToFit(pageBoundingRect([onPage, otherPage], "0:1"), 760, 560);
+    // Both frames on the page (union at 0,0..300,200) land inside the viewport, centred.
+    const topLeft = figmaToScreen(fitted, { x: 0, y: 0 });
+    const bottomRight = figmaToScreen(fitted, { x: 300, y: 200 });
+    expect(topLeft.x).toBeGreaterThanOrEqual(0);
+    expect(topLeft.y).toBeGreaterThanOrEqual(0);
+    expect(bottomRight.x).toBeLessThanOrEqual(760);
+    expect(bottomRight.y).toBeLessThanOrEqual(560);
+    expect((topLeft.x + bottomRight.x) / 2).toBeCloseTo(380, 6);
+    expect((topLeft.y + bottomRight.y) / 2).toBeCloseTo(280, 6);
+  });
+});
+
+describe("node focus resolution (deep links / comment focus)", () => {
+  const page = makePage("0:1", [makeFrameSummary("1:1", 100, 100, 800, 600)]);
+  const nested: FigmaNode = makeNode({
+    id: "1:1",
+    children: [
+      makeNode({ id: "1:61", absoluteBoundingBox: { x: 320, y: 240, width: 180, height: 60 } }),
+    ],
+  });
+  const reader = {
+    get: (id: string) => (id === "1:1" ? nested : undefined),
+    loadedIds: () => ["1:1"],
+  };
+
+  it("returns the summary bounds for a top-level frame", () => {
+    expect(nodeFocusBounds(null, page, "1:1")).toEqual({ x: 100, y: 100, width: 800, height: 600 });
+  });
+
+  it("returns the loaded subtree's absolute box for a nested layer", () => {
+    expect(nodeFocusBounds(reader, page, "1:61")).toEqual({
+      x: 320,
+      y: 240,
+      width: 180,
+      height: 60,
+    });
+  });
+
+  it("is null while the containing frame is not loaded", () => {
+    expect(nodeFocusBounds({ get: () => undefined, loadedIds: () => [] }, page, "1:61")).toBeNull();
+    expect(nodeFocusBounds(reader, page, "9:9")).toBeNull();
+  });
+
+  it("centers a nested layer in the canvas viewport at the current zoom", () => {
+    const bounds = nodeFocusBounds(reader, page, "1:61") as NonNullable<
+      ReturnType<typeof nodeFocusBounds>
+    >;
+    const camera = centerCameraOn(BASE, bounds, 400, 800);
+    expect(camera.zoom).toBe(BASE.zoom);
+    const center = figmaToScreen(camera, { x: 320 + 90, y: 240 + 30 });
+    expect(center.x).toBeCloseTo(200, 6);
+    expect(center.y).toBeCloseTo(400, 6);
   });
 });

@@ -1,3 +1,4 @@
+import { isFullyInViewport } from "./actionability.js";
 import { ARIA_SNAPSHOT_SCRIPT, ARIA_SNAPSHOT_SCRIPT_MARKER } from "./aria-snapshot-script.js";
 
 export interface SnapshotPage {
@@ -360,7 +361,11 @@ function buildFillScript(metadata: BrowserRefMetadata, value: string): string {
     const resolved = ${buildResolveExpression(metadata)};
     if (!resolved.ok) return resolved;
     const element = resolved.element;
-    element.scrollIntoView({ block: 'center', inline: 'center' });
+    const isFullyInViewport = ${isFullyInViewport.toString()};
+    const frameView = (element.ownerDocument && element.ownerDocument.defaultView) || window;
+    if (!isFullyInViewport(element.getBoundingClientRect(), { width: frameView.innerWidth, height: frameView.innerHeight })) {
+      element.scrollIntoView({ block: 'center', inline: 'center' });
+    }
     element.focus();
     const nextValue = ${JSON.stringify(value)};
     if ('value' in element) {
@@ -380,7 +385,11 @@ function buildSelectScript(metadata: BrowserRefMetadata, value: string): string 
     const resolved = ${buildResolveExpression(metadata)};
     if (!resolved.ok) return resolved;
     const element = resolved.element;
-    element.scrollIntoView?.({ block: 'center', inline: 'center' });
+    const isFullyInViewport = ${isFullyInViewport.toString()};
+    const frameView = (element.ownerDocument && element.ownerDocument.defaultView) || window;
+    if (!isFullyInViewport(element.getBoundingClientRect(), { width: frameView.innerWidth, height: frameView.innerHeight })) {
+      element.scrollIntoView?.({ block: 'center', inline: 'center' });
+    }
     element.focus?.();
     const nextValue = ${JSON.stringify(value)};
     if ('value' in element) {
