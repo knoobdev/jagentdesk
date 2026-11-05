@@ -71,6 +71,20 @@ export interface PrototypeFacts {
 }
 
 /**
+ * A page's flow starting points. REST and Link put `flowStartingPoints: [{nodeId, name}]` on
+ * each CANVAS (page) node — the file root does not carry them (§5.1).
+ */
+export function pageFlowStartingPoints(page: unknown): Array<{ nodeId: string; name: string }> {
+  const starts: Array<{ nodeId: string; name: string }> = [];
+  for (const point of objs(obj(page)?.flowStartingPoints)) {
+    const nodeId = str(point.nodeId);
+    if (nodeId === null) continue;
+    starts.push({ nodeId, name: str(point.name) ?? "" });
+  }
+  return starts;
+}
+
+/**
  * Read `GET /v1/files/:key` (whole document or the `nodes` map the `ids` variant returns) and
  * collect every page's `flowStartingPoints` plus every node's normalized interactions.
  */
@@ -85,11 +99,7 @@ export function normalizePrototypeFile(payload: unknown, pageId?: string): Proto
     const pageKey = str(page.id);
     if (pageKey === null) continue;
     if (pageId !== undefined && pageKey !== pageId) continue;
-    for (const point of objs(page.flowStartingPoints)) {
-      const nodeId = str(point.nodeId);
-      if (nodeId === null) continue;
-      flows.push({ nodeId, name: str(point.name) ?? "", pageId: pageKey });
-    }
+    for (const start of pageFlowStartingPoints(page)) flows.push({ ...start, pageId: pageKey });
     collectNodeInteractions(page, interactions);
   }
   return { flows, interactions };

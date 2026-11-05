@@ -15,6 +15,7 @@ import type {
 } from "@jagentdesk/protocol/figma/rpc-schemas";
 import { writePrivateFileAtomicSync } from "../../private-files.js";
 import { FigmaServiceError, type FigmaContext } from "../context.js";
+import { pageFlowStartingPoints } from "../prototype.js";
 import type { FigmaHandlerMap } from "./types.js";
 
 // Outline, nodes, image fills, fallback renders, export, versions, fonts, watches (32.5, 32.8).
@@ -64,12 +65,13 @@ interface RestNode {
   children?: RestNode[];
   absoluteBoundingBox?: { x?: unknown; y?: unknown; width?: unknown; height?: unknown };
   backgroundColor?: RestColor;
+  // CANVAS (page) nodes carry the flow starting points (figma-integration.md §5.1).
+  flowStartingPoints?: RestFlowStart[];
 }
 
 interface RestFlowStart {
   nodeId?: unknown;
   name?: unknown;
-  pageId?: unknown;
 }
 
 interface RestFile {
@@ -78,12 +80,23 @@ interface RestFile {
   lastModified?: unknown;
   editorType?: unknown;
   document?: RestNode;
-  flowStartingPoints?: RestFlowStart[];
+}
+
+/** One entry of the documented `GET /v1/files/:key/nodes` `nodes` map. */
+interface RestNodeEntry {
+  document?: RestNode;
+  components?: Record<string, { key?: unknown; name?: unknown }>;
+  styles?: Record<string, { key?: unknown; name?: unknown; styleType?: unknown }>;
+  schemaVersion?: unknown;
+  // A flat node (no `document` envelope) is tolerated; it is identified by its own id.
+  id?: unknown;
 }
 
 interface RestNodesResponse {
+  err?: unknown;
   version?: unknown;
-  nodes?: Record<string, RestNode | null>;
+  nodes?: Record<string, RestNodeEntry | null>;
+  // Some payloads (and every pre-doc fake) put the library maps at the response root.
   components?: Record<string, { key?: unknown; name?: unknown }>;
   styles?: Record<string, { key?: unknown; name?: unknown; styleType?: unknown }>;
 }
@@ -105,6 +118,7 @@ interface RestVersionsResponse {
 
 interface RestMeta {
   version?: unknown;
+  file?: { version?: unknown };
 }
 
 interface ComponentMeta {
@@ -145,6 +159,15 @@ function toBase64Bytes(value: { mimeType: string; data: Buffer }): FigmaBytes {
 
 function asString(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+/**
+ * The version from `GET /v1/files/:key/meta`, documented as `{ file: { version, … } }`; the
+ * flat shape is tolerated so a host that answers the old way still resolves.
+ */
+function metaVersion(meta: RestMeta | null | undefined): string {
+  const file = meta?.file;
+  return asString(file && typeof file === "object" ? file.version : meta?.version);
 }
 
 function parseMs(iso: unknown): number {
@@ -193,7 +216,7 @@ class FileVersionCache {
       path: `/v1/files/${file.fileKey}/meta`,
       tier: "3",
     });
-    const version = asString(meta?.version);
+    const version = metaVersion(meta);
     if (!version)
       throw new FigmaServiceError(
         "figma_error",
@@ -220,7 +243,7 @@ function colorToHex(color: RestColor | undefined): string | undefined {
   return `#${r}${g}${b}${part(color.a ?? 1) ?? "ff"}`;
 }
 
-function pageFromRest(page: RestNode, flowStarts: RestFlowStart[]): FigmaPage {
+function pageFromRest(page: RestNode): FigmaPage {
   const pageId = asString(page.id);
   return {
     id: pageId,
@@ -241,9 +264,8 @@ function pageFromRest(page: RestNode, flowStarts: RestFlowStart[]): FigmaPage {
         },
         backgroundColor: colorToHex(node.backgroundColor),
       })),
-    flowStartingPoints: flowStarts
-      .filter((start) => asString(start.pageId) === pageId)
-      .map((start) => ({ nodeId: asString(start.nodeId), name: asString(start.name) })),
+    // The page node itself carries its flow starting points (§5.1) — the file root does not.
+    flowStartingPoints: pageFlowStartingPoints(page),
   };
 }
 
@@ -256,7 +278,7 @@ function outlineFromRest(json: RestFile, fileKey: string, version: string): Figm
     editorType: asString(json.editorType) || "figma",
     pages: (json.document?.children ?? [])
       .filter((node) => asString(node.type) === "CANVAS")
-      .map((node) => pageFromRest(node, json.flowStartingPoints ?? [])),
+      .map(pageFromRest),
     source: "rest",
   };
 }
@@ -268,15 +290,13 @@ function linkedOutline(
 ): FigmaOutline | null {
   const pages = (document?.children ?? []).filter((node) => node.type === "CANVAS");
   if (pages.length === 0) return null;
-  const flowStarts =
-    (document as { flowStartingPoints?: RestFlowStart[] } | undefined)?.flowStartingPoints ?? [];
   return {
     fileKey: file.fileKey,
     name: file.name,
     version,
     lastModified_ms: 0,
     editorType: "figma",
-    pages: pages.map((page) => pageFromRest(page as unknown as RestNode, flowStarts)),
+    pages: pages.map((page) => pageFromRest(page as unknown as RestNode)),
     source: "link",
   };
 }
@@ -694,7 +714,7 @@ export class FigmaFileWatches {
         path: `/v1/files/${fileKey}/meta`,
         tier: "3",
       });
-      const version = asString(meta?.version);
+      const version = metaVersion(meta);
       if (!version || version === poller.baseline) return;
       poller.baseline = version;
       this.versions.prime(ctx, fileKey, version);
@@ -759,6 +779,33 @@ export interface ContentDeps {
   nodesBatchSize?: number;
   versionTtlMs?: number;
   fonts?: FontDeps;
+}
+
+/**
+ * The node inside a documented `nodes` entry (figma-integration.md §3.1). A flat node (no
+ * `document` envelope, e.g. an older cached payload) is tolerated when it identifies itself.
+ */
+function restEntryNode(entry: RestNodeEntry | null): RestNode | null {
+  if (!entry) return null;
+  return entry.document ?? (typeof entry.id === "string" ? (entry as unknown as RestNode) : null);
+}
+
+/** Merges every `components`/`styles` map seen in a batch into the cached library metadata. */
+function mergeLibraryMaps(
+  libs: LibraryMeta,
+  componentMaps: Array<Record<string, { key?: unknown; name?: unknown }>>,
+  styleMaps: Array<Record<string, { key?: unknown; name?: unknown; styleType?: unknown }>>,
+): void {
+  for (const map of componentMaps)
+    for (const [id, component] of Object.entries(map))
+      libs.components[id] = { key: asString(component.key), name: asString(component.name) };
+  for (const map of styleMaps)
+    for (const [id, style] of Object.entries(map))
+      libs.styles[id] = {
+        key: asString(style.key),
+        name: asString(style.name),
+        styleType: asString(style.styleType),
+      };
 }
 
 export class FigmaContent {
@@ -875,6 +922,25 @@ export class FigmaContent {
     return this.loadNodes(ctx, file, request.ids, version);
   }
 
+  /** Ids already cached (including known-unknown `null`s) and the ids that must be fetched. */
+  private async cachedNodes(
+    ctx: FigmaContext,
+    file: FigmaFile,
+    ids: string[],
+    version: string,
+  ): Promise<{ nodes: Record<string, FigmaNode | null>; misses: string[] }> {
+    const nodes: Record<string, FigmaNode | null> = {};
+    const misses: string[] = [];
+    for (const id of ids) {
+      const hit = await ctx.cache.getJson<Wrapped<FigmaNode | null>>(
+        `node/${file.fileKey}/${id}@${version}`,
+      );
+      if (hit) nodes[id] = hit.data;
+      else misses.push(id);
+    }
+    return { nodes, misses };
+  }
+
   /** Cached per node per version; uncached ids come back in batched Tier-1 node requests. */
   private async loadNodes(
     ctx: FigmaContext,
@@ -888,15 +954,7 @@ export class FigmaContent {
     components: Record<string, ComponentMeta>;
     styles: Record<string, StyleMeta>;
   }> {
-    const nodes: Record<string, FigmaNode | null> = {};
-    const misses: string[] = [];
-    for (const id of ids) {
-      const hit = await ctx.cache.getJson<Wrapped<FigmaNode | null>>(
-        `node/${file.fileKey}/${id}@${version}`,
-      );
-      if (hit) nodes[id] = hit.data;
-      else misses.push(id);
-    }
+    const { nodes, misses } = await this.cachedNodes(ctx, file, ids, version);
     const libsKey = `libs/${file.fileKey}@${version}`;
     const libs = (await ctx.cache.getJson<LibraryMeta>(libsKey)) ?? { components: {}, styles: {} };
     let resolvedVersion = version;
@@ -908,20 +966,24 @@ export class FigmaContent {
         tier: "1",
       });
       resolvedVersion = asString(response?.version) || resolvedVersion;
+      const componentMaps: Array<Record<string, { key?: unknown; name?: unknown }>> = [
+        response?.components ?? {},
+      ];
+      const styleMaps: Array<
+        Record<string, { key?: unknown; name?: unknown; styleType?: unknown }>
+      > = [response?.styles ?? {}];
       for (const id of batch) {
         // Figma answers `null` for unknown ids; that is cached too, so it is never re-asked.
-        const node = (response?.nodes?.[id] ?? null) as FigmaNode | null;
+        // Each entry is `{ document, components, styles, schemaVersion }`: the node is the
+        // entry's `document`, and the entry-level library maps merge into the response's.
+        const entry = response?.nodes?.[id] ?? null;
+        const node = restEntryNode(entry) as FigmaNode | null;
         nodes[id] = node;
         await ctx.cache.putJson(`node/${file.fileKey}/${id}@${version}`, wrap(node));
+        if (entry?.components) componentMaps.push(entry.components);
+        if (entry?.styles) styleMaps.push(entry.styles);
       }
-      for (const [id, component] of Object.entries(response?.components ?? {}))
-        libs.components[id] = { key: asString(component.key), name: asString(component.name) };
-      for (const [id, style] of Object.entries(response?.styles ?? {}))
-        libs.styles[id] = {
-          key: asString(style.key),
-          name: asString(style.name),
-          styleType: asString(style.styleType),
-        };
+      mergeLibraryMaps(libs, componentMaps, styleMaps);
     }
     if (misses.length > 0) await ctx.cache.putJson(libsKey, libs);
     if (resolvedVersion !== version) this.versions.prime(ctx, file.fileKey, resolvedVersion);

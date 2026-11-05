@@ -7,7 +7,11 @@ import type { FigmaNode } from "@jagentdesk/protocol/figma/rpc-schemas";
 import { FigmaContent, type ContentDeps, readFontNames } from "./content.js";
 import type { FigmaHandlerMap, FigmaRequestOf } from "./types.js";
 import type { ContentRequestType } from "./content.js";
-import { makeFile, makeFigmaApi, type FakeFigmaApi } from "../test-support/fake-figma-content-api.js";
+import {
+  makeFile,
+  makeFigmaApi,
+  type FakeFigmaApi,
+} from "../test-support/fake-figma-content-api.js";
 
 // Unit tests for the content handlers (spec 32.5, 32.8) against a fake Figma API: outline
 // mapping, batched nodes, bytes-not-URLs renders/exports, image fills, versions, fonts, and
@@ -48,14 +52,31 @@ function fileJson(version: string): Record<string, unknown> {
             restFrame("1:2", "Hero", 20, 40),
             { id: "1:3", name: "Stray node", type: "RECTANGLE" }, // no absoluteBoundingBox
           ],
+          // Flow starting points are carried by the CANVAS node (Get file nodes, §5.1).
+          flowStartingPoints: [
+            { nodeId: "1:2", name: "Hero" },
+            { nodeId: "9:9", name: "Ghost" },
+          ],
         },
         { id: "0:2", name: "Team", type: "CANVAS", children: [] },
       ],
     },
-    flowStartingPoints: [
-      { nodeId: "1:2", name: "Hero", pageId: "0:1" },
-      { nodeId: "9:9", name: "Ghost", pageId: "0:1" },
-    ],
+  };
+}
+
+/**
+ * The GET /v1/files/:key/meta shape these handlers read: every field nested under `file`
+ * (developers.figma.com file-endpoints — Get file metadata).
+ */
+function metaJson(version: string): Record<string, unknown> {
+  return {
+    file: {
+      name: "Marketing Site",
+      version,
+      last_touched_at: "2026-03-01T10:00:00Z",
+      thumbnail_url: "https://figma-alpha-api.s3.us-west-2.amazonaws.com/images/thumb-1abcDEF.png",
+      editorType: "figma",
+    },
   };
 }
 
@@ -70,6 +91,7 @@ function linkedDocument(): FigmaNode {
         name: "Cover",
         type: "CANVAS",
         children: [restFrame("1:2", "Hero", 5, 6)],
+        flowStartingPoints: [{ nodeId: "1:2", name: "Hero" }],
       },
     ],
   } as unknown as FigmaNode;
@@ -147,7 +169,7 @@ function build(deps: ContentDeps = {}): Fixture {
   const api = makeFigmaApi({ home, logger: pino({ level: "silent" }) });
   api.store.addFile(makeFile(FILE));
   // The current version is resolved through Tier-3 meta and cached; prime it once per file.
-  api.rest.respond(`/v1/files/${FILE}/meta`, { version: "v1" });
+  api.rest.respond(`/v1/files/${FILE}/meta`, metaJson("v1"));
   const content = new FigmaContent(deps);
   return { api, content, handlers: content.handlers(), home };
 }
@@ -252,6 +274,9 @@ describe("outline", () => {
       width: 100,
       height: 200,
     });
+    // The plugin hands over the same document shape REST returns: starting points live on the
+    // CANVAS node, without a pageId.
+    expect(outline!.pages[0].flowStartingPoints).toEqual([{ nodeId: "1:2", name: "Hero" }]);
     expect(fixture.api.rest.callsTo(`/v1/files/${FILE}`)).toHaveLength(0);
   });
 
@@ -283,15 +308,54 @@ describe("nodes", () => {
   const batchIds = Array.from({ length: 12 }, (_, i) => `1:${i + 1}`);
 
   function respondNodes(): void {
+    // GET /v1/files/:key/nodes documented shape (developers.figma.com file-endpoints): each id
+    // maps to `{ document, components, componentSets, styles, schemaVersion }` (or null), the
+    // library maps live on the entry, and `err` is present on success.
     fixture.api.rest.respond(`/v1/files/${FILE}/nodes`, ({ query }) => {
       const batch = (query.ids ?? "").split(",");
       return {
+        err: null,
+        name: "Marketing Site",
+        role: "owner",
+        lastModified: "2026-03-01T10:00:00Z",
+        thumbnailUrl: "https://figma-alpha-api.s3.us-west-2.amazonaws.com/images/thumb-1abcDEF.png",
         version: "v1",
         nodes: Object.fromEntries(
-          batch.map((id) => [id, id === "1:12" ? null : { id, name: `Node ${id}`, type: "TEXT" }]),
+          batch.map((id) =>
+            id === "1:12"
+              ? [id, null]
+              : [
+                  id,
+                  {
+                    document: {
+                      id,
+                      name: `Node ${id}`,
+                      type: "TEXT",
+                      absoluteBoundingBox: { x: 20, y: 40, width: 100, height: 20 },
+                      componentId: "1:1",
+                    },
+                    components: {
+                      "1:1": {
+                        key: "ck1",
+                        file_key: FILE,
+                        name: "Button",
+                        description: "",
+                      },
+                    },
+                    componentSets: {},
+                    styles: {
+                      "1:1": {
+                        key: "sk1",
+                        name: "H1",
+                        styleType: "TEXT",
+                        description: "",
+                      },
+                    },
+                    schemaVersion: 1,
+                  },
+                ],
+          ),
         ),
-        components: { "1:1": { key: "ck1", name: "Button" } },
-        styles: { "1:1": { key: "sk1", name: "H1", styleType: "TEXT" } },
       };
     });
   }
@@ -319,6 +383,36 @@ describe("nodes", () => {
     expect(out.source).toBe("rest");
     expect(out.nodes["1:1"]).toMatchObject({ name: "Node 1:1" });
     expect(out.nodes["1:12"]).toBeNull();
+    expect(out.components["1:1"]).toEqual({ key: "ck1", name: "Button" });
+    expect(out.styles["1:1"]).toEqual({ key: "sk1", name: "H1", styleType: "TEXT" });
+  });
+
+  it("asks for geometry=paths and hands back the entry document, boxes included", async () => {
+    respondNodes();
+    const out = await fixture.handlers["figma.file.nodes.request"](
+      {
+        requestId: "r1",
+        type: "figma.file.nodes.request",
+        fileKey: FILE,
+        ids: ["1:1"],
+        version: "v1",
+      },
+      fixture.api.ctx,
+      SESSION,
+    );
+    const call = fixture.api.rest.callsTo(`/v1/files/${FILE}/nodes`)[0];
+    // Vector paint data is only returned when the request opts into it — the app's redraw needs
+    // it, so the daemon must always ask (figma-integration.md §3.1).
+    expect(call.query).toMatchObject({ ids: "1:1", geometry: "paths", version: "v1" });
+    // The entry's `document` is the node, not the `{ document, components, … }` wrapper.
+    expect(out.nodes["1:1"]).toMatchObject({
+      id: "1:1",
+      name: "Node 1:1",
+      type: "TEXT",
+      absoluteBoundingBox: { x: 20, y: 40, width: 100, height: 20 },
+      componentId: "1:1",
+    });
+    // Entry-level library maps merge into the response's components/styles.
     expect(out.components["1:1"]).toEqual({ key: "ck1", name: "Button" });
     expect(out.styles["1:1"]).toEqual({ key: "sk1", name: "H1", styleType: "TEXT" });
   });
@@ -954,7 +1048,7 @@ describe("watches", () => {
     expect(fixture.api.rest.callsTo(`/v1/files/${FILE}/meta`)).toHaveLength(2); // prime + poll
 
     // A version bump produces exactly one push for the watch, with the new version.
-    fixture.api.rest.respond(`/v1/files/${FILE}/meta`, { version: "v2" });
+    fixture.api.rest.respond(`/v1/files/${FILE}/meta`, metaJson("v2"));
     await vi.advanceTimersByTimeAsync(60_000);
     expect(changed()).toEqual([
       { type: "figma.file.changed", watchId, fileKey: FILE, version: "v2", source: "rest" },
@@ -991,7 +1085,7 @@ describe("watches", () => {
     expect(fixture.api.rest.callsTo(`/v1/files/${FILE}/meta`)).toHaveLength(before + 1); // one, not two
     expect(changed()).toHaveLength(0);
 
-    fixture.api.rest.respond(`/v1/files/${FILE}/meta`, { version: "v9" });
+    fixture.api.rest.respond(`/v1/files/${FILE}/meta`, metaJson("v9"));
     await vi.advanceTimersByTimeAsync(60_000);
     expect(
       changed()
