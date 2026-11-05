@@ -140,8 +140,18 @@ export function Field({ label, children }: { label: string; children: ReactNode 
   );
 }
 
+const ThemedTextInput = withUnistyles(TextInput);
+const placeholderTint = (theme: Theme) => ({ placeholderTextColor: theme.colors.foregroundMuted });
+
 export function Input(props: TextInputProps) {
-  return <TextInput accessibilityLabel={props.placeholder} {...props} style={figmaStyles.input} />;
+  return (
+    <ThemedTextInput
+      accessibilityLabel={props.placeholder}
+      {...props}
+      style={figmaStyles.input}
+      uniProps={placeholderTint}
+    />
+  );
 }
 
 export function Badge({ label, testID }: { label: string; testID?: string }) {

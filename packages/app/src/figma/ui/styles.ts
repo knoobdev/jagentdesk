@@ -159,6 +159,7 @@ export const figmaStyles = StyleSheet.create((theme: Theme) => ({
     color: theme.colors.foregroundMuted,
   },
   spinner: { alignSelf: "center", padding: theme.spacing[4] },
+  stack: { gap: theme.spacing[4] },
   flex1: { flex: 1 },
   dot: { width: 8, height: 8, borderRadius: 4 },
   dotOk: { ...DOT_BASE, backgroundColor: theme.colors.statusSuccess },

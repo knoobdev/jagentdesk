@@ -216,7 +216,7 @@ export function FigmaConnectScreen({
 
   return (
     <ScrollView style={figmaStyles.screen} contentContainerStyle={figmaStyles.scrollContent}>
-      <View testID="figma-connect-screen">
+      <View style={figmaStyles.stack} testID="figma-connect-screen">
         <Text style={figmaStyles.headerTitle}>Connect Figma</Text>
         <Text style={figmaStyles.sectionHint}>
           JAgentDesk signs in with a private OAuth app you register once in the Figma developer
@@ -267,9 +267,9 @@ export function FigmaConnectScreen({
           <Input
             value={state.clientId}
             onChangeText={changeClientId}
-            placeholder="Client ID"
             autoCapitalize="none"
             autoCorrect={false}
+            accessibilityLabel="Client ID"
             testID="figma-client-id"
           />
         </Field>
@@ -277,10 +277,10 @@ export function FigmaConnectScreen({
           <Input
             value={state.clientSecret}
             onChangeText={changeClientSecret}
-            placeholder="Client secret"
             secureTextEntry
             autoCapitalize="none"
             autoCorrect={false}
+            accessibilityLabel="Client secret"
             testID="figma-client-secret"
           />
         </Field>

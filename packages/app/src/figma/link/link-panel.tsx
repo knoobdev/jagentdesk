@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { callFigma, errorMessage } from "@/figma/api";
 import {
+  CopyButton,
+  DisclosureRow,
   EmptyState,
   ErrorBanner,
   Field,
@@ -33,6 +35,7 @@ export function FigmaLinkPanel({ serverId }: { serverId: string }) {
   const status = useFigmaLinkStatus(serverId);
   useFigmaLinkPushInvalidator(serverId);
   const [code, setCode] = useState("");
+  const [importOpen, setImportOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -81,6 +84,7 @@ export function FigmaLinkPanel({ serverId }: { serverId: string }) {
     },
     [toggleRunScript],
   );
+  const toggleImport = useCallback(() => setImportOpen((open) => !open), []);
 
   if (status.isLoading) return <Spinner testID="figma-link-loading" />;
   if (status.error) return <ErrorBanner message={errorMessage(status.error)} />;
@@ -117,27 +121,43 @@ export function FigmaLinkPanel({ serverId }: { serverId: string }) {
 
       <View style={figmaStyles.card} testID="figma-link-plugin">
         <SectionHeading title="Plugin" />
-        {current.pluginInstalled ? (
-          <Text style={figmaStyles.rowTitle}>
-            Installed{current.pluginVersion ? ` · v${current.pluginVersion}` : ""}
-          </Text>
+        <Text style={figmaStyles.rowTitle} testID="figma-link-plugin-state">
+          {current.pluginInstalled
+            ? `Installed${current.pluginVersion ? ` · v${current.pluginVersion}` : ""}`
+            : "Not installed"}
+        </Text>
+        {current.manifestPath ? (
+          <View style={figmaStyles.rowBetween} testID="figma-link-manifest">
+            <Text style={figmaStyles.mono} numberOfLines={1}>
+              {current.manifestPath}
+            </Text>
+            <CopyButton
+              value={current.manifestPath}
+              label="Copy"
+              testID="figma-link-manifest-copy"
+            />
+          </View>
         ) : (
-          <>
+          <Text style={figmaStyles.rowSubtle}>
+            The manifest path is only available on the host machine.
+          </Text>
+        )}
+        <DisclosureRow
+          expanded={importOpen}
+          onToggle={toggleImport}
+          title="How to import in Figma Desktop"
+          testID="figma-link-import-toggle"
+        />
+        {importOpen ? (
+          <View style={figmaStyles.section} testID="figma-link-import-steps">
             <Text style={figmaStyles.guideBody}>
               1. In Figma Desktop open Plugins → Development → Import plugin from manifest.
             </Text>
             <Text style={figmaStyles.guideBody}>
               2. Choose the manifest file served by JAgentDesk on this machine.
             </Text>
-            {current.manifestPath ? (
-              <Text style={figmaStyles.mono}>{current.manifestPath}</Text>
-            ) : (
-              <Text style={figmaStyles.rowSubtle}>
-                The manifest path is only available on the host machine.
-              </Text>
-            )}
-          </>
-        )}
+          </View>
+        ) : null}
       </View>
 
       <View style={figmaStyles.card} testID="figma-link-pair">
@@ -154,7 +174,7 @@ export function FigmaLinkPanel({ serverId }: { serverId: string }) {
           <Input
             value={code}
             onChangeText={changeCode}
-            placeholder="123456"
+            placeholder="6-digit code"
             keyboardType="number-pad"
             maxLength={6}
             testID="figma-link-code"
