@@ -1,0 +1,97 @@
+:root {
+  --bg-primary: #0f172b;
+  --text-label: #cad5e2;
+  --text-value: #f1f5f9;
+  --dot-connected: #17b26a;
+  --dot-warn: #f59e0b;
+  --dot-disconnected: #f04438;
+  --text-white: #ffffff;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  margin: 0;
+  font-family: Inter, system-ui, -apple-system, sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-value);
+  font-size: 12px;
+}
+
+#root {
+  padding: 10px 12px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.title {
+  font-weight: 600;
+  color: var(--text-label);
+  flex: 1;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.dot--on {
+  background: var(--dot-connected);
+}
+
+.dot--warn {
+  background: var(--dot-warn);
+}
+
+.dot--off {
+  background: var(--dot-disconnected);
+}
+
+.status {
+  margin-top: 8px;
+  color: var(--text-label);
+}
+
+.status--ok {
+  color: var(--dot-connected);
+}
+
+.status--warn {
+  color: var(--dot-warn);
+}
+
+.status--error {
+  color: var(--dot-disconnected);
+}
+
+.code {
+  margin-top: 6px;
+  font-size: 26px;
+  letter-spacing: 6px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-white);
+}
+
+.re-pair {
+  border: 1px solid #ffffff22;
+  background: transparent;
+  color: var(--text-label);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.re-pair:hover {
+  background: #ffffff14;
+}

@@ -2,9 +2,9 @@ import path from "node:path";
 import type pino from "pino";
 import { FileSecretStore } from "../database/secret-store.js";
 import { FigmaService } from "./service.js";
+import { createFigmaLinkBridge } from "./link/create.js";
 import {
   unavailableCache,
-  unavailableLink,
   unavailableRest,
   unavailableStore,
   unavailableTokens,
@@ -18,7 +18,12 @@ export async function createFigmaService(options: {
 }): Promise<FigmaService> {
   const dir = path.join(options.jagentdeskHome, "figma");
   const secrets = new FileSecretStore(dir);
-  return new FigmaService({
+  const link = await createFigmaLinkBridge({
+    secrets,
+    jagentdeskHome: options.jagentdeskHome,
+    logger: options.logger,
+  });
+  const service = new FigmaService({
     jagentdeskHome: options.jagentdeskHome,
     logger: options.logger,
     secrets,
@@ -27,7 +32,10 @@ export async function createFigmaService(options: {
       tokens: unavailableTokens,
       rest: unavailableRest,
       cache: unavailableCache,
-      link: unavailableLink,
+      link,
     },
   });
+  // Every bridge transition (hello, pair, revoke, plugin_status, disconnect) republishes status.
+  link.attachPush((status) => service.ctx.push({ type: "figma.link.changed", status }));
+  return service;
 }

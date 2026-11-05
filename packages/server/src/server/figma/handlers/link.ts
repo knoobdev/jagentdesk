@@ -2,7 +2,9 @@ import { FigmaServiceError } from "../context.js";
 import type { FigmaHandlerMap } from "./types.js";
 
 // Figma Link status, pairing, settings and edit ops (32.4, 32.6). Owner: W6.
-// Replace each stub with the real handler; keep the map complete (service.ts checks coverage).
+// The bridge (../link/bridge.ts) owns every decision; these handlers stay thin
+// and surface its FigmaServiceError codes (link_unavailable, link_unpaired,
+// link_version_mismatch, pairing_required) through the session's error envelope.
 
 export type LinkRequestType =
   | "figma.link.status.request"
@@ -11,14 +13,34 @@ export type LinkRequestType =
   | "figma.link.settings.request"
   | "figma.link.op.request";
 
-const notImplemented = (type: string) => async (): Promise<never> => {
-  throw new FigmaServiceError("unsupported", `${type} is not implemented yet`);
-};
-
 export const linkHandlers: FigmaHandlerMap<LinkRequestType> = {
-  "figma.link.status.request": notImplemented("figma.link.status"),
-  "figma.link.pair.request": notImplemented("figma.link.pair"),
-  "figma.link.revoke.request": notImplemented("figma.link.revoke"),
-  "figma.link.settings.request": notImplemented("figma.link.settings"),
-  "figma.link.op.request": notImplemented("figma.link.op"),
+  "figma.link.status.request": async (_request, ctx) => {
+    return { status: ctx.link.status() };
+  },
+
+  // Redeems a pairing code the plugin showed; returns the post-pairing status
+  // so the app can drop its code prompt without a second round trip.
+  "figma.link.pair.request": async (request, ctx) => {
+    return { status: await ctx.link.pair(request.code) };
+  },
+
+  "figma.link.revoke.request": async (request, ctx) => {
+    await ctx.link.revoke(request.pairingId);
+    return {};
+  },
+
+  "figma.link.settings.request": async (request, ctx) => {
+    return { status: await ctx.link.setRunScriptEnabled(request.runScriptEnabled) };
+  },
+
+  "figma.link.op.request": async (request, ctx) => {
+    if (!ctx.link.isLinked(request.fileKey)) {
+      throw new FigmaServiceError(
+        "link_unavailable",
+        `No Figma Link plugin is connected for ${request.fileKey}`,
+      );
+    }
+    const { createdIds, results } = await ctx.link.applyOps(request.fileKey, request.ops);
+    return { createdIds, results };
+  },
 };
