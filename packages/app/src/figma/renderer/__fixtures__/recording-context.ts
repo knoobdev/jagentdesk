@@ -1,7 +1,9 @@
 // A recording fake of the Canvas 2D context for renderer unit tests (spec 32.11 #12). It records
 // every call and property assignment the renderer performs, in order, as plain data so tests can
-// assert the exact drawing command stream per fixture without a real rasterizer.
+// assert the exact drawing command stream per fixture without a real rasterizer. It also tracks a
+// current transform matrix, so tests can install a camera and assert what the renderer composes.
 import { RecordingPath } from "../render-path";
+import { identity, multiply, type RenderMatrix } from "../matrix";
 
 export type RecordedOp = unknown[];
 
@@ -71,21 +73,36 @@ class FakePattern {
 /** The recording context: implements the subset of CanvasRenderingContext2D the renderer uses. */
 export class RecordingContext {
   readonly ops: RecordedOp[] = [];
+  private ctm: RenderMatrix = identity();
+  private readonly ctmStack: RenderMatrix[] = [];
 
   save(): void {
     this.ops.push(["save"]);
+    this.ctmStack.push({ ...this.ctm });
   }
   restore(): void {
     this.ops.push(["restore"]);
+    const previous = this.ctmStack.pop();
+    if (previous) this.ctm = previous;
   }
   setTransform(a: number, b: number, c: number, d: number, e: number, f: number): void {
     this.ops.push(["setTransform", a, b, c, d, e, f]);
+    this.ctm = { a, b, c, d, e, f };
+  }
+  transform(a: number, b: number, c: number, d: number, e: number, f: number): void {
+    this.ops.push(["transform", a, b, c, d, e, f]);
+    this.ctm = multiply(this.ctm, { a, b, c, d, e, f });
+  }
+  getTransform(): RenderMatrix {
+    return { ...this.ctm };
   }
   translate(x: number, y: number): void {
     this.ops.push(["translate", x, y]);
+    this.ctm = multiply(this.ctm, { a: 1, b: 0, c: 0, d: 1, e: x, f: y });
   }
   scale(sx: number, sy: number): void {
     this.ops.push(["scale", sx, sy]);
+    this.ctm = multiply(this.ctm, { a: sx, b: 0, c: 0, d: sy, e: 0, f: 0 });
   }
   beginPath(): void {
     this.ops.push(["beginPath"]);

@@ -37,9 +37,9 @@ function drawWithMissing(
   return { records: ctx.ops, reports };
 }
 
-/** The root always records one scaled setTransform; a second one means a child drew. */
+/** The root always records one baseline setTransform (the camera); more means children drew. */
 function childTransformCount(records: unknown[][]): number {
-  return records.filter((r) => r[0] === "setTransform" && r[1] === 2).length;
+  return records.filter((r) => r[0] === "setTransform").length;
 }
 
 describe("viewport culling", () => {

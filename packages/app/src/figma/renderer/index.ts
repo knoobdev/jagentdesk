@@ -3,7 +3,7 @@
 // and reports everything it could not draw (missing images/fonts/fallback rasters) through
 // `options.onMissing`. W10's canvas viewer and W1's prototype player own the context and cache.
 import type { FigmaNode } from "@jagentdesk/protocol/figma/rpc-schemas";
-import { drawTree, type DrawState } from "./nodes";
+import { captureCamera, drawTree, type DrawState } from "./nodes";
 import { hitTest } from "./hittest";
 import { unsupportedChildFeatures, unsupportedFeatures } from "./unsupported";
 import { MissingSink } from "./missing";
@@ -14,7 +14,7 @@ export function createFigmaRenderer(): FigmaRenderer {
     draw(ctx: FigmaCanvasContext, root: FigmaNode, options: FigmaRenderOptions): void {
       const scale = Number.isFinite(options.scale) && options.scale > 0 ? options.scale : 1;
       const missing = new MissingSink();
-      const state: DrawState = { ctx, options, missing, scale };
+      const state: DrawState = { ctx, options, missing, scale, camera: captureCamera(ctx) };
       drawTree(state, root);
       if (!missing.empty && options.onMissing) options.onMissing(missing.report());
     },

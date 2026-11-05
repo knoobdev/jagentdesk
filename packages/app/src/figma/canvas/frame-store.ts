@@ -33,7 +33,10 @@ export class FrameStore {
       if (this.cache.has(id) || this.inflight.has(id) || this.pending.has(id)) continue;
       this.pending.add(id);
     }
-    if (!this.flushScheduled && (this.pending.size > 0 || this.inflight.size > 0)) {
+    // Schedule only work that exists: while a fetch is in flight the canvas paint loop keeps
+    // calling load() for the same ids, and an empty flush rescheduling itself as a microtask
+    // never lets the main thread yield (the page freezes).
+    if (!this.flushScheduled && this.pending.size > 0) {
       this.flushScheduled = true;
       queueMicrotask(() => void this.flush());
     }
@@ -100,12 +103,16 @@ export class FrameStore {
         this.notify();
       }
     } finally {
-      if (this.pending.size === 0 && this.inflight.size === 0) {
-        const resolve = this.settleResolve;
-        this.settlePromise = null;
-        this.settleResolve = null;
-        resolve?.();
-      } else {
+      if (this.pending.size === 0) {
+        if (this.inflight.size === 0) {
+          const resolve = this.settleResolve;
+          this.settlePromise = null;
+          this.settleResolve = null;
+          resolve?.();
+        }
+        // An in-flight batch belongs to the suspended `await` above: it resumes this same flush
+        // and re-runs this check, so an empty queue never reschedules itself.
+      } else if (!this.flushScheduled) {
         this.flushScheduled = true;
         queueMicrotask(() => void this.flush());
       }

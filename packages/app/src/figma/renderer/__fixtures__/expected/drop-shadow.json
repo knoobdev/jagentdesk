@@ -1,8 +1,8 @@
 [
   ["save"],
-  ["setTransform", 2, 0, 0, 2, 0, 0],
+  ["setTransform", 1, 0, 0, 1, 0, 0],
   ["save"],
-  ["setTransform", 2, 0, 0, 2, 40, 40],
+  ["setTransform", 1, 0, 0, 1, 20, 20],
   ["set:globalAlpha", 1],
   ["save"],
   ["set:fillStyle", "rgba(255, 255, 255, 1)"],

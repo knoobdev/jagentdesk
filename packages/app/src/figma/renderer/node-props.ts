@@ -1,7 +1,17 @@
 // Typed readers for the Figma REST node fields the renderer consumes. `FigmaNode` is a passthrough
 // bag (`[property: string]: unknown`), so every field access goes through these narrowings.
 import type { FigmaNode } from "@jagentdesk/protocol/figma/rpc-schemas";
-import { readBounds, readMatrix, readNumber, type Bounds, type RenderMatrix } from "./matrix";
+import {
+  boundsOfRect,
+  identity,
+  multiply,
+  readBounds,
+  readMatrix,
+  readNumber,
+  rotate,
+  type Bounds,
+  type RenderMatrix,
+} from "./matrix";
 
 export interface RGBA {
   r: number;
@@ -98,9 +108,9 @@ function readPaint(value: unknown): Paint | null {
     for (const stop of value.gradientStops) {
       if (!isRecord(stop)) continue;
       const position = readNumber(stop.position);
-      const color = readColor(stop.color);
-      if (position === null || !color) continue;
-      stops.push({ position, color });
+      const stopColor = readColor(stop.color);
+      if (position === null || !stopColor) continue;
+      stops.push({ position, color: stopColor });
     }
     if (stops.length) paint.gradientStops = stops;
   }
@@ -166,32 +176,27 @@ export function geometryOf(
   return out;
 }
 
+/**
+ * The node's local→absolute matrix. Figma Link data carries `absoluteTransform` and wins. REST
+ * nodes (`GET /v1/files/:key/nodes?geometry=paths`) never have it: position comes from
+ * `absoluteBoundingBox` (falling back to `absoluteRenderBounds`, whose x/y are equally absolute,
+ * for nodes that omit a bounding box). `relativeTransform` is parent-relative, so only its linear
+ * part — rotation/skew — is used; its translation would double-count ancestors already baked into
+ * the absolute box. The rotated local box is anchored so its corners' extents land on the box:
+ * Figma's `absoluteBoundingBox` is the axis-aligned bounds of the rotated shape.
+ */
 export function nodeTransform(node: FigmaNode): RenderMatrix | null {
   const absolute = readMatrix(node.absoluteTransform);
   if (absolute) return absolute;
-  const box = absoluteBoxOf(node);
+  const box = absoluteBoxOf(node) ?? readBounds(node.absoluteRenderBounds);
   if (!box) return null;
-  const rotation = readNumber(node.rotation) ?? 0;
-  const base = readMatrix(node.relativeTransform) ?? { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
-  // Rotate around the box centre when only a bounding box and a rotation angle exist.
-  const cx = box.width / 2;
-  const cy = box.height / 2;
-  const rad = (rotation * Math.PI) / 180;
-  const cos = Math.cos(rad);
-  const sin = Math.sin(rad);
-  const rotated: RenderMatrix = {
-    a: base.a * cos + base.c * sin,
-    b: base.b * cos + base.d * sin,
-    c: base.a * -sin + base.c * cos,
-    d: base.b * -sin + base.d * cos,
-    e: base.e,
-    f: base.f,
-  };
-  // Offsets baked into absoluteBoundingBox already account for rotation, so place the rotation
-  // about the centre of the unrotated box.
-  rotated.e += box.x - (rotated.a * cx + rotated.c * cy);
-  rotated.f += box.y - (rotated.b * cx + rotated.d * cy);
-  return rotated;
+  const rel = readMatrix(node.relativeTransform);
+  let linear: RenderMatrix = rel ? { ...rel, e: 0, f: 0 } : identity();
+  const rotation = readNumber(node.rotation);
+  if (rotation) linear = multiply(linear, rotate(rotation));
+  const { width, height } = nodeSize(node);
+  const placed = boundsOfRect(linear, width, height);
+  return { ...linear, e: box.x - placed.x, f: box.y - placed.y };
 }
 
 export function absoluteBoxOf(node: FigmaNode): Bounds | null {
@@ -200,8 +205,11 @@ export function absoluteBoxOf(node: FigmaNode): Bounds | null {
 
 export function nodeSize(node: FigmaNode): { width: number; height: number } {
   const box = absoluteBoxOf(node);
-  const width = readNumber(node.width) ?? box?.width ?? 0;
-  const height = readNumber(node.height) ?? box?.height ?? 0;
+  // REST `geometry=paths` nodes carry the unrotated dimensions in `size`; the bounding box is
+  // post-transform, so a rotated node's local shape must be measured against `size`.
+  const size = isRecord(node.size) ? node.size : null;
+  const width = readNumber(node.width) ?? (size ? readNumber(size.x) : null) ?? box?.width ?? 0;
+  const height = readNumber(node.height) ?? (size ? readNumber(size.y) : null) ?? box?.height ?? 0;
   return { width, height };
 }
 

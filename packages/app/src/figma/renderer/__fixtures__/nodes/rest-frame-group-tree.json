@@ -1,0 +1,114 @@
+{
+  "id": "40:1",
+  "name": "Rest Frame",
+  "type": "FRAME",
+  "visible": true,
+  "opacity": 1,
+  "blendMode": "NORMAL",
+  "absoluteBoundingBox": { "x": 120, "y": 200, "width": 300, "height": 400 },
+  "absoluteRenderBounds": { "x": 120, "y": 200, "width": 300, "height": 400 },
+  "relativeTransform": [
+    [1, 0, 120],
+    [0, 1, 200]
+  ],
+  "size": { "x": 300, "y": 400 },
+  "clipsContent": true,
+  "fills": [{ "type": "SOLID", "color": { "r": 1, "g": 1, "b": 1, "a": 1 } }],
+  "strokes": [],
+  "children": [
+    {
+      "id": "40:2",
+      "name": "Rest Group",
+      "type": "GROUP",
+      "visible": true,
+      "opacity": 1,
+      "blendMode": "NORMAL",
+      "absoluteBoundingBox": { "x": 160, "y": 270, "width": 178.284, "height": 226.568 },
+      "relativeTransform": [
+        [1, 0, 40],
+        [0, 1, 70]
+      ],
+      "size": { "x": 178.284, "y": 226.568 },
+      "fills": [],
+      "strokes": [],
+      "children": [
+        {
+          "id": "40:5",
+          "name": "Rest Vector",
+          "type": "VECTOR",
+          "visible": true,
+          "opacity": 1,
+          "blendMode": "NORMAL",
+          "absoluteBoundingBox": { "x": 160, "y": 270, "width": 40, "height": 20 },
+          "relativeTransform": [
+            [1, 0, 0],
+            [0, 1, 0]
+          ],
+          "size": { "x": 40, "y": 20 },
+          "fills": [{ "type": "SOLID", "color": { "r": 0, "g": 0.5, "b": 0, "a": 1 } }],
+          "fillGeometry": [{ "path": "M 0 0 L 40 0 L 40 20 Z", "windingRule": "NONZERO" }],
+          "strokes": []
+        },
+        {
+          "id": "40:3",
+          "name": "Rest Rect",
+          "type": "RECTANGLE",
+          "visible": true,
+          "opacity": 1,
+          "blendMode": "NORMAL",
+          "absoluteBoundingBox": { "x": 170, "y": 310, "width": 100, "height": 50 },
+          "relativeTransform": [
+            [1, 0, 10],
+            [0, 1, 40]
+          ],
+          "size": { "x": 100, "y": 50 },
+          "fills": [{ "type": "SOLID", "color": { "r": 0.8, "g": 0.2, "b": 0.2, "a": 1 } }],
+          "strokes": []
+        },
+        {
+          "id": "40:4",
+          "name": "Rest Text",
+          "type": "TEXT",
+          "visible": true,
+          "opacity": 1,
+          "blendMode": "NORMAL",
+          "absoluteBoundingBox": { "x": 160, "y": 380, "width": 120, "height": 24 },
+          "relativeTransform": [
+            [1, 0, 0],
+            [0, 1, 110]
+          ],
+          "size": { "x": 120, "y": 24 },
+          "characters": "REST shape",
+          "textAutoResize": "WIDTH_AND_HEIGHT",
+          "style": {
+            "fontFamily": "Inter",
+            "fontStyle": "Regular",
+            "fontSize": 16,
+            "textAlignHorizontal": "LEFT",
+            "textAlignVertical": "TOP"
+          },
+          "characterStyleOverrides": [],
+          "styleOverrideTable": {},
+          "fills": [{ "type": "SOLID", "color": { "r": 0.1, "g": 0.1, "b": 0.1, "a": 1 } }],
+          "strokes": []
+        },
+        {
+          "id": "40:6",
+          "name": "Rest Rotated Rect",
+          "type": "RECTANGLE",
+          "visible": true,
+          "opacity": 1,
+          "blendMode": "NORMAL",
+          "absoluteBoundingBox": { "x": 281.716, "y": 440, "width": 56.568, "height": 56.568 },
+          "relativeTransform": [
+            [0.7071, -0.7071, 150],
+            [0.7071, 0.7071, 170]
+          ],
+          "size": { "x": 40, "y": 40 },
+          "fills": [{ "type": "SOLID", "color": { "r": 0, "g": 0.6, "b": 0.2, "a": 1 } }],
+          "strokes": []
+        }
+      ]
+    }
+  ]
+}
