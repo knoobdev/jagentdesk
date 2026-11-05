@@ -1,0 +1,183 @@
+import { StyleSheet } from "react-native-unistyles";
+import type { Theme } from "@/styles/theme";
+
+// Shared styles for the Figma surfaces (spec 32.2–32.6). Same token discipline as the Jira
+// surface: every value comes from the theme, leaf visuals only.
+
+const DOT_BASE = { width: 8, height: 8, borderRadius: 4 };
+
+export const figmaStyles = StyleSheet.create((theme: Theme) => ({
+  screen: { flex: 1, minHeight: 0, backgroundColor: theme.colors.surface0 },
+  content: { padding: theme.spacing[4], gap: theme.spacing[3] },
+  scroll: { flex: 1, minHeight: 0 },
+  scrollContent: { padding: theme.spacing[4], gap: theme.spacing[4] },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    gap: theme.spacing[2],
+  },
+  headerTitle: {
+    fontSize: theme.fontSize.lg,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.foreground,
+  },
+  section: { gap: theme.spacing[2] },
+  sectionHeading: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.foregroundMuted,
+    letterSpacing: 0.4,
+    textTransform: "uppercase",
+  },
+  sectionHint: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundExtraMuted,
+    lineHeight: 16,
+  },
+  card: {
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.surface1,
+    padding: theme.spacing[3],
+    gap: theme.spacing[2],
+  },
+  row: { flexDirection: "row", alignItems: "center", gap: theme.spacing[2] },
+  rowBetween: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: theme.spacing[2],
+  },
+  spacer: { flex: 1 },
+  pressableRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[2],
+    borderRadius: theme.borderRadius.md,
+  },
+  pressableRowSelected: { backgroundColor: theme.colors.surface2 },
+  rowTitle: {
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foreground,
+  },
+  rowTitleSelected: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.foreground,
+  },
+  rowSubtle: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundExtraMuted,
+  },
+  label: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foregroundMuted,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.md,
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[2],
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foreground,
+    backgroundColor: theme.colors.surface0,
+  },
+  mono: {
+    fontFamily: theme.fontFamily.mono,
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+  },
+  guide: {
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.surface1,
+    padding: theme.spacing[3],
+    gap: theme.spacing[1],
+  },
+  guideTitle: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foreground,
+    marginBottom: theme.spacing[1],
+  },
+  guideBody: {
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foregroundMuted,
+    lineHeight: 20,
+  },
+  guideLink: {
+    color: theme.colors.accent,
+    textDecorationLine: "underline",
+  },
+  empty: { padding: theme.spacing[6], alignItems: "center", gap: theme.spacing[2] },
+  emptyTitle: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foregroundMuted,
+    textAlign: "center",
+  },
+  emptyMessage: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundExtraMuted,
+    textAlign: "center",
+  },
+  errorBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+    borderRadius: theme.borderRadius.md,
+    padding: theme.spacing[2],
+  },
+  errorText: {
+    flex: 1,
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.statusDanger,
+  },
+  badge: {
+    paddingHorizontal: theme.spacing[1],
+    paddingVertical: 1,
+    borderRadius: theme.borderRadius.sm,
+    backgroundColor: theme.colors.surface2,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  badgeText: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foregroundMuted,
+  },
+  spinner: { alignSelf: "center", padding: theme.spacing[4] },
+  flex1: { flex: 1 },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  dotOk: { ...DOT_BASE, backgroundColor: theme.colors.statusSuccess },
+  dotWarn: { ...DOT_BASE, backgroundColor: theme.colors.statusWarning },
+  dotExpired: { ...DOT_BASE, backgroundColor: theme.colors.statusDanger },
+  dotOffline: { ...DOT_BASE, backgroundColor: theme.colors.foregroundExtraMuted },
+  pendingBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+  },
+  pendingCount: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.foreground,
+  },
+}));

@@ -94,6 +94,8 @@ import { SidebarWorkspaceList } from "./sidebar-workspace-list";
 import { SidebarServersNav } from "@/ssh/ui/sidebar-servers-nav";
 import { JiraSidebarEntry } from "@/jira/sidebar-entry";
 import { SidebarJiraNav } from "@/jira/sidebar-jira-nav";
+import { FigmaSidebarEntry } from "@/figma/sidebar-entry";
+import { SidebarFigmaNav } from "@/figma/sidebar-figma-nav";
 import { SidebarClusterNav } from "./sidebar-cluster-nav";
 import { SidebarDatabaseNav } from "./sidebar-database-nav";
 import { SidebarArgoCdNav } from "@/argocd/sidebar-argocd-nav";
@@ -110,15 +112,16 @@ function parseArgoCdRoute(
 
 /** Sections whose route owns the desktop left column instead of the workspace list. */
 type SectionRoute =
-  | { section: "servers" | "jira"; serverId: string }
+  | { section: "servers" | "jira" | "figma"; serverId: string }
   | { section: "argocd"; serverId: string; instanceId: string | null };
 
 function resolveSectionRoute(pathname: string): SectionRoute | null {
   const argoCd = parseArgoCdRoute(pathname);
   if (argoCd) return { section: "argocd", ...argoCd };
-  const match = pathname.match(/\/h\/([^/]+)\/(servers|jira)(?:$|[/?])/);
+  const match = pathname.match(/\/h\/([^/]+)\/(servers|jira|figma)(?:$|[/?])/);
   const section = match?.[2];
-  if (!match?.[1] || (section !== "servers" && section !== "jira")) return null;
+  if (!match?.[1] || (section !== "servers" && section !== "jira" && section !== "figma"))
+    return null;
   return { section, serverId: decodeURIComponent(match[1]) };
 }
 
@@ -138,6 +141,8 @@ function resolveSidebarNavBody(
   if (sectionRoute?.section === "servers")
     return <SidebarServersNav serverId={sectionRoute.serverId} />;
   if (sectionRoute?.section === "jira") return <SidebarJiraNav serverId={sectionRoute.serverId} />;
+  if (sectionRoute?.section === "figma")
+    return <SidebarFigmaNav serverId={sectionRoute.serverId} />;
   if (sectionRoute?.section === "argocd") {
     return (
       <SidebarArgoCdNav serverId={sectionRoute.serverId} instanceId={sectionRoute.instanceId} />
@@ -1122,6 +1127,7 @@ function MobileSidebar({
               />
             ) : null}
             <JiraSidebarEntry closesDrawer />
+            <FigmaSidebarEntry closesDrawer />
             <SidebarHeaderRow
               icon={Sparkles}
               label={labels.skills}
@@ -1468,6 +1474,7 @@ function DesktopSidebar({
                 />
               ) : null}
               <JiraSidebarEntry closesDrawer={false} />
+              <FigmaSidebarEntry closesDrawer={false} />
               <SidebarHeaderRow
                 icon={Sparkles}
                 label={labels.skills}
