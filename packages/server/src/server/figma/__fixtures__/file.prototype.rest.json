@@ -159,7 +159,12 @@
                           "direction": "TOP",
                           "easing": {
                             "type": "CUSTOM_CUBIC_BEZIER",
-                            "easingFunctionCubicBezier": { "x1": 0.42, "y1": 0, "x2": 0.58, "y2": 1 }
+                            "easingFunctionCubicBezier": {
+                              "x1": 0.42,
+                              "y1": 0,
+                              "x2": 0.58,
+                              "y2": 1
+                            }
                           },
                           "duration": 250
                         },
