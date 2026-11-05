@@ -1,0 +1,61 @@
+{
+  "id": "12:1",
+  "name": "Button",
+  "type": "INSTANCE",
+  "visible": true,
+  "opacity": 1,
+  "blendMode": "NORMAL",
+  "componentId": "12:9",
+  "absoluteBoundingBox": { "x": 0, "y": 0, "width": 120, "height": 40 },
+  "absoluteTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "relativeTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "width": 120,
+  "height": 40,
+  "clipsContent": true,
+  "cornerRadius": 6,
+  "fills": [{ "type": "SOLID", "color": { "r": 0.1, "g": 0.3, "b": 0.8, "a": 1 } }],
+  "strokes": [],
+  "children": [
+    {
+      "id": "12:2",
+      "name": "Label",
+      "type": "TEXT",
+      "visible": true,
+      "opacity": 1,
+      "blendMode": "NORMAL",
+      "absoluteBoundingBox": { "x": 34, "y": 10, "width": 52, "height": 20 },
+      "absoluteTransform": [
+        [1, 0, 34],
+        [0, 1, 10]
+      ],
+      "relativeTransform": [
+        [1, 0, 34],
+        [0, 1, 10]
+      ],
+      "width": 52,
+      "height": 20,
+      "characters": "Click",
+      "textAutoResize": "WIDTH_AND_HEIGHT",
+      "style": {
+        "fontFamily": "Inter",
+        "fontStyle": "Regular",
+        "fontSize": 16,
+        "textAlignHorizontal": "LEFT",
+        "textAlignVertical": "TOP",
+        "letterSpacing": 0,
+        "lineHeightPx": 20,
+        "lineHeightUnit": "PIXELS"
+      },
+      "characterStyleOverrides": [],
+      "styleOverrideTable": {},
+      "fills": [{ "type": "SOLID", "color": { "r": 1, "g": 1, "b": 1, "a": 1 } }],
+      "strokes": []
+    }
+  ]
+}

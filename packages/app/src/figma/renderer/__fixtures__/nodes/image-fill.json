@@ -1,0 +1,29 @@
+{
+  "id": "4:1",
+  "name": "Photo",
+  "type": "RECTANGLE",
+  "visible": true,
+  "opacity": 1,
+  "blendMode": "NORMAL",
+  "absoluteBoundingBox": { "x": 0, "y": 0, "width": 120, "height": 80 },
+  "absoluteTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "relativeTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "width": 120,
+  "height": 80,
+  "fills": [
+    {
+      "type": "IMAGE",
+      "visible": true,
+      "opacity": 1,
+      "imageRef": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
+      "scaleMode": "FILL"
+    }
+  ],
+  "strokes": []
+}

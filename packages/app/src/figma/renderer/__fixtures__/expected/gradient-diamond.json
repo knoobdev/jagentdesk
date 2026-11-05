@@ -1,0 +1,55 @@
+[
+  ["save"],
+  ["setTransform", 2, 0, 0, 2, 0, 0],
+  ["save"],
+  ["setTransform", 2, 0, 0, 2, 0, 0],
+  ["set:globalAlpha", 1],
+  ["createRadialGradient", 25, 15, 0, 25, 15, 15],
+  ["save"],
+  ["set:globalAlpha", 1],
+  ["save"],
+  [
+    "clip",
+    {
+      "commands": [
+        ["moveTo", 25, 0],
+        ["lineTo", 50, 15],
+        ["lineTo", 25, 30],
+        ["lineTo", 0, 15],
+        ["closePath"]
+      ]
+    },
+    null
+  ],
+  [
+    "set:fillStyle",
+    {
+      "gradient": {
+        "kind": "radial",
+        "args": [25, 15, 0, 25, 15, 15],
+        "stops": [
+          [0, "rgba(0, 255, 255, 1)"],
+          [1, "rgba(0, 0, 0, 1)"]
+        ]
+      }
+    }
+  ],
+  [
+    "fill",
+    {
+      "commands": [
+        ["moveTo", 0, 0],
+        ["lineTo", 50, 0],
+        ["lineTo", 50, 30],
+        ["lineTo", 0, 30],
+        ["lineTo", 0, 0],
+        ["closePath"]
+      ]
+    },
+    "nonzero"
+  ],
+  ["restore"],
+  ["restore"],
+  ["restore"],
+  ["restore"]
+]

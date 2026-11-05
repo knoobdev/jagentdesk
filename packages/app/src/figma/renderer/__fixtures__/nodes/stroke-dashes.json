@@ -1,0 +1,26 @@
+{
+  "id": "2:3",
+  "name": "Dashed",
+  "type": "RECTANGLE",
+  "visible": true,
+  "opacity": 1,
+  "blendMode": "NORMAL",
+  "absoluteBoundingBox": { "x": 0, "y": 0, "width": 40, "height": 40 },
+  "absoluteTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "relativeTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "width": 40,
+  "height": 40,
+  "fills": [],
+  "strokes": [{ "type": "SOLID", "color": { "r": 0, "g": 0, "b": 1, "a": 1 } }],
+  "strokeWeight": 1,
+  "strokeAlign": "CENTER",
+  "strokeDashes": [4, 4],
+  "strokeCap": "SQUARE",
+  "strokeJoin": "ROUND"
+}

@@ -1,0 +1,69 @@
+{
+  "id": "10:1",
+  "name": "Masked",
+  "type": "FRAME",
+  "visible": true,
+  "opacity": 1,
+  "blendMode": "NORMAL",
+  "absoluteBoundingBox": { "x": 0, "y": 0, "width": 100, "height": 60 },
+  "absoluteTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "relativeTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "width": 100,
+  "height": 60,
+  "clipsContent": false,
+  "fills": [],
+  "strokes": [],
+  "children": [
+    {
+      "id": "10:2",
+      "name": "M",
+      "type": "VECTOR",
+      "visible": true,
+      "opacity": 1,
+      "blendMode": "NORMAL",
+      "isMask": true,
+      "maskType": "ALPHA",
+      "absoluteBoundingBox": { "x": 0, "y": 0, "width": 100, "height": 60 },
+      "absoluteTransform": [
+        [1, 0, 0],
+        [0, 1, 0]
+      ],
+      "relativeTransform": [
+        [1, 0, 0],
+        [0, 1, 0]
+      ],
+      "width": 100,
+      "height": 60,
+      "fills": [{ "type": "SOLID", "color": { "r": 0, "g": 0, "b": 0, "a": 1 } }],
+      "strokes": [],
+      "fillGeometry": [{ "path": "M 0 0 L 50 0 L 50 60 L 0 60 Z", "windingRule": "NONZERO" }]
+    },
+    {
+      "id": "10:3",
+      "name": "Clipped",
+      "type": "RECTANGLE",
+      "visible": true,
+      "opacity": 1,
+      "blendMode": "NORMAL",
+      "absoluteBoundingBox": { "x": 0, "y": 0, "width": 80, "height": 40 },
+      "absoluteTransform": [
+        [1, 0, 0],
+        [0, 1, 0]
+      ],
+      "relativeTransform": [
+        [1, 0, 0],
+        [0, 1, 0]
+      ],
+      "width": 80,
+      "height": 40,
+      "fills": [{ "type": "SOLID", "color": { "r": 1, "g": 0, "b": 1, "a": 1 } }],
+      "strokes": []
+    }
+  ]
+}

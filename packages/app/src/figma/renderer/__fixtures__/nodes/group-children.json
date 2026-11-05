@@ -1,0 +1,65 @@
+{
+  "id": "6:2",
+  "name": "Group",
+  "type": "GROUP",
+  "visible": true,
+  "opacity": 1,
+  "blendMode": "NORMAL",
+  "absoluteBoundingBox": { "x": 5, "y": 5, "width": 50, "height": 50 },
+  "absoluteTransform": [
+    [1, 0, 5],
+    [0, 1, 5]
+  ],
+  "relativeTransform": [
+    [1, 0, 5],
+    [0, 1, 5]
+  ],
+  "width": 50,
+  "height": 50,
+  "fills": [],
+  "strokes": [],
+  "children": [
+    {
+      "id": "6:3",
+      "name": "A",
+      "type": "RECTANGLE",
+      "visible": true,
+      "opacity": 1,
+      "blendMode": "NORMAL",
+      "absoluteBoundingBox": { "x": 5, "y": 5, "width": 20, "height": 20 },
+      "absoluteTransform": [
+        [1, 0, 5],
+        [0, 1, 5]
+      ],
+      "relativeTransform": [
+        [1, 0, 0],
+        [0, 1, 0]
+      ],
+      "width": 20,
+      "height": 20,
+      "fills": [{ "type": "SOLID", "color": { "r": 0, "g": 0, "b": 1, "a": 1 } }],
+      "strokes": []
+    },
+    {
+      "id": "6:4",
+      "name": "B",
+      "type": "RECTANGLE",
+      "visible": true,
+      "opacity": 1,
+      "blendMode": "NORMAL",
+      "absoluteBoundingBox": { "x": 25, "y": 25, "width": 30, "height": 30 },
+      "absoluteTransform": [
+        [1, 0, 25],
+        [0, 1, 25]
+      ],
+      "relativeTransform": [
+        [1, 0, 20],
+        [0, 1, 20]
+      ],
+      "width": 30,
+      "height": 30,
+      "fills": [{ "type": "SOLID", "color": { "r": 1, "g": 1, "b": 0, "a": 1 } }],
+      "strokes": []
+    }
+  ]
+}

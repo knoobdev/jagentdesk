@@ -1,0 +1,20 @@
+[
+  ["save"],
+  ["setTransform", 2, 0, 0, 2, 0, 0],
+  ["save"],
+  ["setTransform", 2, 0, 0, 2, 0, 0],
+  ["set:globalAlpha", 1],
+  ["save"],
+  ["set:globalAlpha", 1],
+  ["set:fillStyle", "rgba(128, 0, 128, 1)"],
+  [
+    "fill",
+    {
+      "svg": "M 10 0 A 10 10 0 1 0 10 20 A 10 10 0 1 0 10 0 Z M 10 5 A 5 5 0 1 0 10 15 A 5 5 0 1 0 10 5 Z"
+    },
+    "evenodd"
+  ],
+  ["restore"],
+  ["restore"],
+  ["restore"]
+]

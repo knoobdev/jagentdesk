@@ -1,0 +1,22 @@
+{
+  "id": "9:4",
+  "name": "Scrim",
+  "type": "RECTANGLE",
+  "visible": true,
+  "opacity": 1,
+  "blendMode": "NORMAL",
+  "absoluteBoundingBox": { "x": 10, "y": 10, "width": 200, "height": 100 },
+  "absoluteTransform": [
+    [1, 0, 10],
+    [0, 1, 10]
+  ],
+  "relativeTransform": [
+    [1, 0, 10],
+    [0, 1, 10]
+  ],
+  "width": 200,
+  "height": 100,
+  "fills": [{ "type": "SOLID", "color": { "r": 1, "g": 1, "b": 1, "a": 0.5 } }],
+  "strokes": [],
+  "effects": [{ "type": "BACKGROUND_BLUR", "visible": true, "radius": 20 }]
+}

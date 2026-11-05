@@ -1,0 +1,25 @@
+{
+  "id": "2:2",
+  "name": "Ring2",
+  "type": "ELLIPSE",
+  "visible": true,
+  "opacity": 1,
+  "blendMode": "NORMAL",
+  "absoluteBoundingBox": { "x": 0, "y": 0, "width": 32, "height": 32 },
+  "absoluteTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "relativeTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "width": 32,
+  "height": 32,
+  "fills": [],
+  "strokes": [{ "type": "SOLID", "color": { "r": 0.9, "g": 0.1, "b": 0.1, "a": 1 } }],
+  "strokeWeight": 4,
+  "strokeAlign": "OUTSIDE",
+  "strokeCap": "NONE",
+  "strokeJoin": "MITER"
+}

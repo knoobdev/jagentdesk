@@ -1,0 +1,22 @@
+{
+  "id": "1:7",
+  "name": "Star",
+  "type": "STAR",
+  "visible": true,
+  "opacity": 1,
+  "blendMode": "NORMAL",
+  "absoluteBoundingBox": { "x": 0, "y": 0, "width": 40, "height": 40 },
+  "absoluteTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "relativeTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "width": 40,
+  "height": 40,
+  "pointCount": 5,
+  "fills": [{ "type": "SOLID", "color": { "r": 1, "g": 0.8, "b": 0, "a": 1 } }],
+  "strokes": []
+}

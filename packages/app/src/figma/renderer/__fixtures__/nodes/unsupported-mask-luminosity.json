@@ -1,0 +1,67 @@
+{
+  "id": "14:4",
+  "name": "LumaMasked",
+  "type": "FRAME",
+  "visible": true,
+  "opacity": 1,
+  "blendMode": "NORMAL",
+  "absoluteBoundingBox": { "x": 0, "y": 0, "width": 50, "height": 50 },
+  "absoluteTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "relativeTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "width": 50,
+  "height": 50,
+  "fills": [],
+  "strokes": [],
+  "children": [
+    {
+      "id": "14:5",
+      "name": "M",
+      "type": "RECTANGLE",
+      "visible": true,
+      "opacity": 1,
+      "blendMode": "NORMAL",
+      "isMask": true,
+      "maskType": "LUMINOSITY",
+      "absoluteBoundingBox": { "x": 0, "y": 0, "width": 50, "height": 50 },
+      "absoluteTransform": [
+        [1, 0, 0],
+        [0, 1, 0]
+      ],
+      "relativeTransform": [
+        [1, 0, 0],
+        [0, 1, 0]
+      ],
+      "width": 50,
+      "height": 50,
+      "fills": [],
+      "strokes": []
+    },
+    {
+      "id": "14:6",
+      "name": "C",
+      "type": "ELLIPSE",
+      "visible": true,
+      "opacity": 1,
+      "blendMode": "NORMAL",
+      "absoluteBoundingBox": { "x": 5, "y": 5, "width": 40, "height": 40 },
+      "absoluteTransform": [
+        [1, 0, 5],
+        [0, 1, 5]
+      ],
+      "relativeTransform": [
+        [1, 0, 5],
+        [0, 1, 5]
+      ],
+      "width": 40,
+      "height": 40,
+      "fills": [{ "type": "SOLID", "color": { "r": 1, "g": 0, "b": 0, "a": 1 } }],
+      "strokes": []
+    }
+  ]
+}

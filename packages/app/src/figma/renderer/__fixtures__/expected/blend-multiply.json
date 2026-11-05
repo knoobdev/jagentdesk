@@ -1,0 +1,28 @@
+[
+  ["save"],
+  ["setTransform", 2, 0, 0, 2, 0, 0],
+  ["save"],
+  ["setTransform", 2, 0, 0, 2, 0, 0],
+  ["set:globalAlpha", 1],
+  ["set:globalCompositeOperation", "MULTIPLY"],
+  ["save"],
+  ["set:globalAlpha", 1],
+  ["set:fillStyle", "rgba(128, 128, 128, 1)"],
+  [
+    "fill",
+    {
+      "commands": [
+        ["moveTo", 0, 0],
+        ["lineTo", 60, 0],
+        ["lineTo", 60, 60],
+        ["lineTo", 0, 60],
+        ["lineTo", 0, 0],
+        ["closePath"]
+      ]
+    },
+    "nonzero"
+  ],
+  ["restore"],
+  ["restore"],
+  ["restore"]
+]

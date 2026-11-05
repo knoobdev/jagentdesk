@@ -1,0 +1,64 @@
+[
+  ["save"],
+  ["setTransform", 2, 0, 0, 2, 0, 0],
+  ["save"],
+  ["setTransform", 2, 0, 0, 2, 0, 0],
+  ["set:globalAlpha", 1],
+  ["save"],
+  ["set:globalAlpha", 1],
+  ["set:fillStyle", "rgba(230, 230, 230, 1)"],
+  [
+    "fill",
+    {
+      "commands": [
+        ["moveTo", 0, 0],
+        ["lineTo", 80, 0],
+        ["lineTo", 80, 30],
+        ["lineTo", 0, 30],
+        ["lineTo", 0, 0],
+        ["closePath"]
+      ]
+    },
+    "nonzero"
+  ],
+  ["restore"],
+  ["save"],
+  [
+    "clip",
+    {
+      "commands": [
+        ["moveTo", 0, 0],
+        ["lineTo", 80, 0],
+        ["lineTo", 80, 30],
+        ["lineTo", 0, 30],
+        ["lineTo", 0, 0],
+        ["closePath"]
+      ]
+    },
+    "nonzero"
+  ],
+  ["save"],
+  ["set:shadowColor", "rgba(0, 0, 0, 0.4)"],
+  ["set:shadowBlur", 8],
+  ["set:shadowOffsetX", 0],
+  ["set:shadowOffsetY", 4],
+  ["set:fillStyle", "rgba(0, 0, 0, 0.4)"],
+  [
+    "fill",
+    {
+      "commands": [
+        ["rect", -320, -320, 1040, 990],
+        ["rect", 0, 0, 80, 30]
+      ]
+    },
+    "evenodd"
+  ],
+  ["set:shadowColor", "rgba(0, 0, 0, 0)"],
+  ["set:shadowBlur", 0],
+  ["set:shadowOffsetX", 0],
+  ["set:shadowOffsetY", 0],
+  ["restore"],
+  ["restore"],
+  ["restore"],
+  ["restore"]
+]
