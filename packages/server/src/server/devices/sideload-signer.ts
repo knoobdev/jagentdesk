@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { SideloadAccountSummary } from "@jagentdesk/protocol/sideload/rpc-schemas";
 import type { SimSignerAccount } from "@jagentdesk/protocol/simulator/rpc-schemas";
 import type { SideloadSigner } from "../sideload/sideload-service.js";
@@ -33,12 +34,30 @@ export function createSideloadDeviceSigner(resolve: () => SideloadSigner | null)
       );
       return app ? app.expiresAt_ms : null;
     },
-    signAndInstall(input) {
-      return signer().signAndInstall({
+    async signAndInstall(input) {
+      const service = signer();
+      const existingBundleId = input.options?.bundleId;
+      let bundleId: string;
+      if (typeof existingBundleId === "string" && existingBundleId.trim()) {
+        bundleId = existingBundleId;
+      } else {
+        const account = (await service.listAccounts()).find(
+          (entry) => entry.id === input.accountId,
+        );
+        // The upstream Facebook identifier cannot be registered by the user's Apple team.
+        // Keep one stable App ID per team (account fallback), including across retries/devices.
+        const key = createHash("sha256")
+          .update(account?.teamId || input.accountId)
+          .digest("hex")
+          .slice(0, 20);
+        bundleId = `dev.jagentdesk.wda.${key}.xctrunner`;
+      }
+      return service.signAndInstall({
         accountId: input.accountId,
         deviceUdid: input.deviceUdid,
         ipaPath: input.ipaPath,
         autoRefresh: input.autoRefresh,
+        options: { bundleId },
       });
     },
   };

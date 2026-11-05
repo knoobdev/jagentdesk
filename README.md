@@ -120,6 +120,17 @@ with a few deliberate boundaries:
 
 ## ✨ New in this release
 
+### Figma sign-in and iPhone touch fixes (v0.9.54)
+
+- **Figma sign-in:** fixes React error #185 after login by handling the completed sign-in once,
+  including when the connection list is still loading or you reopen Connections.
+- **Enable touch on iPhone:** newly prepared WebDriverAgent uses a stable bundle identifier for
+  your Apple team, fixing Apple error 9401 for the default Facebook runner identifier. Retries and
+  refreshes keep the identifier; reinstalling with another account does not reuse the old account's
+  identifier.
+- [CHANGELOG](CHANGELOG.md#v0954--2026-11-06) includes the regression checks and remaining validation
+  limits.
+
 ### Figma inside JAgentDesk, and a mobile menu that leaves room for your projects (v0.9.53)
 
 - **Sign in with your own Figma account** (OAuth with a private app you create in your team — the

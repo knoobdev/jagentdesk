@@ -1178,11 +1178,13 @@ export class PhysicalDeviceHub {
     onProgress("download", "Downloading WebDriverAgent");
     const ipaPath = await ensureWdaIpa(this.options.jagentdeskHome, this.fetchBytes);
     onProgress("sign", `Signing WebDriverAgent with ${account.label}`);
+    const previous = this.store.wda(udid);
     const signed = await signer.signAndInstall({
       accountId: account.id,
       deviceUdid: udid.slice(IOS_UDID_PREFIX.length),
       ipaPath,
       autoRefresh: true,
+      ...(previous?.accountId === account.id ? { options: { bundleId: previous.bundleId } } : {}),
     });
     onProgress("install", "WebDriverAgent installed");
     await this.store.setWda(

@@ -1,9 +1,32 @@
 # Changelog
 
 All notable changes to JAgentDesk are documented here. JAgentDesk versions its
-own release line (now `0.9.53`); the many `v0.1.x`–`v1.0.x` tags in history are
+own release line (now `0.9.54`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
+
+## v0.9.54 — 2026-11-06
+
+Fixes the Figma sign-in crash and Apple App ID rejection when enabling touch on an iPhone.
+
+### Fixed
+
+- **Figma sign-in:** consume the completed sign-in before navigating to files. While the connection
+  query was catching up, repeated navigation could crash the app with React error #185. Reopening
+  Connections and React StrictMode no longer replay the completed sign-in.
+- **iPhone touch:** sign a newly prepared WebDriverAgent with a stable JAgentDesk bundle identifier
+  for the Apple team, instead of trying to register `com.facebook.WebDriverAgentRunner.xctrunner`
+  and receiving Apple error 9401. Retries use the same identifier. Reinstalling with the same account
+  keeps the identifier already stored for that device; switching accounts does not inherit it.
+- The WebDriverAgent bundle override reaches the existing Sideload provisioning/signing pipeline
+  and remains part of its saved auto-refresh options.
+
+### Verification
+
+- 7 React DOM component tests and 23 daemon tests passed, including the regression cases, WDA
+  signing adapter, device hub, and IPA bundle-editing fixture.
+- Full repository typecheck, focused lint and formatting checks, and daemon/CLI build passed.
+- Live Figma OAuth and signing/installing WebDriverAgent on a physical iPhone were not exercised.
 
 ## v0.9.53 — 2026-11-05
 
