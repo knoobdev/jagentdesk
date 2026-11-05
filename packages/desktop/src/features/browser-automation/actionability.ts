@@ -21,24 +21,6 @@ export type ActionabilityResult =
 
 const DEFAULT_ACTIONABILITY_TIMEOUT_MS = 5_000;
 
-/**
- * scrollIntoView({block:'center'}) must run only when the element is not fully visible: an
- * unconditional center-scroll repositioned the whole sidebar rail for every rail click, which
- * is how entering Figma scrolled Home/History out of view. Embedded into the injected page
- * script with `.toString()`, so its own unit test covers the shipped logic.
- */
-export function isFullyInViewport(
-  rect: { top: number; left: number; bottom: number; right: number },
-  viewport: { width: number; height: number },
-): boolean {
-  return (
-    rect.top >= 0 &&
-    rect.left >= 0 &&
-    rect.bottom <= viewport.height &&
-    rect.right <= viewport.width
-  );
-}
-
 export async function waitForActionableTarget(input: {
   page: SnapshotPage;
   elementExpression: string;
@@ -241,7 +223,6 @@ function buildActionabilityScript(input: {
       return false;
     };
     const resolveElement = () => (${input.elementExpression});
-    const isFullyInViewport = ${isFullyInViewport.toString()};
 
     let detail = 'not actionable';
     while (performance.now() <= deadline) {
@@ -267,13 +248,8 @@ function buildActionabilityScript(input: {
         continue;
       }
 
-      // Only reposition when the element is not already fully visible — an unconditional
-      // center scroll moved the whole sidebar rail for every rail click.
-      const frameView = ownerView(element);
-      if (!isFullyInViewport(rect, { width: frameView.innerWidth, height: frameView.innerHeight })) {
-        element.scrollIntoView?.({ block: 'center', inline: 'center' });
-        await waitForLayout();
-      }
+      element.scrollIntoView?.({ block: 'center', inline: 'center' });
+      await waitForLayout();
       const firstRect = element.getBoundingClientRect();
       await waitForLayout();
       const secondRect = element.getBoundingClientRect();
