@@ -48,18 +48,43 @@ import { parseFigmaFileUrl, parseFigmaTeamUrl } from "@/figma/url-parse";
 // by name. Rows drive the Figma screen's route params; adding by URL parses client-side first so
 // a bad paste never leaves the column.
 
-const ThemedChevronDown = withUnistyles(ChevronDown);
-const ThemedChevronLeft = withUnistyles(ChevronLeft);
-const ThemedChevronRight = withUnistyles(ChevronRight);
-const ThemedExternal = withUnistyles(ExternalLink);
-const ThemedFile = withUnistyles(FileText);
-const ThemedFolder = withUnistyles(Folder);
-const ThemedPlus = withUnistyles(Plus);
-const ThemedSearch = withUnistyles(Search);
-const ThemedUsers = withUnistyles(Users);
-const ThemedX = withUnistyles(X);
-const mutedTint = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
-const faintTint = (theme: Theme) => ({ color: theme.colors.foregroundExtraMuted });
+// Theme-reactive icons. `withUnistyles(Component, mappings)` keeps the color on the theme
+// (light + dark) without the `uniProps` prop, which leaks onto the DOM node on web and draws
+// a "React does not recognize the uniProps prop" warning on every Figma page.
+const ThemedChevronDown = withUnistyles(ChevronDown, (theme: Theme) => ({
+  color: theme.colors.foregroundExtraMuted,
+}));
+const ThemedChevronLeft = withUnistyles(ChevronLeft, (theme: Theme) => ({
+  color: theme.colors.foregroundMuted,
+}));
+const ThemedChevronRight = withUnistyles(ChevronRight, (theme: Theme) => ({
+  color: theme.colors.foregroundExtraMuted,
+}));
+const ThemedExternalMuted = withUnistyles(ExternalLink, (theme: Theme) => ({
+  color: theme.colors.foregroundMuted,
+}));
+const ThemedExternalFaint = withUnistyles(ExternalLink, (theme: Theme) => ({
+  color: theme.colors.foregroundExtraMuted,
+}));
+const ThemedFileMuted = withUnistyles(FileText, (theme: Theme) => ({
+  color: theme.colors.foregroundMuted,
+}));
+const ThemedFileFaint = withUnistyles(FileText, (theme: Theme) => ({
+  color: theme.colors.foregroundExtraMuted,
+}));
+const ThemedFolder = withUnistyles(Folder, (theme: Theme) => ({
+  color: theme.colors.foregroundExtraMuted,
+}));
+const ThemedPlus = withUnistyles(Plus, (theme: Theme) => ({
+  color: theme.colors.foregroundMuted,
+}));
+const ThemedSearch = withUnistyles(Search, (theme: Theme) => ({
+  color: theme.colors.foregroundExtraMuted,
+}));
+const ThemedUsers = withUnistyles(Users, (theme: Theme) => ({
+  color: theme.colors.foregroundMuted,
+}));
+const ThemedX = withUnistyles(X, (theme: Theme) => ({ color: theme.colors.foregroundMuted }));
 
 type Go = FigmaNav["go"];
 
@@ -120,18 +145,23 @@ function FileRow({
     [file.name, file.pinned],
   );
   return (
-    <Pressable
-      style={active ? styles.rowActive : styles.row}
-      onPress={open}
-      accessibilityRole="button"
-      accessibilityState={accessibilityState}
-      testID={`figma-nav-file-${file.fileKey}`}
-    >
-      <ThemedFile size={13} uniProps={mutedTint} />
-      <Text style={active ? styles.rowLabelActive : styles.rowLabel} numberOfLines={1}>
-        {file.name || file.fileKey}
-      </Text>
-      {file.linked ? <ThemedExternal size={12} uniProps={faintTint} /> : null}
+    // The row is a View wrapper holding two sibling Pressables: a Pressable inside a Pressable
+    // renders nested <button>s on web and React warns ("<button> cannot be a descendant of
+    // <button>") — the pin must not live inside the open target.
+    <View style={active ? styles.rowActive : styles.row}>
+      <Pressable
+        style={styles.rowMain}
+        onPress={open}
+        accessibilityRole="button"
+        accessibilityState={accessibilityState}
+        testID={`figma-nav-file-${file.fileKey}`}
+      >
+        <ThemedFileMuted size={13} />
+        <Text style={active ? styles.rowLabelActive : styles.rowLabel} numberOfLines={1}>
+          {file.name || file.fileKey}
+        </Text>
+        {file.linked ? <ThemedExternalFaint size={12} /> : null}
+      </Pressable>
       <Pressable
         hitSlop={8}
         onPress={togglePin}
@@ -142,7 +172,7 @@ function FileRow({
       >
         <Text style={styles.pinText}>{file.pinned ? "★" : "☆"}</Text>
       </Pressable>
-    </Pressable>
+    </View>
   );
 }
 
@@ -192,7 +222,7 @@ function AddByUrlRow({
         accessibilityRole="button"
         testID={`${testID}-open`}
       >
-        <ThemedPlus size={13} uniProps={mutedTint} />
+        <ThemedPlus size={13} />
         <Text style={styles.addRowLabel}>{placeholder}</Text>
       </Pressable>
     );
@@ -223,7 +253,7 @@ function AddByUrlRow({
         testID={`${testID}-cancel`}
         style={styles.pinButton}
       >
-        <ThemedX size={12} uniProps={mutedTint} />
+        <ThemedX size={12} />
       </Pressable>
       {error ? <Text style={styles.empty}>{error}</Text> : null}
     </View>
@@ -293,7 +323,7 @@ function TeamFileRow({ file, indent, go }: { file: FigmaProjectFile; indent: 1 |
       accessibilityRole="button"
       testID={`figma-nav-team-file-${file.fileKey}`}
     >
-      <ThemedFile size={12} uniProps={faintTint} />
+      <ThemedFileFaint size={12} />
       <Text style={styles.rowLabel} numberOfLines={1}>
         {file.name}
       </Text>
@@ -351,12 +381,8 @@ function ProjectRow({
         accessibilityRole="button"
         testID={`figma-nav-project-${project.id}`}
       >
-        {expanded ? (
-          <ThemedChevronDown size={12} uniProps={faintTint} />
-        ) : (
-          <ThemedChevronRight size={12} uniProps={faintTint} />
-        )}
-        <ThemedFolder size={12} uniProps={faintTint} />
+        {expanded ? <ThemedChevronDown size={12} /> : <ThemedChevronRight size={12} />}
+        <ThemedFolder size={12} />
         <Text style={styles.rowLabel} numberOfLines={1}>
           {project.name}
         </Text>
@@ -441,12 +467,8 @@ function TeamRow({
         accessibilityRole="button"
         testID={`figma-nav-team-${teamId}`}
       >
-        {expanded ? (
-          <ThemedChevronDown size={12} uniProps={faintTint} />
-        ) : (
-          <ThemedChevronRight size={12} uniProps={faintTint} />
-        )}
-        <ThemedUsers size={13} uniProps={mutedTint} />
+        {expanded ? <ThemedChevronDown size={12} /> : <ThemedChevronRight size={12} />}
+        <ThemedUsers size={13} />
         <Text style={styles.rowLabel} numberOfLines={1}>
           {teamName}
         </Text>
@@ -460,11 +482,7 @@ function TeamRow({
 
 function LayerChevron({ hasChildren, expanded }: { hasChildren: boolean; expanded: boolean }) {
   if (!hasChildren) return null;
-  return expanded ? (
-    <ThemedChevronDown size={11} uniProps={faintTint} />
-  ) : (
-    <ThemedChevronRight size={11} uniProps={faintTint} />
-  );
+  return expanded ? <ThemedChevronDown size={11} /> : <ThemedChevronRight size={11} />;
 }
 
 function LayerNodeRow({
@@ -582,11 +600,7 @@ function FrameRow({
         accessibilityRole="button"
         testID={`figma-nav-frame-${frame.id}`}
       >
-        {expanded ? (
-          <ThemedChevronDown size={12} uniProps={faintTint} />
-        ) : (
-          <ThemedChevronRight size={12} uniProps={faintTint} />
-        )}
+        {expanded ? <ThemedChevronDown size={12} /> : <ThemedChevronRight size={12} />}
         <Text
           style={selectedNodeId === frame.id ? styles.rowLabelActive : styles.rowLabel}
           numberOfLines={1}
@@ -653,7 +667,7 @@ function PageRow({
   const searchRow = useMemo(
     () => (
       <View style={[styles.row, styles.indent1]}>
-        <ThemedSearch size={12} uniProps={faintTint} />
+        <ThemedSearch size={12} />
         <TextInput
           value={search}
           onChangeText={onSearchChange}
@@ -675,11 +689,7 @@ function PageRow({
         accessibilityRole="button"
         testID={`figma-nav-page-${page.id}`}
       >
-        {selected ? (
-          <ThemedChevronDown size={12} uniProps={faintTint} />
-        ) : (
-          <ThemedChevronRight size={12} uniProps={faintTint} />
-        )}
+        {selected ? <ThemedChevronDown size={12} /> : <ThemedChevronRight size={12} />}
         <Text style={selected ? styles.rowLabelActive : styles.rowLabel} numberOfLines={1}>
           {page.name}
         </Text>
@@ -815,7 +825,7 @@ function LinkedFileRow({ file, go }: { file: FigmaLinkFile; go: Go }) {
       accessibilityRole="button"
       testID={`figma-nav-linked-${file.fileKey}`}
     >
-      <ThemedExternal size={13} uniProps={mutedTint} />
+      <ThemedExternalMuted size={13} />
       <Text style={styles.rowLabel} numberOfLines={1}>
         {file.fileName}
       </Text>
@@ -866,7 +876,7 @@ export function SidebarFigmaNav({ serverId }: { serverId: string }) {
           accessibilityLabel="Leave Figma"
           testID="sidebar-figma-leave"
         >
-          <ThemedChevronLeft size={16} uniProps={mutedTint} />
+          <ThemedChevronLeft size={16} />
         </Pressable>
         <Pressable
           style={styles.headerTitleRow}
@@ -955,7 +965,7 @@ export function SidebarFigmaNav({ serverId }: { serverId: string }) {
           accessibilityRole="button"
           testID="figma-nav-link"
         >
-          <ThemedExternal size={13} uniProps={mutedTint} />
+          <ThemedExternalMuted size={13} />
           <Text style={styles.rowLabel}>Figma Link…</Text>
         </Pressable>
       </ScrollView>
@@ -1014,6 +1024,13 @@ const styles = StyleSheet.create((theme: Theme) => ({
     paddingTop: theme.spacing[1],
   },
   row: row(theme),
+  rowMain: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+  },
   rowActive: {
     ...row(theme),
     backgroundColor: theme.colors.surfaceSidebarHover ?? theme.colors.surface2,

@@ -1,4 +1,9 @@
-import type { FigmaFrameSummary, FigmaRect } from "@jagentdesk/protocol/figma/rpc-schemas";
+import type {
+  FigmaFrameSummary,
+  FigmaNode,
+  FigmaPage,
+  FigmaRect,
+} from "@jagentdesk/protocol/figma/rpc-schemas";
 
 // Pan/zoom camera for the Figma canvas (spec 32.5.1). Screen pixels map to Figma units by
 // `figma = (screen − offset) ÷ zoom`; the canvas applies `setTransform(zoom·dpr, …, offset·dpr)`.
@@ -144,6 +149,71 @@ export function cameraAt100(rect: FigmaRect | null, width: number, height: numbe
     offsetX: width / 2 - (rect.x + rect.width / 2),
     offsetY: height / 2 - (rect.y + rect.height / 2),
   };
+}
+
+/**
+ * Union of the top-level frames of ONE page — Fit and 100% are page-scoped and must never
+ * span frames sitting on other pages.
+ */
+export function pageBoundingRect(
+  pages: readonly FigmaPage[],
+  pageId: string | null,
+): FigmaRect | null {
+  const page = pages.find((candidate) => candidate.id === pageId);
+  return framesBoundingRect(page?.frames ?? []);
+}
+
+/** The focus math needs read access to the lazy subtree cache; FrameStore satisfies this. */
+export interface LoadedNodeReader {
+  get(id: string): FigmaNode | null | undefined;
+  loadedIds(): string[];
+}
+
+function findDescendant(node: FigmaNode, id: string): FigmaNode | null {
+  for (const child of node.children ?? []) {
+    const found = child.id === id ? child : findDescendant(child, id);
+    if (found) return found;
+  }
+  return null;
+}
+
+/** The absolute bounding box Figma returned for a node (`geometry=paths` passthrough field). */
+export function absoluteBoundingBoxOf(node: FigmaNode | null | undefined): FigmaRect | null {
+  const raw = node?.absoluteBoundingBox;
+  if (typeof raw !== "object" || raw === null) return null;
+  const box = raw as Record<string, unknown>;
+  if (
+    typeof box.x !== "number" ||
+    typeof box.y !== "number" ||
+    typeof box.width !== "number" ||
+    typeof box.height !== "number"
+  ) {
+    return null;
+  }
+  return { x: box.x, y: box.y, width: box.width, height: box.height };
+}
+
+/**
+ * Where a node sits in Figma space: the frame summary for a top-level frame, the loaded
+ * subtree's absolute box for a nested layer, or null while nothing known matches the id.
+ */
+export function nodeFocusBounds(
+  store: LoadedNodeReader | null,
+  page: FigmaPage | null,
+  nodeId: string,
+): FigmaRect | null {
+  const frame = page?.frames.find((candidate) => candidate.id === nodeId);
+  if (frame) return frame.bounds;
+  if (!store) return null;
+  for (const loaded of store.loadedIds()) {
+    const root = store.get(loaded);
+    if (!root) continue;
+    const found = root.id === nodeId ? root : findDescendant(root, nodeId);
+    if (!found) continue;
+    const bounds = absoluteBoundingBoxOf(found);
+    if (bounds) return bounds;
+  }
+  return null;
 }
 
 /** Level of detail for a zoom: thumbnails keep pan/zoom at ≥ 50 fps on big files. */

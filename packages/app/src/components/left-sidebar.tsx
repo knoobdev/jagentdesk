@@ -90,6 +90,7 @@ import {
 } from "@/utils/host-routes";
 import type { ShortcutKey } from "@/utils/format-shortcut";
 import { SidebarAgentListSkeleton } from "./sidebar-agent-list-skeleton";
+import { shouldShowAddProject } from "./sidebar-add-project-visibility";
 import { SidebarCalloutSlot } from "./sidebar-callout-slot";
 import { SidebarWorkspaceList } from "./sidebar-workspace-list";
 import { SidebarServersNav } from "@/ssh/ui/sidebar-servers-nav";
@@ -125,6 +126,12 @@ function resolveSectionRoute(pathname: string): SectionRoute | null {
     return null;
   return { section, serverId: decodeURIComponent(match[1]) };
 }
+
+/**
+ * Whether the sidebar footer may render "Add project" — re-exported from
+ * sidebar-add-project-visibility so the rule stays pure and unit-testable.
+ */
+export { shouldShowAddProject } from "./sidebar-add-project-visibility";
 
 /**
  * Pick the sidebar body for a route: a resource nav when the route points at a
@@ -821,6 +828,7 @@ function SidebarFooter({
   labels,
   handleAddHost,
   handleOpenHostSettings,
+  showAddProject = true,
 }: {
   theme: SidebarTheme;
   handleOpenProject: () => void;
@@ -836,6 +844,7 @@ function SidebarFooter({
   };
   handleAddHost: () => void;
   handleOpenHostSettings: (serverId: string) => void;
+  showAddProject?: boolean;
 }) {
   const newAgentKeys = useShortcutKeys("new-agent");
   const settingsKeys = useShortcutKeys("toggle-settings");
@@ -850,12 +859,14 @@ function SidebarFooter({
 
   return (
     <View style={styles.sidebarFooter}>
-      <FooterAddProjectButton
-        onPress={handleOpenProject}
-        label={labels.addProject}
-        shortcutKeys={newAgentKeys}
-        theme={theme}
-      />
+      {showAddProject ? (
+        <FooterAddProjectButton
+          onPress={handleOpenProject}
+          label={labels.addProject}
+          shortcutKeys={newAgentKeys}
+          theme={theme}
+        />
+      ) : null}
       {/* The ClickUp shell moves hosts, help, pairing and settings to the top bar and rail. */}
       <View style={isClickUp ? styles.footerIconRowHidden : styles.footerIconRow}>
         <SidebarHostPicker
@@ -1362,6 +1373,7 @@ function DesktopSidebar({
           labels={labels}
           handleAddHost={handleAddHost}
           handleOpenHostSettings={handleOpenHostSettings}
+          showAddProject={shouldShowAddProject(pathname)}
         />
 
         <SidebarResizeHandle

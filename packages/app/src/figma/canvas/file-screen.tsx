@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { PanelRightClose, PanelRightOpen, Sparkles } from "lucide-react-native";
 import type { FigmaNode } from "@jagentdesk/protocol/figma/rpc-schemas";
 import { useQueryClient } from "@tanstack/react-query";
@@ -20,6 +20,8 @@ import { FigmaAssistantPanel } from "./assistant-panel";
 import { InspectPanel } from "./inspect-panel";
 import { FigmaTopBar } from "./top-bar";
 import { figmaNodeIdFromParam, figmaNodeParam } from "./node-url";
+import { errorMessage, useFigmaCall } from "./api";
+import { absoluteBoundingBoxOf, type Camera, centerCameraOn, nodeFocusBounds } from "./viewport";
 import {
   figmaKeys,
   invalidateFigmaFile,
@@ -28,7 +30,6 @@ import {
   useFigmaOutline,
   useFigmaWatch,
 } from "./use-figma-file";
-import { type Camera, centerCameraOn } from "./viewport";
 import type { FigmaAssistantContext } from "./assistant-context";
 
 // The file screen (spec 32.5): top bar + toolbar + canvas + the right-hand panel column. Owned
@@ -67,6 +68,19 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   sideCard: { width: 360, borderRadius: 0 },
+  iconRail: {
+    position: "absolute",
+    right: 8,
+    top: 8,
+    zIndex: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#e4e4e7",
+    backgroundColor: "#ffffff",
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+  },
+  canvasError: { position: "absolute", left: 12, right: 12, top: 8, zIndex: 6 },
 });
 
 function panelTitle(tab: PanelTab): string {
@@ -98,12 +112,27 @@ export function FigmaFileScreen({ serverId, fileKey, version }: FigmaFileRef) {
     initialNodeId(params.node),
   );
   const [camera, setCamera] = useState<Camera>({ zoom: 1, offsetX: 0, offsetY: 0 });
+  // Screen size of the canvas area only — Fit / 100% / centring must never measure the body
+  // (the side panel and the compact icon column used to be counted and the fit overshot).
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [panel, setPanel] = useState<PanelTab>("inspect");
   const [panelOpen, setPanelOpen] = useState(!isCompact);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [prototypeOpen, setPrototypeOpen] = useState(false);
-  const cameraInitFor = useRef<string | null>(null);
+  const [storeTick, setStoreTick] = useState(0);
+  const [focusError, setFocusError] = useState<string | null>(null);
+  const skipUrlFocus = useRef<string | null>(null);
+  const autoFocusedFor = useRef<string | null>(null);
+  const call = useFigmaCall(serverId);
+  const dismissFocusError = useCallback(() => setFocusError(null), []);
+  const focusErrorAction = useMemo(
+    () => (
+      <Pressable onPress={dismissFocusError} accessibilityRole="button" hitSlop={6}>
+        <Text style={jiraStyles.textSmall}>Dismiss</Text>
+      </Pressable>
+    ),
+    [dismissFocusError],
+  );
 
   const page = useMemo(() => {
     if (!outline) return null;
@@ -120,42 +149,70 @@ export function FigmaFileScreen({ serverId, fileKey, version }: FigmaFileRef) {
 
   const selectNode = useCallback((nodeId: string | null) => {
     setSelectedNodeId(nodeId);
+    // A canvas-originated selection must not re-center the camera when the URL param echoes it.
+    skipUrlFocus.current = figmaNodeParam(nodeId);
     void router.setParams({ node: figmaNodeParam(nodeId) ?? "" });
   }, []);
+
+  // Loaded subtrees arrive through store listeners, not new store references — without the
+  // tick the memo below would never see a frame land and nested layers would inspect as null.
+  const bumpStore = useCallback(() => setStoreTick((value) => value + 1), []);
+  useEffect(() => (store ? store.subscribe(bumpStore) : undefined), [store, bumpStore]);
 
   // The selected node's latest data: from the lazy store (raw REST shape), not a summary.
   const selectedNode: FigmaNode | null = useMemo(() => {
     if (!store || !selectedNodeId) return null;
     return findNodeInStore(store, selectedNodeId);
-  }, [store, selectedNodeId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store, selectedNodeId, storeTick]);
 
   const focusNode = useCallback(
-    (nodeId: string) => {
+    async (nodeId: string) => {
+      setFocusError(null);
       selectNode(nodeId);
       if (!page || size.width === 0) return;
-      const frame = page.frames.find((candidate) => candidate.id === nodeId);
-      const bounds =
-        (frame?.bounds as { x: number; y: number; width: number; height: number } | undefined) ??
-        (() => {
-          const node = store ? findNodeInStore(store, nodeId) : null;
-          const raw = node?.absoluteBoundingBox;
-          return typeof raw === "object" && raw !== null
-            ? (raw as { x: number; y: number; width: number; height: number })
-            : null;
-        })();
-      if (!bounds) return;
-      setCamera((current) => centerCameraOn(current, bounds, size.width, size.height));
+      let bounds = nodeFocusBounds(store, page, nodeId);
+      if (!bounds) {
+        // Unknown layer (deep link / comment to a nested node): ask the daemon for the node
+        // itself (one Tier-1 call, cached per version), then queue its subtree so the canvas,
+        // the selection box and the inspector all see it once it arrives.
+        try {
+          const data = await call("figma.file.nodes.request", {
+            fileKey,
+            ids: [nodeId],
+            ...(version ? { version } : {}),
+          });
+          bounds = absoluteBoundingBoxOf(data.nodes?.[nodeId]);
+        } catch (cause) {
+          setFocusError(`Could not focus layer ${nodeId}: ${errorMessage(cause)}`);
+          return;
+        }
+        if (!bounds) {
+          setFocusError(`Layer ${nodeId} was not found in this page.`);
+          return;
+        }
+        void store?.load([nodeId]);
+      }
+      const target = bounds;
+      setCamera((current) => centerCameraOn(current, target, size.width, size.height));
     },
-    [page, selectNode, size.height, size.width, store],
+    [call, fileKey, page, selectNode, size.height, size.width, store, version],
   );
 
-  // Center the camera on the selection once per file open (deep link / comment focus).
+  // The URL's `node` param drives focus: a deep link or a comment-panel URL write selects and
+  // zooms to the layer, nested layers included (F5 owns the comment side of this contract).
+  const nodeParam = Array.isArray(params.node) ? params.node[0] : params.node;
   useEffect(() => {
-    if (!page || size.width === 0 || cameraInitFor.current === `${pageId}`) return;
-    cameraInitFor.current = `${pageId}`;
-    if (selectedNodeId) focusNode(selectedNodeId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, size.width]);
+    const nodeId = figmaNodeIdFromParam(nodeParam);
+    if (!nodeId) {
+      autoFocusedFor.current = null;
+      return;
+    }
+    if (nodeId === skipUrlFocus.current || autoFocusedFor.current === nodeId) return;
+    if (!page || size.width === 0) return;
+    autoFocusedFor.current = nodeId;
+    void focusNode(nodeId);
+  }, [nodeParam, page, size.width, focusNode]);
 
   const onLayout = useCallback(
     (event: { nativeEvent: { layout: { width: number; height: number } } }) => {
@@ -167,6 +224,7 @@ export function FigmaFileScreen({ serverId, fileKey, version }: FigmaFileRef) {
   const selectPage = useCallback(
     (next: string) => {
       setPageId(next);
+      autoFocusedFor.current = null;
       selectNode(null);
     },
     [selectNode],
@@ -256,6 +314,7 @@ export function FigmaFileScreen({ serverId, fileKey, version }: FigmaFileRef) {
         selectedNodeId={selectedNodeId}
         camera={camera}
         size={size}
+        compact={isCompact}
         onCamera={setCamera}
         onSelectPage={selectPage}
         onOpenPrototype={openPrototype}
@@ -273,8 +332,8 @@ export function FigmaFileScreen({ serverId, fileKey, version }: FigmaFileRef) {
         onApplyPending={applyPending}
         onDiscardPending={discardPending}
       />
-      <View style={jiraStyles.body} onLayout={onLayout}>
-        <View style={jiraStyles.main}>
+      <View style={jiraStyles.body}>
+        <View style={jiraStyles.main} onLayout={onLayout}>
           <CanvasView
             serverId={serverId}
             fileKey={fileKey}
@@ -287,6 +346,35 @@ export function FigmaFileScreen({ serverId, fileKey, version }: FigmaFileRef) {
             onSelectNode={selectNode}
             overrides={edits.overrides}
           />
+          {focusError ? (
+            <View style={styles.canvasError} testID="figma-focus-error">
+              <ErrorBanner message={focusError} action={focusErrorAction} />
+            </View>
+          ) : null}
+          {isCompact ? (
+            // Phones: the canvas owns the full width — the inspector / Ask AI icons float over
+            // it instead of taking a column beside it (which used to shrink the measured size).
+            <View style={[styles.iconRail, jiraStyles.row]}>
+              <Pressable
+                style={jiraStyles.iconButton}
+                onPress={openPanel}
+                accessibilityLabel="Open inspector"
+                hitSlop={6}
+                testID="figma-compact-panel"
+              >
+                <PanelRightClose size={16} color="#71717a" />
+              </Pressable>
+              <Pressable
+                style={jiraStyles.iconButton}
+                onPress={openAssistant}
+                accessibilityLabel="Ask AI"
+                hitSlop={6}
+                testID="figma-compact-assistant"
+              >
+                <Sparkles size={16} color="#71717a" />
+              </Pressable>
+            </View>
+          ) : null}
           {prototypeOpen ? (
             <View style={styles.overlay}>
               <PrototypePlayer
@@ -311,28 +399,6 @@ export function FigmaFileScreen({ serverId, fileKey, version }: FigmaFileRef) {
           >
             <PanelRightOpen size={16} color="#71717a" />
           </Pressable>
-        ) : null}
-        {isCompact ? (
-          <View style={jiraStyles.row}>
-            <Pressable
-              style={jiraStyles.iconButton}
-              onPress={openPanel}
-              accessibilityLabel="Open inspector"
-              hitSlop={6}
-              testID="figma-compact-panel"
-            >
-              <PanelRightClose size={16} color="#71717a" />
-            </Pressable>
-            <Pressable
-              style={jiraStyles.iconButton}
-              onPress={openAssistant}
-              accessibilityLabel="Ask AI"
-              hitSlop={6}
-              testID="figma-compact-assistant"
-            >
-              <Sparkles size={16} color="#71717a" />
-            </Pressable>
-          </View>
         ) : null}
       </View>
       {isCompact ? (
