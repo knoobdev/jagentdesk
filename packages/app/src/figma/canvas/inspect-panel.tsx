@@ -16,6 +16,7 @@ import type { FigmaColor } from "./protocol-types";
 import type { ApplyFigmaEdits } from "../contracts";
 import { buildEditOps, type InspectEditPatch } from "./ops";
 import { generateNodeCss, gradientFills, colorToCss, type GradientFillInfo } from "./css";
+import { baseTextStyle } from "../renderer/node-props";
 import { isWeb } from "@/constants/platform";
 import { PanelSection, PanelRow, MonoText } from "./panel-ui";
 import { fetchFigmaExport } from "./use-figma-file";
@@ -84,6 +85,14 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderRadius: 4,
     overflow: "hidden",
   },
+  stopSwatch: {
+    width: 12,
+    height: 12,
+    borderRadius: 3,
+    overflow: "hidden",
+    marginRight: 6,
+    flexShrink: 0,
+  },
   gradientRow: {
     alignSelf: "stretch",
     gap: 4,
@@ -103,16 +112,20 @@ function NumberFieldRow({
   disabled,
   apply,
   patchKey,
+  toPatchValue,
 }: {
   label: string;
   value: number | undefined;
   disabled?: boolean;
   apply: (patch: InspectEditPatch) => void;
   patchKey: keyof InspectEditPatch;
+  /** Converts the displayed (relative) number back to what the op carries (page-absolute). */
+  toPatchValue?: (value: number) => number;
 }) {
   const onCommit = useCallback(
-    (next: number) => apply({ [patchKey]: next } as InspectEditPatch),
-    [apply, patchKey],
+    (next: number) =>
+      apply({ [patchKey]: toPatchValue ? toPatchValue(next) : next } as InspectEditPatch),
+    [apply, patchKey, toPatchValue],
   );
   return <NumField label={label} value={value} disabled={disabled} onCommit={onCommit} />;
 }
@@ -290,12 +303,27 @@ function GeometrySection({
   node,
   disabled,
   apply,
+  parentOf,
 }: {
   node: FigmaNode;
   disabled?: boolean;
   apply: (patch: InspectEditPatch) => void;
+  /** Parent within a loaded subtree: null = top-level frame, undefined = not loaded. */
+  parentOf?: (nodeId: string) => FigmaNode | null | undefined;
 }) {
   const bounds = dict(node.absoluteBoundingBox);
+  // Figma's own inspector shows position relative to the containing frame; set_geometry
+  // carries page-absolute coordinates (pending-overrides writes them straight into
+  // absoluteBoundingBox), so the display subtracts the parent offset and edits add it back.
+  // A top-level frame (parentOf → null) or an unloaded parent keeps the absolute number.
+  const parent = parentOf?.(String(node.id));
+  const parentBox = dict(parent?.absoluteBoundingBox);
+  const offsetX = parent ? (num(parentBox.x) ?? 0) : 0;
+  const offsetY = parent ? (num(parentBox.y) ?? 0) : 0;
+  const absX = num(bounds.x);
+  const absY = num(bounds.y);
+  const toAbsoluteX = useCallback((value: number) => value + offsetX, [offsetX]);
+  const toAbsoluteY = useCallback((value: number) => value + offsetY, [offsetY]);
   return (
     <PanelSection title="Size & position">
       <View style={jiraStyles.row}>
@@ -317,17 +345,19 @@ function GeometrySection({
       <View style={jiraStyles.row}>
         <NumberFieldRow
           label="X"
-          value={num(bounds.x)}
+          value={absX === undefined ? undefined : absX - offsetX}
           disabled={disabled}
           apply={apply}
           patchKey="x"
+          toPatchValue={toAbsoluteX}
         />
         <NumberFieldRow
           label="Y"
-          value={num(bounds.y)}
+          value={absY === undefined ? undefined : absY - offsetY}
           disabled={disabled}
           apply={apply}
           patchKey="y"
+          toPatchValue={toAbsoluteY}
         />
       </View>
     </PanelSection>
@@ -484,12 +514,16 @@ function GradientFillRow({ fill }: { fill: GradientFillInfo }) {
         <Text style={jiraStyles.textSmall}>{GRADIENT_LABELS[fill.type] ?? "Gradient"}</Text>
       </View>
       <View style={styles.stopsWrap}>
-        {fill.stops
-          .split(", ")
-          .filter(Boolean)
-          .map((stop) => (
-            <MonoText key={stop}>{stop}</MonoText>
-          ))}
+        {fill.stopEntries.map((stop) => (
+          <View
+            key={`${stop.color}@${stop.position}`}
+            style={jiraStyles.row}
+            testID="figma-inspect-gradient-stop"
+          >
+            <View style={[{ backgroundColor: stop.color }, styles.stopSwatch]} />
+            <MonoText>{`${stop.color} ${stop.position}%`}</MonoText>
+          </View>
+        ))}
       </View>
     </View>
   );
@@ -590,6 +624,9 @@ function TextSection({
   apply: (patch: InspectEditPatch) => void;
 }) {
   const style = dict(node.style);
+  // baseTextStyle normalises REST (`fontFamily`/`fontStyle` top-level) and Plugin-API
+  // (`fontName.family`/`fontName.style`) shapes; only the Font row needs the merged view.
+  const textStyle = baseTextStyle(node);
   return (
     <PanelSection title="Text">
       <TextFieldRow
@@ -600,9 +637,7 @@ function TextSection({
         disabled={disabled}
       />
       <PanelRow label="Font">
-        <MonoText>
-          {`${dict(style.fontName).family ?? "—"} ${dict(style.fontName).style ?? ""}`}
-        </MonoText>
+        <MonoText>{`${textStyle.fontFamily ?? "—"} ${textStyle.fontStyle ?? ""}`}</MonoText>
       </PanelRow>
       <PanelRow label="Size">
         <MonoText>{num(style.fontSize) ?? 0}px</MonoText>
@@ -808,6 +843,12 @@ export interface InspectPanelProps {
   disabled?: boolean;
   /** Component metadata from the loaded subtrees (spec 32.5.2): names + library vs local origin. */
   componentMeta?: (componentId: string) => FigmaComponentMeta | undefined;
+  /**
+   * Parent of a node inside a loaded subtree (FrameStore.parentOf): null for top-level frames,
+   * undefined when no cached subtree contains the node. Geometry position is displayed relative
+   * to the parent, absolute otherwise.
+   */
+  parentOf?: (nodeId: string) => FigmaNode | null | undefined;
 }
 
 export function InspectPanel({
@@ -818,6 +859,7 @@ export function InspectPanel({
   applyEdits,
   disabled,
   componentMeta,
+  parentOf,
 }: InspectPanelProps) {
   const apply = useCallback(
     (patch: InspectEditPatch) => {
@@ -860,7 +902,7 @@ export function InspectPanel({
       </View>
 
       <LayerSection node={node} disabled={disabled} apply={apply} />
-      <GeometrySection node={node} disabled={disabled} apply={apply} />
+      <GeometrySection node={node} disabled={disabled} apply={apply} parentOf={parentOf} />
       <AutoLayoutSection node={node} disabled={disabled} apply={apply} />
       {!isText ? <FillSection node={node} disabled={disabled} apply={apply} /> : null}
       <StrokeSection node={node} />

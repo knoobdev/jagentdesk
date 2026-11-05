@@ -73,14 +73,32 @@ vi.mock("@/jira/ui/primitives", () => ({
     placeholder?: string;
     accessibilityLabel?: string;
     onChangeText?: (text: string) => void;
+    onSubmitEditing?: () => void;
   }) =>
-    React.createElement("input", {
-      "data-testid": `input:${props.accessibilityLabel ?? props.placeholder ?? ""}`,
-      value: props.value ?? "",
-      placeholder: props.placeholder ?? "",
-      readOnly: true,
-      onChange: (event: { target: HTMLInputElement }) => props.onChangeText?.(event.target.value),
-    }),
+    React.createElement(
+      "div",
+      null,
+      React.createElement("input", {
+        "data-testid": `input:${props.accessibilityLabel ?? props.placeholder ?? ""}`,
+        value: props.value ?? "",
+        placeholder: props.placeholder ?? "",
+        readOnly: true,
+        ref: (node: HTMLInputElement | null) => {
+          // Tests set text through this hook: jsdom cannot type into a controlled input.
+          if (node)
+            (node as HTMLInputElement & { setText?: (text: string) => void }).setText =
+              props.onChangeText;
+        },
+        onChange: (event: { target: HTMLInputElement }) => props.onChangeText?.(event.target.value),
+      }),
+      // A real keyboard "enter" commits the field; jsdom cannot focus-type, so expose the
+      // commit handler as a button the tests can click.
+      React.createElement("button", {
+        type: "button",
+        "data-testid": `commit:${props.accessibilityLabel ?? props.placeholder ?? ""}`,
+        onClick: () => props.onSubmitEditing?.(),
+      }),
+    ),
   ErrorBanner: ({ message }: { message: string }) =>
     React.createElement("span", { "data-testid": "error-banner" }, message),
 }));
@@ -111,10 +129,15 @@ vi.mock("./use-figma-file", () => ({
 vi.mock("./save-bytes", () => ({ saveExportedBytes: vi.fn(async () => undefined) }));
 
 import { InspectPanel } from "./inspect-panel";
+import { PANEL_LABEL_WIDTH } from "./panel-ui";
 
 function renderPanel(
   node: FigmaNode | null,
   componentMeta?: (id: string) => FigmaComponentMeta | undefined,
+  opts?: {
+    parentOf?: (id: string) => FigmaNode | null | undefined;
+    applyEdits?: (ops: unknown[]) => Promise<void>;
+  },
 ) {
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -126,8 +149,9 @@ function renderPanel(
         fileKey="file"
         node={node}
         linked={false}
-        applyEdits={vi.fn(async () => undefined)}
+        applyEdits={opts?.applyEdits ?? vi.fn(async () => undefined)}
         componentMeta={componentMeta}
+        parentOf={opts?.parentOf}
       />,
     );
   });
@@ -158,8 +182,12 @@ describe("InspectPanel fill section", () => {
   function render(
     node: FigmaNode | null,
     componentMeta?: (id: string) => FigmaComponentMeta | undefined,
+    opts?: {
+      parentOf?: (id: string) => FigmaNode | null | undefined;
+      applyEdits?: (ops: unknown[]) => Promise<void>;
+    },
   ) {
-    const view = renderPanel(node, componentMeta);
+    const view = renderPanel(node, componentMeta, opts);
     roots.push(view.root);
     containers.push(view.container);
     return view;
@@ -251,5 +279,99 @@ describe("InspectPanel fill section", () => {
     const text = container.textContent ?? "";
     expect(text).toContain("5:2");
     expect(text).toContain("Local component");
+  });
+
+  it("renders one row per gradient stop with the full colour and position", () => {
+    const { container } = render(linearNode());
+    const rows = container.querySelectorAll('[data-testid="figma-inspect-gradient-stop"]');
+    expect(rows).toHaveLength(2);
+    expect(rows[0].textContent ?? "").toContain("rgba(126, 211, 33, 1)");
+    expect(rows[0].textContent ?? "").toContain("0%");
+    expect(rows[1].textContent ?? "").toContain("rgba(0, 143, 56, 1)");
+    expect(rows[1].textContent ?? "").toContain("100%");
+  });
+
+  it("shows the font of a REST-shape text node, not an em dash", () => {
+    const { container } = render(
+      makeNode({
+        type: "TEXT",
+        characters: "Welcome back",
+        style: { fontFamily: "Inter", fontStyle: "Bold", fontSize: 34 },
+      }),
+    );
+    const text = container.textContent ?? "";
+    expect(text).toContain("Inter Bold");
+    expect(text).not.toContain("Font —");
+    expect(text).toContain('font-family: "Inter";');
+    expect(text).toContain("font-weight: 700;");
+  });
+
+  it("shows X/Y relative to the containing frame", () => {
+    const frame = makeNode({
+      id: "1:60",
+      absoluteBoundingBox: { x: 910, y: 400, width: 430, height: 900 },
+    });
+    const child = makeNode({
+      id: "1:61",
+      absoluteBoundingBox: { x: 934, y: 424, width: 327, height: 52 },
+    });
+    const { container } = render(child, undefined, {
+      parentOf: (id) => (id === "1:61" ? frame : undefined),
+    });
+    const value = (label: string) =>
+      (container.querySelector(`input[data-testid="input:${label}"]`) as HTMLInputElement)?.value;
+    expect(value("X")).toBe("24");
+    expect(value("Y")).toBe("24");
+    expect(value("W")).toBe("327");
+    expect(value("H")).toBe("52");
+  });
+
+  it("keeps page-absolute X/Y for top-level frames", () => {
+    const frame = makeNode({
+      id: "1:60",
+      absoluteBoundingBox: { x: 910, y: 400, width: 430, height: 900 },
+    });
+    const { container } = render(frame, undefined, { parentOf: () => null });
+    const value = (label: string) =>
+      (container.querySelector(`input[data-testid="input:${label}"]`) as HTMLInputElement)?.value;
+    expect(value("X")).toBe("910");
+    expect(value("Y")).toBe("400");
+  });
+
+  it("converts an X edit back to page-absolute before building the op", () => {
+    const frame = makeNode({
+      id: "1:60",
+      absoluteBoundingBox: { x: 910, y: 400, width: 430, height: 900 },
+    });
+    const child = makeNode({
+      id: "1:61",
+      absoluteBoundingBox: { x: 934, y: 424, width: 327, height: 52 },
+    });
+    const applyEdits = vi.fn(async (_ops: unknown[]) => undefined);
+    const { container } = render(child, undefined, {
+      parentOf: (id) => (id === "1:61" ? frame : undefined),
+      applyEdits,
+    });
+    const input = container.querySelector('input[data-testid="input:X"]') as HTMLInputElement & {
+      setText?: (text: string) => void;
+    };
+    expect(input.value).toBe("24");
+    act(() => {
+      input.setText?.("40");
+    });
+    act(() => {
+      (container.querySelector('button[data-testid="commit:X"]') as HTMLButtonElement).click();
+    });
+    expect(applyEdits).toHaveBeenCalledTimes(1);
+    expect(applyEdits).toHaveBeenCalledWith([
+      expect.objectContaining({ op: "set_geometry", nodeId: "1:61", x: 950 }),
+    ]);
+  });
+
+  it("sizes the panel label column so labels never truncate", () => {
+    // "Letter spacing" is the widest inspect label; at 13px it needs ~95px plus the rail gap.
+    expect(PANEL_LABEL_WIDTH).toBeGreaterThanOrEqual(108);
+    const { container } = render(makeNode({ type: "TEXT", characters: "x" }));
+    expect(container.textContent ?? "").toContain("Letter spacing");
   });
 });

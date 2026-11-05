@@ -10,6 +10,11 @@ export interface InspectEditPatch {
   visible?: boolean;
   locked?: boolean;
   /** geometry — merged into one set_geometry op when any is present */
+  /**
+   * x/y are PAGE-ABSOLUTE, the same frame absoluteBoundingBox uses: pending-overrides writes
+   * them straight into the box, so the canvas preview lands the node where it will render. The
+   * inspect panel shows position relative to the containing frame and adds the offset back.
+   */
   x?: number;
   y?: number;
   width?: number;

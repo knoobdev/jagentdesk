@@ -171,6 +171,8 @@ export function FigmaFileScreen({ serverId, fileKey, version }: FigmaFileRef) {
     [store],
   );
 
+  const parentOf = useCallback((nodeId: string) => store?.parentOf(nodeId), [store]);
+
   const focusNode = useCallback(
     async (nodeId: string) => {
       setFocusError(null);
@@ -324,6 +326,7 @@ export function FigmaFileScreen({ serverId, fileKey, version }: FigmaFileRef) {
       onFocusNode={focusNode}
       onFocusPoint={focusPoint}
       componentMeta={componentMeta}
+      parentOf={parentOf}
     />
   );
 
@@ -485,6 +488,7 @@ function PanelColumn({
   onFocusNode,
   onFocusPoint,
   componentMeta,
+  parentOf,
 }: {
   serverId: string;
   fileKey: string;
@@ -499,6 +503,7 @@ function PanelColumn({
   onFocusNode: (nodeId: string) => void;
   onFocusPoint: (point: { x: number; y: number }) => void;
   componentMeta?: (componentId: string) => FigmaComponentMeta | undefined;
+  parentOf?: (nodeId: string) => FigmaNode | null | undefined;
 }) {
   return (
     <View style={styles.side}>
@@ -516,6 +521,7 @@ function PanelColumn({
           linked={linked}
           applyEdits={applyEdits}
           componentMeta={componentMeta}
+          parentOf={parentOf}
         />
       ) : null}
       {panel === "comments" && selection ? (
