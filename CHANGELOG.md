@@ -1,9 +1,111 @@
 # Changelog
 
 All notable changes to JAgentDesk are documented here. JAgentDesk versions its
-own release line (now `0.9.52`); the many `v0.1.x`–`v1.0.x` tags in history are
+own release line (now `0.9.53`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
+
+## v0.9.53 — 2026-11-05
+
+Figma inside JAgentDesk: sign in with your own Figma account, open big files in a light viewer
+JAgentDesk draws itself (no Figma desktop canvas, no heavy WebView), inspect and export, play
+prototypes, read and answer comments, and design or edit through the new **Figma Link** plugin or a
+chat agent. The mobile drawer menu no longer pushes the project list off the screen.
+
+### Figma — sign in
+
+- **OAuth with your own private Figma app.** Figma only gives API access to OAuth apps, and a private
+  app in your own team needs no review. The connect screen walks through it: create the app, copy the
+  callback URL, tick the listed scopes (Copy all), paste the client ID and secret. The secret and the
+  tokens stay on the daemon (`$JAGENTDESK_HOME/figma`, files 0600) and never reach the apps or the logs.
+- **System browser only.** Desktop opens your browser and catches the answer on
+  `127.0.0.1:8766/figma/callback`; you can always paste the final URL instead. On a phone, **Sign in on a
+  desktop** finishes the sign-in on a paired desktop.
+- One token manager for the whole daemon: a refresh happens once even when several requests hit an
+  expired token, and an account that needs signing in again says so.
+
+### Figma — files and the canvas
+
+- **Figma section with its own left column** (desktop rail and the mobile drawer): connections, Add file
+  (paste a `figma.com/design|file|proto/…` link), pinned and recent files, teams by URL, files open in
+  Figma (through Link), and Figma Link status.
+- **A viewer JAgentDesk draws itself.** Figma has no light viewer to embed, so JAgentDesk renders the
+  nodes on its own canvas: frames, groups, clips, vector paths, rectangles/ellipses/polygons/stars/lines,
+  corner radii, solid/linear/radial/angular/diamond gradients, image fills, strokes, drop and inner
+  shadows, blurs, opacity, blend modes, masks and text with its own fonts. A node the renderer cannot
+  draw yet is shown with Figma's own render of that one node, in place.
+- **Only what you look at is loaded.** Opening a file loads pages and top-level frames; a frame's layers
+  load once when it comes into view and are cached per file version, so panning and zooming cost no
+  extra Figma requests. Fit shows every frame of the page; 100 % and centring use the canvas size.
+- **Badge**: **Live** when the file comes from Figma Link, **Snapshot · version** when it comes from the
+  REST API. Open files are checked for a new version once a minute (only while open).
+- **Deep links** (`node=1-61`) and comment clicks select and zoom to the layer, nested layers included.
+- **Inspect**: size, position, auto layout (direction, gap, padding per side, sizing), fills (gradients
+  shown as gradients with their stops), strokes, effects, text, component or instance (local component
+  or team library), and generated **CSS** to copy (gradient angle from Figma's handle positions,
+  shadows with blur and spread). **Export** PNG/JPG/SVG/PDF at 1–4× through the daemon.
+- **Versions**: list them and open the canvas at an older version (read only).
+- REST limits are respected per tier, with `Retry-After`; a 429 shows your plan tier and Figma's upgrade
+  link and is never retried in a loop.
+
+### Figma — prototypes
+
+- **A prototype player JAgentDesk wrote** (Figma has no playback API): flows from the file, hotspots on
+  nodes with interactions, on click / on hover / while pressed / after delay, navigate, back, overlays,
+  swap and close overlay, scroll to, open URL, and the instant / dissolve / move / push / slide
+  transitions with their easing. **Smart animate** matches layers by name between two frames and
+  animates position, size, opacity, colour and corner radius.
+- The first flow starts by itself; a file without flows starts at its first frame, and the flow name
+  stays on the flow you started. Overlays are drawn at the same scale as the frame under them, which
+  stays visible, and the buttons inside an overlay work. Text is drawn in the file's fonts.
+
+### Figma — comments
+
+- Comments per file and per layer, pinned on the canvas, with replies, reactions (shown as emoji),
+  posting and deleting your own. Clicking a comment goes to its layer or its point on the canvas.
+
+### Figma — design and edit (Figma Link)
+
+- Figma only accepts changes from a Figma client, so JAgentDesk ships **JAgentDesk Figma Link**, a Figma
+  desktop plugin built on [figma-mcp-forge](https://github.com/HieuAnh87/figma-mcp-forge) (MIT,
+  credited). The daemon installs it under `$JAGENTDESK_HOME/figma/plugin`; the Link panel shows the
+  manifest path to import once (Figma desktop → Plugins → Development → Import plugin from manifest…).
+- **Pairing.** The bridge listens on `127.0.0.1:1995` only. The first time the plugin connects it shows a
+  6-digit code you enter in JAgentDesk; after that it uses a 32-byte key you can revoke. Connections with
+  a web `Origin` or from another machine are refused before the socket opens, and an unpaired client
+  cannot run anything. If another tool already uses port 1995 (for example figma-mcp-forge itself), the
+  panel says so.
+- **Edit from the canvas**: rename, hide, lock, delete, duplicate, reorder, text, fill colour, corner
+  radius, size, position, auto layout, create frame/text/rectangle, components and instances, swap, and
+  prototype reactions. With Link connected the change happens in Figma and shows on the canvas.
+- **Edit queue without Link.** Edits made while Figma Link is not connected are drawn on the canvas at
+  once and kept in a queue (Review, drop one, Discard all). When Link connects, **Apply N changes** sends
+  them through the plugin and stops on any value changed in Figma meanwhile (Keep mine / Keep Figma).
+  `run_script` stays off unless you turn it on.
+
+### Figma — chat agent
+
+- **Ask AI** on a file, frame or layer opens a chat that knows the file, page and selection. Agents get
+  `figma_*` tools to read through REST (outline, nodes, renders, comments, versions, components, styles,
+  CSS, prototype) and `figma_link_*` tools for every figma-mcp-forge read and write tool; writes,
+  comments and the edit queue ask for permission first.
+
+### Mobile drawer menu
+
+- The drawer's 16+ menu rows are now a compact grid of tiles (5 per row, icon and short name) above the
+  projects list, which gets the rest of the screen and scrolls. New sections (Figma) appear in the grid
+  by themselves. The grid can be collapsed with the **Menu** header; the choice is remembered.
+
+### Tested
+
+- 212 daemon Figma tests and 877 app tests (Figma and shared components), with the fake Figma API
+  answering in the shapes Figma documents; app and repository typecheck clean. The renderer is checked against 60 recorded fixtures, including REST-shaped nodes.
+- A real daemon with the web app, headless, three rounds: sign-in screens, adding a file, canvas, Fit,
+  pan and zoom, deep links, inspect and CSS, prototype with overlays, comments, the Link panel (Origin
+  refused with 403, unpaired clients do nothing) and the phone drawer and canvas (screenshots in the
+  README).
+- Not tested here: a real Figma account and Figma desktop with the plugin — that needs your own private
+  OAuth app, and port 1995 free.
 
 ## v0.9.52 — 2026-11-04
 

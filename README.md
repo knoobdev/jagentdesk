@@ -120,6 +120,32 @@ with a few deliberate boundaries:
 
 ## ✨ New in this release
 
+### Figma inside JAgentDesk, and a mobile menu that leaves room for your projects (v0.9.53)
+
+- **Sign in with your own Figma account** (OAuth with a private app you create in your team — the
+  connect screen walks you through it). Secrets and tokens stay on the daemon.
+- **Big files without the heavy Figma canvas.** JAgentDesk draws the design itself and loads a frame's
+  layers only when it comes into view, cached per version — pan and zoom cost no extra requests.
+- **Inspect, CSS and export**, versions, threaded comments with reactions, and a **prototype player**
+  JAgentDesk wrote (flows, hotspots, overlays, transitions, smart animate).
+- **Design and edit** through **JAgentDesk Figma Link**, a Figma desktop plugin built on
+  [figma-mcp-forge](https://github.com/HieuAnh87/figma-mcp-forge), paired with a 6-digit code. Without
+  Link, edits wait in a queue and apply with conflict checks when Link connects. **Ask AI** gives chat
+  agents `figma_*` and `figma_link_*` tools.
+- **Mobile drawer**: the menu is a compact grid, so the project list gets the screen.
+
+![Figma file in JAgentDesk: all frames of the page drawn by JAgentDesk's own renderer after Fit](docs/media/figma-canvas-fit.png)
+
+![Inspect: the Sign in button selected, linear gradient with its stops, radius, shadow, local component and generated CSS](docs/media/figma-inspect.png)
+
+![Prototype player: the Home frame after tapping Sign in, with hotspots shown](docs/media/figma-prototype.png)
+
+![Comments next to the canvas: threads, replies and a 👍 reaction](docs/media/figma-comments.png)
+
+![Connect Figma: the steps for your own private OAuth app, callback URL and scopes to copy](docs/media/figma-connect.png)
+
+<img src="docs/media/mobile-nav-grid.png" alt="Mobile drawer: the menu as a 5-column grid with Figma, and the projects list below" width="320" />
+
 ### iPhone view-first over the cable and Apple ID sign-in that reaches your teams (v0.9.51)
 
 - **Plug in, enable control, see the screen** — no Apple ID, no setup step. The first touch signs and
