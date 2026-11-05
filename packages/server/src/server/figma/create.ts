@@ -1,9 +1,9 @@
 import path from "node:path";
 import type pino from "pino";
 import { FileSecretStore } from "../database/secret-store.js";
+import { FigmaDiskCache } from "./cache.js";
 import { FigmaService } from "./service.js";
 import {
-  unavailableCache,
   unavailableLink,
   unavailableRest,
   unavailableStore,
@@ -26,7 +26,7 @@ export async function createFigmaService(options: {
       store: unavailableStore,
       tokens: unavailableTokens,
       rest: unavailableRest,
-      cache: unavailableCache,
+      cache: new FigmaDiskCache(path.join(dir, "cache")),
       link: unavailableLink,
     },
   });
