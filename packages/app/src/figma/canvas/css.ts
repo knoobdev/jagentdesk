@@ -54,6 +54,18 @@ function solidPaint(paints: Dict[]): Dict | null {
   return paints.find((paint) => paint.type === "SOLID") ?? null;
 }
 
+const GRADIENT_TYPES = [
+  "GRADIENT_LINEAR",
+  "GRADIENT_RADIAL",
+  "GRADIENT_ANGULAR",
+  "GRADIENT_DIAMOND",
+] as const;
+type GradientType = (typeof GRADIENT_TYPES)[number];
+
+function isGradientType(type: unknown): type is GradientType {
+  return (GRADIENT_TYPES as readonly unknown[]).includes(type);
+}
+
 function gradientAngle(transform: unknown): number | undefined {
   // Figma's gradientTransform maps shape space → gradient space; CSS angles run clockwise from
   // "to top", so invert the x-axis of the 2×3 matrix and convert.
@@ -69,6 +81,41 @@ function gradientAngle(transform: unknown): number | undefined {
   return round(((Math.atan2(vx, -vy) * 180) / Math.PI + 360) % 360, 0);
 }
 
+/**
+ * Angle from REST `gradientHandlePositions`: three points in node-normalized space (top-left
+ * 0,0 → bottom-right 1,1) where the first is the gradient start and the second its end. The CSS
+ * angle runs clockwise from "to top", so left→right handles give 90deg and top→bottom 180deg.
+ */
+function handlePosition(handles: unknown, index: number): { x: number; y: number } | undefined {
+  const point = asDict(asArray(handles)[index]);
+  const x = asNumber(point?.x);
+  const y = asNumber(point?.y);
+  return x === undefined || y === undefined ? undefined : { x, y };
+}
+
+function handleAngle(handles: unknown): number | undefined {
+  const start = handlePosition(handles, 0);
+  const end = handlePosition(handles, 1);
+  if (!start || !end) return undefined;
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  if (dx === 0 && dy === 0) return undefined;
+  return round(((Math.atan2(dx, -dy) * 180) / Math.PI + 360) % 360, 0);
+}
+
+/** Gradient geometry prefers REST handle positions and falls back to the Link gradientTransform. */
+function gradientGeometry(paint: Dict): { angle?: number; center?: { x: number; y: number } } {
+  const handles = paint.gradientHandlePositions;
+  const angle = handleAngle(handles) ?? gradientAngle(paint.gradientTransform);
+  const center = handlePosition(handles, 0);
+  return {
+    ...(angle === undefined ? {} : { angle }),
+    ...(center
+      ? { center: { x: round(clamp01(center.x) * 100), y: round(clamp01(center.y) * 100) } }
+      : {}),
+  };
+}
+
 function gradientStops(paint: Dict): string {
   const stops = asArray(paint.gradientStops)
     .map((entry) => asDict(entry))
@@ -80,17 +127,54 @@ function gradientStops(paint: Dict): string {
   return stops.join(", ");
 }
 
+/** The CSS gradient function for one REST/Link paint, or null when it is not a gradient. */
+export function gradientCss(paint: unknown): string | null {
+  const dict = asDict(paint);
+  if (!dict || !isGradientType(dict.type)) return null;
+  const stops = gradientStops(dict);
+  const geometry = gradientGeometry(dict);
+  if (dict.type === "GRADIENT_LINEAR" || dict.type === "GRADIENT_DIAMOND") {
+    // Diamond has no CSS equivalent; its axis reads as a linear gradient.
+    return `linear-gradient(${geometry.angle ?? 180}deg, ${stops})`;
+  }
+  if (dict.type === "GRADIENT_RADIAL") {
+    const at = geometry.center ? ` at ${geometry.center.x}% ${geometry.center.y}%` : "";
+    return `radial-gradient(circle${at}, ${stops})`;
+  }
+  const at = geometry.center ? ` at ${geometry.center.x}% ${geometry.center.y}%` : "";
+  return `conic-gradient(from ${geometry.angle ?? 0}deg${at}, ${stops})`;
+}
+
+export interface GradientFillInfo {
+  type: GradientType;
+  /** The CSS function, also used to paint the inspect swatch. */
+  css: string;
+  /** The stop list, e.g. `rgba(255, 255, 255, 1) 0%, rgba(0, 0, 0, 1) 100%`. */
+  stops: string;
+}
+
+/** Visible gradient fills of a node, topmost paint list order as Figma returns them. */
+export function gradientFills(node: FigmaNode): GradientFillInfo[] {
+  const infos: GradientFillInfo[] = [];
+  for (const paint of visiblePaints(node as unknown as Dict, "fills")) {
+    const type = asString(paint.type);
+    if (!isGradientType(type)) continue;
+    const css = gradientCss(paint);
+    if (!css) continue;
+    infos.push({ type, css, stops: gradientStops(paint) });
+  }
+  return infos;
+}
+
 function backgroundFrom(paints: Dict[]): string[] {
   const lines: string[] = [];
   for (const paint of paints) {
     const type = asString(paint.type);
     if (type === "SOLID") {
       lines.push(`background: ${colorToCss(paint.color, paint.opacity)};`);
-    } else if (type === "GRADIENT_LINEAR") {
-      const angle = gradientAngle(paint.gradientTransform);
-      lines.push(`background: linear-gradient(${angle ?? 180}deg, ${gradientStops(paint)});`);
-    } else if (type === "GRADIENT_RADIAL") {
-      lines.push(`background: radial-gradient(circle, ${gradientStops(paint)});`);
+    } else if (isGradientType(type)) {
+      const css = gradientCss(paint);
+      if (css) lines.push(`background: ${css};`);
     } else if (type === "IMAGE") {
       const ref = asString(paint.imageRef);
       const fit = asString(paint.scaleMode) === "STRETCH" ? "100% 100%" : "cover";
@@ -109,6 +193,25 @@ const ALIGN_H: Record<string, string> = {
 };
 const ALIGN_V: Record<string, string> = { MIN: "flex-start", CENTER: "center", MAX: "flex-end" };
 
+/**
+ * CSS `padding` shorthand from the four REST sides: one value when all match, two when the
+ * vertical and horizontal pairs match, otherwise the full top/right/bottom/left list.
+ */
+export function paddingShorthand(
+  top: number | undefined,
+  right: number | undefined,
+  bottom: number | undefined,
+  left: number | undefined,
+): string {
+  const t = round(top ?? 0);
+  const r = round(right ?? 0);
+  const b = round(bottom ?? 0);
+  const l = round(left ?? 0);
+  if (t === r && r === b && b === l) return `${t}px`;
+  if (t === b && l === r) return `${t}px ${r}px`;
+  return `${t}px ${r}px ${b}px ${l}px`;
+}
+
 function autoLayoutFrom(node: Dict): string[] {
   const mode = asString(node.layoutMode);
   const lines: string[] = [];
@@ -122,9 +225,7 @@ function autoLayoutFrom(node: Dict): string[] {
     const bottom = asNumber(node.paddingBottom);
     const left = asNumber(node.paddingLeft);
     if (top !== undefined || right !== undefined || bottom !== undefined || left !== undefined) {
-      lines.push(
-        `padding: ${round(top ?? 0)}px ${round(right ?? 0)}px ${round(bottom ?? 0)}px ${round(left ?? 0)}px;`,
-      );
+      lines.push(`padding: ${paddingShorthand(top, right, bottom, left)};`);
     }
     const primary = asString(node.primaryAxisAlignItems);
     if (primary && ALIGN_H[primary]) lines.push(`justify-content: ${ALIGN_H[primary]};`);
@@ -174,16 +275,19 @@ function effectsFrom(node: Dict): string[] {
     const type = asString(effect.type);
     const color = colorToCss(effect.color, effect.opacity);
     if (type === "DROP_SHADOW" || type === "INNER_SHADOW") {
+      // REST (and the Link serializer) name the blur amount `radius`; `spread` defaults to 0.
       const offset = asDict(effect.offset);
       const x = round(asNumber(offset?.x) ?? 0);
       const y = round(asNumber(offset?.y) ?? 0);
-      const blur = round(asNumber(effect.blur) ?? 0);
+      const blur = round(asNumber(effect.radius) ?? 0);
       const spread = round(asNumber(effect.spread) ?? 0);
       shadows.push(
         `${type === "INNER_SHADOW" ? "inset " : ""}${x}px ${y}px ${blur}px ${spread}px ${color}`,
       );
     } else if (type === "LAYER_BLUR") {
       lines.push(`filter: blur(${round(asNumber(effect.radius) ?? 0)}px);`);
+    } else if (type === "BACKGROUND_BLUR") {
+      lines.push(`backdrop-filter: blur(${round(asNumber(effect.radius) ?? 0)}px);`);
     }
   }
   if (shadows.length > 0) lines.unshift(`box-shadow: ${shadows.join(", ")};`);
@@ -293,7 +397,8 @@ export function generateNodeCss(node: FigmaNode): string {
     lines.push(`top: ${round(y)}px;`);
   }
   const type = asString(node.type);
-  if (type !== "TEXT") lines.push(...backgroundFrom(visiblePaints(node, "fills")));
+  if (type !== "TEXT")
+    lines.push(...backgroundFrom(visiblePaints(node as unknown as Dict, "fills")));
   const opacity = asNumber(node.opacity);
   if (opacity !== undefined && opacity < 1) lines.push(`opacity: ${round(opacity)};`);
   lines.push(...radiusFrom(node));
