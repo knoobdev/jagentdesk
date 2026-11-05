@@ -36,13 +36,13 @@ describe("toFrameLocalNodes", () => {
     expect(nodeBounds(local)).toEqual({ x: 0, y: 0, width: 375, height: 600 });
     const card = findNodeById(local, "1:2");
     expect(card).not.toBeNull();
-    expect(nodeBounds(card)).toEqual({ x: 20, y: 20, width: 100, height: 40 });
+    expect(card && nodeBounds(card)).toEqual({ x: 20, y: 20, width: 100, height: 40 });
   });
 
   it("leaves the source tree untouched", () => {
     toFrameLocalNodes(home, origin);
     expect(nodeBounds(home)).toEqual(origin);
-    expect(nodeBounds(findNodeById(home, "1:2"))).toEqual({
+    expect(nodeBounds(findNodeById(home, "1:2")!)).toEqual({
       x: 1220,
       y: -280,
       width: 100,

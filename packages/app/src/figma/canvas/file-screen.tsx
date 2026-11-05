@@ -150,7 +150,7 @@ export function FigmaFileScreen({ serverId, fileKey, version }: FigmaFileRef) {
   const selectNode = useCallback((nodeId: string | null) => {
     setSelectedNodeId(nodeId);
     // A canvas-originated selection must not re-center the camera when the URL param echoes it.
-    skipUrlFocus.current = figmaNodeParam(nodeId);
+    skipUrlFocus.current = figmaNodeParam(nodeId) ?? null;
     void router.setParams({ node: figmaNodeParam(nodeId) ?? "" });
   }, []);
 
