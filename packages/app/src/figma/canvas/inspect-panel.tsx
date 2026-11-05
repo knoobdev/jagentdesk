@@ -1,7 +1,8 @@
 // Right-hand inspect panel: selected node fields, edit controls that build ops,
 // generated CSS, and an export section.
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { StyleSheet, View, Text, ScrollView } from "react-native";
+import { View, Text, ScrollView } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
 import type { Theme } from "@/styles/theme";
 import { Input, ErrorBanner } from "@/jira/ui/primitives";
 import { Button } from "@/components/ui/button";
