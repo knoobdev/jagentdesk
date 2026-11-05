@@ -1,0 +1,45 @@
+{
+  "id": "13:9",
+  "name": "GradientText",
+  "type": "TEXT",
+  "visible": true,
+  "opacity": 1,
+  "blendMode": "NORMAL",
+  "absoluteBoundingBox": { "x": 0, "y": 0, "width": 120, "height": 24 },
+  "absoluteTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "relativeTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "width": 120,
+  "height": 24,
+  "characters": "shine",
+  "textAutoResize": "WIDTH_AND_HEIGHT",
+  "style": {
+    "fontFamily": "Inter",
+    "fontStyle": "Bold Italic",
+    "fontSize": 24,
+    "textAlignHorizontal": "LEFT",
+    "textAlignVertical": "TOP",
+    "lineHeightUnit": "AUTO"
+  },
+  "characterStyleOverrides": [],
+  "styleOverrideTable": {},
+  "fills": [
+    {
+      "type": "GRADIENT_LINEAR",
+      "gradientHandlePositions": [
+        { "x": 0, "y": 0.5 },
+        { "x": 1, "y": 0.5 }
+      ],
+      "gradientStops": [
+        { "position": 0, "color": { "r": 1, "g": 0, "b": 1, "a": 1 } },
+        { "position": 1, "color": { "r": 0, "g": 1, "b": 1, "a": 1 } }
+      ]
+    }
+  ],
+  "strokes": []
+}

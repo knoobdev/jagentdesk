@@ -1,0 +1,21 @@
+{
+  "id": "8:4",
+  "name": "Shade",
+  "type": "RECTANGLE",
+  "visible": true,
+  "opacity": 1,
+  "blendMode": "MULTIPLY",
+  "absoluteBoundingBox": { "x": 0, "y": 0, "width": 60, "height": 60 },
+  "absoluteTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "relativeTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "width": 60,
+  "height": 60,
+  "fills": [{ "type": "SOLID", "color": { "r": 0.5, "g": 0.5, "b": 0.5, "a": 1 } }],
+  "strokes": []
+}

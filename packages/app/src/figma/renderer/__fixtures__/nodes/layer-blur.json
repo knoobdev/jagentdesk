@@ -1,0 +1,22 @@
+{
+  "id": "9:3",
+  "name": "Blurred",
+  "type": "RECTANGLE",
+  "visible": true,
+  "opacity": 1,
+  "blendMode": "NORMAL",
+  "absoluteBoundingBox": { "x": 0, "y": 0, "width": 60, "height": 60 },
+  "absoluteTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "relativeTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "width": 60,
+  "height": 60,
+  "fills": [{ "type": "SOLID", "color": { "r": 0.3, "g": 0.6, "b": 0.9, "a": 1 } }],
+  "strokes": [],
+  "effects": [{ "type": "LAYER_BLUR", "visible": true, "radius": 8 }]
+}

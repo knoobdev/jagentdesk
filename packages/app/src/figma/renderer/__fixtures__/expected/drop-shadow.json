@@ -1,0 +1,61 @@
+[
+  ["save"],
+  ["setTransform", 2, 0, 0, 2, 0, 0],
+  ["save"],
+  ["setTransform", 2, 0, 0, 2, 40, 40],
+  ["set:globalAlpha", 1],
+  ["save"],
+  ["set:fillStyle", "rgba(255, 255, 255, 1)"],
+  ["set:globalAlpha", 1],
+  ["set:shadowColor", "rgba(0, 0, 0, 0.25)"],
+  ["set:shadowBlur", 28],
+  ["set:shadowOffsetX", 0],
+  ["set:shadowOffsetY", 8],
+  [
+    "fill",
+    {
+      "commands": [
+        ["moveTo", 8, 0],
+        ["lineTo", 92, 0],
+        ["arcTo", 100, 0, 100, 8, 8],
+        ["lineTo", 100, 52],
+        ["arcTo", 100, 60, 92, 60, 8],
+        ["lineTo", 8, 60],
+        ["arcTo", 0, 60, 0, 52, 8],
+        ["lineTo", 0, 8],
+        ["arcTo", 0, 0, 8, 0, 8],
+        ["closePath"]
+      ]
+    },
+    "nonzero"
+  ],
+  ["set:shadowColor", "rgba(0, 0, 0, 0)"],
+  ["set:shadowBlur", 0],
+  ["set:shadowOffsetX", 0],
+  ["set:shadowOffsetY", 0],
+  ["restore"],
+  ["save"],
+  ["set:globalAlpha", 1],
+  ["set:fillStyle", "rgba(255, 255, 255, 1)"],
+  [
+    "fill",
+    {
+      "commands": [
+        ["moveTo", 8, 0],
+        ["lineTo", 92, 0],
+        ["arcTo", 100, 0, 100, 8, 8],
+        ["lineTo", 100, 52],
+        ["arcTo", 100, 60, 92, 60, 8],
+        ["lineTo", 8, 60],
+        ["arcTo", 0, 60, 0, 52, 8],
+        ["lineTo", 0, 8],
+        ["arcTo", 0, 0, 8, 0, 8],
+        ["closePath"]
+      ]
+    },
+    "nonzero"
+  ],
+  ["restore"],
+  ["restore"],
+  ["restore"]
+]

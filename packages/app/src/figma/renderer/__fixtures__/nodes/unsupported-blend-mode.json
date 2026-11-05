@@ -1,0 +1,21 @@
+{
+  "id": "14:3",
+  "name": "WeirdBlend",
+  "type": "RECTANGLE",
+  "visible": true,
+  "opacity": 1,
+  "blendMode": "LINEAR_BURN",
+  "absoluteBoundingBox": { "x": 0, "y": 0, "width": 20, "height": 20 },
+  "absoluteTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "relativeTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "width": 20,
+  "height": 20,
+  "fills": [{ "type": "SOLID", "color": { "r": 1, "g": 0, "b": 0, "a": 1 } }],
+  "strokes": []
+}

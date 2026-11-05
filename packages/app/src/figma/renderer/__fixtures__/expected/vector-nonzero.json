@@ -1,0 +1,20 @@
+[
+  ["save"],
+  ["setTransform", 2, 0, 0, 2, 0, 0],
+  ["save"],
+  ["setTransform", 2, 0, 0, 2, 100, 100],
+  ["set:globalAlpha", 1],
+  ["save"],
+  ["set:globalAlpha", 1],
+  ["set:fillStyle", "rgba(26, 26, 26, 1)"],
+  [
+    "fill",
+    {
+      "svg": "M 8 0 L 16 16 L 0 16 Z"
+    },
+    "nonzero"
+  ],
+  ["restore"],
+  ["restore"],
+  ["restore"]
+]

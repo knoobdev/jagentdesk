@@ -1,0 +1,21 @@
+{
+  "id": "14:1",
+  "name": "Section",
+  "type": "SECTION",
+  "visible": true,
+  "opacity": 1,
+  "blendMode": "NORMAL",
+  "absoluteBoundingBox": { "x": 0, "y": 0, "width": 400, "height": 300 },
+  "absoluteTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "relativeTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "width": 400,
+  "height": 300,
+  "fills": [{ "type": "SOLID", "color": { "r": 0.95, "g": 0.95, "b": 0.95, "a": 1 } }],
+  "strokes": []
+}

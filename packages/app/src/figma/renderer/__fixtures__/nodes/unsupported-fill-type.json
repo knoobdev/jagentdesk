@@ -1,0 +1,21 @@
+{
+  "id": "14:2",
+  "name": "Weird",
+  "type": "RECTANGLE",
+  "visible": true,
+  "opacity": 1,
+  "blendMode": "NORMAL",
+  "absoluteBoundingBox": { "x": 0, "y": 0, "width": 20, "height": 20 },
+  "absoluteTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "relativeTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "width": 20,
+  "height": 20,
+  "fills": [{ "type": "CUSTOM_PATTERN", "color": { "r": 1, "g": 1, "b": 1, "a": 1 } }],
+  "strokes": []
+}

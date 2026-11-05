@@ -1,0 +1,21 @@
+{
+  "id": "1:4",
+  "name": "Avatar",
+  "type": "ELLIPSE",
+  "visible": true,
+  "opacity": 1,
+  "blendMode": "NORMAL",
+  "absoluteBoundingBox": { "x": 200, "y": 10, "width": 64, "height": 64 },
+  "absoluteTransform": [
+    [1, 0, 200],
+    [0, 1, 10]
+  ],
+  "relativeTransform": [
+    [1, 0, 200],
+    [0, 1, 10]
+  ],
+  "width": 64,
+  "height": 64,
+  "fills": [{ "type": "SOLID", "color": { "r": 1, "g": 0.4, "b": 0.2, "a": 1 } }],
+  "strokes": []
+}

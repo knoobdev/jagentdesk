@@ -1,0 +1,45 @@
+[
+  ["save"],
+  ["setTransform", 2, 0, 0, 2, 0, 0],
+  ["save"],
+  ["setTransform", 2, 0, 0, 2, 0, 0],
+  ["set:globalAlpha", 1],
+  ["save"],
+  ["set:globalAlpha", 1],
+  ["set:fillStyle", "rgba(255, 0, 0, 1)"],
+  [
+    "fill",
+    {
+      "commands": [
+        ["moveTo", 0, 0],
+        ["lineTo", 30, 0],
+        ["lineTo", 30, 30],
+        ["lineTo", 0, 30],
+        ["lineTo", 0, 0],
+        ["closePath"]
+      ]
+    },
+    "nonzero"
+  ],
+  ["restore"],
+  ["save"],
+  ["set:globalAlpha", 0.25],
+  ["set:fillStyle", "rgba(0, 0, 255, 1)"],
+  [
+    "fill",
+    {
+      "commands": [
+        ["moveTo", 0, 0],
+        ["lineTo", 30, 0],
+        ["lineTo", 30, 30],
+        ["lineTo", 0, 30],
+        ["lineTo", 0, 0],
+        ["closePath"]
+      ]
+    },
+    "nonzero"
+  ],
+  ["restore"],
+  ["restore"],
+  ["restore"]
+]

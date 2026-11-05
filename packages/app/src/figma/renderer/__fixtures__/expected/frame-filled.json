@@ -1,0 +1,34 @@
+[
+  ["save"],
+  ["setTransform", 2, 0, 0, 2, 0, 0],
+  ["save"],
+  ["setTransform", 2, 0, 0, 2, 0, 0],
+  ["set:globalAlpha", 1],
+  [
+    "clip",
+    {
+      "commands": [["rect", 0, 0, 360, 640]]
+    },
+    null
+  ],
+  ["save"],
+  ["set:globalAlpha", 1],
+  ["set:fillStyle", "rgba(247, 247, 247, 1)"],
+  [
+    "fill",
+    {
+      "commands": [
+        ["moveTo", 0, 0],
+        ["lineTo", 360, 0],
+        ["lineTo", 360, 640],
+        ["lineTo", 0, 640],
+        ["lineTo", 0, 0],
+        ["closePath"]
+      ]
+    },
+    "nonzero"
+  ],
+  ["restore"],
+  ["restore"],
+  ["restore"]
+]

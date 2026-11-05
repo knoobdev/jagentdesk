@@ -1,0 +1,28 @@
+{
+  "id": "8:1",
+  "name": "Veil",
+  "type": "RECTANGLE",
+  "visible": true,
+  "opacity": 1,
+  "blendMode": "NORMAL",
+  "absoluteBoundingBox": { "x": 0, "y": 0, "width": 50, "height": 50 },
+  "absoluteTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "relativeTransform": [
+    [1, 0, 0],
+    [0, 1, 0]
+  ],
+  "width": 50,
+  "height": 50,
+  "fills": [
+    {
+      "type": "SOLID",
+      "visible": true,
+      "opacity": 0.5,
+      "color": { "r": 0, "g": 0, "b": 0, "a": 1 }
+    }
+  ],
+  "strokes": []
+}

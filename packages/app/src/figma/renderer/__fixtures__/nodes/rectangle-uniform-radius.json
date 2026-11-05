@@ -1,0 +1,22 @@
+{
+  "id": "1:3",
+  "name": "Pill",
+  "type": "RECTANGLE",
+  "visible": true,
+  "opacity": 1,
+  "blendMode": "NORMAL",
+  "absoluteBoundingBox": { "x": 5, "y": 5, "width": 60, "height": 20 },
+  "absoluteTransform": [
+    [1, 0, 5],
+    [0, 1, 5]
+  ],
+  "relativeTransform": [
+    [1, 0, 5],
+    [0, 1, 5]
+  ],
+  "width": 60,
+  "height": 20,
+  "cornerRadius": 10,
+  "fills": [{ "type": "SOLID", "color": { "r": 0, "g": 0.5, "b": 0.5, "a": 1 } }],
+  "strokes": []
+}

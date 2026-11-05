@@ -1,0 +1,44 @@
+[
+  ["save"],
+  ["setTransform", 2, 0, 0, 2, 0, 0],
+  ["save"],
+  ["setTransform", 2, 0, 0, 2, 0, 0],
+  ["set:globalAlpha", 1],
+  ["createPattern", "crop-ref-0002", "no-repeat"],
+  ["save"],
+  ["set:globalAlpha", 1],
+  [
+    "set:fillStyle",
+    {
+      "pattern": {
+        "image": "crop-ref-0002",
+        "repetition": "no-repeat",
+        "transform": {
+          "a": 0.006666666666666667,
+          "b": 0,
+          "c": 0,
+          "d": 0.0075,
+          "e": 0.1,
+          "f": 0.2
+        }
+      }
+    }
+  ],
+  [
+    "fill",
+    {
+      "commands": [
+        ["moveTo", 0, 0],
+        ["lineTo", 100, 0],
+        ["lineTo", 100, 50],
+        ["lineTo", 0, 50],
+        ["lineTo", 0, 0],
+        ["closePath"]
+      ]
+    },
+    "nonzero"
+  ],
+  ["restore"],
+  ["restore"],
+  ["restore"]
+]

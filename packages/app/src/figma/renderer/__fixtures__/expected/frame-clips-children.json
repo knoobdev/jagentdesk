@@ -1,0 +1,62 @@
+[
+  ["save"],
+  ["setTransform", 2, 0, 0, 2, 0, 0],
+  ["save"],
+  ["setTransform", 2, 0, 0, 2, 0, 0],
+  ["set:globalAlpha", 1],
+  [
+    "clip",
+    {
+      "commands": [["rect", 0, 0, 100, 100]]
+    },
+    null
+  ],
+  ["save"],
+  ["save"],
+  ["setTransform", 2, 0, 0, 2, 20, 20],
+  ["set:globalAlpha", 1],
+  ["save"],
+  ["set:globalAlpha", 1],
+  ["set:fillStyle", "rgba(255, 0, 0, 1)"],
+  [
+    "fill",
+    {
+      "commands": [
+        ["moveTo", 0, 0],
+        ["lineTo", 40, 0],
+        ["lineTo", 40, 20],
+        ["lineTo", 0, 20],
+        ["lineTo", 0, 0],
+        ["closePath"]
+      ]
+    },
+    "nonzero"
+  ],
+  ["restore"],
+  ["restore"],
+  ["save"],
+  ["setTransform", 2, 0, 0, 2, 160, 160],
+  ["set:globalAlpha", 1],
+  ["save"],
+  ["set:globalAlpha", 1],
+  ["set:fillStyle", "rgba(0, 255, 0, 1)"],
+  [
+    "fill",
+    {
+      "commands": [
+        ["moveTo", 0, 0],
+        ["lineTo", 40, 0],
+        ["lineTo", 40, 40],
+        ["lineTo", 0, 40],
+        ["lineTo", 0, 0],
+        ["closePath"]
+      ]
+    },
+    "nonzero"
+  ],
+  ["restore"],
+  ["restore"],
+  ["restore"],
+  ["restore"],
+  ["restore"]
+]
