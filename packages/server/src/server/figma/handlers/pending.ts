@@ -1,8 +1,15 @@
-import { FigmaServiceError } from "../context.js";
 import type { FigmaHandlerMap } from "./types.js";
+import {
+  addPendingOps,
+  applyPendingOps,
+  discardPendingOps,
+  loadPendingOps,
+  removePendingOp,
+} from "../pending.js";
 
-// Edit queue (32.6.1). Owner: W7.
-// Replace each stub with the real handler; keep the map complete (service.ts checks coverage).
+// Edit queue RPC handlers (spec 32.9). The queue itself lives in ../pending.ts; these handlers
+// only map requests onto it. `figma.pending.add` comes from the canvas UI, so its ops queue with
+// origin "user"; the agent's figma_queue_ops tool calls the queue module directly with "agent".
 
 export type PendingRequestType =
   | "figma.pending.list.request"
@@ -11,14 +18,22 @@ export type PendingRequestType =
   | "figma.pending.discard.request"
   | "figma.pending.apply.request";
 
-const notImplemented = (type: string) => async (): Promise<never> => {
-  throw new FigmaServiceError("unsupported", `${type} is not implemented yet`);
-};
-
 export const pendingHandlers: FigmaHandlerMap<PendingRequestType> = {
-  "figma.pending.list.request": notImplemented("figma.pending.list"),
-  "figma.pending.add.request": notImplemented("figma.pending.add"),
-  "figma.pending.remove.request": notImplemented("figma.pending.remove"),
-  "figma.pending.discard.request": notImplemented("figma.pending.discard"),
-  "figma.pending.apply.request": notImplemented("figma.pending.apply"),
+  "figma.pending.list.request": async (request, ctx) => ({
+    ops: await loadPendingOps(ctx, request.fileKey),
+  }),
+  "figma.pending.add.request": async (request, ctx) => ({
+    ops: await addPendingOps(ctx, request.fileKey, request.ops, "user"),
+  }),
+  "figma.pending.remove.request": async (request, ctx) => {
+    await removePendingOp(ctx, request.fileKey, request.opId);
+    return {};
+  },
+  "figma.pending.discard.request": async (request, ctx) => {
+    await discardPendingOps(ctx, request.fileKey);
+    return {};
+  },
+  "figma.pending.apply.request": async (request, ctx) => ({
+    ops: await applyPendingOps(ctx, request.fileKey, request.resolutions),
+  }),
 };
