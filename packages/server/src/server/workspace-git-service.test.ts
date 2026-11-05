@@ -751,6 +751,35 @@ describe("WorkspaceGitServiceImpl", () => {
     service.dispose();
   });
 
+  test("a refresh requested after a mutation waits for a new snapshot", async () => {
+    const gate = createDeferred<CheckoutStatusGit>();
+    let reads = 0;
+    const service = createService({
+      getCheckoutStatus: (cwd: string) => {
+        reads += 1;
+        return reads === 1
+          ? gate.promise
+          : Promise.resolve(createCheckoutStatus(cwd, { currentBranch: "new-base" }));
+      },
+    });
+    const first = service.getSnapshot(REPO_CWD, {
+      force: true,
+      includeForge: false,
+      reason: "before-mutation",
+    });
+    await vi.waitFor(() => expect(reads).toBe(1));
+    const after = service.getSnapshot(REPO_CWD, {
+      force: true,
+      includeForge: false,
+      reason: "after-mutation",
+      afterInFlight: true,
+    });
+    gate.resolve(createCheckoutStatus(REPO_CWD, { currentBranch: "old-base" }));
+    await first;
+    expect((await after).git.currentBranch).toBe("new-base");
+    service.dispose();
+  });
+
   test("multiple listeners on the same workspace share one observation setup", async () => {
     const getPullRequestStatus = vi.fn(async () => createPullRequestStatusResult());
     const getCheckoutSnapshotFacts = vi.fn(async (cwd: string) => createCheckoutSnapshotFacts(cwd));

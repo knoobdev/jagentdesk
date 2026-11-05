@@ -189,6 +189,7 @@ export class CheckoutDiffManager {
       remoteUrl: snapshot.git.remoteUrl,
       isJAgentDeskOwnedWorktree: snapshot.git.isJAgentDeskOwnedWorktree,
       baseRef: snapshot.git.baseRef,
+      baseRefExact: snapshot.git.baseRefExact,
       aheadBehind: snapshot.git.aheadBehind,
       aheadOfOrigin: snapshot.git.aheadOfOrigin,
       behindOfOrigin: snapshot.git.behindOfOrigin,

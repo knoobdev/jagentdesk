@@ -863,6 +863,7 @@ export const fr: TranslationResources = {
         },
       },
       diff: {
+        baseBranch: { title: "Branche de base" },
         openChangesTab: "Ouvrir l'onglet Modifications",
         closeChangesTab: "Fermer l'onglet Modifications",
         binaryFile: "Fichier binaire",

@@ -842,6 +842,9 @@ export const en = {
         },
       },
       diff: {
+        baseBranch: {
+          title: "Change base",
+        },
         openChangesTab: "Open Changes tab",
         closeChangesTab: "Close Changes tab",
         binaryFile: "Binary file",

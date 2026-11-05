@@ -49,6 +49,7 @@ import {
   type JAgentDeskWorktreeMetadata,
   readJAgentDeskWorktreeMetadata,
   rebindJAgentDeskWorktreeChangeRequestHint,
+  setJAgentDeskWorktreeBaseRef,
 } from "./worktree-metadata.js";
 const READ_ONLY_GIT_ENV = {
   GIT_OPTIONAL_LOCKS: "0",
@@ -321,14 +322,29 @@ function sortBranchSuggestions(
 
 export async function listBranchSuggestions(
   cwd: string,
-  options?: { query?: string; limit?: number },
+  options: { query?: string; limit?: number; refMode?: "exact" } = {},
 ): Promise<BranchSuggestion[]> {
   await requireGitRepo(cwd);
 
-  const requestedLimit = options?.limit ?? 50;
+  const requestedLimit = options.limit ?? 50;
   const limit = Math.max(1, Math.min(200, requestedLimit));
-  const rawQuery = options?.query?.trim().toLowerCase() ?? "";
+  const rawQuery = options.query?.trim().toLowerCase() ?? "";
   const query = normalizeBranchSuggestionName(rawQuery) ?? rawQuery;
+
+  if (options.refMode === "exact") {
+    const refs = await listGitRefs(cwd, "refs");
+    const branches = refs.filter((ref) => {
+      const isBranch = ref.name.startsWith("refs/heads/") || ref.name.startsWith("refs/remotes/");
+      return isBranch && !ref.name.endsWith("/HEAD") && ref.name.toLowerCase().includes(rawQuery);
+    });
+    branches.sort((a, b) => b.committerDate - a.committerDate || a.name.localeCompare(b.name));
+    return branches.slice(0, limit).map((ref) => ({
+      name: ref.name,
+      committerDate: ref.committerDate,
+      hasLocal: ref.name.startsWith("refs/heads/"),
+      hasRemote: ref.name.startsWith("refs/remotes/"),
+    }));
+  }
 
   const [localRefs, remoteRefs] = await Promise.all([
     listGitRefs(cwd, "refs/heads"),
@@ -887,6 +903,7 @@ export interface CheckoutStatusGitNonJAgentDesk {
   currentBranch: string | null;
   isDirty: boolean;
   baseRef: string | null;
+  baseRefExact?: string | null;
   aheadBehind: AheadBehind | null;
   // Remote-tracking ref for currentBranch, e.g. "refs/remotes/origin/main". Null when the
   // branch has no upstream or git could not resolve it. aheadOfOrigin/behindOfOrigin are
@@ -906,6 +923,7 @@ export interface CheckoutStatusGitJAgentDesk {
   currentBranch: string | null;
   isDirty: boolean;
   baseRef: string;
+  baseRefExact?: string | null;
   aheadBehind: AheadBehind | null;
   upstreamRef: string | null;
   aheadOfOrigin: number | null;
@@ -1302,12 +1320,39 @@ async function getStoredBaseRefForCwd(
   if (context?.facts?.isGit) {
     return context.facts.storedBaseRef;
   }
-  const jagentdeskWorktree = await getJAgentDeskWorktreeForCwd(cwd, { context });
-  if (!jagentdeskWorktree.isJAgentDeskOwnedWorktree) {
-    return null;
-  }
+  const ownership = await getJAgentDeskWorktreeForCwd(cwd, { context });
+  return ownership.isJAgentDeskOwnedWorktree
+    ? readJAgentDeskWorktreeBaseRef(ownership.worktreeRoot)
+    : null;
+}
 
-  return readJAgentDeskWorktreeBaseRef(jagentdeskWorktree.worktreeRoot);
+export async function setCheckoutBaseBranch(input: {
+  cwd: string;
+  baseRef: string;
+  context?: CheckoutContext;
+}): Promise<string> {
+  await requireGitRepo(input.cwd);
+  const ownership = await getJAgentDeskWorktreeForCwd(input.cwd, { context: input.context });
+  if (!ownership.isJAgentDeskOwnedWorktree)
+    throw new Error("Workspace is not a JAgentDesk worktree");
+  const requested = input.baseRef.trim();
+  const qualified = requested.startsWith("refs/");
+  const candidates = qualified
+    ? [requested]
+    : [`refs/heads/${requested}`, `refs/remotes/${requested}`, `refs/remotes/origin/${requested}`];
+  for (const candidate of candidates) {
+    if (!isQualifiedBranchRef(candidate) || candidate.endsWith("/HEAD")) continue;
+    const valid = await runGitCommand(["check-ref-format", candidate], {
+      cwd: input.cwd,
+      acceptExitCodes: [0, 1],
+    });
+    if (valid.exitCode !== 0 || !(await doesGitRefExist(input.cwd, candidate))) continue;
+    const worktreeRoot = await getWorktreeRoot(input.cwd);
+    if (!worktreeRoot) throw new NotGitRepoError(input.cwd);
+    await setJAgentDeskWorktreeBaseRef({ worktreeRoot, baseRef: candidate });
+    return candidate;
+  }
+  throw new Error(`Base branch not found: ${requested}`);
 }
 
 async function getResolvedBaseRefForCwd(
@@ -1780,7 +1825,11 @@ async function getAheadBehind(
   context?: CheckoutContext,
 ): Promise<AheadBehind | null> {
   const normalizedBaseRef = branchNameFromRef(baseRef);
-  if (!normalizedBaseRef || !currentBranch || normalizedBaseRef === currentBranch) {
+  if (
+    !normalizedBaseRef ||
+    !currentBranch ||
+    (!isQualifiedBranchRef(baseRef) && normalizedBaseRef === currentBranch)
+  ) {
     return null;
   }
   const comparisonBaseRef =
@@ -2122,7 +2171,8 @@ export async function getCheckoutSnapshotFacts(
   if (
     resolvedBaseRef &&
     inspected.currentBranch &&
-    branchNameFromRef(resolvedBaseRef) !== inspected.currentBranch
+    (isQualifiedBranchRef(resolvedBaseRef) ||
+      branchNameFromRef(resolvedBaseRef) !== inspected.currentBranch)
   ) {
     comparisonBaseRef = await resolveBestComparisonBaseRef(cwd, resolvedBaseRef, context).catch(
       () => null,
@@ -2367,6 +2417,7 @@ export async function getCheckoutStatus(
       currentBranch,
       isDirty,
       baseRef: displayBaseRef ?? baseRef,
+      baseRefExact: baseRef,
       aheadBehind,
       upstreamRef,
       aheadOfOrigin,
@@ -2385,6 +2436,7 @@ export async function getCheckoutStatus(
     currentBranch,
     isDirty,
     baseRef: displayBaseRef,
+    baseRefExact: baseRef,
     aheadBehind,
     upstreamRef,
     aheadOfOrigin,
@@ -2599,7 +2651,10 @@ async function tryResolveCheckoutCommitsBaseRef(
     return null;
   }
   const normalizedBaseRef = branchNameFromRef(baseRef);
-  if (!normalizedBaseRef || normalizedBaseRef === currentBranch) {
+  if (
+    !normalizedBaseRef ||
+    (!isQualifiedBranchRef(baseRef) && normalizedBaseRef === currentBranch)
+  ) {
     return null;
   }
   try {
@@ -3885,7 +3940,7 @@ export async function mergeToBase(
   const normalizedBaseRef = resolveMergeTargetBranch(baseRef);
   const currentWorktreeRoot = (await getWorktreeRoot(cwd, context)) ?? cwd;
   if (normalizedBaseRef === currentBranch) {
-    return currentWorktreeRoot;
+    throw new Error("Cannot merge a branch into itself");
   }
 
   const baseWorktree = await getWorktreePathForBranch(cwd, normalizedBaseRef);

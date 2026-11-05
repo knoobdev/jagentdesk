@@ -1,4 +1,8 @@
 import { type WorkspaceRuntimeStore } from "./workspace-runtime-store/index.js";
+import {
+  createWorkspaceBaseBranchService,
+  type WorkspaceBaseBranchService,
+} from "./session/workspace-base-branch/service.js";
 import { WebSocket, WebSocketServer } from "ws";
 import type { IncomingMessage, Server as HTTPServer } from "http";
 import { join } from "path";
@@ -666,6 +670,7 @@ export class VoiceAssistantWebSocketServer {
   private readonly sshService: SshService;
   private readonly argocdService: ArgoCdService | null;
   private readonly sideloadService: SideloadService | null;
+  private readonly workspaceBaseBranch: WorkspaceBaseBranchService;
   private readonly scheduleService: ScheduleService;
   private autorunService!: AutorunService | null;
   private sessionShareService!: SessionShareService | null;
@@ -875,10 +880,16 @@ export class VoiceAssistantWebSocketServer {
     this.checkoutDiffManager = requiredServices.checkoutDiffManager;
     this.github = github ?? createGitHubService();
     this.workspaceGitService = workspaceGitService ?? createFallbackWorkspaceGitService();
+    this.worktreesRoot = daemonRuntimeConfig?.worktreesRoot;
+    this.workspaceBaseBranch = createWorkspaceBaseBranchService({
+      jagentdeskHome,
+      worktreesRoot: this.worktreesRoot,
+      workspaceRegistry: this.workspaceRegistry,
+      workspaceGitService: this.workspaceGitService,
+    });
     this.workspaceAutoName = workspaceAutoName;
     this.downloadTokenStore = downloadTokenStore;
     this.jagentdeskHome = jagentdeskHome;
-    this.worktreesRoot = daemonRuntimeConfig?.worktreesRoot;
     this.daemonConfigStore = daemonConfigStore;
     this.mcpBaseUrl = mcpBaseUrl;
     this.assignOptionalServices({
@@ -2068,6 +2079,7 @@ export class VoiceAssistantWebSocketServer {
       figmaService: this.figmaService,
       remoteExecService: this.remoteExecService,
       customProvidersService: this.customProvidersService,
+      workspaceBaseBranch: this.workspaceBaseBranch,
       scheduleService: this.scheduleService,
       autorunService: this.autorunService,
       specModeService: this.specModeService,
@@ -2439,6 +2451,7 @@ export class VoiceAssistantWebSocketServer {
           : {};
       })(),
       features: {
+        workspaceBaseBranch: true,
         // COMPAT(providersSnapshot): keep optional until all clients rely on snapshot flow.
         providersSnapshot: true,
         // COMPAT(checkoutForgeSetAutoMerge): added in v0.1.106, remove old

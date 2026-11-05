@@ -18,6 +18,7 @@ import type { WorkspaceGitService } from "../../workspace-git-service.js";
 import type { CreateJAgentDeskWorktreeWorkflowResult } from "../../worktree-session.js";
 import { deriveProjectKey } from "../../project-key.js";
 import { areEquivalentPaths, createRealpathAwarePathMatcher } from "../../../utils/path.js";
+import { readJAgentDeskWorktreeMetadata } from "../../../utils/worktree-metadata.js";
 
 export interface ResolveOrCreateWorkspaceIdInput {
   createdWorktree: CreateJAgentDeskWorktreeWorkflowResult | null;
@@ -96,6 +97,7 @@ export function createWorkspaceProvisioningService(deps: {
   /** Whether a directory exists at the path. Defaults to the daemon's local file system. */
   isDirectory?: (path: string) => Promise<boolean>;
   logger: Logger;
+  withCheckoutLock?: <T>(root: string, operation: () => Promise<T>) => Promise<T>;
 }): WorkspaceProvisioningService {
   const { serverId, workspaceRegistry, projectRegistry, workspaceGitService, logger } = deps;
   const isDirectory = deps.isDirectory ?? isLocalDirectory;
@@ -227,18 +229,28 @@ export function createWorkspaceProvisioningService(deps: {
       ? await refreshProjectKind(await requireActiveProject(projectId), normalizedCwd, checkout)
       : // COMPAT(workspaceCreateMissingProjectId): added in v0.1.107, remove after 2027-01-15.
         await findOrCreateProjectForDirectory(normalizedCwd);
-    const timestamp = new Date().toISOString();
-    const workspace = createPersistedWorkspaceRecord({
-      workspaceId: generateWorkspaceId(),
-      projectId: project.projectId,
-      ...initialWorkspacePlacement({ source: "checkout", cwd: normalizedCwd, checkout }),
-      title: title?.trim() || null,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-      background: await resolveBackground(context),
-    });
-    await workspaceRegistry.upsert(workspace, context);
-    return workspace;
+    const create = async () => {
+      const baseMetadata =
+        checkout.isGit && checkout.isJAgentDeskOwnedWorktree
+          ? await readJAgentDeskWorktreeMetadata(checkout.worktreeRoot ?? normalizedCwd)
+          : null;
+      const timestamp = new Date().toISOString();
+      const workspace = createPersistedWorkspaceRecord({
+        workspaceId: generateWorkspaceId(),
+        projectId: project.projectId,
+        ...initialWorkspacePlacement({ source: "checkout", cwd: normalizedCwd, checkout }),
+        baseBranch: baseMetadata?.baseRef ?? baseMetadata?.baseRefName ?? null,
+        title: title?.trim() || null,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        background: await resolveBackground(context),
+      });
+      await workspaceRegistry.upsert(workspace, context);
+      return workspace;
+    };
+    return deps.withCheckoutLock && checkout.isGit && checkout.isJAgentDeskOwnedWorktree
+      ? deps.withCheckoutLock(checkout.worktreeRoot ?? normalizedCwd, create)
+      : create();
   }
 
   async function createWorkspaceForWorktree(

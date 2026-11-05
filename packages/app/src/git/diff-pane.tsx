@@ -83,6 +83,7 @@ import { lineNumberGutterWidth } from "@/components/code-insets";
 import { GitActionsSplitButton } from "@/git/actions-split-button";
 import { BranchSwitcher } from "@/components/branch-switcher";
 import { useGitActions } from "@/git/use-actions";
+import { WorkspaceBaseBranchPicker } from "@/git/workspace-base-branch-picker";
 import { GIT_ACTION_ICONS } from "@/git/action-icons";
 import { buildForgeSignInCommand, getForgePresentation, type Forge } from "@/git/forge";
 import { parseGitRemoteLocation } from "@jagentdesk/protocol/git-remote";
@@ -2879,6 +2880,15 @@ export function GitDiffPane({
             isGitCheckout={isGit}
             testID="changes-branch-switcher"
           />
+          {
+            <WorkspaceBaseBranchPicker
+              serverId={serverId}
+              workspaceId={workspaceId}
+              cwd={cwd}
+              baseRef={baseRef}
+              isWorktree={isManagedWorktree(status)}
+            />
+          }
           {isMobile ? <GitActionsSplitButton gitActions={gitActions} /> : null}
         </View>
       ) : null}
@@ -3384,3 +3394,9 @@ const styles = StyleSheet.create((theme) => ({
 }));
 
 const DIFF_HEIGHT_CHANGE_EPSILON = 0.5;
+
+function isManagedWorktree(
+  status: { isJAgentDeskOwnedWorktree?: boolean } | null | undefined,
+): boolean {
+  return status?.isJAgentDeskOwnedWorktree === true;
+}

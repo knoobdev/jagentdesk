@@ -20,16 +20,19 @@ function branchSwitcherTrigger(page: Page, branchName: string) {
 // switcher and diff live. Git checkouts default to the Changes tab when the
 // explorer opens, so this is enough to reveal the switcher on desktop and mobile.
 export async function openChangesPanel(page: Page): Promise<void> {
-  await expect(page.getByTestId("workspace-explorer-toggle").first()).toBeVisible({
-    timeout: 30_000,
-  });
-  await page.getByTestId("workspace-explorer-toggle").first().click();
+  const toggle = page.getByTestId("workspace-explorer-toggle").first();
+  await expect(toggle).toBeVisible({ timeout: 30_000 });
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
   const changesTab = page.getByTestId("explorer-tab-changes").filter({ visible: true }).first();
-  await expect(changesTab).toBeVisible({ timeout: 30_000 });
-  await changesTab.click();
-  await expect(page.getByTestId("changes-header").filter({ visible: true }).first()).toBeVisible({
-    timeout: 30_000,
-  });
+  const header = page.getByTestId("changes-header").filter({ visible: true }).first();
+  // A restored Changes pane may already be active before the tab rail is mounted.
+  await expect
+    .poll(async () => (await header.isVisible()) || (await changesTab.isVisible()), {
+      timeout: 30_000,
+    })
+    .toBe(true);
+  if (await changesTab.isVisible()) await changesTab.click();
+  await expect(header).toBeVisible({ timeout: 30_000 });
 }
 
 export async function expectWorkspaceBranch(page: Page, branchName: string): Promise<void> {
