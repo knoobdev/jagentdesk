@@ -1,10 +1,11 @@
 import path from "node:path";
 import type pino from "pino";
 import { FileSecretStore } from "../database/secret-store.js";
+import { FigmaOAuth } from "./oauth.js";
 import { FigmaService } from "./service.js";
 import { JsonFigmaStore } from "./store.js";
 import { HttpFigmaRestClient } from "./rest.js";
-import { unavailableCache, unavailableLink, unavailableTokens } from "./unavailable.js";
+import { unavailableCache, unavailableLink } from "./unavailable.js";
 
 // Builds the daemon's Figma service (spec 32). Each work package swaps ONE placeholder below for
 // its real part (store W3, tokens W2, rest W3, cache W4, link W6) — change only your own line.
@@ -25,7 +26,7 @@ export async function createFigmaService(options: {
     secrets,
     parts: {
       store,
-      tokens: unavailableTokens,
+      tokens: new FigmaOAuth({ secrets, logger: options.logger }),
       rest,
       cache: unavailableCache,
       link: unavailableLink,

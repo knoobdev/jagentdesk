@@ -227,9 +227,23 @@ export interface DesktopArgoCdBridge {
   }) => Promise<DesktopArgoCdSsoResult>;
 }
 
+export type DesktopFigmaLoopbackResult =
+  | { kind: "code"; code: string; state: string }
+  | { kind: "error"; message: string };
+
+/** Figma OAuth loopback (spec 32.2): Electron only. */
+export interface DesktopFigmaBridge {
+  oauthLoopback: (input: {
+    authorizeUrl: string;
+    redirectUri: string;
+    timeoutMs?: number;
+  }) => Promise<DesktopFigmaLoopbackResult>;
+}
+
 export interface DesktopHostBridge {
   platform?: string;
   argocd?: DesktopArgoCdBridge;
+  figma?: DesktopFigmaBridge;
   invoke?: DesktopInvokeBridge["invoke"];
   getPendingOpenProject?: () => Promise<string | null>;
   agentNavigation?: DesktopAgentNavigationBridge;

@@ -1,4 +1,5 @@
 import { type ChildProcess } from "node:child_process";
+import { createFigmaCommandHandlers } from "../integrations/figma-oauth-loopback.js";
 import { createJiraCommandHandlers } from "../integrations/jira-oauth-loopback.js";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
@@ -1389,6 +1390,7 @@ export function createDaemonCommandHandlers(): Record<string, DesktopCommandHand
     get_cli_install_status: () => getCliInstallStatus(),
     ...createSkillsCommandHandlers({ controller: getSkillsController() }),
     ...createJiraCommandHandlers(),
+    ...createFigmaCommandHandlers(),
   };
 }
 
