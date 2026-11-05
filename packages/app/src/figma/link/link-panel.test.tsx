@@ -227,4 +227,28 @@ describe("FigmaLinkPanel", () => {
       "The manifest path is only available on the host machine.",
     );
   });
+
+  it("describes Run script as the gated figma_link_run_script permission, not edit behaviour", () => {
+    linkState.data = baseStatus({ runScriptEnabled: false });
+    const view = render();
+    const card = view.querySelector('[data-testid="figma-link-run-script"]');
+    expect(card).not.toBeNull();
+    const text = card?.textContent ?? "";
+    expect(text).toContain("figma_link_run_script");
+    expect(text).toContain("Off by default");
+    expect(text).toContain("every run asks for permission");
+    expect(text).toContain("normal edits and the edit queue do not depend on it");
+    // The wrong copy is gone, in both toggle states.
+    expect(text).not.toContain("applies edits from JAgentDesk immediately");
+    expect(text).not.toContain("Without Run script, edits queue");
+    expect(view.querySelector('[data-testid="figma-link-run-script-warning"]')).toBeNull();
+
+    linkState.data = baseStatus({ runScriptEnabled: true });
+    const enabledView = render();
+    const enabledCard = enabledView.querySelector('[data-testid="figma-link-run-script"]');
+    const enabledText = enabledCard?.textContent ?? "";
+    expect(enabledText).toContain("figma_link_run_script");
+    expect(enabledText).not.toContain("Without Run script, edits queue");
+    expect(enabledView.querySelector('[data-testid="figma-link-run-script-warning"]')).toBeNull();
+  });
 });

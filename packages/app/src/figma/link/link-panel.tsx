@@ -224,7 +224,7 @@ export function FigmaLinkPanel({ serverId }: { serverId: string }) {
       <View style={figmaStyles.card} testID="figma-link-run-script">
         <SectionHeading
           title="Run script"
-          hint="With Run script enabled, the plugin applies edits from JAgentDesk immediately. Keep it off only if the plugin’s own scripting conflicts."
+          hint="Lets chat agents run arbitrary Figma Plugin API scripts (figma_link_run_script) in a linked file. Off by default, and every run asks for permission even when it is on; normal edits and the edit queue do not depend on it."
         />
         <View style={figmaStyles.rowBetween}>
           <Text style={figmaStyles.rowTitle}>
@@ -236,12 +236,6 @@ export function FigmaLinkPanel({ serverId }: { serverId: string }) {
             testID="figma-link-run-script-toggle"
           />
         </View>
-        {!current.runScriptEnabled ? (
-          <Text style={figmaStyles.rowSubtle} testID="figma-link-run-script-warning">
-            Without Run script, edits queue until the plugin runs them — the pending bar stays
-            filled while you wait.
-          </Text>
-        ) : null}
       </View>
     </ScrollView>
   );
