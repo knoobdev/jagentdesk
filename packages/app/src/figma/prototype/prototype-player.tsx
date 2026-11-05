@@ -33,6 +33,7 @@ import {
 } from "./interactions";
 import { findNodeById } from "./node-geometry";
 import { smartAnimateOverrides } from "./smart-animate";
+import { pickStartPosition } from "./start-selection";
 import { advanceTimeline, transitionVisuals } from "./transition-timeline";
 import {
   currentFrameId,
@@ -91,6 +92,9 @@ export function PrototypePlayer({ file, outline, startNodeId, onClose }: Prototy
   }, [prototype, outline]);
 
   const interactions = useMemo(() => indexInteractions(prototype?.interactions ?? []), [prototype]);
+
+  const startChoice = useMemo(() => pickStartPosition(flows, outline), [flows, outline]);
+  const [startNote, setStartNote] = useState<string | null>(null);
 
   const overlaySettings = useMemo(() => {
     const map = new Map<string, OverlaySettings>();
@@ -152,6 +156,16 @@ export function PrototypePlayer({ file, outline, startNodeId, onClose }: Prototy
     if (startNodeId) dispatchStart(startNodeId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [startNodeId]);
+
+  // No start point from the caller: pick one ourselves once the flows are known, so the player
+  // never sits on an endless spinner waiting for a hand-picked flow. The first flow wins; with no
+  // flows the first top-level frame does, and the toolbar says so.
+  useEffect(() => {
+    if (startNodeId || player.startFrameId || prototypeRequest.isPending) return;
+    if (!startChoice) return;
+    dispatchStart(startChoice.frameId);
+    setStartNote(startChoice.note);
+  }, [startNodeId, player.startFrameId, prototypeRequest.isPending, startChoice, dispatchStart]);
 
   // AFTER_TIMEOUT for the frame on stage; the machine re-checks arrival before firing.
   useEffect(() => {
@@ -229,7 +243,7 @@ export function PrototypePlayer({ file, outline, startNodeId, onClose }: Prototy
       </View>
     );
   }
-  if (flows.length === 0 && !prototypeRequest.isPending) {
+  if (flows.length === 0 && !startChoice && !prototypeRequest.isPending) {
     return (
       <View style={styles.centered}>
         <Text style={styles.muted}>No prototype flows in this file.</Text>
@@ -254,6 +268,7 @@ export function PrototypePlayer({ file, outline, startNodeId, onClose }: Prototy
         onToggleHotspots={setShowHotspots}
         onClose={onClose}
         overlayNote={overlayNote}
+        startNote={startNote}
       />
       <View style={styles.stageHost} onLayout={onMeasure}>
         {toast ? <Text style={styles.toast}>{toast}</Text> : null}
@@ -268,6 +283,9 @@ export function PrototypePlayer({ file, outline, startNodeId, onClose }: Prototy
           scrollRequest={scrollRequest}
           renderHotspots={renderHotspots}
           showHotspots={showHotspots}
+          loadingPrototype={prototypeRequest.isPending}
+          flows={flows}
+          onStartFlow={dispatchStart}
         />
         {player.overlays.length > 0 ? (
           <OverlayStack
@@ -291,7 +309,7 @@ function scrollTarget(
   return request.targetId;
 }
 
-function PlayerStage({
+export function PlayerStage({
   file,
   transition,
   timeline,
@@ -302,6 +320,9 @@ function PlayerStage({
   scrollRequest,
   renderHotspots,
   showHotspots,
+  loadingPrototype,
+  flows,
+  onStartFlow,
 }: {
   file: PrototypePlayerProps["file"];
   transition: Frame | null;
@@ -313,6 +334,9 @@ function PlayerStage({
   scrollRequest: { frameId: string; targetId: string } | null;
   renderHotspots: (space: StageSpace) => ReactNode;
   showHotspots: boolean;
+  loadingPrototype: boolean;
+  flows: FigmaPrototype["flows"];
+  onStartFlow: (frameId: string) => void;
 }) {
   if (transition && timeline) {
     return (
@@ -325,10 +349,29 @@ function PlayerStage({
       />
     );
   }
-  if (frames.loading || !root) {
+  if (!root) {
+    // The spinner means "frames are actually loading" — nothing else. A file with no start point
+    // shows a Choose-flow prompt instead of spinning forever.
+    if (loadingPrototype || frames.loading) {
+      return (
+        <View style={styles.centered}>
+          <LoadingSpinner size="small" color={styles.spinner.color} />
+        </View>
+      );
+    }
+    if (frames.error) {
+      return (
+        <View style={styles.centered}>
+          <Text style={styles.muted}>{frames.error}</Text>
+        </View>
+      );
+    }
+    if (flows.length > 0) {
+      return <ChooseFlowPrompt flows={flows} onStartFlow={onStartFlow} />;
+    }
     return (
       <View style={styles.centered}>
-        <LoadingSpinner size="small" color={styles.spinner.color} />
+        <Text style={styles.muted}>No prototype flows in this file.</Text>
       </View>
     );
   }
@@ -341,6 +384,39 @@ function PlayerStage({
       scrollToContentNodeId={scrollTarget(scrollRequest, activeFrameId)}
       renderOverlay={showHotspots ? renderHotspots : undefined}
     />
+  );
+}
+
+/** Shown when nothing has started and the endless-spinner default would lie: pick a flow by hand. */
+function ChooseFlowPrompt({
+  flows,
+  onStartFlow,
+}: {
+  flows: FigmaPrototype["flows"];
+  onStartFlow: (frameId: string) => void;
+}) {
+  return (
+    <View style={styles.centered} testID="figma-choose-flow">
+      <Text style={styles.muted}>Choose a flow</Text>
+      {flows.map((flow) => (
+        <FlowRow key={flow.nodeId} flow={flow} onStartFlow={onStartFlow} />
+      ))}
+    </View>
+  );
+}
+
+function FlowRow({
+  flow,
+  onStartFlow,
+}: {
+  flow: FigmaPrototype["flows"][number];
+  onStartFlow: (frameId: string) => void;
+}) {
+  const start = useCallback(() => onStartFlow(flow.nodeId), [onStartFlow, flow.nodeId]);
+  return (
+    <Pressable style={styles.flowRow} onPress={start} accessibilityRole="button">
+      <Text style={styles.flowRowLabel}>{flow.name}</Text>
+    </Pressable>
   );
 }
 
@@ -358,6 +434,7 @@ function PlayerToolbar({
   onToggleHotspots,
   onClose,
   overlayNote,
+  startNote,
 }: {
   flows: FigmaPrototype["flows"];
   activeFrameId: string | null;
@@ -370,6 +447,7 @@ function PlayerToolbar({
   onToggleHotspots: (value: boolean) => void;
   onClose: () => void;
   overlayNote: string | null;
+  startNote: string | null;
 }) {
   return (
     <View style={styles.toolbar}>
@@ -402,6 +480,7 @@ function PlayerToolbar({
         />
       </View>
       {overlayNote ? <Text style={styles.note}>{overlayNote}</Text> : null}
+      {startNote ? <Text style={styles.note}>{startNote}</Text> : null}
       <Button variant="ghost" size="sm" onPress={onClose}>
         Close
       </Button>
@@ -717,6 +796,14 @@ const styles = StyleSheet.create((theme: Theme) => ({
     gap: theme.spacing[2],
   },
   spinner: { color: theme.colors.foregroundMuted },
+  flowRow: {
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.surface1,
+    minWidth: 200,
+  },
+  flowRowLabel: { fontSize: theme.fontSize.sm, color: theme.colors.foreground },
   toast: {
     position: "absolute",
     bottom: theme.spacing[3],

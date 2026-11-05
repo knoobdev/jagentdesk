@@ -149,6 +149,22 @@ export function FigmaFileScreen({ serverId, fileKey, version }: FigmaFileRef) {
     [page, selectNode, size.height, size.width, store],
   );
 
+  // Comment pins with only an x/y offset (no node): pan the camera to the point itself.
+  const focusPoint = useCallback(
+    (point: { x: number; y: number }) => {
+      if (size.width === 0) return;
+      setCamera((current) =>
+        centerCameraOn(
+          current,
+          { x: point.x, y: point.y, width: 0, height: 0 },
+          size.width,
+          size.height,
+        ),
+      );
+    },
+    [size.height, size.width],
+  );
+
   // Center the camera on the selection once per file open (deep link / comment focus).
   useEffect(() => {
     if (!page || size.width === 0 || cameraInitFor.current === `${pageId}`) return;
@@ -243,6 +259,7 @@ export function FigmaFileScreen({ serverId, fileKey, version }: FigmaFileRef) {
       applyEdits={edits.applyEdits}
       selection={selection}
       onFocusNode={focusNode}
+      onFocusPoint={focusPoint}
     />
   );
 
@@ -394,6 +411,7 @@ function PanelColumn({
   applyEdits,
   selection,
   onFocusNode,
+  onFocusPoint,
 }: {
   serverId: string;
   fileKey: string;
@@ -406,6 +424,7 @@ function PanelColumn({
   applyEdits: ApplyFigmaEdits;
   selection: FigmaSelection | null;
   onFocusNode: (nodeId: string) => void;
+  onFocusPoint: (point: { x: number; y: number }) => void;
 }) {
   return (
     <View style={styles.side}>
@@ -425,7 +444,12 @@ function PanelColumn({
         />
       ) : null}
       {panel === "comments" && selection ? (
-        <CommentsPanel file={file} selection={selection} onFocusNode={onFocusNode} />
+        <CommentsPanel
+          file={file}
+          selection={selection}
+          onFocusNode={onFocusNode}
+          onFocusPoint={onFocusPoint}
+        />
       ) : null}
       {panel === "versions" ? (
         <VersionsPanel file={plainFile} onOpenVersion={VERSIONS_OPEN_HANDLER} />

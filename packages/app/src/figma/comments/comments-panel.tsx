@@ -14,14 +14,15 @@ import type { FigmaComment } from "@jagentdesk/protocol/figma/rpc-schemas";
 
 import { callFigma, errorMessage, figmaKeys } from "@/figma/prototype/figma-api";
 import { formatRelativeTime } from "@/figma/versions/versions-model";
+import { renderEmoji } from "./emoji";
 import { buildThreads, filterThreadsByNode, toggleReaction, type CommentThread } from "./threading";
 
 // Comments panel (spec 32.5.4): threads from `figma.file.comments.list`, an "On this node"
 // filter over the canvas selection, posting/replying anchored to the selected node, reaction
-// chips, and deletion of your own comments. Row clicks hand the node id to the canvas via
-// onFocusNode — the panel never pans the canvas itself.
-
-const REACTION_CHOICES = [":+1:", ":tada:", ":fire:", ":eyes:"] as const;
+// chips, and deletion of your own comments. Rows stack — header (avatar, name, time), full-width
+// message, reactions — so the message never shares a line with the chips. Clicks hand the node
+// id to the canvas via onFocusNode (the file screen turns it into a `node=` URL) and pure-offset
+// pins via onFocusPoint; the panel never pans the canvas itself.
 
 const styles = StyleSheet.create((theme: Theme) => ({
   screen: { flex: 1, minHeight: 0, backgroundColor: theme.colors.surface0 },
@@ -77,7 +78,10 @@ const styles = StyleSheet.create((theme: Theme) => ({
   timestamp: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
   resolvedChip: { fontSize: theme.fontSize.xs, color: theme.colors.accent },
   message: { fontSize: theme.fontSize.sm, color: theme.colors.foreground },
-  messageColumn: { flex: 1, minWidth: 0, gap: 2 },
+  commentBlock: { gap: theme.spacing[1] },
+  headerRow: { flexDirection: "row", alignItems: "center", gap: theme.spacing[2] },
+  messageRow: { width: "100%" },
+  deleteButton: { marginLeft: "auto" },
   replyBlock: {
     marginLeft: theme.spacing[3],
     paddingLeft: theme.spacing[2],
@@ -126,10 +130,9 @@ const styles = StyleSheet.create((theme: Theme) => ({
   muted: { fontSize: theme.fontSize.sm, color: theme.colors.foregroundMuted },
   spinner: { color: theme.colors.foregroundMuted },
   placeholderColor: { color: theme.colors.foregroundMuted },
-  rightColumn: { gap: theme.spacing[1] },
 }));
 
-export function CommentsPanel({ file, selection, onFocusNode }: CommentsPanelProps) {
+export function CommentsPanel({ file, selection, onFocusNode, onFocusPoint }: CommentsPanelProps) {
   const client = useHostRuntimeClient(file.serverId);
   const queryClient = useQueryClient();
   const [onThisNode, setOnThisNode] = useState(false);
@@ -291,6 +294,7 @@ export function CommentsPanel({ file, selection, onFocusNode }: CommentsPanelPro
         onToggleReply={toggleReply}
         onSubmitReply={postReply}
         onFocusNode={onFocusNode}
+        onFocusPoint={onFocusPoint}
         onReact={react}
         onDelete={remove}
       />
@@ -349,6 +353,7 @@ interface CommentsBodyProps {
   onToggleReply: (threadId: string) => void;
   onSubmitReply: (threadId: string) => void;
   onFocusNode: (nodeId: string) => void;
+  onFocusPoint?: (point: { x: number; y: number }) => void;
   onReact: (comment: FigmaComment, emoji: string) => void;
   onDelete: (commentId: string) => void;
 }
@@ -388,6 +393,7 @@ function CommentsBody(props: CommentsBodyProps) {
           onToggleReply={props.onToggleReply}
           onSubmitReply={props.onSubmitReply}
           onFocusNode={props.onFocusNode}
+          onFocusPoint={props.onFocusPoint}
           onReact={props.onReact}
           onDelete={props.onDelete}
         />
@@ -406,6 +412,7 @@ interface ThreadCardProps {
   onToggleReply: (threadId: string) => void;
   onSubmitReply: (threadId: string) => void;
   onFocusNode: (nodeId: string) => void;
+  onFocusPoint?: (point: { x: number; y: number }) => void;
   onReact: (comment: FigmaComment, emoji: string) => void;
   onDelete: (commentId: string) => void;
 }
@@ -420,6 +427,7 @@ function ThreadCard({
   onToggleReply,
   onSubmitReply,
   onFocusNode,
+  onFocusPoint,
   onReact,
   onDelete,
 }: ThreadCardProps) {
@@ -432,6 +440,7 @@ function ThreadCard({
         comment={thread.root}
         now_ms={now_ms}
         onFocusNode={onFocusNode}
+        onFocusPoint={onFocusPoint}
         onReact={onReact}
         onDelete={onDelete}
       />
@@ -444,6 +453,7 @@ function ThreadCard({
               comment={reply}
               now_ms={now_ms}
               onFocusNode={onFocusNode}
+              onFocusPoint={onFocusPoint}
               onReact={onReact}
               onDelete={onDelete}
             />
@@ -475,46 +485,62 @@ function ThreadCard({
   );
 }
 
-function CommentRow({
+export function CommentRow({
   comment,
   now_ms,
   onFocusNode,
+  onFocusPoint,
   onReact,
   onDelete,
 }: {
   comment: FigmaComment;
   now_ms: number;
   onFocusNode: (nodeId: string) => void;
+  onFocusPoint?: (point: { x: number; y: number }) => void;
   onReact: (comment: FigmaComment, emoji: string) => void;
   onDelete: (commentId: string) => void;
 }) {
   const handle = comment.user.handle;
   const focus = useCallback(() => {
-    if (comment.nodeId) onFocusNode(comment.nodeId);
-  }, [comment, onFocusNode]);
+    if (comment.nodeId) {
+      onFocusNode(comment.nodeId);
+      return;
+    }
+    if (comment.offset) onFocusPoint?.(comment.offset);
+  }, [comment, onFocusNode, onFocusPoint]);
   const drop = useCallback(() => onDelete(comment.id), [comment, onDelete]);
+  // The message keeps its own full-width line: sharing a row with the avatar and the reaction
+  // chips used to squeeze it to a few characters per line (F5 bug 4).
+  const focusable = comment.nodeId !== null || (comment.offset !== null && !!onFocusPoint);
   return (
-    <View style={styles.authorRow}>
-      <View style={styles.avatar}>
-        <Text style={styles.avatarText}>{initials(handle)}</Text>
-      </View>
-      <View style={styles.messageColumn}>
-        <View style={styles.authorRow}>
-          <Text style={styles.authorName}>{handle}</Text>
-          <Text style={styles.timestamp}>{formatRelativeTime(comment.createdAt_ms, now_ms)}</Text>
+    <View style={styles.commentBlock}>
+      <View style={styles.headerRow}>
+        <View style={styles.avatar}>
+          <Text style={styles.avatarText}>{initials(handle)}</Text>
         </View>
-        <Pressable disabled={!comment.nodeId} onPress={focus} accessibilityRole="button">
-          <Text style={styles.message}>{comment.message}</Text>
-        </Pressable>
-      </View>
-      <View style={styles.rightColumn}>
-        <ReactionRow comment={comment} onReact={onReact} />
+        <Text style={styles.authorName}>{handle}</Text>
+        <Text style={styles.timestamp}>{formatRelativeTime(comment.createdAt_ms, now_ms)}</Text>
         {comment.mine ? (
-          <Pressable onPress={drop} hitSlop={6} accessibilityRole="button">
+          <Pressable
+            style={styles.deleteButton}
+            onPress={drop}
+            hitSlop={6}
+            accessibilityRole="button"
+          >
             <Text style={styles.linkButton}>Delete</Text>
           </Pressable>
         ) : null}
       </View>
+      <Pressable
+        style={styles.messageRow}
+        onPress={focus}
+        disabled={!focusable}
+        accessibilityRole={focusable ? "button" : undefined}
+        testID={`figma-comment-message-${comment.id}`}
+      >
+        <Text style={styles.message}>{comment.message}</Text>
+      </Pressable>
+      <ReactionRow comment={comment} onReact={onReact} />
     </View>
   );
 }
@@ -526,27 +552,18 @@ function ReactionRow({
   comment: FigmaComment;
   onReact: (comment: FigmaComment, emoji: string) => void;
 }) {
+  // Only real reactions render: zero-count chips are decoration, not information.
+  const visible = comment.reactions.filter((reaction) => reaction.count > 0);
+  if (visible.length === 0) return null;
   return (
     <View style={styles.reactionRow}>
-      {comment.reactions.map((reaction) => (
+      {visible.map((reaction) => (
         <ReactionChip
           key={reaction.emoji}
           comment={comment}
           emoji={reaction.emoji}
           count={reaction.count}
           mine={reaction.mine}
-          onReact={onReact}
-        />
-      ))}
-      {REACTION_CHOICES.filter(
-        (emoji) => !comment.reactions.some((reaction) => reaction.emoji === emoji),
-      ).map((emoji) => (
-        <ReactionChip
-          key={`add-${emoji}`}
-          comment={comment}
-          emoji={emoji}
-          count={0}
-          mine={false}
           onReact={onReact}
         />
       ))}
@@ -577,9 +594,10 @@ function ReactionChip({
       style={[styles.reactionChip, mine && styles.reactionChipMine]}
       onPress={toggle}
       accessibilityRole="button"
+      testID={`figma-reaction-${emoji}`}
     >
       <Text style={styles.reactionText}>
-        {emoji} {count}
+        {renderEmoji(emoji)} {count}
       </Text>
     </Pressable>
   );

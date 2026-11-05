@@ -6,7 +6,7 @@ export function comment(
 ): FigmaComment {
   return {
     id,
-    parentId: overrides.parentId ?? null,
+    parentId: overrides.parentId === undefined ? null : overrides.parentId,
     message: overrides.message ?? "message",
     user: overrides.user ?? { handle: "someone", figmaUserId: "u1" },
     createdAt_ms: overrides.createdAt_ms ?? 1_700_000_000_000,
