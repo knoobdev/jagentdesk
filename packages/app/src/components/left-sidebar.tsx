@@ -48,6 +48,7 @@ import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 import { resolveDesktopSidebarWidth } from "@/components/desktop-sidebar-layout";
 import { HostPicker } from "@/components/hosts/host-picker";
+import { MobileNavGrid } from "@/components/sidebar/mobile-nav-grid";
 import { SidebarHeaderRow } from "@/components/sidebar/sidebar-header-row";
 import { useAppNavTargets, useNewWorkspaceNavigate } from "@/components/sidebar/use-app-nav";
 import { ClickUpSidebarHeader } from "@/components/clickup-shell/clickup-sidebar-header";
@@ -236,10 +237,6 @@ interface MobileSidebarProps extends SidebarSharedProps {
   insetsTop: number;
   insetsBottom: number;
   closeSidebar: () => void;
-  handleViewMoreNavigate: () => void;
-  handleViewSchedulesNavigate: () => void;
-  handleViewSharedSessionsNavigate: () => void;
-  handleViewAgentForumNavigate: () => void;
 }
 
 interface DesktopSidebarProps extends SidebarSharedProps {
@@ -573,10 +570,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
           handleSettings={handleSettingsMobile}
           handleAddHost={handleAddHostMobile}
           handleOpenHostSettings={handleOpenHostSettingsMobile}
-          handleViewMoreNavigate={handleViewMoreNavigate}
-          handleViewSchedulesNavigate={handleViewSchedulesNavigate}
-          handleViewSharedSessionsNavigate={handleViewSharedSessionsNavigate}
-          handleViewAgentForumNavigate={handleViewAgentForumNavigate}
         />
       </RetainedPanelActivity>
     );
@@ -919,49 +912,15 @@ function MobileSidebar({
   handleOpenProject,
   handleHome,
   handleSettings,
-  handleClusters,
-  handleDatabases,
-  handleServers,
-  handleArgoCd,
-  handleSkills,
-  handleInsights,
-  handleForge,
-  handleMarketplace,
-  handleDocker,
-  handleSimulator,
-  handleWorkbench,
-  supportsForgeHub,
-  supportsSshServers,
-  supportsArgoCd,
-  supportsDevices,
   labels,
   handleAddHost,
   handleOpenHostSettings,
   insetsTop,
   insetsBottom,
   closeSidebar,
-  handleViewMoreNavigate,
-  handleViewSchedulesNavigate,
-  handleViewSharedSessionsNavigate,
-  handleViewAgentForumNavigate,
 }: MobileSidebarProps) {
-  const pathname = usePathname();
   const hasActiveHostFilter = useSidebarViewStore((state) => state.hostFilters.length > 0);
-  const isSessionsActive = pathname.includes("/sessions");
-  const isSchedulesActive = pathname.includes("/schedules");
-  const isSharedSessionsActive = pathname.includes("/shared-sessions");
-  const isAgentForumActive = pathname.includes("/agent-forum");
-  const isClustersActive = pathname.includes("/clusters");
-  const isDatabasesActive = pathname.includes("/database");
-  const isServersActive = pathname.includes("/servers");
-  const isArgoCdActive = pathname.includes("/argocd");
-  const isSkillsActive = pathname.includes("/skills");
-  const isInsightsActive = pathname.includes("/insights");
-  const isForgeActive = pathname.includes("/forge");
-  const isMarketplaceActive = pathname.includes("/marketplace");
-  const isDockerActive = pathname.includes("/docker");
-  const isSimulatorActive = pathname.includes("/simulator");
-  const isWorkbenchActive = pathname.includes("/proxy");
+  const pathname = usePathname();
   const clusterRouteMatch = pathname.match(/\/h\/([^/]+)\/cluster\/([^/]+)/);
   const clusterRoute = clusterRouteMatch
     ? {
@@ -979,26 +938,6 @@ function MobileSidebar({
   const { gesture: closeGesture, gestureRef: closeGestureRef } = useCloseAgentListGesture();
   const isClickUp = useIsClickUpTheme();
   const dragGestureHostPresented = useIsMobilePanelPresented("agent-list");
-
-  const handleViewMore = useCallback(() => {
-    closeSidebar();
-    handleViewMoreNavigate();
-  }, [closeSidebar, handleViewMoreNavigate]);
-
-  const handleViewSchedules = useCallback(() => {
-    closeSidebar();
-    handleViewSchedulesNavigate();
-  }, [closeSidebar, handleViewSchedulesNavigate]);
-
-  const handleViewSharedSessions = useCallback(() => {
-    closeSidebar();
-    handleViewSharedSessionsNavigate();
-  }, [closeSidebar, handleViewSharedSessionsNavigate]);
-
-  const handleViewAgentForum = useCallback(() => {
-    closeSidebar();
-    handleViewAgentForumNavigate();
-  }, [closeSidebar, handleViewAgentForumNavigate]);
 
   const handleWorkspacePress = useCallback(() => {
     closeSidebar();
@@ -1058,136 +997,7 @@ function MobileSidebar({
                 onBeforeNavigate={closeSidebar}
               />
             )}
-            <SidebarHeaderRow
-              icon={History}
-              label={labels.sessions}
-              onPress={handleViewMore}
-              isActive={isSessionsActive}
-              testID="sidebar-sessions"
-              variant="compact"
-            />
-            <SidebarHeaderRow
-              icon={CalendarClock}
-              label={labels.schedules}
-              onPress={handleViewSchedules}
-              isActive={isSchedulesActive}
-              testID="sidebar-schedules"
-              variant="compact"
-            />
-            <SidebarHeaderRow
-              icon={Share2}
-              label={labels.sharedSessions}
-              onPress={handleViewSharedSessions}
-              isActive={isSharedSessionsActive}
-              testID="sidebar-shared-sessions"
-              variant="compact"
-            />
-            <SidebarHeaderRow
-              icon={Users}
-              label={labels.agentForum}
-              onPress={handleViewAgentForum}
-              isActive={isAgentForumActive}
-              testID="sidebar-agent-forum"
-              variant="compact"
-            />
-            <SidebarHeaderRow
-              icon={Boxes}
-              label={labels.clusters}
-              onPress={handleClusters}
-              isActive={isClustersActive}
-              testID="sidebar-clusters-nav"
-              variant="compact"
-            />
-            <SidebarHeaderRow
-              icon={Database}
-              label={labels.databases}
-              onPress={handleDatabases}
-              isActive={isDatabasesActive}
-              testID="sidebar-databases-nav"
-              variant="compact"
-            />
-            {supportsSshServers ? (
-              <SidebarHeaderRow
-                icon={Server}
-                label={labels.servers}
-                onPress={handleServers}
-                isActive={isServersActive}
-                testID="sidebar-servers-nav"
-                variant="compact"
-              />
-            ) : null}
-            {supportsArgoCd ? (
-              <SidebarHeaderRow
-                icon={Ship}
-                label={labels.argoCd}
-                onPress={handleArgoCd}
-                isActive={isArgoCdActive}
-                testID="sidebar-argocd-nav"
-                variant="compact"
-              />
-            ) : null}
-            <JiraSidebarEntry closesDrawer />
-            <FigmaSidebarEntry closesDrawer />
-            <SidebarHeaderRow
-              icon={Sparkles}
-              label={labels.skills}
-              onPress={handleSkills}
-              isActive={isSkillsActive}
-              testID="sidebar-skills-nav"
-              variant="compact"
-            />
-            <SidebarHeaderRow
-              icon={Store}
-              label={labels.marketplace}
-              onPress={handleMarketplace}
-              isActive={isMarketplaceActive}
-              testID="sidebar-marketplace-nav"
-              variant="compact"
-            />
-            <SidebarHeaderRow
-              icon={Container}
-              label={labels.docker}
-              onPress={handleDocker}
-              isActive={isDockerActive}
-              testID="sidebar-docker-nav"
-              variant="compact"
-            />
-            {supportsDevices ? (
-              <SidebarHeaderRow
-                icon={Smartphone}
-                label={labels.simulator}
-                onPress={handleSimulator}
-                isActive={isSimulatorActive}
-                testID="sidebar-simulator-nav"
-                variant="compact"
-              />
-            ) : null}
-            <SidebarHeaderRow
-              icon={Radar}
-              label={labels.workbench}
-              onPress={handleWorkbench}
-              isActive={isWorkbenchActive}
-              testID="sidebar-workbench-nav"
-              variant="compact"
-            />
-            <SidebarHeaderRow
-              icon={BarChart3}
-              label={labels.insights}
-              onPress={handleInsights}
-              isActive={isInsightsActive}
-              testID="sidebar-insights-nav"
-              variant="compact"
-            />
-            {supportsForgeHub ? (
-              <SidebarHeaderRow
-                icon={GitPullRequest}
-                label={labels.forge}
-                onPress={handleForge}
-                isActive={isForgeActive}
-                testID="sidebar-forge-nav"
-                variant="compact"
-              />
-            ) : null}
+            <MobileNavGrid onBeforeNavigate={closeSidebar} parentGestureRef={closeGestureRef} />
             <PluginSidebarItems onBeforeNavigate={closeSidebar} />
           </View>
         )}
