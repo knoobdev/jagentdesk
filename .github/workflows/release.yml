@@ -11,13 +11,14 @@ on:
         required: true
         type: string
       only:
-        description: "Build every asset, or only re-cut the Android APK of an existing release"
+        description: "Build every asset, or only re-cut the Android APK or the iOS IPA of an existing release"
         required: false
         default: all
         type: choice
         options:
           - all
           - android
+          - ios
 
 concurrency:
   group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
@@ -108,7 +109,7 @@ jobs:
   desktop:
     name: Desktop (${{ matrix.name }})
     needs: [validate, create-release]
-    if: github.event_name != 'workflow_dispatch' || inputs.only != 'android'
+    if: github.event_name != 'workflow_dispatch' || inputs.only == 'all'
     strategy:
       fail-fast: false
       matrix:
@@ -228,6 +229,7 @@ jobs:
   mobile-android:
     name: Mobile Android APK
     needs: [validate, create-release]
+    if: github.event_name != 'workflow_dispatch' || inputs.only != 'ios'
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -351,7 +353,7 @@ jobs:
   mobile-ios-ipa:
     name: Mobile iOS device IPA (Xcode, unsigned)
     needs: [validate, create-release]
-    if: github.event_name != 'workflow_dispatch' || inputs.only != 'android'
+    if: github.event_name != 'workflow_dispatch' || inputs.only == 'all' || inputs.only == 'ios'
     runs-on: macos-15
     env:
       CI: "1"
