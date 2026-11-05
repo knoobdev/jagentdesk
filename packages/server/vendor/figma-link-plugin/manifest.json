@@ -1,0 +1,16 @@
+{
+  "name": "JAgentDesk Figma Link",
+  "id": "jagentdesk-figma-link",
+  "version": "1.0.0",
+  "api": "1.0.0",
+  "main": "dist/code.js",
+  "ui": "dist/index.html",
+  "permissions": [],
+  "networkAccess": {
+    "allowedDomains": ["ws://localhost:1995"],
+    "reasoning": "Connects to the local JAgentDesk daemon over WebSocket so it can run edits and stream document state; port 1995 is the daemon's fixed loopback bridge port"
+  },
+  "documentAccess": "dynamic-page",
+  "editorType": ["figma", "dev", "figjam"],
+  "capabilities": ["inspect"]
+}

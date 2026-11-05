@@ -10,3 +10,5 @@ conversations
 .env.test
 # Compiled tailnet bridge (built via `npm run build:tsnet-bridge`)
 go/tsnet-bridge/tailnet-bridge
+# The Figma Link plugin ships its prebuilt bundle in-repo (README says rebuild+commit dist/)
+!vendor/figma-link-plugin/dist/

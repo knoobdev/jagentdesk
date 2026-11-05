@@ -1,0 +1,2973 @@
+import { serializeNode } from "./serializer";
+import type { SerializableNode } from "./serializer";
+import { addLayersToFrame } from "../html-figma/figma";
+import { getPrototypeConnections, scanPrototype, tracePrototypeFlow } from "./prototype";
+import { handleForgeRequest, isForgeEditType, isForgeRequestType } from "./forge";
+import { serializeRestNode } from "./rest-serializer";
+import { PLUGIN_VERSION } from "../plugin-version";
+
+type RequestType =
+  | "get_document"
+  | "get_selection"
+  | "get_node"
+  | "get_nodes"
+  | "get_prototype_connections"
+  | "trace_prototype_flow"
+  | "get_layout_tree"
+  | "get_styles"
+  | "get_metadata"
+  | "get_design_context"
+  | "get_variable_defs"
+  | "get_screenshot"
+  | "set_node_visibility"
+  | "set_text_content"
+  | "set_text_properties"
+  | "set_node_properties"
+  | "set_solid_fill"
+  | "set_gradient_fill"
+  | "set_effects"
+  | "set_stroke_properties"
+  | "set_auto_layout"
+  | "create_page"
+  | "create_frame"
+  | "create_text"
+  | "create_shape"
+  | "create_image"
+  | "create_svg"
+  | "create_sticky"
+  | "create_connector"
+  | "create_section"
+  | "create_shape_with_text"
+  | "import_html_layers"
+  | "duplicate_nodes"
+  | "duplicate_with_offset"
+  | "fit_to_content"
+  | "distribute_horizontally"
+  | "distribute_vertically"
+  | "align_to_grid"
+  | "place_below"
+  | "place_right_of"
+  | "reparent_nodes"
+  | "group_nodes"
+  | "ungroup_node"
+  | "set_selection"
+  | "scroll_and_zoom_into_view"
+  | "delete_nodes"
+  | "run_script"
+  | "get_motion_styles"
+  | "get_node_motion"
+  | "apply_animation_style"
+  | "remove_animation_style"
+  | "apply_manual_keyframe_track"
+  | "remove_manual_keyframe_track"
+  | "set_timeline_duration";
+
+type ServerRequestParams = Record<string, unknown> & {
+  format?: "PNG" | "SVG" | "JPG" | "PDF";
+  scale?: number;
+  /**
+   * When true, export the node using its absolute bounds (the same behavior
+   * exposed by Figma REST image export via `use_absolute_bounds`). This clips
+   * raster exports such as PNG to the node's logical bounds instead of the
+   * rendered/tight bounds including overflow/effects.
+   */
+  clip?: boolean;
+  depth?: number;
+  maxNodes?: number;
+  includeEmpty?: boolean;
+  includePrototype?: boolean;
+  maxScreens?: number;
+  maxNodesPerScreen?: number;
+  styleId?: string;
+  animationStyleId?: string;
+  animationStyleData?: Record<string, unknown>;
+  field?: any;
+  track?: any;
+  timelineId?: string;
+  duration?: number;
+};
+
+type ServerRequest = {
+  type: RequestType;
+  requestId: string;
+  nodeIds?: string[];
+  params?: ServerRequestParams;
+};
+
+type PluginResponse = {
+  type: RequestType;
+  requestId: string;
+  data?: unknown;
+  error?: string;
+};
+
+let cachedFallbackFileKey: string | null = null;
+
+const generateFallbackFileKey = (): string => {
+  const random = Math.random().toString(36).slice(2, 10);
+  return `unsaved-${Date.now().toString(36)}-${random}`;
+};
+
+const getFileKey = (): string => {
+  // figma.fileKey is available for saved files; otherwise we generate a
+  // session-scoped fallback so unsaved files (and files with duplicate names)
+  // still get a stable, unique identifier for this plugin instance.
+  try {
+    if (typeof figma.fileKey === "string" && figma.fileKey) {
+      return figma.fileKey;
+    }
+  } catch {
+    // fileKey may not be available in all contexts
+  }
+  if (!cachedFallbackFileKey) {
+    cachedFallbackFileKey = generateFallbackFileKey();
+    console.warn(
+      `[figma-mcp-bridge] figma.fileKey unavailable for "${figma.root.name}". ` +
+        `Using session fallback key "${cachedFallbackFileKey}". ` +
+        `If you encounter this in a built plugin, please report at ` +
+        `https://github.com/gethopp/figma-mcp-bridge/issues with steps to reproduce.`
+    );
+  }
+  return cachedFallbackFileKey;
+};
+
+const selectionTypes = (): string[] => {
+  const types = new Set<string>();
+  for (const node of figma.currentPage.selection) types.add(node.type);
+  return [...types];
+};
+
+const selectionSummary = () =>
+  figma.currentPage.selection.slice(0, 20).map((node) => {
+    const box = node.absoluteBoundingBox;
+    return {
+      id: node.id,
+      name: node.name,
+      type: node.type,
+      visible: "visible" in node ? node.visible : true,
+      locked: "locked" in node ? node.locked : false,
+      opacity: "opacity" in node ? node.opacity : 1,
+      width: box ? box.width : node.width ?? 0,
+      height: box ? box.height : node.height ?? 0,
+    };
+  });
+
+const sendStatus = (changedNodeIds?: string[]) => {
+  figma.ui.postMessage({
+    type: "plugin-status",
+    payload: {
+      connected: true,
+      fileName: figma.root.name,
+      fileKey: getFileKey(),
+      pageCount: figma.root.children.length,
+      currentPage: figma.currentPage.name,
+      hasSelection: figma.currentPage.selection.length > 0,
+      selectionCount: figma.currentPage.selection.length,
+      selectionTypes: selectionTypes(),
+      selectionNodes: selectionSummary(),
+      lastUpdatedAt: Date.now(),
+      ...(changedNodeIds && changedNodeIds.length > 0 ? { nodeIds: changedNodeIds } : {}),
+    },
+  });
+};
+
+const serializeVariableValue = (value: VariableValue): unknown => {
+  if (typeof value === "object" && value !== null) {
+    if ("type" in value && value.type === "VARIABLE_ALIAS") {
+      return { type: "VARIABLE_ALIAS", id: value.id };
+    }
+    if ("r" in value && "g" in value && "b" in value) {
+      // It's an RGB or RGBA color
+      const color = value as RGBA;
+      return {
+        type: "COLOR",
+        r: color.r,
+        g: color.g,
+        b: color.b,
+        a: "a" in color ? color.a : 1,
+      };
+    }
+  }
+  return value;
+};
+
+const isSceneNode = (node: BaseNode | null): node is SceneNode =>
+  node !== null && node.type !== "DOCUMENT" && node.type !== "PAGE";
+
+const getSceneNodeById = async (nodeId: string): Promise<SceneNode> => {
+  const node = await figma.getNodeByIdAsync(nodeId);
+  if (!isSceneNode(node)) {
+    throw new Error(`Node not found: ${nodeId}`);
+  }
+  return node;
+};
+
+/**
+ * A node whose text can be edited: a TEXT node itself, or the text sublayer of
+ * a FigJam STICKY / SHAPE_WITH_TEXT node. `node` is the outer scene node (for
+ * id/name/position), `text` is the editable target.
+ */
+type TextTarget =
+  | { kind: "text"; node: TextNode; text: TextNode }
+  | { kind: "sublayer"; node: StickyNode | ShapeWithTextNode; text: TextSublayerNode };
+
+const getTextTargetById = async (nodeId: string, toolName: string): Promise<TextTarget> => {
+  const node = await figma.getNodeByIdAsync(nodeId);
+  if (!isSceneNode(node)) {
+    throw new Error(`Node not found: ${nodeId}`);
+  }
+  if (node.type === "TEXT") {
+    return { kind: "text", node, text: node };
+  }
+  if (node.type === "STICKY" || node.type === "SHAPE_WITH_TEXT") {
+    return { kind: "sublayer", node, text: node.text };
+  }
+  throw new Error(
+    `${toolName} supports TEXT, STICKY, and SHAPE_WITH_TEXT nodes (got ${node.type}: ${nodeId})`
+  );
+};
+
+const supportsChildren = (node: BaseNode): node is BaseNode & ChildrenMixin =>
+  "appendChild" in node;
+
+const isMotionNode = (node: SceneNode): node is SceneNode & MotionNodeMixin =>
+  "applyAnimationStyle" in node;
+
+const getParentNodeById = async (parentId: string): Promise<BaseNode & ChildrenMixin> => {
+  const parent = await figma.getNodeByIdAsync(parentId);
+  if (!parent || parent.type === "DOCUMENT" || !supportsChildren(parent)) {
+    throw new Error(`Parent does not support children: ${parentId}`);
+  }
+  // Under `documentAccess: "dynamic-page"` a page's children are inaccessible
+  // until the page is explicitly loaded, so every caller would otherwise have
+  // to guard before appending.
+  if (parent.type === "PAGE") {
+    await parent.loadAsync();
+  }
+  return parent;
+};
+
+const parseHexColor = (hex: string): RGB => {
+  const normalized = hex.trim().replace(/^#/, "");
+  if (normalized.length !== 3 && normalized.length !== 6) {
+    throw new Error(`Invalid hex color: ${hex}`);
+  }
+
+  const expanded =
+    normalized.length === 3
+      ? normalized
+          .split("")
+          .map((char) => `${char}${char}`)
+          .join("")
+      : normalized;
+
+  if (!/^[0-9a-fA-F]{6}$/.test(expanded)) {
+    throw new Error(`Invalid hex color: ${hex}`);
+  }
+
+  return {
+    r: parseInt(expanded.slice(0, 2), 16) / 255,
+    g: parseInt(expanded.slice(2, 4), 16) / 255,
+    b: parseInt(expanded.slice(4, 6), 16) / 255,
+  };
+};
+
+const setSolidFill = (
+  node: SceneNode,
+  fillHex: string,
+  fillOpacity?: number,
+  target: "fill" | "stroke" = "fill"
+): void => {
+  const paint: SolidPaint = {
+    type: "SOLID",
+    color: parseHexColor(fillHex),
+    opacity: fillOpacity ?? 1,
+  };
+
+  if (target === "stroke") {
+    if (!("strokes" in node)) {
+      throw new Error(`Node does not support strokes: ${node.id}`);
+    }
+    (node as GeometryMixin & { strokes: ReadonlyArray<Paint> }).strokes = [paint];
+    return;
+  }
+
+  if (!("fills" in node)) {
+    throw new Error(`Node does not support fills: ${node.id}`);
+  }
+  (node as GeometryMixin & { fills: ReadonlyArray<Paint> }).fills = [paint];
+};
+
+type GradientStopInput = { position: number; hex: string; opacity?: number };
+type GradientPaintType =
+  "GRADIENT_LINEAR" | "GRADIENT_RADIAL" | "GRADIENT_ANGULAR" | "GRADIENT_DIAMOND";
+
+const buildGradientPaint = (
+  paintType: GradientPaintType,
+  stops: GradientStopInput[],
+  transform: Transform | undefined,
+  opacity: number | undefined
+): GradientPaint => {
+  const colorStops = stops.map((stop) => {
+    const rgb = parseHexColor(stop.hex);
+    return {
+      position: stop.position,
+      color: { r: rgb.r, g: rgb.g, b: rgb.b, a: stop.opacity ?? 1 },
+    };
+  });
+  // Identity transform: [[1,0,0],[0,1,0]] (Figma-default, horizontal L→R).
+  const gradientTransform: Transform = transform ?? [
+    [1, 0, 0],
+    [0, 1, 0],
+  ];
+  const paint: GradientPaint = {
+    type: paintType,
+    gradientStops: colorStops,
+    gradientTransform,
+    opacity: opacity ?? 1,
+  };
+  return paint;
+};
+
+const loadFontsForTextNode = async (node: TextNode | TextSublayerNode): Promise<void> => {
+  const fonts = new Map<string, FontName>();
+
+  if (node.characters.length > 0) {
+    for (const font of node.getRangeAllFontNames(0, node.characters.length)) {
+      fonts.set(`${font.family}::${font.style}`, font);
+    }
+  } else if (typeof node.fontName !== "symbol") {
+    fonts.set(`${node.fontName.family}::${node.fontName.style}`, node.fontName);
+  } else {
+    throw new Error(
+      `Cannot determine font for empty mixed-font text node: ${"id" in node ? node.id : "text sublayer"}`
+    );
+  }
+
+  await Promise.all([...fonts.values()].map((font) => figma.loadFontAsync(font)));
+};
+
+const ensureFont = async (family: string, style: string): Promise<FontName> => {
+  const font: FontName = { family, style };
+  await figma.loadFontAsync(font);
+  return font;
+};
+
+const applyTextFill = (
+  node: TextNode | TextSublayerNode,
+  fillHex: string,
+  fillOpacity?: number
+): void => {
+  node.fills = [
+    {
+      type: "SOLID",
+      color: parseHexColor(fillHex),
+      opacity: fillOpacity ?? 1,
+    },
+  ];
+};
+
+const positionNode = (node: SceneNode, x: unknown, y: unknown): void => {
+  if ("x" in node && typeof x === "number") {
+    node.x = x;
+  }
+  if ("y" in node && typeof y === "number") {
+    node.y = y;
+  }
+};
+
+const resizeNodeIfSupported = (node: SceneNode, width: unknown, height: unknown): void => {
+  if (typeof width !== "number" && typeof height !== "number") {
+    return;
+  }
+  if (!("resize" in node) || typeof node.resize !== "function") {
+    throw new Error(`Node does not support resizing: ${node.id}`);
+  }
+  const nextWidth = typeof width === "number" ? width : node.width;
+  const nextHeight = typeof height === "number" ? height : node.height;
+  node.resize(nextWidth, nextHeight);
+};
+
+const appendToParentIfProvided = async (node: SceneNode, parentId: unknown): Promise<void> => {
+  if (typeof parentId !== "string") {
+    return;
+  }
+  const parent = await getParentNodeById(parentId);
+  parent.appendChild(node);
+};
+
+const decodeBase64ToBytes = (base64: string): Uint8Array => {
+  try {
+    return figma.base64Decode(base64);
+  } catch {
+    throw new Error("Invalid base64 image payload");
+  }
+};
+
+const isFigJam = (): boolean => figma.editorType === "figjam";
+
+/**
+ * Guards the FigJam-only `figma.create*` helpers. Returns a clear error when the
+ * plugin is running outside FigJam or when the installed typings expose the API
+ * but the loaded plugin build does not (e.g. a manifest whose `editorType` omits
+ * "figjam"), which otherwise surfaces as an opaque "not a function".
+ */
+const requireFigJamApi = (toolName: string, apiName: string, api: unknown): void => {
+  if (!isFigJam()) {
+    throw new Error(`${toolName} is only available in FigJam`);
+  }
+  if (typeof api !== "function") {
+    throw new Error(
+      `${toolName} unavailable: figma.${apiName} is missing. Run the plugin in FigJam with "figjam" in the manifest editorType.`
+    );
+  }
+};
+
+const EDIT_REQUEST_TYPES = new Set<RequestType>([
+  "set_node_visibility",
+  "set_text_content",
+  "set_text_properties",
+  "set_node_properties",
+  "set_solid_fill",
+  "set_gradient_fill",
+  "set_effects",
+  "set_stroke_properties",
+  "set_auto_layout",
+  "create_page",
+  "create_frame",
+  "create_text",
+  "create_shape",
+  "create_image",
+  "create_svg",
+  "create_sticky",
+  "create_connector",
+  "create_section",
+  "create_shape_with_text",
+  "import_html_layers",
+  "duplicate_nodes",
+  "duplicate_with_offset",
+  "fit_to_content",
+  "distribute_horizontally",
+  "distribute_vertically",
+  "align_to_grid",
+  "place_below",
+  "place_right_of",
+  "reparent_nodes",
+  "group_nodes",
+  "ungroup_node",
+  "delete_nodes",
+  "run_script",
+  "apply_animation_style",
+  "remove_animation_style",
+  "apply_manual_keyframe_track",
+  "remove_manual_keyframe_track",
+  "set_timeline_duration",
+]);
+
+const requireEditorMode = (toolName: RequestType): void => {
+  // Dev Mode is read-only — every figma.create*/setter throws at runtime there,
+  // and the resulting errors are confusing. Reject up front with a clear hint.
+  if (figma.editorType === "dev") {
+    throw new Error(
+      `${toolName} requires the plugin to be opened in Figma's design editor (Dev Mode is read-only). Switch to the design editor and re-run.`
+    );
+  }
+};
+
+const requirePrototypes = (toolName: string): void => {
+  if (isFigJam()) {
+    throw new Error(`${toolName} is not available in FigJam (FigJam files have no prototypes)`);
+  }
+};
+
+/** Read-only geometry, deliberately independent of screenshot export. */
+async function getLayoutTree(rootId: string, maxNodes = 2000) {
+  const root = await figma.getNodeByIdAsync(rootId);
+  if (!root || root.type === "DOCUMENT" || root.type === "PAGE")
+    throw new Error("Scene root required");
+  const nodes: unknown[] = [];
+  let truncated = false;
+  function visit(node: SceneNode, depth: number) {
+    if (nodes.length >= maxNodes || depth > 100) {
+      truncated = true;
+      return;
+    }
+    nodes.push({
+      id: node.id,
+      parentId: node.parent?.id,
+      name: node.name,
+      type: node.type,
+      visible: node.visible,
+      localSize: { width: node.width, height: node.height },
+      absoluteTransform: node.absoluteTransform,
+      absoluteBoundingBox: node.absoluteBoundingBox,
+      absoluteRenderBounds: "absoluteRenderBounds" in node ? node.absoluteRenderBounds : null,
+      clipsContent: "clipsContent" in node ? node.clipsContent : false,
+    });
+    if ("children" in node) for (const child of node.children) visit(child, depth + 1);
+  }
+  visit(root, 0);
+  return {
+    schemaVersion: 1,
+    snapshotId: new Date().toISOString(),
+    atomicWithScreenshot: false,
+    fileKey: figma.fileKey ?? null,
+    fileName: figma.root.name,
+    pageId: figma.currentPage.id,
+    rootId,
+    truncated,
+    nodes,
+    capture: {
+      coordinateSpace: "document-absolute",
+      window: root.absoluteBoundingBox,
+      exportSettings: {
+        format: "PNG",
+        contentsOnly: true,
+        useAbsoluteBounds: true,
+        constraint: { type: "SCALE", value: 1 },
+      },
+      dimensionsAreMeasuredFromImage: false,
+      clipping:
+        "Rectangles are layout AABBs; ancestor masks and painted visibility are not evaluated.",
+    },
+  };
+}
+
+const handleRequest = async (request: ServerRequest): Promise<PluginResponse> => {
+  try {
+    if (EDIT_REQUEST_TYPES.has(request.type)) {
+      requireEditorMode(request.type);
+    }
+    switch (request.type) {
+      case "get_document":
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: serializeNode(figma.currentPage),
+        };
+      case "get_selection":
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: figma.currentPage.selection.map((node) => serializeNode(node)),
+        };
+      case "get_layout_tree": {
+        const rootId = request.nodeIds?.[0];
+        if (!rootId) throw new Error("rootId is required");
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: await getLayoutTree(rootId, Number(request.params?.maxNodes ?? 2000)),
+        };
+      }
+      case "get_node": {
+        const nodeId = request.nodeIds && request.nodeIds[0];
+        if (!nodeId) {
+          throw new Error("nodeIds is required for get_node");
+        }
+        const node = await figma.getNodeByIdAsync(nodeId);
+        if (!node || node.type === "DOCUMENT") {
+          throw new Error(`Node not found: ${nodeId}`);
+        }
+        const data = serializeNode(node as SceneNode);
+        if (!request.params?.includePrototype) {
+          return { type: request.type, requestId: request.requestId, data };
+        }
+        requirePrototypes("get_node includePrototype");
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: { ...data, prototype: await scanPrototype(node) },
+        };
+      }
+      case "get_nodes": {
+        const ids = request.nodeIds;
+        if (!ids || ids.length === 0) {
+          throw new Error("nodeIds is required for get_nodes");
+        }
+        const nodes: Record<string, unknown>[] = [];
+        for (const id of ids) {
+          const loaded = await figma.getNodeByIdAsync(id);
+          if (!loaded || loaded.type === "DOCUMENT") {
+            throw new Error(`Node not found: ${id}`);
+          }
+          // Pages need their children loaded first under dynamic-page access.
+          if (loaded.type === "PAGE") await loaded.loadAsync();
+          nodes.push(serializeRestNode(loaded));
+        }
+        return { type: request.type, requestId: request.requestId, data: { nodes } };
+      }
+      case "get_prototype_connections": {
+        requirePrototypes(request.type);
+        const nodeId = request.nodeIds?.[0];
+        const root = nodeId ? await figma.getNodeByIdAsync(nodeId) : figma.currentPage;
+        if (!root || root.type === "DOCUMENT") {
+          throw new Error(`Node not found: ${nodeId}`);
+        }
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: await getPrototypeConnections(root, request.params),
+        };
+      }
+      case "trace_prototype_flow": {
+        requirePrototypes(request.type);
+        const nodeId = request.nodeIds?.[0];
+        if (!nodeId) {
+          throw new Error("nodeId is required for trace_prototype_flow");
+        }
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: await tracePrototypeFlow(await getSceneNodeById(nodeId), request.params),
+        };
+      }
+      case "get_styles": {
+        if (isFigJam()) {
+          // FigJam has a limited style API — paint/text/effect/grid style
+          // collections may not be available. Return what we can.
+          let paintStyles: PaintStyle[] = [];
+          let textStyles: TextStyle[] = [];
+          let effectStyles: EffectStyle[] = [];
+          try {
+            paintStyles = await figma.getLocalPaintStylesAsync();
+          } catch {
+            // Paint styles may not be available in FigJam
+          }
+          try {
+            textStyles = await figma.getLocalTextStylesAsync();
+          } catch {
+            // Text styles may not be available in FigJam
+          }
+          try {
+            effectStyles = await figma.getLocalEffectStylesAsync();
+          } catch {
+            // Effect styles may not be available in FigJam
+          }
+          return {
+            type: request.type,
+            requestId: request.requestId,
+            data: {
+              paints: paintStyles.map((style) => ({
+                id: style.id,
+                name: style.name,
+                paints: style.paints,
+              })),
+              text: textStyles.map((style) => ({
+                id: style.id,
+                name: style.name,
+                fontSize: style.fontSize,
+                fontName: style.fontName,
+                textDecoration: style.textDecoration,
+                lineHeight: style.lineHeight,
+                letterSpacing: style.letterSpacing,
+              })),
+              effects: effectStyles.map((style) => ({
+                id: style.id,
+                name: style.name,
+                effects: style.effects,
+              })),
+              grids: [],
+            },
+          };
+        }
+
+        const [paintStyles, textStyles, effectStyles, gridStyles] = await Promise.all([
+          figma.getLocalPaintStylesAsync(),
+          figma.getLocalTextStylesAsync(),
+          figma.getLocalEffectStylesAsync(),
+          figma.getLocalGridStylesAsync(),
+        ]);
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            paints: paintStyles.map((style) => ({
+              id: style.id,
+              name: style.name,
+              paints: style.paints,
+            })),
+            text: textStyles.map((style) => ({
+              id: style.id,
+              name: style.name,
+              fontSize: style.fontSize,
+              fontName: style.fontName,
+              textDecoration: style.textDecoration,
+              lineHeight: style.lineHeight,
+              letterSpacing: style.letterSpacing,
+            })),
+            effects: effectStyles.map((style) => ({
+              id: style.id,
+              name: style.name,
+              effects: style.effects,
+            })),
+            grids: gridStyles.map((style) => ({
+              id: style.id,
+              name: style.name,
+              layoutGrids: style.layoutGrids,
+            })),
+          },
+        };
+      }
+      case "get_metadata": {
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            editorType: figma.editorType,
+            fileName: figma.root.name,
+            currentPageId: figma.currentPage.id,
+            currentPageName: figma.currentPage.name,
+            pageCount: figma.root.children.length,
+            pages: figma.root.children.map((page) => ({
+              id: page.id,
+              name: page.name,
+            })),
+          },
+        };
+      }
+      case "get_design_context": {
+        const depth = typeof request.params?.depth === "number" ? request.params.depth : 2;
+        const serializeWithDepth = async (
+          node: SerializableNode,
+          currentDepth: number
+        ): Promise<ReturnType<typeof serializeNode>> => {
+          const serialized = serializeNode(node);
+          if (currentDepth >= depth && serialized.children) {
+            // Truncate children at depth limit, but show count
+            return {
+              ...serialized,
+              children: undefined,
+              childCount:
+                (node as ChildrenMixin & SceneNode).children?.filter((c) => c.visible !== false)
+                  .length ?? 0,
+            } as ReturnType<typeof serializeNode> & { childCount: number };
+          }
+          if (serialized.children) {
+            const childNodes = await Promise.all(
+              serialized.children.map((child) => figma.getNodeByIdAsync(child.id))
+            );
+            const serializedChildren = await Promise.all(
+              childNodes
+                .filter(
+                  (n): n is SceneNode =>
+                    n !== null && n.type !== "DOCUMENT" && "visible" in n && n.visible !== false
+                )
+                .map((n) => serializeWithDepth(n, currentDepth + 1))
+            );
+            return {
+              ...serialized,
+              children: serializedChildren,
+            };
+          }
+          return serialized;
+        };
+
+        const selection = figma.currentPage.selection;
+        const contextNodes =
+          selection.length > 0
+            ? await Promise.all(selection.map((node) => serializeWithDepth(node, 0)))
+            : [await serializeWithDepth(figma.currentPage, 0)];
+
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            fileName: figma.root.name,
+            currentPage: {
+              id: figma.currentPage.id,
+              name: figma.currentPage.name,
+            },
+            selectionCount: selection.length,
+            context: contextNodes,
+          },
+        };
+      }
+      case "get_variable_defs": {
+        if (isFigJam()) {
+          // FigJam may not support the full variables API.
+          try {
+            const collections = await figma.variables.getLocalVariableCollectionsAsync();
+            const variableData = await Promise.all(
+              collections.map(async (collection) => {
+                const variables = await Promise.all(
+                  collection.variableIds.map((id) => figma.variables.getVariableByIdAsync(id))
+                );
+                return {
+                  id: collection.id,
+                  name: collection.name,
+                  modes: collection.modes.map((mode) => ({
+                    modeId: mode.modeId,
+                    name: mode.name,
+                  })),
+                  variables: variables
+                    .filter((v): v is Variable => v !== null)
+                    .map((variable) => ({
+                      id: variable.id,
+                      name: variable.name,
+                      resolvedType: variable.resolvedType,
+                      valuesByMode: Object.fromEntries(
+                        Object.entries(variable.valuesByMode).map(([modeId, value]) => [
+                          modeId,
+                          serializeVariableValue(value),
+                        ])
+                      ),
+                    })),
+                };
+              })
+            );
+            return {
+              type: request.type,
+              requestId: request.requestId,
+              data: {
+                collections: variableData,
+              },
+            };
+          } catch {
+            return {
+              type: request.type,
+              requestId: request.requestId,
+              data: {
+                collections: [],
+                note: "Variables are not available in FigJam",
+              },
+            };
+          }
+        }
+
+        const collections = await figma.variables.getLocalVariableCollectionsAsync();
+        const variableData = await Promise.all(
+          collections.map(async (collection) => {
+            const variables = await Promise.all(
+              collection.variableIds.map((id) => figma.variables.getVariableByIdAsync(id))
+            );
+            return {
+              id: collection.id,
+              name: collection.name,
+              modes: collection.modes.map((mode) => ({
+                modeId: mode.modeId,
+                name: mode.name,
+              })),
+              variables: variables
+                .filter((v): v is Variable => v !== null)
+                .map((variable) => ({
+                  id: variable.id,
+                  name: variable.name,
+                  resolvedType: variable.resolvedType,
+                  valuesByMode: Object.fromEntries(
+                    Object.entries(variable.valuesByMode).map(([modeId, value]) => [
+                      modeId,
+                      serializeVariableValue(value),
+                    ])
+                  ),
+                })),
+            };
+          })
+        );
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            collections: variableData,
+          },
+        };
+      }
+      case "get_screenshot": {
+        const format =
+          request.params?.format === "SVG" ||
+          request.params?.format === "PDF" ||
+          request.params?.format === "JPG" ||
+          request.params?.format === "PNG"
+            ? request.params.format
+            : "PNG";
+        const scale = typeof request.params?.scale === "number" ? request.params.scale : 2;
+        const clip = request.params?.clip === true;
+
+        // Determine which node(s) to export
+        let targetNodes: SceneNode[];
+        if (request.nodeIds && request.nodeIds.length > 0) {
+          const nodes = await Promise.all(request.nodeIds.map((id) => figma.getNodeByIdAsync(id)));
+          targetNodes = nodes.filter(
+            (node): node is SceneNode =>
+              node !== null && node.type !== "DOCUMENT" && node.type !== "PAGE"
+          );
+        } else {
+          targetNodes = [...figma.currentPage.selection];
+        }
+
+        if (targetNodes.length === 0) {
+          throw new Error("No nodes to export. Select nodes or provide nodeIds.");
+        }
+
+        const exports = await Promise.all(
+          targetNodes.map(async (node) => {
+            const commonSettings = clip ? { contentsOnly: true, useAbsoluteBounds: true } : {};
+            const settings: ExportSettings =
+              format === "SVG"
+                ? { format: "SVG", ...commonSettings }
+                : format === "PDF"
+                  ? { format: "PDF", ...commonSettings }
+                  : format === "JPG"
+                    ? {
+                        format: "JPG",
+                        constraint: { type: "SCALE", value: scale },
+                        ...commonSettings,
+                      }
+                    : {
+                        format: "PNG",
+                        constraint: { type: "SCALE", value: scale },
+                        ...commonSettings,
+                      };
+
+            const bytes = await node.exportAsync(settings);
+            const base64 = figma.base64Encode(bytes);
+            return {
+              nodeId: node.id,
+              nodeName: node.name,
+              format,
+              base64,
+              width: node.width,
+              height: node.height,
+            };
+          })
+        );
+
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            exports,
+          },
+        };
+      }
+      case "set_node_visibility": {
+        const rawItems = request.params?.items;
+        if (!Array.isArray(rawItems) || rawItems.length === 0) {
+          throw new Error("items is required for set_node_visibility");
+        }
+        const items = rawItems as Array<{ nodeId: string; visible: boolean }>;
+        const results: Array<
+          | { nodeId: string; previousVisible: boolean; visible: boolean }
+          | { nodeId: string; error: string }
+        > = [];
+        for (const { nodeId, visible } of items) {
+          const node = await figma.getNodeByIdAsync(nodeId);
+          if (!node || node.type === "DOCUMENT" || node.type === "PAGE") {
+            results.push({ nodeId, error: `Node not found: ${nodeId}` });
+            continue;
+          }
+          const sceneNode = node as SceneNode;
+          const previousVisible = sceneNode.visible;
+          sceneNode.visible = visible;
+          results.push({ nodeId, previousVisible, visible });
+        }
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: { results },
+        };
+      }
+      case "set_text_content": {
+        const nodeId = request.nodeIds && request.nodeIds[0];
+        const text = request.params?.text;
+        if (!nodeId) {
+          throw new Error("nodeIds is required for set_text_content");
+        }
+        if (typeof text !== "string") {
+          throw new Error("text is required for set_text_content");
+        }
+
+        const target = await getTextTargetById(nodeId, "set_text_content");
+        await loadFontsForTextNode(target.text);
+
+        const previousCharacters = target.text.characters;
+        target.text.characters = text;
+
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            nodeId: target.node.id,
+            nodeName: target.node.name,
+            previousCharacters,
+            characters: target.text.characters,
+          },
+        };
+      }
+      case "set_text_properties": {
+        const nodeId = request.nodeIds && request.nodeIds[0];
+        if (!nodeId) {
+          throw new Error("nodeIds is required for set_text_properties");
+        }
+
+        const target = await getTextTargetById(nodeId, "set_text_properties");
+        const text = target.text;
+        const params = request.params ?? {};
+        const applied: Record<string, unknown> = {};
+
+        await loadFontsForTextNode(text);
+
+        if (typeof params.fontFamily === "string" || typeof params.fontStyle === "string") {
+          const currentFontName = typeof text.fontName === "symbol" ? null : text.fontName;
+          const nextFamily =
+            typeof params.fontFamily === "string" ? params.fontFamily : currentFontName?.family;
+          const nextStyle =
+            typeof params.fontStyle === "string" ? params.fontStyle : currentFontName?.style;
+
+          if (!nextFamily || !nextStyle) {
+            throw new Error(
+              "fontFamily and fontStyle must resolve to a concrete font for set_text_properties"
+            );
+          }
+
+          text.fontName = await ensureFont(nextFamily, nextStyle);
+          applied.fontName = text.fontName;
+        }
+
+        if (typeof params.fontSize === "number") {
+          text.fontSize = params.fontSize;
+          applied.fontSize = text.fontSize;
+        }
+
+        if (
+          params.textAlignHorizontal !== undefined ||
+          params.textAlignVertical !== undefined ||
+          params.textAutoResize !== undefined
+        ) {
+          if (target.kind !== "text") {
+            throw new Error(
+              "textAlignHorizontal/textAlignVertical/textAutoResize are only supported on TEXT nodes — they do not exist on STICKY/SHAPE_WITH_TEXT text"
+            );
+          }
+          const node = target.node;
+          if (
+            params.textAlignHorizontal === "LEFT" ||
+            params.textAlignHorizontal === "CENTER" ||
+            params.textAlignHorizontal === "RIGHT" ||
+            params.textAlignHorizontal === "JUSTIFIED"
+          ) {
+            node.textAlignHorizontal = params.textAlignHorizontal;
+            applied.textAlignHorizontal = node.textAlignHorizontal;
+          }
+
+          if (
+            params.textAlignVertical === "TOP" ||
+            params.textAlignVertical === "CENTER" ||
+            params.textAlignVertical === "BOTTOM"
+          ) {
+            node.textAlignVertical = params.textAlignVertical;
+            applied.textAlignVertical = node.textAlignVertical;
+          }
+
+          if (
+            params.textAutoResize === "NONE" ||
+            params.textAutoResize === "WIDTH_AND_HEIGHT" ||
+            params.textAutoResize === "HEIGHT" ||
+            params.textAutoResize === "TRUNCATE"
+          ) {
+            node.textAutoResize = params.textAutoResize;
+            applied.textAutoResize = node.textAutoResize;
+          }
+        }
+
+        if (typeof params.lineHeightPx === "number") {
+          text.lineHeight = {
+            unit: "PIXELS",
+            value: params.lineHeightPx,
+          };
+          applied.lineHeight = text.lineHeight;
+        }
+
+        if (typeof params.letterSpacingPx === "number") {
+          text.letterSpacing = {
+            unit: "PIXELS",
+            value: params.letterSpacingPx,
+          };
+          applied.letterSpacing = text.letterSpacing;
+        }
+
+        if (typeof params.fillHex === "string") {
+          const fillOpacity =
+            typeof params.fillOpacity === "number" ? params.fillOpacity : undefined;
+          applyTextFill(text, params.fillHex, fillOpacity);
+          applied.fillHex = params.fillHex;
+          applied.fillOpacity = fillOpacity ?? 1;
+        }
+
+        const node = target.node;
+        if (typeof params.x === "number" || typeof params.y === "number") {
+          positionNode(node, params.x, params.y);
+          applied.x = node.x;
+          applied.y = node.y;
+        }
+
+        resizeNodeIfSupported(node, params.width, params.height);
+        if (typeof params.width === "number" || typeof params.height === "number") {
+          applied.width = node.width;
+          applied.height = node.height;
+        }
+
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            nodeId: node.id,
+            nodeName: node.name,
+            applied,
+          },
+        };
+      }
+      case "set_node_properties": {
+        const nodeIds = request.nodeIds;
+        if (!nodeIds || nodeIds.length === 0) {
+          throw new Error("nodeIds is required for set_node_properties");
+        }
+
+        // Transport/meta keys are not node properties.
+        const { nodeIds: _batchIds, fileKey: _fileKey, ...params } = request.params ?? {};
+        const hasUpdates = Object.keys(params).length > 0;
+
+        if (!hasUpdates) {
+          throw new Error("At least one property is required for set_node_properties");
+        }
+
+        // Resolve every node before mutating so a missing id cannot leave a
+        // partial batch applied.
+        const nodes = await Promise.all(nodeIds.map((id) => getSceneNodeById(id)));
+
+        const applyUpdates = (node: SceneNode): Record<string, unknown> => {
+          const applied: Record<string, unknown> = {};
+
+          // Capture the id before the `in` narrowing below: when a property
+          // exists on every SceneNode the else-branch narrows to `never`.
+          const id = node.id;
+
+          if (typeof params.name === "string") {
+            node.name = params.name;
+            applied.name = node.name;
+          }
+
+          if (typeof params.visible === "boolean") {
+            node.visible = params.visible;
+            applied.visible = node.visible;
+          }
+
+          if (typeof params.x === "number" || typeof params.y === "number") {
+            if (!("x" in node) || !("y" in node)) {
+              throw new Error(`Node does not support x/y positioning: ${id}`);
+            }
+            positionNode(node, params.x, params.y);
+            applied.x = node.x;
+            applied.y = node.y;
+          }
+
+          if (typeof params.width === "number" || typeof params.height === "number") {
+            resizeNodeIfSupported(node, params.width, params.height);
+            applied.width = node.width;
+            applied.height = node.height;
+          }
+
+          if (typeof params.rotation === "number") {
+            if (!("rotation" in node)) {
+              throw new Error(`Node does not support rotation: ${id}`);
+            }
+            node.rotation = params.rotation;
+            applied.rotation = node.rotation;
+          }
+
+          if (typeof params.opacity === "number") {
+            if (!("opacity" in node)) {
+              throw new Error(`Node does not support opacity: ${id}`);
+            }
+            node.opacity = params.opacity;
+            applied.opacity = node.opacity;
+          }
+
+          if (typeof params.cornerRadius === "number") {
+            if (!("cornerRadius" in node)) {
+              throw new Error(`Node does not support cornerRadius: ${id}`);
+            }
+            const cornerNode = node as CornerMixin;
+            cornerNode.cornerRadius = params.cornerRadius;
+            applied.cornerRadius = cornerNode.cornerRadius;
+          }
+
+          return applied;
+        };
+
+        if (nodes.length === 1) {
+          const node = nodes[0];
+          const applied = applyUpdates(node);
+          return {
+            type: request.type,
+            requestId: request.requestId,
+            data: {
+              nodeId: node.id,
+              nodeName: node.name,
+              applied,
+            },
+          };
+        }
+
+        const results = nodes.map((node) => ({
+          nodeId: node.id,
+          nodeName: node.name,
+          applied: applyUpdates(node),
+        }));
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            updatedCount: results.length,
+            results,
+          },
+        };
+      }
+      case "set_solid_fill": {
+        const nodeId = request.nodeIds && request.nodeIds[0];
+        if (!nodeId) {
+          throw new Error("nodeIds is required for set_solid_fill");
+        }
+
+        const node = await getSceneNodeById(nodeId);
+        const params = request.params ?? {};
+
+        if (typeof params.hex !== "string") {
+          throw new Error("hex is required");
+        }
+        const target = params.target === "stroke" ? "stroke" : "fill";
+        const opacity = typeof params.opacity === "number" ? params.opacity : undefined;
+
+        setSolidFill(node, params.hex, opacity, target);
+
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            nodeId: node.id,
+            nodeName: node.name,
+            applied: {
+              target,
+              hex: params.hex,
+              opacity: opacity ?? 1,
+            },
+          },
+        };
+      }
+      case "set_gradient_fill": {
+        const nodeId = request.nodeIds && request.nodeIds[0];
+        if (!nodeId) {
+          throw new Error("nodeIds is required for set_gradient_fill");
+        }
+
+        const node = await getSceneNodeById(nodeId);
+        const params = request.params ?? {};
+
+        const target = params.target === "stroke" ? "stroke" : "fill";
+        if (target === "fill" && !("fills" in node)) {
+          throw new Error(`Node does not support fills: ${node.id}`);
+        }
+        if (target === "stroke" && !("strokes" in node)) {
+          throw new Error(`Node does not support strokes: ${node.id}`);
+        }
+
+        const gradientType =
+          typeof params.gradientType === "string" ? (params.gradientType as string) : "LINEAR";
+        const paintType = `GRADIENT_${gradientType}` as GradientPaintType;
+        if (
+          paintType !== "GRADIENT_LINEAR" &&
+          paintType !== "GRADIENT_RADIAL" &&
+          paintType !== "GRADIENT_ANGULAR" &&
+          paintType !== "GRADIENT_DIAMOND"
+        ) {
+          throw new Error(`Unsupported gradient type: ${gradientType}`);
+        }
+
+        if (!Array.isArray(params.gradientStops) || params.gradientStops.length < 2) {
+          throw new Error("gradientStops must have at least 2 entries");
+        }
+        const stops = params.gradientStops as GradientStopInput[];
+
+        const transform =
+          Array.isArray(params.gradientTransform) && params.gradientTransform.length === 2
+            ? (params.gradientTransform as Transform)
+            : undefined;
+
+        const opacity = typeof params.opacity === "number" ? params.opacity : undefined;
+
+        const paint = buildGradientPaint(paintType, stops, transform, opacity);
+
+        if (target === "fill") {
+          (node as GeometryMixin & { fills: ReadonlyArray<Paint> }).fills = [paint];
+        } else {
+          (node as GeometryMixin & { strokes: ReadonlyArray<Paint> }).strokes = [paint];
+        }
+
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            nodeId: node.id,
+            nodeName: node.name,
+            applied: {
+              target,
+              gradientType: paintType,
+              stops: paint.gradientStops.length,
+            },
+          },
+        };
+      }
+      case "set_effects": {
+        const nodeId = request.nodeIds && request.nodeIds[0];
+        if (!nodeId) {
+          throw new Error("nodeIds is required for set_effects");
+        }
+
+        const node = await getSceneNodeById(nodeId);
+        if (!("effects" in node)) {
+          throw new Error(`Node does not support effects: ${node.id}`);
+        }
+
+        const params = request.params ?? {};
+        if (!Array.isArray(params.effects)) {
+          throw new Error("effects must be an array (pass [] to clear)");
+        }
+
+        const built = (params.effects as Array<Record<string, unknown>>).map((raw, i): Effect => {
+          const type = raw.type;
+          if (type === "DROP_SHADOW" || type === "INNER_SHADOW") {
+            if (typeof raw.color !== "string") {
+              throw new Error(`effects[${i}].color must be a hex string`);
+            }
+            const offset = raw.offset as { x?: unknown; y?: unknown } | undefined;
+            if (!offset || typeof offset.x !== "number" || typeof offset.y !== "number") {
+              throw new Error(`effects[${i}].offset must be {x,y} numbers`);
+            }
+            if (typeof raw.radius !== "number") {
+              throw new Error(`effects[${i}].radius must be a number`);
+            }
+            const rgb = parseHexColor(raw.color);
+            const alpha = typeof raw.opacity === "number" ? raw.opacity : 1;
+            return {
+              type,
+              color: { r: rgb.r, g: rgb.g, b: rgb.b, a: alpha },
+              offset: { x: offset.x, y: offset.y },
+              radius: raw.radius,
+              spread: typeof raw.spread === "number" ? raw.spread : 0,
+              visible: raw.visible === undefined ? true : Boolean(raw.visible),
+              blendMode:
+                typeof raw.blendMode === "string" ? (raw.blendMode as BlendMode) : "NORMAL",
+            };
+          }
+          if (type === "LAYER_BLUR" || type === "BACKGROUND_BLUR") {
+            if (typeof raw.radius !== "number") {
+              throw new Error(`effects[${i}].radius must be a number`);
+            }
+            return {
+              type,
+              radius: raw.radius,
+              visible: raw.visible === undefined ? true : Boolean(raw.visible),
+            } as Effect;
+          }
+          throw new Error(`Unsupported effect type at effects[${i}]: ${String(type)}`);
+        });
+
+        (node as BlendMixin & { effects: ReadonlyArray<Effect> }).effects = built;
+
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            nodeId: node.id,
+            nodeName: node.name,
+            applied: { count: built.length },
+          },
+        };
+      }
+      case "set_stroke_properties": {
+        const nodeId = request.nodeIds && request.nodeIds[0];
+        if (!nodeId) {
+          throw new Error("nodeIds is required for set_stroke_properties");
+        }
+
+        const node = await getSceneNodeById(nodeId);
+        const params = request.params ?? {};
+        const applied: Record<string, unknown> = {};
+
+        if (typeof params.strokeWeight === "number") {
+          if (!("strokeWeight" in node)) {
+            throw new Error(`Node does not support strokeWeight: ${node.id}`);
+          }
+          (node as MinimalStrokesMixin).strokeWeight = params.strokeWeight;
+          applied.strokeWeight = params.strokeWeight;
+        }
+
+        if (
+          params.strokeAlign === "INSIDE" ||
+          params.strokeAlign === "OUTSIDE" ||
+          params.strokeAlign === "CENTER"
+        ) {
+          if (!("strokeAlign" in node)) {
+            throw new Error(`Node does not support strokeAlign: ${node.id}`);
+          }
+          (node as MinimalStrokesMixin).strokeAlign = params.strokeAlign;
+          applied.strokeAlign = params.strokeAlign;
+        }
+
+        if (Array.isArray(params.dashPattern)) {
+          if (!("dashPattern" in node)) {
+            throw new Error(`Node does not support dashPattern: ${node.id}`);
+          }
+          const pattern = (params.dashPattern as unknown[]).map((n, i) => {
+            if (typeof n !== "number" || n < 0) {
+              throw new Error(`dashPattern[${i}] must be a non-negative number`);
+            }
+            return n;
+          });
+          (node as MinimalStrokesMixin).dashPattern = pattern;
+          applied.dashPattern = pattern;
+        }
+
+        if (typeof params.strokeCap === "string") {
+          if (!("strokeCap" in node)) {
+            throw new Error(`Node does not support strokeCap: ${node.id}`);
+          }
+          (node as SceneNode & { strokeCap: StrokeCap }).strokeCap = params.strokeCap as StrokeCap;
+          applied.strokeCap = params.strokeCap;
+        }
+
+        if (typeof params.strokeJoin === "string") {
+          if (!("strokeJoin" in node)) {
+            throw new Error(`Node does not support strokeJoin: ${node.id}`);
+          }
+          (node as SceneNode & { strokeJoin: StrokeJoin }).strokeJoin =
+            params.strokeJoin as StrokeJoin;
+          applied.strokeJoin = params.strokeJoin;
+        }
+
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            nodeId: node.id,
+            nodeName: node.name,
+            applied,
+          },
+        };
+      }
+      case "set_auto_layout": {
+        if (isFigJam()) {
+          throw new Error("set_auto_layout is not available in FigJam");
+        }
+        const nodeId = request.nodeIds && request.nodeIds[0];
+        if (!nodeId) {
+          throw new Error("nodeIds is required for set_auto_layout");
+        }
+
+        const node = await getSceneNodeById(nodeId);
+        if (node.type === "SECTION") {
+          throw new Error(`Auto-layout is not supported on sections in Figma's API: ${node.id}`);
+        }
+        if (!("layoutMode" in node)) {
+          throw new Error(`Node does not support auto-layout: ${node.id}`);
+        }
+        const frame = node as FrameNode;
+        const params = request.params ?? {};
+        const applied: Record<string, unknown> = {};
+
+        if (
+          params.layoutMode === "NONE" ||
+          params.layoutMode === "HORIZONTAL" ||
+          params.layoutMode === "VERTICAL"
+        ) {
+          frame.layoutMode = params.layoutMode;
+          applied.layoutMode = params.layoutMode;
+        }
+
+        if (typeof params.itemSpacing === "number") {
+          frame.itemSpacing = params.itemSpacing;
+          applied.itemSpacing = params.itemSpacing;
+        }
+        if (typeof params.counterAxisSpacing === "number") {
+          (frame as FrameNode & { counterAxisSpacing: number }).counterAxisSpacing =
+            params.counterAxisSpacing;
+          applied.counterAxisSpacing = params.counterAxisSpacing;
+        }
+
+        if (typeof params.paddingTop === "number") {
+          frame.paddingTop = params.paddingTop;
+          applied.paddingTop = params.paddingTop;
+        }
+        if (typeof params.paddingRight === "number") {
+          frame.paddingRight = params.paddingRight;
+          applied.paddingRight = params.paddingRight;
+        }
+        if (typeof params.paddingBottom === "number") {
+          frame.paddingBottom = params.paddingBottom;
+          applied.paddingBottom = params.paddingBottom;
+        }
+        if (typeof params.paddingLeft === "number") {
+          frame.paddingLeft = params.paddingLeft;
+          applied.paddingLeft = params.paddingLeft;
+        }
+
+        if (
+          params.primaryAxisAlignItems === "MIN" ||
+          params.primaryAxisAlignItems === "MAX" ||
+          params.primaryAxisAlignItems === "CENTER" ||
+          params.primaryAxisAlignItems === "SPACE_BETWEEN"
+        ) {
+          frame.primaryAxisAlignItems = params.primaryAxisAlignItems;
+          applied.primaryAxisAlignItems = params.primaryAxisAlignItems;
+        }
+        if (
+          params.counterAxisAlignItems === "MIN" ||
+          params.counterAxisAlignItems === "MAX" ||
+          params.counterAxisAlignItems === "CENTER" ||
+          params.counterAxisAlignItems === "BASELINE"
+        ) {
+          frame.counterAxisAlignItems = params.counterAxisAlignItems;
+          applied.counterAxisAlignItems = params.counterAxisAlignItems;
+        }
+
+        if (params.primaryAxisSizingMode === "FIXED" || params.primaryAxisSizingMode === "AUTO") {
+          frame.primaryAxisSizingMode = params.primaryAxisSizingMode;
+          applied.primaryAxisSizingMode = params.primaryAxisSizingMode;
+        }
+        if (params.counterAxisSizingMode === "FIXED" || params.counterAxisSizingMode === "AUTO") {
+          frame.counterAxisSizingMode = params.counterAxisSizingMode;
+          applied.counterAxisSizingMode = params.counterAxisSizingMode;
+        }
+
+        if (params.layoutWrap === "NO_WRAP" || params.layoutWrap === "WRAP") {
+          (frame as FrameNode & { layoutWrap: "NO_WRAP" | "WRAP" }).layoutWrap = params.layoutWrap;
+          applied.layoutWrap = params.layoutWrap;
+        }
+
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            nodeId: node.id,
+            nodeName: node.name,
+            applied,
+          },
+        };
+      }
+      case "create_page": {
+        const params = request.params ?? {};
+        const page = figma.createPage();
+
+        if (typeof params.name === "string") {
+          page.name = params.name;
+        }
+
+        // The document is loaded with `documentAccess: "dynamic-page"`, so the
+        // page must be switched with the async setter — assigning
+        // `figma.currentPage` directly throws there.
+        if (params.setAsCurrent === true) {
+          await figma.setCurrentPageAsync(page);
+        }
+
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            pageId: page.id,
+            pageName: page.name,
+            index: figma.root.children.indexOf(page),
+            isCurrentPage: figma.currentPage.id === page.id,
+          },
+        };
+      }
+      case "create_frame": {
+        const params = request.params ?? {};
+        const frame = figma.createFrame();
+
+        if (typeof params.name === "string") {
+          frame.name = params.name;
+        }
+
+        const width = typeof params.width === "number" ? params.width : 100;
+        const height = typeof params.height === "number" ? params.height : 100;
+        frame.resize(width, height);
+
+        if (typeof params.fillHex === "string") {
+          const fillOpacity =
+            typeof params.fillOpacity === "number" ? params.fillOpacity : undefined;
+          setSolidFill(frame, params.fillHex, fillOpacity);
+        }
+
+        await appendToParentIfProvided(frame, params.parentId);
+        positionNode(frame, params.x, params.y);
+
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            nodeId: frame.id,
+            nodeName: frame.name,
+            parentId: frame.parent?.id,
+            x: frame.x,
+            y: frame.y,
+            width: frame.width,
+            height: frame.height,
+          },
+        };
+      }
+      case "create_section": {
+        const params = request.params ?? {};
+        const section = figma.createSection();
+
+        if (typeof params.name === "string") {
+          section.name = params.name;
+        }
+
+        const width = typeof params.width === "number" ? params.width : 100;
+        const height = typeof params.height === "number" ? params.height : 100;
+        section.resize(Math.max(width, 0.01), Math.max(height, 0.01));
+
+        if (typeof params.fillHex === "string") {
+          const fillOpacity =
+            typeof params.fillOpacity === "number" ? params.fillOpacity : undefined;
+          setSolidFill(section, params.fillHex, fillOpacity);
+        }
+
+        if (typeof params.sectionContentsHidden === "boolean") {
+          section.sectionContentsHidden = params.sectionContentsHidden;
+        }
+
+        try {
+          await appendToParentIfProvided(section, params.parentId);
+        } catch (e) {
+          section.remove();
+          throw new Error(
+            `Failed to append section to parent: ${e instanceof Error ? e.message : String(e)}`
+          );
+        }
+        positionNode(section, params.x, params.y);
+
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            nodeId: section.id,
+            nodeName: section.name,
+            parentId: section.parent?.id,
+            x: section.x,
+            y: section.y,
+            width: section.width,
+            height: section.height,
+          },
+        };
+      }
+      case "create_text": {
+        const params = request.params ?? {};
+        const text = figma.createText();
+
+        const fontFamily = typeof params.fontFamily === "string" ? params.fontFamily : "Inter";
+        const fontStyle = typeof params.fontStyle === "string" ? params.fontStyle : "Regular";
+        text.fontName = await ensureFont(fontFamily, fontStyle);
+
+        if (typeof params.name === "string") {
+          text.name = params.name;
+        }
+        if (typeof params.characters === "string") {
+          text.characters = params.characters;
+        }
+        if (typeof params.fontSize === "number") {
+          text.fontSize = params.fontSize;
+        }
+        if (typeof params.fillHex === "string") {
+          const fillOpacity =
+            typeof params.fillOpacity === "number" ? params.fillOpacity : undefined;
+          applyTextFill(text, params.fillHex, fillOpacity);
+        }
+
+        if (
+          params.textAlignHorizontal === "LEFT" ||
+          params.textAlignHorizontal === "CENTER" ||
+          params.textAlignHorizontal === "RIGHT" ||
+          params.textAlignHorizontal === "JUSTIFIED"
+        ) {
+          text.textAlignHorizontal = params.textAlignHorizontal;
+        }
+
+        if (
+          params.textAutoResize === "NONE" ||
+          params.textAutoResize === "WIDTH_AND_HEIGHT" ||
+          params.textAutoResize === "HEIGHT" ||
+          params.textAutoResize === "TRUNCATE"
+        ) {
+          text.textAutoResize = params.textAutoResize;
+        }
+
+        resizeNodeIfSupported(text, params.width, params.height);
+        await appendToParentIfProvided(text, params.parentId);
+        positionNode(text, params.x, params.y);
+
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            nodeId: text.id,
+            nodeName: text.name,
+            parentId: text.parent?.id,
+            characters: text.characters,
+            x: text.x,
+            y: text.y,
+            width: text.width,
+            height: text.height,
+          },
+        };
+      }
+      case "create_shape": {
+        const params = request.params ?? {};
+        const shapeType = params.shapeType;
+        let node: SceneNode;
+
+        if (shapeType === "ELLIPSE") {
+          node = figma.createEllipse();
+        } else if (shapeType === "LINE") {
+          node = figma.createLine();
+        } else {
+          node = figma.createRectangle();
+        }
+
+        if (typeof params.name === "string") {
+          node.name = params.name;
+        }
+
+        resizeNodeIfSupported(node, params.width, params.height);
+
+        if (typeof params.rotation === "number" && "rotation" in node) {
+          node.rotation = params.rotation;
+        }
+
+        if (shapeType === "LINE" && typeof params.fillHex === "string") {
+          throw new Error("LINE shapes do not support fillHex — use strokeHex instead");
+        }
+
+        if (typeof params.fillHex === "string") {
+          const fillOpacity =
+            typeof params.fillOpacity === "number" ? params.fillOpacity : undefined;
+          setSolidFill(node, params.fillHex, fillOpacity);
+        }
+
+        if (shapeType === "LINE" && typeof params.strokeHex !== "string") {
+          throw new Error(
+            "LINE shapes require strokeHex (lines have no fill, so without a stroke they are invisible)"
+          );
+        }
+
+        if (typeof params.strokeHex === "string") {
+          // Captured before the guard: every shape created above has `strokes`,
+          // so TypeScript narrows `node` to `never` inside it.
+          const shapeId = node.id;
+          if (!("strokes" in node)) {
+            throw new Error(`Node does not support strokes: ${shapeId}`);
+          }
+          const strokeOpacity =
+            typeof params.strokeOpacity === "number" ? params.strokeOpacity : undefined;
+          setSolidFill(node, params.strokeHex, strokeOpacity, "stroke");
+        }
+
+        if ("strokeWeight" in node && typeof params.strokeWeight === "number") {
+          node.strokeWeight = params.strokeWeight;
+        }
+
+        if (typeof params.cornerRadius === "number" && "cornerRadius" in node) {
+          node.cornerRadius = params.cornerRadius;
+        }
+
+        await appendToParentIfProvided(node, params.parentId);
+        positionNode(node, params.x, params.y);
+
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            nodeId: node.id,
+            nodeName: node.name,
+            shapeType,
+            parentId: node.parent?.id,
+            x: "x" in node ? node.x : undefined,
+            y: "y" in node ? node.y : undefined,
+            width: "width" in node ? node.width : undefined,
+            height: "height" in node ? node.height : undefined,
+          },
+        };
+      }
+      case "create_image": {
+        const params = request.params ?? {};
+        if (typeof params.imageBase64 !== "string" || params.imageBase64.length === 0) {
+          throw new Error("imageBase64 is required for create_image");
+        }
+
+        const image = figma.createImage(decodeBase64ToBytes(params.imageBase64));
+        const imageSize = await image.getSizeAsync();
+        const node = figma.createRectangle();
+
+        if (typeof params.name === "string") {
+          node.name = params.name;
+        }
+
+        const aspectRatio = imageSize.width / imageSize.height;
+        const width =
+          typeof params.width === "number"
+            ? params.width
+            : typeof params.height === "number"
+              ? params.height * aspectRatio
+              : imageSize.width;
+        const height =
+          typeof params.height === "number"
+            ? params.height
+            : typeof params.width === "number"
+              ? params.width / aspectRatio
+              : imageSize.height;
+
+        node.resize(width, height);
+        node.fills = [
+          {
+            type: "IMAGE",
+            imageHash: image.hash,
+            scaleMode: params.scaleMode === "FIT" ? "FIT" : "FILL",
+          },
+        ];
+
+        if (typeof params.cornerRadius === "number") {
+          node.cornerRadius = params.cornerRadius;
+        }
+
+        await appendToParentIfProvided(node, params.parentId);
+        positionNode(node, params.x, params.y);
+
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            nodeId: node.id,
+            nodeName: node.name,
+            parentId: node.parent?.id,
+            x: node.x,
+            y: node.y,
+            width: node.width,
+            height: node.height,
+            imageHash: image.hash,
+          },
+        };
+      }
+      case "create_svg": {
+        const params = request.params ?? {};
+        if (typeof params.svgText !== "string" || params.svgText.trim().length === 0) {
+          throw new Error("svgText is required for create_svg");
+        }
+
+        // Validate the destination before creating anything. createNodeFromSvg
+        // immediately inserts a node on the current page, so resolving the
+        // parent afterwards could leave an orphan behind when parentId is bad.
+        const parent =
+          typeof params.parentId === "string"
+            ? await getParentNodeById(params.parentId)
+            : undefined;
+
+        const node = figma.createNodeFromSvg(params.svgText);
+        try {
+          if (typeof params.name === "string") {
+            node.name = params.name;
+          }
+
+          resizeNodeIfSupported(node, params.width, params.height);
+          parent?.appendChild(node);
+          positionNode(node, params.x, params.y);
+        } catch (error) {
+          node.remove();
+          throw error;
+        }
+
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            nodeId: node.id,
+            nodeName: node.name,
+            nodeType: node.type,
+            parentId: node.parent?.id,
+            x: node.x,
+            y: node.y,
+            width: node.width,
+            height: node.height,
+            childCount: node.children.length,
+          },
+        };
+      }
+      case "create_sticky": {
+        requireFigJamApi("create_sticky", "createSticky", figma.createSticky);
+
+        const sticky = figma.createSticky();
+        const params = request.params ?? {};
+
+        if (typeof params.name === "string") {
+          sticky.name = params.name;
+        }
+        if (typeof params.characters === "string") {
+          try {
+            const currentFont = sticky.text.fontName;
+            if (typeof currentFont !== "symbol") {
+              await figma.loadFontAsync(currentFont);
+            }
+            sticky.text.characters = params.characters;
+          } catch (e) {
+            sticky.remove();
+            throw new Error(
+              `Failed to set sticky text: ${e instanceof Error ? e.message : String(e)}`
+            );
+          }
+        }
+
+        if (typeof params.isWideWidth === "boolean") {
+          sticky.isWideWidth = params.isWideWidth;
+        }
+
+        try {
+          await appendToParentIfProvided(sticky, params.parentId);
+        } catch (e) {
+          sticky.remove();
+          throw new Error(
+            `Failed to append sticky to parent: ${e instanceof Error ? e.message : String(e)}`
+          );
+        }
+        positionNode(sticky, params.x, params.y);
+
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            nodeId: sticky.id,
+            nodeName: sticky.name,
+            parentId: sticky.parent?.id,
+            x: sticky.x,
+            y: sticky.y,
+            width: sticky.width,
+            height: sticky.height,
+          },
+        };
+      }
+      case "create_shape_with_text": {
+        requireFigJamApi(
+          "create_shape_with_text",
+          "createShapeWithText",
+          figma.createShapeWithText
+        );
+
+        const params = request.params ?? {};
+        const shape = figma.createShapeWithText();
+
+        if (typeof params.name === "string") {
+          shape.name = params.name;
+        }
+
+        if (typeof params.shapeType === "string") {
+          shape.shapeType = params.shapeType as ShapeWithTextNode["shapeType"];
+        }
+
+        resizeNodeIfSupported(shape, params.width, params.height);
+
+        if (typeof params.rotation === "number") {
+          shape.rotation = params.rotation;
+        }
+
+        if (typeof params.fillHex === "string") {
+          const fillOpacity =
+            typeof params.fillOpacity === "number" ? params.fillOpacity : undefined;
+          setSolidFill(shape, params.fillHex, fillOpacity);
+        }
+
+        if (typeof params.strokeHex === "string") {
+          const strokeOpacity =
+            typeof params.strokeOpacity === "number" ? params.strokeOpacity : undefined;
+          setSolidFill(shape, params.strokeHex, strokeOpacity, "stroke");
+        }
+        if (typeof params.strokeWeight === "number") {
+          shape.strokeWeight = params.strokeWeight;
+        }
+
+        if (typeof params.textFillHex === "string") {
+          const textFillOpacity =
+            typeof params.textFillOpacity === "number" ? params.textFillOpacity : undefined;
+          applyTextFill(shape.text, params.textFillHex, textFillOpacity);
+        }
+
+        if (typeof params.characters === "string") {
+          try {
+            // The sublayer's current font must be loaded before any text edit.
+            const currentFont = shape.text.fontName;
+            if (typeof currentFont !== "symbol") {
+              await figma.loadFontAsync(currentFont);
+            }
+            if (typeof params.fontFamily === "string" || typeof params.fontStyle === "string") {
+              shape.text.fontName = await ensureFont(
+                typeof params.fontFamily === "string" ? params.fontFamily : "Inter",
+                typeof params.fontStyle === "string" ? params.fontStyle : "Regular"
+              );
+            }
+            shape.text.characters = params.characters;
+            if (typeof params.fontSize === "number") {
+              shape.text.fontSize = params.fontSize;
+            }
+          } catch (e) {
+            shape.remove();
+            throw new Error(
+              `Failed to set shape text: ${e instanceof Error ? e.message : String(e)}`
+            );
+          }
+        }
+
+        try {
+          await appendToParentIfProvided(shape, params.parentId);
+        } catch (e) {
+          shape.remove();
+          throw new Error(
+            `Failed to append shape to parent: ${e instanceof Error ? e.message : String(e)}`
+          );
+        }
+        positionNode(shape, params.x, params.y);
+
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            nodeId: shape.id,
+            nodeName: shape.name,
+            parentId: shape.parent?.id,
+            shapeType: shape.shapeType,
+            characters: shape.text.characters,
+            x: shape.x,
+            y: shape.y,
+            width: shape.width,
+            height: shape.height,
+          },
+        };
+      }
+      case "create_connector": {
+        requireFigJamApi("create_connector", "createConnector", figma.createConnector);
+
+        const connector = figma.createConnector();
+        const params = request.params ?? {};
+
+        if (typeof params.name === "string") {
+          connector.name = params.name;
+        }
+
+        try {
+          // Schema-level refines already require anchors to come with their
+          // nodeId; this guard protects direct requests that skip them.
+          const anchorMagnet = (
+            anchor: unknown
+          ): "NONE" | "AUTO" | "TOP" | "LEFT" | "BOTTOM" | "RIGHT" | "CENTER" => {
+            if (anchor === "top") return "TOP";
+            if (anchor === "bottom") return "BOTTOM";
+            if (anchor === "left") return "LEFT";
+            if (anchor === "right") return "RIGHT";
+            return "AUTO";
+          };
+
+          // Set start endpoint
+          if (typeof params.startNodeId === "string") {
+            connector.connectorStart = {
+              endpointNodeId: params.startNodeId,
+              magnet: anchorMagnet(params.startAnchor),
+            };
+          } else if (params.startAnchor !== undefined) {
+            throw new Error("startAnchor requires startNodeId");
+          } else if (typeof params.startX === "number" && typeof params.startY === "number") {
+            connector.connectorStart = {
+              position: { x: params.startX, y: params.startY },
+            };
+          }
+
+          // Set end endpoint
+          if (typeof params.endNodeId === "string") {
+            connector.connectorEnd = {
+              endpointNodeId: params.endNodeId,
+              magnet: anchorMagnet(params.endAnchor),
+            };
+          } else if (params.endAnchor !== undefined) {
+            throw new Error("endAnchor requires endNodeId");
+          } else if (typeof params.endX === "number" && typeof params.endY === "number") {
+            connector.connectorEnd = {
+              position: { x: params.endX, y: params.endY },
+            };
+          }
+
+          // Set connector style
+          if (typeof params.strokeWeight === "number") {
+            connector.strokeWeight = params.strokeWeight;
+          }
+          if (typeof params.strokeHex === "string") {
+            setSolidFill(connector, params.strokeHex, undefined, "stroke");
+          }
+
+          await appendToParentIfProvided(connector, params.parentId);
+        } catch (e) {
+          connector.remove();
+          throw new Error(
+            `Failed to create connector: ${e instanceof Error ? e.message : String(e)}`
+          );
+        }
+
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            nodeId: connector.id,
+            nodeName: connector.name,
+            parentId: connector.parent?.id,
+          },
+        };
+      }
+      case "import_html_layers": {
+        const params = request.params ?? {};
+        const root = params.layers as
+          { type?: unknown; width?: unknown; height?: unknown } | undefined;
+        if (!root || typeof root !== "object" || typeof root.type !== "string") {
+          throw new Error(
+            "layers (an html-figma LayerNode tree) is required for import_html_layers"
+          );
+        }
+
+        const wrapper = figma.createFrame();
+        wrapper.name =
+          typeof params.name === "string" && params.name.length > 0
+            ? params.name
+            : "imported layers";
+        const rootWidth = typeof root.width === "number" ? root.width : 100;
+        const rootHeight = typeof root.height === "number" ? root.height : 100;
+        wrapper.resize(Math.max(rootWidth, 1), Math.max(rootHeight, 1));
+        wrapper.fills = [];
+        wrapper.clipsContent = true;
+        // Same contract as the create_* tools: when parentId is given the
+        // wrapper is appended into it and x/y are relative to that parent.
+        await appendToParentIfProvided(wrapper, params.parentId);
+        positionNode(wrapper, params.x, params.y);
+
+        // html-figma catches per-layer render errors internally and keeps
+        // going, so a failed layer would otherwise be silent. Count the tree
+        // up front and compare with how many layers actually rendered.
+        const countLayers = (layer: unknown): number => {
+          if (!layer || typeof layer !== "object") return 0;
+          const children = (layer as { children?: unknown }).children;
+          let total = 1;
+          if (Array.isArray(children)) {
+            for (const child of children) total += countLayers(child);
+          }
+          return total;
+        };
+        const expectedLayerCount = countLayers(root);
+
+        let layerCount = 0;
+        // html-figma renderer: walks the tree, creates frames/text/rects/SVG
+        // vectors, matches installed fonts (including weights carried by the
+        // serialization), and resolves image fills.
+        await addLayersToFrame([root as never], wrapper, () => {
+          layerCount += 1;
+        });
+
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            nodeId: wrapper.id,
+            nodeName: wrapper.name,
+            parentId: wrapper.parent?.id,
+            x: wrapper.x,
+            y: wrapper.y,
+            width: wrapper.width,
+            height: wrapper.height,
+            layerCount,
+            expectedLayerCount,
+            ...(layerCount < expectedLayerCount
+              ? {
+                  warning: `Partial import: ${expectedLayerCount - layerCount} of ${expectedLayerCount} layers failed to render (see the plugin console for per-layer errors). Delete node ${wrapper.id} and retry if completeness matters.`,
+                }
+              : {}),
+          },
+        };
+      }
+      case "duplicate_nodes": {
+        if (!request.nodeIds || request.nodeIds.length === 0) {
+          throw new Error("nodeIds is required for duplicate_nodes");
+        }
+
+        const duplicates = [];
+        for (const nodeId of request.nodeIds) {
+          const node = await getSceneNodeById(nodeId);
+          if (!("clone" in node) || typeof node.clone !== "function") {
+            throw new Error(`Node does not support duplication: ${node.id}`);
+          }
+          const clone = node.clone();
+          duplicates.push({
+            sourceNodeId: node.id,
+            nodeId: clone.id,
+            nodeName: clone.name,
+            parentId: clone.parent?.id,
+          });
+        }
+
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            duplicatedCount: duplicates.length,
+            duplicates,
+          },
+        };
+      }
+      case "duplicate_with_offset": {
+        const nodeIds = request.nodeIds;
+        if (!nodeIds || nodeIds.length === 0) {
+          throw new Error("nodeIds is required for duplicate_with_offset");
+        }
+        const offsetX = request.params?.offsetX;
+        const offsetY = request.params?.offsetY;
+        if (typeof offsetX !== "number" || typeof offsetY !== "number") {
+          throw new Error("offsetX and offsetY are required for duplicate_with_offset");
+        }
+
+        const duplicates = [];
+        for (const nodeId of nodeIds) {
+          const node = await getSceneNodeById(nodeId);
+          if (!("clone" in node) || typeof node.clone !== "function") {
+            throw new Error(`Node does not support duplication: ${node.id}`);
+          }
+          const clone = node.clone();
+          if ("x" in clone && "y" in clone) {
+            clone.x = clone.x + offsetX;
+            clone.y = clone.y + offsetY;
+          }
+          duplicates.push({
+            sourceNodeId: node.id,
+            nodeId: clone.id,
+            nodeName: clone.name,
+            parentId: clone.parent?.id,
+            x: "x" in clone ? clone.x : undefined,
+            y: "y" in clone ? clone.y : undefined,
+          });
+        }
+
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            duplicatedCount: duplicates.length,
+            duplicates,
+          },
+        };
+      }
+      case "fit_to_content": {
+        const nodeId = request.nodeIds && request.nodeIds[0];
+        if (!nodeId) {
+          throw new Error("nodeIds is required for fit_to_content");
+        }
+
+        const node = await getSceneNodeById(nodeId);
+        if (node.type !== "SECTION") {
+          throw new Error(
+            `fit_to_content only supports SECTION nodes (got ${node.type}: ${nodeId})`
+          );
+        }
+
+        const paddingParam = request.params?.padding;
+        const padding = typeof paddingParam === "number" ? paddingParam : 0;
+        if (!(padding >= 0)) {
+          throw new Error("padding must be >= 0 for fit_to_content");
+        }
+
+        const children = node.children;
+        if (children.length > 0) {
+          let minX = Infinity;
+          let minY = Infinity;
+          let maxX = -Infinity;
+          let maxY = -Infinity;
+          for (const child of children) {
+            minX = Math.min(minX, child.x);
+            minY = Math.min(minY, child.y);
+            maxX = Math.max(maxX, child.x + child.width);
+            maxY = Math.max(maxY, child.y + child.height);
+          }
+          const shiftX = padding - minX;
+          const shiftY = padding - minY;
+          if (shiftX !== 0 || shiftY !== 0) {
+            for (const child of children) {
+              child.x = child.x + shiftX;
+              child.y = child.y + shiftY;
+            }
+          }
+          const width = maxX - minX + padding * 2;
+          const height = maxY - minY + padding * 2;
+          node.resizeWithoutConstraints(Math.max(width, 0.01), Math.max(height, 0.01));
+        } else {
+          const size = Math.max(padding * 2, 0.01);
+          node.resizeWithoutConstraints(size, size);
+        }
+
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            nodeId: node.id,
+            nodeName: node.name,
+            x: node.x,
+            y: node.y,
+            width: node.width,
+            height: node.height,
+            childCount: children.length,
+          },
+        };
+      }
+      case "distribute_horizontally":
+      case "distribute_vertically": {
+        const horizontal = request.type === "distribute_horizontally";
+        const nodeIds = request.nodeIds;
+        if (!nodeIds || nodeIds.length < 3) {
+          throw new Error(`${request.type} requires at least 3 nodeIds`);
+        }
+
+        const nodes = await Promise.all(nodeIds.map((id) => getSceneNodeById(id)));
+        const pos = (n: SceneNode): number => (horizontal ? n.x : n.y);
+        const size = (n: SceneNode): number => (horizontal ? n.width : n.height);
+        const setPos = (n: SceneNode, value: number): void => {
+          if (horizontal) n.x = value;
+          else n.y = value;
+        };
+
+        const sorted = [...nodes].sort((a, b) => pos(a) - pos(b));
+        const first = sorted[0];
+        const last = sorted[sorted.length - 1];
+        const span = pos(last) + size(last) - pos(first);
+        const totalSize = sorted.reduce((sum, n) => sum + size(n), 0);
+        const gap = (span - totalSize) / (sorted.length - 1);
+
+        // First and last stay put; everything in between is repositioned so the
+        // gaps between consecutive edges are equal.
+        let cursor = pos(first) + size(first);
+        const results = [];
+        for (let i = 1; i < sorted.length; i++) {
+          const node = sorted[i];
+          const next = cursor + gap;
+          setPos(node, next);
+          results.push({ nodeId: node.id, [horizontal ? "x" : "y"]: next });
+          cursor = next + size(node);
+        }
+
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            axis: horizontal ? "horizontal" : "vertical",
+            gap,
+            movedCount: results.length,
+            results,
+          },
+        };
+      }
+      case "align_to_grid": {
+        const nodeIds = request.nodeIds;
+        if (!nodeIds || nodeIds.length === 0) {
+          throw new Error("nodeIds is required for align_to_grid");
+        }
+        const gridSize = request.params?.gridSize;
+        if (typeof gridSize !== "number" || !(gridSize > 0)) {
+          throw new Error("gridSize must be a positive number for align_to_grid");
+        }
+
+        const nodes = await Promise.all(nodeIds.map((id) => getSceneNodeById(id)));
+        const results = nodes.map((node) => {
+          node.x = Math.round(node.x / gridSize) * gridSize;
+          node.y = Math.round(node.y / gridSize) * gridSize;
+          return { nodeId: node.id, x: node.x, y: node.y };
+        });
+
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            gridSize,
+            updatedCount: results.length,
+            results,
+          },
+        };
+      }
+      case "place_below":
+      case "place_right_of": {
+        const below = request.type === "place_below";
+        const nodeId = request.nodeIds && request.nodeIds[0];
+        if (!nodeId) {
+          throw new Error(`nodeIds is required for ${request.type}`);
+        }
+        const params = request.params ?? {};
+        const relativeToId = params.relativeToId;
+        if (typeof relativeToId !== "string") {
+          throw new Error(`relativeToId is required for ${request.type}`);
+        }
+        const gap = typeof params.gap === "number" ? params.gap : 0;
+        const align = params.align === "center" ? "center" : "start";
+
+        const target = await getSceneNodeById(nodeId);
+        const relativeTo = await getSceneNodeById(relativeToId);
+
+        if (below) {
+          target.y = relativeTo.y + relativeTo.height + gap;
+          target.x =
+            align === "center"
+              ? relativeTo.x + (relativeTo.width - target.width) / 2
+              : relativeTo.x;
+        } else {
+          target.x = relativeTo.x + relativeTo.width + gap;
+          target.y =
+            align === "center"
+              ? relativeTo.y + (relativeTo.height - target.height) / 2
+              : relativeTo.y;
+        }
+
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            nodeId: target.id,
+            nodeName: target.name,
+            x: target.x,
+            y: target.y,
+          },
+        };
+      }
+      case "reparent_nodes": {
+        if (!request.nodeIds || request.nodeIds.length === 0) {
+          throw new Error("nodeIds is required for reparent_nodes");
+        }
+        const parentId = request.params?.parentId;
+        if (typeof parentId !== "string") {
+          throw new Error("parentId is required for reparent_nodes");
+        }
+
+        const parent = await getParentNodeById(parentId);
+        const moved = [];
+
+        for (const nodeId of request.nodeIds) {
+          const node = await getSceneNodeById(nodeId);
+          parent.appendChild(node);
+          moved.push({
+            nodeId: node.id,
+            nodeName: node.name,
+            parentId: node.parent?.id,
+          });
+        }
+
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            movedCount: moved.length,
+            moved,
+          },
+        };
+      }
+      case "group_nodes": {
+        if (!request.nodeIds || request.nodeIds.length === 0) {
+          throw new Error("nodeIds is required for group_nodes");
+        }
+
+        const nodes = await Promise.all(request.nodeIds.map((nodeId) => getSceneNodeById(nodeId)));
+
+        const explicitParentId = request.params?.parentId;
+        let parent: BaseNode & ChildrenMixin;
+        if (typeof explicitParentId === "string") {
+          parent = await getParentNodeById(explicitParentId);
+        } else {
+          const parents = new Set(nodes.map((n) => n.parent?.id));
+          if (parents.size !== 1 || parents.has(undefined)) {
+            throw new Error(
+              "group_nodes requires all nodes to share a parent, or pass parentId explicitly"
+            );
+          }
+          const sharedParent = nodes[0].parent;
+          if (!sharedParent || !supportsChildren(sharedParent)) {
+            throw new Error("Shared parent does not support children");
+          }
+          parent = sharedParent;
+        }
+
+        const group = figma.group(nodes, parent);
+        const name = request.params?.name;
+        if (typeof name === "string") {
+          group.name = name;
+        }
+
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            nodeId: group.id,
+            nodeName: group.name,
+            parentId: group.parent?.id,
+            childIds: group.children.map((c) => c.id),
+          },
+        };
+      }
+      case "ungroup_node": {
+        const nodeId = request.nodeIds && request.nodeIds[0];
+        if (!nodeId) {
+          throw new Error("nodeIds is required for ungroup_node");
+        }
+
+        const node = await getSceneNodeById(nodeId);
+        if (node.type !== "GROUP" && node.type !== "FRAME") {
+          throw new Error(`ungroup_node only works on GROUP or FRAME nodes, got ${node.type}`);
+        }
+
+        const parentId = node.parent?.id;
+        const orphans = figma.ungroup(node as GroupNode | FrameNode);
+
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            parentId,
+            orphanIds: orphans.map((o) => o.id),
+          },
+        };
+      }
+      case "set_selection": {
+        const ids = request.nodeIds ?? [];
+        const nodes: SceneNode[] = [];
+        for (const id of ids) {
+          nodes.push(await getSceneNodeById(id));
+        }
+        figma.currentPage.selection = nodes;
+
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            selectedCount: nodes.length,
+            selectedIds: nodes.map((n) => n.id),
+          },
+        };
+      }
+      case "scroll_and_zoom_into_view": {
+        if (!request.nodeIds || request.nodeIds.length === 0) {
+          throw new Error("nodeIds is required for scroll_and_zoom_into_view");
+        }
+
+        const nodes = await Promise.all(request.nodeIds.map((nodeId) => getSceneNodeById(nodeId)));
+        figma.viewport.scrollAndZoomIntoView(nodes);
+
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            framedCount: nodes.length,
+            framedIds: nodes.map((n) => n.id),
+          },
+        };
+      }
+      case "delete_nodes": {
+        if (request.params?.confirm !== true) {
+          throw new Error("delete_nodes requires confirm: true");
+        }
+        if (!request.nodeIds || request.nodeIds.length === 0) {
+          throw new Error("nodeIds is required for delete_nodes");
+        }
+
+        const nodes = await Promise.all(request.nodeIds.map((nodeId) => getSceneNodeById(nodeId)));
+        const deletions = nodes.map((node) => ({
+          nodeId: node.id,
+          nodeName: node.name,
+          parentId: node.parent?.id,
+        }));
+
+        for (const node of nodes) {
+          node.remove();
+        }
+
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            deletedCount: deletions.length,
+            deletions,
+          },
+        };
+      }
+      case "run_script": {
+        const code = request.params?.code;
+        if (typeof code !== "string" || code.trim() === "") {
+          throw new Error("code is required for run_script");
+        }
+        // Cheap guard against accidental deletions; not a security boundary.
+        if (/\.remove\s*(?:\?\.)?\s*\(/.test(code) && request.params?.allowRemove !== true) {
+          throw new Error("run_script: code calls .remove(); pass allowRemove: true to confirm");
+        }
+        const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+        const result = await new AsyncFunction("figma", code)(figma);
+        let serialized: string | undefined;
+        try {
+          // Symbols such as figma.mixed would otherwise be dropped or turned into null silently.
+          serialized = JSON.stringify(result, (_key, value: unknown) => {
+            if (typeof value === "symbol") {
+              throw new TypeError("symbol");
+            }
+            return value;
+          });
+        } catch {
+          throw new Error("run_script: return value must be JSON-serializable");
+        }
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: { result: serialized === undefined ? null : JSON.parse(serialized) },
+        };
+      }
+      case "get_motion_styles": {
+        if (isFigJam()) {
+          throw new Error("Motion/animation is not available in FigJam");
+        }
+        const motion = figma.motion;
+        if (!motion || typeof motion.figmaAnimationStyles !== "function") {
+          throw new Error(
+            "figma.motion.figmaAnimationStyles is not available in this Figma version"
+          );
+        }
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            styles: motion.figmaAnimationStyles(),
+          },
+        };
+      }
+      case "get_node_motion": {
+        if (isFigJam()) {
+          throw new Error("Motion/animation is not available in FigJam");
+        }
+        const nodeId = request.nodeIds && request.nodeIds[0];
+        if (!nodeId) throw new Error("nodeIds is required for get_node_motion");
+        const node = await getSceneNodeById(nodeId);
+        if (!isMotionNode(node)) {
+          throw new Error(`Node does not support animations: ${nodeId}`);
+        }
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            animationStyles: node.animationStyles,
+            animations: node.animations,
+            manualKeyframeTracks: node.manualKeyframeTracks,
+            timelines: node.timelines,
+          },
+        };
+      }
+      case "apply_animation_style": {
+        if (isFigJam()) {
+          throw new Error("Motion/animation is not available in FigJam");
+        }
+        const nodeId = request.nodeIds && request.nodeIds[0];
+        if (!nodeId) throw new Error("nodeIds is required for apply_animation_style");
+        const styleId = request.params?.styleId;
+        if (typeof styleId !== "string")
+          throw new Error("styleId is required for apply_animation_style");
+        const node = await getSceneNodeById(nodeId);
+        if (!isMotionNode(node)) {
+          throw new Error(`Node does not support applyAnimationStyle: ${nodeId}`);
+        }
+        const animationStyleData = request.params?.animationStyleData as
+          AnimationStyleConfiguration | undefined;
+        node.applyAnimationStyle(styleId, animationStyleData);
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            nodeId: node.id,
+            animationStyles: node.animationStyles,
+          },
+        };
+      }
+      case "remove_animation_style": {
+        if (isFigJam()) {
+          throw new Error("Motion/animation is not available in FigJam");
+        }
+        const nodeId = request.nodeIds && request.nodeIds[0];
+        if (!nodeId) throw new Error("nodeIds is required for remove_animation_style");
+        const node = await getSceneNodeById(nodeId);
+        if (!isMotionNode(node)) {
+          throw new Error(`Node does not support removeAnimationStyle: ${nodeId}`);
+        }
+        const animationStyleId = request.params?.animationStyleId;
+        if (typeof animationStyleId === "string") {
+          node.removeAnimationStyle(animationStyleId);
+        } else {
+          const appliedStyles = node.animationStyles || [];
+          for (const style of appliedStyles) {
+            node.removeAnimationStyle(style.id);
+          }
+        }
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            nodeId: node.id,
+            animationStyles: node.animationStyles,
+          },
+        };
+      }
+
+      case "apply_manual_keyframe_track": {
+        if (isFigJam()) {
+          throw new Error("Motion/animation is not available in FigJam");
+        }
+        const nodeId = request.nodeIds && request.nodeIds[0];
+        if (!nodeId) throw new Error("nodeIds is required for apply_manual_keyframe_track");
+        const field = request.params?.field;
+        const track = request.params?.track;
+        if (!field || !track)
+          throw new Error("field and track are required for apply_manual_keyframe_track");
+
+        const node = await getSceneNodeById(nodeId);
+        if (!isMotionNode(node)) {
+          throw new Error(`Node does not support applyManualKeyframeTrack: ${nodeId}`);
+        }
+        node.applyManualKeyframeTrack(field as KeyframeField, track as ManualKeyframeTrackInput);
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            nodeId: node.id,
+            manualKeyframeTracks: node.manualKeyframeTracks,
+          },
+        };
+      }
+
+      case "remove_manual_keyframe_track": {
+        if (isFigJam()) {
+          throw new Error("Motion/animation is not available in FigJam");
+        }
+        const nodeId = request.nodeIds && request.nodeIds[0];
+        if (!nodeId) throw new Error("nodeIds is required for remove_manual_keyframe_track");
+        const field = request.params?.field;
+        if (!field) throw new Error("field is required for remove_manual_keyframe_track");
+
+        const node = await getSceneNodeById(nodeId);
+        if (!isMotionNode(node)) {
+          throw new Error(`Node does not support removeManualKeyframeTrack: ${nodeId}`);
+        }
+        node.removeManualKeyframeTrack(field as KeyframeField);
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            nodeId: node.id,
+            manualKeyframeTracks: node.manualKeyframeTracks,
+          },
+        };
+      }
+
+      case "set_timeline_duration": {
+        if (isFigJam()) {
+          throw new Error("Motion/animation is not available in FigJam");
+        }
+        const nodeId = request.nodeIds && request.nodeIds[0];
+        if (!nodeId) throw new Error("nodeIds is required for set_timeline_duration");
+        const timelineId = request.params?.timelineId;
+        const duration = request.params?.duration;
+        if (typeof timelineId !== "string" || typeof duration !== "number") {
+          throw new Error("timelineId and duration are required for set_timeline_duration");
+        }
+
+        const node = await getSceneNodeById(nodeId);
+        if (!isMotionNode(node)) {
+          throw new Error(`Node does not support setTimelineDuration: ${nodeId}`);
+        }
+        node.setTimelineDuration(timelineId, duration);
+        return {
+          type: request.type,
+          requestId: request.requestId,
+          data: {
+            nodeId: node.id,
+            timelines: node.timelines,
+          },
+        };
+      }
+      default: {
+        // Forge additions live in ./forge so upstream merges only touch this branch.
+        if (isForgeRequestType(request.type)) {
+          if (isForgeEditType(request.type)) requireEditorMode(request.type);
+          return {
+            type: request.type,
+            requestId: request.requestId,
+            data: await handleForgeRequest(request.type, request.nodeIds, request.params),
+          };
+        }
+        throw new Error(`Unknown request type: ${request.type}`);
+      }
+    }
+  } catch (error) {
+    return {
+      type: request.type,
+      requestId: request.requestId,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+};
+
+const UI_WIDTH = 320;
+const UI_EXPANDED_HEIGHT = 180;
+/** Just the status bar: the collapsed ("minimized") window. */
+const UI_COLLAPSED_HEIGHT = 36;
+const UI_COLLAPSED_KEY = "ui-collapsed";
+
+let uiCollapsed = false;
+
+const applyUiSize = () => {
+  figma.ui.resize(UI_WIDTH, uiCollapsed ? UI_COLLAPSED_HEIGHT : UI_EXPANDED_HEIGHT);
+};
+
+const postUiCollapseState = () => {
+  figma.ui.postMessage({ type: "ui-collapse-state", payload: { collapsed: uiCollapsed } });
+};
+
+// Start hidden so the window never flashes at full height before the stored
+// collapsed state is restored. The iframe still loads and runs while hidden.
+figma.showUI(__html__, { width: UI_WIDTH, height: UI_EXPANDED_HEIGHT, visible: false });
+
+// ── JAgentDesk pairing identity ───────────────────────────────────────────
+// The plugin keeps its own pairing id + key in clientStorage (the UI iframe has
+// no storage). The daemon issues a fresh 6-digit code whenever the key is
+// missing or wrong; the user types that code into JAgentDesk to grant a key.
+const PAIRING_ID_KEY = "jadlink.pairingId";
+const PAIRING_KEY_KEY = "jadlink.pairingKey";
+const INSTANCE_ID_KEY = "jadlink.instanceId";
+
+let pairingId: string | undefined;
+let pairingKey: string | undefined;
+let instanceId: string = "";
+
+const ensureInstanceId = async (): Promise<void> => {
+  try {
+    const stored = await figma.clientStorage.getAsync(INSTANCE_ID_KEY);
+    if (typeof stored === "string" && stored) {
+      instanceId = stored;
+      return;
+    }
+  } catch {
+    // fall through and mint a new one
+  }
+  instanceId = `plugin-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  await figma.clientStorage.setAsync(INSTANCE_ID_KEY, instanceId).catch(() => undefined);
+};
+
+const loadPairing = Promise.all([
+  figma.clientStorage.getAsync(PAIRING_ID_KEY).catch(() => undefined),
+  figma.clientStorage.getAsync(PAIRING_KEY_KEY).catch(() => undefined),
+]).then(([id, key]) => {
+  pairingId = typeof id === "string" && id ? id : undefined;
+  pairingKey = typeof key === "string" && key ? key : undefined;
+});
+
+const postPluginConfig = () => {
+  figma.ui.postMessage({
+    type: "plugin-config",
+    payload: {
+      pluginVersion: PLUGIN_VERSION,
+      instanceId,
+      pairingId,
+      pairingKey,
+      fileName: figma.root.name,
+      fileKey: getFileKey(),
+      manager: figma.currentUser?.name ?? figma.currentUser?.id ?? "Figma user",
+    },
+  });
+};
+
+figma.clientStorage
+  .getAsync(UI_COLLAPSED_KEY)
+  .then((stored) => {
+    uiCollapsed = stored === true;
+  })
+  .catch(() => {
+    uiCollapsed = false;
+  })
+  .then(() => {
+    applyUiSize();
+    postUiCollapseState();
+    figma.ui.show();
+  });
+void ensureInstanceId();
+sendStatus();
+
+figma.on("selectionchange", () => {
+  sendStatus();
+});
+
+figma.on("currentpagechange", () => {
+  sendStatus();
+});
+
+figma.on("documentchange", (event: { nodeIds?: string[] }) => {
+  sendStatus(event.nodeIds ?? []);
+});
+
+figma.ui.onmessage = async (message) => {
+  if (message.type === "ui-ready") {
+    sendStatus();
+    await loadPairing;
+    postPluginConfig();
+    return;
+  }
+
+  if (message.type === "ui-store-pairing") {
+    pairingId = typeof message.pairingId === "string" ? message.pairingId : pairingId;
+    pairingKey = typeof message.pairingKey === "string" ? message.pairingKey : pairingKey;
+    await Promise.all([
+      figma.clientStorage.setAsync(PAIRING_ID_KEY, pairingId ?? null),
+      figma.clientStorage.setAsync(PAIRING_KEY_KEY, pairingKey ?? null),
+    ]);
+    return;
+  }
+
+  if (message.type === "ui-clear-pairing") {
+    pairingId = undefined;
+    pairingKey = undefined;
+    await Promise.all([
+      figma.clientStorage.setAsync(PAIRING_ID_KEY, null),
+      figma.clientStorage.setAsync(PAIRING_KEY_KEY, null),
+    ]);
+    return;
+  }
+
+  if (message.type === "request-ui-state") {
+    postUiCollapseState();
+    return;
+  }
+
+  if (message.type === "set-ui-collapsed") {
+    uiCollapsed = message.collapsed === true;
+    applyUiSize();
+    figma.clientStorage.setAsync(UI_COLLAPSED_KEY, uiCollapsed).catch(() => {
+      // Persisting the preference is best-effort; the window is already resized.
+    });
+    return;
+  }
+
+  if (message.type === "server-request") {
+    const response = await handleRequest(message.payload as ServerRequest);
+    try {
+      figma.ui.postMessage(response);
+    } catch (err) {
+      figma.ui.postMessage({
+        type: response.type,
+        requestId: response.requestId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+};
