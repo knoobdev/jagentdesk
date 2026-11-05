@@ -79,14 +79,16 @@ function resolveWithCustomWebOverlay(context, moduleName, platform) {
   return defaultResolveRequest(context, moduleName, platform);
 }
 
-// See src/native/ws-outbound-zod-validator.ts: Android bundles validate daemon messages with zod's own
-// parser instead of the zod-aot output, which hermesc cannot compile within CI memory.
-const androidWsOutboundValidator = path.resolve(appSrcRoot, "native/ws-outbound-zod-validator.ts");
+// See src/native/ws-outbound-zod-validator.ts: native (Android and iOS) bundles validate daemon
+// messages with zod's own parser instead of the zod-aot output, a single ~6 MB function that
+// hermesc cannot compile within CI memory (the iOS IPA job was killed with signal 9 in v0.9.53).
+const nativeWsOutboundValidator = path.resolve(appSrcRoot, "native/ws-outbound-zod-validator.ts");
+const hermesPlatforms = new Set(["android", "ios"]);
 const wsOutboundAotModule = /(^|[\\/])generated[\\/]validation[\\/]ws-outbound\.aot(\.js|\.ts)?$/;
 
 config.resolver.resolveRequest = (context, moduleName, platform) => {
-  if (platform === "android" && wsOutboundAotModule.test(moduleName)) {
-    return { type: "sourceFile", filePath: androidWsOutboundValidator };
+  if (hermesPlatforms.has(platform) && wsOutboundAotModule.test(moduleName)) {
+    return { type: "sourceFile", filePath: nativeWsOutboundValidator };
   }
   if (isFdroidBuild && platform === "android" && fdroidModuleOverrides[moduleName]) {
     return resolveWithCustomWebOverlay(context, fdroidModuleOverrides[moduleName], platform);
