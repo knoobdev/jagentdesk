@@ -186,6 +186,33 @@ describe("FrameStore lazy batching", () => {
   });
 });
 
+describe("FrameStore.parentOf", () => {
+  async function loadedStore() {
+    const leaf = makeNode({ id: "1:61", name: "Sign in" });
+    const group = makeNode({ id: "1:60", name: "Form", children: [leaf] });
+    const frame = makeNode({ id: "1:1", name: "Home", children: [group] });
+    const fetchNodes: FetchNodeSubtrees = vi.fn(async () => ({
+      nodes: { "1:1": frame },
+      components: {},
+    }));
+    const store = new FrameStore(fetchNodes);
+    await store.load(["1:1"]);
+    return store;
+  }
+
+  it("returns the direct parent found inside a loaded subtree", async () => {
+    const store = await loadedStore();
+    expect(store.parentOf("1:61")?.id).toBe("1:60");
+    expect(store.parentOf("1:60")?.id).toBe("1:1");
+  });
+
+  it("returns null for a cached top-level frame and undefined when nothing contains the id", async () => {
+    const store = await loadedStore();
+    expect(store.parentOf("1:1")).toBeNull();
+    expect(store.parentOf("9:9")).toBeUndefined();
+  });
+});
+
 describe("store registry", () => {
   it("shares one store per (scope, file, version) and separates versions", () => {
     const { fetchNodes } = recordingFetcher();

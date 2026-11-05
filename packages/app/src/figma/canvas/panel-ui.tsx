@@ -5,9 +5,13 @@ import { jiraStyles } from "@/jira/ui/styles";
 // Shared building blocks for the canvas-side panels (inspect, toolbar popovers). Labels run the
 // section rail; values render in mono so numbers align the way Figma's own inspect does.
 
+// 112px fits the widest inspect label ("Letter spacing") at textMuted's 13px, so no label
+// ellipsizes; the rail keeps every value column aligned at the same x.
+export const PANEL_LABEL_WIDTH = 112;
+
 const styles = StyleSheet.create({
   section: { gap: 8 },
-  row: { width: 72 },
+  row: { width: PANEL_LABEL_WIDTH, flexShrink: 0 },
   value: { flex: 1, minWidth: 0, alignItems: "flex-end" },
 });
 

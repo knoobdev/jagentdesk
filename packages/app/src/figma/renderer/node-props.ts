@@ -218,6 +218,8 @@ function readTextStyle(value: unknown): TextStyle | null {
   const style: TextStyle = {};
   if (typeof value.fontFamily === "string") style.fontFamily = value.fontFamily;
   if (typeof value.fontStyle === "string") style.fontStyle = value.fontStyle;
+  const fontWeight = readNumber(value.fontWeight);
+  if (fontWeight !== null) style.fontWeight = fontWeight;
   const fontName = value.fontName;
   if (isRecord(fontName)) {
     if (typeof fontName.family === "string") style.fontFamily = fontName.family;

@@ -258,7 +258,7 @@ export function PrototypePlayer({ file, outline, startNodeId, onClose }: Prototy
     <View style={styles.screen}>
       <PlayerToolbar
         flows={flows}
-        activeFrameId={activeFrameId}
+        startFrameId={player.startFrameId}
         canGoBack={player.stack.length > 1 || player.overlays.length > 0}
         canRestart={!!player.startFrameId}
         showHotspots={showHotspots}
@@ -422,9 +422,11 @@ function FlowRow({
 
 // ── Toolbar ────────────────────────────────────────────────────────────────
 
-function PlayerToolbar({
+// Exported for tests. The label tracks the frame the player STARTED on, not the frame currently
+// on stage: navigating inside a played flow must not drop it back to "Select a flow".
+export function PlayerToolbar({
   flows,
-  activeFrameId,
+  startFrameId,
   canGoBack,
   canRestart,
   showHotspots,
@@ -437,7 +439,7 @@ function PlayerToolbar({
   startNote,
 }: {
   flows: FigmaPrototype["flows"];
-  activeFrameId: string | null;
+  startFrameId: string | null;
   canGoBack: boolean;
   canRestart: boolean;
   showHotspots: boolean;
@@ -454,7 +456,7 @@ function PlayerToolbar({
       <DropdownMenu>
         <DropdownMenuTrigger style={styles.trigger}>
           <Text style={styles.triggerLabel} numberOfLines={1}>
-            {currentFlowLabel(flows, activeFrameId)}
+            {currentFlowLabel(flows, startFrameId)}
           </Text>
         </DropdownMenuTrigger>
         <DropdownMenuContent>
@@ -499,8 +501,9 @@ function FlowMenuItem({
   return <DropdownMenuItem onSelect={start}>{flow.name}</DropdownMenuItem>;
 }
 
-function currentFlowLabel(flows: FigmaPrototype["flows"], frameId: string | null): string {
-  const flow = frameId ? flows.find((candidate) => candidate.nodeId === frameId) : null;
+/** Name of the flow being played — resolved from the session's start frame, not the stage. */
+function currentFlowLabel(flows: FigmaPrototype["flows"], startFrameId: string | null): string {
+  const flow = startFrameId ? flows.find((candidate) => candidate.nodeId === startFrameId) : null;
   return flow ? flow.name : "Select a flow";
 }
 

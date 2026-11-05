@@ -247,6 +247,10 @@ describe("generateNodeCss", () => {
     expect(fills[0].type).toBe("GRADIENT_LINEAR");
     expect(fills[0].css).toContain("linear-gradient(90deg");
     expect(fills[0].stops).toBe("rgba(126, 211, 33, 1) 0%, rgba(0, 143, 56, 1) 100%");
+    expect(fills[0].stopEntries).toEqual([
+      { color: "rgba(126, 211, 33, 1)", position: 0 },
+      { color: "rgba(0, 143, 56, 1)", position: 100 },
+    ]);
     expect(fills[0].colors).toEqual(["rgba(126, 211, 33, 1)", "rgba(0, 143, 56, 1)"]);
     expect(fills[0].start).toEqual({ x: 0, y: 0.5 });
     expect(fills[0].end).toEqual({ x: 1, y: 0.5 });
@@ -411,6 +415,52 @@ describe("generateNodeCss", () => {
     expect(css).toContain("text-transform: uppercase;");
     expect(css).toContain("color: rgba(26, 51, 77, 1);");
     expect(css).not.toContain("background:");
+  });
+
+  it("reads REST-shape TypeStyle fields (fontFamily/fontStyle/fontWeight)", () => {
+    const css = generateNodeCss(
+      makeNode({
+        type: "TEXT",
+        characters: "Welcome back",
+        style: {
+          fontFamily: "Inter",
+          fontStyle: "Bold",
+          fontWeight: 700,
+          fontSize: 18,
+          lineHeightPx: 26,
+          letterSpacing: 1,
+          textAlignHorizontal: "RIGHT",
+        },
+      }),
+    );
+    expect(css).toContain('font-family: "Inter";');
+    expect(css).toContain("font-weight: 700;");
+    expect(css).toContain("font-size: 18px;");
+    expect(css).toContain("line-height: 26px;");
+    expect(css).toContain("letter-spacing: 1px;");
+    expect(css).toContain("text-align: right;");
+  });
+
+  it("derives weight and italics from a REST fontStyle when no numeric weight is given", () => {
+    const css = generateNodeCss(
+      makeNode({
+        type: "TEXT",
+        style: { fontFamily: "Roboto", fontStyle: "Italic", fontSize: 12 },
+      }),
+    );
+    expect(css).toContain('font-family: "Roboto";');
+    expect(css).toContain("font-style: italic;");
+    expect(css).not.toContain("font-weight:");
+  });
+
+  it("prefers a numeric REST fontWeight over the style-name lookup", () => {
+    const css = generateNodeCss(
+      makeNode({
+        type: "TEXT",
+        style: { fontFamily: "Roboto", fontStyle: "Regular", fontWeight: 350 },
+      }),
+    );
+    expect(css).toContain("font-weight: 350;");
   });
 
   it("supports PERCENT letter-spacing and lineHeight", () => {

@@ -14,6 +14,17 @@ export interface NodeBatch {
 
 export type FetchNodeSubtrees = (ids: readonly string[]) => Promise<NodeBatch>;
 
+function findParentInSubtree(node: FigmaNode, childId: string): FigmaNode | null {
+  const children = Array.isArray(node.children) ? (node.children as FigmaNode[]) : [];
+  for (const child of children) {
+    if (!child || typeof child !== "object") continue;
+    if (child.id === childId) return node;
+    const deeper = findParentInSubtree(child, childId);
+    if (deeper) return deeper;
+  }
+  return null;
+}
+
 export class FrameStore {
   private readonly cache: LruCache<FigmaNode | null>;
   private readonly components = new Map<string, FigmaComponentMeta>();
@@ -62,6 +73,30 @@ export class FrameStore {
   /** Component metadata seen while loading subtrees; undefined until its batch arrives. */
   componentMeta(id: string): FigmaComponentMeta | undefined {
     return this.components.get(id);
+  }
+
+  /**
+   * The node's direct parent inside a cached subtree — the inspect panel shows position
+   * relative to it. null when the node is itself a cached top-level subtree root (its parent
+   * is the page, so position stays page-absolute); undefined when no loaded subtree contains
+   * the node.
+   */
+  parentOf(nodeId: string): FigmaNode | null | undefined {
+    for (const root of this.cachedRoots()) {
+      if (root.id === nodeId) return null;
+      const parent = findParentInSubtree(root, nodeId);
+      if (parent) return parent;
+    }
+    return undefined;
+  }
+
+  private cachedRoots(): FigmaNode[] {
+    const roots: FigmaNode[] = [];
+    for (const id of this.cache.keys()) {
+      const node = this.cache.get(id);
+      if (node) roots.push(node);
+    }
+    return roots;
   }
 
   isPending(id: string): boolean {

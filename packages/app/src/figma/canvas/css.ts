@@ -1,5 +1,6 @@
 import type { FigmaNode } from "@jagentdesk/protocol/figma/rpc-schemas";
 import type { FigmaColor } from "./protocol-types";
+import { baseTextStyle } from "../renderer/node-props";
 
 // CSS generation for the Inspect panel (spec 32.5.2). Input is a raw Figma REST node
 // (`geometry=paths`); unknown or missing properties are skipped so partial nodes still produce
@@ -121,21 +122,30 @@ function gradientStops(paint: Dict): string {
   return stopSpec(paint).join(", ");
 }
 
-function stopSpec(paint: Dict): string[] {
+/** One gradient stop, kept structured so the inspect panel never re-parses the CSS string. */
+export interface GradientStopInfo {
+  /** The stop colour as CSS, e.g. `rgba(79, 70, 229, 1)`. */
+  color: string;
+  /** Stop position along the gradient axis, 0–100. */
+  position: number;
+}
+
+function stopEntries(paint: Dict): GradientStopInfo[] {
   return asArray(paint.gradientStops)
     .map((entry) => asDict(entry))
     .filter((stop): stop is Dict => stop !== null)
-    .map(
-      (stop) =>
-        `${colorToCss(stop.color, stop.opacity)} ${round((asNumber(stop.position) ?? 0) * 100)}%`,
-    );
+    .map((stop) => ({
+      color: colorToCss(stop.color, stop.opacity),
+      position: round((asNumber(stop.position) ?? 0) * 100),
+    }));
+}
+
+function stopSpec(paint: Dict): string[] {
+  return stopEntries(paint).map((stop) => `${stop.color} ${stop.position}%`);
 }
 
 function stopColors(paint: Dict): string[] {
-  return asArray(paint.gradientStops)
-    .map((entry) => asDict(entry))
-    .filter((stop): stop is Dict => stop !== null)
-    .map((stop) => colorToCss(stop.color, stop.opacity));
+  return stopEntries(paint).map((stop) => stop.color);
 }
 
 /** The CSS gradient function for one REST/Link paint, or null when it is not a gradient. */
@@ -162,6 +172,8 @@ export interface GradientFillInfo {
   css: string;
   /** The stop list, e.g. `rgba(255, 255, 255, 1) 0%, rgba(0, 0, 0, 1) 100%`. */
   stops: string;
+  /** The same stops, one entry per stop — the inspect panel renders a row per entry. */
+  stopEntries: GradientStopInfo[];
   /** Stop colors in position order, for the native fallback swatch. */
   colors: string[];
   /** The gradient axis in normalized node space (REST handles; defaults to left→right). */
@@ -181,6 +193,7 @@ export function gradientFills(node: FigmaNode): GradientFillInfo[] {
       type,
       css,
       stops: gradientStops(paint),
+      stopEntries: stopEntries(paint),
       colors: stopColors(paint),
       start: handlePosition(paint.gradientHandlePositions, 0) ?? { x: 0, y: 0.5 },
       end: handlePosition(paint.gradientHandlePositions, 1) ?? { x: 1, y: 0.5 },
@@ -346,12 +359,14 @@ function weightOfStyle(style: string | undefined): number {
 function textFrom(node: Dict): string[] {
   if (asString(node.type) !== "TEXT") return [];
   const style = asDict(node.style) ?? {};
-  const fontName = asDict(style.fontName);
+  // REST TypeStyle exposes family/style/weight as top-level fields while the Plugin API nests
+  // them under fontName; baseTextStyle normalises both shapes (see renderer/node-props.ts).
+  const textStyle = baseTextStyle(node as unknown as FigmaNode);
   const lines: string[] = [];
-  const family = asString(fontName?.family);
+  const family = textStyle.fontFamily;
   if (family) lines.push(`font-family: "${family}";`);
-  const styleName = asString(fontName?.style);
-  const weight = weightOfStyle(styleName);
+  const styleName = textStyle.fontStyle;
+  const weight = textStyle.fontWeight ?? weightOfStyle(styleName);
   if (weight !== 400) lines.push(`font-weight: ${weight};`);
   if (styleName && /italic|oblique/i.test(styleName)) lines.push("font-style: italic;");
   const size = asNumber(style.fontSize);
