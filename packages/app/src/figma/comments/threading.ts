@@ -18,14 +18,17 @@ export function buildThreads(comments: readonly FigmaComment[]): CommentThread[]
   const childrenOf = new Map<string, FigmaComment[]>();
   const roots: FigmaComment[] = [];
   for (const comment of comments) {
-    if (comment.parentId === null) {
+    // Figma's REST shape uses "" (not null) for "no parent"; an empty parentId is a root, and the
+    // null type union is kept because the server normalizer can emit null too.
+    const parentId = comment.parentId?.trim() ?? "";
+    if (parentId === "") {
       roots.push(comment);
       continue;
     }
-    if (!byId.has(comment.parentId)) continue;
-    const siblings = childrenOf.get(comment.parentId);
+    if (!byId.has(parentId)) continue;
+    const siblings = childrenOf.get(parentId);
     if (siblings) siblings.push(comment);
-    else childrenOf.set(comment.parentId, [comment]);
+    else childrenOf.set(parentId, [comment]);
   }
   const threads: CommentThread[] = [];
   for (const root of roots) {

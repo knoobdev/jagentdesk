@@ -48,6 +48,18 @@ describe("buildThreads", () => {
     ]);
     expect(threads[0].replies.map((r) => r.id)).toEqual(["x"]);
   });
+
+  it("treats an empty-string parentId like null: the comment stays a root", () => {
+    const threads = buildThreads([
+      comment("empty", { parentId: "" }),
+      comment("spaced", { parentId: "  " }),
+      comment("null", { parentId: null }),
+      comment("child", { parentId: "empty" }),
+    ]);
+    expect(threads.map((t) => t.root.id).sort()).toEqual(["empty", "null", "spaced"]);
+    const empty = threads.find((t) => t.root.id === "empty");
+    expect(empty?.replies.map((r) => r.id)).toEqual(["child"]);
+  });
 });
 
 describe("filterThreadsByNode", () => {

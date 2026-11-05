@@ -41,6 +41,37 @@ export function nodeIsVisible(node: FigmaNode): boolean {
   return node.visible !== false;
 }
 
+/**
+ * Rewrite a subtree in frame-local coordinates: subtract the frame's absoluteBoundingBox origin
+ * from every node's box and pin each node's transform to that local position. The web player's
+ * canvas spans one frame, and the renderer draws with the absolute coordinates it is handed, so
+ * drawing a frame at x=1200 without localizing puts the whole frame off-canvas. Real Figma REST
+ * nodes carry no `absoluteTransform` (that field is plugin-only) — position comes from
+ * `absoluteBoundingBox`, and any transforms riding on the payload are replaced outright.
+ */
+export function toFrameLocalNodes(root: FigmaNode, origin: Rect): FigmaNode {
+  const localize = (node: FigmaNode): FigmaNode => {
+    const copy: FigmaNode = { ...node };
+    delete copy.absoluteTransform;
+    delete copy.relativeTransform;
+    const bounds = nodeBounds(node);
+    if (bounds) {
+      const x = bounds.x - origin.x;
+      const y = bounds.y - origin.y;
+      copy.absoluteBoundingBox = { x, y, width: bounds.width, height: bounds.height };
+      const rotation = readNumber(node.rotation) ?? 0;
+      if (rotation === 0)
+        copy.absoluteTransform = [
+          [1, 0, x],
+          [0, 1, y],
+        ];
+    }
+    if (Array.isArray(node.children)) copy.children = node.children.map(localize);
+    return copy;
+  };
+  return localize(root);
+}
+
 /** The first visible solid fill's colour, as Figma reports it (components 0–1). */
 export function nodeSolidColor(node: FigmaNode): RGBA | null {
   if (!Array.isArray(node.fills)) return null;

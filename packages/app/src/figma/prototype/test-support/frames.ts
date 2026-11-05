@@ -1,4 +1,11 @@
-import type { FigmaNode, FigmaInteraction } from "@jagentdesk/protocol/figma/rpc-schemas";
+import type {
+  FigmaFrameSummary,
+  FigmaInteraction,
+  FigmaNode,
+  FigmaOutline,
+  FigmaPage,
+  FigmaPrototype,
+} from "@jagentdesk/protocol/figma/rpc-schemas";
 
 export interface NodeSpec {
   id: string;
@@ -224,3 +231,27 @@ export const NAVIGATE_B: FigmaInteraction["action"] = {
   navigation: "NAVIGATE",
   destinationId: "2:1",
 };
+
+export function frameSummary(id: string, name: string, x = 0, y = 0): FigmaFrameSummary {
+  return { id, name, type: "FRAME", bounds: { x, y, width: 375, height: 600 } };
+}
+
+export function page(spec: Partial<FigmaPage> & { id: string; name: string }): FigmaPage {
+  return { backgroundColor: undefined, frames: [], flowStartingPoints: [], ...spec };
+}
+
+export function outline(pages: FigmaPage[]): FigmaOutline {
+  return {
+    fileKey: "file-1",
+    name: "Mobile App",
+    version: "v1",
+    lastModified_ms: 1_700_000_000_000,
+    editorType: "figma",
+    pages,
+    source: "rest",
+  };
+}
+
+export function flow(nodeId: string, name: string, pageId = "p1"): FigmaPrototype["flows"][number] {
+  return { nodeId, name, pageId };
+}

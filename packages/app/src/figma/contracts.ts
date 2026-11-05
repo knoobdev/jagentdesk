@@ -37,6 +37,8 @@ export interface CommentsPanelProps {
   selection: FigmaSelection;
   /** Pan/zoom the canvas to a comment's node. */
   onFocusNode: (nodeId: string) => void;
+  /** Pan the canvas to a comment's x/y pin when it has no node. */
+  onFocusPoint?: (point: { x: number; y: number }) => void;
 }
 
 export interface VersionsPanelProps {
