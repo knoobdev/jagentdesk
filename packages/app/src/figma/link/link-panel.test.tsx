@@ -161,7 +161,10 @@ describe("FigmaLinkPanel", () => {
   });
 
   afterEach(() => {
-    if (root) act(() => root.unmount());
+    if (root) {
+      const mounted = root;
+      act(() => mounted.unmount());
+    }
     root = null;
     container?.remove();
     container = null;
@@ -170,8 +173,9 @@ describe("FigmaLinkPanel", () => {
   function render() {
     container = document.createElement("div");
     document.body.appendChild(container);
-    root = createRoot(container);
-    act(() => root.render(<FigmaLinkPanel serverId="s1" />));
+    const mounted = createRoot(container);
+    root = mounted;
+    act(() => mounted.render(<FigmaLinkPanel serverId="s1" />));
     return container;
   }
 

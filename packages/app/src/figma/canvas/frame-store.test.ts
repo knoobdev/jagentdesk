@@ -104,7 +104,7 @@ describe("FrameStore lazy batching", () => {
     // keeps calling load() for the same visible ids. Before the fix every one of those calls
     // scheduled a flush that found an empty queue and rescheduled itself forever: the microtask
     // queue never drained, the main thread never yielded, and the page froze.
-    const fetchNodes = vi.fn(() => new Promise<Record<string, FigmaNode | null>>(() => {}));
+    const fetchNodes = vi.fn(() => new Promise<NodeBatch>(() => {}));
     const store = new FrameStore(fetchNodes);
 
     const scheduled: Array<() => void> = [];

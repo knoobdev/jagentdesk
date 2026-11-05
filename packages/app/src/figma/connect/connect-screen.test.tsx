@@ -210,7 +210,10 @@ describe("FigmaConnectScreen", () => {
   });
 
   afterEach(() => {
-    if (root) act(() => root.unmount());
+    if (root) {
+      const mounted = root;
+      act(() => mounted.unmount());
+    }
     root = null;
     container?.remove();
     container = null;
@@ -219,9 +222,10 @@ describe("FigmaConnectScreen", () => {
   function render() {
     container = document.createElement("div");
     document.body.appendChild(container);
-    root = createRoot(container);
+    const mounted = createRoot(container);
+    root = mounted;
     act(() =>
-      root!.render(<FigmaConnectScreen serverId="s1" connections={[]} onConnected={undefined} />),
+      mounted.render(<FigmaConnectScreen serverId="s1" connections={[]} onConnected={undefined} />),
     );
     return container;
   }

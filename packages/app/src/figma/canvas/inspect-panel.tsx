@@ -1,7 +1,7 @@
 // Right-hand inspect panel: selected node fields, edit controls that build ops,
 // generated CSS, and an export section.
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { View, Text, ScrollView } from "react-native";
+import { View, Text, ScrollView, type StyleProp, type ViewStyle } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import type { Theme } from "@/styles/theme";
 import { Input, ErrorBanner } from "@/jira/ui/primitives";
@@ -427,6 +427,7 @@ function AutoLayoutSection({
             <PaddingField
               side="top"
               label="Top"
+              node={node}
               value={num(node.paddingTop)}
               disabled={disabled}
               apply={apply}
@@ -434,6 +435,7 @@ function AutoLayoutSection({
             <PaddingField
               side="right"
               label="Right"
+              node={node}
               value={num(node.paddingRight)}
               disabled={disabled}
               apply={apply}
@@ -441,6 +443,7 @@ function AutoLayoutSection({
             <PaddingField
               side="bottom"
               label="Bottom"
+              node={node}
               value={num(node.paddingBottom)}
               disabled={disabled}
               apply={apply}
@@ -448,6 +451,7 @@ function AutoLayoutSection({
             <PaddingField
               side="left"
               label="Left"
+              node={node}
               value={num(node.paddingLeft)}
               disabled={disabled}
               apply={apply}
@@ -467,8 +471,11 @@ const GRADIENT_LABELS: Record<string, string> = {
 };
 
 function GradientFillRow({ fill }: { fill: GradientFillInfo }) {
-  const swatchStyle = isWeb
-    ? [{ background: fill.css }, styles.swatch]
+  // Web renders the gradient through the CSS `background` shorthand (not in RN's ViewStyle);
+  // native falls back to the first stop color. Keep the whole thing typed as a View style so
+  // <View style=…> accepts the array — the web-only `background` is an intentional escape.
+  const swatchStyle: StyleProp<ViewStyle> = isWeb
+    ? [{ background: fill.css } as unknown as ViewStyle, styles.swatch]
     : [{ backgroundColor: fill.colors[0] ?? "transparent" }, styles.swatch];
   return (
     <View style={styles.gradientRow} testID="figma-inspect-gradient-fill">
