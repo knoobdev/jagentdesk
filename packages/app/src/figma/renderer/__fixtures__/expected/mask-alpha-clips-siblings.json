@@ -1,11 +1,11 @@
 [
   ["save"],
-  ["setTransform", 2, 0, 0, 2, 0, 0],
+  ["setTransform", 1, 0, 0, 1, 0, 0],
   ["save"],
-  ["setTransform", 2, 0, 0, 2, 0, 0],
+  ["setTransform", 1, 0, 0, 1, 0, 0],
   ["set:globalAlpha", 1],
   ["save"],
-  ["setTransform", 2, 0, 0, 2, 0, 0],
+  ["setTransform", 1, 0, 0, 1, 0, 0],
   [
     "clip",
     {
@@ -14,7 +14,7 @@
     "nonzero"
   ],
   ["save"],
-  ["setTransform", 2, 0, 0, 2, 0, 0],
+  ["setTransform", 1, 0, 0, 1, 0, 0],
   ["set:globalAlpha", 1],
   ["save"],
   ["set:globalAlpha", 1],

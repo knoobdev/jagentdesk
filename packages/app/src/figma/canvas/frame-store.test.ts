@@ -80,6 +80,53 @@ describe("FrameStore lazy batching", () => {
     expect(fetchNodes).toHaveBeenCalledTimes(2);
   });
 
+  it("does not starve the microtask queue while a fetch is in flight", async () => {
+    // The fetcher never resolves, so the batch stays in flight while the canvas paint loop
+    // keeps calling load() for the same visible ids. Before the fix every one of those calls
+    // scheduled a flush that found an empty queue and rescheduled itself forever: the microtask
+    // queue never drained, the main thread never yielded, and the page froze.
+    const fetchNodes = vi.fn(() => new Promise<Record<string, FigmaNode | null>>(() => {}));
+    const store = new FrameStore(fetchNodes);
+
+    const scheduled: Array<() => void> = [];
+    const queueSpy = vi.spyOn(globalThis, "queueMicrotask").mockImplementation((cb) => {
+      scheduled.push(cb);
+    });
+    let flushRuns = 0;
+    const drain = () => {
+      // A self-rescheduling flush never empties the queue, so bound the loop: hitting the cap
+      // is itself the freeze.
+      for (let iterations = 0; scheduled.length > 0 && iterations < 1_000; iterations++) {
+        const task = scheduled.shift()!;
+        flushRuns += 1;
+        task();
+      }
+    };
+
+    try {
+      void store.load(["1:1"]);
+      drain();
+      expect(flushRuns).toBe(1);
+      expect(fetchNodes).toHaveBeenCalledTimes(1);
+
+      for (let frame = 0; frame < 60; frame++) {
+        void store.load(["1:1"]);
+        drain();
+      }
+      expect(flushRuns).toBeLessThanOrEqual(5);
+      expect(scheduled).toHaveLength(0);
+      expect(store.isPending("1:1")).toBe(true);
+
+      // A genuinely new id still schedules work while another batch is in flight.
+      void store.load(["1:2"]);
+      drain();
+      expect(fetchNodes).toHaveBeenCalledTimes(2);
+      expect(fetchNodes).toHaveBeenLastCalledWith(["1:2"]);
+    } finally {
+      queueSpy.mockRestore();
+    }
+  });
+
   it("notifies subscribers when batches land and stop after unsubscribe", async () => {
     const { fetchNodes } = recordingFetcher();
     const store = new FrameStore(fetchNodes);

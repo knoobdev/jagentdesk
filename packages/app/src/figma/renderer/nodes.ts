@@ -3,7 +3,14 @@
 // strokes and effects, in Figma paint order.
 import type { FigmaNode } from "@jagentdesk/protocol/figma/rpc-schemas";
 import type { Paint } from "./node-props";
-import { boundsIntersect, boundsOfRect, type RenderMatrix } from "./matrix";
+import {
+  boundsIntersect,
+  boundsOfRect,
+  identity,
+  multiply,
+  translate,
+  type RenderMatrix,
+} from "./matrix";
 import {
   absoluteBoxOf,
   clipsContent,
@@ -56,6 +63,16 @@ export interface DrawState {
   options: FigmaRenderOptions;
   missing: MissingSink;
   scale: number;
+  /** The caller's CTM when draw() began: node transforms compose with it, never replace it. */
+  camera: RenderMatrix;
+}
+
+/** Reads the caller's current transform; contexts without `getTransform` draw at 1:1 from origin. */
+export function captureCamera(ctx: FigmaCanvasContext): RenderMatrix {
+  const t = typeof ctx.getTransform === "function" ? ctx.getTransform() : null;
+  if (!t) return identity();
+  const m: RenderMatrix = { a: t.a, b: t.b, c: t.c, d: t.d, e: t.e, f: t.f };
+  return Object.values(m).every((v) => Number.isFinite(v)) ? m : identity();
 }
 
 function resolveNode(state: DrawState, node: FigmaNode): FigmaNode {
@@ -65,8 +82,10 @@ function resolveNode(state: DrawState, node: FigmaNode): FigmaNode {
 }
 
 function setNodeTransform(state: DrawState, m: RenderMatrix): void {
-  const s = state.scale;
-  state.ctx.setTransform(m.a * s, m.b * s, m.c * s, m.d * s, m.e * s, m.f * s);
+  // Compose with the camera the caller set (zoom, pan, device-pixel scale): an absolute
+  // setTransform here discarded the pan offset, so drawings stayed while selection moved.
+  const c = multiply(state.camera, m);
+  state.ctx.setTransform(c.a, c.b, c.c, c.d, c.e, c.f);
 }
 
 /** True when the node's absolute box lies entirely outside the render viewport. */
@@ -93,8 +112,9 @@ function drawFallback(state: DrawState, node: FigmaNode, transform: RenderMatrix
   if (!box) return;
   const { ctx } = state;
   ctx.save();
-  const s = state.scale;
-  ctx.setTransform(s, 0, 0, s, box.x * s, box.y * s);
+  // The raster covers the node's absolute box in Figma space; the camera turns that into pixels.
+  const c = multiply(state.camera, translate(box.x, box.y));
+  ctx.setTransform(c.a, c.b, c.c, c.d, c.e, c.f);
   ctx.globalAlpha = nodeOpacity(node);
   ctx.drawImage(raster, 0, 0, box.width, box.height);
   ctx.restore();
@@ -282,7 +302,10 @@ function drawNode(state: DrawState, node: FigmaNode): void {
 export function drawTree(state: DrawState, root: FigmaNode): void {
   const { ctx } = state;
   ctx.save();
-  ctx.setTransform(state.scale, 0, 0, state.scale, 0, 0);
+  // Every node re-sets its own transform composed with `state.camera`; this reset only restores
+  // the caller's baseline between subtrees so one frame's node transform cannot leak into the next.
+  const c = state.camera;
+  ctx.setTransform(c.a, c.b, c.c, c.d, c.e, c.f);
   drawNode(state, resolveNode(state, root));
   ctx.restore();
 }

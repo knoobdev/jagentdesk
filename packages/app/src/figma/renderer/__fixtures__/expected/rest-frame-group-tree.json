@@ -1,0 +1,131 @@
+[
+  ["save"],
+  ["setTransform", 1, 0, 0, 1, 0, 0],
+  ["save"],
+  ["setTransform", 1, 0, 0, 1, 120, 200],
+  ["set:globalAlpha", 1],
+  [
+    "clip",
+    {
+      "commands": [["rect", 0, 0, 300, 400]]
+    },
+    null
+  ],
+  ["save"],
+  ["set:globalAlpha", 1],
+  ["set:fillStyle", "rgba(255, 255, 255, 1)"],
+  [
+    "fill",
+    {
+      "commands": [
+        ["moveTo", 0, 0],
+        ["lineTo", 300, 0],
+        ["lineTo", 300, 400],
+        ["lineTo", 0, 400],
+        ["lineTo", 0, 0],
+        ["closePath"]
+      ]
+    },
+    "nonzero"
+  ],
+  ["restore"],
+  ["save"],
+  ["save"],
+  ["setTransform", 1, 0, 0, 1, 160, 270],
+  ["set:globalAlpha", 1],
+  ["save"],
+  ["save"],
+  ["setTransform", 1, 0, 0, 1, 160, 270],
+  ["set:globalAlpha", 1],
+  ["save"],
+  ["set:globalAlpha", 1],
+  ["set:fillStyle", "rgba(0, 128, 0, 1)"],
+  [
+    "fill",
+    {
+      "svg": "M 0 0 L 40 0 L 40 20 Z"
+    },
+    "nonzero"
+  ],
+  ["restore"],
+  ["restore"],
+  ["save"],
+  ["setTransform", 1, 0, 0, 1, 170, 310],
+  ["set:globalAlpha", 1],
+  ["save"],
+  ["set:globalAlpha", 1],
+  ["set:fillStyle", "rgba(204, 51, 51, 1)"],
+  [
+    "fill",
+    {
+      "commands": [
+        ["moveTo", 0, 0],
+        ["lineTo", 100, 0],
+        ["lineTo", 100, 50],
+        ["lineTo", 0, 50],
+        ["lineTo", 0, 0],
+        ["closePath"]
+      ]
+    },
+    "nonzero"
+  ],
+  ["restore"],
+  ["restore"],
+  ["save"],
+  ["setTransform", 1, 0, 0, 1, 160, 380],
+  ["set:globalAlpha", 1],
+  ["set:font", "400 16px \"Inter\""],
+  ["measureText", "REST"],
+  ["set:font", "400 16px \"Inter\""],
+  ["measureText", " "],
+  ["set:font", "400 16px \"Inter\""],
+  ["measureText", "shape"],
+  ["set:textAlign", "left"],
+  ["set:textBaseline", "alphabetic"],
+  ["set:font", "400 16px \"Inter\""],
+  ["measureText", "REST"],
+  ["set:font", "400 16px \"Inter\""],
+  ["measureText", " "],
+  ["set:font", "400 16px \"Inter\""],
+  ["measureText", "shape"],
+  ["set:font", "400 16px \"Inter\""],
+  ["set:fillStyle", "rgba(26, 26, 26, 1)"],
+  ["set:globalAlpha", 1],
+  ["fillText", "REST", 0, 12.8],
+  ["set:font", "400 16px \"Inter\""],
+  ["set:fillStyle", "rgba(26, 26, 26, 1)"],
+  ["set:globalAlpha", 1],
+  ["fillText", " ", 32, 12.8],
+  ["set:font", "400 16px \"Inter\""],
+  ["set:fillStyle", "rgba(26, 26, 26, 1)"],
+  ["set:globalAlpha", 1],
+  ["fillText", "shape", 40, 12.8],
+  ["restore"],
+  ["save"],
+  ["setTransform", 0.7071, 0.7071, -0.7071, 0.7071, 310, 440],
+  ["set:globalAlpha", 1],
+  ["save"],
+  ["set:globalAlpha", 1],
+  ["set:fillStyle", "rgba(0, 153, 51, 1)"],
+  [
+    "fill",
+    {
+      "commands": [
+        ["moveTo", 0, 0],
+        ["lineTo", 40, 0],
+        ["lineTo", 40, 40],
+        ["lineTo", 0, 40],
+        ["lineTo", 0, 0],
+        ["closePath"]
+      ]
+    },
+    "nonzero"
+  ],
+  ["restore"],
+  ["restore"],
+  ["restore"],
+  ["restore"],
+  ["restore"],
+  ["restore"],
+  ["restore"]
+]

@@ -6,10 +6,9 @@ import { describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { FigmaNode } from "@jagentdesk/protocol/figma/rpc-schemas";
-import { createFigmaRenderer } from "./index";
-import { fakeImage, RecordingContext } from "./__fixtures__/recording-context";
-import type { FigmaRenderOptions } from "./types";
+import { loadNode, recordedOps } from "./__fixtures__/render-harness";
+
+export { defaultRenderOptions, loadNode, recordedOps } from "./__fixtures__/render-harness";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const nodesDir = path.join(here, "__fixtures__", "nodes");
@@ -21,31 +20,6 @@ function fixtureNames(): string[] {
     .filter((f) => f.endsWith(".json"))
     .map((f) => f.replace(/\.json$/, ""))
     .sort();
-}
-
-export function loadNode(name: string): FigmaNode {
-  return JSON.parse(readFileSync(path.join(nodesDir, `${name}.json`), "utf8")) as FigmaNode;
-}
-
-/** Deterministic options: every image, fallback raster and font resolves. */
-export function defaultRenderOptions(overrides?: Partial<FigmaRenderOptions>): FigmaRenderOptions {
-  return {
-    scale: 2,
-    imageForRef: (imageRef) => fakeImage(imageRef, 120, 80) as unknown as CanvasImageSource,
-    fallbackForNode: (nodeId) => fakeImage(`raster:${nodeId}`) as unknown as CanvasImageSource,
-    fontAvailable: () => true,
-    ...overrides,
-  };
-}
-
-export function recordedOps(node: FigmaNode, options?: Partial<FigmaRenderOptions>): unknown[] {
-  const ctx = new RecordingContext();
-  createFigmaRenderer().draw(
-    ctx as unknown as CanvasRenderingContext2D,
-    node,
-    defaultRenderOptions(options),
-  );
-  return ctx.ops;
 }
 
 describe("renderer fixture command streams", () => {

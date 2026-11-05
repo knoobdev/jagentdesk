@@ -1,8 +1,8 @@
 [
   ["save"],
-  ["setTransform", 2, 0, 0, 2, 0, 0],
+  ["setTransform", 1, 0, 0, 1, 0, 0],
   ["save"],
-  ["setTransform", 2, 0, 0, 2, 400, 20],
+  ["setTransform", 1, 0, 0, 1, 200, 10],
   ["set:globalAlpha", 1],
   ["save"],
   ["set:globalAlpha", 1],

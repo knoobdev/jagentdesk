@@ -9,7 +9,11 @@ import type { FigmaNode } from "@jagentdesk/protocol/figma/rpc-schemas";
 export type FigmaCanvasContext = CanvasRenderingContext2D;
 
 export interface FigmaRenderOptions {
-  /** Device pixels per Figma unit (zoom × devicePixelRatio). */
+  /**
+   * Device pixels per Figma unit (zoom × devicePixelRatio), used only for what the context
+   * transform cannot carry (shadow offsets, blur filters). Zoom and pan live on the context
+   * transform itself: `draw` composes every node transform with the caller's current transform.
+   */
   scale: number;
   /** Figma-space rectangle that is visible; nodes outside it are skipped. */
   viewport?: { x: number; y: number; width: number; height: number };

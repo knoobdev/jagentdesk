@@ -1,8 +1,8 @@
 [
   ["save"],
-  ["setTransform", 2, 0, 0, 2, 0, 0],
+  ["setTransform", 1, 0, 0, 1, 0, 0],
   ["save"],
-  ["setTransform", 2, 0, 0, 2, 0, 0],
+  ["setTransform", 1, 0, 0, 1, 0, 0],
   ["set:globalAlpha", 1],
   [
     "clip",
@@ -13,7 +13,7 @@
   ],
   ["save"],
   ["save"],
-  ["setTransform", 2, 0, 0, 2, 20, 20],
+  ["setTransform", 1, 0, 0, 1, 10, 10],
   ["set:globalAlpha", 1],
   ["save"],
   ["set:globalAlpha", 1],
@@ -35,7 +35,7 @@
   ["restore"],
   ["restore"],
   ["save"],
-  ["setTransform", 2, 0, 0, 2, 160, 160],
+  ["setTransform", 1, 0, 0, 1, 80, 80],
   ["set:globalAlpha", 1],
   ["save"],
   ["set:globalAlpha", 1],
