@@ -1,0 +1,219 @@
+{
+  "name": "Checkout Redesign",
+  "role": "owner",
+  "lastModified": "2026-04-01T12:00:00Z",
+  "editorType": "figma",
+  "thumbnailUrl": "https://figma-alpha-api.s3.us-west-2.amazonaws.com/images/3a0f4b1e-77aa-4c9d-b0a1-5f2e8c6d1b09",
+  "version": "1775068800",
+  "document": {
+    "id": "0:0",
+    "name": "Document",
+    "type": "DOCUMENT",
+    "scrollBehavior": "ZOOM_AND_PAN",
+    "children": [
+      {
+        "id": "0:1",
+        "name": "Prototype",
+        "type": "CANVAS",
+        "backgroundColor": "#e5e5e5",
+        "scrollBehavior": "ZOOM_AND_PAN",
+        "prototypeDevice": {
+          "type": "PRESET",
+          "preset": "MONITOR",
+          "orientation": "PORTRAIT",
+          "backgroundColor": "#ffffff"
+        },
+        "flowStartingPoints": [
+          { "nodeId": "1:2", "name": "Onboarding" },
+          { "nodeId": "1:20", "name": "Checkout" }
+        ],
+        "children": [
+          {
+            "id": "1:2",
+            "name": "Welcome",
+            "type": "FRAME",
+            "scrollBehavior": "SMART_ANIMATE",
+            "absoluteBoundingBox": { "x": -400, "y": -120, "width": 375, "height": 812 },
+            "children": [
+              {
+                "id": "1:3",
+                "name": "Get started",
+                "type": "FRAME",
+                "absoluteBoundingBox": { "x": -343, "y": 512, "width": 263, "height": 48 },
+                "interactions": [
+                  {
+                    "trigger": { "type": "ON_CLICK" },
+                    "actions": [
+                      {
+                        "transition": {
+                          "type": "DISSOLVE",
+                          "easing": { "type": "EASE_IN_AND_OUT" },
+                          "duration": 300
+                        },
+                        "destinationId": "1:20",
+                        "navigation": "NAVIGATE",
+                        "preservedScrollPositionOnExit": false,
+                        "resetVideoPosition": false,
+                        "type": "NODE"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "1:4",
+                "name": "Tooltip hotspot",
+                "type": "RECTANGLE",
+                "absoluteBoundingBox": { "x": -343, "y": 240, "width": 263, "height": 96 },
+                "interactions": [
+                  {
+                    "trigger": { "type": "MOUSE_ENTER", "delay": 500 },
+                    "actions": [
+                      {
+                        "transition": {
+                          "type": "PUSH",
+                          "direction": "LEFT",
+                          "easing": { "type": "EASE_OUT" },
+                          "duration": 400
+                        },
+                        "destinationId": "1:30",
+                        "navigation": "OVERLAY",
+                        "overlayRelativePosition": { "x": 12, "y": 24 },
+                        "type": "NODE"
+                      },
+                      { "type": "URL", "url": "https://developers.figma.com/docs/rest-api/" }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "1:5",
+                "name": "Variant switch",
+                "type": "FRAME",
+                "interactions": [
+                  {
+                    "trigger": { "type": "ON_CLICK" },
+                    "actions": [
+                      {
+                        "transition": null,
+                        "destinationId": "1:5:2",
+                        "navigation": "CHANGE_TO",
+                        "type": "NODE"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "1:20",
+            "name": "Cart",
+            "type": "FRAME",
+            "overflowDirection": "VERTICAL",
+            "transitionNodeID": "1:21",
+            "transitionDuration": 0,
+            "transitionEasing": "LINEAR",
+            "interactions": [
+              {
+                "trigger": { "type": "AFTER_TIMEOUT", "timeout": 2000 },
+                "actions": [
+                  {
+                    "transition": { "type": "INSTANT" },
+                    "destinationId": "1:31",
+                    "navigation": "SWAP",
+                    "type": "NODE"
+                  }
+                ]
+              },
+              { "trigger": { "type": "ON_PRESS" }, "actions": [{ "type": "BACK" }] },
+              { "trigger": { "type": "ON_HOVER" }, "actions": [{ "type": "CLOSE" }] },
+              {
+                "trigger": { "type": "ON_MEDIA_HIT", "mediaHitTime": 4.5 },
+                "actions": [
+                  {
+                    "transition": {
+                      "type": "SCROLL_ANIMATE",
+                      "easing": { "type": "LINEAR" },
+                      "duration": 0
+                    },
+                    "destinationId": "1:21",
+                    "navigation": "SCROLL_TO",
+                    "type": "NODE"
+                  }
+                ]
+              }
+            ],
+            "children": [
+              {
+                "id": "1:21",
+                "name": "Nested note",
+                "type": "FRAME",
+                "interactions": [
+                  {
+                    "trigger": { "type": "ON_CLICK" },
+                    "actions": [
+                      {
+                        "transition": {
+                          "type": "MOVE_IN",
+                          "direction": "TOP",
+                          "easing": {
+                            "type": "CUSTOM_CUBIC_BEZIER",
+                            "easingFunctionCubicBezier": { "x1": 0.42, "y1": 0, "x2": 0.58, "y2": 1 }
+                          },
+                          "duration": 250
+                        },
+                        "destinationId": "1:2",
+                        "navigation": "NAVIGATE",
+                        "type": "NODE"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "1:25",
+            "name": "Legacy handoff",
+            "type": "FRAME",
+            "transitionNodeID": "1:20",
+            "transitionDuration": 250,
+            "transitionEasing": "LINEAR"
+          }
+        ]
+      },
+      {
+        "id": "0:2",
+        "name": "Cover",
+        "type": "CANVAS",
+        "backgroundColor": "#ffffff",
+        "flowStartingPoints": [],
+        "children": [
+          {
+            "id": "2:1",
+            "name": "Cover frame",
+            "type": "FRAME",
+            "interactions": [
+              {
+                "trigger": { "type": "ON_CLICK" },
+                "actions": [
+                  {
+                    "transition": {
+                      "type": "DISSOLVE",
+                      "easing": { "type": "EASE_IN_AND_OUT" },
+                      "duration": 300
+                    },
+                    "destinationId": "1:2",
+                    "navigation": "NAVIGATE",
+                    "type": "NODE"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
