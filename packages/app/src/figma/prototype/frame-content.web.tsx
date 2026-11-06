@@ -2,7 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { useHostFeature } from "@/runtime/host-features";
 import { createFigmaRenderer } from "@/figma/renderer";
-import { isPinnedVersion, rasterRung, type RasterSpec } from "@/figma/canvas/assets";
+import {
+  backgroundBlurRasterRung,
+  isPinnedVersion,
+  rasterRung,
+  type FigmaFallbackHint,
+  type RasterSpec,
+} from "@/figma/canvas/assets";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import type { FigmaBytes, FigmaNode } from "@jagentdesk/protocol/figma/rpc-schemas";
 import { callFigma } from "./figma-api";
@@ -29,7 +35,9 @@ import type { FrameContentProps } from "./frame-content";
 // ADR-0042 fidelity path: with the host capability, known-TEXT fallbacks come as Figma-exported
 // outlined SVGs drawn at the absolute bounding box (crisp at any player zoom, correct glyphs
 // without the font), with one finite absolute-bounds PNG downgrade per node+snapshot; non-TEXT
-// rasters ride the quantized rung the player paints at instead of the legacy fixed scale 2.
+// rasters ride the quantized rung the player paints at instead of the legacy fixed scale 2;
+// fallbacks the renderer HINTS as visible BACKGROUND_BLUR ride min(rung, proven-correct scale)
+// — Figma's per-node export bakes no backdrop structure above that scale (ADR-0042 exception).
 // Without the capability every request is the exact legacy scale-2 crop PNG wire.
 
 interface MissingAssets {
@@ -161,6 +169,11 @@ export function FrameContent({ file, root, scale, overrides }: FrameContentProps
   // Node types the renderer revealed through `fallbackForNode(id, nodeType)` — only ids KNOWN
   // to be TEXT take the SVG route; everything else is default-crop PNG on the adaptive rung.
   const nodeTypes = useRef(new Map<string, "TEXT" | "OTHER">());
+  // Ids the renderer hinted as visible BACKGROUND_BLUR at their latest fallback ask (ADR-0042
+  // backdrop exception). Last-write-per-getter: every fallback node passes the getter on every
+  // paint it is drawn, so a hidden or removed effect lifts the cap on the next ask and a stale
+  // paint never re-applies it. Ids only — never the node tree.
+  const bgBlurNodes = useRef(new Set<string>());
   // Persistent per-node downgrade channel `${nodeId}@${version}` (ADR-0042): once a TEXT node's
   // SVG entry failed terminal, EVERY later read and fetch routes to the absolute-bounds PNG —
   // independent of the SVG entry's own retention, so the store reconciling it away cannot
@@ -189,11 +202,25 @@ export function FrameContent({ file, root, scale, overrides }: FrameContentProps
     [quality, scale],
   );
 
+  // The capped backdrop class (ADR-0042 exception): min(adaptive rung, proven-correct scale)
+  // for nodes the getter hinted as visible BACKGROUND_BLUR — Figma's per-node export bakes no
+  // backdrop above that scale, and asking a higher rung wastes the flat bytes.
+  const blurredRasterSpec = useCallback(
+    (bounds: "crop" | "absolute"): RasterSpec => ({
+      scale: quality ? backgroundBlurRasterRung(scale * (window.devicePixelRatio || 1)) : 2,
+      format: "png" as const,
+      bounds,
+    }),
+    [quality, scale],
+  );
+
   // ONE routing decision shared by the draw reads (fallbackForNode) and the fetches
   // (onMissing), so a read can never miss the cache its fetch went into — and a downgraded
   // TEXT never re-enters the SVG class (no per-paint ping-pong, root review bug 2).
   const routeSpecFor = useCallback(
     (nodeId: string, version: string): RasterSpec => {
+      if (quality && bgBlurNodes.current.has(nodeId))
+        return blurredRasterSpec(nodeTypes.current.get(nodeId) === "TEXT" ? "absolute" : "crop");
       if (quality && nodeTypes.current.get(nodeId) === "TEXT") {
         if (downgradedText.current.has(`${nodeId}@${version}`))
           return { scale: cropSpec().scale, format: "png", bounds: "absolute" };
@@ -201,7 +228,7 @@ export function FrameContent({ file, root, scale, overrides }: FrameContentProps
       }
       return cropSpec();
     },
-    [quality, cropSpec],
+    [quality, cropSpec, blurredRasterSpec],
   );
 
   const instanceIdRef = useRef<number | null>(null);
@@ -248,18 +275,16 @@ export function FrameContent({ file, root, scale, overrides }: FrameContentProps
       const claim = store.claim(ownerId, fillKey(ref));
       if (claim) imageClaims.push({ id: ref, claim });
     }
-    // Record the renderer's TEXT classification FIRST, then split the asks through the ONE
+    // Record the renderer's TEXT classification FIRST, then route EVERY ask through the ONE
     // route helper: known TEXT rides the outlined-SVG cache (or its persistent PNG channel once
-    // downgraded), everything else stays default-crop PNG (adaptive rung with the capability,
-    // legacy scale 2 without). `claim` keeps each class single-flight per dimensioned key, and
-    // same-spec ids share one batch.
+    // downgraded), getter-hinted BACKGROUND_BLUR rides the capped crop PNG (absolute for TEXT),
+    // everything else stays default-crop PNG (adaptive rung with the capability, legacy scale 2
+    // without). `claim` keeps each class single-flight per dimensioned key, and same-spec ids
+    // share one batch — the capped class never rides the adaptive batch's rung.
     for (const id of missing.textFallbackNodeIds ?? []) nodeTypes.current.set(id, "TEXT");
     const bySpec = new Map<string, { spec: RasterSpec; claims: RefClaim[] }>();
     for (const id of missing.fallbackNodeIds) {
-      const spec =
-        quality && nodeTypes.current.get(id) === "TEXT"
-          ? routeSpecFor(id, scope.version)
-          : cropSpec();
+      const spec = routeSpecFor(id, scope.version);
       const ns = `${spec.scale}@${spec.format}@${spec.bounds}`;
       const claim = store.claim(ownerId, rasterKey(id, scope.version, spec));
       if (!claim) continue;
@@ -304,9 +329,14 @@ export function FrameContent({ file, root, scale, overrides }: FrameContentProps
     [store, ownerId],
   );
   const fallbackForNode = useCallback(
-    (nodeId: string, nodeType?: string) => {
+    (nodeId: string, nodeType?: string, hint?: FigmaFallbackHint) => {
       if (!store || !scope) return null;
       if (nodeType) nodeTypes.current.set(nodeId, nodeType === "TEXT" ? "TEXT" : "OTHER");
+      // The classifier sees the hint BEFORE any cache choice: record true, drop anything else
+      // (false or absent) — W7 passes it fresh at every fallback ask, and the fetch side reads
+      // the SAME classification through routeSpecFor, so read and ask can never disagree.
+      if (hint?.backgroundBlur === true) bgBlurNodes.current.add(nodeId);
+      else bgBlurNodes.current.delete(nodeId);
       const isQualityText = quality && nodeTypes.current.get(nodeId) === "TEXT";
       const spec = routeSpecFor(nodeId, scope.version);
       const key = rasterKey(nodeId, scope.version, spec);
@@ -316,7 +346,7 @@ export function FrameContent({ file, root, scale, overrides }: FrameContentProps
       // painted — including FAILED entries, whose retention as a negative cache is what makes
       // the route finite (no refetch per paint).
       store.attachOwner(ownerId, key);
-      if (!isQualityText || entry.status !== "failed") return entry.image;
+      if (!isQualityText || spec.format !== "svg" || entry.status !== "failed") return entry.image;
       // Terminal SVG failure → engage the persistent downgrade channel: every later read and
       // fetch for this node+snapshot routes to the absolute-bounds PNG at the CURRENT rung.
       // Each rung is claimed exactly once (finite 1..4 lattice); the rung's own failed entry

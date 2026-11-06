@@ -42,7 +42,11 @@ const { theme, clientRef, callFigma, draws, missingByRoot, fidelityRef } = vi.ho
 
 interface DrawOptions {
   imageForRef: (ref: string) => HTMLImageElement | null;
-  fallbackForNode: (id: string, nodeType?: string) => HTMLImageElement | null;
+  fallbackForNode: (
+    id: string,
+    nodeType?: string,
+    hint?: { backgroundBlur?: boolean },
+  ) => HTMLImageElement | null;
   fallbackTextUsesAbsoluteBounds?: boolean;
   fontAvailable: (family: string, style: string) => boolean;
   onMissing: (missing: {
@@ -1173,6 +1177,228 @@ describe("FrameContent ADR-0042 quality path", () => {
     }
     const fontsGet = callFigma.mock.calls.filter((c) => c[1] === "figma.fonts.get.request");
     expect(fontsGet.length).toBeLessThanOrEqual(1); // bounded by the gate — no repaint feedback loop
+    view.unmount();
+  });
+});
+
+// ── ADR-0042 backdrop BACKGROUND_BLUR exception (prototype store-side) ──────────────────────
+// The player must never paint a hinted backdrop from Figma's flat per-node export above the
+// proven scale: the getter's hint is the classifier, ONE route decision feeds reads and fetches,
+// the store key of the capped ask is the only entry the node ever holds at that class, and the
+// adaptive/TEXT classes keep their rungs. Sibling of the canvas-hook describe.
+describe("FrameContent ADR-0042 backdrop BACKGROUND_BLUR cap", () => {
+  function pngCalls(): Array<Record<string, unknown>> {
+    return callFigma.mock.calls
+      .filter((c) => c[1] === "figma.file.render.request")
+      .map((c) => c[2] as Record<string, unknown>);
+  }
+
+  function pngCallsWhere(format: string, scale?: number): Array<Record<string, unknown>> {
+    const out: Array<Record<string, unknown>> = [];
+    for (const c of pngCalls())
+      if (c.format === format && (scale === undefined || c.scale === scale)) out.push(c);
+    return out;
+  }
+
+  /** Bytes whose base64 embeds the node id — decoded images stay attributable to their ask. */
+  function serveRasterBytesById(): void {
+    callFigma.mockImplementation(async (_client: unknown, type: string, params: unknown) => {
+      const p = (params ?? {}) as { ids?: string[]; imageRefs?: string[]; format?: string };
+      if (type !== "figma.file.render.request") return { images: {} };
+      const mimeType = p.format === "svg" ? "image/svg+xml" : "image/png";
+      return {
+        images: Object.fromEntries(
+          (p.ids ?? []).map((id) => [id, { mimeType, dataBase64: `QUJD-${id}` }]),
+        ),
+      };
+    });
+  }
+
+  function setDpr(value: number): void {
+    Object.defineProperty(window, "devicePixelRatio", { configurable: true, value });
+  }
+
+  function settleTime(): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  function loadDecodeOf(id: string): HTMLImageElement | undefined {
+    return createdImages.find((i) => (i.src ?? "").includes(`QUJD-${id}`));
+  }
+
+  beforeEach(() => {
+    fidelityRef.current = true;
+    setDpr(2);
+  });
+  afterEach(() => {
+    fidelityRef.current = false;
+    setDpr(1);
+  });
+
+  it("first paint never queues 3/4 for the hinted backdrop, siblings ride rung 4 and TEXT stays SVG", async () => {
+    serveRasterBytesById();
+    const view = renderPlayer("v1", true, undefined, 2.1); // dpr 2 × 2.1 = 4.2 → rung 4
+    const draw = await firstDraw();
+    // The real renderer's order: every fallback node passes the getter (hint included) before
+    // anything is reported; the fetch side then reads the SAME classification.
+    act(() => {
+      draw.fallbackForNode("1:2", "RECTANGLE", { backgroundBlur: true });
+      draw.fallbackForNode("1:9", "RECTANGLE");
+      draw.fallbackForNode("1:3", "TEXT");
+      draw.onMissing({
+        fallbackNodeIds: ["1:2", "1:9", "1:3"],
+        textFallbackNodeIds: ["1:3"],
+        imageRefs: [],
+        fonts: [],
+      });
+    });
+    await waitFor(() => expect(pngCalls()).toHaveLength(3));
+    expect(pngCallsWhere("png", 2)).toEqual([
+      { fileKey: "fk1", ids: ["1:2"], scale: 2, version: "v1", format: "png" },
+    ]);
+    expect(pngCallsWhere("png", 4)).toEqual([
+      { fileKey: "fk1", ids: ["1:9"], scale: 4, version: "v1", format: "png" },
+    ]);
+    expect(pngCallsWhere("svg", 1)).toEqual([
+      {
+        fileKey: "fk1",
+        ids: ["1:3"],
+        scale: 1,
+        version: "v1",
+        format: "svg",
+        useAbsoluteBounds: true,
+      },
+    ]);
+    // Cache identity: the backdrop holds ONLY the capped class — no phantom rung-4 claim was
+    // ever made for it, and the ordinary sibling never shares the capped entry.
+    const store = peekAssetScope(assetScopeKey("s1", "fk1", "v1"))!;
+    expect(store.get("raster|v1|2|png|crop|1:2")?.status).toBe("loading");
+    expect(store.get("raster|v1|4|png|crop|1:2")).toBeUndefined();
+    expect(store.get("raster|v1|4|png|crop|1:9")?.status).toBe("loading");
+    view.unmount();
+  });
+
+  it("read and fetch share the capped cache across zoom — rising rung re-reads scale 2, never asks flat bytes", async () => {
+    serveRasterBytesById();
+    const view = renderPlayer("v1", true, undefined, 2.1); // rung 4 → capped fetch at 2
+    const draw = await firstDraw();
+    act(() => {
+      draw.fallbackForNode("1:2", "RECTANGLE", { backgroundBlur: true });
+      draw.onMissing({ fallbackNodeIds: ["1:2"], imageRefs: [], fonts: [] });
+    });
+    await waitFor(() => expect(pngCallsWhere("png", 2)).toHaveLength(1));
+    const bgImage = loadDecodeOf("1:2");
+    expect(bgImage).toBeDefined();
+    act(() => {
+      bgImage!.dispatchEvent(new Event("load"));
+    });
+    await waitFor(() => {
+      const store = peekAssetScope(assetScopeKey("s1", "fk1", "v1"));
+      expect(store?.get("raster|v1|2|png|crop|1:2")?.status).toBe("ready");
+    });
+
+    // Zoom to 3 × dpr 2 = 6 → rung 4 territory for everything else: the hinted read STILL
+    // serves the capped scale-2 image and no new ask opens for the node.
+    view.rerender(frameRoot(true), "v1", 3);
+    const draw6 = await nextDraw(draws.length - 1);
+    for (let pass = 0; pass < 5; pass += 1)
+      expect(draw6.fallbackForNode("1:2", "RECTANGLE", { backgroundBlur: true })).toBeTruthy();
+    act(() => {
+      draw6.onMissing({ fallbackNodeIds: ["1:2"], imageRefs: [], fonts: [] });
+    });
+    await settleTime();
+    expect(pngCalls()).toHaveLength(1); // ever — same cache for read and fetch, across zooms
+    expect(pngCallsWhere("png", 4)).toHaveLength(0); // no phantom rung-4 class for the backdrop
+    view.unmount();
+  });
+
+  it("an ask without the hint lifts the cap — hidden effect re-routes to the honest rung", async () => {
+    serveRasterBytesById();
+    const view = renderPlayer("v1", true, undefined, 2.1); // rung 4
+    const draw = await firstDraw();
+    act(() => {
+      draw.fallbackForNode("1:2", "RECTANGLE", { backgroundBlur: true });
+      draw.onMissing({ fallbackNodeIds: ["1:2"], imageRefs: [], fonts: [] });
+    });
+    await waitFor(() => expect(pngCallsWhere("png", 2)).toHaveLength(1));
+    // Effect hidden: the node still fallbacks (another unsupported feature), WITHOUT the hint.
+    act(() => {
+      expect(draw.fallbackForNode("1:2", "RECTANGLE", { backgroundBlur: false })).toBeNull();
+      draw.onMissing({ fallbackNodeIds: ["1:2"], imageRefs: [], fonts: [] });
+    });
+    await waitFor(() => expect(pngCallsWhere("png", 4)).toHaveLength(1));
+    const store = peekAssetScope(assetScopeKey("s1", "fk1", "v1"))!;
+    expect(store.get("raster|v1|4|png|crop|1:2")?.status).toBe("loading");
+    expect(pngCalls()).toHaveLength(2); // the cap did not linger, and the old capped entry stands
+    view.unmount();
+  });
+
+  it("TEXT with a visible backdrop claims the capped absolute PNG, never an SVG — and returns to SVG once hidden", async () => {
+    serveRasterBytesById();
+    const view = renderPlayer("v1", true, undefined, 2.1);
+    const draw = await firstDraw();
+    act(() => {
+      expect(draw.fallbackForNode("1:3", "TEXT", { backgroundBlur: true })).toBeNull();
+      draw.onMissing({
+        fallbackNodeIds: ["1:3"],
+        textFallbackNodeIds: ["1:3"],
+        imageRefs: [],
+        fonts: [],
+      });
+    });
+    await waitFor(() => expect(pngCallsWhere("png", 2)).toHaveLength(1));
+    expect(pngCallsWhere("png", 2)[0]).toEqual({
+      fileKey: "fk1",
+      ids: ["1:3"],
+      scale: 2,
+      version: "v1",
+      format: "png",
+      useAbsoluteBounds: true,
+    });
+    expect(pngCallsWhere("svg")).toHaveLength(0); // no flat-outline ask for a backdrop node
+    // Hidden: ordinary TEXT reclaims its crisp SVG route — no stale cap, no downgrade mark.
+    act(() => {
+      expect(draw.fallbackForNode("1:3", "TEXT")).toBeNull();
+      draw.onMissing({
+        fallbackNodeIds: ["1:3"],
+        textFallbackNodeIds: ["1:3"],
+        imageRefs: [],
+        fonts: [],
+      });
+    });
+    await waitFor(() => expect(pngCallsWhere("svg", 1)).toHaveLength(1));
+    const store = peekAssetScope(assetScopeKey("s1", "fk1", "v1"))!;
+    expect(store.get("raster|v1|1|svg|absolute|1:3")?.status).toBe("loading");
+    expect(store.get("raster|v1|2|png|absolute|1:3")?.status).toBe("loading"); // capped bytes retained while observed
+    view.unmount();
+  });
+
+  /** Every raster class answers with null bytes — terminal failures drive the negative cache. */
+  function serveNullRasters(): void {
+    callFigma.mockImplementation(async (_client: unknown, type: string, params: unknown) => {
+      const p = (params ?? {}) as { ids?: string[] };
+      if (type !== "figma.file.render.request") return { images: {} };
+      return { images: Object.fromEntries((p.ids ?? []).map((id) => [id, null])) };
+    });
+  }
+
+  it("the capped class stays a finite negative cache — ten re-asks, one wire call, retry via fresh paint", async () => {
+    serveNullRasters();
+    const view = renderPlayer("v1", false, undefined, 2.1); // rung 4 → capped 2, terminal-failed
+    const draw = await firstDraw();
+    for (let pass = 0; pass < 10; pass += 1) {
+      act(() => {
+        expect(draw.fallbackForNode("1:2", "RECTANGLE", { backgroundBlur: true })).toBeNull();
+        draw.onMissing({ fallbackNodeIds: ["1:2"], imageRefs: [], fonts: [] });
+      });
+      await settleTime();
+    }
+    // The failed entry IS the negative cache: every read attaches it, every claim dedups — no
+    // refetch loop, and it never wandered into rung 3/4 while failing.
+    expect(pngCalls()).toHaveLength(1);
+    expect(pngCalls()[0].scale).toBe(2);
+    const store = peekAssetScope(assetScopeKey("s1", "fk1", "v1"))!;
+    expect(store.get("raster|v1|2|png|crop|1:2")?.status).toBe("failed");
     view.unmount();
   });
 });

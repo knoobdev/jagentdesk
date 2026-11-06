@@ -39,6 +39,35 @@ export function rasterRung(deviceScale: number): number {
 }
 
 /**
+ * ADR-0042 backdrop export exception: Figma's PER-NODE PNG export of a node with a VISIBLE
+ * BACKGROUND_BLUR bakes no backdrop structure above this scale (pinned probe: at scale 2 the
+ * bytes match the composited full-frame reference within ~0.5/channel; at scales 3 and 4 the
+ * whole region is one flat color). Highest PROVEN-correct scale — the cap is a named
+ * API-compatibility workaround on the fidelity path, not a generic fixed-2.
+ */
+// COMPAT(figma-bgblur-raster-cap): added in the ADR-0042 backdrop round (2026-11); remove after
+// root re-verifies per-node BACKGROUND_BLUR exports above scale 2 against the composited frame.
+export const BACKGROUND_BLUR_MAX_RASTER_SCALE = 2;
+
+/** The rung a visible-BACKGROUND_BLUR fallback may ask: min(adaptive rung, proven-correct
+ *  scale). Never raises — low zooms keep the honest rung and share the ordinary crop cache. */
+export function backgroundBlurRasterRung(deviceScale: number): number {
+  return Math.min(rasterRung(deviceScale), BACKGROUND_BLUR_MAX_RASTER_SCALE);
+}
+
+/**
+ * Optional hint the renderer hands to the fallback getter (ADR-0042 backdrop exception): true
+ * when the node's fallback route was triggered by a VISIBLE BACKGROUND_BLUR effect. It must
+ * arrive at the FIRST getter call — the canvas getter enqueues the fetch on a miss, so a
+ * classification that only came with the missing report would already have asked a flat rung-4
+ * raster. Consumers treat absent/false identically as "not blurred" so a renderer without the
+ * hint keeps today's behavior.
+ */
+export interface FigmaFallbackHint {
+  backgroundBlur?: boolean;
+}
+
+/**
  * Is this a NON-EMPTY pinned snapshot version (ADR-0042 contract with the daemon,
  * packages/server/src/server/figma/handlers/content.ts): svg/useAbsoluteBounds are REFUSED
  * without one. An empty or whitespace-only pin is therefore exactly the no-pin case — the
