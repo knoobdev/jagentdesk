@@ -49,3 +49,35 @@ describe("server_info figmaPlayback capability", () => {
     expect(parsed.features).toEqual({ figma: true, figmaPlayback: true });
   });
 });
+
+// ADR-0039: `figmaNodeDepth` gates the SECTION outline + depth=1 shallow reads. Additive like
+// every other flag: optional in the schema, stripped by older clients, absent from old daemons.
+describe("server_info figmaNodeDepth capability", () => {
+  it("parses when a new daemon advertises section outline and shallow node reads", () => {
+    const parsed = ServerInfoStatusPayloadSchema.parse(
+      serverInfo({ figma: true, figmaPlayback: true, figmaNodeDepth: true }),
+    );
+
+    expect(parsed.serverId).toBe(SERVER_ID);
+    expect(parsed.features).toEqual({
+      figma: true,
+      figmaPlayback: true,
+      figmaNodeDepth: true,
+    });
+  });
+
+  it("parses a pre-ADR-0039 daemon that only advertised figma", () => {
+    const parsed = parseServerInfoStatusPayload(serverInfo({ figma: true }));
+
+    expect(parsed).not.toBeNull();
+    expect("figmaNodeDepth" in (parsed?.features ?? {})).toBe(false);
+  });
+
+  it("parses figmaNodeDepth:false (service wired without the depth surface) and strips unknown flags", () => {
+    const parsed = ServerInfoStatusPayloadSchema.parse(
+      serverInfo({ figma: true, figmaNodeDepth: false, figmaDeepInspect: true }),
+    );
+
+    expect(parsed.features).toEqual({ figma: true, figmaNodeDepth: false });
+  });
+});

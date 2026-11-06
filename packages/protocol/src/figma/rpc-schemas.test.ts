@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   FIGMA_REQUEST_TYPES,
   FigmaFileNodesRequestSchema,
+  FigmaFileNodesResponseSchema,
   FigmaFilePlaybackRequestSchema,
   FigmaFilePlaybackResponseSchema,
   FigmaFilePrototypeRequestSchema,
   FigmaFilePrototypeResponseSchema,
+  FigmaFrameSummarySchema,
   FigmaRequestSchemas,
   FigmaResponseSchemas,
   type FigmaNode,
@@ -274,5 +276,115 @@ describe("legacy prototype RPC unchanged (ADR-0037 keeps it for existing clients
         version: "",
       }).success,
     ).toBe(true);
+  });
+});
+
+// ADR-0039 (32.5.1): SECTION outlines expose summary `parentId`/`childrenLoaded` and a depth=1
+// shallow node read. Every field is optional — old outlines and old node requests must parse and
+// round-trip exactly as before, and the nodes response shape is untouched.
+describe("figma.frame_summary section fields (ADR-0039)", () => {
+  const BOUNDS = { x: 0, y: 0, width: 1440, height: 1024 };
+
+  it("still parses a pre-ADR-0039 summary unchanged, with no new keys appearing", () => {
+    const legacy = { id: "1:2", name: "Landing", type: "FRAME", bounds: BOUNDS };
+
+    expect(FigmaFrameSummarySchema.parse(legacy)).toEqual(legacy);
+    expect(Object.keys(FigmaFrameSummarySchema.parse(legacy))).toEqual([
+      "id",
+      "name",
+      "type",
+      "bounds",
+    ]);
+  });
+
+  it("keeps every pre-ADR-0039 required field required", () => {
+    for (const field of ["id", "name", "type", "bounds"] as const) {
+      const { [field]: _omitted, ...without } = {
+        id: "1:2",
+        name: "Landing",
+        type: "FRAME",
+        bounds: BOUNDS,
+      };
+      expect(FigmaFrameSummarySchema.safeParse(without).success).toBe(false);
+    }
+  });
+
+  it("carries SECTION membership on separated child frames", () => {
+    const child = {
+      id: "1:11",
+      name: "Nav",
+      type: "FRAME",
+      bounds: BOUNDS,
+      parentId: "1:10",
+    };
+
+    expect(FigmaFrameSummarySchema.parse(child)).toEqual(child);
+  });
+
+  it("marks a SECTION cut at the depth=3 boundary childrenLoaded:false, not an empty section", () => {
+    const section = {
+      id: "1:12",
+      name: "Nested section",
+      type: "SECTION",
+      bounds: BOUNDS,
+      parentId: "1:10",
+      childrenLoaded: false,
+    };
+    const loadedSection = { ...section, id: "1:10", name: "Hero section", childrenLoaded: true };
+
+    expect(FigmaFrameSummarySchema.parse(section)).toEqual(section);
+    expect(FigmaFrameSummarySchema.parse(loadedSection)).toEqual(loadedSection);
+  });
+
+  it("is a plain object schema (wire purity: no transform/catch/preprocess/refine)", () => {
+    expect(
+      (FigmaFrameSummarySchema as unknown as { _zod: { def: { type: string } } })._zod.def.type,
+    ).toBe("object");
+  });
+});
+
+describe("figma.file.nodes.request depth option (ADR-0039)", () => {
+  const base = () => ({
+    type: "figma.file.nodes.request",
+    requestId: "req-nodes",
+    fileKey: "kH8TzQ2mV1",
+    ids: ["1:10"],
+  });
+
+  it("still parses the old request unchanged when depth is absent", () => {
+    expect(FigmaFileNodesRequestSchema.parse(base())).toEqual(base());
+  });
+
+  it("accepts depth:1 with a version pinned for the snapshot read", () => {
+    const request = { ...base(), version: "1566622199797801477", depth: 1 };
+
+    expect(FigmaFileNodesRequestSchema.parse(request)).toEqual(request);
+  });
+
+  it("accepts depth:1 without a version at schema level — the nonempty-version rule is a server handler requirement (W5), not a Zod refine", () => {
+    expect(FigmaFileNodesRequestSchema.safeParse({ ...base(), depth: 1 }).success).toBe(true);
+    expect(
+      FigmaFileNodesRequestSchema.safeParse({ ...base(), version: "", depth: 1 }).success,
+    ).toBe(true);
+  });
+
+  it("rejects any depth other than the literal 1", () => {
+    expect(FigmaFileNodesRequestSchema.safeParse({ ...base(), depth: 2 }).success).toBe(false);
+    expect(FigmaFileNodesRequestSchema.safeParse({ ...base(), depth: "1" }).success).toBe(false);
+    expect(FigmaFileNodesRequestSchema.safeParse({ ...base(), depth: undefined }).success).toBe(
+      true,
+    );
+  });
+
+  it("keeps the nodes response shape untouched: no depth-related fields", () => {
+    expect(Object.keys(FigmaFileNodesResponseSchema.shape.payload.shape)).toEqual([
+      "requestId",
+      "error",
+      "version",
+      "source",
+      "nodes",
+      "components",
+      "styles",
+    ]);
   });
 });

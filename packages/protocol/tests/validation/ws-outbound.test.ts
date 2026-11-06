@@ -352,6 +352,72 @@ const SourceSchema = z.object({
     });
   });
 
+  it("accepts a figma.file.outline.response with ADR-0039 section summary fields", () => {
+    // SECTION children are separated into summaries carrying parentId; childrenLoaded:false
+    // marks a section cut at the depth=3 boundary. Pre-ADR-0039 summaries (right frame) must
+    // keep parsing unchanged through the generated validator.
+    const envelope = {
+      type: "session",
+      message: {
+        type: "figma.file.outline.response",
+        payload: {
+          requestId: "figma-outline",
+          error: null,
+          outline: {
+            fileKey: "kH8TzQ2mV1",
+            name: "Marketing site",
+            version: "1566622199797801477",
+            lastModified_ms: 1762400000000,
+            editorType: "figma",
+            source: "rest",
+            pages: [
+              {
+                id: "0:1",
+                name: "Cover",
+                flowStartingPoints: [{ nodeId: "1:2", name: "Landing" }],
+                frames: [
+                  {
+                    id: "1:2",
+                    name: "Landing",
+                    type: "FRAME",
+                    bounds: { x: 0, y: 0, width: 375, height: 812 },
+                  },
+                  {
+                    id: "1:10",
+                    name: "Hero section",
+                    type: "SECTION",
+                    bounds: { x: 0, y: 812, width: 1440, height: 1024 },
+                    childrenLoaded: true,
+                  },
+                  {
+                    id: "1:11",
+                    name: "Nav",
+                    type: "FRAME",
+                    bounds: { x: 0, y: 812, width: 1440, height: 64 },
+                    parentId: "1:10",
+                  },
+                  {
+                    id: "1:12",
+                    name: "Nested section",
+                    type: "SECTION",
+                    bounds: { x: 0, y: 876, width: 1440, height: 960 },
+                    parentId: "1:10",
+                    childrenLoaded: false,
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    };
+
+    expect(GeneratedWSOutboundMessageSchema.safeParse(envelope)).toEqual({
+      success: true,
+      data: envelope,
+    });
+  });
+
   it("accepts a legacy github_search_response envelope", () => {
     const result = GeneratedWSOutboundMessageSchema.safeParse({
       type: "session",
@@ -431,5 +497,31 @@ describe("WS inbound figma playback request validation", () => {
         },
       }).success,
     ).toBe(true);
+  });
+});
+
+// ADR-0039: the optional depth=1 option rides the existing nodes request client→daemon. Only the
+// literal 1 parses, and its absence must keep the old request valid (an old daemon never sees it).
+describe("WS inbound figma nodes depth option", () => {
+  const nodesEnvelope = (params: Record<string, unknown>) => ({
+    type: "session",
+    message: {
+      type: "figma.file.nodes.request",
+      requestId: "figma-nodes",
+      fileKey: "kH8TzQ2mV1",
+      ids: ["1:10"],
+      version: "1566622199797801477",
+      ...params,
+    },
+  });
+
+  it("accepts a depth=1 request and the old request without depth", () => {
+    expect(WSInboundMessageSchema.safeParse(nodesEnvelope({ depth: 1 })).success).toBe(true);
+    expect(WSInboundMessageSchema.safeParse(nodesEnvelope({})).success).toBe(true);
+  });
+
+  it("rejects any other depth value", () => {
+    expect(WSInboundMessageSchema.safeParse(nodesEnvelope({ depth: 2 })).success).toBe(false);
+    expect(WSInboundMessageSchema.safeParse(nodesEnvelope({ depth: "1" })).success).toBe(false);
   });
 });

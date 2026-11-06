@@ -4706,6 +4706,10 @@ export const ServerInfoStatusPayloadSchema = z
         // Scoped prototype playback (spec 32 / ADR-0037): figma.file.playback.request. Clients
         // send that RPC only when this flag is present; older daemons never advertised it.
         figmaPlayback: z.boolean().optional(),
+        // Section outline + shallow node reads (spec 32.5.1 / ADR-0039): summary parentId/
+        // childrenLoaded and figma.file.nodes.request depth=1. The new viewer gates once; an old
+        // daemon strips depth and returns the full subtree, so it must not receive the option.
+        figmaNodeDepth: z.boolean().optional(),
       })
       .optional(),
   })
