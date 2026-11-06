@@ -245,7 +245,8 @@ export const MIN_DETAIL_PROJECTED_PX = 48;
  */
 export type RootLoadPlan = "metadata" | "thumbnail" | "full";
 
-export function planRootLoad(bounds: FigmaRect, zoom: number): RootLoadPlan {
+export function planRootLoad(bounds: FigmaRect, zoom: number, nodeType?: string): RootLoadPlan {
+  if (nodeType === "TEXT" && Math.min(bounds.width, bounds.height) * zoom < 8) return "metadata";
   if (Math.max(bounds.width, bounds.height) * zoom < MIN_DETAIL_PROJECTED_PX) return "metadata";
   return lodMode(zoom) === "thumbnail" ? "thumbnail" : "full";
 }

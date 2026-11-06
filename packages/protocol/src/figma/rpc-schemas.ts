@@ -543,6 +543,7 @@ export const FigmaFileImageFillsResponseSchema = res("figma.file.imageFills.resp
 export const FigmaFileRenderRequestSchema = req("figma.file.render.request", {
   fileKey,
   ids: z.array(z.string()).min(1).max(20),
+  cachedOnly: z.boolean().optional(),
   scale: z.number().min(0.1).max(4),
   // ADR-0042: `svg` is the text-outline fallback format (Figma draws the text as paths, no
   // substitute font). It rides the existing byte contract; clients send it, and

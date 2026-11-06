@@ -4,9 +4,13 @@ import {
   ByteImageCache,
   FontCache,
   MAX_REFS_PER_REQUEST,
+  MAX_IMAGE_BATCHES_IN_FLIGHT,
+  MAX_PREVIEW_EXPORT_BATCHES_IN_FLIGHT,
+  previewRasterRung,
   rasterNamespace,
   rasterRung,
   type MakeImage,
+  type ImageBytesBatch,
 } from "./assets";
 
 // The draw calls get()/request()/fontAvailable() every paint, and every settle notifies (which
@@ -75,6 +79,121 @@ function captureImages(): { makeImage: MakeImage; images: FakeImage[] } {
   return { makeImage, images };
 }
 
+describe("overview sampling and image backpressure", () => {
+  it("samples a 1440px frame at sufficient display resolution without retaining a full-sized preview", () => {
+    const scale = previewRasterRung(0.07 * 2);
+    expect(scale * 1440).toBeGreaterThanOrEqual(0.07 * 2 * 1440);
+    expect(scale).toBe(0.25);
+    expect(scale * scale).toBeLessThan(0.1);
+    expect(previewRasterRung(0.2 * 2)).toBe(0.5);
+    expect(previewRasterRung(0.2 * 3)).toBe(1);
+  });
+
+  it("starts two batches immediately and bounds concurrency while draining a broad viewport", async () => {
+    const gate = deferred<void>();
+    let active = 0;
+    let peak = 0;
+    const seen: string[] = [];
+    const cache = new ByteImageCache(async (ids) => {
+      active++;
+      peak = Math.max(peak, active);
+      seen.push(...ids);
+      await gate.promise;
+      active--;
+      return recordsFor(ids, null);
+    }, okImage);
+    cache.request(...Array.from({ length: 65 }, (_, i) => `image_${i}`));
+    await settle();
+    expect(active).toBe(MAX_IMAGE_BATCHES_IN_FLIGHT);
+    expect(seen).toHaveLength(MAX_REFS_PER_REQUEST * MAX_IMAGE_BATCHES_IN_FLIGHT);
+    for (let paint = 0; paint < 50; paint++) cache.request("image_64");
+    await settle();
+    expect(peak).toBe(MAX_IMAGE_BATCHES_IN_FLIGHT);
+    gate.resolve();
+    await settle();
+    expect(seen).toHaveLength(65);
+    expect(new Set(seen).size).toBe(65);
+    expect(cache.status()).toEqual({ pending: 0, failed: 65 });
+  });
+});
+
+describe("cached images before missing exports", () => {
+  it("shows a cache hit while another export is pending and keeps it when the export fails", async () => {
+    const missing = deferred<ImageBytesBatch>();
+    const { makeImage, images } = captureImages();
+    const requested: string[][] = [];
+    const cache = new ByteImageCache(
+      async (ids) => {
+        requested.push([...ids]);
+        return missing.promise;
+      },
+      makeImage,
+      () => undefined,
+      async () => ({ image_a: imageBytes(), image_b: null }),
+    );
+    cache.request("image_a", "image_b");
+    await settle();
+    expect(requested).toEqual([["image_b"]]);
+    expect(images).toHaveLength(1);
+    images[0]!.emit("load");
+    expect(cache.get("image_a")).not.toBeNull();
+    expect(cache.status()).toEqual({ pending: 1, failed: 0 });
+    missing.reject(new Error("Export failed"));
+    await settle();
+    expect(cache.get("image_a")).not.toBeNull();
+    expect(cache.status()).toEqual({ pending: 0, failed: 1 });
+  });
+
+  it("keeps cache reads moving while all export slots are occupied", async () => {
+    const exporting = deferred<ImageBytesBatch>();
+    const { makeImage, images } = captureImages();
+    const cache = new ByteImageCache(
+      () => exporting.promise,
+      makeImage,
+      () => undefined,
+      async (ids) => recordsFor(ids, ids.includes("cached_image") ? imageBytes() : null),
+      MAX_PREVIEW_EXPORT_BATCHES_IN_FLIGHT,
+    );
+    cache.request(
+      ...Array.from(
+        { length: MAX_REFS_PER_REQUEST * MAX_PREVIEW_EXPORT_BATCHES_IN_FLIGHT },
+        (_, i) => `missing_${i}`,
+      ),
+    );
+    await settle();
+    await settle();
+    cache.request("cached_image");
+    await settle();
+    expect(images).toHaveLength(1);
+    images[0]!.emit("load");
+    expect(cache.get("cached_image")).not.toBeNull();
+    exporting.resolve({});
+    await settle();
+  });
+
+  it("does not export misses retired while the cache lookup was pending", async () => {
+    const lookup = deferred<ImageBytesBatch>();
+    const loads: string[][] = [];
+    const cache = new ByteImageCache(
+      async (wanted) => {
+        loads.push([...wanted]);
+        return {};
+      },
+      okImage,
+      () => undefined,
+      () => lookup.promise,
+    );
+    cache.request("image_a");
+    await settle();
+    cache.beginDraw();
+    cache.endDraw();
+    lookup.resolve({ image_a: null });
+    await settle();
+    expect(loads).toEqual([]);
+    expect(cache.status()).toEqual({ pending: 0, failed: 0 });
+  });
+});
+
 describe("ByteImageCache failed attempts", () => {
   it("never re-queues a failed ref from request() — the per-paint onMissing loop is bounded", async () => {
     const loadBytes = vi.fn(async (refs: readonly string[]) =>
@@ -91,6 +210,23 @@ describe("ByteImageCache failed attempts", () => {
     await settle();
     expect(loadBytes).toHaveBeenCalledTimes(1);
     expect(cache.has("a")).toBe(false);
+  });
+
+  it("notifies the visible demand ledger when transport fails so Loading does not remain painted", async () => {
+    const changes: { pending: number; failed: number }[] = [];
+    const cache = new ByteImageCache(
+      async () => {
+        throw new Error("Transport failed");
+      },
+      okImage,
+      () => changes.push(cache.status()),
+    );
+    cache.request("image_a");
+    await settle();
+    expect(changes).toEqual([{ pending: 0, failed: 1 }]);
+    for (let paint = 0; paint < 20; paint++) cache.get("image_a");
+    await settle();
+    expect(changes).toHaveLength(1);
   });
 
   it("caches a transport rejection too, and clear() re-arms the retry", async () => {

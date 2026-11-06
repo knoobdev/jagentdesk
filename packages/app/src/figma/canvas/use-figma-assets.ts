@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { FigmaBytes } from "@jagentdesk/protocol/figma/rpc-schemas";
 import type { FigmaFallbackHint } from "@/figma/renderer";
+import { useHostFeature } from "@/runtime/host-features";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { isItalicStyle, weightForStyle } from "../font-style";
 import { callFigma } from "./api";
 import {
   ByteImageCache,
+  MAX_IMAGE_BATCHES_IN_FLIGHT,
+  MAX_PREVIEW_EXPORT_BATCHES_IN_FLIGHT,
   backgroundBlurRasterRung,
   FontCache,
   isPinnedVersion,
@@ -155,6 +158,7 @@ export function useFigmaAssets(input: {
 }): FigmaAssets {
   const { serverId, fileKey, version } = input;
   const client = useHostRuntimeClient(serverId);
+  const cachedRender = useHostFeature(serverId, "figmaCachedRender");
   const decode = input.decodeImage ?? webDecode;
   // The ADR-0042 quality path exists only with BOTH the host capability and a PINNED
   // snapshot: it reads versioned REST (never the live plugin), and an unpinned live scope
@@ -247,26 +251,28 @@ export function useFigmaAssets(input: {
         const ns = rasterNamespace(scale, format, bounds, version);
         let cacheForScale = byNamespace.get(ns);
         if (!cacheForScale) {
+          const load = async (ids: readonly string[], cachedOnly = false) => {
+            if (!client) return {};
+            const response = await callFigma(client, "figma.file.render.request", {
+              fileKey,
+              ids: [...ids],
+              scale,
+              ...(version ? { version } : {}),
+              ...(quality
+                ? { format, ...(bounds === "absolute" ? { useAbsoluteBounds: true } : {}) }
+                : {}),
+              ...(cachedOnly ? { cachedOnly: true } : {}),
+            });
+            return response.images;
+          };
           cacheForScale = new ByteImageCache(
-            async (ids) => {
-              if (!client) return {};
-              const data = await callFigma(client, "figma.file.render.request", {
-                fileKey,
-                ids: [...ids],
-                scale,
-                ...(version ? { version } : {}),
-                // Only the quality path sends the new fields — and only when the cache exists
-                // because of it: the legacy wire stays byte-identical to pre-ADR-0042 daemons,
-                // which never saw `format`/`useAbsoluteBounds` on this RPC. Crop exports keep
-                // Figma's default semantics by omitting the bounds flag entirely.
-                ...(quality
-                  ? { format, ...(bounds === "absolute" ? { useAbsoluteBounds: true } : {}) }
-                  : {}),
-              });
-              return data.images as Record<string, FigmaBytes | null>;
-            },
+            (ids) => load(ids),
             decode,
             notify,
+            cachedRender && isPinnedVersion(version) ? (ids) => load(ids, true) : undefined,
+            cachedRender && format === "png" && scale < 1
+              ? MAX_PREVIEW_EXPORT_BATCHES_IN_FLIGHT
+              : MAX_IMAGE_BATCHES_IN_FLIGHT,
           );
           byNamespace.set(ns, cacheForScale);
           // A cache born mid-draw must join the open observation, or its first paint's keys
@@ -284,7 +290,7 @@ export function useFigmaAssets(input: {
         byNamespace.clear();
       },
     };
-  }, [client, fileKey, version, decode, quality]);
+  }, [client, fileKey, version, decode, quality, cachedRender]);
 
   const fonts = useMemo(
     () =>

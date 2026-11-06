@@ -9,8 +9,11 @@ import type { FigmaBytes } from "@jagentdesk/protocol/figma/rpc-schemas";
 // actually used and reconcile everything else away, so panning cannot accumulate the world.
 
 export const MAX_REFS_PER_REQUEST = 20;
+export const MAX_IMAGE_BATCHES_IN_FLIGHT = 2;
+export const MAX_PREVIEW_EXPORT_BATCHES_IN_FLIGHT = 8;
 
-export type LoadBytes = (ids: readonly string[]) => Promise<Record<string, FigmaBytes | null>>;
+export type ImageBytesBatch = Record<string, FigmaBytes | null>;
+export type LoadBytes = (ids: readonly string[]) => Promise<ImageBytesBatch>;
 
 /** Raster wire formats (ADR-0042). `svg` is the outlined-text fallback class. */
 export type RasterFormat = "png" | "svg";
@@ -23,6 +26,12 @@ export interface RasterSpec {
   scale: number;
   format: RasterFormat;
   bounds: RasterBounds;
+}
+
+/** Overview tiles need enough pixels for their actual on-screen size, not full-size exports. */
+export function previewRasterRung(deviceScale: number): number {
+  if (!Number.isFinite(deviceScale) || deviceScale <= 0) return 1;
+  return [0.125, 0.25, 0.5, 1].find((scale) => scale >= deviceScale) ?? 1;
 }
 
 /**
@@ -94,6 +103,7 @@ export type MakeImage = (dataUrl: string) => DecodedImageLike | null;
 interface RefRecord {
   phase: "queued" | "loading" | "ready" | "failed";
   image: DecodedImageLike | null;
+  cacheChecked: boolean;
 }
 
 export function bytesToDataUrl(bytes: FigmaBytes): string {
@@ -114,6 +124,8 @@ export class ByteImageCache {
   // retired, which is what bounds retention to the current view (spec 32.5.1).
   private draw: Set<string> | null = null;
   private flushScheduled = false;
+  private activeFlushes = 0;
+  private activeCacheReads = 0;
   // Bumped by clear(). A settle from a batch issued before the clear belongs to a dead
   // scope (reconnect, unmount, version switch): it must not repopulate the maps or notify
   // the now-current generation, or every paint after a failure re-enters the fetch loop.
@@ -123,6 +135,8 @@ export class ByteImageCache {
     private readonly loadBytes: LoadBytes,
     private readonly makeImage: MakeImage | null,
     private readonly onReady: () => void = () => undefined,
+    private readonly loadCached?: LoadBytes,
+    private readonly exportConcurrency = MAX_IMAGE_BATCHES_IN_FLIGHT,
   ) {}
 
   /**
@@ -214,6 +228,9 @@ export class ByteImageCache {
 
   clear(): void {
     this.generation += 1;
+    this.activeFlushes = 0;
+    this.activeCacheReads = 0;
+    this.flushScheduled = false;
     this.records.clear();
     this.draw = null;
   }
@@ -223,32 +240,92 @@ export class ByteImageCache {
   }
 
   private enqueue(ref: string): void {
-    this.records.set(ref, { phase: "queued", image: null });
+    this.records.set(ref, { phase: "queued", image: null, cacheChecked: !this.loadCached });
+  }
+
+  private hasQueued(checked: boolean): boolean {
+    for (const record of this.records.values())
+      if (record.phase === "queued" && record.cacheChecked === checked) return true;
+    return false;
   }
 
   private scheduleFlush(): void {
     if (this.flushScheduled) return;
-    let hasQueued = false;
-    for (const record of this.records.values()) {
-      if (record.phase === "queued") {
-        hasQueued = true;
-        break;
-      }
-    }
-    if (!hasQueued) return;
+    const cacheWork =
+      this.loadCached &&
+      this.activeCacheReads < MAX_IMAGE_BATCHES_IN_FLIGHT &&
+      this.hasQueued(false);
+    const exportWork = this.activeFlushes < this.exportConcurrency && this.hasQueued(true);
+    if (!cacheWork && !exportWork) return;
     this.flushScheduled = true;
-    queueMicrotask(() => void this.flush());
+    const generation = this.generation;
+    queueMicrotask(() => {
+      if (generation !== this.generation) return;
+      this.flushScheduled = false;
+      // Local cache reads have their own slots: two slow exports must not prevent a newly
+      // panned-to cached image from being displayed immediately.
+      while (
+        this.loadCached &&
+        this.activeCacheReads < MAX_IMAGE_BATCHES_IN_FLIGHT &&
+        this.hasQueued(false)
+      ) {
+        this.activeCacheReads++;
+        void this.readCached().finally(() => {
+          if (generation !== this.generation) return;
+          this.activeCacheReads--;
+          this.scheduleFlush();
+        });
+      }
+      while (this.activeFlushes < this.exportConcurrency && this.hasQueued(true)) {
+        this.activeFlushes++;
+        void this.flush().finally(() => {
+          if (generation !== this.generation) return;
+          this.activeFlushes--;
+          this.scheduleFlush();
+        });
+      }
+    });
+  }
+
+  private async readCached(): Promise<void> {
+    const generation = this.generation;
+    const current = () => generation === this.generation;
+    const batch = [...this.records]
+      .filter(([, record]) => record.phase === "queued" && !record.cacheChecked)
+      .slice(0, MAX_REFS_PER_REQUEST);
+    for (const [, record] of batch) record.phase = "loading";
+    let result: ImageBytesBatch;
+    try {
+      result = await this.loadCached!(batch.map(([id]) => id));
+    } catch {
+      if (!current()) return;
+      let changed = false;
+      for (const [id, record] of batch) {
+        if (this.records.get(id) === record) {
+          record.phase = "failed";
+          changed = true;
+        }
+      }
+      if (changed) this.onReady();
+      return;
+    }
+    if (!current()) return;
+    for (const [id, record] of batch) {
+      if (this.records.get(id) !== record) continue;
+      record.cacheChecked = true;
+      if (!result[id]) record.phase = "queued";
+    }
+    this.deliver(batch, result, current, true);
   }
 
   private async flush(): Promise<void> {
-    this.flushScheduled = false;
     const generation = this.generation;
     // All post-await writes check this: a clear() mid-flight retires the whole batch.
     const current = () => generation === this.generation;
     for (;;) {
       const batch: [string, RefRecord][] = [];
       for (const [ref, record] of this.records) {
-        if (record.phase !== "queued") continue;
+        if (record.phase !== "queued" || !record.cacheChecked) continue;
         batch.push([ref, record]);
         if (batch.length === MAX_REFS_PER_REQUEST) break;
       }
@@ -260,51 +337,72 @@ export class ByteImageCache {
       } catch {
         if (!current()) return;
         // Transport failure is a cached failure like any other: retried on clear, not per paint.
+        let changed = false;
         for (const [ref, record] of batch) {
-          if (this.records.get(ref) === record) record.phase = "failed";
+          if (this.records.get(ref) === record && !record.image && record.phase !== "ready") {
+            record.phase = "failed";
+            changed = true;
+          }
         }
+        if (changed) this.onReady();
         continue;
       }
       if (!current()) return;
-      let committed = false;
-      for (const [ref, record] of batch) {
-        // A reconcile (or clear) retired this attempt, or a later ask recreated it: the record
-        // identity is the only check that tells those apart, and it settles only the live attempt.
-        if (this.records.get(ref) !== record) continue;
-        const bytes = result[ref];
-        if (!bytes || !this.makeImage) {
-          record.phase = "failed";
-          committed = true;
-          continue;
-        }
-        const image = this.makeImage(bytesToDataUrl(bytes));
-        if (!image) {
-          record.phase = "failed";
-          committed = true;
-          continue;
-        }
-        // Bytes received is NOT decoded-ready: the <img> must still fire load. Until it does,
-        // get() returns null (the renderer keeps drawing the fallback) while the singleflight
-        // and the observed survival of this record hold — no duplicate fetch while decoding.
-        image.addEventListener("load", () => {
-          if (!current() || this.records.get(ref) !== record) return; // retired mid-decode
-          record.phase = "ready";
-          this.onReady();
-        });
-        image.addEventListener("error", () => {
-          // A decode error is terminal for this attempt: get() and request() honor failed, so
-          // the renderer's per-paint onMissing cannot resurrect it while it stays observed.
-          if (!current() || this.records.get(ref) !== record) return;
-          record.phase = "failed";
-          record.image = null;
-          this.onReady();
-        });
-        record.image = image;
-      }
-      // Only immediate terminal writes (failed) notify here; a still-decoding image notifies
-      // from its load/error listener, so the draw is never handed an unloaded element.
-      if (committed) this.onReady();
+      this.deliver(batch, result, current);
     }
+  }
+  private deliver(
+    batch: [string, RefRecord][],
+    result: ImageBytesBatch,
+    current: () => boolean,
+    partial = false,
+  ): void {
+    if (!current()) return;
+    let committed = false;
+    for (const [ref, record] of batch) {
+      // A reconcile (or clear) retired this attempt, or a later ask recreated it: the record
+      // identity is the only check that tells those apart, and it settles only the live attempt.
+      if (this.records.get(ref) !== record) continue;
+      if (record.image || record.phase === "ready" || record.phase === "failed") continue;
+      if (partial && !result[ref]) continue;
+      const bytes = result[ref];
+      if (!bytes || !this.makeImage) {
+        record.phase = "failed";
+        committed = true;
+        continue;
+      }
+      let image: DecodedImageLike | null = null;
+      try {
+        image = this.makeImage(bytesToDataUrl(bytes));
+      } catch {
+        /* decode construction is terminal for this attempt */
+      }
+      if (!image) {
+        record.phase = "failed";
+        committed = true;
+        continue;
+      }
+      // Bytes received is NOT decoded-ready: the <img> must still fire load. Until it does,
+      // get() returns null (the renderer keeps drawing the fallback) while the singleflight
+      // and the observed survival of this record hold — no duplicate fetch while decoding.
+      image.addEventListener("load", () => {
+        if (!current() || this.records.get(ref) !== record) return; // retired mid-decode
+        record.phase = "ready";
+        this.onReady();
+      });
+      image.addEventListener("error", () => {
+        // A decode error is terminal for this attempt: get() and request() honor failed, so
+        // the renderer's per-paint onMissing cannot resurrect it while it stays observed.
+        if (!current() || this.records.get(ref) !== record) return;
+        record.phase = "failed";
+        record.image = null;
+        this.onReady();
+      });
+      record.image = image;
+    }
+    // Only immediate terminal writes (failed) notify here; a still-decoding image notifies
+    // from its load/error listener, so the draw is never handed an unloaded element.
+    if (committed) this.onReady();
   }
 }
 

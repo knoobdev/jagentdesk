@@ -199,6 +199,109 @@ afterEach(() => {
   rmSync(home, { recursive: true, force: true });
 });
 
+describe("preview export grouping boundaries", () => {
+  it("never groups different pinned versions into the same upstream export", async () => {
+    vi.useRealTimers();
+    fixture.api.rest.respond(`/v1/images/${FILE}`, ({ query }) => ({
+      images: { "1:2": `<render-${query.version}>` },
+    }));
+    fixture.api.rest.provideBytes("<render-v1>", { mimeType: "image/png", data: PNG });
+    fixture.api.rest.provideBytes("<render-v2>", {
+      mimeType: "image/png",
+      data: Buffer.from("<version-2-bytes>"),
+    });
+    const request = (version: string) =>
+      fixture.handlers["figma.file.render.request"](
+        {
+          type: "figma.file.render.request",
+          requestId: version,
+          fileKey: FILE,
+          ids: ["1:2"],
+          version,
+          scale: 0.25,
+          format: "png",
+          useAbsoluteBounds: true,
+        },
+        fixture.api.ctx,
+      );
+    const [first, second] = await Promise.all([request("v1"), request("v2")]);
+    expect(first.images["1:2"]?.dataBase64).toBe(PNG.toString("base64"));
+    expect(second.images["1:2"]?.dataBase64).toBe(
+      Buffer.from("<version-2-bytes>").toString("base64"),
+    );
+    expect(
+      fixture.api.rest
+        .callsTo(`/v1/images/${FILE}`)
+        .map((call) => call.query?.version)
+        .sort(),
+    ).toEqual(["v1", "v2"]);
+  });
+});
+
+describe("cached-only render reads", () => {
+  it("returns exact cache hits and null misses without metadata, render, or Link calls", async () => {
+    await fixture.api.ctx.cache.putBytes(`render-rest/${FILE}/1:2@0.25x@png@absolute@v1`, {
+      mimeType: "image/png",
+      data: PNG,
+    });
+    await fixture.api.ctx.cache.putBytes(`render-rest/${FILE}/1:3@0.25x@png@v1`, {
+      mimeType: "image/png",
+      data: PNG,
+    });
+    const result = await fixture.handlers["figma.file.render.request"](
+      {
+        type: "figma.file.render.request",
+        requestId: "cached",
+        fileKey: FILE,
+        ids: ["1:2", "1:3", "1:4"],
+        scale: 0.25,
+        format: "png",
+        useAbsoluteBounds: true,
+        version: "v1",
+        cachedOnly: true,
+      },
+      fixture.api.ctx,
+    );
+    expect(result.images["1:2"]?.dataBase64).toBe(PNG.toString("base64"));
+    expect(result.images["1:3"]).toBeNull();
+    expect(result.images["1:4"]).toBeNull();
+    expect(fixture.api.rest.calls).toHaveLength(0);
+    const other = await fixture.handlers["figma.file.render.request"](
+      {
+        type: "figma.file.render.request",
+        requestId: "other",
+        fileKey: FILE,
+        ids: ["1:2"],
+        scale: 0.25,
+        format: "png",
+        useAbsoluteBounds: true,
+        version: "v2",
+        cachedOnly: true,
+      },
+      fixture.api.ctx,
+    );
+    expect(other.images["1:2"]).toBeNull();
+    expect(fixture.api.rest.calls).toHaveLength(0);
+  });
+
+  it("rejects an implicit version before resolving metadata", async () => {
+    await expect(
+      fixture.handlers["figma.file.render.request"](
+        {
+          type: "figma.file.render.request",
+          requestId: "cached",
+          fileKey: FILE,
+          ids: ["1:2"],
+          scale: 1,
+          cachedOnly: true,
+        },
+        fixture.api.ctx,
+      ),
+    ).rejects.toMatchObject({ code: "invalid_input" });
+    expect(fixture.api.rest.calls).toHaveLength(0);
+  });
+});
+
 describe("parallel frame text outlines", () => {
   it("starts a frame SVG before node data arrives and serves extracted glyphs from the pinned cache", async () => {
     respondFile();

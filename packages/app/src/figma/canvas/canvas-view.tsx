@@ -8,7 +8,7 @@ import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import type { Theme } from "@/styles/theme";
 import { createFigmaRenderer } from "@/figma/renderer";
 import { callFigma } from "./api";
-import { isPinnedVersion, rasterRung } from "./assets";
+import { isPinnedVersion, rasterRung, previewRasterRung } from "./assets";
 import type { FrameStore } from "./frame-store";
 import {
   childSummaries,
@@ -232,7 +232,7 @@ export function CanvasView(props: CanvasViewProps) {
     const subtrees: string[] = [];
     const shallowSections: string[] = [];
     for (const frame of visible) {
-      const plan = planRootLoad(frame.bounds, camera.zoom);
+      const plan = planRootLoad(frame.bounds, camera.zoom, frame.type);
       if (isSectionSummary(frame)) {
         // Unselected overview Sections stay metadata-only. Explicitly selecting a Section
         // asks for its shallow children even at preview LOD, so all its visible designs load
@@ -407,7 +407,7 @@ export function CanvasView(props: CanvasViewProps) {
       const viewport = visibleRect(cameraRef.current, size.width, size.height);
       const mode = lodMode(zoom);
       for (const frame of visible) {
-        const plan = planRootLoad(frame.bounds, zoom);
+        const plan = planRootLoad(frame.bounds, zoom, frame.type);
         // Drag preview (spec 32.6.2): the Section and every summary already known to hang
         // beneath it (parentId closure over metadata — no full-section fetch) move together.
         const offset = sectionMoveOffsets.get(frame.id);
@@ -424,7 +424,10 @@ export function CanvasView(props: CanvasViewProps) {
           continue;
         }
         if (mode === "thumbnail") {
-          const raster = assets.requestThumbnail(frame.id, 1);
+          const raster = assets.requestThumbnail(
+            frame.id,
+            fidelity && isPinnedVersion(version) ? previewRasterRung(zoom * dpr) : 1,
+          );
           if (raster)
             ctx.drawImage(
               raster,
@@ -813,7 +816,7 @@ export function contentLedger(
       if (frame.childrenLoaded === false && store.isSectionPending(frame.id)) pending = true;
       continue;
     }
-    const plan = planRootLoad(frame.bounds, zoom);
+    const plan = planRootLoad(frame.bounds, zoom, frame.type);
     if (plan === "metadata") continue;
     metadataOnlyOverview = false;
     if (plan === "thumbnail") continue; // its rasters show up in the asset ledger below
@@ -998,10 +1001,11 @@ export function NativeCanvasLayer(props: {
   // rung the pinch-zoom actually draws at (zoom × device px); the legacy path keeps the exact
   // fixed scale-2 wire. Tiles stay PNG everywhere — SVG data URIs in RN <Image> have no real-
   // device proof yet, so no SVG claim on native.
-  const tileScale =
-    props.fidelity === true && isPinnedVersion(version)
-      ? rasterRung(camera.zoom * PixelRatio.get())
-      : 2;
+  const detailScale =
+    lodMode(camera.zoom) === "thumbnail"
+      ? previewRasterRung(camera.zoom * PixelRatio.get())
+      : rasterRung(camera.zoom * PixelRatio.get());
+  const tileScale = props.fidelity === true && isPinnedVersion(version) ? detailScale : 2;
   const [rasters, setRasters] = useState<Record<string, string>>({});
   const requested = useRef(new Set<string>());
   // The viewport as of the latest pass: an arriving batch must prune against what is visible
@@ -1029,7 +1033,8 @@ export function NativeCanvasLayer(props: {
       // whole huge container is never worth requesting. Only detail-worthy frame roots get tiles.
       .filter(
         (frame) =>
-          !isSectionSummary(frame) && planRootLoad(frame.bounds, camera.zoom) !== "metadata",
+          !isSectionSummary(frame) &&
+          planRootLoad(frame.bounds, camera.zoom, frame.type) !== "metadata",
       )
       .map((frame) => frame.id);
     // Every cache/ledger key is rung-qualified (`id@scale`, ADR-0042): a tile fetched for one
@@ -1187,7 +1192,7 @@ export function NativeCanvasLayer(props: {
         const waitingOnTiles = visible.some(
           (frame) =>
             !isSectionSummary(frame) &&
-            planRootLoad(frame.bounds, camera.zoom) !== "metadata" &&
+            planRootLoad(frame.bounds, camera.zoom, frame.type) !== "metadata" &&
             rasters[tileKey(frame.id, tileScale)] === undefined,
         );
         const text = waitingOnTiles ? STATUS_LOADING : (props.statusText ?? null);
