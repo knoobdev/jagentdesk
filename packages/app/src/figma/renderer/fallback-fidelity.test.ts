@@ -17,6 +17,14 @@ interface FidelityReport {
   textFallbackNodeIds?: string[];
 }
 
+/** Neutral typed box for the inline fixture factories (normalized, no casts at use sites). */
+interface Box {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 function drawOps(node: FigmaNode, options: Partial<FigmaRenderOptions> = {}): unknown[][] {
   const ctx = new RecordingContext();
   createFigmaRenderer().draw(
@@ -43,11 +51,7 @@ function drawWithMissing(
 const SOLID = [{ type: "SOLID", color: { r: 0.2, g: 0.4, b: 0.9, a: 1 } }];
 const BAKED_OWN_OPACITY_FILL = [{ type: "CUSTOM_PATTERN" }];
 
-function rect(
-  id: string,
-  box: Record<string, number>,
-  extra: Record<string, unknown> = {},
-): FigmaNode {
+function rect(id: string, box: Box, extra: Record<string, unknown> = {}): FigmaNode {
   return {
     id,
     name: id,
@@ -60,10 +64,7 @@ function rect(
   } as unknown as FigmaNode;
 }
 
-function textNode(
-  id: string,
-  boxes: { bbox: Record<string, number>; render?: Record<string, number> },
-): FigmaNode {
+function textNode(id: string, boxes: { bbox: Box; render?: Box }): FigmaNode {
   return {
     id,
     name: id,
@@ -93,27 +94,27 @@ function group(
   children: FigmaNode[],
   extra: Record<string, unknown> = {},
 ): FigmaNode {
-  const xs = children.map((c) => (c.absoluteBoundingBox ?? { x: 0 }).x);
-  const ys = children.map((c) => (c.absoluteBoundingBox ?? { y: 0 }).y);
-  const xe = children.map((c) => {
-    const b = c.absoluteBoundingBox ?? { x: 0, width: 0 };
-    return b.x + b.width;
-  });
-  const ye = children.map((c) => {
-    const b = c.absoluteBoundingBox ?? { y: 0, height: 0 };
-    return b.y + b.height;
-  });
-  const x = Math.min(...xs);
-  const y = Math.min(...ys);
+  const boxes = children.map(drawnChildBox);
+  const x = Math.min(...boxes.map((b) => b.x));
+  const y = Math.min(...boxes.map((b) => b.y));
+  const width = Math.max(...boxes.map((b) => b.x + b.width)) - x;
+  const height = Math.max(...boxes.map((b) => b.y + b.height)) - y;
   return {
     id,
     name: id,
     type: "GROUP",
     opacity,
-    absoluteBoundingBox: { x, y, width: Math.max(...xe) - x, height: Math.max(...ye) - y },
+    absoluteBoundingBox: { x, y, width, height },
     children,
     ...extra,
   } as unknown as FigmaNode;
+}
+
+/** The child's own absolute bounding box, normalized to a typed Box (missing → zeros). */
+function drawnChildBox(child: FigmaNode): Box {
+  const raw = (child as { absoluteBoundingBox?: unknown }).absoluteBoundingBox;
+  const b = typeof raw === "object" && raw !== null ? (raw as Partial<Box>) : {};
+  return { x: b.x ?? 0, y: b.y ?? 0, width: b.width ?? 0, height: b.height ?? 0 };
 }
 
 /** The six-tuple of the last placement (setTransform) the renderer emitted. */
@@ -368,6 +369,28 @@ describe("fallback placement — G2 controlled proof (alpha-bounds-samples.json)
   it("uses the layout box for TEXT only when the absolute flag is on", () => {
     const ops = drawOps(avatar(), { fallbackTextUsesAbsoluteBounds: true });
     expect(lastPlacement(ops)).toEqual([1, 0, 0, 1, 4, 4]);
+  });
+
+  it("keeps a node visible when only its render bounds reach the viewport", () => {
+    // ADR-0042 review: the layout box (x≥100) sits outside the viewport, but the shadow's
+    // render bounds bleed to x=90 — the box the fallback raster is mapped onto. Culled on the
+    // layout box alone, the outset (and its raster) would vanish beside the viewport edge.
+    const shadowy = {
+      id: "f:2",
+      name: "shadowed",
+      type: "RECTANGLE",
+      absoluteBoundingBox: { x: 100, y: 0, width: 50, height: 20 },
+      absoluteRenderBounds: { x: 90, y: 0, width: 60, height: 20 },
+      fills: BAKED_OWN_OPACITY_FILL,
+      strokes: [],
+      effects: [],
+    } as unknown as FigmaNode;
+    const viewport = { x: 0, y: 0, width: 100, height: 100 };
+    const ops = drawOps(shadowy, { viewport });
+    expect(ops).toContainEqual(expect.arrayContaining(["drawImage", "raster:f:2", 0, 0, 60, 20]));
+    // Control: without render bounds the same node is culled on its outside layout box.
+    const bare = { ...shadowy, absoluteRenderBounds: undefined } as unknown as FigmaNode;
+    expect(drawOps(bare, { viewport }).some((r) => r[0] === "drawImage")).toBe(false);
   });
 
   it("falls back to the bounding box when render bounds are missing (disclosed)", () => {
