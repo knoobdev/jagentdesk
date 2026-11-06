@@ -81,8 +81,10 @@ function ConnectedRow({ serverId, connection }: { serverId: string; connection: 
   const test = useCallback(async () => {
     setBusy(true);
     try {
+      // `figma.connections.test` is GET /v1/me: it proves the account sign-in, never file access
+      // (the live 403 came after a 200 /me). Say exactly what was checked.
       await call("figma.connections.test.request", { connectionId: connection.id });
-      setNote("Token is valid.");
+      setNote("Account sign-in is valid. File access is checked when a file is added.");
     } catch (error) {
       setNote(error instanceof Error ? error.message : String(error));
     } finally {
@@ -249,7 +251,9 @@ export function FigmaConnectScreen({
           <GuideStep index={3}>
             <Text style={figmaStyles.guideBody}>Enable these scopes</Text>
             <View style={figmaStyles.row}>
-              <Text style={figmaStyles.mono}>{scopesText}</Text>
+              <Text style={figmaStyles.mono} testID="figma-guide-scopes">
+                {scopesText}
+              </Text>
               <CopyButton value={scopesText} label="Copy all" testID="figma-copy-scopes" />
             </View>
           </GuideStep>

@@ -108,6 +108,48 @@ async function requireConnection(ctx: FigmaContext, connectionId: string): Promi
   }
 }
 
+/** The connected account as the user knows it: email first, handle next, id last. */
+async function accountLabel(ctx: FigmaContext, connectionId: string): Promise<string> {
+  const connection = await ctx.store.getConnection(connectionId);
+  if (!connection) return connectionId;
+  return connection.account.email ?? connection.account.handle ?? connectionId;
+}
+
+/**
+ * `GET /v1/files/:key/meta` answered 403. Sign-in itself is already proven — `figma.oauth.complete`
+ * ran `GET /v1/me` — so Figma's bare "Permission denied" is misleading: a token only carries scopes
+ * the private app has ENABLED in the Figma console (the authorize URL asks for a subset of them), so
+ * a 403 means the APP lacks the grant or the ACCOUNT lacks file access, and /me success cannot tell
+ * the two apart. Quote Figma's error verbatim, name the connected account, and hand the user both
+ * checks without claiming which one is the root cause.
+ */
+async function getFileMeta(
+  ctx: FigmaContext,
+  connectionId: string,
+  fileKey: string,
+): Promise<FileMetaResponse> {
+  let meta: FileMetaResponse;
+  try {
+    meta = await ctx.rest.getJson<FileMetaResponse>({
+      connectionId,
+      path: `/v1/files/${encodeURIComponent(fileKey)}/meta`,
+      tier: "3",
+    });
+  } catch (error) {
+    if (!(error instanceof FigmaServiceError) || error.code !== "forbidden") throw error;
+    const account = await accountLabel(ctx, connectionId);
+    throw new FigmaServiceError(
+      "forbidden",
+      `Figma refused file ${fileKey} for ${account} (403: ${error.message}). Sign-in only proves ` +
+        `the account, so check both sides of file access: the private app must have the scopes ` +
+        `listed in the Connect guide enabled in the Figma console (changing them needs a new ` +
+        `sign-in), and ${account} must be able to open this file's URL in Figma.`,
+      error.extra,
+    );
+  }
+  return meta;
+}
+
 /** Team/project browsing endpoints: public apps answer 403/404 (research §3.3). */
 async function getBrowseJson<T>(
   ctx: FigmaContext,
@@ -147,11 +189,7 @@ export const filesHandlers: FigmaHandlerMap<FilesRequestType> = {
     }
     await requireConnection(ctx, request.connectionId);
     const existing = await ctx.store.getFile(fileKey);
-    const meta = await ctx.rest.getJson<FileMetaResponse>({
-      connectionId: request.connectionId,
-      path: `/v1/files/${encodeURIComponent(fileKey)}/meta`,
-      tier: "3",
-    });
+    const meta = await getFileMeta(ctx, request.connectionId, fileKey);
     const fields = fileMetaFields(meta);
     const name = optionalString(fields.name);
     if (!name) {

@@ -205,6 +205,16 @@ describe("HttpFigmaRestClient", () => {
     );
     expect(forbidden.message).toContain("Invalid token scopes");
 
+    // A 403 without a JSON error body keeps the raw status and the call itself in the message —
+    // the handler adds the account/app-vs-file diagnosis on top of this.
+    api.enqueue({ status: 403 });
+    const bare = expectServiceError(
+      await rest.getJson({ ...metaRoute, connectionId: "fgc_1" }).catch((e) => e),
+      "forbidden",
+    );
+    expect(bare.message).toContain("403");
+    expect(bare.message).toContain("GET /v1/files/KEY1/meta");
+
     api.enqueue({ status: 400, body: { err: "Bad node id" } });
     expectServiceError(
       await rest.getJson({ ...metaRoute, connectionId: "fgc_1" }).catch((e) => e),

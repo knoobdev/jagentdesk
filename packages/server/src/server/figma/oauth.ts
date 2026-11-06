@@ -38,6 +38,12 @@ export function figmaEndpointsFromEnv(env: NodeJS.ProcessEnv): FigmaEndpoints {
 
 // The scopes spec 32.2 requires from the user's private app. `file_variables:*` is Enterprise-only
 // and variables go through Figma Link, so it is not requested.
+// Verified against Figma's OAuth-apps docs (2026-11): the `scope` parameter accepts this list
+// space- OR comma-separated (space is what we send), and the requested scopes must be a SUBSET of
+// the scopes enabled on the app in the Figma console — a scope the app has not enabled is dropped
+// silently at consent. So a token can pass `GET /v1/me` yet 403 on `/v1/files/...`: the guide
+// (packages/app/src/figma/connect) lists this exact array for the user to tick, and its test and
+// the assertion below pin both copies to spec 32.2 — the guide must never drift from this request.
 export const FIGMA_OAUTH_SCOPES = [
   "current_user:read",
   "file_content:read",
