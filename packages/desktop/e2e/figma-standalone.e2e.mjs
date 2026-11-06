@@ -2726,6 +2726,21 @@ async function captureRenderQuality(page, requests, artifactDir, evidence) {
       });
       if (geometry.dpr !== 2) throw new Error(`Quality requires DPR 2, measured ${geometry.dpr}`);
     }
+    if (process.env.JAGENTDESK_FIGMA_E2E_TRACE_PAN === "1") {
+      const before = await readZoom();
+      if (Math.abs(before - 1) > 0.005) {
+        const box = await canvas.boundingBox();
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await page.keyboard.down("Control");
+        try {
+          await page.mouse.wheel(0, -Math.log(1 / before) / wheelGain);
+        } finally {
+          await page.keyboard.up("Control");
+        }
+      }
+      await settle();
+      result.panTrace = await traceContinuousCanvasPan(page, cdp, canvas, artifactDir);
+    }
     result.renderRequests = requests.renderRequests.slice(requestStart);
     result.renderResponses = requests.renderResponses.slice(responseStart);
     result.contentResponses = requests.contentResponses.slice(contentStart);
@@ -2736,6 +2751,72 @@ async function captureRenderQuality(page, requests, artifactDir, evidence) {
     await page.screenshot({ path: path.join(artifactDir, "quality-failure.png") }).catch(() => {});
     console.log(`  diagnostic render-quality failed: ${result.error}`);
   }
+}
+
+/** Diagnostic trace on a LOADED real frame. No per-frame pixel readback or rAF-as-FPS. */
+async function traceContinuousCanvasPan(page, cdp, canvas, artifactDir) {
+  const bounds = await canvas.boundingBox();
+  if (!bounds) throw new Error("No canvas for pan trace");
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+  const camera = () =>
+    canvas.evaluate((element) => {
+      const m = element.getContext("2d").getTransform();
+      return { a: m.a, d: m.d, e: m.e, f: m.f, dpr: window.devicePixelRatio };
+    });
+  const before = await camera();
+  const beforeImage = await cdp.send("Page.captureScreenshot", { format: "png" });
+  fs.writeFileSync(
+    path.join(artifactDir, "pan-before.png"),
+    Buffer.from(beforeImage.data, "base64"),
+  );
+  await cdp.send("Tracing.start", {
+    categories: "devtools.timeline,disabled-by-default-devtools.timeline.frame,blink.user_timing",
+    transferMode: "ReturnAsStream",
+  });
+  let inputs = 0;
+  const started = Date.now();
+  let inputError = null;
+  try {
+    await page.evaluate(() => performance.mark("jagentdesk-pan-start"));
+    for (let i = 0; i < 180 && Date.now() - started < 6_000; i += 1) {
+      await page.mouse.wheel(i < 120 ? 3 : -3, 0);
+      inputs += 1;
+      await delay(Math.max(0, started + ((i + 1) * 1000) / 60 - Date.now()));
+    }
+    await page.evaluate(() => performance.mark("jagentdesk-pan-end"));
+  } catch (error) {
+    inputError = error;
+  }
+  {
+    const completed = new Promise((resolve) => cdp.once("Tracing.tracingComplete", resolve));
+    await cdp.send("Tracing.end");
+    const { stream } = await withDeadline(completed, 15_000, "pan trace completion");
+    if (!stream) throw new Error("Trace returned no stream");
+    const parts = [];
+    try {
+      for (;;) {
+        const chunk = await cdp.send("IO.read", { handle: stream });
+        parts.push(chunk.base64Encoded ? Buffer.from(chunk.data, "base64").toString() : chunk.data);
+        if (chunk.eof) break;
+      }
+    } finally {
+      await cdp.send("IO.close", { handle: stream });
+    }
+    fs.writeFileSync(path.join(artifactDir, "canvas-pan-trace.json"), parts.join(""));
+  }
+  if (inputError) throw inputError;
+  const after = await camera();
+  const afterImage = await cdp.send("Page.captureScreenshot", { format: "png" });
+  fs.writeFileSync(path.join(artifactDir, "pan-after.png"), Buffer.from(afterImage.data, "base64"));
+  return {
+    inputs,
+    elapsedMs: Date.now() - started,
+    before,
+    after,
+    cameraChanged: JSON.stringify(before) !== JSON.stringify(after),
+    screenshotChanged: beforeImage.data !== afterImage.data,
+    note: "Trace needs main-frame/layer correlation and DrawFrame/DroppedFrame analysis; no FPS acceptance inferred here.",
+  };
 }
 
 function finish(evidence, gateMap, artifactDir) {
