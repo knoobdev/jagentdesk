@@ -7,7 +7,7 @@ import { callFigma } from "./figma-api";
 import { collectRequiredFonts, type RequiredFont } from "./font-loading";
 import { nodeBounds, toFrameLocalNodes } from "./node-geometry";
 import { usePrototypeAssetScope, type PrototypeAssetScopeHandle } from "./asset-scope";
-import type { PrototypeAssetStore } from "./asset-store";
+import type { AssetClaim, PrototypeAssetStore } from "./asset-store";
 import type { FrameContentProps } from "./frame-content";
 
 // Web frame surface: draws the frame subtree through the renderer contract (spec 32.5.1/32.5.3)
@@ -18,9 +18,11 @@ import type { FrameContentProps } from "./frame-content";
 // unlocalized frame at x=1200 would paint off-canvas.
 //
 // Every byte, stylesheet, and FontFace this draws through belongs to the player's asset scope
-// (`asset-store.ts`): keyed by server/file/version, shared by all frames on stage, and disposed
-// when the player closes or the pinned version changes. Decodes and fetches that land after
-// disposal drop themselves instead of reviving cleared memory.
+// (`asset-store.ts`) and is claimed under THIS instance's stage-owner identity: when the root
+// changes (a reused instance navigating) or the instance unmounts, the previous owner's claims
+// are released while the player stays open, and only assets a simultaneously active owner still
+// shares survive. Render requests pin the scope's snapshot `version` — keys alone let late
+// bytes from an older snapshot paint as if current.
 
 interface MissingAssets {
   fallbackNodeIds: string[];
@@ -36,16 +38,27 @@ function rasterKey(nodeId: string): string {
   return `raster|${nodeId}`;
 }
 
+interface RefClaim {
+  id: string;
+  claim: AssetClaim;
+}
+
 async function fetchFills(
   client: DaemonClient,
   store: PrototypeAssetStore,
   fileKey: string,
-  imageRefs: string[],
+  claims: RefClaim[],
 ): Promise<void> {
-  const data = await callFigma(client, "figma.file.imageFills.request", { fileKey, imageRefs });
+  const byRef = new Map(claims.map((entry) => [entry.id, entry.claim]));
+  const data = await callFigma(client, "figma.file.imageFills.request", {
+    fileKey,
+    imageRefs: claims.map((entry) => entry.id),
+  });
   if (store.disposed) return;
   for (const [ref, bytes] of Object.entries(data.images)) {
-    store.putDecoded(fillKey(ref), bytes);
+    const claim = byRef.get(ref);
+    // A released claim drops inside putDecoded; nothing here revives cleared entries.
+    if (claim) store.putDecoded(fillKey(ref), bytes, claim);
   }
 }
 
@@ -53,14 +66,28 @@ async function fetchRasters(
   client: DaemonClient,
   store: PrototypeAssetStore,
   fileKey: string,
-  ids: string[],
+  version: string,
+  claims: RefClaim[],
 ): Promise<void> {
-  const data = await callFigma(client, "figma.file.render.request", { fileKey, ids, scale: 2 });
+  const byId = new Map(claims.map((entry) => [entry.id, entry.claim]));
+  // Pin the snapshot: the daemon's versioned cache is what makes these bytes historical rather
+  // than "latest" (a live-link drift could otherwise paint newer bytes into an older frame).
+  const data = await callFigma(client, "figma.file.render.request", {
+    fileKey,
+    ids: claims.map((entry) => entry.id),
+    scale: 2,
+    version,
+  });
   if (store.disposed) return;
   for (const [id, bytes] of Object.entries(data.images)) {
-    store.putDecoded(rasterKey(id), bytes);
+    const claim = byId.get(id);
+    if (claim) store.putDecoded(rasterKey(id), bytes, claim);
   }
 }
+
+// Per-instance identity so a reused FrameContent navigating between roots owns distinct claim
+// sets — the old root's assets must be releasable while the new root keeps whatever it shares.
+let frameContentSequence = 0;
 
 export function FrameContent({ file, root, scale, overrides }: FrameContentProps) {
   const client = useHostRuntimeClient(file.serverId);
@@ -69,27 +96,36 @@ export function FrameContent({ file, root, scale, overrides }: FrameContentProps
   const fontGate = scope?.fontGate ?? null;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [assetsReady, setAssetsReady] = useState(0);
-  const [fontsSettled, setFontsSettled] = useState(false);
   const renderer = useMemo(() => createFigmaRenderer(), []);
   const onMissingRef = useRef<(missing: MissingAssets) => void>(() => {});
 
+  const instanceIdRef = useRef<number | null>(null);
+  if (instanceIdRef.current === null) instanceIdRef.current = ++frameContentSequence;
+  const ownerId = `${instanceIdRef.current}:${root.id}`;
+  const heldOwnersRef = useRef<Set<string>>(new Set());
+  heldOwnersRef.current.add(ownerId);
+
   const requiredFonts = useMemo(() => collectRequiredFonts(root), [root]);
 
-  // The first paint waits for the file's fonts: drawing earlier paints every TEXT node with the
-  // generic stack (serif on most browsers) and leaves the loaded face unused until something
-  // else triggers a redraw. A scope swap (close, version switch) resets this and waits again.
+  // Font loading runs IN PARALLEL with drawing (W8 5d0b57396: the renderer paints TEXT as a real
+  // Figma raster while a face is in flight), so a blocked Google stylesheet can never hold the
+  // player blank. When a face actually becomes available the repaint below replaces the raster
+  // with live text. Unavailable fonts SETTLE (the bounded gate remembers failures): this fires
+  // its repaint only for claims made while a load was still in flight, once per root.
   useEffect(() => {
-    if (!fontGate) return;
+    if (!fontGate || requiredFonts.length === 0) return;
     let cancelled = false;
-    setFontsSettled(false);
-    const settle = async () => {
-      await fontGate.load(requiredFonts);
-      if (!cancelled) setFontsSettled(true);
-    };
-    void settle();
+    void fontGate
+      .loadForOwner(ownerId, requiredFonts)
+      .then((becameAvailable) => {
+        if (!cancelled && becameAvailable) setAssetsReady((tick) => tick + 1);
+        return undefined;
+      })
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requiredFonts, fontGate]);
 
   useEffect(() => {
@@ -99,38 +135,74 @@ export function FrameContent({ file, root, scale, overrides }: FrameContentProps
   }, [store]);
 
   onMissingRef.current = (missing: MissingAssets) => {
-    if (!client || !store || store.disposed) return;
-    // `claim` is the dedupe: one fetch per asset per scope, across every frame on stage.
-    const pendingImageRefs = missing.imageRefs.filter((ref) => store.claim(fillKey(ref)));
-    const pendingNodes = missing.fallbackNodeIds.filter((id) => store.claim(rasterKey(id)));
-    if (pendingImageRefs.length > 0) {
-      void fetchFills(client, store, file.fileKey, pendingImageRefs).catch(() => undefined);
+    if (!client || !store || store.disposed || !scope) return;
+    // `claim` is the dedupe: one fetch per asset, shared by every simultaneously active owner
+    // on stage; only the call that started the fetch holds a token to settle it.
+    const imageClaims: RefClaim[] = [];
+    for (const ref of missing.imageRefs) {
+      const claim = store.claim(ownerId, fillKey(ref));
+      if (claim) imageClaims.push({ id: ref, claim });
     }
-    if (pendingNodes.length > 0) {
-      void fetchRasters(client, store, file.fileKey, pendingNodes).catch(() => undefined);
+    const rasterClaims: RefClaim[] = [];
+    for (const id of missing.fallbackNodeIds) {
+      const claim = store.claim(ownerId, rasterKey(id));
+      if (claim) rasterClaims.push({ id, claim });
+    }
+    if (imageClaims.length > 0) {
+      void fetchFills(client, store, file.fileKey, imageClaims).catch(() => undefined);
+    }
+    if (rasterClaims.length > 0) {
+      void fetchRasters(client, store, file.fileKey, scope.version, rasterClaims).catch(
+        () => undefined,
+      );
     }
     if (missing.fonts.length > 0 && fontGate) {
+      // Bounded by construction: the gate singleflights per family, remembers failed attempts,
+      // and appends each stylesheet at most once. Repaint only when a face actually became
+      // available — a failed font must not re-arm this draw loop on every pass.
       void fontGate
-        .load(missing.fonts as RequiredFont[])
-        .then(() => setAssetsReady((tick) => tick + 1))
+        .loadForOwner(ownerId, missing.fonts as RequiredFont[])
+        .then((becameAvailable) => {
+          if (becameAvailable) setAssetsReady((tick) => tick + 1);
+          return undefined;
+        })
         .catch(() => undefined);
     }
   };
 
   const imageForRef = useCallback(
-    (ref: string) => store?.get(fillKey(ref))?.image ?? null,
-    [store],
+    (ref: string) => {
+      if (!store) return null;
+      const key = fillKey(ref);
+      const entry = store.get(key);
+      if (!entry) return null;
+      // Cache hit IS use: attach this owner so the frame that supplied the bytes releasing
+      // (navigation, unmount) cannot free them while this frame still paints with them. The
+      // real renderer only reports assets the getters miss, so this is the only attach point.
+      store.attachOwner(ownerId, key);
+      return entry.image;
+    },
+    [store, ownerId],
   );
   const fallbackForNode = useCallback(
-    (nodeId: string) => store?.get(rasterKey(nodeId))?.image ?? null,
-    [store],
+    (nodeId: string) => {
+      if (!store) return null;
+      const key = rasterKey(nodeId);
+      const entry = store.get(key);
+      if (!entry) return null;
+      store.attachOwner(ownerId, key);
+      return entry.image;
+    },
+    [store, ownerId],
   );
   const fontAvailable = useCallback(
     (family: string, style: string) => (fontGate ? fontGate.fontAvailable(family, style) : false),
     [fontGate],
   );
   const onMissing = useCallback((missing: MissingAssets) => onMissingRef.current(missing), []);
-  const frame = nodeBounds(root);
+  // Memoized geometry: a fresh `nodeBounds(root)` object every render would rebuild
+  // `localRoot` and re-run the draw effect on every re-render, which is the re-render loop.
+  const frame = useMemo(() => nodeBounds(root), [root]);
   const localRoot = useMemo<FigmaNode | null>(
     () => (frame ? toFrameLocalNodes(root, frame) : null),
     [root, frame],
@@ -138,7 +210,7 @@ export function FrameContent({ file, root, scale, overrides }: FrameContentProps
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || !frame || !localRoot || !fontsSettled) return;
+    if (!canvas || !frame || !localRoot) return;
     const dpr = window.devicePixelRatio || 1;
     const pixelWidth = Math.max(1, Math.round(frame.width * scale * dpr));
     const pixelHeight = Math.max(1, Math.round(frame.height * scale * dpr));
@@ -166,13 +238,35 @@ export function FrameContent({ file, root, scale, overrides }: FrameContentProps
     scale,
     overrides,
     assetsReady,
-    fontsSettled,
     renderer,
     imageForRef,
     fallbackForNode,
     fontAvailable,
     onMissing,
   ]);
+
+  // Release the PREVIOUS root's claims after this commit has already drawn (and claimed) the
+  // new one — declared after the draw effect so claim-before-release keeps assets shared across
+  // the navigation held throughout. On unmount every owner identity this instance drew under is
+  // released from both the asset store and the font gate.
+  const releasedPrevRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (releasedPrevRef.current === null) {
+      releasedPrevRef.current = ownerId;
+      return;
+    }
+    if (releasedPrevRef.current === ownerId) return;
+    const previous = releasedPrevRef.current;
+    releasedPrevRef.current = ownerId;
+    scope?.releaseFrameOwner(previous);
+  }, [ownerId, scope]);
+  useEffect(
+    () => () => {
+      for (const held of Array.from(heldOwnersRef.current)) scope?.releaseFrameOwner(held);
+      heldOwnersRef.current.clear();
+    },
+    [scope],
+  );
 
   const canvasStyle = useMemo(
     () =>

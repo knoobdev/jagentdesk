@@ -10,21 +10,30 @@ import {
   createScopedFontGate,
   retainAssetScope,
   type PrototypeAssetStore,
+  type ScopedFontGate,
 } from "./asset-store";
-import type { PrototypeFontGate } from "./font-loading";
 
 // The player owns its frame/paint assets for exactly as long as it is open on one pinned
 // snapshot (ADR-0037 memory rule): the provider retains the store for `file`@`version`, the
 // tree below it draws through `usePrototypeAssetScope`, and closing the player — or a file,
 // server, or version change under an open player — disposes bytes, stylesheets, and FontFaces.
+// While the player stays open, memory is trimmed per stage owner: `releaseFrameOwner` frees
+// everything a frame instance (base or overlay, on navigation or unmount) claimed, keeping
+// only what a simultaneously active owner still shares.
 
 export interface PrototypeAssetScopeHandle {
   /** `serverId|fileKey|version` the store is pinned to. */
   key: string;
+  /** The pinned snapshot version — render requests must carry it, or late bytes look current. */
+  version: string;
+  /** The live client behind this handle — identity-guards the provider value (see below). */
+  client: DaemonClient;
   store: PrototypeAssetStore;
-  fontGate: PrototypeFontGate;
+  fontGate: ScopedFontGate;
   /** Releases the scope; the provider owns the only call site. */
   release: () => void;
+  /** Drops every asset and font claim held by one stage-owner identity. */
+  releaseFrameOwner: (ownerId: string) => void;
 }
 
 const AssetScopeContext = createContext<PrototypeAssetScopeHandle | null>(null);
@@ -34,16 +43,27 @@ export function usePrototypeAssetScope(): PrototypeAssetScopeHandle | null {
   return useContext(AssetScopeContext);
 }
 
-function createHandle(client: DaemonClient, key: string): PrototypeAssetScopeHandle {
+function createHandle(
+  client: DaemonClient,
+  key: string,
+  version: string,
+): PrototypeAssetScopeHandle {
   const scope = retainAssetScope(key);
+  const fontGate = createScopedFontGate(scope.store, async (family, style) => {
+    const data = await callFigma(client, "figma.fonts.get.request", { family, style });
+    return data.font;
+  });
   return {
     key,
+    version,
+    client,
     store: scope.store,
-    fontGate: createScopedFontGate(scope.store, async (family, style) => {
-      const data = await callFigma(client, "figma.fonts.get.request", { family, style });
-      return data.font;
-    }),
+    fontGate,
     release: scope.release,
+    releaseFrameOwner(ownerId: string) {
+      scope.store.releaseOwner(ownerId);
+      fontGate.releaseOwner(ownerId);
+    },
   };
 }
 
@@ -68,13 +88,20 @@ export function PrototypeAssetScopeProvider({
       setHandle(null);
       return;
     }
-    const scope = createHandle(client, key);
+    const scope = createHandle(client, key, version);
     setHandle(scope);
     return () => {
       setHandle(null);
       scope.release();
     };
-  }, [client, key]);
+  }, [client, key, version]);
 
-  return <AssetScopeContext.Provider value={handle}>{children}</AssetScopeContext.Provider>;
+  // The handle only swaps inside the effect, so for the render between a server/file/version
+  // change and the effect cleanup, children would still see the PREVIOUS snapshot's scope —
+  // one pass drawing (or claiming) with bytes and fonts from a file this tree no longer plays.
+  // Gate the value by identity: a handle whose key or client differs from the current one is
+  // treated as absent, so the switch settles with no old-scope assets observed.
+  const current = handle !== null && handle.key === key && handle.client === client ? handle : null;
+
+  return <AssetScopeContext.Provider value={current}>{children}</AssetScopeContext.Provider>;
 }
