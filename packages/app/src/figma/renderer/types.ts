@@ -1,4 +1,5 @@
 import type { FigmaNode } from "@jagentdesk/protocol/figma/rpc-schemas";
+import type { MissingReport } from "./missing";
 
 // Contract of the JAgentDesk Figma renderer (spec 32.5.1), owned by work package W9 and used by the
 // canvas viewer (W10) and the prototype player (W1). It draws Figma REST node JSON
@@ -21,17 +22,23 @@ export interface FigmaRenderOptions {
   imageForRef: (imageRef: string) => CanvasImageSource | null;
   /**
    * Decoded fallback raster of a node the renderer cannot draw (see `unsupportedFeatures`;
-   * also used for TEXT nodes whose required family/style fails `fontAvailable`).
+   * also used for TEXT nodes whose required family/style fails `fontAvailable`). `nodeType` is
+   * the node's Figma type so the caller can route TEXT ids to the Figma-exported SVG outline
+   * bytes and everything else to PNG (ADR-0042); pre-ADR callers ignore the parameter.
    */
-  fallbackForNode: (nodeId: string) => CanvasImageSource | null;
+  fallbackForNode: (nodeId: string, nodeType?: string) => CanvasImageSource | null;
+  /**
+   * True only on W10's new-quality path: TEXT fallback bytes were exported with
+   * `use_absolute_bounds=true` and map 1:1 onto `absoluteBoundingBox`. Default false keeps the
+   * legacy crop contract: every fallback (and TEXT bytes requested without the flag) maps onto
+   * `absoluteRenderBounds`, because Figma's default export is cropped to the rendered ink
+   * (ADR-0042 G2: a 44×44 shadow frame exports 2×72×72, and text exports to its ink box).
+   */
+  fallbackTextUsesAbsoluteBounds?: boolean;
   /** True when the font face is loaded and usable by the context. */
   fontAvailable: (family: string, style: string) => boolean;
   /** Called with nodes that need a fallback raster or a font, so the caller can fetch them. */
-  onMissing?: (missing: {
-    fallbackNodeIds: string[];
-    imageRefs: string[];
-    fonts: { family: string; style: string }[];
-  }) => void;
+  onMissing?: (missing: MissingReport) => void;
   /** Per-node property overrides (pending edits 32.6.1, smart-animate frames 32.5.3). */
   overrides?: Record<string, Partial<FigmaNode>>;
 }
