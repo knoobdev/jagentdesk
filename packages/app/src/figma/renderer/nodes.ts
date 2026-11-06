@@ -24,6 +24,7 @@ import {
 } from "./node-props";
 import { resolvePaintStyle, isDiamond, diamondClip } from "./paints";
 import { fillShapes, strokeShapes, clipPathOf, type Shape } from "./shapes";
+import { newPath, type RenderPath } from "./render-path";
 import {
   drawDropShadows,
   drawInnerShadows,
@@ -191,37 +192,74 @@ function drawStrokes(state: DrawState, node: FigmaNode, alpha: number): void {
   if (shapes.length === 0) return;
   const { ctx, options } = state;
   const { width, height } = nodeSize(node);
+  const baked = shapes.some((shape) => shape.baked);
   ctx.save();
-  ctx.lineWidth = settings.weight;
-  ctx.lineCap = toCanvasCap(settings.cap);
-  ctx.lineJoin = toCanvasJoin(settings.join);
-  if (settings.dashes.length > 0) ctx.setLineDash(settings.dashes);
+  if (!baked) {
+    ctx.lineWidth = settings.weight;
+    ctx.lineCap = toCanvasCap(settings.cap);
+    ctx.lineJoin = toCanvasJoin(settings.join);
+    if (settings.dashes.length > 0) ctx.setLineDash(settings.dashes);
+  }
   for (const paint of paints) {
     const result = resolvePaintStyle(ctx, paint, width, height, options.imageForRef);
     if (!result || "missing" in result) {
       if (result && "missing" in result) state.missing.addImage(result.missing);
       continue;
     }
-    ctx.strokeStyle = result.style;
+    // Save/restore per paint: without it a MULTIPLY blend (or any state) leaks into the
+    // following NORMAL paint in the same stroke stack.
+    ctx.save();
     ctx.globalAlpha = (paint.opacity ?? 1) * alpha;
     applyPaintBlend(ctx, paint.blendMode);
-    for (const shape of shapes) strokeShape(ctx, shape, settings.align);
+    for (const shape of shapes) {
+      // Figma's strokeGeometry entries are the final outline: width, cap, join and dashes are
+      // already baked into the path, so it is filled with its winding rule, not stroked.
+      if (baked) {
+        ctx.fillStyle = result.style;
+        ctx.fill(shape.path, shape.rule);
+      } else {
+        ctx.strokeStyle = result.style;
+        strokeShape(ctx, shape, settings, width, height);
+      }
+    }
+    ctx.restore();
   }
   ctx.restore();
 }
 
-/** strokeAlign: CENTER strokes normally; INSIDE/OUTSIDE clip to the shape and double the width. */
-function strokeShape(ctx: FigmaCanvasContext, shape: Shape, align: string): void {
-  if (align === "INSIDE" || align === "OUTSIDE") {
+function strokeShape(
+  ctx: FigmaCanvasContext,
+  shape: Shape,
+  settings: { align: string; weight: number },
+  width: number,
+  height: number,
+): void {
+  const outside = settings.align === "OUTSIDE";
+  if (settings.align === "INSIDE" || outside) {
     const current = ctx.lineWidth;
     ctx.save();
-    ctx.clip(shape.path, shape.rule);
+    if (outside) {
+      // Clip to the shape's COMPLEMENT inside a generous rect (evenodd subtracts the shape):
+      // stroking at double width then keeps only the half that grows past the outline.
+      // Clipping to the interior — the INSIDE trick — would draw an inner ring instead.
+      ctx.clip(inverseShape(shape, width, height, current), "evenodd");
+    } else {
+      ctx.clip(shape.path, shape.rule);
+    }
     ctx.lineWidth = current * 2;
     ctx.stroke(shape.path);
     ctx.restore();
     return;
   }
   ctx.stroke(shape.path);
+}
+
+function inverseShape(shape: Shape, width: number, height: number, reach: number): RenderPath {
+  const pad = Math.max(reach, 1) + 1;
+  const path = newPath();
+  path.rect(-pad, -pad, width + pad * 2, height + pad * 2);
+  path.addPath(shape.path);
+  return path;
 }
 
 function toCanvasCap(cap: string): CanvasLineCap {

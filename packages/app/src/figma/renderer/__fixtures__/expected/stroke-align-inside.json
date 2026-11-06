@@ -30,8 +30,9 @@
   ["set:lineWidth", 2],
   ["set:lineCap", "butt"],
   ["set:lineJoin", "miter"],
-  ["set:strokeStyle", "rgba(0, 0, 0, 1)"],
+  ["save"],
   ["set:globalAlpha", 1],
+  ["set:strokeStyle", "rgba(0, 0, 0, 1)"],
   ["save"],
   [
     "clip",
@@ -69,6 +70,7 @@
       ]
     }
   ],
+  ["restore"],
   ["restore"],
   ["restore"],
   ["restore"],

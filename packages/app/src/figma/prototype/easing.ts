@@ -78,7 +78,34 @@ export function easingFor(name: EasingName): EasingFn {
   return fn;
 }
 
-/** Resolves a wire easing string; anything unknown behaves like EASE_IN_AND_OUT. */
+/**
+ * Resolves a wire easing string; anything unknown behaves like EASE_IN_AND_OUT.
+ * The daemon appends the control points for custom curves: `CUSTOM_CUBIC_BEZIER(0.42,0,0.58,1)`
+ * (packages/server/src/server/figma/prototype.ts `easingName`); spaces are accepted too. The
+ * x control points are clamped to [0, 1] like CSS cubic-bezier; y may overshoot (springs).
+ */
+const CUSTOM_CURVE =
+  /CUSTOM_CUBIC_BEZIER[\s(]+(-?[\d.]+)[\s,]+(-?[\d.]+)[\s,]+(-?[\d.]+)[\s,]+(-?[\d.]+)\s*\)?/i;
+
+const CUSTOM_FNS = new Map<string, EasingFn>();
+
+function clampUnit(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
+
 export function resolveEasing(name: string | undefined | null): EasingFn {
-  return easingFor(name && isEasingName(name) ? name : "EASE_IN_AND_OUT");
+  if (name && isEasingName(name)) return easingFor(name);
+  const match = name ? CUSTOM_CURVE.exec(name) : null;
+  if (match) {
+    const points = match.slice(1, 5).map(Number);
+    if (points.every(Number.isFinite)) {
+      const key = points.join(",");
+      const cached = CUSTOM_FNS.get(key);
+      if (cached) return cached;
+      const fn = cubicBezier(clampUnit(points[0]), points[1], clampUnit(points[2]), points[3]);
+      CUSTOM_FNS.set(key, fn);
+      return fn;
+    }
+  }
+  return easingFor("EASE_IN_AND_OUT");
 }

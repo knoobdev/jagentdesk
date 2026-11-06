@@ -83,7 +83,10 @@ function applyTextCase(text: string, textCase: string | undefined): string {
         (_m, pre: string, ch: string) => pre + ch.toUpperCase(),
       );
     case "SMALL_CAPS":
-    case "SMALL_CAPS_AUTOMATIC":
+    case "SMALL_CAPS_FORCED":
+      // Figma's enum (REST TypeStyle.textCase): ORIGINAL | UPPER | LOWER | TITLE | SMALL_CAPS |
+      // SMALL_CAPS_FORCED. Without font small-caps OpenType features on the canvas/Skia
+      // contract we approximate both as full capitals.
       return text.toUpperCase();
     default:
       return text;

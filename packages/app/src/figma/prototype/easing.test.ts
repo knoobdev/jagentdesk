@@ -45,4 +45,21 @@ describe("cubicBezier", () => {
     expect(resolveEasing("SPRING_ROCKET")(0.5)).toBe(resolveEasing("EASE_IN_AND_OUT")(0.5));
     expect(resolveEasing(null)(0.5)).toBe(resolveEasing("EASE_IN_AND_OUT")(0.5));
   });
+
+  it("rebuilds the daemon's custom cubic-bezier curves from the wire string", () => {
+    // The daemon appends the control points: `CUSTOM_CUBIC_BEZIER(0.42,0,0.58,1)`
+    // (server figma/prototype.ts easingName). A bare CUSTOM_CUBIC_BEZIER without points has
+    // no curve to rebuild and stays on the default.
+    const custom = resolveEasing("CUSTOM_CUBIC_BEZIER(0.42,0,0.58,1)");
+    expect(custom(0.5)).toBeCloseTo(cubicBezier(0.42, 0, 0.58, 1)(0.5), 12);
+    expect(resolveEasing("CUSTOM_CUBIC_BEZIER 0.42 0 0.58 1")(0.25)).toBeCloseTo(custom(0.25), 12);
+    expect(resolveEasing("CUSTOM_CUBIC_BEZIER")(0.5)).toBe(resolveEasing("EASE_IN_AND_OUT")(0.5));
+    // y control points may overshoot, like the spring presets; x stays in [0, 1].
+    const overshoot = resolveEasing("CUSTOM_CUBIC_BEZIER(0.175,0.885,0.32,1.275)");
+    expect(overshoot(0.5)).toBeGreaterThan(0.5);
+    expect(resolveEasing("CUSTOM_CUBIC_BEZIER(5,0,-5,1)")(0.5)).toBeCloseTo(
+      cubicBezier(1, 0, 0, 1)(0.5),
+      12,
+    );
+  });
 });

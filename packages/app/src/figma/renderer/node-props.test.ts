@@ -4,7 +4,7 @@
 // absolute box; the parent-relative translation must not be added on top of it.
 import { describe, expect, it } from "vitest";
 import type { FigmaNode } from "@jagentdesk/protocol/figma/rpc-schemas";
-import { absoluteBoxOf, nodeSize, nodeTransform } from "./node-props";
+import { absoluteBoxOf, nodeSize, nodeTransform, textRuns } from "./node-props";
 import { loadNode } from "./__fixtures__/render-harness";
 import { multiply } from "./matrix";
 
@@ -120,3 +120,36 @@ function readRel(node: FigmaNode): NonNullable<ReturnType<typeof nodeTransform>>
   const [[a = 0, c = 0, e = 0], [b = 0, d = 0, f = 0]] = rel as number[][];
   return { a, b, c, d, e, f };
 }
+
+describe("textRuns", () => {
+  function textNode(characterStyleOverrides: unknown[]): FigmaNode {
+    return {
+      id: "13:4",
+      name: "Mixed",
+      type: "TEXT",
+      characters: "abBc",
+      style: { fontFamily: "Inter", fontStyle: "Regular", fontSize: 16 },
+      characterStyleOverrides,
+      styleOverrideTable: { "1": { fontStyle: "Bold" } },
+    } as unknown as FigmaNode;
+  }
+
+  it("splits only on real override ids; the base marker stays one run (spec 32.5.1)", () => {
+    // REST documents 0 as the default style; the plugin API spells it -1. Both, and trailing
+    // characters past a short array, must merge into the base run. A styleOverrideTable entry
+    // under "0" must not hijack them.
+    const runs = textRuns(textNode([0, 0, 1]));
+    expect(runs.map((run) => run.text)).toEqual(["ab", "B", "c"]);
+    expect(runs[0]?.style.fontStyle).toBe("Regular");
+    expect(runs[2]?.style.fontStyle).toBe("Regular");
+    const legacy = textRuns(textNode([-1, -1, 1]));
+    expect(legacy.map((run) => run.text)).toEqual(["ab", "B", "c"]);
+    expect(legacy[0]?.style).toBe(legacy[2]?.style); // one base object shared by both base runs
+  });
+
+  it("applies the override table entry by id", () => {
+    const runs = textRuns(textNode([0, 0, 1, 0]));
+    expect(runs.map((run) => run.text)).toEqual(["ab", "B", "c"]);
+    expect(runs[1]?.style.fontStyle).toBe("Bold");
+  });
+});

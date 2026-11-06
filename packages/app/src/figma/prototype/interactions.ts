@@ -57,6 +57,13 @@ export function parseAction(action: FigmaInteraction["action"]): ParsedAction {
   if (navigation === "OVERLAY") return { kind: "overlay", destinationId };
   if (navigation === "SWAP") return { kind: "swap", destinationId };
   if (navigation === "SCROLL_TO") return { kind: "scroll_to", destinationId };
+  // Figma's Navigation enum is NAVIGATE | SWAP | OVERLAY | SCROLL_TO | CHANGE_TO. Only the
+  // screen-to-screen kinds play here: CHANGE_TO retargets a component instance (no player
+  // state-machine consumer yet) and anything newer must not become a wrong frame jump, so
+  // anything outside the navigate vocabulary is ignored rather than treated as NAVIGATE.
+  // A missing navigation is the legacy node-level transition the daemon synthesizes, which is
+  // a plain NAVIGATE.
+  if (navigation !== null && navigation !== "NAVIGATE") return { kind: "ignore" };
   return {
     kind: "navigate",
     destinationId,
