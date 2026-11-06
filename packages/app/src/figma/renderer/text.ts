@@ -1,7 +1,8 @@
 // Text drawing for the renderer (spec 32.5.1): Figma TEXT nodes with per-segment style overrides,
 // manual wrapping at the node width, alignment, line-height, letter-spacing, textCase and
-// textDecoration. The renderer never loads fonts: `options.fontAvailable` decides whether the
-// requested family is used or a generic fallback, and missing fonts are reported for `onMissing`.
+// textDecoration. The renderer never loads fonts: `textNeedsRasterFallback` routes a node whose
+// required family/style fails `options.fontAvailable` to the per-node raster fallback pipeline,
+// and the font stays reported so the caller can load it and re-render as vector.
 import type { FigmaNode } from "@jagentdesk/protocol/figma/rpc-schemas";
 import type { Paint, TextStyle, TextRun } from "./node-props";
 import { nodeOpacity, nodeSize, paintsOf, textAligns, textRuns } from "./node-props";
@@ -58,17 +59,50 @@ function cssFont(run: ResolvedRun): string {
   return parts.join(" ");
 }
 
+function missingFontFor(
+  style: TextStyle,
+  options: FigmaRenderOptions,
+  missing: MissingSink,
+): string | null {
+  const requested = style.fontFamily;
+  const styleName = style.fontStyle ?? "Regular";
+  if (!requested || requested === GENERIC_FAMILY) return null;
+  if (options.fontAvailable(requested, styleName)) return null;
+  missing.addFont(requested, styleName);
+  return requested;
+}
+
+/**
+ * True when the node has text whose required family/style is not available, so the caller must
+ * use the raster fallback pipeline (spec 32.5.1: a node the renderer cannot draw correctly is
+ * replaced by Figma's render of that node). Reports every missing face on `missing` so the
+ * caller can still load them; a text-less node never rasterizes and keeps drawing as text.
+ */
+export function textNeedsRasterFallback(
+  node: FigmaNode,
+  options: FigmaRenderOptions,
+  missing: MissingSink,
+): boolean {
+  let unavailable = false;
+  let hasText = false;
+  for (const run of textRuns(node)) {
+    if (run.text.length > 0) hasText = true;
+    if (missingFontFor(run.style, options, missing) !== null) unavailable = true;
+  }
+  return unavailable && hasText;
+}
+
 function resolveFamily(
   style: TextStyle,
   options: FigmaRenderOptions,
   missing: MissingSink,
 ): string {
-  const requested = style.fontFamily;
-  const styleName = style.fontStyle ?? "Regular";
-  if (!requested || requested === GENERIC_FAMILY) return GENERIC_FAMILY;
-  if (options.fontAvailable(requested, styleName)) return requested;
-  missing.addFont(requested, styleName);
-  return GENERIC_FAMILY;
+  // Kept for the defensive path (a caller that draws text without the raster gate): an
+  // unavailable family falls back to the generic face and is reported; the gate in drawNode
+  // normally rasterizes the node before any text is drawn.
+  return missingFontFor(style, options, missing) === null
+    ? style.fontFamily || GENERIC_FAMILY
+    : GENERIC_FAMILY;
 }
 
 function applyTextCase(text: string, textCase: string | undefined): string {

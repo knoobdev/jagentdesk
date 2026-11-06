@@ -19,7 +19,10 @@ export interface FigmaRenderOptions {
   viewport?: { x: number; y: number; width: number; height: number };
   /** Decoded image for an `imageRef` (image fills), or null while it loads. */
   imageForRef: (imageRef: string) => CanvasImageSource | null;
-  /** Decoded fallback raster of a node the renderer cannot draw (see `unsupportedFeatures`). */
+  /**
+   * Decoded fallback raster of a node the renderer cannot draw (see `unsupportedFeatures`;
+   * also used for TEXT nodes whose required family/style fails `fontAvailable`).
+   */
   fallbackForNode: (nodeId: string) => CanvasImageSource | null;
   /** True when the font face is loaded and usable by the context. */
   fontAvailable: (family: string, style: string) => boolean;
