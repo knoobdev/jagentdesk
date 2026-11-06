@@ -6,6 +6,7 @@ import { boundsIntersect, readBounds, type Bounds } from "./matrix";
 import {
   absoluteBoxOf,
   effectsOf,
+  geometryOf,
   hasHyperlinks,
   isMask,
   listStyleOf,
@@ -89,6 +90,7 @@ export function unsupportedFeatures(node: FigmaNode): string[] {
   pushEffectFeatures(node, features);
   const { strokeAlign } = strokeAlignmentOf(node);
   if (!STROKE_ALIGNMENTS.has(strokeAlign)) pushFeature(features, `STROKE_ALIGN:${strokeAlign}`);
+  else pushBakedAlignFeature(node, strokeAlign, features);
   if (node.type === "TEXT") pushTextFeatures(node, features);
   pushGeometryAndMaskFeatures(node, features);
   pushContainerOpacityFeature(node, features);
@@ -193,6 +195,25 @@ function hasBlendingPaints(node: FigmaNode): boolean {
 
 function strokeAlignmentOf(node: FigmaNode): { strokeAlign: string } {
   return { strokeAlign: typeof node.strokeAlign === "string" ? node.strokeAlign : "CENTER" };
+}
+
+/**
+ * A baked stroke paints `strokeGeometry` clipped to the fill region for INSIDE/OUTSIDE align.
+ * ctx.clip INTERSECTS, and no single clip rule can express the union of fill outlines that
+ * mix winding rules across `fillGeometry` entries — the stroke would be erased or evaluated
+ * under the wrong rule. Those nodes go to the per-node raster fallback; single-rule multi-
+ * outline nodes are unioned into one merged clip path by the renderer instead.
+ */
+function pushBakedAlignFeature(node: FigmaNode, strokeAlign: string, features: string[]): void {
+  if (strokeAlign !== "INSIDE") return;
+  const weight = typeof node.strokeWeight === "number" ? node.strokeWeight : 0;
+  if (weight <= 0) return;
+  const strokes = geometryOf(node, "strokeGeometry");
+  if (!strokes || strokes.length === 0) return;
+  const fills = geometryOf(node, "fillGeometry");
+  if (!fills || fills.length < 2) return;
+  if (new Set(fills.map((entry) => entry.windingRule)).size > 1)
+    pushFeature(features, "STROKE_ALIGN_MIXED_RULES");
 }
 
 /** Mask children that make their parent depend on features this renderer cannot draw. */

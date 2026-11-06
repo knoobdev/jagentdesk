@@ -123,7 +123,10 @@ describe("baked strokeGeometry honors strokeAlign (PNG4 border proof)", () => {
     const fillIndex = ops.findIndex((op) => op[0] === "fill");
     const clip = ops.find((op, i) => i < fillIndex && op[0] === "clip");
     expect(clip, "baked OUTSIDE stroke must clip to the inverse of the node outline").toBeDefined();
-    expect((clip as unknown[])[2]).toBe("evenodd");
+    // The complement must respect the OUTLINE's own winding rule (the fixture outline is
+    // NONZERO); silently treating every nonzero path as evenodd mis-evaluates complex
+    // geometry, so "nonzero" is the expected rule here.
+    expect((clip as unknown[])[2]).toBe("nonzero");
   });
 
   it("leaves baked CENTER strokes unclipped", () => {
@@ -131,5 +134,107 @@ describe("baked strokeGeometry honors strokeAlign (PNG4 border proof)", () => {
     const fillIndex = ops.findIndex((op) => op[0] === "fill");
     const clip = ops.find((op, i) => i < fillIndex && op[0] === "clip");
     expect(clip, "CENTER strokes fill the baked band as-is").toBeUndefined();
+  });
+});
+
+const RECT_A = "M0 0H40V30H0Z";
+const RECT_B = "M60 0H100V30H60Z"; // disjoint from RECT_A on the same 100x50 box
+const DONUT = "M60 0H100V50H60ZM70 10H90V40H70Z"; // hole subpath, evenodd
+
+function bakedWithOutlines(align: string, outlines: { path: string; rule: string }[]): FigmaNode {
+  return {
+    id: "1:3",
+    name: "baked-multi",
+    type: "RECTANGLE",
+    absoluteBoundingBox: { x: 0, y: 0, width: 100, height: 50 },
+    fills: [],
+    strokes: [{ type: "SOLID", color: { r: 0.122, g: 0.31, b: 0.847, a: 1 } }],
+    strokeWeight: 1,
+    strokeAlign: align,
+    fillGeometry: outlines.map((o) => ({ path: o.path, windingRule: o.rule })),
+    strokeGeometry: [{ path: RING_D, windingRule: "NONZERO" }],
+  } as unknown as FigmaNode;
+}
+
+function opsBeforeFill(ops: unknown[][], name: string): unknown[][] {
+  const fillIndex = ops.findIndex((op) => op[0] === "fill");
+  expect(fillIndex, "stroke band never filled").toBeGreaterThan(-1);
+  return ops.slice(0, fillIndex).filter((op) => op[0] === name);
+}
+
+describe("baked align: union-safe and rule-respecting (root review)", () => {
+  it("unions disjoint INSIDE outlines into ONE clip — no lost stroke, no double alpha", () => {
+    // ctx.clip INTERSECTS, so looping per-outline clips over disjoint fillGeometry entries
+    // produced an empty clip region and erased the border entirely.
+    const ops = recordedOps(
+      bakedWithOutlines("INSIDE", [
+        { path: RECT_A, rule: "NONZERO" },
+        { path: RECT_B, rule: "NONZERO" },
+      ]),
+    );
+    const clips = opsBeforeFill(ops, "clip");
+    expect(clips, "disjoint same-rule outlines must clip once through a merged path").toHaveLength(
+      1,
+    );
+    const merged = clips[0][1] as { commands?: (string | number)[][] };
+    expect(merged.commands, "the single clip must carry BOTH outlines").toEqual(
+      expect.arrayContaining([
+        ["moveTo", 0, 0],
+        ["moveTo", 60, 0],
+      ]),
+    );
+    expect(
+      ops.filter((op) => op[0] === "fill"),
+      "the band fills exactly once",
+    ).toHaveLength(1);
+  });
+
+  it("keeps an evenodd hole excluded from the INSIDE clip (same-rule merged path)", () => {
+    const ops = recordedOps(bakedWithOutlines("INSIDE", [{ path: DONUT, rule: "EVENODD" }]));
+    const clips = opsBeforeFill(ops, "clip");
+    expect(clips).toHaveLength(1);
+    expect(clips[0][2]).toBe("evenodd");
+    expect(ops.filter((op) => op[0] === "fill")).toHaveLength(1);
+  });
+
+  it("routes MIXED-rule multi-outline INSIDE to the existing per-node fallback", () => {
+    // Neither clip rule can express region(nonzero RECT_A) ∪ region(evenodd DONUT), so the
+    // node must go through fallbackForNode — never a half-erased vector stroke.
+    const ops = recordedOps(
+      bakedWithOutlines("INSIDE", [
+        { path: RECT_A, rule: "NONZERO" },
+        { path: DONUT, rule: "EVENODD" },
+      ]),
+    );
+    expect(
+      ops.some((op) => op[0] === "drawImage"),
+      "mixed-rule align uses the raster fallback",
+    ).toBe(true);
+    expect(
+      ops.some((op) => op[0] === "fill"),
+      "no vector band fill survives the fallback route",
+    ).toBe(false);
+  });
+
+  it("OUTSIDE complements respect each outline's own winding rule (no silent evenodd)", () => {
+    const evenodd = recordedOps(bakedWithOutlines("OUTSIDE", [{ path: DONUT, rule: "EVENODD" }]));
+    expect(opsBeforeFill(evenodd, "clip")[0][2]).toBe("evenodd");
+    const nonzero = recordedOps(bakedWithOutlines("OUTSIDE", [{ path: RECT_A, rule: "NONZERO" }]));
+    expect(opsBeforeFill(nonzero, "clip")[0][2]).toBe("nonzero");
+  });
+
+  it("OUTSIDE multi-outline intersects complements per-outline, each under its own rule", () => {
+    // De Morgan: ∩ complement_i = complement of ∪, so per-outline inverse clips never erase
+    // disjoint geometry and no double alpha appears (the band still fills once).
+    const ops = recordedOps(
+      bakedWithOutlines("OUTSIDE", [
+        { path: RECT_A, rule: "NONZERO" },
+        { path: DONUT, rule: "EVENODD" },
+      ]),
+    );
+    const clips = opsBeforeFill(ops, "clip");
+    expect(clips, "one inverse clip per outline").toHaveLength(2);
+    expect(clips.map((clip) => clip[2])).toEqual(["nonzero", "evenodd"]);
+    expect(ops.filter((op) => op[0] === "fill")).toHaveLength(1);
   });
 });

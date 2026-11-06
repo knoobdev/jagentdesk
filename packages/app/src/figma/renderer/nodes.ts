@@ -252,18 +252,8 @@ function drawStrokes(state: DrawState, node: FigmaNode, alpha: number): void {
     ctx.save();
     ctx.globalAlpha = (paint.opacity ?? 1) * alpha;
     applyPaintBlend(ctx, paint.blendMode);
-    if (baked && settings.align !== "CENTER") {
-      // Figma's strokeGeometry band spans ±weight around the outline; the align semantics
-      // are applied by clipping (source PNG4: a 1px INSIDE border covers exactly the inner
-      // half). Unclipped, a weight-1 inside border paints 2px straddling the edge — the
-      // "visibly heavier" stroke residual. Same technique as the primitive branch below.
-      const outlines = fillShapes(node);
-      for (const outline of outlines) {
-        if (settings.align === "INSIDE") ctx.clip(outline.path, outline.rule);
-        else if (settings.align === "OUTSIDE")
-          ctx.clip(inverseShape(outline, width, height, settings.weight), "evenodd");
-      }
-    }
+    if (baked && settings.align !== "CENTER")
+      applyBakedAlignClip(ctx, fillShapes(node), settings.align, width, height, settings.weight);
     for (const shape of shapes) {
       // Figma's strokeGeometry entries are the final outline: width, cap, join and dashes are
       // already baked into the path, so it is filled with its winding rule, not stroked.
@@ -278,6 +268,50 @@ function drawStrokes(state: DrawState, node: FigmaNode, alpha: number): void {
     ctx.restore();
   }
   ctx.restore();
+}
+
+/**
+ * Applies INSIDE/OUTSIDE semantics to a baked strokeGeometry band. Figma bakes the band
+ * spanning ±weight around the outline, so the align is enforced by clipping (source PNG4:
+ * a 1px INSIDE border covers exactly the inner half; unclipped it paints 2px straddling
+ * the edge). ctx.clip INTERSECTS, so multi-outline geometry needs union-aware handling;
+ * the one case no clip rule can express (mixed-rule multi-outline INSIDE) is routed to the
+ * per-node raster fallback by unsupported.ts. Every clip here uses the outline's own
+ * winding rule — a nonzero path is never silently evaluated as evenodd.
+ */
+function applyBakedAlignClip(
+  ctx: FigmaCanvasContext,
+  outlines: Shape[],
+  align: string,
+  width: number,
+  height: number,
+  weight: number,
+): void {
+  if (outlines.length === 0) return;
+  if (outlines.length === 1) {
+    const [outline] = outlines;
+    ctx.clip(
+      align === "INSIDE" ? outline.path : inverseShape(outline, width, height, weight),
+      outline.rule,
+    );
+    return;
+  }
+  const rule = outlines[0].rule;
+  const sameRule = outlines.every((outline) => outline.rule === rule);
+  if (align === "INSIDE" && sameRule) {
+    // One merged path: successive per-outline clips would intersect disjoint outlines
+    // to nothing and erase the border (lost stroke), and the band still fills once.
+    const union = newPath();
+    for (const outline of outlines) union.addPath(outline.path);
+    ctx.clip(union, rule);
+  } else if (align === "OUTSIDE") {
+    // Intersecting complements == complement of the union (De Morgan): per-outline inverse
+    // clips never erase disjoint geometry, and each honors its own rule.
+    for (const outline of outlines)
+      ctx.clip(inverseShape(outline, width, height, weight), outline.rule);
+  }
+  // Mixed-rule INSIDE with a raster-less caller stays unclipped: the straddle beats an
+  // empty intersection, and drawNode never routes here when the fallback exists.
 }
 
 function strokeShape(
