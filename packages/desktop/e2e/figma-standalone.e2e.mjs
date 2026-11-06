@@ -1297,6 +1297,8 @@ async function main() {
       renderRequests: [],
       renderPending: new Set(),
       renderResponses: [],
+      contentPending: new Set(),
+      contentResponses: [],
       playbackFrameCounts: [],
       nodesIdCounts: [],
       apiPlaybackFrameCounts: [],
@@ -1320,6 +1322,17 @@ async function main() {
           if (typeof type !== "string" || !type.startsWith("figma.")) return;
           uiRequests.types.add(type);
           uiRequests.counts[type] = (uiRequests.counts[type] ?? 0) + 1;
+          if (
+            [
+              "figma.file.outline.request",
+              "figma.file.nodes.request",
+              "figma.file.playback.request",
+              "figma.file.render.request",
+              "figma.file.imageFills.request",
+              "figma.fonts.get.request",
+            ].includes(type)
+          )
+            uiRequests.contentPending.add(msg.requestId);
           if (type === "figma.file.render.request") {
             uiRequests.renderRequests.push({ at_ms: Date.now(), ...msg });
             uiRequests.renderPending.add(msg.requestId);
@@ -1336,6 +1349,12 @@ async function main() {
         try {
           const envelope = JSON.parse(String(frame.payload));
           const msg = envelope?.type === "session" ? envelope.message : envelope;
+          if (uiRequests.contentPending.delete(msg?.payload?.requestId))
+            uiRequests.contentResponses.push({
+              type: msg.type,
+              requestId: msg.payload.requestId,
+              errorCode: msg.payload.error?.code ?? null,
+            });
           if (msg?.type === "figma.file.comments.list.response")
             uiRequests.commentsResponses.push({ errorCode: msg.payload?.error?.code ?? null });
           if (msg?.type === "figma.file.render.response") {
@@ -2613,6 +2632,8 @@ async function captureRenderQuality(page, requests, artifactDir, evidence) {
     for (const [key, value] of Object.entries(target)) url.searchParams.set(key, value);
     const requestStart = requests.renderRequests.length;
     const responseStart = requests.renderResponses.length;
+    const contentStart = requests.contentResponses.length;
+    requests.contentPending.clear();
     requests.renderPending.clear(); // the old page's closed socket cannot settle after navigation
     await page.goto(url.toString(), { waitUntil: "domcontentloaded", timeout: 60_000 });
     const canvas = page.locator("#jagentdesk-figma-canvas");
@@ -2639,12 +2660,12 @@ async function captureRenderQuality(page, requests, artifactDir, evidence) {
       while (Date.now() < deadline) {
         const image = await canvas.evaluate((c) => c.toDataURL("image/png"));
         const hash = createHash("sha256").update(image).digest("hex");
-        if (hash !== previous || requests.renderPending.size) stableSince = Date.now();
+        if (hash !== previous || requests.contentPending.size) stableSince = Date.now();
         previous = hash;
         if (Date.now() - stableSince >= 8_000) return { stable: true, pending: 0, hash };
         await delay(1_000);
       }
-      return { stable: false, pending: requests.renderPending.size };
+      return { stable: false, pending: requests.contentPending.size };
     };
     let wheelGain = 0.0025;
     for (const zoom of [1, 2, 3.32]) {
@@ -2707,6 +2728,7 @@ async function captureRenderQuality(page, requests, artifactDir, evidence) {
     }
     result.renderRequests = requests.renderRequests.slice(requestStart);
     result.renderResponses = requests.renderResponses.slice(responseStart);
+    result.contentResponses = requests.contentResponses.slice(contentStart);
     result.finalUrl = page.url();
     console.log(`  diagnostic render-quality ${JSON.stringify(result.captures)}`);
   } catch (error) {
