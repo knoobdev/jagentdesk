@@ -8,6 +8,8 @@ import {
   type ReactNode,
 } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
+import { useQueryClient } from "@tanstack/react-query";
+import { commitFigmaConnection, removeFigmaConnection } from "./connection-cache";
 import type { FigmaConnection } from "@jagentdesk/protocol/figma/rpc-schemas";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { callFigma, useFigmaCall } from "@/figma/api";
@@ -76,6 +78,7 @@ function delegationHint(outcome: "sent" | "no-desktop" | "missing" | "error"): s
 
 function ConnectedRow({ serverId, connection }: { serverId: string; connection: FigmaConnection }) {
   const call = useFigmaCall(serverId);
+  const queryClient = useQueryClient();
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const tone = dotTone(connection.authState);
@@ -84,23 +87,29 @@ function ConnectedRow({ serverId, connection }: { serverId: string; connection: 
     try {
       // `figma.connections.test` is GET /v1/me: it proves the account sign-in, never file access
       // (the live 403 came after a 200 /me). Say exactly what was checked.
-      await call("figma.connections.test.request", { connectionId: connection.id });
+      await commitFigmaConnection(queryClient, serverId, () =>
+        call("figma.connections.test.request", { connectionId: connection.id }),
+      );
       setNote("Account sign-in is valid. File access is checked when a file is added.");
     } catch (error) {
       setNote(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);
     }
-  }, [call, connection.id]);
+  }, [call, connection.id, queryClient, serverId]);
   const remove = useCallback(async () => {
     setBusy(true);
     try {
-      await call("figma.connections.remove.request", { connectionId: connection.id });
+      await removeFigmaConnection(queryClient, serverId, connection.id, () =>
+        call("figma.connections.remove.request", { connectionId: connection.id }),
+      );
       setNote(null);
+    } catch (error) {
+      setNote(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);
     }
-  }, [call, connection.id]);
+  }, [call, connection.id, queryClient, serverId]);
   return (
     <View style={figmaStyles.row} testID={`figma-connection-row-${connection.id}`}>
       <AuthDot tone={tone} />
@@ -144,6 +153,12 @@ export function FigmaConnectScreen({
   onConnected?: () => void;
 }) {
   const client = useHostRuntimeClient(serverId);
+  const queryClient = useQueryClient();
+  const [addingAccount, setAddingAccount] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const showSetup = connections.length === 0 || addingAccount;
+  const toggleAddAccount = useCallback(() => setAddingAccount((value) => !value), []);
+  const toggleAdvanced = useCallback(() => setAdvancedOpen((value) => !value), []);
   const state = useConnectState(serverId);
   const [pastedUrl, setPastedUrl] = useState("");
   const [note, setNote] = useState<string | null>(null);
@@ -152,12 +167,14 @@ export function FigmaConnectScreen({
   // The store talks to the daemon through these ops; configured while this screen is mounted.
   useEffect(() => {
     const complete: Parameters<typeof finishWithLoopback>[0] = (params) =>
-      callFigma(client, "figma.oauth.complete.request", {
-        attemptId: params.attemptId,
-        ...(params.code ? { code: params.code } : {}),
-        ...(params.state ? { state: params.state } : {}),
-        ...(params.pastedUrl ? { pastedUrl: params.pastedUrl } : {}),
-      });
+      commitFigmaConnection(queryClient, serverId, () =>
+        callFigma(client, "figma.oauth.complete.request", {
+          attemptId: params.attemptId,
+          ...(params.code ? { code: params.code } : {}),
+          ...(params.state ? { state: params.state } : {}),
+          ...(params.pastedUrl ? { pastedUrl: params.pastedUrl } : {}),
+        }),
+      );
     configureFigmaConnect({
       begin: (input) => callFigma(client, "figma.oauth.begin.request", input),
       complete: async (input) => {
@@ -168,7 +185,7 @@ export function FigmaConnectScreen({
       delegate: (input) => callFigma(client, "figma.oauth.delegate.request", input),
     });
     return () => configureFigmaConnect(null);
-  }, [client]);
+  }, [client, queryClient, serverId]);
 
   useEffect(() => {
     // Consume the completion before navigating. The route may render this guide again while
@@ -226,45 +243,6 @@ export function FigmaConnectScreen({
   return (
     <ScrollView style={figmaStyles.screen} contentContainerStyle={figmaStyles.scrollContent}>
       <View style={figmaStyles.stack} testID="figma-connect-screen">
-        <Text style={figmaStyles.headerTitle}>Connect Figma</Text>
-        <Text style={figmaStyles.sectionHint}>
-          JAgentDesk signs in with a private OAuth app you register once in the Figma developer
-          console. Your dev machine keeps the token.
-        </Text>
-
-        <View style={figmaStyles.guide} testID="figma-connect-guide">
-          <GuideStep index={1}>
-            <Text style={figmaStyles.guideBody}>
-              Open{" "}
-              <Text style={figmaStyles.guideLink} onPress={openApps}>
-                www.figma.com/developers/apps
-              </Text>{" "}
-              and create a private OAuth application.
-            </Text>
-          </GuideStep>
-          <GuideStep index={2}>
-            <Text style={figmaStyles.guideBody}>Set the redirect URI to exactly</Text>
-            <View style={figmaStyles.row}>
-              <Text style={figmaStyles.mono}>{FIGMA_CALLBACK_URL}</Text>
-              <CopyButton value={FIGMA_CALLBACK_URL} label="Copy" testID="figma-copy-callback" />
-            </View>
-          </GuideStep>
-          <GuideStep index={3}>
-            <Text style={figmaStyles.guideBody}>Enable these scopes</Text>
-            <View style={figmaStyles.row}>
-              <Text style={figmaStyles.mono} testID="figma-guide-scopes">
-                {scopesText}
-              </Text>
-              <CopyButton value={scopesText} label="Copy all" testID="figma-copy-scopes" />
-            </View>
-          </GuideStep>
-          <GuideStep index={4}>
-            <Text style={figmaStyles.guideBody}>
-              Copy the Client ID and Client Secret into the fields below, then start the sign-in.
-            </Text>
-          </GuideStep>
-        </View>
-
         {connections.length > 0 ? (
           <View style={figmaStyles.card} testID="figma-connected-connections">
             <SectionHeading title="Connected" />
@@ -274,105 +252,158 @@ export function FigmaConnectScreen({
           </View>
         ) : null}
 
-        {/* ADR-0040: the Remote MCP editing connector is a separate connection from the REST
-            OAuth account above; the panel gates itself on the host capability. */}
-        <RemoteConnectionPanel serverId={serverId} />
-
-        <Field label="Client ID">
-          <Input
-            value={state.clientId}
-            onChangeText={changeClientId}
-            autoCapitalize="none"
-            autoCorrect={false}
-            accessibilityLabel="Client ID"
-            testID="figma-client-id"
-          />
-        </Field>
-        <Field label="Client secret">
-          <Input
-            value={state.clientSecret}
-            onChangeText={changeClientSecret}
-            secureTextEntry
-            autoCapitalize="none"
-            autoCorrect={false}
-            accessibilityLabel="Client secret"
-            testID="figma-client-secret"
-          />
-        </Field>
-
-        {errorMessageText ? (
-          <ErrorBanner message={errorMessageText} action={dismissAction} />
-        ) : null}
-
-        <View style={figmaStyles.row}>
-          {loopback ? (
-            <Button
-              variant="default"
-              loading={busy}
-              disabled={busy}
-              onPress={signInWithBrowser}
-              testID="figma-signin-browser"
-            >
-              Sign in with browser
-            </Button>
-          ) : null}
-          <Button
-            variant={loopback ? "outline" : "default"}
-            loading={busy && !loopback}
-            disabled={busy}
-            onPress={signInWithPaste}
-            testID="figma-signin-paste"
-          >
-            Paste a URL instead
+        {connections.length > 0 ? (
+          <Button variant="outline" size="sm" onPress={toggleAddAccount} testID="figma-add-account">
+            {addingAccount ? "Cancel" : "Add account"}
           </Button>
-          {!loopback ? (
-            <Button
-              variant="outline"
-              disabled={busy}
-              onPress={onDelegate}
-              testID="figma-signin-delegate"
-            >
-              Sign in on a desktop
-            </Button>
-          ) : null}
-        </View>
-        {note ? <Text style={figmaStyles.rowSubtle}>{note}</Text> : null}
+        ) : null}
+        {showSetup ? (
+          <>
+            <Text style={figmaStyles.headerTitle}>Connect Figma</Text>
+            <Text style={figmaStyles.sectionHint}>
+              JAgentDesk signs in with a private OAuth app you register once in the Figma developer
+              console. Your dev machine keeps the token.
+            </Text>
 
-        {state.phase.kind === "browser-opened" ? (
-          <View style={figmaStyles.card} testID="figma-paste-panel">
-            <SectionHeading
-              title="Finish in your browser"
-              hint="Open the sign-in page, approve access, then copy the address the browser lands on — http://127.0.0.1:8766/figma/callback?code=… — into the field."
-            />
-            <Pressable
-              style={figmaStyles.pressableRow}
-              onPress={openAuthorize}
-              accessibilityRole="button"
-              testID="figma-open-authorize"
-            >
-              <Text style={figmaStyles.rowTitle}>Open the Figma sign-in page</Text>
-            </Pressable>
-            <Field label="Pasted URL">
+            <View style={figmaStyles.guide} testID="figma-connect-guide">
+              <GuideStep index={1}>
+                <Text style={figmaStyles.guideBody}>
+                  Open{" "}
+                  <Text style={figmaStyles.guideLink} onPress={openApps}>
+                    www.figma.com/developers/apps
+                  </Text>{" "}
+                  and create a private OAuth application.
+                </Text>
+              </GuideStep>
+              <GuideStep index={2}>
+                <Text style={figmaStyles.guideBody}>Set the redirect URI to exactly</Text>
+                <View style={figmaStyles.row}>
+                  <Text style={figmaStyles.mono}>{FIGMA_CALLBACK_URL}</Text>
+                  <CopyButton
+                    value={FIGMA_CALLBACK_URL}
+                    label="Copy"
+                    testID="figma-copy-callback"
+                  />
+                </View>
+              </GuideStep>
+              <GuideStep index={3}>
+                <Text style={figmaStyles.guideBody}>Enable these scopes</Text>
+                <View style={figmaStyles.row}>
+                  <Text style={figmaStyles.mono} testID="figma-guide-scopes">
+                    {scopesText}
+                  </Text>
+                  <CopyButton value={scopesText} label="Copy all" testID="figma-copy-scopes" />
+                </View>
+              </GuideStep>
+              <GuideStep index={4}>
+                <Text style={figmaStyles.guideBody}>
+                  Copy the Client ID and Client Secret into the fields below, then start the
+                  sign-in.
+                </Text>
+              </GuideStep>
+            </View>
+
+            <Field label="Client ID">
               <Input
-                value={pastedUrl}
-                onChangeText={setPastedUrl}
-                placeholder="http://127.0.0.1:8766/figma/callback?code=…&state=…"
+                value={state.clientId}
+                onChangeText={changeClientId}
                 autoCapitalize="none"
                 autoCorrect={false}
-                testID="figma-pasted-url"
+                accessibilityLabel="Client ID"
+                testID="figma-client-id"
               />
             </Field>
-            <Button
-              variant="default"
-              disabled={!pastedUrl.trim() || busy}
-              loading={busy}
-              onPress={submitPasted}
-              testID="figma-paste-submit"
-            >
-              Complete sign-in
-            </Button>
-          </View>
+            <Field label="Client secret">
+              <Input
+                value={state.clientSecret}
+                onChangeText={changeClientSecret}
+                secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
+                accessibilityLabel="Client secret"
+                testID="figma-client-secret"
+              />
+            </Field>
+
+            {errorMessageText ? (
+              <ErrorBanner message={errorMessageText} action={dismissAction} />
+            ) : null}
+
+            <View style={figmaStyles.row}>
+              {loopback ? (
+                <Button
+                  variant="default"
+                  loading={busy}
+                  disabled={busy}
+                  onPress={signInWithBrowser}
+                  testID="figma-signin-browser"
+                >
+                  Sign in with browser
+                </Button>
+              ) : null}
+              <Button
+                variant={loopback ? "outline" : "default"}
+                loading={busy && !loopback}
+                disabled={busy}
+                onPress={signInWithPaste}
+                testID="figma-signin-paste"
+              >
+                Paste a URL instead
+              </Button>
+              {!loopback ? (
+                <Button
+                  variant="outline"
+                  disabled={busy}
+                  onPress={onDelegate}
+                  testID="figma-signin-delegate"
+                >
+                  Sign in on a desktop
+                </Button>
+              ) : null}
+            </View>
+            {note ? <Text style={figmaStyles.rowSubtle}>{note}</Text> : null}
+
+            {state.phase.kind === "browser-opened" ? (
+              <View style={figmaStyles.card} testID="figma-paste-panel">
+                <SectionHeading
+                  title="Finish in your browser"
+                  hint="Open the sign-in page, approve access, then copy the address the browser lands on — http://127.0.0.1:8766/figma/callback?code=… — into the field."
+                />
+                <Pressable
+                  style={figmaStyles.pressableRow}
+                  onPress={openAuthorize}
+                  accessibilityRole="button"
+                  testID="figma-open-authorize"
+                >
+                  <Text style={figmaStyles.rowTitle}>Open the Figma sign-in page</Text>
+                </Pressable>
+                <Field label="Pasted URL">
+                  <Input
+                    value={pastedUrl}
+                    onChangeText={setPastedUrl}
+                    placeholder="http://127.0.0.1:8766/figma/callback?code=…&state=…"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    testID="figma-pasted-url"
+                  />
+                </Field>
+                <Button
+                  variant="default"
+                  disabled={!pastedUrl.trim() || busy}
+                  loading={busy}
+                  onPress={submitPasted}
+                  testID="figma-paste-submit"
+                >
+                  Complete sign-in
+                </Button>
+              </View>
+            ) : null}
+          </>
         ) : null}
+        <Button variant="ghost" size="sm" onPress={toggleAdvanced} testID="figma-connect-advanced">
+          {advancedOpen ? "Hide advanced" : "Advanced"}
+        </Button>
+        {advancedOpen ? <RemoteConnectionPanel serverId={serverId} /> : null}
       </View>
     </ScrollView>
   );

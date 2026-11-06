@@ -16,6 +16,7 @@ import {
 import { findDefaultCodexBinary } from "../../agent/providers/codex-app-server-agent.js";
 import { spawnProcess } from "../../../utils/spawn.js";
 import { ensurePrivateDirectory, writePrivateFileAtomicSync } from "../../private-files.js";
+import { figmaIdentityLabel } from "./identity.js";
 import type {
   FigmaRemoteExecuteInput,
   FigmaRemoteExecuteOutcome,
@@ -601,8 +602,7 @@ export class FigmaRemoteConnector implements FigmaRemoteGateway {
       );
       // Final ownership gate after the await: a dead lifecycle never sets identity.
       if (this.owns(generation) && this.client === client) {
-        const text = extractFirstText(response);
-        if (text) this.identityText = text.slice(0, 500);
+        this.identityText = figmaIdentityLabel(extractFirstText(response));
       }
     } catch {
       // best-effort

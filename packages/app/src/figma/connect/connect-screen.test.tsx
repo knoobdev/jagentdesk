@@ -206,7 +206,16 @@ vi.mock("./oauth-flow", () => ({
   FIGMA_OAUTH_SCOPES: ["file_read"],
 }));
 
-import { FigmaConnectScreen } from "./connect-screen";
+import { FigmaConnectScreen as ConnectScreen } from "./connect-screen";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function FigmaConnectScreen(props: React.ComponentProps<typeof ConnectScreen>) {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <ConnectScreen {...props} />
+    </QueryClientProvider>
+  );
+}
 
 describe("FigmaConnectScreen", () => {
   let root: Root | null = null;
@@ -283,10 +292,15 @@ describe("FigmaConnectScreen", () => {
     expect(screen?.getAttribute("data-gap")).toBe(String(theme.spacing[4]));
   });
 
-  // ADR-0040: the Remote MCP editing connection lives in the Connections view next to the REST
-  // account rows; the guide itself (sign-in paths) must keep working alongside it untouched.
-  it("mounts the Remote editing panel for this host in the Connections view", () => {
+  // Editing is explicitly optional and only mounted after opening Advanced.
+  it("opens the optional editing panel under Advanced in Connections", () => {
     const view = render();
+    expect(view.querySelector('[data-testid="figma-remote-panel-stub"]')).toBeNull();
+    act(() => {
+      view
+        .querySelector('[data-testid="figma-connect-advanced"]')
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
     const panel = view.querySelector('[data-testid="figma-remote-panel-stub"]');
     expect(panel?.getAttribute("data-server-id")).toBe("s1");
     // The REST OAuth guide keeps its controls (the connection features are preserved).
