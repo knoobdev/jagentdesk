@@ -18,6 +18,7 @@ const OWNER_ONLY_MODE = 0o700;
 export interface TerminalWorkerSocketPathInput {
   jagentdeskHome: string;
   workerPid: number;
+  recordId: string;
   platform?: NodeJS.Platform;
   tmpDir?: string;
   uid?: number;
@@ -60,7 +61,7 @@ export function terminalWorkerSocketId(jagentdeskHome: string, workerPid: number
  */
 export function resolveTerminalWorkerSocketPath(input: TerminalWorkerSocketPathInput): string {
   const platform = input.platform ?? process.platform;
-  const id = terminalWorkerSocketId(input.jagentdeskHome, input.workerPid);
+  const id = terminalWorkerSocketId(input.jagentdeskHome, input.workerPid) + "-" + input.recordId;
   if (platform === "win32") {
     return `\\\\.\\pipe\\jagentdesk-tw-${id}`;
   }

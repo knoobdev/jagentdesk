@@ -4,7 +4,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { isPlatform } from "../test-utils/platform.js";
 import { encodeFrame, FrameDecoder, TerminalWorkerFrameError } from "./terminal-worker-frames.js";
-import { connectTerminalWorker, TerminalWorkerConnectError } from "./terminal-worker-client.js";
+import { createConnection, createServer, type Server } from "node:net";
+import { randomUUID } from "node:crypto";
+import {
+  connectTerminalWorker,
+  probeTerminalWorkerSocket,
+  TerminalWorkerConnectError,
+} from "./terminal-worker-client.js";
 import { launchTerminalWorker } from "./terminal-worker-launch.js";
 import { terminalWorkerRecordPath } from "./terminal-worker-record.js";
 

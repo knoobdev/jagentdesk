@@ -21,6 +21,7 @@ import {
   terminalCleanupRecordPath,
   terminalWorkerDirectory,
   writeTerminalWorkerRecord,
+  writeTerminalCleanupRecord,
   type TerminalWorkerRecord,
 } from "./terminal-worker-record.js";
 
@@ -118,6 +119,7 @@ function withSessionMember(input: {
 }): TerminalWorkerProcessInspector {
   return {
     reportsSessions: true,
+    reportsBirthTimes: true,
     inspect: (pid) => inspector.inspect(pid),
     listProcesses: async () => {
       // A fresh snapshot each call, so it is rewritten in place.
@@ -293,6 +295,7 @@ describe.skipIf(isPlatform("win32"))("terminal worker reaper", () => {
     const killable = spawnIdle();
     const failing: TerminalWorkerProcessInspector = {
       reportsSessions: inspector.reportsSessions,
+      reportsBirthTimes: inspector.reportsBirthTimes,
       inspect: (pid) =>
         pid === uninspectable.pid
           ? Promise.resolve({ status: "error", error: new Error("ps unavailable") })
@@ -489,6 +492,7 @@ describe.skipIf(isPlatform("win32"))("terminal worker reaper", () => {
     });
     const tableUnavailable: TerminalWorkerProcessInspector = {
       reportsSessions: inspector.reportsSessions,
+      reportsBirthTimes: inspector.reportsBirthTimes,
       inspect: (pid) => inspector.inspect(pid),
       listProcesses: () => Promise.reject(new Error("ps timed out")),
       readEnvironment: (pid) => inspector.readEnvironment(pid),
@@ -564,7 +568,7 @@ describe.skipIf(isPlatform("win32"))("terminal worker reaper", () => {
         process.execPath,
         [
           "-e",
-          "setInterval(() => {}, 1e9)",
+          `require("node:net").createServer(() => {}).listen(${JSON.stringify(path.join(home, "live-record-under-test.sock"))});setInterval(() => {}, 1e9)`,
           "--",
           "--jagentdesk-terminal-worker",
           "record-under-test",
@@ -574,6 +578,7 @@ describe.skipIf(isPlatform("win32"))("terminal worker reaper", () => {
       children.push(worker);
       const recordPath = writeRecord(home, {
         pid: worker.pid!,
+        socketPath: path.join(home, "live-record-under-test.sock"),
         identity: {
           startedAt: await birthOf(worker.pid!),
           commandLine: "node -e --jagentdesk-terminal-worker record-under-test",
@@ -616,7 +621,7 @@ describe.skipIf(isPlatform("win32"))("terminal worker reaper", () => {
         process.execPath,
         [
           "-e",
-          "setInterval(() => {}, 1e9)",
+          `require("node:net").createServer(() => {}).listen(${JSON.stringify(path.join(home, "live-record-under-test.sock"))});setInterval(() => {}, 1e9)`,
           "--",
           "--jagentdesk-terminal-worker",
           "record-under-test",
@@ -626,6 +631,7 @@ describe.skipIf(isPlatform("win32"))("terminal worker reaper", () => {
       children.push(worker);
       const recordPath = writeRecord(home, {
         pid: worker.pid!,
+        socketPath: path.join(home, "live-record-under-test.sock"),
         identity: {
           startedAt: await birthOf(worker.pid!),
           commandLine: "node -e --jagentdesk-terminal-worker record-under-test",
@@ -649,4 +655,129 @@ describe.skipIf(isPlatform("win32"))("terminal worker reaper", () => {
       expect(existsSync(recordPath)).toBe(true);
     });
   });
+});
+
+// Real sockets identify workers on every platform, independently of program birth times.
+describe("terminal worker reaper without process identity", () => {
+  const noIdentity = createTerminalWorkerProcessInspector();
+
+  // A live process standing in for a worker that cannot answer: it listens on the record's
+  // socket and never replies to the hello.
+  async function spawnSilentListener(socketPath: string): Promise<ChildProcess> {
+    const listener = spawnIdle(`
+      require("node:net").createServer(() => {}).listen(${JSON.stringify(socketPath)}, () => {
+        process.stdout.write("listening\\n");
+      });
+    `);
+    await new Promise((resolve) => listener.stdout!.once("data", resolve));
+    return listener;
+  }
+
+  it("retires the record of a gone worker and its gone programs without the identity query", async () => {
+    const home = makeHome();
+    const recordPath = writeRecord(home, {
+      pid: await goneProcessPid(),
+      terminals: [{ id: "t1", pid: await goneProcessPid(), startedAt: null }],
+    });
+
+    const result = await reapTerminalWorkers({ jagentdeskHome: home, inspector: noIdentity });
+
+    expect(result).toEqual({ records: 1, retired: 1, signaled: [] });
+    expect(existsSync(recordPath)).toBe(false);
+  });
+
+  it("does not kill a newer legacy worker when a stale cleanup secret is rejected", async () => {
+    const home = makeHome();
+    const socketPath =
+      process.platform === "win32"
+        ? `\\\\.\\pipe\\jagentdesk-legacy-${Date.now()}`
+        : path.join(home, "legacy.sock");
+    const listener = spawnIdle(`
+      require("node:net").createServer(socket => socket.on("data", () => socket.destroy())).listen(${JSON.stringify(socketPath)}, () => process.stdout.write("ready"));
+    `);
+    await new Promise((resolve) => listener.stdout!.once("data", resolve));
+    const stalePath = writeRecord(home, { pid: listener.pid!, socketPath, secret: "stale-secret" });
+    const stale = await readTerminalWorkerRecord(stalePath);
+    const cleanupPath = await writeTerminalCleanupRecord(home, {
+      ...stale,
+      closing: {
+        unresolved: [
+          { pid: listener.pid!, role: "worker", reason: "still alive", detail: "old cleanup" },
+        ],
+      },
+    });
+    writeRecord(home, {
+      pid: listener.pid!,
+      recordId: "newer-worker",
+      socketPath,
+      secret: "new-secret",
+    });
+    await expect(
+      reapTerminalWorkers({
+        jagentdeskHome: home,
+        gracefulMs: 0,
+        confirmMs: 50,
+        recordPaths: [cleanupPath],
+      }),
+    ).rejects.toBeInstanceOf(TerminalCleanupNotConfirmedError);
+    expect(isAlive(listener.pid!)).toBe(true);
+  });
+
+  it("force kills a worker whose socket accepts but never answers", async () => {
+    const home = makeHome();
+    const socketPath =
+      process.platform === "win32"
+        ? `\\\\.\\pipe\\jagentdesk-test-${Date.now()}-record-under-test`
+        : path.join(home, "w-record-under-test.sock");
+    const listener = await spawnSilentListener(socketPath);
+    writeRecord(home, {
+      pid: listener.pid!,
+      socketPath,
+    });
+
+    const result = await reapTerminalWorkers({
+      jagentdeskHome: home,
+      inspector: noIdentity,
+      gracefulMs: 300,
+    });
+    expect(result.signaled).toContain(listener.pid);
+    await waitUntilGone(listener.pid!);
+    expect(isAlive(listener.pid!)).toBe(false);
+    expect(await readUnconfirmedTerminalCleanup(home)).toEqual([]);
+  });
+
+  it("treats a live pid with nothing on the worker's socket as another process, signals it never, and retires the record", async () => {
+    const home = makeHome();
+    const reusedWorkerPid = spawnIdle().pid!;
+    const recordPath = writeRecord(home, {
+      pid: reusedWorkerPid,
+    });
+
+    const result = await reapTerminalWorkers({ jagentdeskHome: home, inspector: noIdentity });
+
+    expect(result).toEqual({ records: 1, retired: 1, signaled: [] });
+    expect(isAlive(reusedWorkerPid)).toBe(true);
+    expect(existsSync(recordPath)).toBe(false);
+  });
+
+  it.skipIf(isPlatform("win32"))(
+    "never signals a live terminal program recorded without a birth time",
+    async () => {
+      const home = makeHome();
+      const program = spawnIdle();
+      writeRecord(home, {
+        pid: await goneProcessPid(),
+        terminals: [{ id: "t1", pid: program.pid!, startedAt: null }],
+      });
+
+      await expect(
+        reapTerminalWorkers({ jagentdeskHome: home, inspector, confirmMs: 200 }),
+      ).rejects.toBeInstanceOf(TerminalCleanupNotConfirmedError);
+
+      expect(isAlive(program.pid!)).toBe(true);
+      expect(await readUnconfirmedTerminalCleanup(home)).toEqual([
+        expect.objectContaining({ pid: program.pid!, role: "terminal program" }),
+      ]);
+    },
+  );
 });
