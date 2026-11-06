@@ -962,6 +962,8 @@ async function main() {
 
   // ── pre-boot gates: everything cheap is proven before ANY heavy process starts ──
   let exitCode = 0;
+  let tearingDown = false;
+  evidence.rendererLifecycle = [];
   let account = null;
   try {
     if (fs.existsSync(desktopMain)) {
@@ -1255,11 +1257,41 @@ async function main() {
       artifactDir,
     );
     trackChild("desktop", desktop);
+    desktop.child.on("exit", (code, signal) =>
+      evidence.rendererLifecycle.push({
+        at_ms: Date.now(),
+        event: "desktop-runner-exit",
+        code,
+        signal,
+        tearingDown,
+      }),
+    );
     await waitForPort(cdpPort, "Electron CDP", desktop);
     browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`, {
       timeout: bootTimeoutMs,
     });
     const page = await waitForAppPage(browser, expoPort);
+    browser.on("disconnected", () =>
+      evidence.rendererLifecycle.push({
+        at_ms: Date.now(),
+        event: "browser-disconnected",
+        tearingDown,
+      }),
+    );
+    page.on("close", () =>
+      evidence.rendererLifecycle.push({ at_ms: Date.now(), event: "page-close", tearingDown }),
+    );
+    page.on("crash", () =>
+      evidence.rendererLifecycle.push({ at_ms: Date.now(), event: "page-crash", tearingDown }),
+    );
+    page.on("pageerror", (error) =>
+      evidence.rendererLifecycle.push({
+        at_ms: Date.now(),
+        event: "page-error",
+        message: error.message,
+        tearingDown,
+      }),
+    );
     // Renderer boot = the SUPPORTED product user flow with actual clicks, proven by the
     // connected UI — never by an IPC status alone (root run 2 lesson: demanding running+
     // healthy on a correctly-idle managed payload timed the run out at 240 s; the gate that
@@ -1497,7 +1529,10 @@ async function main() {
         proxy,
         jagentdeskHome,
         evidence,
-        closeFileUi: openFigmaSection,
+        closeFileUi: async () => {
+          await page.getByTestId("sidebar-figma-leave").click();
+          await openFigmaSection();
+        },
         refreshUi: async () => {
           // The file entered the daemon store over WS; reload and re-navigate the real product
           // UI so the files home shows it — a user-visible refresh, not DOM injection into Figma.
@@ -1577,6 +1612,7 @@ async function main() {
     evidence.failedWith = String(error?.message ?? error);
     exitCode = 2;
   } finally {
+    tearingDown = true;
     if (ramSampler) clearInterval(ramSampler);
     await client?.close().catch(() => undefined);
     await browser?.close().catch(() => undefined);

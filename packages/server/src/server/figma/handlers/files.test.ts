@@ -256,7 +256,7 @@ describe("figma.files.add", () => {
   it("names the connected email when the account has one", async () => {
     await ctx.store.saveConnection({
       id: "fgc_mail",
-      account: { figmaUserId: "u-2", handle: "chanh", email: "chanhdn35@hdc-flowtech.com" },
+      account: { figmaUserId: "u-2", handle: "<account-handle>", email: "<account-email>" },
       authState: "connected",
       createdAt_ms: 1_700_000_000_000,
     });
@@ -269,7 +269,7 @@ describe("figma.files.add", () => {
       ),
       "forbidden",
     );
-    expect(error.message).toContain("chanhdn35@hdc-flowtech.com");
+    expect(error.message).toContain("<account-email>");
     expect(error.message).toContain("Request denied");
   });
 
