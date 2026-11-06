@@ -6,6 +6,7 @@ import {
 } from "@jagentdesk/protocol/figma/rpc-schemas";
 import { FigmaServiceError } from "../context.js";
 import type { FigmaContext } from "../context.js";
+import { figmaContent } from "./content.js";
 import type { FigmaHandlerMap } from "./types.js";
 
 // Files, teams, projects (32.3) and the REST budget (32.8). Owner: W3.
@@ -206,6 +207,11 @@ export const filesHandlers: FigmaHandlerMap<FilesRequestType> = {
       linked: ctx.link.isLinked(fileKey),
     };
     await ctx.store.saveFile(file);
+    // The meta answer above just verified this version on this connection — prime the content
+    // version memo so the first outline/nodes read does not spend a second Tier-3 meta. Only a
+    // fresh successful add may prime; the stored lastVersion is never trusted on ordinary
+    // reopen, and no content cache is prewarmed (32.8).
+    if (file.lastVersion) figmaContent.primeVerifiedVersion(ctx, fileKey, file.lastVersion);
     return { file };
   },
 

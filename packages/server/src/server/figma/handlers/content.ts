@@ -892,6 +892,9 @@ interface FilePoller {
   timer: ReturnType<typeof setInterval>;
   baseline: string | null;
   inFlight: boolean;
+  // Bumped by authoritative updates (remote-write readback, ADR-0040) while a Tier-3 poll GET
+  // is in flight; a poll whose generation moved must discard its now-stale answer.
+  generation: number;
 }
 
 export class FigmaFileWatches {
@@ -942,7 +945,12 @@ export class FigmaFileWatches {
     if (this.pollers.has(fileKey)) return;
     const timer = setInterval(() => void this.poll(fileKey), this.intervalMs);
     timer.unref?.();
-    this.pollers.set(fileKey, { timer, baseline: this.versions.peek(fileKey), inFlight: false });
+    this.pollers.set(fileKey, {
+      timer,
+      baseline: this.versions.peek(fileKey),
+      inFlight: false,
+      generation: 0,
+    });
   }
 
   private stopPoller(fileKey: string): void {
@@ -960,10 +968,16 @@ export class FigmaFileWatches {
    */
   remoteWriteApplied(ctx: FigmaContext, fileKey: string, version: string | null): void {
     this.versions.invalidate(fileKey);
+    const poller = this.pollers.get(fileKey);
+    if (poller) {
+      // This readback (or forced refresh) now owns the truth: any poll whose Tier-3 GET began
+      // earlier carries a stale answer and must not roll back the memo, the baseline, or push
+      // an old version over this one.
+      poller.generation += 1;
+      if (version) poller.baseline = version;
+    }
     if (version) {
       this.versions.prime(ctx, fileKey, version);
-      const poller = this.pollers.get(fileKey);
-      if (poller) poller.baseline = version;
     }
     this.pushChanged(ctx, fileKey, version ?? "", "rest");
   }
@@ -975,6 +989,7 @@ export class FigmaFileWatches {
     // A linked file reports its own changes through the plugin; spend no Tier-3 budget on it.
     if (ctx.link.isLinked(fileKey)) return;
     poller.inFlight = true;
+    const generation = poller.generation;
     try {
       const file = await ctx.store.getFile(fileKey);
       if (!file) return;
@@ -984,9 +999,25 @@ export class FigmaFileWatches {
         tier: "3",
       });
       const version = metaVersion(meta);
-      if (!version || version === poller.baseline) return;
-      poller.baseline = version;
+      if (!version) return;
+      // An authoritative update (remote-write readback / forced refresh, ADR-0040) landed
+      // while this Tier-3 GET was in flight: the memo, the baseline and the watchers already
+      // own the newer truth, so discard this stale answer instead of rolling them back or
+      // pushing an old version. A stopped-then-restarted poller fails the identity check too.
+      if (this.pollers.get(fileKey) !== poller || poller.generation !== generation) return;
+      // Compare BEFORE re-memoizing. A watch registered before the first outline captured a
+      // null baseline; the outline has since primed the current version, so the comparison
+      // falls back to that known answer — an unchanged file must not push and dump the
+      // client's whole FrameStore and assets. A genuinely unknown version (nothing primed)
+      // keeps the historical first-poll push.
+      const known = poller.baseline ?? this.versions.peek(fileKey);
+      // Every fresh successful poll answer is authoritative for the memo window too: prime it
+      // so a content read right after this tick reuses the version instead of re-GETing
+      // /meta. Same-version polls stay silent; the 60 s TTL and one-send-per-interval budget
+      // semantics are unchanged.
       this.versions.prime(ctx, fileKey, version);
+      poller.baseline = version;
+      if (version === known) return;
       this.pushChanged(ctx, fileKey, version, "rest");
     } catch (error) {
       ctx.logger.info(
@@ -1089,6 +1120,15 @@ export class FigmaContent {
   // imageRef→url maps expire "after no more than 14 days" (figma-integration.md §3.1); a ref
   // missing from a cached map re-fetches the map at most once per minute, not every request.
   private readonly mapRefreshedAt = new Map<string, number>();
+  // Concurrent identical outline reads share one flight (see outline()); live calls only.
+  // Scoped to the requesting FigmaContext: the exported module singleton serves several
+  // service contexts (distinct homes, caches and budgets), so a joiner must never ride a
+  // foreign context's leader — the flight reads and writes THAT context's store, disk cache
+  // and budget, and its callers authorize through its token provider.
+  private readonly outlineFlights = new WeakMap<
+    FigmaContext,
+    Map<string, Promise<{ outline: FigmaOutline | null }>>
+  >();
 
   constructor(deps: ContentDeps = {}) {
     this.versions = new FileVersionCache(deps.versionTtlMs);
@@ -1118,6 +1158,18 @@ export class FigmaContent {
     };
   }
 
+  /**
+   * Narrow prime seam for a successful `figma.files.add` (32.8): the add handler has just
+   * verified the file's version through an authorized Tier-3 meta answer on that connection,
+   * so the version memo is fed from a fresh fact and the first content read resolves
+   * `current` without a second meta call. Only that answer may be primed — never the stored
+   * `files.lastVersion`, which is stale on ordinary reopen — and nothing here prewarms the
+   * content cache: the disk cache stays cold until the first real read.
+   */
+  primeVerifiedVersion(ctx: FigmaContext, fileKey: string, version: string): void {
+    this.versions.prime(ctx, fileKey, version);
+  }
+
   // ── outline / nodes ──
 
   private async outline(
@@ -1125,29 +1177,62 @@ export class FigmaContent {
     ctx: FigmaContext,
   ): Promise<{ outline: FigmaOutline | null }> {
     const file = await requireFile(ctx, request.fileKey);
+    // Run-15 evidence: one real card click fired two identical outline requests a beat apart,
+    // and the daemon did the whole depth-3 read twice — REST dispatch, parse, map, cache write.
+    // Concurrent identical requests compute the answer once and share it (the same
+    // flight-sharing the font index already uses); the entry is dropped when the read settles,
+    // so a later request re-enters and hits the per-version disk cache. Flights live in a
+    // per-context WeakMap, so two service contexts on one module singleton never join each
+    // other, and the key needs no ctx/home dimension.
+    const key = `${file.connectionId}\u0000${request.fileKey}\u0000${request.version ?? "live"}`;
+    let flights = this.outlineFlights.get(ctx);
+    if (!flights) {
+      flights = new Map();
+      this.outlineFlights.set(ctx, flights);
+    }
+    const shared = flights.get(key);
+    if (shared) return shared;
+    const flight = this.outlineUncached(ctx, file, request.version);
+    flights.set(key, flight);
+    try {
+      return await flight;
+    } finally {
+      if (flights.get(key) === flight) flights.delete(key);
+    }
+  }
+
+  private async outlineUncached(
+    ctx: FigmaContext,
+    file: FigmaFile,
+    version: string | undefined,
+  ): Promise<{ outline: FigmaOutline | null }> {
     // An explicit version is a snapshot request (32.1): the plugin's live document belongs to
     // whatever version is open in Figma now, so serving it for a pinned read would silently
     // present current hierarchy and flows as history. Only the live (unversioned) outline may
     // prefer the plugin — the same rule the pinned nodes read enforces.
-    if (request.version === undefined && ctx.link.isLinked(file.fileKey)) {
+    if (version === undefined && ctx.link.isLinked(file.fileKey)) {
       const viaLink = await this.linkedOutlineAttempt(ctx, file);
       if (viaLink) return { outline: viaLink };
     }
-    const version = request.version ?? (await this.versions.current(ctx, file));
+    const pinned = version ?? (await this.versions.current(ctx, file));
     // ADR-0039: the outline is a depth-3 read, so a SECTION's direct children (depth-3 nodes)
     // come back with it. The cache namespace carries that — a stale depth-2 summary, which
     // saw sections as opaque entries with no children, must never answer a depth-3 request.
-    const key = `file/${file.fileKey}/outline-d3@${version}`;
+    const key = `file/${file.fileKey}/outline-d3@${pinned}`;
     const hit = await ctx.cache.getJson<Wrapped<FigmaOutline>>(key);
     if (hit?.data) return { outline: hit.data };
     const json = await ctx.rest.getJson<RestFile>({
       connectionId: file.connectionId,
       path: `/v1/files/${file.fileKey}`,
-      query: { depth: OUTLINE_REST_DEPTH, version },
+      query: { depth: OUTLINE_REST_DEPTH, version: pinned },
       tier: "1",
     });
-    const outline = outlineFromRest(json, file.fileKey, version);
-    this.versions.prime(ctx, file.fileKey, outline.version);
+    const outline = outlineFromRest(json, file.fileKey, pinned);
+    // A pinned read is an immutable historical snapshot (32.1) — promoting its version into
+    // the live memo would poison current v2 with history v1. Only a live (unversioned) read
+    // may promote here; fresh verified meta answers prime through their own seams (watch
+    // poll, files.add), and an unresolved live read goes through current() → Tier-3 meta.
+    if (version === undefined) this.versions.prime(ctx, file.fileKey, outline.version);
     await ctx.cache.putJson(key, wrap(outline));
     return { outline };
   }

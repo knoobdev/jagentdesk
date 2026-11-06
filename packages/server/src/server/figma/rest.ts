@@ -66,6 +66,13 @@ export class HttpFigmaRestClient implements FigmaRestClient {
   private readonly now: () => number;
   private readonly fetchImpl: typeof fetch;
   private readonly budgets = new Map<string, ConnectionBudget>();
+  /**
+   * Identical GETs dispatched while one is already in flight join it instead of asking Figma
+   * again (run-15: the cold mount's duplicate outline request made the daemon fetch, parse, map
+   * and cache-write the whole depth-3 file twice). This shares the live call, it is not a result
+   * cache — the entry disappears the moment the call settles, so a later request re-fetches.
+   */
+  private readonly inflight = new Map<string, Promise<unknown>>();
 
   constructor(options: FigmaRestClientOptions) {
     this.logger = options.logger.child({ module: "figma-rest" });
@@ -119,6 +126,18 @@ export class HttpFigmaRestClient implements FigmaRestClient {
 
   /** Downloads a Figma-returned URL (S3 render, image fill). Never authenticated. */
   async getBytes(url: string): Promise<{ mimeType: string; data: Buffer }> {
+    const shared = this.inflight.get(url);
+    if (shared) return shared as Promise<{ mimeType: string; data: Buffer }>;
+    const flight = this.downloadBytes(url);
+    this.inflight.set(url, flight);
+    try {
+      return await flight;
+    } finally {
+      if (this.inflight.get(url) === flight) this.inflight.delete(url);
+    }
+  }
+
+  private async downloadBytes(url: string): Promise<{ mimeType: string; data: Buffer }> {
     let response: Response;
     try {
       response = await this.fetchImpl(url, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
@@ -166,6 +185,33 @@ export class HttpFigmaRestClient implements FigmaRestClient {
     body: unknown,
     tier: FigmaTier,
   ): Promise<T> {
+    const url = this.buildUrl(path, query);
+    if (method !== "GET")
+      return this.performRequest<T>(connectionId, path, url, method, body, tier);
+    // Coalescing is per connection and tier, so a joiner never crosses an auth boundary or
+    // borrows another tier's budget: the single physical send is accounted to the tier that
+    // made it, and joiners add no send — `usedLastMinute` keeps counting requests actually
+    // sent to Figma, which after coalescing is one, not two.
+    const key = `${connectionId}\u0000${tier}\u0000${url}`;
+    const shared = this.inflight.get(key);
+    if (shared) return shared as Promise<T>;
+    const flight = this.performRequest<T>(connectionId, path, url, "GET", undefined, tier);
+    this.inflight.set(key, flight);
+    try {
+      return await flight;
+    } finally {
+      if (this.inflight.get(key) === flight) this.inflight.delete(key);
+    }
+  }
+
+  private async performRequest<T>(
+    connectionId: string,
+    path: string,
+    url: string,
+    method: "GET" | "POST" | "PUT" | "DELETE",
+    body: unknown,
+    tier: FigmaTier,
+  ): Promise<T> {
     const now = this.now();
     const state = this.stateFor(connectionId);
     const tierBudget = this.tierBudgetFor(state, tier);
@@ -176,7 +222,6 @@ export class HttpFigmaRestClient implements FigmaRestClient {
       tierBudget.blockedUntil_ms = null;
     }
 
-    const url = this.buildUrl(path, query);
     tierBudget.sentAt.push(now);
     let response = await this.fetchAuthorized(url, method, body, connectionId);
 
