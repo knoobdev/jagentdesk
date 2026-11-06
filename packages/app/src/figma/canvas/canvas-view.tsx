@@ -1,12 +1,14 @@
 import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Image, PanResponder, Text, View } from "react-native";
+import { Image, PanResponder, PixelRatio, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import type { FigmaBytes, FigmaNode, FigmaPage } from "@jagentdesk/protocol/figma/rpc-schemas";
 import { isWeb } from "@/constants/platform";
+import { useHostFeature } from "@/runtime/host-features";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import type { Theme } from "@/styles/theme";
 import { createFigmaRenderer } from "@/figma/renderer";
 import { callFigma } from "./api";
+import { rasterRung } from "./assets";
 import type { FrameStore } from "./frame-store";
 import {
   childSummaries,
@@ -181,7 +183,20 @@ export function CanvasView(props: CanvasViewProps) {
   // the same cadence panning already keeps, so there is no redraw storm.
   const [sectionDrag, setSectionDrag] = useState<SectionDrag>(IDLE_DRAG);
   const renderer = useMemo(() => createFigmaRenderer(), []);
-  const assets = useFigmaAssets({ serverId, fileKey, version });
+  // ADR-0042 quality path: the outlined-SVG TEXT fallback and adaptive raster rungs exist only
+  // when the host advertises the capability AND this scope pins a snapshot version (the hook
+  // enforces the pair; without either, every request is the exact legacy scale-2 crop PNG).
+  const fidelity = useHostFeature(serverId, "figmaRenderFidelity");
+  // The device scale the camera is actually drawing with — written fresh each paint, consumed
+  // at the raster boundary to pick the quantized rung (zoom alone would undersample on HiDPI).
+  const deviceScaleRef = useRef(2);
+  const assets = useFigmaAssets({
+    serverId,
+    fileKey,
+    version,
+    fidelity,
+    getDeviceScale: () => deviceScaleRef.current,
+  });
 
   const bump = useCallback(() => setTick((value) => value + 1), []);
   useEffect(() => (store ? store.subscribe(bump) : undefined), [store, bump]);
@@ -363,6 +378,9 @@ export function CanvasView(props: CanvasViewProps) {
       }
       if (size.width === 0) return;
       const zoom = cameraRef.current.zoom;
+      // ADR-0042: record what this paint draws at so the asset layer's raster rung matches the
+      // camera exactly (fallbackForNode/onMissing run synchronously inside the draw below).
+      deviceScaleRef.current = zoom * dpr;
       ctx.setTransform(
         zoom * dpr,
         0,
@@ -420,6 +438,11 @@ export function CanvasView(props: CanvasViewProps) {
           viewport,
           imageForRef: assets.imageForRef,
           fallbackForNode: assets.fallbackForNode,
+          // ADR-0042 bounds pair: the asset layer routes known-TEXT fallbacks to the absolute-
+          // bounds SVG (and its absolute PNG), so the renderer must place those at the layout
+          // box; everything else stays on Figma's default crop → absoluteRenderBounds. False
+          // unless the whole quality path (capability + pinned version) is on.
+          fallbackTextUsesAbsoluteBounds: fidelity && version !== null,
           fontAvailable: assets.fontAvailable,
           onMissing: assets.onMissing,
           overrides: overridesRef.current,
@@ -616,6 +639,7 @@ export function CanvasView(props: CanvasViewProps) {
           serverId={serverId}
           fileKey={fileKey}
           version={version}
+          fidelity={fidelity}
           visible={visible}
           camera={camera}
           selectedNodeId={selectedNodeId}
@@ -852,7 +876,9 @@ export function pruneRasterCache(
 
 /**
  * Merge one arrived render batch and enforce the tile cap. The ledger loses dropped ids so a
- * frame scrolled back into view is requested again.
+ * frame scrolled back into view is requested again. Batch ids are qualified with the rung they
+ * were fetched at (`id@scale`, ADR-0042): two rungs of the same frame are distinct tiles, and
+ * an old-rung response cannot overwrite the new-rung slot.
  */
 function mergeRasterBatch(
   current: Record<string, string>,
@@ -862,11 +888,11 @@ function mergeRasterBatch(
   ledger: Set<string>,
 ): Record<string, string> {
   const next = { ...current };
-  for (const id of batch) {
-    const bytes = images[id];
+  for (const key of batch) {
+    const bytes = images[keyToTileId(key)];
     // Null entries are the wire's "this id got no raster" marker: no tile, id stays pruned
     // from the caller's view of `next` and the ledger lets a re-exposure request it again.
-    if (bytes) next[id] = `data:${bytes.mimeType};base64,${bytes.dataBase64}`;
+    if (bytes) next[key] = `data:${bytes.mimeType};base64,${bytes.dataBase64}`;
   }
   // Bound the cache at arrival time, not render time: panning across a 500-frame page
   // otherwise keeps every tile's base64 payload for the whole session.
@@ -875,11 +901,24 @@ function mergeRasterBatch(
   return pruned.rasters;
 }
 
+/** A tile cache/ledger key qualified with the rung it belongs to (`id@scale`, ADR-0042). */
+function tileKey(id: string, scale: number): string {
+  return `${id}@${scale}`;
+}
+
+/** The wire id behind a qualified tile key: the last `@` split, ids themselves contain `:`. */
+function keyToTileId(key: string): string {
+  const at = key.lastIndexOf("@");
+  return at < 0 ? key : key.slice(0, at);
+}
+
 /** Native (spec 32.5 mobile): same camera math, rasters + pinch/pan through PanResponder. */
 export function NativeCanvasLayer(props: {
   serverId: string;
   fileKey: string;
   version: string | null;
+  /** Host advertised `figmaRenderFidelity` (ADR-0042): adaptive tile rungs. PNG-only on native. */
+  fidelity?: boolean;
   visible: readonly SectionAwareSummary[];
   camera: Camera;
   selectedNodeId: string | null;
@@ -891,6 +930,12 @@ export function NativeCanvasLayer(props: {
 }) {
   const { visible, camera, fileKey, version, onCamera, onSelectNode, selectedNodeId } = props;
   const client = useHostRuntimeClient(props.serverId);
+  // ADR-0042 native tiles: with the capability AND a pinned version, fetch at the quantized
+  // rung the pinch-zoom actually draws at (zoom × device px); the legacy path keeps the exact
+  // fixed scale-2 wire. Tiles stay PNG everywhere — SVG data URIs in RN <Image> have no real-
+  // device proof yet, so no SVG claim on native.
+  const tileScale =
+    props.fidelity === true && version !== null ? rasterRung(camera.zoom * PixelRatio.get()) : 2;
   const [rasters, setRasters] = useState<Record<string, string>>({});
   const requested = useRef(new Set<string>());
   // The viewport as of the latest pass: an arriving batch must prune against what is visible
@@ -921,17 +966,22 @@ export function NativeCanvasLayer(props: {
           !isSectionSummary(frame) && planRootLoad(frame.bounds, camera.zoom) !== "metadata",
       )
       .map((frame) => frame.id);
-    visibleIdsRef.current = detailIds;
+    // Every cache/ledger key is rung-qualified (`id@scale`, ADR-0042): a tile fetched for one
+    // zoom level never answers another, and crossing a rung boundary re-asks instead of
+    // stretching stale bytes.
+    const detailKeys = detailIds.map((id) => tileKey(id, tileScale));
+    visibleIdsRef.current = detailKeys;
     if (!client) return;
-    const missing = detailIds.filter((id) => !requested.current.has(id));
+    const missing = detailIds.filter((id) => !requested.current.has(tileKey(id, tileScale)));
     if (missing.length === 0) return;
-    for (const id of missing) requested.current.add(id);
+    for (const id of missing) requested.current.add(tileKey(id, tileScale));
     for (let i = 0; i < missing.length; i += 20) {
       const batch = missing.slice(i, i + 20);
+      const batchKeys = batch.map((id) => tileKey(id, tileScale));
       void callFigma(client, "figma.file.render.request", {
         fileKey,
         ids: batch,
-        scale: 2,
+        scale: tileScale,
         ...(version ? { version } : {}),
       })
         .then((data) =>
@@ -941,7 +991,7 @@ export function NativeCanvasLayer(props: {
             if (rasterScope.current !== scope) return current;
             return mergeRasterBatch(
               current,
-              batch,
+              batchKeys,
               data.images,
               visibleIdsRef.current,
               requested.current,
@@ -953,10 +1003,10 @@ export function NativeCanvasLayer(props: {
           // not delete the ledger ids the NEW scope's effect just re-requested — otherwise the
           // live batch's ids vanish from `requested` and the next pass double-fetches them.
           if (rasterScope.current !== scope) return;
-          for (const id of batch) requested.current.delete(id);
+          for (const key of batchKeys) requested.current.delete(key);
         });
     }
-  }, [client, props.serverId, fileKey, version, visible, camera]);
+  }, [client, props.serverId, fileKey, version, tileScale, visible, camera]);
 
   const cameraRef = useRef(camera);
   cameraRef.current = camera;
@@ -1041,7 +1091,7 @@ export function NativeCanvasLayer(props: {
     >
       {visible.map((frame) => {
         const corner = figmaToScreen(camera, { x: frame.bounds.x, y: frame.bounds.y });
-        const uri = rasters[frame.id];
+        const uri = rasters[tileKey(frame.id, tileScale)];
         return (
           <View
             key={frame.id}
@@ -1072,7 +1122,7 @@ export function NativeCanvasLayer(props: {
           (frame) =>
             !isSectionSummary(frame) &&
             planRootLoad(frame.bounds, camera.zoom) !== "metadata" &&
-            rasters[frame.id] === undefined,
+            rasters[tileKey(frame.id, tileScale)] === undefined,
         );
         const text = waitingOnTiles ? STATUS_LOADING : (props.statusText ?? null);
         if (!text) return null;

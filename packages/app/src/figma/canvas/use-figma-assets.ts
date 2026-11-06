@@ -3,12 +3,25 @@ import type { FigmaBytes } from "@jagentdesk/protocol/figma/rpc-schemas";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { isItalicStyle, weightForStyle } from "../font-style";
 import { callFigma } from "./api";
-import { ByteImageCache, FontCache, type DecodedImageLike } from "./assets";
+import {
+  ByteImageCache,
+  FontCache,
+  rasterNamespace,
+  rasterRung,
+  type DecodedImageLike,
+  type RasterBounds,
+  type RasterFormat,
+} from "./assets";
 
 // Asset plumbing for the canvas (spec 32.5.1): the renderer never fetches, so these caches are
 // the fetch side. Image fills, fallback rasters / thumbnails and fonts all come back as base64
 // bytes (32.8) and decode to DOM images / FontFace here. The DOM decoders live behind injectable
 // factories so the caches and their tests never require a real DOM.
+// ADR-0042 quality path (host capability + pinned version): TEXT fallbacks become Figma-exported
+// outlined SVGs drawn at the absolute bounding box — crisp at any zoom, correct glyphs without
+// the font — with one finite absolute-bounds PNG downgrade per node if the SVG fails; non-TEXT
+// rasters ride an adaptive rung ceil(zoom × dpr) clamped 1..4 instead of the legacy fixed 2.
+// Without the capability or the pin, every request is the exact pre-ADR-0042 scale-2 crop PNG.
 
 export type ImageDecoder = (dataUrl: string) => DecodedImageLike | null;
 
@@ -55,21 +68,31 @@ export async function webRegisterFont(
 
 export interface FigmaAssets {
   imageForRef: (imageRef: string) => CanvasImageSource | null;
-  fallbackForNode: (nodeId: string) => CanvasImageSource | null;
+  /**
+   * Decoded fallback raster for a node, or null while it loads. `nodeType` is the renderer's
+   * node type (ADR-0042): the quality path routes "TEXT" to the outlined-SVG cache and keeps
+   * every other type on PNG. Callers that do not know the type get the legacy PNG routing.
+   */
+  fallbackForNode: (nodeId: string, nodeType?: string) => CanvasImageSource | null;
   fontAvailable: (family: string, style: string) => boolean;
   /** Ask for a frame's raster thumbnail at a scale; returns null until decoded. */
   requestThumbnail: (nodeId: string, scale: number) => CanvasImageSource | null;
   /** Renderer `onMissing` hook: kick the fetches the draw discovered it needs. */
   onMissing: (missing: {
     fallbackNodeIds: string[];
+    /** Font-missing TEXT ids (W8's MissingReport addition); always `[]` until the renderer lands it. */
+    textFallbackNodeIds?: string[];
     imageRefs: string[];
     fonts: { family: string; style: string }[];
   }) => void;
   /**
-   * The REAL ledger across every cache (fills, per-scale rasters, fonts): attempts not yet
+   * The REAL ledger across every cache (fills, namespaced rasters, fonts): attempts not yet
    * delivered and terminal failures. Backs the canvas's honest loading status (spec 32.5.1) —
    * it reports what the caches actually hold, never fabricated counts, and probing does not
    * observe (unlike get/request/fontAvailable, it cannot pin a key across reconciliation).
+   * ADR-0042 readiness rule: a font attempt whose TEXT nodes already have a ready replacement
+   * raster stops counting — the visible paint is complete, and an optional font download must
+   * not hold the line at loading/failed. The raster attempts themselves always count.
    */
   status: () => { pending: number; failed: number };
   /** Targeted retry: drop failed asset attempts so the next paint re-requests them. */
@@ -101,6 +124,10 @@ export function useFigmaAssets(input: {
   serverId: string;
   fileKey: string;
   version: string | null;
+  /** Host advertised `figmaRenderFidelity` (ADR-0042): routes the quality path at all. */
+  fidelity?: boolean;
+  /** Current device pixels per Figma unit (zoom × dpr). Defaults to the legacy fixed rung. */
+  getDeviceScale?: () => number;
   decodeImage?: ImageDecoder;
   registerFont?: (
     family: string,
@@ -112,6 +139,15 @@ export function useFigmaAssets(input: {
   const { serverId, fileKey, version } = input;
   const client = useHostRuntimeClient(serverId);
   const decode = input.decodeImage ?? webDecode;
+  // The ADR-0042 quality path exists only with BOTH the host capability and a pinned snapshot:
+  // it reads versioned REST (never the live plugin), and an unpinned live scope must keep the
+  // exact legacy wire — same scale-2 crop PNG requests, no format/bounds fields at all.
+  const quality = input.fidelity === true && version !== null;
+  // Identity-stable accessor: the caller's closure changes every render (it reads a ref), but
+  // the memoized asset surface must not — and a stale closure still reads the live ref.
+  const scaleReader = useRef(input.getDeviceScale);
+  scaleReader.current = input.getDeviceScale;
+  const deviceScale = useCallback(() => (scaleReader.current ? scaleReader.current() : 2), []);
   const listeners = useRef(new Set<() => void>());
   const notify = () => {
     for (const listener of Array.from(listeners.current)) listener();
@@ -123,6 +159,16 @@ export function useFigmaAssets(input: {
   // Faces the web registrar added to document.fonts, so dispose and paint reconciliation
   // really remove them.
   const faces = useRef(new Map<string, FontFace>());
+  // ── ADR-0042 routing state (dies with the scope, cleared in the dispose effect) ──
+  // Node types the renderer revealed through `fallbackForNode(id, nodeType)`; the quality
+  // path only routes ids KNOWN to be TEXT to the outlined-SVG cache, everything else to PNG.
+  const nodeTypes = useRef(new Map<string, "TEXT" | "OTHER">());
+  // One-shot gate for the finite SVG→PNG downgrade per (node, version): an SVG attempt that
+  // failed terminal asks for the absolute-bounds PNG exactly once, never a retry loop.
+  const textPngOnce = useRef(new Set<string>());
+  // fontKey → TEXT node ids reported missing alongside that face in the current paint.
+  // Rebuilt at every beginDraw so readiness tracks the visible paint's actual dependencies.
+  const fontFallbackOwners = useRef(new Map<string, string[]>());
   const registerDefault = useCallback(
     (family: string, style: string, dataUrl: string, isCurrent: () => boolean) =>
       webRegisterFont(
@@ -159,10 +205,11 @@ export function useFigmaAssets(input: {
   );
 
   const rasters = useMemo(() => {
-    const byScale = new Map<string, ByteImageCache>();
+    const byNamespace = new Map<string, ByteImageCache>();
     return {
-      get: (scale: number) => {
-        let cacheForScale = byScale.get(String(scale));
+      get: (scale: number, format: RasterFormat, bounds: RasterBounds) => {
+        const ns = rasterNamespace(scale, format, bounds, version);
+        let cacheForScale = byNamespace.get(ns);
         if (!cacheForScale) {
           cacheForScale = new ByteImageCache(
             async (ids) => {
@@ -172,13 +219,20 @@ export function useFigmaAssets(input: {
                 ids: [...ids],
                 scale,
                 ...(version ? { version } : {}),
+                // Only the quality path sends the new fields — and only when the cache exists
+                // because of it: the legacy wire stays byte-identical to pre-ADR-0042 daemons,
+                // which never saw `format`/`useAbsoluteBounds` on this RPC. Crop exports keep
+                // Figma's default semantics by omitting the bounds flag entirely.
+                ...(quality
+                  ? { format, ...(bounds === "absolute" ? { useAbsoluteBounds: true } : {}) }
+                  : {}),
               });
               return data.images as Record<string, FigmaBytes | null>;
             },
             decode,
             notify,
           );
-          byScale.set(String(scale), cacheForScale);
+          byNamespace.set(ns, cacheForScale);
           // A cache born mid-draw must join the open observation, or its first paint's keys
           // would reconcile away before the draw that asked for them ever closes.
           if (openDraw.current) {
@@ -188,13 +242,13 @@ export function useFigmaAssets(input: {
         }
         return cacheForScale;
       },
-      all: () => [...byScale.values()],
+      all: () => [...byNamespace.values()],
       dispose: () => {
-        for (const cacheForScale of byScale.values()) cacheForScale.clear();
-        byScale.clear();
+        for (const cacheForScale of byNamespace.values()) cacheForScale.clear();
+        byNamespace.clear();
       },
     };
-  }, [client, fileKey, version, decode]);
+  }, [client, fileKey, version, decode, quality]);
 
   const fonts = useMemo(
     () =>
@@ -220,6 +274,9 @@ export function useFigmaAssets(input: {
       imageFills.clear();
       rasters.dispose();
       fonts.clear();
+      nodeTypes.current.clear();
+      textPngOnce.current.clear();
+      fontFallbackOwners.current.clear();
       for (const face of faces.current.values()) {
         if (typeof document !== "undefined") document.fonts.delete(face);
       }
@@ -237,34 +294,102 @@ export function useFigmaAssets(input: {
         faces.current.delete(key);
       }
     };
+    /** The raster cache a fallback ask must use — the single routing decision shared by
+     *  `fallbackForNode` (read) and `onMissing` (fetch), so a get can never miss the cache
+     *  its request went into. */
+    const rasterCacheFor = (nodeId: string): ByteImageCache => {
+      if (!quality) return rasters.get(2, "png", "crop");
+      if (nodeTypes.current.get(nodeId) === "TEXT") return rasters.get(1, "svg", "absolute");
+      return rasters.get(rasterRung(deviceScale()), "png", "crop");
+    };
+    /** Non-observing: does ANY raster cache hold a decoded image for this node? */
+    const hasReadyRaster = (nodeId: string): boolean =>
+      rasters.all().some((cache) => cache.has(nodeId));
     return {
       imageForRef: (imageRef) => toSource(imageFills.get(imageRef)),
-      fallbackForNode: (nodeId) => toSource(rasters.get(2).get(nodeId)),
+      fallbackForNode: (nodeId, nodeType) => {
+        if (!nodeId) return null;
+        if (nodeType) nodeTypes.current.set(nodeId, nodeType === "TEXT" ? "TEXT" : "OTHER");
+        if (quality && nodeTypes.current.get(nodeId) === "TEXT") {
+          const svg = rasters.get(1, "svg", "absolute");
+          if (svg.stateOf(nodeId) === "failed") {
+            // Finite per node+version (ADR-0042): the SVG failed terminal, ask the absolute-
+            // bounds PNG ONCE — same drawing box, raster instead of vectors — and never again
+            // until an explicit retry clears the gate. No SVG/PNG ping-pong per paint.
+            const png = rasters.get(rasterRung(deviceScale()), "png", "absolute");
+            const onceKey = `${nodeId}@${version}`;
+            if (!textPngOnce.current.has(onceKey)) {
+              textPngOnce.current.add(onceKey);
+              png.request(nodeId);
+            }
+            return toSource(png.get(nodeId));
+          }
+          return toSource(svg.get(nodeId));
+        }
+        return toSource(rasterCacheFor(nodeId).get(nodeId));
+      },
       fontAvailable: (family, style) => fonts.fontAvailable(family, style),
-      requestThumbnail: (nodeId, scale) => toSource(rasters.get(scale).get(nodeId)),
+      requestThumbnail: (nodeId, scale) => toSource(rasters.get(scale, "png", "crop").get(nodeId)),
       onMissing: (missing) => {
         imageFills.request(...missing.imageRefs);
-        rasters.get(2).request(...missing.fallbackNodeIds);
-        for (const font of missing.fonts) fonts.fontAvailable(font.family, font.style);
+        // Record the renderer's TEXT classification FIRST (W8 emits these ids; `[]` until it
+        // lands), then split the fallback asks: known TEXT rides the outlined-SVG cache,
+        // everything else stays default-crop PNG on the adaptive rung (legacy: fixed scale 2).
+        for (const id of missing.textFallbackNodeIds ?? []) nodeTypes.current.set(id, "TEXT");
+        const textIds: string[] = [];
+        const otherIds: string[] = [];
+        for (const id of missing.fallbackNodeIds) {
+          if (quality && nodeTypes.current.get(id) === "TEXT") textIds.push(id);
+          else otherIds.push(id);
+        }
+        if (textIds.length > 0) rasters.get(1, "svg", "absolute").request(...textIds);
+        if (otherIds.length > 0) {
+          const cache = quality
+            ? rasters.get(rasterRung(deviceScale()), "png", "crop")
+            : rasters.get(2, "png", "crop");
+          cache.request(...otherIds);
+        }
+        for (const font of missing.fonts) {
+          fonts.fontAvailable(font.family, font.style);
+          if (textIds.length === 0) continue;
+          // This face's node set is being replaced by exact SVG outlines this paint: the
+          // font attempt becomes optional, and readiness must judge it by its replacement.
+          const key = `${font.family}\u0000${font.style}`;
+          const owners = fontFallbackOwners.current.get(key) ?? [];
+          for (const id of textIds) if (!owners.includes(id)) owners.push(id);
+          fontFallbackOwners.current.set(key, owners);
+        }
       },
       // Probes the caches' real records — no observation, no pinning, no fabricated numbers:
       // pending counts attempts not yet delivered, failed counts terminal attempts still held.
+      // Font attempts whose TEXT owners already have a ready replacement raster do NOT count
+      // (ADR-0042): the visible paint is complete; the fallback attempts themselves always do.
       status: () => {
         let pending = 0;
         let failed = 0;
-        for (const cache of [imageFills, fonts, ...rasters.all()]) {
+        for (const cache of [imageFills, ...rasters.all()]) {
           const state = cache.status();
           pending += state.pending;
           failed += state.failed;
         }
+        for (const attempt of fonts.unresolved()) {
+          const owners = fontFallbackOwners.current.get(attempt.key);
+          if (owners && owners.length > 0 && owners.every(hasReadyRaster)) continue;
+          if (attempt.pending) pending += 1;
+          else failed += 1;
+        }
         return { pending, failed };
       },
       retryFailed: () => {
+        // Drop terminal failures everywhere; clearing the downgrade gate lets a retried SVG
+        // that fails again take its single PNG shot instead of being locked out forever.
+        textPngOnce.current.clear();
         for (const cache of [imageFills, fonts, ...rasters.all()]) cache.retryFailed();
       },
       beginDraw: () => {
         // Rebuilt each begin so scales first used mid-draw are covered; per-cache begin is
         // idempotent, so a duplicate call never resets an open observation set.
+        fontFallbackOwners.current = new Map();
         const caches = new Set<Reconcilable>([imageFills, fonts, ...rasters.all()]);
         openDraw.current = caches;
         for (const cache of caches) cache.beginDraw();
@@ -284,5 +409,5 @@ export function useFigmaAssets(input: {
         return () => listeners.current.delete(listener);
       },
     };
-  }, [imageFills, rasters, fonts]);
+  }, [imageFills, rasters, fonts, quality, deviceScale]);
 }
