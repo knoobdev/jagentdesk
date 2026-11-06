@@ -7,6 +7,7 @@ import type {
   FigmaFile,
   FigmaNode,
   FigmaPendingOp,
+  FigmaRequestParams,
 } from "@jagentdesk/protocol/figma/rpc-schemas";
 import { useFetchQuery } from "@/data/query";
 import { getHostRuntimeStore, useHostRuntimeClient } from "@/runtime/host-runtime";
@@ -60,12 +61,16 @@ export function useFigmaFrameStore(
       `${serverId}|${reloadToken}`,
       fileKey,
       version ?? undefined,
-      async (ids) => {
-        const data = await client.figmaRequest("figma.file.nodes.request", {
+      async (ids, options) => {
+        // depth: 1 (ADR-0039) rides the same request; W4's protocol field lands in its own
+        // build, so the optional property is added structurally instead of shadowing the type.
+        const params: FigmaRequestParams<"figma.file.nodes.request"> & { depth?: 1 } = {
           fileKey,
           ids: [...ids],
           ...(version ? { version } : {}),
-        });
+        };
+        if (options?.depth) params.depth = options.depth;
+        const data = await client.figmaRequest("figma.file.nodes.request", params);
         if (data.error) throw new Error(data.error.message);
         return {
           nodes: data.nodes as Record<string, FigmaNode | null>,

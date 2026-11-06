@@ -460,3 +460,147 @@ describe("store registry", () => {
     await vi.waitFor(() => expect(store.get("1:1")?.name).toBe("again"));
   });
 });
+
+describe("FrameStore shallow SECTION queue (ADR-0039)", () => {
+  function shallowFetcher(childrenOf: (id: string) => FigmaNode[] = () => []) {
+    const calls: Array<{ ids: string[]; options?: { depth?: number } }> = [];
+    const fetchNodes = vi.fn(async (ids: readonly string[], options?: { depth?: number }) => {
+      calls.push({ ids: [...ids], ...(options ? { options } : {}) });
+      const nodes: Record<string, FigmaNode | null> = {};
+      for (const id of ids) nodes[id] = makeNode({ id, type: "SECTION", children: childrenOf(id) });
+      return { nodes, components: { [ids[0] as string]: { key: "k", name: "C" } } };
+    });
+    return { calls, fetchNodes };
+  }
+
+  it("requests depth: 1 through the fetcher while full subtrees ask with no options", async () => {
+    const { calls, fetchNodes } = shallowFetcher();
+    const store = new FrameStore(fetchNodes);
+    await store.loadSections(["10:1"]);
+    await store.load(["1:1"]);
+    expect(calls).toEqual([
+      { ids: ["10:1"], options: { depth: 1 } },
+      { ids: ["1:1"] }, // the subtree path must keep its exact old shape
+    ]);
+  });
+
+  it("keeps the two caches separate: a shallow payload never satisfies get(), and vice versa", async () => {
+    const { fetchNodes } = shallowFetcher();
+    const store = new FrameStore(fetchNodes);
+    await store.loadSections(["10:1"]);
+    expect(store.sectionNode("10:1")?.type).toBe("SECTION");
+    expect(store.get("10:1")).toBeUndefined(); // criterion 17: never paint a fragment as a tree
+
+    await store.load(["1:1"]);
+    expect(store.get("1:1")?.id).toBe("1:1");
+    expect(store.sectionNode("1:1")).toBeUndefined();
+  });
+
+  it("does not populate component metadata from shallow batches", async () => {
+    const { fetchNodes } = shallowFetcher();
+    const store = new FrameStore(fetchNodes);
+    await store.loadSections(["10:1"]);
+    expect(store.componentMeta("10:1")).toBeUndefined(); // keepsComponents: false
+    await store.load(["10:1"]);
+    expect(store.componentMeta("10:1")).toEqual({ key: "k", name: "C" });
+  });
+
+  it("dedupes pending and cached section ids across load() storm passes", async () => {
+    const { calls, fetchNodes } = shallowFetcher();
+    const store = new FrameStore(fetchNodes);
+    const first = store.loadSections(["10:1"]);
+    void store.loadSections(["10:1"]);
+    await drainMicrotasks();
+    void store.loadSections(["10:1"]); // already cached → no third call
+    await first;
+    expect(calls.map((c) => c.ids)).toEqual([["10:1"]]);
+  });
+
+  it("bounds the section cache on its own capacity and reports its ids", async () => {
+    const { fetchNodes } = shallowFetcher();
+    const store = new FrameStore(fetchNodes, 2, 50);
+    await store.loadSections(["10:1", "10:2", "10:3"]); // evicts 10:1
+    expect(store.sectionLoadedIds()).toEqual(["10:2", "10:3"]);
+    expect(store.sectionNode("10:1")).toBeUndefined();
+    // A full-subtree cache hit must not count as a section hit: capacity is per queue.
+    await store.load(["10:1"]);
+    expect(store.loadedIds()).toEqual(["10:1"]);
+    expect(store.sectionNode("10:1")).toBeUndefined();
+  });
+
+  it("discards a late shallow success from a dead generation", async () => {
+    const releases: Array<(batch: NodeBatch) => void> = [];
+    const fetchNodes = vi.fn(
+      () =>
+        new Promise<NodeBatch>((resolve) => {
+          releases.push(resolve);
+        }),
+    );
+    const store = new FrameStore(fetchNodes);
+    const settled = store.loadSections(["10:1"]);
+    await vi.waitFor(() => expect(fetchNodes).toHaveBeenCalledTimes(1));
+    store.invalidate();
+    releases[0]!({
+      nodes: { "10:1": makeNode({ id: "10:1", type: "SECTION", name: "stale" }) },
+      components: {},
+    });
+    await settled;
+    expect(store.sectionNode("10:1")).toBeUndefined();
+
+    void store.loadSections(["10:1"]);
+    await vi.waitFor(() => expect(fetchNodes).toHaveBeenCalledTimes(2));
+    releases[1]!({
+      nodes: { "10:1": makeNode({ id: "10:1", type: "SECTION", name: "fresh" }) },
+      components: {},
+    });
+    await vi.waitFor(() => expect(store.sectionNode("10:1")?.name).toBe("fresh"));
+  });
+
+  it("lets a failed shallow fetch retry on the next exposure", async () => {
+    let fail = true;
+    const fetchNodes = vi.fn(async (ids: readonly string[]) => {
+      if (fail) throw new Error("rate limited");
+      return {
+        nodes: { [ids[0] as string]: makeNode({ id: ids[0] as string, type: "SECTION" }) },
+        components: {},
+      };
+    });
+    const store = new FrameStore(fetchNodes);
+    await store.loadSections(["10:1"]);
+    expect(store.sectionNode("10:1")).toBeUndefined();
+    expect(store.isSectionPending("10:1")).toBe(false); // not stuck pending forever
+    fail = false;
+    await store.loadSections(["10:1"]);
+    expect(store.sectionNode("10:1")?.type).toBe("SECTION");
+    expect(fetchNodes).toHaveBeenCalledTimes(2);
+  });
+
+  it("settles loadSections() waiters when invalidate() drops the only in-flight batch", async () => {
+    const fetchNodes = vi.fn(() => new Promise<NodeBatch>(() => {}));
+    const store = new FrameStore(fetchNodes);
+    const settled = store.loadSections(["10:1"]);
+    await vi.waitFor(() => expect(fetchNodes).toHaveBeenCalledTimes(1));
+    expect(store.isSectionPending("10:1")).toBe(true);
+    store.invalidate();
+    let resolved = false;
+    void settled.then(
+      () => (resolved = true),
+      () => (resolved = false),
+    );
+    await drainMicrotasks();
+    expect(resolved).toBe(true);
+    expect(store.isSectionPending("10:1")).toBe(false);
+  });
+
+  it("keeps isPending and isSectionPending independent ledgers", async () => {
+    const fetchNodes = vi.fn(() => new Promise<NodeBatch>(() => {})); // never settles
+    const store = new FrameStore(fetchNodes);
+    void store.load(["1:1"]);
+    void store.loadSections(["10:1"]);
+    await drainMicrotasks();
+    expect(store.isPending("1:1")).toBe(true);
+    expect(store.isSectionPending("1:1")).toBe(false);
+    expect(store.isSectionPending("10:1")).toBe(true);
+    expect(store.isPending("10:1")).toBe(false);
+  });
+});

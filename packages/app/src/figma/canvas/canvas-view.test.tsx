@@ -4,9 +4,12 @@
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { FigmaFrameSummary } from "@jagentdesk/protocol/figma/rpc-schemas";
-import { makeFrameSummary } from "./__fixtures__/figma";
-import { MAX_RASTER_TILES, NativeCanvasLayer, pruneRasterCache } from "./canvas-view";
+import type { FigmaFrameSummary, FigmaNode } from "@jagentdesk/protocol/figma/rpc-schemas";
+import { makeFrameSummary, makeNode } from "./__fixtures__/figma";
+import { CanvasView, MAX_RASTER_TILES, NativeCanvasLayer, pruneRasterCache } from "./canvas-view";
+import { FrameStore } from "./frame-store";
+import type { SectionAwareSummary } from "./section-outline";
+import { type Camera, cameraToFit, framesBoundingRect, framesInViewport } from "./viewport";
 
 // The app's tsconfig compiles JSX classic (expo `jsx: "react-native"`), so component modules
 // under test reference a module-global React. Setup does not define it; the heavier import
@@ -14,7 +17,7 @@ import { MAX_RASTER_TILES, NativeCanvasLayer, pruneRasterCache } from "./canvas-
 const globalWithReact = globalThis as typeof globalThis & { React?: typeof React };
 globalWithReact.React ??= React;
 
-const { theme, hosts } = vi.hoisted(() => ({
+const { theme, hosts, assets, viewLayout } = vi.hoisted(() => ({
   theme: {
     fontSize: { xs: 11 },
     colors: { foregroundMuted: "#888" },
@@ -22,11 +25,27 @@ const { theme, hosts } = vi.hoisted(() => ({
   // Mutable per-serverId client registry: tests can register, unregister (offline), or swap
   // hosts exactly like the runtime store does.
   hosts: { current: {} as Record<string, { id: string } | null> },
+  // Records what the paint path asks the asset caches for, so "no flood" is assertable.
+  assets: { thumbnail: [] as string[] },
+  // The host View reports this layout once on mount, giving the viewer a viewport to cull.
+  viewLayout: { current: { width: 800, height: 600 } },
 }));
 
 vi.mock("react-native", () => ({
-  View: ({ children, testID, style }: Record<string, unknown>) =>
-    React.createElement("div", { "data-testid": String(testID ?? ""), style }, children),
+  View: ({
+    children,
+    testID,
+    style,
+    onLayout,
+  }: Record<string, unknown> & { onLayout?: (event: unknown) => void }) => {
+    React.useEffect(() => {
+      if (typeof onLayout === "function")
+        onLayout({ nativeEvent: { layout: { ...viewLayout.current } } });
+      // Mount-once: the viewer's onLayout handler is a stable useCallback.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+    return React.createElement("div", { "data-testid": String(testID ?? ""), style }, children);
+  },
   Text: ({ children }: { children?: React.ReactNode }) =>
     React.createElement("span", null, children),
   Image: ({
@@ -68,7 +87,10 @@ vi.mock("@/figma/renderer", () => ({
 vi.mock("./use-figma-assets", () => ({
   useFigmaAssets: () => ({
     subscribe: () => () => undefined,
-    requestThumbnail: () => null,
+    requestThumbnail: (id: string) => {
+      assets.thumbnail.push(id);
+      return null;
+    },
     imageForRef: () => null,
     fallbackForNode: () => null,
     fontAvailable: () => false,
@@ -182,6 +204,7 @@ function deferredRenderBatches() {
 beforeEach(() => {
   callFigmaMock.mockReset();
   hosts.current = { srv: { id: "srv" } };
+  assets.thumbnail.length = 0;
   serveRenderTiles();
 });
 
@@ -380,5 +403,216 @@ describe("NativeCanvasLayer lazy render requests", () => {
       "data:image/png;base64,srv|7:1:1",
     ]);
     layer.unmount();
+  });
+});
+
+describe("NativeCanvasLayer overview gate (ADR-0039)", () => {
+  it("requests no rasters for frames projected a few pixels wide", async () => {
+    const visible = framesFrom("1", 400); // 100×80 frames at 0.02 zoom project to ~2 px
+    const layer = mountLayer({ visible, camera: { zoom: 0.02, offsetX: 0, offsetY: 0 } });
+    await flush();
+    await flush();
+    expect(callFigmaMock).not.toHaveBeenCalled();
+    layer.unmount();
+  });
+
+  it("requests rasters again once the zoom gives the same frames projected detail", async () => {
+    const visible = framesFrom("1", 3);
+    const layer = mountLayer({ visible, camera: { zoom: 0.02, offsetX: 0, offsetY: 0 } });
+    await flush();
+    expect(callFigmaMock).not.toHaveBeenCalled();
+    layer.rerenderWith({ camera: CAMERA });
+    await flush();
+    expect(callFigmaMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "figma.file.render.request",
+      expect.objectContaining({ ids: ["1:0", "1:1", "1:2"] }),
+    );
+    layer.unmount();
+  });
+});
+
+// ── CanvasView adaptive loading (spec 32.5.1, ADR-0039) ────────────────────────────────
+
+function framesGrid(count: number): FigmaFrameSummary[] {
+  return Array.from({ length: count }, (_, index) =>
+    makeFrameSummary(`7:${index}`, (index % 50) * 220, Math.floor(index / 50) * 170, 200, 150),
+  );
+}
+
+function sectionFrame(id: string, width: number, height: number): SectionAwareSummary {
+  return { ...makeFrameSummary(id, 0, 0, width, height), type: "SECTION", childrenLoaded: false };
+}
+
+function viewerFetcher(respond?: (id: string, depth: number | undefined) => FigmaNode | null) {
+  const calls: Array<{ ids: string[]; depth?: number }> = [];
+  const fetchNodes = vi.fn(async (ids: readonly string[], options?: { depth?: number }) => {
+    calls.push({ ids: [...ids], ...(options?.depth ? { depth: options.depth } : {}) });
+    const nodes: Record<string, FigmaNode | null> = {};
+    for (const id of ids) nodes[id] = respond ? respond(id, options?.depth) : makeNode({ id });
+    return { nodes, components: {} };
+  });
+  return {
+    calls,
+    fetchNodes,
+    subtreeIds: () => calls.filter((c) => c.depth === undefined).flatMap((c) => c.ids),
+    sectionIds: () => calls.filter((c) => c.depth === 1).flatMap((c) => c.ids),
+  };
+}
+
+function mountViewer(opts: {
+  frames: readonly FigmaFrameSummary[];
+  camera: Camera;
+  store: FrameStore | null;
+}) {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root: Root = createRoot(container);
+  const props: React.ComponentProps<typeof CanvasView> = {
+    serverId: "srv",
+    fileKey: "file",
+    version: null,
+    page: { id: "0:1", name: "Page", frames: [...opts.frames], flowStartingPoints: [] },
+    store: opts.store,
+    camera: opts.camera,
+    onCamera: noopCamera,
+    selectedNodeId: null,
+    onSelectNode: noopSelect,
+    overrides: {},
+  };
+  act(() => root.render(<CanvasView {...props} />));
+  return {
+    unmount: () => {
+      act(() => root.unmount());
+      container.remove();
+    },
+    rerender: (next: Partial<React.ComponentProps<typeof CanvasView>>) => {
+      act(() => root.render(<CanvasView {...props} {...next} />));
+    },
+  };
+}
+
+/** Round-trip the store's queueMicrotask drain, the fetcher promises, and the notify re-render. */
+async function settleLoads(rounds = 8): Promise<void> {
+  for (let i = 0; i < rounds; i += 1) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  }
+}
+
+describe("CanvasView adaptive loading (ADR-0039)", () => {
+  it("Fit on thousands of small frames loads nothing: metadata boxes only", async () => {
+    const frames = framesGrid(1500);
+    const camera = cameraToFit(framesBoundingRect(frames), 800, 600);
+    const { fetchNodes } = viewerFetcher();
+    const store = new FrameStore(fetchNodes);
+    const viewer = mountViewer({ frames, camera, store });
+    await settleLoads();
+    expect(fetchNodes).not.toHaveBeenCalled(); // no subtree requests at overview
+    expect(callFigmaMock).not.toHaveBeenCalled(); // and no thumbnail raster flood
+    expect(assets.thumbnail).toEqual([]);
+    viewer.unmount();
+  });
+
+  it("zooming onto one frame requests only the roots under the camera", async () => {
+    const frames = framesGrid(1500);
+    const camera: Camera = { zoom: 1, offsetX: -100, offsetY: -75 };
+    const { fetchNodes, subtreeIds, sectionIds } = viewerFetcher();
+    const store = new FrameStore(fetchNodes);
+    const viewer = mountViewer({ frames, camera, store });
+    await settleLoads();
+    const expected = framesInViewport(frames, camera, 800, 600, 120).map((f) => f.id);
+    expect(expected.length).toBeGreaterThan(0);
+    expect(new Set(subtreeIds())).toEqual(new Set(expected));
+    expect(fetchNodes).toHaveBeenCalledTimes(1); // one ≤50-id batch, no flood of 1500
+    expect(sectionIds()).toEqual([]);
+    viewer.unmount();
+  });
+
+  it("camera moves over cached data repeat no API", async () => {
+    const frames = framesGrid(1500);
+    const camera: Camera = { zoom: 1, offsetX: -100, offsetY: -75 };
+    const fit = cameraToFit(framesBoundingRect(frames), 800, 600);
+    const { fetchNodes } = viewerFetcher();
+    const store = new FrameStore(fetchNodes);
+    const viewer = mountViewer({ frames, camera, store });
+    await settleLoads();
+    expect(fetchNodes).toHaveBeenCalledTimes(1);
+
+    viewer.rerender({ camera: { ...camera, offsetX: camera.offsetX + 2 } });
+    await settleLoads();
+    viewer.rerender({ camera }); // the same camera object again
+    await settleLoads();
+    viewer.rerender({ camera: fit });
+    await settleLoads();
+    viewer.rerender({ camera });
+    await settleLoads();
+    expect(fetchNodes).toHaveBeenCalledTimes(1); // already-cached ids never re-hit the network
+    viewer.unmount();
+  });
+
+  it("defers unknown Section children at overview and never full-tree-loads a SECTION", async () => {
+    const frames = [sectionFrame("10:1", 12000, 9000)];
+    const camera = cameraToFit(framesBoundingRect(frames), 800, 600);
+    const { fetchNodes, subtreeIds, sectionIds } = viewerFetcher();
+    const store = new FrameStore(fetchNodes);
+    const viewer = mountViewer({ frames, camera, store });
+    await settleLoads();
+    expect(fetchNodes).not.toHaveBeenCalled(); // overview: no depth-1 read yet either
+    expect(subtreeIds()).toEqual([]);
+    expect(sectionIds()).toEqual([]);
+    viewer.unmount();
+  });
+
+  it("reads Section children with depth: 1 when vector detail arrives, recursively", async () => {
+    const frames = [sectionFrame("10:1", 1200, 900)];
+    const camera: Camera = { zoom: 1, offsetX: 0, offsetY: 0 };
+    const { fetchNodes, subtreeIds, sectionIds } = viewerFetcher((id, depth) => {
+      if (depth === 1 && id === "10:1")
+        return makeNode({
+          id: "10:1",
+          type: "SECTION",
+          children: [
+            {
+              id: "10:2",
+              name: "Child screen",
+              type: "FRAME",
+              absoluteBoundingBox: { x: 50, y: 50, width: 200, height: 150 },
+            },
+            {
+              id: "10:9",
+              name: "Nested section",
+              type: "SECTION",
+              absoluteBoundingBox: { x: 300, y: 200, width: 600, height: 400 },
+            },
+          ] as FigmaNode[],
+        });
+      if (depth === 1 && id === "10:9")
+        return makeNode({
+          id: "10:9",
+          type: "SECTION",
+          children: [
+            {
+              id: "10:10",
+              name: "Deep screen",
+              type: "FRAME",
+              absoluteBoundingBox: { x: 320, y: 220, width: 240, height: 180 },
+            },
+          ] as FigmaNode[],
+        });
+      if (depth === undefined) return makeNode({ id });
+      return null;
+    });
+    const store = new FrameStore(fetchNodes);
+    const viewer = mountViewer({ frames, camera, store });
+    await settleLoads();
+    expect(sectionIds()).toEqual(["10:1", "10:9"]); // shallow reads, nested Section recursed
+    expect(new Set(subtreeIds())).toEqual(new Set(["10:2", "10:10"])); // leaf roots only
+    expect(subtreeIds()).not.toContain("10:1"); // the Section itself was never a tree load
+    expect(subtreeIds()).not.toContain("10:9");
+    expect(store.get("10:1")).toBeUndefined(); // fragments stay out of the full-subtree cache
+    expect(store.sectionNode("10:1")?.type).toBe("SECTION");
+    viewer.unmount();
   });
 });
