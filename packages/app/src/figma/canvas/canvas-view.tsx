@@ -14,7 +14,32 @@ import {
   isSectionSummary,
   type SectionAwareSummary,
 } from "./section-outline";
-import { useFigmaAssets } from "./use-figma-assets";
+import { type FigmaAssets, useFigmaAssets } from "./use-figma-assets";
+import {
+  beginSectionDrag,
+  cancelSectionDrag,
+  commitSectionDrag,
+  descendantIds,
+  IDLE_DRAG,
+  isSectionDragging,
+  moveSectionDrag,
+  sectionHitAt,
+  STATUS_MOVE_FAILED,
+  STATUS_MOVE_UNVERIFIED,
+  STATUS_SAVING_MOVE,
+  type SectionDrag,
+  type SectionEditing,
+  type SectionMoveStatus,
+  type SectionOffset,
+} from "./section-interaction";
+
+// One place maps the committed move's lifecycle onto its status line (a lookup, not a ternary
+// staircase — each state has exactly one honest string).
+const MOVE_STATUS_LINES: Record<Exclude<SectionMoveStatus, null>, string> = {
+  saving: STATUS_SAVING_MOVE,
+  failed: STATUS_MOVE_FAILED,
+  unverified: STATUS_MOVE_UNVERIFIED,
+};
 import {
   type Camera,
   type Point,
@@ -51,6 +76,15 @@ export interface CanvasViewProps {
   selectedNodeId: string | null;
   onSelectNode: (nodeId: string | null) => void;
   overrides: Record<string, Partial<FigmaNode>>;
+  // ── SECTION selection + drag (spec 32.6.2 / acceptance 19) ──
+  /** Capability/connector/history gate; when false, Sections are select/pan-only and say so. */
+  sectionEditing?: SectionEditing | null;
+  /** The single write on pointerup (a move commits once; Esc/cancel commits nothing). */
+  onMoveSection?: (sectionId: string, dx: number, dy: number) => void;
+  /** Committed offsets held until the refreshed outline data lands (preview continuity). */
+  sectionOffsets?: Readonly<Record<string, SectionOffset>>;
+  /** In-flight/uncertain/failed state of the last committed move, decided by FileScreen. */
+  sectionMoveStatus?: "saving" | "failed" | "unverified" | null;
 }
 
 interface Size {
@@ -134,9 +168,18 @@ export function CanvasView(props: CanvasViewProps) {
     selectedNodeId,
     onSelectNode,
     overrides,
+    sectionEditing,
+    onMoveSection,
+    sectionOffsets,
+    sectionMoveStatus,
   } = props;
   const [size, setSize] = useState<Size>({ width: 0, height: 0 });
   const [tick, setTick] = useState(0);
+  // One left-press on a selected Section's header/border tracks a whole-subtree preview; it
+  // resolves to a single commit on pointerup or to nothing on Esc (spec 32.6.2). State (not a
+  // ref) because the paint reads it — one update per pointermove coalesces into one rAF draw,
+  // the same cadence panning already keeps, so there is no redraw storm.
+  const [sectionDrag, setSectionDrag] = useState<SectionDrag>(IDLE_DRAG);
   const renderer = useMemo(() => createFigmaRenderer(), []);
   const assets = useFigmaAssets({ serverId, fileKey, version });
 
@@ -185,6 +228,25 @@ export function CanvasView(props: CanvasViewProps) {
     if (loadPlan.shallowSections.length > 0) void store.loadSections(loadPlan.shallowSections);
   }, [store, visible, loadPlan]);
 
+  // ── SECTION drag preview (spec 32.6.2) ─────────────────────────────────────────────
+  // Which ids move with the dragged Section is answered from the flat summaries already on
+  // screen: the parentId closure — no full-section fetch, no fabricated metadata nodes. The
+  // live preview delta and FileScreen's committed offsets (held until the refreshed outline
+  // lands) share one lookup so painting stays a single map read.
+  const sectionMoveOffsets = useMemo(() => {
+    const map = new Map<string, SectionOffset>();
+    const entries: Array<[string, SectionOffset]> = [];
+    if (sectionDrag.phase === "preview")
+      entries.push([sectionDrag.sectionId, { dx: sectionDrag.dx, dy: sectionDrag.dy }]);
+    for (const [id, offset] of Object.entries(sectionOffsets ?? {})) entries.push([id, offset]);
+    for (const [id, offset] of entries) {
+      map.set(id, offset);
+      for (const descendant of descendantIds(id, drawnRoots))
+        if (!map.has(descendant)) map.set(descendant, offset);
+    }
+    return map;
+  }, [drawnRoots, sectionDrag, sectionOffsets]);
+
   // ── camera gestures ───────────────────────────────────────────────────────────────
   const cameraRef = useRef(camera);
   cameraRef.current = camera;
@@ -193,6 +255,7 @@ export function CanvasView(props: CanvasViewProps) {
   const interaction = useRef({
     dragging: false,
     movedPx: 0,
+    middle: false,
     lastX: 0,
     lastY: 0,
     pinchDistance: 0,
@@ -206,6 +269,14 @@ export function CanvasView(props: CanvasViewProps) {
         return;
       }
       const cursor = screenToFigma(cameraRef.current, point);
+      // A Section's label and border belong to the SECTION (spec 32.6.2): a press there selects
+      // it even when a child's box overlaps that strip. Its empty interior only selects it
+      // when no child claims the cursor — the child pass below still wins there.
+      const sectionHit = sectionHitAt(drawnRoots, cursor, cameraRef.current.zoom);
+      if (sectionHit && sectionHit.region !== "empty") {
+        onSelectNode(sectionHit.sectionId);
+        return;
+      }
       // Only the stack the cursor actually sits inside — NOT every viewport candidate. At Fit
       // the candidate list is the whole file, and loading all of it on one click defeats the
       // metadata LOD. Sections are chrome (never selectable here); frame roots under the cursor
@@ -220,7 +291,16 @@ export function CanvasView(props: CanvasViewProps) {
         const frame = candidates[i];
         if (!frame) continue;
         const root = store.get(frame.id);
-        if (!root) {
+        if (root === null) {
+          // Confirmed missing is a failure, not a life sentence: the tap that finds it retries
+          // EXACTLY this root (targeted, spec 32.5.1) and clears failed asset attempts so the
+          // repaint re-demands them. load() alone would skip it — the null is cached.
+          void store.retry(frame.id);
+          assets.retryFailed();
+          bump();
+          return;
+        }
+        if (root === undefined) {
           // The click is a detail demand for exactly ONE root: the topmost not-yet-loaded one,
           // which occludes everything below it — hit-testing a loaded lower frame would report
           // a selection the unknown root may cover. Queue it (load dedups cached/in-flight ids)
@@ -234,12 +314,24 @@ export function CanvasView(props: CanvasViewProps) {
           return;
         }
       }
+      if (sectionHit) {
+        // Empty interior, no child under the cursor: the Section itself is the answer.
+        onSelectNode(sectionHit.sectionId);
+        return;
+      }
+      if (assets.status().failed > 0) {
+        // Empty-tap retry only while the status line promises it: failed asset attempts are
+        // dropped so the next paint re-demands them (targeted — queued/ready keys untouched).
+        assets.retryFailed();
+        bump();
+      }
       onSelectNode(null);
     },
-    [drawnRoots, onSelectNode, page, renderer, size.height, size.width, store],
+    [assets, bump, drawnRoots, onSelectNode, page, renderer, size.height, size.width, store],
   );
 
   // ── painting (web/Electron) ───────────────────────────────────────────────────────
+  // eslint-disable-next-line complexity
   const paint = useCallback(() => {
     if (!isWeb || typeof document === "undefined") return;
     const canvas = document.getElementById(CANVAS_ID) as HTMLCanvasElement | null;
@@ -263,7 +355,13 @@ export function CanvasView(props: CanvasViewProps) {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.fillStyle = PAPER_COLOR;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-      if (!page || !store || size.width === 0) return;
+      if (!page || !store) {
+        // A mounted canvas is not a ready canvas (spec 32.5.1): with the outline still on its
+        // way — or absent — the paper alone looks like an empty design, so state the wait.
+        if (size.width > 0) drawStatusLine(ctx, size.width, size.height, dpr, STATUS_LOADING);
+        return;
+      }
+      if (size.width === 0) return;
       const zoom = cameraRef.current.zoom;
       ctx.setTransform(
         zoom * dpr,
@@ -277,15 +375,19 @@ export function CanvasView(props: CanvasViewProps) {
       const mode = lodMode(zoom);
       for (const frame of visible) {
         const plan = planRootLoad(frame.bounds, zoom);
+        // Drag preview (spec 32.6.2): the Section and every summary already known to hang
+        // beneath it (parentId closure over metadata — no full-section fetch) move together.
+        const offset = sectionMoveOffsets.get(frame.id);
+        const shifted = offset ? { ...frame, bounds: shiftBounds(frame.bounds, offset) } : frame;
         // A SECTION is chrome in EVERY LOD: background and label from the summary only. Asking
         // for its thumbnail would raster a whole huge container, and its subtree is never loaded.
         if (isSectionSummary(frame)) {
-          drawSectionChrome(ctx, frame);
+          drawSectionChrome(ctx, shifted);
           continue;
         }
         if (plan === "metadata") {
           // Overview: factual summary data only — zero subtree requests, zero thumbnail rasters.
-          drawMetadataBox(ctx, frame);
+          drawMetadataBox(ctx, shifted);
           continue;
         }
         if (mode === "thumbnail") {
@@ -293,24 +395,26 @@ export function CanvasView(props: CanvasViewProps) {
           if (raster)
             ctx.drawImage(
               raster,
-              frame.bounds.x,
-              frame.bounds.y,
-              frame.bounds.width,
-              frame.bounds.height,
+              shifted.bounds.x,
+              shifted.bounds.y,
+              shifted.bounds.width,
+              shifted.bounds.height,
             );
-          else drawPlaceholder(ctx, frame.bounds, frame.name);
+          else drawPlaceholder(ctx, shifted.bounds, shifted.name);
           continue;
         }
         const node = store.get(frame.id);
         if (node === null) {
-          drawPlaceholder(ctx, frame.bounds, `${frame.name} (unavailable)`);
+          drawPlaceholder(ctx, shifted.bounds, `${shifted.name} (unavailable)`);
           continue;
         }
         if (node === undefined) {
           void store.load([frame.id]);
-          drawPlaceholder(ctx, frame.bounds, frame.name);
+          drawPlaceholder(ctx, shifted.bounds, shifted.name);
           continue;
         }
+        ctx.save();
+        if (offset) ctx.translate(offset.dx, offset.dy);
         renderer.draw(ctx, node, {
           scale: zoom * dpr,
           viewport,
@@ -320,12 +424,50 @@ export function CanvasView(props: CanvasViewProps) {
           onMissing: assets.onMissing,
           overrides: overridesRef.current,
         });
+        ctx.restore();
       }
-      if (selectedNodeId) drawSelectionBox(ctx, store, selectedNodeId);
+      const selectedSection = selectedNodeId
+        ? drawnRoots.find((frame) => frame.id === selectedNodeId && isSectionSummary(frame))
+        : undefined;
+      if (selectedNodeId) {
+        if (selectedSection) {
+          const offset = sectionMoveOffsets.get(selectedSection.id);
+          ctx.save();
+          if (offset) ctx.translate(offset.dx, offset.dy);
+          drawSectionSelection(ctx, selectedSection);
+          ctx.restore();
+        } else {
+          drawSelectionBox(ctx, store, selectedNodeId);
+        }
+      }
+      // Honest readiness over the finished frame (spec 32.5.1): one line from the real
+      // ledgers — subtrees/Section expansions still queued or fetching, assets undelivered,
+      // confirmed-missing roots, or a pure metadata overview waiting on a zoom. A Section
+      // move owns the line while in flight, uncertain, or failed — and a selected Section on
+      // a read-only surface shows "Connect editing" instead of a silent pendingSaved.
+      const moveText = sectionMoveStatus ? MOVE_STATUS_LINES[sectionMoveStatus] : null;
+      const editingText =
+        selectedSection && sectionEditing && !sectionEditing.canEdit ? sectionEditing.notice : null;
+      const statusText =
+        moveText ?? editingText ?? canvasStatusText(contentLedger(visible, store, zoom, assets));
+      if (statusText) drawStatusLine(ctx, size.width, size.height, dpr, statusText);
     } finally {
       assets.endDraw();
     }
-  }, [assets, page, renderer, selectedNodeId, size.height, size.width, store, visible]);
+  }, [
+    assets,
+    drawnRoots,
+    page,
+    renderer,
+    sectionEditing,
+    sectionMoveOffsets,
+    sectionMoveStatus,
+    selectedNodeId,
+    size.height,
+    size.width,
+    store,
+    visible,
+  ]);
 
   useEffect(() => {
     if (!isWeb) return;
@@ -335,8 +477,11 @@ export function CanvasView(props: CanvasViewProps) {
 
   // ── DOM input handlers (web only, attached to the host View's div) ───────────────
   const hostRef = useRef<HTMLElement | null>(null);
-  const handlers = useRef({ selectAt, onCamera });
-  handlers.current = { selectAt, onCamera };
+  const sectionDragRef = useRef<SectionDrag>(IDLE_DRAG);
+  sectionDragRef.current = sectionDrag;
+  const spaceHeld = useRef(false);
+  const handlers = useRef({ selectAt, onCamera, drawnRoots, sectionEditing, onMoveSection });
+  handlers.current = { selectAt, onCamera, drawnRoots, sectionEditing, onMoveSection };
   useEffect(() => {
     if (!isWeb || typeof document === "undefined") return;
     const host = hostRef.current;
@@ -364,17 +509,46 @@ export function CanvasView(props: CanvasViewProps) {
       }
     };
     const onPointerDown = (event: PointerEvent) => {
-      if (event.button !== 0) return;
       const state = interaction.current;
+      if (event.button !== 0 && event.button !== 1) return;
       state.dragging = true;
       state.movedPx = 0;
+      state.middle = event.button === 1;
       state.lastX = event.clientX;
       state.lastY = event.clientY;
       canvas.setPointerCapture?.(event.pointerId);
+      // A left press on a Section's header/border owns the gesture as a whole-subtree move
+      // preview (spec 32.6.2) — unless Space is held or the middle button is down: those pan,
+      // always. Without an editing surface (host capability / connected connector) Sections
+      // stay select/pan only, and the canvas says "Connect editing" instead of dropping it.
+      if (event.button === 1 || spaceHeld.current) return;
+      const {
+        drawnRoots: roots,
+        sectionEditing: editing,
+        onMoveSection: commit,
+      } = handlers.current;
+      const hit = sectionHitAt(roots, cursorOf(event), cameraRef.current.zoom);
+      if (hit && hit.region !== "empty" && editing?.canEdit && commit) {
+        const drag = beginSectionDrag(hit.sectionId, cursorOf(event));
+        sectionDragRef.current = drag;
+        setSectionDrag(drag);
+      }
     };
     const onPointerMove = (event: PointerEvent) => {
       const state = interaction.current;
       if (!state.dragging) return;
+      if (isSectionDragging(sectionDragRef.current)) {
+        const next = moveSectionDrag(
+          sectionDragRef.current,
+          cursorOf(event),
+          cameraRef.current.zoom,
+        );
+        if (next !== sectionDragRef.current) {
+          sectionDragRef.current = next;
+          setSectionDrag(next); // one update per move, coalesced by rAF into one paint
+        }
+        return; // the Section owns this gesture: no pan under a live drag
+      }
       const dx = event.clientX - state.lastX;
       const dy = event.clientY - state.lastY;
       state.lastX = event.clientX;
@@ -384,16 +558,45 @@ export function CanvasView(props: CanvasViewProps) {
     };
     const onPointerUp = (event: PointerEvent) => {
       const state = interaction.current;
-      const click = state.dragging && state.movedPx <= 4;
+      const dragging = isSectionDragging(sectionDragRef.current);
+      const sectionCommit = dragging ? commitSectionDrag(sectionDragRef.current) : null;
+      if (dragging) {
+        sectionDragRef.current = cancelSectionDrag();
+        setSectionDrag(sectionDragRef.current);
+      }
+      const click = state.dragging && state.movedPx <= 4 && !state.middle && !sectionCommit;
       state.dragging = false;
+      state.middle = false;
       canvas.releasePointerCapture?.(event.pointerId);
-      if (click) handlers.current.selectAt(cursorOf(event));
+      // One write per released drag (spec 32.6.2): the commit happens exactly here, here only.
+      if (sectionCommit)
+        handlers.current.onMoveSection?.(
+          sectionCommit.sectionId,
+          sectionCommit.dx,
+          sectionCommit.dy,
+        );
+      else if (click) handlers.current.selectAt(cursorOf(event));
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === " ") spaceHeld.current = true;
+      // Esc kills the preview with ZERO writes — nothing moved, nothing was saved.
+      if (event.key === "Escape" && isSectionDragging(sectionDragRef.current)) {
+        sectionDragRef.current = cancelSectionDrag();
+        setSectionDrag(sectionDragRef.current);
+      }
+    };
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.key === " ") spaceHeld.current = false;
     };
     canvas.addEventListener("wheel", onWheel, { passive: false });
     canvas.addEventListener("pointerdown", onPointerDown);
     canvas.addEventListener("pointermove", onPointerMove);
     canvas.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
     return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
       canvas.remove();
     };
   }, []);
@@ -403,6 +606,10 @@ export function CanvasView(props: CanvasViewProps) {
   }, []);
 
   if (!isWeb) {
+    const statusText =
+      !page || !store
+        ? STATUS_LOADING // outline still arriving: mounted ≠ ready (spec 32.5.1)
+        : canvasStatusText(contentLedger(visible, store, camera.zoom, assets));
     return (
       <View style={styles.fill} onLayout={onLayout} testID="figma-canvas">
         <NativeCanvasLayer
@@ -415,6 +622,7 @@ export function CanvasView(props: CanvasViewProps) {
           onSelectNode={onSelectNode}
           onCamera={onCamera}
           paper={page?.backgroundColor}
+          statusText={statusText}
         />
       </View>
     );
@@ -479,6 +687,110 @@ function drawMetadataBox(ctx: CanvasRenderingContext2D, frame: SectionAwareSumma
   ctx.fillStyle = PLACEHOLDER_BORDER;
   ctx.font = "12px sans-serif";
   ctx.fillText(frame.name, frame.bounds.x + 8, frame.bounds.y + 18);
+  ctx.restore();
+}
+
+/** Summary bounds moved by a live drag preview or a committed-but-unconfirmed offset. */
+function shiftBounds(bounds: FrameBounds, offset: SectionOffset): FrameBounds {
+  return {
+    x: bounds.x + offset.dx,
+    y: bounds.y + offset.dy,
+    width: bounds.width,
+    height: bounds.height,
+  };
+}
+
+/** Selected-Section box: same selection language as nodes, straight from the summary. */
+function drawSectionSelection(ctx: CanvasRenderingContext2D, frame: SectionAwareSummary): void {
+  ctx.save();
+  ctx.strokeStyle = SELECTION_COLOR;
+  ctx.lineWidth = 2 / (ctx.getTransform().a || 1);
+  ctx.strokeRect(frame.bounds.x, frame.bounds.y, frame.bounds.width, frame.bounds.height);
+  ctx.fillStyle = SELECTION_COLOR;
+  ctx.fillRect(frame.bounds.x, frame.bounds.y - 16, 8 + frame.name.length * 6, 16);
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "10px sans-serif";
+  ctx.fillText(frame.name, frame.bounds.x + 4, frame.bounds.y - 4);
+  ctx.restore();
+}
+
+// ── honest content status (spec 32.5.1) ──────────────────────────────────────────────
+// A mounted canvas/outline is NOT content ready: while the visible viewport still waits on
+// subtrees, SECTION depth-1 children, fonts, image fills or rasters, the viewer must say so —
+// a silent dashed placeholder for 8 s reads as "the design is missing". The line is decided
+// from the REAL ledgers (the store's queue/inflight sets and the caches' record phases), never
+// from fabricated counts, and it draws in the existing paint: no extra repaints, no storm.
+
+export const STATUS_LOADING = "Loading content…";
+export const STATUS_FAILED = "Some content failed to load — tap to retry";
+export const STATUS_ZOOM_HINT = "Zoom in for details";
+
+export interface ContentLedger {
+  pending: boolean;
+  failed: boolean;
+  metadataOnlyOverview: boolean;
+}
+
+/**
+ * What the viewport is actually waiting for. Frames below the detail threshold legitimately
+ * draw metadata-only — if that is ALL there is, the viewer says "zoom in" instead of going
+ * silent. A queued or in-flight subtree/SECTION-depth-1 read, an undelivered asset (fill,
+ * raster or font attempt still loading/decoding) is pending; a confirmed-missing root (cached
+ * null) or a terminal failed asset attempt is failed.
+ */
+export function contentLedger(
+  visible: readonly SectionAwareSummary[],
+  store: FrameStore,
+  zoom: number,
+  assets: FigmaAssets,
+): ContentLedger {
+  let pending = false;
+  let failed = false;
+  let metadataOnlyOverview = visible.length > 0;
+  for (const frame of visible) {
+    if (isSectionSummary(frame)) {
+      // Section chrome is the whole picture only until its depth-1 children are asked for:
+      // a queued expansion is content the user is waiting on right now.
+      metadataOnlyOverview = false;
+      if (frame.childrenLoaded === false && store.isSectionPending(frame.id)) pending = true;
+      continue;
+    }
+    const plan = planRootLoad(frame.bounds, zoom);
+    if (plan === "metadata") continue;
+    metadataOnlyOverview = false;
+    if (plan === "thumbnail") continue; // its rasters show up in the asset ledger below
+    const node = store.get(frame.id);
+    if (node === undefined) pending = true;
+    else if (node === null) failed = true;
+  }
+  const assetState = assets.status();
+  if (assetState.pending > 0) pending = true;
+  if (assetState.failed > 0) failed = true;
+  return { pending, failed, metadataOnlyOverview };
+}
+
+export function canvasStatusText(ledger: ContentLedger): string | null {
+  // Loading outranks failure: failed attempts can sit behind work still arriving, and the user
+  // must not be told "failed" while the file is legitimately still on its way.
+  if (ledger.pending) return STATUS_LOADING;
+  if (ledger.failed) return STATUS_FAILED;
+  if (ledger.metadataOnlyOverview) return STATUS_ZOOM_HINT;
+  return null;
+}
+
+function drawStatusLine(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  dpr: number,
+  text: string,
+): void {
+  ctx.save();
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.textAlign = "center";
+  ctx.font = "13px sans-serif";
+  ctx.fillStyle = PLACEHOLDER_BORDER;
+  ctx.fillText(text, width / 2, height - 16);
   ctx.restore();
 }
 
@@ -574,6 +886,8 @@ export function NativeCanvasLayer(props: {
   onSelectNode: (nodeId: string | null) => void;
   onCamera: (next: Camera) => void;
   paper?: string;
+  /** Honest readiness line from the real store/asset ledgers (spec 32.5.1). */
+  statusText?: string | null;
 }) {
   const { visible, camera, fileKey, version, onCamera, onSelectNode, selectedNodeId } = props;
   const client = useHostRuntimeClient(props.serverId);
@@ -751,6 +1065,25 @@ export function NativeCanvasLayer(props: {
           </View>
         );
       })}
+      {(() => {
+        // Tiles the viewport demands but has not received are real pending work: a detail-plan
+        // frame with no raster yet means its render batch is queued, in flight, or mid-retry.
+        const waitingOnTiles = visible.some(
+          (frame) =>
+            !isSectionSummary(frame) &&
+            planRootLoad(frame.bounds, camera.zoom) !== "metadata" &&
+            rasters[frame.id] === undefined,
+        );
+        const text = waitingOnTiles ? STATUS_LOADING : (props.statusText ?? null);
+        if (!text) return null;
+        return (
+          <View style={styles.statusBar} pointerEvents="none">
+            <Text style={styles.statusText} testID="figma-canvas-status">
+              {text}
+            </Text>
+          </View>
+        );
+      })()}
     </View>
   );
 }
@@ -781,5 +1114,20 @@ const styles = StyleSheet.create((theme: Theme) => ({
   nativeFrameLabelText: {
     fontSize: theme.fontSize.xs,
     color: theme.colors.foregroundMuted,
+  },
+  statusBar: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 16,
+    alignItems: "center",
+  },
+  statusText: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+    backgroundColor: "rgba(255,255,255,0.85)",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
   },
 }));

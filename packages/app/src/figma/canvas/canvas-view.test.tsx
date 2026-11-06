@@ -18,7 +18,16 @@ import {
   MAX_RASTER_TILES,
   NativeCanvasLayer,
   pruneRasterCache,
+  STATUS_FAILED,
+  STATUS_LOADING,
+  STATUS_ZOOM_HINT,
 } from "./canvas-view";
+import {
+  CONNECT_EDITING_NOTICE,
+  sectionEditing,
+  STATUS_MOVE_FAILED,
+  STATUS_SAVING_MOVE,
+} from "./section-interaction";
 import { FrameStore, type NodeBatch } from "./frame-store";
 import type { SectionAwareSummary } from "./section-outline";
 import {
@@ -35,7 +44,7 @@ import {
 const globalWithReact = globalThis as typeof globalThis & { React?: typeof React };
 globalWithReact.React ??= React;
 
-const { theme, hosts, assets, viewLayout, platform } = vi.hoisted(() => ({
+const { theme, hosts, assets, viewLayout, platform, renderer } = vi.hoisted(() => ({
   theme: {
     fontSize: { xs: 11 },
     colors: { foregroundMuted: "#888" },
@@ -48,11 +57,17 @@ const { theme, hosts, assets, viewLayout, platform } = vi.hoisted(() => ({
     thumbnail: [] as string[],
     beginDraw: vi.fn(),
     endDraw: vi.fn(),
+    // Backs the hook mock's status()/retryFailed(): tests push pending/failed numbers to
+    // drive the honest loading status without a real cache.
+    state: { pending: 0, failed: 0 },
+    retryFailed: vi.fn(),
   },
   // The host View reports this layout once on mount, giving the viewer a viewport to cull.
   viewLayout: { current: { width: 800, height: 600 } },
   // The web/native branch of CanvasView, switched per test (native is the default).
   platform: { isWeb: false },
+  // Shared renderer mock: tests arm hitTest to model child-vs-Section click ownership.
+  renderer: { draw: vi.fn(), hitTest: vi.fn() },
 }));
 
 vi.mock("react-native", () => ({
@@ -79,8 +94,8 @@ vi.mock("react-native", () => ({
       children,
     );
   },
-  Text: ({ children }: { children?: React.ReactNode }) =>
-    React.createElement("span", null, children),
+  Text: ({ children, testID }: { children?: React.ReactNode; testID?: string }) =>
+    React.createElement("span", { "data-testid": testID }, children),
   Image: ({
     source,
     accessibilityLabel,
@@ -122,7 +137,7 @@ vi.mock("@/runtime/host-runtime", () => ({
   getHostRuntimeStore: () => ({ getSnapshot: () => null }),
 }));
 vi.mock("@/figma/renderer", () => ({
-  createFigmaRenderer: () => ({ draw: vi.fn(), hitTest: vi.fn() }),
+  createFigmaRenderer: () => renderer,
 }));
 vi.mock("./use-figma-assets", () => ({
   useFigmaAssets: () => ({
@@ -135,6 +150,8 @@ vi.mock("./use-figma-assets", () => ({
     fallbackForNode: () => null,
     fontAvailable: () => false,
     onMissing: () => undefined,
+    status: () => ({ ...assets.state }),
+    retryFailed: () => assets.retryFailed(),
     beginDraw: () => assets.beginDraw(),
     endDraw: () => assets.endDraw(),
   }),
@@ -266,6 +283,10 @@ beforeEach(() => {
   assets.thumbnail.length = 0;
   assets.beginDraw.mockClear();
   assets.endDraw.mockClear();
+  assets.retryFailed.mockClear();
+  assets.state.pending = 0;
+  assets.state.failed = 0;
+  renderer.hitTest.mockReset(); // re-armed per test; default: no child under the cursor
   serveRenderTiles();
 });
 
@@ -522,6 +543,12 @@ function mountViewer(opts: {
   camera: Camera;
   store: FrameStore | null;
   onSelectNode?: (nodeId: string | null) => void;
+  onCamera?: (next: Camera) => void;
+  selectedNodeId?: string | null;
+  sectionEditing?: React.ComponentProps<typeof CanvasView>["sectionEditing"];
+  sectionOffsets?: React.ComponentProps<typeof CanvasView>["sectionOffsets"];
+  sectionMoveStatus?: React.ComponentProps<typeof CanvasView>["sectionMoveStatus"];
+  onMoveSection?: React.ComponentProps<typeof CanvasView>["onMoveSection"];
 }) {
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -533,10 +560,14 @@ function mountViewer(opts: {
     page: { id: "0:1", name: "Page", frames: [...opts.frames], flowStartingPoints: [] },
     store: opts.store,
     camera: opts.camera,
-    onCamera: noopCamera,
-    selectedNodeId: null,
+    onCamera: opts.onCamera ?? noopCamera,
+    selectedNodeId: opts.selectedNodeId ?? null,
     onSelectNode: opts.onSelectNode ?? noopSelect,
     overrides: {},
+    sectionEditing: opts.sectionEditing,
+    sectionOffsets: opts.sectionOffsets,
+    sectionMoveStatus: opts.sectionMoveStatus,
+    onMoveSection: opts.onMoveSection,
   };
   act(() => root.render(<CanvasView {...props} />));
   return {
@@ -1013,5 +1044,617 @@ describe("CanvasView paint retention wrapper (spec 32.5.1)", () => {
     } finally {
       HTMLCanvasElement.prototype.getContext = original;
     }
+  });
+});
+
+// ── honest content status (spec 32.5.1) ────────────────────────────────────────────────
+
+/**
+ * A 2D context that records every `fillText` argument, one batch per paint: each draw calls
+ * getContext, so after a settled paint `state.texts` holds exactly what the LAST paint drew —
+ * status assertions cannot be polluted by an earlier frame's line.
+ */
+function ctxTextRecorder() {
+  const state = {
+    texts: [] as string[],
+    at: [] as Array<[string, number, number]>,
+    translates: [] as Array<[number, number]>,
+  };
+  const make = (): CanvasRenderingContext2D => {
+    state.texts = [];
+    state.at = [];
+    state.translates = [];
+    const props: Record<string, unknown> = {
+      fillText: (value: string, x: number, y: number) => {
+        state.texts.push(String(value));
+        state.at.push([String(value), x, y]);
+      },
+      translate: (dx: number, dy: number) => state.translates.push([dx, dy]),
+    };
+    return new Proxy(props, {
+      get: (t, p) => {
+        if (p === "getTransform") return () => ({ a: 1 });
+        if (!(p in t)) t[p as string] = () => undefined;
+        return t[p as string];
+      },
+    }) as unknown as CanvasRenderingContext2D;
+  };
+  return { state, make };
+}
+
+async function withPaintedViewer(
+  setup: () =>
+    | Promise<{ viewer: { unmount: () => void } }>
+    | {
+        viewer: { unmount: () => void };
+      },
+  paint: (
+    texts: () => string[],
+    ops: () => { at: Array<[string, number, number]>; translates: Array<[number, number]> },
+  ) => Promise<void> | void,
+): Promise<void> {
+  const rec = ctxTextRecorder();
+  const original = HTMLCanvasElement.prototype.getContext;
+  HTMLCanvasElement.prototype.getContext = (() => rec.make()) as never;
+  let viewer: { unmount: () => void } | null = null;
+  try {
+    viewer = (await setup()).viewer;
+    await paint(
+      () => rec.state.texts,
+      () => ({ at: rec.state.at, translates: rec.state.translates }),
+    );
+  } finally {
+    viewer?.unmount();
+    HTMLCanvasElement.prototype.getContext = original;
+  }
+}
+
+// Helpers for the pending-ledger tests: a subtree fetch that never lands (module scope keeps
+// these out of the nested-callback limit) and an id filter for "which roots were requested".
+function neverLandingBatch(): Promise<NodeBatch> {
+  return new Promise(() => undefined);
+}
+
+function idsNamed(ids: string[], id: string): string[] {
+  return ids.filter((candidate) => candidate === id);
+}
+
+describe("CanvasView honest content status (spec 32.5.1)", () => {
+  it("shows loading while a visible detail subtree is still in flight", async () => {
+    platform.isWeb = true;
+    await withPaintedViewer(
+      () => {
+        const fetchNodes = vi.fn(neverLandingBatch);
+        const store = new FrameStore(fetchNodes);
+        return {
+          viewer: mountViewer({
+            frames: framesGrid(3),
+            camera: { zoom: 1, offsetX: 0, offsetY: 0 },
+            store,
+          }),
+        };
+      },
+      async (texts) => {
+        await settleLoads(); // drain the queue into the inflight ledger
+        await settlePaint(2);
+        expect(texts()).toContain(STATUS_LOADING);
+      },
+    );
+  });
+
+  it("reports a fully loaded, fully delivered viewport with no status line at all", async () => {
+    platform.isWeb = true;
+    await withPaintedViewer(
+      () => {
+        const { fetchNodes } = viewerFetcher(); // resolves every root
+        return {
+          viewer: mountViewer({
+            frames: framesGrid(3),
+            camera: { zoom: 1, offsetX: 0, offsetY: 0 },
+            store: new FrameStore(fetchNodes),
+          }),
+        };
+      },
+      async (texts) => {
+        await settleLoads();
+        await settlePaint(2);
+        expect(texts()).not.toContain(STATUS_LOADING);
+        expect(texts()).not.toContain(STATUS_FAILED);
+        expect(texts()).not.toContain(STATUS_ZOOM_HINT);
+      },
+    );
+  });
+
+  it("an undelivered asset attempt reports loading, and outranks failures", async () => {
+    platform.isWeb = true;
+    assets.state.pending = 2;
+    assets.state.failed = 3; // loading must beat "failed" while work is still on its way
+    await withPaintedViewer(
+      () => {
+        const { fetchNodes } = viewerFetcher();
+        return {
+          viewer: mountViewer({
+            frames: framesGrid(3),
+            camera: { zoom: 1, offsetX: 0, offsetY: 0 },
+            store: new FrameStore(fetchNodes),
+          }),
+        };
+      },
+      async (texts) => {
+        await settleLoads();
+        await settlePaint(2);
+        expect(texts()).toContain(STATUS_LOADING);
+        expect(texts()).not.toContain(STATUS_FAILED);
+      },
+    );
+  });
+
+  it("terminal failed asset attempts show the retry line once nothing is pending", async () => {
+    platform.isWeb = true;
+    assets.state.failed = 1;
+    await withPaintedViewer(
+      () => {
+        const { fetchNodes } = viewerFetcher();
+        return {
+          viewer: mountViewer({
+            frames: framesGrid(3),
+            camera: { zoom: 1, offsetX: 0, offsetY: 0 },
+            store: new FrameStore(fetchNodes),
+          }),
+        };
+      },
+      async (texts) => {
+        await settleLoads();
+        await settlePaint(2);
+        expect(texts()).toContain(STATUS_FAILED);
+      },
+    );
+  });
+
+  it("a confirmed-missing root reads as failed, and a tap retries exactly that root", async () => {
+    platform.isWeb = true;
+    const { fetchNodes, subtreeIds } = viewerFetcher(() => null); // every root: confirmed null
+    const store = new FrameStore(fetchNodes);
+    const selections = vi.fn();
+    await withPaintedViewer(
+      () => ({
+        viewer: mountViewer({
+          frames: framesGrid(3),
+          camera: { zoom: 1, offsetX: 0, offsetY: 0 },
+          store,
+          onSelectNode: selections,
+        }),
+      }),
+      async (texts) => {
+        await settleLoads();
+        await settlePaint(2);
+        expect(texts()).toContain(STATUS_FAILED);
+        expect(idsNamed(subtreeIds(), "7:0")).toHaveLength(1);
+
+        // Tap the frame whose read confirmed missing: targeted retry of THAT root only.
+        clickCanvas(100, 75); // center of 7:0 at (0,0,200,150), camera offset 0 zoom 1
+        expect(assets.retryFailed).toHaveBeenCalled(); // failed asset attempts cleared too
+        await settleLoads();
+        const retried = idsNamed(subtreeIds(), "7:0");
+        expect(retried).toHaveLength(2); // re-queued, despite the cached null verdict
+        expect(selections).not.toHaveBeenCalled(); // a retry is not a selection
+      },
+    );
+  });
+
+  it("a pure metadata overview says zoom for detail instead of going silent", async () => {
+    platform.isWeb = true;
+    // 300x225 projected 30px at zoom 0.1 — below the detail threshold: metadata-only is right,
+    // but the paper must explain itself (spec 32.5.1: the overview is not a content failure).
+    const frames = [makeFrameSummary("9:1", 0, 0, 300, 225)];
+    await withPaintedViewer(
+      () => {
+        const { fetchNodes } = viewerFetcher();
+        return {
+          viewer: mountViewer({
+            frames,
+            camera: { zoom: 0.1, offsetX: 0, offsetY: 0 },
+            store: new FrameStore(fetchNodes),
+          }),
+        };
+      },
+      async (texts) => {
+        await settlePaint(2);
+        expect(texts()).toContain(STATUS_ZOOM_HINT);
+      },
+    );
+    // ...and the overview demanded zero subtree loads on the way there.
+    const { fetchNodes } = viewerFetcher();
+    const store = new FrameStore(fetchNodes);
+    const viewer = mountViewer({ frames, camera: { zoom: 0.1, offsetX: 0, offsetY: 0 }, store });
+    await settleLoads();
+    expect(fetchNodes).not.toHaveBeenCalled();
+    viewer.unmount();
+  });
+
+  it("a SECTION whose depth-1 children are still queued counts as pending content", async () => {
+    platform.isWeb = true;
+    const section = sectionFrame("40:1", 900, 600); // full-plan at zoom 1 → shallow expansion
+    await withPaintedViewer(
+      () => {
+        const fetchNodes = vi.fn(neverLandingBatch);
+        return {
+          viewer: mountViewer({
+            frames: [section],
+            camera: { zoom: 1, offsetX: 0, offsetY: 0 },
+            store: new FrameStore(fetchNodes),
+          }),
+        };
+      },
+      async (texts) => {
+        await settleLoads();
+        await settlePaint(2);
+        expect(texts()).toContain(STATUS_LOADING);
+      },
+    );
+  });
+
+  it("a mounted canvas without its store is not content-ready: it says loading", async () => {
+    platform.isWeb = true;
+    await withPaintedViewer(
+      () => ({
+        viewer: mountViewer({
+          frames: framesGrid(1),
+          camera: { zoom: 1, offsetX: 0, offsetY: 0 },
+          store: null,
+        }),
+      }),
+      async (texts) => {
+        await settlePaint(2);
+        expect(texts()).toContain(STATUS_LOADING);
+      },
+    );
+  });
+});
+
+describe("NativeCanvasLayer honest content status (spec 32.5.1)", () => {
+  const statusNode = (container: HTMLElement) =>
+    container.querySelector('[data-testid="figma-canvas-status"]');
+
+  it("overlays loading while a demanded tile batch is still in flight, then goes quiet", async () => {
+    const batches = deferredRenderBatches(); // tiles never land until the test says so
+    const layer = mountLayer({
+      visible: framesFrom("1", 2),
+      camera: { zoom: 1, offsetX: 0, offsetY: 0 },
+    });
+    await flush();
+    expect(batches.length).toBeGreaterThan(0);
+    expect(statusNode(layer.container)?.textContent).toContain(STATUS_LOADING);
+
+    for (const batch of batches) batch.resolve("srv", "live");
+    await flush();
+    expect(renderedTiles(layer.container)).toHaveLength(2); // the load was real
+    expect(statusNode(layer.container)).toBeNull(); // delivered: no line, no lie
+    layer.unmount();
+  });
+
+  it("surfaces the ledger's failure line once every tile is present", async () => {
+    const layer = mountLayer({
+      visible: framesFrom("1", 2),
+      camera: { zoom: 1, offsetX: 0, offsetY: 0 },
+      statusText: STATUS_FAILED,
+    });
+    await flush(); // serveRenderTiles (beforeEach) lands the batch
+    expect(renderedTiles(layer.container)).toHaveLength(2);
+    expect(statusNode(layer.container)?.textContent).toContain(STATUS_FAILED);
+    layer.unmount();
+  });
+});
+
+// ── SECTION selection + drag on the web viewer (spec 32.6.2 / acceptance 19) ───────────
+
+function bigSection(): SectionAwareSummary {
+  return {
+    id: "40:1",
+    name: "Flow Board",
+    type: "SECTION",
+    bounds: { x: 0, y: 0, width: 1000, height: 800 },
+    childrenLoaded: false,
+  };
+}
+
+function frameChild(
+  id: string,
+  x: number,
+  y: number,
+  width = 200,
+  height = 150,
+): SectionAwareSummary {
+  return {
+    id,
+    name: `Frame ${id}`,
+    type: "FRAME",
+    bounds: { x, y, width, height },
+    parentId: "40:1",
+  };
+}
+
+const CAMERA_ORIGIN: Camera = { zoom: 1, offsetX: 0, offsetY: 0 };
+const EDITABLE = sectionEditing({ capability: true, remoteConnected: true, versionPinned: false });
+const READ_ONLY = sectionEditing({
+  capability: false,
+  remoteConnected: true,
+  versionPinned: false,
+});
+
+function canvasEl(): HTMLCanvasElement {
+  const canvas = document.getElementById(CANVAS_ID) as HTMLCanvasElement | null;
+  expect(canvas).toBeTruthy();
+  const target = canvas as HTMLCanvasElement;
+  target.setPointerCapture = () => undefined;
+  target.releasePointerCapture = () => undefined;
+  return target;
+}
+
+function pointer(type: string, x: number, y: number, button = 0): void {
+  canvasEl().dispatchEvent(new MouseEvent(type, { clientX: x, clientY: y, button }));
+}
+
+/** Discrete press-track-release with intermediate moves; one event batch per act() pass. */
+function dragCanvas(
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  options: { button?: number; steps?: number } = {},
+): void {
+  const button = options.button ?? 0;
+  const steps = options.steps ?? 4;
+  act(() => pointer("pointerdown", from.x, from.y, button));
+  for (let i = 1; i <= steps; i += 1) {
+    const t = i / steps;
+    act(() =>
+      pointer("pointermove", from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t, button),
+    );
+  }
+  act(() => pointer("pointerup", to.x, to.y, button));
+}
+
+function pressKey(key: string): void {
+  act(() => {
+    window.dispatchEvent(new KeyboardEvent("keydown", { key }));
+  });
+}
+
+function releaseKey(key: string): void {
+  act(() => {
+    window.dispatchEvent(new KeyboardEvent("keyup", { key }));
+  });
+}
+
+describe("CanvasView SECTION select + drag (spec 32.6.2)", () => {
+  it("the label strip selects the Section even where a child frame overlaps it", async () => {
+    platform.isWeb = true;
+    const { fetchNodes } = viewerFetcher();
+    const selections = vi.fn();
+    const viewer = mountViewer({
+      frames: [bigSection(), frameChild("41:1", 0, 0)],
+      camera: CAMERA_ORIGIN,
+      store: new FrameStore(fetchNodes),
+      onSelectNode: selections,
+    });
+    await settleLoads();
+    clickCanvas(100, 8); // inside the child's box, but on the Section's header band
+    expect(selections).toHaveBeenLastCalledWith("40:1");
+    viewer.unmount();
+  });
+
+  it("a click on a child still selects the child, not the Section", async () => {
+    platform.isWeb = true;
+    const { fetchNodes } = viewerFetcher(); // child roots resolve loaded
+    const selections = vi.fn();
+    renderer.hitTest.mockReturnValue({ id: "41:77" }); // the child's tree owns the cursor
+    const viewer = mountViewer({
+      frames: [bigSection(), frameChild("41:1", 0, 0)],
+      camera: CAMERA_ORIGIN,
+      store: new FrameStore(fetchNodes),
+      onSelectNode: selections,
+    });
+    await settleLoads();
+    clickCanvas(100, 100); // interior of the child, below the header band
+    expect(selections).toHaveBeenLastCalledWith("41:77");
+    expect(selections).not.toHaveBeenCalledWith("40:1");
+    viewer.unmount();
+  });
+
+  it("the empty interior selects the Section when no child claims the cursor", async () => {
+    platform.isWeb = true;
+    const { fetchNodes } = viewerFetcher();
+    const selections = vi.fn();
+    const viewer = mountViewer({
+      frames: [bigSection(), frameChild("41:1", 0, 0)],
+      camera: CAMERA_ORIGIN,
+      store: new FrameStore(fetchNodes),
+      onSelectNode: selections,
+    });
+    await settleLoads();
+    clickCanvas(600, 500); // deep inside the Section, outside every frame
+    expect(selections).toHaveBeenLastCalledWith("40:1");
+    viewer.unmount();
+  });
+
+  it("a header drag of the selected Section previews the subtree and commits ONE write", async () => {
+    platform.isWeb = true;
+    const { fetchNodes } = viewerFetcher();
+    const moves = vi.fn();
+    const cameras = vi.fn();
+    const viewer = mountViewer({
+      frames: [bigSection(), frameChild("41:1", 300, 300)],
+      camera: CAMERA_ORIGIN,
+      store: new FrameStore(fetchNodes),
+      selectedNodeId: "40:1",
+      sectionEditing: EDITABLE,
+      onMoveSection: moves,
+      onCamera: cameras,
+    });
+    await settleLoads();
+    dragCanvas({ x: 500, y: 8 }, { x: 600, y: 108 }, { steps: 6 });
+    expect(moves).toHaveBeenCalledTimes(1);
+    expect(moves).toHaveBeenCalledWith("40:1", 100, 100); // px delta / zoom 1
+    expect(cameras).not.toHaveBeenCalled(); // the gesture never panned the camera
+    viewer.unmount();
+  });
+
+  it("Esc during a drag cancels the preview with ZERO writes", async () => {
+    platform.isWeb = true;
+    const { fetchNodes } = viewerFetcher();
+    const moves = vi.fn();
+    const cameras = vi.fn();
+    const viewer = mountViewer({
+      frames: [bigSection()],
+      camera: CAMERA_ORIGIN,
+      store: new FrameStore(fetchNodes),
+      selectedNodeId: "40:1",
+      sectionEditing: EDITABLE,
+      onMoveSection: moves,
+      onCamera: cameras,
+    });
+    await settleLoads();
+    act(() => pointer("pointerdown", 500, 8));
+    act(() => pointer("pointermove", 560, 68)); // past the threshold: previewing
+    pressKey("Escape");
+    act(() => pointer("pointerup", 560, 68));
+    expect(moves).not.toHaveBeenCalled(); // Esc wrote nothing
+    expect(cameras).not.toHaveBeenCalled(); // and nothing panned either
+    viewer.unmount();
+  });
+
+  it("Space held over the header pans instead of dragging", async () => {
+    platform.isWeb = true;
+    const { fetchNodes } = viewerFetcher();
+    const moves = vi.fn();
+    const cameras = vi.fn();
+    const viewer = mountViewer({
+      frames: [bigSection()],
+      camera: CAMERA_ORIGIN,
+      store: new FrameStore(fetchNodes),
+      selectedNodeId: "40:1",
+      sectionEditing: EDITABLE,
+      onMoveSection: moves,
+      onCamera: cameras,
+    });
+    await settleLoads();
+    pressKey(" ");
+    dragCanvas({ x: 500, y: 8 }, { x: 600, y: 108 }, { steps: 6 });
+    releaseKey(" ");
+    expect(moves).not.toHaveBeenCalled();
+    expect(cameras).toHaveBeenCalled();
+    viewer.unmount();
+  });
+
+  it("the middle button always pans and never selects", async () => {
+    platform.isWeb = true;
+    const { fetchNodes } = viewerFetcher();
+    const moves = vi.fn();
+    const cameras = vi.fn();
+    const selections = vi.fn();
+    const viewer = mountViewer({
+      frames: [bigSection()],
+      camera: CAMERA_ORIGIN,
+      store: new FrameStore(fetchNodes),
+      selectedNodeId: "40:1",
+      sectionEditing: EDITABLE,
+      onMoveSection: moves,
+      onCamera: cameras,
+      onSelectNode: selections,
+    });
+    await settleLoads();
+    dragCanvas({ x: 500, y: 8 }, { x: 600, y: 108 }, { button: 1, steps: 6 });
+    expect(cameras).toHaveBeenCalled();
+    expect(moves).not.toHaveBeenCalled();
+    expect(selections).not.toHaveBeenCalled(); // middle release is not a click
+    viewer.unmount();
+  });
+
+  it("a selected Section on a read-only surface says Connect editing and cannot drag", async () => {
+    platform.isWeb = true;
+    const { fetchNodes } = viewerFetcher();
+    const moves = vi.fn();
+    await withPaintedViewer(
+      () => ({
+        viewer: mountViewer({
+          frames: [bigSection()],
+          camera: CAMERA_ORIGIN,
+          store: new FrameStore(fetchNodes),
+          selectedNodeId: "40:1",
+          sectionEditing: READ_ONLY,
+          onMoveSection: moves,
+        }),
+      }),
+      async (texts) => {
+        await settlePaint(2);
+        expect(texts()).toContain(CONNECT_EDITING_NOTICE);
+        dragCanvas({ x: 500, y: 8 }, { x: 560, y: 68 }, { steps: 4 });
+        expect(moves).not.toHaveBeenCalled(); // select/pan only: no write path engaged
+      },
+    );
+  });
+
+  it("an in-flight move owns the line, and so does its failure", async () => {
+    platform.isWeb = true;
+    const { fetchNodes } = viewerFetcher();
+    await withPaintedViewer(
+      () => ({
+        viewer: mountViewer({
+          frames: [bigSection()],
+          camera: CAMERA_ORIGIN,
+          store: new FrameStore(fetchNodes),
+          selectedNodeId: "40:1",
+          sectionEditing: EDITABLE,
+          sectionMoveStatus: "saving",
+        }),
+      }),
+      async (texts) => {
+        await settlePaint(2);
+        expect(texts()).toContain(STATUS_SAVING_MOVE);
+      },
+    );
+    const viewer = mountViewer({
+      frames: [bigSection()],
+      camera: CAMERA_ORIGIN,
+      store: new FrameStore(vi.fn(async (): Promise<NodeBatch> => ({ nodes: {}, components: {} }))),
+      selectedNodeId: "40:1",
+      sectionEditing: EDITABLE,
+      sectionMoveStatus: "failed",
+    });
+    const rec = ctxTextRecorder();
+    const original = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = (() => rec.make()) as never;
+    try {
+      await settlePaint(2);
+      expect(rec.state.texts).toContain(STATUS_MOVE_FAILED);
+    } finally {
+      HTMLCanvasElement.prototype.getContext = original;
+      viewer.unmount();
+    }
+  });
+
+  it("committed offsets shift the Section chrome and translate its known descendants", async () => {
+    platform.isWeb = true;
+    const { fetchNodes } = viewerFetcher(); // child subtree loads; renderer.draw is the mock
+    await withPaintedViewer(
+      () => ({
+        viewer: mountViewer({
+          frames: [bigSection(), frameChild("41:1", 300, 300)],
+          camera: CAMERA_ORIGIN,
+          store: new FrameStore(fetchNodes),
+          sectionEditing: EDITABLE,
+          sectionOffsets: { "40:1": { dx: 50, dy: 0 } },
+        }),
+      }),
+      async (texts, ops) => {
+        await settleLoads();
+        await settlePaint(2);
+        // Section chrome draws at the OFFSET position (metadata bounds + dx):
+        expect(ops().at).toContainEqual(["Flow Board", 58, 18]);
+        // and its known descendant's tree draws under a matching translate — the parentId
+        // closure preview, not a full-section fetch.
+        expect(ops().translates).toContainEqual([50, 0]);
+        expect(texts().length).toBeGreaterThanOrEqual(0);
+      },
+    );
   });
 });

@@ -5,97 +5,138 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { theme, captured, queueOverrides, editsState, features, hooks, routeParams } = vi.hoisted(
-  () => {
-    const uiTheme = {
-      spacing: { 1: 4, 2: 8, 3: 12, 4: 16, 6: 24 },
-      colors: {
-        surface0: "#0a0a0a",
-        surface1: "#111",
-        foreground: "#fff",
-        foregroundMuted: "#aaa",
-        foregroundExtraMuted: "#777",
-        border: "#555",
-        accent: "#0a84ff",
-        statusDanger: "#ff0000",
-        palette: { red: { 300: "#ff6b6b" }, white: "#fff" },
+const {
+  theme,
+  captured,
+  queueOverrides,
+  editsState,
+  features,
+  hooks,
+  routeParams,
+  remote,
+  figmaFns,
+  outlineFixture,
+} = vi.hoisted(() => {
+  const uiTheme = {
+    spacing: { 1: 4, 2: 8, 3: 12, 4: 16, 6: 24 },
+    colors: {
+      surface0: "#0a0a0a",
+      surface1: "#111",
+      foreground: "#fff",
+      foregroundMuted: "#aaa",
+      foregroundExtraMuted: "#777",
+      border: "#555",
+      accent: "#0a84ff",
+      statusDanger: "#ff0000",
+      palette: { red: { 300: "#ff6b6b" }, white: "#fff" },
+    },
+  };
+  const outline = {
+    name: "Design file",
+    // ADR-0039: even live asset paths must pin to the outline snapshot version.
+    version: "snap-1",
+    pages: [
+      {
+        id: "p1",
+        name: "Page 1",
+        frames: [
+          {
+            id: "1:1",
+            name: "Screen",
+            type: "FRAME",
+            bounds: { x: 0, y: 0, width: 375, height: 812 },
+          },
+          // Spec 32.6.2: a SECTION root the write-path tests drag.
+          {
+            id: "40:1",
+            name: "Flow Board",
+            type: "SECTION",
+            bounds: { x: 10, y: 20, width: 1000, height: 800 },
+          },
+        ],
+        children: [],
+        flowStartingPoints: [{ nodeId: "9:9", name: "Onboarding", pageId: "p1" }],
       },
-    };
-    const outline = {
-      name: "Design file",
-      // ADR-0039: even live asset paths must pin to the outline snapshot version.
-      version: "snap-1",
-      pages: [
-        {
-          id: "p1",
-          name: "Page 1",
-          frames: [
-            {
-              id: "1:1",
-              name: "Screen",
-              type: "FRAME",
-              bounds: { x: 0, y: 0, width: 375, height: 812 },
-            },
-          ],
-          children: [],
-          flowStartingPoints: [{ nodeId: "9:9", name: "Onboarding", pageId: "p1" }],
-        },
-      ],
-    };
-    const queue = { "1:1": { name: "Queued" } } as Record<string, unknown>;
-    const edits = {
-      current: {
-        linked: false,
-        pendingCount: 1,
-        overrides: {} as Record<string, unknown>,
-        applyEdits: vi.fn(async () => undefined),
-        applyPending: vi.fn(() => Promise.resolve()),
-        discardPending: vi.fn(() => Promise.resolve()),
+      {
+        id: "p2",
+        name: "Page 2",
+        frames: [
+          {
+            id: "60:1",
+            name: "Other screen",
+            type: "FRAME",
+            bounds: { x: 0, y: 900, width: 375, height: 812 },
+          },
+        ],
+        children: [],
+        flowStartingPoints: [],
       },
-    };
-    // The lazy store as the screen sees it: a cached parent chain 1:5 → 1:4 → 1:1 lets the W6
-    // handoff test assert the player gets the ROOT FRAME, not the selected text/button node.
-    const parentLinks: Record<string, { id: string; name: string; type: string }> = {
-      "1:5": { id: "1:4", name: "Group", type: "GROUP" },
-      "1:4": { id: "1:1", name: "Screen", type: "FRAME" },
-    };
-    const store = {
-      subscribe: vi.fn(() => vi.fn()),
-      parentOf: vi.fn((id: string) => parentLinks[id] ?? null),
-      componentMeta: vi.fn(() => undefined),
-    };
-    return {
-      theme: uiTheme,
-      // Props the screen hands the toolbar / inspect panel / canvas / player — the wiring.
-      captured: {
-        toolbar: null as Record<string, unknown> | null,
-        inspect: null as Record<string, unknown> | null,
-        canvas: null as Record<string, unknown> | null,
-        player: null as Record<string, unknown> | null,
-        topbar: null as Record<string, unknown> | null,
-      },
-      outlineFixture: outline,
-      queueOverrides: queue,
-      editsState: edits,
-      // The daemon capabilities the gate reads (ADR-0039 / spec 32.5.1). Tests flip these; the
-      // base `figma` gate must stay compatible with the pre-ADR behaviour.
-      features: {
-        current: { figma: true, figmaNodeDepth: true } as Record<string, boolean>,
-      },
-      // The inner screen's data path. The capability gate must keep ALL of these unmounted —
-      // a new client never sends depth1 to an old host, and there is no full-Section fallback.
-      hooks: {
-        outline: vi.fn(() => ({ data: outline, isPending: false, isError: false, error: null })),
-        edits: vi.fn(() => edits.current),
-        frameStore: vi.fn(() => store),
-        watch: vi.fn(),
-      },
-      // Route params feed the initial selection (decoded by ./node-url, the real pure module).
-      routeParams: { current: {} as Record<string, string | string[]> },
-      storeMock: store,
-    };
-  },
-);
+    ],
+  };
+  const queue = { "1:1": { name: "Queued" } } as Record<string, unknown>;
+  const edits = {
+    current: {
+      linked: false,
+      pendingCount: 1,
+      overrides: {} as Record<string, unknown>,
+      applyEdits: vi.fn(async () => undefined),
+      applyPending: vi.fn(() => Promise.resolve()),
+      discardPending: vi.fn(() => Promise.resolve()),
+    },
+  };
+  // The lazy store as the screen sees it: a cached parent chain 1:5 → 1:4 → 1:1 lets the W6
+  // handoff test assert the player gets the ROOT FRAME, not the selected text/button node.
+  const parentLinks: Record<string, { id: string; name: string; type: string }> = {
+    "1:5": { id: "1:4", name: "Group", type: "GROUP" },
+    "1:4": { id: "1:1", name: "Screen", type: "FRAME" },
+  };
+  const store = {
+    subscribe: vi.fn(() => vi.fn()),
+    parentOf: vi.fn((id: string) => parentLinks[id] ?? null),
+    componentMeta: vi.fn(() => undefined),
+  };
+  return {
+    theme: uiTheme,
+    // Props the screen hands the toolbar / inspect panel / canvas / player — the wiring.
+    captured: {
+      toolbar: null as Record<string, unknown> | null,
+      inspect: null as Record<string, unknown> | null,
+      canvas: null as Record<string, unknown> | null,
+      player: null as Record<string, unknown> | null,
+      topbar: null as Record<string, unknown> | null,
+    },
+    outlineFixture: outline,
+    queueOverrides: queue,
+    editsState: edits,
+    // The daemon capabilities the gate reads (ADR-0039 / spec 32.5.1). Tests flip these; the
+    // base `figma` gate must stay compatible with the pre-ADR behaviour.
+    features: {
+      current: { figma: true, figmaNodeDepth: true } as Record<string, boolean>,
+    },
+    // The inner screen's data path. The capability gate must keep ALL of these unmounted —
+    // a new client never sends depth1 to an old host, and there is no full-Section fallback.
+    hooks: {
+      outline: vi.fn(() => ({ data: outline, isPending: false, isError: false, error: null })),
+      edits: vi.fn(() => edits.current),
+      frameStore: vi.fn(() => store),
+      watch: vi.fn(),
+    },
+    // Route params feed the initial selection (decoded by ./node-url, the real pure module).
+    routeParams: { current: {} as Record<string, string | string[]> },
+    storeMock: store,
+    // The remote write surface (ADR-0040): W10's connector-status hook answer + the execute
+    // RPC, both fully controlled per test.
+    remote: {
+      statusData: null as { state: string } | null,
+      statusCalls: [] as Array<Record<string, unknown>>,
+      execute: vi.fn(),
+    },
+    figmaFns: {
+      invalidateFile: vi.fn(),
+      invalidateQueries: vi.fn(),
+    },
+  };
+});
 
 // The pending queue RPC promises are the whole point of this wiring test: the callbacks the
 // screen passes to the toolbar must be the live promises (the toolbar surfaces their
@@ -127,7 +168,7 @@ vi.mock("@/runtime/host-features", () => ({
     Boolean(features.current[feature]),
 }));
 vi.mock("@tanstack/react-query", () => ({
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  useQueryClient: () => ({ invalidateQueries: figmaFns.invalidateQueries }),
 }));
 vi.mock("expo-router", () => ({
   router: { setParams: vi.fn(async () => undefined), replace: vi.fn(async () => undefined) },
@@ -153,11 +194,22 @@ vi.mock("lucide-react-native", () => {
 });
 vi.mock("./api", () => ({
   errorMessage: (error: unknown) => (error instanceof Error ? error.message : String(error)),
-  useFigmaCall: () => vi.fn(async () => ({ nodes: {} })),
+  useFigmaCall: () => (type: string, params: unknown) =>
+    type === "figma.remote.execute.request"
+      ? remote.execute(params as { fileKey: string; code: string; description: string })
+      : Promise.resolve({ nodes: {} }),
+}));
+vi.mock("../queries", () => ({
+  // The connector state the screen reads comes from W10's hook verbatim; the tests drive it
+  // through `remote.statusData` and assert the capability gate via the recorded `enabled` option.
+  useFigmaRemoteStatus: (_serverId: string, options: Record<string, unknown>) => {
+    remote.statusCalls.push(options);
+    return { data: remote.statusData };
+  },
 }));
 vi.mock("./use-figma-file", () => ({
   figmaKeys: { all: () => ["figma"] },
-  invalidateFigmaFile: vi.fn(),
+  invalidateFigmaFile: figmaFns.invalidateFile,
   useFigmaOutline: hooks.outline,
   useFigmaEdits: hooks.edits,
   useFigmaFrameStore: hooks.frameStore,
@@ -220,6 +272,19 @@ beforeEach(() => {
   captured.topbar = null;
   routeParams.current = {};
   features.current = { figma: true, figmaNodeDepth: true };
+  lastRerender = null;
+  remote.statusData = null;
+  remote.statusCalls = [];
+  remote.execute.mockReset();
+  remote.execute.mockResolvedValue({ result: { content: [] }, readbackAvailable: true });
+  figmaFns.invalidateFile.mockReset();
+  figmaFns.invalidateQueries.mockReset();
+  hooks.outline.mockImplementation(() => ({
+    data: outlineFixture,
+    isPending: false,
+    isError: false,
+    error: null,
+  }));
   hooks.outline.mockClear();
   hooks.edits.mockClear();
   hooks.frameStore.mockClear();
@@ -392,5 +457,287 @@ describe("FigmaFileScreen snapshot pinning and W6 prototype handoff", () => {
     const second = render();
     openPrototype(second);
     expect(playerSeen().startNodeId).toBe("9:9");
+  });
+});
+
+// ── SECTION write path (spec 32.6.2 / acceptance 19 / ADR-0040) ─────────────────────────
+
+import { SECTION_MOVE_DEADLINE_MS } from "./section-interaction";
+
+interface ExecuteResponse {
+  result: { content: unknown[]; isError?: boolean };
+  readbackAvailable: boolean;
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
+interface CapturedCanvas {
+  onMoveSection: (sectionId: string, dx: number, dy: number) => void;
+  sectionEditing: { canEdit: boolean; notice: string | null };
+  sectionOffsets: Record<string, { dx: number; dy: number }>;
+  sectionMoveStatus: string | null;
+}
+
+function canvasProps(): CapturedCanvas {
+  return captured.canvas as unknown as CapturedCanvas;
+}
+
+let lastRerender: (() => void) | null = null;
+
+/** Re-render the most recently mounted screen so swapped outline data takes effect. */
+function settleRerender(): void {
+  expect(lastRerender).not.toBeNull();
+  act(() => lastRerender!());
+}
+
+function commitDrag(sectionId: string, dx: number, dy: number): void {
+  act(() => canvasProps().onMoveSection(sectionId, dx, dy));
+}
+
+const settle = () => act(async () => undefined);
+
+/** Replace the outline fixture so the SECTION's WORLD bounds read as (x, y) on the next fetch. */
+function setSectionBounds(x: number, y: number): void {
+  const page = outlineFixture.pages[0];
+  const frames = page.frames.slice();
+  const index = frames.findIndex((frame) => frame.id === "40:1");
+  frames[index] = { ...frames[index], bounds: { ...frames[index].bounds, x, y } };
+  hooks.outline.mockImplementation(() => ({
+    data: { ...outlineFixture, pages: [{ ...page, frames }] },
+    isPending: false,
+    isError: false,
+    error: null,
+  }));
+}
+
+function mountEditable(overrides: { fileKey?: string; version?: string } = {}) {
+  features.current.figmaRemoteWrites = true;
+  remote.statusData = { state: "connected" };
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root: Root = createRoot(container);
+  const ref = {
+    serverId: "s1",
+    fileKey: overrides.fileKey ?? "file",
+    ...(overrides.version ? { version: overrides.version } : {}),
+  };
+  act(() => root.render(<FigmaFileScreen {...ref} />));
+  views.push({
+    unmount: () => {
+      act(() => root.unmount());
+      container.remove();
+    },
+  });
+  const rerender = (next: Partial<{ fileKey: string; version: string }> = {}) => {
+    act(() => root.render(<FigmaFileScreen {...ref} {...next} />));
+  };
+  lastRerender = rerender;
+  return { rerender };
+}
+
+describe("FigmaFileScreen SECTION write path", () => {
+  it("commits ONE write whose script guards what metadata cannot attest", async () => {
+    mountEditable();
+    commitDrag("40:1", 100, 50); // world target: bounds 10,20 + 100,50 = 110,70
+    expect(remote.execute).toHaveBeenCalledTimes(1);
+    const params = remote.execute.mock.calls[0][0];
+    expect(params.fileKey).toBe("file");
+    // Never figma.currentPage.findOne: existence asserts (throw, never silent), the ACTUAL
+    // ancestor page is set, and type/locks are re-checked AFTER the await before any write.
+    expect(params.code).toContain('const sectionId = "40:1";');
+    expect(params.code.match(/getNodeByIdAsync/g)).toHaveLength(2); // initial resolve + post-switch re-read
+    expect(params.code).toContain("does not exist");
+    expect(params.code).toContain("not a SECTION");
+    expect(params.code).toContain("locked at write time");
+    expect(params.code.indexOf("locked at write time")).toBeGreaterThan(
+      params.code.indexOf("await figma.setCurrentPageAsync(page)"),
+    );
+    expect(params.code).toContain("/ det");
+    expect(params.code).toContain("const gx = 110 - m[0][2]");
+    expect(params.code).toContain("gy = 70 - m[1][2]");
+    expect(params.code).toContain("before");
+    expect(params.code).toContain("after");
+    expect(params.code).not.toContain("figma.currentPage");
+    expect(params.description).toContain('Move SECTION "Flow Board" to (110, 70)');
+    // The preview stands while the write is in flight.
+    expect(canvasProps().sectionMoveStatus).toBe("saving");
+    expect(canvasProps().sectionOffsets).toEqual({ "40:1": { dx: 100, dy: 50 } });
+  });
+
+  it("without the write capability the status hook stays disabled and a drag writes nothing", () => {
+    remote.statusData = { state: "connected" };
+    render();
+    expect(remote.statusCalls[remote.statusCalls.length - 1]).toEqual({ enabled: false });
+    commitDrag("40:1", 40, 0);
+    expect(remote.execute).not.toHaveBeenCalled();
+    expect(canvasProps().sectionEditing.canEdit).toBe(false);
+    expect(canvasProps().sectionEditing.notice).toBe("Connect editing");
+  });
+
+  it("capability but no connected connector is select/pan only — never a silent write", () => {
+    features.current.figmaRemoteWrites = true;
+    remote.statusData = { state: "disconnected" };
+    render();
+    commitDrag("40:1", 30, 30);
+    expect(remote.execute).not.toHaveBeenCalled();
+    expect(canvasProps().sectionEditing.canEdit).toBe(false);
+  });
+
+  it("a historical version stays read-only even with capability and a connected connector", () => {
+    features.current.figmaRemoteWrites = true;
+    remote.statusData = { state: "connected" };
+    render({ version: "v9" });
+    commitDrag("40:1", 30, 30);
+    expect(remote.execute).not.toHaveBeenCalled();
+    expect(canvasProps().sectionEditing.notice).toBe("Connect editing");
+  });
+
+  it("a synchronous in-flight latch drops fast second drags until the write settles", async () => {
+    mountEditable();
+    const pending = deferred<ExecuteResponse>();
+    remote.execute.mockReturnValue(pending.promise);
+    commitDrag("40:1", 100, 50);
+    commitDrag("40:1", -40, 0); // too fast: the first reply has not landed
+    expect(remote.execute).toHaveBeenCalledTimes(1);
+    pending.resolve({ result: { content: [] }, readbackAvailable: true });
+    await settle();
+    // Still in flight while the INDEPENDENT readback decides — the reply alone is not a settle.
+    commitDrag("40:1", -40, 0);
+    expect(remote.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("only matching independently refreshed metadata settles the move, not the reply", async () => {
+    mountEditable();
+    commitDrag("40:1", 100, 50);
+    await settle(); // the default success reply lands: invalidate, status still saving
+    expect(figmaFns.invalidateFile).toHaveBeenCalledTimes(1);
+    expect(canvasProps().sectionMoveStatus).toBe("saving");
+    setSectionBounds(110, 70); // the re-read agrees with the committed WORLD target
+    // (nested-parent offsets are the script's inverse-transform concern, not the verifier's)
+    settleRerender();
+    expect(canvasProps().sectionMoveStatus).toBeNull();
+    expect(canvasProps().sectionOffsets).toEqual({});
+  });
+
+  it("a mismatching refresh settles to unverified and drops the preview", async () => {
+    mountEditable();
+    commitDrag("40:1", 100, 50);
+    await settle();
+    setSectionBounds(110, 999); // metadata says otherwise (new version or lost write)
+    settleRerender();
+    expect(canvasProps().sectionMoveStatus).toBe("unverified");
+    expect(canvasProps().sectionOffsets).toEqual({});
+  });
+
+  it("an error reply rolls back: failed, preview gone, no invalidate/refetch", async () => {
+    remote.execute.mockResolvedValue({
+      result: { content: [], isError: true },
+      readbackAvailable: true,
+    });
+    mountEditable();
+    commitDrag("40:1", 100, 50);
+    await settle();
+    expect(canvasProps().sectionMoveStatus).toBe("failed");
+    expect(canvasProps().sectionOffsets).toEqual({});
+    expect(figmaFns.invalidateFile).not.toHaveBeenCalled();
+  });
+
+  it("a rejected reply rolls back the same way", async () => {
+    remote.execute.mockRejectedValue(new Error("socket died"));
+    mountEditable();
+    commitDrag("40:1", 100, 50);
+    await settle();
+    expect(canvasProps().sectionMoveStatus).toBe("failed");
+    expect(canvasProps().sectionOffsets).toEqual({});
+  });
+
+  it("a failed daemon re-read settles unverified and DROPS the preview while refresh proceeds", async () => {
+    remote.execute.mockResolvedValue({ result: { content: [] }, readbackAvailable: false });
+    mountEditable();
+    commitDrag("40:1", 100, 50);
+    await settle();
+    expect(canvasProps().sectionMoveStatus).toBe("unverified"); // uncertainty stays visibly flagged
+    expect(canvasProps().sectionOffsets).toEqual({}); // a preview that outlives proof silently lies
+  });
+
+  it("never saving forever: the deadline settles a silent readback, with no auto retry", async () => {
+    vi.useFakeTimers();
+    try {
+      mountEditable();
+      commitDrag("40:1", 100, 50);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(SECTION_MOVE_DEADLINE_MS);
+      });
+      expect(canvasProps().sectionMoveStatus).toBe("unverified");
+      // No automatic retry: a late matching refresh must NOT flip the verdict back to saved.
+      setSectionBounds(110, 70);
+      settleRerender();
+      expect(canvasProps().sectionMoveStatus).toBe("unverified");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a file switch mid-write drops the preview and a late reply fetches nothing stale", async () => {
+    const screen = mountEditable();
+    const pending = deferred<ExecuteResponse>();
+    remote.execute.mockReturnValue(pending.promise);
+    commitDrag("40:1", 100, 50);
+    screen.rerender({ fileKey: "other" });
+    expect(canvasProps().sectionMoveStatus).toBeNull();
+    expect(canvasProps().sectionOffsets).toEqual({});
+    pending.resolve({ result: { content: [] }, readbackAvailable: true });
+    await settle();
+    expect(figmaFns.invalidateFile).not.toHaveBeenCalled(); // no stale invalidate/refetch
+    commitDrag("40:1", 10, 10); // the latch is free again for the new file
+    expect(remote.execute).toHaveBeenCalledTimes(2);
+  });
+
+  it("a page switch mid-write is identity-stale: the late reply settles nothing and refetches nothing", async () => {
+    mountEditable();
+    const pending = deferred<ExecuteResponse>();
+    remote.execute.mockReturnValue(pending.promise);
+    commitDrag("40:1", 100, 50);
+    act(() => (captured.topbar as { onSelectPage: (id: string) => void }).onSelectPage("p2"));
+    expect(canvasProps().sectionMoveStatus).toBeNull();
+    expect(canvasProps().sectionOffsets).toEqual({});
+    pending.resolve({ result: { content: [] }, readbackAvailable: true });
+    await settle();
+    expect(figmaFns.invalidateFile).not.toHaveBeenCalled();
+    // The refreshed outline now reports the section where p1's committed target was — but the
+    // write belonged to a page that is no longer visible: no delayed "verified" flip either.
+    setSectionBounds(110, 70);
+    settleRerender();
+    expect(canvasProps().sectionMoveStatus).toBeNull();
+  });
+
+  it("a version switch mid-write remounts fresh, swallows the late reply, and stays read-only", async () => {
+    const screen = mountEditable();
+    const pending = deferred<ExecuteResponse>();
+    remote.execute.mockReturnValue(pending.promise);
+    commitDrag("40:1", 100, 50);
+    screen.rerender({ version: "v9" }); // keyed identity change: the inner mount is brand new
+    expect(canvasProps().sectionMoveStatus).toBeNull();
+    expect(canvasProps().sectionOffsets).toEqual({});
+    expect(canvasProps().sectionEditing.canEdit).toBe(false); // historical: select/pan only
+    pending.resolve({ result: { content: [] }, readbackAvailable: true });
+    await settle();
+    expect(figmaFns.invalidateFile).not.toHaveBeenCalled(); // no stale invalidate/refetch
+    commitDrag("40:1", 10, 10); // read-only surfaces never write
+    expect(remote.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("a non-finite committed delta never reaches the RPC", () => {
+    mountEditable();
+    commitDrag("40:1", Number.NaN, 5);
+    commitDrag("40:1", 5, Number.POSITIVE_INFINITY);
+    expect(remote.execute).not.toHaveBeenCalled();
+    expect(canvasProps().sectionMoveStatus).toBeNull();
   });
 });

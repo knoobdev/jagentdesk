@@ -110,6 +110,29 @@ export class ByteImageCache {
     return this.records.get(ref)?.phase === "ready";
   }
 
+  /**
+   * Real ledger for the canvas's honest loading status (spec 32.5.1): counts of attempts not
+   * yet delivered (queued, fetching, or mid-decode) and terminal failures. No new state — a
+   * scan of the bounded record map; observing a key is NOT a probe here, so calling this never
+   * pins an entry across reconciliation.
+   */
+  status(): { pending: number; failed: number } {
+    let pending = 0;
+    let failed = 0;
+    for (const record of this.records.values()) {
+      if (record.phase === "failed") failed += 1;
+      else if (record.phase !== "ready") pending += 1;
+    }
+    return { pending, failed };
+  }
+
+  /** Targeted retry: drop terminal failures so the next demand refetches them (spec 32.5.1). */
+  retryFailed(): void {
+    for (const [ref, record] of this.records) {
+      if (record.phase === "failed") this.records.delete(ref);
+    }
+  }
+
   clear(): void {
     this.generation += 1;
     this.records.clear();
@@ -271,6 +294,29 @@ export class FontCache {
     this.records.set(key, started);
     void this.load(key, started, family, style, this.generation);
     return false;
+  }
+
+  /**
+   * Real ledger for the canvas's honest loading status (spec 32.5.1): in-flight font attempts
+   * and settled-attempts-that-failed (a missing face IS a failure the user can retry — the
+   * renderer falls back to rasters for these). Bounded scan of the record map; a probe never
+   * observes.
+   */
+  status(): { pending: number; failed: number } {
+    let pending = 0;
+    let failed = 0;
+    for (const record of this.records.values()) {
+      if (record.phase === "loading") pending += 1;
+      else if (!record.ok) failed += 1;
+    }
+    return { pending, failed };
+  }
+
+  /** Targeted retry: drop failed font attempts so the next demand fetches them again. */
+  retryFailed(): void {
+    for (const [key, record] of this.records) {
+      if (record.phase === "settled" && !record.ok) this.records.delete(key);
+    }
   }
 
   private async load(
