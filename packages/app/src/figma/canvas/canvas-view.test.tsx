@@ -14,11 +14,14 @@ import { MAX_RASTER_TILES, NativeCanvasLayer, pruneRasterCache } from "./canvas-
 const globalWithReact = globalThis as typeof globalThis & { React?: typeof React };
 globalWithReact.React ??= React;
 
-const { theme } = vi.hoisted(() => ({
+const { theme, hosts } = vi.hoisted(() => ({
   theme: {
     fontSize: { xs: 11 },
     colors: { foregroundMuted: "#888" },
   },
+  // Mutable per-serverId client registry: tests can register, unregister (offline), or swap
+  // hosts exactly like the runtime store does.
+  hosts: { current: {} as Record<string, { id: string } | null> },
 }));
 
 vi.mock("react-native", () => ({
@@ -56,7 +59,7 @@ vi.mock("react-native-unistyles", () => ({
 
 vi.mock("@/constants/platform", () => ({ isWeb: false, isNative: true }));
 vi.mock("@/runtime/host-runtime", () => ({
-  useHostRuntimeClient: () => ({ id: "client" }),
+  useHostRuntimeClient: (serverId: string) => hosts.current[serverId] ?? null,
   getHostRuntimeStore: () => ({ getSnapshot: () => null }),
 }));
 vi.mock("@/figma/renderer", () => ({
@@ -83,13 +86,15 @@ const CAMERA = { zoom: 1, offsetX: 0, offsetY: 0 };
 const noopSelect = (_nodeId: string | null): void => undefined;
 const noopCamera = (_next: typeof CAMERA): void => undefined;
 
-/** The daemon answers every render batch with a tile tagged by the requested version. */
+/** The daemon answers every render batch with a tile tagged by the serving host and version. */
 function serveRenderTiles() {
-  callFigmaMock.mockImplementation((async (_client, _method, payload) => {
+  callFigmaMock.mockImplementation((async (client, _method, payload) => {
+    const host = (client as { id?: string } | null)?.id ?? "?";
     const version = String((payload as { version?: string }).version ?? "live");
     const ids = (payload as { ids: string[] }).ids;
     const images: Record<string, { mimeType: string; dataBase64: string }> = {};
-    for (const id of ids) images[id] = { mimeType: "image/png", dataBase64: `${version}:${id}` };
+    for (const id of ids)
+      images[id] = { mimeType: "image/png", dataBase64: `${host}|${version}:${id}` };
     return { images };
   }) as typeof callFigma);
 }
@@ -138,8 +143,45 @@ const flush = async () => {
   });
 };
 
+function renderedTiles(container: HTMLElement): string[] {
+  return Array.from(container.querySelectorAll('img[data-testid="tile"]')).map((node) =>
+    node.getAttribute("src"),
+  ) as string[];
+}
+
+/** Deferred render batches so a test controls exactly when each response lands or fails. */
+function deferredRenderBatches() {
+  const batches: Array<{
+    ids: string[];
+    clientId: string;
+    resolve: (host: string, version: string) => void;
+    reject: (error: Error) => void;
+  }> = [];
+  callFigmaMock.mockImplementation(((_client, _method, payload) => {
+    const ids = [...((payload as { ids: string[] }).ids ?? [])];
+    const clientId = (_client as { id?: string } | null)?.id ?? "?";
+    return new Promise<{ images: Record<string, { mimeType: string; dataBase64: string }> }>(
+      (resolve, reject) => {
+        batches.push({
+          ids,
+          clientId,
+          resolve: (host, version) => {
+            const images: Record<string, { mimeType: string; dataBase64: string }> = {};
+            for (const id of ids)
+              images[id] = { mimeType: "image/png", dataBase64: `${host}|${version}:${id}` };
+            resolve({ images });
+          },
+          reject,
+        });
+      },
+    );
+  }) as typeof callFigma);
+  return batches;
+}
+
 beforeEach(() => {
   callFigmaMock.mockReset();
+  hosts.current = { srv: { id: "srv" } };
   serveRenderTiles();
 });
 
@@ -189,7 +231,7 @@ describe("NativeCanvasLayer lazy render requests", () => {
       Array.from(layer.container.querySelectorAll('img[data-testid="tile"]')).map((node) =>
         node.getAttribute("src"),
       ),
-    ).toEqual(["data:image/png;base64,live:1:0", "data:image/png;base64,live:1:1"]);
+    ).toEqual(["data:image/png;base64,srv|live:1:0", "data:image/png;base64,srv|live:1:1"]);
 
     layer.rerenderWith({ visible: framesFrom("1", 2) });
     await flush();
@@ -226,7 +268,7 @@ describe("NativeCanvasLayer lazy render requests", () => {
     const srcs = Array.from(layer.container.querySelectorAll('img[data-testid="tile"]')).map(
       (node) => node.getAttribute("src"),
     );
-    expect(srcs).toEqual(["data:image/png;base64,7:1:0", "data:image/png;base64,7:1:1"]);
+    expect(srcs).toEqual(["data:image/png;base64,srv|7:1:0", "data:image/png;base64,srv|7:1:1"]);
     layer.unmount();
   });
 
@@ -256,6 +298,87 @@ describe("NativeCanvasLayer lazy render requests", () => {
       "figma.file.render.request",
       expect.objectContaining({ ids: expect.arrayContaining(["2:0"]) }),
     );
+    layer.unmount();
+  });
+
+  it("switching hosts on the same file/version/ids drops the other host's tiles", async () => {
+    // Regression: the scope key omitted serverId, so A→B on the same (fileKey, version) kept
+    // the identical ledger — no clear, no re-request, and host A's tiles painted forever.
+    const batches = deferredRenderBatches();
+    const visible = framesFrom("1", 2);
+    const layer = mountLayer({ visible });
+    await flush();
+    expect(batches).toHaveLength(1);
+    hosts.current.srvB = { id: "srvB" };
+
+    layer.rerenderWith({ serverId: "srvB" });
+    await flush();
+    expect(batches).toHaveLength(2); // the new host must actually be asked
+    expect(batches[1]!.clientId).toBe("srvB");
+
+    batches[0]!.resolve("srv", "live"); // A's response lands only AFTER the switch
+    await flush();
+    expect(renderedTiles(layer.container)).toEqual([]); // stale success from a dead scope
+    batches[1]!.resolve("srvB", "live");
+    await flush();
+    expect(renderedTiles(layer.container)).toEqual([
+      "data:image/png;base64,srvB|live:1:0",
+      "data:image/png;base64,srvB|live:1:1",
+    ]);
+    layer.unmount();
+  });
+
+  it("clears tiles on a server switch even while the new host is offline", async () => {
+    // Regression: the effect returned on `!client` BEFORE the scope reset, so switching to a
+    // host that had not connected yet left the previous host's tiles on screen indefinitely.
+    const layer = mountLayer();
+    await flush();
+    expect(renderedTiles(layer.container)).toHaveLength(2);
+
+    layer.rerenderWith({ serverId: "srvB" }); // srvB has no client yet (offline)
+    await flush();
+    expect(renderedTiles(layer.container)).toEqual([]);
+    expect(callFigmaMock).toHaveBeenCalledTimes(1); // nothing to ask with; no new requests
+
+    hosts.current.srvB = { id: "srvB" };
+    layer.rerenderWith({ serverId: "srvB", visible: framesFrom("1", 2) }); // re-render picks it up
+    await flush();
+    expect(renderedTiles(layer.container)).toEqual([
+      "data:image/png;base64,srvB|live:1:0",
+      "data:image/png;base64,srvB|live:1:1",
+    ]);
+    layer.unmount();
+  });
+
+  it("keeps the new scope's ledger when an old-scope batch rejects late", async () => {
+    // Regression: the catch deleted the batch ids from `requested` unconditionally, so a
+    // rejection from the dead scope un-marked the ids the NEW scope had just re-requested, and
+    // the next effect pass double-fetched while the live request was still pending.
+    const batches = deferredRenderBatches();
+    const visible = framesFrom("1", 2);
+    const layer = mountLayer({ visible });
+    await flush();
+    expect(batches).toHaveLength(1);
+
+    layer.rerenderWith({ version: "7" }); // scope change re-requests the same ids
+    await flush();
+    expect(batches).toHaveLength(2);
+    expect(batches[1]!.ids).toEqual(["1:0", "1:1"]);
+
+    batches[0]!.reject(new Error("old scope died"));
+    await flush();
+    // Same scope, fresh visible array: re-runs the effect; the live batch's ledger ids must
+    // survive the stale rejection, so nothing is re-requested.
+    layer.rerenderWith({ version: "7", visible: framesFrom("1", 2) });
+    await flush();
+    expect(batches).toHaveLength(2);
+
+    batches[1]!.resolve("srv", "7");
+    await flush();
+    expect(renderedTiles(layer.container)).toEqual([
+      "data:image/png;base64,srv|7:1:0",
+      "data:image/png;base64,srv|7:1:1",
+    ]);
     layer.unmount();
   });
 });

@@ -385,8 +385,10 @@ export const MAX_RASTER_TILES = 64;
 /**
  * Cap the native raster cache: the spec keeps no drawing objects outside the viewport, so tiles
  * that scrolled away expire oldest-first once the cache outgrows `max`. Currently visible tiles
- * stay regardless (they are being painted), and every dropped id is reported so the caller can
- * forget it from its request ledger and re-fetch when the frame scrolls back.
+ * stay regardless (they are being painted), so retained tiles are `max(visible, max)` — a wide
+ * viewport legitimately holds more than `max` tiles; only the OFF-viewport retention is capped.
+ * Every dropped id is reported so the caller can forget it from its request ledger and re-fetch
+ * when the frame scrolls back.
  */
 export function pruneRasterCache(
   cached: Record<string, string>,
@@ -447,19 +449,29 @@ export function NativeCanvasLayer(props: {
   const client = useHostRuntimeClient(props.serverId);
   const [rasters, setRasters] = useState<Record<string, string>>({});
   const requested = useRef(new Set<string>());
-  // Rasters belong to one (file, version) snapshot: the versions panel swaps `version` on the
-  // same mounted viewer, and without this ledger the old tiles would render forever — stale
-  // data retained as if it were the new version, and never released.
+  // The viewport as of the latest pass: an arriving batch must prune against what is visible
+  // NOW, not the viewport captured when its fetch began, or a slow response evicts tiles the
+  // user has since scrolled into view.
+  const visibleIdsRef = useRef<string[]>([]);
+  // Rasters belong to one (server, file, version) snapshot: the versions panel swaps `version`
+  // on the same mounted viewer and the host switcher swaps `serverId`, and without this ledger
+  // the old tiles would render forever — stale data retained as if it were the new scope, and
+  // never released.
   const rasterScope = useRef<string | null>(null);
   useEffect(() => {
-    if (!client) return;
-    const scope = `${fileKey}|${version ?? "live"}`;
+    // serverId is part of the identity: two hosts can serve the same fileKey at the same
+    // version, and omitting it left the other host's tiles painted forever. The reset runs
+    // BEFORE the client check — going offline is a scope event too, and returning early left
+    // the previous host's tiles on screen with no client to ever clear them.
+    const scope = `${props.serverId}|${fileKey}|${version ?? "live"}`;
     if (rasterScope.current !== scope) {
       rasterScope.current = scope;
       requested.current.clear();
       setRasters((current) => (Object.keys(current).length === 0 ? current : {}));
     }
     const visibleIds = visible.map((frame) => frame.id);
+    visibleIdsRef.current = visibleIds;
+    if (!client) return;
     const missing = visibleIds.filter((id) => !requested.current.has(id));
     if (missing.length === 0) return;
     for (const id of missing) requested.current.add(id);
@@ -473,17 +485,27 @@ export function NativeCanvasLayer(props: {
       })
         .then((data) =>
           setRasters((current) => {
-            // A response that crossed a version/file switch belongs to the old scope; the new
-            // scope's effect already re-requested these ids, so drop the stale payload.
+            // A response that crossed a server/file/version switch belongs to the old scope;
+            // the new scope's effect already re-requested these ids, so drop the stale payload.
             if (rasterScope.current !== scope) return current;
-            return mergeRasterBatch(current, batch, data.images, visibleIds, requested.current);
+            return mergeRasterBatch(
+              current,
+              batch,
+              data.images,
+              visibleIdsRef.current,
+              requested.current,
+            );
           }),
         )
         .catch(() => {
+          // The same scope guard as success: a rejection surfacing after a scope switch must
+          // not delete the ledger ids the NEW scope's effect just re-requested — otherwise the
+          // live batch's ids vanish from `requested` and the next pass double-fetches them.
+          if (rasterScope.current !== scope) return;
           for (const id of batch) requested.current.delete(id);
         });
     }
-  }, [client, fileKey, version, visible]);
+  }, [client, props.serverId, fileKey, version, visible]);
 
   const cameraRef = useRef(camera);
   cameraRef.current = camera;
