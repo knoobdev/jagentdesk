@@ -2575,6 +2575,13 @@ async function captureRenderQuality(page, requests, artifactDir, evidence) {
     if (!Object.values(target).every(Boolean))
       throw new Error("Quality target needs page, node and version");
     await page.setViewportSize({ width: 1920, height: 1080 });
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Emulation.setDeviceMetricsOverride", {
+      width: 1920,
+      height: 1080,
+      deviceScaleFactor: 2,
+      mobile: false,
+    });
     const url = new URL(page.url());
     for (const [key, value] of Object.entries(target)) url.searchParams.set(key, value);
     const requestStart = requests.renderRequests.length;
