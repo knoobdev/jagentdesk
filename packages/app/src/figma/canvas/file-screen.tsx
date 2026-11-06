@@ -22,7 +22,16 @@ import { FigmaTopBar } from "./top-bar";
 import { figmaNodeIdFromParam, figmaNodeParam, nodeParamToFocusId } from "./node-url";
 import { resolvePrototypeStartNode } from "./prototype-start";
 import { errorMessage, useFigmaCall } from "./api";
+import {
+  SECTION_MOVE_DEADLINE_MS,
+  type SectionMoveStatus,
+  type SectionOffset,
+  sectionEditing as buildSectionEditing,
+  sectionMoveDescription,
+  sectionMoveScript,
+} from "./section-interaction";
 import { absoluteBoundingBoxOf, type Camera, centerCameraOn, nodeFocusBounds } from "./viewport";
+import { useFigmaRemoteStatus } from "../queries";
 import {
   figmaKeys,
   invalidateFigmaFile,
@@ -182,6 +191,135 @@ function FigmaFileScreenInner({ serverId, fileKey, version }: FigmaFileRef) {
   // The wrapper only mounts this screen when the host speaks Figma, so the watch is active for
   // any live file; a historical version snapshot never watches.
   useFigmaWatch({ serverId, fileKey, active: !version, onChanged: onWatched });
+
+  // ── SECTION editing (spec 32.6.2 / acceptance 19 / ADR-0040) ────────────────────────
+  // ONE gate on `figmaRemoteWrites`; the connector's state comes from W10's shared
+  // useFigmaRemoteStatus (enabled=false runs zero RPC on an old host). No capability, no
+  // connected connector, or a pinned historical version means select/pan only — and the canvas
+  // says "Connect editing" rather than swallowing the move. A committed move stays on screen
+  // until INDEPENDENTLY refreshed outline metadata confirms the new WORLD position — the
+  // execute reply (not even readbackAvailable) never claims "Saved" on its own.
+  const remoteWrites = useHostFeature(serverId, "figmaRemoteWrites");
+  const remoteStatus = useFigmaRemoteStatus(serverId, { enabled: remoteWrites });
+  const [sectionOffsets, setSectionOffsets] = useState<Record<string, SectionOffset>>({});
+  const [sectionMoveStatus, setSectionMoveStatus] = useState<SectionMoveStatus>(null);
+  const expectedMove = useRef<{ id: string; x: number; y: number; generation: number } | null>(
+    null,
+  );
+  const moveGeneration = useRef(0);
+  const moveInFlight = useRef(false);
+  const moveDeadline = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sectionEditing = useMemo(
+    () =>
+      buildSectionEditing({
+        capability: remoteWrites,
+        remoteConnected: remoteStatus.data?.state === "connected",
+        versionPinned: Boolean(version),
+      }),
+    [remoteWrites, remoteStatus.data?.state, version],
+  );
+
+  const clearMoveLatch = useCallback((status: SectionMoveStatus) => {
+    if (moveDeadline.current !== null) {
+      clearTimeout(moveDeadline.current);
+      moveDeadline.current = null;
+    }
+    expectedMove.current = null;
+    moveInFlight.current = false;
+    setSectionMoveStatus(status);
+  }, []);
+
+  // A host/file/page/version switch drops the pending preview outright, and bumping the
+  // generation makes every response captured under the old identity "late": ignored, with no
+  // stale invalidate/refetch of the new file.
+  useEffect(() => {
+    moveGeneration.current += 1;
+    if (moveDeadline.current !== null) {
+      clearTimeout(moveDeadline.current);
+      moveDeadline.current = null;
+    }
+    expectedMove.current = null;
+    moveInFlight.current = false;
+    setSectionOffsets({});
+    setSectionMoveStatus(null);
+    return () => {
+      moveGeneration.current += 1;
+    };
+  }, [serverId, fileKey, pageId, version]);
+
+  // Independent verification: only the daemon's own re-read metadata may settle a move — it
+  // compares WORLD bounds against the committed target. A matching refresh ends the preview; a
+  // mismatching refresh (including a new version that disagrees) settles to "unverified" and
+  // drops the preview, because the previewed position is provably not what the file says.
+  useEffect(() => {
+    const expected = expectedMove.current;
+    if (!expected || !page) return;
+    if (expected.generation !== moveGeneration.current) {
+      expectedMove.current = null;
+      return;
+    }
+    const moved = page.frames.find((frame) => frame.id === expected.id);
+    if (!moved) return; // outline not re-read yet — the deadline settles it.
+    if (
+      Math.abs(moved.bounds.x - expected.x) < 0.5 &&
+      Math.abs(moved.bounds.y - expected.y) < 0.5
+    ) {
+      clearMoveLatch(null);
+      setSectionOffsets({});
+    } else {
+      clearMoveLatch("unverified");
+      setSectionOffsets({});
+    }
+  }, [clearMoveLatch, page]);
+
+  const handleMoveSection = useCallback(
+    (sectionId: string, dx: number, dy: number) => {
+      const summary = page?.frames.find((frame) => frame.id === sectionId);
+      // Synchronous single-write latch: a fast second drag cannot overwrite expectedMove or
+      // race a second unverified write onto the wire.
+      if (!summary || !sectionEditing.canEdit || moveInFlight.current) return;
+      const x = summary.bounds.x + dx;
+      const y = summary.bounds.y + dy;
+      const generation = moveGeneration.current;
+      moveInFlight.current = true;
+      expectedMove.current = { id: sectionId, x, y, generation };
+      setSectionOffsets({ [sectionId]: { dx, dy } });
+      setSectionMoveStatus("saving");
+      void call("figma.remote.execute.request", {
+        fileKey,
+        code: sectionMoveScript(sectionId, x, y),
+        description: sectionMoveDescription(summary.name, x, y),
+      })
+        .then((response) => {
+          if (generation !== moveGeneration.current) return; // late: no claim, no refetch
+          if (response.result?.isError) {
+            clearMoveLatch("failed");
+            setSectionOffsets({});
+            return;
+          }
+          // Independent re-read: drop the cached tree + outline so the NEXT render proves the
+          // position from daemon-side metadata (the .then above never claims "Saved").
+          onWatched();
+          if (response.readbackAvailable === false) {
+            // The daemon's own metadata re-read failed: the write may have landed, nothing proves it.
+            clearMoveLatch("unverified");
+            return;
+          }
+          // Wait for the refreshed outline to settle match/mismatch — never "saving" forever.
+          moveDeadline.current = setTimeout(() => {
+            if (generation !== moveGeneration.current) return;
+            clearMoveLatch("unverified");
+          }, SECTION_MOVE_DEADLINE_MS);
+          return undefined;
+        })
+        .catch(() => {
+          if (generation !== moveGeneration.current) return;
+          clearMoveLatch("failed");
+          setSectionOffsets({});
+        });
+    },
+    [call, clearMoveLatch, fileKey, onWatched, page, sectionEditing],
+  );
 
   const selectNode = useCallback((nodeId: string | null) => {
     setSelectedNodeId(nodeId);
@@ -414,6 +552,10 @@ function FigmaFileScreenInner({ serverId, fileKey, version }: FigmaFileRef) {
             selectedNodeId={selectedNodeId}
             onSelectNode={selectNode}
             overrides={version ? HISTORY_NO_OVERRIDES : edits.overrides}
+            sectionEditing={sectionEditing}
+            sectionOffsets={sectionOffsets}
+            sectionMoveStatus={sectionMoveStatus}
+            onMoveSection={handleMoveSection}
           />
           {focusError ? (
             <View style={styles.canvasError} testID="figma-focus-error">

@@ -832,10 +832,11 @@ describe("CanvasView click select — no Fit flood (ADR-0039)", () => {
     // Screen (450, 450) maps to Figma (1100, 1100): inside BOTH summaries; the topmost (last
     // drawn) is the one whose tree has not landed.
     const camera: Camera = { zoom: 1, offsetX: -650, offsetY: -650 };
-    const fetchNodes = vi.fn(async (ids: readonly string[]): Promise<NodeBatch> =>
-      ids.includes("9:99")
-        ? new Promise<NodeBatch>(() => {}) // the occluder's batch is in flight, never lands
-        : { nodes: { "9:0": makeNode({ id: "9:0" }) }, components: {} },
+    const fetchNodes = vi.fn(
+      async (ids: readonly string[]): Promise<NodeBatch> =>
+        ids.includes("9:99")
+          ? new Promise<NodeBatch>(() => {}) // the occluder's batch is in flight, never lands
+          : { nodes: { "9:0": makeNode({ id: "9:0" }) }, components: {} },
     );
     const store = new FrameStore(fetchNodes);
     await store.load(["9:0"]); // only the LOWER root has a tree, loaded before mount
@@ -1108,12 +1109,22 @@ async function withPaintedViewer(
   }
 }
 
+// Helpers for the pending-ledger tests: a subtree fetch that never lands (module scope keeps
+// these out of the nested-callback limit) and an id filter for "which roots were requested".
+function neverLandingBatch(): Promise<NodeBatch> {
+  return new Promise(() => undefined);
+}
+
+function idsNamed(ids: string[], id: string): string[] {
+  return ids.filter((candidate) => candidate === id);
+}
+
 describe("CanvasView honest content status (spec 32.5.1)", () => {
   it("shows loading while a visible detail subtree is still in flight", async () => {
     platform.isWeb = true;
     await withPaintedViewer(
       () => {
-        const fetchNodes = vi.fn(async (): Promise<NodeBatch> => new Promise(() => undefined));
+        const fetchNodes = vi.fn(neverLandingBatch);
         const store = new FrameStore(fetchNodes);
         return {
           viewer: mountViewer({
@@ -1218,13 +1229,13 @@ describe("CanvasView honest content status (spec 32.5.1)", () => {
         await settleLoads();
         await settlePaint(2);
         expect(texts()).toContain(STATUS_FAILED);
-        expect(subtreeIds().filter((id) => id === "7:0")).toHaveLength(1);
+        expect(idsNamed(subtreeIds(), "7:0")).toHaveLength(1);
 
         // Tap the frame whose read confirmed missing: targeted retry of THAT root only.
         clickCanvas(100, 75); // center of 7:0 at (0,0,200,150), camera offset 0 zoom 1
         expect(assets.retryFailed).toHaveBeenCalled(); // failed asset attempts cleared too
         await settleLoads();
-        const retried = subtreeIds().filter((id) => id === "7:0");
+        const retried = idsNamed(subtreeIds(), "7:0");
         expect(retried).toHaveLength(2); // re-queued, despite the cached null verdict
         expect(selections).not.toHaveBeenCalled(); // a retry is not a selection
       },
@@ -1266,7 +1277,7 @@ describe("CanvasView honest content status (spec 32.5.1)", () => {
     const section = sectionFrame("40:1", 900, 600); // full-plan at zoom 1 → shallow expansion
     await withPaintedViewer(
       () => {
-        const fetchNodes = vi.fn(async (): Promise<NodeBatch> => new Promise(() => undefined));
+        const fetchNodes = vi.fn(neverLandingBatch);
         return {
           viewer: mountViewer({
             frames: [section],

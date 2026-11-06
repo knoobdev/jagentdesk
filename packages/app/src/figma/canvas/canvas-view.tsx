@@ -14,7 +14,7 @@ import {
   isSectionSummary,
   type SectionAwareSummary,
 } from "./section-outline";
-import { useFigmaAssets } from "./use-figma-assets";
+import { type FigmaAssets, useFigmaAssets } from "./use-figma-assets";
 import {
   beginSectionDrag,
   cancelSectionDrag,
@@ -29,8 +29,17 @@ import {
   STATUS_SAVING_MOVE,
   type SectionDrag,
   type SectionEditing,
+  type SectionMoveStatus,
   type SectionOffset,
 } from "./section-interaction";
+
+// One place maps the committed move's lifecycle onto its status line (a lookup, not a ternary
+// staircase — each state has exactly one honest string).
+const MOVE_STATUS_LINES: Record<Exclude<SectionMoveStatus, null>, string> = {
+  saving: STATUS_SAVING_MOVE,
+  failed: STATUS_MOVE_FAILED,
+  unverified: STATUS_MOVE_UNVERIFIED,
+};
 import {
   type Camera,
   type Point,
@@ -322,6 +331,7 @@ export function CanvasView(props: CanvasViewProps) {
   );
 
   // ── painting (web/Electron) ───────────────────────────────────────────────────────
+  // eslint-disable-next-line complexity
   const paint = useCallback(() => {
     if (!isWeb || typeof document === "undefined") return;
     const canvas = document.getElementById(CANVAS_ID) as HTMLCanvasElement | null;
@@ -435,14 +445,7 @@ export function CanvasView(props: CanvasViewProps) {
       // confirmed-missing roots, or a pure metadata overview waiting on a zoom. A Section
       // move owns the line while in flight, uncertain, or failed — and a selected Section on
       // a read-only surface shows "Connect editing" instead of a silent pendingSaved.
-      const moveText =
-        sectionMoveStatus === "saving"
-          ? STATUS_SAVING_MOVE
-          : sectionMoveStatus === "failed"
-            ? STATUS_MOVE_FAILED
-            : sectionMoveStatus === "unverified"
-              ? STATUS_MOVE_UNVERIFIED
-              : null;
+      const moveText = sectionMoveStatus ? MOVE_STATUS_LINES[sectionMoveStatus] : null;
       const editingText =
         selectedSection && sectionEditing && !sectionEditing.canEdit ? sectionEditing.notice : null;
       const statusText =
