@@ -757,7 +757,10 @@ function SectionRow({
   return (
     <View>
       <Pressable
-        style={[styles.row, { paddingLeft: outlineRowIndent(depth) }]}
+        style={[
+          selectedNodeId === section.id ? styles.rowActive : styles.row,
+          { paddingLeft: outlineRowIndent(depth) },
+        ]}
         onPress={press}
         accessibilityRole="button"
         disabled={childrenUnknown && !canReadNodeDepth}
@@ -958,12 +961,11 @@ function PagesAndLayers({
     [go, openRow],
   );
   const toggleSection = useCallback(
-    (_pageId: string, sectionId: string, wasExpanded: boolean) => {
-      // Expanding a section is tree navigation, not a canvas selection: the
-      // selected node stays where it was, only the row opens.
+    (pageId: string, sectionId: string, wasExpanded: boolean) => {
+      go({ pageId, nodeId: sectionId, focusCanvas: true });
       openRow(sectionId, wasExpanded);
     },
-    [openRow],
+    [go, openRow],
   );
   const selectNode = useCallback((nodeId: string) => go({ nodeId }), [go]);
   const changeSearch = useCallback((value: string) => setSearch(value), []);

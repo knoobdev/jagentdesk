@@ -1837,7 +1837,7 @@ describe("CanvasView SECTION select + drag (spec 32.6.2)", () => {
     viewer.unmount();
   });
 
-  it("a selected Section on a read-only surface says Connect editing and cannot drag", async () => {
+  it("viewing a Section does not request editing; a blocked drag explains access without a write", async () => {
     platform.isWeb = true;
     const { fetchNodes } = viewerFetcher();
     const moves = vi.fn();
@@ -1854,8 +1854,10 @@ describe("CanvasView SECTION select + drag (spec 32.6.2)", () => {
       }),
       async (texts) => {
         await settlePaint(2);
-        expect(texts()).toContain(CONNECT_EDITING_NOTICE);
+        expect(texts()).not.toContain(CONNECT_EDITING_NOTICE);
         dragCanvas({ x: 500, y: 8 }, { x: 560, y: 68 }, { steps: 4 });
+        await settlePaint(2);
+        expect(texts()).toContain(CONNECT_EDITING_NOTICE);
         expect(moves).not.toHaveBeenCalled(); // select/pan only: no write path engaged
       },
     );

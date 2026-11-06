@@ -408,7 +408,9 @@ export function useFigmaAssets(input: {
       },
       fontAvailable: (family, style) => fonts.fontAvailable(family, style),
       requestThumbnail: (nodeId, scale) => {
-        const cache = rasters.get(scale, "png", "crop");
+        // Previews are placed into summary layout bounds. A cropped export would stretch
+        // sparse text or transparent roots across their layout whitespace.
+        const cache = rasters.get(scale, "png", quality ? "absolute" : "crop");
         select(cache, nodeId);
         return toSource(cache.get(nodeId));
       },

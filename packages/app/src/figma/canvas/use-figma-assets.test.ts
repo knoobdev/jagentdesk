@@ -926,6 +926,35 @@ describe("useFigmaAssets ADR-0042 fidelity quality path", () => {
     vi.unstubAllGlobals();
   });
 
+  it("keeps section previews in absolute layout bounds so sparse text is not stretched", async () => {
+    serveRastersByFormat();
+    const { decodeImage } = captureDecode();
+    const assets = mount({
+      serverId: "s1",
+      fileKey: "f",
+      version: "v1",
+      fidelity: true,
+      decodeImage,
+    });
+    await act(async () => {
+      assets.beginDraw();
+      assets.requestThumbnail("1:1", 1);
+      assets.endDraw();
+      await settle();
+    });
+    const calls = callFigmaMock.mock.calls.filter(
+      (call) => call[1] === "figma.file.render.request",
+    );
+    expect(calls).toHaveLength(1);
+    expect(calls[0]![2]).toMatchObject({
+      ids: ["1:1"],
+      version: "v1",
+      scale: 1,
+      format: "png",
+      useAbsoluteBounds: true,
+    });
+  });
+
   it("routes known TEXT to svg@1@absolute and non-TEXT to the ceil(zoom·dpr) PNG rung, in separate batches", async () => {
     serveRastersByFormat();
     const { images, decodeImage } = captureDecode();

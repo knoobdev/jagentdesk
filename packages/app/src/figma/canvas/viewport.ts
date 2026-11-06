@@ -20,7 +20,9 @@ export const MIN_ZOOM = 0.02;
 export const MAX_ZOOM = 64;
 
 /** Below this zoom the canvas draws cached raster thumbnails instead of vectors. */
-export const THUMBNAIL_ZOOM = 0.15;
+// Section Fit commonly lands around 15–20%. Keep these frame previews rasterized instead
+// of loading every layer and missing-font glyph just to paint a ~200px-wide screen.
+export const THUMBNAIL_ZOOM = 0.25;
 
 export function clampZoom(zoom: number): number {
   if (!Number.isFinite(zoom)) return MIN_ZOOM;
