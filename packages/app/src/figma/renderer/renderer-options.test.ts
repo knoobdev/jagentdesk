@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest";
 import type { FigmaNode } from "@jagentdesk/protocol/figma/rpc-schemas";
 import { createFigmaRenderer } from "./index";
+import type { TextStyle } from "./node-props";
 import { RecordingContext } from "./__fixtures__/recording-context";
 import { defaultRenderOptions, loadNode } from "./renderer-fixtures.test";
 import type { FigmaRenderOptions } from "./types";
@@ -208,7 +209,8 @@ describe("drawn font descriptors", () => {
   // actual recorded font string, not just that the vector path drew at all.
   const drawnFontsFor = (styleName: string): string[] => {
     const node = loadNode("text-basic");
-    (node as { style: { fontStyle: string } }).style.fontStyle = styleName;
+    const style = node.style as TextStyle | undefined;
+    node.style = { ...style, fontStyle: styleName };
     const records = draw(node, { fontAvailable: () => true });
     const fonts = records.filter((r) => r[0] === "set:font").map((r) => String(r[1]));
     expect(fonts.length).toBeGreaterThan(0);
