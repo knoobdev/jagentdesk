@@ -6,6 +6,7 @@ import {
   emptyPlayerState,
   parseOverlayPosition,
   step,
+  visibleFrameIds,
   type PlayerContext,
   type PlayerState,
 } from "./state-machine";
@@ -187,10 +188,117 @@ describe("player state machine", () => {
     expect(scroll.effects).toEqual([{ kind: "scroll_to", frameId: "A", targetId: "n1" }]);
   });
 
-  it("arming a flow re-arms the frame's after-timeout", () => {
+  it("arrival clears the timer; frame_ready arms it once the data is on hand", () => {
     const timeout = timeoutCtx(2_000, navigate("Next"));
-    const state = step(emptyPlayerState(), { type: "start", frameId: "A" }, timeout).state;
-    expect(state.timeout).toEqual({ frameId: "A", delayMs: 2_000 });
+    const started = step(emptyPlayerState(), { type: "start", frameId: "A" }, timeout).state;
+    // ADR-0037: the AFTER_TIMEOUT must not start before the frame's data has arrived.
+    expect(started.timeout).toBeNull();
+    expect(started.timeoutResolved).toBe(false);
+
+    const armed = step(started, { type: "frame_ready", frameId: "A" }, timeout);
+    expect(armed.state.timeout).toEqual({ frameId: "A", delayMs: 2_000 });
+    expect(armed.state.timeoutResolved).toBe(true);
+
+    // Clock ticks and re-fetches replay the effect — a resolved visit never re-arms.
+    expect(step(armed.state, { type: "frame_ready", frameId: "A" }, timeout).state).toBe(
+      armed.state,
+    );
+  });
+
+  it("frame_ready resolves a frame without a timer exactly once", () => {
+    const context = ctx();
+    const started = step(emptyPlayerState(), { type: "start", frameId: "A" }, context).state;
+    const ready = step(started, { type: "frame_ready", frameId: "A" }, context);
+    expect(ready.state.timeout).toBeNull();
+    expect(ready.state.timeoutResolved).toBe(true);
+    expect(step(ready.state, { type: "frame_ready", frameId: "A" }, context).state).toBe(
+      ready.state,
+    );
+  });
+
+  it("frame_ready ignores a frame that is not on stage", () => {
+    const timeout = timeoutCtx(2_000, navigate("Next"));
+    const started = step(emptyPlayerState(), { type: "start", frameId: "A" }, timeout).state;
+    expect(step(started, { type: "frame_ready", frameId: "Z" }, timeout).state).toBe(started);
+  });
+
+  it("frame_ready waits through a transition; the target arms after completion", () => {
+    const onB = { delayMs: 500, action: navigate("C") };
+    const context = ctx({ afterTimeoutFor: (frameId) => (frameId === "B" ? onB : null) });
+    let state = step(emptyPlayerState(), { type: "start", frameId: "A" }, context).state;
+    state = step(
+      state,
+      {
+        type: "interaction",
+        action: {
+          kind: "navigate",
+          destinationId: "B",
+          transition: { type: "DISSOLVE", direction: null, durationMs: 300, easing: "LINEAR" },
+        },
+      },
+      context,
+    ).state;
+    expect(state.transition).not.toBeNull();
+    // Data landing mid-animation must not pre-arm, and must not fire behind the transition.
+    expect(step(state, { type: "frame_ready", frameId: "B" }, context).state).toBe(state);
+    state = step(state, { type: "transition_complete" }, context).state;
+    const armed = step(state, { type: "frame_ready", frameId: "B" }, context);
+    expect(armed.state.timeout).toEqual({ frameId: "B", delayMs: 500 });
+  });
+
+  it("re-entry re-arms the revisited frame's timer", () => {
+    const onA = { delayMs: 500, action: navigate("B") };
+    const context = ctx({ afterTimeoutFor: (frameId) => (frameId === "A" ? onA : null) });
+    let state = step(emptyPlayerState(), { type: "start", frameId: "A" }, context).state;
+    state = step(state, { type: "frame_ready", frameId: "A" }, context).state;
+    expect(state.timeout).not.toBeNull();
+    // Back on the same frame (stack of one) clears the fired timer; the next ready arms it again.
+    state = step(state, { type: "toolbar_back" }, context).state;
+    expect(state.timeout).toBeNull();
+    expect(state.timeoutResolved).toBe(false);
+    const rearmed = step(state, { type: "frame_ready", frameId: "A" }, context);
+    expect(rearmed.state.timeout).toEqual({ frameId: "A", delayMs: 500 });
+  });
+
+  it("restart clears the timer until the restarted frame reports ready", () => {
+    const timeout = timeoutCtx(2_000, navigate("Next"));
+    let state = step(emptyPlayerState(), { type: "start", frameId: "A" }, timeout).state;
+    state = step(state, { type: "frame_ready", frameId: "A" }, timeout).state;
+    state = step(state, { type: "toolbar_restart" }, timeout).state;
+    expect(state.timeout).toBeNull();
+    expect(state.timeoutResolved).toBe(false);
+    const armed = step(state, { type: "frame_ready", frameId: "A" }, timeout);
+    expect(armed.state.timeout).toEqual({ frameId: "A", delayMs: 2_000 });
+  });
+
+  it("visibleFrameIds covers the stage only — base, overlays, transition pair — not Back history", () => {
+    let state = step(emptyPlayerState(), { type: "start", frameId: "A" }, ctx()).state;
+    state = step(state, { type: "interaction", action: navigate("B") }, ctx()).state;
+    state = step(state, { type: "interaction", action: navigate("C") }, ctx()).state;
+    state = step(
+      state,
+      { type: "interaction", action: { kind: "overlay", destinationId: "S" } },
+      ctx(),
+    ).state;
+    expect(state.stack).toEqual(["A", "B", "C"]);
+    // A and B live only as ids in the Back stack; their trees are not observed.
+    expect(new Set(visibleFrameIds(state))).toEqual(new Set(["C", "S"]));
+
+    const withTransition = step(
+      state,
+      {
+        type: "interaction",
+        action: {
+          kind: "navigate",
+          destinationId: "D",
+          transition: { type: "PUSH", direction: "LEFT", durationMs: 200, easing: "LINEAR" },
+        },
+      },
+      ctx({ now: 9_000 }),
+    ).state;
+    // A NAVIGATE fired from the sheet transitions the sheet itself (currentFrameId is the top
+    // overlay), so the pair is S→D; C and the stack stay ids only.
+    expect(new Set(visibleFrameIds(withTransition))).toEqual(new Set(["D", "S"]));
   });
 
   it("timeout_fire applies the pending action and moves on", () => {
@@ -203,6 +311,8 @@ describe("player state machine", () => {
       },
     });
     let state = step(emptyPlayerState(), { type: "start", frameId: "A" }, context).state;
+    // The timer arms only once the frame's data is on hand (ADR-0037).
+    state = step(state, { type: "frame_ready", frameId: "A" }, context).state;
     const result = step(state, { type: "timeout_fire" }, context);
     fired = true;
     state = result.state;

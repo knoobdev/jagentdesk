@@ -78,7 +78,14 @@ const flows = [
 ];
 
 function lookup(overrides: Partial<FrameLookup> = {}): FrameLookup {
-  return { loading: false, error: null, nodeFor: () => null, ...overrides };
+  return {
+    loading: false,
+    error: null,
+    prototype: null,
+    retry: () => undefined,
+    nodeFor: () => null,
+    ...overrides,
+  };
 }
 
 interface StageProps {
@@ -91,7 +98,6 @@ interface StageProps {
   scrollRequest: null;
   renderHotspots: () => null;
   showHotspots: boolean;
-  loadingPrototype: boolean;
   flows: typeof flows;
   onStartFlow: (frameId: string) => void;
 }
@@ -108,7 +114,6 @@ function renderStage(overrides: Partial<StageProps> = {}) {
     scrollRequest: null,
     renderHotspots: () => null,
     showHotspots: true,
-    loadingPrototype: false,
     flows,
     onStartFlow,
     ...overrides,
@@ -146,14 +151,6 @@ describe("PlayerStage start states", () => {
     vi.stubGlobal("React", React);
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     document.body.innerHTML = "";
-  });
-
-  it("spins only while the prototype request is pending", () => {
-    const view = renderStage({ loadingPrototype: true });
-    expect(view.container.querySelector("[data-spinner]")).toBeTruthy();
-    expect(view.text()).not.toContain("Choose a flow");
-    expect(view.text()).not.toContain("No prototype flows");
-    view.unmount();
   });
 
   it("spins while frames load, never after", () => {

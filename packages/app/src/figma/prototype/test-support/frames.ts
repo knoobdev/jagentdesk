@@ -236,6 +236,27 @@ export function frameSummary(id: string, name: string, x = 0, y = 0): FigmaFrame
   return { id, name, type: "FRAME", bounds: { x, y, width: 375, height: 600 } };
 }
 
+/**
+ * Outline summary, including ADR-0039's flattened-section fields (`parentId`/`childrenLoaded`)
+ * which W5's protocol change adds; cast until then.
+ */
+export function summary(spec: {
+  id: string;
+  name: string;
+  type?: string;
+  parentId?: string;
+  childrenLoaded?: boolean;
+}): FigmaFrameSummary {
+  return {
+    id: spec.id,
+    name: spec.name,
+    type: spec.type ?? "FRAME",
+    bounds: { x: 0, y: 0, width: 375, height: 600 },
+    ...(spec.parentId !== undefined ? { parentId: spec.parentId } : {}),
+    ...(spec.childrenLoaded !== undefined ? { childrenLoaded: spec.childrenLoaded } : {}),
+  } as FigmaFrameSummary;
+}
+
 export function page(spec: Partial<FigmaPage> & { id: string; name: string }): FigmaPage {
   return { backgroundColor: undefined, frames: [], flowStartingPoints: [], ...spec };
 }
