@@ -84,7 +84,7 @@ describe("linear gradient parameterization (same-version sign-in proof)", () => 
 const OUTLINE_D = "M0 0H100V50H0Z";
 const RING_D = "M0 -1H100V1H0Z"; // Figma's own shape: the band spans -weight..+weight around the edge
 
-function bakedStrokeNode(align: string): FigmaNode {
+function bakedStrokeNode(align: string, rule: string = "NONZERO"): FigmaNode {
   return {
     id: "1:2",
     name: "baked",
@@ -94,7 +94,7 @@ function bakedStrokeNode(align: string): FigmaNode {
     strokes: [{ type: "SOLID", color: { r: 0.122, g: 0.31, b: 0.847, a: 1 } }],
     strokeWeight: 1,
     strokeAlign: align,
-    fillGeometry: [{ path: OUTLINE_D, windingRule: "NONZERO" }],
+    fillGeometry: [{ path: OUTLINE_D, windingRule: rule }],
     strokeGeometry: [{ path: RING_D, windingRule: "NONZERO" }],
   } as unknown as FigmaNode;
 }
@@ -119,14 +119,14 @@ describe("baked strokeGeometry honors strokeAlign (PNG4 border proof)", () => {
   });
 
   it("clips a baked OUTSIDE stroke to the complement of the outline", () => {
-    const ops = recordedOps(bakedStrokeNode("OUTSIDE"));
+    // Only an evenodd [rect, path] complement is exact (the "nonzero" complement keeps a
+    // same-winding shape inside the clip - real-pixel probe); a NONZERO fill OUTSIDE is a
+    // fallback branch, covered in the conservative-branches block below.
+    const ops = recordedOps(bakedStrokeNode("OUTSIDE", "EVENODD"));
     const fillIndex = ops.findIndex((op) => op[0] === "fill");
     const clip = ops.find((op, i) => i < fillIndex && op[0] === "clip");
     expect(clip, "baked OUTSIDE stroke must clip to the inverse of the node outline").toBeDefined();
-    // The complement must respect the OUTLINE's own winding rule (the fixture outline is
-    // NONZERO); silently treating every nonzero path as evenodd mis-evaluates complex
-    // geometry, so "nonzero" is the expected rule here.
-    expect((clip as unknown[])[2]).toBe("nonzero");
+    expect((clip as unknown[])[2]).toBe("evenodd");
   });
 
   it("leaves baked CENTER strokes unclipped", () => {
@@ -139,6 +139,7 @@ describe("baked strokeGeometry honors strokeAlign (PNG4 border proof)", () => {
 
 const RECT_A = "M0 0H40V30H0Z";
 const RECT_B = "M60 0H100V30H60Z"; // disjoint from RECT_A on the same 100x50 box
+const OVERLAP_B = "M20 10H60V40H20Z"; // overlaps RECT_A: merged clips must not be trusted
 const DONUT = "M60 0H100V50H60ZM70 10H90V40H70Z"; // hole subpath, evenodd
 
 function bakedWithOutlines(align: string, outlines: { path: string; rule: string }[]): FigmaNode {
@@ -162,79 +163,103 @@ function opsBeforeFill(ops: unknown[][], name: string): unknown[][] {
   return ops.slice(0, fillIndex).filter((op) => op[0] === name);
 }
 
-describe("baked align: union-safe and rule-respecting (root review)", () => {
-  it("unions disjoint INSIDE outlines into ONE clip — no lost stroke, no double alpha", () => {
-    // ctx.clip INTERSECTS, so looping per-outline clips over disjoint fillGeometry entries
-    // produced an empty clip region and erased the border entirely.
-    const ops = recordedOps(
-      bakedWithOutlines("INSIDE", [
-        { path: RECT_A, rule: "NONZERO" },
-        { path: RECT_B, rule: "NONZERO" },
-      ]),
-    );
-    const clips = opsBeforeFill(ops, "clip");
-    expect(clips, "disjoint same-rule outlines must clip once through a merged path").toHaveLength(
-      1,
-    );
-    const merged = clips[0][1] as { commands?: (string | number)[][] };
-    expect(merged.commands, "the single clip must carry BOTH outlines").toEqual(
-      expect.arrayContaining([
-        ["moveTo", 0, 0],
-        ["moveTo", 60, 0],
-      ]),
-    );
-    expect(
-      ops.filter((op) => op[0] === "fill"),
-      "the band fills exactly once",
-    ).toHaveLength(1);
+describe("conservative baked align branches (root review of bec3add92)", () => {
+  // The merged-clip "same-rule union" was PROVEN unsafe: merged evenodd islands XOR their
+  // overlap instead of unioning it, and same-rule nonzero cancels opposite-winding overlaps
+  // (winding 1 + −1 = 0). And [rect, path] clipped with "nonzero" keeps a same-winding shape
+  // INSIDE the clip (winding 2 ≠ 0), so it never complements it — only the evenodd inverse
+  // is exact. Headless real-pixel probes pin every one of these facts
+  // (w7-review-clipsemantics.mjs → evidence/render-quality/w7-review-clipsemantics.json);
+  // canvas-clip call shape alone cannot prove pixels. Unsupported branches therefore take
+  // the existing per-node raster fallback (no offscreen compositor was added).
+  it("multi-outline INSIDE routes to the raster fallback — same rule AND overlapping", () => {
+    // RECT_A ∩ OVERLAP_B ≠ ∅: merged evenodd would XOR the overlap away and merged nonzero
+    // could cancel it; neither is a union, so no vector band may survive here.
+    for (const rule of ["NONZERO", "EVENODD"] as const) {
+      for (const second of [RECT_B, OVERLAP_B]) {
+        const ops = recordedOps(
+          bakedWithOutlines("INSIDE", [
+            { path: RECT_A, rule },
+            { path: second, rule },
+          ]),
+        );
+        expect(
+          ops.some((op) => op[0] === "drawImage"),
+          `same-rule (${rule}) multi-outline INSIDE must reach the raster fallback`,
+        ).toBe(true);
+        expect(
+          ops.some((op) => op[0] === "fill"),
+          "no vector band fill survives the fallback route",
+        ).toBe(false);
+        expect(
+          ops.some((op) => op[0] === "clip"),
+          "no align clip is attempted",
+        ).toBe(false);
+      }
+    }
   });
 
-  it("keeps an evenodd hole excluded from the INSIDE clip (same-rule merged path)", () => {
-    const ops = recordedOps(bakedWithOutlines("INSIDE", [{ path: DONUT, rule: "EVENODD" }]));
-    const clips = opsBeforeFill(ops, "clip");
-    expect(clips).toHaveLength(1);
-    expect(clips[0][2]).toBe("evenodd");
-    expect(ops.filter((op) => op[0] === "fill")).toHaveLength(1);
+  it("OUTSIDE over a NONZERO fill falls back — the nonzero complement keeps the shape (probe)", () => {
+    const ops = recordedOps(bakedWithOutlines("OUTSIDE", [{ path: RECT_A, rule: "NONZERO" }]));
+    expect(ops.some((op) => op[0] === "drawImage")).toBe(true);
+    expect(ops.filter((op) => op[0] === "fill")).toHaveLength(0);
+    expect(ops.some((op) => op[0] === "clip")).toBe(false);
   });
 
-  it("routes MIXED-rule multi-outline INSIDE to the existing per-node fallback", () => {
-    // Neither clip rule can express region(nonzero RECT_A) ∪ region(evenodd DONUT), so the
-    // node must go through fallbackForNode — never a half-erased vector stroke.
-    const ops = recordedOps(
-      bakedWithOutlines("INSIDE", [
-        { path: RECT_A, rule: "NONZERO" },
-        { path: DONUT, rule: "EVENODD" },
-      ]),
-    );
-    expect(
-      ops.some((op) => op[0] === "drawImage"),
-      "mixed-rule align uses the raster fallback",
-    ).toBe(true);
-    expect(
-      ops.some((op) => op[0] === "fill"),
-      "no vector band fill survives the fallback route",
-    ).toBe(false);
-  });
-
-  it("OUTSIDE complements respect each outline's own winding rule (no silent evenodd)", () => {
-    const evenodd = recordedOps(bakedWithOutlines("OUTSIDE", [{ path: DONUT, rule: "EVENODD" }]));
-    expect(opsBeforeFill(evenodd, "clip")[0][2]).toBe("evenodd");
-    const nonzero = recordedOps(bakedWithOutlines("OUTSIDE", [{ path: RECT_A, rule: "NONZERO" }]));
-    expect(opsBeforeFill(nonzero, "clip")[0][2]).toBe("nonzero");
-  });
-
-  it("OUTSIDE multi-outline intersects complements per-outline, each under its own rule", () => {
-    // De Morgan: ∩ complement_i = complement of ∪, so per-outline inverse clips never erase
-    // disjoint geometry and no double alpha appears (the band still fills once).
+  it("mixed-rule OUTSIDE falls back as well", () => {
     const ops = recordedOps(
       bakedWithOutlines("OUTSIDE", [
         { path: RECT_A, rule: "NONZERO" },
         { path: DONUT, rule: "EVENODD" },
       ]),
     );
+    expect(ops.some((op) => op[0] === "drawImage")).toBe(true);
+    expect(ops.filter((op) => op[0] === "fill")).toHaveLength(0);
+  });
+
+  it("OUTSIDE over evenodd-only outlines keeps per-outline complements + intersect (De Morgan)", () => {
+    // ∩ complement_i = complement of ∪ — exact for ANY outlines when each complement is
+    // exact (evenodd inverse, proven by probe), and the band still fills exactly once.
+    const ops = recordedOps(
+      bakedWithOutlines("OUTSIDE", [
+        { path: DONUT, rule: "EVENODD" },
+        { path: OVERLAP_B, rule: "EVENODD" },
+      ]),
+    );
     const clips = opsBeforeFill(ops, "clip");
     expect(clips, "one inverse clip per outline").toHaveLength(2);
-    expect(clips.map((clip) => clip[2])).toEqual(["nonzero", "evenodd"]);
+    expect(clips.map((clip) => clip[2])).toEqual(["evenodd", "evenodd"]);
+    expect(
+      ops.filter((op) => op[0] === "fill"),
+      "single fill — no double alpha",
+    ).toHaveLength(1);
+    expect(
+      ops.some((op) => op[0] === "drawImage"),
+      "the proven-safe vector route wins when it exists",
+    ).toBe(false);
+  });
+
+  it("single evenodd-outline INSIDE clips natively under its own rule (hole stays excluded)", () => {
+    const ops = recordedOps(bakedWithOutlines("INSIDE", [{ path: DONUT, rule: "EVENODD" }]));
+    const clips = opsBeforeFill(ops, "clip");
+    expect(clips).toHaveLength(1);
+    expect(clips[0][2]).toBe("evenodd");
     expect(ops.filter((op) => op[0] === "fill")).toHaveLength(1);
+    expect(
+      ops.some((op) => op[0] === "drawImage"),
+      "safe branch, no fallback",
+    ).toBe(false);
+  });
+
+  it("fallback classification is reported through onMissing when no raster is available", () => {
+    let ids: string[] = [];
+    recordedOps(
+      bakedWithOutlines("INSIDE", [
+        { path: RECT_A, rule: "NONZERO" },
+        { path: DONUT, rule: "EVENODD" },
+      ]),
+      { fallbackForNode: () => null, onMissing: (missing) => (ids = missing.fallbackNodeIds) },
+    );
+    expect(ids, "W10 learns the id so the right asset can be queued").toContain("1:3");
   });
 });
