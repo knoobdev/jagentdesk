@@ -158,9 +158,9 @@ describe("Browse files (ADR-0038 primary add)", () => {
     pickFile.mockReturnValue(new Promise((resolve) => (resolvePick = resolve)));
     renderBrowse(<BrowseFilesRow serverId="s1" connectionId="c1" />);
     clickBrowse();
-    expect(screen.getByText("Opening Figma…")).toBeDefined();
+    expect(screen.getByText("Opening file browser…")).toBeDefined();
     act(() => resolvePick({ kind: "cancelled" }));
-    await waitFor(() => expect(screen.queryByText("Opening Figma…")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("Opening file browser…")).toBeNull());
   });
 
   it("drops a late pick after the row unmounted — no add, no navigation", async () => {
@@ -210,7 +210,7 @@ describe("Browse files (ADR-0038 primary add)", () => {
       </QueryClientProvider>,
     );
     clickBrowse();
-    expect(screen.getByText("Opening Figma…")).toBeDefined();
+    expect(screen.getByText("Opening file browser…")).toBeDefined();
     // Account/connection switch while the FIRST pick is still unresolved.
     view.rerender(
       <QueryClientProvider client={client}>
@@ -221,12 +221,12 @@ describe("Browse files (ADR-0038 primary add)", () => {
     await waitFor(() => expect(screen.getByText("Browse files")).toBeDefined());
     clickBrowse();
     // …and the fresh pick now owns the busy state.
-    expect(screen.getByText("Opening Figma…")).toBeDefined();
+    expect(screen.getByText("Opening file browser…")).toBeDefined();
     expect(pickFile).toHaveBeenCalledTimes(2);
     // The STALE completion lands: it must neither unlock the fresh busy state
     // nor add on the old context.
     act(() => resolveStale({ kind: "file", url: PICKED_URL }));
-    await waitFor(() => expect(screen.getByText("Opening Figma…")).toBeDefined());
+    await waitFor(() => expect(screen.getByText("Opening file browser…")).toBeDefined());
     expect(figmaRequest).not.toHaveBeenCalledWith(
       "figma.files.add.request",
       expect.objectContaining({ connectionId: "c1" }),

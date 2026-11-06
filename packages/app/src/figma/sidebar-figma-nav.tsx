@@ -54,8 +54,9 @@ import {
 // Pinned, Recent, and the files Figma Link reports open right now — plus added teams and their
 // projects; when a file is open, its pages and the layer tree of the selected frame, searchable
 // by name. Rows drive the Figma screen's route params. The primary add is Browse files
-// (ADR-0038, desktop only); the URL-paste rows sit under an explicit Advanced disclosure so a
-// bad paste parses client-side first and never leaves the column.
+// (ADR-0038, desktop only); the URL-paste rows and the optional Figma Link entry sit under an
+// explicit Advanced disclosure so the pick → view → play flow owns the surface and a bad paste
+// parses client-side first and never leaves the column.
 
 // Theme-reactive icons. `withUnistyles(Component, mappings)` keeps the color on the theme
 // (light + dark) without the `uniProps` prop, which leaks onto the DOM node on web and draws
@@ -1086,7 +1087,8 @@ function OpenInFigmaSection({ serverId }: { serverId: string }) {
 }
 
 // Everything under a CONNECTED account: the Browse-first Files section (URL
-// paste lives under the Advanced disclosure), Teams, and the Figma Link rows.
+// paste AND the optional Figma Link entry live under the Advanced disclosure),
+// Teams, and the "Open in Figma" rows.
 function ConnectedTree({
   serverId,
   connectionId,
@@ -1104,6 +1106,7 @@ function ConnectedTree({
   const teamList = useMemo(() => teams.data ?? [], [teams.data]);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const toggleAdvanced = useCallback(() => setAdvancedOpen((previous) => !previous), []);
+  const openLink = useCallback(() => go({ view: "link" }), [go]);
   return (
     <>
       <Text style={styles.sectionLabel}>Files</Text>
@@ -1190,6 +1193,18 @@ function ConnectedTree({
         <View testID="figma-nav-advanced-panel">
           <AddFileRow serverId={serverId} connectionId={connectionId} />
           <AddTeamRow serverId={serverId} connectionId={connectionId} />
+          {/* The legacy Link entry lives in Advanced: the primary flow is
+              pick → view → play, and Link is an optional integration, not a
+              step the connected empty state should compete with. */}
+          <Pressable
+            style={styles.row}
+            onPress={openLink}
+            accessibilityRole="button"
+            testID="figma-nav-link"
+          >
+            <ThemedExternalMuted size={13} />
+            <Text style={styles.rowLabel}>Figma Link…</Text>
+          </Pressable>
         </View>
       ) : null}
       <OpenInFigmaSection serverId={serverId} />
@@ -1206,7 +1221,6 @@ export function SidebarFigmaNav({ serverId }: { serverId: string }) {
     [list, location.connectionId],
   );
   const leave = useCallback(() => router.push("/"), []);
-  const openLink = useCallback(() => go({ view: "link" }), [go]);
   const openConnect = useCallback(() => go({ view: "connect" }), [go]);
   return (
     <View style={styles.root} testID="sidebar-figma-nav-panel">
@@ -1261,16 +1275,6 @@ export function SidebarFigmaNav({ serverId }: { serverId: string }) {
             go={go}
           />
         ) : null}
-
-        <Pressable
-          style={styles.row}
-          onPress={openLink}
-          accessibilityRole="button"
-          testID="figma-nav-link"
-        >
-          <ThemedExternalMuted size={13} />
-          <Text style={styles.rowLabel}>Figma Link…</Text>
-        </Pressable>
       </ScrollView>
     </View>
   );

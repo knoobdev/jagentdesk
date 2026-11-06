@@ -286,8 +286,12 @@ describe("SidebarFigmaNav — tracked files", () => {
     expect(screen.getByTestId("figma-nav-teams-empty").textContent).toContain("Advanced");
   });
 
-  it("keeps the explicit Figma Link row for the advanced integration view", () => {
+  it("keeps the optional Figma Link entry inside the Advanced disclosure", () => {
     renderNav();
+    // Pick → view → play owns the primary flow; Link is an advanced integration,
+    // not a top-level row competing with Browse files.
+    expect(screen.queryByTestId("figma-nav-link")).toBeNull();
+    fireEvent.click(screen.getByTestId("figma-nav-advanced"));
     fireEvent.click(screen.getByTestId("figma-nav-link"));
     expect(navState.go).toHaveBeenCalledWith({ view: "link" });
   });
