@@ -2228,9 +2228,11 @@ async function runUiPlaybackGates(
         `  DIAGNOSTIC player assets observation: ${extendedObservationMs}ms; failed gate unchanged`,
       );
       await delay(extendedObservationMs);
+      playerStage = await readPlayerStage();
       evidence.playerExtendedObservation = {
         ms: extendedObservationMs,
-        stage: await readPlayerStage(),
+        elapsedMs: Date.now() - stageStart,
+        stage: playerStage,
       };
       await page.screenshot({ path: path.join(artifactDir, "player-assets-observation.png") });
     }
