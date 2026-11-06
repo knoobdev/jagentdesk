@@ -65,6 +65,16 @@ interface FrameBounds {
   height: number;
 }
 
+/** Is a Figma-space point inside a root's real summary bounds? (Topmost pick, not culling.) */
+function containsPoint(bounds: FrameBounds, point: Point): boolean {
+  return (
+    point.x >= bounds.x &&
+    point.x <= bounds.x + bounds.width &&
+    point.y >= bounds.y &&
+    point.y <= bounds.y + bounds.height
+  );
+}
+
 const PAPER_COLOR = "#f5f5f5";
 const PLACEHOLDER_BORDER = "#9a9a9a";
 export const SELECTION_COLOR = "#0d99ff";
@@ -196,17 +206,27 @@ export function CanvasView(props: CanvasViewProps) {
         return;
       }
       const cursor = screenToFigma(cameraRef.current, point);
-      const candidates = framesInViewport(drawnRoots, cameraRef.current, size.width, size.height);
+      // Only the stack the cursor actually sits inside — NOT every viewport candidate. At Fit
+      // the candidate list is the whole file, and loading all of it on one click defeats the
+      // metadata LOD. Sections are chrome (never selectable here); frame roots under the cursor
+      // are hit-tested topmost-first against their loaded trees.
+      const candidates = framesInViewport(
+        drawnRoots,
+        cameraRef.current,
+        size.width,
+        size.height,
+      ).filter((frame) => !isSectionSummary(frame) && containsPoint(frame.bounds, cursor));
       for (let i = candidates.length - 1; i >= 0; i -= 1) {
         const frame = candidates[i];
-        // Flat child frame roots only: a SECTION is chrome, and its subtree is not loaded.
-        if (!frame || isSectionSummary(frame)) continue;
+        if (!frame) continue;
         const root = store.get(frame.id);
         if (!root) {
-          // The click is a detail demand: queue exactly this root (load dedups cached ids),
-          // so the next click on the same spot hit-tests against the real tree.
+          // The click is a detail demand for exactly ONE root: the topmost not-yet-loaded one,
+          // which occludes everything below it — hit-testing a loaded lower frame would report
+          // a selection the unknown root may cover. Queue it (load dedups cached/in-flight ids)
+          // and stop; the next click at this spot runs against the real tree once it lands.
           void store.load([frame.id]);
-          continue;
+          return;
         }
         const hit = renderer.hitTest(root, cursor);
         if (hit) {
@@ -250,10 +270,15 @@ export function CanvasView(props: CanvasViewProps) {
     const mode = lodMode(zoom);
     for (const frame of visible) {
       const plan = planRootLoad(frame.bounds, zoom);
+      // A SECTION is chrome in EVERY LOD: background and label from the summary only. Asking
+      // for its thumbnail would raster a whole huge container, and its subtree is never loaded.
+      if (isSectionSummary(frame)) {
+        drawSectionChrome(ctx, frame);
+        continue;
+      }
       if (plan === "metadata") {
         // Overview: factual summary data only — zero subtree requests, zero thumbnail rasters.
-        if (isSectionSummary(frame)) drawSectionChrome(ctx, frame);
-        else drawMetadataBox(ctx, frame);
+        drawMetadataBox(ctx, frame);
         continue;
       }
       if (mode === "thumbnail") {
@@ -267,10 +292,6 @@ export function CanvasView(props: CanvasViewProps) {
             frame.bounds.height,
           );
         else drawPlaceholder(ctx, frame.bounds, frame.name);
-        continue;
-      }
-      if (isSectionSummary(frame)) {
-        drawSectionChrome(ctx, frame);
         continue;
       }
       const node = store.get(frame.id);
@@ -402,7 +423,7 @@ export function CanvasView(props: CanvasViewProps) {
   );
 }
 
-const CANVAS_ID = "jagentdesk-figma-canvas";
+export const CANVAS_ID = "jagentdesk-figma-canvas";
 
 function drawPlaceholder(ctx: CanvasRenderingContext2D, bounds: FrameBounds, label: string): void {
   ctx.save();
@@ -567,7 +588,12 @@ export function NativeCanvasLayer(props: {
       setRasters((current) => (Object.keys(current).length === 0 ? current : {}));
     }
     const detailIds = visible
-      .filter((frame) => planRootLoad(frame.bounds, camera.zoom) !== "metadata")
+      // Sections are chrome in every LOD (and overview defers their children): a raster of a
+      // whole huge container is never worth requesting. Only detail-worthy frame roots get tiles.
+      .filter(
+        (frame) =>
+          !isSectionSummary(frame) && planRootLoad(frame.bounds, camera.zoom) !== "metadata",
+      )
       .map((frame) => frame.id);
     visibleIdsRef.current = detailIds;
     if (!client) return;
@@ -663,7 +689,11 @@ export function NativeCanvasLayer(props: {
         const touch = event.nativeEvent.changedTouches[0];
         if (!touch) return;
         const current = cameraRef.current;
+        // Frame-level selection goes through the flat frame roots: a SECTION covers its whole
+        // area and sits earlier in the list, so matching it first made frames inside a Section
+        // untappable on mobile.
         const frame = visible.find((candidate) => {
+          if (isSectionSummary(candidate)) return false;
           const corner = figmaToScreen(current, { x: candidate.bounds.x, y: candidate.bounds.y });
           return (
             touch.pageX >= corner.x &&
