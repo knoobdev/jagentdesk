@@ -374,6 +374,7 @@ export function CanvasView(props: CanvasViewProps) {
         // A mounted canvas is not a ready canvas (spec 32.5.1): with the outline still on its
         // way — or absent — the paper alone looks like an empty design, so state the wait.
         if (size.width > 0) drawStatusLine(ctx, size.width, size.height, dpr, STATUS_LOADING);
+        applyCanvasReadiness(canvas, STATUS_LOADING, true);
         return;
       }
       if (size.width === 0) return;
@@ -471,9 +472,10 @@ export function CanvasView(props: CanvasViewProps) {
       const moveText = sectionMoveStatus ? MOVE_STATUS_LINES[sectionMoveStatus] : null;
       const editingText =
         selectedSection && sectionEditing && !sectionEditing.canEdit ? sectionEditing.notice : null;
-      const statusText =
-        moveText ?? editingText ?? canvasStatusText(contentLedger(visible, store, zoom, assets));
+      const ledger = contentLedger(visible, store, zoom, assets);
+      const statusText = moveText ?? editingText ?? canvasStatusText(ledger);
       if (statusText) drawStatusLine(ctx, size.width, size.height, dpr, statusText);
+      applyCanvasReadiness(canvas, statusText, ledger.pending);
     } finally {
       assets.endDraw();
     }
@@ -519,6 +521,10 @@ export function CanvasView(props: CanvasViewProps) {
     canvas.style.height = "100%";
     canvas.style.touchAction = "none";
     canvas.style.cursor = "default";
+    // Before the first paint there is no truth to announce, and nothing to announce is not
+    // "ready" (spec 32.5.1): start busy, stating the same wait line the empty paint will show.
+    canvas.setAttribute("aria-busy", "true");
+    canvas.setAttribute("aria-label", STATUS_LOADING);
     host.appendChild(canvas);
     const cursorOf = (event: MouseEvent | PointerEvent): Point => {
       const rect = canvas.getBoundingClientRect();
@@ -802,6 +808,36 @@ export function canvasStatusText(ledger: ContentLedger): string | null {
   if (ledger.failed) return STATUS_FAILED;
   if (ledger.metadataOnlyOverview) return STATUS_ZOOM_HINT;
   return null;
+}
+
+/** The assistive-tech name of a content-ready canvas (spec 32.5.1); every OTHER state announces
+ *  the exact line painted, so this label — like the visible line — never fires on mount or on a
+ *  metadata-only overview. */
+export const CANVAS_READY_LABEL = "Figma design canvas";
+
+/**
+ * Assistive-tech readiness (spec 32.5.1): the web canvas element announces what the frame
+ * actually shows, decided from the SAME ledger as the visible status line — never a fabricated
+ * mount-time ready. Content complete: a labelled image. Loading/failure/overview (and the
+ * move/edit notices that own the line while in flight): the exact displayed text, so screen
+ * readers hear what sighted users read. `aria-busy` rides the ledger's pending bit only — a
+ * terminal failure is not "still loading". Set imperatively at paint: no React state, no extra
+ * repaints, native (no DOM) untouched.
+ */
+function applyCanvasReadiness(
+  canvas: HTMLCanvasElement,
+  statusText: string | null,
+  pending: boolean,
+): void {
+  if (statusText) {
+    canvas.removeAttribute("role");
+    canvas.setAttribute("aria-label", statusText);
+  } else {
+    canvas.setAttribute("role", "img");
+    canvas.setAttribute("aria-label", CANVAS_READY_LABEL);
+  }
+  if (pending) canvas.setAttribute("aria-busy", "true");
+  else canvas.removeAttribute("aria-busy");
 }
 
 function drawStatusLine(

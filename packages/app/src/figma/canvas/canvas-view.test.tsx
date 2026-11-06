@@ -14,6 +14,7 @@ import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import { makeFrameSummary, makeNode } from "./__fixtures__/figma";
 import {
   CANVAS_ID,
+  CANVAS_READY_LABEL,
   CanvasView,
   MAX_RASTER_TILES,
   NativeCanvasLayer,
@@ -1368,6 +1369,212 @@ describe("CanvasView honest content status (spec 32.5.1)", () => {
       async (texts) => {
         await settlePaint(2);
         expect(texts()).toContain(STATUS_LOADING);
+      },
+    );
+  });
+});
+
+// ── assistive-tech readiness (spec 32.5.1) ──────────────────────────────────────────
+// The SAME honest ledger that paints the visible status line must land on the DOM element:
+// role img + the "Figma design canvas" name ONLY when the viewport content is complete;
+// loading/failure/overview announce the EXACT displayed text; aria-busy iff content pending.
+// No test markers, no data injection: these are real DOM attributes read off the canvas node.
+
+/** The canvas element's current a11y attributes — module scope keeps the it-callbacks shallow. */
+function canvasReadiness(): { role: string | null; label: string | null; busy: string | null } {
+  const canvas = document.getElementById(CANVAS_ID) as HTMLCanvasElement | null;
+  expect(canvas).toBeTruthy();
+  const target = canvas as HTMLCanvasElement;
+  return {
+    role: target.getAttribute("role"),
+    label: target.getAttribute("aria-label"),
+    busy: target.getAttribute("aria-busy"),
+  };
+}
+
+describe("CanvasView assistive-tech readiness (spec 32.5.1)", () => {
+  it("a canvas created before its first paint is busy and states the wait — never a mount-time ready", async () => {
+    platform.isWeb = true;
+    await withPaintedViewer(
+      () => {
+        const { fetchNodes } = viewerFetcher(); // content will resolve — readiness still starts busy
+        return {
+          viewer: mountViewer({
+            frames: framesGrid(3),
+            camera: { zoom: 1, offsetX: 0, offsetY: 0 },
+            store: new FrameStore(fetchNodes),
+          }),
+        };
+      },
+      () => {
+        // No settlePaint: this is the pre-first-paint state the create effect established.
+        expect(canvasReadiness()).toEqual({ role: null, label: STATUS_LOADING, busy: "true" });
+      },
+    );
+  });
+
+  it("a pending subtree and a pending asset both announce the loading line and aria-busy", async () => {
+    platform.isWeb = true;
+    assets.state.pending = 2; // undelivered raster/font attempts — the ledger's asset side
+    await withPaintedViewer(
+      () => {
+        const fetchNodes = vi.fn(neverLandingBatch); // queued/inflight subtree — the store side
+        return {
+          viewer: mountViewer({
+            frames: framesGrid(3),
+            camera: { zoom: 1, offsetX: 0, offsetY: 0 },
+            store: new FrameStore(fetchNodes),
+          }),
+        };
+      },
+      async (texts) => {
+        await settleLoads();
+        await settlePaint(2);
+        expect(texts()).toContain(STATUS_LOADING); // the visible line
+        expect(canvasReadiness()).toEqual({ role: null, label: STATUS_LOADING, busy: "true" }); // same truth, on the DOM
+      },
+    );
+  });
+
+  it("a resolved draw flips the element to a labelled image and drops aria-busy", async () => {
+    platform.isWeb = true;
+    await withPaintedViewer(
+      () => {
+        const { fetchNodes } = viewerFetcher(); // resolves every root; assets stay clean
+        return {
+          viewer: mountViewer({
+            frames: framesGrid(3),
+            camera: { zoom: 1, offsetX: 0, offsetY: 0 },
+            store: new FrameStore(fetchNodes),
+          }),
+        };
+      },
+      async (texts) => {
+        expect(canvasReadiness().busy).toBe("true"); // busy before any paint (create effect)
+        await settleLoads();
+        await settlePaint(2);
+        expect(texts()).not.toContain(STATUS_LOADING);
+        expect(texts()).not.toContain(STATUS_FAILED);
+        expect(canvasReadiness()).toEqual({
+          role: "img",
+          label: CANVAS_READY_LABEL,
+          busy: null, // iff pending — ready content carries no busy flag at all
+        });
+      },
+    );
+  });
+
+  it("failed content announces the failure line, and a failure is not 'busy'", async () => {
+    platform.isWeb = true;
+    assets.state.failed = 1; // terminal attempts, nothing pending
+    await withPaintedViewer(
+      () => {
+        const { fetchNodes } = viewerFetcher();
+        return {
+          viewer: mountViewer({
+            frames: framesGrid(3),
+            camera: { zoom: 1, offsetX: 0, offsetY: 0 },
+            store: new FrameStore(fetchNodes),
+          }),
+        };
+      },
+      async (texts) => {
+        await settleLoads();
+        await settlePaint(2);
+        expect(texts()).toContain(STATUS_FAILED);
+        expect(canvasReadiness()).toEqual({ role: null, label: STATUS_FAILED, busy: null });
+      },
+    );
+  });
+
+  it("a confirmed-missing root reads as failed on the element too, never a fake ready", async () => {
+    platform.isWeb = true;
+    const { fetchNodes } = viewerFetcher(() => null); // cached-null roots: failure, not pending
+    await withPaintedViewer(
+      () => ({
+        viewer: mountViewer({
+          frames: framesGrid(3),
+          camera: { zoom: 1, offsetX: 0, offsetY: 0 },
+          store: new FrameStore(fetchNodes),
+        }),
+      }),
+      async (texts) => {
+        await settleLoads();
+        await settlePaint(2);
+        expect(texts()).toContain(STATUS_FAILED);
+        const a11y = canvasReadiness();
+        expect(a11y.label).toBe(STATUS_FAILED);
+        expect(a11y.role).toBeNull();
+        expect(a11y.busy).toBeNull();
+      },
+    );
+  });
+
+  it("a metadata-only overview announces the zoom hint, not the image name", async () => {
+    platform.isWeb = true;
+    const frames = [makeFrameSummary("9:1", 0, 0, 300, 225)]; // 30px at zoom 0.1: metadata plan
+    await withPaintedViewer(
+      () => {
+        const { fetchNodes } = viewerFetcher();
+        return {
+          viewer: mountViewer({
+            frames,
+            camera: { zoom: 0.1, offsetX: 0, offsetY: 0 },
+            store: new FrameStore(fetchNodes),
+          }),
+        };
+      },
+      async (texts) => {
+        await settleLoads();
+        await settlePaint(2);
+        expect(texts()).toContain(STATUS_ZOOM_HINT);
+        // "No ready label for placeholder or metadata-only" (spec): not an image yet.
+        expect(canvasReadiness()).toEqual({ role: null, label: STATUS_ZOOM_HINT, busy: null });
+      },
+    );
+  });
+
+  it("the store-less early return keeps the element busy and stating the wait", async () => {
+    platform.isWeb = true;
+    await withPaintedViewer(
+      () => ({
+        viewer: mountViewer({
+          frames: framesGrid(1),
+          camera: { zoom: 1, offsetX: 0, offsetY: 0 },
+          store: null,
+        }),
+      }),
+      async () => {
+        await settlePaint(2);
+        expect(canvasReadiness()).toEqual({ role: null, label: STATUS_LOADING, busy: "true" });
+      },
+    );
+  });
+
+  it("move notices keep owning the line for assistive tech, with busy from the real ledger", async () => {
+    platform.isWeb = true;
+    assets.state.pending = 1; // a move that coincides with undelivered content stays busy
+    await withPaintedViewer(
+      () => {
+        const { fetchNodes } = viewerFetcher();
+        return {
+          viewer: mountViewer({
+            frames: framesGrid(3),
+            camera: { zoom: 1, offsetX: 0, offsetY: 0 },
+            store: new FrameStore(fetchNodes),
+            sectionMoveStatus: "saving",
+          }),
+        };
+      },
+      async (texts) => {
+        await settleLoads();
+        await settlePaint(2);
+        expect(texts()).toContain(STATUS_SAVING_MOVE); // the visible notice is untouched
+        expect(canvasReadiness()).toEqual({
+          role: null,
+          label: STATUS_SAVING_MOVE, // assistive tech hears exactly what is displayed
+          busy: "true", // iff content pending — independent of which line owns the label
+        });
       },
     );
   });
