@@ -37,7 +37,7 @@ export function childSummaries(section: FigmaNode): SectionAwareSummary[] {
       bounds,
       parentId: section.id,
     };
-    if (isSectionSummary(child)) summary.childrenLoaded = false;
+    if (child.type === "SECTION") summary.childrenLoaded = false;
     summaries.push(summary);
   }
   return summaries;
