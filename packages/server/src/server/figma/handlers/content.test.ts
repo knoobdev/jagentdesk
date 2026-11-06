@@ -1725,6 +1725,116 @@ describe("watches", () => {
     expect(fixture.api.pushes).toHaveLength(0);
     expect(missing.watchId).toHaveLength(36);
   });
+
+  it("primes the memo from a successful unchanged poll so the next read reuses it", async () => {
+    // 32.8 fresh-60 s memo: the poll's meta answer is authoritative for the memo window too.
+    // Pre-fix it returned on the unchanged version WITHOUT priming, so a content read a beat
+    // after the tick re-GETed /meta.
+    respondFile();
+    await fixture.handlers["figma.file.outline.request"](
+      { requestId: "r1", type: "figma.file.outline.request", fileKey: FILE },
+      fixture.api.ctx,
+      SESSION,
+    ); // meta #1: initial live resolve, primes memo at T0
+    const { watchId } = await watch(FILE); // registration baseline: v1 (known from the outline)
+    expect(watchId).toHaveLength(36);
+    fixture.api.setNow(fixture.api.now() + 60_000); // the T0 memo is now past its 60 s TTL
+    await vi.advanceTimersByTimeAsync(60_000); // poll #2: unchanged v1 → silent, but primes memo
+    expect(changed()).toHaveLength(0);
+
+    const { outline } = await fixture.handlers["figma.file.outline.request"](
+      { requestId: "r2", type: "figma.file.outline.request", fileKey: FILE },
+      fixture.api.ctx,
+      SESSION,
+    );
+    expect(outline!.version).toBe("v1");
+    // No third meta: the read rode the memo the poll just refreshed (pre-fix: 3 — the poll
+    // left the expired memo expired, so the read re-GETed /meta).
+    expect(fixture.api.rest.callsTo(`/v1/files/${FILE}/meta`)).toHaveLength(2);
+  });
+
+  it("discards a poll answer that raced a remote-write readback instead of rolling it back", async () => {
+    respondFile();
+    await fixture.handlers["figma.file.outline.request"](
+      { requestId: "r1", type: "figma.file.outline.request", fileKey: FILE },
+      fixture.api.ctx,
+      SESSION,
+    ); // primes live memo v1
+    const { watchId } = await watch(FILE); // baseline v1
+
+    // Begin a poll whose Tier-3 answer stays in flight: the send is recorded, but resolution
+    // waits on a manual gate (the fake returns structuredClone() of a Promise, so the
+    // deferral lives on getJson, not in the responder).
+    const rest = fixture.api.rest;
+    const originalGetJson = rest.getJson.bind(rest);
+    let releaseMeta!: (value: unknown) => void;
+    let armed = true;
+    rest.getJson = (async (input: Parameters<typeof originalGetJson>[0]) => {
+      if (armed && input.path === `/v1/files/${FILE}/meta`) {
+        armed = false;
+        await originalGetJson(input); // records the send; the answer arrives only via the gate
+        return await new Promise((resolve) => {
+          releaseMeta = resolve;
+        });
+      }
+      return originalGetJson(input);
+    }) as typeof rest.getJson;
+
+    await vi.advanceTimersByTimeAsync(60_000); // poll #2 begins, GET outstanding (in flight)
+
+    // ADR-0040: a confirmed write readback lands while the poll GET is still outstanding.
+    fixture.content.watches.remoteWriteApplied(fixture.api.ctx, FILE, "v2");
+    releaseMeta(metaJson("v1")); // the stale pre-v2 answer finally arrives
+    await vi.advanceTimersByTimeAsync(0);
+
+    // The remote force push is unchanged, and the old v1 poll answer pushed nothing of its own
+    // (pre-fix: the stale v1 rolled baseline/memo back and emitted a second figma.file.changed).
+    expect(changed()).toEqual([
+      { type: "figma.file.changed", watchId, fileKey: FILE, version: "v2", source: "rest" },
+    ]);
+
+    // Neither the memo nor the baseline rolled back to the stale v1: the next live read serves
+    // the confirmed v2 without re-resolving, and a following unchanged poll is silent.
+    fixture.api.rest.respond(`/v1/files/${FILE}`, ({ query }) => fileJson(String(query.version)));
+    const { outline } = await fixture.handlers["figma.file.outline.request"](
+      { requestId: "r2", type: "figma.file.outline.request", fileKey: FILE },
+      fixture.api.ctx,
+      SESSION,
+    );
+    expect(outline!.version).toBe("v2");
+    expect(outline!.source).toBe("rest");
+    expect(fixture.api.rest.callsTo(`/v1/files/${FILE}/meta`)).toHaveLength(2); // init + raced poll
+    fixture.api.rest.respond(`/v1/files/${FILE}/meta`, metaJson("v2"));
+    await vi.advanceTimersByTimeAsync(60_000); // v2 == baseline → silent
+    expect(changed()).toHaveLength(1);
+    rest.getJson = originalGetJson;
+  });
+
+  it("does not promote a pinned historical outline version into the live memo", async () => {
+    // 32.1: a pinned read is an immutable snapshot — promoting its version would poison the
+    // live memo (current v2) with history (v1). Only live reads or verified fresh meta promote.
+    fixture.api.rest.respond(`/v1/files/${FILE}/meta`, metaJson("v2")); // current is v2
+    fixture.api.rest.respond(`/v1/files/${FILE}`, ({ query }) => fileJson(String(query.version)));
+    const historical = await fixture.handlers["figma.file.outline.request"](
+      { requestId: "r1", type: "figma.file.outline.request", fileKey: FILE, version: "v1" },
+      fixture.api.ctx,
+      SESSION,
+    );
+    expect(historical.outline!.version).toBe("v1");
+
+    const live = await fixture.handlers["figma.file.outline.request"](
+      { requestId: "r2", type: "figma.file.outline.request", fileKey: FILE },
+      fixture.api.ctx,
+      SESSION,
+    );
+    expect(live.outline!.version).toBe("v2");
+    // The fresh live read resolved through Tier-3 meta — not through a history pin (pre-fix:
+    // zero meta calls and a v1 answer, the memo poisoned by the historical read).
+    expect(fixture.api.rest.callsTo(`/v1/files/${FILE}/meta`)).toHaveLength(1);
+    expect(
+      fixture.api.rest.callsTo(`/v1/files/${FILE}`).map((call) => String(call.query.version)),
+    ).toEqual(["v1", "v2"]);
+  });
 });
 
 // ── ADR-0039: section-aware outline + depth-1 metadata read ──────────────────

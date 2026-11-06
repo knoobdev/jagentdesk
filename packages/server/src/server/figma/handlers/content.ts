@@ -892,6 +892,9 @@ interface FilePoller {
   timer: ReturnType<typeof setInterval>;
   baseline: string | null;
   inFlight: boolean;
+  // Bumped by authoritative updates (remote-write readback, ADR-0040) while a Tier-3 poll GET
+  // is in flight; a poll whose generation moved must discard its now-stale answer.
+  generation: number;
 }
 
 export class FigmaFileWatches {
@@ -942,7 +945,12 @@ export class FigmaFileWatches {
     if (this.pollers.has(fileKey)) return;
     const timer = setInterval(() => void this.poll(fileKey), this.intervalMs);
     timer.unref?.();
-    this.pollers.set(fileKey, { timer, baseline: this.versions.peek(fileKey), inFlight: false });
+    this.pollers.set(fileKey, {
+      timer,
+      baseline: this.versions.peek(fileKey),
+      inFlight: false,
+      generation: 0,
+    });
   }
 
   private stopPoller(fileKey: string): void {
@@ -960,10 +968,16 @@ export class FigmaFileWatches {
    */
   remoteWriteApplied(ctx: FigmaContext, fileKey: string, version: string | null): void {
     this.versions.invalidate(fileKey);
+    const poller = this.pollers.get(fileKey);
+    if (poller) {
+      // This readback (or forced refresh) now owns the truth: any poll whose Tier-3 GET began
+      // earlier carries a stale answer and must not roll back the memo, the baseline, or push
+      // an old version over this one.
+      poller.generation += 1;
+      if (version) poller.baseline = version;
+    }
     if (version) {
       this.versions.prime(ctx, fileKey, version);
-      const poller = this.pollers.get(fileKey);
-      if (poller) poller.baseline = version;
     }
     this.pushChanged(ctx, fileKey, version ?? "", "rest");
   }
@@ -975,6 +989,7 @@ export class FigmaFileWatches {
     // A linked file reports its own changes through the plugin; spend no Tier-3 budget on it.
     if (ctx.link.isLinked(fileKey)) return;
     poller.inFlight = true;
+    const generation = poller.generation;
     try {
       const file = await ctx.store.getFile(fileKey);
       if (!file) return;
@@ -985,18 +1000,24 @@ export class FigmaFileWatches {
       });
       const version = metaVersion(meta);
       if (!version) return;
-      // A watch registered BEFORE the first outline captured a null baseline; the outline has
-      // since primed the current version, so comparing only against the stale registration
-      // baseline made the first unchanged poll push and dump the client's whole FrameStore and
-      // assets. Fall back to the known version when the registration baseline is absent; a
-      // genuinely unknown version (nothing primed) keeps the historical first-poll push.
-      if (poller.baseline === null) {
-        const known = this.versions.peek(fileKey);
-        if (known !== null) poller.baseline = known;
-      }
-      if (version === poller.baseline) return;
-      poller.baseline = version;
+      // An authoritative update (remote-write readback / forced refresh, ADR-0040) landed
+      // while this Tier-3 GET was in flight: the memo, the baseline and the watchers already
+      // own the newer truth, so discard this stale answer instead of rolling them back or
+      // pushing an old version. A stopped-then-restarted poller fails the identity check too.
+      if (this.pollers.get(fileKey) !== poller || poller.generation !== generation) return;
+      // Compare BEFORE re-memoizing. A watch registered before the first outline captured a
+      // null baseline; the outline has since primed the current version, so the comparison
+      // falls back to that known answer — an unchanged file must not push and dump the
+      // client's whole FrameStore and assets. A genuinely unknown version (nothing primed)
+      // keeps the historical first-poll push.
+      const known = poller.baseline ?? this.versions.peek(fileKey);
+      // Every fresh successful poll answer is authoritative for the memo window too: prime it
+      // so a content read right after this tick reuses the version instead of re-GETing
+      // /meta. Same-version polls stay silent; the 60 s TTL and one-send-per-interval budget
+      // semantics are unchanged.
       this.versions.prime(ctx, fileKey, version);
+      poller.baseline = version;
+      if (version === known) return;
       this.pushChanged(ctx, fileKey, version, "rest");
     } catch (error) {
       ctx.logger.info(
@@ -1207,7 +1228,11 @@ export class FigmaContent {
       tier: "1",
     });
     const outline = outlineFromRest(json, file.fileKey, pinned);
-    this.versions.prime(ctx, file.fileKey, outline.version);
+    // A pinned read is an immutable historical snapshot (32.1) — promoting its version into
+    // the live memo would poison current v2 with history v1. Only a live (unversioned) read
+    // may promote here; fresh verified meta answers prime through their own seams (watch
+    // poll, files.add), and an unresolved live read goes through current() → Tier-3 meta.
+    if (version === undefined) this.versions.prime(ctx, file.fileKey, outline.version);
     await ctx.cache.putJson(key, wrap(outline));
     return { outline };
   }
