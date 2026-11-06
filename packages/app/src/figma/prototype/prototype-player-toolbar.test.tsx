@@ -35,11 +35,12 @@ vi.mock("@/runtime/host-runtime", () => ({ useHostRuntimeClient: () => null }));
 vi.mock("@/data/query", () => ({ useFetchQuery: () => ({ data: undefined }) }));
 vi.mock("@/utils/open-external-url", () => ({ openExternalUrl: vi.fn() }));
 vi.mock("@/components/ui/button", () => ({
-  Button: ({ children, onPress, disabled }: Record<string, unknown>) =>
+  Button: ({ children, onPress, disabled, testID }: Record<string, unknown>) =>
     React.createElement(
       "button",
       {
         type: "button",
+        "data-testid": (testID as string | undefined) ?? undefined,
         onClick: () => (disabled ? undefined : (onPress as () => void)?.()),
       },
       children as React.ReactNode,
@@ -83,7 +84,10 @@ const flows = [
   { nodeId: "3:1", name: "Checkout", pageId: "p1" },
 ];
 
-function renderToolbar(player: { startFrameId: string | null }) {
+function renderToolbar(
+  player: { startFrameId: string | null },
+  options?: { overlayNote?: string | null; startNote?: string | null; onClose?: () => void },
+) {
   const container = document.createElement("div");
   document.body.appendChild(container);
   let root: ReturnType<typeof createRoot>;
@@ -100,13 +104,14 @@ function renderToolbar(player: { startFrameId: string | null }) {
         onBack={vi.fn()}
         onRestart={vi.fn()}
         onToggleHotspots={vi.fn()}
-        onClose={vi.fn()}
-        overlayNote={null}
-        startNote={null}
+        onClose={options?.onClose ?? vi.fn()}
+        overlayNote={options?.overlayNote ?? null}
+        startNote={options?.startNote ?? null}
       />,
     );
   });
   return {
+    container,
     label: () => container.querySelector('[data-testid="figma-flow-trigger"]')?.textContent ?? "",
     unmount: () => {
       act(() => {
@@ -172,6 +177,33 @@ describe("PlayerToolbar flow label", () => {
     expect(state.startFrameId).toBe("2:1");
     const view = renderToolbar({ startFrameId: state.startFrameId });
     expect(view.label()).toContain("Shopping");
+    view.unmount();
+  });
+
+  // Real-Electron run 12: with a long flow name plus notes ahead of it in an unwrapped row, the
+  // Close button overflowed the player's container and the Inspect panel intercepted its click.
+  // The controls now live under stable testIDs the actual UI test can target — the container for
+  // geometry and Close as a real, pressable control (layout itself is hit-tested in Electron at
+  // narrow desktop and phone widths, not mirrored here).
+  it("exposes the toolbar container and a pressable Close under their testIDs, even with notes shown", () => {
+    const onClose = vi.fn();
+    const view = renderToolbar(
+      { startFrameId: "2:1" },
+      {
+        overlayNote: "Overlay positioning unavailable in this snapshot",
+        startNote: "This frame starts no flow; opening it directly skips the flow entry point.",
+        onClose,
+      },
+    );
+    expect(view.container.querySelector('[data-testid="figma-prototype-toolbar"]')).toBeTruthy();
+    const close = view.container.querySelector(
+      '[data-testid="figma-prototype-close"]',
+    ) as HTMLElement | null;
+    expect(close).toBeTruthy();
+    act(() => {
+      close!.click();
+    });
+    expect(onClose).toHaveBeenCalledTimes(1);
     view.unmount();
   });
 });

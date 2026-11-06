@@ -30,112 +30,140 @@ export function parseSvgPath(d: string): PathCommand[] {
   let i = 0;
   let cmd = "";
   let implicit = "";
-  const read = (n: number): number[] => {
-    const out: number[] = [];
-    for (let k = 0; k < n; k++) out.push(tokens[i++] as number);
-    return out;
-  };
 
   while (i < tokens.length) {
     const token = tokens[i];
     if (typeof token === "string") {
       cmd = token;
-      implicit = /[Mm]/.test(cmd) ? (cmd === "M" ? "L" : "l") : cmd;
+      if (/[Mm]/.test(cmd)) implicit = cmd === "M" ? "L" : "l";
+      else implicit = cmd;
       i++;
     } else {
       cmd = implicit;
     }
     const relative = cmd === cmd.toLowerCase();
     const upper = cmd.toUpperCase();
-    if (upper === "Z") {
-      commands.push({ cmd: "Z" });
-      state.x = state.startx;
-      state.y = state.starty;
-      state.lastCtrl = null;
-      continue;
-    }
-    if (upper === "M" || upper === "L") {
-      const args = read(2);
-      const pts = relative ? [args[0] + state.x, args[1] + state.y] : args;
-      commands.push({ cmd: upper, points: pts });
-      state.x = pts[0];
-      state.y = pts[1];
-      if (upper === "M") {
-        state.startx = pts[0];
-        state.starty = pts[1];
-      }
-      state.lastCtrl = null;
-      continue;
-    }
-    if (upper === "H" || upper === "V") {
-      const value = (tokens[i++] as number) + (relative ? (upper === "H" ? state.x : state.y) : 0);
-      const pts = upper === "H" ? [value, state.y] : [state.x, value];
-      commands.push({ cmd: "L", points: pts });
-      state.x = pts[0];
-      state.y = pts[1];
-      state.lastCtrl = null;
-      continue;
-    }
-    if (upper === "C") {
-      const args = read(6);
-      const pts = relative ? args.map((v, k) => v + (k % 2 === 0 ? state.x : state.y)) : args;
-      commands.push({ cmd: "C", points: pts });
-      state.lastCtrl = [pts[2], pts[3]];
-      state.x = pts[4];
-      state.y = pts[5];
-      continue;
-    }
-    if (upper === "S") {
-      const args = read(4);
-      const ref = state.lastCtrl
-        ? [2 * state.x - state.lastCtrl[0], 2 * state.y - state.lastCtrl[1]]
-        : [state.x, state.y];
-      const pts = relative ? args.map((v, k) => v + (k % 2 === 0 ? state.x : state.y)) : args;
-      commands.push({ cmd: "C", points: [ref[0], ref[1], pts[0], pts[1], pts[2], pts[3]] });
-      state.lastCtrl = [pts[0], pts[1]];
-      state.x = pts[2];
-      state.y = pts[3];
-      continue;
-    }
-    if (upper === "Q") {
-      const args = read(4);
-      const pts = relative ? args.map((v, k) => v + (k % 2 === 0 ? state.x : state.y)) : args;
-      commands.push({ cmd: "Q", points: pts });
-      state.lastCtrl = [pts[0], pts[1]];
-      state.x = pts[2];
-      state.y = pts[3];
-      continue;
-    }
-    if (upper === "T") {
-      const ref = state.lastCtrl
-        ? [2 * state.x - state.lastCtrl[0], 2 * state.y - state.lastCtrl[1]]
-        : [state.x, state.y];
-      const args = read(2);
-      const pts = relative ? args.map((v, k) => v + (k % 2 === 0 ? state.x : state.y)) : args;
-      commands.push({ cmd: "Q", points: [ref[0], ref[1], pts[0], pts[1]] });
-      state.lastCtrl = [ref[0], ref[1]];
-      state.x = pts[0];
-      state.y = pts[1];
-      continue;
-    }
-    if (upper === "A") {
-      const args = read(7);
-      const rx = Math.abs(args[0]);
-      const ry = Math.abs(args[1]);
-      const x = relative ? args[5] + state.x : args[5];
-      const y = relative ? args[6] + state.y : args[6];
-      for (const cubic of arcToCubics(state.x, state.y, rx, ry, args[2], args[3], args[4], x, y)) {
-        commands.push({ cmd: "C", points: cubic });
-      }
-      state.lastCtrl = null;
-      state.x = x;
-      state.y = y;
-      continue;
-    }
+    const consumed = applyCommand(commands, upper, tokens, i, relative, state);
     // Unknown command letter — skip its token to avoid spinning.
-    i++;
+    i = consumed === null ? i + 1 : consumed;
   }
   return commands;
+}
+
+/** Turns relative coordinates into absolute ones; x is even indices, y odd (SVG layout). */
+function absolutePoints(args: number[], relative: boolean, state: SegState): number[] {
+  return relative ? args.map((v, k) => v + (k % 2 === 0 ? state.x : state.y)) : args;
+}
+
+function reflectedControl(state: SegState): [number, number] {
+  return state.lastCtrl
+    ? [2 * state.x - state.lastCtrl[0], 2 * state.y - state.lastCtrl[1]]
+    : [state.x, state.y];
+}
+
+/**
+ * Handles one path command starting at tokens[i] (the coordinate tokens, cmd already resolved).
+ * Returns the next token index, or null for an unrecognized command letter.
+ */
+function applyCommand(
+  commands: PathCommand[],
+  upper: string,
+  tokens: (string | number)[],
+  i: number,
+  relative: boolean,
+  state: SegState,
+): number | null {
+  const read = (n: number): { args: number[]; next: number } => {
+    const args = tokens.slice(i, i + n) as number[];
+    return { args, next: i + n };
+  };
+  if (upper === "Z") {
+    commands.push({ cmd: "Z" });
+    state.x = state.startx;
+    state.y = state.starty;
+    state.lastCtrl = null;
+    return i;
+  }
+  if (upper === "M" || upper === "L") {
+    const { args, next } = read(2);
+    const pts = absolutePoints(args, relative, state);
+    commands.push({ cmd: upper, points: pts });
+    state.x = pts[0];
+    state.y = pts[1];
+    if (upper === "M") {
+      state.startx = pts[0];
+      state.starty = pts[1];
+    }
+    state.lastCtrl = null;
+    return next;
+  }
+  if (upper === "H" || upper === "V") {
+    const base = upper === "H" ? state.x : state.y;
+    const value = relative ? (tokens[i] as number) + base : (tokens[i] as number);
+    const pts = upper === "H" ? [value, state.y] : [state.x, value];
+    commands.push({ cmd: "L", points: pts });
+    state.x = pts[0];
+    state.y = pts[1];
+    state.lastCtrl = null;
+    return i + 1;
+  }
+  if (upper === "C" || upper === "Q" || upper === "S" || upper === "T") {
+    return applyCurve(commands, upper, tokens, i, relative, state);
+  }
+  if (upper === "A") {
+    const { args, next } = read(7);
+    const rx = Math.abs(args[0]);
+    const ry = Math.abs(args[1]);
+    const x = relative ? args[5] + state.x : args[5];
+    const y = relative ? args[6] + state.y : args[6];
+    for (const cubic of arcToCubics(state.x, state.y, rx, ry, args[2], args[3], args[4], x, y)) {
+      commands.push({ cmd: "C", points: cubic });
+    }
+    state.lastCtrl = null;
+    state.x = x;
+    state.y = y;
+    return next;
+  }
+  return null;
+}
+
+/** C/Q/S/T: curves and their smooth continuations, all emitting absolute cubics/quadratics. */
+function applyCurve(
+  commands: PathCommand[],
+  upper: string,
+  tokens: (string | number)[],
+  i: number,
+  relative: boolean,
+  state: SegState,
+): number {
+  let count = 2;
+  if (upper === "C") count = 6;
+  else if (upper === "Q" || upper === "S") count = 4;
+  const args = tokens.slice(i, i + count) as number[];
+  const next = i + count;
+  const pts = absolutePoints(args, relative, state);
+  if (upper === "S") {
+    const ref = reflectedControl(state);
+    commands.push({ cmd: "C", points: [ref[0], ref[1], pts[0], pts[1], pts[2], pts[3]] });
+    state.lastCtrl = [pts[0], pts[1]];
+    state.x = pts[2];
+    state.y = pts[3];
+    return next;
+  }
+  if (upper === "T") {
+    const ref = reflectedControl(state);
+    commands.push({ cmd: "Q", points: [ref[0], ref[1], pts[0], pts[1]] });
+    state.lastCtrl = [ref[0], ref[1]];
+    state.x = pts[0];
+    state.y = pts[1];
+    return next;
+  }
+  commands.push({ cmd: upper as "C" | "Q", points: pts });
+  // The last control point of each curve feeds smooth continuation: C's is pts[2..3], Q's pts[0..1].
+  state.lastCtrl = upper === "C" ? [pts[2], pts[3]] : [pts[0], pts[1]];
+  state.x = pts[upper === "C" ? 4 : 2];
+  state.y = pts[upper === "C" ? 5 : 3];
+  return next;
 }
 
 /** Converts an SVG arc segment to absolute cubic Bézier control points (endpoint → center). */

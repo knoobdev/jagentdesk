@@ -205,6 +205,16 @@ describe("HttpFigmaRestClient", () => {
     );
     expect(forbidden.message).toContain("Invalid token scopes");
 
+    // A 403 without a JSON error body keeps the raw status and the call itself in the message —
+    // the handler adds the account/app-vs-file diagnosis on top of this.
+    api.enqueue({ status: 403 });
+    const bare = expectServiceError(
+      await rest.getJson({ ...metaRoute, connectionId: "fgc_1" }).catch((e) => e),
+      "forbidden",
+    );
+    expect(bare.message).toContain("403");
+    expect(bare.message).toContain("GET /v1/files/KEY1/meta");
+
     api.enqueue({ status: 400, body: { err: "Bad node id" } });
     expectServiceError(
       await rest.getJson({ ...metaRoute, connectionId: "fgc_1" }).catch((e) => e),
@@ -279,5 +289,128 @@ describe("HttpFigmaRestClient", () => {
       if (previous === undefined) delete process.env.JAGENTDESK_FIGMA_API_URL;
       else process.env.JAGENTDESK_FIGMA_API_URL = previous;
     }
+  });
+
+  // Run-15 cold-mount evidence: one card click fired two identical depth-3 outline reads and
+  // the daemon fetched (and parsed, and wrote to cache) twice. Identical concurrent GETs are
+  // one physical request; anything that differs — connection, tier, query — fetches on its own.
+  it("coalesces identical concurrent GETs into one request and one budget send", async () => {
+    api.fileMeta.set("KEY1", { name: "Landing" });
+    const rest = client(new FakeTokens(["fake-figma-access-token-0001"]));
+    const call = () =>
+      rest.getJson<{ file: { name: string } }>({ ...metaRoute, connectionId: "fgc_1" });
+
+    const [a, b] = await Promise.all([call(), call()]);
+    expect(a.file.name).toBe("Landing");
+    expect(b.file.name).toBe("Landing");
+    const metas = api.requests.filter((r) => r.path === "/v1/files/KEY1/meta");
+    expect(metas).toHaveLength(1);
+    // Joiners are answered under the leader's authorized request: one bearer, that connection's.
+    expect(metas[0].authorization).toBe("Bearer fake-figma-access-token-0001");
+    // Honest accounting: the tier saw ONE request sent; the joiner adds nothing.
+    expect(rest.budget("fgc_1").tiers.find((tier) => tier.tier === "3")?.usedLastMinute).toBe(1);
+  });
+
+  it("fetches again once a shared call has settled — sharing is in flight, not a result cache", async () => {
+    api.fileMeta.set("KEY1", { name: "Landing" });
+    const rest = client(new FakeTokens(["fake-figma-access-token-0001"]));
+    const call = () => rest.getJson({ ...metaRoute, connectionId: "fgc_1" });
+
+    await call();
+    await call();
+    expect(api.requests.filter((r) => r.path === "/v1/files/KEY1/meta")).toHaveLength(2);
+    expect(rest.budget("fgc_1").tiers.find((tier) => tier.tier === "3")?.usedLastMinute).toBe(2);
+  });
+
+  it("hands coalesced callers the one shared response object", async () => {
+    // The contract this pins: joiners ride the leader's parse, so the response is a shared
+    // reference, not an independent copy like before coalescing. Safe because every consumer
+    // of a getJson result maps it into freshly built DTOs — none mutates the raw response.
+    api.fileMeta.set("KEY1", { name: "Landing" });
+    const rest = client(new FakeTokens(["fake-figma-access-token-0001"]));
+    const call = () => rest.getJson({ ...metaRoute, connectionId: "fgc_1" });
+
+    const [a, b] = await Promise.all([call(), call()]);
+    expect(b).toBe(a);
+    const fresh = await call(); // settled → a new physical call parses a new object
+    expect(fresh).not.toBe(a);
+    expect(fresh).toEqual(a);
+  });
+
+  it("does not coalesce reads that differ in connection, tier, or query", async () => {
+    api.fileMeta.set("KEY1", { name: "Landing" });
+    api.validToken = null; // per-connection tokens below are what the assertions check
+    const issued: string[] = [];
+    const perConnection = {
+      accessToken: async (connectionId: string) => {
+        issued.push(connectionId);
+        return `token-${connectionId}`;
+      },
+      invalidate: () => {},
+    };
+    const rest = client(perConnection);
+    await Promise.all([
+      rest.getJson({ ...metaRoute, connectionId: "fgc_1" }),
+      rest.getJson({ ...metaRoute, connectionId: "fgc_2" }),
+      rest.getJson({ ...metaRoute, connectionId: "fgc_1", tier: "2" }),
+      rest.getJson({ ...metaRoute, connectionId: "fgc_1", query: { ids: "1:2" } }),
+    ]);
+    const metas = api.requests.filter((r) => r.path === "/v1/files/KEY1/meta");
+    expect(metas).toHaveLength(4);
+    // Each connection's request carries its own bearer: a joiner never rode a foreign
+    // connection's in-flight call, and each physical send minted its own token.
+    expect(metas.map((r) => r.authorization).sort()).toEqual([
+      "Bearer token-fgc_1",
+      "Bearer token-fgc_1",
+      "Bearer token-fgc_1",
+      "Bearer token-fgc_2",
+    ]);
+    expect(issued.sort()).toEqual(["fgc_1", "fgc_1", "fgc_1", "fgc_2"]);
+    // Budgets stay per connection: the fgc_2 send never touched fgc_1's counters.
+    expect(rest.budget("fgc_1").tiers.map((tier) => [tier.tier, tier.usedLastMinute])).toEqual([
+      ["1", 0],
+      ["2", 1],
+      ["3", 2],
+    ]);
+    expect(rest.budget("fgc_2").tiers.find((tier) => tier.tier === "3")?.usedLastMinute).toBe(1);
+  });
+
+  it("shares the 401 refresh-and-retry across coalesced callers", async () => {
+    api.fileMeta.set("KEY1", { name: "Landing" });
+    // First token is refused, the refreshed one is accepted: the released retry-once path.
+    const tokens = new FakeTokens(["wrong-token", "fake-figma-access-token-0001"]);
+    const rest = client(tokens);
+    const call = () => rest.getJson({ ...metaRoute, connectionId: "fgc_1" });
+
+    const [a, b] = await Promise.all([call(), call()]);
+    expect(a).toMatchObject({ file: { name: "Landing" } });
+    expect(b).toMatchObject({ file: { name: "Landing" } });
+    // One leader: the flight ran the released retry-once, and the joiner rode its outcome.
+    expect(api.requests.filter((r) => r.path === "/v1/files/KEY1/meta")).toHaveLength(2);
+    expect(tokens.invalidations).toBe(1);
+    expect(rest.budget("fgc_1").tiers.find((tier) => tier.tier === "3")?.usedLastMinute).toBe(2);
+  });
+
+  it("answers both callers with the leader's rejection", async () => {
+    api.fileMeta.set("KEY1", { name: "Landing" });
+    api.validToken = "nobody"; // no bearer matches: the leader's one retry also 401s
+    const rest = client(new FakeTokens(["other-token"]));
+    const call = () => rest.getJson({ ...metaRoute, connectionId: "fgc_1" });
+
+    const [a, b] = await Promise.allSettled([call(), call()]);
+    expectServiceError((a as PromiseRejectedResult).reason, "auth_failed");
+    expectServiceError((b as PromiseRejectedResult).reason, "auth_failed");
+    expect(api.requests.filter((r) => r.path === "/v1/files/KEY1/meta")).toHaveLength(2);
+  });
+
+  it("coalesces concurrent downloads of the same byte URL", async () => {
+    api.images.set("/images/shared", { data: Buffer.from("png-bytes"), contentType: "image/png" });
+    const rest = client(new FakeTokens(["fake-figma-access-token-0001"]));
+    const url = `${api.baseUrl}/images/shared`;
+
+    const [a, b] = await Promise.all([rest.getBytes(url), rest.getBytes(url)]);
+    expect(a.data.toString()).toBe("png-bytes");
+    expect(b.data).toBe(a.data); // one download, shared buffer
+    expect(api.requests.filter((r) => r.path === "/images/shared")).toHaveLength(1);
   });
 });

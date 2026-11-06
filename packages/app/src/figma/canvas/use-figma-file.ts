@@ -7,6 +7,7 @@ import type {
   FigmaFile,
   FigmaNode,
   FigmaPendingOp,
+  FigmaRequestParams,
 } from "@jagentdesk/protocol/figma/rpc-schemas";
 import { useFetchQuery } from "@/data/query";
 import { getHostRuntimeStore, useHostRuntimeClient } from "@/runtime/host-runtime";
@@ -60,12 +61,15 @@ export function useFigmaFrameStore(
       `${serverId}|${reloadToken}`,
       fileKey,
       version ?? undefined,
-      async (ids) => {
-        const data = await client.figmaRequest("figma.file.nodes.request", {
+      async (ids, options) => {
+        // depth: 1 (ADR-0039) is a protocol field on the nodes request (commit 205355388).
+        const params: FigmaRequestParams<"figma.file.nodes.request"> = {
           fileKey,
           ids: [...ids],
           ...(version ? { version } : {}),
-        });
+        };
+        if (options?.depth) params.depth = options.depth;
+        const data = await client.figmaRequest("figma.file.nodes.request", params);
         if (data.error) throw new Error(data.error.message);
         return {
           nodes: data.nodes as Record<string, FigmaNode | null>,
@@ -79,9 +83,17 @@ export function useFigmaFrameStore(
 /** Subscribe the component to the store and kick loading; returns nothing — read via store.get. */
 export function useFrameLoader(store: FrameStore | null, ids: readonly string[]): void {
   const key = ids.join(",");
+  // The subscribe callback must be stable across renders: an inline arrow changes identity every
+  // render, and useSyncExternalStore then tears down and re-adds the listener on every paint tick.
+  const subscribe = useCallback(
+    (onChange: () => void) => (store ? store.subscribe(onChange) : () => undefined),
+    [store],
+  );
+  // Key the snapshot on the store's monotonic revision, not loadedCount(): at LRU capacity a
+  // replacement keeps the count equal, React sees no change, and the canvas never repaints.
   const snapshot = useSyncExternalStore(
-    (onChange) => (store ? store.subscribe(onChange) : () => undefined),
-    () => (store ? store.loadedCount() : 0),
+    subscribe,
+    () => (store ? store.revisionSnapshot() : 0),
     () => 0,
   );
   useEffect(() => {

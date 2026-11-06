@@ -43,7 +43,36 @@ function buildGradient(
   const h1 = handles[1] ?? { x: 1, y: 0 };
   let gradient: CanvasGradient | null = null;
   if (paint.type === "GRADIENT_LINEAR") {
-    gradient = ctx.createLinearGradient(h0.x * width, h0.y * height, h1.x * width, h1.y * height);
+    // Figma parameterizes the ramp in the NORMALIZED handle space: the stop value at a
+    // bbox-normalized point p is the first coordinate of T⁻¹(p − h0), where T has columns
+    // (h1 − h0, h2 − h0) — the third handle is a basis vector, not decoration. A canvas
+    // gradient projects in pixels (its coordinates are current-user-space), so map the
+    // parameter row into pixel space and normalize it into an axis: w = (r.x / width,
+    // r.y / height), axis = w / |w|². Verified numerically against the same-version
+    // exports: skewed handles (0,0)->(1,1)/(-0.5,0.5) on 366x48 export axis (12.378, 94.378),
+    // which the naive pixel diagonal (366, 48) contradicts.
+    const x0 = h0.x * width;
+    const y0 = h0.y * height;
+    let endX = h1.x * width;
+    let endY = h1.y * height;
+    const base = handles[2];
+    if (base && width > 0 && height > 0) {
+      const ux = h1.x - h0.x;
+      const uy = h1.y - h0.y;
+      const vx = base.x - h0.x;
+      const vy = base.y - h0.y;
+      const det = ux * vy - vx * uy;
+      if (Math.abs(det) > 1e-9) {
+        const wx = vy / det / width; // (first row of T⁻¹) / (width, height)
+        const wy = -vx / det / height;
+        const norm = wx * wx + wy * wy;
+        if (Number.isFinite(norm) && norm > 0) {
+          endX = x0 + wx / norm;
+          endY = y0 + wy / norm;
+        }
+      }
+    }
+    gradient = ctx.createLinearGradient(x0, y0, endX, endY);
   } else if (paint.type === "GRADIENT_RADIAL" || paint.type === "GRADIENT_DIAMOND") {
     const radius = Math.hypot((h1.x - h0.x) * width, (h1.y - h0.y) * height);
     gradient = ctx.createRadialGradient(

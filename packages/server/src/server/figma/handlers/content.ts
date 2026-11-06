@@ -2,11 +2,11 @@ import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { unzipSync } from "fflate";
 import type { Dirent } from "node:fs";
 import type {
   FigmaBytes,
   FigmaFile,
+  FigmaFrameSummary,
   FigmaNode,
   FigmaOutline,
   FigmaPage,
@@ -47,7 +47,23 @@ export const FIGMA_VERSION_RESOLVE_TTL_MS = 60_000;
 const NODES_BATCH_SIZE = 10;
 const RENDER_BATCH_SIZE = 20;
 const VERSIONS_PAGE_SIZE = 50;
-const GOOGLE_FONTS_DOWNLOAD_URL = "https://fonts.google.com/download";
+// 32.5.1: the Google Fonts fallback uses the documented CSS API
+// (https://developers.google.com/fonts/docs/css2), not the fonts.google.com/download ZIP
+// route — that endpoint answers non-browser clients with the site's HTML shell, so the
+// old unzipSync path could never produce bytes. A stable explicit non-browser UA makes
+// css2 serve exactly one full-coverage TTF per requested axis tuple (verified for
+// Inter/Roboto incl. Vietnamese in w5-font-download-spike); a browser UA would get the
+// per-subset woff2 sprawl instead. The UA string is load-bearing for the response shape,
+// so it is pinned here rather than left to the fetch default.
+// ADR-37: only Google's own API/CDN hosts are trusted, and there is no token to hide, so
+// redirects are followed MANUALLY — every hop URL and every Location is validated
+// (https, expected host, no credentials, port 443 only) BEFORE its GET is issued, so a
+// foreign redirect target is never fetched at all and a loop terminates at the bound.
+const GOOGLE_FONTS_CSS2_URL = "https://fonts.googleapis.com/css2";
+const GOOGLE_FONTS_CSS2_HOST = "fonts.googleapis.com";
+const GOOGLE_FONTS_ASSET_HOST = "fonts.gstatic.com";
+const GOOGLE_FONTS_USER_AGENT = "JAgentDesk/1.0 (daemon font fetch)";
+const GOOGLE_FONTS_MAX_REDIRECT_HOPS = 5;
 
 // ── REST response shapes (only the fields these handlers read) ────────────────
 
@@ -209,6 +225,11 @@ class FileVersionCache {
     this.entries.set(fileKey, { version, at_ms: ctx.now() });
   }
 
+  /** Drop a pinned version so the next read re-resolves (remote write, ADR-0040). */
+  invalidate(fileKey: string): void {
+    this.entries.delete(fileKey);
+  }
+
   /** The live version of the file, so every cache key below is (fileKey, version) exact. */
   async current(ctx: FigmaContext, file: FigmaFile): Promise<string> {
     const hit = this.entries.get(file.fileKey);
@@ -229,7 +250,11 @@ class FileVersionCache {
   }
 }
 
-// ── outline mapping (32.5.1) ──────────────────────────────────────────────────
+// ── outline mapping (32.5.1, ADR-0039) ───────────────────────────────────────
+
+// The outline read: document=0, page=1, page children=2, section children=3. A section at
+// the boundary has no returned children — the REST answer truncates it, it is not empty.
+const OUTLINE_REST_DEPTH = 3;
 
 function colorToHex(color: RestColor | undefined): string | undefined {
   if (!color) return undefined;
@@ -245,28 +270,62 @@ function colorToHex(color: RestColor | undefined): string | undefined {
   return `#${r}${g}${b}${part(color.a ?? 1) ?? "ff"}`;
 }
 
-function pageFromRest(page: RestNode): FigmaPage {
-  const pageId = asString(page.id);
+function frameSummaryFromRest(node: RestNode): FigmaFrameSummary | null {
+  const box = node.absoluteBoundingBox;
+  if (!box) return null; // only nodes with bounds can be placed on canvas
   return {
-    id: pageId,
+    id: asString(node.id),
+    name: asString(node.name),
+    type: asString(node.type),
+    bounds: { x: num(box.x), y: num(box.y), width: num(box.width), height: num(box.height) },
+    backgroundColor: colorToHex(node.backgroundColor),
+  };
+}
+
+/**
+ * A SECTION is a background/label entry, never a unit of subtree loading: its direct children
+ * flatten into ordered summaries — parent first, then children, siblings in data order — so
+ * the canvas can place and hit-test screens without loading a section tree. FRAME, COMPONENT,
+ * INSTANCE and every other drawable node stop the walk: a frame nested inside a screen is
+ * content, not its own canvas screen. Children flattened from within a section (including a
+ * nested section) carry `parentId`; `childrenLoaded` marks whether the section's direct
+ * children are known — a section sitting at the document's returned depth boundary reads false
+ * even when the truncated answer carries `children: []`, and is never faked as an empty one.
+ */
+function collectSectionFlattened(
+  nodes: RestNode[],
+  level: number,
+  parentId: string | undefined,
+  knownDepth: number,
+  out: FigmaFrameSummary[],
+): void {
+  for (const node of nodes) {
+    const children = Array.isArray(node.children) ? node.children : null;
+    const summary = frameSummaryFromRest(node);
+    if (summary) {
+      if (asString(node.type) === "SECTION")
+        summary.childrenLoaded = children !== null && level < knownDepth;
+      out.push(parentId === undefined ? summary : { ...summary, parentId });
+    }
+    if (asString(node.type) !== "SECTION" || !children) continue;
+    collectSectionFlattened(children, level + 1, asString(node.id), knownDepth, out);
+  }
+}
+
+/**
+ * `knownDepth` is the deepest level the payload provably carries children for: the depth-3
+ * outline answer (3) or a whole plugin document, which has no cut (Infinity).
+ */
+function pageFromRest(page: RestNode, knownDepth: number): FigmaPage {
+  const frames: FigmaFrameSummary[] = [];
+  collectSectionFlattened(page.children ?? [], 2, undefined, knownDepth, frames);
+  return {
+    id: asString(page.id),
     name: asString(page.name),
     backgroundColor: colorToHex(page.backgroundColor),
-    // depth=2 returns the page's top-level nodes; only ones with bounds can be placed on canvas.
-    frames: (page.children ?? [])
-      .filter((node) => !!node.absoluteBoundingBox)
-      .map((node) => ({
-        id: asString(node.id),
-        name: asString(node.name),
-        type: asString(node.type),
-        bounds: {
-          x: num(node.absoluteBoundingBox?.x),
-          y: num(node.absoluteBoundingBox?.y),
-          width: num(node.absoluteBoundingBox?.width),
-          height: num(node.absoluteBoundingBox?.height),
-        },
-        backgroundColor: colorToHex(node.backgroundColor),
-      })),
+    frames,
     // The page node itself carries its flow starting points (§5.1) — the file root does not.
+    // ADR-0039 keeps them as REST returned them: no invented flows, none dropped.
     flowStartingPoints: pageFlowStartingPoints(page),
   };
 }
@@ -280,7 +339,7 @@ function outlineFromRest(json: RestFile, fileKey: string, version: string): Figm
     editorType: asString(json.editorType) || "figma",
     pages: (json.document?.children ?? [])
       .filter((node) => asString(node.type) === "CANVAS")
-      .map(pageFromRest),
+      .map((page) => pageFromRest(page, OUTLINE_REST_DEPTH)),
     source: "rest",
   };
 }
@@ -298,7 +357,9 @@ function linkedOutline(
     version,
     lastModified_ms: 0,
     editorType: "figma",
-    pages: pages.map((page) => pageFromRest(page as unknown as RestNode)),
+    // The plugin hands over the whole document: no depth cut, so every section's children
+    // are known.
+    pages: pages.map((page) => pageFromRest(page as unknown as RestNode, Infinity)),
     source: "link",
   };
 }
@@ -430,46 +491,209 @@ function matchesFont(
   );
 }
 
-async function pickFontFromZip(
-  zip: Buffer,
-  wantedFamily: string,
-  wantedStyle: string,
-): Promise<DownloadedFont | null> {
-  let files: Record<string, Uint8Array>;
-  try {
-    files = unzipSync(zip);
-  } catch {
-    return null;
+// ── Google Fonts CSS API download (32.5.1) ────────────────────────────────────
+// The fonts.google.com/download?family= ZIP route is dead for non-browser clients (it
+// answers the HTML shell), so the fallback acquires bytes through the documented CSS2
+// API instead: request the exact family:ital,wght tuple with a stable non-browser UA and
+// the response carries a single full-coverage TTF (incl. Vietnamese) on fonts.gstatic.com.
+// Every stage fails closed — an ambiguous, off-host, non-sfnt or wrong-named answer
+// becomes null so the caller keeps the real Figma raster fallback. text=/subset slicing
+// and the /download/list internal diagnostic are deliberately not used.
+
+// Mirror of packages/app/src/figma/font-style.ts, the single authority shared by the
+// renderer and the player. The server must not depend on app code, so this table has to
+// stay in sync with that file when weight tokens change.
+const STYLE_WEIGHTS: [string, number][] = [
+  ["thin", 100],
+  ["hairline", 100],
+  ["extralight", 200],
+  ["ultralight", 200],
+  ["light", 300],
+  ["regular", 400],
+  ["normal", 400],
+  ["medium", 500],
+  ["semibold", 600],
+  ["demibold", 600],
+  ["bold", 700],
+  ["extrabold", 800],
+  ["ultrabold", 800],
+  ["black", 900],
+  ["heavy", 900],
+];
+
+function weightForStyle(styleName: string): number {
+  // "Semi Bold" must not hit the "Bold" token: normalise spacing, then take the LONGEST
+  // matching token so "semibold"/"extrabold"/"demibold" win over "bold".
+  const compact = styleName.toLowerCase().replace(/[\s_-]+/g, "");
+  const tokens = [...STYLE_WEIGHTS].sort((a, b) => b[0].length - a[0].length);
+  for (const [token, value] of tokens) {
+    if (compact.includes(token)) return value;
   }
-  for (const [name, bytes] of Object.entries(files)) {
-    if (!/\.(ttf|otf)$/i.test(name)) continue;
-    const data = Buffer.from(bytes);
-    if (!matchesFont(readFontNames(data), wantedFamily, wantedStyle, data)) continue;
-    return { mimeType: fontMimeType(name), data };
+  return 400;
+}
+
+function isItalicStyle(styleName: string): boolean {
+  return /italic|oblique/.test(styleName.toLowerCase());
+}
+
+function compactFontToken(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function googleFontsCss2Url(family: string, weight: number, italic: boolean): string {
+  const axes = italic ? `ital,wght@1,${weight}` : `wght@${weight}`;
+  return `${GOOGLE_FONTS_CSS2_URL}?family=${encodeURIComponent(family)}:${axes}`;
+}
+
+/**
+ * ADR-37 gate for every Google Fonts hop, including relative Locations once resolved:
+ * https on the exact expected host, and a URL shape that cannot carry state we would
+ * leak to a third party — no embedded credentials, no custom port other than 443.
+ */
+function isAllowedGoogleUrl(raw: string, expectedHost: string): boolean {
+  try {
+    const url = new URL(raw);
+    return (
+      url.protocol === "https:" &&
+      url.hostname === expectedHost &&
+      url.username === "" &&
+      url.password === "" &&
+      (url.port === "" || url.port === "443")
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The one font URL the css2 response serves for the requested face, or null when the
+ * answer is not exactly what was asked for: zero faces (HTML shell — the regression that
+ * killed the ZIP route), more than one face (per-subset woff2 sprawl), descriptors that
+ * disagree with the requested tuple, or multiple/foreign src URLs.
+ */
+function css2FontUrl(css: string, family: string, weight: number, italic: boolean): string | null {
+  const faces = css.match(/@font-face\s*\{[^{}]*\}/g);
+  if (!faces || faces.length !== 1) return null;
+  const face = faces[0];
+  const declaredFamily = /font-family\s*:\s*['"]([^'"]*)['"]/.exec(face)?.[1];
+  if (!declaredFamily || normalizeFontName(declaredFamily) !== normalizeFontName(family))
+    return null;
+  const declaredWeight = Number(/font-weight\s*:\s*(\d+)/.exec(face)?.[1]);
+  if (declaredWeight !== weight) return null;
+  const declaredStyle = /font-style\s*:\s*([A-Za-z]+)/.exec(face)?.[1]?.toLowerCase();
+  if (declaredStyle !== (italic ? "italic" : "normal")) return null;
+  const sources = face.match(/url\(\s*['"]?([^'"()\s]+)/g);
+  if (!sources || sources.length !== 1) return null;
+  const href = sources[0].replace(/^url\(\s*['"]?/, "");
+  return isAllowedGoogleUrl(href, GOOGLE_FONTS_ASSET_HOST) ? href : null;
+}
+
+/**
+ * Fetches inside one expected Google host with redirect:manual, validating every hop
+ * BEFORE its GET: the start URL and each resolved Location must pass isAllowedGoogleUrl,
+ * so an off-policy target (foreign host, http, credentials, custom port) returns null
+ * without ever contacting it. Relative Locations resolve against the current hop. The
+ * hop count is bounded; a loop answers null instead of spinning. 2xx/4xx/5xx responses
+ * are returned for the caller's own ok check — only 3xx is followed here.
+ */
+async function fetchWithinGoogleHost(
+  startUrl: string,
+  expectedHost: string,
+  headers?: Record<string, string>,
+): Promise<Response | null> {
+  let url = startUrl;
+  for (let hop = 0; hop <= GOOGLE_FONTS_MAX_REDIRECT_HOPS; hop += 1) {
+    if (!isAllowedGoogleUrl(url, expectedHost)) return null;
+    const response = await fetch(url, { redirect: "manual", headers });
+    if (response.status < 300 || response.status > 399) return response;
+    if (hop === GOOGLE_FONTS_MAX_REDIRECT_HOPS) return null;
+    const location = response.headers.get("location");
+    if (!location) return null;
+    try {
+      url = new URL(location, url).href;
+    } catch {
+      return null;
+    }
   }
   return null;
 }
 
-async function defaultGoogleFontsDownload(
+async function fetchGoogleFontsBytes(href: string): Promise<Buffer | null> {
+  const response = await fetchWithinGoogleHost(href, GOOGLE_FONTS_ASSET_HOST);
+  if (!response || !response.ok) return null;
+  return Buffer.from(await response.arrayBuffer());
+}
+
+/** sfnt flavor → mime. Only reached after readFontNames proved the buffer is sfnt. */
+function sfntMimeType(buffer: Buffer): string {
+  const tag = buffer.length >= 4 ? buffer.toString("latin1", 0, 4) : "";
+  if (tag === "OTTO") return "font/otf";
+  if (tag === "ttcf") return "font/collection";
+  return "font/ttf";
+}
+
+export async function defaultGoogleFontsDownload(
   family: string,
   style: string,
 ): Promise<DownloadedFont | null> {
-  const response = await fetch(
-    `${GOOGLE_FONTS_DOWNLOAD_URL}?family=${encodeURIComponent(family)}`,
-    {
-      redirect: "follow",
-    },
+  const requestedStyle = style.trim() || "Regular";
+  const weight = weightForStyle(requestedStyle);
+  const italic = isItalicStyle(requestedStyle);
+  // Same manual-hop policy for the stylesheet: fonts.googleapis.com only, every redirect
+  // validated before it is fetched, so a bounce to an untrusted host cannot fake a face.
+  const cssResponse = await fetchWithinGoogleHost(
+    googleFontsCss2Url(family, weight, italic),
+    GOOGLE_FONTS_CSS2_HOST,
+    { "User-Agent": GOOGLE_FONTS_USER_AGENT },
   );
-  if (!response.ok) return null;
-  return pickFontFromZip(
-    Buffer.from(await response.arrayBuffer()),
-    normalizeFontName(family),
-    normalizeFontName(style),
+  if (!cssResponse || !cssResponse.ok) return null;
+  const css = await cssResponse.text();
+  // The HTML shell answers 200 like a stylesheet would; it carries no face.
+  if (!css.includes("@font-face")) return null;
+  const href = css2FontUrl(css, family, weight, italic);
+  if (!href) return null;
+  const data = await fetchGoogleFontsBytes(href);
+  if (!data) return null;
+  // Null for anything that is not a readable sfnt — HTML, woff2, a truncated body.
+  const names = readFontNames(data);
+  if (!names) return null;
+  if (normalizeFontName(names.family) !== normalizeFontName(family)) return null;
+  // The name table must agree with the requested style: a variable font whose name table
+  // says Regular is NOT proof of Italic, so unlike matchesFont (system folders, where a
+  // variable file genuinely carries every style) there is no fvar escape here.
+  if (compactFontToken(names.style) !== compactFontToken(requestedStyle)) return null;
+  return { mimeType: sfntMimeType(data), data };
+}
+
+/**
+ * The index.json read-modify-write runs one save at a time per fonts dir: two flights for
+ * different fonts would otherwise both read the pre-write index, and the later write would
+ * silently drop the earlier entry.
+ */
+const googleFontIndexQueues = new Map<string, Promise<void>>();
+
+function queueGoogleFontIndexWrite(dir: string, write: () => Promise<void>): Promise<void> {
+  const previous = googleFontIndexQueues.get(dir) ?? Promise.resolve();
+  const next = previous.then(write, write);
+  googleFontIndexQueues.set(
+    dir,
+    next.then(
+      () => undefined,
+      () => undefined,
+    ),
   );
+  return next;
 }
 
 export class FigmaFontProvider {
   private readonly attempted = new Set<string>();
+  /**
+   * Concurrent requests for the same family+style share one download (and one cache
+   * save). Without it the `attempted` memo would turn every sibling but the first into a
+   * null — a false "font unavailable" that silently downgrades a whole text subtree to
+   * the raster fallback.
+   */
+  private readonly inFlight = new Map<string, Promise<DownloadedFont | null>>();
   private readonly searchDirs: string[] | null;
   private readonly downloadFont: (family: string, style: string) => Promise<DownloadedFont | null>;
 
@@ -489,16 +713,38 @@ export class FigmaFontProvider {
     const system = await this.fromSystemFonts(wantedFamily, wantedStyle);
     if (system) return toBase64Bytes(system);
     const attempt = `${wantedFamily} ${wantedStyle}`;
+    const shared = this.inFlight.get(attempt);
+    if (shared) return this.joinFlight(shared);
     if (this.attempted.has(attempt)) return null;
     this.attempted.add(attempt);
+    const flight = this.downloadOnce(ctx, trimmedFamily, trimmedStyle);
+    this.inFlight.set(attempt, flight);
     try {
-      const fetched = await this.downloadFont(trimmedFamily, trimmedStyle);
+      return await this.joinFlight(flight);
+    } finally {
+      this.inFlight.delete(attempt);
+    }
+  }
+
+  private async joinFlight(flight: Promise<DownloadedFont | null>): Promise<FigmaBytes | null> {
+    const font = await flight;
+    return font ? toBase64Bytes(font) : null;
+  }
+
+  /** Download plus cache save are one flight so joiners never race the index write. */
+  private async downloadOnce(
+    ctx: FigmaContext,
+    family: string,
+    style: string,
+  ): Promise<DownloadedFont | null> {
+    try {
+      const fetched = await this.downloadFont(family, style);
       if (!fetched) return null;
-      await this.saveToGoogleCache(ctx, trimmedFamily, trimmedStyle, fetched);
-      return toBase64Bytes(fetched);
+      await this.saveToGoogleCache(ctx, family, style, fetched);
+      return fetched;
     } catch (error) {
       ctx.logger.info(
-        { family: trimmedFamily, err: error instanceof Error ? error.message : String(error) },
+        { family, err: error instanceof Error ? error.message : String(error) },
         "figma google fonts download failed",
       );
       return null;
@@ -599,9 +845,14 @@ export class FigmaFontProvider {
     const file = `${fileNameToken(family)}-${fileNameToken(style)}-${randomUUID().slice(0, 8)}${ext}`;
     await fs.mkdir(dir, { recursive: true, mode: 0o700 });
     writePrivateFileAtomicSync(path.join(dir, file), font.data);
-    const entries = await this.readIndex(ctx);
-    entries.push({ family, style, file, mimeType: font.mimeType });
-    writePrivateFileAtomicSync(path.join(dir, "index.json"), JSON.stringify({ entries }, null, 2));
+    await queueGoogleFontIndexWrite(dir, async () => {
+      const entries = await this.readIndex(ctx);
+      entries.push({ family, style, file, mimeType: font.mimeType });
+      writePrivateFileAtomicSync(
+        path.join(dir, "index.json"),
+        JSON.stringify({ entries }, null, 2),
+      );
+    });
   }
 }
 
@@ -641,6 +892,9 @@ interface FilePoller {
   timer: ReturnType<typeof setInterval>;
   baseline: string | null;
   inFlight: boolean;
+  // Bumped by authoritative updates (remote-write readback, ADR-0040) while a Tier-3 poll GET
+  // is in flight; a poll whose generation moved must discard its now-stale answer.
+  generation: number;
 }
 
 export class FigmaFileWatches {
@@ -691,7 +945,12 @@ export class FigmaFileWatches {
     if (this.pollers.has(fileKey)) return;
     const timer = setInterval(() => void this.poll(fileKey), this.intervalMs);
     timer.unref?.();
-    this.pollers.set(fileKey, { timer, baseline: this.versions.peek(fileKey), inFlight: false });
+    this.pollers.set(fileKey, {
+      timer,
+      baseline: this.versions.peek(fileKey),
+      inFlight: false,
+      generation: 0,
+    });
   }
 
   private stopPoller(fileKey: string): void {
@@ -701,6 +960,28 @@ export class FigmaFileWatches {
     this.pollers.delete(fileKey);
   }
 
+  /**
+   * Remote-write seam (ADR-0040): after a `use_figma` reply the version pin must not stay
+   * stale. Drops the memo, re-pins with the readback-confirmed version when there is one,
+   * and notifies watchers so the viewer re-reads. Versioned snapshot caches survive; a
+   * failed readback pushes an empty version so the next read resolves fresh.
+   */
+  remoteWriteApplied(ctx: FigmaContext, fileKey: string, version: string | null): void {
+    this.versions.invalidate(fileKey);
+    const poller = this.pollers.get(fileKey);
+    if (poller) {
+      // This readback (or forced refresh) now owns the truth: any poll whose Tier-3 GET began
+      // earlier carries a stale answer and must not roll back the memo, the baseline, or push
+      // an old version over this one.
+      poller.generation += 1;
+      if (version) poller.baseline = version;
+    }
+    if (version) {
+      this.versions.prime(ctx, fileKey, version);
+    }
+    this.pushChanged(ctx, fileKey, version ?? "", "rest");
+  }
+
   private async poll(fileKey: string): Promise<void> {
     const ctx = this.ctx;
     const poller = this.pollers.get(fileKey);
@@ -708,6 +989,7 @@ export class FigmaFileWatches {
     // A linked file reports its own changes through the plugin; spend no Tier-3 budget on it.
     if (ctx.link.isLinked(fileKey)) return;
     poller.inFlight = true;
+    const generation = poller.generation;
     try {
       const file = await ctx.store.getFile(fileKey);
       if (!file) return;
@@ -717,9 +999,25 @@ export class FigmaFileWatches {
         tier: "3",
       });
       const version = metaVersion(meta);
-      if (!version || version === poller.baseline) return;
-      poller.baseline = version;
+      if (!version) return;
+      // An authoritative update (remote-write readback / forced refresh, ADR-0040) landed
+      // while this Tier-3 GET was in flight: the memo, the baseline and the watchers already
+      // own the newer truth, so discard this stale answer instead of rolling them back or
+      // pushing an old version. A stopped-then-restarted poller fails the identity check too.
+      if (this.pollers.get(fileKey) !== poller || poller.generation !== generation) return;
+      // Compare BEFORE re-memoizing. A watch registered before the first outline captured a
+      // null baseline; the outline has since primed the current version, so the comparison
+      // falls back to that known answer — an unchanged file must not push and dump the
+      // client's whole FrameStore and assets. A genuinely unknown version (nothing primed)
+      // keeps the historical first-poll push.
+      const known = poller.baseline ?? this.versions.peek(fileKey);
+      // Every fresh successful poll answer is authoritative for the memo window too: prime it
+      // so a content read right after this tick reuses the version instead of re-GETing
+      // /meta. Same-version polls stay silent; the 60 s TTL and one-send-per-interval budget
+      // semantics are unchanged.
       this.versions.prime(ctx, fileKey, version);
+      poller.baseline = version;
+      if (version === known) return;
       this.pushChanged(ctx, fileKey, version, "rest");
     } catch (error) {
       ctx.logger.info(
@@ -822,6 +1120,15 @@ export class FigmaContent {
   // imageRef→url maps expire "after no more than 14 days" (figma-integration.md §3.1); a ref
   // missing from a cached map re-fetches the map at most once per minute, not every request.
   private readonly mapRefreshedAt = new Map<string, number>();
+  // Concurrent identical outline reads share one flight (see outline()); live calls only.
+  // Scoped to the requesting FigmaContext: the exported module singleton serves several
+  // service contexts (distinct homes, caches and budgets), so a joiner must never ride a
+  // foreign context's leader — the flight reads and writes THAT context's store, disk cache
+  // and budget, and its callers authorize through its token provider.
+  private readonly outlineFlights = new WeakMap<
+    FigmaContext,
+    Map<string, Promise<{ outline: FigmaOutline | null }>>
+  >();
 
   constructor(deps: ContentDeps = {}) {
     this.versions = new FileVersionCache(deps.versionTtlMs);
@@ -851,6 +1158,18 @@ export class FigmaContent {
     };
   }
 
+  /**
+   * Narrow prime seam for a successful `figma.files.add` (32.8): the add handler has just
+   * verified the file's version through an authorized Tier-3 meta answer on that connection,
+   * so the version memo is fed from a fresh fact and the first content read resolves
+   * `current` without a second meta call. Only that answer may be primed — never the stored
+   * `files.lastVersion`, which is stale on ordinary reopen — and nothing here prewarms the
+   * content cache: the disk cache stays cold until the first real read.
+   */
+  primeVerifiedVersion(ctx: FigmaContext, fileKey: string, version: string): void {
+    this.versions.prime(ctx, fileKey, version);
+  }
+
   // ── outline / nodes ──
 
   private async outline(
@@ -858,22 +1177,62 @@ export class FigmaContent {
     ctx: FigmaContext,
   ): Promise<{ outline: FigmaOutline | null }> {
     const file = await requireFile(ctx, request.fileKey);
-    if (ctx.link.isLinked(file.fileKey)) {
+    // Run-15 evidence: one real card click fired two identical outline requests a beat apart,
+    // and the daemon did the whole depth-3 read twice — REST dispatch, parse, map, cache write.
+    // Concurrent identical requests compute the answer once and share it (the same
+    // flight-sharing the font index already uses); the entry is dropped when the read settles,
+    // so a later request re-enters and hits the per-version disk cache. Flights live in a
+    // per-context WeakMap, so two service contexts on one module singleton never join each
+    // other, and the key needs no ctx/home dimension.
+    const key = `${file.connectionId}\u0000${request.fileKey}\u0000${request.version ?? "live"}`;
+    let flights = this.outlineFlights.get(ctx);
+    if (!flights) {
+      flights = new Map();
+      this.outlineFlights.set(ctx, flights);
+    }
+    const shared = flights.get(key);
+    if (shared) return shared;
+    const flight = this.outlineUncached(ctx, file, request.version);
+    flights.set(key, flight);
+    try {
+      return await flight;
+    } finally {
+      if (flights.get(key) === flight) flights.delete(key);
+    }
+  }
+
+  private async outlineUncached(
+    ctx: FigmaContext,
+    file: FigmaFile,
+    version: string | undefined,
+  ): Promise<{ outline: FigmaOutline | null }> {
+    // An explicit version is a snapshot request (32.1): the plugin's live document belongs to
+    // whatever version is open in Figma now, so serving it for a pinned read would silently
+    // present current hierarchy and flows as history. Only the live (unversioned) outline may
+    // prefer the plugin — the same rule the pinned nodes read enforces.
+    if (version === undefined && ctx.link.isLinked(file.fileKey)) {
       const viaLink = await this.linkedOutlineAttempt(ctx, file);
       if (viaLink) return { outline: viaLink };
     }
-    const version = request.version ?? (await this.versions.current(ctx, file));
-    const key = `file/${file.fileKey}/outline@${version}`;
+    const pinned = version ?? (await this.versions.current(ctx, file));
+    // ADR-0039: the outline is a depth-3 read, so a SECTION's direct children (depth-3 nodes)
+    // come back with it. The cache namespace carries that — a stale depth-2 summary, which
+    // saw sections as opaque entries with no children, must never answer a depth-3 request.
+    const key = `file/${file.fileKey}/outline-d3@${pinned}`;
     const hit = await ctx.cache.getJson<Wrapped<FigmaOutline>>(key);
     if (hit?.data) return { outline: hit.data };
     const json = await ctx.rest.getJson<RestFile>({
       connectionId: file.connectionId,
       path: `/v1/files/${file.fileKey}`,
-      query: { depth: 2, version },
+      query: { depth: OUTLINE_REST_DEPTH, version: pinned },
       tier: "1",
     });
-    const outline = outlineFromRest(json, file.fileKey, version);
-    this.versions.prime(ctx, file.fileKey, outline.version);
+    const outline = outlineFromRest(json, file.fileKey, pinned);
+    // A pinned read is an immutable historical snapshot (32.1) — promoting its version into
+    // the live memo would poison current v2 with history v1. Only a live (unversioned) read
+    // may promote here; fresh verified meta answers prime through their own seams (watch
+    // poll, files.add), and an unresolved live read goes through current() → Tier-3 meta.
+    if (version === undefined) this.versions.prime(ctx, file.fileKey, outline.version);
     await ctx.cache.putJson(key, wrap(outline));
     return { outline };
   }
@@ -896,7 +1255,7 @@ export class FigmaContent {
   }
 
   private async nodes(
-    request: { fileKey: string; ids: string[]; version?: string },
+    request: { fileKey: string; ids: string[]; version?: string; depth?: 1 },
     ctx: FigmaContext,
   ): Promise<{
     version: string;
@@ -906,8 +1265,26 @@ export class FigmaContent {
     styles: Record<string, StyleMeta>;
   }> {
     const file = await requireFile(ctx, request.fileKey);
+    if (request.depth === 1) {
+      // ADR-0039: a shallow read lists a section's direct children only. It is always the
+      // REST snapshot for a pinned version — the non-empty version is enforced here, the
+      // plugin's live tree is never consulted, and answers cache under their own depth-carrying
+      // namespace so a shallow node can never poison the full tree (or vice versa). Geometry
+      // is not requested: metadata does not need vector paths.
+      const version = request.version?.trim() ?? "";
+      if (version === "")
+        throw new FigmaServiceError(
+          "invalid_input",
+          "A depth-1 node read needs the pinned file version.",
+        );
+      return this.loadNodes(ctx, file, request.ids, version, 1);
+    }
     const version = request.version ?? (await this.versions.current(ctx, file));
-    if (ctx.link.isLinked(file.fileKey)) {
+    // An explicit version is a snapshot request (ADR-0037): only data for that exact
+    // (fileKey, version) can answer it. The plugin's live tree belongs to whatever version is
+    // open in Figma right now, so serving it for a pinned version would silently present
+    // current data as history. Only the live (unversioned) read may prefer the plugin.
+    if (request.version === undefined && ctx.link.isLinked(file.fileKey)) {
       try {
         const live = await ctx.link.getNodes(file.fileKey, request.ids);
         if (request.ids.some((id) => live[id]))
@@ -928,18 +1305,35 @@ export class FigmaContent {
     return this.loadNodes(ctx, file, request.ids, version);
   }
 
+  /** The (fileKey, id, version) node cache — namespaced by depth so shallow and full
+   *  answers never serve each other (ADR-0039). */
+  private static nodeKey(fileKey: string, id: string, version: string, depth?: 1): string {
+    return depth === undefined
+      ? `node/${fileKey}/${id}@${version}`
+      : `node/${fileKey}/${id}@${version}@depth=${depth}`;
+  }
+
+  /** Library maps follow the same namespace rule: a shallow read's entry-level maps must not
+   *  overwrite the full tree's component/style metadata (ADR-0039). */
+  private static libsKey(fileKey: string, version: string, depth?: 1): string {
+    return depth === undefined
+      ? `libs/${fileKey}@${version}`
+      : `libs/${fileKey}@${version}@depth=${depth}`;
+  }
+
   /** Ids already cached (including known-unknown `null`s) and the ids that must be fetched. */
   private async cachedNodes(
     ctx: FigmaContext,
     file: FigmaFile,
     ids: string[],
     version: string,
+    depth?: 1,
   ): Promise<{ nodes: Record<string, FigmaNode | null>; misses: string[] }> {
     const nodes: Record<string, FigmaNode | null> = {};
     const misses: string[] = [];
     for (const id of ids) {
       const hit = await ctx.cache.getJson<Wrapped<FigmaNode | null>>(
-        `node/${file.fileKey}/${id}@${version}`,
+        FigmaContent.nodeKey(file.fileKey, id, version, depth),
       );
       if (hit) nodes[id] = hit.data;
       else misses.push(id);
@@ -947,12 +1341,13 @@ export class FigmaContent {
     return { nodes, misses };
   }
 
-  /** Cached per node per version; uncached ids come back in batched Tier-1 node requests. */
+  /** Cached per node per version per depth; uncached ids come back in batched Tier-1 requests. */
   private async loadNodes(
     ctx: FigmaContext,
     file: FigmaFile,
     ids: string[],
     version: string,
+    depth?: 1,
   ): Promise<{
     version: string;
     source: FigmaSource;
@@ -960,15 +1355,21 @@ export class FigmaContent {
     components: Record<string, ComponentMeta>;
     styles: Record<string, StyleMeta>;
   }> {
-    const { nodes, misses } = await this.cachedNodes(ctx, file, ids, version);
-    const libsKey = `libs/${file.fileKey}@${version}`;
+    const { nodes, misses } = await this.cachedNodes(ctx, file, ids, version, depth);
+    // Library maps join the same namespace rule: shallow entries must not overwrite the full
+    // read's component/style metadata either.
+    const libsKey = FigmaContent.libsKey(file.fileKey, version, depth);
     const libs = (await ctx.cache.getJson<LibraryMeta>(libsKey)) ?? { components: {}, styles: {} };
     let resolvedVersion = version;
     for (const batch of chunks(misses, this.nodesBatchSize)) {
       const response = await ctx.rest.getJson<RestNodesResponse>({
         connectionId: file.connectionId,
         path: `/v1/files/${file.fileKey}/nodes`,
-        query: { ids: batch.join(","), geometry: "paths", version },
+        query: {
+          ids: batch.join(","),
+          ...(depth === undefined ? { geometry: "paths" } : { depth }),
+          version,
+        },
         tier: "1",
       });
       resolvedVersion = asString(response?.version) || resolvedVersion;
@@ -985,7 +1386,7 @@ export class FigmaContent {
         const entry = response?.nodes?.[id] ?? null;
         const node = restEntryNode(entry) as FigmaNode | null;
         nodes[id] = node;
-        await ctx.cache.putJson(`node/${file.fileKey}/${id}@${version}`, wrap(node));
+        await ctx.cache.putJson(FigmaContent.nodeKey(file.fileKey, id, version, depth), wrap(node));
         if (entry?.components) componentMaps.push(entry.components);
         if (entry?.styles) styleMaps.push(entry.styles);
       }
@@ -1065,15 +1466,57 @@ export class FigmaContent {
       fileKey: string;
       ids: string[];
       scale: number;
-      format?: "png" | "jpg";
+      format?: "png" | "jpg" | "svg";
+      useAbsoluteBounds?: boolean;
       version?: string;
     },
     ctx: FigmaContext,
   ): Promise<{ images: Record<string, FigmaBytes | null>; source: FigmaSource }> {
     const file = await requireFile(ctx, request.fileKey);
     const format: RenderFormat = request.format ?? "png";
-    const version = request.version ?? (await this.versions.current(ctx, file));
-    return this.renderNodes(ctx, file, request.ids, request.scale, format, version);
+    const absolute = request.useAbsoluteBounds === true;
+    // ADR-0042 (clarified at review): the fidelity path — svg text outlines or absolute bounds —
+    // is answered ONLY by the version-pinned Tier-1 REST read. The plugin export predates the
+    // options and would return wrong-meaning bytes, so an unversioned fidelity request is a
+    // caller error, refused BEFORE any REST dispatch rather than silently resolved to current.
+    if (absolute || format === "svg") {
+      const version = request.version;
+      if (version === undefined || version.trim() === "") {
+        throw new FigmaServiceError(
+          "invalid_input",
+          "figma.file.render.request with format=svg or useAbsoluteBounds must pin an explicit non-empty version: the fidelity path is version-pinned REST, never Live Link (ADR-0042).",
+        );
+      }
+      return this.renderNodes(
+        ctx,
+        file,
+        request.ids,
+        request.scale,
+        format,
+        version,
+        false,
+        absolute,
+      );
+    }
+    // An explicit version is a snapshot request (32.1): the plugin rasterizes whatever version
+    // is open in Figma now, so live bytes mislabeled as history are the failure mode — only the
+    // versioned Tier-1 images endpoint can answer a pinned version, and its answers keep their
+    // own cache namespace so unverified live plugin bytes never serve a snapshot.
+    if (request.version !== undefined)
+      return this.renderNodes(
+        ctx,
+        file,
+        request.ids,
+        request.scale,
+        format,
+        request.version,
+        false,
+      );
+    const version = await this.versions.current(ctx, file);
+    // Legacy crop path, semantics unchanged from before ADR-0042: plugin when linked, exact REST
+    // bytes otherwise. The fidelity route above is enforced HERE, at the caller, not as a format
+    // guard in renderNodes — single-file export (below) keeps its old plugin svg behavior.
+    return this.renderNodes(ctx, file, request.ids, request.scale, format, version, true);
   }
 
   private async export(
@@ -1093,7 +1536,9 @@ export class FigmaContent {
       scale,
       request.format,
       version,
-    );
+      true, // export has no version field: it is the live current-version read (32.1)
+    ); // ADR-0042 adds no option here: single-file export keeps its pre-ADR semantics, plugin
+    // svg included — the fidelity route is enforced in render(), not in this shared helper.
     const bytes = rendered.images[request.nodeId];
     if (!bytes) return { file: null, fileName: null };
     const name =
@@ -1103,8 +1548,31 @@ export class FigmaContent {
     return { file: bytes, fileName: `${name}@${scale}x.${request.format}` };
   }
 
-  /** Cache per nodeId@scale@version; a linked file exports through the plugin instead (32.1). */
+  /**
+   * Cache per nodeId@scale@version and bounds semantics (ADR-0042: absolute bytes never answer
+   * a crop request and vice versa). `live` marks reads whose version is the CURRENT one:
+   * only those may use the plugin export (32.1). Live and verified-REST bytes keep separate
+   * namespaces, and both are NEW: released code cached mixed-source plugin bytes under plain
+   * `render/...@version`, whose legacy entries neither branch reads — a pre-upgrade live byte
+   * can never answer a pinned snapshot unverified.
+   */
   private async renderNodes(
+    ctx: FigmaContext,
+    file: FigmaFile,
+    ids: string[],
+    scale: number,
+    format: RenderFormat,
+    version: string,
+    live: boolean,
+    absolute = false,
+  ): Promise<{ images: Record<string, FigmaBytes | null>; source: FigmaSource }> {
+    if (live && ctx.link.isLinked(file.fileKey))
+      return this.renderViaLink(ctx, file, ids, scale, format, version);
+    return this.renderRest(ctx, file, ids, scale, format, version, absolute);
+  }
+
+  /** Live plugin rasters, cached in their own namespace keyed by the current version. */
+  private async renderViaLink(
     ctx: FigmaContext,
     file: FigmaFile,
     ids: string[],
@@ -1113,54 +1581,85 @@ export class FigmaContent {
     version: string,
   ): Promise<{ images: Record<string, FigmaBytes | null>; source: FigmaSource }> {
     const images: Record<string, FigmaBytes | null> = {};
-    const misses: string[] = [];
-    let source: FigmaSource = "rest";
     const cacheKey = (id: string): string =>
-      `render/${file.fileKey}/${id}@${scale}x@${format}@${version}`;
-    const linked = ctx.link.isLinked(file.fileKey);
-    if (linked) {
-      source = "link";
-      await Promise.all(
-        ids.map(async (id) => {
-          const cached = await ctx.cache.getBytes(cacheKey(id));
-          if (cached) {
-            images[id] = toBase64Bytes(cached);
-            return;
-          }
-          try {
-            const exported = await ctx.link.exportNode(file.fileKey, id, format, scale);
-            const stored = {
-              mimeType: exported.mimeType || RENDER_MIME[format],
-              data: exported.data,
-            };
-            await ctx.cache.putBytes(cacheKey(id), stored);
-            images[id] = toBase64Bytes(stored);
-          } catch (error) {
-            ctx.logger.info(
-              {
-                fileKey: file.fileKey,
-                nodeId: id,
-                err: error instanceof Error ? error.message : String(error),
-              },
-              "figma link export failed",
-            );
-            images[id] = null;
-          }
-        }),
-      );
-      return { images, source };
-    }
+      `render-live/${file.fileKey}/${id}@${scale}x@${format}@${version}`;
+    await Promise.all(
+      ids.map(async (id) => {
+        const cached = await ctx.cache.getBytes(cacheKey(id));
+        if (cached) {
+          images[id] = toBase64Bytes(cached);
+          return;
+        }
+        try {
+          const exported = await ctx.link.exportNode(file.fileKey, id, format, scale);
+          const stored = {
+            mimeType: exported.mimeType || RENDER_MIME[format],
+            data: exported.data,
+          };
+          await ctx.cache.putBytes(cacheKey(id), stored);
+          images[id] = toBase64Bytes(stored);
+        } catch (error) {
+          ctx.logger.info(
+            {
+              fileKey: file.fileKey,
+              nodeId: id,
+              err: error instanceof Error ? error.message : String(error),
+            },
+            "figma link export failed",
+          );
+          images[id] = null;
+        }
+      }),
+    );
+    return { images, source: "link" };
+  }
+
+  /**
+   * One multi-id Tier-1 call per batch; the S3 urls never leave the daemon (32.8). Answers
+   * either the versioned snapshot or the unversioned read of an unlinked file — both are
+   * exact-version REST bytes, so they share the version-keyed namespace. That namespace is
+   * NEW: released code stored plugin-live rasters under plain `render/...@version`, and those
+   * mixed-source entries are never consumed here, so a pre-upgrade live byte can't answer a
+   * pinned snapshot unverified.
+   */
+  private async renderRest(
+    ctx: FigmaContext,
+    file: FigmaFile,
+    ids: string[],
+    scale: number,
+    format: RenderFormat,
+    version: string,
+    absolute: boolean,
+  ): Promise<{ images: Record<string, FigmaBytes | null>; source: FigmaSource }> {
+    const images: Record<string, FigmaBytes | null> = {};
+    const misses: string[] = [];
+    // The crop key is unchanged from released code so its bytes keep answering; the absolute
+    // key can never collide with it — and never reuses its bytes (ADR-0042).
+    const cacheKey = (id: string): string =>
+      absolute
+        ? `render-rest/${file.fileKey}/${id}@${scale}x@${format}@absolute@${version}`
+        : `render-rest/${file.fileKey}/${id}@${scale}x@${format}@${version}`;
     for (const id of ids) {
       const cached = await ctx.cache.getBytes(cacheKey(id));
       if (cached) images[id] = toBase64Bytes(cached);
       else misses.push(id);
     }
-    // One multi-id Tier-1 call per batch; the S3 urls never leave the daemon (32.8).
     for (const batch of chunks(misses, RENDER_BATCH_SIZE)) {
+      const query: Record<string, string | number | boolean | undefined> = {
+        ids: batch.join(","),
+        scale,
+        format,
+        version,
+      };
+      // ADR-0042 → Figma file endpoints: SVG fallbacks carry the text as paths (no substitute
+      // fonts) and absolute bounds export the same geometry the renderer will place it into.
+      // Neither flag is added for the plain crop path — old requests keep identical queries.
+      if (format === "svg") query.svg_outline_text = "true";
+      if (absolute) query.use_absolute_bounds = "true";
       const response = await ctx.rest.getJson<RestImagesResponse>({
         connectionId: file.connectionId,
         path: `/v1/images/${file.fileKey}`,
-        query: { ids: batch.join(","), scale, format, version },
+        query,
         tier: "1",
       });
       await Promise.all(
@@ -1189,7 +1688,7 @@ export class FigmaContent {
         }),
       );
     }
-    return { images, source };
+    return { images, source: "rest" };
   }
 
   // ── versions ──
@@ -1224,4 +1723,7 @@ export class FigmaContent {
   }
 }
 
-export const contentHandlers: FigmaHandlerMap<ContentRequestType> = new FigmaContent().handlers();
+// The daemon-wide content instance, exported for the remote-write seam (ADR-0040): the
+// connector's version memo lives here, so `handlers/remote.ts` pushes through this singleton.
+export const figmaContent = new FigmaContent();
+export const contentHandlers: FigmaHandlerMap<ContentRequestType> = figmaContent.handlers();

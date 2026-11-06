@@ -27,4 +27,9 @@ export function createFigmaRenderer(): FigmaRenderer {
   };
 }
 
-export type { FigmaCanvasContext, FigmaRenderOptions, FigmaRenderer } from "./types";
+export type {
+  FigmaCanvasContext,
+  FigmaFallbackHint,
+  FigmaRenderOptions,
+  FigmaRenderer,
+} from "./types";

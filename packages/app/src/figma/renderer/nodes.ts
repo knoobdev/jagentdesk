@@ -9,10 +9,12 @@ import {
   identity,
   multiply,
   translate,
+  type Bounds,
   type RenderMatrix,
 } from "./matrix";
 import {
   absoluteBoxOf,
+  absoluteRenderBoundsOf,
   clipsContent,
   effectsOf,
   isMask,
@@ -24,6 +26,7 @@ import {
 } from "./node-props";
 import { resolvePaintStyle, isDiamond, diamondClip } from "./paints";
 import { fillShapes, strokeShapes, clipPathOf, type Shape } from "./shapes";
+import { newPath, type RenderPath } from "./render-path";
 import {
   drawDropShadows,
   drawInnerShadows,
@@ -32,7 +35,7 @@ import {
   visibleEffects,
 } from "./effects";
 import { unsupportedChildFeatures, unsupportedFeatures } from "./unsupported";
-import { drawTextNode } from "./text";
+import { drawTextNode, textNeedsRasterFallback } from "./text";
 import type { MissingSink } from "./missing";
 import type { FigmaCanvasContext, FigmaRenderOptions } from "./types";
 
@@ -88,12 +91,18 @@ function setNodeTransform(state: DrawState, m: RenderMatrix): void {
   state.ctx.setTransform(c.a, c.b, c.c, c.d, c.e, c.f);
 }
 
-/** True when the node's absolute box lies entirely outside the render viewport. */
+/**
+ * True when nothing the node paints lies inside the render viewport. The drawn box is
+ * `absoluteRenderBounds` when present — it carries shadow/effect outsets beyond the layout box
+ * and matches where `fallbackPlacementBox` maps raster bytes — so a node reachable only by its
+ * outset stays visible instead of being culled on its layout box (ADR-0042 review).
+ */
 function culled(state: DrawState, node: FigmaNode, transform: RenderMatrix | null): boolean {
   const viewport = state.options.viewport;
   if (!viewport) return false;
   const size = nodeSize(node);
   const box =
+    absoluteRenderBoundsOf(node) ??
     absoluteBoxOf(node) ??
     (transform && size.width > 0 && size.height > 0
       ? boundsOfRect(transform, size.width, size.height)
@@ -102,22 +111,64 @@ function culled(state: DrawState, node: FigmaNode, transform: RenderMatrix | nul
   return !boundsIntersect(box, viewport);
 }
 
-function drawFallback(state: DrawState, node: FigmaNode, transform: RenderMatrix | null): void {
-  const raster = state.options.fallbackForNode(node.id);
+function drawFallback(
+  state: DrawState,
+  node: FigmaNode,
+  transform: RenderMatrix | null,
+  inherited: number,
+): void {
+  // ADR-0042 backdrop rungs: the hint is decided from node data BEFORE the getter runs — an
+  // asset request is queued at call time, so a missing/late hint would ask for the wrong rung.
+  // Only a VISIBLE BACKGROUND_BLUR marks the request; ordinary fallbacks keep the two-argument
+  // call so pre-hint mocks (exact-arity assertions) stay untouched.
+  const backdrop = visibleEffects(effectsOf(node)).some(
+    (effect) => effect.type === "BACKGROUND_BLUR",
+  );
+  const raster = backdrop
+    ? state.options.fallbackForNode(node.id, node.type, { backgroundBlur: true })
+    : state.options.fallbackForNode(node.id, node.type);
   if (!raster) {
     state.missing.addFallback(node.id);
+    if (node.type === "TEXT") state.missing.addTextFallback(node.id);
     return;
   }
-  const box = absoluteBoxOf(node) ?? (transform ? boundsOfRect(transform, ...wh(node)) : null);
+  const box = fallbackPlacementBox(state, node, transform);
   if (!box) return;
   const { ctx } = state;
   ctx.save();
   // The raster covers the node's absolute box in Figma space; the camera turns that into pixels.
   const c = multiply(state.camera, translate(box.x, box.y));
   ctx.setTransform(c.a, c.b, c.c, c.d, c.e, c.f);
-  ctx.globalAlpha = nodeOpacity(node);
+  // ADR-0042 G1 (controlled proof, render-quality/export-alpha-proof.json): bytes Figma exports
+  // already composite the node's own opacity — a 0.12 GROUP carries alphaMax 31/255, so the old
+  // `nodeOpacity(node)` multiplication dropped it to 3/255. Only the ancestor chain, which the
+  // export does not include, composites here.
+  ctx.globalAlpha = Math.min(1, Math.max(0, inherited));
   ctx.drawImage(raster, 0, 0, box.width, box.height);
   ctx.restore();
+}
+
+/**
+ * Where the fallback bytes sit in Figma space. Default-cropped exports (every legacy request,
+ * and all non-TEXT PNG) are cut to the rendered ink box, so they map onto `absoluteRenderBounds`
+ * — the layout box stretches ink-cropped bytes and clips shadow outsets (ADR-0042 G2 proof: a
+ * 44×44 shadow frame exports 2×72×72). W10's new-text path requests `use_absolute_bounds=true`
+ * bytes (flag), which map 1:1 onto `absoluteBoundingBox`. Nodes with no absolute box (REST
+ * `geometry=paths` leaves) are placed through their transform; render bounds missing fall back to
+ * the bounding box, the one disclosed approximation on this path.
+ */
+function fallbackPlacementBox(
+  state: DrawState,
+  node: FigmaNode,
+  transform: RenderMatrix | null,
+): Bounds | null {
+  const rendered = absoluteRenderBoundsOf(node);
+  const layout = absoluteBoxOf(node);
+  const inferred = transform ? boundsOfRect(transform, ...wh(node)) : null;
+  if (node.type === "TEXT" && state.options.fallbackTextUsesAbsoluteBounds === true) {
+    return layout ?? rendered ?? inferred;
+  }
+  return rendered ?? layout ?? inferred;
 }
 
 function wh(node: FigmaNode): [number, number] {
@@ -191,37 +242,114 @@ function drawStrokes(state: DrawState, node: FigmaNode, alpha: number): void {
   if (shapes.length === 0) return;
   const { ctx, options } = state;
   const { width, height } = nodeSize(node);
+  const baked = shapes.some((shape) => shape.baked);
   ctx.save();
-  ctx.lineWidth = settings.weight;
-  ctx.lineCap = toCanvasCap(settings.cap);
-  ctx.lineJoin = toCanvasJoin(settings.join);
-  if (settings.dashes.length > 0) ctx.setLineDash(settings.dashes);
+  if (!baked) {
+    ctx.lineWidth = settings.weight;
+    ctx.lineCap = toCanvasCap(settings.cap);
+    ctx.lineJoin = toCanvasJoin(settings.join);
+    if (settings.dashes.length > 0) ctx.setLineDash(settings.dashes);
+  }
   for (const paint of paints) {
     const result = resolvePaintStyle(ctx, paint, width, height, options.imageForRef);
     if (!result || "missing" in result) {
       if (result && "missing" in result) state.missing.addImage(result.missing);
       continue;
     }
-    ctx.strokeStyle = result.style;
+    // Save/restore per paint: without it a MULTIPLY blend (or any state) leaks into the
+    // following NORMAL paint in the same stroke stack.
+    ctx.save();
     ctx.globalAlpha = (paint.opacity ?? 1) * alpha;
     applyPaintBlend(ctx, paint.blendMode);
-    for (const shape of shapes) strokeShape(ctx, shape, settings.align);
+    if (baked && settings.align !== "CENTER")
+      applyBakedAlignClip(ctx, fillShapes(node), settings.align, width, height, settings.weight);
+    for (const shape of shapes) {
+      // Figma's strokeGeometry entries are the final outline: width, cap, join and dashes are
+      // already baked into the path, so it is filled with its winding rule, not stroked.
+      if (baked) {
+        ctx.fillStyle = result.style;
+        ctx.fill(shape.path, shape.rule);
+      } else {
+        ctx.strokeStyle = result.style;
+        strokeShape(ctx, shape, settings, width, height);
+      }
+    }
+    ctx.restore();
   }
   ctx.restore();
 }
 
-/** strokeAlign: CENTER strokes normally; INSIDE/OUTSIDE clip to the shape and double the width. */
-function strokeShape(ctx: FigmaCanvasContext, shape: Shape, align: string): void {
-  if (align === "INSIDE" || align === "OUTSIDE") {
+/**
+ * Applies INSIDE/OUTSIDE semantics to a baked strokeGeometry band. Figma bakes the band
+ * spanning ±weight around the outline, so the align is enforced by clipping (source PNG4:
+ * a 1px INSIDE border covers exactly the inner half; unclipped it paints 2px straddling
+ * the edge). Only mathematically proven-safe branches draw vectors here — real-pixel probes
+ * (probe-w7-review-clipsemantics.mjs → w7-review-clipsemantics.json) pin why the rest
+ * cannot: ctx.clip INTERSECTS, and a merged path is NOT a union (merged evenodd islands
+ * XOR their overlap; merged nonzero can cancel opposite-winding overlaps to zero), so
+ * multi-outline INSIDE is a fallback branch while a single fill outline clips exactly
+ * under its own rule. And [rect, path] clipped "nonzero" keeps a same-winding shape
+ * INSIDE the clip (winding 2 ≠ 0): only the evenodd inverse complements, so baked OUTSIDE
+ * over any nonzero fill is a fallback branch too; evenodd-only outlines keep per-outline
+ * inverse clips — intersecting complements equals the complement of the union (De Morgan),
+ * exact for any outlines, with the band filled exactly once (no double alpha). A
+ * fallback-classified node reaching this function means the caller supplied no raster; it
+ * then draws unclipped — a straddling band beats an invisible one.
+ */
+function applyBakedAlignClip(
+  ctx: FigmaCanvasContext,
+  outlines: Shape[],
+  align: string,
+  width: number,
+  height: number,
+  weight: number,
+): void {
+  if (outlines.length === 0) return;
+  if (align === "INSIDE") {
+    if (outlines.length > 1) return;
+    const [outline] = outlines;
+    ctx.clip(outline.path, outline.rule);
+    return;
+  }
+  if (outlines.every((outline) => outline.rule === "evenodd")) {
+    for (const outline of outlines)
+      ctx.clip(inverseShape(outline, width, height, weight), "evenodd");
+  }
+}
+
+function strokeShape(
+  ctx: FigmaCanvasContext,
+  shape: Shape,
+  settings: { align: string; weight: number },
+  width: number,
+  height: number,
+): void {
+  const outside = settings.align === "OUTSIDE";
+  if (settings.align === "INSIDE" || outside) {
     const current = ctx.lineWidth;
     ctx.save();
-    ctx.clip(shape.path, shape.rule);
+    if (outside) {
+      // Clip to the shape's COMPLEMENT inside a generous rect (evenodd subtracts the shape):
+      // stroking at double width then keeps only the half that grows past the outline.
+      // Clipping to the interior — the INSIDE trick — would draw an inner ring instead.
+      ctx.clip(inverseShape(shape, width, height, current), "evenodd");
+    } else {
+      ctx.clip(shape.path, shape.rule);
+    }
     ctx.lineWidth = current * 2;
     ctx.stroke(shape.path);
     ctx.restore();
     return;
   }
   ctx.stroke(shape.path);
+}
+
+function inverseShape(shape: Shape, width: number, height: number, reach: number): RenderPath {
+  const pad = Math.max(reach, 1) + 1;
+  const path = newPath();
+  path.rect(-pad, -pad, width + pad * 2, height + pad * 2);
+  path.addPath(shape.path);
+  return path;
 }
 
 function toCanvasCap(cap: string): CanvasLineCap {
@@ -236,7 +364,7 @@ function toCanvasJoin(join: string): CanvasLineJoin {
   return "miter";
 }
 
-function drawChildren(state: DrawState, node: FigmaNode): void {
+function drawChildren(state: DrawState, node: FigmaNode, inherited: number): void {
   const children = node.children ?? [];
   if (children.length === 0) return;
   const { ctx } = state;
@@ -248,7 +376,9 @@ function drawChildren(state: DrawState, node: FigmaNode): void {
       applyMaskClip(state, resolved);
       continue;
     }
-    drawNode(state, resolved);
+    // Children compose with the parent's effective alpha: an assignment per child (the old
+    // line) dropped the inherited value, so a 0.12 group drew its bars at full strength.
+    drawNode(state, resolved, inherited);
   }
   ctx.restore();
 }
@@ -262,21 +392,29 @@ function applyMaskClip(state: DrawState, mask: FigmaNode): void {
   for (const shape of shapes) state.ctx.clip(shape.path, shape.rule);
 }
 
-function drawNode(state: DrawState, node: FigmaNode): void {
+function drawNode(state: DrawState, node: FigmaNode, inherited: number): void {
   if (node.visible === false) return;
   if (typeof node.type === "string" && CONTAINER_TYPES.has(node.type)) {
-    drawChildren(state, node);
+    drawChildren(state, node, inherited);
     return;
   }
   const transform = nodeTransform(node);
   if (culled(state, node, transform)) return;
   const features = [...unsupportedFeatures(node), ...unsupportedChildFeatures(node)];
-  if (features.length > 0) {
-    drawFallback(state, node, transform);
+  // A TEXT node whose required family/style is unavailable cannot be drawn faithfully: it goes
+  // through the same per-node raster fallback as unsupported features (spec 32.5.1), while the
+  // font itself stays on the missing report so the caller can load it and re-render as vector.
+  const textRaster =
+    node.type === "TEXT" && textNeedsRasterFallback(node, state.options, state.missing);
+  if (features.length > 0 || textRaster) {
+    drawFallback(state, node, transform, inherited);
     return;
   }
   if (!transform) return;
-  const alpha = nodeOpacity(node);
+  // Effective alpha multiplies down the tree (spec 32.5.1). Overlapping siblings under a
+  // reduced-opacity container are already routed to the per-node fallback by CONTAINER_OPACITY,
+  // which is where group compositing differs from multiplication (ADR-0042).
+  const alpha = Math.min(1, Math.max(0, inherited)) * nodeOpacity(node);
   if (alpha <= 0) return;
   const { ctx } = state;
   ctx.save();
@@ -294,7 +432,7 @@ function drawNode(state: DrawState, node: FigmaNode): void {
     drawFills(state, node, alpha);
     drawStrokes(state, node, alpha);
   }
-  drawChildren(state, node);
+  drawChildren(state, node, alpha);
   resetLayerBlur(ctx, blurred);
   ctx.restore();
 }
@@ -306,6 +444,6 @@ export function drawTree(state: DrawState, root: FigmaNode): void {
   // the caller's baseline between subtrees so one frame's node transform cannot leak into the next.
   const c = state.camera;
   ctx.setTransform(c.a, c.b, c.c, c.d, c.e, c.f);
-  drawNode(state, resolveNode(state, root));
+  drawNode(state, resolveNode(state, root), 1);
   ctx.restore();
 }

@@ -27,7 +27,7 @@
       "opacity": 1,
       "blendMode": "NORMAL",
       "isMask": true,
-      "maskType": "LUMINOSITY",
+      "maskType": "LUMINANCE",
       "absoluteBoundingBox": { "x": 0, "y": 0, "width": 50, "height": 50 },
       "absoluteTransform": [
         [1, 0, 0],

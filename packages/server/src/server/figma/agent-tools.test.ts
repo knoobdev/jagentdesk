@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import pino from "pino";
 import type { FigmaService } from "./service.js";
 import type { FigmaContext, FigmaNode } from "./context.js";
+import { figmaContent } from "./handlers/content.js";
 import {
   createFigmaAgentTools,
   figmaNodeToCss,
@@ -35,6 +36,7 @@ interface PermissionAsk {
 
 interface Harness {
   ctx: FigmaContext;
+  pushes: ReturnType<typeof fakeFigmaContext>["pushes"];
   link: FakeFigmaLink;
   rest: FakeFigmaRest;
   store: FakeFigmaStore;
@@ -66,7 +68,7 @@ function setup(opts?: {
   if (opts?.linked !== false) link.setLinked(FILE_KEY);
   if (opts?.runScriptEnabled !== undefined) link.runScriptEnabled = opts.runScriptEnabled;
   if (opts?.node) link.setNode(FILE_KEY, opts.node);
-  const { ctx } = fakeFigmaContext({ jagentdeskHome: home, logger, store, rest, link });
+  const { ctx, pushes } = fakeFigmaContext({ jagentdeskHome: home, logger, store, rest, link });
 
   const asks: PermissionAsk[] = [];
   let decision: { behavior: "allow" | "deny" } = { behavior: "allow" };
@@ -83,6 +85,7 @@ function setup(opts?: {
   const byName = new Map(tools.map((t) => [t.name, t]));
   const harness: Harness = {
     ctx,
+    pushes,
     link,
     rest,
     store,
@@ -174,14 +177,14 @@ describe("classification (spec 32.7)", () => {
     }
   });
 
-  it("total tool surface is 113", () => {
+  it("total tool surface is 116", () => {
     const h = setup();
     const tools = createFigmaAgentTools({
       service: { ctx: h.ctx } as unknown as FigmaService,
       callerAgentId: "agent-1",
       requestPermission: async () => ({ behavior: "allow" as const }),
     });
-    expect(tools.length).toBe(113);
+    expect(tools.length).toBe(116);
   });
 });
 
@@ -464,5 +467,192 @@ describe("figmaNodeToCss", () => {
       type: "SECTION",
     } as unknown as FigmaNode);
     expect(css).toContain("/* 7:1 Empty: nothing expressible as CSS */");
+  });
+});
+
+// ── remote write tools (spec 32.7 / ADR-0040) ─────────────────────────────────
+
+class FakeRemoteGateway {
+  status: { state: string; message?: string; identityText?: string } = { state: "disconnected" };
+  readonly executeCalls: Record<string, unknown>[] = [];
+  readonly readCalls: Record<string, unknown>[] = [];
+  executeOutcome: unknown = {
+    result: { content: [{ type: "text", text: "edited 1:2" }] },
+    readback: { content: [], structuredContent: { version: "v-new" } },
+    readbackAvailable: true,
+  };
+  readResult: unknown = { content: [{ type: "text", text: "meta" }] };
+
+  async getStatus(): Promise<unknown> {
+    return this.status;
+  }
+  async authBegin(): Promise<unknown> {
+    return { status: this.status };
+  }
+  async disconnect(): Promise<void> {}
+  async readMetadata(fileKey: string, nodeId?: string): Promise<unknown> {
+    this.readCalls.push({ fileKey, nodeId });
+    return this.readResult;
+  }
+  async execute(input: Record<string, unknown>): Promise<unknown> {
+    this.executeCalls.push(input);
+    return this.executeOutcome;
+  }
+  async dispose(): Promise<void> {}
+}
+
+describe("remote write tools (ADR-0040)", () => {
+  const MAX_CODE = 64 * 1024;
+
+  function remoteHarness(): { h: Harness; gateway: FakeRemoteGateway } {
+    const h = setup();
+    const gateway = new FakeRemoteGateway();
+    h.ctx.remote = gateway as never;
+    return { h, gateway };
+  }
+
+  afterEach(() => {
+    figmaContent.watches.dispose();
+  });
+
+  it("classifies execute as permission-gated and status/read as auto-run reads", () => {
+    const { h } = remoteHarness();
+    expect(h.tool("figma_remote_execute").requiresPermission).toBe(true);
+    expect(h.tool("figma_remote_status").requiresPermission).toBe(false);
+    expect(h.tool("figma_remote_read").requiresPermission).toBe(false);
+    const read = new Set(FIGMA_READ_TOOL_NAMES);
+    expect(read.has("figma_remote_status")).toBe(true);
+    expect(read.has("figma_remote_read")).toBe(true);
+    expect(read.has("figma_remote_execute")).toBe(false);
+  });
+
+  it("raises the permission card before the native execute, showing file, description and code", async () => {
+    const { h, gateway } = remoteHarness();
+    const res = await h.run("figma_remote_execute", {
+      fileKey: FILE_KEY,
+      code: "figma.currentPage.name = 'x'",
+      description: "rename page",
+    });
+    expect(h.asks).toHaveLength(1);
+    expect(h.asks[0]?.name).toBe("figma_remote_execute");
+    expect(res.isError ?? false).toBe(false);
+    expect(gateway.executeCalls).toEqual([
+      { fileKey: FILE_KEY, code: "figma.currentPage.name = 'x'", description: "rename page" },
+    ]);
+  });
+
+  it("denial means no execute on the native side at all", async () => {
+    const { h, gateway } = remoteHarness();
+    h.decide("deny");
+    const res = await h.run("figma_remote_execute", {
+      fileKey: FILE_KEY,
+      code: "x",
+      description: "d",
+    });
+    expect(h.asks).toHaveLength(1);
+    expect(gateway.executeCalls).toHaveLength(0);
+    expect(res.content[0]?.text).toMatch(/Denied/);
+  });
+
+  it("refuses oversized UTF-8 code before the permission card", async () => {
+    const { h, gateway } = remoteHarness();
+    const res = await h.run("figma_remote_execute", {
+      fileKey: FILE_KEY,
+      code: "é".repeat(MAX_CODE),
+      description: "d",
+    });
+    expect(h.asks).toHaveLength(0);
+    expect(gateway.executeCalls).toHaveLength(0);
+    expect(res.isError).toBe(true);
+    expect(res.content[0]?.text).toMatch(/UTF-8 bytes/);
+  });
+
+  it("refuses a file that is not added to JAgentDesk without executing", async () => {
+    const { h, gateway } = remoteHarness();
+    const res = await h.run("figma_remote_execute", {
+      fileKey: "unknown-key",
+      code: "x",
+      description: "d",
+    });
+    expect(gateway.executeCalls).toHaveLength(0);
+    expect(res.isError).toBe(true);
+    expect(res.content[0]?.text).toMatch(/has not been added/);
+  });
+
+  it("pushes the refreshed version to watchers after a successful remote write", async () => {
+    const { h } = remoteHarness();
+    const watchId = figmaContent.watches.watch(h.ctx, FILE_KEY, "s-1");
+    const res = await h.run("figma_remote_execute", {
+      fileKey: FILE_KEY,
+      code: "x",
+      description: "d",
+    });
+    expect(res.isError ?? false).toBe(false);
+    expect(h.pushes).toContainEqual({
+      type: "figma.file.changed",
+      watchId,
+      fileKey: FILE_KEY,
+      version: "v-new",
+      source: "rest",
+    });
+    figmaContent.watches.unwatch(watchId);
+  });
+
+  it("reports UNVERIFIED (never Saved) when the metadata readback failed", async () => {
+    const { h, gateway } = remoteHarness();
+    gateway.executeOutcome = {
+      result: { content: [{ type: "text", text: "ok" }] },
+      readbackAvailable: false,
+    };
+    const res = await h.run("figma_remote_execute", {
+      fileKey: FILE_KEY,
+      code: "x",
+      description: "d",
+    });
+    expect(res.content[0]?.text).toMatch(/UNVERIFIED/);
+    expect(res.content[0]?.text).not.toMatch(/Saved\b/);
+  });
+
+  it("tells the agent to re-read affected IDs when the readback verified", async () => {
+    const { h } = remoteHarness();
+    const res = await h.run("figma_remote_execute", {
+      fileKey: FILE_KEY,
+      code: "x",
+      description: "d",
+    });
+    expect(res.content[0]?.text).toMatch(/readback verified/i);
+    expect(res.content[0]?.text).toMatch(/figma_remote_read/);
+  });
+
+  it("status and read never ask permission and read the connector state", async () => {
+    const { h, gateway } = remoteHarness();
+    gateway.status = { state: "needs_auth", message: 'Ask the user to tap "Connect editing".' };
+    const status = await h.run("figma_remote_status", {});
+    expect(h.asks).toHaveLength(0);
+    expect(status.content[0]?.text).toMatch(/needs_auth/);
+    expect(status.content[0]?.text).toMatch(/Connect editing/);
+    const read = await h.run("figma_remote_read", { fileKey: FILE_KEY, nodeId: "1:2" });
+    expect(h.asks).toHaveLength(0);
+    expect(gateway.readCalls).toEqual([{ fileKey: FILE_KEY, nodeId: "1:2" }]);
+    expect(read.isError ?? false).toBe(false);
+  });
+
+  it("execute requires an agent-scoped tool session", async () => {
+    const h = setup();
+    h.ctx.remote = new FakeRemoteGateway() as never;
+    const byName = new Map(
+      createFigmaAgentTools({
+        service: { ctx: h.ctx } as never,
+        callerAgentId: null,
+        requestPermission: async () => ({ behavior: "allow" as const }),
+      }).map((t) => [t.name, t]),
+    );
+    const tool = byName.get("figma_remote_execute")!;
+    const res = (await tool.handler(
+      { fileKey: FILE_KEY, code: "x", description: "d" },
+      undefined as never,
+    )) as Awaited<ReturnType<Harness["run"]>>;
+    expect(res.isError).toBe(true);
+    expect(res.content[0]?.text).toMatch(/agent-scoped/);
   });
 });

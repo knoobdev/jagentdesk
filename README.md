@@ -120,6 +120,21 @@ with a few deliberate boundaries:
 
 ## ✨ New in this release
 
+### Figma: clearer designs and scoped prototype playback (v0.9.55)
+
+- **Browse files** from the desktop Figma sidebar; the isolated picker uses your Figma website
+  session, while design data uses the daemon's own authorized connection.
+- **Sections and large files:** see nested frames, expand metadata when needed and load detailed
+  content around the viewport. Loading and failures are shown explicitly.
+- **Sharper rendering:** outlined SVG text, resolution-aware fallbacks and fixes for bounds,
+  opacity, gradients and strokes. Canvas and prototype playback run inside JAgentDesk without
+  requiring Figma Desktop or Link.
+- **Prototype playback:** load the active frames, reuse versioned cache entries and free unused
+  assets; show incomplete content and Retry instead of silently leaving a partial frame.
+- **Current limits:** cold loading can still take tens of seconds. Website file selection,
+  writes to the original file and presence/follow are not yet verified end to end; this release
+  does not provide full Figma Design parity. See the [changelog](CHANGELOG.md#v0955--2026-11-06).
+
 ### Figma sign-in and iPhone touch fixes (v0.9.54)
 
 - **Figma sign-in:** fixes React error #185 after login by handling the completed sign-in once,

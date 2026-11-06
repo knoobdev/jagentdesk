@@ -121,6 +121,13 @@ export const FigmaFrameSummarySchema = z.object({
   type: z.string(),
   bounds: FigmaRectSchema,
   backgroundColor: z.string().optional(), // #RRGGBBAA
+  // ADR-0039 (32.5.1): SECTION membership and whether the outline already carries the node's
+  // direct children. Frames separated out of a SECTION carry its `parentId`; `childrenLoaded`
+  // only appears on SECTIONs — false marks one cut off at the depth=3 boundary, whose viewer
+  // reads its children with a depth=1 node request instead of the whole subtree. Everything
+  // else omits both fields; parent-first draw order and sibling order are producer-side.
+  parentId: z.string().optional(),
+  childrenLoaded: z.boolean().optional(),
 });
 export type FigmaFrameSummary = z.infer<typeof FigmaFrameSummarySchema>;
 
@@ -159,6 +166,25 @@ export const FigmaVersionSchema = z.object({
 });
 export type FigmaVersion = z.infer<typeof FigmaVersionSchema>;
 
+// ADR-0041: region-geometry for pinned comments. Figma's `Region` / `FrameOffsetRegion`
+// client_meta carries `region_width`, `region_height`, `comment_pin_corner`; JAgentDesk must
+// preserve that geometry instead of drawing a region as a point. Dimensions are positive and
+// finite; the pin corner is one of the four rectangle corners the pin anchors to.
+export const FigmaCommentPinCornerSchema = z.enum([
+  "top-left",
+  "top-right",
+  "bottom-left",
+  "bottom-right",
+]);
+export type FigmaCommentPinCorner = z.infer<typeof FigmaCommentPinCornerSchema>;
+
+export const FigmaCommentRegionSchema = z.object({
+  width: z.number().finite().positive(),
+  height: z.number().finite().positive(),
+  pinCorner: FigmaCommentPinCornerSchema,
+});
+export type FigmaCommentRegion = z.infer<typeof FigmaCommentRegionSchema>;
+
 export const FigmaCommentSchema = z.object({
   id: z.string(),
   parentId: z.string().nullable(),
@@ -169,6 +195,9 @@ export const FigmaCommentSchema = z.object({
   nodeId: z.string().nullable(),
   // Position relative to the node (or canvas when nodeId is null).
   offset: z.object({ x: z.number(), y: z.number() }).nullable(),
+  // ADR-0041: null on point pins in new responses; optional so a payload from a pre-ADR-0041
+  // host (field absent) parses and reads as "no region". Never guessed geometry.
+  region: FigmaCommentRegionSchema.nullable().optional(),
   reactions: z.array(z.object({ emoji: z.string(), count: z.number(), mine: z.boolean() })),
   mine: z.boolean(),
 });
@@ -477,6 +506,11 @@ export const FigmaFileNodesRequestSchema = req("figma.file.nodes.request", {
   fileKey,
   ids: z.array(z.string()).min(1).max(50),
   version: z.string().optional(),
+  // ADR-0039 (32.9): direct children only, for reading SECTION contents without their subtrees.
+  // The handler requires an explicit nonempty version with this option — a schema-level refine
+  // here would widen the old contract, so the check lives server-side. Old requests omit it and
+  // still receive the full tree; the response shape is unchanged.
+  depth: z.literal(1).optional(),
 });
 export const FigmaComponentMetaSchema = z.object({
   key: z.string(),
@@ -509,7 +543,18 @@ export const FigmaFileRenderRequestSchema = req("figma.file.render.request", {
   fileKey,
   ids: z.array(z.string()).min(1).max(20),
   scale: z.number().min(0.1).max(4),
-  format: z.enum(["png", "jpg"]).default("png"),
+  // ADR-0042: `svg` is the text-outline fallback format (Figma draws the text as paths, no
+  // substitute font). It rides the existing byte contract; clients send it, and
+  // `useAbsoluteBounds`, only when `server_info.features.figmaRenderFidelity` is advertised.
+  // Both MUST carry a non-empty explicit `version` — the fidelity path is version-pinned REST,
+  // never Live Link — and the daemon refuses the request before any REST call when it is absent.
+  format: z.enum(["png", "jpg", "svg"]).default("png"),
+  // ADR-0042: true maps Figma `use_absolute_bounds=true` — the raster covers the node's
+  // absoluteBoundingBox. The client sets it ONLY on the new TEXT fallback path (SVG, or its
+  // PNG fallback): measured on real nodes, absolute crops a shadow's outset (44×44+shadow
+  // exports 88×88, not the 144×144 the default crop gives). The server never forces it —
+  // absent keeps the old crop semantics for every existing client and for export.
+  useAbsoluteBounds: z.boolean().optional(),
   version: z.string().optional(),
 });
 export const FigmaFileRenderResponseSchema = res("figma.file.render.response", {
@@ -535,6 +580,19 @@ export const FigmaFilePrototypeRequestSchema = req("figma.file.prototype.request
   pageId: z.string().optional(),
 });
 export const FigmaFilePrototypeResponseSchema = res("figma.file.prototype.response", {
+  prototype: FigmaPrototypeSchema.nullable(),
+});
+// ADR-0037: playback reads only the visible frames at the outline's immutable version.
+// `.min(1)` on both fields is load-bearing: the versioned node cache treats an empty version or
+// an empty frame id as absent (latest / no-op), which defeats snapshot pinning. Old RPCs keep
+// their plain strings unchanged.
+export const FigmaFilePlaybackRequestSchema = req("figma.file.playback.request", {
+  fileKey,
+  frameIds: z.array(z.string().min(1)).min(1).max(10),
+  version: z.string().min(1),
+});
+export const FigmaFilePlaybackResponseSchema = res("figma.file.playback.response", {
+  frames: z.record(z.string(), FigmaNodeSchema),
   prototype: FigmaPrototypeSchema.nullable(),
 });
 export const FigmaFileWatchRequestSchema = req("figma.file.watch.request", { fileKey });
@@ -575,6 +633,10 @@ export const FigmaCommentsPostRequestSchema = req("figma.file.comments.post.requ
   parentId: z.string().optional(),
   nodeId: z.string().optional(),
   offset: z.object({ x: z.number(), y: z.number() }).optional(),
+  // ADR-0041: region pins ride the existing endpoint/token/permissions; the client sends this
+  // only when the host advertises `server_info.features.figmaCommentRegions`. The handler
+  // requires an explicit finite `offset` alongside it — a region never gets a made-up location.
+  region: FigmaCommentRegionSchema.optional(),
 });
 export const FigmaCommentsPostResponseSchema = res("figma.file.comments.post.response", {
   comment: FigmaCommentSchema.nullable(),
@@ -669,6 +731,69 @@ export const FigmaBudgetGetResponseSchema = res("figma.budget.get.response", {
   budget: FigmaBudgetSchema.nullable(),
 });
 
+// ── Remote MCP writes (32.7 / ADR-0040) ──────────────────────────────────────
+// The daemon's connector drives a real Codex app-server as Figma's supported MCP client. No
+// model is added and the chat provider is untouched; Codex owns the native OAuth flow and the
+// credential vault, so no secret travels in these DTOs. The optional fields stay `.optional()`
+// per ADR and are additionally `.nullable()` because FigmaSession's error path fills an absent
+// optional with null (the nodes/prototype DTOs above follow the same convention).
+
+export const FigmaRemoteStatusSchema = z.object({
+  // `connected` means the connector is live with Figma — not that a seat or edit right exists
+  // for every file (ADR-0040). `unavailable` covers a missing/unsupported Codex executable.
+  state: z.enum(["disconnected", "connecting", "needs_auth", "connected", "unavailable", "error"]),
+  message: z.string().nullable().optional(),
+  identityText: z.string().nullable().optional(), // from the connector's `whoami`, when readable
+});
+export type FigmaRemoteStatus = z.infer<typeof FigmaRemoteStatusSchema>;
+
+// A raw MCP tool result (get_metadata / use_figma) passed through verbatim. No token, no auth
+// header, no native config: JAgentDesk never copies Codex's native credentials (ADR-0040).
+export const FigmaRemoteCallResultSchema = z.object({
+  content: z.array(z.unknown()),
+  structuredContent: z.unknown().optional(),
+  isError: z.boolean().nullable().optional(),
+});
+export type FigmaRemoteCallResult = z.infer<typeof FigmaRemoteCallResultSchema>;
+
+export const FigmaRemoteStatusRequestSchema = req("figma.remote.status.request", {});
+export const FigmaRemoteStatusResponseSchema = res("figma.remote.status.response", {
+  status: FigmaRemoteStatusSchema,
+});
+export const FigmaRemoteAuthBeginRequestSchema = req("figma.remote.auth.begin.request", {});
+export const FigmaRemoteAuthBeginResponseSchema = res("figma.remote.auth.begin.response", {
+  status: FigmaRemoteStatusSchema,
+  // HTTPS Figma URL the app opens in the system browser after a user action; never opened
+  // automatically on mount/query or by an agent tool call (ADR-0040).
+  authorizationUrl: z.string().nullable().optional(),
+});
+export const FigmaRemoteDisconnectRequestSchema = req("figma.remote.disconnect.request", {});
+export const FigmaRemoteDisconnectResponseSchema = res("figma.remote.disconnect.response", {
+  status: FigmaRemoteStatusSchema,
+});
+export const FigmaRemoteReadRequestSchema = req("figma.remote.read.request", {
+  fileKey: z.string().min(1),
+  nodeId: z.string().optional(),
+});
+export const FigmaRemoteReadResponseSchema = res("figma.remote.read.response", {
+  result: FigmaRemoteCallResultSchema,
+});
+export const FigmaRemoteExecuteRequestSchema = req("figma.remote.execute.request", {
+  fileKey: z.string().min(1),
+  // 64 KiB is measured in UTF-8 bytes by the backend handler; the schema caps characters only,
+  // keeping this a pure declaration (32.9).
+  code: z.string().max(65536),
+  description: z.string().min(1).max(1000),
+});
+export const FigmaRemoteExecuteResponseSchema = res("figma.remote.execute.response", {
+  result: FigmaRemoteCallResultSchema,
+  // Metadata re-read after a successful execute, separate from the tool reply. A failed re-read
+  // means `unverified`, never "Saved"; `readbackAvailable` only attests the re-read worked, not
+  // that the design request is correct (ADR-0040).
+  readback: FigmaRemoteCallResultSchema.nullable().optional(),
+  readbackAvailable: z.boolean(),
+});
+
 // Mobile: a desktop runs the browser step for a delegated sign-in.
 export const FigmaOAuthDelegationSchema = z.object({
   type: z.literal("figma.oauth.delegation"),
@@ -701,6 +826,7 @@ export const FigmaRequestSchemas = [
   FigmaFileExportRequestSchema,
   FigmaFileVersionsRequestSchema,
   FigmaFilePrototypeRequestSchema,
+  FigmaFilePlaybackRequestSchema,
   FigmaFileWatchRequestSchema,
   FigmaFileUnwatchRequestSchema,
   FigmaFontsGetRequestSchema,
@@ -719,6 +845,11 @@ export const FigmaRequestSchemas = [
   FigmaPendingDiscardRequestSchema,
   FigmaPendingApplyRequestSchema,
   FigmaBudgetGetRequestSchema,
+  FigmaRemoteStatusRequestSchema,
+  FigmaRemoteAuthBeginRequestSchema,
+  FigmaRemoteDisconnectRequestSchema,
+  FigmaRemoteReadRequestSchema,
+  FigmaRemoteExecuteRequestSchema,
 ] as const;
 
 export const FigmaResponseSchemas = [
@@ -744,6 +875,7 @@ export const FigmaResponseSchemas = [
   FigmaFileExportResponseSchema,
   FigmaFileVersionsResponseSchema,
   FigmaFilePrototypeResponseSchema,
+  FigmaFilePlaybackResponseSchema,
   FigmaFileWatchResponseSchema,
   FigmaFileUnwatchResponseSchema,
   FigmaFontsGetResponseSchema,
@@ -762,6 +894,11 @@ export const FigmaResponseSchemas = [
   FigmaPendingDiscardResponseSchema,
   FigmaPendingApplyResponseSchema,
   FigmaBudgetGetResponseSchema,
+  FigmaRemoteStatusResponseSchema,
+  FigmaRemoteAuthBeginResponseSchema,
+  FigmaRemoteDisconnectResponseSchema,
+  FigmaRemoteReadResponseSchema,
+  FigmaRemoteExecuteResponseSchema,
 ] as const;
 
 export const FigmaPushSchemas = [

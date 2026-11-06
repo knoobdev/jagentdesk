@@ -5,10 +5,82 @@ import type { FigmaBytes } from "@jagentdesk/protocol/figma/rpc-schemas";
 // figma.file.imageFills / figma.file.render / figma.fonts.get RPCs, so the caches stay pure and
 // the wire carries no Figma or S3 URLs. Decoded entries are DOM images on web/Electron; on
 // mobile the byte source feeds RN <Image> data URIs instead (canvas-view's native branch).
+// Retention is bounded by the paint: beginDraw()/endDraw() observe the keys a synchronous draw
+// actually used and reconcile everything else away, so panning cannot accumulate the world.
 
 export const MAX_REFS_PER_REQUEST = 20;
 
 export type LoadBytes = (ids: readonly string[]) => Promise<Record<string, FigmaBytes | null>>;
+
+/** Raster wire formats (ADR-0042). `svg` is the outlined-text fallback class. */
+export type RasterFormat = "png" | "svg";
+/** Export bounds semantics: Figma's default ink/render crop, or the full layout box. */
+export type RasterBounds = "crop" | "absolute";
+/** One raster request class (ADR-0042): rung + wire format + bounds semantics, never mixed.
+ *  The canvas hook and the prototype's keyed store both route through this single shape so a
+ *  read can never miss the cache its fetch went into. */
+export interface RasterSpec {
+  scale: number;
+  format: RasterFormat;
+  bounds: RasterBounds;
+}
+
+/**
+ * Quantized raster rung for a device scale (ADR-0042 resolution rule): the smallest integer
+ * scale that still delivers ≥ the device pixels per Figma unit the camera is drawing at,
+ * clamped to the API's 1..4. Quantizing to integers keeps the cache lattice finite (≤4 rungs
+ * per scope instead of one cache per zoom step). The 32 MP Figma cap is a server-side fact the
+ * ladder cannot outrun: at rung 4 a >2828px-long-edge node exceeds it and the daemon answers
+ * a clamped raster or a failure, never infinite sharpness.
+ */
+export function rasterRung(deviceScale: number): number {
+  if (!Number.isFinite(deviceScale) || deviceScale <= 0) return 2;
+  return Math.min(4, Math.max(1, Math.ceil(deviceScale)));
+}
+
+/**
+ * ADR-0042 backdrop export exception: Figma's PER-NODE PNG export of a node with a VISIBLE
+ * BACKGROUND_BLUR bakes no backdrop structure above this scale (pinned probe: at scale 2 the
+ * bytes match the composited full-frame reference within ~0.5/channel; at scales 3 and 4 the
+ * whole region is one flat color). Highest PROVEN-correct scale — the cap is a named
+ * API-compatibility workaround on the fidelity path, not a generic fixed-2.
+ */
+// COMPAT(figma-bgblur-raster-cap): added in the ADR-0042 backdrop round (2026-11); remove after
+// root re-verifies per-node BACKGROUND_BLUR exports above scale 2 against the composited frame.
+export const BACKGROUND_BLUR_MAX_RASTER_SCALE = 2;
+
+/** The rung a visible-BACKGROUND_BLUR fallback may ask: min(adaptive rung, proven-correct
+ *  scale). Never raises — low zooms keep the honest rung and share the ordinary crop cache.
+ *  The classification rides the renderer's `FigmaFallbackHint` (renderer/types.ts) passed at
+ *  the fallback getter — the single source of truth for which nodes the cap applies to. */
+export function backgroundBlurRasterRung(deviceScale: number): number {
+  return Math.min(rasterRung(deviceScale), BACKGROUND_BLUR_MAX_RASTER_SCALE);
+}
+
+/**
+ * Is this a NON-EMPTY pinned snapshot version (ADR-0042 contract with the daemon,
+ * packages/server/src/server/figma/handlers/content.ts): svg/useAbsoluteBounds are REFUSED
+ * without one. An empty or whitespace-only pin is therefore exactly the no-pin case — the
+ * whole quality path (SVG TEXT, adaptive rungs, new wire fields) stays off and the legacy
+ * scale-2 crop wire goes out untouched.
+ */
+export function isPinnedVersion(version: string | null): boolean {
+  return version !== null && version.trim() !== "";
+}
+
+/**
+ * Full cache namespace for one raster class (ADR-0042): format, bounds, scale and version all
+ * separate, so crop bytes never answer an absolute-bounds ask and an SVG never shares a
+ * ByteImageCache with the PNG of the same node at the same scale.
+ */
+export function rasterNamespace(
+  scale: number,
+  format: RasterFormat,
+  bounds: RasterBounds,
+  version: string | null,
+): string {
+  return `${scale}@${format}@${bounds}@${version ?? "live"}`;
+}
 
 /** The decoded-image surface the caches need (an HTMLImageElement on web, faked in tests). */
 export interface DecodedImageLike {
@@ -18,17 +90,34 @@ export interface DecodedImageLike {
 
 export type MakeImage = (dataUrl: string) => DecodedImageLike | null;
 
+/** Per-ref attempt state. The object itself is the attempt identity — see ByteImageCache. */
+interface RefRecord {
+  phase: "queued" | "loading" | "ready" | "failed";
+  image: DecodedImageLike | null;
+}
+
 export function bytesToDataUrl(bytes: FigmaBytes): string {
   return `data:${bytes.mimeType};base64,${bytes.dataBase64}`;
 }
 
 /** A ref/nodeId → decoded image cache with request coalescing at the wire's 20-id limit. */
 export class ByteImageCache {
-  private readonly images = new Map<string, DecodedImageLike>();
-  private readonly loading = new Set<string>();
-  private readonly failed = new Set<string>();
-  private readonly queued = new Set<string>();
+  /**
+   * One record per ref attempts ever made this scope. The RECORD OBJECT is the attempt identity:
+   * an async settle only commits while `records.get(ref)` is still the very record it started
+   * with, so a success/failure/decode from a retired (unobserved at endDraw) or recreated key can
+   * neither repopulate nor notify.
+   */
+  private readonly records = new Map<string, RefRecord>();
+  // Keys seen through get()/request() since the open beginDraw(). Every endDraw reconciles
+  // against it — no exempt rules: an unobserved decoded image, pending attempt or failed ref is
+  // retired, which is what bounds retention to the current view (spec 32.5.1).
+  private draw: Set<string> | null = null;
   private flushScheduled = false;
+  // Bumped by clear(). A settle from a batch issued before the clear belongs to a dead
+  // scope (reconnect, unmount, version switch): it must not repopulate the maps or notify
+  // the now-current generation, or every paint after a failure re-enters the fetch loop.
+  private generation = 0;
 
   constructor(
     private readonly loadBytes: LoadBytes,
@@ -36,79 +125,185 @@ export class ByteImageCache {
     private readonly onReady: () => void = () => undefined,
   ) {}
 
+  /**
+   * Open a synchronous paint for reconciliation. Idempotent while open (a second begin keeps the
+   * observation set). Standalone callers that never begin/end behave like before: entries simply
+   * accumulate until clear().
+   */
+  beginDraw(): void {
+    if (!this.draw) this.draw = new Set();
+  }
+
+  /**
+   * Close the paint and reconcile: every key the draw did NOT observe is retired — decoded
+   * images, pending attempts and failed refs alike. An empty draw clears everything. Returns the
+   * retired refs (diagnostics/tests); without an open draw it is a no-op.
+   */
+  endDraw(): Set<string> {
+    const observed = this.draw;
+    this.draw = null;
+    const retired = new Set<string>();
+    if (!observed) return retired;
+    for (const key of this.records.keys()) {
+      if (observed.has(key)) continue;
+      this.records.delete(key);
+      retired.add(key);
+    }
+    return retired;
+  }
+
   /** The decoded image for a ref, or null while it loads (loading starts on first miss). */
   get(ref: string): DecodedImageLike | null {
     if (!ref) return null;
-    const hit = this.images.get(ref);
-    if (hit) return hit;
-    if (!this.loading.has(ref) && !this.failed.has(ref)) this.request(ref);
+    this.observe(ref);
+    const record = this.records.get(ref);
+    if (record) return record.phase === "ready" ? record.image : null;
+    this.enqueue(ref);
+    this.scheduleFlush();
     return null;
   }
 
   /** Begin fetching refs; safe to call every frame. Batches never exceed 20 per request. */
   request(...refs: string[]): void {
-    let scheduled = false;
     for (const ref of refs) {
-      if (!ref || this.images.has(ref) || this.loading.has(ref) || this.queued.has(ref)) continue;
-      this.queued.add(ref);
-      scheduled = true;
+      if (!ref) continue;
+      // Observed even when already known: a visible failed ref must survive reconciliation, or
+      // every paint after the failure would refetch (the paint/network feedback loop).
+      this.observe(ref);
+      if (!this.records.has(ref)) this.enqueue(ref);
     }
-    if (scheduled && !this.flushScheduled) {
-      this.flushScheduled = true;
-      queueMicrotask(() => void this.flush());
-    }
+    this.scheduleFlush();
   }
 
+  /** Diagnostic: is a decoded image cached? Probing must not count as observing. */
   has(ref: string): boolean {
-    return this.images.has(ref);
+    return this.records.get(ref)?.phase === "ready";
+  }
+
+  /**
+   * Non-observing phase probe: what this cache currently knows about a ref, or null when it has
+   * never been asked. The fidelity pipeline uses "failed" to trigger its one-shot PNG downgrade
+   * — `get()` cannot answer that because it starts a fetch on a miss.
+   */
+  stateOf(ref: string): "queued" | "loading" | "ready" | "failed" | null {
+    return this.records.get(ref)?.phase ?? null;
+  }
+
+  /**
+   * Real ledger for the canvas's honest loading status (spec 32.5.1): counts of attempts not
+   * yet delivered (queued, fetching, or mid-decode) and terminal failures. No new state — a
+   * scan of the bounded record map; observing a key is NOT a probe here, so calling this never
+   * pins an entry across reconciliation.
+   */
+  status(): { pending: number; failed: number } {
+    let pending = 0;
+    let failed = 0;
+    for (const record of this.records.values()) {
+      if (record.phase === "failed") failed += 1;
+      else if (record.phase !== "ready") pending += 1;
+    }
+    return { pending, failed };
+  }
+
+  /** Targeted retry: drop terminal failures so the next demand refetches them (spec 32.5.1). */
+  retryFailed(): void {
+    for (const [ref, record] of this.records) {
+      if (record.phase === "failed") this.records.delete(ref);
+    }
   }
 
   clear(): void {
-    this.images.clear();
-    this.loading.clear();
-    this.failed.clear();
-    this.queued.clear();
+    this.generation += 1;
+    this.records.clear();
+    this.draw = null;
+  }
+
+  private observe(ref: string): void {
+    this.draw?.add(ref);
+  }
+
+  private enqueue(ref: string): void {
+    this.records.set(ref, { phase: "queued", image: null });
+  }
+
+  private scheduleFlush(): void {
+    if (this.flushScheduled) return;
+    let hasQueued = false;
+    for (const record of this.records.values()) {
+      if (record.phase === "queued") {
+        hasQueued = true;
+        break;
+      }
+    }
+    if (!hasQueued) return;
+    this.flushScheduled = true;
+    queueMicrotask(() => void this.flush());
   }
 
   private async flush(): Promise<void> {
     this.flushScheduled = false;
-    const refs = [...this.queued];
-    this.queued.clear();
-    for (let i = 0; i < refs.length; i += MAX_REFS_PER_REQUEST) {
-      const batch = refs.slice(i, i + MAX_REFS_PER_REQUEST);
-      for (const ref of batch) this.loading.add(ref);
+    const generation = this.generation;
+    // All post-await writes check this: a clear() mid-flight retires the whole batch.
+    const current = () => generation === this.generation;
+    for (;;) {
+      const batch: [string, RefRecord][] = [];
+      for (const [ref, record] of this.records) {
+        if (record.phase !== "queued") continue;
+        batch.push([ref, record]);
+        if (batch.length === MAX_REFS_PER_REQUEST) break;
+      }
+      if (batch.length === 0) return;
+      for (const [, record] of batch) record.phase = "loading";
       let result: Record<string, FigmaBytes | null>;
       try {
-        result = await this.loadBytes(batch);
+        result = await this.loadBytes(batch.map(([ref]) => ref));
       } catch {
-        for (const ref of batch) this.loading.delete(ref);
+        if (!current()) return;
+        // Transport failure is a cached failure like any other: retried on clear, not per paint.
+        for (const [ref, record] of batch) {
+          if (this.records.get(ref) === record) record.phase = "failed";
+        }
         continue;
       }
-      for (const ref of batch) {
+      if (!current()) return;
+      let committed = false;
+      for (const [ref, record] of batch) {
+        // A reconcile (or clear) retired this attempt, or a later ask recreated it: the record
+        // identity is the only check that tells those apart, and it settles only the live attempt.
+        if (this.records.get(ref) !== record) continue;
         const bytes = result[ref];
-        this.loading.delete(ref);
         if (!bytes || !this.makeImage) {
-          this.failed.add(ref);
+          record.phase = "failed";
+          committed = true;
           continue;
         }
         const image = this.makeImage(bytesToDataUrl(bytes));
         if (!image) {
-          this.failed.add(ref);
+          record.phase = "failed";
+          committed = true;
           continue;
         }
-        image.addEventListener("load", () => this.onReady());
-        image.addEventListener("error", () => {
-          this.failed.add(ref);
-          this.images.delete(ref);
+        // Bytes received is NOT decoded-ready: the <img> must still fire load. Until it does,
+        // get() returns null (the renderer keeps drawing the fallback) while the singleflight
+        // and the observed survival of this record hold — no duplicate fetch while decoding.
+        image.addEventListener("load", () => {
+          if (!current() || this.records.get(ref) !== record) return; // retired mid-decode
+          record.phase = "ready";
           this.onReady();
         });
-        this.images.set(ref, image);
+        image.addEventListener("error", () => {
+          // A decode error is terminal for this attempt: get() and request() honor failed, so
+          // the renderer's per-paint onMissing cannot resurrect it while it stays observed.
+          if (!current() || this.records.get(ref) !== record) return;
+          record.phase = "failed";
+          record.image = null;
+          this.onReady();
+        });
+        record.image = image;
       }
-      this.onReady();
-    }
-    if (this.queued.size > 0) {
-      this.flushScheduled = true;
-      queueMicrotask(() => void this.flush());
+      // Only immediate terminal writes (failed) notify here; a still-decoding image notifies
+      // from its load/error listener, so the draw is never handed an unloaded element.
+      if (committed) this.onReady();
     }
   }
 }
@@ -116,44 +311,145 @@ export class ByteImageCache {
 /**
  * `figma.fonts.get` bytes → a loaded font the canvas context can use (spec 32.5.1). Registration
  * is injected (`register`) so web adds a FontFace, mobile hands bytes to Skia, and tests fake it.
+ * A family/style is attempted at most once while it stays observed by the open draw (or while no
+ * draw lifecycle is used at all): the draw calls `fontAvailable` every paint, and a failed/null
+ * attempt that refetched each frame would re-enter the load→notify→paint loop forever. endDraw
+ * retires fonts the paint did not use — including successful faces, which the owner then removes
+ * from `document.fonts` — so offscreen text does not pin its font. clear() (reconnect, unmount,
+ * scope swap) retires everything.
  */
 export class FontCache {
-  private readonly available = new Map<string, boolean>();
-  private readonly loading = new Set<string>();
+  /** One record per family/style attempt; the object identity guards every async settle. */
+  private readonly records = new Map<string, FontRecord>();
+  private draw: Set<string> | null = null;
+  // Bumped by clear(). A settle captured before the clear is stale: it must not repopulate the
+  // maps or notify the now-current generation, or a cleared/reconnected cache resurrects ghosts.
+  private generation = 0;
 
   constructor(
     private readonly loadFont: (family: string, style: string) => Promise<FigmaBytes | null>,
-    private readonly register: (family: string, style: string, dataUrl: string) => Promise<boolean>,
+    private readonly register: (
+      family: string,
+      style: string,
+      dataUrl: string,
+      /** Live only while this attempt's scope AND record are current; the registrar must
+       * commit no DOM side effect once the owner cleared or reconciled the key away. */
+      isCurrent: () => boolean,
+    ) => Promise<boolean>,
     private readonly onReady: () => void = () => undefined,
   ) {}
 
-  fontAvailable(family: string, style: string): boolean {
-    const key = `${family}\u0000${style}`;
-    if (this.available.get(key) === true) return true;
-    if (!this.loading.has(key)) {
-      this.loading.add(key);
-      void this.load(key, family, style);
-    }
-    return this.available.get(key) === true;
+  /** Open a paint: every fontAvailable() until the matching endDraw marks the key used. */
+  beginDraw(): void {
+    if (!this.draw) this.draw = new Set();
   }
 
-  private async load(key: string, family: string, style: string): Promise<void> {
+  /**
+   * Close the paint and retire every family/style the draw did not ask for — loaded faces and
+   * pending attempts alike (an empty draw clears everything). Returns the retired keys so the
+   * owner can release their FontFaces from document.fonts.
+   */
+  endDraw(): Set<string> {
+    const observed = this.draw;
+    this.draw = null;
+    const retired = new Set<string>();
+    if (!observed) return retired;
+    for (const key of this.records.keys()) {
+      if (observed.has(key)) continue;
+      this.records.delete(key);
+      retired.add(key);
+    }
+    return retired;
+  }
+
+  fontAvailable(family: string, style: string): boolean {
+    const key = `${family}\u0000${style}`;
+    // Asking IS observing: a visible font's terminal result (true OR false) and its in-flight
+    // attempt both survive every reconciliation while the paint keeps using them.
+    this.draw?.add(key);
+    const record = this.records.get(key);
+    if (record) return record.phase === "settled" && record.ok;
+    const started: FontRecord = { phase: "loading", ok: false };
+    this.records.set(key, started);
+    void this.load(key, started, family, style, this.generation);
+    return false;
+  }
+
+  /**
+   * Real ledger for the canvas's honest loading status (spec 32.5.1): in-flight font attempts
+   * and settled-attempts-that-failed (a missing face IS a failure the user can retry — the
+   * renderer falls back to rasters for these). Bounded scan of the record map; a probe never
+   * observes.
+   */
+  status(): { pending: number; failed: number } {
+    let pending = 0;
+    let failed = 0;
+    for (const record of this.records.values()) {
+      if (record.phase === "loading") pending += 1;
+      else if (!record.ok) failed += 1;
+    }
+    return { pending, failed };
+  }
+
+  /**
+   * Non-observing per-key view of the same ledger: the undelivered/failed font attempts with
+   * their `family\0style` keys, so the owner can decide whether an exact raster replacement
+   * already covers them (ADR-0042 readiness rule) instead of blanket-counting every font.
+   */
+  unresolved(): Array<{ key: string; pending: boolean }> {
+    const out: Array<{ key: string; pending: boolean }> = [];
+    for (const [key, record] of this.records) {
+      if (record.phase === "loading") out.push({ key, pending: true });
+      else if (!record.ok) out.push({ key, pending: false });
+    }
+    return out;
+  }
+
+  /** Targeted retry: drop failed font attempts so the next demand fetches them again. */
+  retryFailed(): void {
+    for (const [key, record] of this.records) {
+      if (record.phase === "settled" && !record.ok) this.records.delete(key);
+    }
+  }
+
+  private async load(
+    key: string,
+    record: FontRecord,
+    family: string,
+    style: string,
+    generation: number,
+  ): Promise<void> {
+    let ok = false;
+    // Current only while the scope is alive AND this exact record is the cache's entry: an
+    // endDraw reconcile (or clear) that retired the key makes every later check fail, so the
+    // stale attempt can neither register a face, repopulate, nor notify the current draw.
+    const current = () => generation === this.generation && this.records.get(key) === record;
     try {
       const bytes = await this.loadFont(family, style);
-      this.available.set(
-        key,
-        bytes ? await this.register(family, style, bytesToDataUrl(bytes)) : false,
-      );
+      // A retire mid-fetch drops this attempt before it can touch the DOM registrar (adding a
+      // FontFace nobody owns any more).
+      if (!current()) return;
+      // The registrar owns the rest of the async window (face.load() etc): it must re-check
+      // `current` itself, or a scope swap during that await leaks a face into FontFaceSet.
+      ok = bytes ? await this.register(family, style, bytesToDataUrl(bytes), current) : false;
     } catch {
-      this.available.set(key, false);
-    } finally {
-      this.loading.delete(key);
-      this.onReady();
+      ok = false;
     }
+    // A settle from a dead scope or a retired record is dropped: no repopulate, no notify.
+    if (!current()) return;
+    record.phase = "settled";
+    record.ok = ok;
+    this.onReady();
   }
 
   clear(): void {
-    this.available.clear();
-    this.loading.clear();
+    this.generation += 1;
+    this.records.clear();
+    this.draw = null;
   }
+}
+
+interface FontRecord {
+  phase: "loading" | "settled";
+  ok: boolean;
 }

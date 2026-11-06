@@ -1,33 +1,18 @@
 // Text drawing for the renderer (spec 32.5.1): Figma TEXT nodes with per-segment style overrides,
 // manual wrapping at the node width, alignment, line-height, letter-spacing, textCase and
-// textDecoration. The renderer never loads fonts: `options.fontAvailable` decides whether the
-// requested family is used or a generic fallback, and missing fonts are reported for `onMissing`.
+// textDecoration. The renderer never loads fonts: `textNeedsRasterFallback` routes a node whose
+// required family/style fails `options.fontAvailable` to the per-node raster fallback pipeline,
+// and the font stays reported so the caller can load it and re-render as vector.
 import type { FigmaNode } from "@jagentdesk/protocol/figma/rpc-schemas";
 import type { Paint, TextStyle, TextRun } from "./node-props";
 import { nodeOpacity, nodeSize, paintsOf, textAligns, textRuns } from "./node-props";
 import { resolvePaintStyle } from "./paints";
+import { isItalicStyle, weightForStyle } from "../font-style";
 import type { MissingSink } from "./missing";
 import type { FigmaRenderOptions } from "./types";
 
 const DEFAULT_FONT_SIZE = 16;
 const GENERIC_FAMILY = "sans-serif";
-
-const WEIGHT_TOKENS: [string, number][] = [
-  ["thin", 100],
-  ["extralight", 200],
-  ["ultralight", 200],
-  ["light", 300],
-  ["regular", 400],
-  ["normal", 400],
-  ["medium", 500],
-  ["semibold", 600],
-  ["demibold", 600],
-  ["bold", 700],
-  ["extrabold", 800],
-  ["ultrabold", 800],
-  ["black", 900],
-  ["heavy", 900],
-];
 
 interface ResolvedRun {
   text: string;
@@ -40,15 +25,6 @@ interface ResolvedRun {
   decoration: string | null;
 }
 
-function weightAndItalic(styleName: string): { weight: number; italic: boolean } {
-  const lower = styleName.toLowerCase();
-  let weight = 400;
-  for (const [token, value] of WEIGHT_TOKENS) {
-    if (lower.includes(token)) weight = Math.max(weight, value);
-  }
-  return { weight, italic: /italic|oblique/.test(lower) };
-}
-
 function cssFont(run: ResolvedRun): string {
   const parts: string[] = [];
   if (run.italic) parts.push("italic");
@@ -58,17 +34,50 @@ function cssFont(run: ResolvedRun): string {
   return parts.join(" ");
 }
 
+function missingFontFor(
+  style: TextStyle,
+  options: FigmaRenderOptions,
+  missing: MissingSink,
+): string | null {
+  const requested = style.fontFamily;
+  const styleName = style.fontStyle ?? "Regular";
+  if (!requested || requested === GENERIC_FAMILY) return null;
+  if (options.fontAvailable(requested, styleName)) return null;
+  missing.addFont(requested, styleName);
+  return requested;
+}
+
+/**
+ * True when the node has text whose required family/style is not available, so the caller must
+ * use the raster fallback pipeline (spec 32.5.1: a node the renderer cannot draw correctly is
+ * replaced by Figma's render of that node). Reports every missing face on `missing` so the
+ * caller can still load them; a text-less node never rasterizes and keeps drawing as text.
+ */
+export function textNeedsRasterFallback(
+  node: FigmaNode,
+  options: FigmaRenderOptions,
+  missing: MissingSink,
+): boolean {
+  let unavailable = false;
+  let hasText = false;
+  for (const run of textRuns(node)) {
+    if (run.text.length > 0) hasText = true;
+    if (missingFontFor(run.style, options, missing) !== null) unavailable = true;
+  }
+  return unavailable && hasText;
+}
+
 function resolveFamily(
   style: TextStyle,
   options: FigmaRenderOptions,
   missing: MissingSink,
 ): string {
-  const requested = style.fontFamily;
-  const styleName = style.fontStyle ?? "Regular";
-  if (!requested || requested === GENERIC_FAMILY) return GENERIC_FAMILY;
-  if (options.fontAvailable(requested, styleName)) return requested;
-  missing.addFont(requested, styleName);
-  return GENERIC_FAMILY;
+  // Kept for the defensive path (a caller that draws text without the raster gate): an
+  // unavailable family falls back to the generic face and is reported; the gate in drawNode
+  // normally rasterizes the node before any text is drawn.
+  return missingFontFor(style, options, missing) === null
+    ? style.fontFamily || GENERIC_FAMILY
+    : GENERIC_FAMILY;
 }
 
 function applyTextCase(text: string, textCase: string | undefined): string {
@@ -83,7 +92,10 @@ function applyTextCase(text: string, textCase: string | undefined): string {
         (_m, pre: string, ch: string) => pre + ch.toUpperCase(),
       );
     case "SMALL_CAPS":
-    case "SMALL_CAPS_AUTOMATIC":
+    case "SMALL_CAPS_FORCED":
+      // Figma's enum (REST TypeStyle.textCase): ORIGINAL | UPPER | LOWER | TITLE | SMALL_CAPS |
+      // SMALL_CAPS_FORCED. Without font small-caps OpenType features on the canvas/Skia
+      // contract we approximate both as full capitals.
       return text.toUpperCase();
     default:
       return text;
@@ -110,12 +122,12 @@ function toResolvedRun(
 ): ResolvedRun {
   const style = run.style;
   const fontSize = style.fontSize ?? DEFAULT_FONT_SIZE;
-  const { weight, italic } = weightAndItalic(style.fontStyle ?? "Regular");
+  const styleName = style.fontStyle ?? "Regular";
   return {
     text: applyTextCase(run.text, style.textCase),
     family: resolveFamily(style, options, missing),
-    weight,
-    italic,
+    weight: weightForStyle(styleName),
+    italic: isItalicStyle(styleName),
     fontSize,
     letterSpacing: style.letterSpacing ?? 0,
     lineHeight: lineHeightFor(style, fontSize),

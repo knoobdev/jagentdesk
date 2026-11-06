@@ -4703,6 +4703,27 @@ export const ServerInfoStatusPayloadSchema = z
         jira: z.boolean().optional(),
         // Figma (spec 32 / ADR-0035): figma.* RPCs and the Figma section.
         figma: z.boolean().optional(),
+        // Scoped prototype playback (spec 32 / ADR-0037): figma.file.playback.request. Clients
+        // send that RPC only when this flag is present; older daemons never advertised it.
+        figmaPlayback: z.boolean().optional(),
+        // Section outline + shallow node reads (spec 32.5.1 / ADR-0039): summary parentId/
+        // childrenLoaded and figma.file.nodes.request depth=1. The new viewer gates once; an old
+        // daemon strips depth and returns the full subtree, so it must not receive the option.
+        figmaNodeDepth: z.boolean().optional(),
+        // Provider-independent writes over the Codex-backed Remote MCP connector
+        // (spec 32.7 / ADR-0040): the figma.remote.* RPCs. The client gates the write surface
+        // once; old hosts ask the user to update instead of receiving RPCs they cannot answer.
+        figmaRemoteWrites: z.boolean().optional(),
+        // Region-geometry comments (spec 32.5.4 / ADR-0041): `FigmaComment.region` on reads and
+        // the post-request `region`. Clients send `region` only when this flag is present; an old
+        // host strips the unknown field, so sending anyway would pass a point comment off as a
+        // successful region create.
+        figmaCommentRegions: z.boolean().optional(),
+        // Render fidelity (spec 32.5.1 / ADR-0042): the render `svg` format and
+        // `useAbsoluteBounds`, answered version-pinned over REST only. Clients send the new
+        // payloads only when present; an old host's plugin export would answer them with
+        // wrong-meaning bytes, so PNG-crop stays the fallback there and is not new-quality.
+        figmaRenderFidelity: z.boolean().optional(),
       })
       .optional(),
   })

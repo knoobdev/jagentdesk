@@ -67,6 +67,13 @@ export class RecordingPath {
   closePath(): void {
     this.push("closePath");
   }
+  /** Path2D.addPath stand-in: replays another recording path's commands into this one. */
+  addPath(other: RenderPath): void {
+    if (other instanceof RecordingPath) {
+      for (const command of other.commands) this.commands.push([...command]);
+      this.svgData = null;
+    }
+  }
   rect(x: number, y: number, w: number, h: number): void {
     this.push("rect", x, y, w, h);
   }

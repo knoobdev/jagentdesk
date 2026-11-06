@@ -1,9 +1,60 @@
 # Changelog
 
 All notable changes to JAgentDesk are documented here. JAgentDesk versions its
-own release line (now `0.9.54`); the many `v0.1.x`–`v1.0.x` tags in history are
+own release line (now `0.9.55`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
+
+## v0.9.55 — 2026-11-06
+
+Figma browsing, rendering and prototype playback improvements. JAgentDesk draws designs and
+plays frames itself; viewing and playback do not require Figma Desktop or the Figma Link plugin.
+This is an incremental release, not full Figma Design feature parity.
+
+### Changed
+
+- **Browse files:** a desktop file picker opens Figma's Files website in an isolated guest.
+  Selecting a supported file URL hands it to JAgentDesk's canvas. Website sign-in remains separate
+  from the daemon's REST connection. Manual file/team URLs and Link controls move under Advanced.
+- **Large-file navigation:** include frames nested in Sections, preserve flow starting points,
+  expand truncated Section metadata on demand and load detailed frame trees only where needed.
+  Overview, loading, failed content and ready content have distinct visible states.
+- **Sharper canvas:** unavailable fonts use Figma-exported outlined SVG glyphs. Raster fallback
+  resolution follows zoom and display density, with separate cache keys for version, format and
+  bounds. Correct fallback placement, opacity, shadows, linear-gradient handles and stroke alignment.
+  Complex stroke clipping uses a node fallback rather than dropping parts of the outline.
+- **Scoped prototype playback:** fetch only the frames currently needed for the stage, overlays
+  and transitions, in batches of at most ten. Reuse the canvas's versioned frame cache, release
+  unused frame assets and show loading/failure with targeted Retry until required images and
+  glyphs have painted. A mounted canvas is no longer reported as complete content.
+- **Sections and editing connection:** add Section selection and move-preview handling, plus
+  an independent editing-connection panel. A write requires the connector's authorization and
+  readback; a local preview or pending operation is not presented as a saved Figma change.
+  Chat keeps the provider and model selected by the user.
+- **Comments:** improve search, sorting, filters, refresh and desktop/compact layouts. Comment
+  region data can travel through the protocol without being collapsed to a point.
+- **Less repeated work:** coalesce identical in-flight reads, reuse freshly verified metadata
+  and stop unchanged-version polls from clearing the canvas. Historical reads cannot replace
+  the live-version memo; stale poll results cannot roll back a confirmed write readback.
+- File-access errors identify the connected account and preserve Figma's denial details.
+
+### Verification and current limits
+
+- Focused regression tests, app typecheck and daemon build passed. Real Electron checks used
+  a file with over 3,600 frame nodes; the same design frame was visually compared at 100%,
+  200% and 332% zoom on a DPR-2 display.
+- Continuous pan on a loaded viewport measured about 56–58 compositor frames per second.
+  One open/play/close run measured approximately 184 MB peak app-process-tree growth; these
+  measurements are not a performance guarantee for every file or platform.
+- **Cold loading still misses the three-second target:** the latest real file needed about
+  29 seconds for complete viewport content. Initial prototype content can also take many
+  seconds while Figma API/export requests finish. A warm UI reopen completed its viewport in 0.44 seconds with no new REST requests in that run.
+- Website sign-in and file selection, authenticated writes to the original design, native mobile
+  rendering and multi-user presence/follow have not passed end-to-end acceptance. This release
+  does not claim full Figma collaboration or editing support.
+- Some context-dependent backdrop exports and advanced prototype behavior can still differ
+  from Figma. Comment pins, mentions, resolve/reopen and other unimplemented Design features
+  remain outside this release's verified behavior.
 
 ## v0.9.54 — 2026-11-06
 

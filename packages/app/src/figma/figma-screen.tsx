@@ -2,7 +2,7 @@ import { default as React, useCallback, useMemo } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { withUnistyles } from "react-native-unistyles";
-import { Figma as FigmaIcon, Link2, PenTool, Settings2 } from "lucide-react-native";
+import { Figma as FigmaIcon, Link2, Settings2 } from "lucide-react-native";
 import { PageHeader } from "@/components/headers/page-header";
 import { Button } from "@/components/ui/button";
 import { useHostFeature } from "@/runtime/host-features";
@@ -12,6 +12,7 @@ import { FigmaConnectScreen } from "@/figma/connect/connect-screen";
 import { FigmaLinkPanel } from "@/figma/link/link-panel";
 import { useFigmaNav } from "@/figma/nav";
 import { fileSubtitle } from "@/figma/file-subtitle";
+import { canBrowseFigmaFiles } from "@/figma/browse-files";
 import { useFigmaConnections, useFigmaFiles } from "@/figma/queries";
 import { EmptyState, ErrorBanner } from "@/figma/ui/primitives";
 import { figmaStyles } from "@/figma/ui/styles";
@@ -22,6 +23,8 @@ import { FigmaFileScreen } from "@/figma/canvas/file-screen";
 // The Figma section (spec 32.5): the rail opens /h/<serverId>/figma; without a fileKey this shows
 // the home — connections/files, the connect guide, or the Figma Link panel per the `view` param;
 // with a fileKey it mounts the W10 file screen. The left column lives in sidebar-figma-nav.
+// Figma Link is setup for the plugin integration, not a condition for viewing or playback (32.1),
+// so it is reached from the sidebar's explicit Figma Link row, never from this header.
 
 // The color lives in the mappings so no `uniProps` prop reaches the DOM node on web.
 const ThemedLink2 = withUnistyles(Link2, (theme: Theme) => ({ color: theme.colors.statusSuccess }));
@@ -63,15 +66,6 @@ function FilesHome({ serverId, connectionId }: { serverId: string; connectionId:
     (fileKey: string) => go({ fileKey, pageId: null, nodeId: null, version: null }),
     [go],
   );
-  const openConnect = useCallback(() => go({ view: "connect" }), [go]);
-  const connectAction = useMemo(
-    () => (
-      <Button variant="outline" onPress={openConnect} testID="figma-open-connect">
-        Connect Figma
-      </Button>
-    ),
-    [openConnect],
-  );
   if (files.isLoading) return <Text style={figmaStyles.rowSubtle}>Loading files…</Text>;
   if (files.error) return <ErrorBanner message={errorMessage(files.error)} />;
   const pinned = list.filter((file) => file.pinned);
@@ -80,11 +74,15 @@ function FilesHome({ serverId, connectionId }: { serverId: string; connectionId:
     .sort((a, b) => (b.lastOpenedAt_ms ?? 0) - (a.lastOpenedAt_ms ?? 0))
     .slice(0, 12);
   if (list.length === 0) {
+    const browse = canBrowseFigmaFiles();
     return (
       <EmptyState
         title="No files yet"
-        body="Add a Figma file by URL from the left column, or sign in with your own OAuth app to get started."
-        action={connectAction}
+        body={
+          browse
+            ? "Add a file with Browse files in the left column — pick it in the JAgentDesk file picker and it is added and opened here."
+            : "Files are added with Browse files in the JAgentDesk desktop app; this device lists the files already added."
+        }
         testID="figma-files-empty"
       />
     );
@@ -124,11 +122,12 @@ export function FigmaScreen() {
   const connections = useFigmaConnections(serverId);
   const list = useMemo(() => connections.data ?? [], [connections.data]);
   const connected = list.find((connection) => connection.authState === "connected") ?? null;
-  const selectedConnection =
-    list.find((connection) => connection.id === location.connectionId) ?? connected;
+  // A route param can name a connection that has since lost its session; only a
+  // CONNECTED account may carry the files home, otherwise the connect guide wins.
+  const routeSelected = list.find((connection) => connection.id === location.connectionId) ?? null;
+  const selectedConnection = routeSelected?.authState === "connected" ? routeSelected : connected;
 
   const openConnections = useCallback(() => go({ view: "connect" }), [go]);
-  const openLink = useCallback(() => go({ view: "link" }), [go]);
   const openFiles = useCallback(() => go({ view: "files" }), [go]);
   const fileRef = useMemo(
     () =>
@@ -173,15 +172,11 @@ export function FigmaScreen() {
         description={headerDescription}
         actions={
           <>
-            <Button
-              size="sm"
-              variant="ghost"
-              leftIcon={PenTool}
-              onPress={openLink}
-              testID="figma-open-link"
-            >
-              Figma Link
-            </Button>
+            {location.view === "link" ? (
+              <Button size="sm" variant="ghost" onPress={openFiles} testID="figma-back-to-files">
+                Files
+              </Button>
+            ) : null}
             <Button
               size="sm"
               variant="ghost"

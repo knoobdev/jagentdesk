@@ -2470,8 +2470,23 @@ export class VoiceAssistantWebSocketServer {
         ...(this.argocdService ? { argocd: true } : {}),
         // Jira (spec 29 / ADR-0034): capability `jira`, advertised when the service is wired.
         ...(this.jiraService ? { jira: true } : {}),
-        // Figma (spec 32 / ADR-0035).
-        ...(this.figmaService ? { figma: true } : {}),
+        // Figma (spec 32 / ADR-0035). `figmaNodeDepth` (ADR-0039) reports the section-aware
+        // outline and the depth-1 metadata read together; viewers gate once on it.
+        // `figmaRemoteWrites` (ADR-0040) gates the figma.remote.* write surface.
+        // `figmaCommentRegions` (ADR-0041) gates the region-geometry comment DTO fields; clients
+        // send a post `region` only when present.
+        // `figmaRenderFidelity` (ADR-0042) gates the render `svg` text-outline format and
+        // `useAbsoluteBounds`, answered version-pinned over REST only.
+        ...(this.figmaService
+          ? {
+              figma: true,
+              figmaPlayback: true,
+              figmaNodeDepth: true,
+              figmaRemoteWrites: true,
+              figmaCommentRegions: true,
+              figmaRenderFidelity: true,
+            }
+          : {}),
         // Advertise the plugin management surface only when a PluginService is
         // wired; without it the plugin.* RPCs return empty/disabled results.
         ...(this.pluginRuntime

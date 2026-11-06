@@ -9,6 +9,12 @@ export interface Shape {
   path: RenderPath;
   /** Path2D fill rule derived from the geometry's windingRule. */
   rule: CanvasFillRule;
+  /**
+   * True when the path came from Figma's `fillGeometry`/`strokeGeometry`: the path already
+   * encodes the final outline — stroke width, cap, join and dashes included — so a baked
+   * stroke path is FILLED (with `rule`), never stroked.
+   */
+  baked?: boolean;
 }
 
 function roundedRectPath(
@@ -79,6 +85,7 @@ function fromGeometry(node: FigmaNode, field: "fillGeometry" | "strokeGeometry")
   return geometry.map((entry) => ({
     path: newPath(entry.path),
     rule: entry.windingRule === "EVENODD" ? "evenodd" : "nonzero",
+    baked: true,
   }));
 }
 

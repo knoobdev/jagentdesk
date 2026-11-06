@@ -26,6 +26,11 @@ export const figmaKeys = {
     ["figma", serverId, "outline", fileKey, version ?? "latest"] as const,
   nodes: (serverId: string, fileKey: string, ids: readonly string[], version: string | null) =>
     ["figma", serverId, "nodes", fileKey, version ?? "latest", [...ids].sort().join(",")] as const,
+  // ADR-0039: the shallow (depth=1) section-children cache lives in its own
+  // namespace so a shallow snapshot can NEVER answer a full-tree request.
+  nodesShallow: (serverId: string, fileKey: string, id: string, version: string) =>
+    ["figma", serverId, "nodes", "depth-1", fileKey, version, id] as const,
+  remoteStatus: (serverId: string) => ["figma", serverId, "remote", "status"] as const,
 };
 
 const STALE_MS = 10_000;
@@ -77,6 +82,25 @@ export function useFigmaLinkStatus(serverId: string, enabled = true) {
   });
 }
 
+// ADR-0040 / spec 32.7: the Remote MCP editing connector's status. The panel passes a poll
+// interval only while the connector is mid-transition; every other state is read on demand.
+// `enabled` (default true) lets the Section-editing FileScreen mount the hook behind its own
+// capability gate without firing any RPC on a host that predates the connector (W7 consumes it).
+export function useFigmaRemoteStatus(
+  serverId: string,
+  options: { refetchIntervalMs?: number; enabled?: boolean } = {},
+) {
+  const client = useClient(serverId);
+  return useFetchQuery({
+    queryKey: figmaKeys.remoteStatus(serverId),
+    queryFn: async () => (await callFigma(client, "figma.remote.status.request", {})).status,
+    enabled: client !== null && (options.enabled ?? true),
+    dataShape: "value",
+    staleTimeMs: STALE_MS,
+    refetchInterval: options.refetchIntervalMs,
+  });
+}
+
 export function useFigmaPending(serverId: string, fileKey: string | null, enabled = true) {
   const client = useClient(serverId);
   return useFetchQuery({
@@ -125,6 +149,47 @@ export function useFigmaNodes(
         ...(version ? { version } : {}),
       }),
     enabled: client !== null && fileKey !== null && ids.length > 0 && enabled,
+    dataShape: "value",
+    staleTimeMs: 30 * 60_000,
+    // Spec 32.5.1 memory scope: the ONLY consumer of a full subtree is the
+    // sidebar's FrameRow, and collapsing or moving the selection detaches its
+    // observer immediately. TanStack's 5-minute default gcTime would pin every
+    // expanded frame's tree in the app cache OUTSIDE the FrameStore LRU; 0
+    // releases it the moment it is unobserved — revisits ask the daemon (whose
+    // per-version cache answers them), they do not replay app history. The
+    // shallow section reads and the outline keep the default retention.
+    gcTime: 0,
+  });
+}
+
+/**
+ * ADR-0039 shallow subtree: the DIRECT children of a SECTION, read with
+ * `depth: 1` against a pinned, non-empty version (the handler requires one —
+ * a null version never fires this query, there is no speculative fallback).
+ * Its own depth-qualified cache namespace: a shallow response is never
+ * returned to full-tree `useFigmaNodes` requests, and vice versa.
+ */
+export function useFigmaSectionChildren(
+  serverId: string,
+  fileKey: string | null,
+  sectionId: string | null,
+  version: string | null,
+  enabled = true,
+) {
+  const client = useClient(serverId);
+  const active = client !== null && fileKey !== null && sectionId !== null;
+  // Declared outside the literal: `depth` is added by the ADR-0039 protocol
+  // change (W4); until that lands the extra key must not trip the params type.
+  const request = {
+    fileKey: fileKey ?? "",
+    ids: [sectionId ?? ""],
+    depth: 1 as const,
+    version: version ?? "",
+  };
+  return useFetchQuery({
+    queryKey: figmaKeys.nodesShallow(serverId, fileKey ?? "", sectionId ?? "", version ?? ""),
+    queryFn: async () => await callFigma(client, "figma.file.nodes.request", request),
+    enabled: active && !!version && enabled,
     dataShape: "value",
     staleTimeMs: 30 * 60_000,
   });

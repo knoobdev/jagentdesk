@@ -6,6 +6,7 @@ import {
 } from "@jagentdesk/protocol/figma/rpc-schemas";
 import { FigmaServiceError } from "../context.js";
 import type { FigmaContext } from "../context.js";
+import { figmaContent } from "./content.js";
 import type { FigmaHandlerMap } from "./types.js";
 
 // Files, teams, projects (32.3) and the REST budget (32.8). Owner: W3.
@@ -108,6 +109,48 @@ async function requireConnection(ctx: FigmaContext, connectionId: string): Promi
   }
 }
 
+/** The connected account as the user knows it: email first, handle next, id last. */
+async function accountLabel(ctx: FigmaContext, connectionId: string): Promise<string> {
+  const connection = await ctx.store.getConnection(connectionId);
+  if (!connection) return connectionId;
+  return connection.account.email ?? connection.account.handle ?? connectionId;
+}
+
+/**
+ * `GET /v1/files/:key/meta` answered 403. Sign-in itself is already proven — `figma.oauth.complete`
+ * ran `GET /v1/me` — so Figma's bare "Permission denied" is misleading: it reads as the user lacking
+ * file permission, yet the denial's cause is unproven. The private app's scope configuration in the
+ * Figma console and the account's file permission are both candidates, and /me success cannot
+ * separate them. Quote Figma's error verbatim, name the connected account, and hand the user both
+ * checks without declaring either one the cause.
+ */
+async function getFileMeta(
+  ctx: FigmaContext,
+  connectionId: string,
+  fileKey: string,
+): Promise<FileMetaResponse> {
+  let meta: FileMetaResponse;
+  try {
+    meta = await ctx.rest.getJson<FileMetaResponse>({
+      connectionId,
+      path: `/v1/files/${encodeURIComponent(fileKey)}/meta`,
+      tier: "3",
+    });
+  } catch (error) {
+    if (!(error instanceof FigmaServiceError) || error.code !== "forbidden") throw error;
+    const account = await accountLabel(ctx, connectionId);
+    throw new FigmaServiceError(
+      "forbidden",
+      `Figma refused file ${fileKey} for ${account} (403: ${error.message}). A valid sign-in does ` +
+        `not prove file access, and the reason for this refusal is not known. Check both ` +
+        `candidates: the private app must have the scopes listed in the Connect guide enabled in ` +
+        `the Figma console, and ${account} must be able to open this file's URL in Figma.`,
+      error.extra,
+    );
+  }
+  return meta;
+}
+
 /** Team/project browsing endpoints: public apps answer 403/404 (research §3.3). */
 async function getBrowseJson<T>(
   ctx: FigmaContext,
@@ -147,11 +190,7 @@ export const filesHandlers: FigmaHandlerMap<FilesRequestType> = {
     }
     await requireConnection(ctx, request.connectionId);
     const existing = await ctx.store.getFile(fileKey);
-    const meta = await ctx.rest.getJson<FileMetaResponse>({
-      connectionId: request.connectionId,
-      path: `/v1/files/${encodeURIComponent(fileKey)}/meta`,
-      tier: "3",
-    });
+    const meta = await getFileMeta(ctx, request.connectionId, fileKey);
     const fields = fileMetaFields(meta);
     const name = optionalString(fields.name);
     if (!name) {
@@ -168,6 +207,11 @@ export const filesHandlers: FigmaHandlerMap<FilesRequestType> = {
       linked: ctx.link.isLinked(fileKey),
     };
     await ctx.store.saveFile(file);
+    // The meta answer above just verified this version on this connection — prime the content
+    // version memo so the first outline/nodes read does not spend a second Tier-3 meta. Only a
+    // fresh successful add may prime; the stored lastVersion is never trusted on ordinary
+    // reopen, and no content cache is prewarmed (32.8).
+    if (file.lastVersion) figmaContent.primeVerifiedVersion(ctx, fileKey, file.lastVersion);
     return { file };
   },
 

@@ -14,6 +14,8 @@ import {
   nodeFocusBounds,
   pageBoundingRect,
   panBy,
+  planRootLoad,
+  MIN_DETAIL_PROJECTED_PX,
   screenToFigma,
   THUMBNAIL_ZOOM,
   visibleRect,
@@ -155,6 +157,35 @@ describe("LOD switch", () => {
     expect(clampZoom(Number.NaN)).toBe(MIN_ZOOM);
     expect(clampZoom(-5)).toBe(MIN_ZOOM);
     expect(clampZoom(1000)).toBe(MAX_ZOOM);
+  });
+});
+
+describe("projected-detail load plan (ADR-0039)", () => {
+  const box = (width: number, height: number) => ({ x: 0, y: 0, width, height });
+
+  it("plans metadata when the longest projected edge is under the detail threshold", () => {
+    // Fit on a thousand-screen file: every frame is a few pixels wide → zero subtree requests.
+    expect(planRootLoad(box(100, 80), THUMBNAIL_ZOOM / 2)).toBe("metadata");
+    expect(planRootLoad(box(40, 30), 1)).toBe("metadata"); // also at vector zoom
+    expect(planRootLoad(box(375, 812), 0.02)).toBe("metadata");
+  });
+
+  it("plans thumbnail rasters in overview LOD once projected detail exists", () => {
+    expect(planRootLoad(box(1000, 800), 0.1)).toBe("thumbnail");
+  });
+
+  it("plans full subtrees only above the thumbnail zoom with real projected size", () => {
+    expect(planRootLoad(box(100, 80), 1)).toBe("full");
+    expect(planRootLoad(box(1000, 800), THUMBNAIL_ZOOM)).toBe("full");
+  });
+
+  it("judges the longest edge, so tall-narrow screens reach detail on height alone", () => {
+    expect(planRootLoad(box(10, 2000), 0.05)).toBe("thumbnail"); // 100px on the vertical edge
+  });
+
+  it("treats exactly MIN_DETAIL_PROJECTED_PX as detail-worthy, one less is not", () => {
+    expect(planRootLoad(box(MIN_DETAIL_PROJECTED_PX, 10), 1)).toBe("full");
+    expect(planRootLoad(box(MIN_DETAIL_PROJECTED_PX - 0.01, 10), 1)).toBe("metadata");
   });
 });
 

@@ -21,7 +21,10 @@ import { contentHandlers } from "./handlers/content.js";
 import { filesHandlers } from "./handlers/files.js";
 import { linkHandlers } from "./handlers/link.js";
 import { pendingHandlers } from "./handlers/pending.js";
+import { playbackHandlers } from "./handlers/playback.js";
+import { remoteHandlers } from "./handlers/remote.js";
 import type { FigmaHandler, FigmaHandlerMap, FigmaSessionInfo } from "./handlers/types.js";
+import { FigmaRemoteConnector } from "./remote/connector.js";
 
 // The daemon-wide Figma service (spec 32): one instance shared by every session and the agent
 // tools. It composes the handler groups, owns push fan-out, and closes Figma Link on dispose.
@@ -33,6 +36,8 @@ const HANDLERS: FigmaHandlerMap<FigmaRequestType> = {
   ...commentsHandlers,
   ...linkHandlers,
   ...pendingHandlers,
+  ...playbackHandlers,
+  ...remoteHandlers,
 };
 
 export interface FigmaServiceParts {
@@ -70,6 +75,12 @@ export class FigmaService {
       },
       now: options.now ?? (() => Date.now()),
     };
+    // One remote write connector per daemon (ADR-0040). Construction is inert: no file read,
+    // no spawn; the dedicated app-server starts lazily on the first explicit connect.
+    this.ctx.remote = new FigmaRemoteConnector({
+      jagentdeskHome: options.jagentdeskHome,
+      logger: options.logger,
+    });
   }
 
   handles(type: string): type is FigmaRequestType {
@@ -94,5 +105,6 @@ export class FigmaService {
   async dispose(): Promise<void> {
     this.listeners.clear();
     await this.ctx.link.close();
+    await this.ctx.remote?.dispose();
   }
 }

@@ -86,6 +86,8 @@ function lookupFor(nodes: FigmaNode[]): FrameLookup {
   return {
     loading: false,
     error: null,
+    prototype: null,
+    retry: () => undefined,
     nodeFor: (id) => nodes.find((candidate) => candidate.id === id) ?? null,
   };
 }

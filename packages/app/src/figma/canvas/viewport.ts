@@ -1,9 +1,4 @@
-import type {
-  FigmaFrameSummary,
-  FigmaNode,
-  FigmaPage,
-  FigmaRect,
-} from "@jagentdesk/protocol/figma/rpc-schemas";
+import type { FigmaNode, FigmaPage, FigmaRect } from "@jagentdesk/protocol/figma/rpc-schemas";
 
 // Pan/zoom camera for the Figma canvas (spec 32.5.1). Screen pixels map to Figma units by
 // `figma = (screen − offset) ÷ zoom`; the canvas applies `setTransform(zoom·dpr, …, offset·dpr)`.
@@ -83,13 +78,13 @@ export function rectsIntersect(a: FigmaRect, b: FigmaRect): boolean {
 }
 
 /** Frames whose bounds intersect the visible rect, grown by `marginPx` screen pixels. */
-export function framesInViewport(
-  frames: readonly FigmaFrameSummary[],
+export function framesInViewport<T extends { bounds: FigmaRect }>(
+  frames: readonly T[],
   camera: Camera,
   width: number,
   height: number,
   marginPx = 0,
-): FigmaFrameSummary[] {
+): T[] {
   const margin = marginPx / camera.zoom;
   const visible = visibleRect(camera, width, height);
   const view: FigmaRect = {
@@ -228,4 +223,27 @@ export function nodeFocusBounds(
 /** Level of detail for a zoom: thumbnails keep pan/zoom at ≥ 50 fps on big files. */
 export function lodMode(zoom: number): "thumbnail" | "vector" {
   return zoom < THUMBNAIL_ZOOM ? "thumbnail" : "vector";
+}
+
+/**
+ * A frame's longest projected edge must reach this many screen pixels before its content is
+ * worth loading (ADR-0039 overview rule, spec 32.5.1). Below it the canvas draws the factual
+ * metadata box/label from the summary only: Fit on a thousand-screen file puts every frame
+ * under this line, so overview costs zero nodes requests and zero thumbnail rasters.
+ */
+export const MIN_DETAIL_PROJECTED_PX = 48;
+
+/**
+ * What the canvas may ask the network for one visible root at a given zoom. One pure function
+ * is the plan for ALL loaders — the pre-paint effect, the paint loop's on-demand load, and the
+ * native raster batches — so no path can re-introduce the Fit flood:
+ *  - "metadata": too small for detail; draw bounds/name from the summary, fetch nothing.
+ *  - "thumbnail": overview LOD, small on screen; cached raster tiles only, never subtrees.
+ *  - "full": projected detail justifies the vector path; load the subtree once.
+ */
+export type RootLoadPlan = "metadata" | "thumbnail" | "full";
+
+export function planRootLoad(bounds: FigmaRect, zoom: number): RootLoadPlan {
+  if (Math.max(bounds.width, bounds.height) * zoom < MIN_DETAIL_PROJECTED_PX) return "metadata";
+  return lodMode(zoom) === "thumbnail" ? "thumbnail" : "full";
 }

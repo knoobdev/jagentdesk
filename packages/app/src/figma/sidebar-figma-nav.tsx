@@ -18,7 +18,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import type {
   FigmaConnection,
   FigmaFile,
-  FigmaFrameSummary,
   FigmaLinkFile,
   FigmaNode,
   FigmaPage,
@@ -34,19 +33,30 @@ import {
   useFigmaLinkStatus,
   useFigmaNodes,
   useFigmaOutline,
+  useFigmaSectionChildren,
   useFigmaTeamFiles,
   useFigmaTeamProjects,
   useFigmaTeams,
 } from "@/figma/queries";
 import { useFigmaGlobalNav, type FigmaNav } from "@/figma/nav";
+import { childSummaries, type SectionAwareSummary } from "@/figma/canvas/section-outline";
+import { useHostFeature } from "@/runtime/host-features";
 import { parseFigmaFileUrl, parseFigmaTeamUrl } from "@/figma/url-parse";
+import {
+  BrowseFilesRow,
+  BrowseGuidanceRow,
+  canBrowseFigmaFiles,
+  describeFigmaApiError,
+} from "@/figma/browse-files";
 
 // The left column while the Figma section is open (spec 32.5), owned the way the Jira column owns
 // its navigation: connections with their auth state; under the selected connection its files —
 // Pinned, Recent, and the files Figma Link reports open right now — plus added teams and their
 // projects; when a file is open, its pages and the layer tree of the selected frame, searchable
-// by name. Rows drive the Figma screen's route params; adding by URL parses client-side first so
-// a bad paste never leaves the column.
+// by name. Rows drive the Figma screen's route params. The primary add is Browse files
+// (ADR-0038, desktop only); the URL-paste rows and the optional Figma Link entry sit under an
+// explicit Advanced disclosure so the pick → view → play flow owns the surface and a bad paste
+// parses client-side first and never leaves the column.
 
 // Theme-reactive icons. `withUnistyles(Component, mappings)` keeps the color on the theme
 // (light + dark) without the `uniProps` prop, which leaks onto the DOM node on web and draws
@@ -562,30 +572,82 @@ function FrameLayers({
   return <View>{children}</View>;
 }
 
+// ── Outline tree (ADR-0039) ─────────────────────────────────────────────────
+// The depth-3 outline delivers a FLAT, ordered list of frame summaries with an
+// OPTIONAL `parentId` and a SECTION-only `childrenLoaded`. Rows render strictly
+// by parentId (siblings keep the order the API returned); a SECTION expands to
+// its real child summaries when the outline carried them, and to a depth-1
+// snapshot read — its own cache namespace, the outline's pinned version — when
+// they are still unknown. The sidebar never loads a full SECTION subtree and
+// never prefetches sections just because the file opened; only expanding a
+// REAL frame pulls its full tree (useFigmaNodes). Hosts without the
+// figmaNodeDepth capability get a disabled section row plus an update hint —
+// no speculative full-Section fallback.
+
+interface OutlineTree {
+  roots: SectionAwareSummary[];
+  byParent: Map<string, SectionAwareSummary[]>;
+}
+
+const NO_CHILDREN = new Map<string, SectionAwareSummary[]>();
+
+function buildOutlineTree(frames: readonly SectionAwareSummary[]): OutlineTree {
+  const roots: SectionAwareSummary[] = [];
+  const byParent = new Map<string, SectionAwareSummary[]>();
+  for (const summary of frames) {
+    const parent = summary.parentId ?? null;
+    if (parent) {
+      const bucket = byParent.get(parent);
+      if (bucket) bucket.push(summary);
+      else byParent.set(parent, [summary]);
+    } else {
+      roots.push(summary);
+    }
+  }
+  return { roots, byParent };
+}
+
+// Page-child rows start at the old indent1 inset and step 12px per nesting
+// level, so section children line up under their parent section.
+function outlineRowIndent(depth: number): number {
+  return themeSpacing(3) + themeSpacing(2) + depth * 12;
+}
+
+interface OutlineRowProps {
+  serverId: string;
+  fileKey: string;
+  /** Snapshot version the displayed outline came from: depth-1 section reads
+   * AND expanded-frame subtree reads use it, so the tree and its children
+   * always describe the SAME snapshot (the handler requires a non-empty one). */
+  pinnedVersion: string | null;
+  canReadNodeDepth: boolean;
+  /** One-open-per-page rule, shared by frames and sections; node ids are
+   * file-global, so a set keyed by id nests correctly at every level. */
+  expandedIds: ReadonlySet<string>;
+  selectedNodeId: string | null;
+  onSelectFrame: (frameId: string) => void;
+  onSelectNode: (nodeId: string) => void;
+  onToggleSection: (sectionId: string, wasExpanded: boolean) => void;
+  search: string;
+}
+
 function FrameRow({
   serverId,
   fileKey,
-  version,
+  pinnedVersion,
   frame,
+  depth,
   expanded,
   selectedNodeId,
   onSelectFrame,
   onSelectNode,
   search,
-}: {
-  serverId: string;
-  fileKey: string;
-  version: string | null;
-  frame: FigmaFrameSummary;
-  expanded: boolean;
-  selectedNodeId: string | null;
-  onSelectFrame: (frameId: string) => void;
-  onSelectNode: (nodeId: string) => void;
-  search: string;
-}) {
+}: OutlineRowProps & { frame: SectionAwareSummary; depth: number; expanded: boolean }) {
   // The subtree under a frame is fetched from figma.file.nodes only once that frame is open
-  // (32.5.2) — the outline alone carries just the frame summaries.
-  const nodes = useFigmaNodes(serverId, fileKey, expanded ? [frame.id] : [], version);
+  // (32.5.2) — the outline alone carries just the frame summaries — and it reads against the
+  // outline's pinned version so the row and its layers come from one snapshot, never a mix of
+  // the live tree and an older outline.
+  const nodes = useFigmaNodes(serverId, fileKey, expanded ? [frame.id] : [], pinnedVersion);
   const frameNode = expanded ? (nodes.data?.nodes?.[frame.id] ?? null) : null;
   const children = useMemo(
     () => (frameNode?.children ?? []).filter((child) => matchesSearch(child, search)),
@@ -595,7 +657,7 @@ function FrameRow({
   return (
     <View>
       <Pressable
-        style={[styles.row, styles.indent1]}
+        style={[styles.row, { paddingLeft: outlineRowIndent(depth) }]}
         onPress={press}
         accessibilityRole="button"
         testID={`figma-nav-frame-${frame.id}`}
@@ -626,27 +688,167 @@ function FrameRow({
   );
 }
 
+function SectionRow({
+  serverId,
+  fileKey,
+  pinnedVersion,
+  canReadNodeDepth,
+  section,
+  byParent,
+  depth,
+  expanded,
+  expandedIds,
+  selectedNodeId,
+  onSelectFrame,
+  onSelectNode,
+  onToggleSection,
+  search,
+}: OutlineRowProps & {
+  section: SectionAwareSummary;
+  byParent: OutlineTree["byParent"];
+  depth: number;
+  expanded: boolean;
+}) {
+  const knownChildren = useMemo(() => byParent.get(section.id) ?? [], [byParent, section.id]);
+  // Unknown children = the outline did NOT flatten this section (nested
+  // sections at the depth-3 boundary carry childrenLoaded:false; a summary
+  // with no flag at all reads the same way). Only expanding reads depth 1.
+  const childrenUnknown = knownChildren.length === 0 && section.childrenLoaded !== true;
+  const expandable = knownChildren.length > 0 || childrenUnknown;
+  // The shallow read needs the host capability AND the outline's pinned
+  // version; the helper stays disabled (never a full-subtree guess) without
+  // either, and the row is disabled with an update hint when the host lacks it.
+  const shallow = useFigmaSectionChildren(
+    serverId,
+    fileKey,
+    expanded && childrenUnknown && canReadNodeDepth ? section.id : null,
+    pinnedVersion,
+  );
+  const lazyChildren = useMemo(() => {
+    if (!expanded || !childrenUnknown) return [];
+    const node = shallow.data?.nodes?.[section.id] ?? null;
+    return node ? childSummaries(node) : [];
+  }, [childrenUnknown, expanded, section.id, shallow.data]);
+  const press = useCallback(() => {
+    if (expandable) onToggleSection(section.id, expandedIds.has(section.id));
+  }, [expandable, expandedIds, onToggleSection, section.id]);
+  const nested: OutlineRowProps = {
+    serverId,
+    fileKey,
+    pinnedVersion,
+    canReadNodeDepth,
+    expandedIds,
+    selectedNodeId,
+    onSelectFrame,
+    onSelectNode,
+    onToggleSection,
+    search,
+  };
+  let openChildren: React.ReactNode = null;
+  if (expanded) {
+    openChildren = childrenUnknown ? (
+      <FrameLayers loading={shallow.isLoading} error={shallow.error}>
+        <OutlineRows
+          {...nested}
+          summaries={lazyChildren}
+          byParent={NO_CHILDREN}
+          depth={depth + 1}
+        />
+      </FrameLayers>
+    ) : (
+      <OutlineRows {...nested} summaries={knownChildren} byParent={byParent} depth={depth + 1} />
+    );
+  }
+  return (
+    <View>
+      <Pressable
+        style={[styles.row, { paddingLeft: outlineRowIndent(depth) }]}
+        onPress={press}
+        accessibilityRole="button"
+        disabled={childrenUnknown && !canReadNodeDepth}
+        testID={`figma-nav-section-${section.id}`}
+      >
+        <LayerChevron hasChildren={expandable} expanded={expanded} />
+        <Text style={styles.rowLabel} numberOfLines={1}>
+          {section.name}
+        </Text>
+      </Pressable>
+      {expandable && childrenUnknown && !canReadNodeDepth ? (
+        <Text
+          style={[styles.rowSub, { paddingLeft: outlineRowIndent(depth + 1) }]}
+          testID={`figma-nav-section-${section.id}-update-hint`}
+        >
+          Update the host to browse sections.
+        </Text>
+      ) : null}
+      {openChildren}
+    </View>
+  );
+}
+
+function OutlineRows({
+  summaries,
+  byParent,
+  depth,
+  ...rows
+}: OutlineRowProps & {
+  summaries: readonly SectionAwareSummary[];
+  byParent: OutlineTree["byParent"];
+  depth: number;
+}) {
+  return (
+    <>
+      {summaries
+        .filter((summary) => matchesSearch(summary, rows.search))
+        .map((summary) =>
+          summary.type === "SECTION" ? (
+            <SectionRow
+              key={summary.id}
+              {...rows}
+              section={summary}
+              byParent={byParent}
+              depth={depth}
+              expanded={rows.expandedIds.has(summary.id)}
+            />
+          ) : (
+            <FrameRow
+              key={summary.id}
+              {...rows}
+              frame={summary}
+              depth={depth}
+              expanded={rows.expandedIds.has(summary.id)}
+            />
+          ),
+        )}
+    </>
+  );
+}
+
 function PageRow({
   serverId,
   fileKey,
-  version,
+  pinnedVersion,
+  canReadNodeDepth,
   page,
   go,
-  expandedFrame,
+  expandedIds,
   selectedNodeId,
   onToggleFrame,
+  onToggleSection,
   onSelectNode,
   search,
   onSearchChange,
 }: {
   serverId: string;
   fileKey: string;
-  version: string | null;
+  pinnedVersion: string | null;
+  canReadNodeDepth: boolean;
   page: FigmaPage;
   go: Go;
-  expandedFrame: string | null;
+  expandedIds: ReadonlySet<string>;
   selectedNodeId: string | null;
   onToggleFrame: (pageId: string, frameId: string, wasExpanded: boolean) => void;
+  onToggleSection: (pageId: string, sectionId: string, wasExpanded: boolean) => void;
   onSelectNode: (nodeId: string) => void;
   search: string;
   onSearchChange: (value: string) => void;
@@ -657,12 +859,17 @@ function PageRow({
     go({ pageId: page.id, nodeId: null });
   }, [go, page.id]);
   const selectFrame = useCallback(
-    (frameId: string) => onToggleFrame(page.id, frameId, expandedFrame === frameId),
-    [expandedFrame, onToggleFrame, page.id],
+    (frameId: string) => onToggleFrame(page.id, frameId, expandedIds.has(frameId)),
+    [expandedIds, onToggleFrame, page.id],
   );
-  const frames = useMemo(
-    () => (page.frames ?? []).filter((frame) => matchesSearch(frame, search)),
-    [page.frames, search],
+  const toggleSection = useCallback(
+    (sectionId: string, wasExpanded: boolean) => onToggleSection(page.id, sectionId, wasExpanded),
+    [onToggleSection, page.id],
+  );
+  // The flat summaries become a hierarchy strictly through parentId.
+  const tree = useMemo(
+    () => buildOutlineTree(page.frames as readonly SectionAwareSummary[]),
+    [page.frames],
   );
   const searchRow = useMemo(
     () => (
@@ -697,20 +904,21 @@ function PageRow({
       {selected ? (
         <>
           {searchRow}
-          {frames.map((frame) => (
-            <FrameRow
-              key={frame.id}
-              serverId={serverId}
-              fileKey={fileKey}
-              version={version}
-              frame={frame}
-              expanded={expandedFrame === frame.id}
-              selectedNodeId={selectedNodeId}
-              onSelectFrame={selectFrame}
-              onSelectNode={onSelectNode}
-              search={search}
-            />
-          ))}
+          <OutlineRows
+            serverId={serverId}
+            fileKey={fileKey}
+            pinnedVersion={pinnedVersion}
+            canReadNodeDepth={canReadNodeDepth}
+            expandedIds={expandedIds}
+            selectedNodeId={selectedNodeId}
+            onSelectFrame={selectFrame}
+            onSelectNode={onSelectNode}
+            onToggleSection={toggleSection}
+            search={search}
+            summaries={tree.roots}
+            byParent={tree.byParent}
+            depth={0}
+          />
         </>
       ) : null}
     </View>
@@ -730,15 +938,37 @@ function PagesAndLayers({
 }) {
   const { location } = useFigmaGlobalNav();
   const outline = useFigmaOutline(serverId, fileKey, version);
+  const canReadNodeDepth = useHostFeature(serverId, "figmaNodeDepth");
   const [search, setSearch] = useState("");
   const pages = useMemo(() => outline.data?.pages ?? [], [outline.data]);
-  const [expandedFrame, setExpandedFrame] = useState<string | null>(null);
+  // The outline response pins the snapshot its tree came from; depth-1 section
+  // reads AND expanded-frame subtree reads run against the SAME version (the
+  // handler requires a non-empty one — null here simply keeps the shallow read
+  // disabled, never a fallback).
+  const pinnedVersion = outline.data?.version ?? null;
+  const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(() => new Set());
+  const openRow = useCallback((rowId: string, wasExpanded: boolean) => {
+    setExpandedIds((previous) => {
+      const next = new Set(previous);
+      if (wasExpanded) next.delete(rowId);
+      else next.add(rowId);
+      return next;
+    });
+  }, []);
   const toggleFrame = useCallback(
     (pageId: string, frameId: string, wasExpanded: boolean) => {
       go({ pageId, nodeId: frameId });
-      setExpandedFrame(wasExpanded ? null : frameId);
+      openRow(frameId, wasExpanded);
     },
-    [go],
+    [go, openRow],
+  );
+  const toggleSection = useCallback(
+    (_pageId: string, sectionId: string, wasExpanded: boolean) => {
+      // Expanding a section is tree navigation, not a canvas selection: the
+      // selected node stays where it was, only the row opens.
+      openRow(sectionId, wasExpanded);
+    },
+    [openRow],
   );
   const selectNode = useCallback((nodeId: string) => go({ nodeId }), [go]);
   const changeSearch = useCallback((value: string) => setSearch(value), []);
@@ -752,12 +982,14 @@ function PagesAndLayers({
           key={page.id}
           serverId={serverId}
           fileKey={fileKey}
-          version={version}
+          pinnedVersion={pinnedVersion}
+          canReadNodeDepth={canReadNodeDepth}
           page={page}
           go={go}
-          expandedFrame={location.pageId === page.id ? expandedFrame : null}
+          expandedIds={location.pageId === page.id ? expandedIds : EMPTY_IDS}
           selectedNodeId={location.nodeId}
           onToggleFrame={toggleFrame}
+          onToggleSection={toggleSection}
           onSelectNode={selectNode}
           search={search}
           onSearchChange={changeSearch}
@@ -766,6 +998,8 @@ function PagesAndLayers({
     </>
   );
 }
+
+const EMPTY_IDS: ReadonlySet<string> = new Set();
 
 function ConnectionRow({
   connection,
@@ -852,6 +1086,132 @@ function OpenInFigmaSection({ serverId }: { serverId: string }) {
   );
 }
 
+// Everything under a CONNECTED account: the Browse-first Files section (URL
+// paste AND the optional Figma Link entry live under the Advanced disclosure),
+// Teams, and the "Open in Figma" rows.
+function ConnectedTree({
+  serverId,
+  connectionId,
+  fileKey,
+  go,
+}: {
+  serverId: string;
+  connectionId: string;
+  fileKey: string | null;
+  go: Go;
+}) {
+  const files = useFigmaFiles(serverId, connectionId);
+  const teams = useFigmaTeams(serverId, connectionId);
+  const { pinned, recent } = useMemo(() => groupFiles(files.data ?? []), [files.data]);
+  const teamList = useMemo(() => teams.data ?? [], [teams.data]);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const toggleAdvanced = useCallback(() => setAdvancedOpen((previous) => !previous), []);
+  const openLink = useCallback(() => go({ view: "link" }), [go]);
+  return (
+    <>
+      <Text style={styles.sectionLabel}>Files</Text>
+      {/* Browse files is the primary add (ADR-0038). It needs the native
+          pick, so non-desktop sessions get guidance instead of a fake
+          picker, and the URL-paste rows stay reachable under Advanced. */}
+      {canBrowseFigmaFiles() ? (
+        <BrowseFilesRow serverId={serverId} connectionId={connectionId} />
+      ) : (
+        <BrowseGuidanceRow />
+      )}
+      {files.isLoading ? <Text style={styles.empty}>Loading files…</Text> : null}
+      {files.error ? (
+        <Text style={styles.emptyError} testID="figma-nav-files-error">
+          {describeFigmaApiError(files.error)}
+        </Text>
+      ) : null}
+      {pinned.length > 0 ? (
+        <>
+          <Text style={[styles.rowSub, styles.groupLabel]}>Pinned</Text>
+          {pinned.map((file) => (
+            <FileRow
+              key={file.fileKey}
+              serverId={serverId}
+              file={file}
+              active={fileKey === file.fileKey}
+              go={go}
+            />
+          ))}
+        </>
+      ) : null}
+      {recent.length > 0 ? (
+        <>
+          <Text style={[styles.rowSub, styles.groupLabel]}>Recent</Text>
+          {recent.slice(0, 8).map((file) => (
+            <FileRow
+              key={file.fileKey}
+              serverId={serverId}
+              file={file}
+              active={fileKey === file.fileKey}
+              go={go}
+            />
+          ))}
+        </>
+      ) : null}
+      {!files.isLoading && !files.error && !pinned.length && !recent.length ? (
+        <Text style={styles.empty} testID="figma-nav-files-empty">
+          No files yet. Use Browse files, or paste a URL under Advanced.
+        </Text>
+      ) : null}
+
+      <Text style={styles.sectionLabel}>Teams</Text>
+      {teams.isLoading ? <Text style={styles.empty}>Loading teams…</Text> : null}
+      {teams.error ? (
+        <Text style={styles.emptyError} testID="figma-nav-teams-error">
+          {describeFigmaApiError(teams.error)}
+        </Text>
+      ) : null}
+      {teamList.map((team) => (
+        <TeamRow
+          key={team.teamId}
+          serverId={serverId}
+          connectionId={connectionId}
+          teamId={team.teamId}
+          teamName={team.name}
+          go={go}
+        />
+      ))}
+      {!teams.isLoading && !teams.error && !teamList.length ? (
+        <Text style={styles.empty} testID="figma-nav-teams-empty">
+          No teams yet. Add a team by URL under Advanced.
+        </Text>
+      ) : null}
+
+      <Pressable
+        style={styles.advancedRow}
+        onPress={toggleAdvanced}
+        accessibilityRole="button"
+        testID="figma-nav-advanced"
+      >
+        <Text style={styles.advancedLabel}>{advancedOpen ? "▾" : "▸"} Advanced</Text>
+      </Pressable>
+      {advancedOpen ? (
+        <View testID="figma-nav-advanced-panel">
+          <AddFileRow serverId={serverId} connectionId={connectionId} />
+          <AddTeamRow serverId={serverId} connectionId={connectionId} />
+          {/* The legacy Link entry lives in Advanced: the primary flow is
+              pick → view → play, and Link is an optional integration, not a
+              step the connected empty state should compete with. */}
+          <Pressable
+            style={styles.row}
+            onPress={openLink}
+            accessibilityRole="button"
+            testID="figma-nav-link"
+          >
+            <ThemedExternalMuted size={13} />
+            <Text style={styles.rowLabel}>Figma Link…</Text>
+          </Pressable>
+        </View>
+      ) : null}
+      <OpenInFigmaSection serverId={serverId} />
+    </>
+  );
+}
+
 export function SidebarFigmaNav({ serverId }: { serverId: string }) {
   const { location, go } = useFigmaGlobalNav();
   const connections = useFigmaConnections(serverId);
@@ -860,11 +1220,7 @@ export function SidebarFigmaNav({ serverId }: { serverId: string }) {
     () => list.find((c) => c.id === location.connectionId) ?? list[0] ?? null,
     [list, location.connectionId],
   );
-  const files = useFigmaFiles(serverId, selected?.id ?? null);
-  const teams = useFigmaTeams(serverId, selected?.id ?? null);
-  const { pinned, recent } = useMemo(() => groupFiles(files.data ?? []), [files.data]);
   const leave = useCallback(() => router.push("/"), []);
-  const openLink = useCallback(() => go({ view: "link" }), [go]);
   const openConnect = useCallback(() => go({ view: "connect" }), [go]);
   return (
     <View style={styles.root} testID="sidebar-figma-nav-panel">
@@ -903,51 +1259,12 @@ export function SidebarFigmaNav({ serverId }: { serverId: string }) {
         ))}
 
         {selected && selected.authState === "connected" ? (
-          <>
-            <Text style={styles.sectionLabel}>Files</Text>
-            <AddFileRow serverId={serverId} connectionId={selected.id} />
-            {files.isLoading ? <Text style={styles.empty}>Loading files…</Text> : null}
-            {pinned.length > 0 ? (
-              <>
-                <Text style={[styles.rowSub, styles.groupLabel]}>Pinned</Text>
-                {pinned.map((file) => (
-                  <FileRow
-                    key={file.fileKey}
-                    serverId={serverId}
-                    file={file}
-                    active={location.fileKey === file.fileKey}
-                    go={go}
-                  />
-                ))}
-              </>
-            ) : null}
-            {recent.length > 0 ? (
-              <>
-                <Text style={[styles.rowSub, styles.groupLabel]}>Recent</Text>
-                {recent.slice(0, 8).map((file) => (
-                  <FileRow
-                    key={file.fileKey}
-                    serverId={serverId}
-                    file={file}
-                    active={location.fileKey === file.fileKey}
-                    go={go}
-                  />
-                ))}
-              </>
-            ) : null}
-            <AddTeamRow serverId={serverId} connectionId={selected.id} />
-            {(teams.data ?? []).map((team) => (
-              <TeamRow
-                key={team.teamId}
-                serverId={serverId}
-                connectionId={selected.id}
-                teamId={team.teamId}
-                teamName={team.name}
-                go={go}
-              />
-            ))}
-            <OpenInFigmaSection serverId={serverId} />
-          </>
+          <ConnectedTree
+            serverId={serverId}
+            connectionId={selected.id}
+            fileKey={location.fileKey}
+            go={go}
+          />
         ) : null}
 
         {location.fileKey ? (
@@ -958,16 +1275,6 @@ export function SidebarFigmaNav({ serverId }: { serverId: string }) {
             go={go}
           />
         ) : null}
-
-        <Pressable
-          style={styles.row}
-          onPress={openLink}
-          accessibilityRole="button"
-          testID="figma-nav-link"
-        >
-          <ThemedExternalMuted size={13} />
-          <Text style={styles.rowLabel}>Figma Link…</Text>
-        </Pressable>
       </ScrollView>
     </View>
   );
@@ -1080,6 +1387,14 @@ const styles = StyleSheet.create((theme: Theme) => ({
     fontSize: theme.fontSize.xs,
     color: theme.colors.foregroundMuted,
   },
+  emptyError: {
+    paddingHorizontal: theme.spacing[3] + theme.spacing[6],
+    paddingVertical: theme.spacing[1],
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.palette.red[500],
+  },
+  advancedRow: row(theme),
+  advancedLabel: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
   dotGreen: { ...dot(theme), backgroundColor: theme.colors.palette.green[500] },
   dotYellow: { ...dot(theme), backgroundColor: theme.colors.palette.amber[500] },
   dotRed: { ...dot(theme), backgroundColor: theme.colors.palette.red[500] },

@@ -48,6 +48,8 @@ export interface PlayerState {
   overlays: OverlayEntry[];
   transition: ActiveTransition | null;
   timeout: PendingTimeout | null;
+  /** Whether interactions have arrived for this visit (including frames without a timer). */
+  timeoutResolved: boolean;
 }
 
 export type PlayerEvent =
@@ -57,7 +59,8 @@ export type PlayerEvent =
   | { type: "toolbar_restart" }
   | { type: "overlay_dismiss" }
   | { type: "timeout_fire" }
-  | { type: "transition_complete" };
+  | { type: "transition_complete" }
+  | { type: "frame_ready"; frameId: string };
 
 export type PlayerEffect =
   | { kind: "open_url"; url: string }
@@ -101,7 +104,14 @@ export function parseOverlayPosition(value: string | undefined): OverlayPosition
 }
 
 export function emptyPlayerState(): PlayerState {
-  return { startFrameId: null, stack: [], overlays: [], transition: null, timeout: null };
+  return {
+    startFrameId: null,
+    stack: [],
+    overlays: [],
+    transition: null,
+    timeout: null,
+    timeoutResolved: false,
+  };
 }
 
 export function currentFrameId(state: PlayerState): string | null {
@@ -120,6 +130,15 @@ export function baseFrameIdFor(state: PlayerState): string | null {
   return top ?? null;
 }
 
+/** Only pixels still on stage need node trees; Back history keeps IDs only. */
+export function visibleFrameIds(state: PlayerState): string[] {
+  const base = baseFrameIdFor(state);
+  const ids = base ? [base] : [];
+  ids.push(...state.overlays.map((entry) => entry.frameId));
+  if (state.transition) ids.push(state.transition.fromFrameId, state.transition.toFrameId);
+  return [...new Set(ids)];
+}
+
 function timeoutFor(state: PlayerState, ctx: PlayerContext): PendingTimeout | null {
   const frameId = currentFrameId(state);
   if (!frameId) return null;
@@ -127,18 +146,29 @@ function timeoutFor(state: PlayerState, ctx: PlayerContext): PendingTimeout | nu
   return pending ? { frameId, delayMs: pending.delayMs } : null;
 }
 
-/** AFTER_TIMEOUT fires once per arrival on a frame; re-entry re-arms it. */
-function commit(state: PlayerState, ctx: PlayerContext): PlayerState {
-  return { ...state, timeout: timeoutFor(state, ctx) };
+/** Two arms are the same answer when frame and delay match — including both being absent. */
+function sameArm(current: PendingTimeout | null, pending: PendingTimeout | null): boolean {
+  if (current === null || pending === null) return current === pending;
+  return current.frameId === pending.frameId && current.delayMs === pending.delayMs;
+}
+
+/**
+ * Arrival on a new frame clears the timer (ADR-0037): the AFTER_TIMEOUT must not start before
+ * the frame's interaction data is on hand, so only `frame_ready` arms it. `timeoutResolved`
+ * false means "this visit has not been resolved yet" — the view fires `frame_ready` once the
+ * frame's subtree loads, which arms the timer (or marks the visit resolved with no timer).
+ */
+function commit(state: PlayerState): PlayerState {
+  return { ...state, timeout: null, timeoutResolved: false };
 }
 
 function applyAction(state: PlayerState, action: ParsedAction, ctx: PlayerContext): StepResult {
   if (action.kind === "back") {
-    return { state: commit(goBack(state), ctx), effects: [] };
+    return { state: commit(goBack(state)), effects: [] };
   }
   if (action.kind === "close") {
     if (state.overlays.length === 0) return { state, effects: [] };
-    return { state: commit(closeTopOverlay(state), ctx), effects: [] };
+    return { state: commit(closeTopOverlay(state)), effects: [] };
   }
   if (action.kind === "url") {
     return { state, effects: [{ kind: "open_url", url: action.url }] };
@@ -156,7 +186,7 @@ function applyAction(state: PlayerState, action: ParsedAction, ctx: PlayerContex
       ...state.overlays,
       { frameId: action.destinationId, settings: ctx.overlaySettingsFor(action.destinationId) },
     ];
-    return { state: commit({ ...state, overlays }, ctx), effects: [] };
+    return { state: commit({ ...state, overlays }), effects: [] };
   }
   if (action.kind === "swap") {
     if (state.overlays.length === 0) {
@@ -167,7 +197,7 @@ function applyAction(state: PlayerState, action: ParsedAction, ctx: PlayerContex
       frameId: action.destinationId,
       settings: ctx.overlaySettingsFor(action.destinationId),
     };
-    return { state: commit({ ...state, overlays }, ctx), effects: [] };
+    return { state: commit({ ...state, overlays }), effects: [] };
   }
   const from = currentFrameId(state);
   if (!from) return { state, effects: [] };
@@ -184,7 +214,7 @@ function applyAction(state: PlayerState, action: ParsedAction, ctx: PlayerContex
     : null;
   // G5 r2: navigation replaces the whole stage, Figma-style — a NAVIGATE fired from inside an
   // open overlay (the sheet's "View cart") must dismiss the overlays along with it.
-  return { state: commit({ ...state, stack, overlays: [], transition }, ctx), effects: [] };
+  return { state: commit({ ...state, stack, overlays: [], transition }), effects: [] };
 }
 
 function goBack(state: PlayerState): PlayerState {
@@ -206,13 +236,14 @@ export function step(state: PlayerState, event: PlayerEvent, ctx: PlayerContext)
         overlays: [],
         transition: null,
         timeout: null,
+        timeoutResolved: false,
       };
-      return { state: commit(started, ctx), effects: [] };
+      return { state: commit(started), effects: [] };
     }
     case "interaction":
       return applyAction(state, event.action, ctx);
     case "toolbar_back":
-      return { state: commit(goBack(state), ctx), effects: [] };
+      return { state: commit(goBack(state)), effects: [] };
     case "toolbar_restart": {
       if (!state.startFrameId) return { state, effects: [] };
       const restarted: PlayerState = {
@@ -221,13 +252,14 @@ export function step(state: PlayerState, event: PlayerEvent, ctx: PlayerContext)
         overlays: [],
         transition: null,
         timeout: null,
+        timeoutResolved: false,
       };
-      return { state: commit(restarted, ctx), effects: [] };
+      return { state: commit(restarted), effects: [] };
     }
     case "overlay_dismiss": {
       const top = state.overlays[state.overlays.length - 1];
       if (!top || !top.settings.closeOnClickOutside) return { state, effects: [] };
-      return { state: commit(closeTopOverlay(state), ctx), effects: [] };
+      return { state: commit(closeTopOverlay(state)), effects: [] };
     }
     case "timeout_fire": {
       const frameId = currentFrameId(state);
@@ -238,6 +270,22 @@ export function step(state: PlayerState, event: PlayerEvent, ctx: PlayerContext)
       const pending = ctx.afterTimeoutFor(frameId);
       if (!pending) return { state: { ...state, timeout: null }, effects: [] };
       return applyAction({ ...state, timeout: null }, pending.action, ctx);
+    }
+    case "frame_ready": {
+      if (event.frameId !== currentFrameId(state) || state.transition) {
+        return { state, effects: [] };
+      }
+      const pending = timeoutFor(state, ctx);
+      // Idempotent by value: re-firing with the same answer leaves the state (and the view's
+      // timer) untouched. A re-fire once interactions arrive after the visit resolved replaces
+      // the empty arm with the real one — the timer starts when the frame's data is on hand.
+      if (state.timeoutResolved && sameArm(state.timeout, pending)) {
+        return { state, effects: [] };
+      }
+      return {
+        state: { ...state, timeout: pending, timeoutResolved: true },
+        effects: [],
+      };
     }
     case "transition_complete":
       return { state: { ...state, transition: null }, effects: [] };
