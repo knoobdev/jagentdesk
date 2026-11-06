@@ -51,11 +51,12 @@ export function canBrowseFigmaFiles(): boolean {
 }
 
 /**
- * A Figma 403 is an app-API-access failure on the connected Figma account,
- * not a sharing/link-permission problem — so for `forbidden` we surface the
- * daemon's own account/app diagnostic and do not suggest checking sharing.
- * Anything else keeps the daemon message. Never rethrows here: the caller is
- * already in the error branch and needs text.
+ * A Figma 403 has several possible causes — the app's API access, the file's
+ * sharing settings, org policy — and the renderer cannot tell them apart, so
+ * it invents no explanation of its own (no "check sharing" claim): the
+ * daemon's neutral, authoritative diagnostic is surfaced verbatim for
+ * `forbidden`. Anything else keeps the daemon message too. Never rethrows
+ * here: the caller is already in the error branch and needs text.
  */
 export function describeFigmaApiError(cause: unknown): string {
   const rpc = cause as Partial<FigmaRpcError> | null | undefined;
@@ -137,10 +138,13 @@ export function BrowseFilesRow({
       // the add worked would hide a broken response contract.
       const added = response.file;
       if (!added?.fileKey) {
-        setError("Figma added the file but returned no file to open.");
+        setError("Could not add/open file: no file returned.");
         return;
       }
       await invalidateFigmaFiles(queryClient, serverId);
+      // The invalidation awaited — an account switch during it retires this
+      // generation, and a stale completion must neither navigate nor notify.
+      if (generation.current !== started) return;
       onAdded?.();
       // Open the ACTUAL file the add response returned (the captured URL's
       // node-id is the caller's selection, so the node survives the round-trip).

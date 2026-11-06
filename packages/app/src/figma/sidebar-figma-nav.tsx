@@ -39,8 +39,8 @@ import {
   useFigmaTeams,
 } from "@/figma/queries";
 import { useFigmaGlobalNav, type FigmaNav } from "@/figma/nav";
-import { childSummaries, type OutlineSectionSummary } from "@/figma/canvas/section-outline";
-import { useHostFeature, type HostFeatureName } from "@/runtime/host-features";
+import { childSummaries, type SectionAwareSummary } from "@/figma/canvas/section-outline";
+import { useHostFeature } from "@/runtime/host-features";
 import { parseFigmaFileUrl, parseFigmaTeamUrl } from "@/figma/url-parse";
 import {
   BrowseFilesRow,
@@ -584,15 +584,15 @@ function FrameLayers({
 // no speculative full-Section fallback.
 
 interface OutlineTree {
-  roots: OutlineSectionSummary[];
-  byParent: Map<string, OutlineSectionSummary[]>;
+  roots: SectionAwareSummary[];
+  byParent: Map<string, SectionAwareSummary[]>;
 }
 
-const NO_CHILDREN = new Map<string, OutlineSectionSummary[]>();
+const NO_CHILDREN = new Map<string, SectionAwareSummary[]>();
 
-function buildOutlineTree(frames: readonly OutlineSectionSummary[]): OutlineTree {
-  const roots: OutlineSectionSummary[] = [];
-  const byParent = new Map<string, OutlineSectionSummary[]>();
+function buildOutlineTree(frames: readonly SectionAwareSummary[]): OutlineTree {
+  const roots: SectionAwareSummary[] = [];
+  const byParent = new Map<string, SectionAwareSummary[]>();
   for (const summary of frames) {
     const parent = summary.parentId ?? null;
     if (parent) {
@@ -611,10 +611,6 @@ function buildOutlineTree(frames: readonly OutlineSectionSummary[]): OutlineTree
 function outlineRowIndent(depth: number): number {
   return themeSpacing(3) + themeSpacing(2) + depth * 12;
 }
-
-// COMPAT(adr0039-capability): cast pending the protocol's figmaNodeDepth
-// server_info feature (W4); drop the cast after the integrator's build lands.
-const FIGMA_NODE_DEPTH: HostFeatureName = "figmaNodeDepth" as HostFeatureName;
 
 interface OutlineRowProps {
   serverId: string;
@@ -645,7 +641,7 @@ function FrameRow({
   onSelectFrame,
   onSelectNode,
   search,
-}: OutlineRowProps & { frame: OutlineSectionSummary; depth: number; expanded: boolean }) {
+}: OutlineRowProps & { frame: SectionAwareSummary; depth: number; expanded: boolean }) {
   // The subtree under a frame is fetched from figma.file.nodes only once that frame is open
   // (32.5.2) — the outline alone carries just the frame summaries.
   const nodes = useFigmaNodes(serverId, fileKey, expanded ? [frame.id] : [], version);
@@ -706,7 +702,7 @@ function SectionRow({
   onToggleSection,
   search,
 }: OutlineRowProps & {
-  section: OutlineSectionSummary;
+  section: SectionAwareSummary;
   byParent: OutlineTree["byParent"];
   depth: number;
   expanded: boolean;
@@ -795,7 +791,7 @@ function OutlineRows({
   depth,
   ...rows
 }: OutlineRowProps & {
-  summaries: readonly OutlineSectionSummary[];
+  summaries: readonly SectionAwareSummary[];
   byParent: OutlineTree["byParent"];
   depth: number;
 }) {
@@ -873,7 +869,7 @@ function PageRow({
   );
   // The flat summaries become a hierarchy strictly through parentId.
   const tree = useMemo(
-    () => buildOutlineTree(page.frames as readonly OutlineSectionSummary[]),
+    () => buildOutlineTree(page.frames as readonly SectionAwareSummary[]),
     [page.frames],
   );
   const searchRow = useMemo(
@@ -944,7 +940,7 @@ function PagesAndLayers({
 }) {
   const { location } = useFigmaGlobalNav();
   const outline = useFigmaOutline(serverId, fileKey, version);
-  const canReadNodeDepth = useHostFeature(serverId, FIGMA_NODE_DEPTH);
+  const canReadNodeDepth = useHostFeature(serverId, "figmaNodeDepth");
   const [search, setSearch] = useState("");
   const pages = useMemo(() => outline.data?.pages ?? [], [outline.data]);
   // The outline response pins the snapshot its tree came from; depth-1 section

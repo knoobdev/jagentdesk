@@ -249,7 +249,64 @@ describe("Browse files (ADR-0038 primary add)", () => {
     clickBrowse();
     await waitFor(() => expect(screen.getByTestId("figma-nav-browse-error")).toBeDefined());
     // No `?? target.fileKey` success fallback: a missing returned file is an error.
-    expect(screen.getByTestId("figma-nav-browse-error").textContent).toMatch(/no file to open/i);
+    expect(screen.getByTestId("figma-nav-browse-error").textContent).toMatch(/no file returned/i);
+    expect(router.setParams).not.toHaveBeenCalled();
+  });
+
+  it("drops the completion when the context switches during invalidation — no navigate, no onAdded", async () => {
+    // The tracked-files list query must be ACTIVE (a mounted subscriber) so the
+    // invalidation really awaits a refetch: the first list request settles, the
+    // refetch triggered by the add stays pending until the test releases it.
+    let resolveDeferredList: (value: { requestId: string; files: unknown[] }) => void = () => {};
+    let listCount = 0;
+    figmaRequest.mockImplementation((type: string) => {
+      if (type === "figma.files.add.request") {
+        return Promise.resolve({
+          requestId: "r-add",
+          file: {
+            fileKey: FILE_KEY,
+            connectionId: "c1",
+            name: "HDC-APP/main",
+            schemaVersion: 1,
+            nodes: [],
+          },
+        });
+      }
+      if (type === "figma.files.list.request") {
+        listCount += 1;
+        if (listCount === 1) return Promise.resolve({ requestId: "r-list", files: [] });
+        return new Promise((resolve) => (resolveDeferredList = resolve));
+      }
+      return Promise.resolve({ requestId: "r" });
+    });
+    pickFile.mockResolvedValue({ kind: "file", url: PICKED_URL });
+    const onAdded = vi.fn();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    function FilesProbe() {
+      useFigmaFiles("s1", "c1");
+      return null;
+    }
+    const view = render(
+      <QueryClientProvider client={client}>
+        <FilesProbe />
+        <BrowseFilesRow serverId="s1" connectionId="c1" onAdded={onAdded} />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(listCount).toBe(1));
+    clickBrowse();
+    await waitFor(() => expect(listCount).toBe(2));
+    // Account/context switch while the invalidation is still awaited.
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <FilesProbe />
+        <BrowseFilesRow serverId="s2" connectionId="c2" onAdded={onAdded} />
+      </QueryClientProvider>,
+    );
+    act(() => resolveDeferredList({ requestId: "r-list-2", files: [] }));
+    // The retired generation resumes, sees the switch, and stops before the
+    // navigation/notify tail.
+    await waitFor(() => expect(screen.getByText("Browse files")).toBeDefined());
+    expect(onAdded).not.toHaveBeenCalled();
     expect(router.setParams).not.toHaveBeenCalled();
   });
 
