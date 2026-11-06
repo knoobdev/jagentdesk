@@ -176,27 +176,27 @@ describe("FigmaScreen files home", () => {
     });
   });
 
-  it("empty desktop state points at Browse files, not URL pasting", () => {
+  it("empty saved list does not promise website browsing", () => {
     render(<FigmaScreen />);
     const empty = screen.getByTestId("figma-files-empty");
-    expect(empty.textContent).toContain("No files yet");
-    expect(empty.textContent).toContain("Browse files");
+    expect(empty.textContent).toContain("No files added yet");
+    expect(empty.textContent).toContain("no files added to JAgentDesk");
     expect(empty.textContent).not.toContain("by URL");
   });
 
-  it("empty mobile state says files are added from the desktop app", () => {
+  it("mobile displays the same saved-index scope as desktop", () => {
     browse.current = false;
     render(<FigmaScreen />);
     const empty = screen.getByTestId("figma-files-empty");
-    expect(empty.textContent).toContain("JAgentDesk desktop app");
-    expect(empty.textContent).toContain("files already added");
+    expect(empty.textContent).toContain("no files added to JAgentDesk");
+    expect(empty.textContent).toContain("does not include every file");
   });
 
-  it("the connected empty state guides to Browse files without a reconnect button", () => {
+  it("the connected empty state states its scope without asking to reconnect", () => {
     render(<FigmaScreen />);
     const empty = screen.getByTestId("figma-files-empty");
-    expect(empty.textContent).toContain("Browse files");
-    expect(empty.textContent).toContain("JAgentDesk file picker");
+    expect(empty.textContent).toContain("no files added to JAgentDesk");
+    expect(empty.textContent).toContain("does not include every file");
     // Not the Figma Desktop app, and no second Connect competing with Browse.
     expect(empty.textContent).not.toContain("Figma window");
     expect(empty.textContent).not.toContain("Connect Figma");

@@ -211,13 +211,11 @@ describe("SidebarFigmaNav — Browse files primary", () => {
     expect(screen.queryByTestId("figma-nav-add-team-open")).toBeNull();
   });
 
-  it("shows the desktop-selection guidance when there is no picker (mobile / plain web)", () => {
+  it("shows the native file browser without the desktop website picker", () => {
     bridge.current = null;
     renderNav();
-    const guidance = screen.getByTestId("figma-nav-browse-guidance");
-    expect(guidance.textContent).toContain("JAgentDesk desktop app");
-    expect(guidance.textContent).toContain("files already added");
-    expect(screen.queryByTestId("figma-nav-browse")).toBeNull();
+    expect(screen.getByTestId("figma-nav-browse").textContent).toContain("Browse files");
+    expect(screen.queryByTestId("figma-nav-browse-guidance")).toBeNull();
   });
 
   it("keeps the URL-paste rows as explicit Advanced access only", async () => {
@@ -260,7 +258,9 @@ describe("SidebarFigmaNav — tracked files", () => {
 
   it("states the real empty list with where files come from", () => {
     renderNav();
-    expect(screen.getByTestId("figma-nav-files-empty").textContent).toContain("Browse files");
+    expect(screen.getByTestId("figma-nav-files-empty").textContent).toContain(
+      "No files added to JAgentDesk",
+    );
   });
 
   it("shows the file query error instead of an empty list", () => {
