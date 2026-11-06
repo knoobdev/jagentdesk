@@ -2470,8 +2470,9 @@ export class VoiceAssistantWebSocketServer {
         ...(this.argocdService ? { argocd: true } : {}),
         // Jira (spec 29 / ADR-0034): capability `jira`, advertised when the service is wired.
         ...(this.jiraService ? { jira: true } : {}),
-        // Figma (spec 32 / ADR-0035).
-        ...(this.figmaService ? { figma: true, figmaPlayback: true } : {}),
+        // Figma (spec 32 / ADR-0035). `figmaNodeDepth` (ADR-0039) reports the section-aware
+        // outline and the depth-1 metadata read together; viewers gate once on it.
+        ...(this.figmaService ? { figma: true, figmaPlayback: true, figmaNodeDepth: true } : {}),
         // Advertise the plugin management surface only when a PluginService is
         // wired; without it the plugin.* RPCs return empty/disabled results.
         ...(this.pluginRuntime
