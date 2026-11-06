@@ -18,6 +18,8 @@ import * as React from "react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { FigmaConnection } from "@jagentdesk/protocol/figma/rpc-schemas";
+import * as Clipboard from "expo-clipboard";
 
 vi.stubGlobal("React", React);
 
@@ -289,6 +291,53 @@ describe("FigmaConnectScreen", () => {
     const paste = view.querySelector('[data-testid="figma-signin-paste"]') as HTMLButtonElement;
     expect(browser.disabled).toBe(true);
     expect(paste.disabled).toBe(true);
+  });
+
+  // The guide's scope list and the daemon's authorize request share one source in oauth-flow.ts
+  // (pinned to spec 32.2 in oauth-flow.test.ts); this proves the guide renders that list verbatim
+  // and Copy all copies exactly it, so the user ticks what will actually be requested.
+  it("shows the guide's requested-scope list and copies exactly that list", () => {
+    const view = render();
+    const guide = view.querySelector('[data-testid="figma-connect-guide"]');
+    expect(guide?.textContent).toContain("file_read");
+    const scopes = view.querySelector('[data-testid="figma-guide-scopes"]');
+    expect(scopes?.textContent).toBe("file_read");
+    act(() => {
+      view
+        .querySelector('[data-testid="figma-copy-scopes"]')
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(vi.mocked(Clipboard.setStringAsync)).toHaveBeenCalledWith("file_read");
+  });
+
+  // figma.connections.test is GET /v1/me: it proves the sign-in, not file access (the live 403
+  // came after a 200 /me). The note must not overclaim what was checked.
+  it("presents the connection test as an account check, never as proof of file access", async () => {
+    const connected = {
+      id: "fgc_note",
+      account: { figmaUserId: "u-9", handle: "tester", email: null },
+      authState: "connected",
+      createdAt_ms: 1,
+    } as FigmaConnection;
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    const mounted = createRoot(container);
+    root = mounted;
+    act(() =>
+      mounted.render(
+        <FigmaConnectScreen serverId="s1" connections={[connected]} onConnected={undefined} />,
+      ),
+    );
+    const button = container.querySelector(
+      '[data-testid="figma-connection-test"]',
+    ) as HTMLButtonElement;
+    await act(async () => {
+      button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    const row = container.querySelector('[data-testid="figma-connection-row-fgc_note"]');
+    expect(row?.textContent).toContain("Account sign-in is valid");
+    expect(row?.textContent).toContain("File access is checked when a file is added");
+    expect(row?.textContent).not.toContain("Token is valid");
   });
 
   it("navigates once after sign-in while the connection query is still catching up", () => {

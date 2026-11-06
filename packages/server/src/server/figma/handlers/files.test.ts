@@ -230,6 +230,57 @@ describe("figma.files.add", () => {
     );
     expect(api.requestCount).toBe(0);
   });
+
+  // The live 403 evidence (user same account, Can edit): /v1/me returned 200 at sign-in while
+  // /v1/files/:key/meta returned 403 "Permission denied". A bare "Permission denied" reads like
+  // the user lacks file permission; the sign-in already proved the account, so the message must
+  // name the account and put the app-scope check and the file-sharing check side by side.
+  it("diagnoses a 403 on file meta as app-vs-file access, naming the connected account", async () => {
+    api.enqueue({ status: 403, body: { err: "Permission denied" } });
+    const error = await expectError(
+      filesHandlers["figma.files.add.request"](
+        addRequest("https://www.figma.com/design/KEY403/Design"),
+        ctx,
+        session,
+      ),
+      "forbidden",
+    );
+    expect(error.message).toContain("Permission denied"); // Figma's raw error stays quotable
+    expect(error.message).toContain("KEY403");
+    expect(error.message).toContain("@tester"); // the connection has no email → handle
+    expect(error.message).toContain("scopes"); // app access is one of the two checks
+    expect(error.message).toMatch(/open this file.*in Figma/); // user file permission is the other
+    expect(error.message).not.toMatch(/sign in again/i); // it is not presented as a sign-in fault
+  });
+
+  it("names the connected email when the account has one", async () => {
+    await ctx.store.saveConnection({
+      id: "fgc_mail",
+      account: { figmaUserId: "u-2", handle: "chanh", email: "chanhdn35@hdc-flowtech.com" },
+      authState: "connected",
+      createdAt_ms: 1_700_000_000_000,
+    });
+    api.enqueue({ status: 403, body: { err: "Request denied" } });
+    const error = await expectError(
+      filesHandlers["figma.files.add.request"](
+        { ...addRequest("KEY403"), connectionId: "fgc_mail" },
+        ctx,
+        session,
+      ),
+      "forbidden",
+    );
+    expect(error.message).toContain("chanhdn35@hdc-flowtech.com");
+    expect(error.message).toContain("Request denied");
+  });
+
+  it("leaves non-403 meta failures untouched", async () => {
+    api.enqueue({ status: 404, body: { err: "Not found" } });
+    const notFound = await expectError(
+      filesHandlers["figma.files.add.request"](addRequest("MISSING1"), ctx, session),
+      "not_found",
+    );
+    expect(notFound.message).toBe("Not found"); // no diagnostics bolted onto a plain 404
+  });
 });
 
 describe("figma.files list / remove / pin", () => {
